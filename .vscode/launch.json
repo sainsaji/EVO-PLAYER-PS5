@@ -1,0 +1,84 @@
+{
+  // ==========================================================================
+  // Debugging EVO Player payloads.
+  //
+  // READ THIS FIRST - debugging a PS5 payload is not like debugging a local
+  // program. There is no lldb-server on the console. The supported route is:
+  //
+  //   1. Jailbreak the console and start ps5-payload-elfldr.
+  //   2. Deploy ps5-payload-gdbsrv to the console. It listens on TCP 2159.
+  //        https://github.com/ps5-payload-dev/gdbsrv
+  //   3. Attach gdb-multiarch from inside this container to <PS5_HOST>:2159.
+  //
+  // The SDK's own sample Makefiles encode exactly this recipe in their
+  // `debug:` target, and projects/common/evo.mk reproduces it, so
+  //     PS5_HOST=192.168.1.50 make -C projects/hello_world debug
+  // is often quicker than this launch config.
+  //
+  // Set PS5_HOST in .env before using either.
+  // ==========================================================================
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "PS5: attach gdbsrv (hello_world)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/output/elf/hello_world.elf",
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb-multiarch",
+      // gdbsrv on the console. 2159 is its documented port - distinct from
+      // 9021, which is the ELF loader.
+      "miDebuggerServerAddress": "${env:PS5_HOST}:2159",
+      "stopAtEntry": true,
+      "externalConsole": false,
+      "setupCommands": [
+        {
+          "description": "PS5 is x86-64",
+          "text": "set architecture i386:x86-64",
+          "ignoreFailures": false
+        },
+        {
+          "description": "Pretty printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Upload the payload to the console",
+          "text": "remote put ${workspaceFolder}/output/elf/hello_world.elf /data/hello_world.elf",
+          "ignoreFailures": false
+        },
+        {
+          "description": "Tell the stub what to execute",
+          "text": "set remote exec-file /data/hello_world.elf",
+          "ignoreFailures": false
+        }
+      ],
+      "preLaunchTask": "EVO: build hello_world"
+    },
+    {
+      "name": "PS5: attach gdbsrv (videoout_test)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/output/elf/videoout_test.elf",
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb-multiarch",
+      "miDebuggerServerAddress": "${env:PS5_HOST}:2159",
+      "stopAtEntry": true,
+      "externalConsole": false,
+      "setupCommands": [
+        { "text": "set architecture i386:x86-64", "ignoreFailures": false },
+        { "text": "-enable-pretty-printing", "ignoreFailures": true },
+        {
+          "text": "remote put ${workspaceFolder}/output/elf/videoout_test.elf /data/videoout_test.elf",
+          "ignoreFailures": false
+        },
+        {
+          "text": "set remote exec-file /data/videoout_test.elf",
+          "ignoreFailures": false
+        }
+      ]
+    }
+  ]
+}

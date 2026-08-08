@@ -1,0 +1,41 @@
+# The build context only needs scripts/install-*-image.sh. Everything else is
+# bind-mounted at runtime, so keep the context tiny and the image cache stable.
+
+# Build output and artifacts
+build/
+output/
+**/*.elf
+**/*.bin
+**/*.o
+**/*.a
+**/*.so
+
+# Checked-out third-party sources (fetched inside the container instead)
+sdk/ps5-payload-sdk/
+third_party/ffmpeg/ffmpeg-*/
+third_party/**/src/
+projects/prosperoplayer/
+projects/evoplayer/
+
+# Never ship proprietary material into an image layer
+proprietary/
+
+# VCS / editor / OS noise
+.git/
+.gitignore
+.github/
+.vscode/
+.devcontainer/
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+
+# Docs are not needed to build the image
+docs/
+README.md
+LICENSE
+
+# Compose / env
+docker-compose.yml
+.env
+.env.example

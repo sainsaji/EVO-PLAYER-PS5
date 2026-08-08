@@ -1,0 +1,107 @@
+# =============================================================================
+# EVO Player - PS5 12.70 homebrew development environment
+#
+#   docker compose build
+#   docker compose run --rm ps5-dev bash
+#
+# NETWORKING (Docker Desktop / Windows) - read docs/networking.md
+#   This uses the DEFAULT bridge network on purpose.
+#     * network_mode: host does NOT behave on Windows the way it does on
+#       Linux. On Docker Desktop the "host" is the WSL2/Hyper-V VM, not your
+#       Windows machine, so host networking would attach the container to the
+#       VM's stack - it does not give you the Windows LAN interface.
+#     * The default bridge already NATs outbound traffic through the VM to
+#       your LAN, which is all we need: the container is the TCP *client* and
+#       the PS5 is the server (elfldr listens on 9021).
+#   So `nc -vz $PS5_HOST 9021` works out of the box with bridge networking.
+#   No privileged mode, no cap_add, no host networking required.
+#
+#   The one thing bridge networking cannot do is let the PS5 initiate a
+#   connection *into* the container. Nothing in the ELF workflow needs that,
+#   but if you later run a listener (e.g. klogsrv catching console output),
+#   publish the port explicitly - see the commented `ports:` block below.
+# =============================================================================
+
+services:
+  ps5-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Keep these in sync with the pins documented in the Dockerfile header.
+        UBUNTU_VERSION: "24.04"
+        LLVM_VERSION: "18"
+        PS5_SDK_VERSION: "v0.42"
+        PACBREW_VERSION: "v0.39"
+        CMAKE_VERSION: "3.31.6"
+        NINJA_VERSION: "1.12.1"
+        # 1 = build the SDK from git instead of using the release zip.
+        BUILD_SDK_FROM_SOURCE: "0"
+        # 0 = bare SDK, no prebuilt FFmpeg/SDL2 (ProsperoPlayer will not link).
+        INSTALL_PACBREW: "1"
+    image: evo-player/ps5-dev:llvm18-sdk-v0.42
+
+    # A login shell so /etc/profile.d/ps5-sdk.sh runs and exports CC/CXX/...
+    command: ["/bin/bash", "-l"]
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+
+    environment:
+      # PS5_HOST is intentionally NOT defaulted to an IP address. Set it in a
+      # .env file next to this compose file (see .env.example), or per command:
+      #   PS5_HOST=192.168.1.50 docker compose run --rm ps5-dev ./scripts/deploy.sh ...
+      PS5_HOST: "${PS5_HOST:-}"
+      # 9021 is the ps5-payload-elfldr port; it is also the default baked into
+      # host/bin/prospero-deploy and every SDK sample Makefile.
+      PS5_PORT: "${PS5_PORT:-9021}"
+      PS5_PAYLOAD_SDK: /opt/ps5-payload-sdk
+      CCACHE_DIR: /ccache
+
+    volumes:
+      # -- Source of truth stays on Windows -------------------------------
+      # The whole repository is bind-mounted, so sources, build/, output/elf,
+      # output/pkg and output/logs are all visible from Windows and survive
+      # `docker compose down`. Editing in VS Code on Windows edits these files
+      # directly. This satisfies "source remains outside container".
+      - .:/workspace:cached
+
+      # -- SDK lives in a named volume -------------------------------------
+      # Seeded from the image on first run. It is a volume rather than plain
+      # image content so that things you *add* to the sysroot at runtime
+      # persist across container restarts:
+      #   * a custom FFmpeg installed by scripts/build-ffmpeg.sh
+      #   * SCE stubs generated from your own decrypted SPRX files
+      #   * extra pacbrew ports
+      # Delete it (docker volume rm evoplayer_ps5_sdk) to get back to the
+      # pristine, image-pinned SDK.
+      - ps5_sdk:/opt/ps5-payload-sdk
+
+      # -- Heavy build trees stay OUT of the Windows filesystem -------------
+      # Bind mounts on Docker Desktop are slow for builds that create tens of
+      # thousands of small object files. FFmpeg's object tree and ccache live
+      # on native Linux volumes; only the *installed* artifacts are copied back
+      # into the bind-mounted sysroot/output.
+      - ffmpeg_build:/build/ffmpeg
+      - ccache:/ccache
+
+    # Nothing here needs elevated privileges.
+    privileged: false
+
+    # Uncomment ONLY if you run a service inside the container that the PS5 or
+    # your LAN must reach (e.g. serving a payload over HTTP to the console).
+    # ports:
+    #   - "8080:8080"
+
+    # Docker Desktop resolves this to the Windows host if you ever need to
+    # reach something running on Windows itself.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  ps5_sdk:
+    name: evoplayer_ps5_sdk
+  ffmpeg_build:
+    name: evoplayer_ffmpeg_build
+  ccache:
+    name: evoplayer_ccache

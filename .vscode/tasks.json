@@ -1,0 +1,102 @@
+{
+  // VS Code tasks for EVO Player.
+  //
+  // These assume the window is attached to the dev container (Reopen in
+  // Container), so the commands run inside Linux with the SDK on PATH.
+  // If you are editing from Windows without attaching, use the
+  // "* (from Windows)" variants, which shell out through docker compose.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "EVO: build all",
+      "type": "shell",
+      "command": "bash ./scripts/build.sh",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "EVO: build hello_world",
+      "type": "shell",
+      "command": "bash ./scripts/build.sh hello_world",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "EVO: clean build",
+      "type": "shell",
+      "command": "bash ./scripts/build.sh --clean",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "EVO: regenerate compile_commands.json",
+      "detail": "Run after adding a source file, then restart clangd.",
+      "type": "shell",
+      "command": "bash ./scripts/gen-compile-commands.sh",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "EVO: verify SDK",
+      "type": "shell",
+      "command": "bash ./scripts/setup-sdk.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "EVO: deploy payload to PS5",
+      "detail": "Prompts for which ELF; needs PS5_HOST set in .env",
+      "type": "shell",
+      "command": "bash ./scripts/deploy.sh output/elf/${input:payload}",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "EVO: check PS5 reachability",
+      "type": "shell",
+      "command": "nc -vz \"$PS5_HOST\" \"${PS5_PORT:-9021}\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "EVO: build FFmpeg (minimal)",
+      "type": "shell",
+      "command": "bash ./scripts/build-ffmpeg.sh --profile minimal",
+      "problemMatcher": []
+    },
+    {
+      "label": "EVO: build ProsperoPlayer baseline",
+      "type": "shell",
+      "command": "bash ./scripts/build-prosperoplayer.sh",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "EVO: shell in container (from Windows)",
+      "type": "shell",
+      "command": "docker compose run --rm ps5-dev bash -l",
+      "problemMatcher": []
+    },
+    {
+      "label": "EVO: build all (from Windows)",
+      "type": "shell",
+      "command": "docker compose run --rm ps5-dev ./scripts/build.sh",
+      "problemMatcher": ["$gcc"]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "payload",
+      "type": "pickString",
+      "description": "Which payload to deploy?",
+      "default": "hello_world.elf",
+      "options": [
+        "hello_world.elf",
+        "system_info.elf",
+        "videoout_test.elf",
+        "audioout_test.elf",
+        "gpu_test.elf",
+        "decoder_test.elf",
+        "avplayer_test.elf",
+        "yuv_gpu_test.elf"
+      ]
+    }
+  ]
+}

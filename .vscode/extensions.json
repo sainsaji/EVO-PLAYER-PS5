@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "ms-vscode-remote.remote-containers",
+    "llvm-vs-code-extensions.vscode-clangd",
+    "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
+    "ms-vscode.makefile-tools",
+    "timonwong.shellcheck"
+  ],
+  // cpptools' IntelliSense is deliberately disabled in favour of clangd, but
+  // the extension itself is still wanted for its debugger.
+  "unwantedRecommendations": []
+}

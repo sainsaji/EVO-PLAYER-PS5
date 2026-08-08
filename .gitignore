@@ -1,0 +1,92 @@
+# =============================================================================
+# EVO Player - .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PROPRIETARY MATERIAL - never commit.
+# Sony SPRX/SELF modules, decrypted system libraries, console dumps, keys and
+# credentials belong in proprietary/ and must stay on the developer's machine.
+# See docs/proprietary.md for how to supply them locally.
+# -----------------------------------------------------------------------------
+proprietary/
+!proprietary/README.md
+!proprietary/.gitkeep
+
+# Belt and braces: these extensions never belong in this repo regardless of path
+*.sprx
+*.self
+*.elf.sig
+*.pkg
+*.pup
+*.sfo
+*.bin.enc
+*.key
+*.pem
+*.p12
+id_rsa*
+*_dump/
+sce_module/
+system_dump/
+
+# -----------------------------------------------------------------------------
+# Build output
+# -----------------------------------------------------------------------------
+build/
+output/elf/*
+output/pkg/*
+output/logs/*
+!output/elf/.gitkeep
+!output/pkg/.gitkeep
+!output/logs/.gitkeep
+
+*.o
+*.a
+*.so
+*.so.*
+*.elf
+!samples/**/*.elf
+*.d
+compile_commands.json
+.cache/
+.ccache/
+
+# -----------------------------------------------------------------------------
+# Vendored / fetched sources (pulled by scripts, not committed)
+# -----------------------------------------------------------------------------
+sdk/ps5-payload-sdk/
+third_party/ffmpeg/ffmpeg-*/
+third_party/ffmpeg/*.tar.*
+third_party/**/src/
+projects/prosperoplayer/
+
+# -----------------------------------------------------------------------------
+# CMake / Ninja / Meson
+# -----------------------------------------------------------------------------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeUserPresets.json
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+meson-info/
+meson-logs/
+meson-private/
+
+# -----------------------------------------------------------------------------
+# Editors / OS
+# -----------------------------------------------------------------------------
+.vscode/settings.local.json
+.vscode/ipch/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Local environment (may contain your console's IP)
+# -----------------------------------------------------------------------------
+.env
+.env.local

@@ -1,0 +1,105 @@
+{
+  // ==========================================================================
+  // EVO Player - VS Code Dev Container
+  //
+  // Workflow:  Windows -> VS Code -> Docker container -> Linux toolchain
+  //
+  // Open the folder in VS Code and choose
+  //     "Reopen in Container"   (Ctrl+Shift+P -> Dev Containers: Reopen ...)
+  // VS Code then runs its server INSIDE the container, so IntelliSense,
+  // clangd, the terminal and the debugger all see the PS5 cross toolchain
+  // rather than Windows.
+  //
+  // Requires the "Dev Containers" extension (ms-vscode-remote.remote-containers).
+  // ==========================================================================
+  "name": "EVO Player - PS5 12.70 Dev",
+
+  // Reuse the compose service so the container is identical whether you
+  // enter it from VS Code or from ./scripts/shell.sh. Volume definitions,
+  // networking and env all come from docker-compose.yml - one source of truth.
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "ps5-dev",
+  "workspaceFolder": "/workspace",
+
+  // Compose declares `command: bash -l`, which would exit immediately and take
+  // the container with it. Keep it alive for the VS Code session instead.
+  "overrideCommand": true,
+
+  "remoteUser": "dev",
+
+  // PS5_HOST is intentionally absent - set it in .env (git-ignored) so your
+  // console's address never lands in version control.
+  "remoteEnv": {
+    "PS5_PAYLOAD_SDK": "/opt/ps5-payload-sdk",
+    "PS5_PORT": "9021"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // clangd is the primary C engine: it reads compile_commands.json and
+        // therefore understands the cross-compiler's real include paths.
+        "llvm-vs-code-extensions.vscode-clangd",
+        // Microsoft C/C++ - kept for its debugger (cpptools). Its IntelliSense
+        // is disabled in settings below so it does not fight clangd.
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "twxs.cmake",
+        "ms-vscode.makefile-tools",
+        "timonwong.shellcheck"
+      ],
+      "settings": {
+        // -- clangd ------------------------------------------------------
+        "clangd.path": "/usr/bin/clangd",
+        "clangd.arguments": [
+          "--compile-commands-dir=${workspaceFolder}",
+          "--background-index",
+          "--clang-tidy",
+          "--header-insertion=never",
+          "--pretty"
+        ],
+
+        // -- cpptools: debugger yes, IntelliSense no ----------------------
+        // Two C language servers on the same files produce duplicated and
+        // contradictory diagnostics. clangd wins because it is accurate about
+        // the cross toolchain.
+        "C_Cpp.intelliSenseEngine": "disabled",
+        "C_Cpp.autocomplete": "disabled",
+        "C_Cpp.errorSquiggles": "disabled",
+
+        // -- CMake -------------------------------------------------------
+        // Do NOT let CMake Tools configure automatically: it would invoke the
+        // host cmake without the prospero toolchain file and generate a
+        // host-targeted compile database. Use ./scripts/gen-compile-commands.sh.
+        "cmake.configureOnOpen": false,
+        "cmake.automaticReconfigure": false,
+        "cmake.generator": "Ninja",
+        "cmake.buildDirectory": "${workspaceFolder}/build/cmake",
+        "cmake.configureArgs": [
+          "-DCMAKE_TOOLCHAIN_FILE=/opt/ps5-payload-sdk/toolchain/prospero.cmake"
+        ],
+
+        "makefile.configurations": [
+          { "name": "evo", "makeDirectory": "projects" }
+        ],
+
+        "files.associations": {
+          "*.mk": "makefile",
+          "evo_ps5.h": "c"
+        },
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": { "path": "/bin/bash", "args": ["-l"] }
+        },
+        "editor.formatOnSave": false,
+        "files.eol": "\n"
+      }
+    }
+  },
+
+  // Convenience: confirm the toolchain the moment the container is attached,
+  // so a broken image is obvious immediately rather than at first build.
+  "postAttachCommand": "bash -lc 'echo \"PS5_PAYLOAD_SDK=$PS5_PAYLOAD_SDK\"; clang --version | head -1; ld.lld --version; cmake --version | head -1; ninja --version'",
+
+  "shutdownAction": "stopCompose"
+}

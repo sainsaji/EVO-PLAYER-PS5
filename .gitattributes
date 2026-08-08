@@ -1,0 +1,53 @@
+# =============================================================================
+# Line endings.
+#
+# This repository is developed on Windows but every file is consumed inside a
+# Linux container. A shell script checked out with CRLF fails there with the
+# notoriously unhelpful:
+#     bash: ./scripts/build.sh: /usr/bin/env: bad interpreter: No such file or directory
+# and a Makefile with CRLF produces equally confusing recipe errors.
+#
+# So: normalise everything to LF in the repository AND in the working tree,
+# regardless of the developer's core.autocrlf setting.
+# =============================================================================
+
+* text=auto eol=lf
+
+# Be explicit for the files that actually break.
+*.sh        text eol=lf
+*.bash      text eol=lf
+Makefile    text eol=lf
+*.mk        text eol=lf
+Dockerfile  text eol=lf
+*.c         text eol=lf
+*.h         text eol=lf
+*.cpp       text eol=lf
+*.hpp       text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.cmake     text eol=lf
+CMakeLists.txt text eol=lf
+*.md        text eol=lf
+.clangd     text eol=lf
+.gitignore  text eol=lf
+.env.example text eol=lf
+
+# Binary: never touch these.
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.elf       binary
+*.bin       binary
+*.a         binary
+*.so        binary
+*.sprx      binary
+*.self      binary
+*.pkg       binary
+*.zip       binary
+*.tar       binary
+*.tar.gz    binary
+*.tar.xz    binary
+*.gz        binary
+*.xz        binary

@@ -1,0 +1,37 @@
+{
+  // Fallback IntelliSense configuration for the Microsoft C/C++ extension.
+  //
+  // clangd is the primary engine (see .clangd and .devcontainer/devcontainer.json,
+  // which disables cpptools IntelliSense to avoid two servers disagreeing).
+  // This file exists so that opening the repo WITHOUT attaching to the
+  // container still gives usable navigation, and so cpptools' debugger has
+  // sensible paths.
+  "version": 4,
+  "configurations": [
+    {
+      "name": "PS5 (prospero, in container)",
+      "compilerPath": "/opt/ps5-payload-sdk/bin/prospero-clang",
+      "compileCommands": "${workspaceFolder}/compile_commands.json",
+      "cStandard": "c11",
+      "cppStandard": "c++20",
+      // The PS5 runs a modified FreeBSD kernel on x86-64; the SDK targets
+      // x86_64-sie-ps5 (see sce_stubs/Makefile).
+      "intelliSenseMode": "linux-clang-x64",
+      "includePath": [
+        "${workspaceFolder}/projects/common/include",
+        "/opt/ps5-payload-sdk/target/include",
+        "/opt/ps5-payload-sdk/target/include/**",
+        "/opt/ps5-payload-sdk/target/user/homebrew/include",
+        "/opt/ps5-payload-sdk/target/user/homebrew/include/SDL2"
+      ],
+      "defines": [],
+      "browse": {
+        "path": [
+          "${workspaceFolder}/projects",
+          "/opt/ps5-payload-sdk/target/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ]
+}
