@@ -92,6 +92,19 @@ if ! make -C "${DEST}" "${MAKE_ARGS[@]}" > "${BUILD_LOG}" 2>&1; then
     die "EVO Player build failed. Full log: ${BUILD_LOG#"${REPO_ROOT}/"}"
 fi
 
+# Prove the switches asked for actually reached the compiler. Forgetting to
+# forward EXTRA_CFLAGS produced a build that looked correct and was not; a
+# grep of the log is far cheaper than finding out on the console.
+if [[ -n "${EXTRA_CFLAGS:-}" ]]; then
+    for flag in ${EXTRA_CFLAGS}; do
+        grep -qF -- "${flag}" "${BUILD_LOG}" \
+            || die "EXTRA_CFLAGS was set but ${flag} never reached the compile
+       line. Check reexec_in_container in scripts/common.sh.
+       Log: ${BUILD_LOG#"${REPO_ROOT}/"}"
+    done
+    ok "EXTRA_CFLAGS applied: ${EXTRA_CFLAGS}"
+fi
+
 validate_elf "${DEST}/${ELF_NAME}"
 cp -f "${DEST}/${ELF_NAME}" "${ELF_OUT}/"
 ok "-> output/elf/${ELF_NAME}"

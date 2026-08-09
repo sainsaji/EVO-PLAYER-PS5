@@ -2520,6 +2520,18 @@ typedef struct {
 } ProsperoEmbeddedSubtitleCue;
 
 
+/*
+ * Subtitle pipeline counters. The trace already reported "a stream is
+ * selected" and "no cues exist", which is a gap wide enough to hold every
+ * stage in between. These split it: demuxed -> reached the decoder -> text
+ * survived cleaning -> stored.
+ */
+static int dbg_sub_demuxed;   /* packets av_read_frame gave us on the track */
+static int dbg_sub_entered;   /* packets that got past the decoder's guard  */
+static int dbg_sub_blank;     /* decoded but the text cleaned away to empty */
+static int dbg_sub_added;     /* add_cue calls                              */
+static int dbg_sub_cid;       /* codec id actually selected                 */
+
 static AVCodecContext *
 prospero_embedded_subtitle_ctx = NULL;
 
@@ -2780,6 +2792,8 @@ if (best_stream < 0) {
 
     prospero_embedded_subtitle_codec_id =
         codec_id;
+
+    dbg_sub_cid = (int)codec_id;
 
     prospero_embedded_subtitle_reset();
 
@@ -3107,6 +3121,8 @@ static void prospero_embedded_subtitle_decode_packet(
         return;
     }
 
+    dbg_sub_entered++;
+
     AVStream *stream =
         play_fmt->streams[
             prospero_embedded_subtitle_stream_index
@@ -3189,11 +3205,15 @@ static void prospero_embedded_subtitle_decode_packet(
         );
 
         if (cleaned[0]) {
+            dbg_sub_added++;
+
             prospero_embedded_subtitle_add_cue(
                 base_seconds,
                 base_seconds + packet_duration,
                 cleaned
             );
+        } else {
+            dbg_sub_blank++;
         }
 
         return;
@@ -5929,6 +5949,8 @@ void *demux_thread_func(void *arg) {
             pkt->stream_index ==
             prospero_embedded_subtitle_stream_index
         ) {
+            dbg_sub_demuxed++;
+
             prospero_embedded_subtitle_decode_packet(
                 pkt
             );
@@ -14058,7 +14080,8 @@ void draw_menu_linear(uint32_t *fb, int selected)
     evo_build_launch_model(&model);
     evo_screen_launch_sync(&evo_launch_grid, &model);
 
-    evo_grid_tick(&evo_launch_grid, EVO_BLEED_X, EVO_TILE_PITCH);
+    evo_grid_tick(&evo_launch_grid, EVO_BLEED_X, EVO_TILE_PITCH,
+                  (uint32_t)perf_now_ms());
 
     evo_screen_launch(fb, &model, &evo_launch_grid);
 }
@@ -14443,7 +14466,8 @@ void draw_usb_browser(uint32_t *fb)
     evo_cover_budget = 1;
 
     evo_browser_sync();
-    evo_focus_tick(&evo_browser_focus, EVO_CONTENT_Y, EVO_ROW_PITCH);
+    evo_focus_tick(&evo_browser_focus, EVO_CONTENT_Y, EVO_ROW_PITCH,
+                   (uint32_t)perf_now_ms());
 
     /* Breadcrumb. The glyph atlas does carry '/', so the path is shown as it
      * really is rather than transliterated into '>' as it used to be. */
@@ -14608,7 +14632,8 @@ static void evo_page_sync(int *selected, int count)
 
     *selected = evo_page_focus.index;
 
-    evo_focus_tick(&evo_page_focus, EVO_CONTENT_Y, EVO_ROW_PITCH);
+    evo_focus_tick(&evo_page_focus, EVO_CONTENT_Y, EVO_ROW_PITCH,
+                   (uint32_t)perf_now_ms());
 }
 
 /* Movement, from the input handler. Returns the new selection. */
@@ -16225,7 +16250,8 @@ static void evo_vo_trace(const char *tag)
         "pending=%d k4live=%d pb_active=%d has_disp=%d paused=%d "
         "diag=%d supUI=%d | conv=%llu pub=%llu decf=%d vpkt=%d gate=%d "
         "dfps=%d rfps=%d aclk=%.2f vclk=%.2f | sub_en=%d sub_auto=%d "
-        "sub_emb=%d sub_cues=%d sub_ext=%d sub_useext=%d\n",
+        "sub_emb=%d sub_cues=%d sub_ext=%d sub_useext=%d "
+        "| sdemux=%d sent=%d sblank=%d sadd=%d scid=%d srip=%d\n",
         now_ms(), tag, screen, (int)g_pp_backend,
         g_vo_w, g_vo_h, g_pp_vo.width, g_pp_vo.height, g_pp_vo_ready,
         g_pending_vo_reconfig, pp_product_k4_live(screen),
@@ -16239,7 +16265,9 @@ static void evo_vo_trace(const char *tag)
         prospero_subtitle_enabled, prospero_auto_subtitles_enabled,
         prospero_embedded_subtitle_stream_index,
         prospero_embedded_subtitle_count,
-        prospero_subtitle_count, prospero_subtitle_use_external);
+        prospero_subtitle_count, prospero_subtitle_use_external,
+        dbg_sub_demuxed, dbg_sub_entered, dbg_sub_blank, dbg_sub_added,
+        dbg_sub_cid, (int)AV_CODEC_ID_SUBRIP);
 
     fclose(f);
 }

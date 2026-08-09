@@ -554,7 +554,7 @@ void evo_screen_browser(uint32_t *fb, const evo_browser_model *m,
         row.chevron    = (e->kind == EVO_FILE_FOLDER);
         row.badge_icon = e->favorite ? EVO_IC_FAVORITE : -1;
         row.progress   = e->progress;
-        row.marquee_phase = row.selected ? f->settled_frames : 0;
+        row.marquee_phase = row.selected ? f->settled_ms : 0;
 
         evo_widget_row(fb, list_x, EVO_CONTENT_Y + i * EVO_ROW_PITCH,
                        list_w, EVO_ROW_H, &row);
@@ -649,7 +649,7 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
         row.swatch_count  = m->entries[index].swatch_count;
         row.selected      = (index == f->index);
         row.badge_icon    = -1;
-        row.marquee_phase = row.selected ? f->settled_frames : 0;
+        row.marquee_phase = row.selected ? f->settled_ms : 0;
 
         evo_widget_row(fb, x, EVO_CONTENT_Y + i * EVO_ROW_PITCH,
                        w, EVO_ROW_H, &row);

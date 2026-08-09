@@ -105,9 +105,17 @@ reexec_in_container() {
        Install Docker Desktop, or run this script from inside the container."
 
     log "not in container - re-running via docker compose"
+    #
+    # EXTRA_CFLAGS has to cross the container boundary. It did not, and the
+    # failure was silent in the worst way: the build succeeded, the ELF
+    # installed, and the -D switch simply was not in it. A debug build that
+    # quietly is not a debug build costs a whole hardware round trip to
+    # notice. Forward anything the inner script reads from the environment
+    # rather than from its arguments.
     exec docker compose -f "${REPO_ROOT}/docker-compose.yml" run --rm \
         -e "PS5_HOST=${PS5_HOST:-}" \
         -e "PS5_PORT=${PS5_PORT}" \
+        -e "EXTRA_CFLAGS=${EXTRA_CFLAGS:-}" \
         ps5-dev "./scripts/${rel}" "$@"
 }
 

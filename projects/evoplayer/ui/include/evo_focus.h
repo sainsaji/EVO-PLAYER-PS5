@@ -18,6 +18,8 @@
 #ifndef EVO_FOCUS_H
 #define EVO_FOCUS_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,9 +37,18 @@ typedef struct evo_focus {
     int glide_target_fp;
     int glide_ready; /* 0 until the first tick seeds the position */
 
-    /* Frames since the selection last changed. Marquees and reveal
-     * animations key off this rather than each keeping their own counter. */
+    /* Frames since the selection last changed. Reveal animations key off
+     * this rather than each keeping their own counter. */
     int settled_frames;
+
+    /*
+     * Milliseconds since the selection last changed. Anything whose *speed*
+     * matters must use this, not settled_frames: the render loop runs
+     * anywhere between 36 and 60fps depending on what is on screen, so a
+     * frame-counted animation visibly changes pace with the scene.
+     */
+    int settled_ms;
+    uint32_t settled_base_ms;   /* clock latched when the selection moved */
 } evo_focus;
 
 /* Result of a move, so the caller can pick the right feedback. */
@@ -78,7 +89,8 @@ evo_move_result evo_focus_set(evo_focus *f, int index);
  * `row_pitch` the distance between rows; together they give the highlight
  * something to glide towards. Call once per frame, before drawing.
  */
-void evo_focus_tick(evo_focus *f, int row_origin, int row_pitch);
+void evo_focus_tick(evo_focus *f, int row_origin, int row_pitch,
+                    uint32_t now_ms);
 
 /* Current highlight y, in pixels - the glided position, not the row grid. */
 int  evo_focus_glide_y(const evo_focus *f);
@@ -129,6 +141,8 @@ typedef struct evo_grid {
     int glide_ready;
 
     int settled_frames;
+    int settled_ms;
+    uint32_t settled_base_ms;
 } evo_grid;
 
 void evo_grid_init(evo_grid *g, int rows);
@@ -153,7 +167,7 @@ int evo_grid_row_active(const evo_grid *g, int row);
  * Per-frame update for the horizontal highlight. `origin` is the x of the
  * first visible tile and `pitch` the distance between tiles.
  */
-void evo_grid_tick(evo_grid *g, int origin, int pitch);
+void evo_grid_tick(evo_grid *g, int origin, int pitch, uint32_t now_ms);
 
 /* Current highlight x in pixels - the glided position, not the tile grid. */
 int  evo_grid_glide_x(const evo_grid *g);

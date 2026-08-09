@@ -136,12 +136,23 @@ evo_move_result evo_focus_set(evo_focus *f, int index)
     return finish_move(f, before, 0);
 }
 
-void evo_focus_tick(evo_focus *f, int row_origin, int row_pitch)
+void evo_focus_tick(evo_focus *f, int row_origin, int row_pitch,
+                    uint32_t now_ms)
 {
     int vis = evo_focus_visible_index(f);
     int distance;
 
     f->settled_frames++;
+
+    /* settled_frames is reset to 0 on a move, so the first tick after one
+     * latches the clock; every tick after measures real elapsed time. */
+    if (f->settled_frames == 1) {
+        f->settled_base_ms = now_ms;
+        f->settled_ms      = 0;
+    } else {
+        f->settled_ms = (int)(now_ms - f->settled_base_ms);
+    }
+
 
     if (vis < 0) {
         f->glide_ready = 0;
@@ -353,12 +364,20 @@ int evo_grid_row_active(const evo_grid *g, int row)
     return g->row == row;
 }
 
-void evo_grid_tick(evo_grid *g, int origin, int pitch)
+void evo_grid_tick(evo_grid *g, int origin, int pitch, uint32_t now_ms)
 {
     int col = evo_grid_col(g);
     int distance;
 
     g->settled_frames++;
+
+    if (g->settled_frames == 1) {
+        g->settled_base_ms = now_ms;
+        g->settled_ms      = 0;
+    } else {
+        g->settled_ms = (int)(now_ms - g->settled_base_ms);
+    }
+
 
     if (col < 0) { g->glide_ready = 0; return; }
 

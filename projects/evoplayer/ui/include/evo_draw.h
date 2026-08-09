@@ -124,8 +124,9 @@ int  evo_text_fit(uint32_t *fb, int x, int y, int max_w, const char *s,
 
 /*
  * A long label that scrolls back and forth when it does not fit. `phase` is
- * a frame counter owned by the caller (usually reset when the selection
- * changes). Falls back to a plain draw when the text fits.
+ * *milliseconds* since the caller last reset it (usually when the selection
+ * changed) - not a frame count, so the scroll runs at one speed regardless of
+ * what the render loop is managing. Falls back to a plain draw when it fits.
  */
 void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
                       uint32_t colour, evo_face face, int phase);

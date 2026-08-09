@@ -311,7 +311,7 @@ static void render_launch(int sel_row, int sel_col)
     /* Seed the glide so the still shows the settled state, not a frame
      * mid-travel with a stray ring in it. */
     g.glide_ready = 0;
-    evo_grid_tick(&g, EVO_BLEED_X, EVO_TILE_PITCH);
+    evo_grid_tick(&g, EVO_BLEED_X, EVO_TILE_PITCH, 0);
 
     evo_screen_launch(g_fb, &m, &g);
 }
@@ -376,7 +376,7 @@ static void render_browse(int sel, int rail_focused, int rail_sel, int empty)
 
     evo_focus_init(&f, m.count, evo_screen_browser_capacity(), 1);
     evo_focus_set(&f, sel);
-    evo_focus_tick(&f, EVO_CONTENT_Y, EVO_ROW_PITCH);
+    evo_focus_tick(&f, EVO_CONTENT_Y, EVO_ROW_PITCH, 0);
 
     evo_screen_browser(g_fb, &m, &f, rail_focused, rail_sel);
 }
@@ -510,7 +510,7 @@ static void render_list(const char *which, int sel, int rail_focused,
 
     evo_focus_init(&f, n, evo_screen_list_capacity(), 1);
     evo_focus_set(&f, sel);
-    evo_focus_tick(&f, EVO_CONTENT_Y, EVO_ROW_PITCH);
+    evo_focus_tick(&f, EVO_CONTENT_Y, EVO_ROW_PITCH, 0);
 
     evo_screen_list(g_fb, &m, &f, rail_focused, rail_sel,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);

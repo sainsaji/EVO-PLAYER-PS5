@@ -143,17 +143,21 @@ void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
                       uint32_t colour, evo_face face, int phase)
 {
     /*
-     * Pixels of travel per frame. At 1 the scroll took the better part of ten
-     * seconds to cross a long filename, which reads as broken rather than
-     * leisurely. 3px at 60fps is ~180px/s - brisk enough to finish a long
-     * name in a couple of seconds and still readable while it moves.
+     * Pixels of travel per *second*, not per frame. This was frame-counted
+     * and the result was a marquee that changed pace with the scene: the
+     * render loop runs anywhere from 36fps with a preview decoding to 60fps
+     * on a settled list, so the same filename scrolled at two visibly
+     * different speeds. Real time is the only stable basis.
+     *
+     * 180px/s crosses a long filename in a couple of seconds - brisk enough
+     * not to read as broken, slow enough to stay legible while moving.
      */
-    const int speed = 3;
+    const int speed_px_s = 180;
 
     int full_w;
     int overflow;
-    int hold   = 36;   /* frames parked at each end */
-    int travel;
+    int hold   = 600;  /* ms parked at each end */
+    int travel;        /* ms to cross the overflow */
     int cycle;
     int p;
     int shift  = 0;
@@ -173,16 +177,17 @@ void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
      * copy would spill across the inspector panel.
      */
     overflow = full_w - max_w;
-    travel   = (overflow + speed - 1) / speed;   /* frames to cross */
+    travel   = overflow * 1000 / speed_px_s;
     if (travel < 1) travel = 1;
     cycle    = hold * 2 + travel * 2;
     p        = phase % cycle;
 
     if (p < hold)                     shift = 0;
-    else if (p < hold + travel)       shift = (p - hold) * speed;
+    else if (p < hold + travel)       shift = (p - hold) * speed_px_s / 1000;
     else if (p < hold * 2 + travel)   shift = overflow;
     else                              shift = overflow -
-                                              (p - hold * 2 - travel) * speed;
+                                              (p - hold * 2 - travel) *
+                                              speed_px_s / 1000;
 
     if (shift < 0)        shift = 0;
     if (shift > overflow) shift = overflow;

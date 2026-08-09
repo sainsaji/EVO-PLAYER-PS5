@@ -45,7 +45,7 @@ typedef struct evo_row {
     int         progress;
 
     /* Marquee phase for the title when it overflows; pass the focus model's
-     * settled_frames. 0 disables. */
+     * settled_ms. 0 disables. */
     int         marquee_phase;
 
     /*
