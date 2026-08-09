@@ -51,3 +51,9 @@ CMakeLists.txt text eol=lf
 *.tar.xz    binary
 *.gz        binary
 *.xz        binary
+
+# Shell scripts must be LF: a CRLF shebang makes the kernel look for an
+# interpreter literally named "bash\r", and the script dies with a confusing
+# "/usr/bin/env: 'bash\r': No such file or directory". Editing these from
+# Windows tooling is enough to introduce it.
+*.sh text eol=lf

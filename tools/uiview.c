@@ -454,6 +454,23 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.empty_title="NO FAVORITES YET";
         m.empty_hint="PRESS TRIANGLE ON A FILE IN THE BROWSER";
         m.empty_icon=EVO_IC_FAVORITE;
+    } else if (!strcmp(which, "profile")) {
+        static const char *t[] = { "BALANCED","PERFORMANCE","COMPATIBILITY",
+            "DEBUG" };
+        static const char *d[] = {
+            "Even trade between smoothness and format coverage",
+            "ACTIVE",
+            "Widest format support - try this when a file will not play",
+            "Verbose diagnostics and on-screen counters" };
+        n = 4;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=EVO_IC_SETTINGS;
+            e[i].chevron=0; e[i].progress=-1;
+        }
+        e[1].info = 1;                    /* the active profile states a fact */
+        m.title="PLAYBACK PROFILE";
+        m.subtitle="HOW AGGRESSIVELY THE DECODER IS TUNED";
+        m.section=EVO_SECTION_SETTINGS;   /* a child of settings */
     } else { /* about */
         static const char *t[] = { "VERSION","EVO PLAYER","BUILT ON","THEMES",
             "SCREENSHOTS" };
@@ -488,7 +505,7 @@ static void render_list(const char *which, int sel, int rail_focused,
 /* ------------------------------------------------------------------------ */
 
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
-                                 "settings","tools","about", NULL };
+                                 "settings","profile","tools","about", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
                        int empty, int row)

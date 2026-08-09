@@ -87,7 +87,10 @@
  * If this and the C disagree, the C is right and this is the bug.
  */
 const SECTIONS = ['home','browse','recent','favorites','settings','tools','about'];
-const COUNTS   = { browse:10, recent:5, favorites:2, settings:8, tools:4, about:5 };
+/* `profile` is reachable but is not a rail section - it is a child of
+ * settings, and evo_screen_section() keeps SETTINGS lit while you are in it. */
+const COUNTS   = { browse:10, recent:5, favorites:2, settings:8, tools:4,
+                   about:5, profile:4 };
 
 /* Launch rows: hero (1), recent shelf (7), library shelf (6). */
 const LAUNCH_ROWS = [1, 7, 6];
@@ -210,6 +213,9 @@ function key(e) {
     const n = COUNTS[st.screen] || 0;
     if (k === 'ArrowDown')      st.sel[st.screen] = wrap(st.sel[st.screen] + 1, n);
     else if (k === 'ArrowUp')   st.sel[st.screen] = wrap(st.sel[st.screen] - 1, n);
+    /* PLAYBACK PROFILE is the one settings row that opens a child page. */
+    else if (k === 'Enter' && st.screen === 'settings' && st.sel.settings === 0)
+      open('profile');
     else if (k === 'ArrowLeft') {
       st.rail = true;
       st.railSel = Math.max(0, SECTIONS.indexOf(st.screen));

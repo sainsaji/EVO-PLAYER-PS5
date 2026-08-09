@@ -72,13 +72,14 @@ for s in 0 1 2 3 4;           do render "recent_s${s}" recent --sel "${s}"; done
 for s in 0 1;                 do render "favorites_s${s}" favorites --sel "${s}"; done
 for s in 0 1 2 3 4 5 6 7;     do render "settings_s${s}" settings --sel "${s}"; done
 for s in 0 1 2 3;             do render "tools_s${s}" tools --sel "${s}"; done
+for s in 0 1 2 3;             do render "profile_s${s}" profile --sel "${s}"; done
 for s in 0 1 2 3 4;           do render "about_s${s}" about --sel "${s}"; done
 
 # -- the rail overlay ---------------------------------------------------------
 # Rendered once per section per rail position. The content behind is dimmed
 # heavily enough that using the section's first row for all of them is not
 # noticeable, which keeps this from multiplying by every selection.
-for scr in browse recent favorites settings tools about; do
+for scr in browse recent favorites settings profile tools about; do
     for r in 0 1 2 3 4 5 6; do
         render "${scr}_rail${r}" "${scr}" --sel 0 --rail --rail-sel "${r}"
     done
