@@ -16145,6 +16145,43 @@ static void prospero_playback_finished_back(
 /* PROSPERO_PLAYBACK_COMPLETE_MODULE_END */
 
 
+
+/* ---------------------------------------------------------------------------
+ * EVO: video-out state trace.
+ *
+ * Written to a file on the stick rather than stdout, because stdout only
+ * exists while something is holding the /hbldr pipe open - and the bug being
+ * chased needs a controller in someone's hands, not a terminal.
+ *
+ * Off unless -DEVO_VO_DEBUG=1. Logs screen transitions and one line a second
+ * while the player is up; nothing per frame.
+ * ------------------------------------------------------------------------ */
+#ifndef EVO_VO_DEBUG
+#define EVO_VO_DEBUG 0
+#endif
+
+#if EVO_VO_DEBUG
+static void evo_vo_trace(const char *tag)
+{
+    FILE *f = fopen("/mnt/usb0/evo_vo_debug.log", "a");
+    if (!f) return;
+
+    fprintf(f,
+        "%8lld %-14s screen=%2d backend=%d vo=%ux%u pv=%ux%u ready=%d "
+        "pending=%d k4live=%d pb_active=%d has_disp=%d paused=%d "
+        "diag=%d supUI=%d\n",
+        now_ms(), tag, screen, (int)g_pp_backend,
+        g_vo_w, g_vo_h, g_pp_vo.width, g_pp_vo.height, g_pp_vo_ready,
+        g_pending_vo_reconfig, pp_product_k4_live(screen),
+        g_pp_pb.active, pp_playback_has_display(&g_pp_pb),
+        player_paused, g_4k_diag_active, g_4k_suppress_ui);
+
+    fclose(f);
+}
+#else
+#define evo_vo_trace(tag) ((void)0)
+#endif
+
 int main(void) {
     toast("EVO Player", "Version " EVO_PLAYER_VERSION);
     recent_load();
@@ -16790,6 +16827,22 @@ int main(void) {
         }
 
         prospero_playback_finished_update();
+
+#if EVO_VO_DEBUG
+        {
+            static int       last_screen = -1;
+            static long long last_tick;
+
+            if (screen != last_screen) {
+                evo_vo_trace(last_screen < 0 ? "start" : "screen-change");
+                last_screen = screen;
+            } else if (screen == SCREEN_PLAYER &&
+                       now_ms() - last_tick >= 1000) {
+                evo_vo_trace("player-tick");
+                last_tick = now_ms();
+            }
+        }
+#endif
 
 #if PP_BACKEND_ENABLED
         /*
