@@ -78,37 +78,51 @@ overrides `LIBS` on the make command line. Reproduce the failure with
 
 ---
 
-## Requires hardware — NOT YET RUN
+## Hardware results — PS5 at 192.168.0.10, firmware 12.70
 
-Every row is untested. Run them in order; each depends on the previous one.
+Run 2026-08-09 against a jailbroken console with `ps5-payload-elfldr` on 9021.
 
-| # | Check | Status | How |
+| # | Check | Status | Evidence |
 |---|---|---|---|
-| 1 | Container reaches the console | untested | `nc -vz $PS5_HOST 9021` |
-| 2 | `hello_world` loads and runs | untested | `./scripts/deploy.sh output/elf/hello_world.elf` — expect a "hello from PS5" notification |
-| 3 | `hello_world` exits cleanly | untested | no crash, no error dialog |
-| 4 | Firmware really is 12.70 | untested | `system_info` → expect raw `0x12700000` |
-| 5 | VideoOut solid colour | untested | `videoout_test` — expect red/green/blue/white, 2 s each |
-| 6 | VideoOut RGB pattern | untested | `videoout_test pattern` — bars, gradient, grey ramp |
-| 7 | AudioOut sine wave | untested | `audioout_test` — 440 Hz for 3 s, no clicks |
-| 8 | GNM submits allowed | untested | `gpu_test` → `sceGnmAreSubmitsAllowed()` |
-| 9 | Native decoder modules mapped | untested | `decoder_test`, then record in [native-media-research.md](native-media-research.md) |
-| 10 | ProsperoPlayer baseline plays media | untested | deploy `PS5MediaPlayerPRO.elf`, confirm **existing** functionality before any changes |
+| 1 | Container reaches the console | **pass** | `nc -vz` succeeded; ping 8.7–20.5 ms. Default Docker Desktop bridge, no host networking |
+| 2 | `hello_world` loads and runs | **pass** | stdout returned over the loader socket: `argc=1`, `argv[0]=payload.elf`, `clang 18.1.3` |
+| 3 | `hello_world` exits cleanly | **pass** | exit 0 |
+| 4 | Firmware really is 12.70 | **pass** | raw `0x12700001`, group `0x12700000`, 16 CPUs, 16 KiB pages |
+| 5 | VideoOut solid colours | **pass** | 32 MiB allocated, 2 buffers registered, 480 frames flipped |
+| 6 | VideoOut RGB pattern | **pass** | 960 frames total across both scenes, clean exit |
+| 7 | AudioOut sine wave | **pass** | handle `0x20000000`, 562 grains at 48 kHz stereo S16 |
+| 8 | GNM submits allowed | **pass** | `sceGnmAreSubmitsAllowed() → 1`; GnmDriver mapped at `0x8002a0000` |
+| 9 | Native decoder modules reachable | **pass** | `libSceAvPlayer` loaded, all 6 entry points resolved by NID — see [native-media-research.md](native-media-research.md) |
+| 10 | ProsperoPlayer baseline plays media | not yet run | deploy `PS5MediaPlayerPRO.elf` and confirm **existing** functionality before any changes |
 
-### Known uncertainties in the untested code
+Still to confirm visually: that the colours/pattern appeared correctly on the
+panel and the 440 Hz tone was audible. The payloads report success, which
+proves the API calls were accepted, not that the output was correct.
 
-Flagged honestly rather than presented as working:
+### What the hardware run corrected
 
-- **`videoout_test`** — the pixel format, tiling mode and `SCE_KERNEL_WC_GARLIC`
-  direct-memory type come from the documented VideoOut ABI, not from a
-  hardware run. Every symbol used exists in the stub, so it links; whether the
-  first flip actually presents is what run #5 establishes. If it fails, the
-  likeliest culprits are the memory type (try `SCE_KERNEL_WB_ONION`), the
-  2 MiB alignment, or needing `sceVideoOutSetFlipRate` before registration.
-- **`audioout_test`** — `sceAudioOutInit` returning "already initialised"
-  (`0x800f0002`) is treated as benign; that specific code is an assumption.
-- **`gpu_test` / `decoder_test`** — these are *probes*. Reporting "not mapped"
-  is a valid, useful result, not a failure.
+Four assumptions in the original scaffold were wrong. All are now fixed in
+code, with the reasoning recorded at the top of each `main.c`:
+
+1. **No user session in a payload.** `sceUserServiceGetInitialUser()` returns
+   `0x80940004`; klog shows `SceLncService getAppLaunchedUser: LNC_ISOK::0x80940004`.
+   Fix: pass user id `0xff` (system) to `sceVideoOutOpen` / `sceAudioOutOpen`
+   and drop `-lSceUserService` entirely.
+
+2. **The PS4-style VideoOut API is the wrong one.** PS5 uses
+   `sceVideoOutSetBufferAttribute2` / `sceVideoOutRegisterBuffers2`, with a
+   64-bit pixel format (`0x8000000022000000`, memory layout ABGR8888) and an
+   array of buffer descriptors. Pitch is implicit. Cross-checked against
+   `ps5-payload-dev/SDL`'s backend, which is known-good on this platform.
+
+3. **No direct-memory budget.** `sceKernelGetDirectMemorySize()` returns 0 and
+   klog shows the payload spawned with `dmem#0`. Use
+   `sceKernelAllocateMainDirectMemory`, and note **64 MiB fails with EAGAIN
+   (`0x80020023`) while 32 MiB succeeds** — SDL's 64 MiB value is too large
+   for an elfldr payload.
+
+4. **Sony modules export NIDs, not names.** `sceKernelDlsym` by name returns
+   `0x80020003` for every symbol. Use `nid_encode()` + `kernel_dynlib_resolve()`.
 
 ### Recording a run
 

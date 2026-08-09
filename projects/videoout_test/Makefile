@@ -16,10 +16,14 @@ include ../common/evo.mk
 ELF  := videoout_test.elf
 SRCS := main.c $(EVO_COMMON_SRCS)
 
-# -lSceVideoOut      sceVideoOut* (stub: sce_stubs/libSceVideoOut.c)
-# -lSceUserService   sceVideoOutOpen needs the initial user's id
+# -lSceVideoOut       sceVideoOut* (stub: sce_stubs/libSceVideoOut.c)
+# -lSceSystemService  sceSystemServiceHideSplashScreen
 # libkernel's direct-memory calls are linked by default via the CRT.
-LIBS := -lSceVideoOut -lSceUserService
+#
+# Note: no -lSceUserService. A payload has no user session, so we pass user id
+# 0xff (system) to sceVideoOutOpen rather than asking UserService - see the
+# comment block at the top of main.c.
+LIBS := -lSceVideoOut -lSceSystemService
 
 all: $(ELF)
 

@@ -39,23 +39,16 @@ int
 main(void)
 {
     int rc;
-    int32_t userId = 0;
     int32_t handle;
+
+    /* Same story as videoout_test: a payload has no user session, so
+     * sceUserServiceGetInitialUser returns 0x80940004 (measured on 12.70).
+     * Pass the system user id instead. */
+    const int32_t userId = SCE_VIDEO_OUT_USER_ID_SYSTEM;   /* 0xff */
 
     printf("=== EVO Player audioout_test ===\n");
     printf("format: %d Hz, %d ch, S16, grain %d frames\n",
            SAMPLE_RATE, CHANNELS, GRAIN);
-
-    rc = sceUserServiceInitialize(NULL);
-    if (rc < 0)
-        printf("sceUserServiceInitialize -> 0x%08x (continuing)\n", rc);
-
-    rc = sceUserServiceGetInitialUser(&userId);
-    if (rc < 0) {
-        printf("sceUserServiceGetInitialUser failed: 0x%08x\n", rc);
-        evo_notify("EVO audioout_test: no logged-in user");
-        return EXIT_FAILURE;
-    }
 
     rc = sceAudioOutInit();
     /* Returns "already initialised" if a previous payload got here first.

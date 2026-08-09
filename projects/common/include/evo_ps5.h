@@ -173,9 +173,64 @@ typedef struct SceVideoOutResolutionStatus {
     uint32_t reserved1[3];
 } SceVideoOutResolutionStatus;
 
+/* ---- PS5 native path (verified working on 12.70) -------------------------
+ *
+ * Use THESE, not the PS4-style calls below. Confirmed against the working
+ * ps5-payload-dev/SDL video backend (src/video/ps5/SDL_ps5video.c) and by
+ * running projects/videoout_test on a 12.70 console.
+ *
+ * Three things differ from the familiar PS4 sequence:
+ *   1. Pass user id 0xff (system). Do NOT call sceUserServiceGetInitialUser -
+ *      it returns 0x80940004 in an elfldr payload, which has no user session.
+ *   2. Allocate with sceKernelAllocateMainDirectMemory, not
+ *      sceKernelAllocateDirectMemory - the payload process has no direct
+ *      memory budget of its own (sceKernelGetDirectMemorySize() reports 0).
+ *   3. Describe and register buffers with the "2" variants. The pixel format
+ *      is a 64-bit value, and pitch is implicit (= width).
+ */
+
+#define SCE_VIDEO_OUT_USER_ID_SYSTEM   0xff
+
+/* 64-bit pixel format for the ...Attribute2 API. Memory layout is
+ * SDL_PIXELFORMAT_ABGR8888, i.e. a uint32 of 0xAABBGGRR. */
+#define SCE_VIDEO_OUT_PIXEL_FORMAT2_A8B8G8R8_SRGB  0x8000000022000000UL
+
+/* Opaque, sized to match the ABI. Never inspect the fields. */
+typedef struct SceVideoOutBuffer {
+    void     *data;
+    uint64_t  reserved[3];
+} SceVideoOutBuffer;
+
+typedef struct SceVideoOutBufferAttribute2 {
+    uint8_t reserved[80];
+} SceVideoOutBufferAttribute2;
+
+void sceVideoOutSetBufferAttribute2(SceVideoOutBufferAttribute2 *attr,
+                                    uint64_t pixelFormat, uint32_t tilingMode,
+                                    uint32_t width, uint32_t height,
+                                    uint64_t opt0, uint32_t opt1,
+                                    uint64_t opt2);
+
+int  sceVideoOutRegisterBuffers2(int32_t handle, int32_t startIndex,
+                                 int32_t unk, SceVideoOutBuffer *buffers,
+                                 int32_t bufferNum,
+                                 SceVideoOutBufferAttribute2 *attr,
+                                 int32_t unk2, void *unk3);
+
+/* Direct memory from the *main* pool. Signature per the SDL backend:
+ *   (length, alignment, memoryType, physAddrOut) */
+int sceKernelAllocateMainDirectMemory(size_t len, size_t alignment,
+                                      int memoryType, intptr_t *physAddrOut);
+
+int sceSystemServiceHideSplashScreen(void);
+
+/* ---- shared between both paths ------------------------------------------ */
+
 int  sceVideoOutOpen(int32_t userId, int32_t busType, int32_t index,
                      const void *param);
 int  sceVideoOutClose(int32_t handle);
+
+/* ---- PS4-style path: present in the stubs, but see the note above -------- */
 
 void sceVideoOutSetBufferAttribute(SceVideoOutBufferAttribute *attribute,
                                    uint32_t pixelFormat, uint32_t tilingMode,
@@ -226,11 +281,8 @@ int sceAudioOutClose(int32_t handle);
 int sceAudioOutOutput(int32_t handle, const void *ptr);
 int sceAudioOutSetVolume(int32_t handle, int32_t flag, const int32_t *vol);
 
-/* ------------------------------------------------------------------------ */
-/* System service (libSceSystemService)                                      */
-/* ------------------------------------------------------------------------ */
-
-int sceSystemServiceHideSplashScreen(void);
+/* System service (libSceSystemService): sceSystemServiceHideSplashScreen is
+ * declared with the VideoOut group above, since that is where it is used. */
 
 #ifdef __cplusplus
 }

@@ -2,21 +2,37 @@
  *
  * Milestone 3. Exercises the display path end to end:
  *
- *     user id -> sceVideoOutOpen -> buffer attribute -> direct memory
- *             -> sceVideoOutRegisterBuffers -> flip -> present
+ *     sceVideoOutOpen -> main direct memory -> map
+ *                     -> SetBufferAttribute2 -> RegisterBuffers2
+ *                     -> SubmitFlip -> present
  *
- * Two scenes, selected with a command line argument:
- *     (default)   solid colour, cycling through a few flat fills
+ * Two scenes, chosen by the first argument:
+ *     (default)   solid colours, ~2 s each
  *     pattern     an RGB test pattern (colour bars, gradient, grey ramp)
  *
- * This is the foundation the GPU YUV renderer eventually replaces: once a
- * decoded frame can be converted to BGRA and shown here, playback works, and
- * only then is it worth moving the conversion onto the GPU.
+ * ---------------------------------------------------------------------------
+ * THIS IS THE PS5 PATH, NOT THE PS4 ONE.
  *
- * NOT YET RUN ON HARDWARE by the author of this scaffold - the constants come
- * from the documented VideoOut ABI and every symbol used is present in the
- * SDK's libSceVideoOut stub. Treat the first console run as the real test and
- * record the result in docs/validation.md.
+ * The familiar PS4 sequence does not work from an ps5-payload-elfldr payload.
+ * Measured on firmware 12.70:
+ *
+ *   sceUserServiceGetInitialUser()  -> 0x80940004
+ *       A payload has no user session. Pass user id 0xff (system) to
+ *       sceVideoOutOpen instead and skip UserService entirely.
+ *
+ *   sceKernelGetDirectMemorySize()  -> 0
+ *       The payload's host process has no direct memory budget, so deriving
+ *       an allocator search range from it yields an empty range. Use
+ *       sceKernelAllocateMainDirectMemory, which draws from the main pool.
+ *
+ *   sceVideoOutSetBufferAttribute / RegisterBuffers
+ *       Superseded on PS5 by the "2" variants, which take a 64-bit pixel
+ *       format and an array of buffer descriptors rather than raw pointers.
+ *       Pitch is implicit (= width).
+ *
+ * The working sequence below matches ps5-payload-dev/SDL's video backend
+ * (src/video/ps5/SDL_ps5video.c), which is known-good on this platform.
+ * ---------------------------------------------------------------------------
  */
 
 #include <stdio.h>
@@ -25,85 +41,74 @@
 
 #include "evo_ps5.h"
 
-/* 1080p. Deliberately not 4K: this test is about proving the pipeline, and a
- * 1080p buffer is a quarter of the memory and flips on every panel. 4K is a
- * later milestone driven by sceVideoOutConfigureOutputMode. */
 #define FB_WIDTH   1920
 #define FB_HEIGHT  1080
-#define FB_COUNT   2            /* double buffered */
+#define FB_COUNT   2                    /* double buffered */
 
-/* VideoOut requires the pitch to be a multiple of 64 pixels. 1920 already is;
- * this macro keeps that true if you change the width. */
-#define ALIGN_UP(v, a)   (((v) + ((a) - 1)) & ~((a) - 1))
-#define FB_PITCH   ALIGN_UP(FB_WIDTH, 64)
-
-#define FB_BYTES   ((size_t)FB_PITCH * FB_HEIGHT * 4)
-
-/* Display buffers are allocated from one direct-memory block, 2 MiB aligned
- * (the alignment the scanout path expects for a linear surface). */
-#define DMEM_ALIGN  (2u * 1024u * 1024u)
+/* Matches the SDL backend: one 64 MiB block, second buffer at the halfway
+ * point. A 1920x1080x4 frame is ~8 MiB, so this is comfortably oversized and
+ * keeps both buffers well clear of each other. */
+#define FB_MEMSIZE  0x4000000u          /* 64 MiB total   */
+#define FB_ALIGN    0x20000u            /* 128 KiB        */
+#define FB_MEMTYPE  3                   /* WC_GARLIC      */
+#define FB_PROT     0x33                /* CPU RW | GPU all */
 
 typedef struct fb {
-    int32_t  handle;
-    void    *base;              /* mapped CPU pointer to the whole block  */
-    off_t    phys;              /* physical address of the block          */
-    size_t   total;             /* bytes actually allocated               */
-    void    *buf[FB_COUNT];     /* per-buffer pointers into base          */
+    int32_t                     handle;
+    void                       *base;
+    intptr_t                    paddr;
+    size_t                      memsize;
+    SceVideoOutBuffer           buf[FB_COUNT];
+    SceVideoOutBufferAttribute2 attr;
 } fb_t;
 
-static uint32_t
-bgra(uint8_t r, uint8_t g, uint8_t b)
+/* The framebuffer is ABGR8888: a uint32 laid out 0xAABBGGRR. Getting this
+ * backwards shows up immediately as swapped red and blue. */
+static inline uint32_t
+abgr(uint8_t r, uint8_t g, uint8_t b)
 {
-    /* SCE_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SRGB, little-endian 32-bit word. */
-    return (uint32_t)0xff000000u | ((uint32_t)r << 16)
-         | ((uint32_t)g << 8) | (uint32_t)b;
+    return 0xff000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
 }
 
 static void
 fill_solid(uint32_t *px, uint32_t colour)
 {
-    for (unsigned y = 0; y < FB_HEIGHT; y++) {
-        uint32_t *row = px + (size_t)y * FB_PITCH;
-        for (unsigned x = 0; x < FB_WIDTH; x++)
-            row[x] = colour;
-    }
+    for (size_t i = 0; i < (size_t)FB_WIDTH * FB_HEIGHT; i++)
+        px[i] = colour;
 }
 
-/* Colour bars on top, an RGB gradient in the middle, a grey ramp underneath.
- * Enough to spot wrong pixel order, wrong pitch and wrong colour range at a
- * glance - the three things that actually go wrong first. */
+/* Colour bars on top, an RGB sweep in the middle, a grey ramp below. Between
+ * them these expose wrong channel order, wrong pitch and range problems - the
+ * three things that actually go wrong first. */
 static void
 fill_pattern(uint32_t *px)
 {
-    const uint8_t bar_rgb[8][3] = {
+    static const uint8_t bar[8][3] = {
         {255,255,255}, {255,255,0}, {0,255,255}, {0,255,0},
         {255,0,255},   {255,0,0},   {0,0,255},   {0,0,0}
     };
-
     const unsigned bar_h  = FB_HEIGHT / 2;
     const unsigned grad_h = FB_HEIGHT / 4;
 
     for (unsigned y = 0; y < FB_HEIGHT; y++) {
-        uint32_t *row = px + (size_t)y * FB_PITCH;
+        uint32_t *row = px + (size_t)y * FB_WIDTH;
 
         if (y < bar_h) {
             for (unsigned x = 0; x < FB_WIDTH; x++) {
                 unsigned i = (x * 8) / FB_WIDTH;
                 if (i > 7) i = 7;
-                row[x] = bgra(bar_rgb[i][0], bar_rgb[i][1], bar_rgb[i][2]);
+                row[x] = abgr(bar[i][0], bar[i][1], bar[i][2]);
             }
         } else if (y < bar_h + grad_h) {
-            /* Horizontal red->green->blue sweep. */
             for (unsigned x = 0; x < FB_WIDTH; x++) {
                 unsigned t = (x * 255) / (FB_WIDTH - 1);
-                row[x] = bgra((uint8_t)(255 - t), (uint8_t)t,
+                row[x] = abgr((uint8_t)(255 - t), (uint8_t)t,
                               (uint8_t)((t * 2) % 256));
             }
         } else {
-            /* Grey ramp - reveals banding and any range/limited-range issue. */
             for (unsigned x = 0; x < FB_WIDTH; x++) {
                 uint8_t v = (uint8_t)((x * 255) / (FB_WIDTH - 1));
-                row[x] = bgra(v, v, v);
+                row[x] = abgr(v, v, v);
             }
         }
     }
@@ -113,101 +118,109 @@ static int
 fb_init(fb_t *fb)
 {
     int rc;
-    int32_t userId = 0;
+    void *vaddr = NULL;
 
-    /* sceVideoOutOpen needs the id of the logged-in user. */
-    rc = sceUserServiceInitialize(NULL);
-    if (rc < 0 && rc != 0) {
-        /* Already-initialised is common and benign when another payload ran
-         * first; only a hard failure matters. */
-        printf("sceUserServiceInitialize -> 0x%08x (continuing)\n", rc);
-    }
+    memset(fb, 0, sizeof *fb);
+    fb->memsize = FB_MEMSIZE;
 
-    rc = sceUserServiceGetInitialUser(&userId);
-    if (rc < 0) {
-        printf("sceUserServiceGetInitialUser failed: 0x%08x\n", rc);
-        return -1;
-    }
-    printf("initial user id     : 0x%08x\n", userId);
+    /* Get the PS5 logo/splash out of the way before drawing. */
+    sceSystemServiceHideSplashScreen();
 
-    fb->handle = sceVideoOutOpen(userId, SCE_VIDEO_OUT_BUS_TYPE_MAIN, 0, NULL);
+    /* 0xff = system user. A payload has no logged-in user session. */
+    fb->handle = sceVideoOutOpen(SCE_VIDEO_OUT_USER_ID_SYSTEM, 0, 0, NULL);
     if (fb->handle < 0) {
         printf("sceVideoOutOpen failed: 0x%08x\n", fb->handle);
         return -1;
     }
     printf("videoout handle     : %d\n", fb->handle);
 
-    /* Report what the panel is actually doing. */
-    SceVideoOutResolutionStatus res;
-    memset(&res, 0, sizeof res);
-    if (sceVideoOutGetResolutionStatus(fb->handle, &res) == 0) {
-        printf("panel resolution    : %ux%u @ %lu\n",
-               res.fullWidth, res.fullHeight, (unsigned long)res.refreshRate);
+    /* Direct memory is the awkward part in a payload process.
+     *
+     * ps5-payload-elfldr spawns the payload with dmem#0 - no direct memory
+     * budget at all (visible in klog as "FMEM x/y 0.0/0.0 payload.elf"), so
+     * the 64 MiB the SDL backend asks for comes back EAGAIN (0x80020023).
+     *
+     * Rather than guess, try progressively smaller sizes and both allocators,
+     * reporting each result. Two 1920x1080x4 buffers need 16 MiB, so anything
+     * from 16 MiB up is enough.
+     *
+     * Measured on 12.70 under elfldr: 64 MiB (the value SDL's backend uses)
+     * fails with EAGAIN, 32 MiB succeeds. So start at 32. */
+    static const size_t sizes[] = {
+        0x2000000,   /* 32 MiB - works under elfldr on 12.70 */
+        0x1000000,   /* 16 MiB - exactly two 1080p buffers   */
+    };
+
+    rc = -1;
+    for (size_t i = 0; i < sizeof sizes / sizeof *sizes && rc; i++) {
+        fb->memsize = sizes[i];
+
+        rc = sceKernelAllocateMainDirectMemory(fb->memsize, FB_ALIGN,
+                                               FB_MEMTYPE, &fb->paddr);
+        printf("AllocateMainDirectMemory(%8zu KiB) -> 0x%08x\n",
+               fb->memsize / 1024, rc);
+        if (!rc) break;
+
+        /* The non-"Main" allocator draws from a different pool; worth a try
+         * when the main one is exhausted. 16 GiB search range because
+         * sceKernelGetDirectMemorySize() reports 0 here. */
+        rc = sceKernelAllocateDirectMemory(0, (off_t)16 * 1024 * 1024 * 1024,
+                                           fb->memsize, FB_ALIGN,
+                                           FB_MEMTYPE, (off_t *)&fb->paddr);
+        printf("AllocateDirectMemory    (%8zu KiB) -> 0x%08x\n",
+               fb->memsize / 1024, rc);
     }
 
-    /* -- allocate one block big enough for every buffer ------------------- */
-    fb->total = ALIGN_UP(FB_BYTES * FB_COUNT, DMEM_ALIGN);
-
-    rc = sceKernelAllocateDirectMemory(
-            0,                                  /* searchStart              */
-            (off_t)sceKernelGetDirectMemorySize(),
-            fb->total,
-            DMEM_ALIGN,
-            SCE_KERNEL_WC_GARLIC,               /* write-combined, GPU side */
-            &fb->phys);
-    if (rc < 0) {
-        printf("sceKernelAllocateDirectMemory(%zu) failed: 0x%08x\n",
-               fb->total, rc);
+    if (rc) {
+        printf("\nno direct memory available to this payload.\n"
+               "The elfldr host process is spawned with dmem#0. A payload that\n"
+               "needs a framebuffer has to run in a process with a graphics\n"
+               "budget - launch it through ps5-payload-websrv instead.\n");
         sceVideoOutClose(fb->handle);
         return -1;
     }
+    printf("direct memory       : %zu bytes at phys 0x%lx\n",
+           fb->memsize, (unsigned long)fb->paddr);
 
-    fb->base = NULL;
-    rc = sceKernelMapDirectMemory(&fb->base, fb->total,
-                                  SCE_KERNEL_PROT_CPU_RW | SCE_KERNEL_PROT_GPU_ALL,
-                                  0, fb->phys, DMEM_ALIGN);
-    if (rc < 0) {
+    rc = sceKernelMapDirectMemory(&vaddr, fb->memsize, FB_PROT, 0,
+                                  fb->paddr, FB_ALIGN);
+    if (rc) {
         printf("sceKernelMapDirectMemory failed: 0x%08x\n", rc);
-        sceKernelReleaseDirectMemory(fb->phys, fb->total);
+        sceKernelReleaseDirectMemory(fb->paddr, fb->memsize);
         sceVideoOutClose(fb->handle);
         return -1;
     }
-    printf("framebuffer memory  : %zu bytes at %p (phys 0x%lx)\n",
-           fb->total, fb->base, (unsigned long)fb->phys);
+    fb->base = vaddr;
+    printf("mapped at           : %p\n", fb->base);
 
-    for (int i = 0; i < FB_COUNT; i++)
-        fb->buf[i] = (uint8_t *)fb->base + (size_t)i * FB_BYTES;
+    fb->buf[0].data = (uint8_t *)vaddr;
+    fb->buf[1].data = (uint8_t *)vaddr + (fb->memsize / 2);
 
-    /* -- describe the surface and register it ----------------------------- */
-    SceVideoOutBufferAttribute attr;
-    memset(&attr, 0, sizeof attr);
-    sceVideoOutSetBufferAttribute(&attr,
-                                  SCE_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SRGB,
-                                  SCE_VIDEO_OUT_TILING_MODE_LINEAR,
-                                  SCE_VIDEO_OUT_ASPECT_RATIO_16_9,
-                                  FB_WIDTH, FB_HEIGHT, FB_PITCH);
-
-    rc = sceVideoOutRegisterBuffers(fb->handle, 0, fb->buf, FB_COUNT, &attr);
-    if (rc < 0) {
-        printf("sceVideoOutRegisterBuffers failed: 0x%08x\n", rc);
-        sceKernelReleaseDirectMemory(fb->phys, fb->total);
-        sceVideoOutClose(fb->handle);
-        return -1;
-    }
-    printf("registered %d buffers (%ux%u, pitch %u)\n",
-           FB_COUNT, FB_WIDTH, FB_HEIGHT, FB_PITCH);
-
-    /* 0 = flip as fast as vblank allows (60Hz on a 60Hz panel). */
     sceVideoOutSetFlipRate(fb->handle, 0);
+
+    sceVideoOutSetBufferAttribute2(&fb->attr,
+                                   SCE_VIDEO_OUT_PIXEL_FORMAT2_A8B8G8R8_SRGB,
+                                   0, FB_WIDTH, FB_HEIGHT, 0, 0, 0);
+
+    rc = sceVideoOutRegisterBuffers2(fb->handle, 0, 0, fb->buf, FB_COUNT,
+                                     &fb->attr, 0, NULL);
+    if (rc) {
+        printf("sceVideoOutRegisterBuffers2 failed: 0x%08x\n", rc);
+        sceKernelReleaseDirectMemory(fb->paddr, fb->memsize);
+        sceVideoOutClose(fb->handle);
+        return -1;
+    }
+    printf("registered %d buffers (%ux%u)\n", FB_COUNT, FB_WIDTH, FB_HEIGHT);
     return 0;
 }
 
 static void
-fb_present(fb_t *fb, int index)
+fb_present(fb_t *fb, int index, int64_t frame_id)
 {
-    if (sceVideoOutSubmitFlip(fb->handle, index,
-                              SCE_VIDEO_OUT_FLIP_MODE_VSYNC, index) < 0) {
-        printf("sceVideoOutSubmitFlip(%d) failed\n", index);
+    /* flip mode 1 = on next vblank */
+    int rc = sceVideoOutSubmitFlip(fb->handle, index, 1, frame_id);
+    if (rc) {
+        printf("sceVideoOutSubmitFlip(%d) failed: 0x%08x\n", index, rc);
         return;
     }
     sceVideoOutWaitVblank(fb->handle);
@@ -216,61 +229,75 @@ fb_present(fb_t *fb, int index)
 static void
 fb_teardown(fb_t *fb)
 {
-    sceVideoOutUnregisterBuffers(fb->handle, 0);
     sceVideoOutClose(fb->handle);
-    sceKernelReleaseDirectMemory(fb->phys, fb->total);
+    sceKernelReleaseDirectMemory(fb->paddr, fb->memsize);
 }
 
 int
 main(int argc, char **argv)
 {
-    int pattern = (argc > 1 && strcmp(argv[1], "pattern") == 0);
     fb_t fb;
 
-    memset(&fb, 0, sizeof fb);
+    /* ps5-payload-elfldr passes no arguments (argv[0] is always
+     * "payload.elf"), so the scene cannot be selected from the command line
+     * the way it can under websrv. Run BOTH scenes in sequence instead - one
+     * deploy then shows everything worth looking at.
+     *
+     * Passing "solid" or "pattern" still works when a loader does supply
+     * argv. */
+    int want_solid   = 1;
+    int want_pattern = 1;
+    if (argc > 1) {
+        want_solid   = (strcmp(argv[1], "solid")   == 0);
+        want_pattern = (strcmp(argv[1], "pattern") == 0);
+    }
 
-    printf("=== EVO Player videoout_test (%s) ===\n",
-           pattern ? "RGB test pattern" : "solid colours");
+    printf("=== EVO Player videoout_test ===\n");
 
     if (fb_init(&fb) != 0) {
-        evo_notify("EVO videoout_test: initialisation FAILED (see klog)");
+        evo_notify("EVO videoout_test: init FAILED (see klog / stdout)");
         return EXIT_FAILURE;
     }
 
-    evo_notify("EVO videoout_test: %s, %dx%d",
-               pattern ? "test pattern" : "solid colour", FB_WIDTH, FB_HEIGHT);
+    evo_notify("EVO videoout_test: %dx%d, watch the TV", FB_WIDTH, FB_HEIGHT);
 
-    if (pattern) {
-        /* Static image; hold it long enough to photograph. */
-        for (int i = 0; i < FB_COUNT; i++)
-            fill_pattern((uint32_t *)fb.buf[i]);
+    int64_t frame_id = 0;
 
-        for (int frame = 0; frame < 60 * 10; frame++)
-            fb_present(&fb, frame % FB_COUNT);
-    } else {
-        const uint8_t rgb[4][3] = {
-            {200, 30,  30},   /* red    */
-            {30,  200, 30},   /* green  */
-            {30,  30,  200},  /* blue   */
-            {200, 200, 200}   /* white  */
+    if (want_solid) {
+        static const uint8_t rgb[4][3] = {
+            {200,  30,  30},   /* red   */
+            { 30, 200,  30},   /* green */
+            { 30,  30, 200},   /* blue  */
+            {200, 200, 200}    /* white */
         };
 
-        /* Two seconds per colour, flipping every vblank so we also prove the
-         * flip queue keeps up. */
         for (unsigned c = 0; c < 4; c++) {
-            for (int frame = 0; frame < 120; frame++) {
-                int idx = frame % FB_COUNT;
-                if (frame < FB_COUNT)
-                    fill_solid((uint32_t *)fb.buf[idx],
-                               bgra(rgb[c][0], rgb[c][1], rgb[c][2]));
-                fb_present(&fb, idx);
+            printf("solid colour %u: rgb(%u,%u,%u)\n",
+                   c, rgb[c][0], rgb[c][1], rgb[c][2]);
+            for (int f = 0; f < 120; f++) {          /* ~2 s at 60 Hz */
+                int idx = f % FB_COUNT;
+                if (f < FB_COUNT)
+                    fill_solid((uint32_t *)fb.buf[idx].data,
+                               abgr(rgb[c][0], rgb[c][1], rgb[c][2]));
+                fb_present(&fb, idx, frame_id++);
             }
         }
     }
 
+    if (want_pattern) {
+        printf("RGB test pattern (bars / gradient / grey ramp)\n");
+        evo_notify("EVO videoout_test: RGB test pattern");
+        for (int i = 0; i < FB_COUNT; i++)
+            fill_pattern((uint32_t *)fb.buf[i].data);
+
+        /* Hold it long enough to look at and photograph. */
+        for (int f = 0; f < 60 * 8; f++)
+            fb_present(&fb, f % FB_COUNT, frame_id++);
+    }
+
     fb_teardown(&fb);
 
-    printf("videoout_test done\n");
+    printf("videoout_test done (%lld frames)\n", (long long)frame_id);
     evo_notify("EVO videoout_test: finished cleanly");
     return EXIT_SUCCESS;
 }

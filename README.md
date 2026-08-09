@@ -13,12 +13,13 @@ Windows  ->  VS Code  ->  Docker container  ->  Linux toolchain (clang-18)
 Everything is pinned. `docker compose build` produces the same toolchain
 tomorrow as it does today.
 
-> **Status.** The environment is complete and verified end to end *in the
-> container*: the SDK, all eight sample projects, a custom FFmpeg, and an
-> unmodified ProsperoPlayer all build. **No payload has been run on real
-> hardware yet** — the author has no console attached. See
-> [docs/validation.md](docs/validation.md), which separates what is proven from
-> what is not.
+> **Status.** Verified end to end on a real console (firmware `0x12700001`):
+> `hello_world`, `system_info`, `videoout_test`, `audioout_test`, `gpu_test`
+> and `decoder_test` all run. FFmpeg 7.0.1 builds, and unmodified
+> ProsperoPlayer builds. Notably, **`libSceAvPlayer` turned out to be directly
+> callable from a payload** — see
+> [docs/native-media-research.md](docs/native-media-research.md).
+> Full record: [docs/validation.md](docs/validation.md).
 
 ---
 
@@ -573,10 +574,16 @@ Container-verified (reproducible, gated by CI):
 - [x] Proprietary files are excluded from Git
 - [x] README contains complete setup instructions
 
-Requires hardware — **not yet run**:
+Hardware-verified on firmware 12.70:
 
-- [ ] Hello World ELF loads on PS5
-- [ ] Deployment works from container
+- [x] Hello World ELF loads and runs on PS5
+- [x] Deployment works from container
+- [x] Firmware confirmed `0x12700001`
+- [x] VideoOut presents (1920x1080, 960 frames)
+- [x] AudioOut plays (48 kHz stereo S16)
+- [x] GPU submits allowed (`sceGnmAreSubmitsAllowed() -> 1`)
+- [x] `libSceAvPlayer` entry points resolved by NID
+- [ ] ProsperoPlayer baseline playback confirmed on console
 
 Track results in [docs/validation.md](docs/validation.md).
 
@@ -585,15 +592,15 @@ Track results in [docs/validation.md](docs/validation.md).
 ## Roadmap
 
 1. ✅ Environment: Docker → clang-18 → SDK → ELF
-2. ⬜ Run `hello_world` on a 12.70 console
-3. ⬜ VideoOut / AudioOut on hardware
+2. ✅ Run `hello_world` on a 12.70 console
+3. ✅ VideoOut / AudioOut on hardware
 4. ✅ FFmpeg 7.0.1, minimal + full profiles
 5. ✅ ProsperoPlayer baseline builds
 6. ⬜ Confirm baseline playback on hardware
 7. ⬜ Fork to `projects/evoplayer/`, fix E-AC3/DTS/FLAC/Opus
 8. ⬜ GPU YUV renderer (SDL2 + mesa)
 9. ⬜ 4K SDR, HEVC 10-bit
-10. ⬜ Hardware decoder research
+10. 🔬 Hardware decoder research — `libSceAvPlayer` reachable, `libSceVdecCore` export names still unknown
 11. ⬜ HDR, if technically possible
 
 ## Licence and disclaimer

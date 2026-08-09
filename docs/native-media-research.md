@@ -16,47 +16,59 @@ libSceVdecwrap          libSceVideoDecoderArbitration
 ```
 
 You therefore **cannot** write `-lSceVdecCore`. There is nothing to link
-against. Do not assume these APIs are directly callable.
+against.
+
+But that does **not** mean the APIs are unreachable. Verified on 12.70:
+`libSceAvPlayer` loads and all probed entry points resolve, with no
+proprietary files involved. See the [results log](#results-log).
 
 ## Two routes
 
-### Route 1 — runtime symbol resolution (start here)
+### Route 1 — load, then resolve by NID (verified working)
 
-No proprietary files, nothing to install. The SDK's `<ps5/kernel.h>` exposes:
+No proprietary files, nothing to install. Three steps, and each one matters:
 
 ```c
-int      kernel_dynlib_handle(pid_t pid, const char *basename, uint32_t *handle);
-intptr_t kernel_dynlib_dlsym(pid_t pid, uint32_t handle, const char *sym);
-intptr_t kernel_dynlib_resolve(pid_t pid, uint32_t handle, const char *nid);
-intptr_t kernel_dynlib_mapbase_addr(pid_t pid, uint32_t handle);
+/* 1. Load the module - it is NOT mapped unless you link its stub. */
+int modid = sceKernelLoadStartModule("/system/common/lib/libSceAvPlayer.sprx",
+                                     0, NULL, 0, NULL, &res);
+
+/* 2. Get its dynlib handle (different from the module id). */
+uint32_t dynh;
+kernel_dynlib_handle(getpid(), "libSceAvPlayer.sprx", &dynh);
+
+/* 3. Resolve by NID, not by name. */
+char nid[12];
+nid_encode("sceAvPlayerInit", nid);              /* <ps5/nid.h> */
+intptr_t addr = kernel_dynlib_resolve(getpid(), dynh, nid);
 ```
 
-If a module is already mapped into the payload's process, these hand back
-function addresses directly. `sceKernelDlsym` and
-`sceSysmoduleLoadModuleInternal` are also available from the libkernel and
-Sysmodule stubs.
+The three traps, all of which cost a debugging cycle here:
 
-**`projects/decoder_test` does exactly this.** Build and run it, then read the
-klog:
+- **`sceKernelDlsym` by plain name always fails** (`0x80020003`, ESRCH). Sony
+  modules export NIDs — a hash of the symbol name — not names. `nid_encode()`
+  from `<ps5/nid.h>` produces the NID; `kernel_dynlib_resolve()` looks it up.
+- **Passive probing is misleading.** `kernel_dynlib_handle` only finds modules
+  the payload actually depends on. A module you have not linked or loaded
+  reports "not mapped" even when it is present on the system.
+- **The module id and the dynlib handle are different values.**
+  `kernel_dynlib_resolve` wants the latter.
+
+**`projects/decoder_test` implements all of this**, including a control
+(`-lSceVideoOut -lSceAudioOut` must show 3/3, otherwise the probe is
+unreliable and every other result is meaningless):
 
 ```bash
 ./scripts/build.sh decoder_test
-PS5_HOST=192.168.1.50 ./scripts/deploy.sh output/elf/decoder_test.elf
+PS5_HOST=192.168.0.10 ./scripts/deploy.sh output/elf/decoder_test.elf
 ```
 
-It reports which candidate modules are mapped and which symbols resolve.
-**Record the output in this file** — that result determines whether route 1 is
-viable at all.
-
-A likely outcome is that nothing media-related is mapped, because a payload
-injected into a lightweight host process does not have the media stack loaded.
-In that case try, in order:
-
-1. `sceSysmoduleLoadModuleInternal()` with the module id
-2. running the payload inside a process that already uses the decoder
-3. route 2
+Record new findings in the [results log](#results-log).
 
 ### Route 2 — generated stubs from a decrypted SPRX
+
+Only needed if route 1 cannot reach something. Route 1 already works for
+`libSceAvPlayer`.
 
 Supported natively by the SDK: drop a `.sprx` into `sce_stubs/`, run
 `make -C sce_stubs stubs`, and `genstub.py` emits a linkable `.c` by mapping
@@ -99,18 +111,80 @@ implementation as the always-available fallback, and a hardware implementation
 selected only when probing succeeds at run time. Never make hardware decode a
 build-time dependency.
 
-## Open questions
-
-- [ ] Are any `libSceVdec*` modules mapped in an elfldr payload process on 12.70?
-- [ ] Does `sceSysmoduleLoadModuleInternal` succeed for them from a payload?
-- [ ] Do the PS4 `sceVideoDecoder*` signatures still hold on PS5, or has the ABI changed?
-- [ ] Is `libSceAvPlayer` usable without a full application sandbox (it expects app-style file access and a user id)?
-- [ ] Can decoded frames be handed to VideoOut without an intermediate CPU copy?
-- [ ] Does `libSceVideoDecoderArbitration` gate access when no licensed title is running?
-
 ## Results log
 
-*(append findings here, newest first — include firmware, date, and the raw
-`decoder_test` output)*
+*(newest first)*
 
-Nothing recorded yet. `decoder_test` has not been run on hardware.
+### 2026-08-09 — firmware 12.70 (`0x12700001`), elfldr payload
+
+**libSceAvPlayer is directly callable from a payload. No proprietary files
+required.**
+
+Method: `sceKernelLoadStartModule()` on the module path, then
+`kernel_dynlib_handle()` for the dynlib handle, then `nid_encode()` +
+`kernel_dynlib_resolve()` per symbol.
+
+All three modules loaded successfully:
+
+| Module | modid | base |
+|---|---|---|
+| `libSceAvPlayer.sprx` | 0x29 | `0x8008f4000` |
+| `libSceVdecCore.sprx` | 0x2b | `0x80094c000` |
+| `libSceVideoDecoderArbitration.sprx` | 0x2c | `0x800a1c000` |
+
+`libSceAvPlayer` symbols — **all six resolved**:
+
+| Symbol | NID | Address |
+|---|---|---|
+| `sceAvPlayerInit` | `aS66RI0gGgo` | `0x8008f4d00` |
+| `sceAvPlayerAddSource` | `KMcEa+rHsIo` | `0x8008f60e0` |
+| `sceAvPlayerGetVideoData` | `o3+RWnHViSg` | `0x8008f7040` |
+| `sceAvPlayerGetAudioData` | `Wnp1OVcrZgk` | `0x8008f6e60` |
+| `sceAvPlayerIsActive` | `UbQoYawOsfY` | `0x8008f6d30` |
+| `sceAvPlayerClose` | `NkJwDzKmIlw` | `0x8008f5e50` |
+
+`libSceVdecCore` / `libSceVideoDecoderArbitration`: loaded, but **none** of the
+PS4-era `sceVideoDecoder*` names resolved. The modules are present and mapped,
+so this is a naming problem, not an availability problem — the PS5 low-level
+decode API is not called what the PS4 one was.
+
+#### Three things this established
+
+1. **Plain `sceKernelDlsym` never works on Sony modules.** Every symbol returns
+   `0x80020003` (ESRCH) because these modules export NIDs, not names. You must
+   go through `nid_encode()` + `kernel_dynlib_resolve()`. The SDK ships
+   `nid_encode()` in `<ps5/nid.h>` for exactly this.
+
+2. **A module is only mapped if the payload links its stub.** An earlier run
+   reported 0/10 modules mapped — including `libSceVideoOut`, which
+   demonstrably works. Passive probing tells you about *your* dependencies,
+   nothing more. `decoder_test` now links `-lSceVideoOut -lSceAudioOut` purely
+   as a control (3/3 must pass, else the probe is unreliable).
+
+3. **You have to load the module first.** `sceKernelLoadStartModule()` on
+   `/system/common/lib/<name>.sprx` works from an elfldr payload.
+
+#### Next steps
+
+- [ ] Recover the real PS5 `libSceVdecCore` export names. Two routes: dump the
+      module's dynamic symbol table for its NID list and reverse the hash
+      against a wordlist, or check `aerolib.csv` from `zecoxao/sce_symbols`
+      for NIDs matching this module.
+- [ ] Prototype `libSceAvPlayer` in `projects/avplayer_test` now that the
+      entry points are known — resolve the six NIDs and call `sceAvPlayerInit`.
+      Its argument struct is the next unknown; it takes an allocator/callback
+      block on PS4 and the PS5 layout must be confirmed.
+- [ ] Determine whether AvPlayer needs an app sandbox (file access, user id).
+      Note `videoout_test` established that a payload has **no user session**
+      (`sceUserServiceGetInitialUser` → `0x80940004`), which may matter.
+- [ ] Check whether `libSceVideoDecoderArbitration` gates access when no
+      licensed title is running.
+
+## Open questions
+
+- [x] ~~Are any `libSceVdec*` modules mapped in an elfldr payload process on 12.70?~~
+      Not by default, but **they load on demand** via `sceKernelLoadStartModule`.
+- [x] ~~Is `libSceAvPlayer` reachable?~~ **Yes** — all six probed entry points resolve.
+- [ ] What are the real PS5 `libSceVdecCore` export names?
+- [ ] Does `sceAvPlayerInit` actually succeed, or does it fail without an app sandbox?
+- [ ] Can decoded frames reach VideoOut without an intermediate CPU copy?
