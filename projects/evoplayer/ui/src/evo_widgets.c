@@ -31,34 +31,79 @@ static uint32_t mix(uint32_t a, uint32_t b, int t)
 }
 
 /*
- * Nearest-neighbour blit of a BGRA source into a destination rect, scaled to
- * cover. Nearest rather than bilinear on purpose: this runs on the UI thread
- * every frame for the preview panel, and the source is already a decoded
- * thumbnail at roughly the right size.
+ * Blit a BGRA source into a destination rect, scaled.
+ *
+ * Bilinear when magnifying, point-sampled when the scale is 1:1 or smaller.
+ * Nearest-neighbour magnification is what made previews look blocky: the
+ * inspector panel is 560px wide and sources are often smaller, so every
+ * source pixel became a visible square. Bilinear costs three extra lerps per
+ * pixel over an area that is a few hundred pixels across - nothing next to
+ * the per-pixel blending the rest of the frame already does.
+ *
+ * Minification is left point-sampled deliberately. Averaging on the way down
+ * belongs where the thumbnail is produced, not here: doing it per frame would
+ * pay for the same filter sixty times a second to get the same answer. See
+ * prospero_cover_scale_rgba().
  */
+static uint32_t lerp_px(uint32_t a, uint32_t b, int t)
+{
+    int ar =  a        & 0xFF, ag = (a >>  8) & 0xFF, ab = (a >> 16) & 0xFF;
+    int br =  b        & 0xFF, bg = (b >>  8) & 0xFF, bb = (b >> 16) & 0xFF;
+
+    return 0xFF000000u
+         | ((uint32_t)(ab + (((bb - ab) * t) >> 8)) << 16)
+         | ((uint32_t)(ag + (((bg - ag) * t) >> 8)) <<  8)
+         |  (uint32_t)(ar + (((br - ar) * t) >> 8));
+}
+
 static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
                        const uint32_t *src, int sw, int sh, int alpha)
 {
     int x, y;
+    int magnify;
 
     if (!src || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
 
+    magnify = (dw > sw || dh > sh);
+
     for (y = 0; y < dh; y++) {
         int fy = dy + y;
-        int sy;
+        int sy, fyf;
 
         if (fy < 0 || fy >= EVO_SCREEN_H) continue;
-        sy = (y * sh) / dh;
+
+        /* 8-bit sub-pixel position within the source. */
+        {
+            int syq = (y * sh * 256) / dh;
+            sy  = syq >> 8;
+            fyf = syq & 0xFF;
+            if (sy >= sh - 1) { sy = sh - 1; fyf = 0; }
+        }
 
         for (x = 0; x < dw; x++) {
             int fx = dx + x;
-            int sx;
+            int sx, fxf;
             uint32_t px;
 
             if (fx < 0 || fx >= EVO_SCREEN_W) continue;
-            sx = (x * sw) / dw;
 
-            px = src[sy * sw + sx];
+            {
+                int sxq = (x * sw * 256) / dw;
+                sx  = sxq >> 8;
+                fxf = sxq & 0xFF;
+                if (sx >= sw - 1) { sx = sw - 1; fxf = 0; }
+            }
+
+            if (magnify && (fxf || fyf)) {
+                const uint32_t *r0 = src + (size_t)sy * sw;
+                const uint32_t *r1 = r0 + (fyf ? sw : 0);
+                int             nx = fxf ? 1 : 0;
+
+                px = lerp_px(lerp_px(r0[sx], r0[sx + nx], fxf),
+                             lerp_px(r1[sx], r1[sx + nx], fxf), fyf);
+            } else {
+                px = src[(size_t)sy * sw + sx];
+            }
 
             if (alpha >= 255) {
                 fb[fy * EVO_SCREEN_W + fx] = px;

@@ -566,8 +566,14 @@ static void favorites_load(void) {
 #define PROSPERO_COVER_CACHE 48
 
 /* Large selection preview (right panel) — Infuse/BFplayer-style */
-#define PROSPERO_BROWSER_PREVIEW_W 400
-#define PROSPERO_BROWSER_PREVIEW_H 225
+/*
+ * Sized to the inspector panel it is drawn into (EVO_PREVIEW_W/H), so the
+ * preview is presented 1:1. At 400x225 it was being magnified to 560x315 on
+ * screen - a second resample on top of the minification that produced it,
+ * which is what made previews look pixelated.
+ */
+#define PROSPERO_BROWSER_PREVIEW_W 560
+#define PROSPERO_BROWSER_PREVIEW_H 315
 
 typedef struct {
     char path_key[512];
@@ -610,22 +616,56 @@ static void prospero_cover_scale_rgba(
     int y, x;
     if (!src || !dst || sw < 1 || sh < 1 || dw < 1 || dh < 1)
         return;
+
+    /*
+     * Box filter, not point sampling.
+     *
+     * This minifies a decoded frame - 1280x720 or larger - down to a preview
+     * a few hundred pixels wide. Taking one source pixel per destination
+     * pixel discards better than nine tenths of the image and keeps whichever
+     * pixel the arithmetic happens to land on, so fine detail turns into
+     * speckle and straight edges crawl. Averaging the source rectangle that
+     * each destination pixel actually covers is the correct filter for
+     * minification and costs one pass over the source.
+     *
+     * When magnifying (dw > sw) the rectangle collapses to a single pixel and
+     * this degenerates to the old behaviour, which is fine - the callers that
+     * magnify go through blit_cover instead.
+     */
     for (y = 0; y < dh; y++) {
-        int sy = y * sh / dh;
-        if (sy >= sh)
-            sy = sh - 1;
+        int y0 = (int)(((long long)y       * sh) / dh);
+        int y1 = (int)(((long long)(y + 1) * sh) / dh);
+
+        if (y1 <= y0) y1 = y0 + 1;
+        if (y1 > sh)  y1 = sh;
+
         for (x = 0; x < dw; x++) {
-            int sx = x * sw / dw;
-            const unsigned char *p;
-            unsigned char r, g, b;
-            if (sx >= sw)
-                sx = sw - 1;
-            p = src + ((size_t)sy * (size_t)sw + (size_t)sx) * 4u;
-            /* stbi/sws RGBA → same packing as RR_BGRA / load_stb_image */
-            r = p[0];
-            g = p[1];
-            b = p[2];
-            dst[y * dw + x] = RR_BGRA(r, g, b, 255);
+            int x0 = (int)(((long long)x       * sw) / dw);
+            int x1 = (int)(((long long)(x + 1) * sw) / dw);
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            int yy, xx;
+
+            if (x1 <= x0) x1 = x0 + 1;
+            if (x1 > sw)  x1 = sw;
+
+            for (yy = y0; yy < y1; yy++) {
+                const unsigned char *row =
+                    src + ((size_t)yy * (size_t)sw + (size_t)x0) * 4u;
+
+                for (xx = x0; xx < x1; xx++, row += 4) {
+                    r += row[0];
+                    g += row[1];
+                    b += row[2];
+                    n++;
+                }
+            }
+
+            if (!n) n = 1;
+
+            /* stbi/sws RGBA -> same packing as RR_BGRA / load_stb_image */
+            dst[y * dw + x] = RR_BGRA((unsigned char)(r / n),
+                                      (unsigned char)(g / n),
+                                      (unsigned char)(b / n), 255);
         }
     }
 }
