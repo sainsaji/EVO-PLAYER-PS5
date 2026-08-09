@@ -5,6 +5,62 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.2.0
+
+Subtitles, and the interface for choosing them.
+
+### New
+
+- **Subtitle track picker.** DOWN during playback lists every track in the
+  file with the number of cues it declares, the active one marked, and the
+  film still playing behind it. It replaces cycling, which reopened the file
+  on every step - on a disc rip with thirty-four tracks that meant thirty-odd
+  reopens to reach the one you wanted.
+- Track names are built from the language code, not the container's title.
+  The font atlas has no accents or parentheses, so a track really titled
+  `Español (España)` would draw as a row of holes; fifty language codes map
+  to ASCII names, and same-language tracks are numbered rather than shown as
+  duplicate rows.
+
+### Fixed
+
+- **Subtitles appeared to be broken and were not.** A release group ships a
+  vanity track tagged English, flagged default, holding two cues whose first
+  lands thirty-seven minutes in. Selection picked it on metadata alone and
+  then correctly displayed nothing for a whole episode. mkvmerge records
+  `NUMBER_OF_FRAMES` per track, so the cue count is readable before a packet
+  is demuxed, and it now outranks every other signal: a track with fewer than
+  ten cues loses even when it is English and flagged default. Tracks that
+  lose this way are still offered in the picker, dimmed and marked
+  `SIGNS ONLY`, because the count can itself be wrong.
+- **The marquee scrolled at whatever speed the render loop happened to be
+  running.** It advanced a fixed number of pixels per frame, and the loop
+  runs anywhere from 36fps with a preview decoding to 60fps on a settled
+  list, so one filename scrolled at two visibly different rates. It measures
+  milliseconds now and travels 180px/s regardless.
+- **The marquee also stepped a glyph at a time**, because the offset was
+  computed in pixels and then applied by dropping whole characters. The
+  sub-character remainder is applied as a negative x, with the glyph
+  overhanging each end clipped by keeping and restoring the strips either
+  side. Checked on the host: no ink outside the box across 376 phases,
+  largest step 3px against a 17px advance.
+- **`EXTRA_CFLAGS` never reached the compiler** when building from Windows.
+  The re-exec into the dev container forwarded `PS5_HOST` and `PS5_PORT` and
+  dropped everything else, so a `-D` switch produced a successful build, a
+  clean install, and a binary without it. Forwarded now, and the build greps
+  its own compile line and fails if a requested flag did not land.
+
+### Known gaps
+
+- Cue counts come from mkvmerge's statistics tags. Containers written by
+  other tools do not carry them; those tracks are ranked on metadata as
+  before and show no count in the picker.
+- Switching tracks reopens the file and seeks back, so it costs the same
+  pause as a seek. Cues are collected as packets stream past, so a track
+  selected mid-film has no cues from earlier in it.
+
+---
+
 ## 0.1.0
 
 A rebuild of the interface, and the tooling to work on it without a console.
