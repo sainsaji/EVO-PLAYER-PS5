@@ -96,6 +96,8 @@
 #define EVO_FOOTER_H        (EVO_SCREEN_H - EVO_FOOTER_Y)
 #define EVO_FOOTER_X        EVO_CONTENT_X
 #define EVO_FOOTER_HINT_GAP 44    /* space between one hint and the next */
+#define EVO_FOOTER_GLYPH    48    /* controller glyphs are 48x48 */
+#define EVO_FOOTER_GLYPH_GAP 12   /* glyph to its own label */
 
 /* ---- launch screen ----------------------------------------------------- */
 
@@ -129,6 +131,13 @@
 #define EVO_TILE_GAP        20
 #define EVO_TILE_PITCH      (EVO_TILE_W + EVO_TILE_GAP)
 #define EVO_TILES_VISIBLE   6
+
+/*
+ * Height reserved at the bottom of a tile for its caption. Tiles use a
+ * smaller type ramp than rows (SUB over SMALL), so the band is shorter than
+ * it was and the artwork or icon above it gets the difference back.
+ */
+#define EVO_TILE_CAPTION_H  62
 
 /* ---- motion ------------------------------------------------------------ */
 

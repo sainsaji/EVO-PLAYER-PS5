@@ -162,8 +162,9 @@ void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
         int tw = t->art_w, thh = t->art_h;
         int tx = x + pad, ty = y + pad - 4;
 
-        if (tw > w - pad * 2) tw = w - pad * 2;
-        if (thh > h - 84)     thh = h - 84;
+        if (tw > w - pad * 2)                       tw = w - pad * 2;
+        if (thh > h - EVO_TILE_CAPTION_H - pad * 2) thh = h - EVO_TILE_CAPTION_H
+                                                          - pad * 2;
 
         blit_cover(fb, tx, ty, tw, thh, t->art, t->art_w, t->art_h, 255);
 
@@ -177,7 +178,8 @@ void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
 
         /* Scrim under the caption. Without it a bright frame makes the title
          * unreadable, which is the failure mode of every poster grid. */
-        evo_ui_vgrad_over(fb, x + 2, y + h - 76, w - 4, 74,
+        evo_ui_vgrad_over(fb, x + 2, y + h - (EVO_TILE_CAPTION_H + 16), w - 4,
+                          EVO_TILE_CAPTION_H + 14,
                           with_alpha(th->scrim, 0), with_alpha(th->scrim, 245));
 
         /* Re-draw the selection border on top of the artwork. */
@@ -199,18 +201,31 @@ void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
                                     : mix(th->text_secondary, th->accent, 130));
     }
 
+    /*
+     * A tile carries its own, smaller type ramp than a full-width row: SUB
+     * over SMALL rather than MENU over SUB.
+     *
+     * At MENU a 274px tile could not hold an ordinary filename - four of the
+     * six recent tiles ellipsised, and "Dolby TrueHD 7.1" became
+     * "Dolby TrueH..", which is the part that identifies the file. The atlas
+     * only offers four sizes, so this is a whole step down; taking the detail
+     * line down with it keeps the two levels distinguishable instead of
+     * flattening the tile into one weight.
+     */
     if (t->detail && *t->detail) {
         int detail_y;
-        evo_text_y_stacked(y + h - 74, 60, EVO_FACE_MENU, EVO_FACE_SUB, 8,
+        evo_text_y_stacked(y + h - EVO_TILE_CAPTION_H, EVO_TILE_CAPTION_H - 8,
+                           EVO_FACE_SUB, EVO_FACE_SMALL, 6,
                            &title_y, &detail_y);
         evo_text_fit(fb, x + pad, title_y, w - pad * 2, t->title,
-                     th->text_primary, EVO_FACE_MENU);
+                     th->text_primary, EVO_FACE_SUB);
         evo_text_fit(fb, x + pad, detail_y, w - pad * 2, t->detail,
-                     th->text_secondary, EVO_FACE_SUB);
+                     th->text_secondary, EVO_FACE_SMALL);
     } else {
-        title_y = evo_text_y_centred(y + h - 62, 48, EVO_FACE_MENU);
+        title_y = evo_text_y_centred(y + h - EVO_TILE_CAPTION_H,
+                                     EVO_TILE_CAPTION_H - 12, EVO_FACE_SUB);
         evo_text_fit(fb, x + pad, title_y, w - pad * 2, t->title,
-                     th->text_primary, EVO_FACE_MENU);
+                     th->text_primary, EVO_FACE_SUB);
     }
 
     if (t->progress >= 0)

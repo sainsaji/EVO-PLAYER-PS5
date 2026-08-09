@@ -304,17 +304,31 @@ static void draw_footer(uint32_t *fb, const evo_page *p,
 
     for (i = 0; i < n && hints; i++) {
         /*
+         * Glyph and label share one centre line, so each hint reads as a
+         * single item.
+         *
+         * They used not to: the glyph was pinned to EVO_FOOTER_Y + 14 while
+         * the label was centred in the footer, leaving the two 27px apart
+         * vertically - close enough to look like a mistake rather than a
+         * style, and it made the row read as two staggered lines. The advance
+         * was 44 for a 48px glyph as well, so the label overlapped it.
+         *
          * Hints are laid out by measuring, not on a fixed pitch. A fixed
          * pitch either wastes space after "OPEN" or collides after
          * "FAVORITE", and the previous UI had both problems on different
          * screens.
          */
-        evo_glyph(fb, x, EVO_FOOTER_Y + 14, hints[i].glyph);
-        x += 44;
+        int text_y = evo_text_y_centred(EVO_FOOTER_Y, EVO_FOOTER_H,
+                                        EVO_FACE_SMALL);
 
-        evo_text(fb, x,
-                 evo_text_y_centred(EVO_FOOTER_Y, EVO_FOOTER_H, EVO_FACE_SMALL),
-                 hints[i].label, th->text_secondary, EVO_FACE_SMALL);
+        evo_glyph(fb, x,
+                  EVO_FOOTER_Y + (EVO_FOOTER_H - EVO_FOOTER_GLYPH) / 2,
+                  hints[i].glyph);
+
+        x += EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP;
+
+        evo_text(fb, x, text_y, hints[i].label,
+                 th->text_secondary, EVO_FACE_SMALL);
 
         x += evo_text_w(hints[i].label, EVO_FACE_SMALL) + EVO_FOOTER_HINT_GAP;
     }
