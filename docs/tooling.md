@@ -287,14 +287,22 @@ on any machine:
 ```
 
 Arrow keys move, Enter selects, Esc goes back, Left opens the navigation rail
-— the same model the console uses. `E` toggles the empty states.
+— the same model the console uses. `E` toggles the empty states, `F` goes
+fullscreen and `H` hides the page chrome, because the frame is the point and a
+1920×1080 still deserves the whole monitor.
 
 There is no emscripten, no mingw and no host SDL2 in the container, so a
 windowed binary is not buildable from here. It does not need to be: this repo
 owns both the renderer and the navigation model, so every reachable cursor
-position can be rendered ahead of time (93 frames, ~5 MB) and stepped through
-with a JavaScript copy of `evo_grid` / `evo_focus` / `evo_nav`. If that copy
-and the C ever disagree, the C is right and the page is the bug.
+position can be rendered ahead of time — 93 frames at full 1920×1080, about
+13 MB — and stepped through with a JavaScript copy of `evo_grid` /
+`evo_focus` / `evo_nav`. If that copy and the C ever disagree, the C is right
+and the page is the bug.
+
+Frames are full resolution rather than half on purpose: these get viewed on a
+desktop monitor that is often wider than 1920, and the hairlines, 1 px borders
+and small type — the things actually worth inspecting — turn to mush when a
+half-size frame is scaled up.
 
 It is **not** live data, animation or the player's timing. It shows layout and
 navigation, which is exactly what cannot be checked without a console.

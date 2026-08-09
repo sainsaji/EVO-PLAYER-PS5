@@ -89,15 +89,19 @@ render "recent_empty"    recent    --empty
 render "favorites_empty" favorites --empty
 render "browse_empty"    browse    --empty
 
+# Full resolution, not half. These are viewed on a desktop monitor that is
+# often wider than 1920, so a half-size frame is upscaled and the hairlines,
+# 1px borders and small type - the things worth inspecting - turn to mush.
+# ~350KB a frame locally is a fair trade for that.
 begin "converting to PNG"
 shopt -s nullglob
 n=0
 for b in "${OUT}"/*.bmp; do
-    python3 "${REPO_ROOT}/tools/shot.py" png "${b}" "${b%.bmp}.png" 2 >/dev/null
+    python3 "${REPO_ROOT}/tools/shot.py" png "${b}" "${b%.bmp}.png" 1 >/dev/null
     rm -f "${b}"
     n=$(( n + 1 ))
 done
-ok "${n} frames"
+ok "${n} frames at 1920x1080"
 
 cp "${REPO_ROOT}/tools/uiplay.html" "${OUT}/index.html"
 
