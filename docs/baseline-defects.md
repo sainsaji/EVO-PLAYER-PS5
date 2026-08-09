@@ -11,6 +11,13 @@
 > | 1. No surround output | **Fixed.** `sceAudioOutOpen` with `S16_8CH` when the source is multichannel, `AV_CHANNEL_LAYOUT_7POINT1` on the resampler, stereo fallback retained. `main.c`, search `want_surround`. |
 > | 2. Screen tearing | **Fixed.** `EVO_FLIP_SYNC` in `pp/src/pp_videoout.c` retires a buffer only once `sceVideoOutGetFlipStatus` reports its `flipArg`, replacing upstream's 32 ms timer. |
 >
+> **The codec set is wider than any message in the app suggests.** The build
+> enables and links `aac ac3 eac3 dca mp3 mp2 flac opus vorbis alac pcm_*`
+> for audio and `h264 hevc vp9 vp8 mpeg2video mpeg4 av1 mjpeg` for video, plus
+> `truehd`/`mlp`. Verified with `nm` against both `libavcodec.a` and the
+> shipped ELF. If playback reports a codec as unsupported, check the message
+> against that list before believing it.
+>
 > Mistaking this file for open work has already cost one session's planning
 > time. If you are looking for what is actually outstanding, see
 > [`ui-handoff.md`](ui-handoff.md) and [`gpu-notes.md`](gpu-notes.md).

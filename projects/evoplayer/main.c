@@ -6501,6 +6501,11 @@ static void prospero_codec_error(
 
 
 int start_video_playback(const char *path) {
+    /* Audio diagnostics. There is one toast slot, so a specific failure
+     * message is worthless if the summary below overwrites it a moment
+     * later - which is exactly what used to happen. */
+    int            audio_fail_reported = 0;
+    enum AVCodecID audio_seen_codec    = AV_CODEC_ID_NONE;
     stop_video_playback();
 
     prospero_playback_finished = 0;
@@ -6694,6 +6699,9 @@ int start_video_playback(const char *path) {
             par->codec_type ==
             AVMEDIA_TYPE_AUDIO
         ) {
+            /* Remember that this file HAS audio, and what it is, so the
+             * summary at the end can tell the truth about it. */
+            audio_seen_codec = par->codec_id;
             /*
              * Open only the first audio stream that FFmpeg and the
              * PS5 output path can initialize successfully.
@@ -6731,6 +6739,7 @@ int start_video_playback(const char *path) {
                     "decoder unavailable; video may continue"
                 );
 
+                audio_fail_reported = 1;
                 continue;
             }
 
@@ -6773,6 +6782,7 @@ int start_video_playback(const char *path) {
                     "decoder could not initialize"
                 );
 
+                audio_fail_reported = 1;
                 continue;
             }
 
@@ -6829,6 +6839,7 @@ int start_video_playback(const char *path) {
                     "PS5 audio output could not start"
                 );
 
+                audio_fail_reported = 1;
                 continue;
             }
 
@@ -7204,13 +7215,30 @@ int start_video_playback(const char *path) {
         return 0;
     } else if (audio_stream_index < 0 && !g_4k_suppress_audio) {
         /*
-         * Common: E-AC3/DDP/Atmos/DTS with FFmpeg built without those decoders.
-         * PS5 homebrew libavcodec currently has AAC/MP3/PCM, not eac3.
+         * This used to read "Silent: need AAC/MP3 (E-AC3/DDP unsupported)"
+         * unconditionally, and its comment claimed libavcodec here had only
+         * AAC/MP3/PCM. Both were false: the build enables eac3, ac3, dca,
+         * truehd, flac, opus and alac, and all of them link into the ELF.
+         *
+         * Worse, it fired *after* whichever specific failure actually
+         * occurred - and with a single toast slot it overwrote it. Every
+         * audio problem, whatever its cause, ended up blamed on E-AC3.
+         *
+         * So: say nothing when a specific reason was already reported, and
+         * otherwise name the codec actually found rather than guessing.
          */
-        toast(
-            "AUDIO",
-            "Silent: need AAC/MP3 (E-AC3/DDP unsupported)"
-        );
+        if (!audio_fail_reported) {
+            if (audio_seen_codec != AV_CODEC_ID_NONE) {
+                prospero_codec_error(
+                    "AUDIO",
+                    audio_seen_codec,
+                    "track found but could not be opened"
+                );
+            } else {
+                toast("AUDIO", "This file has no audio track");
+            }
+        }
+
         pp_stage_bc_checkpoint("008B_NO_AUDIO", "no usable audio decoder/stream");
     }
 
