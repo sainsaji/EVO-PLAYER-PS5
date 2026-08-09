@@ -94,6 +94,23 @@ static pp_playback g_pp_pb;
 static uint32_t g_vo_w = 1920;
 static uint32_t g_vo_h = 1080;
 static pp_video_backend g_pp_backend = PP_BACKEND_1080_STANDARD;
+
+/*
+ * What the video path was configured with before a 1080-only overlay (Media
+ * Info) took the surface away from it.
+ *
+ * Media Info is drawn at 1080 and would otherwise paint into the top-left
+ * corner of a 4K plane, so entering it forces the VO back to 1080 standard.
+ * Leaving it used to restore nothing: the decoder carried on producing 4K
+ * frames into a presentation path that no longer matched, so video froze
+ * while audio - a separate thread on its own port - kept playing. Pausing
+ * first happened to mask it, because resume re-established presentation.
+ */
+static pp_video_backend g_vo_saved_backend;
+static uint32_t         g_vo_saved_w, g_vo_saved_h, g_vo_saved_bufs;
+static uint32_t         g_vo_saved_out_w, g_vo_saved_out_h;
+static int              g_vo_saved_diag, g_vo_saved_sup_audio, g_vo_saved_sup_ui;
+static int              g_vo_saved_valid;
 static int g_pp_vo_ready = 0;
 /* Progressive 4K product diag (G-H). Set when gated 4K session opens. */
 static int g_4k_diag_active = 0;
@@ -5107,6 +5124,12 @@ static void pp_p10_scratch_free(void);
 #endif
 
 void stop_video_playback(void) {
+    /* Any saved 4K surface belongs to the playback that is ending. Leaving it
+     * set would restore a dead configuration the next time Media Info closes. */
+#if PP_BACKEND_ENABLED
+    g_vo_saved_valid = 0;
+#endif
+
     save_resume_position();
     player_paused = 0;
 
@@ -16385,10 +16408,25 @@ int main(void) {
             }
 
             if (pressed & PS5_PAD_BUTTON_SQUARE && screen == 2) {
-                /* Media Info is 1080 UI — leave 4K V8 surface first */
+                /* Media Info is 1080 UI - leave the 4K surface first, but
+                 * remember what to put back. */
 #if PP_BACKEND_ENABLED
                 if (g_vo_w != 1920u || g_vo_h != 1080u ||
                     g_pp_backend == PP_BACKEND_4K_V8_FUSED) {
+                    g_vo_saved_backend   = g_pp_backend;
+                    g_vo_saved_w         = g_vo_w;
+                    g_vo_saved_h         = g_vo_h;
+                    g_vo_saved_bufs      = g_pp_vo.buffer_count;
+                    g_vo_saved_out_w     = g_vo_w;
+                    g_vo_saved_out_h     = g_vo_h;
+                    g_vo_saved_diag      = g_4k_diag_active;
+                    g_vo_saved_sup_audio = g_4k_suppress_audio;
+                    g_vo_saved_sup_ui    = g_4k_suppress_ui;
+                    g_vo_saved_valid     = 1;
+
+                    g_4k_diag_active   = 0;
+                    g_4k_suppress_ui   = 0;
+
                     g_pp_backend = PP_BACKEND_1080_STANDARD;
                     pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
                     pp_product_request_vo(1920, 1080, 2,
@@ -16709,6 +16747,23 @@ int main(void) {
                 } else if (screen == SCREEN_DEVELOPER_TOOLS) {
                     screen = 0;
                 } else if (screen == SCREEN_MEDIA_INFO) {
+#if PP_BACKEND_ENABLED
+                    /* Put the video path back the way playback had it. */
+                    if (g_vo_saved_valid) {
+                        g_4k_diag_active    = g_vo_saved_diag;
+                        g_4k_suppress_audio = g_vo_saved_sup_audio;
+                        g_4k_suppress_ui    = g_vo_saved_sup_ui;
+
+                        g_pp_backend = g_vo_saved_backend;
+                        pp_playback_set_backend(&g_pp_pb, g_vo_saved_backend);
+                        pp_product_request_vo(g_vo_saved_w, g_vo_saved_h,
+                                              g_vo_saved_bufs,
+                                              g_vo_saved_backend,
+                                              g_vo_saved_out_w,
+                                              g_vo_saved_out_h);
+                        g_vo_saved_valid = 0;
+                    }
+#endif
                     screen = 2;
                 } else if (screen == 3) {
                     screen = 1;
