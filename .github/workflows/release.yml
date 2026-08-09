@@ -73,19 +73,19 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release \
-            bash -lc './scripts/build-evoplayer.sh'
+            bash -lc 'bash ./scripts/build-evoplayer.sh'
 
       - name: Build the sample suite
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release \
-            bash -lc './scripts/build.sh'
+            bash -lc 'bash ./scripts/build.sh'
 
       - name: Package installable homebrew bundle
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release \
-            bash -lc './scripts/package-pkg.sh --format homebrew \
+            bash -lc 'bash ./scripts/package-pkg.sh --format homebrew \
                         --title "EVO Player" --name EVOPlayer \
                         output/elf/EVOPlayer.elf'
 
