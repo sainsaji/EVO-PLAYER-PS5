@@ -186,10 +186,15 @@ nc -z -w 3 "${PS5_HOST}" "${WEBSRV_PORT}" 2>/dev/null \
   || warn "websrv is not on ${WEBSRV_PORT} - you will not be able to launch it"
 
 # Build the bundle websrv expects: eboot.elf + sce_sys/icon0.png.
+#
+# package-pkg.sh derives the bundle DIRECTORY from the ELF basename, while
+# --title only sets the display name. So when --name overrides the on-console
+# directory, those two differ and the bundle must be looked up by the ELF
+# basename, not by NAME.
 begin "packaging ${NAME}"
 "${SCRIPTS_DIR}/package-pkg.sh" --format homebrew --title "${NAME}" "${ELF}" \
     >/dev/null || die "packaging failed"
-BUNDLE="${PKG_OUT}/${NAME}"
+BUNDLE="${PKG_OUT}/$(basename "${ELF}" .elf)"
 need_file "${BUNDLE}/eboot.elf"
 
 begin "uploading to ${HB_DIR}/${NAME}/"

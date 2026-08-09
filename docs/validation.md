@@ -95,7 +95,7 @@ Run 2026-08-09 against a jailbroken console with `ps5-payload-elfldr` on 9021.
 | 7 | AudioOut sine wave | **pass, audibly confirmed** | clean 440 Hz, both channels, no clicks or stutter |
 | 8 | GNM submits allowed | **pass** | `sceGnmAreSubmitsAllowed() → 1`; GnmDriver mapped at `0x8002a0000` |
 | 9 | Native decoder modules reachable | **pass** | `libSceAvPlayer` loaded, all 6 entry points resolved by NID — see [native-media-research.md](native-media-research.md) |
-| 10 | ProsperoPlayer baseline plays media | not yet run | deploy `PS5MediaPlayerPRO.elf` and confirm **existing** functionality before any changes |
+| 10 | ProsperoPlayer baseline plays media | **pass** | installed as homebrew (`ProsperoPlayer_baseline`); video and audio play from USB. Two defects found, both traced to upstream source — see [baseline-defects.md](baseline-defects.md) |
 
 All output confirmed on the panel and through the speakers, not merely
 reported as successful by the API.

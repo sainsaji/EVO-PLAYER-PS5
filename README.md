@@ -612,7 +612,7 @@ Hardware-verified on firmware 12.70:
 - [x] AudioOut plays (48 kHz stereo S16)
 - [x] GPU submits allowed (`sceGnmAreSubmitsAllowed() -> 1`)
 - [x] `libSceAvPlayer` entry points resolved by NID
-- [ ] ProsperoPlayer baseline playback confirmed on console
+- [x] ProsperoPlayer baseline playback confirmed on console
 
 Track results in [docs/validation.md](docs/validation.md).
 
@@ -625,8 +625,9 @@ Track results in [docs/validation.md](docs/validation.md).
 3. ✅ VideoOut / AudioOut on hardware
 4. ✅ FFmpeg 7.0.1, minimal + full profiles
 5. ✅ ProsperoPlayer baseline builds
-6. ⬜ Confirm baseline playback on hardware
-7. ⬜ Fork to `projects/evoplayer/`, fix E-AC3/DTS/FLAC/Opus
+6. ✅ Confirm baseline playback on hardware — works; two defects found
+7. ⬜ Fork to `projects/evoplayer/`: **surround output** and **flip sync**
+   (see [docs/baseline-defects.md](docs/baseline-defects.md))
 8. ⬜ GPU YUV renderer (SDL2 + mesa)
 9. ⬜ 4K SDR, HEVC 10-bit
 10. 🔬 Hardware decoder research — `libSceAvPlayer` reachable, `libSceVdecCore` export names still unknown
