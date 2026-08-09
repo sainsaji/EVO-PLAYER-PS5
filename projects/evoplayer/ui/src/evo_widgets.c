@@ -447,6 +447,81 @@ void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
     evo_widget_progress_a(fb, x, y, w, h, permille, 255);
 }
 
+/* ---- toast --------------------------------------------------------------- */
+
+void evo_widget_toast(uint32_t *fb, const evo_toast *t)
+{
+    const evo_theme *th = evo_theme_current();
+    uint32_t accent;
+    int      icon;
+    int      x, y, title_y, msg_y;
+    int      a;
+
+    if (!t || t->alpha <= 0) return;
+
+    a = t->alpha > 255 ? 255 : t->alpha;
+
+    switch (t->kind) {
+        case EVO_TOAST_ERROR: accent = th->danger;     icon = EVO_IC_ABOUT;   break;
+        case EVO_TOAST_OK:    accent = th->accent_alt; icon = EVO_IC_RESUME;  break;
+        default:              accent = th->accent;     icon = EVO_IC_ABOUT;   break;
+    }
+
+    x = EVO_SCREEN_W - EVO_TOAST_W - EVO_TOAST_MARGIN + t->slide;
+    y = EVO_TOAST_Y;
+
+    /*
+     * Card first, then an accent rail down the left edge - the same vocabulary
+     * a selected row uses, so a toast reads as part of the same system rather
+     * than as a floating notification borrowed from somewhere else.
+     *
+     * The whole thing is drawn at the caller's alpha, including the shadow;
+     * fading only the fill left a hard-edged shadow hanging in the air for the
+     * last frames of the dismissal.
+     */
+    evo_ui_round_rect(fb, x, y, EVO_TOAST_W, EVO_TOAST_H, th->radius + 6,
+                      with_alpha(th->surface,     (a * 245) / 255),
+                      with_alpha(th->surface_alt, (a * 245) / 255),
+                      with_alpha(accent,          (a * 210) / 255),
+                      th->border_px + 1,
+                      with_alpha(th->shadow, (a * ((th->shadow >> 24) & 0xFF))
+                                             / 255),
+                      th->shadow_px);
+
+    evo_ui_round_rect(fb, x + EVO_TOAST_PAD, y + 26,
+                      EVO_TOAST_RAIL_W, EVO_TOAST_H - 52, 2,
+                      with_alpha(accent, a), with_alpha(accent, a),
+                      with_alpha(accent, 0), 0,
+                      with_alpha(th->shadow, 0), 0);
+
+    evo_icon_tinted(fb, x + EVO_TOAST_PAD + 22,
+                    y + (EVO_TOAST_H - EVO_RAIL_ICON) / 2,
+                    icon, with_alpha(accent, a));
+
+    {
+        const int tx = x + EVO_TOAST_PAD + 22 + EVO_RAIL_ICON + 16;
+        const int tw = EVO_TOAST_W - (tx - x) - EVO_TOAST_PAD;
+
+        if (t->message && *t->message) {
+            evo_text_y_stacked(y, EVO_TOAST_H, EVO_FACE_SUB, EVO_FACE_SMALL,
+                               10, &title_y, &msg_y);
+        } else {
+            title_y = evo_text_y_centred(y, EVO_TOAST_H, EVO_FACE_SUB);
+            msg_y   = 0;
+        }
+
+        /* Ellipsised by measurement. The old toast cut the message at a
+         * hardcoded 54 characters and appended three dots, which truncated
+         * short-glyph strings far too early and long-glyph ones too late. */
+        evo_text_fit(fb, tx, title_y, tw, t->title,
+                     with_alpha(th->text_primary, a), EVO_FACE_SUB);
+
+        if (t->message && *t->message)
+            evo_text_fit(fb, tx, msg_y, tw, t->message,
+                         with_alpha(th->text_secondary, a), EVO_FACE_SMALL);
+    }
+}
+
 void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
                       const char *title, const char *hint, int icon)
 {

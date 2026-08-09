@@ -58,6 +58,7 @@ static const evo_theme k_builtin[] = {
         .accent          = EVO_RGBA(0x00, 0xCD, 0xFF, 255),
         .accent_soft     = EVO_RGBA(0x00, 0xA8, 0xFF, 60),
         .accent_alt      = EVO_RGBA(0x7A, 0x5C, 0xFF, 255),
+        .danger          = EVO_RGBA(0xFF, 0x5C, 0x5C, 255),
         .text_primary    = EVO_RGBA(0xEC, 0xF3, 0xFF, 255),
         .text_secondary  = EVO_RGBA(0x9F, 0xB2, 0xCC, 255),
         .text_muted      = EVO_RGBA(0x5E, 0x71, 0x8C, 255),
@@ -79,6 +80,7 @@ static const evo_theme k_builtin[] = {
         .accent          = EVO_RGBA(0xF2, 0xF2, 0xF5, 255),
         .accent_soft     = EVO_RGBA(0xFF, 0xFF, 0xFF, 40),
         .accent_alt      = EVO_RGBA(0xFF, 0x6B, 0x35, 255),
+        .danger          = EVO_RGBA(0xFF, 0x4F, 0x4F, 255),
         .text_primary    = EVO_RGBA(0xF5, 0xF5, 0xF7, 255),
         .text_secondary  = EVO_RGBA(0xA0, 0xA0, 0xA8, 255),
         .text_muted      = EVO_RGBA(0x66, 0x66, 0x6E, 255),
@@ -100,6 +102,7 @@ static const evo_theme k_builtin[] = {
         .accent          = EVO_RGBA(0xFF, 0xA5, 0x28, 255),
         .accent_soft     = EVO_RGBA(0xFF, 0x7A, 0x18, 60),
         .accent_alt      = EVO_RGBA(0xFF, 0x4D, 0x4D, 255),
+        .danger          = EVO_RGBA(0xFF, 0x6E, 0x4A, 255),
         .text_primary    = EVO_RGBA(0xFF, 0xF3, 0xE6, 255),
         .text_secondary  = EVO_RGBA(0xC7, 0xA9, 0x8E, 255),
         .text_muted      = EVO_RGBA(0x8A, 0x6E, 0x56, 255),
@@ -121,6 +124,7 @@ static const evo_theme k_builtin[] = {
         .accent          = EVO_RGBA(0x3D, 0xF5, 0xC0, 255),
         .accent_soft     = EVO_RGBA(0x24, 0xC9, 0xA0, 60),
         .accent_alt      = EVO_RGBA(0x9B, 0x8C, 0xFF, 255),
+        .danger          = EVO_RGBA(0xFF, 0x6B, 0x7A, 255),
         .text_primary    = EVO_RGBA(0xE8, 0xFF, 0xF8, 255),
         .text_secondary  = EVO_RGBA(0x93, 0xC3, 0xB8, 255),
         .text_muted      = EVO_RGBA(0x56, 0x82, 0x7A, 255),
@@ -240,6 +244,7 @@ static int load_theme_file(const char *path, evo_theme *t)
         COL("accent",          accent)
         COL("accent_soft",     accent_soft)
         COL("accent_alt",      accent_alt)
+        COL("danger",          danger)
         COL("text_primary",    text_primary)
         COL("text_secondary",  text_secondary)
         COL("text_muted",      text_muted)

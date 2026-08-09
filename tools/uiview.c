@@ -396,12 +396,22 @@ static void render_list(const char *which, int sel, int rail_focused,
         static const char *t[] = { "PLAYBACK PROFILE","RESUME PLAYBACK",
             "DEFAULT ASPECT RATIO","AUTO-DETECT SUBTITLES","DEVELOPER MODE",
             "FOLDERS FIRST","THEME","REMOVE HOME TILE" };
-        static const char *d[] = { "Performance","ON","FIT","ON","OFF","ON",
-            "CARBON  -  2 OF 4","REMOVES MEDIA TILE" };
+        static char theme_val[64];
+        static const char *d[8];
         static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_RESUME,EVO_IC_ASPECT,
             EVO_IC_SUBTITLES,EVO_IC_TOOLS,EVO_IC_FOLDER,EVO_IC_PALETTE,EVO_IC_TRASH };
         static uint32_t sw[3];
         const evo_theme *cur = evo_theme_current();
+
+        /* Report the theme actually being rendered. A hardcoded "CARBON"
+         * here rendered under MIDNIGHT, which makes the fixture lie about
+         * the one row whose job is to name the theme. */
+        snprintf(theme_val, sizeof(theme_val), "%s  -  %d OF %d",
+                 evo_theme_name(evo_theme_index()),
+                 evo_theme_index() + 1, evo_theme_count());
+
+        d[0]="Performance"; d[1]="ON"; d[2]="FIT"; d[3]="ON";
+        d[4]="OFF"; d[5]="ON"; d[6]=theme_val; d[7]="REMOVES MEDIA TILE";
 
         n = 8;
         for (int i = 0; i < n; i++) {
@@ -586,9 +596,37 @@ static void render_mediainfo(void)
     evo_screen_info(g_fb, &m);
 }
 
+/* Toasts are an overlay, so they are rendered on top of a real screen -
+ * against an empty buffer you cannot tell whether the panel is opaque enough
+ * to read over content, which is the only thing worth checking. */
+static void render_toast(evo_toast_kind kind)
+{
+    evo_toast t;
+
+    render_list("settings", 6, 0, 1, 0);
+
+    memset(&t, 0, sizeof(t));
+    t.alpha = 255;
+    t.slide = 0;
+    t.kind  = kind;
+
+    switch (kind) {
+        case EVO_TOAST_ERROR:
+            t.title = "PLAYBACK FAILED"; t.message = "No decoder for this stream"; break;
+        case EVO_TOAST_OK:
+            t.title = "FAVORITES"; t.message = "Added leftbehind-bts"; break;
+        default:
+            t.title = "THEME";
+            t.message = evo_theme_name(evo_theme_index()); break;
+    }
+
+    evo_widget_toast(g_fb, &t);
+}
+
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
-                                 "resume","finished","mediainfo", NULL };
+                                 "resume","finished","mediainfo",
+                                 "toast","toastok","toasterror", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
                        int empty, int row)
@@ -600,6 +638,9 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "resume"))    render_resume();
     else if (!strcmp(screen, "finished"))  render_finished();
     else if (!strcmp(screen, "mediainfo")) render_mediainfo();
+    else if (!strcmp(screen, "toast"))      render_toast(EVO_TOAST_INFO);
+    else if (!strcmp(screen, "toastok"))    render_toast(EVO_TOAST_OK);
+    else if (!strcmp(screen, "toasterror")) render_toast(EVO_TOAST_ERROR);
     else                                   render_list(screen, sel, rail, rail_sel, empty);
 }
 

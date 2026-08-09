@@ -150,6 +150,30 @@ void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
 void evo_widget_progress_a(uint32_t *fb, int x, int y, int w, int h,
                            int permille, int alpha);
 
+/* ---- toast --------------------------------------------------------------- */
+
+typedef enum {
+    EVO_TOAST_INFO = 0,   /* a value changed, something was saved */
+    EVO_TOAST_OK,         /* an action succeeded */
+    EVO_TOAST_ERROR       /* an action failed */
+} evo_toast_kind;
+
+typedef struct evo_toast {
+    const char    *title;
+    const char    *message;
+    evo_toast_kind kind;
+
+    int alpha;   /* 0..255, the caller owns the fade */
+    int slide;   /* px still to travel on the way in */
+} evo_toast;
+
+/*
+ * The transient panel in the bottom-right. Every colour comes from the theme
+ * - the previous one was built from eight hardcoded literals and stayed cyan
+ * under CARBON, EMBER and AURORA.
+ */
+void evo_widget_toast(uint32_t *fb, const evo_toast *t);
+
 /* Centred "nothing here" state, with a reason and a suggestion. */
 void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
                       const char *title, const char *hint, int icon);

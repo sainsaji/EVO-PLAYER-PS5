@@ -51,6 +51,13 @@ typedef struct evo_theme {
     uint32_t accent;         /* primary accent: icons, rails, highlights  */
     uint32_t accent_soft;    /* the same accent as a diffuse glow         */
     uint32_t accent_alt;     /* secondary accent, used sparingly          */
+    /*
+     * Failure. Deliberately its own token rather than a tint of the accent:
+     * a theme whose accent is already red would produce an error colour
+     * indistinguishable from its normal one, and "something went wrong" is
+     * the one message that must never be ambiguous.
+     */
+    uint32_t danger;
 
     /* ---- text ---------------------------------------------------------- */
     uint32_t text_primary;   /* titles, row labels                        */

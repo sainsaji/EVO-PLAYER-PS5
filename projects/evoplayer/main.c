@@ -15214,162 +15214,49 @@ int scePadOpen(int,int,int,void *);
 
 /* PROSPERO_TOAST_RENDERER_START */
 
-static void draw_prospero_toast(
-    uint32_t *fb
-) {
-    if (!prospero_toast_active) {
-        return;
-    }
-
-    long long elapsed =
-        now_ms() - prospero_toast_started_ms;
-
+static void draw_prospero_toast(uint32_t *fb)
+{
+    /*
+     * Timing and state live here; every pixel is evo_widget_toast's.
+     *
+     * The old renderer built the panel out of eight hardcoded literals - a
+     * cyan border, a near-black fill, pale blue text - so it stayed cyan
+     * under CARBON, EMBER and AURORA. It was the last thing on screen that
+     * ignored the theme.
+     */
     const int hold_ms = 2200;
     const int fade_ms = 360;
-    const int total_ms =
-        hold_ms + fade_ms;
+    const int slide_ms = 180;
+    const int slide_px = 90;
 
-    if (elapsed >= total_ms) {
+    long long elapsed;
+    evo_toast t;
+
+    if (!prospero_toast_active) return;
+
+    elapsed = now_ms() - prospero_toast_started_ms;
+
+    if (elapsed >= hold_ms + fade_ms) {
         prospero_toast_active = 0;
         return;
     }
 
-    int alpha = 255;
+    memset(&t, 0, sizeof(t));
+    t.title   = prospero_toast_title;
+    t.message = prospero_toast_message;
+    t.kind    = (prospero_toast_kind == 2) ? EVO_TOAST_ERROR
+                                           : EVO_TOAST_INFO;
 
-    if (elapsed > hold_ms) {
-        alpha =
-            255 -
-            (int)(
-                (elapsed - hold_ms) *
-                255 /
-                fade_ms
-            );
+    t.alpha = (elapsed > hold_ms)
+        ? 255 - (int)((elapsed - hold_ms) * 255 / fade_ms)
+        : 255;
+    if (t.alpha < 0) t.alpha = 0;
 
-        if (alpha < 0) {
-            alpha = 0;
-        }
-    }
+    t.slide = (elapsed < slide_ms)
+        ? slide_px - (int)(elapsed * slide_px / slide_ms)
+        : 0;
 
-    int enter_offset = 0;
-
-    if (elapsed < 180) {
-        enter_offset =
-            90 -
-            (int)(elapsed * 90 / 180);
-    }
-
-    int panel_w = 530;
-    int panel_h = 132;
-    int panel_x =
-        1920 - panel_w - 58 + enter_offset;
-    int panel_y = 770;
-
-    uint32_t border =
-        prospero_toast_kind == 2
-            ? RR_BGRA(
-                255,
-                105,
-                105,
-                alpha * 225 / 255
-            )
-            : RR_BGRA(
-                0,
-                205,
-                255,
-                alpha * 205 / 255
-            );
-
-    uint32_t glow =
-        prospero_toast_kind == 2
-            ? RR_BGRA(
-                255,
-                60,
-                80,
-                alpha * 55 / 255
-            )
-            : RR_BGRA(
-                0,
-                135,
-                255,
-                alpha * 55 / 255
-            );
-
-    ui_round_asset(
-        fb,
-        panel_x,
-        panel_y,
-        panel_w,
-        panel_h,
-        24,
-        RR_BGRA(
-            1,
-            9,
-            22,
-            alpha * 230 / 255
-        ),
-        border,
-        glow
-    );
-
-    rr_fill(
-        fb,
-        panel_x + 28,
-        panel_y + 26,
-        5,
-        panel_h - 52,
-        border
-    );
-
-    rr_text(
-        fb,
-        panel_x + 58,
-        panel_y + 24,
-        prospero_toast_title,
-        prospero_toast_kind == 2
-            ? RR_BGRA(
-                255,
-                185,
-                185,
-                alpha * 240 / 255
-            )
-            : RR_BGRA(
-                225,
-                245,
-                255,
-                alpha * 240 / 255
-            ),
-        1
-    );
-
-    char message[180];
-
-    snprintf(
-        message,
-        sizeof(message),
-        "%s",
-        prospero_toast_message
-    );
-
-    if (strlen(message) > 54) {
-        message[51] = '.';
-        message[52] = '.';
-        message[53] = '.';
-        message[54] = 0;
-    }
-
-    rr_text(
-        fb,
-        panel_x + 58,
-        panel_y + 72,
-        message,
-        RR_BGRA(
-            135,
-            200,
-            228,
-            alpha * 220 / 255
-        ),
-        0
-    );
+    evo_widget_toast(fb, &t);
 }
 
 /* PROSPERO_TOAST_RENDERER_END */

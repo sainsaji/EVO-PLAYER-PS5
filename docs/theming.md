@@ -49,6 +49,11 @@ Colours are `#RRGGBB` or `#RRGGBBAA`. Alpha defaults to `FF` when omitted, and
 **alpha is meaningful** — `shadow` and `scrim` rely on it, and an opaque
 `shadow` will paint a hard black slab under every card rather than a soft one.
 
+`danger` is its own key rather than a tint of `accent` on purpose: a theme
+whose accent is already red would otherwise produce an error colour
+indistinguishable from its normal one, and "something went wrong" is the one
+message that must never be ambiguous.
+
 **Any key you leave out inherits from `MIDNIGHT`.** A three-line file is a
 valid theme. You do not need to specify all 23 keys to change the accent.
 
@@ -65,6 +70,7 @@ valid theme. You do not need to specify all 23 keys to change the accent.
 | `accent` | Icons, rails, selected values, header marks |
 | `accent_soft` | The accent as a diffuse background bloom |
 | `accent_alt` | Secondary accent, used sparingly |
+| `danger` | Failure. Error toasts, and anything that must read as "this went wrong". |
 | `text_primary` | Row titles |
 | `text_secondary` | Row descriptions |
 | `text_muted` | Footers, hints, disabled state |

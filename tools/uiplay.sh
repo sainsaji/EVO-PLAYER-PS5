@@ -90,6 +90,11 @@ render "resume_s0"    resume
 render "finished_s0"  finished
 render "mediainfo_s0" mediainfo
 
+# -- toasts: an overlay, rendered over a real screen ---------------------------
+render "toast_s0"       toast
+render "toastok_s0"     toastok
+render "toasterror_s0"  toasterror
+
 # -- empty states -------------------------------------------------------------
 render "recent_empty"    recent    --empty
 render "favorites_empty" favorites --empty
