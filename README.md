@@ -395,6 +395,35 @@ terminal and the debugger all see the cross toolchain.
 
 ## 16. Troubleshooting
 
+**`docker compose up` seems to do nothing** — it is the wrong command here, but
+harmless. `up` is for long-running services; this container is a *dev shell*.
+It starts `bash -l` with nothing attached, so it just sits there until you
+Ctrl+C. Use one of these instead:
+
+```powershell
+docker compose run --rm ps5-dev bash     # interactive shell
+docker compose run --rm ps5-dev ./scripts/build.sh
+```
+
+If you already ran `up`, clean up the stopped container with
+`docker compose down`.
+
+**`volume "evoplayer_..." already exists but was not created by Docker
+Compose`** — the volume was created by a bare `docker run -v ...` and lacks
+Compose's ownership labels. Harmless, but to silence it, delete the volume and
+let Compose recreate it:
+
+```powershell
+docker compose down
+docker volume rm evoplayer_ffmpeg_build
+docker compose run --rm ps5-dev bash -lc "true"
+```
+
+Safe for `evoplayer_ffmpeg_build` and `evoplayer_ccache` — both are pure build
+caches, and FFmpeg sources live on the bind mount in `third_party/ffmpeg/`.
+Deleting `evoplayer_ps5_sdk` also resets any custom FFmpeg or generated SCE
+stubs you installed into the sysroot back to the pinned image defaults.
+
 **`PS5_PAYLOAD_SDK is undefined`** — you are outside the container, or not in a
 login shell. Use `./scripts/shell.sh`, or `source
 /opt/ps5-payload-sdk/toolchain/prospero.sh`.

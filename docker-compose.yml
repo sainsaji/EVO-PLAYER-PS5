@@ -4,6 +4,11 @@
 #   docker compose build
 #   docker compose run --rm ps5-dev bash
 #
+# Use `run`, not `up`. This is a development shell, not a long-running
+# service: `docker compose up` starts `bash -l` with nothing attached, so it
+# appears to hang until you Ctrl+C. Harmless, but not what you want. Clean up
+# after an accidental `up` with `docker compose down`.
+#
 # NETWORKING (Docker Desktop / Windows) - read docs/networking.md
 #   This uses the DEFAULT bridge network on purpose.
 #     * network_mode: host does NOT behave on Windows the way it does on
