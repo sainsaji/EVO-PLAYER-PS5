@@ -69,6 +69,16 @@ MAKE_ARGS=("ELF=${ELF_NAME}"
 begin "building EVO Player${STAGE:+ (stage ${STAGE})}"
 BUILD_LOG="${LOG_OUT}/evoplayer-$(date -u +%Y%m%dT%H%M%SZ).log"
 
+# Force a relink every time.
+#
+# Upstream's rule is `$(ELF): main.c $(PP_SRCS)` - it tracks sources but not
+# CFLAGS and not headers. Change a -D flag or a pp/include header and make
+# reports "up to date", leaving the previous binary in place. That silently
+# cost a debugging cycle: a build with a flag change was installed, launched,
+# and drew the wrong conclusion because the ELF had never been rebuilt.
+# A full relink of one translation unit is a few seconds; correctness wins.
+rm -f "${DEST}/${ELF_NAME}"
+
 if ! make -C "${DEST}" "${MAKE_ARGS[@]}" > "${BUILD_LOG}" 2>&1; then
     echo ""
     echo "--- last 40 lines ---"

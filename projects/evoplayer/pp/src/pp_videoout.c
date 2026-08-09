@@ -73,15 +73,34 @@ static uint64_t now_us(void)
  * suspended app - the pipeline recovers instead of deadlocking. It should
  * essentially never fire; stats.retire_timeouts counts it if it does.
  */
+/* Set to 0 to fall back to upstream's time-based retirement (for bisecting). */
+#ifndef EVO_FLIP_SYNC
+#define EVO_FLIP_SYNC 1
+#endif
+
 static void retire_old_inflight(pp_videoout *vo)
 {
+    /* Over-sized backing store, deliberately.
+     *
+     * The exact size of the flip-status struct is not published anywhere we
+     * can verify. If the real one is larger than PP_VideoOutFlipStatus, the
+     * system would write past a bare struct and smash the stack. Giving it a
+     * 256-byte landing area costs nothing and removes that whole class of
+     * failure; we only read the leading fields we have declared. */
+    union {
+        PP_VideoOutFlipStatus s;
+        unsigned char         pad[256];
+    } u;
     PP_VideoOutFlipStatus st;
     uint32_t i;
     uint64_t t = now_us();
-    int have_status;
+    int have_status = 0;
 
-    memset(&st, 0, sizeof(st));
-    have_status = (sceVideoOutGetFlipStatus(vo->handle, &st) == 0);
+    memset(&u, 0, sizeof(u));
+#if EVO_FLIP_SYNC
+    have_status = (sceVideoOutGetFlipStatus(vo->handle, &u.s) == 0);
+#endif
+    st = u.s;
 
     for (i = 0; i < vo->buffer_count; i++) {
         if (vo->state[i] != PP_BUF_IN_FLIGHT)
