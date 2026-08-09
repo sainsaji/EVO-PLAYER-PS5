@@ -120,3 +120,12 @@ output/uiview/
 
 # Host UI walkthrough (tools/uiplay.sh)
 output/uiplay/
+
+# Media dropped into samples/ for testing - including partial downloads.
+# samples/*.jpg and friends were already ignored; these are not images.
+samples/**/*.mkv
+samples/**/*.mp4
+samples/**/*.vob
+samples/**/*.ifo
+samples/**/*.bup
+samples/**/*.fdmdownload
