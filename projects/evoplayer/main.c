@@ -83,7 +83,6 @@ int sceAudioOutClose(int handle);
 int sceAudioOutOutput(int handle, const void *ptr);
 
 
-#define SCE_NOTIFICATION_LOCAL_USER_ID_SYSTEM 0xFE
 #define WIDTH 1920
 #define HEIGHT 1080
 
@@ -2377,7 +2376,6 @@ typedef struct PS5_DrawChunk {
     size_t src_end;
 } PS5_DrawChunk;
 
-int sceNotificationSend(int userId, bool isLogged, const char* payload);
 int sceKernelAllocateMainDirectMemory(size_t, size_t, int, intptr_t*);
 int sceKernelMapDirectMemory(void**, size_t, int, int, intptr_t, size_t);
 int sceKernelCreateEqueue(struct kevent **, const char *);
@@ -3557,31 +3555,19 @@ void toast(
         0;
 
     /*
-     * Keep native PS5 notifications only for technical messages
-     * while the Debug profile or overlay is active.
+     * EVO: the console's own notification banner is deliberately not used.
+     *
+     * This used to also fire sceNotificationSend() for technical messages,
+     * which put a PlayStation system toast over the app - the OS chrome, the
+     * OS position, the OS timing, none of it themeable and none of it
+     * dismissable by us. The player has its own toast, it is themed, and it
+     * is drawn inside our own frame; there is no reason for a second
+     * notification system that we do not control.
+     *
+     * Technical messages are still suppressed entirely unless the Debug
+     * profile or the overlay is on (see the early return above) - they now
+     * simply appear as ordinary in-app toasts when they do appear.
      */
-    if (technical && debug_enabled) {
-        char payload[2048];
-
-        snprintf(
-            payload,
-            sizeof(payload),
-            "{\"rawData\":{\"viewTemplateType\":\"InteractiveToastTemplateB\","
-            "\"channelType\":\"Downloads\",\"useCaseId\":\"IDC\","
-            "\"isImmediate\":true,\"priority\":100,"
-            "\"viewData\":{\"message\":{\"body\":\"%s\"},"
-            "\"subMessage\":{\"body\":\"%s\"}}},"
-            "\"localNotificationId\":\"516200\"}",
-            title,
-            msg
-        );
-
-        sceNotificationSend(
-            SCE_NOTIFICATION_LOCAL_USER_ID_SYSTEM,
-            true,
-            payload
-        );
-    }
 }
 
 
