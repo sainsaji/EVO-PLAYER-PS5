@@ -111,6 +111,12 @@ static uint32_t         g_vo_saved_w, g_vo_saved_h, g_vo_saved_bufs;
 static uint32_t         g_vo_saved_out_w, g_vo_saved_out_h;
 static int              g_vo_saved_diag, g_vo_saved_sup_audio, g_vo_saved_sup_ui;
 static int              g_vo_saved_valid;
+
+/*
+ * Set when a modal overlay paused the presentation clock on playback's
+ * behalf, so it is only resumed if it was not the user who paused.
+ */
+static int              g_osd_clock_paused;
 static int g_pp_vo_ready = 0;
 /* Progressive 4K product diag (G-H). Set when gated 4K session opens. */
 static int g_4k_diag_active = 0;
@@ -5127,7 +5133,8 @@ void stop_video_playback(void) {
     /* Any saved 4K surface belongs to the playback that is ending. Leaving it
      * set would restore a dead configuration the next time Media Info closes. */
 #if PP_BACKEND_ENABLED
-    g_vo_saved_valid = 0;
+    g_vo_saved_valid   = 0;
+    g_osd_clock_paused = 0;
 #endif
 
     save_resume_position();
@@ -16169,12 +16176,18 @@ static void evo_vo_trace(const char *tag)
     fprintf(f,
         "%8lld %-14s screen=%2d backend=%d vo=%ux%u pv=%ux%u ready=%d "
         "pending=%d k4live=%d pb_active=%d has_disp=%d paused=%d "
-        "diag=%d supUI=%d\n",
+        "diag=%d supUI=%d | conv=%llu pub=%llu decf=%d vpkt=%d gate=%d "
+        "dfps=%d rfps=%d aclk=%.2f vclk=%.2f\n",
         now_ms(), tag, screen, (int)g_pp_backend,
         g_vo_w, g_vo_h, g_pp_vo.width, g_pp_vo.height, g_pp_vo_ready,
         g_pending_vo_reconfig, pp_product_k4_live(screen),
         g_pp_pb.active, pp_playback_has_display(&g_pp_pb),
-        player_paused, g_4k_diag_active, g_4k_suppress_ui);
+        player_paused, g_4k_diag_active, g_4k_suppress_ui,
+        (unsigned long long)g_pp_pb.stats.frames_converted,
+        (unsigned long long)g_pp_pb.stats.frames_published,
+        dbg_video_frames, dbg_video_packets,
+        g_vo_decode_gate, perf_decode_fps, perf_render_fps,
+        (double)audio_clock_seconds, (double)video_clock_seconds);
 
     fclose(f);
 }
@@ -16469,6 +16482,24 @@ int main(void) {
                     pp_product_request_vo(1920, 1080, 2,
                                           PP_BACKEND_1080_STANDARD,
                                           WIDTH, HEIGHT);
+                }
+#endif
+                /*
+                 * Suspend the presentation clock for as long as the overlay
+                 * covers playback.
+                 *
+                 * Nothing is pushed to the display while Media Info is up,
+                 * but the clock's wall-time base keeps running. Coming back,
+                 * it believed every arriving frame was late by however long
+                 * you spent in there and dropped all of them - a frozen
+                 * picture with audio still playing. Pausing first happened to
+                 * work because resume re-bases the clock, which is the same
+                 * thing this does deliberately.
+                 */
+#if PP_BACKEND_ENABLED
+                if (!player_paused) {
+                    pp_playback_pause(&g_pp_pb);
+                    g_osd_clock_paused = 1;
                 }
 #endif
                 screen = SCREEN_MEDIA_INFO;
@@ -16784,6 +16815,13 @@ int main(void) {
                 } else if (screen == SCREEN_DEVELOPER_TOOLS) {
                     screen = 0;
                 } else if (screen == SCREEN_MEDIA_INFO) {
+#if PP_BACKEND_ENABLED
+                    if (g_osd_clock_paused) {
+                        g_osd_clock_paused = 0;
+                        if (!player_paused)
+                            pp_playback_resume(&g_pp_pb);
+                    }
+#endif
 #if PP_BACKEND_ENABLED
                     /* Put the video path back the way playback had it. */
                     if (g_vo_saved_valid) {

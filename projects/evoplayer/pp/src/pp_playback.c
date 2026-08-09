@@ -225,6 +225,13 @@ static void note_convert(pp_playback *pb, uint64_t us)
     }
 }
 
+/*
+ * Late frames in a row before the presentation clock is assumed wrong and
+ * re-based. Comfortably more than a genuine catch-up needs (a few frames),
+ * comfortably less than a second at any frame rate.
+ */
+#define PP_LATE_DROP_RESYNC 20
+
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 {
     uint64_t t0, t1, cus;
@@ -358,7 +365,27 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
         } else if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) ==
                    PP_CLOCK_DROP) {
             pb->stats.frames_late_dropped++;
-            return 1;
+
+            /*
+             * Dropping late frames is how the clock catches up, and normally
+             * it does so within a handful of frames. A long unbroken run
+             * means the clock is not behind the video - it is wrong: its
+             * wall-time base advanced during a period when nothing was being
+             * pushed, so every frame now looks late and the picture freezes
+             * for good while audio carries on.
+             *
+             * Re-base on the frame in hand and let it through. Recovering one
+             * frame late is invisible; not recovering is a dead picture.
+             */
+            if (++pb->late_drop_streak < PP_LATE_DROP_RESYNC)
+                return 1;
+
+            pp_clock_reset(&pb->clock);
+            pp_clock_start(&pb->clock, src->pts_us);
+            pb->stats.clock_resets++;
+            pb->late_drop_streak = 0;
+        } else {
+            pb->late_drop_streak = 0;
         }
     }
 

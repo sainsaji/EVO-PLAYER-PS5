@@ -59,6 +59,15 @@ typedef struct pp_playback {
     int64_t seek_target_us;
     uint64_t seek_begin_ms;
 
+    /*
+     * Consecutive frames rejected as late by the presentation clock. If the
+     * clock's wall-time base ever runs on while frames are not being pushed -
+     * a modal overlay covering playback, a long stall - it comes back
+     * believing every frame is late and drops all of them, permanently. This
+     * counter lets that resolve itself. See pp_playback_push_frame().
+     */
+    int late_drop_streak;
+
     /* Product path */
     pp_video_backend backend;
     int force_v3_fallback; /* runtime emergency switch */
