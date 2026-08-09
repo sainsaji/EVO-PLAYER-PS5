@@ -1,0 +1,26 @@
+# EVO Player theme - PAPER
+# Shows that a theme need not be dark. Note that `shadow` and `scrim` carry
+# meaningful alpha - an opaque shadow paints a hard slab under every card.
+
+name = PAPER
+
+bg_top    = #E9EAEE
+bg_bottom = #CFD3DB
+scrim     = #0E121A3C
+
+surface         = #FFFFFFF0
+surface_alt     = #F1F3F7F0
+surface_sel     = #FFFFFFFF
+surface_sel_alt = #E8EDF7FF
+
+border     = #B9C0CC96
+border_sel = #1B6FD8C8
+shadow     = #34405828
+
+accent      = #1B6FD8
+accent_soft = #1B6FD82D
+accent_alt  = #C2410C
+
+text_primary   = #131922
+text_secondary = #47536A
+text_muted     = #808C9F

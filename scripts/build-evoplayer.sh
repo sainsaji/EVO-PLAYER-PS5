@@ -66,6 +66,12 @@ MAKE_ARGS=("ELF=${ELF_NAME}"
            "LIBS=${UPSTREAM_LIBS[*]} ${TRANSITIVE_LIBS[*]} ${SCE_LIBS[*]}")
 [[ -n "${STAGE}" ]] && MAKE_ARGS+=("STAGE=${STAGE}")
 
+# Development switches, e.g. EXTRA_CFLAGS="-DEVO_AUTOSHOT=4 -DEVO_START_SCREEN=10".
+# Going through the script rather than calling make directly matters: the LIBS
+# override above supplies transitive dependencies the project Makefile does not
+# list, so a bare `make` fails to link.
+[[ -n "${EXTRA_CFLAGS:-}" ]] && MAKE_ARGS+=("EXTRA_CFLAGS=${EXTRA_CFLAGS}")
+
 begin "building EVO Player${STAGE:+ (stage ${STAGE})}"
 BUILD_LOG="${LOG_OUT}/evoplayer-$(date -u +%Y%m%dT%H%M%SZ).log"
 

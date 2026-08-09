@@ -97,3 +97,9 @@ desktop.ini
 # -----------------------------------------------------------------------------
 .env
 .env.local
+
+# Third-party UI reference screenshots (Samsung Tizen, Xbox dashboard, etc).
+# Local design reference only - not ours to redistribute.
+samples/*.jpg
+samples/*.jpeg
+samples/*.png

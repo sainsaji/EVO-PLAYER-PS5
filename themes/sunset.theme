@@ -1,0 +1,25 @@
+# EVO Player theme - SUNSET
+# Copy to /mnt/usb0/evo_themes/ on the console.
+# Any key left out inherits from the built-in MIDNIGHT theme.
+
+name = SUNSET
+
+bg_top    = #1C0F1A
+bg_bottom = #0A0509
+
+surface         = #2A1622EB
+surface_alt     = #1D0F18EB
+surface_sel     = #43213AF5
+surface_sel_alt = #2C1526F5
+
+border     = #5A3350AA
+border_sel = #FF7A5CDC
+shadow     = #00000082
+
+accent      = #FF7A5C
+accent_soft = #FF4E7A3C
+accent_alt  = #FFC46B
+
+text_primary   = #FFEDE4
+text_secondary = #D2A99E
+text_muted     = #8E6459

@@ -13,7 +13,19 @@ ELF := PS5MediaPlayerPRO.elf
 # Default 4 after G-H stage ladder PASS (2026-07-21). Rollback: STAGE=0
 STAGE ?= 4
 
-CFLAGS := -Wall -g -O2 \
+# One version, one place. CI checks this file against the release tag, so
+# injecting it here keeps the startup toast, the menu header and the footer
+# from drifting apart - they were three separate literals, and two of them
+# still said 1.0 long after 0.0.1 shipped.
+EVO_VERSION := $(shell tr -d '[:space:]' < VERSION)
+
+# Development-only switches, e.g.
+#   make EXTRA_CFLAGS="-DEVO_AUTOSHOT=4 -DEVO_START_SCREEN=10"
+# Empty for shipping builds.
+EXTRA_CFLAGS ?=
+
+CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
+    -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -Ipp/include \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include/SDL2 \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include \
@@ -45,7 +57,9 @@ PP_SRCS := \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \
     pp/src/pp_playback.c \
-    pp/src/tile_copy.c
+    pp/src/tile_copy.c \
+    pp/src/evo_theme.c \
+    pp/src/evo_ui.c
 
 all: $(ELF)
 

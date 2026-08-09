@@ -102,12 +102,13 @@ def eval_shape(sh, px, py):
     return d
 
 
-def render(shapes):
-    """Rasterise a shape list to an RGBA byte list (ABGR packed later)."""
+def render(shapes, size=None):
+    """Rasterise a shape list to a coverage grid (packed to ABGR later)."""
+    size = SIZE if size is None else size
     px_out = []
-    for y in range(SIZE):
+    for y in range(size):
         row = []
-        for x in range(SIZE):
+        for x in range(size):
             fx, fy = x + 0.5, y + 0.5
             d = min(eval_shape(s, fx, fy) for s in shapes)
             cov = 0.5 - d               # 1px analytic edge
@@ -191,14 +192,167 @@ def icon_chevron():
     ]
 
 
+def icon_resume():
+    # Play triangle inside a ring. A first attempt added a "rewind" arrowhead
+    # breaking the ring; at 72px the head merged with the stroke and read as a
+    # rendering artefact rather than an arrow, so the ring is left closed.
+    return [
+        shape("circle", C, C, 26.0, stroke=STROKE),
+        shape("poly", [(C - 8, C - 13), (C + 13, C), (C - 8, C + 13)],
+              stroke=STROKE),
+    ]
+
+
+def icon_aspect():
+    # A frame with an inner frame - "which shape does the picture take".
+    return [
+        shape("rrect", C, C, 29.0, 20.0, 4.0, stroke=STROKE),
+        shape("rrect", C, C, 15.0, 11.0, 3.0, stroke=3.0),
+    ]
+
+
+def icon_subtitles():
+    # Screen with two caption lines along the bottom, the lower one shorter.
+    return [
+        shape("rrect", C, C, 29.0, 21.0, 5.0, stroke=STROKE),
+        shape("seg", C - 17, C + 5, C + 17, C + 5, half=2.6),
+        shape("seg", C - 17, C + 13, C + 5, C + 13, half=2.6),
+    ]
+
+
+def icon_palette():
+    # Painter's palette: outer ring plus three paint wells. Reads as "theme"
+    # at 72px far better than a half-filled circle, which looks like a bug.
+    shapes = [shape("circle", C, C, 26.0, stroke=STROKE)]
+    for i in range(3):
+        a = -math.pi / 2 + i * 2 * math.pi / 3
+        shapes.append(shape("circle",
+                            C + 13.0 * math.cos(a),
+                            C + 13.0 * math.sin(a),
+                            5.0))
+    return shapes
+
+
+def icon_folder():
+    # One continuous folder silhouette: back panel steps up on the left to
+    # form the tab, then the front panel spans the full width. Drawn as a
+    # single polygon so the tab is part of the outline instead of a stray
+    # line floating above the body, which is how the first version read.
+    return [
+        shape("poly", [
+            (10.0, 54.0),   # bottom-left
+            (10.0, 22.0),   # up the left edge
+            (28.0, 22.0),   # across the tab
+            (33.0, 29.0),   # tab shoulder
+            (62.0, 29.0),   # top of the front panel
+            (62.0, 54.0),   # down the right edge
+        ], stroke=STROKE),
+        shape("seg", 10.0, 29.0, 33.0, 29.0, half=2.0),   # panel divider
+    ]
+
+
+def icon_trash():
+    shapes = [
+        shape("rrect", C, 44.0, 17.0, 20.0, 4.0, stroke=STROKE),  # bin
+        shape("seg", C - 24, 22.0, C + 24, 22.0, half=2.8),       # lid
+        shape("seg", C - 7, 18.0, C + 7, 18.0, half=2.8),         # handle
+        shape("seg", C - 7, 18.0, C - 7, 22.0, half=2.8),
+        shape("seg", C + 7, 18.0, C + 7, 22.0, half=2.8),
+    ]
+    for dx in (-7, 0, 7):                                          # ribs
+        shapes.append(shape("seg", C + dx, 34.0, C + dx, 54.0, half=2.2))
+    return shapes
+
+
+# ---------------------------------------------------------------------------
+# Controller prompts.
+#
+# The originals (RR_CONTROL_*) are 48px two-tone bitmaps - cyan strokes over a
+# near-black disc, 103 distinct RGB values - so they cannot be recoloured by
+# tinting the alpha channel the way the monochrome icons can. Under a
+# greyscale theme they stayed stubbornly blue. Regenerated here as single-hue
+# SDF glyphs at the same 48px so they follow the theme like everything else.
+# ---------------------------------------------------------------------------
+CTRL = 48
+CC = CTRL / 2.0
+CTRL_STROKE = 3.4
+CTRL_RING = 20.0
+
+
+def ctrl_x():
+    d = 8.0
+    return [
+        shape("circle", CC, CC, CTRL_RING, stroke=CTRL_STROKE),
+        shape("seg", CC - d, CC - d, CC + d, CC + d, half=CTRL_STROKE / 2),
+        shape("seg", CC + d, CC - d, CC - d, CC + d, half=CTRL_STROKE / 2),
+    ]
+
+
+def ctrl_circle():
+    return [
+        shape("circle", CC, CC, CTRL_RING, stroke=CTRL_STROKE),
+        shape("circle", CC, CC, 9.5, stroke=CTRL_STROKE),
+    ]
+
+
+def ctrl_triangle():
+    return [
+        shape("circle", CC, CC, CTRL_RING, stroke=CTRL_STROKE),
+        shape("poly", [(CC, CC - 10.0), (CC + 9.5, CC + 7.0),
+                       (CC - 9.5, CC + 7.0)], stroke=CTRL_STROKE),
+    ]
+
+
+def ctrl_square():
+    return [
+        shape("circle", CC, CC, CTRL_RING, stroke=CTRL_STROKE),
+        shape("rrect", CC, CC, 8.5, 8.5, 1.5, stroke=CTRL_STROKE),
+    ]
+
+
+def ctrl_dpad():
+    a, b = 4.0, 13.0
+    return [
+        shape("rrect", CC, CC, a, b, 1.5, stroke=CTRL_STROKE),
+        shape("rrect", CC, CC, b, a, 1.5, stroke=CTRL_STROKE),
+    ]
+
+
+def ctrl_stick(side):
+    # Stick top seen from above, with a nudge arrow on the given side.
+    sx = 1.0 if side == "R" else -1.0
+    return [
+        shape("circle", CC, CC, CTRL_RING, stroke=CTRL_STROKE),
+        shape("circle", CC, CC, 7.0),
+        shape("seg", CC + sx * 11.0, CC, CC + sx * 17.0, CC,
+              half=CTRL_STROKE / 2),
+    ]
+
+
+# (macro prefix, shape function, pixel size)
 ICONS = [
-    ("EVO_ICON_BROWSE_USB", icon_usb),
-    ("EVO_ICON_RECENT_FILES", icon_clock),
-    ("EVO_ICON_FAVORITES", icon_star),
-    ("EVO_ICON_SETTINGS", icon_gear),
-    ("EVO_ICON_DEVELOPER_TOOLS", icon_terminal),
-    ("EVO_ICON_ABOUT_SUPPORT", icon_info),
-    ("EVO_ICON_CHEVRON", icon_chevron),
+    ("EVO_ICON_BROWSE_USB", icon_usb, SIZE),
+    ("EVO_ICON_RECENT_FILES", icon_clock, SIZE),
+    ("EVO_ICON_FAVORITES", icon_star, SIZE),
+    ("EVO_ICON_SETTINGS", icon_gear, SIZE),
+    ("EVO_ICON_DEVELOPER_TOOLS", icon_terminal, SIZE),
+    ("EVO_ICON_ABOUT_SUPPORT", icon_info, SIZE),
+    ("EVO_ICON_CHEVRON", icon_chevron, SIZE),
+    # Settings rows. Indices 7.. - keep appending, rr_icon() switches on these.
+    ("EVO_ICON_RESUME", icon_resume, SIZE),
+    ("EVO_ICON_ASPECT", icon_aspect, SIZE),
+    ("EVO_ICON_SUBTITLES", icon_subtitles, SIZE),
+    ("EVO_ICON_PALETTE", icon_palette, SIZE),
+    ("EVO_ICON_FOLDER", icon_folder, SIZE),
+    ("EVO_ICON_TRASH", icon_trash, SIZE),
+    # Controller prompts, 48px, same names as the RR_CONTROL_* they replace.
+    ("EVO_CTRL_X", ctrl_x, CTRL),
+    ("EVO_CTRL_CIRCLE", ctrl_circle, CTRL),
+    ("EVO_CTRL_TRIANGLE", ctrl_triangle, CTRL),
+    ("EVO_CTRL_SQUARE", ctrl_square, CTRL),
+    ("EVO_CTRL_DPAD", ctrl_dpad, CTRL),
+    ("EVO_CTRL_LEFT_STICK", lambda: ctrl_stick("L"), CTRL),
+    ("EVO_CTRL_RIGHT_STICK", lambda: ctrl_stick("R"), CTRL),
 ]
 
 
@@ -238,22 +392,23 @@ def main():
         "",
     ]
 
-    sheet = [[(6, 10, 20)] * (SIZE * len(ICONS)) for _ in range(SIZE)]
+    # Contact sheet: every icon in its own SIZE-wide cell, small ones centred.
+    bg = (6, 10, 20)
+    sheet = [[bg] * (SIZE * len(ICONS)) for _ in range(SIZE)]
 
-    for idx, (name, fn) in enumerate(ICONS):
-        cov = render(fn())
+    for idx, (name, fn, n) in enumerate(ICONS):
+        cov = render(fn(), n)
         r, g, b = CYAN
-        lines.append(f"#define {name}_W {SIZE}")
-        lines.append(f"#define {name}_H {SIZE}")
-        lines.append(f"static const unsigned int {name}[{SIZE*SIZE}]={{")
+        off = (SIZE - n) // 2
+        lines.append(f"#define {name}_W {n}")
+        lines.append(f"#define {name}_H {n}")
+        lines.append(f"static const unsigned int {name}[{n*n}]={{")
         flat = []
-        for y in range(SIZE):
-            for x in range(SIZE):
+        for y in range(n):
+            for x in range(n):
                 a = cov[y][x]
                 flat.append(f"0x{(a << 24) | (b << 16) | (g << 8) | r:08X}")
-                # preview: composite over the card fill colour
-                bg = (6, 10, 20)
-                sheet[y][idx * SIZE + x] = (
+                sheet[y + off][idx * SIZE + x + off] = (
                     (r * a + bg[0] * (255 - a)) // 255,
                     (g * a + bg[1] * (255 - a)) // 255,
                     (b * a + bg[2] * (255 - a)) // 255,

@@ -1,0 +1,26 @@
+# EVO Player theme - NORD
+# A three-key theme would also be valid; this one is filled in for reference.
+
+name = NORD
+
+bg_top    = #2E3440
+bg_bottom = #1B2028
+
+surface         = #3B4252EB
+surface_alt     = #333A48EB
+surface_sel     = #4C566AF5
+surface_sel_alt = #3E4757F5
+
+border     = #4C566AAA
+border_sel = #88C0D0DC
+shadow     = #00000078
+
+accent      = #88C0D0
+accent_soft = #5E81AC3C
+accent_alt  = #A3BE8C
+
+text_primary   = #ECEFF4
+text_secondary = #C0C8D4
+text_muted     = #7B8798
+
+radius = 10
