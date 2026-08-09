@@ -1,8 +1,46 @@
 # EVO Player
 
-A reproducible Docker development environment for **PS5 homebrew targeting
-firmware 12.70**, and the home of EVO Player — a media player forked from
-[ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer).
+**A media player for jailbroken PS5 (firmware 12.70), and the reproducible
+Docker environment that builds it.**
+
+Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) and
+licensed **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
+
+![EVO Player main menu](docs/images/main-menu.png)
+
+## What EVO Player adds over upstream
+
+| | Upstream | EVO Player |
+|---|---|---|
+| Surround | everything downmixed to stereo | **7.1 / 5.1 output**, stereo fallback |
+| Motion | tearing during camera movement | **flip-synchronised**, triple buffered |
+| Tile swizzle | per-pixel divides + doubles | **shifts and masks**, ~40% less blocking |
+| Menu cards | aliased bitmaps | **antialiased, drawn from SDF** |
+| Icons | aliased bitmaps | **generated vector icons** |
+| Browser | raw `readdir` order | **folders first, A–Z** (toggleable) |
+| Feedback | silent | **navigation sounds** |
+| Debugging | — | **screenshots** to USB (click a stick) |
+
+Every one of those was found and verified on real hardware — see
+[docs/validation.md](docs/validation.md) and
+[docs/baseline-defects.md](docs/baseline-defects.md).
+
+![icons](docs/images/icons.png)
+
+## Quick start
+
+```bash
+git clone https://github.com/sainsaji/EVO-PLAYER-PS5
+cd EVO-PLAYER-PS5
+echo "PS5_HOST=192.168.0.10" > .env      # your console's IP
+
+docker compose build                     # one-time, ~10 min
+docker compose run --rm ps5-dev ./scripts/install-homebrew.sh --setup
+docker compose run --rm ps5-dev ./scripts/build-evoplayer.sh --run
+```
+
+That builds the player, installs it to the console over FTP and launches it.
+Requires a jailbroken PS5 on 12.70 with `ps5-payload-elfldr` running.
 
 ```
 Windows  ->  VS Code  ->  Docker container  ->  Linux toolchain (clang-18)

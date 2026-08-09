@@ -1,0 +1,155 @@
+# =============================================================================
+# EVO Player release
+#
+# Builds the player in the same pinned Docker environment developers use, then
+# publishes the payload and an installable homebrew bundle.
+#
+# Triggered by pushing a tag:
+#     git tag v0.0.1 && git push origin v0.0.1
+# or manually from the Actions tab.
+#
+# The PS5 is obviously not present on a runner, so nothing here is
+# hardware-tested. Release notes say so explicitly rather than implying a
+# verification that did not happen.
+# =============================================================================
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.0.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG}"
+
+      # The VERSION file and the tag must agree, otherwise the player reports a
+      # different version than the release it came from.
+      - name: Check VERSION matches the tag
+        run: |
+          FILE_VER="$(tr -d '[:space:]' < projects/evoplayer/VERSION)"
+          WANT="${{ steps.ver.outputs.version }}"
+          if [ "$FILE_VER" != "$WANT" ]; then
+            echo "::error::projects/evoplayer/VERSION is '$FILE_VER' but the tag says '$WANT'"
+            exit 1
+          fi
+          echo "VERSION $FILE_VER matches tag"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: evo-player/ps5-dev:release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build EVO Player
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release \
+            bash -lc './scripts/build-evoplayer.sh'
+
+      - name: Build the sample suite
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release \
+            bash -lc './scripts/build.sh'
+
+      - name: Package installable homebrew bundle
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release \
+            bash -lc './scripts/package-pkg.sh --format homebrew \
+                        --title "EVO Player" --name EVOPlayer \
+                        output/elf/EVOPlayer.elf'
+
+      - name: Verify the payload is a PS5 ELF
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release bash -lc '
+              set -e
+              f=output/elf/EVOPlayer.elf
+              file "$f" | grep -q "ELF 64-bit LSB.*x86-64"
+              llvm-readelf -l "$f" | grep -q "/lib64/ld-linux" \
+                && { echo "links the host loader - built with the wrong compiler"; exit 1; }
+              echo "ok: $(stat -c %s "$f") bytes"
+            '
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp output/elf/EVOPlayer.elf "dist/EVOPlayer-${{ steps.ver.outputs.tag }}.elf"
+          if [ -f output/pkg/EVOPlayer-homebrew.zip ]; then
+            cp output/pkg/EVOPlayer-homebrew.zip \
+               "dist/EVOPlayer-${{ steps.ver.outputs.tag }}-homebrew.zip"
+          fi
+          ( cd dist && sha256sum * > SHA256SUMS.txt )
+          ls -la dist
+
+      - name: Release notes
+        run: |
+          cat > dist/NOTES.md <<'EOF'
+          ## Install
+
+          1. Jailbreak the console (12.70) and start `ps5-payload-elfldr`.
+          2. Deploy [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv).
+          3. Extract the homebrew zip to a USB stick as `/homebrew/EVOPlayer/`,
+             or copy it to `/data/homebrew/EVOPlayer/` over FTP.
+          4. Launch it from `http://<ps5>:8080/index.html`.
+
+          `EVOPlayer-*.elf` is the bare payload. Note that sending it with
+          `elfldr` alone runs it headless — it needs the homebrew launcher to
+          get a display plane. See the README.
+
+          ## Requirements
+
+          * PS5 on firmware **12.70**, jailbroken (re-run after every reboot)
+          * A USB stick for media
+
+          ## Verification
+
+          Built reproducibly in CI from the pinned toolchain (clang 18.1.3,
+          PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so these
+          binaries are not hardware-tested.** Checksums in `SHA256SUMS.txt`.
+
+          Licensed GPL-3.0-or-later. Derived from ProsperoPlayer; see NOTICE.
+          EOF
+          cat dist/NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: EVO Player ${{ steps.ver.outputs.tag }}
+          body_path: dist/NOTES.md
+          draft: false
+          prerelease: ${{ startsWith(steps.ver.outputs.version, '0.') }}
+          files: |
+            dist/EVOPlayer-*.elf
+            dist/EVOPlayer-*-homebrew.zip
+            dist/SHA256SUMS.txt

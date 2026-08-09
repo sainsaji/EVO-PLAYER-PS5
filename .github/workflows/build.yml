@@ -102,6 +102,11 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build.sh'
 
+      - name: Build EVO Player
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-evoplayer.sh'
+
       - name: Build via CMake + Ninja and emit compile_commands.json
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
