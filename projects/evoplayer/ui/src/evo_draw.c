@@ -1,5 +1,7 @@
 #include "evo_draw.h"
 
+#include "evo_metrics.h"   /* EVO_SCREEN_W/H, for the marquee bleed band */
+
 #include <stdio.h>
 #include <string.h>
 
@@ -139,6 +141,98 @@ int evo_text_fit(uint32_t *fb, int x, int y, int max_w, const char *s,
     return w;
 }
 
+
+/*
+ * Full glyph-box heights per face, as laid out in the atlas. INK_TOP/INK_BOT
+ * above describe where the ink sits inside these boxes.
+ */
+static const int FACE_BOX_H[4] = { 25, 29, 46, 57 };
+
+/*
+ * A marquee draws one partial glyph past each end of its box. These keep the
+ * pixels either side so they can be restored afterwards, which clips the
+ * overhang without a clipping blitter.
+ *
+ * Sized for the widest advance in the largest face with room to spare - the
+ * overhang either side is bounded by one glyph advance. The shift is clamped
+ * to it too, so an atlas whose glyphs outgrew this could only make the
+ * marquee step rather than glide; it could not overrun the buffers.
+ */
+#define EVO_MARQUEE_BLEED   72
+#define EVO_MARQUEE_BAND_H  64
+
+static uint32_t g_marquee_left[EVO_MARQUEE_BLEED * EVO_MARQUEE_BAND_H];
+static uint32_t g_marquee_right[EVO_MARQUEE_BLEED * EVO_MARQUEE_BAND_H];
+
+/* Clamp the band to the framebuffer and hand back the usable rectangle. */
+static int marquee_band(int x, int y, int max_w, int box_h,
+                        int *lx, int *rx, int *y0, int *rows)
+{
+    if (box_h > EVO_MARQUEE_BAND_H) box_h = EVO_MARQUEE_BAND_H;
+
+    *y0 = y;
+    if (*y0 < 0) *y0 = 0;
+
+    *rows = y + box_h - *y0;
+    if (*y0 + *rows > EVO_SCREEN_H) *rows = EVO_SCREEN_H - *y0;
+    if (*rows < 0) *rows = 0;
+
+    *lx = x - EVO_MARQUEE_BLEED;
+    *rx = x + max_w;
+
+    return *rows > 0;
+}
+
+static void marquee_bleed_save(uint32_t *fb, int x, int y, int max_w,
+                               int box_h)
+{
+    int lx, rx, y0, rows, r, c;
+
+    if (!fb || !marquee_band(x, y, max_w, box_h, &lx, &rx, &y0, &rows))
+        return;
+
+    for (r = 0; r < rows; r++) {
+        for (c = 0; c < EVO_MARQUEE_BLEED; c++) {
+            int sx = lx + c;
+
+            g_marquee_left[r * EVO_MARQUEE_BLEED + c] =
+                (sx >= 0 && sx < EVO_SCREEN_W)
+                    ? fb[(y0 + r) * EVO_SCREEN_W + sx] : 0;
+
+            sx = rx + c;
+
+            g_marquee_right[r * EVO_MARQUEE_BLEED + c] =
+                (sx >= 0 && sx < EVO_SCREEN_W)
+                    ? fb[(y0 + r) * EVO_SCREEN_W + sx] : 0;
+        }
+    }
+}
+
+static void marquee_bleed_restore(uint32_t *fb, int x, int y, int max_w,
+                                  int box_h)
+{
+    int lx, rx, y0, rows, r, c;
+
+    if (!fb || !marquee_band(x, y, max_w, box_h, &lx, &rx, &y0, &rows))
+        return;
+
+    for (r = 0; r < rows; r++) {
+        for (c = 0; c < EVO_MARQUEE_BLEED; c++) {
+            int sx = lx + c;
+
+            if (sx >= 0 && sx < EVO_SCREEN_W)
+                fb[(y0 + r) * EVO_SCREEN_W + sx] =
+                    g_marquee_left[r * EVO_MARQUEE_BLEED + c];
+
+            sx = rx + c;
+
+            if (sx >= 0 && sx < EVO_SCREEN_W)
+                fb[(y0 + r) * EVO_SCREEN_W + sx] =
+                    g_marquee_right[r * EVO_MARQUEE_BLEED + c];
+        }
+    }
+}
+
 void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
                       uint32_t colour, evo_face face, int phase)
 {
@@ -193,14 +287,29 @@ void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
     if (shift > overflow) shift = overflow;
 
     /*
-     * No clipping primitive exists, so the tail is truncated by fitting the
-     * shifted substring instead of translating the whole run off its box.
-     * Advance-accurate because it measures the same way it draws.
+     * Rendering the shift.
+     *
+     * Dropping whole characters until their combined advance reaches `shift`
+     * is how this used to work, and it is why the scroll was still not smooth
+     * after being put on a real clock: the offset was computed in pixels but
+     * applied in glyphs, so the text sat still and then jumped a whole
+     * character width. Whole characters are still dropped - that is what
+     * keeps the run short - but the sub-character remainder is applied as a
+     * negative x, which is what actually moves it a pixel at a time.
+     *
+     * That leaves a partial glyph hanging past each end of the box, and there
+     * is no clipping primitive to trim it. The bleed is bounded by one glyph
+     * advance, so the cheap fix is to keep the pixels either side, draw over
+     * them, and put them back - rather than build a clipping blitter for it.
      */
     {
-        char buf[256];
+        char        buf[256];
         const char *cursor = s;
-        int dropped = 0;
+        int         dropped = 0;
+        int         rem;
+        int         box_h;
+        int         used = 0;
+        int         n = 0;
 
         while (*cursor) {
             char one[2];
@@ -215,8 +324,40 @@ void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
             cursor++;
         }
 
-        snprintf(buf, sizeof(buf), "%s", cursor);
-        evo_text_fit(fb, x, y, max_w, buf, colour, face);
+        rem = shift - dropped;
+        if (rem < 0) rem = 0;
+        if (rem > EVO_MARQUEE_BLEED) rem = EVO_MARQUEE_BLEED;
+
+        /*
+         * Take glyphs while they still *start* inside the box. Drawing the
+         * whole remaining string would run it off the right of the screen on
+         * a long name, and every pixel of that is blended and thrown away.
+         *
+         * The test is on where a glyph starts, not on where the run ends: a
+         * glyph that begins past the right edge contributes nothing visible
+         * but does put ink beyond the strip that gets restored, so it escapes
+         * the clip. Stopping at the first one bounds the overhang to a single
+         * glyph advance, which is what EVO_MARQUEE_BLEED is sized for.
+         */
+        while (cursor[n] && n < (int)sizeof(buf) - 1) {
+            char one[2];
+
+            if (used >= max_w + rem) break;
+
+            one[0] = cursor[n];
+            one[1] = 0;
+            used += evo_text_w(one, face);
+            n++;
+        }
+
+        memcpy(buf, cursor, (size_t)n);
+        buf[n] = 0;
+
+        box_h = FACE_BOX_H[face_clamp((int)face)];
+
+        marquee_bleed_save(fb, x, y, max_w, box_h);
+        evo_text(fb, x - rem, y, buf, colour, face);
+        marquee_bleed_restore(fb, x, y, max_w, box_h);
     }
 }
 

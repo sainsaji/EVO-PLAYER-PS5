@@ -180,6 +180,7 @@ static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define SCREEN_DEVELOPER_TOOLS 15
 #define SCREEN_MEDIA_INFO 16
 #define SCREEN_PLAYBACK_FINISHED 17
+#define SCREEN_SUBTITLE_PICKER 18
 
 typedef enum {
     PROFILE_BALANCED = 0,
@@ -2627,6 +2628,63 @@ static void prospero_embedded_subtitle_close(void) {
 }
 
 
+/*
+ * How many cues a subtitle track claims to hold, or -1 when it does not say.
+ *
+ * mkvmerge writes per-track STATISTICS tags, and the key is suffixed with the
+ * language - NUMBER_OF_FRAMES-eng - so the lookup has to ignore the suffix.
+ *
+ * This matters more than it looks. Release groups ship a vanity track that is
+ * flagged "default", is tagged English, and contains two cues forty minutes
+ * in. It wins every metadata-based contest against the real subtitle track
+ * and then displays nothing, which is indistinguishable from subtitles being
+ * broken. The count is the only field that tells them apart before playback.
+ */
+static int prospero_subtitle_declared_cues(
+    AVStream *stream
+) {
+    if (!stream) {
+        return -1;
+    }
+
+    AVDictionaryEntry *frames =
+        av_dict_get(
+            stream->metadata,
+            "NUMBER_OF_FRAMES",
+            NULL,
+            AV_DICT_IGNORE_SUFFIX
+        );
+
+    if (
+        !frames ||
+        !frames->value ||
+        !frames->value[0]
+    ) {
+        return -1;
+    }
+
+    long parsed =
+        strtol(
+            frames->value,
+            NULL,
+            10
+        );
+
+    if (
+        parsed < 0 ||
+        parsed > 1000000
+    ) {
+        return -1;
+    }
+
+    return (int)parsed;
+}
+
+
+/* Below this a track is signage or a watermark, not dialogue. */
+#define PROSPERO_SUBTITLE_MIN_USEFUL_CUES 10
+
+
 static int prospero_embedded_subtitle_score_stream(
     AVStream *stream
 ) {
@@ -2674,6 +2732,28 @@ static int prospero_embedded_subtitle_score_stream(
         AV_DISPOSITION_DEFAULT
     ) {
         score += 40;
+    }
+
+    /*
+     * Cue count outranks every metadata signal, because it is the only one
+     * that reports what the track actually contains rather than what it
+     * claims to be. A near-empty track loses even when it is English and
+     * flagged default; a rich one gets a modest tie-break bonus.
+     */
+    {
+        int cues =
+            prospero_subtitle_declared_cues(
+                stream
+            );
+
+        if (
+            cues >= 0 &&
+            cues < PROSPERO_SUBTITLE_MIN_USEFUL_CUES
+        ) {
+            score -= 1000;
+        } else if (cues > 0) {
+            score += cues > 50 ? 20 : 5;
+        }
     }
 
     if (
@@ -11057,6 +11137,94 @@ static void prospero_subtitle_track_label(
 }
 
 
+/*
+ * Switch to `track` (-1 meaning the external SRT) and carry on from where we
+ * are. Selecting a subtitle stream is a demuxer-open decision, so the file is
+ * reopened and seeked back to the current position rather than switched in
+ * place; the pause state survives so this does not silently start playing a
+ * paused film.
+ *
+ * Split out of the D-pad cycler so the picker performs the identical switch.
+ * Cycling made sense when a file had two tracks. Retail rips carry thirty-odd
+ * and cycling through them one restart at a time is unusable, so the cycler
+ * is now the fallback path and the picker is the one people will use.
+ */
+static void prospero_subtitle_apply_track(int track)
+{
+    char label[128];
+
+    if (
+        !play_fmt ||
+        !current_media_path[0]
+    ) {
+        return;
+    }
+
+    prospero_subtitle_track_label(
+        track,
+        label,
+        sizeof(label)
+    );
+
+    double position =
+        resume_base_offset_seconds +
+        (
+            audio_ctx &&
+            audio_handle >= 1
+                ? audio_clock_seconds
+                : video_clock_seconds
+        );
+
+    if (position < 0.0) {
+        position = 0.0;
+    }
+
+    int restore_paused = player_paused;
+
+    char playback_path[512];
+
+    snprintf(
+        playback_path,
+        sizeof(playback_path),
+        "%s",
+        current_media_path
+    );
+
+    prospero_subtitle_requested_stream = track;
+
+    requested_resume_seek_pos = position;
+    resume_base_offset_seconds = position;
+
+    if (
+        !start_video_playback(
+            playback_path
+        )
+    ) {
+        prospero_subtitle_requested_stream = -2;
+
+        toast(
+            "SUBTITLES",
+            "TRACK CHANGE FAILED"
+        );
+
+        return;
+    }
+
+    if (restore_paused) {
+        player_paused = 1;
+    }
+
+    prospero_subtitle_enabled = 1;
+
+    toast(
+        "SUBTITLES",
+        label
+    );
+
+    controls_last_used_ms = now_ms();
+}
+
+
 static void prospero_subtitle_cycle_track(void) {
     if (
         screen != SCREEN_PLAYER ||
@@ -11128,67 +11296,365 @@ static void prospero_subtitle_cycle_track(void) {
         return;
     }
 
-    double position =
-        resume_base_offset_seconds +
-        (
-            audio_ctx &&
-            audio_handle >= 1
-                ? audio_clock_seconds
-                : video_clock_seconds
-        );
-
-    if (position < 0.0) {
-        position = 0.0;
-    }
-
-    int restore_paused = player_paused;
-
-    char playback_path[512];
-
-    snprintf(
-        playback_path,
-        sizeof(playback_path),
-        "%s",
-        current_media_path
+    prospero_subtitle_apply_track(
+        next_track
     );
-
-    prospero_subtitle_requested_stream =
-        next_track;
-
-    requested_resume_seek_pos = position;
-    resume_base_offset_seconds = position;
-
-    if (
-        !start_video_playback(
-            playback_path
-        )
-    ) {
-        prospero_subtitle_requested_stream = -2;
-
-        toast(
-            "SUBTITLES",
-            "TRACK CHANGE FAILED"
-        );
-
-        return;
-    }
-
-    if (restore_paused) {
-        player_paused = 1;
-    }
-
-    prospero_subtitle_enabled = 1;
-
-    toast(
-        "SUBTITLES",
-        label
-    );
-
-    controls_last_used_ms = now_ms();
 }
 
 /* PROSPERO_SUBTITLE_CONTROLS_END */
 
+
+
+
+/* ==========================================================================
+ * Subtitle track picker
+ *
+ * A retail rip carries thirty-odd subtitle tracks, and the container's own
+ * metadata is not trustworthy about which one is worth watching - the file
+ * that prompted this flags a two-cue vanity track as the default English
+ * one. So the choice is offered, with the fact that settles it - how many
+ * cues each track declares - shown next to each.
+ * ========================================================================== */
+
+#define EVO_SUBS_MAX 64
+
+static evo_focus evo_subs_focus;
+static int       evo_subs_tracks[EVO_SUBS_MAX];   /* -2 off, -1 external SRT */
+static char      evo_subs_labels[EVO_SUBS_MAX][40];
+static char      evo_subs_details[EVO_SUBS_MAX][20];
+static int       evo_subs_weak[EVO_SUBS_MAX];
+static int       evo_subs_count;
+
+/*
+ * ISO 639-2 to something the font atlas can actually draw.
+ *
+ * The atlas holds A-Z a-z 0-9 and a little punctuation - no accents, no
+ * parentheses - so a track titled "Espanol (Espana)" with the accents it
+ * really carries would render as a row of holes. Track titles are therefore
+ * never drawn directly; the language code picks an ASCII name instead.
+ */
+static const char *prospero_subtitle_language_name(const char *code)
+{
+    static const struct { const char *code; const char *name; } table[] = {
+        { "eng", "ENGLISH"    }, { "ara", "ARABIC"     },
+        { "cze", "CZECH"      }, { "ces", "CZECH"      },
+        { "dan", "DANISH"     }, { "ger", "GERMAN"     },
+        { "deu", "GERMAN"     }, { "gre", "GREEK"      },
+        { "ell", "GREEK"      }, { "spa", "SPANISH"    },
+        { "fin", "FINNISH"    }, { "fil", "FILIPINO"   },
+        { "fre", "FRENCH"     }, { "fra", "FRENCH"     },
+        { "heb", "HEBREW"     }, { "hin", "HINDI"      },
+        { "hun", "HUNGARIAN"  }, { "ind", "INDONESIAN" },
+        { "ita", "ITALIAN"    }, { "jpn", "JAPANESE"   },
+        { "kor", "KOREAN"     }, { "may", "MALAY"      },
+        { "msa", "MALAY"      }, { "nob", "NORWEGIAN"  },
+        { "nor", "NORWEGIAN"  }, { "dut", "DUTCH"      },
+        { "nld", "DUTCH"      }, { "pol", "POLISH"     },
+        { "por", "PORTUGUESE" }, { "rum", "ROMANIAN"   },
+        { "ron", "ROMANIAN"   }, { "rus", "RUSSIAN"    },
+        { "swe", "SWEDISH"    }, { "tam", "TAMIL"      },
+        { "tel", "TELUGU"     }, { "tha", "THAI"       },
+        { "tur", "TURKISH"    }, { "chi", "CHINESE"    },
+        { "zho", "CHINESE"    }, { "vie", "VIETNAMESE" },
+        { "ukr", "UKRAINIAN"  }, { "bul", "BULGARIAN"  },
+        { "hrv", "CROATIAN"   }, { "srp", "SERBIAN"    },
+        { "slo", "SLOVAK"     }, { "slv", "SLOVENIAN"  },
+        { "est", "ESTONIAN"   }, { "lav", "LATVIAN"    },
+        { "lit", "LITHUANIAN" }, { "isl", "ICELANDIC"  }
+    };
+
+    if (!code || !code[0]) {
+        return NULL;
+    }
+
+    for (
+        size_t i = 0;
+        i < sizeof(table) / sizeof(table[0]);
+        i++
+    ) {
+        if (strcasecmp(code, table[i].code) == 0) {
+            return table[i].name;
+        }
+    }
+
+    return NULL;
+}
+
+
+/*
+ * Does the title carry a qualifier worth showing? SDH and FORCED change what
+ * you actually get; the rest of a title is usually the release group
+ * advertising itself.
+ */
+static const char *prospero_subtitle_qualifier(AVStream *stream)
+{
+    AVDictionaryEntry *title;
+
+    if (!stream) {
+        return "";
+    }
+
+    if (stream->disposition & AV_DISPOSITION_FORCED) {
+        return " FORCED";
+    }
+
+    if (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) {
+        return " SDH";
+    }
+
+    title =
+        av_dict_get(
+            stream->metadata,
+            "title",
+            NULL,
+            0
+        );
+
+    if (title && title->value) {
+        if (str_contains_ci(title->value, "SDH"))    return " SDH";
+        if (str_contains_ci(title->value, "FORCED")) return " FORCED";
+        if (str_contains_ci(title->value, "SIGNS"))  return " SIGNS";
+    }
+
+    return "";
+}
+
+
+/*
+ * Rebuild the track list. Cheap enough to run every frame the picker is
+ * open, and doing it there rather than once on open means it cannot go
+ * stale against a file that was swapped underneath it.
+ */
+static void evo_subs_sync(void)
+{
+    int count = 0;
+
+    /*
+     * "Off" is always first: it is the one entry that always works, and the
+     * only way back once subtitles are on.
+     */
+    evo_subs_tracks[count] = -2;
+    snprintf(evo_subs_labels[count], sizeof(evo_subs_labels[0]),
+             "SUBTITLES OFF");
+    evo_subs_details[count][0] = 0;
+    evo_subs_weak[count] = 0;
+    count++;
+
+    if (prospero_subtitle_count > 0 && count < EVO_SUBS_MAX) {
+        evo_subs_tracks[count] = -1;
+        snprintf(evo_subs_labels[count], sizeof(evo_subs_labels[0]),
+                 "EXTERNAL SRT");
+        snprintf(evo_subs_details[count], sizeof(evo_subs_details[0]),
+                 "%d CUES", prospero_subtitle_count);
+        evo_subs_weak[count] = 0;
+        count++;
+    }
+
+    for (
+        unsigned int index = 0;
+        play_fmt && index < play_fmt->nb_streams && count < EVO_SUBS_MAX;
+        index++
+    ) {
+        AVStream *stream = play_fmt->streams[index];
+        AVDictionaryEntry *language;
+        const char *name;
+        char base[40];
+        int cues;
+        int dup = 0;
+
+        if (
+            !stream ||
+            !stream->codecpar ||
+            stream->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE ||
+            !prospero_embedded_subtitle_supported(
+                stream->codecpar->codec_id
+            )
+        ) {
+            continue;
+        }
+
+        language =
+            av_dict_get(
+                stream->metadata,
+                "language",
+                NULL,
+                0
+            );
+
+        name =
+            prospero_subtitle_language_name(
+                language ? language->value : NULL
+            );
+
+        if (name) {
+            snprintf(base, sizeof(base), "%s%s", name,
+                     prospero_subtitle_qualifier(stream));
+        } else {
+            /* An unmapped code still identifies the track, which beats
+             * showing a row with no name on it. */
+            snprintf(base, sizeof(base), "TRACK %u%s", index,
+                     prospero_subtitle_qualifier(stream));
+        }
+
+        /*
+         * Two tracks of one language are common - Spanish for Spain and for
+         * Latin America - and the part of the title that tells them apart is
+         * exactly the part the atlas cannot draw. Number them rather than
+         * showing two identical rows.
+         */
+        for (int i = 0; i < count; i++) {
+            if (strncmp(evo_subs_labels[i], base, sizeof(base)) == 0) {
+                dup++;
+            }
+        }
+
+        if (dup > 0) {
+            snprintf(evo_subs_labels[count], sizeof(evo_subs_labels[0]),
+                     "%s %d", base, dup + 1);
+        } else {
+            snprintf(evo_subs_labels[count], sizeof(evo_subs_labels[0]),
+                     "%s", base);
+        }
+
+        cues = prospero_subtitle_declared_cues(stream);
+
+        if (cues < 0) {
+            evo_subs_details[count][0] = 0;
+            evo_subs_weak[count] = 0;
+        } else if (cues < PROSPERO_SUBTITLE_MIN_USEFUL_CUES) {
+            snprintf(evo_subs_details[count], sizeof(evo_subs_details[0]),
+                     "SIGNS ONLY");
+            evo_subs_weak[count] = 1;
+        } else {
+            snprintf(evo_subs_details[count], sizeof(evo_subs_details[0]),
+                     "%d CUES", cues);
+            evo_subs_weak[count] = 0;
+        }
+
+        evo_subs_tracks[count] = (int)index;
+        count++;
+    }
+
+    evo_subs_count = count;
+
+    evo_subs_focus.visible = evo_screen_picker_capacity();
+    evo_subs_focus.wrap    = 1;
+
+    evo_focus_set_count(
+        &evo_subs_focus,
+        count
+    );
+}
+
+
+static void draw_subtitle_picker(uint32_t *fb)
+{
+    evo_picker_entry rows[16];
+    evo_picker_model m;
+    int cap = evo_screen_picker_capacity();
+    int first;
+    int shown;
+    int active;
+
+    evo_subs_sync();
+
+    first = evo_subs_focus.scroll;
+    shown = evo_subs_count - first;
+
+    if (shown > cap) {
+        shown = cap;
+    }
+
+    if (shown > (int)(sizeof(rows) / sizeof(rows[0]))) {
+        shown = (int)(sizeof(rows) / sizeof(rows[0]));
+    }
+
+    if (shown < 0) {
+        shown = 0;
+    }
+
+    /* What is playing right now, in the same -2 / -1 / index space. */
+    active =
+        !prospero_subtitle_enabled
+            ? -2
+            : prospero_subtitle_use_external
+                  ? -1
+                  : prospero_embedded_subtitle_stream_index;
+
+    for (int i = 0; i < shown; i++) {
+        rows[i].label   = evo_subs_labels[first + i];
+        rows[i].detail  = evo_subs_details[first + i];
+        rows[i].current = (evo_subs_tracks[first + i] == active);
+        rows[i].weak    = evo_subs_weak[first + i];
+    }
+
+    memset(&m, 0, sizeof(m));
+
+    m.eyebrow     = "SUBTITLES";
+    m.title       = "SELECT A TRACK";
+    m.entries     = rows;
+    m.first       = first;
+    m.entry_count = shown;
+    m.count       = evo_subs_count;
+
+    evo_screen_picker(fb, &m, &evo_subs_focus);
+}
+
+
+static void evo_subs_open(void)
+{
+    evo_subs_sync();
+
+    /* Open on whatever is playing, not on row zero - the list is long and
+     * landing on "off" every time invites turning them off by accident. */
+    {
+        int active =
+            !prospero_subtitle_enabled
+                ? -2
+                : prospero_subtitle_use_external
+                      ? -1
+                      : prospero_embedded_subtitle_stream_index;
+
+        for (int i = 0; i < evo_subs_count; i++) {
+            if (evo_subs_tracks[i] == active) {
+                evo_focus_set(&evo_subs_focus, i);
+                break;
+            }
+        }
+    }
+
+    screen = SCREEN_SUBTITLE_PICKER;
+}
+
+
+static void evo_subs_activate(void)
+{
+    int track;
+
+    if (
+        evo_subs_focus.index < 0 ||
+        evo_subs_focus.index >= evo_subs_count
+    ) {
+        return;
+    }
+
+    track = evo_subs_tracks[evo_subs_focus.index];
+
+    screen = SCREEN_PLAYER;
+
+    /*
+     * Turning subtitles off needs no reopen, and reopening for it would put
+     * a visible hitch on the one action that should feel instant.
+     */
+    if (track == -2) {
+        prospero_subtitle_enabled = 0;
+        toast("SUBTITLES", "OFF");
+        controls_last_used_ms = now_ms();
+        return;
+    }
+
+    prospero_subtitle_apply_track(track);
+}
 
 
 void draw_player_screen(uint32_t *fb) {
@@ -16631,13 +17097,22 @@ int main(void) {
             /* EVO: evo_input_fired, not the raw edge - this is what gives
              * every list hold-to-scroll. */
             if (evo_input_fired(&evo_pad_state, EVO_ACT_DOWN)) {
-                if (evo_rail_focused) {
+                if (screen == SCREEN_SUBTITLE_PICKER) {
+                    evo_feedback_for_move(
+                        evo_focus_move(&evo_subs_focus, +1));
+                } else if (evo_rail_focused) {
                     evo_rail_nav(+1);
                 } else if (
                     screen == SCREEN_PLAYER &&
                     !prospero_scrub_active
                 ) {
-                    prospero_subtitle_cycle_track();
+                    /*
+                     * Opens the picker rather than stepping to the next
+                     * track. Cycling reopens the file on every step, so on a
+                     * disc rip with thirty-odd tracks reaching the one you
+                     * want meant thirty reopens.
+                     */
+                    evo_subs_open();
                 } else if (screen == SCREEN_MAIN_MENU) evo_launch_nav(0, +1);
                 else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, +1);
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, +1);
@@ -16650,7 +17125,10 @@ int main(void) {
             }
 
             if (evo_input_fired(&evo_pad_state, EVO_ACT_UP)) {
-                if (evo_rail_focused) {
+                if (screen == SCREEN_SUBTITLE_PICKER) {
+                    evo_feedback_for_move(
+                        evo_focus_move(&evo_subs_focus, -1));
+                } else if (evo_rail_focused) {
                     evo_rail_nav(-1);
                 } else if (
                     screen == SCREEN_PLAYER &&
@@ -16757,6 +17235,23 @@ int main(void) {
                 } else if (screen == SCREEN_USB_BROWSER) {
                     evo_browser_page(+1);
                 }
+            }
+
+            if (
+                screen == SCREEN_SUBTITLE_PICKER &&
+                (pressed & PS5_PAD_BUTTON_CROSS)
+            ) {
+                evo_subs_activate();
+                prompt_button_handled = 1;
+            }
+
+            if (
+                screen == SCREEN_SUBTITLE_PICKER &&
+                (pressed & PS5_PAD_BUTTON_CIRCLE)
+            ) {
+                screen = SCREEN_PLAYER;
+                controls_last_used_ms = now_ms();
+                prompt_button_handled = 1;
             }
 
             if (
@@ -17045,6 +17540,17 @@ int main(void) {
             draw_developer_tools_screen(linear);
         else if (screen == SCREEN_MEDIA_INFO)
             draw_media_info_screen(linear);
+        else if (screen == SCREEN_SUBTITLE_PICKER) {
+            /*
+             * The film keeps playing underneath. Deliberately not paused:
+             * pausing to choose a subtitle track means the first thing the
+             * new track has to do is catch up, and pausing around a screen
+             * change is exactly what desynced the presentation clock in the
+             * media-info freeze.
+             */
+            draw_player_screen(linear);
+            draw_subtitle_picker(linear);
+        }
         else if (screen == SCREEN_PLAYBACK_FINISHED) {
             /* Wait one frame if 1080 restore still pending */
             if (g_vo_w == 1920u && g_vo_h == 1080u)

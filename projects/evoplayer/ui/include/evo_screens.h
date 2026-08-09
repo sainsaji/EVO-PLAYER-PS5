@@ -246,6 +246,47 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
                      const evo_focus *f, int rail_focused, int rail_index,
                      const evo_hint *hints, int hint_count);
 
+/* ---- overlay picker ------------------------------------------------------ */
+
+/*
+ * A scrollable list drawn over whatever is already on screen. Subtitle track
+ * selection needs this and neither of the other two shapes fits: the dialog
+ * is a fixed panel with a row of buttons, and the list page paints full-page
+ * chrome, which would throw away the video frame behind it.
+ *
+ * A retail disc rip can carry thirty-odd subtitle tracks, so it scrolls and
+ * shows a scrollbar rather than assuming everything fits.
+ */
+typedef struct evo_picker_entry {
+    const char *label;    /* "ENGLISH SDH" */
+    const char *detail;   /* "1001 CUES", "SIGNS ONLY", "EXTERNAL FILE" */
+    int         current;  /* the track in use - gets a tick */
+    /*
+     * Dimmed. A track the container admits holds almost nothing is still
+     * offered - the count can be wrong - but it should not look like the
+     * obvious choice, because picking it looks exactly like subtitles being
+     * broken.
+     */
+    int         weak;
+} evo_picker_entry;
+
+typedef struct evo_picker_model {
+    const char *eyebrow;
+    const char *title;
+
+    /* Visible window only, same convention as the browser: entries[0] is
+     * absolute index `first`. */
+    const evo_picker_entry *entries;
+    int                     first;
+    int                     entry_count;
+    int                     count;
+} evo_picker_model;
+
+int  evo_screen_picker_capacity(void);
+
+void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
+                       const evo_focus *f);
+
 #ifdef __cplusplus
 }
 #endif

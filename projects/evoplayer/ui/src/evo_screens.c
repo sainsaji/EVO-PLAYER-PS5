@@ -801,3 +801,155 @@ void evo_screen_info(uint32_t *fb, const evo_info_model *m)
         evo_chrome_end(fb, &page, hints, 1);
     }
 }
+
+/* ==========================================================================
+ * Overlay picker
+ * ========================================================================== */
+
+#define EVO_PICKER_W       920
+#define EVO_PICKER_PAD      48
+#define EVO_PICKER_ROW_H    62
+#define EVO_PICKER_PITCH    70
+#define EVO_PICKER_HEAD    132   /* eyebrow + title above the first row */
+#define EVO_PICKER_FOOT     84   /* hint strip below the last row       */
+
+int evo_screen_picker_capacity(void)
+{
+    /*
+     * Derived from the tallest panel that still leaves the video visible
+     * around it, rather than a hardcoded row count that drifts the moment
+     * the pitch changes.
+     */
+    int max_body = EVO_SCREEN_H - 180 - EVO_PICKER_HEAD - EVO_PICKER_FOOT;
+    int rows     = max_body / EVO_PICKER_PITCH;
+
+    if (rows < 3)  rows = 3;
+    if (rows > 10) rows = 10;
+
+    return rows;
+}
+
+void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
+                       const evo_focus *f)
+{
+    const evo_theme *th  = evo_theme_current();
+    const int cap = evo_screen_picker_capacity();
+    int shown, h, x, y, row_y, i;
+    const evo_hint hints[2] = {
+        { EVO_GLYPH_CROSS,  "SELECT" },
+        { EVO_GLYPH_CIRCLE, "BACK"   }
+    };
+
+    if (!m || !f) return;
+
+    shown = m->entry_count < cap ? m->entry_count : cap;
+    if (shown < 0) shown = 0;
+
+    h = EVO_PICKER_HEAD + shown * EVO_PICKER_PITCH + EVO_PICKER_FOOT;
+    x = (EVO_SCREEN_W - EVO_PICKER_W) / 2;
+    y = (EVO_SCREEN_H - h) / 2;
+
+    /* Same reasoning as the dialog: scrim, never clear. */
+    evo_ui_vgrad_over(fb, 0, 0, EVO_SCREEN_W, EVO_SCREEN_H,
+                      with_alpha(th->scrim, 205), with_alpha(th->scrim, 225));
+
+    evo_ui_round_rect(fb, x, y, EVO_PICKER_W, h, th->radius + 4,
+                      with_alpha(th->surface, 255),
+                      with_alpha(th->surface_alt, 255),
+                      th->border_sel, th->border_px + 1,
+                      th->shadow, th->shadow_px + 8);
+
+    if (m->eyebrow && *m->eyebrow)
+        evo_text(fb, x + EVO_PICKER_PAD, y + 40, m->eyebrow,
+                 th->accent, EVO_FACE_SMALL);
+
+    if (m->title && *m->title)
+        evo_text_fit(fb, x + EVO_PICKER_PAD, y + 68,
+                     EVO_PICKER_W - EVO_PICKER_PAD * 2, m->title,
+                     th->text_primary, EVO_FACE_MENU);
+
+    row_y = y + EVO_PICKER_HEAD;
+
+    for (i = 0; i < shown; i++) {
+        const evo_picker_entry *e = &m->entries[i];
+        int abs_index = m->first + i;
+        int selected  = (abs_index == f->index);
+        int rx        = x + EVO_PICKER_PAD;
+        int rw        = EVO_PICKER_W - EVO_PICKER_PAD * 2 - 16;
+        int ry        = row_y + i * EVO_PICKER_PITCH;
+        uint32_t label_col;
+        int text_x    = rx + 22;
+
+        evo_ui_card(fb, rx, ry, rw, EVO_PICKER_ROW_H, selected);
+
+        /*
+         * The active track is flagged with an accent bar at the row's leading
+         * edge rather than an icon: the icon set draws at 72px native, which
+         * does not fit a 62px row, and "which one am I on" versus "which one
+         * is playing" should not be the same glance across 900px of row.
+         */
+        if (e->current) {
+            evo_ui_round_rect(fb, rx + 16,
+                              ry + (EVO_PICKER_ROW_H - 28) / 2, 5, 28, 2,
+                              th->accent, th->accent, th->accent, 0,
+                              with_alpha(th->shadow, 0), 0);
+            text_x = rx + 16 + 5 + 16;
+        }
+
+        /*
+         * Selection is signalled by the card underneath, the same way every
+         * other list in the app does it. Inverting the text as well made the
+         * selected row read as the dimmest one on screen.
+         */
+        label_col = e->weak ? th->text_muted : th->text_primary;
+
+        if (e->detail && *e->detail) {
+            int dw = evo_text_w(e->detail, EVO_FACE_SMALL);
+
+            evo_text(fb, rx + rw - 22 - dw,
+                     evo_text_y_centred(ry, EVO_PICKER_ROW_H, EVO_FACE_SMALL),
+                     e->detail,
+                     selected ? th->text_secondary : th->text_muted,
+                     EVO_FACE_SMALL);
+
+            evo_text_fit(fb, text_x,
+                         evo_text_y_centred(ry, EVO_PICKER_ROW_H,
+                                            EVO_FACE_SUB),
+                         rw - (text_x - rx) - dw - 44,
+                         e->label ? e->label : "", label_col, EVO_FACE_SUB);
+        } else {
+            evo_text_fit(fb, text_x,
+                         evo_text_y_centred(ry, EVO_PICKER_ROW_H,
+                                            EVO_FACE_SUB),
+                         rw - (text_x - rx) - 22,
+                         e->label ? e->label : "", label_col, EVO_FACE_SUB);
+        }
+    }
+
+    if (m->count > cap)
+        evo_widget_scrollbar(fb, x + EVO_PICKER_W - EVO_PICKER_PAD + 12,
+                             row_y, shown * EVO_PICKER_PITCH - 8,
+                             evo_focus_scroll_permille(f), cap, m->count);
+
+    /*
+     * Hints drawn here rather than through the chrome footer: the footer is
+     * pinned to the bottom of the screen, and these belong to the panel.
+     */
+    {
+        int hx = x + EVO_PICKER_PAD;
+        int hy = y + h - EVO_PICKER_FOOT + 16;
+        int n;
+
+        for (n = 0; n < 2; n++) {
+            evo_glyph_tinted(fb, hx, hy, hints[n].glyph, th->text_muted);
+            hx += EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP;
+
+            evo_text(fb, hx,
+                     evo_text_y_centred(hy, EVO_FOOTER_GLYPH,
+                                        EVO_FACE_SMALL),
+                     hints[n].label, th->text_muted, EVO_FACE_SMALL);
+
+            hx += evo_text_w(hints[n].label, EVO_FACE_SMALL) + 34;
+        }
+    }
+}

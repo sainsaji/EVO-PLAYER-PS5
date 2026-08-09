@@ -623,9 +623,75 @@ static void render_toast(evo_toast_kind kind)
     evo_widget_toast(g_fb, &t);
 }
 
+
+/*
+ * Subtitle picker.
+ *
+ * Modelled on the file that prompted it: thirty-odd tracks, two of them
+ * English, and the one flagged "default" holding two cues. The fixture keeps
+ * that shape because it is the case the screen exists to make legible - a
+ * fixture of three tidy tracks would demonstrate nothing.
+ */
+static void render_picker(int sel)
+{
+    static const struct { const char *label; const char *detail; int weak; }
+    tracks[] = {
+        { "SUBTITLES OFF",  "",           0 },
+        { "ENGLISH",        "SIGNS ONLY", 1 },
+        { "ENGLISH SDH",    "1001 CUES",  0 },
+        { "ARABIC",         "998 CUES",   0 },
+        { "CZECH",          "994 CUES",   0 },
+        { "DANISH",         "1002 CUES",  0 },
+        { "GERMAN",         "999 CUES",   0 },
+        { "GREEK",          "1000 CUES",  0 },
+        { "SPANISH",        "997 CUES",   0 },
+        { "SPANISH 2",      "997 CUES",   0 },
+        { "FINNISH",        "995 CUES",   0 },
+        { "FRENCH",         "1003 CUES",  0 }
+    };
+    const int count = (int)(sizeof(tracks) / sizeof(tracks[0]));
+    const int cap   = evo_screen_picker_capacity();
+
+    evo_picker_entry rows[16];
+    evo_picker_model m;
+    evo_focus f;
+    int first, shown, i;
+
+    fill_fake_video();
+
+    memset(&f, 0, sizeof(f));
+    f.visible = cap;
+    evo_focus_set_count(&f, count);
+    evo_focus_set(&f, sel);
+
+    first = f.scroll;
+    shown = count - first;
+    if (shown > cap) shown = cap;
+    if (shown > (int)(sizeof(rows) / sizeof(rows[0])))
+        shown = (int)(sizeof(rows) / sizeof(rows[0]));
+
+    for (i = 0; i < shown; i++) {
+        rows[i].label   = tracks[first + i].label;
+        rows[i].detail  = tracks[first + i].detail;
+        rows[i].weak    = tracks[first + i].weak;
+        rows[i].current = (first + i == 2);   /* SDH is what is playing */
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.eyebrow     = "SUBTITLES";
+    m.title       = "SELECT A TRACK";
+    m.entries     = rows;
+    m.first       = first;
+    m.entry_count = shown;
+    m.count       = count;
+
+    evo_screen_picker(g_fb, &m, &f);
+}
+
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
                                  "resume","finished","mediainfo",
+                                 "picker",
                                  "toast","toastok","toasterror", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
@@ -638,6 +704,7 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "resume"))    render_resume();
     else if (!strcmp(screen, "finished"))  render_finished();
     else if (!strcmp(screen, "mediainfo")) render_mediainfo();
+    else if (!strcmp(screen, "picker"))    render_picker(sel);
     else if (!strcmp(screen, "toast"))      render_toast(EVO_TOAST_INFO);
     else if (!strcmp(screen, "toastok"))    render_toast(EVO_TOAST_OK);
     else if (!strcmp(screen, "toasterror")) render_toast(EVO_TOAST_ERROR);
