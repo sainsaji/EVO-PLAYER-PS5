@@ -56,7 +56,8 @@ enum {
     EVO_IC_SUBTITLES = 9,
     EVO_IC_PALETTE   = 10,
     EVO_IC_FOLDER    = 11,
-    EVO_IC_TRASH     = 12
+    EVO_IC_TRASH     = 12,
+    EVO_IC_HOME      = 13
 };
 
 /* Controller glyph indices, matching rr_control(). */
@@ -139,6 +140,28 @@ void evo_text_y_stacked(int box_y, int box_h, evo_face top_face,
 
 /* Height of the inked part of a face, in pixels. */
 int  evo_face_ink_h(evo_face face);
+
+/* ---- the character set ------------------------------------------------- */
+
+/*
+ * The atlas holds exactly these 69 glyphs:
+ *
+ *   A-Z  a-z  0-9  space  /  .  _  :  -  +
+ *
+ * There is no comma, no parenthesis, no apostrophe and no question mark.
+ * An unsupported character is not omitted - it advances 12px and leaves a
+ * hole, so "CREDITS, PROJECT INFO" renders as "CREDITS  PROJECT INFO" and
+ * looks like a spacing bug rather than a missing glyph. Four strings shipped
+ * that way before anyone noticed.
+ *
+ * Rewrite the copy rather than reaching for punctuation the font does not
+ * have. Use this to check.
+ */
+#define EVO_TEXT_CHARSET \
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+"
+
+/* First unsupported character in `s`, or 0 when the whole string renders. */
+char evo_text_unsupported(const char *s);
 
 #ifdef __cplusplus
 }

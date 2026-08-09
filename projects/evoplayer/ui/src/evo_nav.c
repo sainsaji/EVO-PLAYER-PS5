@@ -2,13 +2,13 @@
 #include "evo_draw.h"
 
 static const evo_section_info SECTIONS[EVO_SECTION_COUNT] = {
-    { "HOME",      "Back to the launch screen",          EVO_IC_FOLDER,   EVO_SCREEN_LAUNCH    },
+    { "HOME",      "Back to the launch screen",          EVO_IC_HOME,     EVO_SCREEN_LAUNCH    },
     { "BROWSE",    "Videos and folders on USB storage",  EVO_IC_USB,      EVO_SCREEN_BROWSER   },
     { "RECENT",    "Pick up where you left off",         EVO_IC_RECENT,   EVO_SCREEN_RECENT    },
     { "FAVORITES", "Media you saved for later",          EVO_IC_FAVORITE, EVO_SCREEN_FAVORITES },
     { "SETTINGS",  "Playback profiles and preferences",  EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS  },
-    { "TOOLS",     "Reports, logs and diagnostics",      EVO_IC_TOOLS,    EVO_SCREEN_TOOLS     },
-    { "ABOUT",     "Credits, project info and support",  EVO_IC_ABOUT,    EVO_SCREEN_ABOUT     }
+    { "TOOLS",     "Reports and diagnostics",      EVO_IC_TOOLS,    EVO_SCREEN_TOOLS     },
+    { "ABOUT",     "Credits and project info",  EVO_IC_ABOUT,    EVO_SCREEN_ABOUT     }
 };
 
 const evo_section_info *evo_section_get(evo_section s)

@@ -251,6 +251,37 @@ def icon_folder():
     ]
 
 
+def icon_home():
+    # A house: gable roof over a body, with a door. HOME used to borrow the
+    # folder glyph, which sat directly above BROWSE's document icon in the
+    # rail - two file-shaped marks meaning entirely different things, and the
+    # one place the rail was genuinely ambiguous.
+    #
+    # Every shape here is a closed polygon because that is what sd_polygon
+    # gives us; `stroke` turns each into an outline. The roof's base and the
+    # body's top edge deliberately coincide, which reads as one silhouette
+    # rather than as a triangle resting on a box.
+    return [
+        shape("poly", [
+            (7.0,  35.0),   # left eave, overhanging the body
+            (C,    13.0),   # ridge
+            (65.0, 35.0),   # right eave
+        ], stroke=STROKE),
+        shape("poly", [
+            (16.0, 35.0),
+            (56.0, 35.0),
+            (56.0, 60.0),
+            (16.0, 60.0),
+        ], stroke=STROKE),
+        shape("poly", [
+            (30.0, 60.0),
+            (30.0, 46.0),
+            (42.0, 46.0),
+            (42.0, 60.0),
+        ], stroke=STROKE),
+    ]
+
+
 def icon_trash():
     shapes = [
         shape("rrect", C, 44.0, 17.0, 20.0, 4.0, stroke=STROKE),  # bin
@@ -345,6 +376,7 @@ ICONS = [
     ("EVO_ICON_PALETTE", icon_palette, SIZE),
     ("EVO_ICON_FOLDER", icon_folder, SIZE),
     ("EVO_ICON_TRASH", icon_trash, SIZE),
+    ("EVO_ICON_HOME", icon_home, SIZE),
     # Controller prompts, 48px, same names as the RR_CONTROL_* they replace.
     ("EVO_CTRL_X", ctrl_x, CTRL),
     ("EVO_CTRL_CIRCLE", ctrl_circle, CTRL),

@@ -118,6 +118,16 @@ typedef struct evo_grid {
     int scroll[EVO_GRID_ROWS];   /* first visible item per row */
     int visible[EVO_GRID_ROWS];  /* items that fit per row */
 
+    /*
+     * Fixed-point (<<8) x of the highlight, so a shelf cursor slides between
+     * tiles instead of teleporting. Lists have glided since evo_focus existed;
+     * without this the launch screen was the one place that snapped, and it
+     * made the home screen feel stiffer than the sections for no reason.
+     */
+    int glide_fp;
+    int glide_target_fp;
+    int glide_ready;
+
     int settled_frames;
 } evo_grid;
 
@@ -138,6 +148,15 @@ int evo_grid_row_scroll(const evo_grid *g, int row);
 
 /* Does `row` currently hold the cursor? */
 int evo_grid_row_active(const evo_grid *g, int row);
+
+/*
+ * Per-frame update for the horizontal highlight. `origin` is the x of the
+ * first visible tile and `pitch` the distance between tiles.
+ */
+void evo_grid_tick(evo_grid *g, int origin, int pitch);
+
+/* Current highlight x in pixels - the glided position, not the tile grid. */
+int  evo_grid_glide_x(const evo_grid *g);
 
 #ifdef __cplusplus
 }

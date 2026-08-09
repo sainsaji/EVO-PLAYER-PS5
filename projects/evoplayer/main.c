@@ -13920,7 +13920,7 @@ void draw_media_info_screen(uint32_t *fb) {
         fb,
         124,
         130,
-        "CURRENT FILE, STREAM AND PLAYBACK DETAILS",
+        "FILE STREAM AND PLAYBACK DETAILS",
         RR_BGRA(0, 205, 250, 225),
         1
     );
@@ -14735,280 +14735,8 @@ static void prospero_settings_activate_selected(void)
 /* EVO: draw_settings_screen is now a model handed to evo_screen_list().
  * Search for "EVO: the list pages". */
 
-void draw_profile_screen(uint32_t *fb) {
-    static int initialized = 0;
-    static int selected_y_fp = 0;
-    static int profile_frame = 0;
-
-    /* EVO: on the same grid as Settings and the main menu. */
-    const evo_theme *th = evo_theme_current();
-
-    const int row_x = 180;
-    const int row_w = 1920 - 2 * 180;
-    const int row_h = 96;
-    const int row_start_y = 286;
-    const int row_gap = 118;
-
-    if (profile_selected < 0) {
-        profile_selected = 0;
-    }
-
-    if (profile_selected > 3) {
-        profile_selected = 3;
-    }
-
-    int target_y_fp =
-        (row_start_y + profile_selected * row_gap) << 8;
-
-    if (!initialized) {
-        selected_y_fp = target_y_fp;
-        initialized = 1;
-    }
-
-    int distance = target_y_fp - selected_y_fp;
-
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
-
-    int selected_draw_y = selected_y_fp >> 8;
-
-    profile_frame++;
-
-    evo_ui_background(fb);
-
-    int breath_phase = profile_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(
-        fb,
-        180,
-        90,
-        4,
-        64,
-        th->accent
-    );
-
-    rr_fill(
-        fb,
-        180,
-        150,
-        26,
-        2,
-        th->accent_soft
-    );
-
-    rr_text(
-        fb,
-        220,
-        84,
-        "PLAYBACK PROFILE",
-        th->text_primary,
-        3
-    );
-
-    rr_text(
-        fb,
-        222,
-        140,
-        "CHOOSE HOW EVO PLAYER HANDLES MEDIA",
-        th->text_muted,
-        1
-    );
-
-    const char *names[4] = {
-        "BALANCED",
-        "PERFORMANCE",
-        "COMPATIBILITY",
-        "DEBUG"
-    };
-
-    const char *descriptions[4] = {
-        "Auto tune from file type (recommended)",
-        "Faster decode: more threads, loop-filter skip",
-        "Safer decode: full filters, deeper queues, no FAST",
-        "Technical toasts and decoder diagnostics"
-    };
-
-    /*
-     * Draw normal cards.
-     */
-    for (int row = 0; row < 4; row++) {
-        int y = row_start_y + row * row_gap;
-
-        evo_ui_card(fb, row_x, y, row_w, row_h, 0);
-    }
-
-    /*
-     * Draw animated selected card.
-     */
-    evo_ui_card(fb, row_x, selected_draw_y, row_w, row_h, 1);
-
-    for (int row = 0; row < 4; row++) {
-        int y = row_start_y + row * row_gap;
-
-        int icon_index =
-            row == 0 ? 3 :
-            row == 1 ? 1 :
-            row == 2 ? 5 :
-            4;
-
-        rr_icon(
-            fb,
-            row_x + 40,
-            y + 12,
-            icon_index
-        );
-
-        rr_text(
-            fb,
-            row_x + 132,
-            y + 10,
-            names[row],
-            th->text_primary,
-            2
-        );
-
-        rr_text(
-            fb,
-            row_x + 132,
-            y + 52,
-            descriptions[row],
-            row == profile_selected
-                ? th->accent
-                : th->text_secondary,
-            1
-        );
-
-        int arrow_shift = 0;
-
-        if (row == profile_selected) {
-            int phase = profile_frame % 36;
-
-            if (phase < 9) {
-                arrow_shift = phase / 3;
-            } else if (phase < 18) {
-                arrow_shift =
-                    3 - ((phase - 9) / 3);
-            }
-        }
-
-        rr_icon(
-            fb,
-            row_x + row_w - 104 + arrow_shift,
-            y + 12,
-            6
-        );
-    }
-
-    /*
-     * Current profile indicator.
-     */
-    char active_profile[96];
-
-    snprintf(
-        active_profile,
-        sizeof(active_profile),
-        "CURRENT  %s",
-        profile_name(current_profile)
-    );
-
-    rr_text(
-        fb,
-        1380,
-        194,
-        active_profile,
-        RR_BGRA(135, 195, 225, 210),
-        0
-    );
-
-    /*
-     * Footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        "APPLY",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        292,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        348,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        3
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "PLAYBACK PROFILE",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
+/* EVO: draw_profile_screen lives with the other list pages, after the
+ * focus and rail helpers it needs. Search "playback profile picker". */
 
 
 
@@ -15227,6 +14955,7 @@ static void rr_icon_tinted(uint32_t *fb, int x, int y, int idx, uint32_t tint)
     case 10: rr_img_tint(fb,x,y,EVO_ICON_PALETTE_W,EVO_ICON_PALETTE_H,EVO_ICON_PALETTE,tint); break;
     case 11: rr_img_tint(fb,x,y,EVO_ICON_FOLDER_W,EVO_ICON_FOLDER_H,EVO_ICON_FOLDER,tint); break;
     case 12: rr_img_tint(fb,x,y,EVO_ICON_TRASH_W,EVO_ICON_TRASH_H,EVO_ICON_TRASH,tint); break;
+    case 13: rr_img_tint(fb,x,y,EVO_ICON_HOME_W,EVO_ICON_HOME_H,EVO_ICON_HOME,tint); break;
     default: break;
     }
 }
@@ -15514,7 +15243,7 @@ void draw_menu_linear(uint32_t *fb, int selected)
     evo_build_launch_model(&model);
     evo_screen_launch_sync(&evo_launch_grid, &model);
 
-    evo_launch_grid.settled_frames++;
+    evo_grid_tick(&evo_launch_grid, EVO_BLEED_X, EVO_TILE_PITCH);
 
     evo_screen_launch(fb, &model, &evo_launch_grid);
 }
@@ -15813,6 +15542,69 @@ static void evo_browser_nav(int delta)
     evo_feedback_for_move(evo_focus_move(&evo_browser_focus, delta));
     file_selected = evo_browser_focus.index;
     file_scroll   = evo_browser_focus.scroll;
+}
+
+/*
+ * Jump to the next entry starting with a different letter.
+ *
+ * Auto-repeat makes a long folder navigable but not fast: 200 files is still
+ * several seconds of held d-pad. This moves in alphabetical steps instead,
+ * which is how you actually look for a file you can name. Bound to L2/R2 in
+ * the browser, where nothing else uses them.
+ */
+static char evo_browser_initial(int index)
+{
+    const char *n;
+    char c;
+
+    if (index < 0 || index >= file_count) return 0;
+
+    n = usb_files[index];
+    if (!n || !*n) return 0;
+
+    c = n[0];
+    if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    return c;
+}
+
+static void evo_browser_jump_letter(int direction)
+{
+    char start;
+    int  i;
+
+    evo_browser_sync();
+
+    if (file_count <= 1) { evo_feedback(EVO_FB_BOUNDARY); return; }
+
+    start = evo_browser_initial(file_selected);
+
+    for (i = 1; i <= file_count; i++) {
+        int idx = file_selected + (direction >= 0 ? i : -i);
+
+        /* Wrap, like the list itself does. */
+        idx %= file_count;
+        if (idx < 0) idx += file_count;
+
+        if (evo_browser_initial(idx) != start) {
+            /* Going backwards, land on the FIRST entry of that letter rather
+             * than its last - otherwise back-then-forward does not return
+             * you where you started. */
+            if (direction < 0) {
+                char target = evo_browser_initial(idx);
+                while (idx > 0 && evo_browser_initial(idx - 1) == target)
+                    idx--;
+            }
+
+            evo_focus_set(&evo_browser_focus, idx);
+            file_selected = evo_browser_focus.index;
+            file_scroll   = evo_browser_focus.scroll;
+            evo_feedback(EVO_FB_MOVE);
+            return;
+        }
+    }
+
+    /* Every entry shares an initial. */
+    evo_feedback(EVO_FB_BOUNDARY);
 }
 
 static void evo_browser_page(int direction)
@@ -16125,9 +15917,10 @@ void draw_settings_screen(uint32_t *fb)
         "REMOVE HOME TILE"
     };
 
-    const char    *details[EVO_SETTINGS_COUNT];
-    evo_list_model m;
-    int            i;
+    static uint32_t theme_swatches[3];
+    const char     *details[EVO_SETTINGS_COUNT];
+    evo_list_model  m;
+    int             i;
 
     evo_page_sync(&settings_selected, EVO_SETTINGS_COUNT);
 
@@ -16138,9 +15931,18 @@ void draw_settings_screen(uint32_t *fb)
 
     /* The theme row states which theme is active and how many exist, so it is
      * obvious when a .theme file on USB has been picked up. */
-    snprintf(theme_value, sizeof(theme_value), "%s  (%d OF %d)",
+    snprintf(theme_value, sizeof(theme_value), "%s  -  %d OF %d",
              evo_theme_name(evo_theme_index()),
              evo_theme_index() + 1, evo_theme_count());
+
+    /* Swatches of what the active theme actually looks like. Cycling by name
+     * alone told you nothing about what you were switching to. */
+    {
+        const evo_theme *cur = evo_theme_current();
+        theme_swatches[0] = cur->accent;
+        theme_swatches[1] = cur->surface;
+        theme_swatches[2] = cur->bg_top;
+    }
 
     snprintf(uninstall_value, sizeof(uninstall_value), "%s",
              (prospero_uninstall_confirm_until != 0 &&
@@ -16157,12 +15959,17 @@ void draw_settings_screen(uint32_t *fb)
     details[7] = uninstall_value;
 
     for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
-        evo_settings_rows[i].title    = titles[i];
-        evo_settings_rows[i].detail   = details[i];
-        evo_settings_rows[i].icon     = icons[i];
-        evo_settings_rows[i].chevron  = 1;
-        evo_settings_rows[i].progress = -1;
+        evo_settings_rows[i].title        = titles[i];
+        evo_settings_rows[i].detail       = details[i];
+        evo_settings_rows[i].icon         = icons[i];
+        evo_settings_rows[i].chevron      = 1;
+        evo_settings_rows[i].progress     = -1;
+        evo_settings_rows[i].swatches     = NULL;
+        evo_settings_rows[i].swatch_count = 0;
     }
+
+    evo_settings_rows[6].swatches     = theme_swatches;   /* THEME */
+    evo_settings_rows[6].swatch_count = 3;
 
     memset(&m, 0, sizeof(m));
     m.title    = "SETTINGS";
@@ -16311,11 +16118,12 @@ void draw_about_support_screen(uint32_t *fb)
     for (int i = 0; i < 5; i++) {
         evo_about_rows[i].chevron  = 0;
         evo_about_rows[i].progress = -1;
+        evo_about_rows[i].info     = 1;   /* facts, not actions */
     }
 
     memset(&m, 0, sizeof(m));
     m.title    = "ABOUT";
-    m.subtitle = "CREDITS, PROJECT INFO AND SUPPORT";
+    m.subtitle = "CREDITS AND PROJECT INFO";
     m.section  = EVO_SECTION_ABOUT;
     m.entries  = evo_about_rows;
     m.count    = 5;
@@ -16375,6 +16183,60 @@ static void evo_rail_activate(void)
      * through every section you visited on the way. */
     evo_nav_replace(info->screen);
     screen = (int)info->screen;
+}
+
+/* ---- playback profile picker ---------------------------------------------
+ *
+ * A child of SETTINGS, so the rail keeps SETTINGS lit while you are in here -
+ * see evo_screen_section(). It is a four-row list and nothing more; it used
+ * 273 lines of bespoke chrome to say so.
+ */
+static evo_list_entry evo_profile_rows[4];
+
+void draw_profile_screen(uint32_t *fb)
+{
+    static const char *names[4] = {
+        "BALANCED", "PERFORMANCE", "COMPATIBILITY", "DEBUG"
+    };
+    static const char *blurbs[4] = {
+        "Even trade between smoothness and format coverage",
+        "Fewest dropped frames - best for high bitrate video",
+        "Widest format support - try this when a file will not play",
+        "Verbose diagnostics and on-screen counters"
+    };
+
+    evo_list_model m;
+    char           badge[48];
+    int            i;
+
+    evo_page_sync(&profile_selected, 4);
+
+    for (i = 0; i < 4; i++) {
+        evo_profile_rows[i].title    = names[i];
+        evo_profile_rows[i].detail   =
+            ((PlaybackProfile)i == current_profile) ? "ACTIVE" : blurbs[i];
+        evo_profile_rows[i].icon     = EVO_IC_SETTINGS;
+        evo_profile_rows[i].chevron  = 0;
+        evo_profile_rows[i].progress = -1;
+        /* The active one states a fact; the rest offer an action. */
+        evo_profile_rows[i].info     =
+            ((PlaybackProfile)i == current_profile);
+        evo_profile_rows[i].swatches     = NULL;
+        evo_profile_rows[i].swatch_count = 0;
+    }
+
+    snprintf(badge, sizeof(badge), "ACTIVE  %s",
+             profile_name(current_profile));
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "PLAYBACK PROFILE";
+    m.subtitle = "HOW AGGRESSIVELY THE DECODER IS TUNED";
+    m.section  = EVO_SECTION_SETTINGS;
+    m.entries  = evo_profile_rows;
+    m.count    = 4;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* PROSPERO_EXACT_MENU_RENDER_END */
@@ -18032,7 +17894,7 @@ int main(void) {
                 else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, +1);
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, +1);
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, +1);
-                else if (screen == SCREEN_PROFILE_SELECT) profile_selected = (profile_selected + 1) % 4;
+                else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, +1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, +1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, +1);
                 else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(+1);
@@ -18051,7 +17913,7 @@ int main(void) {
                 else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, -1);
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, -1);
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, -1);
-                else if (screen == SCREEN_PROFILE_SELECT) profile_selected = (profile_selected + 3) % 4;
+                else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, -1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, -1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, -1);
                 else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(-1);
@@ -18095,6 +17957,17 @@ int main(void) {
             ) {
                 prospero_audio_cycle_track();
             }
+
+            /* EVO: alphabetical jump in the browser. The triggers are free
+             * there, and holding a direction through 200 files is not a way
+             * to find one you can already name. */
+            if (screen == SCREEN_USB_BROWSER &&
+                evo_input_fired(&evo_pad_state, EVO_ACT_SHOULDER_L))
+                evo_browser_jump_letter(-1);
+
+            if (screen == SCREEN_USB_BROWSER &&
+                evo_input_fired(&evo_pad_state, EVO_ACT_SHOULDER_R))
+                evo_browser_jump_letter(+1);
 
             /* Subtitle delay: L2 −100ms, R3 +100ms */
             if (

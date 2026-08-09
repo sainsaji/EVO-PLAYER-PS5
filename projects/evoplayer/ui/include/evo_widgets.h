@@ -29,6 +29,14 @@ typedef struct evo_row {
     int         icon;        /* EVO_IC_*, or -1 for none */
     int         selected;
     int         chevron;     /* draw a disclosure arrow on the right */
+
+    /*
+     * A row that states a fact rather than offering an action - the About
+     * page. Emphasis inverts: the value is what you came to read, so it takes
+     * the primary colour and the label steps back. Without this an
+     * informational row is indistinguishable from a selectable one.
+     */
+    int         info;
     int         badge_icon;  /* EVO_IC_*, right side, or -1 */
 
     /* 0..1000, or -1 for none. Drawn as a thin resume bar along the bottom
@@ -39,6 +47,14 @@ typedef struct evo_row {
     /* Marquee phase for the title when it overflows; pass the focus model's
      * settled_frames. 0 disables. */
     int         marquee_phase;
+
+    /*
+     * Colour chips shown on the right of the row. The settings THEME row uses
+     * them so cycling themes is not blind - the name alone tells you nothing
+     * about what you are about to switch to.
+     */
+    const uint32_t *swatches;
+    int             swatch_count;
 } evo_row;
 
 void evo_widget_row(uint32_t *fb, int x, int y, int w, int h,
@@ -125,6 +141,14 @@ void evo_widget_scrollbar(uint32_t *fb, int x, int y, int h,
 /* Horizontal progress / resume bar. */
 void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
                          int permille);
+
+/*
+ * As above, at a given opacity. A resume bar sitting on a card wants to be
+ * quieter than a hero's progress bar: at full accent it stopped reading as
+ * part of the card and started reading as a separator rule between rows.
+ */
+void evo_widget_progress_a(uint32_t *fb, int x, int y, int w, int h,
+                           int permille, int alpha);
 
 /* Centred "nothing here" state, with a reason and a suggestion. */
 void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,

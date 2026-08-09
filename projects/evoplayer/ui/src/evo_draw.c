@@ -29,6 +29,17 @@ int evo_face_ink_h(evo_face face)
     return INK_BOT[f] - INK_TOP[f] + 1;
 }
 
+char evo_text_unsupported(const char *s)
+{
+    if (!s) return 0;
+
+    for (; *s; s++)
+        if (!strchr(EVO_TEXT_CHARSET, *s))
+            return *s;
+
+    return 0;
+}
+
 /* ---- primitives -------------------------------------------------------- */
 
 void evo_text(uint32_t *fb, int x, int y, const char *s,

@@ -78,6 +78,11 @@
 #define EVO_ROW_ICON        56
 #define EVO_ROW_TEXT_X      108   /* past a 56px icon at pad 28 */
 
+/* Colour chips on a row - the settings THEME preview. */
+#define EVO_SWATCH_W        34
+#define EVO_SWATCH_H        24
+#define EVO_SWATCH_GAP      8
+
 /* ---- inspector (file browser right-hand column) ------------------------ */
 
 #define EVO_INSPECT_W       560

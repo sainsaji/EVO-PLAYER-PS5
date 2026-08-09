@@ -278,6 +278,26 @@ static void draw_shelf(uint32_t *fb, int label_y, int tiles_y,
 
         evo_widget_tile(fb, x, tiles_y, EVO_TILE_W, EVO_TILE_H, &tile);
     }
+
+    /*
+     * A selection ring that slides, drawn only while the glide is in flight.
+     *
+     * The tile's own selected chrome switches instantly - fill, icon tint and
+     * bloom - because those are states, not positions. What was missing was
+     * any sense of travel: the cursor teleported between tiles while every
+     * list in the app glided. Once the glide settles this draws nothing, so
+     * the resting appearance is unchanged and the ring never doubles up on
+     * the tile's own border.
+     */
+    if (active && g->glide_ready && g->glide_fp != g->glide_target_fp) {
+        const evo_theme *th = evo_theme_current();
+        int gx = evo_grid_glide_x(g);
+
+        evo_ui_round_rect(fb, gx, tiles_y, EVO_TILE_W, EVO_TILE_H, th->radius,
+                          with_alpha(th->accent, 0), with_alpha(th->accent, 0),
+                          th->accent, th->border_px + 1,
+                          with_alpha(th->shadow, 0), 0);
+    }
 }
 
 void evo_screen_launch(uint32_t *fb, const evo_launch_model *m,
@@ -431,7 +451,33 @@ static void draw_inspector(uint32_t *fb, const evo_browser_inspect *ins)
     }
 
     if (ins->probing) {
-        evo_text(fb, x, py + 12, "READING MEDIA...",
+        /*
+         * Placeholder bars where the probed fields will land, rather than
+         * only a line of text. The panel otherwise appears to have finished
+         * loading with half its rows missing, and the eye reads absence as an
+         * answer - "this file has no codecs" - instead of as "still working".
+         */
+        int i;
+        int sy = py + 10;
+
+        for (i = 0; i < 4; i++) {
+            int keyw = 90 + (i * 23) % 40;
+            int valw = 150 + (i * 61) % 130;
+
+            evo_ui_round_rect(fb, x, sy + 8, keyw, 10, 5,
+                              with_alpha(th->text_muted, 55),
+                              with_alpha(th->text_muted, 55),
+                              with_alpha(th->border, 0), 0,
+                              with_alpha(th->shadow, 0), 0);
+            evo_ui_round_rect(fb, x + 150, sy + 8, valw, 10, 5,
+                              with_alpha(th->text_muted, 40),
+                              with_alpha(th->text_muted, 40),
+                              with_alpha(th->border, 0), 0,
+                              with_alpha(th->shadow, 0), 0);
+            sy += 34;
+        }
+
+        evo_text(fb, x, sy + 10, "READING MEDIA",
                  with_alpha(th->text_muted, 190), EVO_FACE_SMALL);
     }
 }
@@ -595,6 +641,9 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
         row.icon          = m->entries[index].icon;
         row.chevron       = m->entries[index].chevron;
         row.progress      = m->entries[index].progress;
+        row.info          = m->entries[index].info;
+        row.swatches      = m->entries[index].swatches;
+        row.swatch_count  = m->entries[index].swatch_count;
         row.selected      = (index == f->index);
         row.badge_icon    = -1;
         row.marquee_phase = row.selected ? f->settled_frames : 0;

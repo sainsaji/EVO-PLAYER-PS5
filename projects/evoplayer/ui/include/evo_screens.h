@@ -171,6 +171,11 @@ typedef struct evo_list_entry {
     int         icon;        /* EVO_IC_*, or -1 */
     int         chevron;
     int         progress;    /* 0..1000, or -1 */
+    int         info;        /* states a fact rather than offering an action */
+
+    /* Colour chips on the right - the settings THEME row. */
+    const uint32_t *swatches;
+    int             swatch_count;
 } evo_list_entry;
 
 typedef struct evo_list_model {

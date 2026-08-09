@@ -238,6 +238,8 @@ void evo_grid_init(evo_grid *g, int rows)
     g->row  = 0;
     g->rows = rows;
     g->settled_frames = 0;
+    g->glide_fp = g->glide_target_fp = 0;
+    g->glide_ready = 0;
 
     for (i = 0; i < EVO_GRID_ROWS; i++) {
         g->count[i]   = 0;
@@ -311,6 +313,7 @@ evo_move_result evo_grid_move_v(evo_grid *g, int delta)
         if (g->count[row] > 0) {
             g->row = row;
             grid_clamp_row(g, row);
+            g->glide_ready = 0;   /* new shelf - do not slide sideways into it */
 
             if (g->row == before) return EVO_MOVE_BLOCKED;
 
@@ -348,4 +351,36 @@ int evo_grid_row_scroll(const evo_grid *g, int row)
 int evo_grid_row_active(const evo_grid *g, int row)
 {
     return g->row == row;
+}
+
+void evo_grid_tick(evo_grid *g, int origin, int pitch)
+{
+    int col = evo_grid_col(g);
+    int distance;
+
+    g->settled_frames++;
+
+    if (col < 0) { g->glide_ready = 0; return; }
+
+    g->glide_target_fp = (origin + (col - g->scroll[g->row]) * pitch) << 8;
+
+    /* Re-seed rather than glide when the cursor changes row: sliding
+     * horizontally across a shelf you did not move along is nonsense. */
+    if (!g->glide_ready) {
+        g->glide_fp    = g->glide_target_fp;
+        g->glide_ready = 1;
+        return;
+    }
+
+    distance = g->glide_target_fp - g->glide_fp;
+
+    if (distance > -EVO_GLIDE_SNAP_FP && distance < EVO_GLIDE_SNAP_FP)
+        g->glide_fp = g->glide_target_fp;
+    else
+        g->glide_fp += distance / EVO_GLIDE_DIV;
+}
+
+int evo_grid_glide_x(const evo_grid *g)
+{
+    return g->glide_fp >> 8;
 }

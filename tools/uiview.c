@@ -160,6 +160,7 @@ static void rr_icon_tinted(uint32_t *fb, int x, int y, int idx, uint32_t tint)
     case 10: img_tint(fb,x,y,EVO_ICON_PALETTE_W,EVO_ICON_PALETTE_H,EVO_ICON_PALETTE,tint); break;
     case 11: img_tint(fb,x,y,EVO_ICON_FOLDER_W,EVO_ICON_FOLDER_H,EVO_ICON_FOLDER,tint); break;
     case 12: img_tint(fb,x,y,EVO_ICON_TRASH_W,EVO_ICON_TRASH_H,EVO_ICON_TRASH,tint); break;
+    case 13: img_tint(fb,x,y,EVO_ICON_HOME_W,EVO_ICON_HOME_H,EVO_ICON_HOME,tint); break;
     default: break;
     }
 }
@@ -303,6 +304,11 @@ static void render_launch(int sel_row, int sel_col)
     g.row = sel_row;
     if (sel_col > 0) for (int i = 0; i < sel_col; i++) evo_grid_move_h(&g, 1);
 
+    /* Seed the glide so the still shows the settled state, not a frame
+     * mid-travel with a stray ring in it. */
+    g.glide_ready = 0;
+    evo_grid_tick(&g, EVO_BLEED_X, EVO_TILE_PITCH);
+
     evo_screen_launch(g_fb, &m, &g);
 }
 
@@ -387,14 +393,23 @@ static void render_list(const char *which, int sel, int rail_focused,
             "DEFAULT ASPECT RATIO","AUTO-DETECT SUBTITLES","DEVELOPER MODE",
             "FOLDERS FIRST","THEME","REMOVE HOME TILE" };
         static const char *d[] = { "Performance","ON","FIT","ON","OFF","ON",
-            "CARBON  (2 OF 4)","REMOVES MEDIA TILE" };
+            "CARBON  -  2 OF 4","REMOVES MEDIA TILE" };
         static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_RESUME,EVO_IC_ASPECT,
             EVO_IC_SUBTITLES,EVO_IC_TOOLS,EVO_IC_FOLDER,EVO_IC_PALETTE,EVO_IC_TRASH };
+        static uint32_t sw[3];
+        const evo_theme *cur = evo_theme_current();
+
         n = 8;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
         }
+
+        /* Exercise the THEME row's swatches, as the real settings screen
+         * does - a fixture that skips them cannot show they render. */
+        sw[0] = cur->accent; sw[1] = cur->surface; sw[2] = cur->bg_top;
+        e[6].swatches = sw; e[6].swatch_count = 3;
+
         m.title="SETTINGS"; m.subtitle="PLAYBACK AND APPLICATION PREFERENCES";
         m.section=EVO_SECTION_SETTINGS;
     } else if (!strcmp(which, "tools")) {
@@ -451,9 +466,10 @@ static void render_list(const char *which, int sel, int rail_focused,
             EVO_IC_PALETTE,EVO_IC_ASPECT };
         n = 5;
         for (int i = 0; i < n; i++) {
-            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i]; e[i].progress=-1;
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].progress=-1; e[i].info=1;
         }
-        m.title="ABOUT"; m.subtitle="CREDITS, PROJECT INFO AND SUPPORT";
+        m.title="ABOUT"; m.subtitle="CREDITS AND PROJECT INFO";
         m.section=EVO_SECTION_ABOUT;
     }
 

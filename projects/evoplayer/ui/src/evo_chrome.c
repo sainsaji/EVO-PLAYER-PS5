@@ -275,8 +275,11 @@ static void draw_header(uint32_t *fb, const evo_page *p)
     }
 
     if (p->badge && *p->badge) {
+        /* text_secondary, not text_muted: at muted the position counter was
+         * effectively invisible against the background bloom on the right of
+         * the page, which is exactly where it sits. */
         evo_text_right(fb, evo_chrome_content_r(p), EVO_HEADER_SUB_Y + 4,
-                       p->badge, th->text_muted, EVO_FACE_SMALL);
+                       p->badge, th->text_secondary, EVO_FACE_SMALL);
     }
 
     /*

@@ -98,6 +98,8 @@ void evo_widget_row(uint32_t *fb, int x, int y, int w, int h,
 
     if (r->chevron) text_r -= 56;
     if (r->badge_icon >= 0) text_r -= 48;
+    if (r->swatches && r->swatch_count > 0)
+        text_r -= r->swatch_count * (EVO_SWATCH_W + EVO_SWATCH_GAP) + 12;
 
     if (r->detail && *r->detail) {
         evo_text_y_stacked(y, h, EVO_FACE_MENU, EVO_FACE_SUB, 10,
@@ -107,18 +109,40 @@ void evo_widget_row(uint32_t *fb, int x, int y, int w, int h,
         detail_y = 0;
     }
 
-    if (r->selected && r->marquee_phase > 0) {
-        evo_text_marquee(fb, text_x, title_y, text_r - text_x, r->title,
-                         th->text_primary, EVO_FACE_MENU, r->marquee_phase);
-    } else {
-        evo_text_fit(fb, text_x, title_y, text_r - text_x, r->title,
-                     th->text_primary, EVO_FACE_MENU);
+    {
+        uint32_t title_col = r->info ? th->text_secondary : th->text_primary;
+
+        if (r->selected && r->marquee_phase > 0)
+            evo_text_marquee(fb, text_x, title_y, text_r - text_x, r->title,
+                             title_col, EVO_FACE_MENU, r->marquee_phase);
+        else
+            evo_text_fit(fb, text_x, title_y, text_r - text_x, r->title,
+                         title_col, EVO_FACE_MENU);
     }
 
     if (r->detail && *r->detail) {
+        uint32_t detail_col = r->info
+            ? th->text_primary
+            : (r->selected ? th->text_secondary : th->text_muted);
+
         evo_text_fit(fb, text_x, detail_y, text_r - text_x, r->detail,
-                     r->selected ? th->text_secondary : th->text_muted,
-                     EVO_FACE_SUB);
+                     detail_col, EVO_FACE_SUB);
+    }
+
+    if (r->swatches && r->swatch_count > 0) {
+        int sw_total = r->swatch_count * (EVO_SWATCH_W + EVO_SWATCH_GAP)
+                       - EVO_SWATCH_GAP;
+        int sx = x + w - (r->chevron ? 68 : EVO_ROW_PAD_X) - sw_total;
+        int sy = y + (h - EVO_SWATCH_H) / 2;
+        int i;
+
+        for (i = 0; i < r->swatch_count; i++) {
+            evo_ui_round_rect(fb, sx, sy, EVO_SWATCH_W, EVO_SWATCH_H, 5,
+                              r->swatches[i], r->swatches[i],
+                              with_alpha(th->border, 170), 1,
+                              with_alpha(th->shadow, 0), 0);
+            sx += EVO_SWATCH_W + EVO_SWATCH_GAP;
+        }
     }
 
     if (r->badge_icon >= 0) {
@@ -135,9 +159,15 @@ void evo_widget_row(uint32_t *fb, int x, int y, int w, int h,
     }
 
     if (r->progress >= 0) {
-        /* Along the very bottom of the card, inside the border radius. */
-        evo_widget_progress(fb, x + th->radius, y + h - 5,
-                            w - th->radius * 2, 3, r->progress);
+        /*
+         * Inset from the card edge and dimmed. Flush against the bottom at
+         * full accent it read as a rule *between* rows rather than as this
+         * row's watch progress - the brightest thing on an unselected card,
+         * touching its border.
+         */
+        evo_widget_progress_a(fb, x + EVO_ROW_PAD_X, y + h - 12,
+                              w - EVO_ROW_PAD_X * 2, 3,
+                              r->progress, r->selected ? 210 : 120);
     }
 }
 
@@ -386,8 +416,8 @@ void evo_widget_scrollbar(uint32_t *fb, int x, int y, int h,
                       with_alpha(th->shadow, 0), 0);
 }
 
-void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
-                         int permille)
+void evo_widget_progress_a(uint32_t *fb, int x, int y, int w, int h,
+                           int permille, int alpha)
 {
     const evo_theme *th = evo_theme_current();
     int fill;
@@ -396,8 +426,8 @@ void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
     if (permille > 1000) permille = 1000;
 
     evo_ui_round_rect(fb, x, y, w, h, h / 2,
-                      with_alpha(th->text_muted, 70),
-                      with_alpha(th->text_muted, 70),
+                      with_alpha(th->text_muted, (70 * alpha) / 255),
+                      with_alpha(th->text_muted, (70 * alpha) / 255),
                       with_alpha(th->border, 0), 0,
                       with_alpha(th->shadow, 0), 0);
 
@@ -405,9 +435,16 @@ void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
     if (fill <= 0) return;
 
     evo_ui_round_rect(fb, x, y, fill, h, h / 2,
-                      th->accent, th->accent,
+                      with_alpha(th->accent, alpha),
+                      with_alpha(th->accent, alpha),
                       with_alpha(th->accent, 0), 0,
                       with_alpha(th->shadow, 0), 0);
+}
+
+void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
+                         int permille)
+{
+    evo_widget_progress_a(fb, x, y, w, h, permille, 255);
 }
 
 void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
