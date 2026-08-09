@@ -8297,11 +8297,45 @@ static void prospero_thumbnail_blit(
 
 /* THUMBNAIL_WORKER_FORWARD_END */
 
+/* ---------------------------------------------------------------------------
+ * EVO: the playback OSD draws from the theme.
+ *
+ * It was built from 56 hardcoded literals - cyan panel borders, blue glows,
+ * pale-blue captions - so the one screen you spend the most time on stayed
+ * cyan under CARBON, EMBER and AURORA while every menu around it changed.
+ *
+ * The OSD fades as a whole, so colours arrive with an alpha *expression*
+ * rather than a fixed value; osd_col() takes a theme token and applies it.
+ * ------------------------------------------------------------------------ */
+
+static uint32_t osd_col(uint32_t colour, int alpha)
+{
+    if (alpha < 0)   alpha = 0;
+    if (alpha > 255) alpha = 255;
+    return (colour & 0x00FFFFFFu) | ((uint32_t)alpha << 24);
+}
+
+/*
+ * The scrubber knob and the active chapter mark were near-white cyan - deliberately
+ * brighter than the accent so they read as "this is the live one". Mixing the
+ * accent towards text_primary reproduces that relationship in any theme
+ * instead of pinning it to one hue.
+ */
+static uint32_t osd_hi(const evo_theme *th)
+{
+    uint32_t a = th->accent, w = th->text_primary;
+    int r = ( a        & 0xFF) + ((( w        & 0xFF) - ( a        & 0xFF)) * 150) / 255;
+    int g = ((a >> 8)  & 0xFF) + ((((w >> 8)  & 0xFF) - ((a >> 8)  & 0xFF)) * 150) / 255;
+    int b = ((a >> 16) & 0xFF) + ((((w >> 16) & 0xFF) - ((a >> 16) & 0xFF)) * 150) / 255;
+    return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
 static void prospero_player_osd_draw_scrub_preview(
     uint32_t *fb,
     int bar_y,
     int alpha
 ) {
+    const evo_theme *th = evo_theme_current();
     if (
         !prospero_scrub_active ||
         prospero_player_osd.preview_alpha <= 0
@@ -8364,12 +8398,7 @@ static void prospero_player_osd_draw_scrub_preview(
         card_w,
         card_h,
         24,
-        RR_BGRA(
-            0,
-            0,
-            0,
-            preview_alpha * 90 / 255
-        ),
+        osd_col(th->scrim, preview_alpha * 90 / 255),
         0,
         0
     );
@@ -8384,24 +8413,9 @@ static void prospero_player_osd_draw_scrub_preview(
         card_w,
         card_h,
         24,
-        RR_BGRA(
-            1,
-            8,
-            20,
-            preview_alpha * 235 / 255
-        ),
-        RR_BGRA(
-            0,
-            205,
-            255,
-            preview_alpha * 210 / 255
-        ),
-        RR_BGRA(
-            0,
-            145,
-            255,
-            preview_alpha * 72 / 255
-        )
+        osd_col(th->surface, preview_alpha * 235 / 255),
+        osd_col(th->accent, preview_alpha * 210 / 255),
+        osd_col(th->accent_soft, preview_alpha * 72 / 255)
     );
 
     int image_x =
@@ -8416,12 +8430,7 @@ static void prospero_player_osd_draw_scrub_preview(
         image_y,
         image_w,
         image_h,
-        RR_BGRA(
-            0,
-            2,
-            8,
-            preview_alpha * 245 / 255
-        )
+        osd_col(th->scrim, preview_alpha * 245 / 255)
     );
 
     if (prospero_thumbnail_is_valid()) {
@@ -8441,12 +8450,7 @@ static void prospero_player_osd_draw_scrub_preview(
             prospero_thumbnail_is_loading()
                 ? "LOADING PREVIEW"
                 : "PREVIEW PENDING",
-            RR_BGRA(
-                140,
-                205,
-                230,
-                preview_alpha * 220 / 255
-            ),
+            osd_col(th->text_secondary, preview_alpha * 220 / 255),
             0
         );
     }
@@ -8457,12 +8461,7 @@ static void prospero_player_osd_draw_scrub_preview(
         card_y + card_h - 49,
         card_w - 36,
         1,
-        RR_BGRA(
-            0,
-            165,
-            225,
-            preview_alpha * 90 / 255
-        )
+        osd_col(th->accent_soft, preview_alpha * 90 / 255)
     );
     if (
         prospero_thumbnail_is_loading() &&
@@ -8483,14 +8482,7 @@ static void prospero_player_osd_draw_scrub_preview(
                 image_y + image_h - 22,
                 7,
                 7,
-                RR_BGRA(
-                    125,
-                    235,
-                    255,
-                    preview_alpha *
-                    dot_alpha /
-                    255
-                )
+                osd_col(osd_hi(th), preview_alpha * dot_alpha / 255)
             );
         }
     }
@@ -8510,12 +8502,7 @@ static void prospero_player_osd_draw_scrub_preview(
         card_x + card_w / 2 - 50,
         card_y + card_h - 37,
         target_time,
-        RR_BGRA(
-            230,
-            246,
-            255,
-            preview_alpha * 245 / 255
-        ),
+        osd_col(th->text_primary, preview_alpha * 245 / 255),
         1
     );
 
@@ -8528,12 +8515,7 @@ static void prospero_player_osd_draw_scrub_preview(
         card_y + card_h,
         3,
         bar_y - (card_y + card_h),
-        RR_BGRA(
-            0,
-            205,
-            255,
-            preview_alpha * 105 / 255
-        )
+        osd_col(th->accent, preview_alpha * 105 / 255)
     );
 }
 
@@ -8543,6 +8525,7 @@ static void prospero_player_osd_draw_scrub_handle(
     int bar_y,
     int alpha
 ) {
+    const evo_theme *th = evo_theme_current();
     if (!prospero_scrub_active) {
         return;
     }
@@ -8569,12 +8552,7 @@ static void prospero_player_osd_draw_scrub_handle(
         bar_y - glow_size / 2 + 4,
         glow_size,
         glow_size,
-        RR_BGRA(
-            0,
-            150,
-            255,
-            alpha * 38 / 255
-        )
+        osd_col(th->accent_soft, alpha * 38 / 255)
     );
 
     rr_fill(
@@ -8583,12 +8561,7 @@ static void prospero_player_osd_draw_scrub_handle(
         bar_y - 7,
         14,
         22,
-        RR_BGRA(
-            145,
-            245,
-            255,
-            alpha * 245 / 255
-        )
+        osd_col(osd_hi(th), alpha * 245 / 255)
     );
 
     rr_fill(
@@ -8597,12 +8570,7 @@ static void prospero_player_osd_draw_scrub_handle(
         bar_y - 3,
         6,
         14,
-        RR_BGRA(
-            235,
-            255,
-            255,
-            alpha
-        )
+        osd_col(th->text_primary, alpha)
     );
 }
 
@@ -11089,6 +11057,7 @@ static void prospero_subtitle_cycle_track(void) {
 
 
 void draw_player_screen(uint32_t *fb) {
+    const evo_theme *th = evo_theme_current();
     static int osd_visibility = 0;
     static int music_pulse = 0;
 
@@ -11110,28 +11079,29 @@ void draw_player_screen(uint32_t *fb) {
     } else {
         music_pulse = (music_pulse + 1) % 360;
         /* Atmosphere */
-        rr_fill(fb, 0, 0, 1920, 1080, RR_BGRA(2, 12, 28, 255));
-        rr_fill(fb, 0, 0, 1920, 1080, RR_BGRA(0, 40, 90, 40 + (music_pulse % 40)));
+        rr_fill(fb, 0, 0, 1920, 1080, osd_col(th->bg_top, 255));
+        rr_fill(fb, 0, 0, 1920, 1080,
+                osd_col(th->accent_soft, 40 + (music_pulse % 40)));
 
-        rr_fill(fb, 82, 74, 5, 76, RR_BGRA(0, 215, 255, 225));
-        rr_fill(fb, 82, 146, 31, 2, RR_BGRA(0, 215, 255, 195));
-        rr_text(fb, 122, 70, "NOW PLAYING", RR_BGRA(232, 244, 255, 240), 3);
-        rr_text(fb, 124, 132, "MUSIC", RR_BGRA(0, 205, 250, 225), 1);
+        rr_fill(fb, 82, 74, 5, 76, osd_col(th->accent, 225));
+        rr_fill(fb, 82, 146, 31, 2, osd_col(th->accent, 195));
+        rr_text(fb, 122, 70, "NOW PLAYING", osd_col(th->text_primary, 240), 3);
+        rr_text(fb, 124, 132, "MUSIC", osd_col(th->accent, 225), 1);
 
         /* Center card */
         ui_round_asset(
             fb, 460, 220, 1000, 420, 28,
-            RR_BGRA(1, 14, 32, 230),
-            RR_BGRA(0, 185, 245, 160),
-            RR_BGRA(0, 135, 255, 50)
+            osd_col(th->surface, 230),
+            osd_col(th->accent, 160),
+            osd_col(th->accent_soft, 50)
         );
 
-        rr_fill(fb, 520, 280, 64, 64, RR_BGRA(0, 180, 255, 200));
-        rr_text(fb, 620, 290, "EVO MUSIC", RR_BGRA(0, 215, 255, 235), 2);
+        rr_fill(fb, 520, 280, 64, 64, osd_col(th->accent, 200));
+        rr_text(fb, 620, 290, "EVO MUSIC", osd_col(th->accent, 235), 2);
         rr_text(
             fb, 620, 350,
             player_paused ? "PAUSED" : "PLAYING",
-            RR_BGRA(232, 244, 255, 235),
+            osd_col(th->text_primary, 235),
             2
         );
 
@@ -11145,7 +11115,7 @@ void draw_player_screen(uint32_t *fb) {
                 "%s  ·  CROSS PAUSE  ·  L/R SEEK",
                 cname
             );
-            rr_text(fb, 620, 420, codec_line, RR_BGRA(140, 200, 230, 220), 1);
+            rr_text(fb, 620, 420, codec_line, osd_col(th->text_secondary, 220), 1);
         }
 
         /* Simple pulse bars */
@@ -11159,7 +11129,10 @@ void draw_player_screen(uint32_t *fb) {
                 560 - h,
                 22,
                 h,
-                RR_BGRA(0, 180 + (b % 4) * 15, 255, 180)
+                /* Bars shimmer by alpha rather than by hue, so the
+                 * visualiser follows the theme instead of always being
+                 * cyan. */
+                osd_col(th->accent, 150 + (b % 4) * 25)
             );
         }
     }
@@ -11277,24 +11250,9 @@ double percentage = 0.0;
             panel_w,
             panel_h,
             30,
-            RR_BGRA(
-                1,
-                8,
-                20,
-                alpha * 220 / 255
-            ),
-            RR_BGRA(
-                0,
-                190,
-                245,
-                alpha * 165 / 255
-            ),
-            RR_BGRA(
-                0,
-                135,
-                255,
-                alpha * 52 / 255
-            )
+            osd_col(th->surface, alpha * 220 / 255),
+            osd_col(th->accent, alpha * 165 / 255),
+            osd_col(th->accent_soft, alpha * 52 / 255)
         );
 
         /*
@@ -11305,12 +11263,7 @@ double percentage = 0.0;
             panel_x + 46,
             panel_y + 32,
             title,
-            RR_BGRA(
-                235,
-                246,
-                255,
-                alpha * 245 / 255
-            ),
+            osd_col(th->text_primary, alpha * 245 / 255),
             2
         );
 
@@ -11320,12 +11273,7 @@ double percentage = 0.0;
                 panel_x + 48,
                 panel_y + 76,
                 metadata,
-                RR_BGRA(
-                    125,
-                    198,
-                    228,
-                    alpha * 220 / 255
-                ),
+                osd_col(th->text_secondary, alpha * 220 / 255),
                 1
             );
         }
@@ -11358,18 +11306,8 @@ double percentage = 0.0;
             panel_y + 38,
             state_text,
             player_paused
-                ? RR_BGRA(
-                    255,
-                    220,
-                    120,
-                    alpha * 235 / 255
-                )
-                : RR_BGRA(
-                    0,
-                    215,
-                    255,
-                    alpha * 235 / 255
-                ),
+                ? osd_col(th->accent_alt, alpha * 235 / 255)
+                : osd_col(th->accent, alpha * 235 / 255),
             0
         );
 
@@ -11398,12 +11336,7 @@ double percentage = 0.0;
                 panel_x + panel_w - 360,
                 panel_y + 92,
                 target_label,
-                RR_BGRA(
-                    155,
-                    245,
-                    255,
-                    alpha * 245 / 255
-                ),
+                osd_col(osd_hi(th), alpha * 245 / 255),
                 1
             );
         }
@@ -11448,12 +11381,7 @@ double percentage = 0.0;
             bar_y,
             bar_w,
             bar_h,
-            RR_BGRA(
-                45,
-                72,
-                100,
-                alpha * 180 / 255
-            )
+            osd_col(th->text_muted, alpha * 180 / 255)
         );
 
         if (fill_w > 0) {
@@ -11463,12 +11391,7 @@ double percentage = 0.0;
                 bar_y,
                 fill_w,
                 bar_h,
-                RR_BGRA(
-                    0,
-                    210,
-                    255,
-                    alpha * 235 / 255
-                )
+                osd_col(th->accent, alpha * 235 / 255)
             );
 
             int scrubber_x =
@@ -11480,12 +11403,7 @@ double percentage = 0.0;
                 bar_y - 5,
                 10,
                 bar_h + 10,
-                RR_BGRA(
-                    155,
-                    245,
-                    255,
-                    alpha * 240 / 255
-                )
+                osd_col(osd_hi(th), alpha * 240 / 255)
             );
         }
 
@@ -11522,12 +11440,7 @@ char current_time[32];
             bar_x,
             panel_y + 154,
             current_time,
-            RR_BGRA(
-                195,
-                225,
-                240,
-                alpha * 225 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 225 / 255),
             0
         );
 
@@ -11536,12 +11449,7 @@ char current_time[32];
             bar_x + bar_w - 100,
             panel_y + 154,
             duration_time,
-            RR_BGRA(
-                195,
-                225,
-                240,
-                alpha * 225 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 225 / 255),
             0
         );
 
@@ -11551,12 +11459,7 @@ char current_time[32];
             panel_y + 196,
             panel_w - 84,
             1,
-            RR_BGRA(
-                0,
-                155,
-                225,
-                alpha * 62 / 255
-            )
+            osd_col(th->accent_soft, alpha * 62 / 255)
         );
 
         /*
@@ -11579,12 +11482,7 @@ char current_time[32];
             player_paused
                 ? "PLAY"
                 : "PAUSE",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 215 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 215 / 255),
             0
         );
 
@@ -11600,12 +11498,7 @@ char current_time[32];
             panel_x + 301,
             controls_y + 16,
             "VIEW",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 215 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 215 / 255),
             0
         );
 
@@ -11621,12 +11514,7 @@ char current_time[32];
             panel_x + 481,
             controls_y + 16,
             "INFO",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 215 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 215 / 255),
             0
         );
 
@@ -11635,12 +11523,7 @@ char current_time[32];
             panel_x + 620,
             controls_y + 16,
             "R2 AUDIO",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 210 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 210 / 255),
             0
         );
 
@@ -11649,12 +11532,7 @@ char current_time[32];
             panel_x + 780,
             controls_y + 16,
             "UP/DN SUBS",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 205 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 205 / 255),
             0
         );
 
@@ -11665,12 +11543,7 @@ char current_time[32];
             prospero_chapter_count > 0
                 ? "L1/R1 CHAP"
                 : "L1/R1 SEEK",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 205 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 205 / 255),
             0
         );
 
@@ -11679,12 +11552,7 @@ char current_time[32];
             panel_x + 1160,
             controls_y + 16,
             "L2/R3 DELAY",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 205 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 205 / 255),
             0
         );
 
@@ -11700,12 +11568,7 @@ char current_time[32];
             panel_x + 1541,
             controls_y + 16,
             "BACK",
-            RR_BGRA(
-                190,
-                220,
-                235,
-                alpha * 215 / 255
-            ),
+            osd_col(th->text_secondary, alpha * 215 / 255),
             0
         );
 
@@ -11923,9 +11786,9 @@ char current_time[32];
             debug_w,
             debug_h,
             24,
-            RR_BGRA(1, 8, 20, 232),
-            RR_BGRA(0, 190, 245, 170),
-            RR_BGRA(0, 135, 255, 50)
+            osd_col(th->surface, 232),
+            osd_col(th->accent, 170),
+            osd_col(th->accent_soft, 50)
         );
 
         rr_text(
@@ -11933,7 +11796,7 @@ char current_time[32];
             debug_x + 34,
             debug_y + 24,
             "PLAYBACK STATISTICS",
-            RR_BGRA(0, 215, 255, 240),
+            osd_col(th->accent, 240),
             1
         );
 
@@ -11943,7 +11806,7 @@ char current_time[32];
             debug_y + 68,
             debug_w - 64,
             1,
-            RR_BGRA(0, 155, 225, 75)
+            osd_col(th->accent_soft, 75)
         );
 
         const char *lines[6] = {
@@ -11962,8 +11825,8 @@ char current_time[32];
                 debug_y + 91 + row * 41,
                 lines[row],
                 row >= 4
-                    ? RR_BGRA(135, 205, 230, 220)
-                    : RR_BGRA(220, 238, 248, 230),
+                    ? osd_col(th->text_secondary, 220)
+                    : osd_col(th->text_primary, 230),
                 0
             );
         }
@@ -16402,8 +16265,15 @@ int main(void) {
              * which stick produced it, and in the menus neither is bound to
              * anything else. Excluded during playback so it cannot collide
              * with R3 subtitle delay. */
-            if ((pressed & (PS5_PAD_BUTTON_L3 | PS5_PAD_BUTTON_R3)) &&
-                screen != 2) {
+            /* Menus: either stick. Playback: L3 only, because R3 nudges the
+             * subtitle delay there. Excluding playback entirely - which is
+             * what this did - made the one screen that can only be reached by
+             * playing something the one screen impossible to capture, and so
+             * the hardest to check. */
+            if (screen != SCREEN_PLAYER) {
+                if (pressed & (PS5_PAD_BUTTON_L3 | PS5_PAD_BUTTON_R3))
+                    evo_screenshot_request = 1;
+            } else if (pressed & PS5_PAD_BUTTON_L3) {
                 evo_screenshot_request = 1;
             }
 
