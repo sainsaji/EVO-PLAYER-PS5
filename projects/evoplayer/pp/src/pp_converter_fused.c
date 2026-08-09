@@ -86,14 +86,137 @@ static void *fused_band_worker(void *arg)
     return NULL;
 }
 
+/* ---------------------------------------------------------------------------
+ * Persistent worker pool.
+ *
+ * This path used to pthread_create and pthread_join every worker on every
+ * frame. pp_converter_parallel.c carries a comment naming that exact pattern
+ * as the root cause of the Soft-UHD freeze - "that stalls every few frames
+ * under scheduler pressure" - and was rewritten around a persistent pool. The
+ * fused V8 converter, which is the one 4K playback actually runs through, was
+ * never given the same treatment: at 2160p60 with 8 workers it was asking the
+ * scheduler for 480 thread creations a second.
+ *
+ * Same structure as the pool in pp_converter_parallel.c, deliberately: two
+ * pools of at most 8 threads each is a known, bounded cost, and sharing one
+ * would mean reaching across a module boundary into the 1080 path that is
+ * currently working.
+ *
+ * Unlike that pool, this one honours a change in worker count. The other
+ * silently keeps its original size ("Resize not supported mid-run"), which
+ * makes a request for more workers quietly do nothing.
+ * ------------------------------------------------------------------------ */
+
+#define FUSED_POOL_MAX 8
+
+typedef struct {
+    pthread_mutex_t m;
+    pthread_cond_t  work_cv;
+    pthread_cond_t  done_cv;
+
+    pthread_t       th[FUSED_POOL_MAX];
+    fused_band_job  jobs[FUSED_POOL_MAX];
+
+    int             n_workers;
+    int             started;
+    int             shutdown;
+
+    /* Bumped once per frame. A worker runs when it sees a generation it has
+     * not handled yet, which avoids the lost-wakeup that a plain flag has. */
+    uint64_t        generation;
+    uint64_t        seen[FUSED_POOL_MAX];
+    int             done_count;
+} fused_pool;
+
+static fused_pool g_fpool;
+static pthread_mutex_t g_fpool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *fused_pool_worker(void *arg)
+{
+    int      id  = (int)(intptr_t)arg;
+    uint64_t mine = 0;
+
+    for (;;) {
+        pthread_mutex_lock(&g_fpool.m);
+        while (!g_fpool.shutdown && g_fpool.generation == mine)
+            pthread_cond_wait(&g_fpool.work_cv, &g_fpool.m);
+
+        if (g_fpool.shutdown) {
+            pthread_mutex_unlock(&g_fpool.m);
+            return NULL;
+        }
+
+        mine = g_fpool.generation;
+        pthread_mutex_unlock(&g_fpool.m);
+
+        if (id < g_fpool.n_workers)
+            fused_band_worker(&g_fpool.jobs[id]);
+
+        pthread_mutex_lock(&g_fpool.m);
+        g_fpool.seen[id] = mine;
+        g_fpool.done_count++;
+        pthread_cond_signal(&g_fpool.done_cv);
+        pthread_mutex_unlock(&g_fpool.m);
+    }
+}
+
+static void fused_pool_teardown_locked(void)
+{
+    int i;
+
+    if (!g_fpool.started) return;
+
+    pthread_mutex_lock(&g_fpool.m);
+    g_fpool.shutdown = 1;
+    pthread_cond_broadcast(&g_fpool.work_cv);
+    pthread_mutex_unlock(&g_fpool.m);
+
+    for (i = 0; i < g_fpool.n_workers; i++)
+        pthread_join(g_fpool.th[i], NULL);
+
+    pthread_mutex_destroy(&g_fpool.m);
+    pthread_cond_destroy(&g_fpool.work_cv);
+    pthread_cond_destroy(&g_fpool.done_cv);
+
+    memset(&g_fpool, 0, sizeof(g_fpool));
+}
+
+/* Returns the usable worker count, or 0 if no pool could be built. */
+static int fused_pool_ensure(int n)
+{
+    int i;
+
+    if (g_fpool.started && g_fpool.n_workers == n)
+        return n;
+
+    /* Worker count changed - rebuild. Only happens when the caller genuinely
+     * asks for a different width, which is rare and never mid-frame. */
+    fused_pool_teardown_locked();
+
+    pthread_mutex_init(&g_fpool.m, NULL);
+    pthread_cond_init(&g_fpool.work_cv, NULL);
+    pthread_cond_init(&g_fpool.done_cv, NULL);
+
+    g_fpool.n_workers = n;
+    g_fpool.started   = 1;
+
+    for (i = 0; i < n; i++) {
+        if (pthread_create(&g_fpool.th[i], NULL,
+                           fused_pool_worker, (void *)(intptr_t)i) != 0) {
+            g_fpool.n_workers = i;   /* run with what we got */
+            break;
+        }
+    }
+
+    return g_fpool.n_workers;
+}
+
 int pp_converter_yuv420p_to_tiled_bgra_parallel(const pp_frame *source,
                                                 uint32_t *tiled_destination,
                                                 uint32_t frame_width,
                                                 uint32_t frame_height,
                                                 int workers)
 {
-    pthread_t th[8];
-    fused_band_job jobs[8];
     int i, n = workers;
     uint32_t band;
 
@@ -106,27 +229,58 @@ int pp_converter_yuv420p_to_tiled_bgra_parallel(const pp_frame *source,
         return -3;
     if (n < 1)
         n = 1;
-    if (n > 8)
-        n = 8;
+    if (n > FUSED_POOL_MAX)
+        n = FUSED_POOL_MAX;
 
     band = (frame_height + (uint32_t)n - 1u) / (uint32_t)n;
     /* even rows for 420 + 2×2 block processing */
     if (band & 1u)
         band++;
 
-    for (i = 0; i < n; i++) {
-        jobs[i].src = source;
-        jobs[i].dst = tiled_destination;
-        jobs[i].frame_w = frame_width;
-        jobs[i].y0 = (uint32_t)i * band;
-        jobs[i].y1 = jobs[i].y0 + band;
-        if (jobs[i].y1 > frame_height)
-            jobs[i].y1 = frame_height;
-        if (jobs[i].y0 >= frame_height)
-            jobs[i].y0 = jobs[i].y1 = frame_height;
-        pthread_create(&th[i], NULL, fused_band_worker, &jobs[i]);
+    /* One frame at a time. The pool is process-wide state and the caller is
+     * the single render thread, but a stray concurrent call would otherwise
+     * interleave two frames' jobs into the same slots. */
+    pthread_mutex_lock(&g_fpool_lock);
+
+    n = fused_pool_ensure(n);
+
+    if (n <= 0) {
+        /* No threads available - do the whole frame inline rather than
+         * dropping it. Slow beats blank. */
+        fused_band_job job;
+
+        pthread_mutex_unlock(&g_fpool_lock);
+
+        job.src     = source;
+        job.dst     = tiled_destination;
+        job.frame_w = frame_width;
+        job.y0      = 0;
+        job.y1      = frame_height;
+        fused_band_worker(&job);
+        return 0;
     }
-    for (i = 0; i < n; i++)
-        pthread_join(th[i], NULL);
+
+    for (i = 0; i < n; i++) {
+        g_fpool.jobs[i].src     = source;
+        g_fpool.jobs[i].dst     = tiled_destination;
+        g_fpool.jobs[i].frame_w = frame_width;
+        g_fpool.jobs[i].y0      = (uint32_t)i * band;
+        g_fpool.jobs[i].y1      = g_fpool.jobs[i].y0 + band;
+        if (g_fpool.jobs[i].y1 > frame_height)
+            g_fpool.jobs[i].y1 = frame_height;
+        if (g_fpool.jobs[i].y0 >= frame_height)
+            g_fpool.jobs[i].y0 = g_fpool.jobs[i].y1 = frame_height;
+    }
+
+    pthread_mutex_lock(&g_fpool.m);
+    g_fpool.done_count = 0;
+    g_fpool.generation++;
+    pthread_cond_broadcast(&g_fpool.work_cv);
+
+    while (g_fpool.done_count < n)
+        pthread_cond_wait(&g_fpool.done_cv, &g_fpool.m);
+    pthread_mutex_unlock(&g_fpool.m);
+
+    pthread_mutex_unlock(&g_fpool_lock);
     return 0;
 }
