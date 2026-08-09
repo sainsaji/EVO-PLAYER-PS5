@@ -27,6 +27,7 @@ EXTRA_CFLAGS ?=
 CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -Ipp/include \
+    -Iui/include \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include/SDL2 \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include \
     -DPP_4K_PRODUCT_STAGE=$(STAGE)
@@ -61,9 +62,22 @@ PP_SRCS := \
     pp/src/evo_theme.c \
     pp/src/evo_ui.c
 
+# The UI layer. Kept out of main.c on purpose: these have no dependency on
+# the player, the decoder or the ~1MB of asset headers, so they compile in a
+# second and can be exercised on the host under sanitizers.
+UI_SRCS := \
+    ui/src/evo_draw.c \
+    ui/src/evo_nav.c \
+    ui/src/evo_focus.c \
+    ui/src/evo_input.c \
+    ui/src/evo_feedback.c \
+    ui/src/evo_chrome.c \
+    ui/src/evo_widgets.c \
+    ui/src/evo_screens.c
+
 all: $(ELF)
 
-$(ELF): main.c $(PP_SRCS)
+$(ELF): main.c $(PP_SRCS) $(UI_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@

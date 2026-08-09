@@ -51,6 +51,19 @@
 #include "assets/evo_icons.h"
 #include "pp/include/evo_theme.h"
 #include "pp/include/evo_ui.h"
+/* EVO: the UI layer - navigation, focus, input, feedback, chrome, screens.
+ * See the headers under ui/include; nothing in there knows about the decoder
+ * or the asset headers, which is why it builds in a second and can run on
+ * the host. */
+#include "evo_chrome.h"
+#include "evo_draw.h"
+#include "evo_feedback.h"
+#include "evo_focus.h"
+#include "evo_input.h"
+#include "evo_metrics.h"
+#include "evo_nav.h"
+#include "evo_screens.h"
+#include "evo_widgets.h"
 #include <sys/stat.h>
 #include "assets/browser_icon_assets.h"
 
@@ -12758,1132 +12771,17 @@ static void usb_browser_make_marquee(
 }
 /* USB_BROWSER_MARQUEE_END */
 
-void draw_usb_browser(uint32_t *fb) {
-    static int browser_initialized = 0;
-    static int selected_y_fp = 0;
-    static int intro_frame = 0;
-    static int browser_frame = 0;
-    static char transition_path[256] = {0};
-    static int folder_transition_frame = 12;
-    static int folder_transition_direction = 1;
-    static int marquee_frame = 0;
-    static int marquee_selected = -1;
+/* EVO: draw_usb_browser now lives further down, after the focus,
+ * feedback and formatting helpers it depends on. Search for
+ * "EVO: file browser". */
 
-    /* Six rows fit now that they are 96px on a 112px pitch:
-     *   254 + 5*112 = 814, + 96 = 910, clear of the footer rule at 948.
-     * Five rows left roughly a third of the list area empty. */
-    const int visible = 6;
-    const int row_x = 180;
-    /* Rows stop short of the preview panel at x=1440. The old artwork was
-     * 1265 wide and overlapped it by 5px. */
-    const int row_w = 1220;
-    const int row_h = 96;
-    const int row_start_y = 252;
-    const int row_gap = 112;
 
-    if (file_count <= 0) {
-        file_count = 0;
-        file_selected = 0;
-        file_scroll = 0;
-    } else {
-        if (file_selected < 0) {
-            file_selected = 0;
-        }
 
-        if (file_selected >= file_count) {
-            file_selected = file_count - 1;
-        }
 
-        if (file_selected < file_scroll) {
-            file_scroll = file_selected;
-        }
 
-        if (file_selected >= file_scroll + visible) {
-            file_scroll = file_selected - visible + 1;
-        }
 
-        if (file_scroll < 0) {
-            file_scroll = 0;
-        }
-    }
-
-    int visible_selected = file_selected - file_scroll;
-
-    if (visible_selected < 0) {
-        visible_selected = 0;
-    }
-
-    if (visible_selected >= visible) {
-        visible_selected = visible - 1;
-    }
-
-    int target_y_fp =
-        (row_start_y + visible_selected * row_gap) << 8;
-
-    if (!browser_initialized) {
-        selected_y_fp = target_y_fp;
-        browser_initialized = 1;
-    }
-
-    int distance = target_y_fp - selected_y_fp;
-
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
-
-    int selected_draw_y = selected_y_fp >> 8;
-
-    
-    if (strcmp(transition_path, current_path) != 0) {
-        int old_depth = 0;
-        int new_depth = 0;
-
-        for (int i = 0; transition_path[i]; i++) {
-            if (transition_path[i] == '/') {
-                old_depth++;
-            }
-        }
-
-        for (int i = 0; current_path[i]; i++) {
-            if (current_path[i] == '/') {
-                new_depth++;
-            }
-        }
-
-        if (transition_path[0] == 0) {
-            folder_transition_direction = 1;
-        } else if (new_depth > old_depth) {
-            /* Opening a child folder: contents enter from the right. */
-            folder_transition_direction = 1;
-        } else if (new_depth < old_depth) {
-            /* Going back: contents enter from the left. */
-            folder_transition_direction = -1;
-        } else {
-            folder_transition_direction =
-                strlen(current_path) >= strlen(transition_path)
-                    ? 1
-                    : -1;
-        }
-
-        snprintf(
-            transition_path,
-            sizeof(transition_path),
-            "%s",
-            current_path
-        );
-
-        folder_transition_frame = 0;
-        intro_frame = 22;
-        selected_y_fp =
-            (row_start_y + visible_selected * row_gap) << 8;
-    }
-
-
-    browser_frame++;
-
-    /*
-     * Detect folder changes. The first rendered frame of a new path
-     * starts with the rows offset to the right.
-     */
-    if (strcmp(transition_path, current_path) != 0) {
-        snprintf(
-            transition_path,
-            sizeof(transition_path),
-            "%s",
-            current_path
-        );
-
-        folder_transition_frame = 0;
-        intro_frame = 22;
-    }
-
-    if (folder_transition_frame < 12) {
-        folder_transition_frame++;
-    }
-
-    int folder_enter_offset = 0;
-
-    if (folder_transition_frame < 12) {
-        int remaining = 12 - folder_transition_frame;
-
-        /*
-         * Starts about 180 pixels to the right and settles quickly.
-         * The squared curve makes the final frames ease gently.
-         */
-        folder_enter_offset =
-            folder_transition_direction *
-            ((remaining * remaining * 5) / 4);
-    }
-
-    if (marquee_selected != file_selected) {
-        marquee_selected = file_selected;
-        marquee_frame = 0;
-    } else {
-        marquee_frame++;
-    }
-
-    rr_bg(fb);
-
-    /* Subtle background breathing. */
-    int breath_phase = browser_frame % 360;
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /* Header. */
-    rr_fill(
-        fb,
-        82,
-        74,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        146,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        70,
-        "USB MEDIA",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    char breadcrumb[256];
-    const char *shown_path = current_path;
-
-    if (strncmp(current_path, "/mnt/", 5) == 0) {
-        shown_path = current_path + 5;
-    }
-
-    snprintf(
-        breadcrumb,
-        sizeof(breadcrumb),
-        "%s",
-        shown_path
-    );
-
-    for (int i = 0; breadcrumb[i]; i++) {
-        if (breadcrumb[i] == '/') {
-            breadcrumb[i] = '>';
-        }
-    }
-
-    rr_text(
-        fb,
-        124,
-        132,
-        breadcrumb,
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    char count_text[64];
-
-    if (file_count > 0) {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "%d OF %d",
-            file_selected + 1,
-            file_count
-        );
-    } else {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "EMPTY"
-        );
-    }
-
-    rr_text(
-        fb,
-        1540,
-        132,
-        count_text,
-        RR_BGRA(135, 195, 225, 210),
-        0
-    );
-
-    if (file_count == 0) {
-        rr_text(
-            fb,
-            230,
-            330,
-            "THIS FOLDER IS EMPTY",
-            RR_BGRA(232, 244, 255, 230),
-            2
-        );
-
-        rr_text(
-            fb,
-            232,
-            382,
-            "PRESS O TO GO BACK",
-            RR_BGRA(125, 198, 228, 215),
-            1
-        );
-    } else {
-        /* Base rows. */
-        for (int row = 0; row < visible; row++) {
-            int index = file_scroll + row;
-
-            if (index >= file_count) {
-                break;
-            }
-
-            int local_frame = intro_frame - row;
-            int slide_offset = 0;
-
-            if (local_frame <= 0) {
-                slide_offset = 18;
-            } else if (local_frame < 6) {
-                slide_offset = 18 - local_frame * 3;
-            }
-
-            int y = row_start_y + row * row_gap;
-
-            evo_ui_card(
-                fb,
-                row_x - slide_offset + folder_enter_offset,
-                y,
-                row_w,
-                row_h,
-                0
-            );
-        }
-
-        /* Gliding selected row. */
-        evo_ui_card(
-            fb,
-            row_x + folder_enter_offset,
-            selected_draw_y,
-            row_w,
-            row_h,
-            1
-        );
-
-        /* Icons, titles, metadata and chevrons. */
-        for (int row = 0; row < visible; row++) {
-            int index = file_scroll + row;
-
-            if (index >= file_count) {
-                break;
-            }
-
-            int local_frame = intro_frame - row;
-            int slide_offset = 0;
-
-            if (local_frame <= 0) {
-                slide_offset = 18;
-            } else if (local_frame < 6) {
-                slide_offset = 18 - local_frame * 3;
-            }
-
-            int x = row_x - slide_offset + folder_enter_offset;
-            int y = row_start_y + row * row_gap;
-
-            char title[160];
-            char detail[192];
-            char display_title[160];
-
-            title[0] = 0;
-            detail[0] = 0;
-
-            if (usb_types[index] == 4) {
-                snprintf(
-                    title,
-                    sizeof(title),
-                    "%s",
-                    usb_files[index]
-                );
-
-                snprintf(
-                    detail,
-                    sizeof(detail),
-                    "OPEN FOLDER"
-                );
-            } else {
-                char full_path[768];
-                char metadata[128];
-
-                metadata[0] = 0;
-
-                snprintf(
-                    full_path,
-                    sizeof(full_path),
-                    "%s/%s",
-                    current_path,
-                    usb_files[index]
-                );
-
-                clean_media_title(
-                    full_path,
-                    title,
-                    sizeof(title),
-                    metadata,
-                    sizeof(metadata)
-                );
-
-                struct stat st;
-                char size_text[48];
-
-                size_text[0] = 0;
-
-                if (stat(full_path, &st) == 0) {
-                    format_file_size(
-                        size_text,
-                        sizeof(size_text),
-                        (long long)st.st_size
-                    );
-                }
-
-                const char *type_label =
-                    usb_browser_type_label(
-                        usb_files[index],
-                        usb_types[index]
-                    );
-
-                if (metadata[0] && size_text[0]) {
-                    snprintf(
-                        detail,
-                        sizeof(detail),
-                        "%s  -  %s  -  %s",
-                        type_label,
-                        metadata,
-                        size_text
-                    );
-                } else if (size_text[0]) {
-                    snprintf(
-                        detail,
-                        sizeof(detail),
-                        "%s  -  %s",
-                        type_label,
-                        size_text
-                    );
-                } else {
-                    snprintf(
-                        detail,
-                        sizeof(detail),
-                        "%s",
-                        type_label
-                    );
-                }
-            }
-
-            if (index == file_selected) {
-                usb_browser_make_marquee(
-                    display_title,
-                    sizeof(display_title),
-                    title,
-                    marquee_frame,
-                    50
-                );
-            } else {
-                snprintf(
-                    display_title,
-                    sizeof(display_title),
-                    "%s",
-                    title
-                );
-
-                if (strlen(display_title) > 50) {
-                    display_title[47] = '.';
-                    display_title[48] = '.';
-                    display_title[49] = '.';
-                    display_title[50] = 0;
-                }
-            }
-
-            if (strlen(detail) > 68) {
-                detail[65] = '.';
-                detail[66] = '.';
-                detail[67] = '.';
-                detail[68] = 0;
-            }
-
-            int icon_index =
-                usb_browser_icon_for_entry(
-                    usb_files[index],
-                    usb_types[index]
-                );
-
-            /* Stock icons only — large preview is on the right for selection */
-            rr_browser_icon(
-                fb,
-                x + 40,
-                y + 12,
-                icon_index
-            );
-
-            rr_text(
-                fb,
-                x + 132,
-                y + 10,
-                display_title,
-                evo_theme_current()->text_primary,
-                2
-            );
-
-            rr_text(
-                fb,
-                x + 132,
-                y + 52,
-                detail,
-                index == file_selected
-                    ? evo_theme_current()->text_secondary
-                    : evo_theme_current()->text_muted,
-                1
-            );
-
-            int arrow_shift = 0;
-
-            if (index == file_selected) {
-                int phase = browser_frame % 36;
-
-                if (phase < 9) {
-                    arrow_shift = phase / 3;
-                } else if (phase < 18) {
-                    arrow_shift =
-                        3 - ((phase - 9) / 3);
-                }
-            }
-
-            /* Chevron stays left of the preview panel */
-            rr_icon(
-                fb,
-                x + row_w - 104 + arrow_shift,
-                y + 12,
-                6
-            );
-        }
-    }
-
-    /*
-     * Large thumbnail preview for the highlighted row (right blank area).
-     * Like Infuse / BFplayer — list icons stay stock; art lives on the side.
-     */
-    if (file_count > 0 &&
-        file_selected >= 0 &&
-        file_selected < file_count &&
-        strcmp(usb_files[file_selected], "..") != 0) {
-        char sel_path[768];
-        int is_dir = (usb_types[file_selected] == 4);
-        const int preview_x = 1440;
-        const int preview_y = 280;
-
-        if (current_path[0] &&
-            current_path[strlen(current_path) - 1] == '/')
-            snprintf(
-                sel_path,
-                sizeof(sel_path),
-                "%s%s",
-                current_path,
-                usb_files[file_selected]);
-        else
-            snprintf(
-                sel_path,
-                sizeof(sel_path),
-                "%s/%s",
-                current_path,
-                usb_files[file_selected]);
-
-        prospero_browser_preview_ensure(sel_path, is_dir);
-        prospero_browser_preview_draw_panel(fb, preview_x, preview_y);
-        rr_text(
-            fb,
-            preview_x + 14,
-            preview_y + 14 + PROSPERO_BROWSER_PREVIEW_H + 14,
-            prospero_browser_preview_valid ? "PREVIEW" : "NO PREVIEW",
-            prospero_browser_preview_valid
-                ? evo_theme_current()->accent
-                : evo_theme_current()->text_muted,
-            0
-        );
-    }
-
-    /* Footer. */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        file_count > 0 ? "OPEN" : "SELECT",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        292,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        348,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        0
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "USB MEDIA",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-
-
-    /* PROSPERO_USB_FAVORITE_BUTTON_START */
-
-    /*
-     * Triangle icon and Favorite label.
-     * Added independently so existing Open/Back controls remain untouched.
-     */
-    rr_control(
-        fb,
-        500,
-        982,
-        5
-    );
-
-    rr_text(
-        fb,
-        556,
-        998,
-        "FAVORITE",
-        RR_BGRA(
-            175,
-            205,
-            220,
-            205
-        ),
-        0
-    );
-
-    /* PROSPERO_USB_FAVORITE_BUTTON_END */
-
-}
-
-
-
-
-
-
-void draw_developer_tools_screen(uint32_t *fb) {
-    static int developer_frame = 0;
-    static int intro_frame = 0;
-
-    developer_frame++;
-
-    if (intro_frame < 14) {
-        intro_frame++;
-    }
-
-    int remaining = 14 - intro_frame;
-
-    if (remaining < 0) {
-        remaining = 0;
-    }
-
-    int panel_offset =
-        (remaining * remaining) / 3;
-
-    rr_bg(fb);
-
-    int breath_phase =
-        developer_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(
-        fb,
-        82,
-        74,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        146,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        70,
-        "DEVELOPER TOOLS",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    rr_text(
-        fb,
-        124,
-        132,
-        "PLAYBACK DIAGNOSTICS AND COMPATIBILITY REPORTING",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    /*
-     * Main compatibility-report card.
-     */
-    int action_x = 180 - panel_offset;
-    int action_y = 228;
-    int action_w = 1560;
-    int action_h = 156;
-
-    ui_round_asset(
-        fb,
-        action_x,
-        action_y,
-        action_w,
-        action_h,
-        28,
-        RR_BGRA(1, 10, 25, 225),
-        RR_BGRA(0, 205, 255, 215),
-        RR_BGRA(0, 145, 255, 60)
-    );
-
-    rr_icon(
-        fb,
-        action_x + 54,
-        action_y + 42,
-        4
-    );
-
-    rr_text(
-        fb,
-        action_x + 150,
-        action_y + 34,
-        "GENERATE COMPATIBILITY REPORT",
-        RR_BGRA(235, 246, 255, 245),
-        2
-    );
-
-    rr_text(
-        fb,
-        action_x + 152,
-        action_y + 84,
-        "EXPORT CURRENT MEDIA DECODER AND PLAYBACK INFORMATION TO USB0",
-        RR_BGRA(125, 198, 228, 220),
-        1
-    );
-
-    int arrow_shift = 0;
-    int arrow_phase = developer_frame % 36;
-
-    if (arrow_phase < 9) {
-        arrow_shift = arrow_phase / 3;
-    } else if (arrow_phase < 18) {
-        arrow_shift =
-            3 - ((arrow_phase - 9) / 3);
-    }
-
-    rr_icon(
-        fb,
-        action_x + action_w - 112 + arrow_shift,
-        action_y + 46,
-        6
-    );
-
-    /*
-     * Runtime-status cards.
-     */
-    int card_y = 430;
-    int card_w = 480;
-    int card_h = 300;
-
-    int card1_x = 180 - panel_offset;
-    int card2_x = 720;
-    int card3_x = 1260 + panel_offset;
-
-    ui_round_asset(
-        fb,
-        card1_x,
-        card_y,
-        card_w,
-        card_h,
-        26,
-        RR_BGRA(1, 10, 25, 215),
-        RR_BGRA(0, 175, 235, 135),
-        RR_BGRA(0, 125, 245, 42)
-    );
-
-    ui_round_asset(
-        fb,
-        card2_x,
-        card_y,
-        card_w,
-        card_h,
-        26,
-        RR_BGRA(1, 10, 25, 215),
-        RR_BGRA(0, 175, 235, 135),
-        RR_BGRA(0, 125, 245, 42)
-    );
-
-    ui_round_asset(
-        fb,
-        card3_x,
-        card_y,
-        card_w,
-        card_h,
-        26,
-        RR_BGRA(1, 10, 25, 215),
-        RR_BGRA(0, 175, 235, 135),
-        RR_BGRA(0, 125, 245, 42)
-    );
-
-    /*
-     * Card 1: playback profile.
-     */
-    rr_icon(
-        fb,
-        card1_x + 42,
-        card_y + 38,
-        3
-    );
-
-    rr_text(
-        fb,
-        card1_x + 126,
-        card_y + 42,
-        "PROFILE",
-        RR_BGRA(235, 246, 255, 240),
-        2
-    );
-
-    rr_fill(
-        fb,
-        card1_x + 42,
-        card_y + 112,
-        card_w - 84,
-        1,
-        RR_BGRA(0, 155, 225, 60)
-    );
-
-    rr_text(
-        fb,
-        card1_x + 44,
-        card_y + 154,
-        "ACTIVE MODE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        card1_x + 44,
-        card_y + 198,
-        profile_name(current_profile),
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    /*
-     * Card 2: decoder information.
-     */
-    rr_icon(
-        fb,
-        card2_x + 42,
-        card_y + 38,
-        4
-    );
-
-    rr_text(
-        fb,
-        card2_x + 126,
-        card_y + 42,
-        "DECODER",
-        RR_BGRA(235, 246, 255, 240),
-        2
-    );
-
-    rr_fill(
-        fb,
-        card2_x + 42,
-        card_y + 112,
-        card_w - 84,
-        1,
-        RR_BGRA(0, 155, 225, 60)
-    );
-
-    char decoder_threads[96];
-
-    snprintf(
-        decoder_threads,
-        sizeof(decoder_threads),
-        "%d THREADS",
-        decoder_thread_count
-    );
-
-    rr_text(
-        fb,
-        card2_x + 44,
-        card_y + 154,
-        "VIDEO DECODER",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        card2_x + 44,
-        card_y + 198,
-        decoder_threads,
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    /*
-     * Card 3: diagnostic status.
-     */
-    rr_icon(
-        fb,
-        card3_x + 42,
-        card_y + 38,
-        5
-    );
-
-    rr_text(
-        fb,
-        card3_x + 126,
-        card_y + 42,
-        "DIAGNOSTICS",
-        RR_BGRA(235, 246, 255, 240),
-        2
-    );
-
-    rr_fill(
-        fb,
-        card3_x + 42,
-        card_y + 112,
-        card_w - 84,
-        1,
-        RR_BGRA(0, 155, 225, 60)
-    );
-
-    rr_text(
-        fb,
-        card3_x + 44,
-        card_y + 154,
-        "DEBUG OVERLAY",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        card3_x + 44,
-        card_y + 198,
-        show_debug_overlay ||
-        current_profile == PROFILE_DEBUG
-            ? "ENABLED"
-            : "DISABLED",
-        show_debug_overlay ||
-        current_profile == PROFILE_DEBUG
-            ? RR_BGRA(0, 215, 255, 235)
-            : RR_BGRA(145, 185, 205, 210),
-        1
-    );
-
-    /*
-     * FFmpeg/runtime information strip.
-     */
-    char ffmpeg_text[128];
-
-    snprintf(
-        ffmpeg_text,
-        sizeof(ffmpeg_text),
-        "FFMPEG API  %u",
-        avformat_version()
-    );
-
-    rr_text(
-        fb,
-        184,
-        786,
-        ffmpeg_text,
-        RR_BGRA(120, 190, 220, 205),
-        0
-    );
-
-    char render_text[128];
-
-    snprintf(
-        render_text,
-        sizeof(render_text),
-        "RENDER  %d FPS   DECODER  %d FPS",
-        perf_render_fps,
-        perf_decode_fps
-    );
-
-    rr_text(
-        fb,
-        620,
-        786,
-        render_text,
-        RR_BGRA(120, 190, 220, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        1260,
-        786,
-        "REPORT LOCATION  USB0",
-        RR_BGRA(120, 190, 220, 205),
-        0
-    );
-
-    /*
-     * Footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        "GENERATE REPORT",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        390,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        446,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        4
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "DEVELOPER MODE",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
+/* EVO: draw_developer_tools_screen is now a model handed to evo_screen_list().
+ * Search for "EVO: the list pages". */
 
 
 
@@ -15474,1405 +14372,16 @@ void draw_media_info_screen(uint32_t *fb) {
 
 
 /* PROSPERO_RELEASE_1_0 */
-void draw_about_support_screen(uint32_t *fb) {
-    static int about_frame = 0;
-    static int intro_frame = 0;
+/* EVO: draw_about_support_screen is now a model handed to evo_screen_list().
+ * Search for "EVO: the list pages". */
 
-    about_frame++;
 
-    if (intro_frame < 16) {
-        intro_frame++;
-    }
+/* EVO: draw_recent_files_screen is now a model handed to evo_screen_list().
+ * Search for "EVO: the list pages". */
 
-    int remaining = 16 - intro_frame;
 
-    if (remaining < 0) {
-        remaining = 0;
-    }
-
-    int panel_offset =
-        (remaining * remaining) / 3;
-
-    rr_bg(fb);
-
-    int breath_phase =
-        about_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(
-        fb,
-        82,
-        74,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        146,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        70,
-        "ABOUT / SUPPORT",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    rr_text(
-        fb,
-        124,
-        132,
-        "PROJECT INFORMATION AND CONTROLLER GUIDE",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    /*
-     * Left information panel.
-     */
-    int left_x = 180 - panel_offset;
-    int panel_y = 230;
-    int panel_w = 740;
-    int panel_h = 610;
-
-    ui_round_asset(
-        fb,
-        left_x,
-        panel_y,
-        panel_w,
-        panel_h,
-        30,
-        RR_BGRA(1, 10, 25, 220),
-        RR_BGRA(0, 185, 245, 150),
-        RR_BGRA(0, 135, 255, 48)
-    );
-
-    rr_icon(
-        fb,
-        left_x + 54,
-        panel_y + 48,
-        5
-    );
-
-    rr_text(
-        fb,
-        left_x + 145,
-        panel_y + 52,
-        "EVO PLAYER",
-        RR_BGRA(235, 246, 255, 245),
-        2
-    );
-
-    rr_text(
-        fb,
-        left_x + 148,
-        panel_y + 98,
-        "VERSION " EVO_PLAYER_VERSION,
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    rr_fill(
-        fb,
-        left_x + 54,
-        panel_y + 154,
-        panel_w - 108,
-        1,
-        RR_BGRA(0, 155, 225, 65)
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 198,
-        "PURPOSE",
-        RR_BGRA(120, 190, 220, 210),
-        0
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 238,
-        "A MODERN HOMEBREW MEDIA PLAYER",
-        RR_BGRA(232, 244, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 276,
-        "BUILT FOR PLAYSTATION 5",
-        RR_BGRA(232, 244, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 338,
-        "CURRENT RELEASE",
-        RR_BGRA(120, 190, 220, 210),
-        0
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 378,
-        "VERSION " EVO_PLAYER_VERSION,
-        RR_BGRA(232, 244, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 440,
-        "DEVELOPMENT STATUS",
-        RR_BGRA(120, 190, 220, 210),
-        0
-    );
-
-    rr_text(
-        fb,
-        left_x + 58,
-        panel_y + 480,
-        "STABLE RELEASE",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    /*
-     * Right controller guide with real face-button icons.
-     */
-    int right_x = 1000 + panel_offset;
-
-    ui_round_asset(
-        fb,
-        right_x,
-        panel_y,
-        panel_w,
-        panel_h,
-        30,
-        RR_BGRA(1, 10, 25, 220),
-        RR_BGRA(0, 185, 245, 150),
-        RR_BGRA(0, 135, 255, 48)
-    );
-
-    rr_icon(
-        fb,
-        right_x + 54,
-        panel_y + 48,
-        4
-    );
-
-    rr_text(
-        fb,
-        right_x + 145,
-        panel_y + 52,
-        "CONTROLLER GUIDE",
-        RR_BGRA(235, 246, 255, 245),
-        2
-    );
-
-    rr_text(
-        fb,
-        right_x + 148,
-        panel_y + 98,
-        "PLAYER AND USB SHORTCUTS",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    rr_fill(
-        fb,
-        right_x + 54,
-        panel_y + 154,
-        panel_w - 108,
-        1,
-        RR_BGRA(0, 155, 225, 65)
-    );
-
-    /*
-     * Left column — face-button actions.
-     */
-    int left_icon_x =
-        right_x + 62;
-
-    int left_text_x =
-        right_x + 125;
-
-    int guide_y =
-        panel_y + 198;
-
-    rr_control(
-        fb,
-        left_icon_x,
-        guide_y - 10,
-        0
-    );
-
-    rr_text(
-        fb,
-        left_text_x,
-        guide_y + 6,
-        "PLAY / PAUSE",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    guide_y += 78;
-
-    rr_control(
-        fb,
-        left_icon_x,
-        guide_y - 10,
-        5
-    );
-
-    rr_text(
-        fb,
-        left_text_x,
-        guide_y + 6,
-        "VIEW MODE",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    guide_y += 78;
-
-    rr_control(
-        fb,
-        left_icon_x,
-        guide_y - 10,
-        6
-    );
-
-    rr_text(
-        fb,
-        left_text_x,
-        guide_y + 6,
-        "MEDIA INFO",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    guide_y += 78;
-
-    rr_control(
-        fb,
-        left_icon_x,
-        guide_y - 10,
-        5
-    );
-
-    rr_text(
-        fb,
-        left_text_x,
-        guide_y + 6,
-        "USB FAVORITE",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    /*
-     * Right column — shoulder and directional controls.
-     */
-    int right_label_x =
-        right_x + 390;
-
-    rr_text(
-        fb,
-        right_label_x,
-        panel_y + 204,
-        "R2",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        right_label_x + 76,
-        panel_y + 208,
-        "AUDIO TRACK",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    rr_text(
-        fb,
-        right_label_x,
-        panel_y + 282,
-        "UP",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        right_label_x + 76,
-        panel_y + 286,
-        "SUBTITLES ON / OFF",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    rr_text(
-        fb,
-        right_label_x,
-        panel_y + 360,
-        "DOWN",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        right_label_x + 96,
-        panel_y + 364,
-        "SUBTITLE TRACK",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    rr_text(
-        fb,
-        right_label_x,
-        panel_y + 438,
-        "L / R",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        right_label_x + 96,
-        panel_y + 442,
-        "SEEK 10 SEC",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    rr_text(
-        fb,
-        right_label_x,
-        panel_y + 516,
-        "L1 / R1",
-        RR_BGRA(0, 215, 255, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        right_label_x + 126,
-        panel_y + 520,
-        "SEEK 60 SEC",
-        RR_BGRA(225, 239, 250, 230),
-        0
-    );
-
-    rr_text(
-        fb,
-        right_x + 58,
-        panel_y + 570,
-        "OPTIONS  STATISTICS     /     CIRCLE  BACK",
-        RR_BGRA(110, 185, 218, 200),
-        0
-    );
-
-    /*
-     * Footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        5
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "ABOUT EVO",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
-
-
-void draw_recent_files_screen(uint32_t *fb) {
-    static int initialized = 0;
-    static int selected_y_fp = 0;
-    static int recent_frame = 0;
-    static int recent_scroll = 0;
-
-    const int visible = 5;
-    const int row_x = 180;
-    /* Stop short of the preview panel at x=1440, same as the USB browser. */
-    const int row_w = 1220;
-    const int row_h = 96;
-    const int row_start_y = 254;
-    const int row_gap = 112;
-
-    if (recent_file_count <= 0) {
-        recent_selected = 0;
-        recent_scroll = 0;
-    } else {
-        if (recent_selected < 0) {
-            recent_selected = 0;
-        }
-
-        if (recent_selected >= recent_file_count) {
-            recent_selected = recent_file_count - 1;
-        }
-
-        if (recent_selected < recent_scroll) {
-            recent_scroll = recent_selected;
-        }
-
-        if (recent_selected >= recent_scroll + visible) {
-            recent_scroll =
-                recent_selected - visible + 1;
-        }
-
-        if (recent_scroll < 0) {
-            recent_scroll = 0;
-        }
-    }
-
-    int visible_selected =
-        recent_selected - recent_scroll;
-
-    if (visible_selected < 0) {
-        visible_selected = 0;
-    }
-
-    if (visible_selected >= visible) {
-        visible_selected = visible - 1;
-    }
-
-    int target_y_fp =
-        (
-            row_start_y +
-            visible_selected * row_gap
-        ) << 8;
-
-    if (!initialized) {
-        selected_y_fp = target_y_fp;
-        initialized = 1;
-    }
-
-    int distance =
-        target_y_fp - selected_y_fp;
-
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
-
-    int selected_draw_y =
-        selected_y_fp >> 8;
-
-    recent_frame++;
-
-    rr_bg(fb);
-
-    int breath_phase =
-        recent_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(
-        fb,
-        82,
-        74,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        146,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        70,
-        "RECENT FILES",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    rr_text(
-        fb,
-        124,
-        132,
-        "CONTINUE WATCHING FROM YOUR SAVED POSITION",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    char count_text[64];
-
-    if (recent_file_count > 0) {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "%d OF %d",
-            recent_selected + 1,
-            recent_file_count
-        );
-    } else {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "EMPTY"
-        );
-    }
-
-    rr_text(
-        fb,
-        1540,
-        132,
-        count_text,
-        RR_BGRA(135, 195, 225, 210),
-        0
-    );
-
-    if (recent_file_count <= 0) {
-        rr_text(
-            fb,
-            230,
-            330,
-            "NO RECENT MEDIA",
-            RR_BGRA(232, 244, 255, 230),
-            2
-        );
-
-        rr_text(
-            fb,
-            232,
-            382,
-            "VIDEOS YOU PLAY WILL APPEAR HERE",
-            RR_BGRA(125, 198, 228, 215),
-            1
-        );
-    } else {
-        /*
-         * Normal cards.
-         */
-        for (int row = 0; row < visible; row++) {
-            int index =
-                recent_scroll + row;
-
-            if (index >= recent_file_count) {
-                break;
-            }
-
-            int y =
-                row_start_y + row * row_gap;
-
-            evo_ui_card(fb, row_x, y, row_w, row_h, 0);
-        }
-
-        /*
-         * Gliding selected card.
-         */
-        evo_ui_card(fb, row_x, selected_draw_y, row_w, row_h, 1);
-
-        for (int row = 0; row < visible; row++) {
-            int index =
-                recent_scroll + row;
-
-            if (index >= recent_file_count) {
-                break;
-            }
-
-            RecentFileEntry *entry =
-                &recent_files[index];
-
-            int y =
-                row_start_y + row * row_gap;
-
-            char title[128];
-            char position_text[96];
-            char elapsed[32];
-            char duration[32];
-
-            snprintf(
-                title,
-                sizeof(title),
-                "%s",
-                entry->title[0]
-                    ? entry->title
-                    : entry->path
-            );
-
-            if (strlen(title) > 48) {
-                title[45] = '.';
-                title[46] = '.';
-                title[47] = '.';
-                title[48] = 0;
-            }
-
-            format_time_mmss(
-                elapsed,
-                sizeof(elapsed),
-                entry->last_pos
-            );
-
-            if (entry->duration > 1.0) {
-                format_time_mmss(
-                    duration,
-                    sizeof(duration),
-                    entry->duration
-                );
-
-                snprintf(
-                    position_text,
-                    sizeof(position_text),
-                    "%s  /  %s",
-                    elapsed,
-                    duration
-                );
-            } else {
-                snprintf(
-                    position_text,
-                    sizeof(position_text),
-                    "RESUME AT  %s",
-                    elapsed
-                );
-            }
-
-            rr_browser_icon(
-                fb,
-                row_x + 40,
-                y + 12,
-                1
-            );
-
-            rr_text(
-                fb,
-                row_x + 132,
-                y + 10,
-                title,
-                evo_theme_current()->text_primary,
-                2
-            );
-
-            rr_text(
-                fb,
-                row_x + 132,
-                y + 52,
-                position_text,
-                index == recent_selected
-                    ? evo_theme_current()->accent
-                    : evo_theme_current()->text_secondary,
-                1
-            );
-
-            /*
-             * One watch-progress bar (right of time text, left of chevron).
-             * Leave room for the right-side PREVIEW panel (~1440).
-             */
-            int progress_x = row_x + 820;
-            int progress_y = y + 62;
-            int progress_w = 220;
-            int progress_h = 5;
-
-            if (entry->duration > 1.0) {
-                rr_fill(
-                    fb,
-                    progress_x,
-                    progress_y,
-                    progress_w,
-                    progress_h,
-                    RR_BGRA(40, 75, 105, 145)
-                );
-
-                double ratio =
-                    entry->last_pos /
-                    entry->duration;
-
-                if (ratio < 0.0) {
-                    ratio = 0.0;
-                }
-
-                if (ratio > 1.0) {
-                    ratio = 1.0;
-                }
-
-                int filled =
-                    (int)(ratio * progress_w);
-
-                if (filled > 0) {
-                    rr_fill(
-                        fb,
-                        progress_x,
-                        progress_y,
-                        filled,
-                        progress_h,
-                        RR_BGRA(0, 210, 255, 225)
-                    );
-                }
-            }
-
-            int arrow_shift = 0;
-
-            if (index == recent_selected) {
-                int phase =
-                    recent_frame % 36;
-
-                if (phase < 9) {
-                    arrow_shift =
-                        phase / 3;
-                } else if (phase < 18) {
-                    arrow_shift =
-                        3 - ((phase - 9) / 3);
-                }
-            }
-
-            /* After progress bar (ends ~1040), before preview panel (1440) */
-            rr_icon(
-                fb,
-                row_x + 1080 + arrow_shift,
-                y + 21,
-                6
-            );
-        }
-    }
-
-    if (recent_file_count > 0 &&
-        recent_selected >= 0 &&
-        recent_selected < recent_file_count) {
-        prospero_browser_preview_ensure(
-            recent_files[recent_selected].path, 0);
-        prospero_browser_preview_draw_panel(fb, 1440, 280);
-        rr_text(
-            fb,
-            1454,
-            280 + 14 + PROSPERO_BROWSER_PREVIEW_H + 14,
-            prospero_browser_preview_valid ? "PREVIEW" : "NO PREVIEW",
-            prospero_browser_preview_valid
-                ? evo_theme_current()->accent
-                : evo_theme_current()->text_muted,
-            0
-        );
-    }
-
-    /*
-     * Footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        recent_file_count > 0
-            ? "PLAY"
-            : "SELECT",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        292,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        348,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        1
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "RECENT MEDIA",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
-
-
-void draw_favorites_screen(uint32_t *fb) {
-    static int initialized = 0;
-    static int selected_y_fp = 0;
-    static int favorites_frame = 0;
-    static int favorites_scroll = 0;
-
-    const int visible = 5;
-    const int row_x = 180;
-    /* Stop short of the preview panel at x=1440, same as the USB browser. */
-    const int row_w = 1220;
-    const int row_h = 96;
-    const int row_start_y = 254;
-    const int row_gap = 112;
-
-    if (favorite_count <= 0) {
-        favorite_selected = 0;
-        favorites_scroll = 0;
-    } else {
-        if (favorite_selected < 0) {
-            favorite_selected = 0;
-        }
-
-        if (favorite_selected >= favorite_count) {
-            favorite_selected = favorite_count - 1;
-        }
-
-        if (favorite_selected < favorites_scroll) {
-            favorites_scroll = favorite_selected;
-        }
-
-        if (
-            favorite_selected >=
-            favorites_scroll + visible
-        ) {
-            favorites_scroll =
-                favorite_selected - visible + 1;
-        }
-
-        if (favorites_scroll < 0) {
-            favorites_scroll = 0;
-        }
-    }
-
-    int visible_selected =
-        favorite_selected - favorites_scroll;
-
-    if (visible_selected < 0) {
-        visible_selected = 0;
-    }
-
-    if (visible_selected >= visible) {
-        visible_selected = visible - 1;
-    }
-
-    int target_y_fp =
-        (
-            row_start_y +
-            visible_selected * row_gap
-        ) << 8;
-
-    if (!initialized) {
-        selected_y_fp = target_y_fp;
-        initialized = 1;
-    }
-
-    int distance =
-        target_y_fp - selected_y_fp;
-
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
-
-    int selected_draw_y =
-        selected_y_fp >> 8;
-
-    favorites_frame++;
-
-    rr_bg(fb);
-
-    int breath_phase =
-        favorites_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(
-        fb,
-        82,
-        74,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        146,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        70,
-        "FAVORITES",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    rr_text(
-        fb,
-        124,
-        132,
-        "YOUR SAVED MEDIA COLLECTION",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    char count_text[64];
-
-    if (favorite_count > 0) {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "%d OF %d",
-            favorite_selected + 1,
-            favorite_count
-        );
-    } else {
-        snprintf(
-            count_text,
-            sizeof(count_text),
-            "EMPTY"
-        );
-    }
-
-    rr_text(
-        fb,
-        1540,
-        132,
-        count_text,
-        RR_BGRA(135, 195, 225, 210),
-        0
-    );
-
-    if (favorite_count <= 0) {
-        rr_text(
-            fb,
-            230,
-            330,
-            "NO FAVORITES YET",
-            RR_BGRA(232, 244, 255, 230),
-            2
-        );
-
-        rr_text(
-            fb,
-            232,
-            382,
-            "ADD MEDIA TO FAVORITES FROM THE PLAYER",
-            RR_BGRA(125, 198, 228, 215),
-            1
-        );
-    } else {
-        /*
-         * Normal rows.
-         */
-        for (int row = 0; row < visible; row++) {
-            int index =
-                favorites_scroll + row;
-
-            if (index >= favorite_count) {
-                break;
-            }
-
-            int y =
-                row_start_y + row * row_gap;
-
-            evo_ui_card(fb, row_x, y, row_w, row_h, 0);
-        }
-
-        /*
-         * Selected row.
-         */
-        evo_ui_card(fb, row_x, selected_draw_y, row_w, row_h, 1);
-
-        for (int row = 0; row < visible; row++) {
-            int index =
-                favorites_scroll + row;
-
-            if (index >= favorite_count) {
-                break;
-            }
-
-            FavoriteEntry *entry =
-                &favorite_files[index];
-
-            int y =
-                row_start_y + row * row_gap;
-
-            char title[128];
-            char duration_text[96];
-            char duration[32];
-
-            snprintf(
-                title,
-                sizeof(title),
-                "%s",
-                entry->title[0]
-                    ? entry->title
-                    : entry->path
-            );
-
-            if (strlen(title) > 48) {
-                title[45] = '.';
-                title[46] = '.';
-                title[47] = '.';
-                title[48] = 0;
-            }
-
-            if (entry->duration > 1.0) {
-                format_time_mmss(
-                    duration,
-                    sizeof(duration),
-                    entry->duration
-                );
-
-                snprintf(
-                    duration_text,
-                    sizeof(duration_text),
-                    "DURATION  %s",
-                    duration
-                );
-            } else {
-                snprintf(
-                    duration_text,
-                    sizeof(duration_text),
-                    "SAVED FAVORITE"
-                );
-            }
-
-            rr_browser_icon(
-                fb,
-                row_x + 40,
-                y + 12,
-                1
-            );
-
-            rr_text(
-                fb,
-                row_x + 132,
-                y + 10,
-                title,
-                evo_theme_current()->text_primary,
-                2
-            );
-
-            rr_text(
-                fb,
-                row_x + 132,
-                y + 52,
-                duration_text,
-                index == favorite_selected
-                    ? evo_theme_current()->accent
-                    : evo_theme_current()->text_secondary,
-                1
-            );
-
-            /* One small watch bar if this favorite is also in Recent */
-            {
-                double fav_pos = 0.0;
-                double fav_dur = entry->duration;
-                fav_pos = prospero_recent_lookup(entry->path, &fav_dur);
-                if (fav_dur < 1.0)
-                    fav_dur = entry->duration;
-                if (fav_dur > 1.0 && fav_pos > 1.0) {
-                    int progress_x = row_x + 820;
-                    int progress_y = y + 62;
-                    int progress_w = 220;
-                    int progress_h = 5;
-                    double ratio = fav_pos / fav_dur;
-                    int filled;
-                    if (ratio < 0.0)
-                        ratio = 0.0;
-                    if (ratio > 1.0)
-                        ratio = 1.0;
-                    filled = (int)(ratio * progress_w);
-                    rr_fill(
-                        fb,
-                        progress_x,
-                        progress_y,
-                        progress_w,
-                        progress_h,
-                        RR_BGRA(40, 75, 105, 145));
-                    if (filled > 0)
-                        rr_fill(
-                            fb,
-                            progress_x,
-                            progress_y,
-                            filled,
-                            progress_h,
-                            RR_BGRA(0, 210, 255, 225));
-                }
-            }
-
-            int arrow_shift = 0;
-
-            if (index == favorite_selected) {
-                int phase =
-                    favorites_frame % 36;
-
-                if (phase < 9) {
-                    arrow_shift =
-                        phase / 3;
-                } else if (phase < 18) {
-                    arrow_shift =
-                        3 - ((phase - 9) / 3);
-                }
-            }
-
-            rr_icon(
-                fb,
-                row_x + 1080 + arrow_shift,
-                y + 21,
-                6
-            );
-        }
-    }
-
-    if (favorite_count > 0 &&
-        favorite_selected >= 0 &&
-        favorite_selected < favorite_count) {
-        prospero_browser_preview_ensure(
-            favorite_files[favorite_selected].path, 0);
-        prospero_browser_preview_draw_panel(fb, 1440, 280);
-        rr_text(
-            fb,
-            1454,
-            280 + 14 + PROSPERO_BROWSER_PREVIEW_H + 14,
-            prospero_browser_preview_valid ? "PREVIEW" : "NO PREVIEW",
-            prospero_browser_preview_valid
-                ? evo_theme_current()->accent
-                : evo_theme_current()->text_muted,
-            0
-        );
-    }
-
-    /*
-     * Footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        favorite_count > 0
-            ? "PLAY"
-            : "SELECT",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    /*
-     * Triangle placeholder drawn as text until a dedicated
-     * Triangle asset is added.
-     */
-    rr_control(
-        fb,
-        292,
-        982,
-        5
-    );
-
-    rr_text(
-        fb,
-        348,
-        998,
-        "REMOVE",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        540,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        596,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        2
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "FAVORITE MEDIA",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
+/* EVO: draw_favorites_screen is now a model handed to evo_screen_list().
+ * Search for "EVO: the list pages". */
 
 
 
@@ -17223,328 +14732,8 @@ static void prospero_settings_activate_selected(void)
 /* PROSPERO_PERSISTENT_SETTINGS_END */
 
 
-void draw_settings_screen(uint32_t *fb) {
-    static int initialized = 0;
-    static int selected_y_fp = 0;
-    static int settings_frame = 0;
-
-    /* EVO: same grid as the main menu - see the note there. */
-    const evo_theme *th = evo_theme_current();
-
-    /* Eight rows have to clear the footer rule at y=948:
-     *   186 + 7*94 = 844, + 84 tall = 928.
-     * Slightly denser than the six-row main menu, which is why the row
-     * metrics are stated here rather than shared. */
-    const int row_x = 180;
-    const int row_w = 1920 - 2 * 180;
-    const int row_h = 84;
-    const int row_start_y = 186;
-    const int row_gap = 94;
-    const int settings_count = EVO_SETTINGS_COUNT;
-
-    if (settings_selected < 0) {
-        settings_selected = 0;
-    }
-
-    if (settings_selected >= settings_count) {
-        settings_selected = settings_count - 1;
-    }
-
-    int target_y_fp =
-        (row_start_y + settings_selected * row_gap) << 8;
-
-    if (!initialized) {
-        selected_y_fp = target_y_fp;
-        initialized = 1;
-    }
-
-    int distance = target_y_fp - selected_y_fp;
-
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
-
-    int selected_draw_y = selected_y_fp >> 8;
-
-    settings_frame++;
-
-    /* EVO: themed background. rr_bg() blits a fixed artwork bitmap, which
-     * pins the whole player to one colour scheme; the gradient comes from the
-     * active theme instead. */
-    evo_ui_background(fb);
-
-    /*
-     * Subtle atmosphere matching the other screens.
-     */
-    int breath_phase = settings_frame % 360;
-
-    int breath_alpha =
-        breath_phase < 180
-            ? 1 + breath_phase / 40
-            : 5 - (breath_phase - 180) / 40;
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 24, 60, breath_alpha)
-    );
-
-    /*
-     * Header.
-     */
-    rr_fill(fb, 180, 90, 4, 64, th->accent);
-    rr_fill(fb, 180, 150, 26, 2, th->accent_soft);
-
-    rr_text(
-        fb,
-        220,
-        84,
-        "SETTINGS",
-        th->text_primary,
-        3
-    );
-
-    rr_text(
-        fb,
-        222,
-        140,
-        "PLAYBACK AND APPLICATION PREFERENCES",
-        th->text_muted,
-        1
-    );
-
-    char profile_value[96];
-    char resume_value[32];
-    char view_value[32];
-    char subtitle_value[32];
-    char uninstall_value[48];
-
-    snprintf(
-        profile_value,
-        sizeof(profile_value),
-        "%s",
-        profile_name(current_profile)
-    );
-
-    snprintf(
-        resume_value,
-        sizeof(resume_value),
-        "%s",
-        prospero_resume_playback_enabled
-            ? "ON"
-            : "OFF"
-    );
-
-    snprintf(
-        view_value,
-        sizeof(view_value),
-        "%s",
-        prospero_view_mode_name(
-            prospero_default_view_mode
-        )
-    );
-
-    snprintf(
-        subtitle_value,
-        sizeof(subtitle_value),
-        "%s",
-        prospero_auto_subtitles_enabled
-            ? "ON"
-            : "OFF"
-    );
-
-    snprintf(
-        uninstall_value,
-        sizeof(uninstall_value),
-        "%s",
-        (prospero_uninstall_confirm_until != 0 &&
-         time(NULL) <= prospero_uninstall_confirm_until)
-            ? "PRESS X TO CONFIRM"
-            : "REMOVES MEDIA TILE"
-    );
-
-    /* EVO: theme row shows the active theme and how many are available, so
-     * it is obvious when a .theme file on USB has been picked up. */
-    char theme_value[64];
-
-    snprintf(
-        theme_value,
-        sizeof(theme_value),
-        "%s  (%d OF %d)",
-        evo_theme_name(evo_theme_index()),
-        evo_theme_index() + 1,
-        evo_theme_count()
-    );
-
-    const char *titles[8] = {
-        "PLAYBACK PROFILE",
-        "RESUME PLAYBACK",
-        "DEFAULT ASPECT RATIO",
-        "AUTO-DETECT SUBTITLES",
-        "DEVELOPER MODE",
-        "FOLDERS FIRST",
-        "THEME",
-        "REMOVE HOME TILE"
-    };
-
-    /* One icon per row - every row used to fall through to the generic
-     * info glyph, so six of the eight looked identical. */
-    const int settings_icons[8] = { 3, 7, 8, 9, 4, 11, 10, 12 };
-
-    const char *details[8] = {
-        profile_value,
-        resume_value,
-        view_value,
-        subtitle_value,
-        show_debug_overlay ? "ON" : "OFF",
-        evo_sort_folders_first ? "ON" : "OFF",
-        theme_value,
-        uninstall_value
-    };
-
-    /*
-     * Normal rows first.
-     */
-    for (int row = 0; row < settings_count; row++) {
-        int y = row_start_y + row * row_gap;
-
-        evo_ui_card(fb, row_x, y, row_w, row_h, 0);
-    }
-
-    /*
-     * Gliding selected row.
-     */
-    evo_ui_card(fb, row_x, selected_draw_y, row_w, row_h, 1);
-
-    /*
-     * Row content.
-     */
-    for (int row = 0; row < settings_count; row++) {
-        int y = row_start_y + row * row_gap;
-
-        rr_icon(
-            fb,
-            row_x + 40,
-            y + 6,
-            settings_icons[row]
-        );
-
-        rr_text(
-            fb,
-            row_x + 132,
-            y + 8,
-            titles[row],
-            th->text_primary,
-            2
-        );
-
-        /* The value is what the row is about, so the selected row states it
-         * in the accent colour rather than the muted description grey. */
-        rr_text(
-            fb,
-            row_x + 132,
-            y + 48,
-            details[row],
-            row == settings_selected
-                ? th->accent
-                : th->text_secondary,
-            1
-        );
-
-        int arrow_shift = 0;
-
-        if (row == settings_selected) {
-            int phase = settings_frame % 36;
-
-            if (phase < 9) {
-                arrow_shift = phase / 3;
-            } else if (phase < 18) {
-                arrow_shift = 3 - ((phase - 9) / 3);
-            }
-        }
-
-        rr_icon(
-            fb,
-            row_x + row_w - 104 + arrow_shift,
-            y + 6,
-            6
-        );
-    }
-
-    /*
-     * Minimal footer.
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        0
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        "SELECT",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_control(
-        fb,
-        292,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        348,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        3
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "EVO SETTINGS",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
+/* EVO: draw_settings_screen is now a model handed to evo_screen_list().
+ * Search for "EVO: the list pages". */
 
 void draw_profile_screen(uint32_t *fb) {
     static int initialized = 0;
@@ -17985,6 +15174,71 @@ static void rr_control(
     }
 }
 
+/* ===========================================================================
+ * EVO: binding the UI layer to this file's renderers.
+ *
+ * The font atlas and icon sheets are around a megabyte of `static const`
+ * arrays in headers that only this translation unit includes. Including them
+ * from ui/ as well would duplicate every byte in the ELF, so the UI layer
+ * draws through function pointers instead and this is where they are filled
+ * in. See ui/include/evo_draw.h.
+ * ======================================================================== */
+
+/* Advance width of a string. The atlas is proportional and there was no way
+ * to measure it, so everything was positioned by hand-counted offsets and
+ * nothing could be centred, right-aligned, ellipsised or marqueed. */
+static int rr_text_w(const char *t, int face)
+{
+    int w = 0;
+
+    if (!t) return 0;
+
+    for (const char *q = t; *q; q++) {
+        int id = rr_idx(*q);
+
+        /* Unknown glyphs advance 12px in rr_text; measuring has to agree
+         * with drawing or fitted text will not line up with its box. */
+        if (id < 0) { w += 12; continue; }
+
+        if      (face == 3) w += RR_TITLE_ADV[id];
+        else if (face == 2) w += RR_MENU_ADV[id];
+        else if (face == 1) w += RR_SUB_ADV[id];
+        else                w += RR_SMALL_ADV[id];
+    }
+
+    return w;
+}
+
+/* rr_icon() always tints with the theme accent. The rail and the list rows
+ * need muted and secondary variants too, so the colour becomes a parameter. */
+static void rr_icon_tinted(uint32_t *fb, int x, int y, int idx, uint32_t tint)
+{
+    switch (idx) {
+    case 0:  rr_img_tint(fb,x,y,EVO_ICON_BROWSE_USB_W,EVO_ICON_BROWSE_USB_H,EVO_ICON_BROWSE_USB,tint); break;
+    case 1:  rr_img_tint(fb,x,y,EVO_ICON_RECENT_FILES_W,EVO_ICON_RECENT_FILES_H,EVO_ICON_RECENT_FILES,tint); break;
+    case 2:  rr_img_tint(fb,x,y,EVO_ICON_FAVORITES_W,EVO_ICON_FAVORITES_H,EVO_ICON_FAVORITES,tint); break;
+    case 3:  rr_img_tint(fb,x,y,EVO_ICON_SETTINGS_W,EVO_ICON_SETTINGS_H,EVO_ICON_SETTINGS,tint); break;
+    case 4:  rr_img_tint(fb,x,y,EVO_ICON_DEVELOPER_TOOLS_W,EVO_ICON_DEVELOPER_TOOLS_H,EVO_ICON_DEVELOPER_TOOLS,tint); break;
+    case 5:  rr_img_tint(fb,x,y,EVO_ICON_ABOUT_SUPPORT_W,EVO_ICON_ABOUT_SUPPORT_H,EVO_ICON_ABOUT_SUPPORT,tint); break;
+    case 6:  rr_img_tint(fb,x,y,EVO_ICON_CHEVRON_W,EVO_ICON_CHEVRON_H,EVO_ICON_CHEVRON,tint); break;
+    case 7:  rr_img_tint(fb,x,y,EVO_ICON_RESUME_W,EVO_ICON_RESUME_H,EVO_ICON_RESUME,tint); break;
+    case 8:  rr_img_tint(fb,x,y,EVO_ICON_ASPECT_W,EVO_ICON_ASPECT_H,EVO_ICON_ASPECT,tint); break;
+    case 9:  rr_img_tint(fb,x,y,EVO_ICON_SUBTITLES_W,EVO_ICON_SUBTITLES_H,EVO_ICON_SUBTITLES,tint); break;
+    case 10: rr_img_tint(fb,x,y,EVO_ICON_PALETTE_W,EVO_ICON_PALETTE_H,EVO_ICON_PALETTE,tint); break;
+    case 11: rr_img_tint(fb,x,y,EVO_ICON_FOLDER_W,EVO_ICON_FOLDER_H,EVO_ICON_FOLDER,tint); break;
+    case 12: rr_img_tint(fb,x,y,EVO_ICON_TRASH_W,EVO_ICON_TRASH_H,EVO_ICON_TRASH,tint); break;
+    default: break;
+    }
+}
+
+static const evo_draw_vtable EVO_DRAW_VTABLE = {
+    rr_text,
+    rr_text_w,
+    rr_icon,
+    rr_icon_tinted,
+    rr_control
+};
+
 /* ---------------------------------------------------------------------------
  * EVO: menu cards drawn instead of blitted.
  *
@@ -18021,289 +15275,1107 @@ static void rr_control(
 #define EVO_CARD_SELECTED_STROKE 0xEBFFCD00u
 #define EVO_CARD_SELECTED_GLOW   0x24483A00u
 
-void draw_menu_linear(uint32_t *fb, int selected) {
-    const char *titles[6] = {
-        "BROWSE USB",
-        "RECENT FILES",
-        "FAVORITES",
-        "SETTINGS",
-        "DEVELOPER TOOLS",
-        "ABOUT / SUPPORT"
-    };
+/* ===========================================================================
+ * EVO: shared UI state.
+ *
+ * One focus model per list rather than a loose integer per screen. The old
+ * arrangement - settings_selected, recent_selected, favorite_selected,
+ * file_selected, each with its wrap arithmetic written out at the point of
+ * use - is what let the settings list grow to seven rows while its navigation
+ * still wrapped at six, leaving the last row visible but unreachable.
+ * ======================================================================== */
 
-    const char *subs[6] = {
-        "Explore videos and folders on USB storage",
-        "Continue videos you recently played",
-        "Open saved favorite media",
-        "Profiles and playback preferences",
-        "Reports logs and debug tools",
-        "Credits project info and support"
-    };
+static evo_grid  evo_launch_grid;
+static int       evo_launch_grid_ready;
 
-    static int initialized = 0;
-    static int selected_y_fp = 0;
-    static int intro_frame = 0;
-    static int fade_alpha = 255;
-    static int animation_frame = 0;
-    static int last_selected = -1;
+static evo_focus evo_browser_focus;
+static evo_focus evo_page_focus;      /* recent / favorites / tools / about */
 
-    /* EVO: every colour on this screen comes from here. */
-    const evo_theme *th = evo_theme_current();
+static evo_input evo_pad_state;
 
-    const int mx = 180;
-    const int my = 214;
-    const int gap = 112;
+/* Rail focus is a property of the shell, not of any one screen: pressing
+ * LEFT out of a list should reach the rail from every section. */
+static int evo_rail_focused;
+static int evo_rail_index;
 
-    /* EVO: the column used to stop at x=1429 of 1920, leaving a quarter of
-     * the screen empty on the right. Cards now span the full content width
-     * with symmetric margins. */
-    #define EVO_MENU_CARD_W  (1920 - 2 * 180)
-    #define EVO_MENU_CARD_H  96
-    #define EVO_MENU_ICON_X  40
-    #define EVO_MENU_TEXT_X  132
+/* ---- formatting ---------------------------------------------------------- */
 
-    /* Measured ink bounds of the glyph atlas (rows within each glyph box):
-     *   face 2 (MENU) 9..41,  face 1 (SUB) 7..23
-     * so a title drawn at +10 inks 19..51 and a subtitle at +52 inks 59..75,
-     * leaving 19px above and 21px below inside a 96px card. The old values
-     * (+25 / +70 in an 82px card) pushed the subtitle 11px past the bottom
-     * edge, which is why descriptions sat on the border. */
-    #define EVO_MENU_TITLE_Y 10
-    #define EVO_MENU_SUB_Y   52
-    #define EVO_MENU_ICON_Y  12   /* 72px icon centred in a 96px card */
+static void evo_fmt_duration(char *out, size_t n, double sec)
+{
+    int total, h, m;
 
-    if (selected < 0) selected = 0;
-    if (selected > 5) selected = 5;
+    if (!out || n == 0) return;
 
-    int target_y_fp = (my + selected * gap) << 8;
+    if (sec <= 0.0) { out[0] = 0; return; }
 
-    if (!initialized) {
-        selected_y_fp = target_y_fp;
-        last_selected = selected;
-        initialized = 1;
+    total = (int)(sec + 0.5);
+    h     = total / 3600;
+    m     = (total % 3600) / 60;
+
+    if (h > 0) snprintf(out, n, "%dH %02dM", h, m);
+    else       snprintf(out, n, "%dM %02dS", m, total % 60);
+}
+
+static void evo_fmt_remaining(char *out, size_t n, double pos, double dur)
+{
+    char left[32];
+
+    if (!out || n == 0) return;
+
+    if (dur <= 0.0) { out[0] = 0; return; }
+
+    if (pos <= 1.0) {
+        evo_fmt_duration(left, sizeof(left), dur);
+        snprintf(out, n, "%s", left);
+        return;
     }
 
-    if (selected != last_selected) {
-        last_selected = selected;
+    evo_fmt_duration(left, sizeof(left), dur - pos);
+    snprintf(out, n, "%s LEFT", left);
+}
+
+static int evo_progress_permille(double pos, double dur)
+{
+    int p;
+
+    if (dur <= 0.0 || pos <= 0.0) return -1;
+
+    p = (int)((pos * 1000.0) / dur);
+
+    if (p < 0)    p = 0;
+    if (p > 1000) p = 1000;
+
+    return p;
+}
+
+/* ---- artwork ------------------------------------------------------------- */
+
+/*
+ * Covers are decoded on demand and cached, but the first call for a path can
+ * mean opening the file and decoding a frame. Filling eight recent tiles on
+ * one frame would stall the UI for seconds, so at most one cover is resolved
+ * per frame and the shelf fills in over the following few.
+ */
+static int evo_cover_budget;
+
+static const uint32_t *evo_cover_pixels(const char *path)
+{
+    const ProsperoCoverEntry *e;
+
+    if (!path || !path[0]) return NULL;
+
+    if (evo_cover_budget <= 0) return NULL;
+    evo_cover_budget--;
+
+    e = prospero_cover_get(path, 0);
+    return e ? e->pixels : NULL;
+}
+
+/*
+ * The hero keeps its own copy of its backdrop. The browser's preview buffer
+ * is a single global keyed by path, so sharing it would make every trip
+ * between the launch screen and the browser re-decode a video frame.
+ */
+static uint32_t evo_hero_art[PROSPERO_BROWSER_PREVIEW_W *
+                             PROSPERO_BROWSER_PREVIEW_H];
+static char     evo_hero_art_path[768];
+static int      evo_hero_art_valid;
+
+static void evo_hero_art_ensure(const char *path)
+{
+    if (!path || !path[0]) {
+        evo_hero_art_valid  = 0;
+        evo_hero_art_path[0] = 0;
+        return;
     }
 
-    /*
-     * Faster glide:
-     * previous movement used distance / 5.
-     * distance / 3 feels responsive while remaining smooth.
-     */
-    int distance = target_y_fp - selected_y_fp;
+    if (strcmp(evo_hero_art_path, path) == 0)
+        return;   /* already resolved, hit or miss */
 
-    if (distance > -160 && distance < 160) {
-        selected_y_fp = target_y_fp;
-    } else {
-        selected_y_fp += distance / 2;
-    }
+    snprintf(evo_hero_art_path, sizeof(evo_hero_art_path), "%s", path);
+    evo_hero_art_valid = 0;
 
-    int selected_draw_y = selected_y_fp >> 8;
+    if (!prospero_path_is_readable(path))
+        return;
 
-    intro_frame++;
-    animation_frame++;
+    prospero_browser_preview_ensure(path, 0);
 
-    if (intro_frame > 28) {
-        intro_frame = 28;
-    }
-
-    if (fade_alpha > 0) {
-        fade_alpha -= 42;
-        if (fade_alpha < 0) fade_alpha = 0;
-    }
-
-    rr_bg(fb);
-
-    /*
-     * Very subtle whole-screen blue breathing.
-     * Alpha ranges from 1 to 7.
-     */
-    int breath_phase = animation_frame % 360;
-    int breath_alpha;
-
-    if (breath_phase < 180) {
-        breath_alpha = 1 + breath_phase / 30;
-    } else {
-        breath_alpha = 7 - (breath_phase - 180) / 30;
-    }
-
-    rr_fill(
-        fb,
-        0, 0, 1920, 1080,
-        RR_BGRA(0, 25, 65, breath_alpha)
-    );
-
-    /*
-     * EVO: the drifting particle overlay that used to live here is gone.
-     *
-     * It was 14 deterministic 1x1 and 2x2 fills in a fixed cyan at alpha
-     * 28-70. At that size and contrast they do not read as particles; they
-     * read as stuck pixels, and I chased one as a rendering bug before
-     * finding the loop that drew it. Softening them to antialiased discs
-     * helped but did not fix the underlying problem, so they were removed.
-     * The background's accent bloom already supplies the depth they were
-     * meant to provide.
-     */
-
-    /* Header. EVO: aligned to the card column (x=180) instead of the old
-     * x=82, and coloured from the theme rather than hardcoded cyan. */
-    rr_fill(fb,180,90,4,64,th->accent);
-    rr_fill(fb,180,150,26,2,th->accent_soft);
-
-    rr_text(
-        fb,
-        220,84,
-        "EVO PLAYER",
-        th->text_primary,
-        3
-    );
-
-    rr_text(
-        fb,
-        222,140,
-        "VERSION " EVO_PLAYER_VERSION,
-        th->text_muted,
-        1
-    );
-
-    /*
-     * Draw base cards with a faster staggered intro.
-     */
-    for (int i = 0; i < 6; i++) {
-        int local_frame = intro_frame - i;
-        int slide_offset;
-
-        if (local_frame <= 0) {
-            slide_offset = 21;
-        } else if (local_frame < 7) {
-            slide_offset = 21 - local_frame * 3;
-        } else {
-            slide_offset = 0;
-        }
-
-        int row_x = mx - slide_offset;
-        int row_y = my + i * gap;
-
-        /* EVO: themed card - gradient fill, hairline border, drop shadow. */
-        evo_ui_card(fb, row_x, row_y, EVO_MENU_CARD_W, EVO_MENU_CARD_H, 0);
-    }
-
-    /*
-     * Selected card glides independently between rows.
-     */
-    evo_ui_card(fb, mx, selected_draw_y, EVO_MENU_CARD_W, EVO_MENU_CARD_H, 1);
-
-    /*
-     * One-time specular sweep whenever selection changes.
-     */
-    
-
-
-    /*
-     * Draw icons and text after cards so they remain crisp.
-     */
-    for (int i = 0; i < 6; i++) {
-        int local_frame = intro_frame - i;
-        int slide_offset;
-
-        if (local_frame <= 0) {
-            slide_offset = 21;
-        } else if (local_frame < 7) {
-            slide_offset = 21 - local_frame * 3;
-        } else {
-            slide_offset = 0;
-        }
-
-        int row_x = mx - slide_offset;
-        int row_y = my + i * gap;
-
-        /* EVO: text and chevron positions derive from the card box rather
-         * than being hardcoded to the old 1265px artwork, so widening the
-         * column does not leave the chevron stranded mid-card. */
-        rr_icon(
-            fb,
-            row_x + EVO_MENU_ICON_X,
-            row_y + EVO_MENU_ICON_Y,
-            i
-        );
-
-        int arrow_shift = 0;
-
-        if (i == selected) {
-            int arrow_phase = animation_frame % 36;
-
-            if (arrow_phase < 9) {
-                arrow_shift = arrow_phase / 3;
-            } else if (arrow_phase < 18) {
-                arrow_shift = 3 - ((arrow_phase - 9) / 3);
-            }
-        }
-
-        rr_icon(
-            fb,
-            row_x + EVO_MENU_CARD_W - 104 + arrow_shift,
-            row_y + EVO_MENU_ICON_Y,
-            6
-        );
-
-        rr_text(
-            fb,
-            row_x + EVO_MENU_TEXT_X,
-            row_y + EVO_MENU_TITLE_Y,
-            titles[i],
-            th->text_primary,
-            2
-        );
-
-        rr_text(
-            fb,
-            row_x + EVO_MENU_TEXT_X,
-            row_y + EVO_MENU_SUB_Y,
-            subs[i],
-            th->text_secondary,
-            1
-        );
-    }
-
-    /* Footer. EVO: themed, and its content aligned to the same 180px
-     * margin the cards use so the page reads on one grid. */
-    evo_ui_hline(fb,0,948,1920,th->border);
-    rr_fill(fb,0,949,1920,79,th->scrim);
-
-    rr_control(fb,180,982,0);
-
-    rr_text(
-        fb,
-        236,998,
-        "SELECT",
-        th->text_secondary,
-        0
-    );
-
-    rr_icon(fb,1584,965,5);
-
-    rr_text(
-        fb,
-        1656,997,
-        "V" EVO_PLAYER_VERSION,
-        th->text_muted,
-        0
-    );
-
-    /*
-     * Faster initial fade-in.
-     */
-    if (fade_alpha > 0) {
-        rr_fill(
-            fb,
-            0,0,1920,1080,
-            RR_BGRA(0,0,0,fade_alpha)
-        );
+    if (prospero_browser_preview_valid &&
+        strcmp(prospero_browser_preview_path, path) == 0) {
+        memcpy(evo_hero_art, prospero_browser_preview_pixels,
+               sizeof(evo_hero_art));
+        evo_hero_art_valid = 1;
     }
 }
 
+/* ---- launch screen ------------------------------------------------------- */
+
+static evo_launch_item s_launch_items[EVO_LAUNCH_RECENT_MAX];
+static char            s_launch_detail[EVO_LAUNCH_RECENT_MAX][64];
+static char            s_hero_detail[96];
+static char            s_clock[16];
+
+static void evo_build_launch_model(evo_launch_model *m)
+{
+    int n = recent_file_count;
+    int i;
+
+    memset(m, 0, sizeof(*m));
+
+    if (n > EVO_LAUNCH_RECENT_MAX) n = EVO_LAUNCH_RECENT_MAX;
+
+    /* Clock, for the header. Cheap, and it is the one piece of ambient
+     * information a ten-foot home screen is expected to carry. */
+    {
+        time_t     now = time(NULL);
+        struct tm  tmv;
+
+        if (localtime_r(&now, &tmv))
+            snprintf(s_clock, sizeof(s_clock), "%02d:%02d",
+                     tmv.tm_hour, tmv.tm_min);
+        else
+            s_clock[0] = 0;
+    }
+
+    m->clock      = s_clock[0] ? s_clock : NULL;
+    m->theme_name = evo_theme_name(evo_theme_index());
+
+    if (recent_file_count > 0) {
+        const RecentFileEntry *r = &recent_files[0];
+
+        m->has_resume    = 1;
+        m->hero_title    = r->title[0] ? r->title : r->path;
+        m->hero_progress = evo_progress_permille(r->last_pos, r->duration);
+        m->hero_action   = (r->last_pos > 1.0) ? "RESUME" : "PLAY";
+
+        evo_fmt_remaining(s_hero_detail, sizeof(s_hero_detail),
+                          r->last_pos, r->duration);
+        m->hero_detail = s_hero_detail[0] ? s_hero_detail : NULL;
+
+        evo_hero_art_ensure(r->path);
+
+        if (evo_hero_art_valid) {
+            m->hero_art.pixels = evo_hero_art;
+            m->hero_art.w      = PROSPERO_BROWSER_PREVIEW_W;
+            m->hero_art.h      = PROSPERO_BROWSER_PREVIEW_H;
+        }
+    } else {
+        m->has_resume  = 0;
+        m->hero_title  = "EVO PLAYER";
+        m->hero_detail = "Play video and audio from USB storage";
+        m->hero_action = "BROWSE USB";
+        m->hero_progress = -1;
+    }
+
+    for (i = 0; i < n; i++) {
+        const RecentFileEntry *r = &recent_files[i];
+
+        s_launch_items[i].title    = r->title[0] ? r->title : r->path;
+        s_launch_items[i].progress = evo_progress_permille(r->last_pos,
+                                                           r->duration);
+
+        evo_fmt_remaining(s_launch_detail[i], sizeof(s_launch_detail[i]),
+                          r->last_pos, r->duration);
+        s_launch_items[i].detail = s_launch_detail[i];
+
+        s_launch_items[i].art.pixels = evo_cover_pixels(r->path);
+        s_launch_items[i].art.w      = PROSPERO_COVER_W;
+        s_launch_items[i].art.h      = PROSPERO_COVER_H;
+    }
+
+    m->recent       = s_launch_items;
+    m->recent_count = n;
+}
+
+/*
+ * Kept under the old name and signature so the frame dispatch does not have
+ * to change in the same step. `selected` is ignored: the launch screen is a
+ * two-dimensional grid now and its cursor lives in evo_launch_grid.
+ */
+void draw_menu_linear(uint32_t *fb, int selected)
+{
+    evo_launch_model model;
+
+    (void)selected;
+
+    evo_cover_budget = 1;
+
+    if (!evo_launch_grid_ready) {
+        evo_grid_init(&evo_launch_grid, EVO_LAUNCH_ROWS);
+        /* Open on the library shelf rather than the hero: with no history
+         * the hero is a signpost, and landing on a signpost is a wasted
+         * first press. */
+        evo_launch_grid.row = recent_file_count > 0
+                                ? EVO_LAUNCH_ROW_HERO
+                                : EVO_LAUNCH_ROW_LIBRARY;
+        evo_launch_grid_ready = 1;
+    }
+
+    evo_build_launch_model(&model);
+    evo_screen_launch_sync(&evo_launch_grid, &model);
+
+    evo_launch_grid.settled_frames++;
+
+    evo_screen_launch(fb, &model, &evo_launch_grid);
+}
+
+/* ---- navigation feedback -------------------------------------------------
+ *
+ * Routing every cursor move through here is what lets the pad distinguish
+ * "moved", "wrapped around" and "you are already at the end". Previously all
+ * three produced the same blip, so running into the bottom of a list was
+ * indistinguishable from moving down it.
+ */
+static void evo_feedback_for_move(evo_move_result r)
+{
+    switch (r) {
+        case EVO_MOVE_OK:      evo_feedback(EVO_FB_MOVE);     break;
+        case EVO_MOVE_WRAPPED: evo_feedback(EVO_FB_WRAP);     break;
+        case EVO_MOVE_BLOCKED: evo_feedback(EVO_FB_BOUNDARY); break;
+        case EVO_MOVE_NONE:    default:                       break;
+    }
+}
+
+static void evo_launch_nav(int dx, int dy)
+{
+    if (!evo_launch_grid_ready) return;
+
+    if (dy) evo_feedback_for_move(evo_grid_move_v(&evo_launch_grid, dy));
+    if (dx) evo_feedback_for_move(evo_grid_move_h(&evo_launch_grid, dx));
+}
+
+static void evo_play_recent(int index)
+{
+    if (index < 0 || index >= recent_file_count) {
+        evo_feedback(EVO_FB_ERROR);
+        return;
+    }
+
+    snprintf(current_media_path, sizeof(current_media_path),
+             "%s", recent_files[index].path);
+
+    requested_resume_seek_pos  = recent_files[index].last_pos;
+    resume_base_offset_seconds = recent_files[index].last_pos;
+
+    evo_feedback(EVO_FB_OPEN);
+    evo_nav_push(EVO_SCREEN_PLAYER);
+    screen = SCREEN_PLAYER;
+
+    start_video_playback(current_media_path);
+}
+
+static void evo_launch_activate(void)
+{
+    evo_launch_model model;
+    evo_screen_id    target;
+    int              recent_index = -1;
+    int              play_hero    = 0;
+
+    /* No decode budget: this runs on a button press, and stalling the frame
+     * to fetch a cover the user is about to navigate away from is the wrong
+     * trade. The shelf fills in during idle frames instead. */
+    evo_cover_budget = 0;
+    evo_build_launch_model(&model);
+
+    target = evo_screen_launch_activate(&evo_launch_grid, &model,
+                                        &recent_index, &play_hero);
+
+    if (play_hero) { evo_play_recent(0); return; }
+    if (recent_index >= 0) { evo_play_recent(recent_index); return; }
+
+    if (target == EVO_SCREEN_LAUNCH) {
+        evo_feedback(EVO_FB_ERROR);
+        return;
+    }
+
+    evo_feedback(EVO_FB_OPEN);
+
+    if (target == EVO_SCREEN_BROWSER) load_usb_files();
+    if (target == EVO_SCREEN_SETTINGS) settings_selected = 0;
+
+    evo_nav_push(target);
+    screen = (int)target;
+}
+
+/* ===========================================================================
+ * EVO: file browser.
+ *
+ * Three columns: the navigation rail, the file list, and an inspector that
+ * shows what the selected file actually is - extension, container, size,
+ * length, resolution and codecs - next to a frame from the file itself.
+ *
+ * The interesting problem here is that codecs and duration are not knowable
+ * without opening the file with avformat, which takes long enough to be felt.
+ * Probing on every selection change would stall the list solid while you
+ * scroll. So the probe is debounced: it only runs once the cursor has been
+ * still for a moment, and its result is cached against the path. Scrolling
+ * through a folder never probes anything; stopping on a file fills the panel
+ * in a fraction of a second.
+ * ======================================================================== */
+
+/* Fields the inspector can show without opening the file. Filled immediately
+ * on every selection change so the panel is never empty. */
+static char evo_ins_name[192];
+static char evo_ins_kind[32];
+static char evo_ins_ext[16];
+static char evo_ins_size[48];
+
+/* Fields that need avformat. Filled by the debounced probe. */
+static char evo_ins_duration[32];
+static char evo_ins_resolution[32];
+static char evo_ins_vcodec[64];
+static char evo_ins_acodec[64];
+static char evo_ins_subs[16];
+static char evo_ins_container[48];
+
+/* What the deep fields describe, so a stale panel is never shown against a
+ * newly selected file. */
+static char evo_probe_path[768];
+static int  evo_probe_done;
+
+/* Frames the cursor must sit still before probing. At 60fps this is about a
+ * fifth of a second - long enough that holding a direction through a folder
+ * never triggers it, short enough to feel immediate when you stop. */
+#define EVO_PROBE_SETTLE_FRAMES 12
+
+static void evo_probe_clear(void)
+{
+    evo_ins_duration[0]   = 0;
+    evo_ins_resolution[0] = 0;
+    evo_ins_vcodec[0]     = 0;
+    evo_ins_acodec[0]     = 0;
+    evo_ins_subs[0]       = 0;
+    evo_ins_container[0]  = 0;
+    evo_probe_done        = 0;
+}
+
+static void evo_probe_media(const char *path)
+{
+    AVFormatContext *fmt = NULL;
+    MediaMetadata    md;
+
+    evo_probe_clear();
+    snprintf(evo_probe_path, sizeof(evo_probe_path), "%s", path);
+    evo_probe_done = 1;   /* set even on failure: do not retry every frame */
+
+    if (avformat_open_input(&fmt, path, NULL, NULL) != 0)
+        return;
+
+    /* Stream info is what carries codec parameters for containers that do not
+     * declare them up front. It is also the expensive half, which is exactly
+     * why this whole function is behind a settle timer. */
+    if (avformat_find_stream_info(fmt, NULL) < 0) {
+        avformat_close_input(&fmt);
+        return;
+    }
+
+    load_media_metadata_from_format(fmt, path, &md);
+
+    if (md.duration_sec > 0.0)
+        evo_fmt_duration(evo_ins_duration, sizeof(evo_ins_duration),
+                         md.duration_sec);
+
+    if (md.has_video && md.width > 0 && md.height > 0)
+        snprintf(evo_ins_resolution, sizeof(evo_ins_resolution), "%d x %d",
+                 md.width, md.height);
+
+    if (md.has_video)
+        snprintf(evo_ins_vcodec, sizeof(evo_ins_vcodec), "%s", md.video_codec);
+
+    if (md.has_audio)
+        snprintf(evo_ins_acodec, sizeof(evo_ins_acodec), "%s", md.audio_codec);
+
+    snprintf(evo_ins_subs, sizeof(evo_ins_subs), "%s",
+             md.has_subtitles ? "YES" : "NO");
+
+    if (fmt->iformat && fmt->iformat->name)
+        snprintf(evo_ins_container, sizeof(evo_ins_container), "%s",
+                 fmt->iformat->name);
+
+    avformat_close_input(&fmt);
+}
+
+static evo_file_kind evo_kind_for(const char *name, int entry_type)
+{
+    const char *label = usb_browser_type_label(name, entry_type);
+
+    if (strcmp(label, "FOLDER")   == 0) return EVO_FILE_FOLDER;
+    if (strcmp(label, "VIDEO")    == 0) return EVO_FILE_VIDEO;
+    if (strcmp(label, "AUDIO")    == 0) return EVO_FILE_AUDIO;
+    if (strcmp(label, "IMAGE")    == 0) return EVO_FILE_IMAGE;
+    if (strcmp(label, "DOCUMENT") == 0) return EVO_FILE_SUBTITLE;
+
+    return EVO_FILE_OTHER;
+}
+
+/* Row text for the whole visible window. Only the visible rows are formatted:
+ * a folder can hold hundreds of entries and stat()ing all of them every frame
+ * is work nobody sees. */
+#define EVO_BROWSER_ROWS_MAX 16
+
+static evo_browser_entry evo_browser_rows[EVO_BROWSER_ROWS_MAX];
+static char              evo_browser_name[EVO_BROWSER_ROWS_MAX][160];
+static char              evo_browser_detail[EVO_BROWSER_ROWS_MAX][160];
+
+static void evo_browser_full_path(char *out, size_t n, int index)
+{
+    snprintf(out, n, "%s/%s", current_path, usb_files[index]);
+}
+
+static void evo_browser_build_row(int slot, int index)
+{
+    char full[768];
+    char size_text[48];
+    const char *type_label;
+
+    evo_browser_full_path(full, sizeof(full), index);
+
+    snprintf(evo_browser_name[slot], sizeof(evo_browser_name[slot]),
+             "%s", usb_files[index]);
+
+    evo_browser_rows[slot].name     = evo_browser_name[slot];
+    evo_browser_rows[slot].kind     = evo_kind_for(usb_files[index],
+                                                   usb_types[index]);
+    evo_browser_rows[slot].favorite = favorites_is_favorite(full);
+    evo_browser_rows[slot].progress = -1;
+
+    if (usb_types[index] == 4) {
+        snprintf(evo_browser_detail[slot], sizeof(evo_browser_detail[slot]),
+                 "FOLDER");
+        evo_browser_rows[slot].detail = evo_browser_detail[slot];
+        return;
+    }
+
+    type_label   = usb_browser_type_label(usb_files[index], usb_types[index]);
+    size_text[0] = 0;
+
+    {
+        struct stat st;
+        if (stat(full, &st) == 0)
+            format_file_size(size_text, sizeof(size_text),
+                             (long long)st.st_size);
+    }
+
+    if (size_text[0])
+        snprintf(evo_browser_detail[slot], sizeof(evo_browser_detail[slot]),
+                 "%s  -  %s", type_label, size_text);
+    else
+        snprintf(evo_browser_detail[slot], sizeof(evo_browser_detail[slot]),
+                 "%s", type_label);
+
+    evo_browser_rows[slot].detail = evo_browser_detail[slot];
+
+    /* Resume position, shown as a hairline along the bottom of the card. */
+    for (int i = 0; i < recent_file_count; i++) {
+        if (strcmp(recent_files[i].path, full) != 0) continue;
+        evo_browser_rows[slot].progress =
+            evo_progress_permille(recent_files[i].last_pos,
+                                  recent_files[i].duration);
+        break;
+    }
+}
+
+/*
+ * Keep the shared focus model and the legacy file_selected / file_scroll
+ * globals in agreement. Those globals are read by enter_selected_usb(),
+ * usb_go_back() and the favourite toggle, so they cannot simply be deleted;
+ * the focus model owns movement and writes through to them.
+ */
+static int evo_browser_focus_ready;
+
+static void evo_browser_sync(void)
+{
+    int capacity = evo_screen_browser_capacity();
+
+    if (capacity > EVO_BROWSER_ROWS_MAX) capacity = EVO_BROWSER_ROWS_MAX;
+
+    if (!evo_browser_focus_ready) {
+        evo_focus_init(&evo_browser_focus, file_count, capacity, 1);
+        evo_browser_focus_ready = 1;
+    }
+
+    evo_browser_focus.visible = capacity;
+    evo_focus_set_count(&evo_browser_focus, file_count);
+
+    /* Something outside the focus model moved the cursor - load_usb_files()
+     * resets it to 0 on entering a folder. */
+    if (evo_browser_focus.index != file_selected)
+        evo_focus_set(&evo_browser_focus, file_selected);
+
+    file_selected = evo_browser_focus.index;
+    file_scroll   = evo_browser_focus.scroll;
+}
+
+/* Called from the input handler. */
+static void evo_browser_nav(int delta)
+{
+    evo_browser_sync();
+    evo_feedback_for_move(evo_focus_move(&evo_browser_focus, delta));
+    file_selected = evo_browser_focus.index;
+    file_scroll   = evo_browser_focus.scroll;
+}
+
+static void evo_browser_page(int direction)
+{
+    evo_browser_sync();
+    evo_feedback_for_move(evo_focus_page(&evo_browser_focus, direction));
+    file_selected = evo_browser_focus.index;
+    file_scroll   = evo_browser_focus.scroll;
+}
+
+void draw_usb_browser(uint32_t *fb)
+{
+    evo_browser_model   model;
+    evo_browser_inspect inspect;
+    char                breadcrumb[256];
+    char                selected_path[768];
+    int                 visible;
+    int                 i;
+
+    evo_cover_budget = 1;
+
+    evo_browser_sync();
+    evo_focus_tick(&evo_browser_focus, EVO_CONTENT_Y, EVO_ROW_PITCH);
+
+    /* Breadcrumb. The glyph atlas does carry '/', so the path is shown as it
+     * really is rather than transliterated into '>' as it used to be. */
+    {
+        const char *shown = current_path;
+
+        if (strncmp(current_path, "/mnt/", 5) == 0)
+            shown = current_path + 4;   /* keep the leading slash */
+
+        snprintf(breadcrumb, sizeof(breadcrumb), "%s", shown);
+    }
+
+    memset(&model, 0, sizeof(model));
+    model.path    = breadcrumb;
+    model.count   = file_count;
+    model.at_root = (strcmp(current_path, "/mnt/usb0") == 0);
+
+    visible = evo_browser_focus.visible;
+    if (visible > EVO_BROWSER_ROWS_MAX) visible = EVO_BROWSER_ROWS_MAX;
+
+    for (i = 0; i < visible; i++) {
+        int index = evo_browser_focus.scroll + i;
+        if (index >= file_count) break;
+        evo_browser_build_row(i, index);
+    }
+
+    model.entries     = evo_browser_rows;
+    model.first       = evo_browser_focus.scroll;
+    model.entry_count = i;   /* rows actually formatted above */
+
+    /* ---- inspector ------------------------------------------------------ */
+
+    memset(&inspect, 0, sizeof(inspect));
+
+    if (file_count > 0) {
+        const char *ext;
+
+        evo_browser_full_path(selected_path, sizeof(selected_path),
+                              file_selected);
+
+        snprintf(evo_ins_name, sizeof(evo_ins_name), "%s",
+                 usb_files[file_selected]);
+        snprintf(evo_ins_kind, sizeof(evo_ins_kind), "%s",
+                 usb_browser_type_label(usb_files[file_selected],
+                                        usb_types[file_selected]));
+
+        ext = usb_browser_extension(usb_files[file_selected]);
+        if (ext && *ext) {
+            snprintf(evo_ins_ext, sizeof(evo_ins_ext), "%s", ext);
+            for (char *p = evo_ins_ext; *p; p++)
+                if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 'a' + 'A');
+        } else {
+            evo_ins_ext[0] = 0;
+        }
+
+        evo_ins_size[0] = 0;
+
+        if (usb_types[file_selected] != 4) {
+            struct stat st;
+            if (stat(selected_path, &st) == 0)
+                format_file_size(evo_ins_size, sizeof(evo_ins_size),
+                                 (long long)st.st_size);
+        }
+
+        /* Deep fields belong to whichever path they were probed from. */
+        if (strcmp(evo_probe_path, selected_path) != 0)
+            evo_probe_clear();
+
+        if (!evo_probe_done &&
+            usb_types[file_selected] != 4 &&
+            evo_browser_focus.settled_frames >= EVO_PROBE_SETTLE_FRAMES) {
+            evo_probe_media(selected_path);
+        }
+
+        inspect.name        = evo_ins_name;
+        inspect.kind        = evo_ins_kind;
+        inspect.extension   = evo_ins_ext;
+        inspect.size        = evo_ins_size;
+        inspect.duration    = evo_ins_duration;
+        inspect.resolution  = evo_ins_resolution;
+        inspect.video_codec = evo_ins_vcodec;
+        inspect.audio_codec = evo_ins_acodec;
+        inspect.subtitles   = evo_ins_subs;
+        inspect.container   = evo_ins_container;
+        inspect.probing     = (!evo_probe_done &&
+                               usb_types[file_selected] != 4);
+
+        if (evo_ins_duration[0])
+            inspect.preview_badge = evo_ins_duration;
+
+        /* Thumbnail. Same settle gate as the probe - extracting a frame is
+         * the same kind of expensive, and for the same reason. */
+        if (evo_browser_focus.settled_frames >= EVO_PROBE_SETTLE_FRAMES) {
+            prospero_browser_preview_ensure(selected_path,
+                                            usb_types[file_selected] == 4);
+        }
+
+        if (prospero_browser_preview_valid &&
+            strcmp(prospero_browser_preview_path, selected_path) == 0) {
+            inspect.preview.pixels = prospero_browser_preview_pixels;
+            inspect.preview.w      = PROSPERO_BROWSER_PREVIEW_W;
+            inspect.preview.h      = PROSPERO_BROWSER_PREVIEW_H;
+        }
+
+        model.inspect = &inspect;
+    }
+
+    evo_screen_browser(fb, &model, &evo_browser_focus,
+                       evo_rail_focused, evo_rail_index);
+}
+
+/* ===========================================================================
+ * EVO: the list pages.
+ *
+ * Recent, favourites, settings, tools and about were five separate draw
+ * functions, each with its own header block, its own card metrics, its own
+ * footer and its own glide animation - around 1900 lines between them that
+ * had already drifted apart. Settings used 84px rows on a 94px pitch while
+ * the browser used 96 on 112; the browser header sat at x=82 and its rows at
+ * x=180. They were similar enough to look like a system and different enough
+ * that no fix to one ever reached the others.
+ *
+ * They are all the same page: a title, an optional subtitle, and a column of
+ * rows. So they are one function now, and each screen supplies a model.
+ * ======================================================================== */
+
+static int evo_page_focus_ready;
+static int evo_page_focus_screen = -1;
+
+/*
+ * Point the shared focus model at this screen's selection integer. Those
+ * integers are still read elsewhere (the activation handlers, the favourite
+ * remove path), so the focus model writes through to them rather than
+ * replacing them outright.
+ */
+static void evo_page_sync(int *selected, int count)
+{
+    int capacity = evo_screen_list_capacity();
+
+    if (!evo_page_focus_ready) {
+        evo_focus_init(&evo_page_focus, count, capacity, 1);
+        evo_page_focus_ready = 1;
+    }
+
+    /* One focus model serves every list page, so the highlight has to be
+     * re-seeded when the page changes - otherwise it glides in from wherever
+     * it was sitting on the previous screen. */
+    if (evo_page_focus_screen != screen) {
+        evo_page_focus.glide_ready = 0;
+        evo_page_focus.scroll      = 0;
+        evo_page_focus_screen      = screen;
+    }
+
+    evo_page_focus.visible = capacity;
+    evo_focus_set_count(&evo_page_focus, count);
+
+    if (*selected < 0) *selected = 0;
+    if (count > 0 && *selected >= count) *selected = count - 1;
+
+    if (evo_page_focus.index != *selected)
+        evo_focus_set(&evo_page_focus, *selected);
+
+    *selected = evo_page_focus.index;
+
+    evo_focus_tick(&evo_page_focus, EVO_CONTENT_Y, EVO_ROW_PITCH);
+}
+
+/* Movement, from the input handler. Returns the new selection. */
+static void evo_page_nav(int *selected, int count, int delta)
+{
+    evo_page_sync(selected, count);
+    evo_feedback_for_move(evo_focus_move(&evo_page_focus, delta));
+    *selected = evo_page_focus.index;
+}
+
+/* ---- recent -------------------------------------------------------------- */
+
+static evo_list_entry evo_recent_rows[MAX_RECENT_FILES];
+static char           evo_recent_detail[MAX_RECENT_FILES][80];
+
+void draw_recent_files_screen(uint32_t *fb)
+{
+    evo_list_model m;
+    int            i;
+
+    evo_page_sync(&recent_selected, recent_file_count);
+
+    for (i = 0; i < recent_file_count && i < MAX_RECENT_FILES; i++) {
+        const RecentFileEntry *r = &recent_files[i];
+
+        evo_fmt_remaining(evo_recent_detail[i], sizeof(evo_recent_detail[i]),
+                          r->last_pos, r->duration);
+
+        evo_recent_rows[i].title    = r->title[0] ? r->title : r->path;
+        evo_recent_rows[i].detail   = evo_recent_detail[i];
+        evo_recent_rows[i].icon     = EVO_IC_RECENT;
+        evo_recent_rows[i].chevron  = 0;
+        evo_recent_rows[i].progress = evo_progress_permille(r->last_pos,
+                                                            r->duration);
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title       = "RECENT";
+    m.subtitle    = "PICK UP WHERE YOU LEFT OFF";
+    m.section     = EVO_SECTION_RECENT;
+    m.entries     = evo_recent_rows;
+    m.count       = i;
+    m.empty_title = "NOTHING PLAYED YET";
+    m.empty_hint  = "FILES YOU OPEN WILL APPEAR HERE";
+    m.empty_icon  = EVO_IC_RECENT;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+}
+
+/* ---- favourites ---------------------------------------------------------- */
+
+static evo_list_entry evo_fav_rows[MAX_FAVORITES];
+static char           evo_fav_detail[MAX_FAVORITES][64];
+
+void draw_favorites_screen(uint32_t *fb)
+{
+    static const evo_hint hints[3] = {
+        { EVO_GLYPH_CROSS,    "PLAY"   },
+        { EVO_GLYPH_CIRCLE,   "BACK"   },
+        { EVO_GLYPH_TRIANGLE, "REMOVE" }
+    };
+
+    evo_list_model m;
+    int            i;
+
+    evo_page_sync(&favorite_selected, favorite_count);
+
+    for (i = 0; i < favorite_count && i < MAX_FAVORITES; i++) {
+        const FavoriteEntry *e = &favorite_files[i];
+
+        evo_fmt_duration(evo_fav_detail[i], sizeof(evo_fav_detail[i]),
+                         e->duration);
+
+        evo_fav_rows[i].title    = e->title[0] ? e->title : e->path;
+        evo_fav_rows[i].detail   = evo_fav_detail[i];
+        evo_fav_rows[i].icon     = EVO_IC_FAVORITE;
+        evo_fav_rows[i].chevron  = 0;
+        evo_fav_rows[i].progress = -1;
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title       = "FAVORITES";
+    m.subtitle    = "MEDIA YOU SAVED FOR LATER";
+    m.section     = EVO_SECTION_FAVORITES;
+    m.entries     = evo_fav_rows;
+    m.count       = i;
+    m.empty_title = "NO FAVORITES YET";
+    m.empty_hint  = "PRESS TRIANGLE ON A FILE IN THE BROWSER";
+    m.empty_icon  = EVO_IC_FAVORITE;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    hints, 3);
+}
+
+/* ---- settings ------------------------------------------------------------ */
+
+static evo_list_entry evo_settings_rows[EVO_SETTINGS_COUNT];
+
+void draw_settings_screen(uint32_t *fb)
+{
+    static char profile_value[96];
+    static char view_value[32];
+    static char theme_value[64];
+    static char uninstall_value[48];
+
+    /* One icon per row. Every row used to fall through to the generic info
+     * glyph, so six of the eight looked identical. */
+    static const int icons[EVO_SETTINGS_COUNT] = {
+        EVO_IC_SETTINGS, EVO_IC_RESUME, EVO_IC_ASPECT, EVO_IC_SUBTITLES,
+        EVO_IC_TOOLS,    EVO_IC_FOLDER, EVO_IC_PALETTE, EVO_IC_TRASH
+    };
+
+    static const char *titles[EVO_SETTINGS_COUNT] = {
+        "PLAYBACK PROFILE",
+        "RESUME PLAYBACK",
+        "DEFAULT ASPECT RATIO",
+        "AUTO-DETECT SUBTITLES",
+        "DEVELOPER MODE",
+        "FOLDERS FIRST",
+        "THEME",
+        "REMOVE HOME TILE"
+    };
+
+    const char    *details[EVO_SETTINGS_COUNT];
+    evo_list_model m;
+    int            i;
+
+    evo_page_sync(&settings_selected, EVO_SETTINGS_COUNT);
+
+    snprintf(profile_value, sizeof(profile_value), "%s",
+             profile_name(current_profile));
+    snprintf(view_value, sizeof(view_value), "%s",
+             prospero_view_mode_name(prospero_default_view_mode));
+
+    /* The theme row states which theme is active and how many exist, so it is
+     * obvious when a .theme file on USB has been picked up. */
+    snprintf(theme_value, sizeof(theme_value), "%s  (%d OF %d)",
+             evo_theme_name(evo_theme_index()),
+             evo_theme_index() + 1, evo_theme_count());
+
+    snprintf(uninstall_value, sizeof(uninstall_value), "%s",
+             (prospero_uninstall_confirm_until != 0 &&
+              time(NULL) <= prospero_uninstall_confirm_until)
+                 ? "PRESS X TO CONFIRM" : "REMOVES MEDIA TILE");
+
+    details[0] = profile_value;
+    details[1] = prospero_resume_playback_enabled ? "ON" : "OFF";
+    details[2] = view_value;
+    details[3] = prospero_auto_subtitles_enabled ? "ON" : "OFF";
+    details[4] = show_debug_overlay ? "ON" : "OFF";
+    details[5] = evo_sort_folders_first ? "ON" : "OFF";
+    details[6] = theme_value;
+    details[7] = uninstall_value;
+
+    for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
+        evo_settings_rows[i].title    = titles[i];
+        evo_settings_rows[i].detail   = details[i];
+        evo_settings_rows[i].icon     = icons[i];
+        evo_settings_rows[i].chevron  = 1;
+        evo_settings_rows[i].progress = -1;
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "SETTINGS";
+    m.subtitle = "PLAYBACK AND APPLICATION PREFERENCES";
+    m.section  = EVO_SECTION_SETTINGS;
+    m.entries  = evo_settings_rows;
+    m.count    = EVO_SETTINGS_COUNT;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+}
+
+/* ---- developer tools ----------------------------------------------------- */
+
+/*
+ * Row order is load bearing: evo_tools_activate() below switches on it.
+ * Keeping the two next to each other is the point of putting them here.
+ */
+enum {
+    EVO_TOOL_REPORT = 0,
+    EVO_TOOL_OVERLAY,
+    EVO_TOOL_SOUND,
+    EVO_TOOL_LIGHTBAR,
+    EVO_TOOL_COUNT
+};
+
+static int            evo_tools_selected;
+static evo_list_entry evo_tools_rows[EVO_TOOL_COUNT];
+
+void draw_developer_tools_screen(uint32_t *fb)
+{
+    static char report_detail[64];
+    evo_list_model m;
+
+    evo_page_sync(&evo_tools_selected, EVO_TOOL_COUNT);
+
+    snprintf(report_detail, sizeof(report_detail),
+             "WRITES A CODEC REPORT TO USB0");
+
+    evo_tools_rows[EVO_TOOL_REPORT].title   = "COMPATIBILITY REPORT";
+    evo_tools_rows[EVO_TOOL_REPORT].detail  = report_detail;
+    evo_tools_rows[EVO_TOOL_REPORT].icon    = EVO_IC_TOOLS;
+    evo_tools_rows[EVO_TOOL_REPORT].chevron = 1;
+
+    evo_tools_rows[EVO_TOOL_OVERLAY].title   = "DEBUG OVERLAY";
+    evo_tools_rows[EVO_TOOL_OVERLAY].detail  = show_debug_overlay ? "ON" : "OFF";
+    evo_tools_rows[EVO_TOOL_OVERLAY].icon    = EVO_IC_ASPECT;
+    evo_tools_rows[EVO_TOOL_OVERLAY].chevron = 1;
+
+    evo_tools_rows[EVO_TOOL_SOUND].title   = "NAVIGATION SOUNDS";
+    evo_tools_rows[EVO_TOOL_SOUND].detail  =
+        evo_feedback_sound_enabled() ? "ON" : "OFF";
+    evo_tools_rows[EVO_TOOL_SOUND].icon    = EVO_IC_SUBTITLES;
+    evo_tools_rows[EVO_TOOL_SOUND].chevron = 1;
+
+    evo_tools_rows[EVO_TOOL_LIGHTBAR].title   = "LIGHTBAR";
+    evo_tools_rows[EVO_TOOL_LIGHTBAR].detail  =
+        evo_feedback_lightbar_enabled() ? "THEME ACCENT" : "OFF";
+    evo_tools_rows[EVO_TOOL_LIGHTBAR].icon    = EVO_IC_PALETTE;
+    evo_tools_rows[EVO_TOOL_LIGHTBAR].chevron = 1;
+
+    for (int i = 0; i < EVO_TOOL_COUNT; i++)
+        evo_tools_rows[i].progress = -1;
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "TOOLS";
+    m.subtitle = "DIAGNOSTICS AND CONTROLLER FEEDBACK";
+    m.section  = EVO_SECTION_TOOLS;
+    m.entries  = evo_tools_rows;
+    m.count    = EVO_TOOL_COUNT;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+}
+
+static void evo_tools_activate(void)
+{
+    switch (evo_tools_selected) {
+        case EVO_TOOL_REPORT:
+            write_compatibility_report();
+            break;
+
+        case EVO_TOOL_OVERLAY:
+            show_debug_overlay = !show_debug_overlay;
+            toast("DEBUG OVERLAY", show_debug_overlay ? "ON" : "OFF");
+            break;
+
+        case EVO_TOOL_SOUND:
+            evo_feedback_set_sound(!evo_feedback_sound_enabled());
+            toast("NAVIGATION SOUNDS",
+                  evo_feedback_sound_enabled() ? "ON" : "OFF");
+            break;
+
+        case EVO_TOOL_LIGHTBAR:
+            evo_feedback_set_lightbar(!evo_feedback_lightbar_enabled());
+            toast("LIGHTBAR",
+                  evo_feedback_lightbar_enabled() ? "THEME ACCENT" : "OFF");
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* ---- about --------------------------------------------------------------- */
+
+static int            evo_about_selected;
+static evo_list_entry evo_about_rows[5];
+
+void draw_about_support_screen(uint32_t *fb)
+{
+    static const evo_hint hints[2] = {
+        { EVO_GLYPH_CIRCLE, "BACK" },
+        { EVO_GLYPH_DPAD,   "MOVE" }
+    };
+
+    static char themes_detail[64];
+    evo_list_model m;
+
+    evo_page_sync(&evo_about_selected, 5);
+
+    snprintf(themes_detail, sizeof(themes_detail),
+             "%d AVAILABLE - DROP .THEME FILES ON USB0",
+             evo_theme_count());
+
+    evo_about_rows[0].title  = "VERSION";
+    evo_about_rows[0].detail = EVO_PLAYER_VERSION;
+    evo_about_rows[0].icon   = EVO_IC_ABOUT;
+
+    evo_about_rows[1].title  = "EVO PLAYER";
+    evo_about_rows[1].detail = "MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
+    evo_about_rows[1].icon   = EVO_IC_RESUME;
+
+    evo_about_rows[2].title  = "BUILT ON";
+    evo_about_rows[2].detail = "FFMPEG AND THE PS5 PAYLOAD SDK";
+    evo_about_rows[2].icon   = EVO_IC_TOOLS;
+
+    evo_about_rows[3].title  = "THEMES";
+    evo_about_rows[3].detail = themes_detail;
+    evo_about_rows[3].icon   = EVO_IC_PALETTE;
+
+    evo_about_rows[4].title  = "SCREENSHOTS";
+    evo_about_rows[4].detail = "PRESS L3 OR R3 IN ANY MENU";
+    evo_about_rows[4].icon   = EVO_IC_ASPECT;
+
+    for (int i = 0; i < 5; i++) {
+        evo_about_rows[i].chevron  = 0;
+        evo_about_rows[i].progress = -1;
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "ABOUT";
+    m.subtitle = "CREDITS, PROJECT INFO AND SUPPORT";
+    m.section  = EVO_SECTION_ABOUT;
+    m.entries  = evo_about_rows;
+    m.count    = 5;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    hints, 2);
+}
+
+/* ---- side navigation ------------------------------------------------------
+ *
+ * The rail is what makes the sections reachable from each other. Before it,
+ * every section was a dead end: from FAVORITES the only way to SETTINGS was
+ * back out to the menu and in again, because Back was hardcoded per screen
+ * and nothing offered a lateral move.
+ */
+
+/* Screens that show the rail: the non-modal sections. The launch screen is
+ * full bleed and excluded. */
+static int evo_section_for_screen_visible(int scr)
+{
+    return !evo_screen_is_modal((evo_screen_id)scr) &&
+           scr != SCREEN_MAIN_MENU;
+}
+
+static void evo_rail_nav(int delta)
+{
+    evo_rail_index = evo_sidenav_step(evo_rail_index, delta);
+    evo_feedback(EVO_FB_MOVE);
+}
+
+static void evo_rail_activate(void)
+{
+    const evo_section_info *info =
+        evo_section_get((evo_section)evo_rail_index);
+
+    evo_rail_focused = 0;
+
+    if ((int)info->screen == screen) {
+        /* Already here. Close the rail rather than reloading the page. */
+        evo_feedback(EVO_FB_CANCEL);
+        return;
+    }
+
+    evo_feedback(EVO_FB_OPEN);
+
+    if (info->screen == EVO_SCREEN_LAUNCH) {
+        evo_nav_home();
+        screen = SCREEN_MAIN_MENU;
+        return;
+    }
+
+    if (info->screen == EVO_SCREEN_BROWSER)  load_usb_files();
+    if (info->screen == EVO_SCREEN_SETTINGS) settings_selected = 0;
+
+    /* Replace, not push: moving between sections is lateral, so Back should
+     * still return where you originally came from rather than walking back
+     * through every section you visited on the way. */
+    evo_nav_replace(info->screen);
+    screen = (int)info->screen;
+}
 
 /* PROSPERO_EXACT_MENU_RENDER_END */
 
@@ -19668,6 +17740,19 @@ int main(void) {
     else
         toast("PAD OPEN OK", "Controller connected");
 
+    /* EVO: hand the UI layer this file's text and icon renderers. Must happen
+     * before the first frame; every evo_text/evo_icon call is a safe no-op
+     * until it does, which would draw an empty page rather than crash. */
+    evo_draw_bind(&EVO_DRAW_VTABLE);
+
+    /* EVO: controller feedback. Sound was already wired at the edge-detect
+     * point; this adds the lightbar and gives both one semantic API. The
+     * lightbar picks up the theme accent immediately. */
+    evo_input_reset(&evo_pad_state);
+    evo_feedback_init(pad, evo_sfx_play);
+
+    evo_nav_reset((evo_screen_id)screen);
+
     PS5_PadData padData;
     uint32_t lastButtons = 0;
     int selected = 0;
@@ -19797,6 +17882,13 @@ int main(void) {
             prospero_scrub_hold_update(padData.buttons);
             int prompt_button_handled = 0;
 
+            /* EVO: semantic actions with auto-repeat. Holding a direction
+             * used to do nothing at all - every list moved one item per
+             * physical press, so reaching item 60 of a folder took 60
+             * presses. See ui/include/evo_input.h for the repeat curve. */
+            evo_input_update(&evo_pad_state, padData.buttons,
+                             (uint64_t)now_ms());
+
             /* EVO: navigation feedback.
              *
              * Hooked at the single edge-detect point so every menu in the app
@@ -19829,18 +17921,33 @@ int main(void) {
                 evo_screenshot_request = 1;
             }
 
-            if (pressed && screen != 2) {
-                if (pressed & (PS5_PAD_BUTTON_UP | PS5_PAD_BUTTON_DOWN |
-                               PS5_PAD_BUTTON_LEFT | PS5_PAD_BUTTON_RIGHT)) {
-                    evo_sfx_play(EVO_SFX_MOVE);
-                } else if (pressed & PS5_PAD_BUTTON_CROSS) {
-                    evo_sfx_play(EVO_SFX_CONFIRM);
+            /* EVO: controller feedback - sound and lightbar, from one
+             * semantic call. Hooked at the single edge-detect point so every
+             * menu gets it without touching each screen's handler.
+             *
+             * Suppressed during playback: blips over a film are unwanted, and
+             * it keeps the SFX port quiet while the media port is doing the
+             * work that matters.
+             *
+             * Screens that own a focus model (the launch grid, and every list)
+             * report their own MOVE / WRAP / BOUNDARY below, which is finer
+             * grained than this can be - so directions are only handled here
+             * for the screens that have not been migrated yet. */
+            if (pressed && screen != SCREEN_PLAYER) {
+                if (pressed & PS5_PAD_BUTTON_CROSS) {
+                    evo_feedback(EVO_FB_CONFIRM);
                 } else if (pressed & PS5_PAD_BUTTON_CIRCLE) {
-                    evo_sfx_play(EVO_SFX_BACK);
+                    evo_feedback(EVO_FB_CANCEL);
                 } else if (pressed & (PS5_PAD_BUTTON_TRIANGLE |
                                       PS5_PAD_BUTTON_SQUARE |
                                       PS5_PAD_BUTTON_OPTIONS)) {
-                    evo_sfx_play(EVO_SFX_TOGGLE);
+                    evo_feedback(EVO_FB_TOGGLE);
+                } else if (screen != SCREEN_MAIN_MENU &&
+                           (pressed & (PS5_PAD_BUTTON_UP |
+                                       PS5_PAD_BUTTON_DOWN |
+                                       PS5_PAD_BUTTON_LEFT |
+                                       PS5_PAD_BUTTON_RIGHT))) {
+                    evo_feedback(EVO_FB_MOVE);
                 }
             }
 
@@ -19911,46 +18018,74 @@ int main(void) {
                 }
             }
 
-            if (pressed & PS5_PAD_BUTTON_DOWN) {
-                if (
+            /* EVO: evo_input_fired, not the raw edge - this is what gives
+             * every list hold-to-scroll. */
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_DOWN)) {
+                if (evo_rail_focused) {
+                    evo_rail_nav(+1);
+                } else if (
                     screen == SCREEN_PLAYER &&
                     !prospero_scrub_active
                 ) {
                     prospero_subtitle_cycle_track();
-                } else if (screen == 0) selected = (selected + 1) % 6;
-                else if (screen == SCREEN_SETTINGS) settings_selected = (settings_selected + 1) % EVO_SETTINGS_COUNT;
+                } else if (screen == SCREEN_MAIN_MENU) evo_launch_nav(0, +1);
+                else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, +1);
+                else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, +1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, +1);
                 else if (screen == SCREEN_PROFILE_SELECT) profile_selected = (profile_selected + 1) % 4;
-                else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) recent_selected = (recent_selected + 1) % recent_file_count;
-                else if (screen == SCREEN_FAVORITES && favorite_count > 0) favorite_selected = (favorite_selected + 1) % favorite_count;
+                else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, +1);
+                else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, +1);
+                else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(+1);
                 else if (file_count > 0) file_selected = (file_selected + 1) % file_count;
             }
 
-            if (pressed & PS5_PAD_BUTTON_UP) {
-                if (
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_UP)) {
+                if (evo_rail_focused) {
+                    evo_rail_nav(-1);
+                } else if (
                     screen == SCREEN_PLAYER &&
                     !prospero_scrub_active
                 ) {
                     prospero_subtitle_toggle();
-                } else if (screen == 0) selected = (selected + 5) % 6;
-                else if (screen == SCREEN_SETTINGS) settings_selected = (settings_selected + EVO_SETTINGS_COUNT - 1) % EVO_SETTINGS_COUNT;
+                } else if (screen == SCREEN_MAIN_MENU) evo_launch_nav(0, -1);
+                else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, -1);
+                else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, -1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, -1);
                 else if (screen == SCREEN_PROFILE_SELECT) profile_selected = (profile_selected + 3) % 4;
-                else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) recent_selected = (recent_selected + recent_file_count - 1) % recent_file_count;
-                else if (screen == SCREEN_FAVORITES && favorite_count > 0) favorite_selected = (favorite_selected + favorite_count - 1) % favorite_count;
+                else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, -1);
+                else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, -1);
+                else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(-1);
                 else if (file_count > 0) file_selected = (file_selected + file_count - 1) % file_count;
             }
 
-            if (
-                screen == SCREEN_PLAYER &&
-                (pressed & PS5_PAD_BUTTON_LEFT)
-            ) {
-                prospero_scrub_move(-10.0);
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_LEFT)) {
+                if (screen == SCREEN_PLAYER) {
+                    prospero_scrub_move(-10.0);
+                } else if (screen == SCREEN_MAIN_MENU) {
+                    evo_launch_nav(-1, 0);
+                } else if (evo_section_for_screen_visible(screen) &&
+                           !evo_rail_focused) {
+                    /* EVO: LEFT out of the content column opens the rail.
+                     * This is the one gesture that makes the sections
+                     * reachable from each other - before, every section was
+                     * a dead end you had to back out of to leave. */
+                    evo_rail_focused = 1;
+                    evo_rail_index   = (int)evo_screen_section(
+                                            (evo_screen_id)screen);
+                    if (evo_rail_index < 0) evo_rail_index = 0;
+                    evo_feedback(EVO_FB_OPEN);
+                }
             }
 
-            if (
-                screen == SCREEN_PLAYER &&
-                (pressed & PS5_PAD_BUTTON_RIGHT)
-            ) {
-                prospero_scrub_move(10.0);
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_RIGHT)) {
+                if (screen == SCREEN_PLAYER) {
+                    prospero_scrub_move(10.0);
+                } else if (screen == SCREEN_MAIN_MENU) {
+                    evo_launch_nav(+1, 0);
+                } else if (evo_rail_focused) {
+                    evo_rail_focused = 0;
+                    evo_feedback(EVO_FB_CANCEL);
+                }
             }
 
             if (
@@ -19978,24 +18113,29 @@ int main(void) {
                 prospero_subtitle_nudge_delay(+100);
             }
 
-            if (
-                screen == SCREEN_PLAYER &&
-                (pressed & PS5_PAD_BUTTON_L1)
-            ) {
-                if (prospero_chapter_count > 0 && !prospero_scrub_active)
-                    prospero_chapter_jump(-1);
-                else
-                    prospero_scrub_move(-60.0);
+            /* EVO: the shoulders page through long lists in the browser. A
+             * folder with two hundred files is a lot of d-pad otherwise, even
+             * with auto-repeat. */
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_PAGE_UP)) {
+                if (screen == SCREEN_PLAYER) {
+                    if (prospero_chapter_count > 0 && !prospero_scrub_active)
+                        prospero_chapter_jump(-1);
+                    else
+                        prospero_scrub_move(-60.0);
+                } else if (screen == SCREEN_USB_BROWSER) {
+                    evo_browser_page(-1);
+                }
             }
 
-            if (
-                screen == SCREEN_PLAYER &&
-                (pressed & PS5_PAD_BUTTON_R1)
-            ) {
-                if (prospero_chapter_count > 0 && !prospero_scrub_active)
-                    prospero_chapter_jump(+1);
-                else
-                    prospero_scrub_move(60.0);
+            if (evo_input_fired(&evo_pad_state, EVO_ACT_PAGE_DOWN)) {
+                if (screen == SCREEN_PLAYER) {
+                    if (prospero_chapter_count > 0 && !prospero_scrub_active)
+                        prospero_chapter_jump(+1);
+                    else
+                        prospero_scrub_move(60.0);
+                } else if (screen == SCREEN_USB_BROWSER) {
+                    evo_browser_page(+1);
+                }
             }
 
             if (
@@ -20062,7 +18202,9 @@ int main(void) {
                 !prompt_button_handled &&
                 (pressed & PS5_PAD_BUTTON_CROSS)
             ) {
-                if (screen == SCREEN_SETTINGS) {
+                if (evo_rail_focused) {
+                    evo_rail_activate();
+                } else if (screen == SCREEN_SETTINGS) {
                     prospero_settings_activate_selected();
                 } else if (screen == SCREEN_PROFILE_SELECT) {
                     current_profile =
@@ -20093,7 +18235,7 @@ int main(void) {
                         start_video_playback(current_media_path);
                     }
                 } else if (screen == SCREEN_DEVELOPER_TOOLS) {
-                    write_compatibility_report();
+                    evo_tools_activate();
                 } else if (screen == 2) {
                     player_paused = !player_paused;
 #if PP_BACKEND_ENABLED
@@ -20106,25 +18248,20 @@ int main(void) {
                     toast("PLAYBACK", player_paused ? "Paused" : "Playing");
                 } else if (screen == 1) {
                     enter_selected_usb();
-                } else if (selected == 0) {
-                    load_usb_files();
-                    screen = SCREEN_USB_BROWSER;
-                } else if (selected == 1) {
-                    screen = SCREEN_RECENT_FILES;
-                } else if (selected == 2) {
-                    screen = SCREEN_FAVORITES;
-                } else if (selected == 3) {
-                    screen = SCREEN_SETTINGS;
-                    settings_selected = 0;
-                } else if (selected == 4) {
-                    screen = SCREEN_DEVELOPER_TOOLS;
-                } else if (selected == 5) {
-                    screen = SCREEN_ABOUT_SUPPORT;
+                } else if (screen == SCREEN_MAIN_MENU) {
+                    /* EVO: the launch screen is a two-dimensional grid now,
+                     * so "which of six rows is selected" no longer describes
+                     * the cursor. It resolves its own target. */
+                    evo_launch_activate();
                 }
             }
 
             if (!prompt_button_handled && (pressed & PS5_PAD_BUTTON_CIRCLE) && screen != 4) {
-                if (screen == SCREEN_PROFILE_SELECT) {
+                if (evo_rail_focused) {
+                    /* Close the rail first; Back should not leave the section
+                     * while an overlay is open on top of it. */
+                    evo_rail_focused = 0;
+                } else if (screen == SCREEN_PROFILE_SELECT) {
                     screen = SCREEN_SETTINGS;
                 } else if (screen == SCREEN_SETTINGS) {
                     screen = 0;
@@ -20153,6 +18290,10 @@ int main(void) {
 
             lastButtons = padData.buttons;
         }
+
+        /* EVO: let the lightbar's confirm flash decay back to the resting
+         * accent. Must run every frame regardless of input. */
+        evo_feedback_tick((uint64_t)now_ms());
 
         if (screen == 2 && !player_paused) {
             player_elapsed++;

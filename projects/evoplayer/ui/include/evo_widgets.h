@@ -1,0 +1,137 @@
+/*
+ * evo_widgets — the pieces screens are built from.
+ *
+ * Each of these existed already, open-coded two or three times with slightly
+ * different metrics: the browser drew a row one way, favourites another,
+ * settings a third. They looked related rather than identical, and a fix to
+ * one never reached the others.
+ *
+ * Everything here takes a small description struct rather than a long
+ * argument list, so adding an optional detail later does not touch every
+ * call site.
+ */
+#ifndef EVO_WIDGETS_H
+#define EVO_WIDGETS_H
+
+#include <stdint.h>
+
+#include "evo_draw.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ---- list row ------------------------------------------------------------ */
+
+typedef struct evo_row {
+    const char *title;
+    const char *detail;      /* second line, may be NULL */
+    int         icon;        /* EVO_IC_*, or -1 for none */
+    int         selected;
+    int         chevron;     /* draw a disclosure arrow on the right */
+    int         badge_icon;  /* EVO_IC_*, right side, or -1 */
+
+    /* 0..1000, or -1 for none. Drawn as a thin resume bar along the bottom
+     * edge of the card - the only place watch progress can live without
+     * stealing a text line. */
+    int         progress;
+
+    /* Marquee phase for the title when it overflows; pass the focus model's
+     * settled_frames. 0 disables. */
+    int         marquee_phase;
+} evo_row;
+
+void evo_widget_row(uint32_t *fb, int x, int y, int w, int h,
+                    const evo_row *r);
+
+/*
+ * The selection highlight, drawn separately so it can glide between rows
+ * independently of the row content. Draw all resting rows, then this, then
+ * all row content.
+ */
+void evo_widget_row_highlight(uint32_t *fb, int x, int y, int w, int h);
+
+/* ---- tile (launch screen) ------------------------------------------------ */
+
+typedef struct evo_tile {
+    const char *title;
+    const char *detail;      /* may be NULL */
+    int         icon;        /* EVO_IC_*, or -1 */
+    int         selected;
+
+    /*
+     * Optional artwork: a BGRA buffer the caller owns, drawn scaled to fill
+     * the tile with a scrim under the text. NULL falls back to a tinted
+     * surface, which is what the destination tiles use.
+     */
+    const uint32_t *art;
+    int             art_w;
+    int             art_h;
+
+    /*
+     * Draw the artwork at 1:1 where the icon would go, rather than stretched
+     * across the tile. The cover cache holds 80x80 thumbnails; blown up to
+     * fill a 274x166 tile they are a visibly blocky 3x upscale, and a crisp
+     * small thumbnail reads as deliberate where a blurry large one reads as
+     * broken.
+     */
+    int             art_inset;
+
+    int         progress;    /* 0..1000, or -1 */
+} evo_tile;
+
+void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
+                     const evo_tile *t);
+
+/* Section heading above a shelf of tiles. */
+void evo_widget_shelf_label(uint32_t *fb, int x, int y, const char *label);
+
+/* ---- property inspector -------------------------------------------------- */
+
+typedef struct evo_prop {
+    const char *key;
+    const char *value;
+} evo_prop;
+
+/*
+ * A key/value table: keys muted and left aligned, values primary and aligned
+ * to a common column so they scan vertically. Skips entries whose value is
+ * NULL or empty, so a caller can build a fixed array and let the ones it
+ * could not determine fall out.
+ *
+ * Returns the y just past the last row drawn.
+ */
+int evo_widget_props(uint32_t *fb, int x, int y, int w,
+                     const evo_prop *props, int count);
+
+/* ---- preview panel ------------------------------------------------------- */
+
+/*
+ * Artwork in a rounded frame, with an optional duration badge in the corner.
+ * `art` is BGRA at art_w x art_h and is nearest-scaled to fit while keeping
+ * its aspect; NULL draws a placeholder with the given icon.
+ */
+void evo_widget_preview(uint32_t *fb, int x, int y, int w, int h,
+                        const uint32_t *art, int art_w, int art_h,
+                        const char *badge, int placeholder_icon);
+
+/* ---- indicators ---------------------------------------------------------- */
+
+/* Vertical scrollbar. `permille` is evo_focus_scroll_permille(); negative
+ * draws nothing, which is what a list that fits should show. */
+void evo_widget_scrollbar(uint32_t *fb, int x, int y, int h,
+                          int permille, int visible, int count);
+
+/* Horizontal progress / resume bar. */
+void evo_widget_progress(uint32_t *fb, int x, int y, int w, int h,
+                         int permille);
+
+/* Centred "nothing here" state, with a reason and a suggestion. */
+void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
+                      const char *title, const char *hint, int icon);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* EVO_WIDGETS_H */

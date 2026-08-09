@@ -8,8 +8,11 @@
  * analytic coverage and corners are smooth at any radius. This is what the
  * old hand-rolled rectangles could not do - see the note in evo_ui.c.
  */
-#ifndef EVO_UI_H
-#define EVO_UI_H
+/* Guard is EVO_UI_H_INCLUDED, not EVO_UI_H: the latter is the framebuffer
+ * height below, and defining it twice made every translation unit that
+ * included this header emit a -Wmacro-redefined warning. */
+#ifndef EVO_UI_H_INCLUDED
+#define EVO_UI_H_INCLUDED
 
 #include <stdint.h>
 #include "evo_theme.h"
@@ -63,4 +66,4 @@ void evo_ui_vline(uint32_t *fb, int x, int y, int h, uint32_t colour);
 }
 #endif
 
-#endif /* EVO_UI_H */
+#endif /* EVO_UI_H_INCLUDED */
