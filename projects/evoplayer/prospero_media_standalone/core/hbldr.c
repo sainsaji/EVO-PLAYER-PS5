@@ -15,7 +15,7 @@ along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
 /*
- * Modified for ProsperoPlayer in 2026:
+ * Modified for EVOPlayer in 2026:
  * - removed websrv-specific dependencies;
  * - uses the Prospero media launcher file reader;
  * - keeps the upstream BigApp transition and ELF replacement sequence.
@@ -72,7 +72,7 @@ static const char param_json[] = "{\n"
   "  \"localizedParameters\": {\n"
   "    \"defaultLanguage\": \"en-US\",\n"
   "    \"en-US\": {\n"
-  "      \"titleName\": \"ProsperoPlayer 1.0\"\n"
+  "      \"titleName\": \"EVOPlayer 1.0\"\n"
   "    }\n"
   "  }\n"
   "}\n";

@@ -1,5 +1,5 @@
 /*
- * ProsperoPlayer — one-shot Media tile remover
+ * EVOPlayer — one-shot Media tile remover
  *
  * Use when Options → Delete on the home menu does nothing (common for
  * Media BigApp hosts), or when the resident launcher is not running.
@@ -22,7 +22,7 @@
 
 #define PP_TITLE_ID "PRSP10001"
 #define PP_APPINST_AUTHID UINT64_C(0x4801000000000013)
-#define PP_LOG_PATH "/data/prosperoplayer/uninstall_tile.log"
+#define PP_LOG_PATH "/data/evoplayer/uninstall_tile.log"
 
 static const char *const PP_TITLES[] = {
     "PRSP10001",
@@ -54,7 +54,7 @@ static void pp_log(const char *msg) {
   fputc('\n', stdout);
   fflush(stdout);
   (void)mkdir("/data", 0755);
-  (void)mkdir("/data/prosperoplayer", 0755);
+  (void)mkdir("/data/evoplayer", 0755);
   fd = open(PP_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0600);
   if (fd >= 0) {
     (void)write(fd, msg, strlen(msg));
@@ -123,11 +123,11 @@ static void pp_wipe_host(const char *title) {
 }
 
 static void pp_wipe_runtime(void) {
-  pp_try_unlink("/data/homebrew/ProsperoPlayer/eboot.elf");
-  pp_try_unlink("/data/homebrew/ProsperoPlayer/sce_sys/param.json");
-  pp_try_unlink("/data/homebrew/ProsperoPlayer/sce_sys/icon0.png");
-  pp_try_rmdir("/data/homebrew/ProsperoPlayer/sce_sys");
-  pp_try_rmdir("/data/homebrew/ProsperoPlayer");
+  pp_try_unlink("/data/homebrew/EVOPlayer/eboot.elf");
+  pp_try_unlink("/data/homebrew/EVOPlayer/sce_sys/param.json");
+  pp_try_unlink("/data/homebrew/EVOPlayer/sce_sys/icon0.png");
+  pp_try_rmdir("/data/homebrew/EVOPlayer/sce_sys");
+  pp_try_rmdir("/data/homebrew/EVOPlayer");
 }
 
 static int pp_do_uninstall(void) {
@@ -167,7 +167,7 @@ int main(void) {
   const uint64_t orig = kernel_get_ucred_authid(pid);
   int rc;
 
-  pp_log("ProsperoPlayer uninstall tile start");
+  pp_log("EVOPlayer uninstall tile start");
   if (kernel_set_ucred_authid(pid, PP_APPINST_AUTHID) != 0) {
     pp_log("authid raise failed");
     pp_notify("Prospero uninstall failed (authid)");
@@ -178,7 +178,7 @@ int main(void) {
     (void)kernel_set_ucred_authid(pid, orig);
 
   if (rc == 0) {
-    pp_notify("ProsperoPlayer removed from Media");
+    pp_notify("EVOPlayer removed from Media");
     pp_log("done");
   } else {
     pp_notify("Prospero uninstall incomplete");

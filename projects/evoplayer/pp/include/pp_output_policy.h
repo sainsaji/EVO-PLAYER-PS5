@@ -1,5 +1,5 @@
 /*
- * Output mode selection for ProsperoPlayer product path.
+ * Output mode selection for EVOPlayer product path.
  * After FOUR_K_SDR_PLAYBACK_PASS — honest advertising only for 4K SDR ≤30 FPS.
  */
 #ifndef PP_OUTPUT_POLICY_H

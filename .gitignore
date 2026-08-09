@@ -39,6 +39,13 @@ output/logs/*
 !output/pkg/.gitkeep
 !output/logs/.gitkeep
 
+# Raw framebuffer captures: 6 MB each, uncompressed. Keep them local.
+# Curated PNGs for the docs live in docs/images/ instead.
+output/screenshots/
+
+# Daemon ELFs cached by install-homebrew.sh --setup
+third_party/daemons/
+
 *.o
 *.a
 *.so

@@ -1,5 +1,5 @@
 /*
- * pp_videoout — ProsperoPlayer presentation backend (Workstream A / product path).
+ * pp_videoout — EVOPlayer presentation backend (Workstream A / product path).
  *
  * PROVEN stack (Probe 002):
  *   sceVideoOutOpen
@@ -14,7 +14,7 @@
  *
  * Media RE conclusion (003Q): stock player is service-mediated
  * (VideoCore → CompositorShmClient → CompositorVideo → VideoOut).
- * Ship path for ProsperoPlayer remains *this* direct VideoOut backend.
+ * Ship path for EVOPlayer remains *this* direct VideoOut backend.
  * FUTURE_TARGET: CompositorShmClient descriptor/handoff format.
  */
 #ifndef PP_VIDEOOUT_H
@@ -33,7 +33,7 @@ extern "C" {
 
 /* Display pixel formats understood by this backend */
 typedef enum pp_pixel_format {
-    PP_PIXEL_BGRA32_TILED = 0, /* Probe 002 / ProsperoPlayer known-good */
+    PP_PIXEL_BGRA32_TILED = 0, /* Probe 002 / EVOPlayer known-good */
     PP_PIXEL_RGBA32_TILED = 1  /* same path; channel order is app-side convert */
 } pp_pixel_format;
 
@@ -84,7 +84,7 @@ typedef struct pp_videoout {
 
 /**
  * Open VideoOut, allocate one direct-memory block, map, split into buffer_count
- * planes, RegisterBuffers2 once. Default for ProsperoPlayer TV path: 1280x720, 3 buffers.
+ * planes, RegisterBuffers2 once. Default for EVOPlayer TV path: 1280x720, 3 buffers.
  * Returns 0 on success, negative on failure (safe to call shutdown after partial init).
  */
 int pp_videoout_init(pp_videoout *vo,

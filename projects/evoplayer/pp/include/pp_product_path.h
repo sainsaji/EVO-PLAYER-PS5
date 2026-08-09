@@ -1,5 +1,5 @@
 /*
- * ProsperoPlayer product video path selection — crash isolation defaults.
+ * EVOPlayer product video path selection — crash isolation defaults.
  */
 #ifndef PP_PRODUCT_PATH_H
 #define PP_PRODUCT_PATH_H

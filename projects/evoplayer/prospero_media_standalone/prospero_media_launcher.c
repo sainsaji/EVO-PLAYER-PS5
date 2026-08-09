@@ -1,5 +1,5 @@
 /*
- * ProsperoPlayer — Media home launcher (resident)
+ * EVOPlayer — Media home launcher (resident)
  *
  * Technique (industry-standard PS5 homebrew Media BigApp path):
  *  - Register a Media-category title (applicationCategoryType 65536)
@@ -12,7 +12,7 @@
  *  - /uninstall fully removes the Media tile + host (XMB Delete often
  *    unavailable for Media BigApp hosts; this is the supported removal path)
  *
- * Product identity is ProsperoPlayer only (title PRSP10001, port 9055).
+ * Product identity is EVOPlayer only (title PRSP10001, port 9055).
  * Loader modules in core/ are John Törnblom websrv-derived (GPL-3.0+).
  */
 
@@ -44,9 +44,9 @@
 #define PP_APPINST_AUTHID UINT64_C(0x4801000000000013)
 #define PP_APP_ROOT "/user/app"
 #define PP_APP_DIR PP_APP_ROOT "/" PP_TITLE_ID
-#define PP_RUNTIME_DIR "/data/homebrew/ProsperoPlayer"
+#define PP_RUNTIME_DIR "/data/homebrew/EVOPlayer"
 #define PP_PLAYER_PATH PP_RUNTIME_DIR "/eboot.elf"
-#define PP_LOG_DIR "/data/prosperoplayer"
+#define PP_LOG_DIR "/data/evoplayer"
 #define PP_LOG_PATH PP_LOG_DIR "/media_launcher.log"
 #define PP_PLAYER_LOG PP_LOG_DIR "/player-stdio.log"
 
@@ -68,7 +68,7 @@ static const char *const PP_LEGACY_TITLES[] = {
   extern const uint8_t name[];                                                 \
   extern const unsigned long name##_size
 
-INCASSET(pp_player_elf, "assets/ProsperoPlayer.elf");
+INCASSET(pp_player_elf, "assets/EVOPlayer.elf");
 INCASSET(pp_tile_param, "assets/param.json");
 INCASSET(pp_icon0, "assets/icon0.png");
 
@@ -193,11 +193,11 @@ static void pp_notify(const char *msg) {
 /* Autoload often runs before the shell is ready — delay + second toast. */
 static void pp_notify_ready(void) {
   char line[96];
-  snprintf(line, sizeof(line), "ProsperoPlayer %s ready\nOpen from Media",
+  snprintf(line, sizeof(line), "EVOPlayer %s ready\nOpen from Media",
            PP_VERSION);
   pp_notify(line);
   usleep(1500000);
-  snprintf(line, sizeof(line), "ProsperoPlayer %s ready in Media", PP_VERSION);
+  snprintf(line, sizeof(line), "EVOPlayer %s ready in Media", PP_VERSION);
   pp_notify(line);
 }
 
@@ -432,7 +432,7 @@ static void *pp_launch_player_thread(void *arg) {
   (void)arg;
   if (pp_launch_player() != 0) {
     pp_log("async launch failed");
-    pp_notify("ProsperoPlayer launch failed");
+    pp_notify("EVOPlayer launch failed");
   }
   return NULL;
 }
@@ -560,7 +560,7 @@ static int pp_uninstall_media_tile(void) {
 
   pp_wipe_runtime();
   pp_log("uninstall complete");
-  pp_notify("ProsperoPlayer removed from Media");
+  pp_notify("EVOPlayer removed from Media");
   return 0;
 }
 
@@ -612,7 +612,7 @@ int main(void) {
   int listen_fd;
 
   (void)signal(SIGPIPE, SIG_IGN);
-  pp_log("ProsperoPlayer %s media launcher start id=%s port=%d", PP_VERSION,
+  pp_log("EVOPlayer %s media launcher start id=%s port=%d", PP_VERSION,
          PP_TITLE_ID, PP_SERVICE_PORT);
 
   if (pp_player_elf_size < 64 || pp_player_elf[0] != 0x7f) {
@@ -641,12 +641,12 @@ int main(void) {
   listen_fd = pp_bind_loopback();
   if (listen_fd < 0) {
     pp_log("bind 127.0.0.1:%d failed errno=%d", PP_SERVICE_PORT, errno);
-    pp_notify("ProsperoPlayer launcher failed\nPort busy");
+    pp_notify("EVOPlayer launcher failed\nPort busy");
     (void)sceUserServiceTerminate();
     return 5;
   }
 
-  pp_log("ready — open ProsperoPlayer from Media (keep this payload resident)");
+  pp_log("ready — open EVOPlayer from Media (keep this payload resident)");
   /* Toast so user knows the tile is live (especially after autoload). */
   pp_notify_ready();
   pp_serve(listen_fd);

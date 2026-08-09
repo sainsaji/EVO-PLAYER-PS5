@@ -21,7 +21,7 @@ checkout), this directory **is** committed — it is the project's own source.
 
 ## First targets
 
-From ProsperoPlayer's own README of known limitations, all of which are
+From EVOPlayer's own README of known limitations, all of which are
 codec/integration problems rather than UI ones:
 
 - E-AC3 / Dolby Digital Plus silent

@@ -1,8 +1,8 @@
-ProsperoPlayer 1.0 — Media home launcher (Prospero only)
+EVOPlayer 1.0 — Media home launcher (Prospero only)
 
 WHAT THIS IS
   One resident payload that:
-    1) installs a Media-section tile named ProsperoPlayer (title PRSP10001)
+    1) installs a Media-section tile named EVOPlayer (title PRSP10001)
     2) keeps a loopback service on 127.0.0.1:9055
     3) launches the real player when you open the tile
     4) can fully uninstall the tile via /uninstall or UninstallTile.elf
@@ -11,10 +11,10 @@ WHAT THIS IS
 
 CONSOLE USE
   1. Jailbreak (elfldr running)
-  2. Inject ProsperoPlayer_MediaLauncher.elf
+  2. Inject EVOPlayer_MediaLauncher.elf
        → put on autoload so this is automatic every boot
-  3. Wait for toast: "ProsperoPlayer 1.0 ready" / "Open from Media"
-  4. Home → Media → ProsperoPlayer 1.0
+  3. Wait for toast: "EVOPlayer 1.0 ready" / "Open from Media"
+  4. Home → Media → EVOPlayer 1.0
   5. Leave the launcher payload running in the background
 
   After reboot: jailbreak + launcher inject (autoload recommended).
@@ -28,7 +28,7 @@ UNINSTALL
     Settings → Remove Home Tile (press X twice), or
     GET http://127.0.0.1:9055/uninstall
   Always works (even if launcher is not up):
-    Inject ProsperoPlayer_UninstallTile.elf once
+    Inject EVOPlayer_UninstallTile.elf once
 
   Note: Sony often hides Options → Delete for Media BigApp hosts.
   If Delete works on your FW, fine; use UninstallTile if a ghost remains.
@@ -42,21 +42,21 @@ KNOWN SHELL BEHAVIOR
 
 IDENTITY
   Title ID:     PRSP10001
-  Display name: ProsperoPlayer
+  Display name: EVOPlayer
   Port:         9055
-  Runtime:      /data/homebrew/ProsperoPlayer
-  Logs:         /data/prosperoplayer/media_launcher.log
-                /data/prosperoplayer/player-stdio.log
+  Runtime:      /data/homebrew/EVOPlayer
+  Logs:         /data/evoplayer/media_launcher.log
+                /data/evoplayer/player-stdio.log
 
 BUILD
   Requires PS5 payload SDK at /opt/ps5-payload-sdk (or set SDK=).
   Embed a current player first:
-    cp /path/to/PS5MediaPlayerPRO.elf assets/ProsperoPlayer.elf
+    cp /path/to/PS5MediaPlayerPRO.elf assets/EVOPlayer.elf
   Then:
     make clean all
   Outputs:
-    ProsperoPlayer_MediaLauncher.elf
-    ProsperoPlayer_UninstallTile.elf
+    EVOPlayer_MediaLauncher.elf
+    EVOPlayer_UninstallTile.elf
 
 THIRD-PARTY
   core/hbldr.c, elfldr.c, pt.c — John Törnblom ps5-payload-websrv BigApp
