@@ -177,8 +177,8 @@ void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
 
         /* Scrim under the caption. Without it a bright frame makes the title
          * unreadable, which is the failure mode of every poster grid. */
-        evo_ui_vgrad(fb, x + 2, y + h - 76, w - 4, 74,
-                     with_alpha(th->scrim, 0), with_alpha(th->scrim, 245));
+        evo_ui_vgrad_over(fb, x + 2, y + h - 76, w - 4, 74,
+                          with_alpha(th->scrim, 0), with_alpha(th->scrim, 245));
 
         /* Re-draw the selection border on top of the artwork. */
         if (t->selected)

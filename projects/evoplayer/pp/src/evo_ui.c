@@ -73,6 +73,30 @@ void evo_ui_vgrad(uint32_t *fb, int x, int y, int w, int h,
     }
 }
 
+void evo_ui_vgrad_over(uint32_t *fb, int x, int y, int w, int h,
+                       uint32_t top, uint32_t bottom)
+{
+    int x0 = x < 0 ? 0 : x, x1 = x + w;
+    int y0 = y < 0 ? 0 : y, y1 = y + h;
+    if (x1 > EVO_UI_W) x1 = EVO_UI_W;
+    if (y1 > EVO_UI_H) y1 = EVO_UI_H;
+    if (h <= 0) return;
+
+    for (int py = y0; py < y1; py++) {
+        int t = ((py - y) * 256) / h;
+        uint32_t c = lerp_colour(top, bottom, t);
+        int a = (int)((c >> 24) & 0xFF);
+        uint32_t *row = &fb[py * EVO_UI_W];
+
+        /* Whole rows of a scrim are usually fully transparent at one end;
+         * skipping them is most of the cost of the gradient. */
+        if (a == 0) continue;
+
+        for (int px = x0; px < x1; px++)
+            row[px] = evo_ui_blend(row[px], c, a);
+    }
+}
+
 /*
  * The page background: three cheap layers that together read as designed
  * rather than as a flat fill.

@@ -236,6 +236,48 @@ regenerated as single-hue glyphs.
 
 ---
 
+## `tools/uiview.sh` — the UI, rendered on the host
+
+**Look at the UI without a console.** This is not a mock-up: it links the real
+drawing code — `evo_ui`'s SDF primitives, `evo_chrome`, `evo_widgets`,
+`evo_screens` — against the real font atlas and the real generated icons, and
+paints a 1920×1080 buffer exactly as the player does. What comes out is what
+the console draws, modulo the tile swizzle, which changes where pixels live in
+memory and not what they look like.
+
+```bash
+./tools/uiview.sh --all                  # every screen -> output/uiview/
+./tools/uiview.sh browse --sel 3
+./tools/uiview.sh browse --rail          # rail focused (the expanded overlay)
+./tools/uiview.sh launch --row 2         # cursor on the library shelf
+./tools/uiview.sh favorites --empty      # the empty state
+./tools/uiview.sh settings --theme EMBER
+```
+
+It renders BMP and converts through `tools/shot.py`, the same path console
+captures take, so a host render and a console capture are directly comparable
+with `shot.py diff`.
+
+Themes come from the four built-ins: `EVO_THEME_DIR` is pointed at a path that
+does not exist on the host, so a render never depends on what happens to be on
+someone's USB stick.
+
+It earns its keep immediately — its first run surfaced two real defects that
+had shipped to hardware unnoticed:
+
+- `evo_ui_vgrad` **replaces** rather than blends. Using it for a scrim wrote
+  transparency straight into the framebuffer, and since scanout ignores alpha
+  the hero's fade rendered as a hard black slab. Fixed by adding
+  `evo_ui_vgrad_over()`.
+- The expanded rail was ~240/255 opaque, because card surfaces carry alpha
+  (MIDNIGHT's `surface` is 235) and that alpha propagated into the panel fill.
+  The page title behind ghosted through it.
+
+Both are the kind of thing you notice instantly in a still and never quite
+pin down at ten feet.
+
+---
+
 ## `tools/bench.sh` — the converter, measured on the host
 
 The YUV→BGRA+swizzle path needs no console: it takes a plain `pp_frame` in and

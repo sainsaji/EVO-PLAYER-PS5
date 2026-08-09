@@ -193,12 +193,20 @@ static void draw_rail_expanded(uint32_t *fb, const evo_page *p)
     int i;
 
     /* Dim the page behind the overlay so the rail is unambiguously in front. */
-    evo_ui_vgrad(fb, EVO_RAIL_W, 0, EVO_SCREEN_W - EVO_RAIL_W, EVO_SCREEN_H,
-                 with_alpha(th->scrim, 120), with_alpha(th->scrim, 120));
+    evo_ui_vgrad_over(fb, EVO_RAIL_W, 0,
+                      EVO_SCREEN_W - EVO_RAIL_W, EVO_SCREEN_H,
+                      with_alpha(th->scrim, 120), with_alpha(th->scrim, 120));
 
+    /*
+     * Forced opaque. Card surfaces carry alpha (MIDNIGHT's is 235) so that
+     * they layer over the background, and mixing one into the panel fill left
+     * it around 240 - enough for the page title behind to ghost visibly
+     * through the rail. An overlay that is nearly opaque reads as a rendering
+     * fault, not as a design.
+     */
     evo_ui_round_rect(fb, 0, 0, EVO_RAIL_W_OPEN, EVO_SCREEN_H, 0,
-                      mix(th->bg_top, th->surface, 190),
-                      mix(th->bg_bottom, th->surface, 165),
+                      with_alpha(mix(th->bg_top, th->surface, 190), 255),
+                      with_alpha(mix(th->bg_bottom, th->surface, 165), 255),
                       th->border, th->border_px,
                       th->shadow, th->shadow_px);
 
@@ -291,8 +299,8 @@ static void draw_footer(uint32_t *fb, const evo_page *p,
     int i;
 
     evo_ui_hline(fb, 0, EVO_FOOTER_RULE_Y, EVO_SCREEN_W, th->border);
-    evo_ui_vgrad(fb, 0, EVO_FOOTER_Y, EVO_SCREEN_W, EVO_FOOTER_H,
-                 with_alpha(th->scrim, 200), th->scrim);
+    evo_ui_vgrad_over(fb, 0, EVO_FOOTER_Y, EVO_SCREEN_W, EVO_FOOTER_H,
+                      with_alpha(th->scrim, 200), th->scrim);
 
     for (i = 0; i < n && hints; i++) {
         /*

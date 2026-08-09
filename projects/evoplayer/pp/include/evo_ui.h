@@ -31,9 +31,25 @@ uint32_t evo_ui_blend(uint32_t dst, uint32_t src, int alpha);
 /* Full-screen vertical gradient using the theme's background. */
 void evo_ui_background(uint32_t *fb);
 
-/* Vertical gradient rectangle, hard edges. */
+/*
+ * Vertical gradient rectangle, hard edges.
+ *
+ * REPLACES what is underneath - it does not blend. That is what the page
+ * background wants, and it is why the colours passed here should be opaque.
+ * For a scrim, use evo_ui_vgrad_over(): passing a transparent colour to this
+ * function writes the transparency into the framebuffer, and since scanout
+ * ignores alpha the result is a solid black slab rather than a fade.
+ */
 void evo_ui_vgrad(uint32_t *fb, int x, int y, int w, int h,
                   uint32_t top, uint32_t bottom);
+
+/*
+ * Vertical gradient composited over what is already there, honouring the
+ * alpha of both endpoints. This is the one to use for scrims: a gradient from
+ * alpha 0 to alpha 200 fades in over whatever it covers.
+ */
+void evo_ui_vgrad_over(uint32_t *fb, int x, int y, int w, int h,
+                       uint32_t top, uint32_t bottom);
 
 /*
  * A card.

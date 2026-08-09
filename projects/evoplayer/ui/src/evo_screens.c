@@ -157,8 +157,8 @@ static void draw_hero(uint32_t *fb, const evo_launch_model *m, int selected)
 
         /* Bottom scrim across the full card, so the chip and the progress bar
          * sit on a consistent ground and the band has no visible left edge. */
-        evo_ui_vgrad(fb, art_x, y + h - 140, art_w, 138,
-                     with_alpha(th->scrim, 0), with_alpha(th->scrim, 215));
+        evo_ui_vgrad_over(fb, art_x, y + h - 140, art_w, 138,
+                          with_alpha(th->scrim, 0), with_alpha(th->scrim, 215));
 
         if (selected)
             evo_ui_round_rect(fb, x, y, w, h, th->radius,

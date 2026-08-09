@@ -114,3 +114,6 @@ desktop.ini
 samples/*.jpg
 samples/*.jpeg
 samples/*.png
+
+# Host UI renders (tools/uiview.sh)
+output/uiview/
