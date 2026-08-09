@@ -6,9 +6,9 @@
  *                     -> SetBufferAttribute2 -> RegisterBuffers2
  *                     -> SubmitFlip -> present
  *
- * Two scenes, chosen by the first argument:
- *     (default)   solid colours, ~2 s each
- *     pattern     an RGB test pattern (colour bars, gradient, grey ramp)
+ * Two scenes, run back to back (elfldr passes no argv):
+ *     solid     red / green / blue / white, ~2 s each
+ *     pattern   horizontal colour bands, one scanout tile tall each
  *
  * ---------------------------------------------------------------------------
  * THIS IS THE PS5 PATH, NOT THE PS4 ONE.
@@ -45,6 +45,10 @@
 #define FB_HEIGHT  1080
 #define FB_COUNT   2                    /* double buffered */
 
+/* PS5 scanout tile geometry, from ps5-payload-dev/SDL (SDL_ps5tilemap.inc). */
+#define PS5_TILE_WIDTH   512
+#define PS5_TILE_HEIGHT  128
+
 /* Matches the SDL backend: one 64 MiB block, second buffer at the halfway
  * point. A 1920x1080x4 frame is ~8 MiB, so this is comfortably oversized and
  * keeps both buffers well clear of each other. */
@@ -52,6 +56,30 @@
 #define FB_ALIGN    0x20000u            /* 128 KiB        */
 #define FB_MEMTYPE  3                   /* WC_GARLIC      */
 #define FB_PROT     0x33                /* CPU RW | GPU all */
+
+/* Tiling mode passed to sceVideoOutSetBufferAttribute2.
+ *
+ * ps5-payload-dev/SDL passes 0 here and then swizzles every pixel through a
+ * generated lookup table (SDL_ps5tilemap.inc, PS5_DrawPixelsAsTiles) - i.e.
+ * mode 0 is a TILED surface, and writing to it linearly scrambles any image
+ * that is not a flat colour.
+ *
+ * 1 requests a LINEAR surface, which would be far more convenient for a video
+ * player. TESTED ON 12.70 AND REJECTED - the console replies:
+ *
+ *   [VideoOut] Tiling Mode Error: Linear format is only valid with
+ *   "Enhanced Display Buffer Attribute" enabled (at Debug Settings)
+ *   sceVideoOutRegisterBuffers2 -> 0x80290007
+ *
+ * That is a devkit debug-menu option, so on a retail console TILING IS
+ * MANDATORY. Any non-uniform image must therefore be swizzled through the
+ * tile map (ps5-payload-dev/SDL generates one in SDL_ps5tilemap.inc).
+ * Tile geometry: 512 x 128 pixels.
+ *
+ * Override at build time:  make FB_TILING=0 */
+#ifndef FB_TILING
+#define FB_TILING   0                   /* 0 = tiled (required on retail), 1 = linear */
+#endif
 
 typedef struct fb {
     int32_t                     handle;
@@ -70,47 +98,61 @@ abgr(uint8_t r, uint8_t g, uint8_t b)
     return 0xff000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
 }
 
+/* Fill the WHOLE buffer region, not just width*height pixels.
+ *
+ * Observed on hardware: filling exactly 1920*1080 left a black wedge in the
+ * bottom-right corner. The scanout surface is padded beyond width*height (it
+ * is tiled - see the note on FB_TILING below), so the tail was never written.
+ * A solid colour is invariant under any pixel permutation, so covering the
+ * entire region is both correct and the simplest fix. */
 static void
-fill_solid(uint32_t *px, uint32_t colour)
+fill_solid(uint32_t *px, size_t bytes, uint32_t colour)
 {
-    for (size_t i = 0; i < (size_t)FB_WIDTH * FB_HEIGHT; i++)
+    for (size_t i = 0; i < bytes / sizeof *px; i++)
         px[i] = colour;
 }
 
-/* Colour bars on top, an RGB sweep in the middle, a grey ramp below. Between
- * them these expose wrong channel order, wrong pitch and range problems - the
- * three things that actually go wrong first. */
+/* HORIZONTAL colour bands, one tile-row tall each.
+ *
+ * Why bands and not the usual vertical colour bars: the PS5 scanout surface is
+ * TILED (512x128 pixels per tile - see FB_TILING above), so a linear write of
+ * a non-uniform image comes out scrambled. Rendering an arbitrary image at
+ * this level needs the full swizzle table that ps5-payload-dev/SDL generates
+ * in SDL_ps5tilemap.inc.
+ *
+ * A band that is exactly one tile tall and spans the full width makes every
+ * tile it touches a single flat colour. Flat tiles are invariant under any
+ * intra-tile permutation, so the bands display correctly with no swizzle
+ * table at all - while still proving channel order and vertical geometry.
+ *
+ * Vertical bars cannot do this: 1920 / 512 = 3.75, so bar edges would fall
+ * inside tiles and scramble.
+ *
+ * The buffer region is filled to the end so no padding is left black. */
 static void
-fill_pattern(uint32_t *px)
+fill_pattern(uint32_t *px, size_t bytes)
 {
-    static const uint8_t bar[8][3] = {
-        {255,255,255}, {255,255,0}, {0,255,255}, {0,255,0},
-        {255,0,255},   {255,0,0},   {0,0,255},   {0,0,0}
+    /* Deliberately ordered so a red/blue channel swap is unmistakable: pure
+     * red sits directly above pure blue. */
+    static const uint8_t band[][3] = {
+        {255, 255, 255},   /* white   */
+        {255, 255,   0},   /* yellow  */
+        {  0, 255, 255},   /* cyan    */
+        {  0, 255,   0},   /* green   */
+        {255,   0, 255},   /* magenta */
+        {255,   0,   0},   /* RED     */
+        {  0,   0, 255},   /* BLUE    */
+        {128, 128, 128},   /* grey    */
+        {  0,   0,   0},   /* black   */
     };
-    const unsigned bar_h  = FB_HEIGHT / 2;
-    const unsigned grad_h = FB_HEIGHT / 4;
+    const size_t nband = sizeof band / sizeof *band;
+    const size_t rowpx = FB_WIDTH;
+    const size_t total = bytes / sizeof *px;
 
-    for (unsigned y = 0; y < FB_HEIGHT; y++) {
-        uint32_t *row = px + (size_t)y * FB_WIDTH;
-
-        if (y < bar_h) {
-            for (unsigned x = 0; x < FB_WIDTH; x++) {
-                unsigned i = (x * 8) / FB_WIDTH;
-                if (i > 7) i = 7;
-                row[x] = abgr(bar[i][0], bar[i][1], bar[i][2]);
-            }
-        } else if (y < bar_h + grad_h) {
-            for (unsigned x = 0; x < FB_WIDTH; x++) {
-                unsigned t = (x * 255) / (FB_WIDTH - 1);
-                row[x] = abgr((uint8_t)(255 - t), (uint8_t)t,
-                              (uint8_t)((t * 2) % 256));
-            }
-        } else {
-            for (unsigned x = 0; x < FB_WIDTH; x++) {
-                uint8_t v = (uint8_t)((x * 255) / (FB_WIDTH - 1));
-                row[x] = abgr(v, v, v);
-            }
-        }
+    for (size_t i = 0; i < total; i++) {
+        size_t y = i / rowpx;
+        size_t b = (y / PS5_TILE_HEIGHT) % nband;
+        px[i] = abgr(band[b][0], band[b][1], band[b][2]);
     }
 }
 
@@ -198,14 +240,19 @@ fb_init(fb_t *fb)
 
     sceVideoOutSetFlipRate(fb->handle, 0);
 
+    printf("tiling mode         : %d (%s)\n", FB_TILING,
+           FB_TILING ? "linear" : "tiled");
+
     sceVideoOutSetBufferAttribute2(&fb->attr,
                                    SCE_VIDEO_OUT_PIXEL_FORMAT2_A8B8G8R8_SRGB,
-                                   0, FB_WIDTH, FB_HEIGHT, 0, 0, 0);
+                                   FB_TILING, FB_WIDTH, FB_HEIGHT, 0, 0, 0);
 
     rc = sceVideoOutRegisterBuffers2(fb->handle, 0, 0, fb->buf, FB_COUNT,
                                      &fb->attr, 0, NULL);
     if (rc) {
         printf("sceVideoOutRegisterBuffers2 failed: 0x%08x\n", rc);
+        printf("  tiling mode %d rejected - rebuild with FB_TILING=%d\n",
+               FB_TILING, !FB_TILING);
         sceKernelReleaseDirectMemory(fb->paddr, fb->memsize);
         sceVideoOutClose(fb->handle);
         return -1;
@@ -277,7 +324,7 @@ main(int argc, char **argv)
             for (int f = 0; f < 120; f++) {          /* ~2 s at 60 Hz */
                 int idx = f % FB_COUNT;
                 if (f < FB_COUNT)
-                    fill_solid((uint32_t *)fb.buf[idx].data,
+                    fill_solid((uint32_t *)fb.buf[idx].data, fb.memsize / FB_COUNT,
                                abgr(rgb[c][0], rgb[c][1], rgb[c][2]));
                 fb_present(&fb, idx, frame_id++);
             }
@@ -288,7 +335,7 @@ main(int argc, char **argv)
         printf("RGB test pattern (bars / gradient / grey ramp)\n");
         evo_notify("EVO videoout_test: RGB test pattern");
         for (int i = 0; i < FB_COUNT; i++)
-            fill_pattern((uint32_t *)fb.buf[i].data);
+            fill_pattern((uint32_t *)fb.buf[i].data, fb.memsize / FB_COUNT);
 
         /* Hold it long enough to look at and photograph. */
         for (int f = 0; f < 60 * 8; f++)

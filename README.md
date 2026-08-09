@@ -231,6 +231,35 @@ ELF, probes `PS5_HOST:9021` before transferring, and logs every deployment to
 `output/logs/`. Port **9021** is the `ps5-payload-elfldr` default, and matches
 the SDK's own `prospero-deploy`.
 
+### If it draws or plays sound, deploy.sh is the wrong tool
+
+`ps5-payload-elfldr` runs payloads inside **SceSpZeroConf**
+(`websrv/src/ps5/elfldr.c:74`) — a background network service with **no display
+plane and no audio**. VideoOut and AudioOut calls all *succeed* there; the
+output simply goes nowhere. This cost a debugging session: 960 flips reported
+against a completely black screen.
+
+Anything graphical must be installed as homebrew and launched through websrv's
+`hbldr_launch`, which borrows the PS Now app slot (`hbldr.c:45`):
+
+```bash
+# once per jailbreak - deploys websrv + ftpsrv to the console
+./scripts/install-homebrew.sh --setup
+
+# build -> install -> launch -> stream stdout back, in one command
+./scripts/install-homebrew.sh --run output/elf/videoout_test.elf
+./scripts/install-homebrew.sh --run --args "pattern" output/elf/videoout_test.elf
+```
+
+| Use | For |
+|---|---|
+| `deploy.sh` | headless payloads — `hello_world`, `system_info`, `decoder_test`, daemons |
+| `install-homebrew.sh --run` | anything with picture or sound |
+
+Note that POSTing to websrv's `/elfldr` endpoint does **not** help — that path
+calls `elfldr_spawn` and lands back in SceSpZeroConf. Only the homebrew
+launcher goes through `hbldr_launch`.
+
 Payload output goes to on-screen notifications (every sample calls
 `evo_notify()`), or to klog via `ps5-payload-klogsrv` on port 3232.
 

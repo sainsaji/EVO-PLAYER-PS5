@@ -3,11 +3,13 @@
 Two categories, kept strictly apart:
 
 - **Verified in CI/container** — reproducible by anyone, gated by CI.
-- **Requires hardware** — needs a jailbroken PS5 on 12.70. **Not yet run.**
+- **Verified on hardware** — run on a jailbroken PS5 on 12.70.
 
-The author of this scaffold has no console attached, so *every* on-hardware row
-below is untested. Do not read a green checkbox in the first table as evidence
-that anything runs on a PS5.
+A green checkbox in the first table means the code *builds*; only the second
+table means it *runs*. Rows marked "visually/audibly confirmed" were checked
+against the panel and speakers, not merely reported as successful by the API —
+that distinction matters, because every VideoOut call succeeded for a whole
+session while the screen stayed black (see correction 5 below).
 
 ---
 
@@ -88,20 +90,19 @@ Run 2026-08-09 against a jailbroken console with `ps5-payload-elfldr` on 9021.
 | 2 | `hello_world` loads and runs | **pass** | stdout returned over the loader socket: `argc=1`, `argv[0]=payload.elf`, `clang 18.1.3` |
 | 3 | `hello_world` exits cleanly | **pass** | exit 0 |
 | 4 | Firmware really is 12.70 | **pass** | raw `0x12700001`, group `0x12700000`, 16 CPUs, 16 KiB pages |
-| 5 | VideoOut solid colours | **pass** | 32 MiB allocated, 2 buffers registered, 480 frames flipped |
-| 6 | VideoOut RGB pattern | **pass** | 960 frames total across both scenes, clean exit |
-| 7 | AudioOut sine wave | **pass** | handle `0x20000000`, 562 grains at 48 kHz stereo S16 |
+| 5 | VideoOut solid colours | **pass, visually confirmed** | full-screen red/green/blue/white, no unwritten regions |
+| 6 | VideoOut colour bands | **pass, visually confirmed** | 9 tile-tall bands; **red directly above blue -> ABGR8888 channel order is correct** |
+| 7 | AudioOut sine wave | **pass, audibly confirmed** | clean 440 Hz, both channels, no clicks or stutter |
 | 8 | GNM submits allowed | **pass** | `sceGnmAreSubmitsAllowed() → 1`; GnmDriver mapped at `0x8002a0000` |
 | 9 | Native decoder modules reachable | **pass** | `libSceAvPlayer` loaded, all 6 entry points resolved by NID — see [native-media-research.md](native-media-research.md) |
 | 10 | ProsperoPlayer baseline plays media | not yet run | deploy `PS5MediaPlayerPRO.elf` and confirm **existing** functionality before any changes |
 
-Still to confirm visually: that the colours/pattern appeared correctly on the
-panel and the 440 Hz tone was audible. The payloads report success, which
-proves the API calls were accepted, not that the output was correct.
+All output confirmed on the panel and through the speakers, not merely
+reported as successful by the API.
 
 ### What the hardware run corrected
 
-Four assumptions in the original scaffold were wrong. All are now fixed in
+Six assumptions in the original scaffold were wrong. All are now fixed in
 code, with the reasoning recorded at the top of each `main.c`:
 
 1. **No user session in a payload.** `sceUserServiceGetInitialUser()` returns
@@ -123,6 +124,36 @@ code, with the reasoning recorded at the top of each `main.c`:
 
 4. **Sony modules export NIDs, not names.** `sceKernelDlsym` by name returns
    `0x80020003` for every symbol. Use `nid_encode()` + `kernel_dynlib_resolve()`.
+
+5. **A payload under elfldr is headless.** `ps5-payload-elfldr` spawns payloads
+   inside `SceSpZeroConf` (`websrv/src/ps5/elfldr.c:74`,
+   `/system/vsh/app/NPXS40112/eboot.bin`) - a background network service with
+   no display plane and no audio. VideoOut and AudioOut calls all *succeed*
+   there and 960 flips were reported against a blank screen. Anything that
+   draws or plays sound must be installed as homebrew and launched through
+   websrv's `hbldr_launch`, which borrows the PS Now app slot
+   (`hbldr.c:45`). `scripts/install-homebrew.sh` automates this.
+   Note POSTing to websrv's `/elfldr` does *not* help - that path calls
+   `elfldr_spawn` and lands back in `SceSpZeroConf`.
+
+6. **The scanout surface is tiled, and linear is not available on retail.**
+   Requesting tiling mode 1 gives:
+   ```
+   [VideoOut] Tiling Mode Error: Linear format is only valid with
+   "Enhanced Display Buffer Attribute" enabled (at Debug Settings)
+   sceVideoOutRegisterBuffers2 -> 0x80290007
+   ```
+   Tiles are 512x128 px. Writing a non-uniform image linearly scrambles it;
+   correct output needs a swizzle (ps5-payload-dev/SDL generates the table in
+   `SDL_ps5tilemap.inc` and applies it across 12 threads per frame).
+   `videoout_test` sidesteps this by drawing bands exactly one tile tall, so
+   every tile is a flat colour and is invariant under the permutation.
+   Filling only `width*height` also left the padding unwritten - the black
+   bottom-right wedge seen on the first run - so fills now cover the whole
+   buffer region.
+
+   **Architectural consequence:** GPU-side YUV->RGB is not optional polish.
+   A CPU path would have to swizzle every pixel of every frame.
 
 ### Recording a run
 
