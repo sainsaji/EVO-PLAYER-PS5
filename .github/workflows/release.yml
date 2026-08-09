@@ -111,9 +111,33 @@ jobs:
           ( cd dist && sha256sum * > SHA256SUMS.txt )
           ls -la dist
 
+      # Pull this version's section out of CHANGELOG.md so the release says
+      # what actually changed. Without this every release carried the same
+      # boilerplate and nothing about its own contents.
+      - name: Extract changelog section
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          if awk -v v="## ${V}" '
+                $0 == v {found=1; next}
+                found && /^## / {exit}
+                found {print}
+              ' CHANGELOG.md > dist_notes_body.md && [ -s dist_notes_body.md ]; then
+            echo "found changelog section for ${V}"
+          else
+            echo "::warning::no CHANGELOG.md section for ${V} - notes will be boilerplate only"
+            : > dist_notes_body.md
+          fi
+
       - name: Release notes
         run: |
-          cat > dist/NOTES.md <<'EOF'
+          mkdir -p dist
+          if [ -s dist_notes_body.md ]; then
+            cat dist_notes_body.md > dist/NOTES.md
+            echo "" >> dist/NOTES.md
+            echo "---" >> dist/NOTES.md
+            echo "" >> dist/NOTES.md
+          fi
+          cat >> dist/NOTES.md <<'EOF'
           ## Install
 
           1. Jailbreak the console (12.70) and start `ps5-payload-elfldr`.
