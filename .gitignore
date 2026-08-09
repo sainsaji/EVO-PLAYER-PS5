@@ -43,8 +43,19 @@ output/logs/*
 # Curated PNGs for the docs live in docs/images/ instead.
 output/screenshots/
 
+# Host benchmark binary (tools/bench.sh)
+output/bench/
+
+# Records the last launch time so tools/launch.sh can refuse to stack
+# instances. Machine-local state, not project state.
+output/.last-launch
+
 # Daemon ELFs cached by install-homebrew.sh --setup
 third_party/daemons/
+
+# python bytecode from the tools
+__pycache__/
+*.pyc
 
 *.o
 *.a

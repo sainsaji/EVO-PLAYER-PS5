@@ -1,5 +1,20 @@
 # Baseline defects — ProsperoPlayer on 12.70
 
+> ## Both of these are FIXED in EVO Player.
+>
+> This document describes the **unmodified upstream baseline**, kept as the
+> record of what was wrong and why. It is history, not a backlog — read it for
+> the root-cause analysis, not for work to pick up.
+>
+> | Defect | Status in EVO Player |
+> |---|---|
+> | 1. No surround output | **Fixed.** `sceAudioOutOpen` with `S16_8CH` when the source is multichannel, `AV_CHANNEL_LAYOUT_7POINT1` on the resampler, stereo fallback retained. `main.c`, search `want_surround`. |
+> | 2. Screen tearing | **Fixed.** `EVO_FLIP_SYNC` in `pp/src/pp_videoout.c` retires a buffer only once `sceVideoOutGetFlipStatus` reports its `flipArg`, replacing upstream's 32 ms timer. |
+>
+> Mistaking this file for open work has already cost one session's planning
+> time. If you are looking for what is actually outstanding, see
+> [`ui-handoff.md`](ui-handoff.md) and [`gpu-notes.md`](gpu-notes.md).
+
 Established 2026-08-09 by running the unmodified upstream build
 (`PS5MediaPlayerPRO.elf`, 43 MB) on a real console against a 29-file
 multichannel test set, then tracing each symptom to a line in upstream's
@@ -7,7 +22,7 @@ source.
 
 **The baseline works.** Video and audio play. These are the two defects
 observed, both with confirmed root causes. Neither is a build or environment
-problem — they are missing implementation, which makes them EVO Player's first
+problem — they are missing implementation, which made them EVO Player's first
 two jobs.
 
 ---

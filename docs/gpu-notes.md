@@ -31,41 +31,56 @@ So you can *call* `sceGnmSubmitCommandBuffers`, but you must hand-assemble the
 PM4 packet stream and supply pre-compiled shader binaries to have anything
 worth submitting. That is a large reverse-engineering project on its own.
 
-## The productive route: mesa + SDL2
+## The mesa + SDL2 route does NOT work — measured 2026-08-09
 
-The pacbrew sysroot already ships **mesa** and **SDL2** (both in
-`ci-libs.sh`'s package list, both present in the image). Mesa's `radeonsi`
-driver targets the same RDNA2 hardware through an open stack, and SDL2 sits on
-top of it.
+An earlier version of this document recommended SDL2 NV12 textures on the
+grounds that the sysroot ships mesa and that mesa's `radeonsi` driver targets
+the same RDNA2 hardware. **That was wrong**, and it was wrong in the one way
+that matters: what is shipped is a *software* rasteriser.
 
-For YUV→RGB specifically, start here before writing any shader:
+Checked directly against the image:
 
-```c
-SDL_Texture *tex = SDL_CreateTexture(renderer,
-                                     SDL_PIXELFORMAT_NV12,
-                                     SDL_TEXTUREACCESS_STREAMING,
-                                     width, height);
-SDL_UpdateNVTexture(tex, NULL, yPlane, yPitch, uvPlane, uvPitch);
-SDL_RenderCopy(renderer, tex, NULL, NULL);
+```
+libGL.so -> libOSMesa.so -> libOSMesa.so.8.0.0     (92 MB, Off-Screen Mesa)
+
+gallium drivers linked inside it:
+  radeonsi   0        <-- the hardware driver is absent
+  llvmpipe   575
+  softpipe   380
+  swr        156
+
+/dev/dri, renderD references:  none
+no libradeonsi, libamdgpu, libgallium, libvulkan or DRI modules in the sysroot
+
+SDL2 2.30.12 video drivers compiled in:  dummy, offscreen
+                                         (no PS5, GNM or KMSDRM backend)
 ```
 
-SDL2 performs the colour conversion on the GPU for NV12/IYUV textures. If that
-is sufficient, the entire "GPU YUV converter" milestone collapses into a few
-lines. Only drop to a custom fragment shader when it is not — most likely for
-**10-bit HEVC** (`P010`), where SDL2's format support is thinner, and for HDR
-tone mapping.
+So `SDL_RenderCopy` on an NV12 texture would convert **on the CPU through
+llvmpipe**, and SDL2 has no video backend that can present on this platform
+anyway. It would be slower than `pp/src/pp_converter_fused.c`, which is
+already multithreaded and writes straight into the PS5 tile layout.
 
-This is why `projects/yuv_gpu_test` is scaffolded against SDL2 rather than GNM.
+`SDL_UpdateNVTexture` and `SDL_PIXELFORMAT_NV12` *do* exist in the headers
+(SDL 2.30.12), which is presumably what made the original claim look safe.
+Their presence says nothing about acceleration.
 
-## Ordering
+## What that leaves
 
-1. `videoout_test` must present correctly first — a working scanout path is the
-   prerequisite for everything else.
-2. Get software `libswscale` conversion working end to end in the player. Slow
-   is fine; correct is the point.
-3. Swap in `SDL_PIXELFORMAT_NV12` and measure. This is where the 4K win is.
-4. Only then consider a custom shader, for P010 / 10-bit / HDR.
-5. Raw GNM is a last resort, and probably never.
+There is no open hardware GL/Vulkan path on this SDK today. The options are:
+
+1. **Keep improving the CPU converter.** `pp_converter_fused.c` is the real
+   lever and it is measurable on the host — no console needed to benchmark a
+   YUV→BGRA+swizzle kernel. Wider SIMD, fewer passes and better cache
+   behaviour are all on the table.
+2. **Raw GNM.** `libSceGnmDriver.so` resolves the submit entry points, but you
+   must hand-assemble the PM4 stream and supply precompiled shader binaries,
+   with no headers, no Gnmx and no PSSL compiler. Large, speculative.
+3. **Wait for the ecosystem.** If a radeonsi/DRI port lands in pacbrew, this
+   reopens cheaply — re-run the checks above to find out.
+
+Do not re-scaffold `projects/yuv_gpu_test` against SDL2 without re-checking
+the driver list first. That is the assumption that failed.
 
 ## HDR
 

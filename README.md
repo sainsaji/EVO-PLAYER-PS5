@@ -6,7 +6,7 @@ Docker environment that builds it.**
 Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) and
 licensed **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
 
-![EVO Player main menu](docs/images/main-menu.png)
+![EVO Player launch screen](docs/images/launch.png)
 
 ## What EVO Player adds over upstream
 
@@ -15,10 +15,14 @@ licensed **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
 | Surround | everything downmixed to stereo | **7.1 / 5.1 output**, stereo fallback |
 | Motion | tearing during camera movement | **flip-synchronised**, triple buffered |
 | Tile swizzle | per-pixel divides + doubles | **shifts and masks**, ~40% less blocking |
-| Menu cards | aliased bitmaps | **antialiased, drawn from SDF** |
+| 4K convert | threads spawned every frame | **persistent worker pool** |
+| Navigation | one flat menu, dead-end sections | **launch screen + side rail**, back is a stack |
+| Lists | one press per item | **hold to scroll**, shoulder buttons page |
+| Cards | aliased bitmaps | **antialiased, drawn from SDF** |
 | Icons | aliased bitmaps | **generated vector icons** |
-| Browser | raw `readdir` order | **folders first, A–Z** (toggleable) |
-| Feedback | silent | **navigation sounds** |
+| Browser | raw `readdir` order | **folders first, A–Z**, with a codec/size/length inspector |
+| Feedback | silent | **navigation sounds**, lightbar tinted to the theme |
+| Theming | hardcoded colours | **plug-and-play `.theme` files** from USB |
 | Debugging | — | **screenshots** to USB (click a stick) |
 
 Every one of those was found and verified on real hardware — see
@@ -569,12 +573,27 @@ EVO Player/
 ├── third_party/ffmpeg/         sources (git-ignored)
 ├── output/{elf,pkg,logs}/      artifacts
 ├── proprietary/                never committed
+├── tools/                      capture, klog, launch, benchmark, icon gen
 └── docs/
+    ├── tooling.md              every script and tool, and when to reach for it
+    ├── ui-handoff.md           the UI layer, and what not to re-derive
+    ├── theming.md              writing a .theme file
+    ├── converter-perf.md       host benchmarking, and what it found
     ├── sdk-audit.md            the full SDK audit
     ├── networking.md  packaging.md  gpu-notes.md
     ├── native-media-research.md  proprietary.md  prosperoplayer-baseline.md
+    ├── baseline-defects.md     upstream's two defects (both fixed - history)
     └── validation.md           what is proven vs. what is not
 ```
+
+### Where to start reading
+
+| If you want to… | Read |
+|---|---|
+| build, deploy, capture, read logs | [tooling.md](docs/tooling.md) |
+| work on the UI | [ui-handoff.md](docs/ui-handoff.md), then [theming.md](docs/theming.md) |
+| work on playback performance | [converter-perf.md](docs/converter-perf.md), then [gpu-notes.md](docs/gpu-notes.md) |
+| know what is actually proven | [validation.md](docs/validation.md) |
 
 Source lives on Windows via a bind mount; heavy build trees and ccache live on
 Linux named volumes.
