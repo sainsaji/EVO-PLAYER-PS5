@@ -117,6 +117,7 @@ static int              g_vo_saved_valid;
  * behalf, so it is only resumed if it was not the user who paused.
  */
 static int              g_osd_clock_paused;
+
 static int g_pp_vo_ready = 0;
 /* Progressive 4K product diag (G-H). Set when gated 4K session opens. */
 static int g_4k_diag_active = 0;
@@ -158,6 +159,20 @@ static int g_first_frame_bc_done = 0;
  * hardcode "% 6" while the row table grew, which silently made the last row
  * unreachable. Both now derive from this. */
 #define EVO_SETTINGS_COUNT 8
+
+/*
+ * Where CIRCLE returns to from playback.
+ *
+ * This was hardcoded to the browser. Starting a file from the launch screen's
+ * hero or its Recent shelf therefore dropped you into a browser that had
+ * never been populated - an empty listing on /mnt/usb0 until you backed out
+ * and entered Browse again.
+ *
+ * Deliberately a single explicit variable rather than the nav stack: the
+ * section screens still set `screen` directly on their way back instead of
+ * popping, so the stack drifts and cannot be trusted for this yet.
+ */
+static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define SCREEN_PROFILE_SELECT 11
 #define SCREEN_RECENT_FILES 12
 #define SCREEN_FAVORITES 13
@@ -13874,8 +13889,18 @@ static const uint32_t *evo_cover_pixels(const char *path)
  * is a single global keyed by path, so sharing it would make every trip
  * between the launch screen and the browser re-decode a video frame.
  */
-static uint32_t evo_hero_art[PROSPERO_BROWSER_PREVIEW_W *
-                             PROSPERO_BROWSER_PREVIEW_H];
+/*
+ * The hero backdrop gets its own, larger extraction.
+ *
+ * It is drawn about 1740px wide. Sharing the 560px inspector preview meant a
+ * better-than-3x upscale, which bilinear smooths but cannot add detail to.
+ * 960x540 brings that under 2x and costs 2MB, and extracting separately also
+ * stops the hero from evicting the browser's preview for a different file.
+ */
+#define EVO_HERO_ART_W 960
+#define EVO_HERO_ART_H 540
+
+static uint32_t evo_hero_art[EVO_HERO_ART_W * EVO_HERO_ART_H];
 static char     evo_hero_art_path[768];
 static int      evo_hero_art_valid;
 
@@ -13896,13 +13921,25 @@ static void evo_hero_art_ensure(const char *path)
     if (!prospero_path_is_readable(path))
         return;
 
+    /*
+     * Extract straight into the hero buffer at its own size rather than
+     * copying the browser's preview. Same cost - one decode - but at the
+     * resolution the hero actually needs, and it leaves the inspector's
+     * preview alone.
+     */
+    if (prospero_cover_path_is_video(path) &&
+        prospero_cover_extract_video_frame_size(
+            path, evo_hero_art, EVO_HERO_ART_W, EVO_HERO_ART_H) == 0) {
+        evo_hero_art_valid = 1;
+        return;
+    }
+
+    /* Sidecar artwork, or anything that is not a video. */
     prospero_browser_preview_ensure(path, 0);
 
     if (prospero_browser_preview_valid &&
         strcmp(prospero_browser_preview_path, path) == 0) {
-        memcpy(evo_hero_art, prospero_browser_preview_pixels,
-               sizeof(evo_hero_art));
-        evo_hero_art_valid = 1;
+        evo_hero_art_valid = 2;   /* smaller source; see the model builder */
     }
 }
 
@@ -13952,10 +13989,19 @@ static void evo_build_launch_model(evo_launch_model *m)
 
         evo_hero_art_ensure(r->path);
 
-        if (evo_hero_art_valid) {
+        if (evo_hero_art_valid == 1) {
             m->hero_art.pixels = evo_hero_art;
-            m->hero_art.w      = PROSPERO_BROWSER_PREVIEW_W;
-            m->hero_art.h      = PROSPERO_BROWSER_PREVIEW_H;
+            m->hero_art.w      = EVO_HERO_ART_W;
+            m->hero_art.h      = EVO_HERO_ART_H;
+        } else if (evo_hero_art_valid == 2) {
+            /* Fell back to the shared preview - only usable while it still
+             * holds this file. */
+            if (prospero_browser_preview_valid &&
+                strcmp(prospero_browser_preview_path, r->path) == 0) {
+                m->hero_art.pixels = prospero_browser_preview_pixels;
+                m->hero_art.w      = PROSPERO_BROWSER_PREVIEW_W;
+                m->hero_art.h      = PROSPERO_BROWSER_PREVIEW_H;
+            }
         }
     } else {
         m->has_resume  = 0;
@@ -14057,6 +14103,7 @@ static void evo_play_recent(int index)
 
     evo_feedback(EVO_FB_OPEN);
     evo_nav_push(EVO_SCREEN_PLAYER);
+    g_playback_return_screen = screen;   /* wherever we were - launch, usually */
     screen = SCREEN_PLAYER;
 
     start_video_playback(current_media_path);
@@ -16177,7 +16224,8 @@ static void evo_vo_trace(const char *tag)
         "%8lld %-14s screen=%2d backend=%d vo=%ux%u pv=%ux%u ready=%d "
         "pending=%d k4live=%d pb_active=%d has_disp=%d paused=%d "
         "diag=%d supUI=%d | conv=%llu pub=%llu decf=%d vpkt=%d gate=%d "
-        "dfps=%d rfps=%d aclk=%.2f vclk=%.2f\n",
+        "dfps=%d rfps=%d aclk=%.2f vclk=%.2f | sub_en=%d sub_auto=%d "
+        "sub_emb=%d sub_cues=%d sub_ext=%d sub_useext=%d\n",
         now_ms(), tag, screen, (int)g_pp_backend,
         g_vo_w, g_vo_h, g_pp_vo.width, g_pp_vo.height, g_pp_vo_ready,
         g_pending_vo_reconfig, pp_product_k4_live(screen),
@@ -16187,7 +16235,11 @@ static void evo_vo_trace(const char *tag)
         (unsigned long long)g_pp_pb.stats.frames_published,
         dbg_video_frames, dbg_video_packets,
         g_vo_decode_gate, perf_decode_fps, perf_render_fps,
-        (double)audio_clock_seconds, (double)video_clock_seconds);
+        (double)audio_clock_seconds, (double)video_clock_seconds,
+        prospero_subtitle_enabled, prospero_auto_subtitles_enabled,
+        prospero_embedded_subtitle_stream_index,
+        prospero_embedded_subtitle_count,
+        prospero_subtitle_count, prospero_subtitle_use_external);
 
     fclose(f);
 }
@@ -16760,6 +16812,7 @@ int main(void) {
 
                     screen = SCREEN_SETTINGS;
                 } else if (screen == SCREEN_RECENT_FILES) {
+                    g_playback_return_screen = SCREEN_RECENT_FILES;
                     if (recent_file_count > 0) {
                         snprintf(current_media_path, sizeof(current_media_path), "%s", recent_files[recent_selected].path);
                         requested_resume_seek_pos = recent_files[recent_selected].last_pos;
@@ -16768,6 +16821,7 @@ int main(void) {
                         start_video_playback(current_media_path);
                     }
                 } else if (screen == SCREEN_FAVORITES) {
+                    g_playback_return_screen = SCREEN_FAVORITES;
                     if (favorite_count > 0) {
                         snprintf(current_media_path, sizeof(current_media_path), "%s", favorite_files[favorite_selected].path);
                         requested_resume_seek_pos = 0.0;
@@ -16788,6 +16842,9 @@ int main(void) {
                     controls_last_used_ms = now_ms();
                     toast("PLAYBACK", player_paused ? "Paused" : "Playing");
                 } else if (screen == 1) {
+                    /* Opening a file from the browser: record where we were,
+                     * so CIRCLE out of playback comes back here. */
+                    g_playback_return_screen = SCREEN_USB_BROWSER;
                     enter_selected_usb();
                 } else if (screen == SCREEN_MAIN_MENU) {
                     /* EVO: the launch screen is a two-dimensional grid now,
@@ -16843,9 +16900,24 @@ int main(void) {
                 } else if (screen == 3) {
                     screen = 1;
                 } else if (screen == 2) {
+                    /*
+                     * Back to wherever playback was started from, not always
+                     * the browser. Starting a file from the launch screen's
+                     * hero or Recent shelf and pressing CIRCLE dropped you
+                     * into a file browser that had never been populated -
+                     * an empty list on /mnt/usb0 until you left and re-entered
+                     * Browse. The nav stack already knows the answer; this
+                     * was the one place still hardcoding it.
+                     */
                     recent_update_current_position();
                     stop_video_playback();
-                    screen = 1;
+
+                    screen = g_playback_return_screen;
+
+                    /* The browser can be returned to without ever having been
+                     * populated - playback started from the launch screen. */
+                    if (screen == SCREEN_USB_BROWSER && file_count <= 0)
+                        load_usb_files();
                 } else if (screen == 1) {
                     usb_go_back();
                 } else {

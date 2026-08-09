@@ -142,9 +142,17 @@ int evo_text_fit(uint32_t *fb, int x, int y, int max_w, const char *s,
 void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
                       uint32_t colour, evo_face face, int phase)
 {
+    /*
+     * Pixels of travel per frame. At 1 the scroll took the better part of ten
+     * seconds to cross a long filename, which reads as broken rather than
+     * leisurely. 3px at 60fps is ~180px/s - brisk enough to finish a long
+     * name in a couple of seconds and still readable while it moves.
+     */
+    const int speed = 3;
+
     int full_w;
     int overflow;
-    int hold   = 48;   /* frames parked at each end */
+    int hold   = 36;   /* frames parked at each end */
     int travel;
     int cycle;
     int p;
@@ -165,15 +173,16 @@ void evo_text_marquee(uint32_t *fb, int x, int y, int max_w, const char *s,
      * copy would spill across the inspector panel.
      */
     overflow = full_w - max_w;
-    travel   = overflow * 2;          /* 2 frames per pixel: readable pace */
+    travel   = (overflow + speed - 1) / speed;   /* frames to cross */
+    if (travel < 1) travel = 1;
     cycle    = hold * 2 + travel * 2;
     p        = phase % cycle;
 
     if (p < hold)                     shift = 0;
-    else if (p < hold + travel)       shift = (p - hold) / 2;
+    else if (p < hold + travel)       shift = (p - hold) * speed;
     else if (p < hold * 2 + travel)   shift = overflow;
     else                              shift = overflow -
-                                              (p - hold * 2 - travel) / 2;
+                                              (p - hold * 2 - travel) * speed;
 
     if (shift < 0)        shift = 0;
     if (shift > overflow) shift = overflow;
