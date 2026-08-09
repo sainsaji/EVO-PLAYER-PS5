@@ -1,0 +1,10 @@
+*.o
+*~
+.DS_Store
+.venv/
+__pycache__/
+*.log
+main_BACKUP_*
+Makefile_BACKUP_*
+artifacts/
+prospero_bf_standalone/
