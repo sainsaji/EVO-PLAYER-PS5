@@ -86,8 +86,7 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release \
             bash -lc 'bash ./scripts/package-pkg.sh --format homebrew \
-                        --title "EVO Player" --name EVOPlayer \
-                        output/elf/EVOPlayer.elf'
+                        --title "EVO Player" output/elf/EVOPlayer.elf'
 
       - name: Verify the payload is a PS5 ELF
         run: |
