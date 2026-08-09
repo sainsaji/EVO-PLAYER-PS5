@@ -276,6 +276,34 @@ had shipped to hardware unnoticed:
 Both are the kind of thing you notice instantly in a still and never quite
 pin down at ten feet.
 
+### Walking through it: `tools/uiplay.sh`
+
+`uiview` gives stills. `uiplay` gives something you can drive, in a browser,
+on any machine:
+
+```bash
+./tools/uiplay.sh                # then open output/uiplay/index.html
+./tools/uiplay.sh --theme EMBER
+```
+
+Arrow keys move, Enter selects, Esc goes back, Left opens the navigation rail
+— the same model the console uses. `E` toggles the empty states.
+
+There is no emscripten, no mingw and no host SDL2 in the container, so a
+windowed binary is not buildable from here. It does not need to be: this repo
+owns both the renderer and the navigation model, so every reachable cursor
+position can be rendered ahead of time (93 frames, ~5 MB) and stepped through
+with a JavaScript copy of `evo_grid` / `evo_focus` / `evo_nav`. If that copy
+and the C ever disagree, the C is right and the page is the bug.
+
+It is **not** live data, animation or the player's timing. It shows layout and
+navigation, which is exactly what cannot be checked without a console.
+
+It found the hero's action chip sizing its width for a 48px controller glyph
+placed at a 62px text offset, so the ✕ and the label overlapped whenever the
+hero was not selected — visible only in the unselected state, which no
+hardware screenshot had happened to capture.
+
 ---
 
 ## `tools/bench.sh` — the converter, measured on the host

@@ -117,3 +117,6 @@ samples/*.png
 
 # Host UI renders (tools/uiview.sh)
 output/uiview/
+
+# Host UI walkthrough (tools/uiplay.sh)
+output/uiplay/

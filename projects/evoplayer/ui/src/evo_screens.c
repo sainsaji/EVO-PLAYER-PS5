@@ -193,7 +193,14 @@ static void draw_hero(uint32_t *fb, const evo_launch_model *m, int selected)
      * the one target on this page whose action is not obvious from its
      * label. */
     if (m->hero_action && *m->hero_action) {
-        int cw = evo_text_w(m->hero_action, EVO_FACE_SUB) + 92;
+        /*
+         * Chip geometry, spelled out because guessing it put the glyph and
+         * the label on top of each other: 14 left pad, a 48px controller
+         * glyph, 14 of gap, the label, 18 right pad.
+         */
+        const int pad_l = 14, glyph_w = 48, gap = 14, pad_r = 18;
+        const int text_x_off = pad_l + glyph_w + gap;
+        int cw = text_x_off + evo_text_w(m->hero_action, EVO_FACE_SUB) + pad_r;
         int ch = 52;
         int cy = y + h - 76;
 
@@ -203,9 +210,10 @@ static void draw_hero(uint32_t *fb, const evo_launch_model *m, int selected)
                           selected ? th->accent : th->border, th->border_px,
                           with_alpha(th->shadow, 0), 0);
 
-        evo_glyph(fb, text_x + 14, cy + (ch - 40) / 2 - 2, EVO_GLYPH_CROSS);
+        evo_glyph(fb, text_x + pad_l, cy + (ch - glyph_w) / 2,
+                  EVO_GLYPH_CROSS);
 
-        evo_text(fb, text_x + 62,
+        evo_text(fb, text_x + text_x_off,
                  evo_text_y_centred(cy, ch, EVO_FACE_SUB),
                  m->hero_action,
                  selected ? th->bg_bottom : th->text_primary,

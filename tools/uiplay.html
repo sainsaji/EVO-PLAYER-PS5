@@ -1,0 +1,178 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>EVO Player — UI walkthrough</title>
+<style>
+  :root { --bg:#0b0d12; --fg:#e8eef7; --dim:#7d8798; --line:#252a35; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    display:flex; flex-direction:column; min-height:100vh; align-items:center;
+  }
+  header { width:100%; max-width:1180px; padding:18px 20px 10px; display:flex;
+           gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.02em; }
+  header .sub { color:var(--dim); font-size:13px; }
+  .stage { width:100%; max-width:1180px; padding:0 20px; }
+  .screen {
+    width:100%; aspect-ratio:16/9; background:#000; border:1px solid var(--line);
+    border-radius:10px; overflow:hidden; display:block;
+  }
+  .screen img { width:100%; height:100%; display:block; image-rendering:auto; }
+  footer { width:100%; max-width:1180px; padding:14px 20px 28px; color:var(--dim); }
+  .row { display:flex; gap:22px; flex-wrap:wrap; align-items:center; }
+  kbd {
+    background:#171b23; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:5px; padding:1px 7px; font:12px ui-monospace,monospace;
+    color:var(--fg);
+  }
+  .state { font:12px ui-monospace,monospace; color:var(--dim); }
+  .warn { color:#d8a657; }
+  a { color:#7cc7ff; }
+</style>
+
+<header>
+  <h1>EVO Player — UI walkthrough</h1>
+  <span class="sub">real renderer, real font atlas, real icons — navigation mirrors the console</span>
+</header>
+
+<div class="stage">
+  <div class="screen"><img id="frame" alt=""></div>
+</div>
+
+<footer>
+  <div class="row">
+    <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move</span>
+    <span><kbd>Enter</kbd> select</span>
+    <span><kbd>Esc</kbd> back</span>
+    <span><kbd>E</kbd> toggle empty state</span>
+    <span class="state" id="state"></span>
+  </div>
+  <p class="warn" id="miss" hidden></p>
+  <p style="color:var(--dim);margin:10px 0 0">
+    Pre-rendered frames, not a live build — no animation, no real metadata.
+    It shows layout and navigation, which is what cannot be checked without a
+    console. Regenerate with <code>./tools/uiplay.sh</code>.
+  </p>
+</footer>
+
+<script>
+/*
+ * The navigation model, kept deliberately parallel to the C:
+ *   evo_grid   - launch screen, per-row column memory, skips empty rows
+ *   evo_focus  - section lists, wrapping
+ *   evo_nav    - a stack, so Back returns where you came from
+ * If this and the C disagree, the C is right and this is the bug.
+ */
+const SECTIONS = ['home','browse','recent','favorites','settings','tools','about'];
+const COUNTS   = { browse:10, recent:5, favorites:2, settings:8, tools:4, about:5 };
+
+/* Launch rows: hero (1), recent shelf (7), library shelf (6). */
+const LAUNCH_ROWS = [1, 7, 6];
+
+/* Library tile -> section. The shelf omits HOME, matching library_section(). */
+const LIBRARY = ['browse','recent','favorites','settings','tools','about'];
+
+let st = {
+  screen: 'launch',
+  row: 0,                 // launch only
+  col: [0, 0, 0],         // launch: remembered column per row
+  sel: {},                // per-section list cursor
+  rail: false,
+  railSel: 1,
+  stack: [],
+  empty: false,
+};
+for (const k in COUNTS) st.sel[k] = 0;
+
+const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+const wrap  = (v, n) => n <= 0 ? 0 : ((v % n) + n) % n;
+
+function frameName() {
+  if (st.screen === 'launch') return `launch_r${st.row}_c${st.col[st.row]}`;
+  if (st.rail)                return `${st.screen}_rail${st.railSel}`;
+  if (st.empty && (st.screen === 'recent' || st.screen === 'favorites' ||
+                   st.screen === 'browse'))
+    return `${st.screen}_empty`;
+  return `${st.screen}_s${st.sel[st.screen]}`;
+}
+
+function render() {
+  const name = frameName();
+  const img  = document.getElementById('frame');
+  img.onerror = () => {
+    document.getElementById('miss').hidden = false;
+    document.getElementById('miss').textContent =
+      `missing frame: ${name}.png — re-run ./tools/uiplay.sh`;
+  };
+  img.onload = () => { document.getElementById('miss').hidden = true; };
+  img.src = name + '.png';
+  document.getElementById('state').textContent =
+    st.rail ? `${st.screen} · rail:${SECTIONS[st.railSel]}` : name;
+}
+
+function open(section) {
+  if (section === 'home') { st.screen = 'launch'; st.stack = []; return; }
+  if (st.screen !== 'launch') st.stack.push(st.screen);
+  else st.stack = ['launch'];
+  st.screen = section;
+  st.rail = false;
+}
+
+function back() {
+  if (st.rail) { st.rail = false; return; }        // close the overlay first
+  if (st.screen === 'launch') return;
+  const prev = st.stack.pop();
+  st.screen = (!prev || prev === 'launch') ? 'launch' : prev;
+}
+
+function key(e) {
+  const k = e.key;
+  let used = true;
+
+  if (k === 'e' || k === 'E') { st.empty = !st.empty; }
+
+  else if (st.screen === 'launch') {
+    if (k === 'ArrowDown' || k === 'ArrowUp') {
+      const d = k === 'ArrowDown' ? 1 : -1;
+      /* Skip rows with no items, exactly as evo_grid_move_v does. */
+      for (let i = 0; i < LAUNCH_ROWS.length; i++) {
+        st.row = wrap(st.row + d, LAUNCH_ROWS.length);
+        if (LAUNCH_ROWS[st.row] > 0) break;
+      }
+    } else if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      /* Shelves clamp rather than wrap - see evo_grid_move_h. */
+      const d = k === 'ArrowRight' ? 1 : -1;
+      st.col[st.row] = clamp(st.col[st.row] + d, 0, LAUNCH_ROWS[st.row] - 1);
+    } else if (k === 'Enter') {
+      if (st.row === 2) open(LIBRARY[st.col[2]]);
+      /* hero and recent tiles start playback, which has no frame here */
+    } else used = false;
+  }
+
+  else if (st.rail) {
+    if (k === 'ArrowDown')      st.railSel = wrap(st.railSel + 1, SECTIONS.length);
+    else if (k === 'ArrowUp')   st.railSel = wrap(st.railSel - 1, SECTIONS.length);
+    else if (k === 'ArrowRight' || k === 'Escape' || k === 'Backspace') st.rail = false;
+    else if (k === 'Enter')     { const s = SECTIONS[st.railSel];
+                                  st.rail = false;
+                                  if (s !== st.screen) open(s); }
+    else used = false;
+  }
+
+  else {
+    const n = COUNTS[st.screen] || 0;
+    if (k === 'ArrowDown')      st.sel[st.screen] = wrap(st.sel[st.screen] + 1, n);
+    else if (k === 'ArrowUp')   st.sel[st.screen] = wrap(st.sel[st.screen] - 1, n);
+    else if (k === 'ArrowLeft') { st.rail = true;
+                                  st.railSel = Math.max(0, SECTIONS.indexOf(st.screen)); }
+    else if (k === 'Escape' || k === 'Backspace') back();
+    else used = false;
+  }
+
+  if (used) { e.preventDefault(); render(); }
+}
+
+addEventListener('keydown', key);
+render();
+</script>
