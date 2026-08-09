@@ -5,6 +5,7 @@
 #include "pp_videoout.h"
 #include "pp_platform.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -102,11 +103,50 @@ static void retire_old_inflight(pp_videoout *vo)
 #endif
     st = u.s;
 
+    /* EVO diagnostic: tearing persisted after the flip-sync change, so report
+     * what the API is actually telling us rather than assuming. Prints once a
+     * second at 60fps. Remove once the cause is settled. */
+#if EVO_FLIP_DEBUG
+    {
+        static unsigned dbg_n;
+        if ((dbg_n++ % 60u) == 0u) {
+            printf("[evo-flip] rc_ok=%d count=%llu flipArg=%lld cur=%d "
+                   "pending=%d gcq=%d | submit[0]=%lld submit[1]=%lld "
+                   "state=%u/%u retire_to=%llu blocked=%llu\n",
+                   have_status,
+                   (unsigned long long)st.count,
+                   (long long)st.flipArg,
+                   st.currentBuffer, st.flipPendingNum, st.gcQueueNum,
+                   (long long)vo->submit_frame[0],
+                   (long long)vo->submit_frame[1],
+                   vo->state[0], vo->state[1],
+                   (unsigned long long)vo->stats.retire_timeouts,
+                   (unsigned long long)vo->stats.reuse_blocked);
+            fflush(stdout);
+        }
+    }
+#endif
+
     for (i = 0; i < vo->buffer_count; i++) {
         if (vo->state[i] != PP_BUF_IN_FLIGHT)
             continue;
 
-        if (have_status && st.flipArg >= vo->submit_frame[i]) {
+        /* Two conditions, and the second is the one that actually stops the
+         * tearing.
+         *
+         * "flip completed" does NOT mean "buffer is finished with" - it means
+         * the buffer has just gone ON SCREEN, and it stays there until the
+         * NEXT flip retires. Freeing on flipArg alone therefore released each
+         * buffer at precisely the moment scanout started reading it, and the
+         * renderer drew straight into the live image. Telemetry confirmed it:
+         * rc_ok=1 and retire_to=0, so this path was doing all the retiring,
+         * and it was retiring one flip too early.
+         *
+         * currentBuffer names the plane being scanned out right now, so a
+         * buffer is only reusable once it is no longer that one. */
+        if (have_status &&
+            st.flipArg >= vo->submit_frame[i] &&
+            st.currentBuffer != (int)i) {
             vo->state[i] = PP_BUF_FREE;
             continue;
         }

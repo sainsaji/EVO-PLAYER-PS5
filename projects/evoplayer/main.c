@@ -86,7 +86,14 @@ static int g_4k_suppress_ui = 0;   /* stage < H_FULL */
 static int g_pending_vo_reconfig = 0;
 static uint32_t g_pending_vo_w = 1920;
 static uint32_t g_pending_vo_h = 1080;
-static uint32_t g_pending_vo_buffers = 2;
+/* EVO: triple buffered.
+ *
+ * Correct flip retirement (see pp_videoout.c retire_old_inflight) means a
+ * buffer is only reusable once it is no longer the plane being scanned out.
+ * With two buffers that leaves the renderer stalled for a full frame after
+ * every flip - the tear becomes judder. A third buffer lets frame N+1 be
+ * prepared while N is on screen and N-1 drains. */
+static uint32_t g_pending_vo_buffers = 3;
 static pp_video_backend g_pending_backend = PP_BACKEND_1080_STANDARD;
 static uint32_t g_pending_out_w = 1920;
 static uint32_t g_pending_out_h = 1080;
@@ -223,7 +230,7 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers)
             }
         }
         if (w != 1920u || h != 1080u) {
-            if (pp_videoout_init(&g_pp_vo, 1920, 1080, PP_PIXEL_BGRA32_TILED, 2) == 0) {
+            if (pp_videoout_init(&g_pp_vo, 1920, 1080, PP_PIXEL_BGRA32_TILED, 3) == 0) {
                 g_vo_w = 1920;
                 g_vo_h = 1080;
                 g_pp_vo_ready = 1;
