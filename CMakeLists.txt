@@ -96,7 +96,9 @@ endfunction()
 # -----------------------------------------------------------------------------
 evo_payload(hello_world)
 evo_payload(system_info)
-evo_payload(videoout_test  LIBS SceVideoOut SceUserService)
+# SceSystemService is for sceSystemServiceHideSplashScreen(), without which
+# the splash stays composited over the test pattern.
+evo_payload(videoout_test  LIBS SceVideoOut SceUserService SceSystemService)
 evo_payload(audioout_test  LIBS SceAudioOut SceUserService m)
 evo_payload(gpu_test       LIBS SceGnmDriver)
 evo_payload(decoder_test   LIBS SceSysmodule)
