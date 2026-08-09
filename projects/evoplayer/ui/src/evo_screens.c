@@ -210,8 +210,11 @@ static void draw_hero(uint32_t *fb, const evo_launch_model *m, int selected)
                           selected ? th->accent : th->border, th->border_px,
                           with_alpha(th->shadow, 0), 0);
 
-        evo_glyph(fb, text_x + pad_l, cy + (ch - glyph_w) / 2,
-                  EVO_GLYPH_CROSS);
+        /* On the selected chip the fill IS the accent, so the glyph has to
+         * flip to the same dark colour as the label or it disappears. */
+        evo_glyph_tinted(fb, text_x + pad_l, cy + (ch - glyph_w) / 2,
+                         EVO_GLYPH_CROSS,
+                         selected ? th->bg_bottom : th->accent);
 
         evo_text(fb, text_x + text_x_off,
                  evo_text_y_centred(cy, ch, EVO_FACE_SUB),
@@ -656,4 +659,145 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
                          evo_focus_scroll_permille(f), f->visible, m->count);
 
     evo_chrome_end(fb, &page, hints, hint_count);
+}
+
+/* ==========================================================================
+ * Modal dialog
+ * ========================================================================== */
+
+void evo_screen_dialog(uint32_t *fb, const evo_dialog_model *m)
+{
+    const evo_theme *th = evo_theme_current();
+    const int w  = 1120;
+    /*
+     * Sized to its contents. At 520 the panel had 180px of nothing between
+     * the progress bar and the buttons, which reads as a layout that failed
+     * to fill rather than as breathing room.
+     */
+    const int h  = 430;
+    const int x  = (EVO_SCREEN_W - w) / 2;
+    const int y  = (EVO_SCREEN_H - h) / 2;
+    int       pad = 56;
+    int       art_w = 0;
+    int       ty, dy;
+    int       i, ax;
+
+    if (!m) return;
+
+    /*
+     * Scrim the whole screen rather than clearing it. A dialog over playback
+     * has the last decoded frame behind it, and blanking that makes the
+     * prompt feel like the video was thrown away rather than paused.
+     */
+    evo_ui_vgrad_over(fb, 0, 0, EVO_SCREEN_W, EVO_SCREEN_H,
+                      with_alpha(th->scrim, 205), with_alpha(th->scrim, 225));
+
+    evo_ui_round_rect(fb, x, y, w, h, th->radius + 4,
+                      with_alpha(th->surface, 255),
+                      with_alpha(th->surface_alt, 255),
+                      th->border_sel, th->border_px + 1,
+                      th->shadow, th->shadow_px + 8);
+
+    /* Artwork on the left, when there is any - it identifies the file faster
+     * than its name does. */
+    if (m->art.pixels && m->art.w > 0 && m->art.h > 0) {
+        art_w = 372;
+        evo_widget_preview(fb, x + pad, y + pad, art_w, art_w * 9 / 16,
+                           m->art.pixels, m->art.w, m->art.h, NULL, -1);
+        art_w += 40;
+    }
+
+    if (m->eyebrow && *m->eyebrow)
+        evo_text(fb, x + pad + art_w, y + pad, m->eyebrow,
+                 th->accent, EVO_FACE_SMALL);
+
+    evo_text_y_stacked(y + pad + 30, 118, EVO_FACE_TITLE, EVO_FACE_SUB, 14,
+                       &ty, &dy);
+
+    evo_text_fit(fb, x + pad + art_w, ty, w - pad * 2 - art_w,
+                 m->title ? m->title : "", th->text_primary, EVO_FACE_TITLE);
+
+    if (m->detail && *m->detail)
+        evo_text_fit(fb, x + pad + art_w, dy, w - pad * 2 - art_w,
+                     m->detail, th->text_secondary, EVO_FACE_SUB);
+
+    if (m->progress >= 0)
+        evo_widget_progress(fb, x + pad + art_w, y + pad + 168,
+                            w - pad * 2 - art_w, 6, m->progress);
+
+    /*
+     * Actions along the bottom, measured rather than on a fixed pitch - the
+     * same rule the footer hints follow, and for the same reason.
+     */
+    ax = x + pad;
+
+    for (i = 0; i < m->action_count && m->actions; i++) {
+        int lw = evo_text_w(m->actions[i].label, EVO_FACE_SUB);
+        int cw = EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP + lw + 40;
+        int cy = y + h - pad - 56;
+        int primary = (i == 0);
+
+        evo_ui_round_rect(fb, ax, cy, cw, 56, 28,
+                          primary ? th->accent : with_alpha(th->surface, 255),
+                          primary ? th->accent : with_alpha(th->surface_alt, 255),
+                          primary ? th->accent : th->border, th->border_px,
+                          with_alpha(th->shadow, 0), 0);
+
+        evo_glyph_tinted(fb, ax + 18, cy + (56 - EVO_FOOTER_GLYPH) / 2,
+                         m->actions[i].glyph,
+                         primary ? th->bg_bottom : th->accent);
+
+        evo_text(fb, ax + 18 + EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP,
+                 evo_text_y_centred(cy, 56, EVO_FACE_SUB),
+                 m->actions[i].label,
+                 primary ? th->bg_bottom : th->text_primary, EVO_FACE_SUB);
+
+        ax += cw + 20;
+    }
+}
+
+/* ==========================================================================
+ * Media info
+ * ========================================================================== */
+
+void evo_screen_info(uint32_t *fb, const evo_info_model *m)
+{
+    evo_page page;
+    int      col_w;
+    int      half;
+
+    if (!m) return;
+
+    memset(&page, 0, sizeof(page));
+    page.title    = m->title;
+    page.subtitle = m->subtitle;
+    page.section  = EVO_SECTION_NONE;
+    page.no_rail  = 1;   /* modal: reached from playback, not from the rail */
+
+    evo_chrome_begin(fb, &page);
+
+    /* Preview on the right, properties filling the rest in two columns. The
+     * browser's inspector is one narrow column because it has to share the
+     * page with a file list; here there is no list to share with. */
+    if (m->art.pixels && m->art.w > 0 && m->art.h > 0) {
+        evo_widget_preview(fb, EVO_INSPECT_X, EVO_CONTENT_Y,
+                           EVO_PREVIEW_W, EVO_PREVIEW_H,
+                           m->art.pixels, m->art.w, m->art.h,
+                           m->art_badge, EVO_IC_RESUME);
+    }
+
+    col_w = (EVO_INSPECT_X - EVO_INSPECT_GAP - EVO_BLEED_X) / 2 - 24;
+    half  = (m->prop_count + 1) / 2;
+
+    evo_widget_props(fb, EVO_BLEED_X, EVO_CONTENT_Y, col_w,
+                     m->props, half);
+
+    if (m->prop_count > half)
+        evo_widget_props(fb, EVO_BLEED_X + col_w + 48, EVO_CONTENT_Y, col_w,
+                         m->props + half, m->prop_count - half);
+
+    {
+        const evo_hint hints[1] = { { EVO_GLYPH_CIRCLE, "BACK" } };
+        evo_chrome_end(fb, &page, hints, 1);
+    }
 }

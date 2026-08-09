@@ -72,6 +72,7 @@
   <span><kbd>Enter</kbd> select</span>
   <span><kbd>Esc</kbd> back</span>
   <span><kbd>E</kbd> empty state</span>
+  <span><kbd>M</kbd> modals</span>
   <span><kbd>F</kbd> fullscreen</span>
   <span><kbd>H</kbd> hide chrome</span>
   <span class="warn" id="miss" hidden></span>
@@ -90,7 +91,13 @@ const SECTIONS = ['home','browse','recent','favorites','settings','tools','about
 /* `profile` is reachable but is not a rail section - it is a child of
  * settings, and evo_screen_section() keeps SETTINGS lit while you are in it. */
 const COUNTS   = { browse:10, recent:5, favorites:2, settings:8, tools:4,
-                   about:5, profile:4 };
+                   about:5, profile:4,
+                   /* Modals have no cursor - one frame each. */
+                   resume:1, finished:1, mediainfo:1 };
+
+/* Reachable from playback rather than from the rail, so they are listed
+ * separately and cycled with M rather than navigated into. */
+const MODALS = ['resume', 'finished', 'mediainfo'];
 
 /* Launch rows: hero (1), recent shelf (7), library shelf (6). */
 const LAUNCH_ROWS = [1, 7, 6];
@@ -172,6 +179,16 @@ function key(e) {
   let used = true;
 
   if (k === 'e' || k === 'E') st.empty = !st.empty;
+
+  /* M steps through the modal screens. There is no route to them from the
+     menus - the player opens them - so the walkthrough needs its own way in. */
+  else if (k === 'm' || k === 'M') {
+    const at = MODALS.indexOf(st.screen);
+    if (at < 0) { st.stack.push(st.screen); st.screen = MODALS[0]; }
+    else if (at + 1 < MODALS.length) st.screen = MODALS[at + 1];
+    else back();
+    st.rail = false;
+  }
 
   else if (k === 'f' || k === 'F') {
     if (document.fullscreenElement) document.exitFullscreen();

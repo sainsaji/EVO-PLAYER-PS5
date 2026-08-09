@@ -70,6 +70,12 @@ void evo_glyph(uint32_t *fb, int x, int y, int index)
     if (g_dv && g_dv->glyph) g_dv->glyph(fb, x, y, index);
 }
 
+void evo_glyph_tinted(uint32_t *fb, int x, int y, int index, uint32_t tint)
+{
+    if (g_dv && g_dv->glyph_tinted) g_dv->glyph_tinted(fb, x, y, index, tint);
+    else                            evo_glyph(fb, x, y, index);
+}
+
 /* ---- alignment --------------------------------------------------------- */
 
 void evo_text_right(uint32_t *fb, int right_x, int y, const char *s,

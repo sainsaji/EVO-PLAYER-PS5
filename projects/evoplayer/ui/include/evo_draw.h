@@ -83,6 +83,13 @@ typedef struct evo_draw_vtable {
      * theme accent is not what is wanted (a disabled rail item, say). */
     void (*icon_tinted)(uint32_t *fb, int x, int y, int index, uint32_t tint);
     void (*glyph)(uint32_t *fb, int x, int y, int index);
+    /*
+     * Controller glyphs are monochrome too, and the default tint is the theme
+     * accent - which vanishes on anything filled with the accent. The hero's
+     * RESUME chip is exactly that, and its cross was invisible whenever the
+     * hero was selected.
+     */
+    void (*glyph_tinted)(uint32_t *fb, int x, int y, int index, uint32_t tint);
 } evo_draw_vtable;
 
 /* Call once, before the first frame. */
@@ -96,6 +103,7 @@ int  evo_text_w(const char *s, evo_face face);
 void evo_icon(uint32_t *fb, int x, int y, int index);
 void evo_icon_tinted(uint32_t *fb, int x, int y, int index, uint32_t tint);
 void evo_glyph(uint32_t *fb, int x, int y, int index);
+void evo_glyph_tinted(uint32_t *fb, int x, int y, int index, uint32_t tint);
 
 /* ---- alignment --------------------------------------------------------- */
 

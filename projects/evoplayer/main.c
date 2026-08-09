@@ -12016,325 +12016,8 @@ static void rr_control(
 );
 /* RESUME_UI_FORWARD_DECLARATIONS_END */
 
-void draw_resume_prompt(uint32_t *fb) {
-    static char last_prompt_path[512] = {0};
-    static int prompt_frame = 0;
-
-    if (
-        strcmp(last_prompt_path, pending_resume_path) != 0
-    ) {
-        snprintf(
-            last_prompt_path,
-            sizeof(last_prompt_path),
-            "%s",
-            pending_resume_path
-        );
-
-        prompt_frame = 0;
-    }
-
-    if (prompt_frame < 14) {
-        prompt_frame++;
-    }
-
-    int remaining = 14 - prompt_frame;
-
-    if (remaining < 0) {
-        remaining = 0;
-    }
-
-    int panel_offset_y =
-        (remaining * remaining) / 3;
-
-    int panel_x = 330;
-    int panel_y = 170 + panel_offset_y;
-    int panel_w = 1260;
-    int panel_h = 690;
-
-    rr_bg(fb);
-
-    /*
-     * Darken the background behind the modal without replacing
-     * the approved Prospero artwork.
-     */
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 4, 12, 150)
-    );
-
-    /*
-     * Main glass prompt.
-     */
-    ui_round_asset(
-        fb,
-        panel_x,
-        panel_y,
-        panel_w,
-        panel_h,
-        34,
-        RR_BGRA(1, 10, 25, 238),
-        RR_BGRA(0, 205, 255, 215),
-        RR_BGRA(0, 145, 255, 70)
-    );
-
-    rr_fill(
-        fb,
-        panel_x + 54,
-        panel_y + 54,
-        6,
-        78,
-        RR_BGRA(0, 215, 255, 235)
-    );
-
-    rr_fill(
-        fb,
-        panel_x + 54,
-        panel_y + 126,
-        34,
-        2,
-        RR_BGRA(0, 215, 255, 205)
-    );
-
-    rr_text(
-        fb,
-        panel_x + 98,
-        panel_y + 48,
-        "RESUME PLAYBACK",
-        RR_BGRA(235, 246, 255, 245),
-        3
-    );
-
-    rr_text(
-        fb,
-        panel_x + 100,
-        panel_y + 108,
-        "CONTINUE FROM YOUR LAST POSITION",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    char title[160];
-    char metadata[160];
-
-    title[0] = 0;
-    metadata[0] = 0;
-
-    clean_media_title(
-        pending_resume_path,
-        title,
-        sizeof(title),
-        metadata,
-        sizeof(metadata)
-    );
-
-    if (strlen(title) > 49) {
-        title[46] = '.';
-        title[47] = '.';
-        title[48] = '.';
-        title[49] = 0;
-    }
-
-    if (strlen(metadata) > 67) {
-        metadata[64] = '.';
-        metadata[65] = '.';
-        metadata[66] = '.';
-        metadata[67] = 0;
-    }
-
-    rr_text(
-        fb,
-        panel_x + 100,
-        panel_y + 190,
-        title,
-        RR_BGRA(235, 246, 255, 245),
-        2
-    );
-
-    if (metadata[0]) {
-        rr_text(
-            fb,
-            panel_x + 102,
-            panel_y + 238,
-            metadata,
-            RR_BGRA(125, 198, 228, 220),
-            1
-        );
-    }
-
-    char resume_time[48];
-    char duration_time[48];
-    char position_line[128];
-
-    format_time_mmss(
-        resume_time,
-        sizeof(resume_time),
-        pending_resume_pos
-    );
-
-    double duration =
-        current_metadata.duration_sec > 1.0
-            ? current_metadata.duration_sec
-            : media_duration_sec;
-
-    if (duration > 1.0) {
-        format_time_mmss(
-            duration_time,
-            sizeof(duration_time),
-            duration
-        );
-
-        snprintf(
-            position_line,
-            sizeof(position_line),
-            "%s  /  %s",
-            resume_time,
-            duration_time
-        );
-    } else {
-        snprintf(
-            position_line,
-            sizeof(position_line),
-            "RESUME AT  %s",
-            resume_time
-        );
-    }
-
-    rr_text(
-        fb,
-        panel_x + 100,
-        panel_y + 322,
-        "LAST POSITION",
-        RR_BGRA(120, 190, 220, 210),
-        0
-    );
-
-    rr_text(
-        fb,
-        panel_x + 100,
-        panel_y + 360,
-        position_line,
-        RR_BGRA(232, 244, 255, 240),
-        2
-    );
-
-    /*
-     * Progress track.
-     */
-    int progress_x = panel_x + 100;
-    int progress_y = panel_y + 430;
-    int progress_w = panel_w - 200;
-    int progress_h = 10;
-
-    rr_fill(
-        fb,
-        progress_x,
-        progress_y,
-        progress_w,
-        progress_h,
-        RR_BGRA(40, 75, 105, 175)
-    );
-
-    int progress_fill = 0;
-
-    if (duration > 1.0) {
-        double ratio =
-            pending_resume_pos / duration;
-
-        if (ratio < 0.0) {
-            ratio = 0.0;
-        }
-
-        if (ratio > 1.0) {
-            ratio = 1.0;
-        }
-
-        progress_fill =
-            (int)(ratio * progress_w);
-    }
-
-    if (progress_fill > 0) {
-        rr_fill(
-            fb,
-            progress_x,
-            progress_y,
-            progress_fill,
-            progress_h,
-            RR_BGRA(0, 210, 255, 240)
-        );
-
-        rr_fill(
-            fb,
-            progress_x + progress_fill - 3,
-            progress_y - 4,
-            6,
-            progress_h + 8,
-            RR_BGRA(155, 245, 255, 235)
-        );
-    }
-
-    /*
-     * Divider above controls.
-     */
-    rr_fill(
-        fb,
-        panel_x + 78,
-        panel_y + 500,
-        panel_w - 156,
-        1,
-        RR_BGRA(0, 155, 225, 65)
-    );
-
-    /*
-     * X Resume.
-     */
-    rr_control(
-        fb,
-        panel_x + 105,
-        panel_y + 548,
-        0
-    );
-
-    rr_text(
-        fb,
-        panel_x + 162,
-        panel_y + 564,
-        "RESUME",
-        RR_BGRA(230, 242, 252, 235),
-        0
-    );
-
-    /*
-     * Circle Start Over.
-     */
-    rr_control(
-        fb,
-        panel_x + 430,
-        panel_y + 548,
-        4
-    );
-
-    rr_text(
-        fb,
-        panel_x + 487,
-        panel_y + 564,
-        "START OVER",
-        RR_BGRA(230, 242, 252, 235),
-        0
-    );
-
-    rr_text(
-        fb,
-        panel_x + panel_w - 300,
-        panel_y + 564,
-        "EVO PLAYER",
-        RR_BGRA(110, 185, 218, 190),
-        0
-    );
-}
+/* EVO: draw_resume_prompt is a model handed to the shared UI layer now.
+ * Search "modal screens". */
 
 
 
@@ -13490,885 +13173,8 @@ static void prospero_media_info_subtitle_source(
 /* PROSPERO_MEDIA_INFO_V2_HELPERS_END */
 
 
-void draw_media_info_screen(uint32_t *fb) {
-    static int intro_frame = 0;
-
-    if (intro_frame < 12) {
-        intro_frame++;
-    }
-
-    int remaining =
-        12 - intro_frame;
-
-    if (remaining < 0) {
-        remaining = 0;
-    }
-
-    int entrance_offset =
-        (remaining * remaining) / 3;
-
-    AVStream *video_stream = NULL;
-    AVStream *audio_stream = NULL;
-
-    AVCodecParameters *video_parameters = NULL;
-    AVCodecParameters *audio_parameters = NULL;
-
-    if (
-        play_fmt &&
-        video_stream_index >= 0 &&
-        video_stream_index <
-            (int)play_fmt->nb_streams
-    ) {
-        video_stream =
-            play_fmt->streams[
-                video_stream_index
-            ];
-
-        if (video_stream) {
-            video_parameters =
-                video_stream->codecpar;
-        }
-    }
-
-    if (
-        play_fmt &&
-        audio_stream_index >= 0 &&
-        audio_stream_index <
-            (int)play_fmt->nb_streams
-    ) {
-        audio_stream =
-            play_fmt->streams[
-                audio_stream_index
-            ];
-
-        if (audio_stream) {
-            audio_parameters =
-                audio_stream->codecpar;
-        }
-    }
-
-    int video_track_count =
-        prospero_media_info_count_streams(
-            play_fmt,
-            AVMEDIA_TYPE_VIDEO
-        );
-
-    int audio_track_count =
-        prospero_media_info_count_streams(
-            play_fmt,
-            AVMEDIA_TYPE_AUDIO
-        );
-
-    int embedded_subtitle_count =
-        prospero_media_info_count_streams(
-            play_fmt,
-            AVMEDIA_TYPE_SUBTITLE
-        );
-
-    int external_subtitle_count =
-        prospero_subtitle_count > 0
-            ? 1
-            : 0;
-
-    int subtitle_track_count =
-        embedded_subtitle_count +
-        external_subtitle_count;
-
-    char title[160];
-    char size_text[64];
-    char duration_text[32];
-    char container_text[64];
-
-    char video_codec_text[64];
-    char resolution_text[64];
-    char frame_rate_text[64];
-    char video_bitrate_text[64];
-    char video_heading[64];
-
-    char audio_codec_text[64];
-    char audio_track_text[64];
-    char audio_channels_text[64];
-    char audio_rate_text[64];
-    char audio_bitrate_text[64];
-    char audio_heading[64];
-
-    char subtitle_source_text[96];
-    char subtitle_count_text[64];
-    char summary[320];
-
-    snprintf(
-        title,
-        sizeof(title),
-        "%s",
-        current_metadata.title[0]
-            ? current_metadata.title
-            : "UNKNOWN MEDIA"
-    );
-
-    if (strlen(title) > 52) {
-        title[49] = '.';
-        title[50] = '.';
-        title[51] = '.';
-        title[52] = 0;
-    }
-
-    format_file_size(
-        size_text,
-        sizeof(size_text),
-        current_metadata.file_size_bytes
-    );
-
-    format_time_mmss(
-        duration_text,
-        sizeof(duration_text),
-        current_metadata.duration_sec
-    );
-
-    prospero_display_container(
-        container_text,
-        sizeof(container_text),
-        current_metadata.container,
-        current_metadata.path[0]
-            ? current_metadata.path
-            : current_media_path
-    );
-
-    const char *raw_video_codec =
-        (
-            video_parameters
-        )
-            ? avcodec_get_name(
-                video_parameters->codec_id
-            )
-            : current_metadata.video_codec;
-
-    prospero_display_codec(
-        video_codec_text,
-        sizeof(video_codec_text),
-        raw_video_codec,
-        0
-    );
-
-    const char *raw_audio_codec =
-        (
-            audio_parameters
-        )
-            ? avcodec_get_name(
-                audio_parameters->codec_id
-            )
-            : current_metadata.audio_codec;
-
-    prospero_display_codec(
-        audio_codec_text,
-        sizeof(audio_codec_text),
-        raw_audio_codec,
-        1
-    );
-
-    int display_width =
-        video_parameters
-            ? video_parameters->width
-            : current_metadata.width;
-
-    int display_height =
-        video_parameters
-            ? video_parameters->height
-            : current_metadata.height;
-
-    snprintf(
-        resolution_text,
-        sizeof(resolution_text),
-        "%d X %d",
-        display_width,
-        display_height
-    );
-
-    double active_fps =
-        video_fps;
-
-    if (
-        active_fps <= 0.0 &&
-        video_stream &&
-        video_stream->avg_frame_rate.num > 0 &&
-        video_stream->avg_frame_rate.den > 0
-    ) {
-        active_fps =
-            av_q2d(
-                video_stream->avg_frame_rate
-            );
-    }
-
-    if (active_fps > 0.0) {
-        snprintf(
-            frame_rate_text,
-            sizeof(frame_rate_text),
-            "%.3f FPS",
-            active_fps
-        );
-    } else {
-        snprintf(
-            frame_rate_text,
-            sizeof(frame_rate_text),
-            "UNKNOWN"
-        );
-    }
-
-    int64_t video_bitrate =
-        video_parameters
-            ? video_parameters->bit_rate
-            : 0;
-
-    if (
-        video_bitrate <= 0 &&
-        play_fmt
-    ) {
-        video_bitrate =
-            play_fmt->bit_rate;
-    }
-
-    prospero_media_info_bitrate(
-        video_bitrate_text,
-        sizeof(video_bitrate_text),
-        video_bitrate
-    );
-
-    int audio_ordinal = 0;
-
-    if (
-        play_fmt &&
-        audio_stream_index >= 0
-    ) {
-        int seen = 0;
-
-        for (
-            unsigned int index = 0;
-            index < play_fmt->nb_streams;
-            index++
-        ) {
-            AVStream *stream =
-                play_fmt->streams[index];
-
-            if (
-                !stream ||
-                !stream->codecpar ||
-                stream->codecpar->codec_type !=
-                    AVMEDIA_TYPE_AUDIO
-            ) {
-                continue;
-            }
-
-            seen++;
-
-            if (
-                (int)index ==
-                audio_stream_index
-            ) {
-                audio_ordinal = seen;
-                break;
-            }
-        }
-    }
-
-    snprintf(
-        audio_track_text,
-        sizeof(audio_track_text),
-        "%d / %d   %s",
-        audio_ordinal,
-        audio_track_count,
-        prospero_media_info_language(
-            audio_stream
-        )
-    );
-
-    int audio_channels =
-        audio_parameters
-            ? audio_parameters->
-                ch_layout.nb_channels
-            : 0;
-
-    snprintf(
-        audio_channels_text,
-        sizeof(audio_channels_text),
-        "%d CHANNEL%s",
-        audio_channels,
-        audio_channels == 1
-            ? ""
-            : "S"
-    );
-
-    int audio_rate =
-        audio_parameters
-            ? audio_parameters->sample_rate
-            : detected_audio_rate;
-
-    if (audio_rate > 0) {
-        snprintf(
-            audio_rate_text,
-            sizeof(audio_rate_text),
-            "%d HZ",
-            audio_rate
-        );
-    } else {
-        snprintf(
-            audio_rate_text,
-            sizeof(audio_rate_text),
-            "UNKNOWN"
-        );
-    }
-
-    prospero_media_info_bitrate(
-        audio_bitrate_text,
-        sizeof(audio_bitrate_text),
-        audio_parameters
-            ? audio_parameters->bit_rate
-            : 0
-    );
-
-    prospero_media_info_subtitle_source(
-        subtitle_source_text,
-        sizeof(subtitle_source_text)
-    );
-
-    snprintf(
-        subtitle_count_text,
-        sizeof(subtitle_count_text),
-        "%d TRACK%s",
-        subtitle_track_count,
-        subtitle_track_count == 1
-            ? ""
-            : "S"
-    );
-
-    snprintf(
-        video_heading,
-        sizeof(video_heading),
-        "VIDEO  /  %d STREAM%s",
-        video_track_count,
-        video_track_count == 1
-            ? ""
-            : "S"
-    );
-
-    snprintf(
-        audio_heading,
-        sizeof(audio_heading),
-        "AUDIO  /  %d TRACK%s",
-        audio_track_count,
-        audio_track_count == 1
-            ? ""
-            : "S"
-    );
-
-    snprintf(
-        summary,
-        sizeof(summary),
-        "%s  /  %s  /  %s  /  %s",
-        container_text[0]
-            ? container_text
-            : "MEDIA",
-        video_codec_text[0]
-            ? video_codec_text
-            : "UNKNOWN VIDEO",
-        audio_codec_text[0]
-            ? audio_codec_text
-            : "UNKNOWN AUDIO",
-        resolution_text
-    );
-
-    rr_bg(fb);
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        1920,
-        1080,
-        RR_BGRA(0, 6, 16, 42)
-    );
-
-    /*
-     * Header
-     */
-    rr_fill(
-        fb,
-        82,
-        72,
-        5,
-        76,
-        RR_BGRA(0, 215, 255, 225)
-    );
-
-    rr_fill(
-        fb,
-        82,
-        144,
-        31,
-        2,
-        RR_BGRA(0, 215, 255, 195)
-    );
-
-    rr_text(
-        fb,
-        122,
-        68,
-        "MEDIA INFORMATION",
-        RR_BGRA(232, 244, 255, 240),
-        3
-    );
-
-    rr_text(
-        fb,
-        124,
-        130,
-        "FILE STREAM AND PLAYBACK DETAILS",
-        RR_BGRA(0, 205, 250, 225),
-        1
-    );
-
-    /*
-     * Media identity card
-     */
-    int identity_x = 180;
-    int identity_y =
-        195 + entrance_offset;
-    int identity_w = 1560;
-    int identity_h = 135;
-
-    ui_round_asset(
-        fb,
-        identity_x,
-        identity_y,
-        identity_w,
-        identity_h,
-        28,
-        RR_BGRA(1, 9, 22, 220),
-        RR_BGRA(0, 190, 245, 165),
-        RR_BGRA(0, 135, 255, 44)
-    );
-
-    rr_browser_icon(
-        fb,
-        identity_x + 48,
-        identity_y + 31,
-        1
-    );
-
-    rr_text(
-        fb,
-        identity_x + 144,
-        identity_y + 24,
-        title,
-        RR_BGRA(235, 246, 255, 245),
-        2
-    );
-
-    rr_text(
-        fb,
-        identity_x + 146,
-        identity_y + 75,
-        summary,
-        RR_BGRA(0, 210, 255, 220),
-        1
-    );
-
-    char top_right[96];
-
-    snprintf(
-        top_right,
-        sizeof(top_right),
-        "%s  /  %s",
-        duration_text,
-        size_text
-    );
-
-    rr_text(
-        fb,
-        identity_x + identity_w - 390,
-        identity_y + 31,
-        top_right,
-        RR_BGRA(150, 205, 230, 215),
-        0
-    );
-
-    /*
-     * Video card
-     */
-    int card_y = 370;
-    int card_w = 750;
-    int card_h = 350;
-
-    int video_x =
-        180 - entrance_offset;
-
-    int audio_x =
-        990 + entrance_offset;
-
-    ui_round_asset(
-        fb,
-        video_x,
-        card_y,
-        card_w,
-        card_h,
-        28,
-        RR_BGRA(1, 9, 22, 210),
-        RR_BGRA(0, 175, 235, 130),
-        RR_BGRA(0, 125, 245, 38)
-    );
-
-    rr_browser_icon(
-        fb,
-        video_x + 46,
-        card_y + 34,
-        1
-    );
-
-    rr_text(
-        fb,
-        video_x + 136,
-        card_y + 38,
-        video_heading,
-        RR_BGRA(235, 246, 255, 240),
-        1
-    );
-
-    rr_text(
-        fb,
-        video_x + 48,
-        card_y + 112,
-        "CODEC",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        video_x + 270,
-        card_y + 110,
-        video_codec_text[0]
-            ? video_codec_text
-            : "UNKNOWN",
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        video_x + 48,
-        card_y + 166,
-        "RESOLUTION",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        video_x + 270,
-        card_y + 164,
-        resolution_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        video_x + 48,
-        card_y + 220,
-        "FRAME RATE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        video_x + 270,
-        card_y + 218,
-        frame_rate_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        video_x + 48,
-        card_y + 274,
-        "BITRATE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        video_x + 270,
-        card_y + 272,
-        video_bitrate_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    /*
-     * Audio card
-     */
-    ui_round_asset(
-        fb,
-        audio_x,
-        card_y,
-        card_w,
-        card_h,
-        28,
-        RR_BGRA(1, 9, 22, 210),
-        RR_BGRA(0, 175, 235, 130),
-        RR_BGRA(0, 125, 245, 38)
-    );
-
-    rr_browser_icon(
-        fb,
-        audio_x + 46,
-        card_y + 34,
-        2
-    );
-
-    rr_text(
-        fb,
-        audio_x + 136,
-        card_y + 38,
-        audio_heading,
-        RR_BGRA(235, 246, 255, 240),
-        1
-    );
-
-    rr_text(
-        fb,
-        audio_x + 48,
-        card_y + 112,
-        "ACTIVE TRACK",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        audio_x + 270,
-        card_y + 110,
-        audio_track_count > 0
-            ? audio_track_text
-            : "NONE",
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        audio_x + 48,
-        card_y + 166,
-        "CODEC",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        audio_x + 270,
-        card_y + 164,
-        audio_codec_text[0]
-            ? audio_codec_text
-            : "UNKNOWN",
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        audio_x + 48,
-        card_y + 220,
-        "OUTPUT",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    char audio_output_text[96];
-
-    snprintf(
-        audio_output_text,
-        sizeof(audio_output_text),
-        "%s  /  %s",
-        audio_channels_text,
-        audio_rate_text
-    );
-
-    rr_text(
-        fb,
-        audio_x + 270,
-        card_y + 218,
-        audio_output_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        audio_x + 48,
-        card_y + 274,
-        "BITRATE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        audio_x + 270,
-        card_y + 272,
-        audio_bitrate_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    /*
-     * Playback and subtitle summary card
-     */
-    int playback_x = 180;
-    int playback_y = 758;
-    int playback_w = 1560;
-    int playback_h = 132;
-
-    ui_round_asset(
-        fb,
-        playback_x,
-        playback_y,
-        playback_w,
-        playback_h,
-        24,
-        RR_BGRA(1, 9, 22, 205),
-        RR_BGRA(0, 165, 225, 110),
-        RR_BGRA(0, 115, 235, 32)
-    );
-
-    rr_text(
-        fb,
-        playback_x + 46,
-        playback_y + 24,
-        "PLAYBACK PROFILE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        playback_x + 46,
-        playback_y + 67,
-        profile_name(current_profile),
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        playback_x + 400,
-        playback_y + 24,
-        "CONTAINER",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        playback_x + 400,
-        playback_y + 67,
-        container_text[0]
-            ? container_text
-            : "UNKNOWN",
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        playback_x + 700,
-        playback_y + 24,
-        "SUBTITLE SOURCE",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        playback_x + 700,
-        playback_y + 67,
-        subtitle_source_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    rr_text(
-        fb,
-        playback_x + 1070,
-        playback_y + 24,
-        "SUBTITLE TRACKS",
-        RR_BGRA(115, 185, 215, 205),
-        0
-    );
-
-    rr_text(
-        fb,
-        playback_x + 1070,
-        playback_y + 67,
-        subtitle_count_text,
-        RR_BGRA(230, 242, 252, 235),
-        1
-    );
-
-    /*
-     * Footer
-     */
-    rr_fill(
-        fb,
-        0,
-        948,
-        1920,
-        1,
-        RR_BGRA(0, 150, 255, 48)
-    );
-
-    rr_fill(
-        fb,
-        0,
-        949,
-        1920,
-        79,
-        RR_BGRA(0, 7, 18, 138)
-    );
-
-    rr_control(
-        fb,
-        92,
-        982,
-        4
-    );
-
-    rr_text(
-        fb,
-        148,
-        998,
-        "BACK",
-        RR_BGRA(175, 205, 220, 205),
-        0
-    );
-
-    rr_icon(
-        fb,
-        1512,
-        965,
-        5
-    );
-
-    rr_text(
-        fb,
-        1585,
-        997,
-        "MEDIA DETAILS",
-        RR_BGRA(135, 195, 225, 205),
-        0
-    );
-}
+/* EVO: draw_media_info_screen is a model handed to the shared UI layer now.
+ * Search "modal screens". */
 
 
 /* PROSPERO_RELEASE_1_0 */
@@ -14814,6 +13620,21 @@ static void rr_icon(uint32_t *fb,int x,int y,int idx){
     case 10:rr_img_tint(fb,x,y,EVO_ICON_PALETTE_W,EVO_ICON_PALETTE_H,EVO_ICON_PALETTE,tint);break;
     case 11:rr_img_tint(fb,x,y,EVO_ICON_FOLDER_W,EVO_ICON_FOLDER_H,EVO_ICON_FOLDER,tint);break;
     case 12:rr_img_tint(fb,x,y,EVO_ICON_TRASH_W,EVO_ICON_TRASH_H,EVO_ICON_TRASH,tint);break;}}
+static void rr_control_tinted(uint32_t *fb, int x, int y, int idx,
+                              uint32_t tint)
+{
+    switch (idx) {
+    case 0: rr_img_tint(fb,x,y,EVO_CTRL_X_W,EVO_CTRL_X_H,EVO_CTRL_X,tint); break;
+    case 1: rr_img_tint(fb,x,y,EVO_CTRL_DPAD_W,EVO_CTRL_DPAD_H,EVO_CTRL_DPAD,tint); break;
+    case 2: rr_img_tint(fb,x,y,EVO_CTRL_LEFT_STICK_W,EVO_CTRL_LEFT_STICK_H,EVO_CTRL_LEFT_STICK,tint); break;
+    case 3: rr_img_tint(fb,x,y,EVO_CTRL_RIGHT_STICK_W,EVO_CTRL_RIGHT_STICK_H,EVO_CTRL_RIGHT_STICK,tint); break;
+    case 4: rr_img_tint(fb,x,y,EVO_CTRL_CIRCLE_W,EVO_CTRL_CIRCLE_H,EVO_CTRL_CIRCLE,tint); break;
+    case 5: rr_img_tint(fb,x,y,EVO_CTRL_TRIANGLE_W,EVO_CTRL_TRIANGLE_H,EVO_CTRL_TRIANGLE,tint); break;
+    case 6: rr_img_tint(fb,x,y,EVO_CTRL_SQUARE_W,EVO_CTRL_SQUARE_H,EVO_CTRL_SQUARE,tint); break;
+    default: break;
+    }
+}
+
 static void rr_control(
     uint32_t *fb,
     int x,
@@ -14965,7 +13786,8 @@ static const evo_draw_vtable EVO_DRAW_VTABLE = {
     rr_text_w,
     rr_icon,
     rr_icon_tinted,
-    rr_control
+    rr_control,
+    rr_control_tinted
 };
 
 /* ---------------------------------------------------------------------------
@@ -16130,6 +14952,146 @@ void draw_about_support_screen(uint32_t *fb)
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     hints, 2);
+}
+
+/* ===========================================================================
+ * EVO: modal screens.
+ *
+ * The resume prompt, the end-of-playback prompt and media info. All three
+ * drew their own panel, their own button row and their own scrim - about
+ * 25,000 characters between them - and all three are now models handed to
+ * evo_screen_dialog() or evo_screen_info().
+ *
+ * They are modal: reached from playback rather than from the rail, drawn over
+ * whatever is already in the framebuffer, and they show no navigation rail.
+ * ======================================================================== */
+
+static const uint32_t *evo_modal_art(int *w, int *h)
+{
+    /* Whatever thumbnail already exists for the current file. This never
+     * decodes anything: a prompt that stalls for half a second before it
+     * appears is worse than a prompt without a picture. */
+    if (prospero_browser_preview_valid &&
+        current_media_path[0] &&
+        strcmp(prospero_browser_preview_path, current_media_path) == 0) {
+        *w = PROSPERO_BROWSER_PREVIEW_W;
+        *h = PROSPERO_BROWSER_PREVIEW_H;
+        return prospero_browser_preview_pixels;
+    }
+
+    *w = *h = 0;
+    return NULL;
+}
+
+void draw_resume_prompt(uint32_t *fb)
+{
+    static const evo_dialog_action actions[2] = {
+        { EVO_GLYPH_CROSS,  "RESUME"     },
+        { EVO_GLYPH_CIRCLE, "START OVER" }
+    };
+
+    static char title[192];
+    static char detail[128];
+    char        at[32], total[32];
+    evo_dialog_model m;
+    int aw, ah;
+
+    clean_media_title(pending_resume_path, title, sizeof(title), NULL, 0);
+
+    evo_fmt_duration(at, sizeof(at), pending_resume_pos);
+    evo_fmt_duration(total, sizeof(total), media_duration_sec);
+
+    if (total[0])
+        snprintf(detail, sizeof(detail), "STOPPED AT %s OF %s", at, total);
+    else
+        snprintf(detail, sizeof(detail), "STOPPED AT %s", at);
+
+    memset(&m, 0, sizeof(m));
+    m.eyebrow      = "RESUME PLAYBACK";
+    m.title        = title[0] ? title : pending_resume_path;
+    m.detail       = detail;
+    m.progress     = evo_progress_permille(pending_resume_pos,
+                                           media_duration_sec);
+    m.actions      = actions;
+    m.action_count = 2;
+    m.art.pixels   = evo_modal_art(&aw, &ah);
+    m.art.w        = aw;
+    m.art.h        = ah;
+
+    evo_screen_dialog(fb, &m);
+}
+
+static void draw_playback_finished_screen(uint32_t *fb)
+{
+    static const evo_dialog_action actions[3] = {
+        { EVO_GLYPH_CROSS,    "REPLAY" },
+        { EVO_GLYPH_TRIANGLE, "NEXT"   },
+        { EVO_GLYPH_CIRCLE,   "BACK"   }
+    };
+
+    static char title[192];
+    evo_dialog_model m;
+    int aw, ah;
+
+    clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
+
+    memset(&m, 0, sizeof(m));
+    m.eyebrow      = "FINISHED";
+    m.title        = title[0] ? title : current_media_path;
+    m.detail       = "PLAYBACK REACHED THE END OF THE FILE";
+    m.progress     = 1000;
+    m.actions      = actions;
+    m.action_count = 3;
+    m.art.pixels   = evo_modal_art(&aw, &ah);
+    m.art.w        = aw;
+    m.art.h        = ah;
+
+    evo_screen_dialog(fb, &m);
+}
+
+void draw_media_info_screen(uint32_t *fb)
+{
+    static char      size_s[48], dur_s[32], res_s[32], out_s[40];
+    static evo_prop  props[8];
+    evo_info_model   m;
+    int aw, ah, n = 0;
+
+    const MediaMetadata *md = &current_metadata;
+
+    format_file_size(size_s, sizeof(size_s), md->file_size_bytes);
+    evo_fmt_duration(dur_s, sizeof(dur_s), md->duration_sec);
+
+    if (md->has_video && md->width > 0 && md->height > 0)
+        snprintf(res_s, sizeof(res_s), "%d x %d", md->width, md->height);
+    else
+        res_s[0] = 0;
+
+    snprintf(out_s, sizeof(out_s), "%d CH  -  %d HZ",
+             evo_audio_channels, detected_audio_rate);
+
+    props[n].key = "CONTAINER";  props[n++].value = md->container;
+    props[n].key = "SIZE";       props[n++].value = size_s;
+    props[n].key = "LENGTH";     props[n++].value = dur_s;
+    props[n].key = "RESOLUTION"; props[n++].value = res_s;
+    props[n].key = "VIDEO";      props[n++].value = md->has_video
+                                                    ? md->video_codec : NULL;
+    props[n].key = "AUDIO";      props[n++].value = md->has_audio
+                                                    ? md->audio_codec : NULL;
+    props[n].key = "OUTPUT";     props[n++].value = out_s;
+    props[n].key = "SUBTITLES";  props[n++].value = md->has_subtitles
+                                                    ? "YES" : "NO";
+
+    memset(&m, 0, sizeof(m));
+    m.title      = "MEDIA INFO";
+    m.subtitle   = md->title[0] ? md->title : current_media_path;
+    m.props      = props;
+    m.prop_count = n;
+    m.art_badge  = dur_s[0] ? dur_s : NULL;
+    m.art.pixels = evo_modal_art(&aw, &ah);
+    m.art.w      = aw;
+    m.art.h      = ah;
+
+    evo_screen_info(fb, &m);
 }
 
 /* ---- side navigation ------------------------------------------------------
@@ -17350,219 +16312,8 @@ static void prospero_playback_finished_back(
 }
 
 
-static void draw_playback_finished_screen(
-    uint32_t *fb
-) {
-    /*
-     * Preserve the final decoded frame behind the completion card.
-     */
-    for (
-        int index = 0;
-        index < WIDTH * HEIGHT;
-        index++
-    ) {
-        fb[index] = 0xFF000000;
-    }
-
-    draw_video_frame_to_fb(
-        fb,
-        0,
-        0,
-        WIDTH,
-        HEIGHT
-    );
-
-    rr_fill(
-        fb,
-        0,
-        0,
-        WIDTH,
-        HEIGHT,
-        RR_BGRA(
-            0,
-            4,
-            12,
-            185
-        )
-    );
-
-    int card_x = 430;
-    int card_y = 280;
-    int card_w = 1060;
-    int card_h = 500;
-
-    ui_round_asset(
-        fb,
-        card_x,
-        card_y,
-        card_w,
-        card_h,
-        34,
-        RR_BGRA(
-            1,
-            9,
-            22,
-            238
-        ),
-        RR_BGRA(
-            0,
-            195,
-            245,
-            180
-        ),
-        RR_BGRA(
-            0,
-            135,
-            255,
-            54
-        )
-    );
-
-    rr_text(
-        fb,
-        card_x + 92,
-        card_y + 65,
-        "PLAYBACK COMPLETE",
-        RR_BGRA(
-            235,
-            247,
-            255,
-            248
-        ),
-        3
-    );
-
-    char title[160];
-    char metadata[160];
-
-    title[0] = 0;
-    metadata[0] = 0;
-
-    clean_media_title(
-        current_media_path,
-        title,
-        sizeof(title),
-        metadata,
-        sizeof(metadata)
-    );
-
-    if (strlen(title) > 48) {
-        title[45] = '.';
-        title[46] = '.';
-        title[47] = '.';
-        title[48] = 0;
-    }
-
-    rr_text(
-        fb,
-        card_x + 94,
-        card_y + 145,
-        title[0]
-            ? title
-            : "CURRENT VIDEO",
-        RR_BGRA(
-            0,
-            215,
-            255,
-            235
-        ),
-        2
-    );
-
-    rr_fill(
-        fb,
-        card_x + 92,
-        card_y + 220,
-        card_w - 184,
-        1,
-        RR_BGRA(
-            0,
-            165,
-            225,
-            90
-        )
-    );
-
-    int controls_y =
-        card_y + 300;
-
-    rr_control(
-        fb,
-        card_x + 110,
-        controls_y,
-        0
-    );
-
-    rr_text(
-        fb,
-        card_x + 170,
-        controls_y + 16,
-        "REPLAY",
-        RR_BGRA(
-            220,
-            240,
-            250,
-            235
-        ),
-        1
-    );
-
-    rr_control(
-        fb,
-        card_x + 405,
-        controls_y,
-        5
-    );
-
-    rr_text(
-        fb,
-        card_x + 465,
-        controls_y + 16,
-        "NEXT VIDEO",
-        RR_BGRA(
-            220,
-            240,
-            250,
-            235
-        ),
-        1
-    );
-
-    rr_control(
-        fb,
-        card_x + 770,
-        controls_y,
-        4
-    );
-
-    rr_text(
-        fb,
-        card_x + 830,
-        controls_y + 16,
-        "BACK",
-        RR_BGRA(
-            220,
-            240,
-            250,
-            235
-        ),
-        1
-    );
-
-    rr_text(
-        fb,
-        card_x + 94,
-        card_y + 425,
-        "CHOOSE WHAT TO DO NEXT",
-        RR_BGRA(
-            125,
-            195,
-            225,
-            210
-        ),
-        0
-    );
-}
+/* EVO: draw_playback_finished_screen is a model handed to the shared UI layer now.
+ * Search "modal screens". */
 
 /* PROSPERO_PLAYBACK_COMPLETE_MODULE_END */
 

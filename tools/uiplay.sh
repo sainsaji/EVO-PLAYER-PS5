@@ -85,6 +85,11 @@ for scr in browse recent favorites settings profile tools about; do
     done
 done
 
+# -- modal screens: no cursor, one frame each ---------------------------------
+render "resume_s0"    resume
+render "finished_s0"  finished
+render "mediainfo_s0" mediainfo
+
 # -- empty states -------------------------------------------------------------
 render "recent_empty"    recent    --empty
 render "favorites_empty" favorites --empty

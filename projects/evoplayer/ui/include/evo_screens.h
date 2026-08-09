@@ -19,6 +19,7 @@
 #include "evo_chrome.h"
 #include "evo_focus.h"
 #include "evo_nav.h"
+#include "evo_widgets.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -191,6 +192,55 @@ typedef struct evo_list_model {
 } evo_list_model;
 
 int  evo_screen_list_capacity(void);
+
+/* ---- modal dialog ------------------------------------------------------- */
+
+/*
+ * The resume prompt and the end-of-playback prompt. Both are "here is what
+ * you were watching, pick one of these" and both used to draw their own
+ * panel, their own button row and their own scrim.
+ *
+ * A dialog is drawn OVER whatever is already in the framebuffer - the player
+ * leaves the last video frame there - so it scrims rather than clearing.
+ */
+typedef struct evo_dialog_action {
+    int         glyph;    /* EVO_GLYPH_* */
+    const char *label;
+} evo_dialog_action;
+
+typedef struct evo_dialog_model {
+    const char *eyebrow;   /* "RESUME PLAYBACK" */
+    const char *title;     /* what it is about, usually the file */
+    const char *detail;    /* "STOPPED AT 12M 04S OF 21M 07S" */
+    int         progress;  /* 0..1000, or -1 */
+    evo_art     art;
+
+    const evo_dialog_action *actions;
+    int                      action_count;
+} evo_dialog_model;
+
+void evo_screen_dialog(uint32_t *fb, const evo_dialog_model *m);
+
+/* ---- media info --------------------------------------------------------- */
+
+/*
+ * The property panel for whatever is playing. Same shape as the browser's
+ * inspector, given the whole page instead of a 560px column - so it is two
+ * columns of properties beside a preview rather than a third implementation
+ * of a key/value table.
+ */
+typedef struct evo_info_model {
+    const char *title;
+    const char *subtitle;
+
+    const evo_prop *props;
+    int             prop_count;
+
+    evo_art     art;
+    const char *art_badge;
+} evo_info_model;
+
+void evo_screen_info(uint32_t *fb, const evo_info_model *m);
 
 void evo_screen_list(uint32_t *fb, const evo_list_model *m,
                      const evo_focus *f, int rail_focused, int rail_index,

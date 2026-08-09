@@ -170,9 +170,8 @@ static void rr_icon(uint32_t *fb, int x, int y, int idx)
     rr_icon_tinted(fb, x, y, idx, evo_theme_current()->accent);
 }
 
-static void rr_control(uint32_t *fb, int x, int y, int idx)
+static void rr_control_tinted(uint32_t *fb, int x, int y, int idx, uint32_t t)
 {
-    const uint32_t t = evo_theme_current()->accent;
     switch (idx) {
     case 0: img_tint(fb,x,y,EVO_CTRL_X_W,EVO_CTRL_X_H,EVO_CTRL_X,t); break;
     case 1: img_tint(fb,x,y,EVO_CTRL_DPAD_W,EVO_CTRL_DPAD_H,EVO_CTRL_DPAD,t); break;
@@ -185,8 +184,13 @@ static void rr_control(uint32_t *fb, int x, int y, int idx)
     }
 }
 
+static void rr_control(uint32_t *fb, int x, int y, int idx)
+{
+    rr_control_tinted(fb, x, y, idx, evo_theme_current()->accent);
+}
+
 static const evo_draw_vtable VTABLE = {
-    rr_text, rr_text_w, rr_icon, rr_icon_tinted, rr_control
+    rr_text, rr_text_w, rr_icon, rr_icon_tinted, rr_control, rr_control_tinted
 };
 
 /* ===========================================================================
@@ -504,17 +508,99 @@ static void render_list(const char *which, int sel, int rail_focused,
 
 /* ------------------------------------------------------------------------ */
 
+/*
+ * The modal screens draw OVER whatever is in the framebuffer - during
+ * playback that is the last decoded video frame. Filling the buffer with the
+ * stand-in artwork first is what makes their scrim judgeable; against an
+ * empty buffer a dialog looks like it is on a plain background and you cannot
+ * tell whether the dimming works.
+ */
+static void fill_fake_video(void)
+{
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            int sx = (x * ART_W) / W;
+            int sy = (y * ART_H) / H;
+            g_fb[y * W + x] = g_art[sy * ART_W + sx];
+        }
+}
+
+static void render_resume(void)
+{
+    static const evo_dialog_action a[2] = {
+        { EVO_GLYPH_CROSS, "RESUME" }, { EVO_GLYPH_CIRCLE, "START OVER" }
+    };
+    evo_dialog_model m;
+
+    fill_fake_video();
+    memset(&m, 0, sizeof(m));
+    m.eyebrow = "RESUME PLAYBACK";
+    m.title   = "leftbehind-bts";
+    m.detail  = "STOPPED AT 12M 04S OF 21M 07S";
+    m.progress = 572;
+    m.actions = a; m.action_count = 2;
+    m.art.pixels = g_art; m.art.w = ART_W; m.art.h = ART_H;
+    evo_screen_dialog(g_fb, &m);
+}
+
+static void render_finished(void)
+{
+    static const evo_dialog_action a[3] = {
+        { EVO_GLYPH_CROSS, "REPLAY" }, { EVO_GLYPH_TRIANGLE, "NEXT" },
+        { EVO_GLYPH_CIRCLE, "BACK" }
+    };
+    evo_dialog_model m;
+
+    fill_fake_video();
+    memset(&m, 0, sizeof(m));
+    m.eyebrow = "FINISHED";
+    m.title   = "leftbehind-bts";
+    m.detail  = "PLAYBACK REACHED THE END OF THE FILE";
+    m.progress = 1000;
+    m.actions = a; m.action_count = 3;
+    m.art.pixels = g_art; m.art.w = ART_W; m.art.h = ART_H;
+    evo_screen_dialog(g_fb, &m);
+}
+
+static void render_mediainfo(void)
+{
+    static const evo_prop props[8] = {
+        { "CONTAINER",  "mov mp4 m4a 3gp 3g2 mj2" },
+        { "SIZE",       "928.51 MB"               },
+        { "LENGTH",     "21M 07S"                 },
+        { "RESOLUTION", "3840 x 2160"             },
+        { "VIDEO",      "hevc"                    },
+        { "AUDIO",      "eac3"                    },
+        { "OUTPUT",     "8 CH  -  48000 HZ"       },
+        { "SUBTITLES",  "YES"                     }
+    };
+    evo_info_model m;
+
+    memset(&m, 0, sizeof(m));
+    m.title      = "MEDIA INFO";
+    m.subtitle   = "leftbehind-bts";
+    m.props      = props;
+    m.prop_count = 8;
+    m.art_badge  = "21M 07S";
+    m.art.pixels = g_art; m.art.w = ART_W; m.art.h = ART_H;
+    evo_screen_info(g_fb, &m);
+}
+
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
-                                 "settings","profile","tools","about", NULL };
+                                 "settings","profile","tools","about",
+                                 "resume","finished","mediainfo", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
                        int empty, int row)
 {
     memset(g_fb, 0, sizeof(g_fb));
 
-    if      (!strcmp(screen, "launch")) render_launch(row, sel);
-    else if (!strcmp(screen, "browse")) render_browse(sel, rail, rail_sel, empty);
-    else                                render_list(screen, sel, rail, rail_sel, empty);
+    if      (!strcmp(screen, "launch"))    render_launch(row, sel);
+    else if (!strcmp(screen, "browse"))    render_browse(sel, rail, rail_sel, empty);
+    else if (!strcmp(screen, "resume"))    render_resume();
+    else if (!strcmp(screen, "finished"))  render_finished();
+    else if (!strcmp(screen, "mediainfo")) render_mediainfo();
+    else                                   render_list(screen, sel, rail, rail_sel, empty);
 }
 
 int main(int argc, char **argv)
