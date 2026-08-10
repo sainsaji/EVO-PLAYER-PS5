@@ -185,6 +185,7 @@ Every screenshot on this page is one of those renders.
 | [docs/ui-handoff.md](docs/ui-handoff.md) | the UI layer, and working on it |
 | [docs/converter-perf.md](docs/converter-perf.md) | the video path, measured |
 | [docs/hardware-decode.md](docs/hardware-decode.md) | the plan for getting decode off the CPU |
+| [docs/hardware-decode-review.md](docs/hardware-decode-review.md) | a critical review of that plan |
 | [docs/theming.md](docs/theming.md) | writing a `.theme` file |
 | [docs/tooling.md](docs/tooling.md) | the scripts, and what each is for |
 | [CHANGELOG.md](CHANGELOG.md) | what changed, per release |

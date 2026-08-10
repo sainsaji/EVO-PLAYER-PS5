@@ -10,6 +10,15 @@ rather than repeats.
 
 ---
 
+> **Read [hardware-decode-review.md](hardware-decode-review.md) alongside this.**
+> A reverse-engineering review of this plan argues its ordering is wrong: it
+> spends a console deploy per guess when the modules are already mapped and
+> decrypted in the payload's own address space. One deploy that dumps them
+> turns most of the remaining work into offline static analysis. Ten of its
+> top fifteen investigations need no console at all.
+
+---
+
 ## Why this is the one that matters
 
 Everything in EVO Player runs on the CPU. There is no hardware video decode,
