@@ -139,8 +139,13 @@ covering every one of them with video.
 - **Resume** is offered when you reopen a file you did not finish.
 - **Screenshots** go to the USB stick. The websrv `/fs` endpoint is read-only,
   so delete them from the console's own web terminal or by pulling the drive.
-- **4K** plays natively for 8-bit SDR up to 30fps. HDR and 10-bit are not
-  supported yet.
+- **4K** takes its fastest path on 8-bit SDR up to 30fps. Larger or 10-bit 4K
+  still plays, on a slower path.
+- **10-bit files play**, converted down to 8-bit — the console's display plane
+  here is 8-bit, so the extra precision cannot be carried through. Fine on most
+  material; a smooth gradient like a sky or a fade can show banding.
+- **HDR is not supported.** PQ and HLG content plays but is shown as SDR
+  without tone mapping, so it will look washed out or dark.
 - Media stays on your stick. Nothing is copied to the console, and nothing
   leaves your network.
 
