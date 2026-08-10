@@ -4,6 +4,10 @@ Research area for hardware-accelerated decoding. **Nothing here is implemented**
 — this documents what was found and what to try, so experiments start from
 facts rather than assumptions.
 
+> **Working on this?** Read [hardware-decode.md](hardware-decode.md) first —
+> it carries the plan, the ordered experiments and the console-safety rules.
+> This document is the raw findings and the results log that plan draws on.
+
 ## The finding that shapes everything
 
 The SDK ships **no stubs** for any native media module. `sce_stubs/` has 32

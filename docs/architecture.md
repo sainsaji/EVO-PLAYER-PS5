@@ -161,6 +161,7 @@ EVO Player/
 | build, deploy, capture, read logs | [tooling.md](tooling.md) |
 | work on the UI | [ui-handoff.md](ui-handoff.md), then [theming.md](theming.md) |
 | work on playback performance | [converter-perf.md](converter-perf.md), then [gpu-notes.md](gpu-notes.md) |
+| get decode off the CPU | [hardware-decode.md](hardware-decode.md) |
 | know what is actually proven | [validation.md](validation.md) |
 
 Source lives on Windows via a bind mount; heavy build trees and ccache live on
