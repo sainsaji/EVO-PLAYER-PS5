@@ -105,15 +105,27 @@ def eval_shape(sh, px, py):
 def render(shapes, size=None):
     """Rasterise a shape list to a coverage grid (packed to ABGR later)."""
     size = SIZE if size is None else size
+    return render_box(shapes, size, size, peak=ALPHA)
+
+
+def render_box(shapes, w, h, peak=255):
+    """
+    Rasterise into a non-square cell.
+
+    The icons are all square; font glyphs are not - a cell is as tall as the
+    line box and only as wide as the glyph needs. Same rasteriser, and `peak`
+    exists because glyph coverage runs to full 255 while icons stop at ALPHA
+    to match the card stroke they sit next to.
+    """
     px_out = []
-    for y in range(size):
+    for y in range(h):
         row = []
-        for x in range(size):
+        for x in range(w):
             fx, fy = x + 0.5, y + 0.5
             d = min(eval_shape(s, fx, fy) for s in shapes)
             cov = 0.5 - d               # 1px analytic edge
             cov = max(0.0, min(1.0, cov))
-            row.append(int(cov * ALPHA + 0.5))
+            row.append(int(cov * peak + 0.5))
         px_out.append(row)
     return px_out
 
@@ -460,6 +472,369 @@ CTRL_TABLE = [
 ]
 
 
+# ===========================================================================
+# Supplementary font glyphs - the punctuation the UI font never had.
+# ===========================================================================
+#
+# THE PROBLEM
+#   The UI font is RR_FONT in assets/renderer_reset_assets.h: a 4096x260 alpha
+#   atlas whose alphabet is
+#
+#       ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+
+#
+#   No comma, no apostrophe, no parenthesis, no question mark. rr_text draws an
+#   unknown character as a 12px gap, which is survivable for a filename and
+#   makes ordinary prose unreadable - and a text reader is nothing but prose.
+#   That header is a pre-generated asset with no generator in the tree, so it
+#   cannot be rebuilt; the missing glyphs are generated here instead and looked
+#   up as a fallback when RR_CHARS misses.
+#
+# THE ALIGNMENT PROBLEM, AND WHY THESE NUMBERS ARE MEASURED
+#   Punctuation that does not share the letters' baseline reads as broken. The
+#   atlas carries no baseline, cap height or stroke weight, so tools/measure_font.py
+#   walks the ink of known glyphs - H, x, p, period, colon, hyphen - and derives
+#   them per face. FACE_METRICS below is that script's output. Re-run it rather
+#   than trusting these if the atlas is ever replaced.
+#
+#   Glyphs are then defined once, in cap-height units with the baseline at y=0
+#   and +y upward, and instantiated per face from its own measured baseline and
+#   cap height. That is what keeps a comma sitting on the same line as a letter
+#   at all four sizes.
+
+# From tools/measure_font.py. cell_h/baseline/cap/xh are pixels in the cell;
+# stroke is the measured hyphen bar thickness, which is the font's thin-stroke
+# weight; dot is the period's ink box.
+FACE_METRICS = [
+    # name,    cell_h, baseline, cap, xh, stroke, dot_w, dot_h, pad
+    ("SMALL",  25, 17, 11,  8, 2.0, 2, 2, 5),
+    ("SUB",    29, 20, 13, 10, 2.0, 3, 3, 5),
+    ("MENU",   46, 34, 24, 18, 3.0, 3, 4, 7),
+    ("TITLE",  57, 43, 31, 23, 5.0, 4, 6, 8),
+]
+
+# Order is the C-side `face` parameter: 0 SMALL, 1 SUB, 2 MENU, 3 TITLE.
+
+
+def arc(cx, cy, r, a0, a1, steps=14):
+    """
+    A circular arc as a chain of short segments.
+    Angles in degrees, counter-clockwise, +y up (glyph space).
+
+    The SDF set has no arc primitive and the icons never needed one - every
+    curve there is a full circle. Parentheses, question marks and ampersands
+    are all arcs, so this builds one out of the segment primitive.
+    """
+    pts = []
+    for i in range(steps + 1):
+        t = math.radians(a0 + (a1 - a0) * i / steps)
+        pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
+    return [("segchain", pts)]
+
+
+def seg(x1, y1, x2, y2, w=1.0):
+    """A stroked segment. `w` is a multiple of the face's stroke weight."""
+    return [("seg", (x1, y1, x2, y2), w)]
+
+
+def dot(cx, cy, r=1.0):
+    """A filled dot. `r` is a multiple of the face's period radius."""
+    return [("dot", (cx, cy), r)]
+
+
+# ---------------------------------------------------------------------------
+# The glyphs. Coordinates are cap-height units: y=0 baseline, y=1 cap top.
+# Each entry is (character, nominal width, shape builder).
+#
+# The middle column is advisory only - build_punct_face measures the rasterised
+# ink and derives the real advance from it, because a declared advance and a
+# drawn shape drift apart the moment either is adjusted.
+#
+# Descenders go to about -0.20, which is what measure_font.py reports for 'p'
+# (9px against a 31px cap at TITLE).
+# ---------------------------------------------------------------------------
+
+def g_comma():
+    return dot(0.13, 0.09) + seg(0.13, 0.06, 0.05, -0.19, 0.85)
+
+
+def g_apostrophe():
+    return seg(0.12, 1.00, 0.09, 0.70, 0.95)
+
+
+def g_quote():
+    return seg(0.12, 1.00, 0.09, 0.70, 0.95) + seg(0.34, 1.00, 0.31, 0.70, 0.95)
+
+
+def g_bang():
+    return seg(0.13, 1.00, 0.13, 0.27, 0.95) + dot(0.13, 0.09)
+
+
+def g_question():
+    # The bowl has to run far enough round that the stem meets it. Ending the
+    # arc at the 3 o'clock position leaves a visible gap to a centred stem.
+    return (arc(0.36, 0.76, 0.25, 195, -50, 16)
+            + seg(0.52, 0.57, 0.36, 0.30)
+            + dot(0.36, 0.09))
+
+
+def g_lparen():
+    return arc(0.46, 0.40, 0.62, 118, 242, 20)
+
+
+def g_rparen():
+    return arc(0.02, 0.40, 0.62, 62, -62, 20)
+
+
+def g_semicolon():
+    return dot(0.13, 0.47) + dot(0.13, 0.09) + seg(0.13, 0.06, 0.05, -0.19, 0.85)
+
+
+def g_lbracket():
+    return (seg(0.30, 1.02, 0.11, 1.02)
+            + seg(0.11, 1.02, 0.11, -0.20)
+            + seg(0.11, -0.20, 0.30, -0.20))
+
+
+def g_rbracket():
+    return (seg(0.06, 1.02, 0.25, 1.02)
+            + seg(0.25, 1.02, 0.25, -0.20)
+            + seg(0.25, -0.20, 0.06, -0.20))
+
+
+def g_lbrace():
+    return (arc(0.42, 0.83, 0.20, 180, 90, 8)
+            + seg(0.22, 0.83, 0.22, 0.52)
+            + arc(0.06, 0.52, 0.16, 0, 90, 8)
+            + arc(0.06, 0.29, 0.16, 270, 360, 8)
+            + seg(0.22, 0.29, 0.22, -0.02)
+            + arc(0.42, -0.02, 0.20, 180, 270, 8))
+
+
+def g_rbrace():
+    return (arc(0.04, 0.83, 0.20, 0, 90, 8)
+            + seg(0.24, 0.83, 0.24, 0.52)
+            + arc(0.40, 0.52, 0.16, 180, 90, 8)
+            + arc(0.40, 0.29, 0.16, 270, 180, 8)
+            + seg(0.24, 0.29, 0.24, -0.02)
+            + arc(0.04, -0.02, 0.20, 0, -90, 8))
+
+
+def g_lt():
+    return seg(0.58, 0.86, 0.12, 0.43) + seg(0.12, 0.43, 0.58, 0.00)
+
+
+def g_gt():
+    return seg(0.10, 0.86, 0.56, 0.43) + seg(0.56, 0.43, 0.10, 0.00)
+
+
+def g_eq():
+    return seg(0.10, 0.58, 0.74, 0.58) + seg(0.10, 0.28, 0.74, 0.28)
+
+
+def g_star():
+    cx, cy, r = 0.36, 0.74, 0.28
+    out = []
+    for a in (90, 150, 210, 270, 330, 30):
+        t = math.radians(a)
+        out += seg(cx, cy, cx + r * math.cos(t), cy + r * math.sin(t), 0.85)
+    return out
+
+
+def g_hash():
+    return (seg(0.22, 1.00, 0.14, 0.00, 0.9) + seg(0.56, 1.00, 0.48, 0.00, 0.9)
+            + seg(0.04, 0.68, 0.68, 0.68, 0.9) + seg(0.02, 0.32, 0.66, 0.32, 0.9))
+
+
+def g_pipe():
+    return seg(0.14, 1.05, 0.14, -0.22)
+
+
+def g_backslash():
+    return seg(0.08, 1.00, 0.54, -0.06)
+
+
+def g_tilde():
+    return (arc(0.24, 0.44, 0.15, 160, 20, 8)
+            + arc(0.54, 0.56, 0.15, 340, 200, 8))
+
+
+def g_caret():
+    return seg(0.10, 0.60, 0.36, 0.96) + seg(0.36, 0.96, 0.62, 0.60)
+
+
+def g_backtick():
+    return seg(0.10, 1.00, 0.30, 0.76, 0.95)
+
+
+def g_percent():
+    return (arc(0.22, 0.76, 0.17, 0, 360, 16)
+            + arc(0.72, 0.20, 0.17, 0, 360, 16)
+            + seg(0.82, 0.98, 0.12, -0.02, 0.85))
+
+
+def g_ampersand():
+    # Small loop up top, larger bowl below, diagonal through, tail out.
+    #
+    # Honestly the weakest glyph in the set: a real ampersand is a Latin "et"
+    # ligature and does not decompose into arcs and segments the way the rest
+    # of these do. It is legible in context and rare enough in prose to leave
+    # at that - check output/screenshots/punct_preview.png before assuming a
+    # tweak here improved it.
+    return (arc(0.34, 0.80, 0.16, 340, 190, 12)     # top bowl, right over to left
+            + seg(0.19, 0.77, 0.56, 0.13)           # diagonal down to the right
+            + arc(0.33, 0.27, 0.24, 170, 375, 16)   # bottom bowl, round the base
+            + seg(0.56, 0.35, 0.84, 0.00))          # tail out to the baseline
+
+
+def g_at():
+    # The outer ring must stay OPEN at the lower right. Closed, it reads as a
+    # target rather than an at-sign - which is exactly how the first pass came
+    # out.
+    return (arc(0.48, 0.44, 0.45, 25, 320, 24)
+            + arc(0.43, 0.40, 0.18, 0, 360, 14)
+            + seg(0.61, 0.57, 0.61, 0.29)
+            + seg(0.61, 0.29, 0.78, 0.25))
+
+
+def g_dollar():
+    # Two arcs stacked into an S, then the bar through it. The first pass used
+    # near-full circles, which read as a figure 8.
+    return (arc(0.36, 0.66, 0.19, 0, 205, 12)
+            + arc(0.36, 0.30, 0.19, 180, 385, 12)
+            + seg(0.36, 1.06, 0.36, -0.12, 0.85))
+
+
+PUNCT = [
+    (",",  0.46, g_comma),
+    ("'",  0.34, g_apostrophe),
+    ('"',  0.56, g_quote),
+    ("!",  0.40, g_bang),
+    ("?",  0.76, g_question),
+    ("(",  0.50, g_lparen),
+    (")",  0.50, g_rparen),
+    (";",  0.44, g_semicolon),
+    ("[",  0.48, g_lbracket),
+    ("]",  0.48, g_rbracket),
+    ("{",  0.54, g_lbrace),
+    ("}",  0.54, g_rbrace),
+    ("<",  0.74, g_lt),
+    (">",  0.72, g_gt),
+    ("=",  0.88, g_eq),
+    ("*",  0.66, g_star),
+    ("#",  0.80, g_hash),
+    ("|",  0.34, g_pipe),
+    ("\\", 0.66, g_backslash),
+    ("~",  0.82, g_tilde),
+    ("^",  0.76, g_caret),
+    ("`",  0.36, g_backtick),
+    ("%",  1.00, g_percent),
+    ("&",  0.94, g_ampersand),
+    ("@",  1.06, g_at),
+    ("$",  0.72, g_dollar),
+]
+
+
+def punct_shapes(builder, baseline, cap, stroke, dot_r, left):
+    """
+    Convert a glyph's cap-unit shapes into cell-pixel SDF shapes.
+
+    x_px = left + u * cap        y_px = baseline - v * cap
+    """
+    def X(u):
+        return left + u * cap
+
+    def Y(v):
+        return baseline - v * cap
+
+    out = []
+    for item in builder():
+        kind = item[0]
+        if kind == "seg":
+            x1, y1, x2, y2 = item[1]
+            out.append(shape("seg", X(x1), Y(y1), X(x2), Y(y2),
+                             half=stroke * item[2] / 2.0))
+        elif kind == "segchain":
+            pts = item[1]
+            for i in range(len(pts) - 1):
+                a, b = pts[i], pts[i + 1]
+                out.append(shape("seg", X(a[0]), Y(a[1]), X(b[0]), Y(b[1]),
+                                 half=stroke / 2.0))
+        elif kind == "dot":
+            cx, cy = item[1]
+            out.append(shape("circle", X(cx), Y(cy), dot_r * item[2]))
+        else:
+            raise ValueError(kind)
+    return out
+
+
+def build_punct_face(cell_h, baseline, cap, stroke, dot_w, dot_h, pad):
+    """
+    Rasterise every punctuation glyph for one face. Returns rows + metrics.
+
+    Advances are MEASURED, not declared.
+
+    The first version of this took a hand-written advance per glyph and drew
+    the shape at a fixed left bearing. Both numbers were guesses, and they
+    disagreed with where the ink actually landed: a parenthesis draws an arc
+    whose leftmost point is left of its own origin, so "$4.50 (approx" came out
+    with the bracket touching the zero while the gap after it was too wide.
+
+    So: rasterise into a generous scratch box, find the ink, and crop to it
+    with a symmetric side bearing. The cell then *is* the advance, which makes
+    the gap between any two glyphs exactly two bearings - even, and correct by
+    construction rather than by tuning.
+    """
+    # The period measures slightly taller than wide at the larger faces, so
+    # take the radius from the mean rather than one axis.
+    dot_r = (dot_w + dot_h) / 4.0
+
+    # Sized from the period's own bearing in the real font, so generated
+    # punctuation sits as loosely as the punctuation already there.
+    side = max(1, int(round(0.15 * cap)))
+
+    # Wide enough for the widest glyph plus room for ink left of the origin.
+    scratch_w = int(cap * 2.6) + pad * 4
+    origin = cap  # generous, so a negative-x arc still lands inside the box
+
+    cells, xs, ws, advs = [], [], [], []
+    for ch, _adv_u, builder in PUNCT:
+        shapes = punct_shapes(builder, baseline, cap, stroke, dot_r, origin)
+        scratch = render_box(shapes, scratch_w, cell_h, peak=255)
+
+        # Ink bounds, at the same threshold rr_text treats as ink.
+        x0, x1 = scratch_w, -1
+        for row in scratch:
+            for x, v in enumerate(row):
+                if v > 18:
+                    if x < x0:
+                        x0 = x
+                    if x > x1:
+                        x1 = x
+        if x1 < 0:                     # a glyph that drew nothing
+            x0, x1 = origin, origin
+
+        left = max(0, x0 - side)
+        right = min(scratch_w - 1, x1 + side)
+        w = right - left + 1
+
+        cells.append([row[left:right + 1] for row in scratch])
+        ws.append(w)
+        advs.append(w)
+
+    x = 0
+    for w in ws:
+        xs.append(x)
+        x += w
+
+    atlas_w = x
+    rows = [[0] * atlas_w for _ in range(cell_h)]
+    for cell, x0, w in zip(cells, xs, ws):
+        for y in range(cell_h):
+            rows[y][x0:x0 + w] = cell[y]
+
+    return rows, xs, ws, advs, atlas_w
+
+
 # ---------------------------------------------------------------------------
 def write_png(path, rows_rgb, w, h):
     raw = b"".join(b"\x00" + bytes(r) for r in rows_rgb)
@@ -553,6 +928,130 @@ def main():
 
     rows = [bytes(v for px in row for v in px) for row in sheet]
     write_png(prev, rows, SIZE * len(ICONS), SIZE)
+
+    print(f"wrote {out_h}")
+    print(f"wrote {prev}")
+
+    write_punct(root)
+
+
+def write_punct(root):
+    """Emit the supplementary punctuation atlas, plus a sheet to eyeball it."""
+    out_h = os.path.join(root, "projects", "evoplayer", "assets",
+                         "evo_font_punct.h")
+    prev = os.path.join(root, "output", "screenshots", "punct_preview.png")
+    os.makedirs(os.path.dirname(prev), exist_ok=True)
+
+    lines = [
+        "/* Generated by tools/gen_icons.py - do not edit by hand.",
+        " *",
+        " * The punctuation the UI font never had. RR_CHARS covers letters,",
+        " * digits and  /._:-+  and nothing else, so rr_text drew a comma or an",
+        " * apostrophe as a 12px gap. That is survivable in a filename and",
+        " * unreadable in prose, which is all a text reader renders.",
+        " *",
+        " * Glyphs are defined in cap-height units and instantiated per face",
+        " * from baselines measured out of the real atlas by",
+        " * tools/measure_font.py, so they sit on the same line as the letters.",
+        " *",
+        " * Coverage is 8-bit alpha, same as RR_FONT, and the lookup is the same",
+        " * shape - x/width/advance tables into a single-row atlas per face.",
+        " */",
+        "#pragma once",
+        "",
+        "/* Face order matches rr_text()'s `face` argument. */",
+        "typedef struct {",
+        "    const unsigned char *pix;",
+        "    int atlas_w;",
+        "    int cell_h;",
+        "    const short *x;",
+        "    const short *w;",
+        "    const short *adv;",
+        "} evo_punct_face;",
+        "",
+    ]
+
+    chars = "".join(ch for ch, _adv, _fn in PUNCT)
+    c_escaped = chars.replace("\\", "\\\\").replace('"', '\\"')
+    lines.append("/* Index -> character. Order is this table's order, nothing else. */")
+    lines.append(f'#define EVO_PUNCT_CHARS "{c_escaped}"')
+    lines.append(f"#define EVO_PUNCT_COUNT {len(PUNCT)}")
+    lines.append("")
+
+    sheets = []
+    for name, cell_h, baseline, cap, xh, stroke, dw, dh, pad in FACE_METRICS:
+        rows, xs, ws, advs, atlas_w = build_punct_face(
+            cell_h, baseline, cap, stroke, dw, dh, pad)
+        sheets.append((name, rows, atlas_w, cell_h))
+
+        lines.append(f"/* {name}: cell {cell_h}px, baseline {baseline}, cap {cap} */")
+        lines.append(f"static const short EVO_PUNCT_{name}_X[] = {{"
+                     + ",".join(str(v) for v in xs) + "};")
+        lines.append(f"static const short EVO_PUNCT_{name}_W[] = {{"
+                     + ",".join(str(v) for v in ws) + "};")
+        lines.append(f"static const short EVO_PUNCT_{name}_ADV[] = {{"
+                     + ",".join(str(v) for v in advs) + "};")
+        lines.append(f"static const unsigned char EVO_PUNCT_{name}_PIX[] = {{")
+        flat = [v for row in rows for v in row]
+        for i in range(0, len(flat), 32):
+            lines.append(",".join(str(v) for v in flat[i:i + 32]) + ",")
+        lines.append("};")
+        lines.append("")
+
+    lines.append("static const evo_punct_face EVO_PUNCT_FACES[4] = {")
+    for name, _rows, atlas_w, cell_h in sheets:
+        lines.append(f"    {{ EVO_PUNCT_{name}_PIX, {atlas_w}, {cell_h}, "
+                     f"EVO_PUNCT_{name}_X, EVO_PUNCT_{name}_W, EVO_PUNCT_{name}_ADV }},")
+    lines.append("};")
+    lines.append("")
+
+    with open(out_h, "w") as f:
+        f.write("\n".join(lines))
+
+    # The UI layer needs to know which characters render, but it deliberately
+    # cannot include the atlas above - that is ~1MB of static arrays, and a
+    # second translation unit including them would duplicate every byte in the
+    # ELF. So the *alphabet* alone goes into its own tiny header that ui/ can
+    # include, and evo_draw.h builds EVO_TEXT_CHARSET from it.
+    #
+    # Without this, evo_text_unsupported() goes on reporting a comma as
+    # unsupported long after the comma was added.
+    charset_h = os.path.join(root, "projects", "evoplayer", "ui", "include",
+                             "evo_font_charset.h")
+    with open(charset_h, "w") as f:
+        f.write("\n".join([
+            "/* Generated by tools/gen_icons.py - do not edit by hand.",
+            " *",
+            " * The punctuation the generated second atlas provides, as a plain",
+            " * string. Pixels live in assets/evo_font_punct.h; this carries the",
+            " * alphabet only, so the UI layer can check what renders without",
+            " * pulling in a megabyte of glyph data.",
+            " */",
+            "#pragma once",
+            "",
+            f'#define EVO_FONT_PUNCT_CHARS "{c_escaped}"',
+            "",
+        ]))
+    print(f"wrote {charset_h}")
+
+    # Contact sheet: every face stacked, dark ground, so the glyphs can be
+    # looked at rather than argued about.
+    bg = (6, 10, 20)
+    ink = (0xE8, 0xF2, 0xFF)
+    total_h = sum(s[3] + 8 for s in sheets)
+    total_w = max(s[2] for s in sheets)
+    sheet = [[bg] * total_w for _ in range(total_h)]
+    y0 = 0
+    for _name, rows, atlas_w, cell_h in sheets:
+        for y in range(cell_h):
+            for x in range(atlas_w):
+                a = rows[y][x]
+                sheet[y0 + y][x] = tuple(
+                    (ink[c] * a + bg[c] * (255 - a)) // 255 for c in range(3))
+        y0 += cell_h + 8
+
+    png_rows = [bytes(v for px in row for v in px) for row in sheet]
+    write_png(prev, png_rows, total_w, total_h)
 
     print(f"wrote {out_h}")
     print(f"wrote {prev}")

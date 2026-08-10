@@ -287,6 +287,71 @@ int  evo_screen_picker_capacity(void);
 void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
                        const evo_focus *f);
 
+/* ---- text reader --------------------------------------------------------- */
+
+/*
+ * A page of already-wrapped text.
+ *
+ * The wrapping, the encoding and the scroll position all belong to
+ * media/evo_textreader.c; this draws the window it hands over and nothing
+ * more. Lines arrive NUL-terminated because the draw vtable takes C strings -
+ * the reader copies its visible window into a small buffer rather than making
+ * every text primitive in the UI learn about lengths.
+ */
+
+/* Enough for the smallest face over the full content height, with room spare.
+ * The reader clamps to this; it is a bound on the caller's buffer, not a
+ * limit on the document. */
+#define EVO_READER_MAX_VISIBLE 64
+
+typedef struct evo_reader_model {
+    const char *title;         /* file name */
+    const char *subtitle;      /* folder, or a note about the file */
+    const char *badge;         /* right of the header: "LINE 412 OF 9210" */
+
+    const char *const *lines;  /* the visible window, top first */
+    int         line_count;
+
+    int         face;          /* EVO_FACE_* - the reading size */
+    int         line_pitch;    /* px between lines at that face */
+
+    /*
+     * Both 0..1. `progress` is how far down the document the top of the view
+     * is; `visible_frac` is how much of it is on screen, which is what sets
+     * the size of the scrollbar thumb. A thumb that does not encode length
+     * tells the reader nothing about how much is left.
+     */
+    double      progress;
+    double      visible_frac;
+
+    /* Shown in place of the text: an error, or why the page is empty. */
+    const char *notice;
+    /* Shown under the text: "FIRST 2 MB OF 47 MB". */
+    const char *footnote;
+} evo_reader_model;
+
+/* How many lines fit at `face`. main.c needs this to size its window before
+ * it can fill the model. */
+int  evo_screen_reader_capacity(int face);
+
+/* Line pitch for a face, so the caller and the screen agree. */
+int  evo_screen_reader_pitch(int face);
+
+/*
+ * The width text is wrapped to.
+ *
+ * Published rather than left for the caller to work out, because the caller
+ * has to wrap to exactly the column this screen will draw into - and that
+ * column depends on the rail and the scrollbar, which are the screen's
+ * business. A caller computing it from metrics constants would be a second
+ * definition of the layout, wrong the first time either moved.
+ */
+int  evo_screen_reader_wrap_w(void);
+
+void evo_screen_reader(uint32_t *fb, const evo_reader_model *m,
+                       int rail_focused, int rail_index,
+                       const evo_hint *hints, int hint_count);
+
 #ifdef __cplusplus
 }
 #endif

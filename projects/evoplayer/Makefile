@@ -81,7 +81,8 @@ UI_SRCS := \
 # of functions - see the header of each for the measurement that justified the
 # cut.
 MEDIA_SRCS := \
-    media/src/prospero_thumbnail.c
+    media/src/prospero_thumbnail.c \
+    media/src/evo_textreader.c
 
 all: $(ELF)
 

@@ -969,3 +969,136 @@ void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
         }
     }
 }
+
+/* ==========================================================================
+ * Text reader
+ *
+ * The page is a column of already-wrapped lines and a scrollbar. Everything
+ * interesting - encoding, wrapping, where the view is - happened in
+ * media/evo_textreader.c before this was called; drawing a reader is genuinely
+ * this simple once the text is laid out, and keeping it that way is why the
+ * wrap lives on the other side of a measuring callback.
+ *
+ * Line pitch is the face's own line box plus a little air. Reading a wall of
+ * text on a television at two metres is the case the leading has to serve, so
+ * it is looser than a list row, where the box itself does the separating.
+ * ======================================================================== */
+
+/* Cell heights of the four faces, from the atlas (see tools/measure_font.py).
+ * Pitch adds leading on top; the ratio is what makes long text readable
+ * rather than dense. */
+static int reader_face_h(int face)
+{
+    switch (face) {
+    case EVO_FACE_TITLE: return 57;
+    case EVO_FACE_MENU:  return 46;
+    case EVO_FACE_SUB:   return 29;
+    default:             return 25;
+    }
+}
+
+int evo_screen_reader_pitch(int face)
+{
+    return reader_face_h(face) + (face >= EVO_FACE_MENU ? 12 : 9);
+}
+
+int evo_screen_reader_capacity(int face)
+{
+    int n = (EVO_CONTENT_B - EVO_CONTENT_Y) / evo_screen_reader_pitch(face);
+
+    if (n < 1) n = 1;
+    if (n > EVO_READER_MAX_VISIBLE) n = EVO_READER_MAX_VISIBLE;
+    return n;
+}
+
+/* Must match the column evo_screen_reader() draws into, below. */
+#define EVO_READER_SCROLLBAR_GUTTER 34
+
+int evo_screen_reader_wrap_w(void)
+{
+    evo_page page;
+
+    memset(&page, 0, sizeof(page));
+    page.section = EVO_SECTION_BROWSER;
+
+    return evo_chrome_content_r(&page) - evo_chrome_content_x(&page)
+           - EVO_READER_SCROLLBAR_GUTTER;
+}
+
+void evo_screen_reader(uint32_t *fb, const evo_reader_model *m,
+                       int rail_focused, int rail_index,
+                       const evo_hint *hints, int hint_count)
+{
+    const evo_theme *th = evo_theme_current();
+    evo_page page;
+    int x, right, y, pitch, i;
+
+    if (!fb || !m) return;
+
+    memset(&page, 0, sizeof(page));
+    page.title        = m->title;
+    page.subtitle     = m->subtitle;
+    page.badge        = m->badge;
+    page.section      = EVO_SECTION_BROWSER;   /* it was opened from there */
+    page.rail_focused = rail_focused;
+    page.rail_index   = rail_index;
+
+    evo_chrome_begin(fb, &page);
+
+    x     = evo_chrome_content_x(&page);
+    right = evo_chrome_content_r(&page);
+    y     = EVO_CONTENT_Y;
+    pitch = m->line_pitch > 0 ? m->line_pitch : evo_screen_reader_pitch(m->face);
+
+    if (m->notice) {
+        /* An error, or an empty file. Said in the middle of the page rather
+         * than as a toast: the page has nothing else on it, and a toast would
+         * be gone before the reader worked out why the screen was blank. */
+        int tw = evo_text_w(m->notice, EVO_FACE_MENU);
+        evo_text(fb, x + (right - x - tw) / 2,
+                 EVO_CONTENT_Y + (EVO_CONTENT_B - EVO_CONTENT_Y) / 2 - 24,
+                 m->notice, th->text_secondary, EVO_FACE_MENU);
+    } else {
+        /* The scrollbar occupies the right edge, so text stops short of it. */
+        int text_r = right - EVO_READER_SCROLLBAR_GUTTER;
+
+        for (i = 0; i < m->line_count && m->lines; i++) {
+            const char *s = m->lines[i];
+
+            if (y + reader_face_h(m->face) > EVO_CONTENT_B)
+                break;
+            if (s && *s)
+                evo_text_fit(fb, x, y, text_r - x, s,
+                             th->text_primary, (evo_face)m->face);
+            y += pitch;
+        }
+
+        /*
+         * Thumb size encodes how much of the document is on screen, which is
+         * the only thing that tells you whether "half way" means five more
+         * pages or five hundred. evo_widget_scrollbar takes counts, so the
+         * fractions are turned back into them.
+         */
+        {
+            int total   = 1000;
+            int visible = (int)(m->visible_frac * 1000.0 + 0.5);
+            int permille = (int)(m->progress * 1000.0 + 0.5);
+
+            if (visible < 20)   visible = 20;     /* stays grabbable */
+            if (visible > total) visible = total;
+            if (permille < 0)   permille = 0;
+            if (permille > 1000) permille = 1000;
+
+            if (visible < total)
+                evo_widget_scrollbar(fb, right - 12, EVO_CONTENT_Y,
+                                     EVO_CONTENT_B - EVO_CONTENT_Y,
+                                     permille, visible, total);
+        }
+    }
+
+    if (m->footnote)
+        evo_text(fb, x, EVO_CONTENT_B + 6, m->footnote,
+                 th->text_muted, EVO_FACE_SMALL);
+
+    evo_chrome_end(fb, &page, hints, hint_count);
+}

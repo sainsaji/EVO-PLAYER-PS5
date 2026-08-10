@@ -161,21 +161,28 @@ int  evo_face_ink_h(evo_face face);
 /* ---- the character set ------------------------------------------------- */
 
 /*
- * The atlas holds exactly these 69 glyphs:
+ * Text renders from two atlases now.
  *
- *   A-Z  a-z  0-9  space  /  .  _  :  -  +
+ * The original one holds 69 glyphs - A-Z a-z 0-9 space / . _ : - + - and had
+ * no comma, parenthesis, apostrophe or question mark. That was a real
+ * constraint on UI copy: an unsupported character is not omitted, it advances
+ * 12px and leaves a *hole*, so "CREDITS, PROJECT INFO" rendered as
+ * "CREDITS  PROJECT INFO" and read as a spacing bug rather than a missing
+ * glyph. Four strings shipped that way before anyone noticed.
  *
- * There is no comma, no parenthesis, no apostrophe and no question mark.
- * An unsupported character is not omitted - it advances 12px and leaves a
- * hole, so "CREDITS, PROJECT INFO" renders as "CREDITS  PROJECT INFO" and
- * looks like a spacing bug rather than a missing glyph. Four strings shipped
- * that way before anyone noticed.
+ * tools/gen_icons.py now generates a second atlas carrying the punctuation,
+ * so ordinary prose renders - which is what made the text reader possible.
+ * EVO_FONT_PUNCT_CHARS comes from that generator, so this set cannot drift
+ * away from what actually draws.
  *
- * Rewrite the copy rather than reaching for punctuation the font does not
- * have. Use this to check.
+ * There is still a limit: anything outside the two sets leaves a hole. Check
+ * with evo_text_unsupported() rather than assuming.
  */
+#include "evo_font_charset.h"
+
 #define EVO_TEXT_CHARSET \
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+" \
+    EVO_FONT_PUNCT_CHARS
 
 /* First unsupported character in `s`, or 0 when the whole string renders. */
 char evo_text_unsupported(const char *s);

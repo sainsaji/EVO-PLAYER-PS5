@@ -238,36 +238,49 @@ everything to an append-only log and survives payload restarts.
 - **Position text with `evo_text_y_centred()` / `evo_text_y_stacked()`**, not
   by offset. The glyph boxes carry leading the ink does not fill; positioning
   by box height is what put subtitles 11 px below their card in the old UI.
-- **Two font systems exist.** The UI uses the `RR_FONT` atlas via the
-  `evo_draw` vtable. There is also a legacy 5×7 `draw_char` renderer used by
-  the player overlay. Editing the wrong one wastes a cycle.
-- **The atlas is 69 glyphs, and that is the whole alphabet you have.**
-  `assets/renderer_reset_assets.h` defines it exactly:
+- **Two text renderers exist.** The UI draws through the `evo_draw` vtable,
+  which reaches the `RR_FONT` atlas and the generated punctuation. There is
+  also a legacy 5x7 `draw_char` in `main.c`, still used by parts of the player
+  overlay. Editing the wrong one wastes a cycle. (`pp_font_metrics.h`, a third
+  system this document used to warn about, was unreferenced and is deleted.)
+- **Text comes from two atlases now, and the second one is generated.**
+  `assets/renderer_reset_assets.h` holds the original 69:
 
   ```
   RR_CHARS "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+"
   ```
 
-  Both cases, digits, space, and six punctuation marks. **No comma, no
-  parenthesis, no apostrophe, no question mark** — and an unknown glyph leaves
-  a *hole* rather than being skipped, so prose written without checking comes
-  out as a row of gaps. `EVO_TEXT_CHARSET` and `evo_text_unsupported()` in
-  `evo_draw.h` are the check; use them rather than eyeballing.
+  Both cases, digits, space, six punctuation marks. It had **no comma, no
+  parenthesis, no apostrophe, no question mark**, and an unknown glyph leaves a
+  *hole* rather than being skipped — so prose written without checking came out
+  as a row of gaps.
 
-  Earlier revisions of this document, and the header comment in
-  `evo_changelog.h`, say 43 glyphs and no lower case. That was the *legacy*
-  `PP_CHARS` set, and it is not what the UI draws through — the browser and
-  the launch shelves have been rendering lower-case filenames all along. The
-  changelog entries are upper case as a house style, not because they have
-  to be. **The one thing the shorter set was right about is the punctuation:**
-  no `?`, so a confirmation prompt cannot ask a question mark's worth of
-  question. The stop-playback prompt says `STOP PLAYBACK` and lets the two
-  buttons be the answer.
+  `tools/gen_icons.py` now generates a **second** atlas with the missing
+  punctuation (`assets/evo_font_punct.h`), and `ui/include/evo_font.h` resolves
+  a character across both. Ordinary prose renders; that is what made the text
+  reader possible. Earlier revisions of this document say a confirmation prompt
+  "cannot ask a question mark's worth of question" — it can now.
 
-  An earlier version of this document claimed the atlas lacked `/ _ . : - +`,
-  and the browser transliterated real paths into `>` because of it. It does
-  carry them; every glyph has a real width in the metrics tables. Breadcrumbs
-  show real paths now.
+  Two things still hold:
+
+  - **Anything outside both sets still leaves a hole.** `EVO_TEXT_CHARSET` and
+    `evo_text_unsupported()` in `evo_draw.h` are still the check. The charset
+    is assembled from `EVO_FONT_PUNCT_CHARS`, which the generator emits, so it
+    cannot drift from what actually draws.
+  - **The original atlas cannot be regenerated** — it is a pre-generated asset
+    with no generator in the tree. That is why punctuation is a second atlas
+    rather than an edit to the first.
+
+  If the atlas is ever replaced, re-run `python3 tools/measure_font.py`: the
+  generated glyphs sit on the letters' baseline because that script reads the
+  real baseline, cap height and stroke weight out of the atlas ink, and those
+  numbers are pasted into the generator.
+
+  Two further corrections to earlier revisions of this document. It claimed the
+  atlas lacked `/ _ . : - +`, and the browser transliterated real paths into
+  `>` because of it; it does carry them, and breadcrumbs show real paths now.
+  It also said 43 glyphs and no lower case — that was the *legacy* `PP_CHARS`
+  set, which no longer exists anywhere in the tree.
 - **Anything that opens a media file is expensive.** Probing codecs and
   extracting a thumbnail both cost enough to stall the frame, so the browser
   debounces both behind `EVO_PROBE_SETTLE_FRAMES` and caches by path. Cover

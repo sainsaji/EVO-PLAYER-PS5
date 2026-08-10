@@ -224,10 +224,44 @@ python3 tools/gen_icons.py     # writes assets/evo_icons.h + a contact sheet
 ```
 
 Icons are described as vector shapes and rasterised from signed distance
-fields, so edges carry analytic coverage at any size. Append to `ICONS` as
-`(macro_prefix, shape_fn, size)` and add a `case` in `rr_icon()` — or better,
-a named constant in `ui/include/evo_draw.h`, which is where icon indices live
-now.
+fields, so edges carry analytic coverage at any size.
+
+**To add an icon:** append to `ICONS` as `(macro_prefix, shape_fn, size)`, add
+its name to `ICON_TABLE`, and add a named constant in `ui/include/evo_draw.h`.
+There is no `switch` to update any more — the generator emits
+`EVO_ICON_TABLE`, and both the player and `tools/uiview.c` index it. That
+replaced three hand-written switches, one of which had already drifted and
+drew nothing for two icons.
+
+**It also generates the font punctuation.** The UI atlas has 69 glyphs and no
+comma, apostrophe, parenthesis or question mark, and it cannot be regenerated
+— there is no generator for it in the tree. So `PUNCT` here describes the
+missing marks in cap-height units, and the script emits a second atlas
+(`assets/evo_font_punct.h`), the alphabet on its own for the UI layer
+(`ui/include/evo_font_charset.h`), and a contact sheet at
+`output/screenshots/punct_preview.png`. Look at the sheet after changing a
+glyph; several of them read wrong on the first attempt and only the picture
+showed it.
+
+Advances are measured from the rasterised ink, not declared, so a shape change
+cannot leave the spacing behind.
+
+---
+
+## `tools/measure_font.py` — the font's real metrics
+
+```bash
+python3 tools/measure_font.py
+```
+
+Reads baseline, cap height, x-height, descender and stroke weight straight out
+of the atlas ink, per face, by walking glyphs whose shape is known (`H`, `x`,
+`p`, `.`, `:`, `-`).
+
+Generated punctuation has to sit on the same baseline as the letters, and the
+atlas carries no such metadata — guessing puts a comma floating mid-line. The
+numbers this prints are pasted into `gen_icons.py` as `FACE_METRICS`. Re-run it
+rather than trusting them if the atlas is ever replaced.
 
 They are monochrome by design: the UI tints them with the theme accent at draw
 time. The controller prompts were originally two-tone bitmaps (103 distinct

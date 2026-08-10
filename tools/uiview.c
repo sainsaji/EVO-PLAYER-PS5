@@ -43,6 +43,20 @@
 #include "evo_changelog.h"
 #include "assets/renderer_reset_assets.h"
 #include "assets/evo_icons.h"
+#include "assets/evo_font_punct.h"
+
+/* After both atlases - it reads RR_* and EVO_PUNCT_* directly. */
+#include "evo_font.h"
+#include "evo_textreader.h"
+
+/* The reader measures with the same tables it draws with. */
+static int reader_measure(const char *s, int len, int face)
+{
+    int w = 0;
+    for (int i = 0; i < len; i++)
+        w += evo_font_advance(s[i], face);
+    return w;
+}
 
 #define W EVO_SCREEN_W
 #define H EVO_SCREEN_H
@@ -68,13 +82,14 @@ static uint32_t blend(uint32_t dst, uint32_t src)
     return evo_ui_blend(dst, src, (src >> 24) & 0xFF);
 }
 
-static int rr_idx(char ch)
-{
-    for (int i = 0; i < RR_COUNT; i++)
-        if (RR_CHARS[i] == ch) return i;
-    return -1;
-}
-
+/*
+ * Text drawing, shared with the player through evo_font.h.
+ *
+ * This used to carry its own rr_idx linear scan and its own four-way face
+ * switch, transcribed from main.c. Both now come from the shared resolver, so
+ * the mock and the player cannot disagree about what a character looks like -
+ * which matters more now that there are two atlases to pick between.
+ */
 static void rr_text(uint32_t *fb, int x, int y, const char *t,
                     uint32_t colour, int face)
 {
@@ -82,47 +97,31 @@ static void rr_text(uint32_t *fb, int x, int y, const char *t,
     unsigned ca = (colour >> 24) & 255;
 
     for (const char *q = t; *q; q++) {
-        int id = rr_idx(*q);
-        int sx, sy, sw, sh, adv;
+        evo_font_glyph g;
 
-        if (id < 0) { cx += 12; continue; }
+        if (!evo_font_find(*q, face, &g)) { cx += EVO_FONT_MISS_ADV; continue; }
 
-        if (face == 3) { sx=RR_TITLE_X[id]; sy=RR_TITLE_Y[id]; sw=RR_TITLE_W[id]; sh=RR_TITLE_H[id]; adv=RR_TITLE_ADV[id]; }
-        else if (face == 2) { sx=RR_MENU_X[id]; sy=RR_MENU_Y[id]; sw=RR_MENU_W[id]; sh=RR_MENU_H[id]; adv=RR_MENU_ADV[id]; }
-        else if (face == 1) { sx=RR_SUB_X[id]; sy=RR_SUB_Y[id]; sw=RR_SUB_W[id]; sh=RR_SUB_H[id]; adv=RR_SUB_ADV[id]; }
-        else { sx=RR_SMALL_X[id]; sy=RR_SMALL_Y[id]; sw=RR_SMALL_W[id]; sh=RR_SMALL_H[id]; adv=RR_SMALL_ADV[id]; }
-
-        for (int yy = 0; yy < sh; yy++) {
+        for (int yy = 0; yy < g.sh; yy++) {
             int fy = y + yy;
             if ((unsigned)fy >= H) continue;
-            for (int xx = 0; xx < sw; xx++) {
+            for (int xx = 0; xx < g.sw; xx++) {
                 int fx = cx + xx;
                 unsigned ma, a;
                 if ((unsigned)fx >= W) continue;
-                ma = RR_FONT[(sy + yy) * RR_FONT_W + (sx + xx)];
-                if (ma <= 18) continue;
+                ma = g.atlas[(g.sy + yy) * g.atlas_w + (g.sx + xx)];
+                if (ma <= EVO_FONT_INK_MIN) continue;
                 a = (ma * ca) / 255;
                 fb[fy * W + fx] = blend(fb[fy * W + fx],
                                         (a << 24) | (colour & 0x00FFFFFF));
             }
         }
-        cx += adv;
+        cx += g.adv;
     }
 }
 
 static int rr_text_w(const char *t, int face)
 {
-    int w = 0;
-    if (!t) return 0;
-    for (const char *q = t; *q; q++) {
-        int id = rr_idx(*q);
-        if (id < 0) { w += 12; continue; }
-        if (face == 3)      w += RR_TITLE_ADV[id];
-        else if (face == 2) w += RR_MENU_ADV[id];
-        else if (face == 1) w += RR_SUB_ADV[id];
-        else                w += RR_SMALL_ADV[id];
-    }
-    return w;
+    return evo_font_text_width(t, face);
 }
 
 static void img_tint(uint32_t *fb, int x, int y, int w, int h,
@@ -787,11 +786,113 @@ static void render_picker(int sel)
     evo_screen_picker(g_fb, &m, &f);
 }
 
+
+/*
+ * The text reader, on a fixture that is deliberately awkward: curly quotes and
+ * an em dash that the loader has to fold, a line long enough to wrap several
+ * times, and enough punctuation to show whether the generated glyphs sit on
+ * the same baseline as the letters. A fixture of clean uppercase prose would
+ * prove nothing - that already worked.
+ */
+static int g_reader_face = EVO_FACE_SUB;
+
+static void render_reader(int sel)
+{
+    static const char SAMPLE[] =
+        "The Adventures of the Speckled Band\n"
+        "\n"
+        "On glancing over my notes of the seventy odd cases in which I have "
+        "during the last eight years studied the methods of my friend Sherlock "
+        "Holmes, I find many tragic, some comic, a large number merely strange, "
+        "but none commonplace.\n"
+        "\n"
+        "\"Very sorry to knock you up, Watson,\" said he, \"but it's the common "
+        "lot this morning. Mrs. Hudson has been knocked up, she retorted upon "
+        "me - and I on you.\"\n"
+        "\n"
+        "  * A list item, indented.\n"
+        "  * Another - with a dash, an ellipsis... and a query?\n"
+        "\n"
+        "Costs: $4.50 (approx. 60%) & rising; see notes [1], {2}, <3>.\n"
+        "Path: /mnt/usb0/books/holmes.txt  |  ~4.2 KB  |  100% loaded\n";
+
+    evo_text_doc doc;
+    evo_reader_model m;
+    const char *win[EVO_READER_MAX_VISIBLE];
+    char buf[EVO_READER_MAX_VISIBLE][512];
+    char badge[64], sub[128];
+    int cap, shown, i, page_w;
+
+    /* The loader reads a file, so the fixture is written to one. That keeps
+     * the host path identical to the console path - including the decode. */
+    {
+        const char *tmp = "/tmp/uiview_reader_fixture.txt";
+        FILE *f = fopen(tmp, "wb");
+        if (f) { fwrite(SAMPLE, 1, sizeof(SAMPLE) - 1, f); fclose(f); }
+        if (evo_text_load(&doc, tmp) != EVO_TEXT_OK) {
+            memset(&m, 0, sizeof(m));
+            m.title = "READER"; m.notice = "COULD NOT LOAD THE FIXTURE";
+            evo_screen_reader(g_fb, &m, 0, 0, EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+            return;
+        }
+    }
+
+    doc.face = g_reader_face;
+    cap = evo_screen_reader_capacity(doc.face);
+
+    /* The screen owns its own column width - asking it is the only way the
+     * wrap and the draw cannot disagree. */
+    page_w = evo_screen_reader_wrap_w();
+    evo_text_wrap(&doc, page_w, reader_measure);
+
+    evo_text_scroll(&doc, sel, cap);
+
+    shown = doc.line_count - doc.top;
+    if (shown > cap) shown = cap;
+    if (shown < 0) shown = 0;
+
+    for (i = 0; i < shown; i++) {
+        int n = doc.lines[doc.top + i].len;
+        if (n > (int)sizeof(buf[0]) - 1) n = (int)sizeof(buf[0]) - 1;
+        memcpy(buf[i], doc.lines[doc.top + i].begin, (size_t)n);
+        buf[i][n] = 0;
+        win[i] = buf[i];
+    }
+
+    snprintf(badge, sizeof(badge), "LINE %d OF %d",
+             doc.line_count ? doc.lines[doc.top].source_line : 0,
+             doc.source_lines);
+    snprintf(sub, sizeof(sub), "%zu BYTES", doc.file_bytes);
+
+    memset(&m, 0, sizeof(m));
+    m.title        = doc.title;
+    m.subtitle     = sub;
+    m.badge        = badge;
+    m.lines        = win;
+    m.line_count   = shown;
+    m.face         = doc.face;
+    m.line_pitch   = evo_screen_reader_pitch(doc.face);
+    m.progress     = evo_text_progress(&doc, cap);
+    m.visible_frac = doc.line_count ? (double)cap / (double)doc.line_count : 1.0;
+
+    {
+        static const evo_hint hints[4] = {
+            { EVO_GLYPH_DPAD,   "SCROLL" },
+            { EVO_GLYPH_LSTICK, "PAGE" },
+            { EVO_GLYPH_TRIANGLE, "SIZE" },
+            { EVO_GLYPH_CIRCLE, "BACK" }
+        };
+        evo_screen_reader(g_fb, &m, 0, 0, hints, 4);
+    }
+
+    evo_text_free(&doc);
+}
+
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
                                  "changelog",
                                  "resume","finished","mediainfo","exitconfirm",
-                                 "picker",
+                                 "picker","reader",
                                  "toast","toastok","toasterror", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
@@ -806,6 +907,7 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "mediainfo")) render_mediainfo();
     else if (!strcmp(screen, "exitconfirm")) render_exitconfirm();
     else if (!strcmp(screen, "picker"))    render_picker(sel);
+    else if (!strcmp(screen, "reader"))    render_reader(sel);
     else if (!strcmp(screen, "toast"))      render_toast(EVO_TOAST_INFO);
     else if (!strcmp(screen, "toastok"))    render_toast(EVO_TOAST_OK);
     else if (!strcmp(screen, "toasterror")) render_toast(EVO_TOAST_ERROR);
@@ -819,6 +921,10 @@ int main(int argc, char **argv)
     const char *theme  = NULL;
     int sel = 0, rail = 0, rail_sel = 1, empty = 0, row = 0, all = 0;
 
+    /* Before any text is drawn. Single-threaded here, so a plain call is all
+     * the "once" this program needs - see evo_font.h. */
+    evo_font_build_tables();
+
     for (int i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--all"))      all = 1;
         else if (!strcmp(argv[i], "--sel"))      sel = atoi(argv[++i]);
@@ -827,6 +933,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--rail-sel")) rail_sel = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--empty"))    empty = 1;
         else if (!strcmp(argv[i], "--theme"))    theme = argv[++i];
+        else if (!strcmp(argv[i], "--face"))     g_reader_face = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-o"))         out = argv[++i];
         else if (argv[i][0] != '-')              screen = argv[i];
     }
