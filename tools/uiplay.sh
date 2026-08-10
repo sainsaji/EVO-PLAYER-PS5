@@ -86,9 +86,10 @@ for scr in browse recent favorites settings profile tools about; do
 done
 
 # -- modal screens: no cursor, one frame each ---------------------------------
-render "resume_s0"    resume
-render "finished_s0"  finished
-render "mediainfo_s0" mediainfo
+render "resume_s0"      resume
+render "finished_s0"    finished
+render "mediainfo_s0"   mediainfo
+render "exitconfirm_s0" exitconfirm
 
 # -- toasts: an overlay, rendered over a real screen ---------------------------
 render "toast_s0"       toast

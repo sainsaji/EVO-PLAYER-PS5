@@ -56,15 +56,28 @@ static uint32_t lerp_px(uint32_t a, uint32_t b, int t)
          |  (uint32_t)(ar + (((br - ar) * t) >> 8));
 }
 
-static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
-                       const uint32_t *src, int sw, int sh, int alpha)
+/*
+ * `src_x/src_y/src_w/src_h` select the region of the source that is drawn.
+ * Passing the whole image scales it to the destination; passing a sub-rect is
+ * how a caller crops to the destination's aspect instead of stretching to it.
+ */
+static void blit_cover_src(uint32_t *fb, int dx, int dy, int dw, int dh,
+                           const uint32_t *src, int sw, int sh,
+                           int src_x, int src_y, int src_w, int src_h,
+                           int alpha)
 {
     int x, y;
     int magnify;
 
     if (!src || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
 
-    magnify = (dw > sw || dh > sh);
+    if (src_x < 0) src_x = 0;
+    if (src_y < 0) src_y = 0;
+    if (src_w <= 0 || src_x + src_w > sw) src_w = sw - src_x;
+    if (src_h <= 0 || src_y + src_h > sh) src_h = sh - src_y;
+    if (src_w <= 0 || src_h <= 0) return;
+
+    magnify = (dw > src_w || dh > src_h);
 
     for (y = 0; y < dh; y++) {
         int fy = dy + y;
@@ -74,7 +87,7 @@ static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
 
         /* 8-bit sub-pixel position within the source. */
         {
-            int syq = (y * sh * 256) / dh;
+            int syq = (src_y << 8) + (y * src_h * 256) / dh;
             sy  = syq >> 8;
             fyf = syq & 0xFF;
             if (sy >= sh - 1) { sy = sh - 1; fyf = 0; }
@@ -88,7 +101,7 @@ static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
             if (fx < 0 || fx >= EVO_SCREEN_W) continue;
 
             {
-                int sxq = (x * sw * 256) / dw;
+                int sxq = (src_x << 8) + (x * src_w * 256) / dw;
                 sx  = sxq >> 8;
                 fxf = sxq & 0xFF;
                 if (sx >= sw - 1) { sx = sw - 1; fxf = 0; }
@@ -113,6 +126,47 @@ static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
             }
         }
     }
+}
+
+static void blit_cover(uint32_t *fb, int dx, int dy, int dw, int dh,
+                       const uint32_t *src, int sw, int sh, int alpha)
+{
+    blit_cover_src(fb, dx, dy, dw, dh, src, sw, sh, 0, 0, sw, sh, alpha);
+}
+
+/*
+ * The centred source rectangle that fills `dw x dh` without distorting it.
+ *
+ * Scaling a 16:9 cover to fit a 5:3 tile is a 7% horizontal squash, which is
+ * small enough to look like nothing and large enough to make faces wrong. The
+ * hero backdrop already crops rather than stretches for the same reason; this
+ * is that arithmetic, shared.
+ */
+static void cover_crop_rect(int dw, int dh, int sw, int sh,
+                            int *out_x, int *out_y, int *out_w, int *out_h)
+{
+    /* 16.16 source pixels per destination pixel, taken from whichever axis
+     * needs the most magnification - so neither axis is left short of the
+     * box. Same arithmetic draw_hero() uses in evo_screens.c. */
+    int step_x = (sw << 16) / (dw > 0 ? dw : 1);
+    int step_y = (sh << 16) / (dh > 0 ? dh : 1);
+    int step   = step_x < step_y ? step_x : step_y;
+    int span_w, span_h;
+
+    if (step < 1) step = 1;
+
+    span_w = (dw * step) >> 16;
+    span_h = (dh * step) >> 16;
+
+    if (span_w > sw) span_w = sw;
+    if (span_h > sh) span_h = sh;
+    if (span_w < 1)  span_w = 1;
+    if (span_h < 1)  span_h = 1;
+
+    *out_x = (sw - span_w) / 2;
+    *out_y = (sh - span_h) / 2;
+    *out_w = span_w;
+    *out_h = span_h;
 }
 
 /* ---- list row ------------------------------------------------------------ */
@@ -248,8 +302,16 @@ void evo_widget_tile(uint32_t *fb, int x, int y, int w, int h,
                           with_alpha(th->border, 160), 1,
                           with_alpha(th->shadow, 0), 0);
     } else if (t->art && t->art_w > 0 && t->art_h > 0) {
-        blit_cover(fb, x + 2, y + 2, w - 4, h - 4,
-                   t->art, t->art_w, t->art_h, 255);
+        /* Full-bleed poster, cover-cropped to the tile rather than squashed
+         * into it. */
+        int crop_x, crop_y, crop_w, crop_h;
+
+        cover_crop_rect(w - 4, h - 4, t->art_w, t->art_h,
+                        &crop_x, &crop_y, &crop_w, &crop_h);
+
+        blit_cover_src(fb, x + 2, y + 2, w - 4, h - 4,
+                       t->art, t->art_w, t->art_h,
+                       crop_x, crop_y, crop_w, crop_h, 255);
 
         /* Scrim under the caption. Without it a bright frame makes the title
          * unreadable, which is the failure mode of every poster grid. */

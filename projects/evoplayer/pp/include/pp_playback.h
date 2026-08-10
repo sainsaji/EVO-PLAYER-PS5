@@ -116,6 +116,19 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src);
  */
 int pp_playback_take_pending_present(pp_playback *pb, uint32_t *idx, uint64_t *frame_id);
 
+/**
+ * Blit the ready display frame into dst, and leave EVERY pixel of the
+ * dst_w x dst_h rect defined: the frame where there is one, opaque black
+ * everywhere else (no frame yet, mid-seek, or a display smaller than dst).
+ *
+ * That guarantee is the point. The caller used to clear the whole frame to
+ * black first and then have this overwrite all of it - 8 MB of pure waste per
+ * frame at 1080p. It cannot decide to skip the clear by asking first, because
+ * the seek thread can retire the display between the question and the answer;
+ * so the clearing belongs here, where it happens under the same lock.
+ *
+ * Returns 1 if video was copied, 0 if dst was only cleared.
+ */
 int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_bytes,
                              uint32_t dst_w, uint32_t dst_h);
 

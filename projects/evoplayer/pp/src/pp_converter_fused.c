@@ -9,6 +9,18 @@
 #define PS5_TILE_SIZE (PS5_TILE_WIDTH * PS5_TILE_HEIGHT)
 extern unsigned short PS5_tilemap[PS5_TILE_HEIGHT][PS5_TILE_WIDTH];
 
+/* Both dimensions are powers of two, so the divisions in the tile address are
+ * shifts and the modulos are masks. Asserted rather than assumed, exactly as
+ * tile_copy.c does it. */
+#define PS5_TILE_W_SHIFT 9 /* 1 << 9 == 512 */
+#define PS5_TILE_H_SHIFT 7 /* 1 << 7 == 128 */
+#define PS5_TILE_W_MASK  (PS5_TILE_WIDTH - 1)
+#define PS5_TILE_H_MASK  (PS5_TILE_HEIGHT - 1)
+
+typedef char pp_fused_tile_dims_must_be_pow2[
+    ((1 << PS5_TILE_W_SHIFT) == PS5_TILE_WIDTH &&
+     (1 << PS5_TILE_H_SHIFT) == PS5_TILE_HEIGHT) ? 1 : -1];
+
 typedef struct {
     const pp_frame *src;
     uint32_t *dst;
@@ -16,14 +28,29 @@ typedef struct {
     uint32_t y0, y1;
 } fused_band_job;
 
+/*
+ * The address math is UNCHANGED from the original double-precision form; only
+ * the way it is computed. Same proof as tile_copy.c:
+ *
+ *     t = TILE_SIZE * (tx + ty * w / TILE_WIDTH)
+ *       = TILE_SIZE*tx + (TILE_SIZE / TILE_WIDTH) * ty * w
+ *       = TILE_SIZE*tx + TILE_HEIGHT * ty * w        [65536/512 = 128 exactly]
+ *
+ * The division is exact for every w, so the double arithmetic never rounded -
+ * including 1920, where w/512 = 3.75. This is NOT ceil(w/512); that remains
+ * wrong, as the old comment warns.
+ *
+ * Kept because it is public API and it documents the mapping. The band worker
+ * no longer calls it: it walks whole tile spans instead, so the base is
+ * computed once per 512 pixels rather than once per pixel.
+ */
 size_t pp_tiled_pixel_offset(int x, int y, int frame_width)
 {
-    int ty = y / PS5_TILE_HEIGHT;
-    int tx = x / PS5_TILE_WIDTH;
-    int t = (int)(PS5_TILE_SIZE *
-                  (tx + ty * ((double)frame_width / (double)PS5_TILE_WIDTH)));
-    int i = (int)PS5_tilemap[y % PS5_TILE_HEIGHT][x % PS5_TILE_WIDTH];
-    return (size_t)(t + i);
+    size_t t = (size_t)(y >> PS5_TILE_H_SHIFT) * (size_t)PS5_TILE_HEIGHT *
+                   (size_t)frame_width +
+               (size_t)(x >> PS5_TILE_W_SHIFT) * (size_t)PS5_TILE_SIZE;
+    size_t i = (size_t)PS5_tilemap[y & PS5_TILE_H_MASK][x & PS5_TILE_W_MASK];
+    return t + i;
 }
 
 static uint32_t yuv_to_bgra_r_low(int y, int u, int v)
@@ -47,38 +74,76 @@ static uint32_t yuv_to_bgra_r_low(int y, int u, int v)
     return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
 }
 
+/*
+ * Walks the band a tile span at a time, not a pixel at a time.
+ *
+ * The previous version called pp_tiled_pixel_offset four times per 2×2 block,
+ * and that helper evaluated a double divide and a double multiply per call:
+ * at 2160p that is 8.3M double divides per frame purely to compute addresses.
+ * docs/converter-perf.md named it as the next experiment, and tile_copy.c had
+ * already made the same move for the linear tiling path.
+ *
+ * Now the tile base is hoisted out - once per 512 pixels instead of once per
+ * pixel - and the intra-tile index is the tilemap row lookup the loop was
+ * doing anyway. The inner loop is a load, two table lookups and two indexed
+ * stores. Addresses are bit-for-bit the ones the old formula produced; the
+ * benchmark's plane hashes are the check.
+ */
 static void *fused_band_worker(void *arg)
 {
     fused_band_job *j = (fused_band_job *)arg;
     const pp_frame *s = j->src;
-    uint32_t y, x;
-    uint32_t w = s->width;
-    uint32_t fw = j->frame_w;
+    const uint32_t w = s->width;
+    const uint32_t fw = j->frame_w;
+    uint32_t y;
 
     /* Process 2×2 blocks: load U/V once per block */
     for (y = j->y0; y < j->y1; y += 2u) {
-        const uint8_t *Y0 = s->planes[0] + y * (uint32_t)s->strides[0];
+        const uint8_t *Y0 = s->planes[0] + (size_t)y * (size_t)s->strides[0];
+        const uint8_t *U = s->planes[1] + (size_t)(y / 2u) * (size_t)s->strides[1];
+        const uint8_t *V = s->planes[2] + (size_t)(y / 2u) * (size_t)s->strides[2];
+
+        /* The odd row exists when both the band and the frame still have one.
+         * Bands are cut on even boundaries, so this is only false on a final
+         * odd row - but 4:2:0 with an odd height is the caller's problem, not
+         * something to read past the plane for. */
+        const int has_odd_row = (y + 1u < j->y1) && (y + 1u < s->height);
         const uint8_t *Y1 =
-            (y + 1u < s->height) ? s->planes[0] + (y + 1u) * (uint32_t)s->strides[0] : Y0;
-        const uint8_t *U = s->planes[1] + (y / 2u) * (uint32_t)s->strides[1];
-        const uint8_t *V = s->planes[2] + (y / 2u) * (uint32_t)s->strides[2];
+            has_odd_row ? s->planes[0] + (size_t)(y + 1u) * (size_t)s->strides[0] : Y0;
 
-        for (x = 0; x < w; x += 2u) {
-            int uu = U[x / 2u];
-            int vv = V[x / 2u];
-            uint32_t p00 = yuv_to_bgra_r_low(Y0[x], uu, vv);
-            j->dst[pp_tiled_pixel_offset((int)x, (int)y, (int)fw)] = p00;
+        /* y is even and tiles are 128 rows tall, so both rows of every block
+         * land in the same tile row: one base serves the pair. */
+        const size_t row_base =
+            (size_t)(y >> PS5_TILE_H_SHIFT) * (size_t)PS5_TILE_HEIGHT * (size_t)fw;
+        const unsigned short *lut0 = PS5_tilemap[y & PS5_TILE_H_MASK];
+        const unsigned short *lut1 = PS5_tilemap[(y + 1u) & PS5_TILE_H_MASK];
 
-            if (x + 1u < w) {
-                uint32_t p10 = yuv_to_bgra_r_low(Y0[x + 1u], uu, vv);
-                j->dst[pp_tiled_pixel_offset((int)(x + 1u), (int)y, (int)fw)] = p10;
-            }
-            if (y + 1u < j->y1 && y + 1u < s->height) {
-                uint32_t p01 = yuv_to_bgra_r_low(Y1[x], uu, vv);
-                j->dst[pp_tiled_pixel_offset((int)x, (int)(y + 1u), (int)fw)] = p01;
-                if (x + 1u < w) {
-                    uint32_t p11 = yuv_to_bgra_r_low(Y1[x + 1u], uu, vv);
-                    j->dst[pp_tiled_pixel_offset((int)(x + 1u), (int)(y + 1u), (int)fw)] = p11;
+        uint32_t x0;
+        for (x0 = 0; x0 < w; x0 += PS5_TILE_WIDTH) {
+            uint32_t *d = j->dst + row_base +
+                          ((size_t)(x0 >> PS5_TILE_W_SHIFT) * (size_t)PS5_TILE_SIZE);
+            const uint8_t *y0p = Y0 + x0;
+            const uint8_t *y1p = Y1 + x0;
+            const uint8_t *up = U + x0 / 2u;
+            const uint8_t *vp = V + x0 / 2u;
+            uint32_t k;
+
+            uint32_t n = w - x0;
+            if (n > PS5_TILE_WIDTH)
+                n = PS5_TILE_WIDTH; /* 1920 leaves a 384-wide remainder */
+
+            for (k = 0; k < n; k += 2u) {
+                int uu = up[k / 2u];
+                int vv = vp[k / 2u];
+
+                d[lut0[k]] = yuv_to_bgra_r_low(y0p[k], uu, vv);
+                if (k + 1u < n)
+                    d[lut0[k + 1u]] = yuv_to_bgra_r_low(y0p[k + 1u], uu, vv);
+
+                if (has_odd_row) {
+                    d[lut1[k]] = yuv_to_bgra_r_low(y1p[k], uu, vv);
+                    if (k + 1u < n)
+                        d[lut1[k + 1u]] = yuv_to_bgra_r_low(y1p[k + 1u], uu, vv);
                 }
             }
         }

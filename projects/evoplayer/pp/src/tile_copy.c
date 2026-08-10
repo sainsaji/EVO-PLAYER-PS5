@@ -35,6 +35,8 @@
 #include "pp_platform.h"
 
 #include <pthread.h>
+#include <stdint.h>
+#include <string.h>
 
 #ifndef PS5_TILE_WIDTH
 #define PS5_TILE_WIDTH  512
@@ -97,43 +99,175 @@ static void *pp_tile_thread(void *arg)
     return NULL;
 }
 
+/* ---------------------------------------------------------------------------
+ * Persistent worker pool.
+ *
+ * This function used to pthread_create and pthread_join twelve workers on
+ * every frame. That is the exact pattern the comment at the top of
+ * pp_converter_parallel.c names as the Soft-UHD freeze root cause - "that
+ * stalls every few frames under scheduler pressure" - and both converters were
+ * rewritten around persistent pools because of it. This one was missed, and it
+ * is not a dormant path: pp_videoout_present calls it for every 1080p frame,
+ * so at 60fps it was asking the scheduler for 720 thread creations a second on
+ * the render thread, the one thread that must not stall.
+ *
+ * Same structure as the pool in pp_converter_fused.c, including honouring a
+ * change in worker count rather than silently keeping the original size.
+ * ------------------------------------------------------------------------ */
+
+typedef struct {
+    pthread_mutex_t m;
+    pthread_cond_t  work_cv;
+    pthread_cond_t  done_cv;
+
+    pthread_t       th[PP_TILE_THREADS];
+    PP_DrawChunk    jobs[PP_TILE_THREADS];
+
+    int             n_workers;
+    int             started;
+    int             shutdown;
+
+    /* Bumped once per frame. A worker runs when it sees a generation it has
+     * not handled yet, which avoids the lost-wakeup a plain flag has. */
+    uint64_t        generation;
+    int             done_count;
+} pp_tile_pool;
+
+static pp_tile_pool   g_tpool;
+static pthread_mutex_t g_tpool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *pp_tile_pool_worker(void *arg)
+{
+    int      id   = (int)(intptr_t)arg;
+    uint64_t mine = 0;
+
+    for (;;) {
+        pthread_mutex_lock(&g_tpool.m);
+        while (!g_tpool.shutdown && g_tpool.generation == mine)
+            pthread_cond_wait(&g_tpool.work_cv, &g_tpool.m);
+
+        if (g_tpool.shutdown) {
+            pthread_mutex_unlock(&g_tpool.m);
+            return NULL;
+        }
+
+        mine = g_tpool.generation;
+        pthread_mutex_unlock(&g_tpool.m);
+
+        if (id < g_tpool.n_workers)
+            pp_tile_thread(&g_tpool.jobs[id]);
+
+        pthread_mutex_lock(&g_tpool.m);
+        g_tpool.done_count++;
+        pthread_cond_signal(&g_tpool.done_cv);
+        pthread_mutex_unlock(&g_tpool.m);
+    }
+}
+
+static void pp_tile_pool_teardown(void)
+{
+    int i;
+
+    if (!g_tpool.started)
+        return;
+
+    pthread_mutex_lock(&g_tpool.m);
+    g_tpool.shutdown = 1;
+    pthread_cond_broadcast(&g_tpool.work_cv);
+    pthread_mutex_unlock(&g_tpool.m);
+
+    for (i = 0; i < g_tpool.n_workers; i++)
+        pthread_join(g_tpool.th[i], NULL);
+
+    pthread_mutex_destroy(&g_tpool.m);
+    pthread_cond_destroy(&g_tpool.work_cv);
+    pthread_cond_destroy(&g_tpool.done_cv);
+
+    memset(&g_tpool, 0, sizeof(g_tpool));
+}
+
+/* Returns the usable worker count, or 0 if no pool could be built. */
+static int pp_tile_pool_ensure(int n)
+{
+    int i;
+
+    if (g_tpool.started && g_tpool.n_workers == n)
+        return n;
+
+    pp_tile_pool_teardown();
+
+    pthread_mutex_init(&g_tpool.m, NULL);
+    pthread_cond_init(&g_tpool.work_cv, NULL);
+    pthread_cond_init(&g_tpool.done_cv, NULL);
+
+    g_tpool.n_workers = n;
+    g_tpool.started   = 1;
+
+    for (i = 0; i < n; i++) {
+        if (pthread_create(&g_tpool.th[i], NULL,
+                           pp_tile_pool_worker, (void *)(intptr_t)i) != 0) {
+            g_tpool.n_workers = i;   /* run with what we got */
+            break;
+        }
+    }
+
+    return g_tpool.n_workers;
+}
+
 void pp_draw_pixels_as_tiles(uint32_t *src, uint32_t *dst, int frame_width,
                              int frame_height)
 {
-    PP_DrawChunk chunks[PP_TILE_THREADS];
-    pthread_t threads[PP_TILE_THREADS];
-    int started = 0;
+    int n = PP_TILE_THREADS;
     int i;
 
     if (!src || !dst || frame_width <= 0 || frame_height <= 0)
         return;
 
+    if (n > frame_height)
+        n = frame_height;   /* more threads than rows */
+
+    /* One frame at a time. The pool is process-wide state and the caller is
+     * the single render thread, but a stray concurrent call would otherwise
+     * interleave two frames' jobs into the same slots. */
+    pthread_mutex_lock(&g_tpool_lock);
+
+    n = pp_tile_pool_ensure(n);
+
+    if (n <= 0) {
+        /* No threads available - do the whole frame inline rather than
+         * dropping it. Slow beats blank. */
+        PP_DrawChunk c;
+
+        pthread_mutex_unlock(&g_tpool_lock);
+
+        c.src         = src;
+        c.dst         = dst;
+        c.frame_width = frame_width;
+        c.y_start     = 0;
+        c.y_end       = frame_height;
+        pp_tile_thread(&c);
+        return;
+    }
+
     /* Split by whole rows so each thread owns complete scanlines - a row never
      * straddles two threads, which keeps the per-row setup out of the inner
      * loop and avoids two threads writing into the same tile. */
-    for (i = 0; i < PP_TILE_THREADS; i++) {
-        int y0 = (int)(((long)frame_height * i) / PP_TILE_THREADS);
-        int y1 = (int)(((long)frame_height * (i + 1)) / PP_TILE_THREADS);
-
-        if (y1 <= y0)
-            continue;   /* more threads than rows */
-
-        chunks[started].src         = src;
-        chunks[started].dst         = dst;
-        chunks[started].frame_width = frame_width;
-        chunks[started].y_start     = y0;
-        chunks[started].y_end       = y1;
-
-        if (pthread_create(&threads[started], 0,
-                           pp_tile_thread, &chunks[started]) == 0) {
-            started++;
-        } else {
-            /* Out of threads: do this slice on the calling thread rather than
-             * silently dropping part of the frame. */
-            pp_tile_thread(&chunks[started]);
-        }
+    for (i = 0; i < n; i++) {
+        g_tpool.jobs[i].src         = src;
+        g_tpool.jobs[i].dst         = dst;
+        g_tpool.jobs[i].frame_width = frame_width;
+        g_tpool.jobs[i].y_start     = (int)(((long)frame_height * i) / n);
+        g_tpool.jobs[i].y_end       = (int)(((long)frame_height * (i + 1)) / n);
     }
 
-    for (i = 0; i < started; i++)
-        pthread_join(threads[i], 0);
+    pthread_mutex_lock(&g_tpool.m);
+    g_tpool.done_count = 0;
+    g_tpool.generation++;
+    pthread_cond_broadcast(&g_tpool.work_cv);
+
+    while (g_tpool.done_count < n)
+        pthread_cond_wait(&g_tpool.done_cv, &g_tpool.m);
+    pthread_mutex_unlock(&g_tpool.m);
+
+    pthread_mutex_unlock(&g_tpool_lock);
 }

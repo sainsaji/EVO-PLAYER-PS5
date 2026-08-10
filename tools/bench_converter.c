@@ -28,6 +28,7 @@
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
 #include "pp_frame.h"
+#include "pp_platform.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -309,6 +310,119 @@ static void run_size(uint32_t w, uint32_t h, int iters)
     test_frame_free(&tf);
 }
 
+/* ---- the 1080p present path ---------------------------------------------- */
+
+/*
+ * 1080p never got the fusion 4K got: the fused converter writes YUV -> BGRA ->
+ * tiled in one pass straight to the VideoOut plane, but it is gated to UHD
+ * sizes. Below that gate the render thread runs three more full-frame passes
+ * over 8 MB each, and this measures them separately so the cost of each is a
+ * number rather than an argument.
+ *
+ *   clear   draw_player_screen blacked all 2M pixels ...
+ *   copy    ... and pp_playback_copy_display then overwrote every one of them
+ *   tile    swizzle the composited frame into the tiled VO plane
+ *
+ * The clear is the one that was pure waste, and it is gone. The copy is the
+ * price of compositing the OSD over the video in linear space: removing it
+ * means the converter writing into the VideoOut buffer directly, which is a
+ * change of buffer ownership between the decode and render threads and not
+ * something to land on host timings alone.
+ */
+static void run_present_path(uint32_t w, uint32_t h, int iters)
+{
+    size_t    px    = (size_t)w * h;
+    uint32_t *display = malloc(px * 4);          /* pb->display  */
+    uint32_t *cpu     = malloc(px * 4);          /* VO cpu_buf ("linear") */
+    uint32_t *tiled   = calloc(tiled_plane_pixels(w, h), 4);
+    double    t0, t_clear, t_copy, t_tile;
+    int       i;
+
+    if (!display || !cpu || !tiled) {
+        printf("\n present-path alloc failed\n");
+        free(display); free(cpu); free(tiled);
+        return;
+    }
+
+    for (i = 0; i < (int)px; i++)
+        display[i] = 0xFF000000u | (uint32_t)i;
+
+    printf("\n=== %ux%u present path, %d iterations ===\n", w, h, iters);
+    printf(" each pass touches %.1f MB\n", px * 4.0 / (1024.0 * 1024.0));
+
+    /*
+     * pp_draw_pixels_as_tiles has no worker-count knob, so the consistency
+     * trick used above does not apply. Check it against an independent
+     * reference instead: the same addresses computed one pixel at a time by
+     * pp_tiled_pixel_offset, which the plane hashes above already vouch for.
+     * The threaded version splits by rows, and a band split that drops or
+     * double-writes a row is exactly what this has to catch.
+     */
+    {
+        size_t    tp  = tiled_plane_pixels(w, h);
+        uint32_t *ref = calloc(tp, 4);
+        uint32_t  x, yy;
+
+        if (!ref) {
+            printf(" reference alloc failed\n");
+            free(display); free(cpu); free(tiled);
+            return;
+        }
+
+        for (yy = 0; yy < h; yy++)
+            for (x = 0; x < w; x++)
+                ref[pp_tiled_pixel_offset((int)x, (int)yy, (int)w)] =
+                    display[(size_t)yy * w + x];
+
+        memset(tiled, 0, tp * 4);
+        pp_draw_pixels_as_tiles(display, tiled, (int)w, (int)h);
+
+        printf(" swizzle vs per-pixel reference: %s\n",
+               memcmp(ref, tiled, tp * 4) == 0 ? "match" : "*** MISMATCH ***");
+
+        if (memcmp(ref, tiled, tp * 4) != 0) {
+            printf("\n  REFUSING TO REPORT TIMINGS - the tiled plane is wrong.\n");
+            free(ref); free(display); free(cpu); free(tiled);
+            return;
+        }
+        free(ref);
+    }
+
+    /* Warm both destinations so page faults are not in the measurement. */
+    memset(cpu, 0, px * 4);
+    pp_draw_pixels_as_tiles(cpu, tiled, (int)w, (int)h);
+
+    t0 = now_ms();
+    for (i = 0; i < iters; i++) {
+        size_t k;
+        for (k = 0; k < px; k++)
+            cpu[k] = 0xFF000000u;
+    }
+    t_clear = (now_ms() - t0) / iters;
+
+    t0 = now_ms();
+    for (i = 0; i < iters; i++)
+        memcpy(cpu, display, px * 4);
+    t_copy = (now_ms() - t0) / iters;
+
+    t0 = now_ms();
+    for (i = 0; i < iters; i++)
+        pp_draw_pixels_as_tiles(cpu, tiled, (int)w, (int)h);
+    t_tile = (now_ms() - t0) / iters;
+
+    printf("\n %-28s %8s\n", "stage", "ms/frame");
+    printf(" %-28s %8.2f   (removed)\n", "clear to black", t_clear);
+    printf(" %-28s %8.2f\n", "copy display -> VO buffer", t_copy);
+    printf(" %-28s %8.2f\n", "swizzle -> tiled plane", t_tile);
+    printf(" %-28s %8.2f -> %.2f  (%.0f%% less)\n", "render-thread total",
+           t_clear + t_copy + t_tile, t_copy + t_tile,
+           100.0 * t_clear / (t_clear + t_copy + t_tile));
+
+    free(display);
+    free(cpu);
+    free(tiled);
+}
+
 int main(int argc, char **argv)
 {
     int iters = (argc > 1) ? atoi(argv[1]) : 30;
@@ -322,6 +436,7 @@ int main(int argc, char **argv)
 
     run_size(1920, 1080, iters);
     run_size(3840, 2160, iters > 10 ? iters / 3 : iters);
+    run_present_path(1920, 1080, iters);
 
     return 0;
 }

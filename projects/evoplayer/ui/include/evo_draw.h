@@ -39,9 +39,14 @@ typedef enum {
 /* ---- icon indices ------------------------------------------------------ */
 
 /*
- * These match rr_icon()'s switch in main.c. Named here so screens stop
- * passing bare integers around; `rr_icon(fb, x, y, 6)` told nobody it was
- * drawing a chevron.
+ * These index EVO_ICON_TABLE, which tools/gen_icons.py emits into
+ * assets/evo_icons.h. Named here so screens stop passing bare integers
+ * around; `rr_icon(fb, x, y, 6)` told nobody it was drawing a chevron.
+ *
+ * They used to match a `switch (idx)` written out by hand in main.c and again
+ * in tools/uiview.c. Both are now table lookups, so adding an icon is one
+ * edit to the generator and one line here - it can no longer be added to the
+ * mock and forgotten in the player.
  */
 enum {
     EVO_IC_USB       = 0,
@@ -57,7 +62,10 @@ enum {
     EVO_IC_PALETTE   = 10,
     EVO_IC_FOLDER    = 11,
     EVO_IC_TRASH     = 12,
-    EVO_IC_HOME      = 13
+    EVO_IC_HOME      = 13,
+    /* The application mark. Not a section icon - it is the app's own logo,
+     * drawn at the top of the rail and in the launch header. */
+    EVO_IC_LOGO      = 14
 };
 
 /* Controller glyph indices, matching rr_control(). */

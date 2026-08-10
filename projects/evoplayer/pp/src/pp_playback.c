@@ -463,27 +463,72 @@ int pp_playback_choose_output_mode(const pp_source_caps *src,
     return (int)pp_select_output_mode(src, display_max_w, display_max_h);
 }
 
+/* Opaque black, the same value every clear path in the converters uses. */
+#define PP_DISPLAY_CLEAR_BGRA 0xFF000000u
+
+static void fill_rect_bgra(uint32_t *dst, uint32_t pitch_px, uint32_t x,
+                           uint32_t y, uint32_t w, uint32_t h, uint32_t v)
+{
+    uint32_t r, c;
+
+    for (r = 0; r < h; r++) {
+        uint32_t *row = dst + (size_t)(y + r) * (size_t)pitch_px + x;
+        for (c = 0; c < w; c++)
+            row[c] = v;
+    }
+}
+
 int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_bytes,
                              uint32_t dst_w, uint32_t dst_h)
 {
-    uint32_t y, copy_w, copy_h, p;
-    if (!pb || !dst || !pb->display)
+    uint32_t copy_w = 0, copy_h = 0, p;
+    int copied = 0;
+
+    if (!dst || !dst_w || !dst_h || pitch_bytes < dst_w * 4u)
         return 0;
-    if (pb->lock)
-        pthread_mutex_lock(mtx(pb));
-    if (!pb->display_ready) {
+
+    p = pitch_bytes / 4u;
+
+    if (pb && pb->display) {
+        if (pb->lock)
+            pthread_mutex_lock(mtx(pb));
+        if (pb->display_ready) {
+            copy_w = pb->out_w < dst_w ? pb->out_w : dst_w;
+            copy_h = pb->out_h < dst_h ? pb->out_h : dst_h;
+
+            /*
+             * The full-width case is the one that runs every frame at 1080p.
+             * Row-at-a-time there is 1080 calls to memcpy for what is one
+             * contiguous 8 MB run in both buffers.
+             */
+            if (copy_w == p && copy_w == pb->out_w) {
+                memcpy(dst, pb->display, (size_t)copy_w * copy_h * 4u);
+            } else {
+                uint32_t y;
+                for (y = 0; y < copy_h; y++)
+                    memcpy(dst + (size_t)y * p, pb->display + (size_t)y * pb->out_w,
+                           copy_w * 4u);
+            }
+            copied = 1;
+        }
         if (pb->lock)
             pthread_mutex_unlock(mtx(pb));
-        return 0;
     }
-    copy_w = pb->out_w < dst_w ? pb->out_w : dst_w;
-    copy_h = pb->out_h < dst_h ? pb->out_h : dst_h;
-    p = pitch_bytes / 4u;
-    for (y = 0; y < copy_h; y++)
-        memcpy(dst + y * p, pb->display + y * pb->out_w, copy_w * 4u);
-    if (pb->lock)
-        pthread_mutex_unlock(mtx(pb));
-    return 1;
+
+    /*
+     * Everything the frame did not cover. Deliberately outside the lock: this
+     * is only reached before the first frame, during a seek, or when the
+     * display is smaller than the target, and holding the display mutex across
+     * a multi-megabyte fill would stall the decode thread's buffer swap.
+     */
+    if (copy_h < dst_h)
+        fill_rect_bgra(dst, p, 0, copy_h, dst_w, dst_h - copy_h,
+                       PP_DISPLAY_CLEAR_BGRA);
+    if (copy_w < dst_w)
+        fill_rect_bgra(dst, p, copy_w, 0, dst_w - copy_w, copy_h,
+                       PP_DISPLAY_CLEAR_BGRA);
+
+    return copied;
 }
 
 int pp_playback_has_display(const pp_playback *pb)

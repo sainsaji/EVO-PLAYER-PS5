@@ -48,15 +48,26 @@ static void draw_launch_header(uint32_t *fb, const evo_launch_model *m)
     const evo_theme *th = evo_theme_current();
     int x  = EVO_BLEED_X;
     int cy = 88;
+    /*
+     * The logo, at its native 72px, with the wordmark beside it. It replaced
+     * two concentric circles - see draw_app_mark() in evo_chrome.c for why.
+     *
+     * The icon starts at the bleed margin rather than being centred on it, so
+     * the mark shares its left edge with the hero and both shelves; a 72px
+     * glyph centred where the old 24px circle was would have hung 14px into
+     * the title-safe margin.
+     */
+    int text_x = x + EVO_RAIL_ICON + 20;
 
-    evo_ui_circle(fb, x + 22, cy, 24, with_alpha(th->accent_soft, 80));
-    evo_ui_circle(fb, x + 22, cy, 14, th->accent);
+    evo_ui_circle(fb, x + EVO_RAIL_ICON / 2, cy, 32,
+                  with_alpha(th->accent_soft, 70));
+    evo_icon_tinted(fb, x, cy - EVO_RAIL_ICON / 2, EVO_IC_LOGO, th->accent);
 
-    evo_text(fb, x + 60, evo_text_y_centred(cy - 26, 32, EVO_FACE_MENU),
+    evo_text(fb, text_x, evo_text_y_centred(cy - 26, 32, EVO_FACE_MENU),
              "EVO PLAYER", th->text_primary, EVO_FACE_MENU);
 
 #ifdef EVO_PLAYER_VERSION
-    evo_text(fb, x + 60, evo_text_y_centred(cy + 6, 26, EVO_FACE_SMALL),
+    evo_text(fb, text_x, evo_text_y_centred(cy + 6, 26, EVO_FACE_SMALL),
              "VERSION " EVO_PLAYER_VERSION, th->text_muted, EVO_FACE_SMALL);
 #endif
 
@@ -273,9 +284,14 @@ static void draw_shelf(uint32_t *fb, int label_y, int tiles_y,
             tile.art      = items[index].art.pixels;
             tile.art_w    = items[index].art.w;
             tile.art_h    = items[index].art.h;
-            /* Inset: covers are cached at 80x80, and stretched over a 274px
-             * tile they are a 3x upscale that reads as a broken image. */
-            tile.art_inset = 1;
+            /*
+             * Full bleed. Covers used to be cached at 80x80, which over a
+             * 274px tile is a 3x upscale that reads as a broken image, so
+             * they were inset as a thumbnail in the icon position instead.
+             * They are cached at 320x180 now - larger than the tile draws
+             * them - so the tile can be the poster it was always meant to be.
+             */
+            tile.art_inset = 0;
             tile.icon      = (tile.art ? -1 : EVO_IC_RECENT);
         }
 

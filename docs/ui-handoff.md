@@ -8,17 +8,29 @@ first, then [`theming.md`](theming.md) for the theme format and
 
 ## 1. Where things stand
 
-Two passes have landed.
+Three passes have landed.
 
 **v0.0.2 — theming.** Every colour and metric moved into one struct
 (`evo_theme`), drawing moved onto SDF primitives (`evo_ui`), and icons became
 monochrome so they could be tinted. Verified on hardware.
 
-**Current pass — architecture.** The theming pass left the player *looking*
+**v0.1.0 — architecture.** The theming pass left the player *looking*
 consistent but not *being* consistent: each screen still drew its own header,
 footer and cards at its own coordinates, and navigation was two long
 `if (screen == …)` chains. That is now a real UI layer under
 `projects/evoplayer/ui/`.
+
+**v0.3.0 — the console reaches it.** The player registers a home-screen Media
+tile and starts from the controller, so the UI is finally reachable without a
+browser on a second device — see [`media-tile.md`](media-tile.md). The UI-side
+additions are the changelog screen and a generated application icon.
+
+**Unreleased — posters, a logo, and a prompt before you lose your place.**
+Four changes, all verified on the host renderer rather than on hardware:
+cover art large enough to fill a tile, the application mark replaced with the
+real logo, the feedback settings actually persisted, and CIRCLE during
+playback asking before it stops. Details are in `CHANGELOG.md`; what matters
+for the next session is in §1 and §4 below.
 
 ### The layer
 
@@ -61,6 +73,33 @@ them would duplicate every byte in the ELF.
 - **Recent, Favorites, Settings, Tools, About** — all one function
   (`evo_screen_list`) taking a model. They were ~1900 lines of five separate
   implementations that had already drifted apart in row height and margin.
+- **Changelog** (screen 19) — release notes, reached with CROSS on About's
+  last row and registered as a child of `EVO_SECTION_ABOUT`, so the rail stays
+  lit on About the way the profile picker keeps SETTINGS lit. Another
+  `evo_screen_list` model; the data is a table in
+  `projects/evoplayer/evo_changelog.h`.
+
+  Two things about that table. It is **product content, so it lives beside
+  `main.c`, not in `ui/`** — nothing under `ui/` should know what shipped in
+  0.2.0. And every string in it is written to the font atlas's alphabet, which
+  is not optional; see §3.
+
+  `tools/uiview.c` renders it from the *real* table rather than a fixture, so a
+  host render cannot disagree with the console. Fixtures that drift are how
+  the About render came to show version 0.0.2 for three releases.
+- **Stop playback** (screen 20) — CIRCLE during playback opens this rather
+  than tearing the file down. An `evo_screen_dialog()` model drawn over
+  `draw_player_screen()`, the way the subtitle picker is.
+
+  Two things are load bearing. **CIRCLE dismisses it and CROSS confirms**,
+  which inverts the usual reading of the two buttons on purpose: CIRCLE is
+  what opened the prompt, so a second press must not be what destroys the
+  session. And it goes through `pp_product_overlay_enter()` /
+  `_leave()` — leaving `screen` off `SCREEN_PLAYER` stalls the decode thread
+  but *not* the presentation clock, so without holding the clock every frame
+  on the way back looks late and gets dropped. That is the 0.1.3 Media Info
+  freeze exactly; those two helpers exist so there is one copy of the fix and
+  not two.
 
 ### Defects fixed in this pass
 
@@ -152,6 +191,28 @@ dependencies the project Makefile does not list.
 `-DEVO_START_SCREEN=n` boots straight into a screen: `0` launch, `1` browser,
 `10` settings, `13` favorites, `14` about, `15` tools, `19` changelog.
 
+**The player is installed twice, and one command updates both:**
+
+```bash
+./scripts/update-console.sh          # rebuild, update tile AND homebrew
+```
+
+`/data/homebrew/EVOPlayer` is the websrv install; `/data/evoplayer/app` is the
+tile's own copy, which the launcher **embeds** and rewrites from that embedded
+copy on every launch. So `install-homebrew.sh` alone does not update the tile —
+you rebuild, press the tile, and get the previous build with nothing on screen
+to say why. That is why the script defaults to both.
+
+Console deploys are time-bounded. `prospero-deploy` is `socat -t 9999999` and
+elfldr does not close while the payload it spawned is alive, so deploying the
+resident launcher never returns; an unbounded install ran until it was killed.
+Exit 124 from `timeout` means *still resident, detached*, which is success.
+
+For the UI specifically, prefer the host: `tools/uiview.sh <screen>` renders
+any screen to a PNG with the real drawing code, real atlas and real icons.
+Application artwork is generated too — `tools/gen_app_icon.py` writes the
+512×512 `icon0.png` the Media tile uses, from vector shapes.
+
 Then **measure**:
 
 ```bash
@@ -180,15 +241,48 @@ everything to an append-only log and survives payload restarts.
 - **Two font systems exist.** The UI uses the `RR_FONT` atlas via the
   `evo_draw` vtable. There is also a legacy 5×7 `draw_char` renderer used by
   the player overlay. Editing the wrong one wastes a cycle.
-- **The atlas does carry `/`, `_`, `.`, `:`, `-` and `+`.** An earlier version
-  of this document said it did not, and the browser transliterated paths into
-  `>` because of it. All 69 glyphs have real widths — verified against the
-  metrics tables. Breadcrumbs show real paths now.
+- **The atlas is 69 glyphs, and that is the whole alphabet you have.**
+  `assets/renderer_reset_assets.h` defines it exactly:
+
+  ```
+  RR_CHARS "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+"
+  ```
+
+  Both cases, digits, space, and six punctuation marks. **No comma, no
+  parenthesis, no apostrophe, no question mark** — and an unknown glyph leaves
+  a *hole* rather than being skipped, so prose written without checking comes
+  out as a row of gaps. `EVO_TEXT_CHARSET` and `evo_text_unsupported()` in
+  `evo_draw.h` are the check; use them rather than eyeballing.
+
+  Earlier revisions of this document, and the header comment in
+  `evo_changelog.h`, say 43 glyphs and no lower case. That was the *legacy*
+  `PP_CHARS` set, and it is not what the UI draws through — the browser and
+  the launch shelves have been rendering lower-case filenames all along. The
+  changelog entries are upper case as a house style, not because they have
+  to be. **The one thing the shorter set was right about is the punctuation:**
+  no `?`, so a confirmation prompt cannot ask a question mark's worth of
+  question. The stop-playback prompt says `STOP PLAYBACK` and lets the two
+  buttons be the answer.
+
+  An earlier version of this document claimed the atlas lacked `/ _ . : - +`,
+  and the browser transliterated real paths into `>` because of it. It does
+  carry them; every glyph has a real width in the metrics tables. Breadcrumbs
+  show real paths now.
 - **Anything that opens a media file is expensive.** Probing codecs and
   extracting a thumbnail both cost enough to stall the frame, so the browser
   debounces both behind `EVO_PROBE_SETTLE_FRAMES` and caches by path. Cover
   art on the launch shelf is resolved at **one per frame** for the same
-  reason — eight at once was seconds of hitch.
+  reason — eight at once was seconds of hitch. Note what that budget is
+  protecting: the cost is opening the file and decoding a frame, not scaling
+  the result, which is why raising the cache from 80×80 to 320×180 did not
+  change the pacing. Raising the *count* would.
+- **A modal drawn over playback must hold the presentation clock.** Leaving
+  `screen` off `SCREEN_PLAYER` stalls the decode thread but not the clock, so
+  on the way back every arriving frame is judged late by however long the
+  overlay was open, and all of them are dropped — a frozen picture with audio
+  still playing. `pp_product_overlay_enter()` / `_leave()` do this and the 4K
+  surface hand-off together; call them rather than writing it out again. The
+  subtitle picker still does not, which is a known gap (§4).
 - **Measure, don't eyeball.** Reading pixels out of a capture settled several
   questions this pass that zooming in did not.
 
@@ -196,23 +290,51 @@ everything to an append-only log and survives payload restarts.
 
 ## 4. Suggested next steps
 
-1. **A real home icon.** The rail's HOME entry reuses the folder glyph because
-   the set has no house. Add one to `tools/gen_icons.py`.
-2. **Migrate the modal screens** — profile picker, resume prompt, media info,
-   playback finished. They still draw their own chrome. The profile picker is
-   an `evo_screen_list` with four rows.
-3. **Larger cover art.** The cache is 80×80, which is why recent tiles show a
-   crisp inset thumbnail rather than filling the tile. A 400×225 cache would
-   let them be full-bleed posters like the reference.
-4. **Persist the feedback settings.** Haptics, sound and lightbar reset to
-   defaults on relaunch; they should go through `prospero_settings_save()`.
-5. **Retire `selected`.** `main.c` still carries the old main-menu integer;
-   the launch grid ignores it, but it is dead weight in the loop signature.
+[`backlog.md`](backlog.md) is the ranked list across the whole project and
+decides order. What follows is the UI-local detail behind its entries — keep
+them in step.
+
+1. **Put the whole pass on hardware.** Everything in the unreleased section
+   was verified with `tools/uiplay.sh` and a clean `build-evoplayer.sh`, and
+   nothing in it has been on a console. Three things can only be answered
+   there:
+   - whether the larger cover cache still fills the shelf without a hitch —
+     the argument that it should (§3) is reasoning, not a measurement;
+   - whether the stop prompt's 4K round trip really comes back at 4K.
+     `pp_product_overlay_enter()` / `_leave()` are Media Info's own code, so
+     it should behave as Media Info does, but Media Info's behaviour here has
+     itself only ever been checked by hand;
+   - whether the settings file written by this build is still read by one
+     written before it, and the reverse.
+2. **Give the subtitle picker the overlay helpers.** It is drawn over
+   playback exactly as the stop prompt is, and it holds neither the clock nor
+   the 4K surface — see §3. It has shipped since 0.2.0 without a report, so
+   this is a latent risk rather than a known break, and the fix is two calls.
+3. **Retire `selected`.** `main.c` still carries the old main-menu integer and
+   still passes it to `draw_menu_linear()`. The launch grid ignores it, but it
+   is dead weight in the loop signature.
+4. **Retire `prospero_cover_blit()`.** Dead since the shelf stopped drawing
+   inset thumbnails — nothing calls it — and it now describes an 80×80 world
+   that no longer exists, with a hardcoded cyan frame the theming rules
+   forbid. Left in place only because this pass had no reason to touch it.
+
+### Done since this document last said otherwise
+
+Verified in the source rather than assumed, because two of these sat here as
+open work after they had already shipped:
+
+- **The home icon exists.** `tools/gen_icons.py` has `icon_home()`, it is
+  emitted as `EVO_ICON_HOME`, and the rail's HOME entry uses `EVO_IC_HOME`.
+- **All four modal screens are migrated.** Resume prompt and playback finished
+  go through `evo_screen_dialog()`, media info through `evo_screen_info()`,
+  and the profile picker is an `evo_list_model`. None of them draws its own
+  chrome any more.
+- **Cover art is large, and the feedback settings persist.** Both were items
+  1 and 2 here; they are in the unreleased section of `CHANGELOG.md` now.
 
 ### Known unfinished business unrelated to the UI
 
-- Launching from the console home tile is broken; use the curl command above.
 - FFmpeg `full` decoder profile has never been built.
 - `libSceVdecCore` export names unknown — no hardware decode.
 - The 29-file test set in `/mnt/usb0/test_files_aud_vid/` has not had a full
-  codec sweep.
+  codec sweep. This is the top item in `backlog.md`.

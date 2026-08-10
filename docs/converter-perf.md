@@ -16,6 +16,12 @@ out, with no FFmpeg and no VideoOut in the way.
 ./tools/bench.sh --tsan   # data races
 ```
 
+`--tsan` in Docker needs `--security-opt seccomp=unconfined`. ThreadSanitizer
+disables ASLR for itself through `personality(ADDR_NO_RANDOMIZE)`, which the
+default seccomp profile blocks; the result is a CHECK failure in
+`tsan_platform_linux.cpp` and a SIGSEGV before `main`, which looks like a bug
+in the code under test and is not one.
+
 Host numbers are not the console's numbers. Use them to compare changes
 against each other, not to predict frame rate.
 
@@ -100,25 +106,120 @@ pins the pool for the life of the process, and the other silently gets the
 wrong width. The new pool in `pp_converter_fused.c` rebuilds on a count
 change instead.
 
+## Finding 3 — the fused swizzle did a double divide per pixel
+
+**Fixed 2026-08-10.** This was Finding 2 on the old "what to try next" list.
+
+`pp_tiled_pixel_offset` was called four times per 2×2 block, and each call
+evaluated a `double` divide and multiply purely to compute an address — 8.3M
+double divides per frame at 2160p. `tile_copy.c` had already made exactly this
+move for the *linear* tiling path and carries the proof that the integer form
+is identical; the fused converter never got it.
+
+The band worker now walks whole tile spans, so the tile base is computed once
+per 512 pixels instead of once per pixel, and the intra-tile index is the
+tilemap row lookup the loop was doing anyway. `pp_tiled_pixel_offset` survives
+as public API, rewritten in the same exact integer form.
+
+| | before | after |
+|---|---|---|
+| 4K, 1 worker | 38.22 ms | **20.90 ms** |
+| 4K, 4 workers | 12.43 ms | **10.42 ms** |
+| 4K, 8 workers | 10.31 ms | **8.83 ms** |
+| 1080p, 4 workers | 3.04 ms | **2.06 ms** |
+
+Single-thread time nearly halved, and the multi-worker gain is smaller because
+what is left is memory-bound rather than ALU-bound — which is the expected
+shape of this fix, not a disappointment. Plane hashes unchanged at every worker
+count, clean under ASan/UBSan and TSan.
+
+## Finding 4 — the *live* tiling path still spawned 12 threads a frame
+
+**Fixed 2026-08-10.**
+
+Finding 1 fixed per-frame thread creation in the fused converter. The same
+pattern was still in `pp_draw_pixels_as_tiles` (`tile_copy.c`), which
+`pp_videoout_present` calls for **every 1080p frame** — 12 `pthread_create` +
+`pthread_join` pairs per frame, 720 thread creations a second at 60fps, on the
+render thread, which is the one thread that must not stall.
+
+It is worth being precise about why this was missed. The analysis that found it
+had looked at `PS5_DrawPixelsAsTiles` in `main.c` and correctly concluded it was
+dormant (`PP_BACKEND_ENABLED` is unconditionally 1, so its call site is in a
+dead `#else`). But that is a *different function* from the one in
+`tile_copy.c` with nearly the same name, and the live one had the same defect.
+
+Now on a persistent pool, same structure as the other two.
+
+| | before | after |
+|---|---|---|
+| 1080p swizzle | 2.00 ms | **1.68 ms** |
+
+The host understates this, as it did for Finding 1: a dev container has a fast
+scheduler and spare cores, and the console is where thread-creation pressure
+was actually observed to stall the pipeline. The real gain should be larger
+and, more importantly, less *variable*.
+
+`pp_draw_pixels_as_tiles` takes no worker count, so the consistency trick used
+for the converters does not apply. The benchmark checks it against an
+independent reference instead — the same addresses computed one pixel at a
+time by `pp_tiled_pixel_offset` — and refuses to report timings on a mismatch.
+
+## Finding 5 — the 1080p clear that was overwritten immediately
+
+**Fixed 2026-08-10.**
+
+`draw_player_screen` blacked all 2M pixels and then had every one of them
+overwritten by `draw_video_frame_to_fb` on the next line. It could not simply
+be deleted: the clear is load-bearing when no frame is ready, and the render
+thread cannot ask "is one ready?" first because the seek thread can retire the
+display between the question and the answer.
+
+So the guarantee moved down. `pp_playback_copy_display` now leaves *every*
+pixel of the target defined — the frame where there is one, black everywhere
+else — decided under the same lock that owns the display. `draw_video_frame_to_fb`
+makes the same promise for its legacy path, and the caller's clear is gone.
+The full-width case also became one 8 MB `memcpy` instead of 1080 row-sized
+ones.
+
+Worth stating plainly: this was billed as the single biggest 1080p lever, and
+the measurement says it is not. The clear is **0.28 ms of a 2.49 ms** render
+thread — real, but the swizzle at 1.66 ms is the item that dominates. This is
+what the present-path benchmark is for.
+
 ---
 
 ## Where the remaining time goes
 
-At 4 workers the fused path uses about **64% of a 60fps budget at 4K** on this
-host, and scaling flattens after 4 workers (3.29× at 4, 3.72× at 8). Two
-things worth trying, in this order:
+At 4 workers the fused path now uses about **52% of a 60fps budget at 4K** on
+this host (was 64%), and the 1080p render thread is **2.20 ms/frame**:
 
-1. **Raise the worker count.** The player passes 4 (`workers typically 4
-   (match V3/V6B)`). 8 measured ~11% faster than 4 at 4K even after the pool
-   fix. The PS5 has more cores than the player is using — but confirm on
-   hardware, because contending with the decoder threads may cost more than
-   the conversion gains.
-2. **The swizzle, not the colour math.** `pp_tiled_pixel_offset` is called per
-   pixel and still evaluates a `double` divide and multiply per call. The
-   comment in `tile_copy.c` describes exactly this being optimised out of the
-   *linear* tiling path; the fused path calls the unoptimised helper four
-   times per 2×2 block. Hoisting the tile base out of the inner loop is the
-   obvious next experiment, and the hash check makes it safe to attempt.
+| stage | ms/frame | |
+|---|---|---|
+| clear to black | 0.28 | removed (Finding 5) |
+| copy display → VO buffer | 0.54 | remains |
+| swizzle → tiled plane | 1.66 | remains |
+
+Three things worth trying, in this order:
+
+1. **Remove the 1080p copy.** It exists only because the converter writes to
+   its own buffer and the render thread then composites the OSD over it in
+   linear space. Removing it means the decode thread converting straight into
+   the acquired VideoOut buffer — which is exactly what the V8 path does at 4K,
+   minus the UI step. That is a change of buffer ownership between the decode
+   and render threads, so unlike everything above it is **not** decidable on
+   host timings alone.
+2. **Raise the worker count.** The player passes 4 for the 1080 path; 8
+   measured ~15% faster than 4 at 4K even after both pool fixes. The PS5 has
+   more cores than the player is using — but confirm on hardware, because
+   contending with the decoder threads may cost more than the conversion gains.
+3. **Pace the render loop.** There is no vblank wait anywhere: the loop is
+   `usleep(500)` in the player and `usleep(2000)` in menus, so a static
+   settings page redraws and re-swizzles a full 1920×1080 frame up to 500 times
+   a second. Note that some UI animation is frame-counted rather than
+   time-based (`osd_visibility += 42`), so capping the rate changes how fast
+   those animations run — that has to be converted to wall-clock time in the
+   same change, not after it.
 
 ---
 

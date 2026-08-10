@@ -5,14 +5,19 @@
  *   Reading CHANGELOG.md at runtime would mean the console needing a copy of
  *   the repository on USB, and the markdown is written for a monospace
  *   terminal - prose sentences, backticks, parentheses. The font atlas is
- *   PP_CHARS:
+ *   RR_CHARS, from assets/renderer_reset_assets.h:
  *
- *       ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /._:-+
+ *       ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /._:-+
  *
- *   43 glyphs. No lower case, no comma, no parenthesis, no apostrophe - and
- *   an unknown glyph draws as a hole rather than being skipped, which is what
- *   once turned real filenames into rows of gaps. So the entries here are
- *   written to that alphabet deliberately. Keep new ones inside it.
+ *   69 glyphs. No comma, no parenthesis, no apostrophe, no question mark -
+ *   and an unknown glyph draws as a hole rather than being skipped, which is
+ *   what once turned real filenames into rows of gaps. So the entries here
+ *   are written to that alphabet deliberately. Keep new ones inside it.
+ *
+ *   This comment used to name PP_CHARS and claim 43 glyphs with no lower
+ *   case. That font was retired; PP_CHARS exists nowhere in the tree, and
+ *   lower case has been available all along. The rows below are upper case
+ *   because they have always been, not because they must be.
  *
  * KEEPING IT HONEST
  *   CHANGELOG.md at the repository root stays the source of truth. This is a
@@ -37,6 +42,15 @@ typedef struct evo_changelog_row {
 
 /* Newest first - the last thing that changed is what people look for. */
 static const evo_changelog_row EVO_CHANGELOG[] = {
+    { EVO_CL_VERSION, "0.4.0 - SMOOTHER PLAYBACK AND A SAFER STOP" },
+    { EVO_CL_NEW,     "CIRCLE ASKS BEFORE IT STOPS PLAYBACK" },
+    { EVO_CL_NEW,     "COVER ART IS LARGER - TILES READ AS POSTERS" },
+    { EVO_CL_NEW,     "SOUND AND LIGHTBAR SURVIVE A RELAUNCH" },
+    { EVO_CL_FIXED,   "SMOOTHER 4K - LESS WORK PER FRAME CONVERTED" },
+    { EVO_CL_FIXED,   "LESS STUTTER - NO THREAD CHURN EVERY FRAME" },
+    { EVO_CL_FIXED,   "TILE ART IS CROPPED - NOT SQUASHED" },
+    { EVO_CL_FIXED,   "THE RAIL NO LONGER OPENS OVER A PANEL" },
+
     { EVO_CL_VERSION, "0.3.0 - LAUNCH FROM THE CONSOLE" },
     { EVO_CL_NEW,     "HOME SCREEN TILE - OPEN FROM MEDIA - NO BROWSER" },
     { EVO_CL_NEW,     "THIS CHANGELOG - UNDER ABOUT" },

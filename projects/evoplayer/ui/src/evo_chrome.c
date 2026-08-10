@@ -133,6 +133,31 @@ int evo_sidenav_step(int index, int delta)
 }
 
 /*
+ * The application mark, at the top of the rail.
+ *
+ * This is the EVO logo icon - the ring-and-play mark the Media tile shows on
+ * the console's home screen - and not, as it was, two concentric circles. A
+ * bare accent dot above six real icons read as a bullet point rather than as
+ * the product, and it was the one thing on the page that carried no meaning.
+ *
+ * The soft disc behind it stays: it is what makes the mark sit above the rail
+ * items rather than look like a seventh one.
+ */
+static void draw_app_mark(uint32_t *fb)
+{
+    const evo_theme *th = evo_theme_current();
+
+    evo_ui_circle(fb, EVO_RAIL_W / 2, EVO_RAIL_MARK_CY, 30,
+                  with_alpha(th->accent_soft, 70));
+
+    /* Same x as every rail icon, so the mark and the section icons share one
+     * vertical centre line. */
+    evo_icon_tinted(fb, EVO_RAIL_ICON_X,
+                    EVO_RAIL_MARK_CY - EVO_RAIL_ICON / 2,
+                    EVO_IC_LOGO, th->accent);
+}
+
+/*
  * The resting rail: a full-height band, the app mark at the top, icons down
  * the left edge, and an accent bar marking the active section.
  */
@@ -149,9 +174,7 @@ static void draw_rail_base(uint32_t *fb, const evo_page *p)
      * fading into the background wash. */
     evo_ui_vline(fb, EVO_RAIL_W, 0, EVO_SCREEN_H, th->border);
 
-    /* App mark. */
-    evo_ui_circle(fb, EVO_RAIL_W / 2, 118, 22, with_alpha(th->accent_soft, 90));
-    evo_ui_circle(fb, EVO_RAIL_W / 2, 118, 13, th->accent);
+    draw_app_mark(fb);
 
     for (i = 0; i < EVO_SECTION_COUNT; i++) {
         const evo_section_info *info = evo_section_get((evo_section)i);
@@ -210,8 +233,7 @@ static void draw_rail_expanded(uint32_t *fb, const evo_page *p)
                       th->border, th->border_px,
                       th->shadow, th->shadow_px);
 
-    evo_ui_circle(fb, EVO_RAIL_W / 2, 118, 22, with_alpha(th->accent_soft, 90));
-    evo_ui_circle(fb, EVO_RAIL_W / 2, 118, 13, th->accent);
+    draw_app_mark(fb);
     evo_text(fb, EVO_RAIL_W + 12,
              evo_text_y_centred(96, 44, EVO_FACE_MENU),
              "EVO", th->text_primary, EVO_FACE_MENU);

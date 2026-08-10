@@ -17,16 +17,18 @@ history, not work — both defects it describes are fixed. And the dead ends in
 | # | Item | Size | Risk | Payoff |
 |---|---|---|---|---|
 | 1 | [Codec sweep of the 29-file test set](#1-codec-sweep-of-the-29-file-test-set) | M | none | Know what actually plays, before users tell you |
-| 2 | [Persist feedback settings](#2-persist-the-feedback-settings) | S | none | Fixes a UI that currently lies |
-| 3 | [Larger cover-art cache](#3-larger-cover-art-cache) | S–M | low | The launch screen's biggest visual gap |
-| 4 | [Migrate the four modal screens](#4-migrate-the-four-modal-screens) | M | low | Retires a whole class of drift |
-| 5 | [A real home icon](#5-a-real-home-icon) | S | none | Last obviously-wrong glyph |
+| 2 | ~~Persist feedback settings~~ | — | — | **Done, unreleased.** See §2 |
+| 3 | ~~Larger cover-art cache~~ | — | — | **Done, unreleased.** See §3 |
+| 4 | ~~Migrate the four modal screens~~ | — | — | **Done** before this list was written; see §4 |
+| 5 | ~~A real home icon~~ | — | — | **Done** before this list was written; see §5 |
 | 6 | [Universal subtitle cue counts](#6-universal-subtitle-cue-counts) | M | low | Makes 0.2.0's ranking work on every container |
 | 7 | [Decide what sidecar subtitles are](#7-decide-what-sidecar-subtitles-are) | S to investigate | low | Unknown behaviour on a common file type |
 | 8 | [Console-native launch (Media tile)](#8-console-native-launch-media-tile) | **built, awaiting first install** | **high** | Removes the second device from first-run |
 | 9 | [FFmpeg `full` decoder profile](#9-ffmpeg-full-decoder-profile) | S–M | low | Widens format coverage; needs #1 first |
 | 10 | [Hardware decode spike](#10-hardware-decode-spike-libsceavplayer) | L | **high** | 4K without CPU conversion — or a definitive no |
 | 11 | [Retire `selected`](#11-chore-retire-selected) | S | none | Dead weight in the loop signature |
+| 12 | [Overlay helpers for the subtitle picker](#12-give-the-subtitle-picker-the-overlay-helpers) | S | low | Latent 0.1.3-class freeze; the fix already exists |
+| 13 | [Retire `prospero_cover_blit()`](#13-chore-retire-prospero_cover_blit) | S | none | Dead code describing an 80×80 world |
 
 ---
 
@@ -56,7 +58,18 @@ path. Use `Atmos test tones 1000Hz V4.mp4` to confirm channel order is still
 [`validation.md`](validation.md), and any failure has a cause, not just a
 symptom.
 
-## 2. Persist the feedback settings
+## 2. Persist the feedback settings — DONE (unreleased)
+
+Sound and lightbar are appended to the settings file after the theme name and
+written whenever the Tools rows are toggled. `%[^\n]` stops at the newline and
+the `%d`s that follow skip it, so a file written by any older build still
+parses and keeps the defaults. Tools' DEBUG OVERLAY row had the same defect
+for a field that *was* already in the file, and now saves too.
+
+**Still to check on hardware:** toggle sound off, exit, relaunch, and confirm
+it is still off — and that a settings file written before this change loads.
+
+*Original entry, for the reasoning:*
 
 **Verified in source.** `prospero_settings_save()` (`projects/evoplayer/main.c:13666`)
 writes seven fields:
@@ -77,21 +90,36 @@ way and `load()` tolerates short files), so an older settings file still loads.
 
 **Done when** toggling sound off, exiting, and relaunching leaves it off.
 
-## 3. Larger cover-art cache
+## 3. Larger cover-art cache — DONE (unreleased)
 
-**Recorded in:** `ui-handoff.md` §4.3. The cache is 80×80, which is why recent
-tiles show a crisp inset thumbnail rather than a full-bleed poster. 400×225
-would let them fill the tile.
+320×180 rather than the suggested 400×225: it is 16:9, which is the shape the
+source frames are, and it still *minifies* into the tile's 270×162 drawing
+area instead of magnifying — art larger than that buys nothing a tile can
+show. The cache is 16 slots rather than 48, because only the eight recent
+tiles ever ask for a cover; that is 3.7 MB against the old 1.2 MB.
 
-Mind the cost noted in `ui-handoff.md` §3: anything that opens a media file is
-expensive, cover art on the launch shelf is deliberately resolved **one per
-frame**, and eight at once was seconds of hitch. Larger art makes each
-resolution more expensive, so the pacing matters more, not less.
+The shelf draws it full bleed (`tile.art_inset = 0`) and cover-*crops* to the
+tile rather than stretching, which the hero backdrop already did — a 16:9
+cover squashed into a 5:3 tile is a ~7% horizontal squash, invisible on a
+gradient and obvious on a face. Verified on the host: the fixture's ring
+measures 147px across and 147px tall in the rendered tile.
 
-**Done when** the launch shelf renders full-bleed art with no measurable hitch
-on entry.
+The one-per-frame budget is unchanged, and the pacing worry turned out to be
+misplaced: the expensive part is opening the file and decoding a frame, not
+scaling the result. That is now written down in `ui-handoff.md` §3 so the next
+person does not re-derive it.
 
-## 4. Migrate the four modal screens
+**Still to check on hardware:** entry to the launch screen with eight recent
+files, watching for hitch. The argument above is reasoning, not a measurement.
+
+## 4. Migrate the four modal screens — DONE
+
+Already true when this list was written, and `ui-handoff.md` has said so
+since: resume prompt and playback-finished go through `evo_screen_dialog()`,
+media info through `evo_screen_info()`, the profile picker is an
+`evo_list_model`. None draws its own chrome. Ranked here in error.
+
+*Original entry:*
 
 **Recorded in:** `ui-handoff.md` §4.2. The profile picker, resume prompt, media
 info and playback-finished screens still draw their own chrome, which is the
@@ -106,7 +134,15 @@ mechanical.
 **Done when** all four go through `evo_chrome`/`evo_widgets` and none of them
 carries its own coordinates.
 
-## 5. A real home icon
+## 5. A real home icon — DONE
+
+**Done.** `tools/gen_icons.py` has `icon_home()`, it is emitted as
+`EVO_ICON_HOME`, and the rail's HOME entry uses `EVO_IC_HOME`. Ranked here in
+error, like §4. The set has since gained `icon_logo()` too — the application
+mark, replacing the two concentric circles the rail and the launch header
+drew in place of a logo.
+
+*Original entry:*
 
 **Recorded in:** `ui-handoff.md` §4.1. The rail's HOME entry reuses the folder
 glyph because the generated set has no house. Add one to `tools/gen_icons.py`.
@@ -220,6 +256,32 @@ behind an interface, FFmpeg software path always available, hardware selected at
 
 **Recorded in:** `ui-handoff.md` §4.5. `main.c` still carries the old main-menu
 integer. The launch grid ignores it; it is dead weight in the loop signature.
+
+## 12. Give the subtitle picker the overlay helpers
+
+**Verified in source.** The picker sets `screen = SCREEN_SUBTITLE_PICKER` and
+draws itself over `draw_player_screen()`. That stalls the decode thread —
+every worker loop gates on `screen != SCREEN_PLAYER` — while the presentation
+clock's wall-time base keeps running, so on the way back frames are judged
+late by however long the picker was open. It also leaves a 4K surface without
+remembering to put it back.
+
+That is the 0.1.3 Media Info freeze, and the fix already exists:
+`pp_product_overlay_enter()` / `pp_product_overlay_leave()`, which Media Info
+and the stop-playback prompt both call. Two lines.
+
+It has shipped since 0.2.0 with no report, so treat it as latent rather than
+broken — which is exactly why it is down here and not at the top.
+
+**Done when** opening the picker on a 4K file and dismissing it returns to 4K
+playback with no dropped-frame burst.
+
+## 13. Chore: retire `prospero_cover_blit()`
+
+Dead — nothing calls it, and nothing has since the launch shelf stopped
+drawing inset thumbnails. It describes an 80×80 world that no longer exists
+and paints a hardcoded cyan frame, which is the one thing
+[`theming.md`](theming.md) forbids outright. About 45 lines.
 
 ---
 

@@ -28,6 +28,7 @@ CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -Ipp/include \
     -Iui/include \
+    -Imedia/include \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include/SDL2 \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include \
     -DPP_4K_PRODUCT_STAGE=$(STAGE)
@@ -75,9 +76,16 @@ UI_SRCS := \
     ui/src/evo_widgets.c \
     ui/src/evo_screens.c
 
+# Media subsystems carved out of main.c. Unlike the UI layer these do link
+# against FFmpeg, but they own their own state and threads and expose a handful
+# of functions - see the header of each for the measurement that justified the
+# cut.
+MEDIA_SRCS := \
+    media/src/prospero_thumbnail.c
+
 all: $(ELF)
 
-$(ELF): main.c $(PP_SRCS) $(UI_SRCS)
+$(ELF): main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@

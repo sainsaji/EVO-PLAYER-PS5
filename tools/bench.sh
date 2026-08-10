@@ -5,6 +5,16 @@
 #   ./tools/bench.sh            30 iterations at 1080p, 10 at 4K
 #   ./tools/bench.sh 100        more iterations, steadier numbers
 #   ./tools/bench.sh --asan     run under AddressSanitizer instead of timing
+#   ./tools/bench.sh --tsan     run under ThreadSanitizer instead of timing
+#
+# --tsan inside Docker needs the default seccomp profile relaxed:
+#
+#   docker run --security-opt seccomp=unconfined ...
+#
+# TSan disables ASLR for itself via personality(ADDR_NO_RANDOMIZE), which
+# Docker's default profile blocks. The failure is a CHECK in
+# tsan_platform_linux.cpp and a SIGSEGV before main, which reads like a bug in
+# the code under test and is not one.
 #
 # Host clang, host CPU - no console involved. See the header comment in
 # tools/bench_converter.c for why that is the right call for this measurement.

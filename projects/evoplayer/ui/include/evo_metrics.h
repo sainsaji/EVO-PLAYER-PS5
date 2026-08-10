@@ -40,6 +40,9 @@
 #define EVO_RAIL_TOP        232
 #define EVO_RAIL_ICON       72   /* native icon size from gen_icons.py */
 #define EVO_RAIL_ICON_X     18   /* centres a 72px icon in a 108px rail */
+/* Centre line of the application mark above the section icons. It clears the
+ * first rail item (EVO_RAIL_TOP) by 78px with a 72px glyph. */
+#define EVO_RAIL_MARK_CY    118
 
 /* ---- header ------------------------------------------------------------ */
 

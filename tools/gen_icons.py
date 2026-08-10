@@ -282,6 +282,31 @@ def icon_home():
     ]
 
 
+def icon_logo():
+    # The application mark, as one monochrome glyph.
+    #
+    # The rail and the launch header used to draw two concentric circles as a
+    # stand-in for a logo, which read as a bullet point rather than as the
+    # product. This is the ring-and-play mark from tools/gen_app_icon.py -
+    # the same shape the Media tile shows on the home screen - reduced to a
+    # single 72px icon so it tints with the theme like everything else in the
+    # rail sitting under it.
+    #
+    # The triangle is filled and nudged right: a geometrically centred play
+    # triangle always looks left-heavy inside a ring. Same offset ratio the
+    # app icon uses, scaled to 72px.
+    tri_r  = 13.0
+    tri_cx = C + 1.5
+    return [
+        shape("circle", C, C, 25.0, stroke=6.0),
+        shape("poly", [
+            (tri_cx - tri_r * 0.72, C - tri_r),
+            (tri_cx - tri_r * 0.72, C + tri_r),
+            (tri_cx + tri_r * 0.95, C),
+        ]),
+    ]
+
+
 def icon_trash():
     shapes = [
         shape("rrect", C, 44.0, 17.0, 20.0, 4.0, stroke=STROKE),  # bin
@@ -377,6 +402,7 @@ ICONS = [
     ("EVO_ICON_FOLDER", icon_folder, SIZE),
     ("EVO_ICON_TRASH", icon_trash, SIZE),
     ("EVO_ICON_HOME", icon_home, SIZE),
+    ("EVO_ICON_LOGO", icon_logo, SIZE),
     # Controller prompts, 48px, same names as the RR_CONTROL_* they replace.
     ("EVO_CTRL_X", ctrl_x, CTRL),
     ("EVO_CTRL_CIRCLE", ctrl_circle, CTRL),
@@ -385,6 +411,52 @@ ICONS = [
     ("EVO_CTRL_DPAD", ctrl_dpad, CTRL),
     ("EVO_CTRL_LEFT_STICK", lambda: ctrl_stick("L"), CTRL),
     ("EVO_CTRL_RIGHT_STICK", lambda: ctrl_stick("R"), CTRL),
+]
+
+
+# ---------------------------------------------------------------------------
+# The index each drawing call passes.
+#
+# These were `switch (idx)` statements written out by hand in BOTH
+# projects/evoplayer/main.c and tools/uiview.c - the player and the host mock -
+# with one arm per icon, naming the same three macros each time. Nothing tied
+# the two copies together, and they had already drifted: main.c's rr_icon()
+# stopped at case 12 while every other copy went to 14.
+#
+# Emitting the tables here makes this file the single place an icon is added.
+# Both programs index the table instead of switching, so a new icon cannot be
+# half-added.
+#
+# ORDER IS API. Every call site passes a literal index, so these lists must
+# only ever be appended to. Note that CTRL_TABLE is deliberately NOT the order
+# the controller glyphs appear in ICONS above - it is the order the existing
+# switches used, preserved so no call site has to change.
+ICON_TABLE = [
+    "EVO_ICON_BROWSE_USB",      # 0
+    "EVO_ICON_RECENT_FILES",    # 1
+    "EVO_ICON_FAVORITES",       # 2
+    "EVO_ICON_SETTINGS",        # 3
+    "EVO_ICON_DEVELOPER_TOOLS", # 4
+    "EVO_ICON_ABOUT_SUPPORT",   # 5
+    "EVO_ICON_CHEVRON",         # 6
+    "EVO_ICON_RESUME",          # 7
+    "EVO_ICON_ASPECT",          # 8
+    "EVO_ICON_SUBTITLES",       # 9
+    "EVO_ICON_PALETTE",         # 10
+    "EVO_ICON_FOLDER",          # 11
+    "EVO_ICON_TRASH",           # 12
+    "EVO_ICON_HOME",            # 13
+    "EVO_ICON_LOGO",            # 14
+]
+
+CTRL_TABLE = [
+    "EVO_CTRL_X",               # 0
+    "EVO_CTRL_DPAD",            # 1
+    "EVO_CTRL_LEFT_STICK",      # 2
+    "EVO_CTRL_RIGHT_STICK",     # 3
+    "EVO_CTRL_CIRCLE",          # 4
+    "EVO_CTRL_TRIANGLE",        # 5
+    "EVO_CTRL_SQUARE",          # 6
 ]
 
 
@@ -448,6 +520,32 @@ def main():
         for i in range(0, len(flat), 12):
             lines.append(",".join(flat[i:i + 12]) + ",")
         lines.append("};")
+        lines.append("")
+
+    # Index tables. See the comment on ICON_TABLE for why these exist.
+    known = {name for name, _fn, _n in ICONS}
+    for label, table in (("ICON", ICON_TABLE), ("CTRL", CTRL_TABLE)):
+        for name in table:
+            if name not in known:
+                raise SystemExit(f"{label}_TABLE names {name}, which ICONS does not define")
+
+    lines += [
+        "/* Index -> bitmap. The player and tools/uiview.c both draw through",
+        " * these rather than through a hand-written switch per program.",
+        " * Append only: every call site passes a literal index. */",
+        "typedef struct {",
+        "    const unsigned int *px;",
+        "    int w, h;",
+        "} evo_icon_bitmap;",
+        "",
+    ]
+
+    for label, table in (("EVO_ICON_TABLE", ICON_TABLE), ("EVO_CTRL_TABLE", CTRL_TABLE)):
+        lines.append(f"static const evo_icon_bitmap {label}[] = {{")
+        for idx, name in enumerate(table):
+            lines.append(f"    {{ {name}, {name}_W, {name}_H }}, /* {idx} */")
+        lines.append("};")
+        lines.append(f"#define {label}_COUNT {len(table)}")
         lines.append("")
 
     with open(out_h, "w") as f:

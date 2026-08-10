@@ -5,6 +5,154 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.4.0
+
+Playback does less work per frame, and the code that does it lives in fewer
+places.
+
+The measurable part: the 4K converter stopped computing pixel addresses in
+floating point, the tiling path that runs on every 1080p frame stopped
+creating twelve threads to do it, and the player stopped blacking two million
+pixels it was about to overwrite. The structural part: 87.7 MB of assets
+nothing included are gone, icons draw from a generated table instead of three
+hand-written switches, and the first module has left `main.c`.
+
+Interface work too — CIRCLE asks before it stops playback, and cover art is
+large enough to read as cover art.
+
+### Performance
+
+Every change here is verified on the host by `./tools/bench.sh`, which hashes
+the output plane and refuses to print timings if the pixels moved. Host
+timings are not the console's; they compare changes against each other.
+
+- **The 4K swizzle stopped doing a `double` divide per pixel.** The fused
+  converter called `pp_tiled_pixel_offset` four times per 2×2 block, and each
+  call evaluated a double divide and multiply purely to compute an address —
+  8.3M of them per frame at 2160p. It now walks whole tile spans, so the tile
+  base is computed once per 512 pixels. `tile_copy.c` had already made this
+  move for the linear path and carries the proof that the integer form is
+  identical. 4K single-thread **38.2 ms → 20.9 ms**; at 4 workers 12.4 → 10.4;
+  1080p at 4 workers 3.0 → 2.1. Plane hashes unchanged.
+- **The tiling path that actually runs stopped spawning 12 threads a frame.**
+  `pp_converter_parallel.c` names per-frame `pthread_create`/`join` as the
+  Soft-UHD freeze root cause, and both converters were rewritten around
+  persistent pools because of it. `pp_draw_pixels_as_tiles` was missed — and it
+  is not dormant: `pp_videoout_present` calls it for every 1080p frame, so at
+  60fps it asked the scheduler for 720 thread creations a second on the render
+  thread. (The dormant one is the similarly named `PS5_DrawPixelsAsTiles` in
+  `main.c`; they are different functions.) Now on a pool: **2.00 ms → 1.68 ms**
+  on the host, and the console is where the stalls were actually observed.
+- **The player no longer blacks 2M pixels it is about to overwrite.**
+  `draw_player_screen` cleared the whole frame and then had every pixel of it
+  replaced by the video on the next line. The clear could not simply be
+  deleted — it is load-bearing when no frame is ready, and the render thread
+  cannot ask "is one ready?" first, because the seek thread can retire the
+  display between the question and the answer. So the guarantee moved down:
+  `pp_playback_copy_display` now leaves every pixel of its target defined,
+  decided under the lock that owns the display. Worth 0.28 ms of a 2.49 ms
+  render thread — real, and smaller than it was billed as.
+- **The full-frame display copy is one `memcpy`** rather than 1080 row-sized
+  ones, which is what it had always been in the case that runs every frame.
+- **Glyph lookup is a table**, not a linear scan of the 69-character
+  `RR_CHARS` run once per character drawn — and the miss case, which is most
+  punctuation in a filename, paid all 69 comparisons. There were two hand-
+  copied implementations of that scan; there is now one function.
+
+### Changed
+
+- **The thumbnail worker is its own translation unit.** `main.c` was ~18k
+  lines in one file, and the received wisdom was to pull decode/demux out
+  first. Measuring the file says otherwise: half its 263 file-scope globals
+  are referenced across spans of more than 5,000 lines, and the *most* smeared
+  of them are the playback ones — `g_pp_pb` is touched across 17,899 lines,
+  `player_paused` across 17,311. Cutting there first would publish sixty
+  globals through a header and turn a tangle into a tangle with an API.
+
+  The scrub-preview thumbnail worker measured as the real seam: 1,096 lines,
+  39 symbols, and a total dependency on the rest of the program of two helpers
+  and two screen constants. It owns its thread, mutex, condition variable and
+  request queue, so the boundary already existed — it just wasn't a file. It
+  is now `media/src/prospero_thumbnail.c` behind a six-function header.
+  `main.c` is 16,815 lines and 199 file-scope statics, from 17,985 and 229.
+
+  Nothing about the code changed: the move is checked mechanically against the
+  original region, and differs only by the four substitutions its header
+  documents.
+- **Source-over pixel blending is in one header.** `main.c` carried two copies
+  of it, the second commented "duplicated rather than shared … because that one
+  is defined ~3000 lines further down" — a workaround for declaration order
+  inside a single translation unit, which is exactly the problem a header does
+  not have. Both are now `evo_blend_pixel()` in `ui/include/evo_blend.h`, with
+  identical arithmetic to what they both already did.
+- **Icon drawing goes through a generated table.** `tools/gen_icons.py` now
+  emits `EVO_ICON_TABLE` / `EVO_CTRL_TABLE`, and both the player and
+  `tools/uiview.c` index them. There were *three* hand-written `switch (idx)`
+  copies naming the same macros — and one had already drifted: `rr_icon()` in
+  main.c stopped at case 12, so it drew nothing for HOME or LOGO. It is
+  reachable through `EVO_DRAW_VTABLE`, so that was a defect waiting for its
+  first caller rather than a live one. Adding an icon is now one edit to the
+  generator; it can no longer land in the mock and be forgotten in the player.
+- **87.7 MB of unreferenced assets are gone** — `approved_raw_assets.h`,
+  `approved_ui_assets.h`, `pp_ui_assets.h`, `pp2_ui_assets.h`,
+  `pp_font_metrics.h` and three `.bmp`s. Nothing included any of them; the
+  asset directory went from 117 MB to 30 MB. `pp_font_metrics.h` going with
+  them settles the "two font systems exist" warning in the handoff doc — there
+  was one, plus a header nothing read.
+
+### New
+
+- **CIRCLE during playback asks before it stops.** It was the one
+  irreversible thing CIRCLE did anywhere in the app — tearing down the
+  decoder, the audio port and your position in the file — on a single press
+  of the button that means "back" everywhere else. It now opens a prompt over
+  the paused frame: CIRCLE (the button that opened it) keeps watching, CROSS
+  stops. The action order is deliberate: the destructive answer is not the one
+  you reach by repeating what you just did.
+- **Cover art is large enough to be cover art.** The cache moved from 80×80 to
+  320×180 and the recent shelf draws it full bleed instead of as an inset
+  thumbnail, so tiles are posters. 320×180 is 16:9 — the shape the source
+  frames actually are — and it *minifies* into the tile's 270×162 drawing
+  area rather than magnifying, which is what the old 3.4× upscale could never
+  do. The cache is 16 slots rather than 48: only the eight recent tiles ever
+  ask for one, and the trade is 3.7 MB against 1.2 MB.
+- **The application mark is the EVO logo.** The top-left of the rail and of
+  the launch header drew two concentric circles standing in for a logo. Both
+  now draw `EVO_ICON_LOGO` — the ring-and-play mark from the home-screen icon,
+  generated by `tools/gen_icons.py` as one monochrome glyph so it tints with
+  the theme like every other icon.
+- **Sound and lightbar survive a relaunch.** Appended to the settings file
+  after the theme name, and written when the Tools rows are toggled.
+
+### Fixed
+
+- **Tools' DEBUG OVERLAY toggle did not save**, though Settings' DEVELOPER
+  MODE row — which flips the same variable — always had. Which page you used
+  decided whether it stuck.
+- **Full-bleed tile artwork is cropped, not stretched.** Scaling a 16:9 cover
+  into a 5:3 tile is a ~7% horizontal squash: invisible on a gradient,
+  obvious on a face. `evo_widget_tile` now takes the centred source rectangle
+  that fills the tile, the same way the hero backdrop already did.
+- **LEFT no longer opens the navigation rail over the subtitle picker.**
+  Neither it nor the new stop prompt was listed in `evo_screen_is_modal()`, so
+  the rail could open as a third layer over a panel floating over video.
+- **The 4K-surface dance around a modal overlay is written once.** Media Info
+  and the stop prompt both have to leave a 4K plane and hold the presentation
+  clock; that was ~25 lines transcribed by hand, and a second copy is exactly
+  how a 4K session comes back from an overlay stuck in 1080. Both go through
+  `pp_product_overlay_enter()` / `_leave()` now.
+
+### Tooling
+
+- `tools/uiplay.sh` covers the new prompt (`M` cycles to it), and the fixture
+  artwork is 320×180 with a ring drawn in it — a gradient could not show
+  whether a cover had been squashed, and 128×72 magnified into everything it
+  was drawn on. The hero gets its own 960×540 fixture, matching
+  `EVO_HERO_ART_W/_H`, so the mock stops rendering stair-stepping the console
+  never produces.
+
+---
+
 ## 0.3.0
 
 The player starts from the console now, and tells you what changed.

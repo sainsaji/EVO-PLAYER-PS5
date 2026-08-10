@@ -49,6 +49,14 @@ int evo_screen_is_modal(evo_screen_id id)
         case EVO_SCREEN_RESUME_PROMPT:
         case EVO_SCREEN_MEDIA_INFO:
         case EVO_SCREEN_PLAYBACK_FINISHED:
+        /*
+         * Both of these are drawn over playback and were missing from this
+         * list, so LEFT on them opened the navigation rail on top of a panel
+         * floating over the video - three layers deep, with the rail lit on
+         * whichever section was last visited.
+         */
+        case EVO_SCREEN_SUBTITLE_PICKER:
+        case EVO_SCREEN_EXIT_CONFIRM:
             return 1;
         default:
             return 0;

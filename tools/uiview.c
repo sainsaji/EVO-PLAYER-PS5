@@ -147,25 +147,20 @@ static void img_tint(uint32_t *fb, int x, int y, int w, int h,
     }
 }
 
+/*
+ * Index -> icon, through the table tools/gen_icons.py emits.
+ *
+ * The player has the identical function. Both used to spell out a switch with
+ * one arm per icon, and nothing tied the copies together - the comment in
+ * evo_draw.h says this file is "kept honest by comparison, not by discipline".
+ * Indexing a generated table is the discipline.
+ */
 static void rr_icon_tinted(uint32_t *fb, int x, int y, int idx, uint32_t tint)
 {
-    switch (idx) {
-    case 0:  img_tint(fb,x,y,EVO_ICON_BROWSE_USB_W,EVO_ICON_BROWSE_USB_H,EVO_ICON_BROWSE_USB,tint); break;
-    case 1:  img_tint(fb,x,y,EVO_ICON_RECENT_FILES_W,EVO_ICON_RECENT_FILES_H,EVO_ICON_RECENT_FILES,tint); break;
-    case 2:  img_tint(fb,x,y,EVO_ICON_FAVORITES_W,EVO_ICON_FAVORITES_H,EVO_ICON_FAVORITES,tint); break;
-    case 3:  img_tint(fb,x,y,EVO_ICON_SETTINGS_W,EVO_ICON_SETTINGS_H,EVO_ICON_SETTINGS,tint); break;
-    case 4:  img_tint(fb,x,y,EVO_ICON_DEVELOPER_TOOLS_W,EVO_ICON_DEVELOPER_TOOLS_H,EVO_ICON_DEVELOPER_TOOLS,tint); break;
-    case 5:  img_tint(fb,x,y,EVO_ICON_ABOUT_SUPPORT_W,EVO_ICON_ABOUT_SUPPORT_H,EVO_ICON_ABOUT_SUPPORT,tint); break;
-    case 6:  img_tint(fb,x,y,EVO_ICON_CHEVRON_W,EVO_ICON_CHEVRON_H,EVO_ICON_CHEVRON,tint); break;
-    case 7:  img_tint(fb,x,y,EVO_ICON_RESUME_W,EVO_ICON_RESUME_H,EVO_ICON_RESUME,tint); break;
-    case 8:  img_tint(fb,x,y,EVO_ICON_ASPECT_W,EVO_ICON_ASPECT_H,EVO_ICON_ASPECT,tint); break;
-    case 9:  img_tint(fb,x,y,EVO_ICON_SUBTITLES_W,EVO_ICON_SUBTITLES_H,EVO_ICON_SUBTITLES,tint); break;
-    case 10: img_tint(fb,x,y,EVO_ICON_PALETTE_W,EVO_ICON_PALETTE_H,EVO_ICON_PALETTE,tint); break;
-    case 11: img_tint(fb,x,y,EVO_ICON_FOLDER_W,EVO_ICON_FOLDER_H,EVO_ICON_FOLDER,tint); break;
-    case 12: img_tint(fb,x,y,EVO_ICON_TRASH_W,EVO_ICON_TRASH_H,EVO_ICON_TRASH,tint); break;
-    case 13: img_tint(fb,x,y,EVO_ICON_HOME_W,EVO_ICON_HOME_H,EVO_ICON_HOME,tint); break;
-    default: break;
-    }
+    if ((unsigned)idx >= EVO_ICON_TABLE_COUNT)
+        return;
+    img_tint(fb, x, y, EVO_ICON_TABLE[idx].w, EVO_ICON_TABLE[idx].h,
+             EVO_ICON_TABLE[idx].px, tint);
 }
 
 static void rr_icon(uint32_t *fb, int x, int y, int idx)
@@ -173,18 +168,12 @@ static void rr_icon(uint32_t *fb, int x, int y, int idx)
     rr_icon_tinted(fb, x, y, idx, evo_theme_current()->accent);
 }
 
-static void rr_control_tinted(uint32_t *fb, int x, int y, int idx, uint32_t t)
+static void rr_control_tinted(uint32_t *fb, int x, int y, int t_idx, uint32_t t)
 {
-    switch (idx) {
-    case 0: img_tint(fb,x,y,EVO_CTRL_X_W,EVO_CTRL_X_H,EVO_CTRL_X,t); break;
-    case 1: img_tint(fb,x,y,EVO_CTRL_DPAD_W,EVO_CTRL_DPAD_H,EVO_CTRL_DPAD,t); break;
-    case 2: img_tint(fb,x,y,EVO_CTRL_LEFT_STICK_W,EVO_CTRL_LEFT_STICK_H,EVO_CTRL_LEFT_STICK,t); break;
-    case 3: img_tint(fb,x,y,EVO_CTRL_RIGHT_STICK_W,EVO_CTRL_RIGHT_STICK_H,EVO_CTRL_RIGHT_STICK,t); break;
-    case 4: img_tint(fb,x,y,EVO_CTRL_CIRCLE_W,EVO_CTRL_CIRCLE_H,EVO_CTRL_CIRCLE,t); break;
-    case 5: img_tint(fb,x,y,EVO_CTRL_TRIANGLE_W,EVO_CTRL_TRIANGLE_H,EVO_CTRL_TRIANGLE,t); break;
-    case 6: img_tint(fb,x,y,EVO_CTRL_SQUARE_W,EVO_CTRL_SQUARE_H,EVO_CTRL_SQUARE,t); break;
-    default: break;
-    }
+    if ((unsigned)t_idx >= EVO_CTRL_TABLE_COUNT)
+        return;
+    img_tint(fb, x, y, EVO_CTRL_TABLE[t_idx].w, EVO_CTRL_TABLE[t_idx].h,
+             EVO_CTRL_TABLE[t_idx].px, t);
 }
 
 static void rr_control(uint32_t *fb, int x, int y, int idx)
@@ -253,20 +242,64 @@ static int write_bmp(const char *path, const uint32_t *fb)
  * better than it is.
  * ======================================================================== */
 
-#define ART_W 128
-#define ART_H 72
+/*
+ * 320x180, the size main.c caches cover art at (PROSPERO_COVER_W/_H). The
+ * fixture used to be 128x72, which magnified into every surface it was drawn
+ * on and so could not show what a real cover looks like on a tile.
+ */
+#define ART_W 320
+#define ART_H 180
 static uint32_t g_art[ART_W * ART_H];
+
+/*
+ * The hero gets its own, larger buffer, because main.c gives it one:
+ * EVO_HERO_ART_W/_H are 960x540 precisely so a backdrop drawn 1740px wide is
+ * under a 2x upscale. Feeding the hero a tile-sized fixture made the mock
+ * render a 5.4x magnification and show stair-stepping that the console never
+ * produces - a picture that lies about the thing it exists to check.
+ */
+#define HERO_W 960
+#define HERO_H 540
+static uint32_t g_hero[HERO_W * HERO_H];
+
+/*
+ * A gradient with a true circle inscribed in it, at whatever size is asked
+ * for.
+ *
+ * The gradient alone told us nothing about aspect: covers are 16:9 and the
+ * tiles they fill are closer to 5:3, so anything that stretches rather than
+ * crops squashes them ~7% horizontally - invisible on a gradient, obvious on
+ * a circle, and obvious on a face. It is a ring rather than a disc because a
+ * disc hides the crop; a ring shows both where the edges went and whether it
+ * is still round.
+ */
+static void fill_art(uint32_t *buf, int w, int h)
+{
+    const int cx = w / 2, cy = h / 2;
+    const int rad   = h / 2 - h / 22;
+    const int thick = h / 36 + 1;
+
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            int r = 40 + (x * 160) / w;
+            int g = 30 + (y * 120) / h;
+            int b = 90 + ((x + y) * 90) / (w + h);
+            int dx = x - cx, dy = y - cy;
+            int d  = dx * dx + dy * dy;
+
+            if (d <= rad * rad && d >= (rad - thick) * (rad - thick)) {
+                r = 235; g = 240; b = 245;
+            }
+
+            buf[y * w + x] = 0xFF000000u | ((uint32_t)b << 16) |
+                             ((uint32_t)g << 8) | (uint32_t)r;
+        }
+}
 
 static void make_art(void)
 {
-    for (int y = 0; y < ART_H; y++)
-        for (int x = 0; x < ART_W; x++) {
-            int r = 40 + (x * 160) / ART_W;
-            int g = 30 + (y * 120) / ART_H;
-            int b = 90 + ((x + y) * 90) / (ART_W + ART_H);
-            g_art[y * ART_W + x] = 0xFF000000u | ((uint32_t)b << 16) |
-                                   ((uint32_t)g << 8) | (uint32_t)r;
-        }
+    fill_art(g_art,  ART_W,  ART_H);
+    fill_art(g_hero, HERO_W, HERO_H);
 }
 
 static void render_launch(int sel_row, int sel_col)
@@ -288,8 +321,17 @@ static void render_launch(int sel_row, int sel_col)
         items[i].title    = titles[i];
         items[i].detail   = details[i];
         items[i].progress = (i * 137) % 1000;
-        if (i == 0) { items[i].art.pixels = g_art;
-                      items[i].art.w = ART_W; items[i].art.h = ART_H; }
+        /*
+         * Art on some tiles and not others, on purpose. Cover art resolves at
+         * one file per frame, so a shelf genuinely does sit half-filled for
+         * the first few frames after it appears - and the icon fallback has to
+         * hold its own next to a poster rather than only being seen alone.
+         */
+        if (i == 0 || i == 1 || i == 2 || i == 4) {
+            items[i].art.pixels = g_art;
+            items[i].art.w = ART_W;
+            items[i].art.h = ART_H;
+        }
     }
 
     memset(&m, 0, sizeof(m));
@@ -298,9 +340,9 @@ static void render_launch(int sel_row, int sel_col)
     m.hero_detail   = "7M 58S LEFT";
     m.hero_action   = "RESUME";
     m.hero_progress = 240;
-    m.hero_art.pixels = g_art;
-    m.hero_art.w = ART_W;
-    m.hero_art.h = ART_H;
+    m.hero_art.pixels = g_hero;
+    m.hero_art.w = HERO_W;
+    m.hero_art.h = HERO_H;
     m.recent        = items;
     m.recent_count  = 7;
     m.clock         = "18:23";
@@ -554,11 +596,14 @@ static void render_list(const char *which, int sel, int rail_focused,
  */
 static void fill_fake_video(void)
 {
+    /* From the hero-sized buffer, not the tile-sized one: this fills the whole
+     * 1920x1080 frame, and a 320px source blown up six times is chunky enough
+     * to be mistaken for a fault in the scrim it sits under. */
     for (int y = 0; y < H; y++)
         for (int x = 0; x < W; x++) {
-            int sx = (x * ART_W) / W;
-            int sy = (y * ART_H) / H;
-            g_fb[y * W + x] = g_art[sy * ART_W + sx];
+            int sx = (x * HERO_W) / W;
+            int sy = (y * HERO_H) / H;
+            g_fb[y * W + x] = g_hero[sy * HERO_W + sx];
         }
 }
 
@@ -595,6 +640,33 @@ static void render_finished(void)
     m.detail  = "PLAYBACK REACHED THE END OF THE FILE";
     m.progress = 1000;
     m.actions = a; m.action_count = 3;
+    m.art.pixels = g_art; m.art.w = ART_W; m.art.h = ART_H;
+    evo_screen_dialog(g_fb, &m);
+}
+
+/*
+ * The stop-playback prompt.
+ *
+ * The action order is the thing worth looking at here: KEEP WATCHING is
+ * first, so it is the primary chip and CIRCLE - the button that opened the
+ * prompt - is the one that dismisses it. See draw_exit_confirm_screen() in
+ * main.c for why that inverts the usual reading of the two buttons.
+ */
+static void render_exitconfirm(void)
+{
+    static const evo_dialog_action a[2] = {
+        { EVO_GLYPH_CIRCLE, "KEEP WATCHING" },
+        { EVO_GLYPH_CROSS,  "STOP"          }
+    };
+    evo_dialog_model m;
+
+    fill_fake_video();
+    memset(&m, 0, sizeof(m));
+    m.eyebrow  = "STOP PLAYBACK";
+    m.title    = "leftbehind-bts";
+    m.detail   = "AT 12M 04S OF 21M 07S  -  RESUMES FROM HERE";
+    m.progress = 572;
+    m.actions = a; m.action_count = 2;
     m.art.pixels = g_art; m.art.w = ART_W; m.art.h = ART_H;
     evo_screen_dialog(g_fb, &m);
 }
@@ -718,7 +790,7 @@ static void render_picker(int sel)
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
                                  "changelog",
-                                 "resume","finished","mediainfo",
+                                 "resume","finished","mediainfo","exitconfirm",
                                  "picker",
                                  "toast","toastok","toasterror", NULL };
 
@@ -732,6 +804,7 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "resume"))    render_resume();
     else if (!strcmp(screen, "finished"))  render_finished();
     else if (!strcmp(screen, "mediainfo")) render_mediainfo();
+    else if (!strcmp(screen, "exitconfirm")) render_exitconfirm();
     else if (!strcmp(screen, "picker"))    render_picker(sel);
     else if (!strcmp(screen, "toast"))      render_toast(EVO_TOAST_INFO);
     else if (!strcmp(screen, "toastok"))    render_toast(EVO_TOAST_OK);
