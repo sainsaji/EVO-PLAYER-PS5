@@ -1,5 +1,5 @@
 /*
- * EVOPlayer — Media home launcher (resident)
+ * EVO Player — Media home launcher (resident)
  *
  * Technique (industry-standard PS5 homebrew Media BigApp path):
  *  - Register a Media-category title (applicationCategoryType 65536)
@@ -12,7 +12,11 @@
  *  - /uninstall fully removes the Media tile + host (XMB Delete often
  *    unavailable for Media BigApp hosts; this is the supported removal path)
  *
- * Product identity is EVOPlayer only (title PRSP10001, port 9055).
+ * Product identity is EVO Player only (title EVOP10001, port 9056). Both
+ * differ from ProsperoPlayer's PRSP10001/9055 on purpose: the two tiles are
+ * designed to coexist on the same console, and a shared id or port would mean
+ * one installer silently clobbering the other's registration.
+ *
  * Loader modules in core/ are John Törnblom websrv-derived (GPL-3.0+).
  */
 
@@ -38,22 +42,35 @@
 #include "core/hbldr.h"
 #include "core/standalone_fs.h"
 
-#define PP_VERSION "1.0"
-#define PP_TITLE_ID "PRSP10001"
-#define PP_SERVICE_PORT 9055
+#define PP_VERSION "0.2.0"
+#define PP_TITLE_ID "EVOP10001"
+#define PP_SERVICE_PORT 9056
 #define PP_APPINST_AUTHID UINT64_C(0x4801000000000013)
 #define PP_APP_ROOT "/user/app"
 #define PP_APP_DIR PP_APP_ROOT "/" PP_TITLE_ID
-#define PP_RUNTIME_DIR "/data/homebrew/EVOPlayer"
+/*
+ * The tile keeps its own copy of the player, deliberately NOT under
+ * /data/homebrew. That directory is what websrv scans and what
+ * install-homebrew.sh writes to, so sharing it would mean the tile silently
+ * overwriting a freshly installed dev build (and vice versa), with no way to
+ * tell which binary you just launched.
+ */
+#define PP_RUNTIME_DIR "/data/evoplayer/app"
 #define PP_PLAYER_PATH PP_RUNTIME_DIR "/eboot.elf"
 #define PP_LOG_DIR "/data/evoplayer"
 #define PP_LOG_PATH PP_LOG_DIR "/media_launcher.log"
 #define PP_PLAYER_LOG PP_LOG_DIR "/player-stdio.log"
 
-/* Earlier Prospero experiment IDs — remove so only PRSP10001 remains */
+/*
+ * Title ids to remove on install, so a previous EVO experiment cannot leave a
+ * second tile behind.
+ *
+ * This list must never contain a ProsperoPlayer id. EVO Player coexists with
+ * upstream's PRSP10001 tile rather than replacing it, and uninstalling
+ * somebody else's title from our installer would be both surprising and
+ * destructive. Add only ids this project has itself registered.
+ */
 static const char *const PP_LEGACY_TITLES[] = {
-    "PRSP00001",
-    "PSMC00002", /* old mis-registered Media id from early tests */
     NULL,
 };
 
@@ -193,18 +210,22 @@ static void pp_notify(const char *msg) {
 /* Autoload often runs before the shell is ready — delay + second toast. */
 static void pp_notify_ready(void) {
   char line[96];
-  snprintf(line, sizeof(line), "EVOPlayer %s ready\nOpen from Media",
+  snprintf(line, sizeof(line), "EVO Player %s ready\nOpen from Media",
            PP_VERSION);
   pp_notify(line);
   usleep(1500000);
-  snprintf(line, sizeof(line), "EVOPlayer %s ready in Media", PP_VERSION);
+  snprintf(line, sizeof(line), "EVO Player %s ready in Media", PP_VERSION);
   pp_notify(line);
 }
 
 static int pp_install_runtime(void) {
-  if (pp_mkdir("/data") || pp_mkdir("/data/homebrew") ||
-      pp_mkdir(PP_RUNTIME_DIR) || pp_mkdir(PP_RUNTIME_DIR "/sce_sys") ||
-      pp_mkdir(PP_LOG_DIR)) {
+  /*
+   * Strictly parent-before-child. PP_LOG_DIR is PP_RUNTIME_DIR's parent now
+   * that the runtime lives under /data/evoplayer rather than /data/homebrew,
+   * so creating the runtime dir first fails with ENOENT.
+   */
+  if (pp_mkdir("/data") || pp_mkdir(PP_LOG_DIR) || pp_mkdir(PP_RUNTIME_DIR) ||
+      pp_mkdir(PP_RUNTIME_DIR "/sce_sys")) {
     pp_log("runtime mkdir failed errno=%d", errno);
     return -1;
   }
@@ -251,7 +272,7 @@ static int pp_register_media_tile(void) {
     return -1;
   }
 
-  /* Drop experimental title IDs so only Prospero PRSP10001 remains */
+  /* Drop any earlier EVO experiment ids (see PP_LEGACY_TITLES) */
   for (i = 0; PP_LEGACY_TITLES[i]; i++) {
     (void)sceAppInstUtilAppUnInstall(PP_LEGACY_TITLES[i], NULL, NULL);
     usleep(150000);
@@ -432,7 +453,7 @@ static void *pp_launch_player_thread(void *arg) {
   (void)arg;
   if (pp_launch_player() != 0) {
     pp_log("async launch failed");
-    pp_notify("EVOPlayer launch failed");
+    pp_notify("EVO Player launch failed");
   }
   return NULL;
 }
@@ -536,7 +557,7 @@ static int pp_appinst_uninstall_titles(void) {
 }
 
 /*
- * Full removal of Prospero Media tile from home.
+ * Full removal of the EVO Player Media tile from home.
  * Sony often hides Options→Delete for Media BigApp hosts; this is the
  * supported uninstall path (launcher route + one-shot ELF + Settings).
  */
@@ -560,7 +581,7 @@ static int pp_uninstall_media_tile(void) {
 
   pp_wipe_runtime();
   pp_log("uninstall complete");
-  pp_notify("EVOPlayer removed from Media");
+  pp_notify("EVO Player removed from Media");
   return 0;
 }
 
@@ -596,7 +617,7 @@ static void pp_serve(int listen_fd) {
       close(cfd);
       return;
     } else if (strncmp(req, "GET /status", 11) == 0) {
-      pp_http_reply(cfd, 200, "prospero-media-ready\n");
+      pp_http_reply(cfd, 200, "evo-media-ready\n");
     } else if (strncmp(req, "GET /shutdown", 13) == 0) {
       pp_http_reply(cfd, 200, "bye\n");
       close(cfd);
@@ -612,7 +633,7 @@ int main(void) {
   int listen_fd;
 
   (void)signal(SIGPIPE, SIG_IGN);
-  pp_log("EVOPlayer %s media launcher start id=%s port=%d", PP_VERSION,
+  pp_log("EVO Player %s media launcher start id=%s port=%d", PP_VERSION,
          PP_TITLE_ID, PP_SERVICE_PORT);
 
   if (pp_player_elf_size < 64 || pp_player_elf[0] != 0x7f) {
@@ -641,12 +662,12 @@ int main(void) {
   listen_fd = pp_bind_loopback();
   if (listen_fd < 0) {
     pp_log("bind 127.0.0.1:%d failed errno=%d", PP_SERVICE_PORT, errno);
-    pp_notify("EVOPlayer launcher failed\nPort busy");
+    pp_notify("EVO Player launcher failed\nPort busy");
     (void)sceUserServiceTerminate();
     return 5;
   }
 
-  pp_log("ready — open EVOPlayer from Media (keep this payload resident)");
+  pp_log("ready — open EVO Player from Media (keep this payload resident)");
   /* Toast so user knows the tile is live (especially after autoload). */
   pp_notify_ready();
   pp_serve(listen_fd);

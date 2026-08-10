@@ -64,6 +64,9 @@
 #include "evo_nav.h"
 #include "evo_screens.h"
 #include "evo_widgets.h"
+/* EVO: release notes shown under About. Product content, so it lives here
+ * rather than in the UI layer. */
+#include "evo_changelog.h"
 #include <sys/stat.h>
 #include "assets/browser_icon_assets.h"
 
@@ -181,6 +184,7 @@ static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define SCREEN_MEDIA_INFO 16
 #define SCREEN_PLAYBACK_FINISHED 17
 #define SCREEN_SUBTITLE_PICKER 18
+#define SCREEN_CHANGELOG 19
 
 typedef enum {
     PROFILE_BALANCED = 0,
@@ -15383,12 +15387,19 @@ static void evo_tools_activate(void)
 
 /* ---- about --------------------------------------------------------------- */
 
+/* Rows 0-4 state facts; row EVO_ABOUT_ROW_CHANGELOG is the one you can open. */
+#define EVO_ABOUT_ROWS          6
+#define EVO_ABOUT_ROW_CHANGELOG 5
+
 static int            evo_about_selected;
-static evo_list_entry evo_about_rows[5];
+static evo_list_entry evo_about_rows[EVO_ABOUT_ROWS];
 
 void draw_about_support_screen(uint32_t *fb)
 {
-    static const evo_hint hints[2] = {
+    /* CROSS earns a hint here because, unlike the other five rows, the
+     * changelog row actually goes somewhere. */
+    static const evo_hint hints[3] = {
+        { EVO_GLYPH_CROSS,  "OPEN" },
         { EVO_GLYPH_CIRCLE, "BACK" },
         { EVO_GLYPH_DPAD,   "MOVE" }
     };
@@ -15396,7 +15407,7 @@ void draw_about_support_screen(uint32_t *fb)
     static char themes_detail[64];
     evo_list_model m;
 
-    evo_page_sync(&evo_about_selected, 5);
+    evo_page_sync(&evo_about_selected, EVO_ABOUT_ROWS);
 
     snprintf(themes_detail, sizeof(themes_detail),
              "%d AVAILABLE - DROP .THEME FILES ON USB0",
@@ -15422,18 +15433,91 @@ void draw_about_support_screen(uint32_t *fb)
     evo_about_rows[4].detail = "PRESS L3 OR R3 IN ANY MENU";
     evo_about_rows[4].icon   = EVO_IC_ASPECT;
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < EVO_ABOUT_ROWS; i++) {
         evo_about_rows[i].chevron  = 0;
         evo_about_rows[i].progress = -1;
         evo_about_rows[i].info     = 1;   /* facts, not actions */
     }
+
+    /*
+     * The changelog row is an action, so it opts out of the info styling the
+     * loop above applies: it takes the chevron and the normal label emphasis,
+     * which is the only thing distinguishing "you can press this" from the
+     * five rows above it.
+     */
+    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].title   = "CHANGELOG";
+    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].detail  = "WHAT CHANGED IN EACH RELEASE";
+    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].icon    = EVO_IC_RECENT;
+    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].chevron = 1;
+    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].info    = 0;
 
     memset(&m, 0, sizeof(m));
     m.title    = "ABOUT";
     m.subtitle = "CREDITS AND PROJECT INFO";
     m.section  = EVO_SECTION_ABOUT;
     m.entries  = evo_about_rows;
-    m.count    = 5;
+    m.count    = EVO_ABOUT_ROWS;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    hints, 3);
+}
+
+/* ---- changelog ----------------------------------------------------------- */
+
+static int            evo_changelog_selected;
+static evo_list_entry evo_changelog_rows[EVO_CHANGELOG_COUNT];
+
+void draw_changelog_screen(uint32_t *fb)
+{
+    static const evo_hint hints[2] = {
+        { EVO_GLYPH_CIRCLE, "BACK" },
+        { EVO_GLYPH_DPAD,   "MOVE" }
+    };
+
+    evo_list_model m;
+    int            i;
+
+    evo_page_sync(&evo_changelog_selected, EVO_CHANGELOG_COUNT);
+
+    for (i = 0; i < EVO_CHANGELOG_COUNT; i++) {
+        const evo_changelog_row *r = &EVO_CHANGELOG[i];
+
+        switch (r->kind) {
+            case EVO_CL_VERSION:
+                evo_changelog_rows[i].title = "VERSION";
+                evo_changelog_rows[i].icon  = EVO_IC_ABOUT;
+                break;
+            case EVO_CL_NEW:
+                evo_changelog_rows[i].title = "NEW";
+                evo_changelog_rows[i].icon  = EVO_IC_RESUME;
+                break;
+            case EVO_CL_FIXED:
+                evo_changelog_rows[i].title = "FIXED";
+                evo_changelog_rows[i].icon  = EVO_IC_TOOLS;
+                break;
+            default:
+                evo_changelog_rows[i].title = "REMOVED";
+                evo_changelog_rows[i].icon  = EVO_IC_TRASH;
+                break;
+        }
+
+        evo_changelog_rows[i].detail   = r->text;
+        evo_changelog_rows[i].chevron  = 0;
+        evo_changelog_rows[i].progress = -1;
+        /*
+         * Facts, so the emphasis inverts: the change is what you came to
+         * read and NEW / FIXED steps back into the muted colour. Without
+         * this the label column shouts and the content whispers.
+         */
+        evo_changelog_rows[i].info     = 1;
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "CHANGELOG";
+    m.subtitle = "WHAT CHANGED IN EACH RELEASE";
+    m.section  = EVO_SECTION_ABOUT;
+    m.entries  = evo_changelog_rows;
+    m.count    = EVO_CHANGELOG_COUNT;
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     hints, 2);
@@ -17116,7 +17200,8 @@ int main(void) {
                 } else if (screen == SCREEN_MAIN_MENU) evo_launch_nav(0, +1);
                 else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, +1);
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, +1);
-                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, +1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, +1);
+                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_COUNT, +1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, +1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, +1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, +1);
@@ -17138,7 +17223,8 @@ int main(void) {
                 } else if (screen == SCREEN_MAIN_MENU) evo_launch_nav(0, -1);
                 else if (screen == SCREEN_SETTINGS) evo_page_nav(&settings_selected, EVO_SETTINGS_COUNT, -1);
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, -1);
-                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, 5, -1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, -1);
+                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_COUNT, -1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, -1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, -1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, -1);
@@ -17354,6 +17440,15 @@ int main(void) {
                     }
                 } else if (screen == SCREEN_DEVELOPER_TOOLS) {
                     evo_tools_activate();
+                } else if (screen == SCREEN_ABOUT_SUPPORT) {
+                    /* Only the changelog row goes anywhere; the other five
+                     * state facts and CROSS on them should do nothing rather
+                     * than feel broken. */
+                    if (evo_about_selected == EVO_ABOUT_ROW_CHANGELOG) {
+                        evo_changelog_selected = 0;
+                        screen = SCREEN_CHANGELOG;
+                        evo_feedback(EVO_FB_CONFIRM);
+                    }
                 } else if (screen == 2) {
                     player_paused = !player_paused;
 #if PP_BACKEND_ENABLED
@@ -17392,6 +17487,10 @@ int main(void) {
                     screen = 0;
                 } else if (screen == SCREEN_ABOUT_SUPPORT) {
                     screen = 0;
+                } else if (screen == SCREEN_CHANGELOG) {
+                    /* Back to About, not to the launch screen - the changelog
+                     * is only reachable from there. */
+                    screen = SCREEN_ABOUT_SUPPORT;
                 } else if (screen == SCREEN_DEVELOPER_TOOLS) {
                     screen = 0;
                 } else if (screen == SCREEN_MEDIA_INFO) {
@@ -17536,6 +17635,8 @@ int main(void) {
             draw_favorites_screen(linear);
         else if (screen == SCREEN_ABOUT_SUPPORT)
             draw_about_support_screen(linear);
+        else if (screen == SCREEN_CHANGELOG)
+            draw_changelog_screen(linear);
         else if (screen == SCREEN_DEVELOPER_TOOLS)
             draw_developer_tools_screen(linear);
         else if (screen == SCREEN_MEDIA_INFO)

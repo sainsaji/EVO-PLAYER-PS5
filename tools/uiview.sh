@@ -33,8 +33,12 @@ begin "building uiview"
 # the point: evo_theme_init() then finds no .theme files and falls back to the
 # four built-ins, so a render is reproducible and does not depend on whatever
 # happens to be on someone's USB stick.
+# Read the version rather than hardcoding it - the About fixture displays it,
+# and a render that shows a stale version is a render that lies.
+EVO_VERSION="$(tr -d '[:space:]' < "${EVO}/VERSION" 2>/dev/null || echo 0.0.0)"
+
 clang -O2 -Wall -Wextra -std=gnu11 \
-    -DEVO_PLAYER_VERSION='"0.0.2"' \
+    -DEVO_PLAYER_VERSION="\"${EVO_VERSION}\"" \
     -DEVO_THEME_DIR='"/nonexistent/evo_themes"' \
     -I"${PP}/include" -I"${UI}/include" -I"${EVO}" \
     "${REPO_ROOT}/tools/uiview.c" \

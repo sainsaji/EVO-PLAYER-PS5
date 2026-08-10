@@ -39,7 +39,9 @@ typedef enum {
     EVO_SCREEN_ABOUT             = 14,
     EVO_SCREEN_TOOLS             = 15,
     EVO_SCREEN_MEDIA_INFO        = 16,
-    EVO_SCREEN_PLAYBACK_FINISHED = 17
+    EVO_SCREEN_PLAYBACK_FINISHED = 17,
+    EVO_SCREEN_SUBTITLE_PICKER   = 18,
+    EVO_SCREEN_CHANGELOG         = 19
 } evo_screen_id;
 
 /* Rail sections. Order is the order they appear in the rail. */

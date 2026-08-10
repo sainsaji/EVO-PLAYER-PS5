@@ -150,7 +150,7 @@ against it but cannot close the previous instance for you — see
 dependencies the project Makefile does not list.
 
 `-DEVO_START_SCREEN=n` boots straight into a screen: `0` launch, `1` browser,
-`10` settings, `13` favorites, `14` about, `15` tools.
+`10` settings, `13` favorites, `14` about, `15` tools, `19` changelog.
 
 Then **measure**:
 

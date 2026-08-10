@@ -31,7 +31,12 @@ evo_section evo_screen_section(evo_screen_id id)
         case EVO_SCREEN_PROFILE:   return EVO_SECTION_SETTINGS;
 
         case EVO_SCREEN_TOOLS:     return EVO_SECTION_TOOLS;
-        case EVO_SCREEN_ABOUT:     return EVO_SECTION_ABOUT;
+
+        /* The changelog is a child of About, and keeps ABOUT lit for the same
+         * reason the profile picker keeps SETTINGS lit. */
+        case EVO_SCREEN_ABOUT:
+        case EVO_SCREEN_CHANGELOG: return EVO_SECTION_ABOUT;
+
         default:                   return EVO_SECTION_NONE;
     }
 }

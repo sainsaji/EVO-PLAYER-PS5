@@ -1,11 +1,16 @@
 /*
- * EVOPlayer — one-shot Media tile remover
+ * EVO Player — one-shot Media tile remover
  *
  * Use when Options → Delete on the home menu does nothing (common for
  * Media BigApp hosts), or when the resident launcher is not running.
  *
- * Removes PRSP10001 (and legacy experiment IDs) from app.db, /user/app,
- * and /system_ex/app, then exits. Re-inject MediaLauncher to reinstall.
+ * Removes EVOP10001 from app.db, /user/app and /system_ex/app, then exits.
+ * Re-inject the media launcher to reinstall.
+ *
+ * This removes EVO Player's tile and nothing else. ProsperoPlayer's PRSP10001
+ * is deliberately absent from PP_TITLES: the two tiles coexist, and an
+ * uninstaller that reaches into another project's registration would be a
+ * destructive surprise. Do not add ids this project did not register.
  */
 
 #include <errno.h>
@@ -20,14 +25,13 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-#define PP_TITLE_ID "PRSP10001"
+#define PP_TITLE_ID "EVOP10001"
 #define PP_APPINST_AUTHID UINT64_C(0x4801000000000013)
 #define PP_LOG_PATH "/data/evoplayer/uninstall_tile.log"
+#define PP_RUNTIME_DIR "/data/evoplayer/app"
 
 static const char *const PP_TITLES[] = {
-    "PRSP10001",
-    "PRSP00001",
-    "PSMC00002",
+    PP_TITLE_ID,
     NULL,
 };
 
@@ -122,12 +126,18 @@ static void pp_wipe_host(const char *title) {
   pp_try_rmdir(p);
 }
 
+/*
+ * Only the tile's own copy of the player, under /data/evoplayer/app.
+ * /data/homebrew/EVOPlayer belongs to the websrv install path
+ * (scripts/install-homebrew.sh) and must survive a tile uninstall - removing
+ * a tile should never break the development loop.
+ */
 static void pp_wipe_runtime(void) {
-  pp_try_unlink("/data/homebrew/EVOPlayer/eboot.elf");
-  pp_try_unlink("/data/homebrew/EVOPlayer/sce_sys/param.json");
-  pp_try_unlink("/data/homebrew/EVOPlayer/sce_sys/icon0.png");
-  pp_try_rmdir("/data/homebrew/EVOPlayer/sce_sys");
-  pp_try_rmdir("/data/homebrew/EVOPlayer");
+  pp_try_unlink(PP_RUNTIME_DIR "/eboot.elf");
+  pp_try_unlink(PP_RUNTIME_DIR "/sce_sys/param.json");
+  pp_try_unlink(PP_RUNTIME_DIR "/sce_sys/icon0.png");
+  pp_try_rmdir(PP_RUNTIME_DIR "/sce_sys");
+  pp_try_rmdir(PP_RUNTIME_DIR);
 }
 
 static int pp_do_uninstall(void) {
@@ -167,10 +177,10 @@ int main(void) {
   const uint64_t orig = kernel_get_ucred_authid(pid);
   int rc;
 
-  pp_log("EVOPlayer uninstall tile start");
+  pp_log("EVO Player uninstall tile start");
   if (kernel_set_ucred_authid(pid, PP_APPINST_AUTHID) != 0) {
     pp_log("authid raise failed");
-    pp_notify("Prospero uninstall failed (authid)");
+    pp_notify("EVO Player uninstall failed (authid)");
     return 1;
   }
   rc = pp_do_uninstall();
@@ -178,10 +188,10 @@ int main(void) {
     (void)kernel_set_ucred_authid(pid, orig);
 
   if (rc == 0) {
-    pp_notify("EVOPlayer removed from Media");
+    pp_notify("EVO Player removed from Media");
     pp_log("done");
   } else {
-    pp_notify("Prospero uninstall incomplete");
+    pp_notify("EVO Player uninstall incomplete");
   }
   payload_exit(rc == 0 ? 0 : 1);
   return rc == 0 ? 0 : 1;

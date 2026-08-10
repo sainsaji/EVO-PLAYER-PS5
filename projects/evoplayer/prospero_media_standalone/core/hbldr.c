@@ -50,7 +50,7 @@ along with this program; see the file COPYING. If not, see
 
 
 #define PSNOW_EBOOT "/system_ex/app/NPXS40106/eboot.bin"
-#define HOST_TITLE_ID "PRSP10001"
+#define HOST_TITLE_ID "EVOP10001"
 #define FAKE_PATH "/system_ex/app/" HOST_TITLE_ID
 
 #define IOVEC_ENTRY(x) {x ? x : 0, \
@@ -72,7 +72,7 @@ static const char param_json[] = "{\n"
   "  \"localizedParameters\": {\n"
   "    \"defaultLanguage\": \"en-US\",\n"
   "    \"en-US\": {\n"
-  "      \"titleName\": \"EVOPlayer 1.0\"\n"
+  "      \"titleName\": \"EVO Player\"\n"
   "    }\n"
   "  }\n"
   "}\n";

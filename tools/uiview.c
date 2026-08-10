@@ -38,6 +38,9 @@
 #include <string.h>
 
 /* The real assets. Pure data - no PS5 types anywhere in them. */
+/* The real release-notes table, not a fixture - so a render cannot disagree
+ * with what the console shows. */
+#include "evo_changelog.h"
 #include "assets/renderer_reset_assets.h"
 #include "assets/evo_icons.h"
 
@@ -384,7 +387,9 @@ static void render_browse(int sel, int rail_focused, int rail_sel, int empty)
 static void render_list(const char *which, int sel, int rail_focused,
                         int rail_sel, int empty)
 {
-    evo_list_entry e[8];
+    /* Sized for the longest list, which is the changelog - every other
+     * fixture here is eight rows or fewer. */
+    evo_list_entry e[EVO_CHANGELOG_COUNT > 8 ? EVO_CHANGELOG_COUNT : 8];
     evo_list_model m;
     evo_focus f;
     int n = 0;
@@ -485,21 +490,43 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.title="PLAYBACK PROFILE";
         m.subtitle="HOW AGGRESSIVELY THE DECODER IS TUNED";
         m.section=EVO_SECTION_SETTINGS;   /* a child of settings */
+    } else if (!strcmp(which, "changelog")) {
+        for (int i = 0; i < EVO_CHANGELOG_COUNT; i++) {
+            const evo_changelog_row *r = &EVO_CHANGELOG[i];
+            switch (r->kind) {
+                case EVO_CL_VERSION: e[i].title="VERSION";
+                                     e[i].icon=EVO_IC_ABOUT;  break;
+                case EVO_CL_NEW:     e[i].title="NEW";
+                                     e[i].icon=EVO_IC_RESUME; break;
+                case EVO_CL_FIXED:   e[i].title="FIXED";
+                                     e[i].icon=EVO_IC_TOOLS;  break;
+                default:             e[i].title="REMOVED";
+                                     e[i].icon=EVO_IC_TRASH;  break;
+            }
+            e[i].detail=r->text; e[i].progress=-1; e[i].info=1;
+        }
+        n = EVO_CHANGELOG_COUNT;
+        m.title="CHANGELOG"; m.subtitle="WHAT CHANGED IN EACH RELEASE";
+        m.section=EVO_SECTION_ABOUT;   /* a child of about */
     } else { /* about */
         static const char *t[] = { "VERSION","EVO PLAYER","BUILT ON","THEMES",
-            "SCREENSHOTS" };
-        static const char *d[] = { "0.0.2",
+            "SCREENSHOTS","CHANGELOG" };
+        static const char *d[] = { EVO_PLAYER_VERSION,
             "MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW",
             "FFMPEG AND THE PS5 PAYLOAD SDK",
             "4 AVAILABLE - DROP .THEME FILES ON USB0",
-            "PRESS L3 OR R3 IN ANY MENU" };
+            "PRESS L3 OR R3 IN ANY MENU",
+            "WHAT CHANGED IN EACH RELEASE" };
         static const int ic[] = { EVO_IC_ABOUT,EVO_IC_RESUME,EVO_IC_TOOLS,
-            EVO_IC_PALETTE,EVO_IC_ASPECT };
-        n = 5;
+            EVO_IC_PALETTE,EVO_IC_ASPECT,EVO_IC_RECENT };
+        n = 6;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].progress=-1; e[i].info=1;
         }
+        /* The changelog row is the only one you can open, so it keeps the
+         * chevron and the action styling. */
+        e[5].info = 0; e[5].chevron = 1;
         m.title="ABOUT"; m.subtitle="CREDITS AND PROJECT INFO";
         m.section=EVO_SECTION_ABOUT;
     }
@@ -690,6 +717,7 @@ static void render_picker(int sel)
 
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
+                                 "changelog",
                                  "resume","finished","mediainfo",
                                  "picker",
                                  "toast","toastok","toasterror", NULL };
