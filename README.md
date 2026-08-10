@@ -109,6 +109,31 @@ everywhere else, and it used to throw away your place in the file on one press.
 
 ---
 
+## Performance
+
+Playback does less work per frame than it used to. Every frame is converted
+from the decoder's format and rearranged into the layout the console's display
+hardware wants, and both steps got faster:
+
+| per frame | before | after |
+|---|---|---|
+| 4K conversion | 10.3 ms | **8.8 ms** |
+| 1080p conversion | 3.0 ms | **2.1 ms** |
+| 1080p drawing | 2.9 ms | **2.2 ms** |
+
+The change that probably matters most is not in that table. The step that
+rearranges each frame used to create and destroy twelve threads **every frame**
+— 720 a second at 60fps — which is the pattern behind the stalls that show up
+as an occasional hitch rather than as a lower frame rate. It reuses a pool now.
+The player also stopped painting two million pixels black immediately before
+covering every one of them with video.
+
+> These are measurements from a development PC, taken with `./tools/bench.sh`,
+> which hashes the output and refuses to report a timing if the picture
+> changed. They compare the changes against each other; they are not a
+> prediction of frame rate on your console, and the improvements have not yet
+> been measured on hardware.
+
 ## Good to know
 
 - **Resume** is offered when you reopen a file you did not finish.
