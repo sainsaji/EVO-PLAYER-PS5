@@ -260,6 +260,44 @@ PS5_HOST=<ip> ./scripts/deploy.sh output/elf/decoder_test.elf
 
 ---
 
+## Running this autonomously
+
+The loop closes without a human in it, which matters because the expensive part
+of this work is waiting on someone to fetch a result.
+
+```
+  write payload  ->  build (docker)  ->  deploy (elfldr 9021)
+        ^                                        |
+        |                                        v
+   analyse offline  <-  pull from USB  <-  payload writes /mnt/usb0/*.bin
+                        (websrv 8080)
+```
+
+- **Deploy:** `./scripts/deploy.sh output/elf/<probe>.elf`. A probe that runs
+  and exits returns normally. Always wrap in `timeout`.
+- **Retrieve:** `curl -s -o local.bin http://$PS5_HOST:8080/fs/mnt/usb0/<name>`
+  — the websrv `/fs` endpoint serves files over HTTP. `tools/shot.sh` has used
+  this to fetch screenshots for months; it is a proven path, not a new idea.
+  It is read-only, so the payload writes and the PC reads. That is all this
+  needs.
+- **Analyse:** `llvm-objdump-18`, `llvm-readelf-18`, `llvm-nm-18` are all in
+  the dev container. A dumped module image is just bytes.
+
+**What still needs a person:**
+
+| | Why |
+|---|---|
+| A payload that hangs | Nothing software-side recovers a payload holding VideoOut. This is the one that costs an hour. |
+| Exiting a resident app before relaunching | The stacking rule. Probes exit on their own; the player does not. |
+| Go/no-go before the first call *into* AvPlayer | Everything up to that point is read-only reconnaissance. `sceAvPlayerInit` is the first call that can fault or hang. |
+| A USB stick present and writable | The dump has nowhere to go otherwise. |
+
+**Therefore: put a watchdog in every experimental payload.** If it has not
+finished within N seconds, log what it knows and exit. An experiment that
+fails cleanly costs a deploy; one that hangs costs an afternoon.
+
+---
+
 ## Files that matter
 
 | | |
