@@ -186,6 +186,8 @@ Every screenshot on this page is one of those renders.
 | [docs/converter-perf.md](docs/converter-perf.md) | the video path, measured |
 | [docs/hardware-decode.md](docs/hardware-decode.md) | the plan for getting decode off the CPU |
 | [docs/hardware-decode-review.md](docs/hardware-decode-review.md) | a critical review of that plan |
+| [docs/hardware-decode-findings.md](docs/hardware-decode-findings.md) | **what is known** about the PS5 media stack — module map, import graph, recovered API and ABI |
+| [docs/hardware-decode-next-steps.md](docs/hardware-decode-next-steps.md) | **what to do next**, as phases 4–10, with the go/no-go points |
 | [docs/theming.md](docs/theming.md) | writing a `.theme` file |
 | [docs/tooling.md](docs/tooling.md) | the scripts, and what each is for |
 | [CHANGELOG.md](CHANGELOG.md) | what changed, per release |

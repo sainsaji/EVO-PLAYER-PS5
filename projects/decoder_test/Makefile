@@ -15,7 +15,7 @@ SRCS := main.c $(EVO_COMMON_SRCS)
 
 # VideoOut/AudioOut are linked purely as a CONTROL: they prove the dynlib
 # probe works, since a module is only mapped when the payload links its stub.
-LIBS := -lSceSysmodule -lSceVideoOut -lSceAudioOut
+LIBS := -lSceSysmodule -lSceVideoOut -lSceAudioOut -lSceUserService -lpthread
 
 all: $(ELF)
 

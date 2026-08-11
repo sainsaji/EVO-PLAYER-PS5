@@ -28,7 +28,7 @@ cmake_minimum_required(VERSION 3.16)
 project(EVOPlayer
     VERSION     0.1.0
     DESCRIPTION "PS5 12.70 homebrew media player and development environment"
-    LANGUAGES   C)
+    LANGUAGES   C ASM)
 
 # -----------------------------------------------------------------------------
 # Refuse to configure for the host. Building these sources with the host
@@ -101,8 +101,30 @@ evo_payload(system_info)
 evo_payload(videoout_test  LIBS SceVideoOut SceUserService SceSystemService)
 evo_payload(audioout_test  LIBS SceAudioOut SceUserService m)
 evo_payload(gpu_test       LIBS SceGnmDriver)
-evo_payload(decoder_test   LIBS SceSysmodule)
+# Keep this list in step with projects/decoder_test/Makefile - the probe links
+# the VideoOut/AudioOut stubs as its dynlib control (3/3 resolved is what proves
+# the probe itself works) and calls sceUserService directly.
+evo_payload(decoder_test   LIBS SceSysmodule SceVideoOut SceAudioOut
+                                SceUserService pthread)
 evo_payload(avplayer_test  LIBS SceSysmodule)
+evo_payload(videodec2_test LIBS SceSysmodule)
+evo_payload(createdecoder_test LIBS SceSysmodule)
+
+# Phase 6 carries its own H.264 bitstream, linked into .rodata by test_stream.S
+# with .incbin - hence the extra source, the ASM language above, and the include
+# directory that lets the assembler find the .h264 next to the .S.
+evo_payload(decodeframe_test LIBS SceSysmodule
+    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/projects/decodeframe_test/main.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/projects/decodeframe_test/test_stream.S")
+target_include_directories(decodeframe_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/projects/decodeframe_test")
+evo_payload(codecdump_test LIBS SceSysmodule)
+evo_payload(avplayer_probe LIBS SceSysmodule
+    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/projects/avplayer_probe/main.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/projects/avplayer_probe/test_clip.S")
+target_include_directories(avplayer_probe PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/projects/avplayer_probe")
+evo_payload(slotcheck)
 evo_payload(yuv_gpu_test)
 
 message(STATUS "EVO Player: PS5 SDK  = $ENV{PS5_PAYLOAD_SDK}")

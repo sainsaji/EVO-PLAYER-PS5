@@ -119,6 +119,962 @@ build-time dependency.
 
 *(newest first)*
 
+> This log is chronological — what happened, in the order it happened.
+> **[hardware-decode-findings.md](hardware-decode-findings.md) is the organised
+> reference**: the same knowledge arranged by subject rather than by date, with
+> the full ABI tables. Look there first; come here for how a thing was learned.
+
+Entries from 2026-08-10 onward use the confidence tags from
+[hardware-decode-review.md](hardware-decode-review.md): **[E]** observed on
+this console, **[I]** inference, **[H]** hypothesis.
+
+### 2026-08-11 — Route A: **AvPlayer runs in a payload, and its video path fails EARLIER than ours**
+
+Four deploys of `projects/avplayer_probe/`, every callback instrumented. Route A
+was opened to settle whether Route B's problems were our sequence or our
+privileges. It answered that, and not the way either hypothesis expected.
+
+**1. `sceAvPlayerInit` returns a handle in a payload. [E]** `0x88000efe0`, with
+AvPlayer's own debug log enabled at `debugLevel 4`:
+
+    D/ sceAvPlayerInitImpl [384]:  MVP core shared heap size: 1572864
+    D/ SupplyReplacements [1148]:  Supplied required Params
+    D/ avControllerThread [441]: Thread started
+
+**That is a new instrumentation channel.** AvPlayer narrates its own internals
+at debug level 4 and the lines come back on stdout with everything else.
+
+**2. The whole `SceAvPlayerInitData` layout is confirmed. [E]** Not inferred -
+AvPlayer called all of our callbacks with sensible arguments, which it could
+only do if every function pointer sat where we put it. The PS4 layout is the
+PS5 layout: memory replacement at `+0x00`, file replacement at `+0x28`, event
+replacement at `+0x50`, `debugLevel` `+0x60`, `basePriority` `+0x64`,
+`numOutputVideoFrameBuffers` `+0x68`, `autoStart` `+0x6c`, `defaultLanguage`
+`+0x70`, total `0x78`.
+
+**3. The demuxer works, from memory. [E]** `sceAvPlayerAddSource` returns `0`
+against an MP4 served entirely out of `.rodata` through the file callbacks -
+nothing copied to the console. The read pattern is classic atom walking (offset
+0, 32, 902, 910, 40, 148 …), 36 reads and 811 bytes to parse the container.
+**So the MP4 demuxer really is inside `libSceAvPlayer`**, as §3 suspected from
+the `sceMp4*` strings with no `libSceMp4.sprx` present. **[E]**, upgraded from
+**[H]**.
+
+**4. Its allocation pattern, which Phase 10 needs either way. [E]**
+
+| # | align | size | note |
+|---|---|---|---|
+| 1 | 32 | 1,572,864 | "MVP core shared heap" |
+| 2 | 32 | 616 | the player handle itself |
+| 3 | 32 | 3,145,728 | at AddSource |
+| 7 | 8 | 1,310,720 | decoder work |
+| 8 | **256** | 3,037,184 | **allocateTexture** - a frame buffer |
+| 9 | **2,097,152** | 6,291,456 | 2 MiB alignment, so GPU-facing |
+
+Nine allocations, ~15.4 MB, all freed on `Close`. Note it uses
+`allocateTexture` for exactly one buffer, at 256-byte alignment - the same
+alignment Route B's `Decode` demands of its frame buffer.
+
+**5. And then AvPlayer's video path fails. [E]**
+
+    [SCEVDECCORE@A01D02F3:00000000]
+    [SCEVDECCORE@A01D03A5:80C00002]
+    [SCEVIDEODEC2@A01A0402:00000000]
+
+Line `0x3A5` is `sceVdecCoreQueryInstanceSize` propagating a failure from its
+config validator; line `0x2F3` is that validator's unsupported-configuration
+arm, returning `0x80C00002`. No READY event ever arrives, `StreamCount` stays
+`0`, and the player goes straight to STOP.
+
+**So AvPlayer cannot even QUERY a decoder configuration in this process - and
+Route B queries and CREATES one routinely.** Route B is further along than
+AvPlayer here, which inverts the premise Route A was opened on. AvPlayer is not
+holding a key we lack; it is failing earlier than we do.
+
+**What it does not settle:** arbitration. AvPlayer never got far enough to call
+it, so our direct `Initialize` still blocks and the question of whether the
+submit needs arbitration is still open. The discriminator now runs after
+playback (`--args "eboot.elf arb"`) rather than before it - run 1 probed
+arbitration before playback, which could only ever hang, and that was an
+ordering error.
+
+**Three of the four deploys were spent on my own mistakes**, and they are worth
+recording because they are all the same mistake in different clothes -
+assuming a synchronous API:
+
+- run 1: probed arbitration *before* playback, when AvPlayer brings it up
+  during playback. Hung.
+- run 2: left `autoStart = 0` and never called `Start`, so the player went
+  READY then STOP without reading a byte of `mdat`. 811 bytes read is a
+  container parse, not a decode.
+- run 3: called `sceAvPlayerStart` immediately after `AddSource`, before the
+  demux thread had finished. `StreamCount` returned `0` and `Start` deadlocked.
+
+The fix in each case was to wait for the event callback rather than assume the
+previous call had completed.
+
+### 2026-08-11 — Phase 6, arbitration: **ABI confirmed 7/7, and the real call hangs**
+
+One deploy. The Phase 5 discriminator table predicted that a decoder which
+creates but will not decode is what an unarbitrated client looks like, so
+`libSceVideoDecoderArbitration` was read completely - 16 KB, four exports - and
+called.
+
+**The reading was right.** 7/7 controls exact: wrong `thisSize`, priority 768,
+count 0, NULL params, `Enable` with a non-NULL first argument, `Enable` with a
+NULL callback, and `AcceptEvent(2)` each returned exactly the predicted code.
+The params struct is `{thisSize 0x18, priority 256..767, count 1..127}`, and
+`Enable` takes `(NULL, callback)` - the first argument *must* be NULL, the
+second is stored in a module global and tail-called through a trampoline.
+
+The priority range 256..767 is the same one `sceAvPlayerInit` clamps
+`basePriority` into and the decoder config checks at `cfg+0x38`. Three
+independently-read functions agreeing.
+
+**And then the real `Initialize` never returned. [E]** The per-line flushed log
+on `/mnt/usb0` stops at the last control; the payload held the app slot until
+the deploy's `timeout` detached it. No fault, no error code - the third silent
+block in this effort, after `AllocateComputeQueue` without `libSceGnmDriver`
+and the `libSceAudiodec` load-order hang.
+
+The first two were unresolved lazy imports. **This is not that**: all four
+exports resolve and the controls prove the module's own validation is running.
+The body at `+0x350` blocks. The reading that fits is an IPC to a system service
+that does not answer in a payload process **[H]**, which is consistent with
+`sceUserServiceGetInitialUser` reporting no user session - arbitration exists to
+referee decoder access between titles, and a payload sits outside that.
+
+**So the hypothesis is untestable by this route.** That does not show errno 5200
+is unrelated to arbitration; only that Route B cannot ask the question this way.
+Which is exactly the argument for Route A: AvPlayer runs arbitration
+successfully, so instrumenting it would show what makes the call answer.
+
+### 2026-08-11 — Phase 6: **the submit named, and a wrong conclusion corrected**
+
+`projects/codecdump_test/`, one deploy, no decode call, no hang.
+
+**The correction first.** The entry below concluded that the code refusing the
+decode was *not in the dump*, from a raw byte search finding no `mov ecx,0x254`
+anywhere in `libSceVdecCore`. The search was right; the conclusion was wrong.
+Three ioctl call sites share one logging tail, and the line number reaches it in
+a register:
+
+    mov  r14d, 0x254
+    ...
+    mov  ecx, r14d
+
+so the immediate never appears next to `ecx`. **A byte search for an immediate
+only disproves the immediate form** — worth remembering, because the search felt
+conclusive precisely because it was immune to the disassembler desync that
+motivated it.
+
+**The submit, now named. [E]** `libSceVdecCore +0x2b870`:
+
+    ioctl(fd, _IOW(0x83, 23, 24), { job, dword, arg, dword })
+
+It picks one of three adjacent commands from a mode field at `[obj+0x2c0]` —
+`7` selects command 23 and error line `0x254`, `0x10` selects 24, anything else
+22. The run reported `0x254`, so the mode is 7, the command is 23, and the
+driver refused it with errno 5200. The other group-`0x83` commands VdecCore
+issues are 11, 18 and 20; 20 is the memory pin `MapDirectMemory` drives.
+
+**And the probe's own result. [E]** A modid sweep before and after an H.264
+`CreateDecoder` finds **exactly the same 11 modules** — nothing loads on this
+path, despite the codec dispatch in `sceVdecCoreCreateDecoder` being real
+(`0x80000036` H.264, `0x8000003c` HEVC, `0x80000035` on a resource-class path,
+with `0x805A1001` meaning already-loaded). Either the codec is already resident
+or that branch is not taken for H.264 here.
+
+The run also dumped five modules never dumped before — `libSceSysmodule`,
+`libSceVdecwrap`, `libSceVdecShevc`, `libSceGnmDriver`, `libSceAjm`, 1.4 MB into
+`proprietary/dump/codec/` — so the negative result arrived with the material to
+rule them out. None contains the submit.
+
+**Loose end:** the sweep shows modids `0x42`–`0x47` and `0x49` for eight loaded
+modules. **`0x48` is unaccounted for**, the same shape as Phase 0's missing
+`0x34`. `sceKernelGetModuleInfo` either fails for it or returns a blank name,
+and the probe drops blank names silently. Fix that before the next enumeration.
+
+### 2026-08-11 — Phase 6, offline: ~~the code that refuses the decode is not in the dump~~ **(wrong — see above)**
+
+Zero deploys. An attempt to read the failing submit path the same way the four
+previous gates were read, which stalled — and the reason it stalled is the
+result.
+
+Three independent facts, each cheap:
+
+1. **`mov ecx,0x254` occurs nowhere in `libSceVdecCore`'s text.** A raw
+   byte-pattern search over the segment (immune to disassembler desync, unlike
+   grepping the listing) finds zero, while all 44 other `0xD0A1` diagnostic
+   sites have their line numbers present. **[E]**
+2. **The driver-interface vtables are not in the dump.** The submit is a virtual
+   call `[[gpdec+0x38]] + 0x18`; the map call goes through `[[obj+0xb0]] + 0x00`.
+   None of those implementation addresses appears as a pointer in any dumped
+   segment of any module. **[E]**
+3. **`sceVdecCoreCreateDecoder` loads a codec module on demand**, dispatching on
+   the codec index: **`0x80000036` for H.264**, `0x8000003c` for HEVC,
+   `0x80000035` on a separate resource-class path, each through
+   `sceSysmoduleLoadModuleInternal` with `0x805A1001` meaning already-loaded.
+   **[E]**
+
+So an H.264 `CreateDecoder` maps an internal module we have never enumerated,
+and **that** module owns the submit, the vtables and the failing ioctl. §3's
+"loading the media modules pulls in no new modules at all" was measured before
+any decoder existed and does not describe the process afterwards.
+
+The next move is the one that has broken every impasse in this effort: **one
+deploy that dumps beats N that guess.** Create an H.264 decoder, sweep modids
+through `sceKernelGetModuleInfo`, dump the new module. No decode call, so no
+hang risk. `projects/decoder_test/` already has the sweep and the dumper.
+
+Arbitration stays on the list but not at the front: the previous driver errno
+in this same chain, 5031, also looked like a rights problem and turned out to
+be an unaligned length.
+
+### 2026-08-11 — Phase 6, runs 2–8: **four gates cleared, the driver still says no**
+
+Six more deploys of `projects/decodeframe_test/`. No hang in any of them, clean
+teardown every time. No picture yet — but the path from `Decode` to the
+hardware is now fully mapped, and **every step was diagnosed from the module's
+own diagnostic lines rather than by sweeping anything**.
+
+| run | refused at | cause | fix |
+|---|---|---|---|
+| 1 | GpDec `0xC22`, state 0 | nothing had been mapped | call `MapDirectMemory` |
+| 3 | pin ioctl, errno 5031 | `size` not page-aligned — `mapMemorySize` is `0x331400` | round up to 16 KiB |
+| 4 | GpDec `0x97F`, status `0x33` | every block given `physAddr` 0, so all occupied `[0, size)` and overlapped | use the real physical offset |
+| 6 | GpDec `0xDA6` | the AU, the work memory and the frame pool were not registered | register all of them |
+| **8** | **the hardware submit**, driver errno **5200** | **open** | — |
+
+**`sceVideodec2MapDirectMemory` is now fully characterised** — see
+[hardware-decode-findings.md](hardware-decode-findings.md) §7 for the contract.
+Three results from it are worth repeating because none was guessable:
+
+- **The field order is not the obvious one.** `+0x08` is the *size* and `+0x10`
+  is the pointer. Settled by `lea r15,[rdx+r13]` computing `base + len` in
+  VdecCore, not by trying both.
+- **`physAddr` is an address in a space of its own**, and blocks must not
+  overlap in it. Zero for every block is what made run 3's block 1 fail. A
+  control — an unregistered CPU address carrying block 0's `physAddr` — is
+  refused, which proves the reading rather than assuming it.
+- **`MapDirectMemory` is not "map the output frames".** Everything the hardware
+  touches must be registered: the frames, **the access unit** (so a `.rodata`
+  bitstream can never work — the hardware DMAs it), **and the work memory and
+  frame pool that `CreateDecoder` was already handed**. Passing `CreateDecoder`
+  a pointer is not the same as telling the hardware about it.
+
+**Two runs were wasted on my own mistakes**, and both are worth recording. Run
+2 varied `physAddr` while `size` was still wrong, and read the identical
+failures as evidence about `physAddr` — but with mode 0 that field never
+reaches the driver ioctl, so both attempts issued byte-identical calls. **The
+experiment was inconclusive by construction and I did not notice.** Run 6
+carried a stale assignment that set the frame-buffer size to the input
+buffer's, which cost a deploy to spot.
+
+**Method note that earned its place: capture stdout, not just the USB log.**
+The module's diagnostic lines only come back on stdout. Run 3 was launched with
+stdout redirected to `/dev/null` and the log on the stick showed a bare
+`0x811D0111` with nothing to act on; the next run, identical except for keeping
+stdout, named the exact rejection site. Standing rule 16 exists for this.
+
+**Where it stands:** every software gate is cleared and the submit itself is
+refused by the driver. That is a different kind of failure from the four before
+it. The leading hypothesis is the one the Phase 5 discriminator table already
+wrote down — *"Succeeds, then decode fails → arbitration"* —
+`libSceVideoDecoderArbitration` has never been called, and AvPlayer calls
+`Initialize` / `Enable` before it decodes anything. Reading its four entry
+points is the next step.
+
+### 2026-08-11 — Phase 6, run 1: **no picture, and the module said exactly why**
+
+**One deploy, no hang, clean teardown.** `projects/decodeframe_test/` in the app
+slot. `research-logs/console/evo_decodeframe_log-run1.txt`.
+
+**Two things confirmed on hardware:**
+
+- **18/18 validation controls exact** — 11 for `Decode`, 7 for
+  `GetPictureInfo`. Every struct size, every field offset, every error code in
+  the ABI read offline is now measured. **[E]**
+- **7/7 `mapMemorySize` predictions exact**, across AVC 720p/1080p/4K and HEVC
+  Main and Main10 at 1080p and 4K. **[E]** The frame-layout formula is a
+  property of the module, not a hypothesis about it.
+
+**And one offline conclusion falsified.** The real `Decode` returned
+`0x811D0111` and no picture. That code is the generic "unexpected VdecCore
+value" bucket and says nothing on its own — but the module printed three
+diagnostic lines with it:
+
+    [VDECCORE@B0A10C22:00000000]
+    [SCEVDECCORE@A01D07A8:00000002]
+    [SCEVIDEODEC2@A01A07A7:80C00001]
+
+Innermost first: GpDec refused at its line `0xC22` with value `0`; VdecCore
+bucketed that as status `2` at line `0x7A8` and returned `0x80C00001`; Videodec2
+had no table entry for it and returned `0x811D0111`. Grepping the disassembly
+for those line numbers landed on the exact sites:
+
+```
+mov r8d, DWORD PTR [r14+0x40]   ; GpDec state
+cmp r8, 0x5
+ja  ok
+mov eax, 0x31                   ; bits 0, 4, 5
+bt  eax, r8d
+jae ok                          ; states 1,2,3 and >=6 accepted
+                                ; states 0,4,5 refused
+```
+
+**The GpDec object was in state 0.** The only two writes of `1` to that field
+trace back to `sceVdecCoreMapMemoryBlock` — which is what
+`sceVideodec2MapDirectMemory` calls, and which the probe deliberately skipped.
+
+The offline half had concluded that `MapMemory`/`MapDirectMemory` "are not part
+of decoding", from a reading of `libSceVideodec2` that was complete and correct.
+Nothing on Videodec2's decode path does consult a mapped flag; the state that
+matters simply is not at that layer. **The phase plan's original instinct was
+right and the offline correction that replaced it was wrong.** Two new standing
+rules came out of it: capture the module's diagnostic lines (16), and remember
+that reading a layer to the end only explains that layer (17).
+
+**Next:** call `sceVideodec2MapDirectMemory` — the bound one; `MapMemory`'s
+import is still unbound and still a hang risk — before the first `Decode`. Its
+info struct is 0x20 bytes and repacks into VdecCore's 0x20-byte entry array; the
+field meanings need one more read before the call, per rule 1.
+
+### 2026-08-11 — Phase 6, offline half: **the decode ABI, read before anything was called**
+
+**Zero deploys.** `projects/decodeframe_test/` is written and builds; it has not
+been near a console, and nothing below is a statement about decoder behaviour.
+Everything here comes from `proprietary/dump/` and `objdump`.
+
+Three things came out of it, and each one changed the phase plan rather than
+confirming it — which is the third time in a row the offline half has been worth
+more than the deploy it precedes.
+
+**1. `sceVideodec2Decode` takes four arguments, and the frame buffer is one of
+them.** **[E]** The plan had assumed `mapMemorySize` was what `MapMemory` and
+`MapDirectMemory` were for. It is not: `Decode(decoder, au, fb, out)` carries
+the output buffer in its third argument, nothing on the path consults a "mapped"
+flag, and neither map call is reachable from the decode path at all.
+
+**2. `sceVideodec2MapMemory` would very likely have hung, and one GOT slot said
+so.** **[E]** Its PLT stub's slot (Videodec2 s2 `+0x60`) still contains the
+address of its own `push`/`jmp` resolver sequence — lazily bound, never called —
+while every neighbouring slot that lands in `libSceVdecCore` is resolved. That
+is the exact shape of the Phase 4 hang, except worse: Phase 4 could name the
+missing module (`libSceGnmDriver`) by reading the chain down. Here the slot
+never bound, so the dump does not say who owns the symbol.
+
+The probe therefore **does not call it**, and the phase that was going to open
+with `MapMemory` opens by not needing it. **New standing rule 15: check the GOT
+slot before you call the function.** Rule 11 said load every module in the call
+chain; this is how you find out which, for free.
+
+**3. `mapMemorySize` is exactly one output frame, and that names the pixel
+format.** **[I]** Phase 5 measured `memInfo+0x38` eight times without knowing
+what it was. Working backwards from those eight numbers:
+
+    mapMemorySize = align(width, 256) * align(height, N) * bytes * 3/2 + 5 * 1024
+
+with `N` = 16 for H.264 and 1 for HEVC, `bytes` = 2 for Main10. It reproduces
+**all eight** figures to the byte — 1,387,520 at 720p, 3,347,456 at 1080p,
+12,446,720 at 4K, 3,322,880 for HEVC Main 1080p, and so on. A `× 3/2` with
+half-height chroma is **NV12**; `× 3` is **P010**. The stride is **2048 at
+1080p, not 1920**.
+
+The trailing `5 * 1024` is explained by `GetPictureInfo`, which reads picture
+metadata from `frameBuffer + frameBufferSize - pictureCount * 1024`, walking
+backwards 1 KiB per picture: **the frame buffer carries its own metadata in its
+tail**, five slots of it.
+
+That is most of Phase 7's first two questions answered without a deploy. It is
+still arithmetic — the probe re-checks all seven live configurations against the
+module before it decodes anything, so a mismatch shows up as a mismatch rather
+than as corruption two phases later.
+
+**Also recorded:** two more alias pairs, bringing the total to four of eighteen
+exports. `GetPictureInfo` and `GetAvcPictureInfo` are byte-identical; so are
+`GetHevcPictureInfo` and `GetVp9PictureInfo`. One body serves all four and
+dispatches on `outputInfo->codecType`. **[E]** Standing rule 14 keeps earning
+its place.
+
+**What could not be settled offline:** bitstream framing. Videodec2 passes
+`auData`/`auSize` straight through to VdecCore, and nothing on the path scans
+for start codes, so Annex-B versus AVCC is invisible from here — it bottoms out
+in a `uvd_dec` ioctl that is not in the dump. The probe tries **both**, in one
+deploy, Annex-B first, each on its own decoder.
+
+**And the input needs no USB stick.** The plan called for copying an elementary
+stream onto the console, which the read-only `/fs` makes a manual step on every
+run. `tools/gen-test-stream.sh` encodes eight access units of `testsrc2` at
+1080p High L4.0 instead, and `test_stream.S` links the result into `.rodata`
+with `.incbin`. Access units are split on NAL type 9, which the encoder is told
+to emit, so the split is exact rather than heuristic.
+
+Full ABI in [hardware-decode-findings.md](hardware-decode-findings.md) §7.
+
+### 2026-08-11 — firmware 12.70 — Phase 5: **a payload creates a hardware decoder**
+
+**Two deploys, and they answered everything the phase existed to ask.**
+`projects/createdecoder_test/`, launched into the app slot.
+
+    sceVideodec2CreateDecoder ... rc=0x00000000 OK decoder=2004e0000
+    *** DECODER CREATED ***
+
+`rc=0` on **both** usable resource classes at H.264 1080p DPB 16, **and for
+HEVC Main** on `0x12384`, with `DeleteDecoder` returning `0` every time. **[E]**
+**No entitlement error, no arbitration call, no user session.** The risk this
+phase existed to test — *"this is where an entitlement gate would appear, if
+there is one"* — did not materialise, for either codec.
+
+Every structural prediction made offline held: the decoder handle came back
+**identical to `memInfo+0x10`**, the caller's own buffer; the VdecCore object
+sat at exactly `pWorkMemory + 0x40000`; both magic cookies were present; and
+the 9 cond vars at `+0x80` and 12 mutexes at `+0xc8` were visible in the
+object dump at precisely those offsets. **9/9** validation controls returned
+the predicted code.
+
+**HEVC is accepted, and it creates.** **[E]** Asked properly for the first time
+— profile 1/2, `general_level_idc` — it returns its own memory arithmetic,
+different from H.264 in every field, which is what proves a real configuration
+was accepted rather than waved through:
+
+| | work `+0x08` | frame `+0x18` | map `+0x38` | buffers |
+|---|---|---|---|---|
+| H.264 High 1080p dpb16 | 3,568,896 | 86,507,776 | 3,347,456 | 85.9 MiB |
+| HEVC Main 1080p dpb16 | 5,874,688 | 63,242,496 | 3,322,880 | **65.9 MiB** |
+| HEVC Main10 1080p dpb16 | 5,874,688 | 91,685,120 | 6,640,640 | 93.0 MiB |
+| HEVC Main10 4K L5.1 dpb16 | 5,874,688 | 326,107,392 | 24,888,320 | 316.6 MiB |
+
+HEVC Main at 1080p is **cheaper than H.264**. It requires resource class
+`0x12384`; `0xb6c8` refuses it with `0x811D0200`.
+
+**VP9 is not available.** **[E]** Refused at every configuration tried, profile
+0 and 2, 1080p and 4K, `0x811D0200` from the size computation each time — a
+capacity refusal, not a validation one. It cross-checks exactly against
+`libSceVdecSvp9.sprx` not existing on this firmware. Scope for this effort is
+**H.264 and HEVC**.
+
+And `memInfo+0x28` is **zero** for every accepted configuration, H.264 and
+HEVC alike, so the third buffer is never needed on these paths — which is what
+`sceVdecCoreCreateDecoder`'s class check predicted.
+
+Raw log: `research-logs/console/evo_createdecoder_log.txt`.
+
+#### The offline half, which is why the deploy only had to happen once
+
+**Zero deploys.** `sceVideodec2CreateDecoder` was disassembled before being
+called, per standing rule 1, and reading the config validator *all the way to
+the end* rather than as far as the first accepted call changed the phase.
+
+**The correction.** **[E]** `cfg+0x08` and `cfg+0x0c` are the other way round
+from how Phases 2–4 recorded them. `+0x0c` is the **codec** and `+0x08` a
+**resource class**. The proof is the profile and level validation that follows
+each codec value, which is codec-specific and unambiguous:
+
+| `cfg+0x0c` | profile | level | reading |
+|---|---|---|---|
+| `1` | 66, 77, 100 | 10..111 | H.264 `profile_idc` / `level_idc` |
+| `0xee049` | 1, 2 | {30, 63, 90, 93} ∪ 120..186 | HEVC Main / Main10, level × 30 |
+| `0x245bfd` | 0, 2 | 10..62 in fixed steps | VP9 profile 0 / 2, level × 10 |
+
+**Why it matters more than a relabelling.** Every one of the six configurations
+Phase 3 recorded as accepted used `+0x0c = 1` — all H.264. Its
+`0xb6c8 v=ee049 → 0x811D0205` lines were read as the module refusing HEVC; they
+are the probe handing HEVC a profile of 100 and a level of 51, which are H.264
+numbers, against a code that means *unsupported profile or level*. **HEVC has
+never been validly queried**, and the phase plan's HEVC discriminator —
+"succeeds for `0xb6c8`, fails for `0x12384`" — could not have worked, because
+neither value is a codec.
+
+**Also read off the module, all [E]:**
+
+- `CreateDecoder` (+0xba0) takes **three** arguments — config, memory-info,
+  output handle — plus a fourth its thunk supplies.
+  **`CreateHevcDecoder` (+0x1230) is a byte-for-byte alias of it**, and
+  `QueryHevcDecoderMemoryInfo` (+0xb90) a bare `jmp` to the plain query's body.
+  Neither does anything HEVC-specific.
+- **The decoder handle is the caller's own buffer.** The module builds its
+  object in the first `0x40000` bytes of `memInfo+0x10` and hands that pointer
+  straight back — which is why the `+0x08` requirement is ~3.4 MiB and barely
+  moves with resolution.
+- **Half of `SceVideodec2DecoderMemoryInfo` is input.** The query fills the
+  sizes and then explicitly zeroes `+0x10`, `+0x20`, `+0x30` and `+0x44`. The
+  module's own checker wants **`WB_ONION`** at `+0x10` and **`WC_GARLIC`** at
+  `+0x20`. The size at `+0x28` has never been logged by any probe.
+- `sceVdecCoreCreateDecoder` rejects resource classes above 8, which is why
+  `0xb6c8` (class 4) and `0x12384` (class 8) are the only two that have worked
+  — and on the HEVC codec index it calls `sceSysmoduleLoadModuleInternal`,
+  a lazy import of exactly the shape that hung Phase 4. **[I]** So
+  `libSceSysmodule.sprx` has to be loaded before `CreateDecoder`.
+
+The probe led with the Phase 3 control, then the full memory-info hexdump, then
+a codec matrix that is pure queries — so the HEVC question was answered at
+zero risk in the same deploy as the create. **Five deliberate-error controls
+confirmed the field correction by experiment**: a bogus codec at `+0x0c` gave
+`0x811D0204` and a bogus resource class at `+0x08` gave `0x811D0203`. Had the
+labels been the other way round, those two would have come back swapped.
+
+The HEVC *create* was held back to a second deploy behind an argv flag, because
+it is the only call in the probe that reaches a module load, and a module load
+is the one operation in this work that has hung rather than failed. **It did not
+hang** — `sceVdecCoreCreateDecoder` called `sceSysmoduleLoadModuleInternal`, the
+import resolved, and the decoder came back with codec index `4`.
+`libSceSysmodule.sprx` was in the module list from the start, put there by
+standing rule 11 while reading VdecCore. **That is the first time in this effort
+the rule has been applied before paying for it rather than after.**
+
+**The method note worth keeping:** the wrong reading had been in the reference
+document for three phases and was invisible the whole time, because it still
+produced working calls. Reading further cost nothing and no deploys. A reading
+that explains the successes you have is not the same as a reading that is
+right.
+
+### 2026-08-10 — firmware 12.70 — Phase 4: **a payload gets a GPU compute queue**
+
+Two deploys, `projects/computequeue_test/`. **`sceVideodec2AllocateComputeQueue`
+returns 0 with a live handle, and `ReleaseComputeQueue` gives it back cleanly.**
+**[E]** The risk register's most likely hard blocker — "compute queue refused" —
+is not a blocker.
+
+The memory ceiling is, though. Read to the end.
+
+**What was measured.** **[E]**
+
+- `sceVideodec2QueryComputeMemoryInfo` returns 0. The compute resource wants a
+  fixed **4,805,120 bytes (4.58 MiB)** — it takes no decoder config, so it does
+  not scale with resolution. It also takes **one** argument, not the `(cfg,
+  memInfo)` pair the decoder query uses.
+- Its structures, and `AllocateComputeQueue`'s, were read offline before
+  anything was called, and **7 of 7 deliberate-error controls returned exactly
+  the predicted code** — wrong sizes → `0x811D0101`, non-zero reserved byte →
+  `0x811D0200`, pipe ≥ 5 → `0x811D0201`, queue ≥ 8 → `0x811D0202`, buffer one
+  byte short → `0x811D0104`.
+- The Phase 3 query was re-measured as a control in the same run and returned
+  the same 86,507,776-byte frame pool. Nothing drifted.
+
+**The first deploy hung.** **[E]** `AllocateComputeQueue(pipe 0, queue 0)` with
+valid `WB_ONION` memory never returned. Because the log is flushed every line,
+the stop was located exactly: past all validation, inside
+`sceVdecCoreInitializeComputeResource`. The console stayed healthy and elfldr
+accepted the next connection.
+
+**And a ceiling that turned out not to be one.** **[E]**
+`sceKernelAllocateMainDirectMemory`, laddered — first under `deploy.sh`, then
+the same ELF relaunched through `install-homebrew.sh --run`:
+
+| request | `deploy.sh` | app slot |
+|---|---|---|
+| 4.6 MiB (compute), 16, 32, 41 MiB | OK | OK |
+| 64, 90, 109, 160, 322 MiB | `0x80020023` EAGAIN | **OK** |
+
+Identical on `WB_ONION` and `WC_GARLIC` in both slots, so memory type is never
+the issue. Under `deploy.sh` this looked fatal — 1080p decode needs 89 MiB, so
+the hardware path would have been capped at a resolution the CPU path already
+handles. **In the app slot every size allocated, including the full 4K dpb-16
+working set; the real ceiling there is above 322 MiB and was not found.**
+
+The cause was already written down in [building.md](building.md) and had not
+been connected to this work: `deploy.sh` injects into **`SceSpZeroConf`**, a
+background network service spawned with `dmem#0`, while
+`install-homebrew.sh --run` goes through `hbldr_launch` into the **PS Now app
+slot** — a real application process, which is where EVO Player itself runs.
+building.md frames that boundary in terms of the display plane; memory obeys it
+too. **No new eboot.bin or application is needed — only the right launcher.**
+
+The compute queue allocates in both slots, so nothing else about hardware
+decode depends on this.
+
+**Three plan corrections paid for by this deploy.** `MapMemory` and
+`MapDirectMemory` are Phase 5 calls, not Phase 4 — both demand a decoder-handle
+magic at `+0x68` and return `0x811D0103` without one.
+`sceKernelAllocateDirectMemory` is the wrong allocator for a payload. And the
+compute-queue memory wants `WB_ONION`, not the `WC_GARLIC` the plan assumed —
+read from the module's own gated validator, which requires `memoryType == 0`.
+
+Following `libSceVideodec2`'s PLT into its GOT also named the layer below
+without a symbol table: `QueryComputeMemoryInfo` →
+`sceVdecCoreQueryComputeResourceInfo`, `AllocateComputeQueue` →
+`sceVdecCoreInitializeComputeResource`, `ReleaseComputeQueue` →
+`sceVdecCoreFinalizeComputeResource`, `MapDirectMemory` →
+`sceVdecCoreMapMemoryBlock`.
+
+**The chain was then disassembled, at zero deploy cost, and it named the
+blocker.** `AllocateComputeQueue` → `InitializeComputeResource` → VdecCore
++0xd1c0 → +0x58bf0 → +0x67270 → a five-argument import
+`(pipeId, queueId, ringBase, ringSizeInDW, readPtrAddr)`, which is
+`sceGnmMapComputeQueue`. **[E]** for the chain, **[I]** for the name. Its GOT
+slot was unresolved in the dumped image — lazily bound and never called — and
+**the probe never loaded `libSceGnmDriver.sprx`**.
+
+**The second deploy added that one module and nothing else. `rc=0`, handle
+`0x2002b0500`, released cleanly.** **[E]** Pipe 0 / queue 0 was right from the
+first attempt; a hardware sweep of the five pipes and eight queues would have
+cost many deploys and found nothing.
+
+Two things worth carrying forward, both cheap and both nearly expensive:
+
+- **An unresolved lazy import blocks silently and forever.** No fault, no error
+  code, no log line. It looks exactly like a GPU problem and is not one. Load
+  every module in the call chain, not just the one whose name is on the
+  function.
+- **`EXIT=124` does not mean the payload hung.** The *successful* run also
+  exited 124, with its socket output truncated at exactly the same line as the
+  hang. Only the log on `/mnt/usb0` showed `rc=0`. Without that file a success
+  would have been recorded as a second failure, and the obvious next move would
+  have been to abandon Route B.
+
+And a third, which cost two of the three runs: **know which process the probe is
+running in.** `deploy.sh` and `install-homebrew.sh --run` are not two ways of
+doing the same thing — they land in different processes with different budgets,
+and a resource measurement from one does not transfer to the other.
+
+Phase 5 is unblocked, at 1080p, launched through `install-homebrew.sh --run`.
+
+### 2026-08-10 — firmware 12.70 — Phase 3: **the hardware decoder answered**
+
+**`sceVideodec2QueryDecoderMemoryInfo` returns 0 and real, resolution-scaled
+memory requirements from an elfldr payload.** **[E]** The PS5 hardware video
+decode stack is reachable, configurable and not permission-gated at query time.
+`projects/videodec2_test/`.
+
+This was chosen over `sceAvPlayerInit` as the first call because it is a pure
+query — it creates nothing, allocates nothing and touches no hardware.
+
+> **Corrected by the Phase 5 entry above.** The column below says "codec"; the
+> field is the **resource class**, and every row in this table is H.264. The
+> measurements stand — the labels do not.
+
+| Config | result | working set |
+|---|---|---|
+| class `0x12384`, 720p | **OK** | 41.0 MiB |
+| class `0x12384`, 1080p | **OK** | 89.1 MiB |
+| class `0x12384`, 4K, dpb 16 | **OK** | 322.2 MiB |
+| class `0x12384`, 4K, dpb 4 | **OK** | 108.6 MiB |
+| class `0xb6c8`, 720p / 1080p | **OK** | 41.0 / 89.1 MiB |
+| class `0xb6c8`, 4K | `0x811D0200` | — |
+| class `1` | `0x811D0200` at every resolution | — |
+
+The three output fields are a small fixed block (~3.4 MiB, barely varies), a
+large pool that scales with **resolution × DPB count** — the frame buffers —
+and a third that scales with resolution alone. **The numbers are computed, not
+tabulated**, which is the strongest evidence that a real decoder configuration
+was accepted rather than a validation stub. Output alignment is 256.
+
+**`0xb6c8` is capped below 4K and `0x12384` is not [E]**, so on the [I] reading
+of the day `0xb6c8` was AVC and `0x12384` the HEVC-class type. **That reading
+was wrong** — see the Phase 5 entry: both are resource classes, both were only
+ever asked for H.264, and the 4K refusal is a capacity limit rather than a
+codec one. **No entitlement error appeared at 4K on either**, but that is a
+statement about H.264 alone.
+
+#### How the structure was recovered — and the method that failed
+
+The config is size-prefixed, which the prologue disassembly showed before the
+first call, so the very first call used the right shape and returned a
+meaningful error rather than a fault.
+
+A blind search then tried to solve the rest by hill-climbing on the error code.
+**It failed, and the way it failed is worth recording:** it assumed a larger
+error code meant more progress. It does not — `0x811D020B` is a *rejection* of
+a non-NULL pointer, while the path that gets furthest returns the numerically
+*smaller* `0x811D0205`. The search fixed a field to a wrong value and stalled.
+It also never guessed 66/77/100 or a legal level, because those are not values
+anyone would put in a generic list.
+
+**Reading the validator settled in minutes what 1,335 calls could not.** The
+lesson is the review's own, sharpened: prefer reading the code to searching the
+input space, and never let a search invent its own progress metric.
+
+`SceVideodec2DecoderConfigInfo`, as the module checks it **[E]**:
+
+| offset | | |
+|---|---|---|
+| `+0x00` | u64 | struct size — `0x48` or `0x50`, else `0x811D0101` |
+| `+0x08` | u32 | codec type — `1`, `0xb6c8`, `0x12384`, `0x24708`, `0x24709`, else `0x811D0203` |
+| `+0x0c` | u32 | variant — `1`, `0xee049` or `0x245bfd`, else `0x811D0205`. Must be `1` for the working types |
+| `+0x10` | u32 | H.264 `profile_idc` — 66 / 77 / 100 only |
+| `+0x14` | u32 | H.264 `level_idc` — 10..111, used as a jump-table index |
+| `+0x18` | u32 | frame width |
+| `+0x1c` | u32 | frame height |
+| `+0x20` | u32 | DPB frame count, must be ≤ 16, else `0x811D0209` |
+| `+0x24` | u32 | must be 1..8, else `0x811D0206` — pipeline depth |
+| `+0x38` | u32 | thread priority, 256..767 or `0xffffffff`, else `0x811D0208` |
+| `+0x3e`, `+0x3f` | u8 | must be 0, else `0x811D0200` |
+| `+0x40` | u64 | optional extra-config pointer, **must be NULL** here, else `0x811D020B` |
+
+`SceVideodec2DecoderMemoryInfo` is `0x48` and its size field must be exactly
+that.
+
+Note `+0x38`'s range is the same SCE thread-priority range `sceAvPlayerInit`
+clamps its own `basePriority` into — the two APIs agree, which is a small but
+real cross-check that both readings are right.
+
+#### What this means for the goal
+
+**The ceiling described at the top of [hardware-decode.md](hardware-decode.md)
+is not a wall.** A payload can configure the hardware decoder. What is still
+unproven is everything after configuration: creating a decoder, feeding it,
+and getting a frame out and onto the screen without paying for it in CPU
+copies.
+
+Next, in order:
+
+1. `sceVideodec2AllocateComputeQueue` — the strings say a GPU compute queue is
+   required, and this is the next thing that can fail for a payload-shaped
+   reason. It is also the first call that allocates rather than queries.
+2. `sceVideodec2CreateDecoder` with the now-known-good config and the ~89 MiB
+   of memory it asks for at 1080p. This is where an entitlement gate would
+   appear if there is one.
+3. `sceVideodec2Decode` on a single H.264 access unit, then
+   `GetPictureInfo`/`GetAvcPictureInfo` to characterise the output frame —
+   format, stride, tiling, and whether the CPU can read it at all.
+
+### 2026-08-10 — firmware 12.70 (`0x12700001`) — Phases 0 and 1
+
+**The mapped module images are now on the PC, and the PS5 decode API is not
+called what the plan assumed. Route B's blocker is gone.**
+
+Three deploys, all read-only reconnaissance — no media API was called.
+
+#### Phase 0 — the dump
+
+`decoder_test` now copies the mapped images of the three media modules to the
+USB stick. 1.25 MB, twelve segments, **zero unreadable pages**. Working copies
+live in the gitignored `proprietary/dump/`.
+
+Four APIs were tried for sizing the images, and only one works. **[E]**
+
+| API | Result |
+|---|---|
+| `sceKernelGetModuleInfo(modid)` | **works.** The PS4 `SceKernelModuleInfo` layout (0x160: `st_size`, `name[256]`, 4×`{addr,size,prot}`, count, fingerprint) parses correctly on PS5 |
+| `sceKernelGetModuleList` | returns exactly **one** module (`eboot.bin`) even after three SPRXes load. Useless in a payload |
+| `sceKernelVirtualQuery` | **fails**, against a module known to be mapped |
+| `sceKernelGetModuleInfoInternal` | `0x80020016` |
+
+Because the list API is useless, modules are enumerated by sweeping modids
+0..0xFF through `GetModuleInfo` and keeping what answers. That sweep found 14
+modules in the process.
+
+**Every Sony module's text segment is mapped execute-only (`prot=4`).** **[E]**
+A plain `memcpy` from it *kills the payload outright*, and a `sigaction`
+SIGSEGV/SIGBUS handler with `siglongjmp` **does not rescue it** — the run died
+mid-log with the handler installed. Signal-guarded probing is not a usable
+safety net in an elfldr payload; the log-flush-per-line discipline is what
+diagnosed this, not the handler.
+
+What does work: `kernel_mprotect(pid, addr, len, prot|PROT_READ)` on our own
+process succeeds on the execute-only text, after which `memcpy` is fine. **[E]**
+`kernel_proc_copyout` is kept as the fallback probe because it is
+kernel-mediated and cannot fault the payload at all.
+
+Segment shape is identical across all three modules and matches every other
+Sony module in the process **[E]**:
+
+| | | |
+|---|---|---|
+| s0 | `--x` | code — **no ELF header is mapped** |
+| s1 | `r--` | `.eh_frame_hdr` + `.eh_frame` |
+| s2 | `r--` | relocated pointer tables (GOT, vtables) |
+| s3 | `rw-` | data |
+
+`PT_DYNAMIC` and the SCE dynlib data are **not** mapped, so the review's
+"read the import list from `PT_DYNAMIC`" is not available. **[E]** Two better
+things replace it — see below.
+
+#### Phase 1 — offline, zero deploys
+
+**The import graph, from relocated pointers.** Every pointer in s2/s3 has
+already been resolved by the loader, so classifying each by which module's
+address range it lands in reconstructs the graph *as linked* — stronger than a
+declared `DT_NEEDED` list. (Scanning s0 or s1 produces convincing garbage;
+only s2/s3 hold real pointers.)
+
+| `libSceAvPlayer` imports from | slots | distinct targets |
+|---|---|---|
+| `libkernel_sys` | 50 | 50 |
+| `libSceLibcInternal` | 25 | 24 |
+| `libSceSysmodule` | 4 | 4 |
+| **`libSceVideoDecoderArbitration`** | **3** | **3** (+0xf0, +0x1e0, +0x2a0) |
+
+`libSceVdecCore` imports only from `libkernel_sys`, `libSceLibcInternal` and
+`libSceSysmodule` — **it does not import Arbitration.** `libSceVideoDecoder-
+Arbitration` imports only libc and libkernel.
+
+This answers the review's three named risks directly:
+
+- **User session — the risk is not where the plan thought. [E]** AvPlayer
+  imports *nothing* from `libSceUserService`. (The payload still has no user:
+  `sceUserServiceGetInitialUser` → `0x80940004`, re-confirmed this run.)
+- **Arbitration — real, and it sits above the decoder, not below it. [E]**
+  AvPlayer calls into Arbitration directly; VdecCore does not. So arbitration
+  is AvPlayer's own gate, not a mandatory layer under VdecCore. A Route B
+  client may be able to skip it entirely. **[H]**
+- **GPU — split the claim, as the review urged. [E]** AvPlayer imports nothing
+  from `libSceGnmDriver`, so there is no load-time GPU dependency. But the
+  strings below show decode output *is* GPU memory, so this says only that
+  AvPlayer does not do the submission itself.
+
+**Loading the three modules pulled in no new modules at all** — the before/
+after module tables differ by exactly those three. **[E]** Combined with the
+four `libSceSysmodule` imports, the reading is that AvPlayer loads what it
+needs *at Init time*, not at load time. **[I]** That is why the dependency
+delta looks empty, and it means the real dependency set will only appear once
+`sceAvPlayerInit` runs.
+
+**The function inventory, from `.eh_frame_hdr`.** Its search table gives the
+entry address of every function with unwind info: **725** in AvPlayer, **1373**
+in VdecCore, **10** in Arbitration. **[E]** All six known AvPlayer entry points
+land exactly on FDE starts, which validates the parse.
+
+**Strings — the single highest-value artefact in Phase 1.** The modules are
+built with their diagnostic strings intact, and they name the API:
+
+- **`sceVideodec2CreateDecoder`, `sceVideodec2AllocateComputeQueue`,
+  `sceVideodec2MapMemory`** — **the PS5 low-level decode API is
+  `sceVideodec2*`.** The PS4-era `sceVideoDecoder*` names this project has been
+  probing for a year do not exist on PS5, which is exactly why all five always
+  came back unresolved. `aerolib.csv` catalogues **26** `sceVideodec2*`
+  entry points with NIDs, and **20+** `sceVdecCore*` ones. **Route B's blocker
+  is solved, offline, with no hash brute force.** **[E]**
+- `Invalid vdec query config info - check application entitlement to use HEVC
+  decoder (0x%x)` — **entitlement gating for HEVC, in the module's own
+  words.** **[E]** This is the licensing risk, and it is real.
+- `Unable to map GPU memory for HW decoder`, `HW decoder GPU memory pool
+  usage: 0x%zx (%.1f MiB)`, `SceVdecShaderFrameCopyY/C`, `compute pipe: S/W
+  Slice Dec` — decode output lands in **GPU memory** and frame copies are done
+  by **compute shaders**. The review's [H] "frames land in GPU memory" is now
+  evidence-backed, and `sceVideodec2AllocateComputeQueue` says a **GPU compute
+  queue** is required. **[E]**
+- `Failed sceAudiodecInitLibrary`, `SCE_AUDIODEC_ERROR_INVALID_TYPE` — audio
+  decode goes through **`sceAudiodec*`**, not AJM. Route F's premise is wrong
+  for AvPlayer. **[E]**
+- `sceMp4GetNextUnit`, `SceAvPlayerMp4Demux` — demux is `libSceMp4`. **[E]**
+- Thread names `SceAvPlayerDemux`, `DecodeThread`, `SceAvPlayerVideoDec`,
+  `SceAvPlayerStateMachine`, and `Failed to exit AvController thread` —
+  AvPlayer runs a multi-threaded pipeline. **[E]**
+
+**Prologue disassembly** (GNU objdump; llvm-objdump 18 has no raw-binary input
+mode). Reading the code replaced the plan's central hypothesis with a
+measurement:
+
+- **`sceAvPlayerInit(void *initData)` takes exactly one argument.** RSI/RDX/
+  RCX/R8/R9 are all written before being read, and RDI is dereferenced
+  immediately, so there is **no hidden `sret` pointer** and no argument shift.
+  **[E]**
+- `test rdi,rdi; je → xor eax,eax; ret` — **a NULL argument returns 0**, it
+  does not fault. **[E]**
+- The first field it reads is `[rdi+0x64]`, a 32-bit value clamped against the
+  constants `0x27d`–`0x2ff` (637–767) and used to derive several more by
+  adding 5, 6, 9, 0xa, 0x19. **That range is the SCE thread-priority range, so
+  offset 0x64 is a base thread priority** — which is exactly where
+  `basePriority` sits in the PS4 `SceAvPlayerInitData`. **[E]/[I]**
+- If that field is **zero**, it loads a canned default table from rodata
+  instead. **A zeroed struct is explicitly a supported input.** **[E]**
+- The inner init reads `[rdi+0x60]` and range-checks it to 1..4 — the PS4
+  layout's `debugLevel` slot. **[I]**
+- **`sceAvPlayerGetVideoData(handle, out)` writes exactly 0x28 = 40 bytes** to
+  the caller's buffer (`vmovups` of 32 bytes at +0, plus 8 bytes at +0x20).
+  The PS4 `SceAvPlayerFrameInfo` is 40 bytes. **[E]**
+- `sceAvPlayerIsActive(handle)` and `sceAvPlayerGetVideoData` both test
+  `[handle+0x250]`; the handle is a pointer whose first field is a pointer.
+  **[E]**
+- **AvPlayer's error family is `0x806Axxxx`** — `sceAvPlayerAddSource` returns
+  `0x806A0001` for a NULL handle or NULL path and `0x806A0002` for a failed
+  parse. **[E]** That is the failure taxonomy the review wanted prepared in
+  advance, read off the code rather than guessed.
+
+**So the PS4 `SceAvPlayerInitData` layout is not merely a plausible starting
+point — offsets 0x60 and 0x64 are confirmed by how the code uses them**, and a
+zeroed struct is a supported input rather than a gamble. **[E]**
+
+#### Phase 2 — passive runtime recon (still no media call)
+
+The 176 recovered names were resolved by NID against 14 candidate modules.
+**Resolution only — nothing was called.**
+
+| Module | modid | exports matched |
+|---|---|---|
+| `libSceAvPlayer.sprx` | 0x33 | **27** |
+| `libSceVdecCore.sprx` | 0x35 | **20** (`sceVdecCore*`) |
+| `libSceVideodec2.sprx` | 0x38 | **18** (`sceVideodec2*`) |
+| `libSceVideodec.sprx` | 0x39 | 7 (`sceVideodec*`, the v1 API) |
+| `libSceSysmodule.sprx` | 0x10 | 16 |
+| `libSceAudiodec.sprx` | 0x3f | 9 |
+| `libSceVideoDecoderArbitration.sprx` | 0x36 | 4 |
+| `libSceVdecwrap` / `libSceVdecShevc` / `libSceGnmDriver` / `libSceAjm` | 0x3a/0x3b/0x3c/0x3e | load, 0 matched (no names in the table for them) |
+| `libSceMp4.sprx`, `libSceVdecSvp9.sprx`, `libSceFios2.sprx` | — | **do not exist** — load fails `0x80020002` (ENOENT) |
+
+**`libSceVideodec2.sprx` exists and exports the whole decode API.** **[E]**
+That is the module Route B should target — not `libSceVdecCore`, which turns
+out to be the layer *below* it (`sceVdecCoreCreateDecoder`,
+`sceVdecCoreSetDecodeInput`, `sceVdecCoreSyncDecode`, and the
+compute-resource calls).
+
+**Two independent methods agree, exactly.** The offline import graph said
+AvPlayer points at Arbitration +0xf0, +0x1e0 and +0x2a0; the on-console export
+map resolves those three addresses to **`sceVideoDecoderArbitrationInitialize`,
+`sceVideoDecoderArbitrationEnable` and `sceVideoDecoderArbitrationAcceptEvent`**.
+Nothing was assumed to make those meet. **[E]**
+
+The same match identifies the four `libSceSysmodule` imports as
+`sceSysmoduleLoadModule` (+0xd0), `sceSysmoduleUnloadModule` (+0x2a0),
+`sceSysmoduleLoadModuleInternal` (+0x500) and `sceSysmoduleUnloadModuleInternal`
+(+0x560); VdecCore's two are `sceSysmoduleLoadModuleInternal` and
+`sceSysmoduleIsLoadedInternal`. **[E]**
+
+**This upgrades the empty-dependency-delta inference to evidence: AvPlayer and
+VdecCore load their dependencies at run time through `sceSysmodule`.** The real
+dependency set will not appear until `sceAvPlayerInit` runs — so the module
+table taken after Init is a genuinely valuable measurement, not a formality.
+
+> **Hazard, unexplained.** One run hung after enumerating `libSceVideodec` and
+> never returned; the watchdog thread did not fire and wrote nothing. A rerun
+> with the module order changed completed normally and loaded every module
+> including `libSceAudiodec`, so the cause is **not** established and should
+> not be blamed on a particular module. Two practical consequences: the probe
+> now writes a `#loading <module>` breadcrumb and flushes it *before* each
+> load, and **the watchdog thread cannot be relied on** — it has now failed to
+> fire twice, once here and once on the execute-only fault. Bound the deploy
+> from the PC side; that is the only guard that has actually worked.
+
+#### Tooling added
+
+| | |
+|---|---|
+| `tools/re/nid.py` | Sony NID hashing offline; validated 11/11 against hardware-resolved pairs. Plus an `aerolib.csv` index |
+| `tools/re/analyse.py` | import graph, `.eh_frame_hdr` function inventory, strings |
+| `tools/re/disas.sh` | disassemble a dumped segment at the right virtual address |
+| `tools/re/gen_nid_table.py` | emits `projects/decoder_test/nid_table.h` — 176 recovered names with NIDs |
+
+`tools/re/aerolib.csv` (12.6 MB) is fetched, not committed.
+
+#### What this changes
+
+1. **Route B is no longer blocked, and it was aimed at the wrong module.** It
+   was never a hash-reversal problem; it was a wrong-API-family problem. The
+   target is `libSceVideodec2` and its 18 exports, with `libSceVdecCore`
+   beneath it.
+2. **Zero-copy is the question that matters, and the answer leans favourable.**
+   Frames are already in GPU memory; the cost is a compute-queue dependency.
+3. **HEVC may be entitlement-gated** even if AVC is not — so a first test
+   should use H.264, and an HEVC failure should not be read as "the whole path
+   is closed".
+4. **`sceAvPlayerInit` is a much safer call than the plan assumed** — one
+   argument, no sret, NULL-tolerant, zero-struct-tolerant.
+5. **The watchdog-in-the-payload idea does not work here.** It has failed to
+   fire on both occasions it was needed. `timeout` around the deploy is the
+   guard that holds.
+
+#### Open, and now sharper
+
+- Does `sceVideodec2QueryDecoderMemoryInfo` answer without a decoder being
+  created? If so it is a zero-risk probe of the entitlement gate, cheaper than
+  anything in the AvPlayer path.
+- Which modules appear in the table *after* `sceAvPlayerInit`? That is the
+  real dependency list and it costs one deploy to get.
+- Is the 40-byte `SceAvPlayerFrameInfo` field order the PS4 one? Size matches;
+  order is still **[H]**.
+
 ### 2026-08-09 — firmware 12.70 (`0x12700001`), elfldr payload
 
 **libSceAvPlayer is directly callable from a payload. No proprietary files

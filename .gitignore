@@ -129,3 +129,13 @@ samples/**/*.vob
 samples/**/*.ifo
 samples/**/*.bup
 samples/**/*.fdmdownload
+
+# Third-party NID catalogue (12.6 MB) fetched by tools/re/nid.py's instructions
+# from zecoxao/sce_symbols. Not ours to vendor, and regenerable in seconds.
+tools/re/aerolib.csv
+
+# Console research logs and offline analysis artefacts (Phase 0-3 hardware
+# decode work). Pulled from the console and regenerable from the probes in
+# projects/decoder_test and projects/videodec2_test; kept out of the repo for
+# the same reason proprietary/ is - it is console-derived material.
+research-logs/

@@ -93,6 +93,49 @@ int sceKernelLoadStartModule(const char *name, size_t argc, const void *argv,
                              unsigned int flags, void *opt, int *res);
 
 /* ------------------------------------------------------------------------ */
+/* Module introspection (libkernel)                                          */
+/*                                                                           */
+/* Verified present as exported symbols in the SDK's libkernel.so stub, so   */
+/* these link. The STRUCT LAYOUTS below are the PS4 ones and are a           */
+/* HYPOTHESIS on PS5 - sceKernelGetModuleInfo takes the caller's declared    */
+/* size in st_size, so a wrong size is the likely failure mode. Probes that  */
+/* use these should hexdump the raw struct alongside the parsed fields so    */
+/* the layout can be confirmed rather than assumed.                          */
+/* ------------------------------------------------------------------------ */
+
+/* One loadable segment of a mapped module: where it landed and how big. */
+typedef struct evo_module_segment {
+    void    *address;
+    uint32_t size;
+    int32_t  prot;
+} evo_module_segment_t;          /* 0x10 */
+
+typedef struct evo_module_info {
+    size_t               st_size;      /* IN: sizeof(evo_module_info_t) */
+    char                 name[256];
+    evo_module_segment_t segments[4];
+    uint32_t             segment_count;
+    uint8_t              fingerprint[20];
+} evo_module_info_t;             /* 0x160 on PS4 */
+
+/* sceKernelVirtualQuery: what is actually mapped at an address, independent
+ * of any module's own bookkeeping. Useful as a cross-check on the above. */
+typedef struct evo_virtual_query_info {
+    void    *start;
+    void    *end;
+    int64_t  offset;
+    int32_t  protection;
+    int32_t  memory_type;
+    uint32_t flags;        /* bit0 flexible, 1 direct, 2 stack, 3 pooled, 4 committed */
+    char     name[32];
+} evo_virtual_query_info_t;      /* 0x48 */
+
+int sceKernelGetModuleInfo(int handle, evo_module_info_t *info);
+int sceKernelGetModuleInfoInternal(int handle, void *infoEx);
+int sceKernelGetModuleList(int *handles, size_t max, size_t *count);
+int sceKernelVirtualQuery(const void *addr, int flags, void *info, size_t infoSize);
+
+/* ------------------------------------------------------------------------ */
 /* System modules (libSceSysmodule)                                          */
 /* ------------------------------------------------------------------------ */
 

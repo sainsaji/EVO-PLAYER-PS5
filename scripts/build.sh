@@ -23,6 +23,13 @@ ALL_PROJECTS=(
     gpu_test         # milestone 5: GPU capability probe
     decoder_test     # research: native decoder reconnaissance
     avplayer_test    # research: libSceAvPlayer slot (placeholder)
+    videodec2_test   # research: Route B - libSceVideodec2 first call
+    computequeue_test # research: Route B phase 4 - memory + GPU compute queue
+    createdecoder_test # research: Route B phase 5 - sceVideodec2CreateDecoder
+    decodeframe_test # research: Route B phase 6 - sceVideodec2Decode
+    codecdump_test   # research: Route B phase 6 - dump the on-demand codec module
+    avplayer_probe   # research: Route A - instrumented libSceAvPlayer
+    slotcheck        # tooling:  is the app slot free? (deploy.sh, not --run)
     yuv_gpu_test     # future:   GPU YUV renderer (placeholder)
 )
 
