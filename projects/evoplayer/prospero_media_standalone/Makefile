@@ -21,7 +21,15 @@ SRCS := \
 	core/elfldr.c \
 	core/pt.c
 
+# One version, one place - the same rule the player's Makefile follows, and for
+# the same reason. The launcher used to carry its own `#define PP_VERSION` and
+# it had drifted to 0.2.0 while the player shipped 0.4.x, so the tile announced
+# a version that had not existed for two releases. Read it from the file CI
+# checks against the release tag instead.
+EVO_VERSION := $(shell tr -d '[:space:]' < ../VERSION)
+
 CFLAGS := -Os -Wall -Wno-unused-parameter \
+	-DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
 	-I. -Icore \
 	-I$(SDK)/target/include
 

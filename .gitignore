@@ -129,3 +129,9 @@ samples/**/*.vob
 samples/**/*.ifo
 samples/**/*.bup
 samples/**/*.fdmdownload
+
+# NID database for reverse-engineering work. A ~13MB third-party download from
+# zecoxao/sce_symbols, not our source - sce_stubs/Makefile already fetches it
+# via NID_DB_URL, so committing a copy is dead weight of exactly the kind this
+# repo has deleted before.
+tools/re/aerolib.csv

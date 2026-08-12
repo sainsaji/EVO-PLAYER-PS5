@@ -11,23 +11,41 @@ an interface built for a controller and a television rather than a mouse.
 
 ## Install
 
-Grab the latest **[release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)**
-and take either route:
+From the latest **[release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)**,
+download **`EVOPlayer-*-InstallTile.elf`**.
 
-**From the home screen** — download `EVOPlayer-*-homebrew.zip`, extract it to a
-USB stick as `/homebrew/EVOPlayer/`, and launch it from the websrv launcher at
-`http://<your-ps5>:8080`. Build the home-screen tile with
-`./scripts/build-media-tile.sh --install` and it appears in the console's own
-Media row, no browser needed.
+1. Copy it to a USB stick.
+2. Start it from your **payload manager** — the on-console one, typically at
+   `http://<your-ps5>:8084`.
+3. It reports **"EVO Player ready in Media"**.
+4. Open **EVO Player** from the console's own **Media** row.
+
+That is the whole install. Nothing to extract, no FTP, no websrv.
+
+> **Leave the payload running.** It is resident by design — it is what starts
+> the player when you open the tile. **Re-run it after every reboot**, along
+> with the jailbreak.
 
 **You will need**
 
 - A PS5 on firmware **12.70**, jailbroken — the jailbreak must be re-run after
   every reboot
-- `ps5-payload-elfldr` and `ps5-payload-websrv` running on the console
+- `ps5-payload-elfldr` running, and a way to send it an ELF (a payload manager)
 - A USB stick, formatted exFAT or FAT32, with your media on it
 
 Put video in any folder on the stick. EVO Player reads `/mnt/usb0`.
+
+<details>
+<summary>Other files in the release, and which to avoid</summary>
+
+| File | Use it for |
+|---|---|
+| `EVOPlayer-*-InstallTile.elf` | **The normal install**, above |
+| `EVOPlayer-*-UninstallTile.elf` | Removes the tile completely |
+| `EVOPlayer-*-homebrew.zip` | The websrv route — extract to a USB stick as `/homebrew/EVOPlayer/` and launch from `http://<ps5>:8080` |
+| `EVOPlayer-*-player-only.elf` | The bare player. **Do not send this to a payload manager.** With `elfldr` alone it starts headless with no display plane, so nothing appears on screen — which is exactly what it looks like when it is "not working". It needs `hbldr`, which the tile installer and websrv provide |
+
+</details>
 
 ---
 

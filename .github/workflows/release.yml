@@ -75,6 +75,20 @@ jobs:
             evo-player/ps5-dev:release \
             bash -lc 'bash ./scripts/build-evoplayer.sh'
 
+      # The file most people actually run. EVOPlayer.elf is the bare player and
+      # needs hbldr to get a display plane, so sending it straight to elfldr -
+      # which is what every payload manager does - starts it headless and
+      # nothing appears on screen. That was reported as "the release does not
+      # work", and it was: we shipped the wrong ELF.
+      #
+      # The Media tile launcher embeds the player and carries its own hbldr, so
+      # it works from elfldr alone.
+      - name: Build the Media tile payloads
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:release \
+            bash -lc 'bash ./scripts/build-media-tile.sh'
+
       - name: Build the sample suite
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
@@ -93,20 +107,45 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release bash -lc '
               set -e
-              f=output/elf/EVOPlayer.elf
-              file "$f" | grep -q "ELF 64-bit LSB.*x86-64"
-              llvm-readelf -l "$f" | grep -q "/lib64/ld-linux" \
-                && { echo "links the host loader - built with the wrong compiler"; exit 1; }
-              echo "ok: $(stat -c %s "$f") bytes"
+              for f in output/elf/EVOPlayer.elf \
+                       output/elf/EVOPlayer_MediaLauncher.elf \
+                       output/elf/EVOPlayer_UninstallTile.elf; do
+                [ -f "$f" ] || { echo "missing $f"; exit 1; }
+                file "$f" | grep -q "ELF 64-bit LSB.*x86-64" \
+                  || { echo "$f is not a PS5 ELF"; exit 1; }
+                llvm-readelf -l "$f" | grep -q "/lib64/ld-linux" \
+                  && { echo "$f links the host loader - wrong compiler"; exit 1; }
+                echo "ok: $f  $(stat -c %s "$f") bytes"
+              done
+
+              # The launcher embeds the player, so it must be larger. A
+              # launcher that is suddenly small means the .incbin picked up
+              # nothing - which ships a tile that opens to a black screen.
+              p=$(stat -c %s output/elf/EVOPlayer.elf)
+              l=$(stat -c %s output/elf/EVOPlayer_MediaLauncher.elf)
+              [ "$l" -gt "$p" ] || {
+                echo "launcher ($l) not larger than player ($p) - embed failed"
+                exit 1
+              }
+              echo "ok: launcher embeds the player ($l > $p)"
             '
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          cp output/elf/EVOPlayer.elf "dist/EVOPlayer-${{ steps.ver.outputs.tag }}.elf"
+          T="${{ steps.ver.outputs.tag }}"
+
+          # Named so the right file is obvious in the releases list. The tile
+          # installer is what a payload manager should be pointed at; the bare
+          # player is kept for the homebrew/websrv route, suffixed so nobody
+          # reaches for it by mistake.
+          cp output/elf/EVOPlayer_MediaLauncher.elf "dist/EVOPlayer-${T}-InstallTile.elf"
+          cp output/elf/EVOPlayer_UninstallTile.elf "dist/EVOPlayer-${T}-UninstallTile.elf"
+          cp output/elf/EVOPlayer.elf               "dist/EVOPlayer-${T}-player-only.elf"
+
           if [ -f output/pkg/EVOPlayer-homebrew.zip ]; then
             cp output/pkg/EVOPlayer-homebrew.zip \
-               "dist/EVOPlayer-${{ steps.ver.outputs.tag }}-homebrew.zip"
+               "dist/EVOPlayer-${T}-homebrew.zip"
           fi
           ( cd dist && sha256sum * > SHA256SUMS.txt )
           ls -la dist
@@ -138,17 +177,36 @@ jobs:
             echo "" >> dist/NOTES.md
           fi
           cat >> dist/NOTES.md <<'EOF'
-          ## Install
+          ## Install — start here
+
+          **Download `EVOPlayer-*-InstallTile.elf`.** That is the one to run.
 
           1. Jailbreak the console (12.70) and start `ps5-payload-elfldr`.
-          2. Deploy [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv).
-          3. Extract the homebrew zip to a USB stick as `/homebrew/EVOPlayer/`,
-             or copy it to `/data/homebrew/EVOPlayer/` over FTP.
-          4. Launch it from `http://<ps5>:8080/index.html`.
+          2. Copy `EVOPlayer-*-InstallTile.elf` to a USB stick.
+          3. Start it from your **payload manager** — the on-console one,
+             typically at `http://<ps5>:8084`. Anything that sends an ELF to
+             elfldr works.
+          4. It says **"EVO Player ready in Media"**. Open EVO Player from the
+             console's **Media** row.
 
-          `EVOPlayer-*.elf` is the bare payload. Note that sending it with
-          `elfldr` alone runs it headless — it needs the homebrew launcher to
-          get a display plane. See the README.
+          That is the whole install. **No websrv, no FTP, nothing to extract**,
+          and no second device beyond whatever runs your payload manager — the
+          tile installer carries the player inside it.
+
+          > **Keep the payload running.** It is resident by design — it is what
+             starts the player when you open the tile. Your payload manager may
+             show it as still running; that is correct.
+          >
+          > **Re-run it after every reboot**, along with the jailbreak.
+
+          ### Which file is which
+
+          | File | Use it for |
+          |---|---|
+          | `EVOPlayer-*-InstallTile.elf` | **Normal install.** Payload manager → tile in Media |
+          | `EVOPlayer-*-UninstallTile.elf` | Removes the tile completely |
+          | `EVOPlayer-*-homebrew.zip` | The websrv route: extract to a USB stick as `/homebrew/EVOPlayer/`, launch from `http://<ps5>:8080` |
+          | `EVOPlayer-*-player-only.elf` | The bare player. **Do not send this to a payload manager** — with `elfldr` alone it runs headless with no display plane and nothing appears. It needs `hbldr`, which the tile installer and websrv provide |
 
           ## Requirements
 
