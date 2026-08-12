@@ -42,7 +42,16 @@
 #include "core/hbldr.h"
 #include "core/standalone_fs.h"
 
-#define PP_VERSION "0.2.0"
+/*
+ * Injected from projects/evoplayer/VERSION by the Makefile. This was a
+ * hardcoded "0.2.0" and had drifted two releases behind the player it embeds,
+ * so the tile's own notification announced a version that no longer existed.
+ * The fallback exists only for a direct `make` outside build-media-tile.sh.
+ */
+#ifndef EVO_PLAYER_VERSION
+#define EVO_PLAYER_VERSION "0.0.0-dev"
+#endif
+#define PP_VERSION EVO_PLAYER_VERSION
 #define PP_TITLE_ID "EVOP10001"
 #define PP_SERVICE_PORT 9056
 #define PP_APPINST_AUTHID UINT64_C(0x4801000000000013)
