@@ -5,6 +5,7 @@
 #   ./scripts/build-media-tile.sh                  build both payloads
 #   ./scripts/build-media-tile.sh --install        build, then install the tile
 #   ./scripts/build-media-tile.sh --uninstall      remove the tile from the PS5
+#   ./scripts/build-media-tile.sh --no-build-player   stage the existing player
 #
 # ---------------------------------------------------------------------------
 # WHAT THIS PRODUCES, AND WHY IT IS NOT install-homebrew.sh
@@ -49,6 +50,7 @@ UNINSTALL_ELF="EVOPlayer_UninstallTile.elf"
 
 DO_INSTALL=0
 DO_UNINSTALL=0
+BUILD_PLAYER=1
 # -----------------------------------------------------------------------------
 # Deploys are bounded, and that is not belt-and-braces.
 #
@@ -68,6 +70,7 @@ while (( $# )); do
     case "$1" in
         --install)   DO_INSTALL=1 ;;
         --uninstall) DO_UNINSTALL=1 ;;
+        --no-build-player) BUILD_PLAYER=0 ;;
         --timeout)   shift; DEPLOY_TIMEOUT="${1:?--timeout needs seconds}" ;;
         -h|--help)   sed -n '2,10p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -120,6 +123,23 @@ fi
 # Stage the player. The launcher embeds it whole, so the tile always runs the
 # build that was staged here - not whatever install-homebrew.sh last pushed.
 # -----------------------------------------------------------------------------
+#
+# Build the player rather than trusting whatever is in output/elf.
+#
+# This used to require a pre-built player and stage whatever it found. Nothing
+# checked how old it was, and the version and the in-app changelog live in a
+# header and a VERSION file that main.c's make rule does not depend on - so
+# after a version bump this staged the PREVIOUS player and embedded it in a
+# launcher labelled with the new one. Caught exactly that way: a 0.5.0 tile
+# carrying a 0.4.1 player whose changelog stopped at 0.4.0.
+#
+# The failure is invisible from outside - the tile opens, the player runs, it
+# is simply the wrong build - so the fix is to not depend on the caller having
+# remembered. build-evoplayer.sh force-relinks for the same reason.
+if (( BUILD_PLAYER )); then
+    "${REPO_ROOT}/scripts/build-evoplayer.sh"
+fi
+
 need_file "${ELF_OUT}/${PLAYER_ELF}" "Build the player first:
        ./scripts/build-evoplayer.sh"
 validate_elf "${ELF_OUT}/${PLAYER_ELF}"

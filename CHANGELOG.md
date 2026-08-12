@@ -5,7 +5,34 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
-## Unreleased
+## 0.5.0
+
+**If a previous release did nothing when you ran it, this is the fix.** The
+release shipped the bare player, which needs `hbldr` to be given a display
+plane — sent straight to elfldr by a payload manager it started headless and
+never drew anything. Download **`EVOPlayer-0.5.0-InstallTile.elf`** instead: it
+registers the Media tile and carries the player inside it.
+
+Also: a text reader, and a font that can finally spell a comma.
+
+### Fixed — install
+
+- **The release now ships the ELF that works from a payload manager.**
+  `EVOPlayer.elf` is the bare player and needs `hbldr` for a display plane;
+  elfldr alone runs it headless, so nothing appears. The old release notes
+  documented this in a footnote under a step pointing at that very file.
+  The tile launcher already carried its own copy of websrv's `hbldr` and works
+  from elfldr alone — it just was never built or shipped. Verified on 12.70 on
+  a console where **only** elfldr was reachable.
+- **The bare player is renamed `-player-only.elf`** so it cannot be picked by
+  mistake, and the release notes now say which file is which.
+- **The tile launcher announced the wrong version** — a hardcoded `0.2.0` that
+  had drifted two releases behind the player it embeds. It now takes the
+  version from the same file CI checks against the release tag.
+- **CI verified only one of the three payloads.** It now checks all of them,
+  and asserts the launcher is larger than the player it embeds — a launcher
+  that suddenly shrinks means the `.incbin` picked up nothing, which would
+  ship a tile that opens to a black screen and pass every other check.
 
 ### New
 

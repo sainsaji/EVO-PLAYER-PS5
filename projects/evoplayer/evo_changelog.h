@@ -42,6 +42,13 @@ typedef struct evo_changelog_row {
 
 /* Newest first - the last thing that changed is what people look for. */
 static const evo_changelog_row EVO_CHANGELOG[] = {
+    { EVO_CL_VERSION, "0.5.0 - A TEXT READER AND A FIXED INSTALL" },
+    { EVO_CL_NEW,     "TEXT READER - OPEN TXT LOG MD NFO AND SUBTITLES" },
+    { EVO_CL_NEW,     "SCROLL WITH DPAD - SHOULDERS PAGE - TRIANGLE RESIZES" },
+    { EVO_CL_NEW,     "THE FONT HAS PUNCTUATION AT LAST" },
+    { EVO_CL_FIXED,   "THE RELEASE NOW SHIPS THE FILE THAT ACTUALLY RUNS" },
+    { EVO_CL_FIXED,   "THE MEDIA TILE REPORTS THE RIGHT VERSION" },
+
     { EVO_CL_VERSION, "0.4.0 - SMOOTHER PLAYBACK AND A SAFER STOP" },
     { EVO_CL_NEW,     "CIRCLE ASKS BEFORE IT STOPS PLAYBACK" },
     { EVO_CL_NEW,     "COVER ART IS LARGER - TILES READ AS POSTERS" },

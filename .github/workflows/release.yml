@@ -69,21 +69,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build EVO Player
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release \
-            bash -lc 'bash ./scripts/build-evoplayer.sh'
-
-      # The file most people actually run. EVOPlayer.elf is the bare player and
-      # needs hbldr to get a display plane, so sending it straight to elfldr -
-      # which is what every payload manager does - starts it headless and
-      # nothing appears on screen. That was reported as "the release does not
-      # work", and it was: we shipped the wrong ELF.
+      # Builds the player AND the tile payloads - build-media-tile.sh calls
+      # build-evoplayer.sh itself, so the player it embeds is always the one
+      # just built. There is deliberately no separate player step: two steps
+      # meant two chances to embed a stale build, and the tile carries the
+      # player inside it where nothing downstream can see the version.
       #
-      # The Media tile launcher embeds the player and carries its own hbldr, so
-      # it works from elfldr alone.
-      - name: Build the Media tile payloads
+      # The tile installer is the file most people actually run. EVOPlayer.elf
+      # is the bare player and needs hbldr for a display plane, so sending it
+      # straight to elfldr - which is what every payload manager does - starts
+      # it headless and nothing appears. That was reported as "the release does
+      # not work", and it was: we shipped the wrong ELF.
+      - name: Build the player and the Media tile payloads
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:release \
