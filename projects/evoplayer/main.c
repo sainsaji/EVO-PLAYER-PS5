@@ -16145,8 +16145,26 @@ int main(void) {
     intptr_t paddr = 0;
     void* vaddr = NULL;
 
-    sceKernelAllocateMainDirectMemory(memsize, 0x20000, 3, &paddr);
-    sceKernelMapDirectMemory(&vaddr, memsize, 0x33, 0, paddr, 0x20000);
+    /* Both of these were unchecked, and vaddr was used regardless - a NULL
+     * write on failure. The hardware-decode research measured the failure mode
+     * on 12.70: sceKernelAllocateMainDirectMemory returns 0x80020023 (EAGAIN)
+     * once the process's direct-memory budget is exhausted, and that budget
+     * depends on the LAUNCH SLOT, not the console. Under deploy.sh the ceiling
+     * sits between 41 and 64 MiB; this asks for 32, so it fits today - but with
+     * no margin and previously no check. In the PS Now app slot every size up
+     * to 322 MiB allocated. See docs/hardware-decode-findings.md section 7. */
+    int dmem_rc = sceKernelAllocateMainDirectMemory(memsize, 0x20000, 3, &paddr);
+    if (dmem_rc != 0) {
+        toast("VIDEOOUT", "direct memory allocation failed");
+        return 1;
+    }
+
+    int map_rc = sceKernelMapDirectMemory(&vaddr, memsize, 0x33, 0, paddr,
+                                          0x20000);
+    if (map_rc != 0 || vaddr == NULL) {
+        toast("VIDEOOUT", "direct memory map failed");
+        return 1;
+    }
 
     PS5_VideoBuf vbuf[2];
     memset(vbuf, 0, sizeof(vbuf));

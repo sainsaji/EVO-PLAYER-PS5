@@ -8,7 +8,26 @@ ABI confirmed 18/18, the frame-size formula confirmed 7/7, and
 `sceVideodec2MapDirectMemory` fully characterised — four successive gates found
 and cleared, each diagnosed from the module's own diagnostic lines without a
 single exploratory sweep. `Decode` now reaches the hardware submit and the
-driver refuses the job. See §7.
+driver refuses the job with ioctl errno **5200**. See §7.
+
+**The 2026-08-11 session closed four hypotheses and opened one.** In order of
+how much they cost:
+
+- **The arbitration hang is solved and arbitration is ruled out.** `+0x350` is
+  a **PLT stub**, not a function body; its GOT slot was unbound. The missing
+  provider is `libSceVideoArbitration.sprx` — a *different module* from
+  `libSceVideoDecoderArbitration.sprx`. Load it first and Initialize returns.
+  It changes nothing about the refusal. §7.
+- **The command buffer is not a dead end and it is well formed.** This document
+  previously said the trail ended at a kernel-side consumer. It does not: the
+  object is in *our own* work memory and can simply be read. Width, height,
+  mode and real physical addresses are all correct. §7.
+- **Annex-B is the right framing.** AVCC is rejected *earlier*, in software.
+- **A payload cannot open video out, and trying KERNEL-PANICKED the console.**
+  §9. This is the expensive lesson of the session and the one most worth not
+  repeating.
+- **Open, and the next phase: the kernel is directly readable**, so errno 5200
+  can be read rather than guessed at. §13.
 
 This is the *reference*. It answers "what is true and how do we know", so that
 nothing here has to be re-derived on a console.
@@ -22,15 +41,19 @@ nothing here has to be re-derived on a console.
 - [native-media-research.md](native-media-research.md) — the chronological
   results log, newest first
 
-Raw evidence is in `research-logs/` (gitignored): console logs, deploy
-transcripts, disassembly of every function cited here, extracted strings, and
-the import graph. Module images are in `proprietary/dump/` (gitignored).
+Raw evidence lives in a **separate repository, `PS5-Research`** — console logs,
+deploy transcripts, disassembly of every function cited here, extracted
+strings, the import graph, and offline psdevwiki mirrors. It was extracted from
+this checkout's gitignored `research-logs/` on 2026-08-11, so every
+`research-logs/...` path cited below is now relative to that repository's root.
+Module images stay here, in `proprietary/dump/` (gitignored), and were
+deliberately never copied into it.
 
 ## Confidence tags
 
 | Tag | Means |
 |---|---|
-| **[E]** | Observed on this console, on 12.70, and in `research-logs/` |
+| **[E]** | Observed on this console, on 12.70, and logged in the `PS5-Research` repository (§11) |
 | **[I]** | Inference from evidence plus how x86-64/SysV/ELF demonstrably work |
 | **[H]** | Hypothesis. Plausible, untested, could be wrong |
 
@@ -106,7 +129,12 @@ are simply broken in a payload process. **[E]** for every row.
 | `kernel_dynlib_resolve` by NID | **works** — this is the only symbol lookup that does |
 | `kernel_mprotect` | **works**, including adding `PROT_READ` to execute-only system text |
 | `kernel_proc_copyout` | **works**, and cannot fault the caller |
-| `sceUserServiceGetInitialUser` | `0x80940004` — **a payload has no user session** |
+| `sceUserServiceGetInitialUser` | `0x80940004` under `deploy.sh`, `0x80960006` in the app slot. **Not the right question** — see the row below |
+| `sceUserServiceInitialize` + `GetLoginUserIdList` | **work in the app slot**, returning `0` and a real user id. **[E]** 2026-08-11. The long-standing "a payload has no user session" entry was measured by `decoder_test` under `deploy.sh`, i.e. in `SceSpZeroConf` — the same wrong-host-process error as the 41 MiB memory ceiling. **There IS a session where the player runs.** `GetInitialUser` still fails there; `GetLoginUserIdList` is the call that works |
+| `sceVideoOutOpen` | **REFUSED, and trying it PANICKED THE KERNEL.** `0x80290001` for the real logged-in user; the `0xFF` system-user retry returns `0x4E100000`, which is not a handle. Allocating a compute queue afterwards panicked the console. See §9.1. **Do not call this from a payload** |
+| `kernel_copyout` from `KERNEL_ADDRESS_TEXT_BASE` | **available and read-only.** The SDK resolves the kernel text base for 12.70, so kernel code can be dumped and disassembled offline. No firmware decryption needed — §13 |
+| `kernel_get_proc_file(pid, fd)` | **available** — gives the kernel `struct file *` for an fd, e.g. the decoder's fd 16 |
+| `kernel_get_ucred_authid` / `_caps` | **available**, read and write. `prospero_media_standalone/core/pt.c` already elevates to `0x4800000000010003` + all-`0xFF` caps and restores. Writing is a kernel write — §13 |
 | `sigaction(SIGSEGV)` + `siglongjmp` | **does not rescue a fault** — the process dies anyway |
 | detached `pthread` watchdog | **never fires** — failed on both occasions it was needed |
 | `fopen`/`fwrite` to `/mnt/usb0` | works; retrieve over websrv `/fs`, which is read-only |
@@ -800,6 +828,116 @@ cmp  eax, 0x10 ; jne -> (unchanged) -> cmd 22, error line 0x25c
 group-`0x83` commands VdecCore issues are 11, 18 and 20 — 20 being the memory
 pin that `MapDirectMemory` drives.
 
+##### What the job actually contains — the box, opened **[E]**
+
+The 24 bytes the submit hands the driver are
+`{ jobPtr, [obj+0x1d6c], callerArg, [obj+0x1d70], 0 }`, and the job at
+`obj+0x1898` is three fields:
+
+```
+mov DWORD PTR [rbx+0x1898], 1        ; command   - takes 0, 1 or 2
+mov QWORD PTR [rbx+0x18a0], rax      ; -> a command buffer
+mov DWORD PTR [rbx+0x18a8], 0        ; flag
+```
+
+The buffer comes from a **ring of five slots** at `obj+0x58`, stride `0x80`,
+indexed by `[obj+0x1d50] % 5`. `[obj+0x1d6c]` is an event-queue id — the same
+value is passed to the wait call after the submit, so it is how the driver
+signals completion — and `[obj+0x1d68]` is the file descriptor. Both are set
+together when the device is opened, at `+0x2c470`.
+
+**`[obj+0x1d70]` is read by the submit and written nowhere in the module.**
+Either the object is zero-initialised and the driver expects `0`, or something
+outside VdecCore fills it. Suggestive, not actionable.
+
+**That reading was wrong, and it was wrong in an avoidable way.** It said: "the
+job is a pointer to a command buffer; whatever the driver objects to is in that
+buffer's contents, which the codec layer builds. There is no further handle
+here, and the consumer is kernel-side."
+
+Every sentence is true of the **dump**. None of it is true of a **live
+decoder**. The object is in memory *this program allocated*, so every field the
+submit reads can simply be looked at after the refusal. See below.
+
+##### The job, read back off a live decoder **[E]**
+
+Run 13. The VdecCore object at `decoder+0x78` is *not* the object the submit
+operates on — applying these offsets to it returns zeroes in every field. The
+submit's object is the **GpDec device object**, reached by a pointer chain.
+Rather than chase the chain it was found by what is unique about it: `mode == 7`
+at `+0x2c0` together with a plausible fd at `+0x1d68`, two constraints `0x1ab8`
+bytes apart. **Exactly one candidate matched**, in the work-memory block:
+
+```
+obj+0x1d08 mode index  = 5  -> mode 7 -> ioctl command 23
+obj+0x02c0 mode        = 7
+obj+0x1d68 fd          = 16          (a CHARACTER DEVICE, confirmed by fstat)
+obj+0x1d6c event queue = 0x00000011
+obj+0x1d70 mystery     = 0x00000001   NON-ZERO - something does fill it in
+obj+0x18a0 job.cmdBuf  = 0x2008d3f00  (inside the frame pool)
+```
+
+And the command buffer the driver rejected:
+
+| offset | value | reading |
+|---|---|---|
+| `+0x00` | `0x0de8` | the size of the `obj+0x2b0` structure VdecCore memsets |
+| `+0x08` | `0x01a0ec00` | a **physical address** inside the frame pool |
+| `+0x10` | `7` | the mode |
+| `+0x1c` | `0x780` = **1920** | width |
+| `+0x20` | `0x440` = **1088** | height, macroblock-aligned |
+| `+0x28` | `0x03630000` | a second physical address in the pool |
+
+**The command is well formed.** Correct resolution, correct mode, real physical
+addresses in the right ranges. So the codec layer *does* build a command, and
+"the codec module was never loaded" is dead as an explanation — `libSceVdecSavc`
+and `libSceVdecSavc2` were loaded for the first time in run 11 and changed
+nothing.
+
+`[obj+0x1d70]` reads back as **1**, not zero, so it is filled in by something.
+That closes the "written nowhere in the module" question without answering who
+writes it.
+
+##### The submit path is chosen by the codec, and it does not vary **[E]**
+
+`libSceVdecCore +0x2b870` picks the ioctl command from the mode at `+0x2c0`,
+and the mode comes from a six-entry jump table indexed by `[obj+0x1d08]`:
+
+| `[obj+0x1d08]` | mode | ioctl command |
+|---|---|---|
+| 0 | 0 | 22 |
+| 1 | `0x10` | **24** |
+| 2 | 4 | 22 |
+| 3 | 3 or `0x80000003` | 22 |
+| 4 | 1 | 22 |
+| **5** | **7** | **23** ← ours |
+
+`[obj+0x1d08]` is written by a four-field setter at `+0x8f0` that VdecCore
+exports and the **codec module** calls — so the codec layer chooses the route
+into the driver.
+
+**It is invariant.** Run 14 swept resource class `0xb6c8` and `0x12384` against
+pipeline depth 1 and 4: all four produced mode index 5, mode 7, command 23 and
+errno 5200, identical field for field. **Configuration does not select the
+submit path**, so there is no cheap way to reach commands 22 or 24 from the
+public API.
+
+##### `0x1450` is a genuine ioctl errno **[E]**
+
+Read off the submit's own error path, so this is not an inference:
+
+```
+call 0x8009ea010          ; the ioctl
+mov  r14d, 0x254          ; the line number
+test eax, eax
+je   <success>
+call 0x8009e9ff0          ; __error()  -> &errno
+mov  r8d, DWORD PTR [rax] ; *errno   <- 0x1450 = 5200 is logged from here
+```
+
+The ioctl returned failure and `errno` was 5200. The driver is refusing the
+job, and everything on our side of that call is now known to be well formed.
+
 ##### A correction, and the method note that goes with it
 
 This section previously claimed the refusing code was **not in the dump**, on
@@ -851,10 +989,12 @@ either. It is in VdecCore, as above.
 either fails for it or returns a blank name, and the probe silently drops blank
 names. Worth fixing before the next enumeration.
 
-#### Arbitration: the ABI is confirmed, and `Initialize` **hangs** **[E]**
+#### Arbitration: the ABI is confirmed, and `Initialize` **works** **[E]**
 
-Tried on 2026-08-11. The ABI was read first and every prediction held —
-**7/7 controls exact**:
+**Runs 9 and 10 hung here. Run 11 did not. The cause was an unresolved lazy
+import, and the fix is one module load.**
+
+The ABI was read first and every prediction held — **7/7 controls exact**:
 
 ```c
 typedef struct {
@@ -876,28 +1016,70 @@ The priority range 256..767 is the same one `sceAvPlayerInit` clamps
 `basePriority` into and the decoder config checks at `cfg+0x38`. Three
 independently-read functions agreeing on one range.
 
-**But the real call never returns.** With valid parameters,
-`sceVideoDecoderArbitrationInitialize` blocks indefinitely — the per-line
-flushed log on `/mnt/usb0` stops at the last control and the payload held the
-app slot until the deploy's `timeout` detached. No fault, no error code: the
-third silent block in this effort, after `AllocateComputeQueue` without
-`libSceGnmDriver` and the `libSceAudiodec` load-order hang.
+##### Why it hung: `+0x350` is a PLT stub, not a function body **[E]**
 
-The two earlier ones were unresolved lazy imports. This is not that — the four
-exports resolve, and the controls prove the module's own validation runs. The
-body at `+0x350` is what blocks, and the reading that fits is an IPC to a system
-service that does not answer in a payload process. **[H]** Consistent with
-`sceUserServiceGetInitialUser` returning "no user session" (§2): arbitration
-exists to referee decoder access *between titles*, which is a concept a payload
-sits outside of.
+This document previously called the hang "the body at `+0x350` blocks" and
+hypothesised an IPC to a system service. **Both readings were wrong**, and
+three instructions say so:
 
-**So arbitration is not available to a Route B client this way, and the
-hypothesis it was raised to test is untestable by this route.** That does not
-prove the submit's errno 5200 is unrelated — only that this experiment cannot
-settle it. **[E]** that it hangs; **[H]** why.
+```
+800a3c350:  jmp QWORD PTR [rip+0x7cf2]   # GOT, segment 2 +0x48
+800a3c356:  push 0x1
+800a3c35b:  jmp  0x800a3c330
+```
 
-Note the previous driver errno in this same chain, 5031, also looked like it
-could be a rights problem and turned out to be an unaligned length.
+`Initialize` validates its parameters and then **tail-calls an import**. In the
+Phase 0 dump that import's GOT slot held `0x800a3c356` — the address of its own
+`push`/`jmp` resolver sequence. **Unbound**, while its neighbours in the same
+table were bound to libkernel and libSceLibcInternal.
+
+That is not a new failure mode. It is the **third** instance in this project,
+after `AllocateComputeQueue` without `libSceGnmDriver` and
+`sceVideodec2MapMemory`. Standing rule 15 — *check the GOT slot before you call
+the function* — was written after the second one and simply was not applied
+here. An unresolved lazy import blocks silently and forever: no fault, no error
+code, no log line. Which is exactly what runs 9 and 10 observed, and why "no
+user session" looked plausible enough to spend a deploy on.
+
+**The provider is `libSceVideoArbitration.sprx`** — a **different module** from
+`libSceVideoDecoderArbitration.sprx`, present on the console, never loaded by
+this project before. **[E]** With it loaded first, all three previously unbound
+slots bind into one module's address range:
+
+| GOT slot | before | after |
+|---|---|---|
+| s2 +0x48 | `base+0x356` (own PLT) | bound — **Initialize's tail call** |
+| s2 +0x58 | `base+0x376` (own PLT) | bound |
+| s2 +0x70 | `base+0x3a6` (own PLT) | bound |
+
+**Load order matters.** Binding on this loader is eager at load time, so the
+provider must be resident *before* the consumer is loaded. Every earlier run
+loaded `libSceVideoDecoderArbitration` second, before anything that could
+supply it.
+
+##### Arbitration comes up, and it changes nothing **[E]**
+
+Run 11, with the slot bound:
+
+```
+Initialize(priority 700, +0x10 = 4) -> 0x81570002   already initialised
+Enable(NULL, callback)              -> 0x00000000
+AcceptEvent(0) / AcceptEvent(1)     -> 0x00000000 / 0x00000000
+```
+
+Arbitration was then up for the first time in this project, and a decode run
+immediately afterwards was **refused by the driver with the identical errno
+5200 chain**. Two earlier attempts in the same run, unarbitrated, failed the
+same way.
+
+**So arbitration is ruled out as the cause of errno 5200.** **[E]** It had been
+the prime suspect since run 8, on the reasoning that AvPlayer calls
+`Initialize`/`Enable` before decoding and Route B never had. That reasoning was
+sound and the answer is still no.
+
+`sceUserServiceInitialize` plus a real logged-in user id in the process makes no
+difference either — tested separately, same block before the fix, same refusal
+after it.
 
 Raw logs: `research-logs/console/evo_decodeframe_log-run1.txt` and
 `research-logs/deploy/decodeframe-run{4,5,8}-stdout.txt`. **The stdout captures
@@ -1014,6 +1196,26 @@ That is most of Phase 7's first two questions, obtained without a deploy — and
 longer a hypothesis about `memInfo+0x38`; it is a measured property of the
 module on 12.70. No frame has been *looked at* yet, so the inference from the
 formula to NV12/P010 pixels remains **[I]**.
+
+#### `optimizeProgressiveVideo` costs one metadata block **[E]**
+
+2026-08-11, and found by accident: the config field was set to `true` for the
+first time (to match the working reference client) and **all seven rows
+immediately read exactly 1024 bytes below prediction** — every codec, every
+resolution, no exceptions.
+
+    optimizeProgressiveVideo = false  ->  ... + 5 * 1024
+    optimizeProgressiveVideo = true   ->  ... + 4 * 1024
+
+So the `5 * 1024` tail is not fixed. One of the five 1 KiB metadata slots is
+there only for interlaced content, and declaring the stream progressive drops
+it. The rest of the formula is unchanged.
+
+Two things follow. The field is **not cosmetic** — it changes the frame
+layout, so anything reading metadata out of the tail must know which of the two
+sizes it is dealing with. And a 7/7 match becoming 0/7 the moment an unrelated
+config flag moved is a reminder that the frame-size control is sensitive to the
+whole config, not just to resolution and codec.
 
 ### `MapMemory` and `MapDirectMemory` need a decoder, not memory — and one of them is a trap
 
@@ -1317,13 +1519,75 @@ and copy cost must be measured separately from decode cost.
 |---|---|
 | **Execute-only text** | Every Sony module's s0 is `--x`. A plain `memcpy` from it **kills the payload**, and a SIGSEGV handler does not save it. Use `kernel_mprotect` to add `PROT_READ` first, or `kernel_proc_copyout` |
 | **`libSceAudiodec` load hang** | Hangs the payload when loaded straight after the video modules. Reproduced twice. Fine once GnmDriver/Ajm are loaded |
-| **`sceVideoDecoderArbitrationInitialize` blocks** | Valid parameters, all four exports resolved, 7/7 validation controls exact - and the real call never returns. Not an unresolved import; the body at `+0x350` blocks, most likely on an IPC a payload has no session for. Held the app slot until `timeout` detached |
+| **`sceVideoOutOpen` KERNEL-PANICS THE CONSOLE** | **The most expensive mistake in this project.** From a payload in the borrowed `hbldr` app slot: the real logged-in user is refused with `0x80290001`, and the `0xFF` system-user retry returns `1309671680` = `0x4E100000` - **not a handle**, real ones are small integers. A `< 0` check treats that garbage as success. Allocating a GPU compute queue afterwards **panicked the kernel**; `sceVideodec2AllocateComputeQueue` had succeeded in every prior run and the open video-out handle was the only new thing. Cost ~50 minutes of recovery. **Do not open video out from a payload.** §9.1 |
+| **`sceVideoDecoderArbitrationInitialize` blocked** | **Solved.** It was an unresolved lazy import, not a body - `+0x350` is a PLT stub. Load `libSceVideoArbitration.sprx` **before** `libSceVideoDecoderArbitration.sprx` and it returns. Cost two deploys and a wrong hypothesis about user sessions. §7 |
 | **Unresolved lazy imports block** | `AllocateComputeQueue` hung, silently and indefinitely, purely because `libSceGnmDriver.sprx` was not loaded. It did not fault and it did not return an error. **Load every module in the call chain, not just the one you are calling** |
 | **An unbound GOT slot is visible offline** | The same hazard, findable without a deploy: an unbound lazy import still points into its own PLT `push`/`jmp` sequence. `sceVideodec2MapMemory`'s one import is unbound while every VdecCore neighbour is resolved, and no module name is recoverable for it. **Check the slot before calling the function** |
 | **`EXIT=124` does not prove a hang** | The successful run also exited 124: the payload finished, but the elfldr socket did not close and its tail never reached the PC. **Always read the log off `/mnt/usb0` before concluding anything from the deploy socket** |
 | **In-payload watchdogs do not work** | Failed to fire on both occasions needed. Bound the deploy with `timeout` instead |
 | **A hung payload holds the elfldr socket** | `timeout` exit 124 is the expected signal, not an error. The console stayed healthy through both hangs; no reboot was needed |
 | **Never stack launches** | Unchanged and still the expensive one — see `docs/hardware-decode.md` |
+
+---
+
+### 9.1 The video-out kernel panic — post-mortem **[E]**
+
+2026-08-11. Worth a section rather than a table row, because the *reasoning*
+error is more reusable than the fact.
+
+**What was done and why.** Moonlight-ps4 — the only implementation known to
+drive `libSceVideodec2` successfully — opens video out *before* it allocates a
+compute queue and *before* `CreateDecoder`, and its comment ties that ordering
+to `CPU_FAULT_SUBMITDONE_TIMEOUT`, a **submit** fault. Our decode dies at the
+submit. No probe in this project had ever opened video out. It looked like the
+largest remaining structural difference, and it was.
+
+**What happened.** The log on `/mnt/usb0` survived because every line is
+flushed (rule 4), and it locates the panic exactly:
+
+```
+sceVideoOutOpen(user 513995993, BUS_MAIN) -> 0x80290001 FAILED
+sceVideoOutOpen(user 0xFF,      BUS_MAIN) -> 1309671680 "ok"
+sceVideoOutSetFlipRate(60Hz) -> 0x00000000
+--- compute queue ---
+QueryComputeMemoryInfo -> 0  size 4805120
+queue memory 4805120 B WB_ONION -> 0 virt 2000a0000
+<panic - nothing further>
+```
+
+The next call was `sceVideodec2AllocateComputeQueue`, which bottoms out in
+`sceGnmMapComputeQueue`. **That call had succeeded in every previous run.** The
+only new thing in the process was an open video-out handle.
+
+**Three lessons, in order of how much they generalise.**
+
+1. **A lesson from a PS4 *title* does not transfer to a borrowed PS5 app slot.**
+   Moonlight owns its process. This payload is injected into a running
+   application that already owns the display pipeline. The reasoning behind the
+   experiment was sound; the transfer was never checked. **When importing a
+   practice from a reference implementation, check that the thing it assumes
+   about its process is also true of ours.**
+
+2. **Validate handles by range, not by sign.** `0x4E100000` is positive, so
+   `if (h < 0)` passed it. The system-user retry did not fail cleanly — it
+   returned garbage. The *first* call had already given the honest answer,
+   `0x80290001`, and a fallback overrode it.
+
+3. **"Low risk by construction" is not a risk assessment.** The same build
+   carried a probe that issued deliberately malformed ioctls to the decoder fd,
+   justified on the grounds that drivers validate their inputs. That probe
+   never ran, so it is **not** what panicked the console — but the reasoning
+   had nothing behind it. **Any call that reaches a kernel driver directly —
+   raw `ioctl` on a device fd, video-out or GPU context acquisition — is a
+   panic risk and needs explicit agreement before it is built into a payload.**
+   Read-only observation of driver state, which is what produced every real
+   finding in §7, carries none of that risk.
+
+**What it cost and what it returned.** About fifty minutes of console recovery.
+It returned three things: video out is genuinely unavailable to a payload
+(`0x80290001` is a clean refusal, not a bug in the call), the Moonlight
+ordering hypothesis is closed rather than left open, and
+`optimizeProgressiveVideo` was measured — see §7's frame-size note.
 
 ---
 
@@ -1403,7 +1667,7 @@ is not the same as a reading that is right.**
 | `projects/videodec2_test/` | Route B phase 3: the `sceVideodec2QueryDecoderMemoryInfo` call |
 | `projects/computequeue_test/` | Route B phase 4: compute memory, the direct-memory ladder, the compute queue |
 | `projects/createdecoder_test/` | Route B phase 5: the codec matrix and `sceVideodec2CreateDecoder` |
-| `projects/decodeframe_test/` | Route B phase 6: `sceVideodec2Decode`. Carries its own H.264 stream in `.rodata`. **Built, not yet run** |
+| `projects/decodeframe_test/` | Route B phase 6: `sceVideodec2Decode`. Carries its own H.264 stream in `.rodata`. Also locates the GpDec device object and dumps the submitted job. **Video out and the ioctl errno probe were removed after §9.1 — do not put either back** |
 | `tools/gen-test-stream.sh` | regenerates that stream and its access-unit index with ffmpeg |
 | `projects/slotcheck/` | **is the app slot free?** Sweeps pids, reads `p_comm` from the kernel proc struct, reports which processes hold the decoder modules. **Deploy with `deploy.sh`, not `--run`** - it lands in `SceSpZeroConf` on purpose, so it cannot stack on the slot it is asking about |
 | `projects/decoder_test/nid_table.h` | generated — 176 recovered names with NIDs |
@@ -1411,6 +1675,7 @@ is not the same as a reading that is right.**
 | `tools/re/analyse.py` | import graph, `.eh_frame_hdr` function inventory, strings |
 | `tools/re/disas.sh` | disassemble a dumped segment at its real virtual address |
 | `tools/re/gen_nid_table.py` | regenerates `nid_table.h` |
+| `tools/psdevwiki-dump.js` | exports psdevwiki from the browser console. The site is behind a Cloudflare managed challenge that rejects curl, wget and TLS-impersonating clients alike, so it runs in an already-cleared tab and drives MediaWiki's `api.php`. Takes every listable namespace |
 
 `tools/re/aerolib.csv` (12.6 MB) is fetched, not committed:
 
@@ -1421,6 +1686,149 @@ curl -sfLo tools/re/aerolib.csv \
 
 GNU `objdump` rather than `llvm-objdump` — LLVM 18's has no raw-binary input
 mode, and the dumps have no ELF header.
+
+### Raw evidence has moved out of this repository
+
+`research-logs/` was extracted on 2026-08-11 into a **separate repository,
+`PS5-Research`** — console transcripts, deploy logs, disassembly, strings, the
+import graph, the methodology notes, and the psdevwiki mirrors with an offline
+viewer (`wiki/viewer.html`). Every `research-logs/...` path cited in this
+document is now relative to that repository's root.
+
+| there | what |
+|---|---|
+| `console/` | logs pulled off the PS5, including `evo_decodeframe_log-run16-KP.txt` — the run that panicked the console, recovered off the USB stick |
+| `deploy/` | PC-side transcripts, one per deploy |
+| `derived/` | import graph, function inventory, strings, disassembly |
+| `wiki/` | psdevwiki PS5 and PS4 mirrors + `viewer.html` |
+| `references/` | third-party checkouts (gitignored): Moonlight-ps4, SharpProspero |
+
+**Module images stay here**, in `proprietary/dump/`, and were deliberately not
+copied into it.
+
+---
+
+## 13. What is left, and the two ways to reach it
+
+### The reference implementations — what they proved and what they cost **[E]**
+
+2026-08-11. Three independent projects drive or reimplement this same library,
+and comparing against them was the single most productive hour of the session.
+Cloned to `PS5-Research/references/` (gitignored).
+
+| project | what it is | worth |
+|---|---|---|
+| [Moonlight-ps4](https://github.com/JaimeJimenezG/Moonlight-ps4) | homebrew that **actually hardware-decodes H.264** through `libSceVideodec2`, annotated with console-validated notes | the config diffs below, and the video-out trap |
+| [SharpProspero](https://github.com/SvenGDK/SharpProspero) | a **PS5** SDK with Videodec2 bindings | its codec constants match ours exactly (`Hevc = 0xEE049`, `Vp9 = 0x245BFD`), confirming it describes this library |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | emulator reimplementation | independently asserts the config struct is `0x48` bytes |
+
+**What they confirmed.** Our struct layouts are right, field for field — the
+`0x38`/`0x40`/`0x44` error codes recorded in §7 land exactly on
+`maxFrameBufferSize`, `frameBufferAlignment` and `reserved0`. Our memory types
+are right too: Moonlight uses ONION for `cpuMemory` and `cpuGpuMemory` and
+GARLIC for `gpuMemory`, which is what this project already does. Those were the
+two most likely places for a silent error, and neither is wrong.
+
+**The naming this project had been using is worth correcting.** What the probes
+call "work memory" is `cpuMemory` (`memInfo+0x08`/`+0x10`), "frame pool" is
+`gpuMemory` (`+0x18`/`+0x20`), and the third buffer measured as always-zero is
+`cpuGpuMemorySize` (`+0x28`/`+0x30`).
+
+**Four config differences**, none of which is a validated-error field, so none
+would ever have shown up as a bad return code:
+
+| field | this project | the working client |
+|---|---|---|
+| `cpuAffinityMask` | `0` (memset default) | `0x3F` — all six cores |
+| `optimizeProgressiveVideo` | `false` | `true` |
+| `maxFrameHeight` | 1080 | **1088**, macroblock-aligned |
+| `maxDpbFrameCount` / depth | 16 / 1 | 4 / 2 |
+
+All four are now aligned in `decodeframe_test`. **None has been tested against
+a decode** — the run that would have done it panicked on video out first.
+
+**One discrepancy deliberately not adopted.** Both references set
+`resourceType = 1`. On 12.70 that is refused at query with `0x811D0200`, and
+`CreateDecoderBid` is documented in §7 as refusing class 1 outright. `0xb6c8`
+and `0x12384` stay. This is a real PS4/PS5 firmware difference, not an error to
+correct.
+
+**And one dead end, recorded so it is not re-investigated.**
+[PS5-3.20_Libs](https://github.com/DNNDHH/PS5-3.20_Libs) has a promising
+`libSceVideodec2.c`, but it is auto-generated `jmp qword ptr [rip + ...]` stubs
+from `genstub.py`. No implementation. Nothing to learn.
+
+### psdevwiki — mirrored, and mostly a negative **[E]**
+
+1,147 PS5 pages and 5,282 PS4 pages exported with `tools/psdevwiki-dump.js`,
+stored in `PS5-Research/wiki/` with an offline viewer.
+
+- **Errno 5200 is not documented anywhere.** Every `5200` and `0x1450` hit is a
+  coincidental substring inside unrelated NP/WebAPI codes. `Devices` knows
+  `uvd_{dec,enc,bgt}` exists and annotates it only as *"Maybe related to
+  gameplay recording"* — no ioctl table, no error codes. **The wiki will not
+  answer this question; stop looking there.**
+- Every decoder module shares auth ID `4900000000000002` — `VdecCore`, `Savc`,
+  `Savc2`, `Shevc`, `Svp9`, `Vdecsw`, `Vdecwrap`, `Videodec`, `Videodec2`,
+  `VideoDecoderArbitration`. One privilege family.
+- PS4 brokers decode through a dedicated `SceVdecProxy.elf` process (auth
+  `3800000000000003`). **The PS5 has no such process** — zero hits across 1,147
+  pages. Sony moved to in-process decode against `uvd_dec`, which is the
+  architecture §4 describes. A structural confirmation, not a fix.
+
+### The kernel is directly readable — and firmware decryption is not needed **[E]**
+
+The obvious next thought is "decrypt the firmware and read the driver". That is
+the wrong tool twice over:
+
+- The **userland** modules are already decrypted. `proprietary/dump/` holds
+  them as mapped images pulled from live process memory, which is
+  post-decryption by definition.
+- The **kernel** does not need decrypting either. `ps5/kernel.h` in the payload
+  SDK exports `KERNEL_ADDRESS_TEXT_BASE` already resolved for this firmware,
+  plus `kernel_copyout` — arbitrary kernel read. That yields the *running,
+  relocated* kernel, which is strictly better than a PUP dump because the
+  addresses are the real ones.
+
+The primitives that matter, all present in the SDK on this machine:
+
+```c
+extern const intptr_t KERNEL_ADDRESS_TEXT_BASE;
+int32_t  kernel_copyout(intptr_t kaddr, void *udaddr, size_t len);
+intptr_t kernel_get_proc_file(pid_t pid, int fd);   /* struct file * for fd 16 */
+uint64_t kernel_get_ucred_authid(pid_t pid);
+int32_t  kernel_set_ucred_authid(pid_t pid, uint64_t authid);
+int32_t  kernel_get_ucred_caps(pid_t pid, uint8_t caps[16]);
+```
+
+`kernel_copyout` is recorded in §2 as working and **unable to fault the
+caller**, so reading is genuinely low risk — the opposite profile from §9.1.
+
+**And this codebase already elevates process identity.**
+`prospero_media_standalone/core/pt.c` temporarily sets its own authid to
+`0x4800000000010003` and caps to all-`0xFF`, performs a privileged syscall,
+then restores both. `elfldr.c` does the same with caps. So the technique is
+proven here, not speculative.
+
+**The hypothesis that follows, stated so it can be killed cheaply:** if the
+`uvd_dec` driver checks the caller's authid or capabilities, then what it is
+refusing is our process's *identity*, not our job — which would make errno 5200
+the same shape as every other blocker in this effort. It is **[H]**. Nothing
+yet shows the driver checks anything of the sort.
+
+**How to settle it, cheapest and safest first:**
+
+1. **Read-only, no driver calls.** Report `kernel_get_ucred_authid` and
+   `kernel_get_ucred_caps` for the payload. Then scan kernel `.text` from
+   `KERNEL_ADDRESS_TEXT_BASE` for the immediate `0x1450`, dump whatever
+   function contains it with `kernel_copyout`, and disassemble it offline with
+   the existing `tools/re/` setup. This *reads* the answer instead of guessing
+   it — the method that cleared every gate in §7, applied one layer deeper
+   (rule 10).
+2. **Needs explicit sign-off, because it writes kernel state.** Wrap the
+   `sceVideodec2Decode` call in the same authid/caps elevation `pt.c` already
+   uses, and retry. Per-process, temporary and restorable — but a kernel write,
+   and §9.1 is why that is not a decision to take unilaterally.
 
 ---
 
@@ -1437,24 +1845,36 @@ In the order they should be answered.
    configuration. The third buffer is never needed on these paths.
 4. ~~**Does HEVC *create*?**~~ **Answered: yes.** `rc=0`, codec index `4`,
    clean delete, no hang on the `sceSysmodule` path. §7.
-5. **Does `sceVideodec2Decode` produce a picture, and which bitstream framing
-   does it want?** The ABI is read and the probe is written; nothing has run.
-   Nothing on the path scans for start codes, so Annex-B versus AVCC could not
-   be settled offline and `decodeframe_test` tries both in one deploy.
+5. ~~**Which bitstream framing does `Decode` want?**~~ **Answered: Annex-B.**
+   **[E]** Annex-B reaches the hardware submit and is refused there; AVCC is
+   rejected *earlier*, in software, with `0x811D0303` (VdecCore stream error).
+   A framing the decoder will not even look at is not the one it wants. AVCC is
+   dropped from the probe.
+5b. **Does `sceVideodec2Decode` produce a picture?** Still no. Everything on our
+   side of the ioctl is now measured and well formed; the driver refuses with
+   errno 5200. **This is the only question that matters, and §13 is how to
+   answer it.**
 6. **What does a decoded frame actually look like?** Partly answered without a
    deploy: the `mapMemorySize` arithmetic says **NV12 or P010 at a stride of
    `align(width, 256)`**, H.264 padding height to 16 and HEVC not padding, with
-   five 1 KiB metadata blocks in the tail. **[I]** Still open and still to be
+   **four or five** 1 KiB metadata blocks in the tail — five normally, four when
+   `optimizeProgressiveVideo` is set. **[I]** Still open and still to be
    measured: tiling, plane pointers, CPU readability, cacheability, lifetime and
    ownership.
 7. **Can a frame reach `libSceVideoOut` without a CPU copy?** The question that
-   decides whether this is faster or merely different.
+   decides whether this is faster or merely different. **Note before designing
+   this: a payload cannot open video out at all** — the logged-in user is
+   refused with `0x80290001`, and trying it panicked the console (§9.1). Phase
+   8 needs a route that does not involve this payload owning a video-out
+   handle, and that constraint is now a measurement rather than a guess.
 8. **Is the compute queue actually mandatory for `CreateDecoder`?** Deliberately
    left untested. VdecCore does not NULL-check it, so the failure mode is a
    fault rather than an error code, and a faulted payload holds the app slot.
 9. **Which module owns `sceVideodec2MapMemory`'s import, and what is the call
-   for?** Its GOT slot never bound, so the dump does not say. Not on the decode
-   path, so not urgent — but it is the one entry point in this module that
+   for?** Its GOT slot never bound, so the dump does not say. **Worth retrying
+   now**: the identical-looking arbitration slot turned out to be supplied by a
+   module nobody had loaded (`libSceVideoArbitration.sprx`), so the answer here
+   may also just be an unloaded provider. Not on the decode path, so not urgent — but it is the one entry point in this module that
    cannot currently be called safely.
 10. **What loads at `sceAvPlayerInit` time?** The module table after a successful
     Init is the only way to see the true dependency set. Route A is now the
@@ -1463,3 +1883,10 @@ In the order they should be answered.
     matches; order is unverified.
 12. **Is the MP4 demuxer statically linked into AvPlayer?** `libSceMp4.sprx`
     does not exist, yet AvPlayer references `sceMp4*` by name.
+13. **Does the `uvd_dec` driver check the caller's authid or capabilities?**
+    The live question. §13 sets out how to read the answer out of the kernel
+    rather than guess it.
+14. **What are ioctl commands 22 and 24 for?** The codec layer always chooses
+    23 for H.264 on this firmware (mode index 5, invariant across every
+    configuration tried). Commands 22 and 24 are unreachable from the public
+    API, so whatever they do is not selectable by us.

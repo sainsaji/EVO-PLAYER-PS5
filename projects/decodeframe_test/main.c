@@ -188,12 +188,16 @@
  *   - Every decoder is deleted and every buffer released on every path.
  */
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
+#include <sys/ioctl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <ps5/kernel.h>
@@ -237,15 +241,53 @@
  * picture, which is where GetPictureInfo reads it from. */
 #define PICTURE_META_SIZE 1024
 
+/* Load order matters, and it was wrong. Two separate mistakes, both of the
+ * shape standing rule 11 exists for - "load every module in the call chain":
+ *
+ * 1. THE H.264 CODEC MODULE WAS NEVER LOADED. Every run so far loaded
+ *    libSceVdecShevc.sprx - the HEVC codec - and then decoded an H.264
+ *    stream. /system/common/lib has libSceVdecSavc.sprx and
+ *    libSceVdecSavc2.sprx sitting right next to it, and neither has ever been
+ *    loaded by this project. codecdump_test measured that CreateDecoder loads
+ *    NO module on the H.264 path, and that was recorded as "either the codec
+ *    is already resident or that path is not taken". The third reading was
+ *    never considered: the codec module is simply absent, CreateDecoder does
+ *    not care because it only builds the object, and the absence first bites
+ *    at the hardware submit - which is exactly where errno 5200 appears. The
+ *    job VdecCore hands the driver is a POINTER TO A COMMAND BUFFER whose
+ *    contents the codec layer builds; with no codec layer there is nothing
+ *    sane in it to submit.
+ *
+ * 2. ARBITRATION WAS LOADED BEFORE ITS OWN BACKEND. libSceVideoArbitration.sprx
+ *    is a DIFFERENT module from libSceVideoDecoderArbitration.sprx, it exists
+ *    on this console, and it has never been loaded. See the GOT check in
+ *    main() for why that is almost certainly the cause of the Initialize hang.
+ *    Binding on this loader is eager at load time, so the provider has to be
+ *    resident BEFORE the consumer is loaded - hence the position here.
+ *
+ * The other arbitration candidates are loaded too. They are cheap, and if the
+ * GOT slot binds, the log says which module bound it. */
 static const char *const kModules[] = {
+    /* -- candidate providers, loaded FIRST so eager binding can see them -- */
+    "libSceIpmi.sprx",              /* Sony's IPC layer for system services  */
+    "libSceVideoArbitration.sprx",  /* NOT the same module as the one below  */
+    "libSceResourceArbitrator.sprx",
+
     "libSceVdecCore.sprx",
     "libSceVideoDecoderArbitration.sprx",
     "libSceVideodec2.sprx",
     "libSceVdecwrap.sprx",
-    "libSceVdecShevc.sprx",
-    "libSceGnmDriver.sprx",   /* sceGnmMapComputeQueue lives here           */
+    "libSceVdecShevc.sprx",   /* HEVC codec - loaded since Phase 5           */
+    "libSceGnmDriver.sprx",   /* sceGnmMapComputeQueue lives here            */
     "libSceSysmodule.sprx",   /* VdecCore loads its codec module through it  */
     "libSceAjm.sprx",
+
+    /* -- the H.264 codec modules. THE STREAM IN THIS PAYLOAD IS H.264. ---- *
+     * Loaded after GnmDriver and Ajm on purpose: libSceAudiodec is on record
+     * as hanging when loaded before those two, and a codec module is exactly
+     * the kind of thing that might share that dependency. */
+    "libSceVdecSavc.sprx",
+    "libSceVdecSavc2.sprx",
 };
 
 /* ------------------------------------------------------------------------- */
@@ -759,6 +801,86 @@ arb_err(uint32_t rc)
     }
 }
 
+/* -- WHY Initialize HANGS, found offline, for free -------------------------
+ *
+ * findings.md called the hang "the body at +0x350 blocks", and hypothesised an
+ * IPC to a system service. Both readings were wrong, and the disassembly says
+ * so in three instructions:
+ *
+ *     800a3c350:  jmp QWORD PTR [rip+0x7cf2]   # 0x800a44048
+ *     800a3c356:  push 0x1
+ *     800a3c35b:  jmp  0x800a3c330
+ *
+ * +0x350 IS NOT A FUNCTION BODY. It is a PLT stub. Initialize validates its
+ * parameters and then tail-calls an IMPORT - and in the Phase 0 dump that
+ * import's GOT slot, segment 2 +0x48, still holds 0x800a3c356: the address of
+ * its own push/jmp resolver sequence. It is UNBOUND, while its neighbours in
+ * the same table are bound to libkernel and libSceLibcInternal.
+ *
+ * That is not a new failure mode. It is the THIRD time in this project:
+ * sceVideodec2AllocateComputeQueue hung for exactly this reason until
+ * libSceGnmDriver was loaded, and sceVideodec2MapMemory's slot is unbound in
+ * the same way. Standing rule 15 - "check the GOT slot before you call the
+ * function" - was written after the second one and simply was not applied to
+ * arbitration. An unresolved lazy import blocks silently and forever: no
+ * fault, no error code, no log line. Which is precisely what run 9 and run 10
+ * observed, and why "no user session" looked plausible enough to spend a
+ * deploy on.
+ *
+ * So this reads the slot BEFORE calling anything. If it is still the stub,
+ * Initialize is not called at all - the hang is predicted rather than
+ * suffered, and the deploy keeps everything after it.
+ *
+ * The segment layout is four contiguous 0x4000 segments, so s2 is mapbase
+ * +0x8000 and the slot is mapbase +0x8048. s2 is mapped PROT_READ, so this
+ * load is safe. */
+#define ARB_GOT_SLOT_OFF   0x8048   /* segment 2 +0x48                       */
+#define ARB_PLT_STUB_OFF   0x356    /* what an unbound slot points back at   */
+
+static int
+arbitration_import_is_bound(intptr_t arb_base)
+{
+    static const struct { unsigned got; unsigned stub; const char *what; } kSlots[] = {
+        { 0x8000, 0x0e0, "(unnamed)"                                   },
+        { 0x8010, 0x0d0, "(unnamed)"                                   },
+        { ARB_GOT_SLOT_OFF, ARB_PLT_STUB_OFF,
+          "<-- Initialize's tail call. THIS ONE DECIDES."               },
+        { 0x8058, 0x376, "(unnamed)"                                   },
+        { 0x8070, 0x3a6, "(unnamed)"                                   },
+    };
+    int bound = 0;
+
+    LOG("\n--- arbitration: GOT slots, read before anything is called ---\n");
+    LOG("    An unbound lazy import still points into its own PLT push/jmp\n"
+        "    sequence. Calling one blocks forever - it does not fault and it\n"
+        "    does not return. Rule 15. This is why runs 9 and 10 hung.\n\n");
+
+    for (size_t i = 0; i < sizeof kSlots / sizeof *kSlots; i++) {
+        uint64_t v        = *(volatile uint64_t *)(arb_base + kSlots[i].got);
+        uint64_t stub     = (uint64_t)(arb_base + kSlots[i].stub);
+        int      unbound  = (v == stub);
+
+        LOG("  s2+0x%02x = 0x%016llx  %-9s %s\n",
+            kSlots[i].got - 0x8000, (unsigned long long)v,
+            unbound ? "UNBOUND" : "bound", kSlots[i].what);
+
+        if (kSlots[i].got == ARB_GOT_SLOT_OFF)
+            bound = !unbound;
+    }
+
+    if (bound)
+        LOG("\n  *** THE SLOT IS BOUND. *** One of the modules loaded ahead of\n"
+            "  libSceVideoDecoderArbitration this run supplied it. Initialize\n"
+            "  is safe to call, and the hang of runs 9 and 10 is explained and\n"
+            "  fixed.\n");
+    else
+        LOG("\n  Still unbound. Initialize WILL hang if called, so it is not\n"
+            "  being called - the run continues to the decode instead.\n"
+            "  The provider is some module not loaded this run.\n");
+
+    return bound;
+}
+
 /* Returns 1 if arbitration is initialised and enabled. Every failure is a
  * plain error return - nothing here allocates or touches hardware - so a
  * refusal costs the log line and nothing else. */
@@ -900,6 +1022,32 @@ cfg_init(SceVideodec2DecoderConfigInfo *cfg, uint32_t resourceType,
     cfg->decodePipelineDepth = depth;
     cfg->computeQueue        = queue;
     cfg->cpuThreadPriority   = 700;
+
+    /* -- aligned with the only implementation known to actually decode -----
+     *
+     * Moonlight-ps4 (JaimeJimenezG/Moonlight-ps4, src/orbis/videodec2.h and
+     * src/video/decoder_orbis.c) drives this same library successfully, and
+     * its configuration is annotated with what was validated on a console.
+     * Its struct is byte-identical to the one above - shadPS4 asserts the
+     * same 0x48 size - so the two fields below are directly comparable, and
+     * both were left at the memset default here, which is NOT what a working
+     * client sends:
+     *
+     *   cpuAffinityMask = 0x3F   all six cores. Zero means "inherit", which
+     *                            is legal - the validator accepts it - but a
+     *                            decoder whose worker threads inherit a mask
+     *                            from a payload process is not the case Sony
+     *                            tests. 0x3F is what the working client uses.
+     *
+     *   optimizeProgressiveVideo = true   the working client sets it; this
+     *                            probe has always sent false.
+     *
+     * Neither is a validated-error field, so neither would ever have shown up
+     * as a bad return code - they are exactly the kind of difference that
+     * only appears by comparing against something that works. */
+    cfg->cpuAffinityMask          = 0x3Full;
+    cfg->optimizeProgressiveVideo = 1;
+    cfg->checkMemoryType          = 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1255,6 +1403,355 @@ map_controls(map_direct_memory_fn mapDirect, void *decoder,
     }
 }
 
+/* -- the submitted job, read out of our own memory -------------------------
+ *
+ * findings.md §7 opened this box statically and stopped here: "the job is a
+ * POINTER TO A COMMAND BUFFER; whatever the driver objects to is in that
+ * buffer's contents, which the codec layer builds. There is no further handle
+ * here ... and the consumer is kernel-side."
+ *
+ * That is true of the DUMP. It is not true of a LIVE decoder. The VdecCore
+ * object lives at decoder+0x78, which is pWorkMemory+0x40000 - memory THIS
+ * PROGRAM allocated, registered and can read. So every field the submit reads
+ * can simply be looked at after the refusal, including the command buffer the
+ * driver rejected. Nothing here calls anything; it is all loads.
+ *
+ * The layout, from the disassembly of libSceVdecCore +0x2b870:
+ *
+ *     ioctl(fd, _IOW(0x83, 23, 24), { &job, evq, callerArg, mystery, 0 })
+ *
+ *     obj+0x0058  ring of 5 command-buffer slots, stride 0x80
+ *     obj+0x1898  job.command   - 0, 1 or 2
+ *     obj+0x18a0  job.cmdBuffer - a pointer into that ring
+ *     obj+0x18a8  job.flag
+ *     obj+0x1d50  ring index; the slot used is index % 5
+ *     obj+0x1d68  the device file descriptor
+ *     obj+0x1d6c  the event-queue id, also passed to the wait after the submit
+ *     obj+0x1d70  READ BY THE SUBMIT, WRITTEN NOWHERE IN VDECCORE
+ *     obj+0x02c0  the mode; 7 selects command 23, which is what run 8 reported
+ *
+ * obj+0x1d70 is the interesting one. If it reads back as zero, the object is
+ * simply zero-initialised there and the driver expects zero. If it reads back
+ * as something structured, some module outside VdecCore fills it in - and
+ * that module is not loaded here, which would be a fifth instance of the one
+ * failure mode this whole effort keeps rediscovering.
+ *
+ * SAFETY: the command-buffer pointer is only dereferenced if it lands inside
+ * the work-memory block we allocated. A stray pointer is printed, not
+ * followed - an execute-only or unmapped read kills the payload outright and
+ * a SIGSEGV handler does not rescue it (§9). */
+/* Run 12 applied those offsets to decoder+0x78 and every field read back zero
+ * - mode 0, fd 0, cmdBuf NULL. That is not a finding about the job; it is the
+ * offsets being applied to the WRONG OBJECT. findings.md §7 already says the
+ * submit is a virtual call at [[gpdec+0x38]]+0x18, so the object the submit
+ * takes is the GpDec device object, reached by a pointer chain, not the
+ * VdecCore object the decoder handle points at.
+ *
+ * Rather than guess the chain, find the object by what is unique about it: it
+ * holds the decoder device's FILE DESCRIPTOR at +0x1d68 and the mode at
+ * +0x2c0. So enumerate the process's open fds, identify the character devices,
+ * and then sweep our own memory for a 32-bit word equal to one of them whose
+ * containing structure also has the right mode. Two independent constraints
+ * 0x1b08 bytes apart do not coincide by accident.
+ *
+ * This also answers a question worth having on its own: whether the decoder
+ * device is open in this process at all. */
+
+/* -- video out, opened before anything decodes -----------------------------
+ *
+ * The one ordering step the working client does that this probe never has.
+ *
+ * Moonlight-ps4 (src/video/decoder_orbis.c, dr_setup) calls
+ * video_present_init() - which is sceVideoOutOpen(userId, BUS_MAIN, 0, NULL)
+ * plus sceVideoOutSetFlipRate - BEFORE it allocates the compute queue and
+ * BEFORE CreateDecoder. Its comment gives the reason and it is not cosmetic:
+ *
+ *     "Present BEFORE CreateDecoder (validated stability) and BEFORE creating
+ *      the compute queue: if YCbCr hard-fails we left the queue alive and
+ *      suspending the app triggered CPU_FAULT_SUBMITDONE_TIMEOUT."
+ *
+ * CPU_FAULT_SUBMITDONE_TIMEOUT is a SUBMIT fault. That is the same stage of
+ * the pipeline our decode dies at - the driver refusing a submitted job with
+ * errno 5200 - and it says the display pipeline and the decode submit path
+ * are coupled.
+ *
+ * Which is plausible on its own terms: the decoder writes into GPU memory and
+ * moves frames with compute shaders (SceVdecShaderFrameCopyY and friends,
+ * findings.md section 8). Opening video out is how a process acquires its
+ * GPU/display context on this platform. A process that never opened one has
+ * nothing for the decoder's GPU work to belong to - and a driver would be
+ * entitled to refuse a job from it.
+ *
+ * Every probe from Phase 4 onward has skipped this. So has every decode
+ * attempt. It is the largest remaining structural difference between this
+ * program and one that is known to decode.
+ *
+ * The user id matters too. Moonlight passes a real logged-in user and only
+ * falls back to a constant. This probe measured on 2026-08-11 that the app
+ * slot HAS a logged-in user (id 513995993 from GetLoginUserIdList), so it
+ * passes that, and falls back to 0xFF - the system user - which is what
+ * videoout_test uses successfully.
+ *
+ * Failure here is reported and does not stop the run: if video out cannot be
+ * opened, that is itself worth knowing, and the decode below still tells us
+ * whether anything changed. */
+/* -- REMOVED: sceVideoOutOpen -----------------------------------------------
+ *
+ * THIS KERNEL-PANICKED THE CONSOLE on 2026-08-11. Do not put it back.
+ *
+ * The idea came from Moonlight-ps4, which opens video out before it creates a
+ * decoder and ties that ordering to a SUBMIT fault - the same pipeline stage
+ * our decode dies at. The reasoning was sound; the transfer was not. Moonlight
+ * is a TITLE that owns its process. This payload is injected into a BORROWED
+ * hbldr app slot that already owns the display pipeline.
+ *
+ * The log that survived on /mnt/usb0 says exactly what happened:
+ *
+ *     sceVideoOutOpen(user 513995993, BUS_MAIN) -> 0x80290001 FAILED
+ *     sceVideoOutOpen(user 0xFF,      BUS_MAIN) -> 1309671680 "ok"
+ *     sceVideoOutSetFlipRate(60Hz) -> 0x00000000
+ *     --- compute queue ---
+ *     QueryComputeMemoryInfo -> 0  size 4805120
+ *     queue memory 4805120 B WB_ONION -> 0 virt 2000a0000
+ *     <panic - nothing further>
+ *
+ * The next call was sceVideodec2AllocateComputeQueue, which bottoms out in
+ * sceGnmMapComputeQueue. THAT CALL HAD SUCCEEDED IN EVERY PREVIOUS RUN. The
+ * only new thing in the process was an open video-out handle. Opening video
+ * out and then mapping a GPU compute queue is what wedged the GPU driver.
+ *
+ * Two things worth keeping from it:
+ *
+ *   - The real logged-in user is REFUSED with 0x80290001. The app slot already
+ *     holds the display pipeline; a second client is not welcome.
+ *   - The 0xFF system-user retry returned 1309671680 = 0x4E100000, which is
+ *     NOT a handle - real ones are small integers. The "h < 0" check treated
+ *     garbage as success. Validate handles by RANGE, not by sign.
+ */
+
+/* -- REMOVED: sceVideoOutOpen ---------------------------------------------- */
+
+/* Every open fd, and what kind of file it is. */
+static void
+dump_open_fds(void)
+{
+    int shown = 0;
+
+    LOG("\n--- open file descriptors in this process ---\n");
+    LOG("    The decoder device is opened by libSceVdecCore at +0x2c470, which\n"
+        "    also sets the event-queue id. If no character device is open here,\n"
+        "    the submit had no device to talk to and errno 5200 is explained.\n\n");
+
+    for (int fd = 0; fd < 256; fd++) {
+        struct stat st;
+
+        if (fcntl(fd, F_GETFD) == -1)
+            continue;
+
+        memset(&st, 0, sizeof st);
+        if (fstat(fd, &st) != 0) {
+            LOG("  fd %3d  open, fstat failed\n", fd);
+            shown++;
+            continue;
+        }
+
+        LOG("  fd %3d  mode 0%06o  rdev 0x%llx  size %lld  %s\n", fd,
+            (unsigned)st.st_mode, (unsigned long long)st.st_rdev,
+            (long long)st.st_size,
+            S_ISCHR(st.st_mode)  ? "CHARACTER DEVICE" :
+            S_ISSOCK(st.st_mode) ? "socket"           :
+            S_ISFIFO(st.st_mode) ? "pipe"             :
+            S_ISDIR(st.st_mode)  ? "directory"        :
+            S_ISREG(st.st_mode)  ? "regular file"     : "other");
+        shown++;
+    }
+
+    if (!shown)
+        LOG("  none - which cannot be right, so treat this probe as broken.\n");
+}
+
+/* Sweep a block for the GpDec device object. */
+static const unsigned char *
+find_device_object(const dmem_block *blk, const char *what)
+{
+    const unsigned char *base = (const unsigned char *)blk->vaddr;
+    const unsigned char *found = NULL;
+    size_t len = blk->len;
+    int    hits = 0;
+
+    if (!base || len < 0x2000)
+        return NULL;
+
+    /* The object must have at least 0x2000 bytes ahead of it for +0x1d70 and
+     * the fields around it to be inside the block. */
+    for (size_t off = 0; off + 0x2000 <= len; off += 8) {
+        const unsigned char *cand = base + off;
+        uint32_t mode = *(const volatile uint32_t *)(cand + 0x2c0);
+        int32_t  fd   = *(const volatile int32_t  *)(cand + 0x1d68);
+
+        /* mode 7 is what run 8's error line 0x254 implies, and a device fd is
+         * a small positive integer. Both, 0x1ab8 bytes apart, is the object. */
+        if (mode != 7 || fd <= 2 || fd > 4096)
+            continue;
+
+        if (++hits <= 4) {
+            LOG("  candidate in %s at +0x%zx  (addr %p): mode 7, fd %d\n",
+                what, off, (const void *)cand, fd);
+            if (!found)
+                found = cand;
+        }
+    }
+
+    if (hits > 4)
+        LOG("  ...and %d more candidates in %s\n", hits - 4, what);
+    if (!hits)
+        LOG("  no candidate in %s\n", what);
+
+    return found;
+}
+
+static void
+dump_submitted_job(void *decoder, const dmem_block *work,
+                   const dmem_block *pool)
+{
+    const unsigned char *obj = NULL;
+    uint32_t  mode, ringIdx, jobCmd, jobFlag, evq, mystery;
+    int32_t   fd;
+    uintptr_t cmdBuf;
+
+    if (!decoder || !work || !work->vaddr)
+        return;
+
+    dump_open_fds();
+
+    LOG("\n--- locating the GpDec device object the submit operates on ---\n");
+    LOG("    decoder %p  ->  VdecCore object %p\n", decoder,
+        *(const void *const *)((const unsigned char *)decoder + 0x78));
+    LOG("    Searching for mode==7 at +0x2c0 together with a plausible fd at\n"
+        "    +0x1d68 - the two fields libSceVdecCore +0x2b870 reads.\n\n");
+
+    obj = find_device_object(work, "work memory");
+    if (!obj && pool)
+        obj = find_device_object(pool, "frame pool");
+
+    if (!obj) {
+        LOG("\n  The object is not in memory we allocated, so VdecCore keeps it\n"
+            "  on its own heap. The fd list above still says whether the device\n"
+            "  is open, which is the half of the question that matters most.\n");
+        return;
+    }
+
+    mode    = *(const volatile uint32_t *)(obj + 0x02c0);
+    ringIdx = *(const volatile uint32_t *)(obj + 0x1d50);
+    jobCmd  = *(const volatile uint32_t *)(obj + 0x1898);
+    cmdBuf  = *(const volatile uintptr_t *)(obj + 0x18a0);
+    jobFlag = *(const volatile uint32_t *)(obj + 0x18a8);
+    fd      = *(const volatile int32_t  *)(obj + 0x1d68);
+    evq     = *(const volatile uint32_t *)(obj + 0x1d6c);
+    mystery = *(const volatile uint32_t *)(obj + 0x1d70);
+
+    /* -- WHICH submit path this is, and who chose it ----------------------
+     *
+     * libSceVdecCore +0x2b870 picks the ioctl command from the mode at
+     * +0x2c0: mode 7 -> command 23, mode 0x10 -> command 24, anything else
+     * -> command 22. And the mode is not configured directly. It comes out
+     * of a six-entry jump table indexed by [obj+0x1d08]:
+     *
+     *     [0x1d08]  0 -> mode 0     3 -> mode 3 (or 0x80000003)
+     *               1 -> mode 0x10  4 -> mode 1
+     *               2 -> mode 4     5 -> mode 7      <- ours
+     *
+     * [0x1d08] is written by a four-field setter at +0x8f0 that VdecCore
+     * exports and that the CODEC MODULE calls - so the codec layer chooses
+     * the submit path, and the value it chose is the most useful single
+     * number in this dump. Two other sites in VdecCore set it to 1, which is
+     * a different ioctl command entirely. If a configuration exists that
+     * lands on 1 rather than 5, it takes a completely different route into
+     * the driver and errno 5200 may simply not be on it. */
+    LOG("\n--- the job that was submitted ---\n");
+    LOG("    obj+0x1d08 mode index  = %u  -> mode %u -> ioctl command %d\n",
+        *(const volatile uint32_t *)(obj + 0x1d08), mode,
+        mode == 7 ? 23 : mode == 0x10 ? 24 : 22);
+    LOG("    obj+0x1d18/0x1d1c/0x1d20 = 0x%08x 0x%08x 0x%08x  (set together\n"
+        "                               with the mode index by the codec)\n",
+        *(const volatile uint32_t *)(obj + 0x1d18),
+        *(const volatile uint32_t *)(obj + 0x1d1c),
+        *(const volatile uint32_t *)(obj + 0x1d20));
+    LOG("    obj+0x1d4c/0x1d54          = 0x%08x 0x%08x\n",
+        *(const volatile uint32_t *)(obj + 0x1d4c),
+        *(const volatile uint32_t *)(obj + 0x1d54));
+    LOG("    obj+0x02c0 mode        = %u\n", mode);
+    LOG("    obj+0x1d68 fd          = %d\n", fd);
+    LOG("    obj+0x1d6c event queue = 0x%08x\n", evq);
+    LOG("    obj+0x1d70 mystery     = 0x%08x   %s\n", mystery,
+        mystery ? "*** NON-ZERO - something DID fill it in ***"
+                : "zero - either expected, or nobody filled it in");
+    LOG("    obj+0x1d50 ring index  = %u  -> slot %u of 5\n",
+        ringIdx, ringIdx % 5u);
+    LOG("    obj+0x1898 job.command = %u\n", jobCmd);
+    LOG("    obj+0x18a0 job.cmdBuf  = 0x%llx\n", (unsigned long long)cmdBuf);
+    LOG("    obj+0x18a8 job.flag    = %u\n", jobFlag);
+
+    LOG("\n    the command ring at obj+0x58, 5 slots of 0x80:\n");
+    for (unsigned s = 0; s < 5; s++) {
+        const unsigned char *slot = obj + 0x58 + s * 0x80;
+        int nonzero = 0;
+
+        for (unsigned b = 0; b < 0x80; b++)
+            if (slot[b]) { nonzero = 1; break; }
+
+        LOG("      slot %u%s%s\n", s,
+            nonzero ? ":" : " is entirely ZERO",
+            (s == ringIdx % 5u) ? "   <-- the slot this submit used" : "");
+        if (nonzero)
+            hexdump(slot, 0x80, "        ");
+    }
+
+    /* Only follow the command-buffer pointer into memory we own. An unmapped
+     * or execute-only read kills the payload outright (§9). */
+    {
+        uintptr_t wlo = (uintptr_t)work->vaddr, whi = wlo + work->len;
+        uintptr_t plo = pool ? (uintptr_t)pool->vaddr : 0;
+        uintptr_t phi = pool ? plo + pool->len : 0;
+        int safe = (cmdBuf >= wlo && cmdBuf + 0x100 <= whi) ||
+                   (plo && cmdBuf >= plo && cmdBuf + 0x100 <= phi);
+
+        if (safe) {
+            LOG("\n    the command buffer the driver rejected (0x100 bytes):\n");
+            hexdump((const void *)cmdBuf, 0x100, "        ");
+        } else if (cmdBuf) {
+            LOG("\n    job.cmdBuf 0x%llx is outside memory we allocated, so it\n"
+                "    is NOT dereferenced - a bad read here kills the payload.\n",
+                (unsigned long long)cmdBuf);
+        } else {
+            LOG("\n    *** job.cmdBuf IS NULL *** - the submit handed the driver\n"
+                "    a job with no command buffer.\n");
+        }
+    }
+
+    LOG("\n    a window around the object head, for orientation:\n");
+    hexdump(obj + 0x280, 0x80, "        ");
+    LOG("\n    and around the submit fields at +0x1d40:\n");
+    hexdump(obj + 0x1d40, 0x60, "        ");
+
+    /* -- REMOVED: the ioctl errno-space probe -----------------------------
+     *
+     * This block issued deliberately malformed ioctls on the decoder fd -
+     * undefined command numbers, a NULL arg, a zeroed arg - to learn whether
+     * errno 5200 is a verdict on the JOB or a blanket refusal of the PROCESS.
+     *
+     * It never ran. The console kernel-panicked earlier in the same build, at
+     * sceVideodec2AllocateComputeQueue, so this is not what panicked it, and
+     * the question it asked is still open and still worth answering.
+     *
+     * Removed regardless. Fuzzing a proprietary kernel GPU driver was called
+     * "low risk by construction" here, on the reasoning that drivers validate
+     * their inputs. That reasoning had nothing behind it. A panic costs about
+     * fifty minutes of someone else's time. If this experiment is worth
+     * running later, it gets proposed and agreed BEFORE it is built.
+     */
+}
+
 /* Queries, allocates, creates, decodes, flushes, deletes, releases. Owns every
  * buffer it uses, so an attempt that fails leaves nothing behind for the next.
  * Returns the number of valid pictures the decoder reported. */
@@ -1272,6 +1769,7 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
     dmem_block *work = &blocks[0], *pool = &blocks[1], *inbuf = &blocks[2];
     dmem_block *targets = &blocks[3];
     int         mapped = 0;
+    int         dumpedJob = 0;
     uint64_t    mapLen = 0;
     int         inputMapped = 0;
     void       *mapAddr[MAP_BLOCKS] = {0};   /* what was actually registered */
@@ -1297,9 +1795,25 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
                                   : "AVCC (4-byte lengths)",
         auCount, auCount == 1 ? "" : "s");
 
+    /* -- geometry and depth, from the working client -----------------------
+     *
+     * Two more differences from Moonlight-ps4, both annotated there as
+     * console-validated:
+     *
+     *   maxFrameHeight must be MACROBLOCK-ALIGNED. Its comment is explicit -
+     *   "1088: macroblock-align; 1080 in config -> slow Decode / rare paths".
+     *   This probe has always configured 1080. The command buffer dumped in
+     *   run 13 shows the module padding it to 1088 (0x440) internally anyway,
+     *   so the two disagree about the height right up to the submit.
+     *
+     *   maxDpbFrameCount 4 rather than 16, and decodePipelineDepth 2 rather
+     *   than 1 - "depth=1 serialises submit->wait against the compute queue
+     *   every frame". Depth 1 was chosen here as "the shortest path from one
+     *   access unit to one picture", which is reasonable and is not what a
+     *   working client does. */
     cfg_init(&cfg, resourceType, CODEC_AVC, TEST_STREAM_PROFILE,
-             TEST_STREAM_LEVEL, TEST_STREAM_WIDTH, TEST_STREAM_HEIGHT, 16,
-             depth, queue);
+             TEST_STREAM_LEVEL, TEST_STREAM_WIDTH,
+             (TEST_STREAM_HEIGHT + 15u) & ~15u, 4, depth, queue);
 
     memset(&mem, 0, sizeof mem);
     mem.thisSize = DECODER_MEMINFO_SIZE;
@@ -1627,6 +2141,15 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
                 report_output(&ctx, what, rc, &out, &fb);
             }
 
+            /* The refusal is the most informative moment there is: the object
+             * still holds exactly what was handed to the driver. Dumped once,
+             * on the first failure only, so a repeated error does not bury the
+             * log. */
+            if (rc && !dumpedJob) {
+                dumpedJob = 1;
+                dump_submitted_job(dec, work, pool);
+            }
+
             if (rc)
                 break;
         }
@@ -1680,8 +2203,13 @@ main(int argc, char **argv)
     int      tryAvcc   = 1;
     int      useArb    = 1;
     int      arbUp     = 0;
+    int      arbBound  = 0;          /* is Initialize's import resolved?     */
+    int32_t  loginUser = -1;         /* real user id, if the slot has one     */
+    uint32_t dynh_arb  = 0;
+    intptr_t arb_base  = 0;
     int      have_control = 0, queue_ok = 0;
     int      annexbPics = 0, avccPics = 0;
+    int      arbPics    = 0;         /* pictures decoded WITH arbitration up */
     size_t   compute_size;
 
     dmem_block cq_mem = {0};
@@ -1730,24 +2258,81 @@ main(int argc, char **argv)
         LOG("load %-38s modid=0x%x res=0x%x\n", kModules[i], modid, res);
     }
 
-    /* Arbitration first: AvPlayer initialises it before it touches a decoder,
-     * and if it is what the submit is waiting on, everything below behaves
-     * differently. Cheap, reversible, and every failure is an error return. */
-    if (useArb) {
-        uint32_t dynh_arb = 0;
+    /* -- the user session, re-measured IN THE APP SLOT -------------------- *
+     * findings.md section 2 records "a payload has no user session", from
+     * sceUserServiceGetInitialUser returning 0x80940004. That measurement came
+     * from decoder_test, which is deployed with deploy.sh - i.e. it ran in
+     * SceSpZeroConf, NOT the app slot. It is the same error the 41 MiB memory
+     * "ceiling" was: a property of the wrong host process, recorded as a
+     * property of payloads. Standing rule 12 exists because of that one, and
+     * it was not applied here.
+     *
+     * EVO Player, in this slot, calls sceUserServiceInitialize and then opens
+     * the pad with the id it gets back - so a session plainly IS available
+     * here. None of the Phase 4-6 probes ever called Initialize.
+     *
+     * That matters because arbitration blocks on what looks like an IPC, and
+     * "no session" was the hypothesis for why. If the session simply was never
+     * established in-process, the block may not be structural at all. */
+    LOG("\n--- user session, in the app slot ---\n");
+    {
+        int32_t user_id = -1;
+        int     users[4] = {0};
+        int     uinit, ulist, uget;
 
-        if (kernel_dynlib_handle(getpid(), "libSceVideoDecoderArbitration.sprx",
-                                 &dynh_arb) == 0) {
-            intptr_t arb_base = kernel_dynlib_mapbase_addr(getpid(), dynh_arb);
+        uinit = sceUserServiceInitialize(NULL);
+        LOG("  sceUserServiceInitialize      -> 0x%08x\n", uinit);
 
-            LOG("\nlibSceVideoDecoderArbitration base 0x%lx\n",
-                (unsigned long)arb_base);
+        ulist = sceUserServiceGetLoginUserIdList(users);
+        LOG("  sceUserServiceGetLoginUserIdList -> 0x%08x  ids %d %d %d %d\n",
+            ulist, users[0], users[1], users[2], users[3]);
+
+        /* Recorded because it corrects findings.md section 2. It is NOT
+         * used to open video out - see the REMOVED block above. */
+        if (ulist == 0 && users[0] > 0)
+            loginUser = users[0];
+
+        uget = sceUserServiceGetInitialUser(&user_id);
+        LOG("  sceUserServiceGetInitialUser  -> 0x%08x  user_id %d\n",
+            uget, user_id);
+
+        if (uget == 0 || users[0] > 0)
+            LOG("\n  *** THERE IS A USER SESSION HERE ***\n"
+                "  findings.md section 2 says otherwise, and it was measured in\n"
+                "  SceSpZeroConf under deploy.sh. Correct that entry.\n");
+        else
+            LOG("\n  no user session even after Initialize, in the app slot.\n"
+                "  The findings entry stands, and the arbitration hypothesis\n"
+                "  with it.\n");
+    }
+
+    /* -- arbitration: the GOT slot only. NOTHING IS CALLED HERE. ----------- *
+     * Runs 9 and 10 both called Initialize at this point in the program and
+     * both hung, taking the entire decode with them - the log stops at the
+     * last control and the four gates cleared in runs 1-8 were never
+     * re-exercised. That is standing rule 9 violated: the riskiest call in the
+     * probe ran before everything cheap.
+     *
+     * So the order is inverted. Here we only READ the GOT slot, which is free
+     * and cannot block. The decode - which is known to return an error rather
+     * than hang - runs next. Arbitration is attempted at the very END, and
+     * only if the slot is bound. */
+    if (kernel_dynlib_handle(getpid(), "libSceVideoDecoderArbitration.sprx",
+                             &dynh_arb) == 0) {
+        arb_base = kernel_dynlib_mapbase_addr(getpid(), dynh_arb);
+        LOG("\nlibSceVideoDecoderArbitration base 0x%lx\n",
+            (unsigned long)arb_base);
+        arbBound = arbitration_import_is_bound(arb_base);
+
+        /* Run 11 proved this returns rather than blocks once the import is
+         * bound: Initialize, Enable and both AcceptEvent calls all came back.
+         * So it now runs BEFORE the decode, which is the order AvPlayer uses
+         * and which makes every attempt below an arbitrated one. It is still
+         * gated on the slot - an unbound import is never called. */
+        if (useArb && arbBound)
             arbUp = arbitration_bring_up(dynh_arb, arb_base);
-        } else {
-            LOG("\nno dynlib handle for libSceVideoDecoderArbitration.sprx\n");
-        }
     } else {
-        LOG("\narbitration skipped (no-arb)\n");
+        LOG("\nno dynlib handle for libSceVideoDecoderArbitration.sprx\n");
     }
 
     uint32_t dynh = 0;
@@ -1924,29 +2509,65 @@ main(int argc, char **argv)
      * shortest path from one access unit to one picture. The Phase 5 control
      * above still runs at depth 4, so the comparison with Phase 5's recorded
      * figures is unaffected. */
-    annexbPics = attempt_decode(query, create, del, decode, flush, getPic,
-                                mapDirect,
-                                "Annex-B framing, depth 1, class 0xb6c8",
-                                FRAMING_ANNEXB, RES_STD, 1, auCount, queue,
-                                /*controls=*/1, dumpFrame);
+    /* -- the configuration sweep ------------------------------------------
+     *
+     * Run 11 settled the framing question that this phase was built around:
+     * Annex-B reaches the hardware submit and is refused there, while AVCC is
+     * rejected EARLIER, in software, with 0x811D0303. A bitstream the decoder
+     * will not even look at cannot be the one it wants, so Annex-B is the
+     * right framing and AVCC is dropped.
+     *
+     * What is swept instead is the thing the job dump says actually selects
+     * the route into the driver: the resource class and the pipeline depth.
+     * Each attempt owns and frees its own ~90 MiB, and each prints the mode
+     * index the codec layer chose. If any of them lands on a mode index other
+     * than 5, that is a different ioctl command and a genuinely different
+     * experiment - and it costs nothing to find out here rather than in
+     * another deploy. */
+    {
+        static const struct {
+            const char *label;
+            uint32_t    res;
+            uint32_t    depth;
+        } kSweep[] = {
+            /* Run 14 swept all four of these and every one produced mode
+             * index 5, mode 7, command 23 and errno 5200 - identical down to
+             * the field. The configuration does not select the route, so the
+             * sweep is collapsed back to one and the deploy is spent on the
+             * errno question instead. */
+            { "class 0xb6c8, depth 2 (Moonlight's)", RES_STD, 2 },
+            { "class 0xb6c8, depth 1",              RES_STD, 1 },
+        };
 
-    /* -- AVCC, only if Annex-B produced nothing --------------------------- */
-    if (annexbPics == 0 && tryAvcc) {
-        LOG("\n\nAnnex-B produced no picture. Re-framing the same access units\n"
-            "as AVCC - 4-byte big-endian NAL lengths instead of start codes -\n"
-            "on a fresh decoder. Nothing on the decode path scans for start\n"
-            "codes, so which framing the hardware wants could not be settled\n"
-            "offline; this is the experiment that settles it.\n");
-        avccPics = attempt_decode(query, create, del, decode, flush, getPic,
-                                  mapDirect,
-                                  "AVCC framing, depth 1, class 0xb6c8",
-                                  FRAMING_AVCC, RES_STD, 1, auCount, queue,
-                                  /*controls=*/0, dumpFrame);
-    } else if (annexbPics) {
-        LOG("\nAVCC retry skipped: Annex-B already produced %d picture%s.\n",
-            annexbPics, annexbPics == 1 ? "" : "s");
+        for (size_t i = 0; i < sizeof kSweep / sizeof *kSweep; i++) {
+            char label[96];
+            int  pics;
+
+            snprintf(label, sizeof label, "Annex-B, %s", kSweep[i].label);
+            pics = attempt_decode(query, create, del, decode, flush, getPic,
+                                  mapDirect, label, FRAMING_ANNEXB,
+                                  kSweep[i].res, kSweep[i].depth, auCount,
+                                  queue, /*controls=*/(i == 0), dumpFrame);
+
+            if (pics) {
+                annexbPics = pics;
+                LOG("\n  *** %s PRODUCED A PICTURE - stopping the sweep ***\n",
+                    kSweep[i].label);
+                break;
+            }
+        }
     }
+    (void)tryAvcc; (void)avccPics;
 
+    /* -- arbitration LAST, and only if its import actually resolved -------- *
+     * Everything above is already in the log and already flushed, so if
+     * Initialize still blocks it costs a timeout and nothing else. That is
+     * the whole point of moving it here.
+     *
+     * If it does come up, one more decode runs on a fresh decoder. That is
+     * the real test of "the submit is refused because this client is not
+     * arbitrated" - the hypothesis findings.md calls the prime suspect for
+     * errno 5200, which has never been testable because Initialize hung. */
 done:
     if (queue) {
         int rc = rel_cq(queue);
@@ -1959,6 +2580,9 @@ done:
         have_control ? "MATCH" : "DIVERGED - distrust everything above");
     LOG("  compute queue               : %s\n",
         queue_ok ? "allocated" : "NOT OBTAINED");
+    LOG("  arbitration import slot     : %s\n",
+        arbBound ? "BOUND - the modules loaded first supplied it"
+                 : "still unbound - Initialize would hang, not called");
     LOG("  arbitration                 : %s\n",
         !useArb ? "skipped" : arbUp ? "initialised and enabled" : "NOT UP");
     LOG("  pictures, Annex-B framing   : %d\n", annexbPics);
@@ -1966,8 +2590,10 @@ done:
         LOG("  pictures, AVCC framing      : %d\n", avccPics);
     else
         LOG("  pictures, AVCC framing      : not attempted\n");
+    LOG("  pictures, arbitrated retry  : %s\n",
+        arbUp ? (arbPics ? "SEE ABOVE" : "0") : "not attempted");
 
-    if (annexbPics || avccPics) {
+    if (annexbPics || avccPics || arbPics) {
         LOG("\n  *** PHASE 6 GOAL MET: the decoder reported a picture ***\n");
         LOG("  Next, Phase 7: re-run with \"dump\" to write a whole frame to\n"
             "  %s and read it on the PC. The offline\n"

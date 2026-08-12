@@ -128,6 +128,181 @@ Entries from 2026-08-10 onward use the confidence tags from
 [hardware-decode-review.md](hardware-decode-review.md): **[E]** observed on
 this console, **[I]** inference, **[H]** hypothesis.
 
+### 2026-08-11 — **five hypotheses closed, one console panicked, and the next layer identified**
+
+Six deploys. The session that took Phase 6 from "the driver refuses and we are
+out of cheap ideas" to "everything on our side is measured and correct, and the
+remaining question is in the kernel — which is readable".
+
+**The arbitration hang was an unresolved lazy import. [E]** Three instructions
+of disassembly settled what two deploys and a wrong hypothesis had not:
+`+0x350` is a **PLT stub**, not a function body, and its GOT slot at segment 2
+`+0x48` held the address of its own resolver sequence. The provider is
+`libSceVideoArbitration.sprx` — a *different module* from
+`libSceVideoDecoderArbitration.sprx`, sitting on the console, never loaded.
+Loading it **before** the consumer (binding is eager at load time) bound all
+three unbound slots, and `Initialize`, `Enable` and both `AcceptEvent` calls
+returned 0.
+
+This is the **third** silent block in this project caused by an unresolved lazy
+import, after `AllocateComputeQueue` and `sceVideodec2MapMemory`. Standing rule
+15 was written after the second one and was not applied to the third. The
+lesson is not "check GOT slots" — that rule already existed — it is that a rule
+written for one module has to be applied to every module.
+
+**And arbitration changed nothing. [E]** With it fully up, the decode was
+refused with the identical errno 5200 chain. It had been the prime suspect
+since run 8. Killing a prime suspect properly is worth a deploy.
+
+**The command buffer was not a dead end. [E]** The findings doc had recorded
+"that is where the trail ends... the consumer is kernel-side". True of the
+dump; false of a live decoder. The submit's object is the **GpDec device
+object**, not the VdecCore object at `decoder+0x78` — applying the offsets
+there returns zeroes in every field. It was found by searching our own work
+memory for two constraints `0x1ab8` bytes apart, `mode == 7` at `+0x2c0` and a
+plausible fd at `+0x1d68`. **Exactly one candidate matched.**
+
+    fd 16 (a character device), event queue 0x11, [obj+0x1d70] = 1
+    cmdBuf -> size 0xde8, phys 0x01a0ec00, mode 7, 1920 x 1088, phys 0x03630000
+
+**The command is well formed.** Which kills the "codec module was never loaded"
+theory — `libSceVdecSavc` and `libSceVdecSavc2` were loaded for the first time
+this session and changed nothing.
+
+**Annex-B is the framing. [E]** AVCC is rejected *earlier*, in software, with
+`0x811D0303`. A framing the decoder will not look at is not the one it wants.
+
+**The submit path does not vary. [E]** Mode index 5 → mode 7 → ioctl command
+23, identical across resource classes `0xb6c8`/`0x12384` and depths 1/4. The
+codec layer chooses it; configuration cannot reach commands 22 or 24.
+
+**`0x1450` is a real errno. [E]** Read off the submit's own `__error()` deref,
+not inferred.
+
+#### The reference implementations were the most productive hour
+
+Three projects drive or reimplement this library, found on GitHub and cloned to
+`PS5-Research/references/`. Moonlight-ps4 **actually hardware-decodes H.264**
+through `libSceVideodec2` and is annotated with console-validated notes.
+
+They confirmed our struct layouts field-for-field and our memory types
+(ONION/GARLIC/ONION) — the two most likely places for a silent error, neither
+wrong. They exposed four config fields we had left at memset defaults, none of
+them validated-error fields, so none would ever have surfaced as a bad return
+code: `cpuAffinityMask`, `optimizeProgressiveVideo`, a macroblock-aligned
+`maxFrameHeight`, and dpb/depth.
+
+**`optimizeProgressiveVideo` turned out to change the frame layout. [E]** Set
+it and all seven `mapMemorySize` rows drop by exactly 1024 bytes — the tail is
+five 1 KiB metadata blocks normally, four when the stream is declared
+progressive. Found by accident, from a 7/7 control becoming 0/7.
+
+#### The expensive part
+
+Moonlight opens video out *before* creating a decoder and ties that ordering to
+`CPU_FAULT_SUBMITDONE_TIMEOUT` — a **submit** fault, the same stage our decode
+dies at. No probe here had ever opened video out. It was the largest remaining
+structural difference and it looked like the best lead of the session.
+
+**It kernel-panicked the console. [E]** The per-line-flushed log survived on the
+USB stick and locates it exactly: the real logged-in user is refused with
+`0x80290001`; the `0xFF` retry returns `1309671680` = `0x4E100000`, which is
+**not a handle**; and the next call, `sceVideodec2AllocateComputeQueue` — which
+had succeeded in every previous run — panicked. About fifty minutes of
+recovery.
+
+Three lessons, in `hardware-decode-findings.md` §9.1 and standing rules 18–20.
+The one that generalises furthest: **a practice borrowed from a reference
+implementation is only valid if what it assumes about its process is also true
+of ours.** Moonlight is a title that owns its process; this payload is injected
+into a borrowed app slot that already owns the display pipeline. The reasoning
+behind the experiment was sound and the transfer was never checked.
+
+The same build carried an ioctl probe on the decoder fd, justified as "low risk
+by construction, drivers validate their inputs". It never ran, so it is *not*
+what panicked the console — but that reasoning had nothing behind it and the
+probe has been removed. Both sites now carry the post-mortem in comments, and
+`-lSceVideoOut` is unlinked so the call cannot return by accident.
+
+It did return three things: video out is genuinely unavailable to a payload
+(a clean refusal, not a broken call), the Moonlight ordering hypothesis is
+closed rather than left open, and the progressive-video measurement above.
+
+#### psdevwiki, mirrored — and mostly a negative
+
+1,147 PS5 and 5,282 PS4 pages exported with `tools/psdevwiki-dump.js`. The site
+is behind a Cloudflare managed challenge that rejects curl, wget and
+TLS-impersonating clients alike (tested), so the exporter runs in an
+already-cleared browser tab and drives MediaWiki's `api.php`.
+
+**Errno 5200 is not documented anywhere** — every hit is a coincidental
+substring in unrelated NP codes, and `Devices` knows `uvd_{dec,enc,bgt}` exists
+only as *"Maybe related to gameplay recording"*. Worth knowing so nobody
+searches there again. It did give two structural facts: all decoder modules
+share auth ID `4900000000000002`, and PS4's dedicated `SceVdecProxy.elf`
+process **has no PS5 equivalent**, confirming the in-process architecture.
+
+#### Where it leaves Phase 6
+
+Everything on our side of the ioctl is measured and correct. So the question is
+in the driver — and the driver is readable. The SDK exports
+`KERNEL_ADDRESS_TEXT_BASE` already resolved for 12.70 plus `kernel_copyout`,
+`kernel_get_proc_file` and `kernel_get/set_ucred_authid`. **Firmware decryption
+is unnecessary**: the userland modules are already decrypted from memory, and a
+kernel memory dump gives the running, relocated kernel with real addresses.
+
+The live hypothesis is that the driver refuses *who is asking* rather than
+*what is asked*, and it is **[H]** — nothing yet shows the driver checks
+authority at all. Findings §13 sets out how to read the answer instead of
+guessing it: a read-only pass first, and a kernel write only with explicit
+agreement.
+
+### 2026-08-11 — the user session: **a documented finding was measured in the wrong process**
+
+One deploy. The lead came from a question about running the research inside EVO
+Player, and the answer turned out to be about three lines of initialisation
+rather than about the process.
+
+**EVO Player does something none of the Phase 4–6 probes do:**
+
+```c
+sceUserServiceInitialize(NULL);
+sceUserServiceGetLoginUserIdList(users);
+int pad = scePadOpen(users[0], 0, 0, NULL);   /* and this succeeds */
+```
+
+`decodeframe_test`, `avplayer_probe` and `codecdump_test` never called
+`sceUserServiceInitialize` at all. `decoder_test` did — but it is deployed with
+`deploy.sh`, so it measured `SceSpZeroConf`, not the app slot.
+
+**Measured in the app slot, with Initialize called first: [E]**
+
+    sceUserServiceInitialize         -> 0x00000000
+    sceUserServiceGetLoginUserIdList -> 0x00000000  ids 513995993 -1 -1 -1
+    sceUserServiceGetInitialUser     -> 0x80960006  user_id -1
+
+**So "a payload has no user session" is wrong where the player runs.** There is
+a logged-in user and a real id. `GetInitialUser` still fails — and with a
+*different* code than the one on record (`0x80960006` here versus `0x80940004`
+under `deploy.sh`, which is itself a hint that the two slots differ) — but
+`GetLoginUserIdList` is the call that works, and it is the one EVO Player uses.
+
+This is the **same error as the 41 MiB memory ceiling**: a property of
+`SceSpZeroConf` recorded as a property of payloads. Standing rule 12 was written
+after that one and was not applied here. §2 is corrected.
+
+**It did not unblock arbitration. [E]** `sceVideoDecoderArbitrationInitialize`
+was called immediately afterwards, with a live session in the process, and
+blocked exactly as before — the flushed log stops at the last control, 7/7 again.
+
+So the hypothesis this run existed to test is **dead**: the block is not a
+missing user session. What blocks in that body at `+0x350` is still unknown, and
+there is no longer a cheap hypothesis for it.
+
+**Worth having anyway.** "Payloads have no user session" is the kind of claim
+that would misdirect anything touching the pad, audio routing or per-user paths,
+and it had been sitting in §2 unchallenged since Phase 2.
+
 ### 2026-08-11 — Route A: **AvPlayer runs in a payload, and its video path fails EARLIER than ours**
 
 Four deploys of `projects/avplayer_probe/`, every callback instrumented. Route A

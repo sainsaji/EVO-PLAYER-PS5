@@ -30,6 +30,7 @@ ALL_PROJECTS=(
     codecdump_test   # research: Route B phase 6 - dump the on-demand codec module
     avplayer_probe   # research: Route A - instrumented libSceAvPlayer
     slotcheck        # tooling:  is the app slot free? (deploy.sh, not --run)
+    kdump            # tooling:  dump the running kernel (deploy.sh, not --run)
     yuv_gpu_test     # future:   GPU YUV renderer (placeholder)
 )
 

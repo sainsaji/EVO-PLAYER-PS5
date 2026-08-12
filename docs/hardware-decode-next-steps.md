@@ -76,16 +76,44 @@ dumped (`libSceSysmodule`, `libSceVdecwrap`, `libSceVdecShevc`,
 `libSceGnmDriver`, `libSceAjm`) into `proprietary/dump/codec/`. None contains
 the submit.
 
-**Two things to try next, in this order:**
+**Both of those were done on 2026-08-11, and both are now closed.**
 
-1. **Read what the job at `[obj+0x1898]` contains**, and what mode 7 means at
-   `[obj+0x2c0]`. Free, and it is the same technique that cleared the first four
-   gates.
-2. **Arbitration.** `libSceVideoDecoderArbitration` has never been called and
-   AvPlayer calls `Initialize`/`Enable` before decoding. Still a live
-   hypothesis — but the previous driver errno in this chain, 5031, also looked
-   like a rights problem and turned out to be an unaligned length, so read
-   before assuming.
+1. ~~**Read what the job contains.**~~ **Done — and the premise that it could
+   not be read was wrong.** The submit's object is the GpDec device object, not
+   the VdecCore object at `decoder+0x78`; it was found by searching our own
+   work memory for `mode == 7` at `+0x2c0` together with a plausible fd at
+   `+0x1d68` (exactly one match). **The command buffer is well formed**: width
+   1920, height 1088, mode 7, real physical addresses into the frame pool. The
+   codec layer does build a command, so "the codec module was never loaded" is
+   dead — `libSceVdecSavc`/`Savc2` were loaded for the first time and changed
+   nothing. Mode index 5 → mode 7 → command 23 is **invariant** across every
+   resource class and depth tried. Findings §7.
+2. ~~**Arbitration.**~~ **Done, and ruled out.** The hang was an unresolved
+   lazy import — `+0x350` is a PLT stub — fixed by loading
+   `libSceVideoArbitration.sprx` first. With arbitration fully up
+   (`Initialize`/`Enable`/`AcceptEvent` all returning 0) the decode is refused
+   with the identical errno 5200. Findings §7.
+
+**Also closed:** Annex-B is the right framing (AVCC is rejected earlier, in
+software); the four config fields that differed from the working reference
+client are now aligned; and `0x1450` is confirmed a genuine ioctl `errno`, read
+off the submit's own `__error()` path.
+
+**What is next: read the kernel.** Everything on our side of the ioctl is now
+measured and correct, so the remaining question lives in the driver — and the
+driver is readable. `KERNEL_ADDRESS_TEXT_BASE` is resolved by the SDK for this
+firmware and `kernel_copyout` is arbitrary kernel read, so **no firmware
+decryption is needed**. Findings §13 sets out the two steps: a read-only pass
+that reports the payload's authid/caps and disassembles whatever kernel
+function produces `0x1450`, and — only with explicit agreement, because it
+writes kernel state — wrapping `Decode` in the authid/caps elevation
+`prospero_media_standalone/core/pt.c` already performs.
+
+**And one thing that must not be repeated.** `sceVideoOutOpen` from a payload
+**kernel-panicked the console**. Video out is not available here at all: the
+real logged-in user is refused with `0x80290001`. See findings §9.1 and
+standing rules 18–20. This also constrains Phase 8, which can no longer assume
+this payload can own a video-out handle.
 
 **Also worth fixing:** the modid sweep shows `0x42`–`0x47` and `0x49` for eight
 modules — **`0x48` is unaccounted for**, the same shape as Phase 0's missing
@@ -107,7 +135,7 @@ Phase 4's first two runs measured the wrong process.
 | 4 | Memory + compute queue | console | 3 | medium | **done** |
 | ~~4b~~ | ~~Raise the 41 MiB memory ceiling~~ | console | 0 | — | **done** — it was the launch slot |
 | ~~5~~ | ~~Create a decoder~~ | console | 2 | — | **done** — `rc=0` for H.264 **and HEVC** |
-| **6** | **Decode one frame** | console | 7 so far | medium | **four gates cleared; the hardware submit refuses** |
+| **6** | **Decode one frame** | console | 16 so far | medium | **every software gate cleared; the DRIVER refuses with errno 5200.** Arbitration, the codec module, the framing and the config are all ruled out. Next: read the kernel (§13) |
 | 7 | Characterise the frame | console | 1–2 | low | frame-size formula **confirmed 7/7** on hardware |
 | 8 | Get a frame on screen | console | 2–4 | **high** | |
 | 9 | Paired benchmark against FFmpeg | console | 2+ | low | |
@@ -198,6 +226,43 @@ These are not general advice; each one was paid for during Phases 0–3.
     concluded from a complete and correct reading of it that the map calls were
     not part of decoding. They are — the state they set lives two layers down,
     in GpDec. A correct reading of the wrong layer is still the wrong answer.
+
+18. **Anything that reaches a kernel driver needs sign-off first, described as
+    a panic risk.** Raw `ioctl` on a device fd, video-out or GPU context
+    acquisition, kernel writes. `sceVideoOutOpen` from a payload
+    **kernel-panicked the console** on 2026-08-11 and cost about fifty minutes
+    of recovery — see findings §9.1. The same build carried an ioctl probe on
+    the decoder fd justified as "low risk by construction, drivers validate
+    their inputs"; that reasoning had nothing behind it. **`slotcheck` cannot
+    protect against this** — it detects a busy app slot, not a driver you are
+    about to wedge. Read-only observation of driver state has produced every
+    real finding in Phase 6 and carries none of the risk.
+
+19. **A practice borrowed from a reference implementation is only valid if what
+    it assumes about its process is also true of ours.** Moonlight-ps4 opens
+    video out before creating a decoder, and it is right to. It is a *title*
+    that owns its process. This payload is injected into a **borrowed** app
+    slot that already owns the display pipeline, and doing the same thing there
+    panicked the console. Copy the finding; re-derive the precondition.
+
+20. **Validate handles by range, not by sign.** The system-user
+    `sceVideoOutOpen` retry returned `1309671680` = `0x4E100000` — positive, so
+    a `< 0` check accepted it, and it is not a handle. The *first* call had
+    already returned the honest answer (`0x80290001`), and a fallback overrode
+    it. **A fallback that turns a clean refusal into garbage is worse than no
+    fallback.**
+
+21. **Apply rule 15 to every module, not just the one you remember.** The
+    arbitration hang cost two deploys and a wrong hypothesis about user
+    sessions, and it was visible offline the whole time: `+0x350` is a PLT stub
+    whose GOT slot was unbound. Rule 15 existed and was not applied. When a
+    call blocks silently, **check its GOT slot before hypothesising about
+    anything else** — that is now three occurrences out of three silent blocks.
+
+22. **Load providers before consumers.** Binding is eager at load time on this
+    loader, so a module loaded *after* its consumer cannot satisfy it.
+    `libSceVideoArbitration.sprx` had to move ahead of
+    `libSceVideoDecoderArbitration.sprx` in the load list before the slot bound.
 
 ---
 
@@ -622,7 +687,7 @@ Measure and record:
 | Pixel format | **[I]** NV12, or P010 for 10-bit — the `× 3/2` and `× 3` in the `mapMemorySize` formula. Do **not** assume YUV420P |
 | Tiled or linear, and which tiling | The existing VideoOut plane is tiled (`PP_VO_ATTR_TILED_BGRA`) and the repo already has working tile-address logic. It may or may not match |
 | **Stride vs width** | **[I]** `align(width, 256)` — 2048 for 1080p, not 1920. Hardware decoders pad, and assuming `stride == width` is the classic first-frame corruption bug |
-| The 5 KiB tail | **[E]** five 1 KiB picture-metadata blocks live at the *end* of the frame buffer, which is where `GetPictureInfo` reads them from. Do not treat the whole buffer as pixels |
+| The metadata tail | **[E]** 1 KiB picture-metadata blocks live at the *end* of the frame buffer, which is where `GetPictureInfo` reads them from. Do not treat the whole buffer as pixels. **The count is not fixed: five normally, FOUR when `optimizeProgressiveVideo` is set** — measured 7/7 on 2026-08-11 |
 | Plane count and pointers | One interleaved chroma plane (NV12) or two changes the converter entirely |
 | **CPU readability** | Can the payload read the buffer at all without faulting? Given every module's text is execute-only, assume nothing |
 | **Cacheability** | If it is write-combined or uncached, CPU reads are catastrophically slow — and a naive `memcpy` benchmark will blame the decoder for the read |
@@ -753,7 +818,9 @@ Updated from the original plan. Struck-through rows are now settled.
 | **VP9 is unavailable** | [E] Refused at every configuration, `0x811D0200`, and `libSceVdecSvp9.sprx` does not exist on 12.70. Not a risk so much as a scope limit: H.264 and HEVC only |
 | ~~Memory budget~~ | **Settled — it was the launch slot.** [E] `deploy.sh` caps at 41 MiB; the app slot allocated 322 MiB, the full 4K working set. Run probes with `install-homebrew.sh --run` |
 | **Output needs a CPU copy** | **The one that decides whether this is worth doing.** Phases 7–9 |
-| **Arbitration** | **Now the prime suspect.** [E] With every software gate cleared, the hardware submit is refused with driver errno 5200. AvPlayer calls `Initialize`/`Enable` before decoding; Route B never has. Still untested — and it is the next thing to test |
+| ~~**Arbitration**~~ | **RULED OUT, 2026-08-11.** [E] The hang was an unresolved lazy import (`+0x350` is a PLT stub); loading `libSceVideoArbitration.sprx` first fixes it. With arbitration fully up, the decode is refused with the identical errno 5200 |
+| **Process authority** | **The live hypothesis.** [H] Every software gate is cleared and the submitted command buffer is well formed, so what the driver objects to may be *who is asking* rather than *what is asked*. psdevwiki records all decoder modules under auth ID `4900000000000002`. Testable: read the payload's authid/caps, and read the kernel code that produces `0x1450`. Findings §13 |
+| **Video out** | **A hard constraint, discovered expensively.** [E] A payload cannot open video out — `0x80290001` for the real user — and trying it **kernel-panicked the console**. Phase 8 cannot assume this payload owns a video-out handle. Findings §9.1 |
 
 ---
 

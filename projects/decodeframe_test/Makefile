@@ -25,7 +25,10 @@ SRCS := main.c test_stream.S $(EVO_COMMON_SRCS)
 
 CFLAGS += -I$(CURDIR)
 
-LIBS := -lSceSysmodule
+# NO -lSceVideoOut. Opening video out from this payload kernel-panicked the
+# console on 2026-08-11; the library is unlinked so the call cannot come back
+# by accident. See the REMOVED block in main.c.
+LIBS := -lSceSysmodule -lSceUserService
 
 all: $(ELF)
 
