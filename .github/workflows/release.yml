@@ -226,7 +226,8 @@ jobs:
           name: EVO Player ${{ steps.ver.outputs.tag }}
           body_path: dist/NOTES.md
           draft: false
-          prerelease: ${{ startsWith(steps.ver.outputs.version, '0.') }}
+          prerelease: false
+          make_latest: true
           files: |
             dist/EVOPlayer-*.elf
             dist/EVOPlayer-*-homebrew.zip
