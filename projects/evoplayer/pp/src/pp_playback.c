@@ -1,7 +1,9 @@
 #include "pp_playback.h"
+#include "pp_compute_pipeline.h"
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
 #include "pp_output_policy.h"
+
 #include "pp_4k_sdr_policy.h"
 #include "pp_product_path.h"
 #include "pp_v8_gate.h"
@@ -315,9 +317,14 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
             v8_workers = 12;
 
         t0 = now_us();
-        rc = pp_converter_yuv420p_to_tiled_bgra_parallel(
+        rc = pp_compute_pipeline_convert(
             src, gpu, pb->out_w, pb->out_h, v8_workers);
+        if (rc != 0) {
+            rc = pp_converter_yuv420p_to_tiled_bgra_parallel(
+                src, gpu, pb->out_w, pb->out_h, v8_workers);
+        }
         t1 = now_us();
+
         if (rc != 0) {
             pp_videoout_release(pb->vo, idx);
             pp_stage_bc_checkpoint("011_FIRST_FRAME_CONVERT_FAIL", "fused rc");

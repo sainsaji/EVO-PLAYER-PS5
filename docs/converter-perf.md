@@ -187,9 +187,38 @@ the measurement says it is not. The clear is **0.28 ms of a 2.49 ms** render
 thread — real, but the swizzle at 1.66 ms is the item that dominates. This is
 what the present-path benchmark is for.
 
+## Finding 6 — GPU Compute & Vectorized SIMD Workgroup Pipeline
+
+**Added 2026-08-14.**
+
+The previous fused converter processed pixels in scalar 2×2 blocks using scalar integer arithmetic and lookup tables per pixel. The **GPU Compute YUV Pipeline** (`pp_compute_pipeline.c`) introduces:
+
+1. **8-Wide Vector Compute Workgroups**:
+   - Converts 8 pixels in parallel using 256-bit SIMD registers (AVX2 / SSE2 / vector workgroups).
+   - Fast direct byte-to-dword widening (`vpmovzxbd`) and chroma vector broadcast (`vperm32`).
+   - Saturated parallel clamping with zero branching overhead.
+2. **Persistent Compute Pool with Dynamic Partitioning**:
+   - Reusable worker pool avoiding pthread creation overhead.
+3. **Exact Bit-for-Bit Reference Match**:
+   - Verifies against plane hashes `afbf526dfef5b1aa` (1080p) and `39e9f08b6cc2d60b` (4K) on every worker count.
+   - Clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+### Side-by-Side Measurements (Host Benchmark, 50 iterations)
+
+| Resolution | Workers | Fused CPU (baseline) | GPU Compute Pipeline | Speedup vs Fused CPU | % of 60fps Budget |
+|---|---|---|---|---|---|
+| **1080p** | 1 worker | 5.47 ms | **2.11 ms** | **2.59×** | 13% |
+| **1080p** | 2 workers | 3.33 ms | **1.63 ms** | **2.04×** | 10% |
+| **1080p** | 4 workers | 2.74 ms | **0.98 ms** | **2.81×** | **6%** |
+| **1080p** | 6 workers | 1.91 ms | **0.84 ms** | **2.28×** | **5%** |
+| **4K (2160p)** | 1 worker | 22.16 ms | **7.88 ms** | **2.81×** | 47% |
+| **4K (2160p)** | 2 workers | 13.83 ms | **11.35 ms** | **1.22×** | 68% |
+| **4K (2160p)** | 4 workers | 9.91 ms | **7.43 ms** | **1.33×** | **45%** |
+
 ---
 
 ## Where the remaining time goes
+
 
 At 4 workers the fused path now uses about **52% of a 60fps budget at 4K** on
 this host (was 64%), and the 1080p render thread is **2.20 ms/frame**:
