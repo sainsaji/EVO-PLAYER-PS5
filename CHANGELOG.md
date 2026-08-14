@@ -32,6 +32,7 @@ Download **`EVOPlayer-0.7.0-InstallTile.elf`** to register the Media tile on the
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native PS5 IME Keyboard Support.** Seamless integration with `libSceImeDialog.sprx` supporting multilingual input and USB keyboards, with automatic fallback to custom virtual keyboard.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Media Directory Search.** Interactive search modal in file browser for fast folder and item filtering.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Streaming Stability.** Fixed custom AVIO lifecycle conflict and stabilized network streaming playback.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Subtitle Overlay Presentation Clock.** Integrated `pp_product_overlay_enter()`/`leave()` into subtitle picker lifecycle to eliminate 4K decode stalls and frame drop bursts upon dismissal.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **CPU SIMD Vectorized YUV Pipeline.** 8-wide AVX2 SIMD workgroups for high-throughput video presentation (7.4ms per 4K frame).
 
 ---

@@ -10258,6 +10258,9 @@ static void evo_subs_step_size(int delta)
 
 static void evo_subs_open(void)
 {
+#if PP_BACKEND_ENABLED
+    pp_product_overlay_enter();
+#endif
     evo_subs_sync();
 
     /* Open on whatever is playing, not on row zero - the list is long and
@@ -10295,6 +10298,9 @@ static void evo_subs_activate(void)
 
     track = evo_subs_tracks[evo_subs_focus.index];
 
+#if PP_BACKEND_ENABLED
+    pp_product_overlay_leave();
+#endif
     screen = SCREEN_PLAYER;
 
     /*
@@ -17424,6 +17430,9 @@ int main(void) {
                 screen == SCREEN_SUBTITLE_PICKER &&
                 (pressed & PS5_PAD_BUTTON_CIRCLE)
             ) {
+#if PP_BACKEND_ENABLED
+                pp_product_overlay_leave();
+#endif
                 screen = SCREEN_PLAYER;
                 controls_last_used_ms = now_ms();
                 prompt_button_handled = 1;

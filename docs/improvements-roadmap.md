@@ -11,7 +11,7 @@
 
 | Priority | Item | Size | Risk | Domain | Status |
 |:---:|---|:---:|:---:|---|---|
-| 🔴 **P1** | [Subtitle Picker Overlay Fix](#p1--subtitle-picker-overlay-fix) | XS | None | Playback / UI | Ready |
+| 🔴 **P1** | [Subtitle Picker Overlay Fix](#p1--subtitle-picker-overlay-fix) | XS | None | Playback / UI | **Resolved 2026-08-14** |
 | 🔴 **P1** | [Codec Sweep — 29-file Test Set](#p1--codec-sweep--29-file-test-set) | M | None | QA / Validation | Ready |
 | 🔴 **P1** | [10-bit Video Falls Off the Fast Path](#p1--10-bit-video-falls-off-the-fast-path-entirely) | M | Low | Playback / Performance | **New 2026-08-14** |
 | 🔴 **P1** | [`https://` Is Parsed But Not Implemented](#p1--https-is-parsed-but-not-implemented) | M | Low | Addons / Network | **New 2026-08-14** |
@@ -52,7 +52,7 @@ pp_product_overlay_leave();
 ```
 
 ### Done When
-Opening the subtitle picker on a 4K file and dismissing it returns to 4K playback with no dropped-frame burst and correct surface state.
+Opening the subtitle picker on a 4K file and dismissing it returns to 4K playback with no dropped-frame burst and correct surface state. *(Resolved 2026-08-14 — pp_product_overlay_enter() / leave() wired into evo_subs_open(), evo_subs_activate(), and CIRCLE cancel).*
 
 ---
 
