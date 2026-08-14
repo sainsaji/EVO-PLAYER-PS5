@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -93,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -162,10 +162,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: ps5-elf-payloads, path: output/elf }
 
       # Packaging is not on the critical path for ELF development, so it runs
@@ -197,7 +197,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -226,7 +226,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -256,7 +256,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
