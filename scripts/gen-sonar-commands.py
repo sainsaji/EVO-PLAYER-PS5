@@ -18,26 +18,31 @@ def main():
     )
     
     includes = [
-        "-I" + os.path.join(repo_root, "projects/evoplayer"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/pp/include"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/ui/include"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/media/include"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/addons/include"),
-        "-I" + os.path.join(repo_root, "projects/common/include"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/metadata"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/playback"),
-        "-I" + os.path.join(repo_root, "projects/evoplayer/storage"),
+        "-Iprojects/evoplayer",
+        "-Iprojects/evoplayer/pp/include",
+        "-Iprojects/evoplayer/ui/include",
+        "-Iprojects/evoplayer/media/include",
+        "-Iprojects/evoplayer/addons/include",
+        "-Iprojects/common/include",
+        "-Iprojects/evoplayer/metadata",
+        "-Iprojects/evoplayer/playback",
+        "-Iprojects/evoplayer/storage",
     ]
     
     entries = []
     for file_path in c_files:
-        obj_path = file_path + ".o"
-        cmd = ["gcc", "-O0", "-g", "-Wall", "-std=gnu11", "-DNO_OPENSSL=1", "-DEVO_PLAYER_VERSION=\"0.8.0-dev\""] + includes + ["-c", file_path, "-o", obj_path]
+        rel_path = os.path.relpath(file_path, repo_root).replace("\\", "/")
+        args = [
+            "clang",
+            "-std=c11",
+            "-DNO_OPENSSL=1",
+            "-DEVO_PLAYER_VERSION=\"0.8.0-dev\""
+        ] + includes + ["-c", rel_path]
+        
         entries.append({
-            "directory": repo_root,
-            "command": " ".join(cmd),
-            "file": file_path,
-            "output": obj_path
+            "directory": ".",
+            "arguments": args,
+            "file": rel_path
         })
         
     out_file = os.path.join(repo_root, "compile_commands.json")
