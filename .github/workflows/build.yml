@@ -66,9 +66,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             evo-player/ps5-dev:ci
-            ghcr.io/${{ github.repository }}/ps5-dev:cache
+            ghcr.io/sainsaji/evo-player-ps5-dev:cache
           cache-from: |
-            type=registry,ref=ghcr.io/${{ github.repository }}/ps5-dev:cache
+            type=registry,ref=ghcr.io/sainsaji/evo-player-ps5-dev:cache
             type=gha
           cache-to: type=gha,mode=max
           build-args: |
