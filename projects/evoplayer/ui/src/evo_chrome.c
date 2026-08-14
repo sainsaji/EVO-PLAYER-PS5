@@ -17,9 +17,10 @@ const evo_hint EVO_HINTS_BROWSE[4] = {
     { EVO_GLYPH_CROSS,    "OPEN"     },
     { EVO_GLYPH_CIRCLE,   "BACK"     },
     { EVO_GLYPH_TRIANGLE, "FAVORITE" },
-    { EVO_GLYPH_SQUARE,   "INFO"     }
+    { EVO_GLYPH_SQUARE,   "SEARCH"   }
 };
 const int EVO_HINTS_BROWSE_N = 4;
+
 
 const evo_hint EVO_HINTS_ROOT[2] = {
     { EVO_GLYPH_CROSS, "SELECT" },

@@ -19,13 +19,22 @@ extern "C" {
 
 typedef void (*evo_keyboard_cb)(const char *text, void *userdata);
 
+enum {
+    EVO_KEYBOARD_TYPE_VIRTUAL = 0,
+    EVO_KEYBOARD_TYPE_NATIVE  = 1
+};
+
+/* Configure keyboard backend (0 = Custom Virtual Keyboard, 1 = Native PS5 IME Dialog) */
+void evo_keyboard_set_type(int type);
+int  evo_keyboard_get_type(void);
+
 /*
- * Open the global virtual keyboard modal.
+ * Open the global keyboard modal.
  *
  * `title`: Prompt / description shown above the text field.
  * `initial_value`: Pre-filled text (can be NULL or empty).
  * `max_len`: Maximum allowable characters (excluding NUL).
- * `on_submit`: Callback invoked when user accepts with Done / Triangle.
+ * `on_submit`: Callback invoked when user accepts with Done / Triangle / Enter.
  * `userdata`: Context pointer forwarded to `on_submit`.
  */
 void evo_keyboard_open(const char *title,
@@ -34,14 +43,20 @@ void evo_keyboard_open(const char *title,
                        evo_keyboard_cb on_submit,
                        void *userdata);
 
-/* Close the virtual keyboard without submitting. */
+/* Close the keyboard without submitting. */
 void evo_keyboard_close(void);
 
 /* Check if the keyboard modal is currently active. */
 int  evo_keyboard_is_open(void);
 
+/* Check if native PS5 IME dialog is the active backend. */
+int  evo_keyboard_is_native_active(void);
+
 /* Retrieve current text in the keyboard buffer. */
 const char *evo_keyboard_get_text(void);
+
+/* Update keyboard lifecycle every frame (polls Native IME status if active) */
+void evo_keyboard_update(void);
 
 /*
  * Handle controller pad events for the keyboard.
@@ -60,3 +75,4 @@ void evo_screen_keyboard(uint32_t *fb);
 #endif
 
 #endif /* EVO_KEYBOARD_H */
+

@@ -26,6 +26,7 @@ EXTRA_CFLAGS ?=
 
 CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
+    -DEVO_TARGET_PS5=1 \
     -Ipp/include \
     -Iui/include \
     -Imedia/include \
@@ -50,6 +51,8 @@ LIBS := \
     -lSceKeyboard \
     -lSceImeDialog \
     -lc++ -lc++abi -lpthread
+
+
 
 PP_SRCS := \
     pp/src/pp_videoout.c \

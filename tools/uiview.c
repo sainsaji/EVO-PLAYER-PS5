@@ -492,18 +492,18 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.title="SUBTITLES"; m.subtitle="SETTINGS  -  DETECTION & DEFAULT SIZING";
         m.section=EVO_SECTION_SETTINGS;
     } else if (!strcmp(which, "settings_interface")) {
-        static const char *t[] = { "THEME","NAVIGATION SOUNDS","CONTROLLER LIGHTBAR","FOLDERS FIRST" };
+        static const char *t[] = { "THEME","NAVIGATION SOUNDS","CONTROLLER LIGHTBAR","FOLDERS FIRST","KEYBOARD INPUT" };
         static char theme_val[64];
-        static const char *d[4];
-        static const int ic[] = { EVO_IC_PALETTE, EVO_IC_SUBTITLES, EVO_IC_PALETTE, EVO_IC_FOLDER };
+        static const char *d[5];
+        static const int ic[] = { EVO_IC_PALETTE, EVO_IC_SUBTITLES, EVO_IC_PALETTE, EVO_IC_FOLDER, EVO_IC_SETTINGS };
         static uint32_t sw[3];
         const evo_theme *cur = evo_theme_current();
 
         snprintf(theme_val, sizeof(theme_val), "%s  -  %d OF %d",
                  evo_theme_name(evo_theme_index()),
                  evo_theme_index() + 1, evo_theme_count());
-        d[0] = theme_val; d[1] = "ON"; d[2] = "THEME ACCENT"; d[3] = "ON";
-        n = 4;
+        d[0] = theme_val; d[1] = "ON"; d[2] = "THEME ACCENT"; d[3] = "ON"; d[4] = "NATIVE PS5 IME";
+        n = 5;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
@@ -512,6 +512,7 @@ static void render_list(const char *which, int sel, int rail_focused,
         e[0].swatches = sw; e[0].swatch_count = 3;
         m.title="INTERFACE & CONTROLS"; m.subtitle="SETTINGS  -  THEMES, SOUNDS & CONTROLS";
         m.section=EVO_SECTION_SETTINGS;
+
     } else if (!strcmp(which, "settings_system")) {
         static const char *t[] = { "COMPATIBILITY REPORT","DEBUG OVERLAY","REMOVE HOME TILE" };
         static const char *d[] = { "WRITES A CODEC REPORT TO USB0","OFF","REMOVES MEDIA TILE" };
