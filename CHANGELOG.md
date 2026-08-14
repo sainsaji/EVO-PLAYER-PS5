@@ -7,29 +7,32 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ## 0.7.0
 
-**Emby password authentication, master-detail hierarchical changelog viewer, direct memory buffer streaming, and native PS5 IME keyboard.**
+![](https://img.shields.io/badge/Release-v0.7.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
+
+**Emby password authentication, native HTTPS/TLS streaming, master-detail hierarchical changelog viewer, direct memory buffer streaming, and native PS5 IME keyboard.**
 
 Download **`EVOPlayer-0.7.0-InstallTile.elf`** to register the Media tile on the home screen, or **`EVOPlayer-0.7.0-player-only.elf`** for homebrew app slot launch.
 
-### New — Emby Password Authentication & Setup
+### ![](https://img.shields.io/badge/ADDON-007acc?style=flat-square) Emby Password Authentication & Setup
 
-- **Account Password Support.** Dedicated interactive password configuration row in Emby Setup screen with virtual keyboard input and secure asterisk masking (`********`).
-- **Robust cJSON Authentication.** Server authentication payloads formatted with `cJSON` for compliant user session tokens against password-protected Emby and Jellyfin servers.
-- **Config Persistence.** Safe loading and saving of passwords in `/data/evoplayer/emby.conf` and USB configurations with key-value and legacy positional compatibility.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Account Password Support.** Dedicated interactive password configuration row in Emby Setup screen with virtual keyboard input and secure asterisk masking (`********`).
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Robust cJSON Authentication.** Server authentication payloads formatted with `cJSON` for compliant user session tokens against password-protected Emby and Jellyfin servers.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Config Persistence.** Safe loading and saving of passwords in `/data/evoplayer/emby.conf` and USB configurations with key-value and legacy positional compatibility.
 
-### New — Hierarchical Changelog Viewer
+### ![](https://img.shields.io/badge/UI%2FUX-007acc?style=flat-square) Hierarchical Changelog Viewer
 
-- **Master-Detail Version Architecture.** Replaced legacy flat cards with a clean dual-pane layout: a version selector on the left and a dedicated release notes inspector card on the right.
-- **Categorized Visual Badges.** Clear `[NEW]`, `[FIXED]`, `[IMPROVED]`, and `[REMOVED]` indicator pills with accent color coding.
-- **Instant Version Switching.** Fluid D-pad navigation across all releases with automatic detail panel updates.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Master-Detail Version Architecture.** Replaced legacy flat cards with a clean dual-pane layout: a version selector on the left and a dedicated release notes inspector card on the right.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Categorized Visual Badges.** Clear `[NEW]`, `[FIXED]`, `[IMPROVED]`, and `[REMOVED]` indicator pills with accent color coding.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Instant Version Switching.** Fluid D-pad navigation across all releases with automatic detail panel updates.
 
-### New & Improved — Core Subsystems
+### ![](https://img.shields.io/badge/CORE-ff8c00?style=flat-square) Core Subsystems & Network Engine
 
-- **Direct Memory Region Manager.** High-throughput streaming buffer allocations leveraging native PS5 direct memory (`dmem`).
-- **Native HTTPS & TLS Support.** Integrated OpenSSL (`libssl.a`/`libcrypto.a`) with TLS 1.2/1.3 handshakes, SNI extension, and secure communication for remote HTTPS media servers.
-- **Native PS5 IME Keyboard Support.** Seamless integration with `libSceImeDialog.sprx` supporting multilingual input and USB keyboards, with automatic fallback to custom virtual keyboard.
-- **Media Directory Search.** Interactive search modal in file browser for fast folder and item filtering.
-- **CPU SIMD Vectorized YUV Pipeline.** 8-wide AVX2 SIMD workgroups for high-throughput video presentation (7.4ms per 4K frame).
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) ![](https://img.shields.io/badge/SECURITY-e91e63?style=flat-square) **Native HTTPS & TLS Support.** Integrated OpenSSL (`libssl.a`/`libcrypto.a`) with TLS 1.2/1.3 handshakes, SNI extension, and secure communication for remote HTTPS media servers.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Direct Memory Region Manager.** High-throughput streaming buffer allocations leveraging native PS5 direct memory (`dmem`).
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native PS5 IME Keyboard Support.** Seamless integration with `libSceImeDialog.sprx` supporting multilingual input and USB keyboards, with automatic fallback to custom virtual keyboard.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Media Directory Search.** Interactive search modal in file browser for fast folder and item filtering.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Streaming Stability.** Fixed custom AVIO lifecycle conflict and stabilized network streaming playback.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **CPU SIMD Vectorized YUV Pipeline.** 8-wide AVX2 SIMD workgroups for high-throughput video presentation (7.4ms per 4K frame).
 
 ---
 
