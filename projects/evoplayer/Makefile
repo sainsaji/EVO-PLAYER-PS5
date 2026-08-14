@@ -29,6 +29,7 @@ CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -Ipp/include \
     -Iui/include \
     -Imedia/include \
+    -Iaddons/include \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include/SDL2 \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include \
     -DPP_4K_PRODUCT_STAGE=$(STAGE)
@@ -74,6 +75,7 @@ UI_SRCS := \
     ui/src/evo_feedback.c \
     ui/src/evo_chrome.c \
     ui/src/evo_widgets.c \
+    ui/src/evo_keyboard.c \
     ui/src/evo_screens.c
 
 # Media subsystems carved out of main.c. Unlike the UI layer these do link
@@ -84,9 +86,15 @@ MEDIA_SRCS := \
     media/src/prospero_thumbnail.c \
     media/src/evo_textreader.c
 
+# Streaming & Addon subsystems (Emby, Nuvio/Stremio, async HTTP REST queue)
+ADDON_SRCS := \
+    addons/src/cJSON.c \
+    addons/src/evo_net.c \
+    addons/src/addon_emby.c
+
 all: $(ELF)
 
-$(ELF): main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS)
+$(ELF): main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@
