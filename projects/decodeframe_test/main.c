@@ -1726,11 +1726,19 @@ diagnose_gpdec_object(void *decoder, const unsigned char *located,
         return;
     }
 
+    /* These are two DIFFERENT objects and that is correct, not a discrepancy.
+     * [vdeccore+0x140] is the GpDec decoder object - magic at +0, state at
+     * +0x40, locks at +0x10/+0x20/+0x30. The submit runs on the GpDec DEVICE
+     * object, reached from it by the virtual call at [[gpdec+0x38]]+0x18, and
+     * that is the one carrying the fd at +0x1d68 and the mode at +0x2c0. An
+     * earlier version of this line called the difference an error; it is the
+     * pointer chain working as documented. */
     if (located)
-        LOG("    the object the submit search found: %p  -> %s\n",
+        LOG("    the submit's device object:         %p  (%s)\n",
             (const void *)located,
-            gpdec == located ? "SAME OBJECT - the two agree"
-                             : "*** DIFFERENT - one of the two is wrong ***");
+            gpdec == located
+                ? "the same object - unexpected, the chain should separate them"
+                : "a different object, as the [[gpdec+0x38]]+0x18 chain implies");
 
     if (!(((uintptr_t)gpdec >= lo && (uintptr_t)gpdec + 0x48 <= hi) ||
           (plo && (uintptr_t)gpdec >= plo && (uintptr_t)gpdec + 0x48 <= phi))) {

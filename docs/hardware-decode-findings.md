@@ -1146,20 +1146,72 @@ is `memcmp` and nothing else — you cannot lock or copy into read-only memory. 
 `0x800978550` opens with `memcmp(object, <magic at 0x8009fb730>, 0x10)` and
 requires equality.
 
-That turns GpDec's three failure lines into three *different statements about the
-object at `[vdeccore+0x140]`*, which is what makes this cheap to settle:
+##### Why Reset really fails: it waits for a completion that will never arrive **[E]**
 
-| line | condition | what it would mean |
-|---|---|---|
-| `0x1645` | `rdi == NULL` | there is no GpDec object — a **lifetime** problem, not a permissions one |
-| `0x164C` | magic mismatch | the pointer at `+0x140` is stale or the object is debris |
-| `0x1653` | lock at `+0x20` failed | the object is valid and someone else holds it |
+2026-08-14, second run, `diagnose_gpdec_object()`. The pointer at
+`[vdeccore+0x140]` was walked directly rather than inferred:
 
-**[H] as to which, and the probe no longer needs the console's help to say.** The
-VdecCore object is at `decoder+0x78`, in memory this payload allocated, so the
-pointer at `+0x140` can simply be read and the three cases told apart directly —
-`diagnose_gpdec_object()` in `projects/decodeframe_test/main.c` does exactly
-that, on the first Reset failure, following pointers only into ranges it owns.
+```
+decoder                 0x200540000
+  +0x78 VdecCore object 0x200580000   (= decoder + 0x40000)
+  [vdeccore+0x140]      0x2005c0000   (= vdeccore + 0x40000)  the GpDec object
+      +0x00  magic      bb 91 27 b0 d1 3a 4f 07 97 4b 42 19 43 bb 99 7c
+      +0x20  lock       0x000000088002f720
+      +0x40  state      5
+  the submit's device object          0x2006a00f0
+```
+
+**Two objects, and that is correct.** `[vdeccore+0x140]` is the GpDec *decoder*
+object; the submit runs on the GpDec *device* object reached from it by the
+virtual call at `[[gpdec+0x38]]+0x18`, which is where the fd at `+0x1d68` and
+the mode at `+0x2c0` live. They are different addresses because the chain
+separates them, not because either reading is wrong.
+
+**Line `0x1645` is ruled out** — the pointer is non-NULL. **Line `0x164C` almost
+certainly passes**: the sixteen bytes are a high-entropy constant, byte-identical
+across both decoder instances in the run, which is what a signature written at
+construction looks like and is not what debris looks like.
+
+**And the object is in state 5** — one of the three states (0, 4, 5) that line
+`0xC22` explicitly refuses. The first run of Phase 6 saw state 0, before anything
+was mapped. This is the far side: the decoder has entered state 5 and every
+subsequent `Decode` is refused there, which is why all eight access units failed
+identically and why the selector never moved. **The AUs after the first were
+almost certainly refused before reaching the driver at all** — a tighter bound on
+the §7 result above than "while the driver is refusing the job".
+
+**The earlier three-line table was incomplete, and the rest of the function says
+why Reset cannot succeed.** `0x800978550` takes locks at `+0x20` (line `0x1653`)
+and `+0x30` (line `0x165A`) and then calls the inner reset at `0x800973270`
+(line `0x1665`), which opens with a **condition-variable wait**:
+
+```
+lea  r14,[rdi+0x10]              ; a third lock
+call <lock>                      ; fails -> line 0x1FAE
+lea  r15,[rbx+0xc70]             ; the condition variable
+loop:
+  cmp  DWORD PTR [rbx+0xc60], 1  ; while a job is outstanding...
+  jne  <proceed>
+  call <cond_wait>(r15, r14)     ; ...wait for it. fails -> line 0x1FB7
+  test eax,eax
+  je   loop
+```
+
+`[gpdec+0xc60]` is an outstanding-job flag and `+0xc70` is the condvar the
+completion signals. **The refused submit is exactly the case where that
+completion never comes**: the driver rejected the job with errno 5200, so nothing
+will ever signal it, and the flag is never cleared. `Reset` returns rather than
+hanging, so the wait is failing rather than blocking — `0x1FB7` — but either way
+it cannot finish.
+
+**So `Reset` is not a second, independent blocker. It is downstream of the same
+errno 5200.** The decoder cannot be reset because it is still waiting for the job
+the driver threw away. That closes the question this section opened and puts the
+whole weight back on errno 5200, where it belongs.
+
+For the record, the failure lines in this path are `0x1645`, `0x164C`, `0x1653`,
+`0x165A`, `0x165E`, `0x1665`, and beneath it `0x1FAE` and `0x1FB7` — not the
+three originally listed.
 
 Worth noting for its own sake: GpDec's refusal happens *before* any ioctl — the
 failing call is `memcmp`, not a driver call — so **this does not show the driver
