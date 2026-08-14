@@ -6,8 +6,10 @@
 
 include ../common/evo.mk
 
+CFLAGS += -I../avplayer_probe
+
 ELF  := avplayer_test.elf
-SRCS := main.c $(EVO_COMMON_SRCS)
+SRCS := main.c ../avplayer_probe/test_clip.S $(EVO_COMMON_SRCS)
 
 LIBS := -lSceSysmodule
 

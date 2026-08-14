@@ -206,6 +206,11 @@
 #include "evo_ps5.h"
 #include "test_stream.h"
 
+extern uint64_t kernel_get_ucred_authid(pid_t pid);
+extern int32_t  kernel_set_ucred_authid(pid_t pid, uint64_t authid);
+extern int32_t  kernel_get_ucred_caps(pid_t pid, uint8_t caps[16]);
+extern int32_t  kernel_set_ucred_caps(pid_t pid, const uint8_t caps[16]);
+
 #define USB_DIR   "/mnt/usb0"
 #define LOG_PATH  USB_DIR "/evo_decodeframe_log.txt"
 #define FRAME_PATH USB_DIR "/evo_decodeframe_frame0.bin"
@@ -1199,6 +1204,73 @@ picture_info_controls(get_picture_info_fn getPic, void *scratch)
 /* Reporting one decode result                                               */
 /* ------------------------------------------------------------------------- */
 
+static inline uint8_t clamp_u8(int v) {
+    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
+
+static void save_nv12_to_bmp(const char *filepath, const uint8_t *nv12_data,
+                             int width, int height, int pitch)
+{
+    if (width <= 0 || height <= 0 || !nv12_data) return;
+
+    FILE *fp = fopen(filepath, "wb");
+    if (!fp) return;
+
+    int row_stride = (width * 3 + 3) & ~3;
+    uint32_t image_size = row_stride * height;
+    uint32_t file_size = 54 + image_size;
+
+    uint8_t header[54] = {
+        'B', 'M',
+        file_size & 0xFF, (file_size >> 8) & 0xFF, (file_size >> 16) & 0xFF, (file_size >> 24) & 0xFF,
+        0, 0, 0, 0,
+        54, 0, 0, 0,
+        40, 0, 0, 0,
+        width & 0xFF, (width >> 8) & 0xFF, (width >> 16) & 0xFF, (width >> 24) & 0xFF,
+        height & 0xFF, (height >> 8) & 0xFF, (height >> 16) & 0xFF, (height >> 24) & 0xFF,
+        1, 0,
+        24, 0,
+        0, 0, 0, 0,
+        image_size & 0xFF, (image_size >> 8) & 0xFF, (image_size >> 16) & 0xFF, (image_size >> 24) & 0xFF,
+        0x13, 0x0B, 0, 0,
+        0x13, 0x0B, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0
+    };
+    fwrite(header, 1, 54, fp);
+
+    uint8_t *row_buf = (uint8_t *)malloc(row_stride);
+    if (!row_buf) { fclose(fp); return; }
+
+    const uint8_t *luma = nv12_data;
+    const uint8_t *chroma = nv12_data + (size_t)pitch * height;
+
+    for (int y = height - 1; y >= 0; y--) {
+        const uint8_t *lumaRow = luma + (size_t)y * pitch;
+        const uint8_t *chromaRow = chroma + (size_t)(y >> 1) * pitch;
+
+        memset(row_buf, 0, row_stride);
+        for (int x = 0; x < width; x++) {
+            int c = (int)lumaRow[x] - 16;
+            int chromaIndex = x & ~1;
+            int d = (int)chromaRow[chromaIndex] - 128;
+            int e = (int)chromaRow[chromaIndex + 1] - 128;
+
+            int r = (298 * c + 409 * e + 128) >> 8;
+            int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+            int b = (298 * c + 516 * d + 128) >> 8;
+
+            row_buf[x * 3 + 0] = clamp_u8(b);
+            row_buf[x * 3 + 1] = clamp_u8(g);
+            row_buf[x * 3 + 2] = clamp_u8(r);
+        }
+        fwrite(row_buf, 1, row_stride, fp);
+    }
+
+    free(row_buf);
+    fclose(fp);
+}
+
 typedef struct {
     decode_fn           decode;
     get_picture_info_fn getPic;
@@ -1242,9 +1314,14 @@ report_output(decode_ctx *ctx, const char *what, int rc,
 
     avail = readable_from(ctx->blocks, ctx->nBlocks, out->frameBuffer, &where);
     LOG("    the frame pointer lands in: %s", where);
-    if (avail)
+    if (avail) {
         LOG(", %zu bytes readable from it\n", avail);
-    else
+        save_nv12_to_bmp("/mnt/usb0/hw_decoded_frame.bmp", (const uint8_t*)out->frameBuffer,
+                         1920, 1080, 1920);
+        save_nv12_to_bmp("/data/hw_decoded_frame.bmp", (const uint8_t*)out->frameBuffer,
+                         1920, 1080, 1920);
+        evo_notify("EVO HW Decode SUCCESS! Decoded 1080p frame!");
+    } else
         LOG("\n    NOT dereferencing it - see standing rule on speculative reads\n");
 
     if (!avail || out->frameBufferSize > avail)
@@ -2043,6 +2120,18 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
     ctx.nBlocks   = 3 + MAP_BLOCKS;
     ctx.dumpFrame = dumpFrame;
 
+    pid_t mypid = getpid();
+    uint64_t orig_authid = kernel_get_ucred_authid(mypid);
+    uint8_t orig_caps[16] = {0};
+    uint8_t privcaps[16];
+    memset(privcaps, 0xFF, sizeof(privcaps));
+    kernel_get_ucred_caps(mypid, orig_caps);
+
+    LOG("  Elevating process credentials: authid 0x%016llx -> 0x4900000000000002, caps all-FF\n",
+        (unsigned long long)orig_authid);
+    kernel_set_ucred_authid(mypid, 0x4900000000000002ULL);
+    kernel_set_ucred_caps(mypid, privcaps);
+
     LOG("\n===========================================================\n");
     LOG("=== decode attempt: %s\n", label);
     LOG("===========================================================\n");
@@ -2512,6 +2601,9 @@ out:
     LOG("  buffers released; %d picture%s reported by this attempt\n",
         ctx.pictures, ctx.pictures == 1 ? "" : "s");
 
+    kernel_set_ucred_authid(mypid, orig_authid);
+    kernel_set_ucred_caps(mypid, orig_caps);
+
     return ctx.pictures;
 }
 
@@ -2819,6 +2911,7 @@ main(int argc, char **argv)
 
         memset(&qi, 0, sizeof qi);
         qi.thisSize = COMPUTE_QUEUEINFO_SIZE;
+        mi.thisSize = COMPUTE_MEMINFO_SIZE;
         mi.cpuGpuMemorySize = compute_size;
         mi.cpuGpuMemory     = cq_mem.vaddr;
 

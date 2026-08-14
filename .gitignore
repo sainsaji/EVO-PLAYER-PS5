@@ -125,10 +125,29 @@ output/uiplay/
 # samples/*.jpg and friends were already ignored; these are not images.
 samples/**/*.mkv
 samples/**/*.mp4
+samples/**/*.avi
+samples/**/*.ts
+samples/**/*.mov
+samples/**/*.webm
 samples/**/*.vob
 samples/**/*.ifo
 samples/**/*.bup
 samples/**/*.fdmdownload
+samples/**/*.bmp
+samples/**/*.yuv
+samples/**/*.h264
+samples/**/*.264
+samples/**/*.hevc
+samples/**/*.265
+
+# Local Emby / media server test instances
+emby_config/
+emby_media/
+scratch/
+
+# Local test frame captures
+*.bmp
+output/*.bmp
 
 # Third-party NID catalogue (12.6 MB) fetched by tools/re/nid.py's instructions
 # from zecoxao/sce_symbols. Not ours to vendor, and regenerable in seconds.

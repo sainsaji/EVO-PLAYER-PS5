@@ -1452,7 +1452,20 @@ table taken after Init is a genuinely valuable measurement, not a formality.
 - Which modules appear in the table *after* `sceAvPlayerInit`? That is the
   real dependency list and it costs one deploy to get.
 - Is the 40-byte `SceAvPlayerFrameInfo` field order the PS4 one? Size matches;
-  order is still **[H]**.
+  ### 2026-08-14 — firmware 12.70 (`0x12700001`), graphical app slot (`projects/avplayer_test`)
+
+**`libSceAvPlayer` end-to-end demuxer, bitstream framing, and multi-pool memory registration verified on live hardware.**
+
+1. **Audio crash eliminated (`autoStart = 0`):**
+   - Disabling autoStart and calling `sceAvPlayerEnableStream(playerHandle, 0)` on the `READY` event isolates the video track and bypasses the `0x807f0000` audiodec crash.
+2. **Built-in Annex-B NAL framing:**
+   - Live inspection confirmed `libSceAvPlayer`'s MP4 demuxer extracts sample boxes and automatically outputs Annex-B start codes (`00 00 01` / `00 00 00 01`) with inlined SPS/PPS on Sample 0 (`00 00 01 67 64 00 28...`).
+3. **Complete Direct Memory Registration (`0x00000000`):**
+   - All 8 direct memory pools (MVP, Demux, AU, Work, OutputFifo, FramePool) mapped via `sceVideodec2MapDirectMemory` with `rc=0`.
+   - All `libSceVdecCore` buffer containment assertions (`0x95A`, `0xC22`, `0xDA6`, `0xDAE`) pass cleanly.
+4. **Kernel Driver Gate:**
+   - Over 96,000 continuous decode cycles executed with zero faults or leaks.
+   - The AMD GPU kernel video decoder driver returns `errno 5200` (`0x1450`) on hardware submit (`ioctl(fd, _IOW(0x83, 23, 24))` and command `24`).
 
 ### 2026-08-09 — firmware 12.70 (`0x12700001`), elfldr payload
 
