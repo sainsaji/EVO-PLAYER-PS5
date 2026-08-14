@@ -280,6 +280,9 @@ typedef struct evo_picker_model {
     int                     first;
     int                     entry_count;
     int                     count;
+
+    int                     preview_face;   /* -1 if no preview, or 0 (SMALL), 1 (MEDIUM), 2 (LARGE) */
+    const char             *preview_text;   /* optional custom text, or NULL for default */
 } evo_picker_model;
 
 int  evo_screen_picker_capacity(void);

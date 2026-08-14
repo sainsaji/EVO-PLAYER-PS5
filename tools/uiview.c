@@ -440,12 +440,13 @@ static void render_list(const char *which, int sel, int rail_focused,
 
     if (!strcmp(which, "settings")) {
         static const char *t[] = { "PLAYBACK PROFILE","RESUME PLAYBACK",
-            "DEFAULT ASPECT RATIO","AUTO-DETECT SUBTITLES","DEVELOPER MODE",
-            "FOLDERS FIRST","THEME","REMOVE HOME TILE" };
+            "DEFAULT ASPECT RATIO","AUTO-DETECT SUBTITLES","DEFAULT SUBTITLE SIZE",
+            "DEVELOPER MODE","FOLDERS FIRST","THEME","REMOVE HOME TILE" };
         static char theme_val[64];
-        static const char *d[8];
+        static const char *d[9];
         static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_RESUME,EVO_IC_ASPECT,
-            EVO_IC_SUBTITLES,EVO_IC_TOOLS,EVO_IC_FOLDER,EVO_IC_PALETTE,EVO_IC_TRASH };
+            EVO_IC_SUBTITLES,EVO_IC_SUBTITLES,EVO_IC_TOOLS,EVO_IC_FOLDER,
+            EVO_IC_PALETTE,EVO_IC_TRASH };
         static uint32_t sw[3];
         const evo_theme *cur = evo_theme_current();
 
@@ -457,9 +458,9 @@ static void render_list(const char *which, int sel, int rail_focused,
                  evo_theme_index() + 1, evo_theme_count());
 
         d[0]="Performance"; d[1]="ON"; d[2]="FIT"; d[3]="ON";
-        d[4]="OFF"; d[5]="ON"; d[6]=theme_val; d[7]="REMOVES MEDIA TILE";
+        d[4]="MEDIUM"; d[5]="OFF"; d[6]="ON"; d[7]=theme_val; d[8]="REMOVES MEDIA TILE";
 
-        n = 8;
+        n = 9;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
@@ -468,7 +469,7 @@ static void render_list(const char *which, int sel, int rail_focused,
         /* Exercise the THEME row's swatches, as the real settings screen
          * does - a fixture that skips them cannot show they render. */
         sw[0] = cur->accent; sw[1] = cur->surface; sw[2] = cur->bg_top;
-        e[6].swatches = sw; e[6].swatch_count = 3;
+        e[7].swatches = sw; e[7].swatch_count = 3;
 
         m.title="SETTINGS"; m.subtitle="PLAYBACK AND APPLICATION PREFERENCES";
         m.section=EVO_SECTION_SETTINGS;
@@ -487,8 +488,8 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.title="TOOLS"; m.subtitle="DIAGNOSTICS AND CONTROLLER FEEDBACK";
         m.section=EVO_SECTION_TOOLS;
     } else if (!strcmp(which, "recent")) {
-        static const char *t[] = { "leftbehind-bts","A Very Long Documentary "
-            "Title That Must Ellipsise","DTS 5.1","Dolby TrueHD 7.1","AAC 5.1" };
+        static const char *t[] = { "leftbehind-bts", ("A Very Long Documentary "
+            "Title That Must Ellipsise"), "DTS 5.1", "Dolby TrueHD 7.1", "AAC 5.1" };
         static const char *d[] = { "7M 58S LEFT","1H 12M LEFT","0M 01S LEFT",
             "0M 09S LEFT","0M 40S LEFT" };
         n = 5;
@@ -730,7 +731,7 @@ static void render_toast(evo_toast_kind kind)
  * that shape because it is the case the screen exists to make legible - a
  * fixture of three tidy tracks would demonstrate nothing.
  */
-static void render_picker(int sel)
+static void render_picker(int sel, int size_face)
 {
     static const struct { const char *label; const char *detail; int weak; }
     tracks[] = {
@@ -754,6 +755,9 @@ static void render_picker(int sel)
     evo_picker_model m;
     evo_focus f;
     int first, shown, i;
+    static char title_buf[64];
+    const char *size_str = (size_face == EVO_FACE_SUB)   ? "SMALL" :
+                           (size_face == EVO_FACE_TITLE) ? "LARGE" : "MEDIUM";
 
     fill_fake_video();
 
@@ -775,15 +779,56 @@ static void render_picker(int sel)
         rows[i].current = (first + i == 2);   /* SDH is what is playing */
     }
 
+    snprintf(title_buf, sizeof(title_buf), "SELECT TRACK  -  SIZE: %s", size_str);
+
     memset(&m, 0, sizeof(m));
-    m.eyebrow     = "SUBTITLES";
-    m.title       = "SELECT A TRACK";
-    m.entries     = rows;
-    m.first       = first;
-    m.entry_count = shown;
-    m.count       = count;
+    m.eyebrow      = "SUBTITLES";
+    m.title        = title_buf;
+    m.entries      = rows;
+    m.first        = first;
+    m.entry_count  = shown;
+    m.count        = count;
+    m.preview_face = size_face;
+    m.preview_text = NULL;
 
     evo_screen_picker(g_fb, &m, &f);
+}
+
+static void render_subtitles(int face)
+{
+    fill_fake_video();
+
+    const char *line1 = "Welcome to EVO Player on PlayStation 5";
+    const char *line2 = (face == EVO_FACE_SUB)   ? "Subtitle size: SMALL (EVO_FACE_SUB) with adaptive outline and shadow" :
+                        (face == EVO_FACE_TITLE) ? "Subtitle size: LARGE (EVO_FACE_TITLE)" :
+                        "Subtitle size: MEDIUM (EVO_FACE_MENU) default size";
+
+    const char *lines[2] = { line1, line2 };
+    int line_count = 2;
+
+    int bottom_y = 910;
+    int line_spacing = (face == EVO_FACE_SUB)   ? 56 :
+                       (face == EVO_FACE_TITLE) ? 96 : 76;
+    int first_y = bottom_y - (line_count - 1) * line_spacing;
+
+    for (int i = 0; i < line_count; i++) {
+        const char *line = lines[i];
+        int tw = evo_font_text_width(line, face);
+        int x = (W - tw) / 2;
+        int y = first_y + i * line_spacing;
+
+        /* Soft lower shadow */
+        rr_text(g_fb, x + 2, y + 3, line, 0xBE000000, face);
+
+        /* Thin outline around letters */
+        rr_text(g_fb, x - 2, y, line, 0xF5000000, face);
+        rr_text(g_fb, x + 2, y, line, 0xF5000000, face);
+        rr_text(g_fb, x, y - 2, line, 0xF5000000, face);
+        rr_text(g_fb, x, y + 2, line, 0xF5000000, face);
+
+        /* Main text */
+        rr_text(g_fb, x, y, line, 0xFFFAFCFF, face);
+    }
 }
 
 
@@ -892,7 +937,9 @@ static const char *SCREENS[] = { "launch","browse","recent","favorites",
                                  "settings","profile","tools","about",
                                  "changelog",
                                  "resume","finished","mediainfo","exitconfirm",
-                                 "picker","reader",
+                                 "picker","picker_small","picker_medium","picker_large",
+                                 "subs_small","subs_medium","subs_large",
+                                 "reader",
                                  "toast","toastok","toasterror", NULL };
 
 static void render_one(const char *screen, int sel, int rail, int rail_sel,
@@ -900,18 +947,24 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
 {
     memset(g_fb, 0, sizeof(g_fb));
 
-    if      (!strcmp(screen, "launch"))    render_launch(row, sel);
-    else if (!strcmp(screen, "browse"))    render_browse(sel, rail, rail_sel, empty);
-    else if (!strcmp(screen, "resume"))    render_resume();
-    else if (!strcmp(screen, "finished"))  render_finished();
-    else if (!strcmp(screen, "mediainfo")) render_mediainfo();
-    else if (!strcmp(screen, "exitconfirm")) render_exitconfirm();
-    else if (!strcmp(screen, "picker"))    render_picker(sel);
-    else if (!strcmp(screen, "reader"))    render_reader(sel);
-    else if (!strcmp(screen, "toast"))      render_toast(EVO_TOAST_INFO);
-    else if (!strcmp(screen, "toastok"))    render_toast(EVO_TOAST_OK);
-    else if (!strcmp(screen, "toasterror")) render_toast(EVO_TOAST_ERROR);
-    else                                   render_list(screen, sel, rail, rail_sel, empty);
+    if      (!strcmp(screen, "launch"))        render_launch(row, sel);
+    else if (!strcmp(screen, "browse"))        render_browse(sel, rail, rail_sel, empty);
+    else if (!strcmp(screen, "resume"))        render_resume();
+    else if (!strcmp(screen, "finished"))      render_finished();
+    else if (!strcmp(screen, "mediainfo"))     render_mediainfo();
+    else if (!strcmp(screen, "exitconfirm"))   render_exitconfirm();
+    else if (!strcmp(screen, "picker"))        render_picker(sel, EVO_FACE_MENU);
+    else if (!strcmp(screen, "picker_small"))  render_picker(sel, EVO_FACE_SUB);
+    else if (!strcmp(screen, "picker_medium")) render_picker(sel, EVO_FACE_MENU);
+    else if (!strcmp(screen, "picker_large"))  render_picker(sel, EVO_FACE_TITLE);
+    else if (!strcmp(screen, "subs_small"))    render_subtitles(EVO_FACE_SUB);
+    else if (!strcmp(screen, "subs_medium"))   render_subtitles(EVO_FACE_MENU);
+    else if (!strcmp(screen, "subs_large"))    render_subtitles(EVO_FACE_TITLE);
+    else if (!strcmp(screen, "reader"))        render_reader(sel);
+    else if (!strcmp(screen, "toast"))         render_toast(EVO_TOAST_INFO);
+    else if (!strcmp(screen, "toastok"))       render_toast(EVO_TOAST_OK);
+    else if (!strcmp(screen, "toasterror"))    render_toast(EVO_TOAST_ERROR);
+    else                                       render_list(screen, sel, rail, rail_sel, empty);
 }
 
 int main(int argc, char **argv)

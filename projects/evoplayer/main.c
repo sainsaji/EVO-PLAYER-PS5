@@ -168,7 +168,7 @@ static int g_first_frame_bc_done = 0;
 /* EVO: single source of truth for the settings row count. Navigation used to
  * hardcode "% 6" while the row table grew, which silently made the last row
  * unreachable. Both now derive from this. */
-#define EVO_SETTINGS_COUNT 8
+#define EVO_SETTINGS_COUNT 9
 
 /*
  * Where CIRCLE returns to from playback.
@@ -2606,6 +2606,7 @@ static void prospero_subtitle_clear(void);
  */
 static int prospero_subtitle_count;
 static int prospero_subtitle_enabled;
+static int prospero_subtitle_face;
 
 static void prospero_subtitle_clean_line(
     const char *input,
@@ -8885,6 +8886,7 @@ static ProsperoSubtitleCue prospero_subtitle_cues[
 
 static int prospero_subtitle_count = 0;
 static int prospero_subtitle_enabled = 1;
+static int prospero_subtitle_face = 2;  /* 1 SUB (SMALL), 2 MENU (MEDIUM/DEFAULT), 3 TITLE (LARGE) */
 
 static char prospero_subtitle_path[512] = {0};
 
@@ -9593,6 +9595,9 @@ static int prospero_subtitle_wrap_text(
 ) {
     int line_count = 0;
     const char *cursor = text;
+    int max_wrap_len = (prospero_subtitle_face == EVO_FACE_SUB)   ? 48 :
+                       (prospero_subtitle_face == EVO_FACE_TITLE) ? 26 : 36;
+    int min_break_len = max_wrap_len / 2;
 
     while (
         cursor &&
@@ -9619,7 +9624,7 @@ static int prospero_subtitle_wrap_text(
         while (
             cursor[length] &&
             cursor[length] != '\n' &&
-            length < 44
+            length < max_wrap_len
         ) {
             if (cursor[length] == ' ') {
                 last_space = length;
@@ -9631,8 +9636,8 @@ static int prospero_subtitle_wrap_text(
         if (
             cursor[length] &&
             cursor[length] != '\n' &&
-            length >= 44 &&
-            last_space > 20
+            length >= max_wrap_len &&
+            last_space > min_break_len
         ) {
             length = last_space;
         }
@@ -9711,13 +9716,12 @@ static int prospero_subtitle_wrap_text(
 static int rr_idx(char ch);
 
 /*
- * Measure subtitle line width with the same glyph advances as rr_text face 1
- * (RR_SUB_*). Fixed 12px/char was too narrow → text sat off-center.
+ * Measure subtitle line width with the glyph advances matching the active subtitle face.
  */
 static int prospero_subtitle_text_width(
     const char *text
 ) {
-    return evo_font_text_width(text, 1);   /* face 1 == RR_SUB_*, as rr_text */
+    return evo_font_text_width(text, prospero_subtitle_face);
 }
 
 
@@ -9795,7 +9799,9 @@ static void prospero_subtitle_draw(
             ? 625
             : 910;
 
-    int line_spacing = 72;
+    int line_spacing =
+        (prospero_subtitle_face == EVO_FACE_SUB)   ? 56 :
+        (prospero_subtitle_face == EVO_FACE_TITLE) ? 96 : 76;
 
     int first_y =
         bottom_y -
@@ -9816,7 +9822,7 @@ static void prospero_subtitle_draw(
             );
 
         /*
-         * Exact horizontal center (width matches face 1 / RR_SUB advances).
+         * Exact horizontal center.
          */
         int x =
             (WIDTH - text_width) / 2;
@@ -9841,12 +9847,11 @@ static void prospero_subtitle_draw(
                 0,
                 190
             ),
-            1
+            prospero_subtitle_face
         );
 
         /*
          * Thin outline around the letters. No background rectangle.
-         * face 1 = subtitle glyph set (same as width measure).
          */
         rr_text(
             framebuffer,
@@ -9859,7 +9864,7 @@ static void prospero_subtitle_draw(
                 0,
                 245
             ),
-            1
+            prospero_subtitle_face
         );
 
         rr_text(
@@ -9873,7 +9878,7 @@ static void prospero_subtitle_draw(
                 0,
                 245
             ),
-            1
+            prospero_subtitle_face
         );
 
         rr_text(
@@ -9887,7 +9892,7 @@ static void prospero_subtitle_draw(
                 0,
                 245
             ),
-            1
+            prospero_subtitle_face
         );
 
         rr_text(
@@ -9901,7 +9906,7 @@ static void prospero_subtitle_draw(
                 0,
                 245
             ),
-            1
+            prospero_subtitle_face
         );
 
         /*
@@ -9918,7 +9923,7 @@ static void prospero_subtitle_draw(
                 255,
                 255
             ),
-            1
+            prospero_subtitle_face
         );
     }
 }
@@ -10496,6 +10501,8 @@ static void evo_subs_sync(void)
 }
 
 
+static void prospero_settings_save(void);
+
 static void draw_subtitle_picker(uint32_t *fb)
 {
     evo_picker_entry rows[16];
@@ -10537,16 +10544,67 @@ static void draw_subtitle_picker(uint32_t *fb)
         rows[i].weak    = evo_subs_weak[first + i];
     }
 
+    static char title_buf[64];
+    const char *size_str =
+        prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+        prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM";
+
+    snprintf(title_buf, sizeof(title_buf), "SELECT TRACK  -  SIZE: %s", size_str);
+
     memset(&m, 0, sizeof(m));
 
-    m.eyebrow     = "SUBTITLES";
-    m.title       = "SELECT A TRACK";
-    m.entries     = rows;
-    m.first       = first;
-    m.entry_count = shown;
-    m.count       = evo_subs_count;
+    m.eyebrow      = "SUBTITLES";
+    m.title        = title_buf;
+    m.entries      = rows;
+    m.first        = first;
+    m.entry_count  = shown;
+    m.count        = evo_subs_count;
+    m.preview_face = prospero_subtitle_face;
+    m.preview_text = NULL;
 
     evo_screen_picker(fb, &m, &evo_subs_focus);
+}
+
+
+static void evo_subs_cycle_size(void)
+{
+    static const int order[3] = { EVO_FACE_SUB, EVO_FACE_MENU, EVO_FACE_TITLE };
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        if (order[i] == prospero_subtitle_face)
+            break;
+    }
+
+    prospero_subtitle_face = order[(i + 1) % 3];
+    prospero_settings_save();
+    evo_feedback(EVO_FB_OPEN);
+
+    toast("SUBTITLE SIZE",
+          prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+          prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM");
+}
+
+static void evo_subs_step_size(int delta)
+{
+    static const int order[3] = { EVO_FACE_SUB, EVO_FACE_MENU, EVO_FACE_TITLE };
+    int i;
+
+    for (i = 0; i < 3; i++) {
+        if (order[i] == prospero_subtitle_face)
+            break;
+    }
+
+    int next = (i + delta) % 3;
+    if (next < 0) next += 3;
+
+    prospero_subtitle_face = order[next];
+    prospero_settings_save();
+    evo_feedback(EVO_FB_OPEN);
+
+    toast("SUBTITLE SIZE",
+          prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+          prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM");
 }
 
 
@@ -12833,7 +12891,7 @@ static void prospero_settings_save(void)
 
     fprintf(
         file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n",
         (int)current_profile,
         prospero_resume_playback_enabled,
         prospero_default_view_mode,
@@ -12842,16 +12900,15 @@ static void prospero_settings_save(void)
         evo_sort_folders_first,  /* EVO: appended, see load() */
         evo_theme_name(evo_theme_index()),  /* EVO: by name, not index */
         /*
-         * EVO: controller feedback, appended after the theme name.
+         * EVO: controller feedback and subtitle size, appended after the theme name.
          *
          * The theme is read with %[^\n], which stops at the newline, and the
          * %d that follows skips it - so these can be appended after a string
-         * field without disturbing anything already written. Tools presented
-         * both of these as settings and neither survived a relaunch, which
-         * made two rows of that page lie.
+         * field without disturbing anything already written.
          */
         evo_feedback_sound_enabled(),
-        evo_feedback_lightbar_enabled()
+        evo_feedback_lightbar_enabled(),
+        prospero_subtitle_face
     );
 
     fclose(file);
@@ -12878,6 +12935,7 @@ static void prospero_settings_load(void)
      * parses and simply keeps these defaults. */
     int loaded_sound = 1;
     int loaded_lightbar = 1;
+    int loaded_sub_face = 1;
 
     FILE *file =
         fopen(
@@ -12889,7 +12947,7 @@ static void prospero_settings_load(void)
         int values_read =
             fscanf(
                 file,
-                "%d%d%d%d%d%d %23[^\n]%d%d",
+                "%d%d%d%d%d%d %23[^\n]%d%d%d",
                 &loaded_profile,
                 &loaded_resume,
                 &loaded_view,
@@ -12898,13 +12956,14 @@ static void prospero_settings_load(void)
                 &loaded_sort,
                 loaded_theme,
                 &loaded_sound,
-                &loaded_lightbar
+                &loaded_lightbar,
+                &loaded_sub_face
             );
 
         fclose(file);
 
         /*
-         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8 or 9.
+         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9 or 10.
          * Fewer than 5 is corrupt.
          */
         if (values_read < 5) {
@@ -12924,7 +12983,12 @@ static void prospero_settings_load(void)
 
         if (values_read < 8) loaded_sound    = 1;
         if (values_read < 9) loaded_lightbar = 1;
+        if (values_read < 10) loaded_sub_face = 1;
     }
+
+    if (loaded_sub_face != EVO_FACE_SUB && loaded_sub_face != EVO_FACE_TITLE)
+        loaded_sub_face = EVO_FACE_MENU;
+    prospero_subtitle_face = loaded_sub_face;
 
     evo_sort_folders_first = loaded_sort ? 1 : 0;
 
@@ -13092,6 +13156,29 @@ static void prospero_settings_activate_selected(void)
     }
 
     if (settings_selected == 4) {
+        /* EVO: cycle default subtitle size */
+        static const int order[3] = { EVO_FACE_SUB, EVO_FACE_MENU, EVO_FACE_TITLE };
+        int i;
+
+        for (i = 0; i < 3; i++) {
+            if (order[i] == prospero_subtitle_face)
+                break;
+        }
+
+        prospero_subtitle_face = order[(i + 1) % 3];
+        prospero_settings_save();
+        evo_feedback(EVO_FB_OPEN);
+
+        toast(
+            "DEFAULT SUBTITLE SIZE",
+            prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+            prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM"
+        );
+
+        return;
+    }
+
+    if (settings_selected == 5) {
         show_debug_overlay =
             !show_debug_overlay;
 
@@ -13107,7 +13194,7 @@ static void prospero_settings_activate_selected(void)
         return;
     }
 
-    if (settings_selected == 5) {
+    if (settings_selected == 6) {
         /* EVO: browser sort toggle. */
         evo_sort_folders_first = !evo_sort_folders_first;
 
@@ -13125,7 +13212,7 @@ static void prospero_settings_activate_selected(void)
         return;
     }
 
-    if (settings_selected == 6) {
+    if (settings_selected == 7) {
         /* EVO: cycle to the next theme. Applies on the very next frame -
          * every screen reads evo_theme_current() while drawing. */
         int next = evo_theme_set(evo_theme_index() + 1);
@@ -13137,7 +13224,7 @@ static void prospero_settings_activate_selected(void)
         return;
     }
 
-    if (settings_selected == 7) {
+    if (settings_selected == 8) {
         time_t now = time(NULL);
 
         if (
@@ -14374,11 +14461,11 @@ void draw_settings_screen(uint32_t *fb)
     static char theme_value[64];
     static char uninstall_value[48];
 
-    /* One icon per row. Every row used to fall through to the generic info
-     * glyph, so six of the eight looked identical. */
+    /* One icon per row. */
     static const int icons[EVO_SETTINGS_COUNT] = {
-        EVO_IC_SETTINGS, EVO_IC_RESUME, EVO_IC_ASPECT, EVO_IC_SUBTITLES,
-        EVO_IC_TOOLS,    EVO_IC_FOLDER, EVO_IC_PALETTE, EVO_IC_TRASH
+        EVO_IC_SETTINGS,  EVO_IC_RESUME, EVO_IC_ASPECT, EVO_IC_SUBTITLES,
+        EVO_IC_SUBTITLES, EVO_IC_TOOLS,  EVO_IC_FOLDER, EVO_IC_PALETTE,
+        EVO_IC_TRASH
     };
 
     static const char *titles[EVO_SETTINGS_COUNT] = {
@@ -14386,6 +14473,7 @@ void draw_settings_screen(uint32_t *fb)
         "RESUME PLAYBACK",
         "DEFAULT ASPECT RATIO",
         "AUTO-DETECT SUBTITLES",
+        "DEFAULT SUBTITLE SIZE",
         "DEVELOPER MODE",
         "FOLDERS FIRST",
         "THEME",
@@ -14424,14 +14512,19 @@ void draw_settings_screen(uint32_t *fb)
               time(NULL) <= prospero_uninstall_confirm_until)
                  ? "PRESS X TO CONFIRM" : "REMOVES MEDIA TILE");
 
+    const char *sub_size_str =
+        prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+        prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM";
+
     details[0] = profile_value;
     details[1] = prospero_resume_playback_enabled ? "ON" : "OFF";
     details[2] = view_value;
     details[3] = prospero_auto_subtitles_enabled ? "ON" : "OFF";
-    details[4] = show_debug_overlay ? "ON" : "OFF";
-    details[5] = evo_sort_folders_first ? "ON" : "OFF";
-    details[6] = theme_value;
-    details[7] = uninstall_value;
+    details[4] = sub_size_str;
+    details[5] = show_debug_overlay ? "ON" : "OFF";
+    details[6] = evo_sort_folders_first ? "ON" : "OFF";
+    details[7] = theme_value;
+    details[8] = uninstall_value;
 
     for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
         evo_settings_rows[i].title        = titles[i];
@@ -14443,8 +14536,8 @@ void draw_settings_screen(uint32_t *fb)
         evo_settings_rows[i].swatch_count = 0;
     }
 
-    evo_settings_rows[6].swatches     = theme_swatches;   /* THEME */
-    evo_settings_rows[6].swatch_count = 3;
+    evo_settings_rows[7].swatches     = theme_swatches;   /* THEME */
+    evo_settings_rows[7].swatch_count = 3;
 
     memset(&m, 0, sizeof(m));
     m.title    = "SETTINGS";
@@ -16335,20 +16428,18 @@ int main(void) {
                 toast("STATS", show_stats_for_nerds ? "ON" : "OFF");
             }
 
-            if (pressed & PS5_PAD_BUTTON_SQUARE && screen == 2) {
-                /* Media Info is a 1080 panel over the video: leave the 4K
-                 * surface and hold the clock, remembering both. */
+            if (pressed & PS5_PAD_BUTTON_SQUARE) {
+                if (screen == 2) {
+                    /* Media Info is a 1080 panel over the video: leave the 4K
+                     * surface and hold the clock, remembering both. */
 #if PP_BACKEND_ENABLED
-                pp_product_overlay_enter();
+                    pp_product_overlay_enter();
 #endif
-                screen = SCREEN_MEDIA_INFO;
+                    screen = SCREEN_MEDIA_INFO;
+                } else if (screen == SCREEN_SUBTITLE_PICKER) {
+                    evo_subs_cycle_size();
+                }
             }
-
-            
-
-
-            
-
 
             if (
                 screen == 1 &&
@@ -16371,6 +16462,11 @@ int main(void) {
             if (pressed & PS5_PAD_BUTTON_TRIANGLE &&
                 screen == SCREEN_TEXT_READER) {
                 evo_reader_cycle_face();
+            }
+
+            if (pressed & PS5_PAD_BUTTON_TRIANGLE &&
+                screen == SCREEN_SUBTITLE_PICKER) {
+                evo_subs_cycle_size();
             }
 
             if (pressed & PS5_PAD_BUTTON_TRIANGLE && screen == 2) {
@@ -16453,7 +16549,9 @@ int main(void) {
             }
 
             if (evo_input_fired(&evo_pad_state, EVO_ACT_LEFT)) {
-                if (screen == SCREEN_PLAYER) {
+                if (screen == SCREEN_SUBTITLE_PICKER) {
+                    evo_subs_step_size(-1);
+                } else if (screen == SCREEN_PLAYER) {
                     prospero_scrub_move(-10.0);
                 } else if (screen == SCREEN_MAIN_MENU) {
                     evo_launch_nav(-1, 0);
@@ -16472,7 +16570,9 @@ int main(void) {
             }
 
             if (evo_input_fired(&evo_pad_state, EVO_ACT_RIGHT)) {
-                if (screen == SCREEN_PLAYER) {
+                if (screen == SCREEN_SUBTITLE_PICKER) {
+                    evo_subs_step_size(+1);
+                } else if (screen == SCREEN_PLAYER) {
                     prospero_scrub_move(10.0);
                 } else if (screen == SCREEN_MAIN_MENU) {
                     evo_launch_nav(+1, 0);

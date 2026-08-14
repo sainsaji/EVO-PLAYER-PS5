@@ -832,15 +832,14 @@ void evo_screen_info(uint32_t *fb, const evo_info_model *m)
 int evo_screen_picker_capacity(void)
 {
     /*
-     * Derived from the tallest panel that still leaves the video visible
-     * around it, rather than a hardcoded row count that drifts the moment
-     * the pitch changes.
+     * Derived from the tallest panel that still leaves the subtitle preview
+     * visible below it, so size switching is immediately apparent.
      */
-    int max_body = EVO_SCREEN_H - 180 - EVO_PICKER_HEAD - EVO_PICKER_FOOT;
+    int max_body = EVO_SCREEN_H - 360 - EVO_PICKER_HEAD - EVO_PICKER_FOOT;
     int rows     = max_body / EVO_PICKER_PITCH;
 
-    if (rows < 3)  rows = 3;
-    if (rows > 10) rows = 10;
+    if (rows < 3) rows = 3;
+    if (rows > 7) rows = 7;
 
     return rows;
 }
@@ -851,9 +850,10 @@ void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
     const evo_theme *th  = evo_theme_current();
     const int cap = evo_screen_picker_capacity();
     int shown, h, x, y, row_y, i;
-    const evo_hint hints[2] = {
-        { EVO_GLYPH_CROSS,  "SELECT" },
-        { EVO_GLYPH_CIRCLE, "BACK"   }
+    const evo_hint hints[3] = {
+        { EVO_GLYPH_CROSS,    "SELECT" },
+        { EVO_GLYPH_TRIANGLE, "SIZE"   },
+        { EVO_GLYPH_CIRCLE,   "BACK"   }
     };
 
     if (!m || !f) return;
@@ -863,7 +863,11 @@ void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
 
     h = EVO_PICKER_HEAD + shown * EVO_PICKER_PITCH + EVO_PICKER_FOOT;
     x = (EVO_SCREEN_W - EVO_PICKER_W) / 2;
-    y = (EVO_SCREEN_H - h) / 2;
+    if (m->preview_face >= 0) {
+        y = 110;
+    } else {
+        y = (EVO_SCREEN_H - h) / 2;
+    }
 
     /* Same reasoning as the dialog: scrim, never clear. */
     evo_ui_vgrad_over(fb, 0, 0, EVO_SCREEN_W, EVO_SCREEN_H,
@@ -956,7 +960,7 @@ void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
         int hy = y + h - EVO_PICKER_FOOT + 16;
         int n;
 
-        for (n = 0; n < 2; n++) {
+        for (n = 0; n < 3; n++) {
             evo_glyph_tinted(fb, hx, hy, hints[n].glyph, th->text_muted);
             hx += EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP;
 
@@ -966,6 +970,61 @@ void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
                      hints[n].label, th->text_muted, EVO_FACE_SMALL);
 
             hx += evo_text_w(hints[n].label, EVO_FACE_SMALL) + 34;
+        }
+    }
+
+    /*
+     * Subtitle preview below the picker card so changes in size are immediately
+     * visible with authentic subtitle outline and shadow styling.
+     */
+    if (m->preview_face >= 0) {
+        int face = m->preview_face;
+        int line_spacing = (face == EVO_FACE_SUB)   ? 56 :
+                           (face == EVO_FACE_TITLE) ? 96 : 76;
+
+        const char *line1 = "Welcome to EVO Player on PlayStation 5";
+        const char *line2 = (face == EVO_FACE_SUB)   ? "Subtitle size: SMALL" :
+                            (face == EVO_FACE_TITLE) ? "Subtitle size: LARGE" :
+                                                       "Subtitle size: MEDIUM";
+        const char *lines[2];
+        int line_count = 2;
+
+        if (m->preview_text && *m->preview_text) {
+            lines[0] = m->preview_text;
+            line_count = 1;
+        } else {
+            lines[0] = line1;
+            lines[1] = line2;
+        }
+
+        /* Subtle preview eyebrow */
+        evo_text_centre(fb, EVO_SCREEN_W / 2, y + h + 24,
+                        "SUBTITLE PREVIEW", th->text_muted, EVO_FACE_SMALL);
+
+        /* Center lines vertically in the remaining space below the label */
+        int preview_area_top = y + h + 54;
+        int preview_area_bot = EVO_SCREEN_H - 40;
+        int center_y = (preview_area_top + preview_area_bot) / 2;
+        int first_y = center_y - ((line_count - 1) * line_spacing) / 2;
+
+        for (int li = 0; li < line_count; li++) {
+            const char *line = lines[li];
+            int tw = evo_text_w(line, (evo_face)face);
+            int lx = (EVO_SCREEN_W - tw) / 2;
+            if (lx < 0) lx = 0;
+            int ly = first_y + li * line_spacing;
+
+            /* Soft lower shadow */
+            evo_text(fb, lx + 2, ly + 3, line, 0xBE000000, (evo_face)face);
+
+            /* Thin outline around letters */
+            evo_text(fb, lx - 2, ly,     line, 0xF5000000, (evo_face)face);
+            evo_text(fb, lx + 2, ly,     line, 0xF5000000, (evo_face)face);
+            evo_text(fb, lx,     ly - 2, line, 0xF5000000, (evo_face)face);
+            evo_text(fb, lx,     ly + 2, line, 0xF5000000, (evo_face)face);
+
+            /* Main text */
+            evo_text(fb, lx,     ly,     line, 0xFFFAFCFF, (evo_face)face);
         }
     }
 }
