@@ -314,7 +314,8 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 
         /* More workers on wide UHD frames (was 4 — under-used CPU) */
         if (pb->out_w * pb->out_h >= 3840u * 1600u)
-            v8_workers = 12;
+            v8_workers = 8;
+
 
         t0 = now_us();
         rc = pp_compute_pipeline_convert(
