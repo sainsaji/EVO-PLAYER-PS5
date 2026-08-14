@@ -2,13 +2,13 @@
 #include "evo_draw.h"
 
 static const evo_section_info SECTIONS[EVO_SECTION_COUNT] = {
-    { "HOME",      "Back to the launch screen",          EVO_IC_HOME,     EVO_SCREEN_LAUNCH    },
-    { "BROWSE",    "Videos and folders on USB storage",  EVO_IC_USB,      EVO_SCREEN_BROWSER   },
-    { "RECENT",    "Pick up where you left off",         EVO_IC_RECENT,   EVO_SCREEN_RECENT    },
-    { "FAVORITES", "Media you saved for later",          EVO_IC_FAVORITE, EVO_SCREEN_FAVORITES },
-    { "SETTINGS",  "Playback profiles and preferences",  EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS  },
-    { "TOOLS",     "Reports and diagnostics",      EVO_IC_TOOLS,    EVO_SCREEN_TOOLS     },
-    { "ABOUT",     "Credits and project info",  EVO_IC_ABOUT,    EVO_SCREEN_ABOUT     }
+    { "HOME",      "Back to the launch screen",          EVO_IC_HOME,     EVO_SCREEN_LAUNCH     },
+    { "BROWSE",    "Videos and folders on USB storage",  EVO_IC_USB,      EVO_SCREEN_BROWSER    },
+    { "RECENT",    "Pick up where you left off",         EVO_IC_RECENT,   EVO_SCREEN_RECENT     },
+    { "FAVORITES", "Media you saved for later",          EVO_IC_FAVORITE, EVO_SCREEN_FAVORITES  },
+    { "EMBY",      "Emby and media server streaming",    EVO_IC_EMBY,     EVO_SCREEN_EMBY_SETUP },
+    { "SETTINGS",  "Playback profiles and preferences",  EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS   },
+    { "ABOUT",     "Credits and project info",           EVO_IC_ABOUT,    EVO_SCREEN_ABOUT      }
 };
 
 const evo_section_info *evo_section_get(evo_section s)
@@ -20,24 +20,31 @@ const evo_section_info *evo_section_get(evo_section s)
 evo_section evo_screen_section(evo_screen_id id)
 {
     switch (id) {
-        case EVO_SCREEN_LAUNCH:    return EVO_SECTION_HOME;
-        case EVO_SCREEN_BROWSER:   return EVO_SECTION_BROWSER;
-        case EVO_SCREEN_RECENT:    return EVO_SECTION_RECENT;
-        case EVO_SCREEN_FAVORITES: return EVO_SECTION_FAVORITES;
+        case EVO_SCREEN_LAUNCH:      return EVO_SECTION_HOME;
+        case EVO_SCREEN_BROWSER:     return EVO_SECTION_BROWSER;
+        case EVO_SCREEN_RECENT:      return EVO_SECTION_RECENT;
+        case EVO_SCREEN_FAVORITES:   return EVO_SECTION_FAVORITES;
 
-        /* The profile picker is a child of settings and keeps SETTINGS lit,
-         * so descending into it does not make the rail jump. */
+        case EVO_SCREEN_EMBY_SETUP:
+        case EVO_SCREEN_EMBY_BROWSE: return EVO_SECTION_EMBY;
+
+        /* Settings and its children keep SETTINGS lit on the rail. */
         case EVO_SCREEN_SETTINGS:
-        case EVO_SCREEN_PROFILE:   return EVO_SECTION_SETTINGS;
-
-        case EVO_SCREEN_TOOLS:     return EVO_SECTION_TOOLS;
+        case EVO_SCREEN_PROFILE:
+        case EVO_SCREEN_TOOLS:
+        case EVO_SCREEN_SETTINGS_PLAYBACK:
+        case EVO_SCREEN_SETTINGS_SUBTITLES:
+        case EVO_SCREEN_SETTINGS_INTERFACE:
+        case EVO_SCREEN_SETTINGS_SYSTEM:
+        case EVO_SCREEN_SURROUND_TEST:
+            return EVO_SECTION_SETTINGS;
 
         /* The changelog is a child of About, and keeps ABOUT lit for the same
          * reason the profile picker keeps SETTINGS lit. */
         case EVO_SCREEN_ABOUT:
-        case EVO_SCREEN_CHANGELOG: return EVO_SECTION_ABOUT;
+        case EVO_SCREEN_CHANGELOG:   return EVO_SECTION_ABOUT;
 
-        default:                   return EVO_SECTION_NONE;
+        default:                     return EVO_SECTION_NONE;
     }
 }
 

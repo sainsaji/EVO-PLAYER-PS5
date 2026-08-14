@@ -397,6 +397,23 @@ def ctrl_stick(side):
     ]
 
 
+def icon_emby():
+    # Emby's official logo mark:
+    # Outer play-triangle polygon with an inner solid play chevron/arrow.
+    return [
+        shape("poly", [
+            (C - 16.0, C - 23.0),
+            (C + 23.0, C),
+            (C - 16.0, C + 23.0),
+        ], stroke=STROKE),
+        shape("poly", [
+            (C - 6.5, C - 10.0),
+            (C + 10.5, C),
+            (C - 6.5, C + 10.0),
+        ]),
+    ]
+
+
 # (macro prefix, shape function, pixel size)
 ICONS = [
     ("EVO_ICON_BROWSE_USB", icon_usb, SIZE),
@@ -415,6 +432,7 @@ ICONS = [
     ("EVO_ICON_TRASH", icon_trash, SIZE),
     ("EVO_ICON_HOME", icon_home, SIZE),
     ("EVO_ICON_LOGO", icon_logo, SIZE),
+    ("EVO_ICON_EMBY", icon_emby, SIZE),
     # Controller prompts, 48px, same names as the RR_CONTROL_* they replace.
     ("EVO_CTRL_X", ctrl_x, CTRL),
     ("EVO_CTRL_CIRCLE", ctrl_circle, CTRL),
@@ -459,6 +477,7 @@ ICON_TABLE = [
     "EVO_ICON_TRASH",           # 12
     "EVO_ICON_HOME",            # 13
     "EVO_ICON_LOGO",            # 14
+    "EVO_ICON_EMBY",            # 15
 ]
 
 CTRL_TABLE = [

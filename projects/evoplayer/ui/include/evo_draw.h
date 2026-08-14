@@ -65,7 +65,9 @@ enum {
     EVO_IC_HOME      = 13,
     /* The application mark. Not a section icon - it is the app's own logo,
      * drawn at the top of the rail and in the launch header. */
-    EVO_IC_LOGO      = 14
+    EVO_IC_LOGO      = 14,
+    /* The Emby streaming service icon mark. */
+    EVO_IC_EMBY      = 15
 };
 
 /* Controller glyph indices, matching rr_control(). */

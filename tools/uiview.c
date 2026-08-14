@@ -31,6 +31,7 @@
 #include "evo_theme.h"
 #include "evo_ui.h"
 #include "evo_widgets.h"
+#include "evo_keyboard.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -48,6 +49,10 @@
 /* After both atlases - it reads RR_* and EVO_PUNCT_* directly. */
 #include "evo_font.h"
 #include "evo_textreader.h"
+#include "evo_feedback.h"
+
+void evo_feedback(evo_feedback_kind kind) { (void)kind; }
+void evo_feedback_for_move(int moved) { (void)moved; }
 
 /* The reader measures with the same tables it draws with. */
 static int reader_measure(const char *s, int len, int face)
@@ -439,39 +444,84 @@ static void render_list(const char *which, int sel, int rail_focused,
     memset(&m, 0, sizeof(m));
 
     if (!strcmp(which, "settings")) {
-        static const char *t[] = { "PLAYBACK PROFILE","RESUME PLAYBACK",
-            "DEFAULT ASPECT RATIO","AUTO-DETECT SUBTITLES","DEFAULT SUBTITLE SIZE",
-            "DEVELOPER MODE","FOLDERS FIRST","THEME","REMOVE HOME TILE" };
-        static char theme_val[64];
-        static const char *d[9];
-        static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_RESUME,EVO_IC_ASPECT,
-            EVO_IC_SUBTITLES,EVO_IC_SUBTITLES,EVO_IC_TOOLS,EVO_IC_FOLDER,
-            EVO_IC_PALETTE,EVO_IC_TRASH };
-        static uint32_t sw[3];
-        const evo_theme *cur = evo_theme_current();
-
-        /* Report the theme actually being rendered. A hardcoded "CARBON"
-         * here rendered under MIDNIGHT, which makes the fixture lie about
-         * the one row whose job is to name the theme. */
-        snprintf(theme_val, sizeof(theme_val), "%s  -  %d OF %d",
-                 evo_theme_name(evo_theme_index()),
-                 evo_theme_index() + 1, evo_theme_count());
-
-        d[0]="Performance"; d[1]="ON"; d[2]="FIT"; d[3]="ON";
-        d[4]="MEDIUM"; d[5]="OFF"; d[6]="ON"; d[7]=theme_val; d[8]="REMOVES MEDIA TILE";
-
-        n = 9;
+        static const char *t[] = {
+            "PLAYBACK & VIDEO",
+            "SUBTITLES",
+            "INTERFACE & CONTROLS",
+            "SYSTEM & DIAGNOSTICS"
+        };
+        static const char *d[] = {
+            "PROFILE, ASPECT RATIO & RESUME",
+            "AUTO-DETECT & DEFAULT SIZING",
+            "THEMES, SOUNDS, LIGHTBAR & SORTING",
+            "DEVELOPER TOOLS & MEDIA TILE"
+        };
+        static const int ic[] = {
+            EVO_IC_RESUME,
+            EVO_IC_SUBTITLES,
+            EVO_IC_PALETTE,
+            EVO_IC_TOOLS
+        };
+        n = 4;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
         }
+        m.title="SETTINGS"; m.subtitle="APPLICATION & PLAYBACK PREFERENCES";
+        m.section=EVO_SECTION_SETTINGS;
+    } else if (!strcmp(which, "settings_playback")) {
+        static const char *t[] = { "PLAYBACK PROFILE","DEFAULT ASPECT RATIO","RESUME PLAYBACK","SURROUND SOUND TEST" };
+        static const char *d[] = { "Performance","FIT","ON","5.1 & 7.1 SPEAKER CHANNEL VERIFICATION" };
+        static const int ic[] = { EVO_IC_SETTINGS, EVO_IC_ASPECT, EVO_IC_RESUME, EVO_IC_RESUME };
+        n = 4;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].chevron=1; e[i].progress=-1;
+        }
+        m.title="PLAYBACK & VIDEO"; m.subtitle="SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
+        m.section=EVO_SECTION_SETTINGS;
+    } else if (!strcmp(which, "settings_subtitles")) {
+        static const char *t[] = { "AUTO-DETECT SUBTITLES","DEFAULT SUBTITLE SIZE" };
+        static const char *d[] = { "ON","MEDIUM" };
+        static const int ic[] = { EVO_IC_SUBTITLES, EVO_IC_SUBTITLES };
+        n = 2;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].chevron=1; e[i].progress=-1;
+        }
+        m.title="SUBTITLES"; m.subtitle="SETTINGS  -  DETECTION & DEFAULT SIZING";
+        m.section=EVO_SECTION_SETTINGS;
+    } else if (!strcmp(which, "settings_interface")) {
+        static const char *t[] = { "THEME","NAVIGATION SOUNDS","CONTROLLER LIGHTBAR","FOLDERS FIRST" };
+        static char theme_val[64];
+        static const char *d[4];
+        static const int ic[] = { EVO_IC_PALETTE, EVO_IC_SUBTITLES, EVO_IC_PALETTE, EVO_IC_FOLDER };
+        static uint32_t sw[3];
+        const evo_theme *cur = evo_theme_current();
 
-        /* Exercise the THEME row's swatches, as the real settings screen
-         * does - a fixture that skips them cannot show they render. */
+        snprintf(theme_val, sizeof(theme_val), "%s  -  %d OF %d",
+                 evo_theme_name(evo_theme_index()),
+                 evo_theme_index() + 1, evo_theme_count());
+        d[0] = theme_val; d[1] = "ON"; d[2] = "THEME ACCENT"; d[3] = "ON";
+        n = 4;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].chevron=1; e[i].progress=-1;
+        }
         sw[0] = cur->accent; sw[1] = cur->surface; sw[2] = cur->bg_top;
-        e[7].swatches = sw; e[7].swatch_count = 3;
-
-        m.title="SETTINGS"; m.subtitle="PLAYBACK AND APPLICATION PREFERENCES";
+        e[0].swatches = sw; e[0].swatch_count = 3;
+        m.title="INTERFACE & CONTROLS"; m.subtitle="SETTINGS  -  THEMES, SOUNDS & CONTROLS";
+        m.section=EVO_SECTION_SETTINGS;
+    } else if (!strcmp(which, "settings_system")) {
+        static const char *t[] = { "COMPATIBILITY REPORT","DEBUG OVERLAY","REMOVE HOME TILE" };
+        static const char *d[] = { "WRITES A CODEC REPORT TO USB0","OFF","REMOVES MEDIA TILE" };
+        static const int ic[] = { EVO_IC_TOOLS, EVO_IC_ASPECT, EVO_IC_TRASH };
+        n = 3;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].chevron=1; e[i].progress=-1;
+        }
+        m.title="SYSTEM & DIAGNOSTICS"; m.subtitle="SETTINGS  -  DIAGNOSTICS & SYSTEM MANAGEMENT";
         m.section=EVO_SECTION_SETTINGS;
     } else if (!strcmp(which, "tools")) {
         static const char *t[] = { "COMPATIBILITY REPORT","DEBUG OVERLAY",
@@ -485,8 +535,38 @@ static void render_list(const char *which, int sel, int rail_focused,
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
         }
-        m.title="TOOLS"; m.subtitle="DIAGNOSTICS AND CONTROLLER FEEDBACK";
-        m.section=EVO_SECTION_TOOLS;
+        m.title="DEVELOPER TOOLS"; m.subtitle="DIAGNOSTICS & SYSTEM REPORTS";
+        m.section=EVO_SECTION_SETTINGS;
+    } else if (!strcmp(which, "emby_setup")) {
+        static const char *t[] = { "SERVER HOST","SERVER PORT","ACCOUNT USERNAME",
+            "CONNECTION STATUS","EXPLORE MEDIA LIBRARIES" };
+        static const char *d[] = { "192.168.0.11  (PRESS X TO EDIT)",
+            "8096  (PRESS X TO EDIT)",
+            "bin  (PRESS X TO EDIT)",
+            "CONNECTED (PRESS X TO DISCONNECT)",
+            "BROWSE MOVIES, TV SHOWS & COLLECTIONS" };
+        static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_TOOLS,EVO_IC_RESUME,
+            EVO_IC_SUBTITLES,EVO_IC_FOLDER };
+        n = 5;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
+            e[i].chevron=1; e[i].progress=-1;
+        }
+        m.title="EMBY MEDIA SERVER"; m.subtitle="STREAMING ADDON CONFIGURATION";
+        m.section=EVO_SECTION_EMBY;
+    } else if (!strcmp(which, "emby_browse")) {
+        static const char *t[] = { "Movies","TV Shows","Anime Collection","Music Videos" };
+        static const char *d[] = { "LIBRARY - movies","LIBRARY - tvshows","LIBRARY - anime","LIBRARY - musicvideos" };
+        n = 4;
+        for (int i = 0; i < n; i++) {
+            e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=EVO_IC_FOLDER;
+            e[i].chevron=1; e[i].progress=-1;
+        }
+        m.title="EMBY BROWSER"; m.subtitle="EMBY  -  ROOT LIBRARIES";
+        m.section=EVO_SECTION_EMBY;
+        m.empty_title="NO ITEMS FOUND";
+        m.empty_hint="PRESS CIRCLE TO GO BACK";
+        m.empty_icon=EVO_IC_FOLDER;
     } else if (!strcmp(which, "recent")) {
         static const char *t[] = { "leftbehind-bts", ("A Very Long Documentary "
             "Title That Must Ellipsise"), "DTS 5.1", "Dolby TrueHD 7.1", "AAC 5.1" };
@@ -722,6 +802,169 @@ static void render_toast(evo_toast_kind kind)
     evo_widget_toast(g_fb, &t);
 }
 
+static void render_surround_studio(int sel, int rail, int rail_sel)
+{
+    const evo_theme *th = evo_theme_current();
+    evo_page page;
+    memset(&page, 0, sizeof(page));
+    page.title = "SURROUND SOUND STUDIO";
+    page.subtitle = "CALIBRATION  -  7.1 SPEAKER SYSTEM (8 CHANNELS)";
+    page.section = EVO_SECTION_SETTINGS;
+    page.rail_focused = rail;
+    page.rail_index = rail_sel;
+
+    static const evo_hint hints[] = {
+        { EVO_GLYPH_CROSS,    "TEST / ACTIVATE" },
+        { EVO_GLYPH_SQUARE,   "5.1 / 7.1 MODE" },
+        { EVO_GLYPH_TRIANGLE, "SILENCE" },
+        { EVO_GLYPH_DPAD,     "NAVIGATE" },
+        { EVO_GLYPH_CIRCLE,   "BACK" }
+    };
+
+    evo_chrome_begin(g_fb, &page);
+
+    int mon_x = 130, mon_y = 160, mon_w = 460, mon_h = 220;
+    evo_ui_round_rect(g_fb, mon_x, mon_y, mon_w, mon_h, 18,
+                      th->surface_alt, th->bg_bottom,
+                      th->border, 1,
+                      0x44000000, 16);
+
+    evo_text(g_fb, mon_x + 24, mon_y + 18, "SPEAKER CALIBRATION MONITOR", th->accent, EVO_FACE_SMALL);
+    evo_text(g_fb, mon_x + 24, mon_y + 48, "FRONT LEFT (FL)", th->accent, EVO_FACE_MENU);
+    evo_text(g_fb, mon_x + 24, mon_y + 92, "TONE FREQ: 330.0 HZ (E4)", th->text_secondary, EVO_FACE_SMALL);
+    evo_text(g_fb, mon_x + 24, mon_y + 124, "PS5 AUDIO OUT: S16_8CH (CH 0)", th->text_muted, EVO_FACE_SMALL);
+    evo_text(g_fb, mon_x + 24, mon_y + 158, "STATUS: [ ACTIVE NOW ]", th->accent, EVO_FACE_SMALL);
+
+    static const struct {
+        const char *label;
+        const char *sub;
+    } actions[5] = {
+        { "AUTO TEST 5.1", "6-CHANNEL CALIBRATION" },
+        { "AUTO TEST 7.1", "8-CHANNEL CALIBRATION" },
+        { "360 ROTATION SWEEP", "CIRCULAR PERIMETER PAN" },
+        { "SPEAKER LAYOUT", "SWITCH 5.1 / 7.1" },
+        { "SILENCE / STOP", "STOP ALL OUTPUT" }
+    };
+
+    int act_y = 400;
+    for (int i = 0; i < 5; i++) {
+        int is_sel = (!rail && sel == i);
+        int cur_y = act_y + i * 80;
+        uint32_t fill_top = is_sel ? th->surface_sel : th->surface;
+        uint32_t fill_bot = is_sel ? th->surface_sel_alt : th->surface_alt;
+        uint32_t border = is_sel ? th->border_sel : th->border;
+
+        evo_ui_round_rect(g_fb, mon_x, cur_y, mon_w, 72, 14,
+                          fill_top, fill_bot, border, is_sel ? 2 : 1,
+                          is_sel ? 0x66000000 : 0x22000000, is_sel ? 14 : 6);
+
+        if (is_sel) {
+            evo_ui_round_rect(g_fb, mon_x + 3, cur_y + 14, 5, 44, 3,
+                              th->accent, th->accent, th->accent, 0, 0, 0);
+        }
+
+        evo_text(g_fb, mon_x + 24, cur_y + 12, actions[i].label, is_sel ? th->text_primary : th->text_secondary, EVO_FACE_MENU);
+        evo_text(g_fb, mon_x + 24, cur_y + 44, (i == 3) ? "CURRENT: 7.1 SURROUND" : actions[i].sub, is_sel ? th->accent : th->text_muted, EVO_FACE_SMALL);
+    }
+
+    int stage_x = 610, stage_y = 160, stage_w = 1180, stage_h = 760;
+    evo_ui_round_rect(g_fb, stage_x, stage_y, stage_w, stage_h, 24,
+                      th->surface_alt, th->bg_top,
+                      th->border, 1,
+                      0x55000000, 20);
+
+    int scr_w = 420, scr_h = 14;
+    int scr_x = stage_x + (stage_w - scr_w) / 2;
+    int scr_y = stage_y + 24;
+    evo_ui_round_rect(g_fb, scr_x, scr_y, scr_w, scr_h, 7,
+                      th->accent, th->accent_soft, th->accent, 1,
+                      0x4419d8ff, 10);
+    evo_text(g_fb, scr_x + (scr_w - evo_text_w("FRONT DISPLAY / TV SCREEN", EVO_FACE_SMALL)) / 2,
+             scr_y + 22, "FRONT DISPLAY / TV SCREEN", th->text_muted, EVO_FACE_SMALL);
+
+    int couch_cx = stage_x + stage_w / 2;
+    int couch_cy = stage_y + 390;
+
+    evo_ui_circle(g_fb, couch_cx, couch_cy, 120, 0x14FFFFFF);
+    evo_ui_circle(g_fb, couch_cx, couch_cy, 230, 0x0BFFFFFF);
+    evo_ui_circle(g_fb, couch_cx, couch_cy, 340, 0x06FFFFFF);
+
+    int couch_w = 130, couch_h = 66;
+    evo_ui_round_rect(g_fb, couch_cx - couch_w / 2, couch_cy - couch_h / 2, couch_w, couch_h, 14,
+                      th->surface, th->surface_alt, th->border, 1, 0x44000000, 8);
+    evo_text(g_fb, couch_cx - evo_text_w("LISTENER", EVO_FACE_MENU) / 2,
+             couch_cy - 20, "LISTENER", th->text_primary, EVO_FACE_MENU);
+    evo_text(g_fb, couch_cx - evo_text_w("SWEET SPOT", EVO_FACE_SMALL) / 2,
+             couch_cy + 12, "SWEET SPOT", th->accent, EVO_FACE_SMALL);
+
+    static const struct {
+        const char *name;
+        const char *label;
+        double hz;
+        int dx;
+        int dy;
+        int w;
+        int h;
+        int is_act;
+    } spk[8] = {
+        { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 0 },
+        { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 0 },
+        { "FRONT LEFT",   "FL",  330.0, -460, -180, 150, 82, 1 },
+        { "FRONT RIGHT",  "FR",  440.0,  310, -180, 150, 82, 0 },
+        { "SIDE LEFT",    "SL", 1109.0, -510,   10, 150, 82, 0 },
+        { "SIDE RIGHT",   "SR", 1319.0,  360,   10, 150, 82, 0 },
+        { "BACK LEFT",    "BL",  659.0, -380,  200, 150, 82, 0 },
+        { "BACK RIGHT",   "BR",  880.0,  230,  200, 150, 82, 0 }
+    };
+
+    int is_51 = 0; /* Test 7.1 layout with all 8 speakers */
+
+    for (int i = 0; i < 8; i++) {
+        if (is_51 && (!strcmp(spk[i].label, "SL") || !strcmp(spk[i].label, "SR"))) {
+            continue;
+        }
+        int sx = couch_cx + spk[i].dx;
+        int sy = couch_cy + spk[i].dy;
+        int sw = spk[i].w;
+        int sh = spk[i].h;
+        int is_act = spk[i].is_act;
+        int is_sel = (!rail && sel == (i + 5));
+
+        if (is_act) {
+            evo_ui_circle(g_fb, sx + sw / 2, sy + sh / 2, 75, 0x3319D8FF);
+            evo_ui_circle(g_fb, sx + sw / 2, sy + sh / 2, 105, 0x1A19D8FF);
+        }
+
+        uint32_t fill_t = is_act ? 0xDD004466 : (is_sel ? th->surface_sel : th->surface);
+        uint32_t fill_b = is_act ? 0xDD002233 : (is_sel ? th->surface_sel_alt : th->surface_alt);
+        uint32_t border = is_act ? 0xFF00E5FF : (is_sel ? th->border_sel : th->border);
+
+        evo_ui_round_rect(g_fb, sx, sy, sw, sh, 16,
+                          fill_t, fill_b, border, (is_act || is_sel) ? 2 : 1,
+                          is_act ? 0x8819D8FF : (is_sel ? 0x66000000 : 0x22000000),
+                          is_act ? 18 : (is_sel ? 12 : 6));
+
+        if (is_sel) {
+            evo_ui_round_rect(g_fb, sx + 4, sy + 14, 5, sh - 28, 3,
+                              th->accent, th->accent, th->accent, 0, 0, 0);
+        }
+
+        uint32_t txt_c = is_act ? 0xFF00FFFF : (is_sel ? th->text_primary : th->text_secondary);
+        evo_text(g_fb, sx + 20, sy + 14, spk[i].label, txt_c, EVO_FACE_MENU);
+
+        char hz_str[32];
+        if (is_act) {
+            snprintf(hz_str, sizeof(hz_str), "%.0f Hz [ON]", spk[i].hz);
+        } else {
+            snprintf(hz_str, sizeof(hz_str), "%.0f Hz", spk[i].hz);
+        }
+        evo_text(g_fb, sx + 20, sy + 46, hz_str,
+                 is_act ? th->accent : th->text_muted,
+                 EVO_FACE_SMALL);
+    }
+
+    evo_chrome_end(g_fb, &page, hints, 5);
+}
 
 /*
  * Subtitle picker.
@@ -933,9 +1176,20 @@ static void render_reader(int sel)
     evo_text_free(&doc);
 }
 
+static void render_keyboard(void)
+{
+    render_list("emby_setup", 0, 0, 0, 0);
+    evo_keyboard_open("ENTER SERVER HOST IP OR DOMAIN", "192.168.0.11", 64, NULL, NULL);
+    evo_screen_keyboard(g_fb);
+}
+
 static const char *SCREENS[] = { "launch","browse","recent","favorites",
-                                 "settings","profile","tools","about",
-                                 "changelog",
+                                 "settings","settings_playback","settings_surround",
+                                 "settings_subtitles",
+                                 "settings_interface","settings_system",
+                                 "profile","tools","about",
+                                 "changelog","emby_setup","emby_browse",
+                                 "keyboard",
                                  "resume","finished","mediainfo","exitconfirm",
                                  "picker","picker_small","picker_medium","picker_large",
                                  "subs_small","subs_medium","subs_large",
@@ -961,6 +1215,8 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "subs_medium"))   render_subtitles(EVO_FACE_MENU);
     else if (!strcmp(screen, "subs_large"))    render_subtitles(EVO_FACE_TITLE);
     else if (!strcmp(screen, "reader"))        render_reader(sel);
+    else if (!strcmp(screen, "keyboard"))      render_keyboard();
+    else if (!strcmp(screen, "settings_surround")) render_surround_studio(sel, rail, rail_sel);
     else if (!strcmp(screen, "toast"))         render_toast(EVO_TOAST_INFO);
     else if (!strcmp(screen, "toastok"))       render_toast(EVO_TOAST_OK);
     else if (!strcmp(screen, "toasterror"))    render_toast(EVO_TOAST_ERROR);

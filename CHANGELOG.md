@@ -5,6 +5,34 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.6.0
+
+**Direct Emby streaming, on-screen virtual keyboard, and a dedicated Surround Sound Studio for 5.1 and 7.1 speaker calibration.**
+
+Download **`EVOPlayer-0.6.0-InstallTile.elf`** to register the Media tile on the home screen, or **`EVOPlayer-0.6.0-player-only.elf`** for homebrew app slot launch.
+
+### New — Emby Media Server Add-on
+
+- **Native Emby LAN streaming & browsing.** Connect directly to your local Emby server, browse media libraries with dynamic cover art and backdrops, and direct-stream video files without transcode overhead.
+- **On-screen Virtual Keyboard.** Full controller-driven keyboard with character, numeric, and symbol sets for convenient entering of server IP addresses, ports, usernames, and passwords.
+- **Playstate reporting.** Real-time playback progress and resume position synchronization back to Emby server.
+- **Custom Emby branding.** Dedicated section icon and navigation rail entry.
+
+### New — Surround Sound Studio
+
+- **360° Top-Down Soundstage Theater.** Bespoke visual calibration interface featuring a top-down view of listener sweet spot, concentric acoustic range rings, front display soundbar, and 8 positional speaker modules (`FL`, `FC`, `FR`, `LFE`, `SL`, `SR`, `BL`, `BR`).
+- **PS5 8-Channel Hardware Audio Output (`S16_8CH`).** Verified hardware tone generator with smooth 50ms attack/decay envelope fades to prevent audio clicking.
+- **Sequential 5.1 & 7.1 Auto-Calibration.** Automated channel sweep across each speaker with live frequency and status monitoring.
+- **360° Perimeter Rotation Sweep.** Continuous circular pan around the room perimeter to verify surround transitions.
+- **Dynamic 5.1 Speaker Hiding & 2D D-Pad Room Traversal.** Seamlessly hides inactive side speakers in 5.1 mode and adjusts D-pad traversal grid to navigate directly between active physical channels.
+
+### New & Improved — Settings & Subtitles
+
+- **Structured Settings Hierarchy.** Organized preferences into dedicated sub-sections: *Playback & Video*, *Subtitles*, *Interface & Controls*, *System & Hardware*, and *Developer Tools*.
+- **Default Subtitle Sizing.** Configurable and persistent default subtitle size preference (`SMALL`, `MEDIUM`, `LARGE`) with improved base scaling for high-resolution displays.
+
+---
+
 ## 0.5.0
 
 **If a previous release did nothing when you ran it, this is the fix.** The

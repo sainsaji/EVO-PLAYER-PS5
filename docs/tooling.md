@@ -227,7 +227,8 @@ Icons are described as vector shapes and rasterised from signed distance
 fields, so edges carry analytic coverage at any size.
 
 **To add an icon:** append to `ICONS` as `(macro_prefix, shape_fn, size)`, add
-its name to `ICON_TABLE`, and add a named constant in `ui/include/evo_draw.h`.
+its name to `ICON_TABLE`, and add a named constant in `ui/include/evo_draw.h`
+(such as `EVO_IC_LOGO`, `EVO_IC_HOME`, or `EVO_IC_EMBY`).
 There is no `switch` to update any more — the generator emits
 `EVO_ICON_TABLE`, and both the player and `tools/uiview.c` index it. That
 replaced three hand-written switches, one of which had already drifted and

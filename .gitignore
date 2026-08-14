@@ -135,3 +135,9 @@ samples/**/*.fdmdownload
 # via NID_DB_URL, so committing a copy is dead weight of exactly the kind this
 # repo has deleted before.
 tools/re/aerolib.csv
+
+# Local test environment, media fixtures & scratch
+emby_config/
+emby_media/
+scratch/
+
