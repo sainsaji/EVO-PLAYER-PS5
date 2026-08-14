@@ -45,11 +45,11 @@ mkdir -p "${OUT}"
 # -fsanitize builds are for finding races and overruns in the band splitting,
 # not for timing - they are several times slower and the numbers are
 # meaningless. Kept separate rather than mixed into the same run.
-FLAGS=(-O2 -Wall -Wextra -pthread
+FLAGS=(-O2 -Wall -Wextra -pthread -mavx2 -mfma
        -I"${PP}/include" -I"${EVO}")
 
 if (( SAN )); then
-    FLAGS=(-O1 -g -Wall -Wextra -pthread
+    FLAGS=(-O1 -g -Wall -Wextra -pthread -mavx2 -mfma
            -fsanitize=address,undefined
            -I"${PP}/include" -I"${EVO}")
     begin "building benchmark under ASan/UBSan"
@@ -57,7 +57,7 @@ elif (( TSAN )); then
     # ASan does not find data races, and the fused converter now carries a
     # persistent worker pool with a condition variable - exactly the code
     # where a race would be invisible until it corrupted a frame on hardware.
-    FLAGS=(-O1 -g -Wall -Wextra -pthread
+    FLAGS=(-O1 -g -Wall -Wextra -pthread -mavx2 -mfma
            -fsanitize=thread
            -I"${PP}/include" -I"${EVO}")
     begin "building benchmark under ThreadSanitizer"
@@ -67,12 +67,14 @@ fi
 
 clang "${FLAGS[@]}" \
     "${REPO_ROOT}/tools/bench_converter.c" \
+    "${PP}/src/pp_compute_pipeline.c" \
     "${PP}/src/pp_converter_fused.c" \
     "${PP}/src/pp_converter_parallel.c" \
     "${PP}/src/pp_converter.c" \
     "${PP}/src/tile_copy.c" \
     -lm -o "${OUT}/bench" \
     || die "benchmark build failed"
+
 
 ok "-> output/bench/bench"
 echo ""

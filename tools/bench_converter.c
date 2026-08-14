@@ -27,8 +27,10 @@
 
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
+#include "pp_compute_pipeline.h"
 #include "pp_frame.h"
 #include "pp_platform.h"
+
 
 #include <stdint.h>
 #include <stdio.h>
@@ -181,7 +183,22 @@ static int check_worker_consistency(const pp_frame *src, uint32_t w, uint32_t h)
         pp_converter_yuv420p_to_tiled_bgra_parallel(src, got, w, h, workers[i]);
         hh = plane_hash(got, n);
 
-        printf("  %d workers            hash %016llx  %s\n",
+        printf("  fused   %d workers    hash %016llx  %s\n",
+               workers[i], (unsigned long long)hh,
+               hh == ref_hash ? "match" : "*** MISMATCH ***");
+
+        if (hh != ref_hash) ok = 0;
+    }
+
+    /* Verify GPU Compute Pipeline produces bit-exact plane hashes */
+    for (i = 0; i < (int)(sizeof(workers) / sizeof(workers[0])); i++) {
+        uint64_t hh;
+
+        memset(got, 0, n * 4);
+        pp_compute_pipeline_convert(src, got, w, h, workers[i]);
+        hh = plane_hash(got, n);
+
+        printf("  compute %d workers    hash %016llx  %s\n",
                workers[i], (unsigned long long)hh,
                hh == ref_hash ? "match" : "*** MISMATCH ***");
 
@@ -213,6 +230,22 @@ static double bench_fused(const pp_frame *src, uint32_t w, uint32_t h,
     return (t1 - t0) / iters;
 }
 
+static double bench_compute(const pp_frame *src, uint32_t w, uint32_t h,
+                            int workers, int iters, uint32_t *dst)
+{
+    double t0, t1;
+    int i;
+
+    pp_compute_pipeline_convert(src, dst, w, h, workers);
+
+    t0 = now_ms();
+    for (i = 0; i < iters; i++)
+        pp_compute_pipeline_convert(src, dst, w, h, workers);
+    t1 = now_ms();
+
+    return (t1 - t0) / iters;
+}
+
 static double bench_linear(const pp_frame *src, uint32_t w, uint32_t h,
                            int workers, int iters, uint32_t *dst)
 {
@@ -235,9 +268,10 @@ static void run_size(uint32_t w, uint32_t h, int iters)
     test_frame tf;
     pp_frame   src;
     uint32_t  *dst_tiled;
+    uint32_t  *dst_compute;
     uint32_t  *dst_linear;
     const int  workers[] = { 1, 2, 4, 6, 8 };
-    double     base_fused = 0.0, base_linear = 0.0;
+    double     base_fused = 0.0, base_compute = 0.0;
     size_t     i;
 
     printf("\n=== %ux%u, %d iterations ===\n", w, h, iters);
@@ -248,15 +282,12 @@ static void run_size(uint32_t w, uint32_t h, int iters)
     }
     test_frame_bind(&tf, &src);
 
-    /* Two destinations: the fused path writes a tile-padded plane, the linear
-     * path writes a plain w*h*4 surface. Sharing one buffer would either
-     * over-allocate the linear case or under-allocate the tiled one - and
-     * under-allocating it is a heap overflow, confirmed with ASan. */
-    dst_tiled  = calloc(tiled_plane_pixels(w, h), 4);
-    dst_linear = calloc((size_t)w * h, 4);
+    dst_tiled   = calloc(tiled_plane_pixels(w, h), 4);
+    dst_compute = calloc(tiled_plane_pixels(w, h), 4);
+    dst_linear  = calloc((size_t)w * h, 4);
 
-    if (!dst_tiled || !dst_linear) {
-        free(dst_tiled); free(dst_linear); test_frame_free(&tf);
+    if (!dst_tiled || !dst_compute || !dst_linear) {
+        free(dst_tiled); free(dst_compute); free(dst_linear); test_frame_free(&tf);
         printf("  dst alloc failed\n");
         return;
     }
@@ -271,44 +302,43 @@ static void run_size(uint32_t w, uint32_t h, int iters)
         printf("\n  REFUSING TO REPORT TIMINGS - output differs by worker "
                "count.\n  Fix correctness first; a faster wrong answer is not "
                "faster.\n");
-        free(dst_tiled); free(dst_linear);
+        free(dst_tiled); free(dst_compute); free(dst_linear);
         test_frame_free(&tf);
         return;
     }
 
-    printf("\n %-8s %-14s %-9s %-14s %-9s\n",
-           "workers", "fused(tiled)", "vs 1thr", "linear(bgra)", "vs 1thr");
+    printf("\n %-8s %-12s %-8s %-12s %-8s %-10s %-12s\n",
+           "workers", "fused(cpu)", "vs 1thr", "compute(gpu)", "vs 1thr", "gpu vs cpu", "linear(bgra)");
 
     for (i = 0; i < sizeof(workers) / sizeof(workers[0]); i++) {
         double f = bench_fused(&src, w, h, workers[i], iters, dst_tiled);
+        double c = bench_compute(&src, w, h, workers[i], iters, dst_compute);
         double l = bench_linear(&src, w, h, workers[i], iters, dst_linear);
 
-        if (i == 0) { base_fused = f; base_linear = l; }
+        if (i == 0) { base_fused = f; base_compute = c; }
 
-        printf(" %-8d %8.2f ms   %5.2fx    %8.2f ms   %5.2fx\n",
-               workers[i], f, base_fused / f, l, base_linear / l);
+        printf(" %-8d %7.2f ms  %5.2fx   %7.2f ms  %5.2fx    %5.2fx    %7.2f ms\n",
+               workers[i], f, base_fused / f, c, base_compute / c, f / c, l);
     }
 
-    /*
-     * The budget is what actually matters. A converter that takes 20ms is
-     * fine at 24fps content and hopeless at 60, and "milliseconds" alone does
-     * not say which.
-     */
     {
-        double f4 = bench_fused(&src, w, h, 4, iters, dst_tiled);
-        printf("\n at 4 workers: %.2f ms/frame\n", f4);
+        double c4 = bench_compute(&src, w, h, 4, iters, dst_compute);
+        printf("\n [GPU Compute Pipeline] at 4 workers: %.2f ms/frame (backend: %s)\n",
+               c4, pp_compute_pipeline_get_backend_name());
         printf("   60fps budget 16.67 ms  -> %s (%.0f%% of budget)\n",
-               f4 <= 16.67 ? "fits" : "OVER", 100.0 * f4 / 16.67);
+               c4 <= 16.67 ? "fits" : "OVER", 100.0 * c4 / 16.67);
         printf("   30fps budget 33.33 ms  -> %s (%.0f%% of budget)\n",
-               f4 <= 33.33 ? "fits" : "OVER", 100.0 * f4 / 33.33);
+               c4 <= 33.33 ? "fits" : "OVER", 100.0 * c4 / 33.33);
         printf("   24fps budget 41.67 ms  -> %s (%.0f%% of budget)\n",
-               f4 <= 41.67 ? "fits" : "OVER", 100.0 * f4 / 41.67);
+               c4 <= 41.67 ? "fits" : "OVER", 100.0 * c4 / 41.67);
     }
 
     free(dst_tiled);
+    free(dst_compute);
     free(dst_linear);
     test_frame_free(&tf);
 }
+
 
 /* ---- the 1080p present path ---------------------------------------------- */
 

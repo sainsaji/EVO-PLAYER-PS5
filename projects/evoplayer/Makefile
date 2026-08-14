@@ -59,6 +59,7 @@ PP_SRCS := \
     pp/src/pp_converter.c \
     pp/src/pp_converter_parallel.c \
     pp/src/pp_converter_fused.c \
+    pp/src/pp_compute_pipeline.c \
     pp/src/pp_audio_clock.c \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \
@@ -66,6 +67,7 @@ PP_SRCS := \
     pp/src/tile_copy.c \
     pp/src/evo_theme.c \
     pp/src/evo_ui.c
+
 
 # The UI layer. Kept out of main.c on purpose: these have no dependency on
 # the player, the decoder or the ~1MB of asset headers, so they compile in a
