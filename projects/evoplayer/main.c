@@ -223,9 +223,10 @@ static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define EVO_SETTINGS_COUNT 4
 #define EVO_SETTINGS_PLAYBACK_COUNT 4
 #define EVO_SETTINGS_SUBTITLES_COUNT 2
-#define EVO_SETTINGS_INTERFACE_COUNT 4
+#define EVO_SETTINGS_INTERFACE_COUNT 5
 #define EVO_SETTINGS_SYSTEM_COUNT 3
 #define EVO_SURROUND_TEST_COUNT 11
+
 
 typedef enum {
     PROFILE_BALANCED = 0,
@@ -247,6 +248,9 @@ static int surround_test_selected = 0;
 static int profile_selected = 0;
 static int evo_tools_selected = 0;
 static int show_debug_overlay = 0;
+int g_ps5_user_id = 0;
+int prospero_get_initial_user_id(void) { return g_ps5_user_id; }
+
 
 /* PROSPERO_SETTINGS_EARLY_GLOBALS_START */
 static int prospero_resume_playback_enabled = 1;
@@ -4275,12 +4279,107 @@ static void prospero_last_folder_load(void)
 /* PROSPERO_LAST_FOLDER_V3_END */
 
 
-void load_usb_files(void) {
-    DIR *dir =
-        opendir(current_path);
+static char g_browser_search[64] = "";
 
+static const char *evo_strcasestr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) return NULL;
+    if (!*needle) return haystack;
+    size_t needle_len = strlen(needle);
+    for (; *haystack; haystack++) {
+        if (strncasecmp(haystack, needle, needle_len) == 0)
+            return haystack;
+    }
+    return NULL;
+}
+
+static void scan_search_recursive(const char *base_path, const char *rel_path, const char *query, int depth)
+{
+    if (depth > 5 || file_count >= 255) return;
+
+    char dir_path[768];
+    if (rel_path && rel_path[0])
+        snprintf(dir_path, sizeof(dir_path), "%s/%s", base_path, rel_path);
+    else
+        snprintf(dir_path, sizeof(dir_path), "%s", base_path);
+
+    DIR *dir = opendir(dir_path);
+    if (!dir) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && file_count < 255) {
+        if (entry->d_name[0] == '.') continue;
+        if (!strcmp(entry->d_name, "$RECYCLE.BIN")) continue;
+        if (!strcmp(entry->d_name, "System Volume Information")) continue;
+
+        char item_rel[512];
+        if (rel_path && rel_path[0])
+            snprintf(item_rel, sizeof(item_rel), "%s/%s", rel_path, entry->d_name);
+        else
+            snprintf(item_rel, sizeof(item_rel), "%s", entry->d_name);
+
+        if (evo_strcasestr(entry->d_name, query) || evo_strcasestr(item_rel, query)) {
+            snprintf(usb_files[file_count], sizeof(usb_files[file_count]), "%s", item_rel);
+            usb_types[file_count] = entry->d_type;
+            file_count++;
+        }
+
+        if (entry->d_type == 4) { /* DT_DIR */
+            scan_search_recursive(base_path, item_rel, query, depth + 1);
+        }
+    }
+    closedir(dir);
+}
+
+void load_usb_files(void) {
     file_count = 0;
     file_selected = 0;
+
+    if (g_browser_search[0] != '\0') {
+        scan_search_recursive(current_path, "", g_browser_search, 0);
+
+        if (evo_sort_folders_first && file_count > 1) {
+            for (int i = 1; i < file_count; i++) {
+                char          key_name[sizeof(usb_files[0])];
+                unsigned char key_type = usb_types[i];
+                int           j = i - 1;
+
+                snprintf(key_name, sizeof(key_name), "%s", usb_files[i]);
+
+                while (j >= 0) {
+                    int j_is_dir   = (usb_types[j] == 4);
+                    int key_is_dir = (key_type == 4);
+                    int move;
+
+                    if (j_is_dir != key_is_dir) {
+                        move = (key_is_dir && !j_is_dir);
+                    } else {
+                        move = (strcasecmp(usb_files[j], key_name) > 0);
+                    }
+
+                    if (!move)
+                        break;
+
+                    snprintf(usb_files[j + 1], sizeof(usb_files[0]), "%s", usb_files[j]);
+                    usb_types[j + 1] = usb_types[j];
+                    j--;
+                }
+
+                snprintf(usb_files[j + 1], sizeof(usb_files[0]), "%s", key_name);
+                usb_types[j + 1] = key_type;
+            }
+        }
+
+        if (file_count == 0) {
+            snprintf(usb_files[0], sizeof(usb_files[0]), "NO MATCHES FOR \"%s\"", g_browser_search);
+            usb_types[0] = 0;
+            file_count = 1;
+        }
+        return;
+    }
+
+    DIR *dir =
+        opendir(current_path);
 
     /*
      * A remembered folder may have been deleted or renamed.
@@ -4379,6 +4478,7 @@ void load_usb_files(void) {
         file_count = 1;
     }
 }
+
 
 
 int has_ext(const char *name, const char *ext) {
@@ -4837,7 +4937,7 @@ void enter_selected_usb(void) {
     if (file_count <= 0) return;
 
     if (usb_types[file_selected] == 4) {
-        char next[256];
+        char next[512];
 
         if (strcmp(current_path, "/mnt/usb0") == 0)
             snprintf(next, sizeof(next), "/mnt/usb0/%s", usb_files[file_selected]);
@@ -4845,6 +4945,7 @@ void enter_selected_usb(void) {
             snprintf(next, sizeof(next), "%s/%s", current_path, usb_files[file_selected]);
 
         snprintf(current_path, sizeof(current_path), "%s", next);
+        g_browser_search[0] = '\0';
         load_usb_files();
         prospero_last_folder_save();
         toast("OPEN FOLDER", current_path);
@@ -4854,6 +4955,7 @@ void enter_selected_usb(void) {
 }
 
 void usb_go_back(void) {
+    g_browser_search[0] = '\0';
     if (strcmp(current_path, "/mnt/usb0") == 0) {
         screen = 0;
         return;
@@ -4866,6 +4968,7 @@ void usb_go_back(void) {
 
     load_usb_files();
 }
+
 
 
 void format_time(int seconds, char *out, int size) {
@@ -12910,7 +13013,7 @@ static void prospero_settings_save(void)
 
     fprintf(
         file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n",
         (int)current_profile,
         prospero_resume_playback_enabled,
         prospero_default_view_mode,
@@ -12927,7 +13030,8 @@ static void prospero_settings_save(void)
          */
         evo_feedback_sound_enabled(),
         evo_feedback_lightbar_enabled(),
-        prospero_subtitle_face
+        prospero_subtitle_face,
+        evo_keyboard_get_type()
     );
 
     fclose(file);
@@ -12955,6 +13059,7 @@ static void prospero_settings_load(void)
     int loaded_sound = 1;
     int loaded_lightbar = 1;
     int loaded_sub_face = 1;
+    int loaded_kb_type = 1;
 
     FILE *file =
         fopen(
@@ -12966,7 +13071,7 @@ static void prospero_settings_load(void)
         int values_read =
             fscanf(
                 file,
-                "%d%d%d%d%d%d %23[^\n]%d%d%d",
+                "%d%d%d%d%d%d %23[^\n]%d%d%d%d",
                 &loaded_profile,
                 &loaded_resume,
                 &loaded_view,
@@ -12976,13 +13081,14 @@ static void prospero_settings_load(void)
                 loaded_theme,
                 &loaded_sound,
                 &loaded_lightbar,
-                &loaded_sub_face
+                &loaded_sub_face,
+                &loaded_kb_type
             );
 
         fclose(file);
 
         /*
-         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9 or 10.
+         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9, 10 or 11.
          * Fewer than 5 is corrupt.
          */
         if (values_read < 5) {
@@ -13003,6 +13109,7 @@ static void prospero_settings_load(void)
         if (values_read < 8) loaded_sound    = 1;
         if (values_read < 9) loaded_lightbar = 1;
         if (values_read < 10) loaded_sub_face = 1;
+        if (values_read < 11) loaded_kb_type = 1;
     }
 
     if (loaded_sub_face != EVO_FACE_SUB && loaded_sub_face != EVO_FACE_TITLE)
@@ -13010,6 +13117,8 @@ static void prospero_settings_load(void)
     prospero_subtitle_face = loaded_sub_face;
 
     evo_sort_folders_first = loaded_sort ? 1 : 0;
+    evo_keyboard_set_type(loaded_kb_type);
+
 
     /*
      * Applied before evo_feedback_init(), which is fine and deliberate: these
@@ -13581,8 +13690,15 @@ static void settings_interface_activate(void)
         load_usb_files();
         evo_feedback(EVO_FB_TOGGLE);
         toast("FOLDERS FIRST", evo_sort_folders_first ? "ON" : "OFF");
+    } else if (settings_interface_selected == 4) {
+        int cur_kb = evo_keyboard_get_type();
+        evo_keyboard_set_type(cur_kb == EVO_KEYBOARD_TYPE_NATIVE ? EVO_KEYBOARD_TYPE_VIRTUAL : EVO_KEYBOARD_TYPE_NATIVE);
+        prospero_settings_save();
+        evo_feedback(EVO_FB_TOGGLE);
+        toast("KEYBOARD INPUT", (evo_keyboard_get_type() == EVO_KEYBOARD_TYPE_NATIVE) ? "NATIVE PS5 IME" : "VIRTUAL KEYBOARD");
     }
 }
+
 
 static void settings_system_activate(void)
 {
@@ -14453,6 +14569,30 @@ static void evo_browser_sync(void)
     file_scroll   = evo_browser_focus.scroll;
 }
 
+static void on_browser_search_submit(const char *text, void *userdata)
+{
+    (void)userdata;
+    if (text && text[0]) {
+        strncpy(g_browser_search, text, sizeof(g_browser_search) - 1);
+        g_browser_search[sizeof(g_browser_search) - 1] = '\0';
+        load_usb_files();
+        file_selected = 0;
+        file_scroll   = 0;
+        evo_browser_sync();
+        char msg[96];
+        snprintf(msg, sizeof(msg), "\"%s\" (%d found)", g_browser_search, file_count);
+        toast("SEARCH FILTER", msg);
+    } else {
+        g_browser_search[0] = '\0';
+        load_usb_files();
+        file_selected = 0;
+        file_scroll   = 0;
+        evo_browser_sync();
+        toast("SEARCH FILTER", "Cleared");
+    }
+}
+
+
 /* Called from the input handler. */
 static void evo_browser_nav(int delta)
 {
@@ -14556,8 +14696,13 @@ void draw_usb_browser(uint32_t *fb)
         if (strncmp(current_path, "/mnt/", 5) == 0)
             shown = current_path + 4;   /* keep the leading slash */
 
-        snprintf(breadcrumb, sizeof(breadcrumb), "%s", shown);
+        if (g_browser_search[0] != '\0') {
+            snprintf(breadcrumb, sizeof(breadcrumb), "%s  -  [SEARCH: \"%s\"]", shown, g_browser_search);
+        } else {
+            snprintf(breadcrumb, sizeof(breadcrumb), "%s", shown);
+        }
     }
+
 
     memset(&model, 0, sizeof(model));
     model.path    = breadcrumb;
@@ -15214,7 +15359,15 @@ void draw_settings_interface_screen(uint32_t *fb)
     evo_settings_interface_rows[3].swatches     = NULL;
     evo_settings_interface_rows[3].swatch_count = 0;
 
+    evo_settings_interface_rows[4].title        = "KEYBOARD INPUT";
+    evo_settings_interface_rows[4].detail       = (evo_keyboard_get_type() == EVO_KEYBOARD_TYPE_NATIVE) ? "NATIVE PS5 IME" : "VIRTUAL KEYBOARD";
+    evo_settings_interface_rows[4].icon         = EVO_IC_SETTINGS;
+    evo_settings_interface_rows[4].chevron      = 1;
+    evo_settings_interface_rows[4].swatches     = NULL;
+    evo_settings_interface_rows[4].swatch_count = 0;
+
     for (i = 0; i < EVO_SETTINGS_INTERFACE_COUNT; i++)
+
         evo_settings_interface_rows[i].progress = -1;
 
     memset(&m, 0, sizeof(m));
@@ -17230,6 +17383,8 @@ int main(void) {
 
     int users[4] = {0};
     sceUserServiceGetLoginUserIdList(users);
+    g_ps5_user_id = users[0];
+
 
     int pad = scePadOpen(users[0], 0, 0, NULL);
 
@@ -17431,11 +17586,13 @@ int main(void) {
             }
 
             if (evo_keyboard_is_open()) {
+                evo_keyboard_update();
                 if (pressed) {
                     evo_keyboard_handle_input(pressed);
                 }
                 goto skip_screen_input;
             }
+
 
             /*
              * Audio/haptic feedback on every edge.
@@ -17485,8 +17642,11 @@ int main(void) {
                     screen = SCREEN_MEDIA_INFO;
                 } else if (screen == SCREEN_SUBTITLE_PICKER) {
                     evo_subs_cycle_size();
+                } else if (screen == 1) {
+                    evo_keyboard_open("SEARCH IN DIRECTORY", g_browser_search, 48, on_browser_search_submit, NULL);
                 }
             }
+
 
             if (
                 screen == 1 &&
@@ -18054,8 +18214,19 @@ int main(void) {
                     controls_last_used_ms = now_ms();
                     evo_feedback(EVO_FB_OPEN);
                 } else if (screen == 1) {
-                    usb_go_back();
+                    if (g_browser_search[0] != '\0') {
+                        g_browser_search[0] = '\0';
+                        load_usb_files();
+                        file_selected = 0;
+                        file_scroll   = 0;
+                        evo_browser_sync();
+                        evo_feedback(EVO_FB_CANCEL);
+                        toast("SEARCH", "Filter cleared");
+                    } else {
+                        usb_go_back();
+                    }
                 } else {
+
                     toast("EXIT", "Use PS button to close for now");
                 }
             }

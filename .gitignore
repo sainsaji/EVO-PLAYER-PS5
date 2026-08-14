@@ -141,3 +141,7 @@ emby_config/
 emby_media/
 scratch/
 
+# Research analysis notes
+docs/reng-*.md
+
+

@@ -1,11 +1,13 @@
 /*
- * evo_keyboard.c — Global on-screen virtual keyboard modal implementation.
+ * evo_keyboard.c — Global keyboard modal implementation.
+ * Supports both Native PlayStation 5 IME Dialog and Custom Virtual Keyboard.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "evo_keyboard.h"
+#include "evo_ime_dialog.h"
 #include "evo_theme.h"
 #include "evo_ui.h"
 #include "evo_feedback.h"
@@ -14,7 +16,144 @@
 
 #define KB_MAX_BUF 256
 
-/* Key grids */
+static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
+
+void evo_keyboard_set_type(int type)
+{
+    g_kb_type = (type == EVO_KEYBOARD_TYPE_VIRTUAL) ? EVO_KEYBOARD_TYPE_VIRTUAL : EVO_KEYBOARD_TYPE_NATIVE;
+}
+
+int evo_keyboard_get_type(void)
+{
+    return g_kb_type;
+}
+
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
+static uint16_t g_ime_buf[1024];
+static uint16_t g_ime_title[256];
+static uint16_t g_ime_placeholder[256];
+
+void toast(const char *title, const char *msg);
+
+static void init_native_ime_subsystem(void)
+{
+    static int s_common_dlg_inited = 0;
+    if (s_common_dlg_inited) return;
+
+    int res = 0;
+    int mod = sceKernelLoadStartModule("libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
+    if (mod <= 0) {
+        mod = sceKernelLoadStartModule("/system/common/lib/libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
+    }
+    printf("[evo-ime] libSceCommonDialog handle=%d res=%d\n", mod, res);
+
+    if (mod > 0) {
+        int (*p_cmn_init)(void) = NULL;
+        if (sceKernelDlsym(mod, "sceCommonDialogInitialize", (void**)&p_cmn_init) == 0 && p_cmn_init) {
+            int rc = p_cmn_init();
+            printf("[evo-ime] sceCommonDialogInitialize() => 0x%08x (%d)\n", (unsigned)rc, rc);
+        } else if (sceKernelDlsym(mod, "uoUpLGNkygk", (void**)&p_cmn_init) == 0 && p_cmn_init) {
+            int rc = p_cmn_init();
+            printf("[evo-ime] sceCommonDialogInitialize(NID) => 0x%08x (%d)\n", (unsigned)rc, rc);
+        }
+    }
+    s_common_dlg_inited = 1;
+}
+
+static void utf8_to_utf16(const char *src, uint16_t *dst, size_t max_dst)
+{
+    if (!dst || max_dst == 0) return;
+    if (!src) {
+        dst[0] = 0;
+        return;
+    }
+    size_t d = 0;
+    while (*src && d < max_dst - 1) {
+        uint32_t codepoint = 0;
+        unsigned char c = (unsigned char)*src;
+        if (c < 0x80) {
+            codepoint = c;
+            src++;
+        } else if ((c & 0xE0) == 0xC0) {
+            codepoint = (c & 0x1F) << 6;
+            if ((src[1] & 0xC0) == 0x80) {
+                codepoint |= (src[1] & 0x3F);
+                src += 2;
+            } else { src++; continue; }
+        } else if ((c & 0xF0) == 0xE0) {
+            codepoint = (c & 0x0F) << 12;
+            if ((src[1] & 0xC0) == 0x80 && (src[2] & 0xC0) == 0x80) {
+                codepoint |= ((src[1] & 0x3F) << 6) | (src[2] & 0x3F);
+                src += 3;
+            } else { src++; continue; }
+        } else if ((c & 0xF8) == 0xF0) {
+            codepoint = (c & 0x07) << 18;
+            if ((src[1] & 0xC0) == 0x80 && (src[2] & 0xC0) == 0x80 && (src[3] & 0xC0) == 0x80) {
+                codepoint |= ((src[1] & 0x3F) << 12) | ((src[2] & 0x3F) << 6) | (src[3] & 0x3F);
+                src += 4;
+            } else { src++; continue; }
+        } else {
+            src++;
+            continue;
+        }
+
+        if (codepoint < 0x10000) {
+            dst[d++] = (uint16_t)codepoint;
+        } else if (codepoint <= 0x10FFFF) {
+            if (d + 1 < max_dst - 1) {
+                codepoint -= 0x10000;
+                dst[d++] = (uint16_t)(0xD800 + (codepoint >> 10));
+                dst[d++] = (uint16_t)(0xDC00 + (codepoint & 0x3FF));
+            } else {
+                break;
+            }
+        }
+    }
+    dst[d] = 0;
+}
+
+static void utf16_to_utf8(const uint16_t *src, char *dst, size_t max_dst)
+{
+    if (!dst || max_dst == 0) return;
+    if (!src) {
+        dst[0] = 0;
+        return;
+    }
+    size_t d = 0;
+    while (*src && d < max_dst - 1) {
+        uint32_t cp = *src++;
+        if (cp >= 0xD800 && cp <= 0xDBFF && *src >= 0xDC00 && *src <= 0xDFFF) {
+            cp = 0x10000 + (((cp & 0x3FF) << 10) | (*src++ & 0x3FF));
+        }
+
+        if (cp < 0x80) {
+            if (d + 1 < max_dst) dst[d++] = (char)cp;
+        } else if (cp < 0x800) {
+            if (d + 2 < max_dst) {
+                dst[d++] = (char)(0xC0 | (cp >> 6));
+                dst[d++] = (char)(0x80 | (cp & 0x3F));
+            }
+        } else if (cp < 0x10000) {
+            if (d + 3 < max_dst) {
+                dst[d++] = (char)(0xE0 | (cp >> 12));
+                dst[d++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                dst[d++] = (char)(0x80 | (cp & 0x3F));
+            }
+        } else if (cp <= 0x10FFFF) {
+            if (d + 4 < max_dst) {
+                dst[d++] = (char)(0xF0 | (cp >> 18));
+                dst[d++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                dst[d++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                dst[d++] = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    }
+    dst[d] = 0;
+}
+#endif
+
+
+/* Key grids for Virtual Keyboard */
 static const char *const GRID_LOWER[4] = {
     "1234567890",
     "qwertyuiop",
@@ -58,6 +197,7 @@ static const char *const ACTION_LABELS[KB_ACT_COUNT] = {
 
 typedef struct {
     int             is_open;
+    int             is_native_active;
     char            title[128];
     char            buffer[KB_MAX_BUF];
     int             max_len;
@@ -94,11 +234,81 @@ void evo_keyboard_open(const char *title,
     g_kb.callback = on_submit;
     g_kb.userdata = userdata;
 
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
+    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE) {
+        init_native_ime_subsystem();
+
+        utf8_to_utf16(g_kb.title, g_ime_title, 256);
+        utf8_to_utf16(initial_value ? initial_value : "", g_ime_buf, 1024);
+        utf8_to_utf16("Enter text...", g_ime_placeholder, 256);
+
+int prospero_get_initial_user_id(void);
+
+        int userId = prospero_get_initial_user_id();
+        if (userId <= 0) {
+            if (sceUserServiceGetInitialUser(&userId) < 0 || userId <= 0) {
+                int login_users[4] = {0};
+                if (sceUserServiceGetLoginUserIdList(login_users) >= 0 && login_users[0] > 0) {
+                    userId = login_users[0];
+                } else {
+                    userId = 0x10000000;
+                }
+            }
+        }
+
+
+        SceImeDialogParam param;
+        memset(&param, 0, sizeof(param));
+        param.userId = userId;
+        param.type = SCE_IME_TYPE_DEFAULT;
+        param.enterLabel = SCE_IME_ENTER_LABEL_DEFAULT;
+        param.inputMethod = SCE_IME_INPUT_METHOD_DEFAULT;
+        param.option = SCE_IME_OPTION_NONE;
+        param.maxTextLength = (uint32_t)g_kb.max_len;
+        param.inputTextBuffer = g_ime_buf;
+        param.title = g_ime_title;
+        param.placeholder = g_ime_placeholder;
+
+        uint32_t width = 0, height = 0;
+        if (sceImeDialogGetPanelSizeExtended(&param, NULL, &width, &height) >= 0 && width > 0 && height > 0) {
+            param.posx = (1920.0f - (float)width) / 2.0f;
+            param.posy = (1080.0f - (float)height) / 2.0f;
+            param.horizontalAlignment = SCE_IME_HALIGN_LEFT;
+            param.verticalAlignment = SCE_IME_VALIGN_TOP;
+        }
+
+        int rc = sceImeDialogInit(&param, NULL);
+        printf("[evo-ime] sceImeDialogInit userId=0x%08x len=%u rc=0x%08x (%d)\n",
+               (unsigned)userId, (unsigned)param.maxTextLength, (unsigned)rc, rc);
+        fflush(stdout);
+
+        if (rc >= 0) {
+            g_kb.is_native_active = 1;
+            evo_feedback(EVO_FB_OPEN);
+            return;
+        }
+
+        /* Diagnostic feedback if native IME failed */
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "ERR 0x%08X", (unsigned)rc);
+        toast("NATIVE IME FALLBACK", err_msg);
+    }
+#endif
+
+
+    g_kb.is_native_active = 0;
     evo_feedback(EVO_FB_OPEN);
 }
 
 void evo_keyboard_close(void)
 {
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
+    if (g_kb.is_open && g_kb.is_native_active) {
+        sceImeDialogAbort();
+        sceImeDialogTerm();
+        g_kb.is_native_active = 0;
+    }
+#endif
     g_kb.is_open = 0;
 }
 
@@ -107,10 +317,46 @@ int evo_keyboard_is_open(void)
     return g_kb.is_open;
 }
 
+int evo_keyboard_is_native_active(void)
+{
+    return g_kb.is_open && g_kb.is_native_active;
+}
+
 const char *evo_keyboard_get_text(void)
 {
     return g_kb.buffer;
 }
+
+void evo_keyboard_update(void)
+{
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
+    if (g_kb.is_open && g_kb.is_native_active) {
+        int status = sceImeDialogGetStatus();
+        if (status == SCE_IME_DIALOG_STATUS_FINISHED) {
+            SceImeDialogResult result;
+            memset(&result, 0, sizeof(result));
+            sceImeDialogGetResult(&result);
+            if (result.endStatus == SCE_IME_DIALOG_END_STATUS_OK) {
+                utf16_to_utf8(g_ime_buf, g_kb.buffer, sizeof(g_kb.buffer));
+                if (g_kb.callback) {
+                    g_kb.callback(g_kb.buffer, g_kb.userdata);
+                }
+                evo_feedback(EVO_FB_CONFIRM);
+            } else {
+                evo_feedback(EVO_FB_CANCEL);
+            }
+            sceImeDialogTerm();
+            g_kb.is_open = 0;
+            g_kb.is_native_active = 0;
+        } else if (status == SCE_IME_DIALOG_STATUS_NONE) {
+            sceImeDialogTerm();
+            g_kb.is_open = 0;
+            g_kb.is_native_active = 0;
+        }
+    }
+#endif
+}
+
 
 static void insert_char(char c)
 {
@@ -158,6 +404,11 @@ static void submit_text(void)
 int evo_keyboard_handle_input(uint32_t pressed)
 {
     if (!g_kb.is_open) return 0;
+
+    if (g_kb.is_native_active) {
+        evo_keyboard_update();
+        return 1; /* Consume all pad events while native IME is active */
+    }
 
     /* D-PAD Navigation */
     if (pressed & EVO_PAD_UP) {
@@ -273,6 +524,14 @@ void evo_screen_keyboard(uint32_t *fb)
     if (!g_kb.is_open) return;
 
     const evo_theme *th = evo_theme_current();
+
+    if (g_kb.is_native_active) {
+        /* Soft scrim dim behind native PlayStation OS keyboard */
+        evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
+                          with_alpha(th->bg_bottom, 160),
+                          with_alpha(th->bg_top, 180));
+        return;
+    }
 
     /* 1. Scrim background (smooth dark dim over current screen) */
     evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
