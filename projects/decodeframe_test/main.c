@@ -1570,9 +1570,29 @@ dump_open_fds(void)
         LOG("  none - which cannot be right, so treat this probe as broken.\n");
 }
 
-/* Sweep a block for the GpDec device object. */
+/* The two entries of the +0x2b870 jump table this probe can encounter, as
+ * (index at +0x1d08, mode at +0x2c0) pairs. Index 5 -> mode 7 -> ioctl 23 is
+ * the route every run has taken; index 1 -> mode 0x10 -> ioctl 24 is the one
+ * the VdecCore writers at +0x13e58 / +0x158d8 would select. */
+static const uint32_t kExpectIdx[2] = { 5u, 1u };
+static const uint32_t kModeFor[2]   = { 7u, 0x10u };
+
+/* Is this fd open in this process, and is it a character device? The decoder
+ * device is a chardev, so a candidate whose fd is neither cannot be it. */
+static int
+fd_is_chardev(int fd)
+{
+    struct stat st;
+
+    if (fd < 0 || fstat(fd, &st) != 0)
+        return 0;
+
+    return S_ISCHR(st.st_mode);
+}
+
+/* Sweep a block for the GpDec device object, looking for one specific mode. */
 static const unsigned char *
-find_device_object(const dmem_block *blk, const char *what)
+find_device_object(const dmem_block *blk, const char *what, uint32_t wantMode)
 {
     const unsigned char *base = (const unsigned char *)blk->vaddr;
     const unsigned char *found = NULL;
@@ -1588,15 +1608,45 @@ find_device_object(const dmem_block *blk, const char *what)
         const unsigned char *cand = base + off;
         uint32_t mode = *(const volatile uint32_t *)(cand + 0x2c0);
         int32_t  fd   = *(const volatile int32_t  *)(cand + 0x1d68);
+        uint32_t idx  = *(const volatile uint32_t *)(cand + 0x1d08);
 
-        /* mode 7 is what run 8's error line 0x254 implies, and a device fd is
-         * a small positive integer. Both, 0x1ab8 bytes apart, is the object. */
-        if (mode != 7 || fd <= 2 || fd > 4096)
+        if (mode != wantMode || fd <= 2 || fd > 4096)
+            continue;
+
+        /* -- CORROBORATION, and the reason it exists --------------------------
+         *
+         * The first cut of this search accepted mode 7 OR mode 0x10, on the
+         * reasoning that insisting on 7 could only ever confirm the answer we
+         * already had. That reasoning was right and the change was still wrong:
+         * mode 0x10 is the value SIXTEEN, and the work arena is full of it -
+         * the run of 2026-08-13 matched five "objects" inside a region that is
+         * a solid repeating array of 10 00 00 00, and reported the submit path
+         * had moved. It had not. Every field read out of that address was 16
+         * because every word there is 16.
+         *
+         * The predicate's power was never "mode == 7". It was that 7 is RARE.
+         * Widening it to a common value threw the power away, so the value has
+         * to be paid for some other way. Two checks do it, and both are free:
+         *
+         *   1. The jump table has to agree with itself. [0x1d08] indexes it and
+         *      [0x2c0] is its output, so index 5 must accompany mode 7 and
+         *      index 1 must accompany mode 0x10. The false match read index 0
+         *      with mode 16, which the table forbids.
+         *   2. The fd has to be one this process actually has open, and it has
+         *      to be a character device. The false match claimed fd 119; the fd
+         *      dump printed two lines below it showed the process owned nothing
+         *      above 17. */
+        if (!(idx == kExpectIdx[0] && mode == kModeFor[0]) &&
+            !(idx == kExpectIdx[1] && mode == kModeFor[1]))
+            continue;
+
+        if (!fd_is_chardev(fd))
             continue;
 
         if (++hits <= 4) {
-            LOG("  candidate in %s at +0x%zx  (addr %p): mode 7, fd %d\n",
-                what, off, (const void *)cand, fd);
+            LOG("  candidate in %s at +0x%zx  (addr %p): index %u, mode %u,"
+                " fd %d (open chardev)\n",
+                what, off, (const void *)cand, idx, mode, fd);
             if (!found)
                 found = cand;
         }
@@ -1610,36 +1660,227 @@ find_device_object(const dmem_block *blk, const char *what)
     return found;
 }
 
+/* -- Why sceVideodec2Reset fails, answered by pointer-walking not by luck ----
+ *
+ * Reset returns 0x811D0111 on every call and never clears the error latch, and
+ * reading it offline (findings §7) says the refusal is not its own:
+ *
+ *     sceVideodec2Reset  +0x30f0   passes magic, lock, argument gates
+ *       -> sceVdecCoreResetDecoder +0x1a40   arg2 = 0, explicitly permitted
+ *          -> rdi = [vdeccore+0x140]         the GpDec object
+ *          -> GpDec reset 0x800978550        FAILS on its first check
+ *
+ * That function has exactly three ways to fail, and each one is a different
+ * statement about the object at [vdeccore+0x140]:
+ *
+ *     line 0x1645   rdi == NULL                    - no GpDec object at all
+ *     line 0x164C   memcmp(rdi, magic, 0x10) != 0  - not a valid GpDec object
+ *     line 0x1653   the lock at rdi+0x20 failed    - valid, but held
+ *
+ * (The check is memcmp: the helper is called 42 times, and two adjacent sites
+ * compare one 16-byte stack buffer against two different .rodata constants and
+ * branch on equality. Nothing else fits - you cannot lock or copy into rodata.)
+ *
+ * The console prints WHICH line fired, but only on stdout via the hbldr pipe,
+ * which is easy to lose and was lost once already. This does not need the
+ * console's help: the VdecCore object is in memory we allocated, so the pointer
+ * at +0x140 can simply be read, and the three cases told apart here. */
 static void
-dump_submitted_job(void *decoder, const dmem_block *work,
-                   const dmem_block *pool)
+diagnose_gpdec_object(void *decoder, const unsigned char *located,
+                      const dmem_block *work, const dmem_block *pool)
 {
-    const unsigned char *obj = NULL;
-    uint32_t  mode, ringIdx, jobCmd, jobFlag, evq, mystery;
-    int32_t   fd;
-    uintptr_t cmdBuf;
+    const unsigned char *vdec, *gpdec;
+    uintptr_t lo, hi, plo, phi;
 
     if (!decoder || !work || !work->vaddr)
         return;
 
-    dump_open_fds();
+    LOG("\n--- why Reset fails: the GpDec object at [vdeccore+0x140] ---\n");
+
+    vdec = *(const unsigned char *const *)((const unsigned char *)decoder + 0x78);
+    lo  = (uintptr_t)work->vaddr;  hi  = lo + work->len;
+    plo = pool ? (uintptr_t)pool->vaddr : 0;
+    phi = pool ? plo + pool->len : 0;
+
+    if (!vdec) {
+        LOG("    decoder+0x78 is NULL - there is no VdecCore object to walk.\n");
+        return;
+    }
+    if (!(((uintptr_t)vdec >= lo && (uintptr_t)vdec + 0x148 <= hi) ||
+          (plo && (uintptr_t)vdec >= plo && (uintptr_t)vdec + 0x148 <= phi))) {
+        LOG("    VdecCore object %p is outside memory we allocated, so +0x140\n"
+            "    is NOT dereferenced - a bad read here kills the payload.\n",
+            (const void *)vdec);
+        return;
+    }
+
+    gpdec = *(const unsigned char *const *)(vdec + 0x140);
+    LOG("    [vdeccore+0x140] = %p\n", (const void *)gpdec);
+
+    if (!gpdec) {
+        LOG("\n    *** IT IS NULL. That is GpDec line 0x1645, and it means the\n"
+            "    reset never had an object to work on. Reset's failure is then\n"
+            "    a lifetime problem - the GpDec object was never created, or was\n"
+            "    torn down by the refused decode - and NOT a permissions or an\n"
+            "    entitlement problem. ***\n");
+        return;
+    }
+
+    if (located)
+        LOG("    the object the submit search found: %p  -> %s\n",
+            (const void *)located,
+            gpdec == located ? "SAME OBJECT - the two agree"
+                             : "*** DIFFERENT - one of the two is wrong ***");
+
+    if (!(((uintptr_t)gpdec >= lo && (uintptr_t)gpdec + 0x48 <= hi) ||
+          (plo && (uintptr_t)gpdec >= plo && (uintptr_t)gpdec + 0x48 <= phi))) {
+        LOG("    ...but it is outside memory we allocated, so its head is NOT\n"
+            "    read. Not being able to read it is not evidence against it:\n"
+            "    VdecCore is entitled to keep it on its own heap.\n");
+        return;
+    }
+
+    LOG("\n    the 16 bytes GpDec memcmps against its magic (line 0x164C):\n");
+    hexdump(gpdec, 0x10, "        ");
+    LOG("\n    gpdec+0x40 state = %u  (line 0xC22 refuses states 0, 4 and 5)\n",
+        *(const volatile uint32_t *)(gpdec + 0x40));
+    LOG("    gpdec+0x20 lock  = 0x%016llx  (line 0x1653 is this lock failing)\n",
+        (unsigned long long)*(const volatile uint64_t *)(gpdec + 0x20));
+    LOG("\n    If those 16 bytes look like a signature - printable, or stable\n"
+        "    across runs - the magic check passes and the refusal is the lock\n"
+        "    or the state. If they look like zeros or heap debris, line 0x164C\n"
+        "    is the answer and the pointer at +0x140 is stale.\n");
+}
+
+/* Find the GpDec device object once, so every AU afterwards can be read
+ * against the SAME object rather than re-searched with a predicate that
+ * assumes the answer. Returns NULL if it is not in memory we allocated. */
+static const unsigned char *
+locate_device_object(void *decoder, const dmem_block *work,
+                     const dmem_block *pool)
+{
+    const unsigned char *obj;
+
+    if (!decoder || !work || !work->vaddr)
+        return NULL;
 
     LOG("\n--- locating the GpDec device object the submit operates on ---\n");
     LOG("    decoder %p  ->  VdecCore object %p\n", decoder,
         *(const void *const *)((const unsigned char *)decoder + 0x78));
-    LOG("    Searching for mode==7 at +0x2c0 together with a plausible fd at\n"
-        "    +0x1d68 - the two fields libSceVdecCore +0x2b870 reads.\n\n");
+    LOG("    A candidate must satisfy all three: the mode at +0x2c0, an index\n"
+        "    at +0x1d08 that the jump table maps TO that mode, and an fd at\n"
+        "    +0x1d68 this process really has open as a character device.\n");
 
-    obj = find_device_object(work, "work memory");
+    /* Mode 7 first, because it is rare and it is the answer every previous run
+     * got. Only if it is absent is mode 0x10 worth looking for - searching for
+     * the common value first is what produced the false positive. */
+    LOG("\n  pass 1: index 5 / mode 7 -> ioctl command 23 (the known route)\n");
+    obj = find_device_object(work, "work memory", 7u);
     if (!obj && pool)
-        obj = find_device_object(pool, "frame pool");
+        obj = find_device_object(pool, "frame pool", 7u);
 
     if (!obj) {
+        LOG("\n  pass 2: index 1 / mode 0x10 -> ioctl command 24 (the route\n"
+            "          Phase 6b.1 is looking for)\n");
+        obj = find_device_object(work, "work memory", 0x10u);
+        if (!obj && pool)
+            obj = find_device_object(pool, "frame pool", 0x10u);
+        if (obj)
+            LOG("\n  *** FOUND ON MODE 0x10, AND IT PASSED BOTH CORROBORATION\n"
+                "      CHECKS. That is the Phase 6b.1 result, not an artefact. ***\n");
+    }
+
+    if (!obj)
         LOG("\n  The object is not in memory we allocated, so VdecCore keeps it\n"
             "  on its own heap. The fd list above still says whether the device\n"
             "  is open, which is the half of the question that matters most.\n");
+
+    return obj;
+}
+
+/* -- PHASE 6b.1: has the submit path moved? --------------------------------
+ *
+ * The one question this run exists to answer. libSceVdecCore +0x2b870 picks
+ * the ioctl command from a six-entry jump table indexed by [obj+0x1d08]:
+ * index 5 -> mode 7 -> command 23, which is what every run so far has taken;
+ * index 1 -> mode 0x10 -> command 24, which nothing has ever taken.
+ *
+ * Run 14 swept resource class and pipeline depth and concluded the path was
+ * fixed. It is not: two writers INSIDE VdecCore, at +0x13e58 and +0x158d8,
+ * store the literal 1 into that field, guarded by an equality between two
+ * counters in the codec context and followed by a 0x204-byte memcpy into
+ * [obj+0x1448]. Neither is reachable by configuration - what would reach them
+ * is parsed bitstream state, which is why this feeds every access unit in the
+ * stream instead of stopping at the first refusal.
+ *
+ * So the selector is read after EVERY AU, and the 0x1448 window with it: if
+ * the writers ever fire, both change together and one confirms the other. */
+typedef struct {
+    uint32_t      lastIdx;              /* 5 on every run before this one    */
+    int           primed;               /* has a baseline been taken yet?    */
+    int           moved;                /* did it EVER leave 5?              */
+    unsigned char last1448[0x20];
+} selector_watch;
+
+static void
+log_submit_selector(const unsigned char *obj, const char *when,
+                    selector_watch *w)
+{
+    uint32_t idx, mode;
+    unsigned cmd;
+    int      changed1448;
+
+    if (!obj)
         return;
+
+    idx  = *(const volatile uint32_t *)(obj + 0x1d08);
+    mode = *(const volatile uint32_t *)(obj + 0x02c0);
+    cmd  = mode == 7 ? 23u : mode == 0x10 ? 24u : 22u;
+
+    changed1448 = memcmp(w->last1448, obj + 0x1448, sizeof w->last1448) != 0;
+    memcpy(w->last1448, obj + 0x1448, sizeof w->last1448);
+
+    LOG("    [6b.1] %-16s obj+0x1d08 = %u -> mode %u -> ioctl command %u%s\n",
+        when, idx, mode, cmd,
+        idx == 1 ? "   *** THE OTHER PATH ***" : "");
+
+    if (w->primed && idx != w->lastIdx) {
+        LOG("    [6b.1] *** THE SELECTOR MOVED: %u -> %u ***\n"
+            "           Run 14's \"the submit path does not vary\" is dead, and\n"
+            "           the writers at VdecCore +0x13e58 / +0x158d8 are on the\n"
+            "           same object the submit uses. Findings section 7 [H] is\n"
+            "           settled in the affirmative.\n", w->lastIdx, idx);
     }
+    if (idx != 5)
+        w->moved = 1;
+
+    w->lastIdx = idx;
+
+    /* The first read is a baseline, not a change - saying otherwise would
+     * manufacture a signal out of the zeroed initial state. */
+    if (changed1448) {
+        LOG("    [6b.1] obj+0x1448 %s - the 0x204-byte memcpy that\n"
+            "           accompanies a write of 1 to the selector lands here:\n",
+            w->primed ? "CHANGED" : "baseline");
+        hexdump(obj + 0x1448, sizeof w->last1448, "           ");
+    }
+
+    w->primed = 1;
+}
+
+static void
+dump_submitted_job(void *decoder, const unsigned char *obj,
+                   const dmem_block *work, const dmem_block *pool)
+{
+    uint32_t  mode, ringIdx, jobCmd, jobFlag, evq, mystery;
+    int32_t   fd;
+    uintptr_t cmdBuf;
+
+    if (!obj)
+        return;
+
+    (void)decoder;
+    dump_open_fds();
 
     mode    = *(const volatile uint32_t *)(obj + 0x02c0);
     ringIdx = *(const volatile uint32_t *)(obj + 0x1d50);
@@ -1661,13 +1902,17 @@ dump_submitted_job(void *decoder, const dmem_block *work,
      *               1 -> mode 0x10  4 -> mode 1
      *               2 -> mode 4     5 -> mode 7      <- ours
      *
-     * [0x1d08] is written by a four-field setter at +0x8f0 that VdecCore
+     * [0x1d08] is written by a four-field setter at +0x288f0 that VdecCore
      * exports and that the CODEC MODULE calls - so the codec layer chooses
      * the submit path, and the value it chose is the most useful single
-     * number in this dump. Two other sites in VdecCore set it to 1, which is
-     * a different ioctl command entirely. If a configuration exists that
-     * lands on 1 rather than 5, it takes a completely different route into
-     * the driver and errno 5200 may simply not be on it. */
+     * number in this dump. (This comment said +0x8f0. That was a
+     * transcription slip of 0x28000, corrected 2026-08-13 against the indexed
+     * listing, where every other offset in this section resolves exactly.)
+     *
+     * The other two sites that write it are at +0x13e58 and +0x158d8, both
+     * storing the literal 1 - ioctl command 24 - and neither is selected by
+     * configuration. Phase 6b.1 above is the experiment that tests whether
+     * bitstream state reaches them. */
     LOG("\n--- the job that was submitted ---\n");
     LOG("    obj+0x1d08 mode index  = %u  -> mode %u -> ioctl command %d\n",
         *(const volatile uint32_t *)(obj + 0x1d08), mode,
@@ -1759,7 +2004,7 @@ static int
 attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
                delete_decoder_fn del, decode_fn decode, flush_fn flush,
                get_picture_info_fn getPic, map_direct_memory_fn mapDirect,
-               const char *label, framing_t framing,
+               reset_fn reset, const char *label, framing_t framing,
                uint32_t resourceType, uint32_t depth, unsigned auCount,
                void *queue, int controls, int dumpFrame)
 {
@@ -1770,6 +2015,10 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
     dmem_block *targets = &blocks[3];
     int         mapped = 0;
     int         dumpedJob = 0;
+    const unsigned char *obj = NULL;             /* the GpDec device object   */
+    selector_watch       watch = { 5, 0, 0, {0} };
+    unsigned             fed = 0;                /* AUs actually handed over  */
+    int                  diagnosedReset = 0;
     uint64_t    mapLen = 0;
     int         inputMapped = 0;
     void       *mapAddr[MAP_BLOCKS] = {0};   /* what was actually registered */
@@ -2134,6 +2383,7 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
                 (unsigned long long)au.ptsData, i % (unsigned)mapped);
 
             rc = decode(dec, &au, &fb, &out);
+            fed++;
 
             {
                 char what[48];
@@ -2141,18 +2391,82 @@ attempt_decode(query_decoder_meminfo_fn query, create_decoder_fn create,
                 report_output(&ctx, what, rc, &out, &fb);
             }
 
+            /* Locate the object once, on the first AU, whatever the result -
+             * every later read is then against the same address rather than a
+             * fresh search whose predicate presumes the answer. */
+            if (!obj)
+                obj = locate_device_object(dec, work, pool);
+
             /* The refusal is the most informative moment there is: the object
              * still holds exactly what was handed to the driver. Dumped once,
              * on the first failure only, so a repeated error does not bury the
              * log. */
             if (rc && !dumpedJob) {
                 dumpedJob = 1;
-                dump_submitted_job(dec, work, pool);
+                dump_submitted_job(dec, obj, work, pool);
             }
 
-            if (rc)
-                break;
+            {
+                char when[24];
+                snprintf(when, sizeof when, "after AU %u", i);
+                log_submit_selector(obj, when, &watch);
+            }
+
+            /* -- PHASE 6b.1: do NOT stop at the first refusal ---------------
+             *
+             * Every run before this one broke here, so AU 0 - the IDR - is the
+             * only access unit the hardware has ever been shown. That is
+             * exactly the wrong stream for the question now being asked: the
+             * two writers that would move the submit onto ioctl command 24 are
+             * guarded by an equality between two counters in the codec context,
+             * and one access unit cannot make two counters disagree.
+             *
+             * A failed Decode latches decoder+0x48/0x4c, after which every
+             * further Decode is refused in software with 0x811D0300/0304 and
+             * never reaches VdecCore at all - so continuing is only meaningful
+             * with a Reset in between. Reset was resolved in every run so far
+             * and deliberately never called; this is what it is for.
+             *
+             * The cost of being wrong is one more error line in the log. */
+            if (rc) {
+                int rrc = reset ? reset(dec) : -1;
+
+                LOG("    [6b.1] AU %u refused; sceVideodec2Reset -> 0x%08x %s\n",
+                    i, rrc, reset ? vdec2_err((uint32_t)rrc) : "(not resolved)");
+
+                /* Once, on the first failure: walk to the object GpDec is
+                 * actually refusing. Reading it costs nothing and tells the
+                 * three failure lines apart without the stdout diagnostics. */
+                if (rrc && !diagnosedReset) {
+                    diagnosedReset = 1;
+                    diagnose_gpdec_object(dec, obj, work, pool);
+                }
+
+                if (rrc)
+                    LOG("    [6b.1] Reset did NOT clear the latch. The next AU is\n"
+                        "           expected to be refused in software with\n"
+                        "           0x811D0300/0304 without reaching VdecCore -\n"
+                        "           and if it is refused with something else, that\n"
+                        "           is worth more than this experiment was.\n"
+                        "           Feeding it anyway: the cost is one log line.\n");
+
+                log_submit_selector(obj, "after Reset", &watch);
+            }
         }
+
+        /* Report what was actually fed, not what was asked for. The first cut
+         * of this line printed auCount and announced "fed 8 of 8" after the
+         * decoder had refused AU 0 and taken no further input at all. */
+        LOG("\n  [6b.1] fed %u of the %u access units asked for; the submit"
+            " selector %s.\n", fed, auCount,
+            !obj          ? "could not be read - the object was never located"
+            : watch.moved ? "MOVED off 5 - see the marked lines above"
+                          : "never moved off 5 (ioctl command 23)");
+        if (fed < 2)
+            LOG("  [6b.1] Fewer than two AUs reached the decoder, so the guard\n"
+                "         this experiment targets - an equality between two\n"
+                "         counters in the codec context - cannot have been\n"
+                "         disturbed. This run does NOT test 6b.1's question.\n");
 
         /* -- drain -------------------------------------------------------- */
         LOG("\n--- flush: draining whatever the pipeline still holds ---\n");
@@ -2198,7 +2512,10 @@ out:
 int
 main(int argc, char **argv)
 {
-    unsigned auCount   = 4;
+    /* Phase 6b.1 needs the WHOLE stream, not a sample of it: the counters that
+     * would move the submit selector cannot disagree while only one access
+     * unit has ever been parsed. "one" still narrows it back down by hand. */
+    unsigned auCount   = TEST_STREAM_AU_COUNT;
     int      dumpFrame = 0;
     int      tryAvcc   = 1;
     int      useArb    = 1;
@@ -2368,7 +2685,7 @@ main(int argc, char **argv)
     LOG("    GetPictureInfo and GetAvcPictureInfo are byte-identical thunks;\n"
         "    so are GetHevcPictureInfo and GetVp9PictureInfo. The body\n"
         "    dispatches on outputInfo->codecType, not on the name called.\n");
-    (void)a_getavc; (void)a_gethevc; (void)a_getvp9; (void)a_reset;
+    (void)a_getavc; (void)a_gethevc; (void)a_getvp9;
 
     /* Resolved and deliberately NOT called: MapMemory's one import is unbound
      * in the dump, which is the shape of a silent indefinite block. Logging its
@@ -2378,7 +2695,8 @@ main(int argc, char **argv)
         "      MapDirectMemory (+0x340) is the bound route to the same layer.\n");
 
     if (!a_query || !a_create || !a_delete || !a_decode || !a_flush ||
-        !a_getpic || !a_mapdirect || !a_query_cm || !a_alloc_cq || !a_rel_cq) {
+        !a_getpic || !a_mapdirect || !a_query_cm || !a_alloc_cq || !a_rel_cq ||
+        !a_reset) {
         LOG("\nFATAL: an entry point did not resolve\n");
         return EXIT_FAILURE;
     }
@@ -2388,6 +2706,9 @@ main(int argc, char **argv)
     delete_decoder_fn        del      = (delete_decoder_fn)a_delete;
     decode_fn                decode   = (decode_fn)a_decode;
     flush_fn                 flush    = (flush_fn)a_flush;
+    /* Resolved since Phase 5 and never called until Phase 6b.1, which needs it
+     * to clear the error latch between access units. */
+    reset_fn                 reset    = (reset_fn)a_reset;
     get_picture_info_fn      getPic   = (get_picture_info_fn)a_getpic;
     map_direct_memory_fn     mapDirect = (map_direct_memory_fn)a_mapdirect;
     query_compute_meminfo_fn query_cm = (query_compute_meminfo_fn)a_query_cm;
@@ -2545,7 +2866,7 @@ main(int argc, char **argv)
 
             snprintf(label, sizeof label, "Annex-B, %s", kSweep[i].label);
             pics = attempt_decode(query, create, del, decode, flush, getPic,
-                                  mapDirect, label, FRAMING_ANNEXB,
+                                  mapDirect, reset, label, FRAMING_ANNEXB,
                                   kSweep[i].res, kSweep[i].depth, auCount,
                                   queue, /*controls=*/(i == 0), dumpFrame);
 

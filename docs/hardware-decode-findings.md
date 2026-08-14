@@ -1,7 +1,39 @@
 # PS5 media stack — findings
 
 Everything established about the PS5's native media modules on firmware
-**12.70 (`0x12700001`)**, as of **2026-08-11**, through Phase 6.
+**12.70 (`0x12700001`)**, as of **2026-08-14**, through Phase 6.
+
+> **2026-08-14 — the 6b.1 probe was built and run, and two things closed.**
+>
+> - **The submit selector does not move.** 34 readings of `[obj+0x1d08]` across
+>   eight access units and two configurations, all of them 5 → mode 7 → ioctl
+>   command 23. The hopeful reading of the 2026-08-13 finding below is settled
+>   against. It is bounded by `Reset`, which never clears the error latch. §7.
+> - **Scanning kernel `.text` panics the console**, every time. `projects/kdump`
+>   has been deleted. §13 step 1 is withdrawn, and §2's "`kernel_copyout` cannot
+>   fault the caller" must not be read as covering a sweep. §13.
+>
+> The new cheapest question is **why `sceVideodec2Reset` fails**, which is
+> answerable offline with no console. Next-steps 6b.4.
+
+> **2026-08-13 — three findings, no console time.** All three came from static
+> analysis of the disassembly already in `PS5-Research` and from re-reading
+> transcripts already captured. In descending order of how much they change the
+> plan:
+>
+> - **The submit path is not invariant.** Two writers inside VdecCore select
+>   ioctl command **24** under a *bitstream* condition. The earlier "no cheap way
+>   to reach commands 22 or 24" is withdrawn, and testing it is now §13 step 0 —
+>   one probe, no kernel access. §7.
+> - **The identity hypothesis is downgraded.** The same submit ioctl returns
+>   errno **5103** elsewhere in run 8 while its caller succeeds, against 5200 for
+>   the decode job. A permission check refuses uniformly; this driver is
+>   inspecting the job. The kernel *write* in §13 step 2 is no longer the
+>   priority. §7.
+> - **The driver handshake succeeds, and the ioctl inventory is closed.**
+>   VdecCore issues exactly four group-`0x83` commands. Two of them — a version
+>   check that must read `0x07000000`, and an init call — had never been read
+>   and have never once failed. Nothing was skipped. §7.
 
 **Phase 6 has not produced a picture yet.** What it *has* produced: `Decode`'s
 ABI confirmed 18/18, the frame-size formula confirmed 7/7, and
@@ -898,7 +930,15 @@ nothing.
 That closes the "written nowhere in the module" question without answering who
 writes it.
 
-##### The submit path is chosen by the codec, and it does not vary **[E]**
+**"Written nowhere in the module" is now exhaustive rather than a byte search.**
+**[E]** 2026-08-13: a scan of every instruction in the indexed listing whose
+operands reference `+0x1d70` finds **one** site — the read at `+0x2b8b1`, in the
+submit — and **zero** writes. So the writer is genuinely outside VdecCore. This
+is the same scan that found the `+0x1d08` writers above, and it is the method
+note worth carrying: a search over decoded operands answers "who touches this
+field" in a way a search over raw bytes cannot.
+
+##### The submit path is chosen by the codec, and ~~it does not vary~~ **configuration does not vary it** **[E]**
 
 `libSceVdecCore +0x2b870` picks the ioctl command from the mode at `+0x2c0`,
 and the mode comes from a six-entry jump table indexed by `[obj+0x1d08]`:
@@ -916,11 +956,225 @@ and the mode comes from a six-entry jump table indexed by `[obj+0x1d08]`:
 exports and the **codec module** calls — so the codec layer chooses the route
 into the driver.
 
-**It is invariant.** Run 14 swept resource class `0xb6c8` and `0x12384` against
-pipeline depth 1 and 4: all four produced mode index 5, mode 7, command 23 and
-errno 5200, identical field for field. **Configuration does not select the
-submit path**, so there is no cheap way to reach commands 22 or 24 from the
-public API.
+**It is invariant under configuration.** Run 14 swept resource class `0xb6c8`
+and `0x12384` against pipeline depth 1 and 4: all four produced mode index 5,
+mode 7, command 23 and errno 5200, identical field for field. **Configuration
+does not select the submit path.**
+
+##### …but it is not invariant, and the selector is written by bitstream handling **[E]**
+
+2026-08-13. A whole-listing scan of every instruction touching `+0x1d08`, over
+the indexed `vdeccore_s0_full.asm` in `PS5-Research`, finds **three** writers,
+not one.
+
+The first is the exported four-field setter named above — and its address here is
+**`+0x288f0`**, not `+0x8f0`. The body is unambiguous (`+0x1d08`, `+0x1d18`,
+`+0x1d20`, `+0x1d1c`, `ret`) and every other offset in this section resolves
+exactly against the listing's declared base of `0x80096c000`, so `+0x8f0` is a
+transcription slip in the paragraph above rather than a second function. Left
+corrected here rather than silently edited, because an offset that is wrong by
+`0x28000` is the kind of thing that costs a deploy.
+
+The other two writers are **inside VdecCore**, at `+0x13e58` and `+0x158d8`, and
+both write the literal **1** — mode `0x10`, **ioctl command 24**:
+
+```
+mov  eax, [rcx+0x64f7c]
+cmp  eax, [rcx+0x2a88]          ; two counters in a large codec context
+jne  <skip>                     ; …must be equal
+mov  edx, 0x204
+lea  rdi, [rax+0x1448]
+mov  DWORD PTR [rax+0x1d08], 1  ; -> command 24
+call <memcpy>                   ; 0x204 bytes into obj+0x1448
+```
+
+The two sites are byte-for-byte the same shape in two large near-identical
+functions — the per-codec sequence handlers, on their stack-frame sizes and
+their position in the module.
+
+**So the earlier conclusion was right about configuration and wrong about
+reachability.** Run 14 varied resource class and pipeline depth, and neither is
+what writes this field. What writes it is a condition on *parsed bitstream
+state*. The claim "there is no cheap way to reach commands 22 or 24 from the
+public API" is withdrawn: there may be a very cheap way, and it is a property of
+the stream rather than of the API.
+
+~~**[H]**~~ — **settled against, 2026-08-14. [E]** The experiment was run: eight
+access units into one decoder, a `Reset` attempted between each, `[obj+0x1d08]`
+read off the live GpDec object after every Decode and every Reset. **All 34
+readings, across both configurations, were 5** — mode 7, ioctl command 23.
+Never 1, and `obj+0x1448` never changed after its baseline. So `[rax+0x1d08]` at
+`+0x13e58` / `+0x158d8` is **not** the same object the submit operates on, or
+its guard is unreachable from the public API.
+
+**The claim is bounded, and the bound is the interesting part.**
+`sceVideodec2Reset` returned `0x811D0111` every time and never cleared the error
+latch, so the decoder was never restored to a clean state between access units.
+Each Decode still returned `0x811D0111` rather than the software-latch codes
+`0x811D0300/0304`, so the attempts were getting past the API's own gates — but
+the codec sequence handlers plausibly never advance their counters while every
+submit is being refused. What is established is *the selector does not move
+while the driver is refusing the job*, which is not the same as *the selector
+can never move*. Reset is now the thing to read; see next-steps 6b.4.
+
+> **The first attempt reported the opposite, and it was an artefact of the
+> probe.** To allow a moved selector to be found, `find_device_object` was
+> widened from `mode == 7` to `mode == 7 || mode == 0x10`. Mode `0x10` is
+> **sixteen**, and the work arena contains a large region of solid
+> `10 00 00 00`; the search matched five "objects" inside it and every field
+> read out of the first was 16 because every word there is 16. The predicate's
+> power was never `mode == 7` — it was that **7 is rare**.
+>
+> Two free checks buy the selectivity back, and both are now in the probe:
+> the jump table must agree with itself (index 5 ↔ mode 7, index 1 ↔ mode
+> 0x10 — the false match read index **0** with mode **16**, which the table
+> forbids), and the fd at `+0x1d68` must be one the process really has open as
+> a character device (the false match claimed fd **119**; nothing above 17 was
+> open). With both in, exactly one candidate survives: `work+0x1600f0`, index
+> 5, mode 7, fd 16, an open chardev with `rdev 0x80`.
+>
+> **The general rule, since this is the second time a search predicate has
+> misled this project:** a predicate that matches a common value is not a
+> search. When a filter has to be loosened, the selectivity it gives up has to
+> be bought back with corroboration from an independent field.
+
+##### The driver handshake happens, it succeeds, and that rules out a whole class of cause **[E]**
+
+2026-08-13, from the same scan. VdecCore issues **exactly four** group-`0x83`
+ioctl commands, and the complete list closes a question this document had left
+open by implication:
+
+| function | command | encoding | what it is |
+|---|---|---|---|
+| `+0x2c8d0` | **11** | `_IOR(0x83, 11, 8)` | driver → us, 8 bytes |
+| `+0x2c8d0` | **18** | `_IOW(0x83, 18, 12)` | us → driver, 12 zero bytes |
+| `+0x287d0` | **20** | `_IOW(0x83, 20, 40)` | the memory pin `MapDirectMemory` drives |
+| `+0x2b870` | 22 / 23 / 24 | `_IOW(0x83, 22, 24)` +0/+1/+2 | the submit |
+
+`+0x2c8d0` had not been read before. It is a **version handshake**:
+
+```
++0x2c8eb  mov  esi, 0x4008830b        ; _IOR(0x83, 11, 8)
++0x2c8f9  mov  edi, [rdi+0x1d68]      ; the fd
+          call ioctl                  ; !=0 -> log line 0x51F, return failure
++0x2c92d  mov  r8d, [rbp-0x2c]        ; the 8 bytes the driver returned
++0x2c931  cmp  r8, 0x7000000          ; must be exactly 0x07000000
++0x2c938  jne  <log 0x524, 0x525, return failure>
++0x2c93a  mov  QWORD PTR [rbp-0x2c], 0
++0x2c946  mov  esi, 0x800c8312        ; _IOW(0x83, 18, 12), twelve zero bytes
+          call ioctl                  ; !=0 -> log line 0x536, return failure
+```
+
+It is called from `+0x26a60`, the same initialiser that calls `+0x2c470` — so it
+runs immediately after the fd and event-queue id are placed at `+0x1d68` /
+`+0x1d6c`, on every path that opens the device.
+
+**It succeeded on every run this project has ever made.** Its four failure lines
+are `0xD0A1` `0x51F`, `0x524`, `0x525` and `0x536`, and **none of them appears in
+any transcript** in `PS5-Research/deploy/` or `PS5-Research/console/`. The only
+two `D0A1` lines that appear anywhere are `0x00D5` (the pin) and `0x0254` (the
+submit).
+
+So the driver told us its version is `0x07000000`, accepted it, and accepted the
+init call. **"We never issued a setup ioctl the driver was waiting for" is dead**,
+and the ioctl inventory above is complete — there is no unissued command.
+
+##### `Reset` is the latch clear, and it never reaches it **[E]**
+
+2026-08-14, read offline from `PS5-Research/derived/` — no console. This answers
+next-steps 6b.4 and it changes what `0x811D0111` means.
+
+**`sceVideodec2Reset` (`libSceVideodec2 +0x30f0`).** Base `0x800a4c000`, so the
+body is at `0x800a4f0f0`. It returns `0x811D0111` from exactly three places, and
+none of them is an argument check:
+
+```
++0x3155  cmp [rbx+0x68], 0xa824d9799010a455   ; magic - PASSES
++0x3165  lea r14,[rbx+0xc8]
++0x316c  call <lock>                          ; (A) lock fails -> 0x811D0111
++0x317f  mov rdi,[rbx+0x78]                   ; the VdecCore object
++0x3183  xor esi,esi                          ; arg2 = 0
++0x3185  call <import>                        ; (B) fails -> r12d stays 0x811D0111
++0x318a  mov r12d,0x811d0111
++0x3192  jne +0x31bf                          ;     ...and the clear below is SKIPPED
+         ; ---- success path, not taken on any run this project has made ----
++0x3194  mov QWORD PTR [rbx+0x70],0
++0x319c  inc DWORD PTR [rbx+0x40]
++0x31a6  vmovups XMMWORD PTR [rbx+0x8],xmm0
++0x31ab  mov QWORD PTR [rbx+0x18],0
++0x31b3  vmovups XMMWORD PTR [rbx+0x44],xmm0  ; <-- SIXTEEN BYTES FROM +0x44
++0x31b8  mov DWORD PTR [rbx+0x54],0
++0x31bf  call <unlock>                        ; (C) unlock fails -> 0x811D0111
+```
+
+**`[rbx+0x44]` for 16 bytes covers `+0x48`, `+0x4c` and `+0x50`.** Those are,
+exactly, the two error latches `Decode` gates on — `decoder+0x48 == 0` else
+`0x811D0300`, `decoder+0x4c == 0` else `0x811D0304` — **and** the one-way flush
+latch at `decoder+0x50` that the ABI notes say stays set "until Reset". So the
+API does have a documented way back to a decodable state, this is it, and the
+reason it has never been observed is that the call at (B) fails first.
+
+**What (B) is, and what happens under it.** It is a PLT stub, so an import, and
+Videodec2's only code dependency below it is VdecCore. By the export table in
+`PS5-Research/console/evo_dump_exports.txt` the match is
+`sceVdecCoreResetDecoder` at VdecCore `+0x1a40` — **[I]**, from the signature
+`(object, 0)` and the export list, not from a resolved relocation. Reading it
+settles that our call is well formed:
+
+```
++0x1a4e  test rsi,rsi ; je +0x1a8f     ; arg2 == 0 is LEGAL - it means mode 0
++0x1a9b  mov [rdi+0x1a0], eax          ; ...so this stores 0 and continues
++0x1aa4  mov rdi,[rdi+0x140]           ; the GpDec object
++0x1aab  call 0x800978550              ; <-- fails
++0x1ab2  jne  -> log A01D line 0x649, return 0x80C00001
+```
+
+and inside `0x800978550` (GpDec, log module `B0A1`) the **first** call already
+fails, logging line `0x164C`, before anything touches the device fd.
+
+**So `0x811D0111` is not a lock problem and not an argument problem — it is
+GpDec refusing to reset the decoder.** That reframes the bound on §7's result
+above: the selector could not move because the decoder never left the state the
+failed submit put it in, and `Reset` is refused by the layer that owns that
+state.
+
+**GpDec's first check is a `memcmp` against a 16-byte magic. [E]** The helper at
+VdecCore `+0xe660` is a thunk to an import, called 42 times in the module, and
+two adjacent call sites at `+0x11d10`/`+0x11d3a` compare **one 16-byte stack
+buffer against two different `.rodata` constants** and branch on equality. That
+is `memcmp` and nothing else — you cannot lock or copy into read-only memory. So
+`0x800978550` opens with `memcmp(object, <magic at 0x8009fb730>, 0x10)` and
+requires equality.
+
+That turns GpDec's three failure lines into three *different statements about the
+object at `[vdeccore+0x140]`*, which is what makes this cheap to settle:
+
+| line | condition | what it would mean |
+|---|---|---|
+| `0x1645` | `rdi == NULL` | there is no GpDec object — a **lifetime** problem, not a permissions one |
+| `0x164C` | magic mismatch | the pointer at `+0x140` is stale or the object is debris |
+| `0x1653` | lock at `+0x20` failed | the object is valid and someone else holds it |
+
+**[H] as to which, and the probe no longer needs the console's help to say.** The
+VdecCore object is at `decoder+0x78`, in memory this payload allocated, so the
+pointer at `+0x140` can simply be read and the three cases told apart directly —
+`diagnose_gpdec_object()` in `projects/decodeframe_test/main.c` does exactly
+that, on the first Reset failure, following pointers only into ranges it owns.
+
+Worth noting for its own sake: GpDec's refusal happens *before* any ioctl — the
+failing call is `memcmp`, not a driver call — so **this does not show the driver
+refusing `Reset`**, and it must not be read as one.
+
+**A capture note, paid for once.** The `[VDECCORE@B0A1....]` and
+`[SCEVDECCORE@A01D....]` diagnostics go to **stdout on the hbldr pipe**, never to
+the USB log — which is why every example quoted in this document comes from a
+`*-stdout.txt`. The 2026-08-14 run piped stdout through `tail -40` and lost them.
+Redirect the whole of stdout to a file:
+
+```bash
+PS5_HOST=<ip> ./scripts/install-homebrew.sh --run --timeout 45 \
+    output/elf/decodeframe_test.elf > deploy-stdout.txt 2>&1
+```
 
 ##### `0x1450` is a genuine ioctl errno **[E]**
 
@@ -937,6 +1191,38 @@ mov  r8d, DWORD PTR [rax] ; *errno   <- 0x1450 = 5200 is logged from here
 
 The ioctl returned failure and `errno` was 5200. The driver is refusing the
 job, and everything on our side of that call is now known to be well formed.
+
+##### The same ioctl returns a *different* errno in the same run — which argues against the identity hypothesis **[E]**
+
+2026-08-13, found by re-reading run 8 rather than by deploying anything. Line
+`0x254` — the submit — appears **twice** in
+`PS5-Research/deploy/decodeframe-run8-stdout.txt`, with two different errnos:
+
+| where | line | errno |
+|---|---|---|
+| `Decode(AU 0)`, which returned `0x811D0111` | `D0A10254` | `0x1450` = **5200** |
+| after `Flush(0)`, which returned **`0x00000000`** | `D0A10254` | `0x13EF` = **5103** |
+
+Three known codes from this one driver now exist: **5031** (`0x13A7`, logged at
+line `0x00D5`, and already understood — `size` not page-aligned), **5103** and
+**5200**.
+
+**This is evidence against the hypothesis in §13**, which is that the driver is
+refusing our process's *identity* — its authid or its capabilities. A permission
+check refuses uniformly: same caller, same fd, same open file, same command,
+same answer. This driver gives two answers in one run depending on what is in
+the job. **It is inspecting the work, not the worker.**
+
+Stated with its caveat: stdout is interleaved with the payload's own printing,
+so `5103` sits between `Flush`'s result and `DeleteDecoder`'s and belongs to one
+of the two. A teardown has no reason to issue command 23, which points at
+`Flush`'s own submit — but whichever it is, it is line `0x254` returning a
+different errno from the same process, and that is the whole of the argument.
+
+The hypothesis is **downgraded, not killed**. A driver can check identity *and*
+validate jobs; 5103 and 5200 could both be job complaints with a third,
+uniform identity refusal never reached. But it is no longer the first thing to
+spend a kernel write on.
 
 ##### A correction, and the method note that goes with it
 
@@ -1816,19 +2102,53 @@ refusing is our process's *identity*, not our job — which would make errno 520
 the same shape as every other blocker in this effort. It is **[H]**. Nothing
 yet shows the driver checks anything of the sort.
 
-**How to settle it, cheapest and safest first:**
+> **Update, 2026-08-13: this hypothesis is downgraded and is no longer the
+> first thing to try.** The same ioctl line returns errno **5103** elsewhere in
+> run 8 while its caller returns success, against **5200** for the decode job —
+> same process, same fd, same command, two answers. A permission check refuses
+> uniformly. See §7, *"The same ioctl returns a different errno in the same
+> run"*. The ordering below is revised accordingly.
 
-1. **Read-only, no driver calls.** Report `kernel_get_ucred_authid` and
-   `kernel_get_ucred_caps` for the payload. Then scan kernel `.text` from
-   `KERNEL_ADDRESS_TEXT_BASE` for the immediate `0x1450`, dump whatever
-   function contains it with `kernel_copyout`, and disassemble it offline with
-   the existing `tools/re/` setup. This *reads* the answer instead of guessing
-   it — the method that cleared every gate in §7, applied one layer deeper
-   (rule 10).
+**How to settle it, cheapest and safest first — revised 2026-08-13:**
+
+0. ~~**No deploy at all.**~~ **DONE 2026-08-14, and the answer is no.** The
+   selector read 5 on all 34 readings across eight access units and two
+   configurations. It never reached ioctl command 24. See §7 above, including
+   the false positive the first attempt produced and the search-predicate rule
+   that came out of it.
+1. ~~**Read-only, no driver calls.** Scan kernel `.text` …~~ **WITHDRAWN — IT
+   PANICS THE CONSOLE.** `projects/kdump` implemented exactly this scan. It
+   printed the identity below, printed `probing in 1 MiB steps, up to 128 MiB
+   ...`, and the console panicked; the user reports it **always** panics. The
+   project has been deleted from the repo and from `scripts/build.sh`. **Do not
+   rebuild it.**
+
+   **This document is where the bad premise came from.** §2 records
+   `kernel_copyout` as "working and unable to fault the caller". That is true of
+   **a single small read at a known-good address** and does not generalise to
+   walking megabytes of address space, where unmapped or guarded pages take the
+   kernel down. Step 1 was written on the generalisation. Corrected here so the
+   sentence in §2 is not read that way again.
+
+   What the probe *did* return before dying is the one measurement this section
+   wanted, and it is now taken in the **app slot** rather than in
+   `SceSpZeroConf` (rule 12):
+
+       authid : 0x4800000000000027
+       caps   : ffffffffff1cff40ffffffffffffffff
+
+   psdevwiki records the decoder modules under `4900000000000002`. This is not
+   that — but see the argument above for why identity is still not the leading
+   explanation.
 2. **Needs explicit sign-off, because it writes kernel state.** Wrap the
    `sceVideodec2Decode` call in the same authid/caps elevation `pt.c` already
    uses, and retry. Per-process, temporary and restorable — but a kernel write,
-   and §9.1 is why that is not a decision to take unilaterally.
+   and §9.1 is why that is not a decision to take unilaterally. It moves up only
+   because step 1 died, not because the evidence for it improved — the 5103/5200
+   split still argues the driver inspects the job.
+3. **Read `sceVideodec2Reset` offline first.** It returns `0x811D0111` and never
+   clears the error latch, which is what bounds step 0's result and blocks every
+   multi-AU experiment. It costs no console and no sign-off. Next-steps 6b.4.
 
 ---
 
@@ -1854,6 +2174,32 @@ In the order they should be answered.
    side of the ioctl is now measured and well formed; the driver refuses with
    errno 5200. **This is the only question that matters, and §13 is how to
    answer it.**
+
+   *2026-08-13, three things narrowed it without a deploy.* The driver
+   **handshake succeeds** — VdecCore's version check (ioctl 11, must return
+   `0x07000000`) and its init call (ioctl 18) both ran and neither ever logged a
+   failure, so no setup command was skipped and the group-`0x83` inventory is
+   complete. The driver **discriminates on the job, not the caller** — the same
+   ioctl line returns 5103 elsewhere in run 8. And the submit path is **not**
+   fixed after all: two writers inside VdecCore set the mode selector to command
+   **24** under a bitstream condition, which §13 step 0 now tests first.
+
+5c. ~~**Is ioctl command 24 reachable from the public API?**~~ **ANSWERED NO,
+   2026-08-14. [E]** Eight access units, two configurations, 34 readings of
+   `[obj+0x1d08]` off the live object: **5 every time**. The writers at
+   `+0x13e58` / `+0x158d8` are not on the object the submit uses, or their guard
+   is unreachable from here. Bounded by the fact that `Reset` never cleared the
+   error latch, so the decoder never left the refused state. §7.
+
+5d. ~~**Why does `sceVideodec2Reset` fail?**~~ **READ 2026-08-14, no console.
+   [E]** It passes every one of its own gates — magic, lock, arguments — and is
+   refused one layer down: `sceVdecCoreResetDecoder` calls the GpDec reset,
+   whose *first* check fails, logging `B0A1` line `0x164C`. The state clear is
+   then skipped — and that clear is `vmovups [rbx+0x44]`, sixteen bytes covering
+   `decoder+0x48`, `+0x4c` and `+0x50`, i.e. **exactly the latches `Decode`
+   gates on**. §7. What remains **[H]** is *why* GpDec refuses; the refusal
+   happens before any ioctl, so it is not the driver, and the line number that
+   fired is already printed to stdout on every run.
 6. **What does a decoded frame actually look like?** Partly answered without a
    deploy: the `mapMemorySize` arithmetic says **NV12 or P010 at a stride of
    `align(width, 256)`**, H.264 padding height to 16 and HEVC not padding, with
