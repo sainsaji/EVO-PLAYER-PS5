@@ -81,6 +81,9 @@
 #include "addon_emby.h"
 #include "evo_net.h"
 #include <sys/stat.h>
+#include "evo_toast.h"
+#include "evo_recent.h"
+#include "evo_favorites.h"
 #include "assets/browser_icon_assets.h"
 
 #ifndef RR_BGRA
@@ -239,9 +242,9 @@ typedef enum {
 } PlaybackProfile;
 
 /* Media clock: audio when live, else video (silent / E-AC3 files). */
-static double prospero_media_clock_seconds(void);
+double prospero_media_clock_seconds(void);
 
-static PlaybackProfile current_profile = PROFILE_BALANCED;
+PlaybackProfile current_profile = PROFILE_BALANCED;
 static int settings_selected = 0;
 static int settings_playback_selected = 0;
 static int settings_subtitles_selected = 0;
@@ -250,7 +253,7 @@ static int settings_system_selected = 0;
 static int surround_test_selected = 0;
 static int profile_selected = 0;
 static int evo_tools_selected = 0;
-static int show_debug_overlay = 0;
+int show_debug_overlay = 0;
 int g_ps5_user_id = 0;
 int prospero_get_initial_user_id(void) { return g_ps5_user_id; }
 
@@ -296,7 +299,6 @@ void toast(const char* title, const char* msg);
 void clean_media_title(const char *path, char *title, size_t title_sz, char *meta, size_t meta_sz);
 void format_time_mmss(char *out, size_t out_size, double sec);
 long long now_ms(void);
-static void recent_save(void);
 static void format_file_size(char *out, size_t outsz, long long bytes);
 const char* profile_name(PlaybackProfile profile);
 
@@ -598,127 +600,8 @@ static void pp_product_overlay_leave(void)
 
 
 
-#define RECENT_FILE_DB "/mnt/usb0/evo_recent.txt"
-#define MAX_RECENT_FILES 25
-
-typedef struct {
-    char path[512];
-    char title[128];
-    double last_pos;
-    double duration;
-    long long last_played;
-} RecentFileEntry;
-
-static RecentFileEntry recent_files[MAX_RECENT_FILES];
-static int recent_file_count = 0;
-static int recent_selected = 0;
-
-
-#define FAVORITES_FILE_DB "/mnt/usb0/evo_favorites.txt"
-#define MAX_FAVORITES 100
-
-typedef struct {
-    char path[512];
-    char title[128];
-    double duration;
-} FavoriteEntry;
-
-static FavoriteEntry favorite_files[MAX_FAVORITES];
-static int favorite_count = 0;
-static int favorite_selected = 0;
-
-static void favorites_clear(void) {
-    memset(favorite_files, 0, sizeof(favorite_files));
-    favorite_count = 0;
-    favorite_selected = 0;
-}
-
-static int favorites_find(const char *path) {
-    if (!path || !path[0]) return -1;
-
-    for (int i = 0; i < favorite_count; i++) {
-        if (strcmp(favorite_files[i].path, path) == 0) return i;
-    }
-
-    return -1;
-}
-
-static int favorites_is_favorite(const char *path) {
-    return favorites_find(path) >= 0;
-}
-
-static void favorites_add(const char *path, const char *title, double duration) {
-    if (!path || !path[0]) return;
-    if (favorites_find(path) >= 0) return;
-    if (favorite_count >= MAX_FAVORITES) return;
-
-    FavoriteEntry *e = &favorite_files[favorite_count];
-    memset(e, 0, sizeof(*e));
-
-    snprintf(e->path, sizeof(e->path), "%s", path);
-    snprintf(e->title, sizeof(e->title), "%s", title && title[0] ? title : path);
-    e->duration = duration;
-
-    favorite_count++;
-}
-
-static void favorites_remove(const char *path) {
-    int idx = favorites_find(path);
-    if (idx < 0) return;
-
-    for (int i = idx; i < favorite_count - 1; i++) {
-        favorite_files[i] = favorite_files[i + 1];
-    }
-
-    if (favorite_count > 0) favorite_count--;
-
-    if (favorite_selected >= favorite_count) {
-        favorite_selected = favorite_count > 0 ? favorite_count - 1 : 0;
-    }
-}
-
-static void favorites_save(void) {
-    FILE *fp = fopen(FAVORITES_FILE_DB, "w");
-    if (!fp) return;
-
-    for (int i = 0; i < favorite_count; i++) {
-        fprintf(fp, "%s\t%s\t%.3f\n",
-            favorite_files[i].path,
-            favorite_files[i].title,
-            favorite_files[i].duration
-        );
-    }
-
-    fclose(fp);
-}
-
-static void favorites_load(void) {
-    favorites_clear();
-
-    FILE *fp = fopen(FAVORITES_FILE_DB, "r");
-    if (!fp) return;
-
-    char line[1024];
-
-    while (fgets(line, sizeof(line), fp) && favorite_count < MAX_FAVORITES) {
-        FavoriteEntry *e = &favorite_files[favorite_count];
-        memset(e, 0, sizeof(*e));
-
-        char *path = strtok(line, "\t");
-        char *title = strtok(NULL, "\t");
-        char *duration = strtok(NULL, "\t\r\n");
-
-        if (!path || !title) continue;
-
-        snprintf(e->path, sizeof(e->path), "%s", path);
-        snprintf(e->title, sizeof(e->title), "%s", title);
-        e->duration = duration ? atof(duration) : 0.0;
-
-        favorite_count++;
-    }
-
-    fclose(fp);
-}
+/* Recent files and Favorites state live in their own modules.
+ * See include/evo_recent.h and include/evo_favorites.h. */
 
 
 /* ==========================================================================
@@ -1425,6 +1308,7 @@ static void prospero_draw_progress_bar(
     }
 }
 
+
 static double prospero_recent_lookup(
     const char *path,
     double *out_duration
@@ -1588,139 +1472,11 @@ static void write_compatibility_report(void) {
 }
 
 
-static void favorites_toggle_current_media(void) {
-    if (!current_media_path[0]) return;
-
-    if (favorites_is_favorite(current_media_path)) {
-        favorites_remove(current_media_path);
-        favorites_save();
-        toast("FAVORITES", "Removed");
-    } else {
-        char title[128];
-        char meta[96];
-        clean_media_title(current_media_path, title, sizeof(title), meta, sizeof(meta));
-
-        favorites_add(current_media_path, title, media_duration_sec);
-        favorites_save();
-        toast("FAVORITES", "Added");
-    }
-}
+/* favorites_toggle_current_media moved to src/evo_favorites.c */
 
 
-
-static void recent_clear(void) {
-    memset(recent_files, 0, sizeof(recent_files));
-    recent_file_count = 0;
-    recent_selected = 0;
-}
-
-static void recent_add_or_update(const char *path, const char *title, double last_pos, double duration) {
-    if (!path || !path[0]) return;
-
-    int existing = -1;
-    for (int i = 0; i < recent_file_count; i++) {
-        if (strcmp(recent_files[i].path, path) == 0) {
-            existing = i;
-            break;
-        }
-    }
-
-    RecentFileEntry entry;
-    memset(&entry, 0, sizeof(entry));
-    snprintf(entry.path, sizeof(entry.path), "%s", path);
-    snprintf(entry.title, sizeof(entry.title), "%s", title && title[0] ? title : path);
-    entry.last_pos = last_pos;
-    entry.duration = duration;
-    entry.last_played = now_ms();
-
-    if (existing >= 0) {
-        for (int i = existing; i > 0; i--) {
-            recent_files[i] = recent_files[i - 1];
-        }
-        recent_files[0] = entry;
-    } else {
-        int limit = recent_file_count;
-        if (limit >= MAX_RECENT_FILES) limit = MAX_RECENT_FILES - 1;
-
-        for (int i = limit; i > 0; i--) {
-            recent_files[i] = recent_files[i - 1];
-        }
-
-        recent_files[0] = entry;
-
-        if (recent_file_count < MAX_RECENT_FILES) {
-            recent_file_count++;
-        }
-    }
-
-    recent_selected = 0;
-}
-
-
-static void recent_update_current_position(void) {
-    if (!current_media_path[0]) return;
-
-    double pos =
-        resume_base_offset_seconds +
-        prospero_media_clock_seconds();
-    if (pos < 0.0) pos = 0.0;
-
-    char title[128];
-    char meta[96];
-    clean_media_title(current_media_path, title, sizeof(title), meta, sizeof(meta));
-
-    recent_add_or_update(current_media_path, title, pos, media_duration_sec);
-    recent_save();
-}
-
-static void recent_save(void) {
-    FILE *fp = fopen(RECENT_FILE_DB, "w");
-    if (!fp) return;
-
-    for (int i = 0; i < recent_file_count; i++) {
-        fprintf(fp, "%s\t%s\t%.3f\t%.3f\t%lld\n",
-            recent_files[i].path,
-            recent_files[i].title,
-            recent_files[i].last_pos,
-            recent_files[i].duration,
-            recent_files[i].last_played
-        );
-    }
-
-    fclose(fp);
-}
-
-static void recent_load(void) {
-    recent_clear();
-
-    FILE *fp = fopen(RECENT_FILE_DB, "r");
-    if (!fp) return;
-
-    char line[1024];
-
-    while (fgets(line, sizeof(line), fp) && recent_file_count < MAX_RECENT_FILES) {
-        RecentFileEntry *e = &recent_files[recent_file_count];
-        memset(e, 0, sizeof(*e));
-
-        char *path = strtok(line, "\t");
-        char *title = strtok(NULL, "\t");
-        char *last_pos = strtok(NULL, "\t");
-        char *duration = strtok(NULL, "\t");
-        char *last_played = strtok(NULL, "\t\r\n");
-
-        if (!path || !title) continue;
-
-        snprintf(e->path, sizeof(e->path), "%s", path);
-        snprintf(e->title, sizeof(e->title), "%s", title);
-        e->last_pos = last_pos ? atof(last_pos) : 0.0;
-        e->duration = duration ? atof(duration) : 0.0;
-        e->last_played = last_played ? atoll(last_played) : 0;
-
-        recent_file_count++;
-    }
-
-    fclose(fp);
-}
+/* recent_clear, recent_add_or_update, recent_update_current_position,
+ * recent_save, recent_load moved to src/evo_recent.c */
 
 
 static void clear_media_metadata(MediaMetadata *m) {
@@ -2193,7 +1949,7 @@ static double first_video_pts_seconds = -1.0;
 static double first_audio_pts_seconds = -1.0;
 double video_clock_seconds = 0.0;
 
-static double prospero_media_clock_seconds(void)
+double prospero_media_clock_seconds(void)
 {
     double audio_rel = audio_clock_seconds;
     double video_rel = 0.0;
@@ -3639,218 +3395,11 @@ void ffmpeg_test(void) {
 
 
 /* PROSPERO_TOAST_STATE_START */
-
-static char prospero_toast_title[96] = {0};
-static char prospero_toast_message[256] = {0};
-static long long prospero_toast_started_ms = 0;
-static int prospero_toast_active = 0;
-static int prospero_toast_kind = 0;
-
-static int prospero_text_contains_ci(
-    const char *text,
-    const char *needle
-) {
-    if (!text || !needle || !needle[0]) {
-        return 0;
-    }
-
-    size_t needle_length = strlen(needle);
-
-    for (const char *cursor = text; *cursor; cursor++) {
-        if (
-            strncasecmp(
-                cursor,
-                needle,
-                needle_length
-            ) == 0
-        ) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-static int prospero_toast_is_technical(
-    const char *title,
-    const char *message
-) {
-    const char *technical_titles[] = {
-        "STREAM INFO",
-        "AUDIO STREAM",
-        "FIRST FRAME",
-        "MKV OPEN",
-        "MKV INFO",
-        "DECODER"
-    };
-
-    for (
-        size_t i = 0;
-        i <
-        sizeof(technical_titles) /
-        sizeof(technical_titles[0]);
-        i++
-    ) {
-        if (
-            title &&
-            strcasecmp(
-                title,
-                technical_titles[i]
-            ) == 0
-        ) {
-            return 1;
-        }
-    }
-
-    if (
-        title &&
-        strcasecmp(title, "AUDIO") == 0
-    ) {
-        if (
-            prospero_text_contains_ci(message, "OK") ||
-            prospero_text_contains_ci(message, "THREAD") ||
-            prospero_text_contains_ci(message, "DECODER")
-        ) {
-            return 1;
-        }
-    }
-
-    if (
-        title &&
-        strcasecmp(title, "PROFILE") == 0
-    ) {
-        return 1;
-    }
-
-    if (
-        title &&
-        (
-            prospero_text_contains_ci(title, "SELECTED") ||
-            prospero_text_contains_ci(message, "SELECTED")
-        )
-    ) {
-        return 1;
-    }
-
-    return 0;
-}
-
-static int prospero_toast_is_error(
-    const char *title,
-    const char *message
-) {
-    const char *error_terms[] = {
-        "FAIL",
-        "FAILED",
-        "ERROR",
-        "UNSUPPORTED",
-        "NOT FOUND",
-        "NO VIDEO",
-        "NO AUDIO",
-        "INVALID"
-    };
-
-    for (
-        size_t i = 0;
-        i <
-        sizeof(error_terms) /
-        sizeof(error_terms[0]);
-        i++
-    ) {
-        if (
-            prospero_text_contains_ci(
-                title,
-                error_terms[i]
-            ) ||
-            prospero_text_contains_ci(
-                message,
-                error_terms[i]
-            )
-        ) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
+/* Toast state and classification moved to src/evo_toast.c */
 /* PROSPERO_TOAST_STATE_END */
 
-void toast(
-    const char *title,
-    const char *msg
-) {
-    if (!title) {
-        title = "EVO PLAYER";
-    }
 
-    if (!msg) {
-        msg = "";
-    }
-
-    int technical =
-        prospero_toast_is_technical(
-            title,
-            msg
-        );
-
-    int error =
-        prospero_toast_is_error(
-            title,
-            msg
-        );
-
-    int debug_enabled =
-        show_debug_overlay ||
-        current_profile == PROFILE_DEBUG;
-
-    /*
-     * Normal users do not need decoder initialization,
-     * stream-count or successful-thread messages.
-     */
-    if (technical && !error && !debug_enabled) {
-        return;
-    }
-
-    snprintf(
-        prospero_toast_title,
-        sizeof(prospero_toast_title),
-        "%s",
-        title
-    );
-
-    snprintf(
-        prospero_toast_message,
-        sizeof(prospero_toast_message),
-        "%s",
-        msg
-    );
-
-    prospero_toast_started_ms =
-        now_ms();
-
-    prospero_toast_active = 1;
-
-    prospero_toast_kind =
-        error ? 2 :
-        technical ? 1 :
-        0;
-
-    /*
-     * EVO: the console's own notification banner is deliberately not used.
-     *
-     * This used to also fire sceNotificationSend() for technical messages,
-     * which put a PlayStation system toast over the app - the OS chrome, the
-     * OS position, the OS timing, none of it themeable and none of it
-     * dismissable by us. The player has its own toast, it is themed, and it
-     * is drawn inside our own frame; there is no reason for a second
-     * notification system that we do not control.
-     *
-     * Technical messages are still suppressed entirely unless the Debug
-     * profile or the overlay is on (see the early return above) - they now
-     * simply appear as ordinary in-app toasts when they do appear.
-     */
-}
+/* toast() and draw_prospero_toast() moved to src/evo_toast.c */
 
 
 #define PROSPERO_USER_SERVICE_USER_ID_SYSTEM 0xFF
@@ -16275,53 +15824,9 @@ int scePadOpen(int,int,int,void *);
 
 
 /* PROSPERO_TOAST_RENDERER_START */
-
-static void draw_prospero_toast(uint32_t *fb)
-{
-    /*
-     * Timing and state live here; every pixel is evo_widget_toast's.
-     *
-     * The old renderer built the panel out of eight hardcoded literals - a
-     * cyan border, a near-black fill, pale blue text - so it stayed cyan
-     * under CARBON, EMBER and AURORA. It was the last thing on screen that
-     * ignored the theme.
-     */
-    const int hold_ms = 2200;
-    const int fade_ms = 360;
-    const int slide_ms = 180;
-    const int slide_px = 90;
-
-    long long elapsed;
-    evo_toast t;
-
-    if (!prospero_toast_active) return;
-
-    elapsed = now_ms() - prospero_toast_started_ms;
-
-    if (elapsed >= hold_ms + fade_ms) {
-        prospero_toast_active = 0;
-        return;
-    }
-
-    memset(&t, 0, sizeof(t));
-    t.title   = prospero_toast_title;
-    t.message = prospero_toast_message;
-    t.kind    = (prospero_toast_kind == 2) ? EVO_TOAST_ERROR
-                                           : EVO_TOAST_INFO;
-
-    t.alpha = (elapsed > hold_ms)
-        ? 255 - (int)((elapsed - hold_ms) * 255 / fade_ms)
-        : 255;
-    if (t.alpha < 0) t.alpha = 0;
-
-    t.slide = (elapsed < slide_ms)
-        ? slide_px - (int)(elapsed * slide_px / slide_ms)
-        : 0;
-
-    evo_widget_toast(fb, &t);
-}
-
+/* draw_prospero_toast moved to src/evo_toast.c */
 /* PROSPERO_TOAST_RENDERER_END */
+
 
 
 /* PROSPERO_REAL_SEEK_START */

@@ -27,6 +27,7 @@ EXTRA_CFLAGS ?=
 CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -DEVO_TARGET_PS5=1 \
+    -Iinclude \
     -Ipp/include \
     -Iui/include \
     -Imedia/include \
@@ -91,7 +92,10 @@ MEDIA_SRCS := \
     media/src/prospero_thumbnail.c \
     media/src/evo_textreader.c \
     media/src/evo_direct_mem.c \
-    media/src/evo_stream_io.c
+    media/src/evo_stream_io.c \
+    src/evo_toast.c \
+    src/evo_recent.c \
+    src/evo_favorites.c
 
 
 # Streaming & Addon subsystems (Emby, Nuvio/Stremio, async HTTP REST queue)
