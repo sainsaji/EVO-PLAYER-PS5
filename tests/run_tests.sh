@@ -17,7 +17,13 @@ mkdir -p "${OUT}" "${COV_OUT}"
 
 echo "==> Building EVO Player Test Suite with Coverage Instrumentation..."
 
-CC="${CC:-gcc}"
+if [ -x "/usr/bin/gcc" ]; then
+    CC="/usr/bin/gcc"
+elif [ -x "/usr/bin/clang" ]; then
+    CC="/usr/bin/clang"
+else
+    CC="gcc"
+fi
 
 SRCS=(
     "${REPO_ROOT}/tests/test_runner.c"
