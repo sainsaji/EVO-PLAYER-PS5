@@ -55,9 +55,12 @@
 #include "evo_font.h"
 #include "evo_textreader.h"
 #include "evo_blend.h"
+#include "evo_direct_mem.h"
+#include "evo_stream_io.h"
 #include "prospero_thumbnail.h"
 #include "pp/include/evo_theme.h"
 #include "pp/include/evo_ui.h"
+
 /* EVO: the UI layer - navigation, focus, input, feedback, chrome, screens.
  * See the headers under ui/include; nothing in there knows about the decoder
  * or the asset headers, which is why it builds in a second and can run on
@@ -2401,7 +2404,9 @@ static int packet_queue_count(PacketQueue *q) {
 }
 
 AVFormatContext *play_fmt = NULL;
+static evo_stream_io_ctx_t *g_stream_io_ctx = NULL;
 AVCodecContext *play_ctx = NULL;
+
 AVPacket *play_pkt = NULL;
 AVFrame *play_frame = NULL;
 struct SwsContext *play_sws = NULL;
@@ -5566,10 +5571,18 @@ void stop_video_playback(void) {
         play_ctx = NULL;
     }
 
-    if (play_fmt) {
+    if (g_stream_io_ctx) {
+        if (play_fmt) {
+            avformat_close_input(&play_fmt);
+            play_fmt = NULL;
+        }
+        evo_stream_io_close(g_stream_io_ctx);
+        g_stream_io_ctx = NULL;
+    } else if (play_fmt) {
         avformat_close_input(&play_fmt);
         play_fmt = NULL;
     }
+
 
     video_decode_ready = 0;
     video_decode_done = 0;
@@ -6968,13 +6981,23 @@ int start_video_playback(const char *path) {
     audio_samples_decoded = 0;
     video_decode_done = 0;
 
+    if (g_stream_io_ctx) {
+        evo_stream_io_close(g_stream_io_ctx);
+        g_stream_io_ctx = NULL;
+    }
+
     int prospero_open_result =
-        avformat_open_input(
-            &play_fmt,
-            path,
-            NULL,
-            NULL
-        );
+        evo_stream_io_open(path, &play_fmt, NULL, &g_stream_io_ctx);
+    if (prospero_open_result < 0) {
+        prospero_open_result =
+            avformat_open_input(
+                &play_fmt,
+                path,
+                NULL,
+                NULL
+            );
+    }
+
 
     if (prospero_open_result < 0) {
         prospero_ffmpeg_error(
@@ -17349,6 +17372,9 @@ static void evo_vo_trace(const char *tag)
 #endif
 
 int main(void) {
+    /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
+    evo_direct_mem_init(64 * 1024 * 1024);
+
     /*
      * First, before anything draws or any thread starts. The glyph tables are
      * plain arrays with no lock on the read path - which is what keeps the
@@ -17356,6 +17382,7 @@ int main(void) {
      * is still the only thread. toast() below already draws text.
      */
     evo_font_build_tables();
+
 
     toast("EVO Player", "Version " EVO_PLAYER_VERSION);
     recent_load();

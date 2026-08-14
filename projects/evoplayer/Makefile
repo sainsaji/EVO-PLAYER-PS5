@@ -89,7 +89,10 @@ UI_SRCS := \
 # cut.
 MEDIA_SRCS := \
     media/src/prospero_thumbnail.c \
-    media/src/evo_textreader.c
+    media/src/evo_textreader.c \
+    media/src/evo_direct_mem.c \
+    media/src/evo_stream_io.c
+
 
 # Streaming & Addon subsystems (Emby, Nuvio/Stremio, async HTTP REST queue)
 ADDON_SRCS := \
