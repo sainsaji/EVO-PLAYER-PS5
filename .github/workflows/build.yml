@@ -267,7 +267,7 @@ jobs:
       - name: Run Test Suite & Generate Coverage
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh && bash ./scripts/gen-compile-commands.sh'
+            evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh'
 
       - name: Archive Test Coverage
         uses: actions/upload-artifact@v4

@@ -77,4 +77,8 @@ if command -v lcov &>/dev/null; then
     lcov --capture --directory "${OUT}" --output-file "${COV_OUT}/coverage.info" --rc lcov_branch_coverage=1 || true
 fi
 
+if [ -f "${REPO_ROOT}/scripts/gen-sonar-commands.py" ]; then
+    python3 "${REPO_ROOT}/scripts/gen-sonar-commands.py"
+fi
+
 echo "==> All Tests and Coverage Generated Successfully!"
