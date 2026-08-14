@@ -1,8 +1,78 @@
-# Hardware decode — the plan
+# Hardware decode — CLOSED
 
-**Goal: get video decoding off the CPU and onto the console's own decoder.**
+> # ⛔ This effort is closed. 2026-08-14.
+>
+> **Native hardware video decode does not work from a payload on 12.70, and
+> this project has stopped pursuing it.** Everything below is kept as the
+> record of how far it got and why it stopped — it is history, not a plan.
+> Do not restart from it without reading *"Where it actually stopped"* first.
+>
+> **The premise it was built on is also gone.** This document opens by saying
+> "there is no GPU either". That was true when it was written and is not true
+> now: the **GPU compute YUV→RGB pipeline shipped** and does 4K in ~7.4 ms,
+> a 2.81× speedup, in `pp/src/pp_compute_pipeline.c`. The problem hardware
+> decode existed to solve was solved another way. See
+> [reng-analysis-integration.md](reng-analysis-integration.md).
+>
+> ### Where it actually stopped
+>
+> Ten phases got the software side completely right. Modules load, symbols
+> resolve by NID, the decoder is created for H.264 **and** HEVC, memory is
+> mapped, the compute queue allocates, and `sceVideodec2Decode` builds a
+> correct command buffer — right resolution, right mode, real physical
+> addresses — and hands it to the driver.
+>
+> **The driver refuses the job with ioctl errno 5200, and that is the wall.**
+> Everything on our side of that call is measured and well formed.
+>
+> What the last session established, all of it narrowing rather than opening:
+>
+> - **Ioctl command 24 is not reachable.** 34 readings of the mode selector
+>   off the live GpDec object, across 8 access units and 2 configurations:
+>   5 every time. The one cheap hope of a different route into the driver is
+>   gone.
+> - **The `0x83` ioctl inventory is complete and the handshake succeeds.** The
+>   driver states its version, we accept it, it accepts our init. Nothing was
+>   skipped.
+> - **`Reset` cannot recover the decoder**, and it is not an independent
+>   blocker — it waits on a condition variable for a completion that the
+>   refused submit guarantees will never arrive. It is another symptom of 5200.
+> - **The identity hypothesis is weak, not strong.** The same ioctl returns
+>   errno 5103 elsewhere in the same run while its caller succeeds. A
+>   permission check refuses uniformly; this driver inspects the job.
+>
+> ### What would reopen it, and nothing less
+>
+> 1. **A working example to compare against.** The one measurement that would
+>   still be decisive is a process that decodes *successfully* on this console,
+>   read side by side with ours. `projects/mediaspy` was built for exactly this
+>   and found no userland process mapping both decoder modules — but that
+>   result was never confirmed against live playback, so it is **unfinished,
+>   not negative**.
+> 2. **The kernel side of errno 5200**, obtained some way that is not a payload
+>   scanning kernel text. That panics the console, every time — see
+>   *"What must never be retried"*.
+>
+> ### What must never be retried
+>
+> - **Sweeping kernel `.text` with `kernel_copyout`.** Panics the console. The
+>   `kdump` project was deleted for it. §2's "cannot fault the caller" is true
+>   of one small read at a known-good address and does not generalise.
+> - **`sceVideoOutOpen` from a payload.** Panics the console when a compute
+>   queue is allocated afterwards. Returns a bogus handle that passes a `< 0`
+>   check.
+> - **Fuzzing the decoder fd with malformed ioctls.** Proposed once, never run,
+>   and it was a bad idea both times it was considered.
+>
+> Full evidence lives on the `research/hardware-decode` branch, in
+> `hardware-decode-findings.md` §7 and `hardware-decode-next-steps.md` Phase 6b.
 
-This document is written to be picked up cold. It carries everything needed to
+---
+
+**Original goal: get video decoding off the CPU and onto the console's own
+decoder.**
+
+This document was written to be picked up cold. It carries everything needed to
 resume the work without re-deriving anything, and it is deliberately a *plan of
 attack* rather than a status page — the raw findings live in
 [native-media-research.md](native-media-research.md), which this links to

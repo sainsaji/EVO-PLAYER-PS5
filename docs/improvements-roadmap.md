@@ -13,6 +13,8 @@
 |:---:|---|:---:|:---:|---|---|
 | 🔴 **P1** | [Subtitle Picker Overlay Fix](#p1--subtitle-picker-overlay-fix) | XS | None | Playback / UI | Ready |
 | 🔴 **P1** | [Codec Sweep — 29-file Test Set](#p1--codec-sweep--29-file-test-set) | M | None | QA / Validation | Ready |
+| 🔴 **P1** | [`https://` Is Parsed But Not Implemented](#p1--https-is-parsed-but-not-implemented) | M | Low | Addons / Network | **New 2026-08-14** |
+| 🟠 **P2** | [Make the Codec Sweep Measure Time](#p2--make-the-codec-sweep-measure-time-not-just-passfail) | XS | None | QA / Validation | **New 2026-08-14** |
 | 🟠 **P2** | [Universal Subtitle Cue Counts](#p2--universal-subtitle-cue-counts) | M | Low | Subtitles | Planned |
 | 🟠 **P2** | [DualSense Touchpad Timeline Scrubbing](#p2--dualsense-touchpad-timeline-scrubbing) | M | Low | Input | Planned |
 | 🟠 **P2** | [Dynamic Audio Re-routing Detection](#p2--dynamic-audio-re-routing-detection) | S | Low | Audio | Planned |
@@ -240,6 +242,80 @@ Nothing calls this function. It describes an 80×80 world that no longer exists 
 
 ---
 
+## P1 — `https://` Is Parsed But Not Implemented
+
+**Found:** 2026-08-14, reading `evo_net.c` against the module inventory.
+**Size:** M **Risk:** Low **Domain:** Addons / Network
+
+### Problem
+
+[`evo_net.c`](../projects/evoplayer/addons/src/evo_net.c) accepts an
+`https://` URL, strips the scheme and sets the port to 443 — and then opens a
+**plain BSD socket** and calls `send()`/`recv()` on it. There is no TLS
+anywhere in the tree: no mbedTLS, no OpenSSL, no wolfSSL, and no `-lssl`,
+`-lcrypto` or `SceSsl` in the link line.
+
+```c
+} else if (strncmp(p, "https://", 8) == 0) {
+    p += 8;
+    default_port = 443;     /* ...and then plaintext send() to port 443 */
+}
+```
+
+So the URL parses, the connection opens, and the server — which is speaking
+TLS — never replies to a plaintext `GET`. **Any Emby or Jellyfin server behind
+HTTPS simply does not work**, which is most remote servers and a good share of
+LAN ones. The failure surfaces as a timeout or an empty response, not as
+"HTTPS is unsupported", so it looks like a broken server rather than a missing
+feature.
+
+Accepting the scheme is what makes this a bug rather than a limitation. A
+client that rejected `https://` outright would at least be honest.
+
+### Fix
+
+Two routes, and the native one is available:
+
+1. **`libSceHttp.sprx`** — confirmed present on 12.70 via `reng`. It is the
+   console's own HTTP(S) client and handles TLS, redirects and connection
+   reuse. It needs the same load-and-resolve-by-NID treatment every other Sony
+   module in this project has had, and that path is well understood here.
+2. **Bundle a small TLS library** (mbedTLS) and keep the existing socket code.
+   No console research, larger ELF, and the player is already 33.9 MB.
+
+Start by reading `libSceHttp`'s exports — the technique is proven and costs no
+console time.
+
+### Done When
+
+- An `https://` Emby/Jellyfin server authenticates, lists libraries and streams.
+- A TLS failure reports *itself* — bad certificate, handshake failure — rather
+  than timing out.
+- If neither route lands, `https://` is **rejected at entry** with a message
+  saying so, instead of being silently attempted in plaintext.
+
+---
+
+## P2 — Make the Codec Sweep Measure Time, Not Just Pass/Fail
+
+**Amends:** [P1 — Codec Sweep](#p1--codec-sweep--29-file-test-set)
+**Size:** XS (a column, not a project) **Risk:** None
+
+Now that hardware decode is closed, **decode is permanently on the CPU**, and
+that changes what the sweep needs to record. A pass/fail table answers "does it
+play"; it does not answer "does it play *at rate*", which is the question that
+now has no other way of being answered.
+
+Add per-file **decode ms/frame and dropped-frame count** to the
+[`validation.md`](validation.md) table. The GPU compute pipeline took colour
+conversion down to ~7.4 ms at 4K, so conversion is no longer the suspect when a
+high-bitrate file stutters — decode is, and this is the measurement that says
+so. It also tells the [FFmpeg `full` profile](#p3--ffmpeg-full-decoder-profile)
+item whether a codec is missing or merely too slow, which are different
+problems with different fixes.
+
+---
+
 ## Closed — Do Not Reopen
 
 | Item | Why Closed |
@@ -248,4 +324,5 @@ Nothing calls this function. It describes an 80×80 world that no longer exists 
 | Controller haptics | Built, tested on hardware, removed. Every vibration entry point either returns success and does nothing or rejects the call. Full probe table in [`ui-handoff.md`](ui-handoff.md). |
 | `package-pkg.sh --format app` | `make_fself.py` requires static `ET_EXEC`; all payloads here are PIE. Structural, not a missing flag. See [`packaging.md`](packaging.md). |
 | Signed fPKG | Requires Sony's proprietary `prospero-pub-cmd`. See [`packaging.md`](packaging.md) §3. |
-| Hardware video decode (`libSceAvPlayer`) | Modules load and all 6 entry points resolve on 12.70. Blocked on PS5 `SceAvPlayerInitData` layout (unconfirmed vs PS4) and sandbox restriction (no user session in payload slot). Timeboxed spike in `projects/avplayer_test/` only. See [`hardware-decode.md`](hardware-decode.md). |
+| Hardware video decode (`libSceVideodec2` / `libSceAvPlayer`) | **CLOSED 2026-08-14 — a definitive no, after ten phases.** The old reason given here (init-struct layout, no user session) was wrong on both counts: the struct is fully recovered, the app slot *does* have a user session, decoders are created for H.264 and HEVC, and `sceVideodec2Decode` builds a correct command buffer. **The driver refuses the job with ioctl errno 5200**, and every cheap route past it is now closed — alternate ioctl command unreachable (34 live readings), driver handshake succeeds so nothing was skipped, and `Reset` can never recover the decoder. The goal it existed for was met by the GPU compute pipeline instead. See [`hardware-decode.md`](hardware-decode.md), which opens with the closure and the two calls that **panic the console** and must never be retried. |
+| Hardware JPEG / PNG decode for cover art | Looked for on 2026-08-14 and not found: no `libSceJpeg*`, `libScePng*` or image-codec module appears in the `reng` corpus for 12.70, while `libSceHttp`, `libSceIme`, `libSceNotification` and `libSceFont` all do. Cover art stays on `stb_image`. *Caveat: that corpus is dominated by firmware file paths and the vsh prefetch list, so this is strong absence-of-evidence, not proof.* |

@@ -25,7 +25,7 @@ history, not work — both defects it describes are fixed. And the dead ends in
 | 7 | [Decide what sidecar subtitles are](#7-decide-what-sidecar-subtitles-are) | S to investigate | low | Unknown behaviour on a common file type |
 | 8 | [Console-native launch (Media tile)](#8-console-native-launch-media-tile) | **built, awaiting first install** | **high** | Removes the second device from first-run |
 | 9 | [FFmpeg `full` decoder profile](#9-ffmpeg-full-decoder-profile) | S–M | low | Widens format coverage; needs #1 first |
-| 10 | [Hardware decode spike](#10-hardware-decode-spike-libsceavplayer) | L | **high** | 4K without CPU conversion — or a definitive no |
+| ~~10~~ | ~~[Hardware decode spike](#10-hardware-decode-spike-libsceavplayer)~~ | — | — | **CLOSED 2026-08-14 — the definitive no.** The driver refuses the job with ioctl errno 5200, and the goal it existed for (4K without CPU conversion) was met by the GPU compute pipeline instead |
 | 11 | [Retire `selected`](#11-chore-retire-selected) | S | none | Dead weight in the loop signature |
 | 12 | [Overlay helpers for the subtitle picker](#12-give-the-subtitle-picker-the-overlay-helpers) | S | low | Latent 0.1.3-class freeze; the fix already exists |
 | 13 | [Retire `prospero_cover_blit()`](#13-chore-retire-prospero_cover_blit) | S | none | Dead code describing an 80×80 world |
@@ -224,9 +224,41 @@ codec set actually does with real files is optimising blind. Once the sweep has
 a failure list, it will say whether `full` is the answer to any of it, and what
 it costs in ELF size (the player is already 33.9 MB).
 
-## 10. Hardware decode spike (`libSceAvPlayer`)
+## 10. ~~Hardware decode spike (`libSceAvPlayer`)~~ — **CLOSED, 2026-08-14**
 
-**Full research:** [`native-media-research.md`](native-media-research.md).
+> **This item asked for "4K without CPU conversion — or a definitive no". It
+> got both, from different directions, and neither leaves anything to do here.**
+>
+> **The definitive no.** Ten phases of research took the software side as far
+> as it goes: modules load, symbols resolve by NID, decoders are created for
+> H.264 and HEVC, memory maps, the compute queue allocates, and
+> `sceVideodec2Decode` builds a well-formed command buffer with the right
+> resolution and real physical addresses. The driver then refuses the job with
+> **ioctl errno 5200**. Every cheap route past it has been tried and closed —
+> the alternate ioctl command is unreachable (34 live readings), the driver
+> handshake succeeds so nothing was skipped, and `Reset` cannot recover the
+> decoder because it waits forever on a completion the refused job will never
+> produce. See [hardware-decode.md](hardware-decode.md), which now opens with
+> the closure and the list of things that must never be retried.
+>
+> **And the goal was met anyway.** The reason this item was rated "high" value
+> was the 9.15 ms/frame CPU colour convert quoted below. That is gone: the
+> **GPU compute YUV→RGB pipeline** does 4K in ~7.4 ms — 2.81× — in
+> `pp/src/pp_compute_pipeline.c`. Hardware decode was one way to get there and
+> it is no longer the only one, so the risk/reward that justified the spike no
+> longer exists.
+>
+> **Two rules survive this closure and outlive the item**, because they cost
+> real console time to learn:
+> - Never sweep kernel `.text` from a payload — it panics the console.
+> - Never call `sceVideoOutOpen` from a payload — it panics the console, and it
+>   returns a bogus handle that passes a `< 0` check.
+
+**Full research:** [`native-media-research.md`](native-media-research.md), and
+the `research/hardware-decode` branch for the phase-by-phase findings.
+
+<details>
+<summary>The original item, as written before it was closed</summary>
 
 Verified on 12.70 with no proprietary files: `libSceAvPlayer.sprx` loads and all
 six probed entry points resolve — `sceAvPlayerInit`, `AddSource`,
@@ -251,6 +283,8 @@ is research, not a deliverable.
 If it ever lands, `native-media-research.md` is emphatic on the shape: decoder
 behind an interface, FFmpeg software path always available, hardware selected at
 **run time** by probing. Never a build-time dependency.
+
+</details>
 
 ## 11. Chore: retire `selected`
 
