@@ -789,14 +789,17 @@ void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
     evo_text(fb, inset_x + (tag_w - tw)/2, hy + (tag_h - 18)/2, tag_str,
              th->accent, EVO_FACE_SMALL);
 
-    /* Tagline */
-    evo_text_fit(fb, inset_x + tag_w + 20, hy + 2, inset_w - tag_w - 300,
-                 cur->tagline, th->text_primary, EVO_FACE_MENU);
-
     /* Stats right */
     char stats_str[64];
     snprintf(stats_str, sizeof(stats_str), "%d HIGHLIGHTS  -  %s", cur->item_count, cur->date);
+    int stats_w = evo_text_w(stats_str, EVO_FACE_SMALL);
     evo_text_right(fb, inset_x + inset_w, hy + 7, stats_str, th->text_muted, EVO_FACE_SMALL);
+
+    /* Tagline */
+    int max_tagline_w = inset_w - tag_w - stats_w - 40;
+    if (max_tagline_w < 120) max_tagline_w = 120;
+    evo_text_fit(fb, inset_x + tag_w + 20, hy + 2, max_tagline_w,
+                 cur->tagline, th->text_primary, EVO_FACE_MENU);
 
     /* Divider */
     evo_ui_hline(fb, inset_x, hy + 46, inset_w, with_alpha(th->border, 110));
@@ -926,12 +929,18 @@ void evo_screen_dialog(uint32_t *fb, const evo_dialog_model *m)
      * same rule the footer hints follow, and for the same reason.
      */
     ax = x + pad;
+    int max_actions_r = x + w - pad;
 
     for (i = 0; i < m->action_count && m->actions; i++) {
         int lw = evo_text_w(m->actions[i].label, EVO_FACE_SUB);
         int cw = EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP + lw + 40;
         int cy = y + h - pad - 56;
         int primary = (i == 0);
+
+        if (ax + cw > max_actions_r) {
+            cw = max_actions_r - ax;
+            if (cw < 50) break;
+        }
 
         evo_ui_round_rect(fb, ax, cy, cw, 56, 28,
                           primary ? th->accent : with_alpha(th->surface, 255),
@@ -943,10 +952,14 @@ void evo_screen_dialog(uint32_t *fb, const evo_dialog_model *m)
                          m->actions[i].glyph,
                          primary ? th->bg_bottom : th->accent);
 
-        evo_text(fb, ax + 18 + EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP,
-                 evo_text_y_centred(cy, 56, EVO_FACE_SUB),
-                 m->actions[i].label,
-                 primary ? th->bg_bottom : th->text_primary, EVO_FACE_SUB);
+        int max_label_w = cw - (18 + EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP + 18);
+        if (max_label_w > 0) {
+            evo_text_fit(fb, ax + 18 + EVO_FOOTER_GLYPH + EVO_FOOTER_GLYPH_GAP,
+                         evo_text_y_centred(cy, 56, EVO_FACE_SUB),
+                         max_label_w,
+                         m->actions[i].label,
+                         primary ? th->bg_bottom : th->text_primary, EVO_FACE_SUB);
+        }
 
         ax += cw + 20;
     }

@@ -10740,23 +10740,27 @@ double percentage = 0.0;
         /*
          * Title and state.
          */
-        rr_text(
+        int max_title_w = panel_w - 650;
+        evo_text_fit(
             fb,
             panel_x + 46,
             panel_y + 32,
+            max_title_w,
             title,
             osd_col(th->text_primary, alpha * 245 / 255),
-            2
+            EVO_FACE_MENU
         );
 
         if (metadata[0]) {
-            rr_text(
+            int max_meta_w = prospero_scrub_active ? (panel_w - 420) : (panel_w - 100);
+            evo_text_fit(
                 fb,
                 panel_x + 48,
                 panel_y + 76,
+                max_meta_w,
                 metadata,
                 osd_col(th->text_secondary, alpha * 220 / 255),
-                1
+                EVO_FACE_SUB
             );
         }
 
