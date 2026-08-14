@@ -2123,6 +2123,7 @@ struct SwsContext *play_sws = NULL;
 char current_media[128];
 char current_path[256] = "/mnt/usb0";
 char current_media_path[512];
+char g_current_media_title[256] = {0};
 char current_image[256];
 char current_image_path[512];
 uint32_t *bmp_pixels = NULL;
@@ -4147,6 +4148,7 @@ static int  evo_is_text_file(const char *name);
 static void evo_reader_open(const char *path);
 
 void file_action(const char *name) {
+    g_current_media_title[0] = '\0';
     /* Remember the folder containing the selected media. */
     prospero_last_folder_save();
 
@@ -7633,6 +7635,34 @@ int str_contains_ci(const char *s, const char *needle) {
 }
 
 void clean_media_title(const char *path, char *line1, size_t line1_sz, char *line2, size_t line2_sz) {
+    if (!path || !path[0]) {
+        if (line1 && line1_sz > 0) line1[0] = '\0';
+        if (line2 && line2_sz > 0) line2[0] = '\0';
+        return;
+    }
+
+    if (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0) {
+        if (g_current_media_title[0]) {
+            snprintf(line1, line1_sz, "%s", g_current_media_title);
+        } else {
+            const char *slash = strrchr(path, '/');
+            const char *fname = slash ? slash + 1 : path;
+            char temp[256];
+            snprintf(temp, sizeof(temp), "%s", fname);
+            char *q = strchr(temp, '?');
+            if (q) *q = '\0';
+            if (temp[0] && strcmp(temp, "stream") != 0 && strcmp(temp, "master.m3u8") != 0) {
+                snprintf(line1, line1_sz, "%s", temp);
+            } else {
+                snprintf(line1, line1_sz, "Emby Media Stream");
+            }
+        }
+        if (line2 && line2_sz > 0) {
+            snprintf(line2, line2_sz, "EMBY STREAM");
+        }
+        return;
+    }
+
     const char *name = strrchr(path, '/');
     name = name ? name + 1 : path;
 
@@ -15277,6 +15307,7 @@ static void evo_emby_browse_activate(void)
         if (item->stream_url[0]) {
             evo_feedback(EVO_FB_CONFIRM);
             strncpy(emby_active_item_id, item->id, sizeof(emby_active_item_id) - 1);
+            strncpy(g_current_media_title, item->title, sizeof(g_current_media_title) - 1);
             strncpy(current_media_path, item->stream_url, sizeof(current_media_path) - 1);
             emby_report_playback_start(item->id);
             emby_last_report_sec = 0;
