@@ -62,7 +62,7 @@ jobs:
       - name: Export image
         run: docker save evo-player/ps5-dev:ci | gzip > /tmp/evo-image.tar.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docker-image
           path: /tmp/evo-image.tar.gz
@@ -137,7 +137,7 @@ jobs:
             '
 
       - name: Archive ELF artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ps5-elf-payloads
           path: |
@@ -148,7 +148,7 @@ jobs:
 
       - name: Archive build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-logs
           path: output/logs/
@@ -179,7 +179,7 @@ jobs:
             '
 
       - name: Archive PKG artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ps5-homebrew-bundles
           path: output/pkg/**
@@ -209,7 +209,7 @@ jobs:
             evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-ffmpeg.sh --profile minimal'
 
       - name: Archive codec inventory
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ffmpeg-codec-inventory
           path: output/logs/ffmpeg-*-codecs.txt
@@ -235,7 +235,7 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-prosperoplayer.sh'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: prosperoplayer-baseline
@@ -268,7 +268,7 @@ jobs:
             evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh && bash ./scripts/gen-compile-commands.sh'
 
       - name: Archive Test Coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-coverage-report
