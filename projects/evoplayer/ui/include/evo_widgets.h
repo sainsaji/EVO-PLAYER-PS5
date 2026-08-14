@@ -178,6 +178,51 @@ void evo_widget_toast(uint32_t *fb, const evo_toast *t);
 void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
                       const char *title, const char *hint, int icon);
 
+/* ---- badge / pill tags --------------------------------------------------- */
+
+enum evo_badge_category {
+    EVO_BADGE_ACCENT  = 0, /* Theme Accent (NEW, INFO, 4K) */
+    EVO_BADGE_SUCCESS = 1, /* Green (FIXED, READY, ONLINE) */
+    EVO_BADGE_WARNING = 2, /* Amber (IMPROVED, STANDBY, HDR) */
+    EVO_BADGE_DANGER  = 3, /* Red (REMOVED, ERROR, OFFLINE) */
+    EVO_BADGE_MUTED   = 4  /* Subtle text muted pill */
+};
+
+/* Generic pill badge with caller-provided colors. */
+void evo_widget_badge(uint32_t *fb, int x, int y, int w, int h,
+                      const char *text, uint32_t bg, uint32_t border,
+                      uint32_t text_col, int face);
+
+/* Standardized categorical pill badge. */
+void evo_widget_category_badge(uint32_t *fb, int x, int y, int w, int h,
+                               int category, const char *text);
+
+/* ---- stat / telemetry card ----------------------------------------------- */
+
+typedef struct evo_stat_card {
+    const char *header_label;
+    const char *title;
+    const char *line1;
+    const char *line2;
+    const char *status_text;
+    int         is_active;
+} evo_stat_card;
+
+void evo_widget_stat_card(uint32_t *fb, int x, int y, int w, int h,
+                          const evo_stat_card *card);
+
+/* ---- audio / speaker stage node ------------------------------------------ */
+
+typedef struct evo_speaker_node {
+    const char *label;
+    const char *sub;
+    int         is_active;
+    int         is_selected;
+} evo_speaker_node;
+
+void evo_widget_speaker_node(uint32_t *fb, int x, int y, int w, int h,
+                             const evo_speaker_node *node);
+
 #ifdef __cplusplus
 }
 #endif

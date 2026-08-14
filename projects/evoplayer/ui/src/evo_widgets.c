@@ -649,3 +649,147 @@ void evo_widget_empty(uint32_t *fb, int x, int y, int w, int h,
     if (hint)
         evo_text_centre(fb, cx, cy + 62, hint, th->text_muted, EVO_FACE_SUB);
 }
+
+/* ---- badge / pill tags --------------------------------------------------- */
+
+void evo_widget_badge(uint32_t *fb, int x, int y, int w, int h,
+                      const char *text, uint32_t bg, uint32_t border,
+                      uint32_t text_col, int face)
+{
+    if (!text || !*text) return;
+
+    int radius = h / 4;
+    if (radius < 4) radius = 4;
+    if (radius > 8) radius = 8;
+
+    evo_ui_round_rect(fb, x, y, w, h, radius,
+                      bg, bg, border, 1,
+                      0, 0);
+
+    int tw = evo_text_w(text, face);
+    int tx = x + (w - tw) / 2;
+    int ty = y + (h - (face == EVO_FACE_SMALL ? 16 : 20)) / 2;
+    if (tx < x + 4) tx = x + 4;
+
+    evo_text(fb, tx, ty, text, text_col, face);
+}
+
+void evo_widget_category_badge(uint32_t *fb, int x, int y, int w, int h,
+                               int category, const char *text)
+{
+    const evo_theme *th = evo_theme_current();
+    uint32_t fill;
+    uint32_t border;
+    uint32_t text_col;
+
+    switch (category) {
+    case EVO_BADGE_SUCCESS:
+        fill     = with_alpha(0x00227733, 90);
+        border   = with_alpha(0x0044CC66, 220);
+        text_col = with_alpha(0x0088FFAA, 255);
+        break;
+    case EVO_BADGE_WARNING:
+        fill     = with_alpha(0x00885500, 90);
+        border   = with_alpha(0x00FFBB33, 220);
+        text_col = with_alpha(0x00FFEE77, 255);
+        break;
+    case EVO_BADGE_DANGER:
+        fill     = with_alpha(0x00881111, 90);
+        border   = with_alpha(0x00FF4444, 220);
+        text_col = with_alpha(0x00FFAAAA, 255);
+        break;
+    case EVO_BADGE_MUTED:
+        fill     = with_alpha(th->surface, 120);
+        border   = with_alpha(th->border, 160);
+        text_col = th->text_muted;
+        break;
+    case EVO_BADGE_ACCENT:
+    default:
+        fill     = with_alpha(th->accent_soft, 85);
+        border   = with_alpha(th->accent, 220);
+        text_col = th->accent;
+        break;
+    }
+
+    evo_widget_badge(fb, x, y, w, h, text, fill, border, text_col, EVO_FACE_SMALL);
+}
+
+/* ---- stat / telemetry card ----------------------------------------------- */
+
+void evo_widget_stat_card(uint32_t *fb, int x, int y, int w, int h,
+                          const evo_stat_card *card)
+{
+    if (!card) return;
+    const evo_theme *th = evo_theme_current();
+
+    evo_ui_round_rect(fb, x, y, w, h, 18,
+                      th->surface_alt, th->bg_bottom,
+                      card->is_active ? th->accent : th->border,
+                      card->is_active ? 2 : 1,
+                      0x44000000, 16);
+
+    if (card->header_label && *card->header_label) {
+        evo_text(fb, x + 24, y + 18, card->header_label, th->accent, EVO_FACE_SMALL);
+    }
+
+    if (card->title && *card->title) {
+        evo_text_fit(fb, x + 24, y + 48, w - 48, card->title,
+                     card->is_active ? th->accent : th->text_primary, EVO_FACE_MENU);
+    }
+
+    if (card->line1 && *card->line1) {
+        evo_text_fit(fb, x + 24, y + 92, w - 48, card->line1,
+                     th->text_secondary, EVO_FACE_SMALL);
+    }
+
+    if (card->line2 && *card->line2) {
+        evo_text_fit(fb, x + 24, y + 124, w - 48, card->line2,
+                     th->text_muted, EVO_FACE_SMALL);
+    }
+
+    if (card->status_text && *card->status_text) {
+        evo_text_fit(fb, x + 24, y + 158, w - 48, card->status_text,
+                     card->is_active ? th->accent : th->text_secondary, EVO_FACE_SMALL);
+    }
+}
+
+/* ---- audio / speaker stage node ------------------------------------------ */
+
+void evo_widget_speaker_node(uint32_t *fb, int x, int y, int w, int h,
+                             const evo_speaker_node *node)
+{
+    if (!node) return;
+    const evo_theme *th = evo_theme_current();
+
+    if (node->is_active) {
+        int cx = x + w / 2;
+        int cy = y + h / 2;
+        evo_ui_circle(fb, cx, cy, 75, 0x3319D8FF);
+        evo_ui_circle(fb, cx, cy, 105, 0x1A19D8FF);
+    }
+
+    uint32_t fill_t = node->is_active ? 0xDD004466 : (node->is_selected ? th->surface_sel : th->surface);
+    uint32_t fill_b = node->is_active ? 0xDD002233 : (node->is_selected ? th->surface_sel_alt : th->surface_alt);
+    uint32_t border = node->is_active ? 0xFF00E5FF : (node->is_selected ? th->border_sel : th->border);
+
+    evo_ui_round_rect(fb, x, y, w, h, 16,
+                      fill_t, fill_b, border, (node->is_active || node->is_selected) ? 2 : 1,
+                      node->is_active ? 0x8819D8FF : (node->is_selected ? 0x66000000 : 0x22000000),
+                      node->is_active ? 18 : (node->is_selected ? 12 : 6));
+
+    if (node->is_selected) {
+        evo_ui_round_rect(fb, x + 4, y + 14, 5, h - 28, 3,
+                          th->accent, th->accent, th->accent, 0, 0, 0);
+    }
+
+    if (node->label && *node->label) {
+        uint32_t txt_c = node->is_active ? 0xFF00FFFF : (node->is_selected ? th->text_primary : th->text_secondary);
+        evo_text(fb, x + 20, y + 14, node->label, txt_c, EVO_FACE_MENU);
+    }
+
+    if (node->sub && *node->sub) {
+        evo_text(fb, x + 20, y + 46, node->sub,
+                 node->is_active ? th->accent : th->text_muted,
+                 EVO_FACE_SMALL);
+    }
+}

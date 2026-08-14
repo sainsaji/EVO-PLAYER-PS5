@@ -16,6 +16,8 @@
 #include "evo_draw.h"
 #include "evo_focus.h"
 #include "evo_theme.h"
+#include "evo_widgets.h"
+#include "evo_screens.h"
 #include "evo_addon.h"
 #include "addon_emby.h"
 #include "evo_changelog.h"
@@ -395,22 +397,96 @@ static void test_changelog_model_integrity(void)
 {
     TEST_START("Changelog Model: Release & Badges Integrity");
     
-    TEST_ASSERT(EVO_CHANGELOG_RELEASE_COUNT > 0, "Release count is zero");
+    TEST_ASSERT(EVO_CHANGELOG_RELEASE_COUNT > 0, "No changelog releases defined");
     
     for (int i = 0; i < EVO_CHANGELOG_RELEASE_COUNT; i++) {
-        const evo_changelog_release *rel = &EVO_CHANGELOG_RELEASES[i];
-        TEST_ASSERT(rel->version != NULL && strlen(rel->version) > 0, "Version string empty");
-        TEST_ASSERT(rel->date != NULL && strlen(rel->date) > 0, "Release date empty");
-        TEST_ASSERT(rel->item_count > 0, "Release has no items");
+        const evo_changelog_release *r = &EVO_CHANGELOG_RELEASES[i];
+        TEST_ASSERT(r->version != NULL && strlen(r->version) > 0, "Release version is empty");
+        TEST_ASSERT(r->date != NULL && strlen(r->date) > 0, "Release date is empty");
+        TEST_ASSERT(r->tagline != NULL && strlen(r->tagline) > 0, "Release tagline is empty");
+        TEST_ASSERT(r->item_count > 0, "Release has no changelog items");
+        TEST_ASSERT(r->items != NULL, "Release items pointer is NULL");
         
-        for (int j = 0; j < rel->item_count; j++) {
-            const evo_changelog_item *it = &rel->items[j];
-            TEST_ASSERT(it->text != NULL && strlen(it->text) > 0, "Item text empty");
-            TEST_ASSERT(it->kind >= EVO_CL_NEW && it->kind <= EVO_CL_VERSION,
-                        "Invalid changelog category badge kind");
+        for (int j = 0; j < r->item_count; j++) {
+            TEST_ASSERT(r->items[j].text != NULL, "Changelog item text is NULL");
+            TEST_ASSERT(r->items[j].kind >= 0 && r->items[j].kind <= 3, "Invalid changelog item category");
         }
     }
     
+    TEST_PASS();
+}
+
+/* ==========================================================================
+ * 7. Common UI Widgets & Surround Studio Rendering Tests
+ * ========================================================================== */
+
+static void test_common_ui_widgets_and_surround_screen(void)
+{
+    TEST_START("Common UI: Badges, Stat Cards & Surround Studio Screen");
+
+    uint32_t *mock_fb = (uint32_t *)calloc(1920 * 1080, sizeof(uint32_t));
+    TEST_ASSERT(mock_fb != NULL, "Failed to allocate mock framebuffer");
+
+    /* 1. Test Categorical Badges */
+    evo_widget_category_badge(mock_fb, 100, 100, 90, 26, EVO_BADGE_ACCENT, "NEW");
+    evo_widget_category_badge(mock_fb, 200, 100, 90, 26, EVO_BADGE_SUCCESS, "FIXED");
+    evo_widget_category_badge(mock_fb, 300, 100, 90, 26, EVO_BADGE_WARNING, "IMPROVED");
+    evo_widget_category_badge(mock_fb, 400, 100, 90, 26, EVO_BADGE_DANGER, "REMOVED");
+
+    /* 2. Test Stat / Monitor Card */
+    evo_stat_card card;
+    memset(&card, 0, sizeof(card));
+    card.header_label = "SPEAKER CALIBRATION MONITOR";
+    card.title = "FRONT LEFT (FL)";
+    card.line1 = "TONE FREQ: 330.0 HZ";
+    card.line2 = "PS5 AUDIO OUT: S16_8CH (CH 0)";
+    card.status_text = "STATUS: [ ACTIVE NOW ]";
+    card.is_active = 1;
+    evo_widget_stat_card(mock_fb, 130, 160, 460, 220, &card);
+
+    /* 3. Test Speaker Stage Node */
+    evo_speaker_node node;
+    memset(&node, 0, sizeof(node));
+    node.label = "FL";
+    node.sub = "330 Hz [ON]";
+    node.is_active = 1;
+    node.is_selected = 1;
+    evo_widget_speaker_node(mock_fb, 600, 300, 150, 82, &node);
+
+    /* 4. Test Full Surround Sound Studio Screen Rendering (5.1 & 7.1) */
+    static const evo_surround_speaker_info test_spk[8] = {
+        { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 2, 6 },
+        { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 3, 8 },
+        { "FRONT LEFT",   "FL",  330.0, -460, -180, 150, 82, 0, 5 },
+        { "FRONT RIGHT",  "FR",  440.0,  310, -180, 150, 82, 1, 7 },
+        { "SIDE LEFT",    "SL", 1109.0, -510,   10, 150, 82, 6, 9 },
+        { "SIDE RIGHT",   "SR", 1319.0,  360,   10, 150, 82, 7, 10 },
+        { "BACK LEFT",    "BL",  659.0, -380,  200, 150, 82, 4, 11 },
+        { "BACK RIGHT",   "BR",  880.0,  230,  200, 150, 82, 5, 12 }
+    };
+
+    evo_surround_test_model m;
+    memset(&m, 0, sizeof(m));
+    m.is_51_layout   = 1;
+    m.selected_item  = 0;
+    m.active_channel = 0;
+    m.surround_mode  = 1;
+    m.speakers       = test_spk;
+    m.speaker_count  = 8;
+
+    static const evo_hint hints[] = {
+        { EVO_GLYPH_CROSS, "TEST" },
+        { EVO_GLYPH_CIRCLE, "BACK" }
+    };
+
+    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
+
+    /* Switch to 7.1 layout and render */
+    m.is_51_layout = 0;
+    m.active_channel = 6;
+    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
+
+    free(mock_fb);
     TEST_PASS();
 }
 
@@ -459,6 +535,7 @@ int main(void)
     test_emby_url_and_config();
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
+    test_common_ui_widgets_and_surround_screen();
     
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

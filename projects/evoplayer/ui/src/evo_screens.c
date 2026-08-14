@@ -779,15 +779,11 @@ void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
     /* Pill badge for version tag */
     int tag_w = 150;
     int tag_h = 32;
-    evo_ui_round_rect(fb, inset_x, hy, tag_w, tag_h, 6,
-                      with_alpha(th->accent_soft, 80), with_alpha(th->accent_soft, 80),
-                      th->accent, 1, with_alpha(th->shadow, 0), 0);
-
     char tag_str[32];
     snprintf(tag_str, sizeof(tag_str), "RELEASE %s", cur->version);
-    int tw = evo_text_w(tag_str, EVO_FACE_SMALL);
-    evo_text(fb, inset_x + (tag_w - tw)/2, hy + (tag_h - 18)/2, tag_str,
-             th->accent, EVO_FACE_SMALL);
+    evo_widget_badge(fb, inset_x, hy, tag_w, tag_h, tag_str,
+                     with_alpha(th->accent_soft, 80), th->accent,
+                     th->accent, EVO_FACE_SMALL);
 
     /* Stats right */
     char stats_str[64];
@@ -812,38 +808,24 @@ void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
     for (int j = 0; j < cur->item_count && j < max_items; j++) {
         const evo_changelog_item *it = &cur->items[j];
 
-        /* Badge pill */
+        /* Standardized Categorical Badge */
         const char *badge_text = "NEW";
-        uint32_t badge_fill = with_alpha(th->accent_soft, 85);
-        uint32_t badge_border = with_alpha(th->accent, 220);
-        uint32_t badge_text_col = th->accent;
+        int badge_cat = EVO_BADGE_ACCENT;
 
         if (it->kind == EVO_CL_FIXED) {
             badge_text = "FIXED";
-            badge_fill = with_alpha(0x00227733, 90);
-            badge_border = with_alpha(0x0044CC66, 220);
-            badge_text_col = with_alpha(0x0088FFAA, 255);
+            badge_cat  = EVO_BADGE_SUCCESS;
         } else if (it->kind == EVO_CL_IMPROVED) {
             badge_text = "IMPROVED";
-            badge_fill = with_alpha(0x00885500, 90);
-            badge_border = with_alpha(0x00FFBB33, 220);
-            badge_text_col = with_alpha(0x00FFEE77, 255);
+            badge_cat  = EVO_BADGE_WARNING;
         } else if (it->kind == EVO_CL_REMOVED) {
             badge_text = "REMOVED";
-            badge_fill = with_alpha(0x00881111, 90);
-            badge_border = with_alpha(0x00FF4444, 220);
-            badge_text_col = with_alpha(0x00FFAAAA, 255);
+            badge_cat  = EVO_BADGE_DANGER;
         }
 
         int pw = 94;
         int ph = 26;
-        evo_ui_round_rect(fb, inset_x, item_y + 3, pw, ph, 5,
-                          badge_fill, badge_fill, badge_border, 1,
-                          with_alpha(th->shadow, 0), 0);
-
-        int btw = evo_text_w(badge_text, EVO_FACE_SMALL);
-        evo_text(fb, inset_x + (pw - btw)/2, item_y + 3 + (ph - 18)/2, badge_text,
-                 badge_text_col, EVO_FACE_SMALL);
+        evo_widget_category_badge(fb, inset_x, item_y + 3, pw, ph, badge_cat, badge_text);
 
         /* Item text */
         evo_text_fit(fb, inset_x + pw + 16, item_y + 3, inset_w - pw - 20,
@@ -855,6 +837,177 @@ void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
         }
 
         item_y += item_pitch;
+    }
+
+    evo_chrome_end(fb, &page, hints, hint_count);
+}
+
+/* ==========================================================================
+ * Surround Sound Studio Screen
+ * ========================================================================== */
+
+void evo_screen_surround_test(uint32_t *fb, const evo_surround_test_model *m,
+                              int rail_focused, int rail_index,
+                              const evo_hint *hints, int hint_count)
+{
+    const evo_theme *th = evo_theme_current();
+    evo_page page;
+    memset(&page, 0, sizeof(page));
+    page.title = "SURROUND SOUND STUDIO";
+    page.subtitle = (m && m->is_51_layout)
+        ? "CALIBRATION  -  5.1 SPEAKER SYSTEM (6 CHANNELS)"
+        : "CALIBRATION  -  7.1 SPEAKER SYSTEM (8 CHANNELS)";
+    page.section = EVO_SECTION_SETTINGS;
+    page.rail_focused = rail_focused;
+    page.rail_index = rail_index;
+
+    evo_chrome_begin(fb, &page);
+
+    int mon_x = 130, mon_y = 160, mon_w = 460, mon_h = 220;
+
+    /* 1. Left Telemetry Monitor Panel */
+    evo_stat_card card;
+    memset(&card, 0, sizeof(card));
+    card.header_label = "SPEAKER CALIBRATION MONITOR";
+
+    int active_spk = m ? m->active_channel : -1;
+    int sel_item   = m ? m->selected_item : 0;
+    int display_spk = -1;
+
+    if (active_spk >= 0) {
+        display_spk = active_spk;
+    } else if (sel_item >= 5 && sel_item <= 12) {
+        display_spk = (sel_item == 5 ? 0 :
+                       sel_item == 6 ? 2 :
+                       sel_item == 7 ? 1 :
+                       sel_item == 8 ? 3 :
+                       sel_item == 9 ? 6 :
+                       sel_item == 10 ? 7 :
+                       sel_item == 11 ? 4 : 5);
+    }
+
+    char title_buf[64], hz_buf[64], ch_buf[64], stat_buf[64];
+    if (display_spk >= 0 && m && display_spk < m->speaker_count) {
+        const evo_surround_speaker_info *spk = &m->speakers[display_spk];
+        snprintf(title_buf, sizeof(title_buf), "%s (%s)", spk->name, spk->label);
+        snprintf(hz_buf, sizeof(hz_buf), "TONE FREQ: %.1f HZ", spk->hz);
+        snprintf(ch_buf, sizeof(ch_buf), "PS5 AUDIO OUT: S16_8CH (CH %d)", display_spk);
+        snprintf(stat_buf, sizeof(stat_buf), active_spk >= 0 ? "STATUS: [ ACTIVE NOW ]" : "STATUS: [ READY / STANDBY ]");
+        card.is_active = (active_spk >= 0);
+    } else {
+        snprintf(title_buf, sizeof(title_buf), "%s",
+                 sel_item == 0 ? "5.1 AUTO SEQUENCE" :
+                 sel_item == 1 ? "7.1 AUTO SEQUENCE" :
+                 sel_item == 2 ? "360 ROTATION SWEEP" :
+                 sel_item == 3 ? (m && m->is_51_layout ? "LAYOUT: 5.1 CHANNELS" : "LAYOUT: 7.1 CHANNELS") : "SILENCE / STOP");
+        snprintf(hz_buf, sizeof(hz_buf), "MODE: %s",
+                 sel_item == 0 ? "CALIBRATION SWEEP 5.1" :
+                 sel_item == 1 ? "CALIBRATION SWEEP 7.1" :
+                 sel_item == 2 ? "PERIMETER CIRCLE" :
+                 sel_item == 3 ? "TOGGLE SPEAKER COUNT" : "STOP AUDIO STREAM");
+        snprintf(ch_buf, sizeof(ch_buf), "PS5 AUDIO OUT: 48 kHz / 16-BIT");
+        snprintf(stat_buf, sizeof(stat_buf), "%s", (m && m->surround_mode != 0) ? "STATUS: [ RUNNING TEST ]" : "STATUS: [ IDLE ]");
+        card.is_active = 0;
+    }
+
+    card.title       = title_buf;
+    card.line1       = hz_buf;
+    card.line2       = ch_buf;
+    card.status_text = stat_buf;
+    evo_widget_stat_card(fb, mon_x, mon_y, mon_w, mon_h, &card);
+
+    /* 2. Action Buttons */
+    static const struct {
+        const char *label;
+        const char *sub;
+    } actions[5] = {
+        { "AUTO TEST 5.1", "6-CHANNEL CALIBRATION" },
+        { "AUTO TEST 7.1", "8-CHANNEL CALIBRATION" },
+        { "360 ROTATION SWEEP", "CIRCULAR PERIMETER PAN" },
+        { "SPEAKER LAYOUT", "SWITCH 5.1 / 7.1" },
+        { "SILENCE / STOP", "STOP ALL OUTPUT" }
+    };
+
+    int act_y = 400;
+    for (int i = 0; i < 5; i++) {
+        int is_sel = (!rail_focused && sel_item == i);
+        int cur_y = act_y + i * 80;
+        uint32_t fill_top = is_sel ? th->surface_sel : th->surface;
+        uint32_t fill_bot = is_sel ? th->surface_sel_alt : th->surface_alt;
+        uint32_t border   = is_sel ? th->border_sel : th->border;
+
+        evo_ui_round_rect(fb, mon_x, cur_y, mon_w, 72, 14,
+                          fill_top, fill_bot, border, is_sel ? 2 : 1,
+                          is_sel ? 0x66000000 : 0x22000000, is_sel ? 14 : 6);
+
+        if (is_sel) {
+            evo_ui_round_rect(fb, mon_x + 3, cur_y + 14, 5, 44, 3,
+                              th->accent, th->accent, th->accent, 0, 0, 0);
+        }
+
+        evo_text(fb, mon_x + 24, cur_y + 12, actions[i].label, is_sel ? th->text_primary : th->text_secondary, EVO_FACE_MENU);
+        evo_text(fb, mon_x + 24, cur_y + 44, (i == 3) ? (m && m->is_51_layout ? "CURRENT: 5.1 SURROUND" : "CURRENT: 7.1 SURROUND") : actions[i].sub, is_sel ? th->accent : th->text_muted, EVO_FACE_SMALL);
+    }
+
+    /* 3. Stage & Visualizer */
+    int stage_x = 610, stage_y = 160, stage_w = 1180, stage_h = 760;
+    evo_ui_round_rect(fb, stage_x, stage_y, stage_w, stage_h, 24,
+                      th->surface_alt, th->bg_top,
+                      th->border, 1,
+                      0x55000000, 20);
+
+    int scr_w = 420, scr_h = 14;
+    int scr_x = stage_x + (stage_w - scr_w) / 2;
+    int scr_y = stage_y + 24;
+    evo_ui_round_rect(fb, scr_x, scr_y, scr_w, scr_h, 7,
+                      th->accent, th->accent_soft, th->accent, 1,
+                      0x4419d8ff, 10);
+    evo_text(fb, scr_x + (scr_w - evo_text_w("FRONT DISPLAY / TV SCREEN", EVO_FACE_SMALL)) / 2,
+             scr_y + 22, "FRONT DISPLAY / TV SCREEN", th->text_muted, EVO_FACE_SMALL);
+
+    int couch_cx = stage_x + stage_w / 2;
+    int couch_cy = stage_y + 390;
+
+    evo_ui_circle(fb, couch_cx, couch_cy, 120, 0x14FFFFFF);
+    evo_ui_circle(fb, couch_cx, couch_cy, 230, 0x0BFFFFFF);
+    evo_ui_circle(fb, couch_cx, couch_cy, 340, 0x06FFFFFF);
+
+    int couch_w = 130, couch_h = 66;
+    evo_ui_round_rect(fb, couch_cx - couch_w / 2, couch_cy - couch_h / 2, couch_w, couch_h, 14,
+                      th->surface, th->surface_alt, th->border, 1, 0x44000000, 8);
+    evo_text(fb, couch_cx - evo_text_w("LISTENER", EVO_FACE_MENU) / 2,
+             couch_cy - 20, "LISTENER", th->text_primary, EVO_FACE_MENU);
+    evo_text(fb, couch_cx - evo_text_w("SWEET SPOT", EVO_FACE_SMALL) / 2,
+             couch_cy + 12, "SWEET SPOT", th->accent, EVO_FACE_SMALL);
+
+    if (m && m->speakers) {
+        for (int i = 0; i < m->speaker_count; i++) {
+            int ch = m->speakers[i].ch;
+            if (m->is_51_layout && (ch == 6 || ch == 7)) {
+                continue; /* Hide side surround speakers in 5.1 */
+            }
+            int sx = couch_cx + m->speakers[i].dx;
+            int sy = couch_cy + m->speakers[i].dy;
+            int sw = m->speakers[i].w;
+            int sh = m->speakers[i].h;
+            int is_act = (active_spk == ch);
+            int is_sel = (!rail_focused && sel_item == m->speakers[i].item_idx);
+
+            char hz_str[32];
+            if (is_act) {
+                snprintf(hz_str, sizeof(hz_str), "%.0f Hz [ON]", m->speakers[i].hz);
+            } else {
+                snprintf(hz_str, sizeof(hz_str), "%.0f Hz", m->speakers[i].hz);
+            }
+
+            evo_speaker_node node;
+            node.label       = m->speakers[i].label;
+            node.sub         = hz_str;
+            node.is_active   = is_act;
+            node.is_selected = is_sel;
+
+            evo_widget_speaker_node(fb, sx, sy, sw, sh, &node);
+        }
     }
 
     evo_chrome_end(fb, &page, hints, hint_count);

@@ -14621,17 +14621,6 @@ void draw_settings_playback_screen(uint32_t *fb)
 
 void draw_surround_test_screen(uint32_t *fb)
 {
-    const evo_theme *th = evo_theme_current();
-    evo_page page;
-    memset(&page, 0, sizeof(page));
-    page.title = "SURROUND SOUND STUDIO";
-    page.subtitle = surround_is_51()
-        ? "CALIBRATION  -  5.1 SPEAKER SYSTEM (6 CHANNELS)"
-        : "CALIBRATION  -  7.1 SPEAKER SYSTEM (8 CHANNELS)";
-    page.section = EVO_SECTION_SETTINGS;
-    page.rail_focused = evo_rail_focused;
-    page.rail_index = evo_rail_index;
-
     static const evo_hint hints[] = {
         { EVO_GLYPH_CROSS,    "TEST / ACTIVATE" },
         { EVO_GLYPH_SQUARE,   "5.1 / 7.1 MODE" },
@@ -14640,131 +14629,7 @@ void draw_surround_test_screen(uint32_t *fb)
         { EVO_GLYPH_CIRCLE,   "BACK" }
     };
 
-    evo_chrome_begin(fb, &page);
-
-    int mon_x = 130, mon_y = 160, mon_w = 460, mon_h = 220;
-    evo_ui_round_rect(fb, mon_x, mon_y, mon_w, mon_h, 18,
-                      th->surface_alt, th->bg_bottom,
-                      th->border, 1,
-                      0x44000000, 16);
-
-    evo_text(fb, mon_x + 24, mon_y + 18, "SPEAKER CALIBRATION MONITOR", th->accent, EVO_FACE_SMALL);
-
-    int active_spk = evo_surround_active_ch;
-    int display_spk = (active_spk >= 0) ? active_spk :
-                      (surround_test_selected >= 5 && surround_test_selected <= 12) ?
-                      (surround_test_selected == 5 ? 0 :
-                       surround_test_selected == 6 ? 2 :
-                       surround_test_selected == 7 ? 1 :
-                       surround_test_selected == 8 ? 3 :
-                       surround_test_selected == 9 ? 6 :
-                       surround_test_selected == 10 ? 7 :
-                       surround_test_selected == 11 ? 4 : 5) : -1;
-
-    char title_buf[64], hz_buf[64], ch_buf[64], stat_buf[64];
-    if (active_spk >= 0) {
-        snprintf(title_buf, sizeof(title_buf), "%s (%s)", EVO_SPEAKERS[active_spk].name, EVO_SPEAKERS[active_spk].label);
-        snprintf(hz_buf, sizeof(hz_buf), "TONE FREQ: %.1f HZ", EVO_SPEAKERS[active_spk].hz);
-        snprintf(ch_buf, sizeof(ch_buf), "PS5 AUDIO OUT: S16_8CH (CH %d)", active_spk);
-        snprintf(stat_buf, sizeof(stat_buf), "STATUS: [ ACTIVE NOW ]");
-    } else if (display_spk >= 0) {
-        snprintf(title_buf, sizeof(title_buf), "%s (%s)", EVO_SPEAKERS[display_spk].name, EVO_SPEAKERS[display_spk].label);
-        snprintf(hz_buf, sizeof(hz_buf), "TONE FREQ: %.1f HZ", EVO_SPEAKERS[display_spk].hz);
-        snprintf(ch_buf, sizeof(ch_buf), "PS5 AUDIO OUT: S16_8CH (CH %d)", display_spk);
-        snprintf(stat_buf, sizeof(stat_buf), "STATUS: [ READY / STANDBY ]");
-    } else {
-        snprintf(title_buf, sizeof(title_buf), "%s",
-                 surround_test_selected == 0 ? "5.1 AUTO SEQUENCE" :
-                 surround_test_selected == 1 ? "7.1 AUTO SEQUENCE" :
-                 surround_test_selected == 2 ? "360 ROTATION SWEEP" :
-                 surround_test_selected == 3 ? (surround_layout_mode ? "LAYOUT: 7.1 CHANNELS" : "LAYOUT: 5.1 CHANNELS") : "SILENCE / STOP");
-        snprintf(hz_buf, sizeof(hz_buf), "MODE: %s",
-                 surround_test_selected == 0 ? "CALIBRATION SWEEP 5.1" :
-                 surround_test_selected == 1 ? "CALIBRATION SWEEP 7.1" :
-                 surround_test_selected == 2 ? "PERIMETER CIRCLE" :
-                 surround_test_selected == 3 ? "TOGGLE SPEAKER COUNT" : "STOP AUDIO STREAM");
-        snprintf(ch_buf, sizeof(ch_buf), "PS5 AUDIO OUT: 48 kHz / 16-BIT");
-        snprintf(stat_buf, sizeof(stat_buf), "%s", (evo_surround_mode != EVO_SURROUND_MODE_IDLE) ? "STATUS: [ RUNNING TEST ]" : "STATUS: [ IDLE ]");
-    }
-
-    evo_text(fb, mon_x + 24, mon_y + 48, title_buf, (active_spk >= 0) ? th->accent : th->text_primary, EVO_FACE_MENU);
-    evo_text(fb, mon_x + 24, mon_y + 92, hz_buf, th->text_secondary, EVO_FACE_SMALL);
-    evo_text(fb, mon_x + 24, mon_y + 124, ch_buf, th->text_muted, EVO_FACE_SMALL);
-    evo_text(fb, mon_x + 24, mon_y + 158, stat_buf, (active_spk >= 0) ? th->accent : th->text_secondary, EVO_FACE_SMALL);
-
-    static const struct {
-        const char *label;
-        const char *sub;
-    } actions[5] = {
-        { "AUTO TEST 5.1", "6-CHANNEL CALIBRATION" },
-        { "AUTO TEST 7.1", "8-CHANNEL CALIBRATION" },
-        { "360 ROTATION SWEEP", "CIRCULAR PERIMETER PAN" },
-        { "SPEAKER LAYOUT", "SWITCH 5.1 / 7.1" },
-        { "SILENCE / STOP", "STOP ALL OUTPUT" }
-    };
-
-    int act_y = 400;
-    for (int i = 0; i < 5; i++) {
-        int is_sel = (!evo_rail_focused && surround_test_selected == i);
-        int cur_y = act_y + i * 80;
-        uint32_t fill_top = is_sel ? th->surface_sel : th->surface;
-        uint32_t fill_bot = is_sel ? th->surface_sel_alt : th->surface_alt;
-        uint32_t border = is_sel ? th->border_sel : th->border;
-
-        evo_ui_round_rect(fb, mon_x, cur_y, mon_w, 72, 14,
-                          fill_top, fill_bot, border, is_sel ? 2 : 1,
-                          is_sel ? 0x66000000 : 0x22000000, is_sel ? 14 : 6);
-
-        if (is_sel) {
-            evo_ui_round_rect(fb, mon_x + 3, cur_y + 14, 5, 44, 3,
-                              th->accent, th->accent, th->accent, 0, 0, 0);
-        }
-
-        evo_text(fb, mon_x + 24, cur_y + 12, actions[i].label, is_sel ? th->text_primary : th->text_secondary, EVO_FACE_MENU);
-        evo_text(fb, mon_x + 24, cur_y + 44, (i == 3) ? (surround_layout_mode ? "CURRENT: 7.1 SURROUND" : "CURRENT: 5.1 SURROUND") : actions[i].sub, is_sel ? th->accent : th->text_muted, EVO_FACE_SMALL);
-    }
-
-    int stage_x = 610, stage_y = 160, stage_w = 1180, stage_h = 760;
-    evo_ui_round_rect(fb, stage_x, stage_y, stage_w, stage_h, 24,
-                      th->surface_alt, th->bg_top,
-                      th->border, 1,
-                      0x55000000, 20);
-
-    int scr_w = 420, scr_h = 14;
-    int scr_x = stage_x + (stage_w - scr_w) / 2;
-    int scr_y = stage_y + 24;
-    evo_ui_round_rect(fb, scr_x, scr_y, scr_w, scr_h, 7,
-                      th->accent, th->accent_soft, th->accent, 1,
-                      0x4419d8ff, 10);
-    evo_text(fb, scr_x + (scr_w - evo_text_w("FRONT DISPLAY / TV SCREEN", EVO_FACE_SMALL)) / 2,
-             scr_y + 22, "FRONT DISPLAY / TV SCREEN", th->text_muted, EVO_FACE_SMALL);
-
-    int couch_cx = stage_x + stage_w / 2;
-    int couch_cy = stage_y + 390;
-
-    evo_ui_circle(fb, couch_cx, couch_cy, 120, 0x14FFFFFF);
-    evo_ui_circle(fb, couch_cx, couch_cy, 230, 0x0BFFFFFF);
-    evo_ui_circle(fb, couch_cx, couch_cy, 340, 0x06FFFFFF);
-
-    int couch_w = 130, couch_h = 66;
-    evo_ui_round_rect(fb, couch_cx - couch_w / 2, couch_cy - couch_h / 2, couch_w, couch_h, 14,
-                      th->surface, th->surface_alt, th->border, 1, 0x44000000, 8);
-    evo_text(fb, couch_cx - evo_text_w("LISTENER", EVO_FACE_MENU) / 2,
-             couch_cy - 20, "LISTENER", th->text_primary, EVO_FACE_MENU);
-    evo_text(fb, couch_cx - evo_text_w("SWEET SPOT", EVO_FACE_SMALL) / 2,
-             couch_cy + 12, "SWEET SPOT", th->accent, EVO_FACE_SMALL);
-
-    static const struct {
-        const char *name;
-        const char *label;
-        double hz;
-        int dx;
-        int dy;
-        int w;
-        int h;
-        int ch;
-        int item_idx;
-    } spk[8] = {
+    static const evo_surround_speaker_info spk[8] = {
         { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 2, 6 },
         { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 3, 8 },
         { "FRONT LEFT",   "FL",  330.0, -460, -180, 150, 82, 0, 5 },
@@ -14775,55 +14640,16 @@ void draw_surround_test_screen(uint32_t *fb)
         { "BACK RIGHT",   "BR",  880.0,  230,  200, 150, 82, 5, 12 }
     };
 
-    int is_51 = surround_is_51();
+    evo_surround_test_model m;
+    memset(&m, 0, sizeof(m));
+    m.is_51_layout   = surround_is_51();
+    m.selected_item  = surround_test_selected;
+    m.active_channel = evo_surround_active_ch;
+    m.surround_mode  = evo_surround_mode;
+    m.speakers       = spk;
+    m.speaker_count  = 8;
 
-    for (int i = 0; i < 8; i++) {
-        int ch = spk[i].ch;
-        if (is_51 && (ch == 6 || ch == 7)) {
-            continue; /* Completely hide unavailable speakers in 5.1 layout */
-        }
-        int sx = couch_cx + spk[i].dx;
-        int sy = couch_cy + spk[i].dy;
-        int sw = spk[i].w;
-        int sh = spk[i].h;
-        int item = spk[i].item_idx;
-        int is_act = (evo_surround_active_ch == ch);
-        int is_sel = (!evo_rail_focused && surround_test_selected == item);
-
-        if (is_act) {
-            evo_ui_circle(fb, sx + sw / 2, sy + sh / 2, 75, 0x3319D8FF);
-            evo_ui_circle(fb, sx + sw / 2, sy + sh / 2, 105, 0x1A19D8FF);
-        }
-
-        uint32_t fill_t = is_act ? 0xDD004466 : (is_sel ? th->surface_sel : th->surface);
-        uint32_t fill_b = is_act ? 0xDD002233 : (is_sel ? th->surface_sel_alt : th->surface_alt);
-        uint32_t border = is_act ? 0xFF00E5FF : (is_sel ? th->border_sel : th->border);
-
-        evo_ui_round_rect(fb, sx, sy, sw, sh, 16,
-                          fill_t, fill_b, border, (is_act || is_sel) ? 2 : 1,
-                          is_act ? 0x8819D8FF : (is_sel ? 0x66000000 : 0x22000000),
-                          is_act ? 18 : (is_sel ? 12 : 6));
-
-        if (is_sel) {
-            evo_ui_round_rect(fb, sx + 4, sy + 14, 5, sh - 28, 3,
-                              th->accent, th->accent, th->accent, 0, 0, 0);
-        }
-
-        uint32_t txt_c = is_act ? 0xFF00FFFF : (is_sel ? th->text_primary : th->text_secondary);
-        evo_text(fb, sx + 20, sy + 14, spk[i].label, txt_c, EVO_FACE_MENU);
-
-        char hz_str[32];
-        if (is_act) {
-            snprintf(hz_str, sizeof(hz_str), "%.0f Hz [ON]", spk[i].hz);
-        } else {
-            snprintf(hz_str, sizeof(hz_str), "%.0f Hz", spk[i].hz);
-        }
-        evo_text(fb, sx + 20, sy + 46, hz_str,
-                 is_act ? th->accent : th->text_muted,
-                 EVO_FACE_SMALL);
-    }
-
-    evo_chrome_end(fb, &page, hints, 5);
+    evo_screen_surround_test(fb, &m, evo_rail_focused, evo_rail_index, hints, 5);
 }
 
 /* ---- settings: subtitles ------------------------------------------------ */

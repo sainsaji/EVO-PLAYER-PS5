@@ -259,6 +259,33 @@ void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
                           const evo_focus *f, int rail_focused, int rail_index,
                           const evo_hint *hints, int hint_count);
 
+/* ---- surround sound studio screen --------------------------------------- */
+
+typedef struct evo_surround_speaker_info {
+    const char *name;
+    const char *label;
+    double      hz;
+    int         dx;
+    int         dy;
+    int         w;
+    int         h;
+    int         ch;
+    int         item_idx;
+} evo_surround_speaker_info;
+
+typedef struct evo_surround_test_model {
+    int         is_51_layout;
+    int         selected_item;
+    int         active_channel;
+    int         surround_mode;
+    const evo_surround_speaker_info *speakers;
+    int         speaker_count;
+} evo_surround_test_model;
+
+void evo_screen_surround_test(uint32_t *fb, const evo_surround_test_model *m,
+                              int rail_focused, int rail_index,
+                              const evo_hint *hints, int hint_count);
+
 /* ---- overlay picker ------------------------------------------------------ */
 
 /*
