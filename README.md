@@ -2,224 +2,169 @@
 
 **A media player for jailbroken PS5 on firmware 12.70.**
 
-Plays your video off a USB stick, with surround sound, subtitles, resume, and
-an interface built for a controller and a television rather than a mouse.
+Plays your video off a USB drive or streams directly from your local **Emby** media server, featuring full 5.1 / 7.1 surround sound, subtitles, resume support, an acoustic calibration studio, and a television-first UI built specifically for the DualSense controller.
 
 ![EVO Player launch screen](docs/images/launch.png)
 
 ---
 
-## Install
+## Installation Guide
 
-From the latest **[release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)**,
-download **`EVOPlayer-*-InstallTile.elf`**.
+The recommended way to install and use EVO Player is via the **Media Tile Launcher** (`InstallTile.elf`), which embeds the player and registers an official tile directly in your PS5's **Media** home screen.
 
-1. Copy it to a USB stick.
-2. Start it from your **payload manager** — the on-console one, typically at
-   `http://<your-ps5>:8084`.
-3. It reports **"EVO Player ready in Media"**.
-4. Open **EVO Player** from the console's own **Media** row.
+### Prerequisites
 
-That is the whole install. Nothing to extract, no FTP, no websrv.
-
-> **Leave the payload running.** It is resident by design — it is what starts
-> the player when you open the tile. **Re-run it after every reboot**, along
-> with the jailbreak.
-
-**You will need**
-
-- A PS5 on firmware **12.70**, jailbroken — the jailbreak must be re-run after
-  every reboot
-- `ps5-payload-elfldr` running, and a way to send it an ELF (a payload manager)
-- A USB stick, formatted exFAT or FAT32, with your media on it
-
-Put video in any folder on the stick. EVO Player reads `/mnt/usb0`.
-
-<details>
-<summary>Other files in the release, and which to avoid</summary>
-
-| File | Use it for |
-|---|---|
-| `EVOPlayer-*-InstallTile.elf` | **The normal install**, above |
-| `EVOPlayer-*-UninstallTile.elf` | Removes the tile completely |
-| `EVOPlayer-*-homebrew.zip` | The websrv route — extract to a USB stick as `/homebrew/EVOPlayer/` and launch from `http://<ps5>:8080` |
-| `EVOPlayer-*-player-only.elf` | The bare player. **Do not send this to a payload manager.** With `elfldr` alone it starts headless with no display plane, so nothing appears on screen — which is exactly what it looks like when it is "not working". It needs `hbldr`, which the tile installer and websrv provide |
-
-</details>
+- A PS5 running firmware **12.70**, jailbroken with `ps5-payload-elfldr` active.
+- Access to a **payload manager** (such as the on-console web payload manager, typically at `http://<your-ps5-ip>:8084` or `prospero-deploy`).
+- *(Optional for USB playback)* A USB stick formatted as **exFAT** or **FAT32** plugged into `/mnt/usb0`.
+- *(Optional for Emby)* An active Emby server reachable on your local area network (LAN).
 
 ---
 
-## What it does
+### Method 1: Media Tile Installation (`InstallTile.elf`) — Recommended
 
-### Browse your library
+1. Download **`EVOPlayer-*-InstallTile.elf`** from the latest **[GitHub Release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)**.
+2. Copy `EVOPlayer-*-InstallTile.elf` to your USB stick or send it directly over your network using your payload manager (`http://<your-ps5-ip>:8084` or `tools/launch.sh`).
+3. Execute the payload. The installer registers the application into `/system_ex/app/` and `/user/app/` and displays:
+   > **"EVO Player ready in Media"**
+4. Press the **PS Button**, navigate to the **Media** tab on the PS5 home screen, and launch **EVO Player**.
 
-Folders first, then A–Z. The inspector shows codec, resolution, size and
-length before you commit to opening anything, and files you have started show
-how far in you got.
+> [!IMPORTANT]
+> **Leave the tile payload resident.** The launcher stays resident in the background to handle display planes and app launch handoffs. **Re-run the payload after every console reboot** alongside your jailbreak.
+
+---
+
+### Method 2: Web Server / USB Homebrew (`homebrew.zip`)
+
+If you prefer launching homebrew via `ps5-payload-websrv` rather than registering a Media tile:
+
+1. Download **`EVOPlayer-*-homebrew.zip`** from the release.
+2. Extract the contents directly to the root of your USB drive so the path is `/homebrew/EVOPlayer/eboot.elf`.
+3. Connect the USB drive to the console, open `http://<your-ps5-ip>:8080/index.html` in a browser, and click **EVOPlayer**.
+
+---
+
+### Release Package Matrix
+
+| File | Type | How to use |
+|---|---|---|
+| **`EVOPlayer-*-InstallTile.elf`** | **Media Tile Installer** | **Standard install.** Send to payload manager (port 8084) $\to$ opens from Media tab |
+| **`EVOPlayer-*-UninstallTile.elf`** | **Tile Uninstaller** | Removes the EVO Player tile from the Media home screen |
+| **`EVOPlayer-*-homebrew.zip`** | **Websrv Bundle** | Extract to `/homebrew/EVOPlayer/` on USB $\to$ launch from port 8080 |
+| **`EVOPlayer-*-player-only.elf`** | **Bare Payload** | For direct websrv / `/data/homebrew` usage. **Do not send directly to raw elfldr** (runs headless without `hbldr`) |
+
+---
+
+## Features
+
+### Browse USB & Stream from Emby Server
+
+Browse local video files from `/mnt/usb0` with real-time metadata inspector (codecs, resolution, file size, duration) or connect directly to your local **Emby Server**. Browse libraries, seasons, and episodes with server-cached cover posters and backdrops, and stream directly over LAN with synchronized watch progress.
 
 ![Browsing a folder](docs/images/browse.png)
+![Emby media library](docs/images/emby.png)
 
-Hold a direction to scroll, shoulder buttons to page, triggers to jump A–Z.
-TRIANGLE favourites a file; SQUARE opens full details.
+### On-Screen Virtual Keyboard
 
-### Pick up where you left off
+Built-in controller-friendly on-screen keyboard for setting up network endpoints, server ports, usernames, and passwords. Supports lowercase, uppercase, digits, and special symbols with instant controller shortcuts ($\square$ for Backspace, $\Delta$ for Done, $\bigcirc$ for Cancel).
 
-The launch screen leads with whatever you were last watching, and the shelf
-below it holds the rest of your recent files with real cover art pulled from
-the video itself.
+![On-screen virtual keyboard](docs/images/keyboard.png)
 
-![Recent files](docs/images/recent.png)
+### Surround Sound Studio (5.1 & 7.1 Calibration)
 
-### Subtitles, chosen by what is in them
+A bespoke 360° top-down acoustic sound stage interface for verifying multichannel audio setups.
+- Real-time hardware test over PS5 8-channel audio (`S16_8CH`).
+- Smooth 50ms attack/decay envelope fades to prevent popping or clicking.
+- Individual speaker tone tests for `FL`, `FC`, `FR`, `LFE`, `SL`, `SR`, `BL`, and `BR`.
+- Automated **5.1 & 7.1 Auto-Test Sequences** and a continuous **360° Perimeter Rotation Sweep**.
+- Dynamic 5.1 layout mode that hides inactive side speakers and seamlessly updates 2D spatial D-pad navigation.
 
-Tracks are ranked by how many cues they actually contain, not by what the
-metadata claims — so the real subtitle track is at the top and a signs-only
-track is labelled as one instead of being picked by accident.
+![Surround Sound Studio](docs/images/surround.png)
+
+### Smart Subtitle Selection & Sizing
+
+Subtitle tracks are ranked and ordered by real cue counts rather than claimed metadata. Includes a persistent default subtitle size configuration (`SMALL`, `MEDIUM`, `LARGE`) in Settings, and real-time synchronization offset adjustment ($L2$/$R2$) during playback.
 
 ![Subtitle track picker](docs/images/picker.png)
 
-Press DOWN during playback. Language names come from the track's language code,
-50 of them mapped. L2 and R3 nudge subtitle timing if a file is out of sync.
+### Text Document Reader
 
-### Read text files
-
-Open a `.txt`, `.log`, `.md`, `.nfo`, `.srt` or `.json` and it opens in a
-reader rather than doing nothing.
+Open `.txt`, `.log`, `.md`, `.nfo`, `.json`, and subtitle documents directly in the built-in reader with custom typography, punctuation atlas, and adjustable text sizes.
 
 ![Text reader](docs/images/reader.png)
 
-D-pad scrolls, shoulders page, triggers jump a tenth of the file, TRIANGLE
-changes text size and keeps your place. Curly quotes, em dashes and accented
-letters are folded to what the font can draw, so text from the web reads
-properly.
+### Structured Settings & Custom Themes
 
-### Know what you are playing
-
-![Media info](docs/images/mediainfo.png)
-
-### Make it yours
+Organized sub-menus for Playback & Video, Subtitles, Interface, System Hardware, and Developer Tools. Includes 4 built-in color themes plus support for external `.theme` files placed in `/mnt/usb0/evo_themes`.
 
 ![Settings](docs/images/settings.png)
-
-Four built-in themes, plus any `.theme` file you drop in `/mnt/usb0/evo_themes`
-— see [docs/theming.md](docs/theming.md). Navigation sounds and a lightbar
-tinted to the theme, both of which can be turned off.
 
 ---
 
 ## Controls
 
-| | Browsing | Playing |
-|---|---|---|
-| **CROSS** | open | pause / resume |
-| **CIRCLE** | back | stop, after confirming |
-| **TRIANGLE** | favourite | view mode: fit / fill / stretch |
-| **SQUARE** | file details | — |
-| **D-pad / stick** | move, hold to scroll | — |
-| **LEFT** | open the side rail | — |
-| **DOWN** | — | choose a subtitle track |
-| **L1 / R1** | page | skip a chapter, or ±60s |
-| **L2 / R2** | jump A–Z | subtitle timing |
-| **L3** | — | save a screenshot to USB |
-
-CIRCLE asks before it stops playback — it is the same button that means "back"
-everywhere else, and it used to throw away your place in the file on one press.
+| Button | In Menus & Browser | During Video Playback | In Keyboard Modal |
+|---|---|---|---|
+| **CROSS ($\times$)** | Select / Open | Pause / Resume | Type Character |
+| **CIRCLE ($\bigcirc$)** | Back / Return | Stop (with prompt) | Cancel / Close |
+| **TRIANGLE ($\Delta$)** | Toggle Favorite | Aspect Ratio (Fit / Fill / Stretch) | Submit / Done |
+| **SQUARE ($\square$)** | File Details / Inspector | — | Backspace |
+| **D-Pad / Stick** | Move focus, hold to scroll | — | Move cursor |
+| **LEFT** | Open side navigation rail | — | — |
+| **DOWN** | — | Subtitle track picker | — |
+| **L1 / R1** | Page scroll | Skip chapter / ±60s | Switch Shift / Symbols |
+| **L2 / R2** | Jump alphabetical (A–Z) | Subtitle sync nudge (±50ms) | — |
+| **L3** | Screenshot capture | Screenshot capture | — |
 
 ---
 
-## Performance
+## Building from Source
 
-Playback does less work per frame than it used to. Every frame is converted
-from the decoder's format and rearranged into the layout the console's display
-hardware wants, and both steps got faster:
-
-| per frame | before | after |
-|---|---|---|
-| 4K conversion | 10.3 ms | **8.8 ms** |
-| 1080p conversion | 3.0 ms | **2.1 ms** |
-| 1080p drawing | 2.9 ms | **2.2 ms** |
-
-The change that probably matters most is not in that table. The step that
-rearranges each frame used to create and destroy twelve threads **every frame**
-— 720 a second at 60fps — which is the pattern behind the stalls that show up
-as an occasional hitch rather than as a lower frame rate. It reuses a pool now.
-The player also stopped painting two million pixels black immediately before
-covering every one of them with video.
-
-> These are measurements from a development PC, taken with `./tools/bench.sh`,
-> which hashes the output and refuses to report a timing if the picture
-> changed. They compare the changes against each other; they are not a
-> prediction of frame rate on your console, and the improvements have not yet
-> been measured on hardware.
-
-## Good to know
-
-- **Resume** is offered when you reopen a file you did not finish.
-- **Screenshots** go to the USB stick. The websrv `/fs` endpoint is read-only,
-  so delete them from the console's own web terminal or by pulling the drive.
-- **4K** takes its fastest path on 8-bit SDR up to 30fps. Larger or 10-bit 4K
-  still plays, on a slower path.
-- **10-bit files play**, converted down to 8-bit — the console's display plane
-  here is 8-bit, so the extra precision cannot be carried through. Fine on most
-  material; a smooth gradient like a sky or a fade can show banding.
-- **HDR is not supported.** PQ and HLG content plays but is shown as SDR
-  without tone mapping, so it will look washed out or dark.
-- Media stays on your stick. Nothing is copied to the console, and nothing
-  leaves your network.
-
----
-
-## Building it yourself
-
-Everything builds in a pinned Docker container — no toolchain to install:
+Builds are fully containerized using the pinned Docker toolchain:
 
 ```bash
 git clone https://github.com/sainsaji/EVO-PLAYER-PS5
 cd EVO-PLAYER-PS5
 echo "PS5_HOST=192.168.0.10" > .env      # your console's IP
 
-docker compose build                     # one-time, ~10 min
+docker compose build                     # build container image
 docker compose run --rm ps5-dev ./scripts/build-evoplayer.sh
 ```
 
-The full setup — Windows host, the SDK, FFmpeg, deployment, and why each
-version is pinned where it is — is in **[docs/building.md](docs/building.md)**.
-
-The interface can be rendered on your PC without a console at all, which is how
-most of it was built:
-
+To build all release payloads (including Media tile and homebrew bundle):
 ```bash
-./tools/uiview.sh --all          # every screen, to output/uiview/
+docker compose run --rm ps5-dev ./scripts/build-media-tile.sh
+docker compose run --rm ps5-dev ./scripts/package-pkg.sh --format homebrew output/elf/EVOPlayer.elf
 ```
 
-Every screenshot on this page is one of those renders.
-
-### Documentation
-
-| | |
-|---|---|
-| [docs/building.md](docs/building.md) | full build and deploy guide |
-| [docs/architecture.md](docs/architecture.md) | how the code is laid out |
-| [docs/ui-handoff.md](docs/ui-handoff.md) | the UI layer, and working on it |
-| [docs/converter-perf.md](docs/converter-perf.md) | the video path, measured |
-| [docs/hardware-decode.md](docs/hardware-decode.md) | the plan for getting decode off the CPU |
-| [docs/hardware-decode-review.md](docs/hardware-decode-review.md) | a critical review of that plan |
-| [docs/theming.md](docs/theming.md) | writing a `.theme` file |
-| [docs/tooling.md](docs/tooling.md) | the scripts, and what each is for |
-| [CHANGELOG.md](CHANGELOG.md) | what changed, per release |
+To render all UI screens offline on PC:
+```bash
+./tools/uiview.sh --all                  # renders PNGs to output/uiview/
+```
 
 ---
 
-## Credits and licence
+## Documentation
 
-Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by
-KINGDKAK, and licensed **GPL-3.0-or-later** — see [COPYRIGHT.md](COPYRIGHT.md).
+| Document | Purpose |
+|---|---|
+| [docs/building.md](docs/building.md) | Full build, environment, and packaging guide |
+| [docs/addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Technical architecture and specs for Emby & streaming add-ons |
+| [docs/architecture.md](docs/architecture.md) | Code architecture, video pipelines, and draw vtables |
+| [docs/ui-handoff.md](docs/ui-handoff.md) | UI system, design tokens, and layout guidelines |
+| [docs/converter-perf.md](docs/converter-perf.md) | 4K/1080p video converter benchmarks and metrics |
+| [docs/theming.md](docs/theming.md) | Theme format specifications and tokens |
+| [docs/tooling.md](docs/tooling.md) | Launcher safety cooldowns and CLI utilities |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and release notes |
 
-- [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) — SDK,
-  elfldr, websrv, pacbrew-repo
+---
+
+## Credits & License
+
+Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by KINGDKAK and licensed under **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
+
+- [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) — SDK, elfldr, websrv
 - [KINGDKAK](https://github.com/KINGDKAK) — ProsperoPlayer
-- [zecoxao/sce_symbols](https://github.com/zecoxao/sce_symbols) — NID database
+- [zecoxao/sce_symbols](https://github.com/zecoxao/sce_symbols) — NID symbol database
 
-EVO Player is independent homebrew, **not affiliated with Sony or
-PlayStation**. Use at your own risk, with media you own. No Sony code, binaries
-or keys are included in or required by this repository.
+*EVO Player is independent homebrew software and is not affiliated with, endorsed by, or associated with Sony Interactive Entertainment. All PlayStation trademarks belong to their respective owners.*
