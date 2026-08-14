@@ -1379,52 +1379,6 @@ static const ProsperoCoverEntry *prospero_cover_get(
     return NULL;
 }
 
-static int prospero_cover_blit(
-    uint32_t *fb,
-    int x,
-    int y,
-    const char *media_path,
-    int is_directory
-) {
-    const ProsperoCoverEntry *cover;
-    int row, col;
-    const int fb_w = 1920;
-    const int fb_h = 1080;
-
-    if (!fb || !media_path)
-        return 0;
-
-    cover = prospero_cover_get(media_path, is_directory);
-    if (!cover || !cover->valid)
-        return 0;
-
-    /* Thin cyan frame (RR_BGRA — not raw 0xFF00D7FF which reads as yellow) */
-    for (row = -2; row < PROSPERO_COVER_H + 2; row++) {
-        for (col = -2; col < PROSPERO_COVER_W + 2; col++) {
-            int px = x + col;
-            int py = y + row;
-            int edge = (row < 0 || row >= PROSPERO_COVER_H ||
-                        col < 0 || col >= PROSPERO_COVER_W);
-            if (!edge || px < 0 || py < 0 || px >= fb_w || py >= fb_h)
-                continue;
-            fb[py * fb_w + px] = RR_BGRA(0, 215, 255, 255);
-        }
-    }
-
-    for (row = 0; row < PROSPERO_COVER_H; row++) {
-        int py = y + row;
-        if (py < 0 || py >= fb_h)
-            continue;
-        for (col = 0; col < PROSPERO_COVER_W; col++) {
-            int px = x + col;
-            if (px < 0 || px >= fb_w)
-                continue;
-            fb[py * fb_w + px] =
-                cover->pixels[row * PROSPERO_COVER_W + col];
-        }
-    }
-    return 1;
-}
 
 static void prospero_draw_progress_bar(
     uint32_t *fb,
@@ -14271,16 +14225,9 @@ static void evo_build_launch_model(evo_launch_model *m)
     m->recent_count = n;
 }
 
-/*
- * Kept under the old name and signature so the frame dispatch does not have
- * to change in the same step. `selected` is ignored: the launch screen is a
- * two-dimensional grid now and its cursor lives in evo_launch_grid.
- */
-void draw_menu_linear(uint32_t *fb, int selected)
+void draw_menu_linear(uint32_t *fb)
 {
     evo_launch_model model;
-
-    (void)selected;
 
     evo_cover_budget = 1;
 
@@ -17438,7 +17385,6 @@ int main(void) {
 
     PS5_PadData padData;
     uint32_t lastButtons = 0;
-    int selected = 0;
     bool running = true;
 
 #if PP_BACKEND_ENABLED
@@ -18328,7 +18274,7 @@ skip_screen_input:
                     &g_pp_pb, linear, g_vo_w * 4u, g_vo_w, g_vo_h);
             }
         } else if (screen == 0)
-            draw_menu_linear(linear, selected);
+            draw_menu_linear(linear);
         else if (screen == 1)
             draw_usb_browser(linear);
         else if (screen == 2)
@@ -18399,7 +18345,7 @@ skip_screen_input:
             }
         }
         else
-            draw_menu_linear(linear, selected);
+            draw_menu_linear(linear);
 
         /* Virtual Keyboard modal overlay */
         if (evo_keyboard_is_open())
