@@ -137,11 +137,10 @@ samples/**/*.fdmdownload
 tools/re/aerolib.csv
 
 # Local test environment, media fixtures & scratch
+# Local test environment, media fixtures & scratch
 emby_config/
 emby_media/
 scratch/
 
-# Research analysis notes
-docs/reng-*.md
 
 
