@@ -27,6 +27,7 @@ EXTRA_CFLAGS ?=
 CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -DEVO_TARGET_PS5=1 \
+    -I. \
     -Iinclude \
     -Ipp/include \
     -Iui/include \
@@ -43,6 +44,8 @@ LIBS := \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libswresample.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libavutil.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libswscale.a \
+    -lssl \
+    -lcrypto \
     -lSceNotification \
     -lSceSystemService \
     -lSceUserService \

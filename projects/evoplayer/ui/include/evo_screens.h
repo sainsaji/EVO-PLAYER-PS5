@@ -246,6 +246,19 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
                      const evo_focus *f, int rail_focused, int rail_index,
                      const evo_hint *hints, int hint_count);
 
+/* ---- changelog screen --------------------------------------------------- */
+
+#include "evo_changelog.h"
+
+typedef struct evo_changelog_model {
+    const evo_changelog_release *releases;
+    int                          release_count;
+} evo_changelog_model;
+
+void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
+                          const evo_focus *f, int rail_focused, int rail_index,
+                          const evo_hint *hints, int hint_count);
+
 /* ---- overlay picker ------------------------------------------------------ */
 
 /*

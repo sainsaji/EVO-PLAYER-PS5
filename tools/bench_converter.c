@@ -325,7 +325,7 @@ static void run_size(uint32_t w, uint32_t h, int iters)
 
     {
         double c4 = bench_compute(&src, w, h, 4, iters, dst_compute);
-        printf("\n [GPU Compute Pipeline] at 4 workers: %.2f ms/frame (backend: %s)\n",
+        printf("\n [CPU SIMD Workgroup Pipeline] at 4 workers: %.2f ms/frame (backend: %s)\n",
                c4, pp_compute_pipeline_get_backend_name());
         printf("   60fps budget 16.67 ms  -> %s (%.0f%% of budget)\n",
                c4 <= 16.67 ? "fits" : "OVER", 100.0 * c4 / 16.67);

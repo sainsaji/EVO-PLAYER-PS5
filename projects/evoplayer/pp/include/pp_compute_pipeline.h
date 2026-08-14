@@ -1,7 +1,7 @@
 /*
- * pp_compute_pipeline.h — GPU Compute & Vectorized Compute YUV Pipeline.
+ * pp_compute_pipeline.h — CPU SIMD & Vectorized Workgroup YUV Pipeline.
  *
- * Implements a high-throughput GPU Compute & SIMD Workgroup Pipeline for
+ * Implements a high-throughput CPU AVX2 SIMD & Workgroup Pipeline for
  * YUV420P / NV12 / P010 -> PS5 Tiled BGRA Direct VideoOut conversion.
  */
 #ifndef PP_COMPUTE_PIPELINE_H
@@ -18,7 +18,7 @@ extern "C" {
 typedef enum {
     PP_COMPUTE_BACKEND_AUTO = 0,
     PP_COMPUTE_BACKEND_VECTOR_WORKGROUP,
-    PP_COMPUTE_BACKEND_PS5_GNM,
+    PP_COMPUTE_BACKEND_CPU_SIMD,
     PP_COMPUTE_BACKEND_FALLBACK
 } pp_compute_backend_t;
 
@@ -28,17 +28,17 @@ typedef struct {
     int                  color_matrix; /* 0 = BT.709 (HD/4K), 1 = BT.601 (SD) */
 } pp_compute_config_t;
 
-/* Initialize the GPU Compute Pipeline */
+/* Initialize the CPU SIMD Workgroup Pipeline */
 int pp_compute_pipeline_init(const pp_compute_config_t *cfg);
 
-/* Shutdown compute workers and release GPU compute queues */
+/* Shutdown compute workers */
 void pp_compute_pipeline_shutdown(void);
 
 /* Query active compute pipeline backend name */
 const char *pp_compute_pipeline_get_backend_name(void);
 
 /**
- * Execute GPU Compute YUV Pipeline:
+ * Execute CPU SIMD YUV Pipeline:
  * Converts YUV420P frame into PS5 tiled BGRA VideoOut direct memory buffer.
  *
  * @param source            Input YUV420P frame

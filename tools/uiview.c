@@ -433,9 +433,8 @@ static void render_browse(int sel, int rail_focused, int rail_sel, int empty)
 static void render_list(const char *which, int sel, int rail_focused,
                         int rail_sel, int empty)
 {
-    /* Sized for the longest list, which is the changelog - every other
-     * fixture here is eight rows or fewer. */
-    evo_list_entry e[EVO_CHANGELOG_COUNT > 8 ? EVO_CHANGELOG_COUNT : 8];
+    /* Sized for the longest list fixture (settings submenus and about). */
+    evo_list_entry e[32];
     evo_list_model m;
     evo_focus f;
     int n = 0;
@@ -539,16 +538,17 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.title="DEVELOPER TOOLS"; m.subtitle="DIAGNOSTICS & SYSTEM REPORTS";
         m.section=EVO_SECTION_SETTINGS;
     } else if (!strcmp(which, "emby_setup")) {
-        static const char *t[] = { "SERVER HOST","SERVER PORT","ACCOUNT USERNAME",
+        static const char *t[] = { "SERVER HOST","SERVER PORT","ACCOUNT USERNAME","ACCOUNT PASSWORD",
             "CONNECTION STATUS","EXPLORE MEDIA LIBRARIES" };
         static const char *d[] = { "192.168.0.11  (PRESS X TO EDIT)",
             "8096  (PRESS X TO EDIT)",
             "bin  (PRESS X TO EDIT)",
+            "********  (PRESS X TO EDIT)",
             "CONNECTED (PRESS X TO DISCONNECT)",
             "BROWSE MOVIES, TV SHOWS & COLLECTIONS" };
         static const int ic[] = { EVO_IC_SETTINGS,EVO_IC_TOOLS,EVO_IC_RESUME,
-            EVO_IC_SUBTITLES,EVO_IC_FOLDER };
-        n = 5;
+            EVO_IC_SETTINGS,EVO_IC_SUBTITLES,EVO_IC_FOLDER };
+        n = 6;
         for (int i = 0; i < n; i++) {
             e[i].title=t[i]; e[i].detail=d[i]; e[i].icon=ic[i];
             e[i].chevron=1; e[i].progress=-1;
@@ -613,24 +613,6 @@ static void render_list(const char *which, int sel, int rail_focused,
         m.title="PLAYBACK PROFILE";
         m.subtitle="HOW AGGRESSIVELY THE DECODER IS TUNED";
         m.section=EVO_SECTION_SETTINGS;   /* a child of settings */
-    } else if (!strcmp(which, "changelog")) {
-        for (int i = 0; i < EVO_CHANGELOG_COUNT; i++) {
-            const evo_changelog_row *r = &EVO_CHANGELOG[i];
-            switch (r->kind) {
-                case EVO_CL_VERSION: e[i].title="VERSION";
-                                     e[i].icon=EVO_IC_ABOUT;  break;
-                case EVO_CL_NEW:     e[i].title="NEW";
-                                     e[i].icon=EVO_IC_RESUME; break;
-                case EVO_CL_FIXED:   e[i].title="FIXED";
-                                     e[i].icon=EVO_IC_TOOLS;  break;
-                default:             e[i].title="REMOVED";
-                                     e[i].icon=EVO_IC_TRASH;  break;
-            }
-            e[i].detail=r->text; e[i].progress=-1; e[i].info=1;
-        }
-        n = EVO_CHANGELOG_COUNT;
-        m.title="CHANGELOG"; m.subtitle="WHAT CHANGED IN EACH RELEASE";
-        m.section=EVO_SECTION_ABOUT;   /* a child of about */
     } else { /* about */
         static const char *t[] = { "VERSION","EVO PLAYER","BUILT ON","THEMES",
             "SCREENSHOTS","CHANGELOG" };
@@ -1177,6 +1159,28 @@ static void render_reader(int sel)
     evo_text_free(&doc);
 }
 
+static void render_changelog(int sel, int rail, int rail_sel)
+{
+    evo_focus f;
+    memset(&f, 0, sizeof(f));
+    f.index = (sel >= 0 && sel < EVO_CHANGELOG_RELEASE_COUNT) ? sel : 0;
+    f.scroll = 0;
+    f.visible = 6;
+    f.count = EVO_CHANGELOG_RELEASE_COUNT;
+
+    evo_changelog_model m;
+    memset(&m, 0, sizeof(m));
+    m.releases = EVO_CHANGELOG_RELEASES;
+    m.release_count = EVO_CHANGELOG_RELEASE_COUNT;
+
+    static const evo_hint hints[2] = {
+        { EVO_GLYPH_CIRCLE, "BACK" },
+        { EVO_GLYPH_DPAD,   "MOVE" }
+    };
+
+    evo_screen_changelog(g_fb, &m, &f, rail, rail_sel, hints, 2);
+}
+
 static void render_keyboard(void)
 {
     render_list("emby_setup", 0, 0, 0, 0);
@@ -1217,6 +1221,7 @@ static void render_one(const char *screen, int sel, int rail, int rail_sel,
     else if (!strcmp(screen, "subs_large"))    render_subtitles(EVO_FACE_TITLE);
     else if (!strcmp(screen, "reader"))        render_reader(sel);
     else if (!strcmp(screen, "keyboard"))      render_keyboard();
+    else if (!strcmp(screen, "changelog"))     render_changelog(sel, rail, rail_sel);
     else if (!strcmp(screen, "settings_surround")) render_surround_studio(sel, rail, rail_sel);
     else if (!strcmp(screen, "toast"))         render_toast(EVO_TOAST_INFO);
     else if (!strcmp(screen, "toastok"))       render_toast(EVO_TOAST_OK);

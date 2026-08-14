@@ -678,6 +678,186 @@ void evo_screen_list(uint32_t *fb, const evo_list_model *m,
 }
 
 /* ==========================================================================
+ * Changelog Master-Detail screen
+ * ========================================================================== */
+
+void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
+                          const evo_focus *f, int rail_focused, int rail_index,
+                          const evo_hint *hints, int hint_count)
+{
+    const evo_theme *th = evo_theme_current();
+    evo_page page;
+    char badge[32];
+    int list_x = EVO_CONTENT_X;   /* 152 */
+    int list_w = 420;
+    int row_h = 88;
+    int row_pitch = 98;
+    int visible_rows = 6;
+    int i;
+
+    memset(&page, 0, sizeof(page));
+    page.title        = "CHANGELOG";
+    page.subtitle     = "WHAT CHANGED IN EACH RELEASE";
+    page.section      = EVO_SECTION_ABOUT;
+    page.rail_focused = rail_focused;
+    page.rail_index   = rail_index;
+
+    if (m && m->release_count > 0) {
+        snprintf(badge, sizeof(badge), "RELEASE %d OF %d", (f ? f->index : 0) + 1, m->release_count);
+        page.badge = badge;
+    }
+
+    evo_chrome_begin(fb, &page);
+
+    if (!m || m->release_count == 0) {
+        evo_widget_empty(fb, list_x, EVO_CONTENT_Y, EVO_CONTENT_W - 24, EVO_CONTENT_H,
+                         "NO RELEASES FOUND", "PRESS CIRCLE TO GO BACK", EVO_IC_ABOUT);
+        evo_chrome_end(fb, &page, hints, hint_count);
+        return;
+    }
+
+    /* 1. Left column: Release version cards */
+    for (i = 0; i < f->visible && (f->scroll + i) < m->release_count; i++) {
+        int index = f->scroll + i;
+        int y = EVO_CONTENT_Y + i * row_pitch;
+        int is_sel = (index == f->index);
+        int title_y, sub_y;
+
+        evo_ui_card(fb, list_x, y, list_w, row_h, is_sel);
+
+        const evo_changelog_release *rel = &m->releases[index];
+        int icon_idx = (index == 0) ? EVO_IC_LOGO : EVO_IC_ABOUT;
+        evo_icon_tinted(fb, list_x + EVO_ROW_PAD_X,
+                        y + (row_h - EVO_ROW_ICON) / 2 - 8,
+                        icon_idx,
+                        is_sel ? th->accent : with_alpha(th->text_muted, 180));
+
+        evo_text_y_stacked(y, row_h, EVO_FACE_MENU, EVO_FACE_SMALL, 6,
+                           &title_y, &sub_y);
+
+        char ver_title[48];
+        snprintf(ver_title, sizeof(ver_title), "VERSION %s", rel->version);
+        evo_text(fb, list_x + EVO_ROW_TEXT_X, title_y, ver_title,
+                 is_sel ? th->accent : th->text_primary, EVO_FACE_MENU);
+
+        char ver_sub[64];
+        snprintf(ver_sub, sizeof(ver_sub), "%d CHANGES  -  %s", rel->item_count, rel->date);
+        evo_text_fit(fb, list_x + EVO_ROW_TEXT_X, sub_y, list_w - EVO_ROW_TEXT_X - 44, ver_sub,
+                     th->text_muted, EVO_FACE_SMALL);
+
+        if (is_sel) {
+            evo_icon_tinted(fb, list_x + list_w - 44, y + (row_h - EVO_ROW_ICON) / 2 - 8,
+                            EVO_IC_CHEVRON, th->accent);
+        }
+    }
+
+    if (m->release_count > visible_rows) {
+        evo_widget_scrollbar(fb, list_x + list_w + 8, EVO_CONTENT_Y,
+                             EVO_CONTENT_H, evo_focus_scroll_permille(f),
+                             visible_rows, m->release_count);
+    }
+
+    /* 2. Vertical separator rule */
+    evo_ui_vline(fb, list_x + list_w + 22, EVO_CONTENT_Y, EVO_CONTENT_H,
+                 with_alpha(th->border, 90));
+
+    /* 3. Right column: Release Notes Inspector Panel */
+    int panel_x = list_x + list_w + 40;
+    int panel_w = EVO_CONTENT_R - panel_x;
+    int panel_y = EVO_CONTENT_Y;
+    int panel_h = EVO_CONTENT_H;
+
+    evo_ui_card(fb, panel_x, panel_y, panel_w, panel_h, 0);
+
+    int cur_idx = (f && f->index >= 0 && f->index < m->release_count) ? f->index : 0;
+    const evo_changelog_release *cur = &m->releases[cur_idx];
+
+    int inset_x = panel_x + 36;
+    int inset_w = panel_w - 72;
+    int hy = panel_y + 24;
+
+    /* Pill badge for version tag */
+    int tag_w = 150;
+    int tag_h = 32;
+    evo_ui_round_rect(fb, inset_x, hy, tag_w, tag_h, 6,
+                      with_alpha(th->accent_soft, 80), with_alpha(th->accent_soft, 80),
+                      th->accent, 1, with_alpha(th->shadow, 0), 0);
+
+    char tag_str[32];
+    snprintf(tag_str, sizeof(tag_str), "RELEASE %s", cur->version);
+    int tw = evo_text_w(tag_str, EVO_FACE_SMALL);
+    evo_text(fb, inset_x + (tag_w - tw)/2, hy + (tag_h - 18)/2, tag_str,
+             th->accent, EVO_FACE_SMALL);
+
+    /* Tagline */
+    evo_text_fit(fb, inset_x + tag_w + 20, hy + 2, inset_w - tag_w - 300,
+                 cur->tagline, th->text_primary, EVO_FACE_MENU);
+
+    /* Stats right */
+    char stats_str[64];
+    snprintf(stats_str, sizeof(stats_str), "%d HIGHLIGHTS  -  %s", cur->item_count, cur->date);
+    evo_text_right(fb, inset_x + inset_w, hy + 7, stats_str, th->text_muted, EVO_FACE_SMALL);
+
+    /* Divider */
+    evo_ui_hline(fb, inset_x, hy + 46, inset_w, with_alpha(th->border, 110));
+
+    /* Items */
+    int item_y = hy + 62;
+    int item_pitch = 54;
+    int max_items = 11;
+
+    for (int j = 0; j < cur->item_count && j < max_items; j++) {
+        const evo_changelog_item *it = &cur->items[j];
+
+        /* Badge pill */
+        const char *badge_text = "NEW";
+        uint32_t badge_fill = with_alpha(th->accent_soft, 85);
+        uint32_t badge_border = with_alpha(th->accent, 220);
+        uint32_t badge_text_col = th->accent;
+
+        if (it->kind == EVO_CL_FIXED) {
+            badge_text = "FIXED";
+            badge_fill = with_alpha(0x00227733, 90);
+            badge_border = with_alpha(0x0044CC66, 220);
+            badge_text_col = with_alpha(0x0088FFAA, 255);
+        } else if (it->kind == EVO_CL_IMPROVED) {
+            badge_text = "IMPROVED";
+            badge_fill = with_alpha(0x00885500, 90);
+            badge_border = with_alpha(0x00FFBB33, 220);
+            badge_text_col = with_alpha(0x00FFEE77, 255);
+        } else if (it->kind == EVO_CL_REMOVED) {
+            badge_text = "REMOVED";
+            badge_fill = with_alpha(0x00881111, 90);
+            badge_border = with_alpha(0x00FF4444, 220);
+            badge_text_col = with_alpha(0x00FFAAAA, 255);
+        }
+
+        int pw = 94;
+        int ph = 26;
+        evo_ui_round_rect(fb, inset_x, item_y + 3, pw, ph, 5,
+                          badge_fill, badge_fill, badge_border, 1,
+                          with_alpha(th->shadow, 0), 0);
+
+        int btw = evo_text_w(badge_text, EVO_FACE_SMALL);
+        evo_text(fb, inset_x + (pw - btw)/2, item_y + 3 + (ph - 18)/2, badge_text,
+                 badge_text_col, EVO_FACE_SMALL);
+
+        /* Item text */
+        evo_text_fit(fb, inset_x + pw + 16, item_y + 3, inset_w - pw - 20,
+                     it->text, th->text_primary, EVO_FACE_SUB);
+
+        /* Subtle item row separator */
+        if (j < cur->item_count - 1 && j < max_items - 1) {
+            evo_ui_hline(fb, inset_x, item_y + 41, inset_w, with_alpha(th->border, 35));
+        }
+
+        item_y += item_pitch;
+    }
+
+    evo_chrome_end(fb, &page, hints, hint_count);
+}
+
+/* ==========================================================================
  * Modal dialog
  * ========================================================================== */
 

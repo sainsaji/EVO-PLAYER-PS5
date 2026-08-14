@@ -15052,11 +15052,12 @@ static void evo_tools_activate(void)
 
 /* ---- Emby Media Server Addon Screens ------------------------------------ */
 
-#define EMBY_SETUP_COUNT 5
+#define EMBY_SETUP_COUNT 6
 enum {
     EMBY_SETUP_ROW_HOST = 0,
     EMBY_SETUP_ROW_PORT,
     EMBY_SETUP_ROW_USER,
+    EMBY_SETUP_ROW_PASS,
     EMBY_SETUP_ROW_STATUS,
     EMBY_SETUP_ROW_BROWSE
 };
@@ -15183,6 +15184,17 @@ static void on_emby_user_submitted(const char *text, void *userdata)
     }
 }
 
+static void on_emby_pass_submitted(const char *text, void *userdata)
+{
+    (void)userdata;
+    emby_config_t *cfg = emby_get_config();
+    if (text) {
+        strncpy(cfg->password, text, sizeof(cfg->password) - 1);
+        emby_save_config();
+        toast("ACCOUNT PASSWORD", cfg->password[0] ? "PASSWORD SAVED" : "CLEARED");
+    }
+}
+
 static void evo_emby_setup_activate(void)
 {
     emby_config_t *cfg = emby_get_config();
@@ -15212,6 +15224,14 @@ static void evo_emby_setup_activate(void)
                               cfg->username,
                               sizeof(cfg->username) - 1,
                               on_emby_user_submitted,
+                              NULL);
+            break;
+
+        case EMBY_SETUP_ROW_PASS:
+            evo_keyboard_open("ENTER ACCOUNT PASSWORD",
+                              cfg->password,
+                              sizeof(cfg->password) - 1,
+                              on_emby_pass_submitted,
                               NULL);
             break;
 
@@ -15269,6 +15289,7 @@ void draw_emby_setup_screen(uint32_t *fb)
     static char host_detail[160];
     static char port_detail[64];
     static char user_detail[96];
+    static char pass_detail[96];
     static char status_detail[128];
     evo_list_model m;
 
@@ -15277,6 +15298,16 @@ void draw_emby_setup_screen(uint32_t *fb)
     snprintf(host_detail, sizeof(host_detail), "%s  (PRESS X TO EDIT)", cfg->host);
     snprintf(port_detail, sizeof(port_detail), "%d  (PRESS X TO EDIT)", cfg->port);
     snprintf(user_detail, sizeof(user_detail), "%s  (PRESS X TO EDIT)", cfg->username);
+    if (cfg->password[0]) {
+        size_t plen = strlen(cfg->password);
+        if (plen > 16) plen = 16;
+        char stars[32];
+        memset(stars, '*', plen);
+        stars[plen] = '\0';
+        snprintf(pass_detail, sizeof(pass_detail), "%s  (PRESS X TO EDIT)", stars);
+    } else {
+        snprintf(pass_detail, sizeof(pass_detail), "(NONE)  (PRESS X TO EDIT)");
+    }
     snprintf(status_detail, sizeof(status_detail), "%s",
              cfg->is_connected ? "CONNECTED (PRESS X TO DISCONNECT)" : "DISCONNECTED (PRESS X TO CONNECT)");
 
@@ -15295,15 +15326,20 @@ void draw_emby_setup_screen(uint32_t *fb)
     emby_setup_rows[2].icon    = EVO_IC_RESUME;
     emby_setup_rows[2].chevron = 1;
 
-    emby_setup_rows[3].title   = "CONNECTION STATUS";
-    emby_setup_rows[3].detail  = status_detail;
-    emby_setup_rows[3].icon    = EVO_IC_SUBTITLES;
+    emby_setup_rows[3].title   = "ACCOUNT PASSWORD";
+    emby_setup_rows[3].detail  = pass_detail;
+    emby_setup_rows[3].icon    = EVO_IC_SETTINGS;
     emby_setup_rows[3].chevron = 1;
 
-    emby_setup_rows[4].title   = "EXPLORE MEDIA LIBRARIES";
-    emby_setup_rows[4].detail  = cfg->is_connected ? "BROWSE MOVIES, TV SHOWS & COLLECTIONS" : "CONNECT TO SERVER FIRST";
-    emby_setup_rows[4].icon    = EVO_IC_FOLDER;
+    emby_setup_rows[4].title   = "CONNECTION STATUS";
+    emby_setup_rows[4].detail  = status_detail;
+    emby_setup_rows[4].icon    = EVO_IC_SUBTITLES;
     emby_setup_rows[4].chevron = 1;
+
+    emby_setup_rows[5].title   = "EXPLORE MEDIA LIBRARIES";
+    emby_setup_rows[5].detail  = cfg->is_connected ? "BROWSE MOVIES, TV SHOWS & COLLECTIONS" : "CONNECT TO SERVER FIRST";
+    emby_setup_rows[5].icon    = EVO_IC_FOLDER;
+    emby_setup_rows[5].chevron = 1;
 
     for (int i = 0; i < EMBY_SETUP_COUNT; i++) {
         emby_setup_rows[i].progress = -1;
@@ -15438,8 +15474,7 @@ void draw_about_support_screen(uint32_t *fb)
 
 /* ---- changelog ----------------------------------------------------------- */
 
-static int            evo_changelog_selected;
-static evo_list_entry evo_changelog_rows[EVO_CHANGELOG_COUNT];
+static int evo_changelog_selected = 0;
 
 void draw_changelog_screen(uint32_t *fb)
 {
@@ -15448,53 +15483,16 @@ void draw_changelog_screen(uint32_t *fb)
         { EVO_GLYPH_DPAD,   "MOVE" }
     };
 
-    evo_list_model m;
-    int            i;
+    evo_changelog_model m;
 
-    evo_page_sync(&evo_changelog_selected, EVO_CHANGELOG_COUNT);
-
-    for (i = 0; i < EVO_CHANGELOG_COUNT; i++) {
-        const evo_changelog_row *r = &EVO_CHANGELOG[i];
-
-        switch (r->kind) {
-            case EVO_CL_VERSION:
-                evo_changelog_rows[i].title = "VERSION";
-                evo_changelog_rows[i].icon  = EVO_IC_ABOUT;
-                break;
-            case EVO_CL_NEW:
-                evo_changelog_rows[i].title = "NEW";
-                evo_changelog_rows[i].icon  = EVO_IC_RESUME;
-                break;
-            case EVO_CL_FIXED:
-                evo_changelog_rows[i].title = "FIXED";
-                evo_changelog_rows[i].icon  = EVO_IC_TOOLS;
-                break;
-            default:
-                evo_changelog_rows[i].title = "REMOVED";
-                evo_changelog_rows[i].icon  = EVO_IC_TRASH;
-                break;
-        }
-
-        evo_changelog_rows[i].detail   = r->text;
-        evo_changelog_rows[i].chevron  = 0;
-        evo_changelog_rows[i].progress = -1;
-        /*
-         * Facts, so the emphasis inverts: the change is what you came to
-         * read and NEW / FIXED steps back into the muted colour. Without
-         * this the label column shouts and the content whispers.
-         */
-        evo_changelog_rows[i].info     = 1;
-    }
+    evo_page_sync(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT);
 
     memset(&m, 0, sizeof(m));
-    m.title    = "CHANGELOG";
-    m.subtitle = "WHAT CHANGED IN EACH RELEASE";
-    m.section  = EVO_SECTION_ABOUT;
-    m.entries  = evo_changelog_rows;
-    m.count    = EVO_CHANGELOG_COUNT;
+    m.releases      = EVO_CHANGELOG_RELEASES;
+    m.release_count = EVO_CHANGELOG_RELEASE_COUNT;
 
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    hints, 2);
+    evo_screen_changelog(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                         hints, 2);
 }
 
 /* ===========================================================================
@@ -17230,7 +17228,7 @@ int main(void) {
                 else if (screen == SCREEN_EMBY_SETUP) evo_page_nav(&emby_setup_selected, EMBY_SETUP_COUNT, +1);
                 else if (screen == SCREEN_EMBY_BROWSE && emby_item_count > 0) evo_page_nav(&emby_browse_selected, emby_item_count, +1);
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, +1);
-                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_COUNT, +1);
+                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, +1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, +1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, +1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, +1);
@@ -17265,7 +17263,7 @@ int main(void) {
                 else if (screen == SCREEN_EMBY_SETUP) evo_page_nav(&emby_setup_selected, EMBY_SETUP_COUNT, -1);
                 else if (screen == SCREEN_EMBY_BROWSE && emby_item_count > 0) evo_page_nav(&emby_browse_selected, emby_item_count, -1);
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, -1);
-                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_COUNT, -1);
+                else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, -1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, -1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, -1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, -1);

@@ -5,6 +5,34 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.7.0
+
+**Emby password authentication, master-detail hierarchical changelog viewer, direct memory buffer streaming, and native PS5 IME keyboard.**
+
+Download **`EVOPlayer-0.7.0-InstallTile.elf`** to register the Media tile on the home screen, or **`EVOPlayer-0.7.0-player-only.elf`** for homebrew app slot launch.
+
+### New — Emby Password Authentication & Setup
+
+- **Account Password Support.** Dedicated interactive password configuration row in Emby Setup screen with virtual keyboard input and secure asterisk masking (`********`).
+- **Robust cJSON Authentication.** Server authentication payloads formatted with `cJSON` for compliant user session tokens against password-protected Emby and Jellyfin servers.
+- **Config Persistence.** Safe loading and saving of passwords in `/data/evoplayer/emby.conf` and USB configurations with key-value and legacy positional compatibility.
+
+### New — Hierarchical Changelog Viewer
+
+- **Master-Detail Version Architecture.** Replaced legacy flat cards with a clean dual-pane layout: a version selector on the left and a dedicated release notes inspector card on the right.
+- **Categorized Visual Badges.** Clear `[NEW]`, `[FIXED]`, `[IMPROVED]`, and `[REMOVED]` indicator pills with accent color coding.
+- **Instant Version Switching.** Fluid D-pad navigation across all releases with automatic detail panel updates.
+
+### New & Improved — Core Subsystems
+
+- **Direct Memory Region Manager.** High-throughput streaming buffer allocations leveraging native PS5 direct memory (`dmem`).
+- **Native HTTPS & TLS Support.** Integrated OpenSSL (`libssl.a`/`libcrypto.a`) with TLS 1.2/1.3 handshakes, SNI extension, and secure communication for remote HTTPS media servers.
+- **Native PS5 IME Keyboard Support.** Seamless integration with `libSceImeDialog.sprx` supporting multilingual input and USB keyboards, with automatic fallback to custom virtual keyboard.
+- **Media Directory Search.** Interactive search modal in file browser for fast folder and item filtering.
+- **CPU SIMD Vectorized YUV Pipeline.** 8-wide AVX2 SIMD workgroups for high-throughput video presentation (7.4ms per 4K frame).
+
+---
+
 ## 0.6.0
 
 **Direct Emby streaming, on-screen virtual keyboard, and a dedicated Surround Sound Studio for 5.1 and 7.1 speaker calibration.**

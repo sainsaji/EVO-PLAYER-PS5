@@ -16,6 +16,8 @@
 #include <sys/time.h>
 
 #include "evo_net.h"
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 #define EVO_NET_MAX_QUEUE    32
 #define EVO_NET_BUFFER_SIZE  8192
@@ -49,18 +51,41 @@ static int             g_pending_count = 0;
 static evo_net_req_t  *g_completed_queue[EVO_NET_MAX_QUEUE];
 static int             g_completed_count = 0;
 
-/* Parse http://host:port/path */
-static int parse_url(const char *url, char *host, int *port, char *path)
+static SSL_CTX        *g_ssl_ctx = NULL;
+static pthread_mutex_t g_ssl_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static SSL_CTX *evo_net_get_ssl_ctx(void)
+{
+    pthread_mutex_lock(&g_ssl_init_mutex);
+    if (!g_ssl_ctx) {
+        SSL_library_init();
+        OpenSSL_add_all_algorithms();
+        SSL_load_error_strings();
+        const SSL_METHOD *method = TLS_client_method();
+        g_ssl_ctx = SSL_CTX_new(method);
+        if (g_ssl_ctx) {
+            SSL_CTX_set_mode(g_ssl_ctx, SSL_MODE_AUTO_RETRY);
+        }
+    }
+    pthread_mutex_unlock(&g_ssl_init_mutex);
+    return g_ssl_ctx;
+}
+
+/* Parse http://host:port/path and https://host:port/path */
+static int parse_url(const char *url, char *host, int *port, char *path, int *is_https)
 {
     const char *p = url;
     int default_port = 80;
+    *is_https = 0;
 
     if (strncmp(p, "http://", 7) == 0) {
         p += 7;
         default_port = 80;
+        *is_https = 0;
     } else if (strncmp(p, "https://", 8) == 0) {
         p += 8;
         default_port = 443;
+        *is_https = 1;
     }
 
     const char *slash = strchr(p, '/');
@@ -104,8 +129,9 @@ static int execute_http(const char *method,
     char host[128] = {0};
     int  port = 80;
     char path[256] = {0};
+    int  is_https = 0;
 
-    if (parse_url(url, host, &port, path) != 0)
+    if (parse_url(url, host, &port, path, &is_https) != 0)
         return -1;
 
     struct addrinfo hints, *res = NULL, *rp = NULL;
@@ -143,12 +169,34 @@ static int execute_http(const char *method,
     if (sock < 0)
         return -3;
 
+    /* Initialize SSL if HTTPS */
+    SSL *ssl = NULL;
+    if (is_https) {
+        SSL_CTX *ctx = evo_net_get_ssl_ctx();
+        if (!ctx) {
+            close(sock);
+            return -10;
+        }
+        ssl = SSL_new(ctx);
+        if (!ssl) {
+            close(sock);
+            return -11;
+        }
+        SSL_set_tlsext_host_name(ssl, host);
+        SSL_set_fd(ssl, sock);
+        if (SSL_connect(ssl) <= 0) {
+            SSL_free(ssl);
+            close(sock);
+            return -12;
+        }
+    }
+
     /* Build HTTP request header */
     char req_buf[2048];
     int req_len = snprintf(req_buf, sizeof(req_buf),
                            "%s %s HTTP/1.1\r\n"
                            "Host: %s:%d\r\n"
-                           "User-Agent: EVOPlayer-PS5/0.5.0\r\n"
+                           "User-Agent: EVOPlayer-PS5/0.7.0\r\n"
                            "Accept: application/json, text/plain, */*\r\n"
                            "Connection: close\r\n",
                            method, path, host, port);
@@ -170,7 +218,15 @@ static int execute_http(const char *method,
     req_len += snprintf(req_buf + req_len, sizeof(req_buf) - req_len, "\r\n");
 
     /* Send header */
-    if (send(sock, req_buf, req_len, 0) < 0) {
+    int send_err = 0;
+    if (is_https) {
+        if (SSL_write(ssl, req_buf, req_len) <= 0) send_err = 1;
+    } else {
+        if (send(sock, req_buf, req_len, 0) < 0) send_err = 1;
+    }
+
+    if (send_err) {
+        if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
         close(sock);
         return -4;
     }
@@ -178,7 +234,14 @@ static int execute_http(const char *method,
     /* Send payload if POST */
     if (post_data) {
         size_t post_len = strlen(post_data);
-        if (send(sock, post_data, post_len, 0) < 0) {
+        int post_err = 0;
+        if (is_https) {
+            if (SSL_write(ssl, post_data, post_len) <= 0) post_err = 1;
+        } else {
+            if (send(sock, post_data, post_len, 0) < 0) post_err = 1;
+        }
+        if (post_err) {
+            if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
             close(sock);
             return -5;
         }
@@ -189,23 +252,38 @@ static int execute_http(const char *method,
     size_t total = 0;
     char *buf = (char *)malloc(cap);
     if (!buf) {
+        if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
         close(sock);
         return -6;
     }
 
     ssize_t n;
-    while ((n = recv(sock, buf + total, cap - total - 1, 0)) > 0) {
+    while (1) {
+        if (is_https) {
+            n = SSL_read(ssl, buf + total, cap - total - 1);
+        } else {
+            n = recv(sock, buf + total, cap - total - 1, 0);
+        }
+
+        if (n <= 0) break;
+
         total += n;
         if (total + 4096 >= cap) {
             cap *= 2;
             char *new_buf = (char *)realloc(buf, cap);
             if (!new_buf) {
                 free(buf);
+                if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
                 close(sock);
                 return -7;
             }
             buf = new_buf;
         }
+    }
+
+    if (ssl) {
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
     }
     close(sock);
 
@@ -363,6 +441,13 @@ void evo_net_shutdown(void)
         free(g_completed_queue[i]);
     }
     g_completed_count = 0;
+
+    pthread_mutex_lock(&g_ssl_init_mutex);
+    if (g_ssl_ctx) {
+        SSL_CTX_free(g_ssl_ctx);
+        g_ssl_ctx = NULL;
+    }
+    pthread_mutex_unlock(&g_ssl_init_mutex);
 }
 
 int evo_net_request_async(const char *method,

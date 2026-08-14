@@ -1,9 +1,9 @@
 /*
- * pp_compute_pipeline.c — GPU Compute & Vectorized Workgroup YUV Pipeline.
+ * pp_compute_pipeline.c — CPU SIMD & Vectorized Workgroup YUV Pipeline.
  *
  * Provides a high-performance compute pipeline for YUV420P -> PS5 Tiled BGRA.
  * Features:
- *   - 8-wide SIMD Compute Kernel (AVX2 / SSE2 / vector workgroups)
+ *   - 8-wide AVX2 / SSE2 CPU SIMD Compute Kernel
  *   - Hoisted tile base address math & shared Chroma (U/V) 2x2 caching
  *   - Persistent worker pool with dynamic workgroup partitioning
  *   - 100% bit-exact correctness with reference FNV-1a plane hashes
@@ -282,11 +282,11 @@ void pp_compute_pipeline_shutdown(void)
 const char *pp_compute_pipeline_get_backend_name(void)
 {
 #if defined(EVO_TARGET_PS5)
-    return "GPU Compute (RDNA2 Direct / GNM)";
+    return "CPU SIMD (AVX2 8-Wide Workgroups)";
 #elif defined(__AVX2__)
-    return "GPU Compute (Vector AVX2 8-wide SIMD)";
+    return "CPU SIMD (AVX2 8-Wide Vectorized)";
 #else
-    return "GPU Compute (Multi-threaded Workgroups)";
+    return "CPU Multi-threaded Workgroups";
 #endif
 }
 

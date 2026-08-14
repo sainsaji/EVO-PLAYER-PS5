@@ -10,8 +10,13 @@
 #include "evo_net.h"
 #include "cJSON.h"
 
+#ifndef EMBY_CONF_PATH
 #define EMBY_CONF_PATH "/data/evoplayer/emby.conf"
+#endif
+
+#ifndef EMBY_CONF_USB
 #define EMBY_CONF_USB  "/mnt/usb0/.evo_emby.conf"
+#endif
 
 static emby_config_t g_emby_config = {
     .host = "192.168.0.11",
@@ -32,29 +37,45 @@ int emby_init(void)
 
     if (f) {
         char line[256];
-        if (fgets(line, sizeof(line), f)) {
+        int line_idx = 0;
+        while (fgets(line, sizeof(line), f)) {
             line[strcspn(line, "\r\n")] = 0;
-            strncpy(g_emby_config.host, line, sizeof(g_emby_config.host) - 1);
-        }
-        if (fgets(line, sizeof(line), f)) {
-            g_emby_config.port = atoi(line);
-            if (g_emby_config.port <= 0) g_emby_config.port = 8096;
-        }
-        if (fgets(line, sizeof(line), f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            strncpy(g_emby_config.username, line, sizeof(g_emby_config.username) - 1);
-        }
-        if (fgets(line, sizeof(line), f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            strncpy(g_emby_config.token, line, sizeof(g_emby_config.token) - 1);
-        }
-        if (fgets(line, sizeof(line), f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            strncpy(g_emby_config.user_id, line, sizeof(g_emby_config.user_id) - 1);
-        }
-        if (fgets(line, sizeof(line), f)) {
-            line[strcspn(line, "\r\n")] = 0;
-            strncpy(g_emby_config.server_name, line, sizeof(g_emby_config.server_name) - 1);
+
+            if (strncmp(line, "host=", 5) == 0) {
+                strncpy(g_emby_config.host, line + 5, sizeof(g_emby_config.host) - 1);
+            } else if (strncmp(line, "port=", 5) == 0) {
+                g_emby_config.port = atoi(line + 5);
+                if (g_emby_config.port <= 0) g_emby_config.port = 8096;
+            } else if (strncmp(line, "username=", 9) == 0) {
+                strncpy(g_emby_config.username, line + 9, sizeof(g_emby_config.username) - 1);
+            } else if (strncmp(line, "password=", 9) == 0) {
+                strncpy(g_emby_config.password, line + 9, sizeof(g_emby_config.password) - 1);
+            } else if (strncmp(line, "token=", 6) == 0) {
+                strncpy(g_emby_config.token, line + 6, sizeof(g_emby_config.token) - 1);
+            } else if (strncmp(line, "user_id=", 8) == 0) {
+                strncpy(g_emby_config.user_id, line + 8, sizeof(g_emby_config.user_id) - 1);
+            } else if (strncmp(line, "server_name=", 12) == 0) {
+                strncpy(g_emby_config.server_name, line + 12, sizeof(g_emby_config.server_name) - 1);
+            } else {
+                /* Positional fallback */
+                if (line_idx == 0 && line[0]) {
+                    strncpy(g_emby_config.host, line, sizeof(g_emby_config.host) - 1);
+                } else if (line_idx == 1 && line[0]) {
+                    g_emby_config.port = atoi(line);
+                    if (g_emby_config.port <= 0) g_emby_config.port = 8096;
+                } else if (line_idx == 2 && line[0]) {
+                    strncpy(g_emby_config.username, line, sizeof(g_emby_config.username) - 1);
+                } else if (line_idx == 3) {
+                    strncpy(g_emby_config.password, line, sizeof(g_emby_config.password) - 1);
+                } else if (line_idx == 4 && line[0]) {
+                    strncpy(g_emby_config.token, line, sizeof(g_emby_config.token) - 1);
+                } else if (line_idx == 5 && line[0]) {
+                    strncpy(g_emby_config.user_id, line, sizeof(g_emby_config.user_id) - 1);
+                } else if (line_idx == 6 && line[0]) {
+                    strncpy(g_emby_config.server_name, line, sizeof(g_emby_config.server_name) - 1);
+                }
+            }
+            line_idx++;
         }
 
         if (g_emby_config.token[0] && g_emby_config.user_id[0]) {
@@ -73,10 +94,11 @@ int emby_save_config(void)
     if (!f) f = fopen(EMBY_CONF_USB, "w");
     if (!f) return -1;
 
-    fprintf(f, "%s\n%d\n%s\n%s\n%s\n%s\n",
+    fprintf(f, "host=%s\nport=%d\nusername=%s\npassword=%s\ntoken=%s\nuser_id=%s\nserver_name=%s\n",
             g_emby_config.host,
             g_emby_config.port,
             g_emby_config.username,
+            g_emby_config.password,
             g_emby_config.token,
             g_emby_config.user_id,
             g_emby_config.server_name);
@@ -136,17 +158,19 @@ static void on_public_users_response(int success, int status_code, const char *b
                     snprintf(url, sizeof(url), "http://%s:%d/emby/Users/AuthenticateByName",
                              g_emby_config.host, g_emby_config.port);
 
-                    char post_json[512];
-                    snprintf(post_json, sizeof(post_json),
-                             "{\"Username\":\"%s\",\"Pw\":\"%s\"}",
-                             g_emby_config.username, g_emby_config.password);
+                    cJSON *auth_req = cJSON_CreateObject();
+                    cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
+                    cJSON_AddStringToObject(auth_req, "Pw", g_emby_config.password);
+                    char *post_json = cJSON_PrintUnformatted(auth_req);
 
                     const char *headers[2];
                     headers[0] = "X-Emby-Authorization: MediaBrowser Client=\"EVOPlayer\", Device=\"PlayStation 5\", DeviceId=\"EVO-PS5-050\", Version=\"0.5.0\"";
                     headers[1] = "Content-Type: application/json";
 
                     ctx->retried = 1;
-                    evo_net_request_async("POST", url, post_json, headers, 2, on_auth_response, ctx);
+                    evo_net_request_async("POST", url, post_json ? post_json : "{}", headers, 2, on_auth_response, ctx);
+                    if (post_json) free(post_json);
+                    cJSON_Delete(auth_req);
                     return;
                 }
             }
@@ -224,22 +248,29 @@ int emby_connect_async(emby_auth_cb callback, void *userdata)
     snprintf(url, sizeof(url), "http://%s:%d/emby/Users/AuthenticateByName",
              g_emby_config.host, g_emby_config.port);
 
-    char post_json[512];
-    snprintf(post_json, sizeof(post_json),
-             "{\"Username\":\"%s\",\"Pw\":\"%s\"}",
-             g_emby_config.username, g_emby_config.password);
+    cJSON *auth_req = cJSON_CreateObject();
+    cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
+    cJSON_AddStringToObject(auth_req, "Pw", g_emby_config.password);
+    char *post_json = cJSON_PrintUnformatted(auth_req);
 
     const char *headers[2];
     headers[0] = "X-Emby-Authorization: MediaBrowser Client=\"EVOPlayer\", Device=\"PlayStation 5\", DeviceId=\"EVO-PS5-050\", Version=\"0.5.0\"";
     headers[1] = "Content-Type: application/json";
 
     auth_ctx_t *ctx = (auth_ctx_t *)malloc(sizeof(auth_ctx_t));
-    if (!ctx) return -1;
+    if (!ctx) {
+        if (post_json) free(post_json);
+        cJSON_Delete(auth_req);
+        return -1;
+    }
     ctx->callback = callback;
     ctx->userdata = userdata;
     ctx->retried  = 0;
 
-    return evo_net_request_async("POST", url, post_json, headers, 2, on_auth_response, ctx);
+    int ret = evo_net_request_async("POST", url, post_json ? post_json : "{}", headers, 2, on_auth_response, ctx);
+    if (post_json) free(post_json);
+    cJSON_Delete(auth_req);
+    return ret;
 }
 
 /* Items Query Context */

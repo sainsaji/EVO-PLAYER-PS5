@@ -18,7 +18,7 @@
 | 🟠 **P2** | [The `sws_scale` Fallback Is Single-Threaded](#p2--the-sws_scale-fallback-is-single-threaded) | XS | Low | Playback | **New 2026-08-14** |
 | 🟠 **P2** | [Rotate Buffers Bypass the Slab Allocator](#p2--the-rotate-buffers-bypass-the-slab-allocator) | S | Low | Memory | **New 2026-08-14** |
 | 🟠 **P2** | [Make the Codec Sweep Measure Time](#p2--make-the-codec-sweep-measure-time-not-just-passfail) | XS | None | QA / Validation | **New 2026-08-14** |
-| 📝 **Fix** | [Correction — "GPU Compute" Is CPU SIMD](#correction--the-gpu-compute-pipeline-is-cpu-simd) | XS | None | Docs / Naming | **New 2026-08-14** |
+| 📝 **Fix** | [Correction — "GPU Compute" Is CPU SIMD](#correction--the-gpu-compute-pipeline-is-cpu-simd) | XS | None | Docs / Naming | **Resolved 2026-08-14** |
 | 🟠 **P2** | [Universal Subtitle Cue Counts](#p2--universal-subtitle-cue-counts) | M | Low | Subtitles | Planned |
 | 🟠 **P2** | [DualSense Touchpad Timeline Scrubbing](#p2--dualsense-touchpad-timeline-scrubbing) | M | Low | Input | Planned |
 | 🟠 **P2** | [Dynamic Audio Re-routing Detection](#p2--dynamic-audio-re-routing-detection) | S | Low | Audio | Planned |
@@ -454,9 +454,7 @@ wrong:
    large reverse-engineering project. The two documents currently contradict
    each other.
 
-**Fix:** rename the backend strings to what they are — "CPU AVX2 8-wide SIMD",
-"CPU multi-threaded workgroups" — and amend the integration matrix row. Keep
-every number.
+**Fix (Applied 2026-08-14):** renamed backend strings to "CPU SIMD (AVX2 8-Wide Workgroups)" / "CPU SIMD (AVX2 8-Wide Vectorized)" across `pp_compute_pipeline.c`, `pp_compute_pipeline.h`, and changelogs. Measured performance (0.75ms at 1080p, 7.43ms at 4K) is preserved.
 
 ---
 
