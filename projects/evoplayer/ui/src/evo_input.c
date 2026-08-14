@@ -64,14 +64,14 @@ static int action_repeats(evo_action a)
 }
 
 /*
- * Repeat curve. 380ms before the first repeat, so a deliberate single press
- * is never doubled; then 110ms, tightening to 45ms once the direction has
- * been held for a second and a half and the intent is clearly "keep going".
+ * Repeat curve. 220ms before the first repeat, giving an immediate responsive
+ * feel for single taps and held navigation; then 65ms (~15 Hz), tightening to
+ * 28ms (~35 Hz) once held for 750ms for smooth fast scrolling.
  */
-#define REPEAT_DELAY_MS   380u
-#define REPEAT_SLOW_MS    110u
-#define REPEAT_FAST_MS     45u
-#define REPEAT_RAMP_MS   1500u
+#define REPEAT_DELAY_MS   220u
+#define REPEAT_SLOW_MS     65u
+#define REPEAT_FAST_MS     28u
+#define REPEAT_RAMP_MS    750u
 
 static uint64_t repeat_interval(uint64_t held_for_ms)
 {

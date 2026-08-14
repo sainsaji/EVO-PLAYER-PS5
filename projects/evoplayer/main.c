@@ -16864,10 +16864,12 @@ int main(void) {
             }
             linear = (uint32_t *)pp_videoout_acquire(&g_pp_vo, &pp_buf_idx, &pp_pitch);
             if (!linear) {
-                usleep(2000);
+                usleep(500);
                 continue;
             }
-            memset(linear, 0, (size_t)g_vo_w * (size_t)g_vo_h * 4u);
+            if (screen == SCREEN_PLAYER) {
+                memset(linear, 0, (size_t)g_vo_w * (size_t)g_vo_h * 4u);
+            }
         } else if (v8_presented) {
             linear = NULL;
         }
@@ -17786,13 +17788,12 @@ skip_screen_input:
             }
         }
         /*
-         * Old path slept ~2ms every frame even during 4K play (choppy).
-         * Player: yield briefly. Menus: slightly longer to cut CPU spin.
+         * UI menus are synchronized to hardware VSYNC via pp_videoout_acquire /
+         * sceVideoOutSubmitFlip at 60 Hz. Do not add artificial multi-millisecond
+         * sleeps in menu mode, which causes missed VSYNC deadlines and frame drops.
          */
         if (screen == SCREEN_PLAYER)
-            usleep(500);
-        else
-            usleep(2000);
+            usleep(250);
     }
 
 #if PP_BACKEND_ENABLED
