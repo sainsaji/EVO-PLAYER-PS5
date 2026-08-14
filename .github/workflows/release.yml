@@ -58,7 +58,7 @@ jobs:
           fi
           echo "VERSION $FILE_VER matches tag"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build dev image
         uses: docker/build-push-action@v6

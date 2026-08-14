@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Export to a tar so later jobs reuse the exact same image rather than
       # rebuilding it (and risking a different result).
