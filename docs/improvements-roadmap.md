@@ -13,8 +13,12 @@
 |:---:|---|:---:|:---:|---|---|
 | 🔴 **P1** | [Subtitle Picker Overlay Fix](#p1--subtitle-picker-overlay-fix) | XS | None | Playback / UI | Ready |
 | 🔴 **P1** | [Codec Sweep — 29-file Test Set](#p1--codec-sweep--29-file-test-set) | M | None | QA / Validation | Ready |
+| 🔴 **P1** | [10-bit Video Falls Off the Fast Path](#p1--10-bit-video-falls-off-the-fast-path-entirely) | M | Low | Playback / Performance | **New 2026-08-14** |
 | 🔴 **P1** | [`https://` Is Parsed But Not Implemented](#p1--https-is-parsed-but-not-implemented) | M | Low | Addons / Network | **New 2026-08-14** |
+| 🟠 **P2** | [The `sws_scale` Fallback Is Single-Threaded](#p2--the-sws_scale-fallback-is-single-threaded) | XS | Low | Playback | **New 2026-08-14** |
+| 🟠 **P2** | [Rotate Buffers Bypass the Slab Allocator](#p2--the-rotate-buffers-bypass-the-slab-allocator) | S | Low | Memory | **New 2026-08-14** |
 | 🟠 **P2** | [Make the Codec Sweep Measure Time](#p2--make-the-codec-sweep-measure-time-not-just-passfail) | XS | None | QA / Validation | **New 2026-08-14** |
+| 📝 **Fix** | [Correction — "GPU Compute" Is CPU SIMD](#correction--the-gpu-compute-pipeline-is-cpu-simd) | XS | None | Docs / Naming | **New 2026-08-14** |
 | 🟠 **P2** | [Universal Subtitle Cue Counts](#p2--universal-subtitle-cue-counts) | M | Low | Subtitles | Planned |
 | 🟠 **P2** | [DualSense Touchpad Timeline Scrubbing](#p2--dualsense-touchpad-timeline-scrubbing) | M | Low | Input | Planned |
 | 🟠 **P2** | [Dynamic Audio Re-routing Detection](#p2--dynamic-audio-re-routing-detection) | S | Low | Audio | Planned |
@@ -242,6 +246,104 @@ Nothing calls this function. It describes an 80×80 world that no longer exists 
 
 ---
 
+## P1 — 10-bit Video Falls Off the Fast Path Entirely
+
+**Found:** 2026-08-14, reading `convert_frame_to_rgb()` and `pp_map_avframe()`.
+**Size:** M **Risk:** Low **Domain:** Playback / Performance
+
+### Problem
+
+`pp_map_avframe()` ([`main.c:5245`](../projects/evoplayer/main.c)) accepts
+exactly **three** pixel formats:
+
+```c
+AV_PIX_FMT_YUV420P   AV_PIX_FMT_YUVJ420P   AV_PIX_FMT_NV12
+```
+
+Anything else fails the map and `convert_frame_to_rgb()` falls through to
+`sws_scale()`. The code says so itself:
+
+```c
+/* 10-bit / odd formats → sws (much slower). One-shot toast. */
+```
+
+**That fallback is the entire 4K HDR case.** HEVC Main10 decodes to
+`yuv420p10le` (or `p010le`), so every 10-bit file — which is essentially all
+4K HDR REMUX — misses the AVX2 workgroup pipeline and lands on a
+**single-threaded** `sws_scale`. The 8 MB sequential read-ahead and the slab
+allocator were both built for exactly those files, and then the frame path
+drops them onto the slow route.
+
+So the player has a fast 8-bit path and a slow 10-bit one, and the headline use
+case is the slow one. The measured 7.43 ms at 4K applies to content that is not
+the content people bring to a 4K player.
+
+### Fix
+
+Add a 10-bit input variant to the existing kernel in
+[`pp_compute_pipeline.c`](../projects/evoplayer/pp/src/pp_compute_pipeline.c).
+The workgroup pool, band splitting and threading are all reusable unchanged —
+what changes is the load and a `>> 2` on each component (`yuv420p10le` is
+16-bit little-endian samples with 10 significant bits), plus a `p010le` variant
+where chroma is interleaved like NV12 but 16-bit.
+
+Then extend `pp_map_avframe()` to accept both, which is where the routing
+decision actually lives.
+
+### Done When
+
+- A 4K HEVC Main10 file reports the AVX2 backend, not the sws fallback.
+- The one-shot "much slower" toast stops firing on 10-bit content.
+- `bench.sh` carries a 10-bit row next to the 8-bit ones, so the win is a
+  number rather than a claim.
+
+---
+
+## P2 — The `sws_scale` Fallback Is Single-Threaded
+
+**Found:** 2026-08-14. **Size:** XS **Risk:** Low **Domain:** Playback
+
+Whatever remains on the fallback after the item above — 4:2:2, 4:4:4, and
+10-bit until it lands — runs through a `sws_getContext()` built with default
+options, which means **one thread** for the whole frame.
+
+swscale can slice-thread, but the thread count has to be set before the context
+is initialised, so `sws_getContext()` cannot express it. The shape is:
+
+```c
+play_sws = sws_alloc_context();
+/* set srcW/srcH/srcFormat/dstW/dstH/dstFormat/flags via av_opt_set_int */
+av_opt_set_int(play_sws, "threads", n, 0);
+sws_init_context(play_sws, NULL, NULL);
+```
+
+It is a handful of lines and it multiplies the fallback by roughly the core
+count. Worth doing **even though** P1 should retire most of its traffic —
+because "most" is not "all", and a 4:4:4 file should not fall to one thread.
+
+---
+
+## P2 — The Rotate Buffers Bypass the Slab Allocator
+
+**Found:** 2026-08-14. **Size:** S **Risk:** Low **Domain:** Memory
+
+`VIDEO_ROTATE_BUFFERS` is **8**, and each one is allocated with a plain
+`malloc(video_frame_w * video_frame_h * 4)`. At 4K that is
+`3840 × 2160 × 4 = 33.2 MB` each — **265 MB from the heap**, in the one code
+path that also runs the slow converter.
+
+Meanwhile [`evo_direct_mem.c`](../projects/evoplayer/media/src/evo_direct_mem.c)
+exists precisely to avoid this, is initialised at startup with a 64 MB region,
+and measured 1.50× faster allocation with zero fragmentation. The rotate
+buffers do not use it, and at 4K they could not fit in it as currently sized.
+
+Two things to decide together, which is why this is one item and not two:
+whether the pool should be sized for 4K rotate buffers, and whether **eight**
+buffers is the right number at 4K — the count looks inherited from a
+lower-resolution era, and each one costs 33 MB.
+
+---
+
 ## P1 — `https://` Is Parsed But Not Implemented
 
 **Found:** 2026-08-14, reading `evo_net.c` against the module inventory.
@@ -313,6 +415,48 @@ high-bitrate file stutters — decode is, and this is the measurement that says
 so. It also tells the [FFmpeg `full` profile](#p3--ffmpeg-full-decoder-profile)
 item whether a codec is missing or merely too slow, which are different
 problems with different fixes.
+
+---
+
+## Correction — The "GPU Compute" Pipeline Is CPU SIMD
+
+**Found:** 2026-08-14, reading
+[`pp_compute_pipeline.c`](../projects/evoplayer/pp/src/pp_compute_pipeline.c).
+
+**The performance is real. The attribution is not.** That file contains no
+`sceGnm*` call, no shader, no dispatch and no compute queue. It is a
+multi-threaded AVX2 converter — `compute_kernel_avx2_8px_fast()`,
+`compute_workgroup_process_band()`, a persistent `compute_pool_worker` pool.
+What makes it *look* like a GPU path is that `get_backend_name()` returns the
+string:
+
+```c
+#if defined(EVO_TARGET_PS5)
+    return "GPU Compute (RDNA2 Direct / GNM)";
+```
+
+On the PS5 build it reports RDNA2 and GNM while executing AVX2 on the CPU.
+That label has propagated into
+[`reng-analysis-integration.md`](reng-analysis-integration.md), where "GPU
+Compute YUV→RGB Pipeline" is recorded as 100% complete.
+
+**Why this is worth correcting rather than shrugging at.** The measured numbers
+(0.75 ms at 1080p, 7.43 ms at 4K, 2.81×) stand — they were measured, and the
+work behind them is real and good. But three things follow from the label being
+wrong:
+
+1. **The GPU is still entirely unused.** That is an untapped avenue, not a
+   completed one, and the current docs say the opposite.
+2. Anyone optimising later will reason from "the conversion is already on the
+   GPU, so the CPU is free" — and both halves of that are false.
+3. It sits directly next to [`gpu-notes.md`](gpu-notes.md), which correctly
+   documents that there is no hardware GL/Vulkan and that raw GNM would be a
+   large reverse-engineering project. The two documents currently contradict
+   each other.
+
+**Fix:** rename the backend strings to what they are — "CPU AVX2 8-wide SIMD",
+"CPU multi-threaded workgroups" — and amend the integration matrix row. Keep
+every number.
 
 ---
 
