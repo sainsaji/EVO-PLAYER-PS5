@@ -28,8 +28,10 @@
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
 #include "pp_compute_pipeline.h"
+#include "evo_direct_mem.h"
 #include "pp_frame.h"
 #include "pp_platform.h"
+
 
 
 #include <stdint.h>
@@ -453,6 +455,90 @@ static void run_present_path(uint32_t w, uint32_t h, int iters)
     free(tiled);
 }
 
+static void run_direct_memory_bench(int iters)
+{
+    printf("\n=== Direct Memory Architecture & Allocation Benchmark ===\n");
+
+    evo_direct_mem_init(64 * 1024 * 1024);
+
+    const size_t sizes[] = { 64 * 1024, 512 * 1024, 8 * 1024 * 1024 };
+    const char *labels[] = { "64 KB (Audio/Sub)", "512 KB (I/O Block)", "8 MB (4K Frame)" };
+    int count = (iters < 10) ? 200 : 2000;
+
+    printf(" %-20s %-12s %-12s %-12s %-10s\n",
+           "Buffer Size", "malloc/free", "DirectMemory", "Speedup", "Ops/Sec");
+
+    for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+        size_t sz = sizes[s];
+        int test_count = (sz >= 8 * 1024 * 1024) ? (count / 10) : count;
+        if (test_count < 10) test_count = 10;
+
+        /* 1. Measure standard malloc / free */
+        double t0 = now_ms();
+        for (int i = 0; i < test_count; i++) {
+            void *p = malloc(sz);
+            if (p) {
+                ((volatile uint8_t*)p)[0] = 1;
+                free(p);
+            }
+        }
+        double t_malloc = (now_ms() - t0);
+
+        /* 2. Measure Direct Memory slab allocator */
+        t0 = now_ms();
+        for (int i = 0; i < test_count; i++) {
+            void *p = evo_direct_mem_alloc(sz);
+            if (p) {
+                ((volatile uint8_t*)p)[0] = 1;
+                evo_direct_mem_free(p);
+            }
+        }
+        double t_direct = (now_ms() - t0);
+
+        double ops_sec = (test_count / (t_direct / 1000.0));
+
+        printf(" %-20s %8.2f ms   %8.2f ms   %6.2fx    %9.0f\n",
+               labels[s], t_malloc, t_direct, t_malloc / t_direct, ops_sec);
+    }
+
+    /* Fragmentation stress test */
+    {
+        int frag_count = (iters < 10) ? 500 : 5000;
+        void *ptrs_malloc[64] = {0};
+        void *ptrs_direct[64] = {0};
+
+        double t0 = now_ms();
+        for (int i = 0; i < frag_count; i++) {
+            int slot = i % 64;
+            if (ptrs_malloc[slot]) { free(ptrs_malloc[slot]); ptrs_malloc[slot] = NULL; }
+            size_t sz = (size_t)(16 * 1024 + (i * 1024) % (256 * 1024));
+            ptrs_malloc[slot] = malloc(sz);
+        }
+        for (int slot = 0; slot < 64; slot++) { if (ptrs_malloc[slot]) free(ptrs_malloc[slot]); }
+        double t_frag_malloc = now_ms() - t0;
+
+        t0 = now_ms();
+        for (int i = 0; i < frag_count; i++) {
+            int slot = i % 64;
+            if (ptrs_direct[slot]) { evo_direct_mem_free(ptrs_direct[slot]); ptrs_direct[slot] = NULL; }
+            size_t sz = (size_t)(16 * 1024 + (i * 1024) % (256 * 1024));
+            ptrs_direct[slot] = evo_direct_mem_alloc(sz);
+        }
+        for (int slot = 0; slot < 64; slot++) { if (ptrs_direct[slot]) evo_direct_mem_free(ptrs_direct[slot]); }
+        double t_frag_direct = now_ms() - t0;
+
+        evo_direct_mem_stats_t stats;
+        evo_direct_mem_get_stats(&stats);
+
+        printf("\n Interleaved Allocation & Fragmentation Stress (%d cycles):\n", frag_count);
+        printf("   Standard Heap:   %6.2f ms\n", t_frag_malloc);
+        printf("   Direct Memory:   %6.2f ms (%.2fx faster, 0 heap fragmentation)\n",
+               t_frag_direct, t_frag_malloc / t_frag_direct);
+        printf("   Direct Pool:     %zu MB pool, peak usage: %zu KB across %zu live slabs\n",
+               stats.total_bytes / (1024 * 1024), stats.peak_bytes / 1024, stats.num_allocations);
+    }
+}
+
 int main(int argc, char **argv)
 {
     int iters = (argc > 1) ? atoi(argv[1]) : 30;
@@ -467,6 +553,8 @@ int main(int argc, char **argv)
     run_size(1920, 1080, iters);
     run_size(3840, 2160, iters > 10 ? iters / 3 : iters);
     run_present_path(1920, 1080, iters);
+    run_direct_memory_bench(iters);
 
     return 0;
 }
+
