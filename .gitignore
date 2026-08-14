@@ -45,6 +45,8 @@ output/screenshots/
 
 # Host benchmark binary (tools/bench.sh)
 output/bench/
+output/tests/
+output/coverage/
 
 # Records the last launch time so tools/launch.sh can refuse to stack
 # instances. Machine-local state, not project state.

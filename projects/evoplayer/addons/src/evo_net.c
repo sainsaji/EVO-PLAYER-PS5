@@ -16,8 +16,10 @@
 #include <sys/time.h>
 
 #include "evo_net.h"
+#ifndef NO_OPENSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#endif
 
 #define EVO_NET_MAX_QUEUE    32
 #define EVO_NET_BUFFER_SIZE  8192
@@ -51,6 +53,7 @@ static int             g_pending_count = 0;
 static evo_net_req_t  *g_completed_queue[EVO_NET_MAX_QUEUE];
 static int             g_completed_count = 0;
 
+#ifndef NO_OPENSSL
 static SSL_CTX        *g_ssl_ctx = NULL;
 static pthread_mutex_t g_ssl_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -70,6 +73,7 @@ static SSL_CTX *evo_net_get_ssl_ctx(void)
     pthread_mutex_unlock(&g_ssl_init_mutex);
     return g_ssl_ctx;
 }
+#endif
 
 /* Parse http://host:port/path and https://host:port/path */
 static int parse_url(const char *url, char *host, int *port, char *path, int *is_https)
@@ -170,6 +174,7 @@ static int execute_http(const char *method,
         return -3;
 
     /* Initialize SSL if HTTPS */
+#ifndef NO_OPENSSL
     SSL *ssl = NULL;
     if (is_https) {
         SSL_CTX *ctx = evo_net_get_ssl_ctx();
@@ -190,6 +195,12 @@ static int execute_http(const char *method,
             return -12;
         }
     }
+#else
+    if (is_https) {
+        close(sock);
+        return -10;
+    }
+#endif
 
     /* Build HTTP request header */
     char req_buf[2048];
@@ -219,14 +230,19 @@ static int execute_http(const char *method,
 
     /* Send header */
     int send_err = 0;
+#ifndef NO_OPENSSL
     if (is_https) {
         if (SSL_write(ssl, req_buf, req_len) <= 0) send_err = 1;
-    } else {
+    } else
+#endif
+    {
         if (send(sock, req_buf, req_len, 0) < 0) send_err = 1;
     }
 
     if (send_err) {
+#ifndef NO_OPENSSL
         if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+#endif
         close(sock);
         return -4;
     }
@@ -235,13 +251,18 @@ static int execute_http(const char *method,
     if (post_data) {
         size_t post_len = strlen(post_data);
         int post_err = 0;
+#ifndef NO_OPENSSL
         if (is_https) {
             if (SSL_write(ssl, post_data, post_len) <= 0) post_err = 1;
-        } else {
+        } else
+#endif
+        {
             if (send(sock, post_data, post_len, 0) < 0) post_err = 1;
         }
         if (post_err) {
+#ifndef NO_OPENSSL
             if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+#endif
             close(sock);
             return -5;
         }
@@ -252,16 +273,21 @@ static int execute_http(const char *method,
     size_t total = 0;
     char *buf = (char *)malloc(cap);
     if (!buf) {
+#ifndef NO_OPENSSL
         if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+#endif
         close(sock);
         return -6;
     }
 
     ssize_t n;
     while (1) {
+#ifndef NO_OPENSSL
         if (is_https) {
             n = SSL_read(ssl, buf + total, cap - total - 1);
-        } else {
+        } else
+#endif
+        {
             n = recv(sock, buf + total, cap - total - 1, 0);
         }
 
@@ -273,7 +299,9 @@ static int execute_http(const char *method,
             char *new_buf = (char *)realloc(buf, cap);
             if (!new_buf) {
                 free(buf);
+#ifndef NO_OPENSSL
                 if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); }
+#endif
                 close(sock);
                 return -7;
             }
@@ -281,10 +309,12 @@ static int execute_http(const char *method,
         }
     }
 
+#ifndef NO_OPENSSL
     if (ssl) {
         SSL_shutdown(ssl);
         SSL_free(ssl);
     }
+#endif
     close(sock);
 
     buf[total] = '\0';
@@ -442,12 +472,14 @@ void evo_net_shutdown(void)
     }
     g_completed_count = 0;
 
+#ifndef NO_OPENSSL
     pthread_mutex_lock(&g_ssl_init_mutex);
     if (g_ssl_ctx) {
         SSL_CTX_free(g_ssl_ctx);
         g_ssl_ctx = NULL;
     }
     pthread_mutex_unlock(&g_ssl_init_mutex);
+#endif
 }
 
 int evo_net_request_async(const char *method,

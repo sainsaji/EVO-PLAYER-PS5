@@ -25,6 +25,7 @@ extern int sceKernelReleaseDirectMemory(off_t physAddr, size_t length);
 
 #define EVO_DIRECT_MEM_DEFAULT_SIZE (64 * 1024 * 1024) /* 64 MiB */
 #define EVO_DIRECT_MEM_ALIGN        64                  /* 64-byte SIMD alignment */
+#define EVO_CHUNK_HEADER_SIZE       ((sizeof(mem_chunk_header_t) + EVO_DIRECT_MEM_ALIGN - 1) & ~(EVO_DIRECT_MEM_ALIGN - 1))
 
 typedef struct mem_chunk_header {
     size_t                   size;
@@ -111,7 +112,7 @@ int evo_direct_mem_init(size_t pool_size_bytes)
 
     /* Initialize root chunk */
     mem_chunk_header_t *root = (mem_chunk_header_t *)base;
-    root->size = pool_size_bytes - sizeof(mem_chunk_header_t);
+    root->size = pool_size_bytes - EVO_CHUNK_HEADER_SIZE;
     root->is_free = 1;
     root->next = NULL;
     root->prev = NULL;
@@ -166,9 +167,9 @@ void *evo_direct_mem_alloc(size_t bytes)
     while (curr) {
         if (curr->is_free && curr->size >= req) {
             /* Split chunk if remaining space is useful */
-            if (curr->size >= req + sizeof(mem_chunk_header_t) + EVO_DIRECT_MEM_ALIGN) {
-                mem_chunk_header_t *next_chunk = (mem_chunk_header_t *)((uint8_t *)curr + sizeof(mem_chunk_header_t) + req);
-                next_chunk->size = curr->size - req - sizeof(mem_chunk_header_t);
+            if (curr->size >= req + EVO_CHUNK_HEADER_SIZE + EVO_DIRECT_MEM_ALIGN) {
+                mem_chunk_header_t *next_chunk = (mem_chunk_header_t *)((uint8_t *)curr + EVO_CHUNK_HEADER_SIZE + req);
+                next_chunk->size = curr->size - req - EVO_CHUNK_HEADER_SIZE;
                 next_chunk->is_free = 1;
                 next_chunk->next = curr->next;
                 next_chunk->prev = curr;
@@ -184,7 +185,7 @@ void *evo_direct_mem_alloc(size_t bytes)
                 g_direct_pool.peak_size = g_direct_pool.allocated_size;
             }
 
-            void *ptr = (void *)((uint8_t *)curr + sizeof(mem_chunk_header_t));
+            void *ptr = (void *)((uint8_t *)curr + EVO_CHUNK_HEADER_SIZE);
             pthread_mutex_unlock(&g_direct_pool.lock);
             return ptr;
         }
@@ -217,7 +218,7 @@ void evo_direct_mem_free(void *ptr)
         return;
     }
 
-    mem_chunk_header_t *chunk = (mem_chunk_header_t *)((uint8_t *)ptr - sizeof(mem_chunk_header_t));
+    mem_chunk_header_t *chunk = (mem_chunk_header_t *)((uint8_t *)ptr - EVO_CHUNK_HEADER_SIZE);
     if (!chunk->is_free) {
         chunk->is_free = 1;
         g_direct_pool.allocated_size -= chunk->size;
@@ -225,14 +226,14 @@ void evo_direct_mem_free(void *ptr)
 
         /* Merge with next chunk if free */
         if (chunk->next && chunk->next->is_free) {
-            chunk->size += sizeof(mem_chunk_header_t) + chunk->next->size;
+            chunk->size += EVO_CHUNK_HEADER_SIZE + chunk->next->size;
             chunk->next = chunk->next->next;
             if (chunk->next) chunk->next->prev = chunk;
         }
 
         /* Merge with previous chunk if free */
         if (chunk->prev && chunk->prev->is_free) {
-            chunk->prev->size += sizeof(mem_chunk_header_t) + chunk->size;
+            chunk->prev->size += EVO_CHUNK_HEADER_SIZE + chunk->size;
             chunk->prev->next = chunk->next;
             if (chunk->next) chunk->next->prev = chunk->prev;
         }

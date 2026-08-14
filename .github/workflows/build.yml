@@ -245,6 +245,44 @@ jobs:
           if-no-files-found: warn
 
   # ===========================================================================
+  # Native Unit Tests & Code Coverage Pipeline
+  # ===========================================================================
+  test-and-coverage:
+    name: Unit Tests & Code Coverage
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Run Test Suite & Generate Coverage
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh'
+
+      - name: Archive Test Coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-coverage-report
+          path: |
+            output/tests/
+            output/coverage/
+          if-no-files-found: warn
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3
+        if: env.SONAR_TOKEN != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ===========================================================================
   lint:
     name: Shell lint
     runs-on: ubuntu-latest
