@@ -1,0 +1,137 @@
+<rml>
+<head>
+    <link type="text/rcss" href="subtitles.rcss"/>
+</head>
+<body id="subtitles-body">
+    <div id="subtitles-scrim">
+        <div id="subtitles-card">
+            <!-- Header -->
+            <div id="subtitles-header">
+                <div id="header-titles">
+                    <div id="subtitles-eyebrow">SUBTITLES &amp; CLOSED CAPTIONS</div>
+                    <div id="subtitles-title">SELECT SUBTITLE TRACK</div>
+                </div>
+                <div id="subtitles-size-pill">
+                    <img src="../icons/btn_triangle.png" class="size-glyph"/>
+                    <span id="subtitles-size-label">SIZE: MEDIUM</span>
+                </div>
+            </div>
+
+            <!-- Track List -->
+            <div id="subtitles-list">
+                <!-- Row 0 -->
+                <div id="sub-row-0" class="sub-row row-focused">
+                    <div class="sub-left">
+                        <div id="sub-check-0" class="sub-check-box checked">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-0" class="sub-title">SUBTITLES OFF</div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-0" class="sub-badge badge-hidden"></div>
+                    </div>
+                </div>
+
+                <!-- Row 1 -->
+                <div id="sub-row-1" class="sub-row">
+                    <div class="sub-left">
+                        <div id="sub-check-1" class="sub-check-box">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-1" class="sub-title">ENGLISH SDH</div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-1" class="sub-badge">1001 CUES</div>
+                    </div>
+                </div>
+
+                <!-- Row 2 -->
+                <div id="sub-row-2" class="sub-row">
+                    <div class="sub-left">
+                        <div id="sub-check-2" class="sub-check-box">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-2" class="sub-title">SPANISH</div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-2" class="sub-badge">EXTERNAL SRT</div>
+                    </div>
+                </div>
+
+                <!-- Row 3 -->
+                <div id="sub-row-3" class="sub-row">
+                    <div class="sub-left">
+                        <div id="sub-check-3" class="sub-check-box">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-3" class="sub-title">FRENCH</div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-3" class="sub-badge">EMBEDDED</div>
+                    </div>
+                </div>
+
+                <!-- Row 4 -->
+                <div id="sub-row-4" class="sub-row sub-hidden">
+                    <div class="sub-left">
+                        <div id="sub-check-4" class="sub-check-box">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-4" class="sub-title"></div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-4" class="sub-badge badge-hidden"></div>
+                    </div>
+                </div>
+
+                <!-- Row 5 -->
+                <div id="sub-row-5" class="sub-row sub-hidden">
+                    <div class="sub-left">
+                        <div id="sub-check-5" class="sub-check-box">
+                            <div class="sub-check-dot"></div>
+                        </div>
+                        <div class="sub-title-box">
+                            <div id="sub-title-5" class="sub-title"></div>
+                        </div>
+                    </div>
+                    <div class="sub-right">
+                        <div id="sub-detail-5" class="sub-badge badge-hidden"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Hints -->
+            <div id="subtitles-footer">
+                <div class="footer-hint">
+                    <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                    <span class="footer-text">SELECT</span>
+                </div>
+                <div class="footer-hint">
+                    <img src="../icons/btn_triangle.png" class="footer-glyph"/>
+                    <span class="footer-text">CYCLE SIZE</span>
+                </div>
+                <div class="footer-hint">
+                    <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                    <span class="footer-text">BACK</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Subtitle Font Size Preview Box -->
+        <div id="subtitles-preview-box">
+            <div id="subtitles-preview-label">SUBTITLE PREVIEW</div>
+            <div id="subtitles-preview-text" class="preview-medium">Welcome to EVO Player on PlayStation 5</div>
+        </div>
+    </div>
+</body>
+</rml>

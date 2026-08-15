@@ -91,32 +91,20 @@ bool EvoRmlApp::Initialize(int width, int height) {
     for (const auto& p : rml_prefixes) {
         if (!m_playback_doc) {
             m_playback_doc = m_context->LoadDocument(p + "playback.rml");
-            if (m_playback_doc) {
-                m_playback_doc->Hide();
-            }
+            if (m_playback_doc) m_playback_doc->Hide();
         }
         if (!m_dialog_doc) {
             m_dialog_doc = m_context->LoadDocument(p + "dialog.rml");
-            if (m_dialog_doc) {
-                m_dialog_doc->Hide();
-            }
+            if (m_dialog_doc) m_dialog_doc->Hide();
         }
         if (!m_settings_doc) {
             m_settings_doc = m_context->LoadDocument(p + "settings.rml");
-            if (m_settings_doc) {
-                m_settings_doc->Hide();
-            }
+            if (m_settings_doc) m_settings_doc->Hide();
         }
-    }
-
-    if (!m_playback_doc) {
-        std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
-    }
-    if (!m_dialog_doc) {
-        std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
-    }
-    if (!m_settings_doc) {
-        std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
+        if (!m_subtitles_doc) {
+            m_subtitles_doc = m_context->LoadDocument(p + "subtitles.rml");
+            if (m_subtitles_doc) m_subtitles_doc->Hide();
+        }
     }
 
     m_initialized = true;
@@ -127,6 +115,11 @@ bool EvoRmlApp::Initialize(int width, int height) {
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_subtitles_doc) {
+        m_subtitles_doc->Close();
+        m_subtitles_doc = nullptr;
+    }
 
     if (m_settings_doc) {
         m_settings_doc->Close();
@@ -301,6 +294,7 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
 
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
     m_playback_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -376,6 +370,7 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
 
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
     m_dialog_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -465,7 +460,82 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
 
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
     m_settings_doc->Show();
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    m_context->Update();
+    m_context->Render();
+}
+
+void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
+    if (!m_initialized || !m_subtitles_doc) return;
+
+    m_last_subtitles = state;
+
+    Rml::Element* el_eb = m_subtitles_doc->GetElementById("subtitles-eyebrow");
+    if (el_eb) el_eb->SetInnerRML(state.eyebrow);
+
+    Rml::Element* el_ti = m_subtitles_doc->GetElementById("subtitles-title");
+    if (el_ti) el_ti->SetInnerRML(state.title);
+
+    Rml::Element* el_sz = m_subtitles_doc->GetElementById("subtitles-size-label");
+    if (el_sz) el_sz->SetInnerRML(std::string("SIZE: ") + state.size_str);
+
+    Rml::Element* el_pv = m_subtitles_doc->GetElementById("subtitles-preview-text");
+    if (el_pv) {
+        el_pv->SetInnerRML(state.preview_text.empty() ? "Welcome to EVO Player on PlayStation 5" : state.preview_text);
+        el_pv->SetClass("preview-small", state.preview_face == 0);
+        el_pv->SetClass("preview-medium", state.preview_face == 1);
+        el_pv->SetClass("preview-large", state.preview_face == 2);
+    }
+
+    for (int i = 0; i < 6; i++) {
+        std::string row_id = "sub-row-" + std::to_string(i);
+        std::string chk_id = "sub-check-" + std::to_string(i);
+        std::string title_id = "sub-title-" + std::to_string(i);
+        std::string detail_id = "sub-detail-" + std::to_string(i);
+
+        Rml::Element* el_row = m_subtitles_doc->GetElementById(row_id);
+        Rml::Element* el_chk = m_subtitles_doc->GetElementById(chk_id);
+        Rml::Element* el_title = m_subtitles_doc->GetElementById(title_id);
+        Rml::Element* el_detail = m_subtitles_doc->GetElementById(detail_id);
+
+        if (el_row) {
+            if (i < (int)state.tracks.size()) {
+                el_row->SetProperty("display", "flex");
+                el_row->SetClass("row-focused", state.tracks[i].is_focused);
+
+                if (el_chk) {
+                    el_chk->SetClass("checked", state.tracks[i].is_current);
+                }
+                if (el_title) {
+                    el_title->SetInnerRML(state.tracks[i].label);
+                }
+                if (el_detail) {
+                    if (state.tracks[i].detail.empty()) {
+                        el_detail->SetProperty("display", "none");
+                    } else {
+                        el_detail->SetProperty("display", "inline-block");
+                        el_detail->SetInnerRML(state.tracks[i].detail);
+                    }
+                }
+            } else {
+                el_row->SetProperty("display", "none");
+            }
+        }
+    }
+}
+
+void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_subtitles_doc || !framebuffer) return;
+
+    if (m_playback_doc) m_playback_doc->Hide();
+    if (m_dialog_doc) m_dialog_doc->Hide();
+    if (m_settings_doc) m_settings_doc->Hide();
+    m_subtitles_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);

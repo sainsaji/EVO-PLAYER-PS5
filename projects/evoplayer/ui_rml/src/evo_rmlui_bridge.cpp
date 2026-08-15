@@ -94,4 +94,29 @@ void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderSettings(framebuffer, width, height);
 }
 
+void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
+    if (!p) return;
+    EvoSubtitlesState state;
+    state.eyebrow = p->eyebrow ? p->eyebrow : "SUBTITLES & CLOSED CAPTIONS";
+    state.title = p->title ? p->title : "SELECT SUBTITLE TRACK";
+    state.size_str = p->size_str ? p->size_str : "MEDIUM";
+    state.preview_text = p->preview_text ? p->preview_text : "";
+    state.preview_face = p->preview_face;
+
+    for (int i = 0; i < p->track_count && i < 6; i++) {
+        EvoSubtitlesTrack trk;
+        trk.label = p->tracks[i].label ? p->tracks[i].label : "";
+        trk.detail = p->tracks[i].detail ? p->tracks[i].detail : "";
+        trk.is_current = (p->tracks[i].is_current != 0);
+        trk.is_focused = (p->tracks[i].is_focused != 0);
+        state.tracks.push_back(trk);
+    }
+
+    EvoRmlApp::Instance().UpdateSubtitlesState(state);
+}
+
+void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderSubtitles(framebuffer, width, height);
+}
+
 }

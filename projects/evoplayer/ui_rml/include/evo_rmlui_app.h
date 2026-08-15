@@ -59,6 +59,22 @@ struct EvoSettingsState {
     std::vector<EvoSettingsRow> rows;
 };
 
+struct EvoSubtitlesTrack {
+    std::string label;
+    std::string detail;
+    bool is_current = false;
+    bool is_focused = false;
+};
+
+struct EvoSubtitlesState {
+    std::string eyebrow;
+    std::string title;
+    std::string size_str;
+    std::string preview_text;
+    int preview_face = 1; // 0=small, 1=medium, 2=large
+    std::vector<EvoSubtitlesTrack> tracks;
+};
+
 class EvoRmlApp {
 public:
     static EvoRmlApp& Instance();
@@ -74,6 +90,9 @@ public:
 
     void UpdateSettingsState(const EvoSettingsState& state);
     void RenderSettings(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSubtitlesState(const EvoSubtitlesState& state);
+    void RenderSubtitles(uint32_t* framebuffer, int width, int height);
 
     bool IsInitialized() const { return m_initialized; }
 
@@ -91,8 +110,10 @@ private:
     Rml::ElementDocument* m_playback_doc = nullptr;
     Rml::ElementDocument* m_dialog_doc = nullptr;
     Rml::ElementDocument* m_settings_doc = nullptr;
+    Rml::ElementDocument* m_subtitles_doc = nullptr;
 
     EvoPlaybackState m_last_state;
     EvoDialogState m_last_dialog;
     EvoSettingsState m_last_settings;
+    EvoSubtitlesState m_last_subtitles;
 };

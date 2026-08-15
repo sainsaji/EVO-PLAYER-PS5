@@ -1,0 +1,261 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Netflix Subtitle Track Picker RCSS Stylesheet
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Fullscreen Dimmed Scrim */
+#subtitles-scrim {
+    width: 1920px;
+    height: 1080px;
+    background-color: #000000b8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* Subtitle Modal Card */
+#subtitles-card {
+    width: 960px;
+    background-color: #0c1018fc;
+    border-width: 1px;
+    border-color: #222d3e;
+    border-radius: 16px;
+    padding: 34px 44px;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 60px;
+}
+
+/* Header */
+#subtitles-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    width: 872px;
+}
+
+#header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#subtitles-eyebrow {
+    font-size: 12px;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 1.5px;
+}
+
+#subtitles-title {
+    font-size: 26px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+#subtitles-size-pill {
+    background-color: #162236;
+    border-width: 1px;
+    border-color: #2b3e5e;
+    border-radius: 20px;
+    padding: 8px 16px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.size-glyph {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+}
+
+#subtitles-size-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+}
+
+/* Track List */
+#subtitles-list {
+    display: flex;
+    flex-direction: column;
+    width: 872px;
+}
+
+.sub-row {
+    width: 872px;
+    height: 58px;
+    background-color: #0d121ce6;
+    border-width: 1px;
+    border-color: #1a2333;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    padding: 0 20px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.row-focused {
+    background-color: #151e2e;
+    border-width: 1.5px;
+    border-color: #e50914;
+}
+
+.sub-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.sub-check-box {
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    border-width: 1.5px;
+    border-color: #3b4d68;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16px;
+}
+
+.sub-check-box.checked {
+    border-color: #e50914;
+}
+
+.sub-check-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    background-color: transparent;
+}
+
+.checked .sub-check-dot {
+    background-color: #e50914;
+}
+
+.sub-title {
+    font-size: 17px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+.sub-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.sub-badge {
+    background-color: #162236;
+    border-width: 1px;
+    border-color: #273750;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
+}
+
+.sub-hidden {
+    display: none;
+}
+
+.badge-hidden {
+    display: none;
+}
+
+/* Footer Hints */
+#subtitles-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 28px;
+    margin-top: 20px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+/* Live Subtitle Preview Box */
+#subtitles-preview-box {
+    position: absolute;
+    bottom: 50px;
+    left: 0;
+    width: 1920px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#subtitles-preview-label {
+    font-size: 12px;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 1.5px;
+    margin-bottom: 8px;
+}
+
+#subtitles-preview-text {
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.preview-small {
+    font-size: 22px;
+}
+
+.preview-medium {
+    font-size: 28px;
+}
+
+.preview-large {
+    font-size: 36px;
+}

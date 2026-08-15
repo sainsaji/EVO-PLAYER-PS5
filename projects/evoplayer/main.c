@@ -10216,6 +10216,35 @@ static void draw_subtitle_picker(uint32_t *fb)
                   ? -1
                   : prospero_embedded_subtitle_stream_index;
 
+    const char *size_str =
+        prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
+        prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM";
+
+    int pface = (prospero_subtitle_face == EVO_FACE_SUB) ? 0 :
+                ((prospero_subtitle_face == EVO_FACE_TITLE) ? 2 : 1);
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_subtitles_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "SUBTITLES & CLOSED CAPTIONS";
+        p.title = "SELECT SUBTITLE TRACK";
+        p.size_str = size_str;
+        p.preview_text = "Welcome to EVO Player on PlayStation 5";
+        p.preview_face = pface;
+        p.track_count = shown;
+
+        for (int i = 0; i < shown; i++) {
+            p.tracks[i].label = evo_subs_labels[first + i];
+            p.tracks[i].detail = evo_subs_details[first + i];
+            p.tracks[i].is_current = (evo_subs_tracks[first + i] == active);
+            p.tracks[i].is_focused = ((first + i) == evo_subs_focus.index);
+        }
+
+        evo_rmlui_update_subtitles(&p);
+        evo_rmlui_render_subtitles(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     for (int i = 0; i < shown; i++) {
         rows[i].label   = evo_subs_labels[first + i];
         rows[i].detail  = evo_subs_details[first + i];
@@ -10224,10 +10253,6 @@ static void draw_subtitle_picker(uint32_t *fb)
     }
 
     static char title_buf[64];
-    const char *size_str =
-        prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
-        prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM";
-
     snprintf(title_buf, sizeof(title_buf), "SELECT TRACK  -  SIZE: %s", size_str);
 
     memset(&m, 0, sizeof(m));

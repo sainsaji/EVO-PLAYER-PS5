@@ -55,8 +55,9 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> fb_dialog(width * height);
     std::vector<uint32_t> fb_settings(width * height);
     std::vector<uint32_t> fb_settings_sub(width * height);
+    std::vector<uint32_t> fb_subtitles(width * height);
 
-    // Simulate cinematic film frame background for player
+    // Simulate cinematic film frame background
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             uint8_t r = 18 + (y * 22 / height);
@@ -65,6 +66,7 @@ int main(int argc, char** argv) {
             uint32_t px = 0xFF000000 | (b << 16) | (g << 8) | r;
             fb_playback[y * width + x] = px;
             fb_dialog[y * width + x] = px;
+            fb_subtitles[y * width + x] = px;
             fb_settings[y * width + x] = 0xFF06090E;
             fb_settings_sub[y * width + x] = 0xFF06090E;
         }
@@ -198,6 +200,40 @@ int main(int argc, char** argv) {
     evo_rmlui_update_settings(&set);
     evo_rmlui_render_settings(fb_settings_sub.data(), width, height);
     save_bmp_24("output/uiview/rml_settings_sub.bmp", fb_settings_sub.data(), width, height);
+
+    // 5. Render Subtitles Track Picker
+    evo_rmlui_subtitles_params_t sub;
+    memset(&sub, 0, sizeof(sub));
+    sub.eyebrow = "SUBTITLES & CLOSED CAPTIONS";
+    sub.title = "SELECT SUBTITLE TRACK";
+    sub.size_str = "MEDIUM";
+    sub.preview_text = "Welcome to EVO Player on PlayStation 5";
+    sub.preview_face = 1;
+    sub.track_count = 4;
+
+    sub.tracks[0].label = "SUBTITLES OFF";
+    sub.tracks[0].detail = "";
+    sub.tracks[0].is_current = 0;
+    sub.tracks[0].is_focused = 0;
+
+    sub.tracks[1].label = "ENGLISH SDH";
+    sub.tracks[1].detail = "1001 CUES";
+    sub.tracks[1].is_current = 1; // currently active
+    sub.tracks[1].is_focused = 1; // cursor selected
+
+    sub.tracks[2].label = "SPANISH";
+    sub.tracks[2].detail = "EXTERNAL SRT";
+    sub.tracks[2].is_current = 0;
+    sub.tracks[2].is_focused = 0;
+
+    sub.tracks[3].label = "FRENCH";
+    sub.tracks[3].detail = "EMBEDDED";
+    sub.tracks[3].is_current = 0;
+    sub.tracks[3].is_focused = 0;
+
+    evo_rmlui_update_subtitles(&sub);
+    evo_rmlui_render_subtitles(fb_subtitles.data(), width, height);
+    save_bmp_24("output/uiview/rml_subtitles.bmp", fb_subtitles.data(), width, height);
 
     std::cout << "Rendered all preview screens successfully" << std::endl;
     return 0;

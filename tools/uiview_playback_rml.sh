@@ -29,7 +29,7 @@ g++ -O2 -std=c++17 \
     -lrmlui -lfreetype -lpng16 -lz -lpthread \
     -Wl,-rpath,/workspace/build/rmlui-host-dist/lib:/workspace/build/rmlui-host/RmlUi/build
 
-echo "--- rendering Netflix Playback OSD, Dialog & Settings screens"
+echo "--- rendering Netflix Playback OSD, Dialog, Settings & Subtitles screens"
 export LD_LIBRARY_PATH="/workspace/build/rmlui-host-dist/lib:/workspace/build/rmlui-host/RmlUi/build:${LD_LIBRARY_PATH:-}"
 ./output/uiview/uiview_playback_rml
 
@@ -37,7 +37,9 @@ python3 tools/shot.py png output/uiview/rml_playback.bmp output/uiview/rml_playb
 python3 tools/shot.py png output/uiview/rml_dialog.bmp output/uiview/rml_dialog.png
 python3 tools/shot.py png output/uiview/rml_settings.bmp output/uiview/rml_settings.png
 python3 tools/shot.py png output/uiview/rml_settings_sub.bmp output/uiview/rml_settings_sub.png
+python3 tools/shot.py png output/uiview/rml_subtitles.bmp output/uiview/rml_subtitles.png
 echo "  ok -> output/uiview/rml_playback.png"
 echo "  ok -> output/uiview/rml_dialog.png"
 echo "  ok -> output/uiview/rml_settings.png"
 echo "  ok -> output/uiview/rml_settings_sub.png"
+echo "  ok -> output/uiview/rml_subtitles.png"
