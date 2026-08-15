@@ -14805,6 +14805,51 @@ void draw_developer_tools_screen(uint32_t *fb)
 
     evo_page_sync(&evo_tools_selected, EVO_TOOL_COUNT);
 
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "DEVELOPER TOOLS";
+        p.subtitle = "DIAGNOSTICS & SYSTEM REPORTS";
+        char cnt[32];
+        snprintf(cnt, sizeof(cnt), "%d OF %d", evo_tools_selected + 1, EVO_TOOL_COUNT);
+        p.counter = cnt;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = 4;
+
+        p.rows[0].title = "COMPATIBILITY REPORT";
+        p.rows[0].detail = "WRITES A CODEC REPORT TO USB0";
+        p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        p.rows[0].badge = "RUN";
+        p.rows[0].has_chevron = 1;
+        p.rows[0].is_focused = (evo_tools_selected == 0);
+
+        p.rows[1].title = "DEBUG OVERLAY";
+        p.rows[1].detail = "ON-SCREEN REALTIME PERFORMANCE STATS";
+        p.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+        p.rows[1].badge = show_debug_overlay ? "ON" : "OFF";
+        p.rows[1].has_chevron = 0;
+        p.rows[1].is_focused = (evo_tools_selected == 1);
+
+        p.rows[2].title = "NAVIGATION SOUNDS";
+        p.rows[2].detail = "PLAY AUDIO CLICKS ON CONTROLLER INPUT";
+        p.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
+        p.rows[2].badge = evo_feedback_sound_enabled() ? "ON" : "OFF";
+        p.rows[2].has_chevron = 0;
+        p.rows[2].is_focused = (evo_tools_selected == 2);
+
+        p.rows[3].title = "LIGHTBAR ACCENTS";
+        p.rows[3].detail = "SYNC DUALSENSE LIGHTBAR WITH THEME";
+        p.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        p.rows[3].badge = evo_feedback_lightbar_enabled() ? "THEME" : "OFF";
+        p.rows[3].has_chevron = 0;
+        p.rows[3].is_focused = (evo_tools_selected == 3);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     snprintf(report_detail, sizeof(report_detail),
              "WRITES A CODEC REPORT TO USB0");
 
@@ -15236,8 +15281,6 @@ static evo_list_entry evo_about_rows[EVO_ABOUT_ROWS];
 
 void draw_about_support_screen(uint32_t *fb)
 {
-    /* CROSS earns a hint here because, unlike the other five rows, the
-     * changelog row actually goes somewhere. */
     static const evo_hint hints[3] = {
         { EVO_GLYPH_CROSS,  "OPEN" },
         { EVO_GLYPH_CIRCLE, "BACK" },
@@ -15252,6 +15295,65 @@ void draw_about_support_screen(uint32_t *fb)
     snprintf(themes_detail, sizeof(themes_detail),
              "%d AVAILABLE - DROP .THEME FILES ON USB0",
              evo_theme_count());
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "ABOUT & SUPPORT";
+        p.subtitle = "CREDITS, ENGINE & PROJECT INFO";
+        char cnt[32];
+        snprintf(cnt, sizeof(cnt), "%d OF %d", evo_about_selected + 1, EVO_ABOUT_ROWS);
+        p.counter = cnt;
+        p.rail_active_idx = 6;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = 6;
+
+        p.rows[0].title = "VERSION";
+        p.rows[0].detail = EVO_PLAYER_VERSION;
+        p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_about_support.png";
+        p.rows[0].badge = "v0.7.0";
+        p.rows[0].has_chevron = 0;
+        p.rows[0].is_focused = (evo_about_selected == 0);
+
+        p.rows[1].title = "EVO PLAYER PRO";
+        p.rows[1].detail = "CINEMATIC MEDIA PLAYER FOR PS5 HOMEBREW";
+        p.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        p.rows[1].badge = "";
+        p.rows[1].has_chevron = 0;
+        p.rows[1].is_focused = (evo_about_selected == 1);
+
+        p.rows[2].title = "BUILT ON";
+        p.rows[2].detail = "FFMPEG, RMLUI & PS5 PAYLOAD SDK";
+        p.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        p.rows[2].badge = "";
+        p.rows[2].has_chevron = 0;
+        p.rows[2].is_focused = (evo_about_selected == 2);
+
+        p.rows[3].title = "THEMES";
+        p.rows[3].detail = themes_detail;
+        p.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        p.rows[3].badge = "";
+        p.rows[3].has_chevron = 0;
+        p.rows[3].is_focused = (evo_about_selected == 3);
+
+        p.rows[4].title = "SCREENSHOTS";
+        p.rows[4].detail = "PRESS L3 OR R3 IN ANY MENU";
+        p.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        p.rows[4].badge = "";
+        p.rows[4].has_chevron = 0;
+        p.rows[4].is_focused = (evo_about_selected == 4);
+
+        p.rows[5].title = "CHANGELOG";
+        p.rows[5].detail = "WHAT CHANGED IN EACH RELEASE";
+        p.rows[5].icon_path = "projects/evoplayer/assets/icons/icon_recent_files.png";
+        p.rows[5].badge = "VIEW";
+        p.rows[5].has_chevron = 1;
+        p.rows[5].is_focused = (evo_about_selected == 5);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
 
     evo_about_rows[0].title  = "VERSION";
     evo_about_rows[0].detail = EVO_PLAYER_VERSION;
@@ -15717,11 +15819,37 @@ void draw_profile_screen(uint32_t *fb)
         "Verbose diagnostics and on-screen counters"
     };
 
+    evo_page_sync(&profile_selected, 4);
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "PLAYBACK PROFILE";
+        p.subtitle = "HOW AGGRESSIVELY THE DECODER IS TUNED";
+        char cnt[32];
+        snprintf(cnt, sizeof(cnt), "%d OF 4", profile_selected + 1);
+        p.counter = cnt;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = 4;
+
+        for (int i = 0; i < 4; i++) {
+            p.rows[i].title = names[i];
+            p.rows[i].detail = blurbs[i];
+            p.rows[i].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+            p.rows[i].badge = ((PlaybackProfile)i == current_profile) ? "ACTIVE" : "";
+            p.rows[i].has_chevron = 0;
+            p.rows[i].is_focused = (i == profile_selected);
+        }
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     evo_list_model m;
     char           badge[48];
     int            i;
-
-    evo_page_sync(&profile_selected, 4);
 
     for (i = 0; i < 4; i++) {
         evo_profile_rows[i].title    = names[i];
