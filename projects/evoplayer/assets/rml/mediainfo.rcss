@@ -1,0 +1,227 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Netflix Media Info Specifications RCSS Stylesheet
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Fullscreen Dimmed Scrim */
+#mediainfo-scrim {
+    width: 1920px;
+    height: 1080px;
+    background-color: #000000ba;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Media Info Main Card */
+#mediainfo-card {
+    width: 1400px;
+    background-color: #0b101afc;
+    border-width: 1px;
+    border-color: #1e293b;
+    border-radius: 16px;
+    padding: 38px 48px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+#mediainfo-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 1304px;
+}
+
+#header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#mediainfo-indicator {
+    width: 4px;
+    height: 52px;
+    background-color: #e50914;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#header-text-block {
+    display: flex;
+    flex-direction: column;
+}
+
+#mediainfo-eyebrow {
+    font-size: 12px;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 1.5px;
+}
+
+#mediainfo-title {
+    font-size: 26px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+}
+
+#mediainfo-path {
+    font-size: 13px;
+    font-weight: normal;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+#header-badges {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    align-items: center;
+}
+
+.info-badge {
+    background-color: #152033;
+    border-width: 1px;
+    border-color: #293d5c;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+}
+
+.badge-hdr {
+    border-color: #ffd700;
+    color: #ffd700;
+}
+
+.badge-hidden {
+    display: none;
+}
+
+/* Specs Grid */
+#specs-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-top: 30px;
+    gap: 20px;
+    width: 1304px;
+}
+
+.spec-card {
+    width: 640px;
+    background-color: #0f1726d8;
+    border-width: 1px;
+    border-color: #1c283d;
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+.card-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 16px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1b2638;
+    padding-bottom: 10px;
+}
+
+.card-icon {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #e2e8f0;
+    letter-spacing: 1px;
+}
+
+.spec-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.spec-key {
+    font-size: 13px;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 0.5px;
+}
+
+.spec-val {
+    font-size: 14px;
+    font-weight: bold;
+    color: #f1f5f9;
+    letter-spacing: 0.5px;
+}
+
+/* Footer Hints */
+#mediainfo-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 28px;
+    margin-top: 30px;
+    width: 1304px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+#footer-engine-ver {
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: bold;
+    color: #475569;
+    letter-spacing: 1px;
+}

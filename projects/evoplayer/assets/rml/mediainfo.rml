@@ -1,0 +1,124 @@
+<rml>
+<head>
+    <link type="text/rcss" href="mediainfo.rcss"/>
+</head>
+<body id="mediainfo-body">
+    <div id="mediainfo-scrim">
+        <div id="mediainfo-card">
+            <!-- Header Bar -->
+            <div id="mediainfo-header">
+                <div id="header-left">
+                    <div id="mediainfo-indicator"></div>
+                    <div id="header-text-block">
+                        <div id="mediainfo-eyebrow">TECHNICAL SPECIFICATIONS</div>
+                        <div id="mediainfo-title">Big Buck Bunny (2008)</div>
+                        <div id="mediainfo-path">/mnt/usb0/movies/Big_Buck_Bunny.mkv</div>
+                    </div>
+                </div>
+                <div id="header-badges">
+                    <div id="info-badge-res" class="info-badge">4K UHD</div>
+                    <div id="info-badge-hdr" class="info-badge badge-hdr">HDR10</div>
+                    <div id="info-badge-codec" class="info-badge">HEVC 10-BIT</div>
+                    <div id="info-badge-fps" class="info-badge">60 FPS</div>
+                </div>
+            </div>
+
+            <!-- Specs Grid (2x2 Cards) -->
+            <div id="specs-grid">
+                <!-- Card 1: Container & Storage -->
+                <div class="spec-card">
+                    <div class="card-header">
+                        <img src="../icons/icon_browse_usb.png" class="card-icon"/>
+                        <span class="card-title">CONTAINER &amp; STORAGE</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">FORMAT</span>
+                        <span id="spec-container" class="spec-val">Matroska (.mkv)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">FILE SIZE</span>
+                        <span id="spec-size" class="spec-val">4.24 GB</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">DURATION</span>
+                        <span id="spec-duration" class="spec-val">01:42:15</span>
+                    </div>
+                </div>
+
+                <!-- Card 2: Video Stream -->
+                <div class="spec-card">
+                    <div class="card-header">
+                        <img src="../icons/icon_aspect.png" class="card-icon"/>
+                        <span class="card-title">VIDEO STREAM</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">CODEC</span>
+                        <span id="spec-vcodec" class="spec-val">HEVC (H.265 Main 10)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">RESOLUTION</span>
+                        <span id="spec-res" class="spec-val">3840 x 2160 (4K UHD)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">COLOR / HDR</span>
+                        <span id="spec-hdr" class="spec-val">BT.2020 (HDR10)</span>
+                    </div>
+                </div>
+
+                <!-- Card 3: Audio Stream -->
+                <div class="spec-card">
+                    <div class="card-header">
+                        <img src="../icons/icon_subtitles.png" class="card-icon"/>
+                        <span class="card-title">AUDIO STREAM</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">CODEC</span>
+                        <span id="spec-acodec" class="spec-val">Dolby Digital (E-AC-3)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">CHANNELS</span>
+                        <span id="spec-channels" class="spec-val">6 CH (5.1 Surround)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">SAMPLE RATE</span>
+                        <span id="spec-rate" class="spec-val">48,000 Hz</span>
+                    </div>
+                </div>
+
+                <!-- Card 4: Subtitles & Engine -->
+                <div class="spec-card">
+                    <div class="card-header">
+                        <img src="../icons/icon_settings.png" class="card-icon"/>
+                        <span class="card-title">SUBTITLES &amp; ENGINE</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">SUBTITLES</span>
+                        <span id="spec-subs" class="spec-val">Active (Embedded)</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">OUTPUT</span>
+                        <span id="spec-output" class="spec-val">PS5 Linear Audio Out</span>
+                    </div>
+                    <div class="spec-row">
+                        <span class="spec-key">RENDERER</span>
+                        <span id="spec-renderer" class="spec-val">Prospero Native 60Hz</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Hints -->
+            <div id="mediainfo-footer">
+                <div class="footer-hint">
+                    <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                    <span class="footer-text">CLOSE</span>
+                </div>
+                <div class="footer-hint">
+                    <img src="../icons/btn_square.png" class="footer-glyph"/>
+                    <span class="footer-text">RETURN TO FILM</span>
+                </div>
+                <div id="footer-engine-ver">EVO PRO DECODER v0.7.0</div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

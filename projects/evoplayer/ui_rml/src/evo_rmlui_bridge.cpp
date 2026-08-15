@@ -119,4 +119,33 @@ void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderSubtitles(framebuffer, width, height);
 }
 
+void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
+    if (!p) return;
+    EvoMediaInfoState state;
+    state.title = p->title ? p->title : "";
+    state.path = p->path ? p->path : "";
+    state.res_badge = p->res_badge ? p->res_badge : "";
+    state.hdr_badge = p->hdr_badge ? p->hdr_badge : "";
+    state.codec_badge = p->codec_badge ? p->codec_badge : "";
+    state.fps_badge = p->fps_badge ? p->fps_badge : "";
+    state.container = p->container ? p->container : "";
+    state.file_size = p->file_size ? p->file_size : "";
+    state.duration = p->duration ? p->duration : "";
+    state.video_codec = p->video_codec ? p->video_codec : "";
+    state.resolution = p->resolution ? p->resolution : "";
+    state.color_hdr = p->color_hdr ? p->color_hdr : "";
+    state.audio_codec = p->audio_codec ? p->audio_codec : "";
+    state.channels = p->channels ? p->channels : "";
+    state.sample_rate = p->sample_rate ? p->sample_rate : "";
+    state.subtitles = p->subtitles ? p->subtitles : "";
+    state.output = p->output ? p->output : "";
+    state.renderer = p->renderer ? p->renderer : "";
+
+    EvoRmlApp::Instance().UpdateMediaInfoState(state);
+}
+
+void evo_rmlui_render_mediainfo(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderMediaInfo(framebuffer, width, height);
+}
+
 }

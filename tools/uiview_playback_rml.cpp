@@ -56,6 +56,7 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> fb_settings(width * height);
     std::vector<uint32_t> fb_settings_sub(width * height);
     std::vector<uint32_t> fb_subtitles(width * height);
+    std::vector<uint32_t> fb_mediainfo(width * height);
 
     // Simulate cinematic film frame background
     for (int y = 0; y < height; y++) {
@@ -67,6 +68,7 @@ int main(int argc, char** argv) {
             fb_playback[y * width + x] = px;
             fb_dialog[y * width + x] = px;
             fb_subtitles[y * width + x] = px;
+            fb_mediainfo[y * width + x] = px;
             fb_settings[y * width + x] = 0xFF06090E;
             fb_settings_sub[y * width + x] = 0xFF06090E;
         }
@@ -218,8 +220,8 @@ int main(int argc, char** argv) {
 
     sub.tracks[1].label = "ENGLISH SDH";
     sub.tracks[1].detail = "1001 CUES";
-    sub.tracks[1].is_current = 1; // currently active
-    sub.tracks[1].is_focused = 1; // cursor selected
+    sub.tracks[1].is_current = 1;
+    sub.tracks[1].is_focused = 1;
 
     sub.tracks[2].label = "SPANISH";
     sub.tracks[2].detail = "EXTERNAL SRT";
@@ -234,6 +236,32 @@ int main(int argc, char** argv) {
     evo_rmlui_update_subtitles(&sub);
     evo_rmlui_render_subtitles(fb_subtitles.data(), width, height);
     save_bmp_24("output/uiview/rml_subtitles.bmp", fb_subtitles.data(), width, height);
+
+    // 6. Render Media Info Screen
+    evo_rmlui_mediainfo_params_t info;
+    memset(&info, 0, sizeof(info));
+    info.title = "Big Buck Bunny (2008)";
+    info.path = "/mnt/usb0/movies/Big_Buck_Bunny.mkv";
+    info.res_badge = "4K UHD";
+    info.hdr_badge = "HDR10";
+    info.codec_badge = "HEVC 10-BIT";
+    info.fps_badge = "60 FPS";
+    info.container = "Matroska (.mkv)";
+    info.file_size = "4.24 GB";
+    info.duration = "01:42:15";
+    info.video_codec = "HEVC (H.265 Main 10)";
+    info.resolution = "3840 x 2160 (4K UHD)";
+    info.color_hdr = "BT.2020 / ST 2084 (HDR10)";
+    info.audio_codec = "Dolby Digital (E-AC-3)";
+    info.channels = "6 Channels (5.1 Surround)";
+    info.sample_rate = "48,000 Hz";
+    info.subtitles = "Active (English SDH)";
+    info.output = "PS5 Linear Audio Out";
+    info.renderer = "Prospero Hardware Vsync";
+
+    evo_rmlui_update_mediainfo(&info);
+    evo_rmlui_render_mediainfo(fb_mediainfo.data(), width, height);
+    save_bmp_24("output/uiview/rml_mediainfo.bmp", fb_mediainfo.data(), width, height);
 
     std::cout << "Rendered all preview screens successfully" << std::endl;
     return 0;

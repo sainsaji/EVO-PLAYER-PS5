@@ -105,16 +105,31 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_subtitles_doc = m_context->LoadDocument(p + "subtitles.rml");
             if (m_subtitles_doc) m_subtitles_doc->Hide();
         }
+        if (!m_mediainfo_doc) {
+            m_mediainfo_doc = m_context->LoadDocument(p + "mediainfo.rml");
+            if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+        }
     }
 
+    if (!m_playback_doc) std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
+    if (!m_dialog_doc) std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
+    if (!m_settings_doc) std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
+    if (!m_subtitles_doc) std::cerr << "[EVO RmlUi] Failed to load subtitles.rml!" << std::endl;
+    if (!m_mediainfo_doc) std::cerr << "[EVO RmlUi] Failed to load mediainfo.rml!" << std::endl;
+
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Engine initialized successfully ("
+    std::cout << "[EVO RmlUi] Retained-mode Full Engine initialized successfully ("
               << width << "x" << height << ")." << std::endl;
     return true;
 }
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_mediainfo_doc) {
+        m_mediainfo_doc->Close();
+        m_mediainfo_doc = nullptr;
+    }
 
     if (m_subtitles_doc) {
         m_subtitles_doc->Close();
@@ -248,7 +263,7 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         }
     }
 
-    // 5. Play/Pause State (Only show PAUSED badge if paused AND not scrubbing)
+    // 5. Play/Pause State
     Rml::Element* el_pause = m_playback_doc->GetElementById("pause-badge");
     if (el_pause) {
         if (state.paused && !state.scrub_active) {
@@ -295,6 +310,7 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     m_playback_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -309,7 +325,6 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
 
     m_last_dialog = state;
 
-    // Eyebrow, Title, Detail
     Rml::Element* el_eb = m_dialog_doc->GetElementById("dialog-eyebrow");
     if (el_eb) el_eb->SetInnerRML(state.eyebrow);
 
@@ -319,7 +334,6 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
     Rml::Element* el_de = m_dialog_doc->GetElementById("dialog-detail");
     if (el_de) el_de->SetInnerRML(state.detail);
 
-    // Progress Bar
     Rml::Element* el_track = m_dialog_doc->GetElementById("dialog-progress-track");
     Rml::Element* el_fill = m_dialog_doc->GetElementById("dialog-progress-fill");
     if (el_track && el_fill) {
@@ -336,7 +350,6 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
         }
     }
 
-    // Action Buttons
     for (int i = 0; i < 3; i++) {
         std::string btn_id = "action-" + std::to_string(i);
         std::string icon_id = "action-icon-" + std::to_string(i);
@@ -352,12 +365,8 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                 el_btn->SetClass("btn-primary", state.actions[i].is_primary);
                 el_btn->SetClass("btn-secondary", !state.actions[i].is_primary);
 
-                if (el_icon) {
-                    el_icon->SetAttribute("src", state.actions[i].icon_path);
-                }
-                if (el_lbl) {
-                    el_lbl->SetInnerRML(state.actions[i].label);
-                }
+                if (el_icon) el_icon->SetAttribute("src", state.actions[i].icon_path);
+                if (el_lbl) el_lbl->SetInnerRML(state.actions[i].label);
             } else {
                 el_btn->SetProperty("display", "none");
             }
@@ -371,6 +380,7 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     m_dialog_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -385,7 +395,6 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
 
     m_last_settings = state;
 
-    // 1. Titles & Counter
     Rml::Element* el_ti = m_settings_doc->GetElementById("settings-title");
     if (el_ti) el_ti->SetInnerRML(state.title);
 
@@ -395,7 +404,6 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
     Rml::Element* el_cnt = m_settings_doc->GetElementById("settings-counter");
     if (el_cnt) el_cnt->SetInnerRML(state.counter);
 
-    // 2. Rail Navigation
     for (int r = 0; r < 7; r++) {
         std::string rid = "rail-" + std::to_string(r);
         Rml::Element* el_r = m_settings_doc->GetElementById(rid);
@@ -407,7 +415,6 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         }
     }
 
-    // 3. Rows
     for (int i = 0; i < 6; i++) {
         std::string row_id = "row-" + std::to_string(i);
         std::string icon_id = "row-icon-" + std::to_string(i);
@@ -431,12 +438,8 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 if (el_icon) {
                     el_icon->SetAttribute("src", state.rows[i].icon_path.empty() ? "../icons/icon_settings.png" : state.rows[i].icon_path);
                 }
-                if (el_title) {
-                    el_title->SetInnerRML(state.rows[i].title);
-                }
-                if (el_detail) {
-                    el_detail->SetInnerRML(state.rows[i].detail);
-                }
+                if (el_title) el_title->SetInnerRML(state.rows[i].title);
+                if (el_detail) el_detail->SetInnerRML(state.rows[i].detail);
                 if (el_badge) {
                     if (state.rows[i].badge.empty()) {
                         el_badge->SetProperty("display", "none");
@@ -461,6 +464,7 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     m_settings_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -508,12 +512,8 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
                 el_row->SetProperty("display", "flex");
                 el_row->SetClass("row-focused", state.tracks[i].is_focused);
 
-                if (el_chk) {
-                    el_chk->SetClass("checked", state.tracks[i].is_current);
-                }
-                if (el_title) {
-                    el_title->SetInnerRML(state.tracks[i].label);
-                }
+                if (el_chk) el_chk->SetClass("checked", state.tracks[i].is_current);
+                if (el_title) el_title->SetInnerRML(state.tracks[i].label);
                 if (el_detail) {
                     if (state.tracks[i].detail.empty()) {
                         el_detail->SetProperty("display", "none");
@@ -535,7 +535,98 @@ void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     m_subtitles_doc->Show();
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    m_context->Update();
+    m_context->Render();
+}
+
+void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
+    if (!m_initialized || !m_mediainfo_doc) return;
+
+    m_last_mediainfo = state;
+
+    Rml::Element* el_ti = m_mediainfo_doc->GetElementById("mediainfo-title");
+    if (el_ti) el_ti->SetInnerRML(state.title.empty() ? "Media Details" : state.title);
+
+    Rml::Element* el_pa = m_mediainfo_doc->GetElementById("mediainfo-path");
+    if (el_pa) el_pa->SetInnerRML(state.path);
+
+    // Badges
+    Rml::Element* el_res = m_mediainfo_doc->GetElementById("info-badge-res");
+    if (el_res) {
+        if (state.res_badge.empty()) el_res->SetProperty("display", "none");
+        else { el_res->SetProperty("display", "inline-block"); el_res->SetInnerRML(state.res_badge); }
+    }
+
+    Rml::Element* el_hdr = m_mediainfo_doc->GetElementById("info-badge-hdr");
+    if (el_hdr) {
+        if (state.hdr_badge.empty()) el_hdr->SetProperty("display", "none");
+        else { el_hdr->SetProperty("display", "inline-block"); el_hdr->SetInnerRML(state.hdr_badge); }
+    }
+
+    Rml::Element* el_codec = m_mediainfo_doc->GetElementById("info-badge-codec");
+    if (el_codec) {
+        if (state.codec_badge.empty()) el_codec->SetProperty("display", "none");
+        else { el_codec->SetProperty("display", "inline-block"); el_codec->SetInnerRML(state.codec_badge); }
+    }
+
+    Rml::Element* el_fps = m_mediainfo_doc->GetElementById("info-badge-fps");
+    if (el_fps) {
+        if (state.fps_badge.empty()) el_fps->SetProperty("display", "none");
+        else { el_fps->SetProperty("display", "inline-block"); el_fps->SetInnerRML(state.fps_badge); }
+    }
+
+    // Specs
+    Rml::Element* el_con = m_mediainfo_doc->GetElementById("spec-container");
+    if (el_con) el_con->SetInnerRML(state.container);
+
+    Rml::Element* el_sz = m_mediainfo_doc->GetElementById("spec-size");
+    if (el_sz) el_sz->SetInnerRML(state.file_size);
+
+    Rml::Element* el_du = m_mediainfo_doc->GetElementById("spec-duration");
+    if (el_du) el_du->SetInnerRML(state.duration);
+
+    Rml::Element* el_vc = m_mediainfo_doc->GetElementById("spec-vcodec");
+    if (el_vc) el_vc->SetInnerRML(state.video_codec);
+
+    Rml::Element* el_rs = m_mediainfo_doc->GetElementById("spec-res");
+    if (el_rs) el_rs->SetInnerRML(state.resolution);
+
+    Rml::Element* el_hd = m_mediainfo_doc->GetElementById("spec-hdr");
+    if (el_hd) el_hd->SetInnerRML(state.color_hdr);
+
+    Rml::Element* el_ac = m_mediainfo_doc->GetElementById("spec-acodec");
+    if (el_ac) el_ac->SetInnerRML(state.audio_codec);
+
+    Rml::Element* el_ch = m_mediainfo_doc->GetElementById("spec-channels");
+    if (el_ch) el_ch->SetInnerRML(state.channels);
+
+    Rml::Element* el_rt = m_mediainfo_doc->GetElementById("spec-rate");
+    if (el_rt) el_rt->SetInnerRML(state.sample_rate);
+
+    Rml::Element* el_su = m_mediainfo_doc->GetElementById("spec-subs");
+    if (el_su) el_su->SetInnerRML(state.subtitles);
+
+    Rml::Element* el_ou = m_mediainfo_doc->GetElementById("spec-output");
+    if (el_ou) el_ou->SetInnerRML(state.output);
+
+    Rml::Element* el_rn = m_mediainfo_doc->GetElementById("spec-renderer");
+    if (el_rn) el_rn->SetInnerRML(state.renderer);
+}
+
+void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_mediainfo_doc || !framebuffer) return;
+
+    if (m_playback_doc) m_playback_doc->Hide();
+    if (m_dialog_doc) m_dialog_doc->Hide();
+    if (m_settings_doc) m_settings_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
+    m_mediainfo_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);

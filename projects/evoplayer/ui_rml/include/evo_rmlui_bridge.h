@@ -78,6 +78,27 @@ typedef struct {
     evo_rmlui_subtitles_track_t tracks[8];
 } evo_rmlui_subtitles_params_t;
 
+typedef struct {
+    const char* title;
+    const char* path;
+    const char* res_badge;
+    const char* hdr_badge;
+    const char* codec_badge;
+    const char* fps_badge;
+    const char* container;
+    const char* file_size;
+    const char* duration;
+    const char* video_codec;
+    const char* resolution;
+    const char* color_hdr;
+    const char* audio_codec;
+    const char* channels;
+    const char* sample_rate;
+    const char* subtitles;
+    const char* output;
+    const char* renderer;
+} evo_rmlui_mediainfo_params_t;
+
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);
 void evo_rmlui_shutdown(void);
@@ -98,6 +119,10 @@ void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height);
 /* Subtitles Track Selection Modal API */
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* params);
 void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height);
+
+/* Media Info Technical Specifications Modal API */
+void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* params);
+void evo_rmlui_render_mediainfo(uint32_t* framebuffer, int width, int height);
 
 #ifdef __cplusplus
 }

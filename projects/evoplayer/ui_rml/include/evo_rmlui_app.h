@@ -75,6 +75,27 @@ struct EvoSubtitlesState {
     std::vector<EvoSubtitlesTrack> tracks;
 };
 
+struct EvoMediaInfoState {
+    std::string title;
+    std::string path;
+    std::string res_badge;
+    std::string hdr_badge;
+    std::string codec_badge;
+    std::string fps_badge;
+    std::string container;
+    std::string file_size;
+    std::string duration;
+    std::string video_codec;
+    std::string resolution;
+    std::string color_hdr;
+    std::string audio_codec;
+    std::string channels;
+    std::string sample_rate;
+    std::string subtitles;
+    std::string output;
+    std::string renderer;
+};
+
 class EvoRmlApp {
 public:
     static EvoRmlApp& Instance();
@@ -94,6 +115,9 @@ public:
     void UpdateSubtitlesState(const EvoSubtitlesState& state);
     void RenderSubtitles(uint32_t* framebuffer, int width, int height);
 
+    void UpdateMediaInfoState(const EvoMediaInfoState& state);
+    void RenderMediaInfo(uint32_t* framebuffer, int width, int height);
+
     bool IsInitialized() const { return m_initialized; }
 
 private:
@@ -111,9 +135,11 @@ private:
     Rml::ElementDocument* m_dialog_doc = nullptr;
     Rml::ElementDocument* m_settings_doc = nullptr;
     Rml::ElementDocument* m_subtitles_doc = nullptr;
+    Rml::ElementDocument* m_mediainfo_doc = nullptr;
 
     EvoPlaybackState m_last_state;
     EvoDialogState m_last_dialog;
     EvoSettingsState m_last_settings;
     EvoSubtitlesState m_last_subtitles;
+    EvoMediaInfoState m_last_mediainfo;
 };

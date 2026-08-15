@@ -15543,6 +15543,82 @@ void draw_media_info_screen(uint32_t *fb)
     snprintf(out_s, sizeof(out_s), "%d CH  -  %d HZ",
              evo_audio_channels, detected_audio_rate);
 
+    if (evo_rmlui_is_initialized()) {
+        char clean_title[192];
+        clean_media_title(current_media_path, clean_title, sizeof(clean_title), NULL, 0);
+
+        char res_badge[32] = "";
+        char hdr_badge[32] = "";
+        char codec_badge[32] = "";
+        char fps_badge[32] = "";
+        char ch_str[64] = "";
+        char rate_str[32] = "";
+        char color_hdr[64] = "BT.709 (SDR)";
+
+        if (play_ctx) {
+            if (play_ctx->width >= 3840 || play_ctx->height >= 2160) snprintf(res_badge, sizeof(res_badge), "4K UHD");
+            else if (play_ctx->width >= 1920 || play_ctx->height >= 1080) snprintf(res_badge, sizeof(res_badge), "1080p FHD");
+            else if (play_ctx->width >= 1280 || play_ctx->height >= 720) snprintf(res_badge, sizeof(res_badge), "720p HD");
+            else if (play_ctx->height > 0) snprintf(res_badge, sizeof(res_badge), "%dp", play_ctx->height);
+
+            if (play_ctx->color_trc == AVCOL_TRC_SMPTE2084) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HDR10");
+                snprintf(color_hdr, sizeof(color_hdr), "BT.2020 / ST 2084 (HDR10)");
+            } else if (play_ctx->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HLG");
+                snprintf(color_hdr, sizeof(color_hdr), "BT.2020 / ARIB (HLG)");
+            } else if (play_ctx->color_trc == AVCOL_TRC_BT2020_10) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HDR");
+                snprintf(color_hdr, sizeof(color_hdr), "BT.2020 (10-bit)");
+            }
+
+            int is_10bit = (play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ||
+                            play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10BE ||
+                            play_ctx->pix_fmt == AV_PIX_FMT_YUV422P10LE ||
+                            play_ctx->pix_fmt == AV_PIX_FMT_YUV444P10LE);
+
+            const char *cname = (play_ctx->codec && play_ctx->codec->name) ? play_ctx->codec->name : "";
+            if (cname[0]) {
+                if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
+                else if (strcasecmp(cname, "h264") == 0 || strcasecmp(cname, "avc") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AVC 10-BIT" : "AVC / H.264");
+                else if (strcasecmp(cname, "av1") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AV1 10-BIT" : "AV1");
+                else if (strcasecmp(cname, "vp9") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "VP9 10-BIT" : "VP9");
+                else snprintf(codec_badge, sizeof(codec_badge), "%s", cname);
+            }
+
+            if (video_fps > 1.0) snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(video_fps));
+        }
+
+        snprintf(ch_str, sizeof(ch_str), "%d Channels (%s)", evo_audio_channels,
+                 evo_audio_channels == 6 ? "5.1 Surround" : (evo_audio_channels == 8 ? "7.1 Surround" : "Stereo"));
+        snprintf(rate_str, sizeof(rate_str), "%d Hz", detected_audio_rate > 0 ? detected_audio_rate : 48000);
+
+        evo_rmlui_mediainfo_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = clean_title[0] ? clean_title : (md->title[0] ? md->title : "Media Information");
+        p.path = current_media_path;
+        p.res_badge = res_badge;
+        p.hdr_badge = hdr_badge;
+        p.codec_badge = codec_badge;
+        p.fps_badge = fps_badge;
+        p.container = md->container ? md->container : "Media Container";
+        p.file_size = size_s[0] ? size_s : "Unknown";
+        p.duration = dur_s[0] ? dur_s : "--:--";
+        p.video_codec = md->video_codec ? md->video_codec : (codec_badge[0] ? codec_badge : "Video Stream");
+        p.resolution = res_s[0] ? res_s : (res_badge[0] ? res_badge : "Unknown");
+        p.color_hdr = color_hdr;
+        p.audio_codec = md->audio_codec ? md->audio_codec : "Audio Stream";
+        p.channels = ch_str;
+        p.sample_rate = rate_str;
+        p.subtitles = prospero_subtitle_enabled ? "Active" : (md->has_subtitles ? "Available (Off)" : "None");
+        p.output = "PS5 Linear Audio Out";
+        p.renderer = "Prospero Hardware Vsync";
+
+        evo_rmlui_update_mediainfo(&p);
+        evo_rmlui_render_mediainfo(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     props[n].key = "CONTAINER";  props[n++].value = md->container;
     props[n].key = "SIZE";       props[n++].value = size_s;
     props[n].key = "LENGTH";     props[n++].value = dur_s;
