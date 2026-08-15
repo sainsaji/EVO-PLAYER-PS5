@@ -14257,8 +14257,6 @@ void draw_favorites_screen(uint32_t *fb)
 
 /* ---- settings ------------------------------------------------------------ */
 
-/* ---- settings ------------------------------------------------------------ */
-
 static evo_list_entry evo_settings_rows[EVO_SETTINGS_COUNT];
 
 void draw_settings_screen(uint32_t *fb)
@@ -14275,21 +14273,48 @@ void draw_settings_screen(uint32_t *fb)
         "THEMES, SOUNDS, LIGHTBAR & SORTING",
         "DEVELOPER TOOLS & MEDIA TILE"
     };
-    static const int icons[EVO_SETTINGS_COUNT] = {
-        EVO_IC_RESUME,
-        EVO_IC_SUBTITLES,
-        EVO_IC_PALETTE,
-        EVO_IC_TOOLS
+    static const char *icons[EVO_SETTINGS_COUNT] = {
+        "../icons/icon_resume.png",
+        "../icons/icon_subtitles.png",
+        "../icons/icon_palette.png",
+        "../icons/icon_developer_tools.png"
     };
     evo_list_model m;
     int i;
 
     evo_page_sync(&settings_selected, EVO_SETTINGS_COUNT);
 
+    if (evo_rmlui_is_initialized()) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%d OF %d", settings_selected + 1, EVO_SETTINGS_COUNT);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "SETTINGS";
+        p.subtitle = "APPLICATION & PLAYBACK PREFERENCES";
+        p.counter = counter;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = EVO_SETTINGS_COUNT;
+
+        for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
+            p.rows[i].title = titles[i];
+            p.rows[i].detail = details[i];
+            p.rows[i].icon_path = icons[i];
+            p.rows[i].badge = "";
+            p.rows[i].has_chevron = 1;
+            p.rows[i].is_focused = (i == settings_selected);
+        }
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
         evo_settings_rows[i].title        = titles[i];
         evo_settings_rows[i].detail       = details[i];
-        evo_settings_rows[i].icon         = icons[i];
+        evo_settings_rows[i].icon         = i == 0 ? EVO_IC_RESUME : (i == 1 ? EVO_IC_SUBTITLES : (i == 2 ? EVO_IC_PALETTE : EVO_IC_TOOLS));
         evo_settings_rows[i].chevron      = 1;
         evo_settings_rows[i].progress     = -1;
         evo_settings_rows[i].swatches     = NULL;
@@ -14322,6 +14347,52 @@ void draw_settings_playback_screen(uint32_t *fb)
 
     snprintf(profile_val, sizeof(profile_val), "%s", profile_name(current_profile));
     snprintf(view_val, sizeof(view_val), "%s", prospero_view_mode_name(prospero_default_view_mode));
+
+    if (evo_rmlui_is_initialized()) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%d OF %d", settings_playback_selected + 1, EVO_SETTINGS_PLAYBACK_COUNT);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "PLAYBACK & VIDEO";
+        p.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
+        p.counter = counter;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = EVO_SETTINGS_PLAYBACK_COUNT;
+
+        p.rows[0].title = "PLAYBACK PROFILE";
+        p.rows[0].detail = "SELECT ENGINE PROFILE";
+        p.rows[0].icon_path = "../icons/icon_settings.png";
+        p.rows[0].badge = profile_val;
+        p.rows[0].has_chevron = 1;
+        p.rows[0].is_focused = (settings_playback_selected == 0);
+
+        p.rows[1].title = "DEFAULT ASPECT RATIO";
+        p.rows[1].detail = "FIT, FILL OR STRETCH";
+        p.rows[1].icon_path = "../icons/icon_aspect.png";
+        p.rows[1].badge = view_val;
+        p.rows[1].has_chevron = 1;
+        p.rows[1].is_focused = (settings_playback_selected == 1);
+
+        p.rows[2].title = "RESUME PLAYBACK";
+        p.rows[2].detail = "REMEMBER PLAYBACK POSITION";
+        p.rows[2].icon_path = "../icons/icon_resume.png";
+        p.rows[2].badge = prospero_resume_playback_enabled ? "ON" : "OFF";
+        p.rows[2].has_chevron = 1;
+        p.rows[2].is_focused = (settings_playback_selected == 2);
+
+        p.rows[3].title = "SURROUND SOUND TEST";
+        p.rows[3].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
+        p.rows[3].icon_path = "../icons/icon_resume.png";
+        p.rows[3].badge = "";
+        p.rows[3].has_chevron = 1;
+        p.rows[3].is_focused = (settings_playback_selected == 3);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
 
     evo_settings_playback_rows[0].title   = "PLAYBACK PROFILE";
     evo_settings_playback_rows[0].detail  = profile_val;
@@ -14410,6 +14481,38 @@ void draw_settings_subtitles_screen(uint32_t *fb)
         prospero_subtitle_face == EVO_FACE_SUB   ? "SMALL" :
         prospero_subtitle_face == EVO_FACE_TITLE ? "LARGE" : "MEDIUM";
 
+    if (evo_rmlui_is_initialized()) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%d OF %d", settings_subtitles_selected + 1, EVO_SETTINGS_SUBTITLES_COUNT);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "SUBTITLES";
+        p.subtitle = "SETTINGS  -  DETECTION & DEFAULT SIZING";
+        p.counter = counter;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = EVO_SETTINGS_SUBTITLES_COUNT;
+
+        p.rows[0].title = "AUTO-DETECT SUBTITLES";
+        p.rows[0].detail = "LOAD MATCHING SRT/ASS FILES AUTOMATICALLY";
+        p.rows[0].icon_path = "../icons/icon_subtitles.png";
+        p.rows[0].badge = prospero_auto_subtitles_enabled ? "ON" : "OFF";
+        p.rows[0].has_chevron = 1;
+        p.rows[0].is_focused = (settings_subtitles_selected == 0);
+
+        p.rows[1].title = "DEFAULT SUBTITLE SIZE";
+        p.rows[1].detail = "FONT SIZE FOR ON-SCREEN TEXT";
+        p.rows[1].icon_path = "../icons/icon_subtitles.png";
+        p.rows[1].badge = sub_size_str;
+        p.rows[1].has_chevron = 1;
+        p.rows[1].is_focused = (settings_subtitles_selected == 1);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     evo_settings_subtitles_rows[0].title   = "AUTO-DETECT SUBTITLES";
     evo_settings_subtitles_rows[0].detail  = prospero_auto_subtitles_enabled ? "ON" : "OFF";
     evo_settings_subtitles_rows[0].icon    = EVO_IC_SUBTITLES;
@@ -14454,6 +14557,59 @@ void draw_settings_interface_screen(uint32_t *fb)
              evo_theme_name(evo_theme_index()),
              evo_theme_index() + 1, evo_theme_count());
 
+    if (evo_rmlui_is_initialized()) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%d OF %d", settings_interface_selected + 1, EVO_SETTINGS_INTERFACE_COUNT);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "INTERFACE & CONTROLS";
+        p.subtitle = "SETTINGS  -  THEMES, SOUNDS & CONTROLS";
+        p.counter = counter;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = EVO_SETTINGS_INTERFACE_COUNT;
+
+        p.rows[0].title = "THEME";
+        p.rows[0].detail = "COLOR PALETTE & ACCENTS";
+        p.rows[0].icon_path = "../icons/icon_palette.png";
+        p.rows[0].badge = theme_val;
+        p.rows[0].has_chevron = 1;
+        p.rows[0].is_focused = (settings_interface_selected == 0);
+
+        p.rows[1].title = "NAVIGATION SOUNDS";
+        p.rows[1].detail = "AUDIO FEEDBACK ON D-PAD & BUTTONS";
+        p.rows[1].icon_path = "../icons/icon_subtitles.png";
+        p.rows[1].badge = evo_feedback_sound_enabled() ? "ON" : "OFF";
+        p.rows[1].has_chevron = 1;
+        p.rows[1].is_focused = (settings_interface_selected == 1);
+
+        p.rows[2].title = "CONTROLLER LIGHTBAR";
+        p.rows[2].detail = "DUALSENSE LIGHT COLOR";
+        p.rows[2].icon_path = "../icons/icon_palette.png";
+        p.rows[2].badge = evo_feedback_lightbar_enabled() ? "THEME ACCENT" : "OFF";
+        p.rows[2].has_chevron = 1;
+        p.rows[2].is_focused = (settings_interface_selected == 2);
+
+        p.rows[3].title = "FOLDERS FIRST";
+        p.rows[3].detail = "USB FILE BROWSER SORTING";
+        p.rows[3].icon_path = "../icons/icon_folder.png";
+        p.rows[3].badge = evo_sort_folders_first ? "ON" : "OFF";
+        p.rows[3].has_chevron = 1;
+        p.rows[3].is_focused = (settings_interface_selected == 3);
+
+        p.rows[4].title = "KEYBOARD INPUT";
+        p.rows[4].detail = "TEXT ENTRY METHOD";
+        p.rows[4].icon_path = "../icons/icon_settings.png";
+        p.rows[4].badge = (evo_keyboard_get_type() == EVO_KEYBOARD_TYPE_NATIVE) ? "NATIVE PS5 IME" : "VIRTUAL KEYBOARD";
+        p.rows[4].has_chevron = 1;
+        p.rows[4].is_focused = (settings_interface_selected == 4);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     const evo_theme *cur = evo_theme_current();
     theme_swatches[0] = cur->accent;
     theme_swatches[1] = cur->surface;
@@ -14495,7 +14651,6 @@ void draw_settings_interface_screen(uint32_t *fb)
     evo_settings_interface_rows[4].swatch_count = 0;
 
     for (i = 0; i < EVO_SETTINGS_INTERFACE_COUNT; i++)
-
         evo_settings_interface_rows[i].progress = -1;
 
     memset(&m, 0, sizeof(m));
@@ -14525,6 +14680,45 @@ void draw_settings_system_screen(uint32_t *fb)
              (prospero_uninstall_confirm_until != 0 &&
               time(NULL) <= prospero_uninstall_confirm_until)
                  ? "PRESS X TO CONFIRM" : "REMOVES MEDIA TILE");
+
+    if (evo_rmlui_is_initialized()) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%d OF %d", settings_system_selected + 1, EVO_SETTINGS_SYSTEM_COUNT);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "SYSTEM & DIAGNOSTICS";
+        p.subtitle = "SETTINGS  -  DIAGNOSTICS & SYSTEM MANAGEMENT";
+        p.counter = counter;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = EVO_SETTINGS_SYSTEM_COUNT;
+
+        p.rows[0].title = "COMPATIBILITY REPORT";
+        p.rows[0].detail = "WRITES A CODEC REPORT TO USB0";
+        p.rows[0].icon_path = "../icons/icon_developer_tools.png";
+        p.rows[0].badge = "";
+        p.rows[0].has_chevron = 1;
+        p.rows[0].is_focused = (settings_system_selected == 0);
+
+        p.rows[1].title = "DEBUG OVERLAY";
+        p.rows[1].detail = "ON-SCREEN HARDWARE PERFORMANCE METRICS";
+        p.rows[1].icon_path = "../icons/icon_aspect.png";
+        p.rows[1].badge = show_debug_overlay ? "ON" : "OFF";
+        p.rows[1].has_chevron = 1;
+        p.rows[1].is_focused = (settings_system_selected == 1);
+
+        p.rows[2].title = "REMOVE HOME TILE";
+        p.rows[2].detail = uninstall_val;
+        p.rows[2].icon_path = "../icons/icon_trash.png";
+        p.rows[2].badge = "";
+        p.rows[2].has_chevron = 1;
+        p.rows[2].is_focused = (settings_system_selected == 2);
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
 
     evo_settings_system_rows[0].title   = "COMPATIBILITY REPORT";
     evo_settings_system_rows[0].detail  = "WRITES A CODEC REPORT TO USB0";
@@ -14557,6 +14751,7 @@ void draw_settings_system_screen(uint32_t *fb)
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
+
 
 /* ---- developer tools ----------------------------------------------------- */
 

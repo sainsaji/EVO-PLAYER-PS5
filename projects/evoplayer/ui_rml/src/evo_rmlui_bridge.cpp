@@ -54,7 +54,7 @@ void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
 
     for (int i = 0; i < p->action_count && i < 3; i++) {
         EvoDialogAction act;
-        act.icon_path = p->actions[i].icon_path ? p->actions[i].icon_path : "icons/btn_cross.png";
+        act.icon_path = p->actions[i].icon_path ? p->actions[i].icon_path : "../icons/btn_cross.png";
         act.label = p->actions[i].label ? p->actions[i].label : "";
         act.is_primary = (p->actions[i].is_primary != 0);
         state.actions.push_back(act);
@@ -65,6 +65,33 @@ void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
 
 void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderDialog(framebuffer, width, height);
+}
+
+void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
+    if (!p) return;
+    EvoSettingsState state;
+    state.title = p->title ? p->title : "SETTINGS";
+    state.subtitle = p->subtitle ? p->subtitle : "";
+    state.counter = p->counter ? p->counter : "";
+    state.rail_active_idx = p->rail_active_idx;
+    state.rail_focused = (p->rail_focused != 0);
+
+    for (int i = 0; i < p->row_count && i < 6; i++) {
+        EvoSettingsRow row;
+        row.title = p->rows[i].title ? p->rows[i].title : "";
+        row.detail = p->rows[i].detail ? p->rows[i].detail : "";
+        row.icon_path = p->rows[i].icon_path ? p->rows[i].icon_path : "../icons/icon_settings.png";
+        row.badge = p->rows[i].badge ? p->rows[i].badge : "";
+        row.has_chevron = (p->rows[i].has_chevron != 0);
+        row.is_focused = (p->rows[i].is_focused != 0);
+        state.rows.push_back(row);
+    }
+
+    EvoRmlApp::Instance().UpdateSettingsState(state);
+}
+
+void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderSettings(framebuffer, width, height);
 }
 
 }

@@ -20,15 +20,15 @@
             <!-- Action Buttons Row -->
             <div id="dialog-actions-row">
                 <div id="action-0" class="action-btn btn-primary">
-                    <img id="action-icon-0" src="icons/btn_cross.png" class="btn-glyph"/>
+                    <img id="action-icon-0" src="../icons/btn_cross.png" class="btn-glyph"/>
                     <span id="action-label-0" class="btn-text">RESUME</span>
                 </div>
                 <div id="action-1" class="action-btn btn-secondary">
-                    <img id="action-icon-1" src="icons/btn_circle.png" class="btn-glyph"/>
+                    <img id="action-icon-1" src="../icons/btn_circle.png" class="btn-glyph"/>
                     <span id="action-label-1" class="btn-text">START OVER</span>
                 </div>
                 <div id="action-2" class="action-btn btn-secondary action-hidden">
-                    <img id="action-icon-2" src="icons/btn_triangle.png" class="btn-glyph"/>
+                    <img id="action-icon-2" src="../icons/btn_triangle.png" class="btn-glyph"/>
                     <span id="action-label-2" class="btn-text">NEXT</span>
                 </div>
             </div>

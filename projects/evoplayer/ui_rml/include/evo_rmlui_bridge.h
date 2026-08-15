@@ -42,6 +42,25 @@ typedef struct {
     } actions[3];
 } evo_rmlui_dialog_params_t;
 
+typedef struct {
+    const char* title;
+    const char* detail;
+    const char* icon_path;
+    const char* badge;
+    int has_chevron;
+    int is_focused;
+} evo_rmlui_settings_row_t;
+
+typedef struct {
+    const char* title;
+    const char* subtitle;
+    const char* counter;
+    int rail_active_idx;
+    int rail_focused;
+    int row_count;
+    evo_rmlui_settings_row_t rows[8];
+} evo_rmlui_settings_params_t;
+
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);
 void evo_rmlui_shutdown(void);
@@ -54,6 +73,10 @@ void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height)
 /* Confirmation & Modal Dialog API */
 void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* params);
 void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
+
+/* Settings API */
+void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* params);
+void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height);
 
 #ifdef __cplusplus
 }

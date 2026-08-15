@@ -41,6 +41,24 @@ struct EvoDialogState {
     std::vector<EvoDialogAction> actions;
 };
 
+struct EvoSettingsRow {
+    std::string title;
+    std::string detail;
+    std::string icon_path;
+    std::string badge;
+    bool has_chevron = true;
+    bool is_focused = false;
+};
+
+struct EvoSettingsState {
+    std::string title;
+    std::string subtitle;
+    std::string counter;
+    int rail_active_idx = 5;
+    bool rail_focused = false;
+    std::vector<EvoSettingsRow> rows;
+};
+
 class EvoRmlApp {
 public:
     static EvoRmlApp& Instance();
@@ -53,6 +71,9 @@ public:
 
     void UpdateDialogState(const EvoDialogState& state);
     void RenderDialog(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSettingsState(const EvoSettingsState& state);
+    void RenderSettings(uint32_t* framebuffer, int width, int height);
 
     bool IsInitialized() const { return m_initialized; }
 
@@ -69,7 +90,9 @@ private:
     Rml::Context* m_context = nullptr;
     Rml::ElementDocument* m_playback_doc = nullptr;
     Rml::ElementDocument* m_dialog_doc = nullptr;
+    Rml::ElementDocument* m_settings_doc = nullptr;
 
     EvoPlaybackState m_last_state;
     EvoDialogState m_last_dialog;
+    EvoSettingsState m_last_settings;
 };

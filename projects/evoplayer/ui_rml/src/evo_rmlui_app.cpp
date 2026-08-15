@@ -92,13 +92,19 @@ bool EvoRmlApp::Initialize(int width, int height) {
         if (!m_playback_doc) {
             m_playback_doc = m_context->LoadDocument(p + "playback.rml");
             if (m_playback_doc) {
-                m_playback_doc->Show();
+                m_playback_doc->Hide();
             }
         }
         if (!m_dialog_doc) {
             m_dialog_doc = m_context->LoadDocument(p + "dialog.rml");
             if (m_dialog_doc) {
                 m_dialog_doc->Hide();
+            }
+        }
+        if (!m_settings_doc) {
+            m_settings_doc = m_context->LoadDocument(p + "settings.rml");
+            if (m_settings_doc) {
+                m_settings_doc->Hide();
             }
         }
     }
@@ -109,15 +115,23 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_dialog_doc) {
         std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
     }
+    if (!m_settings_doc) {
+        std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
+    }
 
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Playback & Dialog Engine initialized successfully ("
+    std::cout << "[EVO RmlUi] Retained-mode Engine initialized successfully ("
               << width << "x" << height << ")." << std::endl;
     return true;
 }
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_settings_doc) {
+        m_settings_doc->Close();
+        m_settings_doc = nullptr;
+    }
 
     if (m_dialog_doc) {
         m_dialog_doc->Close();
@@ -286,6 +300,7 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     if (!m_initialized || !m_context || !m_playback_doc || !framebuffer) return;
 
     if (m_dialog_doc) m_dialog_doc->Hide();
+    if (m_settings_doc) m_settings_doc->Hide();
     m_playback_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -360,7 +375,97 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_dialog_doc || !framebuffer) return;
 
     if (m_playback_doc) m_playback_doc->Hide();
+    if (m_settings_doc) m_settings_doc->Hide();
     m_dialog_doc->Show();
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    m_context->Update();
+    m_context->Render();
+}
+
+void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
+    if (!m_initialized || !m_settings_doc) return;
+
+    m_last_settings = state;
+
+    // 1. Titles & Counter
+    Rml::Element* el_ti = m_settings_doc->GetElementById("settings-title");
+    if (el_ti) el_ti->SetInnerRML(state.title);
+
+    Rml::Element* el_sub = m_settings_doc->GetElementById("settings-subtitle");
+    if (el_sub) el_sub->SetInnerRML(state.subtitle);
+
+    Rml::Element* el_cnt = m_settings_doc->GetElementById("settings-counter");
+    if (el_cnt) el_cnt->SetInnerRML(state.counter);
+
+    // 2. Rail Navigation
+    for (int r = 0; r < 7; r++) {
+        std::string rid = "rail-" + std::to_string(r);
+        Rml::Element* el_r = m_settings_doc->GetElementById(rid);
+        if (el_r) {
+            bool is_active = (r == state.rail_active_idx);
+            bool is_focused = is_active && state.rail_focused;
+            el_r->SetClass("rail-active", is_active);
+            el_r->SetClass("rail-focused", is_focused);
+        }
+    }
+
+    // 3. Rows
+    for (int i = 0; i < 6; i++) {
+        std::string row_id = "row-" + std::to_string(i);
+        std::string icon_id = "row-icon-" + std::to_string(i);
+        std::string title_id = "row-title-" + std::to_string(i);
+        std::string detail_id = "row-detail-" + std::to_string(i);
+        std::string badge_id = "row-badge-" + std::to_string(i);
+        std::string chev_id = "row-chevron-" + std::to_string(i);
+
+        Rml::Element* el_row = m_settings_doc->GetElementById(row_id);
+        Rml::Element* el_icon = m_settings_doc->GetElementById(icon_id);
+        Rml::Element* el_title = m_settings_doc->GetElementById(title_id);
+        Rml::Element* el_detail = m_settings_doc->GetElementById(detail_id);
+        Rml::Element* el_badge = m_settings_doc->GetElementById(badge_id);
+        Rml::Element* el_chev = m_settings_doc->GetElementById(chev_id);
+
+        if (el_row) {
+            if (i < (int)state.rows.size()) {
+                el_row->SetProperty("display", "flex");
+                el_row->SetClass("row-focused", state.rows[i].is_focused && !state.rail_focused);
+
+                if (el_icon) {
+                    el_icon->SetAttribute("src", state.rows[i].icon_path.empty() ? "../icons/icon_settings.png" : state.rows[i].icon_path);
+                }
+                if (el_title) {
+                    el_title->SetInnerRML(state.rows[i].title);
+                }
+                if (el_detail) {
+                    el_detail->SetInnerRML(state.rows[i].detail);
+                }
+                if (el_badge) {
+                    if (state.rows[i].badge.empty()) {
+                        el_badge->SetProperty("display", "none");
+                    } else {
+                        el_badge->SetProperty("display", "inline-block");
+                        el_badge->SetInnerRML(state.rows[i].badge);
+                    }
+                }
+                if (el_chev) {
+                    el_chev->SetProperty("display", state.rows[i].has_chevron ? "inline-block" : "none");
+                }
+            } else {
+                el_row->SetProperty("display", "none");
+            }
+        }
+    }
+}
+
+void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_settings_doc || !framebuffer) return;
+
+    if (m_playback_doc) m_playback_doc->Hide();
+    if (m_dialog_doc) m_dialog_doc->Hide();
+    m_settings_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);

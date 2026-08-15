@@ -1,0 +1,271 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Netflix Settings RCSS Stylesheet
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Left Navigation Rail */
+#nav-rail {
+    width: 96px;
+    height: 1080px;
+    position: absolute;
+    left: 0;
+    top: 0;
+    background-color: #080c13e6;
+    border-right-width: 1px;
+    border-right-color: #151d2a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+}
+
+.rail-item {
+    width: 52px;
+    height: 52px;
+    border-radius: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rail-active {
+    background-color: #19243a;
+    border-width: 1px;
+    border-color: #293a5b;
+}
+
+.rail-focused {
+    background-color: #e50914;
+    border-width: 1px;
+    border-color: #ffffff;
+}
+
+.rail-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-block;
+}
+
+/* Content Pane */
+#content-pane {
+    position: absolute;
+    left: 140px;
+    top: 0;
+    width: 1720px;
+    height: 1080px;
+}
+
+/* Header */
+#settings-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 60px;
+    margin-bottom: 34px;
+    width: 1680px;
+}
+
+#header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#header-indicator {
+    width: 4px;
+    height: 48px;
+    background-color: #e50914;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#settings-title {
+    font-size: 32px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#settings-subtitle {
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+    margin-top: 3px;
+}
+
+#settings-counter {
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+/* Settings List */
+#settings-list {
+    display: flex;
+    flex-direction: column;
+    width: 1680px;
+}
+
+.setting-row {
+    width: 1680px;
+    height: 82px;
+    background-color: #0d121ce6;
+    border-width: 1px;
+    border-color: #1a2333;
+    border-radius: 14px;
+    margin-bottom: 12px;
+    padding: 0 28px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.row-focused {
+    background-color: #151e2e;
+    border-width: 1.5px;
+    border-color: #e50914;
+}
+
+.row-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.row-icon-box {
+    width: 46px;
+    height: 46px;
+    background-color: #141c2b;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 20px;
+}
+
+.row-icon {
+    width: 22px;
+    height: 22px;
+    display: inline-block;
+}
+
+.row-text-box {
+    display: flex;
+    flex-direction: column;
+}
+
+.row-title {
+    font-size: 19px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+.row-detail {
+    font-size: 13px;
+    font-weight: bold;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+}
+
+.row-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.row-badge {
+    background-color: #162236;
+    border-width: 1px;
+    border-color: #2b3e5e;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+    margin-right: 18px;
+}
+
+.row-chevron {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+}
+
+.row-hidden {
+    display: none;
+}
+
+.badge-hidden {
+    display: none;
+}
+
+/* Footer Hints */
+#settings-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 1680px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 22px;
+    height: 22px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 13px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+#footer-version {
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: bold;
+    color: #4b586c;
+    letter-spacing: 1px;
+}

@@ -1,0 +1,154 @@
+<rml>
+<head>
+    <link type="text/rcss" href="settings.rcss"/>
+</head>
+<body id="settings-body">
+    <!-- Left Navigation Rail -->
+    <div id="nav-rail">
+        <div class="rail-item" id="rail-0"><img src="../icons/icon_home.png" class="rail-icon"/></div>
+        <div class="rail-item" id="rail-1"><img src="../icons/icon_browse_usb.png" class="rail-icon"/></div>
+        <div class="rail-item" id="rail-2"><img src="../icons/icon_recent_files.png" class="rail-icon"/></div>
+        <div class="rail-item" id="rail-3"><img src="../icons/icon_favorites.png" class="rail-icon"/></div>
+        <div class="rail-item" id="rail-4"><img src="../icons/icon_resume.png" class="rail-icon"/></div>
+        <div class="rail-item rail-active" id="rail-5"><img src="../icons/icon_settings.png" class="rail-icon"/></div>
+        <div class="rail-item" id="rail-6"><img src="../icons/icon_about_support.png" class="rail-icon"/></div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="content-pane">
+        <!-- Header -->
+        <div id="settings-header">
+            <div id="header-left">
+                <div id="header-indicator"></div>
+                <div id="header-titles">
+                    <div id="settings-title">SETTINGS</div>
+                    <div id="settings-subtitle">APPLICATION &amp; PLAYBACK PREFERENCES</div>
+                </div>
+            </div>
+            <div id="settings-counter">1 OF 4</div>
+        </div>
+
+        <!-- Settings Row List -->
+        <div id="settings-list">
+            <!-- Row 0 -->
+            <div id="row-0" class="setting-row row-focused">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-0" src="../icons/icon_resume.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-0" class="row-title">PLAYBACK &amp; VIDEO</div>
+                        <div id="row-detail-0" class="row-detail">PROFILE, ASPECT RATIO &amp; RESUME</div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-0" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-0" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+
+            <!-- Row 1 -->
+            <div id="row-1" class="setting-row">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-1" src="../icons/icon_subtitles.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-1" class="row-title">SUBTITLES</div>
+                        <div id="row-detail-1" class="row-detail">AUTO-DETECT &amp; DEFAULT SIZING</div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-1" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-1" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+
+            <!-- Row 2 -->
+            <div id="row-2" class="setting-row">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-2" src="../icons/icon_palette.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-2" class="row-title">INTERFACE &amp; CONTROLS</div>
+                        <div id="row-detail-2" class="row-detail">THEMES, SOUNDS, LIGHTBAR &amp; SORTING</div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-2" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-2" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+
+            <!-- Row 3 -->
+            <div id="row-3" class="setting-row">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-3" src="../icons/icon_developer_tools.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-3" class="row-title">SYSTEM &amp; DIAGNOSTICS</div>
+                        <div id="row-detail-3" class="row-detail">DEVELOPER TOOLS &amp; MEDIA TILE</div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-3" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-3" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+
+            <!-- Row 4 -->
+            <div id="row-4" class="setting-row row-hidden">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-4" src="../icons/icon_settings.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-4" class="row-title"></div>
+                        <div id="row-detail-4" class="row-detail"></div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-4" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-4" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+
+            <!-- Row 5 -->
+            <div id="row-5" class="setting-row row-hidden">
+                <div class="row-left">
+                    <div class="row-icon-box">
+                        <img id="row-icon-5" src="../icons/icon_settings.png" class="row-icon"/>
+                    </div>
+                    <div class="row-text-box">
+                        <div id="row-title-5" class="row-title"></div>
+                        <div id="row-detail-5" class="row-detail"></div>
+                    </div>
+                </div>
+                <div class="row-right">
+                    <div id="row-badge-5" class="row-badge badge-hidden"></div>
+                    <img id="row-chevron-5" src="../icons/icon_chevron.png" class="row-chevron"/>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Hints -->
+        <div id="settings-footer">
+            <div class="footer-hint">
+                <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                <span class="footer-text">SELECT</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                <span class="footer-text">BACK</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_dpad.png" class="footer-glyph"/>
+                <span class="footer-text">NAVIGATE</span>
+            </div>
+            <div id="footer-version">v0.7.0</div>
+        </div>
+    </div>
+</body>
+</rml>
