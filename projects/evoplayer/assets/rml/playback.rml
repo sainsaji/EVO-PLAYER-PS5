@@ -1,0 +1,95 @@
+<rml>
+<head>
+    <link type="text/rcss" href="playback.rcss"/>
+</head>
+<body id="playback-hud">
+    <!-- Top Header Bar -->
+    <div id="top-scrim">
+        <div id="title-block">
+            <div id="media-title">Dune: Part Two</div>
+            <div id="media-meta">Ultra HD 4K • Dolby Atmos • Direct 7.1 PCM Passthrough</div>
+        </div>
+        <div id="badge-rack">
+            <span class="badge-hdr">HDR10+</span>
+            <span class="badge-codec">HEVC 10-BIT</span>
+            <span class="badge-fps">60 FPS</span>
+        </div>
+    </div>
+
+    <!-- Center Play/Pause & Scrubbing Overlay -->
+    <div id="center-overlay">
+        <div id="scrub-capsule" class="hidden">
+            <span id="scrub-label">SEEK TO</span>
+            <span id="scrub-time">01:24:15</span>
+        </div>
+        <div id="pause-badge" class="hidden">
+            <div id="pause-icon"></div>
+            <span id="pause-label">PAUSED</span>
+        </div>
+    </div>
+
+    <!-- Stats for Nerds HUD (Diagnostic Overlay) -->
+    <div id="stats-hud" class="hidden">
+        <div class="stats-title">STREAM & HARDWARE DIAGNOSTICS</div>
+        <div class="stats-row"><span class="stats-k">VIDEO ENGINE</span><span class="stats-v">Stage 4 Hardware ASIC</span></div>
+        <div class="stats-row"><span class="stats-k">DECODER CORE</span><span class="stats-v">libSceAvPlayer 4K HEVC 10-Bit</span></div>
+        <div class="stats-row"><span class="stats-k">AUDIO BITSTREAM</span><span class="stats-v">SceAudioOut 7.1 Direct PCM</span></div>
+        <div class="stats-row"><span class="stats-k">DROPPED FRAMES</span><span class="stats-v text-green">0 (0.00%)</span></div>
+        <div class="stats-row"><span class="stats-k">DISPLAY CADENCE</span><span class="stats-v text-cyan">60.0 FPS Stable</span></div>
+    </div>
+
+    <!-- Bottom Netflix Controller Bar -->
+    <div id="bottom-scrim">
+        <!-- Progress Bar Timeline -->
+        <div id="progress-container">
+            <div id="progress-track">
+                <div id="progress-fill" style="width: 0%;">
+                    <div id="progress-thumb"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Time Row -->
+        <div id="time-row">
+            <span id="time-current">00:45:12</span>
+            <span id="time-duration">-01:12:30 / 01:57:42</span>
+        </div>
+
+        <!-- Netflix Action Ribbon & Hints -->
+        <div id="controls-row">
+            <div class="control-item">
+                <img src="icons/btn_cross.png" class="btn-icon"/>
+                <span id="label-playpause" class="control-label">PAUSE</span>
+            </div>
+            <div class="control-item">
+                <img src="icons/btn_dpad.png" class="btn-icon"/>
+                <span class="control-label">SEEK 10s</span>
+            </div>
+            <div class="control-item">
+                <span class="btn-tag">L1 / R1</span>
+                <span class="control-label">CHAPTER</span>
+            </div>
+            <div class="control-item">
+                <span class="btn-tag">R2</span>
+                <span id="label-audio" class="control-label">AUDIO: English 7.1 TrueHD</span>
+            </div>
+            <div class="control-item">
+                <span class="btn-tag">UP / DN</span>
+                <span id="label-subs" class="control-label">SUBS: English [SDH]</span>
+            </div>
+            <div class="control-item">
+                <img src="icons/btn_square.png" class="btn-icon"/>
+                <span id="label-aspect" class="control-label">ASPECT: FIT</span>
+            </div>
+            <div class="control-item">
+                <img src="icons/btn_triangle.png" class="btn-icon"/>
+                <span class="control-label">INFO</span>
+            </div>
+            <div class="control-item">
+                <img src="icons/btn_circle.png" class="btn-icon"/>
+                <span class="control-label">BACK</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

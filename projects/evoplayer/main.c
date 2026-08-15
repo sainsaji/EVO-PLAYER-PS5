@@ -58,6 +58,7 @@
 #include "evo_direct_mem.h"
 #include "evo_stream_io.h"
 #include "prospero_thumbnail.h"
+#include "evo_rmlui_bridge.h"
 #include "pp/include/evo_theme.h"
 #include "pp/include/evo_ui.h"
 
@@ -10711,354 +10712,35 @@ double percentage = 0.0;
     }
 
     if (osd_visibility > 0) {
-        int alpha =
-            osd_visibility;
+        int alpha = osd_visibility;
+        const char *audio_name = (audio_ctx && audio_ctx->codec && audio_ctx->codec->name)
+                                     ? audio_ctx->codec->name
+                                     : "Audio";
+        const char *sub_name = (prospero_subtitle_enabled)
+                                   ? "Active"
+                                   : "None";
 
-        int panel_x = 72;
-        int panel_y =
-            716
-            + ((255 - osd_visibility) * 74 / 255);
-
-        int panel_w = 1776;
-        int panel_h = 292;
-
-        /*
-         * Glass OSD body.
-         */
-        ui_round_asset(
-            fb,
-            panel_x,
-            panel_y,
-            panel_w,
-            panel_h,
-            30,
-            osd_col(th->surface, alpha * 220 / 255),
-            osd_col(th->accent, alpha * 165 / 255),
-            osd_col(th->accent_soft, alpha * 52 / 255)
-        );
-
-        /*
-         * Title and state.
-         */
-        int max_title_w = panel_w - 650;
-        evo_text_fit(
-            fb,
-            panel_x + 46,
-            panel_y + 32,
-            max_title_w,
-            title,
-            osd_col(th->text_primary, alpha * 245 / 255),
-            EVO_FACE_MENU
-        );
-
-        if (metadata[0]) {
-            int max_meta_w = prospero_scrub_active ? (panel_w - 420) : (panel_w - 100);
-            evo_text_fit(
-                fb,
-                panel_x + 48,
-                panel_y + 76,
-                max_meta_w,
+        if (evo_rmlui_is_initialized()) {
+            evo_rmlui_update_playback_osd(
+                title,
                 metadata,
-                osd_col(th->text_secondary, alpha * 220 / 255),
-                EVO_FACE_SUB
+                display_position,
+                media_duration_sec,
+                percentage,
+                player_paused,
+                prospero_scrub_active,
+                prospero_scrub_target,
+                audio_name,
+                sub_name,
+                video_view_mode,
+                show_stats_for_nerds,
+                alpha
             );
+
+            evo_rmlui_render_playback_osd(fb, WIDTH, HEIGHT);
         }
-
-        const char *view_mode =
-            video_view_mode == 0
-                ? "FIT"
-                : (
-                    video_view_mode == 1
-                        ? "FILL"
-                        : "STRETCH"
-                );
-
-        char state_text[128];
-
-        snprintf(
-            state_text,
-            sizeof(state_text),
-            "%s  /  %s PROFILE  /  %s",
-            player_paused
-                ? "PAUSED"
-                : "PLAYING",
-            profile_name(current_profile),
-            view_mode
-        );
-
-        rr_text(
-            fb,
-            panel_x + panel_w - 580,
-            panel_y + 38,
-            state_text,
-            player_paused
-                ? osd_col(th->accent_alt, alpha * 235 / 255)
-                : osd_col(th->accent, alpha * 235 / 255),
-            0
-        );
-
-        /*
-         * Progress bar.
-         */
-        if (prospero_scrub_active) {
-            char target_time[32];
-            char target_label[96];
-
-            format_time_mmss(
-                target_time,
-                sizeof(target_time),
-                prospero_scrub_target
-            );
-
-            snprintf(
-                target_label,
-                sizeof(target_label),
-                "SEEK TO  %s",
-                target_time
-            );
-
-            rr_text(
-                fb,
-                panel_x + panel_w - 360,
-                panel_y + 92,
-                target_label,
-                osd_col(osd_hi(th), alpha * 245 / 255),
-                1
-            );
-        }
-
-        int bar_x =
-            panel_x + 46;
-
-        int bar_y =
-            panel_y + 130;
-
-        int bar_w =
-            panel_w - 92;
-
-        int bar_h = 8;
-
-        prospero_player_osd_update(
-            prospero_scrub_active,
-            prospero_scrub_target,
-            media_duration_sec,
-            bar_x,
-            bar_w
-        );
-
-        prospero_thumbnail_request(
-            current_media_path,
-            prospero_scrub_target,
-            prospero_scrub_active
-        );
-
-
-
-        int fill_w =
-            prospero_player_osd_fill_width(
-                bar_x,
-                bar_w,
-                (int)(bar_w * percentage)
-            );
-
-        rr_fill(
-            fb,
-            bar_x,
-            bar_y,
-            bar_w,
-            bar_h,
-            osd_col(th->text_muted, alpha * 180 / 255)
-        );
-
-        if (fill_w > 0) {
-            rr_fill(
-                fb,
-                bar_x,
-                bar_y,
-                fill_w,
-                bar_h,
-                osd_col(th->accent, alpha * 235 / 255)
-            );
-
-            int scrubber_x =
-                bar_x + fill_w - 5;
-
-            rr_fill(
-                fb,
-                scrubber_x,
-                bar_y - 5,
-                10,
-                bar_h + 10,
-                osd_col(osd_hi(th), alpha * 240 / 255)
-            );
-        }
-
-        
-        prospero_player_osd_draw_scrub_preview(
-            fb,
-            bar_y,
-            alpha
-        );
-
-        prospero_player_osd_draw_scrub_handle(
-            fb,
-            bar_y,
-            alpha
-        );
-
-char current_time[32];
-        char duration_time[32];
-
-        format_time_mmss(
-            current_time,
-            sizeof(current_time),
-            display_position
-        );
-
-        format_time_mmss(
-            duration_time,
-            sizeof(duration_time),
-            media_duration_sec
-        );
-
-        rr_text(
-            fb,
-            bar_x,
-            panel_y + 154,
-            current_time,
-            osd_col(th->text_secondary, alpha * 225 / 255),
-            0
-        );
-
-        rr_text(
-            fb,
-            bar_x + bar_w - 100,
-            panel_y + 154,
-            duration_time,
-            osd_col(th->text_secondary, alpha * 225 / 255),
-            0
-        );
-
-        rr_fill(
-            fb,
-            panel_x + 42,
-            panel_y + 196,
-            panel_w - 84,
-            1,
-            osd_col(th->accent_soft, alpha * 62 / 255)
-        );
-
-        /*
-         * Clean primary control row.
-         */
-        int controls_y =
-            panel_y + 218;
-
-        rr_control(
-            fb,
-            panel_x + 48,
-            controls_y,
-            0
-        );
-
-        rr_text(
-            fb,
-            panel_x + 104,
-            controls_y + 16,
-            player_paused
-                ? "PLAY"
-                : "PAUSE",
-            osd_col(th->text_secondary, alpha * 215 / 255),
-            0
-        );
-
-        rr_control(
-            fb,
-            panel_x + 245,
-            controls_y,
-            5
-        );
-
-        rr_text(
-            fb,
-            panel_x + 301,
-            controls_y + 16,
-            "VIEW",
-            osd_col(th->text_secondary, alpha * 215 / 255),
-            0
-        );
-
-        rr_control(
-            fb,
-            panel_x + 425,
-            controls_y,
-            6
-        );
-
-        rr_text(
-            fb,
-            panel_x + 481,
-            controls_y + 16,
-            "INFO",
-            osd_col(th->text_secondary, alpha * 215 / 255),
-            0
-        );
-
-        rr_text(
-            fb,
-            panel_x + 620,
-            controls_y + 16,
-            "R2 AUDIO",
-            osd_col(th->text_secondary, alpha * 210 / 255),
-            0
-        );
-
-        rr_text(
-            fb,
-            panel_x + 780,
-            controls_y + 16,
-            "UP/DN SUBS",
-            osd_col(th->text_secondary, alpha * 205 / 255),
-            0
-        );
-
-        rr_text(
-            fb,
-            panel_x + 960,
-            controls_y + 16,
-            prospero_chapter_count > 0
-                ? "L1/R1 CHAP"
-                : "L1/R1 SEEK",
-            osd_col(th->text_secondary, alpha * 205 / 255),
-            0
-        );
-
-        rr_text(
-            fb,
-            panel_x + 1160,
-            controls_y + 16,
-            "L2/R3 DELAY",
-            osd_col(th->text_secondary, alpha * 205 / 255),
-            0
-        );
-
-        rr_control(
-            fb,
-            panel_x + 1485,
-            controls_y,
-            4
-        );
-
-        rr_text(
-            fb,
-            panel_x + 1541,
-            controls_y + 16,
-            "BACK",
-            osd_col(th->text_secondary, alpha * 215 / 255),
-            0
-        );
-
     }
+
 
     /* PROSPERO_SRT_DRAW_CALL_START */
 
@@ -16741,6 +16423,7 @@ int main(void) {
      * before the first frame; every evo_text/evo_icon call is a safe no-op
      * until it does, which would draw an empty page rather than crash. */
     evo_draw_bind(&EVO_DRAW_VTABLE);
+    evo_rmlui_init(WIDTH, HEIGHT);
 
     /* EVO: controller feedback. Sound was already wired at the edge-detect
      * point; this adds the lightbar and gives both one semantic API. The

@@ -1,0 +1,317 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Netflix Playback HUD & OSD Stylesheet (RCSS)
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+.hidden {
+    display: none;
+}
+
+/* Top Gradient Scrim */
+#top-scrim {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1920px;
+    height: 150px;
+    padding: 36px 60px 0 60px;
+    background-color: #06080de8;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+#title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#media-title {
+    font-size: 34px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#media-meta {
+    font-size: 15px;
+    color: #a2b0c2;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+#badge-rack {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.badge-hdr {
+    background-color: #ffd700;
+    color: #080a0f;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
+.badge-codec {
+    background-color: #141c28;
+    border-width: 1px;
+    border-color: #2a374a;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+.badge-fps {
+    background-color: #00d2ff;
+    color: #080a0f;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+/* Center Scrubbing & Pause Overlay */
+#center-overlay {
+    position: absolute;
+    top: 440px;
+    left: 710px;
+    width: 500px;
+    height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+#scrub-capsule {
+    background-color: #0c1018f2;
+    border-width: 2px;
+    border-color: #00d2ff;
+    border-radius: 28px;
+    padding: 10px 28px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+}
+
+#scrub-label {
+    font-size: 15px;
+    font-weight: bold;
+    color: #00d2ff;
+    letter-spacing: 1.5px;
+}
+
+#scrub-time {
+    font-size: 24px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#pause-badge {
+    background-color: #e50914e6;
+    border-radius: 6px;
+    padding: 10px 26px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+#pause-label {
+    font-size: 20px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 2px;
+}
+
+/* Stats for Nerds HUD */
+#stats-hud {
+    position: absolute;
+    top: 150px;
+    left: 60px;
+    width: 480px;
+    background-color: #080c14f0;
+    border-width: 1px;
+    border-color: #1e2838;
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stats-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffd700;
+    letter-spacing: 1px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1a2332;
+    padding-bottom: 6px;
+}
+
+.stats-row {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.stats-k {
+    font-size: 13px;
+    color: #8c9bb0;
+    font-weight: bold;
+}
+
+.stats-v {
+    font-size: 14px;
+    font-weight: bold;
+    color: #f8fafc;
+}
+
+.text-green { color: #00ffaa; }
+.text-cyan  { color: #00d2ff; }
+
+/* Bottom Netflix Controller Console */
+#bottom-scrim {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 1920px;
+    height: 190px;
+    padding: 24px 60px 28px 60px;
+    background-color: #06080df5;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+/* Red Timeline Progress Bar */
+#progress-container {
+    width: 1800px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+#progress-track {
+    width: 1800px;
+    height: 8px;
+    background-color: #242c3d;
+    border-radius: 4px;
+    position: relative;
+}
+
+#progress-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 8px;
+    background-color: #e50914;
+    border-radius: 4px;
+}
+
+#progress-thumb {
+    position: absolute;
+    right: -8px;
+    top: -5px;
+    width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    background-color: #ffffff;
+    border-width: 3px;
+    border-color: #e50914;
+}
+
+/* Time Row */
+#time-row {
+    width: 1800px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+#time-current {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#time-duration {
+    font-size: 16px;
+    font-weight: bold;
+    color: #a2b0c2;
+}
+
+/* Bottom Action Ribbon & Hints */
+#controls-row {
+    width: 1800px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 28px;
+}
+
+.control-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-icon {
+    width: 22px;
+    height: 22px;
+    display: inline-block;
+}
+
+.btn-tag {
+    background-color: #1a2336;
+    border-width: 1px;
+    border-color: #2e3e5c;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #00d2ff;
+}
+
+.control-label {
+    font-size: 14px;
+    color: #e2e8f0;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}

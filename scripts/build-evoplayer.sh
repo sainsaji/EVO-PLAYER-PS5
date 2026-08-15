@@ -44,6 +44,7 @@ mkdirs
 HB="${PS5_SYSROOT}/user/homebrew"
 
 UPSTREAM_LIBS=(
+    "${HB}/lib/librmlui.a"
     "${HB}/lib/libSDL2.a"
     "${HB}/lib/libavformat.a"
     "${HB}/lib/libavcodec.a"
@@ -75,15 +76,9 @@ MAKE_ARGS=("ELF=${ELF_NAME}"
 begin "building EVO Player${STAGE:+ (stage ${STAGE})}"
 BUILD_LOG="${LOG_OUT}/evoplayer-$(date -u +%Y%m%dT%H%M%SZ).log"
 
-# Force a relink every time.
-#
-# Upstream's rule is `$(ELF): main.c $(PP_SRCS)` - it tracks sources but not
-# CFLAGS and not headers. Change a -D flag or a pp/include header and make
-# reports "up to date", leaving the previous binary in place. That silently
-# cost a debugging cycle: a build with a flag change was installed, launched,
-# and drew the wrong conclusion because the ELF had never been rebuilt.
-# A full relink of one translation unit is a few seconds; correctness wins.
+# Force a relink and rebuild of object files
 rm -f "${DEST}/${ELF_NAME}"
+find "${DEST}" -name "*.o" -delete
 
 if ! make -C "${DEST}" "${MAKE_ARGS[@]}" > "${BUILD_LOG}" 2>&1; then
     echo ""
@@ -92,9 +87,7 @@ if ! make -C "${DEST}" "${MAKE_ARGS[@]}" > "${BUILD_LOG}" 2>&1; then
     die "EVO Player build failed. Full log: ${BUILD_LOG#"${REPO_ROOT}/"}"
 fi
 
-# Prove the switches asked for actually reached the compiler. Forgetting to
-# forward EXTRA_CFLAGS produced a build that looked correct and was not; a
-# grep of the log is far cheaper than finding out on the console.
+# Prove the switches asked for actually reached the compiler.
 if [[ -n "${EXTRA_CFLAGS:-}" ]]; then
     for flag in ${EXTRA_CFLAGS}; do
         grep -qF -- "${flag}" "${BUILD_LOG}" \
@@ -109,7 +102,42 @@ validate_elf "${DEST}/${ELF_NAME}"
 cp -f "${DEST}/${ELF_NAME}" "${ELF_OUT}/"
 ok "-> output/elf/${ELF_NAME}"
 
+# Also sync assets if running
 if (( DO_RUN )); then
+    begin "syncing homebrew assets"
+    python3 -c "
+import ftplib, os, sys
+host = '${PS5_HOST:-192.168.0.12}'
+port = 2121
+try:
+    ftp = ftplib.FTP()
+    ftp.connect(host, port, timeout=5)
+    ftp.login()
+    ftp.set_pasv(True)
+    def ensure_dir(d):
+        cur = ''
+        for p in d.strip('/').split('/'):
+            cur += '/' + p
+            try: ftp.mkd(cur)
+            except Exception: pass
+    def upload(src, dst):
+        with open(src, 'rb') as f:
+            ftp.storbinary(f'STOR {dst}', f)
+    for root, dirs, files in os.walk('projects/evoplayer/assets'):
+        rel = os.path.relpath(root, 'projects/evoplayer/assets').replace('\\\\', '/')
+        r_dir = '/data/homebrew/EVOPlayer/assets' + ('/' + rel if rel != '.' else '')
+        ensure_dir(r_dir)
+        for f in files:
+            upload(os.path.join(root, f), r_dir + '/' + f)
+        r_dir2 = '/data/evoplayer/app/assets' + ('/' + rel if rel != '.' else '')
+        ensure_dir(r_dir2)
+        for f in files:
+            upload(os.path.join(root, f), r_dir2 + '/' + f)
+    ftp.quit()
+except Exception as e:
+    pass
+" 2>/dev/null || true
+
     "${SCRIPTS_DIR}/install-homebrew.sh" --run --timeout "${RUN_TIMEOUT}" \
         --name EVOPlayer "${ELF_OUT}/${ELF_NAME}"
 else
