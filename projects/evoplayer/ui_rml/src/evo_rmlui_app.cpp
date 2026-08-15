@@ -133,20 +133,67 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
 
     // 1. Title & Meta
     Rml::Element* el_title = m_playback_doc->GetElementById("media-title");
-    if (el_title && el_title->GetInnerRML() != state.title) {
-        el_title->SetInnerRML(state.title.empty() ? "Now Playing" : state.title);
+    if (el_title) {
+        el_title->SetInnerRML(state.title.empty() ? "Video Playback" : state.title);
     }
 
     Rml::Element* el_meta = m_playback_doc->GetElementById("media-meta");
-    if (el_meta && el_meta->GetInnerRML() != state.meta) {
-        el_meta->SetInnerRML(state.meta);
+    if (el_meta) {
+        if (state.meta.empty()) {
+            el_meta->SetProperty("display", "none");
+        } else {
+            el_meta->SetProperty("display", "block");
+            el_meta->SetInnerRML(state.meta);
+        }
     }
 
-    // 2. Times & Progress
+    // 2. Badges (Resolution, HDR, Codec, FPS)
+    Rml::Element* el_res = m_playback_doc->GetElementById("badge-res");
+    if (el_res) {
+        if (state.res_badge.empty()) {
+            el_res->SetProperty("display", "none");
+        } else {
+            el_res->SetProperty("display", "inline-block");
+            el_res->SetInnerRML(state.res_badge);
+        }
+    }
+
+    Rml::Element* el_hdr = m_playback_doc->GetElementById("badge-hdr");
+    if (el_hdr) {
+        if (state.hdr_badge.empty()) {
+            el_hdr->SetProperty("display", "none");
+        } else {
+            el_hdr->SetProperty("display", "inline-block");
+            el_hdr->SetInnerRML(state.hdr_badge);
+        }
+    }
+
+    Rml::Element* el_codec = m_playback_doc->GetElementById("badge-codec");
+    if (el_codec) {
+        if (state.codec_badge.empty()) {
+            el_codec->SetProperty("display", "none");
+        } else {
+            el_codec->SetProperty("display", "inline-block");
+            el_codec->SetInnerRML(state.codec_badge);
+        }
+    }
+
+    Rml::Element* el_fps = m_playback_doc->GetElementById("badge-fps");
+    if (el_fps) {
+        if (state.fps_badge.empty()) {
+            el_fps->SetProperty("display", "none");
+        } else {
+            el_fps->SetProperty("display", "inline-block");
+            el_fps->SetInnerRML(state.fps_badge);
+        }
+    }
+
+    // 3. Times & Progress
     double cur_pos = state.scrub_active ? state.scrub_target : state.position_sec;
     std::string cur_str = format_time(cur_pos);
     std::string dur_str = format_time(state.duration_sec);
     double remaining = state.duration_sec - cur_pos;
+    if (remaining < 0) remaining = 0;
     std::string rem_str = "-" + format_time(remaining);
     std::string time_display = rem_str + " / " + dur_str;
 
@@ -167,22 +214,26 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         el_fill->SetProperty("width", ss.str());
     }
 
-    // 3. Scrubbing Capsule
+    // 4. Scrubbing Capsule
     Rml::Element* el_scrub = m_playback_doc->GetElementById("scrub-capsule");
     if (el_scrub) {
         if (state.scrub_active) {
-            el_scrub->SetClass("hidden", false);
+            el_scrub->SetProperty("display", "flex");
             Rml::Element* el_stime = m_playback_doc->GetElementById("scrub-time");
             if (el_stime) el_stime->SetInnerRML(format_time(state.scrub_target));
         } else {
-            el_scrub->SetClass("hidden", true);
+            el_scrub->SetProperty("display", "none");
         }
     }
 
-    // 4. Play/Pause State
+    // 5. Play/Pause State (Only show PAUSED badge if paused AND not scrubbing)
     Rml::Element* el_pause = m_playback_doc->GetElementById("pause-badge");
     if (el_pause) {
-        el_pause->SetClass("hidden", !state.paused || state.scrub_active);
+        if (state.paused && !state.scrub_active) {
+            el_pause->SetProperty("display", "flex");
+        } else {
+            el_pause->SetProperty("display", "none");
+        }
     }
 
     Rml::Element* el_pp_label = m_playback_doc->GetElementById("label-playpause");
@@ -190,10 +241,10 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         el_pp_label->SetInnerRML(state.paused ? "PLAY" : "PAUSE");
     }
 
-    // 5. Track labels
+    // 6. Track labels
     Rml::Element* el_audio = m_playback_doc->GetElementById("label-audio");
     if (el_audio) {
-        std::string a_txt = "AUDIO: " + (state.audio_track.empty() ? "Stereo PCM" : state.audio_track);
+        std::string a_txt = "AUDIO: " + (state.audio_track.empty() ? "Stereo" : state.audio_track);
         el_audio->SetInnerRML(a_txt);
     }
 
@@ -209,10 +260,10 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         el_aspect->SetInnerRML(std::string("ASPECT: ") + vm);
     }
 
-    // 6. Stats for Nerds HUD
+    // 7. Stats for Nerds HUD
     Rml::Element* el_stats = m_playback_doc->GetElementById("stats-hud");
     if (el_stats) {
-        el_stats->SetClass("hidden", !state.show_stats);
+        el_stats->SetProperty("display", state.show_stats ? "flex" : "none");
     }
 }
 

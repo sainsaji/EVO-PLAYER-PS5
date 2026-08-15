@@ -68,22 +68,29 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    evo_rmlui_update_playback_osd(
-        "Dune: Part Two",
-        "Ultra HD 4K • Dolby Atmos • Direct 7.1 PCM Passthrough",
-        2712.0, // 45m 12s
-        7062.0, // 1h 57m 42s
-        2712.0 / 7062.0,
-        0, // playing
-        0, // not scrubbing
-        0.0,
-        "English 7.1 TrueHD",
-        "English [SDH]",
-        0, // FIT
-        0, // stats off
-        255
-    );
+    // Test 1: Playing (Not paused, not scrubbing)
+    evo_playback_osd_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.title = "Big Buck Bunny (2008)";
+    p.metadata = "1080p  H.264  6CH";
+    p.res_badge = "1080p FHD";
+    p.hdr_badge = ""; // SDR video
+    p.codec_badge = "AVC / H.264";
+    p.fps_badge = "60 FPS";
+    p.audio_badge = "5.1 Surround";
+    p.position_sec = 142.0; // 02:22
+    p.duration_sec = 596.0; // 09:56
+    p.percentage = 142.0 / 596.0;
+    p.paused = 0; // Playing!
+    p.scrub_active = 0; // Not scrubbing!
+    p.scrub_target = 0.0;
+    p.audio_track = "English AC3 5.1";
+    p.sub_track = "None";
+    p.view_mode = 0; // FIT
+    p.show_stats = 0; // Stats off
+    p.alpha = 255;
 
+    evo_rmlui_update_playback_params(&p);
     evo_rmlui_render_playback_osd(fb.data(), width, height);
 
     save_bmp_24("output/uiview/rml_playback.bmp", fb.data(), width, height);

@@ -20,10 +20,6 @@ div, span, p {
     box-sizing: border-box;
 }
 
-.hidden {
-    display: none;
-}
-
 /* Top Gradient Scrim */
 #top-scrim {
     position: absolute;
@@ -67,7 +63,19 @@ div, span, p {
     margin-top: 6px;
 }
 
+.badge-res {
+    display: none;
+    background-color: #00d2ff;
+    color: #080a0f;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+}
+
 .badge-hdr {
+    display: none;
     background-color: #ffd700;
     color: #080a0f;
     font-weight: bold;
@@ -78,6 +86,7 @@ div, span, p {
 }
 
 .badge-codec {
+    display: none;
     background-color: #141c28;
     border-width: 1px;
     border-color: #2a374a;
@@ -89,8 +98,11 @@ div, span, p {
 }
 
 .badge-fps {
-    background-color: #00d2ff;
-    color: #080a0f;
+    display: none;
+    background-color: #1e293b;
+    border-width: 1px;
+    border-color: #334155;
+    color: #38bdf8;
     font-weight: bold;
     font-size: 13px;
     padding: 4px 10px;
@@ -112,12 +124,12 @@ div, span, p {
 }
 
 #scrub-capsule {
+    display: none;
     background-color: #0c1018f2;
     border-width: 2px;
     border-color: #00d2ff;
     border-radius: 28px;
     padding: 10px 28px;
-    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 14px;
@@ -137,10 +149,10 @@ div, span, p {
 }
 
 #pause-badge {
+    display: none;
     background-color: #e50914e6;
     border-radius: 6px;
     padding: 10px 26px;
-    display: flex;
     flex-direction: row;
     align-items: center;
     gap: 10px;
@@ -155,6 +167,7 @@ div, span, p {
 
 /* Stats for Nerds HUD */
 #stats-hud {
+    display: none;
     position: absolute;
     top: 150px;
     left: 60px;
@@ -164,7 +177,6 @@ div, span, p {
     border-color: #1e2838;
     border-radius: 8px;
     padding: 16px 20px;
-    display: flex;
     flex-direction: column;
     gap: 8px;
 }

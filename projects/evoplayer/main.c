@@ -10713,6 +10713,60 @@ double percentage = 0.0;
 
     if (osd_visibility > 0) {
         int alpha = osd_visibility;
+
+        char res_badge[32] = "";
+        char hdr_badge[32] = "";
+        char codec_badge[32] = "";
+        char fps_badge[32] = "";
+        char audio_badge[32] = "";
+
+        if (play_ctx) {
+            if (play_ctx->width >= 3840 || play_ctx->height >= 2160) {
+                snprintf(res_badge, sizeof(res_badge), "4K UHD");
+            } else if (play_ctx->width >= 1920 || play_ctx->height >= 1080) {
+                snprintf(res_badge, sizeof(res_badge), "1080p FHD");
+            } else if (play_ctx->width >= 1280 || play_ctx->height >= 720) {
+                snprintf(res_badge, sizeof(res_badge), "720p HD");
+            } else if (play_ctx->height > 0) {
+                snprintf(res_badge, sizeof(res_badge), "%dp", play_ctx->height);
+            }
+
+            if (play_ctx->color_trc == AVCOL_TRC_SMPTE2084) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HDR10");
+            } else if (play_ctx->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HLG");
+            } else if (play_ctx->color_trc == AVCOL_TRC_BT2020_10) {
+                snprintf(hdr_badge, sizeof(hdr_badge), "HDR");
+            }
+
+            int is_10bit = 0;
+            if (play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ||
+                play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10BE ||
+                play_ctx->pix_fmt == AV_PIX_FMT_YUV422P10LE ||
+                play_ctx->pix_fmt == AV_PIX_FMT_YUV444P10LE) {
+                is_10bit = 1;
+            }
+
+            const char *cname = (play_ctx->codec && play_ctx->codec->name) ? play_ctx->codec->name : "";
+            if (cname[0]) {
+                if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) {
+                    snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
+                } else if (strcasecmp(cname, "h264") == 0 || strcasecmp(cname, "avc") == 0) {
+                    snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AVC 10-BIT" : "AVC / H.264");
+                } else if (strcasecmp(cname, "av1") == 0) {
+                    snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AV1 10-BIT" : "AV1");
+                } else if (strcasecmp(cname, "vp9") == 0) {
+                    snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "VP9 10-BIT" : "VP9");
+                } else {
+                    snprintf(codec_badge, sizeof(codec_badge), "%s", cname);
+                }
+            }
+
+            if (video_fps > 1.0) {
+                snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(video_fps));
+            }
+        }
+
         const char *audio_name = (audio_ctx && audio_ctx->codec && audio_ctx->codec->name)
                                      ? audio_ctx->codec->name
                                      : "Audio";
@@ -10720,26 +10774,33 @@ double percentage = 0.0;
                                    ? "Active"
                                    : "None";
 
-        if (evo_rmlui_is_initialized()) {
-            evo_rmlui_update_playback_osd(
-                title,
-                metadata,
-                display_position,
-                media_duration_sec,
-                percentage,
-                player_paused,
-                prospero_scrub_active,
-                prospero_scrub_target,
-                audio_name,
-                sub_name,
-                video_view_mode,
-                show_stats_for_nerds,
-                alpha
-            );
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = title[0] ? title : "Video Playback";
+        p.metadata = metadata;
+        p.res_badge = res_badge;
+        p.hdr_badge = hdr_badge;
+        p.codec_badge = codec_badge;
+        p.fps_badge = fps_badge;
+        p.audio_badge = audio_badge;
+        p.position_sec = display_position;
+        p.duration_sec = media_duration_sec;
+        p.percentage = percentage;
+        p.paused = player_paused;
+        p.scrub_active = prospero_scrub_active;
+        p.scrub_target = prospero_scrub_target;
+        p.audio_track = audio_name;
+        p.sub_track = sub_name;
+        p.view_mode = video_view_mode;
+        p.show_stats = show_stats_for_nerds;
+        p.alpha = alpha;
 
+        if (evo_rmlui_is_initialized()) {
+            evo_rmlui_update_playback_params(&p);
             evo_rmlui_render_playback_osd(fb, WIDTH, HEIGHT);
         }
     }
+
 
 
     /* PROSPERO_SRT_DRAW_CALL_START */

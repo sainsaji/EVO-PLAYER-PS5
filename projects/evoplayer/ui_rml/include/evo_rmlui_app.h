@@ -8,6 +8,11 @@
 struct EvoPlaybackState {
     std::string title;
     std::string meta;
+    std::string res_badge;
+    std::string hdr_badge;
+    std::string codec_badge;
+    std::string fps_badge;
+    std::string audio_badge;
     double position_sec = 0.0;
     double duration_sec = 0.0;
     double percentage = 0.0;
