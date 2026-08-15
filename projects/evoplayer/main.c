@@ -15136,16 +15136,9 @@ static const uint32_t *evo_modal_art(int *w, int *h)
 
 void draw_resume_prompt(uint32_t *fb)
 {
-    static const evo_dialog_action actions[2] = {
-        { EVO_GLYPH_CROSS,  "RESUME"     },
-        { EVO_GLYPH_CIRCLE, "START OVER" }
-    };
-
     static char title[192];
     static char detail[128];
     char        at[32], total[32];
-    evo_dialog_model m;
-    int aw, ah;
 
     clean_media_title(pending_resume_path, title, sizeof(title), NULL, 0);
 
@@ -15157,35 +15150,82 @@ void draw_resume_prompt(uint32_t *fb)
     else
         snprintf(detail, sizeof(detail), "STOPPED AT %s", at);
 
+    double pct = (media_duration_sec > 0.1) ? (pending_resume_pos / media_duration_sec) : -1.0;
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_dialog_params_t dlg;
+        memset(&dlg, 0, sizeof(dlg));
+        dlg.eyebrow = "RESUME PLAYBACK";
+        dlg.title = title[0] ? title : pending_resume_path;
+        dlg.detail = detail;
+        dlg.progress_pct = pct;
+        dlg.action_count = 2;
+        dlg.actions[0].icon_path = "icons/btn_cross.png";
+        dlg.actions[0].label = "RESUME";
+        dlg.actions[0].is_primary = 1;
+        dlg.actions[1].icon_path = "icons/btn_circle.png";
+        dlg.actions[1].label = "START OVER";
+        dlg.actions[1].is_primary = 0;
+
+        evo_rmlui_update_dialog(&dlg);
+        evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
+        return;
+    }
+
+    static const evo_dialog_action actions[2] = {
+        { EVO_GLYPH_CROSS,  "RESUME"     },
+        { EVO_GLYPH_CIRCLE, "START OVER" }
+    };
+    evo_dialog_model m;
+    int aw, ah;
     memset(&m, 0, sizeof(m));
     m.eyebrow      = "RESUME PLAYBACK";
     m.title        = title[0] ? title : pending_resume_path;
     m.detail       = detail;
-    m.progress     = evo_progress_permille(pending_resume_pos,
-                                           media_duration_sec);
+    m.progress     = evo_progress_permille(pending_resume_pos, media_duration_sec);
     m.actions      = actions;
     m.action_count = 2;
     m.art.pixels   = evo_modal_art(&aw, &ah);
     m.art.w        = aw;
     m.art.h        = ah;
-
     evo_screen_dialog(fb, &m);
 }
 
 static void draw_playback_finished_screen(uint32_t *fb)
 {
+    static char title[192];
+    clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_dialog_params_t dlg;
+        memset(&dlg, 0, sizeof(dlg));
+        dlg.eyebrow = "FINISHED";
+        dlg.title = title[0] ? title : current_media_path;
+        dlg.detail = "PLAYBACK REACHED THE END OF THE FILE";
+        dlg.progress_pct = 1.0;
+        dlg.action_count = 3;
+        dlg.actions[0].icon_path = "icons/btn_cross.png";
+        dlg.actions[0].label = "REPLAY";
+        dlg.actions[0].is_primary = 1;
+        dlg.actions[1].icon_path = "icons/btn_triangle.png";
+        dlg.actions[1].label = "NEXT";
+        dlg.actions[1].is_primary = 0;
+        dlg.actions[2].icon_path = "icons/btn_circle.png";
+        dlg.actions[2].label = "BACK";
+        dlg.actions[2].is_primary = 0;
+
+        evo_rmlui_update_dialog(&dlg);
+        evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
+        return;
+    }
+
     static const evo_dialog_action actions[3] = {
         { EVO_GLYPH_CROSS,    "REPLAY" },
         { EVO_GLYPH_TRIANGLE, "NEXT"   },
         { EVO_GLYPH_CIRCLE,   "BACK"   }
     };
-
-    static char title[192];
     evo_dialog_model m;
     int aw, ah;
-
-    clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
-
     memset(&m, 0, sizeof(m));
     m.eyebrow      = "FINISHED";
     m.title        = title[0] ? title : current_media_path;
@@ -15196,7 +15236,6 @@ static void draw_playback_finished_screen(uint32_t *fb)
     m.art.pixels   = evo_modal_art(&aw, &ah);
     m.art.w        = aw;
     m.art.h        = ah;
-
     evo_screen_dialog(fb, &m);
 }
 
@@ -15204,56 +15243,52 @@ static void draw_playback_finished_screen(uint32_t *fb)
  * where playback currently is. */
 static double prospero_player_position(void);
 
-/*
- * The stop-playback prompt.
- *
- * Deliberately ordered so the safe answer is the one under the thumb that
- * just pressed CIRCLE: CIRCLE returns to the film, CROSS stops. That inverts
- * the usual "CROSS confirms, CIRCLE backs out" reading of the two buttons,
- * which is the point - the destructive action should not be the one you
- * reach by repeating what you just did.
- *
- * KEEP WATCHING is therefore the primary chip, and it is listed first because
- * evo_screen_dialog styles action zero as primary.
- *
- * The heading is a statement, not a question, because the atlas has no
- * question mark - see EVO_TEXT_CHARSET. The two buttons are the answer.
- */
 static void draw_exit_confirm_screen(uint32_t *fb)
 {
-    static const evo_dialog_action actions[2] = {
-        { EVO_GLYPH_CIRCLE, "KEEP WATCHING" },
-        { EVO_GLYPH_CROSS,  "STOP"          }
-    };
-
     static char title[192];
     static char detail[128];
     char        at[32], total[32];
-    evo_dialog_model m;
     double position = prospero_player_position();
-    int aw, ah;
 
     clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
 
     evo_fmt_duration(at, sizeof(at), position);
     evo_fmt_duration(total, sizeof(total), media_duration_sec);
 
-    /*
-     * Say where it will resume from. The prompt asks you to give up a
-     * position, so it should show which position that is - and say that
-     * stopping does not throw it away, which is the actual worry.
-     *
-     * Kept short on purpose. The dialog gives the detail line the panel width
-     * minus the artwork, which is about 596px at EVO_FACE_SUB; a first draft
-     * reading "YOU ARE AT ... IT WILL RESUME FROM HERE" ellipsised on the
-     * word that mattered.
-     */
     if (total[0])
         snprintf(detail, sizeof(detail), "AT %s OF %s  -  RESUMES FROM HERE",
                  at, total);
     else
         snprintf(detail, sizeof(detail), "AT %s  -  RESUMES FROM HERE", at);
 
+    double pct = (media_duration_sec > 0.1) ? (position / media_duration_sec) : -1.0;
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_dialog_params_t dlg;
+        memset(&dlg, 0, sizeof(dlg));
+        dlg.eyebrow = "STOP PLAYBACK";
+        dlg.title = title[0] ? title : current_media_path;
+        dlg.detail = detail;
+        dlg.progress_pct = pct;
+        dlg.action_count = 2;
+        dlg.actions[0].icon_path = "icons/btn_circle.png";
+        dlg.actions[0].label = "KEEP WATCHING";
+        dlg.actions[0].is_primary = 1;
+        dlg.actions[1].icon_path = "icons/btn_cross.png";
+        dlg.actions[1].label = "STOP";
+        dlg.actions[1].is_primary = 0;
+
+        evo_rmlui_update_dialog(&dlg);
+        evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
+        return;
+    }
+
+    static const evo_dialog_action actions[2] = {
+        { EVO_GLYPH_CIRCLE, "KEEP WATCHING" },
+        { EVO_GLYPH_CROSS,  "STOP"          }
+    };
+    evo_dialog_model m;
+    int aw, ah;
     memset(&m, 0, sizeof(m));
     m.eyebrow      = "STOP PLAYBACK";
     m.title        = title[0] ? title : current_media_path;
@@ -15264,9 +15299,9 @@ static void draw_exit_confirm_screen(uint32_t *fb)
     m.art.pixels   = evo_modal_art(&aw, &ah);
     m.art.w        = aw;
     m.art.h        = ah;
-
     evo_screen_dialog(fb, &m);
 }
+
 
 void draw_media_info_screen(uint32_t *fb)
 {

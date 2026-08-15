@@ -89,25 +89,40 @@ bool EvoRmlApp::Initialize(int width, int height) {
     };
 
     for (const auto& p : rml_prefixes) {
-        m_playback_doc = m_context->LoadDocument(p + "playback.rml");
-        if (m_playback_doc) {
-            m_playback_doc->Show();
-            break;
+        if (!m_playback_doc) {
+            m_playback_doc = m_context->LoadDocument(p + "playback.rml");
+            if (m_playback_doc) {
+                m_playback_doc->Show();
+            }
+        }
+        if (!m_dialog_doc) {
+            m_dialog_doc = m_context->LoadDocument(p + "dialog.rml");
+            if (m_dialog_doc) {
+                m_dialog_doc->Hide();
+            }
         }
     }
 
     if (!m_playback_doc) {
         std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
     }
+    if (!m_dialog_doc) {
+        std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
+    }
 
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Playback Engine initialized successfully ("
+    std::cout << "[EVO RmlUi] Retained-mode Playback & Dialog Engine initialized successfully ("
               << width << "x" << height << ")." << std::endl;
     return true;
 }
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_dialog_doc) {
+        m_dialog_doc->Close();
+        m_dialog_doc = nullptr;
+    }
 
     if (m_playback_doc) {
         m_playback_doc->Close();
@@ -269,6 +284,83 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
 
 void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_playback_doc || !framebuffer) return;
+
+    if (m_dialog_doc) m_dialog_doc->Hide();
+    m_playback_doc->Show();
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    m_context->Update();
+    m_context->Render();
+}
+
+void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
+    if (!m_initialized || !m_dialog_doc) return;
+
+    m_last_dialog = state;
+
+    // Eyebrow, Title, Detail
+    Rml::Element* el_eb = m_dialog_doc->GetElementById("dialog-eyebrow");
+    if (el_eb) el_eb->SetInnerRML(state.eyebrow);
+
+    Rml::Element* el_ti = m_dialog_doc->GetElementById("dialog-title");
+    if (el_ti) el_ti->SetInnerRML(state.title.empty() ? "Confirmation" : state.title);
+
+    Rml::Element* el_de = m_dialog_doc->GetElementById("dialog-detail");
+    if (el_de) el_de->SetInnerRML(state.detail);
+
+    // Progress Bar
+    Rml::Element* el_track = m_dialog_doc->GetElementById("dialog-progress-track");
+    Rml::Element* el_fill = m_dialog_doc->GetElementById("dialog-progress-fill");
+    if (el_track && el_fill) {
+        if (state.progress_pct >= 0.0) {
+            el_track->SetProperty("display", "block");
+            double pct = state.progress_pct * 100.0;
+            if (pct < 0.0) pct = 0.0;
+            if (pct > 100.0) pct = 100.0;
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(1) << pct << "%";
+            el_fill->SetProperty("width", ss.str());
+        } else {
+            el_track->SetProperty("display", "none");
+        }
+    }
+
+    // Action Buttons
+    for (int i = 0; i < 3; i++) {
+        std::string btn_id = "action-" + std::to_string(i);
+        std::string icon_id = "action-icon-" + std::to_string(i);
+        std::string label_id = "action-label-" + std::to_string(i);
+
+        Rml::Element* el_btn = m_dialog_doc->GetElementById(btn_id);
+        Rml::Element* el_icon = m_dialog_doc->GetElementById(icon_id);
+        Rml::Element* el_lbl = m_dialog_doc->GetElementById(label_id);
+
+        if (el_btn) {
+            if (i < (int)state.actions.size()) {
+                el_btn->SetProperty("display", "flex");
+                el_btn->SetClass("btn-primary", state.actions[i].is_primary);
+                el_btn->SetClass("btn-secondary", !state.actions[i].is_primary);
+
+                if (el_icon) {
+                    el_icon->SetAttribute("src", state.actions[i].icon_path);
+                }
+                if (el_lbl) {
+                    el_lbl->SetInnerRML(state.actions[i].label);
+                }
+            } else {
+                el_btn->SetProperty("display", "none");
+            }
+        }
+    }
+}
+
+void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_dialog_doc || !framebuffer) return;
+
+    if (m_playback_doc) m_playback_doc->Hide();
+    m_dialog_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);

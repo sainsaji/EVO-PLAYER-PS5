@@ -51,7 +51,8 @@ static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int
 int main(int argc, char** argv) {
     const int width = 1920;
     const int height = 1080;
-    std::vector<uint32_t> fb(width * height);
+    std::vector<uint32_t> fb_playback(width * height);
+    std::vector<uint32_t> fb_dialog(width * height);
 
     // Simulate cinematic film frame background
     for (int y = 0; y < height; y++) {
@@ -59,7 +60,9 @@ int main(int argc, char** argv) {
             uint8_t r = 18 + (y * 22 / height);
             uint8_t g = 24 + (x * 18 / width);
             uint8_t b = 40 + (y * 35 / height);
-            fb[y * width + x] = 0xFF000000 | (b << 16) | (g << 8) | r;
+            uint32_t px = 0xFF000000 | (b << 16) | (g << 8) | r;
+            fb_playback[y * width + x] = px;
+            fb_dialog[y * width + x] = px;
         }
     }
 
@@ -68,32 +71,51 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Test 1: Playing (Not paused, not scrubbing)
+    // 1. Render Playback OSD
     evo_playback_osd_params_t p;
     memset(&p, 0, sizeof(p));
     p.title = "Big Buck Bunny (2008)";
     p.metadata = "1080p  H.264  6CH";
     p.res_badge = "1080p FHD";
-    p.hdr_badge = ""; // SDR video
+    p.hdr_badge = "";
     p.codec_badge = "AVC / H.264";
     p.fps_badge = "60 FPS";
     p.audio_badge = "5.1 Surround";
-    p.position_sec = 142.0; // 02:22
-    p.duration_sec = 596.0; // 09:56
+    p.position_sec = 142.0;
+    p.duration_sec = 596.0;
     p.percentage = 142.0 / 596.0;
-    p.paused = 0; // Playing!
-    p.scrub_active = 0; // Not scrubbing!
+    p.paused = 0;
+    p.scrub_active = 0;
     p.scrub_target = 0.0;
     p.audio_track = "English AC3 5.1";
     p.sub_track = "None";
-    p.view_mode = 0; // FIT
-    p.show_stats = 0; // Stats off
+    p.view_mode = 0;
+    p.show_stats = 0;
     p.alpha = 255;
 
     evo_rmlui_update_playback_params(&p);
-    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    evo_rmlui_render_playback_osd(fb_playback.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback.bmp", fb_playback.data(), width, height);
 
-    save_bmp_24("output/uiview/rml_playback.bmp", fb.data(), width, height);
-    std::cout << "Rendered output/uiview/rml_playback.bmp successfully" << std::endl;
+    // 2. Render Confirmation / Resume Dialog
+    evo_rmlui_dialog_params_t dlg;
+    memset(&dlg, 0, sizeof(dlg));
+    dlg.eyebrow = "RESUME PLAYBACK";
+    dlg.title = "Big Buck Bunny (2008)";
+    dlg.detail = "STOPPED AT 02:22 OF 09:56";
+    dlg.progress_pct = 142.0 / 596.0;
+    dlg.action_count = 2;
+    dlg.actions[0].icon_path = "icons/btn_cross.png";
+    dlg.actions[0].label = "RESUME";
+    dlg.actions[0].is_primary = 1;
+    dlg.actions[1].icon_path = "icons/btn_circle.png";
+    dlg.actions[1].label = "START OVER";
+    dlg.actions[1].is_primary = 0;
+
+    evo_rmlui_update_dialog(&dlg);
+    evo_rmlui_render_dialog(fb_dialog.data(), width, height);
+    save_bmp_24("output/uiview/rml_dialog.bmp", fb_dialog.data(), width, height);
+
+    std::cout << "Rendered rml_playback.bmp and rml_dialog.bmp successfully" << std::endl;
     return 0;
 }

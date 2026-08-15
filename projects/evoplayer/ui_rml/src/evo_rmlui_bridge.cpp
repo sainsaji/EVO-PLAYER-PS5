@@ -40,46 +40,31 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     EvoRmlApp::Instance().UpdatePlaybackState(state);
 }
 
-void evo_rmlui_update_playback_osd(
-    const char* title,
-    const char* metadata,
-    double position_sec,
-    double duration_sec,
-    double percentage,
-    int paused,
-    int scrub_active,
-    double scrub_target,
-    const char* audio_track,
-    const char* sub_track,
-    int view_mode,
-    int show_stats,
-    int alpha
-) {
-    evo_playback_osd_params_t p;
-    p.title = title;
-    p.metadata = metadata;
-    p.res_badge = "";
-    p.hdr_badge = "";
-    p.codec_badge = "";
-    p.fps_badge = "";
-    p.audio_badge = "";
-    p.position_sec = position_sec;
-    p.duration_sec = duration_sec;
-    p.percentage = percentage;
-    p.paused = paused;
-    p.scrub_active = scrub_active;
-    p.scrub_target = scrub_target;
-    p.audio_track = audio_track;
-    p.sub_track = sub_track;
-    p.view_mode = view_mode;
-    p.show_stats = show_stats;
-    p.alpha = alpha;
-
-    evo_rmlui_update_playback_params(&p);
-}
-
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderPlaybackOSD(framebuffer, width, height);
+}
+
+void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
+    if (!p) return;
+    EvoDialogState state;
+    state.eyebrow = p->eyebrow ? p->eyebrow : "";
+    state.title = p->title ? p->title : "";
+    state.detail = p->detail ? p->detail : "";
+    state.progress_pct = p->progress_pct;
+
+    for (int i = 0; i < p->action_count && i < 3; i++) {
+        EvoDialogAction act;
+        act.icon_path = p->actions[i].icon_path ? p->actions[i].icon_path : "icons/btn_cross.png";
+        act.label = p->actions[i].label ? p->actions[i].label : "";
+        act.is_primary = (p->actions[i].is_primary != 0);
+        state.actions.push_back(act);
+    }
+
+    EvoRmlApp::Instance().UpdateDialogState(state);
+}
+
+void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderDialog(framebuffer, width, height);
 }
 
 }

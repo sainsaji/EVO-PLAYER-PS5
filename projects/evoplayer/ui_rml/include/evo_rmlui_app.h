@@ -1,6 +1,7 @@
 #pragma once
 #include <RmlUi/Core.h>
 #include <string>
+#include <vector>
 #include <memory>
 #include "evo_rmlui_render.h"
 #include "evo_rmlui_system.h"
@@ -26,6 +27,20 @@ struct EvoPlaybackState {
     int alpha = 255;
 };
 
+struct EvoDialogAction {
+    std::string icon_path;
+    std::string label;
+    bool is_primary = false;
+};
+
+struct EvoDialogState {
+    std::string eyebrow;
+    std::string title;
+    std::string detail;
+    double progress_pct = -1.0; // 0.0 to 1.0, or -1.0 to hide
+    std::vector<EvoDialogAction> actions;
+};
+
 class EvoRmlApp {
 public:
     static EvoRmlApp& Instance();
@@ -35,6 +50,9 @@ public:
 
     void UpdatePlaybackState(const EvoPlaybackState& state);
     void RenderPlaybackOSD(uint32_t* framebuffer, int width, int height);
+
+    void UpdateDialogState(const EvoDialogState& state);
+    void RenderDialog(uint32_t* framebuffer, int width, int height);
 
     bool IsInitialized() const { return m_initialized; }
 
@@ -50,6 +68,8 @@ private:
     std::unique_ptr<EvoRenderInterface> m_render;
     Rml::Context* m_context = nullptr;
     Rml::ElementDocument* m_playback_doc = nullptr;
+    Rml::ElementDocument* m_dialog_doc = nullptr;
 
     EvoPlaybackState m_last_state;
+    EvoDialogState m_last_dialog;
 };

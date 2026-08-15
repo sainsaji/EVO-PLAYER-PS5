@@ -29,31 +29,31 @@ typedef struct {
     int alpha;
 } evo_playback_osd_params_t;
 
+typedef struct {
+    const char* eyebrow;
+    const char* title;
+    const char* detail;
+    double progress_pct; // 0.0 to 1.0, or -1.0
+    int action_count;
+    struct {
+        const char* icon_path;
+        const char* label;
+        int is_primary;
+    } actions[3];
+} evo_rmlui_dialog_params_t;
+
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);
 void evo_rmlui_shutdown(void);
 bool evo_rmlui_is_initialized(void);
 
-/* Update and Render Netflix Playback OSD on top of video frame */
+/* Playback OSD API */
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* params);
-
-void evo_rmlui_update_playback_osd(
-    const char* title,
-    const char* metadata,
-    double position_sec,
-    double duration_sec,
-    double percentage,
-    int paused,
-    int scrub_active,
-    double scrub_target,
-    const char* audio_track,
-    const char* sub_track,
-    int view_mode,
-    int show_stats,
-    int alpha
-);
-
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height);
+
+/* Confirmation & Modal Dialog API */
+void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* params);
+void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
 
 #ifdef __cplusplus
 }
