@@ -50,7 +50,8 @@ typedef enum {
     EVO_SCREEN_SETTINGS_SUBTITLES = 25,
     EVO_SCREEN_SETTINGS_INTERFACE = 26,
     EVO_SCREEN_SETTINGS_SYSTEM    = 27,
-    EVO_SCREEN_SURROUND_TEST      = 28
+    EVO_SCREEN_SURROUND_TEST      = 28,
+    EVO_SCREEN_THEME_SELECT       = 29
 } evo_screen_id;
 
 /* Rail sections. Order is the order they appear in the rail. */

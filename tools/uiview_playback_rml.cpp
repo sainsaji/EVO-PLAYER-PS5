@@ -414,6 +414,51 @@ int main(int argc, char** argv) {
         save_bmp_24("output/uiview/rml_settings_about.bmp", fb.data(), width, height);
     }
 
+    // 9. Color Themes Selection Screen
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "COLOR THEMES";
+        set.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
+        set.counter = "1 OF 4";
+        set.rail_active_idx = 5;
+        set.rail_focused = 0;
+        set.row_count = 4;
+
+        set.rows[0].title = "MIDNIGHT";
+        set.rows[0].detail = "OBSIDIAN BACKDROP WITH SAPPHIRE BLUE ACCENTS";
+        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[0].badge = "ACTIVE";
+        set.rows[0].has_chevron = 0;
+        set.rows[0].is_focused = 1;
+
+        set.rows[1].title = "CARBON";
+        set.rows[1].detail = "MONOCHROME SLATE WITH PURE WHITE & ORANGE ACCENTS";
+        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[1].badge = "";
+        set.rows[1].has_chevron = 0;
+        set.rows[1].is_focused = 0;
+
+        set.rows[2].title = "EMBER";
+        set.rows[2].detail = "WARM CINEMA AMBER WITH GOLD ACCENTS";
+        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[2].badge = "";
+        set.rows[2].has_chevron = 0;
+        set.rows[2].is_focused = 0;
+
+        set.rows[3].title = "AURORA";
+        set.rows[3].detail = "DEEP EMERALD TEAL WITH MINT AURORA GLOW";
+        set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[3].badge = "";
+        set.rows[3].has_chevron = 0;
+        set.rows[3].is_focused = 0;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_theme.bmp", fb.data(), width, height);
+    }
+
     std::cout << "Rendered all settings screens successfully" << std::endl;
     return 0;
 }

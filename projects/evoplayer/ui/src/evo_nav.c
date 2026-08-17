@@ -37,6 +37,7 @@ evo_section evo_screen_section(evo_screen_id id)
         case EVO_SCREEN_SETTINGS_INTERFACE:
         case EVO_SCREEN_SETTINGS_SYSTEM:
         case EVO_SCREEN_SURROUND_TEST:
+        case EVO_SCREEN_THEME_SELECT:
             return EVO_SECTION_SETTINGS;
 
         /* The changelog is a child of About, and keeps ABOUT lit for the same

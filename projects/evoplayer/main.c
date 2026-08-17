@@ -226,6 +226,7 @@ static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define SCREEN_SETTINGS_INTERFACE 26
 #define SCREEN_SETTINGS_SYSTEM    27
 #define SCREEN_SURROUND_TEST      28
+#define SCREEN_THEME_SELECT       29
 
 #define EVO_SETTINGS_COUNT 4
 #define EVO_SETTINGS_PLAYBACK_COUNT 4
@@ -253,6 +254,7 @@ static int settings_interface_selected = 0;
 static int settings_system_selected = 0;
 static int surround_test_selected = 0;
 static int profile_selected = 0;
+static int theme_selected = 0;
 static int evo_tools_selected = 0;
 int show_debug_overlay = 0;
 int g_ps5_user_id = 0;
@@ -13004,10 +13006,9 @@ static void settings_subtitles_activate(void)
 static void settings_interface_activate(void)
 {
     if (settings_interface_selected == 0) {
-        int next = evo_theme_set(evo_theme_index() + 1);
-        prospero_settings_save();
-        evo_feedback(EVO_FB_TOGGLE);
-        toast("THEME", evo_theme_name(next));
+        theme_selected = evo_theme_index();
+        screen = SCREEN_THEME_SELECT;
+        evo_feedback(EVO_FB_CONFIRM);
     } else if (settings_interface_selected == 1) {
         evo_feedback_set_sound(!evo_feedback_sound_enabled());
         prospero_settings_save();
@@ -15703,13 +15704,13 @@ void draw_media_info_screen(uint32_t *fb)
         p.hdr_badge = hdr_badge;
         p.codec_badge = codec_badge;
         p.fps_badge = fps_badge;
-        p.container = md->container ? md->container : "Media Container";
+        p.container = md->container[0] ? md->container : "Media Container";
         p.file_size = size_s[0] ? size_s : "Unknown";
         p.duration = dur_s[0] ? dur_s : "--:--";
-        p.video_codec = md->video_codec ? md->video_codec : (codec_badge[0] ? codec_badge : "Video Stream");
+        p.video_codec = md->video_codec[0] ? md->video_codec : (codec_badge[0] ? codec_badge : "Video Stream");
         p.resolution = res_s[0] ? res_s : (res_badge[0] ? res_badge : "Unknown");
         p.color_hdr = color_hdr;
-        p.audio_codec = md->audio_codec ? md->audio_codec : "Audio Stream";
+        p.audio_codec = md->audio_codec[0] ? md->audio_codec : "Audio Stream";
         p.channels = ch_str;
         p.sample_rate = rate_str;
         p.subtitles = prospero_subtitle_enabled ? "Active" : (md->has_subtitles ? "Available (Off)" : "None");
@@ -15874,6 +15875,87 @@ void draw_profile_screen(uint32_t *fb)
     m.section  = EVO_SECTION_SETTINGS;
     m.entries  = evo_profile_rows;
     m.count    = 4;
+
+    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
+                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+}
+
+/* ---- theme select screen --------------------------------------------------
+ *
+ * Child of SETTINGS (Interface & Controls), lists built-in and USB themes.
+ */
+static evo_list_entry evo_theme_rows[EVO_THEME_MAX];
+
+void draw_theme_select_screen(uint32_t *fb)
+{
+    int count = evo_theme_count();
+    if (count > EVO_THEME_MAX) count = EVO_THEME_MAX;
+    if (count > 8) count = 8;
+    evo_page_sync(&theme_selected, count);
+
+    int cur_idx = evo_theme_index();
+
+    if (evo_rmlui_is_initialized()) {
+        char cnt[32];
+        snprintf(cnt, sizeof(cnt), "%d OF %d", theme_selected + 1, count);
+
+        evo_rmlui_settings_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "COLOR THEMES";
+        p.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
+        p.counter = cnt;
+        p.rail_active_idx = 5;
+        p.rail_focused = evo_rail_focused;
+        p.row_count = count;
+
+        for (int i = 0; i < count; i++) {
+            const char *name = evo_theme_name(i);
+            p.rows[i].title = (name && *name) ? name : "THEME";
+
+            if (strcmp(p.rows[i].title, "MIDNIGHT") == 0) {
+                p.rows[i].detail = "OBSIDIAN BACKDROP WITH SAPPHIRE BLUE ACCENTS";
+            } else if (strcmp(p.rows[i].title, "CARBON") == 0) {
+                p.rows[i].detail = "MONOCHROME SLATE WITH PURE WHITE & ORANGE ACCENTS";
+            } else if (strcmp(p.rows[i].title, "EMBER") == 0) {
+                p.rows[i].detail = "WARM CINEMA AMBER WITH GOLD ACCENTS";
+            } else if (strcmp(p.rows[i].title, "AURORA") == 0) {
+                p.rows[i].detail = "DEEP EMERALD TEAL WITH MINT AURORA GLOW";
+            } else {
+                p.rows[i].detail = "CUSTOM USER THEME (USB0)";
+            }
+
+            p.rows[i].icon_path = "../icons/icon_palette.png";
+            p.rows[i].badge = (i == cur_idx) ? "ACTIVE" : "";
+            p.rows[i].has_chevron = 0;
+            p.rows[i].is_focused = (i == theme_selected);
+        }
+
+        evo_rmlui_update_settings(&p);
+        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        return;
+    }
+
+    evo_list_model m;
+    int i;
+
+    for (i = 0; i < count; i++) {
+        const char *name = evo_theme_name(i);
+        evo_theme_rows[i].title    = name ? name : "THEME";
+        evo_theme_rows[i].detail   = (i == cur_idx) ? "ACTIVE" : "SELECT THEME";
+        evo_theme_rows[i].icon     = EVO_IC_PALETTE;
+        evo_theme_rows[i].chevron  = 0;
+        evo_theme_rows[i].progress = -1;
+        evo_theme_rows[i].info     = (i == cur_idx);
+        evo_theme_rows[i].swatches     = NULL;
+        evo_theme_rows[i].swatch_count = 0;
+    }
+
+    memset(&m, 0, sizeof(m));
+    m.title    = "COLOR THEMES";
+    m.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
+    m.section  = EVO_SECTION_SETTINGS;
+    m.entries  = evo_theme_rows;
+    m.count    = count;
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);
@@ -17302,6 +17384,7 @@ int main(void) {
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, +1);
                 else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, +1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, +1);
+                else if (screen == SCREEN_THEME_SELECT) evo_page_nav(&theme_selected, evo_theme_count(), +1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, +1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, +1);
                 else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(+1);
@@ -17337,6 +17420,7 @@ int main(void) {
                 else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, -1);
                 else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, -1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, -1);
+                else if (screen == SCREEN_THEME_SELECT) evo_page_nav(&theme_selected, evo_theme_count(), -1);
                 else if (screen == SCREEN_RECENT_FILES && recent_file_count > 0) evo_page_nav(&recent_selected, recent_file_count, -1);
                 else if (screen == SCREEN_FAVORITES && favorite_count > 0) evo_page_nav(&favorite_selected, favorite_count, -1);
                 else if (screen == SCREEN_USB_BROWSER) evo_browser_nav(-1);
@@ -17639,6 +17723,15 @@ int main(void) {
                     );
 
                     screen = SCREEN_SETTINGS_PLAYBACK;
+                } else if (screen == SCREEN_THEME_SELECT) {
+                    int count = evo_theme_count();
+                    if (theme_selected >= 0 && theme_selected < count) {
+                        evo_theme_set(theme_selected);
+                        prospero_settings_save();
+                        evo_feedback(EVO_FB_CONFIRM);
+                        toast("THEME", evo_theme_name(theme_selected));
+                    }
+                    screen = SCREEN_SETTINGS_INTERFACE;
                 } else if (screen == SCREEN_RECENT_FILES) {
                     g_playback_return_screen = SCREEN_RECENT_FILES;
                     if (recent_file_count > 0) {
@@ -17704,6 +17797,8 @@ int main(void) {
                     evo_reader_close();
                 } else if (screen == SCREEN_PROFILE_SELECT) {
                     screen = SCREEN_SETTINGS_PLAYBACK;
+                } else if (screen == SCREEN_THEME_SELECT) {
+                    screen = SCREEN_SETTINGS_INTERFACE;
                 } else if (screen == SCREEN_SURROUND_TEST) {
                     evo_surround_stop();
                     screen = SCREEN_SETTINGS_PLAYBACK;
@@ -17875,6 +17970,8 @@ skip_screen_input:
             draw_surround_test_screen(linear);
         else if (screen == SCREEN_PROFILE_SELECT)
             draw_profile_screen(linear);
+        else if (screen == SCREEN_THEME_SELECT)
+            draw_theme_select_screen(linear);
         else if (screen == SCREEN_RECENT_FILES)
             draw_recent_files_screen(linear);
         else if (screen == SCREEN_FAVORITES)

@@ -41,6 +41,7 @@ python3 tools/shot.py png output/uiview/rml_settings_system.bmp output/uiview/rm
 python3 tools/shot.py png output/uiview/rml_settings_profile.bmp output/uiview/rml_settings_profile.png
 python3 tools/shot.py png output/uiview/rml_settings_devtools.bmp output/uiview/rml_settings_devtools.png
 python3 tools/shot.py png output/uiview/rml_settings_about.bmp output/uiview/rml_settings_about.png
+python3 tools/shot.py png output/uiview/rml_settings_theme.bmp output/uiview/rml_settings_theme.png
 
 echo "  ok -> output/uiview/rml_settings_main.png"
 echo "  ok -> output/uiview/rml_settings_playback.png"
@@ -50,3 +51,4 @@ echo "  ok -> output/uiview/rml_settings_system.png"
 echo "  ok -> output/uiview/rml_settings_profile.png"
 echo "  ok -> output/uiview/rml_settings_devtools.png"
 echo "  ok -> output/uiview/rml_settings_about.png"
+echo "  ok -> output/uiview/rml_settings_theme.png"
