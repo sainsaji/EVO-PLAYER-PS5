@@ -29,19 +29,24 @@ g++ -O2 -std=c++17 \
     -lrmlui -lfreetype -lpng16 -lz -lpthread \
     -Wl,-rpath,/workspace/build/rmlui-host-dist/lib:/workspace/build/rmlui-host/RmlUi/build
 
-echo "--- rendering Netflix Playback OSD, Dialog, Settings, Subtitles & MediaInfo screens"
+echo "--- rendering all settings screenshots"
 export LD_LIBRARY_PATH="/workspace/build/rmlui-host-dist/lib:/workspace/build/rmlui-host/RmlUi/build:${LD_LIBRARY_PATH:-}"
 ./output/uiview/uiview_playback_rml
 
-python3 tools/shot.py png output/uiview/rml_playback.bmp output/uiview/rml_playback.png
-python3 tools/shot.py png output/uiview/rml_dialog.bmp output/uiview/rml_dialog.png
-python3 tools/shot.py png output/uiview/rml_settings.bmp output/uiview/rml_settings.png
-python3 tools/shot.py png output/uiview/rml_settings_sub.bmp output/uiview/rml_settings_sub.png
-python3 tools/shot.py png output/uiview/rml_subtitles.bmp output/uiview/rml_subtitles.png
-python3 tools/shot.py png output/uiview/rml_mediainfo.bmp output/uiview/rml_mediainfo.png
-echo "  ok -> output/uiview/rml_playback.png"
-echo "  ok -> output/uiview/rml_dialog.png"
-echo "  ok -> output/uiview/rml_settings.png"
-echo "  ok -> output/uiview/rml_settings_sub.png"
-echo "  ok -> output/uiview/rml_subtitles.png"
-echo "  ok -> output/uiview/rml_mediainfo.png"
+python3 tools/shot.py png output/uiview/rml_settings_main.bmp output/uiview/rml_settings_main.png
+python3 tools/shot.py png output/uiview/rml_settings_playback.bmp output/uiview/rml_settings_playback.png
+python3 tools/shot.py png output/uiview/rml_settings_subtitles.bmp output/uiview/rml_settings_subtitles.png
+python3 tools/shot.py png output/uiview/rml_settings_interface.bmp output/uiview/rml_settings_interface.png
+python3 tools/shot.py png output/uiview/rml_settings_system.bmp output/uiview/rml_settings_system.png
+python3 tools/shot.py png output/uiview/rml_settings_profile.bmp output/uiview/rml_settings_profile.png
+python3 tools/shot.py png output/uiview/rml_settings_devtools.bmp output/uiview/rml_settings_devtools.png
+python3 tools/shot.py png output/uiview/rml_settings_about.bmp output/uiview/rml_settings_about.png
+
+echo "  ok -> output/uiview/rml_settings_main.png"
+echo "  ok -> output/uiview/rml_settings_playback.png"
+echo "  ok -> output/uiview/rml_settings_subtitles.png"
+echo "  ok -> output/uiview/rml_settings_interface.png"
+echo "  ok -> output/uiview/rml_settings_system.png"
+echo "  ok -> output/uiview/rml_settings_profile.png"
+echo "  ok -> output/uiview/rml_settings_devtools.png"
+echo "  ok -> output/uiview/rml_settings_about.png"

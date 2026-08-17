@@ -1,5 +1,6 @@
 /* =============================================================================
- * EVO PLAYER PRO - Netflix Confirmation & Modal Dialog Stylesheet (RCSS)
+ * EVO PLAYER PRO - Confirmation & Modal Dialog Stylesheet (RCSS)
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  * ============================================================================= */
 
 body {
@@ -33,9 +34,9 @@ div, span, p {
 /* Dialog Container Card */
 #dialog-card {
     width: 920px;
-    background-color: #0c1018fc;
+    background-color: #0c121ffc;
     border-width: 1px;
-    border-color: #222d3e;
+    border-color: #1e2c44;
     border-radius: 16px;
     padding: 40px 48px;
     display: flex;
@@ -59,7 +60,7 @@ div, span, p {
 
 #dialog-detail {
     font-size: 15px;
-    font-weight: bold;
+    font-weight: normal;
     color: #94a3b8;
     letter-spacing: 0.5px;
     margin-top: 6px;
@@ -69,7 +70,7 @@ div, span, p {
 #dialog-progress-track {
     width: 824px;
     height: 6px;
-    background-color: #242c3d;
+    background-color: #1d293d;
     border-radius: 3px;
     margin-top: 24px;
     position: relative;
@@ -80,7 +81,7 @@ div, span, p {
     top: 0;
     left: 0;
     height: 6px;
-    background-color: #e50914;
+    background-color: #38bdf8;
     border-radius: 3px;
 }
 
@@ -102,14 +103,16 @@ div, span, p {
 }
 
 .btn-primary {
-    background-color: #e50914;
+    background-color: #0070d1;
+    border-width: 1px;
+    border-color: #38bdf8;
     color: #ffffff;
 }
 
 .btn-secondary {
-    background-color: #1a2336;
+    background-color: #141f33;
     border-width: 1px;
-    border-color: #2e3e5c;
+    border-color: #273a5a;
     color: #e2e8f0;
 }
 

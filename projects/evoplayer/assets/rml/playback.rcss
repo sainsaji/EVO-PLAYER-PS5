@@ -1,5 +1,6 @@
 /* =============================================================================
- * EVO PLAYER PRO - Netflix Playback HUD & OSD Stylesheet (RCSS)
+ * EVO PLAYER PRO - Playback HUD & OSD Stylesheet (RCSS)
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  * ============================================================================= */
 
 body {
@@ -150,7 +151,9 @@ div, span, p {
 
 #pause-badge {
     display: none;
-    background-color: #e50914e6;
+    background-color: #0070d1e6;
+    border-width: 1px;
+    border-color: #38bdf8;
     border-radius: 6px;
     padding: 10px 26px;
     flex-direction: row;
@@ -213,7 +216,7 @@ div, span, p {
 .text-green { color: #00ffaa; }
 .text-cyan  { color: #00d2ff; }
 
-/* Bottom Netflix Controller Console */
+/* Bottom Controller Console */
 #bottom-scrim {
     position: absolute;
     bottom: 0;
@@ -227,7 +230,7 @@ div, span, p {
     justify-content: flex-end;
 }
 
-/* Red Timeline Progress Bar */
+/* Sapphire Timeline Progress Bar */
 #progress-container {
     width: 1800px;
     height: 24px;
@@ -239,7 +242,7 @@ div, span, p {
 #progress-track {
     width: 1800px;
     height: 8px;
-    background-color: #242c3d;
+    background-color: #1d293d;
     border-radius: 4px;
     position: relative;
 }
@@ -249,7 +252,7 @@ div, span, p {
     top: 0;
     left: 0;
     height: 8px;
-    background-color: #e50914;
+    background-color: #0070d1;
     border-radius: 4px;
 }
 
@@ -262,7 +265,7 @@ div, span, p {
     border-radius: 9px;
     background-color: #ffffff;
     border-width: 3px;
-    border-color: #e50914;
+    border-color: #0070d1;
 }
 
 /* Time Row */

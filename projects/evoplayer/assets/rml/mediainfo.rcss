@@ -1,5 +1,6 @@
 /* =============================================================================
- * EVO PLAYER PRO - Netflix Media Info Specifications RCSS Stylesheet
+ * EVO PLAYER PRO - Media Info Specifications RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  * ============================================================================= */
 
 body {
@@ -60,7 +61,7 @@ div, span, p {
 #mediainfo-indicator {
     width: 4px;
     height: 52px;
-    background-color: #e50914;
+    background-color: #0070d1;
     border-radius: 2px;
     margin-right: 18px;
 }

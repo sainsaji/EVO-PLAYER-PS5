@@ -1,5 +1,6 @@
 /* =============================================================================
- * EVO PLAYER PRO - Netflix Settings RCSS Stylesheet
+ * EVO PLAYER PRO - Modern Cinema Settings RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  * ============================================================================= */
 
 body {
@@ -27,9 +28,9 @@ div, span, p {
     position: absolute;
     left: 0;
     top: 0;
-    background-color: #080c13e6;
+    background-color: #080c13f0;
     border-right-width: 1px;
-    border-right-color: #151d2a;
+    border-right-color: #172236;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -47,15 +48,15 @@ div, span, p {
 }
 
 .rail-active {
-    background-color: #19243a;
+    background-color: #152238;
     border-width: 1px;
-    border-color: #293a5b;
+    border-color: #253b60;
 }
 
 .rail-focused {
-    background-color: #e50914;
-    border-width: 1px;
-    border-color: #ffffff;
+    background-color: #0070d1;
+    border-width: 1.5px;
+    border-color: #60a5fa;
 }
 
 .rail-icon {
@@ -93,7 +94,7 @@ div, span, p {
 #header-indicator {
     width: 4px;
     height: 48px;
-    background-color: #e50914;
+    background-color: #0070d1;
     border-radius: 2px;
     margin-right: 18px;
 }
@@ -113,7 +114,7 @@ div, span, p {
 #settings-subtitle {
     font-size: 13px;
     font-weight: bold;
-    color: #8b99ad;
+    color: #8fa0b5;
     letter-spacing: 1px;
     margin-top: 3px;
 }
@@ -121,7 +122,7 @@ div, span, p {
 #settings-counter {
     font-size: 13px;
     font-weight: bold;
-    color: #8b99ad;
+    color: #8fa0b5;
     letter-spacing: 1px;
     margin-bottom: 6px;
 }
@@ -136,9 +137,9 @@ div, span, p {
 .setting-row {
     width: 1680px;
     height: 82px;
-    background-color: #0d121ce6;
+    background-color: #0c1322;
     border-width: 1px;
-    border-color: #1a2333;
+    border-color: #172338;
     border-radius: 14px;
     margin-bottom: 12px;
     padding: 0 28px;
@@ -149,9 +150,9 @@ div, span, p {
 }
 
 .row-focused {
-    background-color: #151e2e;
+    background-color: #142036;
     border-width: 1.5px;
-    border-color: #e50914;
+    border-color: #38bdf8;
 }
 
 .row-left {
@@ -163,12 +164,16 @@ div, span, p {
 .row-icon-box {
     width: 46px;
     height: 46px;
-    background-color: #141c2b;
+    background-color: #131c2e;
     border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     margin-right: 20px;
+}
+
+.row-focused .row-icon-box {
+    background-color: #1a2a47;
 }
 
 .row-icon {
@@ -191,10 +196,10 @@ div, span, p {
 
 .row-detail {
     font-size: 13px;
-    font-weight: bold;
+    font-weight: normal;
     color: #94a3b8;
     letter-spacing: 0.5px;
-    margin-top: 3px;
+    margin-top: 4px;
 }
 
 .row-right {
@@ -204,16 +209,22 @@ div, span, p {
 }
 
 .row-badge {
-    background-color: #162236;
+    background-color: #131d2e;
     border-width: 1px;
-    border-color: #2b3e5e;
+    border-color: #243550;
     border-radius: 6px;
     padding: 6px 14px;
     font-size: 13px;
     font-weight: bold;
-    color: #38bdf8;
+    color: #94a3b8;
     letter-spacing: 0.5px;
     margin-right: 18px;
+}
+
+.row-focused .row-badge {
+    background-color: #0369a1;
+    border-color: #38bdf8;
+    color: #ffffff;
 }
 
 .row-chevron {

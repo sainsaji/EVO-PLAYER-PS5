@@ -1,5 +1,6 @@
 /* =============================================================================
- * EVO PLAYER PRO - Netflix Subtitle Track Picker RCSS Stylesheet
+ * EVO PLAYER PRO - Subtitle Track Picker RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  * ============================================================================= */
 
 body {
@@ -35,9 +36,9 @@ div, span, p {
 /* Subtitle Modal Card */
 #subtitles-card {
     width: 960px;
-    background-color: #0c1018fc;
+    background-color: #0c121ffc;
     border-width: 1px;
-    border-color: #222d3e;
+    border-color: #1e2c44;
     border-radius: 16px;
     padding: 34px 44px;
     display: flex;
@@ -76,9 +77,9 @@ div, span, p {
 }
 
 #subtitles-size-pill {
-    background-color: #162236;
+    background-color: #131d2e;
     border-width: 1px;
-    border-color: #2b3e5e;
+    border-color: #243550;
     border-radius: 20px;
     padding: 8px 16px;
     display: flex;
@@ -110,9 +111,9 @@ div, span, p {
 .sub-row {
     width: 872px;
     height: 58px;
-    background-color: #0d121ce6;
+    background-color: #0d1422;
     border-width: 1px;
-    border-color: #1a2333;
+    border-color: #172338;
     border-radius: 10px;
     margin-bottom: 10px;
     padding: 0 20px;
@@ -123,9 +124,9 @@ div, span, p {
 }
 
 .row-focused {
-    background-color: #151e2e;
+    background-color: #142036;
     border-width: 1.5px;
-    border-color: #e50914;
+    border-color: #38bdf8;
 }
 
 .sub-left {
@@ -139,7 +140,7 @@ div, span, p {
     height: 22px;
     border-radius: 11px;
     border-width: 1.5px;
-    border-color: #3b4d68;
+    border-color: #2b3e5c;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -147,7 +148,7 @@ div, span, p {
 }
 
 .sub-check-box.checked {
-    border-color: #e50914;
+    border-color: #38bdf8;
 }
 
 .sub-check-dot {
@@ -158,7 +159,7 @@ div, span, p {
 }
 
 .checked .sub-check-dot {
-    background-color: #e50914;
+    background-color: #38bdf8;
 }
 
 .sub-title {
@@ -175,15 +176,21 @@ div, span, p {
 }
 
 .sub-badge {
-    background-color: #162236;
+    background-color: #131d2e;
     border-width: 1px;
-    border-color: #273750;
+    border-color: #243550;
     border-radius: 4px;
     padding: 4px 10px;
     font-size: 12px;
     font-weight: bold;
     color: #94a3b8;
     letter-spacing: 0.5px;
+}
+
+.row-focused .sub-badge {
+    background-color: #0369a1;
+    border-color: #38bdf8;
+    color: #ffffff;
 }
 
 .sub-hidden {
