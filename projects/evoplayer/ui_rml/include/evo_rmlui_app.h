@@ -96,12 +96,31 @@ struct EvoMediaInfoState {
     std::string renderer;
 };
 
+struct EvoThemeColors {
+    std::string name = "MIDNIGHT";
+    uint32_t bg_top = 0xFF060B16;
+    uint32_t bg_bottom = 0xFF020409;
+    uint32_t surface = 0xEB121B2E;
+    uint32_t surface_sel = 0xF51B2E4C;
+    uint32_t border = 0xAA2A3B55;
+    uint32_t border_sel = 0xDC00CDFF;
+    uint32_t accent = 0xFF00CDFF;
+    uint32_t accent_soft = 0x3C00A8FF;
+    uint32_t accent_alt = 0xFF7A5CFF;
+    uint32_t text_primary = 0xFFECF3FF;
+    uint32_t text_secondary = 0xFF9FB2CC;
+    uint32_t text_muted = 0xFF5E718C;
+};
+
 class EvoRmlApp {
 public:
     static EvoRmlApp& Instance();
 
     bool Initialize(int width, int height);
     void Shutdown();
+
+    void SetTheme(const EvoThemeColors& theme);
+    const EvoThemeColors& GetTheme() const { return m_theme; }
 
     void UpdatePlaybackState(const EvoPlaybackState& state);
     void RenderPlaybackOSD(uint32_t* framebuffer, int width, int height);
@@ -137,6 +156,7 @@ private:
     Rml::ElementDocument* m_subtitles_doc = nullptr;
     Rml::ElementDocument* m_mediainfo_doc = nullptr;
 
+    EvoThemeColors m_theme;
     EvoPlaybackState m_last_state;
     EvoDialogState m_last_dialog;
     EvoSettingsState m_last_settings;

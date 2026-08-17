@@ -35,6 +35,29 @@ static std::string format_time(double seconds) {
     return oss.str();
 }
 
+static std::string to_hex_rgb(uint32_t col) {
+    uint8_t r = col & 0xFF;
+    uint8_t g = (col >> 8) & 0xFF;
+    uint8_t b = (col >> 16) & 0xFF;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "#%02x%02x%02x", r, g, b);
+    return std::string(buf);
+}
+
+static std::string to_hex_rgba(uint32_t col) {
+    uint8_t r = col & 0xFF;
+    uint8_t g = (col >> 8) & 0xFF;
+    uint8_t b = (col >> 16) & 0xFF;
+    uint8_t a = (col >> 24) & 0xFF;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", r, g, b, a);
+    return std::string(buf);
+}
+
+void EvoRmlApp::SetTheme(const EvoThemeColors& theme) {
+    m_theme = theme;
+}
+
 bool EvoRmlApp::Initialize(int width, int height) {
     if (m_initialized) return true;
 
@@ -249,11 +272,18 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(1) << pct << "%";
         el_fill->SetProperty("width", ss.str());
+        el_fill->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    }
+
+    Rml::Element* el_thumb = m_playback_doc->GetElementById("progress-thumb");
+    if (el_thumb) {
+        el_thumb->SetProperty("border-color", to_hex_rgb(m_theme.accent));
     }
 
     // 4. Scrubbing Capsule
     Rml::Element* el_scrub = m_playback_doc->GetElementById("scrub-capsule");
     if (el_scrub) {
+        el_scrub->SetProperty("border-color", to_hex_rgb(m_theme.accent));
         if (state.scrub_active) {
             el_scrub->SetProperty("display", "flex");
             Rml::Element* el_stime = m_playback_doc->GetElementById("scrub-time");
@@ -263,9 +293,16 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         }
     }
 
+    Rml::Element* el_scrub_lbl = m_playback_doc->GetElementById("scrub-label");
+    if (el_scrub_lbl) {
+        el_scrub_lbl->SetProperty("color", to_hex_rgb(m_theme.accent));
+    }
+
     // 5. Play/Pause State
     Rml::Element* el_pause = m_playback_doc->GetElementById("pause-badge");
     if (el_pause) {
+        el_pause->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+        el_pause->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
         if (state.paused && !state.scrub_active) {
             el_pause->SetProperty("display", "flex");
         } else {
@@ -345,6 +382,7 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
             std::ostringstream ss;
             ss << std::fixed << std::setprecision(1) << pct << "%";
             el_fill->SetProperty("width", ss.str());
+            el_fill->SetProperty("background-color", to_hex_rgb(m_theme.accent));
         } else {
             el_track->SetProperty("display", "none");
         }
@@ -364,6 +402,16 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                 el_btn->SetProperty("display", "flex");
                 el_btn->SetClass("btn-primary", state.actions[i].is_primary);
                 el_btn->SetClass("btn-secondary", !state.actions[i].is_primary);
+
+                if (state.actions[i].is_primary) {
+                    el_btn->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                    el_btn->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+                    el_btn->SetProperty("color", "#ffffff");
+                } else {
+                    el_btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
+                    el_btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                    el_btn->SetProperty("color", "#e2e8f0");
+                }
 
                 if (el_icon) el_icon->SetAttribute("src", state.actions[i].icon_path);
                 if (el_lbl) el_lbl->SetInnerRML(state.actions[i].label);
@@ -404,6 +452,11 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
     Rml::Element* el_cnt = m_settings_doc->GetElementById("settings-counter");
     if (el_cnt) el_cnt->SetInnerRML(state.counter);
 
+    Rml::Element* el_ind = m_settings_doc->GetElementById("header-indicator");
+    if (el_ind) {
+        el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    }
+
     for (int r = 0; r < 7; r++) {
         std::string rid = "rail-" + std::to_string(r);
         Rml::Element* el_r = m_settings_doc->GetElementById(rid);
@@ -412,6 +465,17 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
             bool is_focused = is_active && state.rail_focused;
             el_r->SetClass("rail-active", is_active);
             el_r->SetClass("rail-focused", is_focused);
+
+            if (is_focused) {
+                el_r->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                el_r->SetProperty("border-color", "#ffffff");
+            } else if (is_active) {
+                el_r->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+                el_r->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+            } else {
+                el_r->SetProperty("background-color", "transparent");
+                el_r->SetProperty("border-color", "transparent");
+            }
         }
     }
 
@@ -433,7 +497,26 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         if (el_row) {
             if (i < (int)state.rows.size()) {
                 el_row->SetProperty("display", "flex");
-                el_row->SetClass("row-focused", state.rows[i].is_focused && !state.rail_focused);
+                bool is_focused = state.rows[i].is_focused && !state.rail_focused;
+                el_row->SetClass("row-focused", is_focused);
+
+                if (is_focused) {
+                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+                    el_row->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                    if (el_badge) {
+                        el_badge->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                        el_badge->SetProperty("border-color", "#ffffff");
+                        el_badge->SetProperty("color", "#ffffff");
+                    }
+                } else {
+                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface));
+                    el_row->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                    if (el_badge) {
+                        el_badge->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+                        el_badge->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+                        el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
+                    }
+                }
 
                 if (el_icon) {
                     el_icon->SetAttribute("src", state.rows[i].icon_path.empty() ? "../icons/icon_settings.png" : state.rows[i].icon_path);
@@ -485,8 +568,16 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
     Rml::Element* el_ti = m_subtitles_doc->GetElementById("subtitles-title");
     if (el_ti) el_ti->SetInnerRML(state.title);
 
+    Rml::Element* el_pill = m_subtitles_doc->GetElementById("subtitles-size-pill");
+    if (el_pill) {
+        el_pill->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+    }
+
     Rml::Element* el_sz = m_subtitles_doc->GetElementById("subtitles-size-label");
-    if (el_sz) el_sz->SetInnerRML(std::string("SIZE: ") + state.size_str);
+    if (el_sz) {
+        el_sz->SetInnerRML(std::string("SIZE: ") + state.size_str);
+        el_sz->SetProperty("color", to_hex_rgb(m_theme.accent));
+    }
 
     Rml::Element* el_pv = m_subtitles_doc->GetElementById("subtitles-preview-text");
     if (el_pv) {
@@ -499,11 +590,13 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
     for (int i = 0; i < 6; i++) {
         std::string row_id = "sub-row-" + std::to_string(i);
         std::string chk_id = "sub-check-" + std::to_string(i);
+        std::string dot_id = "sub-dot-" + std::to_string(i);
         std::string title_id = "sub-title-" + std::to_string(i);
         std::string detail_id = "sub-detail-" + std::to_string(i);
 
         Rml::Element* el_row = m_subtitles_doc->GetElementById(row_id);
         Rml::Element* el_chk = m_subtitles_doc->GetElementById(chk_id);
+        Rml::Element* el_dot = m_subtitles_doc->GetElementById(dot_id);
         Rml::Element* el_title = m_subtitles_doc->GetElementById(title_id);
         Rml::Element* el_detail = m_subtitles_doc->GetElementById(detail_id);
 
@@ -512,7 +605,21 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
                 el_row->SetProperty("display", "flex");
                 el_row->SetClass("row-focused", state.tracks[i].is_focused);
 
-                if (el_chk) el_chk->SetClass("checked", state.tracks[i].is_current);
+                if (state.tracks[i].is_focused) {
+                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+                    el_row->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                } else {
+                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface));
+                    el_row->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                }
+
+                if (el_chk) {
+                    el_chk->SetClass("checked", state.tracks[i].is_current);
+                    el_chk->SetProperty("border-color", state.tracks[i].is_current ? to_hex_rgb(m_theme.accent) : to_hex_rgba(m_theme.border));
+                }
+                if (el_dot) {
+                    el_dot->SetProperty("background-color", state.tracks[i].is_current ? to_hex_rgb(m_theme.accent) : "transparent");
+                }
                 if (el_title) el_title->SetInnerRML(state.tracks[i].label);
                 if (el_detail) {
                     if (state.tracks[i].detail.empty()) {
@@ -520,6 +627,15 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
                     } else {
                         el_detail->SetProperty("display", "inline-block");
                         el_detail->SetInnerRML(state.tracks[i].detail);
+                        if (state.tracks[i].is_focused) {
+                            el_detail->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                            el_detail->SetProperty("border-color", "#ffffff");
+                            el_detail->SetProperty("color", "#ffffff");
+                        } else {
+                            el_detail->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+                            el_detail->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+                            el_detail->SetProperty("color", to_hex_rgb(m_theme.accent));
+                        }
                     }
                 }
             } else {
@@ -550,6 +666,11 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
 
     m_last_mediainfo = state;
 
+    Rml::Element* el_ind = m_mediainfo_doc->GetElementById("mediainfo-indicator");
+    if (el_ind) {
+        el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    }
+
     Rml::Element* el_ti = m_mediainfo_doc->GetElementById("mediainfo-title");
     if (el_ti) el_ti->SetInnerRML(state.title.empty() ? "Media Details" : state.title);
 
@@ -560,25 +681,45 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
     Rml::Element* el_res = m_mediainfo_doc->GetElementById("info-badge-res");
     if (el_res) {
         if (state.res_badge.empty()) el_res->SetProperty("display", "none");
-        else { el_res->SetProperty("display", "inline-block"); el_res->SetInnerRML(state.res_badge); }
+        else {
+            el_res->SetProperty("display", "inline-block");
+            el_res->SetInnerRML(state.res_badge);
+            el_res->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+            el_res->SetProperty("color", to_hex_rgb(m_theme.accent));
+        }
     }
 
     Rml::Element* el_hdr = m_mediainfo_doc->GetElementById("info-badge-hdr");
     if (el_hdr) {
         if (state.hdr_badge.empty()) el_hdr->SetProperty("display", "none");
-        else { el_hdr->SetProperty("display", "inline-block"); el_hdr->SetInnerRML(state.hdr_badge); }
+        else {
+            el_hdr->SetProperty("display", "inline-block");
+            el_hdr->SetInnerRML(state.hdr_badge);
+            el_hdr->SetProperty("border-color", "#ffd700");
+            el_hdr->SetProperty("color", "#ffd700");
+        }
     }
 
     Rml::Element* el_codec = m_mediainfo_doc->GetElementById("info-badge-codec");
     if (el_codec) {
         if (state.codec_badge.empty()) el_codec->SetProperty("display", "none");
-        else { el_codec->SetProperty("display", "inline-block"); el_codec->SetInnerRML(state.codec_badge); }
+        else {
+            el_codec->SetProperty("display", "inline-block");
+            el_codec->SetInnerRML(state.codec_badge);
+            el_codec->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+            el_codec->SetProperty("color", to_hex_rgb(m_theme.accent));
+        }
     }
 
     Rml::Element* el_fps = m_mediainfo_doc->GetElementById("info-badge-fps");
     if (el_fps) {
         if (state.fps_badge.empty()) el_fps->SetProperty("display", "none");
-        else { el_fps->SetProperty("display", "inline-block"); el_fps->SetInnerRML(state.fps_badge); }
+        else {
+            el_fps->SetProperty("display", "inline-block");
+            el_fps->SetInnerRML(state.fps_badge);
+            el_fps->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+            el_fps->SetProperty("color", to_hex_rgb(m_theme.accent));
+        }
     }
 
     // Specs

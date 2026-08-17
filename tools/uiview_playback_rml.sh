@@ -42,6 +42,9 @@ python3 tools/shot.py png output/uiview/rml_settings_profile.bmp output/uiview/r
 python3 tools/shot.py png output/uiview/rml_settings_devtools.bmp output/uiview/rml_settings_devtools.png
 python3 tools/shot.py png output/uiview/rml_settings_about.bmp output/uiview/rml_settings_about.png
 python3 tools/shot.py png output/uiview/rml_settings_theme.bmp output/uiview/rml_settings_theme.png
+python3 tools/shot.py png output/uiview/rml_theme_carbon.bmp output/uiview/rml_theme_carbon.png
+python3 tools/shot.py png output/uiview/rml_theme_ember.bmp output/uiview/rml_theme_ember.png
+python3 tools/shot.py png output/uiview/rml_theme_aurora.bmp output/uiview/rml_theme_aurora.png
 
 echo "  ok -> output/uiview/rml_settings_main.png"
 echo "  ok -> output/uiview/rml_settings_playback.png"
@@ -52,3 +55,6 @@ echo "  ok -> output/uiview/rml_settings_profile.png"
 echo "  ok -> output/uiview/rml_settings_devtools.png"
 echo "  ok -> output/uiview/rml_settings_about.png"
 echo "  ok -> output/uiview/rml_settings_theme.png"
+echo "  ok -> output/uiview/rml_theme_carbon.png"
+echo "  ok -> output/uiview/rml_theme_ember.png"
+echo "  ok -> output/uiview/rml_theme_aurora.png"

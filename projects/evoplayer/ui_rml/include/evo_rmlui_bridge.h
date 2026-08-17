@@ -124,6 +124,25 @@ void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height);
 void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* params);
 void evo_rmlui_render_mediainfo(uint32_t* framebuffer, int width, int height);
 
+/* Centralized Theme API */
+typedef struct {
+    const char* name;
+    uint32_t bg_top;
+    uint32_t bg_bottom;
+    uint32_t surface;
+    uint32_t surface_sel;
+    uint32_t border;
+    uint32_t border_sel;
+    uint32_t accent;
+    uint32_t accent_soft;
+    uint32_t accent_alt;
+    uint32_t text_primary;
+    uint32_t text_secondary;
+    uint32_t text_muted;
+} evo_rmlui_theme_t;
+
+void evo_rmlui_set_theme(const evo_rmlui_theme_t* theme);
+
 #ifdef __cplusplus
 }
 #endif

@@ -459,6 +459,99 @@ int main(int argc, char** argv) {
         save_bmp_24("output/uiview/rml_settings_theme.bmp", fb.data(), width, height);
     }
 
+    // 10. Centralized Theming Showcase (Carbon, Ember, Aurora)
+    {
+        // Carbon Theme
+        evo_rmlui_theme_t carbon_th;
+        memset(&carbon_th, 0, sizeof(carbon_th));
+        carbon_th.name = "CARBON";
+        carbon_th.accent = 0xFFF2F2F5;     // Pure Silver/White
+        carbon_th.border_sel = 0xFFF2F2F5;
+        carbon_th.surface = 0xEB1E1E24;
+        carbon_th.surface_sel = 0xF52E2E38;
+        carbon_th.border = 0xAA3A3A48;
+        evo_rmlui_set_theme(&carbon_th);
+
+        evo_rmlui_settings_params_t set_c;
+        memset(&set_c, 0, sizeof(set_c));
+        set_c.title = "SETTINGS (CARBON THEME)";
+        set_c.subtitle = "MONOCHROME SLATE PALETTE";
+        set_c.counter = "1 OF 4";
+        set_c.rail_active_idx = 5;
+        set_c.row_count = 4;
+        set_c.rows[0].title = "PLAYBACK & VIDEO";
+        set_c.rows[0].detail = "PROFILE, ASPECT RATIO & RESUME";
+        set_c.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set_c.rows[0].has_chevron = 1;
+        set_c.rows[0].is_focused = 1;
+        set_c.rows[1].title = "SUBTITLES";
+        set_c.rows[1].detail = "AUTO-DETECT & DEFAULT SIZING";
+        set_c.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
+        set_c.rows[1].has_chevron = 1;
+        set_c.rows[2].title = "INTERFACE & CONTROLS";
+        set_c.rows[2].detail = "THEMES, SOUNDS, LIGHTBAR & SORTING";
+        set_c.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set_c.rows[2].has_chevron = 1;
+        set_c.rows[3].title = "SYSTEM & DIAGNOSTICS";
+        set_c.rows[3].detail = "DEVELOPER TOOLS & MEDIA TILE";
+        set_c.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set_c.rows[3].has_chevron = 1;
+
+        std::fill(fb.begin(), fb.end(), 0xFF0E0E12);
+        evo_rmlui_update_settings(&set_c);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_theme_carbon.bmp", fb.data(), width, height);
+
+        // Ember Theme
+        evo_rmlui_theme_t ember_th;
+        memset(&ember_th, 0, sizeof(ember_th));
+        ember_th.name = "EMBER";
+        ember_th.accent = 0xFF28A5FF;     // Amber Gold (#ffa528 in BGR/RGBA) -> R=0xff, G=0xa5, B=0x28
+        ember_th.accent = 0x0028A5FF;
+        ember_th.accent = (0x28 << 16) | (0xa5 << 8) | 0xff; // R=0xff, G=0xa5, B=0x28 -> 0x0028a5ff
+        ember_th.border_sel = ember_th.accent;
+        ember_th.surface = 0xEB121824;
+        ember_th.surface_sel = 0xF51A263D;
+        ember_th.border = 0xAA2D3D55;
+        evo_rmlui_set_theme(&ember_th);
+
+        set_c.title = "SETTINGS (EMBER THEME)";
+        set_c.subtitle = "WARM CINEMA AMBER PALETTE";
+        std::fill(fb.begin(), fb.end(), 0xFF080C14);
+        evo_rmlui_update_settings(&set_c);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_theme_ember.bmp", fb.data(), width, height);
+
+        // Aurora Theme
+        evo_rmlui_theme_t aurora_th;
+        memset(&aurora_th, 0, sizeof(aurora_th));
+        aurora_th.name = "AURORA";
+        aurora_th.accent = (0xc0 << 16) | (0xf5 << 8) | 0x3d; // R=0x3d, G=0xf5, B=0xc0
+        aurora_th.border_sel = aurora_th.accent;
+        aurora_th.surface = 0xEB22240E;
+        aurora_th.surface_sel = 0xF5373B16;
+        aurora_th.border = 0xAA454A20;
+        evo_rmlui_set_theme(&aurora_th);
+
+        set_c.title = "SETTINGS (AURORA THEME)";
+        set_c.subtitle = "MINT & EMERALD TEAL PALETTE";
+        std::fill(fb.begin(), fb.end(), 0xFF0B1410);
+        evo_rmlui_update_settings(&set_c);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_theme_aurora.bmp", fb.data(), width, height);
+
+        // Reset to Midnight Theme
+        evo_rmlui_theme_t midnight_th;
+        memset(&midnight_th, 0, sizeof(midnight_th));
+        midnight_th.name = "MIDNIGHT";
+        midnight_th.accent = (0xf8 << 16) | (0xbd << 8) | 0x38; // Electric blue #38bdf8
+        midnight_th.border_sel = midnight_th.accent;
+        midnight_th.surface = 0xEB1E1B12;
+        midnight_th.surface_sel = 0xF5362014;
+        midnight_th.border = 0xAA3B2A18;
+        evo_rmlui_set_theme(&midnight_th);
+    }
+
     std::cout << "Rendered all settings screens successfully" << std::endl;
     return 0;
 }

@@ -148,4 +148,23 @@ void evo_rmlui_render_mediainfo(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderMediaInfo(framebuffer, width, height);
 }
 
+void evo_rmlui_set_theme(const evo_rmlui_theme_t* t) {
+    if (!t) return;
+    EvoThemeColors colors;
+    colors.name = t->name ? t->name : "MIDNIGHT";
+    colors.bg_top = t->bg_top;
+    colors.bg_bottom = t->bg_bottom;
+    colors.surface = t->surface;
+    colors.surface_sel = t->surface_sel;
+    colors.border = t->border;
+    colors.border_sel = t->border_sel;
+    colors.accent = t->accent;
+    colors.accent_soft = t->accent_soft;
+    colors.accent_alt = t->accent_alt;
+    colors.text_primary = t->text_primary;
+    colors.text_secondary = t->text_secondary;
+    colors.text_muted = t->text_muted;
+    EvoRmlApp::Instance().SetTheme(colors);
 }
+
+} // extern "C"

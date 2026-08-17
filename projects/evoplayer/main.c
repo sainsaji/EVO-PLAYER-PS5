@@ -12373,6 +12373,26 @@ static void prospero_settings_save(void)
     fclose(file);
 }
 
+void evo_sync_rmlui_theme(void)
+{
+    const evo_theme *t = evo_theme_current();
+    if (!t) return;
+    evo_rmlui_theme_t rt;
+    rt.name = t->name;
+    rt.bg_top = t->bg_top;
+    rt.bg_bottom = t->bg_bottom;
+    rt.surface = t->surface;
+    rt.surface_sel = t->surface_sel;
+    rt.border = t->border;
+    rt.border_sel = t->border_sel;
+    rt.accent = t->accent;
+    rt.accent_soft = t->accent_soft;
+    rt.accent_alt = t->accent_alt;
+    rt.text_primary = t->text_primary;
+    rt.text_secondary = t->text_secondary;
+    rt.text_muted = t->text_muted;
+    evo_rmlui_set_theme(&rt);
+}
 
 static void prospero_settings_load(void)
 {
@@ -12468,6 +12488,7 @@ static void prospero_settings_load(void)
     /* Themes must be discovered before a saved name can be matched. */
     evo_theme_init();
     evo_theme_set_by_name(loaded_theme);
+    evo_sync_rmlui_theme();
 
     if (
         loaded_profile < 0 ||
@@ -17026,6 +17047,7 @@ int main(void) {
      * until it does, which would draw an empty page rather than crash. */
     evo_draw_bind(&EVO_DRAW_VTABLE);
     evo_rmlui_init(WIDTH, HEIGHT);
+    evo_sync_rmlui_theme();
 
     /* EVO: controller feedback. Sound was already wired at the edge-detect
      * point; this adds the lightbar and gives both one semantic API. The
@@ -17727,6 +17749,7 @@ int main(void) {
                     int count = evo_theme_count();
                     if (theme_selected >= 0 && theme_selected < count) {
                         evo_theme_set(theme_selected);
+                        evo_sync_rmlui_theme();
                         prospero_settings_save();
                         evo_feedback(EVO_FB_CONFIRM);
                         toast("THEME", evo_theme_name(theme_selected));
