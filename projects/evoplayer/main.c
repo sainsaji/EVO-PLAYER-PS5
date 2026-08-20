@@ -12394,6 +12394,25 @@ void evo_sync_rmlui_theme(void)
     evo_rmlui_set_theme(&rt);
 }
 
+/*
+ * Push the current navigation state to the RmlUi navbar overlay.
+ *   section     – EVO_SECTION_* integer (0–6)
+ *   rail_focused – 1 when the user has moved focus into the rail
+ *   rail_index   – which rail item has cursor when focused
+ *   visible      – 1 to show the rail, 0 to hide (OSD / modal screens)
+ */
+void evo_sync_rmlui_nav(int section, int rail_focused, int rail_index, int visible)
+{
+    if (!evo_rmlui_is_initialized()) return;
+    evo_rmlui_nav_params_t nav;
+    nav.active_section = section;
+    nav.rail_focused   = rail_focused;
+    nav.cursor_index   = rail_focused ? rail_index : section;
+    nav.visible        = visible;
+    evo_rmlui_update_nav(&nav);
+}
+
+
 static void prospero_settings_load(void)
 {
     int loaded_profile =
@@ -12488,6 +12507,7 @@ static void prospero_settings_load(void)
     /* Themes must be discovered before a saved name can be matched. */
     evo_theme_init();
     evo_theme_set_by_name(loaded_theme);
+    evo_rmlui_set_version("v" EVO_PLAYER_VERSION);
     evo_sync_rmlui_theme();
 
     if (
@@ -13604,6 +13624,96 @@ static void evo_build_launch_model(evo_launch_model *m)
     m->recent_count = n;
 }
 
+/*
+ * The RmlUi home screen. Same model, same grid, same cursor — this only
+ * translates evo_launch_model into the DOM's flat parameter block and lets
+ * the retained engine lay it out.
+ */
+static void evo_rmlui_draw_launch(uint32_t *fb, const evo_launch_model *m,
+                                  const evo_grid *g)
+{
+    /* Sections 1..6: HOME is left off the shelf, because offering "go home"
+     * on the home screen is noise. Mirrors library_section() in evo_screens.c. */
+    static const char *lib_icons[EVO_SECTION_COUNT - 1] = {
+        "../icons/icon_browse_usb.png",
+        "../icons/icon_recent_files.png",
+        "../icons/icon_favorites.png",
+        "../icons/icon_emby.png",
+        "../icons/icon_settings.png",
+        "../icons/icon_about_support.png"
+    };
+
+    evo_rmlui_launch_params_t p;
+    int rec_scroll = evo_grid_row_scroll(g, EVO_LAUNCH_ROW_RECENT);
+    int rec_cursor = evo_grid_row_col(g, EVO_LAUNCH_ROW_RECENT);
+    int rec_active = evo_grid_row_active(g, EVO_LAUNCH_ROW_RECENT);
+    int lib_cursor = evo_grid_row_col(g, EVO_LAUNCH_ROW_LIBRARY);
+    int lib_active = evo_grid_row_active(g, EVO_LAUNCH_ROW_LIBRARY);
+    int recent = m->recent_count;
+    int i;
+
+    memset(&p, 0, sizeof(p));
+
+    p.app_name   = "EVO PLAYER";
+    p.version    = "VERSION " EVO_PLAYER_VERSION;
+    p.clock      = m->clock;
+    p.theme_name = m->theme_name;
+
+    p.hero_eyebrow  = m->has_resume ? "CONTINUE WATCHING" : "WELCOME";
+    p.hero_title    = m->hero_title ? m->hero_title : "EVO PLAYER";
+    p.hero_detail   = m->hero_detail;
+    p.hero_action   = m->hero_action;
+    p.hero_progress = m->hero_progress;
+    p.hero_art      = m->hero_art.pixels;
+    p.hero_art_w    = m->hero_art.w;
+    p.hero_art_h    = m->hero_art.h;
+    p.hero_focused  = evo_grid_row_active(g, EVO_LAUNCH_ROW_HERO);
+
+    if (recent > EVO_LAUNCH_RECENT_MAX) recent = EVO_LAUNCH_RECENT_MAX;
+
+    /*
+     * The DOM holds six tiles and the C side hands it the window, exactly as
+     * draw_shelf() blits six from `scroll`. Nothing is allocated per frame
+     * and a shelf of any length costs the same.
+     */
+    p.recent_total  = recent;
+    p.recent_cursor = rec_active ? rec_cursor : -1;
+    p.recent_visible = 0;
+
+    for (i = 0; i < EVO_RMLUI_TILES; i++) {
+        int index = rec_scroll + i;
+
+        if (index >= recent) break;
+
+        p.recent[i].title      = m->recent[index].title;
+        p.recent[i].detail     = m->recent[index].detail;
+        p.recent[i].icon_path  = "../icons/icon_recent_files.png";
+        p.recent[i].progress   = m->recent[index].progress;
+        p.recent[i].art        = m->recent[index].art.pixels;
+        p.recent[i].art_w      = m->recent[index].art.w;
+        p.recent[i].art_h      = m->recent[index].art.h;
+        p.recent[i].is_focused = (rec_active && index == rec_cursor);
+        p.recent_visible++;
+    }
+
+    p.library_visible = EVO_SECTION_COUNT - 1;
+    if (p.library_visible > EVO_RMLUI_TILES) p.library_visible = EVO_RMLUI_TILES;
+
+    for (i = 0; i < p.library_visible; i++) {
+        const evo_section_info *info = evo_section_get((evo_section)(i + 1));
+
+        p.library[i].title      = info->label;
+        p.library[i].detail     = info->blurb;
+        p.library[i].icon_path  = lib_icons[i];
+        p.library[i].progress   = -1;
+        p.library[i].is_focused = (lib_active && i == lib_cursor);
+    }
+
+    evo_rmlui_update_launch(&p);
+    evo_sync_rmlui_nav(EVO_SECTION_HOME, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_launch(fb, WIDTH, HEIGHT);
+}
+
 void draw_menu_linear(uint32_t *fb)
 {
     evo_launch_model model;
@@ -13626,6 +13736,11 @@ void draw_menu_linear(uint32_t *fb)
 
     evo_grid_tick(&evo_launch_grid, EVO_BLEED_X, EVO_TILE_PITCH,
                   (uint32_t)perf_now_ms());
+
+    if (evo_rmlui_is_initialized()) {
+        evo_rmlui_draw_launch(fb, &model, &evo_launch_grid);
+        return;
+    }
 
     evo_screen_launch(fb, &model, &evo_launch_grid);
 }
@@ -13655,6 +13770,30 @@ static void evo_launch_nav(int dx, int dy)
     if (dx) evo_feedback_for_move(evo_grid_move_h(&evo_launch_grid, dx));
 }
 
+/*
+ * LEFT on the home screen.
+ *
+ * Shelves clamp rather than wrap, so a LEFT that cannot move is free to mean
+ * something else — and it should mean the same thing it does in every other
+ * section: open the navigation rail. Without this the rail was drawn on the
+ * home screen but unreachable from it, so HOME was the one section you could
+ * not leave sideways. The hero is a one-item row, so it opens the rail on the
+ * first press.
+ */
+static void evo_launch_nav_left(void)
+{
+    if (!evo_launch_grid_ready) return;
+
+    if (evo_grid_col(&evo_launch_grid) <= 0) {
+        evo_rail_focused = 1;
+        evo_rail_index   = (int)EVO_SECTION_HOME;
+        evo_feedback(EVO_FB_OPEN);
+        return;
+    }
+
+    evo_launch_nav(-1, 0);
+}
+
 static void evo_play_recent(int index)
 {
     if (index < 0 || index >= recent_file_count) {
@@ -13675,6 +13814,9 @@ static void evo_play_recent(int index)
 
     start_video_playback(current_media_path);
 }
+
+/* Defined with the rail, which owns the other section-entry resets. */
+static void evo_browser_enter_root(void);
 
 static void evo_launch_activate(void)
 {
@@ -13704,6 +13846,7 @@ static void evo_launch_activate(void)
 
     if (target == EVO_SCREEN_BROWSER) load_usb_files();
     if (target == EVO_SCREEN_SETTINGS) settings_selected = 0;
+    if (target == EVO_SCREEN_BROWSER)  evo_browser_enter_root();
 
     evo_nav_push(target);
     screen = (int)target;
@@ -14022,6 +14165,109 @@ static void evo_browser_page(int direction)
     file_scroll   = evo_browser_focus.scroll;
 }
 
+/*
+ * Draw the browser through RmlUi. Returns 1 when it handled the frame.
+ *
+ * The model is already built by the caller — the same one the immediate-mode
+ * screen consumes — so this only reshapes it for the DOM. `entries` covers
+ * the visible window only, with entries[0] at absolute index `first`.
+ */
+static int evo_rmlui_draw_browser(uint32_t *fb, const evo_browser_model *m,
+                                  const evo_focus *f)
+{
+    evo_rmlui_browser_params_t p;
+    int i;
+
+    if (!evo_rmlui_is_initialized()) return 0;
+
+    memset(&p, 0, sizeof(p));
+    p.path         = m->path;
+    p.at_root      = m->at_root;
+    p.rail_focused = evo_rail_focused;
+    p.total_count  = m->count;
+    p.cursor_index = (m->count > 0 && f) ? f->index : -1;
+
+    if (m->count <= 0) {
+        p.is_empty    = 1;
+        p.empty_title = "NOTHING HERE";
+        p.empty_hint  = "CONNECT A USB DRIVE WITH MEDIA ON IT";
+    }
+
+    for (i = 0; i < m->entry_count && i < EVO_RMLUI_BROWSER_ROWS; i++) {
+        const evo_browser_entry *e = &m->entries[i];
+        int index = m->first + i;
+
+        p.rows[i].name        = e->name;
+        p.rows[i].detail      = e->detail;
+        p.rows[i].progress    = e->progress;
+        p.rows[i].is_favorite = e->favorite;
+        p.rows[i].is_focused  = (f && index == f->index);
+
+        switch (e->kind) {
+            case EVO_FILE_FOLDER:
+                p.rows[i].icon_path = "../icons/icon_folder.png";
+                p.rows[i].badge     = "DIR";
+                break;
+            case EVO_FILE_AUDIO:
+                p.rows[i].icon_path = "../icons/icon_subtitles.png";
+                p.rows[i].badge     = "AUDIO";
+                break;
+            case EVO_FILE_VIDEO:
+                p.rows[i].icon_path = "../icons/icon_resume.png";
+                p.rows[i].badge     = NULL;
+                break;
+            default:
+                p.rows[i].icon_path = "../icons/icon_about_support.png";
+                p.rows[i].badge     = NULL;
+                break;
+        }
+        p.row_count++;
+    }
+
+    if (m->inspect) {
+        const evo_browser_inspect *in = m->inspect;
+
+        p.ins_name          = in->name;
+        p.ins_kind          = in->kind;
+        p.ins_ext           = in->extension;
+        p.ins_probing       = in->probing;
+        p.ins_preview_badge = in->preview_badge;
+        p.ins_preview       = in->preview.pixels;
+        p.ins_preview_w     = in->preview.w;
+        p.ins_preview_h     = in->preview.h;
+
+        /*
+         * Empty fields are skipped rather than shown blank, so a file whose
+         * codecs have not been probed yet shows what is already known instead
+         * of a panel full of empty rows.
+         */
+        #define EVO_INS_PROP(k, v)                                        \
+            do {                                                          \
+                if ((v) && *(v) &&                                        \
+                    p.ins_prop_count < EVO_RMLUI_BROWSER_PROPS) {         \
+                    p.ins_props[p.ins_prop_count].key   = (k);            \
+                    p.ins_props[p.ins_prop_count].value = (v);            \
+                    p.ins_prop_count++;                                   \
+                }                                                         \
+            } while (0)
+
+        EVO_INS_PROP("SIZE",       in->size);
+        EVO_INS_PROP("CONTAINER",  in->container);
+        EVO_INS_PROP("DURATION",   in->duration);
+        EVO_INS_PROP("RESOLUTION", in->resolution);
+        EVO_INS_PROP("VIDEO",      in->video_codec);
+        EVO_INS_PROP("AUDIO",      in->audio_codec);
+        EVO_INS_PROP("SUBTITLES",  in->subtitles);
+
+        #undef EVO_INS_PROP
+    }
+
+    evo_rmlui_update_browser(&p);
+    evo_sync_rmlui_nav(EVO_SECTION_BROWSER, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_browser(fb, WIDTH, HEIGHT);
+    return 1;
+}
+
 void draw_usb_browser(uint32_t *fb)
 {
     evo_browser_model   model;
@@ -14148,6 +14394,8 @@ void draw_usb_browser(uint32_t *fb)
         model.inspect = &inspect;
     }
 
+    if (evo_rmlui_draw_browser(fb, &model, &evo_browser_focus)) return;
+
     evo_screen_browser(fb, &model, &evo_browser_focus,
                        evo_rail_focused, evo_rail_index);
 }
@@ -14222,6 +14470,114 @@ static void evo_page_nav(int *selected, int count, int delta)
 static evo_list_entry evo_recent_rows[MAX_RECENT_FILES];
 static char           evo_recent_detail[MAX_RECENT_FILES][80];
 
+/* ---- RmlUi generic list bridge -------------------------------------------
+ *
+ * RECENT, FAVORITES, EMBY SETUP and EMBY BROWSE are all evo_list_model, so
+ * they all go through here. The DOM holds EVO_RMLUI_LIST_ROWS rows and this
+ * hands it the visible window, which is what keeps a folder of five thousand
+ * files costing the same as one of five.
+ */
+static const char *evo_rmlui_icon_path(int icon)
+{
+    switch (icon) {
+        case EVO_IC_HOME:      return "../icons/icon_home.png";
+        case EVO_IC_USB:       return "../icons/icon_browse_usb.png";
+        case EVO_IC_RECENT:    return "../icons/icon_recent_files.png";
+        case EVO_IC_FAVORITE:  return "../icons/icon_favorites.png";
+        case EVO_IC_EMBY:      return "../icons/icon_emby.png";
+        case EVO_IC_SETTINGS:  return "../icons/icon_settings.png";
+        case EVO_IC_ABOUT:     return "../icons/icon_about_support.png";
+        case EVO_IC_TOOLS:     return "../icons/icon_developer_tools.png";
+        case EVO_IC_PALETTE:   return "../icons/icon_palette.png";
+        case EVO_IC_SUBTITLES: return "../icons/icon_subtitles.png";
+        case EVO_IC_RESUME:    return "../icons/icon_resume.png";
+        case EVO_IC_FOLDER:    return "../icons/icon_folder.png";
+        default:               return "../icons/icon_settings.png";
+    }
+}
+
+static const char *evo_rmlui_glyph_path(int glyph)
+{
+    switch (glyph) {
+        case EVO_GLYPH_CROSS:    return "../icons/btn_cross.png";
+        case EVO_GLYPH_CIRCLE:   return "../icons/btn_circle.png";
+        case EVO_GLYPH_TRIANGLE: return "../icons/btn_triangle.png";
+        case EVO_GLYPH_SQUARE:   return "../icons/btn_square.png";
+        case EVO_GLYPH_LSTICK:
+        case EVO_GLYPH_RSTICK:   return "../icons/btn_lstick.png";
+        default:                 return "../icons/btn_dpad.png";
+    }
+}
+
+/*
+ * Draw one evo_list_model through RmlUi. Returns 1 when it handled the frame,
+ * 0 when RmlUi is not up and the caller should fall back to the immediate-mode
+ * renderer — so every screen keeps working if a document fails to load.
+ */
+static int evo_rmlui_draw_list(uint32_t *fb, const evo_list_model *m,
+                               const evo_focus *f,
+                               const evo_hint *hints, int hint_count)
+{
+    evo_rmlui_list_params_t p;
+    int scroll = f ? f->scroll : 0;
+    int cursor = f ? f->index : 0;
+    int i;
+
+    if (!evo_rmlui_is_initialized()) return 0;
+
+    memset(&p, 0, sizeof(p));
+    p.title        = m->title;
+    p.subtitle     = m->subtitle;
+    p.section      = (int)m->section;
+    p.rail_focused = evo_rail_focused;
+    p.total_count  = m->count;
+    p.cursor_index = (m->count > 0) ? cursor : -1;
+
+    if (m->count <= 0) {
+        p.is_empty     = 1;
+        p.empty_title  = m->empty_title;
+        p.empty_hint   = m->empty_hint;
+        p.empty_icon   = evo_rmlui_icon_path(m->empty_icon);
+    } else {
+        /*
+         * Never more rows than the focus model believes are visible. Its
+         * capacity comes from EVO_ROW_H / EVO_ROW_PITCH against the content
+         * band, and it is what decides when the list scrolls — filling more
+         * DOM rows than that pushes the last ones under the footer and lets
+         * the cursor walk off the bottom of the screen.
+         */
+        int cap = (f && f->visible > 0) ? f->visible : EVO_RMLUI_LIST_ROWS;
+
+        if (cap > EVO_RMLUI_LIST_ROWS) cap = EVO_RMLUI_LIST_ROWS;
+
+        for (i = 0; i < cap; i++) {
+            int index = scroll + i;
+
+            if (index >= m->count) break;
+
+            p.rows[i].title       = m->entries[index].title;
+            p.rows[i].detail      = m->entries[index].detail;
+            p.rows[i].icon_path   = evo_rmlui_icon_path(m->entries[index].icon);
+            p.rows[i].badge       = NULL;
+            p.rows[i].progress    = m->entries[index].progress;
+            p.rows[i].has_chevron = m->entries[index].chevron;
+            p.rows[i].is_focused  = (index == cursor);
+            p.row_count++;
+        }
+    }
+
+    for (i = 0; i < hint_count && i < 4; i++) {
+        p.hints[i].glyph_path = evo_rmlui_glyph_path(hints[i].glyph);
+        p.hints[i].label      = hints[i].label;
+        p.hint_count++;
+    }
+
+    evo_rmlui_update_list(&p);
+    evo_sync_rmlui_nav((int)m->section, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_list(fb, WIDTH, HEIGHT);
+    return 1;
+}
+
 void draw_recent_files_screen(uint32_t *fb)
 {
     evo_list_model m;
@@ -14252,6 +14608,9 @@ void draw_recent_files_screen(uint32_t *fb)
     m.empty_title = "NOTHING PLAYED YET";
     m.empty_hint  = "FILES YOU OPEN WILL APPEAR HERE";
     m.empty_icon  = EVO_IC_RECENT;
+
+    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);
@@ -14297,6 +14656,8 @@ void draw_favorites_screen(uint32_t *fb)
     m.empty_title = "NO FAVORITES YET";
     m.empty_hint  = "PRESS TRIANGLE ON A FILE IN THE BROWSER";
     m.empty_icon  = EVO_IC_FAVORITE;
+
+    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus, hints, 3)) return;
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     hints, 3);
@@ -14354,6 +14715,7 @@ void draw_settings_screen(uint32_t *fb)
         }
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -14437,6 +14799,7 @@ void draw_settings_playback_screen(uint32_t *fb)
         p.rows[3].is_focused = (settings_playback_selected == 3);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -14556,6 +14919,7 @@ void draw_settings_subtitles_screen(uint32_t *fb)
         p.rows[1].is_focused = (settings_subtitles_selected == 1);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -14653,6 +15017,7 @@ void draw_settings_interface_screen(uint32_t *fb)
         p.rows[4].is_focused = (settings_interface_selected == 4);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -14763,6 +15128,7 @@ void draw_settings_system_screen(uint32_t *fb)
         p.rows[2].is_focused = (settings_system_selected == 2);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -14868,6 +15234,7 @@ void draw_developer_tools_screen(uint32_t *fb)
         p.rows[3].is_focused = (evo_tools_selected == 3);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -15251,6 +15618,9 @@ void draw_emby_setup_screen(uint32_t *fb)
     m.entries  = emby_setup_rows;
     m.count    = EMBY_SETUP_COUNT;
 
+    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
+
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
@@ -15287,6 +15657,9 @@ void draw_emby_browse_screen(uint32_t *fb)
     m.empty_title = emby_is_loading ? "FETCHING MEDIA..." : "NO ITEMS FOUND";
     m.empty_hint  = emby_is_loading ? "CONTACTING EMBY SERVER OVER HTTP" : "PRESS CIRCLE TO GO BACK";
     m.empty_icon  = EVO_IC_FOLDER;
+
+    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
 
     evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                     EVO_HINTS_LIST, EVO_HINTS_LIST_N);
@@ -15373,6 +15746,7 @@ void draw_about_support_screen(uint32_t *fb)
         p.rows[5].is_focused = (evo_about_selected == 5);
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -15430,6 +15804,75 @@ void draw_about_support_screen(uint32_t *fb)
 
 static int evo_changelog_selected = 0;
 
+/*
+ * The changelog is master-detail: the releases on the left, what changed in
+ * the selected one on the right. The detail column is the *cursor's* release,
+ * not a fixed one, so moving the cursor rewrites the right-hand panel.
+ */
+static int evo_rmlui_draw_changelog(uint32_t *fb, const evo_changelog_model *m,
+                                    const evo_focus *f)
+{
+    static const char *kind_label[] = {
+        "NEW", "FIXED", "IMPROVED", "REMOVED", "VERSION"
+    };
+
+    evo_rmlui_changelog_params_t p;
+    int cursor = f ? f->index : 0;
+    int scroll = f ? f->scroll : 0;
+    int i;
+
+    if (!evo_rmlui_is_initialized()) return 0;
+    if (m->release_count <= 0) return 0;
+
+    if (cursor < 0) cursor = 0;
+    if (cursor >= m->release_count) cursor = m->release_count - 1;
+
+    memset(&p, 0, sizeof(p));
+    p.title         = "CHANGELOG";
+    p.subtitle      = "WHAT CHANGED IN EACH RELEASE";
+    p.rail_focused  = evo_rail_focused;
+    p.release_total = m->release_count;
+    p.cursor_index  = cursor;
+
+    {
+    int cap = (f && f->visible > 0) ? f->visible : EVO_RMLUI_CL_RELEASES;
+
+    if (cap > EVO_RMLUI_CL_RELEASES) cap = EVO_RMLUI_CL_RELEASES;
+
+    for (i = 0; i < cap; i++) {
+        int index = scroll + i;
+
+        if (index >= m->release_count) break;
+
+        p.releases[i].version    = m->releases[index].version;
+        p.releases[i].tagline    = m->releases[index].tagline;
+        p.releases[i].date       = m->releases[index].date;
+        p.releases[i].is_focused = (index == cursor);
+        p.release_count++;
+    }
+    }
+
+    p.detail_version = m->releases[cursor].version;
+    p.detail_tagline = m->releases[cursor].tagline;
+    p.item_total     = m->releases[cursor].item_count;
+
+    for (i = 0; i < m->releases[cursor].item_count &&
+                i < EVO_RMLUI_CL_ITEMS; i++) {
+        int kind = (int)m->releases[cursor].items[i].kind;
+
+        if (kind < 0 || kind > 4) kind = 0;
+
+        p.items[i].kind = kind_label[kind];
+        p.items[i].text = m->releases[cursor].items[i].text;
+        p.item_count++;
+    }
+
+    evo_rmlui_update_changelog(&p);
+    evo_sync_rmlui_nav(EVO_SECTION_ABOUT, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_changelog(fb, WIDTH, HEIGHT);
+    return 1;
+}
+
 void draw_changelog_screen(uint32_t *fb)
 {
     static const evo_hint hints[2] = {
@@ -15444,6 +15887,8 @@ void draw_changelog_screen(uint32_t *fb)
     memset(&m, 0, sizeof(m));
     m.releases      = EVO_CHANGELOG_RELEASES;
     m.release_count = EVO_CHANGELOG_RELEASE_COUNT;
+
+    if (evo_rmlui_draw_changelog(fb, &m, &evo_page_focus)) return;
 
     evo_screen_changelog(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
                          hints, 2);
@@ -15784,6 +16229,29 @@ static int evo_section_for_screen_visible(int scr)
            scr != SCREEN_MAIN_MENU;
 }
 
+/*
+ * Enter the browser as a section, at the USB root.
+ *
+ * `current_path` is shell state that playback also writes: finishing a file
+ * and auto-advancing points it at that file's folder (see the next-video
+ * handler), and so does opening anything from Recent or Favorites. That is
+ * right for "back to where this file lives", but it meant selecting BROWSE
+ * from the rail or the home shelf dropped you into whatever folder was last
+ * played rather than at /mnt/usb0 — the browser appeared to open at a random
+ * directory.
+ *
+ * So arriving *at the section* resets to the root, while Back out of the
+ * player or the reader still returns to the folder you were in.
+ */
+static void evo_browser_enter_root(void)
+{
+    snprintf(current_path, sizeof(current_path), "/mnt/usb0");
+    g_browser_search[0] = '\0';
+    file_selected = 0;
+    evo_browser_focus_ready = 0;   /* re-inits scroll against the new count */
+    load_usb_files();
+}
+
 static void evo_rail_nav(int delta)
 {
     evo_rail_index = evo_sidenav_step(evo_rail_index, delta);
@@ -15811,7 +16279,7 @@ static void evo_rail_activate(void)
         return;
     }
 
-    if (info->screen == EVO_SCREEN_BROWSER)  load_usb_files();
+    if (info->screen == EVO_SCREEN_BROWSER)  evo_browser_enter_root();
     if (info->screen == EVO_SCREEN_SETTINGS) settings_selected = 0;
 
     /* Replace, not push: moving between sections is lateral, so Back should
@@ -15865,6 +16333,7 @@ void draw_profile_screen(uint32_t *fb)
         }
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -15952,6 +16421,7 @@ void draw_theme_select_screen(uint32_t *fb)
         }
 
         evo_rmlui_update_settings(&p);
+        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
         return;
     }
@@ -17466,7 +17936,7 @@ int main(void) {
                 } else if (screen == SCREEN_PLAYER) {
                     prospero_scrub_move(-10.0);
                 } else if (screen == SCREEN_MAIN_MENU) {
-                    evo_launch_nav(-1, 0);
+                    evo_launch_nav_left();
                 } else if (evo_section_for_screen_visible(screen) &&
                            !evo_rail_focused) {
                     /* EVO: LEFT out of the content column opens the rail.
@@ -17494,11 +17964,14 @@ int main(void) {
                     evo_subs_step_size(+1);
                 } else if (screen == SCREEN_PLAYER) {
                     prospero_scrub_move(10.0);
-                } else if (screen == SCREEN_MAIN_MENU) {
-                    evo_launch_nav(+1, 0);
                 } else if (evo_rail_focused) {
+                    /* Ahead of the per-screen cases: on the home screen RIGHT
+                     * moved the shelf cursor instead of closing the rail, so
+                     * the rail could be opened and not dismissed. */
                     evo_rail_focused = 0;
                     evo_feedback(EVO_FB_CANCEL);
+                } else if (screen == SCREEN_MAIN_MENU) {
+                    evo_launch_nav(+1, 0);
                 }
             }
 

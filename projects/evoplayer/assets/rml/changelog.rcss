@@ -1,0 +1,300 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Changelog
+ *
+ * Master-detail, like the immediate-mode original: the releases down the
+ * left, what changed in the selected one down the right. A single flat list
+ * of every item across every release is unreadable at ten feet, which is why
+ * this screen is not just another list.rml.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#changelog-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Header =============================== */
+
+#changelog-header {
+    position: absolute;
+    left: 0;
+    top: 96px;
+    width: 1704px;
+    height: 52px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+#changelog-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#changelog-indicator {
+    width: 5px;
+    height: 62px;
+    background-color: #00cdff;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#changelog-header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#changelog-title {
+    display: block;
+    font-size: 43px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#changelog-subtitle {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-top: 3px;
+}
+
+#changelog-counter {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+/* ============================ Master column ============================ */
+
+/* 600 for the releases, 24 gutter, 1080 for the detail = 1704. */
+#changelog-releases {
+    position: absolute;
+    left: 0;
+    top: 222px;
+    width: 600px;
+    display: flex;
+    flex-direction: column;
+}
+
+.clrel {
+    width: 600px;
+    height: 96px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    padding-left: 22px;
+    padding-right: 22px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.clrel-focused {
+    background-color: #1b2e4cf5;
+    border-width: 1.5px;
+    border-color: #00cdff;
+}
+
+.clrel-text {
+    display: flex;
+    flex-direction: column;
+    width: 430px;
+}
+
+.clrel-ver {
+    display: block;
+    font-size: 30px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.5px;
+}
+
+.clrel-tag {
+    display: block;
+    font-size: 17px;
+    font-weight: normal;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.clrel-date {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+}
+
+/* ============================ Detail column ============================ */
+
+#changelog-detail {
+    position: absolute;
+    left: 624px;
+    top: 222px;
+    width: 1080px;
+    height: 714px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    padding: 26px;
+}
+
+#cldetail-head {
+    display: flex;
+    flex-direction: column;
+    width: 1028px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom-width: 1px;
+    border-bottom-color: #1b2740;
+}
+
+#cldetail-ver {
+    display: block;
+    font-size: 36px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.5px;
+}
+
+#cldetail-tag {
+    display: block;
+    font-size: 17px;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5px;
+    margin-top: 6px;
+}
+
+#cldetail-items {
+    display: flex;
+    flex-direction: column;
+    width: 1028px;
+}
+
+.clitem {
+    width: 1028px;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    margin-bottom: 14px;
+}
+
+/*
+ * The kind is a chip rather than a colour on the text: NEW, FIXED and
+ * IMPROVED have to be told apart at ten feet, and hue alone does not carry
+ * that far — nor does it survive a theme that recolours the accent.
+ */
+.clitem-kind {
+    width: 128px;
+    height: 32px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: #243550;
+    background-color: #131d2e;
+    font-size: 15px;
+    font-weight: bold;
+    color: #9fb2cc;
+    letter-spacing: 1px;
+    text-align: center;
+    padding-top: 6px;
+    margin-right: 20px;
+}
+
+.clitem-text {
+    display: block;
+    width: 860px;
+    font-size: 18px;
+    font-weight: normal;
+    color: #cfdcef;
+    letter-spacing: 0.3px;
+    padding-top: 3px;
+}
+
+/* Releases can carry more entries than the panel holds; say so rather than
+ * silently truncating. */
+#cldetail-more {
+    display: none;
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 6px;
+}
+
+/* =============================== Footer =============================== */
+
+#changelog-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 30px;
+    height: 30px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 15px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+#changelog-footer-version {
+    margin-left: auto;
+    font-size: 15px;
+    font-weight: bold;
+    color: #4b586c;
+    letter-spacing: 1px;
+}

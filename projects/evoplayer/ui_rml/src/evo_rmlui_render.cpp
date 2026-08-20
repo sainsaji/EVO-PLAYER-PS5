@@ -92,9 +92,44 @@ Rml::TextureHandle EvoRenderInterface::GenerateTexture(Rml::Span<const Rml::byte
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../stb_image.h"
 
+void EvoRenderInterface::SetMemoryTexture(const std::string& key, const uint32_t* bgra,
+                                          int w, int h)
+{
+    if (!bgra || w <= 0 || h <= 0) {
+        m_mem_textures.erase(key);
+        return;
+    }
+
+    MemImage& img = m_mem_textures[key];
+    img.width = w;
+    img.height = h;
+    img.pixels.assign(bgra, bgra + (size_t)w * (size_t)h);
+}
+
+void EvoRenderInterface::DropMemoryTexture(const std::string& key)
+{
+    m_mem_textures.erase(key);
+}
+
 Rml::TextureHandle EvoRenderInterface::LoadTexture(Rml::Vector2i& texture_dimensions,
                                                   const Rml::String& source)
 {
+    /* Runtime artwork: served from the memory registry, never the disk. */
+    if (source.compare(0, 8, "evo:mem/") == 0) {
+        auto it = m_mem_textures.find(std::string(source));
+        if (it == m_mem_textures.end()) {
+            texture_dimensions = Rml::Vector2i(0, 0);
+            return 0;
+        }
+
+        texture_dimensions = Rml::Vector2i(it->second.width, it->second.height);
+        RmlTexture* tex = new RmlTexture();
+        tex->width = it->second.width;
+        tex->height = it->second.height;
+        tex->pixels = it->second.pixels;
+        return reinterpret_cast<Rml::TextureHandle>(tex);
+    }
+
     std::string filename = source;
     size_t last_slash = source.find_last_of("/\\");
     if (last_slash != std::string::npos) {
@@ -236,14 +271,37 @@ static void draw_triangle(uint32_t* fb, int screen_w, int screen_h,
                     float u = w0 * v0.tex_coord.x + w1 * v1.tex_coord.x + w2 * v2.tex_coord.x;
                     float v = w0 * v0.tex_coord.y + w1 * v1.tex_coord.y + w2 * v2.tex_coord.y;
 
-                    int tx = std::clamp((int)(u * tex->width), 0, tex->width - 1);
-                    int ty = std::clamp((int)(v * tex->height), 0, tex->height - 1);
-                    uint32_t tex_pixel = tex->pixels[ty * tex->width + tx];
+                    // Bilinear sampling
+                    float fx = u * (float)tex->width  - 0.5f;
+                    float fy = v * (float)tex->height - 0.5f;
+                    int ix0 = std::clamp((int)std::floor(fx), 0, tex->width  - 1);
+                    int iy0 = std::clamp((int)std::floor(fy), 0, tex->height - 1);
+                    int ix1 = std::clamp(ix0 + 1,             0, tex->width  - 1);
+                    int iy1 = std::clamp(iy0 + 1,             0, tex->height - 1);
+                    float fx_f = fx - std::floor(fx);
+                    float fy_f = fy - std::floor(fy);
 
-                    uint32_t tr = tex_pixel & 0xFF;
-                    uint32_t tg = (tex_pixel >> 8) & 0xFF;
-                    uint32_t tb = (tex_pixel >> 16) & 0xFF;
-                    uint32_t ta = (tex_pixel >> 24) & 0xFF;
+                    uint32_t p00 = tex->pixels[iy0 * tex->width + ix0];
+                    uint32_t p10 = tex->pixels[iy0 * tex->width + ix1];
+                    uint32_t p01 = tex->pixels[iy1 * tex->width + ix0];
+                    uint32_t p11 = tex->pixels[iy1 * tex->width + ix1];
+
+                    float if0 = 1.0f - fx_f, if1 = fx_f;
+                    float vf0 = 1.0f - fy_f, vf1 = fy_f;
+                    auto blerp_tri = [&](int shift) -> uint32_t {
+                        float c00 = (float)((p00 >> shift) & 0xFF);
+                        float c10 = (float)((p10 >> shift) & 0xFF);
+                        float c01 = (float)((p01 >> shift) & 0xFF);
+                        float c11 = (float)((p11 >> shift) & 0xFF);
+                        float c = (c00 * if0 + c10 * if1) * vf0
+                                + (c01 * if0 + c11 * if1) * vf1;
+                        return (uint32_t)(c + 0.5f);
+                    };
+
+                    uint32_t tr = blerp_tri(0);
+                    uint32_t tg = blerp_tri(8);
+                    uint32_t tb = blerp_tri(16);
+                    uint32_t ta = blerp_tri(24);
 
                     uint32_t mr = (r * tr) / 255;
                     uint32_t mg = (g * tg) / 255;
@@ -286,6 +344,25 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
 
     if (rx0 >= rx1 || ry0 >= ry1) return true;
 
+    /*
+     * Gradient decorators are vertex-coloured geometry, not shaders, so they
+     * arrive here as an ordinary axis-aligned quad whose four corners differ.
+     * This path only ever reads v0's colour, which flattened every gradient
+     * to its start colour. Hand those quads to the barycentric rasterizer,
+     * which interpolates; flat quads — the overwhelming majority — still take
+     * the fast path.
+     */
+    auto same_colour = [](const auto& a_, const auto& b_) {
+        return a_.red == b_.red && a_.green == b_.green &&
+               a_.blue == b_.blue && a_.alpha == b_.alpha;
+    };
+    if (!same_colour(v0.colour, v1.colour) ||
+        !same_colour(v0.colour, v2.colour) ||
+        !same_colour(v0.colour, v3.colour))
+    {
+        return false;
+    }
+
     float qw = x1 - x0;
     float qh = y2 - y0;
     if (qw <= 0.001f || qh <= 0.001f) return true;
@@ -306,7 +383,7 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
         return true;
     }
 
-    // Textured quad (Font glyphs or icons)
+    // Textured quad — bilinear filtering for antialiased font glyphs
     float u0 = v0.tex_coord.x, v_t0 = v0.tex_coord.y;
     float u1 = v1.tex_coord.x, v_t1 = v2.tex_coord.y;
     float min_u = std::min(u0, u1), max_u = std::max(u0, u1);
@@ -315,27 +392,128 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
     float du_dx = (u1 - u0) / qw;
     float dv_dy = (v_t1 - v_t0) / qh;
 
+    float fw = (float)tex->width;
+    float fh = (float)tex->height;
+
+    /*
+     * Minification needs a box filter, not four taps.
+     *
+     * The icons are 72x72 and the controller glyphs 48x48, drawn at 20-30 px.
+     * Bilinear reads four texels out of the nine or more each destination
+     * pixel actually covers, so which four you land on changes with subpixel
+     * position and the edges break up — the jagged small elements visible on
+     * hardware but not in a half-scale screenshot, which resamples them away.
+     *
+     * Averaging the real footprint costs a few texels per pixel on elements
+     * that are small by definition, and nothing at all when magnifying: text
+     * glyphs are rendered at size and take the bilinear path below unchanged.
+     */
+    const float texels_x = std::abs(du_dx) * fw;
+    const float texels_y = std::abs(dv_dy) * fh;
+
+    if (texels_x > 1.3f || texels_y > 1.3f) {
+        int bx = std::clamp((int)(texels_x + 0.5f), 1, 16);
+        int by = std::clamp((int)(texels_y + 0.5f), 1, 16);
+        float inv_n = 1.0f / (float)(bx * by);
+
+        for (int y = ry0; y < ry1; y++) {
+            uint32_t* row = &fb[y * screen_w];
+            float cur_v = std::clamp(v_t0 + (y + 0.5f - y0) * dv_dy, min_v, max_v);
+            int sy0 = (int)(cur_v * fh) - by / 2;
+            float cur_u = u0 + (rx0 + 0.5f - x0) * du_dx;
+
+            for (int x = rx0; x < rx1; x++) {
+                float cu = std::clamp(cur_u, min_u, max_u);
+                cur_u += du_dx;
+
+                int sx0 = (int)(cu * fw) - bx / 2;
+                float ar = 0.0f, ag = 0.0f, ab = 0.0f, aa = 0.0f;
+
+                for (int j = 0; j < by; j++) {
+                    int sy = std::clamp(sy0 + j, 0, tex->height - 1);
+                    const uint32_t* trow = &tex->pixels[sy * tex->width];
+                    for (int i2 = 0; i2 < bx; i2++) {
+                        int sx = std::clamp(sx0 + i2, 0, tex->width - 1);
+                        uint32_t px = trow[sx];
+                        ar += (float)(px & 0xFF);
+                        ag += (float)((px >> 8) & 0xFF);
+                        ab += (float)((px >> 16) & 0xFF);
+                        aa += (float)((px >> 24) & 0xFF);
+                    }
+                }
+
+                uint32_t ta = (uint32_t)(aa * inv_n + 0.5f);
+                if (ta == 0) continue;
+
+                uint32_t tr = (uint32_t)(ar * inv_n + 0.5f);
+                uint32_t tg = (uint32_t)(ag * inv_n + 0.5f);
+                uint32_t tb = (uint32_t)(ab * inv_n + 0.5f);
+
+                uint32_t mr = (r * tr) / 255;
+                uint32_t mg = (g * tg) / 255;
+                uint32_t mb = (b * tb) / 255;
+                uint32_t ma = (a * ta) / 255;
+
+                uint32_t modulated = (ma << 24) | (mb << 16) | (mg << 8) | mr;
+                row[x] = blend_bgra(row[x], modulated, ma);
+            }
+        }
+        return true;
+    }
+
     for (int y = ry0; y < ry1; y++) {
         uint32_t* row = &fb[y * screen_w];
         float cur_v = v_t0 + (y + 0.5f - y0) * dv_dy;
         cur_v = std::clamp(cur_v, min_v, max_v);
-        int ty = std::clamp((int)(cur_v * tex->height), 0, tex->height - 1);
-        const uint32_t* tex_row = &tex->pixels[ty * tex->width];
+
+        // Bilinear V interpolation
+        float fy = cur_v * fh - 0.5f;
+        int iy0 = (int)std::floor(fy);
+        int iy1 = iy0 + 1;
+        float fy_frac = fy - (float)iy0;
+        iy0 = std::clamp(iy0, 0, tex->height - 1);
+        iy1 = std::clamp(iy1, 0, tex->height - 1);
+        const uint32_t* trow0 = &tex->pixels[iy0 * tex->width];
+        const uint32_t* trow1 = &tex->pixels[iy1 * tex->width];
 
         float cur_u = u0 + (rx0 + 0.5f - x0) * du_dx;
 
         for (int x = rx0; x < rx1; x++) {
             float clamped_u = std::clamp(cur_u, min_u, max_u);
-            int tx = std::clamp((int)(clamped_u * tex->width), 0, tex->width - 1);
             cur_u += du_dx;
 
-            uint32_t tex_pixel = tex_row[tx];
-            uint32_t ta = (tex_pixel >> 24) & 0xFF;
+            // Bilinear U interpolation
+            float fx = clamped_u * fw - 0.5f;
+            int ix0 = (int)std::floor(fx);
+            int ix1 = ix0 + 1;
+            float fx_frac = fx - (float)ix0;
+            ix0 = std::clamp(ix0, 0, tex->width - 1);
+            ix1 = std::clamp(ix1, 0, tex->width - 1);
+
+            // Sample 4 neighbours
+            uint32_t p00 = trow0[ix0], p10 = trow0[ix1];
+            uint32_t p01 = trow1[ix0], p11 = trow1[ix1];
+
+            // Bilinear blend per channel — lambda with captured fracs
+            float if0 = 1.0f - fx_frac, if1 = fx_frac;
+            float vf0 = 1.0f - fy_frac, vf1 = fy_frac;
+
+            auto blerp = [&](int shift) -> uint32_t {
+                float c00 = (float)((p00 >> shift) & 0xFF);
+                float c10 = (float)((p10 >> shift) & 0xFF);
+                float c01 = (float)((p01 >> shift) & 0xFF);
+                float c11 = (float)((p11 >> shift) & 0xFF);
+                float c = (c00 * if0 + c10 * if1) * vf0
+                        + (c01 * if0 + c11 * if1) * vf1;
+                return (uint32_t)(c + 0.5f);
+            };
+
+            uint32_t ta = blerp(24);
             if (ta == 0) continue;
 
-            uint32_t tr = tex_pixel & 0xFF;
-            uint32_t tg = (tex_pixel >> 8) & 0xFF;
-            uint32_t tb = (tex_pixel >> 16) & 0xFF;
+            uint32_t tr = blerp(0);
+            uint32_t tg = blerp(8);
+            uint32_t tb = blerp(16);
 
             uint32_t mr = (r * tr) / 255;
             uint32_t mg = (g * tg) / 255;

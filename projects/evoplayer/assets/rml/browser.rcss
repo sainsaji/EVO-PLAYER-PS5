@@ -1,0 +1,477 @@
+/* =============================================================================
+ * EVO PLAYER PRO - USB Storage Browser
+ *
+ * Three columns, as in the immediate-mode original: the navigation rail
+ * (navbar.rml), the file list, and an inspector showing what the selected
+ * file actually is. The list is virtualised — the DOM holds twelve rows and
+ * the C side swaps their text as the window moves, so a folder of five
+ * thousand files costs exactly what one of five costs.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#browser-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Header =============================== */
+
+#browser-header {
+    position: absolute;
+    left: 0;
+    top: 96px;
+    width: 1704px;
+    height: 52px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+
+#browser-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#browser-indicator {
+    width: 5px;
+    height: 62px;
+    background-color: #00cdff;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#browser-header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#browser-title {
+    display: block;
+    font-size: 43px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+/* The atlas carries '/', so the path is shown as it really is rather than
+ * transliterated into '>' the way it once was. */
+#browser-path {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    width: 900px;
+}
+
+#browser-counter {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+/* ============================== File list ============================== */
+
+/* 1116 for the list, 24 of gutter, 564 for the inspector = 1704. */
+#browser-list {
+    position: absolute;
+    left: 0;
+    top: 222px;
+    width: 1116px;
+    display: flex;
+    flex-direction: column;
+}
+
+.brow {
+    position: relative;
+    width: 1116px;
+    height: 84px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    padding-left: 26px;
+    padding-right: 26px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.brow-focused {
+    background-color: #1b2e4cf5;
+    border-width: 1.5px;
+    border-color: #00cdff;
+}
+
+.brow-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.brow-icon-box {
+    width: 54px;
+    height: 54px;
+    background-color: #131c2e;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16px;
+}
+
+.brow-focused .brow-icon-box {
+    background-color: #1a2a47;
+}
+
+.brow-icon {
+    width: 28px;
+    height: 28px;
+    display: inline-block;
+}
+
+.brow-text {
+    display: flex;
+    flex-direction: column;
+    width: 806px;
+}
+
+.brow-name {
+    display: block;
+    font-size: 28px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.brow-detail {
+    display: block;
+    font-size: 17px;
+    font-weight: normal;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.brow-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+}
+
+.brow-fav {
+    width: 24px;
+    height: 24px;
+    display: none;
+}
+
+.brow-badge {
+    background-color: #131d2e;
+    border-width: 1px;
+    border-color: #243550;
+    border-radius: 7px;
+    padding: 7px 14px;
+    font-size: 15px;
+    font-weight: bold;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+}
+
+/*
+ * Resume position, as an underline on the row's bottom edge rather than a
+ * floating bar. Inset above the edge it ran straight through the detail
+ * line — a 62 px row has no spare band between centred two-line text and
+ * its own border. The row clips, so this follows the rounded corners.
+ */
+.brow-track {
+    display: none;
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1116px;
+    height: 3px;
+    background-color: #2a3b5599;
+}
+
+.brow-fill {
+    display: block;
+    width: 0%;
+    height: 3px;
+    background-color: #00cdff;
+}
+
+/* ============================= Empty state ============================= */
+
+#browser-empty {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 320px;
+    width: 1116px;
+    flex-direction: column;
+    align-items: center;
+}
+
+#browser-empty-icon-box {
+    width: 128px;
+    height: 128px;
+    border-radius: 64px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 26px;
+}
+
+#browser-empty-icon {
+    width: 56px;
+    height: 56px;
+    display: inline-block;
+}
+
+#browser-empty-title {
+    display: block;
+    font-size: 33px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 1px;
+}
+
+#browser-empty-hint {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 12px;
+}
+
+/* ============================== Inspector ============================== */
+
+#inspector {
+    position: absolute;
+    left: 1140px;
+    top: 222px;
+    width: 564px;
+    height: 714px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    padding: 20px;
+}
+
+/* 16:9 at the panel's inner width, so a frame from the file is shown at the
+ * shape it was shot in rather than letterboxed into a square. */
+#ins-preview {
+    position: relative;
+    width: 524px;
+    height: 295px;
+    background-color: #0a1120;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #2a3b5566;
+    overflow: hidden;
+}
+
+#ins-preview-art {
+    position: absolute;
+    left: 1px;
+    top: 1px;
+    width: 522px;
+    height: 293px;
+    border-radius: 9px;
+}
+
+#ins-preview-empty {
+    position: absolute;
+    left: 0;
+    top: 136px;
+    width: 524px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #3d4c63;
+    letter-spacing: 2px;
+    text-align: center;
+}
+
+#ins-preview-badge {
+    display: none;
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    background-color: #020409d7;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.5px;
+}
+
+#ins-name {
+    display: block;
+    font-size: 26px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.3px;
+    margin-top: 20px;
+}
+
+#ins-kindrow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    margin-bottom: 6px;
+}
+
+#ins-kind {
+    font-size: 15px;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5px;
+}
+
+#ins-ext {
+    background-color: #131d2e;
+    border-width: 1px;
+    border-color: #243550;
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 15px;
+    font-weight: bold;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+}
+
+#ins-props {
+    display: flex;
+    flex-direction: column;
+    width: 524px;
+    margin-top: 10px;
+}
+
+/*
+ * 34, not 40. The inspector shows up to nine properties under a 302 px
+ * preview, and at 40 the ninth row — AUDIO, on any file with both a video
+ * and an audio stream — landed past the panel.
+ */
+.ins-prop {
+    width: 524px;
+    height: 42px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom-width: 1px;
+    border-bottom-color: #1b2740;
+}
+
+.ins-key {
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+}
+
+.ins-val {
+    font-size: 17px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.3px;
+}
+
+/* Codecs and duration need avformat, which takes long enough to be felt, so
+ * the probe is debounced and this says so rather than showing a blank panel. */
+#ins-probing {
+    display: none;
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1.5px;
+    margin-top: 14px;
+}
+
+/* =============================== Footer =============================== */
+
+#browser-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 30px;
+    height: 30px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 15px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+#browser-footer-version {
+    margin-left: auto;
+    font-size: 15px;
+    font-weight: bold;
+    color: #4b586c;
+    letter-spacing: 1px;
+}

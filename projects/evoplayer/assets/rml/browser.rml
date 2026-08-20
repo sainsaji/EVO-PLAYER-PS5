@@ -1,0 +1,277 @@
+<rml>
+<head>
+    <link type="text/rcss" href="browser.rcss"/>
+</head>
+<body id="browser-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="browser-pane">
+        <!-- Header: breadcrumb + counts -->
+        <div id="browser-header">
+            <div id="browser-header-left">
+                <div id="browser-indicator"></div>
+                <div id="browser-header-titles">
+                    <div id="browser-title">USB STORAGE</div>
+                    <div id="browser-path">/usb0</div>
+                </div>
+            </div>
+            <div id="browser-counter"></div>
+        </div>
+
+        <!-- Left: virtualised file list -->
+        <div id="browser-list">
+            <div id="brow-0" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-0" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-0" class="brow-name"></div>
+                        <div id="brow-detail-0" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-0" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-0" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-0" class="brow-track"><div id="brow-fill-0" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-1" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-1" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-1" class="brow-name"></div>
+                        <div id="brow-detail-1" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-1" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-1" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-1" class="brow-track"><div id="brow-fill-1" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-2" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-2" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-2" class="brow-name"></div>
+                        <div id="brow-detail-2" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-2" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-2" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-2" class="brow-track"><div id="brow-fill-2" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-3" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-3" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-3" class="brow-name"></div>
+                        <div id="brow-detail-3" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-3" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-3" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-3" class="brow-track"><div id="brow-fill-3" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-4" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-4" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-4" class="brow-name"></div>
+                        <div id="brow-detail-4" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-4" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-4" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-4" class="brow-track"><div id="brow-fill-4" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-5" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-5" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-5" class="brow-name"></div>
+                        <div id="brow-detail-5" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-5" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-5" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-5" class="brow-track"><div id="brow-fill-5" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-6" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-6" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-6" class="brow-name"></div>
+                        <div id="brow-detail-6" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-6" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-6" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-6" class="brow-track"><div id="brow-fill-6" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-7" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-7" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-7" class="brow-name"></div>
+                        <div id="brow-detail-7" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-7" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-7" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-7" class="brow-track"><div id="brow-fill-7" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-8" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-8" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-8" class="brow-name"></div>
+                        <div id="brow-detail-8" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-8" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-8" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-8" class="brow-track"><div id="brow-fill-8" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-9" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-9" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-9" class="brow-name"></div>
+                        <div id="brow-detail-9" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-9" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-9" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-9" class="brow-track"><div id="brow-fill-9" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-10" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-10" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-10" class="brow-name"></div>
+                        <div id="brow-detail-10" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-10" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-10" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-10" class="brow-track"><div id="brow-fill-10" class="brow-fill"></div></div>
+            </div>
+            <div id="brow-11" class="brow">
+                <div class="brow-left">
+                    <div class="brow-icon-box"><img id="brow-icon-11" class="brow-icon" src="../icons/icon_folder.png"/></div>
+                    <div class="brow-text">
+                        <div id="brow-name-11" class="brow-name"></div>
+                        <div id="brow-detail-11" class="brow-detail"></div>
+                    </div>
+                </div>
+                <div class="brow-right">
+                    <img id="brow-fav-11" class="brow-fav" src="../icons/icon_favorites.png"/>
+                    <div id="brow-badge-11" class="brow-badge"></div>
+                </div>
+                <div id="brow-track-11" class="brow-track"><div id="brow-fill-11" class="brow-fill"></div></div>
+            </div>
+        </div>
+
+        <!-- Left: empty state, when the folder has nothing in it -->
+        <div id="browser-empty">
+            <div id="browser-empty-icon-box">
+                <img id="browser-empty-icon" src="../icons/icon_browse_usb.png"/>
+            </div>
+            <div id="browser-empty-title">NOTHING HERE</div>
+            <div id="browser-empty-hint">CONNECT A USB DRIVE WITH MEDIA ON IT</div>
+        </div>
+
+        <!-- Right: inspector -->
+        <div id="inspector">
+            <div id="ins-preview">
+                <div id="ins-preview-art"></div>
+                <div id="ins-preview-empty">NO PREVIEW</div>
+                <div id="ins-preview-badge"></div>
+            </div>
+            <div id="ins-name"></div>
+            <div id="ins-kindrow">
+                <div id="ins-kind"></div>
+                <div id="ins-ext"></div>
+            </div>
+            <div id="ins-props">
+                <div id="ins-prop-0" class="ins-prop">
+                    <span id="ins-key-0" class="ins-key"></span>
+                    <span id="ins-val-0" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-1" class="ins-prop">
+                    <span id="ins-key-1" class="ins-key"></span>
+                    <span id="ins-val-1" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-2" class="ins-prop">
+                    <span id="ins-key-2" class="ins-key"></span>
+                    <span id="ins-val-2" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-3" class="ins-prop">
+                    <span id="ins-key-3" class="ins-key"></span>
+                    <span id="ins-val-3" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-4" class="ins-prop">
+                    <span id="ins-key-4" class="ins-key"></span>
+                    <span id="ins-val-4" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-5" class="ins-prop">
+                    <span id="ins-key-5" class="ins-key"></span>
+                    <span id="ins-val-5" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-6" class="ins-prop">
+                    <span id="ins-key-6" class="ins-key"></span>
+                    <span id="ins-val-6" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-7" class="ins-prop">
+                    <span id="ins-key-7" class="ins-key"></span>
+                    <span id="ins-val-7" class="ins-val"></span>
+                </div>
+                <div id="ins-prop-8" class="ins-prop">
+                    <span id="ins-key-8" class="ins-key"></span>
+                    <span id="ins-val-8" class="ins-val"></span>
+                </div>
+            </div>
+            <div id="ins-probing">READING FILE...</div>
+        </div>
+
+        <!-- Footer hints -->
+        <div id="browser-footer">
+            <div class="footer-hint">
+                <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                <span class="footer-text">OPEN</span>
+            </div>
+            <div class="footer-hint" id="bhint-back">
+                <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                <span class="footer-text">BACK</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_triangle.png" class="footer-glyph"/>
+                <span class="footer-text">FAVORITE</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_square.png" class="footer-glyph"/>
+                <span class="footer-text">SEARCH</span>
+            </div>
+            <div id="browser-footer-version">v0.7.1</div>
+        </div>
+    </div>
+</body>
+</rml>

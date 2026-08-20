@@ -1,0 +1,113 @@
+<rml>
+<head>
+    <link type="text/rcss" href="navbar.rcss"/>
+</head>
+<body id="navbar-body">
+    <!-- ================================================================
+         Collapsed rail (always visible when nav is shown)
+         ================================================================ -->
+    <div id="nav-rail-bg"></div>
+
+    <!-- EVO logo mark -->
+    <div id="nav-logo">
+        <img id="nav-logo-img" src="../icons/icon_logo.png"/>
+    </div>
+
+    <!-- Icon-only collapsed items -->
+    <div id="nav-items">
+        <!-- 0: HOME -->
+        <div class="rail-item-wrap" id="nav-wrap-0">
+            <div class="rail-accent-bar" id="nav-bar-0"></div>
+            <div class="rail-item" id="nav-item-0">
+                <img src="../icons/icon_home.png" class="rail-icon" id="nav-icon-0"/>
+            </div>
+        </div>
+        <!-- 1: BROWSE -->
+        <div class="rail-item-wrap" id="nav-wrap-1">
+            <div class="rail-accent-bar" id="nav-bar-1"></div>
+            <div class="rail-item" id="nav-item-1">
+                <img src="../icons/icon_browse_usb.png" class="rail-icon" id="nav-icon-1"/>
+            </div>
+        </div>
+        <!-- 2: RECENT -->
+        <div class="rail-item-wrap" id="nav-wrap-2">
+            <div class="rail-accent-bar" id="nav-bar-2"></div>
+            <div class="rail-item" id="nav-item-2">
+                <img src="../icons/icon_recent_files.png" class="rail-icon" id="nav-icon-2"/>
+            </div>
+        </div>
+        <!-- 3: FAVORITES -->
+        <div class="rail-item-wrap" id="nav-wrap-3">
+            <div class="rail-accent-bar" id="nav-bar-3"></div>
+            <div class="rail-item" id="nav-item-3">
+                <img src="../icons/icon_favorites.png" class="rail-icon" id="nav-icon-3"/>
+            </div>
+        </div>
+        <!-- 4: EMBY -->
+        <div class="rail-item-wrap" id="nav-wrap-4">
+            <div class="rail-accent-bar" id="nav-bar-4"></div>
+            <div class="rail-item" id="nav-item-4">
+                <img src="../icons/icon_emby.png" class="rail-icon" id="nav-icon-4"/>
+            </div>
+        </div>
+        <!-- 5: SETTINGS -->
+        <div class="rail-item-wrap" id="nav-wrap-5">
+            <div class="rail-accent-bar" id="nav-bar-5"></div>
+            <div class="rail-item rail-item-active" id="nav-item-5">
+                <img src="../icons/icon_settings.png" class="rail-icon" id="nav-icon-5"/>
+            </div>
+        </div>
+        <!-- 6: ABOUT -->
+        <div class="rail-item-wrap" id="nav-wrap-6">
+            <div class="rail-accent-bar" id="nav-bar-6"></div>
+            <div class="rail-item" id="nav-item-6">
+                <img src="../icons/icon_about_support.png" class="rail-icon" id="nav-icon-6"/>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
+         Expanded overlay (shown when rail_focused = true)
+         ================================================================ -->
+    <div id="nav-scrim"></div>
+    <div id="nav-expanded">
+        <!-- Logo + app name -->
+        <div id="nav-expanded-logo">
+            <img id="nav-expanded-logo-img" src="../icons/icon_logo.png"/>
+        </div>
+        <div id="nav-app-label">EVO</div>
+
+        <!-- Labelled items -->
+        <div id="nav-expanded-items">
+            <div class="rail-exp-item" id="nav-exp-0">
+                <img src="../icons/icon_home.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-0">HOME</span>
+            </div>
+            <div class="rail-exp-item" id="nav-exp-1">
+                <img src="../icons/icon_browse_usb.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-1">BROWSE</span>
+            </div>
+            <div class="rail-exp-item" id="nav-exp-2">
+                <img src="../icons/icon_recent_files.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-2">RECENT</span>
+            </div>
+            <div class="rail-exp-item" id="nav-exp-3">
+                <img src="../icons/icon_favorites.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-3">FAVORITES</span>
+            </div>
+            <div class="rail-exp-item" id="nav-exp-4">
+                <img src="../icons/icon_emby.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-4">EMBY</span>
+            </div>
+            <div class="rail-exp-item rail-exp-item-active" id="nav-exp-5">
+                <img src="../icons/icon_settings.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-5">SETTINGS</span>
+            </div>
+            <div class="rail-exp-item" id="nav-exp-6">
+                <img src="../icons/icon_about_support.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-6">ABOUT</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

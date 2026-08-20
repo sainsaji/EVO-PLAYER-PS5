@@ -1,0 +1,506 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Launch / Home screen
+ *
+ * Geometry follows ui/include/evo_metrics.h so a host render and a console
+ * capture line up under shot.py diff, with one deliberate shift: the legacy
+ * screen drew no navigation rail (page.no_rail), and this one sits beside the
+ * 96 px navbar.rml overlay like every other RmlUi screen. So the content
+ * column starts at EVO_CONTENT_X (152) rather than the 88 px bleed, and is
+ * EVO_CONTENT_W (1704) wide like every other screen. Tiles are 264 + 24 gap:
+ * 6*264 + 5*24 = 1704 exactly.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#launch-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Header =============================== */
+
+#launch-header {
+    position: absolute;
+    left: 0;
+    top: 72px;
+    width: 1704px;
+    height: 88px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#brand {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+/* The accent bloom behind the mark, standing in for evo_ui_circle(). */
+#brand-mark {
+    width: 80px;
+    height: 80px;
+    border-radius: 40px;
+    background-color: #ffcd0026;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 18px;
+}
+
+#brand-logo {
+    width: 44px;
+    height: 44px;
+    display: inline-block;
+}
+
+#brand-text {
+    display: flex;
+    flex-direction: column;
+}
+
+#brand-name {
+    font-size: 33px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 2px;
+}
+
+#brand-version {
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+#status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+#status-clock {
+    font-size: 33px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 1px;
+}
+
+#status-theme {
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+/* ================================ Hero ================================ */
+
+#hero {
+    position: absolute;
+    left: 0;
+    top: 200px;
+    width: 1704px;
+    height: 318px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+/*
+ * Cover-crop, not stretch: the source is 16:9 and the hero is closer to
+ * 5.5:1, so fitting the box makes faces visibly wide. The image decorator
+ * with `cover` is the retained-mode equivalent of the fixed-point centre-crop
+ * in draw_hero(); an oversized <img> clipped by overflow is not, because
+ * overflow does not clip absolutely-positioned children here — it painted
+ * the poster across the whole page.
+ */
+#hero-art {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 1698px;
+    height: 312px;
+    border-radius: 12px;
+}
+
+/*
+ * Artwork fades out towards the left so the copy sits on flat surface colour
+ * while the frame still reads as a backdrop. A region that simply starts
+ * partway across leaves a hard vertical seam down the middle of the card.
+ */
+#hero-fade-l {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 477px;
+    height: 312px;
+    background-color: #121b2eff;
+}
+
+#hero-fade-h {
+    position: absolute;
+    left: 479px;
+    top: 2px;
+    width: 545px;
+    height: 312px;
+    decorator: horizontal-gradient(#121b2eff #121b2e00);
+}
+
+/* Bottom scrim, so the chip and the bar sit on a consistent ground. */
+#hero-fade-b {
+    position: absolute;
+    left: 2px;
+    bottom: 2px;
+    width: 1698px;
+    height: 138px;
+    decorator: vertical-gradient(#00000000 #000000d7);
+}
+
+#hero-copy {
+    position: absolute;
+    left: 56px;
+    top: 38px;
+    width: 900px;
+    display: flex;
+    flex-direction: column;
+}
+
+#hero-eyebrow {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffcd00;
+    letter-spacing: 2px;
+}
+
+#hero-title {
+    font-size: 46px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.5px;
+    margin-top: 14px;
+}
+
+#hero-detail {
+    font-size: 20px;
+    font-weight: normal;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+    margin-top: 14px;
+}
+
+#hero-foot {
+    position: absolute;
+    left: 56px;
+    bottom: 28px;
+    width: 800px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+#hero-progress-track {
+    width: 580px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #2a3b5599;
+    margin-bottom: 18px;
+}
+
+/* Explicitly block: an inline element ignores width, so the fill drew
+ * nothing and the bar read as an empty track at every position. */
+#hero-progress-fill {
+    display: block;
+    width: 0%;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #ffcd00;
+}
+
+/*
+ * Chip geometry spelled out, because guessing it put the glyph and the label
+ * on top of each other in the immediate-mode original: 14 left pad, a 28 px
+ * controller glyph, 14 of gap, the label, 18 right pad.
+ */
+#hero-chip {
+    height: 62px;
+    border-radius: 31px;
+    background-color: #121b2ef0;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 14px;
+    padding-right: 18px;
+    gap: 14px;
+}
+
+#hero-chip-glyph {
+    width: 36px;
+    height: 36px;
+    display: inline-block;
+}
+
+#hero-chip-label {
+    font-size: 22px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 1px;
+}
+
+/* =============================== Shelves =============================== */
+
+#shelves {
+    position: absolute;
+    left: 0;
+    top: 556px;
+    width: 1704px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 36 px label band + 166 px tiles = 202, and 26 of air below, so the second
+ * shelf lands at 784 and its tiles end at 986 — clear of the footer. Hiding
+ * the first shelf reflows the second up into its slot, which is what
+ * draw_launch() does by hand. */
+.shelf {
+    width: 1704px;
+    margin-bottom: 26px;
+}
+
+.shelf-head {
+    width: 1704px;
+    height: 36px;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.shelf-label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.shelf-tick {
+    width: 3px;
+    height: 20px;
+    border-radius: 1px;
+    background-color: #ffcd00;
+    margin-right: 14px;
+}
+
+.shelf-title {
+    font-size: 24px;
+    font-weight: bold;
+    color: #9fb2cc;
+    letter-spacing: 1.5px;
+}
+
+.shelf-count {
+    font-size: 15px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+}
+
+.shelf-tiles {
+    width: 1704px;
+    height: 166px;
+    display: flex;
+    flex-direction: row;
+    gap: 24px;
+}
+
+/* ================================ Tiles ================================ */
+
+.tile {
+    width: 264px;
+    height: 166px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+}
+
+.tile-focused {
+    background-color: #1b2e4cf5;
+    border-width: 2px;
+    border-color: #ffcd00;
+}
+
+.tile-art {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 260px;
+    height: 160px;
+    border-radius: 12px;
+}
+
+/* Destination tiles carry a large soft icon top-left instead of a poster. */
+.tile-icon-box {
+    position: absolute;
+    left: 18px;
+    top: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tile-icon {
+    width: 36px;
+    height: 36px;
+    display: inline-block;
+}
+
+.tile-icon-box-lg {
+    left: 18px;
+    top: 18px;
+    width: 56px;
+    height: 56px;
+}
+
+.tile-icon-lg {
+    width: 52px;
+    height: 52px;
+}
+
+/* Accent bloom behind a focused destination icon. */
+.tile-bloom {
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    width: 84px;
+    height: 84px;
+    border-radius: 42px;
+    background-color: #ffcd0000;
+}
+
+.tile-bloom-lit {
+    background-color: #ffcd0026;
+}
+
+/* Without this a bright frame makes the caption unreadable, which is the
+ * failure mode of every poster grid. EVO_TILE_CAPTION_H + 16. */
+.tile-scrim {
+    position: absolute;
+    left: 2px;
+    bottom: 2px;
+    width: 260px;
+    height: 92px;
+    decorator: vertical-gradient(#00000000 #000000f5);
+}
+
+.tile-caption {
+    position: absolute;
+    left: 18px;
+    bottom: 16px;
+    width: 228px;
+    display: flex;
+    flex-direction: column;
+}
+
+/*
+ * A tile carries a smaller type ramp than a full-width row. At the row size
+ * a 270 px tile cannot hold an ordinary filename — "Dolby TrueHD 7.1" became
+ * "Dolby TrueH..", which is the part that identifies the file.
+ */
+.tile-title {
+    font-size: 21px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tile-detail {
+    font-size: 16px;
+    font-weight: normal;
+    color: #9fb2cc;
+    letter-spacing: 0.5px;
+    margin-top: 5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.tile-progress-track {
+    position: absolute;
+    left: 18px;
+    bottom: 8px;
+    width: 228px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: #2a3b5599;
+}
+
+.tile-progress-fill {
+    display: block;
+    width: 0%;
+    height: 4px;
+    border-radius: 2px;
+    background-color: #ffcd00;
+}
+
+/* =============================== Footer =============================== */
+
+#launch-footer {
+    position: absolute;
+    left: 0;
+    bottom: 40px;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.footer-glyph {
+    width: 30px;
+    height: 30px;
+    display: inline-block;
+}
+
+.footer-text {
+    font-size: 15px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}

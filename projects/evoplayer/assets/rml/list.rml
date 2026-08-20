@@ -1,0 +1,182 @@
+<rml>
+<head>
+    <link type="text/rcss" href="list.rcss"/>
+</head>
+<body id="list-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="list-pane">
+        <!-- Header -->
+        <div id="list-header">
+            <div id="list-header-left">
+                <div id="list-indicator"></div>
+                <div id="list-header-titles">
+                    <div id="list-title">RECENT</div>
+                    <div id="list-subtitle">PICK UP WHERE YOU LEFT OFF</div>
+                </div>
+            </div>
+            <div id="list-counter"></div>
+        </div>
+
+        <!-- Rows -->
+        <div id="list-rows">
+            <div id="lrow-0" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-0" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-0" class="lrow-title"></div>
+                        <div id="lrow-detail-0" class="lrow-detail"></div>
+                        <div id="lrow-track-0" class="lrow-track"><div id="lrow-fill-0" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-0" class="lrow-badge"></div>
+                    <img id="lrow-chevron-0" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-1" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-1" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-1" class="lrow-title"></div>
+                        <div id="lrow-detail-1" class="lrow-detail"></div>
+                        <div id="lrow-track-1" class="lrow-track"><div id="lrow-fill-1" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-1" class="lrow-badge"></div>
+                    <img id="lrow-chevron-1" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-2" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-2" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-2" class="lrow-title"></div>
+                        <div id="lrow-detail-2" class="lrow-detail"></div>
+                        <div id="lrow-track-2" class="lrow-track"><div id="lrow-fill-2" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-2" class="lrow-badge"></div>
+                    <img id="lrow-chevron-2" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-3" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-3" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-3" class="lrow-title"></div>
+                        <div id="lrow-detail-3" class="lrow-detail"></div>
+                        <div id="lrow-track-3" class="lrow-track"><div id="lrow-fill-3" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-3" class="lrow-badge"></div>
+                    <img id="lrow-chevron-3" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-4" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-4" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-4" class="lrow-title"></div>
+                        <div id="lrow-detail-4" class="lrow-detail"></div>
+                        <div id="lrow-track-4" class="lrow-track"><div id="lrow-fill-4" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-4" class="lrow-badge"></div>
+                    <img id="lrow-chevron-4" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-5" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-5" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-5" class="lrow-title"></div>
+                        <div id="lrow-detail-5" class="lrow-detail"></div>
+                        <div id="lrow-track-5" class="lrow-track"><div id="lrow-fill-5" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-5" class="lrow-badge"></div>
+                    <img id="lrow-chevron-5" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-6" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-6" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-6" class="lrow-title"></div>
+                        <div id="lrow-detail-6" class="lrow-detail"></div>
+                        <div id="lrow-track-6" class="lrow-track"><div id="lrow-fill-6" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-6" class="lrow-badge"></div>
+                    <img id="lrow-chevron-6" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-7" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-7" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-7" class="lrow-title"></div>
+                        <div id="lrow-detail-7" class="lrow-detail"></div>
+                        <div id="lrow-track-7" class="lrow-track"><div id="lrow-fill-7" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-7" class="lrow-badge"></div>
+                    <img id="lrow-chevron-7" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+            <div id="lrow-8" class="list-row">
+                <div class="lrow-left">
+                    <div class="lrow-icon-box"><img id="lrow-icon-8" class="lrow-icon" src="../icons/icon_recent_files.png"/></div>
+                    <div class="lrow-text">
+                        <div id="lrow-title-8" class="lrow-title"></div>
+                        <div id="lrow-detail-8" class="lrow-detail"></div>
+                        <div id="lrow-track-8" class="lrow-track"><div id="lrow-fill-8" class="lrow-fill"></div></div>
+                    </div>
+                </div>
+                <div class="lrow-right">
+                    <div id="lrow-badge-8" class="lrow-badge"></div>
+                    <img id="lrow-chevron-8" class="lrow-chevron" src="../icons/icon_chevron.png"/>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="list-empty">
+            <div id="list-empty-icon-box">
+                <img id="list-empty-icon" src="../icons/icon_recent_files.png"/>
+            </div>
+            <div id="list-empty-title">NOTHING PLAYED YET</div>
+            <div id="list-empty-hint">FILES YOU OPEN WILL APPEAR HERE</div>
+        </div>
+
+        <!-- Footer hints -->
+        <div id="list-footer">
+            <div class="footer-hint" id="lhint-0">
+                <img class="footer-glyph" id="lhint-glyph-0" src="../icons/btn_cross.png"/>
+                <span class="footer-text" id="lhint-label-0">SELECT</span>
+            </div>
+            <div class="footer-hint" id="lhint-1">
+                <img class="footer-glyph" id="lhint-glyph-1" src="../icons/btn_circle.png"/>
+                <span class="footer-text" id="lhint-label-1">BACK</span>
+            </div>
+            <div class="footer-hint" id="lhint-2">
+                <img class="footer-glyph" id="lhint-glyph-2" src="../icons/btn_dpad.png"/>
+                <span class="footer-text" id="lhint-label-2">NAVIGATE</span>
+            </div>
+            <div class="footer-hint" id="lhint-3">
+                <img class="footer-glyph" id="lhint-glyph-3" src="../icons/btn_triangle.png"/>
+                <span class="footer-text" id="lhint-label-3">REMOVE</span>
+            </div>
+            <div id="list-footer-version">v0.7.1</div>
+        </div>
+    </div>
+</body>
+</rml>

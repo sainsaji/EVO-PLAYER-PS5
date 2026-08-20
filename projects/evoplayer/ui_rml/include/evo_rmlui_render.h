@@ -2,6 +2,8 @@
 #include <RmlUi/Core/RenderInterface.h>
 #include <vector>
 #include <cstdint>
+#include <string>
+#include <map>
 
 class EvoRenderInterface : public Rml::RenderInterface {
 public:
@@ -10,6 +12,16 @@ public:
 
     void SetFramebuffer(uint32_t* fb) { m_fb = fb; }
     void SetDimensions(int w, int h) { m_width = w; m_height = h; }
+
+    /*
+     * Artwork the engine produces at runtime — decoded posters, the hero
+     * still — has no file on disk to point an <img src> at, so it is
+     * registered under a name in the "evo:mem/" namespace and LoadTexture
+     * resolves that name out of this map instead of hitting the filesystem.
+     * The pixels are copied because the caller's buffer is a rotating cache.
+     */
+    void SetMemoryTexture(const std::string& key, const uint32_t* bgra, int w, int h);
+    void DropMemoryTexture(const std::string& key);
 
     void SetScissorRegion(Rml::Rectanglei region) override;
     void EnableScissorRegion(bool enable) override;
@@ -32,4 +44,11 @@ private:
     Rml::Rectanglei m_scissor_region;
     bool m_has_transform;
     Rml::Matrix4f m_transform;
+
+    struct MemImage {
+        std::vector<uint32_t> pixels;
+        int width = 0;
+        int height = 0;
+    };
+    std::map<std::string, MemImage> m_mem_textures;
 };

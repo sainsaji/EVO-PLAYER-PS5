@@ -1,0 +1,160 @@
+<rml>
+<head>
+    <link type="text/rcss" href="changelog.rcss"/>
+</head>
+<body id="changelog-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="changelog-pane">
+        <div id="changelog-header">
+            <div id="changelog-header-left">
+                <div id="changelog-indicator"></div>
+                <div id="changelog-header-titles">
+                    <div id="changelog-title">CHANGELOG</div>
+                    <div id="changelog-subtitle">WHAT CHANGED IN EACH RELEASE</div>
+                </div>
+            </div>
+            <div id="changelog-counter"></div>
+        </div>
+
+        <!-- Master: the releases -->
+        <div id="changelog-releases">
+            <div id="clrel-0" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-0" class="clrel-ver"></div>
+                    <div id="clrel-tag-0" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-0" class="clrel-date"></div>
+            </div>
+            <div id="clrel-1" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-1" class="clrel-ver"></div>
+                    <div id="clrel-tag-1" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-1" class="clrel-date"></div>
+            </div>
+            <div id="clrel-2" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-2" class="clrel-ver"></div>
+                    <div id="clrel-tag-2" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-2" class="clrel-date"></div>
+            </div>
+            <div id="clrel-3" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-3" class="clrel-ver"></div>
+                    <div id="clrel-tag-3" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-3" class="clrel-date"></div>
+            </div>
+            <div id="clrel-4" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-4" class="clrel-ver"></div>
+                    <div id="clrel-tag-4" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-4" class="clrel-date"></div>
+            </div>
+            <div id="clrel-5" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-5" class="clrel-ver"></div>
+                    <div id="clrel-tag-5" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-5" class="clrel-date"></div>
+            </div>
+            <div id="clrel-6" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-6" class="clrel-ver"></div>
+                    <div id="clrel-tag-6" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-6" class="clrel-date"></div>
+            </div>
+            <div id="clrel-7" class="clrel">
+                <div class="clrel-text">
+                    <div id="clrel-ver-7" class="clrel-ver"></div>
+                    <div id="clrel-tag-7" class="clrel-tag"></div>
+                </div>
+                <div id="clrel-date-7" class="clrel-date"></div>
+            </div>
+        </div>
+
+        <!-- Detail: what changed in the selected release -->
+        <div id="changelog-detail">
+            <div id="cldetail-head">
+                <div id="cldetail-ver"></div>
+                <div id="cldetail-tag"></div>
+            </div>
+            <div id="cldetail-items">
+                <div id="clitem-0" class="clitem">
+                    <div id="clitem-kind-0" class="clitem-kind"></div>
+                    <div id="clitem-text-0" class="clitem-text"></div>
+                </div>
+                <div id="clitem-1" class="clitem">
+                    <div id="clitem-kind-1" class="clitem-kind"></div>
+                    <div id="clitem-text-1" class="clitem-text"></div>
+                </div>
+                <div id="clitem-2" class="clitem">
+                    <div id="clitem-kind-2" class="clitem-kind"></div>
+                    <div id="clitem-text-2" class="clitem-text"></div>
+                </div>
+                <div id="clitem-3" class="clitem">
+                    <div id="clitem-kind-3" class="clitem-kind"></div>
+                    <div id="clitem-text-3" class="clitem-text"></div>
+                </div>
+                <div id="clitem-4" class="clitem">
+                    <div id="clitem-kind-4" class="clitem-kind"></div>
+                    <div id="clitem-text-4" class="clitem-text"></div>
+                </div>
+                <div id="clitem-5" class="clitem">
+                    <div id="clitem-kind-5" class="clitem-kind"></div>
+                    <div id="clitem-text-5" class="clitem-text"></div>
+                </div>
+                <div id="clitem-6" class="clitem">
+                    <div id="clitem-kind-6" class="clitem-kind"></div>
+                    <div id="clitem-text-6" class="clitem-text"></div>
+                </div>
+                <div id="clitem-7" class="clitem">
+                    <div id="clitem-kind-7" class="clitem-kind"></div>
+                    <div id="clitem-text-7" class="clitem-text"></div>
+                </div>
+                <div id="clitem-8" class="clitem">
+                    <div id="clitem-kind-8" class="clitem-kind"></div>
+                    <div id="clitem-text-8" class="clitem-text"></div>
+                </div>
+                <div id="clitem-9" class="clitem">
+                    <div id="clitem-kind-9" class="clitem-kind"></div>
+                    <div id="clitem-text-9" class="clitem-text"></div>
+                </div>
+                <div id="clitem-10" class="clitem">
+                    <div id="clitem-kind-10" class="clitem-kind"></div>
+                    <div id="clitem-text-10" class="clitem-text"></div>
+                </div>
+                <div id="clitem-11" class="clitem">
+                    <div id="clitem-kind-11" class="clitem-kind"></div>
+                    <div id="clitem-text-11" class="clitem-text"></div>
+                </div>
+                <div id="clitem-12" class="clitem">
+                    <div id="clitem-kind-12" class="clitem-kind"></div>
+                    <div id="clitem-text-12" class="clitem-text"></div>
+                </div>
+                <div id="clitem-13" class="clitem">
+                    <div id="clitem-kind-13" class="clitem-kind"></div>
+                    <div id="clitem-text-13" class="clitem-text"></div>
+                </div>
+            </div>
+            <div id="cldetail-more"></div>
+        </div>
+
+        <div id="changelog-footer">
+            <div class="footer-hint">
+                <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                <span class="footer-text">BACK</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_dpad.png" class="footer-glyph"/>
+                <span class="footer-text">MOVE</span>
+            </div>
+            <div id="changelog-footer-version">v0.7.1</div>
+        </div>
+    </div>
+</body>
+</rml>

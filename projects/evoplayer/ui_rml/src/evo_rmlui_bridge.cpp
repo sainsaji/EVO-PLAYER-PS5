@@ -15,6 +15,179 @@ bool evo_rmlui_is_initialized(void) {
     return EvoRmlApp::Instance().IsInitialized();
 }
 
+void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* p) {
+    if (!p) return;
+    EvoChangelogState state;
+    state.title = p->title ? p->title : "CHANGELOG";
+    state.subtitle = p->subtitle ? p->subtitle : "";
+    state.rail_focused = (p->rail_focused != 0);
+    state.release_total = p->release_total;
+    state.cursor_index = p->cursor_index;
+
+    for (int i = 0; i < p->release_count && i < EVO_RMLUI_CL_RELEASES; i++) {
+        EvoChangelogRelease r;
+        r.version = p->releases[i].version ? p->releases[i].version : "";
+        r.tagline = p->releases[i].tagline ? p->releases[i].tagline : "";
+        r.date = p->releases[i].date ? p->releases[i].date : "";
+        r.is_focused = (p->releases[i].is_focused != 0);
+        state.releases.push_back(r);
+    }
+
+    state.detail_version = p->detail_version ? p->detail_version : "";
+    state.detail_tagline = p->detail_tagline ? p->detail_tagline : "";
+    state.item_total = p->item_total;
+
+    for (int i = 0; i < p->item_count && i < EVO_RMLUI_CL_ITEMS; i++) {
+        state.items.emplace_back(
+            p->items[i].kind ? p->items[i].kind : "",
+            p->items[i].text ? p->items[i].text : "");
+    }
+
+    EvoRmlApp::Instance().UpdateChangelogState(state);
+}
+
+void evo_rmlui_render_changelog(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderChangelog(framebuffer, width, height);
+}
+
+void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
+    if (!p) return;
+    EvoBrowserState state;
+    state.path = p->path ? p->path : "";
+    state.at_root = (p->at_root != 0);
+    state.rail_focused = (p->rail_focused != 0);
+    state.total_count = p->total_count;
+    state.cursor_index = p->cursor_index;
+
+    for (int i = 0; i < p->row_count && i < EVO_RMLUI_BROWSER_ROWS; i++) {
+        EvoBrowserRow r;
+        r.name = p->rows[i].name ? p->rows[i].name : "";
+        r.detail = p->rows[i].detail ? p->rows[i].detail : "";
+        r.icon_path = p->rows[i].icon_path ? p->rows[i].icon_path : "";
+        r.badge = p->rows[i].badge ? p->rows[i].badge : "";
+        r.progress = p->rows[i].progress;
+        r.is_favorite = (p->rows[i].is_favorite != 0);
+        r.is_focused = (p->rows[i].is_focused != 0);
+        state.rows.push_back(r);
+    }
+
+    state.is_empty = (p->is_empty != 0);
+    state.empty_title = p->empty_title ? p->empty_title : "";
+    state.empty_hint = p->empty_hint ? p->empty_hint : "";
+
+    state.ins_name = p->ins_name ? p->ins_name : "";
+    state.ins_kind = p->ins_kind ? p->ins_kind : "";
+    state.ins_ext = p->ins_ext ? p->ins_ext : "";
+    state.ins_probing = (p->ins_probing != 0);
+    state.ins_preview_badge = p->ins_preview_badge ? p->ins_preview_badge : "";
+    state.ins_preview = p->ins_preview;
+    state.ins_preview_w = p->ins_preview_w;
+    state.ins_preview_h = p->ins_preview_h;
+
+    for (int i = 0; i < p->ins_prop_count && i < EVO_RMLUI_BROWSER_PROPS; i++) {
+        state.ins_props.emplace_back(
+            p->ins_props[i].key ? p->ins_props[i].key : "",
+            p->ins_props[i].value ? p->ins_props[i].value : "");
+    }
+
+    EvoRmlApp::Instance().UpdateBrowserState(state);
+}
+
+void evo_rmlui_render_browser(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderBrowser(framebuffer, width, height);
+}
+
+void evo_rmlui_set_version(const char* version) {
+    EvoRmlApp::Instance().SetVersion(version ? version : "");
+}
+
+void evo_rmlui_update_list(const evo_rmlui_list_params_t* p) {
+    if (!p) return;
+    EvoListState state;
+    state.title = p->title ? p->title : "";
+    state.subtitle = p->subtitle ? p->subtitle : "";
+    state.section = p->section;
+    state.rail_focused = (p->rail_focused != 0);
+    state.total_count = p->total_count;
+    state.cursor_index = p->cursor_index;
+
+    for (int i = 0; i < p->row_count && i < EVO_RMLUI_LIST_ROWS; i++) {
+        EvoListRow r;
+        r.title = p->rows[i].title ? p->rows[i].title : "";
+        r.detail = p->rows[i].detail ? p->rows[i].detail : "";
+        r.icon_path = p->rows[i].icon_path ? p->rows[i].icon_path : "";
+        r.badge = p->rows[i].badge ? p->rows[i].badge : "";
+        r.progress = p->rows[i].progress;
+        r.has_chevron = (p->rows[i].has_chevron != 0);
+        r.is_focused = (p->rows[i].is_focused != 0);
+        state.rows.push_back(r);
+    }
+
+    state.is_empty = (p->is_empty != 0);
+    state.empty_title = p->empty_title ? p->empty_title : "";
+    state.empty_hint = p->empty_hint ? p->empty_hint : "";
+    state.empty_icon = p->empty_icon ? p->empty_icon : "";
+
+    for (int i = 0; i < p->hint_count && i < 4; i++) {
+        EvoListHint h;
+        h.glyph_path = p->hints[i].glyph_path ? p->hints[i].glyph_path : "";
+        h.label = p->hints[i].label ? p->hints[i].label : "";
+        state.hints.push_back(h);
+    }
+
+    EvoRmlApp::Instance().UpdateListState(state);
+}
+
+void evo_rmlui_render_list(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderList(framebuffer, width, height);
+}
+
+static EvoLaunchTile evo_rmlui_tile_from(const evo_rmlui_launch_tile_t& in) {
+    EvoLaunchTile t;
+    t.title = in.title ? in.title : "";
+    t.detail = in.detail ? in.detail : "";
+    t.icon_path = in.icon_path ? in.icon_path : "";
+    t.progress = in.progress;
+    t.art = in.art;
+    t.art_w = in.art_w;
+    t.art_h = in.art_h;
+    t.is_focused = (in.is_focused != 0);
+    return t;
+}
+
+void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* p) {
+    if (!p) return;
+    EvoLaunchState state;
+    state.app_name = p->app_name ? p->app_name : "EVO PLAYER";
+    state.version = p->version ? p->version : "";
+    state.clock = p->clock ? p->clock : "";
+    state.theme_name = p->theme_name ? p->theme_name : "";
+
+    state.hero_eyebrow = p->hero_eyebrow ? p->hero_eyebrow : "";
+    state.hero_title = p->hero_title ? p->hero_title : "";
+    state.hero_detail = p->hero_detail ? p->hero_detail : "";
+    state.hero_action = p->hero_action ? p->hero_action : "";
+    state.hero_progress = p->hero_progress;
+    state.hero_art = p->hero_art;
+    state.hero_art_w = p->hero_art_w;
+    state.hero_art_h = p->hero_art_h;
+    state.hero_focused = (p->hero_focused != 0);
+
+    state.recent_total = p->recent_total;
+    state.recent_cursor = p->recent_cursor;
+    for (int i = 0; i < p->recent_visible && i < EVO_RMLUI_TILES; i++)
+        state.recent.push_back(evo_rmlui_tile_from(p->recent[i]));
+
+    for (int i = 0; i < p->library_visible && i < EVO_RMLUI_TILES; i++)
+        state.library.push_back(evo_rmlui_tile_from(p->library[i]));
+
+    EvoRmlApp::Instance().UpdateLaunchState(state);
+}
+
+void evo_rmlui_render_launch(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderLaunch(framebuffer, width, height);
+}
+
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     if (!p) return;
     EvoPlaybackState state;
@@ -167,4 +340,15 @@ void evo_rmlui_set_theme(const evo_rmlui_theme_t* t) {
     EvoRmlApp::Instance().SetTheme(colors);
 }
 
+void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
+    if (!p) return;
+    EvoNavState state;
+    state.active_section = p->active_section;
+    state.rail_focused   = (p->rail_focused != 0);
+    state.cursor_index   = p->cursor_index;
+    state.visible        = (p->visible != 0);
+    EvoRmlApp::Instance().UpdateNavState(state);
+}
+
 } // extern "C"
+

@@ -1,0 +1,238 @@
+<rml>
+<head>
+    <link type="text/rcss" href="launch.rcss"/>
+</head>
+<body id="launch-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="launch-pane">
+        <!-- ================= Header ================= -->
+        <div id="launch-header">
+            <div id="brand">
+                <div id="brand-mark">
+                    <img id="brand-logo" src="../icons/icon_logo.png"/>
+                </div>
+                <div id="brand-text">
+                    <div id="brand-name">EVO PLAYER</div>
+                    <div id="brand-version">VERSION 0.7.0</div>
+                </div>
+            </div>
+            <div id="status">
+                <div id="status-clock">00:00</div>
+                <div id="status-theme">MIDNIGHT</div>
+            </div>
+        </div>
+
+        <!-- ================= Hero ================= -->
+        <div id="hero">
+            <div id="hero-art"></div>
+            <div id="hero-fade-l"></div>
+            <div id="hero-fade-h"></div>
+            <div id="hero-fade-b"></div>
+            <div id="hero-copy">
+                <div id="hero-eyebrow">CONTINUE WATCHING</div>
+                <div id="hero-title">EVO PLAYER</div>
+                <div id="hero-detail">Play video and audio from USB storage</div>
+            </div>
+            <div id="hero-foot">
+                <div id="hero-progress-track">
+                    <div id="hero-progress-fill"></div>
+                </div>
+                <div id="hero-chip">
+                    <img id="hero-chip-glyph" src="../icons/btn_cross.png"/>
+                    <span id="hero-chip-label">RESUME</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= Shelves ================= -->
+        <div id="shelves">
+            <!-- Shelf 0: JUMP BACK IN -->
+            <div id="shelf-recent" class="shelf">
+                <div class="shelf-head">
+                    <div class="shelf-label">
+                        <div class="shelf-tick" id="shelf-recent-tick"></div>
+                        <span class="shelf-title">JUMP BACK IN</span>
+                    </div>
+                    <div class="shelf-count" id="shelf-recent-count"></div>
+                </div>
+                <div class="shelf-tiles">
+                    <div class="tile" id="rec-tile-0">
+                        <div class="tile-art" id="rec-art-0"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-0">
+                            <img class="tile-icon" id="rec-icon-0" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-0"></div>
+                            <div class="tile-detail" id="rec-detail-0"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-0">
+                            <div class="tile-progress-fill" id="rec-prog-fill-0"></div>
+                        </div>
+                    </div>
+                    <div class="tile" id="rec-tile-1">
+                        <div class="tile-art" id="rec-art-1"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-1">
+                            <img class="tile-icon" id="rec-icon-1" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-1"></div>
+                            <div class="tile-detail" id="rec-detail-1"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-1">
+                            <div class="tile-progress-fill" id="rec-prog-fill-1"></div>
+                        </div>
+                    </div>
+                    <div class="tile" id="rec-tile-2">
+                        <div class="tile-art" id="rec-art-2"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-2">
+                            <img class="tile-icon" id="rec-icon-2" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-2"></div>
+                            <div class="tile-detail" id="rec-detail-2"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-2">
+                            <div class="tile-progress-fill" id="rec-prog-fill-2"></div>
+                        </div>
+                    </div>
+                    <div class="tile" id="rec-tile-3">
+                        <div class="tile-art" id="rec-art-3"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-3">
+                            <img class="tile-icon" id="rec-icon-3" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-3"></div>
+                            <div class="tile-detail" id="rec-detail-3"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-3">
+                            <div class="tile-progress-fill" id="rec-prog-fill-3"></div>
+                        </div>
+                    </div>
+                    <div class="tile" id="rec-tile-4">
+                        <div class="tile-art" id="rec-art-4"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-4">
+                            <img class="tile-icon" id="rec-icon-4" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-4"></div>
+                            <div class="tile-detail" id="rec-detail-4"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-4">
+                            <div class="tile-progress-fill" id="rec-prog-fill-4"></div>
+                        </div>
+                    </div>
+                    <div class="tile" id="rec-tile-5">
+                        <div class="tile-art" id="rec-art-5"></div>
+                        <div class="tile-icon-box" id="rec-iconbox-5">
+                            <img class="tile-icon" id="rec-icon-5" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="rec-title-5"></div>
+                            <div class="tile-detail" id="rec-detail-5"></div>
+                        </div>
+                        <div class="tile-progress-track" id="rec-prog-track-5">
+                            <div class="tile-progress-fill" id="rec-prog-fill-5"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shelf 1: LIBRARY -->
+            <div id="shelf-library" class="shelf">
+                <div class="shelf-head">
+                    <div class="shelf-label">
+                        <div class="shelf-tick" id="shelf-library-tick"></div>
+                        <span class="shelf-title">LIBRARY</span>
+                    </div>
+                    <div class="shelf-count" id="shelf-library-count"></div>
+                </div>
+                <div class="shelf-tiles">
+                    <div class="tile tile-destination" id="lib-tile-0">
+                        <div class="tile-bloom" id="lib-bloom-0"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-0">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-0" src="../icons/icon_browse_usb.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-0">BROWSE</div>
+                            <div class="tile-detail" id="lib-detail-0">Videos and folders on USB storage</div>
+                        </div>
+                    </div>
+                    <div class="tile tile-destination" id="lib-tile-1">
+                        <div class="tile-bloom" id="lib-bloom-1"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-1">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-1" src="../icons/icon_recent_files.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-1">RECENT</div>
+                            <div class="tile-detail" id="lib-detail-1">Pick up where you left off</div>
+                        </div>
+                    </div>
+                    <div class="tile tile-destination" id="lib-tile-2">
+                        <div class="tile-bloom" id="lib-bloom-2"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-2">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-2" src="../icons/icon_favorites.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-2">FAVORITES</div>
+                            <div class="tile-detail" id="lib-detail-2">Media you saved for later</div>
+                        </div>
+                    </div>
+                    <div class="tile tile-destination" id="lib-tile-3">
+                        <div class="tile-bloom" id="lib-bloom-3"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-3">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-3" src="../icons/icon_emby.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-3">EMBY</div>
+                            <div class="tile-detail" id="lib-detail-3">Emby and media server streaming</div>
+                        </div>
+                    </div>
+                    <div class="tile tile-destination" id="lib-tile-4">
+                        <div class="tile-bloom" id="lib-bloom-4"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-4">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-4" src="../icons/icon_settings.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-4">SETTINGS</div>
+                            <div class="tile-detail" id="lib-detail-4">Playback profiles and preferences</div>
+                        </div>
+                    </div>
+                    <div class="tile tile-destination" id="lib-tile-5">
+                        <div class="tile-bloom" id="lib-bloom-5"></div>
+                        <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-5">
+                            <img class="tile-icon tile-icon-lg" id="lib-icon-5" src="../icons/icon_about_support.png"/>
+                        </div>
+                        <div class="tile-caption">
+                            <div class="tile-title" id="lib-title-5">ABOUT</div>
+                            <div class="tile-detail" id="lib-detail-5">Credits and project info</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= Footer ================= -->
+        <div id="launch-footer">
+            <div class="footer-hint">
+                <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                <span class="footer-text">SELECT</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_dpad.png" class="footer-glyph"/>
+                <span class="footer-text">MOVE</span>
+            </div>
+            <div class="footer-hint">
+                <img src="../icons/btn_lstick.png" class="footer-glyph"/>
+                <span class="footer-text">SCREENSHOT</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

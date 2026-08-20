@@ -1,6 +1,10 @@
 /* =============================================================================
- * EVO PLAYER PRO - Modern Cinema Settings RCSS Stylesheet
- * Premium PlayStation Obsidian & Sapphire Blue Theme
+ * EVO PLAYER PRO - Generic scrolling list screen
+ *
+ * RECENT, FAVORITES, EMBY SETUP and EMBY BROWSE. All four are evo_list_model
+ * in the immediate-mode UI, so they share one document here rather than four
+ * near-identical ones. Geometry and type follow settings.rcss so a user
+ * moving between sections sees one interface, not four.
  * ============================================================================= */
 
 body {
@@ -21,12 +25,8 @@ div, span, p {
     box-sizing: border-box;
 }
 
-/* Left Navigation Rail styles removed — rail is now the standalone navbar.rml overlay */
-
-
-/* Content pane at EVO_CONTENT_X, leaving the 44 px channel the native
- * layout puts between EVO_RAIL_W and the first card. */
-#content-pane {
+/* Content pane at EVO_CONTENT_X, clear of the rail by the native 44 px. */
+#list-pane {
     position: absolute;
     left: 152px;
     top: 0;
@@ -34,9 +34,9 @@ div, span, p {
     height: 1080px;
 }
 
+/* =============================== Header =============================== */
 
-/* Header */
-#settings-header {
+#list-header {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -46,33 +46,33 @@ div, span, p {
     width: 1704px;
 }
 
-#header-left {
+#list-header-left {
     display: flex;
     flex-direction: row;
     align-items: center;
 }
 
-#header-indicator {
+#list-indicator {
     width: 5px;
     height: 62px;
-    background-color: #0070d1;
+    background-color: #00cdff;
     border-radius: 2px;
     margin-right: 18px;
 }
 
-#header-titles {
+#list-header-titles {
     display: flex;
     flex-direction: column;
 }
 
-#settings-title {
+#list-title {
     font-size: 43px;
     font-weight: bold;
     color: #ffffff;
     letter-spacing: 0.5px;
 }
 
-#settings-subtitle {
+#list-subtitle {
     font-size: 15px;
     font-weight: bold;
     color: #8fa0b5;
@@ -80,7 +80,7 @@ div, span, p {
     margin-top: 3px;
 }
 
-#settings-counter {
+#list-counter {
     font-size: 15px;
     font-weight: bold;
     color: #8fa0b5;
@@ -88,42 +88,46 @@ div, span, p {
     margin-bottom: 6px;
 }
 
-/* Settings List */
-#settings-list {
+/* ================================ Rows ================================ */
+
+#list-rows {
     display: flex;
     flex-direction: column;
     width: 1704px;
 }
 
-.setting-row {
+/* EVO_ROW_H on EVO_ROW_PITCH, the same geometry the immediate-mode list
+ * used. The focus model's capacity is derived from those constants, so a
+ * shorter row here would scroll out of step with the cursor. */
+.list-row {
     width: 1704px;
     height: 92px;
-    background-color: #0c1322;
-
+    background-color: #121b2eeb;
     border-width: 1px;
-    border-color: #172338;
+    border-color: #2a3b55aa;
     border-radius: 14px;
     margin-bottom: 12px;
-    padding: 0 32px;
+    padding-left: 32px;
+    padding-right: 32px;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
 }
 
-.row-focused {
-    background-color: #142036;
+.list-row-focused {
+    background-color: #1b2e4cf5;
     border-width: 1.5px;
-    border-color: #38bdf8;
+    border-color: #00cdff;
 }
 
-.row-left {
+.lrow-left {
     display: flex;
     flex-direction: row;
     align-items: center;
 }
 
-.row-icon-box {
+.lrow-icon-box {
     width: 60px;
     height: 60px;
     background-color: #131c2e;
@@ -134,43 +138,71 @@ div, span, p {
     margin-right: 20px;
 }
 
-.row-focused .row-icon-box {
+.list-row-focused .lrow-icon-box {
     background-color: #1a2a47;
 }
 
-.row-icon {
+.lrow-icon {
     width: 30px;
     height: 30px;
     display: inline-block;
 }
 
-.row-text-box {
+.lrow-text {
     display: flex;
     flex-direction: column;
+    width: 1384px;
 }
 
-.row-title {
+.lrow-title {
+    display: block;
     font-size: 33px;
     font-weight: bold;
-    color: #ffffff;
+    color: #ecf3ff;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
-.row-detail {
+.lrow-detail {
+    display: block;
     font-size: 18px;
     font-weight: normal;
-    color: #94a3b8;
+    color: #9fb2cc;
     letter-spacing: 0.5px;
-    margin-top: 4px;
+    margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
-.row-right {
+/* Resume position, for RECENT. Sits under the detail line rather than beside
+ * it, so a long filename never has to share the row with it. */
+.lrow-track {
+    display: block;
+    width: 460px;
+    height: 5px;
+    border-radius: 2px;
+    background-color: #2a3b5599;
+    margin-top: 7px;
+}
+
+.lrow-fill {
+    display: block;
+    width: 0%;
+    height: 5px;
+    border-radius: 2px;
+    background-color: #00cdff;
+}
+
+.lrow-right {
     display: flex;
     flex-direction: row;
     align-items: center;
 }
 
-.row-badge {
+.lrow-badge {
     background-color: #131d2e;
     border-width: 1px;
     border-color: #243550;
@@ -178,33 +210,68 @@ div, span, p {
     padding: 8px 16px;
     font-size: 15px;
     font-weight: bold;
-    color: #94a3b8;
+    color: #9fb2cc;
     letter-spacing: 0.5px;
-    margin-right: 18px;
+    margin-right: 16px;
 }
 
-.row-focused .row-badge {
-    background-color: #0369a1;
-    border-color: #38bdf8;
-    color: #ffffff;
-}
-
-.row-chevron {
+.lrow-chevron {
     width: 20px;
     height: 20px;
     display: inline-block;
 }
 
-.row-hidden {
+/* ============================= Empty state ============================= */
+
+#list-empty {
     display: none;
+    position: absolute;
+    left: 0;
+    top: 300px;
+    width: 1704px;
+    flex-direction: column;
+    align-items: center;
 }
 
-.badge-hidden {
-    display: none;
+#list-empty-icon-box {
+    width: 128px;
+    height: 128px;
+    border-radius: 64px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 26px;
 }
 
-/* Footer Hints */
-#settings-footer {
+#list-empty-icon {
+    width: 56px;
+    height: 56px;
+    display: inline-block;
+}
+
+#list-empty-title {
+    display: block;
+    font-size: 33px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 1px;
+}
+
+#list-empty-hint {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 12px;
+}
+
+/* =============================== Footer =============================== */
+
+#list-footer {
     position: absolute;
     bottom: 40px;
     left: 0;
@@ -214,7 +281,6 @@ div, span, p {
     align-items: center;
     gap: 32px;
 }
-
 
 .footer-hint {
     display: flex;
@@ -236,7 +302,7 @@ div, span, p {
     letter-spacing: 1px;
 }
 
-#footer-version {
+#list-footer-version {
     margin-left: auto;
     font-size: 15px;
     font-weight: bold;

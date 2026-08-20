@@ -1,0 +1,226 @@
+/* =============================================================================
+ * EVO Player - Side Navigation Rail (navbar.rcss)
+ * Standalone overlay rendered on top of every RML screen that needs a rail.
+ * Collapsed: 96 px icon strip. Expanded (rail_focused): 240 px labelled panel.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-size: 15px;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span {
+    box-sizing: border-box;
+}
+
+/* ---- Collapsed rail background band ---- */
+#nav-rail-bg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 108px;
+    height: 1080px;
+    background-color: #060b16f5;
+    border-right-width: 1px;
+    border-right-color: #172236;
+}
+
+/* ---- EVO logo mark (collapsed) ---- */
+#nav-logo {
+    position: absolute;
+    left: 0;
+    top: 22px;
+    width: 108px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#nav-logo-img {
+    width: 38px;
+    height: 38px;
+    display: inline-block;
+}
+
+/* ---- Collapsed icon items ---- */
+#nav-items {
+    position: absolute;
+    left: 0;
+    top: 88px;
+    width: 108px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding-top: 2px;
+}
+
+.rail-item-wrap {
+    position: relative;
+    width: 108px;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Accent bar on the left edge of active item */
+.rail-accent-bar {
+    position: absolute;
+    left: 0px;
+    top: 14px;
+    width: 4px;
+    height: 26px;
+    border-radius: 2px;
+    background-color: #00cdff;
+    display: none;
+}
+
+.rail-accent-bar-visible {
+    display: block;
+}
+
+.rail-item {
+    width: 84px;
+    height: 50px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: transparent;
+    border-width: 0px;
+    border-color: transparent;
+}
+
+.rail-item-active {
+    background-color: #1b2e4ceb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+}
+
+.rail-item-cursor {
+    background-color: #00cdffe6;
+    border-width: 1px;
+    border-color: #ffffff;
+}
+
+.rail-icon {
+    width: 34px;
+    height: 34px;
+    display: inline-block;
+}
+
+/* ============================================================
+   Expanded overlay (rail_focused = true)
+   ============================================================ */
+
+/* Scrim dims the content to the right of the rail */
+#nav-scrim {
+    display: none;
+    position: absolute;
+    left: 108px;
+    top: 0;
+    width: 1812px;
+    height: 1080px;
+    background-color: #020409a8;
+}
+
+/* Full expanded panel */
+#nav-expanded {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 300px;
+    height: 1080px;
+    background-color: #060b16ff;
+    border-right-width: 1px;
+    border-right-color: #1e2f47;
+}
+
+#nav-expanded-logo {
+    position: absolute;
+    left: 0;
+    top: 22px;
+    width: 108px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#nav-expanded-logo-img {
+    width: 38px;
+    height: 38px;
+    display: inline-block;
+}
+
+#nav-app-label {
+    position: absolute;
+    left: 120px;
+    top: 30px;
+    font-size: 28px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 3px;
+}
+
+/* Expanded items list */
+#nav-expanded-items {
+    position: absolute;
+    left: 12px;
+    top: 90px;
+    width: 276px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rail-exp-item {
+    width: 276px;
+    height: 52px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 12px;
+    padding-right: 12px;
+    gap: 14px;
+    background-color: transparent;
+    border-width: 0px;
+    border-color: transparent;
+}
+
+.rail-exp-item-active {
+    background-color: #1b2e4caa;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+}
+
+.rail-exp-item-cursor {
+    background-color: #00cdffe6;
+    border-width: 1px;
+    border-color: #ffffff;
+}
+
+.rail-exp-icon {
+    width: 30px;
+    height: 30px;
+    display: inline-block;
+}
+
+.rail-exp-label {
+    font-size: 19px;
+    font-weight: bold;
+    color: #9fb2cc;
+    letter-spacing: 1px;
+}

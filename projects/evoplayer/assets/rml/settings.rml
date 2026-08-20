@@ -3,16 +3,7 @@
     <link type="text/rcss" href="settings.rcss"/>
 </head>
 <body id="settings-body">
-    <!-- Left Navigation Rail -->
-    <div id="nav-rail">
-        <div class="rail-item" id="rail-0"><img src="../icons/icon_home.png" class="rail-icon"/></div>
-        <div class="rail-item" id="rail-1"><img src="../icons/icon_browse_usb.png" class="rail-icon"/></div>
-        <div class="rail-item" id="rail-2"><img src="../icons/icon_recent_files.png" class="rail-icon"/></div>
-        <div class="rail-item" id="rail-3"><img src="../icons/icon_favorites.png" class="rail-icon"/></div>
-        <div class="rail-item" id="rail-4"><img src="../icons/icon_resume.png" class="rail-icon"/></div>
-        <div class="rail-item rail-active" id="rail-5"><img src="../icons/icon_settings.png" class="rail-icon"/></div>
-        <div class="rail-item" id="rail-6"><img src="../icons/icon_about_support.png" class="rail-icon"/></div>
-    </div>
+    <!-- Navigation rail is now rendered via the standalone navbar.rml overlay -->
 
     <!-- Main Content Area -->
     <div id="content-pane">

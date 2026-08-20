@@ -3,6 +3,8 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <algorithm>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
@@ -48,6 +50,556 @@ static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int
     }
 }
 
+/* ------------------------------------------------------------------
+ * Launch / home screen
+ *
+ * The posters the console shows are decoded video frames, so there is no
+ * file to point at here. These stand-ins are generated at the same
+ * dimensions the player caches covers and the hero still at, and go through
+ * the same raw-BGRA path, so what this renders is the real code path and
+ * not an <img src> that only works on the host.
+ * ------------------------------------------------------------------ */
+
+static uint32_t evo_demo_bgra(int r, int g, int b) {
+    return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
+static std::vector<uint32_t> make_demo_art(int w, int h, int seed) {
+    std::vector<uint32_t> px((size_t)w * (size_t)h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            float fx = (float)x / (float)w;
+            float fy = (float)y / (float)h;
+            /* A soft diagonal wash plus a vignette — enough structure to see
+             * the cover-crop and the scrims doing their job. */
+            float d = 0.55f * fx + 0.45f * (1.0f - fy);
+            float vig = 1.0f - 0.45f * ((fx - 0.5f) * (fx - 0.5f) +
+                                        (fy - 0.5f) * (fy - 0.5f)) * 4.0f;
+            if (vig < 0.0f) vig = 0.0f;
+
+            int base_r = (seed * 53) % 90 + 20;
+            int base_g = (seed * 97) % 70 + 25;
+            int base_b = (seed * 31) % 110 + 60;
+
+            int r = (int)((base_r + d * 150.0f) * vig);
+            int g = (int)((base_g + d * 120.0f) * vig);
+            int b = (int)((base_b + d * 170.0f) * vig);
+            if (r > 255) r = 255;
+            if (g > 255) g = 255;
+            if (b > 255) b = 255;
+            px[(size_t)y * w + x] = evo_demo_bgra(r, g, b);
+        }
+    }
+    return px;
+}
+
+struct DemoRecent {
+    const char* title;
+    const char* detail;
+    int progress;
+};
+
+static void render_launch_screens(std::vector<uint32_t>& fb, int width, int height) {
+    /* Cover cache is 320x180; the hero still is 560 wide. */
+    std::vector<uint32_t> hero_art = make_demo_art(560, 315, 3);
+    std::vector<std::vector<uint32_t>> covers;
+    for (int i = 0; i < 6; i++) covers.push_back(make_demo_art(320, 180, 5 + i * 7));
+
+    static const DemoRecent recents[6] = {
+        { "Blade Runner 2049",            "1H 42M LEFT",      412 },
+        { "Dune Part Two",                "58M LEFT",         735 },
+        { "The Grand Budapest Hotel",     "MKV - 4.2 GB",      -1 },
+        { "Arrival",                      "22M LEFT",         880 },
+        { "Interstellar 2160p HDR10",     "2H 04M LEFT",      160 },
+        { "Dolby Atmos Demo Disc 2024",   "MKV - 12.8 GB",     -1 },
+    };
+
+    static const char* lib_titles[6] = {
+        "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT"
+    };
+    static const char* lib_details[6] = {
+        "Videos and folders on USB storage",
+        "Pick up where you left off",
+        "Media you saved for later",
+        "Emby and media server streaming",
+        "Playback profiles and preferences",
+        "Credits and project info"
+    };
+    static const char* lib_icons[6] = {
+        "projects/evoplayer/assets/icons/icon_browse_usb.png",
+        "projects/evoplayer/assets/icons/icon_recent_files.png",
+        "projects/evoplayer/assets/icons/icon_favorites.png",
+        "projects/evoplayer/assets/icons/icon_emby.png",
+        "projects/evoplayer/assets/icons/icon_settings.png",
+        "projects/evoplayer/assets/icons/icon_about_support.png"
+    };
+
+    /*
+     * row: 0 = hero, 1 = the recent shelf, 2 = the library shelf.
+     * col: which tile in that shelf carries the cursor.
+     */
+    auto build = [&](evo_rmlui_launch_params_t& p, int row, int col,
+                     bool with_recent) {
+        memset(&p, 0, sizeof(p));
+        p.app_name = "EVO PLAYER";
+        p.version = "VERSION 0.7.0";
+        p.clock = "21:48";
+        p.theme_name = "MIDNIGHT";
+
+        if (with_recent) {
+            p.hero_eyebrow = "CONTINUE WATCHING";
+            p.hero_title = "Blade Runner 2049";
+            p.hero_detail = "1H 42M LEFT  -  HEVC MAIN 10  -  HDR10  -  DTS-HD MA 5.1";
+            p.hero_action = "RESUME";
+            p.hero_progress = 412;
+            p.hero_art = hero_art.data();
+            p.hero_art_w = 560;
+            p.hero_art_h = 315;
+        } else {
+            p.hero_eyebrow = "WELCOME";
+            p.hero_title = "EVO PLAYER";
+            p.hero_detail = "Play video and audio from USB storage";
+            p.hero_action = "BROWSE USB";
+            p.hero_progress = -1;
+        }
+        p.hero_focused = (row == 0) ? 1 : 0;
+
+        if (with_recent) {
+            p.recent_total = 9;
+            p.recent_visible = 6;
+            p.recent_cursor = (row == 1) ? col : -1;
+            for (int i = 0; i < 6; i++) {
+                p.recent[i].title = recents[i].title;
+                p.recent[i].detail = recents[i].detail;
+                p.recent[i].progress = recents[i].progress;
+                p.recent[i].icon_path =
+                    "projects/evoplayer/assets/icons/icon_recent_files.png";
+                p.recent[i].art = covers[i].data();
+                p.recent[i].art_w = 320;
+                p.recent[i].art_h = 180;
+                p.recent[i].is_focused = (row == 1 && i == col) ? 1 : 0;
+            }
+        }
+
+        p.library_visible = 6;
+        for (int i = 0; i < 6; i++) {
+            p.library[i].title = lib_titles[i];
+            p.library[i].detail = lib_details[i];
+            p.library[i].icon_path = lib_icons[i];
+            p.library[i].progress = -1;
+            p.library[i].is_focused = (row == 2 && i == col) ? 1 : 0;
+        }
+    };
+
+    evo_rmlui_nav_params_t nav;
+    memset(&nav, 0, sizeof(nav));
+    nav.active_section = 0;   /* HOME */
+    nav.cursor_index = 0;
+    nav.visible = 1;
+
+    struct Shot { const char* name; int row; int col; bool recent; int rail; };
+    static const Shot shots[] = {
+        { "rml_launch_hero",     0, 0, true,  0 },
+        { "rml_launch_recent",   1, 2, true,  0 },
+        { "rml_launch_library",  2, 4, true,  0 },
+        { "rml_launch_empty",    2, 0, false, 0 },
+        { "rml_launch_rail",     0, 0, true,  1 },
+    };
+
+    for (const Shot& s : shots) {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+
+        nav.rail_focused = s.rail;
+        nav.cursor_index = s.rail ? 1 : 0;
+        evo_rmlui_update_nav(&nav);
+
+        evo_rmlui_launch_params_t p;
+        build(p, s.row, s.col, s.recent);
+        evo_rmlui_update_launch(&p);
+        evo_rmlui_render_launch(fb.data(), width, height);
+
+        std::string out = std::string("output/uiview/") + s.name + ".bmp";
+        save_bmp_24(out.c_str(), fb.data(), width, height);
+    }
+
+    /* Hand the rail back the way the settings shots below expect to find it:
+     * SETTINGS lit, collapsed. Nav state is sticky across renders, so leaving
+     * it expanded here drew the overlay across every screen that follows. */
+    nav.active_section = 5;
+    nav.cursor_index = 5;
+    nav.rail_focused = 0;
+    evo_rmlui_update_nav(&nav);
+}
+
+/* ------------------------------------------------------------------
+ * List, browser and changelog screens
+ * ------------------------------------------------------------------ */
+
+static void set_nav(int section, int rail_focused) {
+    evo_rmlui_nav_params_t nav;
+    memset(&nav, 0, sizeof(nav));
+    nav.active_section = section;
+    nav.cursor_index = rail_focused ? section : section;
+    nav.rail_focused = rail_focused;
+    nav.visible = 1;
+    evo_rmlui_update_nav(&nav);
+}
+
+static void render_list_screens(std::vector<uint32_t>& fb, int width, int height) {
+    const char* ico_recent = "projects/evoplayer/assets/icons/icon_recent_files.png";
+    const char* ico_fav    = "projects/evoplayer/assets/icons/icon_favorites.png";
+    const char* ico_set    = "projects/evoplayer/assets/icons/icon_settings.png";
+    const char* ico_folder = "projects/evoplayer/assets/icons/icon_folder.png";
+    const char* ico_res    = "projects/evoplayer/assets/icons/icon_resume.png";
+
+    auto hints3 = [](evo_rmlui_list_params_t& p, const char* a, const char* b, const char* c) {
+        p.hints[0].glyph_path = "projects/evoplayer/assets/icons/btn_cross.png";
+        p.hints[0].label = a;
+        p.hints[1].glyph_path = "projects/evoplayer/assets/icons/btn_circle.png";
+        p.hints[1].label = b;
+        p.hints[2].glyph_path = "projects/evoplayer/assets/icons/btn_dpad.png";
+        p.hints[2].label = c;
+        p.hint_count = 3;
+    };
+
+    /* --- RECENT --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(2, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "RECENT";
+        p.subtitle = "PICK UP WHERE YOU LEFT OFF";
+        p.section = 2;
+        p.total_count = 12;
+        p.cursor_index = 1;
+        hints3(p, "PLAY", "BACK", "MOVE");
+
+        static const char* t[9] = {
+            "Blade Runner 2049", "Dune Part Two", "The Grand Budapest Hotel",
+            "Arrival", "Interstellar 2160p HDR10", "Dolby Atmos Demo Disc 2024",
+            "Sicario", "Whiplash", "The Social Network"
+        };
+        static const char* d[9] = {
+            "1H 42M LEFT", "58M LEFT", "MKV - 4.2 GB", "22M LEFT",
+            "2H 04M LEFT", "MKV - 12.8 GB", "41M LEFT", "13M LEFT", "1H 06M LEFT"
+        };
+        static const int pr[9] = { 412, 735, -1, 880, 160, -1, 560, 905, 330 };
+
+        for (int i = 0; i < 7; i++) {
+            p.rows[i].title = t[i];
+            p.rows[i].detail = d[i];
+            p.rows[i].icon_path = ico_recent;
+            p.rows[i].progress = pr[i];
+            p.rows[i].is_focused = (i == 1);
+            p.row_count++;
+        }
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_recent.bmp", fb.data(), width, height);
+    }
+
+    /* --- FAVORITES, empty --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(3, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "FAVORITES";
+        p.subtitle = "MEDIA YOU SAVED FOR LATER";
+        p.section = 3;
+        p.cursor_index = -1;
+        p.is_empty = 1;
+        p.empty_title = "NO FAVORITES YET";
+        p.empty_hint = "PRESS TRIANGLE ON A FILE IN THE BROWSER";
+        p.empty_icon = ico_fav;
+        hints3(p, "PLAY", "BACK", "REMOVE");
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_favorites_empty.bmp", fb.data(), width, height);
+    }
+
+    /* --- FAVORITES, populated --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(3, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "FAVORITES";
+        p.subtitle = "MEDIA YOU SAVED FOR LATER";
+        p.section = 3;
+        p.total_count = 4;
+        p.cursor_index = 0;
+        hints3(p, "PLAY", "BACK", "REMOVE");
+        static const char* t[4] = {
+            "Blade Runner 2049", "Dolby Atmos Demo Disc 2024",
+            "Planet Earth II - Islands", "Whiplash"
+        };
+        static const char* d[4] = { "2H 44M", "18M", "50M", "1H 46M" };
+        for (int i = 0; i < 4; i++) {
+            p.rows[i].title = t[i];
+            p.rows[i].detail = d[i];
+            p.rows[i].icon_path = ico_fav;
+            p.rows[i].progress = -1;
+            p.rows[i].is_focused = (i == 0);
+            p.row_count++;
+        }
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_favorites.bmp", fb.data(), width, height);
+    }
+
+    /* --- EMBY SETUP --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(4, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "EMBY MEDIA SERVER";
+        p.subtitle = "STREAMING ADDON CONFIGURATION";
+        p.section = 4;
+        p.total_count = 6;
+        p.cursor_index = 4;
+        hints3(p, "SELECT", "BACK", "MOVE");
+        static const char* t[6] = {
+            "SERVER HOST", "SERVER PORT", "ACCOUNT USERNAME",
+            "ACCOUNT PASSWORD", "CONNECTION STATUS", "EXPLORE MEDIA LIBRARIES"
+        };
+        static const char* d[6] = {
+            "192.168.0.24  (PRESS X TO EDIT)", "8096  (PRESS X TO EDIT)",
+            "sain  (PRESS X TO EDIT)", "********  (PRESS X TO EDIT)",
+            "CONNECTED (PRESS X TO DISCONNECT)",
+            "BROWSE MOVIES, TV SHOWS & COLLECTIONS"
+        };
+        for (int i = 0; i < 6; i++) {
+            p.rows[i].title = t[i];
+            p.rows[i].detail = d[i];
+            p.rows[i].icon_path = (i == 5) ? ico_folder : ico_set;
+            p.rows[i].progress = -1;
+            p.rows[i].has_chevron = 1;
+            p.rows[i].is_focused = (i == 4);
+            p.row_count++;
+        }
+        p.rows[4].badge = "ONLINE";
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_emby_setup.bmp", fb.data(), width, height);
+    }
+
+    /* --- EMBY BROWSE --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(4, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "EMBY BROWSER";
+        p.subtitle = "EMBY  -  ROOT LIBRARIES";
+        p.section = 4;
+        p.total_count = 7;
+        p.cursor_index = 2;
+        hints3(p, "OPEN", "BACK", "MOVE");
+        static const char* t[7] = {
+            "Movies", "TV Shows", "Documentaries", "Music Videos",
+            "4K HDR Collection", "Kids", "Home Videos"
+        };
+        static const char* d[7] = {
+            "482 ITEMS", "96 SERIES", "134 ITEMS", "58 ITEMS",
+            "71 ITEMS", "203 ITEMS", "19 ITEMS"
+        };
+        for (int i = 0; i < 7; i++) {
+            p.rows[i].title = t[i];
+            p.rows[i].detail = d[i];
+            p.rows[i].icon_path = ico_folder;
+            p.rows[i].progress = -1;
+            p.rows[i].has_chevron = 1;
+            p.rows[i].is_focused = (i == 2);
+            p.row_count++;
+        }
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_emby_browse.bmp", fb.data(), width, height);
+    }
+
+    (void)ico_res;
+}
+
+static void render_browser_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::vector<uint32_t> preview = make_demo_art(560, 315, 11);
+
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(1, 0);
+
+    evo_rmlui_browser_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.path = "/usb0/Movies";
+    p.at_root = 0;
+    p.total_count = 37;
+    p.cursor_index = 3;
+
+    struct Row { const char* n; const char* d; const char* icon; const char* badge; int prog; int fav; };
+    static const Row rows[12] = {
+        { "..",                          "PARENT FOLDER",        "projects/evoplayer/assets/icons/icon_folder.png",   "DIR",   -1, 0 },
+        { "4K HDR",                      "12 ITEMS",             "projects/evoplayer/assets/icons/icon_folder.png",   "DIR",   -1, 0 },
+        { "Documentaries",               "31 ITEMS",             "projects/evoplayer/assets/icons/icon_folder.png",   "DIR",   -1, 0 },
+        { "Blade Runner 2049.mkv",       "MKV - 24.8 GB - 2H 44M", "projects/evoplayer/assets/icons/icon_resume.png", NULL,   412, 1 },
+        { "Dune Part Two.mkv",           "MKV - 31.2 GB - 2H 46M", "projects/evoplayer/assets/icons/icon_resume.png", NULL,   735, 0 },
+        { "Arrival.mp4",                 "MP4 - 8.1 GB - 1H 56M",  "projects/evoplayer/assets/icons/icon_resume.png", NULL,   880, 1 },
+        { "Interstellar 2160p HDR10.mkv","MKV - 46.0 GB - 2H 49M", "projects/evoplayer/assets/icons/icon_resume.png", NULL,   160, 0 },
+        { "Sicario.mkv",                 "MKV - 18.4 GB - 2H 01M", "projects/evoplayer/assets/icons/icon_resume.png", NULL,    -1, 0 },
+        { "Whiplash.mkv",                "MKV - 11.7 GB - 1H 46M", "projects/evoplayer/assets/icons/icon_resume.png", NULL,   905, 0 },
+        { "Atmos Demo.m4a",              "M4A - 92 MB - 4M 18S",   "projects/evoplayer/assets/icons/icon_subtitles.png", "AUDIO", -1, 0 },
+        { "Soundtrack.flac",             "FLAC - 412 MB - 58M",    "projects/evoplayer/assets/icons/icon_subtitles.png", "AUDIO", -1, 0 },
+        { "notes.txt",                   "TXT - 2 KB",             "projects/evoplayer/assets/icons/icon_about_support.png", NULL, -1, 0 },
+    };
+
+    for (int i = 0; i < 12; i++) {
+        p.rows[i].name = rows[i].n;
+        p.rows[i].detail = rows[i].d;
+        p.rows[i].icon_path = rows[i].icon;
+        p.rows[i].badge = rows[i].badge;
+        p.rows[i].progress = rows[i].prog;
+        p.rows[i].is_favorite = rows[i].fav;
+        p.rows[i].is_focused = (i == 3);
+        p.row_count++;
+    }
+
+    p.ins_name = "Blade Runner 2049.mkv";
+    p.ins_kind = "VIDEO";
+    p.ins_ext = "MKV";
+    p.ins_preview_badge = "2H 44M";
+    p.ins_preview = preview.data();
+    p.ins_preview_w = 560;
+    p.ins_preview_h = 315;
+
+    struct KV { const char* k; const char* v; };
+    static const KV props[7] = {
+        { "SIZE",       "24.8 GB" },
+        { "CONTAINER",  "MATROSKA" },
+        { "DURATION",   "2H 44M" },
+        { "RESOLUTION", "3840 x 2160" },
+        { "VIDEO",      "HEVC MAIN 10" },
+        { "AUDIO",      "DTS-HD MA 5.1" },
+        { "SUBTITLES",  "3" },
+    };
+    for (int i = 0; i < 7; i++) {
+        p.ins_props[i].key = props[i].k;
+        p.ins_props[i].value = props[i].v;
+        p.ins_prop_count++;
+    }
+
+    evo_rmlui_update_browser(&p);
+    evo_rmlui_render_browser(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_browser.bmp", fb.data(), width, height);
+
+    /* Empty folder, at the root — no BACK hint, no inspector content. */
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    evo_rmlui_browser_params_t e;
+    memset(&e, 0, sizeof(e));
+    e.path = "/usb0";
+    e.at_root = 1;
+    e.cursor_index = -1;
+    e.is_empty = 1;
+    e.empty_title = "NOTHING HERE";
+    e.empty_hint = "CONNECT A USB DRIVE WITH MEDIA ON IT";
+    e.ins_name = "";
+    evo_rmlui_update_browser(&e);
+    evo_rmlui_render_browser(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_browser_empty.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * Playback OSD, paused
+ *
+ * Nav is left visible from render_browser_screen() just above, matching
+ * how the real app reaches this screen (browse -> open a file -> pause).
+ * RenderPlaybackOSD must hide the nav rail itself instead of inheriting
+ * whatever the previous screen left it as - it forgot to once, and the
+ * rail bled through onto the player only while paused, since the OSD draw
+ * call is skipped entirely during steady playback.
+ * ------------------------------------------------------------------ */
+static void render_playback_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+
+    evo_playback_osd_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.title = "Blade Runner 2049";
+    p.metadata = "1H 42M LEFT";
+    p.res_badge = "4K UHD";
+    p.hdr_badge = "HDR10";
+    p.codec_badge = "HEVC 10-BIT";
+    p.fps_badge = "24 FPS";
+    p.audio_badge = "";
+    p.position_sec = 1234.0;
+    p.duration_sec = 9780.0;
+    p.percentage = p.position_sec / p.duration_sec;
+    p.paused = 1;
+    p.scrub_active = 0;
+    p.scrub_target = 0.0;
+    p.audio_track = "DTS-HD MA 5.1";
+    p.sub_track = "English";
+    p.view_mode = 0;
+    p.show_stats = 0;
+    p.alpha = 255;
+
+    evo_rmlui_update_playback_params(&p);
+    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback_paused.bmp", fb.data(), width, height);
+}
+
+static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(6, 0);
+
+    evo_rmlui_changelog_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.title = "CHANGELOG";
+    p.subtitle = "WHAT CHANGED IN EACH RELEASE";
+    p.release_total = 5;
+    p.cursor_index = 0;
+
+    struct Rel { const char* v; const char* t; const char* d; };
+    static const Rel rel[5] = {
+        { "0.7.1", "RMLUI LAUNCH, BROWSER & LIST SCREENS", "AUGUST 2026" },
+        { "0.7.0", "EMBY PASSWORD AUTH & REFINED UI",      "AUGUST 2026" },
+        { "0.6.0", "NATIVE RMLUI PLAYBACK OSD",            "AUGUST 2026" },
+        { "0.5.0", "MEDIA HOME TILE & THEMING",            "JULY 2026"   },
+        { "0.4.0", "HARDWARE DECODE PIPELINE",             "JULY 2026"   },
+    };
+    for (int i = 0; i < 5; i++) {
+        p.releases[i].version = rel[i].v;
+        p.releases[i].tagline = rel[i].t;
+        p.releases[i].date = rel[i].d;
+        p.releases[i].is_focused = (i == 0);
+        p.release_count++;
+    }
+
+    p.detail_version = "0.7.1";
+    p.detail_tagline = "RMLUI LAUNCH, BROWSER & LIST SCREENS";
+    p.item_total = 9;
+
+    struct It { const char* k; const char* t; };
+    static const It items[9] = {
+        { "NEW",      "RETAINED-MODE LAUNCH SCREEN WITH HERO, RECENT SHELF AND LIBRARY TILES" },
+        { "NEW",      "USB BROWSER REBUILT AS A VIRTUALISED TWELVE-ROW LIST WITH LIVE INSPECTOR" },
+        { "NEW",      "SHARED LIST DOCUMENT SERVING RECENT, FAVORITES AND BOTH EMBY SCREENS" },
+        { "NEW",      "MASTER-DETAIL CHANGELOG VIEWER" },
+        { "FIXED",    "BROWSER OPENED IN THE LAST PLAYED FOLDER INSTEAD OF THE USB ROOT" },
+        { "FIXED",    "NAVIGATION RAIL WAS UNREACHABLE FROM THE HOME SCREEN" },
+        { "FIXED",    "THEME COLOURS WERE BYTE-SWAPPED BEFORE THE FIRST THEME SYNC" },
+        { "FIXED",    "GRADIENT DECORATORS FLATTENED TO THEIR START COLOUR" },
+        { "IMPROVED", "RUNTIME ARTWORK NOW REACHES THE DOM WITHOUT A FILE ON DISK" },
+    };
+    for (int i = 0; i < 9; i++) {
+        p.items[i].kind = items[i].k;
+        p.items[i].text = items[i].t;
+        p.item_count++;
+    }
+
+    evo_rmlui_update_changelog(&p);
+    evo_rmlui_render_changelog(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_changelog.bmp", fb.data(), width, height);
+}
+
 int main(int argc, char** argv) {
     const int width = 1920;
     const int height = 1080;
@@ -57,6 +609,13 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to initialize RmlUi playback engine!" << std::endl;
         return 1;
     }
+
+    render_launch_screens(fb, width, height);
+    render_list_screens(fb, width, height);
+    render_browser_screen(fb, width, height);
+    render_playback_screen(fb, width, height);
+    render_changelog_screen(fb, width, height);
+    set_nav(5, 0);
 
     // 1. Settings Main Hub
     {
