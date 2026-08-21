@@ -356,6 +356,63 @@ struct EvoChangelogState {
     bool operator!=(const EvoChangelogState& o) const { return !(*this == o); }
 };
 
+struct EvoReaderState {
+    std::string title;
+    std::string subtitle;
+    std::string badge;
+    bool rail_focused = false;
+
+    std::vector<std::string> lines;
+    int face = 0;
+
+    double progress = 0.0;
+    double visible_frac = 1.0;
+
+    std::string notice;
+    std::string footnote;
+
+    bool operator==(const EvoReaderState& o) const {
+        return title == o.title && subtitle == o.subtitle && badge == o.badge &&
+               rail_focused == o.rail_focused && lines == o.lines && face == o.face &&
+               progress == o.progress && visible_frac == o.visible_frac &&
+               notice == o.notice && footnote == o.footnote;
+    }
+    bool operator!=(const EvoReaderState& o) const { return !(*this == o); }
+};
+
+struct EvoSurroundSpeaker {
+    std::string name;
+    std::string label;
+    double hz = 0.0;
+    int dx = 0;
+    int dy = 0;
+    int ch = -1;
+    int item_idx = -1;
+    bool hidden = false;
+
+    bool operator==(const EvoSurroundSpeaker& o) const {
+        return name == o.name && label == o.label && hz == o.hz && dx == o.dx &&
+               dy == o.dy && ch == o.ch && item_idx == o.item_idx && hidden == o.hidden;
+    }
+    bool operator!=(const EvoSurroundSpeaker& o) const { return !(*this == o); }
+};
+
+struct EvoSurroundState {
+    bool rail_focused = false;
+    bool is_51_layout = false;
+    int selected_item = 0;
+    int active_channel = -1;
+    int surround_mode = 0;
+    std::vector<EvoSurroundSpeaker> speakers;
+
+    bool operator==(const EvoSurroundState& o) const {
+        return rail_focused == o.rail_focused && is_51_layout == o.is_51_layout &&
+               selected_item == o.selected_item && active_channel == o.active_channel &&
+               surround_mode == o.surround_mode && speakers == o.speakers;
+    }
+    bool operator!=(const EvoSurroundState& o) const { return !(*this == o); }
+};
+
 struct EvoThemeColors {
     /*
      * Packed 0xAABBGGRR, the same order EVO_RGBA() produces in evo_theme.c —
@@ -407,6 +464,12 @@ public:
     void UpdateChangelogState(const EvoChangelogState& state);
     void RenderChangelog(uint32_t* framebuffer, int width, int height);
 
+    void UpdateReaderState(const EvoReaderState& state);
+    void RenderReader(uint32_t* framebuffer, int width, int height);
+
+    void UpdateSurroundState(const EvoSurroundState& state);
+    void RenderSurround(uint32_t* framebuffer, int width, int height);
+
     void UpdateBrowserState(const EvoBrowserState& state);
     void RenderBrowser(uint32_t* framebuffer, int width, int height);
 
@@ -451,6 +514,8 @@ private:
     Rml::ElementDocument* m_list_doc = nullptr;
     Rml::ElementDocument* m_browser_doc = nullptr;
     Rml::ElementDocument* m_changelog_doc = nullptr;
+    Rml::ElementDocument* m_reader_doc = nullptr;
+    Rml::ElementDocument* m_surround_doc = nullptr;
     Rml::ElementDocument* m_playback_doc = nullptr;
     Rml::ElementDocument* m_dialog_doc = nullptr;
     Rml::ElementDocument* m_settings_doc = nullptr;
@@ -464,6 +529,8 @@ private:
     EvoListState m_last_list;
     EvoBrowserState m_last_browser;
     EvoChangelogState m_last_changelog;
+    EvoReaderState m_last_reader;
+    EvoSurroundState m_last_surround;
     EvoPlaybackState m_last_state;
 
     /*
@@ -486,6 +553,8 @@ private:
     int m_theme_gen_list = -1;
     int m_theme_gen_browser = -1;
     int m_theme_gen_changelog = -1;
+    int m_theme_gen_reader = -1;
+    int m_theme_gen_surround = -1;
     int m_theme_gen_playback = -1;
     int m_theme_gen_dialog = -1;
     int m_theme_gen_settings = -1;
@@ -510,6 +579,8 @@ private:
     /* Must stay in step with EVO_RMLUI_CL_* and changelog.rml. */
     static const int kChangelogReleases = 8;
     static const int kChangelogItems = 14;
+    static const int kReaderLines = 64;
+    static const int kSurroundSpeakers = 8;
 
     /* 0 = hero, 1..6 = the recent shelf, 7 = the browser preview. */
     static const int kBrowserArtSlot = 7;

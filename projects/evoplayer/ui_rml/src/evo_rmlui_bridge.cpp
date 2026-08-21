@@ -50,6 +50,59 @@ void evo_rmlui_render_changelog(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderChangelog(framebuffer, width, height);
 }
 
+void evo_rmlui_update_reader(const evo_rmlui_reader_params_t* p) {
+    if (!p) return;
+    EvoReaderState state;
+    state.title = p->title ? p->title : "";
+    state.subtitle = p->subtitle ? p->subtitle : "";
+    state.badge = p->badge ? p->badge : "";
+    state.rail_focused = (p->rail_focused != 0);
+    state.face = p->face;
+    state.progress = p->progress;
+    state.visible_frac = p->visible_frac;
+    state.notice = p->notice ? p->notice : "";
+    state.footnote = p->footnote ? p->footnote : "";
+
+    for (int i = 0; i < p->line_count && i < EVO_RMLUI_READER_LINES; i++) {
+        state.lines.push_back(p->lines[i] ? p->lines[i] : "");
+    }
+
+    EvoRmlApp::Instance().UpdateReaderState(state);
+}
+
+void evo_rmlui_render_reader(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderReader(framebuffer, width, height);
+}
+
+void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
+    if (!p) return;
+    EvoSurroundState state;
+    state.rail_focused = (p->rail_focused != 0);
+    state.is_51_layout = (p->is_51_layout != 0);
+    state.selected_item = p->selected_item;
+    state.active_channel = p->active_channel;
+    state.surround_mode = p->surround_mode;
+
+    for (int i = 0; i < p->speaker_count && i < EVO_RMLUI_SURROUND_SPEAKERS; i++) {
+        EvoSurroundSpeaker s;
+        s.name = p->speakers[i].name ? p->speakers[i].name : "";
+        s.label = p->speakers[i].label ? p->speakers[i].label : "";
+        s.hz = p->speakers[i].hz;
+        s.dx = p->speakers[i].dx;
+        s.dy = p->speakers[i].dy;
+        s.ch = p->speakers[i].ch;
+        s.item_idx = p->speakers[i].item_idx;
+        s.hidden = (p->speakers[i].hidden != 0);
+        state.speakers.push_back(s);
+    }
+
+    EvoRmlApp::Instance().UpdateSurroundState(state);
+}
+
+void evo_rmlui_render_surround(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderSurround(framebuffer, width, height);
+}
+
 void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     if (!p) return;
     EvoBrowserState state;

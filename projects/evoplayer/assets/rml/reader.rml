@@ -1,0 +1,115 @@
+<rml>
+<head>
+    <link type="text/rcss" href="reader.rcss"/>
+</head>
+<body id="reader-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="reader-pane">
+        <div id="reader-header">
+            <div id="reader-header-left">
+                <div id="reader-indicator"></div>
+                <div id="reader-header-titles">
+                    <div id="reader-title"></div>
+                    <div id="reader-subtitle"></div>
+                </div>
+            </div>
+            <div id="reader-badge"></div>
+        </div>
+
+        <div id="reader-notice"></div>
+
+        <div id="reader-lines">
+            <div id="rline-0" class="rline"></div>
+            <div id="rline-1" class="rline"></div>
+            <div id="rline-2" class="rline"></div>
+            <div id="rline-3" class="rline"></div>
+            <div id="rline-4" class="rline"></div>
+            <div id="rline-5" class="rline"></div>
+            <div id="rline-6" class="rline"></div>
+            <div id="rline-7" class="rline"></div>
+            <div id="rline-8" class="rline"></div>
+            <div id="rline-9" class="rline"></div>
+            <div id="rline-10" class="rline"></div>
+            <div id="rline-11" class="rline"></div>
+            <div id="rline-12" class="rline"></div>
+            <div id="rline-13" class="rline"></div>
+            <div id="rline-14" class="rline"></div>
+            <div id="rline-15" class="rline"></div>
+            <div id="rline-16" class="rline"></div>
+            <div id="rline-17" class="rline"></div>
+            <div id="rline-18" class="rline"></div>
+            <div id="rline-19" class="rline"></div>
+            <div id="rline-20" class="rline"></div>
+            <div id="rline-21" class="rline"></div>
+            <div id="rline-22" class="rline"></div>
+            <div id="rline-23" class="rline"></div>
+            <div id="rline-24" class="rline"></div>
+            <div id="rline-25" class="rline"></div>
+            <div id="rline-26" class="rline"></div>
+            <div id="rline-27" class="rline"></div>
+            <div id="rline-28" class="rline"></div>
+            <div id="rline-29" class="rline"></div>
+            <div id="rline-30" class="rline"></div>
+            <div id="rline-31" class="rline"></div>
+            <div id="rline-32" class="rline"></div>
+            <div id="rline-33" class="rline"></div>
+            <div id="rline-34" class="rline"></div>
+            <div id="rline-35" class="rline"></div>
+            <div id="rline-36" class="rline"></div>
+            <div id="rline-37" class="rline"></div>
+            <div id="rline-38" class="rline"></div>
+            <div id="rline-39" class="rline"></div>
+            <div id="rline-40" class="rline"></div>
+            <div id="rline-41" class="rline"></div>
+            <div id="rline-42" class="rline"></div>
+            <div id="rline-43" class="rline"></div>
+            <div id="rline-44" class="rline"></div>
+            <div id="rline-45" class="rline"></div>
+            <div id="rline-46" class="rline"></div>
+            <div id="rline-47" class="rline"></div>
+            <div id="rline-48" class="rline"></div>
+            <div id="rline-49" class="rline"></div>
+            <div id="rline-50" class="rline"></div>
+            <div id="rline-51" class="rline"></div>
+            <div id="rline-52" class="rline"></div>
+            <div id="rline-53" class="rline"></div>
+            <div id="rline-54" class="rline"></div>
+            <div id="rline-55" class="rline"></div>
+            <div id="rline-56" class="rline"></div>
+            <div id="rline-57" class="rline"></div>
+            <div id="rline-58" class="rline"></div>
+            <div id="rline-59" class="rline"></div>
+            <div id="rline-60" class="rline"></div>
+            <div id="rline-61" class="rline"></div>
+            <div id="rline-62" class="rline"></div>
+            <div id="rline-63" class="rline"></div>
+        </div>
+
+        <div id="reader-scrollbar">
+            <div id="reader-scrollbar-thumb"></div>
+        </div>
+
+        <div id="reader-footnote"></div>
+
+        <div id="reader-footer">
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">BACK</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">SCROLL</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">TEXT SIZE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_lstick.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">PAGE</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

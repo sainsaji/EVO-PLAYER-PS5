@@ -61,9 +61,24 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPTS_DIR}/.." && pwd)"
 export REPO_ROOT SCRIPTS_DIR
 
+# Load .env / .env.local if present
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+    set +u; set -a
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.env"
+    set +a; set -u
+fi
+if [[ -f "${REPO_ROOT}/.env.local" ]]; then
+    set +u; set -a
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/.env.local"
+    set +a; set -u
+fi
+
 : "${PS5_PAYLOAD_SDK:=/opt/ps5-payload-sdk}"
 : "${PS5_PORT:=9021}"   # ps5-payload-elfldr default (host/bin/prospero-deploy)
-export PS5_PAYLOAD_SDK PS5_PORT
+: "${PS5_MAC:=}"
+export PS5_PAYLOAD_SDK PS5_PORT PS5_MAC
 
 OUTPUT_DIR="${REPO_ROOT}/output"
 ELF_OUT="${OUTPUT_DIR}/elf"
@@ -105,15 +120,9 @@ reexec_in_container() {
        Install Docker Desktop, or run this script from inside the container."
 
     log "not in container - re-running via docker compose"
-    #
-    # EXTRA_CFLAGS has to cross the container boundary. It did not, and the
-    # failure was silent in the worst way: the build succeeded, the ELF
-    # installed, and the -D switch simply was not in it. A debug build that
-    # quietly is not a debug build costs a whole hardware round trip to
-    # notice. Forward anything the inner script reads from the environment
-    # rather than from its arguments.
     exec docker compose -f "${REPO_ROOT}/docker-compose.yml" run --rm \
         -e "PS5_HOST=${PS5_HOST:-}" \
+        -e "PS5_MAC=${PS5_MAC:-}" \
         -e "PS5_PORT=${PS5_PORT}" \
         -e "EXTRA_CFLAGS=${EXTRA_CFLAGS:-}" \
         ps5-dev "./scripts/${rel}" "$@"
@@ -151,18 +160,49 @@ sdk_version_banner() {
 
 # -----------------------------------------------------------------------------
 # PS5 host/port validation, shared by deploy.sh and the test targets.
-# Deliberately never defaults PS5_HOST to an address.
 # -----------------------------------------------------------------------------
+auto_detect_ps5_from_mac() {
+    local target_mac="${1:-${PS5_MAC:-}}"
+    [[ -n "${target_mac}" ]] || return 1
+    target_mac="$(echo "${target_mac}" | tr '[:upper:]-' '[:lower:]:')"
+
+    if [[ -f /proc/net/arp ]]; then
+        local found_ip
+        found_ip=$(awk -v mac="${target_mac}" 'tolower($4) == mac {print $1}' /proc/net/arp | head -n 1)
+        if [[ -n "${found_ip}" ]]; then
+            PS5_HOST="${found_ip}"
+            export PS5_HOST
+            return 0
+        fi
+    fi
+
+    if command -v ip >/dev/null 2>&1; then
+        local found_ip
+        found_ip=$(ip neigh 2>/dev/null | awk -v mac="${target_mac}" 'tolower($5) == mac {print $1}' | head -n 1)
+        if [[ -n "${found_ip}" ]]; then
+            PS5_HOST="${found_ip}"
+            export PS5_HOST
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 require_ps5_host() {
     if [[ -z "${PS5_HOST:-}" ]]; then
-        die "PS5_HOST is not set.
+        if [[ -n "${PS5_MAC:-}" ]] && auto_detect_ps5_from_mac "${PS5_MAC}"; then
+            ok "Auto-detected PS5 IP from MAC (${PS5_MAC}): ${PS5_HOST}"
+            return 0
+        fi
+
+        die "PS5_HOST is not set and could not auto-detect from MAC.
 
        Point it at your console (never hard-coded in this repo):
            PS5_HOST=192.168.1.50 $0 $*
        or persist it for compose in a .env file at the repo root:
            PS5_HOST=192.168.1.50
-       or export it in your container shell:
-           export PS5_HOST=192.168.1.50
+           PS5_MAC=00:11:22:33:44:55   # optional, enables auto-detect by MAC
 
        Find the address on the console under:
            Settings -> Network -> Connection Status"

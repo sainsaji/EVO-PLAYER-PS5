@@ -281,6 +281,58 @@ typedef struct {
     evo_rmlui_cl_item_t items[EVO_RMLUI_CL_ITEMS];
 } evo_rmlui_changelog_params_t;
 
+/*
+ * Text reader — a single scrolling pane. The visible window (lines[]) is
+ * already wrapped and paged by evo_textreader.c; this only ever displays it.
+ */
+#define EVO_RMLUI_READER_LINES 64
+
+typedef struct {
+    const char* title;
+    const char* subtitle;
+    const char* badge;
+    int         rail_focused;
+
+    const char* lines[EVO_RMLUI_READER_LINES];
+    int         line_count;
+    int         face;          /* EVO_FACE_MENU or EVO_FACE_SMALL - reading size */
+
+    double      progress;      /* 0..1, how far down the document the top is */
+    double      visible_frac;  /* 0..1, how much of it is on screen */
+
+    const char* notice;        /* shown instead of lines: error / empty file */
+    const char* footnote;      /* shown under the lines: "FIRST 2MB OF 47MB" */
+} evo_rmlui_reader_params_t;
+
+/*
+ * Surround sound test — a spatial room diagram, not a list. Each speaker
+ * carries its own screen offset from the listener position (dx, dy), matching
+ * the layout evo_screen_surround_test() already draws.
+ */
+#define EVO_RMLUI_SURROUND_SPEAKERS 8
+
+typedef struct {
+    const char* name;   /* "FRONT LEFT" */
+    const char* label;  /* "FL" */
+    double      hz;     /* test tone frequency */
+    int         dx;
+    int         dy;
+    int         ch;         /* channel index, matches active_channel */
+    int         item_idx;   /* matches selected_item when this node has the cursor */
+    int         hidden;     /* side-surround speakers, hidden in 5.1 layout */
+} evo_rmlui_surround_speaker_t;
+
+typedef struct {
+    int         rail_focused;
+    int         is_51_layout;
+    int         selected_item;   /* 0-4 auto/layout/silence actions, 5-12 speakers */
+    int         active_channel;  /* -1 = none; driven by the audio test thread */
+    int         surround_mode;   /* 0 = idle */
+
+    evo_rmlui_surround_speaker_t speakers[EVO_RMLUI_SURROUND_SPEAKERS];
+    int         speaker_count;
+} evo_rmlui_surround_params_t;
+
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);
 void evo_rmlui_shutdown(void);
@@ -309,6 +361,14 @@ void evo_rmlui_render_browser(uint32_t* framebuffer, int width, int height);
 /* Changelog API */
 void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* params);
 void evo_rmlui_render_changelog(uint32_t* framebuffer, int width, int height);
+
+/* Text reader API */
+void evo_rmlui_update_reader(const evo_rmlui_reader_params_t* params);
+void evo_rmlui_render_reader(uint32_t* framebuffer, int width, int height);
+
+/* Surround sound test API */
+void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* params);
+void evo_rmlui_render_surround(uint32_t* framebuffer, int width, int height);
 
 /* Settings API */
 void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* params);

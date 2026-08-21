@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
 
 struct RmlTexture {
     std::vector<uint32_t> pixels; // BGRA 0xAABBGGRR
@@ -34,20 +35,104 @@ struct RmlCompiledGeo {
  * the UI was darkened by the square of its own coverage. That is a large part
  * of why curves read as thin and broken rather than smooth.
  */
+static inline uint32_t fast_div255(uint32_t v) {
+    return (v + 128 + ((v + 128) >> 8)) >> 8;
+}
+
 static inline uint32_t blend_premul(uint32_t dst, uint32_t src, uint32_t a) {
     if (a == 0) return dst;
     if (a >= 255) return src | 0xFF000000;
 
     uint32_t inv = 255 - a;
-    uint32_t r = ( src        & 0xFF) + (( dst        & 0xFF) * inv + 127) / 255;
-    uint32_t g = ((src >>  8) & 0xFF) + (((dst >>  8) & 0xFF) * inv + 127) / 255;
-    uint32_t b = ((src >> 16) & 0xFF) + (((dst >> 16) & 0xFF) * inv + 127) / 255;
+    uint32_t dr = dst & 0xFF;
+    uint32_t dg = (dst >> 8) & 0xFF;
+    uint32_t db = (dst >> 16) & 0xFF;
+
+    uint32_t sr = src & 0xFF;
+    uint32_t sg = (src >> 8) & 0xFF;
+    uint32_t sb = (src >> 16) & 0xFF;
+
+    uint32_t r = sr + fast_div255(dr * inv);
+    uint32_t g = sg + fast_div255(dg * inv);
+    uint32_t b = sb + fast_div255(db * inv);
 
     if (r > 255) r = 255;
     if (g > 255) g = 255;
     if (b > 255) b = 255;
 
     return 0xFF000000 | (b << 16) | (g << 8) | r;
+}
+
+#include <immintrin.h>
+
+static inline void blend_span_constant(uint32_t* dst, int count, uint32_t src, uint32_t a) {
+    if (a == 0 || count <= 0) return;
+    if (a >= 255) {
+        uint32_t col = src | 0xFF000000;
+        int i = 0;
+#if defined(__AVX2__)
+        __m256i vcol = _mm256_set1_epi32((int)col);
+        for (; i + 8 <= count; i += 8) {
+            _mm256_storeu_si256((__m256i*)&dst[i], vcol);
+        }
+#elif defined(__SSE2__)
+        __m128i vcol = _mm_set1_epi32((int)col);
+        for (; i + 4 <= count; i += 4) {
+            _mm_storeu_si128((__m128i*)&dst[i], vcol);
+        }
+#endif
+        for (; i < count; i++) {
+            dst[i] = col;
+        }
+        return;
+    }
+
+    uint32_t inv = 255 - a;
+    uint32_t sr = src & 0xFF;
+    uint32_t sg = (src >> 8) & 0xFF;
+    uint32_t sb = (src >> 16) & 0xFF;
+
+    int i = 0;
+#if defined(__SSE4_1__) || defined(__AVX2__)
+    __m128i vinv = _mm_set1_epi16((short)inv);
+    __m128i v128 = _mm_set1_epi16(128);
+    __m128i valpha_ff = _mm_set1_epi32((int)0xFF000000);
+    __m128i s = _mm_set1_epi32((int)((sb << 16) | (sg << 8) | sr));
+
+    for (; i + 4 <= count; i += 4) {
+        __m128i d = _mm_loadu_si128((const __m128i*)&dst[i]);
+        __m128i d_lo = _mm_unpacklo_epi8(d, _mm_setzero_si128());
+        __m128i d_hi = _mm_unpackhi_epi8(d, _mm_setzero_si128());
+
+        __m128i prod_lo = _mm_add_epi16(_mm_mullo_epi16(d_lo, vinv), v128);
+        __m128i prod_hi = _mm_add_epi16(_mm_mullo_epi16(d_hi, vinv), v128);
+
+        __m128i res_lo = _mm_srli_epi16(_mm_add_epi16(prod_lo, _mm_srli_epi16(prod_lo, 8)), 8);
+        __m128i res_hi = _mm_srli_epi16(_mm_add_epi16(prod_hi, _mm_srli_epi16(prod_hi, 8)), 8);
+
+        __m128i d_scaled = _mm_packus_epi16(res_lo, res_hi);
+        __m128i out = _mm_adds_epu8(d_scaled, s);
+        out = _mm_or_si128(out, valpha_ff);
+
+        _mm_storeu_si128((__m128i*)&dst[i], out);
+    }
+#endif
+    for (; i < count; i++) {
+        uint32_t d = dst[i];
+        uint32_t dr = d & 0xFF;
+        uint32_t dg = (d >> 8) & 0xFF;
+        uint32_t db = (d >> 16) & 0xFF;
+
+        uint32_t r = sr + fast_div255(dr * inv);
+        uint32_t g = sg + fast_div255(dg * inv);
+        uint32_t b = sb + fast_div255(db * inv);
+
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+
+        dst[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
+    }
 }
 
 /*
@@ -83,10 +168,10 @@ static inline bool apply_clip(const ClipMask* clip, int x, int y,
     uint32_t m = clip->at(x, y);
     if (m == 0) return false;
     if (m < 255) {
-        r = (r * m + 127) / 255;
-        g = (g * m + 127) / 255;
-        b = (b * m + 127) / 255;
-        a = (a * m + 127) / 255;
+        r = fast_div255(r * m);
+        g = fast_div255(g * m);
+        b = fast_div255(b * m);
+        a = fast_div255(a * m);
     }
     return a != 0;
 }
@@ -330,37 +415,29 @@ static inline uint32_t sample_bilinear(const RmlTexture* tex, float u, float v)
     uint32_t p01 = tex->pixels[(size_t)iy1 * tex->width + ix0];
     uint32_t p11 = tex->pixels[(size_t)iy1 * tex->width + ix1];
 
-    float if0 = 1.0f - fxf, if1 = fxf;
-    float vf0 = 1.0f - fyf, vf1 = fyf;
+    uint32_t fx8 = (uint32_t)std::clamp((int)(fxf * 256.0f + 0.5f), 0, 256);
+    uint32_t fy8 = (uint32_t)std::clamp((int)(fyf * 256.0f + 0.5f), 0, 256);
+    uint32_t ifx8 = 256 - fx8;
+    uint32_t ify8 = 256 - fy8;
 
-    uint32_t out = 0;
-    for (int shift = 0; shift < 32; shift += 8) {
-        float c00 = (float)((p00 >> shift) & 0xFF);
-        float c10 = (float)((p10 >> shift) & 0xFF);
-        float c01 = (float)((p01 >> shift) & 0xFF);
-        float c11 = (float)((p11 >> shift) & 0xFF);
-        float c = (c00 * if0 + c10 * if1) * vf0
-                + (c01 * if0 + c11 * if1) * vf1;
-        out |= (uint32_t)std::clamp(c + 0.5f, 0.0f, 255.0f) << shift;
-    }
-    return out;
+    uint32_t w00 = ifx8 * ify8;
+    uint32_t w10 = fx8  * ify8;
+    uint32_t w01 = ifx8 * fy8;
+    uint32_t w11 = fx8  * fy8;
+
+    uint32_t rb00 = p00 & 0x00FF00FF, ga00 = (p00 >> 8) & 0x00FF00FF;
+    uint32_t rb10 = p10 & 0x00FF00FF, ga10 = (p10 >> 8) & 0x00FF00FF;
+    uint32_t rb01 = p01 & 0x00FF00FF, ga01 = (p01 >> 8) & 0x00FF00FF;
+    uint32_t rb11 = p11 & 0x00FF00FF, ga11 = (p11 >> 8) & 0x00FF00FF;
+
+    uint32_t rb = (rb00 * w00 + rb10 * w10 + rb01 * w01 + rb11 * w11 + 0x00008000) >> 16;
+    uint32_t ga = (ga00 * w00 + ga10 * w10 + ga01 * w01 + ga11 * w11 + 0x00008000) >> 16;
+
+    return (rb & 0x00FF00FF) | ((ga & 0x00FF00FF) << 8);
 }
 
 /*
  * Area average over the destination pixel's real footprint in the texture.
- *
- * Minification cannot be done with a fixed number of taps. The version this
- * replaces took round(texels) of them, centred by integer division, which at
- * the ratio the navbar icons are actually drawn at - 72px artwork in a 34px
- * box, 2.118 texels to the pixel - read two texels out of every 2.118 and
- * stepped straight over the remainder. Four texels in every row were never
- * read at all. On a photo that is invisible; on a gear or a star it is whole
- * teeth and whole limbs dropping out, and the icons came back shredded rather
- * than merely soft.
- *
- * Weighting each texel by how much of it the footprint covers is both correct
- * and self-scaling: nothing in range is skipped, and the partial texels at
- * the edges contribute in proportion to their overlap.
  */
 static inline uint32_t sample_box(const RmlTexture* tex,
                                   float cx, float cy, float hx, float hy)
@@ -368,8 +445,10 @@ static inline uint32_t sample_box(const RmlTexture* tex,
     float x_lo = cx - hx, x_hi = cx + hx;
     float y_lo = cy - hy, y_hi = cy + hy;
 
-    int ix_lo = (int)std::floor(x_lo), ix_hi = (int)std::ceil(x_hi) - 1;
-    int iy_lo = (int)std::floor(y_lo), iy_hi = (int)std::ceil(y_hi) - 1;
+    int ix_lo = std::max(0, (int)std::floor(x_lo));
+    int ix_hi = std::min(tex->width - 1, (int)std::ceil(x_hi) - 1);
+    int iy_lo = std::max(0, (int)std::floor(y_lo));
+    int iy_hi = std::min(tex->height - 1, (int)std::ceil(y_hi) - 1);
     if (ix_hi < ix_lo) ix_hi = ix_lo;
     if (iy_hi < iy_lo) iy_hi = iy_lo;
 
@@ -379,15 +458,14 @@ static inline uint32_t sample_box(const RmlTexture* tex,
         float wy = std::min((float)sy + 1.0f, y_hi) - std::max((float)sy, y_lo);
         if (wy <= 0.0f) continue;
 
-        const uint32_t* trow =
-            &tex->pixels[(size_t)std::clamp(sy, 0, tex->height - 1) * tex->width];
+        const uint32_t* trow = &tex->pixels[(size_t)sy * tex->width];
 
         for (int sx = ix_lo; sx <= ix_hi; sx++) {
             float wx = std::min((float)sx + 1.0f, x_hi) - std::max((float)sx, x_lo);
             if (wx <= 0.0f) continue;
 
             float w = wx * wy;
-            uint32_t px = trow[std::clamp(sx, 0, tex->width - 1)];
+            uint32_t px = trow[sx];
             ar += w * (float)( px        & 0xFF);
             ag += w * (float)((px >>  8) & 0xFF);
             ab += w * (float)((px >> 16) & 0xFF);
@@ -521,7 +599,8 @@ static std::vector<int> g_cov_hi;
 static void accumulate_triangle(int acc_w, int acc_x0, int acc_y0,
                                 const Rml::Vertex& v0, const Rml::Vertex& v1, const Rml::Vertex& v2,
                                 const RmlTexture* tex, const Rml::Vector2f& offset,
-                                int clip_x0, int clip_y0, int clip_x1, int clip_y1)
+                                int clip_x0, int clip_y0, int clip_x1, int clip_y1,
+                                bool flat_color)
 {
     float x0 = v0.position.x + offset.x, y0 = v0.position.y + offset.y;
     float x1 = v1.position.x + offset.x, y1 = v1.position.y + offset.y;
@@ -540,48 +619,64 @@ static void accumulate_triangle(int acc_w, int acc_x0, int acc_y0,
     if (std::abs(denom) < 0.0001f) return;
     float inv_denom = 1.0f / denom;
 
-    /* Screen-space gradient of each edge function, in w-units per pixel -
-     * dividing a w value by its own edge's gradient converts it into a signed
-     * distance in pixels from that edge. */
     float dw0dx = (y1 - y2) * inv_denom, dw0dy = (x2 - x1) * inv_denom;
     float dw1dx = (y2 - y0) * inv_denom, dw1dy = (x0 - x2) * inv_denom;
     float dw2dx = -(dw0dx + dw1dx),      dw2dy = -(dw0dy + dw1dy);
     float grad0 = std::max(1e-6f, std::sqrt(dw0dx * dw0dx + dw0dy * dw0dy));
     float grad1 = std::max(1e-6f, std::sqrt(dw1dx * dw1dx + dw1dy * dw1dy));
     float grad2 = std::max(1e-6f, std::sqrt(dw2dx * dw2dx + dw2dy * dw2dy));
+    float inv_grad0 = 1.0f / grad0;
+    float inv_grad1 = 1.0f / grad1;
+    float inv_grad2 = 1.0f / grad2;
 
     for (int y = min_y; y <= max_y; y++) {
         float py = y + 0.5f;
+
         int row = y - acc_y0;
         CovPixel* arow = &g_cov[(size_t)row * acc_w];
         int touched_lo = g_cov_lo[row];
         int touched_hi = g_cov_hi[row];
 
+        /*
+         * Full [min_x, max_x] bbox scan, recomputing w0/w1/w2 fresh from the
+         * exact edge formula at every pixel. A prior version narrowed this to
+         * a per-row [scan_min_x, scan_max_x] derived from where the triangle's
+         * edges crossed this scanline, and stepped the coverage values
+         * incrementally rather than recomputing them - on a wide, shallow UI
+         * element (a navbar row highlight split into two triangles by a
+         * near-horizontal diagonal) that produced visible scanline speckle
+         * across the fill. Neither the narrowing nor the incremental stepping
+         * was the whole story on its own; reverting both was what actually
+         * matched this to the coverage the un-narrowed per-pixel formula
+         * below (and the pre-rewrite renderer) produces.
+         */
         for (int x = min_x; x <= max_x; x++) {
             float px = x + 0.5f;
-
             float w0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) * inv_denom;
             float w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv_denom;
             float w2 = 1.0f - w0 - w1;
 
-            /* How much of this pixel each edge leaves inside, from its signed
-             * distance; the tightest of the three is the triangle's share. */
-            float c0 = std::clamp(0.5f + w0 / grad0, 0.0f, 1.0f);
-            float c1 = std::clamp(0.5f + w1 / grad1, 0.0f, 1.0f);
-            float c2 = std::clamp(0.5f + w2 / grad2, 0.0f, 1.0f);
-            float cov = std::min(c0, std::min(c1, c2));
-            if (cov <= 0.001f) continue;
+            float w0_s = 0.5f + w0 * inv_grad0;
+            float w1_s = 0.5f + w1 * inv_grad1;
+            float w2_s = 0.5f + w2 * inv_grad2;
+            float min_w = std::min(std::min(w0_s, w1_s), w2_s);
 
-            /* Attributes are wanted at the pixel centre even where that centre
-             * sits just outside the triangle, and a raw barycentric there
-             * extrapolates past the vertices it interpolates between - on a
-             * gradient that reads as a bright fringe along the edge. Clamping
-             * first keeps the sample inside the triangle's own range. */
+            if (min_w <= 0.001f) continue;
+            float cov = (min_w < 1.0f) ? min_w : 1.0f;
+
+            if (flat_color) {
+                arow[x - acc_x0].w += cov;
+                if (x < touched_lo) touched_lo = x;
+                if (x > touched_hi) touched_hi = x;
+                continue;
+            }
+
             float b0 = std::clamp(w0, 0.0f, 1.0f);
             float b1 = std::clamp(w1, 0.0f, 1.0f);
             float b2 = std::clamp(w2, 0.0f, 1.0f);
             float bsum = b0 + b1 + b2;
             if (bsum <= 0.0f) continue;
+
             float inv_b = 1.0f / bsum;
             b0 *= inv_b; b1 *= inv_b; b2 *= inv_b;
 
@@ -600,10 +695,6 @@ static void accumulate_triangle(int acc_w, int acc_x0, int acc_y0,
                 ca = ca * (float)((t >> 24) & 0xFF) * (1.0f / 255.0f);
             }
 
-            /* Premultiplied compositing is linear, so the contributions of
-             * triangles that tile a pixel add directly - no normalising by
-             * the accumulated alpha afterwards, which is what the straight
-             * -alpha form needed. */
             CovPixel& p = arow[x - acc_x0];
             p.w += cov;
             p.a += cov * ca;
@@ -624,15 +715,66 @@ static void accumulate_triangle(int acc_w, int acc_x0, int acc_y0,
  * Drain the accumulator: blend each touched pixel into the framebuffer exactly
  * once, or fold its coverage into the clip mask, and leave it zeroed behind us
  * for the next draw call.
- *
- * A mask has to visit every pixel of its region rather than only the touched
- * spans, because a pixel the mask geometry misses is one the mask must clear.
  */
 static void emit_coverage(CovTarget target, uint32_t* fb, uint8_t* mask, int screen_w,
                           int acc_x0, int acc_y0, int acc_w, int acc_h,
-                          const ClipMask* clip)
+                          const ClipMask* clip,
+                          bool is_flat_color = false,
+                          uint32_t const_col = 0, uint32_t const_a = 0,
+                          uint32_t const_r = 0, uint32_t const_g = 0, uint32_t const_b = 0)
 {
     if (target == CovTarget::Framebuffer) {
+        if (is_flat_color) {
+            for (int j = 0; j < acc_h; j++) {
+                int lo = g_cov_lo[j];
+                int hi = g_cov_hi[j];
+                if (lo > hi) continue;
+
+                CovPixel* arow = &g_cov[(size_t)j * acc_w];
+                uint32_t* row = &fb[(size_t)(acc_y0 + j) * screen_w];
+
+                int x = lo;
+                while (x <= hi) {
+                    float w = arow[x - acc_x0].w;
+                    if (w <= 0.001f) {
+                        arow[x - acc_x0] = CovPixel{};
+                        x++;
+                        continue;
+                    }
+
+                    if (!clip && w >= 0.999f) {
+                        /* Find the run's extent before clearing anything - the
+                         * cells still hold their accumulated weight, which is
+                         * exactly what this scan needs to read. Clearing first
+                         * (as a previous version did) leaves every cell zeroed
+                         * before this loop can see it, so the run always came
+                         * out zero-length and nothing in it was ever drawn. */
+                        int start_x = x;
+                        while (x <= hi && arow[x - acc_x0].w >= 0.999f) {
+                            x++;
+                        }
+                        int len = x - start_x;
+                        std::memset(&arow[start_x - acc_x0], 0, (size_t)len * sizeof(CovPixel));
+                        blend_span_constant(&row[start_x], len, const_col, const_a);
+                    } else {
+                        arow[x - acc_x0] = CovPixel{};
+                        float s = (w > 1.0f) ? 1.0f : w;
+                        uint32_t a = (uint32_t)(s * (float)const_a + 0.5f);
+                        uint32_t r = (uint32_t)(s * (float)const_r + 0.5f);
+                        uint32_t g = (uint32_t)(s * (float)const_g + 0.5f);
+                        uint32_t b = (uint32_t)(s * (float)const_b + 0.5f);
+
+                        if (!clip || apply_clip(clip, x, acc_y0 + j, r, g, b, a)) {
+                            uint32_t col = (a << 24) | (b << 16) | (g << 8) | r;
+                            row[x] = blend_premul(row[x], col, a);
+                        }
+                        x++;
+                    }
+                }
+            }
+            return;
+        }
+
         for (int j = 0; j < acc_h; j++) {
             int lo = g_cov_lo[j];
             int hi = g_cov_hi[j];
@@ -647,7 +789,7 @@ static void emit_coverage(CovTarget target, uint32_t* fb, uint8_t* mask, int scr
                     /* Triangles that overlap within one draw call can push the
                      * sum past a whole pixel; a pixel is still one pixel, so
                      * scale the whole premultiplied quad back down together. */
-                    float s = std::min(p.w, 1.0f) / p.w;
+                    float s = (p.w > 1.0f) ? (1.0f / p.w) : 1.0f;
 
                     uint32_t a = (uint32_t)std::clamp((int)(p.a * s + 0.5f), 0, 255);
                     uint32_t r = (uint32_t)std::clamp((int)(p.r * s + 0.5f), 0, 255);
@@ -666,32 +808,33 @@ static void emit_coverage(CovTarget target, uint32_t* fb, uint8_t* mask, int scr
     }
 
     for (int j = 0; j < acc_h; j++) {
+        int lo = g_cov_lo[j];
+        int hi = g_cov_hi[j];
+        if (lo > hi) continue;
+
         CovPixel* arow = &g_cov[(size_t)j * acc_w];
         uint8_t* mrow = &mask[(size_t)(acc_y0 + j) * screen_w + acc_x0];
 
-        for (int i = 0; i < acc_w; i++) {
+        for (int x = lo; x <= hi; x++) {
+            int i = x - acc_x0;
             CovPixel& p = arow[i];
-            uint32_t cov = 0;
             if (p.w > 0.0f) {
-                /* The mask records the shape, not what colour filled it. */
-                cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
+                uint32_t cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
                 p = CovPixel{};
-            }
 
-            switch (target) {
-            case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
-            case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
-            case CovTarget::MaskIntersect: mrow[i] = (uint8_t)((mrow[i] * cov + 127) / 255); break;
-            default: break;
+                switch (target) {
+                case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
+                case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
+                case CovTarget::MaskIntersect: mrow[i] = (uint8_t)(((uint32_t)mrow[i] * cov + 127) / 255); break;
+                default: break;
+                }
             }
         }
     }
 }
 
 /*
- * Rasterize a run of triangles through the accumulator, in horizontal strips so
- * the scratch stays bounded by the strip height rather than by the tallest
- * element on screen.
+ * Rasterize a run of triangles through the accumulator in a single bounded pass.
  */
 static void render_triangles_accumulated(CovTarget target, uint32_t* fb, uint8_t* mask,
                                          int screen_w,
@@ -704,29 +847,47 @@ static void render_triangles_accumulated(CovTarget target, uint32_t* fb, uint8_t
 {
     if (idx_count < 3 || bx0 > bx1 || by0 > by1) return;
 
-    const int acc_w = bx1 - bx0 + 1;
-    const int STRIP = 64;
-
-    for (int sy0 = by0; sy0 <= by1; sy0 += STRIP) {
-        int sy1 = std::min(by1, sy0 + STRIP - 1);
-        int acc_h = sy1 - sy0 + 1;
-
-        size_t need = (size_t)acc_w * acc_h;
-        if (g_cov.size() < need) g_cov.resize(need);      /* grows zeroed */
-        if ((int)g_cov_lo.size() < acc_h) { g_cov_lo.resize(acc_h); g_cov_hi.resize(acc_h); }
-        for (int j = 0; j < acc_h; j++) { g_cov_lo[j] = bx1 + 1; g_cov_hi[j] = bx0 - 1; }
-
-        for (size_t i = 0; i + 2 < idx_count; i += 3) {
-            accumulate_triangle(acc_w, bx0, sy0,
-                                geo->vertices[tri_idx[i + 0]],
-                                geo->vertices[tri_idx[i + 1]],
-                                geo->vertices[tri_idx[i + 2]],
-                                tex, translation,
-                                bx0, sy0, bx1 + 1, sy1 + 1);
+    bool is_flat_color = (!tex || tex->width <= 0 || tex->height <= 0);
+    bool uniform_color = true;
+    Rml::ColourbPremultiplied ucol = geo->vertices[tri_idx[0]].colour;
+    if (is_flat_color) {
+        for (size_t i = 1; i < idx_count; i++) {
+            const auto& c = geo->vertices[tri_idx[i]].colour;
+            if (c.red != ucol.red || c.green != ucol.green || c.blue != ucol.blue || c.alpha != ucol.alpha) {
+                uniform_color = false;
+                break;
+            }
         }
-
-        emit_coverage(target, fb, mask, screen_w, bx0, sy0, acc_w, acc_h, clip);
+    } else {
+        uniform_color = false;
     }
+
+    uint32_t const_col = 0;
+    uint32_t const_a = ucol.alpha, const_r = ucol.red, const_g = ucol.green, const_b = ucol.blue;
+    if (uniform_color) {
+        const_col = ((uint32_t)const_a << 24) | ((uint32_t)const_b << 16) | ((uint32_t)const_g << 8) | (uint32_t)const_r;
+    }
+
+    const int acc_w = bx1 - bx0 + 1;
+    const int acc_h = by1 - by0 + 1;
+
+    size_t need = (size_t)acc_w * acc_h;
+    if (g_cov.size() < need) g_cov.resize(need);      /* grows zeroed */
+    if ((int)g_cov_lo.size() < acc_h) { g_cov_lo.resize(acc_h); g_cov_hi.resize(acc_h); }
+    for (int j = 0; j < acc_h; j++) { g_cov_lo[j] = bx1 + 1; g_cov_hi[j] = bx0 - 1; }
+
+    for (size_t i = 0; i + 2 < idx_count; i += 3) {
+        accumulate_triangle(acc_w, bx0, by0,
+                            geo->vertices[tri_idx[i + 0]],
+                            geo->vertices[tri_idx[i + 1]],
+                            geo->vertices[tri_idx[i + 2]],
+                            tex, translation,
+                            bx0, by0, bx1 + 1, by1 + 1,
+                            uniform_color);
+    }
+
+    emit_coverage(target, fb, mask, screen_w, bx0, by0, acc_w, acc_h, clip,
+                  uniform_color, const_col, const_a, const_r, const_g, const_b);
 }
 
 /* Screen-space bounds of the vertices a run of indices refers to, grown by the
@@ -894,13 +1055,21 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
     uint32_t a = v0.colour.alpha;
 
     if (!tex || tex->width <= 0 || tex->height <= 0) {
+        if (!clip) {
+            uint32_t col = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+            int count = rx1 - rx0;
+            for (int y = ry0; y < ry1; y++) {
+                blend_span_constant(&fb[y * screen_w + rx0], count, col, a);
+            }
+            return true;
+        }
         uint32_t col = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
         for (int y = ry0; y < ry1; y++) {
             uint32_t* row = &fb[y * screen_w];
             for (int x = rx0; x < rx1; x++) {
                 uint32_t pr = r, pg = g, pb = b, pa = a;
                 if (!apply_clip(clip, x, y, pr, pg, pb, pa)) continue;
-                uint32_t pc = clip ? ((pa << 24) | (pb << 16) | (pg << 8) | pr) : col;
+                uint32_t pc = (pa << 24) | (pb << 16) | (pg << 8) | pr;
                 row[x] = blend_premul(row[x], pc, pa);
             }
         }
@@ -947,6 +1116,10 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
         {
             int sox = (int)rsx - (int)rdx;
             int soy = (int)rsy - (int)rdy;
+            int min_gx = std::max(rx0, -sox);
+            int max_gx = std::min(rx1, tex->width - sox);
+
+            bool is_white = (r >= 250 && g >= 250 && b >= 250 && a >= 250);
 
             for (int y = ry0; y < ry1; y++) {
                 int sy = y + soy;
@@ -954,21 +1127,32 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
                 const uint32_t* trow = &tex->pixels[(size_t)sy * tex->width];
                 uint32_t* row = &fb[y * screen_w];
 
-                for (int x = rx0; x < rx1; x++) {
-                    int sx = x + sox;
-                    if (sx < 0 || sx >= tex->width) continue;
-                    uint32_t t = trow[sx];
-                    uint32_t ta = (t >> 24) & 0xFF;
-                    if (ta == 0) continue;
+                if (!clip && is_white) {
+                    for (int x = min_gx; x < max_gx; x++) {
+                        uint32_t t = trow[x + sox];
+                        uint32_t ta = (t >> 24) & 0xFF;
+                        if (ta == 0) continue;
+                        if (ta >= 255) {
+                            row[x] = t | 0xFF000000;
+                        } else {
+                            row[x] = blend_premul(row[x], t, ta);
+                        }
+                    }
+                } else {
+                    for (int x = min_gx; x < max_gx; x++) {
+                        uint32_t t = trow[x + sox];
+                        uint32_t ta = (t >> 24) & 0xFF;
+                        if (ta == 0) continue;
 
-                    uint32_t ma = (a * ta) / 255;
-                    uint32_t mr = (r * ( t        & 0xFF)) / 255;
-                    uint32_t mg = (g * ((t >>  8) & 0xFF)) / 255;
-                    uint32_t mb = (b * ((t >> 16) & 0xFF)) / 255;
-                    if (!apply_clip(clip, x, y, mr, mg, mb, ma)) continue;
+                        uint32_t ma = fast_div255(a * ta);
+                        uint32_t mr = fast_div255(r * ( t        & 0xFF));
+                        uint32_t mg = fast_div255(g * ((t >>  8) & 0xFF));
+                        uint32_t mb = fast_div255(b * ((t >> 16) & 0xFF));
+                        if (clip && !apply_clip(clip, x, y, mr, mg, mb, ma)) continue;
 
-                    uint32_t modulated = (ma << 24) | (mb << 16) | (mg << 8) | mr;
-                    row[x] = blend_premul(row[x], modulated, ma);
+                        uint32_t modulated = (ma << 24) | (mb << 16) | (mg << 8) | mr;
+                        row[x] = blend_premul(row[x], modulated, ma);
+                    }
                 }
             }
             return true;
@@ -1052,44 +1236,65 @@ static bool try_draw_fast_quad(uint32_t* fb, int screen_w, int screen_h,
     return true;
 }
 
-/*
- * RmlUi batches a whole text run - and any repeated sprite - into a single
- * geometry of independent quads: vertices in groups of four laid out
- * top-left, top-right, bottom-right, bottom-left, with six indices per group
- * referring only to that group.
- *
- * The test is deliberately on which vertices a group uses rather than on the
- * order it lists them in. The check this replaces looked for the winding
- * (0,1,2) (0,2,3); RmlUi's MeshUtilities::GenerateQuad actually emits
- * (0,3,1) (1,3,2), so nothing ever matched and the whole blitter below was
- * unreachable. Every string, icon and poster on screen went through the
- * general triangle rasterizer instead - text resampled where it should have
- * been copied, artwork bilinear where it should have been bicubic, and the
- * box filter meant to stop small icons breaking up had never once run. A
- * winding-agnostic test cannot fail that way again: two triangles over the
- * same four corners are the same quad whichever way round they are wound.
- */
-static bool is_quad_batch(const RmlCompiledGeo* geo)
+static bool try_draw_quad_indices(uint32_t* fb, int screen_w, int screen_h,
+                                  const RmlCompiledGeo* geo,
+                                  const int* ix,
+                                  const RmlTexture* tex, const Rml::Vector2f& translation,
+                                  int clip_x0, int clip_y0, int clip_x1, int clip_y1,
+                                  const ClipMask* clip)
 {
-    size_t n = geo->indices.size();
-    if (n == 0 || n % 6 != 0) return false;
-
-    size_t quads = n / 6;
-    if (geo->vertices.size() != quads * 4) return false;
-
-    for (size_t q = 0; q < quads; q++) {
-        const int* ix = &geo->indices[q * 6];
-        int base = (int)(q * 4);
-        bool used[4] = { false, false, false, false };
-
-        for (int k = 0; k < 6; k++) {
-            int rel = ix[k] - base;
-            if (rel < 0 || rel > 3) return false;
-            used[rel] = true;
+    int u[4];
+    int u_count = 0;
+    for (int k = 0; k < 6; k++) {
+        int idx = ix[k];
+        if (idx < 0 || idx >= (int)geo->vertices.size()) return false;
+        bool found = false;
+        for (int j = 0; j < u_count; j++) {
+            if (u[j] == idx) { found = true; break; }
         }
-        if (!used[0] || !used[1] || !used[2] || !used[3]) return false;
+        if (!found) {
+            if (u_count >= 4) return false;
+            u[u_count++] = idx;
+        }
     }
-    return true;
+    if (u_count != 4) return false;
+
+    const Rml::Vertex& v0 = geo->vertices[u[0]];
+    const Rml::Vertex& v1 = geo->vertices[u[1]];
+    const Rml::Vertex& v2 = geo->vertices[u[2]];
+    const Rml::Vertex& v3 = geo->vertices[u[3]];
+
+    float min_x = std::min({v0.position.x, v1.position.x, v2.position.x, v3.position.x});
+    float max_x = std::max({v0.position.x, v1.position.x, v2.position.x, v3.position.x});
+    float min_y = std::min({v0.position.y, v1.position.y, v2.position.y, v3.position.y});
+    float max_y = std::max({v0.position.y, v1.position.y, v2.position.y, v3.position.y});
+
+    if (max_x - min_x <= 0.001f || max_y - min_y <= 0.001f) return true;
+
+    const Rml::Vertex* qTL = nullptr;
+    const Rml::Vertex* qTR = nullptr;
+    const Rml::Vertex* qBR = nullptr;
+    const Rml::Vertex* qBL = nullptr;
+
+    const Rml::Vertex* verts[4] = { &v0, &v1, &v2, &v3 };
+    for (int k = 0; k < 4; k++) {
+        const Rml::Vertex* v = verts[k];
+        bool is_left = (std::abs(v->position.x - min_x) < 0.05f);
+        bool is_right = (std::abs(v->position.x - max_x) < 0.05f);
+        bool is_top = (std::abs(v->position.y - min_y) < 0.05f);
+        bool is_bottom = (std::abs(v->position.y - max_y) < 0.05f);
+
+        if (is_left && is_top) qTL = v;
+        else if (is_right && is_top) qTR = v;
+        else if (is_right && is_bottom) qBR = v;
+        else if (is_left && is_bottom) qBL = v;
+        else return false;
+    }
+
+    if (!qTL || !qTR || !qBR || !qBL) return false;
+
+    return try_draw_fast_quad(fb, screen_w, screen_h, *qTL, *qTR, *qBR, *qBL,
+                              tex, translation, clip_x0, clip_y0, clip_x1, clip_y1, clip);
 }
 
 void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
@@ -1109,8 +1314,6 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
         clip_y1 = std::min(m_height, m_scissor_region.Bottom());
     }
 
-    /* Outside the mask's box everything is clipped away, so fold the box into
-     * the scissor and never visit those pixels at all. */
     ClipMask mask_view;
     const ClipMask* clip = nullptr;
     if (m_clip_enabled && m_clip_mask.size() == (size_t)m_width * (size_t)m_height &&
@@ -1132,43 +1335,35 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
 
     RmlTexture* tex = reinterpret_cast<RmlTexture*>(texture);
 
-    if (is_quad_batch(geo)) {
-        /* Quads the blitter turns down - rotated, or vertex-coloured for a
-         * gradient - are collected and rasterized together afterwards. */
-        std::vector<int> leftover;
-        size_t quads = geo->indices.size() / 6;
-
-        for (size_t q = 0; q < quads; q++) {
-            const Rml::Vertex* v = &geo->vertices[q * 4];
-            if (!try_draw_fast_quad(m_fb, m_width, m_height,
-                                    v[0], v[1], v[2], v[3],
-                                    tex, translation,
-                                    clip_x0, clip_y0, clip_x1, clip_y1, clip))
+    if (tex && tex->width > 0 && tex->height > 0) {
+        size_t idx_count = geo->indices.size();
+        size_t i = 0;
+        bool all_quads = true;
+        while (i + 6 <= idx_count) {
+            if (try_draw_quad_indices(m_fb, m_width, m_height, geo, &geo->indices[i],
+                                      tex, translation, clip_x0, clip_y0, clip_x1, clip_y1, clip))
             {
-                for (int k = 0; k < 6; k++)
-                    leftover.push_back(geo->indices[q * 6 + k]);
+                i += 6;
+            } else {
+                all_quads = false;
+                break;
             }
         }
-
-        if (!leftover.empty()) {
-            int bx0, by0, bx1, by1;
-            if (geometry_bounds(geo, leftover.data(), leftover.size(), translation,
-                                clip_x0, clip_y0, clip_x1, clip_y1, bx0, by0, bx1, by1))
-            {
-                render_triangles_accumulated(CovTarget::Framebuffer, m_fb, nullptr, m_width,
-                                             geo, leftover.data(), leftover.size(),
-                                             tex, translation, bx0, by0, bx1, by1, clip);
-            }
+        if (all_quads && i == idx_count) return;
+    } else if (geo->indices.size() == 6 && geo->vertices.size() == 4) {
+        if (try_draw_quad_indices(m_fb, m_width, m_height, geo, geo->indices.data(),
+                                  tex, translation, clip_x0, clip_y0, clip_x1, clip_y1, clip))
+        {
+            return;
         }
-        return;
     }
 
     int bx0, by0, bx1, by1;
-    if (!geometry_bounds(geo, geo->indices.data(), geo->indices.size(), translation,
-                         clip_x0, clip_y0, clip_x1, clip_y1, bx0, by0, bx1, by1))
-        return;
-
-    render_triangles_accumulated(CovTarget::Framebuffer, m_fb, nullptr, m_width,
-                                 geo, geo->indices.data(), geo->indices.size(),
-                                 tex, translation, bx0, by0, bx1, by1, clip);
+    if (geometry_bounds(geo, geo->indices.data(), geo->indices.size(), translation,
+                        clip_x0, clip_y0, clip_x1, clip_y1, bx0, by0, bx1, by1))
+    {
+        render_triangles_accumulated(CovTarget::Framebuffer, m_fb, nullptr, m_width,
+                                     geo, geo->indices.data(), geo->indices.size(),
+                                     tex, translation, bx0, by0, bx1, by1, clip);
+    }
 }

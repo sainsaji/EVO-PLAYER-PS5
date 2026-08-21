@@ -10535,6 +10535,45 @@ static const char *evo_reader_notice(void)
     return g_reader_doc.line_count ? NULL : "NOTHING TO SHOW";
 }
 
+/* Defined later in this file, alongside the rest of the nav-rail sync
+ * plumbing; forward-declared here since the reader screen is drawn earlier
+ * in the file than that section. */
+void evo_sync_rmlui_nav(int section, int rail_focused, int rail_index, int visible);
+
+/*
+ * Draw one evo_reader_model through RmlUi. Returns 1 when it handled the
+ * frame, 0 when RmlUi is not up and the caller should fall back to the
+ * immediate-mode renderer.
+ */
+static int evo_rmlui_draw_reader(uint32_t *fb, const evo_reader_model *m)
+{
+    evo_rmlui_reader_params_t p;
+    int i;
+
+    if (!evo_rmlui_is_initialized()) return 0;
+
+    memset(&p, 0, sizeof(p));
+    p.title        = m->title;
+    p.subtitle     = m->subtitle;
+    p.badge        = m->badge;
+    p.rail_focused = evo_rail_focused;
+    p.face         = m->face;
+    p.progress     = m->progress;
+    p.visible_frac = m->visible_frac;
+    p.notice       = m->notice;
+    p.footnote     = m->footnote;
+
+    p.line_count = m->line_count;
+    if (p.line_count > EVO_RMLUI_READER_LINES) p.line_count = EVO_RMLUI_READER_LINES;
+    for (i = 0; i < p.line_count; i++)
+        p.lines[i] = m->lines[i];
+
+    evo_rmlui_update_reader(&p);
+    evo_sync_rmlui_nav(EVO_SECTION_BROWSER, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_reader(fb, WIDTH, HEIGHT);
+    return 1;
+}
+
 void draw_text_reader_screen(uint32_t *fb)
 {
     static char  buf[EVO_READER_MAX_VISIBLE][512];
@@ -10600,6 +10639,8 @@ void draw_text_reader_screen(uint32_t *fb)
     m.progress     = evo_text_progress(&g_reader_doc, cap);
     m.visible_frac = g_reader_doc.line_count
                      ? (double)cap / (double)g_reader_doc.line_count : 1.0;
+
+    if (evo_rmlui_draw_reader(fb, &m)) return;
 
     {
         static const evo_hint hints[4] = {
@@ -14916,6 +14957,48 @@ void draw_settings_playback_screen(uint32_t *fb)
 
 /* ---- settings: surround sound studio ------------------------------------ */
 
+/*
+ * Draw one evo_surround_test_model through RmlUi. Returns 1 when it handled
+ * the frame, 0 when RmlUi is not up and the caller should fall back to the
+ * immediate-mode renderer.
+ */
+static int evo_rmlui_draw_surround(uint32_t *fb, const evo_surround_test_model *m)
+{
+    evo_rmlui_surround_params_t p;
+    int i;
+
+    if (!evo_rmlui_is_initialized()) return 0;
+
+    memset(&p, 0, sizeof(p));
+    p.rail_focused   = evo_rail_focused;
+    p.is_51_layout   = m->is_51_layout;
+    p.selected_item  = m->selected_item;
+    p.active_channel = m->active_channel;
+    p.surround_mode  = m->surround_mode;
+
+    p.speaker_count = m->speaker_count;
+    if (p.speaker_count > EVO_RMLUI_SURROUND_SPEAKERS) p.speaker_count = EVO_RMLUI_SURROUND_SPEAKERS;
+
+    for (i = 0; i < p.speaker_count; i++) {
+        const evo_surround_speaker_info *s = &m->speakers[i];
+        p.speakers[i].name     = s->name;
+        p.speakers[i].label    = s->label;
+        p.speakers[i].hz       = s->hz;
+        p.speakers[i].dx       = s->dx;
+        p.speakers[i].dy       = s->dy;
+        p.speakers[i].ch       = s->ch;
+        p.speakers[i].item_idx = s->item_idx;
+        /* Side surrounds don't exist in a 5.1 layout - hide rather than send
+         * a node the C model itself would have skipped drawing. */
+        p.speakers[i].hidden = (m->is_51_layout && (s->ch == 6 || s->ch == 7)) ? 1 : 0;
+    }
+
+    evo_rmlui_update_surround(&p);
+    evo_sync_rmlui_nav(EVO_SECTION_SETTINGS, evo_rail_focused, evo_rail_index, 1);
+    evo_rmlui_render_surround(fb, WIDTH, HEIGHT);
+    return 1;
+}
+
 void draw_surround_test_screen(uint32_t *fb)
 {
     static const evo_hint hints[] = {
@@ -14945,6 +15028,8 @@ void draw_surround_test_screen(uint32_t *fb)
     m.surround_mode  = evo_surround_mode;
     m.speakers       = spk;
     m.speaker_count  = 8;
+
+    if (evo_rmlui_draw_surround(fb, &m)) return;
 
     evo_screen_surround_test(fb, &m, evo_rail_focused, evo_rail_index, hints, 5);
 }

@@ -1,0 +1,373 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Surround Sound Studio
+ *
+ * A spatial room diagram rather than a list: a telemetry monitor + action
+ * rows on the left, a stage panel with the listener and up to 8 positioned
+ * speaker nodes on the right. Geometry follows changelog.rcss's two-column
+ * split (600 / 24 gutter / 1080) so this reads as the same app.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#surround-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Header =============================== */
+
+#surround-header {
+    position: absolute;
+    left: 0;
+    top: 96px;
+    width: 1704px;
+    height: 52px;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+}
+
+#surround-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#surround-indicator {
+    width: 5px;
+    height: 62px;
+    background-color: #00cdff;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#surround-header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#surround-title {
+    display: block;
+    font-size: 38px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#surround-subtitle {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-top: 3px;
+}
+
+/* ============================= Left column ============================= */
+
+#surround-left {
+    position: absolute;
+    left: 0;
+    top: 222px;
+    width: 600px;
+}
+
+#surround-monitor {
+    width: 600px;
+    height: 220px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    padding: 22px 26px;
+    display: flex;
+    flex-direction: column;
+}
+
+#surround-monitor-header {
+    display: block;
+    font-size: 14px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+}
+
+#surround-monitor-title {
+    display: block;
+    font-size: 26px;
+    font-weight: bold;
+    color: #ecf3ff;
+    letter-spacing: 0.3px;
+}
+
+#surround-monitor-line1 {
+    display: block;
+    font-size: 16px;
+    font-weight: normal;
+    color: #9fb2cc;
+    margin-top: 10px;
+}
+
+#surround-monitor-line2 {
+    display: block;
+    font-size: 16px;
+    font-weight: normal;
+    color: #9fb2cc;
+    margin-top: 4px;
+}
+
+#surround-monitor-status {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    margin-top: 16px;
+}
+
+#surround-actions {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.srd-action {
+    width: 600px;
+    height: 72px;
+    background-color: #121b2eeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 14px;
+    margin-bottom: 8px;
+    padding-left: 24px;
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.srd-action-focused {
+    background-color: #1b2e4cf5;
+    border-width: 1.5px;
+    border-color: #00cdff;
+}
+
+.srd-action-label {
+    display: block;
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+}
+
+.srd-action-sub {
+    display: block;
+    font-size: 14px;
+    font-weight: normal;
+    letter-spacing: 0.3px;
+    margin-top: 4px;
+}
+
+/* =============================== Stage =============================== */
+
+#surround-stage {
+    position: absolute;
+    left: 624px;
+    top: 222px;
+    width: 1080px;
+    height: 714px;
+    background-color: #0c1526;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    border-radius: 24px;
+    padding: 0;
+    overflow: hidden;
+}
+
+#surround-stage-display {
+    position: absolute;
+    left: 330px;
+    top: 24px;
+    width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#surround-stage-display-bar {
+    width: 420px;
+    height: 14px;
+    border-radius: 7px;
+    background-color: #00cdff;
+    border-width: 1px;
+    border-color: #00cdff;
+}
+
+#surround-stage-display-label {
+    display: block;
+    font-size: 14px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1px;
+    margin-top: 12px;
+}
+
+/* Ambience rings - static, purely decorative, so a fixed low-alpha white
+ * reads fine under every theme without needing to be pushed from C++. */
+#surround-ring-1 {
+    position: absolute;
+    left: 440px;
+    top: 257px;
+    width: 200px;
+    height: 200px;
+    border-radius: 100px;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+#surround-ring-2 {
+    position: absolute;
+    left: 350px;
+    top: 167px;
+    width: 380px;
+    height: 380px;
+    border-radius: 190px;
+    background-color: rgba(255, 255, 255, 0.045);
+}
+
+#surround-ring-3 {
+    position: absolute;
+    left: 255px;
+    top: 72px;
+    width: 570px;
+    height: 570px;
+    border-radius: 285px;
+    background-color: rgba(255, 255, 255, 0.024);
+}
+
+#surround-listener {
+    position: absolute;
+    left: 475px;
+    top: 324px;
+    width: 130px;
+    height: 66px;
+    border-radius: 14px;
+    background-color: #16233aeb;
+    border-width: 1px;
+    border-color: #2a3b55aa;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#surround-listener-label {
+    display: block;
+    font-size: 16px;
+    font-weight: bold;
+    color: #ecf3ff;
+}
+
+#surround-listener-sub {
+    display: block;
+    font-size: 12px;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+}
+
+/* ============================= Speaker nodes ============================= */
+
+.srd-spk {
+    position: absolute;
+    width: 150px;
+    height: 82px;
+    border-radius: 12px;
+    border-width: 1px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.srd-spk-active {
+    border-width: 2px;
+}
+
+.srd-spk-selected {
+    border-width: 1.5px;
+}
+
+.srd-spk-label {
+    display: block;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+}
+
+.srd-spk-sub {
+    display: block;
+    font-size: 13px;
+    font-weight: normal;
+    margin-top: 4px;
+}
+
+/* =============================== Footer =============================== */
+
+#surround-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 26px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.glyph-badge {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 21px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 28px;
+    height: 28px;
+}
+
+.footer-text {
+    font-size: 15px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}

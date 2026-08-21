@@ -1,0 +1,129 @@
+<rml>
+<head>
+    <link type="text/rcss" href="surround.rcss"/>
+</head>
+<body id="surround-body">
+    <!-- Navigation rail comes from the standalone navbar.rml overlay -->
+
+    <div id="surround-pane">
+        <div id="surround-header">
+            <div id="surround-header-left">
+                <div id="surround-indicator"></div>
+                <div id="surround-header-titles">
+                    <div id="surround-title">SURROUND SOUND STUDIO</div>
+                    <div id="surround-subtitle"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="surround-columns">
+            <!-- Left: telemetry monitor + action list -->
+            <div id="surround-left">
+                <div id="surround-monitor">
+                    <div id="surround-monitor-header">SPEAKER CALIBRATION MONITOR</div>
+                    <div id="surround-monitor-title"></div>
+                    <div id="surround-monitor-line1"></div>
+                    <div id="surround-monitor-line2"></div>
+                    <div id="surround-monitor-status"></div>
+                </div>
+
+                <div id="surround-actions">
+                    <div id="srd-action-0" class="srd-action">
+                        <div id="srd-action-label-0" class="srd-action-label"></div>
+                        <div id="srd-action-sub-0" class="srd-action-sub"></div>
+                    </div>
+                    <div id="srd-action-1" class="srd-action">
+                        <div id="srd-action-label-1" class="srd-action-label"></div>
+                        <div id="srd-action-sub-1" class="srd-action-sub"></div>
+                    </div>
+                    <div id="srd-action-2" class="srd-action">
+                        <div id="srd-action-label-2" class="srd-action-label"></div>
+                        <div id="srd-action-sub-2" class="srd-action-sub"></div>
+                    </div>
+                    <div id="srd-action-3" class="srd-action">
+                        <div id="srd-action-label-3" class="srd-action-label"></div>
+                        <div id="srd-action-sub-3" class="srd-action-sub"></div>
+                    </div>
+                    <div id="srd-action-4" class="srd-action">
+                        <div id="srd-action-label-4" class="srd-action-label"></div>
+                        <div id="srd-action-sub-4" class="srd-action-sub"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: the room diagram -->
+            <div id="surround-stage">
+                <div id="surround-stage-display">
+                    <div id="surround-stage-display-bar"></div>
+                    <div id="surround-stage-display-label">FRONT DISPLAY / TV SCREEN</div>
+                </div>
+
+                <div id="surround-ring-3"></div>
+                <div id="surround-ring-2"></div>
+                <div id="surround-ring-1"></div>
+
+                <div id="surround-listener">
+                    <div id="surround-listener-label">LISTENER</div>
+                    <div id="surround-listener-sub">SWEET SPOT</div>
+                </div>
+
+                <div id="srd-spk-0" class="srd-spk">
+                    <div id="srd-spk-label-0" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-0" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-1" class="srd-spk">
+                    <div id="srd-spk-label-1" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-1" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-2" class="srd-spk">
+                    <div id="srd-spk-label-2" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-2" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-3" class="srd-spk">
+                    <div id="srd-spk-label-3" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-3" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-4" class="srd-spk">
+                    <div id="srd-spk-label-4" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-4" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-5" class="srd-spk">
+                    <div id="srd-spk-label-5" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-5" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-6" class="srd-spk">
+                    <div id="srd-spk-label-6" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-6" class="srd-spk-sub"></div>
+                </div>
+                <div id="srd-spk-7" class="srd-spk">
+                    <div id="srd-spk-label-7" class="srd-spk-label"></div>
+                    <div id="srd-spk-sub-7" class="srd-spk-sub"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="surround-footer">
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">TEST / ACTIVATE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">5.1 / 7.1 MODE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">SILENCE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">NAVIGATE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">BACK</span>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

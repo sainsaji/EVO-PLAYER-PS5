@@ -347,7 +347,6 @@ div, span, p {
     border-color: #2a3b55aa;
     border-radius: 14px;
     position: relative;
-    overflow: hidden;
 }
 
 .tile-focused {

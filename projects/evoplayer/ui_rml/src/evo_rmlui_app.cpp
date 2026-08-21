@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <chrono>
 
 EvoRmlApp& EvoRmlApp::Instance() {
     static EvoRmlApp instance;
@@ -68,17 +69,9 @@ void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
 }
 
 bool EvoRmlApp::ShouldFullRender(int screen_id) {
-    bool screen_changed = (screen_id != m_last_rendered_screen);
-    m_last_rendered_screen = screen_id;
-
-    if (screen_changed || m_frame_dirty)
-        m_settle_frames_left = kBufferSettleFrames;
-
-    bool full = m_settle_frames_left > 0;
-    if (full) m_settle_frames_left--;
-
+    (void)screen_id;
     m_frame_dirty = false;
-    return full;
+    return true;
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {
@@ -157,6 +150,14 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_changelog_doc = m_context->LoadDocument(p + "changelog.rml");
             if (m_changelog_doc) m_changelog_doc->Hide();
         }
+        if (!m_reader_doc) {
+            m_reader_doc = m_context->LoadDocument(p + "reader.rml");
+            if (m_reader_doc) m_reader_doc->Hide();
+        }
+        if (!m_surround_doc) {
+            m_surround_doc = m_context->LoadDocument(p + "surround.rml");
+            if (m_surround_doc) m_surround_doc->Hide();
+        }
         if (!m_playback_doc) {
             m_playback_doc = m_context->LoadDocument(p + "playback.rml");
             if (m_playback_doc) m_playback_doc->Hide();
@@ -187,6 +188,8 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_list_doc) std::cerr << "[EVO RmlUi] Failed to load list.rml!" << std::endl;
     if (!m_browser_doc) std::cerr << "[EVO RmlUi] Failed to load browser.rml!" << std::endl;
     if (!m_changelog_doc) std::cerr << "[EVO RmlUi] Failed to load changelog.rml!" << std::endl;
+    if (!m_reader_doc) std::cerr << "[EVO RmlUi] Failed to load reader.rml!" << std::endl;
+    if (!m_surround_doc) std::cerr << "[EVO RmlUi] Failed to load surround.rml!" << std::endl;
     if (!m_playback_doc) std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
     if (!m_dialog_doc) std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
     if (!m_settings_doc) std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
@@ -251,6 +254,16 @@ void EvoRmlApp::Shutdown() {
     if (m_changelog_doc) {
         m_changelog_doc->Close();
         m_changelog_doc = nullptr;
+    }
+
+    if (m_reader_doc) {
+        m_reader_doc->Close();
+        m_reader_doc = nullptr;
+    }
+
+    if (m_surround_doc) {
+        m_surround_doc->Close();
+        m_surround_doc = nullptr;
     }
 
     if (m_context) {
@@ -630,6 +643,8 @@ void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
     if (m_list_doc)      m_list_doc->Hide();
     if (m_browser_doc)   m_browser_doc->Hide();
     if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_launch_doc->Show();
 
     /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
@@ -835,6 +850,8 @@ void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_browser_doc)   m_browser_doc->Hide();
     if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_list_doc->Show();
 
     if (m_nav_doc) {
@@ -1066,6 +1083,8 @@ void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_browser_doc->Show();
 
     if (m_nav_doc) {
@@ -1225,6 +1244,8 @@ void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
     if (m_settings_doc)  m_settings_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_changelog_doc->Show();
 
     if (m_nav_doc) {
@@ -1236,6 +1257,312 @@ void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
     m_render->SetDimensions(width, height);
 
     if (ShouldFullRender(3)) {
+        m_context->Update();
+        m_context->Render();
+    }
+}
+
+/* ==========================================================================
+ * Text reader — a single scrolling pane over a fixed pool of line elements.
+ * ========================================================================== */
+
+void EvoRmlApp::UpdateReaderState(const EvoReaderState& state) {
+    if (!m_initialized || !m_reader_doc) return;
+    if (state == m_last_reader && m_theme_generation == m_theme_gen_reader) return;
+    m_theme_gen_reader = m_theme_generation;
+    m_frame_dirty = true;
+    m_last_reader = state;
+
+    const std::string accent  = to_hex_rgb(m_theme.accent);
+    const std::string surface = to_hex_rgba(m_theme.surface);
+    const std::string border  = to_hex_rgba(m_theme.border);
+    const std::string text_1  = to_hex_rgb(m_theme.text_primary);
+    const std::string text_2  = to_hex_rgb(m_theme.text_secondary);
+    const std::string text_3  = to_hex_rgb(m_theme.text_muted);
+
+    auto el = [&](const std::string& id) { return m_reader_doc->GetElementById(id); };
+
+    if (Rml::Element* e = el("reader-title"))     e->SetInnerRML(state.title);
+    if (Rml::Element* e = el("reader-subtitle"))  e->SetInnerRML(state.subtitle);
+    if (Rml::Element* e = el("reader-indicator")) e->SetProperty("background-color", accent);
+    if (Rml::Element* e = el("reader-badge")) {
+        e->SetInnerRML(state.badge);
+        e->SetProperty("color", text_3);
+    }
+
+    bool show_notice = !state.notice.empty();
+    if (Rml::Element* e = el("reader-notice")) {
+        e->SetProperty("display", show_notice ? "block" : "none");
+        if (show_notice) {
+            e->SetInnerRML(state.notice);
+            e->SetProperty("color", text_2);
+        }
+    }
+    if (Rml::Element* e = el("reader-lines"))     e->SetProperty("display", show_notice ? "none" : "flex");
+    if (Rml::Element* e = el("reader-scrollbar")) {
+        e->SetProperty("display", show_notice ? "none" : "flex");
+        e->SetProperty("background-color", surface);
+        e->SetProperty("border-color", border);
+    }
+
+    for (int i = 0; i < kReaderLines; i++) {
+        Rml::Element* line = el("rline-" + std::to_string(i));
+        if (!line) continue;
+
+        if (show_notice || i >= (int)state.lines.size()) {
+            line->SetProperty("display", "none");
+            continue;
+        }
+        line->SetProperty("display", "block");
+        line->SetClass("rline-face-0", state.face == 0);
+        line->SetClass("rline-face-1", state.face == 1);
+        line->SetClass("rline-face-2", state.face != 0 && state.face != 1);
+        line->SetInnerRML(state.lines[i]);
+        line->SetProperty("color", text_1);
+    }
+
+    if (Rml::Element* thumb = el("reader-scrollbar-thumb")) {
+        if (show_notice) {
+            thumb->SetProperty("display", "none");
+        } else {
+            double visible_frac = state.visible_frac;
+            if (visible_frac < 0.02) visible_frac = 0.02;
+            if (visible_frac > 1.0)  visible_frac = 1.0;
+
+            if (visible_frac >= 1.0) {
+                thumb->SetProperty("display", "none");
+            } else {
+                double top_pct = state.progress * (1.0 - visible_frac) * 100.0;
+                std::ostringstream h, t;
+                h << (visible_frac * 100.0) << "%";
+                t << top_pct << "%";
+                thumb->SetProperty("display", "block");
+                thumb->SetProperty("height", h.str());
+                thumb->SetProperty("top", t.str());
+                thumb->SetProperty("background-color", accent);
+            }
+        }
+    }
+
+    if (Rml::Element* e = el("reader-footnote")) {
+        bool has_footnote = !state.footnote.empty();
+        e->SetProperty("display", has_footnote ? "block" : "none");
+        if (has_footnote) {
+            e->SetInnerRML(state.footnote);
+            e->SetProperty("color", text_3);
+        }
+    }
+}
+
+void EvoRmlApp::RenderReader(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_reader_doc || !framebuffer) return;
+
+    if (m_launch_doc)    m_launch_doc->Hide();
+    if (m_list_doc)      m_list_doc->Hide();
+    if (m_browser_doc)   m_browser_doc->Hide();
+    if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_playback_doc)  m_playback_doc->Hide();
+    if (m_dialog_doc)    m_dialog_doc->Hide();
+    if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
+    m_reader_doc->Show();
+
+    if (m_nav_doc) {
+        if (m_last_nav.visible) m_nav_doc->Show();
+        else                    m_nav_doc->Hide();
+    }
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    if (ShouldFullRender(9)) {
+        m_context->Update();
+        m_context->Render();
+    }
+}
+
+/* ==========================================================================
+ * Surround sound test — a spatial room diagram, not a list. Speaker nodes are
+ * positioned from each speaker's own dx/dy offset (see evo_screen_surround_
+ * test in the legacy renderer), scaled down from that screen's 1180x760 stage
+ * to this document's 1080x714 stage panel.
+ * ========================================================================== */
+
+void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
+    if (!m_initialized || !m_surround_doc) return;
+    if (state == m_last_surround && m_theme_generation == m_theme_gen_surround) return;
+    m_theme_gen_surround = m_theme_generation;
+    m_frame_dirty = true;
+    m_last_surround = state;
+
+    const std::string accent     = to_hex_rgb(m_theme.accent);
+    const std::string surface    = to_hex_rgba(m_theme.surface);
+    const std::string surf_sel   = to_hex_rgba(m_theme.surface_sel);
+    const std::string border     = to_hex_rgba(m_theme.border);
+    const std::string border_sel = to_hex_rgb(m_theme.border_sel);
+    const std::string text_1     = to_hex_rgb(m_theme.text_primary);
+    const std::string text_2     = to_hex_rgb(m_theme.text_secondary);
+    const std::string text_3     = to_hex_rgb(m_theme.text_muted);
+
+    auto el = [&](const std::string& id) { return m_surround_doc->GetElementById(id); };
+
+    if (Rml::Element* e = el("surround-indicator")) e->SetProperty("background-color", accent);
+    if (Rml::Element* e = el("surround-subtitle")) {
+        e->SetInnerRML(state.is_51_layout
+            ? "CALIBRATION - 5.1 SPEAKER SYSTEM (6 CHANNELS)"
+            : "CALIBRATION - 7.1 SPEAKER SYSTEM (8 CHANNELS)");
+        e->SetProperty("color", text_2);
+    }
+
+    /* Monitor panel: which speaker (or which action) is under the cursor,
+     * mirroring evo_screen_surround_test's display_spk derivation exactly -
+     * item_idx 5-12 map to speaker channels in the fixed order the legacy
+     * table lists them. */
+    int display_spk = -1;
+    if (state.active_channel >= 0) {
+        display_spk = state.active_channel;
+    } else if (state.selected_item >= 5 && state.selected_item <= 12) {
+        static const int kItemToChannel[8] = {0, 2, 1, 3, 6, 7, 4, 5};
+        display_spk = kItemToChannel[state.selected_item - 5];
+    }
+
+    std::string mon_title, mon_line1, mon_line2, mon_status;
+    bool mon_active = false;
+
+    if (display_spk >= 0 && display_spk < (int)state.speakers.size()) {
+        const EvoSurroundSpeaker& spk = state.speakers[display_spk];
+        std::ostringstream t, hz, ch;
+        t << spk.name << " (" << spk.label << ")";
+        hz << "TONE FREQ: " << std::fixed << std::setprecision(1) << spk.hz << " HZ";
+        ch << "PS5 AUDIO OUT: S16_8CH (CH " << display_spk << ")";
+        mon_title = t.str();
+        mon_line1 = hz.str();
+        mon_line2 = ch.str();
+        mon_active = (state.active_channel >= 0);
+        mon_status = mon_active ? "STATUS: [ ACTIVE NOW ]" : "STATUS: [ READY / STANDBY ]";
+    } else {
+        switch (state.selected_item) {
+            case 0: mon_title = "5.1 AUTO SEQUENCE";  mon_line1 = "MODE: CALIBRATION SWEEP 5.1"; break;
+            case 1: mon_title = "7.1 AUTO SEQUENCE";  mon_line1 = "MODE: CALIBRATION SWEEP 7.1"; break;
+            case 2: mon_title = "360 ROTATION SWEEP"; mon_line1 = "MODE: PERIMETER CIRCLE"; break;
+            case 3: mon_title = state.is_51_layout ? "LAYOUT: 5.1 CHANNELS" : "LAYOUT: 7.1 CHANNELS";
+                    mon_line1 = "MODE: TOGGLE SPEAKER COUNT"; break;
+            default: mon_title = "SILENCE / STOP"; mon_line1 = "MODE: STOP AUDIO STREAM"; break;
+        }
+        mon_line2 = "PS5 AUDIO OUT: 48 kHz / 16-BIT";
+        mon_status = (state.surround_mode != 0) ? "STATUS: [ RUNNING TEST ]" : "STATUS: [ IDLE ]";
+    }
+
+    if (Rml::Element* e = el("surround-monitor")) {
+        e->SetProperty("background-color", mon_active ? surf_sel : surface);
+        e->SetProperty("border-color", mon_active ? accent : border);
+    }
+    if (Rml::Element* e = el("surround-monitor-title")) { e->SetInnerRML(mon_title); e->SetProperty("color", text_1); }
+    if (Rml::Element* e = el("surround-monitor-line1")) { e->SetInnerRML(mon_line1); e->SetProperty("color", text_2); }
+    if (Rml::Element* e = el("surround-monitor-line2")) { e->SetInnerRML(mon_line2); e->SetProperty("color", text_2); }
+    if (Rml::Element* e = el("surround-monitor-status")) {
+        e->SetInnerRML(mon_status);
+        e->SetProperty("color", mon_active ? accent : text_3);
+    }
+
+    static const char* kActionLabel[5] = {
+        "AUTO TEST 5.1", "AUTO TEST 7.1", "360 ROTATION SWEEP", "SPEAKER LAYOUT", "SILENCE / STOP"
+    };
+    static const char* kActionSub[5] = {
+        "6-CHANNEL CALIBRATION", "8-CHANNEL CALIBRATION", "CIRCULAR PERIMETER PAN", "SWITCH 5.1 / 7.1", "STOP ALL OUTPUT"
+    };
+    for (int i = 0; i < 5; i++) {
+        const std::string n = std::to_string(i);
+        Rml::Element* row = el("srd-action-" + n);
+        Rml::Element* lbl = el("srd-action-label-" + n);
+        Rml::Element* sub = el("srd-action-sub-" + n);
+        if (!row) continue;
+
+        bool is_sel = (!state.rail_focused && state.selected_item == i);
+        row->SetClass("srd-action-focused", is_sel);
+        row->SetProperty("background-color", is_sel ? surf_sel : surface);
+        row->SetProperty("border-color", is_sel ? accent : border);
+
+        if (lbl) { lbl->SetInnerRML(kActionLabel[i]); lbl->SetProperty("color", is_sel ? text_1 : text_2); }
+        if (sub) {
+            std::string sub_text = (i == 3)
+                ? (state.is_51_layout ? "CURRENT: 5.1 SURROUND" : "CURRENT: 7.1 SURROUND")
+                : kActionSub[i];
+            sub->SetInnerRML(sub_text);
+            sub->SetProperty("color", is_sel ? accent : text_3);
+        }
+    }
+
+    /* Speaker nodes, absolutely positioned from each speaker's own dx/dy. */
+    for (int i = 0; i < kSurroundSpeakers; i++) {
+        const std::string n = std::to_string(i);
+        Rml::Element* node = el("srd-spk-" + n);
+        if (!node) continue;
+
+        if (i >= (int)state.speakers.size() || state.speakers[i].hidden) {
+            node->SetProperty("display", "none");
+            continue;
+        }
+
+        const EvoSurroundSpeaker& spk = state.speakers[i];
+        bool is_active = (state.active_channel == spk.ch);
+        bool is_sel = (!state.rail_focused && state.selected_item == spk.item_idx);
+
+        /* dx/dy are couch-relative design coordinates tuned for the legacy
+         * screen's 1180x760 stage; 0.85 brings them in from this document's
+         * 1080x714 stage panel edges with room for the node's own footprint. */
+        const double kScale = 0.85;
+        int left = 540 + (int)(spk.dx * kScale) - 75;
+        int top  = 357 + (int)(spk.dy * kScale) - 41;
+
+        node->SetProperty("display", "flex");
+        node->SetProperty("left", std::to_string(left) + "px");
+        node->SetProperty("top", std::to_string(top) + "px");
+        node->SetClass("srd-spk-active", is_active);
+        node->SetClass("srd-spk-selected", is_sel);
+        node->SetProperty("background-color", is_active ? surf_sel : surface);
+        node->SetProperty("border-color", is_active ? accent : (is_sel ? border_sel : border));
+
+        std::ostringstream hz;
+        hz << std::fixed << std::setprecision(0) << spk.hz << " Hz" << (is_active ? " [ON]" : "");
+
+        if (Rml::Element* lbl = el("srd-spk-label-" + n)) {
+            lbl->SetInnerRML(spk.label);
+            lbl->SetProperty("color", is_active ? accent : text_1);
+        }
+        if (Rml::Element* sub = el("srd-spk-sub-" + n)) {
+            sub->SetInnerRML(hz.str());
+            sub->SetProperty("color", is_active ? accent : text_3);
+        }
+    }
+}
+
+void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_surround_doc || !framebuffer) return;
+
+    if (m_launch_doc)    m_launch_doc->Hide();
+    if (m_list_doc)      m_list_doc->Hide();
+    if (m_browser_doc)   m_browser_doc->Hide();
+    if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_playback_doc)  m_playback_doc->Hide();
+    if (m_dialog_doc)    m_dialog_doc->Hide();
+    if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    m_surround_doc->Show();
+
+    if (m_nav_doc) {
+        if (m_last_nav.visible) m_nav_doc->Show();
+        else                    m_nav_doc->Hide();
+    }
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+
+    if (ShouldFullRender(10)) {
         m_context->Update();
         m_context->Render();
     }
@@ -1414,6 +1741,8 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_nav_doc) m_nav_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_playback_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -1504,6 +1833,8 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     if (m_settings_doc) m_settings_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_dialog_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -1648,6 +1979,8 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_settings_doc->Show();
 
     /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
@@ -1769,6 +2102,8 @@ void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_subtitles_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);
@@ -1899,6 +2234,8 @@ void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
     if (m_settings_doc) m_settings_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_nav_doc) m_nav_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
     m_mediainfo_doc->Show();
 
     m_render->SetFramebuffer(framebuffer);

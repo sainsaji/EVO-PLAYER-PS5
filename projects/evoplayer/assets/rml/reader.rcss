@@ -1,0 +1,224 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Text reader
+ *
+ * A single scrolling pane: header, a column of pre-wrapped lines, a
+ * scrollbar in the gutter, and an optional footnote. Geometry follows
+ * changelog.rcss / list.rcss so this reads as the same app, not a bolt-on.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+#reader-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Header =============================== */
+
+#reader-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 96px;
+    margin-bottom: 42px;
+    width: 1704px;
+}
+
+#reader-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#reader-indicator {
+    width: 5px;
+    height: 62px;
+    background-color: #00cdff;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#reader-header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#reader-title {
+    display: block;
+    font-size: 34px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+}
+
+#reader-subtitle {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-top: 3px;
+}
+
+#reader-badge {
+    display: block;
+    font-size: 15px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+/* ================================ Notice ================================ */
+
+/* An error, or an empty file. Centred in the content area rather than a
+ * toast: the page has nothing else on it, and a toast would be gone before
+ * the reader worked out why the screen was blank. */
+#reader-notice {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 550px;
+    width: 1704px;
+    font-size: 22px;
+    font-weight: normal;
+    text-align: center;
+}
+
+/* ================================ Lines ================================ */
+
+#reader-lines {
+    position: absolute;
+    left: 0;
+    top: 222px;
+    width: 1670px;
+    height: 700px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.rline {
+    display: block;
+    width: 1670px;
+    font-weight: normal;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Three reading sizes, cycled with TRIANGLE - matches EVO_FACE_SMALL /
+ * EVO_FACE_SUB / EVO_FACE_MENU in the legacy renderer (reader_face_h). */
+.rline-face-0 {
+    height: 24px;
+    font-size: 16px;
+}
+
+.rline-face-1 {
+    height: 30px;
+    font-size: 20px;
+}
+
+.rline-face-2 {
+    height: 36px;
+    font-size: 26px;
+}
+
+/* =============================== Scrollbar =============================== */
+
+#reader-scrollbar {
+    display: flex;
+    position: absolute;
+    left: 1684px;
+    top: 222px;
+    width: 6px;
+    height: 700px;
+    border-radius: 3px;
+    border-width: 1px;
+}
+
+#reader-scrollbar-thumb {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    border-radius: 3px;
+}
+
+/* ================================ Footnote ================================ */
+
+#reader-footnote {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 934px;
+    width: 1704px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+/* =============================== Footer =============================== */
+
+#reader-footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.glyph-badge {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 21px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 28px;
+    height: 28px;
+}
+
+.footer-text {
+    font-size: 15px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
