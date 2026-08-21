@@ -124,6 +124,7 @@ mock data — everything in the DOM binds to live C structs
 | [packaging.md](docs/packaging.md) | PKG packaging |
 | [validation.md](docs/validation.md) | Validation checklist |
 | [modularisation-plan.md](docs/modularisation-plan.md) / [backlog.md](docs/backlog.md) / [improvements-roadmap.md](docs/improvements-roadmap.md) | Planning docs, not current state |
+| [icon-swap-handoff.md](docs/icon-swap-handoff.md) | RmlUi icon swap to Lucide/Kenney — candidates approved, not yet implemented |
 | [prosperoplayer-baseline.md](docs/prosperoplayer-baseline.md) / [reng-analysis-integration.md](docs/reng-analysis-integration.md) / [native-media-research.md](docs/native-media-research.md) / [sdk-audit.md](docs/sdk-audit.md) / [baseline-defects.md](docs/baseline-defects.md) | Upstream baseline research |
 | [proprietary.md](docs/proprietary.md) | Licensing notes |
 
