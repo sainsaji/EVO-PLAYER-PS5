@@ -33,7 +33,7 @@ echo "--- rendering all launch + settings screenshots"
 export LD_LIBRARY_PATH="/workspace/build/rmlui-host-dist/lib:/workspace/build/rmlui-host/RmlUi/build:${LD_LIBRARY_PATH:-}"
 ./output/uiview/uiview_playback_rml
 
-for s in rml_launch_hero rml_launch_recent rml_launch_library rml_launch_empty rml_launch_rail rml_recent rml_favorites rml_favorites_empty rml_emby_setup rml_emby_browse rml_browser rml_browser_empty rml_playback_paused rml_changelog; do
+for s in rml_launch_hero rml_launch_recent rml_launch_library rml_launch_empty rml_launch_rail rml_recent rml_favorites rml_favorites_empty rml_emby_setup rml_emby_browse rml_browser rml_browser_empty rml_browser_sources rml_playback_paused rml_changelog; do
     python3 tools/shot.py png "output/uiview/$s.bmp" "output/uiview/$s.png"
     echo "  ok -> output/uiview/$s.png"
 done

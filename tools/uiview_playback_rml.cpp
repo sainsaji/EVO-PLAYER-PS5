@@ -432,6 +432,7 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_browser_params_t p;
     memset(&p, 0, sizeof(p));
     p.path = "/usb0/Movies";
+    p.title = "USB DRIVE";
     p.at_root = 0;
     p.total_count = 37;
     p.cursor_index = 3;
@@ -496,6 +497,7 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_browser_params_t e;
     memset(&e, 0, sizeof(e));
     e.path = "/usb0";
+    e.title = "USB DRIVE";
     e.at_root = 1;
     e.cursor_index = -1;
     e.is_empty = 1;
@@ -505,6 +507,35 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_update_browser(&e);
     evo_rmlui_render_browser(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_browser_empty.bmp", fb.data(), width, height);
+
+    /* The source picker — the new top level above USB0/Internal Storage. */
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    evo_rmlui_browser_params_t s;
+    memset(&s, 0, sizeof(s));
+    s.path = "SELECT A SOURCE";
+    s.title = "SOURCES";
+    s.at_root = 1;
+    s.total_count = 2;
+    s.cursor_index = 0;
+
+    struct SrcRow { const char* n; const char* d; const char* badge; };
+    static const SrcRow srows[2] = {
+        { "USB DRIVE",        "SOURCE", "USB" },
+        { "INTERNAL STORAGE", "SOURCE", "INTERNAL" },
+    };
+    for (int i = 0; i < 2; i++) {
+        s.rows[i].name = srows[i].n;
+        s.rows[i].detail = srows[i].d;
+        s.rows[i].icon_path = "projects/evoplayer/assets/icons/icon_folder.png";
+        s.rows[i].badge = srows[i].badge;
+        s.rows[i].progress = -1;
+        s.rows[i].is_focused = (i == 0);
+        s.row_count++;
+    }
+
+    evo_rmlui_update_browser(&s);
+    evo_rmlui_render_browser(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_browser_sources.bmp", fb.data(), width, height);
 }
 
 /* ------------------------------------------------------------------

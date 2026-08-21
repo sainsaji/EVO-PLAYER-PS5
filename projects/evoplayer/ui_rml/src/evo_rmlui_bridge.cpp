@@ -54,6 +54,7 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     if (!p) return;
     EvoBrowserState state;
     state.path = p->path ? p->path : "";
+    state.title = p->title ? p->title : "";
     state.at_root = (p->at_root != 0);
     state.rail_focused = (p->rail_focused != 0);
     state.total_count = p->total_count;

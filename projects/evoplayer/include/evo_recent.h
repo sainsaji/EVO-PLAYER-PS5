@@ -4,7 +4,7 @@
 /*
  * Module: evo_recent
  *
- * Recent-files database. Persists to /mnt/usb0/evo_recent.txt.
+ * Recent-files database. Persists to /data/evoplayer/evo_recent.txt.
  * Stores the last 25 played files with path, title, position and duration.
  *
  * Public surface:
@@ -18,7 +18,7 @@
  * State is exposed read-only via the arrays below for the UI draw code.
  */
 
-#define RECENT_FILE_DB   "/mnt/usb0/evo_recent.txt"
+#define RECENT_FILE_DB   "/data/evoplayer/evo_recent.txt"
 #define MAX_RECENT_FILES 25
 
 typedef struct {

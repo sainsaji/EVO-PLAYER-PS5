@@ -216,6 +216,7 @@ typedef struct {
 
 typedef struct {
     const char* path;          /* breadcrumb, already trimmed for display */
+    const char* title;         /* header title, e.g. the active source's name */
     int         at_root;       /* hides the "back" hint */
     int         rail_focused;
 

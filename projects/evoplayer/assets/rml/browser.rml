@@ -11,8 +11,8 @@
             <div id="browser-header-left">
                 <div id="browser-indicator"></div>
                 <div id="browser-header-titles">
-                    <div id="browser-title">USB STORAGE</div>
-                    <div id="browser-path">/usb0</div>
+                    <div id="browser-title">SOURCES</div>
+                    <div id="browser-path">SELECT A SOURCE</div>
                 </div>
             </div>
             <div id="browser-counter"></div>

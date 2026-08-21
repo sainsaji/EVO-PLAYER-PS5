@@ -2124,7 +2124,38 @@ AVPacket *play_pkt = NULL;
 AVFrame *play_frame = NULL;
 struct SwsContext *play_sws = NULL;
 char current_media[128];
-char current_path[256] = "/mnt/usb0";
+
+/*
+ * EVO: the browser's available roots. `current_path` walks into one of
+ * these; `current_path[0] == '\0'` is the sentinel for "at the picker,
+ * above any source" (safe because a real path always starts with '/').
+ */
+typedef struct {
+    const char *label;   /* browser title when inside this source */
+    const char *badge;   /* row badge shown at the picker */
+    const char *root;    /* real filesystem path */
+} evo_media_source_t;
+
+static const evo_media_source_t evo_media_sources[] = {
+    { "USB DRIVE",        "USB",      "/mnt/usb0" },
+    { "INTERNAL STORAGE", "INTERNAL", "/data"      },
+};
+#define EVO_MEDIA_SOURCE_COUNT \
+    (int)(sizeof(evo_media_sources) / sizeof(evo_media_sources[0]))
+
+static int evo_media_source_index_for_path(const char *path)
+{
+    int i;
+    for (i = 0; i < EVO_MEDIA_SOURCE_COUNT; i++) {
+        size_t n = strlen(evo_media_sources[i].root);
+        if (strncmp(path, evo_media_sources[i].root, n) == 0 &&
+            (path[n] == '\0' || path[n] == '/'))
+            return i;
+    }
+    return -1;
+}
+
+char current_path[256] = "";
 char current_media_path[512];
 char g_current_media_title[256] = {0};
 char current_image[256];
@@ -3658,7 +3689,7 @@ void draw_bmp_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 /* PROSPERO_LAST_FOLDER_V3_START */
 
 #define PROSPERO_LAST_FOLDER_FILE \
-    "/mnt/usb0/.evo_last_folder.cfg"
+    "/data/evoplayer/evo_last_folder.cfg"
 
 
 static int prospero_last_folder_is_safe(
@@ -3668,20 +3699,7 @@ static int prospero_last_folder_is_safe(
         return 0;
     }
 
-    if (
-        strncmp(
-            folder,
-            "/mnt/usb0",
-            9
-        ) != 0
-    ) {
-        return 0;
-    }
-
-    return (
-        folder[9] == 0 ||
-        folder[9] == '/'
-    );
+    return evo_media_source_index_for_path(folder) >= 0;
 }
 
 
@@ -3717,11 +3735,7 @@ static void prospero_last_folder_save(void)
 
 static void prospero_last_folder_load(void)
 {
-    snprintf(
-        current_path,
-        sizeof(current_path),
-        "/mnt/usb0"
-    );
+    current_path[0] = '\0';   /* default: the source picker */
 
     FILE *file =
         fopen(
@@ -3847,6 +3861,19 @@ void load_usb_files(void) {
     file_count = 0;
     file_selected = 0;
 
+    /* EVO: the source picker sits above every real path. Its "listing" is
+     * the fixed source table, not a directory. */
+    if (current_path[0] == '\0') {
+        int i;
+        for (i = 0; i < EVO_MEDIA_SOURCE_COUNT && file_count < 256; i++) {
+            snprintf(usb_files[file_count], sizeof(usb_files[file_count]),
+                      "%s", evo_media_sources[i].label);
+            usb_types[file_count] = 4; /* DT_DIR */
+            file_count++;
+        }
+        return;
+    }
+
     if (g_browser_search[0] != '\0') {
         scan_search_recursive(current_path, "", g_browser_search, 0);
 
@@ -3894,30 +3921,30 @@ void load_usb_files(void) {
         opendir(current_path);
 
     /*
-     * A remembered folder may have been deleted or renamed.
+     * A remembered folder may have been deleted or renamed - fall back to
+     * its source's own root rather than a hardcoded USB path, so the user
+     * still lands inside whichever source they were browsing.
      */
-    if (
-        !dir &&
-        strcmp(
-            current_path,
-            "/mnt/usb0"
-        ) != 0
-    ) {
-        snprintf(
-            current_path,
-            sizeof(current_path),
-            "/mnt/usb0"
-        );
+    if (!dir) {
+        int src = evo_media_source_index_for_path(current_path);
+        if (src >= 0 && strcmp(current_path, evo_media_sources[src].root) != 0) {
+            snprintf(
+                current_path,
+                sizeof(current_path),
+                "%s",
+                evo_media_sources[src].root
+            );
 
-        dir =
-            opendir(current_path);
+            dir =
+                opendir(current_path);
+        }
     }
 
     if (!dir) {
         snprintf(
             usb_files[0],
             sizeof(usb_files[0]),
-            "USB NOT FOUND"
+            "NOT FOUND"
         );
 
         file_count = 1;
@@ -4449,6 +4476,20 @@ void draw_text(uint32_t *fb, int x, int y, const char *text, uint32_t color, int
 void enter_selected_usb(void) {
     if (file_count <= 0) return;
 
+    /* EVO: at the picker, "opening a folder" means choosing a source. */
+    if (current_path[0] == '\0') {
+        if (file_selected < 0 || file_selected >= EVO_MEDIA_SOURCE_COUNT)
+            return;
+
+        snprintf(current_path, sizeof(current_path), "%s",
+                 evo_media_sources[file_selected].root);
+        g_browser_search[0] = '\0';
+        load_usb_files();
+        prospero_last_folder_save();
+        toast("OPEN SOURCE", current_path);
+        return;
+    }
+
     if (usb_types[file_selected] == 4) {
         char next[512];
 
@@ -4469,9 +4510,22 @@ void enter_selected_usb(void) {
 
 void usb_go_back(void) {
     g_browser_search[0] = '\0';
-    if (strcmp(current_path, "/mnt/usb0") == 0) {
+
+    /* At the picker, there is nowhere to go but out to the menu. */
+    if (current_path[0] == '\0') {
         screen = 0;
         return;
+    }
+
+    /* At a source's own root, back means back to the picker - not
+     * stripping into whatever happens to sit above the source's mount. */
+    {
+        int src = evo_media_source_index_for_path(current_path);
+        if (src >= 0 && strcmp(current_path, evo_media_sources[src].root) == 0) {
+            current_path[0] = '\0';
+            load_usb_files();
+            return;
+        }
     }
 
     char *last = strrchr(current_path, '/');
@@ -12311,7 +12365,7 @@ static void prospero_media_info_subtitle_source(
 /* PROSPERO_PERSISTENT_SETTINGS_START */
 
 #define PROSPERO_SETTINGS_FILE \
-    "/mnt/usb0/.evo_player_settings.cfg"
+    "/data/evoplayer/evo_player_settings.cfg"
 
 
 
@@ -13996,7 +14050,7 @@ static void evo_browser_build_row(int slot, int index)
 
     if (usb_types[index] == 4) {
         snprintf(evo_browser_detail[slot], sizeof(evo_browser_detail[slot]),
-                 "FOLDER");
+                 current_path[0] == '\0' ? "SOURCE" : "FOLDER");
         evo_browser_rows[slot].detail = evo_browser_detail[slot];
         return;
     }
@@ -14182,6 +14236,7 @@ static int evo_rmlui_draw_browser(uint32_t *fb, const evo_browser_model *m,
 
     memset(&p, 0, sizeof(p));
     p.path         = m->path;
+    p.title        = m->title;
     p.at_root      = m->at_root;
     p.rail_focused = evo_rail_focused;
     p.total_count  = m->count;
@@ -14221,6 +14276,12 @@ static int evo_rmlui_draw_browser(uint32_t *fb, const evo_browser_model *m,
                 p.rows[i].badge     = NULL;
                 break;
         }
+
+        /* EVO: at the picker, badge the row with which source it is rather
+         * than the generic "DIR". */
+        if (current_path[0] == '\0' && index >= 0 && index < EVO_MEDIA_SOURCE_COUNT)
+            p.rows[i].badge = evo_media_sources[index].badge;
+
         p.row_count++;
     }
 
@@ -14274,6 +14335,7 @@ void draw_usb_browser(uint32_t *fb)
     evo_browser_inspect inspect;
     char                breadcrumb[256];
     char                selected_path[768];
+    const char         *title;
     int                 visible;
     int                 i;
 
@@ -14283,6 +14345,12 @@ void draw_usb_browser(uint32_t *fb)
     evo_focus_tick(&evo_browser_focus, EVO_CONTENT_Y, EVO_ROW_PITCH,
                    (uint32_t)perf_now_ms());
 
+    /* Header title: which source we're in, or "SOURCES" at the picker. */
+    {
+        int src = evo_media_source_index_for_path(current_path);
+        title = (src >= 0) ? evo_media_sources[src].label : "SOURCES";
+    }
+
     /* Breadcrumb. The glyph atlas does carry '/', so the path is shown as it
      * really is rather than transliterated into '>' as it used to be. */
     {
@@ -14290,6 +14358,10 @@ void draw_usb_browser(uint32_t *fb)
 
         if (strncmp(current_path, "/mnt/", 5) == 0)
             shown = current_path + 4;   /* keep the leading slash */
+
+        if (current_path[0] == '\0') {
+            shown = "SELECT A SOURCE";
+        }
 
         if (g_browser_search[0] != '\0') {
             snprintf(breadcrumb, sizeof(breadcrumb), "%s  -  [SEARCH: \"%s\"]", shown, g_browser_search);
@@ -14301,8 +14373,9 @@ void draw_usb_browser(uint32_t *fb)
 
     memset(&model, 0, sizeof(model));
     model.path    = breadcrumb;
+    model.title   = title;
     model.count   = file_count;
-    model.at_root = (strcmp(current_path, "/mnt/usb0") == 0);
+    model.at_root = (current_path[0] == '\0');
 
     visible = evo_browser_focus.visible;
     if (visible > EVO_BROWSER_ROWS_MAX) visible = EVO_BROWSER_ROWS_MAX;
@@ -16237,15 +16310,15 @@ static int evo_section_for_screen_visible(int scr)
  * handler), and so does opening anything from Recent or Favorites. That is
  * right for "back to where this file lives", but it meant selecting BROWSE
  * from the rail or the home shelf dropped you into whatever folder was last
- * played rather than at /mnt/usb0 — the browser appeared to open at a random
- * directory.
+ * played rather than at the source picker — the browser appeared to open at
+ * a random directory.
  *
- * So arriving *at the section* resets to the root, while Back out of the
+ * So arriving *at the section* resets to the picker, while Back out of the
  * player or the reader still returns to the folder you were in.
  */
 static void evo_browser_enter_root(void)
 {
-    snprintf(current_path, sizeof(current_path), "/mnt/usb0");
+    current_path[0] = '\0';
     g_browser_search[0] = '\0';
     file_selected = 0;
     evo_browser_focus_ready = 0;   /* re-inits scroll against the new count */
@@ -17495,6 +17568,19 @@ static void draw_fps_overlay(uint32_t *fb)
     evo_text_right(fb, x + w - 12, text_y, buf, text_col, EVO_FACE_SMALL);
 }
 
+/*
+ * App data (favorites, recent, settings, last-folder, Emby config) lives at
+ * /data/evoplayer/ so the player works with no USB stick present at all.
+ * Nothing else in the tree ever created that directory - addon_emby.c has
+ * been writing EMBY_CONF_PATH there without one existing, which silently
+ * failed on any console that never installed the Media-tile launcher.
+ */
+static void evo_ensure_data_dir(void)
+{
+    mkdir("/data", 0777);
+    mkdir("/data/evoplayer", 0777);
+}
+
 int main(void) {
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
     evo_direct_mem_init(64 * 1024 * 1024);
@@ -17507,6 +17593,7 @@ int main(void) {
      */
     evo_font_build_tables();
 
+    evo_ensure_data_dir();
 
     toast("EVO Player", "Version " EVO_PLAYER_VERSION);
     recent_load();

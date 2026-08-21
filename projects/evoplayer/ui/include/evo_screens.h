@@ -136,6 +136,7 @@ typedef struct evo_browser_inspect {
 
 typedef struct evo_browser_model {
     const char              *path;          /* breadcrumb */
+    const char              *title;         /* header title, e.g. the active source's name */
 
     /*
      * `entries` covers only the visible window: entries[0] is absolute index

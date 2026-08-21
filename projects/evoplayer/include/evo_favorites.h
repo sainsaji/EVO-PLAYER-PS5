@@ -4,7 +4,7 @@
 /*
  * Module: evo_favorites
  *
- * Favorites database. Persists to /mnt/usb0/evo_favorites.txt.
+ * Favorites database. Persists to /data/evoplayer/evo_favorites.txt.
  * Stores up to 100 entries with path, title and duration.
  *
  * Public surface:
@@ -18,7 +18,7 @@
  *   favorites_toggle_current_media()   -- add/remove currently playing file
  */
 
-#define FAVORITES_FILE_DB "/mnt/usb0/evo_favorites.txt"
+#define FAVORITES_FILE_DB "/data/evoplayer/evo_favorites.txt"
 #define MAX_FAVORITES     100
 
 typedef struct {

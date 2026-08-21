@@ -1,7 +1,7 @@
 /*
  * Module: evo_recent
  *
- * Recent-files database. Persists to /mnt/usb0/evo_recent.txt.
+ * Recent-files database. Persists to /data/evoplayer/evo_recent.txt.
  * Extracted from main.c (lines 600–614, 1611–1723, 1428–1445).
  */
 

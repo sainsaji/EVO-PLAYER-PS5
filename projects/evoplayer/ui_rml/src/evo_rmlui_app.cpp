@@ -879,6 +879,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     auto el = [&](const std::string& id) { return m_browser_doc->GetElementById(id); };
 
     if (Rml::Element* e = el("browser-indicator")) e->SetProperty("background-color", accent);
+    if (Rml::Element* e = el("browser-title")) e->SetInnerRML(state.title);
     if (Rml::Element* e = el("browser-path")) {
         e->SetInnerRML(state.path);
         e->SetProperty("color", text_2);

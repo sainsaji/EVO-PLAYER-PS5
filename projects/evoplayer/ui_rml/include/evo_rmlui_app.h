@@ -284,6 +284,7 @@ struct EvoBrowserRow {
 
 struct EvoBrowserState {
     std::string path;
+    std::string title;
     bool at_root = true;
     bool rail_focused = false;
 
@@ -306,7 +307,7 @@ struct EvoBrowserState {
     std::vector<std::pair<std::string, std::string>> ins_props;
 
     bool operator==(const EvoBrowserState& o) const {
-        return path == o.path && at_root == o.at_root && rail_focused == o.rail_focused &&
+        return path == o.path && title == o.title && at_root == o.at_root && rail_focused == o.rail_focused &&
                total_count == o.total_count && cursor_index == o.cursor_index &&
                rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
                empty_hint == o.empty_hint && ins_name == o.ins_name &&
