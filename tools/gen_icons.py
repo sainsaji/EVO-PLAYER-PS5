@@ -170,13 +170,17 @@ def icon_gear():
         shape("circle", C, C, 20.0, stroke=STROKE),   # rim
         shape("circle", C, C, 7.0, stroke=STROKE),    # hub
     ]
-    # Teeth start inside the rim so they merge with it instead of reading as
-    # detached spikes, and are wide enough to look like gear teeth.
+    # Rim band runs 17.5-22.5 (radius 20, stroke 5). Teeth start at 21 - just
+    # inside the outer edge, so the tooth fuses into the band instead of the
+    # earlier 16, which buried the tooth's round cap under the rim's inner
+    # edge and read as a thick fuzzy ring rather than eight teeth. Narrower
+    # (half 3.3 vs 5.0) and longer (7px beyond the rim vs 4.5px) so each one
+    # reads as a spike instead of a stub nearly as wide as it is long.
     for i in range(8):
         a = i * math.pi / 4
-        x1, y1 = C + 16.0 * math.cos(a), C + 16.0 * math.sin(a)
-        x2, y2 = C + 26.5 * math.cos(a), C + 26.5 * math.sin(a)
-        shapes.append(shape("seg", x1, y1, x2, y2, half=5.0))
+        x1, y1 = C + 21.0 * math.cos(a), C + 21.0 * math.sin(a)
+        x2, y2 = C + 28.0 * math.cos(a), C + 28.0 * math.sin(a)
+        shapes.append(shape("seg", x1, y1, x2, y2, half=3.3))
     return shapes
 
 

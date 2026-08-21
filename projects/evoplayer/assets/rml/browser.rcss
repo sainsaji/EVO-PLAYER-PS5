@@ -101,12 +101,21 @@ div, span, p {
 
 /* ============================== File list ============================== */
 
-/* 1116 for the list, 24 of gutter, 564 for the inspector = 1704. */
+/* 1116 for the list, 24 of gutter, 564 for the inspector = 1704.
+ *
+ * Height is 8 rows at the 94px pitch (84 + 10px margin), minus the last
+ * row's trailing margin. Unbounded, the 12-row DOM pool (kBrowserRows, for
+ * folders with a long page) ran its ninth-and-later rows straight under the
+ * footer hint row instead of stopping short of it; the C side already caps
+ * how many rows it actually populates, but nothing here enforced the same
+ * limit, so it only took a longer folder listing to show it. */
 #browser-list {
     position: absolute;
     left: 0;
     top: 222px;
     width: 1116px;
+    height: 742px;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -115,6 +124,7 @@ div, span, p {
     position: relative;
     width: 1116px;
     height: 84px;
+    flex-shrink: 0;
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
