@@ -229,6 +229,21 @@ div, span, p {
     display: inline-block;
 }
 
+.glyph-badge {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 21px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 28px;
+    height: 28px;
+}
+
 .footer-text {
     font-size: 15px;
     font-weight: bold;

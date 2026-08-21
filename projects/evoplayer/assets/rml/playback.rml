@@ -58,11 +58,11 @@
         <!-- Netflix Action Ribbon & Hints -->
         <div id="controls-row">
             <div class="control-item">
-                <img src="icons/btn_cross.png" class="btn-icon"/>
+                <div class="glyph-badge"><img src="icons/btn_cross.png" class="glyph-badge-img"/></div>
                 <span id="label-playpause" class="control-label">PAUSE</span>
             </div>
             <div class="control-item">
-                <img src="icons/btn_dpad.png" class="btn-icon"/>
+                <div class="glyph-badge"><img src="icons/btn_dpad.png" class="glyph-badge-img"/></div>
                 <span class="control-label">SEEK 10s</span>
             </div>
             <div class="control-item">
@@ -78,15 +78,15 @@
                 <span id="label-subs" class="control-label">SUBS: None</span>
             </div>
             <div class="control-item">
-                <img src="icons/btn_square.png" class="btn-icon"/>
+                <div class="glyph-badge"><img src="icons/btn_square.png" class="glyph-badge-img"/></div>
                 <span class="control-label">INFO</span>
             </div>
             <div class="control-item">
-                <img src="icons/btn_triangle.png" class="btn-icon"/>
+                <div class="glyph-badge"><img src="icons/btn_triangle.png" class="glyph-badge-img"/></div>
                 <span id="label-aspect" class="control-label">ASPECT: FIT</span>
             </div>
             <div class="control-item">
-                <img src="icons/btn_circle.png" class="btn-icon"/>
+                <div class="glyph-badge"><img src="icons/btn_circle.png" class="glyph-badge-img"/></div>
                 <span class="control-label">BACK</span>
             </div>
         </div>

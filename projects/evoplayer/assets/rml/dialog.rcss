@@ -122,6 +122,21 @@ div, span, p {
     display: inline-block;
 }
 
+.glyph-badge {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 15px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 20px;
+    height: 20px;
+}
+
 .btn-text {
     font-size: 15px;
     font-weight: bold;

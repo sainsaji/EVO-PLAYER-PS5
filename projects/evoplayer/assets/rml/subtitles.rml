@@ -113,15 +113,15 @@
             <!-- Footer Hints -->
             <div id="subtitles-footer">
                 <div class="footer-hint">
-                    <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">SELECT</span>
                 </div>
                 <div class="footer-hint">
-                    <img src="../icons/btn_triangle.png" class="footer-glyph"/>
+                    <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">CYCLE SIZE</span>
                 </div>
                 <div class="footer-hint">
-                    <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">BACK</span>
                 </div>
             </div>

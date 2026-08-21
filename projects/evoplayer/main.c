@@ -15706,7 +15706,7 @@ void draw_about_support_screen(uint32_t *fb)
         p.rows[0].title = "VERSION";
         p.rows[0].detail = EVO_PLAYER_VERSION;
         p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_about_support.png";
-        p.rows[0].badge = "v0.7.0";
+        p.rows[0].badge = "v" EVO_PLAYER_VERSION;
         p.rows[0].has_chevron = 0;
         p.rows[0].is_focused = (evo_about_selected == 0);
 
@@ -17463,6 +17463,38 @@ static void evo_vo_trace(const char *tag)
 #define evo_vo_trace(tag) ((void)0)
 #endif
 
+/*
+ * On-screen performance readout, gated by the "DEBUG OVERLAY" settings row
+ * (show_debug_overlay). Drawn last in the frame, after whichever screen
+ * function populated `linear` - legacy immediate-mode or RmlUi - so one call
+ * site covers every screen instead of threading a draw call through each
+ * renderer separately.
+ */
+static void draw_fps_overlay(uint32_t *fb)
+{
+    char buf[32];
+    const evo_theme *th;
+    uint32_t bg, text_col;
+    int w, h, x, y, text_y;
+
+    if (!show_debug_overlay) return;
+
+    th = evo_theme_current();
+    bg = EVO_RGBA(0x00, 0x00, 0x00, 170);
+    text_col = th ? th->text_primary : EVO_RGBA(0xFF, 0xFF, 0xFF, 255);
+
+    snprintf(buf, sizeof(buf), "%d FPS", perf_render_fps);
+
+    w = evo_text_w(buf, EVO_FACE_SMALL) + 24;
+    h = 30;
+    x = EVO_UI_W - w - 12;
+    y = 12;
+
+    evo_ui_round_rect(fb, x, y, w, h, 6, bg, bg, 0, 0, 0, 0);
+    text_y = evo_text_y_centred(y, h, EVO_FACE_SMALL);
+    evo_text_right(fb, x + w - 12, text_y, buf, text_col, EVO_FACE_SMALL);
+}
+
 int main(void) {
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
     evo_direct_mem_init(64 * 1024 * 1024);
@@ -18526,6 +18558,8 @@ skip_screen_input:
         if (!(screen == 2 && g_4k_diag_active && g_4k_suppress_ui))
             draw_prospero_toast(linear);
 
+        draw_fps_overlay(linear);
+
         /* EVO: screenshot. Taken here, after everything has been drawn into
          * the linear staging buffer but before it is swizzled and flipped,
          * so the capture is exactly what reaches the panel. */
@@ -18578,6 +18612,10 @@ skip_screen_input:
             if (pm - perf_last_ms >= 1000) {
                 perf_render_fps = perf_render_frames;
                 perf_decode_fps = perf_decode_frames;
+#if EVO_DIAG_FPS
+                printf("[evo-diag] screen=%d fps=%d\n", screen, perf_render_fps);
+                fflush(stdout);
+#endif
                 perf_render_frames = 0;
                 perf_decode_frames = 0;
                 perf_last_ms = pm;

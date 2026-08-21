@@ -255,19 +255,19 @@
         <!-- Footer hints -->
         <div id="browser-footer">
             <div class="footer-hint">
-                <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">OPEN</span>
             </div>
             <div class="footer-hint" id="bhint-back">
-                <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">BACK</span>
             </div>
             <div class="footer-hint">
-                <img src="../icons/btn_triangle.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">FAVORITE</span>
             </div>
             <div class="footer-hint">
-                <img src="../icons/btn_square.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">SEARCH</span>
             </div>
             <div id="browser-footer-version">v0.7.1</div>

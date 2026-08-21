@@ -36,6 +36,11 @@ public:
 
     void SetTransform(const Rml::Matrix4f* transform) override;
 
+    void EnableClipMask(bool enable) override;
+    void RenderToClipMask(Rml::ClipMaskOperation operation,
+                          Rml::CompiledGeometryHandle geometry,
+                          Rml::Vector2f translation) override;
+
 private:
     int m_width;
     int m_height;
@@ -51,4 +56,23 @@ private:
         int height = 0;
     };
     std::map<std::string, MemImage> m_mem_textures;
+
+    /*
+     * Clip mask: 8-bit coverage, one byte per screen pixel.
+     *
+     * RmlUi asks for one whenever a clip cannot be expressed as a plain
+     * rectangle - which is every card in this UI, because they all pair
+     * `overflow: hidden` with a `border-radius`. Both hooks are optional in
+     * the render interface and default to doing nothing, and that default is
+     * silent: the geometry still draws, just unclipped, so the hero artwork
+     * and every tile's poster painted square over the rounded corner they
+     * were supposed to be cut by.
+     *
+     * Only the box below holds meaningful bytes. Outside it the mask reads as
+     * zero - fully clipped - which is what lets Set and Intersect write just
+     * the region they touch instead of clearing the whole screen each time.
+     */
+    std::vector<uint8_t> m_clip_mask;
+    bool m_clip_enabled = false;
+    int m_mask_x0 = 0, m_mask_y0 = 0, m_mask_x1 = 0, m_mask_y1 = 0;
 };

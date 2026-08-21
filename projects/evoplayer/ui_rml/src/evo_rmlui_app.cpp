@@ -56,6 +56,29 @@ static std::string to_hex_rgba(uint32_t col) {
 
 void EvoRmlApp::SetTheme(const EvoThemeColors& theme) {
     m_theme = theme;
+    m_theme_generation++;
+}
+
+void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
+    if (!el) return;
+    auto it = m_image_color_cache.find(el);
+    if (it != m_image_color_cache.end() && it->second == color) return;
+    el->SetProperty("image-color", color);
+    m_image_color_cache[el] = color;
+}
+
+bool EvoRmlApp::ShouldFullRender(int screen_id) {
+    bool screen_changed = (screen_id != m_last_rendered_screen);
+    m_last_rendered_screen = screen_id;
+
+    if (screen_changed || m_frame_dirty)
+        m_settle_frames_left = kBufferSettleFrames;
+
+    bool full = m_settle_frames_left > 0;
+    if (full) m_settle_frames_left--;
+
+    m_frame_dirty = false;
+    return full;
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {
@@ -306,6 +329,9 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
 
 void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
     if (!m_initialized || !m_launch_doc) return;
+    if (state == m_last_launch && m_theme_generation == m_theme_gen_launch) return;
+    m_theme_gen_launch = m_theme_generation;
+    m_frame_dirty = true;
 
     m_last_launch = state;
 
@@ -524,7 +550,10 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
         }
         /* No poster: fall back to the recent glyph in the icon position. */
         if (el_ibox) el_ibox->SetProperty("display", src.empty() ? "flex" : "none");
-        if (el_icon && !t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
+        if (el_icon) {
+            if (!t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
+            SetImageColor(el_icon, t.is_focused ? accent : text_2);
+        }
 
         if (el_title)  el_title->SetInnerRML(t.title);
         if (el_detail) {
@@ -576,7 +605,12 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
                 t.is_focused ? accent_bg
                              : to_hex_rgba(m_theme.accent & 0x00FFFFFFu));
         }
-        if (el_icon && !t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
+        if (el_icon) {
+            if (!t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
+            /* Library slot 3 is the Emby destination - icon_emby.png is a
+             * trademark excluded from the icon swap/tint, kept as baked. */
+            if (i != 3) SetImageColor(el_icon, t.is_focused ? accent : text_2);
+        }
         if (el_title)  el_title->SetInnerRML(t.title);
         if (el_detail) {
             el_detail->SetInnerRML(t.detail);
@@ -609,8 +643,10 @@ void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(0)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 /* ==========================================================================
@@ -619,6 +655,9 @@ void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
 
 void EvoRmlApp::UpdateListState(const EvoListState& state) {
     if (!m_initialized || !m_list_doc) return;
+    if (state == m_last_list && m_theme_generation == m_theme_gen_list) return;
+    m_theme_gen_list = m_theme_generation;
+    m_frame_dirty = true;
 
     if (!m_version.empty()) {
         if (Rml::Element* vel = m_list_doc->GetElementById("list-footer-version"))
@@ -678,6 +717,7 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
         }
         if (Rml::Element* e = el("list-empty-icon")) {
             if (!state.empty_icon.empty()) e->SetAttribute("src", state.empty_icon);
+            SetImageColor(e, text_3);
         }
         if (Rml::Element* e = el("list-empty-icon-box")) {
             e->SetProperty("background-color", surface);
@@ -718,7 +758,10 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
             row->SetProperty("border-width", "1px");
         }
 
-        if (icon && !r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+        if (icon) {
+            if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+            SetImageColor(icon, focused ? accent : text_3);
+        }
         if (title) {
             title->SetInnerRML(r.title);
             title->SetProperty("color", text_1);
@@ -745,7 +788,10 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
                 }
             }
         }
-        if (chev) chev->SetProperty("display", r.has_chevron ? "inline-block" : "none");
+        if (chev) {
+            chev->SetProperty("display", r.has_chevron ? "inline-block" : "none");
+            SetImageColor(chev, focused ? accent : text_3);
+        }
         if (track) {
             track->SetProperty("display", r.progress >= 0 ? "block" : "none");
             track->SetProperty("background-color", border);
@@ -799,8 +845,10 @@ void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(1)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 /* ==========================================================================
@@ -809,6 +857,9 @@ void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
 
 void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (!m_initialized || !m_browser_doc) return;
+    if (state == m_last_browser && m_theme_generation == m_theme_gen_browser) return;
+    m_theme_gen_browser = m_theme_generation;
+    m_frame_dirty = true;
 
     if (!m_version.empty()) {
         if (Rml::Element* vel = m_browser_doc->GetElementById("browser-footer-version"))
@@ -852,6 +903,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (state.is_empty) {
         if (Rml::Element* e = el("browser-empty-title")) e->SetInnerRML(state.empty_title);
         if (Rml::Element* e = el("browser-empty-hint"))  e->SetInnerRML(state.empty_hint);
+        if (Rml::Element* e = el("browser-empty-icon"))  SetImageColor(e, text_3);
     }
 
     for (int i = 0; i < kBrowserRows; i++) {
@@ -887,7 +939,10 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
             row->SetProperty("border-width", "1px");
         }
 
-        if (icon && !r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+        if (icon) {
+            if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+            SetImageColor(icon, focused ? accent : text_3);
+        }
         if (name) {
             name->SetInnerRML(r.name);
             name->SetProperty("color", text_1);
@@ -897,7 +952,10 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
             detail->SetInnerRML(r.detail);
             detail->SetProperty("color", text_2);
         }
-        if (fav) fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
+        if (fav) {
+            fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
+            SetImageColor(fav, accent);
+        }
         if (badge) {
             if (r.badge.empty()) {
                 badge->SetProperty("display", "none");
@@ -1017,8 +1075,10 @@ void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(2)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 /* ==========================================================================
@@ -1027,6 +1087,9 @@ void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
 
 void EvoRmlApp::UpdateChangelogState(const EvoChangelogState& state) {
     if (!m_initialized || !m_changelog_doc) return;
+    if (state == m_last_changelog && m_theme_generation == m_theme_gen_changelog) return;
+    m_theme_gen_changelog = m_theme_generation;
+    m_frame_dirty = true;
 
     if (!m_version.empty()) {
         if (Rml::Element* vel = m_changelog_doc->GetElementById("changelog-footer-version"))
@@ -1171,12 +1234,20 @@ void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(3)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     if (!m_initialized || !m_playback_doc) return;
+    /* position_sec ticks every playing frame, so this only actually skips
+     * while genuinely paused and idle - the theme-generation gate still
+     * catches a theme switch during that pause. */
+    if (state == m_last_state && m_theme_generation == m_theme_gen_playback) return;
+    m_theme_gen_playback = m_theme_generation;
+    m_frame_dirty = true;
 
     m_last_state = state;
 
@@ -1347,12 +1418,17 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(4)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
     if (!m_initialized || !m_dialog_doc) return;
+    if (state == m_last_dialog && m_theme_generation == m_theme_gen_dialog) return;
+    m_theme_gen_dialog = m_theme_generation;
+    m_frame_dirty = true;
 
     m_last_dialog = state;
 
@@ -1432,12 +1508,17 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(5)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
     if (!m_initialized || !m_settings_doc) return;
+    if (state == m_last_settings && m_theme_generation == m_theme_gen_settings) return;
+    m_theme_gen_settings = m_theme_generation;
+    m_frame_dirty = true;
 
     if (!m_version.empty()) {
         if (Rml::Element* vel = m_settings_doc->GetElementById("footer-version"))
@@ -1528,6 +1609,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
 
                 if (el_icon) {
                     el_icon->SetAttribute("src", state.rows[i].icon_path.empty() ? "../icons/icon_settings.png" : state.rows[i].icon_path);
+                    SetImageColor(el_icon, is_focused
+                        ? to_hex_rgb(m_theme.accent)
+                        : to_hex_rgb(m_theme.text_secondary));
                 }
                 if (el_title) el_title->SetInnerRML(state.rows[i].title);
                 if (el_detail) el_detail->SetInnerRML(state.rows[i].detail);
@@ -1541,6 +1625,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 }
                 if (el_chev) {
                     el_chev->SetProperty("display", state.rows[i].has_chevron ? "inline-block" : "none");
+                    SetImageColor(el_chev, is_focused
+                        ? to_hex_rgb(m_theme.accent)
+                        : to_hex_rgb(m_theme.text_secondary));
                 }
             } else {
                 el_row->SetProperty("display", "none");
@@ -1573,12 +1660,17 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(6)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
     if (!m_initialized || !m_subtitles_doc) return;
+    if (state == m_last_subtitles && m_theme_generation == m_theme_gen_subtitles) return;
+    m_theme_gen_subtitles = m_theme_generation;
+    m_frame_dirty = true;
 
     m_last_subtitles = state;
 
@@ -1681,18 +1773,28 @@ void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(7)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
     if (!m_initialized || !m_mediainfo_doc) return;
+    if (state == m_last_mediainfo && m_theme_generation == m_theme_gen_mediainfo) return;
+    m_theme_gen_mediainfo = m_theme_generation;
+    m_frame_dirty = true;
 
     m_last_mediainfo = state;
 
     Rml::Element* el_ind = m_mediainfo_doc->GetElementById("mediainfo-indicator");
     if (el_ind) {
         el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    }
+
+    for (int i = 0; i < 4; i++) {
+        Rml::Element* el_ci = m_mediainfo_doc->GetElementById("card-icon-" + std::to_string(i));
+        if (el_ci) SetImageColor(el_ci, to_hex_rgb(m_theme.accent));
     }
 
     Rml::Element* el_ti = m_mediainfo_doc->GetElementById("mediainfo-title");
@@ -1801,21 +1903,28 @@ void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    m_context->Update();
-    m_context->Render();
+    if (ShouldFullRender(8)) {
+        m_context->Update();
+        m_context->Render();
+    }
 }
 
 void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     if (!m_initialized || !m_nav_doc) return;
+    if (state == m_last_nav && m_theme_generation == m_theme_gen_nav) return;
+    m_theme_gen_nav = m_theme_generation;
+    m_frame_dirty = true;
     m_last_nav = state;
 
     /* ---- collapsed icon rail ---- */
     for (int i = 0; i < 7; i++) {
         std::string item_id  = "nav-item-" + std::to_string(i);
         std::string bar_id   = "nav-bar-"  + std::to_string(i);
+        std::string icon_id  = "nav-icon-" + std::to_string(i);
 
         Rml::Element* el_item = m_nav_doc->GetElementById(item_id);
         Rml::Element* el_bar  = m_nav_doc->GetElementById(bar_id);
+        Rml::Element* el_icon = m_nav_doc->GetElementById(icon_id);
 
         if (!el_item) continue;
 
@@ -1840,6 +1949,20 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_item->SetProperty("border-width", "0px");
         }
 
+        /* Icon glyph: the cursor pill fills solid accent, so the glyph has to
+         * flip to the darkest theme colour there or it disappears into it -
+         * same trick as the settings/list focused badges. Section 4 (Emby) is
+         * a trademark, excluded from the icon swap, so it keeps its own baked
+         * colour rather than being retinted. */
+        if (el_icon && i != 4) {
+            if (is_cursor)
+                SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
+            else if (is_active)
+                SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
+            else
+                SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
+        }
+
         /* Accent bar */
         if (el_bar) {
             el_bar->SetClass("rail-accent-bar-visible", is_active && !state.rail_focused);
@@ -1855,11 +1978,13 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     if (expanded) expanded->SetProperty("display", state.rail_focused ? "block" : "none");
 
     for (int i = 0; i < 7; i++) {
-        std::string exp_id = "nav-exp-"       + std::to_string(i);
-        std::string lbl_id = "nav-exp-label-" + std::to_string(i);
+        std::string exp_id  = "nav-exp-"       + std::to_string(i);
+        std::string lbl_id  = "nav-exp-label-" + std::to_string(i);
+        std::string icon_id = "nav-exp-icon-"  + std::to_string(i);
 
-        Rml::Element* el_exp = m_nav_doc->GetElementById(exp_id);
-        Rml::Element* el_lbl = m_nav_doc->GetElementById(lbl_id);
+        Rml::Element* el_exp  = m_nav_doc->GetElementById(exp_id);
+        Rml::Element* el_lbl  = m_nav_doc->GetElementById(lbl_id);
+        Rml::Element* el_icon = m_nav_doc->GetElementById(icon_id);
 
         if (!el_exp) continue;
 
@@ -1874,16 +1999,19 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_exp->SetProperty("border-color", "#ffffff");
             el_exp->SetProperty("border-width", "1.5px");
             if (el_lbl) el_lbl->SetProperty("color", "#060b16");
+            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
         } else if (is_active) {
             el_exp->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
             el_exp->SetProperty("border-color", to_hex_rgba(m_theme.border));
             el_exp->SetProperty("border-width", "1px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_primary));
+            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
         } else {
             el_exp->SetProperty("background-color", "transparent");
             el_exp->SetProperty("border-color", "transparent");
             el_exp->SetProperty("border-width", "0px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_secondary));
+            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
         }
     }
 }

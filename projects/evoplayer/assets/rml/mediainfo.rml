@@ -28,7 +28,7 @@
                 <!-- Card 1: Container & Storage -->
                 <div class="spec-card">
                     <div class="card-header">
-                        <img src="../icons/icon_browse_usb.png" class="card-icon"/>
+                        <img id="card-icon-0" src="../icons/icon_browse_usb.png" class="card-icon"/>
                         <span class="card-title">CONTAINER &amp; STORAGE</span>
                     </div>
                     <div class="spec-row">
@@ -48,7 +48,7 @@
                 <!-- Card 2: Video Stream -->
                 <div class="spec-card">
                     <div class="card-header">
-                        <img src="../icons/icon_aspect.png" class="card-icon"/>
+                        <img id="card-icon-1" src="../icons/icon_aspect.png" class="card-icon"/>
                         <span class="card-title">VIDEO STREAM</span>
                     </div>
                     <div class="spec-row">
@@ -68,7 +68,7 @@
                 <!-- Card 3: Audio Stream -->
                 <div class="spec-card">
                     <div class="card-header">
-                        <img src="../icons/icon_subtitles.png" class="card-icon"/>
+                        <img id="card-icon-2" src="../icons/icon_subtitles.png" class="card-icon"/>
                         <span class="card-title">AUDIO STREAM</span>
                     </div>
                     <div class="spec-row">
@@ -88,7 +88,7 @@
                 <!-- Card 4: Subtitles & Engine -->
                 <div class="spec-card">
                     <div class="card-header">
-                        <img src="../icons/icon_settings.png" class="card-icon"/>
+                        <img id="card-icon-3" src="../icons/icon_settings.png" class="card-icon"/>
                         <span class="card-title">SUBTITLES &amp; ENGINE</span>
                     </div>
                     <div class="spec-row">
@@ -109,11 +109,11 @@
             <!-- Footer Hints -->
             <div id="mediainfo-footer">
                 <div class="footer-hint">
-                    <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">CLOSE</span>
                 </div>
                 <div class="footer-hint">
-                    <img src="../icons/btn_square.png" class="footer-glyph"/>
+                    <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">RETURN TO FILM</span>
                 </div>
                 <div id="footer-engine-ver">EVO PRO DECODER v0.7.0</div>

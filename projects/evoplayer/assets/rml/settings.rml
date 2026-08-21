@@ -127,15 +127,15 @@
         <!-- Footer Hints -->
         <div id="settings-footer">
             <div class="footer-hint">
-                <img src="../icons/btn_cross.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">SELECT</span>
             </div>
             <div class="footer-hint">
-                <img src="../icons/btn_circle.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">BACK</span>
             </div>
             <div class="footer-hint">
-                <img src="../icons/btn_dpad.png" class="footer-glyph"/>
+                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">NAVIGATE</span>
             </div>
             <div id="footer-version">v0.7.0</div>

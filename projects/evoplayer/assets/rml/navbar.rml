@@ -80,31 +80,31 @@
         <!-- Labelled items -->
         <div id="nav-expanded-items">
             <div class="rail-exp-item" id="nav-exp-0">
-                <img src="../icons/icon_home.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-0" src="../icons/icon_home.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-0">HOME</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-1">
-                <img src="../icons/icon_browse_usb.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-1" src="../icons/icon_browse_usb.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-1">BROWSE</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-2">
-                <img src="../icons/icon_recent_files.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-2" src="../icons/icon_recent_files.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-2">RECENT</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-3">
-                <img src="../icons/icon_favorites.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-3" src="../icons/icon_favorites.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-3">FAVORITES</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-4">
-                <img src="../icons/icon_emby.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-4" src="../icons/icon_emby.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-4">EMBY</span>
             </div>
             <div class="rail-exp-item rail-exp-item-active" id="nav-exp-5">
-                <img src="../icons/icon_settings.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-5" src="../icons/icon_settings.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-5">SETTINGS</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-6">
-                <img src="../icons/icon_about_support.png" class="rail-exp-icon"/>
+                <img id="nav-exp-icon-6" src="../icons/icon_about_support.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-6">ABOUT</span>
             </div>
         </div>

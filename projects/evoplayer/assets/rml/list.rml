@@ -160,19 +160,19 @@
         <!-- Footer hints -->
         <div id="list-footer">
             <div class="footer-hint" id="lhint-0">
-                <img class="footer-glyph" id="lhint-glyph-0" src="../icons/btn_cross.png"/>
+                <div class="glyph-badge"><img class="glyph-badge-img" id="lhint-glyph-0" src="../icons/btn_cross.png"/></div>
                 <span class="footer-text" id="lhint-label-0">SELECT</span>
             </div>
             <div class="footer-hint" id="lhint-1">
-                <img class="footer-glyph" id="lhint-glyph-1" src="../icons/btn_circle.png"/>
+                <div class="glyph-badge"><img class="glyph-badge-img" id="lhint-glyph-1" src="../icons/btn_circle.png"/></div>
                 <span class="footer-text" id="lhint-label-1">BACK</span>
             </div>
             <div class="footer-hint" id="lhint-2">
-                <img class="footer-glyph" id="lhint-glyph-2" src="../icons/btn_dpad.png"/>
+                <div class="glyph-badge"><img class="glyph-badge-img" id="lhint-glyph-2" src="../icons/btn_dpad.png"/></div>
                 <span class="footer-text" id="lhint-label-2">NAVIGATE</span>
             </div>
             <div class="footer-hint" id="lhint-3">
-                <img class="footer-glyph" id="lhint-glyph-3" src="../icons/btn_triangle.png"/>
+                <div class="glyph-badge"><img class="glyph-badge-img" id="lhint-glyph-3" src="../icons/btn_triangle.png"/></div>
                 <span class="footer-text" id="lhint-label-3">REMOVE</span>
             </div>
             <div id="list-footer-version">v0.7.1</div>

@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <utility>
+#include <unordered_map>
 #include "evo_rmlui_render.h"
 #include "evo_rmlui_system.h"
 
@@ -26,12 +27,29 @@ struct EvoPlaybackState {
     int view_mode = 0; // 0=FIT, 1=FILL, 2=STRETCH
     bool show_stats = false;
     int alpha = 255;
+
+    bool operator==(const EvoPlaybackState& o) const {
+        return title == o.title && meta == o.meta && res_badge == o.res_badge &&
+               hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
+               fps_badge == o.fps_badge && audio_badge == o.audio_badge &&
+               position_sec == o.position_sec && duration_sec == o.duration_sec &&
+               percentage == o.percentage && paused == o.paused &&
+               scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
+               audio_track == o.audio_track && sub_track == o.sub_track &&
+               view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha;
+    }
+    bool operator!=(const EvoPlaybackState& o) const { return !(*this == o); }
 };
 
 struct EvoDialogAction {
     std::string icon_path;
     std::string label;
     bool is_primary = false;
+
+    bool operator==(const EvoDialogAction& o) const {
+        return icon_path == o.icon_path && label == o.label && is_primary == o.is_primary;
+    }
+    bool operator!=(const EvoDialogAction& o) const { return !(*this == o); }
 };
 
 struct EvoDialogState {
@@ -40,6 +58,12 @@ struct EvoDialogState {
     std::string detail;
     double progress_pct = -1.0; // 0.0 to 1.0, or -1.0 to hide
     std::vector<EvoDialogAction> actions;
+
+    bool operator==(const EvoDialogState& o) const {
+        return eyebrow == o.eyebrow && title == o.title && detail == o.detail &&
+               progress_pct == o.progress_pct && actions == o.actions;
+    }
+    bool operator!=(const EvoDialogState& o) const { return !(*this == o); }
 };
 
 struct EvoSettingsRow {
@@ -49,6 +73,12 @@ struct EvoSettingsRow {
     std::string badge;
     bool has_chevron = true;
     bool is_focused = false;
+
+    bool operator==(const EvoSettingsRow& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && has_chevron == o.has_chevron && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoSettingsRow& o) const { return !(*this == o); }
 };
 
 struct EvoSettingsState {
@@ -58,6 +88,13 @@ struct EvoSettingsState {
     int rail_active_idx = 5;
     bool rail_focused = false;
     std::vector<EvoSettingsRow> rows;
+
+    bool operator==(const EvoSettingsState& o) const {
+        return title == o.title && subtitle == o.subtitle && counter == o.counter &&
+               rail_active_idx == o.rail_active_idx && rail_focused == o.rail_focused &&
+               rows == o.rows;
+    }
+    bool operator!=(const EvoSettingsState& o) const { return !(*this == o); }
 };
 
 struct EvoSubtitlesTrack {
@@ -65,6 +102,12 @@ struct EvoSubtitlesTrack {
     std::string detail;
     bool is_current = false;
     bool is_focused = false;
+
+    bool operator==(const EvoSubtitlesTrack& o) const {
+        return label == o.label && detail == o.detail &&
+               is_current == o.is_current && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoSubtitlesTrack& o) const { return !(*this == o); }
 };
 
 struct EvoSubtitlesState {
@@ -74,6 +117,13 @@ struct EvoSubtitlesState {
     std::string preview_text;
     int preview_face = 1; // 0=small, 1=medium, 2=large
     std::vector<EvoSubtitlesTrack> tracks;
+
+    bool operator==(const EvoSubtitlesState& o) const {
+        return eyebrow == o.eyebrow && title == o.title && size_str == o.size_str &&
+               preview_text == o.preview_text && preview_face == o.preview_face &&
+               tracks == o.tracks;
+    }
+    bool operator!=(const EvoSubtitlesState& o) const { return !(*this == o); }
 };
 
 struct EvoMediaInfoState {
@@ -95,6 +145,18 @@ struct EvoMediaInfoState {
     std::string subtitles;
     std::string output;
     std::string renderer;
+
+    bool operator==(const EvoMediaInfoState& o) const {
+        return title == o.title && path == o.path && res_badge == o.res_badge &&
+               hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
+               fps_badge == o.fps_badge && container == o.container &&
+               file_size == o.file_size && duration == o.duration &&
+               video_codec == o.video_codec && resolution == o.resolution &&
+               color_hdr == o.color_hdr && audio_codec == o.audio_codec &&
+               channels == o.channels && sample_rate == o.sample_rate &&
+               subtitles == o.subtitles && output == o.output && renderer == o.renderer;
+    }
+    bool operator!=(const EvoMediaInfoState& o) const { return !(*this == o); }
 };
 
 struct EvoLaunchTile {
@@ -106,6 +168,13 @@ struct EvoLaunchTile {
     int art_w = 0;
     int art_h = 0;
     bool is_focused = false;
+
+    bool operator==(const EvoLaunchTile& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               progress == o.progress && art == o.art && art_w == o.art_w &&
+               art_h == o.art_h && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoLaunchTile& o) const { return !(*this == o); }
 };
 
 struct EvoLaunchState {
@@ -128,6 +197,18 @@ struct EvoLaunchState {
     int recent_cursor = -1;
     std::vector<EvoLaunchTile> recent;
     std::vector<EvoLaunchTile> library;
+
+    bool operator==(const EvoLaunchState& o) const {
+        return app_name == o.app_name && version == o.version && clock == o.clock &&
+               theme_name == o.theme_name && hero_eyebrow == o.hero_eyebrow &&
+               hero_title == o.hero_title && hero_detail == o.hero_detail &&
+               hero_action == o.hero_action && hero_progress == o.hero_progress &&
+               hero_art == o.hero_art && hero_art_w == o.hero_art_w &&
+               hero_art_h == o.hero_art_h && hero_focused == o.hero_focused &&
+               recent_total == o.recent_total && recent_cursor == o.recent_cursor &&
+               recent == o.recent && library == o.library;
+    }
+    bool operator!=(const EvoLaunchState& o) const { return !(*this == o); }
 };
 
 struct EvoListRow {
@@ -138,11 +219,23 @@ struct EvoListRow {
     int progress = -1;
     bool has_chevron = false;
     bool is_focused = false;
+
+    bool operator==(const EvoListRow& o) const {
+        return title == o.title && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && progress == o.progress &&
+               has_chevron == o.has_chevron && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoListRow& o) const { return !(*this == o); }
 };
 
 struct EvoListHint {
     std::string glyph_path;
     std::string label;
+
+    bool operator==(const EvoListHint& o) const {
+        return glyph_path == o.glyph_path && label == o.label;
+    }
+    bool operator!=(const EvoListHint& o) const { return !(*this == o); }
 };
 
 struct EvoListState {
@@ -161,6 +254,15 @@ struct EvoListState {
     std::string empty_icon;
 
     std::vector<EvoListHint> hints;
+
+    bool operator==(const EvoListState& o) const {
+        return title == o.title && subtitle == o.subtitle && section == o.section &&
+               rail_focused == o.rail_focused && total_count == o.total_count &&
+               cursor_index == o.cursor_index && rows == o.rows &&
+               is_empty == o.is_empty && empty_title == o.empty_title &&
+               empty_hint == o.empty_hint && empty_icon == o.empty_icon && hints == o.hints;
+    }
+    bool operator!=(const EvoListState& o) const { return !(*this == o); }
 };
 
 struct EvoBrowserRow {
@@ -171,6 +273,13 @@ struct EvoBrowserRow {
     int progress = -1;
     bool is_favorite = false;
     bool is_focused = false;
+
+    bool operator==(const EvoBrowserRow& o) const {
+        return name == o.name && detail == o.detail && icon_path == o.icon_path &&
+               badge == o.badge && progress == o.progress &&
+               is_favorite == o.is_favorite && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoBrowserRow& o) const { return !(*this == o); }
 };
 
 struct EvoBrowserState {
@@ -195,6 +304,18 @@ struct EvoBrowserState {
     int ins_preview_w = 0;
     int ins_preview_h = 0;
     std::vector<std::pair<std::string, std::string>> ins_props;
+
+    bool operator==(const EvoBrowserState& o) const {
+        return path == o.path && at_root == o.at_root && rail_focused == o.rail_focused &&
+               total_count == o.total_count && cursor_index == o.cursor_index &&
+               rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
+               empty_hint == o.empty_hint && ins_name == o.ins_name &&
+               ins_kind == o.ins_kind && ins_ext == o.ins_ext &&
+               ins_probing == o.ins_probing && ins_preview_badge == o.ins_preview_badge &&
+               ins_preview == o.ins_preview && ins_preview_w == o.ins_preview_w &&
+               ins_preview_h == o.ins_preview_h && ins_props == o.ins_props;
+    }
+    bool operator!=(const EvoBrowserState& o) const { return !(*this == o); }
 };
 
 struct EvoChangelogRelease {
@@ -202,6 +323,12 @@ struct EvoChangelogRelease {
     std::string tagline;
     std::string date;
     bool is_focused = false;
+
+    bool operator==(const EvoChangelogRelease& o) const {
+        return version == o.version && tagline == o.tagline &&
+               date == o.date && is_focused == o.is_focused;
+    }
+    bool operator!=(const EvoChangelogRelease& o) const { return !(*this == o); }
 };
 
 struct EvoChangelogState {
@@ -217,6 +344,15 @@ struct EvoChangelogState {
     std::string detail_tagline;
     int item_total = 0;
     std::vector<std::pair<std::string, std::string>> items;
+
+    bool operator==(const EvoChangelogState& o) const {
+        return title == o.title && subtitle == o.subtitle && rail_focused == o.rail_focused &&
+               release_total == o.release_total && cursor_index == o.cursor_index &&
+               releases == o.releases && detail_version == o.detail_version &&
+               detail_tagline == o.detail_tagline && item_total == o.item_total &&
+               items == o.items;
+    }
+    bool operator!=(const EvoChangelogState& o) const { return !(*this == o); }
 };
 
 struct EvoThemeColors {
@@ -247,6 +383,12 @@ struct EvoNavState {
     int rail_focused = 0;   /* 0=collapsed icon strip, 1=expanded labelled panel */
     int cursor_index = 5;   /* which item has cursor when expanded */
     int visible = 1;        /* 1=show the nav rail, 0=hide (full-screen OSD etc.) */
+
+    bool operator==(const EvoNavState& o) const {
+        return active_section == o.active_section && rail_focused == o.rail_focused &&
+               cursor_index == o.cursor_index && visible == o.visible;
+    }
+    bool operator!=(const EvoNavState& o) const { return !(*this == o); }
 };
 
 class EvoRmlApp {
@@ -324,6 +466,33 @@ private:
     EvoPlaybackState m_last_state;
 
     /*
+     * Bumped on every SetTheme call. Each Update*State call skips its whole
+     * body - all the SetProperty/SetInnerRML work - when the incoming state
+     * struct equals the one from last frame AND the theme has not moved
+     * since that frame was processed. Without the generation check, a screen
+     * sitting idle (state unchanged) would miss a live theme switch until
+     * something else about it also happened to change.
+     *
+     * This exists because RmlUi's SetProperty always marks its target dirty
+     * regardless of whether the value actually changed, forcing a full
+     * geometry/decorator rebuild - so calling it on unchanged state every
+     * single frame (the previous behavior here) measured 6-7 fps on the
+     * launch screen on real hardware, slow enough that the pad is polled too
+     * rarely to reliably catch a normal button tap.
+     */
+    int m_theme_generation = 0;
+    int m_theme_gen_launch = -1;
+    int m_theme_gen_list = -1;
+    int m_theme_gen_browser = -1;
+    int m_theme_gen_changelog = -1;
+    int m_theme_gen_playback = -1;
+    int m_theme_gen_dialog = -1;
+    int m_theme_gen_settings = -1;
+    int m_theme_gen_subtitles = -1;
+    int m_theme_gen_mediainfo = -1;
+    int m_theme_gen_nav = -1;
+
+    /*
      * RmlUi caches textures by source string, so a poster whose pixels change
      * has to change name too or the stale frame is served forever. Each art
      * slot (0 = hero, 1..6 = the recent shelf) carries a generation that bumps
@@ -358,5 +527,40 @@ private:
     EvoSubtitlesState m_last_subtitles;
     EvoMediaInfoState m_last_mediainfo;
     EvoNavState m_last_nav;
+
+    /*
+     * RmlUi's ElementImage::OnPropertyChange marks geometry dirty on ANY
+     * image-color SetProperty call, regardless of whether the value actually
+     * changed - SetProperty itself never diffs against the current value.
+     * Icon tinting is recomputed every frame (nav rail runs every screen,
+     * every frame, via evo_sync_rmlui_nav), so without this cache every icon
+     * rebuilds its geometry every frame even when its colour is unchanged
+     * from the last one - the cost that made the navbar miss D-pad presses.
+     */
+    std::unordered_map<Rml::Element*, std::string> m_image_color_cache;
+    void SetImageColor(Rml::Element* el, const std::string& color);
+
+    /*
+     * State-diffing in Update*State only avoids RE-STYLING unchanged
+     * elements; it does nothing about the cost of Context::Render() itself,
+     * which walks and CPU-rasterizes every visible element every time it is
+     * called regardless of whether anything is dirty - measured at 6-7 fps
+     * on the launch screen with state-diffing already in place and skipping
+     * ~97% of Update calls. That render pass is what actually needs skipping
+     * on an unchanged frame.
+     *
+     * A skip is only safe once every rotating output buffer already holds
+     * the current, correct pixels - pp_videoout_init uses 2 - so a change
+     * (including a screen switch) has to force a real render for at least
+     * that many frames before skips resume. Menu screens never memset their
+     * framebuffer before drawing (see draw_menu_linear callers in main.c),
+     * so a skipped frame's buffer still holds whatever the last real render
+     * put there, which by then is identical across every buffer in rotation.
+     */
+    static const int kBufferSettleFrames = 3;
+    int m_last_rendered_screen = -1;
+    int m_settle_frames_left = kBufferSettleFrames;
+    bool m_frame_dirty = true;
+    bool ShouldFullRender(int screen_id);
 };
 

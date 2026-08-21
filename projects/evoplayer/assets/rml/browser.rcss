@@ -471,6 +471,25 @@ div, span, p {
     display: inline-block;
 }
 
+/* Wrapper badge for the four face-button glyphs (Kenney's flat cutout art
+ * carries its own DualSense colour-coding but no backdrop) — reproduces the
+ * disc that used to be baked into the PNG. D-pad/stick glyphs never had one,
+ * so they keep using .footer-glyph directly. */
+.glyph-badge {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 21px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 28px;
+    height: 28px;
+}
+
 .footer-text {
     font-size: 15px;
     font-weight: bold;
