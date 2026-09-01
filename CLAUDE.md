@@ -116,6 +116,7 @@ mock data — everything in the DOM binds to live C structs
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
+| [native-decode-integration-plan.md](docs/native-decode-integration-plan.md) | Proposed: native decode via fake-SELF app slot, SharpProspero as ABI ref, FFmpeg/Native settings toggle |
 | [gpu-notes.md](docs/gpu-notes.md) | Why there's no hardware GL driver |
 | [converter-perf.md](docs/converter-perf.md) | YUV→BGRA+swizzle perf, `bench.sh` findings |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
@@ -123,7 +124,8 @@ mock data — everything in the DOM binds to live C structs
 | [addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
 | [packaging.md](docs/packaging.md) | PKG packaging |
 | [validation.md](docs/validation.md) | Validation checklist |
-| [modularisation-plan.md](docs/modularisation-plan.md) / [backlog.md](docs/backlog.md) / [improvements-roadmap.md](docs/improvements-roadmap.md) | Planning docs, not current state |
+| [modularisation-plan.md](docs/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |
+| [backlog.md](docs/backlog.md) / [improvements-roadmap.md](docs/improvements-roadmap.md) | Planning docs, not current state |
 | [icon-swap-handoff.md](docs/icon-swap-handoff.md) | RmlUi icon swap to Lucide/Kenney — candidates approved, not yet implemented |
 | [prosperoplayer-baseline.md](docs/prosperoplayer-baseline.md) / [reng-analysis-integration.md](docs/reng-analysis-integration.md) / [native-media-research.md](docs/native-media-research.md) / [sdk-audit.md](docs/sdk-audit.md) / [baseline-defects.md](docs/baseline-defects.md) | Upstream baseline research |
 | [proprietary.md](docs/proprietary.md) | Licensing notes |
