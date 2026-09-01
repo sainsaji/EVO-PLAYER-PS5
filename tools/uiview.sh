@@ -40,9 +40,10 @@ EVO_VERSION="$(tr -d '[:space:]' < "${EVO}/VERSION" 2>/dev/null || echo 0.0.0)"
 clang -O2 -Wall -Wextra -std=gnu11 \
     -DEVO_PLAYER_VERSION="\"${EVO_VERSION}\"" \
     -DEVO_THEME_DIR='"/nonexistent/evo_themes"' \
-    -I"${PP}/include" -I"${UI}/include" -I"${EVO}/media/include" -I"${EVO}/addons/include" -I"${EVO}" \
+    -I"${PP}/include" -I"${UI}/include" -I"${EVO}/media/include" -I"${EVO}/addons/include" -I"${EVO}/include" -I"${EVO}" \
     "${REPO_ROOT}/tools/uiview.c" \
     "${EVO}/media/src/evo_textreader.c" \
+    "${EVO}/src/evo_readdir.c" \
     "${UI}/src/evo_draw.c" \
     "${UI}/src/evo_nav.c" \
     "${UI}/src/evo_focus.c" \

@@ -18,7 +18,9 @@
  *   favorites_toggle_current_media()   -- add/remove currently playing file
  */
 
-#define FAVORITES_FILE_DB "/data/evoplayer/evo_favorites.txt"
+#include "evo_data_path.h"
+
+#define FAVORITES_FILE_DB EVO_DATA_DIR "/evo_favorites.txt"
 #define MAX_FAVORITES     100
 
 typedef struct {

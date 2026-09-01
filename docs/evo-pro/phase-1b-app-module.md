@@ -1,12 +1,14 @@
 # Phase 1b — repackage EVO Player as a game-category app module
 
-> **Status (2026-09-02):** Milestone 1 tasks 1–5 ✅ on hardware — **EVO Player
-> boots as `PPSA99039` to the RmlUi main menu with working pad navigation**;
-> VideoOut / RmlUi / FFmpeg / audio / networking all initialise in the app
-> sandbox. Build/deploy: `./scripts/package-app.sh` → `./scripts/deploy-app.sh`
-> → ShadowMountPlus. Remaining: tasks 6–8 (settings→`/download0`, `evo_readdir`,
-> `sandbox-unjail` for USB, instrumented playback). See §8. No native decode in
-> this phase.
+> **Status (2026-09-02):** Milestone 1 tasks 1–7 ✅ on hardware — **EVO Player
+> runs as `PPSA99039`**: boots to the RmlUi menu, pad nav, VideoOut / RmlUi /
+> FFmpeg / audio / networking init in the sandbox; settings persist to
+> `/download0/evoplayer/` (task 6); directory enumeration via `evo_readdir`
+> (task 6); USB browse works after `./tools/sandbox-unjail.sh` (task 7, re-run
+> per launch). Build/deploy: `./scripts/package-app.sh` →
+> `./scripts/deploy-app.sh` → ShadowMountPlus. **Task 8 (playback) is the only
+> one left and picking a media file currently crashes** — see §8. No native
+> decode in this phase.
 >
 > **Predecessors:** Phase 0 (`sce_videodec2.h` / [videodec2-abi.md](videodec2-abi.md))
 > and the Phase 1 go/no-go gate — **PASSED on hardware 2026-09-01** via the
@@ -307,20 +309,36 @@ knowns: (a) expect `fstatfs` & friends in the re-harvested api-surface, and
    `/data/evoplayer/...` sites through it. Write-temp-then-`rename` (already the
    pattern). Contained change.
 
-2. **USB media browse → unsandbox the running EVO process.** New elfldr payload
-   **`tools/sandbox-unjail.elf`** (elfldr context *has* kernel R/W): find the
-   live EVO proc by name, copy `fd_rdir`/`fd_jdir` from an unsandboxed proc (or
-   set to rootvnode), clear the `sceSblACMgr` sandbox flags — **the same
-   primitive HEN already applies to the PS-Now slot** for hbldr. EVO then sees
-   the real `/mnt/usb0`, `/data`, network; the literal `/mnt/usb0` strings
-   resolve, no path changes needed.
+2. ✅ **USB media browse → unsandbox the running EVO process.** elfldr payload
+   **`projects/sandbox_unjail/`** + wrapper **`tools/sandbox-unjail.sh`**
+   (elfldr context *has* kernel R/W via `<ps5/kernel.h>`). It finds the running
+   `eboot.bin` proc and applies the identical lift `ps5-payload-elfldr` gives
+   its own payloads (`elfldr_raise_privileges`):
 
-   Dev loop (launch-safety rules still apply — never stack launches):
-   1. `make deploy` folder → `/data/homebrew/PPSA99039/`
-   2. ShadowMountPlus mount + launch from the Games row
-   3. EVO boots to a "waiting for filesystem" screen, polling `/mnt/usb0` ~15 s
-   4. `./tools/sandbox-unjail.sh` → elfldr runs the payload → unsandboxes EVO
-   5. poll succeeds → RmlUi main menu
+   | call | effect |
+   |---|---|
+   | `kernel_set_proc_rootdir(pid, kernel_get_root_vnode())` | `fd_rdir` → real `/` |
+   | `kernel_set_proc_jaildir(pid, 0)` | `fd_jdir` → 0 (no jail root) |
+   | `kernel_set_ucred_uid(pid, 0)` | `cr_uid` → 0 |
+   | `kernel_set_ucred_caps(pid, {0xff×16})` | full `cr_sceCaps` |
+
+   `namei` reads `fd_rdir`/`fd_jdir` at lookup time, so EVO's **next** `open()`
+   sees the real FS — no remount, no path changes, the literal `/mnt/usb0`
+   strings just resolve. Only touches procs whose `jaildir != 0` (skips an
+   already-unjailed one). **The same primitive HEN applies to the hbldr PS-Now
+   slot.**
+
+   Dev loop (launch-safety rules still apply — never stack launches; a game
+   also runs as `eboot.bin`, so close one first):
+   1. `./scripts/package-app.sh` → `./scripts/deploy-app.sh`
+   2. ShadowMountPlus mount + launch from the Games row → RmlUi menu
+   3. `PS5_HOST=<ip> ./tools/sandbox-unjail.sh` → elfldr runs the payload,
+      on-screen notification reports `pid=N unjailed`
+   4. reopen EVO's media browser → `/mnt/usb0` now lists
+
+   No "waiting for filesystem" boot gate was needed — EVO already boots to the
+   menu in the sandbox (task 4); only the browser needs the unjail, and
+   `load_usb_files()` re-scans on every browser entry.
 
    Production later: fold the unjail into a resident daemon (websrv-style) that
    watches for the sandbox dir and clears it automatically.
@@ -361,13 +379,15 @@ milestone 1 hits R5. No decision needed now.
    ✅ stubs/libc_ext.c                   _setjmp/_longjmp, dladdr/__dl*, recvmmsg
    ✅ stubs/malloc_shim.c                mmap-backed allocator (R1)
    ✅ stubs/*_link_stub.c                7 SCE link stubs (unused so far)
-◻  tools/sandbox-unjail.{c,elf,sh}      elfldr payload, unsandbox EVO proc (task 7)
+✅ projects/sandbox_unjail/{main.c,Makefile}          elfldr payload: unjail EVO proc (task 7)
+✅ tools/sandbox-unjail.sh                            build + push to elfldr, host wrapper (task 7)
 ✅ projects/evoplayer/sce_sys/{param.json,icon0.png}   PPSA99039, game category
 ✅ projects/evoplayer/Makefile                         `objects` / `print-objects`
 ✅ projects/evoplayer/include/evo_boot_trace.h         EVO_BOOT_TRACE breadcrumbs
 ✅ projects/sandbox_probe/{main.c,Makefile}            §5 Step A probe (+ payload A/B)
 ✅ projects/app_ctl/{main.c,Makefile}                  launch/kill payload for app-loop.sh
-◻  projects/evoplayer/src/evo_data_path.{c,h}          /download0 vs /data helper (task 6)
+✅ projects/evoplayer/{src/evo_data_path.c,src/evo_readdir.c,
+   include/evo_data_path.h,include/evo_readdir.h}       /download0 helper + getdents enum (task 6)
 ✅ scripts/setup-native-app-deps.sh    static zlib 1.3.2 bootstrap into .deps/
 ✅ scripts/package-app.sh  [--probe|--player(default)|--rebuild-libc]
 ✅ scripts/deploy-app.sh               FTP output/app/PPSA99039/ → /data/homebrew/
@@ -429,12 +449,35 @@ in the app sandbox. No native decode.
 
 5. ✅ *(folded into task 4)* — every object built `-femulated-tls`. Residual
    heap/TLS risk (R1/R5) addressed by `malloc_shim.c`; watch at runtime.
-6. `evo_data_path()` → `/download0/evoplayer/` settings migration (§5 Step B.1)
+6. ✅ `evo_data_path()` → `/download0/evoplayer/` settings migration (§5 Step B.1)
    + `evo_readdir()` over `open`+`getdents` for the browser (§5 Step A #2).
-7. `tools/sandbox-unjail` payload + "waiting for filesystem" boot gate
-   (§5 Step B.2) — `/mnt/usb0` is ENOENT in the sandbox.
-8. Instrumented playback: `av_log` → notify, decode plane-hash vs `main`,
-   1080p **and** 4K FFmpeg software decode without allocation failure.
+   **Hardware 2026-09-02:** `EVO_DATA_DIR` (compile-time, `-DEVO_APP_MODULE=1`
+   from `package-app.sh`) routes settings / recent / favorites / last-folder /
+   emby.conf / themes to `/download0/evoplayer/`; settings write + **persist
+   across a clean PS-button relaunch** (`settings loaded`); `evo_readdir` over
+   `open(O_DIRECTORY)`+`getdents` enumerated `/download0/evoplayer/` correctly
+   (`2 entries first=evo_last_folder.cfg`); `evo_opendir("/mnt/usb0")` returns
+   NULL cleanly → browser shows "NOT FOUND", no crash/hang.
+   New: `src/evo_data_path.{c},include/evo_data_path.h`,
+   `src/evo_readdir.{c},include/evo_readdir.h`. Boot trace trimmed to 4 lines.
+7. ✅ `sandbox_unjail` elfldr payload (§5 Step B.2) — `/mnt/usb0` is ENOENT in
+   the sandbox. `projects/sandbox_unjail/` + `tools/sandbox-unjail.sh`; applies
+   `elfldr_raise_privileges`' rootdir/jaildir/uid/caps lift to the running
+   process. No boot gate — EVO boots fine sandboxed, only the browser needs it.
+   **Hardware 2026-09-02: works — after `./tools/sandbox-unjail.sh`, EVO's USB
+   browser lists `/mnt/usb0`.** Must be re-run after every relaunch (the lift is
+   per-process); a resident auto-unjail daemon is the "production later" item.
+   Process lookup: `sysctl {1,14,8,0}` namelen 4 (`KERN_PROC_PROC`) — the
+   namelen-3 `KERN_PROC_ALL` form in `projects/app_ctl` returns EINVAL on this
+   console; `ki_pid`@72, `ki_tdname`@447.
+8. **NEXT** — instrumented playback. **2026-09-02: picking a media file
+   crashes the app module** (menu / browse / settings all stable). Unproven
+   before this and expected to need work — R1 (FFmpeg `av_malloc` vs the capped
+   libc heap), R3 (libm binding), the `exit()` `SIGSYS`, and possibly the
+   mid-run cred swap from `sandbox_unjail` as a new vector. Needs `evo_bt`
+   breadcrumbs down the open path (demux → decoder alloc → videoout attach →
+   first frame), `av_log` → notify, then decode plane-hash vs `main`, at 1080p
+   **and** 4K.
 
 ---
 
@@ -448,18 +491,18 @@ in the app sandbox. No native decode.
 - [x] `sceUserServiceGetInitialUser` returns a real user (not `0x80940004`)
       — uid `0x1ea2f4d9`, Step A 2026-09-02
 - [x] `libScePad` drives navigation — 2026-09-02
-- [ ] **`opendir`/`readdir` work through `libc.prx`** — Step A: `opendir`
-      fails EPERM everywhere but `open(O_DIRECTORY)`+`getdents` work → task-6
-      `evo_readdir` shim (see §5 Step A #2)
+- [x] **directory enumeration works** — `evo_readdir` over
+      `open(O_DIRECTORY)`+`getdents` listed `/download0/evoplayer/` (2 entries,
+      names correct), 2026-09-02. `opendir` still fails EPERM (unused now).
 - [ ] `libSceAudioOut` — play a file, audio present, A/V sync within `main`
       tolerance
 - [ ] elfldr / klog / websrv / ftpsrv stay healthy after exit; clean PS-button
       close (a `SIGSYS` fired in `exit()` teardown on the early-exit path —
       revisit once the app has a real quit path)
-- [ ] USB browse lists `/mnt/usb0` media after `sandbox-unjail` (or directly, if
-      Step A showed broad access)
-- [ ] Settings read+write survives relaunch (`/download0/evoplayer/` or `/data`
-      per Step A)
+- [x] USB browse lists `/mnt/usb0` media after `./tools/sandbox-unjail.sh`
+      — 2026-09-02 (must re-run the unjail after every relaunch)
+- [x] Settings read+write survives relaunch — `/download0/evoplayer/`,
+      `settings loaded` after a clean PS-button close, 2026-09-02
 - [ ] 1080p **and** 4K FFmpeg software decode play without allocation failure;
       decode plane hashes match `main`
 - [ ] Clean close via PS button → home screen, no panic

@@ -110,7 +110,9 @@ MEDIA_SRCS := \
     media/src/evo_playback.c \
     src/evo_toast.c \
     src/evo_recent.c \
-    src/evo_favorites.c
+    src/evo_favorites.c \
+    src/evo_data_path.c \
+    src/evo_readdir.c
 
 ADDON_SRCS := \
     addons/src/cJSON.c \

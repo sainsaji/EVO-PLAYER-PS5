@@ -9,9 +9,10 @@
 #include "addon_emby.h"
 #include "evo_net.h"
 #include "cJSON.h"
+#include "evo_data_path.h"
 
 #ifndef EMBY_CONF_PATH
-#define EMBY_CONF_PATH "/data/evoplayer/emby.conf"
+#define EMBY_CONF_PATH EVO_DATA_DIR "/emby.conf"
 #endif
 
 #ifndef EMBY_CONF_USB

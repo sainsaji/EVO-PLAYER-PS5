@@ -20,10 +20,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "evo_data_path.h"
+#include "evo_readdir.h"
+
 /* Overridable so the parser can be exercised on a host with a local
- * directory of .theme files instead of a console. */
+ * directory of .theme files instead of a console.
+ *
+ * elfldr payload: USB, as documented (docs/theming.md). App module: USB is
+ * ENOENT in the sandbox until tools/sandbox-unjail (task 7), so custom themes
+ * come from /download0/evoplayer/themes/ instead. */
 #ifndef EVO_THEME_DIR
+#ifdef EVO_APP_MODULE
+#define EVO_THEME_DIR evo_data_path("themes")
+#else
 #define EVO_THEME_DIR "/mnt/usb0/evo_themes"
+#endif
 #endif
 
 static evo_theme g_themes[EVO_THEME_MAX];
@@ -268,7 +279,7 @@ static int load_theme_file(const char *path, evo_theme *t)
 
 void evo_theme_init(void)
 {
-    DIR *d;
+    evo_dir_t *d;
     struct dirent *e;
 
     if (g_inited)
@@ -279,11 +290,14 @@ void evo_theme_init(void)
         g_themes[g_count++] = k_builtin[i];
 
     /* Plug and play: whatever is on the stick, in directory order. */
-    d = opendir(EVO_THEME_DIR);
+    char theme_dir[512];
+    snprintf(theme_dir, sizeof theme_dir, "%s", EVO_THEME_DIR);
+
+    d = evo_opendir(theme_dir);
     if (!d)
         return;
 
-    while ((e = readdir(d)) != NULL && g_count < EVO_THEME_MAX) {
+    while ((e = evo_readdir(d)) != NULL && g_count < EVO_THEME_MAX) {
         size_t n = strlen(e->d_name);
         char path[512];
 
@@ -292,11 +306,11 @@ void evo_theme_init(void)
         if (e->d_name[0] == '.')
             continue;
 
-        snprintf(path, sizeof path, "%s/%s", EVO_THEME_DIR, e->d_name);
+        snprintf(path, sizeof path, "%s/%s", theme_dir, e->d_name);
         if (load_theme_file(path, &g_themes[g_count]))
             g_count++;
     }
-    closedir(d);
+    evo_closedir(d);
 }
 
 const evo_theme *evo_theme_current(void)

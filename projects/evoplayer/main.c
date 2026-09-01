@@ -92,6 +92,8 @@
 #include "evo_toast.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
+#include "evo_data_path.h"
+#include "evo_readdir.h"
 #include "assets/browser_icon_assets.h"
 
 #ifndef RR_BGRA
@@ -2005,20 +2007,20 @@ void rect(uint32_t *fb, int x, int y, int w, int h, uint32_t color) {
 
 
 int count_files_in_path(const char *path) {
-    DIR *dir = opendir(path);
+    evo_dir_t *dir = evo_opendir(path);
     if (!dir) return -1;
 
     int count = 0;
     struct dirent *entry;
 
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = evo_readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') continue;
         if (!strcmp(entry->d_name, "$RECYCLE.BIN")) continue;
         if (!strcmp(entry->d_name, "System Volume Information")) continue;
         count++;
     }
 
-    closedir(dir);
+    evo_closedir(dir);
     return count;
 }
 
@@ -2071,7 +2073,7 @@ void draw_bmp_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 /* PROSPERO_LAST_FOLDER_V3_START */
 
 #define PROSPERO_LAST_FOLDER_FILE \
-    "/data/evoplayer/evo_last_folder.cfg"
+    EVO_DATA_DIR "/evo_last_folder.cfg"
 
 
 static int prospero_last_folder_is_safe(
@@ -2167,14 +2169,14 @@ static void prospero_last_folder_load(void)
         return;
     }
 
-    DIR *directory =
-        opendir(saved_folder);
+    evo_dir_t *directory =
+        evo_opendir(saved_folder);
 
     if (!directory) {
         return;
     }
 
-    closedir(directory);
+    evo_closedir(directory);
 
     snprintf(
         current_path,
@@ -2211,11 +2213,11 @@ static void scan_search_recursive(const char *base_path, const char *rel_path, c
     else
         snprintf(dir_path, sizeof(dir_path), "%s", base_path);
 
-    DIR *dir = opendir(dir_path);
+    evo_dir_t *dir = evo_opendir(dir_path);
     if (!dir) return;
 
     struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && file_count < 255) {
+    while ((entry = evo_readdir(dir)) != NULL && file_count < 255) {
         if (entry->d_name[0] == '.') continue;
         if (!strcmp(entry->d_name, "$RECYCLE.BIN")) continue;
         if (!strcmp(entry->d_name, "System Volume Information")) continue;
@@ -2236,7 +2238,7 @@ static void scan_search_recursive(const char *base_path, const char *rel_path, c
             scan_search_recursive(base_path, item_rel, query, depth + 1);
         }
     }
-    closedir(dir);
+    evo_closedir(dir);
 }
 
 void load_usb_files(void) {
@@ -2299,8 +2301,8 @@ void load_usb_files(void) {
         return;
     }
 
-    DIR *dir =
-        opendir(current_path);
+    evo_dir_t *dir =
+        evo_opendir(current_path);
 
     /*
      * A remembered folder may have been deleted or renamed - fall back to
@@ -2318,7 +2320,7 @@ void load_usb_files(void) {
             );
 
             dir =
-                opendir(current_path);
+                evo_opendir(current_path);
         }
     }
 
@@ -2335,7 +2337,7 @@ void load_usb_files(void) {
 
 
     struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && file_count < 256) {
+    while ((entry = evo_readdir(dir)) != NULL && file_count < 256) {
         if (entry->d_name[0] == '.') continue;
         if (!strcmp(entry->d_name, "$RECYCLE.BIN")) continue;
         if (!strcmp(entry->d_name, "System Volume Information")) continue;
@@ -2344,7 +2346,7 @@ void load_usb_files(void) {
         file_count++;
     }
 
-    closedir(dir);
+    evo_closedir(dir);
 
     /* EVO: sort the listing.
      *
@@ -6851,7 +6853,7 @@ static void rr_browser_icon(
 /* PROSPERO_PERSISTENT_SETTINGS_START */
 
 #define PROSPERO_SETTINGS_FILE \
-    "/data/evoplayer/evo_player_settings.cfg"
+    EVO_DATA_DIR "/evo_player_settings.cfg"
 
 
 
@@ -6981,6 +6983,8 @@ static void prospero_settings_load(void)
             PROSPERO_SETTINGS_FILE,
             "r"
         );
+
+    evo_bt("data %s (settings %s)", evo_data_dir(), file ? "loaded" : "new");
 
     if (file) {
         int values_read =
@@ -11705,8 +11709,8 @@ static int prospero_find_next_video(
         slash + 1
     );
 
-    DIR *folder =
-        opendir(directory);
+    evo_dir_t *folder =
+        evo_opendir(directory);
 
     if (!folder) {
         return 0;
@@ -11722,7 +11726,7 @@ static int prospero_find_next_video(
     while (
         (
             entry =
-                readdir(folder)
+                evo_readdir(folder)
         ) != NULL
     ) {
         const char *name =
@@ -11787,7 +11791,7 @@ static int prospero_find_next_video(
         }
     }
 
-    closedir(folder);
+    evo_closedir(folder);
 
     /*
      * Wrap around to the first file after the last video.
@@ -12065,22 +12069,46 @@ static void draw_fps_overlay(uint32_t *fb)
 
 /*
  * App data (favorites, recent, settings, last-folder, Emby config) lives at
- * /data/evoplayer/ so the player works with no USB stick present at all.
+ * EVO_DATA_DIR so the player works with no USB stick present at all. As an
+ * elfldr payload that is /data/evoplayer/; as the PPSA99039 app module the
+ * sandbox has no /data, so it is /download0/evoplayer/ (see evo_data_path.h).
  * Nothing else in the tree ever created that directory - addon_emby.c has
  * been writing EMBY_CONF_PATH there without one existing, which silently
  * failed on any console that never installed the Media-tile launcher.
  */
 static void evo_ensure_data_dir(void)
 {
-    mkdir("/data", 0777);
-    mkdir("/data/evoplayer", 0777);
+#ifndef EVO_APP_MODULE
+    mkdir("/data", 0777);   /* /download0 always exists in the app sandbox */
+#endif
+    mkdir(EVO_DATA_DIR, 0777);
+
+#ifdef EVO_BOOT_TRACE
+    /* Exercise evo_readdir() on a directory that actually has files - the
+     * browser's /mnt/usb0 is ENOENT until sandbox-unjail, so it can't. */
+    {
+        evo_dir_t *d = evo_opendir(EVO_DATA_DIR);
+        int n = 0;
+        char first[80] = "";
+        if (d) {
+            struct dirent *e;
+            while ((e = evo_readdir(d)) != NULL) {
+                if (e->d_name[0] == '.') continue;
+                if (!first[0]) snprintf(first, sizeof first, " first=%s", e->d_name);
+                n++;
+            }
+            evo_closedir(d);
+        }
+        evo_bt("readdir %s: %s%d entries%s",
+               EVO_DATA_DIR, d ? "" : "OPEN FAILED ", n, first);
+    }
+#endif
 }
 
 int main(void) {
     evo_bt("main() entry");
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
     evo_direct_mem_init(64 * 1024 * 1024);
-    evo_bt("direct_mem_init ok");
 
     /*
      * First, before anything draws or any thread starts. The glyph tables are
@@ -12089,7 +12117,6 @@ int main(void) {
      * is still the only thread. toast() below already draws text.
      */
     evo_font_build_tables();
-    evo_bt("font tables built");
 
     evo_ensure_data_dir();
 
@@ -12097,7 +12124,6 @@ int main(void) {
     recent_load();
     favorites_load();
     prospero_settings_load();
-    evo_bt("settings loaded");
 
     /* EVO: UI sound engine. Safe to call before anything else audio-related;
      * it opens its own port and stays silent if that fails. */
@@ -12113,9 +12139,7 @@ int main(void) {
     load_usb_files();
 #endif
 
-    evo_bt("pre ffmpeg_test");
     ffmpeg_test();
-    evo_bt("ffmpeg_test ok");
 
     sceUserServiceInitialize(NULL);
     scePadInit();
@@ -12135,11 +12159,9 @@ int main(void) {
     /* EVO: hand the UI layer this file's text and icon renderers. Must happen
      * before the first frame; every evo_text/evo_icon call is a safe no-op
      * until it does, which would draw an empty page rather than crash. */
-    evo_bt("pre rmlui_init");
     evo_draw_bind(&EVO_DRAW_VTABLE);
     evo_rmlui_init(WIDTH, HEIGHT);
     evo_sync_rmlui_theme();
-    evo_bt("rmlui_init ok");
 
     /* EVO: controller feedback. Sound was already wired at the edge-detect
      * point; this adds the lightbar and gives both one semantic API. The
@@ -12151,7 +12173,6 @@ int main(void) {
     evo_net_init();
     emby_init();
     avformat_network_init();
-    evo_bt("net init ok");
 
     PS5_PadData padData;
     uint32_t lastButtons = 0;
@@ -12160,7 +12181,6 @@ int main(void) {
 #if PP_BACKEND_ENABLED
     memset(&g_pp_vo, 0, sizeof(g_pp_vo));
     pp_playback_init(&g_pp_pb);
-    evo_bt("pre pp_videoout_init");
     if (pp_videoout_init(&g_pp_vo, WIDTH, HEIGHT, PP_PIXEL_BGRA32_TILED, 2) != 0) {
         toast("VIDEOOUT", "pp_videoout_init failed");
         evo_bt("pp_videoout_init FAILED step=%d rc=%d (10=Open 11=AllocDmem "
@@ -12168,7 +12188,6 @@ int main(void) {
                pp_videoout_last_step, pp_videoout_last_rc);
         return 1;
     }
-    evo_bt("pp_videoout_init ok");
     g_pp_vo_ready = 1;
     pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
     pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
@@ -12202,13 +12221,9 @@ int main(void) {
     sceVideoOutRegisterBuffers2(handle, 0, 0, vbuf, 2, &attr, 0, NULL);
 #endif
 
-    evo_bt("entering frame loop");
+    evo_bt("boot ok - frame loop");
     for (int frame = 0; running; frame++) {
         evo_net_poll();
-#ifdef EVO_BOOT_TRACE
-        if (frame == 0 || frame == 1 || frame == 30 || frame == 120)
-            evo_bt("frame %d (screen=%d)", frame, (int)screen);
-#endif
 #if PP_BACKEND_ENABLED
         /* Safe point: no buffer held — apply deferred 4K/1080 VO reconfig */
         pp_product_apply_pending_vo();

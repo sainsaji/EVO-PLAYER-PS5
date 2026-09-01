@@ -18,7 +18,9 @@
  * State is exposed read-only via the arrays below for the UI draw code.
  */
 
-#define RECENT_FILE_DB   "/data/evoplayer/evo_recent.txt"
+#include "evo_data_path.h"
+
+#define RECENT_FILE_DB   EVO_DATA_DIR "/evo_recent.txt"
 #define MAX_RECENT_FILES 25
 
 typedef struct {

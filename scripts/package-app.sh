@@ -203,9 +203,11 @@ else
     # add the native-app link-tail flags via EXTRA_CFLAGS.
     # EVO_BOOT_TRACE: system-notification breadcrumbs through main()'s init
     # (only channel visible before VideoOut). Drop once milestone 1 is signed.
+    # EVO_APP_MODULE: routes data paths to /download0/evoplayer and directory
+    # enumeration through getdents (opendir fails EPERM in the sandbox).
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
-        EXTRA_CFLAGS="${TFLAGS[*]} -DEVO_BOOT_TRACE=1" \
+        EXTRA_CFLAGS="${TFLAGS[*]} -DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
             tail -40 "${BUILD}/compile.log" | sed 's/^/  /'
