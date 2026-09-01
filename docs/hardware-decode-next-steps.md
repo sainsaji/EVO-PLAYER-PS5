@@ -913,14 +913,81 @@ useful:
 Either way it is answered by reading, which is the method that has produced
 every real finding in this effort and has never cost a console.
 
+### 6b.5 — Checked against Moonlight-ps4 (`decoder_orbis.c`) — no new lead, §9.1 already covers it
+
+Read 2026-08-21, no console, prompted by an external request to compare
+against `github.com/JaimeJimenezG/Moonlight-ps4` (`decoder_orbis.c` /
+`renderer_videoout.c` at `61427a2`). **This session initially misread the
+comparison as a fresh, untested hypothesis and wrote it up as one. It is not
+fresh — it is the exact experiment §9.1 already ran, on 2026-08-11, and it
+kernel-panicked the console. Corrected here rather than silently fixed, per
+this document's own recording rule.**
+
+Moonlight's own comment gives the ordering it uses and why:
+
+    Present BEFORE CreateDecoder (validated stability) and BEFORE creating the
+    compute queue: if YCbCr hard-fails we left the queue alive and suspending
+    the app triggered CPU_FAULT_SUBMITDONE_TIMEOUT.
+
+§9.1 tried exactly this — open video out, then allocate the compute queue —
+from a research payload in the app slot. The video-out open itself half-worked
+(the real user was cleanly refused `0x80290001`; the `0xFF` system-user
+fallback returned `0x4E100000`, a positive value that is not a handle), and
+the very next call, `sceVideodec2AllocateComputeQueue`, **panicked the
+console** — a call that had succeeded in every prior run with no video-out
+handle open. §9.1's conclusion is explicit: **video out is unavailable to a
+payload, the Moonlight ordering hypothesis is closed, and any call that
+reaches a kernel driver directly needs sign-off before it goes in a payload
+again (rule 18).** Nothing found here overturns that. **Do not repeat this.**
+
+One distinction worth recording rather than acting on: EVO Player's own
+`pp_videoout.c` opens video out with a single, direct
+`sceVideoOutOpen(0xff, 0, 0, NULL)` call — no prior real-user attempt — and
+that works, every time the player runs; it is how every screenshot in this
+project exists. The panic in §9.1 followed a *different* sequence: real user
+first (clean refusal), *then* `0xFF` (garbage handle), *then* the compute
+queue call. Whether the panic was caused by having any video-out handle open
+at all, or specifically by proceeding with that garbage handle, was never
+isolated — and §9.1's own rule 3 is that this is exactly the kind of call
+that does not get re-tried on a hunch. **Nothing here changes the go/no-go
+below**; it is recorded so nobody reruns the identical experiment believing
+it to be new, and nobody mistakes EVO Player's own working VideoOut path for
+license to combine it with the decoder without the sign-off rule 18 already
+requires.
+
+**What Moonlight-ps4 does add, and neither point touches a kernel driver:**
+
+- Its compute-queue memory is ONION, matching this project's own reading of
+  the module's intent (mode 0 = onion for the work buffer). Its frame buffers
+  try ONION *first* and fall back to `WB_GARLIC` only if that mapping fails,
+  rather than assuming GARLIC outright — this project has always used GARLIC
+  for the frame pool and has not tried ONION there. Cheap to try, and
+  read-only until the point `Decode` is actually called.
+- Its AU buffer is deliberately multi-slot at pipeline depth > 1, because "the
+  Vdec worker may still be parsing the previous AU after Decode() returned" —
+  worth checking against `decodeframe_test` if depth is ever raised above 1.
+  Not relevant at the depth this project has tested so far.
+
+No arbitration calls, no title-id or entitlement checks, and no ioctl-level
+error handling beyond a retry-and-`Reset`-after-30-failures counter appear
+anywhere in `decoder_orbis.c` — consistent with, and mild further evidence
+for, this project's own conclusion that arbitration and entitlement are not
+the gate.
+
 ### Go / no-go
 
 - **6b.1 is done. It cost one probe and no risk, exactly as predicted.**
 - **6b.2 is withdrawn — it panics the console.** Do not run it, and do not
   rebuild `kdump`.
-- **6b.4 needs no console at all.** Do it next.
-- **6b.3 needs a person**, and it should wait for 6b.4 — there is no point
-  spending a kernel write while `Reset` is still unexplained.
+- **6b.4 is done. `Reset` is downstream of errno 5200, not a second blocker.**
+- **6b.5 found nothing new — the video-out-before-compute-queue idea is §9.1,
+  already closed by a panic.** Do not reopen it without a person explicitly
+  signing off per rule 18, and do not merge decode into EVO Player's
+  VideoOut-owning process on the strength of this comparison alone.
+- **6b.3 needs a person**, and is the only item left in this phase's plan.
+  There is no cheaper untested option standing between here and a kernel
+  write — the ONION-frame-pool try above is worth doing first since it is
+  free, but it is a memory-type change, not a new theory of errno 5200.
 
 ---
 
