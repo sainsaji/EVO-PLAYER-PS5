@@ -1,0 +1,1073 @@
+==> not in container - re-running via docker compose
+ Container evoplayer-ps5-dev-run-fa7e7631c371 Creating 
+ Container evoplayer-ps5-dev-run-fa7e7631c371 Created 
+  ok decodeframe_test.elf - ELF 64-bit LSB pie executable (494808 bytes)
+--- checking daemons
+  ok ftpsrv on 2121
+  ok websrv on 8080
+--- packaging decodeframe_test
+warning: no icon supplied - wrote a 1x1 placeholder to sce_sys/icon0.png
+warning: provide one with --icon, or put assets/icon0.png in the repo
+--- uploading to /data/homebrew/decodeframe_test/
+  uploaded eboot.elf                483 KiB
+  uploaded icon0.png                0 KiB
+  uploaded homebrew.js              0 KiB
+
+  ok installed as 'decodeframe_test'
+--- launching decodeframe_test (graphical app slot, timeout 120s)
+
+=== EVO Player decodeframe_test - Phase 6 ===
+firmware : 0x12700001
+pid      : 138
+stream   : 290608 bytes, 8 access units, 1920x1080 High L4.0
+feeding  : 8 AUs per attempt
+frame dump: off - pass "dump" to enable   AVCC retry: on
+
+AU 0, first 0x30 bytes as linked into this payload:
+  0000  00 00 00 01 09 10 00 00 00 01 67 64 00 28 ac b4  |..........gd.(..|
+  0010  03 c0 11 3f 2e 02 20 00 00 03 00 20 00 00 07 81  |...?.. .... ....|
+  0020  e3 06 54 00 00 00 01 68 ef 06 cb 22 c0 00 00 01  |..T....h..."....|
+load libSceIpmi.sprx                        modid=0x31 res=0x0
+load libSceVideoArbitration.sprx            modid=0x43 res=0x0
+load libSceResourceArbitrator.sprx          modid=0x45 res=0x0
+load libSceVdecCore.sprx                    modid=0x47 res=0x0
+load libSceVideoDecoderArbitration.sprx     modid=0x48 res=0x0
+load libSceVideodec2.sprx                   modid=0x49 res=0x0
+load libSceVdecwrap.sprx                    modid=0x4a res=0x0
+load libSceVdecShevc.sprx                   modid=0x4b res=0x0
+ERROR: Failed to get trap hanlder code
+**** Base Mode ****
+load libSceGnmDriver.sprx                   modid=0x4c res=0x0
+load libSceSysmodule.sprx                   modid=0x12 res=0x0
+load libSceAjm.sprx                         modid=0x4e res=0x0
+load libSceVdecSavc.sprx                    modid=0x4f res=0x0
+load libSceVdecSavc2.sprx                   modid=0x50 res=0x0
+
+--- user session, in the app slot ---
+  sceUserServiceInitialize      -> 0x00000000
+  sceUserServiceGetLoginUserIdList -> 0x00000000  ids 513995993 -1 -1 -1
+  sceUserServiceGetInitialUser  -> 0x80960006  user_id -1
+
+  *** THERE IS A USER SESSION HERE ***
+  findings.md section 2 says otherwise, and it was measured in
+  SceSpZeroConf under deploy.sh. Correct that entry.
+
+libSceVideoDecoderArbitration base 0x800590000
+
+--- arbitration: GOT slots, read before anything is called ---
+    An unbound lazy import still points into its own PLT push/jmp
+    sequence. Calling one blocks forever - it does not fault and it
+    does not return. Rule 15. This is why runs 9 and 10 hung.
+
+  s2+0x00 = 0x00000008005900e0  UNBOUND   (unnamed)
+  s2+0x10 = 0x00000008005900d0  UNBOUND   (unnamed)
+  s2+0x48 = 0x00000008004a0250  bound     <-- Initialize's tail call. THIS ONE DECIDES.
+  s2+0x58 = 0x00000008004a0490  bound     (unnamed)
+  s2+0x70 = 0x00000008004a0500  bound     (unnamed)
+
+  *** THE SLOT IS BOUND. *** One of the modules loaded ahead of
+  libSceVideoDecoderArbitration this run supplied it. Initialize
+  is safe to call, and the hang of runs 9 and 10 is explained and
+  fixed.
+
+--- arbitration ---
+    Never called by this project before. AvPlayer calls Initialize
+    and Enable before it decodes, and the Phase 5 discriminator table
+    predicted that "creates but will not decode" is what an
+    unarbitrated client looks like. This is that experiment.
+
+  sceVideoDecoderArbitrationInitialize   PO9tOKyviYI  +0xf0     ok
+  sceVideoDecoderArbitrationEnable       jnvPWZ140Sw  +0x1e0    ok
+  sceVideoDecoderArbitrationAcceptEvent  XEUrIeCJiVs  +0x2a0    ok
+  sceVideoDecoderArbitrationEnableSuspendMode lV5XniySQD8  +0x270    ok
+  control: thisSize 0x10      -> 0x81570001 expect 0x81570001  ok
+  control: priority 768       -> 0x81570004 expect 0x81570004  ok
+  control: count 0            -> 0x81570001 expect 0x81570001  ok
+  control: NULL params        -> 0x81570001 expect 0x81570001  ok
+  control: Enable(non-NULL,cb)-> 0x81570001 expect 0x81570001  ok
+  control: Enable(NULL,NULL)  -> 0x81570001 expect 0x81570001  ok
+  control: AcceptEvent(2)     -> 0x81570001 expect 0x81570001  ok
+  Initialize(priority 700, +0x10 = 1) -> 0x81570001 bad argument
+  Initialize(priority 700, +0x10 = 4) -> 0x81570002 already initialised / already enabled
+  Enable(NULL, callback) -> 0x00000000 OK
+  AcceptEvent(0) -> 0x00000000 OK
+  AcceptEvent(1) -> 0x00000000 OK
+  arbitration is up; callbacks seen so far: 0
+
+libSceVideodec2 base 0x8005a0000
+  sceVideodec2QueryDecoderMemoryInfo     qqMCwlULR+E  +0xa10    ok
+  sceVideodec2CreateDecoder              CNNRoRYd8XI  +0xba0    ok
+  sceVideodec2DeleteDecoder              jwImxXRGSKA  +0x3220   ok
+  sceVideodec2Decode                     852F5+q6+iM  +0x1290   ok
+  sceVideodec2Flush                      l1hXwscLuCY  +0x1bf0   ok
+  sceVideodec2Reset                      wJXikG6QFN8  +0x30f0   ok
+  sceVideodec2GetPictureInfo             NtXRa3dRzU0  +0x2120   ok
+  sceVideodec2MapDirectMemory            hIIZXUsMeI8  +0x340    ok
+  sceVideodec2QueryComputeMemoryInfo     RnDibcGCPKw  +0x550    ok
+  sceVideodec2AllocateComputeQueue       eD+X2SmxUt4  +0x660    ok
+  sceVideodec2ReleaseComputeQueue        UvtA3FAiF4Y  +0x970    ok
+
+  the picture-info entry points - all four reach the body at +0x2130:
+  sceVideodec2GetAvcPictureInfo          kjrLbcyhEiw  +0x30c0   ok
+  sceVideodec2GetHevcPictureInfo         7M+1UFqWOAI  +0x30e0   ok
+  sceVideodec2GetVp9PictureInfo          69fVNDtk2Zk  +0x30d0   ok
+    GetPictureInfo and GetAvcPictureInfo are byte-identical thunks;
+    so are GetHevcPictureInfo and GetVp9PictureInfo. The body
+    dispatches on outputInfo->codecType, not on the name called.
+  sceVideodec2MapMemory                  2C6StOEz+nM  +0xe0     ok
+    ^ resolved but never called - its GOT slot (s2 +0x60) is unbound.
+      MapDirectMemory (+0x340) is the bound route to the same layer.
+
+--- control: the Phase 5 query, AVC 1080p dpb16 depth4 ---
+  rc=0x00000000  frame pool 86507776  (Phase 5: 86507776)  MATCH
+
+--- control: mapMemorySize predicted vs measured ---
+    predicted = align(w,256) * align(h,N) * bytes * 3/2 + 5*1024
+    with N = 16 for H.264 and 1 for HEVC, bytes = 2 for Main10.
+    If every row matches, the decoder's output is NV12 or P010 at a
+    256-aligned stride and Phase 7 starts from a known layout.
+
+  configuration                         predicted     measured  
+  AVC  High   L4.0  1280x720              1387520      1386496  *** DIFFERS ***
+  AVC  High   L5.1  1920x1080             3347456      3346432  *** DIFFERS ***
+  AVC  High   L5.1  3840x2160            12446720     12445696  *** DIFFERS ***
+  HEVC Main   L4.0  1920x1080             3322880      3321856  *** DIFFERS ***
+  HEVC Main10 L4.0  1920x1080             6640640      6639616  *** DIFFERS ***
+  HEVC Main   L5.1  3840x2160            12446720     12445696  *** DIFFERS ***
+  HEVC Main10 L5.1  3840x2160            24888320     24887296  *** DIFFERS ***
+
+--- compute queue ---
+  QueryComputeMemoryInfo -> 0x00000000  size 4805120 (4.58 MiB)
+  queue memory 4805120 B WB_ONION -> 0x00000000 virt 2000a0000
+  AllocateComputeQueue(pipe 0, queue 0) -> 0x00000000 handle 200330500
+  Elevating process credentials: authid 0x4800000000000027 -> 0x4900000000000002, caps all-FF
+
+===========================================================
+=== decode attempt: Annex-B, class 0xb6c8, depth 2 (Moonlight's)
+===========================================================
+  resourceType 0xb6c8  pipelineDepth 2  framing Annex-B (start codes)  feeding 8 AUs
+  QueryDecoderMemoryInfo -> 0x00000000 OK
+    work 3539456  frame pool 27590912  extra 0  map 3346432
+    mapMemorySize predicted 3347456, measured 3346432  *** the frame arithmetic is WRONG ***
+  work      3539456 B WB_ONION  -> 0x00000000 virt 200540000
+  pool     27590912 B WC_GARLIC -> 0x00000000 virt 2008c0000
+  frame0    3346432 B WC_GARLIC -> 0x00000000 virt 202320000 phys 0x22a0000  (256-aligned: yes)
+  frame1    3346432 B WC_GARLIC -> 0x00000000 virt 202660000 phys 0x25e0000  (256-aligned: yes)
+  frame2    3346432 B WC_GARLIC -> 0x00000000 virt 2029a0000 phys 0x2920000  (256-aligned: yes)
+  frame3    3346432 B WC_GARLIC -> 0x00000000 virt 202ce0000 phys 0x2c60000  (256-aligned: yes)
+  input     1048576 B WB_ONION  -> 0x00000000 virt 203020000 phys 0x2fa0000
+
+  sceVideodec2CreateDecoder -> 0x00000000 OK decoder=200540000
+    +0x68 cookie 0xa824d9799010a455 as read
+
+--- MapDirectMemory: validation controls ---
+[SCEVIDEODEC2@A01A017D:00000000]
+  decoder = &junk        -> 0x811d0103  expect 0x811d0103  ok
+[SCEVIDEODEC2@A01A0182:00000000]
+  info NULL              -> 0x811d0102  expect 0x811d0102  ok
+[SCEVIDEODEC2@A01A0187:00000000]
+  info size 0x18         -> 0x811d0101  expect 0x811d0101  ok
+[SCEVIDEODEC2@A01A018C:00000000]
+  size 0                 -> 0x811d0104  expect 0x811d0104  ok
+
+--- MapDirectMemory: registering 4 output buffers ---
+    size 3358720 (mapMemorySize 3346432 rounded up to 16 KiB)
+    info+0x18 = the direct-memory physical offset, which is
+    what keeps the blocks from colliding in the second space.
+
+  block 0  addr 202320000 phys 0x0022a0000 len 3358720 -> 0x00000000 ACCEPTED
+  block 1  addr 202660000 phys 0x0025e0000 len 3358720 -> 0x00000000 ACCEPTED
+  block 2  addr 2029a0000 phys 0x002920000 len 3358720 -> 0x00000000 ACCEPTED
+  block 3  addr 202ce0000 phys 0x002c60000 len 3358720 -> 0x00000000 ACCEPTED
+[VDECCORE@B0A1097F:00000000]
+[SCEVDECCORE@A01D0131:00000033]
+[SCEVIDEODEC2@A01A01A4:80C00001]
+
+  control: unregistered CPU address carrying block 0's
+           physical offset -> 0x811d010c  refused, as predicted
+  input  addr 203020000 phys 0x002fa0000 len    1048576 -> 0x00000000 ACCEPTED
+  work   addr 200540000 phys 0x0004c0000 len    3670016 -> 0x00000000 ACCEPTED
+  pool   addr 2008c0000 phys 0x000840000 len   27656192 -> 0x00000000 ACCEPTED
+
+  4 of 4 output buffers registered, input registered
+
+--- Decode: validation controls ---
+    None of these reaches sceVdecCoreSetDecodeInput, so none touches
+    the hardware. The "outputInfo size 0x30" row has no predicted
+    code on purpose: Decode accepts 0x30 and 0x38 alike, so it should
+    get PAST validation and behave like a real call. It is listed to
+    record which, not to assert a value.
+[SCEVIDEODEC2@A01A07D8:00000000]
+  all-NULL                 -> 0x811d0102  expect 0x811d0102  ok
+[SCEVIDEODEC2@A01A07D4:00000000]
+  decoder = &junk          -> 0x811d0103  expect 0x811d0103  ok
+[SCEVIDEODEC2@A01A07F9:00000000]
+  inputData size 0x28      -> 0x811d0101  expect 0x811d0101  ok
+[SCEVIDEODEC2@A01A07F9:00000000]
+  frameBuffer size 0x18    -> 0x811d0101  expect 0x811d0101  ok
+[SCEVIDEODEC2@A01A07FF:00000000]
+  outputInfo size 0x28     -> 0x811d0101  expect 0x811d0101  ok
+  outputInfo size 0x30     -> not run; 0x30 is accepted, so this would be a real
+                           decode and the controls must stay inert
+[SCEVIDEODEC2@A01A080A:00000000]
+  frameBuffer NULL         -> 0x811d0107  expect 0x811d0107  ok
+[SCEVIDEODEC2@A01A0813:02320001]
+  frameBuffer +1           -> 0x811d0108  expect 0x811d0108  ok
+[SCEVIDEODEC2@A01A0818:00000000]
+  frameBufferSize 0        -> 0x811d0106  expect 0x811d0106  ok
+[SCEVIDEODEC2@A01A0820:00000000]
+  auData NULL              -> 0x811d010e  expect 0x811d010e  ok
+[SCEVIDEODEC2@A01A0825:00000000]
+  auSize 0                 -> 0x811d010d  expect 0x811d010d  ok
+
+--- GetPictureInfo: validation controls ---
+    These validate purely from the OutputInfo the caller supplies, so
+    they need no decoded picture and run before the hardware is used.
+    Every one of them returns before the module dereferences the
+    metadata pointer it computes - the picture-info size check comes
+    first - so none of them reads uninitialised memory.
+[SCEVIDEODEC2@A01A09BD:00000000]
+  pic0 NULL                -> 0x811d0102  expect 0x811d0102  ok
+[SCEVIDEODEC2@A01A09D9:00000000]
+  outputInfo size 0x28     -> 0x811d0101  expect 0x811d0101  ok
+[SCEVIDEODEC2@A01A09E5:00000000]
+  frameBuffer NULL         -> 0x811d0107  expect 0x811d0107  ok
+[SCEVIDEODEC2@A01A09E0:02320001]
+  frameBuffer +1           -> 0x811d0108  expect 0x811d0108  ok
+[SCEVIDEODEC2@A01A09EE:00000000]
+  pictureCount 0           -> 0x811d010f  expect 0x811d010f  ok
+[SCEVIDEODEC2@A01A09EE:00000003]
+  pictureCount 3           -> 0x811d010f  expect 0x811d010f  ok
+[SCEVIDEODEC2@A01A09F3:00000400]
+  frameBufferSize 1024     -> 0x811d0106  expect 0x811d0106  ok
+[SCEVIDEODEC2@A01A0A52:00000000]
+  avc pictureInfo 0x70     -> 0x811d0101  expect 0x811d0101  ok
+
+--- feeding the decoder ---
+    Everything above this line is already in the log. If the run
+    stops here, sceVdecCoreSyncDecode blocked on the hardware and
+    that is itself the finding.
+
+
+  --- AU 0: 50477 bytes, IDR, pts 1000, into block 0 ---
+[VDECCORE@D0A10254:00001450]
+[VDECCORE@C0B504C1:00000001]
+[VDECCORE@B0A10DC6:00000000]
+[SCEVDECCORE@A01D07A8:00000004]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 0)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202320000 size 3358720, isAccepted 0)
+
+--- locating the GpDec device object the submit operates on ---
+    decoder 200540000  ->  VdecCore object 200580000
+    A candidate must satisfy all three: the mode at +0x2c0, an index
+    at +0x1d08 that the jump table maps TO that mode, and an fd at
+    +0x1d68 this process really has open as a character device.
+
+  pass 1: index 5 / mode 7 -> ioctl command 23 (the known route)
+  candidate in work memory at +0x1600f0  (addr 2006a00f0): index 5, mode 7, fd 16 (open chardev)
+
+--- open file descriptors in this process ---
+    The decoder device is opened by libSceVdecCore at +0x2c470, which
+    also sets the event-queue id. If no character device is open here,
+    the submit had no device to talk to and errno 5200 is explained.
+
+  fd   0  mode 0020666  rdev 0x27  size 0  CHARACTER DEVICE
+  fd   1  mode 0140666  rdev 0x0  size 0  socket
+  fd   2  mode 0140666  rdev 0x0  size 0  socket
+  fd   3  mode 0020600  rdev 0x4  size 0  CHARACTER DEVICE
+  fd   4  mode 0020666  rdev 0x17  size 0  CHARACTER DEVICE
+  fd   5  mode 0140666  rdev 0x0  size 0  socket
+  fd   6  mode 0140666  rdev 0x0  size 0  socket
+  fd   7  mode 0010000  rdev 0x0  size 16  pipe
+  fd   8  mode 0010000  rdev 0x0  size 0  pipe
+  fd   9  mode 0100777  rdev 0xffffffff  size 13166  regular file
+  fd  10  mode 0020666  rdev 0x6b  size 0  CHARACTER DEVICE
+  fd  11  mode 0020777  rdev 0x62  size 0  CHARACTER DEVICE
+  fd  12  mode 0020777  rdev 0x63  size 0  CHARACTER DEVICE
+  fd  13  mode 0020777  rdev 0x64  size 0  CHARACTER DEVICE
+  fd  14  mode 0130000  rdev 0x0  size 0  other
+  fd  15  mode 0010000  rdev 0x0  size 0  pipe
+  fd  16  mode 0020666  rdev 0x80  size 0  CHARACTER DEVICE
+  fd  17  mode 0010000  rdev 0x0  size 0  pipe
+
+--- the job that was submitted ---
+    obj+0x1d08 mode index  = 5  -> mode 7 -> ioctl command 23
+    obj+0x1d18/0x1d1c/0x1d20 = 0x00000000 0x00000000 0x00000100  (set together
+                               with the mode index by the codec)
+    obj+0x1d4c/0x1d54          = 0x00000000 0x00e1ac00
+    obj+0x02c0 mode        = 7
+    obj+0x1d68 fd          = 16
+    obj+0x1d6c event queue = 0x00000011
+    obj+0x1d70 mystery     = 0x00000001   *** NON-ZERO - something DID fill it in ***
+    obj+0x1d50 ring index  = 0  -> slot 0 of 5
+    obj+0x1898 job.command = 0
+    obj+0x18a0 job.cmdBuf  = 0x2008d3f00
+    obj+0x18a8 job.flag    = 0
+
+    the command ring at obj+0x58, 5 slots of 0x80:
+      slot 0:   <-- the slot this submit used
+        0000  00 3f 8d 00 02 00 00 00 00 4f 8d 00 02 00 00 00  |.?.......O......|
+        0010  00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00  |................|
+        0020  01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 53 8d 00 02 00 00 00  |.........S......|
+      slot 1:
+        0000  00 5b 8d 00 02 00 00 00 00 6b 8d 00 02 00 00 00  |.[.......k......|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 6f 8d 00 02 00 00 00  |.........o......|
+      slot 2:
+        0000  00 77 8d 00 02 00 00 00 00 87 8d 00 02 00 00 00  |.w..............|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 8b 8d 00 02 00 00 00  |................|
+      slot 3:
+        0000  00 93 8d 00 02 00 00 00 00 a3 8d 00 02 00 00 00  |................|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 a7 8d 00 02 00 00 00  |................|
+      slot 4:
+        0000  00 af 8d 00 02 00 00 00 00 bf 8d 00 02 00 00 00  |................|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 ac e1 00 02 00 00 00  |................|
+        0030  00 00 ff 00 00 00 00 00 00 01 00 00 00 00 00 00  |................|
+        0040  00 00 8e 00 02 00 00 00 00 ac 53 00 00 00 00 00  |..........S.....|
+        0050  00 00 01 00 07 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 07 00 00 00 00 00 00 00  |................|
+        0070  80 07 00 00 40 04 00 00 00 00 00 00 00 00 ff 00  |....@...........|
+
+    the command buffer the driver rejected (0x100 bytes):
+        0000  e8 0d 00 00 00 00 00 00 00 ac e1 00 00 00 00 00  |................|
+        0010  07 00 00 00 00 00 00 00 00 00 00 00 80 07 00 00  |................|
+        0020  40 04 00 00 00 00 00 00 00 00 ff 00 00 00 00 00  |@...............|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0080  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0090  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00a0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00b0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00c0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00d0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00e0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00f0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+
+    a window around the object head, for orientation:
+        0000  00 ac e1 00 02 00 00 00 00 00 ff 00 00 00 00 00  |................|
+        0010  00 01 00 00 00 00 00 00 00 00 8e 00 02 00 00 00  |................|
+        0020  00 ac 53 00 00 00 00 00 00 00 01 00 07 00 00 00  |..S.............|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  07 00 00 00 00 00 00 00 80 07 00 00 40 04 00 00  |............@...|
+        0050  00 00 00 00 00 00 ff 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 08 00 00 02 00 00 00 02 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 05 00 00 00 00 00 00  |................|
+
+    and around the submit fields at +0x1d40:
+        0000  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0010  00 00 00 00 00 ac e1 00 01 00 00 00 00 08 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 10 00 00 00 11 00 00 00  |................|
+        0030  01 00 00 00 00 00 00 00 10 00 00 00 11 00 00 00  |................|
+        0040  00 ac e1 00 02 00 00 00 00 00 ff 00 00 00 00 00  |................|
+        0050  00 01 00 00 00 00 00 00 00 00 8e 00 02 00 00 00  |................|
+    [6b.1] after AU 0       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+    [6b.1] obj+0x1448 baseline - the 0x204-byte memcpy that
+           accompanies a write of 1 to the selector lands here:
+           0000  a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5  |................|
+           0010  a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5  |................|
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 0 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+
+--- why Reset fails: the GpDec object at [vdeccore+0x140] ---
+    [vdeccore+0x140] = 2005c0000
+    the submit's device object:         2006a00f0  (a different object, as the [[gpdec+0x38]]+0x18 chain implies)
+
+    the 16 bytes GpDec memcmps against its magic (line 0x164C):
+        0000  bb 91 27 b0 d1 3a 4f 07 97 4b 42 19 43 bb 99 7c  |..'..:O..KB.C..||
+
+    gpdec+0x40 state = 5  (line 0xC22 refuses states 0, 4 and 5)
+    gpdec+0x20 lock  = 0x000000088002f720  (line 0x1653 is this lock failing)
+
+    If those 16 bytes look like a signature - printable, or stable
+    across runs - the magic check passes and the refusal is the lock
+    or the state. If they look like zeros or heap debris, line 0x164C
+    is the answer and the pointer at +0x140 is stale.
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 1: 36200 bytes, P, pts 1001, into block 1 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 1)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202660000 size 3358720, isAccepted 1)
+    [6b.1] after AU 1       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 1 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 2: 36012 bytes, P, pts 1002, into block 2 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 2)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 2029a0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 2       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 2 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 3: 35010 bytes, P, pts 1003, into block 3 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 3)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 3       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 3 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 4: 34557 bytes, P, pts 1004, into block 0 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 4)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202320000 size 3358720, isAccepted 1)
+    [6b.1] after AU 4       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 4 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 5: 34377 bytes, P, pts 1005, into block 1 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 5)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202660000 size 3358720, isAccepted 1)
+    [6b.1] after AU 5       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 5 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 6: 33783 bytes, P, pts 1006, into block 2 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 6)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 2029a0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 6       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 6 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 7: 30192 bytes, P, pts 1007, into block 3 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 7)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 7       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 7 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  [6b.1] fed 8 of the 8 access units asked for; the submit selector never moved off 5 (ioctl command 23).
+
+--- flush: draining whatever the pipeline still holds ---
+    Flush latches decoder+0x50, after which every Decode returns
+    0x811D0100 until Reset. It goes last for that reason.
+  Flush(0)               rc=0x00000000 OK
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 0)
+[VDECCORE@D0A10254:000013EF]
+[VDECCORE@D0A00A54:00000000]
+
+  sceVideodec2DeleteDecoder -> 0x00000000 OK
+  buffers released; 0 pictures reported by this attempt
+  Elevating process credentials: authid 0x4800000000000027 -> 0x4900000000000002, caps all-FF
+
+===========================================================
+=== decode attempt: Annex-B, class 0xb6c8, depth 1
+===========================================================
+  resourceType 0xb6c8  pipelineDepth 1  framing Annex-B (start codes)  feeding 8 AUs
+  QueryDecoderMemoryInfo -> 0x00000000 OK
+    work 3539456  frame pool 27590912  extra 0  map 3346432
+    mapMemorySize predicted 3347456, measured 3346432  *** the frame arithmetic is WRONG ***
+  work      3539456 B WB_ONION  -> 0x00000000 virt 200540000
+  pool     27590912 B WC_GARLIC -> 0x00000000 virt 2008c0000
+  frame0    3346432 B WC_GARLIC -> 0x00000000 virt 202320000 phys 0x22a0000  (256-aligned: yes)
+  frame1    3346432 B WC_GARLIC -> 0x00000000 virt 202660000 phys 0x25e0000  (256-aligned: yes)
+  frame2    3346432 B WC_GARLIC -> 0x00000000 virt 2029a0000 phys 0x2920000  (256-aligned: yes)
+  frame3    3346432 B WC_GARLIC -> 0x00000000 virt 202ce0000 phys 0x2c60000  (256-aligned: yes)
+  input     1048576 B WB_ONION  -> 0x00000000 virt 203020000 phys 0x2fa0000
+
+  sceVideodec2CreateDecoder -> 0x00000000 OK decoder=200540000
+    +0x68 cookie 0xa824d9799010a455 as read
+
+--- MapDirectMemory: registering 4 output buffers ---
+    size 3358720 (mapMemorySize 3346432 rounded up to 16 KiB)
+    info+0x18 = the direct-memory physical offset, which is
+    what keeps the blocks from colliding in the second space.
+
+  block 0  addr 202320000 phys 0x0022a0000 len 3358720 -> 0x00000000 ACCEPTED
+  block 1  addr 202660000 phys 0x0025e0000 len 3358720 -> 0x00000000 ACCEPTED
+  block 2  addr 2029a0000 phys 0x002920000 len 3358720 -> 0x00000000 ACCEPTED
+  block 3  addr 202ce0000 phys 0x002c60000 len 3358720 -> 0x00000000 ACCEPTED
+[VDECCORE@B0A1097F:00000000]
+[SCEVDECCORE@A01D0131:00000033]
+[SCEVIDEODEC2@A01A01A4:80C00001]
+
+  control: unregistered CPU address carrying block 0's
+           physical offset -> 0x811d010c  refused, as predicted
+  input  addr 203020000 phys 0x002fa0000 len    1048576 -> 0x00000000 ACCEPTED
+  work   addr 200540000 phys 0x0004c0000 len    3670016 -> 0x00000000 ACCEPTED
+  pool   addr 2008c0000 phys 0x000840000 len   27656192 -> 0x00000000 ACCEPTED
+
+  4 of 4 output buffers registered, input registered
+
+--- feeding the decoder ---
+    Everything above this line is already in the log. If the run
+    stops here, sceVdecCoreSyncDecode blocked on the hardware and
+    that is itself the finding.
+
+
+  --- AU 0: 50477 bytes, IDR, pts 1000, into block 0 ---
+[VDECCORE@D0A10254:00001450]
+[VDECCORE@C0B504C1:00000001]
+[VDECCORE@B0A10DC6:00000000]
+[SCEVDECCORE@A01D07A8:00000004]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 0)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202320000 size 3358720, isAccepted 1)
+
+--- locating the GpDec device object the submit operates on ---
+    decoder 200540000  ->  VdecCore object 200580000
+    A candidate must satisfy all three: the mode at +0x2c0, an index
+    at +0x1d08 that the jump table maps TO that mode, and an fd at
+    +0x1d68 this process really has open as a character device.
+
+  pass 1: index 5 / mode 7 -> ioctl command 23 (the known route)
+  candidate in work memory at +0x1600f0  (addr 2006a00f0): index 5, mode 7, fd 16 (open chardev)
+
+--- open file descriptors in this process ---
+    The decoder device is opened by libSceVdecCore at +0x2c470, which
+    also sets the event-queue id. If no character device is open here,
+    the submit had no device to talk to and errno 5200 is explained.
+
+  fd   0  mode 0020666  rdev 0x27  size 0  CHARACTER DEVICE
+  fd   1  mode 0140666  rdev 0x0  size 0  socket
+  fd   2  mode 0140666  rdev 0x0  size 0  socket
+  fd   3  mode 0020600  rdev 0x4  size 0  CHARACTER DEVICE
+  fd   4  mode 0020666  rdev 0x17  size 0  CHARACTER DEVICE
+  fd   5  mode 0140666  rdev 0x0  size 0  socket
+  fd   6  mode 0140666  rdev 0x0  size 0  socket
+  fd   7  mode 0010000  rdev 0x0  size 16  pipe
+  fd   8  mode 0010000  rdev 0x0  size 0  pipe
+  fd   9  mode 0100777  rdev 0xffffffff  size 35892  regular file
+  fd  10  mode 0020666  rdev 0x6b  size 0  CHARACTER DEVICE
+  fd  11  mode 0020777  rdev 0x62  size 0  CHARACTER DEVICE
+  fd  12  mode 0020777  rdev 0x63  size 0  CHARACTER DEVICE
+  fd  13  mode 0020777  rdev 0x64  size 0  CHARACTER DEVICE
+  fd  14  mode 0130000  rdev 0x0  size 0  other
+  fd  15  mode 0010000  rdev 0x0  size 0  pipe
+  fd  16  mode 0020666  rdev 0x80  size 0  CHARACTER DEVICE
+  fd  17  mode 0010000  rdev 0x0  size 0  pipe
+
+--- the job that was submitted ---
+    obj+0x1d08 mode index  = 5  -> mode 7 -> ioctl command 23
+    obj+0x1d18/0x1d1c/0x1d20 = 0x00000000 0x00000000 0x00000100  (set together
+                               with the mode index by the codec)
+    obj+0x1d4c/0x1d54          = 0x00000000 0x00e1ac00
+    obj+0x02c0 mode        = 7
+    obj+0x1d68 fd          = 16
+    obj+0x1d6c event queue = 0x00000011
+    obj+0x1d70 mystery     = 0x00000001   *** NON-ZERO - something DID fill it in ***
+    obj+0x1d50 ring index  = 0  -> slot 0 of 5
+    obj+0x1898 job.command = 0
+    obj+0x18a0 job.cmdBuf  = 0x2008d3f00
+    obj+0x18a8 job.flag    = 0
+
+    the command ring at obj+0x58, 5 slots of 0x80:
+      slot 0:   <-- the slot this submit used
+        0000  00 3f 8d 00 02 00 00 00 00 4f 8d 00 02 00 00 00  |.?.......O......|
+        0010  00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00  |................|
+        0020  01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 53 8d 00 02 00 00 00  |.........S......|
+      slot 1:
+        0000  00 5b 8d 00 02 00 00 00 00 6b 8d 00 02 00 00 00  |.[.......k......|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 6f 8d 00 02 00 00 00  |.........o......|
+      slot 2:
+        0000  00 77 8d 00 02 00 00 00 00 87 8d 00 02 00 00 00  |.w..............|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 8b 8d 00 02 00 00 00  |................|
+      slot 3:
+        0000  00 93 8d 00 02 00 00 00 00 a3 8d 00 02 00 00 00  |................|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00  |................|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 a7 8d 00 02 00 00 00  |................|
+      slot 4:
+        0000  00 af 8d 00 02 00 00 00 00 bf 8d 00 02 00 00 00  |................|
+        0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 00 ac e1 00 02 00 00 00  |................|
+        0030  00 00 ff 00 00 00 00 00 00 01 00 00 00 00 00 00  |................|
+        0040  00 00 8e 00 02 00 00 00 00 ac 53 00 00 00 00 00  |..........S.....|
+        0050  00 00 01 00 07 00 00 00 e8 0d 00 00 02 00 00 00  |................|
+        0060  00 ac e1 00 00 00 00 00 07 00 00 00 00 00 00 00  |................|
+        0070  80 07 00 00 40 04 00 00 00 00 00 00 00 00 ff 00  |....@...........|
+
+    the command buffer the driver rejected (0x100 bytes):
+        0000  e8 0d 00 00 00 00 00 00 00 ac e1 00 00 00 00 00  |................|
+        0010  07 00 00 00 00 00 00 00 00 00 00 00 80 07 00 00  |................|
+        0020  40 04 00 00 00 00 00 00 00 00 ff 00 00 00 00 00  |@...............|
+        0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0050  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0080  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0090  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00a0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00b0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00c0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00d0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00e0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        00f0  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+
+    a window around the object head, for orientation:
+        0000  00 ac e1 00 02 00 00 00 00 00 ff 00 00 00 00 00  |................|
+        0010  00 01 00 00 00 00 00 00 00 00 8e 00 02 00 00 00  |................|
+        0020  00 ac 53 00 00 00 00 00 00 00 01 00 07 00 00 00  |..S.............|
+        0030  e8 0d 00 00 02 00 00 00 00 ac e1 00 00 00 00 00  |................|
+        0040  07 00 00 00 00 00 00 00 80 07 00 00 40 04 00 00  |............@...|
+        0050  00 00 00 00 00 00 ff 00 00 00 00 00 00 00 00 00  |................|
+        0060  00 00 00 00 00 08 00 00 02 00 00 00 02 00 00 00  |................|
+        0070  00 00 00 00 00 00 00 00 00 05 00 00 00 00 00 00  |................|
+
+    and around the submit fields at +0x1d40:
+        0000  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+        0010  00 00 00 00 00 ac e1 00 01 00 00 00 00 08 00 00  |................|
+        0020  00 00 00 00 00 00 00 00 10 00 00 00 11 00 00 00  |................|
+        0030  01 00 00 00 00 00 00 00 10 00 00 00 11 00 00 00  |................|
+        0040  00 ac e1 00 02 00 00 00 00 00 ff 00 00 00 00 00  |................|
+        0050  00 01 00 00 00 00 00 00 00 00 8e 00 02 00 00 00  |................|
+    [6b.1] after AU 0       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+    [6b.1] obj+0x1448 baseline - the 0x204-byte memcpy that
+           accompanies a write of 1 to the selector lands here:
+           0000  a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5  |................|
+           0010  a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5  |................|
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 0 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+
+--- why Reset fails: the GpDec object at [vdeccore+0x140] ---
+    [vdeccore+0x140] = 2005c0000
+    the submit's device object:         2006a00f0  (a different object, as the [[gpdec+0x38]]+0x18 chain implies)
+
+    the 16 bytes GpDec memcmps against its magic (line 0x164C):
+        0000  bb 91 27 b0 d1 3a 4f 07 97 4b 42 19 43 bb 99 7c  |..'..:O..KB.C..||
+
+    gpdec+0x40 state = 5  (line 0xC22 refuses states 0, 4 and 5)
+    gpdec+0x20 lock  = 0x000000088002f720  (line 0x1653 is this lock failing)
+
+    If those 16 bytes look like a signature - printable, or stable
+    across runs - the magic check passes and the refusal is the lock
+    or the state. If they look like zeros or heap debris, line 0x164C
+    is the answer and the pointer at +0x140 is stale.
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 1: 36200 bytes, P, pts 1001, into block 1 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 1)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202660000 size 3358720, isAccepted 1)
+    [6b.1] after AU 1       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 1 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 2: 36012 bytes, P, pts 1002, into block 2 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 2)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 2029a0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 2       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 2 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 3: 35010 bytes, P, pts 1003, into block 3 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 3)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 3       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 3 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 4: 34557 bytes, P, pts 1004, into block 0 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 4)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202320000 size 3358720, isAccepted 1)
+    [6b.1] after AU 4       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 4 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 5: 34377 bytes, P, pts 1005, into block 1 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 5)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202660000 size 3358720, isAccepted 1)
+    [6b.1] after AU 5       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 5 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 6: 33783 bytes, P, pts 1006, into block 2 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 6)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 2029a0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 6       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 6 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  --- AU 7: 30192 bytes, P, pts 1007, into block 3 ---
+[VDECCORE@B0A10C22:00000005]
+[SCEVDECCORE@A01D07A8:00000002]
+[SCEVIDEODEC2@A01A07A7:80C00001]
+  Decode(AU 7)           rc=0x811d0111 internal lock/unlock or unexpected VdecCore code
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 1)
+    [6b.1] after AU 7       obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+[VDECCORE@B0A11684:00000005]
+[SCEVDECCORE@A01D0649:00000002]
+    [6b.1] AU 7 refused; sceVideodec2Reset -> 0x811d0111 internal lock/unlock or unexpected VdecCore code
+    [6b.1] Reset did NOT clear the latch. The next AU is
+           expected to be refused in software with
+           0x811D0300/0304 without reaching VdecCore -
+           and if it is refused with something else, that
+           is worth more than this experiment was.
+           Feeding it anyway: the cost is one log line.
+    [6b.1] after Reset      obj+0x1d08 = 5 -> mode 7 -> ioctl command 23
+
+  [6b.1] fed 8 of the 8 access units asked for; the submit selector never moved off 5 (ioctl command 23).
+
+--- flush: draining whatever the pipeline still holds ---
+    Flush latches decoder+0x50, after which every Decode returns
+    0x811D0100 until Reset. It goes last for that reason.
+  Flush(0)               rc=0x00000000 OK
+    outputInfo raw:
+      0000  38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |8...............|
+      0010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|
+      0030  00 00 00 00 00 00 00 00  |........|
+    isValid 0  isErrorFrame 0  pictureCount 0  streamState 0
+    codecType 0x0 (none)  pts 0x0  word18 0x0  word30 0x0  word34 0x0
+    frameBuffer 0  size 0  (our buffer 202ce0000 size 3358720, isAccepted 0)
+[VDECCORE@D0A10254:000013EF]
+[VDECCORE@D0A00A54:00000000]
+
+  sceVideodec2DeleteDecoder -> 0x00000000 OK
+  buffers released; 0 pictures reported by this attempt
+
+ReleaseComputeQueue -> 0x00000000
+
+=== summary ===
+  Phase 5 control re-measured : MATCH
+  compute queue               : allocated
+  arbitration import slot     : BOUND - the modules loaded first supplied it
+  arbitration                 : initialised and enabled
+  pictures, Annex-B framing   : 0
+  pictures, AVCC framing      : 0
+  pictures, arbitrated retry  : 0
+
+  Reading the refusal:
+    0x811D0101/0102/0106/0107/0108/010D/010E -> argument shape.
+               Compare against the controls above; if a control
+               that should have failed did not, the struct
+               layout read is wrong.
+    0x811D0300/0304 -> the decoder latched an error state. That
+               is the layer below rejecting the bitstream, which
+               points at framing rather than at the API.
+    0x811D0100 after a Flush -> expected; the flush latch at
+               decoder+0x50 is one-way until Reset.
+    rc=0 with isValid 0 on every AU and every Flush -> the
+               decoder accepted the data and produced nothing.
+               That is a framing or a compute-queue problem, not
+               an entitlement one.
+    log stops inside an AU -> sceVdecCoreSyncDecode blocked on
+               the hardware. Where it stopped is the finding.
+
+done
+EVO decodeframe_test: 0 picture(s) decoded
+
+  ok decodeframe_test launched; detached after 120s
+   The app slot stays resident, so the log pipe never EOFs.
+   Raise the limit with --timeout N if your payload runs longer.
