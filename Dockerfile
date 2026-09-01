@@ -211,6 +211,31 @@ RUN cd /tmp \
  && rm -f /tmp/ninja-linux.zip
 
 # -----------------------------------------------------------------------------
+# Static zlib for the Phase 1b native-app build tail.
+#
+# tools/native-app/native_app_builder.cpp + self_container.cpp (the LLVM-PIE ->
+# PS5-module converter and FSELF signer) link against a HOST static zlib. This
+# is the "boilerplate .deps bootstrap" from ps5-payload-boilerplate/ProsperoLight,
+# baked into the image so scripts/package-app.sh has a fast path. When absent,
+# scripts/setup-native-app-deps.sh rebuilds the identical pinned archive under
+# .deps/ at runtime.
+#
+# Pinned to zlib 1.3.2, the exact version + SHA-256 the upstream bootstrap uses.
+# -----------------------------------------------------------------------------
+ARG ZLIB_NATIVE_VERSION=1.3.2
+ARG ZLIB_NATIVE_SHA256=bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+ENV EVO_NATIVE_ZLIB=/opt/zlib-native
+RUN cd /tmp \
+ && wget -q "https://zlib.net/fossils/zlib-${ZLIB_NATIVE_VERSION}.tar.gz" \
+ && echo "${ZLIB_NATIVE_SHA256}  zlib-${ZLIB_NATIVE_VERSION}.tar.gz" | sha256sum -c - \
+ && tar -xzf "zlib-${ZLIB_NATIVE_VERSION}.tar.gz" \
+ && cd "zlib-${ZLIB_NATIVE_VERSION}" \
+ && CC=clang AR=llvm-ar RANLIB=llvm-ranlib ./configure --static --prefix="${EVO_NATIVE_ZLIB}" \
+ && make -j"$(nproc)" CC=clang AR=llvm-ar RANLIB=llvm-ranlib \
+ && make install \
+ && cd /tmp && rm -rf "zlib-${ZLIB_NATIVE_VERSION}" "zlib-${ZLIB_NATIVE_VERSION}.tar.gz"
+
+# -----------------------------------------------------------------------------
 # PS5 Payload SDK.
 #
 # Installed into the IMAGE at /opt/ps5-payload-sdk so that `docker compose

@@ -1,12 +1,31 @@
 # Native hardware decode — integration plan
 
-> **Status:** proposed, not started. This plan supersedes nothing yet — the
-> hardware-decode effort in [hardware-decode.md](hardware-decode.md) is still
-> CLOSED and its two "never retry" rules still stand. This document lays out
-> the one configuration that has not been tried (a registered app slot, the
-> way [SharpProspero](file:///D:/Projects/PS5-Research/references/SharpProspero)
-> runs), and what it would take to wire a native decoder into the player
-> behind a settings toggle.
+> **Status:** Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
+> "registered app slot" hypothesis is confirmed: from a fake-signed
+> game-category app module the full `sceVideodec2` sequence —
+> `CreateDecoder` **and `Decode`** — returns `0` and produces a valid
+> 1920×1088 NV12 H.264 frame. The errno 5200 wall recorded in
+> [hardware-decode.md](../hardware-decode.md) was a **process-context** limit
+> (elfldr payload / hbldr borrowed slot), not a hardware, driver, or signing
+> limit. That doc's two "never retry" rules (`sceVideoOutOpen` from a payload,
+> kernel `.text` sweeps) still stand — they are unrelated to this result.
+>
+> **What proved it:** `blackbearreloaded/ProsperoLight` (a real Moonlight PS5
+> client that uses VideoDec2) built with a `PROSPEROLIGHT_VDEC_SELF_TEST`
+> patch that runs the decoder bring-up offline and feeds one bundled 1080p
+> H.264 IDR through `sceVideodec2Decode`. Deployed to `/data/homebrew/` and
+> launched via ShadowMountPlus. Every stage returned `0x00000000`; output
+> `valid=1 error=0 picture_count=1 1920x1088 pitch=2048 codec=1`. No
+> arbitration calls, no credential elevation. See
+> [[native-decode-app-slot-plan]].
+>
+> **Consequence for the plan below:** Phase 1's open question ("does a
+> stub-bootstrapped PIE payload inherit app privileges, or must the player be
+> a static module?") is now the main design decision. ProsperoLight is a
+> *static module* (NativeAOT-equivalent: SDK-linked `eboot.bin` + carried
+> clean-room `libc.prx` + full `param.json`), launched from a folder under
+> `/data/homebrew/` by ShadowMountPlus — **not** a launcher-stub that boots a
+> PIE. Assume EVO Player must be repackaged the same way.
 
 ---
 
@@ -67,7 +86,7 @@ costs a few console trips, not a rewrite.**
 - **Scope:** full integration — decoder-backend abstraction, runtime probe,
   settings toggle with config migration, host-preview story, validation, docs.
 - **Non-negotiable constraint (unchanged from
-  [native-media-research.md](native-media-research.md)):** the FFmpeg software
+  [native-media-research.md](../native-media-research.md)):** the FFmpeg software
   path stays the always-available default. Native decode is selected at **run
   time** after a probe succeeds, never a build-time dependency, and any native
   failure falls back to FFmpeg without ending playback.
@@ -79,7 +98,7 @@ costs a few console trips, not a rewrite.**
 Today, decode lives inline in `main.c`: the play loop calls `av_read_frame` /
 `avcodec_send_packet` / `avcodec_receive_frame`, then `pp_map_avframe()`
 adapts the `AVFrame` into a `pp_frame` (the FFmpeg-free struct in
-[pp_frame.h](../projects/evoplayer/pp/include/pp_frame.h)), which
+[pp_frame.h](../../projects/evoplayer/pp/include/pp_frame.h)), which
 `pp_playback_push_frame()` converts and presents.
 
 `pp_frame` is already the right seam. The plan introduces a decoder interface
@@ -158,14 +177,15 @@ Design notes:
 
 ### Phase 0 — ABI harvest (offline, no console)
 
-Turn SharpProspero's C# into C headers under
-`projects/evoplayer/media/include/sce/`. All of this is a mechanical
-transcription of structs whose offsets SharpProspero already documents.
+Turn the reference implementation's decode code into C headers under
+`projects/evoplayer/media/include/sce/`.
 
-- [ ] `sce_videodec2.h` — from `Videodec2.cs`: `SceVideodec2DecoderConfigInfo`,
-      `…MemoryInfo`, `…InputData`, `…OutputInfo`, `…FrameBuffer`,
-      `…ComputeMemoryInfo`, `…ComputeConfigInfo`; codec enum
-      (`Avc=1`, `Hevc=974921`, `Vp9=2382845`), `ResourceType.Compute=1`.
+- [x] **`sce_videodec2.h`** — done 2026-09-01, transcribed from ProsperoLight
+      (`src/moonlight_stream.cpp`), not SharpProspero, because ProsperoLight's
+      path is **hardware-verified**. Structs, codec values
+      (`Avc=1`, `Hevc=974921`, `Vp9=2382845`), memory-typing crib, and the full
+      call sequence are in [videodec2-abi.md](videodec2-abi.md). Header
+      compiles as C11 and C++20.
 - [ ] `sce_avplayer.h` — from `AvPlayer.cs`: `AvPlayerInitData` (120 bytes,
       every field offset is in the C# doc-comments), the three callback blocks
       (`MemAllocator` 40B, `FileReplacement` 40B, `EventReplacement` 16B),
@@ -175,7 +195,7 @@ transcription of structs whose offsets SharpProspero already documents.
       `$PS5_PAYLOAD_SDK/bin/prospero-nid` (or `SharpProspero`'s `nid` command)
       and cross-check against the prior `decoder_test` findings for
       `libSceAvPlayer` (six known-good addresses in
-      [native-media-research.md](native-media-research.md#results-log)).
+      [native-media-research.md](../native-media-research.md#results-log)).
 - [ ] Port `MediaPlayer`'s allocator + texture-slot callbacks
       (`AllocateTexture` / `DeallocateTexture` in `MediaPlayer.cs`) to C. These
       show exactly which memory type the decoder's output buffers need
@@ -190,6 +210,12 @@ typing vs. what `research/hardware-decode` recorded.
 
 ### Phase 1 — run EVO Player from an app slot
 
+> **Gate PASSED 2026-09-01** via the ProsperoLight self-test (see status block).
+> The context *does* differ from the payload: `sceVideodec2Decode` succeeds.
+> Remaining Phase 1 work is now purely about **repackaging EVO Player** as a
+> static app module and confirming the *player's own* decode probe succeeds in
+> that package (not just a standalone test binary).
+
 Get the *unchanged* player (FFmpeg decode) launching as a registered title,
 and establish whether that context differs from the payload.
 
@@ -200,7 +226,7 @@ and establish whether that context differs from the payload.
       does the `make_fself.py` + `param.json` + FTP-install half; it currently
       `die`s because our ELF is PIE, so this phase makes the stub it expects.
 - [ ] Install via the FTP + `sceAppInstUtil` sequence in
-      [packaging.md](packaging.md); launch from the home screen.
+      [packaging.md](../packaging.md); launch from the home screen.
 - [ ] **Probe the context from inside the running app** (extend the existing
       `decoder_test` logic, run it *as the app payload*): does
       `sceUserServiceGetInitialUser` now return a real user (not `0x80940004`)?
@@ -241,7 +267,7 @@ fails and how.
 
 ### Phase 3 — decoder abstraction refactor (ships regardless)
 
-> **Prerequisite: Track A of [modularisation-plan.md](modularisation-plan.md).**
+> **Prerequisite: Track A of [modularisation-plan.md](../modularisation-plan.md).**
 > Steps A1–A7 there *are* this phase's groundwork — they pull the demux
 > thread, audio path, and the pure decode loop out of `main.c` and define
 > `evo_vdec.h`. Once Track A lands, Phase 3 is "add `evo_vdec_native.c` beside
@@ -254,7 +280,7 @@ fails and how.
       pushing `pp_frame` into `pp_playback` exactly as now.
 - [ ] Seek path (`main.c:5559`+) calls `evo_vdec_flush`.
 - [ ] Verify bit-exact parity: the codec sweep in
-      [validation.md](validation.md) plus `tools/bench.sh` plane hashes
+      [validation.md](../validation.md) plus `tools/bench.sh` plane hashes
       unchanged.
 - [ ] Host preview (`tools/uiview_playback_rml`) links `evo_vdec_ffmpeg` and
       is unaffected.
@@ -271,7 +297,7 @@ fails and how.
       the former; `pp_playback` already converts synchronously on push.
 - [ ] Wire the direct-memory allocations through the existing
       `evo_direct_mem` slab pool
-      ([evo_direct_mem.c](../projects/evoplayer/media/src/evo_direct_mem.c))
+      ([evo_direct_mem.c](../../projects/evoplayer/media/src/evo_direct_mem.c))
       rather than raw `sceKernelAllocateDirectMemory`, so multi-hour playback
       doesn't fragment.
 - [ ] Watchdog in the decode thread (hardware-decode-review §7): if no frame
@@ -292,8 +318,8 @@ fails and how.
   - `NATIVE` → native; if the probe failed, show it greyed with "unavailable"
     and behave as FFmpeg.
 - [ ] Config migration in `prospero_settings_save` / `_load`
-      ([main.c:12428](../projects/evoplayer/main.c#L12428) /
-      [:12511](../projects/evoplayer/main.c#L12511)): append **one `%d`** after
+      ([main.c:12428](../../projects/evoplayer/main.c#L12428) /
+      [:12511](../../projects/evoplayer/main.c#L12511)): append **one `%d`** after
       `evo_keyboard_get_type()` in the `fprintf`, add one field to the
       `fscanf` format and one default (`loaded_vdec_pref = 0`). This is the
       exact pattern the file's own comments describe for the theme-name /
@@ -302,10 +328,10 @@ fails and how.
 - [ ] Settings screen — add a **"Video decoder"** row to
       `SCREEN_SETTINGS_PLAYBACK`:
   - bump `EVO_SETTINGS_PLAYBACK_COUNT` 4 → 5
-      ([main.c:232](../projects/evoplayer/main.c#L232));
+      ([main.c:232](../../projects/evoplayer/main.c#L232));
   - add the `settings_playback_selected == 4` branch in
     `settings_playback_activate()`
-    ([main.c:12901](../projects/evoplayer/main.c#L12901)) cycling
+    ([main.c:12901](../../projects/evoplayer/main.c#L12901)) cycling
     AUTO→FFMPEG→NATIVE with a `toast()` and `prospero_settings_save()`;
   - render the row + current value in the playback-settings draw code (same
     place the other four rows draw);
@@ -321,19 +347,19 @@ fails and how.
       host. Guard `evo_vdec_native` behind `__PROSPERO__` (or the SDK macro
       already used) so the host build always gets `evo_vdec_ffmpeg` and the
       toggle shows "native unavailable on host". No host regression.
-- [ ] Extend [validation.md](validation.md) codec sweep with a
+- [ ] Extend [validation.md](../validation.md) codec sweep with a
       **backend column** and per-file decode ms/frame + dropped-frame count
       for both backends (this also feeds
-      [improvements-roadmap.md](improvements-roadmap.md) P2).
+      [improvements-roadmap.md](../improvements-roadmap.md) P2).
 - [ ] Paired A/B benchmark (hardware-decode-review §6): identical clip, same
       session, FFmpeg vs native — decode time and *copy* time measured
       separately. A native path that isn't decisively faster on a clip the CPU
       path already struggles with does not ship as the `AUTO` default.
-- [ ] Rewrite the top of [hardware-decode.md](hardware-decode.md): it stays
+- [ ] Rewrite the top of [hardware-decode.md](../hardware-decode.md): it stays
       the record of the payload-context closure, with a pointer here for the
       app-context outcome.
-- [ ] Update [backlog.md](backlog.md) item 10 and
-      [improvements-roadmap.md](improvements-roadmap.md) (the
+- [ ] Update [backlog.md](../backlog.md) item 10 and
+      [improvements-roadmap.md](../improvements-roadmap.md) (the
       "decode is permanently on the CPU" framing).
 
 ---

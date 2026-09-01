@@ -136,6 +136,20 @@ RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 
 all: $(ELF)
 
+# -----------------------------------------------------------------------------
+# App-module packaging hooks (Phase 1b - docs/evo-pro/phase-1b-app-module.md).
+# scripts/package-app.sh compiles the object set with the native-app toolchain
+# (prospero-clang18: -femulated-tls -fno-plt -fno-stack-protector) and does its
+# own link/convert/sign, so it needs the objects without the SDK-crt link.
+#   objects        build every .o, no ELF
+#   print-objects  emit the object paths (relative to this dir), space-separated
+# -----------------------------------------------------------------------------
+.PHONY: objects print-objects
+objects: $(C_OBJS) $(RMLUI_OBJS)
+
+print-objects:
+	@echo $(C_OBJS) $(RMLUI_OBJS)
+
 $(ELF): $(C_OBJS) $(RMLUI_OBJS)
 	$(CXX) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"

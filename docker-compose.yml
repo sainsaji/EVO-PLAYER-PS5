@@ -40,6 +40,8 @@ services:
         PACBREW_VERSION: "v0.39"
         CMAKE_VERSION: "3.31.6"
         NINJA_VERSION: "1.12.1"
+        # Static host zlib for the Phase 1b native-app converter (tools/native-app).
+        ZLIB_NATIVE_VERSION: "1.3.2"
         # 1 = build the SDK from git instead of using the release zip.
         BUILD_SDK_FROM_SOURCE: "0"
         # 0 = bare SDK, no prebuilt FFmpeg/SDL2 (ProsperoPlayer will not link).

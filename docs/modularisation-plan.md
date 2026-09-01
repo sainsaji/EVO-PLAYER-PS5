@@ -9,7 +9,7 @@
 >
 > **This revision re-scopes the plan** around one goal: get a clean decoder
 > seam out of `main.c` so the native hardware-decode work
-> ([native-decode-integration-plan.md](native-decode-integration-plan.md)
+> ([evo-pro/native-decode-plan.md](evo-pro/native-decode-plan.md)
 > Phase 3) has somewhere to land. That is **Track A** below and it is the
 > priority. **Track B** is the rest of the carve and can proceed in any order
 > around it.

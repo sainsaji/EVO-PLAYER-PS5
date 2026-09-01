@@ -116,7 +116,7 @@ mock data — everything in the DOM binds to live C structs
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
-| [native-decode-integration-plan.md](docs/native-decode-integration-plan.md) | Proposed: native decode via fake-SELF app slot, SharpProspero as ABI ref, FFmpeg/Native settings toggle |
+| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. Index: [evo-pro/README.md](docs/evo-pro/README.md). Contains: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master 9-phase plan, Phase 1 gate PASSED 2026-09-01), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Phase 0 verified ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md) (repackage as `PPSA99039` — **next**), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) (AGC convert/composite — the ~11 fps fix) |
 | [gpu-notes.md](docs/gpu-notes.md) | Why there's no hardware GL driver |
 | [converter-perf.md](docs/converter-perf.md) | YUV→BGRA+swizzle perf, `bench.sh` findings |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |

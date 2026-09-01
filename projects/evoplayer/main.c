@@ -114,6 +114,8 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 #define WIDTH 1920
 #define HEIGHT 1080
 
+#include "evo_boot_trace.h"   /* Phase 1b app-module bring-up breadcrumbs */
+
 /* Product video backend (pp_videoout + converter + clock). */
 #define PP_BACKEND_ENABLED 1
 static pp_videoout g_pp_vo;
@@ -12075,8 +12077,10 @@ static void evo_ensure_data_dir(void)
 }
 
 int main(void) {
+    evo_bt("main() entry");
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
     evo_direct_mem_init(64 * 1024 * 1024);
+    evo_bt("direct_mem_init ok");
 
     /*
      * First, before anything draws or any thread starts. The glyph tables are
@@ -12085,6 +12089,7 @@ int main(void) {
      * is still the only thread. toast() below already draws text.
      */
     evo_font_build_tables();
+    evo_bt("font tables built");
 
     evo_ensure_data_dir();
 
@@ -12092,6 +12097,7 @@ int main(void) {
     recent_load();
     favorites_load();
     prospero_settings_load();
+    evo_bt("settings loaded");
 
     /* EVO: UI sound engine. Safe to call before anything else audio-related;
      * it opens its own port and stays silent if that fails. */
@@ -12107,7 +12113,9 @@ int main(void) {
     load_usb_files();
 #endif
 
+    evo_bt("pre ffmpeg_test");
     ffmpeg_test();
+    evo_bt("ffmpeg_test ok");
 
     sceUserServiceInitialize(NULL);
     scePadInit();
@@ -12127,9 +12135,11 @@ int main(void) {
     /* EVO: hand the UI layer this file's text and icon renderers. Must happen
      * before the first frame; every evo_text/evo_icon call is a safe no-op
      * until it does, which would draw an empty page rather than crash. */
+    evo_bt("pre rmlui_init");
     evo_draw_bind(&EVO_DRAW_VTABLE);
     evo_rmlui_init(WIDTH, HEIGHT);
     evo_sync_rmlui_theme();
+    evo_bt("rmlui_init ok");
 
     /* EVO: controller feedback. Sound was already wired at the edge-detect
      * point; this adds the lightbar and gives both one semantic API. The
@@ -12141,6 +12151,7 @@ int main(void) {
     evo_net_init();
     emby_init();
     avformat_network_init();
+    evo_bt("net init ok");
 
     PS5_PadData padData;
     uint32_t lastButtons = 0;
@@ -12149,10 +12160,15 @@ int main(void) {
 #if PP_BACKEND_ENABLED
     memset(&g_pp_vo, 0, sizeof(g_pp_vo));
     pp_playback_init(&g_pp_pb);
+    evo_bt("pre pp_videoout_init");
     if (pp_videoout_init(&g_pp_vo, WIDTH, HEIGHT, PP_PIXEL_BGRA32_TILED, 2) != 0) {
         toast("VIDEOOUT", "pp_videoout_init failed");
+        evo_bt("pp_videoout_init FAILED step=%d rc=%d (10=Open 11=AllocDmem "
+               "12=MapDmem 14=RegBuf2 15=malloc) -> exit(1)",
+               pp_videoout_last_step, pp_videoout_last_rc);
         return 1;
     }
+    evo_bt("pp_videoout_init ok");
     g_pp_vo_ready = 1;
     pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
     pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
@@ -12186,8 +12202,13 @@ int main(void) {
     sceVideoOutRegisterBuffers2(handle, 0, 0, vbuf, 2, &attr, 0, NULL);
 #endif
 
+    evo_bt("entering frame loop");
     for (int frame = 0; running; frame++) {
         evo_net_poll();
+#ifdef EVO_BOOT_TRACE
+        if (frame == 0 || frame == 1 || frame == 30 || frame == 120)
+            evo_bt("frame %d (screen=%d)", frame, (int)screen);
+#endif
 #if PP_BACKEND_ENABLED
         /* Safe point: no buffer held — apply deferred 4K/1080 VO reconfig */
         pp_product_apply_pending_vo();

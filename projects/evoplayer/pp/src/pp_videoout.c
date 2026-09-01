@@ -4,6 +4,7 @@
  */
 #include "pp_videoout.h"
 #include "pp_platform.h"
+#include "evo_boot_trace.h"
 
 #include <stdio.h>
 #include <stdlib.h>

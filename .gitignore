@@ -79,6 +79,11 @@ third_party/ffmpeg/*.tar.*
 third_party/**/src/
 projects/prosperoplayer/
 
+# Local reference clone of the native-app build tail we fork in Phase 1b.
+# Kept on disk, never committed. See third_party/ProsperoLight/README.EVO.md
+# and docs/evo-pro/phase-1b-app-module.md.
+third_party/ProsperoLight/
+
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson
 # -----------------------------------------------------------------------------
@@ -146,3 +151,16 @@ scratch/
 
 
 
+
+# --- Phase 1b: native-app build tail --------------------------------------
+# Generated clean-room runtime shim (rebuilt locally by scripts/package-app.sh).
+tools/native-app/runtime/libc.prx
+
+# Native-app + other local dependency caches (SHA-pinned, rebuildable).
+.deps/
+
+# Packaged app-module output (scripts/package-app.sh).
+output/app/
+
+# ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
+/klog.txt
