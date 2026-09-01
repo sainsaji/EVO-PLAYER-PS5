@@ -101,6 +101,13 @@ MEDIA_SRCS := \
     media/src/evo_textreader.c \
     media/src/evo_direct_mem.c \
     media/src/evo_stream_io.c \
+    media/src/evo_packet_queue.c \
+    media/src/evo_audio_resample.c \
+    media/src/evo_audio_out.c \
+    media/src/evo_subtitle.c \
+    media/src/evo_demux.c \
+    media/src/evo_vdec_ffmpeg.c \
+    media/src/evo_playback.c \
     src/evo_toast.c \
     src/evo_recent.c \
     src/evo_favorites.c

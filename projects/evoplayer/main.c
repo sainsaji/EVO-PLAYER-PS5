@@ -57,6 +57,13 @@
 #include "evo_blend.h"
 #include "evo_direct_mem.h"
 #include "evo_stream_io.h"
+#include "evo_packet_queue.h"
+#include "evo_audio_resample.h"
+#include "evo_audio_out.h"
+#include "evo_subtitle.h"
+#include "evo_demux.h"
+#include "evo_vdec.h"
+#include "evo_playback.h"
 #include "prospero_thumbnail.h"
 #include "evo_rmlui_bridge.h"
 #include "pp/include/evo_theme.h"
@@ -110,11 +117,13 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 /* Product video backend (pp_videoout + converter + clock). */
 #define PP_BACKEND_ENABLED 1
 static pp_videoout g_pp_vo;
-static pp_playback g_pp_pb;
+/* Non-static: evo_demux.c's seek executor calls pp_playback_notify_seek_*()
+ * on it (A5, transitional — becomes a passed-in pointer at A7). */
+pp_playback g_pp_pb;
 /* VO dimensions may be 1080 (UI) or 4K (V8 playback). */
 static uint32_t g_vo_w = 1920;
 static uint32_t g_vo_h = 1080;
-static pp_video_backend g_pp_backend = PP_BACKEND_1080_STANDARD;
+pp_video_backend g_pp_backend = PP_BACKEND_1080_STANDARD;
 
 /*
  * What the video path was configured with before a 1080-only overlay (Media
@@ -160,8 +169,8 @@ static pp_video_backend g_pending_backend = PP_BACKEND_1080_STANDARD;
 static uint32_t g_pending_out_w = 1920;
 static uint32_t g_pending_out_h = 1080;
 /* 0 while VO reconfig in flight — video thread must not touch VO */
-static volatile int g_vo_decode_gate = 1;
-static int g_first_frame_bc_done = 0;
+volatile int g_vo_decode_gate = 1;
+int g_first_frame_bc_done = 0;
 
 // EVO Player 1.0 UI state
 #define SCREEN_MAIN_MENU 0
@@ -244,7 +253,6 @@ typedef enum {
 } PlaybackProfile;
 
 /* Media clock: audio when live, else video (silent / E-AC3 files). */
-double prospero_media_clock_seconds(void);
 
 PlaybackProfile current_profile = PROFILE_BALANCED;
 static int settings_selected = 0;
@@ -296,7 +304,7 @@ extern int screen;
 extern char current_media_path[512];
 extern double resume_base_offset_seconds;
 extern double media_duration_sec;
-static volatile double audio_clock_seconds;
+/* audio_clock_seconds is declared by evo_audio_out.h (included above). */
 
 void toast(const char* title, const char* msg);
 void clean_media_title(const char *path, char *title, size_t title_sz, char *meta, size_t meta_sz);
@@ -664,7 +672,6 @@ static char prospero_browser_preview_path[768];
 static int prospero_browser_preview_valid = 0;
 static int prospero_browser_preview_failed = 0;
 
-static int prospero_subtitle_delay_ms = 0;
 
 #define PROSPERO_CHAPTER_LIMIT 128
 static int prospero_chapter_count = 0;
@@ -896,7 +903,6 @@ static int prospero_cover_extract_video_frame_size(
     double seek_sec = 5.0;
     int64_t seek_ts;
     uint8_t *rgba = NULL;
-    int rgba_stride;
 
     if (!media_path || !out_pixels || out_w < 2 || out_h < 2)
         return -1;
@@ -1153,67 +1159,6 @@ static void prospero_browser_preview_ensure(
 }
 
 /* Right-side preview panel (highlighted file only). */
-static void prospero_browser_preview_draw_panel(
-    uint32_t *fb,
-    int panel_x,
-    int panel_y
-) {
-    const int fb_w = 1920;
-    const int fb_h = 1080;
-    const int pad = 14;
-    const int box_w = PROSPERO_BROWSER_PREVIEW_W + pad * 2;
-    const int box_h = PROSPERO_BROWSER_PREVIEW_H + pad * 2 + 48;
-    int row, col;
-    int img_x, img_y;
-
-    if (!fb)
-        return;
-
-    {
-        /* EVO: the panel chrome is a themed card - rounded, hairline border,
-         * drop shadow - so it matches the rows instead of being a hard 1px
-         * cyan rectangle. The thumbnail itself is still a straight blit; it
-         * is rectangular artwork and should not be feathered.
-         *
-         * Colours must go through RR_BGRA / the theme: a raw 0xFF00D7FF is
-         * YELLOW on this framebuffer (R high, B low). */
-        const uint32_t col_empty = evo_theme_current()->surface_alt;
-
-        evo_ui_card(fb, panel_x, panel_y, box_w, box_h, 0);
-
-        img_x = panel_x + pad;
-        img_y = panel_y + pad;
-
-        if (prospero_browser_preview_valid) {
-            for (row = 0; row < PROSPERO_BROWSER_PREVIEW_H; row++) {
-                int py = img_y + row;
-                if (py < 0 || py >= fb_h)
-                    continue;
-                for (col = 0; col < PROSPERO_BROWSER_PREVIEW_W; col++) {
-                    int px = img_x + col;
-                    if (px < 0 || px >= fb_w)
-                        continue;
-                    fb[py * fb_w + px] =
-                        prospero_browser_preview_pixels[
-                            row * PROSPERO_BROWSER_PREVIEW_W + col];
-                }
-            }
-        } else {
-            for (row = 0; row < PROSPERO_BROWSER_PREVIEW_H; row++) {
-                int py = img_y + row;
-                if (py < 0 || py >= fb_h)
-                    continue;
-                for (col = 0; col < PROSPERO_BROWSER_PREVIEW_W; col++) {
-                    int px = img_x + col;
-                    if (px < 0 || px >= fb_w)
-                        continue;
-                    fb[py * fb_w + px] = col_empty;
-                }
-            }
-        }
-    }
-    /* Caption drawn by caller via rr_text (defined later). */
-}
 
 static const ProsperoCoverEntry *prospero_cover_get(
     const char *media_path,
@@ -1266,70 +1211,8 @@ static const ProsperoCoverEntry *prospero_cover_get(
 }
 
 
-static void prospero_draw_progress_bar(
-    uint32_t *fb,
-    int x,
-    int y,
-    int w,
-    int h,
-    double pos,
-    double dur
-) {
-    int filled;
-    int i, j;
-    const int fb_w = 1920;
-    const int fb_h = 1080;
-    double t;
-
-    if (!fb || w < 4 || h < 2 || dur < 1.0)
-        return;
-    t = pos / dur;
-    if (t < 0.0)
-        t = 0.0;
-    if (t > 1.0)
-        t = 1.0;
-    filled = (int)(t * (double)w + 0.5);
-    if (filled < 0)
-        filled = 0;
-    if (filled > w)
-        filled = w;
-
-    for (j = 0; j < h; j++) {
-        int py = y + j;
-        if (py < 0 || py >= fb_h)
-            continue;
-        for (i = 0; i < w; i++) {
-            int px = x + i;
-            uint32_t c;
-            if (px < 0 || px >= fb_w)
-                continue;
-            c = (i < filled)
-                    ? RR_BGRA(0, 215, 255, 255)
-                    : RR_BGRA(20, 40, 60, 176);
-            fb[py * fb_w + px] = c;
-        }
-    }
-}
 
 
-static double prospero_recent_lookup(
-    const char *path,
-    double *out_duration
-) {
-    int i;
-    if (out_duration)
-        *out_duration = 0.0;
-    if (!path || !path[0])
-        return 0.0;
-    for (i = 0; i < recent_file_count; i++) {
-        if (strcmp(recent_files[i].path, path) == 0) {
-            if (out_duration)
-                *out_duration = recent_files[i].duration;
-            return recent_files[i].last_pos;
-        }
-    }
-    return 0.0;
-}
 
 static void prospero_chapters_clear(void)
 {
@@ -1602,7 +1485,7 @@ long long controls_last_used_ms = 0;
 
 #if PP_BACKEND_ENABLED
 /* Map UI view mode → product convert aspect (HEVC soft + 4K paths). */
-static pp_aspect_mode prospero_view_mode_to_aspect(void)
+pp_aspect_mode prospero_view_mode_to_aspect(void)
 {
     if (video_view_mode == 1)
         return PP_ASPECT_FILL;
@@ -1648,23 +1531,22 @@ static void prospero_apply_view_mode(void)
     }
 }
 #endif
-uint32_t *video_frame_pixels = NULL;
 uint32_t *video_frame_back_pixels = NULL;
 uint32_t *video_frame_third_pixels = NULL;
 
-#define VIDEO_ROTATE_BUFFERS 8
-uint32_t *video_rotate_pixels[VIDEO_ROTATE_BUFFERS] = {0};
-int video_rotate_index = 0;
-int video_frame_w = 0;
-int video_frame_h = 0;
-int video_frame_loaded = 0;
-int video_decode_ready = 0;
-int video_decode_done = 0;
+/*
+ * The video decode/pace/present loop, the media clock, the video thread and
+ * their state (video_clock_seconds, first_video_pts_seconds, video_fps,
+ * video_decode_ready/done, the swscale ring, video_frame_*) moved to
+ * media/src/evo_playback.c behind evo_playback.h (Track A / A7). main.c keeps
+ * start_video_playback() / stop_video_playback() (open/close policy) and
+ * drives the session through evo_pb_*() and the raw externs the header still
+ * publishes (A8 migrates the readers to the façade).
+ */
 
 static int prospero_playback_finished = 0;
 static long long prospero_finish_candidate_ms = 0;
 
-double video_fps = 60.0;
 double media_duration_sec = 0.0;
 int perf_render_frames = 0;
 int perf_decode_frames = 0;
@@ -1678,451 +1560,65 @@ int dbg_swaps = 0;
 long long dbg_last_pts = 0;
 long long perf_last_ms = 0;
 long long playback_start_ms = 0;
-int video_stream_index = -1;
-int audio_stream_index = -1;
+/* video_stream_index / audio_stream_index moved to media/evo_demux.c (A5). */
 /* 1 = audio-only file (music); no video track / video thread */
 static int prospero_music_mode = 0;
 AVCodecContext *audio_ctx = NULL;
-
-/* PROSPERO_AUDIO_RESAMPLER_STATE_START */
 
 /* ---------------------------------------------------------------------------
  * EVO: surround output.
  *
  * Upstream hardcoded stereo everywhere - the AudioOut port was opened with
  * S16_STEREO and libswresample downmixed every layout to 2.0, so a 5.1 or 7.1
- * source lost its surround channels entirely.
- *
- * Verified on hardware (12.70, 5.1 system) by projects/audioout_test:
- *   - sceAudioOutOpen accepts S16_8CH (format 2) from a homebrew app slot
- *   - the PS5's channel interleave order matches FFmpeg's 7.1 order exactly:
- *         FL FR FC LFE BL BR SL SR
- *     confirmed one speaker at a time and with a clockwise rotation test
+ * source lost its surround channels entirely. See projects/audioout_test for
+ * the hardware verification (12.70, 5.1 system): sceAudioOutOpen accepts
+ * S16_8CH from a homebrew app slot and the PS5's interleave order matches
+ * FFmpeg's 7.1 order (FL FR FC LFE BL BR SL SR) exactly.
  *
  * Buffers are sized for the maximum (8) and only evo_audio_channels of them
  * are used, so switching between a stereo and a surround file at runtime does
- * not reallocate anything.
- *
- * Declared here, ahead of the resampler configuration that reads it.
+ * not reallocate anything. EVO_AUDIO_MAX_CH lives in evo_audio_out.h now.
  * ------------------------------------------------------------------------ */
-#define EVO_AUDIO_MAX_CH 8
 
 /* Channel count of the currently open port: 2 or 8. Set when the port opens. */
-static int evo_audio_channels = 2;
-
-static SwrContext *prospero_audio_swr = NULL;
-
-static AVChannelLayout prospero_audio_input_layout;
-static int prospero_audio_input_layout_valid = 0;
-
-static enum AVSampleFormat prospero_audio_input_format =
-    AV_SAMPLE_FMT_NONE;
-
-static int prospero_audio_input_rate = 0;
-static const int prospero_audio_output_rate = 48000;
-
-
-static void prospero_audio_resampler_destroy(void) {
-    if (prospero_audio_swr) {
-        swr_free(&prospero_audio_swr);
-    }
-
-    if (prospero_audio_input_layout_valid) {
-        av_channel_layout_uninit(
-            &prospero_audio_input_layout
-        );
-
-        prospero_audio_input_layout_valid = 0;
-    }
-
-    prospero_audio_input_format =
-        AV_SAMPLE_FMT_NONE;
-
-    prospero_audio_input_rate = 0;
-}
-
-
-static void prospero_audio_resampler_reset(void) {
-    if (!prospero_audio_swr) {
-        return;
-    }
-
-    swr_close(prospero_audio_swr);
-
-    if (swr_init(prospero_audio_swr) < 0) {
-        prospero_audio_resampler_destroy();
-    }
-}
-
-
-static int prospero_audio_resampler_configure(
-    const AVFrame *frame
-) {
-    if (!frame) {
-        return 0;
-    }
-
-    int input_rate =
-        frame->sample_rate > 0
-            ? frame->sample_rate
-            : (
-                audio_ctx &&
-                audio_ctx->sample_rate > 0
-                    ? audio_ctx->sample_rate
-                    : 48000
-            );
-
-    AVChannelLayout input_layout;
-
-    memset(
-        &input_layout,
-        0,
-        sizeof(input_layout)
-    );
-
-    if (frame->ch_layout.nb_channels > 0) {
-        if (
-            av_channel_layout_copy(
-                &input_layout,
-                &frame->ch_layout
-            ) < 0
-        ) {
-            return 0;
-        }
-    } else if (
-        audio_ctx &&
-        audio_ctx->ch_layout.nb_channels > 0
-    ) {
-        if (
-            av_channel_layout_copy(
-                &input_layout,
-                &audio_ctx->ch_layout
-            ) < 0
-        ) {
-            return 0;
-        }
-    } else {
-        av_channel_layout_default(
-            &input_layout,
-            2
-        );
-    }
-
-    int unchanged =
-        prospero_audio_swr &&
-        prospero_audio_input_layout_valid &&
-        prospero_audio_input_format ==
-            (enum AVSampleFormat)frame->format &&
-        prospero_audio_input_rate ==
-            input_rate &&
-        av_channel_layout_compare(
-            &prospero_audio_input_layout,
-            &input_layout
-        ) == 0;
-
-    if (unchanged) {
-        av_channel_layout_uninit(
-            &input_layout
-        );
-
-        return 1;
-    }
-
-    prospero_audio_resampler_destroy();
-
-    /* EVO: match the resampler's output layout to the port that is actually
-     * open. Upstream always used AV_CHANNEL_LAYOUT_STEREO here, which is what
-     * discarded the surround channels before they ever reached AudioOut.
-     *
-     * FFmpeg's 7.1 order (FL FR FC LFE BL BR SL SR) matches the PS5's
-     * interleave order exactly - verified per speaker on hardware - so no
-     * channel remapping is needed. */
-    AVChannelLayout output_layout =
-        (evo_audio_channels == 8)
-            ? (AVChannelLayout)AV_CHANNEL_LAYOUT_7POINT1
-            : (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
-
-    if (
-        swr_alloc_set_opts2(
-            &prospero_audio_swr,
-            &output_layout,
-            AV_SAMPLE_FMT_S16,
-            prospero_audio_output_rate,
-            &input_layout,
-            (enum AVSampleFormat)frame->format,
-            input_rate,
-            0,
-            NULL
-        ) < 0
-    ) {
-        av_channel_layout_uninit(
-            &input_layout
-        );
-
-        prospero_audio_resampler_destroy();
-        return 0;
-    }
-
-    av_opt_set_double(
-        prospero_audio_swr,
-        "rematrix_maxval",
-        1.0,
-        0
-    );
-
-    av_opt_set_double(
-        prospero_audio_swr,
-        "center_mix_level",
-        0.70710678,
-        0
-    );
-
-    av_opt_set_double(
-        prospero_audio_swr,
-        "surround_mix_level",
-        0.70710678,
-        0
-    );
-
-    av_opt_set_double(
-        prospero_audio_swr,
-        "lfe_mix_level",
-        0.5,
-        0
-    );
-
-    if (swr_init(prospero_audio_swr) < 0) {
-        av_channel_layout_uninit(
-            &input_layout
-        );
-
-        prospero_audio_resampler_destroy();
-        return 0;
-    }
-
-    if (
-        av_channel_layout_copy(
-            &prospero_audio_input_layout,
-            &input_layout
-        ) < 0
-    ) {
-        av_channel_layout_uninit(
-            &input_layout
-        );
-
-        prospero_audio_resampler_destroy();
-        return 0;
-    }
-
-    prospero_audio_input_layout_valid = 1;
-
-    prospero_audio_input_format =
-        (enum AVSampleFormat)frame->format;
-
-    prospero_audio_input_rate =
-        input_rate;
-
-    av_channel_layout_uninit(
-        &input_layout
-    );
-
-    return 1;
-}
-
-/* PROSPERO_AUDIO_RESAMPLER_STATE_END */
-
-
-int audio_handle = -1;
-static int16_t audio_accum[2048 * EVO_AUDIO_MAX_CH];
-int audio_accum_pos = 0;
-
-/* ~2.7s at 48kHz in 2048-sample blocks — UHD soft decode needs headroom */
-#define AUDIO_QUEUE_BLOCKS 64
-#define AUDIO_BLOCK_SAMPLES 2048
-
-static int16_t audio_queue[AUDIO_QUEUE_BLOCKS][AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
-static volatile int audio_queue_read = 0;
-static volatile int audio_queue_write = 0;
-static volatile int audio_queue_count = 0;
-static volatile long long audio_samples_played = 0;
-static volatile long long audio_samples_decoded = 0;
-static volatile double audio_clock_seconds = 0.0;
-static volatile double audio_pts_seconds = 0.0;
-static double first_video_pts_seconds = -1.0;
-static double first_audio_pts_seconds = -1.0;
-double video_clock_seconds = 0.0;
-
-double prospero_media_clock_seconds(void)
-{
-    double audio_rel = audio_clock_seconds;
-    double video_rel = 0.0;
-
-    if (first_video_pts_seconds >= 0.0)
-        video_rel = video_clock_seconds - first_video_pts_seconds;
-    else if (video_clock_seconds > 0.0)
-        video_rel = video_clock_seconds;
-    if (video_rel < 0.0)
-        video_rel = 0.0;
-
-    /*
-     * Prefer audio when a playable track is open and the out clock has
-     * started. Otherwise drive UI/resume from video so silent E-AC3
-     * files still move the progress bar.
-     */
-    if (audio_stream_index >= 0 && audio_handle >= 1 && audio_rel >= 0.05)
-        return audio_rel;
-    return video_rel;
-}
-static int detected_audio_rate = 48000;
-static volatile int audio_thread_running = 0;
-static pthread_t audio_thread;
-
-static volatile int video_thread_running = 0;
-static volatile int audio_decode_thread_running = 0;
-static pthread_t video_thread;
-static pthread_t audio_decode_thread;
-static AVPacket *video_pending_pkt = NULL;
-static AVPacket *video_video_pending_pkt = NULL;
-static pthread_mutex_t video_frame_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void audio_queue_push(int16_t *buf) {
-    int spins = 0;
-    /* Wait for space instead of dropping — drops cause choppy audio on UHD */
-    while (audio_queue_count >= AUDIO_QUEUE_BLOCKS &&
-           audio_decode_thread_running && spins < 200) {
-        usleep(500);
-        spins++;
-    }
-    if (audio_queue_count >= AUDIO_QUEUE_BLOCKS)
-        return;
-
-    memcpy(audio_queue[audio_queue_write], buf,
-           (size_t)AUDIO_BLOCK_SAMPLES * evo_audio_channels * sizeof(int16_t));
-    audio_queue_write = (audio_queue_write + 1) % AUDIO_QUEUE_BLOCKS;
-    audio_queue_count++;
-}
-
-void *audio_output_thread(void *arg) {
-    static int16_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
-    while (audio_thread_running) {
-        if (screen == 2 && !player_paused && audio_handle >= 1) {
-            /*
-             * Compare like-for-like: audio_clock is from t=0 of this session,
-             * video must be relative to first video PTS (not absolute PTS).
-             * Absolute compare freezes easy 720p/YouTube when clocks diverge.
-             */
-            double video_rel = video_clock_seconds;
-            if (first_video_pts_seconds >= 0.0)
-                video_rel = video_clock_seconds - first_video_pts_seconds;
-            if (video_rel < 0.0)
-                video_rel = 0.0;
-
-            if (video_rel > 0.1 &&
-                audio_clock_seconds > video_rel + 0.50) {
-                usleep(2000);
-                continue;
-            }
-            if (audio_queue_count > 0) {
-                sceAudioOutOutput(audio_handle, audio_queue[audio_queue_read]);
-                audio_samples_played += AUDIO_BLOCK_SAMPLES;
-                audio_clock_seconds = (double)audio_samples_played / 48000.0;
-                audio_queue_read = (audio_queue_read + 1) % AUDIO_QUEUE_BLOCKS;
-                audio_queue_count--;
-            } else {
-                /*
-                 * Soft underrun: silence without advancing media clock.
-                 * Video wait loop must break if audio stays stuck (see decode).
-                 */
-                sceAudioOutOutput(audio_handle, silence);
-            }
-        } else {
-            usleep(200);
-        }
-    }
-    return NULL;
-}
-
-
-#define PACKET_QUEUE_SIZE 512
-
-typedef struct {
-    AVPacket *packets[PACKET_QUEUE_SIZE];
-    int read;
-    int write;
-    int count;
-    pthread_mutex_t mutex;
-} PacketQueue;
-
-static PacketQueue video_packet_queue = { .mutex = PTHREAD_MUTEX_INITIALIZER };
-static PacketQueue audio_packet_queue = { .mutex = PTHREAD_MUTEX_INITIALIZER };
-
-static volatile int demux_thread_running = 0;
-static pthread_t demux_thread;
-
-static void packet_queue_clear(PacketQueue *q) {
-    pthread_mutex_lock(&q->mutex);
-
-    for (int i = 0; i < PACKET_QUEUE_SIZE; i++) {
-        if (q->packets[i]) {
-            av_packet_free(&q->packets[i]);
-            q->packets[i] = NULL;
-        }
-    }
-
-    q->read = 0;
-    q->write = 0;
-    q->count = 0;
-
-    pthread_mutex_unlock(&q->mutex);
-}
-
-static int packet_queue_push(PacketQueue *q, AVPacket *pkt) {
-    pthread_mutex_lock(&q->mutex);
-
-    if (q->count >= PACKET_QUEUE_SIZE) {
-        pthread_mutex_unlock(&q->mutex);
-        return 0;
-    }
-
-    q->packets[q->write] = av_packet_clone(pkt);
-    q->write = (q->write + 1) % PACKET_QUEUE_SIZE;
-    q->count++;
-
-    pthread_mutex_unlock(&q->mutex);
-    return 1;
-}
-
-static AVPacket *packet_queue_pop(PacketQueue *q) {
-    pthread_mutex_lock(&q->mutex);
-
-    if (q->count <= 0) {
-        pthread_mutex_unlock(&q->mutex);
-        return NULL;
-    }
-
-    AVPacket *pkt = q->packets[q->read];
-    q->packets[q->read] = NULL;
-    q->read = (q->read + 1) % PACKET_QUEUE_SIZE;
-    q->count--;
-
-    pthread_mutex_unlock(&q->mutex);
-    return pkt;
-}
-
-static int packet_queue_count(PacketQueue *q) {
-    pthread_mutex_lock(&q->mutex);
-    int c = q->count;
-    pthread_mutex_unlock(&q->mutex);
-    return c;
-}
+int evo_audio_channels = 2;
+
+/*
+ * The libswresample configuration lives in media/src/evo_audio_resample.c (A2).
+ * The audio-out ring, session clock, output/decode threads and the audio
+ * track switch live in media/src/evo_audio_out.c (A3); its state is declared
+ * in evo_audio_out.h and main.c's start/stop/seek path still writes it
+ * directly until A8. The video clock stays here.
+ */
+/*
+ * prospero_media_clock_seconds() + the video clock/thread/ring state moved to
+ * media/src/evo_playback.c (A7). video_pending_pkt is a vestigial unused
+ * AVPacket kept here (freed on stop/seek); the live one is
+ * video_video_pending_pkt, now owned by evo_playback.
+ */
+AVPacket *video_pending_pkt = NULL;
+
+
+/*
+ * PacketQueue lives in media/src/evo_packet_queue.c (A1). The two queue
+ * instances, the demux thread handle, video_stream_index / audio_stream_index
+ * and the whole PROSPERO_TRUE_AV_SEEK region moved to media/src/evo_demux.c
+ * (A5); their declarations are in evo_demux.h.
+ */
 
 AVFormatContext *play_fmt = NULL;
 static evo_stream_io_ctx_t *g_stream_io_ctx = NULL;
-AVCodecContext *play_ctx = NULL;
 
-AVPacket *play_pkt = NULL;
-AVFrame *play_frame = NULL;
-struct SwsContext *play_sws = NULL;
+/*
+ * The video decoder (AVCodecContext + receive AVFrame + avcodec_* calls +
+ * pp_map_avframe) moved to media/src/evo_vdec_ffmpeg.c behind evo_vdec.h
+ * (Track A / A6, docs/modularisation-plan.md §5). Non-static: the evo_demux
+ * seek executor flushes it. `play_pkt` was a vestigial unused AVPacket and
+ * went with the decode scaffolding.
+ */
+evo_vdec *g_vdec = NULL;
+
+struct SwsContext *play_sws = NULL;   /* legacy swscale fallback (exotic fmts) */
 char current_media[128];
 
 /*
@@ -2367,1047 +1863,6 @@ void ffmpeg_mkv_test(void);
 
 int start_video_playback(const char *path);
 
-/* PROSPERO_SRT_FORWARD_START */
-
-static void prospero_subtitle_clear(void);
-
-/* PROSPERO_SUBTITLE_EARLY_DECLS_START */
-
-/*
- * These are implemented later by the external SRT module but are
- * also used by the earlier embedded-subtitle module.
- */
-static int prospero_subtitle_count;
-static int prospero_subtitle_enabled;
-static int prospero_subtitle_face;
-
-static void prospero_subtitle_clean_line(
-    const char *input,
-    char *output,
-    size_t output_size
-);
-
-static void prospero_subtitle_append_text(
-    char *destination,
-    size_t destination_size,
-    const char *line
-);
-
-/* PROSPERO_SUBTITLE_EARLY_DECLS_END */
-
-
-
-static int prospero_subtitle_load_for_media(
-    const char *media_path
-);
-
-
-/* PROSPERO_EMBEDDED_SUBTITLE_MODULE_START */
-
-#define PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES 256
-#define PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE 768
-
-typedef struct {
-    double start_seconds;
-    double end_seconds;
-
-    char text[
-        PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-    ];
-} ProsperoEmbeddedSubtitleCue;
-
-
-/*
- * Subtitle pipeline counters. The trace already reported "a stream is
- * selected" and "no cues exist", which is a gap wide enough to hold every
- * stage in between. These split it: demuxed -> reached the decoder -> text
- * survived cleaning -> stored.
- */
-static int dbg_sub_demuxed;   /* packets av_read_frame gave us on the track */
-static int dbg_sub_entered;   /* packets that got past the decoder's guard  */
-static int dbg_sub_blank;     /* decoded but the text cleaned away to empty */
-static int dbg_sub_added;     /* add_cue calls                              */
-static int dbg_sub_cid;       /* codec id actually selected                 */
-
-static AVCodecContext *
-prospero_embedded_subtitle_ctx = NULL;
-
-static int
-prospero_embedded_subtitle_stream_index = -1;
-
-/* PROSPERO_DIRECT_SUBRIP_START */
-
-static enum AVCodecID
-prospero_embedded_subtitle_codec_id =
-    AV_CODEC_ID_NONE;
-
-/* PROSPERO_DIRECT_SUBRIP_END */
-
-
-
-/* PROSPERO_SUBTITLE_SELECTION_STATE_START */
-
-/*
- * -2 = automatic
- * -1 = external matching SRT
- * >=0 = exact embedded MKV subtitle stream
- */
-static int prospero_subtitle_requested_stream = -2;
-
-/*
- * Zero renders the active embedded stream.
- * One renders the matching external SRT.
- */
-static int prospero_subtitle_use_external = 0;
-
-/* PROSPERO_SUBTITLE_SELECTION_STATE_END */
-
-
-
-
-static ProsperoEmbeddedSubtitleCue
-prospero_embedded_subtitle_cues[
-    PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
-];
-
-static int
-prospero_embedded_subtitle_head = 0;
-
-static int
-prospero_embedded_subtitle_count = 0;
-
-static pthread_mutex_t
-prospero_embedded_subtitle_mutex =
-    PTHREAD_MUTEX_INITIALIZER;
-
-
-static int prospero_embedded_subtitle_supported(
-    enum AVCodecID codec_id
-) {
-    return (
-        codec_id == AV_CODEC_ID_SUBRIP ||
-        codec_id == AV_CODEC_ID_ASS ||
-        codec_id == AV_CODEC_ID_SSA ||
-        codec_id == AV_CODEC_ID_WEBVTT
-    );
-}
-
-
-static void prospero_embedded_subtitle_reset(void) {
-    pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
-    );
-
-    prospero_embedded_subtitle_head = 0;
-    prospero_embedded_subtitle_count = 0;
-
-    pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
-    );
-}
-
-
-static void prospero_embedded_subtitle_close(void) {
-    prospero_embedded_subtitle_reset();
-
-    if (prospero_embedded_subtitle_ctx) {
-        avcodec_free_context(
-            &prospero_embedded_subtitle_ctx
-        );
-    }
-
-    prospero_embedded_subtitle_stream_index =
-        -1;
-
-    prospero_embedded_subtitle_codec_id =
-        AV_CODEC_ID_NONE;
-}
-
-
-/*
- * How many cues a subtitle track claims to hold, or -1 when it does not say.
- *
- * mkvmerge writes per-track STATISTICS tags, and the key is suffixed with the
- * language - NUMBER_OF_FRAMES-eng - so the lookup has to ignore the suffix.
- *
- * This matters more than it looks. Release groups ship a vanity track that is
- * flagged "default", is tagged English, and contains two cues forty minutes
- * in. It wins every metadata-based contest against the real subtitle track
- * and then displays nothing, which is indistinguishable from subtitles being
- * broken. The count is the only field that tells them apart before playback.
- */
-static int prospero_subtitle_declared_cues(
-    AVStream *stream
-) {
-    if (!stream) {
-        return -1;
-    }
-
-    AVDictionaryEntry *frames =
-        av_dict_get(
-            stream->metadata,
-            "NUMBER_OF_FRAMES",
-            NULL,
-            AV_DICT_IGNORE_SUFFIX
-        );
-
-    if (
-        !frames ||
-        !frames->value ||
-        !frames->value[0]
-    ) {
-        return -1;
-    }
-
-    long parsed =
-        strtol(
-            frames->value,
-            NULL,
-            10
-        );
-
-    if (
-        parsed < 0 ||
-        parsed > 1000000
-    ) {
-        return -1;
-    }
-
-    return (int)parsed;
-}
-
-
-/* Below this a track is signage or a watermark, not dialogue. */
-#define PROSPERO_SUBTITLE_MIN_USEFUL_CUES 10
-
-
-static int prospero_embedded_subtitle_score_stream(
-    AVStream *stream
-) {
-    if (
-        !stream ||
-        !stream->codecpar ||
-        !prospero_embedded_subtitle_supported(
-            stream->codecpar->codec_id
-        )
-    ) {
-        return -100000;
-    }
-
-    int score = 10;
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (language && language->value) {
-        if (
-            strcasecmp(
-                language->value,
-                "eng"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "en"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "english"
-            ) == 0
-        ) {
-            score += 100;
-        }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_DEFAULT
-    ) {
-        score += 40;
-    }
-
-    /*
-     * Cue count outranks every metadata signal, because it is the only one
-     * that reports what the track actually contains rather than what it
-     * claims to be. A near-empty track loses even when it is English and
-     * flagged default; a rich one gets a modest tie-break bonus.
-     */
-    {
-        int cues =
-            prospero_subtitle_declared_cues(
-                stream
-            );
-
-        if (
-            cues >= 0 &&
-            cues < PROSPERO_SUBTITLE_MIN_USEFUL_CUES
-        ) {
-            score -= 1000;
-        } else if (cues > 0) {
-            score += cues > 50 ? 20 : 5;
-        }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_FORCED
-    ) {
-        score += 25;
-    }
-
-    return score;
-}
-
-
-static int prospero_embedded_subtitle_open(
-    AVFormatContext *format
-) {
-    prospero_embedded_subtitle_close();
-
-    /*
-     * A matching external SRT is treated as the selected track.
-     */
-    if (!format) {
-        return 0;
-    }
-
-    int best_stream = -1;
-    int best_score = -100000;
-    int found_pgs = 0;
-
-    for (
-        unsigned int index = 0;
-        index < format->nb_streams;
-        index++
-    ) {
-        AVStream *stream =
-            format->streams[index];
-
-        if (
-            !stream ||
-            !stream->codecpar ||
-            stream->codecpar->codec_type !=
-                AVMEDIA_TYPE_SUBTITLE
-        ) {
-            continue;
-        }
-
-        if (
-            stream->codecpar->codec_id ==
-            AV_CODEC_ID_HDMV_PGS_SUBTITLE
-        ) {
-            found_pgs = 1;
-            continue;
-        }
-
-        int score =
-            prospero_embedded_subtitle_score_stream(
-                stream
-            );
-
-        if (score > best_score) {
-            best_score = score;
-            best_stream = (int)index;
-        }
-    }
-
-    
-    /*
-     * D-pad track cycling may request a specific embedded stream.
-     */
-    if (
-        prospero_subtitle_requested_stream >= 0
-    ) {
-        int requested =
-            prospero_subtitle_requested_stream;
-
-        if (
-            requested <
-            (int)format->nb_streams
-        ) {
-            AVStream *requested_stream =
-                format->streams[requested];
-
-            if (
-                requested_stream &&
-                requested_stream->codecpar &&
-                requested_stream->codecpar->codec_type ==
-                    AVMEDIA_TYPE_SUBTITLE &&
-                prospero_embedded_subtitle_supported(
-                    requested_stream->codecpar->codec_id
-                )
-            ) {
-                best_stream = requested;
-            }
-        }
-    }
-
-if (best_stream < 0) {
-        if (found_pgs) {
-            toast(
-                "SUBTITLES",
-                "PGS NOT SUPPORTED YET"
-            );
-        }
-
-        return 0;
-    }
-
-    AVStream *stream =
-        format->streams[best_stream];
-
-    enum AVCodecID codec_id =
-        stream->codecpar->codec_id;
-
-    prospero_embedded_subtitle_stream_index =
-        best_stream;
-
-    prospero_embedded_subtitle_codec_id =
-        codec_id;
-
-    dbg_sub_cid = (int)codec_id;
-
-    prospero_embedded_subtitle_reset();
-
-    /*
-     * Matroska SubRip packets already contain plain subtitle text.
-     * Decode them directly when the PS5 FFmpeg build does not include
-     * a registered SubRip decoder.
-     */
-    if (codec_id != AV_CODEC_ID_SUBRIP) {
-        const AVCodec *decoder =
-            avcodec_find_decoder(
-                codec_id
-            );
-
-        if (!decoder) {
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            toast(
-                "SUBTITLES",
-                "TEXT DECODER NOT FOUND"
-            );
-
-            return 0;
-        }
-
-        AVCodecContext *context =
-            avcodec_alloc_context3(
-                decoder
-            );
-
-        if (!context) {
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            return 0;
-        }
-
-        if (
-            avcodec_parameters_to_context(
-                context,
-                stream->codecpar
-            ) < 0
-        ) {
-            avcodec_free_context(
-                &context
-            );
-
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            return 0;
-        }
-
-        context->pkt_timebase =
-            stream->time_base;
-
-        if (
-            avcodec_open2(
-                context,
-                decoder,
-                NULL
-            ) < 0
-        ) {
-            avcodec_free_context(
-                &context
-            );
-
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            toast(
-                "SUBTITLES",
-                "TEXT DECODER FAILED"
-            );
-
-            return 0;
-        }
-
-        prospero_embedded_subtitle_ctx =
-            context;
-    }
-
-    const char *codec_name =
-        avcodec_get_name(
-            codec_id
-        );
-
-    const char *language_name =
-        "UNSPECIFIED";
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (
-        language &&
-        language->value &&
-        language->value[0]
-    ) {
-        language_name =
-            language->value;
-    }
-
-    char message[128];
-
-    snprintf(
-        message,
-        sizeof(message),
-        "%s / %s",
-        language_name,
-        codec_name
-            ? codec_name
-            : "TEXT"
-    );
-
-    toast(
-        "EMBEDDED SUBTITLES",
-        message
-    );
-
-    return 1;
-}
-
-
-static const char *
-prospero_embedded_subtitle_ass_payload(
-    const char *ass
-) {
-    if (!ass) {
-        return NULL;
-    }
-
-    int fields_to_skip =
-        strncmp(
-            ass,
-            "Dialogue:",
-            9
-        ) == 0
-            ? 9
-            : 8;
-
-    const char *cursor = ass;
-    int comma_count = 0;
-
-    while (*cursor) {
-        if (*cursor == ',') {
-            comma_count++;
-
-            if (
-                comma_count >=
-                fields_to_skip
-            ) {
-                return cursor + 1;
-            }
-        }
-
-        cursor++;
-    }
-
-    return ass;
-}
-
-
-static void prospero_embedded_subtitle_extract_text(
-    AVSubtitle *subtitle,
-    char *output,
-    size_t output_size
-) {
-    if (
-        !subtitle ||
-        !output ||
-        output_size == 0
-    ) {
-        return;
-    }
-
-    output[0] = 0;
-
-    for (
-        unsigned int index = 0;
-        index < subtitle->num_rects;
-        index++
-    ) {
-        AVSubtitleRect *rectangle =
-            subtitle->rects[index];
-
-        if (!rectangle) {
-            continue;
-        }
-
-        const char *raw_text = NULL;
-
-        if (
-            rectangle->text &&
-            rectangle->text[0]
-        ) {
-            raw_text =
-                rectangle->text;
-        } else if (
-            rectangle->ass &&
-            rectangle->ass[0]
-        ) {
-            raw_text =
-                prospero_embedded_subtitle_ass_payload(
-                    rectangle->ass
-                );
-        }
-
-        if (!raw_text || !raw_text[0]) {
-            continue;
-        }
-
-        char cleaned[
-            PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-        ];
-
-        prospero_subtitle_clean_line(
-            raw_text,
-            cleaned,
-            sizeof(cleaned)
-        );
-
-        if (cleaned[0]) {
-            prospero_subtitle_append_text(
-                output,
-                output_size,
-                cleaned
-            );
-        }
-    }
-}
-
-
-static void prospero_embedded_subtitle_add_cue(
-    double start_seconds,
-    double end_seconds,
-    const char *text
-) {
-    if (
-        !text ||
-        !text[0] ||
-        end_seconds <= start_seconds
-    ) {
-        return;
-    }
-
-    pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
-    );
-
-    if (
-        prospero_embedded_subtitle_count >=
-        PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
-    ) {
-        prospero_embedded_subtitle_head =
-            (
-                prospero_embedded_subtitle_head +
-                1
-            ) %
-            PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
-
-        prospero_embedded_subtitle_count--;
-    }
-
-    int write_index =
-        (
-            prospero_embedded_subtitle_head +
-            prospero_embedded_subtitle_count
-        ) %
-        PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
-
-    ProsperoEmbeddedSubtitleCue *cue =
-        &prospero_embedded_subtitle_cues[
-            write_index
-        ];
-
-    cue->start_seconds =
-        start_seconds;
-
-    cue->end_seconds =
-        end_seconds;
-
-    snprintf(
-        cue->text,
-        sizeof(cue->text),
-        "%s",
-        text
-    );
-
-    prospero_embedded_subtitle_count++;
-
-    pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
-    );
-}
-
-
-static void prospero_embedded_subtitle_decode_packet(
-    AVPacket *packet
-) {
-    if (
-        !packet ||
-        packet->stream_index !=
-            prospero_embedded_subtitle_stream_index ||
-        !play_fmt ||
-        prospero_embedded_subtitle_stream_index < 0
-    ) {
-        return;
-    }
-
-    dbg_sub_entered++;
-
-    AVStream *stream =
-        play_fmt->streams[
-            prospero_embedded_subtitle_stream_index
-        ];
-
-    int64_t timestamp =
-        packet->pts != AV_NOPTS_VALUE
-            ? packet->pts
-            : packet->dts;
-
-    double base_seconds = 0.0;
-
-    if (timestamp != AV_NOPTS_VALUE) {
-        base_seconds =
-            timestamp *
-            av_q2d(
-                stream->time_base
-            );
-    }
-
-    double packet_duration = 0.0;
-
-    if (packet->duration > 0) {
-        packet_duration =
-            packet->duration *
-            av_q2d(
-                stream->time_base
-            );
-    }
-
-    if (packet_duration <= 0.0) {
-        packet_duration = 5.0;
-    }
-
-    /*
-     * Direct Matroska SubRip path.
-     */
-    if (
-        prospero_embedded_subtitle_codec_id ==
-        AV_CODEC_ID_SUBRIP
-    ) {
-        if (
-            !packet->data ||
-            packet->size <= 0
-        ) {
-            return;
-        }
-
-        size_t copy_size =
-            (size_t)packet->size;
-
-        if (
-            copy_size >=
-            PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-        ) {
-            copy_size =
-                PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE - 1;
-        }
-
-        char raw_text[
-            PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-        ];
-
-        memcpy(
-            raw_text,
-            packet->data,
-            copy_size
-        );
-
-        raw_text[copy_size] = 0;
-
-        char cleaned[
-            PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-        ];
-
-        prospero_subtitle_clean_line(
-            raw_text,
-            cleaned,
-            sizeof(cleaned)
-        );
-
-        if (cleaned[0]) {
-            dbg_sub_added++;
-
-            prospero_embedded_subtitle_add_cue(
-                base_seconds,
-                base_seconds + packet_duration,
-                cleaned
-            );
-        } else {
-            dbg_sub_blank++;
-        }
-
-        return;
-    }
-
-    if (!prospero_embedded_subtitle_ctx) {
-        return;
-    }
-
-    AVSubtitle subtitle;
-
-    memset(
-        &subtitle,
-        0,
-        sizeof(subtitle)
-    );
-
-    subtitle.pts =
-        AV_NOPTS_VALUE;
-
-    int got_subtitle = 0;
-
-    int result =
-        avcodec_decode_subtitle2(
-            prospero_embedded_subtitle_ctx,
-            &subtitle,
-            &got_subtitle,
-            packet
-        );
-
-    if (
-        result < 0 ||
-        !got_subtitle
-    ) {
-        avsubtitle_free(
-            &subtitle
-        );
-
-        return;
-    }
-
-    if (
-        subtitle.pts !=
-        AV_NOPTS_VALUE
-    ) {
-        base_seconds =
-            (double)subtitle.pts /
-            (double)AV_TIME_BASE;
-    }
-
-    double start_seconds =
-        base_seconds +
-        subtitle.start_display_time /
-            1000.0;
-
-    double end_seconds =
-        base_seconds +
-        subtitle.end_display_time /
-            1000.0;
-
-    if (
-        end_seconds <= start_seconds ||
-        end_seconds - start_seconds >
-            120.0
-    ) {
-        end_seconds =
-            start_seconds +
-            packet_duration;
-    }
-
-    if (end_seconds <= start_seconds) {
-        end_seconds =
-            start_seconds + 5.0;
-    }
-
-    char text[
-        PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE
-    ];
-
-    prospero_embedded_subtitle_extract_text(
-        &subtitle,
-        text,
-        sizeof(text)
-    );
-
-    if (text[0]) {
-        prospero_embedded_subtitle_add_cue(
-            start_seconds,
-            end_seconds,
-            text
-        );
-    }
-
-    avsubtitle_free(
-        &subtitle
-    );
-}
-
-
-static int prospero_embedded_subtitle_text_at(
-    double position,
-    char *output,
-    size_t output_size
-) {
-    if (
-        !output ||
-        output_size == 0
-    ) {
-        return 0;
-    }
-
-    output[0] = 0;
-
-    pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
-    );
-
-    const ProsperoEmbeddedSubtitleCue *
-        selected = NULL;
-
-    for (
-        int offset = 0;
-        offset <
-            prospero_embedded_subtitle_count;
-        offset++
-    ) {
-        int index =
-            (
-                prospero_embedded_subtitle_head +
-                offset
-            ) %
-            PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
-
-        const ProsperoEmbeddedSubtitleCue *cue =
-            &prospero_embedded_subtitle_cues[
-                index
-            ];
-
-        if (
-            position >= cue->start_seconds &&
-            position <= cue->end_seconds
-        ) {
-            if (
-                !selected ||
-                cue->start_seconds >
-                    selected->start_seconds
-            ) {
-                selected = cue;
-            }
-        }
-    }
-
-    if (selected) {
-        snprintf(
-            output,
-            output_size,
-            "%s",
-            selected->text
-        );
-    }
-
-    pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
-    );
-
-    return output[0] != 0;
-}
-
-/* PROSPERO_EMBEDDED_SUBTITLE_MODULE_END */
-
-static void prospero_subtitle_draw(
-    uint32_t *framebuffer,
-    double position,
-    int osd_visibility
-);
-
-/* PROSPERO_SRT_FORWARD_END */
-
-/* PROSPERO_EMBEDDED_SUBTITLE_FORWARD_START */
-
-/*
- * External SRT state/helpers are defined later in this translation
- * unit, after the embedded subtitle module.
- */
-static int prospero_subtitle_count;
-
-static void prospero_subtitle_clean_line(
-    const char *input,
-    char *output,
-    size_t output_size
-);
-
-static void prospero_subtitle_append_text(
-    char *destination,
-    size_t destination_size,
-    const char *line
-);
-
-
-
-static int prospero_embedded_subtitle_open(
-    AVFormatContext *format
-);
-
-static void prospero_embedded_subtitle_decode_packet(
-    AVPacket *packet
-);
-
-static void prospero_embedded_subtitle_reset(void);
-static void prospero_embedded_subtitle_close(void);
-
-static int prospero_embedded_subtitle_text_at(
-    double position,
-    char *output,
-    size_t output_size
-);
-
-/* PROSPERO_EMBEDDED_SUBTITLE_FORWARD_END */
 
 
 
@@ -3416,7 +1871,6 @@ void save_resume_position(void);
 double load_resume_position(const char *path);
 
 void stop_video_playback(void);
-int decode_next_video_frame(void);
 long long now_ms(void);
 
 void ffmpeg_test(void) {
@@ -3442,81 +1896,7 @@ void ffmpeg_test(void) {
 #define PROSPERO_AUDIO_OUT_PARAM_FORMAT_S16_STEREO 1
 
 
-void audio_beep_test(void) {
-    sceAudioOutInit();
 
-    int samples = 1024;
-    int h = sceAudioOutOpen(PROSPERO_USER_SERVICE_USER_ID_SYSTEM,
-                            PROSPERO_AUDIO_OUT_PORT_TYPE_MAIN,
-                            0, samples, 48000,
-                            PROSPERO_AUDIO_OUT_PARAM_FORMAT_S16_STEREO);
-
-    if (h < 1) {
-        toast("AUDIO", "OPEN FAIL");
-        return;
-    }
-
-    toast("AUDIO", "OPEN OK");
-
-    static int16_t buffer[1024 * 2];
-
-    for (int block = 0; block < 48; block++) {
-        for (int i = 0; i < samples; i++) {
-            int16_t sample = ((i + block * samples) % 54) < 27 ? 12000 : -12000;
-            buffer[i * 2 + 0] = sample;
-            buffer[i * 2 + 1] = sample;
-        }
-        sceAudioOutOutput(h, buffer);
-    }
-
-    sceAudioOutClose(h);
-    toast("AUDIO", "BEEP DONE");
-}
-
-static void* PS5_DrawTileThread(void* arg) {
-    const PS5_DrawChunk* chunk = (PS5_DrawChunk*)arg;
-    /* RC1-proven float pitch (not integer ceil) — integer ceil stacks 1080 UI */
-    for (int ind = chunk->src_start; ind < chunk->src_end; ind++) {
-        int x = ind % chunk->frame_width;
-        int y = ind / chunk->frame_width;
-        int ty = y / PS5_TILE_HEIGHT;
-        int tx = x / PS5_TILE_WIDTH;
-
-        int t = (int)(PS5_TILE_SIZE *
-                      (tx + ty * ((double)chunk->frame_width / PS5_TILE_WIDTH)));
-        int i = PS5_tilemap[y % PS5_TILE_HEIGHT][x % PS5_TILE_WIDTH];
-
-        chunk->dst[t + i] = chunk->src[ind];
-    }
-
-    return 0;
-}
-
-static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst, int frame_width, int frame_height)
-{
-    int chunk_size = frame_width * frame_height / PS5_THREAD_COUNT;
-    PS5_DrawChunk chunks[PS5_THREAD_COUNT];
-    pthread_t threads[PS5_THREAD_COUNT];
-
-    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
-        chunks[i].src = src;
-        chunks[i].dst = dst;
-        chunks[i].src_start = i * chunk_size;
-        chunks[i].src_end = (i + 1) * chunk_size;
-        chunks[i].frame_width = frame_width;
-        chunks[i].frame_height = frame_height;
-
-        if (i == PS5_THREAD_COUNT - 1) {
-            chunks[i].src_end = frame_width * frame_height;
-        }
-
-        pthread_create(&threads[i], 0, &PS5_DrawTileThread, &chunks[i]);
-    }
-
-    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
-        pthread_join(threads[i], 0);
-    }
-}
 
 /* ===========================================================================
  * EVO: framebuffer screenshot.
@@ -4300,16 +2680,6 @@ void file_action(const char *name) {
     }
 }
 
-void usb_scan_test(void) {
-    char msg[128];
-
-    int c0 = count_files_in_path("/mnt/usb0");
-    int c1 = count_files_in_path("/mnt/usb1");
-    int cm = count_files_in_path("/mnt");
-
-    snprintf(msg, sizeof(msg), "mnt:%d usb0:%d usb1:%d", cm, c0, c1);
-    toast("USB SCAN", msg);
-}
 
 void draw_char(uint32_t *fb, int x, int y, char c, uint32_t color, int scale) {
     if (c >= 'a' && c <= 'z') c = c - 32;
@@ -4538,11 +2908,6 @@ void usb_go_back(void) {
 
 
 
-void format_time(int seconds, char *out, int size) {
-    int m = seconds / 60;
-    int s = seconds % 60;
-    snprintf(out, size, "%02d:%02d", m, s);
-}
 
 
 static uint16_t le16(unsigned char *p) {
@@ -4690,7 +3055,7 @@ static void rr_fill(
     uint32_t color
 );
 
-static void rr_text(
+void rr_text(
     uint32_t *fb,
     int x,
     int y,
@@ -5048,10 +3413,6 @@ double load_resume_position(const char *path) {
 }
 
 
-#if PP_BACKEND_ENABLED
-static void pp_p10_scratch_free(void);
-#endif
-
 void stop_video_playback(void) {
     /* Any saved 4K surface belongs to the playback that is ending. Leaving it
      * set would restore a dead configuration the next time Media Info closes. */
@@ -5106,16 +3467,6 @@ void stop_video_playback(void) {
         play_sws = NULL;
     }
 
-    if (play_frame) {
-        av_frame_free(&play_frame);
-        play_frame = NULL;
-    }
-
-    if (play_pkt) {
-        av_packet_free(&play_pkt);
-        play_pkt = NULL;
-    }
-
     if (audio_handle >= 1) {
         sceAudioOutClose(audio_handle);
         audio_handle = -1;
@@ -5128,9 +3479,9 @@ void stop_video_playback(void) {
         audio_ctx = NULL;
     }
 
-    if (play_ctx) {
-        avcodec_free_context(&play_ctx);
-        play_ctx = NULL;
+    if (g_vdec) {
+        evo_vdec_close(g_vdec);
+        g_vdec = NULL;
     }
 
     if (g_stream_io_ctx) {
@@ -5182,7 +3533,7 @@ void stop_video_playback(void) {
         pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
                               WIDTH, HEIGHT);
     }
-    pp_p10_scratch_free();
+    /* the 10-bit pack scratch is freed by evo_vdec_close() (A6) */
     g_4k_diag_active = 0;
     g_4k_suppress_audio = 0;
     g_4k_suppress_ui = 0;
@@ -5192,1244 +3543,25 @@ void stop_video_playback(void) {
 }
 
 
-#if PP_BACKEND_ENABLED
+
+
+
+
+
+
+/* PROSPERO_TRUE_AV_SEEK (demux thread + in-place seek) -> media/evo_demux.c (A5). */
+
+
+
+
+
+
 /*
- * Fast path for 10-bit planar 4:2:0: right-shift to 8-bit yuv420p, then use
- * the normal convert (not full swscale YUV->RGBA). Main10 soft-decode is still
- * heavy; this removes the second bottleneck.
+ * audio_get_sample / audio_float_to_s16 / mix_audio_frame_to_queue /
+ * audio_decode_thread_func and the AUDIO_TRACK_SWITCH block
+ * (prospero_audio_collect_streams / _build_label / _cycle_track) moved to
+ * media/src/evo_audio_out.c — see docs/modularisation-plan.md Track A / A3.
  */
-static uint8_t *s_p10_y = NULL;
-static uint8_t *s_p10_u = NULL;
-static uint8_t *s_p10_v = NULL;
-static int s_p10_w = 0;
-static int s_p10_h = 0;
-static int s_p10_pack_toasted = 0;
-
-static void pp_p10_scratch_free(void)
-{
-    free(s_p10_y); s_p10_y = NULL;
-    free(s_p10_u); s_p10_u = NULL;
-    free(s_p10_v); s_p10_v = NULL;
-    s_p10_w = 0;
-    s_p10_h = 0;
-    s_p10_pack_toasted = 0;
-}
-
-static int pp_p10_scratch_ensure(int w, int h)
-{
-    size_t ysz, csz;
-    if (w <= 0 || h <= 0 || (w & 1) || (h & 1))
-        return -1;
-    if (s_p10_y && s_p10_w == w && s_p10_h == h)
-        return 0;
-    pp_p10_scratch_free();
-    ysz = (size_t)w * (size_t)h;
-    csz = (size_t)(w / 2) * (size_t)(h / 2);
-    s_p10_y = (uint8_t *)malloc(ysz);
-    s_p10_u = (uint8_t *)malloc(csz);
-    s_p10_v = (uint8_t *)malloc(csz);
-    if (!s_p10_y || !s_p10_u || !s_p10_v) {
-        pp_p10_scratch_free();
-        return -2;
-    }
-    s_p10_w = w;
-    s_p10_h = h;
-    return 0;
-}
-
-static void pp_pack_plane_u16_to_u8(const uint8_t *src, int src_stride,
-                                    uint8_t *dst, int dst_stride,
-                                    int width, int height, int shift)
-{
-    int y, x;
-    for (y = 0; y < height; y++) {
-        const uint16_t *s = (const uint16_t *)(src + (size_t)y * (size_t)src_stride);
-        uint8_t *d = dst + (size_t)y * (size_t)dst_stride;
-        /* Unroll 8-wide — 10-bit pack was a multi-ms stall before convert */
-        x = 0;
-        for (; x + 8 <= width; x += 8) {
-            d[x + 0] = (uint8_t)(s[x + 0] >> shift);
-            d[x + 1] = (uint8_t)(s[x + 1] >> shift);
-            d[x + 2] = (uint8_t)(s[x + 2] >> shift);
-            d[x + 3] = (uint8_t)(s[x + 3] >> shift);
-            d[x + 4] = (uint8_t)(s[x + 4] >> shift);
-            d[x + 5] = (uint8_t)(s[x + 5] >> shift);
-            d[x + 6] = (uint8_t)(s[x + 6] >> shift);
-            d[x + 7] = (uint8_t)(s[x + 7] >> shift);
-        }
-        for (; x < width; x++)
-            d[x] = (uint8_t)(s[x] >> shift);
-    }
-}
-
-static int pp_map_yuv420p10_to_8(const AVFrame *frame, pp_frame *out, int64_t pts_us)
-{
-    int w = frame->width;
-    int h = frame->height;
-    int cw = w / 2;
-    int ch = h / 2;
-    const int shift = 2; /* 10-bit in low bits of uint16 */
-
-    if (pp_p10_scratch_ensure(w, h) != 0)
-        return -3;
-    if (!frame->data[0] || !frame->data[1] || !frame->data[2])
-        return -4;
-
-    pp_pack_plane_u16_to_u8(frame->data[0], frame->linesize[0],
-                            s_p10_y, w, w, h, shift);
-    pp_pack_plane_u16_to_u8(frame->data[1], frame->linesize[1],
-                            s_p10_u, cw, cw, ch, shift);
-    pp_pack_plane_u16_to_u8(frame->data[2], frame->linesize[2],
-                            s_p10_v, cw, cw, ch, shift);
-
-    memset(out, 0, sizeof(*out));
-    out->format = PP_FRAME_YUV420P;
-    out->width = (uint32_t)w;
-    out->height = (uint32_t)h;
-    out->pts_us = pts_us;
-    out->planes[0] = s_p10_y;
-    out->planes[1] = s_p10_u;
-    out->planes[2] = s_p10_v;
-    out->strides[0] = w;
-    out->strides[1] = cw;
-    out->strides[2] = cw;
-
-    if (!s_p10_pack_toasted) {
-        toast("CONVERT", "10-bit pack -> fast path");
-        s_p10_pack_toasted = 1;
-    }
-    return 0;
-}
-
-static int pp_map_avframe(const AVFrame *frame, pp_frame *out, int64_t pts_us)
-{
-    if (!frame || !out) return -1;
-    memset(out, 0, sizeof(*out));
-    out->width = (uint32_t)frame->width;
-    out->height = (uint32_t)frame->height;
-    out->pts_us = pts_us;
-    if (frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P) {
-        out->format = PP_FRAME_YUV420P;
-        out->planes[0] = frame->data[0];
-        out->planes[1] = frame->data[1];
-        out->planes[2] = frame->data[2];
-        out->strides[0] = frame->linesize[0];
-        out->strides[1] = frame->linesize[1];
-        out->strides[2] = frame->linesize[2];
-        return 0;
-    }
-    if (frame->format == AV_PIX_FMT_NV12) {
-        out->format = PP_FRAME_NV12;
-        out->planes[0] = frame->data[0];
-        out->planes[1] = frame->data[1];
-        out->strides[0] = frame->linesize[0];
-        out->strides[1] = frame->linesize[1];
-        return 0;
-    }
-    /* 10-bit 4:2:0 planar -> pack to 8-bit, keep fast convert */
-    if (frame->format == AV_PIX_FMT_YUV420P10LE ||
-        frame->format == AV_PIX_FMT_YUV420P10BE) {
-        return pp_map_yuv420p10_to_8(frame, out, pts_us);
-    }
-    return -2;
-}
-
-static int64_t pp_frame_pts_us(const AVFrame *frame)
-{
-    int64_t pts;
-    if (!frame || !play_fmt || video_stream_index < 0)
-        return 0;
-    if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
-        pts = frame->best_effort_timestamp;
-    else if (frame->pts != AV_NOPTS_VALUE)
-        pts = frame->pts;
-    else
-        return (int64_t)(video_clock_seconds * 1000000.0);
-    return av_rescale_q(pts, play_fmt->streams[video_stream_index]->time_base,
-                        (AVRational){1, 1000000});
-}
-#endif
-
-int convert_frame_to_rgb(AVFrame *frame) {
-    if (!frame) return 0;
-
-#if PP_BACKEND_ENABLED
-    if (g_pp_pb.active) {
-        pp_frame pf;
-        int64_t pts_us = pp_frame_pts_us(frame);
-        /* Wait briefly for deferred 4K VO — do not convert into dying buffers */
-        if (!g_vo_decode_gate) {
-            int spins = 0;
-            while (!g_vo_decode_gate && spins < 200) {
-                usleep(1000);
-                spins++;
-            }
-            if (!g_vo_decode_gate)
-                return 0; /* drop frame; VO not ready */
-        }
-        {
-            if (!g_first_frame_bc_done && g_vo_decode_gate) {
-                char d[80];
-                const char *pn = av_get_pix_fmt_name((enum AVPixelFormat)frame->format);
-                snprintf(d, sizeof(d), "fmt=%s %dx%d be=%d",
-                         pn ? pn : "?", frame->width, frame->height,
-                         (int)g_pp_backend);
-                pp_stage_bc_checkpoint("009_FIRST_FRAME_ENTER", d);
-                g_first_frame_bc_done = 1;
-            }
-        }
-        if (pp_map_avframe(frame, &pf, pts_us) == 0) {
-            g_pp_pb.cfg.aspect = prospero_view_mode_to_aspect();
-            g_pp_pb.stats.aspect = (int)g_pp_pb.cfg.aspect;
-            (void)pp_playback_push_frame(&g_pp_pb, &pf);
-            video_frame_loaded = pp_playback_has_display(&g_pp_pb);
-            return 1;
-        }
-        /* 10-bit / odd formats → sws (much slower). One-shot toast. */
-        {
-            static int s_sws_warned;
-            if (!s_sws_warned) {
-                const char *pn = av_get_pix_fmt_name((enum AVPixelFormat)frame->format);
-                char msg[80];
-                snprintf(msg, sizeof(msg), "slow path fmt=%s", pn ? pn : "?");
-                toast("CONVERT", msg);
-                s_sws_warned = 1;
-            }
-        }
-    }
-#endif
-
-    if (video_frame_w != frame->width || video_frame_h != frame->height || video_rotate_pixels[0] == NULL) {
-        pthread_mutex_lock(&video_frame_mutex);
-
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            if (video_rotate_pixels[i]) {
-                free(video_rotate_pixels[i]);
-                video_rotate_pixels[i] = NULL;
-            }
-        }
-
-        video_frame_w = frame->width;
-        video_frame_h = frame->height;
-        video_rotate_index = 0;
-        video_frame_loaded = 0;
-
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            video_rotate_pixels[i] = malloc(video_frame_w * video_frame_h * 4);
-            if (!video_rotate_pixels[i]) {
-                pthread_mutex_unlock(&video_frame_mutex);
-                return 0;
-            }
-        }
-
-        video_frame_pixels = video_rotate_pixels[0];
-        pthread_mutex_unlock(&video_frame_mutex);
-    }
-
-    if (!play_sws) {
-        play_sws = sws_getContext(
-            frame->width, frame->height, frame->format,
-            frame->width, frame->height, AV_PIX_FMT_RGBA,
-            SWS_BILINEAR, NULL, NULL, NULL
-        );
-
-        if (!play_sws) return 0;
-    }
-
-    int write_index = (video_rotate_index + 1) % VIDEO_ROTATE_BUFFERS;
-
-    uint8_t *dst_data[4] = {(uint8_t*)video_rotate_pixels[write_index], NULL, NULL, NULL};
-    int dst_linesize[4] = {video_frame_w * 4, 0, 0, 0};
-
-    sws_scale(play_sws, (const uint8_t * const*)frame->data,
-              frame->linesize, 0, frame->height,
-              dst_data, dst_linesize);
-
-    pthread_mutex_lock(&video_frame_mutex);
-    video_rotate_index = write_index;
-    video_frame_pixels = video_rotate_pixels[video_rotate_index];
-    video_frame_loaded = 1;
-    dbg_swaps++;
-    pthread_mutex_unlock(&video_frame_mutex);
-
-    return 1;
-}
-
-
-
-/* PROSPERO_TRUE_AV_SEEK_START */
-
-static pthread_mutex_t prospero_seek_mutex =
-    PTHREAD_MUTEX_INITIALIZER;
-
-static volatile int prospero_seek_pending = 0;
-static volatile int prospero_seek_in_progress = 0;
-
-static double prospero_seek_target_seconds = 0.0;
-static int prospero_seek_restore_paused = 0;
-
-
-static int prospero_request_inplace_seek(
-    double target_seconds,
-    int restore_paused
-) {
-    if (
-        !play_fmt ||
-        (video_stream_index < 0 && audio_stream_index < 0) ||
-        !current_media_path[0]
-    ) {
-        return 0;
-    }
-
-    if (target_seconds < 0.0) {
-        target_seconds = 0.0;
-    }
-
-    if (media_duration_sec > 1.0) {
-        double maximum =
-            media_duration_sec - 1.0;
-
-        if (maximum < 0.0) {
-            maximum = 0.0;
-        }
-
-        if (target_seconds > maximum) {
-            target_seconds = maximum;
-        }
-    }
-
-    player_paused = 1;
-    controls_last_used_ms = now_ms();
-
-    pthread_mutex_lock(
-        &prospero_seek_mutex
-    );
-
-    prospero_seek_target_seconds =
-        target_seconds;
-
-    prospero_seek_restore_paused =
-        restore_paused;
-
-    prospero_seek_pending = 1;
-
-    pthread_mutex_unlock(
-        &prospero_seek_mutex
-    );
-
-    return 1;
-}
-
-
-
-/* AUDIO_DECODE_THREAD_FORWARD_START */
-void *audio_decode_thread_func(void *arg);
-/* AUDIO_DECODE_THREAD_FORWARD_END */
-
-static int prospero_process_seek_request(void) {
-    double target_seconds;
-    int restore_paused;
-
-    pthread_mutex_lock(
-        &prospero_seek_mutex
-    );
-
-    if (!prospero_seek_pending) {
-        pthread_mutex_unlock(
-            &prospero_seek_mutex
-        );
-
-        return 0;
-    }
-
-    target_seconds =
-        prospero_seek_target_seconds;
-
-    restore_paused =
-        prospero_seek_restore_paused;
-
-    prospero_seek_pending = 0;
-    prospero_seek_in_progress = 1;
-
-    pthread_mutex_unlock(
-        &prospero_seek_mutex
-    );
-
-#if PP_BACKEND_ENABLED
-    pp_playback_notify_seek_begin(
-        &g_pp_pb,
-        (int64_t)(target_seconds * 1000000.0)
-    );
-#endif
-
-    /*
-     * Let decoder/output threads observe player_paused.
-     */
-    usleep(5000);
-
-    
-    /*
-     * Clear EOF immediately. This wakes the video and audio decoder
-     * loops while the seek and queue reset are being completed.
-     */
-    video_decode_done = 0;
-    video_decode_ready = 1;
-    dbg_read_fail = 0;
-
-packet_queue_clear(
-        &video_packet_queue
-    );
-
-    packet_queue_clear(
-        &audio_packet_queue
-    );
-
-    if (video_pending_pkt) {
-        av_packet_free(
-            &video_pending_pkt
-        );
-
-        video_pending_pkt = NULL;
-    }
-
-    if (video_video_pending_pkt) {
-        av_packet_free(
-            &video_video_pending_pkt
-        );
-
-        video_video_pending_pkt = NULL;
-    }
-
-    audio_queue_count = 0;
-    audio_queue_read = 0;
-    audio_queue_write = 0;
-    audio_accum_pos = 0;
-
-    double decoder_seek_seconds =
-        target_seconds;
-
-    /*
-     * Move slightly backward so inter-frame codecs can begin from
-     * a nearby keyframe.
-     */
-    /* Video: back up slightly for keyframe. Audio-only: seek near target. */
-    if (video_stream_index >= 0 && decoder_seek_seconds > 0.50) {
-        decoder_seek_seconds -= 0.50;
-    }
-
-    int seek_stream =
-        video_stream_index >= 0
-            ? video_stream_index
-            : audio_stream_index;
-
-    AVRational time_base =
-        play_fmt->streams[
-            seek_stream
-        ]->time_base;
-
-    int64_t seek_timestamp =
-        (int64_t)(
-            decoder_seek_seconds /
-            av_q2d(time_base)
-        );
-
-    int result =
-        av_seek_frame(
-            play_fmt,
-            seek_stream,
-            seek_timestamp,
-            AVSEEK_FLAG_BACKWARD
-        );
-
-    if (result >= 0) {
-        avformat_flush(play_fmt);
-
-        if (play_ctx) {
-            avcodec_flush_buffers(
-                play_ctx
-            );
-        }
-
-        if (play_frame) {
-            av_frame_unref(play_frame);
-        }
-
-        if (play_pkt) {
-            av_packet_unref(play_pkt);
-        }
-
-
-        if (audio_ctx) {
-            avcodec_flush_buffers(
-                audio_ctx
-            );
-        }
-
-        prospero_audio_resampler_reset();
-
-        if (
-            prospero_embedded_subtitle_ctx
-        ) {
-            avcodec_flush_buffers(
-                prospero_embedded_subtitle_ctx
-            );
-        }
-
-        prospero_embedded_subtitle_reset();
-
-        /*
-         * The UI position is base offset plus the new audio clock.
-         */
-        resume_base_offset_seconds =
-            target_seconds;
-
-        audio_samples_played = 0;
-        audio_samples_decoded = 0;
-
-        audio_clock_seconds = 0.0;
-        audio_pts_seconds = 0.0;
-        video_clock_seconds = 0.0;
-
-        first_audio_pts_seconds = -1.0;
-        first_video_pts_seconds = -1.0;
-
-        video_decode_done = 0;
-        dbg_read_fail = 0;
-
-        /*
-         * Older builds allowed the audio decoder thread to exit at
-         * EOF. Restart it if this session reached EOF before seeking.
-         */
-        if (
-            audio_ctx &&
-            !audio_decode_thread_running
-        ) {
-            audio_decode_thread_running = 1;
-
-            pthread_create(
-                &audio_decode_thread,
-                NULL,
-                audio_decode_thread_func,
-                NULL
-            );
-        }
-
-    } else {
-        toast(
-            "SEEK",
-            "Decoder seek failed"
-        );
-    }
-
-    prospero_seek_in_progress = 0;
-
-#if PP_BACKEND_ENABLED
-    pp_playback_notify_seek_end(
-        &g_pp_pb,
-        result >= 0,
-        0,
-        0
-    );
-    if (result >= 0 && !restore_paused)
-        pp_playback_resume(&g_pp_pb);
-#endif
-
-    player_paused =
-        restore_paused ? 1 : 0;
-
-    controls_last_used_ms =
-        now_ms();
-
-    return result >= 0;
-}
-
-
-void *demux_thread_func(void *arg) {
-    (void)arg;
-
-    AVPacket *pkt =
-        av_packet_alloc();
-
-    if (!pkt) {
-        return NULL;
-    }
-
-    while (demux_thread_running) {
-        /*
-         * Process seek requests before checking the paused state.
-         */
-        if (prospero_process_seek_request()) {
-            av_packet_unref(pkt);
-            continue;
-        }
-
-        if (player_paused) {
-            usleep(1000);
-            continue;
-        }
-
-        int read_result =
-            av_read_frame(
-                play_fmt,
-                pkt
-            );
-
-        if (read_result < 0) {
-            /*
-             * Keep the demux thread alive so seeking backward from EOF
-             * does not require reopening the file.
-             */
-            video_decode_done = 1;
-            usleep(5000);
-            continue;
-        }
-
-        video_decode_done = 0;
-
-        if (
-            pkt->stream_index ==
-            video_stream_index
-        ) {
-            int vq = packet_queue_count(&video_packet_queue);
-            /*
-             * Do not drop non-keyframes in demux — that freezes for a full GOP
-             * (often every 1–2s). Cap queue by waiting only.
-             */
-            while (
-                demux_thread_running &&
-                !player_paused &&
-                packet_queue_count(
-                    &video_packet_queue
-                ) >= video_packet_cap
-            ) {
-                usleep(playback_profile >= 3 ? 300 : 500);
-            }
-
-            if (
-                demux_thread_running &&
-                !player_paused
-            ) {
-                packet_queue_push(
-                    &video_packet_queue,
-                    pkt
-                );
-
-                dbg_video_packets++;
-            }
-        } else if (
-            pkt->stream_index ==
-            audio_stream_index
-        ) {
-            while (
-                demux_thread_running &&
-                !player_paused &&
-                packet_queue_count(
-                    &audio_packet_queue
-                ) >= audio_packet_cap
-            ) {
-                usleep(1000);
-            }
-
-            if (
-                demux_thread_running &&
-                !player_paused
-            ) {
-                packet_queue_push(
-                    &audio_packet_queue,
-                    pkt
-                );
-            }
-        }
-
-        if (
-            pkt->stream_index ==
-            prospero_embedded_subtitle_stream_index
-        ) {
-            dbg_sub_demuxed++;
-
-            prospero_embedded_subtitle_decode_packet(
-                pkt
-            );
-        }
-
-        av_packet_unref(pkt);
-    }
-
-    av_packet_free(&pkt);
-    return NULL;
-}
-
-/* PROSPERO_TRUE_AV_SEEK_END */
-
-
-
-void *video_decode_thread_func(void *arg) {
-    long long next_ms = 0;
-    double frame_ms = 33.333;
-
-    while (video_thread_running) {
-        if (
-            player_paused ||
-            screen != SCREEN_PLAYER ||
-            !video_decode_ready
-        ) {
-            usleep(1000);
-            next_ms = 0;
-            continue;
-        }
-
-        dbg_video_thread_alive++;
-
-#if PP_BACKEND_ENABLED
-        /* Audio-master wait is inside decode_next_video_frame. */
-        decode_next_video_frame();
-        usleep(playback_profile >= 2 ? 100 : 200);
-#else
-        if (video_fps > 1.0) frame_ms = 1000.0 / video_fps;
-
-        long long now = now_ms();
-
-        if (next_ms == 0) {
-            next_ms = now;
-        }
-
-        if (now >= next_ms) {
-            decode_next_video_frame();
-            next_ms += (long long)(frame_ms);
-
-            static double frac = 0.0;
-            frac += frame_ms - (long long)frame_ms;
-            if (frac >= 1.0) {
-                next_ms += 1;
-                frac -= 1.0;
-            }
-        } else {
-            usleep(500);
-        }
-#endif
-    }
-
-    return NULL;
-}
-
-static float audio_get_sample(AVFrame *af, int ch, int i) {
-    int channels = af->ch_layout.nb_channels;
-    if (channels <= 0) channels = 2;
-
-    if (ch >= channels) ch = channels - 1;
-    if (ch < 0) ch = 0;
-
-    if (af->format == AV_SAMPLE_FMT_FLTP) {
-        float *d = (float*)af->data[ch];
-        return d ? d[i] : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_FLT) {
-        float *d = (float*)af->data[0];
-        return d ? d[i * channels + ch] : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_S16P) {
-        int16_t *d = (int16_t*)af->data[ch];
-        return d ? ((float)d[i] / 32768.0f) : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_S16) {
-        int16_t *d = (int16_t*)af->data[0];
-        return d ? ((float)d[i * channels + ch] / 32768.0f) : 0.0f;
-    }
-
-    return 0.0f;
-}
-
-static int16_t audio_float_to_s16(float v) {
-    if (v > 1.0f) v = 1.0f;
-    if (v < -1.0f) v = -1.0f;
-    return (int16_t)(v * 30000.0f);
-}
-
-static void mix_audio_frame_to_queue(
-    AVFrame *frame
-) {
-    if (
-        !frame ||
-        frame->nb_samples <= 0
-    ) {
-        return;
-    }
-
-    if (
-        !prospero_audio_resampler_configure(
-            frame
-        )
-    ) {
-        return;
-    }
-
-    int input_rate =
-        frame->sample_rate > 0
-            ? frame->sample_rate
-            : prospero_audio_input_rate;
-
-    int64_t delay =
-        swr_get_delay(
-            prospero_audio_swr,
-            input_rate
-        );
-
-    int output_capacity =
-        (int)av_rescale_rnd(
-            delay + frame->nb_samples,
-            prospero_audio_output_rate,
-            input_rate,
-            AV_ROUND_UP
-        );
-
-    if (output_capacity <= 0) {
-        return;
-    }
-
-    uint8_t *output_buffer = NULL;
-    int output_linesize = 0;
-
-    if (
-        av_samples_alloc(
-            &output_buffer,
-            &output_linesize,
-            evo_audio_channels,   /* EVO: was hardcoded 2 */
-            output_capacity,
-            AV_SAMPLE_FMT_S16,
-            0
-        ) < 0
-    ) {
-        return;
-    }
-
-    uint8_t *output_planes[1] = {
-        output_buffer
-    };
-
-    int converted =
-        swr_convert(
-            prospero_audio_swr,
-            output_planes,
-            output_capacity,
-            (const uint8_t * const *)
-                frame->extended_data,
-            frame->nb_samples
-        );
-
-    if (converted > 0) {
-        int16_t *samples =
-            (int16_t *)output_buffer;
-
-        for (
-            int index = 0;
-            index < converted &&
-            audio_decode_thread_running;
-            index++
-        ) {
-            /* EVO: copy every channel, not just L/R. Both buffers are
-             * interleaved with the same channel count, so this is a straight
-             * per-frame copy of evo_audio_channels samples. */
-            for (int c = 0; c < evo_audio_channels; c++) {
-                audio_accum[audio_accum_pos * evo_audio_channels + c] =
-                    samples[index * evo_audio_channels + c];
-            }
-
-            audio_accum_pos++;
-            audio_samples_decoded++;
-
-            if (
-                audio_accum_pos >=
-                AUDIO_BLOCK_SAMPLES
-            ) {
-                while (
-                    audio_decode_thread_running &&
-                    audio_queue_count >=
-                        AUDIO_QUEUE_BLOCKS - 2
-                ) {
-                    usleep(1000);
-                }
-
-                if (!audio_decode_thread_running) {
-                    break;
-                }
-
-                audio_queue_push(audio_accum);
-                audio_accum_pos = 0;
-            }
-        }
-    }
-
-    av_freep(&output_buffer);
-}
-
-
-void *audio_decode_thread_func(void *arg) {
-    AVFrame *af = av_frame_alloc();
-    if (!af) return NULL;
-
-    while (audio_decode_thread_running) {
-        if (player_paused || screen != 2) {
-            usleep(1000);
-            continue;
-        }
-
-        while (audio_decode_thread_running && audio_queue_count > 10) {
-            usleep(1000);
-        }
-
-        AVPacket *pkt = packet_queue_pop(&audio_packet_queue);
-        if (!pkt) {
-            /*
-             * Do not terminate at EOF. The demux thread stays alive
-             * so an in-place backward seek can refill this queue.
-             */
-            usleep(
-                video_decode_done
-                    ? 5000
-                    : 1000
-            );
-
-            continue;
-        }
-
-        if (avcodec_send_packet(audio_ctx, pkt) == 0) {
-            while (audio_decode_thread_running && avcodec_receive_frame(audio_ctx, af) == 0) {
-                if (af->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
-                    audio_pts_seconds = af->pts * av_q2d(play_fmt->streams[audio_stream_index]->time_base);
-                    if (first_audio_pts_seconds < 0.0)
-                        first_audio_pts_seconds = audio_pts_seconds;
-                }
-
-                mix_audio_frame_to_queue(af);
-                av_frame_unref(af);
-            }
-        }
-
-        av_packet_free(&pkt);
-    }
-
-    av_frame_free(&af);
-    return NULL;
-}
-
-
-/* PROSPERO_AUDIO_TRACK_SWITCH_START */
-
-#define PROSPERO_AUDIO_TRACK_LIMIT 32
-
-static int prospero_audio_requested_stream = -1;
-static char prospero_audio_active_label[128] = {0};
-
-int start_video_playback(const char *path);
-
-
-static int prospero_audio_collect_streams(
-    AVFormatContext *format,
-    int *indexes,
-    int maximum
-) {
-    if (!format || !indexes || maximum <= 0) {
-        return 0;
-    }
-
-    int count = 0;
-
-    for (
-        unsigned int index = 0;
-        index < format->nb_streams &&
-        count < maximum;
-        index++
-    ) {
-        AVStream *stream =
-            format->streams[index];
-
-        if (
-            !stream ||
-            !stream->codecpar ||
-            stream->codecpar->codec_type !=
-                AVMEDIA_TYPE_AUDIO
-        ) {
-            continue;
-        }
-
-        if (
-            !avcodec_find_decoder(
-                stream->codecpar->codec_id
-            )
-        ) {
-            continue;
-        }
-
-        indexes[count++] =
-            (int)index;
-    }
-
-    return count;
-}
-
-
-static void prospero_audio_build_label(
-    AVFormatContext *format,
-    int selected_stream,
-    char *output,
-    size_t output_size
-) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    snprintf(
-        output,
-        output_size,
-        "UNKNOWN AUDIO"
-    );
-
-    if (
-        !format ||
-        selected_stream < 0 ||
-        selected_stream >=
-            (int)format->nb_streams
-    ) {
-        return;
-    }
-
-    int indexes[
-        PROSPERO_AUDIO_TRACK_LIMIT
-    ];
-
-    int count =
-        prospero_audio_collect_streams(
-            format,
-            indexes,
-            PROSPERO_AUDIO_TRACK_LIMIT
-        );
-
-    int ordinal = 0;
-
-    for (int index = 0; index < count; index++) {
-        if (indexes[index] == selected_stream) {
-            ordinal = index + 1;
-            break;
-        }
-    }
-
-    AVStream *stream =
-        format->streams[selected_stream];
-
-    AVCodecParameters *parameters =
-        stream->codecpar;
-
-    const AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    const char *language_text =
-        (
-            language &&
-            language->value &&
-            language->value[0]
-        )
-            ? language->value
-            : "und";
-
-    const char *codec_name =
-        avcodec_get_name(
-            parameters->codec_id
-        );
-
-    int channels =
-        parameters->ch_layout.nb_channels;
-
-    snprintf(
-        output,
-        output_size,
-        "%d/%d  %s  %s  %dCH",
-        ordinal,
-        count,
-        language_text,
-        codec_name
-            ? codec_name
-            : "unknown",
-        channels
-    );
-}
-
-
-static void prospero_audio_cycle_track(void)
-{
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt
-    ) {
-        return;
-    }
-
-    int indexes[
-        PROSPERO_AUDIO_TRACK_LIMIT
-    ];
-
-    int count =
-        prospero_audio_collect_streams(
-            play_fmt,
-            indexes,
-            PROSPERO_AUDIO_TRACK_LIMIT
-        );
-
-    if (count <= 0) {
-        toast(
-            "AUDIO TRACK",
-            "NO SUPPORTED AUDIO"
-        );
-
-        return;
-    }
-
-    if (count == 1) {
-        prospero_audio_build_label(
-            play_fmt,
-            indexes[0],
-            prospero_audio_active_label,
-            sizeof(prospero_audio_active_label)
-        );
-
-        toast(
-            "AUDIO TRACK",
-            "ONLY ONE TRACK"
-        );
-
-        return;
-    }
-
-    int current_slot = 0;
-
-    for (int index = 0; index < count; index++) {
-        if (
-            indexes[index] ==
-            audio_stream_index
-        ) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        (current_slot + 1) % count;
-
-    int next_stream =
-        indexes[next_slot];
-
-    int restore_paused =
-        player_paused;
-
-    int restore_subtitles =
-        prospero_subtitle_enabled;
-
-    int subtitle_request = -2;
-
-    if (
-        prospero_subtitle_use_external &&
-        prospero_subtitle_count > 0
-    ) {
-        subtitle_request = -1;
-    } else if (
-        !prospero_subtitle_use_external &&
-        prospero_embedded_subtitle_stream_index >= 0
-    ) {
-        subtitle_request =
-            prospero_embedded_subtitle_stream_index;
-    }
-
-    double position =
-        resume_base_offset_seconds +
-        (
-            audio_stream_index >= 0
-                ? audio_clock_seconds
-                : video_clock_seconds
-        );
-
-    if (position < 0.0) {
-        position = 0.0;
-    }
-
-    if (
-        media_duration_sec > 0.0 &&
-        position > media_duration_sec
-    ) {
-        position = media_duration_sec;
-    }
-
-    char playback_path[1024];
-
-    snprintf(
-        playback_path,
-        sizeof(playback_path),
-        "%s",
-        current_media_path
-    );
-
-    prospero_audio_requested_stream =
-        next_stream;
-
-    prospero_subtitle_requested_stream =
-        subtitle_request;
-
-    /*
-     * Playback startup subtracts one second for keyframe preroll.
-     */
-    requested_resume_seek_pos =
-        position > 3.0
-            ? position + 1.0
-            : position;
-
-    resume_base_offset_seconds =
-        position;
-
-    if (
-        !start_video_playback(
-            playback_path
-        )
-    ) {
-        prospero_audio_requested_stream = -1;
-
-        toast(
-            "AUDIO TRACK",
-            "SWITCH FAILED"
-        );
-
-        return;
-    }
-
-    player_paused =
-        restore_paused;
-
-    prospero_subtitle_enabled =
-        restore_subtitles;
-
-    prospero_audio_build_label(
-        play_fmt,
-        audio_stream_index,
-        prospero_audio_active_label,
-        sizeof(prospero_audio_active_label)
-    );
-
-    controls_last_used_ms =
-        now_ms();
-
-    toast(
-        "AUDIO TRACK",
-        prospero_audio_active_label
-    );
-}
-
-/* PROSPERO_AUDIO_TRACK_SWITCH_END */
-
 
 
 /* PROSPERO_ERROR_MESSAGES_V4 */
@@ -6733,9 +3865,6 @@ int start_video_playback(const char *path) {
             ) {
                 continue;
             }
-
-            int audio_ch =
-                par->ch_layout.nb_channels;
 
             int audio_rate =
                 par->sample_rate;
@@ -7085,31 +4214,11 @@ int start_video_playback(const char *path) {
                 if (decoder_thread_count > 16) decoder_thread_count = 16;
             }
 
-            const AVCodec *dec = avcodec_find_decoder(par->codec_id);
-            if (!dec) {
+            if (!avcodec_find_decoder(par->codec_id)) {
                 prospero_codec_error(
                     "VIDEO UNSUPPORTED",
                     par->codec_id,
                     "decoder unavailable"
-                );
-                stop_video_playback();
-                return 0;
-            }
-
-            play_ctx = avcodec_alloc_context3(dec);
-            if (!play_ctx) {
-                toast(
-                    "VIDEO ERROR",
-                    "Could not allocate decoder context"
-                );
-                stop_video_playback();
-                return 0;
-            }
-
-            if (avcodec_parameters_to_context(play_ctx, par) < 0) {
-                toast(
-                    "VIDEO ERROR",
-                    "Invalid video stream parameters"
                 );
                 stop_video_playback();
                 return 0;
@@ -7140,46 +4249,56 @@ int start_video_playback(const char *path) {
                     audio_packet_cap = 96;
             }
 
-            play_ctx->thread_count = decoder_thread_count;
+            /*
+             * Resolve the codec tuning here (it depends on playback_profile /
+             * current_profile) and hand it to evo_vdec_open — the avcodec_*
+             * calls themselves live in media/src/evo_vdec_ffmpeg.c now (A6).
+             */
+            evo_vdec_open_params vp;
+            memset(&vp, 0, sizeof(vp));
+            vp.backend      = EVO_VDEC_BACKEND_FFMPEG;
+            vp.codec_id     = par->codec_id;
+            vp.width        = par->width;
+            vp.height       = par->height;
+            vp.avctx_params = par;
+            vp.thread_count = decoder_thread_count;
             /* Frame threading usually wins for HEVC; slice+frame can thrash. */
-            if (par->codec_id == AV_CODEC_ID_HEVC)
-                play_ctx->thread_type = FF_THREAD_FRAME;
-            else
-                play_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
-
-#ifdef AV_CODEC_FLAG2_FAST
-            /* Compatibility: full quality decode. Else speed path for hard content. */
-            if (current_profile != PROFILE_COMPATIBILITY) {
-                if (playback_profile >= 2 ||
-                    par->codec_id == AV_CODEC_ID_HEVC ||
-                    current_profile == PROFILE_PERFORMANCE)
-                    play_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
-            }
-#endif
-
+            vp.thread_type  = (par->codec_id == AV_CODEC_ID_HEVC)
+                                ? FF_THREAD_FRAME
+                                : (FF_THREAD_FRAME | FF_THREAD_SLICE);
+            /* Compatibility: full quality. Else speed path for hard content. */
+            vp.flag2_fast   = (current_profile != PROFILE_COMPATIBILITY) &&
+                              (playback_profile >= 2 ||
+                               par->codec_id == AV_CODEC_ID_HEVC ||
+                               current_profile == PROFILE_PERFORMANCE);
+            vp.skip_loop_filter = EVO_VDEC_KEEP;
+            vp.skip_frame       = EVO_VDEC_KEEP;
+            vp.skip_idct        = EVO_VDEC_KEEP;
             if (current_profile == PROFILE_COMPATIBILITY) {
-                play_ctx->skip_loop_filter = AVDISCARD_DEFAULT;
-                play_ctx->skip_frame = AVDISCARD_DEFAULT;
-                play_ctx->skip_idct = AVDISCARD_DEFAULT;
+                vp.skip_loop_filter = AVDISCARD_DEFAULT;
+                vp.skip_frame       = AVDISCARD_DEFAULT;
+                vp.skip_idct        = AVDISCARD_DEFAULT;
             } else if (current_profile == PROFILE_PERFORMANCE &&
                        (playback_profile >= 1 ||
                         par->codec_id == AV_CODEC_ID_HEVC)) {
-                play_ctx->skip_loop_filter = AVDISCARD_NONREF;
-                play_ctx->skip_frame = AVDISCARD_DEFAULT;
+                vp.skip_loop_filter = AVDISCARD_NONREF;
+                vp.skip_frame       = AVDISCARD_DEFAULT;
             } else if (playback_profile == 3) {
                 /* Soft UHD HEVC only: mild quality trade for realtime */
-                play_ctx->skip_loop_filter = AVDISCARD_NONREF;
-                play_ctx->skip_frame = AVDISCARD_DEFAULT;
+                vp.skip_loop_filter = AVDISCARD_NONREF;
+                vp.skip_frame       = AVDISCARD_DEFAULT;
             } else if (playback_profile == 2) {
-                play_ctx->skip_loop_filter = AVDISCARD_DEFAULT;
-                play_ctx->skip_frame = AVDISCARD_DEFAULT;
-                play_ctx->skip_idct = AVDISCARD_DEFAULT;
+                vp.skip_loop_filter = AVDISCARD_DEFAULT;
+                vp.skip_frame       = AVDISCARD_DEFAULT;
+                vp.skip_idct        = AVDISCARD_DEFAULT;
             } else if (par->codec_id == AV_CODEC_ID_HEVC) {
-                play_ctx->skip_loop_filter = AVDISCARD_NONREF;
-                play_ctx->skip_frame = AVDISCARD_DEFAULT;
+                vp.skip_loop_filter = AVDISCARD_NONREF;
+                vp.skip_frame       = AVDISCARD_DEFAULT;
             }
 
-            if (avcodec_open2(play_ctx, dec, NULL) < 0) {
+            evo_vdec_backend vdec_chosen = EVO_VDEC_BACKEND_FFMPEG;
+            g_vdec = evo_vdec_open(&vp, &vdec_chosen);
+            if (!g_vdec) {
                 prospero_codec_error(
                     "VIDEO ERROR",
                     par->codec_id,
@@ -7255,17 +4374,7 @@ int start_video_playback(const char *path) {
         pp_stage_bc_checkpoint("008B_NO_AUDIO", "no usable audio decoder/stream");
     }
 
-    play_pkt = av_packet_alloc();
-    play_frame = av_frame_alloc();
-
-    if (!play_pkt || !play_frame) {
-        toast(
-            "MEMORY ERROR",
-            "Could not allocate decoder buffers"
-        );
-        stop_video_playback();
-        return 0;
-    }
+    /* The decode packet/frame scratch is owned by evo_vdec now (A6). */
 
     player_elapsed = 0;
     player_paused = 0;
@@ -7293,7 +4402,7 @@ int start_video_playback(const char *path) {
 
         if (av_seek_frame(play_fmt, seek_stream, seek_ts,
                           AVSEEK_FLAG_BACKWARD) >= 0) {
-            if (play_ctx) avcodec_flush_buffers(play_ctx);
+            evo_vdec_flush(g_vdec);
             if (audio_ctx) {
                 avcodec_flush_buffers(audio_ctx);
                 prospero_audio_resampler_reset();
@@ -7371,189 +4480,7 @@ long long now_ms(void) {
     return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL;
 }
 
-static void prospero_video_queue_drain_nonkey(int max_packets)
-{
-    /*
-     * Drop only non-keyframes so the decoder never waits on a full flush
-     * (flush → freeze until next key every few seconds).
-     */
-    int n = 0;
-    while (n < max_packets) {
-        AVPacket *drop = packet_queue_pop(&video_packet_queue);
-        if (!drop)
-            break;
-        if (drop->flags & AV_PKT_FLAG_KEY) {
-            /* Put keyframe back as pending so we don't skip the GOP start */
-            if (!video_video_pending_pkt)
-                video_video_pending_pkt = drop;
-            else
-                av_packet_free(&drop);
-            break;
-        }
-        av_packet_free(&drop);
-        n++;
-    }
-}
 
-int decode_next_video_frame(void) {
-    if (!video_decode_ready || player_paused) return 0;
-
-    /*
-     * Audio-master pacing:
-     *  - If video is AHEAD of audio: wait (full remaining gap, chunked) so
-     *    picture is not "very fast".
-     *  - If video is slightly late: present now (no freeze).
-     *  - If video is badly late: drain non-keys, still present this frame.
-     *  - Always convert (skip-convert = frozen picture).
-     *  - Never avcodec_flush mid-stream.
-     */
-    for (int attempts = 0; attempts < 48; attempts++) {
-        int recv_ret = avcodec_receive_frame(play_ctx, play_frame);
-        if (recv_ret == 0) {
-            double video_rel = 0.0;
-            double audio_rel = 0.0;
-            double behind = 0.0;
-            int wait_iters = 0;
-
-            dbg_video_frames++;
-            dbg_last_pts = play_frame->pts;
-            perf_decode_frames++;
-
-            if (play_frame->pts != AV_NOPTS_VALUE && play_fmt &&
-                video_stream_index >= 0) {
-                video_clock_seconds =
-                    play_frame->pts *
-                    av_q2d(play_fmt->streams[video_stream_index]->time_base);
-                if (first_video_pts_seconds < 0.0)
-                    first_video_pts_seconds = video_clock_seconds;
-            }
-
-            video_rel = video_clock_seconds - first_video_pts_seconds;
-            if (video_rel < 0.0)
-                video_rel = 0.0;
-            audio_rel = audio_clock_seconds;
-            behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
-
-            if (audio_rel > 0.05) {
-                /*
-                 * Video ahead of audio: wait for audio, but NEVER freeze the
-                 * picture if audio clock stops (underrun / 44.1k stall).
-                 * Y2JB-class clips froze ~2s in when wait never broke out.
-                 */
-                double audio_at_wait = audio_rel;
-                int stuck_iters = 0;
-
-                while (behind < -0.008 &&
-                       !player_paused &&
-                       video_decode_ready &&
-                       wait_iters < 100) {
-                    int sleep_us = (int)((-behind) * 1000000.0);
-                    if (sleep_us > 15000)
-                        sleep_us = 15000;
-                    if (sleep_us < 500)
-                        sleep_us = 500;
-                    usleep(sleep_us);
-                    audio_rel = audio_clock_seconds;
-                    behind = audio_rel - video_rel;
-                    wait_iters++;
-                    if (audio_rel <= audio_at_wait + 0.0005)
-                        stuck_iters++;
-                    else {
-                        audio_at_wait = audio_rel;
-                        stuck_iters = 0;
-                    }
-                    /* ~120ms with no audio progress → present anyway */
-                    if (stuck_iters >= 8)
-                        break;
-                }
-
-                /* Badly late vs audio: drop queued non-keys, still show frame */
-                if (behind > 0.45)
-                    prospero_video_queue_drain_nonkey(24);
-            } else if (video_fps > 1.0) {
-                /*
-                 * Audio not running yet: pace by nominal frame interval so
-                 * we don't race through the open before audio primes.
-                 */
-                static double s_last_present_host = -1.0;
-                struct timespec ts;
-                double now_s, target_s, frame_s;
-
-                /* Reset host pacer on a fresh open (no first video PTS yet) */
-                if (first_video_pts_seconds < 0.0 &&
-                    audio_samples_played == 0)
-                    s_last_present_host = -1.0;
-
-                clock_gettime(CLOCK_MONOTONIC, &ts);
-                now_s = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-                frame_s = 1.0 / video_fps;
-                if (frame_s < 0.016)
-                    frame_s = 0.016;
-                if (frame_s > 0.050)
-                    frame_s = 0.050;
-                if (s_last_present_host > 0.0) {
-                    target_s = s_last_present_host + frame_s;
-                    if (now_s < target_s) {
-                        int sleep_us = (int)((target_s - now_s) * 1000000.0);
-                        if (sleep_us > 40000)
-                            sleep_us = 40000;
-                        if (sleep_us > 500)
-                            usleep(sleep_us);
-                    }
-                }
-                clock_gettime(CLOCK_MONOTONIC, &ts);
-                s_last_present_host =
-                    (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-            }
-
-#if !PP_BACKEND_ENABLED
-            {
-                double avdiff = audio_pts_seconds - video_clock_seconds;
-                if (audio_pts_seconds > 0.1 && avdiff < -0.04) {
-                    int sleep_us = (int)((-avdiff - 0.04) * 1000000.0);
-                    if (sleep_us > 60000)
-                        sleep_us = 60000;
-                    if (sleep_us < 1000)
-                        sleep_us = 1000;
-                    usleep(sleep_us);
-                }
-            }
-#endif
-
-            /* Always convert+show — continuous picture */
-            convert_frame_to_rgb(play_frame);
-            av_frame_unref(play_frame);
-            return 1;
-        }
-
-        if (!video_video_pending_pkt) {
-            video_video_pending_pkt = packet_queue_pop(&video_packet_queue);
-        }
-
-        if (!video_video_pending_pkt) {
-            if (video_decode_done)
-                return 0;
-            usleep(100);
-            return 1;
-        }
-
-        int send_ret = avcodec_send_packet(play_ctx, video_video_pending_pkt);
-
-        if (send_ret == 0) {
-            av_packet_free(&video_video_pending_pkt);
-            continue;
-        }
-
-        if (send_ret == AVERROR(EAGAIN)) {
-            usleep(50);
-            continue;
-        }
-
-        av_packet_free(&video_video_pending_pkt);
-    }
-
-    return 1;
-}
 
 /*
  * Paints the decoded frame into fb and leaves every pixel of the frame
@@ -7805,9 +4732,6 @@ void format_time_mmss(char *out, size_t out_size, double sec) {
 #define UI_MUTED     0xFF9BA8B8
 #define UI_DARK_TEXT 0xFF101010
 
-void ui_clear_modern(uint32_t *fb) {
-    for (int i = 0; i < WIDTH * HEIGHT; i++) fb[i] = UI_BG;
-}
 
 
 
@@ -7947,21 +4871,8 @@ void ui_selected_panel(uint32_t *fb, int x, int y, int w, int h) {
     ui_rr_selected(fb, x, y, w, h);
 }
 
-void ui_header_modern(uint32_t *fb, const char *title, const char *subtitle) {
-    rect(fb, 70, 55, 5, 65, UI_BLUE);
-    draw_text(fb, 95, 55, title, UI_WHITE, 4);
-    if (subtitle) draw_text(fb, 98, 105, subtitle, UI_MUTED, 2);
-}
 
-void ui_footer_modern(uint32_t *fb, const char *text) {
-    rect(fb, 0, 1010, WIDTH, 1, UI_BORDER);
-    draw_text(fb, 80, 1030, text, UI_MUTED, 2);
-}
 
-void ui_row_modern(uint32_t *fb, int x, int y, int w, int h, int selected) {
-    if (selected) ui_selected_panel(fb, x, y, w, h);
-    else ui_panel(fb, x, y, w, h);
-}
 
 
 
@@ -7975,7 +4886,7 @@ static void rr_fill(
     uint32_t color
 );
 
-static void rr_text(
+void rr_text(
     uint32_t *fb,
     int x,
     int y,
@@ -7999,332 +4910,12 @@ static double prospero_scrub_target;
 /* SCRUB_FORWARD_DECLARATIONS_END */
 
 
-/* PROSPERO_PLAYER_OSD_MODULE_START */
-
-#define PROSPERO_PREVIEW_W 320
-#define PROSPERO_PREVIEW_H 180
-
-typedef struct EVOPlayerOsdState {
-    uint32_t preview_pixels[
-        PROSPERO_PREVIEW_W *
-        PROSPERO_PREVIEW_H
-    ];
-
-    int preview_valid;
-    int preview_alpha;
-
-    float preview_scale;
-    float marker_x;
-    float target_marker_x;
-
-    long long last_capture_ms;
-    char captured_path[512];
-} EVOPlayerOsdState;
-
-
-static EVOPlayerOsdState prospero_player_osd = {
-    .preview_valid = 0,
-    .preview_alpha = 0,
-    .preview_scale = 0.88f,
-    .marker_x = 0.0f,
-    .target_marker_x = 0.0f,
-    .last_capture_ms = 0,
-    .captured_path = {0}
-};
-
-
-
-
-static void prospero_player_osd_capture_frame(void) {
-    pthread_mutex_lock(
-        &video_frame_mutex
-    );
-
-    if (
-        !video_frame_loaded ||
-        !video_frame_pixels ||
-        video_frame_w <= 0 ||
-        video_frame_h <= 0
-    ) {
-        pthread_mutex_unlock(
-            &video_frame_mutex
-        );
-
-        return;
-    }
-
-    int source_w = video_frame_w;
-    int source_h = video_frame_h;
-
-    double source_aspect =
-        (double)source_w /
-        (double)source_h;
-
-    double preview_aspect =
-        (double)PROSPERO_PREVIEW_W /
-        (double)PROSPERO_PREVIEW_H;
-
-    int crop_x = 0;
-    int crop_y = 0;
-    int crop_w = source_w;
-    int crop_h = source_h;
-
-    if (source_aspect > preview_aspect) {
-        crop_w =
-            (int)(
-                source_h *
-                preview_aspect
-            );
-
-        crop_x =
-            (source_w - crop_w) / 2;
-    } else if (source_aspect < preview_aspect) {
-        crop_h =
-            (int)(
-                source_w /
-                preview_aspect
-            );
-
-        crop_y =
-            (source_h - crop_h) / 2;
-    }
-
-    for (int y = 0; y < PROSPERO_PREVIEW_H; y++) {
-        int source_y =
-            crop_y +
-            y * crop_h /
-            PROSPERO_PREVIEW_H;
-
-        if (source_y >= source_h) {
-            source_y = source_h - 1;
-        }
-
-        for (int x = 0; x < PROSPERO_PREVIEW_W; x++) {
-            int source_x =
-                crop_x +
-                x * crop_w /
-                PROSPERO_PREVIEW_W;
-
-            if (source_x >= source_w) {
-                source_x = source_w - 1;
-            }
-
-            prospero_player_osd.preview_pixels[
-                y * PROSPERO_PREVIEW_W + x
-            ] =
-                video_frame_pixels[
-                    source_y * source_w +
-                    source_x
-                ];
-        }
-    }
-
-    pthread_mutex_unlock(
-        &video_frame_mutex
-    );
-
-    prospero_player_osd.preview_valid = 1;
-    prospero_player_osd.last_capture_ms = now_ms();
-
-    snprintf(
-        prospero_player_osd.captured_path,
-        sizeof(prospero_player_osd.captured_path),
-        "%s",
-        current_media_path
-    );
-}
-
-
-static void prospero_player_osd_update(
-    int scrub_active,
-    double scrub_target,
-    double duration,
-    int bar_x,
-    int bar_w
-) {
-    float ratio = 0.0f;
-
-    if (duration > 0.1) {
-        ratio =
-            (float)(
-                scrub_target /
-                duration
-            );
-
-        if (ratio < 0.0f) {
-            ratio = 0.0f;
-        }
-
-        if (ratio > 1.0f) {
-            ratio = 1.0f;
-        }
-    }
-
-    prospero_player_osd.target_marker_x =
-        (float)bar_x +
-        ratio * (float)bar_w;
-
-    if (prospero_player_osd.marker_x <= 0.0f) {
-        prospero_player_osd.marker_x =
-            prospero_player_osd.target_marker_x;
-    }
-
-    prospero_player_osd.marker_x +=
-        (
-            prospero_player_osd.target_marker_x -
-            prospero_player_osd.marker_x
-        ) * 0.20f;
-
-    if (scrub_active) {
-        if (
-            strcmp(
-                prospero_player_osd.captured_path,
-                current_media_path
-            ) != 0
-        ) {
-            prospero_player_osd.preview_valid = 0;
-        }
-
-        if (
-            !prospero_player_osd.preview_valid ||
-            now_ms() -
-            prospero_player_osd.last_capture_ms >
-            300
-        ) {
-            prospero_player_osd_capture_frame();
-        }
-
-        prospero_player_osd.preview_alpha += 34;
-
-        if (prospero_player_osd.preview_alpha > 255) {
-            prospero_player_osd.preview_alpha = 255;
-        }
-
-        prospero_player_osd.preview_scale +=
-            (
-                1.0f -
-                prospero_player_osd.preview_scale
-            ) * 0.24f;
-    } else {
-        prospero_player_osd.preview_alpha -= 36;
-
-        if (prospero_player_osd.preview_alpha < 0) {
-            prospero_player_osd.preview_alpha = 0;
-        }
-
-        prospero_player_osd.preview_scale +=
-            (
-                0.94f -
-                prospero_player_osd.preview_scale
-            ) * 0.22f;
-    }
-}
-
-
-static int prospero_player_osd_fill_width(
-    int bar_x,
-    int bar_w,
-    int normal_fill
-) {
-    if (!prospero_scrub_active) {
-        return normal_fill;
-    }
-
-    int fill =
-        (int)(
-            prospero_player_osd.marker_x -
-            (float)bar_x
-        );
-
-    if (fill < 0) {
-        fill = 0;
-    }
-
-    if (fill > bar_w) {
-        fill = bar_w;
-    }
-
-    return fill;
-}
-
-
-static void prospero_player_osd_blit_preview(
-    uint32_t *fb,
-    int destination_x,
-    int destination_y,
-    int destination_w,
-    int destination_h,
-    int opacity
-) {
-    if (
-        !prospero_player_osd.preview_valid ||
-        opacity <= 0
-    ) {
-        return;
-    }
-
-    for (int y = 0; y < destination_h; y++) {
-        int source_y =
-            y *
-            PROSPERO_PREVIEW_H /
-            destination_h;
-
-        for (int x = 0; x < destination_w; x++) {
-            int screen_x = destination_x + x;
-            int screen_y = destination_y + y;
-
-            if (
-                screen_x < 0 ||
-                screen_x >= WIDTH ||
-                screen_y < 0 ||
-                screen_y >= HEIGHT
-            ) {
-                continue;
-            }
-
-            int source_x =
-                x *
-                PROSPERO_PREVIEW_W /
-                destination_w;
-
-            uint32_t source_pixel =
-                prospero_player_osd.preview_pixels[
-                    source_y *
-                    PROSPERO_PREVIEW_W +
-                    source_x
-                ];
-
-            uint32_t *destination =
-                &fb[
-                    screen_y *
-                    WIDTH +
-                    screen_x
-                ];
-
-            *destination =
-                evo_blend_pixel(
-                    *destination,
-                    source_pixel,
-                    opacity
-                );
-        }
-    }
-}
-
-
-
-
 /* ---------------------------------------------------------------------------
- * EVO: the playback OSD draws from the theme.
- *
- * It was built from 56 hardcoded literals - cyan panel borders, blue glows,
- * pale-blue captions - so the one screen you spend the most time on stayed
- * cyan under CARBON, EMBER and AURORA while every menu around it changed.
- *
- * The OSD fades as a whole, so colours arrive with an alpha *expression*
- * rather than a fixed value; osd_col() takes a theme token and applies it.
+ * OSD theme colour helpers. (The rest of PROSPERO_PLAYER_OSD_MODULE — the SDF
+ * scrub preview / handle / capture — was dead after the RmlUi playback OSD
+ * landed and has been removed. These two are still used by the music
+ * visualiser and the remaining SDF screen chrome.)
  * ------------------------------------------------------------------------ */
-
 static uint32_t osd_col(uint32_t colour, int alpha)
 {
     if (alpha < 0)   alpha = 0;
@@ -8332,992 +4923,14 @@ static uint32_t osd_col(uint32_t colour, int alpha)
     return (colour & 0x00FFFFFFu) | ((uint32_t)alpha << 24);
 }
 
+
+
 /*
- * The scrubber knob and the active chapter mark were near-white cyan - deliberately
- * brighter than the accent so they read as "this is the live one". Mixing the
- * accent towards text_primary reproduces that relationship in any theme
- * instead of pinning it to one hue.
+ * Subtitle overlay renderer + its two face-aware helpers. Stayed in main.c
+ * when the subtitle engine moved to media/evo_subtitle.c (A4): they are welded
+ * to the font-atlas headers, rr_text and the EVO_FACE_* enum. The cue lookup
+ * and embedded-text-at helpers they call live in the module (evo_subtitle.h).
  */
-static uint32_t osd_hi(const evo_theme *th)
-{
-    uint32_t a = th->accent, w = th->text_primary;
-    int r = ( a        & 0xFF) + ((( w        & 0xFF) - ( a        & 0xFF)) * 150) / 255;
-    int g = ((a >> 8)  & 0xFF) + ((((w >> 8)  & 0xFF) - ((a >> 8)  & 0xFF)) * 150) / 255;
-    int b = ((a >> 16) & 0xFF) + ((((w >> 16) & 0xFF) - ((a >> 16) & 0xFF)) * 150) / 255;
-    return 0xFF000000u | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
-}
-
-static void prospero_player_osd_draw_scrub_preview(
-    uint32_t *fb,
-    int bar_y,
-    int alpha
-) {
-    const evo_theme *th = evo_theme_current();
-    if (
-        !prospero_scrub_active ||
-        prospero_player_osd.preview_alpha <= 0
-    ) {
-        return;
-    }
-
-    int preview_alpha =
-        prospero_player_osd.preview_alpha *
-        alpha /
-        255;
-
-    float scale =
-        prospero_player_osd.preview_scale;
-
-    int image_w =
-        (int)(
-            PROSPERO_THUMB_W *
-            scale
-        );
-
-    int image_h =
-        (int)(
-            PROSPERO_THUMB_H *
-            scale
-        );
-
-    int card_w =
-        image_w + 28;
-
-    int card_h =
-        image_h + 76;
-
-    int card_x =
-        (int)prospero_player_osd.marker_x -
-        card_w / 2;
-
-    int minimum_x = 38;
-    int maximum_x =
-        WIDTH - card_w - 38;
-
-    if (card_x < minimum_x) {
-        card_x = minimum_x;
-    }
-
-    if (card_x > maximum_x) {
-        card_x = maximum_x;
-    }
-
-    int card_y =
-        bar_y - card_h - 32;
-
-    /*
-     * Shadow.
-     */
-    ui_round_asset(
-        fb,
-        card_x + 10,
-        card_y + 12,
-        card_w,
-        card_h,
-        24,
-        osd_col(th->scrim, preview_alpha * 90 / 255),
-        0,
-        0
-    );
-
-    /*
-     * Glass frame.
-     */
-    ui_round_asset(
-        fb,
-        card_x,
-        card_y,
-        card_w,
-        card_h,
-        24,
-        osd_col(th->surface, preview_alpha * 235 / 255),
-        osd_col(th->accent, preview_alpha * 210 / 255),
-        osd_col(th->accent_soft, preview_alpha * 72 / 255)
-    );
-
-    int image_x =
-        card_x + 14;
-
-    int image_y =
-        card_y + 14;
-
-    rr_fill(
-        fb,
-        image_x,
-        image_y,
-        image_w,
-        image_h,
-        osd_col(th->scrim, preview_alpha * 245 / 255)
-    );
-
-    if (prospero_thumbnail_is_valid()) {
-        prospero_thumbnail_blit(
-            fb,
-            image_x,
-            image_y,
-            image_w,
-            image_h,
-            preview_alpha
-        );
-    } else {
-        rr_text(
-            fb,
-            image_x + image_w / 2 - 78,
-            image_y + image_h / 2 - 14,
-            prospero_thumbnail_is_loading()
-                ? "LOADING PREVIEW"
-                : "PREVIEW PENDING",
-            osd_col(th->text_secondary, preview_alpha * 220 / 255),
-            0
-        );
-    }
-
-    rr_fill(
-        fb,
-        card_x + 18,
-        card_y + card_h - 49,
-        card_w - 36,
-        1,
-        osd_col(th->accent_soft, preview_alpha * 90 / 255)
-    );
-    if (
-        prospero_thumbnail_is_loading() &&
-        prospero_thumbnail_is_valid()
-    ) {
-        int phase =
-            (int)(now_ms() / 90) % 8;
-
-        for (int dot = 0; dot < 3; dot++) {
-            int dot_alpha =
-                dot == phase % 3
-                    ? 220
-                    : 75;
-
-            rr_fill(
-                fb,
-                image_x + image_w - 54 + dot * 15,
-                image_y + image_h - 22,
-                7,
-                7,
-                osd_col(osd_hi(th), preview_alpha * dot_alpha / 255)
-            );
-        }
-    }
-
-
-
-    char target_time[32];
-
-    format_time_mmss(
-        target_time,
-        sizeof(target_time),
-        prospero_scrub_target
-    );
-
-    rr_text(
-        fb,
-        card_x + card_w / 2 - 50,
-        card_y + card_h - 37,
-        target_time,
-        osd_col(th->text_primary, preview_alpha * 245 / 255),
-        1
-    );
-
-    int marker_x =
-        (int)prospero_player_osd.marker_x;
-
-    rr_fill(
-        fb,
-        marker_x - 1,
-        card_y + card_h,
-        3,
-        bar_y - (card_y + card_h),
-        osd_col(th->accent, preview_alpha * 105 / 255)
-    );
-}
-
-
-static void prospero_player_osd_draw_scrub_handle(
-    uint32_t *fb,
-    int bar_y,
-    int alpha
-) {
-    const evo_theme *th = evo_theme_current();
-    if (!prospero_scrub_active) {
-        return;
-    }
-
-    int marker_x =
-        (int)prospero_player_osd.marker_x;
-
-    int pulse_phase =
-        (int)(
-            now_ms() / 70
-        ) % 20;
-
-    int pulse =
-        pulse_phase < 10
-            ? pulse_phase
-            : 20 - pulse_phase;
-
-    int glow_size =
-        22 + pulse / 2;
-
-    rr_fill(
-        fb,
-        marker_x - glow_size / 2,
-        bar_y - glow_size / 2 + 4,
-        glow_size,
-        glow_size,
-        osd_col(th->accent_soft, alpha * 38 / 255)
-    );
-
-    rr_fill(
-        fb,
-        marker_x - 7,
-        bar_y - 7,
-        14,
-        22,
-        osd_col(osd_hi(th), alpha * 245 / 255)
-    );
-
-    rr_fill(
-        fb,
-        marker_x - 3,
-        bar_y - 3,
-        6,
-        14,
-        osd_col(th->text_primary, alpha)
-    );
-}
-
-/* PROSPERO_PLAYER_OSD_MODULE_END */
-
-
-
-
-
-
-/* PROSPERO_SRT_MODULE_START */
-
-#define PROSPERO_SUBTITLE_MAX_CUES 2048
-#define PROSPERO_SUBTITLE_TEXT_SIZE 512
-#define PROSPERO_SUBTITLE_MAX_LINES 3
-#define PROSPERO_SUBTITLE_LINE_SIZE 160
-
-typedef struct {
-    double start_seconds;
-    double end_seconds;
-
-    char text[
-        PROSPERO_SUBTITLE_TEXT_SIZE
-    ];
-} ProsperoSubtitleCue;
-
-
-static ProsperoSubtitleCue prospero_subtitle_cues[
-    PROSPERO_SUBTITLE_MAX_CUES
-];
-
-static int prospero_subtitle_count = 0;
-static int prospero_subtitle_enabled = 1;
-static int prospero_subtitle_face = 2;  /* 1 SUB (SMALL), 2 MENU (MEDIUM/DEFAULT), 3 TITLE (LARGE) */
-
-static char prospero_subtitle_path[512] = {0};
-
-
-static void prospero_subtitle_clear(void) {
-    prospero_subtitle_count = 0;
-    prospero_subtitle_path[0] = 0;
-}
-
-
-static void prospero_subtitle_trim(
-    char *text
-) {
-    if (!text) {
-        return;
-    }
-
-    size_t length =
-        strlen(text);
-
-    while (
-        length > 0 &&
-        (
-            text[length - 1] == '\r' ||
-            text[length - 1] == '\n' ||
-            text[length - 1] == ' ' ||
-            text[length - 1] == '\t'
-        )
-    ) {
-        text[--length] = 0;
-    }
-
-    size_t start = 0;
-
-    while (
-        text[start] == ' ' ||
-        text[start] == '\t'
-    ) {
-        start++;
-    }
-
-    if (start > 0) {
-        memmove(
-            text,
-            text + start,
-            strlen(text + start) + 1
-        );
-    }
-}
-
-
-static int prospero_subtitle_parse_timing(
-    const char *line,
-    double *start_seconds,
-    double *end_seconds
-) {
-    int start_hour = 0;
-    int start_minute = 0;
-    int start_second = 0;
-    int start_millisecond = 0;
-
-    int end_hour = 0;
-    int end_minute = 0;
-    int end_second = 0;
-    int end_millisecond = 0;
-
-    char start_separator = 0;
-    char end_separator = 0;
-
-    int matched =
-        sscanf(
-            line,
-            "%d:%d:%d%c%d --> %d:%d:%d%c%d",
-            &start_hour,
-            &start_minute,
-            &start_second,
-            &start_separator,
-            &start_millisecond,
-            &end_hour,
-            &end_minute,
-            &end_second,
-            &end_separator,
-            &end_millisecond
-        );
-
-    if (matched != 10) {
-        return 0;
-    }
-
-    if (
-        (
-            start_separator != ',' &&
-            start_separator != '.'
-        ) ||
-        (
-            end_separator != ',' &&
-            end_separator != '.'
-        )
-    ) {
-        return 0;
-    }
-
-    *start_seconds =
-        start_hour * 3600.0 +
-        start_minute * 60.0 +
-        start_second +
-        start_millisecond / 1000.0;
-
-    *end_seconds =
-        end_hour * 3600.0 +
-        end_minute * 60.0 +
-        end_second +
-        end_millisecond / 1000.0;
-
-    return (
-        *end_seconds >=
-        *start_seconds
-    );
-}
-
-
-static void prospero_subtitle_clean_line(
-    const char *input,
-    char *output,
-    size_t output_size
-) {
-    if (
-        !input ||
-        !output ||
-        output_size == 0
-    ) {
-        return;
-    }
-
-    size_t write_index = 0;
-    int inside_angle_tag = 0;
-    int inside_brace_tag = 0;
-
-    for (
-        size_t index = 0;
-        input[index] &&
-        write_index + 1 < output_size;
-        index++
-    ) {
-        unsigned char value =
-            (unsigned char)input[index];
-
-        if (value == '<') {
-            inside_angle_tag = 1;
-            continue;
-        }
-
-        if (
-            inside_angle_tag &&
-            value == '>'
-        ) {
-            inside_angle_tag = 0;
-            continue;
-        }
-
-        if (value == '{') {
-            inside_brace_tag = 1;
-            continue;
-        }
-
-        if (
-            inside_brace_tag &&
-            value == '}'
-        ) {
-            inside_brace_tag = 0;
-            continue;
-        }
-
-        if (
-            inside_angle_tag ||
-            inside_brace_tag
-        ) {
-            continue;
-        }
-
-        if (
-            value == '\\' &&
-            (
-                input[index + 1] == 'N' ||
-                input[index + 1] == 'n'
-            )
-        ) {
-            output[write_index++] = '\n';
-            index++;
-            continue;
-        }
-
-        if (
-            strncmp(
-                input + index,
-                "&amp;",
-                5
-            ) == 0
-        ) {
-            output[write_index++] = '&';
-            index += 4;
-            continue;
-        }
-
-        if (
-            strncmp(
-                input + index,
-                "&lt;",
-                4
-            ) == 0
-        ) {
-            output[write_index++] = '<';
-            index += 3;
-            continue;
-        }
-
-        if (
-            strncmp(
-                input + index,
-                "&gt;",
-                4
-            ) == 0
-        ) {
-            output[write_index++] = '>';
-            index += 3;
-            continue;
-        }
-
-        if (
-            strncmp(
-                input + index,
-                "&nbsp;",
-                6
-            ) == 0
-        ) {
-            output[write_index++] = ' ';
-            index += 5;
-            continue;
-        }
-
-        /*
-         * Normalize common UTF-8 punctuation to characters supported
-         * by the current UI font.
-         */
-        if (
-            value == 0xE2 &&
-            (unsigned char)input[index + 1] == 0x80
-        ) {
-            unsigned char third =
-                (unsigned char)input[index + 2];
-
-            if (
-                third == 0x98 ||
-                third == 0x99
-            ) {
-                output[write_index++] = '\'';
-                index += 2;
-                continue;
-            }
-
-            if (
-                third == 0x9C ||
-                third == 0x9D
-            ) {
-                output[write_index++] = '"';
-                index += 2;
-                continue;
-            }
-
-            if (
-                third == 0x93 ||
-                third == 0x94
-            ) {
-                output[write_index++] = '-';
-                index += 2;
-                continue;
-            }
-
-            if (third == 0xA6) {
-                if (
-                    write_index + 3 <
-                    output_size
-                ) {
-                    output[write_index++] = '.';
-                    output[write_index++] = '.';
-                    output[write_index++] = '.';
-                }
-
-                index += 2;
-                continue;
-            }
-        }
-
-        if (
-            value == 0xC2 &&
-            (unsigned char)input[index + 1] == 0xA0
-        ) {
-            output[write_index++] = ' ';
-            index++;
-            continue;
-        }
-
-        if (value >= 128) {
-            output[write_index++] = '?';
-
-            while (
-                input[index + 1] &&
-                (
-                    (
-                        (unsigned char)
-                        input[index + 1]
-                    ) & 0xC0
-                ) == 0x80
-            ) {
-                index++;
-            }
-
-            continue;
-        }
-
-        if (value == '\t') {
-            value = ' ';
-        }
-
-        output[write_index++] =
-            (char)value;
-    }
-
-    output[write_index] = 0;
-    prospero_subtitle_trim(output);
-}
-
-
-static void prospero_subtitle_append_text(
-    char *destination,
-    size_t destination_size,
-    const char *line
-) {
-    if (
-        !destination ||
-        !line ||
-        destination_size == 0
-    ) {
-        return;
-    }
-
-    size_t used =
-        strlen(destination);
-
-    if (
-        used > 0 &&
-        used + 1 < destination_size
-    ) {
-        destination[used++] = '\n';
-        destination[used] = 0;
-    }
-
-    if (used + 1 >= destination_size) {
-        return;
-    }
-
-    snprintf(
-        destination + used,
-        destination_size - used,
-        "%s",
-        line
-    );
-}
-
-
-static int prospero_subtitle_sidecar_path(
-    const char *media_path,
-    char *output,
-    size_t output_size,
-    const char *extension
-) {
-    if (
-        !media_path ||
-        !media_path[0] ||
-        !output ||
-        output_size == 0
-    ) {
-        return 0;
-    }
-
-    snprintf(
-        output,
-        output_size,
-        "%s",
-        media_path
-    );
-
-    char *last_slash =
-        strrchr(output, '/');
-
-    char *last_dot =
-        strrchr(output, '.');
-
-    if (
-        last_dot &&
-        (
-            !last_slash ||
-            last_dot > last_slash
-        )
-    ) {
-        *last_dot = 0;
-    }
-
-    size_t used =
-        strlen(output);
-
-    if (
-        used + strlen(extension) + 1 >
-        output_size
-    ) {
-        return 0;
-    }
-
-    strcat(
-        output,
-        extension
-    );
-
-    return 1;
-}
-
-
-static int prospero_subtitle_load_file(
-    const char *path
-) {
-    FILE *file =
-        fopen(
-            path,
-            "rb"
-        );
-
-    if (!file) {
-        return 0;
-    }
-
-    prospero_subtitle_count = 0;
-
-    char line[1024];
-    int first_line = 1;
-
-    while (
-        prospero_subtitle_count <
-            PROSPERO_SUBTITLE_MAX_CUES &&
-        fgets(
-            line,
-            sizeof(line),
-            file
-        )
-    ) {
-        if (
-            first_line &&
-            (unsigned char)line[0] == 0xEF &&
-            (unsigned char)line[1] == 0xBB &&
-            (unsigned char)line[2] == 0xBF
-        ) {
-            memmove(
-                line,
-                line + 3,
-                strlen(line + 3) + 1
-            );
-        }
-
-        first_line = 0;
-        prospero_subtitle_trim(line);
-
-        if (!line[0]) {
-            continue;
-        }
-
-        char timing_line[1024];
-
-        if (strstr(line, "-->")) {
-            snprintf(
-                timing_line,
-                sizeof(timing_line),
-                "%s",
-                line
-            );
-        } else {
-            if (
-                !fgets(
-                    timing_line,
-                    sizeof(timing_line),
-                    file
-                )
-            ) {
-                break;
-            }
-
-            prospero_subtitle_trim(
-                timing_line
-            );
-
-            if (
-                !strstr(
-                    timing_line,
-                    "-->"
-                )
-            ) {
-                continue;
-            }
-        }
-
-        double start_seconds = 0.0;
-        double end_seconds = 0.0;
-
-        if (
-            !prospero_subtitle_parse_timing(
-                timing_line,
-                &start_seconds,
-                &end_seconds
-            )
-        ) {
-            continue;
-        }
-
-        ProsperoSubtitleCue *cue =
-            &prospero_subtitle_cues[
-                prospero_subtitle_count
-            ];
-
-        cue->start_seconds =
-            start_seconds;
-
-        cue->end_seconds =
-            end_seconds;
-
-        cue->text[0] = 0;
-
-        while (
-            fgets(
-                line,
-                sizeof(line),
-                file
-            )
-        ) {
-            prospero_subtitle_trim(line);
-
-            if (!line[0]) {
-                break;
-            }
-
-            char cleaned[
-                PROSPERO_SUBTITLE_TEXT_SIZE
-            ];
-
-            prospero_subtitle_clean_line(
-                line,
-                cleaned,
-                sizeof(cleaned)
-            );
-
-            if (cleaned[0]) {
-                prospero_subtitle_append_text(
-                    cue->text,
-                    sizeof(cue->text),
-                    cleaned
-                );
-            }
-        }
-
-        if (cue->text[0]) {
-            prospero_subtitle_count++;
-        }
-    }
-
-    fclose(file);
-
-    if (prospero_subtitle_count <= 0) {
-        return 0;
-    }
-
-    snprintf(
-        prospero_subtitle_path,
-        sizeof(prospero_subtitle_path),
-        "%s",
-        path
-    );
-
-    return prospero_subtitle_count;
-}
-
-
-static int prospero_subtitle_load_for_media(
-    const char *media_path
-) {
-    prospero_subtitle_clear();
-
-    char sidecar_path[512];
-
-    if (
-        prospero_subtitle_sidecar_path(
-            media_path,
-            sidecar_path,
-            sizeof(sidecar_path),
-            ".srt"
-        )
-    ) {
-        int count =
-            prospero_subtitle_load_file(
-                sidecar_path
-            );
-
-        if (count > 0) {
-            char message[96];
-
-            snprintf(
-                message,
-                sizeof(message),
-                "Loaded %d cues",
-                count
-            );
-
-            toast(
-                "SUBTITLES",
-                message
-            );
-
-            return count;
-        }
-    }
-
-    if (
-        prospero_subtitle_sidecar_path(
-            media_path,
-            sidecar_path,
-            sizeof(sidecar_path),
-            ".SRT"
-        )
-    ) {
-        int count =
-            prospero_subtitle_load_file(
-                sidecar_path
-            );
-
-        if (count > 0) {
-            char message[96];
-
-            snprintf(
-                message,
-                sizeof(message),
-                "Loaded %d cues",
-                count
-            );
-
-            toast(
-                "SUBTITLES",
-                message
-            );
-
-            return count;
-        }
-    }
-
-    prospero_subtitle_clear();
-    return 0;
-}
-
-
-static const ProsperoSubtitleCue *
-prospero_subtitle_active_cue(
-    double position
-) {
-    int low = 0;
-    int high =
-        prospero_subtitle_count - 1;
-
-    while (low <= high) {
-        int middle =
-            low + (high - low) / 2;
-
-        const ProsperoSubtitleCue *cue =
-            &prospero_subtitle_cues[middle];
-
-        if (
-            position <
-            cue->start_seconds
-        ) {
-            high = middle - 1;
-        } else if (
-            position >
-            cue->end_seconds
-        ) {
-            low = middle + 1;
-        } else {
-            return cue;
-        }
-    }
-
-    return NULL;
-}
 
 
 static int prospero_subtitle_wrap_text(
@@ -9443,12 +5056,6 @@ static int prospero_subtitle_wrap_text(
 
     return line_count;
 }
-
-
-/* Defined with the other rr_* renderers further down. Declared here because
- * this is the one glyph lookup that happens outside them, and it had grown a
- * hand-copied second implementation of the same scan. */
-static int rr_idx(char ch);
 
 /*
  * Measure subtitle line width with the glyph advances matching the active subtitle face.
@@ -9663,334 +5270,12 @@ static void prospero_subtitle_draw(
     }
 }
 
-/* PROSPERO_SRT_MODULE_END */
-
-/* PROSPERO_SUBTITLE_CONTROLS_START */
-
-static void prospero_subtitle_toggle(void) {
-    int available =
-        prospero_subtitle_count > 0 ||
-        prospero_embedded_subtitle_stream_index >= 0;
-
-    if (!available) {
-        prospero_subtitle_enabled = 0;
-
-        toast(
-            "SUBTITLES",
-            "NO SUPPORTED TEXT TRACK"
-        );
-
-        return;
-    }
-
-    prospero_subtitle_enabled =
-        !prospero_subtitle_enabled;
-
-    toast(
-        "SUBTITLES",
-        prospero_subtitle_enabled
-            ? "ON"
-            : "OFF"
-    );
-
-    controls_last_used_ms = now_ms();
-}
 
 
-static int prospero_subtitle_collect_tracks(
-    int *tracks,
-    int capacity
-) {
-    if (
-        !tracks ||
-        capacity <= 0 ||
-        !play_fmt
-    ) {
-        return 0;
-    }
-
-    int count = 0;
-
-    /*
-     * -1 represents the matching external SRT.
-     */
-    if (
-        prospero_subtitle_count > 0 &&
-        count < capacity
-    ) {
-        tracks[count++] = -1;
-    }
-
-    for (
-        unsigned int index = 0;
-        index < play_fmt->nb_streams &&
-        count < capacity;
-        index++
-    ) {
-        AVStream *stream =
-            play_fmt->streams[index];
-
-        if (
-            !stream ||
-            !stream->codecpar ||
-            stream->codecpar->codec_type !=
-                AVMEDIA_TYPE_SUBTITLE
-        ) {
-            continue;
-        }
-
-        if (
-            prospero_embedded_subtitle_supported(
-                stream->codecpar->codec_id
-            )
-        ) {
-            tracks[count++] = (int)index;
-        }
-    }
-
-    return count;
-}
 
 
-static void prospero_subtitle_track_label(
-    int track,
-    char *output,
-    size_t output_size
-) {
-    if (
-        !output ||
-        output_size == 0
-    ) {
-        return;
-    }
-
-    if (track < 0) {
-        snprintf(
-            output,
-            output_size,
-            "EXTERNAL SRT"
-        );
-
-        return;
-    }
-
-    if (
-        !play_fmt ||
-        track >= (int)play_fmt->nb_streams
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "EMBEDDED TEXT"
-        );
-
-        return;
-    }
-
-    AVStream *stream =
-        play_fmt->streams[track];
-
-    const char *language_name =
-        "UNSPECIFIED";
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (
-        language &&
-        language->value &&
-        language->value[0]
-    ) {
-        language_name = language->value;
-    }
-
-    const char *codec_name =
-        avcodec_get_name(
-            stream->codecpar->codec_id
-        );
-
-    snprintf(
-        output,
-        output_size,
-        "%s / %s",
-        language_name,
-        codec_name
-            ? codec_name
-            : "TEXT"
-    );
-}
 
 
-/*
- * Switch to `track` (-1 meaning the external SRT) and carry on from where we
- * are. Selecting a subtitle stream is a demuxer-open decision, so the file is
- * reopened and seeked back to the current position rather than switched in
- * place; the pause state survives so this does not silently start playing a
- * paused film.
- *
- * Split out of the D-pad cycler so the picker performs the identical switch.
- * Cycling made sense when a file had two tracks. Retail rips carry thirty-odd
- * and cycling through them one restart at a time is unusable, so the cycler
- * is now the fallback path and the picker is the one people will use.
- */
-static void prospero_subtitle_apply_track(int track)
-{
-    char label[128];
-
-    if (
-        !play_fmt ||
-        !current_media_path[0]
-    ) {
-        return;
-    }
-
-    prospero_subtitle_track_label(
-        track,
-        label,
-        sizeof(label)
-    );
-
-    double position =
-        resume_base_offset_seconds +
-        (
-            audio_ctx &&
-            audio_handle >= 1
-                ? audio_clock_seconds
-                : video_clock_seconds
-        );
-
-    if (position < 0.0) {
-        position = 0.0;
-    }
-
-    int restore_paused = player_paused;
-
-    char playback_path[512];
-
-    snprintf(
-        playback_path,
-        sizeof(playback_path),
-        "%s",
-        current_media_path
-    );
-
-    prospero_subtitle_requested_stream = track;
-
-    requested_resume_seek_pos = position;
-    resume_base_offset_seconds = position;
-
-    if (
-        !start_video_playback(
-            playback_path
-        )
-    ) {
-        prospero_subtitle_requested_stream = -2;
-
-        toast(
-            "SUBTITLES",
-            "TRACK CHANGE FAILED"
-        );
-
-        return;
-    }
-
-    if (restore_paused) {
-        player_paused = 1;
-    }
-
-    prospero_subtitle_enabled = 1;
-
-    toast(
-        "SUBTITLES",
-        label
-    );
-
-    controls_last_used_ms = now_ms();
-}
-
-
-static void prospero_subtitle_cycle_track(void) {
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt ||
-        !current_media_path[0]
-    ) {
-        return;
-    }
-
-    int tracks[64];
-
-    int track_count =
-        prospero_subtitle_collect_tracks(
-            tracks,
-            64
-        );
-
-    if (track_count <= 0) {
-        prospero_subtitle_enabled = 0;
-
-        toast(
-            "SUBTITLES",
-            "NO SUPPORTED TEXT TRACK"
-        );
-
-        return;
-    }
-
-    int current_track =
-        prospero_subtitle_use_external
-            ? -1
-            : prospero_embedded_subtitle_stream_index;
-
-    int current_slot = -1;
-
-    for (
-        int index = 0;
-        index < track_count;
-        index++
-    ) {
-        if (tracks[index] == current_track) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        current_slot < 0
-            ? 0
-            : (current_slot + 1) % track_count;
-
-    int next_track =
-        tracks[next_slot];
-
-    char label[128];
-
-    prospero_subtitle_track_label(
-        next_track,
-        label,
-        sizeof(label)
-    );
-
-    if (
-        track_count == 1 &&
-        current_slot == 0
-    ) {
-        prospero_subtitle_enabled = 1;
-        toast("SUBTITLES", label);
-        return;
-    }
-
-    prospero_subtitle_apply_track(
-        next_track
-    );
-}
-
-/* PROSPERO_SUBTITLE_CONTROLS_END */
 
 
 
@@ -10842,34 +6127,39 @@ double percentage = 0.0;
         char fps_badge[32] = "";
         char audio_badge[32] = "";
 
-        if (play_ctx) {
-            if (play_ctx->width >= 3840 || play_ctx->height >= 2160) {
+        if (g_vdec) {
+            int vc_w = evo_vdec_ffmpeg_width(g_vdec);
+            int vc_h = evo_vdec_ffmpeg_height(g_vdec);
+            int vc_trc = evo_vdec_ffmpeg_color_trc(g_vdec);
+            int vc_pf = evo_vdec_ffmpeg_pix_fmt(g_vdec);
+
+            if (vc_w >= 3840 || vc_h >= 2160) {
                 snprintf(res_badge, sizeof(res_badge), "4K UHD");
-            } else if (play_ctx->width >= 1920 || play_ctx->height >= 1080) {
+            } else if (vc_w >= 1920 || vc_h >= 1080) {
                 snprintf(res_badge, sizeof(res_badge), "1080p FHD");
-            } else if (play_ctx->width >= 1280 || play_ctx->height >= 720) {
+            } else if (vc_w >= 1280 || vc_h >= 720) {
                 snprintf(res_badge, sizeof(res_badge), "720p HD");
-            } else if (play_ctx->height > 0) {
-                snprintf(res_badge, sizeof(res_badge), "%dp", play_ctx->height);
+            } else if (vc_h > 0) {
+                snprintf(res_badge, sizeof(res_badge), "%dp", vc_h);
             }
 
-            if (play_ctx->color_trc == AVCOL_TRC_SMPTE2084) {
+            if (vc_trc == AVCOL_TRC_SMPTE2084) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HDR10");
-            } else if (play_ctx->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+            } else if (vc_trc == AVCOL_TRC_ARIB_STD_B67) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HLG");
-            } else if (play_ctx->color_trc == AVCOL_TRC_BT2020_10) {
+            } else if (vc_trc == AVCOL_TRC_BT2020_10) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HDR");
             }
 
             int is_10bit = 0;
-            if (play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ||
-                play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10BE ||
-                play_ctx->pix_fmt == AV_PIX_FMT_YUV422P10LE ||
-                play_ctx->pix_fmt == AV_PIX_FMT_YUV444P10LE) {
+            if (vc_pf == AV_PIX_FMT_YUV420P10LE ||
+                vc_pf == AV_PIX_FMT_YUV420P10BE ||
+                vc_pf == AV_PIX_FMT_YUV422P10LE ||
+                vc_pf == AV_PIX_FMT_YUV444P10LE) {
                 is_10bit = 1;
             }
 
-            const char *cname = (play_ctx->codec && play_ctx->codec->name) ? play_ctx->codec->name : "";
+            const char *cname = evo_vdec_ffmpeg_codec_name(g_vdec);
             if (cname[0]) {
                 if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) {
                     snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
@@ -10884,8 +6174,8 @@ double percentage = 0.0;
                 }
             }
 
-            if (video_fps > 1.0) {
-                snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(video_fps));
+            if (evo_pb_video_fps() > 1.0) {
+                snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(evo_pb_video_fps()));
             }
         }
 
@@ -10933,7 +6223,7 @@ double percentage = 0.0;
             audio_ctx &&
             audio_handle >= 1
                 ? audio_clock_seconds
-                : video_clock_seconds
+                : evo_pb_video_clock_s()
         );
 
     if (subtitle_position < 0.0) {
@@ -11067,7 +6357,7 @@ double percentage = 0.0;
             video_codec,
             video_width,
             video_height,
-            video_fps
+            evo_pb_video_fps()
         );
 
         snprintf(
@@ -11103,9 +6393,9 @@ double percentage = 0.0;
             clock_line,
             sizeof(clock_line),
             "CLOCKS  VIDEO %.2F  /  AUDIO %.2F  /  DELTA %.3F",
-            video_clock_seconds,
+            evo_pb_video_clock_s(),
             audio_clock_seconds,
-            video_clock_seconds -
+            evo_pb_video_clock_s() -
                 audio_clock_seconds
         );
 
@@ -11199,7 +6489,7 @@ static void rr_fill(
     uint32_t color
 );
 
-static void rr_text(
+void rr_text(
     uint32_t *fb,
     int x,
     int y,
@@ -11223,16 +6513,6 @@ static void rr_control(
 
 /* RR_FORWARD_DECLARATIONS_START */
 
-static void rr_img(
-    uint32_t *fb,
-    int x,
-    int y,
-    int w,
-    int h,
-    const unsigned int *img
-);
-
-/* EVO: monochrome icon blit in a theme colour. Defined next to rr_img(). */
 static void rr_img_tint(
     uint32_t *fb,
     int x,
@@ -11254,7 +6534,7 @@ static void rr_fill(
     uint32_t color
 );
 
-static void rr_text(
+void rr_text(
     uint32_t *fb,
     int x,
     int y,
@@ -11391,88 +6671,6 @@ static const char *usb_browser_type_label(
  * 4 = developer terminal
  * 5 = information/document
  */
-static int usb_browser_icon_for_entry(
-    const char *name,
-    int entry_type
-) {
-    if (entry_type == 4) {
-        return 0;
-    }
-
-    const char *extension =
-        usb_browser_extension(name);
-
-    if (
-        usb_browser_extension_is(extension, "mkv") ||
-        usb_browser_extension_is(extension, "mp4") ||
-        usb_browser_extension_is(extension, "mov") ||
-        usb_browser_extension_is(extension, "avi") ||
-        usb_browser_extension_is(extension, "webm") ||
-        usb_browser_extension_is(extension, "m2ts") ||
-        usb_browser_extension_is(extension, "ts")
-    ) {
-        return 1;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "mp3") ||
-        usb_browser_extension_is(extension, "flac") ||
-        usb_browser_extension_is(extension, "wav") ||
-        usb_browser_extension_is(extension, "aac") ||
-        usb_browser_extension_is(extension, "m4a") ||
-        usb_browser_extension_is(extension, "ogg")
-    ) {
-        return 2;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "jpg") ||
-        usb_browser_extension_is(extension, "jpeg") ||
-        usb_browser_extension_is(extension, "png") ||
-        usb_browser_extension_is(extension, "bmp") ||
-        usb_browser_extension_is(extension, "webp")
-    ) {
-        return 3;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "txt") ||
-        usb_browser_extension_is(extension, "srt") ||
-        usb_browser_extension_is(extension, "ass") ||
-        usb_browser_extension_is(extension, "ssa") ||
-        usb_browser_extension_is(extension, "vtt")
-    ) {
-        return 4;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "iso") ||
-        usb_browser_extension_is(extension, "img")
-    ) {
-        return 5;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "elf") ||
-        usb_browser_extension_is(extension, "bin") ||
-        usb_browser_extension_is(extension, "sprx") ||
-        usb_browser_extension_is(extension, "pkg")
-    ) {
-        return 6;
-    }
-
-    if (
-        usb_browser_extension_is(extension, "zip") ||
-        usb_browser_extension_is(extension, "rar") ||
-        usb_browser_extension_is(extension, "7z") ||
-        usb_browser_extension_is(extension, "tar") ||
-        usb_browser_extension_is(extension, "gz")
-    ) {
-        return 7;
-    }
-
-    return 8;
-}
 
 /* USB_BROWSER_FILE_TYPE_HELPERS_END */
 
@@ -11587,83 +6785,6 @@ static void rr_browser_icon(
 
 
 /* USB_BROWSER_MARQUEE_START */
-static void usb_browser_make_marquee(
-    char *out,
-    size_t out_size,
-    const char *text,
-    int frame,
-    int visible_chars
-) {
-    if (!out || out_size == 0) {
-        return;
-    }
-
-    out[0] = 0;
-
-    if (!text) {
-        return;
-    }
-
-    size_t length = strlen(text);
-
-    if ((int)length <= visible_chars) {
-        snprintf(out, out_size, "%s", text);
-        return;
-    }
-
-    /*
-     * Pause, scroll, pause.
-     * Three frames per character keeps it smooth and readable.
-     */
-    const int pause_frames = 34;
-    const int gap_chars = 7;
-    const int speed_divisor = 3;
-
-    int scrolling_frames =
-        ((int)length + gap_chars) * speed_divisor;
-
-    int cycle_frames =
-        pause_frames +
-        scrolling_frames +
-        pause_frames;
-
-    int local_frame =
-        frame % cycle_frames;
-
-    int offset = 0;
-
-    if (
-        local_frame >= pause_frames &&
-        local_frame < pause_frames + scrolling_frames
-    ) {
-        offset =
-            (local_frame - pause_frames) /
-            speed_divisor;
-    }
-
-    for (
-        int column = 0;
-        column < visible_chars &&
-        column + 1 < (int)out_size;
-        column++
-    ) {
-        int virtual_index =
-            offset + column;
-
-        int repeated_length =
-            (int)length + gap_chars;
-
-        virtual_index %= repeated_length;
-
-        if (virtual_index < (int)length) {
-            out[column] = text[virtual_index];
-        } else {
-            out[column] = ' ';
-        }
-
-        out[column + 1] = 0;
-    }
-}
 /* USB_BROWSER_MARQUEE_END */
 
 /* EVO: draw_usb_browser now lives further down, after the focus,
@@ -11684,527 +6805,12 @@ static void usb_browser_make_marquee(
 
 /* PROSPERO_DYNAMIC_MEDIA_LABELS_START */
 
-static const char *prospero_file_extension(
-    const char *path
-) {
-    if (!path) {
-        return "";
-    }
-
-    const char *slash =
-        strrchr(path, '/');
-
-    const char *name =
-        slash ? slash + 1 : path;
-
-    const char *dot =
-        strrchr(name, '.');
-
-    if (!dot || !dot[1]) {
-        return "";
-    }
-
-    return dot + 1;
-}
 
 
-static int prospero_contains_ci(
-    const char *text,
-    const char *needle
-) {
-    if (!text || !needle || !needle[0]) {
-        return 0;
-    }
-
-    size_t needle_length =
-        strlen(needle);
-
-    for (
-        const char *cursor = text;
-        *cursor;
-        cursor++
-    ) {
-        if (
-            strncasecmp(
-                cursor,
-                needle,
-                needle_length
-            ) == 0
-        ) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
 
 
-static void prospero_display_container(
-    char *output,
-    size_t output_size,
-    const char *raw_container,
-    const char *path
-) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    output[0] = 0;
-
-    const char *extension =
-        prospero_file_extension(path);
-
-    /*
-     * Prefer the actual file extension because FFmpeg frequently
-     * reports one demuxer name containing several format aliases.
-     */
-    if (
-        strcasecmp(extension, "mkv") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MKV"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "webm") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "WEBM"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "mp4") == 0 ||
-        strcasecmp(extension, "m4v") == 0 ||
-        strcasecmp(extension, "m4a") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MP4"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "mov") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MOV"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "avi") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "AVI"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "m2ts") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "M2TS"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "ts") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MPEG-TS"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "mpg") == 0 ||
-        strcasecmp(extension, "mpeg") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MPEG"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "wmv") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "WMV"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "flv") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "FLV"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(extension, "ogg") == 0 ||
-        strcasecmp(extension, "ogv") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "OGG"
-        );
-        return;
-    }
-
-    /*
-     * Fall back to FFmpeg's raw demuxer string when no useful file
-     * extension is available.
-     */
-    if (
-        prospero_contains_ci(
-            raw_container,
-            "matroska"
-        )
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MKV"
-        );
-    } else if (
-        prospero_contains_ci(
-            raw_container,
-            "mov"
-        ) ||
-        prospero_contains_ci(
-            raw_container,
-            "mp4"
-        )
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MP4"
-        );
-    } else if (
-        prospero_contains_ci(
-            raw_container,
-            "mpegts"
-        )
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MPEG-TS"
-        );
-    } else if (
-        prospero_contains_ci(
-            raw_container,
-            "avi"
-        )
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "AVI"
-        );
-    } else if (
-        prospero_contains_ci(
-            raw_container,
-            "webm"
-        )
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "WEBM"
-        );
-    } else if (
-        raw_container &&
-        raw_container[0]
-    ) {
-        /*
-         * Keep only the first FFmpeg alias rather than the complete
-         * comma- or space-separated demuxer list.
-         */
-        size_t used = 0;
-
-        while (
-            raw_container[used] &&
-            raw_container[used] != ',' &&
-            raw_container[used] != ' ' &&
-            used + 1 < output_size
-        ) {
-            char character =
-                raw_container[used];
-
-            if (
-                character >= 'a' &&
-                character <= 'z'
-            ) {
-                character =
-                    (char)(
-                        character - 'a' + 'A'
-                    );
-            }
-
-            output[used] =
-                character;
-
-            used++;
-        }
-
-        output[used] = 0;
-    } else {
-        snprintf(
-            output,
-            output_size,
-            "UNKNOWN"
-        );
-    }
-}
 
 
-static void prospero_display_codec(
-    char *output,
-    size_t output_size,
-    const char *raw_codec,
-    int audio_codec
-) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    output[0] = 0;
-
-    if (!raw_codec || !raw_codec[0]) {
-        snprintf(
-            output,
-            output_size,
-            "UNKNOWN"
-        );
-        return;
-    }
-
-    if (
-        strcasecmp(raw_codec, "h264") == 0 ||
-        strcasecmp(raw_codec, "avc") == 0 ||
-        strcasecmp(raw_codec, "avc1") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "H.264"
-        );
-    } else if (
-        strcasecmp(raw_codec, "hevc") == 0 ||
-        strcasecmp(raw_codec, "h265") == 0 ||
-        strcasecmp(raw_codec, "hev1") == 0 ||
-        strcasecmp(raw_codec, "hvc1") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "HEVC"
-        );
-    } else if (
-        strcasecmp(raw_codec, "av1") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "AV1"
-        );
-    } else if (
-        strcasecmp(raw_codec, "vp9") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "VP9"
-        );
-    } else if (
-        strcasecmp(raw_codec, "vp8") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "VP8"
-        );
-    } else if (
-        strcasecmp(raw_codec, "mpeg4") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MPEG-4"
-        );
-    } else if (
-        strcasecmp(raw_codec, "mpeg2video") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MPEG-2"
-        );
-    } else if (
-        strcasecmp(raw_codec, "vc1") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "VC-1"
-        );
-    } else if (
-        strcasecmp(raw_codec, "aac") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "AAC"
-        );
-    } else if (
-        strcasecmp(raw_codec, "ac3") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "AC-3"
-        );
-    } else if (
-        strcasecmp(raw_codec, "eac3") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "E-AC-3"
-        );
-    } else if (
-        strcasecmp(raw_codec, "truehd") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "Dolby TrueHD"
-        );
-    } else if (
-        strcasecmp(raw_codec, "dts") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "DTS"
-        );
-    } else if (
-        strcasecmp(raw_codec, "flac") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "FLAC"
-        );
-    } else if (
-        strcasecmp(raw_codec, "opus") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "Opus"
-        );
-    } else if (
-        strcasecmp(raw_codec, "vorbis") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "Vorbis"
-        );
-    } else if (
-        strcasecmp(raw_codec, "mp3") == 0 ||
-        strcasecmp(raw_codec, "mp3float") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "MP3"
-        );
-    } else if (
-        strcasecmp(raw_codec, "pcm_s16le") == 0 ||
-        strcasecmp(raw_codec, "pcm_s24le") == 0 ||
-        strcasecmp(raw_codec, "pcm_s32le") == 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "PCM"
-        );
-    } else {
-        /*
-         * Unknown codecs remain dynamic. Clean capitalization without
-         * hiding a format that Prospero has not explicitly mapped yet.
-         */
-        size_t used = 0;
-
-        while (
-            raw_codec[used] &&
-            used + 1 < output_size
-        ) {
-            char character =
-                raw_codec[used];
-
-            if (character == '_') {
-                character = ' ';
-            }
-
-            if (
-                used == 0 &&
-                character >= 'a' &&
-                character <= 'z'
-            ) {
-                character =
-                    (char)(
-                        character - 'a' + 'A'
-                    );
-            }
-
-            output[used] =
-                character;
-
-            used++;
-        }
-
-        output[used] = 0;
-    }
-
-    (void)audio_codec;
-}
 
 
 /* PROSPERO_DYNAMIC_MEDIA_LABELS_END */
@@ -12212,175 +6818,12 @@ static void prospero_display_codec(
 
 /* PROSPERO_MEDIA_INFO_V2_HELPERS_START */
 
-static int prospero_media_info_count_streams(
-    AVFormatContext *format,
-    enum AVMediaType media_type
-) {
-    if (!format) {
-        return 0;
-    }
-
-    int count = 0;
-
-    for (
-        unsigned int index = 0;
-        index < format->nb_streams;
-        index++
-    ) {
-        AVStream *stream =
-            format->streams[index];
-
-        if (
-            stream &&
-            stream->codecpar &&
-            stream->codecpar->codec_type ==
-                media_type
-        ) {
-            count++;
-        }
-    }
-
-    return count;
-}
 
 
-static const char *prospero_media_info_language(
-    AVStream *stream
-) {
-    if (!stream) {
-        return "und";
-    }
-
-    const AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (
-        language &&
-        language->value &&
-        language->value[0]
-    ) {
-        return language->value;
-    }
-
-    return "und";
-}
 
 
-static void prospero_media_info_bitrate(
-    char *output,
-    size_t output_size,
-    int64_t bitrate
-) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    if (bitrate <= 0) {
-        snprintf(
-            output,
-            output_size,
-            "UNKNOWN"
-        );
-
-        return;
-    }
-
-    if (bitrate >= 1000000) {
-        snprintf(
-            output,
-            output_size,
-            "%.2f MBPS",
-            (double)bitrate / 1000000.0
-        );
-    } else {
-        snprintf(
-            output,
-            output_size,
-            "%lld KBPS",
-            (long long)(bitrate / 1000)
-        );
-    }
-}
 
 
-static void prospero_media_info_subtitle_source(
-    char *output,
-    size_t output_size
-) {
-    if (!output || output_size == 0) {
-        return;
-    }
-
-    if (!prospero_subtitle_enabled) {
-        snprintf(
-            output,
-            output_size,
-            "OFF"
-        );
-
-        return;
-    }
-
-    if (
-        prospero_subtitle_use_external &&
-        prospero_subtitle_count > 0
-    ) {
-        snprintf(
-            output,
-            output_size,
-            "EXTERNAL SRT"
-        );
-
-        return;
-    }
-
-    if (
-        play_fmt &&
-        prospero_embedded_subtitle_stream_index >= 0 &&
-        prospero_embedded_subtitle_stream_index <
-            (int)play_fmt->nb_streams
-    ) {
-        AVStream *stream =
-            play_fmt->streams[
-                prospero_embedded_subtitle_stream_index
-            ];
-
-        const char *codec_name =
-            (
-                stream &&
-                stream->codecpar
-            )
-                ? avcodec_get_name(
-                    stream->codecpar->codec_id
-                )
-                : "unknown";
-
-        snprintf(
-            output,
-            output_size,
-            "%s  %s",
-            prospero_media_info_language(
-                stream
-            ),
-            codec_name
-                ? codec_name
-                : "unknown"
-        );
-
-        return;
-    }
-
-    snprintf(
-        output,
-        output_size,
-        "NONE"
-    );
-}
 
 /* PROSPERO_MEDIA_INFO_V2_HELPERS_END */
 
@@ -13229,12 +7672,6 @@ static inline uint32_t rr_blend(uint32_t dst,uint32_t src){
     unsigned b=(sb*a + db*(255-a))/255;
     return 0xFF000000|(b<<16)|(g<<8)|r;
 }
-static void rr_img(uint32_t *fb,int x,int y,int w,int h,const unsigned int *img){
-    for(int yy=0;yy<h;yy++){int fy=y+yy;if((unsigned)fy>=1080)continue;
-    for(int xx=0;xx<w;xx++){int fx=x+xx;if((unsigned)fx>=1920)continue;
-    fb[fy*1920+fx]=rr_blend(fb[fy*1920+fx],img[yy*w+xx]);}}
-}
-
 /* EVO: blit a monochrome icon in an arbitrary colour.
  *
  * The generated icons are a single hue (the cyan the UI used to be) with the
@@ -13263,27 +7700,13 @@ static void rr_img_tint(uint32_t *fb,int x,int y,int w,int h,
 static void rr_bg(uint32_t *fb){ evo_ui_background(fb); }
 static void rr_fill(uint32_t *fb,int x,int y,int w,int h,uint32_t c){for(int yy=0;yy<h;yy++)for(int xx=0;xx<w;xx++){int fx=x+xx,fy=y+yy;if((unsigned)fx<1920&&(unsigned)fy<1080)fb[fy*1920+fx]=rr_blend(fb[fy*1920+fx],c);}}
 /*
- * Glyph char -> RR index.
- *
- * Was a linear scan of the 69-character RR_CHARS run once per character
- * drawn, where the miss case - punctuation, which is most of a filename -
- * paid all 69 comparisons before returning -1. The table that replaced it
- * now lives in evo_font.h, which needs one anyway to pick between the two
- * atlases. This stays as the thin wrapper for callers that want the index
- * rather than a glyph.
- */
-static int rr_idx(char ch)
-{
-    return evo_font_rr_index(ch);
-}
-/*
  * Draws through evo_font.h, which resolves a character across BOTH atlases -
  * the original RR font and the generated punctuation that gives it a comma,
  * an apostrophe and a question mark. The four-way face switch that used to be
  * written out here (and again in tools/uiview.c, and again in the measurer
  * below) lives there once.
  */
-static void rr_text(uint32_t *fb,int x,int y,const char *t,uint32_t color,int face){
+void rr_text(uint32_t *fb,int x,int y,const char *t,uint32_t color,int face){
     int cx=x; unsigned ca=(color>>24)&255;
     for(const char*q=t;*q;q++){
         evo_font_glyph g;
@@ -16282,29 +10705,34 @@ void draw_media_info_screen(uint32_t *fb)
         char rate_str[32] = "";
         char color_hdr[64] = "BT.709 (SDR)";
 
-        if (play_ctx) {
-            if (play_ctx->width >= 3840 || play_ctx->height >= 2160) snprintf(res_badge, sizeof(res_badge), "4K UHD");
-            else if (play_ctx->width >= 1920 || play_ctx->height >= 1080) snprintf(res_badge, sizeof(res_badge), "1080p FHD");
-            else if (play_ctx->width >= 1280 || play_ctx->height >= 720) snprintf(res_badge, sizeof(res_badge), "720p HD");
-            else if (play_ctx->height > 0) snprintf(res_badge, sizeof(res_badge), "%dp", play_ctx->height);
+        if (g_vdec) {
+            int vc_w = evo_vdec_ffmpeg_width(g_vdec);
+            int vc_h = evo_vdec_ffmpeg_height(g_vdec);
+            int vc_trc = evo_vdec_ffmpeg_color_trc(g_vdec);
+            int vc_pf = evo_vdec_ffmpeg_pix_fmt(g_vdec);
 
-            if (play_ctx->color_trc == AVCOL_TRC_SMPTE2084) {
+            if (vc_w >= 3840 || vc_h >= 2160) snprintf(res_badge, sizeof(res_badge), "4K UHD");
+            else if (vc_w >= 1920 || vc_h >= 1080) snprintf(res_badge, sizeof(res_badge), "1080p FHD");
+            else if (vc_w >= 1280 || vc_h >= 720) snprintf(res_badge, sizeof(res_badge), "720p HD");
+            else if (vc_h > 0) snprintf(res_badge, sizeof(res_badge), "%dp", vc_h);
+
+            if (vc_trc == AVCOL_TRC_SMPTE2084) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HDR10");
                 snprintf(color_hdr, sizeof(color_hdr), "BT.2020 / ST 2084 (HDR10)");
-            } else if (play_ctx->color_trc == AVCOL_TRC_ARIB_STD_B67) {
+            } else if (vc_trc == AVCOL_TRC_ARIB_STD_B67) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HLG");
                 snprintf(color_hdr, sizeof(color_hdr), "BT.2020 / ARIB (HLG)");
-            } else if (play_ctx->color_trc == AVCOL_TRC_BT2020_10) {
+            } else if (vc_trc == AVCOL_TRC_BT2020_10) {
                 snprintf(hdr_badge, sizeof(hdr_badge), "HDR");
                 snprintf(color_hdr, sizeof(color_hdr), "BT.2020 (10-bit)");
             }
 
-            int is_10bit = (play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ||
-                            play_ctx->pix_fmt == AV_PIX_FMT_YUV420P10BE ||
-                            play_ctx->pix_fmt == AV_PIX_FMT_YUV422P10LE ||
-                            play_ctx->pix_fmt == AV_PIX_FMT_YUV444P10LE);
+            int is_10bit = (vc_pf == AV_PIX_FMT_YUV420P10LE ||
+                            vc_pf == AV_PIX_FMT_YUV420P10BE ||
+                            vc_pf == AV_PIX_FMT_YUV422P10LE ||
+                            vc_pf == AV_PIX_FMT_YUV444P10LE);
 
-            const char *cname = (play_ctx->codec && play_ctx->codec->name) ? play_ctx->codec->name : "";
+            const char *cname = evo_vdec_ffmpeg_codec_name(g_vdec);
             if (cname[0]) {
                 if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
                 else if (strcasecmp(cname, "h264") == 0 || strcasecmp(cname, "avc") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AVC 10-BIT" : "AVC / H.264");
@@ -16313,7 +10741,7 @@ void draw_media_info_screen(uint32_t *fb)
                 else snprintf(codec_badge, sizeof(codec_badge), "%s", cname);
             }
 
-            if (video_fps > 1.0) snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(video_fps));
+            if (evo_pb_video_fps() > 1.0) snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(evo_pb_video_fps()));
         }
 
         snprintf(ch_str, sizeof(ch_str), "%d Channels (%s)", evo_audio_channels,
@@ -16770,26 +11198,6 @@ static void prospero_chapter_jump(int direction)
     controls_last_used_ms = now_ms();
 }
 
-static void prospero_subtitle_nudge_delay(int delta_ms)
-{
-    char msg[64];
-    prospero_subtitle_delay_ms += delta_ms;
-    if (prospero_subtitle_delay_ms < -5000)
-        prospero_subtitle_delay_ms = -5000;
-    if (prospero_subtitle_delay_ms > 5000)
-        prospero_subtitle_delay_ms = 5000;
-
-    if (prospero_subtitle_delay_ms == 0)
-        snprintf(msg, sizeof(msg), "0 ms (sync)");
-    else
-        snprintf(
-            msg,
-            sizeof(msg),
-            "%+d ms",
-            prospero_subtitle_delay_ms);
-    toast("SUB DELAY", msg);
-    controls_last_used_ms = now_ms();
-}
 
 
 /* SCRUB_HOLD_FORWARD_DECLARATION_START */
@@ -17121,11 +11529,11 @@ static double prospero_playback_current_position(
     if (
         !audio_ctx ||
         audio_stream_index < 0 ||
-        video_clock_seconds >
+        evo_pb_video_clock_s() >
             active_clock
     ) {
         active_clock =
-            video_clock_seconds;
+            evo_pb_video_clock_s();
     }
 
     double position =
@@ -17152,7 +11560,7 @@ static void prospero_playback_finished_update(
         return;
     }
 
-    if (!video_decode_done) {
+    if (!evo_pb_is_eof()) {
         prospero_finish_candidate_ms = 0;
         return;
     }
@@ -17607,7 +12015,7 @@ static void evo_vo_trace(const char *tag)
         (unsigned long long)g_pp_pb.stats.frames_published,
         dbg_video_frames, dbg_video_packets,
         g_vo_decode_gate, perf_decode_fps, perf_render_fps,
-        (double)audio_clock_seconds, (double)video_clock_seconds,
+        (double)audio_clock_seconds, evo_pb_video_clock_s(),
         prospero_subtitle_enabled, prospero_auto_subtitles_enabled,
         prospero_embedded_subtitle_stream_index,
         prospero_embedded_subtitle_count,
