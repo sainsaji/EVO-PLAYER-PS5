@@ -40,9 +40,16 @@ genuinely more viable post-packaging.
 |---|---|
 | OpenGL / Vulkan / mesa (SDL accelerated renderer) | No hardware GL/Vulkan driver on this SDK ([gpu-notes.md](../gpu-notes.md)). SDL2's presence "says nothing about acceleration" — its renderer is software. Not an option. |
 | Raw GNM (hand-assembled PM4) | `sceGnmAreSubmitsAllowed() → 1` on hardware, but no headers, no Gnmx, no PSSL compiler. "Large, speculative" ([gpu-notes.md](../gpu-notes.md)). |
-| **AGC (`sceAgc` + `sceAgcDriver`)** | **ProsperoLight demonstrates the full pipeline** — `sceAgcCreateShader` / `sceAgcLinkShaders` / register setup / `sceAgcDcbDrawIndexAuto` / `sceAgcDriverSubmitDcb` / `sceAgcDcbSetFlip` — from a game-category app module. This is the route. |
+| **AGC (`sceAgc` + `sceAgcDriver`)** | **ProsperoLight demonstrates the full pipeline** — `sceAgcCreateShader` / `sceAgcLinkShaders` / register setup / `sceAgcDcbDrawIndexAuto` / `sceAgcDriverSubmitDcb` / `sceAgcDcbSetFlip` — from a game-category app module. This is the route. The ABI, the DCB struct, the render-target register model and a clean-room swizzle library are documented call-by-call in [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md). |
 
 ## 3. How ProsperoLight splits the work
+
+References: `third_party/ProsperoLight/src/native_agc_present.cpp` is the
+**hardware-proven C++** implementation skeleton;
+[sharpprospero-agc-reference.md](sharpprospero-agc-reference.md) is the
+**annotated ABI + method spec** (`third_party/SharpProspero/`, git-ignored) —
+use both, ProsperoLight for "what runs", SharpProspero for "what every call
+means".
 
 `third_party/ProsperoLight/src/main.cpp` (`SdlRenderInterface`) +
 `native_agc_present.cpp`:

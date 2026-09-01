@@ -84,6 +84,10 @@ projects/prosperoplayer/
 # and docs/evo-pro/phase-1b-app-module.md.
 third_party/ProsperoLight/
 
+# Local reference clone: SvenGDK/SharpProspero (C# app-module SDK). Studied for
+# its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.
+third_party/SharpProspero/
+
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson
 # -----------------------------------------------------------------------------
