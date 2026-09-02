@@ -10,10 +10,16 @@ session, launched from `/data/homebrew/` by ShadowMountPlus — `sceVideodec2`
 decodes cleanly and `sceAgc` runs a full shader pipeline. Neither works from
 the elfldr-payload / hbldr borrowed-slot context EVO ships in today.
 
+## Start here
+
+**[status.md](status.md)** — current state, the exact commands to run when a
+console is available, and what each result means. Point an AI at it to resume.
+
 ## Documents
 
 | Doc | What it is | Status |
 |---|---|---|
+| [status.md](status.md) | **Resume-here** — next actions, decision tree, what's done/blocked | 🧭 living |
 | [videodec2-abi.md](videodec2-abi.md) | **Phase 0** — verified `libSceVideodec2` structs + exact call sequence; header `projects/evoplayer/media/include/sce/sce_videodec2.h` | ✅ done, hardware-verified |
 | [native-decode-plan.md](native-decode-plan.md) | The master plan — 9 phases from ABI harvest to a shipped Auto/FFmpeg/Native decoder toggle, with kill criteria | Phase 1 gate ✅ PASSED |
 | [phase-1b-app-module.md](phase-1b-app-module.md) | **Phase 1b** — repackage EVO as app module `PPSA99039` (fork the `ps5-native-app-boilerplate` build tail, clean-room `libc.prx`, ShadowMountPlus). **Milestone 1:** the unchanged FFmpeg-software player running in the app sandbox | 🟢 **tasks 1–7 done on hardware 2026-09-02** — boots to menu, pad, settings→/download0, USB browse (via sandbox-unjail); task 8 (playback) blocked, crashes on file select |
