@@ -50,12 +50,40 @@ Step 2 is the video path, so task 8 gates it.
 ## Do this first (needs console)
 
 **Build staged locally (2026-09-02):** `output/app/PPSA99039.ffpfsc` (22 MB) +
-`output/app/PPSA99039/`, with `--agc-probe` + the etaHEN/Lapy self-unjail +
-the task-8 breadcrumbs compiled in. Rebuild if the tree changed since:
+`output/app/PPSA99039/`. Rebuild if the tree changed since:
 
 ```bash
 docker compose run --rm ps5-dev bash ./scripts/package-app.sh --agc-probe --ffpfsc
 ```
+
+### What's in this build
+
+The `.ffpfsc` = the `output/app/PPSA99039/` folder wrapped in an inner exFAT
+image then PFS-compressed (ProsperoLight's exact format — `mkpfs inspect` only
+sees `PPSA99039.exfat`; the files are inside it). Contents:
+
+| file | what |
+|---|---|
+| `eboot.bin` (34 MB) | the signed EVO Player, built with the flags below |
+| `sce_module/libc.prx` (1.3 MB) | clean-room runtime shim (byte-pinned) |
+| `sce_sys/param.json` | `PPSA99039`, game category, `downloadDataSize>0` |
+| `sce_sys/icon0.png` | app icon |
+| `assets/` | RmlUi `.rml`/`.rcss`, icons, fonts, `renderer_reset_assets.h` |
+
+`eboot.bin` compile-time flags (set by `package-app.sh --agc-probe`):
+
+- **`EVO_APP_MODULE=1`** — `/download0/evoplayer` data paths, `getdents`
+  directory enum, **self-unjail** (`evo_jailbreak.c`, Lapy/etaHEN file-drop —
+  covers `/mnt/usb0` + `/data`), **`P8_*` playback breadcrumbs**,
+  `av_log`→notify, `pp_stage_bc`→notify.
+- **`EVO_AGC_PROBE=1`** — boot-time `sceAgc` reachability recon
+  (`evo_agc_probe.c` → `EVO agc:` notification).
+- **`EVO_BOOT_TRACE=1`** — `evo_bt` init breadcrumbs.
+- Always in the app build: `malloc_shim` (mmap allocator, R1), `libc_ext`
+  (locale/setjmp stubs), the RmlUi **Step 1 surface cache**.
+
+**Not in the ffpfsc** (separate artifacts): `pp/shaders/rgba_ps.bin` (not
+wired to the build yet), `agc_probe` / `sandbox_unjail` (elfldr payloads).
 
 When the console is up (powered, jailbroken — `nc -vz $PS5_HOST 2121` responds):
 
@@ -68,11 +96,13 @@ triggers the mount. **Launch is still manual**: on the console, launch EVO from
 the **Games row**. Do **not** stack launches — PS button to close before any
 rebuild.
 
-USB browse: EVO now **self-unjails** at boot — drops `{"PID":"<pid>"}` to
-`/download0/etahen_jailbreak` for the resident daemon (the user has
-**PS5-Lapy-JB-Daemon**; etaHEN uses the same file). Watch for the
-`EVO boot: jailbreak: promoted …` notification → no `sandbox-unjail.sh` step.
-If the daemon isn't running, fall back to `tools/sandbox-unjail.sh` per launch.
+USB + internal browse: EVO **self-unjails** at boot — drops `{"PID":"<pid>"}`
+to `/download0/etahen_jailbreak` for **PS5-Lapy-JB-Daemon** (add it to
+`/data/autoload.txt` so it's always up). One promotion opens the real root, so
+`/mnt/usb0` (USB) and `/data` (INTERNAL STORAGE) both resolve. Watch for
+`EVO boot: jailbreak: promoted …`. Daemon absent → `tools/sandbox-unjail.sh`
+per launch. Lapy README says fw 3.00→12.00 — 12.70 unconfirmed; the
+notification will tell.
 
 The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
 someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from
