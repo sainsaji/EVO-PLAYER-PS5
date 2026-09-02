@@ -29,6 +29,11 @@ docker compose run --rm ps5-dev ./tools/klog.sh
 
 Then open `output/screenshots/latest.png`.
 
+That is the payload/`hbldr` loop, fine for UI iteration. **Anything touching
+decode, GPU, audio output or the sandbox goes through the app module instead**
+(`package-app.sh --ffpfsc` → `deploy-app.sh --ffpfsc` → ShadowMountPlus) — see
+[Packaging: two routes](#packaging-two-routes).
+
 > **Exit the app on the console before launching again.** This is the one rule
 > that matters — see the next section.
 
@@ -71,6 +76,69 @@ pipe never EOFs.
 
 ---
 
+## Packaging: two routes
+
+EVO ships two ways, for two different jobs.
+
+### 1. App module — `.ffpfsc`, the one that matters
+
+`scripts/package-app.sh` → `scripts/deploy-app.sh` → mount + launch from the
+**Games row** with ShadowMountPlus. Builds a fake-signed **game-category app
+module** (`PPSA99039`): full `param.json`, a carried clean-room `libc.prx`,
+the whole EVO player.
+
+This is the **only context with real system access** — `sceVideodec2`
+hardware decode, `sceAgc` GPU rendering, a proper user session, the full
+sandbox. A borrowed-process payload (below) reaches none of that; the errno
+5200 decode wall and the elfldr "no graphics path" result were both just
+process-context limits. From here on, anything touching decode, GPU, or
+audio/output fidelity is tested here.
+
+```bash
+docker compose run --rm ps5-dev bash -lc '
+  ./scripts/package-app.sh --ffpfsc     # eboot.bin + param + libc, PFS-packed
+  ./scripts/deploy-app.sh --ffpfsc'     # PS5_HOST from .env, like everything else
+# then, on the console: ShadowMountPlus -> mount PPSA99039 -> launch from Games
+```
+
+| Script | What it does |
+|---|---|
+| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--agc-probe` adds the boot-time `sceAgc` reachability recon. `--probe` builds the sandbox probe instead of the player. |
+| `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
+| `setup-pfs-tool.sh` | Fetches MkPFS into `.deps/` (pinned, isolated venv). Called by `--ffpfsc`; needs network on first run. |
+| `setup-native-app-deps.sh` | Bootstraps the static zlib the host converter needs. Called by `package-app.sh`. |
+
+`param.json` lives at `projects/evoplayer/sce_sys/param.json` and is validated
+on every build. The `eboot.bin` / `param.json` / `libc.prx` are byte-identical
+between the folder and the `.ffpfsc` — the image is just a different container.
+
+Iteration still needs a manual mount + launch per cycle (no remote
+`SceSystemServiceLaunchApp` for an unregistered title). Diagnostics come back
+as **system-notification popups + klog** (`-DEVO_APP_MODULE` routes the
+`pp_stage_bc` / `evo_bt` / `EVO_P8` breadcrumbs there — `/mnt/usb0` is ENOENT
+inside the sandbox, so file-based breadcrumbs are invisible). USB media browse
+needs `tools/sandbox-unjail.sh`, re-run per launch.
+
+### 2. ELF payload — minimal probes only
+
+`scripts/build.sh` (small `projects/*` targets) → `scripts/deploy.sh` →
+`ps5-payload-elfldr` (9021). Or the legacy full-player-as-homebrew route:
+`build-evoplayer.sh` → `install-homebrew.sh` → `tools/launch.sh` (`/hbldr`,
+the borrowed PS-Now slot).
+
+Use payloads **only** for things that need nothing from the graphics/media
+stack: kernel-R/W helpers (`sandbox_unjail`), sandbox/dynlib reconnaissance
+(`agc_probe`, `decoder_test`, `gpu_test`), quick UI-layout checks on the real
+framebuffer. The elfldr host has no path to the GPU (`libSceGnmDriver` init
+crashes, `sceKernelLoadStartModule("libSceAgc.sprx")` hangs); the hbldr slot
+never reached the hardware decoder. Neither is where real playback work
+belongs any more.
+
+`tools/uiview.sh` / `tools/uiplay.sh` cover most UI iteration on the host with
+no console at all — prefer them.
+
+---
+
 ## `scripts/` — build and deploy
 
 | Script | What it does |
@@ -81,10 +149,11 @@ pipe never EOFs.
 | `build.sh` | Builds the small sample projects under `projects/`. |
 | `build-ffmpeg.sh` | Builds FFmpeg for the console. Slow, cached in a Linux volume. |
 | `build-prosperoplayer.sh` | Builds the upstream baseline fork. |
-| `build-evoplayer.sh` | **The one you want.** Builds EVO Player. `--run` installs and launches, `--stage N` picks a 4K product stage. |
+| `build-evoplayer.sh` | Builds EVO Player as an **ELF payload** (`/hbldr`). Fine for UI iteration; not the release path. `--run` installs and launches, `--stage N` picks a 4K product stage. |
+| `package-app.sh` / `deploy-app.sh` | **The release path.** Build + deploy EVO as the `PPSA99039` app module — see [Packaging: two routes](#packaging-two-routes). |
 | `install-homebrew.sh` | Installs an ELF as a homebrew app and optionally launches it. |
 | `package-pkg.sh` | Produces a distributable PKG. |
-| `deploy.sh` | Sends an ELF straight to `ps5-payload-elfldr` on port 9021. |
+| `deploy.sh` | Sends a minimal ELF probe straight to `ps5-payload-elfldr` on port 9021. |
 | `tools/launch.sh` | Launches the installed homebrew and streams its stdout, refusing to stack instances. Prefer this over a raw `curl` to `/hbldr`. |
 | `gen-compile-commands.sh` | Regenerates `compile_commands.json` for clangd. |
 | `shell.sh` | Drops you into a container shell. |
@@ -419,8 +488,9 @@ Which services need to be running on the console:
 
 | Task | Needs |
 |---|---|
-| `deploy.sh` | `ps5-payload-elfldr` (9021) |
-| `shot.sh`, `install-homebrew.sh` | `ps5-payload-websrv` (8080) |
+| `deploy.sh`, `tools/sandbox-unjail.sh` | `ps5-payload-elfldr` (9021) |
+| `shot.sh`, `install-homebrew.sh`, `tools/launch.sh` | `ps5-payload-websrv` (8080) |
+| `deploy-app.sh` | `ps5-payload-ftpsrv` (2121) + ShadowMountPlus to mount + launch |
 | `klog.sh` | `ps5-payload-klogsrv` (3232) |
 
 All of them need the jailbreak re-run after every console reboot. A port that
