@@ -241,20 +241,47 @@ The full list is in `native_agc_present.cpp:191–209`.
 
 ---
 
-## 5. Step 3 verdict
+## 5. Step 3 — complete UI on the GPU (committed scope)
 
-**Feasible but deferred.** The toolchain exists (`llvm-mc-18` assembles GCN),
-`geometry.text.bin`'s VS is already the right shape, and the remaining shaders
-(solid-colour tri, textured tri, scissored, modulated) are small. What it costs:
-each shader needs a hand-adapted Sony header, and `Rml::RenderInterface`'s
-`RenderGeometry` / `CompileGeometry` / `RenderToClipMask` / scissor / transform
-all have to map onto AGC draw calls — a full reimplementation of
-`evo_rmlui_render.cpp`'s rasteriser as a GPU backend.
+Not optional — the destination is a **single GPU path**: UI triangles + video
+convert + composite + flip all on `sceAgc`, `evo_rmlui_render.cpp`'s ~2000-line
+CPU coverage rasteriser deleted. Sequenced after Step 2 because Step 2 is the
+minimum pipeline that de-risks the shared infrastructure (toolchain,
+`CreateShader`/`LinkShaders`, DCB submit, VideoOut integration, panic
+discipline) on the simplest case.
 
-Per the Step 1 profile + hardware result (idle menus already 60 fps, held-
-scroll "noticeably smoother"), the value is **only** smoother continuous
-scrolling. Do it after Step 2 ships and only if held-scroll still misses the
-budget on hardware.
+**Feasible.** `llvm-mc-18` assembles GCN; `geometry.text.bin`'s VS is already a
+"structured vertex buffer + index + MVP" program (see SharpProspero
+`mesh_vs.pssl`); the remaining shaders are small.
+
+**Work:**
+
+1. **Shaders** (hand-write `.s`, assemble with `llvm-mc-18`, adapt a header
+   from ProsperoLight's):
+   - RGBA passthrough — textured quad (also serves the Step 2 OSD composite)
+   - solid-colour triangle
+   - textured + per-vertex-colour-modulated triangle (RmlUi's common case)
+   - each with scissor (rect test in the PS, or a HW scissor register)
+2. **`ui_rml/src/evo_rmlui_render_agc.cpp`** — an `Rml::RenderInterface` that
+   emits AGC draw calls into a per-frame DCB instead of CPU-rasterising:
+   - `CompileGeometry` → upload a GPU vertex/index buffer, return a handle
+   - `RenderGeometry` / `RenderCompiledGeometry` → bind shader + texture(s) +
+     translation constant → `sceAgcDcbDrawIndexAuto`
+   - `EnableScissorRegion` / `SetScissorRegion` → scissor register
+   - `RenderToClipMask` / `EnableClipMask` → stencil buffer or a coverage
+     texture sampled by the PS
+   - `SetTransform` → MVP constant buffer
+   - `GenerateTexture` / `LoadTexture` → GPU texture upload (the glyph atlas
+     and icons become GPU textures once, not per frame)
+3. **`evo_rmlui_app.cpp`** — pick `EvoRenderInterfaceAgc` when
+   `pp_agc_available()`, else the CPU `EvoRenderInterface` (Step 1). Runtime
+   switch, no `#ifdef` in the app layer.
+4. **`pp_agc.c` `render_frame`** gains a UI pass between the video quad and the
+   flip — one DCB does video + UI + composite + flip.
+5. **Delete** the CPU coverage rasteriser from `evo_rmlui_render.cpp` once
+   plane-hash parity holds on every screen.
+
+The Step 1 CPU path is kept as the fallback (AGC probe fails, or host preview).
 
 ---
 

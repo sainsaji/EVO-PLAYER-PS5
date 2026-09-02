@@ -13,15 +13,24 @@ EVO Player's RmlUi UI was ~11 fps and 4K playback is CPU-bound. The fix is a
 
 | Step | | State |
 |---|---|---|
-| **1** | Cache the RmlUi menu surface, re-raster only on change (CPU) | ✅ **shipped + hardware-verified** — idle menus 11 → ~55–60 fps |
-| **2** | GPU YUV→RGB convert + present for the video path (`sceAgc`) | 🔒 designed, blocked on a gate + on task 8 |
-| **3** | Full RmlUi geometry on the GPU | ⏸ deferred (low value after Step 1) |
+| **1** | Cache the RmlUi menu surface, re-raster only on change (CPU) | ✅ **shipped + hardware-verified** — idle menus 11 → ~55–60 fps. Stays as the AGC-unavailable / host fallback. |
+| **2** | GPU YUV→RGB convert + present for the **video path** (`sceAgc`) | 🔒 designed, blocked on a gate + on task 8 |
+| **3** | **Complete UI rendering on the GPU** — bind `Rml::RenderInterface` to AGC draw calls; delete the CPU rasteriser | 🔒 committed scope ("full attempt"), sequenced after Step 2 |
 
-Step 2 needs `sceAgc`, which only works from a **registered app module**, not
-an ELF payload (proven this session from both ends). So all GPU/decode work now
-targets EVO running as app module **`PPSA99039`**. That already boots to the
-menu (Phase 1b tasks 1–7 done), but **task 8 — picking a media file crashes it**
-— is unresolved, and Step 2 is the video path, so task 8 gates it.
+**The destination is one GPU path** — UI triangles + video convert + composite
++ flip all on `sceAgc`, `evo_rmlui_render.cpp`'s ~2000-line CPU coverage
+rasteriser gone, held-scroll smooth, 4K UI native, UI-over-video correct by
+construction. Step 2 first because it is the minimum pipeline that de-risks
+everything Step 3 needs (shader toolchain, `CreateShader`/`LinkShaders`, DCB
+submit, VideoOut integration, panic discipline) using the simplest case
+(fullscreen quads, ProsperoLight's existing blobs). Step 3 reuses all that
+plumbing and swaps in the harder hand-written shader set.
+
+`sceAgc` only works from a **registered app module**, not an ELF payload
+(proven this session from both ends). So all GPU/decode work targets EVO as app
+module **`PPSA99039`**. That already boots to the menu (Phase 1b tasks 1–7
+done), but **task 8 — picking a media file crashes it** — is unresolved, and
+Step 2 is the video path, so task 8 gates it.
 
 **Two questions the next console session answers, in one launch.**
 
@@ -91,6 +100,28 @@ port plan). Summary:
 `llvm-mc-18` in the container assembles GCN (`--mcpu=gfx1030`), so the RGBA PS
 and the Step 3 shaders are hand-writable — see agc-implementation.md §1/§5.
 
+### Then Step 3 — complete UI on the GPU (committed scope)
+
+Once Step 2's pipeline runs on device:
+
+1. Hand-write + assemble the shader set: RGBA passthrough (textured quad),
+   solid-colour triangle, textured+vertex-colour-modulated triangle, all with
+   scissor. Each needs a Sony header — start from ProsperoLight's
+   `pixel.header.bin` / `geometry.header.bin` and adapt (agc-implementation.md
+   §1/§5).
+2. New `ui_rml/src/evo_rmlui_render_agc.cpp` — an `Rml::RenderInterface` that
+   emits AGC draw calls into a per-frame DCB instead of CPU-rasterising:
+   `CompileGeometry` → a GPU vertex/index buffer; `RenderGeometry` → bind
+   shader + textures + `DrawIndexAuto`; `RenderToClipMask` / `EnableScissorRegion`
+   → scissor rects or a stencil; `SetTransform` → the MVP constant buffer.
+3. `evo_rmlui_app.cpp` picks the AGC interface when `pp_agc_available()`, else
+   the existing CPU `EvoRenderInterface` (Step 1). One `#ifdef`-free runtime
+   switch.
+4. The menu/video/OSD composites become draws in the same DCB — `pp_agc.c`'s
+   `render_frame` gains a "UI pass" between the video quad and the flip.
+5. Delete the CPU coverage rasteriser from `evo_rmlui_render.cpp` once parity
+   holds (plane-hash A/B every screen).
+
 ## B — fixing task 8 (the playback crash)
 
 The `P8_*` breadcrumb that fires last tells you which call. Likely suspects
@@ -141,20 +172,31 @@ Once playback is stable in `PPSA99039`, re-check A/V sync and 4K against `main`
 Builds verified: `build-evoplayer.sh` (payload) and `package-app.sh --agc-probe`
 (app module) both compile clean.
 
-## Remaining host work (optional, not blocking)
+## Remaining host work (not blocking — can start before the console session)
 
-1. `pp/src/pp_agc.c` scaffold — ~80% of Step 2, can be written + compile-checked
-   before the gate result is known.
-2. Optimise `render_triangles_accumulated` in `evo_rmlui_render.cpp` — the
-   profile's dominant cost; helps held-scroll (which Step 1 didn't touch).
-   Verify with `tools/prof_rmlui.sh`.
-3. Hand-write + assemble the RGBA-passthrough PS — proves the shader toolchain.
-4. Fix `projects/app_ctl/` (broken `sysctl` form — use `mib[4]={1,14,8,0}`).
+Toward Step 2/3:
+
+1. **`pp/src/pp_agc.c` scaffold** — ~80% of Step 2, written + compile-checked
+   before the gate result is known. Mechanical strip of `native_agc_present.cpp`.
+2. **Hand-write + assemble the RGBA-passthrough PS** with `llvm-mc-18` and adapt
+   a header from ProsperoLight's — proves the shader toolchain end to end, and
+   it is the first shader both Step 2 (OSD composite) and Step 3 need.
+3. Sketch `ui_rml/src/evo_rmlui_render_agc.cpp` — the `Rml::RenderInterface`→AGC
+   mapping (Step 3 §2 in [agc-implementation.md](agc-implementation.md)).
+
+Housekeeping:
+
+4. Fix `projects/app_ctl/` (broken `sysctl` form — use `mib[4]={1,14,8,0}`,
+   `KERN_PROC_PROC`, namelen 4). Gives a `list / kill <pid>` payload.
 5. `tools/bench_rmlui.cpp` — stale, references dead symbols; align to
    `evo_rmlui_prof.h` or delete.
 6. Clean the loose test media at the repo root (`bbb_au.bin`, `rabbit.mp4`,
    `test.264`, `test.mp4`, `test_au.bin`) + root-level `moonlight_stream.cpp` /
    `native_agc_present.cpp`.
+
+> Optimising the CPU rasteriser (`render_triangles_accumulated`) is **not**
+> worth it — Step 3 deletes it. Only touch it if Step 3 slips badly and
+> held-scroll needs a stopgap.
 
 ---
 

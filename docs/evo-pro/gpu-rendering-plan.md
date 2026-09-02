@@ -158,15 +158,23 @@ Gate: can a payload reach `sceAgc` without repackaging as an app module?
 - **Full how-to (blobs disassembled, `render_frame` annotated, the port and
   wiring): [agc-implementation.md](agc-implementation.md).**
 
-### Step 3 — full RmlUi GPU geometry backend (optional, largest)
+### Step 3 — complete UI rendering on the GPU (committed scope, largest)
 
 Bind `Rml::RenderInterface` (`RenderGeometry` / `CompileGeometry` /
-`RenderCompiledGeometry` / scissor / transform) directly to AGC draw calls, so
-UI triangles are rasterised on the GPU too. Removes the CPU UI raster entirely.
+`RenderCompiledGeometry` / scissor / clip mask / transform / `GenerateTexture`)
+directly to AGC draw calls, so UI triangles rasterise on the GPU too.
+**Deletes `evo_rmlui_render.cpp`'s ~2000-line CPU coverage rasteriser.**
 
-- More shaders (solid-colour, textured, scissored, transformed triangles) —
-  still a bounded set.
-- Only worth it if Step 1 + Step 2 don't reach the frame budget.
+The destination: video + UI + composite + flip in one DCB per frame. Held-
+scroll smooth, 4K UI native, UI-over-video correct by construction.
+
+- New hand-written shaders (solid-colour, textured, colour-modulated,
+  scissored triangles) — assembled with `llvm-mc-18`, headers adapted from
+  ProsperoLight's. Bounded set.
+- New `ui_rml/src/evo_rmlui_render_agc.cpp`; `evo_rmlui_app.cpp` picks it at
+  runtime when `pp_agc_available()`, else the Step 1 CPU path (the fallback).
+- Sequenced after Step 2 — which de-risks the shared AGC infrastructure on the
+  simplest case first. Full plan: [agc-implementation.md](agc-implementation.md) §5.
 
 ## 5. Interaction with native decode
 
