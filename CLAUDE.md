@@ -36,20 +36,37 @@ before doing deep work in its area instead of exploring the tree cold.
 - **Everything toolchain-related runs in the pinned Docker container.**
   Scripts under `scripts/` and `tools/` re-exec themselves through
   `docker compose` when run from Windows.
+- **Two packaging routes, and they are not interchangeable.** The **app
+  module** (`.ffpfsc` — `scripts/package-app.sh` → `scripts/deploy-app.sh` →
+  ShadowMountPlus, TITLE_ID `PPSA99039`) is the release path and the **only
+  context with real system access**: `sceVideodec2` hardware decode, `sceAgc`
+  GPU, a proper user session. An **ELF payload** (elfldr `deploy.sh`, or the
+  full player via `build-evoplayer.sh` + `/hbldr`) runs in a borrowed process
+  with a constrained sandbox — no graphics stack, the errno-5200 decode wall.
+  Payloads are for minimal probes (kernel R/W, dynlib recon) and quick UI
+  checks only. Anything touching decode, GPU or audio fidelity goes through
+  the app module. → [docs/tooling.md](docs/tooling.md#packaging-two-routes)
 
 ---
 
 ## Quick commands
 
 ```bash
-# build, install, launch, capture a screenshot
+# APP MODULE - the release path; the only context with hw decode / sceAgc / etc.
+docker compose run --rm ps5-dev bash -lc '
+  ./scripts/package-app.sh --ffpfsc     # add --agc-probe for the GPU Step 2 gate
+  ./scripts/deploy-app.sh --ffpfsc'
+# then on the console: ShadowMountPlus -> mount PPSA99039 -> launch from Games.
+# Diagnostics come back as notification popups + klog (-DEVO_APP_MODULE).
+
+# PAYLOAD - UI iteration only: build, install, launch, screenshot
 docker compose run --rm ps5-dev bash -lc '
   EXTRA_CFLAGS="-DEVO_AUTOSHOT=6" ./scripts/build-evoplayer.sh
   ./scripts/install-homebrew.sh --name EVOPlayer output/elf/EVOPlayer.elf
   ./tools/launch.sh --timeout 12
   ./tools/shot.sh grab'
 
-# watch the console log while you do it
+# watch the console log while you do it (either route)
 docker compose run --rm ps5-dev ./tools/klog.sh
 
 # render the UI on the host, no console needed (fast iteration loop)
@@ -122,7 +139,7 @@ mock data — everything in the DOM binds to live C structs
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/media-tile.md) | Media tile / metadata handling |
 | [addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
-| [packaging.md](docs/packaging.md) | PKG packaging |
+| [packaging.md](docs/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/tooling.md#packaging-two-routes)) |
 | [validation.md](docs/validation.md) | Validation checklist |
 | [modularisation-plan.md](docs/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |
 | [backlog.md](docs/backlog.md) / [improvements-roadmap.md](docs/improvements-roadmap.md) | Planning docs, not current state |
