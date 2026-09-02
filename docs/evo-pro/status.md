@@ -2,7 +2,46 @@
 
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
-> Last updated **2026-09-02**. Branch: **`refactor/main-c-media-modules`**.
+> Last updated **2026-09-02** (evening). Branch: **`refactor/main-c-media-modules`**.
+
+## 2026-09-02 evening — hardware session results
+
+- **Self-unjail CONFIRMED on 12.70** — PS5-Lapy-JB-Daemon file-drop works
+  (`daemon_saw=yes sandbox=OPEN`). One promotion opens `/mnt/usb0` **and**
+  `/data`. Lapy must be launched via HBL before EVO each session.
+- **Task 8 — 1080p MKV PLAYS.** Root cause was `posix_fadvise()` in
+  `evo_stream_io.c` faulting (SIGSYS-class) from the `PPSA99039` sandbox —
+  crashed on file-open between `P8_01c` and `P8_01d`. Fixed: both call sites
+  `#ifndef EVO_APP_MODULE` (commit `55685aa0`). Full `P8_*` chain now completes
+  through `009_FIRST_FRAME_ENTER`. `mmap live=98M peak=103M` → R1 heap is a
+  non-issue at 1080p.
+- **4K (GTA VI H.264) — decoded garbage then crashed.** FFmpeg spammed
+  `get_buffer() failed` / `thread_get_buffer() failed` → missing reference
+  pictures → corrupt frames → crash. This is the **frame pool running out of
+  memory**: `malloc_shim.c` was backing every allocation with plain anonymous
+  `mmap()`, which on PS5 is serviced from a small (~few-hundred-MB) system pool
+  — fine at 1080p (~100 MB) but a 4K frame pool (400 MB+) exhausts it.
+  **Fix (staged, not yet hardware-tested):** `malloc_shim.c` now maps through
+  `sceKernelMapNamedFlexibleMemory` (full title budget, GBs) with plain `mmap`
+  as fallback. Added `evo_alloc_map_info()` (map-fail count, last-fail size,
+  `sceKernelAvailableFlexibleMemorySize`) — surfaced in `P8_31_RETURN_OK` and
+  appended to the first buffer/alloc `P8_AVLOG` line. `evo_av_log_cb` narrowed
+  back to `AV_LOG_ERROR` and de-duplicates repeated lines (the screenshots were
+  40+ identical popups).
+- **Build-hygiene bug that cost 3 sessions** — `make objects` reused stale
+  *payload* `.o` files (the evoplayer Makefile tracks sources, not `CFLAGS`),
+  so deployed eboots had **zero** app-module code. Plus a leftover
+  `/data/homebrew/PPSA99039/` folder shadowed the `.ffpfsc`
+  ("Duplicate PPSA99039 ignored"). Both fixed: `package-app.sh` writes
+  `app-cflags.stamp` and force-cleans on mismatch; `deploy-app.sh --ffpfsc`
+  deletes the folder first; `main()` fires `EVO boot: BUILD <sha>_<MMDD-HHMM>`
+  first so a stale mount is caught in one glance.
+- **`--agc-probe` now links.** `evo_agc_probe.c` was rewritten to drop the
+  payload-only kernel-R/W symbols: it computes Sony NIDs inline via OpenSSL
+  `SHA1()` (libcrypto is already linked) and resolves through
+  `sceKernelLoadStartModule` + `sceKernelDlsym` (tries NID string then plain
+  name). NID encoder verified byte-for-byte against the SDK's `prospero-nid`
+  for 10 symbols. **The AGC gate answer is one launch away.**
 
 ---
 

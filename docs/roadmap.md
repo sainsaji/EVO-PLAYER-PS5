@@ -1,16 +1,16 @@
 # Roadmap — implementation order & per-story references
 
-The GitHub milestones (`v0.8.0` → `v0.9.0` → `v1.0.0`) with a dependency-ordered
-plan. **Each open issue's body carries its own "References & sequencing" block**
-pointing at the exact docs + files to read — this page is the map across all of
-them.
+The GitHub milestones (`v0.8.0` → `v0.9.0` → `v1.0.0` → `v1.1.0`) with a
+dependency-ordered plan. **Each open issue's body carries its own "References &
+sequencing" block** pointing at the exact docs + files to read — this page is
+the map across all of them.
 
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
 Priority labels track this order: **critical** #26 · **high** #27, #25 ·
-**medium** #9, #16, #6 · **low** the rest. `independent` = no cross-deps,
-work any time in parallel.
+**medium** #9, #16, #6, #29/#30 · **low** the rest. `independent` = no
+cross-deps, work any time in parallel.
 
 ---
 
@@ -19,7 +19,7 @@ work any time in parallel.
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
                  │  #17 CI/tests   #9 Emby URL   #8 codec metrics   #3 subtitles (meta)      │
-                 │  #5 swscale MT  #16 UI text/overflow                                       │
+                 │  #5 swscale MT  #16 UI text/overflow   #30 evo_vdec.h seam sign-off       │
                  └──────────────────────────────────────────────────────────────────────────┘
 
   #26 app-module playback crash  ──────────────┐        (needs console; gates the GPU track)
@@ -32,6 +32,10 @@ work any time in parallel.
                                                           delete the CPU rasteriser
 
   #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
+
+  #29 native hw decode (umbrella, v1.1.0)
+    └─ #30 Phase 3: finish the evo_vdec.h seam  ── independent, no console, ships regardless
+       └─ Phase 2 spike → Phase 4 native backend → Phase 5 toggle → Phase 6 validation
 ```
 
 ---
@@ -50,6 +54,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#3** | Subtitle subsystem + precise overlay timing (meta) | `docs/validation.md`; `media/src/evo_subtitle.c`, `assets/rml/subtitles.rml`, `main.c` subtitle picker/overlay path |
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
+| **#30** | Finish + sign off the `evo_vdec.h` decoder seam (Phase 3 of #29) | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
 
 ### 1 · `#26` — app-module playback crash *(needs console — do first of the hardware track)*
 
@@ -89,6 +94,17 @@ Blocked by #27 (it reuses all of #27's plumbing). Deletes the CPU rasteriser.
 
 - Reads: `docs/evo-pro/agc-implementation.md` §5, `docs/evo-pro/gpu-rendering-plan.md`, SharpProspero `Graphics/Agc/` (`Renderer3D`, `CxRenderTarget`, `AgcRenderTargetSetup`, `AgcBufferDescriptor` — the register model to transcribe)
 - Files: `ui_rml/src/evo_rmlui_render.cpp` + `.h` (the interface being replaced), `ui_rml/src/evo_rmlui_app.cpp`, `pp/shaders/`, `tools/build-shader.sh`, `tools/prof_rmlui.sh` (parity check)
+
+### 6 · `#29` / `#30` — native hardware decode *(v1.1.0)*
+
+`sceVideodec2` from the app module. Phase 1 gate PASSED on hardware
+(2026-09-01); the decoder seam (`evo_vdec.h`) is ~80 % built. **Start with
+`#30`** — Phase 3, finishing + signing off the seam: `independent`, no console,
+ships regardless of whether native decode ever lands.
+
+- Reads: **`docs/evo-pro/native-decode-plan.md`** (the full 9-phase plan, §3 architecture, kill criteria §8), `docs/evo-pro/videodec2-abi.md`, `docs/modularisation-plan.md` (Track A), `docs/evo-pro/status.md`
+- Files: `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `media/include/sce/sce_videodec2.h`, `main.c` (`start_video_playback` + the two thumbnail decoders), `third_party/ProsperoLight/src/moonlight_stream.cpp` (hardware-verified reference)
+- Sequencing: `#30` now (parallel to the GPU track) → Phase 2 native spike (needs console, timeboxed) → Phase 4 `evo_vdec_native.c` → Phase 5 settings toggle + probe → Phase 6 validation. Depends on #26 (app-module playback milestone).
 
 ### Ongoing · `#25` — RmlUi migration (umbrella)
 
