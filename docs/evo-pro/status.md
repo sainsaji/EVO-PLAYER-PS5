@@ -22,9 +22,20 @@ EVO Player's RmlUi UI was ~11 fps and 4K playback is CPU-bound. The fix is a
 rasteriser gone, held-scroll smooth, 4K UI native, UI-over-video correct by
 construction. Step 2 first because it is the minimum pipeline that de-risks
 everything Step 3 needs (shader toolchain, `CreateShader`/`LinkShaders`, DCB
-submit, VideoOut integration, panic discipline) using the simplest case
-(fullscreen quads, ProsperoLight's existing blobs). Step 3 reuses all that
-plumbing and swaps in the harder hand-written shader set.
+submit, VideoOut integration, panic discipline) using ProsperoLight's
+**hardware-proven** fullscreen-quad path. Step 3 reuses all that plumbing and
+swaps in arbitrary triangle geometry + a hand-written shader set — the
+primitive is proven structurally by SharpProspero's `Renderer3D.DrawMesh` but
+not yet on device, which is exactly why Step 2 goes first.
+
+> **We have full GPU access.** `sceAgc` from the app module = render target on
+> the VideoOut buffer, viewport, scissor, arbitrary vertex/index buffers,
+> constant buffers, shader linkage, textured+blended draws, flip. ProsperoLight
+> (fullscreen, hardware-proven) + SharpProspero (arbitrary geometry, clean-room
+> ABI) document it call-by-call. Missing: the PSSL compiler (→ `llvm-mc-18`
+> assembles GCN) and Gnmx helpers (→ SharpProspero rebuilt the register model).
+> **ProsperoLight draws its own RmlUi UI on the CPU** (`SDL_CreateSoftwareRenderer`)
+> — it is a Step 1+2 reference, not Step 3.
 
 `sceAgc` only works from a **registered app module**, not an ELF payload
 (proven this session from both ends). So all GPU/decode work targets EVO as app

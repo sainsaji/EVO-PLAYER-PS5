@@ -11,6 +11,34 @@
 
 ---
 
+## 0. What the references actually prove
+
+| Reference | GPU pipeline it demonstrates | Hardware-verified? |
+|---|---|---|
+| **ProsperoLight** `native_agc_present.cpp` | Fullscreen textured quads: NV12/P010→RGB sample, a second quad for the overlay composite, `sceAgcDcbSetFlip`. Render target points straight at the `sceVideoOut` back-buffer. | ✅ **yes** — this is "what runs" |
+| **SharpProspero** `Graphics/Agc/` (`Renderer3D.DrawMesh`, `MeshBuffer`, `CxRenderTarget`, `AgcRenderTargetSetup`, `AgcViewport`, `AgcBufferDescriptor`) | The **full** pipeline: arbitrary structured vertex buffer + 32-bit index buffer, constant buffers, `sceAgcLinkShaders(…, PrimitiveTriangleList=4)`, `sceAgcDcbSetIndexBuffer` + `DrawIndex`, viewport, target write-mask, blend. Its `prospero-3d` sample draws an indexed cube mesh. | ⚠️ **clean-room, ABI-solid, render loop not claimed on device** (managed C#/.NET — the *code* isn't liftable, the *register model + ABI* is) |
+
+**ProsperoLight renders its own RmlUi UI on the CPU** — `main.cpp:972`
+`SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION,"software")`, `:977`
+`SDL_CreateSoftwareRenderer`, `SdlRenderInterface`→`SDL_RenderGeometry` into an
+`SDL_Surface`. The GPU only touches the decoded video frame, the loading screen,
+and compositing that CPU-drawn surface. **ProsperoLight = EVO's Step 1 + Step 2.
+It is not a Step 3 reference — SharpProspero is.**
+
+Consequence for sequencing: Step 2 rides ProsperoLight's *proven* fullscreen
+path. Step 3's arbitrary-geometry draw is only *structurally* proven
+(SharpProspero) — so do it after Step 2 has the shared plumbing (shaders, DCB
+submit, VideoOut, panic behaviour) known-good on device.
+
+`sceAgcDcbDrawIndex` / `DrawIndexAuto` take any vertex+index buffer — nothing
+restricts the GPU to fullscreen quads. RmlUi's
+`RenderGeometry(vertices, indices, texture, translation)` is a triangle list
+with position + `ColourbPremultiplied` + UV per vertex → maps 1:1 onto
+`Renderer3D`'s `Vertex(pos, normal, uv, colour)` (drop the normal), a 2D-ortho
+MVP, and a texture bind.
+
+---
+
 ## 1. The one blocker, and the way around it
 
 There is **no PSSL→`.sb` compiler** in the SDK or anywhere reachable. Sony's
@@ -250,9 +278,14 @@ minimum pipeline that de-risks the shared infrastructure (toolchain,
 `CreateShader`/`LinkShaders`, DCB submit, VideoOut integration, panic
 discipline) on the simplest case.
 
-**Feasible.** `llvm-mc-18` assembles GCN; `geometry.text.bin`'s VS is already a
-"structured vertex buffer + index + MVP" program (see SharpProspero
-`mesh_vs.pssl`); the remaining shaders are small.
+**Feasible, and not speculative** — SharpProspero's `Renderer3D.DrawMesh`
+(`Graphics/Agc/`) is exactly this primitive: arbitrary structured vertex buffer
++ 32-bit index buffer + constant buffer + `sceAgcLinkShaders(…, triangle list)`
++ `DrawIndex`, render target on the VideoOut back-buffer. Its `CxRenderTarget` /
+`AgcRenderTargetSetup` / `AgcViewport` / `AgcBufferDescriptor` are the
+clean-room C# register model to transcribe to C (the managed code itself isn't
+liftable). `llvm-mc-18` assembles the shaders; `geometry.text.bin`'s VS is
+already the right shape. Remaining shaders are small.
 
 **Work:**
 
