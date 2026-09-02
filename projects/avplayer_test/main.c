@@ -1,12 +1,16 @@
 /* =============================================================================
- * avplayer_test — libSceAvPlayer native decode spike (Phase 2, Route A).
+ * avplayer_test — libSceAvPlayer callback-port REFERENCE (payload build).
  *
- * Native-decode plan Phase 2 (docs/evo-pro/native-decode-plan.md).
- * GATE QUESTION: from EVO's process context, does the sequence
- *     sceAvPlayerInit -> AddSource -> EnableStream -> Start -> GetVideoDataEx
- * actually run and hand back a decoded NV12 frame? Prior recon
- * (docs/native-media-research.md) only proved the six core symbols *resolve*
- * from a payload — not that the pipeline works.
+ * NOT the native-decode gate. An ELF payload (elfldr or hbldr) is a
+ * borrowed-process sandbox and cannot reach hardware decode — it hits the
+ * errno-5200 wall, same as Route B did. The real Route A gate is the boot-time
+ * probe compiled into the PPSA99039 app module:
+ *     projects/evoplayer/src/evo_avplayer_probe.c   (package-app.sh --avplayer-probe)
+ * See docs/evo-pro/avplayer-abi.md §4/§5.
+ *
+ * This file is kept as a compile-checked, self-contained reference for the
+ * AvPlayer call sequence and the MediaPlayer.cs callback port. Running it will
+ * at best exercise Init + demux; a decoded frame is not expected here.
  *
  * WHAT THIS BUILD DOES
  *   - resolves every entry point at run time by NID (nid_encode +

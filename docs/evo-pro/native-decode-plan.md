@@ -243,30 +243,31 @@ and establish whether that context differs from the payload.
 **This is the go/no-go gate.** If `sceVideodec2Decode` still returns errno
 5200 here *and* the `sceAvPlayer` spike in Phase 2 also fails, stop — §8.
 
-### Phase 2 — native decode spike (`projects/avplayer_test`, in the app context)
+### Phase 2 — native decode spike (in the app module — payloads can't decode)
 
-Run inside the Phase 1 app slot. Timeboxed. Two independent probes; run A
-first (cheaper payoff is larger, and it is the untried one).
+Both probes run **inside `PPSA99039`** (the errno-5200 wall is a payload/hbldr
+sandbox limit; only the registered app module has hardware decode). Timeboxed.
+Run A first — it's the untried route.
 
-**Route A — `sceAvPlayer`:** the probe is **built and host-compile-clean** —
-`projects/avplayer_test/main.c` (rewritten 2026-09-02 from the earlier draft).
-It does all four steps below already; Phase 2 is now just *running it on the
-console* and recording the result against the table in
-[avplayer-abi.md](avplayer-abi.md) §5.
-- [x] `sceAvPlayerInit` with the Phase 0 struct; general + texture allocators
-      ported from `MediaPlayer.cs`; **file-replacement callbacks that log every
-      call** then service it from the real fs; event callback log-only; debug
-      level `All`; watchdog thread `_exit()`s on a hang.
-- [x] `sceAvPlayerAddSource` (argv[1] or `/data/bunny.mp4`), then
-      `StreamCount` / `GetStreamInfo` / `EnableStream` (first of each kind).
+**Route A — `sceAvPlayer`:** the probe is **built into the app module** behind
+`-DEVO_AVPLAYER_PROBE` — `projects/evoplayer/src/evo_avplayer_probe.c` (boot-time,
+like `evo_agc_probe.c`). It does all four steps below; Phase 2 is now just
+*launching EVO on the console with a test file present* and reading the
+`EVO avplayer:` popups against [avplayer-abi.md](avplayer-abi.md) §5.
+- [x] `sceAvPlayerInit` with the Phase 0 struct; general heap + texture
+      allocator (`AllocateMainDirectMemory` type 12→3, prot 0x33); log+serve
+      file callbacks; debug `All`; watchdog thread `_exit()`s EVO on a hang.
+- [x] `sceAvPlayerAddSource` (auto-finds `/data/probe.mp4` /
+      `/mnt/usb0/probe.mp4` / `/download0/evoplayer/probe.mp4`), then
+      `StreamCount` / `GetStreamInfo` / `EnableStream`.
 - [x] `sceAvPlayerStart` → poll `sceAvPlayerGetVideoDataEx` → dump the first
-      frame's planes + every `AvPlayerFrameInfoEx` field to
-      `/data/avplayer_probe/`.
-- [x] Characterise the frame: `pitch` vs `width`, the four crop insets,
-      CPU-readable-without-a-fault (SIGSEGV-guarded), rough NV12 sanity (luma
-      spread, chroma near 128).
-- [ ] **RUN IT** (needs console). Never calls `sceVideoOutOpen` — the panic
-      vector is not in play.
+      frame + metadata to `/download0/evoplayer/avpx_frame0.*`.
+- [x] Characterise: `pitch` vs `width`, the four crop insets, CPU-readable
+      (SIGSEGV-guarded), rough NV12 sanity, which texture memory type worked.
+- [ ] **RUN IT** — `package-app.sh --avplayer-probe --ffpfsc`, deploy, drop a
+      small H.264 `.mp4`, launch from the Games row. Never opens VideoOut.
+- payload build `projects/avplayer_test/` kept as a compile-checked
+      callback-port reference only.
 
 **Route B — `sceVideodec2`:**
 - [ ] Repeat EVO's phase-9/10 `CreateDecoder` → `Decode`, but with

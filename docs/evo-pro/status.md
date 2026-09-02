@@ -13,18 +13,25 @@
   play-stream `avcodec_*`/`sws_*`. Builds clean: `build-evoplayer.sh`,
   `package-app.sh --ffpfsc`, `uiview_playback_rml.sh`. Commit on the branch.
   Remaining: bit-exact codec-sweep parity check (hardware).
-- **#29 Route A (`sceAvPlayer`) Phase 0 done + spike rebuilt.**
+- **#29 Route A (`sceAvPlayer`) Phase 0 done + gate probe built into the app module.**
   - New header `projects/evoplayer/media/include/sce/sce_avplayer.h` from
     SharpProspero (sizes/offsets `_Static_assert`ed, C + C++ clean).
-  - `projects/avplayer_test/main.c` rewritten from the earlier draft (which had
-    a scrambled NID table, the PS4 file-callback layout, and a `sceVideoOutOpen`
-    present path). Now: NIDs computed via `nid_encode`, `MediaPlayer.cs`
-    allocator port, log-and-serve file callbacks, SIGSEGV-guarded frame
-    characterisation, `/data/avplayer_probe/` dump, watchdog `_exit()`. **No
-    `sceVideoOutOpen`.** Host-compiles clean.
-  - Write-up + result-table + memory-typing diff: [avplayer-abi.md](avplayer-abi.md).
-  - **Next console session:** run it (see [avplayer-abi.md](avplayer-abi.md) §5),
-    read the transcript + `frame0.txt`, match the verdict table.
+  - **`projects/evoplayer/src/evo_avplayer_probe.c`** — boot-time probe behind
+    `-DEVO_AVPLAYER_PROBE` (`package-app.sh --avplayer-probe`), modelled on
+    `evo_agc_probe.c`. Payloads can't reach hardware decode, so this runs
+    **inside `PPSA99039`**: inline-SHA1 NID resolve, `MediaPlayer.cs` callback
+    port (texture via `AllocateMainDirectMemory` 12→3), `Init → AddSource →
+    EnableStream → Start → GetVideoDataEx`, frame characterisation, dump to
+    `/download0/evoplayer/avpx_frame0.*`, watchdog `_exit()`s EVO on a hang.
+    Output = `EVO avplayer:` notification popups. Compiled into the eboot
+    (verified: symbol + strings present).
+  - `projects/avplayer_test/` (payload) kept as a compile-checked callback-port
+    reference only — it cannot decode.
+  - Write-up + verdict table + memory-typing diff: [avplayer-abi.md](avplayer-abi.md).
+  - **Staged build:** `output/app/PPSA99039.ffpfsc` includes `--avplayer-probe`
+    `--agc-probe`. **Next console session:** deploy, drop a small H.264 `.mp4`
+    at `/data/probe.mp4` (FTP) or `/mnt/usb0/probe.mp4`, launch from Games row,
+    relay the `EVO avplayer:` popups → verdict table.
 
 ## 2026-09-02 evening — hardware session results
 
@@ -93,10 +100,12 @@
   - [ ] then a 4K file
 
 **Then, in order** (GitHub issues):
-- [ ] **Route A spike** (#29 Phase 2) — launch `output/elf/avplayer_test.elf`
-      (payload, watchdog-guarded, no VideoOut) with a small `.mp4` at
-      `/data/bunny.mp4`; relay the transcript + `/data/avplayer_probe/frame0.txt`
-      → verdict table in [avplayer-abi.md](avplayer-abi.md) §5
+- [ ] **Route A gate** (#29 Phase 2) — `PPSA99039.ffpfsc` is built with
+      `--avplayer-probe`. Deploy, drop a small H.264 `.mp4` at `/data/probe.mp4`
+      (FTP) or `/mnt/usb0/probe.mp4`, launch from Games row; relay the
+      `EVO avplayer:` popups + `/download0/evoplayer/avpx_frame0.txt`
+      → verdict table in [avplayer-abi.md](avplayer-abi.md) §5. Runs at boot,
+      before the UI; watchdog closes EVO if it hangs.
 - [ ] **Task 8** (#26) — fix the call the breadcrumb named; verify A/V sync + 4K vs `main`
 - [ ] **Step 2** (#27) — `pp/src/pp_agc.{h,c}` + `agc_blobs.S` (port `native_agc_present.cpp`); wire `pp_videoout.c` / `pp_playback.c`; settings toggle Auto/CPU/GPU; device-test a test-pattern NV12; plane-hash A/B vs CPU
 - [ ] **Step 2.5** (#27) — `rgba_ps` + reused header → `sceAgcCreateShader` accepts? → GPU OSD composite

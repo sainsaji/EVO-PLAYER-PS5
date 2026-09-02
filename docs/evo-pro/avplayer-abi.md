@@ -4,8 +4,9 @@
 native-decode plan's **Route A** (`sceAvPlayer` — hardware demux + decode +
 A/V sync in one API). Header:
 [sce/sce_avplayer.h](../../projects/evoplayer/media/include/sce/sce_avplayer.h).
-The spike that turns this into a hardware result is
-[`projects/avplayer_test/`](../../projects/avplayer_test/main.c) — Phase 2.
+The gate that turns this into a hardware result is the boot-time probe
+[`evo_avplayer_probe.c`](../../projects/evoplayer/src/evo_avplayer_probe.c) in
+the app module (`--avplayer-probe`) — Phase 2. §4/§5 below.
 
 What *is* verified (prior recon, [native-media-research.md](../native-media-research.md#results-log),
 fw 12.70, elfldr payload): `libSceAvPlayer.sprx` maps into EVO's process and
@@ -139,48 +140,58 @@ queue 0**. Whether the wrong memory type contributed to errno 5200 is
 unproven, but Route B's Phase 2 re-run (`sceVideodec2` with SharpProspero's
 *exact* typing) is the controlled test.
 
-### the payload-context caveat (why the spike may still fail cleanly)
+### only the app module can answer this
 
-`sceKernelGetDirectMemorySize()` returns **0** in an elfldr payload — there is
-no direct-memory budget, so `sceKernelAllocateDirectMemory` cannot be used as
-`MediaPlayer.cs` does. `projects/avplayer_test` therefore routes the texture
-allocator through `sceKernelAllocateMainDirectMemory` (the main pool, as
-`videoout_test` does). If the decoder rejects that memory, **that is the
-finding**: Route A needs the registered-app-module context, same conclusion as
-the Phase 1 gate reached for Route B. The clean follow-up is to fold the probe
-into the app module behind a `-D` flag, next to `evo_agc_probe.c`.
+Native hardware decode does **not** work from an ELF payload — elfldr *and*
+hbldr are both borrowed-process sandboxes and both hit the errno-5200 wall
+(this is the whole reason Phase 1 repackaged EVO as `PPSA99039`). So the Route A
+gate runs **inside the app module**, as a boot-time probe behind
+`-DEVO_AVPLAYER_PROBE`, exactly like `evo_agc_probe.c`:
+
+- `projects/evoplayer/src/evo_avplayer_probe.c` — module load + NID resolve
+  (inline SHA1, no kernel R/W), the four callbacks (general heap; texture via
+  `sceKernelAllocateMainDirectMemory` type 12→3 fallback, prot 0x33; log+serve
+  file callbacks), `Init → AddSource → EnableStream → Start → GetVideoDataEx`,
+  frame characterisation, `/download0/evoplayer/avpx_frame0.*` dump, watchdog
+  thread that `_exit()`s EVO on a hang. Output is **notification popups** (no
+  stdout in the app sandbox).
+
+`projects/avplayer_test/` (the payload build) is kept only as a compile-checked
+reference for the callback port — it cannot reach hardware decode.
 
 ---
 
-## 5. Running the spike
+## 5. Running the gate (app module)
 
 ```bash
 docker compose run --rm ps5-dev bash -lc '
-  cd projects/avplayer_test && make'
-# put a small .mp4 (H.264, .mp4/.mov extension) at /data/bunny.mp4 on the console
-./tools/launch.sh output/elf/avplayer_test.elf --timeout 45      # payload; watchdog _exit()s at 40s
-# read the transcript from the /hbldr pipe + the notification popups
+  ./scripts/package-app.sh --avplayer-probe --agc-probe --ffpfsc
+  ./scripts/deploy-app.sh --ffpfsc'
 ```
 
+Then on the console: a small **H.264 `.mp4`** at one of `/data/probe.mp4`
+(FTP), `/mnt/usb0/probe.mp4` (USB stick), or `/download0/evoplayer/probe.mp4`;
+launch EVO from the **Games row**. The probe runs before the UI. Read the
+`EVO avplayer:` notification popups off the TV.
+
 Outputs:
-- **stdout transcript** (over the `/hbldr` pipe) — every resolve, every
-  callback, the full `AvPlayerFrameInfoEx` dump, the characterisation.
-- **`/data/avplayer_probe/frame0.nv12`** + `frame0.txt` — first frame's planes
-  and metadata, for off-console inspection (`ffplay -f rawvideo -pix_fmt nv12
-  -video_size <pitch>x<height> frame0.nv12`).
-- **notification popup** — one-line verdict.
+- **notification popups** — module/NID result, Init/AddSource/streams/Start,
+  first-frame characterisation, and a one-line verdict.
+- **`/download0/evoplayer/avpx_frame0.nv12`** + `avpx_frame0.txt` — first
+  frame's planes + metadata (`ffplay -f rawvideo -pix_fmt nv12 -video_size
+  <pitch>x<height> avpx_frame0.nv12`). Falls back to `/data` or `/mnt/usb0`.
 
-### what each result means
+### what each verdict means
 
-| transcript ends at | meaning | → |
+| `EVO avplayer:` notification | meaning | → |
 |---|---|---|
-| `FAILED (symbol resolve)` | module not mappable in this context | Route A dead from a payload; try in-app |
-| `Init returned NULL` | allocators rejected, or context refused | inspect the `[tex]`/`[file]` logs just above |
-| `AddSource 0x…` non-zero | demux refused the file | check extension + path; try `file://` |
-| `StreamCount -> 0` (stays) | source-read thread never finished | file unreadable via the callbacks, or hang (watchdog fires) |
-| `Start -> 0x…` non-zero | no stream enabled, or start refused | |
-| decode loop, `video frames: 0` | **the interesting failure** — pipeline ran, no frame out | this is the errno-5200-equivalent for Route A; compare `isActive` polls |
-| `OK — N video frame(s) decoded` + `cpu-readable: yes` | **Route A works** | → Phase 4: `evo_vdec_native.c` on `sceAvPlayer` |
+| `libSceAvPlayer.sprx load FAILED` | module not loadable even in-app | Route A dead; Route B only |
+| `core NIDs unresolved` | loaded but symbols missing | check the printed pointers; NID salt/alphabet |
+| `NO test file` | probe ran, no media at any candidate path | drop `/data/probe.mp4`, relaunch |
+| `sceAvPlayerInit -> NULL` | allocators rejected or context refused Init | check `InitData` size line (want 120) |
+| `AddSource(...) -> 0x…` non-zero | demux refused the file (`opened=` / `reads=` show if I/O happened) | extension must be `.mp4/.mov/.m4v/.webm` |
+| `pipeline ran, N frames` (N=0) | **the errno-5200-equivalent** — Init+demux OK, no decoded frame | Route A also context-limited; Route B re-run + reassess §8 |
+| `ROUTE A WORKS — N video frame(s) hw-decoded` + `cpu-read=YES` | **gate passed** | → Phase 4: `evo_vdec_native.c` on `sceAvPlayer` |
 
 ---
 
@@ -203,7 +214,8 @@ Outputs:
 ## 7. Reference
 
 - Header: [sce/sce_avplayer.h](../../projects/evoplayer/media/include/sce/sce_avplayer.h)
-- Spike: [projects/avplayer_test/main.c](../../projects/avplayer_test/main.c)
+- Gate probe (app module): [projects/evoplayer/src/evo_avplayer_probe.c](../../projects/evoplayer/src/evo_avplayer_probe.c)
+- Callback-port reference (payload, cannot decode): [projects/avplayer_test/main.c](../../projects/avplayer_test/main.c)
 - Clean-room ABI: `third_party/SharpProspero/src/SharpProspero/Interop/Media/AvPlayer.cs`
 - Reference impl: `third_party/SharpProspero/src/SharpProspero/Media/MediaPlayer.cs`
 - Prior recon: [native-media-research.md](../native-media-research.md)
