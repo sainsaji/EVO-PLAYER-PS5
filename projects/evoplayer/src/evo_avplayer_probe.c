@@ -30,6 +30,11 @@
 
 extern int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
 extern unsigned int sceKernelUsleep(unsigned int us);
+/* SharpProspero's prospero-media sample loads the module before use:
+ *   SystemModule.Load(SystemModuleId.AvPlayer)  ==  sceSysmoduleLoadModule(0xA5)
+ * The PRX-stub NEEDED entry only maps the .prx; this runs its module_start. */
+extern int sceSysmoduleLoadModule(uint16_t id);
+#define SCE_SYSMODULE_ID_AVPLAYER 0x00A5
 extern uint64_t sceKernelGetProcessTime(void);
 extern int sceKernelAllocateMainDirectMemory(size_t, size_t, int, intptr_t *);
 extern int sceKernelMapDirectMemory(void **, size_t, int, int, intptr_t, size_t);
@@ -309,6 +314,14 @@ void evo_avplayer_probe(void)
         return;
     }
     note("EVO avplayer: test file = %s", file);
+
+    /* --- load the module (module_start), the way SharpProspero's sample does
+     *     before it touches sceAvPlayerInit. The PRX-stub NEEDED entry only
+     *     maps the .prx; without this the first call faulted. --- */
+    g_stage = 2;
+    g_fault_where = "sceSysmoduleLoadModule(0xA5)";
+    int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_ID_AVPLAYER);
+    note("EVO avplayer: sceSysmoduleLoadModule(0xA5) -> 0x%08x", sm);
 
     /* --- init --- */
     g_stage = 3;

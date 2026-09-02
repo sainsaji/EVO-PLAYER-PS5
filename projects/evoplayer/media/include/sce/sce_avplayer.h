@@ -42,11 +42,12 @@ extern "C" {
 #endif
 
 /* --- sysmodule id ------------------------------------------------------- */
-/* sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER) / LoadModuleInternal.
- * SharpProspero and prior payload recon load the .sprx by path:
- *   /system/common/lib/libSceAvPlayer.sprx
- * The numeric id is kept here for the app-module loader path. */
-#define SCE_SYSMODULE_AVPLAYER 0x0015 /* 21 — sceSysmoduleLoadModuleInternal(0x80000018) also seen */
+/* sceSysmoduleLoadModule(SCE_SYSMODULE_AVPLAYER) — must be called before
+ * sceAvPlayerInit (SharpProspero's prospero-media sample does exactly this:
+ * `SystemModule.Load(SystemModuleId.AvPlayer)`). A link-time NEEDED entry only
+ * maps the .prx; this runs its module_start. Value from SharpProspero
+ * Interop/Sysmodule/SystemModuleId.cs. */
+#define SCE_SYSMODULE_AVPLAYER 0x00A5 /* 165 */
 
 /* --- debug level (SceAvPlayerDebugLevel) ------------------------------- */
 #define SCE_AVPLAYER_DEBUG_NONE     0u
