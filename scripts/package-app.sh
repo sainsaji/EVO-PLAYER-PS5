@@ -229,6 +229,9 @@ else
     printf '#pragma once\n#define EVO_BUILD_ID "%s_%s"\n' \
         "${BUILD_SHA}" "$(date -u +%m%d-%H%M)" > "${EVO}/include/evo_build_id.h"
     ok "build id $(sed -n 's/.*"\(.*\)".*/\1/p' "${EVO}/include/evo_build_id.h")"
+    # main.c bakes EVO_BUILD_ID in but the Makefile tracks source mtimes, not
+    # this generated header - drop main.o so the id on screen is always current.
+    rm -f "${EVO}/main.o"
     APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     (( AVPLAYER_PROBE )) && APP_DEFS+=" -DEVO_AVPLAYER_PROBE=1"

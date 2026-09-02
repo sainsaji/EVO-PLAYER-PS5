@@ -65,12 +65,18 @@ static void *watchdog(void *arg)
     return 0;
 }
 
-/* ---- SIGSEGV/SIGBUS guard for the "is the frame CPU-readable" probe ---- */
-static sigjmp_buf g_fault_jmp;
-static volatile sig_atomic_t g_fault_armed = 0;
+/* ---- SIGSEGV/SIGBUS guard. Armed around every call into libSceAvPlayer so a
+ *      fault in the module is reported, not a bare crash-reporter popup. --- */
+static sigjmp_buf g_fault_jmp;      /* top-level: any libSceAvPlayer call    */
+static sigjmp_buf g_read_jmp;       /* the frame CPU-read test only          */
+static volatile sig_atomic_t g_fault_armed = 0;   /* 0 none, 1 top, 2 read   */
+static const char *volatile g_fault_where = "?";
 static void fault_handler(int sig)
 {
-    if (g_fault_armed) { g_fault_armed = 0; siglongjmp(g_fault_jmp, sig); }
+    int a = g_fault_armed;
+    g_fault_armed = 0;
+    if (a == 2) siglongjmp(g_read_jmp, sig);
+    if (a == 1) siglongjmp(g_fault_jmp, sig);
     _exit(130 + sig);
 }
 
@@ -202,8 +208,8 @@ static void characterise(const SceAvPlayerFrameInfoEx *f)
 
     const char *readable = "untested";
     long cmean = -1; unsigned ymin = 0, ymax = 0;
-    if (f->data && sigsetjmp(g_fault_jmp, 1) == 0) {
-        g_fault_armed = 1;
+    if (f->data && sigsetjmp(g_read_jmp, 1) == 0) {
+        g_fault_armed = 2;
         const uint8_t *p = (const uint8_t *)f->data;
         const uint8_t *c = p + (size_t)pitch * h;
         volatile uint32_t acc = 0;
@@ -221,12 +227,12 @@ static void characterise(const SceAvPlayerFrameInfoEx *f)
             for (unsigned x = 0; x < 128; x++) { csum += cr[x]; cn++; acc += cr[x]; }
         }
         (void)acc;
-        g_fault_armed = 0;
         cmean = cn ? csum / cn : -1;
         readable = "YES";
     } else if (f->data) {
         readable = "NO (faulted)";
     }
+    g_fault_armed = 1;   /* re-arm the top-level guard for the rest of the probe */
 
     /* dump the planes + metadata to the first writable dir */
     char path[128] = "(none)";
@@ -273,11 +279,28 @@ void evo_avplayer_probe(void)
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = fault_handler;
     sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSYS,  &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
+
+    note("EVO avplayer: probe entry (libSceAvPlayer NEEDED via PRX stub)");
+
+    /* Catch a fault anywhere in the probe body and report where we were. */
+    if (sigsetjmp(g_fault_jmp, 1) != 0) {
+        note("EVO avplayer: FAULT at [%s] (stage %d) - libSceAvPlayer call "
+             "crashed. The .sprx loaded but is not usable from a fake-signed "
+             "module.", g_fault_where, g_stage);
+        _exit(70);
+    }
+    g_fault_armed = 1;
 
     pthread_t wd;
     pthread_create(&wd, NULL, watchdog, NULL);
 
+    g_fault_where = "find_test_file";
     const char *file = find_test_file();
     if (!file) {
         note("EVO avplayer: libSceAvPlayer linked OK, but NO test file.\n"
@@ -285,6 +308,7 @@ void evo_avplayer_probe(void)
              "/mnt/usb0/probe.mp4 (USB), relaunch.");
         return;
     }
+    note("EVO avplayer: test file = %s", file);
 
     /* --- init --- */
     g_stage = 3;
@@ -302,15 +326,18 @@ void evo_avplayer_probe(void)
     init.num_output_video_framebuffers = 6;
     init.auto_start = 0;
 
+    g_fault_where = "sceAvPlayerInit";
     void *pl = sceAvPlayerInit(&init);
     if (!pl) {
         note("EVO avplayer: sceAvPlayerInit -> NULL (InitData=%zu B, want 120). "
              "Route A refused at Init.", sizeof init);
         return;
     }
+    note("EVO avplayer: sceAvPlayerInit OK -> %p", pl);
 
     /* --- add source --- */
     g_stage = 4;
+    g_fault_where = "sceAvPlayerAddSource";
     int rc = sceAvPlayerAddSource(pl, file);
     if (rc != 0) {
         note("EVO avplayer: AddSource(\"%s\") -> 0x%08x (opened=\"%s\" reads=%llu). "
@@ -322,6 +349,7 @@ void evo_avplayer_probe(void)
 
     /* --- streams --- */
     g_stage = 5;
+    g_fault_where = "sceAvPlayerStreamCount/GetStreamInfo/EnableStream";
     int count = 0;
     for (int t = 0; t < 100; t++) {
         count = sceAvPlayerStreamCount(pl);
@@ -347,12 +375,14 @@ void evo_avplayer_probe(void)
 
     /* --- start + decode loop --- */
     g_stage = 6;
+    g_fault_where = "sceAvPlayerSetLooping/Start";
     sceAvPlayerSetLooping(pl, 0);
     int srtc = sceAvPlayerStart(pl);
     note("EVO avplayer: Init OK, AddSource OK, streams=%d (video %dx%d), "
          "Start->0x%08x. Decoding...", count, vw, vh, srtc);
 
     g_stage = 7;
+    g_fault_where = "sceAvPlayerGetVideoDataEx";
     int frames = 0, polls = 0;
     uint64_t t0 = sceKernelGetProcessTime();
     while (sceKernelGetProcessTime() - t0 < 15ULL * 1000 * 1000) {
