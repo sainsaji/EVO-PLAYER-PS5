@@ -8,9 +8,9 @@ the map across all of them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
-Priority labels track this order: **critical** #26 · **high** #27, #25 ·
-**medium** #9, #16, #6, #29/#30 · **low** the rest. `independent` = no
-cross-deps, work any time in parallel.
+Priority labels track this order: **high** #27, #25 · **medium** #9, #16, #6,
+#29/#30 · **low** the rest. `independent` = no cross-deps, work any time in
+parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K → #29.)
 
 ---
 
@@ -22,14 +22,15 @@ cross-deps, work any time in parallel.
                  │  #5 swscale MT  #16 UI text/overflow   #30 evo_vdec.h seam sign-off       │
                  └──────────────────────────────────────────────────────────────────────────┘
 
-  #26 app-module playback crash  ──────────────┐        (needs console; gates the GPU track)
-                                               │
-  #6 rotate buffers → direct mem ──────────────┤        (touches pp_videoout; do before #27)
+  #26 app-module playback ─── CLOSED (works; demanding 4K → #29)
+
+  #6 rotate buffers → direct mem ──────────────┐        (touches pp_videoout; do before #27)
                                                │
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
-  #27 GPU Step 2: sceAgc video convert+present  ──────►  #28 GPU Step 3: RmlUi on sceAgc,
-                                                          delete the CPU rasteriser
+  libSceAgc link stub ──► #27 GPU Step 2: sceAgc convert+present ──► #28 GPU Step 3:
+    (sceKernelLoadStartModule refused on hw)                          RmlUi on sceAgc,
+                                                                      delete CPU rasteriser
 
   #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
 
@@ -56,14 +57,12 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
 | **#30** | Finish + sign off the `evo_vdec.h` decoder seam (Phase 3 of #29) | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
 
-### 1 · `#26` — app-module playback crash *(needs console — do first of the hardware track)*
+### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**
 
-Gates everything in `v1.0.0`. Diagnostics already shipped; one console launch
-names the failing call.
-
-- Reads: `docs/evo-pro/status.md` (Branch B + the checklist), `docs/evo-pro/phase-1b-app-module.md` §8, `docs/validation.md`
-- Files: `main.c` `start_video_playback` + the `EVO_P8()` macro, `pp/src/pp_stage_breadcrumb.c`, `tools/native-app/stubs/malloc_shim.c`, `media/src/evo_vdec_ffmpeg.c`
-- Procedure: `scripts/package-app.sh --agc-probe --ffpfsc` → `scripts/deploy-app.sh --ffpfsc` → launch → read the last `P8_*` / `P8_AVLOG` notification before the crash.
+1080p + reasonable 4K play in `PPSA99039`; demanding 4K degrades gracefully
+(toast, no crash). Fixes: `55685aa0` (posix_fadvise SIGSYS), `d84d05c`
+(flexible-memory allocator), `bb80de1` (slice threading + fatal-decode abort).
+Demanding-4K playback needs native decode → tracked under **#29**.
 
 ### 2 · `#6` — rotate buffers → direct memory *(before #27)*
 
@@ -83,7 +82,13 @@ The real fix is #27 (GPU P010 shader). Only do a CPU-side improvement here if
 
 ### 4 · `#27` — GPU Step 2: sceAgc video convert + present
 
-Blocked by #26 + the AGC gate (`EVO agc: … VIABLE`). The big one.
+**Prerequisite (hardware 2026-09-02):** `sceKernelLoadStartModule("libSceAgc.sprx")`
+is refused from the app module — a fake-signed module can only load PRXes it
+declares NEEDED. **A `libSceAgc` / `libSceAgcDriver` import stub must be added to
+the app-module link first** (`tools/native-app/` + `scripts/package-app.sh`);
+NID list + encoder are in `evo_agc_probe.c` (verified vs `prospero-nid`),
+export-table layout in SharpProspero `tools/SharpProspero.Prx/`. Only then does
+the AGC gate (`EVO agc: … VIABLE`) get a real answer. The big one.
 
 - Reads: **`docs/evo-pro/agc-implementation.md`** (§0 what's proven, §1 shaders, §3 `render_frame` annotated, §4 the port), `docs/evo-pro/gpu-rendering-plan.md`, `docs/evo-pro/sharpprospero-agc-reference.md`, `docs/evo-pro/videodec2-abi.md` §6 (AGC/decoder ordering)
 - Files: `third_party/ProsperoLight/src/native_agc_present.cpp` (+ `assets/private/*.bin`), `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `projects/evoplayer/src/evo_agc_probe.c` (runtime NID resolution pattern), `tools/build-shader.sh`, `pp/shaders/rgba_ps.s`
