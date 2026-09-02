@@ -8,6 +8,10 @@ them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
+Priority labels track this order: **critical** #26 · **high** #27, #25 ·
+**medium** #9, #16, #6 · **low** the rest. `independent` = no cross-deps,
+work any time in parallel.
+
 ---
 
 ## Dependency graph
