@@ -15,19 +15,31 @@
   `#ifndef EVO_APP_MODULE` (commit `55685aa0`). Full `P8_*` chain now completes
   through `009_FIRST_FRAME_ENTER`. `mmap live=98M peak=103M` → R1 heap is a
   non-issue at 1080p.
-- **4K (GTA VI H.264) — decoded garbage then crashed.** FFmpeg spammed
-  `get_buffer() failed` / `thread_get_buffer() failed` → missing reference
-  pictures → corrupt frames → crash. This is the **frame pool running out of
-  memory**: `malloc_shim.c` was backing every allocation with plain anonymous
-  `mmap()`, which on PS5 is serviced from a small (~few-hundred-MB) system pool
-  — fine at 1080p (~100 MB) but a 4K frame pool (400 MB+) exhausts it.
-  **Fix (staged, not yet hardware-tested):** `malloc_shim.c` now maps through
-  `sceKernelMapNamedFlexibleMemory` (full title budget, GBs) with plain `mmap`
-  as fallback. Added `evo_alloc_map_info()` (map-fail count, last-fail size,
-  `sceKernelAvailableFlexibleMemorySize`) — surfaced in `P8_31_RETURN_OK` and
-  appended to the first buffer/alloc `P8_AVLOG` line. `evo_av_log_cb` narrowed
-  back to `AV_LOG_ERROR` and de-duplicates repeated lines (the screenshots were
-  40+ identical popups).
+- **4K playback — reasonable encodes work, demanding ones can't.** Verified on
+  hardware 2026-09-02:
+  - **Tears of Steel 4K** (3840×1714 H.264) — plays + seeks fine.
+  - **GTA VI trailer** (3840×2160 H.264, deep refs) — a few frames then crash.
+  - `P8_31` on the GTA VI run: `heap live=62M peak=142M flex_maps=25958
+    anon_maps=0 fail=0 flex_avail=281M`. The flexible-memory allocator works
+    perfectly — the problem is the **hard ~450 MB flexible-memory budget** the
+    kernel gives a fake-signed game module. A deep-ref 4K frame pool wants
+    more; `sceKernelMapNamedFlexibleMemory` starts refusing and the decoder
+    desyncs (POC errors) and faults.
+  - **This ceiling is structural** — can't meaningfully raise it for this title
+    category. Software 4K in the sandbox is permanently fragile.
+  - **Landed (`bb80de1`):** `malloc_shim` → `sceKernelMapNamedFlexibleMemory`
+    (+ split flex/anon map counters); UHD in the app module → slice threading
+    (~6× smaller pool); `evo_playback` aborts cleanly to the finished screen
+    with a toast after a fatal-decode streak instead of crashing;
+    `evo_av_log_cb` → `AV_LOG_ERROR` + dedup.
+  - **The real fix is native decode (#29)** — `sceVideodec2` allocates frames
+    from its own direct-memory pool, not this budget.
+- **AGC gate (#27) — `EVO agc: libSceAgc.sprx load FAILED - Step 2 blocked`.**
+  `sceKernelLoadStartModule` can't pull a system PRX an app module didn't
+  declare NEEDED. ProsperoLight/SharpProspero link a libSceAgc stub so the
+  loader auto-loads it; the SDK has no such stub. Step 2's runtime-resolve
+  approach is dead — #27 needs a libSceAgc stub added to the app-module link
+  first. Noted on the issue.
 - **Build-hygiene bug that cost 3 sessions** — `make objects` reused stale
   *payload* `.o` files (the evoplayer Makefile tracks sources, not `CFLAGS`),
   so deployed eboots had **zero** app-module code. Plus a leftover
