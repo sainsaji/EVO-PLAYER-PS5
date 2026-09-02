@@ -226,9 +226,23 @@ else
     ok "build id $(sed -n 's/.*"\(.*\)".*/\1/p' "${EVO}/include/evo_build_id.h")"
     APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
+
+    # The Makefile tracks sources, NOT the -D flag set. The app-module defines
+    # (EVO_APP_MODULE, EVO_BOOT_TRACE, ...) differ from build-evoplayer.sh's, so
+    # `make objects` would silently reuse payload .o files - which is exactly
+    # how three console sessions shipped an eboot with none of the app-module
+    # code. Force a clean object build whenever the flag set changed.
+    STAMP="${BUILD}/app-cflags.stamp"
+    WANT="${TFLAGS[*]} ${APP_DEFS}"
+    if [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
+        begin "app-module flags changed - clean rebuild"
+        make -C "${EVO}" clean >/dev/null 2>&1 || true
+        printf '%s' "${WANT}" > "${STAMP}"
+    fi
+
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
-        EXTRA_CFLAGS="${TFLAGS[*]} ${APP_DEFS}" \
+        EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
             tail -40 "${BUILD}/compile.log" | sed 's/^/  /'
