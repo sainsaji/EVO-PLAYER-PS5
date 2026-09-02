@@ -12137,9 +12137,12 @@ int main(void) {
 #endif
     evo_bt("main() entry");
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
+    /* Route B first: the minimal-eboot test decoded a frame, but only when the
+     * failing sceKernelLoadStartModule calls in evo_agc_probe() did NOT run
+     * before it (those seem to poison sceSysmoduleLoadModule). Order matters. */
+    evo_videodec2_probe();  /* no-op unless -DEVO_VIDEODEC2_PROBE — Route B, bundled AU */
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
     evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */
-    evo_videodec2_probe();  /* no-op unless -DEVO_VIDEODEC2_PROBE — Route B, bundled AU */
 #ifdef EVO_APP_MODULE
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
