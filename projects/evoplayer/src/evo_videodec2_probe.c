@@ -36,6 +36,9 @@ extern int      sceKernelSendNotificationRequest(int, void *, unsigned long, int
 extern unsigned int sceKernelUsleep(unsigned int us);
 extern int      sceSysmoduleLoadModule(uint16_t id);
 extern int      sceSysmoduleUnloadModule(uint16_t id);
+extern int      sceSysmoduleLoadModuleInternal(uint32_t id);
+extern int      sceSysmoduleLoadModuleInternalWithArg(uint32_t id, unsigned long argc,
+                                                      const void *argv, void *opt, void *res);
 extern int64_t  sceKernelGetDirectMemorySize(void);
 extern int      sceKernelAllocateDirectMemory(int64_t, int64_t, size_t, size_t, int, int64_t *);
 extern int      sceKernelMapDirectMemory(void **, size_t, int, int, int64_t, size_t);
@@ -161,7 +164,14 @@ void evo_videodec2_probe(void)
     g_stage = 2;
     AT("sceSysmoduleLoadModule(207)");
     int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
-    note("EVO vdec2: sysmod207 -> 0x%08x, entering the decode sequence", (unsigned)sm);
+    /* The public API SDK-checks; the Internal variant (system-software path)
+     * may not. SharpProspero SysmoduleMap: libSceVideodec2 -> 0x800000B2. */
+    AT("sceSysmoduleLoadModuleInternal(0x800000B2)");
+    int smi = sceSysmoduleLoadModuleInternal(0x800000B2u);
+    AT("sceSysmoduleLoadModuleInternalWithArg(0x800000B2)");
+    int smw = sceSysmoduleLoadModuleInternalWithArg(0x800000B2u, 0, 0, 0, 0);
+    note("EVO vdec2: sysmod207=0x%08x internal=0x%08x withArg=0x%08x - decoding",
+         (unsigned)sm, (unsigned)smi, (unsigned)smw);
 
     AT("sceKernelGetDirectMemorySize");
     int64_t dm_limit = sceKernelGetDirectMemorySize();
