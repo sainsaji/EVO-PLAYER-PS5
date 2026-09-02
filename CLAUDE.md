@@ -8,6 +8,10 @@ Full docs live in `docs/`. This file is the index plus the rules that are
 expensive to relearn by trial and error on real hardware. Read the linked doc
 before doing deep work in its area instead of exploring the tree cold.
 
+**Implementing a GitHub issue?** Start at [docs/roadmap.md](docs/roadmap.md) —
+the dependency-ordered plan; each issue body also carries its own
+"References & sequencing" block (docs + files to read).
+
 ---
 
 ## Rules that must not be broken
@@ -126,6 +130,7 @@ mock data — everything in the DOM binds to live C structs
 
 | Doc | What's in it |
 |---|---|
+| [roadmap.md](docs/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
 | [architecture.md](docs/architecture.md) | Layer boundaries, why `main.c` is still large |
 | [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
 | [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
