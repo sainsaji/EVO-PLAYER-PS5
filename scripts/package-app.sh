@@ -218,7 +218,7 @@ else
     # Build fingerprint — the FIRST notification main() fires, so a stale
     # ShadowMount / cached mount is caught immediately instead of costing a
     # whole console session.
-    BUILD_ID="$(cd "${EVO}" && git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)$(cd "${EVO}" && git diff --quiet 2>/dev/null || echo +dirty) $(date -u +%m%d-%H%M)"
+    BUILD_ID="$(cd "${EVO}" && git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)$(cd "${EVO}" && git diff --quiet -- . ':!*.o' 2>/dev/null || echo +dirty) $(date -u +%m%d-%H%M)"
     APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_BUILD_ID=\"${BUILD_ID}\""
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     make -C "${EVO}" objects -j"$(nproc)" \
