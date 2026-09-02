@@ -27,6 +27,18 @@
 extern void *mmap(void *addr, size_t len, int prot, int flags, int fd, long off);
 extern int   munmap(void *addr, size_t len);
 
+/* PS5 flexible memory. Plain anonymous mmap() on this console is serviced from
+ * a small system-managed pool (~a few hundred MB) - fine for the 1080p path
+ * (~100 MB high-water) but 4K frame pools (400 MB+) exhaust it and FFmpeg
+ * starts logging "get_buffer() failed" then decodes garbage / crashes
+ * (hardware 2026-09-02, GTA VI 4K H.264). sceKernelMapNamedFlexibleMemory
+ * draws from the full title budget (GBs). Both symbols are in the app-module
+ * import list; this file is only ever linked into eboot.bin. */
+extern int sceKernelMapNamedFlexibleMemory(void **addr, size_t len, int prot,
+                                           int flags, const char *name);
+extern int sceKernelMunmap(void *addr, size_t len);
+extern int sceKernelAvailableFlexibleMemorySize(size_t *out);
+
 #define PROT_RW        0x03
 #define MAP_ANON_PRIV  0x1002          /* MAP_PRIVATE | MAP_ANONYMOUS (FreeBSD) */
 #define PAGE           0x4000ULL       /* 16 KiB */
@@ -70,6 +82,28 @@ static void unlock(void) { atomic_flag_clear_explicit(&g.lock, memory_order_rele
 static _Atomic uint64_t g_mmap_live;
 static _Atomic uint64_t g_mmap_peak;
 static _Atomic uint64_t g_large_count;
+static _Atomic uint64_t g_map_fail;      /* # of backing-map failures */
+static _Atomic uint64_t g_map_fail_bytes;/* last failed request size   */
+
+/* Back a mapping with PS5 flexible memory; fall back to plain anon mmap. */
+static void *sh_map(size_t len)
+{
+    void *p = 0;
+    if (sceKernelMapNamedFlexibleMemory(&p, len, PROT_RW, 0, "EVOheap") == 0 && p)
+        return p;
+    p = mmap(0, len, PROT_RW, MAP_ANON_PRIV, -1, 0);
+    if (p != (void *)-1 && p != 0)
+        return p;
+    atomic_fetch_add_explicit(&g_map_fail, 1, memory_order_relaxed);
+    atomic_store_explicit(&g_map_fail_bytes, (uint64_t)len, memory_order_relaxed);
+    return 0;
+}
+
+static void sh_unmap(void *p, size_t len)
+{
+    if (sceKernelMunmap(p, len) != 0)
+        munmap(p, len);
+}
 
 static void acct_add(uint64_t bytes)
 {
@@ -90,6 +124,24 @@ void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
     if (large_n) *large_n = atomic_load_explicit(&g_large_count, memory_order_relaxed);
 }
 
+/* Map-failure detail + remaining flexible-memory budget, for the 4K crash
+ * diagnosis. fails>0 means a backing map was refused -> the "get_buffer()
+ * failed" spam is a real OOM. */
+void evo_alloc_map_info(uint64_t *fails, uint64_t *last_fail_bytes,
+                        uint64_t *flex_avail)
+{
+    if (fails)
+        *fails = atomic_load_explicit(&g_map_fail, memory_order_relaxed);
+    if (last_fail_bytes)
+        *last_fail_bytes = atomic_load_explicit(&g_map_fail_bytes,
+                                                memory_order_relaxed);
+    if (flex_avail) {
+        size_t a = 0;
+        *flex_avail = (sceKernelAvailableFlexibleMemorySize(&a) == 0)
+                          ? (uint64_t)a : 0;
+    }
+}
+
 #define SLAB_MAX (kClassSize[NCLASS - 1])   /* 12288 - above this -> large path */
 
 static int class_for(size_t n)
@@ -104,8 +156,8 @@ static int class_for(size_t n)
 static void *arena_carve(size_t need)
 {
     if ((size_t)(g.end - g.cur) < need) {
-        uint8_t *a = (uint8_t *)mmap(0, ARENA, PROT_RW, MAP_ANON_PRIV, -1, 0);
-        if (a == (uint8_t *)-1 || a == 0)
+        uint8_t *a = (uint8_t *)sh_map(ARENA);
+        if (!a)
             return 0;
         acct_add(ARENA);
         g.cur = a;                    /* mmap is page-aligned -> 32-aligned */
@@ -123,8 +175,8 @@ static void *arena_carve(size_t need)
 static void *large_alloc(size_t user)
 {
     size_t total = (PAGE + user + (PAGE - 1)) & ~(PAGE - 1);
-    uint8_t *base = (uint8_t *)mmap(0, total, PROT_RW, MAP_ANON_PRIV, -1, 0);
-    if (base == (uint8_t *)-1 || base == 0)
+    uint8_t *base = (uint8_t *)sh_map(total);
+    if (!base)
         return 0;
     acct_add(total);
     atomic_fetch_add_explicit(&g_large_count, 1, memory_order_relaxed);
@@ -167,7 +219,7 @@ void free(void *p)
     if (h->magic == MAGIC_LARGE) {
         atomic_fetch_sub_explicit(&g_mmap_live, (uint64_t)h->info,
                                   memory_order_relaxed);
-        munmap((uint8_t *)p - PAGE, (size_t)h->info);
+        sh_unmap((uint8_t *)p - PAGE, (size_t)h->info);
     } else if (h->magic == MAGIC_SLAB) {
         int c = (int)h->info;
         lock();

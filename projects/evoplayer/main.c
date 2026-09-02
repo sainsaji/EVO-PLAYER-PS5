@@ -135,10 +135,13 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
         char _p8[192]; snprintf(_p8, sizeof _p8, __VA_ARGS__); \
         pp_stage_bc((id), _p8); \
     } while (0)
-/* mmap high-water from tools/native-app/stubs/malloc_shim.c (weak: absent in
- * the payload build). Declared here so start_video_playback can use it. */
+/* mmap high-water + backing-map failure counters from
+ * tools/native-app/stubs/malloc_shim.c (weak: absent in the payload build).
+ * Declared here so start_video_playback can use them. */
 extern void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
     __attribute__((weak));
+extern void evo_alloc_map_info(uint64_t *fails, uint64_t *last_fail_bytes,
+                               uint64_t *flex_avail) __attribute__((weak));
 #else
 #  define EVO_P8(id, ...) ((void)0)
 #endif
@@ -4525,11 +4528,14 @@ int start_video_playback(const char *path) {
 
 #ifdef EVO_APP_MODULE
     if (evo_alloc_stats) {
-        uint64_t live = 0, peak = 0, ln = 0;
+        uint64_t live = 0, peak = 0, ln = 0, mf = 0, fa = 0;
         evo_alloc_stats(&live, &peak, &ln);
-        EVO_P8("P8_31_RETURN_OK", "threads up; mmap live=%lluM peak=%lluM large=%llu",
+        if (evo_alloc_map_info) evo_alloc_map_info(&mf, NULL, &fa);
+        EVO_P8("P8_31_RETURN_OK",
+               "threads up; heap live=%lluM peak=%lluM large=%llu map_fail=%llu flex_avail=%lluM",
                (unsigned long long)(live >> 20), (unsigned long long)(peak >> 20),
-               (unsigned long long)ln);
+               (unsigned long long)ln, (unsigned long long)mf,
+               (unsigned long long)(fa >> 20));
     } else
 #endif
         EVO_P8("P8_31_RETURN_OK", "playback threads up");
@@ -12171,17 +12177,42 @@ static void evo_ensure_data_dir(void)
 static void evo_av_log_cb(void *avcl, int level, const char *fmt, va_list ap)
 {
     (void)avcl;
-    /* task-8 diagnosis: crash is inside avformat_open_input, no SIGSEGV
-     * produces an av_log, so widen to INFO to see the LAST line FFmpeg
-     * printed before it died. Narrow back to AV_LOG_ERROR once fixed. */
-    if (level > AV_LOG_INFO)
+    if (level > AV_LOG_ERROR)
         return;
     char msg[224];
     vsnprintf(msg, sizeof msg, fmt, ap);
     for (char *p = msg; *p; p++)
         if (*p == '\n' || *p == '\r') *p = ' ';
-    if (msg[0])
-        pp_stage_bc("P8_AVLOG", msg);
+    if (!msg[0])
+        return;
+
+    /* Collapse the repeated identical lines FFmpeg emits when a 4K frame pool
+     * can't allocate ("get_buffer() failed" x N). Only the first of a run
+     * reaches the popup, and it carries the allocator's memory state so the
+     * cause (real OOM vs bitstream) is visible in one screenshot. */
+    static char last[224];
+    static unsigned repeat;
+    if (strcmp(msg, last) == 0) {
+        if (++repeat % 60 == 0)
+            pp_stage_bc("P8_AVLOG", "...(still repeating)");
+        return;
+    }
+    snprintf(last, sizeof last, "%s", msg);
+    repeat = 0;
+
+    if (evo_alloc_map_info &&
+        (strstr(msg, "buffer") || strstr(msg, "emory") || strstr(msg, "lloc"))) {
+        uint64_t f = 0, fb = 0, fa = 0;
+        evo_alloc_map_info(&f, &fb, &fa);
+        char d[288];
+        snprintf(d, sizeof d, "%s [map_fail=%llu last=%lluK flex_avail=%lluM]",
+                 msg, (unsigned long long)f,
+                 (unsigned long long)(fb >> 10),
+                 (unsigned long long)(fa >> 20));
+        pp_stage_bc("P8_AVLOG", d);
+        return;
+    }
+    pp_stage_bc("P8_AVLOG", msg);
 }
 #endif
 
@@ -12193,7 +12224,7 @@ int main(void) {
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
 #ifdef EVO_APP_MODULE
-    av_log_set_level(AV_LOG_INFO);
+    av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
 #endif
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
