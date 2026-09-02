@@ -117,6 +117,23 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 #define HEIGHT 1080
 
 #include "evo_boot_trace.h"   /* Phase 1b app-module bring-up breadcrumbs */
+#include "evo_agc_probe.h"    /* -DEVO_AGC_PROBE: boot-time sceAgc recon */
+
+/*
+ * Phase 1b task 8: playback path breadcrumbs. In the app-module sandbox
+ * pp_stage_bc() pushes to the notification popup + klog (see
+ * pp_stage_breadcrumb.c). The existing 001..012 checkpoints are all inside
+ * the 4K branch, so a 1080p test file hits almost none - these fill the gap.
+ * Free (compiled out) in the normal payload build.
+ */
+#ifdef EVO_APP_MODULE
+#  define EVO_P8(id, ...) do { \
+        char _p8[192]; snprintf(_p8, sizeof _p8, __VA_ARGS__); \
+        pp_stage_bc((id), _p8); \
+    } while (0)
+#else
+#  define EVO_P8(id, ...) ((void)0)
+#endif
 
 /* Product video backend (pp_videoout + converter + clock). */
 #define PP_BACKEND_ENABLED 1
@@ -3647,6 +3664,8 @@ int start_video_playback(const char *path) {
     enum AVCodecID audio_seen_codec    = AV_CODEC_ID_NONE;
     stop_video_playback();
 
+    EVO_P8("P8_00_ENTER", "%.80s", path ? path : "(null)");
+
     prospero_playback_finished = 0;
     prospero_finish_candidate_ms = 0;
 
@@ -3684,6 +3703,7 @@ int start_video_playback(const char *path) {
         g_stream_io_ctx = NULL;
     }
 
+    EVO_P8("P8_01_OPEN_BEGIN", "stream_io then avformat");
     int prospero_open_result =
         evo_stream_io_open(path, &play_fmt, NULL, &g_stream_io_ctx);
     if (prospero_open_result < 0) {
@@ -3696,6 +3716,7 @@ int start_video_playback(const char *path) {
             );
     }
 
+    EVO_P8("P8_02_OPEN_RC", "rc=%d fmt=%p", prospero_open_result, (void *)play_fmt);
 
     if (prospero_open_result < 0) {
         prospero_ffmpeg_error(
@@ -3711,6 +3732,9 @@ int start_video_playback(const char *path) {
             play_fmt,
             NULL
         );
+
+    EVO_P8("P8_03_STREAMINFO", "rc=%d nb=%u", prospero_stream_result,
+           play_fmt ? play_fmt->nb_streams : 0u);
 
     if (prospero_stream_result < 0) {
         prospero_ffmpeg_error(
@@ -3770,9 +3794,11 @@ int start_video_playback(const char *path) {
 
     /* PROSPERO_SUBTITLE_SOURCE_APPLY_END */
 
+    EVO_P8("P8_04_SUBS_CHAPS", "ok");
     load_media_metadata_from_format(play_fmt, path, &current_metadata);
     recent_add_or_update(path, current_metadata.title, 0.0, current_metadata.duration_sec);
     recent_save();
+    EVO_P8("P8_05_META_RECENT", "ok");
 
     char stream_msg[64];
     snprintf(stream_msg, sizeof(stream_msg), "streams:%u", play_fmt->nb_streams);
@@ -3932,6 +3958,7 @@ int start_video_playback(const char *path) {
                 continue;
             }
 
+            EVO_P8("P8_10_ADEC_OPEN", "codec=%d ok", (int)par->codec_id);
             sceAudioOutInit();
 
             /* EVO: open a surround port when the source has more than two
@@ -4028,12 +4055,14 @@ int start_video_playback(const char *path) {
 
             audio_thread_running = 1;
 
+            EVO_P8("P8_11_APORT_OPEN", "h=%d ch=%d", audio_handle, evo_audio_channels);
             pthread_create(
                 &audio_thread,
                 NULL,
                 audio_output_thread,
                 NULL
             );
+            EVO_P8("P8_12_ATHREAD", "created");
         }
 
         if (par->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -4300,8 +4329,12 @@ int start_video_playback(const char *path) {
                 vp.skip_frame       = AVDISCARD_DEFAULT;
             }
 
+            EVO_P8("P8_20_VDEC_OPEN", "codec=%d %dx%d thr=%d prof=%d",
+                   (int)par->codec_id, par->width, par->height,
+                   decoder_thread_count, playback_profile);
             evo_vdec_backend vdec_chosen = EVO_VDEC_BACKEND_FFMPEG;
             g_vdec = evo_vdec_open(&vp, &vdec_chosen);
+            EVO_P8("P8_21_VDEC_RC", "vdec=%p", (void *)g_vdec);
             if (!g_vdec) {
                 prospero_codec_error(
                     "VIDEO ERROR",
@@ -4448,6 +4481,9 @@ int start_video_playback(const char *path) {
     audio_decode_thread_running =
         audio_ctx != NULL;
 
+    EVO_P8("P8_30_THREADS", "vidx=%d aidx=%d music=%d",
+           video_stream_index, audio_stream_index, prospero_music_mode);
+
     pthread_create(
         &demux_thread,
         NULL,
@@ -4472,9 +4508,19 @@ int start_video_playback(const char *path) {
             NULL
         );
     }
-    
+
     prospero_audio_requested_stream = -1;
 
+#ifdef EVO_APP_MODULE
+    if (evo_alloc_stats) {
+        uint64_t live = 0, peak = 0, ln = 0;
+        evo_alloc_stats(&live, &peak, &ln);
+        EVO_P8("P8_31_RETURN_OK", "threads up; mmap live=%lluM peak=%lluM large=%llu",
+               (unsigned long long)(live >> 20), (unsigned long long)(peak >> 20),
+               (unsigned long long)ln);
+    } else
+#endif
+        EVO_P8("P8_31_RETURN_OK", "playback threads up");
     return 1;
 }
 
@@ -12105,8 +12151,32 @@ static void evo_ensure_data_dir(void)
 #endif
 }
 
+#ifdef EVO_APP_MODULE
+/* Route FFmpeg's own diagnostics to the app-module notification channel -
+ * the "why" behind an avformat_open_input / avcodec_open2 failure that would
+ * otherwise only reach a toast (needs VideoOut) or nowhere. Rate-limited to
+ * errors so it does not drown the popup during normal decode. */
+static void evo_av_log_cb(void *avcl, int level, const char *fmt, va_list ap)
+{
+    (void)avcl;
+    if (level > AV_LOG_ERROR)
+        return;
+    char msg[224];
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    for (char *p = msg; *p; p++)
+        if (*p == '\n' || *p == '\r') *p = ' ';
+    pp_stage_bc("P8_AVLOG", msg);
+}
+extern void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
+    __attribute__((weak));
+#endif
+
 int main(void) {
     evo_bt("main() entry");
+    evo_agc_probe();   /* no-op unless -DEVO_AGC_PROBE */
+#ifdef EVO_APP_MODULE
+    av_log_set_callback(evo_av_log_cb);
+#endif
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
     evo_direct_mem_init(64 * 1024 * 1024);
 

@@ -6,6 +6,10 @@
 #                                             player (Phase 1b task 4+)
 #   ./scripts/package-app.sh --probe          build the sandbox probe instead
 #   ./scripts/package-app.sh --rebuild-libc   force-regenerate the runtime shim
+#   ./scripts/package-app.sh --agc-probe      + boot-time sceAgc reachability
+#                                             recon (GPU rendering Step 2 gate)
+#   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
+#                                             ProsperoLight (needs MkPFS)
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -21,11 +25,15 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 MODE="player"
 REBUILD_LIBC=0
+AGC_PROBE=0
+FFPFSC=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
+        --agc-probe)    AGC_PROBE=1 ;;
+        --ffpfsc)       FFPFSC=1 ;;
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -35,6 +43,8 @@ done
 if ! in_container; then
     FWD=(--"${MODE}")
     (( REBUILD_LIBC )) && FWD+=(--rebuild-libc)
+    (( AGC_PROBE ))    && FWD+=(--agc-probe)
+    (( FFPFSC ))       && FWD+=(--ffpfsc)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -205,9 +215,11 @@ else
     # (only channel visible before VideoOut). Drop once milestone 1 is signed.
     # EVO_APP_MODULE: routes data paths to /download0/evoplayer and directory
     # enumeration through getdents (opendir fails EPERM in the sandbox).
+    APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1"
+    (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
-        EXTRA_CFLAGS="${TFLAGS[*]} -DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1" \
+        EXTRA_CFLAGS="${TFLAGS[*]} ${APP_DEFS}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
             tail -40 "${BUILD}/compile.log" | sed 's/^/  /'
@@ -353,6 +365,27 @@ fi
 
 begin "inspecting signed containers"
 "${TOOL}" self --inspect --file "${APPDIR}/eboot.bin"
+
+# ---------------------------------------------------------------------------
+# 10. Optional: PFS-pack the app folder into a single .ffpfsc image, matching
+#     ProsperoLight's packaging exactly (same MkPFS, same layout). The eboot,
+#     param.json and libc.prx are byte-identical to the folder above - this is
+#     only a different container on /data/homebrew.
+# ---------------------------------------------------------------------------
+if (( FFPFSC )); then
+    begin "PFS-packing ${TITLE_ID}.ffpfsc (MkPFS)"
+    if MKPFS="$("${SCRIPTS_DIR}/setup-pfs-tool.sh")"; then
+        IMG="${APP_OUT}/${TITLE_ID}.ffpfsc"
+        rm -f -- "${IMG}"
+        "${MKPFS}" pack folder --no-adjust-output-file-extension \
+            --version PS5 --verify "${APPDIR}" "${IMG}" \
+            && ok "ffpfsc: ${IMG#"${REPO_ROOT}/"}  ($(stat -c %s "${IMG}") bytes)" \
+            || warn "MkPFS pack failed - the folder output above is still usable"
+    else
+        warn "MkPFS unavailable (needs git + python3-venv + network on first run).
+       Skipping .ffpfsc; deploy the folder with scripts/deploy-app.sh."
+    fi
+fi
 
 echo ""
 ok "app module: ${APPDIR#"${REPO_ROOT}/"}/"

@@ -3,7 +3,8 @@
 # scripts/deploy-app.sh - publish the packaged app module over FTP.
 #
 #   PS5_HOST=192.168.1.50 ./scripts/deploy-app.sh
-#   ./scripts/deploy-app.sh --undeploy        # remove the staged title
+#   ./scripts/deploy-app.sh --ffpfsc          # upload the PFS image instead
+#   ./scripts/deploy-app.sh --undeploy        # remove the staged title (+ image)
 #
 # Uploads output/app/<TITLE_ID>/ to ftp://<host>:2121/data/homebrew/<TITLE_ID>/.
 # Files go up under a temporary name and are renamed into place; eboot.bin and
@@ -16,10 +17,12 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 ACTION="deploy"
+FFPFSC=0
 while (( $# )); do
     case "$1" in
         --undeploy) ACTION="undeploy" ;;
-        -h|--help)  sed -n '2,15p' "$0"; exit 0 ;;
+        --ffpfsc)   FFPFSC=1 ;;
+        -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -28,7 +31,10 @@ done
 FTP_PORT="${FTP_PORT:-2121}"
 
 if ! in_container; then
-    reexec_in_container "deploy-app.sh" $([[ "${ACTION}" == undeploy ]] && echo --undeploy)
+    FWD=()
+    [[ "${ACTION}" == undeploy ]] && FWD+=(--undeploy)
+    (( FFPFSC )) && FWD+=(--ffpfsc)
+    reexec_in_container "deploy-app.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
 
 need_cmd python3
@@ -41,6 +47,38 @@ t=json.load(open(sys.argv[1]))["titleId"]
 sys.exit("bad titleId") if not re.fullmatch(r"PPSA\d{5}",t) else print(t)' "${PARAM}")"
 
 APPDIR="${OUTPUT_DIR}/app/${TITLE_ID}"
+FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
+
+# --- .ffpfsc image path: one file to /data/homebrew/<TITLE_ID>.ffpfsc --------
+if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
+    need_file "${FFPFSC_IMG}" "run ./scripts/package-app.sh --ffpfsc first"
+    require_ps5_host
+    begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
+    python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
+import sys
+from ftplib import FTP, error_perm
+from posixpath import join
+
+host, port, title_id, img = sys.argv[1:]
+remote = join("/data/homebrew", f"{title_id}.ffpfsc")
+tmp = remote + ".upload"
+with FTP() as ftp:
+    ftp.connect(host, int(port), timeout=15)
+    ftp.login()
+    try: ftp.set_pasv(True)
+    except Exception: pass
+    for path in (tmp, remote):
+        try: ftp.sendcmd(f"DELE {path}")
+        except error_perm: pass
+    with open(img, "rb") as fh:
+        ftp.storbinary(f"STOR {tmp}", fh, blocksize=256 * 1024)
+    ftp.rename(tmp, remote)
+    print(f"done: ftp://{host}:{port}{remote}")
+PY
+    ok "deploy complete"
+    echo "   Mount + launch from the Games row (ShadowMountPlus). Never stack launches."
+    exit 0
+fi
 
 if [[ "${ACTION}" == "deploy" ]]; then
     need_file "${APPDIR}/eboot.bin" "run ./scripts/package-app.sh --probe first"
@@ -120,7 +158,11 @@ with FTP() as ftp:
 
     if action == "undeploy":
         removed = rm(ftp, target)
-        print(f"removed {target}" if removed else f"nothing staged for {title_id}")
+        img_removed = rm(ftp, target + ".ffpfsc")
+        if removed or img_removed:
+            print(f"removed {target}{' + .ffpfsc' if img_removed else ''}")
+        else:
+            print(f"nothing staged for {title_id}")
         sys.exit(0)
 
     app = Path(appdir)

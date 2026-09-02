@@ -63,6 +63,33 @@ static struct {
 static void lock(void)   { while (atomic_flag_test_and_set_explicit(&g.lock, memory_order_acquire)) { } }
 static void unlock(void) { atomic_flag_clear_explicit(&g.lock, memory_order_release); }
 
+/* Coarse accounting for the Phase 1b task-8 diagnostic: how much this
+ * interposer has mmap'd (large blocks + slab arenas) and the peak. Not exact
+ * (frees of large blocks are not subtracted from _live), but enough to see
+ * whether playback is anywhere near a memory ceiling. */
+static _Atomic uint64_t g_mmap_live;
+static _Atomic uint64_t g_mmap_peak;
+static _Atomic uint64_t g_large_count;
+
+static void acct_add(uint64_t bytes)
+{
+    uint64_t live = atomic_fetch_add_explicit(&g_mmap_live, bytes,
+                                              memory_order_relaxed) + bytes;
+    uint64_t peak = atomic_load_explicit(&g_mmap_peak, memory_order_relaxed);
+    while (live > peak &&
+           !atomic_compare_exchange_weak_explicit(&g_mmap_peak, &peak, live,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) { }
+}
+
+/* Consumed by main.c's playback breadcrumbs (weak: absent in payload builds). */
+void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
+{
+    if (live)    *live    = atomic_load_explicit(&g_mmap_live, memory_order_relaxed);
+    if (peak)    *peak    = atomic_load_explicit(&g_mmap_peak, memory_order_relaxed);
+    if (large_n) *large_n = atomic_load_explicit(&g_large_count, memory_order_relaxed);
+}
+
 #define SLAB_MAX (kClassSize[NCLASS - 1])   /* 12288 - above this -> large path */
 
 static int class_for(size_t n)
@@ -80,6 +107,7 @@ static void *arena_carve(size_t need)
         uint8_t *a = (uint8_t *)mmap(0, ARENA, PROT_RW, MAP_ANON_PRIV, -1, 0);
         if (a == (uint8_t *)-1 || a == 0)
             return 0;
+        acct_add(ARENA);
         g.cur = a;                    /* mmap is page-aligned -> 32-aligned */
         g.end = a + ARENA;
     }
@@ -98,6 +126,8 @@ static void *large_alloc(size_t user)
     uint8_t *base = (uint8_t *)mmap(0, total, PROT_RW, MAP_ANON_PRIV, -1, 0);
     if (base == (uint8_t *)-1 || base == 0)
         return 0;
+    acct_add(total);
+    atomic_fetch_add_explicit(&g_large_count, 1, memory_order_relaxed);
     hdr_t *tag = (hdr_t *)(base + PAGE - HDR);
     tag->magic = MAGIC_LARGE;
     tag->info  = total;
@@ -135,6 +165,8 @@ void free(void *p)
         return;
     hdr_t *h = (hdr_t *)((uint8_t *)p - HDR);
     if (h->magic == MAGIC_LARGE) {
+        atomic_fetch_sub_explicit(&g_mmap_live, (uint64_t)h->info,
+                                  memory_order_relaxed);
         munmap((uint8_t *)p - PAGE, (size_t)h->info);
     } else if (h->magic == MAGIC_SLAB) {
         int c = (int)h->info;
