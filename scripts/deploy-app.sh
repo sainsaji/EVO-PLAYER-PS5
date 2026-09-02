@@ -60,13 +60,40 @@ from ftplib import FTP, error_perm
 from posixpath import join
 
 host, port, title_id, img = sys.argv[1:]
-remote = join("/data/homebrew", f"{title_id}.ffpfsc")
+root = "/data/homebrew"
+remote = join(root, f"{title_id}.ffpfsc")
+folder = join(root, title_id)
 tmp = remote + ".upload"
+
+
+def rmtree(ftp, path):
+    """ShadowMount+ ignores a .ffpfsc when a same-TITLE_ID folder exists, so
+    the loose folder must go before the image is served."""
+    try:
+        ftp.sendcmd(f"DELE {path}"); return
+    except error_perm:
+        pass
+    try:
+        prev = ftp.pwd(); ftp.cwd(path)
+        names = [n for n, _ in ftp.mlsd() if n not in (".", "..")]
+        ftp.cwd(prev)
+    except error_perm:
+        return
+    for n in names:
+        rmtree(ftp, join(path, n))
+    try:
+        ftp.rmd(path)
+    except error_perm:
+        pass
+
+
 with FTP() as ftp:
     ftp.connect(host, int(port), timeout=15)
     ftp.login()
     try: ftp.set_pasv(True)
     except Exception: pass
+    rmtree(ftp, folder)               # kill any stale loose folder for this TID
+    print(f"cleared {folder} (if present)")
     for path in (tmp, remote):
         try: ftp.sendcmd(f"DELE {path}")
         except error_perm: pass

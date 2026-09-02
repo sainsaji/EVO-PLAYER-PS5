@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -17,21 +18,13 @@
  * polls /mnt/sandbox/<TID>_<NNN>/download0/etahen_jailbreak every 250 ms,
  * reads the pid, applies caps + authid + uid + sceAttr@0x83 + fd_rdir/fd_jdir
  * = rootvnode on that process, then unlink()s the file as the "done" signal.
- * namei re-reads fd_rdir/fd_jdir per lookup, so one bump at boot is enough
- * and every later "/mnt/usb0" open resolves.
- *
- * (Lapy's README: a first attempt can lose a timing race - relaunching the
- * app succeeds. We poll ~3 s for the unlink and re-probe the sandbox.)
+ * namei re-reads fd_rdir/fd_jdir per lookup, so one bump is enough and every
+ * later "/mnt/usb0" or "/data" open resolves.
  */
 #define JB_FILE   "/download0/etahen_jailbreak"
 
-/*
- * A jailed module has its root remapped to /mnt/sandbox/<TID>_NNN, so real
- * paths outside it (/data = EVO's INTERNAL STORAGE source, /mnt/usb0 = USB,
- * /mnt/sandbox itself) are ENOENT. After the daemon points fd_rdir/fd_jdir
- * at the real rootvnode they all resolve. /data is the reliable probe: it
- * always exists on the real root and is never in the sandbox view.
- */
+/* A jailed module's root is remapped, so /data (INTERNAL source) and
+ * /mnt/usb0 (USB source) are ENOENT. /data is the reliable probe. */
 static int sandbox_is_open(void)
 {
     int fd = open("/data", O_RDONLY | O_DIRECTORY);
@@ -42,13 +35,38 @@ static int sandbox_is_open(void)
 static int drop_request(void)
 {
     int fd = open(JB_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0)
+    if (fd < 0) {
+        evo_bt("jailbreak: open(%s) failed errno=%d", JB_FILE, errno);
         return 0;
+    }
     char body[48];
     int n = snprintf(body, sizeof body, "{\"PID\":\"%d\"}", (int)getpid());
     ssize_t w = write(fd, body, (size_t)n);
     close(fd);
-    return w == n;
+    if (w != n) {
+        evo_bt("jailbreak: write(%s) short w=%zd errno=%d", JB_FILE, w, errno);
+        return 0;
+    }
+    return 1;
+}
+
+/* One promote attempt: drop the file, wait for the daemon to unlink it and
+ * the sandbox to open. Returns 1 if opened. */
+static int attempt(int tenths)
+{
+    if (!drop_request())
+        return 0;
+
+    int consumed = 0, opened = 0;
+    for (int i = 0; i < tenths; i++) {
+        usleep(100 * 1000);
+        if (!consumed && access(JB_FILE, F_OK) != 0) consumed = 1;
+        if (sandbox_is_open()) { opened = 1; break; }
+    }
+    evo_bt("jailbreak: pid=%d file=%s daemon_saw=%s sandbox=%s (/data errno=%d)",
+           (int)getpid(), JB_FILE, consumed ? "yes" : "NO",
+           opened ? "OPEN" : "closed", opened ? 0 : errno);
+    return opened;
 }
 
 int evo_jailbreak_self(void)
@@ -57,29 +75,19 @@ int evo_jailbreak_self(void)
         evo_bt("jailbreak: sandbox already open");
         return 1;
     }
+    /* At boot the daemon may not be polling yet; a shorter first try, the
+     * real one happens on browser entry (evo_jailbreak_ensure). */
+    return attempt(12);
+}
 
-    if (!drop_request()) {
-        evo_bt("jailbreak: cannot write %s", JB_FILE);
-        return 0;
-    }
-
-    /* Wait for the daemon to consume the file (unlink) + the sandbox to open.
-     * The daemon polls at 250 ms; ~1.2 s here is enough without a visible boot
-     * stall, and the loop exits early on the common path. */
-    for (int i = 0; i < 12; i++) {
-        usleep(100 * 1000);
-        int consumed = (access(JB_FILE, F_OK) != 0);
-        if (consumed && sandbox_is_open()) {
-            evo_bt("jailbreak: promoted (Lapy/etaHEN daemon)");
-            return 1;
-        }
-    }
-
-    /* Leave the request in place - the daemon may still pick it up before the
-     * user reaches the browser. Otherwise USB browse falls back to
-     * tools/sandbox-unjail.sh. */
-    evo_bt("jailbreak: daemon slow/absent - USB may need sandbox-unjail.sh");
-    return 0;
+int evo_jailbreak_ensure(void)
+{
+    if (sandbox_is_open())
+        return 1;
+    /* Two harder tries - Lapy's own note is that a first attempt can lose a
+     * timing race. */
+    if (attempt(25)) return 1;
+    return attempt(25);
 }
 
 #endif /* EVO_APP_MODULE */

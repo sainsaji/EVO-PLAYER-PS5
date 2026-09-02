@@ -2263,6 +2263,10 @@ void load_usb_files(void) {
     file_count = 0;
     file_selected = 0;
 
+    /* App module: make sure the per-title sandbox is lifted before we try to
+     * read a real path. No-op on the payload build and once promoted. */
+    evo_jailbreak_ensure();
+
     /* EVO: the source picker sits above every real path. Its "listing" is
      * the fixed source table, not a directory. */
     if (current_path[0] == '\0') {
@@ -12173,8 +12177,11 @@ extern void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
 #endif
 
 int main(void) {
+#ifdef EVO_BUILD_ID
+    evo_bt("BUILD " EVO_BUILD_ID);   /* first thing on screen — catches a stale mount */
+#endif
     evo_bt("main() entry");
-    evo_jailbreak_self();   /* app module: self-unjail via etaHEN IPC (no-op on payload) */
+    evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
 #ifdef EVO_APP_MODULE
     av_log_set_callback(evo_av_log_cb);

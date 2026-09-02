@@ -122,13 +122,22 @@ triggers the mount. **Launch is still manual**: on the console, launch EVO from
 the **Games row**. Do **not** stack launches — PS button to close before any
 rebuild.
 
-USB + internal browse: EVO **self-unjails** at boot — drops `{"PID":"<pid>"}`
-to `/download0/etahen_jailbreak` for **PS5-Lapy-JB-Daemon** (add it to
-`/data/autoload.txt` so it's always up). One promotion opens the real root, so
-`/mnt/usb0` (USB) and `/data` (INTERNAL STORAGE) both resolve. Watch for
-`EVO boot: jailbreak: promoted …`. Daemon absent → `tools/sandbox-unjail.sh`
-per launch. Lapy README says fw 3.00→12.00 — 12.70 unconfirmed; the
-notification will tell.
+> **Confirm the fresh build is running.** `main()`'s first popup is
+> `EVO boot: BUILD <git-sha> <MMDD-HHMM>`. If you don't see it, or the sha is
+> wrong, ShadowMount+ is serving a stale/cached mount — force a rescan or
+> reboot. (2026-09-02: a leftover `/data/homebrew/PPSA99039/` folder shadowed a
+> new `.ffpfsc` for a whole session — ShadowMount+ prints "Duplicate PPSA99039
+> ignored". `deploy-app.sh --ffpfsc` now deletes the folder first.)
+
+USB + internal browse: EVO **self-unjails** — drops `{"PID":"<pid>"}` to
+`/download0/etahen_jailbreak` for **PS5-Lapy-JB-Daemon**, once at boot
+(`evo_jailbreak_self`, short) and again on every browser entry
+(`evo_jailbreak_ensure`, two harder tries). Reports
+`jailbreak: pid=N file=… daemon_saw=yes/NO sandbox=OPEN/closed (/data errno=…)`.
+One promotion opens the real root → `/mnt/usb0` + `/data` both resolve.
+Launch Lapy via HBL first (or add to `/data/autoload.txt`). Daemon absent /
+fails → `tools/sandbox-unjail.sh` per launch. Lapy README says fw 3.00→12.00;
+**12.70 unconfirmed** — the `daemon_saw` / `sandbox` fields say which part failed.
 
 The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
 someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from

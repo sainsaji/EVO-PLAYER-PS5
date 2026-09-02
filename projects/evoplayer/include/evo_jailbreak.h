@@ -29,11 +29,15 @@ extern "C" {
 #endif
 
 #ifdef EVO_APP_MODULE
-/* Returns 1 if the process is now promoted (daemon said ok, or a probe shows
- * the sandbox is already lifted), 0 otherwise. Safe to call more than once. */
+/* Called once at main() entry - a short attempt (the daemon may not be
+ * polling yet). Returns 1 if the sandbox is open. */
 int evo_jailbreak_self(void);
+/* Called on media-browser entry - two harder attempts. Idempotent; returns
+ * early if already promoted. */
+int evo_jailbreak_ensure(void);
 #else
-#define evo_jailbreak_self() (1)
+#define evo_jailbreak_self()   (1)
+#define evo_jailbreak_ensure() (1)
 #endif
 
 #ifdef __cplusplus
