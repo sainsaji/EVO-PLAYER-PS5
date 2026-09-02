@@ -118,6 +118,7 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 
 #include "evo_boot_trace.h"   /* Phase 1b app-module bring-up breadcrumbs */
 #include "evo_agc_probe.h"    /* -DEVO_AGC_PROBE: boot-time sceAgc recon */
+#include "evo_jailbreak.h"    /* EVO_APP_MODULE: self-unjail via etaHEN IPC */
 
 /*
  * Phase 1b task 8: playback path breadcrumbs. In the app-module sandbox
@@ -12173,7 +12174,8 @@ extern void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
 
 int main(void) {
     evo_bt("main() entry");
-    evo_agc_probe();   /* no-op unless -DEVO_AGC_PROBE */
+    evo_jailbreak_self();   /* app module: self-unjail via etaHEN IPC (no-op on payload) */
+    evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
 #ifdef EVO_APP_MODULE
     av_log_set_callback(evo_av_log_cb);
 #endif

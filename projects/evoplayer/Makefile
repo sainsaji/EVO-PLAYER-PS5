@@ -113,7 +113,8 @@ MEDIA_SRCS := \
     src/evo_favorites.c \
     src/evo_data_path.c \
     src/evo_readdir.c \
-    src/evo_agc_probe.c
+    src/evo_agc_probe.c \
+    src/evo_jailbreak.c
 
 ADDON_SRCS := \
     addons/src/cJSON.c \

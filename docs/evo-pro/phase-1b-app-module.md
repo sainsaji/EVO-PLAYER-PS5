@@ -340,12 +340,26 @@ knowns: (a) expect `fstatfs` & friends in the re-harvested api-surface, and
    menu in the sandbox (task 4); only the browser needs the unjail, and
    `load_usb_files()` re-scans on every browser entry.
 
-   Production later: fold the unjail into a resident daemon (websrv-style) that
-   watches for the sandbox dir and clears it automatically.
+   **Self-service unjail — no per-launch command (2026-09-02):**
+   `projects/evoplayer/src/evo_jailbreak.c` (`EVO_APP_MODULE` only, called at
+   `main()` entry). A registered module cannot promote itself — the loader
+   re-applies the sandbox every launch and the module has no kernel access
+   (third_party/SharpProspero/docs/app-promotion.md). But it can *ask* the
+   **persistent jailbreak daemon etaHEN already runs**: IPC on
+   `127.0.0.1:9028`, `HijackerCommand{ magic 0xDEADBEEF, cmd 5 (JAILBREAK),
+   pid getpid() }` → the daemon applies the same 11-write cred + `fd_rdir`/
+   `fd_jdir` lift. `namei` re-reads those per lookup, so one call at boot is
+   enough. `evo_bt` reports the outcome.
+   - **If etaHEN is running (usual setup): zero extra steps** — EVO self-unjails
+     on launch, `/mnt/usb0` just resolves.
+   - **If not:** the connect to `:9028` fails, EVO falls back and the user runs
+     `tools/sandbox-unjail.sh` once per launch as before. PS5-Lapy-JB-Daemon and
+     SharpProspero's `prospero-payload-unjail` speak the same protocol.
 
-   Fallback if unjail is unreliable: `nmount`/`nullfs`-bind `/mnt/usb0` and a
-   writable `/data/evoplayer` into `/mnt/sandbox/PPSA99039_000/…` — more code
-   (iovec construction), narrower blast radius.
+   Fallback if the daemon route is unreliable: `nmount`/`nullfs`-bind
+   `/mnt/usb0` and a writable `/data/evoplayer` into
+   `/mnt/sandbox/PPSA99039_000/…` — more code (iovec construction), narrower
+   blast radius.
 
 ---
 

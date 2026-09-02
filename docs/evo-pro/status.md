@@ -68,6 +68,11 @@ triggers the mount. **Launch is still manual**: on the console, launch EVO from
 the **Games row**. Do **not** stack launches — PS button to close before any
 rebuild.
 
+USB browse: EVO now **self-unjails via etaHEN's IPC** (`127.0.0.1:9028`) at
+boot — if etaHEN is running, no `sandbox-unjail.sh` step; watch for the
+`EVO boot: jailbreak: …` notification. If not running, fall back to
+`tools/sandbox-unjail.sh` per launch.
+
 The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
 someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from
 the app-module sandbox; `/mnt/usb0` is ENOENT so screenshots can't save either).
