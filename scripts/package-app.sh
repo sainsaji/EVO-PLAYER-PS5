@@ -8,8 +8,8 @@
 #   ./scripts/package-app.sh --rebuild-libc   force-regenerate the runtime shim
 #   ./scripts/package-app.sh --agc-probe      + boot-time sceAgc reachability
 #                                             recon (GPU rendering Step 2 gate)
-#   ./scripts/package-app.sh --avplayer-probe + boot-time libSceAvPlayer native
-#                                             decode gate (native-decode Route A)
+#   ./scripts/package-app.sh --avplayer-probe + libSceAvPlayer gate (Route A — DEAD)
+#   ./scripts/package-app.sh --videodec2-probe + sceVideodec2 gate (Route B, the one)
 #   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
 #                                             ProsperoLight (needs MkPFS)
 #
@@ -29,6 +29,7 @@ MODE="player"
 REBUILD_LIBC=0
 AGC_PROBE=0
 AVPLAYER_PROBE=0
+VIDEODEC2_PROBE=0
 FFPFSC=0
 while (( $# )); do
     case "$1" in
@@ -37,6 +38,7 @@ while (( $# )); do
         --rebuild-libc) REBUILD_LIBC=1 ;;
         --agc-probe)    AGC_PROBE=1 ;;
         --avplayer-probe) AVPLAYER_PROBE=1 ;;
+        --videodec2-probe) VIDEODEC2_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -49,6 +51,7 @@ if ! in_container; then
     (( REBUILD_LIBC )) && FWD+=(--rebuild-libc)
     (( AGC_PROBE ))    && FWD+=(--agc-probe)
     (( AVPLAYER_PROBE )) && FWD+=(--avplayer-probe)
+    (( VIDEODEC2_PROBE )) && FWD+=(--videodec2-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
@@ -235,6 +238,7 @@ else
     APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     (( AVPLAYER_PROBE )) && APP_DEFS+=" -DEVO_AVPLAYER_PROBE=1"
+    (( VIDEODEC2_PROBE )) && APP_DEFS+=" -DEVO_VIDEODEC2_PROBE=1"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
     # (EVO_APP_MODULE, EVO_BOOT_TRACE, ...) differ from build-evoplayer.sh's, so

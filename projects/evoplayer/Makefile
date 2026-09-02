@@ -115,6 +115,7 @@ MEDIA_SRCS := \
     src/evo_readdir.c \
     src/evo_agc_probe.c \
     src/evo_avplayer_probe.c \
+    src/evo_videodec2_probe.c \
     src/evo_jailbreak.c
 
 ADDON_SRCS := \
