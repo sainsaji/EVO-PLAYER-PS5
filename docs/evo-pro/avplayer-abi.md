@@ -1,12 +1,25 @@
 # libSceAvPlayer — ABI reference and spike plan (Route A)
 
-**Status: transcription, not yet hardware-run.** This is Phase 0 for the
-native-decode plan's **Route A** (`sceAvPlayer` — hardware demux + decode +
-A/V sync in one API). Header:
+**Status: Phase 0 done; Phase 2 gate ran on hardware 2026-09-03 — BLOCKED at
+module load.** This is the native-decode plan's **Route A** (`sceAvPlayer` —
+hardware demux + decode + A/V sync in one API). Header:
 [sce/sce_avplayer.h](../../projects/evoplayer/media/include/sce/sce_avplayer.h).
-The gate that turns this into a hardware result is the boot-time probe
-[`evo_avplayer_probe.c`](../../projects/evoplayer/src/evo_avplayer_probe.c) in
-the app module (`--avplayer-probe`) — Phase 2. §4/§5 below.
+Gate probe:
+[`evo_avplayer_probe.c`](../../projects/evoplayer/src/evo_avplayer_probe.c)
+(`--avplayer-probe`).
+
+> **Hardware result (PPSA99039, fw 12.70, 2026-09-03):**
+> `EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked`.
+> `sceKernelLoadStartModule` of the system PRX is **refused for a fake-signed
+> app module that did not declare it NEEDED** — the *exact* same wall
+> `libSceAgc.sprx` hits (#27). Route A can't be answered until
+> `libSceAvPlayer` is a link-time import stub. This is now a **shared
+> prerequisite**: `libSceAgc`/`libSceAgcDriver` (#27), `libSceAvPlayer`
+> (Route A), `libSceVideodec2` (Route B) all need the same PRX-stub work in
+> `tools/native-app/` + `scripts/package-app.sh`. The SDK ships no `.so` stub
+> for any of them (only `libSceSysmodule.so` and 30 others). Once the stub is
+> NEEDED, the loader auto-loads the `.sprx` and the symbols resolve directly —
+> no `sceKernelDlsym`, no NID computation.
 
 What *is* verified (prior recon, [native-media-research.md](../native-media-research.md#results-log),
 fw 12.70, elfldr payload): `libSceAvPlayer.sprx` maps into EVO's process and

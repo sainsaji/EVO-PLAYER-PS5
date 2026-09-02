@@ -264,13 +264,26 @@ like `evo_agc_probe.c`). It does all four steps below; Phase 2 is now just
       frame + metadata to `/download0/evoplayer/avpx_frame0.*`.
 - [x] Characterise: `pitch` vs `width`, the four crop insets, CPU-readable
       (SIGSEGV-guarded), rough NV12 sanity, which texture memory type worked.
-- [ ] **RUN IT** — `package-app.sh --avplayer-probe --ffpfsc`, deploy, drop a
-      small H.264 `.mp4`, launch from the Games row. Never opens VideoOut.
+- [x] **RAN on hardware 2026-09-03** →
+      `EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked`.
+      Same wall as `libSceAgc` (#27): a fake-signed app module can't
+      `sceKernelLoadStartModule` a system PRX it didn't declare NEEDED.
+- [ ] **BLOCKER: `libSceAvPlayer` import stub** — must be added to the
+      app-module link (`tools/native-app/` + `package-app.sh`), same
+      prerequisite as #27's `libSceAgc` stub and Route B's `libSceVideodec2`.
+      SharpProspero's `tools/SharpProspero.Prx/` (StubEmitter / StubCatalog) is
+      the reference; `prospero-nid` + `evo_avplayer_probe.c`'s symbol list give
+      the NID table. Then re-run the gate — symbols resolve directly, no probe
+      dlsym.
 - payload build `projects/avplayer_test/` kept as a compile-checked
       callback-port reference only.
 
 **Route B — `sceVideodec2`:**
-- [ ] Repeat EVO's phase-9/10 `CreateDecoder` → `Decode`, but with
+- [ ] Same `libSceVideodec2` import-stub blocker as Route A (ProsperoLight's
+      self-test worked because ProsperoLight links its own generated stub, so
+      its `sceSysmoduleLoadModule(207)` succeeded — EVO declares no such dep).
+      Do the shared PRX-stub work first.
+- [ ] Then repeat EVO's phase-9/10 `CreateDecoder` → `Decode` with
       SharpProspero's *exact* memory typing and config values from Phase 0.
       One deploy. If it still returns 5200, Route B is confirmed dead in this
       context too.

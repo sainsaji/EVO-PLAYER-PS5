@@ -28,15 +28,16 @@ parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K →
                                                │
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
-  libSceAgc link stub ──► #27 GPU Step 2: sceAgc convert+present ──► #28 GPU Step 3:
-    (sceKernelLoadStartModule refused on hw)                          RmlUi on sceAgc,
-                                                                      delete CPU rasteriser
+  system-PRX import stubs ──┬──► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
+   (app module can't runtime-  │      (libSceAgc + libSceAgcDriver)            RmlUi on sceAgc
+    load an undeclared .sprx;  ├──► #29 Route A: libSceAvPlayer   ┐
+    proven on hw 09-02/09-03)  └──► #29 Route B: libSceVideodec2  ┘ native decode spike
 
   #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
 
   #29 native hw decode (umbrella, v1.1.0)
-    └─ #30 Phase 3: finish the evo_vdec.h seam  ── independent, no console, ships regardless
-       └─ Phase 2 spike → Phase 4 native backend → Phase 5 toggle → Phase 6 validation
+    └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
+       └─ PRX stubs → Phase 2 spike → Phase 4 native backend → Phase 5 toggle → Phase 6
 ```
 
 ---

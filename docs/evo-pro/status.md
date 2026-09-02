@@ -2,7 +2,35 @@
 
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
-> Last updated **2026-09-02** (late — host work). Branch: **`refactor/main-c-media-modules`**.
+> Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
+
+## 2026-09-03 — Route A gate ran on hardware: BLOCKED (shared with #27)
+
+`EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked` (PPSA99039,
+fw 12.70). Boot trace otherwise clean — `jailbreak: … sandbox=OPEN (/data
+errno=0)`, `boot ok - frame loop`. `EVO agc:` still `load FAILED` too.
+
+**Root cause = the #27 blocker, generalised.** A fake-signed app module can't
+`sceKernelLoadStartModule` a system PRX it didn't declare NEEDED. This now
+blocks **three** things behind one piece of work:
+
+| needs a NEEDED import stub | for |
+|---|---|
+| `libSceAgc` + `libSceAgcDriver` | #27 GPU Step 2 (AGC convert/present) |
+| `libSceAvPlayer` | #29 native decode Route A |
+| `libSceVideodec2` | #29 native decode Route B |
+
+The SDK ships `.so` stubs for 31 modules — **none of these three**. The
+reference for building them: SharpProspero `tools/SharpProspero.Prx/`
+(`PrxStubEmitter.cs`, `StubCatalog.cs`) + `prospero-nid`. Once a stub is linked,
+the loader auto-loads the `.sprx` at process start and the symbols resolve as
+ordinary imports — `evo_agc_probe.c` / `evo_avplayer_probe.c`'s runtime
+`sceKernelDlsym` + inline-NID approach becomes unnecessary.
+
+**Next:** build the PRX import-stub generator into `tools/native-app/` +
+`scripts/package-app.sh` (a `--needed libSceAgc,libSceAvPlayer,...` style
+knob), then re-run both gates. Probes stay as-is — they'll just resolve
+directly instead of via dlsym.
 
 ## 2026-09-02 (late) — host work, no console
 
