@@ -84,16 +84,22 @@ static _Atomic uint64_t g_mmap_peak;
 static _Atomic uint64_t g_large_count;
 static _Atomic uint64_t g_map_fail;      /* # of backing-map failures */
 static _Atomic uint64_t g_map_fail_bytes;/* last failed request size   */
+static _Atomic uint64_t g_map_flex;      /* # served by flexible memory */
+static _Atomic uint64_t g_map_anon;      /* # served by the mmap fallback */
 
 /* Back a mapping with PS5 flexible memory; fall back to plain anon mmap. */
 static void *sh_map(size_t len)
 {
     void *p = 0;
-    if (sceKernelMapNamedFlexibleMemory(&p, len, PROT_RW, 0, "EVOheap") == 0 && p)
+    if (sceKernelMapNamedFlexibleMemory(&p, len, PROT_RW, 0, "EVOheap") == 0 && p) {
+        atomic_fetch_add_explicit(&g_map_flex, 1, memory_order_relaxed);
         return p;
+    }
     p = mmap(0, len, PROT_RW, MAP_ANON_PRIV, -1, 0);
-    if (p != (void *)-1 && p != 0)
+    if (p != (void *)-1 && p != 0) {
+        atomic_fetch_add_explicit(&g_map_anon, 1, memory_order_relaxed);
         return p;
+    }
     atomic_fetch_add_explicit(&g_map_fail, 1, memory_order_relaxed);
     atomic_store_explicit(&g_map_fail_bytes, (uint64_t)len, memory_order_relaxed);
     return 0;
@@ -127,14 +133,15 @@ void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
 /* Map-failure detail + remaining flexible-memory budget, for the 4K crash
  * diagnosis. fails>0 means a backing map was refused -> the "get_buffer()
  * failed" spam is a real OOM. */
-void evo_alloc_map_info(uint64_t *fails, uint64_t *last_fail_bytes,
-                        uint64_t *flex_avail)
+void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
+                        uint64_t *served_anon, uint64_t *flex_avail)
 {
     if (fails)
         *fails = atomic_load_explicit(&g_map_fail, memory_order_relaxed);
-    if (last_fail_bytes)
-        *last_fail_bytes = atomic_load_explicit(&g_map_fail_bytes,
-                                                memory_order_relaxed);
+    if (served_flex)
+        *served_flex = atomic_load_explicit(&g_map_flex, memory_order_relaxed);
+    if (served_anon)
+        *served_anon = atomic_load_explicit(&g_map_anon, memory_order_relaxed);
     if (flex_avail) {
         size_t a = 0;
         *flex_avail = (sceKernelAvailableFlexibleMemorySize(&a) == 0)

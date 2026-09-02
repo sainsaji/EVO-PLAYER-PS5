@@ -140,8 +140,9 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
  * Declared here so start_video_playback can use them. */
 extern void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n)
     __attribute__((weak));
-extern void evo_alloc_map_info(uint64_t *fails, uint64_t *last_fail_bytes,
-                               uint64_t *flex_avail) __attribute__((weak));
+extern void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
+                               uint64_t *served_anon, uint64_t *flex_avail)
+    __attribute__((weak));
 #else
 #  define EVO_P8(id, ...) ((void)0)
 #endif
@@ -4314,6 +4315,24 @@ int start_video_playback(const char *path) {
             vp.thread_type  = (par->codec_id == AV_CODEC_ID_HEVC)
                                 ? FF_THREAD_FRAME
                                 : (FF_THREAD_FRAME | FF_THREAD_SLICE);
+#ifdef EVO_APP_MODULE
+            /*
+             * App-module sandbox: frame threading keeps thread_count * DPB
+             * decoded-picture buffers alive at once. At 4K with a deep-ref
+             * encode (e.g. the GTA VI trailer, ref=16) that is ~1 GB and the
+             * flexible-memory pool runs dry mid-decode -> "get_buffer() failed"
+             * spam, corrupt frames, crash (hardware 2026-09-02). Slice
+             * threading shares one working frame set. Slower on single-slice
+             * streams, but it does not fall over. Native decode (issue #29)
+             * is the real fix. A second 4K H.264 file (Tears of Steel,
+             * 3840x1714) decoded fine frame-threaded; keep the cap UHD-only.
+             */
+            if (is_uhd) {
+                vp.thread_type  = FF_THREAD_SLICE;
+                if (vp.thread_count > 4)
+                    vp.thread_count = 4;
+            }
+#endif
             /* Compatibility: full quality. Else speed path for hard content. */
             vp.flag2_fast   = (current_profile != PROFILE_COMPATIBILITY) &&
                               (playback_profile >= 2 ||
@@ -4344,9 +4363,9 @@ int start_video_playback(const char *path) {
                 vp.skip_frame       = AVDISCARD_DEFAULT;
             }
 
-            EVO_P8("P8_20_VDEC_OPEN", "codec=%d %dx%d thr=%d prof=%d",
+            EVO_P8("P8_20_VDEC_OPEN", "codec=%d %dx%d thr=%d ttype=%d prof=%d",
                    (int)par->codec_id, par->width, par->height,
-                   decoder_thread_count, playback_profile);
+                   vp.thread_count, vp.thread_type, playback_profile);
             evo_vdec_backend vdec_chosen = EVO_VDEC_BACKEND_FFMPEG;
             g_vdec = evo_vdec_open(&vp, &vdec_chosen);
             EVO_P8("P8_21_VDEC_RC", "vdec=%p", (void *)g_vdec);
@@ -4433,6 +4452,7 @@ int start_video_playback(const char *path) {
     video_decode_ready = (video_stream_index >= 0) ? 1 : 0;
     /* demux sets video_decode_done on EOF for both video and music */
     video_decode_done = 0;
+    g_pb_decode_fatal = 0;
 
     packet_queue_clear(&video_packet_queue);
     packet_queue_clear(&audio_packet_queue);
@@ -4528,14 +4548,14 @@ int start_video_playback(const char *path) {
 
 #ifdef EVO_APP_MODULE
     if (evo_alloc_stats) {
-        uint64_t live = 0, peak = 0, ln = 0, mf = 0, fa = 0;
+        uint64_t live = 0, peak = 0, ln = 0, mf = 0, sf = 0, sa = 0, fa = 0;
         evo_alloc_stats(&live, &peak, &ln);
-        if (evo_alloc_map_info) evo_alloc_map_info(&mf, NULL, &fa);
+        if (evo_alloc_map_info) evo_alloc_map_info(&mf, &sf, &sa, &fa);
         EVO_P8("P8_31_RETURN_OK",
-               "threads up; heap live=%lluM peak=%lluM large=%llu map_fail=%llu flex_avail=%lluM",
+               "heap live=%lluM peak=%lluM flex_maps=%llu anon_maps=%llu fail=%llu flex_avail=%lluM",
                (unsigned long long)(live >> 20), (unsigned long long)(peak >> 20),
-               (unsigned long long)ln, (unsigned long long)mf,
-               (unsigned long long)(fa >> 20));
+               (unsigned long long)sf, (unsigned long long)sa,
+               (unsigned long long)mf, (unsigned long long)(fa >> 20));
     } else
 #endif
         EVO_P8("P8_31_RETURN_OK", "playback threads up");
@@ -11630,6 +11650,28 @@ static void prospero_playback_finished_update(
         return;
     }
 
+    /* Decoder gave up (e.g. a 4K frame pool the app-module sandbox can't
+     * satisfy). evo_playback has already toasted + stopped the loop; end the
+     * session now rather than sitting on a frozen last frame. */
+    if (evo_pb_decode_fatal()) {
+        prospero_playback_finished = 1;
+        player_paused = 1;
+        screen = SCREEN_PLAYBACK_FINISHED;
+        controls_last_used_ms = now_ms();
+#if PP_BACKEND_ENABLED
+        g_4k_diag_active = 0;
+        g_4k_suppress_audio = 0;
+        g_4k_suppress_ui = 0;
+        if (g_vo_w != 1920u || g_vo_h != 1080u || g_pending_vo_reconfig) {
+            pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
+                                  WIDTH, HEIGHT);
+            pp_stage_bc_checkpoint("015_FINISH_UI_1080", "decode abort");
+        }
+#endif
+        prospero_finish_candidate_ms = 0;
+        return;
+    }
+
     if (!evo_pb_is_eof()) {
         prospero_finish_candidate_ms = 0;
         return;
@@ -12202,13 +12244,12 @@ static void evo_av_log_cb(void *avcl, int level, const char *fmt, va_list ap)
 
     if (evo_alloc_map_info &&
         (strstr(msg, "buffer") || strstr(msg, "emory") || strstr(msg, "lloc"))) {
-        uint64_t f = 0, fb = 0, fa = 0;
-        evo_alloc_map_info(&f, &fb, &fa);
+        uint64_t f = 0, sf = 0, sa = 0, fa = 0;
+        evo_alloc_map_info(&f, &sf, &sa, &fa);
         char d[288];
-        snprintf(d, sizeof d, "%s [map_fail=%llu last=%lluK flex_avail=%lluM]",
-                 msg, (unsigned long long)f,
-                 (unsigned long long)(fb >> 10),
-                 (unsigned long long)(fa >> 20));
+        snprintf(d, sizeof d, "%s [flex=%llu anon=%llu fail=%llu avail=%lluM]",
+                 msg, (unsigned long long)sf, (unsigned long long)sa,
+                 (unsigned long long)f, (unsigned long long)(fa >> 20));
         pp_stage_bc("P8_AVLOG", d);
         return;
     }
