@@ -119,13 +119,13 @@ void evo_videodec2_probe(void)
            input_pool = 0, frame_pool = 0, frame_size = 0, cpu_map = 0;
     size_t flex_avail = 0;
 
+    /* ProsperoLight's self-test does NOT gate on this - libSceVideodec2 is
+     * also a NEEDED dep (loaded at process start), so the sceVideodec2* calls
+     * can work even when sceSysmoduleLoadModule returns non-zero. 0x80020063 =
+     * ESDKVERSION: the sysmodule-registration path has a stricter SDK check
+     * than the plain NEEDED load. Log it, carry on. */
     g_stage = 2;
     int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
-    if (sm != 0) {
-        note("EVO vdec2: sceSysmoduleLoadModule(207) -> 0x%08x — Route B blocked "
-             "(module gated for a fake-signed app, like AvPlayer 0xA5)", (unsigned)sm);
-        _exit(1);
-    }
 
     int64_t dm_limit = sceKernelGetDirectMemorySize();
 
@@ -219,14 +219,17 @@ void evo_videodec2_probe(void)
     }
 
     note("EVO vdec2: %s\n"
-         "sysmod207=0 cQ:q=%08x a=%08x mk=%08x  dMem:q=%08x cpuMap=%08x alloc=%08x\n"
+         "sysmod207=%08x (nonzero ok if NEEDED) cQ:q=%08x a=%08x mk=%08x\n"
+         "dMem:q=%08x cpuMap=%08x alloc=%08x  dmLimit=%llx\n"
          "CREATE=%08x reset=%08x DECODE=%08x flush=%08x\n"
          "out valid=%u err=%u pics=%u %ux%u pitch=%u codec=%u  flexAvail=%zx",
          valid ? "HARDWARE DECODE OK (Route B viable)"
                : c_rc == 0 ? "decoder created, DECODE failed"
                            : "decoder creation FAILED",
+         (unsigned)sm,
          (unsigned)q_query, (unsigned)q_alloc, (unsigned)q_make,
          (unsigned)d_query, (unsigned)cpu_rc, (unsigned)a_rc,
+         (unsigned long long)dm_limit,
          (unsigned)c_rc, (unsigned)r_rc, (unsigned)dec_rc, (unsigned)flush_rc,
          (unsigned)output.valid, (unsigned)output.error, (unsigned)output.picture_count,
          output.width, output.height, output.pitch, output.codec, flex_avail);
