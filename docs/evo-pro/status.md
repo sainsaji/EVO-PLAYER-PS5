@@ -27,10 +27,20 @@ the loader auto-loads the `.sprx` at process start and the symbols resolve as
 ordinary imports — `evo_agc_probe.c` / `evo_avplayer_probe.c`'s runtime
 `sceKernelDlsym` + inline-NID approach becomes unnecessary.
 
-**Next:** build the PRX import-stub generator into `tools/native-app/` +
-`scripts/package-app.sh` (a `--needed libSceAgc,libSceAvPlayer,...` style
-knob), then re-run both gates. Probes stay as-is — they'll just resolve
-directly instead of via dlsym.
+**Done same day — PRX import-stub mechanism built.**
+`tools/native-app/stubs/prx/<module>.syms` (one symbol name per line) →
+`package-app.sh` emits a tiny ELF `.so` (SONAME `<module>.sprx`), links it
+`--as-needed`, and passes it to `native_app_builder link --stub`. Verified in
+the build: `libSceAvPlayer.prx` NEEDED in the converted eboot,
+`sceAvPlayerInit → aS66RI0gGgo#I#J` (NIDs match `prospero-nid`),
+`integrity: valid`. `evo_avplayer_probe.c` rewritten to call `sceAvPlayer*`
+directly (no load, no dlsym). `libSceAgc`/`libSceAgcDriver`/`libSceVideodec2`
+`.syms` also staged — stubs build but aren't NEEDED until something references
+them (#27 / Phase 4 flip a one-liner).
+
+**Next:** hardware run #2 — does the loader auto-load `libSceAvPlayer.sprx` for
+a fake-signed module? Deploy the `--avplayer-probe` build (`/data/probe.mp4`
+already on the console), launch, read `EVO avplayer:` popups.
 
 ## 2026-09-02 (late) — host work, no console
 

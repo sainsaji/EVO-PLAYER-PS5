@@ -301,6 +301,34 @@ if [[ "${MODE}" == "player" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. PRX import stubs for system modules the SDK ships no .so for.
+#     Each tools/native-app/stubs/prx/<name>.syms -> a tiny ELF .so with
+#     SONAME <name>.sprx and one empty FUNC per symbol. Linked --as-needed
+#     (only becomes a real NEEDED entry if EVO references a symbol) and passed
+#     to native_app_builder as --stub. The converter computes the Sony NID
+#     from the plain name and the loader auto-loads the .sprx at start.
+#     Fixes the hardware-proven wall: a fake-signed module cannot
+#     sceKernelLoadStartModule an undeclared system PRX. See the prx/README.
+# ---------------------------------------------------------------------------
+PRX_STUB_SOS=()
+PRX_STUB_SRC="${NATIVE}/stubs/prx"
+if compgen -G "${PRX_STUB_SRC}/*.syms" > /dev/null; then
+    begin "building PRX import stubs"
+    mkdir -p "${BUILD}/stubs"
+    for syms in "${PRX_STUB_SRC}"/*.syms; do
+        base="$(basename "${syms}" .syms)"
+        so="${BUILD}/stubs/${base}.so"
+        csrc="${BUILD}/stubs/${base}.c"
+        grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
+        "${TCC}" -shared -nostdlib -nodefaultlibs -fPIC \
+            -Wl,-soname,"${base}.sprx" -o "${so}" "${csrc}"
+        PRX_STUB_SOS+=("${so}")
+        printf '     %-22s %s syms\n' "${base}.sprx" "$(wc -l < "${csrc}")"
+    done
+    ok "built ${#PRX_STUB_SOS[@]} PRX import stubs"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Link the intermediate PS5 PIE.
 # ---------------------------------------------------------------------------
 begin "linking intermediate PIE"
@@ -322,6 +350,7 @@ STUBDIR="${PS5_SYSROOT}/lib"
 # members resolve each other; archive semantics keep malloc/stdio/etc. bound to
 # the .so stubs (and, on device, the runtime shim's heap table).
 LINK_TAIL=(--as-needed "${STUBDIR}"/*.so)
+(( ${#PRX_STUB_SOS[@]} )) && LINK_TAIL+=("${PRX_STUB_SOS[@]}")
 [[ "${MODE}" == "player" ]] && \
     LINK_TAIL+=(--start-group "${PS5_SYSROOT}/lib/libc.a" --end-group)
 
@@ -370,8 +399,10 @@ llvm-nm -u "${BUILD}/llvm-pie.elf" 2>/dev/null | awk '{print $NF}' | sort -u \
 # 8. Convert LLVM PIE -> PS5 module, then sign to FSELF.
 # ---------------------------------------------------------------------------
 begin "converting to PS5 module + signing"
+CONV_STUB_ARGS=()
+for so in ${PRX_STUB_SOS[@]+"${PRX_STUB_SOS[@]}"}; do CONV_STUB_ARGS+=(--stub "${so}"); done
 "${TOOL}" link --in "${BUILD}/llvm-pie.elf" --out "${BUILD}/eboot.elf" \
-    --stub-dir "${STUBDIR}" \
+    --stub-dir "${STUBDIR}" ${CONV_STUB_ARGS[@]+"${CONV_STUB_ARGS[@]}"} \
     --module-sdk "${MODULE_SDK}" --companion-sdk "${COMPANION_SDK}" \
     --file-name eboot.elf
 

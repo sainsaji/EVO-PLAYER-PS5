@@ -108,7 +108,8 @@ void evo_agc_probe(void)
 {
     int agc = load_module("libSceAgc.sprx");
     if (agc < 0) {
-        note("EVO agc: libSceAgc.sprx load FAILED - Step 2 blocked");
+        note("EVO agc: libSceAgc.sprx load FAILED - Step 2 blocked "
+             "(#27: switch to the PRX import stub, like libSceAvPlayer)");
         return;
     }
 

@@ -1,0 +1,4 @@
+# libSceAgcDriver — DCB submit / GPU sync (#27 GPU Step 2/3).
+# Full ABI: third_party/SharpProspero .../Interop/Agc/SceAgcDriver.cs.
+sceAgcDriverSubmitDcb
+sceAgcDriverWaitUntilSafeForRendering

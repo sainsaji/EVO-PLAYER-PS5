@@ -8,18 +8,26 @@ Gate probe:
 [`evo_avplayer_probe.c`](../../projects/evoplayer/src/evo_avplayer_probe.c)
 (`--avplayer-probe`).
 
-> **Hardware result (PPSA99039, fw 12.70, 2026-09-03):**
+> **Hardware result #1 (2026-09-03):**
 > `EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked`.
-> `sceKernelLoadStartModule` of the system PRX is **refused for a fake-signed
-> app module that did not declare it NEEDED** — the *exact* same wall
-> `libSceAgc.sprx` hits (#27). Route A can't be answered until
-> `libSceAvPlayer` is a link-time import stub. This is now a **shared
-> prerequisite**: `libSceAgc`/`libSceAgcDriver` (#27), `libSceAvPlayer`
-> (Route A), `libSceVideodec2` (Route B) all need the same PRX-stub work in
-> `tools/native-app/` + `scripts/package-app.sh`. The SDK ships no `.so` stub
-> for any of them (only `libSceSysmodule.so` and 30 others). Once the stub is
-> NEEDED, the loader auto-loads the `.sprx` and the symbols resolve directly —
-> no `sceKernelDlsym`, no NID computation.
+> `sceKernelLoadStartModule` of a system PRX is refused for a fake-signed app
+> module that did not declare it NEEDED — same wall `libSceAgc.sprx` hits (#27).
+>
+> **Fix built (2026-09-03):** PRX import stubs —
+> `tools/native-app/stubs/prx/*.syms` → a tiny ELF `.so` per module (SONAME
+> `libSceX.sprx`, one empty `FUNC` per symbol). `package-app.sh` links them
+> `--as-needed` (so a module is only NEEDED if EVO references one of its
+> symbols) and passes them to `native_app_builder link --stub`, which computes
+> the Sony NID from the plain name. Verified: the converted `eboot.elf` has
+> `libSceAvPlayer.prx` NEEDED and `sceAvPlayerInit → aS66RI0gGgo#I#J` etc.
+> (NIDs match `prospero-nid` and the hw-verified list); `integrity: valid`.
+> The probe now `extern`-declares and calls `sceAvPlayer*` directly — no
+> module load, no dlsym. **Awaiting hardware run #2** to confirm the loader
+> auto-loads `libSceAvPlayer.sprx` for a fake-signed module (the theory, from
+> ProsperoLight/SharpProspero precedent — they ship NEEDED system PRXs).
+>
+> Stubs also staged (not yet NEEDED — nothing references them): `libSceAgc` +
+> `libSceAgcDriver` (#27), `libSceVideodec2` (Route B).
 
 What *is* verified (prior recon, [native-media-research.md](../native-media-research.md#results-log),
 fw 12.70, elfldr payload): `libSceAvPlayer.sprx` maps into EVO's process and

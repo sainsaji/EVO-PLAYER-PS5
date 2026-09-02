@@ -3,10 +3,13 @@
  * the PPSA99039 app module. See evo_avplayer_probe.h and
  * docs/evo-pro/avplayer-abi.md. Compiled only under -DEVO_AVPLAYER_PROBE.
  *
- * App-module context: NO kernel R/W, NO stdout to klog. Module load + symbol
- * resolution go through sceKernelLoadStartModule + sceKernelDlsym-by-NID (NID
- * computed here from OpenSSL SHA1, exactly as evo_agc_probe.c does). Every
- * result comes back as a system-notification popup.
+ * libSceAvPlayer is now a link-time NEEDED dependency (PRX import stub —
+ * tools/native-app/stubs/prx/libSceAvPlayer.syms), so the loader auto-loads
+ * libSceAvPlayer.sprx at start and the sceAvPlayer* symbols are called
+ * directly. No sceKernelLoadStartModule (which a fake-signed module can't do
+ * for an undeclared PRX - the wall this probe first hit), no dlsym, no NID.
+ *
+ * App-module context: NO stdout to klog. Every result is a notification popup.
  */
 #ifdef EVO_AVPLAYER_PROBE
 
@@ -25,18 +28,9 @@
 #include <pthread.h>
 #include <sys/stat.h>
 
-#include <openssl/sha.h>
-
-/* --- app-module module loader + dlsym (userland; no stub header in EVO) --- */
-extern int sceKernelLoadStartModule(const char *name, unsigned long argc,
-                                    const void *argv, unsigned int flags,
-                                    void *opt, int *res);
-extern int sceKernelDlsym(int handle, const char *symbol, void **addr);
 extern int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
 extern unsigned int sceKernelUsleep(unsigned int us);
 extern uint64_t sceKernelGetProcessTime(void);
-
-/* direct memory — same entry points main.c uses for the app-module framebuffer */
 extern int sceKernelAllocateMainDirectMemory(size_t, size_t, int, intptr_t *);
 extern int sceKernelMapDirectMemory(void **, size_t, int, int, intptr_t, size_t);
 extern int sceKernelReleaseDirectMemory(intptr_t, size_t);
@@ -52,65 +46,6 @@ static void note(const char *fmt, ...)
     vsnprintf(n.msg, sizeof n.msg, fmt, ap);
     va_end(ap);
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
-}
-
-/* Sony NID: SHA1(name + salt), first 8 bytes reversed, base64 w/ custom
- * alphabet, keep 11 chars. Verified byte-for-byte against prospero-nid — this
- * is a straight copy of evo_agc_probe.c's nid_of(). */
-static void nid_of(const char *sym, char out[12])
-{
-    static const uint8_t salt[16] = {
-        0x51,0x8D,0x64,0xA6,0x35,0xDE,0xD8,0xC1,
-        0xE6,0xB0,0x39,0xB1,0xC3,0xE5,0x52,0x30};
-    static const char b64[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
-
-    uint8_t buf[256], hash[SHA_DIGEST_LENGTH], d[9] = {0};
-    size_t n = strlen(sym);
-    if (n > sizeof(buf) - sizeof(salt)) n = sizeof(buf) - sizeof(salt);
-    memcpy(buf, sym, n);
-    memcpy(buf + n, salt, sizeof(salt));
-    SHA1(buf, n + sizeof(salt), hash);
-
-    for (int i = 0; i < 8; i++) d[i] = hash[7 - i];
-
-    char tmp[12];
-    int p = 0;
-    for (int i = 0; i < 9; i += 3) {
-        int abc = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
-        tmp[p++] = b64[(abc >> 18) & 0x3f];
-        tmp[p++] = b64[(abc >> 12) & 0x3f];
-        tmp[p++] = b64[(abc >> 6) & 0x3f];
-        tmp[p++] = b64[abc & 0x3f];
-    }
-    memcpy(out, tmp, 11);
-    out[11] = '\0';
-}
-
-static int load_module(const char *basename)
-{
-    static const char *const dirs[] = {
-        "/system/common/lib/", "/system/priv/lib/", "/system_ex/common_ex/lib/",
-    };
-    char path[256];
-    for (unsigned i = 0; i < sizeof dirs / sizeof *dirs; i++) {
-        int res = 0;
-        snprintf(path, sizeof path, "%s%s", dirs[i], basename);
-        int id = sceKernelLoadStartModule(path, 0, 0, 0, 0, &res);
-        if (id >= 0)
-            return id;
-    }
-    return -1;
-}
-
-static void *resolve(int mod, const char *name)
-{
-    void *a = 0;
-    char nid[12];
-    nid_of(name, nid);
-    if (sceKernelDlsym(mod, nid, &a) == 0 && a) return a;
-    if (sceKernelDlsym(mod, name, &a) == 0 && a) return a;
-    return 0;
 }
 
 /* ---- watchdog: _exit()s EVO if a call hangs. A clean close the user can
@@ -240,20 +175,6 @@ static uint64_t av_file_size(void *a)
 }
 
 /* ================================ probe =============================== */
-struct api {
-    void   *(*Init)(const SceAvPlayerInitData *);
-    int32_t (*AddSource)(void *, const char *);
-    int32_t (*Start)(void *);
-    int32_t (*Stop)(void *);
-    int32_t (*IsActive)(void *);
-    int32_t (*SetLooping)(void *, int32_t);
-    int32_t (*StreamCount)(void *);
-    int32_t (*GetStreamInfo)(void *, uint32_t, SceAvPlayerStreamInfo *);
-    int32_t (*EnableStream)(void *, uint32_t);
-    int32_t (*GetVideoDataEx)(void *, SceAvPlayerFrameInfoEx *);
-    int32_t (*Close)(void *);
-};
-
 static const char *const kCandidates[] = {
     "/data/probe.mp4",
     "/data/bunny.mp4",
@@ -357,41 +278,9 @@ void evo_avplayer_probe(void)
     pthread_t wd;
     pthread_create(&wd, NULL, watchdog, NULL);
 
-    /* --- module + symbols --- */
-    g_stage = 1;
-    int mod = load_module("libSceAvPlayer.sprx");
-    if (mod < 0) {
-        note("EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked");
-        return;
-    }
-
-    g_stage = 2;
-    struct api A;
-    memset(&A, 0, sizeof A);
-    A.Init           = resolve(mod, "sceAvPlayerInit");
-    A.AddSource      = resolve(mod, "sceAvPlayerAddSource");
-    A.Start          = resolve(mod, "sceAvPlayerStart");
-    A.Stop           = resolve(mod, "sceAvPlayerStop");
-    A.IsActive       = resolve(mod, "sceAvPlayerIsActive");
-    A.SetLooping     = resolve(mod, "sceAvPlayerSetLooping");
-    A.StreamCount    = resolve(mod, "sceAvPlayerStreamCount");
-    A.GetStreamInfo  = resolve(mod, "sceAvPlayerGetStreamInfo");
-    A.EnableStream   = resolve(mod, "sceAvPlayerEnableStream");
-    A.GetVideoDataEx = resolve(mod, "sceAvPlayerGetVideoDataEx");
-    A.Close          = resolve(mod, "sceAvPlayerClose");
-
-    int core = (A.Init && A.AddSource && A.Start && A.GetVideoDataEx && A.Close);
-    if (!core) {
-        note("EVO avplayer: modid=0x%x but core NIDs unresolved "
-             "(Init=%p AddSrc=%p Start=%p GetVidEx=%p Close=%p)",
-             mod, (void *)A.Init, (void *)A.AddSource, (void *)A.Start,
-             (void *)A.GetVideoDataEx, (void *)A.Close);
-        return;
-    }
-
     const char *file = find_test_file();
     if (!file) {
-        note("EVO avplayer: modid=0x%x, all NIDs OK, but NO test file.\n"
+        note("EVO avplayer: libSceAvPlayer linked OK, but NO test file.\n"
              "Drop a small H.264 .mp4 at /data/probe.mp4 (FTP) or "
              "/mnt/usb0/probe.mp4 (USB), relaunch.");
         return;
@@ -413,7 +302,7 @@ void evo_avplayer_probe(void)
     init.num_output_video_framebuffers = 6;
     init.auto_start = 0;
 
-    void *pl = A.Init(&init);
+    void *pl = sceAvPlayerInit(&init);
     if (!pl) {
         note("EVO avplayer: sceAvPlayerInit -> NULL (InitData=%zu B, want 120). "
              "Route A refused at Init.", sizeof init);
@@ -422,12 +311,12 @@ void evo_avplayer_probe(void)
 
     /* --- add source --- */
     g_stage = 4;
-    int rc = A.AddSource(pl, file);
+    int rc = sceAvPlayerAddSource(pl, file);
     if (rc != 0) {
         note("EVO avplayer: AddSource(\"%s\") -> 0x%08x (opened=\"%s\" reads=%llu). "
              "Route A refused the file.",
              file, rc, g_openpath, (unsigned long long)g_reads);
-        A.Close(pl);
+        sceAvPlayerClose(pl);
         return;
     }
 
@@ -435,22 +324,22 @@ void evo_avplayer_probe(void)
     g_stage = 5;
     int count = 0;
     for (int t = 0; t < 100; t++) {
-        count = A.StreamCount ? A.StreamCount(pl) : -1;
+        count = sceAvPlayerStreamCount(pl);
         if (count > 0) break;
         sceKernelUsleep(100 * 1000);
     }
     int vw = 0, vh = 0, taken[4] = {0,0,0,0};
-    if (count > 0 && A.GetStreamInfo && A.EnableStream) {
+    if (count > 0) {
         for (uint32_t i = 0; i < (uint32_t)count; i++) {
             SceAvPlayerStreamInfo si;
             memset(&si, 0, sizeof si);
-            if (A.GetStreamInfo(pl, i, &si) != 0) continue;
+            if (sceAvPlayerGetStreamInfo(pl, i, &si) != 0) continue;
             if (si.type == SCE_AVPLAYER_STREAM_VIDEO) {
                 vw = (int)si.details.video.width;
                 vh = (int)si.details.video.height;
             }
             if (si.type < 4 && !taken[si.type]) {
-                A.EnableStream(pl, i);
+                sceAvPlayerEnableStream(pl, i);
                 taken[si.type] = 1;
             }
         }
@@ -458,8 +347,8 @@ void evo_avplayer_probe(void)
 
     /* --- start + decode loop --- */
     g_stage = 6;
-    if (A.SetLooping) A.SetLooping(pl, 0);
-    int srtc = A.Start(pl);
+    sceAvPlayerSetLooping(pl, 0);
+    int srtc = sceAvPlayerStart(pl);
     note("EVO avplayer: Init OK, AddSource OK, streams=%d (video %dx%d), "
          "Start->0x%08x. Decoding...", count, vw, vh, srtc);
 
@@ -469,11 +358,11 @@ void evo_avplayer_probe(void)
     while (sceKernelGetProcessTime() - t0 < 15ULL * 1000 * 1000) {
         SceAvPlayerFrameInfoEx vf;
         memset(&vf, 0, sizeof vf);
-        if (A.GetVideoDataEx(pl, &vf) && vf.data) {
+        if (sceAvPlayerGetVideoDataEx(pl, &vf) && vf.data) {
             if (frames == 0) characterise(&vf);
             frames++;
         } else if (++polls % 200 == 0) {
-            int act = A.IsActive ? A.IsActive(pl) : -1;
+            int act = sceAvPlayerIsActive(pl);
             if (act == 0 && polls >= 400) break;
         }
         sceKernelUsleep(5 * 1000);
@@ -481,8 +370,8 @@ void evo_avplayer_probe(void)
 
     /* --- shutdown --- */
     g_stage = 8;
-    if (A.Stop) A.Stop(pl);
-    A.Close(pl);
+    sceAvPlayerStop(pl);
+    sceAvPlayerClose(pl);
 
     g_stage = 9;
     if (frames > 0)
