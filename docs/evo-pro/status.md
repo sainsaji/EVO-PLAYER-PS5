@@ -49,26 +49,28 @@ Step 2 is the video path, so task 8 gates it.
 
 ## Do this first (needs console)
 
-Console at the IP in `.env` (`PS5_HOST`). Jailbreak re-run after any reboot;
-`websrv` 8080, `ftpsrv` 2121 up. If a payload got wedged earlier, re-run the
-jailbreak to clear the elfldr host (see "Recovery" below).
+**Build already staged locally (2026-09-02):** `output/app/PPSA99039.ffpfsc`
+(21.9 MB) + `output/app/PPSA99039/`, both with `--agc-probe` compiled in.
+Rebuild only if the tree changed:
 
 ```bash
-docker compose run --rm ps5-dev bash -lc '
-  ./scripts/package-app.sh --agc-probe --ffpfsc
-  ./scripts/deploy-app.sh --ffpfsc'
+docker compose run --rm ps5-dev bash ./scripts/package-app.sh --agc-probe --ffpfsc
 ```
 
-Then **on the console**: ShadowMountPlus → mount `PPSA99039` → launch from the
-**Games row**. Do **not** stack launches — PS button to close before any
-rebuild ([tooling.md](../tooling.md#packaging-two-routes)).
-
-Watch the TV for **system-notification popups** (the only channel out of the
-sandbox — `/mnt/usb0` is ENOENT inside it). Also capture klog:
+When the console is up (powered, jailbroken — `nc -vz $PS5_HOST 2121` responds):
 
 ```bash
-docker compose run --rm ps5-dev ./tools/klog.sh
+docker compose run --rm ps5-dev bash ./scripts/deploy-app.sh --ffpfsc
 ```
+
+The user's **ShadowMountPlus auto-mounts on folder/image change** — the deploy
+triggers the mount. **Launch is still manual**: on the console, launch EVO from
+the **Games row**. Do **not** stack launches — PS button to close before any
+rebuild.
+
+The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
+someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from
+the app-module sandbox; `/mnt/usb0` is ENOENT so screenshots can't save either).
 
 ### Read the notifications
 
