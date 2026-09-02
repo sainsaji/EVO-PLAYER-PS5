@@ -147,13 +147,16 @@ Gate: can a payload reach `sceAgc` without repackaging as an app module?
   `native_agc_present.cpp` + `third_party/ProsperoLight/assets/private/*.bin`
   into a new `pp/src/pp_agc_present.c`, built by `package-app.sh`.
 
-- Shaders: ProsperoLight's NV12-sample + textured-quad shaders cover most of
-  this. **No on-device PSSL compiler** — precompiled shader ISA blobs are
-  embedded (as ProsperoLight does). This is the main new artifact.
+- Shaders: ProsperoLight's NV12-sample + fullscreen-quad blobs cover the
+  video path. **No PSSL compiler** — but `llvm-mc-18` (in the container)
+  assembles/disassembles GCN for `gfx1030`, so a hand-written
+  RGBA-passthrough PS (for compositing the RmlUi surface) is feasible.
 - Touches: `pp/src/pp_videoout.c`, `pp/src/pp_converter*` (bypass on target),
-  new `pp/src/pp_agc_present.c` + shader blobs.
+  new `pp/src/pp_agc.c` + `agc_blobs.S`.
 - Guard behind `__PROSPERO__` so the host preview (`tools/uiview*`,
   `uiplay`) keeps the SDL/CPU path — no host regression.
+- **Full how-to (blobs disassembled, `render_frame` annotated, the port and
+  wiring): [agc-implementation.md](agc-implementation.md).**
 
 ### Step 3 — full RmlUi GPU geometry backend (optional, largest)
 
