@@ -20,7 +20,8 @@ console is available, and what each result means. Point an AI at it to resume.
 | Doc | What it is | Status |
 |---|---|---|
 | [status.md](status.md) | **Resume-here** — next actions, decision tree, what's done/blocked | 🧭 living |
-| [videodec2-abi.md](videodec2-abi.md) | **Phase 0** — verified `libSceVideodec2` structs + exact call sequence; header `projects/evoplayer/media/include/sce/sce_videodec2.h` | ✅ done, hardware-verified |
+| [videodec2-abi.md](videodec2-abi.md) | **Phase 0 (Route B)** — verified `libSceVideodec2` structs + exact call sequence; header `projects/evoplayer/media/include/sce/sce_videodec2.h` | ✅ done, hardware-verified |
+| [avplayer-abi.md](avplayer-abi.md) | **Phase 0 (Route A)** — `libSceAvPlayer` ABI from SharpProspero (`SceAvPlayerInitData` 120B, `...FrameInfoEx` pitch+crop, callback port, memory-typing diff vs the old `WC_GARLIC` try); header `sce/sce_avplayer.h`; spike `projects/avplayer_test/` | ✅ transcribed + spike compile-clean; not yet hardware-run |
 | [native-decode-plan.md](native-decode-plan.md) | The master plan — 9 phases from ABI harvest to a shipped Auto/FFmpeg/Native decoder toggle, with kill criteria | Phase 1 gate ✅ PASSED |
 | [phase-1b-app-module.md](phase-1b-app-module.md) | **Phase 1b** — repackage EVO as app module `PPSA99039` (fork the `ps5-native-app-boilerplate` build tail, clean-room `libc.prx`, ShadowMountPlus). **Milestone 1:** the unchanged FFmpeg-software player running in the app sandbox | 🟢 **tasks 1–7 done on hardware 2026-09-02** — boots to menu, pad, settings→/download0, USB browse (via sandbox-unjail); task 8 (playback) blocked, crashes on file select |
 | [gpu-rendering-plan.md](gpu-rendering-plan.md) | Move YUV convert + composite + UI off the CPU onto `sceAgc` — the fix for the ~11 fps RmlUi frame. **Step 1 (dirty-flag the RmlUi surface) DONE + hardware-verified** (idle menus 11→~60 fps). Step 2/3 (AGC) sequenced after Phase 1b m1. | 🟢 Step 1 shipped; Step 2 pending AGC gate |

@@ -2,7 +2,29 @@
 
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
-> Last updated **2026-09-02** (evening). Branch: **`refactor/main-c-media-modules`**.
+> Last updated **2026-09-02** (late — host work). Branch: **`refactor/main-c-media-modules`**.
+
+## 2026-09-02 (late) — host work, no console
+
+- **#30 (Phase 3, `evo_vdec.h` seam) signed off.** Dead `ffmpeg_mkv_test()`
+  inline decoder removed; cover/poster extractor documented as staying out of
+  the seam (→ `evo_cover`, Track B); `evo_vdec.h` doc pass (Phase 4 slot-in +
+  accessor contract). `evo_vdec_ffmpeg.c` is now the only file with
+  play-stream `avcodec_*`/`sws_*`. Builds clean: `build-evoplayer.sh`,
+  `package-app.sh --ffpfsc`, `uiview_playback_rml.sh`. Commit on the branch.
+  Remaining: bit-exact codec-sweep parity check (hardware).
+- **#29 Route A (`sceAvPlayer`) Phase 0 done + spike rebuilt.**
+  - New header `projects/evoplayer/media/include/sce/sce_avplayer.h` from
+    SharpProspero (sizes/offsets `_Static_assert`ed, C + C++ clean).
+  - `projects/avplayer_test/main.c` rewritten from the earlier draft (which had
+    a scrambled NID table, the PS4 file-callback layout, and a `sceVideoOutOpen`
+    present path). Now: NIDs computed via `nid_encode`, `MediaPlayer.cs`
+    allocator port, log-and-serve file callbacks, SIGSEGV-guarded frame
+    characterisation, `/data/avplayer_probe/` dump, watchdog `_exit()`. **No
+    `sceVideoOutOpen`.** Host-compiles clean.
+  - Write-up + result-table + memory-typing diff: [avplayer-abi.md](avplayer-abi.md).
+  - **Next console session:** run it (see [avplayer-abi.md](avplayer-abi.md) §5),
+    read the transcript + `frame0.txt`, match the verdict table.
 
 ## 2026-09-02 evening — hardware session results
 
@@ -71,6 +93,10 @@
   - [ ] then a 4K file
 
 **Then, in order** (GitHub issues):
+- [ ] **Route A spike** (#29 Phase 2) — launch `output/elf/avplayer_test.elf`
+      (payload, watchdog-guarded, no VideoOut) with a small `.mp4` at
+      `/data/bunny.mp4`; relay the transcript + `/data/avplayer_probe/frame0.txt`
+      → verdict table in [avplayer-abi.md](avplayer-abi.md) §5
 - [ ] **Task 8** (#26) — fix the call the breadcrumb named; verify A/V sync + 4K vs `main`
 - [ ] **Step 2** (#27) — `pp/src/pp_agc.{h,c}` + `agc_blobs.S` (port `native_agc_present.cpp`); wire `pp_videoout.c` / `pp_playback.c`; settings toggle Auto/CPU/GPU; device-test a test-pattern NV12; plane-hash A/B vs CPU
 - [ ] **Step 2.5** (#27) — `rgba_ps` + reused header → `sceAgcCreateShader` accepts? → GPU OSD composite

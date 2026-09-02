@@ -22,7 +22,7 @@ ALL_PROJECTS=(
     audioout_test    # milestone 4: audio path
     gpu_test         # milestone 5: GPU capability probe
     decoder_test     # research: native decoder reconnaissance
-    avplayer_test    # research: libSceAvPlayer slot (placeholder)
+    avplayer_test    # research: libSceAvPlayer native-decode spike (Route A)
     yuv_gpu_test     # future:   GPU YUV renderer (placeholder)
 )
 

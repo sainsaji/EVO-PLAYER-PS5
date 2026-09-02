@@ -186,27 +186,31 @@ Turn the reference implementation's decode code into C headers under
       (`Avc=1`, `Hevc=974921`, `Vp9=2382845`), memory-typing crib, and the full
       call sequence are in [videodec2-abi.md](videodec2-abi.md). Header
       compiles as C11 and C++20.
-- [ ] `sce_avplayer.h` — from `AvPlayer.cs`: `AvPlayerInitData` (120 bytes,
-      every field offset is in the C# doc-comments), the three callback blocks
-      (`MemAllocator` 40B, `FileReplacement` 40B, `EventReplacement` 16B),
-      `AvPlayerFrameInfoEx` (104 bytes — offsets 0/16/24/28/44/48/52/56/60),
-      stream-info structs.
-- [ ] NID list for both modules — resolve names → NIDs with
-      `$PS5_PAYLOAD_SDK/bin/prospero-nid` (or `SharpProspero`'s `nid` command)
-      and cross-check against the prior `decoder_test` findings for
-      `libSceAvPlayer` (six known-good addresses in
-      [native-media-research.md](../native-media-research.md#results-log)).
-- [ ] Port `MediaPlayer`'s allocator + texture-slot callbacks
-      (`AllocateTexture` / `DeallocateTexture` in `MediaPlayer.cs`) to C. These
-      show exactly which memory type the decoder's output buffers need
-      (`sceKernelAllocateDirectMemory` + `MemoryTypeCachedShared` +
-      `ProtCpuReadWrite | ProtGpuAll`) — the detail EVO's `sceVideodec2` try
-      may have got wrong. `VideoDecoder.CreateAvc` uses
-      `MemoryTypeCachedShared` for CPU-GPU regions, `MemoryTypeCached` for the
-      GPU region, `MapNoCoalesce`, compute pipe 0 / queue 0.
+- [x] `sce_avplayer.h` — done 2026-09-02, transcribed from SharpProspero
+      (`AvPlayer.cs` + `MediaPlayer.cs`). `SceAvPlayerInitData` (120 B), the
+      three callback blocks (`MemAllocator` 40B, `FileReplacement` 40B —
+      **object-ptr first, `readOffset` only**, not the PS4 shape —
+      `EventReplacement` 16B), `SceAvPlayerFrameInfoEx` (104 B, pitch @ 0x3C +
+      four crop insets @ 0x2C..0x38), stream-info structs. Sizes/offsets
+      `_Static_assert`ed; compiles as C11 and C++17. Full write-up:
+      [avplayer-abi.md](avplayer-abi.md).
+- [x] NID handling — the header pins the six hw-verified core NIDs in a
+      comment for cross-check, but calling code **computes** every NID
+      (`nid_encode` in a payload, inline SHA1 in the app module) rather than
+      hardcoding — an earlier draft's pasted NID table was scrambled.
+- [x] Port `MediaPlayer`'s allocator + texture-slot callbacks to C — done in
+      `projects/avplayer_test/main.c` (general = aligned heap; texture =
+      GPU-visible direct memory + `(addr→offset,size)` slot table; the
+      deallocator unmaps *and* releases). Memory-typing diff vs.
+      `hardware-decode.md` (old try used `WC_GARLIC` 3; SharpProspero uses
+      `MemoryTypeCachedShared` 12 / prot 0x33) written up in
+      [avplayer-abi.md](avplayer-abi.md) §4, including the **payload caveat**:
+      `sceKernelGetDirectMemorySize()` is 0 in a payload so the spike uses the
+      main pool; if the decoder rejects it, Route A needs the app-module
+      context.
 
-**Deliverable:** headers compile; a written diff of SharpProspero's memory
-typing vs. what `research/hardware-decode` recorded.
+**Deliverable:** headers compile (done); memory-typing diff written
+([avplayer-abi.md](avplayer-abi.md) §4).
 
 ### Phase 1 — run EVO Player from an app slot
 
@@ -244,16 +248,25 @@ and establish whether that context differs from the payload.
 Run inside the Phase 1 app slot. Timeboxed. Two independent probes; run A
 first (cheaper payoff is larger, and it is the untried one).
 
-**Route A — `sceAvPlayer`:**
-- [ ] `sceAvPlayerInit` with the Phase 0 struct, allocators wired to
-      `NativeMemory`-style aligned alloc, **file-replacement callbacks that
-      only log** (per hardware-decode-review §8 — instrument before the first
-      call), debug level `All`.
-- [ ] `sceAvPlayerAddSource` on a small H.264 MP4 on USB.
-- [ ] `sceAvPlayerStart` → poll `sceAvPlayerGetVideoDataEx` → dump the first
-      frame's NV12 planes + `AvPlayerFrameInfoEx` fields to USB.
-- [ ] Characterise the frame (hardware-decode-review §5): NV12? tiled or
-      linear? `pitch` vs `width`? CPU-readable without a fault? cacheable?
+**Route A — `sceAvPlayer`:** the probe is **built and host-compile-clean** —
+`projects/avplayer_test/main.c` (rewritten 2026-09-02 from the earlier draft).
+It does all four steps below already; Phase 2 is now just *running it on the
+console* and recording the result against the table in
+[avplayer-abi.md](avplayer-abi.md) §5.
+- [x] `sceAvPlayerInit` with the Phase 0 struct; general + texture allocators
+      ported from `MediaPlayer.cs`; **file-replacement callbacks that log every
+      call** then service it from the real fs; event callback log-only; debug
+      level `All`; watchdog thread `_exit()`s on a hang.
+- [x] `sceAvPlayerAddSource` (argv[1] or `/data/bunny.mp4`), then
+      `StreamCount` / `GetStreamInfo` / `EnableStream` (first of each kind).
+- [x] `sceAvPlayerStart` → poll `sceAvPlayerGetVideoDataEx` → dump the first
+      frame's planes + every `AvPlayerFrameInfoEx` field to
+      `/data/avplayer_probe/`.
+- [x] Characterise the frame: `pitch` vs `width`, the four crop insets,
+      CPU-readable-without-a-fault (SIGSEGV-guarded), rough NV12 sanity (luma
+      spread, chroma near 128).
+- [ ] **RUN IT** (needs console). Never calls `sceVideoOutOpen` — the panic
+      vector is not in play.
 
 **Route B — `sceVideodec2`:**
 - [ ] Repeat EVO's phase-9/10 `CreateDecoder` → `Decode`, but with
