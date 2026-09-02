@@ -64,16 +64,22 @@ static void note(const char *fmt, ...)
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
 }
 
-/* watchdog: _exit() EVO if a call hangs (safer than a wedged app slot). */
+/* watchdog: _exit() EVO only if a call HANGS (safer than a wedged app slot).
+ * Stands down once the probe reaches stage 9 (done) — the player keeps running. */
+#define VDEC2_STAGE_DONE 9
 static volatile int g_stage = 0, g_stage_seen = -1;
 static void *watchdog(void *a)
 {
     (void)a;
     for (int i = 0; i < 40; i++) {
         sceKernelUsleep(1000 * 1000);
+        if (g_stage >= VDEC2_STAGE_DONE)
+            return 0;                                    /* probe finished — stand down */
         if (g_stage != g_stage_seen) { g_stage_seen = g_stage; i = 0; }
     }
-    note("EVO vdec2: WATCHDOG at stage %d - closing app", g_stage);
+    if (g_stage >= VDEC2_STAGE_DONE)
+        return 0;
+    note("EVO vdec2: WATCHDOG at stage %d - hung, closing app", g_stage);
     _exit(80 + g_stage);
     return 0;
 }
@@ -308,7 +314,17 @@ void evo_videodec2_probe(void)
     free_direct(compute_memory.cpu_gpu, compute_start, compute_size);
     sceSysmoduleUnloadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
 
-    g_stage = 9;
+    /* Restore default signal handling so the player's own crash reporting is
+     * back to normal once the probe is done. */
+    struct sigaction d;
+    memset(&d, 0, sizeof d);
+    d.sa_handler = SIG_DFL;
+    sigaction(SIGSEGV, &d, NULL); sigaction(SIGBUS,  &d, NULL);
+    sigaction(SIGILL,  &d, NULL); sigaction(SIGABRT, &d, NULL);
+    sigaction(SIGSYS,  &d, NULL); sigaction(SIGTRAP, &d, NULL);
+    sigaction(SIGFPE,  &d, NULL);
+
+    g_stage = 9;   /* watchdog stands down; player keeps running */
 }
 
 #endif /* EVO_VIDEODEC2_PROBE */
