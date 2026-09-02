@@ -122,6 +122,24 @@ composite**, and the **flip** onto the GPU. The CPU converter
 (`pp_converter_*.c`) stops running on the hot path; `pp_videoout.c` submits an
 AGC DCB instead of `sceVideoOutSubmitFlip` with a CPU-filled buffer.
 
+#### AGC reachability probe — `projects/agc_probe/` (in progress 2026-09-02)
+
+Gate: can a payload reach `sceAgc` without repackaging as an app module?
+
+- **elfldr payload context: NO.** `-lSceGnmDriver` → the payload SIGSEGVs on
+  GNM init (`sce::Gnm::Initialize Error: Get CU Mask Fails (0)`).
+  `sceKernelLoadStartModule("/system/common/lib/libSceAgc.sprx")` → **hangs,
+  never returns** (left a wedged payload in the elfldr host; console stayed
+  fully healthy — websrv/ftp/`/fs` kernel-R-W all responsive, no KP). The
+  elfldr host process has no path to the graphics stack.
+- **hbldr / app-slot context: pending.** `agc_probe` rebuilt with a watchdog
+  thread that force-exits on a hang, staged as homebrew `AgcProbe`, to be
+  launched via `/hbldr` (EVO's real runtime — real display plane, working
+  VideoOut). If `libSceAgc.sprx` loads and the `sceAgc*` NIDs resolve there,
+  Step 2 may not need the full app-module repackage.
+- If hbldr also fails → Step 2 requires the registered app module
+  (`PPSA99039`), i.e. Phase 1b milestone 1 + task 8.
+
 - Shaders: ProsperoLight's NV12-sample + textured-quad shaders cover most of
   this. **No on-device PSSL compiler** — precompiled shader ISA blobs are
   embedded (as ProsperoLight does). This is the main new artifact.
