@@ -183,15 +183,25 @@ Once playback is stable in `PPSA99039`, re-check A/V sync and 4K against `main`
 Builds verified: `build-evoplayer.sh` (payload) and `package-app.sh --agc-probe`
 (app module) both compile clean.
 
+## Host work done since (commits after `73cf154`)
+
+- **Shader toolchain proven** — `tools/build-shader.sh` (`llvm-mc-18` +
+  `llvm-objcopy-18`): hand-written GCN `.s` → raw `.text` blob for
+  `sceAgcCreateShader`. `pp/shaders/rgba_ps.s` (RGBA × vertex colour, first
+  shader Step 2 + Step 3 both need) assembles + round-trips. **Not run on
+  hardware.** The `.header.bin` half is still open — plan: reuse ProsperoLight's.
+- **GLSL→ISA path scoped** — container has `llc-18`/`clang-18` with the amdgcn
+  target but no `glslang`/`spirv-tools`; a nicer GLSL→SPIR-V→RDNA2 route needs a
+  Dockerfile change. Documented in [agc-implementation.md](agc-implementation.md) §7.
+
 ## Remaining host work (not blocking — can start before the console session)
 
 Toward Step 2/3:
 
 1. **`pp/src/pp_agc.c` scaffold** — ~80% of Step 2, written + compile-checked
    before the gate result is known. Mechanical strip of `native_agc_present.cpp`.
-2. **Hand-write + assemble the RGBA-passthrough PS** with `llvm-mc-18` and adapt
-   a header from ProsperoLight's — proves the shader toolchain end to end, and
-   it is the first shader both Step 2 (OSD composite) and Step 3 need.
+2. **Solid-colour PS + 2D-ortho UI VS** — next shaders (`pp/shaders/`), same
+   `build-shader.sh` workflow.
 3. Sketch `ui_rml/src/evo_rmlui_render_agc.cpp` — the `Rml::RenderInterface`→AGC
    mapping (Step 3 §2 in [agc-implementation.md](agc-implementation.md)).
 
@@ -199,11 +209,6 @@ Housekeeping:
 
 4. Fix `projects/app_ctl/` (broken `sysctl` form — use `mib[4]={1,14,8,0}`,
    `KERN_PROC_PROC`, namelen 4). Gives a `list / kill <pid>` payload.
-5. `tools/bench_rmlui.cpp` — stale, references dead symbols; align to
-   `evo_rmlui_prof.h` or delete.
-6. Clean the loose test media at the repo root (`bbb_au.bin`, `rabbit.mp4`,
-   `test.264`, `test.mp4`, `test_au.bin`) + root-level `moonlight_stream.cpp` /
-   `native_agc_present.cpp`.
 
 > Optimising the CPU rasteriser (`render_triangles_accumulated`) is **not**
 > worth it — Step 3 deletes it. Only touch it if Step 3 slips badly and

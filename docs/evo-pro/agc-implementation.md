@@ -46,12 +46,24 @@ There is **no PSSL→`.sb` compiler** in the SDK or anywhere reachable. Sony's
 binaries and never compiles one.
 
 **But `llvm-mc-18` (in the dev container) assembles and disassembles AMD GCN /
-RDNA2 ISA for `--triple=amdgcn--amdpal --mcpu=gfx1030`** — verified 2026-09-02:
+RDNA2 ISA for `--triple=amdgcn--amdpal --mcpu=gfx1030`.** Full workflow wired +
+verified 2026-09-02 as **`tools/build-shader.sh`**:
 
 ```bash
-llvm-mc-18 --assemble --triple=amdgcn--amdpal --mcpu=gfx1030 --filetype=obj -o out.o in.s
-llvm-objdump -d --mcpu=gfx1030 out.o          # round-trips
+./tools/build-shader.sh pp/shaders/rgba_ps.s   # .s -> raw .text blob + disasm
 ```
+
+It assembles with `llvm-mc-18`, then `llvm-objcopy-18 -O binary
+--only-section=.text` strips the ELF wrapper to the bare code half of the
+`(header, code)` pair `sceAgcCreateShader` wants. `pp/shaders/rgba_ps.s`
+(112-byte blob) round-trips cleanly.
+
+> The container has `llvm-mc-18` / `llvm-objcopy-18` / `llc-18` / `clang-18`
+> with the **amdgcn target**, but **no** `glslang` / `spirv-tools` /
+> `llvm-spirv` / Mesa / RGA, and the image is unprivileged (no apt). A nicer
+> **GLSL → SPIR-V → RDNA2 ISA** path (LLVM AMDGPU backend / Radeon GPU Analyzer
+> — see §7) would need a Dockerfile change; hand-written GCN is what works today
+> and the shaders are small enough that it is fine.
 
 So the real situation is:
 
@@ -60,8 +72,8 @@ So the real situation is:
 | NV12→RGB fullscreen convert PS | ✅ `pixel.text.linear-buffer.bin` (ProsperoLight) |
 | P010 (10-bit HDR) convert PS | ✅ `pixel.text.p010-passthrough.bin` |
 | Fullscreen-quad VS | ✅ `geometry.text.bin` |
-| **RGBA-passthrough PS** (for compositing the cached RmlUi surface) | ❌ — hand-write ~15 instrs of GCN, assemble with `llvm-mc-18` |
-| Solid-colour / textured-triangle PS+VS (Step 3) | ❌ — larger hand-written set |
+| **RGBA-passthrough PS** (for compositing the cached RmlUi surface) | 🚧 written — `pp/shaders/rgba_ps.s`, assembles, **not run on hardware** |
+| Solid-colour / textured-triangle PS+VS (Step 3) | ❌ — larger hand-written set, same workflow |
 
 The hard part of a hand-written shader is **not the ISA** — it is the Sony
 **shader *header*** blob that `sceAgcCreateShader(shader, header, code)` consumes
@@ -329,7 +341,39 @@ The Step 1 CPU path is kept as the fallback (AGC probe fails, or host preview).
 
 ---
 
-## 7. Sequencing
+## 7. Shader toolchain — status & the nicer path
+
+**Working now (`tools/build-shader.sh`):** hand-written GCN `.s` →
+`llvm-mc-18` → `llvm-objcopy-18 --only-section=.text` → raw `.text` blob.
+`pp/shaders/rgba_ps.s` is the first shader (RGBA × vertex colour, MRT0 export),
+register conventions mirrored from ProsperoLight's disassembled NV12 PS
+(`pp/shaders/README.md`). Assembles + round-trips; **unrun**.
+
+**Still to solve for a shader we author:** the `.header.bin` half.
+`sceAgcCreateShader(shader, header, code)` needs SPI config + GPR counts +
+resource layout. Plan: reuse ProsperoLight's `pixel.header.bin` with our
+`.text` (structural subset). Fallback: build the header from the RDNA2 ISA
+reference (doc 70648) + the `.sb` parsers in KytyPS5 / shadPS5 / SharpProspero's
+`ShaderInfo.cs`.
+
+**The nicer path (needs a Dockerfile change, not blocking):**
+GLSL → SPIR-V → RDNA2 ISA with open tooling, so Step 3's shader set can be
+written in GLSL (port RmlUi's own GL3/Vulkan backend shaders) instead of
+assembly:
+
+- add `glslang` + `spirv-tools` + `SPIRV-LLVM-Translator` (matching LLVM 18)
+  to the container, OR
+- `clang-18 -target amdgcn-amd-amdpal` / `llc-18 -mtriple=amdgcn-amd-amdpal
+  -mcpu=gfx1030` (both present) fed from SPIR-V or LLVM IR, OR
+- AMD's [Radeon GPU Analyzer](https://github.com/GPUOpen-Tools/radeon_gpu_analyzer)
+  (GLSL/Vulkan/HLSL → AMD ISA, offline, single binary).
+
+The header wrapping is still bespoke either way; only the code generation gets
+easier. Verify on host before committing to it.
+
+---
+
+## 8. Sequencing
 
 1. **Console:** `package-app.sh --agc-probe` → deploy → launch. Read the
    `EVO agc:` notification. **Gate.**
@@ -339,5 +383,7 @@ The Step 1 CPU path is kept as the fallback (AGC probe fails, or host preview).
    NV12 buffer → a picture on the TV via the GPU. Attribute each stage from
    the `report_agc_receipt`-style notifications.
 4. Feed real decoded frames; A/B the plane hash.
-5. RGBA-passthrough PS → GPU OSD composite.
-6. Step 3, maybe.
+5. `rgba_ps` + reused header → `sceAgcCreateShader` accepts it? → GPU OSD
+   composite.
+6. Step 3 — the shader set + `evo_rmlui_render_agc.cpp` + delete the CPU
+   rasteriser.

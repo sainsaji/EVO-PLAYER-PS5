@@ -120,6 +120,22 @@ desktop.ini
 .env
 .env.local
 
+# -----------------------------------------------------------------------------
+# Assembled GPU shader blobs (regenerate: tools/build-shader.sh pp/shaders/*.s)
+# -----------------------------------------------------------------------------
+pp/shaders/*.bin
+
+# Loose media / scratch dropped at the repo root during hardware testing.
+/*.mp4
+/*.mkv
+/*.264
+/*.265
+/*.h264
+/bbb_au.bin
+/test_au.bin
+/moonlight_stream.cpp
+/native_agc_present.cpp
+
 # Third-party UI reference screenshots (Samsung Tizen, Xbox dashboard, etc).
 # Local design reference only - not ours to redistribute.
 samples/*.jpg
