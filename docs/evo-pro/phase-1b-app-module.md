@@ -354,7 +354,8 @@ knowns: (a) expect `fstatfs` & friends in the re-harvested api-surface, and
    drop at boot is enough. `evo_jailbreak.c` waits ~1.2 s for the sandbox to
    open and `evo_bt`-reports the outcome.
    - **Daemon running (the user has PS5-Lapy-JB-Daemon): zero extra steps** —
-     EVO self-unjails on launch, `/mnt/usb0` just resolves.
+     EVO self-unjails on launch; one promotion opens the real root, so **both**
+     media sources resolve — `/mnt/usb0` (USB) and `/data` (INTERNAL STORAGE).
    - **If not:** falls back — the user runs `tools/sandbox-unjail.sh` once per
      launch as before. (Lapy's own note: a first attempt can lose a timing
      race; relaunching the app succeeds.)

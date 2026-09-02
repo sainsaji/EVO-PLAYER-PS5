@@ -2,9 +2,10 @@
  * evo_jailbreak.h - self-service sandbox promotion for the app module.
  *
  * A registered app module (PPSA99039) launches into a fresh per-title sandbox
- * every time - /mnt/usb0, /data and the real root are ENOENT from inside, and
- * the module has no kernel access to lift that itself (see
- * third_party/SharpProspero/docs/app-promotion.md).
+ * every time - /mnt/usb0 (USB source) and /data (INTERNAL STORAGE source) are
+ * both ENOENT from inside, and the module has no kernel access to lift that
+ * itself (see third_party/SharpProspero/docs/app-promotion.md). One promotion
+ * opens the real root, so it covers both media sources.
  *
  * The fix that needs no per-launch command: ask the persistent jailbreak
  * daemon (PS5-Lapy-JB-Daemon, or etaHEN) already running on the console.

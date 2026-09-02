@@ -25,10 +25,16 @@
  */
 #define JB_FILE   "/download0/etahen_jailbreak"
 
-/* A jailed module gets ENOENT on /mnt; a promoted one gets a real handle. */
+/*
+ * A jailed module has its root remapped to /mnt/sandbox/<TID>_NNN, so real
+ * paths outside it (/data = EVO's INTERNAL STORAGE source, /mnt/usb0 = USB,
+ * /mnt/sandbox itself) are ENOENT. After the daemon points fd_rdir/fd_jdir
+ * at the real rootvnode they all resolve. /data is the reliable probe: it
+ * always exists on the real root and is never in the sandbox view.
+ */
 static int sandbox_is_open(void)
 {
-    int fd = open("/mnt", O_RDONLY | O_DIRECTORY);
+    int fd = open("/data", O_RDONLY | O_DIRECTORY);
     if (fd >= 0) { close(fd); return 1; }
     return 0;
 }
