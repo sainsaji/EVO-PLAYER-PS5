@@ -914,6 +914,23 @@ static int prospero_cover_path_is_video(const char *path)
  * Decode one video frame near ~10% / 5s and scale to out_w x out_h.
  * Used for large right-panel preview (and small cover fallback).
  * Returns 0 on success.
+ *
+ * WHY THIS STAYS OUT OF evo_vdec (#30 sign-off decision)
+ * -----------------------------------------------------
+ * evo_vdec.h is deliberately a pure "one AU in, one pp_frame out" seam — no
+ * avformat, no seeking, no swscale, no output-size scaling. This helper is a
+ * self-contained one-shot: it opens its own AVFormatContext, fast-probes,
+ * seeks ~10% in, pulls a single frame and sws_scales it straight to an
+ * arbitrary RGBA box. It never touches the play stream's decoder. Folding it
+ * behind evo_vdec would drag avformat + swscale + a scaler back into the
+ * "pure" interface for no benefit and no bearing on Phase 4 (native decode
+ * only ever swaps the play-stream backend).
+ *
+ * Its real home is the `evo_cover` module (cover-art cache / thumbnail /
+ * browser preview) — docs/modularisation-plan.md Track B, step B6. Moving it
+ * there is that step's job, not this one's. The scrub-preview decoder already
+ * lives in its own module (media/src/prospero_thumbnail.c) for the same
+ * reason.
  */
 static int prospero_cover_extract_video_frame_size(
     const char *media_path,
@@ -1891,9 +1908,6 @@ int sceVideoOutRegisterBuffers2(int, int, int, PS5_VideoBuf*, int, PS5_VideoAttr
 
 void toast(const char* title, const char* msg);
 
-void ffmpeg_mkv_test(void);
-
-
 int start_video_playback(const char *path);
 
 
@@ -2442,148 +2456,6 @@ int has_ext(const char *name, const char *ext) {
     size_t e = strlen(ext);
     if (n < e) return 0;
     return strcasecmp(name + n - e, ext) == 0;
-}
-
-
-void ffmpeg_mkv_test(void)
-{
-    AVFormatContext *fmt = NULL;
-
-    if (avformat_open_input(&fmt, current_media_path, NULL, NULL) == 0)
-    {
-        toast("MKV OPEN", "SUCCESS");
-
-        char msg[128];
-        snprintf(msg, sizeof(msg), "streams:%d", fmt->nb_streams);
-        toast("MKV INFO", msg);
-
-
-        for (unsigned int ai = 0; ai < fmt->nb_streams; ai++) {
-            AVCodecParameters *apar = fmt->streams[ai]->codecpar;
-            if (apar->codec_type == AVMEDIA_TYPE_AUDIO) {
-                snprintf(msg, sizeof(msg), "audio codec:%d ch:%d rate:%d",
-                         apar->codec_id, apar->ch_layout.nb_channels, apar->sample_rate);
-                toast("AUDIO STREAM", msg);
-                break;
-            }
-        }
-
-        for (unsigned int i = 0; i < fmt->nb_streams; i++) {
-            AVCodecParameters *par = fmt->streams[i]->codecpar;
-            if (par->codec_type == AVMEDIA_TYPE_VIDEO) {
-                snprintf(msg, sizeof(msg), "video:%dx%d codec:%d", par->width, par->height, par->codec_id);
-                toast("VIDEO STREAM", msg);
-
-                const AVCodec *dec = avcodec_find_decoder(par->codec_id);
-                if (!dec) {
-                    toast("DECODER", "NOT FOUND");
-                    break;
-                }
-
-                AVCodecContext *ctx = avcodec_alloc_context3(dec);
-                if (!ctx) {
-                    toast("DECODER", "ALLOC FAIL");
-                    break;
-                }
-
-                if (avcodec_parameters_to_context(ctx, par) < 0) {
-                    toast("DECODER", "PARAM FAIL");
-                    avcodec_free_context(&ctx);
-                    break;
-                }
-
-                ctx->thread_count = 4;
-                ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
-
-                if (avcodec_open2(ctx, dec, NULL) < 0) {
-                    toast("DECODER", "OPEN FAIL");
-                    avcodec_free_context(&ctx);
-                    break;
-                }
-
-                toast("DECODER", "OPEN OK");
-
-                AVPacket *pkt = av_packet_alloc();
-                AVFrame *frame = av_frame_alloc();
-                int got_frame = 0;
-
-                if (!pkt || !frame) {
-                    toast("FRAME", "ALLOC FAIL");
-                } else {
-                    while (av_read_frame(fmt, pkt) >= 0) {
-                        if (pkt->stream_index == (int)i) {
-                            int send_ret = avcodec_send_packet(ctx, pkt);
-
-                            if (send_ret == 0) {
-                                int recv_ret = avcodec_receive_frame(ctx, frame);
-
-                                if (recv_ret == 0) {
-                                    snprintf(msg, sizeof(msg), "frame:%dx%d", frame->width, frame->height);
-                                    toast("FIRST FRAME OK", msg);
-
-                                    if (video_frame_pixels) {
-                                        free(video_frame_pixels);
-                                        video_frame_pixels = NULL;
-                                    }
-
-                                    video_frame_w = frame->width;
-                                    video_frame_h = frame->height;
-                                    video_frame_pixels = malloc(video_frame_w * video_frame_h * 4);
-
-                                    if (video_frame_pixels) {
-                                        struct SwsContext *sws = sws_getContext(
-                                            frame->width, frame->height, frame->format,
-                                            frame->width, frame->height, AV_PIX_FMT_RGBA,
-                                            SWS_BILINEAR, NULL, NULL, NULL
-                                        );
-
-                                        if (sws) {
-                                            uint8_t *dst_data[4] = {(uint8_t*)video_frame_pixels, NULL, NULL, NULL};
-                                            int dst_linesize[4] = {video_frame_w * 4, 0, 0, 0};
-
-                                            sws_scale(sws, (const uint8_t * const*)frame->data,
-                                                      frame->linesize, 0, frame->height,
-                                                      dst_data, dst_linesize);
-
-                                            sws_freeContext(sws);
-                                            video_frame_loaded = 1;
-                                            toast("FRAME RGB", "CONVERT OK");
-                                        } else {
-                                            toast("FRAME RGB", "SWS FAIL");
-                                        }
-                                    } else {
-                                        toast("FRAME RGB", "ALLOC FAIL");
-                                    }
-
-                                    got_frame = 1;
-                                    av_packet_unref(pkt);
-                                    break;
-                                }
-                            }
-                        }
-
-                        av_packet_unref(pkt);
-                    }
-
-                    if (!got_frame) {
-                        toast("FIRST FRAME", "NOT DECODED");
-                    }
-                }
-
-                if (frame) av_frame_free(&frame);
-                if (pkt) av_packet_free(&pkt);
-
-                avcodec_free_context(&ctx);
-                break;
-            }
-        }
-
-        avformat_close_input(&fmt);
-    }
-    else
-    {
-        toast("MKV OPEN", "FAILED");
-    }
 }
 
 /* PROSPERO_LAST_FOLDER_SEMANTICS_V4 */

@@ -273,17 +273,28 @@ fails and how.
 > `evo_vdec.h`. Once Track A lands, Phase 3 is "add `evo_vdec_native.c` beside
 > `evo_vdec_ffmpeg.c`" and the rest of this section is already done.
 
-- [ ] Add `evo_vdec.h` (§3) + `evo_vdec_ffmpeg.c` — move `play_ctx`,
+- [x] Add `evo_vdec.h` (§3) + `evo_vdec_ffmpeg.c` — move `play_ctx`,
       `avcodec_open2`, the send/receive loop, and `pp_map_avframe` /
-      `pp_map_yuv420p10_to_8` out of `main.c` behind the interface.
-- [ ] `main.c` play loop calls `evo_vdec_send` / `evo_vdec_receive` and keeps
+      `pp_map_yuv420p10_to_8` out of `main.c` behind the interface. *(Track A A6.)*
+- [x] `main.c` play loop calls `evo_vdec_send` / `evo_vdec_receive` and keeps
       pushing `pp_frame` into `pp_playback` exactly as now.
-- [ ] Seek path (`main.c:5559`+) calls `evo_vdec_flush`.
-- [ ] Verify bit-exact parity: the codec sweep in
-      [validation.md](../validation.md) plus `tools/bench.sh` plane hashes
-      unchanged.
-- [ ] Host preview (`tools/uiview_playback_rml`) links `evo_vdec_ffmpeg` and
-      is unaffected.
+- [x] Seek path calls `evo_vdec_flush` — all three video seek entry points
+      (`main.c` resume-seek, `evo_demux.c` scrub/seek-request, and the play
+      loop's flush) route through it. The one-shot cover/poster extractor
+      (`main.c`) and the scrub-preview worker (`media/src/prospero_thumbnail.c`)
+      keep their own isolated `av_seek_frame` + `avcodec_flush_buffers` on
+      purpose — separate AVFormatContext, not the play stream.
+- [x] `#30` sign-off: dead `ffmpeg_mkv_test()` inline decoder removed; the
+      cover/poster extractor documented as staying out of the seam (its home is
+      `evo_cover`, modularisation-plan Track B / B6). `evo_vdec_ffmpeg.c` is now
+      the only file with play-stream `avcodec_*` / `sws_*`.
+- [ ] Verify bit-exact parity on hardware: codec sweep +
+      [validation.md](../validation.md), `tools/bench.sh` plane hashes. Expected
+      identical — the play loop has routed through `evo_vdec` since A6 and `#30`
+      made no decode-path behaviour change — this is the empirical sign-off.
+- [x] Host preview (`tools/uiview_playback_rml.sh`) builds + renders. *(It no
+      longer links `evo_vdec_ffmpeg` directly — it exercises only the RmlUi
+      screens — so it is structurally unaffected.)*
 
 ### Phase 4 — native backend
 

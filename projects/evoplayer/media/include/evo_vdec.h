@@ -8,6 +8,23 @@
  * no globals. The play loop (evo_playback.c / main.c) owns pacing and present.
  *
  * Track A step A6 of docs/modularisation-plan.md.
+ *
+ * PHASE 4 SLOT-IN (native decode)
+ * ------------------------------
+ * The native backend is a second .c file — evo_vdec_native.c — that
+ * implements exactly this header against sceVideodec2 (see
+ * docs/evo-pro/videodec2-abi.md). Nothing in main.c / evo_playback.c /
+ * evo_demux.c changes: they already speak only evo_vdec_open / _send /
+ * _receive / _flush / _close. evo_vdec_open() picks the backend from
+ * p->backend and reports what it actually built through *chosen; the ffmpeg
+ * path always downgrades to FFMPEG. Guard evo_vdec_native.c behind the SDK
+ * macro so the host build keeps linking only evo_vdec_ffmpeg.c.
+ *
+ * Scope note: only the play-stream decoder goes through this seam. The
+ * one-shot cover/poster extractor (main.c) and the scrub-preview worker
+ * (media/src/prospero_thumbnail.c) keep their own avcodec paths on purpose —
+ * they demux and scale, which this interface deliberately does not do, and
+ * native decode has no bearing on them.
  */
 #ifndef EVO_VDEC_H
 #define EVO_VDEC_H
@@ -72,7 +89,13 @@ void evo_vdec_flush(evo_vdec *v);      /* seek: drop all buffered state */
 void evo_vdec_close(evo_vdec *v);
 evo_vdec_backend evo_vdec_active(const evo_vdec *v);
 
-/* ---- FFmpeg-backend-only accessors (return 0 / NULL for the native path).
+/* ---- FFmpeg-backend-only accessors.
+ *      CONTRACT: the native backend implements these as hard stubs —
+ *      the int accessors return 0, evo_vdec_ffmpeg_codec_name() returns NULL,
+ *      evo_vdec_ffmpeg_avframe() returns NULL (the r==2 swscale path cannot
+ *      occur on the native backend, which only ever yields pp_frame-mappable
+ *      output). Callers must treat 0 / NULL as "unknown" and fall back to the
+ *      demuxer's AVCodecParameters, which are backend-independent.
  *      Transitional: the OSD / media-info badges still read codec context
  *      fields directly. --- */
 int         evo_vdec_ffmpeg_width(const evo_vdec *v);
