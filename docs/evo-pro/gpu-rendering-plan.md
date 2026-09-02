@@ -132,13 +132,20 @@ Gate: can a payload reach `sceAgc` without repackaging as an app module?
   never returns** (left a wedged payload in the elfldr host; console stayed
   fully healthy — websrv/ftp/`/fs` kernel-R-W all responsive, no KP). The
   elfldr host process has no path to the graphics stack.
-- **hbldr / app-slot context: pending.** `agc_probe` rebuilt with a watchdog
-  thread that force-exits on a hang, staged as homebrew `AgcProbe`, to be
-  launched via `/hbldr` (EVO's real runtime — real display plane, working
-  VideoOut). If `libSceAgc.sprx` loads and the `sceAgc*` NIDs resolve there,
-  Step 2 may not need the full app-module repackage.
-- If hbldr also fails → Step 2 requires the registered app module
-  (`PPSA99039`), i.e. Phase 1b milestone 1 + task 8.
+- **ELF track abandoned** (elfldr *and* hbldr are borrowed-process sandboxes —
+  the same context class that never reached the `sceVideodec2` decoder). All
+  GPU/decode work now targets the **registered app module `PPSA99039`**, the
+  context where ProsperoLight runs the full pipeline.
+- **App-module recon:** `scripts/package-app.sh --agc-probe` compiles
+  `-DEVO_AGC_PROBE`, which runs `evo_agc_probe()` at `main()` entry —
+  `sceKernelLoadStartModule("/system/common/lib/libSceAgc.sprx")` + NID
+  resolution from inside `PPSA99039`, reported via the notification popup.
+  The app module already boots to the menu, so this answers the Step 2 gate
+  **before** task 8 (playback) is fixed. Deploy the current build and read
+  the "EVO agc: ..." notification.
+- If `libSceAgc` loads and the NIDs resolve → Step 2 is viable: lift
+  `native_agc_present.cpp` + `third_party/ProsperoLight/assets/private/*.bin`
+  into a new `pp/src/pp_agc_present.c`, built by `package-app.sh`.
 
 - Shaders: ProsperoLight's NV12-sample + textured-quad shaders cover most of
   this. **No on-device PSSL compiler** — precompiled shader ISA blobs are

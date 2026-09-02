@@ -474,10 +474,24 @@ in the app sandbox. No native decode.
    crashes the app module** (menu / browse / settings all stable). Unproven
    before this and expected to need work — R1 (FFmpeg `av_malloc` vs the capped
    libc heap), R3 (libm binding), the `exit()` `SIGSYS`, and possibly the
-   mid-run cred swap from `sandbox_unjail` as a new vector. Needs `evo_bt`
-   breadcrumbs down the open path (demux → decoder alloc → videoout attach →
-   first frame), `av_log` → notify, then decode plane-hash vs `main`, at 1080p
-   **and** 4K.
+   mid-run cred swap from `sandbox_unjail` as a new vector.
+
+   **Diagnostic instrumentation landed (commit `9c7b3fa`, console-free):**
+   - `pp_stage_breadcrumb.c` — under `EVO_APP_MODULE`, every `pp_stage_bc*`
+     checkpoint also fires a notification + klog line. Lights up the existing
+     `001..012` trail, invisible before (sandbox `/mnt/usb0` = ENOENT).
+   - `main.c` `EVO_P8()` — unconditional breadcrumbs `P8_00..P8_31` down
+     `start_video_playback` (the existing checkpoints are all inside the 4K
+     branch; a 1080p file hits none).
+   - `av_log` → notify callback (`AV_LOG_ERROR`), so the *reason* an
+     `avformat_open_input` / `avcodec_open2` fails reaches out of the sandbox.
+   - `malloc_shim.c` `evo_alloc_stats()` — mmap high-water, reported at
+     `P8_31` (checks R1 from the other side).
+
+   Next hardware session: deploy `package-app.sh --agc-probe`, pick a 1080p
+   file (`test.mp4` / `rabbit.mp4`), read the last `EVO bc:` / `EVO P8` /
+   `P8_AVLOG` notification before the crash → that names the failing call.
+   Then 4K. The same launch's `EVO agc:` line answers the GPU Step 2 gate.
 
 ---
 
