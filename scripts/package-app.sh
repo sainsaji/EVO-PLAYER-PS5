@@ -310,20 +310,27 @@ fi
 # ---------------------------------------------------------------------------
 # 6b. PRX import stubs for system modules the SDK ships no .so for.
 #     Each tools/native-app/stubs/prx/<name>.syms -> a tiny ELF .so with
-#     SONAME <name>.sprx and one empty FUNC per symbol. Linked --as-needed
-#     (only becomes a real NEEDED entry if EVO references a symbol) and passed
-#     to native_app_builder as --stub. The converter computes the Sony NID
-#     from the plain name and the loader auto-loads the .sprx at start.
+#     SONAME <name>.sprx and one empty FUNC per symbol, linked POSITIONALLY
+#     (unconditional DT_NEEDED, like ProsperoLight) and passed to
+#     native_app_builder as --stub. The converter computes the Sony NID from
+#     the plain name and the loader auto-loads the .sprx at process start.
+#     Only built for modules a probe actually uses - an unconditional NEEDED on
+#     a module the loader refuses would brick the boot.
 #     Fixes the hardware-proven wall: a fake-signed module cannot
 #     sceKernelLoadStartModule an undeclared system PRX. See the prx/README.
 # ---------------------------------------------------------------------------
 PRX_STUB_SOS=()
 PRX_STUB_SRC="${NATIVE}/stubs/prx"
-if compgen -G "${PRX_STUB_SRC}/*.syms" > /dev/null; then
+PRX_STUB_WANT=()
+(( VIDEODEC2_PROBE )) && PRX_STUB_WANT+=(libSceVideodec2)
+(( AVPLAYER_PROBE ))  && PRX_STUB_WANT+=(libSceAvPlayer)
+# libSceAgc / libSceAgcDriver: not wired to a direct-call probe yet (#27).
+if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"
     mkdir -p "${BUILD}/stubs"
-    for syms in "${PRX_STUB_SRC}"/*.syms; do
-        base="$(basename "${syms}" .syms)"
+    for base in "${PRX_STUB_WANT[@]}"; do
+        syms="${PRX_STUB_SRC}/${base}.syms"
+        need_file "${syms}" "missing PRX stub symbol list: ${base}.syms"
         so="${BUILD}/stubs/${base}.so"
         csrc="${BUILD}/stubs/${base}.c"
         grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
@@ -345,6 +352,11 @@ LINK_INPUTS=()
 LINK_INPUTS+=("${BUILD}/obj/app_crt.o" "${BUILD}/obj/app_cpp_runtime.o")
 [[ -n "${LIBC_EXT_O}" ]] && LINK_INPUTS+=("${LIBC_EXT_O}")
 LINK_INPUTS+=("${OBJS[@]}")
+# PRX import stubs: POSITIONAL (not --as-needed), matching ProsperoLight's
+# tools/build.sh exactly. An --as-needed-derived DT_NEEDED for a system PRX
+# would not bind correctly for a fake-signed module (the sceAvPlayerInit /
+# sceVideodec2* first-call crashes traced to this).
+(( ${#PRX_STUB_SOS[@]} )) && LINK_INPUTS+=("${PRX_STUB_SOS[@]}")
 (( ${#ARCHIVE_GROUP[@]} )) && LINK_INPUTS+=(--start-group "${ARCHIVE_GROUP[@]}" --end-group)
 (( ${#ARCHIVE_GROUP[@]} )) && LINK_INPUTS+=("${CXX_RUNTIME[@]}")
 

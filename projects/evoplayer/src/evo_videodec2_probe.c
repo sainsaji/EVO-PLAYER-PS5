@@ -25,6 +25,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <pthread.h>
 
 #include "evo_vdec_selftest_au.inc"   /* kVdecSelfTestBitstream[] */
@@ -73,6 +75,17 @@ static void *watchdog(void *a)
     return 0;
 }
 
+/* fault guard: report which call crashed instead of a bare crash popup. */
+static sigjmp_buf g_jmp;
+static volatile sig_atomic_t g_armed = 0;
+static const char *volatile g_where = "?";
+static void fault_h(int sig)
+{
+    if (g_armed) { g_armed = 0; siglongjmp(g_jmp, sig); }
+    _exit(140 + sig);
+}
+#define AT(x) (g_where = (x))
+
 static size_t align16k(size_t v) { return (v + 0x3fff) & ~(size_t)0x3fff; }
 
 /* ProsperoLight allocate_direct: AllocateDirectMemory type 12, align 0x4000,
@@ -93,6 +106,27 @@ static void free_direct(void *addr, int64_t start, size_t size)
 
 void evo_videodec2_probe(void)
 {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = fault_h;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS,  &sa, NULL);
+    sigaction(SIGILL,  &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSYS,  &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    sigaction(SIGFPE,  &sa, NULL);
+
+    note("EVO vdec2: probe entry (libSceVideodec2 NEEDED via PRX stub)");
+
+    if (sigsetjmp(g_jmp, 1) != 0) {
+        note("EVO vdec2: FAULT at [%s] (stage %d) - the sceVideodec2 call "
+             "crashed. Module NEEDED-mapped but not callable from this package.",
+             g_where, g_stage);
+        _exit(60);
+    }
+    g_armed = 1;
+
     pthread_t wd;
     pthread_create(&wd, NULL, watchdog, NULL);
 
@@ -125,15 +159,20 @@ void evo_videodec2_probe(void)
      * ESDKVERSION: the sysmodule-registration path has a stricter SDK check
      * than the plain NEEDED load. Log it, carry on. */
     g_stage = 2;
+    AT("sceSysmoduleLoadModule(207)");
     int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
+    note("EVO vdec2: sysmod207 -> 0x%08x, entering the decode sequence", (unsigned)sm);
 
+    AT("sceKernelGetDirectMemorySize");
     int64_t dm_limit = sceKernelGetDirectMemorySize();
 
     /* --- compute queue --- */
     g_stage = 3;
+    AT("sceVideodec2QueryComputeMemoryInfo");
     compute_memory.size = sizeof compute_memory;
     int q_query = sceVideodec2QueryComputeMemoryInfo(&compute_memory);
     compute_size = align16k((size_t)compute_memory.cpu_gpu_size);
+    AT("alloc_direct(compute)");
     int q_alloc = alloc_direct(compute_size, 0x33, dm_limit,
                                &compute_start, &compute_memory.cpu_gpu);
     int q_make = -1;
@@ -142,6 +181,7 @@ void evo_videodec2_probe(void)
         compute_config.size = sizeof compute_config;
         compute_config.pipe_id = 0;
         compute_config.queue_id = 0;
+        AT("sceVideodec2AllocateComputeQueue");
         q_make = sceVideodec2AllocateComputeQueue(&compute_config, &compute_memory,
                                                   &compute_queue);
     }
@@ -163,10 +203,12 @@ void evo_videodec2_probe(void)
     config.optimize_progressive = 1;
 
     memory.size = sizeof memory;
+    AT("sceVideodec2QueryDecoderMemoryInfo");
     int d_query = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
 
     cpu_map = align16k((size_t)memory.cpu_size);
     sceKernelAvailableFlexibleMemorySize(&flex_avail);
+    AT("sceKernelMapNamedFlexibleMemory");
     int cpu_rc = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpu_map, 0x03, 0,
                                                  "EvoVdec2Probe");
 
@@ -178,6 +220,7 @@ void evo_videodec2_probe(void)
     memory.gpu_size = gpu_size;
     if (cpu_gpu_size) memory.cpu_gpu_size = cpu_gpu_size;
 
+    AT("alloc_direct(gpu/cpu_gpu/input/frame pools)");
     int a_rc = alloc_direct(gpu_size, 0x32, dm_limit, &gpu_start, &memory.gpu);
     if (a_rc == 0 && cpu_gpu_size)
         a_rc = alloc_direct(cpu_gpu_size, 0x33, dm_limit, &cpu_gpu_start, &memory.cpu_gpu);
@@ -190,8 +233,10 @@ void evo_videodec2_probe(void)
     g_stage = 5;
     int c_rc = -1, r_rc = -1, dec_rc = -1, flush_rc = -1, valid = 0;
     if (compute_queue && d_query == 0 && cpu_rc == 0 && a_rc == 0 && memory.cpu) {
+        AT("sceVideodec2CreateDecoder");
         c_rc = sceVideodec2CreateDecoder(&config, &memory, &decoder);
         if (c_rc == 0 && decoder) {
+            AT("sceVideodec2Reset");
             r_rc = sceVideodec2Reset(decoder);
 
             const size_t au = sizeof kVdecSelfTestBitstream;
@@ -208,10 +253,12 @@ void evo_videodec2_probe(void)
             output.size = sizeof output;
 
             g_stage = 6;
+            AT("sceVideodec2Decode");
             dec_rc = sceVideodec2Decode(decoder, &input, &frame, &output);
             if (dec_rc == 0 && !output.valid) {
                 memset(&output, 0, sizeof output);
                 output.size = sizeof output;
+                AT("sceVideodec2Flush");
                 flush_rc = sceVideodec2Flush(decoder, &frame, &output);
             }
             valid = (dec_rc == 0 || flush_rc == 0) && output.valid && !output.error;
@@ -233,6 +280,8 @@ void evo_videodec2_probe(void)
          (unsigned)c_rc, (unsigned)r_rc, (unsigned)dec_rc, (unsigned)flush_rc,
          (unsigned)output.valid, (unsigned)output.error, (unsigned)output.picture_count,
          output.width, output.height, output.pitch, output.codec, flex_avail);
+
+    g_armed = 0;   /* result reported; a teardown fault is no longer interesting */
 
     /* teardown (rc ignored) */
     g_stage = 7;
