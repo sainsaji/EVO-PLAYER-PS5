@@ -339,12 +339,21 @@ own signed package. → Phase 4.
       longer links `evo_vdec_ffmpeg` directly — it exercises only the RmlUi
       screens — so it is structurally unaffected.)*
 
-### Phase 4 — native backend
+### Phase 4 — native backend — **#31**
 
-- [ ] `evo_vdec_native.c` implementing whichever of Route A / B survived
-      Phase 2, producing `pp_frame` (NV12; crop applied from
-      `AvPlayerFrameInfoEx` insets, which are measured from the pitch — see
-      `MediaPlayer.cs` `VideoFrame` remarks).
+Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
+`projects/evoplayer/src/evo_videodec2_probe.c` — do not re-derive.
+
+- [ ] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`,
+      producing `pp_frame` (NV12; crop applied from the `SceVideodec2OutputInfo`
+      pitch/width — `pitch` is in samples, `pitch_bytes` in bytes).
+- [ ] **Module load before the first `evo_jailbreak_self()`** — the self-unjail
+      poisons `sceSysmoduleLoadModule(207)` (→ `ESDKVERSION`). Load + hold at
+      boot; open HW question is whether `CreateDecoder` after a later
+      `evo_jailbreak_ensure()` still works.
+- [ ] Make `libSceVideodec2` + `libSceAgc` + `libSceAgcDriver` positional PRX
+      stubs unconditional in the app-module player build (`package-app.sh` — the
+      `--videodec2-probe` gate already does this).
 - [ ] Frame-buffer lifetime: the native buffer is valid only until the next
       `GetVideoDataEx` / `Decode` — either the converter consumes it in the
       same tick (it does today) or `evo_vdec_native` copies into a ring. Prefer

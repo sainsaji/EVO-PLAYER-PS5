@@ -38,7 +38,7 @@ parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K →
   #29 native hw decode (umbrella, v1.1.0)
     └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
        └─ Phase 2 spike ✅ (Route B works; init must precede evo_jailbreak_self)
-          └─ Phase 4 evo_vdec_native.c → Phase 5 toggle → Phase 6 validation
+          └─ #31 Phase 4 evo_vdec_native.c → Phase 5 toggle → Phase 6 validation
 ```
 
 ---
@@ -107,7 +107,7 @@ Blocked by #27 (it reuses all of #27's plumbing). Deletes the CPU rasteriser.
 `sceVideodec2` from the app module. **Phase 2 spike PASSED on hardware
 2026-09-03** — `EVO vdec2: HARDWARE DECODE OK`, a 1920×1088 NV12 H.264 frame
 decoded inside the full EVO Player. `#30` (the `evo_vdec.h` seam) is signed
-off. Next: **Phase 4** — `media/src/evo_vdec_native.c`.
+off. Next: **#31 (Phase 4)** — `media/src/evo_vdec_native.c`.
 
 - Reads: **`docs/evo-pro/status.md`** (the win + Phase 4 plan), `docs/evo-pro/native-decode-plan.md` (§3 architecture, Phase 2/4, kill criteria §8), `docs/evo-pro/videodec2-abi.md`
 - Files: `media/include/evo_vdec.h`, `projects/evoplayer/src/evo_videodec2_probe.c` (the proven sequence to port), `media/include/sce/sce_videodec2.h`, `media/src/evo_vdec_ffmpeg.c` (the sibling impl), `main.c` (probe runs before `evo_jailbreak_self()`), `tools/native-app/stubs/prx/` (the PRX import stubs)
