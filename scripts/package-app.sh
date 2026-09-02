@@ -206,12 +206,21 @@ CXX_RUNTIME=("${PS5_SYSROOT}/lib/libc++.a" "${PS5_SYSROOT}/lib/libc++abi.a" \
 if [[ "${MODE}" == "probe" ]]; then
     APP_NAME="sandbox_probe"
     begin "compiling ${APP_NAME}"
-    for src in "${REPO_ROOT}/projects/sandbox_probe/main.c" \
-               "${REPO_ROOT}/projects/common/src/evo_notify.c"; do
+    PROBE_SRCS=("${REPO_ROOT}/projects/sandbox_probe/main.c"
+               "${REPO_ROOT}/projects/common/src/evo_notify.c")
+    PROBE_DEFS=()
+    if (( VIDEODEC2_PROBE )); then
+        PROBE_SRCS+=("${REPO_ROOT}/projects/evoplayer/src/evo_videodec2_probe.c")
+        PROBE_DEFS+=(-DEVO_VIDEODEC2_PROBE=1)
+    fi
+    for src in "${PROBE_SRCS[@]}"; do
         obj="${BUILD}/obj/$(echo "${src#"${REPO_ROOT}/"}" | tr '/.' '__').o"
         "${TCC}" -std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter \
-            "${TFLAGS[@]}" \
-            -I"${REPO_ROOT}/projects/common/include" -c "${src}" -o "${obj}"
+            "${TFLAGS[@]}" ${PROBE_DEFS[@]+"${PROBE_DEFS[@]}"} \
+            -I"${REPO_ROOT}/projects/common/include" \
+            -I"${REPO_ROOT}/projects/evoplayer/include" \
+            -I"${REPO_ROOT}/projects/evoplayer/media/include" \
+            -c "${src}" -o "${obj}"
         OBJS+=("${obj}")
     done
 else

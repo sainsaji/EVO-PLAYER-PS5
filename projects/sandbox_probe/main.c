@@ -139,7 +139,17 @@ main(void)
     for (size_t i = 0; i < sizeof paths / sizeof paths[0]; i++)
         probe_path(paths[i]);
 
-    evo_notify("EVO sandbox probe - done (PS button to close)");
+    evo_notify("EVO sandbox probe - done");
+
+#ifdef EVO_VIDEODEC2_PROBE
+    /* Minimal-eboot Route B test: same sceVideodec2 sequence as the full
+     * player, but in a tiny eboot (no FFmpeg/SDL/RmlUi). If this works and the
+     * full player doesn't, the big link is the problem. */
+    extern void evo_videodec2_probe(void);
+    evo_videodec2_probe();
+#endif
+
+    evo_notify("EVO sandbox probe - resident (PS button to close)");
 
     /* Stay resident so the notifications persist and the title does not
      * exit immediately (which reads as a crash on the home screen). */
