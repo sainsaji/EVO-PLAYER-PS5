@@ -19,11 +19,11 @@
   - [ ] pick a 1080p file → last `P8_*` / `P8_AVLOG` before the crash → **task 8**
   - [ ] then a 4K file
 
-**Then, in order:**
-- [ ] **Task 8** — fix the call the breadcrumb named; verify A/V sync + 4K vs `main`
-- [ ] **Step 2** — `pp/src/pp_agc.{h,c}` + `agc_blobs.S` (port `native_agc_present.cpp`); wire `pp_videoout.c` / `pp_playback.c`; settings toggle Auto/CPU/GPU; device-test a test-pattern NV12; plane-hash A/B vs CPU
-- [ ] **Step 2.5** — `rgba_ps` + reused header → `sceAgcCreateShader` accepts? → GPU OSD composite
-- [ ] **Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`); `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); `evo_rmlui_app.cpp` picks it when `pp_agc_available()`; fold the UI pass into `pp_agc` `render_frame`; **delete `evo_rmlui_render.cpp`'s CPU rasteriser** after plane-hash parity
+**Then, in order** (GitHub issues):
+- [ ] **Task 8** (#26) — fix the call the breadcrumb named; verify A/V sync + 4K vs `main`
+- [ ] **Step 2** (#27) — `pp/src/pp_agc.{h,c}` + `agc_blobs.S` (port `native_agc_present.cpp`); wire `pp_videoout.c` / `pp_playback.c`; settings toggle Auto/CPU/GPU; device-test a test-pattern NV12; plane-hash A/B vs CPU
+- [ ] **Step 2.5** (#27) — `rgba_ps` + reused header → `sceAgcCreateShader` accepts? → GPU OSD composite
+- [ ] **Step 3** (#28) — solid/UI-VS/scissored shaders (`build-shader.sh`); `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); `evo_rmlui_app.cpp` picks it when `pp_agc_available()`; fold the UI pass into `pp_agc` `render_frame`; **delete `evo_rmlui_render.cpp`'s CPU rasteriser** after plane-hash parity
 
 **Optional / housekeeping:**
 - [ ] GLSL→SPIR-V→RDNA2 toolchain in the container (Dockerfile) — nicer shader path ([agc-implementation.md](agc-implementation.md) §7)
