@@ -12171,13 +12171,17 @@ static void evo_ensure_data_dir(void)
 static void evo_av_log_cb(void *avcl, int level, const char *fmt, va_list ap)
 {
     (void)avcl;
-    if (level > AV_LOG_ERROR)
+    /* task-8 diagnosis: crash is inside avformat_open_input, no SIGSEGV
+     * produces an av_log, so widen to INFO to see the LAST line FFmpeg
+     * printed before it died. Narrow back to AV_LOG_ERROR once fixed. */
+    if (level > AV_LOG_INFO)
         return;
     char msg[224];
     vsnprintf(msg, sizeof msg, fmt, ap);
     for (char *p = msg; *p; p++)
         if (*p == '\n' || *p == '\r') *p = ' ';
-    pp_stage_bc("P8_AVLOG", msg);
+    if (msg[0])
+        pp_stage_bc("P8_AVLOG", msg);
 }
 #endif
 
@@ -12189,6 +12193,7 @@ int main(void) {
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
 #ifdef EVO_APP_MODULE
+    av_log_set_level(AV_LOG_INFO);
     av_log_set_callback(evo_av_log_cb);
 #endif
     /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */

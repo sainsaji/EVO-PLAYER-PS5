@@ -7,6 +7,13 @@
 #include "evo_stream_io.h"
 #include "evo_direct_mem.h"
 
+#ifdef EVO_APP_MODULE
+extern void pp_stage_bc(const char *stage_id, const char *detail);
+#  define SIO_BC(id, d) pp_stage_bc((id), (d))
+#else
+#  define SIO_BC(id, d) ((void)0)
+#endif
+
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,9 +59,11 @@ int evo_stream_io_open(const char *path,
 {
     if (!path || !out_fmt_ctx) return -1;
 
+    SIO_BC("P8_01a_SIO_ENTER", path);
     evo_stream_io_ctx_t *ctx = (evo_stream_io_ctx_t *)evo_direct_mem_calloc(1, sizeof(evo_stream_io_ctx_t));
     if (!ctx) ctx = (evo_stream_io_ctx_t *)calloc(1, sizeof(evo_stream_io_ctx_t));
     if (!ctx) return -1;
+    SIO_BC("P8_01b_SIO_CTX", "ctx alloc ok");
 
     ctx->is_network = (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0);
     snprintf(ctx->media_path, sizeof(ctx->media_path), "%s", path);
@@ -77,11 +86,17 @@ int evo_stream_io_open(const char *path,
         av_dict_set(&opts, "timeout", "5000000", 0);
     } else {
         /* Prime the kernel storage controller for sequential read-ahead */
+        SIO_BC("P8_01c_PREFETCH", "open+fadvise");
         prefetch_file_sequential(path);
     }
 
+    SIO_BC("P8_01d_PRE_OPEN", "-> avformat_open_input");
     AVFormatContext *fmt = NULL;
     int rc = avformat_open_input(&fmt, path, NULL, &opts);
+    {
+        char d[32]; snprintf(d, sizeof d, "rc=%d", rc);
+        SIO_BC("P8_01e_OPEN_RC", d);
+    }
     av_dict_free(&opts);
 
     if (rc < 0) {
