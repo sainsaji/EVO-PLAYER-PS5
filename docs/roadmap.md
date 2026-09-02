@@ -28,16 +28,17 @@ parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K →
                                                │
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
-  system-PRX import stubs ──┬──► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (app module can't runtime-  │      (libSceAgc + libSceAgcDriver)            RmlUi on sceAgc
-    load an undeclared .sprx;  ├──► #29 Route A: libSceAvPlayer   ┐
-    proven on hw 09-02/09-03)  └──► #29 Route B: libSceVideodec2  ┘ native decode spike
+  positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
+   (package-app.sh step 6b —     │      (libSceAgc + libSceAgcDriver — mechanism proven)
+    unconditional DT_NEEDED,      └─► #29 Route B: libSceVideodec2 ✅ DECODED A FRAME
+    the loader auto-loads .sprx)      in the full player 2026-09-03 (Route A dead)
 
   #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
 
   #29 native hw decode (umbrella, v1.1.0)
     └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
-       └─ PRX stubs → Phase 2 spike → Phase 4 native backend → Phase 5 toggle → Phase 6
+       └─ Phase 2 spike ✅ (Route B works; init must precede evo_jailbreak_self)
+          └─ Phase 4 evo_vdec_native.c → Phase 5 toggle → Phase 6 validation
 ```
 
 ---
@@ -103,14 +104,15 @@ Blocked by #27 (it reuses all of #27's plumbing). Deletes the CPU rasteriser.
 
 ### 6 · `#29` / `#30` — native hardware decode *(v1.1.0)*
 
-`sceVideodec2` from the app module. Phase 1 gate PASSED on hardware
-(2026-09-01); the decoder seam (`evo_vdec.h`) is ~80 % built. **Start with
-`#30`** — Phase 3, finishing + signing off the seam: `independent`, no console,
-ships regardless of whether native decode ever lands.
+`sceVideodec2` from the app module. **Phase 2 spike PASSED on hardware
+2026-09-03** — `EVO vdec2: HARDWARE DECODE OK`, a 1920×1088 NV12 H.264 frame
+decoded inside the full EVO Player. `#30` (the `evo_vdec.h` seam) is signed
+off. Next: **Phase 4** — `media/src/evo_vdec_native.c`.
 
-- Reads: **`docs/evo-pro/native-decode-plan.md`** (the full 9-phase plan, §3 architecture, kill criteria §8), `docs/evo-pro/videodec2-abi.md`, `docs/modularisation-plan.md` (Track A), `docs/evo-pro/status.md`
-- Files: `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `media/include/sce/sce_videodec2.h`, `main.c` (`start_video_playback` + the two thumbnail decoders), `third_party/ProsperoLight/src/moonlight_stream.cpp` (hardware-verified reference)
-- Sequencing: `#30` now (parallel to the GPU track) → Phase 2 native spike (needs console, timeboxed) → Phase 4 `evo_vdec_native.c` → Phase 5 settings toggle + probe → Phase 6 validation. Depends on #26 (app-module playback milestone).
+- Reads: **`docs/evo-pro/status.md`** (the win + Phase 4 plan), `docs/evo-pro/native-decode-plan.md` (§3 architecture, Phase 2/4, kill criteria §8), `docs/evo-pro/videodec2-abi.md`
+- Files: `media/include/evo_vdec.h`, `projects/evoplayer/src/evo_videodec2_probe.c` (the proven sequence to port), `media/include/sce/sce_videodec2.h`, `media/src/evo_vdec_ffmpeg.c` (the sibling impl), `main.c` (probe runs before `evo_jailbreak_self()`), `tools/native-app/stubs/prx/` (the PRX import stubs)
+- **Two hard-won requirements** (see status.md): (1) `libSceVideodec2`+`libSceAgc`+`libSceAgcDriver` as positional PRX import stubs; (2) decode init must run **before** the self-unjail, or `sceSysmoduleLoadModule(207)` → ESDKVERSION.
+- Sequencing: Phase 4 `evo_vdec_native.c` → Phase 5 settings toggle + `evo_vdec_probe()` → Phase 6 validation. Route A (`sceAvPlayer`) is dead.
 
 ### Ongoing · `#25` — RmlUi migration (umbrella)
 
