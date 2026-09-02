@@ -49,9 +49,9 @@ Step 2 is the video path, so task 8 gates it.
 
 ## Do this first (needs console)
 
-**Build already staged locally (2026-09-02):** `output/app/PPSA99039.ffpfsc`
-(21.9 MB) + `output/app/PPSA99039/`, both with `--agc-probe` compiled in.
-Rebuild only if the tree changed:
+**Build staged locally (2026-09-02):** `output/app/PPSA99039.ffpfsc` (22 MB) +
+`output/app/PPSA99039/`, with `--agc-probe` + the etaHEN/Lapy self-unjail +
+the task-8 breadcrumbs compiled in. Rebuild if the tree changed since:
 
 ```bash
 docker compose run --rm ps5-dev bash ./scripts/package-app.sh --agc-probe --ffpfsc
