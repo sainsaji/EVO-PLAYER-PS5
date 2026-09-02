@@ -322,9 +322,12 @@ fi
 PRX_STUB_SOS=()
 PRX_STUB_SRC="${NATIVE}/stubs/prx"
 PRX_STUB_WANT=()
-(( VIDEODEC2_PROBE )) && PRX_STUB_WANT+=(libSceVideodec2)
+# libSceVideodec2's own startup load needs the GPU driver stack present
+# (sceVideodec2AllocateComputeQueue allocates a GPU compute queue). ProsperoLight
+# links libSceAgc + libSceAgcDriver, which pull in libSceGnmDriver and satisfy
+# that; EVO must do the same or libSceVideodec2 loads broken.
+(( VIDEODEC2_PROBE )) && PRX_STUB_WANT+=(libSceVideodec2 libSceAgc libSceAgcDriver)
 (( AVPLAYER_PROBE ))  && PRX_STUB_WANT+=(libSceAvPlayer)
-# libSceAgc / libSceAgcDriver: not wired to a direct-call probe yet (#27).
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"
     mkdir -p "${BUILD}/stubs"
