@@ -185,3 +185,4 @@ output/app/
 
 # ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
 /klog.txt
+projects/evoplayer/include/evo_build_id.h

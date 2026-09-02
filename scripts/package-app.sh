@@ -215,11 +215,16 @@ else
     # (only channel visible before VideoOut). Drop once milestone 1 is signed.
     # EVO_APP_MODULE: routes data paths to /download0/evoplayer and directory
     # enumeration through getdents (opendir fails EPERM in the sandbox).
-    # Build fingerprint — the FIRST notification main() fires, so a stale
-    # ShadowMount / cached mount is caught immediately instead of costing a
-    # whole console session.
-    BUILD_ID="$(cd "${EVO}" && git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)$(cd "${EVO}" && git diff --quiet -- . ':!*.o' 2>/dev/null || echo +dirty) $(date -u +%m%d-%H%M)"
-    APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_BUILD_ID=\"${BUILD_ID}\""
+    # Build fingerprint — main()'s FIRST notification, so a stale ShadowMount /
+    # cached mount is caught immediately instead of costing a console session.
+    # Written to a generated header to sidestep -D string quoting through the
+    # make -> /bin/sh recipe chain.
+    BUILD_SHA="$(git -C "${EVO}" rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
+    git -C "${EVO}" diff --quiet -- "${EVO}" 2>/dev/null || BUILD_SHA="${BUILD_SHA}-dirty"
+    printf '#pragma once\n#define EVO_BUILD_ID "%s_%s"\n' \
+        "${BUILD_SHA}" "$(date -u +%m%d-%H%M)" > "${EVO}/include/evo_build_id.h"
+    ok "build id $(sed -n 's/.*"\(.*\)".*/\1/p' "${EVO}/include/evo_build_id.h")"
+    APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
