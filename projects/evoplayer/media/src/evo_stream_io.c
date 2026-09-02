@@ -32,11 +32,17 @@ struct evo_stream_io_ctx {
 void evo_stream_io_hint_sequential(int fd)
 {
     if (fd < 0) return;
+    /* posix_fadvise is not wired on the PS5 kernel from the app-module
+     * process - it faults (SIGSYS-class, same as exit()). It is only a
+     * read-ahead hint, so skip it there. Hardware-confirmed 2026-09-02:
+     * the crash on file-open was here, between P8_01c and P8_01d. */
+#ifndef EVO_APP_MODULE
 #if defined(POSIX_FADV_SEQUENTIAL)
     posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
 #endif
 #if defined(POSIX_FADV_WILLNEED)
     posix_fadvise(fd, 0, 0, POSIX_FADV_WILLNEED);
+#endif
 #endif
 }
 
@@ -44,12 +50,13 @@ static void prefetch_file_sequential(const char *path)
 {
     if (!path || strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0)
         return;
-
+#ifndef EVO_APP_MODULE
     int fd = open(path, O_RDONLY);
     if (fd >= 0) {
         evo_stream_io_hint_sequential(fd);
         close(fd);
     }
+#endif
 }
 
 int evo_stream_io_open(const char *path,
