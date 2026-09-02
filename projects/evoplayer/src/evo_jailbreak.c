@@ -4,36 +4,28 @@
 #include "evo_jailbreak.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
 
 #include "evo_boot_trace.h"   /* evo_bt() - notification + klog */
 
-/* etaHEN IPC. The daemon binds 127.0.0.1:9028 and reads one whole struct per
- * connection. Layout mirrors third_party/SharpProspero/docs/app-promotion.md
- * (SharpProspero's prospero-payload-unjail "mimics etaHEN's jailbreak-on-demand
- * API"). PS5-Lapy-JB-Daemon speaks the same protocol. */
-#define ETAHEN_IPC_PORT      9028
-#define HIJACKER_MAGIC       0xDEADBEEFu
-#define HIJACKER_CMD_JAIL    5           /* JAILBREAK_CMD */
-#define HIJACKER_CMD_SIZE    0xA10       /* 2576: magic+cmd+pid+ret + 2x1280 */
+/*
+ * PS5-Lapy-JB-Daemon (and etaHEN) jailbreak-on-demand, file-drop form:
+ * write "{"PID":"<pid>"}" to /download0/etahen_jailbreak. A resident daemon
+ * polls /mnt/sandbox/<TID>_<NNN>/download0/etahen_jailbreak every 250 ms,
+ * reads the pid, applies caps + authid + uid + sceAttr@0x83 + fd_rdir/fd_jdir
+ * = rootvnode on that process, then unlink()s the file as the "done" signal.
+ * namei re-reads fd_rdir/fd_jdir per lookup, so one bump at boot is enough
+ * and every later "/mnt/usb0" open resolves.
+ *
+ * (Lapy's README: a first attempt can lose a timing race - relaunching the
+ * app succeeds. We poll ~3 s for the unlink and re-probe the sandbox.)
+ */
+#define JB_FILE   "/download0/etahen_jailbreak"
 
-struct hijacker_cmd {
-    uint32_t magic;
-    int32_t  cmd;
-    int32_t  pid;
-    int32_t  ret;
-    uint8_t  reserved1[1280];
-    uint8_t  reserved2[1280];
-};
-
-/* True if we can already see outside the per-title sandbox. Cheap probe: a
- * jailed module gets ENOENT on /mnt, a promoted one gets a real handle. */
+/* A jailed module gets ENOENT on /mnt; a promoted one gets a real handle. */
 static int sandbox_is_open(void)
 {
     int fd = open("/mnt", O_RDONLY | O_DIRECTORY);
@@ -41,47 +33,16 @@ static int sandbox_is_open(void)
     return 0;
 }
 
-static int request_promotion(void)
+static int drop_request(void)
 {
-    int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0)
+    int fd = open(JB_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
         return 0;
-
-    struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_port   = htons(ETAHEN_IPC_PORT);
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   /* 127.0.0.1 */
-
-    if (connect(s, (struct sockaddr *)&a, sizeof a) != 0) {
-        close(s);
-        return 0;   /* no daemon listening - fall back to the manual payload */
-    }
-
-    struct hijacker_cmd c;
-    memset(&c, 0, sizeof c);
-    c.magic = HIJACKER_MAGIC;
-    c.cmd   = HIJACKER_CMD_JAIL;
-    c.pid   = getpid();
-
-    ssize_t n = send(s, &c, HIJACKER_CMD_SIZE, 0);
-    int ok = 0;
-    if (n == (ssize_t)HIJACKER_CMD_SIZE) {
-        size_t got = 0;
-        while (got < HIJACKER_CMD_SIZE) {
-            ssize_t r = recv(s, (uint8_t *)&c + got, HIJACKER_CMD_SIZE - got, 0);
-            if (r <= 0) break;
-            got += (size_t)r;
-        }
-        if (got >= 16 && c.ret == 0)
-            ok = 1;
-    }
-    close(s);
-    return ok;
+    char body[48];
+    int n = snprintf(body, sizeof body, "{\"PID\":\"%d\"}", (int)getpid());
+    ssize_t w = write(fd, body, (size_t)n);
+    close(fd);
+    return w == n;
 }
 
 int evo_jailbreak_self(void)
@@ -90,13 +51,28 @@ int evo_jailbreak_self(void)
         evo_bt("jailbreak: sandbox already open");
         return 1;
     }
-    int ok = request_promotion();
-    if (ok && sandbox_is_open()) {
-        evo_bt("jailbreak: promoted via etaHEN IPC");
-        return 1;
+
+    if (!drop_request()) {
+        evo_bt("jailbreak: cannot write %s", JB_FILE);
+        return 0;
     }
-    evo_bt("jailbreak: %s - USB browse needs tools/sandbox-unjail.sh",
-           ok ? "daemon ok but sandbox still closed" : "no daemon on :9028");
+
+    /* Wait for the daemon to consume the file (unlink) + the sandbox to open.
+     * The daemon polls at 250 ms; ~1.2 s here is enough without a visible boot
+     * stall, and the loop exits early on the common path. */
+    for (int i = 0; i < 12; i++) {
+        usleep(100 * 1000);
+        int consumed = (access(JB_FILE, F_OK) != 0);
+        if (consumed && sandbox_is_open()) {
+            evo_bt("jailbreak: promoted (Lapy/etaHEN daemon)");
+            return 1;
+        }
+    }
+
+    /* Leave the request in place - the daemon may still pick it up before the
+     * user reaches the browser. Otherwise USB browse falls back to
+     * tools/sandbox-unjail.sh. */
+    evo_bt("jailbreak: daemon slow/absent - USB may need sandbox-unjail.sh");
     return 0;
 }
 

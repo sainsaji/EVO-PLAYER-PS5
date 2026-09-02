@@ -68,10 +68,11 @@ triggers the mount. **Launch is still manual**: on the console, launch EVO from
 the **Games row**. Do **not** stack launches — PS button to close before any
 rebuild.
 
-USB browse: EVO now **self-unjails via etaHEN's IPC** (`127.0.0.1:9028`) at
-boot — if etaHEN is running, no `sandbox-unjail.sh` step; watch for the
-`EVO boot: jailbreak: …` notification. If not running, fall back to
-`tools/sandbox-unjail.sh` per launch.
+USB browse: EVO now **self-unjails** at boot — drops `{"PID":"<pid>"}` to
+`/download0/etahen_jailbreak` for the resident daemon (the user has
+**PS5-Lapy-JB-Daemon**; etaHEN uses the same file). Watch for the
+`EVO boot: jailbreak: promoted …` notification → no `sandbox-unjail.sh` step.
+If the daemon isn't running, fall back to `tools/sandbox-unjail.sh` per launch.
 
 The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
 someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from
