@@ -618,21 +618,29 @@ private:
      * which walks and CPU-rasterizes every visible element every time it is
      * called regardless of whether anything is dirty - measured at 6-7 fps
      * on the launch screen with state-diffing already in place and skipping
-     * ~97% of Update calls. That render pass is what actually needs skipping
-     * on an unchanged frame.
+     * ~97% of Update calls (host profile: Context::Update 0.1 ms, the whole
+     * ~120 ms frame is the render-interface raster). That render pass is what
+     * needs skipping on an unchanged frame.
      *
-     * A skip is only safe once every rotating output buffer already holds
-     * the current, correct pixels - pp_videoout_init uses 2 - so a change
-     * (including a screen switch) has to force a real render for at least
-     * that many frames before skips resume. Menu screens never memset their
-     * framebuffer before drawing (see draw_menu_linear callers in main.c),
-     * so a skipped frame's buffer still holds whatever the last real render
-     * put there, which by then is identical across every buffer in rotation.
+     * Step 1 of docs/evo-pro/gpu-rendering-plan.md: the full-screen menu
+     * documents (launch, list, browser, settings, changelog, reader,
+     * surround) are opaque, cover the whole 1080p frame, and - the RCSS
+     * carries no transitions or animations - never change between input
+     * events. Each rasterizes into m_surface ONLY when m_frame_dirty (a real
+     * state / theme / nav change set it), the visible screen switched, or the
+     * surface was (re)sized; every frame then blits m_surface into the
+     * caller's rotating VideoOut buffer (~0.5 ms memcpy). The blitted pixels
+     * are exactly what Context::Render() last produced, so parity holds.
+     *
+     * Overlay screens that compose over live video (playback OSD, dialog,
+     * subtitle picker, media info) are NOT cached - they keep rendering
+     * straight into the framebuffer every frame, unchanged.
      */
-    static const int kBufferSettleFrames = 3;
-    int m_last_rendered_screen = -1;
-    int m_settle_frames_left = kBufferSettleFrames;
     bool m_frame_dirty = true;
-    bool ShouldFullRender(int screen_id);
+    std::vector<uint32_t> m_surface;
+    int m_surface_w = 0;
+    int m_surface_h = 0;
+    int m_cached_screen = -1;
+    void RenderCachedScreen(int screen_id, uint32_t* framebuffer, int width, int height);
 };
 

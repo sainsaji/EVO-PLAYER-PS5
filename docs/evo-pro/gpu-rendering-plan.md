@@ -67,17 +67,53 @@ the per-pixel work that scales with resolution.
 
 ## 4. Effort ladder
 
-### Step 1 — dirty-flag the UI surface (CPU only, no GPU, ships independently)
+### Step 1 — dirty-flag the UI surface (CPU only, no GPU) — **DONE 2026-09-02**
 
-Rasterise the RmlUi context to its backing surface **only when the DOM /
-document changed** (RmlUi exposes this via the render interface and
-`Context::Update` return signals). Composite the cached surface every frame.
-For a static menu this drops per-frame UI cost to near zero.
+Rasterise the RmlUi context into a retained surface **only when it actually
+changed**, and blit that surface into the caller's rotating VideoOut buffer
+every frame. For a static menu this drops per-frame UI cost to near zero.
 
-- Touches: `ui_rml/src/evo_rmlui_render.cpp`, the per-frame loop in `main.c`.
-- No console-context dependency — do this whenever, even before Phase 1b.
-- Expected: the biggest single win if the profile (below) shows per-frame
-  re-rasterisation dominates.
+Implemented in **`ui_rml/src/evo_rmlui_app.cpp`** (`EvoRmlApp::RenderCachedScreen`),
+not `main.c` — the per-frame loop already calls `update` + `render` every
+frame; the gate lives one layer down where the `m_frame_dirty` state-diff
+already existed (it was previously wired to a `ShouldFullRender` stub that
+always returned true). `main.c` is untouched.
+
+- **Scope:** the seven full-screen opaque menu documents — launch, list
+  (recent/favorites/emby), browser, settings, changelog, reader, surround.
+  The RCSS carries no transitions or animations, so these never change
+  between input events. Re-render triggers: `m_frame_dirty` (a real
+  state / theme / nav-rail change set it), the visible screen switched, or
+  the surface was resized.
+- **Not cached:** overlay screens that compose over live video (playback OSD,
+  dialog, subtitle picker, media info) still render straight into the
+  framebuffer every frame — unchanged behaviour, zero parity risk.
+- **Instrumentation:** `projects/evoplayer/ui_rml/include/evo_rmlui_prof.h` +
+  `tools/prof_rmlui.{cpp,sh}` — a host frame profiler, compiled in only under
+  `-DEVO_RML_PROFILE` (no shipping build defines it). Kept for validating
+  Step 2.
+
+**Host profile result (`tools/prof_rmlui.sh`, Docker/WSL — ratios are the
+point, not absolute ms):**
+
+| screen | before (idle) | after (idle) | navigation (unchanged) |
+|---|--:|--:|--:|
+| launch (hero + shelf + library) | 119 ms | **0.8 ms** | 120 ms |
+| settings (4-row list) | 30 ms | **0.7 ms** | 31 ms |
+| browser (12 rows + inspector) | 65 ms | **0.8 ms** | 68 ms |
+
+`Context::Update` (style + layout) was **0.1 ms** throughout — the entire
+frame is the render-interface raster, dominated by the coverage (triangle)
+rasterizer (~1.4–2.3 ms per rounded-rect / gradient / non-axis-aligned call).
+Glyph rasterisation is **0 ms** in steady state (warm FreeType atlas). The
+memcpy Step 1 adds back is 0.45 ms at 1080p.
+
+**Verdict:** Step 1 fixes the stated problem — idle menus were the ~11 fps /
+missed-input case (see the `m_frame_dirty` comment in `evo_rmlui_app.h`).
+Continuous D-pad scroll is untouched (every frame genuinely dirty); it holds
+at ~8–15 fps on this host. Step 2 (AGC) is now only needed for smooth 60 fps
+*during* held navigation and for the 4K video convert/composite/flip — not a
+blocker for UI responsiveness.
 
 ### Step 2 — AGC present + composite (needs the app module)
 
@@ -114,19 +150,30 @@ VideoOut / AGC init, tear it down **before**. The decoder uses a compute queue
 (`sceVideodec2AllocateComputeQueue`); the renderer uses the graphics ring —
 separate.
 
-## 6. Before building anything — profile
+## 6. Before building anything — profile — **DONE 2026-09-02**
 
-`tools/uiview.sh` / `uiplay.sh` link the real drawing code against the real
-assets on the host, no console. Instrument the RmlUi frame there and attribute
-the ~90 ms:
+`tools/prof_rmlui.sh` (host, no console — links the real drawing code) with
+`evo_rmlui_prof.h` instrumentation. Findings:
 
-- per-frame re-rasterisation vs. genuinely-changed regions
-- glyph raster vs. cached atlas hits
-- rasteriser fast-path (axis-aligned quads / SIMD span-fill) vs. slow path
-  (transforms, sub-pixel positions, alpha)
-- composite + framebuffer copy cost at 1080p vs 4K
+- **per-frame re-rasterisation vs. genuinely-changed regions:** idle and
+  navigation frames cost the same to within 1% — ~100% of the frame is
+  re-rasterising an unchanged scene. There is no changed-region path;
+  `Context::Render()` redraws the whole document. → Step 1 target.
+- **glyph raster vs. atlas hits:** steady-state glyph raster is **0 ms / 0
+  calls**. Atlas built once on the first frame after a text change; every
+  later frame is pure atlas hits. Not a per-frame cost.
+- **fast-path vs. slow path:** the coverage (triangle) rasterizer dominates
+  everywhere — 58 ms/launch, 27 ms/settings, 53 ms/browser — at ~1.4–2.3 ms
+  per rounded-rect / gradient / non-axis-aligned call. The "fast" AA-quad
+  blitter is also heavy on launch (48 ms: hero bicubic magnify + poster
+  box-filter + full-screen gradient fills).
+- **composite + framebuffer copy:** memcpy 0.45 ms (1080p) / 3.0 ms (4K);
+  scalar alpha-composite 3.4 / 13.3 ms (the SIMD `blend_span_constant` path
+  roughly halves that).
 
-The profile decides whether Step 1 alone is enough or Step 2 is required.
+Result: **Step 1 alone is sufficient for the UI-responsiveness problem** (idle
+menus at ~11 fps, missed inputs). Step 2 is required only for 60 fps *during*
+continuous scroll and for the 4K playback convert/composite/flip.
 
 ## 7. Validation
 
@@ -142,8 +189,9 @@ The profile decides whether Step 1 alone is enough or Step 2 is required.
 
 | Path | Change |
 |---|---|
-| `ui_rml/src/evo_rmlui_render.cpp` | Step 1: dirty-flag the surface raster |
-| `projects/evoplayer/main.c` | Step 1: gate UI raster on change signal |
+| `ui_rml/src/evo_rmlui_app.cpp` | Step 1 **DONE** — `RenderCachedScreen`: retained surface, re-raster on change only, blit every frame |
+| `ui_rml/include/evo_rmlui_app.h` | Step 1 **DONE** — `m_surface` + members; retired the `ShouldFullRender` stub |
+| `ui_rml/{include/evo_rmlui_prof.h,src/evo_rmlui_render.cpp}` + `tools/prof_rmlui.*` | Step 1 **DONE** — host frame profiler, `-DEVO_RML_PROFILE` only |
 | `pp/src/pp_agc_present.c` + `pp/src/shaders/*.sb` | **new** — AGC DCB build, shader blobs (adapted from `third_party/ProsperoLight/src/native_agc_present.cpp`) |
 | `pp/src/pp_videoout.c` | Step 2: submit AGC DCB instead of CPU-buffer flip on target |
 | `pp/src/pp_converter*.c` | Step 2: bypassed on `__PROSPERO__`; kept for host |

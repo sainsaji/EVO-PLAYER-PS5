@@ -1,10 +1,24 @@
 #include "evo_rmlui_app.h"
+#include "evo_rmlui_prof.h"
 #include <iostream>
 #include <vector>
+#include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
 #include <chrono>
+
+#ifdef EVO_RML_PROFILE
+#define EVO_PROF_CTX_RENDER() do {                                      \
+        double _c0 = evo_prof_now_ms(); m_context->Update();            \
+        double _c1 = evo_prof_now_ms(); m_context->Render();            \
+        double _c2 = evo_prof_now_ms();                                 \
+        g_evo_rml_prof.update_ms += _c1 - _c0; g_evo_rml_prof.update_n++;\
+        g_evo_rml_prof.render_ms += _c2 - _c1; g_evo_rml_prof.render_n++;\
+    } while (0)
+#else
+#define EVO_PROF_CTX_RENDER() do { m_context->Update(); m_context->Render(); } while (0)
+#endif
 
 EvoRmlApp& EvoRmlApp::Instance() {
     static EvoRmlApp instance;
@@ -68,10 +82,37 @@ void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
     m_image_color_cache[el] = color;
 }
 
-bool EvoRmlApp::ShouldFullRender(int screen_id) {
-    (void)screen_id;
-    m_frame_dirty = false;
-    return true;
+/*
+ * Step 1 of docs/evo-pro/gpu-rendering-plan.md — see the comment on m_surface
+ * in evo_rmlui_app.h. Rasterise a full-screen menu document into the retained
+ * m_surface only when it actually changed, then blit that surface into the
+ * caller's (rotating) VideoOut buffer every frame.
+ */
+void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
+                                   int width, int height)
+{
+    const size_t px = (size_t)width * (size_t)height;
+
+    bool resized = (width != m_surface_w || height != m_surface_h);
+    if (resized) {
+        m_surface.assign(px, 0xFF000000u);
+        m_surface_w = width;
+        m_surface_h = height;
+        m_cached_screen = -1;
+    }
+
+    bool screen_changed = (screen_id != m_cached_screen);
+
+    if (m_frame_dirty || screen_changed || resized) {
+        m_render->SetFramebuffer(m_surface.data());
+        m_render->SetDimensions(width, height);
+        EVO_PROF_CTX_RENDER();
+        m_frame_dirty = false;
+        m_cached_screen = screen_id;
+    }
+
+    if (framebuffer != m_surface.data())
+        std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {
@@ -79,6 +120,11 @@ bool EvoRmlApp::Initialize(int width, int height) {
 
     m_width = width;
     m_height = height;
+
+    /* Force the first RenderCachedScreen call after a (re)init to rasterise. */
+    m_surface_w = m_surface_h = 0;
+    m_cached_screen = -1;
+    m_frame_dirty = true;
 
     m_system = std::make_unique<EvoSystemInterface>();
     m_render = std::make_unique<EvoRenderInterface>(width, height);
@@ -655,13 +701,7 @@ void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
             m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(0)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(0, framebuffer, width, height);
 }
 
 /* ==========================================================================
@@ -859,13 +899,7 @@ void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
         else                    m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(1)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(1, framebuffer, width, height);
 }
 
 /* ==========================================================================
@@ -1092,13 +1126,7 @@ void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
         else                    m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(2)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(2, framebuffer, width, height);
 }
 
 /* ==========================================================================
@@ -1253,13 +1281,7 @@ void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
         else                    m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(3)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(3, framebuffer, width, height);
 }
 
 /* ==========================================================================
@@ -1374,13 +1396,7 @@ void EvoRmlApp::RenderReader(uint32_t* framebuffer, int width, int height) {
         else                    m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(9)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(9, framebuffer, width, height);
 }
 
 /* ==========================================================================
@@ -1559,13 +1575,7 @@ void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {
         else                    m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(10)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(10, framebuffer, width, height);
 }
 
 void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
@@ -1748,10 +1758,8 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    if (ShouldFullRender(4)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    /* Overlay over live video — always render straight to the framebuffer. */
+    EVO_PROF_CTX_RENDER();
 }
 
 void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
@@ -1840,10 +1848,8 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    if (ShouldFullRender(5)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    /* Modal, sometimes over live video — always render straight to the framebuffer. */
+    EVO_PROF_CTX_RENDER();
 }
 
 void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
@@ -1991,13 +1997,7 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
             m_nav_doc->Hide();
     }
 
-    m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
-
-    if (ShouldFullRender(6)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    RenderCachedScreen(6, framebuffer, width, height);
 }
 
 void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
@@ -2109,10 +2109,8 @@ void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    if (ShouldFullRender(7)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    /* Over live video (film keeps playing) — always render straight to the framebuffer. */
+    EVO_PROF_CTX_RENDER();
 }
 
 void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
@@ -2241,10 +2239,8 @@ void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
 
-    if (ShouldFullRender(8)) {
-        m_context->Update();
-        m_context->Render();
-    }
+    /* Over live video — always render straight to the framebuffer. */
+    EVO_PROF_CTX_RENDER();
 }
 
 void EvoRmlApp::UpdateNavState(const EvoNavState& state) {

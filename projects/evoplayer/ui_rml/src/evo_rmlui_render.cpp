@@ -1,9 +1,27 @@
 #include "evo_rmlui_render.h"
+#include "evo_rmlui_prof.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <chrono>
+
+#ifdef EVO_RML_PROFILE
+EvoRmlProf g_evo_rml_prof{};
+
+/* Adds elapsed time to one of two buckets depending on which path the call
+ * actually took — set *tri true just before handing off to the coverage
+ * rasterizer. */
+struct EvoProfGeoScope {
+    double t0;
+    const bool* tri;
+    ~EvoProfGeoScope() {
+        double dt = evo_prof_now_ms() - t0;
+        if (*tri) { g_evo_rml_prof.geo_tri_ms  += dt; g_evo_rml_prof.geo_tri_n++;  }
+        else      { g_evo_rml_prof.geo_quad_ms += dt; g_evo_rml_prof.geo_quad_n++; }
+    }
+};
+#endif
 
 struct RmlTexture {
     std::vector<uint32_t> pixels; // BGRA 0xAABBGGRR
@@ -210,6 +228,10 @@ Rml::TextureHandle EvoRenderInterface::GenerateTexture(Rml::Span<const Rml::byte
     if (source.empty() || source_dimensions.x <= 0 || source_dimensions.y <= 0)
         return 0;
 
+#ifdef EVO_RML_PROFILE
+    double _gt0 = evo_prof_now_ms();
+#endif
+
     RmlTexture* tex = new RmlTexture();
     tex->width = source_dimensions.x;
     tex->height = source_dimensions.y;
@@ -224,6 +246,12 @@ Rml::TextureHandle EvoRenderInterface::GenerateTexture(Rml::Span<const Rml::byte
         uint8_t a = src[i * 4 + 3];
         tex->pixels[i] = ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
     }
+
+#ifdef EVO_RML_PROFILE
+    g_evo_rml_prof.gentex_ms += evo_prof_now_ms() - _gt0;
+    g_evo_rml_prof.gentex_n++;
+    g_evo_rml_prof.gentex_px += (long)tex->width * (long)tex->height;
+#endif
 
     return reinterpret_cast<Rml::TextureHandle>(tex);
 }
@@ -267,6 +295,13 @@ void EvoRenderInterface::DropMemoryTexture(const std::string& key)
 Rml::TextureHandle EvoRenderInterface::LoadTexture(Rml::Vector2i& texture_dimensions,
                                                   const Rml::String& source)
 {
+#ifdef EVO_RML_PROFILE
+    struct LtScope { double t0; ~LtScope() {
+        g_evo_rml_prof.loadtex_ms += evo_prof_now_ms() - t0;
+        g_evo_rml_prof.loadtex_n++;
+    } } _lt{evo_prof_now_ms()};
+#endif
+
     /* Runtime artwork: served from the memory registry, never the disk. */
     if (source.compare(0, 8, "evo:mem/") == 0) {
         auto it = m_mem_textures.find(std::string(source));
@@ -927,6 +962,13 @@ void EvoRenderInterface::RenderToClipMask(Rml::ClipMaskOperation operation,
                                           Rml::CompiledGeometryHandle geometry,
                                           Rml::Vector2f translation)
 {
+#ifdef EVO_RML_PROFILE
+    struct ClScope { double t0; ~ClScope() {
+        g_evo_rml_prof.clip_ms += evo_prof_now_ms() - t0;
+        g_evo_rml_prof.clip_n++;
+    } } _cl{evo_prof_now_ms()};
+#endif
+
     if (!geometry || m_width <= 0 || m_height <= 0) return;
 
     RmlCompiledGeo* geo = reinterpret_cast<RmlCompiledGeo*>(geometry);
@@ -1306,6 +1348,11 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     RmlCompiledGeo* geo = reinterpret_cast<RmlCompiledGeo*>(geometry);
     if (geo->vertices.empty() || geo->indices.empty()) return;
 
+#ifdef EVO_RML_PROFILE
+    bool _pg_tri = false;
+    EvoProfGeoScope _pg{evo_prof_now_ms(), &_pg_tri};
+#endif
+
     int clip_x0 = 0, clip_y0 = 0, clip_x1 = m_width, clip_y1 = m_height;
     if (m_scissor_enabled) {
         clip_x0 = std::max(0, m_scissor_region.Left());
@@ -1362,6 +1409,9 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     if (geometry_bounds(geo, geo->indices.data(), geo->indices.size(), translation,
                         clip_x0, clip_y0, clip_x1, clip_y1, bx0, by0, bx1, by1))
     {
+#ifdef EVO_RML_PROFILE
+        _pg_tri = true;
+#endif
         render_triangles_accumulated(CovTarget::Framebuffer, m_fb, nullptr, m_width,
                                      geo, geo->indices.data(), geo->indices.size(),
                                      tex, translation, bx0, by0, bx1, by1, clip);
