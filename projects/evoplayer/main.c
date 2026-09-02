@@ -12136,11 +12136,14 @@ int main(void) {
     evo_bt("BUILD " EVO_BUILD_ID);   /* first thing on screen — catches a stale mount */
 #endif
     evo_bt("main() entry");
-    evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
-    /* Route B first: the minimal-eboot test decoded a frame, but only when the
-     * failing sceKernelLoadStartModule calls in evo_agc_probe() did NOT run
-     * before it (those seem to poison sceSysmoduleLoadModule). Order matters. */
+    /* Route B probe BEFORE the self-unjail. The minimal sandbox_probe eboot
+     * (which never unjails) decoded a frame; the full player (which unjails
+     * first) can't call libSceVideodec2. The mid-run credential swap in
+     * evo_jailbreak_self() is the prime suspect for poisoning
+     * sceSysmoduleLoadModule. The probe uses a bundled AU, so it needs no
+     * filesystem access and can run pre-unjail. */
     evo_videodec2_probe();  /* no-op unless -DEVO_VIDEODEC2_PROBE — Route B, bundled AU */
+    evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
     evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */
 #ifdef EVO_APP_MODULE
