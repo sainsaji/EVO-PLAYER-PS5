@@ -278,19 +278,35 @@ like `evo_agc_probe.c`). It does all four steps below; Phase 2 is now just
 - payload build `projects/avplayer_test/` kept as a compile-checked
       callback-port reference only.
 
-**Route B — `sceVideodec2`:**
-- [ ] Same `libSceVideodec2` import-stub blocker as Route A (ProsperoLight's
-      self-test worked because ProsperoLight links its own generated stub, so
-      its `sceSysmoduleLoadModule(207)` succeeded — EVO declares no such dep).
-      Do the shared PRX-stub work first.
-- [ ] Then repeat EVO's phase-9/10 `CreateDecoder` → `Decode` with
-      SharpProspero's *exact* memory typing and config values from Phase 0.
-      One deploy. If it still returns 5200, Route B is confirmed dead in this
-      context too.
+**Route B — `sceVideodec2`: ✅ WORKS ON HARDWARE (2026-09-03, PPSA99039).**
+`EVO vdec2: HARDWARE DECODE OK` — every call `0`, `out valid=1 err=0 pics=1
+1920x1088 pitch=2048 codec=1` — from inside the full 43 MB EVO Player, which
+then booted on to the menu. Probe: `projects/evoplayer/src/evo_videodec2_probe.c`
+(`--videodec2-probe`), a C port of ProsperoLight's VDEC self-test.
 
-**Deliverable:** a `pp_frame` filled by a Sony module, dumped and eyeballed;
-or a precise error taxonomy (hardware-decode-review §8) saying which call
-fails and how.
+Two things had to be true, both hard-won:
+- [x] **`libSceVideodec2` (+ `libSceAgc` + `libSceAgcDriver`) linked as a
+      POSITIONAL PRX import stub** (`tools/native-app/stubs/prx/*.syms`,
+      `package-app.sh` step 6b), so the loader auto-loads the `.sprx`. `--as-needed`
+      is not enough — the DT_NEEDED must be unconditional (ProsperoLight does the
+      same). AGC/AgcDriver must be present too or `libSceVideodec2`'s own GPU
+      imports don't resolve.
+- [x] **The decode init must run BEFORE `evo_jailbreak_self()`.** The Lapy /
+      etaHEN self-unjail swaps the process credentials mid-run (uid→0, caps,
+      `fd_rdir`/`fd_jdir`=rootvnode); after that swap `sceSysmoduleLoadModule(207)`
+      returns `0x80020063` (`ESDKVERSION`) and `libSceVideodec2` never finishes
+      loading, so the first `sceVideodec2*` call faults. Run pre-unjail: `sysmod207
+      → 0`, everything works. This is the whole reason ~14 hardware launches were
+      needed — `evo_agc_probe`'s failed `sceKernelLoadStartModule` calls are a
+      red herring; the unjail is the poison. → [[native-decode-app-slot-plan]]
+- Note: `sceSysmoduleLoadModule(207)` (public) works pre-unjail; the *Internal*
+      variant (`0x800000B2`) returns `0x80020008` — use the public one.
+
+**Route A** (`sceAvPlayer`, module `0xA5`) stays dead: `sceSysmoduleLoadModule(0xA5)`
+is refused (`0x80020063`) even pre-unjail, so `sceAvPlayerInit` faults.
+
+**Deliverable met:** a decoded NV12 H.264 frame from `sceVideodec2` inside EVO's
+own signed package. → Phase 4.
 
 ### Phase 3 — decoder abstraction refactor (ships regardless)
 

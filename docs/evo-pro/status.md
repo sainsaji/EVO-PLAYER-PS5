@@ -4,6 +4,45 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 
+## 2026-09-03 (late) — NATIVE HW DECODE WORKS IN EVO 🎉
+
+`EVO vdec2: HARDWARE DECODE OK (Route B viable)` from the **full 43 MB EVO
+Player** (PPSA99039), which then booted on to the menu. All calls `0`,
+`out valid=1 err=0 pics=1 1920x1088 pitch=2048 codec=1`. `sceVideodec2`
+(Route B). Probe: `projects/evoplayer/src/evo_videodec2_probe.c`
+(`package-app.sh --videodec2-probe`).
+
+**Two things had to be true (found over ~14 launches):**
+
+1. **PRX import stubs linked POSITIONALLY** — `libSceVideodec2` + `libSceAgc` +
+   `libSceAgcDriver` as unconditional `DT_NEEDED` (`package-app.sh` step 6b,
+   `tools/native-app/stubs/prx/*.syms`). `--as-needed` is not enough. AGC is
+   needed so libSceVideodec2's own GPU imports resolve. **This also unblocks
+   #27** — switch `evo_agc_probe` from `sceKernelLoadStartModule` to the stub.
+2. **Decode init must run BEFORE `evo_jailbreak_self()`.** The self-unjail's
+   mid-run credential swap makes `sceSysmoduleLoadModule(207)` return
+   `ESDKVERSION` and `libSceVideodec2` never finishes loading → first call
+   SIGSEGVs. `main()` now runs `evo_videodec2_probe()` first (commit `fea7d1c`).
+
+**Route A (`sceAvPlayer`) is dead** — sysmodule `0xA5` refused even pre-unjail.
+
+### Next — Phase 4: `media/src/evo_vdec_native.c`
+
+Implement the `evo_vdec.h` seam (#30, already merged) against `sceVideodec2`:
+- port `evo_videodec2_probe.c`'s sequence into `evo_vdec_native.c`
+  (`evo_vdec_open` → sysmodule+compute-queue+decoder, `evo_vdec_send` →
+  `sceVideodec2Decode`, `evo_vdec_receive` → the NV12 `pp_frame`,
+  `evo_vdec_flush` → `sceVideodec2Flush`+`Reset`, `evo_vdec_close`).
+- **Sequencing:** `sceSysmoduleLoadModule(207)` + probe/hold the module at
+  boot, before the first `evo_jailbreak_self()`. Open question for the first HW
+  test: does a decoder created after a later `evo_jailbreak_ensure()` (browser
+  entry) still work if the module was loaded pre-unjail?
+- Guard behind `EVO_APP_MODULE` + a runtime `evo_vdec_probe()`; FFmpeg stays
+  the default/fallback (plan §8).
+- `--videodec2-probe` build stays as the regression check.
+
+---
+
 ## 2026-09-03 — Route A gate ran on hardware: BLOCKED (shared with #27)
 
 `EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked` (PPSA99039,
