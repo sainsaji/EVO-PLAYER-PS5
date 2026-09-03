@@ -377,8 +377,15 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers,
                                      int open_gate)
 {
     char detail[96];
+    int want_linear = 0;
+#if defined(EVO_APP_MODULE)
+    /* Must mirror pp_videoout_init's attr choice, so a same-size reconfig that
+     * only flips the attr (#27: AGC died -> need a tiled VO) is not skipped. */
+    want_linear = (pp_agc_available() && w >= 3200u) ? 1 : 0;
+#endif
     if (g_pp_vo_ready && g_pp_vo.inited && g_vo_w == w && g_vo_h == h &&
-        g_pp_vo.buffer_count == buffers)
+        g_pp_vo.buffer_count == buffers &&
+        pp_videoout_is_linear(&g_pp_vo) == want_linear)
         return 0;
 
     /* Block decode/present against this VO until re-init completes */
@@ -12105,6 +12112,20 @@ int main(void) {
         /* #32: drive the scrub-overlay state machine (may queue a VO reconfig
          * once the decode thread has parked). Before apply so it lands now. */
         prospero_scrub_overlay_pump();
+
+        /*
+         * #27: the sceAgc GPU present died mid-clip (fault / wedge / test hook)
+         * and the decode thread hit a CPU-path frame while the VO is still
+         * linear-registered. Re-register the VO tiled at the same size so the
+         * CPU converter path is correct from here.
+         */
+        if (pp_playback_take_vo_retile_req(&g_pp_pb) &&
+            pp_videoout_is_linear(&g_pp_vo) &&
+            g_pp_vo_ready && g_vo_w >= 3200u) {
+            pp_product_request_vo(g_vo_w, g_vo_h, g_pp_vo.buffer_count,
+                                  g_pp_backend, g_vo_w, g_vo_h);
+            pp_stage_bc_checkpoint("013_AGC_VO_RETILE", "linear -> tiled, cpu path");
+        }
 
         /* Safe point: no buffer held — apply deferred 4K/1080 VO reconfig */
         pp_product_apply_pending_vo();

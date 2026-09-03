@@ -25,6 +25,8 @@
 
 #include <setjmp.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -135,7 +137,25 @@ static struct {
     int       first_frame_logged;
     int       tv_safe;             /* 0 = full-frame (parity with CPU path)  */
     volatile int submit_wedged;    /* a submit blew the 250ms watchdog once    */
+    uint64_t  present_calls;       /* pp_agc_present_nv12 entries (test hook)   */
 } g_agc;
+
+/* #27 test hook: simulate a mid-clip GPU wedge on frame ~120 when
+ * /mnt/usb0/evo_agc_no_present (or EVO_AGC_NO_PRESENT) is present. */
+static int agc_test_wedge_due(uint64_t call_index)
+{
+    static int mode = -1;   /* -1 unknown, 0 off, N = wedge on this frame */
+    if (mode < 0) {
+        mode = 0;
+        if (getenv("EVO_AGC_NO_PRESENT"))
+            mode = 120;
+        else {
+            FILE *f = fopen("/mnt/usb0/evo_agc_no_present", "r");
+            if (f) { mode = 120; fclose(f); }
+        }
+    }
+    return mode > 0 && call_index == (uint64_t)mode;
+}
 
 /*
  * #27 B: the GPU submit half of the present runs on a dedicated worker thread
@@ -770,6 +790,19 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
         pitch_bytes == 0 || (pitch_bytes & 1u) || coded_height == 0 ||
         vis_w == 0 || vis_h == 0 || out_w == 0 || out_h == 0)
         return -1;
+
+    /* #27 test hook: /mnt/usb0/evo_agc_no_present (or EVO_AGC_NO_PRESENT env)
+     * simulates a mid-clip GPU wedge after ~120 good frames, so the AGC-death ->
+     * VO-retile -> CPU-path recovery can be exercised without a real fault. */
+    if (agc_test_wedge_due(g_agc.present_calls++)) {
+        g_agc.submit_wedged = 1;
+        g_agc.ready = 0;
+        evo_boot_log("pp_agc: TEST WEDGE (evo_agc_no_present) after %llu frames - "
+                     "simulating a mid-clip GPU stall",
+                     (unsigned long long)g_agc.present_calls);
+        evo_boot_log_flush();
+        return -2;
+    }
 
     int fg = !g_agc.first_frame_ok;   /* instrument + guard the first frame only */
     if (fg)

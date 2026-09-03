@@ -90,6 +90,8 @@ typedef struct pp_playback {
     uint64_t agc_present_us_max;
     uint64_t agc_present_dropped; /* late/dropped on the AGC path (heartbeat)   */
     uint64_t agc_hb_frames;       /* frames counted toward the current window   */
+    int agc_vo_retile_req;        /* #27: CPU path needs the VO re-registered   */
+                                  /*      tiled - main polls + clears this      */
 
     void *lock;
     pp_playback_stats stats;
@@ -146,6 +148,13 @@ int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_byte
                              uint32_t dst_w, uint32_t dst_h);
 
 int pp_playback_has_display(const pp_playback *pb);
+
+/**
+ * #27: 1 (and clears the request) if a frame took the CPU path while the VO was
+ * linear-registered for sceAgc - main must re-register the VO tiled. Returns 0
+ * otherwise.
+ */
+int pp_playback_take_vo_retile_req(pp_playback *pb);
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us);
 void pp_playback_notify_seek_end(pp_playback *pb, int success,

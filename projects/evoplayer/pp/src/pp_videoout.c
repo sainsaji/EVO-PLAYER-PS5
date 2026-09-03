@@ -347,17 +347,13 @@ int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_i
     if (vo->state[buffer_index] != PP_BUF_ACQUIRED)
         return -3;
 
-    if (vo->attr_linear) {
-        /* #27: linear-registered plane - no tile swizzle, straight copy of the
-         * tightly-packed (pitch = width*4) CPU staging the caller wrote. */
-        memcpy(vo->gpu_bufs[buffer_index], vo->cpu_bufs[buffer_index],
-               vo->cpu_bytes);
-    } else {
-        pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
-                                (uint32_t *)vo->gpu_bufs[buffer_index],
-                                (int)vo->width,
-                                (int)vo->height);
-    }
+    /* #27: a linear-registered plane (sceAgc path) must never reach here on the
+     * CPU route - pp_playback requests a tiled re-register instead. If it
+     * somehow does, tiling is no more wrong than a plain copy would be. */
+    pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
+                            (uint32_t *)vo->gpu_bufs[buffer_index],
+                            (int)vo->width,
+                            (int)vo->height);
 
     vo->stats.presents++;
     rc = sceVideoOutSubmitFlip(vo->handle, (int)buffer_index, 1, (int64_t)frame_id);

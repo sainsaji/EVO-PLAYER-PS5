@@ -322,25 +322,6 @@ static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
     return 0;
 }
 
-/* #27 test hook: force the CPU-into-linear-VO fallback path while pp_agc stays
- * "available" (so the VO still registers linear) - the only way to exercise it
- * on demand without an actual GPU fault. Toggled by the env var OR, on the
- * console where env is awkward, by FTP-dropping /mnt/usb0/evo_agc_no_present. */
-static int agc_no_present(void)
-{
-    static int v = -1;
-    if (v < 0) {
-        v = getenv("EVO_AGC_NO_PRESENT") ? 1 : 0;
-#ifdef EVO_APP_MODULE
-        if (!v) {
-            FILE *f = fopen("/mnt/usb0/evo_agc_no_present", "r");
-            if (f) { v = 1; fclose(f); }
-        }
-#endif
-    }
-    return v;
-}
-
 /* #27: steady-state GPU present timing, mirrors evo_vdec_native's decode
  * heartbeat. One line to evo_boot.log per window so evo-remote.sh boot shows
  * whether the convert+flip holds the frame budget. */
@@ -439,8 +420,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
      * disabled AGC, the 1080/V3 branch) the CPU converters need planar
      * YUV420P, so de-interleave here.
      */
-    agc_path = !agc_no_present() &&
-               use_v8 && pp_agc_available() && src->format == PP_FRAME_NV12 &&
+    agc_path = use_v8 && pp_agc_available() && src->format == PP_FRAME_NV12 &&
                src->planes[0] && src->planes[1] && src->strides[0] > 0 &&
                /* AGC stages one contiguous Y+UV block — require it (the native
                 * decoder guarantees this; a stray FFmpeg NV12 frame may not). */
@@ -552,29 +532,35 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
             return -4;
         }
 
+        /*
+         * #27: the VO is linear-registered for the sceAgc GPU path, but this
+         * frame is on the CPU path (AGC faulted / wedged, or the test hook).
+         * No CPU converter produces the layout a linear-registered plane scans
+         * out - both the tiled swizzle and a plain linear write garble it. Drop
+         * this frame (main keeps showing the last good AGC frame) and ask main
+         * to re-register the VO tiled; from the next frame the normal tiled
+         * converter is correct.
+         */
+        if (pp_videoout_is_linear(pb->vo)) {
+            pp_videoout_release(pb->vo, idx);
+            if (!pb->agc_vo_retile_req) {
+                pb->agc_vo_retile_req = 1;
+                pp_stage_bc_checkpoint("011_AGC_VO_RETILE_REQ", "cpu path needs a tiled VO");
+            }
+            return 1;
+        }
+
         /* More workers on wide UHD frames (was 4 — under-used CPU) */
         if (pb->out_w * pb->out_h >= 3840u * 1600u)
             v8_workers = 8;
 
 
         t0 = now_us();
-        if (pp_videoout_is_linear(pb->vo)) {
-            /*
-             * #27: the VO is linear-registered for the sceAgc path but this
-             * frame is on the CPU path (AGC faulted/wedged, EVO_AGC_NO_PRESENT,
-             * or a non-AGC frame). The tiled converters would garble a linear
-             * plane — emit linear BGRA 1:1 instead. present_pre_tiled below just
-             * flips, which is correct for the linear plane.
-             */
-            rc = pp_converter_yuv420p_to_bgra_parallel(
-                src, gpu, pb->out_w * 4u, v8_workers);
-        } else {
-            rc = pp_compute_pipeline_convert(
+        rc = pp_compute_pipeline_convert(
+            src, gpu, pb->out_w, pb->out_h, v8_workers);
+        if (rc != 0) {
+            rc = pp_converter_yuv420p_to_tiled_bgra_parallel(
                 src, gpu, pb->out_w, pb->out_h, v8_workers);
-            if (rc != 0) {
-                rc = pp_converter_yuv420p_to_tiled_bgra_parallel(
-                    src, gpu, pb->out_w, pb->out_h, v8_workers);
-            }
         }
         t1 = now_us();
 
@@ -715,6 +701,20 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
     return 0;
+}
+
+int pp_playback_take_vo_retile_req(pp_playback *pb)
+{
+    int r;
+    if (!pb)
+        return 0;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    r = pb->agc_vo_retile_req;
+    pb->agc_vo_retile_req = 0;
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+    return r;
 }
 
 int pp_playback_take_pending_present(pp_playback *pb, uint32_t *idx, uint64_t *frame_id)
