@@ -138,6 +138,7 @@ mock data — everything in the DOM binds to live C structs
 | Doc | What's in it |
 |---|---|
 | [roadmap.md](docs/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
+| [project-tracking.md](docs/project-tracking.md) | The "EVO Player Roadmap" GitHub Project board — setup script, field↔label map, views, auto-add workflows |
 | [architecture.md](docs/architecture.md) | Layer boundaries, why `main.c` is still large |
 | [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
 | [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |

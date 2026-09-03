@@ -8,6 +8,10 @@ the map across all of them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
+For a **visual** view of the same issues — kanban, priority table, milestone
+timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
+[project-tracking.md](project-tracking.md) has the one-command setup.
+
 Priority labels track this order: **critical** #27 (render_frame ported + wired
 09-03, awaiting a first hardware run) · **high** #44, #32, #36 (#46 code landed
 09-03, HW-verify pending) · **medium** #9, #16, #6, #37/#38/#39/#41, #33, #34,
