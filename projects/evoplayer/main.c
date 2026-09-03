@@ -12174,6 +12174,15 @@ int main(void) {
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
                              * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
                              * sceAgcInit must run first (#27). */
+#ifdef EVO_APP_MODULE
+    /* #27 GPU Step 2: bring the sceAgc present path up for the bare player
+     * build too (evo_agc_probe already does this under --agc-probe; pp_agc_init
+     * is idempotent). MUST be pre-unjail, same reason as evo_vdec_probe.
+     * pp_agc_available() gates the GPU present in pp_playback's V8 branch;
+     * hardware-verified through LinkShaders, render_frame still unproven. */
+    pp_agc_init(1920, 1080, 0);
+    evo_boot_log_flush();
+#endif
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_boot_log_flush();   /* sandbox open now — dump the pre-unjail probe results to USB */
     evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */

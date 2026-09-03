@@ -22,6 +22,11 @@ typedef struct pp_frame {
     pp_frame_format format;
     uint32_t width;
     uint32_t height;
+    /* MB-padded luma height for NV12 — the row count at which the interleaved
+     * UV plane starts (planes[1] == planes[0] + strides[0]*coded_height).
+     * 0 means "same as height". Only the native NV12 decode path sets it;
+     * the GPU (sceAgc) present path needs it, the CPU converters ignore it. */
+    uint32_t coded_height;
     const uint8_t *planes[4];
     int strides[4];
     int64_t pts_us;

@@ -36,6 +36,7 @@
  */
 #include "evo_vdec_native.h"
 #include "evo_boot_log.h"
+#include "pp_agc.h"
 
 #ifdef EVO_APP_MODULE
 
@@ -321,8 +322,10 @@ struct nat_slot {
     uint8_t *data;
     size_t   cap;
     int      used;
+    int      nv12;              /* 1 = data is straight NV12 (AGC path)      */
     int64_t  pts;
     uint32_t w, h;              /* display size                             */
+    uint32_t coded_h;           /* MB-padded luma rows (UV starts here)      */
     uint32_t y_stride, c_stride;
     size_t   u_off, v_off;      /* byte offsets of U and V within data       */
 };
@@ -339,6 +342,7 @@ struct evo_vdec_native {
     unsigned frames_out;
     int      flushing;
     int      fatal;
+    int      agc_out;       /* pp_agc_available() at open — emit NV12, not I420 */
     int      first_valid_logged;
     int      first_err_logged;
 
@@ -424,27 +428,43 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
         s->cap  = need;
     }
 
-    /* Y: verbatim */
-    memcpy(s->data, out->buffer, y_sz);
+    if (n->agc_out) {
+        /* AGC path: keep NV12 exactly as the decoder laid it out — Y then the
+         * interleaved UV plane, contiguous, one flat copy. pp_agc_present_nv12
+         * samples it directly (no CPU touch of the pixels). */
+        const size_t uv_sz = (size_t)cw * ((codeh + 1u) / 2u);
+        memcpy(s->data, out->buffer, y_sz + uv_sz);
+        s->nv12     = 1;
+        s->y_stride = cw;
+        s->c_stride = cw;              /* NV12: chroma row pitch == luma pitch */
+        s->u_off    = y_sz;
+        s->v_off    = y_sz;
+    } else {
+        /* Y: verbatim */
+        memcpy(s->data, out->buffer, y_sz);
 
-    /* UV interleaved (NV12) -> planar U, V */
-    const uint8_t *uv = (const uint8_t *)out->buffer + (size_t)cw * codeh;
-    uint8_t *du = s->data + y_sz;
-    uint8_t *dv = du + c_sz;
-    for (uint32_t row = 0; row < chh; row++) {
-        const uint8_t *src = uv + (size_t)row * cw;
-        uint8_t *pu = du + (size_t)row * cstride;
-        uint8_t *pv = dv + (size_t)row * cstride;
-        for (uint32_t x = 0; x < chw; x++) {
-            pu[x] = src[2u * x];
-            pv[x] = src[2u * x + 1u];
+        /* UV interleaved (NV12) -> planar U, V */
+        const uint8_t *uv = (const uint8_t *)out->buffer + (size_t)cw * codeh;
+        uint8_t *du = s->data + y_sz;
+        uint8_t *dv = du + c_sz;
+        for (uint32_t row = 0; row < chh; row++) {
+            const uint8_t *src = uv + (size_t)row * cw;
+            uint8_t *pu = du + (size_t)row * cstride;
+            uint8_t *pv = dv + (size_t)row * cstride;
+            for (uint32_t x = 0; x < chw; x++) {
+                pu[x] = src[2u * x];
+                pv[x] = src[2u * x + 1u];
+            }
         }
+
+        s->nv12     = 0;
+        s->y_stride = cw;
+        s->c_stride = cstride;
+        s->u_off    = y_sz;
+        s->v_off    = y_sz + c_sz;
     }
 
-    s->y_stride = cw;
-    s->c_stride = cstride;
-    s->u_off    = y_sz;
-    s->v_off    = y_sz + c_sz;
+    s->coded_h  = codeh;
     s->w        = dw;
     s->h        = dh;
     s->pts      = pts_take(n);
@@ -591,6 +611,10 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     n->frame_size = g_boot.frame_size;
     n->disp_w     = par->width  > 0 ? (uint32_t)par->width  : 0;
     n->disp_h     = par->height > 0 ? (uint32_t)par->height : 0;
+    /* #27: when the GPU present path is up, emit NV12 straight from the decoder
+     * — pp_agc's shader samples NV12 and does the YUV->RGB + scale on-GPU, so
+     * the CPU never touches the pixels. Fixed for the stream's lifetime. */
+    n->agc_out    = pp_agc_available();
 
     if (par->extradata && par->extradata_size >= 4 && par->extradata[0] == 1) {
         n->bsf_name = "h264_mp4toannexb";
@@ -690,16 +714,17 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
         return 0;
 
     memset(out, 0, sizeof(*out));
-    out->format     = PP_FRAME_YUV420P;     /* de-interleaved in ro_harvest */
-    out->width      = best->w;
-    out->height     = best->h;
-    out->planes[0]  = best->data;
-    out->planes[1]  = best->data + best->u_off;
-    out->planes[2]  = best->data + best->v_off;
-    out->strides[0] = (int)best->y_stride;
-    out->strides[1] = (int)best->c_stride;
-    out->strides[2] = (int)best->c_stride;
-    out->pts_us     = best->pts;
+    out->format       = best->nv12 ? PP_FRAME_NV12 : PP_FRAME_YUV420P;
+    out->width        = best->w;
+    out->height       = best->h;
+    out->coded_height = best->coded_h;
+    out->planes[0]    = best->data;
+    out->planes[1]    = best->data + best->u_off;
+    out->planes[2]    = best->data + best->v_off;
+    out->strides[0]   = (int)best->y_stride;
+    out->strides[1]   = (int)best->c_stride;
+    out->strides[2]   = (int)best->c_stride;
+    out->pts_us       = best->pts;
 
     best->used = 0;
     v->ro_count--;

@@ -116,6 +116,15 @@ int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_i
  */
 int pp_videoout_present_pre_tiled(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id);
 
+/**
+ * Record that buffer_index is now in-flight because a flip was queued for it
+ * OUTSIDE this backend (sceAgc's DCB does its own sceAgcDcbSetFlip). No
+ * SubmitFlip is issued here. frame_id MUST equal the flip argument the GPU
+ * DCB used, so retire_old_inflight() can free the buffer once the flip retires.
+ * buffer_index must be currently ACQUIRED. Returns 0 on success.
+ */
+int pp_videoout_adopt_flip(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id);
+
 /** Tiled GPU plane for acquired buffer (V8 write target). */
 void *pp_videoout_gpu_plane(pp_videoout *vo, uint32_t buffer_index);
 

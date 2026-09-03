@@ -7,6 +7,7 @@
 #ifndef PP_PLAYBACK_H
 #define PP_PLAYBACK_H
 
+#include "pp_agc.h"
 #include "pp_clock.h"
 #include "pp_converter.h"
 #include "pp_frame.h"
@@ -77,6 +78,13 @@ typedef struct pp_playback {
     uint32_t pending_vo_idx;
     uint64_t pending_frame_id;
     uint64_t present_seq;
+
+    /* #27: scratch for the rare NV12->YUV420P de-interleave fallback — the
+     * native decoder emitted NV12 for the sceAgc GPU path but pp_agc is not
+     * available (host preview, or a first-frame fault disabled it). */
+    uint8_t *nv12_fb;
+    size_t   nv12_fb_cap;
+    uint64_t agc_frames;   /* frames presented through pp_agc_present_nv12 */
 
     void *lock;
     pp_playback_stats stats;

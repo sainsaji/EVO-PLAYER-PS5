@@ -377,6 +377,25 @@ int pp_videoout_present_pre_tiled(pp_videoout *vo, uint32_t buffer_index, uint64
     return rc;
 }
 
+int pp_videoout_adopt_flip(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id)
+{
+    if (!vo || !vo->inited)
+        return -1;
+    if (buffer_index >= vo->buffer_count)
+        return -2;
+    if (vo->state[buffer_index] != PP_BUF_ACQUIRED)
+        return -3;
+
+    /* The GPU DCB queued the flip itself (sceAgcDcbSetFlip); we only mirror the
+     * bookkeeping present_pre_tiled would have done on a successful SubmitFlip. */
+    vo->stats.presents++;
+    vo->stats.flips_ok++;
+    vo->state[buffer_index] = PP_BUF_IN_FLIGHT;
+    vo->submit_tsc[buffer_index] = now_us();
+    vo->submit_frame[buffer_index] = frame_id;
+    return 0;
+}
+
 int pp_videoout_wait_available(pp_videoout *vo, uint32_t buffer_index, uint32_t timeout_ms)
 {
     uint64_t start, deadline, now;

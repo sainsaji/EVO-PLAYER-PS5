@@ -1,4 +1,5 @@
 #include "pp_playback.h"
+#include "pp_agc.h"
 #include "pp_compute_pipeline.h"
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
@@ -103,6 +104,9 @@ void pp_playback_shutdown(pp_playback *pb)
     pb->display = NULL;
     free(pb->display_back);
     pb->display_back = NULL;
+    free(pb->nv12_fb);
+    pb->nv12_fb = NULL;
+    pb->nv12_fb_cap = 0;
     if (pb->lock) {
         pthread_mutex_destroy(mtx(pb));
         free(pb->lock);
@@ -247,12 +251,70 @@ static void note_convert(pp_playback *pb, uint64_t us)
  */
 #define PP_LATE_DROP_RESYNC 20
 
+/*
+ * The native decoder emits NV12 for the sceAgc GPU present path (#27). When
+ * that path is not taken — host preview, or a first-frame AGC fault disabled
+ * it — de-interleave NV12 -> planar YUV420P into pb->nv12_fb so the CPU
+ * converters (YUV420P-only) can run. Mirrors evo_vdec_native.c's ro_harvest
+ * non-AGC branch. Returns 0 and retargets *out, or <0 on OOM.
+ */
+static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
+{
+    uint32_t pitch   = (uint32_t)s->strides[0];
+    uint32_t uvpitch = s->strides[1] > 0 ? (uint32_t)s->strides[1] : pitch;
+    uint32_t coded_h = s->coded_height ? s->coded_height : s->height;
+    uint32_t cpitch  = pitch / 2u;
+    uint32_t chh     = (coded_h + 1u) / 2u;
+    uint32_t chw     = (s->width + 1u) / 2u;
+    size_t   y_sz    = (size_t)pitch * coded_h;
+    size_t   c_sz    = (size_t)cpitch * chh;
+    size_t   need    = y_sz + 2u * c_sz;
+    uint8_t *du, *dv;
+
+    if (!s->planes[0] || !s->planes[1] || pitch < 2u || (pitch & 1u))
+        return -1;
+    if (pb->nv12_fb_cap < need) {
+        uint8_t *p = (uint8_t *)realloc(pb->nv12_fb, need);
+        if (!p)
+            return -1;
+        pb->nv12_fb = p;
+        pb->nv12_fb_cap = need;
+    }
+    memcpy(pb->nv12_fb, s->planes[0], y_sz);
+    du = pb->nv12_fb + y_sz;
+    dv = du + c_sz;
+    for (uint32_t r = 0; r < chh; r++) {
+        const uint8_t *row = s->planes[1] + (size_t)r * uvpitch;
+        uint8_t *pu = du + (size_t)r * cpitch;
+        uint8_t *pv = dv + (size_t)r * cpitch;
+        for (uint32_t x = 0; x < chw; x++) {
+            pu[x] = row[2u * x];
+            pv[x] = row[2u * x + 1u];
+        }
+    }
+    memset(out, 0, sizeof *out);
+    out->format       = PP_FRAME_YUV420P;
+    out->width        = s->width;
+    out->height       = s->height;
+    out->coded_height = coded_h;
+    out->planes[0]    = pb->nv12_fb;
+    out->planes[1]    = du;
+    out->planes[2]    = dv;
+    out->strides[0]   = (int)pitch;
+    out->strides[1]   = (int)cpitch;
+    out->strides[2]   = (int)cpitch;
+    out->pts_us       = s->pts_us;
+    return 0;
+}
+
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 {
     uint64_t t0, t1, cus;
     int rc;
     size_t need;
     int use_v8;
+    int agc_path;
+    pp_frame nv12_local;
 
     if (!pb || !src || !pb->active)
         return -1;
@@ -300,6 +362,25 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     use_v8 = 0; /* crash isolation: product never uses V8 path */
 #endif
 
+    /*
+     * #27: the native decoder emits NV12 when the sceAgc GPU present path is
+     * up. That path is only taken on the V8 branch; anywhere else (host, a
+     * disabled AGC, the 1080/V3 branch) the CPU converters need planar
+     * YUV420P, so de-interleave here.
+     */
+    agc_path = use_v8 && pp_agc_available() && src->format == PP_FRAME_NV12 &&
+               src->planes[0] && src->planes[1] && src->strides[0] > 0 &&
+               /* AGC stages one contiguous Y+UV block — require it (the native
+                * decoder guarantees this; a stray FFmpeg NV12 frame may not). */
+               src->planes[1] == src->planes[0] +
+                   (size_t)src->strides[0] *
+                       (src->coded_height ? src->coded_height : src->height);
+    if (src->format == PP_FRAME_NV12 && !agc_path) {
+        if (nv12_to_yuv420p(pb, src, &nv12_local) != 0)
+            return -4;
+        src = &nv12_local;
+    }
+
     /* ---- V8 fused: write tiled GPU plane; main present_pre_tiled ---- */
     if (use_v8) {
         uint32_t idx = 0, pitch = 0;
@@ -324,6 +405,65 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 
         if (pb->stats.frames_converted == 0)
             pp_stage_bc_checkpoint("010_FIRST_FRAME_DECODED", "entering V8 convert");
+
+        /*
+         * #27: GPU convert + present via sceAgc. The DCB does NV12->RGB into
+         * the VO plane AND queues its own flip, so on success there is nothing
+         * for main.c to present_pre_tiled — mark the buffer in-flight and
+         * publish. A failure (or a first-frame fault, which disables pp_agc)
+         * releases the buffer; the next frame is de-interleaved to YUV420P by
+         * the nv12_to_yuv420p normalise above and takes the CPU path.
+         */
+        if (agc_path) {
+            int64_t marker;
+            uint32_t coded_h = src->coded_height ? src->coded_height : src->height;
+
+            if (pb->lock)
+                pthread_mutex_lock(mtx(pb));
+            marker = (int64_t)(++pb->present_seq);
+            if (pb->lock)
+                pthread_mutex_unlock(mtx(pb));
+
+            t0 = now_us();
+            rc = pp_agc_present_nv12(pb->vo->handle, idx, gpu,
+                                     src->planes[0], (uint32_t)src->strides[0],
+                                     coded_h, src->width, src->height,
+                                     pb->out_w, pb->out_h, marker);
+            t1 = now_us();
+
+            if (rc == 0) {
+                /* The DCB has queued the flip on `idx` regardless of what the
+                 * bookkeeping call returns — never release this buffer now. */
+                (void)pp_videoout_adopt_flip(pb->vo, idx, (uint64_t)marker);
+                cus = t1 - t0;
+                pb->stats.frames_converted++;
+                pb->agc_frames++;
+                note_convert(pb, cus);
+                if (pb->agc_frames == 1)
+                    pp_stage_bc_checkpoint("012_AGC_FIRST_PRESENT", "agc gpu flip");
+
+                if (pb->lock)
+                    pthread_mutex_lock(mtx(pb));
+                /* Drop any earlier CPU-path frame that main never presented. */
+                if (pb->pending_present) {
+                    pp_videoout_release(pb->vo, pb->pending_vo_idx);
+                    pb->pending_present = 0;
+                }
+                pb->display_ready = 1;
+                pb->display_pts_us = src->pts_us;
+                pb->stats.frames_published++;
+                if (pb->lock)
+                    pthread_mutex_unlock(mtx(pb));
+                return 0;
+            }
+
+            /* AGC present failed — hand the buffer back and drop this frame.
+             * pp_agc disables itself after a first-frame fault, so subsequent
+             * frames fall through nv12_to_yuv420p + the CPU converter. */
+            pp_videoout_release(pb->vo, idx);
+            pp_stage_bc_checkpoint("011_AGC_PRESENT_FAIL", "cpu fallback next");
+            return -4;
+        }
 
         /* More workers on wide UHD frames (was 4 — under-used CPU) */
         if (pb->out_w * pb->out_h >= 3840u * 1600u)
