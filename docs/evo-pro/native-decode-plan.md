@@ -362,10 +362,11 @@ Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
 `sceVideodec2` in EVO — colours correct, no judder, `fatal=0`. Frame order is
 display-order. Remaining: **#32 — scrub blanks player UI on the V8 4K path**
 (not a freeze; the `pp_product_k4_live` present path never composites the OSD
-and `v8_hold` skips the flip during the seek-discard window) — **fix landed:**
-scrub / chapter-jump now drop to the 1080 overlay VO for the duration of the
-seek (`prospero_scrub_overlay_*` in `main.c`), hw-verify pending — and Phase 5
-(settings row).
+and `v8_hold` skips the flip during the seek-discard window) — **fix landed
+(`a0cc708`+`5d305ab`):** the interactive scrub drops to the 1080 overlay VO via
+a render-loop state machine gated on `video_decode_parked` (the naive version
+raced `pp_playback`'s unlocked converter against the VO teardown and crashed),
+hw-verify pending — and Phase 5 (settings row).
 
 - [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`.
       Crop applied (`disp_w/h` from the demuxer vs the coded

@@ -220,21 +220,34 @@ stale payload-era UI assets for weeks and shadowed every #16 RCSS clamp on
 hardware. `deploy-app.sh --ffpfsc` now wipes + re-pushes the packaged asset
 tree there on every deploy.
 
-**#32 — scrub shows no player UI on the V8 4K path (high). FIX LANDED, HW-VERIFY
-PENDING.** Reframed 2026-09-03: **not a freeze / deadlock** — the seek works and
-the app stays responsive. The bug was that the `pp_product_k4_live` V8 4K
-present path never composites the OSD and `v8_hold` skips the whole draw + flip
-during the seek-discard window, and `prospero_scrub_begin()` never dropped to
-the 1080 VO the way Media Info / exit-confirm do. **Fix (smallest / consistent
-option):** `prospero_scrub_begin` + `prospero_chapter_jump` now call
-`pp_product_overlay_enter()` when `pp_product_k4_live`, so the scrub/seek runs
-under the 1080 overlay VO where `draw_player_screen` composites the OSD over a
-held frame. `prospero_scrub_cancel` restores the 4K surface immediately; a
-committed seek holds the overlay until its discard window (`g_pp_pb.seek_discarding`)
-closes — polled in the render loop next to `prospero_playback_finished_update()` —
-then `pp_product_overlay_leave()`. New state: `prospero_scrub_overlay_*` in
-`main.c`. Video behind the scrub bar is black during the overlay (same as
-Media Info / exit-confirm); a held 4K frame there needs the #27 GPU composite.
+**#32 — scrub blanks player UI on the V8 4K path (high). FIX LANDED (`a0cc708` +
+`5d305ab`), HW-VERIFY PENDING.** Not a freeze — seek works, app responsive. The
+bug: the `pp_product_k4_live` V8 4K present path never composites the OSD and
+`v8_hold` skips the draw + flip during the seek-discard window.
+
+Fix: run the interactive scrub under the 1080 overlay VO (like Media Info),
+where `draw_player_screen` composites the OSD. **The trap:** `pp_playback`'s
+convert (`pp_converter_to_display`, `pp_playback.c:555`) runs UNLOCKED on the
+decode thread while the 1080↔4K VO reconfigure frees `pb->display`;
+`present_pp_frame`'s `g_vo_decode_gate` check is check-then-act →
+use-after-free. Frame pacing hid it; the first attempt at the discard speedup
+(`b24f5c1`, reverted) made it crash every seek.
+
+Real fix — overlay reworked as a render-loop **state machine**
+(`prospero_scrub_ovl_state` NONE/ENTERING/ACTIVE/LEAVING +
+`prospero_scrub_overlay_pump()`, `main.c`) that only calls
+`pp_product_overlay_enter/leave` while the new `volatile int
+video_decode_parked` (`evo_playback.c`, =1 when the decode thread is in its
+idle branch, i.e. not converting) is set. A committed seek: pump waits for
+`g_pp_pb.seek_discarding` to clear, re-pauses, waits parked, flips the VO,
+restores `player_paused`. Then `5d305ab` re-lands the flat-out discard
+(safe now the reconfigure is off the decode thread).
+
+**Chapter jump dropped from the overlay** (fire-and-forget seek → pre-#32
+held-frame behaviour). `SQUARE → Media Info` blocked while
+`prospero_scrub_overlay_engaged()`. Video behind the scrub bar is black during
+the overlay; a held 4K frame there needs the #27 GPU composite. Residual: the
+seek is still GOP-bound on long-GOP 4K (flat-out only shaves ~1.5-2×).
 Separately still open: verify the `AVSEEK_FLAG_ANY` byte-seek fallback
 (`fe6c6ed`) lands GTA's 14 GB file on a keyframe.
 
@@ -444,8 +457,10 @@ the "remote-close investigation" section — there is no clean remote close):
       pattern — land decoder-append first, then renderer).
 - [~] **#32** — scrub blanks player UI on the V8 4K path (not a freeze;
       k4_live never composites the OSD + `v8_hold` skips the flip) (high).
-      Fix landed: scrub / chapter-jump drop to the 1080 overlay VO
-      (`prospero_scrub_overlay_*` in `main.c`). HW-verify pending.
+      Fix landed (`a0cc708`+`5d305ab`): interactive scrub drops to the 1080
+      overlay VO via a render-loop state machine gated on `video_decode_parked`
+      (the naive version raced the unlocked converter and crashed). HW-verify
+      pending.
 - [ ] **#37** — Phase 5: `Video decoder: Auto / FFmpeg / Native` settings
       toggle + `evo_vdec_probe()` gate + config migration.
 - [ ] **#28 Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`);
