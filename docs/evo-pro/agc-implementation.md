@@ -259,14 +259,20 @@ pp/src/shaders/*.sb        assembled output (build step)
 - Host preview (`tools/uiview*`, `uiplay`) — `pp_agc.c` is `#ifdef __PROSPERO__`
   compiled to a stub returning "unavailable"; the SDL/CPU path is untouched.
 
-### AGC symbol resolution
+### AGC symbol resolution — SOLVED (#31)
 
-The app-module SDK has **no `libSceAgc` stub** (like the payload SDK). Resolve
-at runtime the same way `evo_agc_probe.c` does: `sceKernelLoadStartModule(
-"/system/common/lib/libSceAgc.sprx")` + `kernel_dynlib_resolve` over
-`nid_encode()` of each name. Cache the ~15 function pointers in a struct. If any
-fail to resolve → `pp_agc_available()` returns 0, player falls back to CPU.
-The full list is in `native_agc_present.cpp:191–209`.
+**No runtime resolution.** As of #31 `libSceAgc` + `libSceAgcDriver` are
+**positional PRX import stubs** (`tools/native-app/stubs/prx/libSceAgc*.syms`
+→ `package-app.sh` step 6b, **unconditional for `MODE == player`** — they're
+already `DT_NEEDED` because `libSceVideodec2`'s own GPU imports pull them in).
+The loader auto-loads the `.sprx` at process start and `sceAgc*` resolve as
+ordinary imports. So `pp_agc.c` just `extern`s and calls them, like
+`evo_vdec_native.c` / the rewritten `evo_agc_probe.c` — the
+`sceKernelLoadStartModule` + `nid_encode` + `sceKernelDlsym` machinery is
+gone. To add a symbol `pp_agc.c` needs: append it to `libSceAgc.syms` (a link
+error names the missing one). `pp_agc_available()` = "did `sceAgcInit`
+succeed", checked once at init; on failure the player falls back to the Step 1
+CPU path. The old "`libSceAgc.sprx` load FAILED" gate is dead.
 
 ### Panic discipline
 

@@ -12170,8 +12170,10 @@ int main(void) {
     evo_vdec_probe();       /* app module: preload libSceVideodec2 for the native decode backend
                              * (#31). MUST be here — before the self-unjail poisons sysmodule 207.
                              * No-op returning 0 on host + payload. */
+    evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
+                             * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
+                             * sceAgcInit must run first (#27). */
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
-    evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE */
     evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */
 #ifdef EVO_APP_MODULE
     av_log_set_level(AV_LOG_ERROR);
