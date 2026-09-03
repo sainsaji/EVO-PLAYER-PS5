@@ -4,30 +4,26 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 >
-> **RESUME HERE → #27 (GPU Step 2) — CORE PATH HARDWARE-VERIFIED 2026-09-04.**
-> Branch `feat/27-agc-submit-watchdog`. GTA 4K plays through the sceAgc GPU
-> present path: decode → NV12 → GPU YUV→RGB → GPU flip, **correct colour, no
-> crash, `fatal=0`, CPU swizzle out of the 4K hot path** (`012_AGC_FIRST_PRESENT`,
-> `render_frame rc=0x0`). Got there via three fixes on top of the first
-> (hung/crashed) run:
-> - **B** — `render_frame` runs on a dedicated worker thread behind a 250 ms
->   watchdog (`pp_agc.c`); a wedge returns `-2`, `pp_agc` goes unavailable, CPU
->   path takes over, no app-slot freeze.
-> - **reachability** — `pp_playback` let an NV12 UHD frame through the V8 gate
->   (`pp_v8_frame_gate` only clears YUV420P); before this `agc_path` was
->   structurally unreachable and 4K NV12 fell to the V3 path → overflow crash.
-> - **A** — `pp_videoout_init` registers the UHD VO with ProsperoLight's linear
->   SDR attr (`0x8000000000000000`) when `pp_agc_available()`; render_frame's
->   coeffs + MRT0 order are tuned to it, tiled attr = R↔B swap + range shift.
-> Timing measured (avg 982 µs/frame = 3% of the 30 fps budget) and AGC-death
-> recovery works (VO re-registers tiled, CPU path resumes — a plain linear CPU
-> write into the AGC plane also garbles, so recovery is a retile not a converter
-> swap). #55 (reconfig ordering + display sizing) folded in.
-> Still `--agc-probe`-gated; default build unchanged (CPU V8).
-> **Remaining:** plane-hash A/B parity, settings row (after #37), P010, GPU OSD.
+> **#27 (GPU Step 2) — ✅ CLOSED 2026-09-04, PR #61 merged** to
+> `refactor/main-c-media-modules`. GTA 4K plays through the sceAgc GPU present
+> path: decode → NV12 → GPU YUV→RGB → GPU flip, correct colour, `fatal=0`, CPU
+> swizzle off the 4K hot path, **982 µs/frame (3% of the 30 fps budget)**. On
+> AGC fault/wedge the VO re-registers tiled and the CPU path resumes. `--agc-probe`
+> gated, default build unchanged. #55 fixed alongside. The four fixes that got
+> there: watchdog worker thread (B), V8-gate reachability, linear UHD VO attr (A),
+> retile-on-AGC-death. Full write-up in the 2026-09-04 sections below.
+>
+> **RESUME HERE → the #27 leftovers, then #28 (GPU Step 3).**
+> - **#62** — plane-hash A/B parity: AGC present vs the CPU converter, pixel-level.
+>   The A/B is built in (default `.ffpfsc` = CPU, `--agc-probe` = AGC). Needs a
+>   plane-dump hook + `tools/bench.sh`.
+> - **#37** — the `Renderer: Auto/CPU/GPU` settings row (after #37's decoder-row append).
+> - **#41** — P010 / HEVC Main10 present (the `hdr=1` shader is wired; needs a
+>   P010 `bind_pixel_source` + the 2nd resident decoder feeding it).
+> - **#28** — RmlUi on sceAgc + GPU OSD-over-4K composite. Unblocked; reuses all
+>   of #27's plumbing (shader setup, DCB submit, VideoOut, panic behaviour).
 > Open bugs from #31: #32 (scrub blanks player UI on the V8 4K path — fix landed
-> via a 1080 scrub overlay, hw-verify pending), #55 (4K V3-fallback buffer
-> overflow), #33 (harness cleanup).
+> via a 1080 scrub overlay, hw-verify pending), #33 (harness cleanup).
 > Console `192.168.0.6` (ethernet, `.env`).
 > Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
 > -> `evo-remote.sh boot` -> `evo-remote.sh play <4K H.264>`.

@@ -12,14 +12,16 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **critical** #27 (**GPU present path + timing +
-AGC-death recovery all HARDWARE-VERIFIED 2026-09-04** on
-`feat/27-agc-submit-watchdog` — GTA 4K via sceAgc, correct colour, 982 µs/frame
-(3% of budget), and a clean VO-retile-to-tiled recovery on AGC wedge. **#55
-folded in.** Still `--agc-probe`-gated. Remaining: plane-hash A/B parity,
-settings row (after #37), P010) · **high** #32, #36 · **medium** #35,
-#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51,
+Priority labels track this order: **high** #32, #36, #55, #28 · **medium** #35,
+#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53, #62 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
+
+**#27 CLOSED 2026-09-04** — sceAgc GPU present path delivered + hardware-verified
+(PR #61: watchdog worker thread, linear UHD VO, V8-gate reachability fix,
+AGC-death VO-retile recovery, #55 folded in). 982 µs/frame, `--agc-probe`-gated,
+default build unchanged. Leftovers split: **#62** plane-hash A/B parity ·
+**#37** the Renderer settings row · **#41** P010 present · #28 gets GPU
+OSD-over-4K. **#28 (Step 3) is unblocked.**
 
 **Closed 2026-09-03 (evening):** **#6** (video buffers → direct mem — landed as
 the swscale rotate-ring slab move + `--agc-probe` gate; PR #54, hw-verified) ·
@@ -36,7 +38,7 @@ Exercised (no corruption/hang) via #27's VO-retile path; verify + close.
 **#16** (text clamps, absorbed into #44). The #16 fixes had been shadowed on
 hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` made
 `deploy-app.sh --ffpfsc` re-sync the asset tree. #35 is now unblocked (part B's
-dependency #44 is done); #28 still waits on #27.
+dependency #44 is done); **#28 unblocked** (#27 closed 2026-09-04).
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
 `rmlui` = #45, #28, #49, #60 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
@@ -73,9 +75,9 @@ These edges are also wired as **native GitHub relationships** (2026-09-03) so
 the issue UI shows blockers / sub-tasks directly:
 
 - **Sub-issues:** #46 → #50, #51  (#44 → #16 both ✅ closed)
-- **Blocking → blocked:** #6 → #27 → #28 · #35 → #43 · #37 → #38 · #8 → #38 ·
+- **Blocking → blocked:** #35 → #43 · #37 → #38 · #8 → #38 ·
   #53 → #50 (`main.c` logic can't be host-linked for tests until the carve-up).
-  #44's edges cleared on close: #28 now waits only on #27, #35 is unblocked.
+  #6 + #27 both closed → **#28 unblocked** (2026-09-04).
 
 Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
 / Related) — softer "coordinate with" / "do before" links live there only.
@@ -88,15 +90,14 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
 
   #26 app-module playback ─── CLOSED (works; demanding 4K → native decode ✅ #31)
 
-  #6 rotate buffers → direct mem ──────────────┐        (touches pp_videoout; do before #27)
-                                               │
-  #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
-                                               ▼
-  positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (package-app.sh step 6b,      │   gate ✅ + shaders ✅ + render_frame present ✅ ALL
-    unconditional DT_NEEDED)      │   HW-VERIFIED (2026-09-04, --agc-probe). GTA 4K on
-                                  │   GPU, correct colour. Remaining: timing/VSync, A/B
-                                 │   (same wall also blocks #34 native IME keyboard)
+  #6 rotate buffers → direct mem ── ✅ CLOSED (PR #54)
+
+  positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ─ ✅ CLOSED
+   (package-app.sh step 6b,      │   2026-09-04, PR #61 — GTA 4K on GPU, correct colour,
+    unconditional DT_NEEDED)      │   982µs/frame. Leftovers: #62 A/B, #37 row, #41 P010
+                                  │      │
+                                  │      └─► #28 Step 3: RmlUi on sceAgc (unblocked)
+                                  │   (same PRX-stub wall also blocks #34 native IME kb)
                                  └─► Route B libSceVideodec2 ✅ #31 CLOSED — GTA 4K
                                      plays real-time on native decode (2026-09-03)
 
@@ -184,26 +185,20 @@ The real fix is #27 (GPU P010 shader). Only do a CPU-side improvement here if
 - Reads: `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/evo-pro/gpu-rendering-plan.md`
 - Files: `main.c` `start_video_playback` (`is10` / `bpp>8` gating), `pp/src/pp_v8_gate.c`, `pp/src/pp_compute_pipeline.c`
 
-### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **STALLED**
+### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **✅ CLOSED 2026-09-04**
 
-AGC gate ✅ + `pp_agc_init` (shader setup) ✅ hw-verified. **`render_frame` is
-ported + wired but FAILED its first hardware run (2026-09-03):**
-`sceAgcDriverSubmitDcb` → `sceAgcSuspendPoint` never returns → 4K hangs. Gated
-behind `--agc-probe`; default build is on the CPU V8 path (#31-proven).
+Delivered + hardware-verified (PR #61). GTA 4K plays via sceAgc — decode → NV12 →
+GPU YUV→RGB → GPU flip, correct colour, 982 µs/frame (3% of the 30 fps budget),
+CPU swizzle off the 4K path. `render_frame` runs on a watchdog'd worker thread; a
+wedge/fault re-registers the VO tiled and the CPU path resumes. `--agc-probe`-gated,
+default build unchanged. #55 fixed alongside. Leftovers: **#62** (plane-hash A/B),
+**#37** (Renderer settings row), **#41** (P010), **#28** (GPU OSD over 4K).
+See `docs/evo-pro/status.md` + `agc-implementation.md` for the full write-up.
 
-**Plan to finish is on issue #27** (comment 2026-09-03): **B** move the GPU
-submit to a dedicated thread + ~250ms watchdog (so a wrong guess costs a
-dropped frame, not a console cycle — do first) · **A** register the VO buffer
-with ProsperoLight's `0x8000000000000000` attr instead of EVO's
-`0x8000000022000000` (RT tiling mismatch is the leading hang hypothesis) ·
-**C** iterate `--agc-probe` on the `cx` bits. Needs ~2–4 hardware cycles.
+### 5 · `#28` — GPU Step 3: complete RmlUi on sceAgc — **unblocked**
 
-- Reads: **`docs/evo-pro/status.md`** (resume-here + render_frame checklist), **`docs/evo-pro/agc-implementation.md`** §2/§3 (blob layout, `render_frame` annotated), `gpu-rendering-plan.md`, `sharpprospero-agc-reference.md`, `videodec2-abi.md` §6
-- Files: `third_party/ProsperoLight/src/native_agc_present.cpp` (`render_frame` ~571, `initialize_presenter` ~990), `pp/src/pp_agc.c` (scaffold done), `pp/src/agc_blobs.S`, `pp/blobs/`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c` (`use_v8` branch), `media/src/evo_vdec_native.c` (`ro_harvest` — NV12 vs I420), `tools/native-app/stubs/prx/libSceAgc*.syms`, `tools/evo-remote.sh` (test loop)
-
-### 5 · `#28` — GPU Step 3: complete RmlUi on sceAgc
-
-Blocked by #27 (it reuses all of #27's plumbing). Deletes the CPU rasteriser.
+Reuses all of #27's plumbing (shader setup, DCB submit, VideoOut, panic
+behaviour, all now proven). Deletes the CPU coverage rasteriser.
 
 - Reads: `docs/evo-pro/agc-implementation.md` §5, `docs/evo-pro/gpu-rendering-plan.md`, SharpProspero `Graphics/Agc/` (`Renderer3D`, `CxRenderTarget`, `AgcRenderTargetSetup`, `AgcBufferDescriptor` — the register model to transcribe)
 - Files: `ui_rml/src/evo_rmlui_render.cpp` + `.h` (the interface being replaced), `ui_rml/src/evo_rmlui_app.cpp`, `pp/shaders/`, `tools/build-shader.sh`, `tools/prof_rmlui.sh` (parity check)
