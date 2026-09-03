@@ -361,11 +361,15 @@ div, span, p {
 
 #ins-name {
     display: block;
+    width: 524px;
     font-size: 26px;
     font-weight: bold;
     color: #ecf3ff;
     letter-spacing: 0.3px;
     margin-top: 20px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #ins-kindrow {
@@ -424,13 +428,22 @@ div, span, p {
     font-weight: bold;
     color: #5e718c;
     letter-spacing: 1px;
+    flex-shrink: 0;
+    margin-right: 16px;
 }
 
+/* Bounded so a long value (codec strings, "Dolby Digital (E-AC-3)") truncates
+ * instead of colliding with the key or wrapping past the row height. */
 .ins-val {
+    width: 320px;
     font-size: 17px;
     font-weight: bold;
     color: #ecf3ff;
     letter-spacing: 0.3px;
+    text-align: right;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 /* Codecs and duration need avformat, which takes long enough to be felt, so

@@ -135,6 +135,7 @@ mock data — everything in the DOM binds to live C structs
 | [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
 | [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
 | [rmlui-integration-guide.md](docs/rmlui-integration-guide.md) | RmlUi migration spec (active work) |
+| [rmlui-parity.md](docs/rmlui-parity.md) | **#44 per-screen RmlUi-vs-`main` parity checklist** + #16 text-clamp status + marquee scope |
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |

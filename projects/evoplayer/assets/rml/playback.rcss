@@ -34,12 +34,23 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: flex-start;
+    overflow: hidden;
 }
 
+/*
+ * Fixed-width clip window for the title + metadata (#16): 1920 - 120 padding
+ * - ~360 badge rack. A long title/metadata line is clipped here instead of
+ * pushing the badge rack off the right edge, and the C++ marquee tick slides
+ * #media-title left inside this window to reveal the tail (#44), matching the
+ * legacy evo_text_marquee ping-pong.
+ */
 #title-block {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    display: block;
+    width: 1180px;
+    height: 78px;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
 }
 
 #media-title {
@@ -47,6 +58,7 @@ div, span, p {
     font-weight: bold;
     color: #ffffff;
     letter-spacing: 0.5px;
+    white-space: nowrap;
 }
 
 #media-meta {
@@ -54,6 +66,11 @@ div, span, p {
     color: #a2b0c2;
     font-weight: bold;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    width: 1180px;
+    margin-top: 6px;
 }
 
 #badge-rack {
@@ -62,6 +79,7 @@ div, span, p {
     gap: 12px;
     align-items: center;
     margin-top: 6px;
+    flex-shrink: 0;
 }
 
 .badge-res {

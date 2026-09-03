@@ -195,11 +195,15 @@ div, span, p {
 
 #cldetail-tag {
     display: block;
+    width: 1028px;
     font-size: 17px;
     font-weight: bold;
     color: #00cdff;
     letter-spacing: 1.5px;
     margin-top: 6px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #cldetail-items {
