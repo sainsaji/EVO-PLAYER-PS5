@@ -16,71 +16,66 @@ Two rules that save time:
 ## The short version
 
 ```bash
-# build, install, launch, capture a screenshot
+# the ONLY hardware path — build + deploy the app module
 docker compose run --rm ps5-dev bash -lc '
-  EXTRA_CFLAGS="-DEVO_AUTOSHOT=6" ./scripts/build-evoplayer.sh
-  ./scripts/install-homebrew.sh --name EVOPlayer output/elf/EVOPlayer.elf
-  ./tools/launch.sh --timeout 12
-  ./tools/shot.sh grab'
+  ./scripts/package-app.sh --ffpfsc
+  ./scripts/deploy-app.sh --ffpfsc'
+# ShadowMountPlus re-mounts + auto-launches PPSA99039 on the .ffpfsc change;
+# otherwise launch it from the Games row. PS-button-close a running EVO first.
 
-# watch the console log while you do it (separate terminal, keeps a record)
+# watch the console log (separate terminal, keeps a record)
 docker compose run --rm ps5-dev ./tools/klog.sh
+
+# unattended: build/deploy + drive playback over FTP, pull the boot log
+docker compose run --rm ps5-dev bash -lc './tools/evo-remote.sh build --usb-remote'
+docker compose run --rm ps5-dev ./tools/evo-remote.sh status
+
+# a UI/layout question? render on the host, no console:
+./tools/uiview.sh --all      # -> output/uiview/rml_*.png
 ```
 
-Then open `output/screenshots/latest.png`.
+**There is no ELF-payload deploy loop any more.** `install-homebrew.sh`,
+`tools/launch.sh` and `scripts/deploy.sh` were deleted 2026-09-03 — reaching
+for them (even for a UI check) kept costing console sessions.
+`scripts/build-evoplayer.sh` still exists but is a **host compile check only**;
+it hard-errors on `--run`.
 
-That is the payload/`hbldr` loop, fine for UI iteration. **Anything touching
-decode, GPU, audio output or the sandbox goes through the app module instead**
-(`package-app.sh --ffpfsc` → `deploy-app.sh --ffpfsc` → ShadowMountPlus) — see
-[Packaging: two routes](#packaging-two-routes).
-
-> **Exit the app on the console before launching again.** This is the one rule
-> that matters — see the next section.
+> **PS-button-close EVO on the console before every redeploy.** Deploying over
+> a running instance risks a panic; stacking launches has kernel-panicked the
+> console.
 
 ---
 
 ## Launching, and why it needs care
 
-**The app slot stays resident after a launch.** `/hbldr` never closes its log
-pipe because the process does not exit, and launching again does **not**
-replace the running instance — it adds another one. Every instance opens
-videoout, an audio port, the pad and decoder threads.
+Deploy = `deploy-app.sh --ffpfsc` FTPs `PPSA99039.ffpfsc` to
+`/data/homebrew/`. The user's **ShadowMountPlus re-mounts and auto-launches**
+it on the file change — the only non-manual relaunch. Otherwise the user
+launches PPSA99039 from the **Games row**. There is **no remote launch or kill**
+for a fake-signed title.
 
-Stacking them kernel-panicked the console on 2026-08-09, during a loop that
-fired about ten launches without exiting anything in between. It cost roughly
-fifty minutes of recovery.
+**The app slot stays resident.** Launching again does not replace the running
+instance — it adds one, and each opens videoout, an audio port, the pad and
+decoder threads. Stacking them kernel-panicked the console on 2026-08-09
+(~50 min lost). **Only the PS button → close the application** frees the slot,
+and you must do that **before** the next deploy — deploying over a live EVO can
+panic.
 
-So launch through `tools/launch.sh`, which refuses to pile another instance on
-top of a recent one:
-
-```bash
-./tools/launch.sh                # stream stdout for 15s
-./tools/launch.sh --timeout 30
-./tools/launch.sh --force        # you know the previous instance is gone
-```
-
-The cooldown is 90 s by default (`EVO_LAUNCH_COOLDOWN`). It is a speed bump,
-not a real interlock: the console exposes no remote "kill app" that we have
-found, so **only you can actually close the previous instance** — PS button →
-close the application.
-
-Two habits that help more than the guard does:
+Two habits:
 
 - **Batch verification.** One launch that captures several screens beats one
   launch per screen.
 - **Iterate in the container.** Building and syntax-checking cost nothing.
   Go to hardware when there is something real to see.
 
-`curl` reporting a timeout (exit 28) is the normal, successful outcome — the
-pipe never EOFs.
+`curl` / `timeout` reporting a timeout (exit 28 / 124) on an `evo-remote.sh`
+call is the normal, successful outcome — the far end holds the socket.
 
 ---
 
-## Packaging: two routes
+## Packaging: the app module
 
-EVO ships two ways, for two different jobs.
-
-### 1. App module — `.ffpfsc`, the one that matters
+### `.ffpfsc` — the only route
 
 `scripts/package-app.sh` → `scripts/deploy-app.sh` → mount + launch from the
 **Games row** with ShadowMountPlus. Builds a fake-signed **game-category app
@@ -119,23 +114,25 @@ as **system-notification popups + klog** (`-DEVO_APP_MODULE` routes the
 inside the sandbox, so file-based breadcrumbs are invisible). USB media browse
 needs `tools/sandbox-unjail.sh`, re-run per launch.
 
-### 2. ELF payload — minimal probes only
+### The removed ELF-payload route
 
-`scripts/build.sh` (small `projects/*` targets) → `scripts/deploy.sh` →
-`ps5-payload-elfldr` (9021). Or the legacy full-player-as-homebrew route:
-`build-evoplayer.sh` → `install-homebrew.sh` → `tools/launch.sh` (`/hbldr`,
-the borrowed PS-Now slot).
+Historically EVO also ran as an elfldr/`/hbldr` ELF payload
+(`build-evoplayer.sh` → `install-homebrew.sh` → `tools/launch.sh`). That
+context has **no graphics path** (`libSceGnmDriver` init crashes,
+`sceKernelLoadStartModule("libSceAgc.sprx")` hangs) and hit the errno-5200
+decode wall — it could never do the headline features. Deploying it as a
+stand-in for the app module kept costing console sessions, so the push scripts
+were **deleted 2026-09-03**. `scripts/build-evoplayer.sh` remains as a host
+compile check (keeps the non-app-module `#else` paths green for #31/#36/the
+modularisation plan) and cannot deploy.
 
-Use payloads **only** for things that need nothing from the graphics/media
-stack: kernel-R/W helpers (`sandbox_unjail`), sandbox/dynlib reconnaissance
-(`agc_probe`, `decoder_test`, `gpu_test`), quick UI-layout checks on the real
-framebuffer. The elfldr host has no path to the GPU (`libSceGnmDriver` init
-crashes, `sceKernelLoadStartModule("libSceAgc.sprx")` hangs); the hbldr slot
-never reached the hardware decoder. Neither is where real playback work
-belongs any more.
+For anything that used to be a "quick UI check on the real framebuffer", use
+the host renderer (`tools/uiview.sh` / `uiplay.sh`) — same RmlUi code and
+assets, no console. Kernel-R/W / dynlib recon probes, if ever needed again,
+are in git history.
 
-`tools/uiview.sh` / `tools/uiplay.sh` cover most UI iteration on the host with
-no console at all — prefer them.
+Historical detail on why the payload context was a dead end:
+`docs/hardware-decode.md`, `docs/evo-pro/phase-1b-app-module.md`.
 
 ---
 
@@ -149,12 +146,9 @@ no console at all — prefer them.
 | `build.sh` | Builds the small sample projects under `projects/`. |
 | `build-ffmpeg.sh` | Builds FFmpeg for the console. Slow, cached in a Linux volume. |
 | `build-prosperoplayer.sh` | Builds the upstream baseline fork. |
-| `build-evoplayer.sh` | Builds EVO Player as an **ELF payload** (`/hbldr`). Fine for UI iteration; not the release path. `--run` installs and launches, `--stage N` picks a 4K product stage. |
-| `package-app.sh` / `deploy-app.sh` | **The release path.** Build + deploy EVO as the `PPSA99039` app module — see [Packaging: two routes](#packaging-two-routes). |
-| `install-homebrew.sh` | Installs an ELF as a homebrew app and optionally launches it. |
+| `build-evoplayer.sh` | **Host compile check only.** Builds `output/elf/EVOPlayer.elf` to keep the non-app-module code path green (#31/#36/modularisation). Hard-errors on `--run`; cannot deploy. `--stage N` picks a 4K product stage. |
+| `package-app.sh` / `deploy-app.sh` | **The one deploy path.** Build + deploy EVO as the `PPSA99039` app module — see [above](#ffpfsc--the-only-route). |
 | `package-pkg.sh` | Produces a distributable PKG. |
-| `deploy.sh` | Sends a minimal ELF probe straight to `ps5-payload-elfldr` on port 9021. |
-| `tools/launch.sh` | Launches the installed homebrew and streams its stdout, refusing to stack instances. Prefer this over a raw `curl` to `/hbldr`. |
 | `gen-compile-commands.sh` | Regenerates `compile_commands.json` for clangd. |
 | `shell.sh` | Drops you into a container shell. |
 
@@ -488,9 +482,9 @@ Which services need to be running on the console:
 
 | Task | Needs |
 |---|---|
-| `deploy.sh`, `tools/sandbox-unjail.sh` | `ps5-payload-elfldr` (9021) |
-| `shot.sh`, `install-homebrew.sh`, `tools/launch.sh` | `ps5-payload-websrv` (8080) |
-| `deploy-app.sh` | `ps5-payload-ftpsrv` (2121) + ShadowMountPlus to mount + launch |
+| `deploy-app.sh`, `tools/evo-remote.sh` | `ps5-payload-ftpsrv` (2121) + ShadowMountPlus to mount + launch |
+| `tools/shot.sh`, `evo-remote.sh` boot-log pull | `ps5-payload-websrv` (8080) |
+| `tools/sandbox-unjail.sh` (rarely) | `ps5-payload-elfldr` (9021) |
 | `klog.sh` | `ps5-payload-klogsrv` (3232) |
 
 All of them need the jailbreak re-run after every console reboot. A port that

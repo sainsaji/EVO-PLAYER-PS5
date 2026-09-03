@@ -2119,8 +2119,7 @@ void draw_bmp_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 
 /* PROSPERO_LAST_FOLDER_V3_START */
 
-#define PROSPERO_LAST_FOLDER_FILE \
-    EVO_DATA_DIR "/evo_last_folder.cfg"
+#define PROSPERO_LAST_FOLDER_FILE evo_data_path("evo_last_folder.cfg")
 
 
 static int prospero_last_folder_is_safe(
@@ -2288,13 +2287,24 @@ static void scan_search_recursive(const char *base_path, const char *rel_path, c
     evo_closedir(dir);
 }
 
+#ifdef EVO_APP_MODULE
+static void evo_persistence_rebind(void);
+#endif
+
 void load_usb_files(void) {
     file_count = 0;
     file_selected = 0;
 
     /* App module: make sure the per-title sandbox is lifted before we try to
-     * read a real path. No-op on the payload build and once promoted. */
+     * read a real path. No-op on the payload build and once promoted. If this
+     * is the call that finally opens the sandbox, config loaded at boot from
+     * the /download0 fallback has to be re-bound to /data (#46). */
+#ifdef EVO_APP_MODULE
+    if (!evo_jailbreak_is_open() && evo_jailbreak_ensure())
+        evo_persistence_rebind();
+#else
     evo_jailbreak_ensure();
+#endif
 
     /* EVO: the source picker sits above every real path. Its "listing" is
      * the fixed source table, not a directory. */
@@ -3277,7 +3287,10 @@ void draw_image_screen(uint32_t *fb) {
 
 
 
-#define RESUME_FILE "/data/ps5_media_resume.txt"
+/* #46: was a bare hard-coded "/data/ps5_media_resume.txt" for every build.
+ * Now under the resolved data root; evo_migrate_legacy_store() copies the old
+ * file across on first bind. */
+#define RESUME_FILE evo_data_path("ps5_media_resume.txt")
 
 void save_resume_position(void) {
     double pos;
@@ -4432,13 +4445,17 @@ int start_video_playback(const char *path) {
 #ifdef EVO_APP_MODULE
     if (evo_alloc_stats) {
         uint64_t live = 0, peak = 0, ln = 0, mf = 0, sf = 0, sa = 0, fa = 0;
+        evo_direct_mem_stats_t dm = {0};
         evo_alloc_stats(&live, &peak, &ln);
         if (evo_alloc_map_info) evo_alloc_map_info(&mf, &sf, &sa, &fa);
+        evo_direct_mem_get_stats(&dm);
         EVO_P8("P8_31_RETURN_OK",
-               "heap live=%lluM peak=%lluM flex_maps=%llu anon_maps=%llu fail=%llu flex_avail=%lluM",
+               "heap live=%lluM peak=%lluM flex_maps=%llu anon_maps=%llu fail=%llu flex_avail=%lluM dmem=%lluM/%lluM hw=%d",
                (unsigned long long)(live >> 20), (unsigned long long)(peak >> 20),
                (unsigned long long)sf, (unsigned long long)sa,
-               (unsigned long long)mf, (unsigned long long)(fa >> 20));
+               (unsigned long long)mf, (unsigned long long)(fa >> 20),
+               (unsigned long long)(dm.allocated_bytes >> 20),
+               (unsigned long long)(dm.total_bytes >> 20), dm.is_direct_hardware_mem);
     } else
 #endif
         EVO_P8("P8_31_RETURN_OK", "playback threads up");
@@ -5496,8 +5513,6 @@ static void prospero_settings_save(void);
 
 static void draw_subtitle_picker(uint32_t *fb)
 {
-    evo_picker_entry rows[16];
-    evo_picker_model m;
     int cap = evo_screen_picker_capacity();
     int first;
     int shown;
@@ -5512,8 +5527,9 @@ static void draw_subtitle_picker(uint32_t *fb)
         shown = cap;
     }
 
-    if (shown > (int)(sizeof(rows) / sizeof(rows[0]))) {
-        shown = (int)(sizeof(rows) / sizeof(rows[0]));
+    /* Never past the RmlUi params' fixed track array (8). */
+    if (shown > 8) {
+        shown = 8;
     }
 
     if (shown < 0) {
@@ -5535,50 +5551,26 @@ static void draw_subtitle_picker(uint32_t *fb)
     int pface = (prospero_subtitle_face == EVO_FACE_SUB) ? 0 :
                 ((prospero_subtitle_face == EVO_FACE_TITLE) ? 2 : 1);
 
-    if (evo_rmlui_is_initialized()) {
-        evo_rmlui_subtitles_params_t p;
-        memset(&p, 0, sizeof(p));
-        p.eyebrow = "SUBTITLES & CLOSED CAPTIONS";
-        p.title = "SELECT SUBTITLE TRACK";
-        p.size_str = size_str;
-        p.preview_text = "Welcome to EVO Player on PlayStation 5";
-        p.preview_face = pface;
-        p.track_count = shown;
+    if (!evo_rmlui_is_initialized()) return;
 
-        for (int i = 0; i < shown; i++) {
-            p.tracks[i].label = evo_subs_labels[first + i];
-            p.tracks[i].detail = evo_subs_details[first + i];
-            p.tracks[i].is_current = (evo_subs_tracks[first + i] == active);
-            p.tracks[i].is_focused = ((first + i) == evo_subs_focus.index);
-        }
-
-        evo_rmlui_update_subtitles(&p);
-        evo_rmlui_render_subtitles(fb, WIDTH, HEIGHT);
-        return;
-    }
+    evo_rmlui_subtitles_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.eyebrow = "SUBTITLES & CLOSED CAPTIONS";
+    p.title = "SELECT SUBTITLE TRACK";
+    p.size_str = size_str;
+    p.preview_text = "Welcome to EVO Player on PlayStation 5";
+    p.preview_face = pface;
+    p.track_count = shown;
 
     for (int i = 0; i < shown; i++) {
-        rows[i].label   = evo_subs_labels[first + i];
-        rows[i].detail  = evo_subs_details[first + i];
-        rows[i].current = (evo_subs_tracks[first + i] == active);
-        rows[i].weak    = evo_subs_weak[first + i];
+        p.tracks[i].label = evo_subs_labels[first + i];
+        p.tracks[i].detail = evo_subs_details[first + i];
+        p.tracks[i].is_current = (evo_subs_tracks[first + i] == active);
+        p.tracks[i].is_focused = ((first + i) == evo_subs_focus.index);
     }
 
-    static char title_buf[64];
-    snprintf(title_buf, sizeof(title_buf), "SELECT TRACK  -  SIZE: %s", size_str);
-
-    memset(&m, 0, sizeof(m));
-
-    m.eyebrow      = "SUBTITLES";
-    m.title        = title_buf;
-    m.entries      = rows;
-    m.first        = first;
-    m.entry_count  = shown;
-    m.count        = evo_subs_count;
-    m.preview_face = prospero_subtitle_face;
-    m.preview_text = NULL;
-
-    evo_screen_picker(fb, &m, &evo_subs_focus);
+    evo_rmlui_update_subtitles(&p);
+    evo_rmlui_render_subtitles(fb, WIDTH, HEIGHT);
 }
 
 
@@ -5896,18 +5888,7 @@ void draw_text_reader_screen(uint32_t *fb)
     m.visible_frac = g_reader_doc.line_count
                      ? (double)cap / (double)g_reader_doc.line_count : 1.0;
 
-    if (evo_rmlui_draw_reader(fb, &m)) return;
-
-    {
-        static const evo_hint hints[4] = {
-            { EVO_GLYPH_DPAD,     "SCROLL" },
-            { EVO_GLYPH_LSTICK,   "PAGE" },
-            { EVO_GLYPH_TRIANGLE, "SIZE" },
-            { EVO_GLYPH_CIRCLE,   "BACK" }
-        };
-        evo_screen_reader(fb, &m, evo_rail_focused, evo_rail_index,
-                          hints, 4);
-    }
+    evo_rmlui_draw_reader(fb, &m);
 }
 
 void draw_player_screen(uint32_t *fb) {
@@ -6075,19 +6056,10 @@ double percentage = 0.0;
         sizeof(metadata)
     );
 
-    if (strlen(title) > 55) {
-        title[52] = '.';
-        title[53] = '.';
-        title[54] = '.';
-        title[55] = 0;
-    }
-
-    if (strlen(metadata) > 76) {
-        metadata[73] = '.';
-        metadata[74] = '.';
-        metadata[75] = '.';
-        metadata[76] = 0;
-    }
+    /* No length cap here any more: the RmlUi OSD marquees a long title
+     * (#media-title) and ellipsises a long metadata line (#media-meta in
+     * playback.rcss) itself. Pre-truncating hid the tail the marquee exists
+     * to reveal (#16 / #44). */
 
     if (osd_visibility > 0) {
         int alpha = osd_visibility;
@@ -6819,8 +6791,7 @@ static void rr_browser_icon(
 
 /* PROSPERO_PERSISTENT_SETTINGS_START */
 
-#define PROSPERO_SETTINGS_FILE \
-    EVO_DATA_DIR "/evo_player_settings.cfg"
+#define PROSPERO_SETTINGS_FILE evo_data_path("evo_player_settings.cfg")
 
 
 
@@ -8124,7 +8095,7 @@ static void evo_rmlui_draw_launch(uint32_t *fb, const evo_launch_model *m,
                                   const evo_grid *g)
 {
     /* Sections 1..6: HOME is left off the shelf, because offering "go home"
-     * on the home screen is noise. Mirrors library_section() in evo_screens.c. */
+     * on the home screen is noise. Mirrors library_section() in evo_layout.c. */
     static const char *lib_icons[EVO_SECTION_COUNT - 1] = {
         "../icons/icon_browse_usb.png",
         "../icons/icon_recent_files.png",
@@ -8228,12 +8199,8 @@ void draw_menu_linear(uint32_t *fb)
     evo_grid_tick(&evo_launch_grid, EVO_BLEED_X, EVO_TILE_PITCH,
                   (uint32_t)perf_now_ms());
 
-    if (evo_rmlui_is_initialized()) {
+    if (evo_rmlui_is_initialized())
         evo_rmlui_draw_launch(fb, &model, &evo_launch_grid);
-        return;
-    }
-
-    evo_screen_launch(fb, &model, &evo_launch_grid);
 }
 
 /* ---- navigation feedback -------------------------------------------------
@@ -8920,10 +8887,7 @@ void draw_usb_browser(uint32_t *fb)
         model.inspect = &inspect;
     }
 
-    if (evo_rmlui_draw_browser(fb, &model, &evo_browser_focus)) return;
-
-    evo_screen_browser(fb, &model, &evo_browser_focus,
-                       evo_rail_focused, evo_rail_index);
+    evo_rmlui_draw_browser(fb, &model, &evo_browser_focus);
 }
 
 /* ===========================================================================
@@ -9135,11 +9099,8 @@ void draw_recent_files_screen(uint32_t *fb)
     m.empty_hint  = "FILES YOU OPEN WILL APPEAR HERE";
     m.empty_icon  = EVO_IC_RECENT;
 
-    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
-                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+    evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                        EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- favourites ---------------------------------------------------------- */
@@ -9183,15 +9144,10 @@ void draw_favorites_screen(uint32_t *fb)
     m.empty_hint  = "PRESS TRIANGLE ON A FILE IN THE BROWSER";
     m.empty_icon  = EVO_IC_FAVORITE;
 
-    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus, hints, 3)) return;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    hints, 3);
+    evo_rmlui_draw_list(fb, &m, &evo_page_focus, hints, 3);
 }
 
 /* ---- settings ------------------------------------------------------------ */
-
-static evo_list_entry evo_settings_rows[EVO_SETTINGS_COUNT];
 
 void draw_settings_screen(uint32_t *fb)
 {
@@ -9213,7 +9169,6 @@ void draw_settings_screen(uint32_t *fb)
         "../icons/icon_palette.png",
         "../icons/icon_developer_tools.png"
     };
-    evo_list_model m;
     int i;
 
     evo_page_sync(&settings_selected, EVO_SETTINGS_COUNT);
@@ -9243,40 +9198,15 @@ void draw_settings_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    for (i = 0; i < EVO_SETTINGS_COUNT; i++) {
-        evo_settings_rows[i].title        = titles[i];
-        evo_settings_rows[i].detail       = details[i];
-        evo_settings_rows[i].icon         = i == 0 ? EVO_IC_RESUME : (i == 1 ? EVO_IC_SUBTITLES : (i == 2 ? EVO_IC_PALETTE : EVO_IC_TOOLS));
-        evo_settings_rows[i].chevron      = 1;
-        evo_settings_rows[i].progress     = -1;
-        evo_settings_rows[i].swatches     = NULL;
-        evo_settings_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "SETTINGS";
-    m.subtitle = "APPLICATION & PLAYBACK PREFERENCES";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_settings_rows;
-    m.count    = EVO_SETTINGS_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- settings: playback & video ----------------------------------------- */
-
-static evo_list_entry evo_settings_playback_rows[EVO_SETTINGS_PLAYBACK_COUNT];
 
 void draw_settings_playback_screen(uint32_t *fb)
 {
     static char profile_val[96];
     static char view_val[32];
-    evo_list_model m;
-    int i;
 
     evo_page_sync(&settings_playback_selected, EVO_SETTINGS_PLAYBACK_COUNT);
 
@@ -9327,44 +9257,7 @@ void draw_settings_playback_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_settings_playback_rows[0].title   = "PLAYBACK PROFILE";
-    evo_settings_playback_rows[0].detail  = profile_val;
-    evo_settings_playback_rows[0].icon    = EVO_IC_SETTINGS;
-    evo_settings_playback_rows[0].chevron = 1;
-
-    evo_settings_playback_rows[1].title   = "DEFAULT ASPECT RATIO";
-    evo_settings_playback_rows[1].detail  = view_val;
-    evo_settings_playback_rows[1].icon    = EVO_IC_ASPECT;
-    evo_settings_playback_rows[1].chevron = 1;
-
-    evo_settings_playback_rows[2].title   = "RESUME PLAYBACK";
-    evo_settings_playback_rows[2].detail  = prospero_resume_playback_enabled ? "ON" : "OFF";
-    evo_settings_playback_rows[2].icon    = EVO_IC_RESUME;
-    evo_settings_playback_rows[2].chevron = 1;
-
-    evo_settings_playback_rows[3].title   = "SURROUND SOUND TEST";
-    evo_settings_playback_rows[3].detail  = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
-    evo_settings_playback_rows[3].icon    = EVO_IC_RESUME;
-    evo_settings_playback_rows[3].chevron = 1;
-
-    for (i = 0; i < EVO_SETTINGS_PLAYBACK_COUNT; i++) {
-        evo_settings_playback_rows[i].progress     = -1;
-        evo_settings_playback_rows[i].swatches     = NULL;
-        evo_settings_playback_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "PLAYBACK & VIDEO";
-    m.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_settings_playback_rows;
-    m.count    = EVO_SETTINGS_PLAYBACK_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- settings: surround sound studio ------------------------------------ */
@@ -9413,14 +9306,6 @@ static int evo_rmlui_draw_surround(uint32_t *fb, const evo_surround_test_model *
 
 void draw_surround_test_screen(uint32_t *fb)
 {
-    static const evo_hint hints[] = {
-        { EVO_GLYPH_CROSS,    "TEST / ACTIVATE" },
-        { EVO_GLYPH_SQUARE,   "5.1 / 7.1 MODE" },
-        { EVO_GLYPH_TRIANGLE, "SILENCE" },
-        { EVO_GLYPH_DPAD,     "NAVIGATE" },
-        { EVO_GLYPH_CIRCLE,   "BACK" }
-    };
-
     static const evo_surround_speaker_info spk[8] = {
         { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 2, 6 },
         { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 3, 8 },
@@ -9441,20 +9326,13 @@ void draw_surround_test_screen(uint32_t *fb)
     m.speakers       = spk;
     m.speaker_count  = 8;
 
-    if (evo_rmlui_draw_surround(fb, &m)) return;
-
-    evo_screen_surround_test(fb, &m, evo_rail_focused, evo_rail_index, hints, 5);
+    evo_rmlui_draw_surround(fb, &m);
 }
 
 /* ---- settings: subtitles ------------------------------------------------ */
 
-static evo_list_entry evo_settings_subtitles_rows[EVO_SETTINGS_SUBTITLES_COUNT];
-
 void draw_settings_subtitles_screen(uint32_t *fb)
 {
-    evo_list_model m;
-    int i;
-
     evo_page_sync(&settings_subtitles_selected, EVO_SETTINGS_SUBTITLES_COUNT);
 
     const char *sub_size_str =
@@ -9491,46 +9369,14 @@ void draw_settings_subtitles_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_settings_subtitles_rows[0].title   = "AUTO-DETECT SUBTITLES";
-    evo_settings_subtitles_rows[0].detail  = prospero_auto_subtitles_enabled ? "ON" : "OFF";
-    evo_settings_subtitles_rows[0].icon    = EVO_IC_SUBTITLES;
-    evo_settings_subtitles_rows[0].chevron = 1;
-
-    evo_settings_subtitles_rows[1].title   = "DEFAULT SUBTITLE SIZE";
-    evo_settings_subtitles_rows[1].detail  = sub_size_str;
-    evo_settings_subtitles_rows[1].icon    = EVO_IC_SUBTITLES;
-    evo_settings_subtitles_rows[1].chevron = 1;
-
-    for (i = 0; i < EVO_SETTINGS_SUBTITLES_COUNT; i++) {
-        evo_settings_subtitles_rows[i].progress     = -1;
-        evo_settings_subtitles_rows[i].swatches     = NULL;
-        evo_settings_subtitles_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "SUBTITLES";
-    m.subtitle = "SETTINGS  -  DETECTION & DEFAULT SIZING";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_settings_subtitles_rows;
-    m.count    = EVO_SETTINGS_SUBTITLES_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- settings: interface & controls ------------------------------------- */
 
-static evo_list_entry evo_settings_interface_rows[EVO_SETTINGS_INTERFACE_COUNT];
-
 void draw_settings_interface_screen(uint32_t *fb)
 {
     static char theme_val[64];
-    static uint32_t theme_swatches[3];
-    evo_list_model m;
-    int i;
 
     evo_page_sync(&settings_interface_selected, EVO_SETTINGS_INTERFACE_COUNT);
 
@@ -9589,72 +9435,14 @@ void draw_settings_interface_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    const evo_theme *cur = evo_theme_current();
-    theme_swatches[0] = cur->accent;
-    theme_swatches[1] = cur->surface;
-    theme_swatches[2] = cur->bg_top;
-
-    evo_settings_interface_rows[0].title        = "THEME";
-    evo_settings_interface_rows[0].detail       = theme_val;
-    evo_settings_interface_rows[0].icon         = EVO_IC_PALETTE;
-    evo_settings_interface_rows[0].chevron      = 1;
-    evo_settings_interface_rows[0].swatches     = theme_swatches;
-    evo_settings_interface_rows[0].swatch_count = 3;
-
-    evo_settings_interface_rows[1].title        = "NAVIGATION SOUNDS";
-    evo_settings_interface_rows[1].detail       = evo_feedback_sound_enabled() ? "ON" : "OFF";
-    evo_settings_interface_rows[1].icon         = EVO_IC_SUBTITLES;
-    evo_settings_interface_rows[1].chevron      = 1;
-    evo_settings_interface_rows[1].swatches     = NULL;
-    evo_settings_interface_rows[1].swatch_count = 0;
-
-    evo_settings_interface_rows[2].title        = "CONTROLLER LIGHTBAR";
-    evo_settings_interface_rows[2].detail       = evo_feedback_lightbar_enabled() ? "THEME ACCENT" : "OFF";
-    evo_settings_interface_rows[2].icon         = EVO_IC_PALETTE;
-    evo_settings_interface_rows[2].chevron      = 1;
-    evo_settings_interface_rows[2].swatches     = NULL;
-    evo_settings_interface_rows[2].swatch_count = 0;
-
-    evo_settings_interface_rows[3].title        = "FOLDERS FIRST";
-    evo_settings_interface_rows[3].detail       = evo_sort_folders_first ? "ON" : "OFF";
-    evo_settings_interface_rows[3].icon         = EVO_IC_FOLDER;
-    evo_settings_interface_rows[3].chevron      = 1;
-    evo_settings_interface_rows[3].swatches     = NULL;
-    evo_settings_interface_rows[3].swatch_count = 0;
-
-    evo_settings_interface_rows[4].title        = "KEYBOARD INPUT";
-    evo_settings_interface_rows[4].detail       = (evo_keyboard_get_type() == EVO_KEYBOARD_TYPE_NATIVE) ? "NATIVE PS5 IME" : "VIRTUAL KEYBOARD";
-    evo_settings_interface_rows[4].icon         = EVO_IC_SETTINGS;
-    evo_settings_interface_rows[4].chevron      = 1;
-    evo_settings_interface_rows[4].swatches     = NULL;
-    evo_settings_interface_rows[4].swatch_count = 0;
-
-    for (i = 0; i < EVO_SETTINGS_INTERFACE_COUNT; i++)
-        evo_settings_interface_rows[i].progress = -1;
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "INTERFACE & CONTROLS";
-    m.subtitle = "SETTINGS  -  THEMES, SOUNDS & CONTROLS";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_settings_interface_rows;
-    m.count    = EVO_SETTINGS_INTERFACE_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- settings: system & diagnostics ------------------------------------- */
 
-static evo_list_entry evo_settings_system_rows[EVO_SETTINGS_SYSTEM_COUNT];
-
 void draw_settings_system_screen(uint32_t *fb)
 {
     static char uninstall_val[48];
-    evo_list_model m;
-    int i;
 
     evo_page_sync(&settings_system_selected, EVO_SETTINGS_SYSTEM_COUNT);
 
@@ -9700,39 +9488,7 @@ void draw_settings_system_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_settings_system_rows[0].title   = "COMPATIBILITY REPORT";
-    evo_settings_system_rows[0].detail  = "WRITES A CODEC REPORT TO USB0";
-    evo_settings_system_rows[0].icon    = EVO_IC_TOOLS;
-    evo_settings_system_rows[0].chevron = 1;
-
-    evo_settings_system_rows[1].title   = "DEBUG OVERLAY";
-    evo_settings_system_rows[1].detail  = show_debug_overlay ? "ON" : "OFF";
-    evo_settings_system_rows[1].icon    = EVO_IC_ASPECT;
-    evo_settings_system_rows[1].chevron = 1;
-
-    evo_settings_system_rows[2].title   = "REMOVE HOME TILE";
-    evo_settings_system_rows[2].detail  = uninstall_val;
-    evo_settings_system_rows[2].icon    = EVO_IC_TRASH;
-    evo_settings_system_rows[2].chevron = 1;
-
-    for (i = 0; i < EVO_SETTINGS_SYSTEM_COUNT; i++) {
-        evo_settings_system_rows[i].progress     = -1;
-        evo_settings_system_rows[i].swatches     = NULL;
-        evo_settings_system_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "SYSTEM & DIAGNOSTICS";
-    m.subtitle = "SETTINGS  -  DIAGNOSTICS & SYSTEM MANAGEMENT";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_settings_system_rows;
-    m.count    = EVO_SETTINGS_SYSTEM_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 
@@ -9751,16 +9507,12 @@ enum {
 };
 
 static int            evo_tools_selected;
-static evo_list_entry evo_tools_rows[EVO_TOOL_COUNT];
 
 /* Forward declarations for Emby navigation */
 static void evo_emby_open_browse(const char *parent_id, const char *title);
 
 void draw_developer_tools_screen(uint32_t *fb)
 {
-    static char report_detail[64];
-    evo_list_model m;
-
     evo_page_sync(&evo_tools_selected, EVO_TOOL_COUNT);
 
     if (evo_rmlui_is_initialized()) {
@@ -9806,49 +9558,7 @@ void draw_developer_tools_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    snprintf(report_detail, sizeof(report_detail),
-             "WRITES A CODEC REPORT TO USB0");
-
-    evo_tools_rows[EVO_TOOL_REPORT].title   = "COMPATIBILITY REPORT";
-    evo_tools_rows[EVO_TOOL_REPORT].detail  = report_detail;
-    evo_tools_rows[EVO_TOOL_REPORT].icon    = EVO_IC_TOOLS;
-    evo_tools_rows[EVO_TOOL_REPORT].chevron = 1;
-
-    evo_tools_rows[EVO_TOOL_OVERLAY].title   = "DEBUG OVERLAY";
-    evo_tools_rows[EVO_TOOL_OVERLAY].detail  = show_debug_overlay ? "ON" : "OFF";
-    evo_tools_rows[EVO_TOOL_OVERLAY].icon    = EVO_IC_ASPECT;
-    evo_tools_rows[EVO_TOOL_OVERLAY].chevron = 1;
-
-    evo_tools_rows[EVO_TOOL_SOUND].title   = "NAVIGATION SOUNDS";
-    evo_tools_rows[EVO_TOOL_SOUND].detail  =
-        evo_feedback_sound_enabled() ? "ON" : "OFF";
-    evo_tools_rows[EVO_TOOL_SOUND].icon    = EVO_IC_SUBTITLES;
-    evo_tools_rows[EVO_TOOL_SOUND].chevron = 1;
-
-    evo_tools_rows[EVO_TOOL_LIGHTBAR].title   = "LIGHTBAR";
-    evo_tools_rows[EVO_TOOL_LIGHTBAR].detail  =
-        evo_feedback_lightbar_enabled() ? "THEME ACCENT" : "OFF";
-    evo_tools_rows[EVO_TOOL_LIGHTBAR].icon    = EVO_IC_PALETTE;
-    evo_tools_rows[EVO_TOOL_LIGHTBAR].chevron = 1;
-
-    for (int i = 0; i < EVO_TOOL_COUNT; i++) {
-        evo_tools_rows[i].progress     = -1;
-        evo_tools_rows[i].swatches     = NULL;
-        evo_tools_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "DEVELOPER TOOLS";
-    m.subtitle = "DIAGNOSTICS & SYSTEM REPORTS";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_tools_rows;
-    m.count    = EVO_TOOL_COUNT;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 static void evo_tools_activate(void)
@@ -10188,11 +9898,8 @@ void draw_emby_setup_screen(uint32_t *fb)
     m.entries  = emby_setup_rows;
     m.count    = EMBY_SETUP_COUNT;
 
-    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
-                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+    evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                        EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 void draw_emby_browse_screen(uint32_t *fb)
@@ -10228,11 +9935,8 @@ void draw_emby_browse_screen(uint32_t *fb)
     m.empty_hint  = emby_is_loading ? "CONTACTING EMBY SERVER OVER HTTP" : "PRESS CIRCLE TO GO BACK";
     m.empty_icon  = EVO_IC_FOLDER;
 
-    if (evo_rmlui_draw_list(fb, &m, &evo_page_focus,
-                            EVO_HINTS_LIST, EVO_HINTS_LIST_N)) return;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
+    evo_rmlui_draw_list(fb, &m, &evo_page_focus,
+                        EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- about --------------------------------------------------------------- */
@@ -10242,18 +9946,10 @@ void draw_emby_browse_screen(uint32_t *fb)
 #define EVO_ABOUT_ROW_CHANGELOG 5
 
 static int            evo_about_selected;
-static evo_list_entry evo_about_rows[EVO_ABOUT_ROWS];
 
 void draw_about_support_screen(uint32_t *fb)
 {
-    static const evo_hint hints[3] = {
-        { EVO_GLYPH_CROSS,  "OPEN" },
-        { EVO_GLYPH_CIRCLE, "BACK" },
-        { EVO_GLYPH_DPAD,   "MOVE" }
-    };
-
     static char themes_detail[64];
-    evo_list_model m;
 
     evo_page_sync(&evo_about_selected, EVO_ABOUT_ROWS);
 
@@ -10318,56 +10014,7 @@ void draw_about_support_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_about_rows[0].title  = "VERSION";
-    evo_about_rows[0].detail = EVO_PLAYER_VERSION;
-    evo_about_rows[0].icon   = EVO_IC_ABOUT;
-
-    evo_about_rows[1].title  = "EVO PLAYER";
-    evo_about_rows[1].detail = "MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
-    evo_about_rows[1].icon   = EVO_IC_RESUME;
-
-    evo_about_rows[2].title  = "BUILT ON";
-    evo_about_rows[2].detail = "FFMPEG AND THE PS5 PAYLOAD SDK";
-    evo_about_rows[2].icon   = EVO_IC_TOOLS;
-
-    evo_about_rows[3].title  = "THEMES";
-    evo_about_rows[3].detail = themes_detail;
-    evo_about_rows[3].icon   = EVO_IC_PALETTE;
-
-    evo_about_rows[4].title  = "SCREENSHOTS";
-    evo_about_rows[4].detail = "PRESS L3 OR R3 IN ANY MENU";
-    evo_about_rows[4].icon   = EVO_IC_ASPECT;
-
-    for (int i = 0; i < EVO_ABOUT_ROWS; i++) {
-        evo_about_rows[i].chevron  = 0;
-        evo_about_rows[i].progress = -1;
-        evo_about_rows[i].info     = 1;   /* facts, not actions */
-    }
-
-    /*
-     * The changelog row is an action, so it opts out of the info styling the
-     * loop above applies: it takes the chevron and the normal label emphasis,
-     * which is the only thing distinguishing "you can press this" from the
-     * five rows above it.
-     */
-    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].title   = "CHANGELOG";
-    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].detail  = "WHAT CHANGED IN EACH RELEASE";
-    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].icon    = EVO_IC_RECENT;
-    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].chevron = 1;
-    evo_about_rows[EVO_ABOUT_ROW_CHANGELOG].info    = 0;
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "ABOUT";
-    m.subtitle = "CREDITS AND PROJECT INFO";
-    m.section  = EVO_SECTION_ABOUT;
-    m.entries  = evo_about_rows;
-    m.count    = EVO_ABOUT_ROWS;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    hints, 3);
 }
 
 /* ---- changelog ----------------------------------------------------------- */
@@ -10445,11 +10092,6 @@ static int evo_rmlui_draw_changelog(uint32_t *fb, const evo_changelog_model *m,
 
 void draw_changelog_screen(uint32_t *fb)
 {
-    static const evo_hint hints[2] = {
-        { EVO_GLYPH_CIRCLE, "BACK" },
-        { EVO_GLYPH_DPAD,   "MOVE" }
-    };
-
     evo_changelog_model m;
 
     evo_page_sync(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT);
@@ -10458,40 +10100,17 @@ void draw_changelog_screen(uint32_t *fb)
     m.releases      = EVO_CHANGELOG_RELEASES;
     m.release_count = EVO_CHANGELOG_RELEASE_COUNT;
 
-    if (evo_rmlui_draw_changelog(fb, &m, &evo_page_focus)) return;
-
-    evo_screen_changelog(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                         hints, 2);
+    evo_rmlui_draw_changelog(fb, &m, &evo_page_focus);
 }
 
 /* ===========================================================================
  * EVO: modal screens.
  *
- * The resume prompt, the end-of-playback prompt and media info. All three
- * drew their own panel, their own button row and their own scrim - about
- * 25,000 characters between them - and all three are now models handed to
- * evo_screen_dialog() or evo_screen_info().
- *
- * They are modal: reached from playback rather than from the rail, drawn over
- * whatever is already in the framebuffer, and they show no navigation rail.
+ * The resume prompt, the end-of-playback prompt and media info: reached from
+ * playback rather than from the rail, drawn over whatever is already in the
+ * framebuffer, and they show no navigation rail. All three render through
+ * RmlUi (evo_rmlui_render_dialog / _mediainfo).
  * ======================================================================== */
-
-static const uint32_t *evo_modal_art(int *w, int *h)
-{
-    /* Whatever thumbnail already exists for the current file. This never
-     * decodes anything: a prompt that stalls for half a second before it
-     * appears is worse than a prompt without a picture. */
-    if (prospero_browser_preview_valid &&
-        current_media_path[0] &&
-        strcmp(prospero_browser_preview_path, current_media_path) == 0) {
-        *w = PROSPERO_BROWSER_PREVIEW_W;
-        *h = PROSPERO_BROWSER_PREVIEW_H;
-        return prospero_browser_preview_pixels;
-    }
-
-    *w = *h = 0;
-    return NULL;
-}
 
 void draw_resume_prompt(uint32_t *fb)
 {
@@ -10528,26 +10147,7 @@ void draw_resume_prompt(uint32_t *fb)
 
         evo_rmlui_update_dialog(&dlg);
         evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    static const evo_dialog_action actions[2] = {
-        { EVO_GLYPH_CROSS,  "RESUME"     },
-        { EVO_GLYPH_CIRCLE, "START OVER" }
-    };
-    evo_dialog_model m;
-    int aw, ah;
-    memset(&m, 0, sizeof(m));
-    m.eyebrow      = "RESUME PLAYBACK";
-    m.title        = title[0] ? title : pending_resume_path;
-    m.detail       = detail;
-    m.progress     = evo_progress_permille(pending_resume_pos, media_duration_sec);
-    m.actions      = actions;
-    m.action_count = 2;
-    m.art.pixels   = evo_modal_art(&aw, &ah);
-    m.art.w        = aw;
-    m.art.h        = ah;
-    evo_screen_dialog(fb, &m);
 }
 
 static void draw_playback_finished_screen(uint32_t *fb)
@@ -10575,27 +10175,7 @@ static void draw_playback_finished_screen(uint32_t *fb)
 
         evo_rmlui_update_dialog(&dlg);
         evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    static const evo_dialog_action actions[3] = {
-        { EVO_GLYPH_CROSS,    "REPLAY" },
-        { EVO_GLYPH_TRIANGLE, "NEXT"   },
-        { EVO_GLYPH_CIRCLE,   "BACK"   }
-    };
-    evo_dialog_model m;
-    int aw, ah;
-    memset(&m, 0, sizeof(m));
-    m.eyebrow      = "FINISHED";
-    m.title        = title[0] ? title : current_media_path;
-    m.detail       = "PLAYBACK REACHED THE END OF THE FILE";
-    m.progress     = 1000;
-    m.actions      = actions;
-    m.action_count = 3;
-    m.art.pixels   = evo_modal_art(&aw, &ah);
-    m.art.w        = aw;
-    m.art.h        = ah;
-    evo_screen_dialog(fb, &m);
 }
 
 /* Defined with the scrubbing code further down; the prompt needs to report
@@ -10639,35 +10219,13 @@ static void draw_exit_confirm_screen(uint32_t *fb)
 
         evo_rmlui_update_dialog(&dlg);
         evo_rmlui_render_dialog(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    static const evo_dialog_action actions[2] = {
-        { EVO_GLYPH_CIRCLE, "KEEP WATCHING" },
-        { EVO_GLYPH_CROSS,  "STOP"          }
-    };
-    evo_dialog_model m;
-    int aw, ah;
-    memset(&m, 0, sizeof(m));
-    m.eyebrow      = "STOP PLAYBACK";
-    m.title        = title[0] ? title : current_media_path;
-    m.detail       = detail;
-    m.progress     = evo_progress_permille(position, media_duration_sec);
-    m.actions      = actions;
-    m.action_count = 2;
-    m.art.pixels   = evo_modal_art(&aw, &ah);
-    m.art.w        = aw;
-    m.art.h        = ah;
-    evo_screen_dialog(fb, &m);
 }
 
 
 void draw_media_info_screen(uint32_t *fb)
 {
-    static char      size_s[48], dur_s[32], res_s[32], out_s[40];
-    static evo_prop  props[8];
-    evo_info_model   m;
-    int aw, ah, n = 0;
+    static char size_s[48], dur_s[32], res_s[32];
 
     const MediaMetadata *md = &current_metadata;
 
@@ -10678,9 +10236,6 @@ void draw_media_info_screen(uint32_t *fb)
         snprintf(res_s, sizeof(res_s), "%d x %d", md->width, md->height);
     else
         res_s[0] = 0;
-
-    snprintf(out_s, sizeof(out_s), "%d CH  -  %d HZ",
-             evo_audio_channels, detected_audio_rate);
 
     if (evo_rmlui_is_initialized()) {
         char clean_title[192];
@@ -10760,32 +10315,7 @@ void draw_media_info_screen(uint32_t *fb)
 
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    props[n].key = "CONTAINER";  props[n++].value = md->container;
-    props[n].key = "SIZE";       props[n++].value = size_s;
-    props[n].key = "LENGTH";     props[n++].value = dur_s;
-    props[n].key = "RESOLUTION"; props[n++].value = res_s;
-    props[n].key = "VIDEO";      props[n++].value = md->has_video
-                                                    ? md->video_codec : NULL;
-    props[n].key = "AUDIO";      props[n++].value = md->has_audio
-                                                    ? md->audio_codec : NULL;
-    props[n].key = "OUTPUT";     props[n++].value = out_s;
-    props[n].key = "SUBTITLES";  props[n++].value = md->has_subtitles
-                                                    ? "YES" : "NO";
-
-    memset(&m, 0, sizeof(m));
-    m.title      = "MEDIA INFO";
-    m.subtitle   = md->title[0] ? md->title : current_media_path;
-    m.props      = props;
-    m.prop_count = n;
-    m.art_badge  = dur_s[0] ? dur_s : NULL;
-    m.art.pixels = evo_modal_art(&aw, &ah);
-    m.art.w      = aw;
-    m.art.h      = ah;
-
-    evo_screen_info(fb, &m);
 }
 
 /* ---- side navigation ------------------------------------------------------
@@ -10870,8 +10400,6 @@ static void evo_rail_activate(void)
  * see evo_screen_section(). It is a four-row list and nothing more; it used
  * 273 lines of bespoke chrome to say so.
  */
-static evo_list_entry evo_profile_rows[4];
-
 void draw_profile_screen(uint32_t *fb)
 {
     static const char *names[4] = {
@@ -10910,46 +10438,13 @@ void draw_profile_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_list_model m;
-    char           badge[48];
-    int            i;
-
-    for (i = 0; i < 4; i++) {
-        evo_profile_rows[i].title    = names[i];
-        evo_profile_rows[i].detail   =
-            ((PlaybackProfile)i == current_profile) ? "ACTIVE" : blurbs[i];
-        evo_profile_rows[i].icon     = EVO_IC_SETTINGS;
-        evo_profile_rows[i].chevron  = 0;
-        evo_profile_rows[i].progress = -1;
-        /* The active one states a fact; the rest offer an action. */
-        evo_profile_rows[i].info     =
-            ((PlaybackProfile)i == current_profile);
-        evo_profile_rows[i].swatches     = NULL;
-        evo_profile_rows[i].swatch_count = 0;
-    }
-
-    snprintf(badge, sizeof(badge), "ACTIVE  %s",
-             profile_name(current_profile));
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "PLAYBACK PROFILE";
-    m.subtitle = "HOW AGGRESSIVELY THE DECODER IS TUNED";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_profile_rows;
-    m.count    = 4;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* ---- theme select screen --------------------------------------------------
  *
  * Child of SETTINGS (Interface & Controls), lists built-in and USB themes.
  */
-static evo_list_entry evo_theme_rows[EVO_THEME_MAX];
 
 void draw_theme_select_screen(uint32_t *fb)
 {
@@ -10998,33 +10493,7 @@ void draw_theme_select_screen(uint32_t *fb)
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
-        return;
     }
-
-    evo_list_model m;
-    int i;
-
-    for (i = 0; i < count; i++) {
-        const char *name = evo_theme_name(i);
-        evo_theme_rows[i].title    = name ? name : "THEME";
-        evo_theme_rows[i].detail   = (i == cur_idx) ? "ACTIVE" : "SELECT THEME";
-        evo_theme_rows[i].icon     = EVO_IC_PALETTE;
-        evo_theme_rows[i].chevron  = 0;
-        evo_theme_rows[i].progress = -1;
-        evo_theme_rows[i].info     = (i == cur_idx);
-        evo_theme_rows[i].swatches     = NULL;
-        evo_theme_rows[i].swatch_count = 0;
-    }
-
-    memset(&m, 0, sizeof(m));
-    m.title    = "COLOR THEMES";
-    m.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
-    m.section  = EVO_SECTION_SETTINGS;
-    m.entries  = evo_theme_rows;
-    m.count    = count;
-
-    evo_screen_list(fb, &m, &evo_page_focus, evo_rail_focused, evo_rail_index,
-                    EVO_HINTS_LIST, EVO_HINTS_LIST_N);
 }
 
 /* PROSPERO_EXACT_MENU_RENDER_END */
@@ -12072,27 +11541,90 @@ static void draw_fps_overlay(uint32_t *fb)
     evo_text_right(fb, x + w - 12, text_y, buf, text_col, EVO_FACE_SMALL);
 }
 
+/* Byte-copy src -> dst. Returns 1 on a complete copy, 0 otherwise (incl. no
+ * src). Used only for the small text config files below. */
+static int evo_copy_file(const char *src, const char *dst)
+{
+    FILE *in = fopen(src, "rb");
+    if (!in)
+        return 0;
+    FILE *out = fopen(dst, "wb");
+    if (!out) { fclose(in); return 0; }
+
+    char b[4096];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(b, 1, sizeof b, in)) > 0) {
+        if (fwrite(b, 1, n, out) != n) { ok = 0; break; }
+    }
+    fclose(in);
+    if (fclose(out) != 0)
+        ok = 0;
+    return ok;
+}
+
 /*
- * App data (favorites, recent, settings, last-folder, Emby config) lives at
- * EVO_DATA_DIR so the player works with no USB stick present at all. As an
- * elfldr payload that is /data/evoplayer/; as the PPSA99039 app module the
- * sandbox has no /data, so it is /download0/evoplayer/ (see evo_data_path.h).
- * Nothing else in the tree ever created that directory - addon_emby.c has
- * been writing EMBY_CONF_PATH there without one existing, which silently
- * failed on any console that never installed the Media-tile launcher.
+ * One-time migration of the config store to its durable home (#46). Two legacy
+ * locations to sweep, never overwriting a file already at the new root:
+ *   - "/data/ps5_media_resume.txt" - the bare resume file every build wrote
+ *     before #46 routed it through evo_data_path().
+ *   - "/download0/evoplayer/*" - where the app module wrote everything while
+ *     EVO_DATA_DIR was a compile-time string; that mount does not survive a
+ *     relaunch, but the *current* boot can still read it once.
+ */
+static void evo_migrate_legacy_store(void)
+{
+    const char *root = evo_data_dir();   /* stable literal, safe to hold */
+    char dst[512];
+
+    snprintf(dst, sizeof dst, "%s/ps5_media_resume.txt", root);
+    if (access(dst, F_OK) != 0 &&
+        evo_copy_file("/data/ps5_media_resume.txt", dst))
+        evo_bt("persistence: migrated ps5_media_resume.txt from /data");
+
+#ifdef EVO_APP_MODULE
+    if (strcmp(root, "/download0/evoplayer") != 0) {
+        static const char *const leaves[] = {
+            "evo_recent.txt", "evo_favorites.txt", "evo_last_folder.cfg",
+            "evo_player_settings.cfg", "emby.conf", "ps5_media_resume.txt",
+        };
+        for (size_t i = 0; i < sizeof leaves / sizeof leaves[0]; i++) {
+            char src[512];
+            snprintf(src, sizeof src, "/download0/evoplayer/%s", leaves[i]);
+            snprintf(dst, sizeof dst, "%s/%s", root, leaves[i]);
+            if (access(dst, F_OK) != 0 && evo_copy_file(src, dst))
+                evo_bt("persistence: migrated %s from /download0", leaves[i]);
+        }
+    }
+#endif
+}
+
+/*
+ * App data (favorites, recent, settings, last-folder, Emby config) lives under
+ * evo_data_dir() so the player works with no USB stick present at all. The root
+ * is resolved at runtime (see evo_data_path.h): /data/evoplayer once the app
+ * sandbox is open (the payload: always), /download0/evoplayer only as a
+ * pre-unjail fallback. Nothing else in the tree ever created that directory.
  */
 static void evo_ensure_data_dir(void)
 {
-#ifndef EVO_APP_MODULE
-    mkdir("/data", 0777);   /* /download0 always exists in the app sandbox */
+    evo_mkdir("/data");   /* payload: ensure the parent; app: no-op / EEXIST */
+    evo_mkdir(evo_data_dir());
+
+#ifdef EVO_APP_MODULE
+    evo_bt("persistence: data root = %s (%s)", evo_data_dir(),
+           evo_jailbreak_is_open() ? "sandbox open"
+                                   : "FALLBACK - unjail not up yet");
 #endif
-    mkdir(EVO_DATA_DIR, 0777);
+
+    evo_migrate_legacy_store();
 
 #ifdef EVO_BOOT_TRACE
     /* Exercise evo_readdir() on a directory that actually has files - the
      * browser's /mnt/usb0 is ENOENT until sandbox-unjail, so it can't. */
     {
-        evo_dir_t *d = evo_opendir(EVO_DATA_DIR);
+        const char *root = evo_data_dir();
+        evo_dir_t *d = evo_opendir(root);
         int n = 0;
         char first[80] = "";
         if (d) {
@@ -12105,10 +11637,35 @@ static void evo_ensure_data_dir(void)
             evo_closedir(d);
         }
         evo_bt("readdir %s: %s%d entries%s",
-               EVO_DATA_DIR, d ? "" : "OPEN FAILED ", n, first);
+               root, d ? "" : "OPEN FAILED ", n, first);
     }
 #endif
 }
+
+#ifdef EVO_APP_MODULE
+/*
+ * The boot self-unjail (evo_jailbreak_self, ~1.2s) can lose the timing race
+ * with the jailbreak daemon. Config then loads from the /download0 fallback and
+ * later saves would split across two roots. Once evo_jailbreak_ensure() finally
+ * opens the sandbox (browser entry), re-point the data root at /data and reload
+ * everything that was read at boot. Cheap - all small text files, each loader
+ * clears before it reads. (#46)
+ */
+static void evo_persistence_rebind(void)
+{
+    evo_data_path_rebind();
+    evo_ensure_data_dir();
+    recent_load();
+    favorites_load();
+    evo_theme_reset();          /* re-scan themes/ under the new root */
+    prospero_settings_load();   /* calls evo_theme_init() + set_by_name() */
+    emby_init();
+    /* Not prospero_last_folder_load() - the user has already entered the
+     * browser by now; re-seeding current_path would yank them out of it. The
+     * file still saves to /data and restores on the next boot. */
+    evo_bt("persistence: rebound to %s after late unjail", evo_data_dir());
+}
+#endif
 
 #ifdef EVO_APP_MODULE
 /* Route FFmpeg's own diagnostics to the app-module notification channel -
@@ -12174,12 +11731,16 @@ int main(void) {
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
                              * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
                              * sceAgcInit must run first (#27). */
-#ifdef EVO_APP_MODULE
-    /* #27 GPU Step 2: bring the sceAgc present path up for the bare player
-     * build too (evo_agc_probe already does this under --agc-probe; pp_agc_init
-     * is idempotent). MUST be pre-unjail, same reason as evo_vdec_probe.
-     * pp_agc_available() gates the GPU present in pp_playback's V8 branch;
-     * hardware-verified through LinkShaders, render_frame still unproven. */
+#if defined(EVO_APP_MODULE) && defined(EVO_AGC_PROBE)
+    /* #27 GPU Step 2: arm the sceAgc NV12 present path. Gated behind
+     * --agc-probe (was unconditional). render_frame / pp_agc_present_nv12 is
+     * still unproven on hardware and it HANGS then crashes GTA VI 4K
+     * (2026-09-03): once armed, the native decoder emits NV12 and pp_playback's
+     * V8 branch routes it into pp_agc_present_nv12, whose GPU submit
+     * (sceAgcDriverSubmitDcb -> sceAgcSuspendPoint) never returns. Without this
+     * the V8 4K path uses the CPU converter (YUV420P, #31-proven). Under
+     * --agc-probe, evo_agc_probe() above already calls pp_agc_init; this call
+     * is the redundant idempotent one. MUST be pre-unjail (evo_vdec_probe). */
     pp_agc_init(1920, 1080, 0);
     evo_boot_log_flush();
 #endif
@@ -12191,8 +11752,10 @@ int main(void) {
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
 #endif
-    /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
-    evo_direct_mem_init(64 * 1024 * 1024);
+    /* Initialize the 2MB-aligned Direct Memory Region. Sized (#6) for the 4K
+     * CPU video working set so the rotate ring / pp_playback display / VO
+     * linear staging come from this fixed slab instead of churning the heap. */
+    evo_direct_mem_init(EVO_DIRECT_MEM_POOL_BYTES);
 
     /*
      * First, before anything draws or any thread starts. The glyph tables are

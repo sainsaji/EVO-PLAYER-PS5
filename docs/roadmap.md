@@ -8,19 +8,60 @@ the map across all of them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
+For a **visual** view of the same issues — kanban, priority table, milestone
+timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
+[project-tracking.md](project-tracking.md) has the one-command setup.
+
 Priority labels track this order: **critical** #27 (render_frame ported + wired
-09-03, awaiting a first hardware run) · **high** #46, #44, #32, #36 · **medium** #9,
-#16, #6, #37/#38/#39/#41, #33, #34, #35, #42 · **low** the rest.
-`independent` = no cross-deps, work any time in parallel.
+09-03, awaiting a first hardware run) · **high** #32, #36 · **medium** #6, #35,
+#37/#38/#39/#41, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51, #52,
+the rest. `independent` = no cross-deps, work any time in parallel.
+
+**Closed 2026-09-03 (later):** **#46** (persistence — hardware-verified,
+`788b1a0`), **#44** (RmlUi parity signed off, legacy screen renderer deleted) +
+**#16** (text clamps, absorbed into #44). The #16 fixes had been shadowed on
+hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` made
+`deploy-app.sh --ffpfsc` re-sync the asset tree. #35 is now unblocked (part B's
+dependency #44 is done); #28 still waits on #27.
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
-`rmlui` = #44, #45, #16, #28 · `subtitles` = #35, #42, #43. (#26 closed
+`rmlui` = #45, #28, #49 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
+`modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)). (#26 closed
 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
-H.264 plays.)
+H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
+only a hardware pass left.)
+
+**New stories (2026-09-03):** #47 native audio decode + Dolby/DTS bitstream
+passthrough (v1.1.0, alongside `native-decode`) · #48 re-probe controller
+vibration from the app module + haptics feedback channel (v0.9.0) · #49
+consolidate the RmlUi UI seam — drop the model→params double hop, move the
+screen builders out of `main.c` (v0.9.0, `rmlui`, do before #28) · **#50 +
+#51 are sub-issues of #46** (spun out of its implementation): #50 grow the host
+test suite over the runtime data-root logic + persistence parsers (v0.9.0,
+`independent`, CI wiring stays with #17) · #51 quiet the boot breadcrumbs —
+keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
+`app-module`).
+
+**2026-09-03 (later):** #52 stand up the GitHub Project board (tooling in
+`f7a340e`; `docs/project-tracking.md`) · #53 `main.c` Track-B carve-up —
+`main.c` logic is at 0% coverage because it can't be host-linked; #53 is the
+prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
+New label `modularisation` = #49 + #53.
 
 ---
 
 ## Dependency graph
+
+These edges are also wired as **native GitHub relationships** (2026-09-03) so
+the issue UI shows blockers / sub-tasks directly:
+
+- **Sub-issues:** #46 → #50, #51  (#44 → #16 both ✅ closed)
+- **Blocking → blocked:** #6 → #27 → #28 · #35 → #43 · #37 → #38 · #8 → #38 ·
+  #53 → #50 (`main.c` logic can't be host-linked for tests until the carve-up).
+  #44's edges cleared on close: #28 now waits only on #27, #35 is unblocked.
+
+Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
+/ Related) — softer "coordinate with" / "do before" links live there only.
 
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
@@ -42,11 +83,12 @@ H.264 plays.)
                                      plays real-time on native decode (2026-09-03)
 
   RmlUi migration  (label: rmlui — #25 umbrella retired; screens built)
-    #44 per-screen parity sign-off + delete dead legacy screen code  ◀── blocks #28
-    #16 text clamping / widget overflow  (folded into #44's pass)
+    #44 per-screen parity sign-off + delete legacy screen code  ✅ CLOSED 09-03
+    #16 text clamping / widget overflow  ✅ CLOSED 09-03 (with #44)
     #45 icon swap (Lucide + Kenney, approved)
-    #35 part B: on-video caption overlay off legacy rr_text → RmlUi
+    #35 part B: on-video caption overlay off legacy rr_text → RmlUi  (unblocked)
     #28 RenderInterface → sceAgc + delete the CPU rasteriser (GPU Step 3, after #27)
+    #49 seam cleanup — drop model→params hop, screen builders out of main.c
 
   native hw decode  (label: native-decode, v1.1.0 — #29 umbrella retired)
     #30 evo_vdec.h seam ✅ CLOSED (FFmpeg-parity regression check moved to #38)
@@ -71,16 +113,19 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | # | Story | Reads |
 |---|---|---|
 | **#17** | CI: unit tests, coverage, Sonar | `docs/tooling.md`, `docs/validation.md`, `docs/converter-perf.md`; `.github/workflows/`, `tools/bench.sh`, `tools/prof_rmlui.sh` |
+| **#52** | Stand up the "EVO Player Roadmap" GitHub Project board — tooling landed (`f7a340e`); needs `gh auth refresh -s project`, one script run, and the views + built-in workflows set up in the UI | `scripts/setup-github-project.sh`, `.github/workflows/add-to-project.yml`, `docs/project-tracking.md` |
+| **#53** | `main.c` carve-up, **Track B** — extract `evo_settings` / `evo_osd` / `evo_media_meta` / `evo_browser` / per-screen draw etc. as leaf modules (pure moves, no behaviour change). `main.c` is ~12.9k lines and links the whole runtime, so its logic is at **0% coverage**; this is the lever on that. Blocks #50's `main.c` portion. `modularisation` label with #49 | `docs/modularisation-plan.md` (§ Track B, § Rules), `projects/evoplayer/main.c` (`/* PROSPERO_*_START/END */` markers), `projects/evoplayer/Makefile` (`_SRCS`), `tools/{bench,uiview}.sh` (parity checks) |
 | **#33** | Clean up the unattended hw-test harness — **partly done**: `tools/evo-remote.sh` (scriptable `play`/`seek`/`watch` over FTP) + `src/evo_usb_remote.c` (`-DEVO_USB_REMOTE`) replaced the compile-time autoplay; `note()` USB log gated to `-DEVO_VDEC_LOG`; payload build now invalidates the app cflags stamp. Remaining: fully hands-off launch (shsrv), `app_ctl` launch fix | `tools/evo-remote.sh`, `src/evo_usb_remote.c`, `scripts/package-app.sh` (`--usb-remote`) |
 | **#9** | Emby shows raw stream URL, not the title | `docs/addons-emby-nuvio.md`; `projects/evoplayer/addons/src/addon_emby.c`, `ui_rml` list rendering (`evo_rmlui_bridge.cpp` / `evo_rmlui_app.cpp` list path) |
 | **#8** | Codec-sweep decode latency / drop metrics | `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/validation.md`; `pp/include/pp_pipeline_metrics.h`, `main.c` perf counters + `EVO_DIAG_FPS`, `projects/*_test/` |
 | **#42** | Universal subtitle cue counts — demux-probe count for non-mkvmerge containers so decoy tracks lose the ranking (`prospero_subtitle_declared_cues` / `_score_stream`) | `docs/backlog.md` §6; `media/src/evo_subtitle.c`, `media/src/prospero_thumbnail.c` (probe pattern), `main.c` picker path |
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
 | **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
-| **#46** | App module persists **nothing** (settings/recent/favorites/resume) — the ELF payload did. `/download0/evoplayer/` isn't durable for a fake-signed ShadowMount title, and/or `evo_jailbreak_self()` (now at boot, was added after task 6 verified persistence) detaches it. Fix: route to `/data/evoplayer/` post-unjail like the payload; `evo_data_path()` becomes a runtime pick; `RESUME_FILE` too; migrate old config | `src/evo_data_path.{c,h}`, `src/evo_jailbreak.c`, `main.c` (`evo_ensure_data_dir` ~L12084, `RESUME_FILE` ~L3280), `addons/src/addon_emby.c`, `docs/evo-pro/phase-1b-app-module.md` §5 |
+| ~~#46~~ | ✅ **CLOSED 2026-09-03, hardware-verified.** Runtime data-root resolution (`/data/evoplayer` once `evo_jailbreak_is_open()`, `/download0` fallback) + `evo_mkdir`=`sceKernelMkdir` + `evo_persistence_rebind()` + one-shot store migration. `788b1a0`. Follow-ups: #50 (tests), #51 (breadcrumbs). |
+| **#50** | *(sub-issue of #46)* Grow the host test suite over the #46 runtime data-root logic (`evo_data_path` join / rebind / `evo_mkdir`) and the persistence parsers (`evo_recent`, `evo_favorites`), plus `evo_theme` parse + `evo_theme_reset`, `evo_layout` geometry. Host-only; CI wiring stays with #17 | `tests/run_tests.sh` (SRCS), `tests/test_runner.c`, `src/evo_data_path.c`, `src/evo_recent.c`, `src/evo_favorites.c`, `pp/src/evo_theme.c`, `ui/src/evo_layout.c` |
+| **#51** | *(sub-issue of #46)* Quiet the boot breadcrumbs — split the on-screen notification popup from the durable channels: keep `sceKernelDebugOutText` (klog) + `/mnt/usb0/evo_boot.log`, move `sceKernelSendNotificationRequest` behind an opt-in `EVO_BOOT_TRACE_POPUP` (`--breadcrumbs`). Drop `-DEVO_BOOT_TRACE=1` from the default `APP_DEFS` | `include/evo_boot_trace.h`, `src/evo_boot_log.c`, `include/evo_boot_log.h`, `scripts/package-app.sh`, `docs/tooling.md`, `docs/evo-pro/status.md` |
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
-| **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**
@@ -91,13 +136,25 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 Demanding-4K playback needs native decode → **done (#31)**; the rest of that
 work is the **`native-decode`** label (§6).
 
-### 2 · `#6` — rotate buffers → direct memory *(before #27)*
+### 2 · `#6` — rotate buffers → direct memory *(before #27)* — **CODE DONE, hw-verify pending**
 
 Small, memory hygiene, and it touches `pp_videoout.c` which #27 rewrites — land
 it first to avoid a merge tangle.
 
 - Reads: `docs/improvements-roadmap.md` §P2, `docs/converter-perf.md` Finding 7
-- Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `main.c` (`VIDEO_ROTATE_BUFFERS`)
+- Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `media/src/evo_playback.c` (`VIDEO_ROTATE_BUFFERS`), `main.c`
+- **Branch `feat/6-video-buffers-direct-mem` (PR #54) — hardware-verified 2026-09-03:**
+  rotate ring 8→3 + `evo_direct_mem` slab (grow-only). `P8_31_RETURN_OK` logs
+  `dmem=`. 1080p ✅, 4K TearsOfSteel ✅.
+  - Routing `pp_playback` display / `pp_videoout` `cpu_bufs` through the slab
+    + a 192 MiB pool were **backed out** — hung GTA 4K (a latent 4K V3-fallback
+    overflow corrupts the *shared* slab). Overflow filed as **#55**.
+  - The GTA 4K hang was actually **`90c890b` (#27's unproven sceAgc NV12 present
+    path), armed by default in `main.c`**. This PR also gates `pp_agc_init`
+    behind `--agc-probe` so the default build uses the CPU V8 converter
+    (#31-proven) and the branch is deployable again. Commented on #27.
+  - Seek on native 4K → "too demanding" (`0x811d0303` after flush) is
+    pre-existing, unrelated — native-decode seek robustness (#32 area).
 
 ### 3 · `#4` — 10-bit fast path *(optional CPU stopgap)*
 
@@ -167,8 +224,8 @@ work as discrete stories:
 
 | Story | What | State |
 |---|---|---|
-| **#44** | Per-screen parity sign-off vs `main` + delete the dead legacy screen code (`ui/src/evo_chrome.c`, `evo_screens.c`, shadowed `draw_*_screen`) — **blocks #28** | open, high |
-| **#16** | Text clamping / widget overflow / title collisions — folded into #44's pass | open |
+| ~~#44~~ | ✅ **CLOSED 2026-09-03.** Per-screen RmlUi parity signed off on hardware; legacy `evo_screens.c`/`evo_chrome.c` deleted (PR2). |
+| ~~#16~~ | ✅ **CLOSED 2026-09-03** with #44. RCSS clamps across OSD / dialog / inspector / media-info / settings / changelog / hero. Were shadowed on hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` (`deploy-app.sh --ffpfsc` now re-syncs assets). |
 | **#45** | Icon swap — Lucide concept icons + Kenney controller glyphs (approved, `docs/icon-swap-handoff.md`) | open, low |
 | **#35** part B | On-video **caption** rendering off legacy `rr_text` → RmlUi | open |
 | **#28** | Bind `Rml::RenderInterface` → `sceAgc` + delete the CPU coverage rasteriser (GPU Step 3, after #27) | open, low |

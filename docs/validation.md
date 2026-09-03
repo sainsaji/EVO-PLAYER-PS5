@@ -160,3 +160,23 @@ code, with the reasoning recorded at the top of each `main.c`:
 Append to this file: date, firmware raw word, payload sha256, what you saw,
 and any error codes. A photograph of the screen is worth more than a
 description for the VideoOut tests.
+
+---
+
+## UI parity (#44)
+
+Per-screen RmlUi-vs-`main` sign-off lives in
+[rmlui-parity.md](rmlui-parity.md). Every screen is **OK / OK\*** on the host
+render pairs (`tools/uiview_playback_rml.sh` vs `tools/uiview.sh --all`), with
+#16 folded in. The following still need a hardware pass on a jailbroken PS5
+(app module, `PPSA99039`) before the legacy screen code is deleted:
+
+| Check | Why host can't confirm it | Status |
+|---|---|---|
+| Theme switch repaint on device | RmlUi applies theme colours per-element in `Update*State`; a missed element only shows when switching themes live | not run |
+| Playback OSD over live decoded video | Host renders the OSD over a flat fill; real compositing is over a moving 4K frame (BGRA `0xAABBGGRR`) | not run |
+| Dialog / Media Info / subtitle picker over video | Same — overlay-over-video path | not run |
+| OSD title marquee smoothness | Host steps a fake clock; real cadence is the player's frame loop while paused | not run |
+| D-pad focus / navigation order + timing | Host fixtures set focus directly; real nav is `evo_focus` / `evo_nav` driving the DOM | not run |
+
+Record results here (date, `.ffpfsc` sha, screen, pass/fail, photo).

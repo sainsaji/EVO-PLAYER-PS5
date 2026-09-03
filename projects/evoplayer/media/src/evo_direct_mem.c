@@ -23,7 +23,9 @@ extern int sceKernelMapDirectMemory(void **addr, size_t length, int protection,
 extern int sceKernelReleaseDirectMemory(off_t physAddr, size_t length);
 #endif
 
-#define EVO_DIRECT_MEM_DEFAULT_SIZE (64 * 1024 * 1024) /* 64 MiB */
+/* Lazy-init size when a caller allocates before evo_direct_mem_init() runs.
+ * The real pool is sized by main.c (EVO_DIRECT_MEM_POOL_BYTES, #6). */
+#define EVO_DIRECT_MEM_DEFAULT_SIZE EVO_DIRECT_MEM_POOL_BYTES
 #define EVO_DIRECT_MEM_ALIGN        64                  /* 64-byte SIMD alignment */
 #define EVO_CHUNK_HEADER_SIZE       ((sizeof(mem_chunk_header_t) + EVO_DIRECT_MEM_ALIGN - 1) & ~(EVO_DIRECT_MEM_ALIGN - 1))
 
@@ -71,20 +73,45 @@ int evo_direct_mem_init(size_t pool_size_bytes)
     int is_hw = 0;
 
 #if defined(EVO_TARGET_PS5)
-    off_t phys = 0;
-    /* PS5 Direct Memory: memoryType 3 = WB_ONION (CPU cacheable + GPU shared) */
-    int ret = sceKernelAllocateDirectMemory(0, (off_t)16 * 1024 * 1024 * 1024ULL,
-                                           pool_size_bytes, align_2mb, 3, &phys);
-    if (ret == 0 && phys != 0) {
-        void *mapped = NULL;
-        ret = sceKernelMapDirectMemory(&mapped, pool_size_bytes, 0x3 /* PROT_READ|PROT_WRITE */,
-                                       0, phys, align_2mb);
-        if (ret == 0 && mapped != NULL) {
-            base = mapped;
-            g_direct_pool.ps5_phys_addr = phys;
-            is_hw = 1;
-        } else {
-            sceKernelReleaseDirectMemory(phys, pool_size_bytes);
+    /* PS5 Direct Memory: memoryType 3 = WB_ONION (CPU cacheable + GPU shared).
+     *
+     * #6: the pool is now sized for the 4K CPU video working set (rotate ring,
+     * pp_playback display, pp_videoout linear staging), which is far larger
+     * than the original 64 MiB. If the console cannot satisfy the full request
+     * from physical direct memory, step down rather than fall through to the
+     * heap fallback below (posix_memalign here means flexible memory on the
+     * app module, and the whole point of #6 is to keep these buffers OFF the
+     * flexible-memory heap that the 4K decode pools contend for). Each step
+     * still leaves the 1080p working set entirely in-slab. */
+    {
+        size_t try_sizes[4];
+        int n = 0;
+        try_sizes[n++] = pool_size_bytes;
+        if (pool_size_bytes > (size_t)128 * 1024 * 1024)
+            try_sizes[n++] = (size_t)128 * 1024 * 1024;
+        if (pool_size_bytes > (size_t)96 * 1024 * 1024)
+            try_sizes[n++] = (size_t)96 * 1024 * 1024;
+        if (pool_size_bytes > (size_t)64 * 1024 * 1024)
+            try_sizes[n++] = (size_t)64 * 1024 * 1024;
+
+        for (int t = 0; t < n && !base; t++) {
+            off_t phys = 0;
+            size_t want = (try_sizes[t] + align_2mb - 1) & ~(align_2mb - 1);
+            int ret = sceKernelAllocateDirectMemory(
+                0, (off_t)16 * 1024 * 1024 * 1024ULL, want, align_2mb, 3, &phys);
+            if (ret != 0 || phys == 0)
+                continue;
+            void *mapped = NULL;
+            ret = sceKernelMapDirectMemory(&mapped, want, 0x3 /* PROT_READ|PROT_WRITE */,
+                                           0, phys, align_2mb);
+            if (ret == 0 && mapped != NULL) {
+                base = mapped;
+                pool_size_bytes = want;
+                g_direct_pool.ps5_phys_addr = phys;
+                is_hw = 1;
+            } else {
+                sceKernelReleaseDirectMemory(phys, want);
+            }
         }
     }
 #endif

@@ -5,6 +5,8 @@
 #include <cstring>
 #include <string>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
@@ -242,6 +244,15 @@ static void set_nav(int section, int rail_focused) {
     nav.cursor_index = rail_focused ? section : section;
     nav.rail_focused = rail_focused;
     nav.visible = 1;
+    evo_rmlui_update_nav(&nav);
+}
+
+/* Full-screen OSD and modals draw over the player, where the rail is already
+ * hidden. Match that so a sticky rail from a previous render does not bleed in. */
+static void hide_nav() {
+    evo_rmlui_nav_params_t nav;
+    memset(&nav, 0, sizeof(nav));
+    nav.visible = 0;
     evo_rmlui_update_nav(&nav);
 }
 
@@ -492,6 +503,21 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_render_browser(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_browser.bmp", fb.data(), width, height);
 
+    /* #16/#44: a long unbroken filename must ellipsise in the row AND the
+     * inspector title, not overrun the panel. */
+    {
+        static const char* kLong =
+            "Clarksons.Farm.S01E01.720p.AMZN.WEBRip.x264-GalaxyTV[rarbg].mkv";
+        p.rows[3].name = kLong;
+        p.ins_name = kLong;
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        evo_rmlui_update_browser(&p);
+        evo_rmlui_render_browser(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_browser_longname.bmp", fb.data(), width, height);
+        p.rows[3].name = "Blade Runner 2049.mkv";
+        p.ins_name = "Blade Runner 2049.mkv";
+    }
+
     /* Empty folder, at the root — no BACK hint, no inspector content. */
     std::fill(fb.begin(), fb.end(), 0xFF0E0906);
     evo_rmlui_browser_params_t e;
@@ -631,6 +657,442 @@ static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int he
     save_bmp_24("output/uiview/rml_changelog.bmp", fb.data(), width, height);
 }
 
+/* ------------------------------------------------------------------
+ * Text reader
+ * ------------------------------------------------------------------ */
+static void render_reader_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(1, 0);
+
+    evo_rmlui_reader_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.title = "release-notes-0.7.1.txt";
+    p.subtitle = "/usb0/Documents  -  TEXT  -  12 KB";
+    p.badge = "TXT";
+    p.face = 0;
+    p.progress = 0.18;
+    p.visible_frac = 0.42;
+    p.footnote = "FIRST 2 MB OF 12 KB";
+
+    static const char* lines[] = {
+        "EVO PLAYER 0.7.1 - RELEASE NOTES",
+        "",
+        "This build brings the RmlUi retained-mode interface to the launch,",
+        "browser and list screens. The immediate-mode renderer is still the",
+        "fallback while each screen is signed off for parity.",
+        "",
+        "NEW",
+        "  - Retained-mode launch screen with hero, recent shelf and library.",
+        "  - USB browser rebuilt as a virtualised twelve-row list.",
+        "  - Shared list document serving recent, favorites and both Emby views.",
+        "",
+        "FIXED",
+        "  - Browser opened in the last played folder instead of the USB root.",
+        "  - Navigation rail was unreachable from the home screen.",
+        "  - Theme colours were byte-swapped before the first theme sync.",
+        "",
+        "A very long unbroken line follows to exercise the reader wrap path: ",
+        "abcdefghijklmnopqrstuvwxyz0123456789-abcdefghijklmnopqrstuvwxyz0123456789",
+    };
+    int n = (int)(sizeof(lines) / sizeof(lines[0]));
+    for (int i = 0; i < n; i++) p.lines[i] = lines[i];
+    p.line_count = n;
+
+    evo_rmlui_update_reader(&p);
+    evo_rmlui_render_reader(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_reader.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * Surround sound test
+ * ------------------------------------------------------------------ */
+static void render_surround_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(5, 0);
+
+    evo_rmlui_surround_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.rail_focused = 0;
+    p.is_51_layout = 0;      /* 7.1 */
+    p.selected_item = 6;     /* a speaker node */
+    p.active_channel = 2;
+    p.surround_mode = 1;
+
+    struct Spk { const char* name; const char* label; double hz; int dx; int dy; int ch; int item; int hidden; };
+    static const Spk spk[8] = {
+        { "FRONT LEFT",       "FL",  440.0, -260, -170, 0, 5, 0 },
+        { "FRONT RIGHT",      "FR",  440.0,  260, -170, 1, 6, 0 },
+        { "CENTER",           "C",   330.0,    0, -210, 2, 7, 0 },
+        { "SUBWOOFER",        "LFE",  60.0,    0,  200, 3, 8, 0 },
+        { "SURROUND LEFT",    "SL",  520.0, -320,   40, 4, 9, 0 },
+        { "SURROUND RIGHT",   "SR",  520.0,  320,   40, 5, 10, 0 },
+        { "SURROUND BACK L",  "SBL", 600.0, -180,  180, 6, 11, 0 },
+        { "SURROUND BACK R",  "SBR", 600.0,  180,  180, 7, 12, 0 },
+    };
+    for (int i = 0; i < 8; i++) {
+        p.speakers[i].name = spk[i].name;
+        p.speakers[i].label = spk[i].label;
+        p.speakers[i].hz = spk[i].hz;
+        p.speakers[i].dx = spk[i].dx;
+        p.speakers[i].dy = spk[i].dy;
+        p.speakers[i].ch = spk[i].ch;
+        p.speakers[i].item_idx = spk[i].item;
+        p.speakers[i].hidden = spk[i].hidden;
+    }
+    p.speaker_count = 8;
+
+    evo_rmlui_update_surround(&p);
+    evo_rmlui_render_surround(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_surround.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * Modal dialogs — resume / playback finished / exit confirm,
+ * plus a three-action stress case (#16).
+ * ------------------------------------------------------------------ */
+static void render_dialog_screens(std::vector<uint32_t>& fb, int width, int height) {
+    const char* ic_x = "projects/evoplayer/assets/icons/btn_cross.png";
+    const char* ic_o = "projects/evoplayer/assets/icons/btn_circle.png";
+    const char* ic_t = "projects/evoplayer/assets/icons/btn_triangle.png";
+
+    auto shoot = [&](const char* name, const evo_rmlui_dialog_params_t& p) {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_update_dialog(&p);
+        evo_rmlui_render_dialog(fb.data(), width, height);
+        save_bmp_24((std::string("output/uiview/") + name + ".bmp").c_str(),
+                    fb.data(), width, height);
+    };
+
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "RESUME PLAYBACK";
+        p.title = "Blade Runner 2049 (2017)";
+        p.detail = "STOPPED AT 02:22:15 OF 09:56:00";
+        p.progress_pct = 0.35;
+        p.action_count = 2;
+        p.actions[0] = { ic_x, "RESUME", 1 };
+        p.actions[1] = { ic_o, "START OVER", 0 };
+        shoot("rml_dialog_resume", p);
+    }
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "PLAYBACK FINISHED";
+        p.title = "The Grand Budapest Hotel";
+        p.detail = "WHAT WOULD YOU LIKE TO DO NEXT?";
+        p.progress_pct = -1.0;
+        p.action_count = 3;
+        p.actions[0] = { ic_x, "PLAY AGAIN", 1 };
+        p.actions[1] = { ic_t, "NEXT EPISODE", 0 };
+        p.actions[2] = { ic_o, "BACK TO BROWSER", 0 };
+        shoot("rml_dialog_finished", p);
+    }
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "STOP PLAYBACK";
+        p.title = "Stop watching?";
+        p.detail = "YOUR POSITION WILL BE SAVED FOR NEXT TIME.";
+        p.progress_pct = -1.0;
+        p.action_count = 2;
+        p.actions[0] = { ic_x, "STOP", 1 };
+        p.actions[1] = { ic_o, "KEEP WATCHING", 0 };
+        shoot("rml_dialog_exit", p);
+    }
+    {
+        /* #16 stress: three long action labels must wrap, not overflow. */
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "RESUME PLAYBACK";
+        p.title = "A Very Long Feature Title That Also Needs To Be Clamped 2024";
+        p.detail = "STOPPED AT 02:22:15 OF 09:56:00  -  CHAPTER 14 OF 32";
+        p.progress_pct = 0.42;
+        p.action_count = 3;
+        p.actions[0] = { ic_x, "RESUME AT 02:22:15", 1 };
+        p.actions[1] = { ic_o, "START FROM THE BEGINNING", 0 };
+        p.actions[2] = { ic_t, "PLAY THE NEXT EPISODE INSTEAD", 0 };
+        shoot("rml_dialog_stress", p);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Media Info — technical specs deck, over video. Includes a #16
+ * long-string stress pass.
+ * ------------------------------------------------------------------ */
+static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int height) {
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_mediainfo_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Blade Runner 2049.mkv";
+        p.path = "/usb0/Movies/Blade Runner 2049.mkv";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "HDR10";
+        p.codec_badge = "HEVC";
+        p.fps_badge = "24 FPS";
+        p.container = "Matroska";
+        p.file_size = "24.8 GB";
+        p.duration = "02:44:31";
+        p.video_codec = "HEVC (H.265 Main 10)";
+        p.resolution = "3840 x 2160";
+        p.color_hdr = "HDR10  -  BT.2020  -  10-bit";
+        p.audio_codec = "DTS-HD MA 5.1";
+        p.channels = "5.1 (6 channels)";
+        p.sample_rate = "48 kHz";
+        p.subtitles = "3 tracks  -  English, French, Spanish";
+        p.output = "Direct  -  3840 x 2160";
+        p.renderer = "FFmpeg software decode";
+        evo_rmlui_update_mediainfo(&p);
+        evo_rmlui_render_mediainfo(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_mediainfo.bmp", fb.data(), width, height);
+    }
+    {
+        /* #16 stress: a long filename + path + long codec strings. */
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_mediainfo_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.mkv";
+        p.path = "/usb0/Movies/Peter Jackson/The Lord of the Rings Extended Editions/Return of the King.mkv";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "DOLBY VISION";
+        p.codec_badge = "HEVC";
+        p.fps_badge = "23.976 FPS";
+        p.container = "Matroska (WebM-compatible)";
+        p.file_size = "63.2 GB";
+        p.duration = "04:23:07";
+        p.video_codec = "HEVC (H.265 Main 10, Level 5.1, High tier)";
+        p.resolution = "3840 x 2160 (progressive)";
+        p.color_hdr = "Dolby Vision Profile 8.1  -  BT.2020 nc  -  12-bit";
+        p.audio_codec = "TrueHD 7.1 with Dolby Atmos (48 kHz, 24-bit)";
+        p.channels = "7.1 (8 channels) + objects";
+        p.sample_rate = "48 kHz";
+        p.subtitles = "7 tracks  -  English SDH, French, German, Spanish, Italian";
+        p.output = "Direct  -  3840 x 2160";
+        p.renderer = "FFmpeg software decode (slice-threaded, 12 threads)";
+        evo_rmlui_update_mediainfo(&p);
+        evo_rmlui_render_mediainfo(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_mediainfo_stress.bmp", fb.data(), width, height);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Subtitle track picker, over video.
+ * ------------------------------------------------------------------ */
+static void render_subtitles_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    hide_nav();
+
+    evo_rmlui_subtitles_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.eyebrow = "SUBTITLES";
+    p.title = "SELECT A SUBTITLE TRACK";
+    p.size_str = "MEDIUM";
+    p.preview_text = "The quick brown fox jumps over the lazy dog";
+    p.preview_face = 1;
+
+    struct Tr { const char* label; const char* detail; int cur; };
+    static const Tr tr[6] = {
+        { "OFF",                     "NO SUBTITLES",                 0 },
+        { "English",                 "SRT  -  EMBEDDED  -  1,204 CUES", 1 },
+        { "English (SDH)",           "PGS  -  EMBEDDED  -  1,410 CUES", 0 },
+        { "French",                  "SRT  -  EXTERNAL  -  1,198 CUES", 0 },
+        { "Spanish (Latin America)", "SRT  -  EXTERNAL  -  1,201 CUES", 0 },
+        { "Director's commentary track transcript (English)", "ASS  -  EXTERNAL", 0 },
+    };
+    for (int i = 0; i < 6; i++) {
+        p.tracks[i].label = tr[i].label;
+        p.tracks[i].detail = tr[i].detail;
+        p.tracks[i].is_current = tr[i].cur;
+        p.tracks[i].is_focused = (i == 1);
+        p.track_count++;
+    }
+
+    evo_rmlui_update_subtitles(&p);
+    evo_rmlui_render_subtitles(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_subtitles.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * #16 stress: long strings on the screens the issue calls out.
+ * ------------------------------------------------------------------ */
+static void render_stress_screens(std::vector<uint32_t>& fb, int width, int height) {
+    /* Player OSD: 55-char title + 76-char metadata must ellipsise, never
+     * collide with the badge rack. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "The Lord of the Rings: The Return of the King (Extended Edition) - Special Extended DVD Edition, Disc One";
+        p.metadata = "4H 23M LEFT  -  HEVC MAIN 10  -  DOLBY VISION P8  -  TRUEHD 7.1 ATMOS  -  48KHZ 24-BIT  -  BT.2020";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "DOLBY VISION";
+        p.codec_badge = "HEVC 10-BIT";
+        p.fps_badge = "23.976 FPS";
+        p.audio_badge = "";
+        p.position_sec = 1234.0;
+        p.duration_sec = 15787.0;
+        p.percentage = p.position_sec / p.duration_sec;
+        p.paused = 0;
+        p.scrub_active = 1;
+        p.scrub_target = 0.62;
+        p.audio_track = "TrueHD 7.1 Atmos";
+        p.sub_track = "English (SDH)";
+        p.view_mode = 0;
+        p.show_stats = 1;
+        p.alpha = 255;
+        evo_rmlui_update_playback_params(&p);
+        /* Render a couple of seconds of frames so the title marquee has laid
+         * out (one-frame lag) and scrolled past its start dwell; grab a frame
+         * mid-scroll and one near the far end. */
+        for (int f = 0; f < 200; f++) {
+            evo_rmlui_render_playback_osd(fb.data(), width, height);
+            if (f == 110)
+                save_bmp_24("output/uiview/rml_playback_stress.bmp",
+                            fb.data(), width, height);
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+        save_bmp_24("output/uiview/rml_playback_stress_end.bmp",
+                    fb.data(), width, height);
+    }
+
+    /* Browser inspector: long filename + long codec value. */
+    {
+        std::vector<uint32_t> preview = make_demo_art(560, 315, 17);
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(1, 0);
+        evo_rmlui_browser_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.path = "/usb0/Movies/Peter Jackson/The Lord of the Rings Extended Editions";
+        p.title = "USB DRIVE";
+        p.total_count = 3;
+        p.cursor_index = 0;
+        p.rows[0].name = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.DV.mkv";
+        p.rows[0].detail = "MKV - 63.2 GB - 4H 23M - HEVC - TrueHD 7.1 Atmos";
+        p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        p.rows[0].progress = 240;
+        p.rows[0].is_focused = 1;
+        p.row_count = 1;
+        p.ins_name = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.DV.mkv";
+        p.ins_kind = "VIDEO";
+        p.ins_ext = "MKV";
+        p.ins_preview_badge = "4H 23M";
+        p.ins_preview = preview.data();
+        p.ins_preview_w = 560;
+        p.ins_preview_h = 315;
+        struct KV { const char* k; const char* v; };
+        static const KV props[7] = {
+            { "SIZE",       "63.2 GB" },
+            { "CONTAINER",  "MATROSKA (WEBM-COMPATIBLE)" },
+            { "DURATION",   "04:23:07" },
+            { "RESOLUTION", "3840 x 2160 progressive" },
+            { "VIDEO",      "HEVC (H.265 Main 10, Level 5.1)" },
+            { "AUDIO",      "TrueHD 7.1 + Dolby Atmos objects" },
+            { "SUBTITLES",  "7 (English SDH, French, German...)" },
+        };
+        for (int i = 0; i < 7; i++) {
+            p.ins_props[i].key = props[i].k;
+            p.ins_props[i].value = props[i].v;
+            p.ins_prop_count++;
+        }
+        evo_rmlui_update_browser(&p);
+        evo_rmlui_render_browser(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_browser_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Settings row: long title + long value badge. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        set_nav(5, 0);
+        evo_rmlui_settings_params_t s;
+        memset(&s, 0, sizeof(s));
+        s.title = "PLAYBACK & VIDEO";
+        s.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
+        s.counter = "1 OF 4";
+        s.rail_active_idx = 5;
+        s.row_count = 3;
+        s.rows[0].title = "PLAYBACK PROFILE FOR HIGH BITRATE 4K HDR CONTENT";
+        s.rows[0].detail = "TUNES THE DECODER, CONVERTER AND PRESENT PATH TOGETHER";
+        s.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+        s.rows[0].badge = "Cinephile - HDR passthrough, 24fps judder-free, max threads";
+        s.rows[0].has_chevron = 1;
+        s.rows[0].is_focused = 1;
+        s.rows[1].title = "DEFAULT ASPECT RATIO";
+        s.rows[1].detail = "FIT, FILL OR STRETCH";
+        s.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        s.rows[1].badge = "FIT TO SCREEN (PRESERVE ASPECT RATIO)";
+        s.rows[1].has_chevron = 1;
+        s.rows[2].title = "RESUME PLAYBACK";
+        s.rows[2].detail = "REMEMBER PLAYBACK POSITION PER FILE ACROSS APP RESTARTS AND CONSOLE REBOOTS";
+        s.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        s.rows[2].badge = "ON";
+        s.rows[2].has_chevron = 1;
+        evo_rmlui_update_settings(&s);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Changelog detail tagline: long. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(6, 0);
+        evo_rmlui_changelog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "CHANGELOG";
+        p.subtitle = "WHAT CHANGED IN EACH RELEASE";
+        p.release_total = 1;
+        p.cursor_index = 0;
+        p.releases[0].version = "0.8.0";
+        p.releases[0].tagline = "RMLUI PARITY SIGN-OFF, TEXT CLAMPING, AND THE LEGACY IMMEDIATE-MODE RENDERER RETIRED";
+        p.releases[0].date = "SEPTEMBER 2026";
+        p.releases[0].is_focused = 1;
+        p.release_count = 1;
+        p.detail_version = "0.8.0";
+        p.detail_tagline = "RMLUI PARITY SIGN-OFF, TEXT CLAMPING, AND THE LEGACY IMMEDIATE-MODE RENDERER RETIRED";
+        p.item_total = 2;
+        p.items[0].kind = "IMPROVED";
+        p.items[0].text = "EVERY DYNAMIC STRING NOW ELLIPSISES OR MARQUEES INSTEAD OF COLLIDING WITH ADJACENT WIDGETS";
+        p.items[1].kind = "REMOVED";
+        p.items[1].text = "ui/src/evo_screens.c AND ui/src/evo_chrome.c - THE LEGACY SDF SCREEN RENDERER";
+        p.item_count = 2;
+        evo_rmlui_update_changelog(&p);
+        evo_rmlui_render_changelog(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_changelog_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Launch hero: long title. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(0, 0);
+        evo_rmlui_launch_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.app_name = "EVO PLAYER";
+        p.version = "VERSION 0.8.0";
+        p.clock = "21:48";
+        p.theme_name = "MIDNIGHT";
+        p.hero_eyebrow = "CONTINUE WATCHING";
+        p.hero_title = "The Lord of the Rings: The Return of the King (Extended Edition)";
+        p.hero_detail = "4H 23M LEFT  -  HEVC MAIN 10  -  DOLBY VISION  -  TRUEHD 7.1 ATMOS  -  48 KHZ 24-BIT";
+        p.hero_action = "RESUME";
+        p.hero_progress = 240;
+        p.hero_focused = 1;
+        p.library_visible = 6;
+        static const char* lt[6] = { "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT" };
+        for (int i = 0; i < 6; i++) {
+            p.library[i].title = lt[i];
+            p.library[i].detail = "";
+            p.library[i].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+            p.library[i].progress = -1;
+        }
+        evo_rmlui_update_launch(&p);
+        evo_rmlui_render_launch(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_launch_stress.bmp", fb.data(), width, height);
+    }
+}
+
 int main(int argc, char** argv) {
     const int width = 1920;
     const int height = 1080;
@@ -646,6 +1108,12 @@ int main(int argc, char** argv) {
     render_browser_screen(fb, width, height);
     render_playback_screen(fb, width, height);
     render_changelog_screen(fb, width, height);
+    render_reader_screen(fb, width, height);
+    render_surround_screen(fb, width, height);
+    render_dialog_screens(fb, width, height);
+    render_mediainfo_screen(fb, width, height);
+    render_subtitles_screen(fb, width, height);
+    render_stress_screens(fb, width, height);
     set_nav(5, 0);
 
     // 1. Settings Main Hub

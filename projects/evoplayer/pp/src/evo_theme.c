@@ -313,6 +313,13 @@ void evo_theme_init(void)
     evo_closedir(d);
 }
 
+void evo_theme_reset(void)
+{
+    g_count  = 0;
+    g_active = 0;
+    g_inited = 0;
+}
+
 const evo_theme *evo_theme_current(void)
 {
     if (!g_inited)

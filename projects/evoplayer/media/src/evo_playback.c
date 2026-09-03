@@ -32,6 +32,7 @@
 #include "evo_packet_queue.h"
 #include "evo_demux.h"
 #include "evo_audio_out.h"
+#include "evo_direct_mem.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -122,8 +123,20 @@ int video_frame_w = 0;
 int video_frame_h = 0;
 int video_frame_loaded = 0;
 
-/* Internal to convert_frame_via_sws — nothing outside touches the ring. */
+/*
+ * Internal to convert_frame_via_sws — nothing outside touches the ring.
+ *
+ * #6: this is the exotic-pixel-format swscale fallback (evo_vdec_receive() == 2
+ * or the product backend inactive) — the product path presents through
+ * pp_playback's display model, not this ring. Backed by the evo_direct_mem
+ * slab and grow-only: the buffers are (re)allocated only when a frame arrives
+ * larger than the current slot size, so a seek or a same-resolution re-open
+ * reuses them and playback never churns the heap. Count trimmed 8 -> 3
+ * (VIDEO_ROTATE_BUFFERS) — enough for one presented + one just-written + one
+ * in-flight without the legacy renderer tearing.
+ */
 static uint32_t *video_rotate_pixels[VIDEO_ROTATE_BUFFERS] = {0};
+static size_t    video_rotate_slot_bytes = 0;
 static int video_rotate_index = 0;
 
 static int present_pp_frame(const pp_frame *pf);
@@ -212,27 +225,38 @@ static int convert_frame_via_sws(AVFrame *frame)
     }
 
     if (video_frame_w != frame->width || video_frame_h != frame->height || video_rotate_pixels[0] == NULL) {
+        size_t need = (size_t)frame->width * (size_t)frame->height * 4u;
+
         pthread_mutex_lock(&video_frame_mutex);
 
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            if (video_rotate_pixels[i]) {
-                free(video_rotate_pixels[i]);
+        /* Grow-only: keep the existing slots when the new frame fits. */
+        if (need > video_rotate_slot_bytes || video_rotate_pixels[0] == NULL) {
+            for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
+                evo_direct_mem_free(video_rotate_pixels[i]);
                 video_rotate_pixels[i] = NULL;
             }
+            video_rotate_slot_bytes = 0;
+
+            for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
+                video_rotate_pixels[i] = (uint32_t *)evo_direct_mem_alloc(need);
+                if (!video_rotate_pixels[i]) {
+                    for (int j = 0; j < i; j++) {
+                        evo_direct_mem_free(video_rotate_pixels[j]);
+                        video_rotate_pixels[j] = NULL;
+                    }
+                    video_frame_pixels = NULL;
+                    video_frame_loaded = 0;
+                    pthread_mutex_unlock(&video_frame_mutex);
+                    return 0;
+                }
+            }
+            video_rotate_slot_bytes = need;
         }
 
         video_frame_w = frame->width;
         video_frame_h = frame->height;
         video_rotate_index = 0;
         video_frame_loaded = 0;
-
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            video_rotate_pixels[i] = malloc(video_frame_w * video_frame_h * 4);
-            if (!video_rotate_pixels[i]) {
-                pthread_mutex_unlock(&video_frame_mutex);
-                return 0;
-            }
-        }
 
         video_frame_pixels = video_rotate_pixels[0];
         pthread_mutex_unlock(&video_frame_mutex);

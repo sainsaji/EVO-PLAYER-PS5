@@ -43,10 +43,10 @@
       "problemMatcher": []
     },
     {
-      "label": "EVO: deploy payload to PS5",
-      "detail": "Prompts for which ELF; needs PS5_HOST set in .env",
+      "label": "EVO: deploy app module (.ffpfsc) to PS5",
+      "detail": "package-app.sh --ffpfsc + deploy-app.sh --ffpfsc; needs PS5_HOST in .env. Then launch PPSA99039 from the Games row.",
       "type": "shell",
-      "command": "bash ./scripts/deploy.sh output/elf/${input:payload}",
+      "command": "bash ./scripts/package-app.sh --ffpfsc && bash ./scripts/deploy-app.sh --ffpfsc",
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "shared" }
     },

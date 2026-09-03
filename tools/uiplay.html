@@ -1,251 +1,52 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EVO Player — UI walkthrough</title>
+<title>EVO Player — RmlUi screens</title>
 <style>
   :root { --bg:#0b0d12; --fg:#e8eef7; --dim:#7d8798; --line:#252a35; }
   * { box-sizing: border-box; }
-
-  /*
-   * Fill the viewport. The content is 16:9 and the point of the tool is to
-   * inspect it, so the frame should be as large as the window allows - an
-   * earlier version capped the page at 1180px and on a wide monitor the
-   * player ended up a third of the screen, which defeats the exercise.
-   */
-  html, body { height: 100%; }
-  body {
-    margin:0; background:var(--bg); color:var(--fg); overflow:hidden;
-    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-    display:flex; flex-direction:column;
-  }
-
-  header {
-    flex:0 0 auto; padding:8px 16px; display:flex; gap:14px;
-    align-items:baseline; flex-wrap:wrap; border-bottom:1px solid var(--line);
-  }
-  h1 { font-size:13px; margin:0; font-weight:600; letter-spacing:.02em; }
-  header .sub { color:var(--dim); font-size:12px; }
-
-  /* flex:1 + min-height:0 is what lets the frame shrink to fit rather than
-     overflowing the viewport and forcing a scrollbar. */
-  .stage {
-    flex:1 1 auto; min-height:0; display:flex;
-    align-items:center; justify-content:center; padding:10px;
-  }
-  .screen {
-    max-width:100%; max-height:100%; aspect-ratio:16/9;
-    background:#000; border:1px solid var(--line); border-radius:8px;
-    overflow:hidden; box-shadow:0 8px 40px rgba(0,0,0,.6);
-  }
-  .screen img { width:100%; height:100%; display:block; }
-
-  footer {
-    flex:0 0 auto; padding:8px 16px; color:var(--dim);
-    border-top:1px solid var(--line);
-    display:flex; gap:18px; align-items:center; flex-wrap:wrap;
-  }
-  kbd {
-    background:#171b23; border:1px solid var(--line); border-bottom-width:2px;
-    border-radius:5px; padding:1px 6px; font:11px ui-monospace,monospace;
-    color:var(--fg);
-  }
-  .state { font:11px ui-monospace,monospace; color:var(--dim); margin-left:auto; }
-  .warn { color:#d8a657; }
-
-  /* Fullscreen: drop the chrome entirely so the frame gets the whole panel. */
-  body.bare header, body.bare footer { display:none; }
-  body.bare .stage { padding:0; }
-  body.bare .screen { border:0; border-radius:0; box-shadow:none; }
+  html, body { margin:0; background:var(--bg); color:var(--fg);
+    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:18px 22px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:15px; font-weight:600; }
+  header p { margin:4px 0 0; color:var(--dim); }
+  main { display:grid; gap:18px; padding:22px;
+    grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); }
+  figure { margin:0; border:1px solid var(--line); border-radius:8px; overflow:hidden;
+    background:#000; cursor:zoom-in; }
+  figure img { display:block; width:100%; height:auto; }
+  figcaption { padding:8px 10px; color:var(--dim); font-size:12px;
+    border-top:1px solid var(--line); background:var(--bg); }
+  #lightbox { position:fixed; inset:0; background:rgba(0,0,0,.92); display:none;
+    align-items:center; justify-content:center; cursor:zoom-out; z-index:10; }
+  #lightbox img { max-width:98vw; max-height:98vh; }
 </style>
-
 <header>
-  <h1>EVO Player — UI walkthrough</h1>
-  <span class="sub">real renderer, real font atlas, real icons — navigation mirrors the console</span>
+  <h1>EVO Player — RmlUi screens</h1>
+  <p>Contact sheet of every screen the RmlUi host harness renders, including the
+     #16 <code>*_stress</code> fixtures. Real RmlUi drawing code and assets;
+     not interactive. Click a frame to enlarge.</p>
 </header>
-
-<div class="stage">
-  <div class="screen"><img id="frame" alt=""></div>
-</div>
-
-<footer>
-  <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move</span>
-  <span><kbd>Enter</kbd> select</span>
-  <span><kbd>Esc</kbd> back</span>
-  <span><kbd>E</kbd> empty state</span>
-  <span><kbd>M</kbd> modals</span>
-  <span><kbd>F</kbd> fullscreen</span>
-  <span><kbd>H</kbd> hide chrome</span>
-  <span class="warn" id="miss" hidden></span>
-  <span class="state" id="state"></span>
-</footer>
-
+<main id="grid"></main>
+<div id="lightbox"><img alt=""></div>
 <script>
-/*
- * The navigation model, kept deliberately parallel to the C:
- *   evo_grid   - launch screen, per-row column memory, skips empty rows
- *   evo_focus  - section lists, wrapping
- *   evo_nav    - a stack, so Back returns where you came from
- * If this and the C disagree, the C is right and this is the bug.
- */
-const SECTIONS = ['home','browse','recent','favorites','settings','tools','about'];
-/* `profile` is reachable but is not a rail section - it is a child of
- * settings, and evo_screen_section() keeps SETTINGS lit while you are in it. */
-const COUNTS   = { browse:10, recent:5, favorites:2, settings:8, tools:4,
-                   about:5, profile:4,
-                   /* Modals have no cursor - one frame each. */
-                   resume:1, finished:1, mediainfo:1, exitconfirm:1,
-                   toast:1, toastok:1, toasterror:1 };
-
-/* Reachable from playback rather than from the rail, so they are listed
- * separately and cycled with M rather than navigated into. */
-const MODALS = ['resume', 'finished', 'mediainfo', 'exitconfirm',
-                'toast', 'toastok', 'toasterror'];
-
-/* Launch rows: hero (1), recent shelf (7), library shelf (6). */
-const LAUNCH_ROWS = [1, 7, 6];
-
-/* Library tile -> section. The shelf omits HOME, matching library_section(). */
-const LIBRARY = ['browse','recent','favorites','settings','tools','about'];
-
-let st = {
-  screen:'launch', row:0, col:[0,0,0], sel:{},
-  rail:false, railSel:1, stack:[], empty:false,
-};
-for (const k in COUNTS) st.sel[k] = 0;
-
-const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
-const wrap  = (v, n) => n <= 0 ? 0 : ((v % n) + n) % n;
-
-function frameName() {
-  if (st.screen === 'launch') return `launch_r${st.row}_c${st.col[st.row]}`;
-  if (st.rail)                return `${st.screen}_rail${st.railSel}`;
-  if (st.empty && ['recent','favorites','browse'].includes(st.screen))
-    return `${st.screen}_empty`;
-  return `${st.screen}_s${st.sel[st.screen]}`;
+function renderGallery() {
+  const grid = document.getElementById('grid');
+  const lb = document.getElementById('lightbox');
+  const lbImg = lb.querySelector('img');
+  (window.FRAMES || []).slice().sort().forEach(name => {
+    const fig = document.createElement('figure');
+    const img = document.createElement('img');
+    img.src = name; img.alt = name; img.loading = 'lazy';
+    const cap = document.createElement('figcaption');
+    cap.textContent = name.replace(/^rml_/, '').replace(/\.png$/, '');
+    fig.append(img, cap);
+    fig.addEventListener('click', () => { lbImg.src = name; lb.style.display = 'flex'; });
+    grid.append(fig);
+  });
+  lb.addEventListener('click', () => { lb.style.display = 'none'; lbImg.src = ''; });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { lb.style.display = 'none'; lbImg.src = ''; }
+  });
 }
-
-/* Decode ahead so stepping through a list does not flash white between
-   frames on the first pass. */
-const warmed = new Set();
-function warm(name) {
-  if (warmed.has(name)) return;
-  warmed.add(name);
-  const i = new Image();
-  i.src = name + '.png';
-}
-function warmNeighbours() {
-  if (st.screen === 'launch') {
-    const n = LAUNCH_ROWS[st.row];
-    warm(`launch_r${st.row}_c${clamp(st.col[st.row]+1,0,n-1)}`);
-    warm(`launch_r${st.row}_c${clamp(st.col[st.row]-1,0,n-1)}`);
-  } else if (!st.rail) {
-    const n = COUNTS[st.screen] || 0;
-    warm(`${st.screen}_s${wrap(st.sel[st.screen]+1,n)}`);
-    warm(`${st.screen}_s${wrap(st.sel[st.screen]-1,n)}`);
-  }
-}
-
-function render() {
-  const name = frameName();
-  const img  = document.getElementById('frame');
-  const miss = document.getElementById('miss');
-
-  img.onerror = () => {
-    miss.hidden = false;
-    miss.textContent = `missing frame: ${name}.png — re-run ./tools/uiplay.sh`;
-  };
-  img.onload = () => { miss.hidden = true; warmNeighbours(); };
-  img.src = name + '.png';
-
-  document.getElementById('state').textContent =
-    st.rail ? `${st.screen} · rail:${SECTIONS[st.railSel]}` : name;
-}
-
-function open(section) {
-  if (section === 'home') { st.screen = 'launch'; st.stack = []; return; }
-  if (st.screen !== 'launch') st.stack.push(st.screen);
-  else st.stack = ['launch'];
-  st.screen = section;
-  st.rail = false;
-}
-
-function back() {
-  if (st.rail) { st.rail = false; return; }   /* close the overlay first */
-  if (st.screen === 'launch') return;
-  const prev = st.stack.pop();
-  st.screen = (!prev || prev === 'launch') ? 'launch' : prev;
-}
-
-function key(e) {
-  const k = e.key;
-  let used = true;
-
-  if (k === 'e' || k === 'E') st.empty = !st.empty;
-
-  /* M steps through the modal screens. There is no route to them from the
-     menus - the player opens them - so the walkthrough needs its own way in. */
-  else if (k === 'm' || k === 'M') {
-    const at = MODALS.indexOf(st.screen);
-    if (at < 0) { st.stack.push(st.screen); st.screen = MODALS[0]; }
-    else if (at + 1 < MODALS.length) st.screen = MODALS[at + 1];
-    else back();
-    st.rail = false;
-  }
-
-  else if (k === 'f' || k === 'F') {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen?.();
-  }
-  else if (k === 'h' || k === 'H') document.body.classList.toggle('bare');
-
-  else if (st.screen === 'launch') {
-    if (k === 'ArrowDown' || k === 'ArrowUp') {
-      const d = k === 'ArrowDown' ? 1 : -1;
-      /* Skip rows with no items, exactly as evo_grid_move_v does. */
-      for (let i = 0; i < LAUNCH_ROWS.length; i++) {
-        st.row = wrap(st.row + d, LAUNCH_ROWS.length);
-        if (LAUNCH_ROWS[st.row] > 0) break;
-      }
-    } else if (k === 'ArrowLeft' || k === 'ArrowRight') {
-      /* Shelves clamp rather than wrap - see evo_grid_move_h. */
-      const d = k === 'ArrowRight' ? 1 : -1;
-      st.col[st.row] = clamp(st.col[st.row] + d, 0, LAUNCH_ROWS[st.row] - 1);
-    } else if (k === 'Enter') {
-      if (st.row === 2) open(LIBRARY[st.col[2]]);
-      /* hero and recent tiles start playback, which has no frame here */
-    } else used = false;
-  }
-
-  else if (st.rail) {
-    if (k === 'ArrowDown')      st.railSel = wrap(st.railSel + 1, SECTIONS.length);
-    else if (k === 'ArrowUp')   st.railSel = wrap(st.railSel - 1, SECTIONS.length);
-    else if (k === 'ArrowRight' || k === 'Escape' || k === 'Backspace') st.rail = false;
-    else if (k === 'Enter') {
-      const s = SECTIONS[st.railSel];
-      st.rail = false;
-      if (s !== st.screen) open(s);
-    }
-    else used = false;
-  }
-
-  else {
-    const n = COUNTS[st.screen] || 0;
-    if (k === 'ArrowDown')      st.sel[st.screen] = wrap(st.sel[st.screen] + 1, n);
-    else if (k === 'ArrowUp')   st.sel[st.screen] = wrap(st.sel[st.screen] - 1, n);
-    /* PLAYBACK PROFILE is the one settings row that opens a child page. */
-    else if (k === 'Enter' && st.screen === 'settings' && st.sel.settings === 0)
-      open('profile');
-    else if (k === 'ArrowLeft') {
-      st.rail = true;
-      st.railSel = Math.max(0, SECTIONS.indexOf(st.screen));
-    }
-    else if (k === 'Escape' || k === 'Backspace') back();
-    else used = false;
-  }
-
-  if (used) { e.preventDefault(); render(); }
-}
-
-addEventListener('keydown', key);
-render();
 </script>

@@ -137,10 +137,13 @@ bool EvoRmlApp::Initialize(int width, int height) {
         return false;
     }
 
+    /* #44: the app module's own bundle (/app0, read-only, always current) MUST
+     * win over /data/evoplayer/app/ — that dir is payload-era cruft that
+     * outlives a redeploy and was serving stale pre-#16 .rcss on hardware. */
     std::vector<std::string> font_prefixes = {
+        "/app0/assets/fonts/",
         "/data/evoplayer/app/assets/fonts/",
         "/data/homebrew/EVOPlayer/assets/fonts/",
-        "/app0/assets/fonts/",
         "assets/fonts/",
         "projects/evoplayer/assets/fonts/",
         "/workspace/projects/evoplayer/assets/fonts/"
@@ -165,9 +168,9 @@ bool EvoRmlApp::Initialize(int width, int height) {
     }
 
     std::vector<std::string> rml_prefixes = {
+        "/app0/assets/rml/",                    /* #44: the .ffpfsc bundle wins */
         "/data/evoplayer/app/assets/rml/",
         "/data/homebrew/EVOPlayer/assets/rml/",
-        "/app0/assets/rml/",
         "assets/rml/",
         "projects/evoplayer/assets/rml/",
         "/workspace/projects/evoplayer/assets/rml/"
@@ -384,6 +387,59 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
 
     m_render->SetMemoryTexture(m_art_source[slot], pixels, w, h);
     return m_art_source[slot];
+}
+
+/*
+ * Ping-pong scroll for a single-line (white-space: nowrap) text element whose
+ * content overflows its parent's fixed-width overflow:hidden clip box,
+ * matching the legacy evo_text_marquee: dwell at each end, constant px/sec
+ * travel. Slides the element with a negative margin-left inside the parent
+ * clip. Reads the post-layout width from the previous frame (one-frame lag,
+ * invisible in motion). Call every frame the owning document is rendered.
+ */
+void EvoRmlApp::MarqueeTick(Rml::Element* text_el, bool active) {
+    if (!text_el) return;
+    Rml::Element* box_el = text_el->GetParentNode();
+    if (!box_el) return;
+
+    const float content = text_el->GetScrollWidth();   /* nowrap block = text width */
+    const float box     = box_el->GetClientWidth();     /* the fixed clip window */
+    const float travel  = content - box;
+
+    MarqueeState& m = m_marquee[text_el];
+
+    if (!active || travel <= 4.0f) {
+        if (m.active) {
+            text_el->SetProperty("margin-left", "0px");
+            m.active = false;
+        }
+        return;
+    }
+
+    const double now = m_system ? m_system->GetElapsedTime() : 0.0;
+
+    if (!m.active || std::fabs(m.travel - travel) > 1.0f) {
+        m.active = true;
+        m.start  = now;
+        m.travel = travel;
+    }
+
+    const double PAUSE = 1.4;   /* seconds held at each end */
+    const double SPEED = 85.0;  /* px per second */
+    const double leg    = m.travel / SPEED;
+    const double period = 2.0 * (leg + PAUSE);
+    const double p      = std::fmod(now - m.start, period);
+
+    double off;
+    if (p < PAUSE)                    off = 0.0;
+    else if (p < PAUSE + leg)         off = (p - PAUSE) * SPEED;
+    else if (p < 2.0 * PAUSE + leg)   off = m.travel;
+    else                             off = m.travel - (p - 2.0 * PAUSE - leg) * SPEED;
+
+    if (off < 0.0)          off = 0.0;
+    if (off > m.travel)     off = m.travel;
+
+    text_el->SetProperty("margin-left", std::to_string(-(int)(off + 0.5)) + "px");
 }
 
 void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
@@ -1754,6 +1810,10 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     if (m_reader_doc)    m_reader_doc->Hide();
     if (m_surround_doc)  m_surround_doc->Hide();
     m_playback_doc->Show();
+
+    /* Scroll a long movie title. This document is not surface-cached, so the
+     * per-frame re-render this relies on is already happening. */
+    MarqueeTick(m_playback_doc->GetElementById("media-title"), true);
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);

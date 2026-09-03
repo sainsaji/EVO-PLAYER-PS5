@@ -234,6 +234,15 @@ Standard dynamic heap allocation (`malloc`/`free`) incurs metadata locking, page
 - **Direct Memory Slab Manager**: **`0.94 ms`** (**1.65× faster**, **0 heap fragmentation**)
 - **Clean Slabs Recycled**: 100% memory recycled to direct pool upon stream close.
 
+### #6 (2026-09-03) — the swscale rotate ring moved to the slab
+
+`convert_frame_via_sws`'s ring is now **3 slots not 8** and allocates from
+`evo_direct_mem`, grow-only (265 MB → ~100 MB at 4K, off the heap). Everything
+else stayed on `malloc`: routing `pp_playback` `display` / `nv12_fb` and
+`pp_videoout` `cpu_bufs` through the slab, plus a 64 → 192 MiB pool, **wedged
+the 4K GPU present on hardware** and was backed out. See
+[`improvements-roadmap.md`](improvements-roadmap.md) §P2.
+
 ---
 
 ## Where the remaining time goes

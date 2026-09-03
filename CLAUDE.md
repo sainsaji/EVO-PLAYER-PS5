@@ -17,12 +17,17 @@ the dependency-ordered plan; each issue body also carries its own
 ## Rules that must not be broken
 
 - **Never call `make` directly.** The Makefile is missing FFmpeg's transitive
-  dependency list. Use `scripts/build-evoplayer.sh`. → [docs/tooling.md](docs/tooling.md)
-- **Never stack payload launches.** The app slot stays resident; launching
-  again *adds* an instance instead of replacing one. Ten stacked launches
-  kernel-panicked the console once and cost ~50 minutes. Always launch through
-  `tools/launch.sh`, which refuses to pile on top of a recent launch. Only the
-  PS button (close app on console) actually frees the slot.
+  dependency list. Use `scripts/build-evoplayer.sh` (host compile check) or
+  `scripts/package-app.sh` (the real build). → [docs/tooling.md](docs/tooling.md)
+- **One hardware path: the `.ffpfsc` app module.** `scripts/package-app.sh
+  --ffpfsc` + `scripts/deploy-app.sh --ffpfsc`, launched from the Games row
+  (ShadowMountPlus auto-launches on the `.ffpfsc` change). The ELF-payload
+  push scripts (`install-homebrew.sh`, `tools/launch.sh`, `scripts/deploy.sh`)
+  were **deleted 2026-09-03** — do not recreate them or a deploy path around
+  them, not even for a UI check. `build-evoplayer.sh` is a compile check only.
+- **Never deploy over a running EVO** (panic risk) and **never stack launches**
+  — the app slot stays resident; stacking has kernel-panicked the console
+  (~50 min lost). Only the PS button (close app on console) frees the slot.
 - **Never sweep kernel `.text`** (`kernel_copyout` over a range). Panics the
   console every time; this is why the `kdump` project no longer exists.
 - **Never call `sceVideoOutOpen` from a payload.** Returns a handle that
@@ -33,55 +38,55 @@ the dependency-ordered plan; each issue body also carries its own
 - **The console's `/fs` web route is read-only**, no `DELETE`. Don't attempt
   to script deletion of USB screenshots through it — `tools/shot.sh clean`
   explains the two routes that actually work.
-- **Payload `printf` is not in klog.** klog is the kernel log only. Payload
-  stdout comes back as the HTTP response body from `/hbldr` when `pipe=1` —
-  see the curl recipe in [docs/tooling.md](docs/tooling.md#seeing-payload-printf).
-  A `curl` timeout (exit 28) on that request is the normal, successful outcome.
+- **App-module diagnostics are on-screen notification popups.** klog only gets
+  `sceKernelDebugOutText` lines (`-DEVO_APP_MODULE`); the sandbox has no visible
+  stdout. `tools/evo-remote.sh` pulls `/mnt/usb0/evo_*` logs over FTP when the
+  build carries `--usb-remote`. A `timeout`/`curl` timeout on an `evo-remote.sh`
+  call is the normal, successful outcome.
 - **Everything toolchain-related runs in the pinned Docker container.**
   Scripts under `scripts/` and `tools/` re-exec themselves through
   `docker compose` when run from Windows.
-- **Two packaging routes, and they are not interchangeable.** The **app
-  module** (`.ffpfsc` — `scripts/package-app.sh` → `scripts/deploy-app.sh` →
-  ShadowMountPlus, TITLE_ID `PPSA99039`) is the release path and the **only
-  context with real system access**: `sceVideodec2` hardware decode, `sceAgc`
-  GPU, a proper user session. An **ELF payload** (elfldr `deploy.sh`, or the
-  full player via `build-evoplayer.sh` + `/hbldr`) runs in a borrowed process
-  with a constrained sandbox — no graphics stack, the errno-5200 decode wall.
-  Payloads are for minimal probes (kernel R/W, dynlib recon) and quick UI
-  checks only. Anything touching decode, GPU or audio fidelity goes through
-  the app module. → [docs/tooling.md](docs/tooling.md#packaging-two-routes)
+- **The app module is the whole story.** `.ffpfsc` (`scripts/package-app.sh`
+  → `scripts/deploy-app.sh` → ShadowMountPlus, TITLE_ID `PPSA99039`) is the
+  release path *and* the only thing you ever deploy — it has `sceVideodec2`
+  decode, `sceAgc` GPU, audio, a real user session, the self-unjail for
+  `/data`. The old ELF-payload route (borrowed `/hbldr` process, no graphics,
+  errno-5200 decode wall) is gone; its scripts were deleted. For a UI/layout
+  question use the **host renderer** (`uiview.sh` / `uiplay.sh`), not a
+  console. → [docs/tooling.md](docs/tooling.md#packaging-two-routes)
 
 ---
 
 ## Quick commands
 
 ```bash
-# APP MODULE - the release path; the only context with hw decode / sceAgc / etc.
+# DEPLOY - the ONLY hardware path (app module, PPSA99039)
 docker compose run --rm ps5-dev bash -lc '
-  ./scripts/package-app.sh --ffpfsc     # add --agc-probe for the GPU Step 2 gate
+  ./scripts/package-app.sh --ffpfsc     # add --agc-probe only for #27 GPU Step 2
   ./scripts/deploy-app.sh --ffpfsc'
-# then on the console: ShadowMountPlus -> mount PPSA99039 -> launch from Games.
-# Diagnostics come back as notification popups + klog (-DEVO_APP_MODULE).
+# ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
+# launch PPSA99039 from the Games row. PS-button-close a running EVO first.
+# Diagnostics = on-screen notification popups (+ klog for -DEVO_APP_MODULE).
+# Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
 
-# PAYLOAD - UI iteration only: build, install, launch, screenshot
-docker compose run --rm ps5-dev bash -lc '
-  EXTRA_CFLAGS="-DEVO_AUTOSHOT=6" ./scripts/build-evoplayer.sh
-  ./scripts/install-homebrew.sh --name EVOPlayer output/elf/EVOPlayer.elf
-  ./tools/launch.sh --timeout 12
-  ./tools/shot.sh grab'
+# COMPILE CHECK ONLY - keeps the non-app-module path green (#31/#36/modularisation)
+docker compose run --rm ps5-dev ./scripts/build-evoplayer.sh   # never deploys
 
-# watch the console log while you do it (either route)
+# render the UI on the host, no console needed (use this for any layout question)
+./tools/uiview.sh --all    # every RmlUi screen -> output/uiview/rml_*.png
+./tools/uiplay.sh          # contact sheet of them all -> output/uiplay/index.html
+
+# watch the console log
 docker compose run --rm ps5-dev ./tools/klog.sh
-
-# render the UI on the host, no console needed (fast iteration loop)
-./tools/uiview.sh --all
-./tools/uiplay.sh          # then open output/uiplay/index.html, arrow keys to drive it
 ```
 
-Prefer the host UI renderer (`uiview.sh` / `uiplay.sh`) over a hardware round
-trip whenever the question is about layout, navigation or rendering — it links
-the real drawing code against the real assets. Go to hardware only when the
-question is genuinely about console behavior.
+Prefer the host UI renderer (`uiview.sh` / `uiplay.sh`, both now the RmlUi
+harness `tools/uiview_playback_rml`) over a hardware round trip whenever the
+question is about layout or rendering — it links the real RmlUi documents,
+stylesheets and assets. Add a fixture to `tools/uiview_playback_rml.cpp` for a
+screen or cursor state it doesn't cover. Go to hardware only when the question
+is genuinely about console behavior (theme repaint, overlay-over-video, input
+timing).
 
 Full command reference, all scripts, screenshot measurement tools
 (`shot.sh probe/scan/crop/diff`), env vars: [docs/tooling.md](docs/tooling.md).
@@ -95,8 +100,12 @@ projects/evoplayer/
   main.c        the player: FFmpeg, threads, input, screens, state
   media/        subsystems carved out of main.c (own state/threads, narrow interface)
   pp/           playback backend: VideoOut, converters, clocks, theme
-  ui/           legacy immediate-mode screens/widgets/chrome (no FFmpeg, no VideoOut)
-  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp (the active work)
+  ui/           shared immediate-mode primitives still used by both paths:
+                draw/nav/focus/input/feedback, evo_keyboard (IME modal),
+                evo_widgets (toasts), evo_layout (grid/capacity geometry).
+                The screen renderers (evo_screens.c/evo_chrome.c) were deleted
+                in #44 — every screen now draws through ui_rml.
+  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI
   assets/rml/   .rml/.rcss documents for the RmlUi screens
 scripts/        build/deploy — see docs/tooling.md
 tools/          uiview, klog, shot, bench, gen_icons — see docs/tooling.md
@@ -131,10 +140,12 @@ mock data — everything in the DOM binds to live C structs
 | Doc | What's in it |
 |---|---|
 | [roadmap.md](docs/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
+| [project-tracking.md](docs/project-tracking.md) | The "EVO Player Roadmap" GitHub Project board — setup script, field↔label map, views, auto-add workflows |
 | [architecture.md](docs/architecture.md) | Layer boundaries, why `main.c` is still large |
 | [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
 | [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
 | [rmlui-integration-guide.md](docs/rmlui-integration-guide.md) | RmlUi migration spec (active work) |
+| [rmlui-parity.md](docs/rmlui-parity.md) | **#44 per-screen RmlUi-vs-`main` parity checklist** + #16 text-clamp status + marquee scope |
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
@@ -168,5 +179,5 @@ mock data — everything in the DOM binds to live C structs
   beats one launch per screen — and hardware round trips are the slow, risky
   part of the loop anyway (see the launch-safety rule above).
 - **Prefer `uiview.sh`/`uiplay.sh` over hardware** for anything about layout
-  or navigation — it's the same drawing code, with no console risk and no
-  90s launch cooldown.
+  or rendering — it's the same RmlUi code and assets, with no console risk and
+  no 90s launch cooldown.

@@ -139,6 +139,3 @@ fi
 
 echo ""
 ok "all requested projects built"
-echo ""
-echo "   Deploy one:"
-echo "     PS5_HOST=192.168.1.50 ./scripts/deploy.sh output/elf/hello_world.elf"

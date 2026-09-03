@@ -14,6 +14,17 @@
 extern "C" {
 #endif
 
+/*
+ * Pool size (#6). Kept at the proven 64 MiB: a larger WB_ONION reservation
+ * competes with the GPU / sceAgc / VideoOut direct-memory budget and wedged
+ * the first 4K V8 present on hardware (2026-09-03). The 1080p CPU working set
+ * (swscale rotate ring, pp_playback display, nv12 scratch) fits here; the 4K
+ * display / staging buffers deliberately spill to malloc() via
+ * evo_direct_mem_alloc's graceful fallback — exactly as before #6, and the
+ * V8 GPU present path never allocates them anyway.
+ */
+#define EVO_DIRECT_MEM_POOL_BYTES ((size_t)64 * 1024 * 1024)
+
 typedef struct {
     size_t total_bytes;
     size_t allocated_bytes;

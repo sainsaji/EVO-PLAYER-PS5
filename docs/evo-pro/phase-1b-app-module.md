@@ -479,6 +479,15 @@ in the app sandbox. No native decode.
    NULL cleanly → browser shows "NOT FOUND", no crash/hang.
    New: `src/evo_data_path.{c},include/evo_data_path.h`,
    `src/evo_readdir.{c},include/evo_readdir.h`. Boot trace trimmed to 4 lines.
+
+   > ⚠️ **Superseded by #46 (code 2026-09-03).** The "persists across relaunch"
+   > result above did **not** hold once `evo_jailbreak_self()` moved to `main()`
+   > boot — `/download0/evoplayer/` is a savedata-relative mount with no
+   > `sceSaveDataMount2`/commit, so it is wiped every launch. `evo_data_dir()` /
+   > `evo_data_path()` now resolve the root at **runtime**: `/data/evoplayer`
+   > once the sandbox is open, `/download0/evoplayer` only as a pre-unjail
+   > fallback. `evo_mkdir()` uses `sceKernelMkdir` (POSIX `mkdir` absent from
+   > the shim surface). See `docs/evo-pro/status.md` #46 block.
 7. ✅ `sandbox_unjail` elfldr payload (§5 Step B.2) — `/mnt/usb0` is ENOENT in
    the sandbox. `projects/sandbox_unjail/` + `tools/sandbox-unjail.sh`; applies
    `elfldr_raise_privileges`' rootdir/jaildir/uid/caps lift to the running

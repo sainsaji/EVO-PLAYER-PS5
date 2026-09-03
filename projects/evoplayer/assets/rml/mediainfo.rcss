@@ -69,6 +69,7 @@ div, span, p {
 #header-text-block {
     display: flex;
     flex-direction: column;
+    max-width: 980px;
 }
 
 #mediainfo-eyebrow {
@@ -84,6 +85,9 @@ div, span, p {
     color: #ffffff;
     letter-spacing: 0.5px;
     margin-top: 3px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #mediainfo-path {
@@ -91,6 +95,9 @@ div, span, p {
     font-weight: normal;
     color: #64748b;
     margin-top: 2px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #header-badges {
@@ -98,6 +105,7 @@ div, span, p {
     flex-direction: row;
     gap: 10px;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .info-badge {
@@ -180,13 +188,23 @@ div, span, p {
     font-weight: bold;
     color: #64748b;
     letter-spacing: 0.5px;
+    flex-shrink: 0;
+    margin-right: 16px;
 }
 
+/* Bounded (card is 592 px inside its padding) so long codec strings such as
+ * "HEVC (H.265 Main 10)" / "Dolby Digital (E-AC-3)" truncate rather than
+ * colliding with the key label (#16). */
 .spec-val {
+    width: 380px;
     font-size: 14px;
     font-weight: bold;
     color: #f1f5f9;
     letter-spacing: 0.5px;
+    text-align: right;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 /* Footer Hints */

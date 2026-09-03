@@ -264,7 +264,19 @@ static void test_direct_mem_lifecycle(void)
     evo_direct_mem_free(p2);
     evo_direct_mem_get_stats(&stats);
     TEST_ASSERT(stats.allocated_bytes == 0, "Free did not clear allocated bytes");
-    
+
+    /*
+     * #6: a request larger than the whole pool must still succeed (graceful
+     * malloc fallback) and free() must route it back correctly — the 4K video
+     * buffers depend on this when the console can't give the full slab.
+     */
+    void *big = evo_direct_mem_alloc(8 * 1024 * 1024);
+    TEST_ASSERT(big != NULL, "oversize alloc did not fall back");
+    memset(big, 0xAB, 8 * 1024 * 1024); /* must be writable for its full extent */
+    evo_direct_mem_free(big);
+    evo_direct_mem_get_stats(&stats);
+    TEST_ASSERT(stats.allocated_bytes == 0, "fallback free leaked into pool stats");
+
     evo_direct_mem_shutdown();
     TEST_PASS();
 }
@@ -422,7 +434,7 @@ static void test_changelog_model_integrity(void)
 
 static void test_common_ui_widgets_and_surround_screen(void)
 {
-    TEST_START("Common UI: Badges, Stat Cards & Surround Studio Screen");
+    TEST_START("Common UI: Badges, Stat Cards & Speaker Nodes");
 
     uint32_t *mock_fb = (uint32_t *)calloc(1920 * 1080, sizeof(uint32_t));
     TEST_ASSERT(mock_fb != NULL, "Failed to allocate mock framebuffer");
@@ -453,38 +465,9 @@ static void test_common_ui_widgets_and_surround_screen(void)
     node.is_selected = 1;
     evo_widget_speaker_node(mock_fb, 600, 300, 150, 82, &node);
 
-    /* 4. Test Full Surround Sound Studio Screen Rendering (5.1 & 7.1) */
-    static const evo_surround_speaker_info test_spk[8] = {
-        { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 2, 6 },
-        { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 3, 8 },
-        { "FRONT LEFT",   "FL",  330.0, -460, -180, 150, 82, 0, 5 },
-        { "FRONT RIGHT",  "FR",  440.0,  310, -180, 150, 82, 1, 7 },
-        { "SIDE LEFT",    "SL", 1109.0, -510,   10, 150, 82, 6, 9 },
-        { "SIDE RIGHT",   "SR", 1319.0,  360,   10, 150, 82, 7, 10 },
-        { "BACK LEFT",    "BL",  659.0, -380,  200, 150, 82, 4, 11 },
-        { "BACK RIGHT",   "BR",  880.0,  230,  200, 150, 82, 5, 12 }
-    };
-
-    evo_surround_test_model m;
-    memset(&m, 0, sizeof(m));
-    m.is_51_layout   = 1;
-    m.selected_item  = 0;
-    m.active_channel = 0;
-    m.surround_mode  = 1;
-    m.speakers       = test_spk;
-    m.speaker_count  = 8;
-
-    static const evo_hint hints[] = {
-        { EVO_GLYPH_CROSS, "TEST" },
-        { EVO_GLYPH_CIRCLE, "BACK" }
-    };
-
-    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
-
-    /* Switch to 7.1 layout and render */
-    m.is_51_layout = 0;
-    m.active_channel = 6;
-    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
+    /* The full surround-studio SCREEN renderer moved to RmlUi (#44); only the
+     * shared widgets it was built from are still drawn on this immediate-mode
+     * path, and those are exercised above. */
 
     free(mock_fb);
     TEST_PASS();

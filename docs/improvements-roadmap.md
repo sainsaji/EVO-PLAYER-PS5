@@ -323,9 +323,34 @@ because "most" is not "all", and a 4:4:4 file should not fall to one thread.
 
 ---
 
-## P2 — The Rotate Buffers Bypass the Slab Allocator
+## P2 — The Rotate Buffers Bypass the Slab Allocator  ✅ DONE (#6, 2026-09-03)
 
 **Found:** 2026-08-14. **Size:** S **Risk:** Low **Domain:** Memory
+
+**Resolution (#6) — narrowed to the rotate ring after a hardware regression:**
+
+- `convert_frame_via_sws` rotate ring — `VIDEO_ROTATE_BUFFERS` trimmed **8 → 3**
+  and moved to the `evo_direct_mem` slab, grow-only (reallocated only when a
+  frame arrives larger than the current slot). This is the exotic-pixfmt
+  swscale fallback; the product path presents through `pp_playback`'s display
+  model. **265 MB → ~100 MB at 4K, off the heap, no per-open churn.**
+- `P8_31_RETURN_OK` now logs `dmem=used/total` for verification.
+- `evo_direct_mem_init` gained a step-down ladder (no-op at 64 MiB, there if the
+  pool is ever raised).
+
+**Backed out** (hardware, 2026-09-03 — caused a hard hang on GTA 4K, right after
+`006B_VO_RECONFIG_APPLIED`, `dmem=31M/192M hw=1`):
+- pool 64 → 192 MiB — a WB_ONION reservation that large competes with the
+  GPU / sceAgc / VideoOut direct-memory budget.
+- routing `pp_playback` `display` / `display_back` / `nv12_fb` and `pp_videoout`
+  `cpu_bufs` through the slab — a latent 4K V3-fallback buffer overflow (present
+  even pre-#6) corrupts the *shared* slab instead of an isolated `malloc` block,
+  turning "mostly-worked UB" into a wedge. Left on `malloc`; the real fix for
+  that overflow is its own item.
+
+Original analysis below.
+
+---
 
 `VIDEO_ROTATE_BUFFERS` is **8**, and each one is allocated with a plain
 `malloc(video_frame_w * video_frame_h * 4)`. At 4K that is
