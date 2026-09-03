@@ -177,6 +177,33 @@ static struct {
 
 static int agc_submit_start(void);
 
+/* First-frame breadcrumbs -> evo_boot.log, flushed each call, silent once a
+ * frame has presented. #27 phase C: pin down where the present path dies when
+ * neither the sigsetjmp guard nor the submit watchdog fires. */
+#define agc_dbg(...) do { \
+        if (!g_agc.first_frame_ok) { \
+            evo_boot_log("pp_agc: " __VA_ARGS__); \
+            evo_boot_log_flush(); \
+        } \
+    } while (0)
+
+/* Per-thread fault guard: the decode-thread caller and the submit worker each
+ * arm one around their first frame. Handlers are installed once (agc_submit_start)
+ * and left in place; an un-armed fault re-raises with default disposition so an
+ * unrelated crash still behaves normally. */
+static __thread sigjmp_buf t_agc_jmp;
+static __thread volatile sig_atomic_t t_agc_armed;
+
+static void agc_fault_h(int sig)
+{
+    if (t_agc_armed) {
+        t_agc_armed = 0;
+        siglongjmp(t_agc_jmp, sig);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 static int copy_asset(void *dst, size_t cap, const uint8_t *s, const uint8_t *e)
 {
     if (e < s)
@@ -340,11 +367,17 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     memset(&submit, 0, sizeof submit);
     memset(descriptor, 0, sizeof descriptor);
 
+    agc_dbg("R0 render_frame enter  target=%p defaults=%p  ybytes=%zu uvbytes=%zu srcbytes=%zu",
+            target, defaults, y_bytes, uv_bytes, source_bytes);
+
     if (!defaults || visible_width == 0 || visible_height == 0 || visible_width > pitch ||
         visible_height > surface_height || (pitch & 1u) != 0 || y_bytes > UINT32_MAX ||
         uv_bytes > UINT32_MAX || y_bytes + uv_bytes > source_bytes || output_width == 0 ||
-        output_height == 0)
+        output_height == 0) {
+        agc_dbg("R0! validation failed  vis=%ux%u pitch=%u surfh=%u",
+                visible_width, visible_height, pitch, surface_height);
         return -1;
+    }
 
     blocks = *(agc_register_t ***)defaults;
     default_count = *(uint32_t *)((uint8_t *)defaults + 0x20);
@@ -413,9 +446,11 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     command.down = command.top;
     command.callback = (uintptr_t)agc_out_of_space;
 
+    agc_dbg("R1 cx base done (%u regs) -> WaitUntilSafeForRendering", cx_count);
     sceAgcDriverWaitUntilSafeForRendering(&command.up,
                                           sceAgcDriverGetWaitRenderingPacketSizeInDwords(), 0,
                                           (uint32_t)video, buffer_index);
+    agc_dbg("R2 WaitUntilSafeForRendering returned");
 
     {
         agc_register_t *link_cx = (agc_register_t *)(memory + 0x5000);
@@ -459,6 +494,7 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     }
     sceAgcCbSetShRegisterRangeDirect(&command, 0x8c + slot, descriptor, 8);
 
+    agc_dbg("R3 link/sh done -> bind_pixel_source + draw + flip");
     bind_pixel_source(&command, resources, source, y_bytes, uv_bytes, pixel_cb);
     sceAgcDcbDrawIndexAuto(&command, 4, 2);
     sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
@@ -467,10 +503,13 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     submit.word_count = (uint32_t)(command.up - words);
     *word_count = submit.word_count;
     flush_gpu_data(memory, SHADER_STATIC_BYTES);
+    agc_dbg("R4 DCB built (%u words) -> SubmitDcb", submit.word_count);
     {
         int32_t result = sceAgcDriverSubmitDcb(&submit);
+        agc_dbg("R5 SubmitDcb=0x%08x -> SuspendPoint", (unsigned)result);
         if (result == 0)
             result = sceAgcSuspendPoint();
+        agc_dbg("R6 SuspendPoint done, result=0x%08x", (unsigned)result);
         return result;
     }
 }
@@ -606,21 +645,6 @@ static int agc_staging_ensure(size_t need)
     return 0;
 }
 
-/* --- fault guard for the first render_frame (evo_agc_probe.c pattern) -----
- * Runs on the submit worker thread now (the thread that would fault). Only a
- * CPU fault is caught here - the GPU-side stall is the watchdog's job. */
-static sigjmp_buf g_agc_jmp;
-static volatile sig_atomic_t g_agc_armed;
-
-static void agc_fault_h(int sig)
-{
-    if (g_agc_armed) {
-        g_agc_armed = 0;
-        siglongjmp(g_agc_jmp, sig);
-    }
-    _exit(150 + sig);
-}
-
 /* The GPU submit worker. One request in flight; see g_agc_submit. */
 static void *agc_submit_worker(void *arg)
 {
@@ -660,35 +684,23 @@ static void *agc_submit_worker(void *arg)
 
         guard = !g_agc.first_frame_ok;
         if (guard) {
-            struct sigaction sa, o_segv, o_bus, o_ill;
-            memset(&sa, 0, sizeof sa);
-            sa.sa_handler = agc_fault_h;
-            sigaction(SIGSEGV, &sa, &o_segv);
-            sigaction(SIGBUS, &sa, &o_bus);
-            sigaction(SIGILL, &sa, &o_ill);
-
-            if (sigsetjmp(g_agc_jmp, 1) != 0) {
-                g_agc_armed = 0;
-                sigaction(SIGSEGV, &o_segv, NULL);
-                sigaction(SIGBUS, &o_bus, NULL);
-                sigaction(SIGILL, &o_ill, NULL);
-                evo_boot_log("pp_agc: FAULT in first agc_render_frame - GPU present "
-                             "DISABLED, playback falls back to the CPU converter");
+            agc_dbg("W0 worker picked up frame -> agc_render_frame");
+            if (sigsetjmp(t_agc_jmp, 1) != 0) {
+                t_agc_armed = 0;
+                evo_boot_log("pp_agc: FAULT (worker) in first agc_render_frame - "
+                             "GPU present DISABLED, CPU fallback");
                 evo_boot_log_flush();
                 g_agc.ready = 0;
                 rc = -99;
                 words = 0;
                 goto reply;
             }
-            g_agc_armed = 1;
+            t_agc_armed = 1;
             rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
                                   g_agc.vs, g_agc.ps, source, source_bytes, pitch,
                                   surface_height, visible_width, visible_height,
                                   output_width, output_height, render_marker, &words);
-            g_agc_armed = 0;
-            sigaction(SIGSEGV, &o_segv, NULL);
-            sigaction(SIGBUS, &o_bus, NULL);
-            sigaction(SIGILL, &o_ill, NULL);
+            t_agc_armed = 0;
 
             evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
                          "pitch=%u codedh=%u marker=%lld",
@@ -722,6 +734,16 @@ static int agc_submit_start(void)
 {
     if (g_agc_submit.started)
         return 0;
+
+    /* Installed once, left in place. agc_fault_h re-raises with default
+     * disposition for any fault that isn't inside an armed (TLS) guard. */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = agc_fault_h;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+
     pthread_mutex_init(&g_agc_submit.lock, NULL);
     pthread_cond_init(&g_agc_submit.req_cv, NULL);
     pthread_cond_init(&g_agc_submit.done_cv, NULL);
@@ -749,14 +771,43 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
         vis_w == 0 || vis_h == 0 || out_w == 0 || out_h == 0)
         return -1;
 
+    int fg = !g_agc.first_frame_ok;   /* instrument + guard the first frame only */
+    if (fg)
+        agc_dbg("A0 present enter  vh=%d buf=%u pitch=%u codedh=%u vis=%ux%u out=%ux%u "
+                "nv12=%p gpu=%p marker=%lld",
+                vout_handle, buf_idx, pitch_bytes, coded_height, vis_w, vis_h,
+                out_w, out_h, nv12, gpu_target, (long long)flip_marker);
+
     size_t need = (size_t)pitch_bytes * coded_height                     /* Y  */
                 + (size_t)pitch_bytes * ((coded_height + 1u) / 2u);      /* UV */
-    if (agc_staging_ensure(need) != 0)
+
+    /* Guard the decode-thread side (staging alloc + the NV12 memcpy + clflush) -
+     * a bad source pointer / size faults HERE, on this thread, not the worker. */
+    if (fg) {
+        if (sigsetjmp(t_agc_jmp, 1) != 0) {
+            t_agc_armed = 0;
+            evo_boot_log("pp_agc: FAULT (caller) staging the NV12 frame - GPU present "
+                         "DISABLED, CPU fallback");
+            evo_boot_log_flush();
+            g_agc.ready = 0;
+            return -1;
+        }
+        t_agc_armed = 1;
+    }
+
+    if (agc_staging_ensure(need) != 0) {
+        if (fg) t_agc_armed = 0;
         return -1;
+    }
 
     uint8_t *stage = g_agc.stage[buf_idx];
+    if (fg) agc_dbg("A1 staging ok stage=%p need=%zu -> memcpy + flush", stage, need);
     memcpy(stage, nv12, need);
     flush_gpu_data(stage, need);
+    if (fg) {
+        t_agc_armed = 0;
+        agc_dbg("A2 staged + flushed -> dispatch worker (250ms watchdog)");
+    }
 
     /* 250 ms watchdog on the whole render_frame call (WaitUntilSafeForRendering
      * + SubmitDcb + SuspendPoint). The cond deadline is CLOCK_REALTIME (the BSD
@@ -824,9 +875,7 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
         g_agc.ready = 0;
         pthread_mutex_unlock(&g_agc_submit.lock);
         evo_boot_log("pp_agc: SUBMIT WEDGED (>250ms in agc_render_frame) - GPU "
-                     "present ABANDONED for the session, CPU converter from here. "
-                     "The VO is linear-registered while AGC is on, so the CPU "
-                     "fallback picture may be garbled until the app restarts.");
+                     "present ABANDONED for the session, CPU converter from here.");
         evo_boot_log_flush();
         return -2;
     }
@@ -835,6 +884,7 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     g_agc_submit.have_done = 0;
     pthread_mutex_unlock(&g_agc_submit.lock);
 
+    if (fg) agc_dbg("A3 caller got rc=0x%08x", (unsigned)rc);
     return rc == 0 ? 0 : -1;
 }
 

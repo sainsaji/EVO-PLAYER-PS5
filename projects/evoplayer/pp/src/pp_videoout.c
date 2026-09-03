@@ -261,18 +261,15 @@ int pp_videoout_init(pp_videoout *vo,
     (void)sceVideoOutSetFlipRate(vo->handle, vo->flip_rate);
 
     /*
-     * #27: when the sceAgc GPU present path is armed (--agc-probe builds only;
-     * pp_agc_available() is 0 in the default .ffpfsc and on host), register the
-     * VO with ProsperoLight's linear SDR attribute. The ported render_frame's
-     * render-target bits are tuned to that layout; running it against EVO's
-     * CPU-tiler attribute is the leading suspect for the first-run GPU hang.
-     * The CPU tiler path is left completely untouched.
+     * #27: plan A (register the VO with ProsperoLight's linear SDR attr
+     * PP_VO_ATTR_SDR_LINEAR when pp_agc_available()) black-screened + hung the
+     * compositor on hardware 2026-09-03 - "weird colors" then an app-slot hang,
+     * before agc_render_frame even logged. Backed out: the VO stays on the
+     * proven CPU-tiler attribute. The ported render_frame runs against that for
+     * now (the issue predicts garbled-not-crash if its RT bits disagree), so we
+     * can actually read `pp_agc: render_frame rc=` before touching the attr again.
      */
-#if defined(EVO_APP_MODULE)
-    attr_pix = pp_agc_available() ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
-#else
     attr_pix = PP_VO_ATTR_TILED_BGRA;
-#endif
     evo_bt("pp_videoout_init %ux%u attr=%#llx", width, height,
            (unsigned long long)attr_pix);
     memset(&attr, 0, sizeof(attr));
