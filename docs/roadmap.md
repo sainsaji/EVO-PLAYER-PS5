@@ -33,7 +33,7 @@ hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` made
 dependency #44 is done); #28 still waits on #27.
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
-`rmlui` = #45, #28, #49 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
+`rmlui` = #45, #28, #49, #60 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
 `modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)). (#26 closed
 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
 H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
@@ -56,7 +56,8 @@ keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
 prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
 New label `modularisation` = #49 + #53 · **#59** surface active video decoder
 backend in player UI (HW vs SW badge + OSD / Media Info, v1.1.0, `native-decode`,
-`priority: medium`).
+`priority: medium`) · **#60** make `.ffpfsc` self-contained by embedding RmlUi
+assets in binary (eliminate `/data` FTP sync, v0.9.0, `rmlui`, `priority: medium`).
 
 ---
 
@@ -99,6 +100,7 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
     #35 part B: on-video caption overlay off legacy rr_text → RmlUi  (unblocked)
     #28 RenderInterface → sceAgc + delete the CPU rasteriser (GPU Step 3, after #27)
     #49 seam cleanup — drop model→params hop, screen builders out of main.c
+    #60 self-contained .ffpfsc: embed RmlUi assets in binary (drop /data FTP sync)
 
   native hw decode  (label: native-decode, v1.1.0 — #29 umbrella retired)
     #30 evo_vdec.h seam ✅ CLOSED (FFmpeg-parity regression check moved to #38)
@@ -244,6 +246,7 @@ work as discrete stories:
 | **#45** | Icon swap — Lucide concept icons + Kenney controller glyphs (approved, `docs/icon-swap-handoff.md`) | open, low |
 | **#35** part B | On-video **caption** rendering off legacy `rr_text` → RmlUi | open |
 | **#28** | Bind `Rml::RenderInterface` → `sceAgc` + delete the CPU coverage rasteriser (GPU Step 3, after #27) | open, low |
+| **#60** | Make `.ffpfsc` self-contained: embed RmlUi assets in binary (eliminate `/data` FTP push) | open, medium |
 
 - Reads: `docs/rmlui-integration-guide.md` (§7 per-screen parity specs),
   `docs/ui-handoff.md`, `docs/theming.md`, `docs/icon-swap-handoff.md`
