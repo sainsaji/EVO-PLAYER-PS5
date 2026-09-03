@@ -52,6 +52,7 @@ typedef struct pp_playback {
     uint32_t out_h;
     uint32_t *display;      /* linear BGRA front (published) */
     uint32_t *display_back; /* convert target; swapped under lock */
+    size_t   display_cap;   /* bytes allocated for EACH of display/display_back */
     int display_ready;
     int64_t display_pts_us;
 
@@ -84,7 +85,11 @@ typedef struct pp_playback {
      * available (host preview, or a first-frame fault disabled it). */
     uint8_t *nv12_fb;
     size_t   nv12_fb_cap;
-    uint64_t agc_frames;   /* frames presented through pp_agc_present_nv12 */
+    uint64_t agc_frames;      /* frames presented through pp_agc_present_nv12   */
+    uint64_t agc_present_us_sum;  /* rolling since the last heartbeat           */
+    uint64_t agc_present_us_max;
+    uint64_t agc_present_dropped; /* late/dropped on the AGC path (heartbeat)   */
+    uint64_t agc_hb_frames;       /* frames counted toward the current window   */
 
     void *lock;
     pp_playback_stats stats;

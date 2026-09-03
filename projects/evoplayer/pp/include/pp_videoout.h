@@ -80,6 +80,11 @@ typedef struct pp_videoout {
     pp_videoout_stats stats;
     int inited;
     int registered;
+    /* #27: 1 when the VO buffers were registered with the linear SDR attribute
+     * (PP_VO_ATTR_SDR_LINEAR) for the sceAgc GPU present path. In that mode
+     * nothing may tile into the plane - pp_videoout_present does a straight copy
+     * and every CPU converter must emit linear BGRA. */
+    int attr_linear;
 } pp_videoout;
 
 /**
@@ -127,6 +132,10 @@ int pp_videoout_adopt_flip(pp_videoout *vo, uint32_t buffer_index, uint64_t fram
 
 /** Tiled GPU plane for acquired buffer (V8 write target). */
 void *pp_videoout_gpu_plane(pp_videoout *vo, uint32_t buffer_index);
+
+/** 1 if the VO plane is linear-registered (#27 sceAgc path) - callers must not
+ * tile into it and CPU converters must emit linear BGRA. */
+int pp_videoout_is_linear(const pp_videoout *vo);
 
 /**
  * Wait until buffer_index is safe to reuse (not in-flight), or timeout.

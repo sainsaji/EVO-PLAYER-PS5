@@ -272,13 +272,13 @@ int pp_videoout_init(pp_videoout *vo,
      * the V3-fallback overflow from the unreachable-AGC bug, since fixed.
      */
 #if defined(EVO_APP_MODULE)
-    attr_pix = (pp_agc_available() && width >= 3200u)
-                   ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
+    vo->attr_linear = (pp_agc_available() && width >= 3200u) ? 1 : 0;
 #else
-    attr_pix = PP_VO_ATTR_TILED_BGRA;
+    vo->attr_linear = 0;
 #endif
-    evo_bt("pp_videoout_init %ux%u attr=%#llx", width, height,
-           (unsigned long long)attr_pix);
+    attr_pix = vo->attr_linear ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
+    evo_bt("pp_videoout_init %ux%u attr=%#llx linear=%d", width, height,
+           (unsigned long long)attr_pix, vo->attr_linear);
     memset(&attr, 0, sizeof(attr));
     sceVideoOutSetBufferAttribute2(&attr, attr_pix, 0, width, height, 0, 0, 0);
     rc = sceVideoOutRegisterBuffers2(vo->handle, 0, 0, vbuf, (int)buffer_count, &attr, 0, NULL);
@@ -347,10 +347,17 @@ int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_i
     if (vo->state[buffer_index] != PP_BUF_ACQUIRED)
         return -3;
 
-    pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
-                            (uint32_t *)vo->gpu_bufs[buffer_index],
-                            (int)vo->width,
-                            (int)vo->height);
+    if (vo->attr_linear) {
+        /* #27: linear-registered plane - no tile swizzle, straight copy of the
+         * tightly-packed (pitch = width*4) CPU staging the caller wrote. */
+        memcpy(vo->gpu_bufs[buffer_index], vo->cpu_bufs[buffer_index],
+               vo->cpu_bytes);
+    } else {
+        pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
+                                (uint32_t *)vo->gpu_bufs[buffer_index],
+                                (int)vo->width,
+                                (int)vo->height);
+    }
 
     vo->stats.presents++;
     rc = sceVideoOutSubmitFlip(vo->handle, (int)buffer_index, 1, (int64_t)frame_id);
@@ -373,6 +380,11 @@ void *pp_videoout_gpu_plane(pp_videoout *vo, uint32_t buffer_index)
     if (buffer_index >= vo->buffer_count)
         return NULL;
     return vo->gpu_bufs[buffer_index];
+}
+
+int pp_videoout_is_linear(const pp_videoout *vo)
+{
+    return (vo && vo->inited) ? vo->attr_linear : 0;
 }
 
 int pp_videoout_present_pre_tiled(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id)
