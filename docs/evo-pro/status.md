@@ -128,8 +128,8 @@ rebase + SDR full-range coeffs), CreateShader, LinkShaders — **all work**.
 - **`pp_playback.c`** `use_v8` branch: when `pp_agc_available()`, skip
   `pp_compute_pipeline_convert` / `pp_converter_yuv420p_to_tiled_bgra_parallel`
   and call `pp_agc_present_nv12`.
-- Settings row `Playback -> Renderer: Auto/CPU/GPU` — coordinate with #29
-  Phase 5's `Video decoder` row (same screen, same config-append pattern).
+- Settings row `Playback -> Renderer: Auto/CPU/GPU` — coordinate with **#37**'s
+  `Video decoder` row (same screen, same config-append pattern).
 - Panic discipline: AGC present up after VO, down before VO reconfig; watchdog
   the submit; `flush_gpu_data` before every submit.
 

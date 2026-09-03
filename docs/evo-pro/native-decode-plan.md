@@ -3,11 +3,16 @@
 > **Status (2026-09-03):** **Phase 4 DONE — #31 closed.** GTA VI 4K H.264 plays
 > real-time on `sceVideodec2` inside `PPSA99039` (`be=1` NATIVE, `pos` climbs
 > 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the
-> backend behind `evo_vdec.h`. Open: **#32** (scrub shows no player UI on the
-> V8 4K path — not a freeze, app responsive; the k4_live present path never
-> composites the OSD; high) and **Phase 5** (the `Auto / FFmpeg / Native`
-> settings row).
-> History of the gate below.
+> backend behind `evo_vdec.h`.
+>
+> **The #29 umbrella is retired** — the remaining work is discrete GitHub
+> stories under the **`native-decode`** label: **#37** (Phase 5 — `Auto /
+> FFmpeg / Native` settings toggle + probe + config), **#38** (Phase 6 —
+> validation sweep + FFmpeg-vs-native A/B benchmark + docs), **#39**
+> (decode-thread watchdog), **#40** (route direct memory via `evo_direct_mem` +
+> soak), **#41** (HEVC — 2nd resident decoder), plus **#32** (scrub shows no
+> player UI on the V8 4K path — not a freeze). The phase sections below are the
+> design detail each story points back to. History of the gate follows.
 >
 > Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
 > "registered app slot" hypothesis is confirmed: from a fake-signed
@@ -383,15 +388,14 @@ and `v8_hold` skips the flip during the seek-discard window), and Phase 5
       window is also the B-frame display-order safety net, and there is no
       output-PTS/picture-detail call bound). One extra full-frame read+write
       per frame; the converter reads every byte immediately after regardless.
-- [ ] Wire the direct-memory allocations through `evo_direct_mem`
-      ([evo_direct_mem.c](../../projects/evoplayer/media/src/evo_direct_mem.c))
-      rather than raw `sceKernelAllocateDirectMemory` — deferred; the probe's
-      raw path is what's hardware-verified, revisit after multi-hour soak.
-- [ ] Watchdog in the decode thread (hardware-decode-review §7) — deferred.
-      Today a native call that *returns* an error falls back cleanly
+- [ ] Wire the direct-memory allocations through `evo_direct_mem` + multi-hour
+      soak — **#40** (deferred; the probe's raw path is hardware-verified).
+- [ ] Watchdog in the decode thread (hardware-decode-review §7) — **#39**
+      (deferred). A native call that *returns* an error falls back cleanly
       (`evo_playback`'s fatal-streak → finished screen); a native call that
-      *hangs* still wedges the app slot. Add the watchdog thread once the
-      happy path is confirmed on hardware.
+      *hangs* still wedges the app slot.
+- [ ] HEVC — a 2nd resident `sceVideodec2` decoder — **#41** (H.264 8-bit ≤4K
+      only today; HEVC / >4K / 10-bit fall back to FFmpeg).
 
 ### Phase 5 — settings toggle + runtime probe — **#37**
 
@@ -430,7 +434,7 @@ and `v8_hold` skips the flip during the seek-discard window), and Phase 5
 - [ ] Changing the toggle mid-playback: apply on next `open_file`, toast
       "applies to next video". Don't hot-swap a live decoder.
 
-### Phase 6 — host preview, validation, docs
+### Phase 6 — host preview, validation, docs — **#38**
 
 - [ ] `tools/uiview_playback_rml` / `uiplay`: the native path can't run on the
       host. Guard `evo_vdec_native` behind `__PROSPERO__` (or the SDK macro

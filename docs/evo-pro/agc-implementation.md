@@ -248,7 +248,7 @@ allocate+map `shader_memory` → `copy_asset` the 5 blobs into place →
 | FFmpeg planar → cheap interleave | `evo_vdec_native.c` `ro_harvest` emits **straight NV12** (skips its NV12→I420 de-interleave) when `pp_agc_available()`; `pp_frame` gained `coded_height`. `pp_playback.c` de-interleaves NV12→YUV420P as a fallback for every other path (host, disabled AGC, 1080/V3). |
 | guard `__PROSPERO__` | guard is `EVO_APP_MODULE` (matches the rest of the app-module code). |
 | watchdog the submit thread | **not yet** — only a first-frame `sigsetjmp` SIGSEGV/BUS/ILL guard (evo_agc_probe.c pattern); a fault disables `pp_agc` for the session and playback drops to the CPU converter. A proper submit watchdog thread is still TODO. |
-| Settings row `Renderer: Auto/CPU/GPU` | **not done** — separate task, coordinate with #29 Phase 5's `Video decoder` row. `pp_agc_init` is currently called unconditionally from `main()` (app module) so the bare build arms the path; `pp_agc_available()` is the de-facto Auto. |
+| Settings row `Renderer: Auto/CPU/GPU` | **not done** — separate task, coordinate with **#37**'s `Video decoder` row (same settings screen, same fscanf-append; land decoder-append first). `pp_agc_init` is currently called unconditionally from `main()` (app module) so the bare build arms the path; `pp_agc_available()` is the de-facto Auto. |
 
 **Open hardware unknowns** (first device run answers these): RT format/tiling —
 EVO's VO buffer is `SetBufferAttribute2(0x8000000022000000, tiling=0)` while
