@@ -175,16 +175,19 @@ The real fix is #27 (GPU P010 shader). Only do a CPU-side improvement here if
 - Reads: `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/evo-pro/gpu-rendering-plan.md`
 - Files: `main.c` `start_video_playback` (`is10` / `bpp>8` gating), `pp/src/pp_v8_gate.c`, `pp/src/pp_compute_pipeline.c`
 
-### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **IN PROGRESS**
+### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **STALLED**
 
-**Prereqs cleared.** AGC gate PASSED (2026-09-03): `sceAgcInit` works from the
-app module via the positional PRX import stubs (from #31 — no `LoadStartModule`,
-no runtime NID). **`pp_agc_init` (shader setup: blobs → CreateShader ×2 →
-LinkShaders) is ported and hardware-verified** (`pp/src/pp_agc.c` +
-`agc_blobs.S` + `pp/blobs/`). **Next: port `render_frame` + wire the present
-path** — full cold-start checklist in issue #27's body and
-`docs/evo-pro/status.md` ("#27 shader setup VALIDATED" section). The `.syms`
-for render_frame are pre-staged.
+AGC gate ✅ + `pp_agc_init` (shader setup) ✅ hw-verified. **`render_frame` is
+ported + wired but FAILED its first hardware run (2026-09-03):**
+`sceAgcDriverSubmitDcb` → `sceAgcSuspendPoint` never returns → 4K hangs. Gated
+behind `--agc-probe`; default build is on the CPU V8 path (#31-proven).
+
+**Plan to finish is on issue #27** (comment 2026-09-03): **B** move the GPU
+submit to a dedicated thread + ~250ms watchdog (so a wrong guess costs a
+dropped frame, not a console cycle — do first) · **A** register the VO buffer
+with ProsperoLight's `0x8000000000000000` attr instead of EVO's
+`0x8000000022000000` (RT tiling mismatch is the leading hang hypothesis) ·
+**C** iterate `--agc-probe` on the `cx` bits. Needs ~2–4 hardware cycles.
 
 - Reads: **`docs/evo-pro/status.md`** (resume-here + render_frame checklist), **`docs/evo-pro/agc-implementation.md`** §2/§3 (blob layout, `render_frame` annotated), `gpu-rendering-plan.md`, `sharpprospero-agc-reference.md`, `videodec2-abi.md` §6
 - Files: `third_party/ProsperoLight/src/native_agc_present.cpp` (`render_frame` ~571, `initialize_presenter` ~990), `pp/src/pp_agc.c` (scaffold done), `pp/src/agc_blobs.S`, `pp/blobs/`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c` (`use_v8` branch), `media/src/evo_vdec_native.c` (`ro_harvest` — NV12 vs I420), `tools/native-app/stubs/prx/libSceAgc*.syms`, `tools/evo-remote.sh` (test loop)
