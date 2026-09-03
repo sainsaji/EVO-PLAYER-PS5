@@ -12,12 +12,20 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **critical** #27 (render_frame ported + wired
-09-03, awaiting a first hardware run) · **high** #32, #36 · **medium** #6, #35,
-#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51, #52,
-the rest. `independent` = no cross-deps, work any time in parallel.
+Priority labels track this order: **critical** #27 (render_frame FAILED its
+first hardware run 09-03 — GPU submit hangs 4K; gated behind `--agc-probe`,
+default build on the CPU V8 path) · **high** #32, #36, #55 · **medium** #35,
+#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51,
+#52, the rest. `independent` = no cross-deps, work any time in parallel.
 
-**Closed 2026-09-03 (later):** **#46** (persistence — hardware-verified,
+**Closed 2026-09-03 (evening):** **#6** (video buffers → direct mem — landed as
+the swscale rotate-ring slab move + `--agc-probe` gate; PR #54, hw-verified) ·
+**#56** (GTA 4K regression — was #27's unproven sceAgc path armed by default;
+gated) · **#57** (4K seek "too demanding" — #31 routed Tears of Steel to native
+decode, which rejects it post-`sceVideodec2Reset`; PR #58 adds the FFmpeg
+fallback). New: **#55** (4K V3-fallback buffer overflow, surfaced by #6).
+
+**Closed 2026-09-03 (earlier):** **#46** (persistence — hardware-verified,
 `788b1a0`), **#44** (RmlUi parity signed off, legacy screen renderer deleted) +
 **#16** (text clamps, absorbed into #44). The #16 fixes had been shadowed on
 hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` made
