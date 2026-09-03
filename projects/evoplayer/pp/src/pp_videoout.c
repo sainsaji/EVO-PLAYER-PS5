@@ -261,15 +261,22 @@ int pp_videoout_init(pp_videoout *vo,
     (void)sceVideoOutSetFlipRate(vo->handle, vo->flip_rate);
 
     /*
-     * #27: plan A (register the VO with ProsperoLight's linear SDR attr
-     * PP_VO_ATTR_SDR_LINEAR when pp_agc_available()) black-screened + hung the
-     * compositor on hardware 2026-09-03 - "weird colors" then an app-slot hang,
-     * before agc_render_frame even logged. Backed out: the VO stays on the
-     * proven CPU-tiler attribute. The ported render_frame runs against that for
-     * now (the issue predicts garbled-not-crash if its RT bits disagree), so we
-     * can actually read `pp_agc: render_frame rc=` before touching the attr again.
+     * #27 plan A: when the sceAgc GPU present path is armed (--agc-probe only;
+     * pp_agc_available() is 0 in the default .ffpfsc and on host) AND this is the
+     * UHD playback VO, register with ProsperoLight's linear SDR attribute.
+     * render_frame's whole matched set - RT bits, YUV->RGB coefficients, MRT0
+     * export order - is tuned to that layout; against EVO's CPU-tiler attribute
+     * the picture comes out R<->B swapped / range-shifted (hw 2026-09-04). Gated
+     * to UHD so the 1080 menu VO (CPU tiler) is untouched - a linear attr there
+     * garbles the RmlUi UI. The earlier "plan A hangs the compositor" was really
+     * the V3-fallback overflow from the unreachable-AGC bug, since fixed.
      */
+#if defined(EVO_APP_MODULE)
+    attr_pix = (pp_agc_available() && width >= 3200u)
+                   ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
+#else
     attr_pix = PP_VO_ATTR_TILED_BGRA;
+#endif
     evo_bt("pp_videoout_init %ux%u attr=%#llx", width, height,
            (unsigned long long)attr_pix);
     memset(&attr, 0, sizeof(attr));
