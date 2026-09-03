@@ -171,6 +171,15 @@ Clarksons 720p too.
   `MODE == player`; `tools/vdec-test.sh` + `package-app.sh --autoplay` drive
   the unattended hardware-test loop (FTP log pull, one manual launch press).
 
+**KNOWN BUG — #46, app module persists nothing (high).** Settings / recent /
+favorites / resume all reset every launch; the ELF payload persisted fine.
+Console: `savedata_prospero/` has no `PPSA99039` folder. Cause: `/download0/
+evoplayer/` isn't durable for a fake-signed ShadowMount title, and/or
+`evo_jailbreak_self()` (now at `main()` boot, landed *after* task 6 verified
+persistence 2026-09-02) detaches it. Fix: route to `/data/evoplayer/`
+post-unjail like the payload — `evo_data_path()` becomes a runtime pick;
+`RESUME_FILE` (`/data/...`) too; migrate old config.
+
 **KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
 Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**
 The seek works and the app stays responsive (Back → exit prompt, Triangle →
