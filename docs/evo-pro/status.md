@@ -189,7 +189,9 @@ the clean-room `libc.prx` surface). Late-unjail race handled by
 One-shot migration copies `/download0/evoplayer/*` and the old bare resume file
 into `/data/evoplayer/` on first bind. Both builds compile green; **not yet run
 on a console** — verify: theme + favorite + resume → PS-close → relaunch → all
-restored, and `/fs/data/evoplayer/?fmt=json` shows the files.
+restored, and `/fs/data/evoplayer/?fmt=json` shows the files. Spun out as
+sub-issues: **#50** (host tests for the new data-root logic + parsers), **#51**
+(quiet the boot breadcrumbs — keep klog + `evo_boot.log`, drop the popups).
 
 **KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
 Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**

@@ -9,8 +9,9 @@ To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
-09-03, awaiting a first hardware run) · **high** #46, #44, #32, #36 · **medium** #9,
-#16, #6, #37/#38/#39/#41, #33, #34, #35, #42, #47, #49 · **low** #48, the rest.
+09-03, awaiting a first hardware run) · **high** #44, #32, #36 (#46 code landed
+09-03, HW-verify pending) · **medium** #9, #16, #6, #37/#38/#39/#41, #33, #34,
+#35, #42, #47, #49, #50 · **low** #48, #51, the rest.
 `independent` = no cross-deps, work any time in parallel.
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
@@ -23,7 +24,12 @@ only a hardware pass left.)
 passthrough (v1.1.0, alongside `native-decode`) · #48 re-probe controller
 vibration from the app module + haptics feedback channel (v0.9.0) · #49
 consolidate the RmlUi UI seam — drop the model→params double hop, move the
-screen builders out of `main.c` (v0.9.0, `rmlui`, do before #28).
+screen builders out of `main.c` (v0.9.0, `rmlui`, do before #28) · **#50 +
+#51 are sub-issues of #46** (spun out of its implementation): #50 grow the host
+test suite over the runtime data-root logic + persistence parsers (v0.9.0,
+`independent`, CI wiring stays with #17) · #51 quiet the boot breadcrumbs —
+keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
+`app-module`).
 
 ---
 
@@ -85,6 +91,8 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
 | **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
 | **#46** | App module persists **nothing** (settings/recent/favorites/resume) — the ELF payload did. `/download0/evoplayer/` isn't durable for a fake-signed ShadowMount title. **CODE DONE 2026-09-03 (`refactor/main-c-media-modules`), HW-VERIFY PENDING** — `evo_data_dir()`/`evo_data_path()` resolve the root at runtime (`/data/evoplayer` once `evo_jailbreak_is_open()`, `/download0` fallback only); all compile-time sites + `RESUME_FILE` routed through it; `evo_mkdir()` = `sceKernelMkdir` on the app module; `evo_persistence_rebind()` for the late-unjail race; one-shot migration of the old store. | `src/evo_data_path.{c,h}`, `src/evo_jailbreak.{c,h}`, `main.c` (`evo_ensure_data_dir`, `evo_migrate_legacy_store`, `evo_persistence_rebind`, `RESUME_FILE`), `addons/src/addon_emby.c`, `pp/src/evo_theme.c` (`evo_theme_reset`), `docs/evo-pro/phase-1b-app-module.md` §5 |
+| **#50** | *(sub-issue of #46)* Grow the host test suite over the #46 runtime data-root logic (`evo_data_path` join / rebind / `evo_mkdir`) and the persistence parsers (`evo_recent`, `evo_favorites`), plus `evo_theme` parse + `evo_theme_reset`, `evo_layout` geometry. Host-only; CI wiring stays with #17 | `tests/run_tests.sh` (SRCS), `tests/test_runner.c`, `src/evo_data_path.c`, `src/evo_recent.c`, `src/evo_favorites.c`, `pp/src/evo_theme.c`, `ui/src/evo_layout.c` |
+| **#51** | *(sub-issue of #46)* Quiet the boot breadcrumbs — split the on-screen notification popup from the durable channels: keep `sceKernelDebugOutText` (klog) + `/mnt/usb0/evo_boot.log`, move `sceKernelSendNotificationRequest` behind an opt-in `EVO_BOOT_TRACE_POPUP` (`--breadcrumbs`). Drop `-DEVO_BOOT_TRACE=1` from the default `APP_DEFS` | `include/evo_boot_trace.h`, `src/evo_boot_log.c`, `include/evo_boot_log.h`, `scripts/package-app.sh`, `docs/tooling.md`, `docs/evo-pro/status.md` |
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
