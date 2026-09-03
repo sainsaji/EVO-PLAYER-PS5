@@ -263,12 +263,12 @@ packet_queue_clear(
         result = av_seek_frame(play_fmt, seek_stream, seek_timestamp,
                                AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
     }
-#if defined(EVO_APP_MODULE)
+#if defined(EVO_VDEC_LOG)
     {
         char d[80];
         snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d",
                  result, (long long)seek_timestamp, seek_stream);
-        pp_stage_bc("SEEK_AVFRAME", d);
+        pp_stage_bc("SEEK_AVFRAME", d);   /* #32 diagnostics; --usb-remote only */
     }
 #endif
 

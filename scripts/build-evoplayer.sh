@@ -79,6 +79,10 @@ BUILD_LOG="${LOG_OUT}/evoplayer-$(date -u +%Y%m%dT%H%M%SZ).log"
 # Force a relink and rebuild of object files
 rm -f "${DEST}/${ELF_NAME}"
 find "${DEST}" -name "*.o" -delete
+# These payload-flavoured .o would otherwise be silently reused by the next
+# scripts/package-app.sh (its cflags stamp only tracks app-build -> app-build
+# changes). Invalidate the stamp so the next app build force-cleans.
+rm -f "${OUTPUT_DIR}/app/.build/app-cflags.stamp"
 
 if ! make -C "${DEST}" "${MAKE_ARGS[@]}" > "${BUILD_LOG}" 2>&1; then
     echo ""

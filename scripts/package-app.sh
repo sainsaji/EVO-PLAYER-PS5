@@ -31,7 +31,7 @@ AGC_PROBE=0
 AVPLAYER_PROBE=0
 VIDEODEC2_PROBE=0
 FFPFSC=0
-AUTOPLAY=""
+USB_REMOTE=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -41,7 +41,7 @@ while (( $# )); do
         --avplayer-probe) AVPLAYER_PROBE=1 ;;
         --videodec2-probe) VIDEODEC2_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
-        --autoplay)     AUTOPLAY="$2"; shift ;;   # unattended: open this path on boot
+        --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -55,7 +55,7 @@ if ! in_container; then
     (( AVPLAYER_PROBE )) && FWD+=(--avplayer-probe)
     (( VIDEODEC2_PROBE )) && FWD+=(--videodec2-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
-    [[ -n "${AUTOPLAY}" ]] && FWD+=(--autoplay "${AUTOPLAY}")
+    (( USB_REMOTE ))   && FWD+=(--usb-remote)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -251,15 +251,11 @@ else
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     (( AVPLAYER_PROBE )) && APP_DEFS+=" -DEVO_AVPLAYER_PROBE=1"
     (( VIDEODEC2_PROBE )) && APP_DEFS+=" -DEVO_VIDEODEC2_PROBE=1"
-    if [[ -n "${AUTOPLAY}" ]]; then
-        # escape for the make -> /bin/sh recipe chain via a generated header
-        printf '#pragma once\n#define EVO_AUTOPLAY_FILE "%s"\n' "${AUTOPLAY}" \
-            > "${EVO}/include/evo_autoplay.h"
-        APP_DEFS+=" -DEVO_AUTOPLAY_HDR=1"
-        ok "autoplay: ${AUTOPLAY}"
-    else
-        rm -f "${EVO}/include/evo_autoplay.h"
-    fi
+    # --usb-remote: the scriptable dev remote (evo_usb_remote.c) + the verbose
+    # /mnt/usb0/evo_vdec.log append in evo_vdec_native.c's note(). Off by
+    # default so a release eboot never touches the user's USB stick per frame.
+    (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1 -DEVO_VDEC_LOG=1"
+    rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
     # (EVO_APP_MODULE, EVO_BOOT_TRACE, ...) differ from build-evoplayer.sh's, so

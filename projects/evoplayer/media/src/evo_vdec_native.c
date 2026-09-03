@@ -91,10 +91,10 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
 
-/* App-module diagnostics: a notification popup (visible on the TV) AND an
- * append to /mnt/usb0/evo_vdec.log (pullable over FTP — the unattended path,
- * tools/vdec-test.sh). The USB file no-ops until the sandbox is unjailed. */
-#define EVO_VDEC_LOG_PATH "/mnt/usb0/evo_vdec.log"
+/* App-module diagnostics: always a notification popup (visible on the TV);
+ * under -DEVO_VDEC_LOG (package-app.sh --usb-remote) ALSO an fsync'd append to
+ * /mnt/usb0/evo_vdec.log for an FTP pull. The per-frame fsync is dev-only —
+ * a release eboot just gets the notifications. */
 struct v2n_note { char pad[45]; char msg[3075]; };
 static void note(const char *fmt, ...)
 {
@@ -109,7 +109,8 @@ static void note(const char *fmt, ...)
     snprintf(n.msg, sizeof n.msg, "%s", msg);
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
 
-    FILE *f = fopen(EVO_VDEC_LOG_PATH, "a");
+#ifdef EVO_VDEC_LOG
+    FILE *f = fopen("/mnt/usb0/evo_vdec.log", "a");
     if (f) {
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -119,6 +120,7 @@ static void note(const char *fmt, ...)
         fsync(fileno(f));
         fclose(f);
     }
+#endif
 }
 
 static size_t align16k(size_t v) { return (v + 0x3fffu) & ~(size_t)0x3fffu; }
