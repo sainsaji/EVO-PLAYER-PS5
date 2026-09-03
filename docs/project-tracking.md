@@ -5,10 +5,9 @@ tracked and visualised (board, priority table, milestone timeline, blocked
 list). The dependency-ordered narrative still lives in
 [roadmap.md](roadmap.md) — this doc is only about the board.
 
-> **Live Board** — the project board is stood up and active at:
-> **[EVO Player Roadmap (Project #5)](https://github.com/users/sainsaji/projects/5)**.
-> Linked to repository [`sainsaji/EVO-PLAYER-PS5`](https://github.com/sainsaji/EVO-PLAYER-PS5).
-> Stood up via **issue #52**.
+> **Not stood up yet** — the tooling below is committed but the board itself
+> needs a `gh auth refresh -s project` + one script run + a few UI clicks.
+> Tracked in **issue #52**.
 
 ---
 
@@ -26,8 +25,8 @@ list). The dependency-ordered narrative still lives in
    ./scripts/setup-github-project.sh
    ```
 
-   Creates the Project, adds the `Priority` and `Area` fields, links the repository,
-   generates the 5 views, adds **every** issue (open + closed) as an item, and back-fills:
+   Creates the Project, adds the `Priority` and `Area` fields, adds **every**
+   issue (open + closed) as an item, and back-fills:
 
    | Field | Filled from | Values |
    |---|---|---|
@@ -36,7 +35,7 @@ list). The dependency-ordered narrative still lives in
    | `Area` | most specific domain label | `native-decode` › `rmlui` › `gpu` › `subtitles` › `audio` › `playback` › `memory` › `performance` › `addons` › `network` › `ci` › `ui` › `docs` |
 
    The script is **idempotent** — re-run it any time (after re-labelling, after
-   filing new issues) to resync the fields. It only modifies fields that differ.
+   filing new issues) to resync the fields.
 
 3. **Blocked-by / sub-issue relationships** need nothing — GitHub issue
    dependencies and sub-issues render on the board automatically. They're
@@ -44,11 +43,9 @@ list). The dependency-ordered narrative still lives in
 
 ---
 
-## Saved views and automation
+## Manual bits the API can't do
 
-### A. Views (created automatically by `setup-github-project.sh`)
-
-The script generates and configures all 5 views:
+### A. Views  (Project ▸ **+ New view**)
 
 | View | Layout | Configure |
 |---|---|---|

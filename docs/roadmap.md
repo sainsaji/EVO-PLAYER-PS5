@@ -143,13 +143,13 @@ it first to avoid a merge tangle.
 
 - Reads: `docs/improvements-roadmap.md` §P2, `docs/converter-perf.md` Finding 7
 - Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `media/src/evo_playback.c` (`VIDEO_ROTATE_BUFFERS`), `main.c`
-- **Branch `feat/6-video-buffers-direct-mem`:** rotate ring 8→3 + slab,
-  `pp_playback` display/nv12 + slab (grow-only). Pool stays 64 MiB and
-  `pp_videoout` `cpu_bufs` stays on malloc — a 192 MiB WB_ONION pool wedged the
-  first 4K V8 present on hardware (2026-09-03, `dmem=31M/192M hw=1` then hang
-  after `006B_VO_RECONFIG_APPLIED`). `P8_31_RETURN_OK` logs `dmem=`.
-  **Left: re-verify the corrected build on hardware** (4K play + seek loop,
-  `heap live/peak` flat, `dmem` shows the 1080 working set relocated).
+- **Branch `feat/6-video-buffers-direct-mem`:** rotate ring 8→3 + `evo_direct_mem`
+  slab (grow-only) — that is the whole change now. `P8_31_RETURN_OK` logs `dmem=`.
+  Routing `pp_playback` display / `pp_videoout` `cpu_bufs` through the slab and
+  a 192 MiB pool were **backed out** — they hard-hung GTA 4K on hardware
+  (2026-09-03, `dmem=31M/192M hw=1`, wedge after `006B_VO_RECONFIG_APPLIED`;
+  a latent 4K V3-fallback overflow corrupts the shared slab). That overflow is
+  its own follow-up. **Left: verify the rotate-ring build on 1080p + 4K.**
 
 ### 3 · `#4` — 10-bit fast path *(optional CPU stopgap)*
 

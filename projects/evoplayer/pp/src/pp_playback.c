@@ -10,11 +10,6 @@
 #include "pp_v8_gate.h"
 #include "pp_stage_breadcrumb.h"
 
-/* #6: video display buffers come from the fixed direct-memory slab, not the
- * heap. evo_direct_mem is a standalone allocator (no media deps) that happens
- * to live under media/; -Imedia/include is on every build that compiles this. */
-#include "evo_direct_mem.h"
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,7 +56,6 @@ void pp_playback_init(pp_playback *pb)
     pb->out_h = 1080;
     pb->display = NULL;
     pb->display_back = NULL;
-    pb->display_cap = 0;
     pb->backend = PP_BACKEND_1080_STANDARD;
     pb->force_v3_fallback = 0;
     pb->pending_present = 0;
@@ -106,12 +100,11 @@ void pp_playback_shutdown(pp_playback *pb)
     if (!pb)
         return;
     pp_playback_on_file_close(pb);
-    evo_direct_mem_free(pb->display);
+    free(pb->display);
     pb->display = NULL;
-    evo_direct_mem_free(pb->display_back);
+    free(pb->display_back);
     pb->display_back = NULL;
-    pb->display_cap = 0;
-    evo_direct_mem_free(pb->nv12_fb);
+    free(pb->nv12_fb);
     pb->nv12_fb = NULL;
     pb->nv12_fb_cap = 0;
     if (pb->lock) {
@@ -145,30 +138,23 @@ int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
      * old size and use_v8 turns off -> black screen. Skip it for V8; the
      * V3/1080 path allocates on demand in the fallback branch of push_frame.
      */
-    bytes = (size_t)w * (size_t)h * 4u;
-    /*
-     * #6: from the direct-memory slab, grow-only. A seek or a re-open at the
-     * same-or-smaller resolution keeps the existing buffers — no heap churn,
-     * no reallocation during playback. Only grow when a larger frame needs it.
-     */
-    if (pb->backend != PP_BACKEND_4K_V8_FUSED &&
-        (!pb->display || !pb->display_back || bytes > pb->display_cap)) {
-        front = (uint32_t *)evo_direct_mem_alloc(bytes);
-        back = (uint32_t *)evo_direct_mem_alloc(bytes);
+    if (pb->backend != PP_BACKEND_4K_V8_FUSED) {
+        bytes = (size_t)w * (size_t)h * 4u;
+        front = (uint32_t *)malloc(bytes);
+        back = (uint32_t *)malloc(bytes);
         if (!front || !back) {
-            evo_direct_mem_free(front);
-            evo_direct_mem_free(back);
+            free(front);
+            free(back);
             return -2;
         }
     }
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));
     if (front) {
-        evo_direct_mem_free(pb->display);
-        evo_direct_mem_free(pb->display_back);
+        free(pb->display);
+        free(pb->display_back);
         pb->display = front;
         pb->display_back = back;
-        pb->display_cap = bytes;
     }
     pb->out_w = w;
     pb->out_h = h;
@@ -288,12 +274,9 @@ static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
     if (!s->planes[0] || !s->planes[1] || pitch < 2u || (pitch & 1u))
         return -1;
     if (pb->nv12_fb_cap < need) {
-        /* #6: slab-backed, grow-only. The caller rewrites the whole buffer
-         * immediately below, so nothing is lost by not preserving contents. */
-        uint8_t *p = (uint8_t *)evo_direct_mem_alloc(need);
+        uint8_t *p = (uint8_t *)realloc(pb->nv12_fb, need);
         if (!p)
             return -1;
-        evo_direct_mem_free(pb->nv12_fb);
         pb->nv12_fb = p;
         pb->nv12_fb_cap = need;
     }

@@ -327,25 +327,26 @@ because "most" is not "all", and a 4:4:4 file should not fall to one thread.
 
 **Found:** 2026-08-14. **Size:** S **Risk:** Low **Domain:** Memory
 
-**Resolution (#6):** the CPU-side video buffers that churn the heap on every
-open/seek now come from the `evo_direct_mem` slab, grow-only (allocated once,
-reused across seeks / re-opens at the same-or-smaller resolution):
+**Resolution (#6) — narrowed to the rotate ring after a hardware regression:**
 
 - `convert_frame_via_sws` rotate ring — `VIDEO_ROTATE_BUFFERS` trimmed **8 → 3**
-  (it is only the exotic-pixfmt fallback path; the product path presents through
-  `pp_playback`'s display model), slab-backed.
-- `pp_playback` `display` / `display_back` / `nv12_fb` — slab-backed, grow-only
-  (`display_cap`).
-- `P8_31_RETURN_OK` now logs `dmem=used/total`.
+  and moved to the `evo_direct_mem` slab, grow-only (reallocated only when a
+  frame arrives larger than the current slot). This is the exotic-pixfmt
+  swscale fallback; the product path presents through `pp_playback`'s display
+  model. **265 MB → ~100 MB at 4K, off the heap, no per-open churn.**
+- `P8_31_RETURN_OK` now logs `dmem=used/total` for verification.
+- `evo_direct_mem_init` gained a step-down ladder (no-op at 64 MiB, there if the
+  pool is ever raised).
 
-**Not done, deliberately** (hardware-learned 2026-09-03):
-- `pp_videoout` `cpu_bufs` stays on `malloc`. At 4K it is 3×33 MB and the V8
-  GPU present path never reads it; routing it in just pressures the slab.
-- The pool stays at **64 MiB**. A 192 MiB WB_ONION reservation competes with the
-  GPU / sceAgc / VideoOut direct-memory budget and **wedged the first 4K V8
-  present on hardware** (`dmem=31M/192M hw=1`, then a hang right after
-  `006B_VO_RECONFIG_APPLIED`). The 4K display / staging buffers spill to
-  `malloc()` via `evo_direct_mem_alloc`'s graceful fallback — exactly as before.
+**Backed out** (hardware, 2026-09-03 — caused a hard hang on GTA 4K, right after
+`006B_VO_RECONFIG_APPLIED`, `dmem=31M/192M hw=1`):
+- pool 64 → 192 MiB — a WB_ONION reservation that large competes with the
+  GPU / sceAgc / VideoOut direct-memory budget.
+- routing `pp_playback` `display` / `display_back` / `nv12_fb` and `pp_videoout`
+  `cpu_bufs` through the slab — a latent 4K V3-fallback buffer overflow (present
+  even pre-#6) corrupts the *shared* slab instead of an isolated `malloc` block,
+  turning "mostly-worked UB" into a wedge. Left on `malloc`; the real fix for
+  that overflow is its own item.
 
 Original analysis below.
 
