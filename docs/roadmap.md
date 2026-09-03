@@ -9,10 +9,11 @@ To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
-09-03, awaiting a first hardware run) · **high** #25, #32 · **medium** #9, #16,
-#6, #29/#30, #33, #34, #35 · **low** the rest. `independent` = no cross-deps,
-work any time in parallel. (#26 closed 2026-09-02 — app-module playback works;
-demanding 4K → #29. #31 closed 2026-09-03 — native 4K decode plays.)
+09-03, awaiting a first hardware run) · **high** #25, #32, #36 · **medium** #9,
+#16, #6, #29/#30, #33, #34, #35 · **low** the rest. `independent` = no
+cross-deps, work any time in parallel. (#26 closed 2026-09-02 — app-module
+playback works; demanding 4K → #29. #31 closed 2026-09-03 — native 4K decode
+plays.)
 
 ---
 
@@ -62,6 +63,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
 | **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) is gated behind #25. Distinct from #3 (picker/cue-count/`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
+| **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
 | **#30** | Finish + sign off the `evo_vdec.h` decoder seam (Phase 3 of #29) — **signed off 09-03**, parity sweep owed | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
