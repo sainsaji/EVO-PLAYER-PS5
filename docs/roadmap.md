@@ -10,13 +10,20 @@ names, then go.
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
 09-03, awaiting a first hardware run) · **high** #46, #44, #32, #36 · **medium** #9,
-#16, #6, #37/#38/#39/#41, #33, #34, #35, #42 · **low** the rest.
+#16, #6, #37/#38/#39/#41, #33, #34, #35, #42, #47, #49 · **low** #48, the rest.
 `independent` = no cross-deps, work any time in parallel.
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
-`rmlui` = #44, #45, #16, #28 · `subtitles` = #35, #42, #43. (#26 closed
+`rmlui` = #44, #45, #16, #28, #49 · `subtitles` = #35, #42, #43. (#26 closed
 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
-H.264 plays.)
+H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
+only a hardware pass left.)
+
+**New stories (2026-09-03):** #47 native audio decode + Dolby/DTS bitstream
+passthrough (v1.1.0, alongside `native-decode`) · #48 re-probe controller
+vibration from the app module + haptics feedback channel (v0.9.0) · #49
+consolidate the RmlUi UI seam — drop the model→params double hop, move the
+screen builders out of `main.c` (v0.9.0, `rmlui`, do before #28).
 
 ---
 
