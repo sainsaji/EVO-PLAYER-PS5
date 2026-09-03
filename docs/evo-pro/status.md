@@ -4,20 +4,24 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 >
-> **RESUME HERE → #27 (GPU Step 2), phase C.** #31 (native 4K decode) is DONE +
-> closed. The AGC gate passed and `pp_agc_init` (shader setup) is
-> hardware-verified. `render_frame` / `pp_agc_present_nv12` FAILED its first
-> hardware run (2026-09-03) — GPU submit hangs then crashes GTA 4K.
-> **Plan A+B landed on `feat/27-agc-submit-watchdog`:** the whole `render_frame`
-> now runs on a dedicated worker thread behind a 250 ms watchdog (`pp_agc.c`) —
-> a wedged `sceAgcDriverSubmitDcb` returns `-2`, `pp_agc` goes permanently
-> unavailable for the session, and playback drops to the CPU V8 path instead of
-> freezing the app slot — and `pp_videoout_init` registers the VO with
-> ProsperoLight's linear SDR attr (`0x8000000000000000`) whenever
-> `pp_agc_available()` (i.e. `--agc-probe` builds only). Still `--agc-probe`
-> gated; default build unchanged (CPU V8). **Next: run `--agc-probe` on
-> hardware** — the watchdog makes a wrong RT-attr / `cx` guess cost a dropped
-> frame + a log line, so iterate the picture per `agc-implementation.md` §8.
+> **RESUME HERE → #27 (GPU Step 2) — CORE PATH HARDWARE-VERIFIED 2026-09-04.**
+> Branch `feat/27-agc-submit-watchdog`. GTA 4K plays through the sceAgc GPU
+> present path: decode → NV12 → GPU YUV→RGB → GPU flip, **correct colour, no
+> crash, `fatal=0`, CPU swizzle out of the 4K hot path** (`012_AGC_FIRST_PRESENT`,
+> `render_frame rc=0x0`). Got there via three fixes on top of the first
+> (hung/crashed) run:
+> - **B** — `render_frame` runs on a dedicated worker thread behind a 250 ms
+>   watchdog (`pp_agc.c`); a wedge returns `-2`, `pp_agc` goes unavailable, CPU
+>   path takes over, no app-slot freeze.
+> - **reachability** — `pp_playback` let an NV12 UHD frame through the V8 gate
+>   (`pp_v8_frame_gate` only clears YUV420P); before this `agc_path` was
+>   structurally unreachable and 4K NV12 fell to the V3 path → overflow crash.
+> - **A** — `pp_videoout_init` registers the UHD VO with ProsperoLight's linear
+>   SDR attr (`0x8000000000000000`) when `pp_agc_available()`; render_frame's
+>   coeffs + MRT0 order are tuned to it, tiled attr = R↔B swap + range shift.
+> Still `--agc-probe`-gated; default build unchanged (CPU V8).
+> **Next:** per-frame timing / VSync hold measurement, plane-hash A/B vs the CPU
+> converter, then the follow-ups below.
 > Open bugs from #31: #32 (scrub blanks player UI on the V8 4K path — fix landed
 > via a 1080 scrub overlay, hw-verify pending), #55 (4K V3-fallback buffer
 > overflow), #33 (harness cleanup).
@@ -118,6 +122,58 @@ The default `.ffpfsc` uses the CPU V8 converter (YUV420P, #31-proven); GTA 4K
 plays again. `--agc-probe` still arms the GPU path for #27 work via
 `evo_agc_probe()`. Next #27 step: register the VO buffer with ProsperoLight's
 `0x80..00` attr (or adjust the `cx` RT bits) before the next `--agc-probe` run.
+
+## 2026-09-04 — #27 AGC present path WORKS on hardware
+
+`tools/evo-remote.sh` loop, `--agc-probe`, GTA 4K H.264 (`GTAVI_An_Extended_Look.mp4`):
+
+```
+pp_agc: READY - GPU present path armed (render_frame ported, submit watchdog live, #27)
+pp_agc: A0 present enter  buf=0 pitch=3840 codedh=2160 vis=3840x2160 out=3840x2160
+pp_agc: A1 staging ok need=12441600 -> memcpy + flush     (12 MB x3 direct-mem scratch)
+pp_agc: W0 worker picked up frame -> agc_render_frame
+pp_agc: R1 cx base done (31 regs) -> WaitUntilSafeForRendering
+pp_agc: R2 WaitUntilSafeForRendering returned
+pp_agc: R4 DCB built (156 words) -> SubmitDcb
+pp_agc: R5 SubmitDcb=0x0 -> SuspendPoint
+pp_agc: R6 SuspendPoint done, result=0x0
+pp_agc: render_frame rc=0x0 words=156
+012_AGC_FIRST_PRESENT agc gpu flip
+EVO vdec native: decodes=538 framesout=522 fatal=0     (then seek, clean CLOSE)
+```
+
+Colour correct, motion smooth, no crash, no wedge. **The CPU `pp_converter_*` +
+swizzle + `sceVideoOutSubmitFlip` are off the 4K path.** The three fixes that got
+here (B watchdog / reachability / A linear attr) are in the resume block above.
+
+### Iteration log (what each hardware run showed)
+
+| Run | Build | Result |
+|---|---|---|
+| 1 | `70e32029` A+B | "weird colors" + app-slot hang. Neither the sigsetjmp guard nor the watchdog fired. |
+| 2 | `a78996b2` + instrumentation, plan A backed out | UI colour correct (tiled VO), still hung on playback — **no `A0`/`R0` breadcrumbs at all**. |
+| 3 | `f138be4e` V8-gate reachability fix | GPU present works! `render_frame rc=0`, `012_AGC_FIRST_PRESENT`, plays — but **R↔B swapped** (blue "avatars") against the tiled VO. |
+| 4 | `3ef157d` re-apply plan A (linear UHD VO) | **colour correct, no crash.** ✅ |
+
+Root cause of runs 1-2: `agc_path = use_v8 && format==NV12`, but `use_v8`'s
+`pp_v8_frame_gate` rejects NV12 → `use_v8=0` → NV12 4K de-interleaved to YUV420P
+→ **V3/1080 fallback path → overflow at 3840x2160 (#55)**. The AGC branch was
+dead code. Run 1's "weird colors" was the linear-registered VO scanned out while
+the CPU menu drew tiled into it — misattributed to "plan A hangs the compositor".
+
+### Known limitations / follow-ups
+
+- **FFmpeg/CPU fallback on the linear UHD VO garbles** — if a UHD clip takes the
+  CPU path while `pp_agc_available()` (native decoder rejected it → #58 FFmpeg
+  fallback, or an AGC fault), the CPU tiler writes tiled data into the
+  linear-registered buffer → garbled until app restart. Needs a VO
+  reconfigure-on-write-path-switch before #27 goes non-`--agc-probe`.
+  (Observed run 4: 2nd clip `3840x1714` → `rc=0x811d0303` → `016_VDEC_FFMPEG_FALLBACK`.)
+- Instrumentation (`A0..R6` breadcrumbs) is first-frame-only — no per-frame
+  timing yet. Next: measure the GPU convert+flip cost, confirm VSync hold at 4K60.
+- Plane-hash A/B vs the CPU converter still owed (`tools/bench.sh`).
+- Settings `Renderer: Auto/CPU/GPU` row; P010/HDR; GPU OSD-over-4K composite.
+- `#55` (V3 4K overflow) is now also the fallback hazard above — worth a real fix.
 
 ## 2026-09-03 (night) — #27 plan A+B landed (`feat/27-agc-submit-watchdog`)
 

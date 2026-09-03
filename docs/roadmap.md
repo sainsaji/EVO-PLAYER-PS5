@@ -12,13 +12,13 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **critical** #27 (render_frame FAILED its
-first hardware run 09-03 — GPU submit hangs 4K. Plan A+B landed on
-`feat/27-agc-submit-watchdog`: the submit now runs on a watchdog'd worker
-thread — a wedge drops to the CPU path instead of freezing the app — and the VO
-registers linear when AGC is armed. Still `--agc-probe`-gated; default build on
-the CPU V8 path. Next: the `--agc-probe` hardware iterate — phase C) · **high**
-#32, #36, #55 · **medium** #35,
+Priority labels track this order: **critical** #27 (**core GPU present path
+HARDWARE-VERIFIED 2026-09-04** on `feat/27-agc-submit-watchdog` — GTA 4K plays
+via sceAgc: decode→NV12→GPU YUV→RGB→flip, correct colour, no crash, CPU swizzle
+off the 4K path. Took a watchdog'd worker thread + a V8-gate reachability fix +
+the linear UHD VO attr. Still `--agc-probe`-gated. Remaining: per-frame timing /
+VSync, plane-hash A/B, FFmpeg-fallback-on-linear-VO garble, settings row) ·
+**high** #32, #36, #55 · **medium** #35,
 #37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
@@ -91,9 +91,9 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (package-app.sh step 6b,      │   gate ✅ + pp_agc_init ✅ hw; render_frame ported +
-    unconditional DT_NEEDED)      │   wired; A+B (watchdog thread + linear VO attr)
-                                  │   landed — awaiting the --agc-probe hw iterate (C)
+   (package-app.sh step 6b,      │   gate ✅ + shaders ✅ + render_frame present ✅ ALL
+    unconditional DT_NEEDED)      │   HW-VERIFIED (2026-09-04, --agc-probe). GTA 4K on
+                                  │   GPU, correct colour. Remaining: timing/VSync, A/B
                                  │   (same wall also blocks #34 native IME keyboard)
                                  └─► Route B libSceVideodec2 ✅ #31 CLOSED — GTA 4K
                                      plays real-time on native decode (2026-09-03)

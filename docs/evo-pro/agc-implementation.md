@@ -4,14 +4,19 @@
 > *why* and the ladder; this is the *how* — the ProsperoLight AGC path read
 > line by line, the shader blobs disassembled, and the concrete EVO port.
 >
-> **Status: 2026-09-03.** Gate PASSED on hardware — `sceAgcInit` +
-> `sceAgcGetRegisterDefaults` work from `PPSA99039` via positional PRX import
-> stubs. `pp_agc_init` (§3 `initialize_presenter` first half — shader scratch,
-> blob copy, `CreateShader` ×2, `LinkShaders`) is **hardware-verified**
-> (`create=0x0 link=0x0`). **`agc_render_frame` (§3) is now ported into
-> `pp/src/pp_agc.c` and the present path is wired into `pp_playback.c`'s V8
-> branch — builds green (app-module + host), not yet run on hardware.** What
-> remains is a device run + the deltas in §4a below.
+> **Status: 2026-09-04 — the whole Step 2 present path is HARDWARE-VERIFIED**
+> (`--agc-probe`, branch `feat/27-agc-submit-watchdog`). GTA 4K H.264 plays
+> through sceAgc: decode → NV12 → `agc_render_frame` (GPU YUV→RGB) → GPU flip,
+> **correct colour, no crash, `fatal=0`**, CPU `pp_converter_*` + swizzle +
+> `sceVideoOutSubmitFlip` off the 4K path. `render_frame rc=0x0`,
+> `012_AGC_FIRST_PRESENT`. Three fixes past the first (hung) run:
+> **(B)** `render_frame` on a dedicated worker thread + 250 ms watchdog
+> (`pp_agc.c`); **(reachability)** `pp_playback` lets NV12 UHD through the V8
+> gate — `agc_path` was dead code otherwise; **(A)** the UHD VO is registered
+> linear (`0x8000000000000000`) when AGC is armed, matching render_frame's
+> coefficients + MRT0 order. Remaining: per-frame timing / VSync hold,
+> plane-hash A/B, FFmpeg-fallback-on-linear-VO garble, settings row, P010.
+> See `status.md` 2026-09-04 for the run-by-run iteration log.
 
 ---
 
@@ -250,15 +255,16 @@ allocate+map `shader_memory` → `copy_asset` the 5 blobs into place →
 | watchdog the submit thread | **done (#27 plan B, `feat/27-agc-submit-watchdog`).** The whole `agc_render_frame` (incl. `WaitUntilSafeForRendering` + `SubmitDcb` + `SuspendPoint`) runs on a dedicated `agc_submit_worker` thread; `pp_agc_present_nv12` `pthread_cond_timedwait`s 250 ms. On timeout the worker is abandoned (it's stuck in the GPU syscall — never joined), `g_agc.submit_wedged` latches, `pp_agc_available()` goes false, and `pp_agc_present_nv12` returns **`-2`** → the V8 branch `adopt_flip`s the buffer (the abandoned worker may still queue its flip) and drops to the CPU path for the rest of the session. The first-frame `sigsetjmp` guard moved onto the worker (the thread that faults). |
 | Settings row `Renderer: Auto/CPU/GPU` | **not done** — separate task, coordinate with **#37**'s `Video decoder` row (same settings screen, same fscanf-append; land decoder-append first). `pp_agc_init` is currently called unconditionally from `main()` (app module) so the bare build arms the path; `pp_agc_available()` is the de-facto Auto. |
 
-**Open hardware unknowns** (first device run answers these): RT format/tiling —
-**plan A landed:** `pp_videoout_init` now registers the VO with ProsperoLight's
-`0x8000000000000000` (linear SDR) instead of `0x8000000022000000` whenever
-`pp_agc_available()`, so `render_frame`'s CX render-target bits
-(`cx[2]/cx[4]/cx[15]`) meet the layout they were tuned for. If the picture is
-still wrong the fallback is adjusting those `cx` bits (garbled / channel-swapped,
-**not** a crash — and the plan-B watchdog now contains a crash into a dropped
-frame anyway); `sceAgcDcbSetFlip` against a handle whose buffers `pp_videoout`
-registered; `0xAABBGGRR` order vs the
+**Open hardware unknowns — RESOLVED 2026-09-04.** RT format/tiling: confirmed —
+`render_frame` against EVO's tiled `0x8000000022000000` buffer came out R↔B
+swapped + range-shifted (recognisable picture, "blue avatars", **not** a crash);
+registering the UHD VO linear `0x8000000000000000` when `pp_agc_available()`
+(plan A) fixed it — render_frame's coefficients + MRT0 export are a matched set
+for the linear buffer. `sceAgcDcbSetFlip` against EVO's own `pp_videoout` handle:
+works (`012_AGC_FIRST_PRESENT`, retire via `pp_videoout_adopt_flip`). Type-12
+direct-memory headroom for 0xD0000 + 3×12 MB NV12 staging alongside the resident
+decoder: fine (`staging 12160KB x3`, `flex_avail=214M`). Historical note:
+`0xAABBGGRR` order vs the
 shader's MRT0 export; type-12 direct-memory headroom (0xD0000 + ~36 MB staging
 alongside #31's resident decoder).
 
