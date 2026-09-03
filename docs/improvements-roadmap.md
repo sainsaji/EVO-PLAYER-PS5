@@ -327,22 +327,25 @@ because "most" is not "all", and a 4:4:4 file should not fall to one thread.
 
 **Found:** 2026-08-14. **Size:** S **Risk:** Low **Domain:** Memory
 
-**Resolution (#6):** every CPU-side video display buffer now comes from the
-`evo_direct_mem` slab, grow-only (allocated once, reused across seeks / re-opens
-at the same-or-smaller resolution — no reallocation during playback):
+**Resolution (#6):** the CPU-side video buffers that churn the heap on every
+open/seek now come from the `evo_direct_mem` slab, grow-only (allocated once,
+reused across seeks / re-opens at the same-or-smaller resolution):
 
 - `convert_frame_via_sws` rotate ring — `VIDEO_ROTATE_BUFFERS` trimmed **8 → 3**
   (it is only the exotic-pixfmt fallback path; the product path presents through
   `pp_playback`'s display model), slab-backed.
 - `pp_playback` `display` / `display_back` / `nv12_fb` — slab-backed, grow-only
   (`display_cap`).
-- `pp_videoout` `cpu_bufs` linear staging — slab-backed.
-- The slab pool grew **64 → 192 MiB** (`EVO_DIRECT_MEM_POOL_BYTES`), sized for
-  the 4K CPU working set, with a step-down ladder (128/96/64 MiB) in
-  `evo_direct_mem_init` if the console won't give the full block, and the
-  existing graceful `malloc()` fallback if a request still overflows. On the
-  app module this also moves ~100 MB of buffers off the flexible-memory heap
-  that the 4K decode pools contend for. `P8_31_RETURN_OK` now logs `dmem=used/total`.
+- `P8_31_RETURN_OK` now logs `dmem=used/total`.
+
+**Not done, deliberately** (hardware-learned 2026-09-03):
+- `pp_videoout` `cpu_bufs` stays on `malloc`. At 4K it is 3×33 MB and the V8
+  GPU present path never reads it; routing it in just pressures the slab.
+- The pool stays at **64 MiB**. A 192 MiB WB_ONION reservation competes with the
+  GPU / sceAgc / VideoOut direct-memory budget and **wedged the first 4K V8
+  present on hardware** (`dmem=31M/192M hw=1`, then a hang right after
+  `006B_VO_RECONFIG_APPLIED`). The 4K display / staging buffers spill to
+  `malloc()` via `evo_direct_mem_alloc`'s graceful fallback — exactly as before.
 
 Original analysis below.
 

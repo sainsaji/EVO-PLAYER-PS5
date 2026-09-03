@@ -5,7 +5,6 @@
 #include "pp_videoout.h"
 #include "pp_platform.h"
 #include "evo_boot_trace.h"
-#include "evo_direct_mem.h" /* #6: linear staging buffers off the heap slab */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -236,7 +235,11 @@ int pp_videoout_init(pp_videoout *vo,
     for (i = 0; i < buffer_count; i++) {
         vo->gpu_bufs[i] = (void *)((uintptr_t)vo->vaddr + vo->plane_bytes * (size_t)i);
         vbuf[i].data = vo->gpu_bufs[i];
-        vo->cpu_bufs[i] = (uint32_t *)evo_direct_mem_alloc(vo->cpu_bytes);
+        /* #6: NOT routed through evo_direct_mem — at 4K this is 3x33 MB and the
+         * V8 present path never reads it (present_pre_tiled / AGC only touch the
+         * GPU plane); keeping it on malloc leaves the direct-memory slab for the
+         * GPU/AGC budget. */
+        vo->cpu_bufs[i] = (uint32_t *)malloc(vo->cpu_bytes);
         if (!vo->cpu_bufs[i]) {
             fail(15, (int)i);
             pp_videoout_shutdown(vo);
@@ -470,7 +473,7 @@ void pp_videoout_shutdown(pp_videoout *vo)
 
     for (i = 0; i < PP_VO_MAX_BUFFERS; i++) {
         if (vo->cpu_bufs[i]) {
-            evo_direct_mem_free(vo->cpu_bufs[i]);
+            free(vo->cpu_bufs[i]);
             vo->cpu_bufs[i] = NULL;
         }
         vo->gpu_bufs[i] = NULL;

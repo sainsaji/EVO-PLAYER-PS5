@@ -234,14 +234,14 @@ Standard dynamic heap allocation (`malloc`/`free`) incurs metadata locking, page
 - **Direct Memory Slab Manager**: **`0.94 ms`** (**1.65× faster**, **0 heap fragmentation**)
 - **Clean Slabs Recycled**: 100% memory recycled to direct pool upon stream close.
 
-### #6 (2026-09-03) — all CPU display buffers moved to the slab
+### #6 (2026-09-03) — the churny CPU buffers moved to the slab
 
-The rotate ring (`convert_frame_via_sws`, now 3 slots not 8), `pp_playback`'s
-`display` / `display_back` / `nv12_fb`, and `pp_videoout`'s `cpu_bufs` linear
-staging now allocate from `evo_direct_mem`, grow-only — no reallocation during
-playback, steady memory across seek / open cycles. Pool grew to 192 MiB
-(`EVO_DIRECT_MEM_POOL_BYTES`) to hold the 4K working set; step-down ladder +
-`malloc` fallback if the console won't give it. See
+The rotate ring (`convert_frame_via_sws`, now 3 slots not 8) and `pp_playback`'s
+`display` / `display_back` / `nv12_fb` now allocate from `evo_direct_mem`,
+grow-only — no reallocation during playback, steady memory across seek / open
+cycles. Pool stays at **64 MiB**: a bigger WB_ONION reservation starved the 4K
+GPU present path (hardware, 2026-09-03). `pp_videoout` `cpu_bufs` stays on
+`malloc` (3×33 MB at 4K, unused by the V8 present). See
 [`improvements-roadmap.md`](improvements-roadmap.md) §P2.
 
 ---
