@@ -340,6 +340,39 @@ clean-room C# register model to transcribe to C (the managed code itself isn't
 liftable). `llvm-mc-18` assembles the shaders; `geometry.text.bin`'s VS is
 already the right shape. Remaining shaders are small.
 
+### 5a. What Step 2 (#27) landed — the foundation to reuse (2026-09-04)
+
+#27 is **closed + merged** (PR #61, `refactor/main-c-media-modules`). Concrete
+pieces in `pp/src/pp_agc.c` a Step 3 session reuses verbatim or by pattern:
+
+| Piece | Reuse for Step 3 |
+|---|---|
+| `pp_agc_init(w, h, hdr)` — `sceAgcInit`, 0xD0000 shader scratch alloc/map, `copy_asset` the blobs, `prepare_resources`, `sceAgcCreateShader` ×2, `sceAgcLinkShaders(…, 6 /*TriStrip*/)` | Keep for the video PS; **add** a `CreateShader`/`LinkShaders(…, 4 /*TriList*/)` per new UI shader. Scratch layout offsets are fixed constants at the top of `pp_agc.c`. |
+| `agc_render_frame()` — the CX register block build (`sceAgcGetRegisterDefaults` → patch the 16 `target_offsets` for RT base/dims/blend → `ADD_REG` viewport/scissor/guardband), link-register concat from the shader objects (`*(agc_register_t**)((u8*)shader+24)` cx, `+32` sh, `shader[91]`/`[92]` counts), `sceAgcDcbSetCxRegistersIndirect` / `SetUcRegistersIndirect` / `SetShRegistersIndirect`, `sceAgcCbSetShRegisterRangeDirect` for the resource descriptors, `sceAgcDcbDrawIndexAuto`, `sceAgcDcbSetFlip`, `flush_gpu_data` (clflush/64 + mfence over `SHADER_STATIC_BYTES`), `sceAgcDriverSubmitDcb` + `sceAgcSuspendPoint` | This IS the per-frame DCB skeleton. Step 3's `render_frame` extends it: video quad → **UI pass(es)** (bind UI shader + vtx/idx/tex descriptors + scissor → `DrawIndex`) → flip, one DCB. |
+| `agc_submit_worker` thread + 250 ms `pthread_cond_timedwait` watchdog + `-2` "abandon" return + TLS `sigsetjmp` fault guard (`t_agc_jmp`/`t_agc_armed`, handlers installed once) + `agc_dbg` first-frame breadcrumbs to `evo_boot.log` + the present heartbeat | Run the UI+composite DCB submit through the **same worker + watchdog** — a wedged UI submit must not freeze the app slot either. |
+| `bind_pixel_source()` — the 30-word NV12 image descriptor at SH `0x0c`, `shader_resource_offset()` | Template for the UI texture descriptors (glyph atlas / icons — 8-bit RGBA, different format word; see SharpProspero `AgcBufferDescriptor`). |
+| VO: `pp_videoout_init` registers the UHD plane **linear** (`0x8000000000000000`) when `pp_agc_available()`; `pp_videoout_is_linear()`; `pp_videoout_adopt_flip()` mirrors a DCB-queued flip into the retire bookkeeping | The UI pass writes the **same plane** as the video quad. Non-UHD (menu) VO stays tiled — Step 3's UI-on-GPU only applies on the UHD present path unless the menu VO is also moved to linear. |
+| `.syms`: `tools/native-app/stubs/prx/libSceAgc*.syms` (11 + 3 symbols) | Add `sceAgcDcbSetIndexBuffer`, `sceAgcDcbDrawIndex`, a scissor register setter, texture-upload helpers as link errors name them (the file says so). |
+| Shader blobs: 6 vendored ProsperoLight `.bin` in `pp/blobs/` (`.incbin` via `pp/src/agc_blobs.S`) cover NV12 + P010 | Step 3's hand-written `.s` → `tools/build-shader.sh` → raw `.text` blob, `.incbin`'d the same way. `pp/shaders/rgba_ps.s` exists, unrun. |
+
+**AGC-death recovery** (`#27`): on a fault/wedge the VO re-registers **tiled**
+and the CPU path resumes. Step 3 must handle the same — when `pp_agc` dies the
+UI has to fall back to the Step 1 CPU `EvoRenderInterface` for the rest of the
+session (the `evo_rmlui_app.cpp` runtime switch already picks by
+`pp_agc_available()`; make sure it re-checks, not just at startup).
+
+**Playback OSD over 4K video is UNSHIPPED** and is a Step 3 deliverable. Today
+an AGC 4K frame presents with **no overlay**; #32's stopgap drops the whole
+player to a **1080 overlay VO** for scrub/seek (`main.c`
+`prospero_scrub_overlay_pump`, `prospero_scrub_ovl_state` NONE/ENTERING/ACTIVE/
+LEAVING, gated on `video_decode_parked`). Step 3's proper fix: composite the OSD
+as a second draw in `render_frame` before the flip (RGBA passthrough PS). When
+that lands, **#32's 1080-overlay machinery can be deleted** — note it on #32.
+
+**Video↔UI plane-hash parity** for the *video* pixels is tracked as **#62**
+(AGC present vs the CPU converter); Step 3's per-screen *UI* A/B is separate but
+shares the capture approach.
+
 **Work:**
 
 1. **Shaders** (hand-write `.s`, assemble with `llvm-mc-18`, adapt a header
