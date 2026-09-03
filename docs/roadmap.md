@@ -8,10 +8,11 @@ the map across all of them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
-Priority labels track this order: **critical** #27 (in progress) · **high** #25,
-#32 · **medium** #9, #16, #6, #29/#30, #33 · **low** the rest. `independent` =
-no cross-deps, work any time in
-parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K → #29.)
+Priority labels track this order: **critical** #27 (render_frame ported + wired
+09-03, awaiting a first hardware run) · **high** #25, #32 · **medium** #9, #16,
+#6, #29/#30, #33, #34 · **low** the rest. `independent` = no cross-deps, work
+any time in parallel. (#26 closed 2026-09-02 — app-module playback works;
+demanding 4K → #29. #31 closed 2026-09-03 — native 4K decode plays.)
 
 ---
 
@@ -30,8 +31,9 @@ parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K →
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (package-app.sh step 6b,      │   IN PROGRESS: gate ✅, pp_agc_init (shaders) ✅ hw;
-    unconditional DT_NEEDED)      │   next = port render_frame + wire pp_playback V8
+   (package-app.sh step 6b,      │   gate ✅ + pp_agc_init ✅ hw; render_frame ported
+    unconditional DT_NEEDED)      │   + pp_playback V8 wired 09-03 — awaiting a hw run
+                                 │   (same wall also blocks #34 native IME keyboard)
                                  └─► #29 Route B: libSceVideodec2 ✅ #31 CLOSED — GTA 4K
                                      plays real-time on native decode (2026-09-03)
 
@@ -58,6 +60,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#8** | Codec-sweep decode latency / drop metrics | `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/validation.md`; `pp/include/pp_pipeline_metrics.h`, `main.c` perf counters + `EVO_DIAG_FPS`, `projects/*_test/` |
 | **#3** | Subtitle subsystem + precise overlay timing (meta) | `docs/validation.md`; `media/src/evo_subtitle.c`, `assets/rml/subtitles.rml`, `main.c` subtitle picker/overlay path |
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
+| **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
 | **#30** | Finish + sign off the `evo_vdec.h` decoder seam (Phase 3 of #29) — **signed off 09-03**, parity sweep owed | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
