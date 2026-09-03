@@ -5,11 +5,13 @@
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 >
 > **RESUME HERE → #27 (GPU Step 2).** #31 (native 4K decode) is DONE + closed.
-> The AGC gate passed, `pp_agc_init` (shader setup) is hardware-verified, and
-> **`render_frame` is now ported + wired end to end (host + app-module builds
-> green)** — needs a hardware run. Open bugs from #31: #32 (scrub shows no
-> player UI on the V8 4K path — not a freeze, app responsive; high) and #33
-> (test-harness cleanup, partly done).
+> The AGC gate passed and `pp_agc_init` (shader setup) is hardware-verified.
+> **`render_frame` / `pp_agc_present_nv12` FAILED its first hardware run
+> (2026-09-03) — GPU submit hangs then crashes GTA 4K.** It's now gated behind
+> `--agc-probe` (PR #54); default build uses the CPU V8 path. Next: RT
+> buffer-attr / `cx` bits (open unknown #1) before the next `--agc-probe` run.
+> Open bugs from #31: #32 (scrub shows no player UI on the V8 4K path — not a
+> freeze; high), #55 (4K V3-fallback buffer overflow), #33 (harness cleanup).
 > Console `192.168.0.6` (ethernet, `.env`).
 > Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
 > -> `evo-remote.sh boot` -> `evo-remote.sh play <4K H.264>`.
@@ -66,8 +68,9 @@ row (or let ShadowMount auto-launch) → `evo-remote.sh boot` / `play`.
 - **Fault guard** — the *first* `agc_render_frame` runs under a
   SIGSEGV/BUS/ILL `sigsetjmp` (evo_agc_probe.c pattern); a fault logs to
   `evo_boot.log`, sets `pp_agc` unavailable, playback drops to the CPU
-  converter. `pp_agc_init` also called unconditionally from `main()` (app
-  module) so the bare build arms the path, not just `--agc-probe`.
+  converter. (It does **not** catch a GPU-side hang — see the failure note
+  above.) `main()` used to call `pp_agc_init` unconditionally; **PR #54 gated
+  that behind `--agc-probe`** after the hardware hang. Default build = CPU path.
 
 **Open hardware unknowns (first run answers these):**
 1. Does AGC render into EVO's VO buffer? It's registered
@@ -87,6 +90,22 @@ row (or let ShadowMount auto-launch) → `evo-remote.sh boot` / `play`.
 **Not done this pass:** settings row `Playback → Renderer: Auto/CPU/GPU`;
 GPU OSD composite over 4K video (AGC frames present with no overlay — deferred,
 agc-implementation.md §4); P010/HDR present; plane-hash A/B vs CPU.
+
+## 2026-09-03 (later still) — render_frame present path FAILS on hardware
+
+First hardware run of `pp_agc_present_nv12` (via #6's branch, the first `.ffpfsc`
+deployed that contains `90c890b`): **GTA VI 4K hangs then crashes** right after
+`006B_VO_RECONFIG_APPLIED` / the first valid 4K decode. The decoder emits NV12,
+`pp_playback`'s V8 branch calls `pp_agc_present_nv12`, and the GPU submit
+(`sceAgcDriverSubmitDcb` → `sceAgcSuspendPoint`) never returns; a second fault
+then `_exit`s. Matches open unknown #1 (RT format/tiling) and/or #4 (submit).
+
+**Mitigation shipped (PR #54):** `main.c`'s unconditional `pp_agc_init()` is now
+gated behind `--agc-probe` (`#if defined(EVO_APP_MODULE) && defined(EVO_AGC_PROBE)`).
+The default `.ffpfsc` uses the CPU V8 converter (YUV420P, #31-proven); GTA 4K
+plays again. `--agc-probe` still arms the GPU path for #27 work via
+`evo_agc_probe()`. Next #27 step: register the VO buffer with ProsperoLight's
+`0x80..00` attr (or adjust the `cx` RT bits) before the next `--agc-probe` run.
 
 ## 2026-09-03 (later) — #27 shader setup VALIDATED on hardware
 

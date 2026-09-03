@@ -11731,12 +11731,16 @@ int main(void) {
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
                              * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
                              * sceAgcInit must run first (#27). */
-#ifdef EVO_APP_MODULE
-    /* #27 GPU Step 2: bring the sceAgc present path up for the bare player
-     * build too (evo_agc_probe already does this under --agc-probe; pp_agc_init
-     * is idempotent). MUST be pre-unjail, same reason as evo_vdec_probe.
-     * pp_agc_available() gates the GPU present in pp_playback's V8 branch;
-     * hardware-verified through LinkShaders, render_frame still unproven. */
+#if defined(EVO_APP_MODULE) && defined(EVO_AGC_PROBE)
+    /* #27 GPU Step 2: arm the sceAgc NV12 present path. Gated behind
+     * --agc-probe (was unconditional). render_frame / pp_agc_present_nv12 is
+     * still unproven on hardware and it HANGS then crashes GTA VI 4K
+     * (2026-09-03): once armed, the native decoder emits NV12 and pp_playback's
+     * V8 branch routes it into pp_agc_present_nv12, whose GPU submit
+     * (sceAgcDriverSubmitDcb -> sceAgcSuspendPoint) never returns. Without this
+     * the V8 4K path uses the CPU converter (YUV420P, #31-proven). Under
+     * --agc-probe, evo_agc_probe() above already calls pp_agc_init; this call
+     * is the redundant idempotent one. MUST be pre-unjail (evo_vdec_probe). */
     pp_agc_init(1920, 1080, 0);
     evo_boot_log_flush();
 #endif

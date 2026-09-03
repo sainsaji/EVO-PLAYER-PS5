@@ -143,13 +143,18 @@ it first to avoid a merge tangle.
 
 - Reads: `docs/improvements-roadmap.md` §P2, `docs/converter-perf.md` Finding 7
 - Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `media/src/evo_playback.c` (`VIDEO_ROTATE_BUFFERS`), `main.c`
-- **Branch `feat/6-video-buffers-direct-mem`:** rotate ring 8→3 + `evo_direct_mem`
-  slab (grow-only) — that is the whole change now. `P8_31_RETURN_OK` logs `dmem=`.
-  Routing `pp_playback` display / `pp_videoout` `cpu_bufs` through the slab and
-  a 192 MiB pool were **backed out** — they hard-hung GTA 4K on hardware
-  (2026-09-03, `dmem=31M/192M hw=1`, wedge after `006B_VO_RECONFIG_APPLIED`;
-  a latent 4K V3-fallback overflow corrupts the shared slab). That overflow is
-  its own follow-up. **Left: verify the rotate-ring build on 1080p + 4K.**
+- **Branch `feat/6-video-buffers-direct-mem` (PR #54) — hardware-verified 2026-09-03:**
+  rotate ring 8→3 + `evo_direct_mem` slab (grow-only). `P8_31_RETURN_OK` logs
+  `dmem=`. 1080p ✅, 4K TearsOfSteel ✅.
+  - Routing `pp_playback` display / `pp_videoout` `cpu_bufs` through the slab
+    + a 192 MiB pool were **backed out** — hung GTA 4K (a latent 4K V3-fallback
+    overflow corrupts the *shared* slab). Overflow filed as **#55**.
+  - The GTA 4K hang was actually **`90c890b` (#27's unproven sceAgc NV12 present
+    path), armed by default in `main.c`**. This PR also gates `pp_agc_init`
+    behind `--agc-probe` so the default build uses the CPU V8 converter
+    (#31-proven) and the branch is deployable again. Commented on #27.
+  - Seek on native 4K → "too demanding" (`0x811d0303` after flush) is
+    pre-existing, unrelated — native-decode seek robustness (#32 area).
 
 ### 3 · `#4` — 10-bit fast path *(optional CPU stopgap)*
 
