@@ -16,10 +16,11 @@
 ; Header: reuses pp/blobs/pixel.header.bin verbatim (1 image + 1 sampler + 1
 ; CB is a subset of the NV12 PS's 2 images + 2 samplers + 1 CB).
 ;
-; Inputs (from the linked VS / SPI setup, per the .header.bin):
-;   s[28:29]    descriptor-table base
-;   s[0:7]      tex0 image descriptor (T#)   — the R8 atlas / mask
-;   s[16:19]    tex0 sampler (S#)
+; Inputs — descriptors pre-loaded by the driver from the SH register block; the
+; shader samples s[0:7] / s[16:19] DIRECTLY. Do NOT s_load over them (the reused
+; pixel.header.bin declares them live; sceAgcCreateShader rejects 0x8a6c001f).
+;   s[0:7]      tex0 image descriptor (T#)   — the R8 atlas / mask, pre-loaded
+;   s[16:19]    tex0 sampler (S#)            — pre-loaded
 ;   v0, v1      barycentric I, J
 ;   m0          interpolation state (from s30)
 ;   attr0.xy    UV
@@ -46,12 +47,7 @@
 	v_interp_p1_f32_e32 v11, v0, attr1.w
 	v_interp_p2_f32_e32 v11, v1, attr1.w
 
-	; load tex0 image + sampler descriptors
-	s_load_dwordx8 s[0:7],   s[28:29], 0x0
-	s_load_dwordx4 s[16:19], s[28:29], 0x20
-	s_waitcnt lgkmcnt(0)
-
-	; sample coverage -> v12 (single channel)
+	; sample coverage -> v12 (single channel) — descriptors already in s[0:7]/s[16:19]
 	image_sample v12, v[2:3], s[0:7], s[16:19] dmask:0x1 dim:SQ_RSRC_IMG_2D
 	s_waitcnt vmcnt(0)
 
