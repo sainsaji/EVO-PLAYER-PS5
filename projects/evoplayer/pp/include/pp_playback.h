@@ -15,6 +15,7 @@
 #include "pp_product_path.h"
 #include "pp_videoout.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -52,6 +53,7 @@ typedef struct pp_playback {
     uint32_t out_h;
     uint32_t *display;      /* linear BGRA front (published) */
     uint32_t *display_back; /* convert target; swapped under lock */
+    size_t   display_cap;   /* #6: bytes per display buffer; grow-only */
     int display_ready;
     int64_t display_pts_us;
 

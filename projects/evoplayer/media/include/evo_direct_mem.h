@@ -14,6 +14,18 @@
 extern "C" {
 #endif
 
+/*
+ * Default pool size (#6). Sized for the 4K CPU video working set:
+ *   pp_videoout linear staging   3 x 3840*2160*4  = ~100 MiB
+ *   pp_playback display + back    (1080/V3 path)   =  ~16..66 MiB
+ *   swscale rotate ring (fallback) 3 x frame       =  ~25..100 MiB
+ * The common 4K path (V8 GPU present) only needs the staging buffers; the
+ * rotate ring and display buffers are the 1080/V3/exotic-pixfmt paths and
+ * spill gracefully to malloc() if they don't fit. evo_direct_mem_init steps
+ * the request down (128/96/64 MiB) if the console won't give the full block.
+ */
+#define EVO_DIRECT_MEM_POOL_BYTES ((size_t)192 * 1024 * 1024)
+
 typedef struct {
     size_t total_bytes;
     size_t allocated_bytes;

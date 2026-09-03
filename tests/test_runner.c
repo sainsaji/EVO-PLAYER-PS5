@@ -264,7 +264,19 @@ static void test_direct_mem_lifecycle(void)
     evo_direct_mem_free(p2);
     evo_direct_mem_get_stats(&stats);
     TEST_ASSERT(stats.allocated_bytes == 0, "Free did not clear allocated bytes");
-    
+
+    /*
+     * #6: a request larger than the whole pool must still succeed (graceful
+     * malloc fallback) and free() must route it back correctly — the 4K video
+     * buffers depend on this when the console can't give the full slab.
+     */
+    void *big = evo_direct_mem_alloc(8 * 1024 * 1024);
+    TEST_ASSERT(big != NULL, "oversize alloc did not fall back");
+    memset(big, 0xAB, 8 * 1024 * 1024); /* must be writable for its full extent */
+    evo_direct_mem_free(big);
+    evo_direct_mem_get_stats(&stats);
+    TEST_ASSERT(stats.allocated_bytes == 0, "fallback free leaked into pool stats");
+
     evo_direct_mem_shutdown();
     TEST_PASS();
 }

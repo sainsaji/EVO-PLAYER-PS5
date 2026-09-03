@@ -136,13 +136,19 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 Demanding-4K playback needs native decode → **done (#31)**; the rest of that
 work is the **`native-decode`** label (§6).
 
-### 2 · `#6` — rotate buffers → direct memory *(before #27)*
+### 2 · `#6` — rotate buffers → direct memory *(before #27)* — **CODE DONE, hw-verify pending**
 
 Small, memory hygiene, and it touches `pp_videoout.c` which #27 rewrites — land
 it first to avoid a merge tangle.
 
 - Reads: `docs/improvements-roadmap.md` §P2, `docs/converter-perf.md` Finding 7
-- Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `main.c` (`VIDEO_ROTATE_BUFFERS`)
+- Files: `media/src/evo_direct_mem.c`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `media/src/evo_playback.c` (`VIDEO_ROTATE_BUFFERS`), `main.c`
+- **Done (branch `feat/6-video-buffers-direct-mem`):** rotate ring 8→3 + slab,
+  `pp_playback` display/nv12 + slab (grow-only), `pp_videoout` `cpu_bufs` + slab,
+  pool 64→192 MiB with step-down ladder. Host build + unit tests green.
+  **Left: one hardware run** — play a 4K file, confirm `P8_31_RETURN_OK`
+  `dmem=` climbs and mmap `heap live/peak` stays flat across a seek loop
+  (`tools/evo-remote.sh`).
 
 ### 3 · `#4` — 10-bit fast path *(optional CPU stopgap)*
 

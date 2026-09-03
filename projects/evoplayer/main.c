@@ -4445,13 +4445,17 @@ int start_video_playback(const char *path) {
 #ifdef EVO_APP_MODULE
     if (evo_alloc_stats) {
         uint64_t live = 0, peak = 0, ln = 0, mf = 0, sf = 0, sa = 0, fa = 0;
+        evo_direct_mem_stats_t dm = {0};
         evo_alloc_stats(&live, &peak, &ln);
         if (evo_alloc_map_info) evo_alloc_map_info(&mf, &sf, &sa, &fa);
+        evo_direct_mem_get_stats(&dm);
         EVO_P8("P8_31_RETURN_OK",
-               "heap live=%lluM peak=%lluM flex_maps=%llu anon_maps=%llu fail=%llu flex_avail=%lluM",
+               "heap live=%lluM peak=%lluM flex_maps=%llu anon_maps=%llu fail=%llu flex_avail=%lluM dmem=%lluM/%lluM hw=%d",
                (unsigned long long)(live >> 20), (unsigned long long)(peak >> 20),
                (unsigned long long)sf, (unsigned long long)sa,
-               (unsigned long long)mf, (unsigned long long)(fa >> 20));
+               (unsigned long long)mf, (unsigned long long)(fa >> 20),
+               (unsigned long long)(dm.allocated_bytes >> 20),
+               (unsigned long long)(dm.total_bytes >> 20), dm.is_direct_hardware_mem);
     } else
 #endif
         EVO_P8("P8_31_RETURN_OK", "playback threads up");
@@ -11744,8 +11748,10 @@ int main(void) {
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
 #endif
-    /* Initialize 2MB-aligned Direct Memory Region (64 MiB) */
-    evo_direct_mem_init(64 * 1024 * 1024);
+    /* Initialize the 2MB-aligned Direct Memory Region. Sized (#6) for the 4K
+     * CPU video working set so the rotate ring / pp_playback display / VO
+     * linear staging come from this fixed slab instead of churning the heap. */
+    evo_direct_mem_init(EVO_DIRECT_MEM_POOL_BYTES);
 
     /*
      * First, before anything draws or any thread starts. The glyph tables are

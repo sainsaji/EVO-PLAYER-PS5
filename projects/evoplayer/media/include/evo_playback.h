@@ -24,7 +24,13 @@
 extern "C" {
 #endif
 
-#define VIDEO_ROTATE_BUFFERS 8
+/*
+ * Slots in the swscale-fallback present ring (convert_frame_via_sws). #6:
+ * trimmed 8 -> 3 — one presented + one just-written + one in-flight is enough
+ * for the legacy renderer not to tear, and at 4K each slot is 33 MB. The
+ * product present path does not use this ring (see evo_playback.c).
+ */
+#define VIDEO_ROTATE_BUFFERS 3
 
 /* ---- §4 playback façade — the stable interface ---- */
 int    evo_pb_is_active(void);        /* a video decode session is running   */

@@ -323,9 +323,30 @@ because "most" is not "all", and a 4:4:4 file should not fall to one thread.
 
 ---
 
-## P2 — The Rotate Buffers Bypass the Slab Allocator
+## P2 — The Rotate Buffers Bypass the Slab Allocator  ✅ DONE (#6, 2026-09-03)
 
 **Found:** 2026-08-14. **Size:** S **Risk:** Low **Domain:** Memory
+
+**Resolution (#6):** every CPU-side video display buffer now comes from the
+`evo_direct_mem` slab, grow-only (allocated once, reused across seeks / re-opens
+at the same-or-smaller resolution — no reallocation during playback):
+
+- `convert_frame_via_sws` rotate ring — `VIDEO_ROTATE_BUFFERS` trimmed **8 → 3**
+  (it is only the exotic-pixfmt fallback path; the product path presents through
+  `pp_playback`'s display model), slab-backed.
+- `pp_playback` `display` / `display_back` / `nv12_fb` — slab-backed, grow-only
+  (`display_cap`).
+- `pp_videoout` `cpu_bufs` linear staging — slab-backed.
+- The slab pool grew **64 → 192 MiB** (`EVO_DIRECT_MEM_POOL_BYTES`), sized for
+  the 4K CPU working set, with a step-down ladder (128/96/64 MiB) in
+  `evo_direct_mem_init` if the console won't give the full block, and the
+  existing graceful `malloc()` fallback if a request still overflows. On the
+  app module this also moves ~100 MB of buffers off the flexible-memory heap
+  that the 4K decode pools contend for. `P8_31_RETURN_OK` now logs `dmem=used/total`.
+
+Original analysis below.
+
+---
 
 `VIDEO_ROTATE_BUFFERS` is **8**, and each one is allocated with a plain
 `malloc(video_frame_w * video_frame_h * 4)`. At 4K that is
