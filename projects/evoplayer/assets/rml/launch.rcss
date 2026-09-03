@@ -202,6 +202,9 @@ div, span, p {
     color: #ecf3ff;
     letter-spacing: 0.5px;
     margin-top: 14px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #hero-detail {
@@ -210,6 +213,9 @@ div, span, p {
     color: #9fb2cc;
     letter-spacing: 0.5px;
     margin-top: 14px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #hero-foot {

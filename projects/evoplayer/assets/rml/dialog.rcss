@@ -41,6 +41,7 @@ div, span, p {
     padding: 40px 48px;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 #dialog-eyebrow {
@@ -86,11 +87,16 @@ div, span, p {
 }
 
 /* Actions Row */
+/* Wrap rather than overflow the 824 px inner width when a third action with a
+ * long label is present (e.g. RESUME AT 02:22:15 / START FROM BEGINNING /
+ * NEXT EPISODE) (#16). */
 #dialog-actions-row {
     display: flex;
     flex-direction: row;
-    gap: 20px;
+    flex-wrap: wrap;
+    gap: 16px;
     margin-top: 36px;
+    width: 824px;
 }
 
 .action-btn {

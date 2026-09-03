@@ -6075,19 +6075,10 @@ double percentage = 0.0;
         sizeof(metadata)
     );
 
-    if (strlen(title) > 55) {
-        title[52] = '.';
-        title[53] = '.';
-        title[54] = '.';
-        title[55] = 0;
-    }
-
-    if (strlen(metadata) > 76) {
-        metadata[73] = '.';
-        metadata[74] = '.';
-        metadata[75] = '.';
-        metadata[76] = 0;
-    }
+    /* No length cap here any more: the RmlUi OSD marquees a long title
+     * (#media-title) and ellipsises a long metadata line (#media-meta in
+     * playback.rcss) itself. Pre-truncating hid the tail the marquee exists
+     * to reveal (#16 / #44). */
 
     if (osd_visibility > 0) {
         int alpha = osd_visibility;

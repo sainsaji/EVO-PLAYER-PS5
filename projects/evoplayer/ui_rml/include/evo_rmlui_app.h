@@ -613,6 +613,17 @@ private:
     void SetImageColor(Rml::Element* el, const std::string& color);
 
     /*
+     * Long-text marquee, matching the legacy evo_text_marquee ping-pong. Only
+     * used on the playback OSD title (#media-title): that document is not in
+     * the Step-1 surface cache, so scrolling it costs nothing extra, whereas
+     * marqueeing a cached menu row would force a full re-raster every frame.
+     * The menu/list rows keep the static text-overflow: ellipsis in their RCSS.
+     */
+    struct MarqueeState { bool active = false; double start = 0.0; float travel = 0.0f; };
+    std::unordered_map<Rml::Element*, MarqueeState> m_marquee;
+    void MarqueeTick(Rml::Element* el, bool active);
+
+    /*
      * State-diffing in Update*State only avoids RE-STYLING unchanged
      * elements; it does nothing about the cost of Context::Render() itself,
      * which walks and CPU-rasterizes every visible element every time it is
