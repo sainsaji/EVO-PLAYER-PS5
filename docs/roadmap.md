@@ -42,7 +42,9 @@ plays.)
 
   #29 native hw decode (umbrella, v1.1.0)
     └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
-       └─ #31 Phase 4 ✅ CLOSED → #32 seek freeze (high) → Phase 5 toggle → Phase 6
+       └─ #31 Phase 4 ✅ CLOSED → #32 scrub shows no player UI on the V8 4K path
+          (not a freeze — app responsive; k4_live never composites the OSD +
+          v8_hold skips the flip) (high) → Phase 5 toggle → Phase 6
 ```
 
 ---

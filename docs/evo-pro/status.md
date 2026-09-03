@@ -7,8 +7,9 @@
 > **RESUME HERE → #27 (GPU Step 2).** #31 (native 4K decode) is DONE + closed.
 > The AGC gate passed, `pp_agc_init` (shader setup) is hardware-verified, and
 > **`render_frame` is now ported + wired end to end (host + app-module builds
-> green)** — needs a hardware run. Open bugs from #31: #32 (seek freeze on the
-> V8 4K path, high) and #33 (test-harness cleanup, partly done).
+> green)** — needs a hardware run. Open bugs from #31: #32 (scrub shows no
+> player UI on the V8 4K path — not a freeze, app responsive; high) and #33
+> (test-harness cleanup, partly done).
 > Console `192.168.0.6` (ethernet, `.env`).
 > Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
 > -> `evo-remote.sh boot` -> `evo-remote.sh play <4K H.264>`.
@@ -170,11 +171,17 @@ Clarksons 720p too.
   `MODE == player`; `tools/vdec-test.sh` + `package-app.sh --autoplay` drive
   the unattended hardware-test loop (FTP log pull, one manual launch press).
 
-**KNOWN BUG — seek → frozen picture (filed high-priority).** On a failed
-`av_seek_frame` (GTA's 14 GB file), `pp_playback_notify_seek_end(false)` left
-the `pp_clock` paused → every frame dropped. Partial fix landed (always
-un-pause on `!restore_paused`; byte-seek fallback), but seek still isn't
-clean on the V8 4K path. Tracked separately.
+**KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
+Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**
+The seek works and the app stays responsive (Back → exit prompt, Triangle →
+codec info, D-pad moves the target, X commits + resumes). The bug: while a
+scrub is active the **player screen stops rendering** (video + OSD invisible),
+because the `pp_product_k4_live` V8 4K present path never composites the OSD and
+`v8_hold` skips the whole draw + flip during the seek-discard window;
+`prospero_scrub_begin()` never drops to the 1080 VO the way Media Info /
+exit-confirm do. Fix: make scrub an overlay (drop to 1080), or GPU OSD-over-4K
+composite (#27). Separately: verify the `AVSEEK_FLAG_ANY` byte-seek fallback
+(`fe6c6ed`) lands GTA's 14 GB file on a keyframe.
 
 ## 2026-09-03 (late) — NATIVE HW DECODE WORKS IN EVO 🎉
 
@@ -380,7 +387,8 @@ the "remote-close investigation" section — there is no clean remote close):
 - [ ] **#27 settings row** `Playback → Renderer: Auto / CPU / GPU` — coordinate
       with **#29 Phase 5**'s `Video decoder` row (same screen, same
       fscanf-append pattern).
-- [ ] **#32** — seek → frozen picture on the V8 4K path (high).
+- [ ] **#32** — scrub shows no player UI on the V8 4K path (not a freeze;
+      k4_live never composites the OSD + `v8_hold` skips the flip) (high).
 - [ ] **#29 Phase 5** — `evo_vdec_probe()` gate + the `Video decoder` settings row.
 - [ ] **#28 Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`);
       `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); fold the UI

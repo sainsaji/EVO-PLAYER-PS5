@@ -3,8 +3,10 @@
 > **Status (2026-09-03):** **Phase 4 DONE — #31 closed.** GTA VI 4K H.264 plays
 > real-time on `sceVideodec2` inside `PPSA99039` (`be=1` NATIVE, `pos` climbs
 > 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the
-> backend behind `evo_vdec.h`. Open: **#32** (seek → frozen picture on the V8
-> 4K path, high) and **Phase 5** (the `Auto / FFmpeg / Native` settings row).
+> backend behind `evo_vdec.h`. Open: **#32** (scrub shows no player UI on the
+> V8 4K path — not a freeze, app responsive; the k4_live present path never
+> composites the OSD; high) and **Phase 5** (the `Auto / FFmpeg / Native`
+> settings row).
 > History of the gate below.
 >
 > Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
@@ -353,8 +355,10 @@ Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
 
 **DONE on hardware (#31, 2026-09-03).** GTA VI 4K H.264 plays real-time on
 `sceVideodec2` in EVO — colours correct, no judder, `fatal=0`. Frame order is
-display-order. Remaining: **seek → frozen picture** on the V8 4K path (filed
-separately, high priority), and Phase 5 (settings row).
+display-order. Remaining: **#32 — scrub shows no player UI on the V8 4K path**
+(not a freeze; the `pp_product_k4_live` present path never composites the OSD
+and `v8_hold` skips the flip during the seek-discard window), and Phase 5
+(settings row).
 
 - [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`.
       Crop applied (`disp_w/h` from the demuxer vs the coded
