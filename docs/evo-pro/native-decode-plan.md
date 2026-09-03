@@ -360,9 +360,11 @@ Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
 
 **DONE on hardware (#31, 2026-09-03).** GTA VI 4K H.264 plays real-time on
 `sceVideodec2` in EVO — colours correct, no judder, `fatal=0`. Frame order is
-display-order. Remaining: **#32 — scrub shows no player UI on the V8 4K path**
+display-order. Remaining: **#32 — scrub blanks player UI on the V8 4K path**
 (not a freeze; the `pp_product_k4_live` present path never composites the OSD
-and `v8_hold` skips the flip during the seek-discard window), and Phase 5
+and `v8_hold` skips the flip during the seek-discard window) — **fix landed:**
+scrub / chapter-jump now drop to the 1080 overlay VO for the duration of the
+seek (`prospero_scrub_overlay_*` in `main.c`), hw-verify pending — and Phase 5
 (settings row).
 
 - [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`.

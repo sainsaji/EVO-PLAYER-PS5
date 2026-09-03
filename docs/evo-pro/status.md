@@ -10,8 +10,9 @@
 > (2026-09-03) — GPU submit hangs then crashes GTA 4K.** It's now gated behind
 > `--agc-probe` (PR #54); default build uses the CPU V8 path. Next: RT
 > buffer-attr / `cx` bits (open unknown #1) before the next `--agc-probe` run.
-> Open bugs from #31: #32 (scrub shows no player UI on the V8 4K path — not a
-> freeze; high), #55 (4K V3-fallback buffer overflow), #33 (harness cleanup).
+> Open bugs from #31: #32 (scrub blanks player UI on the V8 4K path — fix landed
+> via a 1080 scrub overlay, hw-verify pending), #55 (4K V3-fallback buffer
+> overflow), #33 (harness cleanup).
 > Console `192.168.0.6` (ethernet, `.env`).
 > Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
 > -> `evo-remote.sh boot` -> `evo-remote.sh play <4K H.264>`.
@@ -219,16 +220,22 @@ stale payload-era UI assets for weeks and shadowed every #16 RCSS clamp on
 hardware. `deploy-app.sh --ffpfsc` now wipes + re-pushes the packaged asset
 tree there on every deploy.
 
-**KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
-Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**
-The seek works and the app stays responsive (Back → exit prompt, Triangle →
-codec info, D-pad moves the target, X commits + resumes). The bug: while a
-scrub is active the **player screen stops rendering** (video + OSD invisible),
-because the `pp_product_k4_live` V8 4K present path never composites the OSD and
-`v8_hold` skips the whole draw + flip during the seek-discard window;
-`prospero_scrub_begin()` never drops to the 1080 VO the way Media Info /
-exit-confirm do. Fix: make scrub an overlay (drop to 1080), or GPU OSD-over-4K
-composite (#27). Separately: verify the `AVSEEK_FLAG_ANY` byte-seek fallback
+**#32 — scrub shows no player UI on the V8 4K path (high). FIX LANDED, HW-VERIFY
+PENDING.** Reframed 2026-09-03: **not a freeze / deadlock** — the seek works and
+the app stays responsive. The bug was that the `pp_product_k4_live` V8 4K
+present path never composites the OSD and `v8_hold` skips the whole draw + flip
+during the seek-discard window, and `prospero_scrub_begin()` never dropped to
+the 1080 VO the way Media Info / exit-confirm do. **Fix (smallest / consistent
+option):** `prospero_scrub_begin` + `prospero_chapter_jump` now call
+`pp_product_overlay_enter()` when `pp_product_k4_live`, so the scrub/seek runs
+under the 1080 overlay VO where `draw_player_screen` composites the OSD over a
+held frame. `prospero_scrub_cancel` restores the 4K surface immediately; a
+committed seek holds the overlay until its discard window (`g_pp_pb.seek_discarding`)
+closes — polled in the render loop next to `prospero_playback_finished_update()` —
+then `pp_product_overlay_leave()`. New state: `prospero_scrub_overlay_*` in
+`main.c`. Video behind the scrub bar is black during the overlay (same as
+Media Info / exit-confirm); a held 4K frame there needs the #27 GPU composite.
+Separately still open: verify the `AVSEEK_FLAG_ANY` byte-seek fallback
 (`fe6c6ed`) lands GTA's 14 GB file on a keyframe.
 
 ## 2026-09-03 (late) — NATIVE HW DECODE WORKS IN EVO 🎉
@@ -435,8 +442,10 @@ the "remote-close investigation" section — there is no clean remote close):
 - [ ] **#27 settings row** `Playback → Renderer: Auto / CPU / GPU` — coordinate
       with **#37**'s `Video decoder` row (same screen, same fscanf-append
       pattern — land decoder-append first, then renderer).
-- [ ] **#32** — scrub shows no player UI on the V8 4K path (not a freeze;
+- [~] **#32** — scrub blanks player UI on the V8 4K path (not a freeze;
       k4_live never composites the OSD + `v8_hold` skips the flip) (high).
+      Fix landed: scrub / chapter-jump drop to the 1080 overlay VO
+      (`prospero_scrub_overlay_*` in `main.c`). HW-verify pending.
 - [ ] **#37** — Phase 5: `Video decoder: Auto / FFmpeg / Native` settings
       toggle + `evo_vdec_probe()` gate + config migration.
 - [ ] **#28 Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`);

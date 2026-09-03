@@ -10546,6 +10546,56 @@ static int prospero_scrub_was_paused = 0;
 static double prospero_scrub_origin = 0.0;
 static double prospero_scrub_target = 0.0;
 
+#if PP_BACKEND_ENABLED
+/*
+ * #32: on the native-UHD present path (`pp_product_k4_live`) the render loop
+ * presents the V8 4K plane directly and never composites `draw_player_screen`,
+ * and the seek-discard window (`v8_hold`) skips the flip entirely - so a scrub
+ * or chapter jump during 4K playback left the screen on the last flipped frame
+ * with no scrub bar or OSD.
+ *
+ * Fix: for the duration of a k4_live scrub/seek, drop to the 1080 overlay VO -
+ * exactly what Media Info, the exit prompt and the subtitle picker already do -
+ * where `draw_player_screen` composites the OSD over a held frame. The 4K
+ * surface is restored once the scrub (and any seek it commits) has settled.
+ */
+static int prospero_scrub_overlay_active = 0;
+static int prospero_scrub_overlay_wait_seek = 0;
+static uint64_t prospero_scrub_overlay_seek_req = 0;
+static long long prospero_scrub_overlay_deadline_ms = 0;
+
+/* Enter the 1080 overlay if we are on the native-UHD path. Idempotent. */
+static void prospero_scrub_overlay_enter(void)
+{
+    if (!prospero_scrub_overlay_active && pp_product_k4_live(screen)) {
+        pp_product_overlay_enter();
+        prospero_scrub_overlay_active = 1;
+        prospero_scrub_overlay_wait_seek = 0;
+    }
+}
+
+/* Keep the overlay up until the committed seek's discard window closes; the
+ * render-loop poll then restores the 4K surface. */
+static void prospero_scrub_overlay_defer_leave_until_seek(void)
+{
+    if (prospero_scrub_overlay_active) {
+        prospero_scrub_overlay_wait_seek = 1;
+        prospero_scrub_overlay_seek_req = g_pp_pb.stats.seek_requests;
+        prospero_scrub_overlay_deadline_ms = now_ms() + 8000;
+    }
+}
+
+/* Restore the 4K surface immediately (scrub cancelled, or seek never submitted). */
+static void prospero_scrub_overlay_leave_now(void)
+{
+    if (prospero_scrub_overlay_active) {
+        pp_product_overlay_leave();
+        prospero_scrub_overlay_active = 0;
+        prospero_scrub_overlay_wait_seek = 0;
+    }
+}
+#endif
+
 static double prospero_player_position(void) {
     double position =
         resume_base_offset_seconds +
@@ -10598,6 +10648,14 @@ static void prospero_scrub_begin(void) {
 
     prospero_scrub_was_paused =
         player_paused;
+
+#if PP_BACKEND_ENABLED
+    /* Enter the overlay while player_paused still reflects the user's state,
+     * so pp_product_overlay_enter() suspends the presentation clock if we were
+     * playing (otherwise a cancel comes back to a clock that judges every
+     * frame late - the 0.1.3 Media Info freeze). */
+    prospero_scrub_overlay_enter();
+#endif
 
     player_paused = 1;
     prospero_scrub_active = 1;
@@ -10654,11 +10712,24 @@ static void prospero_chapter_jump(int direction)
             next = prospero_chapter_count - 1;
     }
 
+#if PP_BACKEND_ENABLED
+    /* #32: a chapter jump on the native-UHD path blanks the OSD for the same
+     * reason a scrub does - route it through the 1080 overlay too. */
+    prospero_scrub_overlay_enter();
+#endif
+
     if (!prospero_request_inplace_seek(
             prospero_chapter_start[next], player_paused)) {
         toast("CHAPTER", "Seek failed");
+#if PP_BACKEND_ENABLED
+        prospero_scrub_overlay_leave_now();
+#endif
         return;
     }
+
+#if PP_BACKEND_ENABLED
+    prospero_scrub_overlay_defer_leave_until_seek();
+#endif
 
     format_time_mmss(tbuf, sizeof(tbuf), prospero_chapter_start[next]);
     snprintf(
@@ -10693,6 +10764,12 @@ static void prospero_scrub_cancel(void) {
     player_paused =
         prospero_scrub_was_paused;
 
+#if PP_BACKEND_ENABLED
+    /* No seek to wait on - restore the 4K surface now. player_paused is
+     * already back to the user's value so overlay_leave resumes the clock. */
+    prospero_scrub_overlay_leave_now();
+#endif
+
     controls_last_used_ms = now_ms();
 }
 
@@ -10726,6 +10803,10 @@ static int prospero_scrub_confirm(void) {
         player_paused =
             restore_paused;
 
+#if PP_BACKEND_ENABLED
+        prospero_scrub_overlay_leave_now();
+#endif
+
         toast(
             "SEEK",
             "Unable to submit seek"
@@ -10733,6 +10814,12 @@ static int prospero_scrub_confirm(void) {
 
         return 0;
     }
+
+#if PP_BACKEND_ENABLED
+    /* Seek submitted: hold the 1080 overlay (OSD over a held frame) until the
+     * demux thread's discard window closes, then the render loop restores 4K. */
+    prospero_scrub_overlay_defer_leave_until_seek();
+#endif
 
     char time_text[32];
     char message[96];
@@ -12091,9 +12178,12 @@ int main(void) {
             }
 
             if (pressed & PS5_PAD_BUTTON_SQUARE) {
-                if (screen == 2) {
+                if (screen == 2 && !prospero_scrub_active) {
                     /* Media Info is a 1080 panel over the video: leave the 4K
-                     * surface and hold the clock, remembering both. */
+                     * surface and hold the clock, remembering both. Suppressed
+                     * mid-scrub - the scrub already owns the 1080 overlay's
+                     * saved-VO slot (#32), and nesting a second enter/leave
+                     * pair over it would strand the restore. */
 #if PP_BACKEND_ENABLED
                     pp_product_overlay_enter();
 #endif
@@ -12720,6 +12810,30 @@ skip_screen_input:
         if (screen == 2 && !player_paused) {
             player_elapsed++;
         }
+
+#if PP_BACKEND_ENABLED
+        /*
+         * #32: a k4_live scrub/chapter-jump runs under the 1080 overlay VO so
+         * draw_player_screen can composite the OSD over a held frame. Restore
+         * the 4K surface once the scrub - and any seek it committed - settles.
+         * A committed seek is done when its discard window (seek_discarding)
+         * closes; the deadline only guards the case where the demux thread
+         * never picked the request up.
+         */
+        if (prospero_scrub_overlay_active && !prospero_scrub_active) {
+            int leave = 1;
+            if (prospero_scrub_overlay_wait_seek) {
+                int seek_started = g_pp_pb.stats.seek_requests !=
+                                   prospero_scrub_overlay_seek_req;
+                if (seek_started)
+                    leave = !g_pp_pb.seek_discarding;
+                else
+                    leave = now_ms() >= prospero_scrub_overlay_deadline_ms;
+            }
+            if (leave)
+                prospero_scrub_overlay_leave_now();
+        }
+#endif
 
         prospero_playback_finished_update();
 

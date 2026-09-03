@@ -109,8 +109,8 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
     #40 route direct memory via evo_direct_mem + multi-hour soak
     #41 HEVC hardware decode (2nd resident decoder)
     #59 Surface video decoder backend in player UI (HW vs SW badge + OSD)
-    #32 scrub shows no player UI on the V8 4K path (not a freeze — app
-        responsive; k4_live never composites the OSD + v8_hold skips the flip) (high)
+    #32 scrub blanks player UI on the V8 4K path (fix landed — 1080 scrub
+        overlay; hw-verify pending) (high)
 ```
 
 ---
@@ -217,7 +217,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 | **#40** | Route the resident decoder's direct memory through `evo_direct_mem` + multi-hour soak | open |
 | **#41** | HEVC hardware decode — a 2nd resident `sceVideodec2` decoder (H.264-only today) | open |
 | **#59** | Surface video decoder backend in player UI (Hardware vs Software decode indicator) | open, medium |
-| **#32** | Scrub shows no player UI on the V8 4K path (not a freeze — app responsive) | open, high |
+| **#32** | Scrub blanks player UI on the V8 4K path — fix landed (1080 scrub overlay), hw-verify pending | open, high |
 
 - Reads: **`docs/evo-pro/status.md`**, `docs/evo-pro/native-decode-plan.md`
   (§3 architecture, Phases 4–6, kill criteria §8), `docs/evo-pro/videodec2-abi.md`
