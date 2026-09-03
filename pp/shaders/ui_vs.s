@@ -10,34 +10,24 @@
 ;   out param1 = colour.xyzw   (premultiplied, interpolated for gradients)
 ;
 ; ============================================================================
-;  HEADER RISK — READ BEFORE ITERATING ON HARDWARE
+;  HARDWARE RESULT (2026-09-04, pp_agc_probe_ui_shaders, --agc-probe)
 ; ============================================================================
-; The video path (#27) reuses ProsperoLight's geometry.header.bin verbatim and
-; swaps only geometry.text.bin. That works because its VS is a strict fetch of
-; { float3 pos; float2 uv } with ONE exported param — a structural match.
+; sceAgcCreateShader(this, geometry.header.bin) = 0x0  — ACCEPTED.
+; sceAgcLinkShaders(this, solid_ps, TriangleList) = 0x0 — LINKS.
 ;
-; This UI VS needs a THIRD fetched attribute (per-vertex colour) and a SECOND
-; exported param. That is a header change, not a subset: the reused
-; geometry.header.bin's vertex-input descriptor table (2 entries) and its
-; SPI_VS_OUT_CONFIG / param-export count will not describe this program.
+; So the reused geometry.header.bin tolerates this VS's 3 vertex fetches + 2
+; param exports (contrary to the earlier "needs its own header" worry). What is
+; NOT yet verified is whether it actually FETCHES correctly when drawn — the
+; attribute-descriptor selection math below is elided (see the buffer_load_format
+; lines). Phase 1's first real draw confirms/fixes that against
+; geometry.text.bin's exact sequence.
 ;
-; Options, in order of preference (decide at the Phase-1 hardware session):
-;   1. Smuggle colour through the existing 2-slot fetch: upload the UI vertex as
-;      { float2 pos; u32 colour; float2 uv } and fetch it as { float3; float2 }.
-;      Colour rides in "pos.z". Requires the colour param export to be FLAT
-;      (S_MODE / interp mode in the header) AND unpacking 4x u8 in the PS. Loses
-;      per-triangle colour interpolation — acceptable for solid fills, WRONG for
-;      RmlUi gradient meshes. Ship a separate non-interpolated gradient path or
-;      accept banding.
-;   2. Hand-build a matching header from the RDNA2 ISA reference (doc 70648) +
-;      the .sb parsers in KytyPS5 / shadPS5 / SharpProspero ShaderInfo.cs
-;      (agc-implementation.md §7). Highest effort, fully correct.
-;   3. Add glslang + SPIRV-LLVM-Translator to the container and compile a real
-;      VS from GLSL — the compiler emits a correct header. (Question 3 was
-;      answered "hand-write GCN now"; revisit if 1 and 2 both stall.)
-;
-; The body below is written for option 2/3 (3 real attributes, 2 params). It
-; assembles but has NOT run on hardware and has no matching header yet.
+; Textured pixel shaders are the real wall: any PS that touches a memory
+; resource (image_sample OR buffer_load_format) fails sceAgcCreateShader
+; 0x8a6c001f — it validates the code against the header's "sl00" metadata and
+; ProsperoLight only ships NV12/P010 PS headers. Text/icons/art need the
+; GLSL -> SPIR-V -> AMD ISA toolchain (agc-implementation.md §7). The solid
+; path (this VS + solid_ps) is unblocked.
 ; ============================================================================
 ;
 ; Inputs (Sony fetch-shader convention, mirrored from geometry.text.bin):
@@ -46,8 +36,8 @@
 ;   s14/s15/.. packed per-attribute fetch info (stride / format / table index)
 ;   v5         S_VERTEX_ID (wave-relative), v8 = 0 helper
 ;
-; STATUS: hand-written, NOT run on hardware, NO matching header. Assemble:
-;   ./tools/build-shader.sh pp/shaders/ui_vs.s
+; STATUS: CreateShader + LinkShaders verified on hardware; vertex fetch not yet
+; exercised by a real draw. Assemble:  ./tools/build-shader.sh pp/shaders/ui_vs.s
 
 	s_inst_prefetch 0x3
 

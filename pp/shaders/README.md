@@ -14,9 +14,21 @@ The assembled `.bin` code halves and `SHA256SUMS` are checked in here;
 `projects/evoplayer/pp/src/agc_ui_blobs.S` `.incbin`s them (paths
 `../../pp/shaders/*.bin`) alongside the reused ProsperoLight headers.
 
-## Status
+## Status (hardware, 2026-09-04 — `pp_agc_probe_ui_shaders`, `--agc-probe`)
 
-**None of these have run on hardware.** They are written against the register
+| shader | `sceAgcCreateShader` | `LinkShaders` (TriList) |
+|---|---|---|
+| `ui_vs` (vs `geometry.header.bin`) | `0x0` ✓ | `ui_vs+solid_ps` `0x0` ✓ |
+| `solid_ps` (vs `pixel.header.bin`) | `0x0` ✓ | — |
+| `glyph_ps`, `rgba_ps` | `0x8a6c001f` ✗ | — |
+
+`sceAgcCreateShader` validates the code body against the header's `sl00`
+resource-metadata block whenever a memory resource is touched — `image_sample`
+**and** typed `buffer_load_format` both fail, hand-written or spliced onto the
+reference NV12 body's exact trailer. ProsperoLight ships headers only for its
+NV12/P010 shaders, so **textured pixel shaders (text, icons, art) need a
+compiler that emits header+code+`sl00` as a set — the GLSL → SPIR-V → AMD-ISA
+toolchain (§7 / `agc-implementation.md`).** The solid path is unblocked. They are written against the register
 conventions observed by disassembling ProsperoLight's proven
 `pixel.text.linear-buffer.bin` (`third_party/ProsperoLight/assets/private/`):
 
