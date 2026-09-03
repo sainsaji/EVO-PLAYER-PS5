@@ -435,10 +435,25 @@ int decode_next_video_frame(void)
         }
 
         if (!video_video_pending_pkt) {
-            if (video_decode_done)
-                return 0;
-            usleep(100);
-            return 1;
+            /*
+             * End of stream: flush the decoder once so buffered pictures still
+             * come out (the native backend holds a small PTS-reorder window;
+             * FFmpeg buffers frame-threaded latency). Send a NULL AU, loop back
+             * so evo_vdec_receive() drains the tail, then stop. s_eof_drained
+             * re-arms as soon as the stream is no longer at EOF (seek/replay).
+             */
+            static int s_eof_drained = 0;
+            if (!video_decode_done) {
+                s_eof_drained = 0;
+                usleep(100);
+                return 1;
+            }
+            if (!s_eof_drained) {
+                s_eof_drained = 1;
+                evo_vdec_send(g_vdec, NULL, 0, INT64_MIN);
+                continue;
+            }
+            return 0;
         }
 
         int64_t send_pts_us = INT64_MIN;

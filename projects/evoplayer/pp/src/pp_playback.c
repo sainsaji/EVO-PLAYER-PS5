@@ -121,24 +121,37 @@ void pp_playback_attach_videoout(pp_playback *pb, pp_videoout *vo)
 int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
                            pp_aspect_mode aspect)
 {
-    uint32_t *front, *back;
+    uint32_t *front = NULL, *back = NULL;
     size_t bytes;
     if (!pb || w < 64 || h < 64)
         return -1;
-    bytes = (size_t)w * (size_t)h * 4u;
-    front = (uint32_t *)malloc(bytes);
-    back = (uint32_t *)malloc(bytes);
-    if (!front || !back) {
-        free(front);
-        free(back);
-        return -2;
+
+    /*
+     * The V8 fused 4K path writes straight to the VideoOut GPU plane and never
+     * touches pb->display / pb->display_back — allocating 2×(w*h*4) for them
+     * (66 MB at 3840x2160) is pure waste, and if that alloc fails (tight flex
+     * budget once the native decoder is resident) out_w silently stays at the
+     * old size and use_v8 turns off -> black screen. Skip it for V8; the
+     * V3/1080 path allocates on demand in the fallback branch of push_frame.
+     */
+    if (pb->backend != PP_BACKEND_4K_V8_FUSED) {
+        bytes = (size_t)w * (size_t)h * 4u;
+        front = (uint32_t *)malloc(bytes);
+        back = (uint32_t *)malloc(bytes);
+        if (!front || !back) {
+            free(front);
+            free(back);
+            return -2;
+        }
     }
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));
-    free(pb->display);
-    free(pb->display_back);
-    pb->display = front;
-    pb->display_back = back;
+    if (front) {
+        free(pb->display);
+        free(pb->display_back);
+        pb->display = front;
+        pb->display_back = back;
+    }
     pb->out_w = w;
     pb->out_h = h;
     pb->cfg.aspect = aspect;

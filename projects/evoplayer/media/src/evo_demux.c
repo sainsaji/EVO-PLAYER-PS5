@@ -24,6 +24,7 @@
 #include "evo_audio_resample.h"
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
+#include "pp_stage_breadcrumb.h"
 
 /* Matches main.c: the product video backend is always on in this build. */
 #ifndef PP_BACKEND_ENABLED
@@ -256,6 +257,21 @@ packet_queue_clear(
             AVSEEK_FLAG_BACKWARD
         );
 
+    /* Big files (14 GB GTA trailer) whose stream index doesn't cover the byte
+     * range can fail the timestamp seek; fall back to a byte seek. */
+    if (result < 0) {
+        result = av_seek_frame(play_fmt, seek_stream, seek_timestamp,
+                               AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+    }
+#if defined(EVO_APP_MODULE)
+    {
+        char d[80];
+        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d",
+                 result, (long long)seek_timestamp, seek_stream);
+        pp_stage_bc("SEEK_AVFRAME", d);
+    }
+#endif
+
     if (result >= 0) {
         avformat_flush(play_fmt);
 
@@ -332,7 +348,10 @@ packet_queue_clear(
         0,
         0
     );
-    if (result >= 0 && !restore_paused)
+    /* notify_seek_begin() paused the clock. Always lift that if we were
+     * playing — on a FAILED seek notify_seek_end() only clears seek_discarding
+     * and leaves the clock paused, which drops every frame -> frozen picture. */
+    if (!restore_paused)
         pp_playback_resume(&g_pp_pb);
 #endif
 

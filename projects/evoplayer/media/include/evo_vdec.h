@@ -65,8 +65,19 @@ typedef struct {
     int   skip_idct;               /* AVDISCARD_*, or EVO_VDEC_KEEP          */
 } evo_vdec_open_params;
 
+/* Preload the native backend's system module (libSceVideodec2, sysmodule 207).
+ * MUST be called from main() BEFORE the first evo_jailbreak_self() — the
+ * self-unjail's mid-run credential swap makes the module load fail
+ * (docs/evo-pro/status.md, 2026-09-03). No-op returning 0 on host + payload
+ * builds. Returns 1 if native decode may be available this session — the
+ * caller then requests EVO_VDEC_BACKEND_NATIVE; evo_vdec_open() still falls
+ * back to FFmpeg if bring-up fails. Idempotent. */
+int evo_vdec_probe(void);
+
 /* Open a decoder. Returns NULL on failure. `*chosen` (may be NULL) reports the
- * backend actually created — the ffmpeg path always downgrades to FFMPEG. */
+ * backend actually created. A EVO_VDEC_BACKEND_NATIVE request that cannot be
+ * honoured (probe failed, unsupported codec, bring-up error) silently opens
+ * FFmpeg instead — this never returns NULL when FFmpeg could have opened. */
 evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen);
 
 /* Feed one compressed access unit. pts_us is the presentation timestamp in

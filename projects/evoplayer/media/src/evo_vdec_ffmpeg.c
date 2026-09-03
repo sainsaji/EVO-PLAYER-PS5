@@ -11,6 +11,7 @@
  * 10-bit pack scratch moved here verbatim.
  */
 #include "evo_vdec.h"
+#include "evo_vdec_native.h"   /* sceVideodec2 backend (stubs off the app module) */
 
 #include <stdlib.h>
 #include <string.h>
@@ -22,12 +23,25 @@
 /* One-shot user toast used by the 10-bit fast-path notice (kept verbatim). */
 void toast(const char *title, const char *msg);
 
+/*
+ * This file owns the public evo_vdec.h surface and dispatches: a NATIVE
+ * request that opens goes to evo_vdec_native.c, everything else (and every
+ * native failure) is the FFmpeg path below. `nat` is non-NULL iff
+ * backend == EVO_VDEC_BACKEND_NATIVE, and then the ctx/frame/pkt fields are
+ * unused.
+ */
 struct evo_vdec {
     evo_vdec_backend backend;
     AVCodecContext  *ctx;
     AVFrame         *frame;   /* scratch for receive; planes borrowed until next call */
     AVPacket        *pkt;     /* scratch for send */
+    evo_vdec_native *nat;     /* sceVideodec2 sub-backend, or NULL */
 };
+
+int evo_vdec_probe(void)
+{
+    return evo_vdec_native_probe();
+}
 
 /* ---------------------------------------------------------------------------
  * 10-bit planar 4:2:0 -> 8-bit yuv420p fast pack. Verbatim from main.c.
@@ -193,9 +207,26 @@ static void ffmpeg_apply_tuning(AVCodecContext *ctx, const evo_vdec_open_params 
 evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
 {
     if (chosen)
-        *chosen = EVO_VDEC_BACKEND_FFMPEG;   /* only backend for now */
+        *chosen = EVO_VDEC_BACKEND_FFMPEG;
     if (!p)
         return NULL;
+
+    /* Native first, if asked. Any failure falls through to FFmpeg — the seam
+     * contract is "never NULL when FFmpeg could have opened". */
+    if (p->backend == EVO_VDEC_BACKEND_NATIVE) {
+        evo_vdec_native *nat = evo_vdec_native_open(p);
+        if (nat) {
+            evo_vdec *v = (evo_vdec *)calloc(1, sizeof(*v));
+            if (v) {
+                v->backend = EVO_VDEC_BACKEND_NATIVE;
+                v->nat = nat;
+                if (chosen)
+                    *chosen = EVO_VDEC_BACKEND_NATIVE;
+                return v;
+            }
+            evo_vdec_native_close(nat);
+        }
+    }
 
     const AVCodec *dec = avcodec_find_decoder((enum AVCodecID)p->codec_id);
     if (!dec)
@@ -236,7 +267,11 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
 
 int evo_vdec_send(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us)
 {
-    if (!v || !v->ctx)
+    if (!v)
+        return -1;
+    if (v->backend == EVO_VDEC_BACKEND_NATIVE)
+        return evo_vdec_native_send(v->nat, data, size, pts_us);
+    if (!v->ctx)
         return -1;
 
     av_packet_unref(v->pkt);
@@ -269,14 +304,18 @@ int evo_vdec_send(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us)
 
 int evo_vdec_receive(evo_vdec *v, pp_frame *out)
 {
-    if (!v || !v->ctx || !out)
+    if (!v || !out)
+        return -1;
+    if (v->backend == EVO_VDEC_BACKEND_NATIVE)
+        return evo_vdec_native_receive(v->nat, out);   /* 1 / 0 / <0, never 2 */
+    if (!v->ctx)
         return -1;
 
     av_frame_unref(v->frame);
 
     int ret = avcodec_receive_frame(v->ctx, v->frame);
-    if (ret == AVERROR(EAGAIN))
-        return 0;
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        return 0;   /* EOF: drained after a NULL send — not a decode failure */
     if (ret < 0)
         return -1;
 
@@ -297,6 +336,10 @@ void evo_vdec_flush(evo_vdec *v)
 {
     if (!v)
         return;
+    if (v->backend == EVO_VDEC_BACKEND_NATIVE) {
+        evo_vdec_native_flush(v->nat);
+        return;
+    }
     if (v->ctx)
         avcodec_flush_buffers(v->ctx);
     if (v->frame)
@@ -309,6 +352,11 @@ void evo_vdec_close(evo_vdec *v)
 {
     if (!v)
         return;
+    if (v->backend == EVO_VDEC_BACKEND_NATIVE) {
+        evo_vdec_native_close(v->nat);
+        free(v);
+        return;
+    }
     if (v->pkt)
         av_packet_free(&v->pkt);
     if (v->frame)

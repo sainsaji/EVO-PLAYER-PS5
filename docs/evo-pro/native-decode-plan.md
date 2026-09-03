@@ -344,28 +344,36 @@ own signed package. → Phase 4.
 Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
 `projects/evoplayer/src/evo_videodec2_probe.c` — do not re-derive.
 
-- [ ] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`,
-      producing `pp_frame` (NV12; crop applied from the `SceVideodec2OutputInfo`
-      pitch/width — `pitch` is in samples, `pitch_bytes` in bytes).
-- [ ] **Module load before the first `evo_jailbreak_self()`** — the self-unjail
-      poisons `sceSysmoduleLoadModule(207)` (→ `ESDKVERSION`). Load + hold at
-      boot; open HW question is whether `CreateDecoder` after a later
-      `evo_jailbreak_ensure()` still works.
-- [ ] Make `libSceVideodec2` + `libSceAgc` + `libSceAgcDriver` positional PRX
-      stubs unconditional in the app-module player build (`package-app.sh` — the
-      `--videodec2-probe` gate already does this).
-- [ ] Frame-buffer lifetime: the native buffer is valid only until the next
-      `GetVideoDataEx` / `Decode` — either the converter consumes it in the
-      same tick (it does today) or `evo_vdec_native` copies into a ring. Prefer
-      the former; `pp_playback` already converts synchronously on push.
-- [ ] Wire the direct-memory allocations through the existing
-      `evo_direct_mem` slab pool
+**DONE on hardware (#31, 2026-09-03).** GTA VI 4K H.264 plays real-time on
+`sceVideodec2` in EVO — colours correct, no judder, `fatal=0`. Frame order is
+display-order. Remaining: **seek → frozen picture** on the V8 4K path (filed
+separately, high priority), and Phase 5 (settings row).
+
+- [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`,
+      producing `pp_frame` NV12. Crop applied (`disp_w/h` from the demuxer vs
+      the coded `OutputInfo.width/height`); chroma offset uses the **coded**
+      luma height, `pitch_bytes` for stride. mp4/mkv AUs run through the
+      `*_mp4toannexb` bsf first.
+- [x] **Module load before the first `evo_jailbreak_self()`** —
+      `evo_vdec_probe()` at `main.c` ~12146, right after `evo_videodec2_probe()`.
+      Open HW question (does `CreateDecoder` after `evo_jailbreak_ensure()`
+      still work) is called out in `status.md` for the first run.
+- [x] `libSceVideodec2` + `libSceAgc` + `libSceAgcDriver` positional PRX stubs
+      unconditional for `MODE == player` in `package-app.sh` step 6b.
+- [x] Frame-buffer lifetime: `evo_vdec_native` **copies** each picture out of
+      the frame pool into a small reorder window (needed anyway — the reorder
+      window is also the B-frame display-order safety net, and there is no
+      output-PTS/picture-detail call bound). One extra full-frame read+write
+      per frame; the converter reads every byte immediately after regardless.
+- [ ] Wire the direct-memory allocations through `evo_direct_mem`
       ([evo_direct_mem.c](../../projects/evoplayer/media/src/evo_direct_mem.c))
-      rather than raw `sceKernelAllocateDirectMemory`, so multi-hour playback
-      doesn't fragment.
-- [ ] Watchdog in the decode thread (hardware-decode-review §7): if no frame
-      in N seconds, log every thread's state and fall back to FFmpeg — never
-      hang holding VideoOut.
+      rather than raw `sceKernelAllocateDirectMemory` — deferred; the probe's
+      raw path is what's hardware-verified, revisit after multi-hour soak.
+- [ ] Watchdog in the decode thread (hardware-decode-review §7) — deferred.
+      Today a native call that *returns* an error falls back cleanly
+      (`evo_playback`'s fatal-streak → finished screen); a native call that
+      *hangs* still wedges the app slot. Add the watchdog thread once the
+      happy path is confirmed on hardware.
 
 ### Phase 5 — settings toggle + runtime probe
 

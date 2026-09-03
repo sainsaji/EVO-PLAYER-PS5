@@ -4,6 +4,38 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 
+## 2026-09-03 (later) — PHASE 4 (#31) DONE: native 4K decode plays in EVO 🎉
+
+`media/src/evo_vdec_native.c` — the `sceVideodec2` backend behind `evo_vdec.h`.
+**On hardware (PPSA99039):** GTA VI trailer (3840×2160 H.264, the clip that
+crashed the FFmpeg frame pool) **plays real-time on native decode** — `be=1`
+NATIVE, `pos` climbs 1.0×, `fatal=0`, colours correct, no judder. BBB 1080p and
+Clarksons 720p too.
+
+**How it works:**
+- **Resident decoder.** Every `libSceVideodec2` call fails `0x811D0111` once
+  `evo_jailbreak_self()` has run, so the compute queue + a 4K AVC-High decoder
+  (`max_dpb_frames = -1` auto, `pipeline_depth = 4` — SharpProspero's prod
+  config) are brought up **once at boot** in `evo_vdec_native_probe()`, before
+  the unjail, and held for the session. Each `evo_vdec_native_open()` just
+  `sceVideodec2Reset`s it. HEVC / >4K fall back to FFmpeg.
+- **mp4 → Annex-B** via the `h264_mp4toannexb` bitstream filter.
+- **NV12 → planar I420** de-interleave in `ro_harvest` — EVO's fast/parallel/4K
+  converters only accept `PP_FRAME_YUV420P`; NV12 at 4K silently draws black.
+- **`pp_playback.c` fix:** the V8 4K path was still mallocing 2×33 MB of
+  `pb->display` buffers it never uses; that alloc now fails under the resident
+  decoder's memory pressure and left `out_w` at 1920 → `use_v8` off → black.
+  Skip the alloc for V8 (matches `pp_playback_on_file_open`).
+- Dispatch stays in `evo_vdec_ffmpeg.c`; PRX stubs unconditional for
+  `MODE == player`; `tools/vdec-test.sh` + `package-app.sh --autoplay` drive
+  the unattended hardware-test loop (FTP log pull, one manual launch press).
+
+**KNOWN BUG — seek → frozen picture (filed high-priority).** On a failed
+`av_seek_frame` (GTA's 14 GB file), `pp_playback_notify_seek_end(false)` left
+the `pp_clock` paused → every frame dropped. Partial fix landed (always
+un-pause on `!restore_paused`; byte-seek fallback), but seek still isn't
+clean on the V8 4K path. Tracked separately.
+
 ## 2026-09-03 (late) — NATIVE HW DECODE WORKS IN EVO 🎉
 
 `EVO vdec2: HARDWARE DECODE OK (Route B viable)` from the **full 43 MB EVO
@@ -26,19 +58,39 @@ Player** (PPSA99039), which then booted on to the menu. All calls `0`,
 
 **Route A (`sceAvPlayer`) is dead** — sysmodule `0xA5` refused even pre-unjail.
 
-### Next — Phase 4: `media/src/evo_vdec_native.c`
+### Phase 4: `media/src/evo_vdec_native.c` — CODE LANDED, needs hardware
 
-Implement the `evo_vdec.h` seam (#30, already merged) against `sceVideodec2`:
-- port `evo_videodec2_probe.c`'s sequence into `evo_vdec_native.c`
-  (`evo_vdec_open` → sysmodule+compute-queue+decoder, `evo_vdec_send` →
-  `sceVideodec2Decode`, `evo_vdec_receive` → the NV12 `pp_frame`,
-  `evo_vdec_flush` → `sceVideodec2Flush`+`Reset`, `evo_vdec_close`).
-- **Sequencing:** `sceSysmoduleLoadModule(207)` + probe/hold the module at
-  boot, before the first `evo_jailbreak_self()`. Open question for the first HW
-  test: does a decoder created after a later `evo_jailbreak_ensure()` (browser
-  entry) still work if the module was loaded pre-unjail?
-- Guard behind `EVO_APP_MODULE` + a runtime `evo_vdec_probe()`; FFmpeg stays
-  the default/fallback (plan §8).
+Implemented on `refactor/main-c-media-modules` (#31):
+- **`media/src/evo_vdec_native.c`** — ports `evo_videodec2_probe.c`'s
+  bring-up / decode / teardown behind the `evo_vdec.h` seam. mp4/mkv AUs go
+  through the `h264_mp4toannexb` / `hevc_mp4toannexb` bitstream filter first
+  (sceVideodec2 wants Annex-B). NV12 pictures are copied out of the frame pool
+  into a small PTS-sorted reorder window, cropped to display size, handed back
+  as `pp_frame`. HEVC Main10 / >8-bit falls back to FFmpeg (no `PP_FRAME_P010`
+  yet). Guarded by `EVO_APP_MODULE`; host + payload get stubs.
+- **Dispatcher** stays in `evo_vdec_ffmpeg.c` — `evo_vdec_open()` tries native
+  when `p->backend == NATIVE`, falls back to FFmpeg on any failure (never
+  returns NULL if FFmpeg could open). `evo_vdec_probe()` → `main()` before
+  `evo_jailbreak_self()`. Hidden AUTO: `main.c` requests NATIVE when the probe
+  armed (the real Auto/FFmpeg/Native row is Phase 5).
+- **`package-app.sh`** — the `libSceVideodec2`+`libSceAgc`+`libSceAgcDriver`
+  positional PRX stubs are now unconditional for `MODE == player`.
+- **`evo_playback.c`** — sends one NULL AU at EOF so the decoder drains its
+  buffered tail (helps both backends; `evo_vdec_receive` now treats
+  `AVERROR_EOF` as "no frame", not fatal).
+
+**First hardware run must answer (instrument `note()` output):**
+1. **Frame order** — does `sceVideodec2Decode` emit pictures in DISPLAY or
+   DECODE order? The backend assumes display order + min-PTS pairing. If
+   B-frame content stutters / A-V drifts, rebuild with
+   `-DEVO_VDEC_NATIVE_DECODE_ORDER=1` and a deeper `-DEVO_VDEC_REORDER_DEPTH`.
+2. Does `CreateDecoder` succeed when playback starts (i.e. *after* a later
+   `evo_jailbreak_ensure()` on browser entry), given the module was loaded
+   pre-unjail? If not → hold a decoder from boot, or reload the module.
+3. `evo_pb_active_backend()` should report NATIVE; a native open failure must
+   fall back to FFmpeg with no crash.
+4. 4K clip that exhausts the FFmpeg frame pool (GTA VI trailer) — plays on
+   native?
 - `--videodec2-probe` build stays as the regression check.
 
 ---
