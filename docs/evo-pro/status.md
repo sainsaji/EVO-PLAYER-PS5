@@ -3,6 +3,16 @@
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
+>
+> **RESUME HERE → #27 (GPU Step 2).** #31 (native 4K decode) is DONE + closed.
+> The AGC gate passed and `pp_agc_init` (shader setup) is hardware-verified.
+> **Next: port `render_frame` + wire the present path** — the full checklist is
+> in issue #27's body ("Work — port render_frame + wire") and the section just
+> below. Open bugs from #31: #32 (seek freeze on the V8 4K path, high) and #33
+> (test-harness cleanup, partly done — `tools/evo-remote.sh`).
+> Console `192.168.0.6` (ethernet, `.env`); build `877f1af3_0903-0340` deployed.
+> Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
+> -> `evo-remote.sh boot`.
 
 ## 2026-09-03 (later) — #27 shader setup VALIDATED on hardware
 

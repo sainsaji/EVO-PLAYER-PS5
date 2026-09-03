@@ -6,7 +6,10 @@ sceAgcInit
 sceAgcGetRegisterDefaults
 sceAgcCreateShader
 sceAgcLinkShaders
+sceAgcDcbSetCxRegistersIndirect
+sceAgcDcbSetUcRegistersIndirect
 sceAgcDcbSetShRegistersIndirect
 sceAgcCbSetShRegisterRangeDirect
 sceAgcDcbDrawIndexAuto
 sceAgcDcbSetFlip
+sceAgcSuspendPoint

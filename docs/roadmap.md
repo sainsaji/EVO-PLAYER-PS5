@@ -8,8 +8,9 @@ the map across all of them.
 To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
-Priority labels track this order: **high** #27, #25 · **medium** #9, #16, #6,
-#29/#30 · **low** the rest. `independent` = no cross-deps, work any time in
+Priority labels track this order: **critical** #27 (in progress) · **high** #25,
+#32 · **medium** #9, #16, #6, #29/#30, #33 · **low** the rest. `independent` =
+no cross-deps, work any time in
 parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K → #29.)
 
 ---
@@ -29,16 +30,16 @@ parallel. (#26 closed 2026-09-02 — app-module playback works; demanding 4K →
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (package-app.sh step 6b —     │      (libSceAgc + libSceAgcDriver — mechanism proven)
-    unconditional DT_NEEDED,      └─► #29 Route B: libSceVideodec2 ✅ DECODED A FRAME
-    the loader auto-loads .sprx)      in the full player 2026-09-03 (Route A dead)
+   (package-app.sh step 6b,      │   IN PROGRESS: gate ✅, pp_agc_init (shaders) ✅ hw;
+    unconditional DT_NEEDED)      │   next = port render_frame + wire pp_playback V8
+                                 └─► #29 Route B: libSceVideodec2 ✅ #31 CLOSED — GTA 4K
+                                     plays real-time on native decode (2026-09-03)
 
   #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
 
   #29 native hw decode (umbrella, v1.1.0)
     └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
-       └─ Phase 2 spike ✅ (Route B works; init must precede evo_jailbreak_self)
-          └─ #31 Phase 4 evo_vdec_native.c → Phase 5 toggle → Phase 6 validation
+       └─ #31 Phase 4 ✅ CLOSED → #32 seek freeze (high) → Phase 5 toggle → Phase 6
 ```
 
 ---
@@ -84,18 +85,19 @@ The real fix is #27 (GPU P010 shader). Only do a CPU-side improvement here if
 - Reads: `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/evo-pro/gpu-rendering-plan.md`
 - Files: `main.c` `start_video_playback` (`is10` / `bpp>8` gating), `pp/src/pp_v8_gate.c`, `pp/src/pp_compute_pipeline.c`
 
-### 4 · `#27` — GPU Step 2: sceAgc video convert + present
+### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **IN PROGRESS**
 
-**Prerequisite (hardware 2026-09-02):** `sceKernelLoadStartModule("libSceAgc.sprx")`
-is refused from the app module — a fake-signed module can only load PRXes it
-declares NEEDED. **A `libSceAgc` / `libSceAgcDriver` import stub must be added to
-the app-module link first** (`tools/native-app/` + `scripts/package-app.sh`);
-NID list + encoder are in `evo_agc_probe.c` (verified vs `prospero-nid`),
-export-table layout in SharpProspero `tools/SharpProspero.Prx/`. Only then does
-the AGC gate (`EVO agc: … VIABLE`) get a real answer. The big one.
+**Prereqs cleared.** AGC gate PASSED (2026-09-03): `sceAgcInit` works from the
+app module via the positional PRX import stubs (from #31 — no `LoadStartModule`,
+no runtime NID). **`pp_agc_init` (shader setup: blobs → CreateShader ×2 →
+LinkShaders) is ported and hardware-verified** (`pp/src/pp_agc.c` +
+`agc_blobs.S` + `pp/blobs/`). **Next: port `render_frame` + wire the present
+path** — full cold-start checklist in issue #27's body and
+`docs/evo-pro/status.md` ("#27 shader setup VALIDATED" section). The `.syms`
+for render_frame are pre-staged.
 
-- Reads: **`docs/evo-pro/agc-implementation.md`** (§0 what's proven, §1 shaders, §3 `render_frame` annotated, §4 the port), `docs/evo-pro/gpu-rendering-plan.md`, `docs/evo-pro/sharpprospero-agc-reference.md`, `docs/evo-pro/videodec2-abi.md` §6 (AGC/decoder ordering)
-- Files: `third_party/ProsperoLight/src/native_agc_present.cpp` (+ `assets/private/*.bin`), `pp/src/pp_videoout.c`, `pp/src/pp_playback.c`, `projects/evoplayer/src/evo_agc_probe.c` (runtime NID resolution pattern), `tools/build-shader.sh`, `pp/shaders/rgba_ps.s`
+- Reads: **`docs/evo-pro/status.md`** (resume-here + render_frame checklist), **`docs/evo-pro/agc-implementation.md`** §2/§3 (blob layout, `render_frame` annotated), `gpu-rendering-plan.md`, `sharpprospero-agc-reference.md`, `videodec2-abi.md` §6
+- Files: `third_party/ProsperoLight/src/native_agc_present.cpp` (`render_frame` ~571, `initialize_presenter` ~990), `pp/src/pp_agc.c` (scaffold done), `pp/src/agc_blobs.S`, `pp/blobs/`, `pp/src/pp_videoout.c`, `pp/src/pp_playback.c` (`use_v8` branch), `media/src/evo_vdec_native.c` (`ro_harvest` — NV12 vs I420), `tools/native-app/stubs/prx/libSceAgc*.syms`, `tools/evo-remote.sh` (test loop)
 
 ### 5 · `#28` — GPU Step 3: complete RmlUi on sceAgc
 

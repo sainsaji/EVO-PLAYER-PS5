@@ -2,3 +2,4 @@
 # Full ABI: third_party/SharpProspero .../Interop/Agc/SceAgcDriver.cs.
 sceAgcDriverSubmitDcb
 sceAgcDriverWaitUntilSafeForRendering
+sceAgcDriverGetWaitRenderingPacketSizeInDwords
