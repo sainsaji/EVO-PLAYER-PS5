@@ -13,7 +13,11 @@
  * STATUS: initialize (sceAgcInit -> shader memory -> CreateShader x2 ->
  * LinkShaders) is hardware-verified; render_frame is ported (SDR / NV12, no
  * overlay) and pp_agc_present_nv12() drives it. Wired into pp_playback.c's V8
- * branch. Untested end-to-end on hardware.
+ * branch. The first hardware run hung on a GPU-side submit stall; #27 B now
+ * runs render_frame on a dedicated worker thread behind a 250 ms watchdog, so a
+ * wedged submit drops to the CPU path instead of freezing the app, and #27 A
+ * registers the VO with ProsperoLight's linear SDR attribute when armed. The
+ * end-to-end GPU picture is still unproven on hardware.
  */
 #ifndef PP_AGC_H
 #define PP_AGC_H
@@ -55,8 +59,15 @@ int  pp_agc_available(void);
  *                logic tracks the GPU-queued flip. Must be monotonic.
  *
  * The DCB owns the flip, so the caller must NOT also SubmitFlip this buffer.
- * Returns 0 on submit, <0 on failure (caller releases the buffer + falls back
- * to the CPU converter; a first-frame fault disables pp_agc for the session).
+ *
+ * Return:
+ *    0   submitted — caller adopts the GPU-queued flip (pp_videoout_adopt_flip).
+ *   -1   failed before/at submit — caller RELEASES the buffer, next frame takes
+ *        the CPU path (a first-frame CPU fault also disables pp_agc + returns -1).
+ *   -2   the submit blew the 250 ms watchdog (#27 B). The worker thread is
+ *        abandoned mid-GPU-call and may still write the target + queue its flip,
+ *        so the caller must ADOPT the flip, not release. pp_agc is permanently
+ *        unavailable for the rest of the session; playback stays on the CPU path.
  */
 int  pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
                          const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,

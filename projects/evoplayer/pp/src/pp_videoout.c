@@ -4,6 +4,7 @@
  */
 #include "pp_videoout.h"
 #include "pp_platform.h"
+#include "pp_agc.h"
 #include "evo_boot_trace.h"
 
 #include <stdio.h>
@@ -259,7 +260,25 @@ int pp_videoout_init(pp_videoout *vo,
     }
     (void)sceVideoOutSetFlipRate(vo->handle, vo->flip_rate);
 
-    attr_pix = PP_VO_ATTR_TILED_BGRA;
+    /*
+     * #27 plan A: when the sceAgc GPU present path is armed (--agc-probe only;
+     * pp_agc_available() is 0 in the default .ffpfsc and on host) AND this is the
+     * UHD playback VO, register with ProsperoLight's linear SDR attribute.
+     * render_frame's whole matched set - RT bits, YUV->RGB coefficients, MRT0
+     * export order - is tuned to that layout; against EVO's CPU-tiler attribute
+     * the picture comes out R<->B swapped / range-shifted (hw 2026-09-04). Gated
+     * to UHD so the 1080 menu VO (CPU tiler) is untouched - a linear attr there
+     * garbles the RmlUi UI. The earlier "plan A hangs the compositor" was really
+     * the V3-fallback overflow from the unreachable-AGC bug, since fixed.
+     */
+#if defined(EVO_APP_MODULE)
+    vo->attr_linear = (pp_agc_available() && width >= 3200u) ? 1 : 0;
+#else
+    vo->attr_linear = 0;
+#endif
+    attr_pix = vo->attr_linear ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
+    evo_bt("pp_videoout_init %ux%u attr=%#llx linear=%d", width, height,
+           (unsigned long long)attr_pix, vo->attr_linear);
     memset(&attr, 0, sizeof(attr));
     sceVideoOutSetBufferAttribute2(&attr, attr_pix, 0, width, height, 0, 0, 0);
     rc = sceVideoOutRegisterBuffers2(vo->handle, 0, 0, vbuf, (int)buffer_count, &attr, 0, NULL);
@@ -328,6 +347,9 @@ int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_i
     if (vo->state[buffer_index] != PP_BUF_ACQUIRED)
         return -3;
 
+    /* #27: a linear-registered plane (sceAgc path) must never reach here on the
+     * CPU route - pp_playback requests a tiled re-register instead. If it
+     * somehow does, tiling is no more wrong than a plain copy would be. */
     pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
                             (uint32_t *)vo->gpu_bufs[buffer_index],
                             (int)vo->width,
@@ -354,6 +376,11 @@ void *pp_videoout_gpu_plane(pp_videoout *vo, uint32_t buffer_index)
     if (buffer_index >= vo->buffer_count)
         return NULL;
     return vo->gpu_bufs[buffer_index];
+}
+
+int pp_videoout_is_linear(const pp_videoout *vo)
+{
+    return (vo && vo->inited) ? vo->attr_linear : 0;
 }
 
 int pp_videoout_present_pre_tiled(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id)

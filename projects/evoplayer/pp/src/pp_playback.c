@@ -9,6 +9,7 @@
 #include "pp_product_path.h"
 #include "pp_v8_gate.h"
 #include "pp_stage_breadcrumb.h"
+#include "evo_boot_log.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -104,6 +105,7 @@ void pp_playback_shutdown(pp_playback *pb)
     pb->display = NULL;
     free(pb->display_back);
     pb->display_back = NULL;
+    pb->display_cap = 0;
     free(pb->nv12_fb);
     pb->nv12_fb = NULL;
     pb->nv12_fb_cap = 0;
@@ -138,8 +140,8 @@ int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
      * old size and use_v8 turns off -> black screen. Skip it for V8; the
      * V3/1080 path allocates on demand in the fallback branch of push_frame.
      */
+    bytes = (size_t)w * (size_t)h * 4u;
     if (pb->backend != PP_BACKEND_4K_V8_FUSED) {
-        bytes = (size_t)w * (size_t)h * 4u;
         front = (uint32_t *)malloc(bytes);
         back = (uint32_t *)malloc(bytes);
         if (!front || !back) {
@@ -155,6 +157,19 @@ int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
         free(pb->display_back);
         pb->display = front;
         pb->display_back = back;
+        pb->display_cap = bytes;
+    } else if (pb->display && pb->display_cap < bytes) {
+        /*
+         * #55: V8 path skips the display alloc, but if the backend later drops
+         * to V3 at this (larger) resolution, converting into a stale
+         * smaller-resolution pb->display overflows the heap. Drop the stale
+         * buffers now; the V3 branch of push_frame reallocs to the right size.
+         */
+        free(pb->display);
+        free(pb->display_back);
+        pb->display = NULL;
+        pb->display_back = NULL;
+        pb->display_cap = 0;
     }
     pb->out_w = w;
     pb->out_h = h;
@@ -307,6 +322,32 @@ static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
     return 0;
 }
 
+/* #27: steady-state GPU present timing, mirrors evo_vdec_native's decode
+ * heartbeat. One line to evo_boot.log per window so evo-remote.sh boot shows
+ * whether the convert+flip holds the frame budget. */
+#define PP_AGC_HEARTBEAT_FRAMES 300u
+static void agc_heartbeat_note(pp_playback *pb, uint64_t present_us, int dropped)
+{
+    if (dropped) {
+        pb->agc_present_dropped++;
+        return;
+    }
+    pb->agc_present_us_sum += present_us;
+    if (present_us > pb->agc_present_us_max)
+        pb->agc_present_us_max = present_us;
+    if (++pb->agc_hb_frames < PP_AGC_HEARTBEAT_FRAMES)
+        return;
+    evo_boot_log("pp_agc: heartbeat presented=%llu dropped=%llu avg=%lluus max=%lluus",
+                 (unsigned long long)pb->agc_frames,
+                 (unsigned long long)pb->agc_present_dropped,
+                 (unsigned long long)(pb->agc_present_us_sum / pb->agc_hb_frames),
+                 (unsigned long long)pb->agc_present_us_max);
+    evo_boot_log_flush();
+    pb->agc_present_us_sum = 0;
+    pb->agc_present_us_max = 0;
+    pb->agc_hb_frames = 0;
+}
+
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 {
     uint64_t t0, t1, cus;
@@ -346,12 +387,23 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     /*
      * V8 fused: 1:1 yuv420p → tiled BGRA at live VO size.
      * Supports full 3840x2160 and cinema UHD (e.g. 3840x1920).
+     *
+     * #27: pp_v8_frame_gate only clears YUV420P (the CPU converters' format).
+     * An NV12 UHD frame from the native decoder is also a valid V8 source — the
+     * AGC GPU converter samples NV12 directly (agc_path below), and if AGC is
+     * not taken the NV12→YUV420P de-interleave a few lines down feeds the CPU
+     * converter. Without this an NV12 frame falls to the V3/1080 path, which
+     * overflows at 4K (#55) — the crash seen on the first #27 hardware runs.
      */
+    int v8_src_ok = (pp_v8_frame_gate(src, 30.0) == PP_V8_GATE_OK) ||
+                    (src->format == PP_FRAME_NV12 &&
+                     pp_v8_is_uhd_size(src->width, src->height));
+
     use_v8 = (pb->backend == PP_BACKEND_4K_V8_FUSED && !pb->force_v3_fallback &&
               pb->vo && pb->vo->inited &&
               pb->out_w == pb->vo->width && pb->out_h == pb->vo->height &&
               src->width == pb->out_w && src->height == pb->out_h &&
-              pp_v8_frame_gate(src, 30.0) == PP_V8_GATE_OK);
+              v8_src_ok);
 
     /*
      * V8 is strict 1:1 tile (no FIT/FILL/STRETCH). If the user forced V3 via
@@ -395,6 +447,8 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 
         if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) == PP_CLOCK_DROP) {
             pb->stats.frames_late_dropped++;
+            if (agc_path)
+                agc_heartbeat_note(pb, 0, 1);
             return 1;
         }
 
@@ -439,6 +493,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
                 pb->stats.frames_converted++;
                 pb->agc_frames++;
                 note_convert(pb, cus);
+                agc_heartbeat_note(pb, cus, 0);
                 if (pb->agc_frames == 1)
                     pp_stage_bc_checkpoint("012_AGC_FIRST_PRESENT", "agc gpu flip");
 
@@ -457,12 +512,42 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
                 return 0;
             }
 
-            /* AGC present failed — hand the buffer back and drop this frame.
-             * pp_agc disables itself after a first-frame fault, so subsequent
-             * frames fall through nv12_to_yuv420p + the CPU converter. */
+            /* #27 B: rc == -2 — the GPU submit blew the 250 ms watchdog. The
+             * worker is abandoned but may still write `idx` and queue its flip,
+             * so hand the buffer to the VO retire watchdog (adopt) rather than
+             * releasing it into the free pool. pp_agc is permanently
+             * unavailable for the rest of the session now. */
+            if (rc == -2) {
+                (void)pp_videoout_adopt_flip(pb->vo, idx, (uint64_t)marker);
+                pp_stage_bc_checkpoint("011_AGC_SUBMIT_WEDGED", "cpu path from here");
+                return -4;
+            }
+
+            /* rc == -1: AGC present failed cleanly — hand the buffer back and
+             * drop this frame. pp_agc disables itself after a first-frame
+             * fault, so subsequent frames fall through nv12_to_yuv420p + the
+             * CPU converter. */
             pp_videoout_release(pb->vo, idx);
             pp_stage_bc_checkpoint("011_AGC_PRESENT_FAIL", "cpu fallback next");
             return -4;
+        }
+
+        /*
+         * #27: the VO is linear-registered for the sceAgc GPU path, but this
+         * frame is on the CPU path (AGC faulted / wedged, or the test hook).
+         * No CPU converter produces the layout a linear-registered plane scans
+         * out - both the tiled swizzle and a plain linear write garble it. Drop
+         * this frame (main keeps showing the last good AGC frame) and ask main
+         * to re-register the VO tiled; from the next frame the normal tiled
+         * converter is correct.
+         */
+        if (pp_videoout_is_linear(pb->vo)) {
+            pp_videoout_release(pb->vo, idx);
+            if (!pb->agc_vo_retile_req) {
+                pb->agc_vo_retile_req = 1;
+                pp_stage_bc_checkpoint("011_AGC_VO_RETILE_REQ", "cpu path needs a tiled VO");
+            }
+            return 1;
         }
 
         /* More workers on wide UHD frames (was 4 — under-used CPU) */
@@ -508,9 +593,33 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     }
 
     /* ---- 1080 / V3 fallback: linear display then main tiles ---- */
-    if (!pb->display || !pb->display_back) {
-        if (pp_playback_set_output(pb, pb->out_w, pb->out_h, pb->cfg.aspect) != 0)
-            return -3;
+    {
+        /*
+         * #55: size the display buffers to the ACTUAL output, independent of
+         * pb->backend (which can still say V8 here — use_v8 also gates on the
+         * VO match / force_v3 / clock). pp_playback_set_output skips the alloc
+         * when backend==V8, so do it directly.
+         */
+        size_t need_disp = (size_t)pb->out_w * (size_t)pb->out_h * 4u;
+        if (!pb->display || !pb->display_back || pb->display_cap < need_disp) {
+            uint32_t *nf = (uint32_t *)malloc(need_disp);
+            uint32_t *nb = (uint32_t *)malloc(need_disp);
+            if (!nf || !nb) {
+                free(nf);
+                free(nb);
+                return -3;
+            }
+            if (pb->lock)
+                pthread_mutex_lock(mtx(pb));
+            free(pb->display);
+            free(pb->display_back);
+            pb->display = nf;
+            pb->display_back = nb;
+            pb->display_cap = need_disp;
+            pb->display_ready = 0;
+            if (pb->lock)
+                pthread_mutex_unlock(mtx(pb));
+        }
     }
 
     {
@@ -592,6 +701,20 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
     return 0;
+}
+
+int pp_playback_take_vo_retile_req(pp_playback *pb)
+{
+    int r;
+    if (!pb)
+        return 0;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    r = pb->agc_vo_retile_req;
+    pb->agc_vo_retile_req = 0;
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+    return r;
 }
 
 int pp_playback_take_pending_present(pp_playback *pb, uint32_t *idx, uint64_t *frame_id)

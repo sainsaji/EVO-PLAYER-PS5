@@ -366,11 +366,26 @@ const char* profile_name(PlaybackProfile profile);
  * Transactional VO reconfiguration (004Q crash isolation).
  * Stops pending presents / purges before destroying old framebuffers.
  */
-static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers)
+/*
+ * open_gate: 1 = this call is the whole reconfig, re-open g_vo_decode_gate on
+ * success. 0 = the caller (pp_product_apply_pending_vo) still has to set the
+ * backend + pp_playback_set_output for the NEW resolution and will open the
+ * gate itself afterward. Opening it here first is #55 — the decode thread pushes
+ * a frame into a pb->display still sized for the old resolution.
+ */
+static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers,
+                                     int open_gate)
 {
     char detail[96];
+    int want_linear = 0;
+#if defined(EVO_APP_MODULE)
+    /* Must mirror pp_videoout_init's attr choice, so a same-size reconfig that
+     * only flips the attr (#27: AGC died -> need a tiled VO) is not skipped. */
+    want_linear = (pp_agc_available() && w >= 3200u) ? 1 : 0;
+#endif
     if (g_pp_vo_ready && g_pp_vo.inited && g_vo_w == w && g_vo_h == h &&
-        g_pp_vo.buffer_count == buffers)
+        g_pp_vo.buffer_count == buffers &&
+        pp_videoout_is_linear(&g_pp_vo) == want_linear)
         return 0;
 
     /* Block decode/present against this VO until re-init completes */
@@ -413,7 +428,8 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers)
                 g_vo_h = 2160;
                 g_pp_vo_ready = 1;
                 pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
-                g_vo_decode_gate = 1;
+                if (open_gate)
+                    g_vo_decode_gate = 1;
                 toast("PLAYBACK", "4K VO @ 3840x2160");
                 pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_OK",
                                       "fallback 3840x2160");
@@ -428,7 +444,9 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers)
                 pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
                 pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
                 g_pp_backend = PP_BACKEND_1080_STANDARD;
-                g_vo_decode_gate = 1;
+                pp_playback_set_output(&g_pp_pb, 1920, 1080, PP_ASPECT_FIT);
+                if (open_gate)
+                    g_vo_decode_gate = 1;
                 /* Friendly — console rejected UHD mode, not a hard crash */
                 toast("PLAYBACK", "Present @ 1080 (VO mode)");
                 return -1;
@@ -444,7 +462,8 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers)
     /* Brief settle after 4K register — first-open race was here */
     if (w >= 3840u)
         usleep(30000);
-    g_vo_decode_gate = 1;
+    if (open_gate)
+        g_vo_decode_gate = 1;
     pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_OK", detail);
     return 0;
 }
@@ -503,7 +522,7 @@ static void pp_product_apply_pending_vo(void)
         return;
     g_pending_vo_reconfig = 0;
     if (pp_product_reconfigure_vo(g_pending_vo_w, g_pending_vo_h,
-                                  g_pending_vo_buffers) != 0) {
+                                  g_pending_vo_buffers, 0 /* gate opened below */) != 0) {
         g_pp_backend = PP_BACKEND_1080_STANDARD;
         pp_playback_set_backend(&g_pp_pb, g_pp_backend);
         pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
@@ -12094,6 +12113,20 @@ int main(void) {
          * once the decode thread has parked). Before apply so it lands now. */
         prospero_scrub_overlay_pump();
 
+        /*
+         * #27: the sceAgc GPU present died mid-clip (fault / wedge / test hook)
+         * and the decode thread hit a CPU-path frame while the VO is still
+         * linear-registered. Re-register the VO tiled at the same size so the
+         * CPU converter path is correct from here.
+         */
+        if (pp_playback_take_vo_retile_req(&g_pp_pb) &&
+            pp_videoout_is_linear(&g_pp_vo) &&
+            g_pp_vo_ready && g_vo_w >= 3200u) {
+            pp_product_request_vo(g_vo_w, g_vo_h, g_pp_vo.buffer_count,
+                                  g_pp_backend, g_vo_w, g_vo_h);
+            pp_stage_bc_checkpoint("013_AGC_VO_RETILE", "linear -> tiled, cpu path");
+        }
+
         /* Safe point: no buffer held — apply deferred 4K/1080 VO reconfig */
         pp_product_apply_pending_vo();
 
@@ -13126,7 +13159,7 @@ skip_screen_input:
     stop_video_playback();
     /* Restore 1080 VO for clean exit if still on 4K */
     if (g_vo_w != 1920u || g_vo_h != 1080u)
-        (void)pp_product_reconfigure_vo(1920, 1080, 2);
+        (void)pp_product_reconfigure_vo(1920, 1080, 2, 1 /* open gate */);
     pp_playback_shutdown(&g_pp_pb);
     if (g_pp_vo_ready)
         pp_videoout_shutdown(&g_pp_vo);
