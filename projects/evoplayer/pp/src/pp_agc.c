@@ -114,11 +114,13 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
     g_agc.tried = 1;
     g_agc.mem_start = -1;
 
+    /* sceAgcInit is not idempotent — a second call (e.g. after evo_agc_probe's
+     * gate) returns 0x8A6C0004 "already initialized". Only a hard failure to
+     * make the library usable matters, and CreateShader/LinkShaders below will
+     * catch that; so log the rc and press on. */
     int32_t rc = sceAgcInit(&g_agc.state, 8);
-    if (rc != 0) {
-        evo_boot_log("pp_agc: sceAgcInit=0x%08x", (unsigned)rc);
-        return -1;
-    }
+    evo_boot_log("pp_agc: sceAgcInit=0x%08x (0x8a6c0004 = already-init, ok)",
+                 (unsigned)rc);
 
     int64_t limit = sceKernelGetDirectMemorySize();
     rc = sceKernelAllocateDirectMemory(0, limit, SHADER_MEMORY_BYTES, SHADER_ALIGN,
