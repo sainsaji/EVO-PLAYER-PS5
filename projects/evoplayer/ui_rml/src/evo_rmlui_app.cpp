@@ -137,10 +137,13 @@ bool EvoRmlApp::Initialize(int width, int height) {
         return false;
     }
 
+    /* #44: the app module's own bundle (/app0, read-only, always current) MUST
+     * win over /data/evoplayer/app/ — that dir is payload-era cruft that
+     * outlives a redeploy and was serving stale pre-#16 .rcss on hardware. */
     std::vector<std::string> font_prefixes = {
+        "/app0/assets/fonts/",
         "/data/evoplayer/app/assets/fonts/",
         "/data/homebrew/EVOPlayer/assets/fonts/",
-        "/app0/assets/fonts/",
         "assets/fonts/",
         "projects/evoplayer/assets/fonts/",
         "/workspace/projects/evoplayer/assets/fonts/"
@@ -165,9 +168,9 @@ bool EvoRmlApp::Initialize(int width, int height) {
     }
 
     std::vector<std::string> rml_prefixes = {
+        "/app0/assets/rml/",                    /* #44: the .ffpfsc bundle wins */
         "/data/evoplayer/app/assets/rml/",
         "/data/homebrew/EVOPlayer/assets/rml/",
-        "/app0/assets/rml/",
         "assets/rml/",
         "projects/evoplayer/assets/rml/",
         "/workspace/projects/evoplayer/assets/rml/"

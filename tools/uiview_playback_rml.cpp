@@ -503,6 +503,21 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_render_browser(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_browser.bmp", fb.data(), width, height);
 
+    /* #16/#44: a long unbroken filename must ellipsise in the row AND the
+     * inspector title, not overrun the panel. */
+    {
+        static const char* kLong =
+            "Clarksons.Farm.S01E01.720p.AMZN.WEBRip.x264-GalaxyTV[rarbg].mkv";
+        p.rows[3].name = kLong;
+        p.ins_name = kLong;
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        evo_rmlui_update_browser(&p);
+        evo_rmlui_render_browser(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_browser_longname.bmp", fb.data(), width, height);
+        p.rows[3].name = "Blade Runner 2049.mkv";
+        p.ins_name = "Blade Runner 2049.mkv";
+    }
+
     /* Empty folder, at the root — no BACK hint, no inspector content. */
     std::fill(fb.begin(), fb.end(), 0xFF0E0906);
     evo_rmlui_browser_params_t e;
