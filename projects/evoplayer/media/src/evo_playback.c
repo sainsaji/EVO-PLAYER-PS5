@@ -128,6 +128,14 @@ static void note_vdec_result(int fatal)
 volatile int video_thread_running = 0;
 pthread_t    video_thread;
 
+/*
+ * 1 while the decode thread is idling (paused / off-screen / not ready) and is
+ * therefore NOT inside pp_playback_push_frame's unlocked convert. main.c waits
+ * for this before reconfiguring the VideoOut for the #32 scrub overlay, so the
+ * VO teardown can't free pb->display under pp_converter_to_display.
+ */
+volatile int video_decode_parked = 1;
+
 AVPacket *video_video_pending_pkt = NULL;
 pthread_mutex_t video_frame_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -535,11 +543,13 @@ void *video_decode_thread_func(void *arg) {
             screen != SCREEN_PLAYER ||
             !video_decode_ready
         ) {
+            video_decode_parked = 1;
             usleep(1000);
             next_ms = 0;
             continue;
         }
 
+        video_decode_parked = 0;
         dbg_video_thread_alive++;
 
 #if PP_BACKEND_ENABLED

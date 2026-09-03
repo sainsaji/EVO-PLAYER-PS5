@@ -58,6 +58,10 @@ int   decode_next_video_frame(void);   /* one pump iteration; return unused   */
 extern volatile int video_thread_running;
 extern pthread_t    video_thread;
 
+/* 1 while the decode thread is idle (not inside push_frame's unlocked convert).
+ * main.c waits on this before a #32 scrub-overlay VO reconfigure. */
+extern volatile int video_decode_parked;
+
 /* ---- TRANSITIONAL raw state.
  * A8 migrated main.c's OSD / debug / completion *reads* to evo_pb_*(); what
  * remains is (a) the session-lifecycle *writes* in start/stop_video_playback
