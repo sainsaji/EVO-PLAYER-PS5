@@ -35,6 +35,16 @@ keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
 
 ## Dependency graph
 
+These edges are also wired as **native GitHub relationships** (2026-09-03) so
+the issue UI shows blockers / sub-tasks directly:
+
+- **Sub-issues:** #44 → #16 · #46 → #50, #51
+- **Blocking → blocked:** #6 → #27 → #28 · #44 → #28 · #44 → #35 → #43 ·
+  #37 → #38 · #8 → #38
+
+Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
+/ Related) — softer "coordinate with" / "do before" links live there only.
+
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
                  │  #17 CI/tests   #9 Emby URL   #8 codec metrics   #42 subtitle cue counts   │
