@@ -4,6 +4,51 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 
+## 2026-09-03 (later) — #27 shader setup VALIDATED on hardware
+
+`pp_agc_init` (the first half of ProsperoLight's `initialize_presenter`, ported
+to `pp/src/pp_agc.c`) runs clean from the app module:
+```
+pp_agc: sceAgcInit=0x8a6c0004 (already-init, ok)   # 2nd call after the gate; benign
+pp_agc: create=0x00000000 link=0x00000000 vs=0x223fac000 ps=0x223fad000  1920x1080 hdr=0
+```
+`sceAgcCreateShader` ×2 → 0, `sceAgcLinkShaders` → 0, with the **vendored
+ProsperoLight blobs** (`pp/blobs/*.bin`, 6 files, `.incbin` via
+`pp/src/agc_blobs.S`). So: sceAgcInit, the 0xD0000 shader-scratch alloc/map,
+`copy_asset` of the blobs to their fixed offsets, `prepare_resources` (NGR1
+rebase + SDR full-range coeffs), CreateShader, LinkShaders — **all work**.
+
+### Next — port `render_frame` (agc-implementation.md §3) + wire
+
+- **`agc_render_frame`** into `pp_agc.c`: the per-frame DCB — CX register block
+  (from `sceAgcGetRegisterDefaults`, 16 `target_offsets` entries patched with
+  the RT base / dims / blend, + the `ADD_REG` viewport/scissor/guardband set),
+  `geometry_cb`/`pixel_cb` constant buffers, `sceAgcDriverWaitUntilSafeForRendering`,
+  link-register concat from the shader objects (`*(void**)(shader+24)` cx,
+  `+32` sh, `shader[91]`/`[92]` counts), `bind_pixel_source` (30-word NV12
+  descriptor at SH `0x0c`), `sceAgcDcbDrawIndexAuto(4, 2)`, `sceAgcDcbSetFlip`,
+  `flush_gpu_data(mem, 0x10000)`, `sceAgcDriverSubmitDcb` + `sceAgcSuspendPoint`.
+- **New `.syms`**: `sceAgcDcbSetCxRegistersIndirect`,
+  `sceAgcDcbSetUcRegistersIndirect`, `sceAgcSuspendPoint` (libSceAgc);
+  `sceAgcDriverGetWaitRenderingPacketSizeInDwords` (libSceAgcDriver).
+- **`pp_agc_present_nv12(vout_handle, buf_idx, gpu_target, nv12, pitch,
+  coded_h, vis_w, vis_h, out_w, out_h, marker)`** — takes EVO's acquired VO
+  buffer as params; **reuses `pp_videoout`'s handle**, never `sceVideoOutOpen`
+  (two opens is bad; also the `sceVideoOutOpen`→compute-queue panic vector, and
+  #31's resident decoder already holds a compute queue). Does its own
+  `SetFlip` + submit, so main.c's V8 present path must not also flip that frame.
+- **Feed it NV12 directly.** #31's `ro_harvest` de-interleaves NV12→I420 for
+  the CPU converters; the AGC path wants NV12, so `evo_vdec_native` should hand
+  `SceVideodec2OutputInfo.buffer` straight through when `pp_agc_available()` —
+  no CPU touch of the pixels at all. FFmpeg frames still need the CPU path.
+- **`pp_playback.c`** `use_v8` branch: when `pp_agc_available()`, skip
+  `pp_compute_pipeline_convert` / `pp_converter_yuv420p_to_tiled_bgra_parallel`
+  and call `pp_agc_present_nv12`.
+- Settings row `Playback -> Renderer: Auto/CPU/GPU` — coordinate with #29
+  Phase 5's `Video decoder` row (same screen, same config-append pattern).
+- Panic discipline: AGC present up after VO, down before VO reconfig; watchdog
+  the submit; `flush_gpu_data` before every submit.
+
 ## 2026-09-03 (later) — #27 AGC gate PASSED
 
 `EVO agc: init=0x00000000 defaults=0x8005b4180 -> Step 2 VIABLE` from the app
