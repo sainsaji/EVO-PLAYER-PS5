@@ -69,6 +69,14 @@ extern const uint8_t pp_agc_pixel_code_start[],      pp_agc_pixel_code_end[];
 extern const uint8_t pp_agc_pixel_hdr_code_start[],  pp_agc_pixel_hdr_code_end[];
 extern const uint8_t pp_agc_resources_start[],       pp_agc_resources_end[];
 
+/* --- embedded UI shader blobs (#28 Phase 0, agc_ui_blobs.S) ------------- */
+extern const uint8_t pp_agc_ui_vs_header_start[],   pp_agc_ui_vs_header_end[];
+extern const uint8_t pp_agc_ui_ps_header_start[],   pp_agc_ui_ps_header_end[];
+extern const uint8_t pp_agc_ui_vs_code_start[],     pp_agc_ui_vs_code_end[];
+extern const uint8_t pp_agc_solid_ps_code_start[],  pp_agc_solid_ps_code_end[];
+extern const uint8_t pp_agc_glyph_ps_code_start[],  pp_agc_glyph_ps_code_end[];
+extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
+
 /* --- constants (ProsperoLight) ----------------------------------------- */
 #define SHADER_MEMORY_BYTES  0x0d0000u
 #define SHADER_STATIC_BYTES  0x10000u        /* flushed before every submit    */
@@ -91,6 +99,18 @@ extern const uint8_t pp_agc_resources_start[],       pp_agc_resources_end[];
 #define OFF_LINK_A    0x5000u
 #define OFF_LINK_B    0x6000u
 #define OFF_RESOURCES 0xc000u
+
+/* #28 Phase 1 probe: scratch for the UI shader create/link go/no-go check.
+ * Well above the video path's 0x8000..0xc000 DCB + resources; g_agc.mem is
+ * 0xD0000, so 0xd000..0x15000 is free headroom. */
+#define OFF_UI_VS_HDR    0x0d000u
+#define OFF_UI_VS_CODE   0x0e000u
+#define OFF_UI_PS_HDR    0x0f000u
+#define OFF_UI_PS_A_CODE 0x10000u   /* solid_ps */
+#define OFF_UI_PS_B_CODE 0x11000u   /* glyph_ps */
+#define OFF_UI_PS_C_CODE 0x12000u   /* rgba_ps  */
+#define OFF_UI_LINK_A    0x13000u
+#define OFF_UI_LINK_B    0x14000u
 
 /* --- AGC ABI structs (ProsperoLight) ---------------------------------- */
 typedef struct agc_register {
@@ -614,6 +634,71 @@ int pp_agc_available(void)
     return g_agc.ready;
 }
 
+/*
+ * #28 Phase 1 go/no-go: does sceAgcCreateShader accept the hand-written UI
+ * shaders paired with ProsperoLight's reused headers, and does
+ * sceAgcLinkShaders work with primitive type 4 (triangle list)?
+ *
+ * Pure library calls - no DCB, no draw, no submit, no flip. Runs under
+ * evo_agc_probe()'s fault guard, logs every rc to evo_boot.log. Needs
+ * pp_agc_init() to have mapped g_agc.mem first. Changes no state.
+ *
+ * The pixel headers (pixel.header.bin) should work - each PS is a structural
+ * subset of the NV12 PS. ui_vs against geometry.header.bin is the real
+ * question (see the risk note in pp/shaders/ui_vs.s).
+ */
+int pp_agc_probe_ui_shaders(void)
+{
+    if (!g_agc.mem) {
+        evo_boot_log("pp_agc UI: mem not mapped - run pp_agc_init first");
+        evo_boot_log_flush();
+        return -1;
+    }
+
+    uint8_t *m = g_agc.mem;
+    int bad = 0;
+    bad |= copy_asset(m + OFF_UI_VS_HDR,    0x1000, pp_agc_ui_vs_header_start,  pp_agc_ui_vs_header_end);
+    bad |= copy_asset(m + OFF_UI_PS_HDR,    0x1000, pp_agc_ui_ps_header_start,  pp_agc_ui_ps_header_end);
+    bad |= copy_asset(m + OFF_UI_VS_CODE,   0x1000, pp_agc_ui_vs_code_start,    pp_agc_ui_vs_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_A_CODE, 0x1000, pp_agc_solid_ps_code_start, pp_agc_solid_ps_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_B_CODE, 0x1000, pp_agc_glyph_ps_code_start, pp_agc_glyph_ps_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_C_CODE, 0x1000, pp_agc_rgba_ps_code_start,  pp_agc_rgba_ps_code_end);
+    if (bad) {
+        evo_boot_log("pp_agc UI: blob copy failed");
+        evo_boot_log_flush();
+        return -1;
+    }
+
+    void *vs = 0, *ps_solid = 0, *ps_glyph = 0, *ps_rgba = 0;
+    int32_t c_vs    = sceAgcCreateShader(&vs,       m + OFF_UI_VS_HDR, m + OFF_UI_VS_CODE);
+    int32_t c_solid = sceAgcCreateShader(&ps_solid, m + OFF_UI_PS_HDR, m + OFF_UI_PS_A_CODE);
+    int32_t c_glyph = sceAgcCreateShader(&ps_glyph, m + OFF_UI_PS_HDR, m + OFF_UI_PS_B_CODE);
+    int32_t c_rgba  = sceAgcCreateShader(&ps_rgba,  m + OFF_UI_PS_HDR, m + OFF_UI_PS_C_CODE);
+
+    evo_boot_log("pp_agc UI: CreateShader ui_vs=0x%08x solid=0x%08x glyph=0x%08x rgba=0x%08x",
+                 (unsigned)c_vs, (unsigned)c_solid, (unsigned)c_glyph, (unsigned)c_rgba);
+    evo_boot_log("pp_agc UI:   vs=%p solid=%p glyph=%p rgba=%p", vs, ps_solid, ps_glyph, ps_rgba);
+    evo_boot_log_flush();
+
+    /* LinkShaders(..., 4 == PrimitiveTriangleList) - only where both halves
+     * were created. */
+    if (c_vs == 0 && c_solid == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_solid, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+solid (TriList) = 0x%08x", (unsigned)l);
+    }
+    if (c_vs == 0 && c_glyph == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_glyph, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+glyph (TriList) = 0x%08x", (unsigned)l);
+    }
+    if (c_vs == 0 && c_rgba == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rgba, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba (TriList) = 0x%08x", (unsigned)l);
+    }
+    evo_boot_log("pp_agc UI: probe done (no state changed)");
+    evo_boot_log_flush();
+    return (c_vs == 0 && c_solid == 0 && c_glyph == 0 && c_rgba == 0) ? 0 : -1;
+}
+
 /* (re)allocate the double/triple NV12 staging pool in GPU-visible direct
  * memory. One slot per VO buffer — pp_videoout_acquire only hands back a
  * buffer whose previous flip has fully retired, so keying the staging slot to
@@ -954,6 +1039,7 @@ void pp_agc_shutdown(void)
 
 int  pp_agc_init(uint32_t w, uint32_t h, int hdr) { (void)w; (void)h; (void)hdr; return -1; }
 int  pp_agc_available(void) { return 0; }
+int  pp_agc_probe_ui_shaders(void) { return -1; }
 int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
                          uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
                          uint32_t oh, int64_t m)

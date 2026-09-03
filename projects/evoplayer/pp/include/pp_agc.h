@@ -38,6 +38,16 @@ int  pp_agc_init(uint32_t width, uint32_t height, int hdr);
 int  pp_agc_available(void);
 
 /*
+ * #28 Phase 1 go/no-go: create + link the hand-written UI shaders (ui_vs +
+ * solid/glyph/rgba PS) against ProsperoLight's reused headers and log every rc
+ * to evo_boot.log. Pure library calls - no DCB, no draw, no flip; changes no
+ * state. Needs pp_agc_init() to have mapped the shader scratch first. Called
+ * from evo_agc_probe() (--agc-probe builds only). Returns 0 iff all four
+ * CreateShader calls returned 0.
+ */
+int  pp_agc_probe_ui_shaders(void);
+
+/*
  * Present one decoded NV12 frame on the GPU: YUV->RGB fullscreen convert into
  * `gpu_target`, then a flip queued in the same DCB.
  *
