@@ -355,15 +355,6 @@ int decode_next_video_frame(void)
             double behind = 0.0;
             int wait_iters = 0;
 
-            /*
-             * #32: in the seek-discard window every frame between the keyframe
-             * and the seek target is thrown away by pp_playback_push_frame().
-             * Pacing them to the frame rate (the branches below) made a seek
-             * across a long 4K GOP take GOP-length wall time - "seek is quite
-             * slow" on the GTA trailer. Decode + discard flat out instead.
-             */
-            int seek_discarding = g_pp_pb.active && g_pp_pb.seek_discarding;
-
             dbg_video_frames++;
             dbg_last_pts = pf.pts_us;   /* now microseconds (was raw stream PTS) */
             perf_decode_frames++;
@@ -381,9 +372,7 @@ int decode_next_video_frame(void)
             audio_rel = audio_clock_seconds;
             behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
 
-            if (seek_discarding) {
-                /* no pacing - push_frame drops this frame outright */
-            } else if (audio_rel > 0.05) {
+            if (audio_rel > 0.05) {
                 /*
                  * Video ahead of audio: wait for audio, but NEVER freeze the
                  * picture if audio clock stops (underrun / 44.1k stall).
