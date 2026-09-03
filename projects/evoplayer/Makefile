@@ -92,10 +92,9 @@ UI_SRCS := \
     ui/src/evo_focus.c \
     ui/src/evo_input.c \
     ui/src/evo_feedback.c \
-    ui/src/evo_chrome.c \
+    ui/src/evo_layout.c \
     ui/src/evo_widgets.c \
-    ui/src/evo_keyboard.c \
-    ui/src/evo_screens.c
+    ui/src/evo_keyboard.c
 
 MEDIA_SRCS := \
     media/src/prospero_thumbnail.c \

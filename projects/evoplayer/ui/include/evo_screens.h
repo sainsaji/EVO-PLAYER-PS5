@@ -1,15 +1,16 @@
 /*
- * evo_screens — screen drawing, kept out of main.c.
+ * evo_screens — the screen *models*, kept out of main.c.
  *
- * Screens take a *model*: a plain description of what to show, filled in by
- * main.c from its own state. Nothing in here reaches back into the player,
- * the decoder or the asset headers, which is what lets the whole UI layer
- * compile in a second and be exercised on the host.
+ * The immediate-mode screen renderers were retired with the RmlUi migration
+ * (#44). What remains is the model vocabulary: plain descriptions of what each
+ * screen shows (`evo_launch_model`, `evo_browser_model`, `evo_list_model`, …),
+ * which main.c still fills in from its own state and then hands to the RmlUi
+ * bridge. A few pure layout helpers (grid sync, row capacity, reader wrap
+ * width) also survive here; they are implemented in ui/src/evo_layout.c.
  *
- * The models are deliberately dumb - arrays of strings and a few integers.
- * Building one per frame costs nothing next to the per-pixel blending, and
- * it means the drawing code cannot accidentally depend on decoder state
- * that is only valid on some frames.
+ * The models are deliberately dumb - arrays of strings and a few integers -
+ * so the UI cannot accidentally depend on decoder state that is only valid
+ * on some frames.
  */
 #ifndef EVO_SCREENS_H
 #define EVO_SCREENS_H
@@ -76,9 +77,6 @@ typedef struct evo_launch_model {
  * and before drawing, every frame - the counts change as files are played.
  */
 void evo_screen_launch_sync(evo_grid *g, const evo_launch_model *m);
-
-void evo_screen_launch(uint32_t *fb, const evo_launch_model *m,
-                       const evo_grid *g);
 
 /*
  * Where the cursor currently is, resolved to something main.c can act on.
@@ -157,9 +155,6 @@ typedef struct evo_browser_model {
 /* Rows that fit in the browser's list column. */
 int evo_screen_browser_capacity(void);
 
-void evo_screen_browser(uint32_t *fb, const evo_browser_model *m,
-                        const evo_focus *f, int rail_focused, int rail_index);
-
 /* ---- generic list page -------------------------------------------------- */
 
 /*
@@ -220,8 +215,6 @@ typedef struct evo_dialog_model {
     int                      action_count;
 } evo_dialog_model;
 
-void evo_screen_dialog(uint32_t *fb, const evo_dialog_model *m);
-
 /* ---- media info --------------------------------------------------------- */
 
 /*
@@ -241,12 +234,6 @@ typedef struct evo_info_model {
     const char *art_badge;
 } evo_info_model;
 
-void evo_screen_info(uint32_t *fb, const evo_info_model *m);
-
-void evo_screen_list(uint32_t *fb, const evo_list_model *m,
-                     const evo_focus *f, int rail_focused, int rail_index,
-                     const evo_hint *hints, int hint_count);
-
 /* ---- changelog screen --------------------------------------------------- */
 
 #include "evo_changelog.h"
@@ -255,10 +242,6 @@ typedef struct evo_changelog_model {
     const evo_changelog_release *releases;
     int                          release_count;
 } evo_changelog_model;
-
-void evo_screen_changelog(uint32_t *fb, const evo_changelog_model *m,
-                          const evo_focus *f, int rail_focused, int rail_index,
-                          const evo_hint *hints, int hint_count);
 
 /* ---- surround sound studio screen --------------------------------------- */
 
@@ -282,10 +265,6 @@ typedef struct evo_surround_test_model {
     const evo_surround_speaker_info *speakers;
     int         speaker_count;
 } evo_surround_test_model;
-
-void evo_screen_surround_test(uint32_t *fb, const evo_surround_test_model *m,
-                              int rail_focused, int rail_index,
-                              const evo_hint *hints, int hint_count);
 
 /* ---- overlay picker ------------------------------------------------------ */
 
@@ -327,9 +306,6 @@ typedef struct evo_picker_model {
 } evo_picker_model;
 
 int  evo_screen_picker_capacity(void);
-
-void evo_screen_picker(uint32_t *fb, const evo_picker_model *m,
-                       const evo_focus *f);
 
 /* ---- text reader --------------------------------------------------------- */
 
@@ -391,10 +367,6 @@ int  evo_screen_reader_pitch(int face);
  * definition of the layout, wrong the first time either moved.
  */
 int  evo_screen_reader_wrap_w(void);
-
-void evo_screen_reader(uint32_t *fb, const evo_reader_model *m,
-                       int rail_focused, int rail_index,
-                       const evo_hint *hints, int hint_count);
 
 #ifdef __cplusplus
 }

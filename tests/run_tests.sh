@@ -33,9 +33,10 @@ SRCS=(
     "${UI}/src/evo_draw.c"
     "${UI}/src/evo_nav.c"
     "${UI}/src/evo_focus.c"
-    "${UI}/src/evo_chrome.c"
+    "${UI}/src/evo_layout.c"
     "${UI}/src/evo_widgets.c"
-    "${UI}/src/evo_screens.c"
+    "${EVO}/src/evo_data_path.c"
+    "${EVO}/src/evo_readdir.c"
     "${PP}/src/evo_theme.c"
     "${PP}/src/evo_ui.c"
     "${ADDONS}/src/addon_emby.c"
@@ -54,6 +55,7 @@ for src in "${SRCS[@]}"; do
         -I"${UI}/include" \
         -I"${MEDIA}/include" \
         -I"${ADDONS}/include" \
+        -I"${EVO}/include" \
         -I"${EVO}" \
         -c "${src}" -o "${obj}"
     OBJS+=("${obj}")

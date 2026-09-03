@@ -70,13 +70,36 @@ clamped the remaining unbounded dynamic strings:
 - Settings row title vs value badge — fixed (`.row-text-box` / `.row-right` / `.row-badge`).
 - Launch hero title — fixed (`#hero-title` clamp).
 
-## Still owed (PR 2 / hardware)
+## Legacy screen code — deleted (PR 2, done)
 
-- A hardware pass of the **HW**-marked rows: theme switch repaint on device,
-  OSD + dialog + media-info + subtitle-picker compositing over live decoded
-  video, marquee smoothness at real cadence, D-pad focus/nav order and timing.
-  Log results in [validation.md](validation.md).
-- Once every row above is OK / OK\* and the hardware pass is clean: delete the
-  legacy screen code (see the #44 plan / roadmap — `ui/src/evo_screens.c`,
-  `ui/src/evo_chrome.c`, the `draw_*_screen` legacy tails, `Makefile` `UI_SRCS`,
-  `tools/uiview.c` → RmlUi harness).
+The immediate-mode screen renderer is gone:
+
+- Deleted `ui/src/evo_screens.c` + `ui/src/evo_chrome.c` (the 9 `evo_screen_*`
+  draw fns + `evo_chrome_begin/end` + rail/header/footer drawing).
+- The pure geometry helpers both paths still call (grid sync, row capacity,
+  reader wrap width, `EVO_HINTS_LIST`, `evo_sidenav_step`) moved to the new
+  `ui/src/evo_layout.c`; `evo_screens.h` / `evo_chrome.h` trimmed to the model
+  typedefs + surviving decls.
+- Removed the legacy fallback tail from every migrated `draw_*_screen` in
+  `main.c` (~23 fns) and the now-dead scratch buffers / `evo_modal_art`.
+- **Kept**: `ui/src/{evo_draw,evo_nav,evo_focus,evo_input,evo_feedback,
+  evo_keyboard,evo_widgets}.c` (still used by both paths; `evo_widgets` via
+  `src/evo_toast.c`), `draw_menu_linear` (screen-0 default), `draw_image_screen`
+  (no RmlUi equivalent).
+- `Makefile` `UI_SRCS`, `tests/run_tests.sh` + `tests/test_runner.c` updated.
+- `tools/uiview.c` deleted; `tools/uiview.sh` + `tools/uiplay.sh` now drive the
+  RmlUi harness (`tools/uiview_playback_rml`). `uiplay.sh` is a contact sheet
+  now rather than an interactive nav sim — the sim was tied to the deleted
+  host build of `evo_focus`/`evo_grid`; a faithful RmlUi rebuild is out of
+  scope here.
+
+Payload build (`build-evoplayer.sh`) and `tests/run_tests.sh` (9/9) green after
+the deletion.
+
+## Still owed (hardware)
+
+A hardware pass of the **HW**-marked rows — theme switch repaint on device,
+OSD + dialog + media-info + subtitle-picker compositing over live decoded
+video, marquee smoothness at real cadence, D-pad focus/nav order and timing.
+Log results in [validation.md](validation.md). This is the last thing before
+#28 can build on a fully-signed-off RmlUi target.
