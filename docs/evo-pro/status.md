@@ -171,10 +171,11 @@ Clarksons 720p too.
   `MODE == player`; `tools/vdec-test.sh` + `package-app.sh --autoplay` drive
   the unattended hardware-test loop (FTP log pull, one manual launch press).
 
-**#46 — app module persists nothing (high). CODE DONE 2026-09-03, HW-VERIFY
-PENDING.** Settings / recent / favorites / resume reset every launch; the ELF
-payload persisted fine. Cause: `/download0/evoplayer/` isn't durable for a
-fake-signed ShadowMount title. Fix landed on `refactor/main-c-media-modules`:
+**#46 — app module persists nothing. ✅ CLOSED 2026-09-03, HARDWARE-VERIFIED**
+(theme + favorite + resume → PS-close → relaunch → all restored). Was: settings
+/ recent / favorites / resume reset every launch because `/download0/evoplayer/`
+isn't durable for a fake-signed ShadowMount title. Fix landed on
+`refactor/main-c-media-modules` (`788b1a0`):
 `evo_data_dir()`/`evo_data_path()` (`src/evo_data_path.c`) now resolve the root
 at **runtime** — `/data/evoplayer` once `evo_jailbreak_is_open()`, the
 `/download0` literal only as a pre-unjail fallback (uncached, self-heals).
@@ -187,11 +188,17 @@ the clean-room `libc.prx` surface). Late-unjail race handled by
 `evo_persistence_rebind()` (browser entry re-binds + reloads if the boot
 `attempt(12)` lost the race — chose this over hardening the boot attempt).
 One-shot migration copies `/download0/evoplayer/*` and the old bare resume file
-into `/data/evoplayer/` on first bind. Both builds compile green; **not yet run
-on a console** — verify: theme + favorite + resume → PS-close → relaunch → all
-restored, and `/fs/data/evoplayer/?fmt=json` shows the files. Spun out as
-sub-issues: **#50** (host tests for the new data-root logic + parsers), **#51**
-(quiet the boot breadcrumbs — keep klog + `evo_boot.log`, drop the popups).
+into `/data/evoplayer/` on first bind. Follow-up sub-issues still open: **#50**
+(host tests for the new data-root logic + parsers), **#51** (quiet the boot
+breadcrumbs — keep klog + `evo_boot.log`, drop the popups).
+
+**Asset shadowing (found during the #44 pass, fixed `edc3a08`):** the app reads
+`.rml`/`.rcss`/fonts from `/data/evoplayer/app/assets/` (the only asset path
+reachable in the sandbox — `/app0` was never confirmed to resolve). That dir is
+**not in the `.ffpfsc`** and `deploy-app.sh` never refreshed it, so it served
+stale payload-era UI assets for weeks and shadowed every #16 RCSS clamp on
+hardware. `deploy-app.sh --ffpfsc` now wipes + re-pushes the packaged asset
+tree there on every deploy.
 
 **KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
 Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**
