@@ -84,6 +84,23 @@ int  pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
                          uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
                          int64_t flip_marker);
 
+/*
+ * #28: as pp_agc_present_nv12, plus an OSD quad composited over the video in
+ * the same DCB (2nd DrawIndexAuto, constant-alpha blend). `ovl_nv12` is a
+ * tightly-packed NV12 surface (pitch == ovl_w, interleaved UV at
+ * ovl_nv12 + ovl_w*ovl_h), drawn at (ovl_x, ovl_y) with ovl_alpha (0..1).
+ * Pass ovl_nv12 = NULL for video-only (pp_agc_present_nv12 does exactly that).
+ * The overlay is best-effort: a bad rect / staging failure drops the overlay
+ * and presents video-only, it never fails the frame. Return codes as
+ * pp_agc_present_nv12.
+ */
+int  pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                                 const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                                 uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                                 int64_t flip_marker,
+                                 const void *ovl_nv12, uint32_t ovl_w, uint32_t ovl_h,
+                                 uint32_t ovl_x, uint32_t ovl_y, float ovl_alpha);
+
 void pp_agc_shutdown(void);
 
 #ifdef __cplusplus

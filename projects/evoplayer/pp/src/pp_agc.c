@@ -153,6 +153,13 @@ static struct {
     size_t    stage_total;
     size_t    stage_cap;
 
+    /* #28 Phase 1: per-VO-buffer overlay-NV12 staging (the OSD quad). Separate
+     * slab because the overlay is a different size and updates independently. */
+    uint8_t  *ovl_stage[PP_VO_MAX_BUFFERS];
+    int64_t   ovl_stage_start;
+    size_t    ovl_stage_total;
+    size_t    ovl_stage_cap;
+
     volatile int first_frame_ok;   /* a render_frame has returned 0 (worker)   */
     int       first_frame_logged;
     int       tv_safe;             /* 0 = full-frame (parity with CPU path)  */
@@ -209,6 +216,12 @@ static struct {
     uint32_t    visible_width, visible_height;
     uint32_t    output_width, output_height;
     int64_t     render_marker;
+
+    /* #28 overlay quad (0 = video only) */
+    int         draw_overlay;
+    const void *ovl_source;                     /* staged overlay NV12, pitch == ovl_w */
+    uint32_t    ovl_w, ovl_h, ovl_x, ovl_y;
+    float       ovl_alpha;
 
     /* response */
     int32_t     rc;
@@ -366,15 +379,20 @@ static void bind_pixel_source(agc_command_buffer_t *command, uint8_t *resources,
     sceAgcCbSetShRegisterRangeDirect(command, 0x0c, descriptor, 30);
 }
 
-/* One presented frame. Verbatim port of ProsperoLight render_frame(), SDR path
- * only, HUD/overlay branch removed. Scratch offsets inside `memory`. */
+/* One presented frame. Port of ProsperoLight render_frame(), SDR path only.
+ * The optional overlay quad (ovl_*) is #28's OSD composite - a second
+ * DrawIndexAuto in the same DCB, constant-alpha blended, from a tightly-packed
+ * NV12 surface at `ovl_source`. Scratch offsets inside `memory`. */
 static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *memory,
                             void *vertex_shader, void *pixel_shader,
                             const void *source, size_t source_bytes, uint32_t pitch,
                             uint32_t surface_height, uint32_t visible_width,
                             uint32_t visible_height, uint32_t output_width,
                             uint32_t output_height, int64_t render_marker,
-                            uint32_t *word_count)
+                            uint32_t *word_count,
+                            int draw_overlay, const void *ovl_source,
+                            uint32_t ovl_w, uint32_t ovl_h, uint32_t ovl_x,
+                            uint32_t ovl_y, float ovl_alpha)
 {
     static const uint16_t target_offsets[16] = { 0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
                                                  0x321, 0x323, 0x324, 0x325, 0x390, 0x398,
@@ -388,6 +406,8 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     agc_register_t *cx = (agc_register_t *)(memory + 0x7000);
     uint8_t *geometry_cb = memory + 0x7800;
     uint8_t *pixel_cb = memory + 0x7900;
+    uint8_t *ovl_pixel_cb = memory + 0x7a00;               /* #28 overlay CB */
+    agc_register_t *ovl_state = (agc_register_t *)(memory + 0x7b00); /* 11 regs */
     uint8_t *resources = memory + 0xc000;
     uint32_t *words = (uint32_t *)(memory + 0x8000);
     agc_command_buffer_t command;
@@ -537,6 +557,41 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     agc_dbg("R3 link/sh done -> bind_pixel_source + draw + flip");
     bind_pixel_source(&command, resources, source, y_bytes, uv_bytes, pixel_cb);
     sceAgcDcbDrawIndexAuto(&command, 4, 2);
+
+    /* #28: overlay quad - a 2nd DrawIndexAuto in the same DCB, viewport moved
+     * to the OSD rect + constant-alpha blend, from a tightly-packed NV12
+     * surface. Verbatim from ProsperoLight render_frame()'s draw_overlay
+     * branch (SDR: no shader rebind, reuse the NV12 pipeline + resources). */
+    if (draw_overlay && ovl_source && ovl_w && ovl_h) {
+        size_t ovl_y_bytes  = (size_t)ovl_w * ovl_h;
+        size_t ovl_uv_bytes = (size_t)ovl_w * ((ovl_h + 1u) / 2u);
+        const agc_register_t state[11] = {
+            { 0x10f, 0, float_bits(ovl_w * .5f) },
+            { 0x110, 0, float_bits(ovl_x + ovl_w * .5f) },
+            { 0x111, 0, float_bits(ovl_h * -.5f) },
+            { 0x112, 0, float_bits(ovl_y + ovl_h * .5f) },
+            { 0x113, 0, float_bits(1) },
+            { 0x114, 0, 0 },
+            { 0x105, 0, float_bits(ovl_alpha) },
+            { 0x106, 0, float_bits(ovl_alpha) },
+            { 0x107, 0, float_bits(ovl_alpha) },
+            { 0x108, 0, float_bits(ovl_alpha) },
+            /* src * constAlpha + dst * (1 - constAlpha) */
+            { 0x1e0, 0, 0x40001413u },
+        };
+        memcpy(ovl_pixel_cb, pixel_constants, sizeof(pixel_constants));
+        ((uint32_t *)ovl_pixel_cb)[12] = float_bits((float)ovl_w);
+        ((uint32_t *)ovl_pixel_cb)[13] = float_bits((float)ovl_h);
+        ((uint32_t *)ovl_pixel_cb)[14] = ovl_w;
+        ((uint32_t *)ovl_pixel_cb)[15] = ovl_w / 2u;
+        memcpy(ovl_state, state, sizeof(state));
+        sceAgcDcbSetCxRegistersIndirect(&command, ovl_state, 11);
+        bind_pixel_source(&command, resources, ovl_source, ovl_y_bytes, ovl_uv_bytes, ovl_pixel_cb);
+        sceAgcDcbDrawIndexAuto(&command, 4, 2);
+        agc_dbg("R3b overlay quad  %ux%u @ %u,%u a=%d/100",
+                ovl_w, ovl_h, ovl_x, ovl_y, (int)(ovl_alpha * 100.f));
+    }
+
     sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
 
     submit.words = words;
@@ -563,6 +618,7 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
     g_agc.tried = 1;
     g_agc.mem_start = -1;
     g_agc.stage_start = -1;
+    g_agc.ovl_stage_start = -1;
 
     /* sceAgcInit is not idempotent — a second call (e.g. after evo_agc_probe's
      * gate) returns 0x8A6C0004 "already initialized". Only a hard failure to
@@ -762,6 +818,52 @@ static int agc_staging_ensure(size_t need)
     return 0;
 }
 
+/* #28: same grow-only per-VO-buffer slab pattern for the overlay NV12. */
+static void agc_ovl_staging_free(void)
+{
+    if (g_agc.ovl_stage[0]) {
+        sceKernelMunmap(g_agc.ovl_stage[0], g_agc.ovl_stage_total);
+        for (int i = 0; i < PP_VO_MAX_BUFFERS; i++)
+            g_agc.ovl_stage[i] = 0;
+    }
+    if (g_agc.ovl_stage_start >= 0) {
+        sceKernelReleaseDirectMemory(g_agc.ovl_stage_start, g_agc.ovl_stage_total);
+        g_agc.ovl_stage_start = -1;
+    }
+    g_agc.ovl_stage_total = 0;
+    g_agc.ovl_stage_cap = 0;
+}
+
+static int agc_ovl_staging_ensure(size_t need)
+{
+    if (g_agc.ovl_stage[0] && g_agc.ovl_stage_cap >= need)
+        return 0;
+    agc_ovl_staging_free();
+
+    size_t cap = (need + 0xffffu) & ~(size_t)0xffffu;
+    size_t total = cap * (size_t)PP_VO_MAX_BUFFERS;
+    int64_t start = -1;
+    void *base = 0;
+    int64_t limit = sceKernelGetDirectMemorySize();
+    int32_t rc = sceKernelAllocateDirectMemory(0, limit, total, SHADER_ALIGN,
+                                               DIRECT_MEMORY_TYPE, &start);
+    if (rc == 0)
+        rc = sceKernelMapDirectMemory(&base, total, MAP_PROTECTION, 0, start, SHADER_ALIGN);
+    if (rc != 0 || !base) {
+        evo_boot_log("pp_agc: overlay staging alloc/map=0x%08x need=%zu", (unsigned)rc, need);
+        if (start >= 0)
+            sceKernelReleaseDirectMemory(start, total);
+        return -1;
+    }
+    g_agc.ovl_stage_start = start;
+    g_agc.ovl_stage_total = total;
+    g_agc.ovl_stage_cap = cap;
+    for (int i = 0; i < PP_VO_MAX_BUFFERS; i++)
+        g_agc.ovl_stage[i] = (uint8_t *)base + (size_t)i * cap;
+    evo_boot_log("pp_agc: overlay staging %zuKB x%d @ %p", cap >> 10, PP_VO_MAX_BUFFERS, base);
+    return 0;
+}
+
 /* The GPU submit worker. One request in flight; see g_agc_submit. */
 static void *agc_submit_worker(void *arg)
 {
@@ -774,6 +876,10 @@ static void *agc_submit_worker(void *arg)
         uint32_t    pitch, surface_height, visible_width, visible_height;
         uint32_t    output_width, output_height;
         int64_t     render_marker;
+        int         draw_overlay;
+        const void *ovl_source;
+        uint32_t    ovl_w, ovl_h, ovl_x, ovl_y;
+        float       ovl_alpha;
         uint32_t    words = 0;
         int32_t     rc;
         int         guard;
@@ -797,6 +903,13 @@ static void *agc_submit_worker(void *arg)
         output_width   = g_agc_submit.output_width;
         output_height  = g_agc_submit.output_height;
         render_marker  = g_agc_submit.render_marker;
+        draw_overlay   = g_agc_submit.draw_overlay;
+        ovl_source     = g_agc_submit.ovl_source;
+        ovl_w          = g_agc_submit.ovl_w;
+        ovl_h          = g_agc_submit.ovl_h;
+        ovl_x          = g_agc_submit.ovl_x;
+        ovl_y          = g_agc_submit.ovl_y;
+        ovl_alpha      = g_agc_submit.ovl_alpha;
         pthread_mutex_unlock(&g_agc_submit.lock);
 
         guard = !g_agc.first_frame_ok;
@@ -816,7 +929,9 @@ static void *agc_submit_worker(void *arg)
             rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
                                   g_agc.vs, g_agc.ps, source, source_bytes, pitch,
                                   surface_height, visible_width, visible_height,
-                                  output_width, output_height, render_marker, &words);
+                                  output_width, output_height, render_marker, &words,
+                                  draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
+                                  ovl_alpha);
             t_agc_armed = 0;
 
             evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
@@ -832,7 +947,9 @@ static void *agc_submit_worker(void *arg)
             rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
                                   g_agc.vs, g_agc.ps, source, source_bytes, pitch,
                                   surface_height, visible_width, visible_height,
-                                  output_width, output_height, render_marker, &words);
+                                  output_width, output_height, render_marker, &words,
+                                  draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
+                                  ovl_alpha);
         }
 
     reply:
@@ -873,11 +990,17 @@ static int agc_submit_start(void)
 
 /* Single caller only: pp_playback_push_frame runs on one decode thread and
  * every call here blocks until the worker replies or the watchdog fires, so
- * there is never more than one request in flight. */
-int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
-                        const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
-                        uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
-                        int64_t flip_marker)
+ * there is never more than one request in flight.
+ *
+ * ovl_nv12 (may be NULL) is a tightly-packed NV12 OSD surface (pitch == ovl_w,
+ * interleaved UV at ovl_nv12 + ovl_w*ovl_h); it is composited as a second quad
+ * in the same DCB at (ovl_x, ovl_y), constant-alpha blended (ovl_alpha 0..1). */
+int pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                                const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                                uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                                int64_t flip_marker,
+                                const void *ovl_nv12, uint32_t ovl_w, uint32_t ovl_h,
+                                uint32_t ovl_x, uint32_t ovl_y, float ovl_alpha)
 {
     if (g_agc.submit_wedged)
         return -2;
@@ -887,6 +1010,12 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
         pitch_bytes == 0 || (pitch_bytes & 1u) || coded_height == 0 ||
         vis_w == 0 || vis_h == 0 || out_w == 0 || out_h == 0)
         return -1;
+
+    /* Overlay is best-effort: a bad rect just disables it, never fails the frame. */
+    int want_overlay = ovl_nv12 && ovl_w >= 2 && ovl_h >= 2 && (ovl_w & 1u) == 0 &&
+                       (ovl_h & 1u) == 0 && ovl_x + ovl_w <= out_w && ovl_y + ovl_h <= out_h;
+    if (ovl_alpha < 0.f) ovl_alpha = 0.f;
+    if (ovl_alpha > 1.f) ovl_alpha = 1.f;
 
     /* #27 test hook: /mnt/usb0/evo_agc_no_present (or EVO_AGC_NO_PRESENT env)
      * simulates a mid-clip GPU wedge after ~120 good frames, so the AGC-death ->
@@ -934,6 +1063,25 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     if (fg) agc_dbg("A1 staging ok stage=%p need=%zu -> memcpy + flush", stage, need);
     memcpy(stage, nv12, need);
     flush_gpu_data(stage, need);
+
+    /* Stage the overlay NV12 into its own per-VO-buffer slab. Under the same
+     * first-frame fault guard as the video staging (a bad ovl_nv12 pointer
+     * faults on this thread). On any overlay-staging failure, drop the overlay
+     * and present video-only rather than failing the frame. */
+    const uint8_t *ovl_stage = 0;
+    if (want_overlay) {
+        size_t ovl_need = (size_t)ovl_w * ovl_h + (size_t)ovl_w * ((ovl_h + 1u) / 2u);
+        if (agc_ovl_staging_ensure(ovl_need) == 0) {
+            uint8_t *os = g_agc.ovl_stage[buf_idx];
+            memcpy(os, ovl_nv12, ovl_need);
+            flush_gpu_data(os, ovl_need);
+            ovl_stage = os;
+        } else {
+            want_overlay = 0;
+        }
+        if (fg) agc_dbg("A1b overlay staged=%p %ux%u @ %u,%u", ovl_stage, ovl_w, ovl_h, ovl_x, ovl_y);
+    }
+
     if (fg) {
         t_agc_armed = 0;
         agc_dbg("A2 staged + flushed -> dispatch worker (250ms watchdog)");
@@ -968,6 +1116,13 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     g_agc_submit.output_width   = out_w;
     g_agc_submit.output_height  = out_h;
     g_agc_submit.render_marker  = flip_marker;
+    g_agc_submit.draw_overlay   = want_overlay;
+    g_agc_submit.ovl_source     = ovl_stage;
+    g_agc_submit.ovl_w          = ovl_w;
+    g_agc_submit.ovl_h          = ovl_h;
+    g_agc_submit.ovl_x          = ovl_x;
+    g_agc_submit.ovl_y          = ovl_y;
+    g_agc_submit.ovl_alpha      = ovl_alpha;
     g_agc_submit.have_done      = 0;
     g_agc_submit.have_req       = 1;
     pthread_cond_signal(&g_agc_submit.req_cv);
@@ -1018,6 +1173,61 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     return rc == 0 ? 0 : -1;
 }
 
+/* #28 Phase 1 test hook: /mnt/usb0/evo_agc_test_overlay draws a translucent
+ * cyan NV12 bar bottom-centre over the live video, exercising the overlay quad
+ * without the Phase 2 OSD compositor. Verifies the 2nd DrawIndexAuto + blend +
+ * overlay staging + flush path on hardware. */
+#define AGC_TEST_OVL_W 960u
+#define AGC_TEST_OVL_H 160u
+static int agc_test_overlay_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        mode = 0;
+        if (getenv("EVO_AGC_TEST_OVERLAY")) mode = 1;
+        else { FILE *f = fopen("/mnt/usb0/evo_agc_test_overlay", "r"); if (f) { mode = 1; fclose(f); } }
+    }
+    return mode;
+}
+static const uint8_t *agc_test_overlay_surface(void)
+{
+    static uint8_t buf[AGC_TEST_OVL_W * AGC_TEST_OVL_H
+                       + AGC_TEST_OVL_W * (AGC_TEST_OVL_H / 2u)];
+    static int built = 0;
+    if (!built) {
+        uint8_t *y  = buf;
+        uint8_t *uv = buf + AGC_TEST_OVL_W * AGC_TEST_OVL_H;
+        for (uint32_t r = 0; r < AGC_TEST_OVL_H; r++)
+            for (uint32_t c = 0; c < AGC_TEST_OVL_W; c++)
+                y[r * AGC_TEST_OVL_W + c] = (uint8_t)(40u + (c * 180u) / AGC_TEST_OVL_W);
+        for (uint32_t r = 0; r < AGC_TEST_OVL_H / 2u; r++)
+            for (uint32_t c = 0; c < AGC_TEST_OVL_W / 2u; c++) {
+                uv[(r * (AGC_TEST_OVL_W / 2u) + c) * 2u + 0] = 200; /* U -> cyan/blue */
+                uv[(r * (AGC_TEST_OVL_W / 2u) + c) * 2u + 1] = 60;  /* V */
+            }
+        built = 1;
+    }
+    return buf;
+}
+
+int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                        const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                        uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                        int64_t flip_marker)
+{
+    const void *ovl = 0;
+    uint32_t ox = 0, oy = 0;
+    if (agc_test_overlay_mode() && out_w >= AGC_TEST_OVL_W && out_h >= AGC_TEST_OVL_H) {
+        ovl = agc_test_overlay_surface();
+        ox = (out_w - AGC_TEST_OVL_W) / 2u;
+        oy = out_h - AGC_TEST_OVL_H - out_h / 20u;
+    }
+    return pp_agc_present_nv12_overlay(vout_handle, buf_idx, gpu_target, nv12, pitch_bytes,
+                                       coded_height, vis_w, vis_h, out_w, out_h, flip_marker,
+                                       ovl, ovl ? AGC_TEST_OVL_W : 0u,
+                                       ovl ? AGC_TEST_OVL_H : 0u, ox, oy, 0.6f);
+}
+
 void pp_agc_shutdown(void)
 {
     /* Stop the worker first - unless it is wedged, in which case it is blocked
@@ -1035,6 +1245,7 @@ void pp_agc_shutdown(void)
         return;
 
     agc_staging_free();
+    agc_ovl_staging_free();
     if (g_agc.mem) {
         sceKernelMunmap(g_agc.mem, SHADER_MEMORY_BYTES);
         g_agc.mem = 0;
@@ -1058,6 +1269,15 @@ int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t 
 {
     (void)vh; (void)bi; (void)gt; (void)n; (void)p; (void)ch;
     (void)vw; (void)vh2; (void)ow; (void)oh; (void)m;
+    return -1;
+}
+int  pp_agc_present_nv12_overlay(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
+                                 uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
+                                 uint32_t oh, int64_t m, const void *on, uint32_t ow2,
+                                 uint32_t oh2, uint32_t ox, uint32_t oy, float oa)
+{
+    (void)vh; (void)bi; (void)gt; (void)n; (void)p; (void)ch; (void)vw; (void)vh2;
+    (void)ow; (void)oh; (void)m; (void)on; (void)ow2; (void)oh2; (void)ox; (void)oy; (void)oa;
     return -1;
 }
 void pp_agc_shutdown(void) {}
