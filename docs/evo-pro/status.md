@@ -19,9 +19,12 @@
 > - **A** — `pp_videoout_init` registers the UHD VO with ProsperoLight's linear
 >   SDR attr (`0x8000000000000000`) when `pp_agc_available()`; render_frame's
 >   coeffs + MRT0 order are tuned to it, tiled attr = R↔B swap + range shift.
+> Timing measured (avg 982 µs/frame = 3% of the 30 fps budget) and AGC-death
+> recovery works (VO re-registers tiled, CPU path resumes — a plain linear CPU
+> write into the AGC plane also garbles, so recovery is a retile not a converter
+> swap). #55 (reconfig ordering + display sizing) folded in.
 > Still `--agc-probe`-gated; default build unchanged (CPU V8).
-> **Next:** per-frame timing / VSync hold measurement, plane-hash A/B vs the CPU
-> converter, then the follow-ups below.
+> **Remaining:** plane-hash A/B parity, settings row (after #37), P010, GPU OSD.
 > Open bugs from #31: #32 (scrub blanks player UI on the V8 4K path — fix landed
 > via a 1080 scrub overlay, hw-verify pending), #55 (4K V3-fallback buffer
 > overflow), #33 (harness cleanup).
@@ -161,19 +164,39 @@ Root cause of runs 1-2: `agc_path = use_v8 && format==NV12`, but `use_v8`'s
 dead code. Run 1's "weird colors" was the linear-registered VO scanned out while
 the CPU menu drew tiled into it — misattributed to "plan A hangs the compositor".
 
-### Known limitations / follow-ups
+### 2026-09-04 (later) — fallback recovery + #55 + timing, all hardware-verified
 
-- **FFmpeg/CPU fallback on the linear UHD VO garbles** — if a UHD clip takes the
-  CPU path while `pp_agc_available()` (native decoder rejected it → #58 FFmpeg
-  fallback, or an AGC fault), the CPU tiler writes tiled data into the
-  linear-registered buffer → garbled until app restart. Needs a VO
-  reconfigure-on-write-path-switch before #27 goes non-`--agc-probe`.
-  (Observed run 4: 2nd clip `3840x1714` → `rc=0x811d0303` → `016_VDEC_FFMPEG_FALLBACK`.)
-- Instrumentation (`A0..R6` breadcrumbs) is first-frame-only — no per-frame
-  timing yet. Next: measure the GPU convert+flip cost, confirm VSync hold at 4K60.
-- Plane-hash A/B vs the CPU converter still owed (`tools/bench.sh`).
-- Settings `Renderer: Auto/CPU/GPU` row; P010/HDR; GPU OSD-over-4K composite.
-- `#55` (V3 4K overflow) is now also the fallback hazard above — worth a real fix.
+- **GPU present timing** (`--agc-probe`, GTA 4K): `pp_agc: heartbeat presented=900
+  dropped=1 avg=982us max=1205us`. The convert+flip uses **3% of the 33 ms 30 fps
+  budget** — huge headroom. (~1 ms is mostly the 12 MB NV12 `memcpy` into the
+  GPU-visible staging + clflush; decode-into-staging could remove it later.)
+- **AGC-death recovery.** A plain linear CPU write into the `0x8000000000000000`
+  plane *also* garbles (it's a GPU tile layout `render_frame` produces, not
+  CPU-linear — no CPU converter matches it). So on AGC fault/wedge, EVO now
+  **re-registers the VO with the proven tiled attr** and the normal CPU
+  converter takes over. Verified with the `/mnt/usb0/evo_agc_no_present` hook
+  (simulated wedge at frame 121):
+  ```
+  012_AGC_FIRST_PRESENT → pp_agc: TEST WEDGE after 121 frames
+  011_AGC_SUBMIT_WEDGED → 011_AGC_VO_RETILE_REQ
+  005B_VO_RECONFIG_QUEUED req 3840x2160 chg=0 → 013_AGC_VO_RETILE
+  006B_VO_RECONFIG_APPLIED → 012_FIRST_FRAME_PRESENTED v8 pre_tiled
+  ```
+  ~306 ms transition (one dropped frame, last AGC frame held), then playback
+  continues on the CPU tiled path — user reported "plays without any issue".
+- **#55** folded in: `pp_product_reconfigure_vo` takes `open_gate` so the decode
+  gate opens only after `pp_playback_set_output` resizes `pb->display`;
+  `pb->display_cap` tracks the alloc and the V3 branch reallocs to `out_w*out_h*4`
+  regardless of `pb->backend`.
+
+### Remaining for #27
+
+- Plane-hash A/B: AGC output vs the CPU converter, pixel-level (`tools/bench.sh`,
+  `docs/validation.md`). Visual + math parity look right; not automated.
+- Settings `Renderer: Auto/CPU/GPU` row — land #37's config-append first.
+- P010 / 4K60 HEVC Main10 present (#41 wants this shader).
+- GPU OSD-over-4K composite (needs the RGBA passthrough PS; #28 plumbing).
+- Optional: decode straight into GPU-visible memory to drop the ~1 ms staging copy.
 
 ## 2026-09-03 (night) — #27 plan A+B landed (`feat/27-agc-submit-watchdog`)
 

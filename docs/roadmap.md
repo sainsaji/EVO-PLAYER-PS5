@@ -12,13 +12,12 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **critical** #27 (**core GPU present path
-HARDWARE-VERIFIED 2026-09-04** on `feat/27-agc-submit-watchdog` — GTA 4K plays
-via sceAgc: decode→NV12→GPU YUV→RGB→flip, correct colour, no crash, CPU swizzle
-off the 4K path. Took a watchdog'd worker thread + a V8-gate reachability fix +
-the linear UHD VO attr. Still `--agc-probe`-gated. Remaining: per-frame timing /
-VSync, plane-hash A/B, FFmpeg-fallback-on-linear-VO garble, settings row) ·
-**high** #32, #36, #55 · **medium** #35,
+Priority labels track this order: **critical** #27 (**GPU present path + timing +
+AGC-death recovery all HARDWARE-VERIFIED 2026-09-04** on
+`feat/27-agc-submit-watchdog` — GTA 4K via sceAgc, correct colour, 982 µs/frame
+(3% of budget), and a clean VO-retile-to-tiled recovery on AGC wedge. **#55
+folded in.** Still `--agc-probe`-gated. Remaining: plane-hash A/B parity,
+settings row (after #37), P010) · **high** #32, #36 · **medium** #35,
 #37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
@@ -27,7 +26,10 @@ the swscale rotate-ring slab move + `--agc-probe` gate; PR #54, hw-verified) ·
 **#56** (GTA 4K regression — was #27's unproven sceAgc path armed by default;
 gated) · **#57** (4K seek "too demanding" — #31 routed Tears of Steel to native
 decode, which rejects it post-`sceVideodec2Reset`; PR #58 adds the FFmpeg
-fallback). New: **#55** (4K V3-fallback buffer overflow, surfaced by #6).
+fallback). **#55** (4K V3-fallback buffer overflow) — **fixed in PR #61** as part
+of #27: `pp_product_reconfigure_vo` gates on `pp_playback_set_output` completing,
+`pb->display_cap` tracks the alloc, the V3 branch reallocs to the real size.
+Exercised (no corruption/hang) via #27's VO-retile path; verify + close.
 
 **Closed 2026-09-03 (earlier):** **#46** (persistence — hardware-verified,
 `788b1a0`), **#44** (RmlUi parity signed off, legacy screen renderer deleted) +

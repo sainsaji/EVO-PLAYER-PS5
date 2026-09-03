@@ -14,8 +14,13 @@
 > (`pp_agc.c`); **(reachability)** `pp_playback` lets NV12 UHD through the V8
 > gate — `agc_path` was dead code otherwise; **(A)** the UHD VO is registered
 > linear (`0x8000000000000000`) when AGC is armed, matching render_frame's
-> coefficients + MRT0 order. Remaining: per-frame timing / VSync hold,
-> plane-hash A/B, FFmpeg-fallback-on-linear-VO garble, settings row, P010.
+> coefficients + MRT0 order.
+> **Timing:** 982 µs/frame convert+flip = 3% of the 30 fps budget.
+> **AGC-death recovery:** a plain linear CPU write into the AGC plane *also*
+> garbles (that attr is a GPU tile layout, not CPU-linear), so on fault/wedge the
+> VO **re-registers tiled** and the CPU converter resumes — verified with the
+> `evo_agc_no_present` wedge hook. **#55** (V3 reconfig overflow) fixed alongside.
+> Remaining: plane-hash A/B parity, settings row (after #37), P010.
 > See `status.md` 2026-09-04 for the run-by-run iteration log.
 
 ---
