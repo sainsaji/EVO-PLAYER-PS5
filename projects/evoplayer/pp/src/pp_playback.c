@@ -322,14 +322,22 @@ static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
     return 0;
 }
 
-/* #27 test hook: EVO_AGC_NO_PRESENT keeps pp_agc_available() (so the VO still
- * registers linear) but forces the CPU-into-linear-VO fallback path, the only
- * way to exercise it on demand without an actual GPU fault. */
+/* #27 test hook: force the CPU-into-linear-VO fallback path while pp_agc stays
+ * "available" (so the VO still registers linear) - the only way to exercise it
+ * on demand without an actual GPU fault. Toggled by the env var OR, on the
+ * console where env is awkward, by FTP-dropping /mnt/usb0/evo_agc_no_present. */
 static int agc_no_present(void)
 {
     static int v = -1;
-    if (v < 0)
+    if (v < 0) {
         v = getenv("EVO_AGC_NO_PRESENT") ? 1 : 0;
+#ifdef EVO_APP_MODULE
+        if (!v) {
+            FILE *f = fopen("/mnt/usb0/evo_agc_no_present", "r");
+            if (f) { v = 1; fclose(f); }
+        }
+#endif
+    }
     return v;
 }
 
