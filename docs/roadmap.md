@@ -10,10 +10,10 @@ names, then go.
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
 09-03, awaiting a first hardware run) · **high** #44, #32, #36 · **medium** #9,
-#16, #6, #30/#37/#38/#39/#41, #33, #34, #35, #42 · **low** the rest.
+#16, #6, #37/#38/#39/#41, #33, #34, #35, #42 · **low** the rest.
 `independent` = no cross-deps, work any time in parallel.
 
-**Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 ·
+**Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
 `rmlui` = #44, #45, #16, #28 · `subtitles` = #35, #42, #43. (#26 closed
 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
 H.264 plays.)
@@ -25,7 +25,7 @@ H.264 plays.)
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
                  │  #17 CI/tests   #9 Emby URL   #8 codec metrics   #42 subtitle cue counts   │
-                 │  #5 swscale MT  #16 UI text/overflow   #30 evo_vdec.h seam sign-off       │
+                 │  #5 swscale MT  #16 UI text/overflow   #34 IME kb   #35 subtitles A/C/D   │
                  └──────────────────────────────────────────────────────────────────────────┘
 
   #26 app-module playback ─── CLOSED (works; demanding 4K → native decode ✅ #31)
@@ -49,7 +49,7 @@ H.264 plays.)
     #28 RenderInterface → sceAgc + delete the CPU rasteriser (GPU Step 3, after #27)
 
   native hw decode  (label: native-decode, v1.1.0 — #29 umbrella retired)
-    #30 evo_vdec.h seam ── SIGNED OFF 09-03 (parity sweep owed)
+    #30 evo_vdec.h seam ✅ CLOSED (FFmpeg-parity regression check moved to #38)
     #31 evo_vdec_native.c ✅ CLOSED — GTA 4K H.264 plays
     #37 Video decoder toggle (Auto/FFmpeg/Native) + probe + config  ◀── next
     #38 validation sweep + FFmpeg-vs-native A/B benchmark + docs
@@ -80,7 +80,6 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
-| **#30** | Finish + sign off the `evo_vdec.h` decoder seam (`native-decode`) — **signed off 09-03**, parity sweep owed | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**
@@ -138,7 +137,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 
 | Story | What | State |
 |---|---|---|
-| **#30** | `evo_vdec.h` decoder seam (Phase 3) | signed off, parity sweep owed |
+| **#30** | `evo_vdec.h` decoder seam (Phase 3) | ✅ closed — FFmpeg-parity check moved to #38 |
 | **#31** | `evo_vdec_native.c` — `sceVideodec2` backend (Phase 4) | ✅ closed |
 | **#37** | `Video decoder: Auto / FFmpeg / Native` toggle + `evo_vdec_probe()` + config migration (Phase 5) | **◀ next** |
 | **#38** | Validation sweep (backend column) + FFmpeg-vs-native A/B benchmark + docs rewrite (Phase 6) | open |
