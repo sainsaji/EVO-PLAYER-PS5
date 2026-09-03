@@ -15,11 +15,12 @@ timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 Priority labels track this order: **critical** #27 (render_frame ported + wired
 09-03, awaiting a first hardware run) · **high** #44, #32, #36 (#46 code landed
 09-03, HW-verify pending) · **medium** #9, #16, #6, #37/#38/#39/#41, #33, #34,
-#35, #42, #47, #49, #50 · **low** #48, #51, the rest.
+#35, #42, #47, #49, #50, #53 · **low** #48, #51, #52, the rest.
 `independent` = no cross-deps, work any time in parallel.
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
-`rmlui` = #44, #45, #16, #28, #49 · `subtitles` = #35, #42, #43. (#26 closed
+`rmlui` = #44, #45, #16, #28, #49 · `subtitles` = #35, #42, #43 ·
+`modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)). (#26 closed
 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
 H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
 only a hardware pass left.)
@@ -35,6 +36,12 @@ test suite over the runtime data-root logic + persistence parsers (v0.9.0,
 keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
 `app-module`).
 
+**2026-09-03 (later):** #52 stand up the GitHub Project board (tooling in
+`f7a340e`; `docs/project-tracking.md`) · #53 `main.c` Track-B carve-up —
+`main.c` logic is at 0% coverage because it can't be host-linked; #53 is the
+prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
+New label `modularisation` = #49 + #53.
+
 ---
 
 ## Dependency graph
@@ -44,7 +51,8 @@ the issue UI shows blockers / sub-tasks directly:
 
 - **Sub-issues:** #44 → #16 · #46 → #50, #51
 - **Blocking → blocked:** #6 → #27 → #28 · #44 → #28 · #44 → #35 → #43 ·
-  #37 → #38 · #8 → #38
+  #37 → #38 · #8 → #38 · #53 → #50 (`main.c` logic can't be host-linked for
+  tests until the carve-up)
 
 Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
 / Related) — softer "coordinate with" / "do before" links live there only.
@@ -99,6 +107,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 |---|---|---|
 | **#17** | CI: unit tests, coverage, Sonar | `docs/tooling.md`, `docs/validation.md`, `docs/converter-perf.md`; `.github/workflows/`, `tools/bench.sh`, `tools/prof_rmlui.sh` |
 | **#52** | Stand up the "EVO Player Roadmap" GitHub Project board — tooling landed (`f7a340e`); needs `gh auth refresh -s project`, one script run, and the views + built-in workflows set up in the UI | `scripts/setup-github-project.sh`, `.github/workflows/add-to-project.yml`, `docs/project-tracking.md` |
+| **#53** | `main.c` carve-up, **Track B** — extract `evo_settings` / `evo_osd` / `evo_media_meta` / `evo_browser` / per-screen draw etc. as leaf modules (pure moves, no behaviour change). `main.c` is ~12.9k lines and links the whole runtime, so its logic is at **0% coverage**; this is the lever on that. Blocks #50's `main.c` portion. `modularisation` label with #49 | `docs/modularisation-plan.md` (§ Track B, § Rules), `projects/evoplayer/main.c` (`/* PROSPERO_*_START/END */` markers), `projects/evoplayer/Makefile` (`_SRCS`), `tools/{bench,uiview}.sh` (parity checks) |
 | **#33** | Clean up the unattended hw-test harness — **partly done**: `tools/evo-remote.sh` (scriptable `play`/`seek`/`watch` over FTP) + `src/evo_usb_remote.c` (`-DEVO_USB_REMOTE`) replaced the compile-time autoplay; `note()` USB log gated to `-DEVO_VDEC_LOG`; payload build now invalidates the app cflags stamp. Remaining: fully hands-off launch (shsrv), `app_ctl` launch fix | `tools/evo-remote.sh`, `src/evo_usb_remote.c`, `scripts/package-app.sh` (`--usb-remote`) |
 | **#9** | Emby shows raw stream URL, not the title | `docs/addons-emby-nuvio.md`; `projects/evoplayer/addons/src/addon_emby.c`, `ui_rml` list rendering (`evo_rmlui_bridge.cpp` / `evo_rmlui_app.cpp` list path) |
 | **#8** | Codec-sweep decode latency / drop metrics | `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/validation.md`; `pp/include/pp_pipeline_metrics.h`, `main.c` perf counters + `EVO_DIAG_FPS`, `projects/*_test/` |
