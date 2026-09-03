@@ -14,8 +14,9 @@
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   status                                  print /mnt/usb0/evo_status once
+#   boot                                    print evo_boot.log (pre-unjail probe results)
 #   watch [seconds]                         stream evo_status + new evo_vdec.log lines
-#   log                                     pull evo_vdec.log + the breadcrumb tail
+#   log                                     pull evo_boot.log + evo_vdec.log + breadcrumb tail
 #   clear                                   delete the USB status / log / breadcrumb files
 #
 # The one thing this can't do: launch the title (sceSystemServiceLaunchApp from
@@ -85,12 +86,14 @@ PY
 
 USB_STATUS="/mnt/usb0/evo_status"
 USB_VDEC="/mnt/usb0/evo_vdec.log"
+USB_BOOT="/mnt/usb0/evo_boot.log"
 USB_BC="/mnt/usb0/pp_4k_stage_breadcrumb.txt"
 
 case "${SUB}" in
 build)
     "${SCRIPTS_DIR}/package-app.sh" --ffpfsc --usb-remote "$@"
-    del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BC}" /mnt/usb0/pp_4k_stage_last.txt || true
+    del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BOOT}" "${USB_BC}" \
+              /mnt/usb0/pp_4k_stage_last.txt || true
     "${SCRIPTS_DIR}/deploy-app.sh" --ffpfsc
     echo ""
     echo "  >>> launch PPSA99039 from the Games row (ShadowMount+ remounted) <<<"
@@ -107,12 +110,16 @@ kill)
     ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
-clear)  del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BC}" /mnt/usb0/pp_4k_stage_last.txt ;;
+clear)  del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BOOT}" "${USB_BC}" /mnt/usb0/pp_4k_stage_last.txt ;;
 status) get_file "${USB_STATUS}" || echo "(no evo_status — launched? built --usb-remote?)" ;;
+boot)   get_file "${USB_BOOT}"   || echo "(no evo_boot.log — launched? sandbox open?)" ;;
 log)
     mkdir -p "${LOG_OUT}"
-    get_file "${USB_VDEC}" | tee "${LOG_OUT}/evo_vdec.log"
-    echo "--- breadcrumb tail ---"
+    echo "=== evo_boot.log (pre-unjail probes) ==="
+    get_file "${USB_BOOT}" 2>/dev/null | tee "${LOG_OUT}/evo_boot.log" || true
+    echo "=== evo_vdec.log ==="
+    get_file "${USB_VDEC}" 2>/dev/null | tee "${LOG_OUT}/evo_vdec.log" || true
+    echo "=== breadcrumb tail ==="
     get_file "${USB_BC}" 2>/dev/null | grep -E 'REMOTE|SEEK|FLUSH|VDEC|012_|009_|AVLOG|RECONFIG|FINISH' | tail -40 || true
     ;;
 watch)

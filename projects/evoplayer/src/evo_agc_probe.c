@@ -16,10 +16,9 @@
 #ifdef EVO_AGC_PROBE
 
 #include "evo_agc_probe.h"
+#include "evo_boot_log.h"
 
-#include <stdarg.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -27,23 +26,9 @@
 extern int32_t  sceAgcInit(void *state, uint32_t defaults_revision);
 extern void    *sceAgcGetRegisterDefaults(void);
 
-extern int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
-extern int sceKernelDebugOutText(int, const char *);
-
-struct agc_note { char pad[45]; char msg[3075]; };
-static void note(const char *fmt, ...)
-{
-    struct agc_note n;
-    char line[512];
-    va_list ap;
-    memset(&n, 0, sizeof n);
-    va_start(ap, fmt);
-    vsnprintf(n.msg, sizeof n.msg, fmt, ap);
-    va_end(ap);
-    sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
-    snprintf(line, sizeof line, "%s\n", n.msg);
-    sceKernelDebugOutText(0, line);
-}
+/* Runs pre-unjail; results reach /mnt/usb0/evo_boot.log (buffered, flushed
+ * once the sandbox opens) + a notification popup. */
+#define note(...) evo_boot_log(__VA_ARGS__)
 
 /* Fault guard: a NULL-bound stub call SIGSEGVs; report which call instead of a
  * bare crash popup. Mirrors evo_videodec2_probe.c. */

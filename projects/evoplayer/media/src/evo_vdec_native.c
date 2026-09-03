@@ -35,6 +35,7 @@
  * -DEVO_VDEC_REORDER_DEPTH.
  */
 #include "evo_vdec_native.h"
+#include "evo_boot_log.h"
 
 #ifdef EVO_APP_MODULE
 
@@ -108,6 +109,10 @@ static void note(const char *fmt, ...)
     memset(&n, 0, sizeof n);
     snprintf(n.msg, sizeof n.msg, "%s", msg);
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
+
+    /* evo_vdec_native_probe() runs pre-unjail — route it to the buffered
+     * boot log too (harmless overlap once /mnt/usb0 is up). */
+    evo_boot_log("%s", msg);
 
 #ifdef EVO_VDEC_LOG
     FILE *f = fopen("/mnt/usb0/evo_vdec.log", "a");
