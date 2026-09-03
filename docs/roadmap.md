@@ -9,11 +9,14 @@ To implement a story: open its issue, read the docs it names, then the files it
 names, then go.
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
-09-03, awaiting a first hardware run) · **high** #25, #32, #36 · **medium** #9,
-#16, #6, #30/#37/#38/#39/#41, #33, #34, #35 · **low** the rest. `independent` =
-no cross-deps, work any time in parallel. The **`native-decode`** label groups
-#30–#41 (the retired #29 umbrella). (#26 closed 2026-09-02 — app-module
-playback works. #31 closed 2026-09-03 — native 4K H.264 plays.)
+09-03, awaiting a first hardware run) · **high** #44, #32, #36 · **medium** #9,
+#16, #6, #30/#37/#38/#39/#41, #33, #34, #35, #42 · **low** the rest.
+`independent` = no cross-deps, work any time in parallel.
+
+**Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 ·
+`rmlui` = #44, #45, #16, #28 · `subtitles` = #35, #42, #43. (#26 closed
+2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
+H.264 plays.)
 
 ---
 
@@ -21,7 +24,7 @@ playback works. #31 closed 2026-09-03 — native 4K H.264 plays.)
 
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
-                 │  #17 CI/tests   #9 Emby URL   #8 codec metrics   #3 subtitles (meta)      │
+                 │  #17 CI/tests   #9 Emby URL   #8 codec metrics   #42 subtitle cue counts   │
                  │  #5 swscale MT  #16 UI text/overflow   #30 evo_vdec.h seam sign-off       │
                  └──────────────────────────────────────────────────────────────────────────┘
 
@@ -38,7 +41,12 @@ playback works. #31 closed 2026-09-03 — native 4K H.264 plays.)
                                  └─► Route B libSceVideodec2 ✅ #31 CLOSED — GTA 4K
                                      plays real-time on native decode (2026-09-03)
 
-  #25 RmlUi migration (umbrella) ── sign off before #28 replaces the renderer
+  RmlUi migration  (label: rmlui — #25 umbrella retired; screens built)
+    #44 per-screen parity sign-off + delete dead legacy screen code  ◀── blocks #28
+    #16 text clamping / widget overflow  (folded into #44's pass)
+    #45 icon swap (Lucide + Kenney, approved)
+    #35 part B: on-video caption overlay off legacy rr_text → RmlUi
+    #28 RenderInterface → sceAgc + delete the CPU rasteriser (GPU Step 3, after #27)
 
   native hw decode  (label: native-decode, v1.1.0 — #29 umbrella retired)
     #30 evo_vdec.h seam ── SIGNED OFF 09-03 (parity sweep owed)
@@ -66,10 +74,10 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#33** | Clean up the unattended hw-test harness — **partly done**: `tools/evo-remote.sh` (scriptable `play`/`seek`/`watch` over FTP) + `src/evo_usb_remote.c` (`-DEVO_USB_REMOTE`) replaced the compile-time autoplay; `note()` USB log gated to `-DEVO_VDEC_LOG`; payload build now invalidates the app cflags stamp. Remaining: fully hands-off launch (shsrv), `app_ctl` launch fix | `tools/evo-remote.sh`, `src/evo_usb_remote.c`, `scripts/package-app.sh` (`--usb-remote`) |
 | **#9** | Emby shows raw stream URL, not the title | `docs/addons-emby-nuvio.md`; `projects/evoplayer/addons/src/addon_emby.c`, `ui_rml` list rendering (`evo_rmlui_bridge.cpp` / `evo_rmlui_app.cpp` list path) |
 | **#8** | Codec-sweep decode latency / drop metrics | `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/validation.md`; `pp/include/pp_pipeline_metrics.h`, `main.c` perf counters + `EVO_DIAG_FPS`, `projects/*_test/` |
-| **#3** | Subtitle subsystem + precise overlay timing (meta) | `docs/validation.md`; `media/src/evo_subtitle.c`, `assets/rml/subtitles.rml`, `main.c` subtitle picker/overlay path |
+| **#42** | Universal subtitle cue counts — demux-probe count for non-mkvmerge containers so decoy tracks lose the ranking (`prospero_subtitle_declared_cues` / `_score_stream`) | `docs/backlog.md` §6; `media/src/evo_subtitle.c`, `media/src/prospero_thumbnail.c` (probe pattern), `main.c` picker path |
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
 | **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
-| **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) is gated behind #25. Distinct from #3 (picker/cue-count/`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
+| **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
 | **#16** | Text clamping / overflow / title collisions | `docs/rmlui-integration-guide.md`, `docs/theming.md`; `assets/rml/*.rcss`, `ui_rml/src/evo_rmlui_render.cpp` (text path), `tools/uiview.sh` to check every screen |
 | **#30** | Finish + sign off the `evo_vdec.h` decoder seam (`native-decode`) — **signed off 09-03**, parity sweep owed | `docs/evo-pro/native-decode-plan.md` §3, `docs/modularisation-plan.md` Track A, `docs/validation.md`; `media/include/evo_vdec.h`, `media/src/evo_vdec_ffmpeg.c`, `main.c` thumbnail decoders, `tools/bench.sh` |
@@ -152,14 +160,22 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 - Coordinate **#37**'s fscanf config-append with **#27**'s `Renderer` row
   (same settings screen; land decoder-append first).
 
-### Ongoing · `#25` — RmlUi migration (umbrella)
+### RmlUi migration — label **`rmlui`** *(#25 umbrella retired 2026-09-03)*
 
-Not a single PR. Screens are built; the remaining work is parity sign-off vs
-`main` and folding in #16. **Must be signed off before #28** replaces the
-render interface.
+Every screen already renders through RmlUi (`evo_rmlui_render_*`). Remaining
+work as discrete stories:
 
-- Reads: `docs/rmlui-integration-guide.md`, `docs/ui-handoff.md`, `docs/theming.md`, `docs/icon-swap-handoff.md`
-- Files: `projects/evoplayer/ui_rml/`, `projects/evoplayer/assets/rml/`
+| Story | What | State |
+|---|---|---|
+| **#44** | Per-screen parity sign-off vs `main` + delete the dead legacy screen code (`ui/src/evo_chrome.c`, `evo_screens.c`, shadowed `draw_*_screen`) — **blocks #28** | open, high |
+| **#16** | Text clamping / widget overflow / title collisions — folded into #44's pass | open |
+| **#45** | Icon swap — Lucide concept icons + Kenney controller glyphs (approved, `docs/icon-swap-handoff.md`) | open, low |
+| **#35** part B | On-video **caption** rendering off legacy `rr_text` → RmlUi | open |
+| **#28** | Bind `Rml::RenderInterface` → `sceAgc` + delete the CPU coverage rasteriser (GPU Step 3, after #27) | open, low |
+
+- Reads: `docs/rmlui-integration-guide.md` (§7 per-screen parity specs),
+  `docs/ui-handoff.md`, `docs/theming.md`, `docs/icon-swap-handoff.md`
+- Files: `projects/evoplayer/{ui_rml,assets/rml,ui/src}/`, `main.c`, `Makefile` (`UI_SRCS`)
 
 ---
 
