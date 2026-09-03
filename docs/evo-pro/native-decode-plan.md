@@ -393,7 +393,7 @@ and `v8_hold` skips the flip during the seek-discard window), and Phase 5
       *hangs* still wedges the app slot. Add the watchdog thread once the
       happy path is confirmed on hardware.
 
-### Phase 5 — settings toggle + runtime probe
+### Phase 5 — settings toggle + runtime probe — **#37**
 
 - [ ] `evo_vdec_probe()` at startup (or first playback): load the module,
       resolve NIDs, run the cheapest non-destructive check

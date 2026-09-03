@@ -44,7 +44,8 @@ plays.)
     └─ #30 Phase 3: finish the evo_vdec.h seam  ── SIGNED OFF 09-03 (parity sweep owed)
        └─ #31 Phase 4 ✅ CLOSED → #32 scrub shows no player UI on the V8 4K path
           (not a freeze — app responsive; k4_live never composites the OSD +
-          v8_hold skips the flip) (high) → Phase 5 toggle → Phase 6
+          v8_hold skips the flip) (high) → #37 Phase 5 (Auto/FFmpeg/Native
+          settings toggle) → Phase 6
 ```
 
 ---
@@ -122,14 +123,14 @@ decoded inside the full EVO Player. `#30` (the `evo_vdec.h` seam) is signed off.
 — GTA VI 4K H.264 plays real-time on `sceVideodec2` in EVO (`media/src/evo_vdec_native.c`,
 resident decoder created pre-unjail, NV12→I420 de-interleave, colours correct,
 no judder). Frame order is **display-order** (B-frame content smooth) — the
-reorder window + min-PTS pairing hold. **Open: seek → frozen picture** on the
-V8 4K path (filed high-priority). Next: **Phase 5** (Auto/FFmpeg/Native
-settings row) + the seek fix.
+reorder window + min-PTS pairing hold. **Open: #32** (scrub shows no player UI
+on the V8 4K path — not a freeze). Next: **#37 Phase 5** (Auto/FFmpeg/Native
+settings toggle + probe + config migration) + the #32 fix.
 
 - Reads: **`docs/evo-pro/status.md`** (the win + Phase 4 plan), `docs/evo-pro/native-decode-plan.md` (§3 architecture, Phase 2/4, kill criteria §8), `docs/evo-pro/videodec2-abi.md`
 - Files: `media/include/evo_vdec.h`, `projects/evoplayer/src/evo_videodec2_probe.c` (the proven sequence to port), `media/include/sce/sce_videodec2.h`, `media/src/evo_vdec_ffmpeg.c` (the sibling impl), `main.c` (probe runs before `evo_jailbreak_self()`), `tools/native-app/stubs/prx/` (the PRX import stubs)
 - **Two hard-won requirements** (see status.md): (1) `libSceVideodec2`+`libSceAgc`+`libSceAgcDriver` as positional PRX import stubs; (2) decode init must run **before** the self-unjail, or `sceSysmoduleLoadModule(207)` → ESDKVERSION.
-- Sequencing: Phase 4 `evo_vdec_native.c` → Phase 5 settings toggle + `evo_vdec_probe()` → Phase 6 validation. Route A (`sceAvPlayer`) is dead.
+- Sequencing: Phase 4 `evo_vdec_native.c` (#31 ✅) → **#37** Phase 5 settings toggle + `evo_vdec_probe()` + config migration (coordinate the fscanf-append with #27's `Renderer` row) → Phase 6 validation. Route A (`sceAvPlayer`) is dead.
 
 ### Ongoing · `#25` — RmlUi migration (umbrella)
 

@@ -385,11 +385,12 @@ the "remote-close investigation" section — there is no clean remote close):
       `pp_converter_fused` / the CPU swizzle from the 4K hot path; submit
       watchdog thread; P010/HDR present path.
 - [ ] **#27 settings row** `Playback → Renderer: Auto / CPU / GPU` — coordinate
-      with **#29 Phase 5**'s `Video decoder` row (same screen, same
-      fscanf-append pattern).
+      with **#37**'s `Video decoder` row (same screen, same fscanf-append
+      pattern — land decoder-append first, then renderer).
 - [ ] **#32** — scrub shows no player UI on the V8 4K path (not a freeze;
       k4_live never composites the OSD + `v8_hold` skips the flip) (high).
-- [ ] **#29 Phase 5** — `evo_vdec_probe()` gate + the `Video decoder` settings row.
+- [ ] **#37** — Phase 5: `Video decoder: Auto / FFmpeg / Native` settings
+      toggle + `evo_vdec_probe()` gate + config migration.
 - [ ] **#28 Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`);
       `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); fold the UI
       pass into `pp_agc` `render_frame`; **delete `evo_rmlui_render.cpp`'s CPU
