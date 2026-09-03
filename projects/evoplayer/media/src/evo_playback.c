@@ -380,7 +380,21 @@ int decode_next_video_frame(void)
             audio_rel = audio_clock_seconds;
             behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
 
-            if (audio_rel > 0.05) {
+            /*
+             * #32: in the seek-discard window every frame between the keyframe
+             * and the seek target is dropped by pp_playback_push_frame(). Pacing
+             * them to the frame rate (the branches below) makes a seek across a
+             * long 4K GOP take ~GOP-length wall time - the slow GTA-trailer
+             * seek. Decode + discard as fast as the decoder returns instead;
+             * sceVideodec2Decode is synchronous so this can't outrun it, and
+             * the #32 overlay pump keeps the VO reconfigure off the decode
+             * thread's back.
+             */
+            int seek_discarding = g_pp_pb.active && g_pp_pb.seek_discarding;
+
+            if (seek_discarding) {
+                /* no pacing - the frame is about to be thrown away */
+            } else if (audio_rel > 0.05) {
                 /*
                  * Video ahead of audio: wait for audio, but NEVER freeze the
                  * picture if audio clock stops (underrun / 44.1k stall).
