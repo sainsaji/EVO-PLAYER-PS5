@@ -1,11 +1,14 @@
 # GPU rendering — moving convert + composite + UI off the CPU
 
-> **Status:** plan, not started. Sequenced **after
-> [phase-1b-app-module.md](phase-1b-app-module.md) milestone 1** — Steps 2–3
-> need the app-module context; Step 1 is CPU-only and can land any time.
+> **Status (2026-09-03):** Step 1 ✅ shipped + hardware-verified (idle menus
+> 11 → ~55–60 fps). **Step 2 (#27): AGC gate PASSED, `pp_agc_init` (shader
+> setup) hardware-verified, `render_frame` ported + present path wired
+> (`pp/src/pp_agc.c`, `pp_playback.c` V8 branch) — builds green, awaiting a
+> hardware run.** Step 3 (#28) committed, sequenced after Step 2.
 >
-> **Trigger:** the RmlUi UI runs at **~11 fps (~90 ms/frame)** against a design
-> that targets 60 (16.6 ms). See [ui-handoff.md](../ui-handoff.md) and
+> **Trigger:** the RmlUi UI ran at **~11 fps (~90 ms/frame)** against a design
+> that targets 60 (16.6 ms); 4K playback is CPU-bound on the YUV→BGRA convert +
+> tile swizzle. See [ui-handoff.md](../ui-handoff.md) and
 > [rmlui-integration-guide.md](../rmlui-integration-guide.md) (§4 virtualisation,
 > §5 rasteriser).
 
@@ -115,46 +118,50 @@ at ~8–15 fps on this host. Step 2 (AGC) is now only needed for smooth 60 fps
 *during* held navigation and for the 4K video convert/composite/flip — not a
 blocker for UI responsiveness.
 
-### Step 2 — AGC present + composite (needs the app module)
+### Step 2 — AGC convert + present (#27) — video path
 
-Lift `native_agc_present.cpp`. Move **YUV→BGRA convert**, the **final
-composite**, and the **flip** onto the GPU. The CPU converter
-(`pp_converter_*.c`) stops running on the hot path; `pp_videoout.c` submits an
-AGC DCB instead of `sceVideoOutSubmitFlip` with a CPU-filled buffer.
+Lift `native_agc_present.cpp`. Move **YUV(NV12)→RGB convert**, the **scale**,
+and the **flip** onto the GPU for the 4K/1080p video path. The CPU converter
+(`pp_converter_*.c`) + tile swizzle stop running on the hot path.
 
-#### AGC reachability probe — `projects/agc_probe/` (in progress 2026-09-02)
+**Progress (2026-09-03):**
 
-Gate: can a payload reach `sceAgc` without repackaging as an app module?
-
-- **elfldr payload context: NO.** `-lSceGnmDriver` → the payload SIGSEGVs on
-  GNM init (`sce::Gnm::Initialize Error: Get CU Mask Fails (0)`).
-  `sceKernelLoadStartModule("/system/common/lib/libSceAgc.sprx")` → **hangs,
-  never returns** (left a wedged payload in the elfldr host; console stayed
-  fully healthy — websrv/ftp/`/fs` kernel-R-W all responsive, no KP). The
-  elfldr host process has no path to the graphics stack.
-- **ELF track abandoned** (elfldr *and* hbldr are borrowed-process sandboxes —
-  the same context class that never reached the `sceVideodec2` decoder). All
-  GPU/decode work now targets the **registered app module `PPSA99039`**, the
-  context where ProsperoLight runs the full pipeline.
-- **App-module recon:** `scripts/package-app.sh --agc-probe` compiles
-  `-DEVO_AGC_PROBE`, which runs `evo_agc_probe()` at `main()` entry —
-  `sceKernelLoadStartModule("/system/common/lib/libSceAgc.sprx")` + NID
-  resolution from inside `PPSA99039`, reported via the notification popup.
-  The app module already boots to the menu, so this answers the Step 2 gate
-  **before** task 8 (playback) is fixed. Deploy the current build and read
-  the "EVO agc: ..." notification.
-- If `libSceAgc` loads and the NIDs resolve → Step 2 is viable: lift
-  `native_agc_present.cpp` + `third_party/ProsperoLight/assets/private/*.bin`
-  into a new `pp/src/pp_agc_present.c`, built by `package-app.sh`.
+- **AGC reachability gate: PASSED.** From `PPSA99039`, `sceAgcInit` → 0,
+  `sceAgcGetRegisterDefaults()` → valid table. The fix (shared with #31's
+  decode) is **positional PRX import stubs** — `libSceAgc` + `libSceAgcDriver`
+  as unconditional `DT_NEEDED` for `MODE == player`. No
+  `sceKernelLoadStartModule`, no runtime NID resolution; `evo_agc_probe.c` is
+  `extern` + call. (The elfldr-payload path is dead — same borrowed-process
+  sandbox class that never reached `sceVideodec2`.)
+- **`pp_agc_init` hardware-verified.** `sceAgcInit` → alloc/map the 0xD0000
+  shader scratch (direct-memory type 12, prot 0x33) → `copy_asset` the 6
+  vendored ProsperoLight blobs (`pp/blobs/*.bin`, `.incbin` via
+  `pp/src/agc_blobs.S`) → `prepare_resources` (NGR1 rebase + SDR full-range
+  coeffs) → `sceAgcCreateShader` ×2 → `sceAgcLinkShaders` — all return 0.
+- **`render_frame` ported + wired (not run on hardware).** `agc_render_frame`
+  in `pp/src/pp_agc.c` is a verbatim strip of ProsperoLight's `render_frame`
+  (SDR/NV12, HUD/overlay removed). `pp_agc_present_nv12(vout_handle, buf_idx,
+  gpu_target, nv12, …)` reuses EVO's own `pp_videoout` handle (never
+  `sceVideoOutOpen`), stages the NV12 into a per-VO-buffer direct-memory
+  scratch (the decoder's malloc copy is `PROT_RW` flexible memory — not
+  GPU-samplable), and lets the DCB own its `sceAgcDcbSetFlip`.
+  `pp_videoout_adopt_flip` marks the buffer in-flight without a second
+  SubmitFlip. `pp_playback.c`'s V8 branch calls it when
+  `pp_agc_available() && NV12`; `evo_vdec_native.c` emits NV12 straight
+  (skips the NV12→I420 de-interleave) when AGC is up.
+- **Open hardware unknowns:** EVO registers its VO buffer
+  `SetBufferAttribute2(0x8000000022000000, tiling=0)` while `render_frame`'s
+  render-target CX bits are tuned to ProsperoLight's `0x80..00` pool —
+  mismatch = garbled/channel-swapped, not a crash; `sceAgcDcbSetFlip` against a
+  `pp_videoout`-registered handle; submit latency on the playback thread
+  (first-frame `sigsetjmp` guard only, no watchdog thread).
 
 - Shaders: ProsperoLight's NV12-sample + fullscreen-quad blobs cover the
   video path. **No PSSL compiler** — but `llvm-mc-18` (in the container)
   assembles/disassembles GCN for `gfx1030`, so a hand-written
-  RGBA-passthrough PS (for compositing the RmlUi surface) is feasible.
-- Touches: `pp/src/pp_videoout.c`, `pp/src/pp_converter*` (bypass on target),
-  new `pp/src/pp_agc.c` + `agc_blobs.S`.
-- Guard behind `__PROSPERO__` so the host preview (`tools/uiview*`,
-  `uiplay`) keeps the SDL/CPU path — no host regression.
+  RGBA-passthrough PS (for compositing the RmlUi surface / OSD) is feasible.
+- Guard behind `EVO_APP_MODULE` so the host preview (`tools/uiview*`) keeps
+  the SDL/CPU path — no host regression.
 - **Full how-to (blobs disassembled, `render_frame` annotated, the port and
   wiring): [agc-implementation.md](agc-implementation.md).**
 

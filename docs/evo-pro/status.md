@@ -5,14 +5,87 @@
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 >
 > **RESUME HERE → #27 (GPU Step 2).** #31 (native 4K decode) is DONE + closed.
-> The AGC gate passed and `pp_agc_init` (shader setup) is hardware-verified.
-> **Next: port `render_frame` + wire the present path** — the full checklist is
-> in issue #27's body ("Work — port render_frame + wire") and the section just
-> below. Open bugs from #31: #32 (seek freeze on the V8 4K path, high) and #33
-> (test-harness cleanup, partly done — `tools/evo-remote.sh`).
-> Console `192.168.0.6` (ethernet, `.env`); build `877f1af3_0903-0340` deployed.
+> The AGC gate passed, `pp_agc_init` (shader setup) is hardware-verified, and
+> **`render_frame` is now ported + wired end to end (host + app-module builds
+> green)** — needs a hardware run. Open bugs from #31: #32 (seek freeze on the
+> V8 4K path, high) and #33 (test-harness cleanup, partly done).
+> Console `192.168.0.6` (ethernet, `.env`).
 > Test loop: `tools/evo-remote.sh build --agc-probe` -> launch from Games row
-> -> `evo-remote.sh boot`.
+> -> `evo-remote.sh boot` -> `evo-remote.sh play <4K H.264>`.
+
+## 2026-09-03 (evening) — remote-close investigation + console state
+
+The console is **powered on and reachable** (`192.168.0.6`: FTP 2121, websrv
+8080, elfldr 9021). **EVO is running on it** — the pre-`#27` build
+(`03c0d6b6-dirty_0903-0322`), idle on the launch screen (`evo_status` `t=`
+advancing ~1/s, `scr=0 active=0`). The deployed image is
+`/data/homebrew/PPSA99039.ffpfsc` (Sep 3 03:47, pre-render_frame).
+
+**Can a running EVO app be closed remotely?** Researched — practically, **no**,
+not without an ELF payload:
+
+| Route | Verdict |
+|---|---|
+| `sceSystemServiceLaunchApp` / `...KillApp` from elfldr context | Launch returns `0x80940005`; Kill likely the same class. That's why `evo-remote.sh` says "launch from the Games row". |
+| etaHEN IPC `KILL_APP_CMD` (opcode 4, `0xDEADBEEF` struct → `127.0.0.1:9028`) | The clean route — **but bound to localhost** (needs an on-console process) **and 9028 is refused on this console** (etaHEN's IPC isn't running; the JB here is the Lapy daemon + a manual autoload chain). |
+| `projects/app_ctl/` `kill` | Raw `kill(pid, SIGKILL)` on the `eboot.bin` process via kernel-R/W creds. Would probably work, **but it is an ELF payload** (pushed via `/hbldr` or elfldr) — the user asked not to use ELF payloads for this — and it's untested on hardware, and a bare SIGKILL may leave the shell's app-slot state inconsistent. `launch` afterwards is still blocked (`0x80940005`). |
+| **PS Remote Play** (mobile / PC) | The only no-payload route: on-screen PS button → Control Center → close game, and it can also navigate the Games row to relaunch. Needs Remote Play registered + PSN on the console (JB consoles are usually offline → typically unavailable). |
+| ShadowMount+ auto-launch | Its `debug.log` shows it **does** `[GAME] started: PPSA99039` after mounting a *new* image. So a headless `deploy-app.sh --ffpfsc` can relaunch EVO with no controller — **observed on first registration; re-launch on an updated image unconfirmed.** |
+
+**Conclusion / rule:** do **not** deploy a new `.ffpfsc` over a running EVO
+(ShadowMount may unmount/remount a resident title or stack a launch → kernel
+panic → all network services down → dead until someone is physically there;
+see the 50-minute-loss precedent). Wait for the user at the console: PS button
+to close → `evo-remote.sh build --agc-probe` (deploy) → launch from the Games
+row (or let ShadowMount auto-launch) → `evo-remote.sh boot` / `play`.
+
+## 2026-09-03 (later still) — #27 render_frame ported + wired (untested on HW)
+
+`agc_render_frame` is a near-verbatim strip of ProsperoLight's `render_frame`
+(SDR / NV12, no HUD/overlay) in `pp/src/pp_agc.c`. The present path is wired:
+
+- **`pp_agc_present_nv12(vout_handle, buf_idx, gpu_target, nv12, pitch, coded_h,
+  vis_w, vis_h, out_w, out_h, marker)`** — reshaped to take EVO's *own*
+  `pp_videoout` handle + an already-acquired GPU plane. **Never
+  `sceVideoOutOpen`.** The DCB owns its `sceAgcDcbSetFlip`.
+- **NV12 staging.** The decoder hands an NV12 copy in *flexible* memory
+  (`malloc` → `sceKernelMapNamedFlexibleMemory`, `PROT_RW` only — **not
+  GPU-samplable**). `pp_agc_present_nv12` stages each frame into a per-VO-buffer
+  direct-memory scratch (`prot 0x33`, `PP_VO_MAX_BUFFERS` slots keyed by
+  `buf_idx` so `pp_videoout_acquire`'s retire guarantee covers slot reuse).
+  ~12 MB × 3 at 4K, lazy-allocated, every rc checked.
+- **`pp_videoout_adopt_flip`** — marks the VO buffer in-flight for a flip the
+  GPU DCB queued itself (no `SubmitFlip`), so `retire_old_inflight` frees it
+  when `flipArg` reaches the marker. `main.c`'s V8 `present_pre_tiled` is *not*
+  called for AGC frames (they set no `pending_present`).
+- **`evo_vdec_native.c`** — `ro_harvest` emits straight NV12 (skips the
+  NV12→I420 de-interleave) when `pp_agc_available()`; `pp_frame` gained
+  `coded_height`. `pp_playback.c` de-interleaves NV12→YUV420P as a fallback if
+  AGC is unavailable / faults.
+- **Fault guard** — the *first* `agc_render_frame` runs under a
+  SIGSEGV/BUS/ILL `sigsetjmp` (evo_agc_probe.c pattern); a fault logs to
+  `evo_boot.log`, sets `pp_agc` unavailable, playback drops to the CPU
+  converter. `pp_agc_init` also called unconditionally from `main()` (app
+  module) so the bare build arms the path, not just `--agc-probe`.
+
+**Open hardware unknowns (first run answers these):**
+1. Does AGC render into EVO's VO buffer? It's registered
+   `SetBufferAttribute2(0x8000000022000000, tiling=0)`; ProsperoLight registers
+   its *own* pool with `0x8000000000000000`. The `render_frame` CX
+   render-target bits (`cx[2]/cx[4]/cx[15]`, tiling/format) are tuned to
+   ProsperoLight's buffer. Mismatch = garbled/swapped, not a crash. Fix:
+   register the VO buffer with ProsperoLight's attr when AGC is on, or adjust cx.
+2. `sceAgcDcbSetFlip` against a handle whose buffers `pp_videoout` (not AGC)
+   registered.
+3. Colour: `0xAABBGGRR` framebuffer order vs the shader's MRT0 export.
+4. `sceAgcDriverSubmitDcb` latency on the playback push thread (no watchdog
+   thread yet — first-frame guard only).
+5. Type-12 direct-memory headroom for 0xD0000 + ~36 MB staging alongside the
+   resident decoder.
+
+**Not done this pass:** settings row `Playback → Renderer: Auto/CPU/GPU`;
+GPU OSD composite over 4K video (AGC frames present with no overlay — deferred,
+agc-implementation.md §4); P010/HDR present; plane-hash A/B vs CPU.
 
 ## 2026-09-03 (later) — #27 shader setup VALIDATED on hardware
 
@@ -28,7 +101,7 @@ ProsperoLight blobs** (`pp/blobs/*.bin`, 6 files, `.incbin` via
 `copy_asset` of the blobs to their fixed offsets, `prepare_resources` (NGR1
 rebase + SDR full-range coeffs), CreateShader, LinkShaders — **all work**.
 
-### Next — port `render_frame` (agc-implementation.md §3) + wire
+### Next — port `render_frame` (agc-implementation.md §3) + wire  — ✅ DONE, see the "evening" section above
 
 - **`agc_render_frame`** into `pp_agc.c`: the per-frame DCB — CX register block
   (from `sceAgcGetRegisterDefaults`, 16 `target_offsets` entries patched with
@@ -284,33 +357,40 @@ already on the console), launch, read `EVO avplayer:` popups.
 
 ## Checklist
 
-**Next console session** (~5 min of your time):
-- [ ] Console online — `nc -vz $PS5_HOST 2121` responds
-- [ ] Add `/data/homebrew/lapy_jb/lapy_jb_daemon.elf` to `/data/autoload.txt` (once)
-- [ ] `deploy-app.sh --ffpfsc` → auto-mounts
-- [ ] Launch EVO from the Games row
-- [ ] Relay the notifications:
-  - [ ] `EVO boot: jailbreak: promoted …` → self-unjail works (USB + internal)
-  - [ ] `EVO agc: … VIABLE` / `NOT AVAILABLE` → **Step 2 gate**
-  - [ ] pick a 1080p file → last `P8_*` / `P8_AVLOG` before the crash → **task 8**
-  - [ ] then a 4K file
+**Next console session — #27 first device run** (EVO must be closed first; see
+the "remote-close investigation" section — there is no clean remote close):
+- [ ] Console online — `nc -vz $PS5_HOST 2121`
+- [ ] PS button → close the running EVO (frees the app slot)
+- [ ] `tools/evo-remote.sh build --agc-probe` (packages `--usb-remote` + deploys)
+- [ ] Launch `PPSA99039` from the Games row (or let ShadowMount+ auto-launch on
+      the image change)
+- [ ] `tools/evo-remote.sh boot` — confirm `EVO agc: … Step 2 VIABLE` and
+      `pp_agc: READY`
+- [ ] `tools/evo-remote.sh play /mnt/usb0/bbb_1080p_h264.mp4` then a 4K H.264
+      (`/mnt/usb0/GTAVI_An_Extended_Look.mp4`)
+- [ ] `tools/evo-remote.sh boot` again — read `pp_agc: render_frame rc=…`
+  - rc=0 + correct picture → Step 2 works, move to plane-hash A/B
+  - garbled / channel-swapped → RT format/tiling (see the unknowns list above)
+  - `pp_agc: FAULT …` → guard fired, AGC disabled, CPU fallback — debug offline
 
-**Then, in order** (GitHub issues):
-- [ ] **Route A gate** (#29 Phase 2) — `PPSA99039.ffpfsc` is built with
-      `--avplayer-probe`. Deploy, drop a small H.264 `.mp4` at `/data/probe.mp4`
-      (FTP) or `/mnt/usb0/probe.mp4`, launch from Games row; relay the
-      `EVO avplayer:` popups + `/download0/evoplayer/avpx_frame0.txt`
-      → verdict table in [avplayer-abi.md](avplayer-abi.md) §5. Runs at boot,
-      before the UI; watchdog closes EVO if it hangs.
-- [ ] **Task 8** (#26) — fix the call the breadcrumb named; verify A/V sync + 4K vs `main`
-- [ ] **Step 2** (#27) — `pp/src/pp_agc.{h,c}` + `agc_blobs.S` (port `native_agc_present.cpp`); wire `pp_videoout.c` / `pp_playback.c`; settings toggle Auto/CPU/GPU; device-test a test-pattern NV12; plane-hash A/B vs CPU
-- [ ] **Step 2.5** (#27) — `rgba_ps` + reused header → `sceAgcCreateShader` accepts? → GPU OSD composite
-- [ ] **Step 3** (#28) — solid/UI-VS/scissored shaders (`build-shader.sh`); `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); `evo_rmlui_app.cpp` picks it when `pp_agc_available()`; fold the UI pass into `pp_agc` `render_frame`; **delete `evo_rmlui_render.cpp`'s CPU rasteriser** after plane-hash parity
+**Then, in order:**
+- [ ] **#27 Step 2 finish** — plane-hash A/B vs the CPU converter; then remove
+      `pp_converter_fused` / the CPU swizzle from the 4K hot path; submit
+      watchdog thread; P010/HDR present path.
+- [ ] **#27 settings row** `Playback → Renderer: Auto / CPU / GPU` — coordinate
+      with **#29 Phase 5**'s `Video decoder` row (same screen, same
+      fscanf-append pattern).
+- [ ] **#32** — seek → frozen picture on the V8 4K path (high).
+- [ ] **#29 Phase 5** — `evo_vdec_probe()` gate + the `Video decoder` settings row.
+- [ ] **#28 Step 3** — solid/UI-VS/scissored shaders (`build-shader.sh`);
+      `ui_rml/src/evo_rmlui_render_agc.cpp` (RenderInterface→AGC); fold the UI
+      pass into `pp_agc` `render_frame`; **delete `evo_rmlui_render.cpp`'s CPU
+      rasteriser** after plane-hash parity.
 
 **Optional / housekeeping:**
 - [ ] GLSL→SPIR-V→RDNA2 toolchain in the container (Dockerfile) — nicer shader path ([agc-implementation.md](agc-implementation.md) §7)
-- [ ] Rebuild `projects/sandbox_unjail/` as a resident daemon (for non-Lapy setups)
-- [ ] `projects/app_ctl` — test `list` / `kill` on hardware
+- [ ] `projects/app_ctl` — test `list` / `kill` on hardware (the only remote
+      "close EVO" lever, ELF-payload based, currently unverified)
 
 ---
 
@@ -322,8 +402,8 @@ EVO Player's RmlUi UI was ~11 fps and 4K playback is CPU-bound. The fix is a
 | Step | | State |
 |---|---|---|
 | **1** | Cache the RmlUi menu surface, re-raster only on change (CPU) | ✅ **shipped + hardware-verified** — idle menus 11 → ~55–60 fps. Stays as the AGC-unavailable / host fallback. |
-| **2** | GPU YUV→RGB convert + present for the **video path** (`sceAgc`) | 🔒 designed, blocked on a gate + on task 8 |
-| **3** | **Complete UI rendering on the GPU** — bind `Rml::RenderInterface` to AGC draw calls; delete the CPU rasteriser | 🔒 committed scope ("full attempt"), sequenced after Step 2 |
+| **2** | GPU YUV(NV12)→RGB convert + present for the **video path** (`sceAgc`) | 🟢 gate PASSED, `pp_agc_init` hw-verified, `render_frame` **ported + wired** (`pp/src/pp_agc.c`, `pp_playback` V8 branch) — builds green, **awaiting a first device run** |
+| **3** | **Complete UI rendering on the GPU** — bind `Rml::RenderInterface` to AGC draw calls; delete the CPU rasteriser | 🔒 committed scope ("full attempt"), sequenced after Step 2 (#28) |
 
 **The destination is one GPU path** — UI triangles + video convert + composite
 + flip all on `sceAgc`, `evo_rmlui_render.cpp`'s ~2000-line CPU coverage
@@ -346,127 +426,62 @@ not yet on device, which is exactly why Step 2 goes first.
 > — it is a Step 1+2 reference, not Step 3.
 
 `sceAgc` only works from a **registered app module**, not an ELF payload
-(proven this session from both ends). So all GPU/decode work targets EVO as app
-module **`PPSA99039`**. That already boots to the menu (Phase 1b tasks 1–7
-done), but **task 8 — picking a media file crashes it** — is unresolved, and
-Step 2 is the video path, so task 8 gates it.
-
-**Two questions the next console session answers, in one launch.**
+(proven from both ends). So all GPU/decode work targets EVO as app module
+**`PPSA99039`**, which now boots to the menu **and plays** (Phase 1b done; task 8
+was `posix_fadvise` from the sandbox, fixed `55685aa0`) and does native 4K
+decode (#31). Step 2's video path rides on top.
 
 ---
 
 ## Do this first (needs console)
 
-**Build staged locally (2026-09-02):** `output/app/PPSA99039.ffpfsc` (22 MB) +
-`output/app/PPSA99039/`. Rebuild if the tree changed since:
+Rebuild + deploy the current tree:
 
 ```bash
-docker compose run --rm ps5-dev bash ./scripts/package-app.sh --agc-probe --ffpfsc
+tools/evo-remote.sh build --agc-probe    # package --usb-remote --ffpfsc + deploy
+# — OR just the eboot check —
+docker compose run --rm ps5-dev bash ./scripts/package-app.sh --agc-probe
 ```
 
-### What's in this build
+### Build contents
 
-The `.ffpfsc` = the `output/app/PPSA99039/` folder wrapped in an inner exFAT
-image then PFS-compressed (ProsperoLight's exact format — `mkpfs inspect` only
-sees `PPSA99039.exfat`; the files are inside it). Contents:
+`package-app.sh --agc-probe` → `output/app/PPSA99039.ffpfsc` (inner exFAT
+image, PFS-compressed — ProsperoLight's format). `eboot.bin` +
+`sce_module/libc.prx` + `sce_sys/param.json` (`PPSA99039`, game category) +
+`assets/`. Compile flags: `EVO_APP_MODULE=1` (data paths, self-unjail,
+`P8_*` breadcrumbs, `av_log`→notify), `EVO_AGC_PROBE=1` (`evo_agc_probe.c`
+→ `EVO agc:` popup + `pp_agc_init`), `EVO_BOOT_TRACE=1`. Always: `malloc_shim`
+(flexible-mem allocator), `libc_ext`, the RmlUi Step 1 surface cache. #31's
+native decode + #27's `pp_agc` are unconditional for `MODE == player`.
+`tools/evo-remote.sh build` adds `--usb-remote` (the `/mnt/usb0/evo_cmd` /
+`evo_status` remote) + deploys.
 
-| file | what |
+Deploy: `tools/evo-remote.sh build` or `scripts/deploy-app.sh --ffpfsc` (FTP →
+ShadowMount+ auto-mounts on the image change; it may also auto-launch — see the
+remote-close section). **Confirm the fresh build:** `main()`'s first popup is
+`EVO boot: BUILD <git-sha>_<MMDD-HHMM>`. Diagnostics: `evo-remote.sh boot`
+(pulls `/mnt/usb0/evo_boot.log`), `status`, `watch`. Popups also show on the TV
+(`sceKernelDebugOutText` doesn't reach klog from the app sandbox).
+
+Self-unjail: EVO drops `{"PID":…}` to `/download0/etahen_jailbreak` for
+**PS5-Lapy-JB-Daemon** at boot + on browser entry — one promotion opens
+`/mnt/usb0` + `/data`. Launch Lapy via HBL first (or `/data/autoload.txt`).
+
+### First device run (#27)
+
+**AGC gate PASSED, `pp_agc_init` hw-verified, `render_frame` ported + wired.**
+What the first run answers:
+
+| `evo_boot.log` line | Meaning |
 |---|---|
-| `eboot.bin` (34 MB) | the signed EVO Player, built with the flags below |
-| `sce_module/libc.prx` (1.3 MB) | clean-room runtime shim (byte-pinned) |
-| `sce_sys/param.json` | `PPSA99039`, game category, `downloadDataSize>0` |
-| `sce_sys/icon0.png` | app icon |
-| `assets/` | RmlUi `.rml`/`.rcss`, icons, fonts, `renderer_reset_assets.h` |
+| `EVO agc: … Step 2 VIABLE` + `pp_agc: create=0x0 link=0x0` + `pp_agc: READY` | init path good (already seen) |
+| `pp_agc: staging …KB x3 @ …` then `pp_agc: render_frame rc=0x0 words=…` + correct picture | **Step 2 works** → plane-hash A/B, then strip the CPU converter from the hot path |
+| `render_frame rc=0x0` but garbled / channel-swapped picture | RT format/tiling — EVO's VO attr `0x8000000022000000` vs ProsperoLight's `0x80..00`; adjust `cx[2/4/15]` or register the VO buffer with ProsperoLight's attr |
+| `pp_agc: FAULT in first agc_render_frame` | the `sigsetjmp` guard fired — AGC disabled, playback on the CPU converter; debug offline from the DCB build |
 
-`eboot.bin` compile-time flags (set by `package-app.sh --agc-probe`):
+Full port write-up + the as-built deltas: **[agc-implementation.md](agc-implementation.md) §3–4a**.
 
-- **`EVO_APP_MODULE=1`** — `/download0/evoplayer` data paths, `getdents`
-  directory enum, **self-unjail** (`evo_jailbreak.c`, Lapy/etaHEN file-drop —
-  covers `/mnt/usb0` + `/data`), **`P8_*` playback breadcrumbs**,
-  `av_log`→notify, `pp_stage_bc`→notify.
-- **`EVO_AGC_PROBE=1`** — boot-time `sceAgc` reachability recon
-  (`evo_agc_probe.c` → `EVO agc:` notification).
-- **`EVO_BOOT_TRACE=1`** — `evo_bt` init breadcrumbs.
-- Always in the app build: `malloc_shim` (mmap allocator, R1), `libc_ext`
-  (locale/setjmp stubs), the RmlUi **Step 1 surface cache**.
-
-**Not in the ffpfsc** (separate artifacts): `pp/shaders/rgba_ps.bin` (not
-wired to the build yet), `agc_probe` / `sandbox_unjail` (elfldr payloads).
-
-When the console is up (powered, jailbroken — `nc -vz $PS5_HOST 2121` responds):
-
-```bash
-docker compose run --rm ps5-dev bash ./scripts/deploy-app.sh --ffpfsc
-```
-
-The user's **ShadowMountPlus auto-mounts on folder/image change** — the deploy
-triggers the mount. **Launch is still manual**: on the console, launch EVO from
-the **Games row**. Do **not** stack launches — PS button to close before any
-rebuild.
-
-> **Confirm the fresh build is running.** `main()`'s first popup is
-> `EVO boot: BUILD <git-sha> <MMDD-HHMM>`. If you don't see it, or the sha is
-> wrong, ShadowMount+ is serving a stale/cached mount — force a rescan or
-> reboot. (2026-09-02: a leftover `/data/homebrew/PPSA99039/` folder shadowed a
-> new `.ffpfsc` for a whole session — ShadowMount+ prints "Duplicate PPSA99039
-> ignored". `deploy-app.sh --ffpfsc` now deletes the folder first.)
-
-USB + internal browse: EVO **self-unjails** — drops `{"PID":"<pid>"}` to
-`/download0/etahen_jailbreak` for **PS5-Lapy-JB-Daemon**, once at boot
-(`evo_jailbreak_self`, short) and again on every browser entry
-(`evo_jailbreak_ensure`, two harder tries). Reports
-`jailbreak: pid=N file=… daemon_saw=yes/NO sandbox=OPEN/closed (/data errno=…)`.
-One promotion opens the real root → `/mnt/usb0` + `/data` both resolve.
-Launch Lapy via HBL first (or add to `/data/autoload.txt`). Daemon absent /
-fails → `tools/sandbox-unjail.sh` per launch. Lapy README says fw 3.00→12.00;
-**12.70 unconfirmed** — the `daemon_saw` / `sandbox` fields say which part failed.
-
-The `EVO agc:` / `P8_*` answers come out as **system-notification popups** —
-someone has to read the TV (`sceKernelDebugOutText` does **not** reach klog from
-the app-module sandbox; `/mnt/usb0` is ENOENT so screenshots can't save either).
-
-### Read the notifications
-
-| Notification | Meaning | → next |
-|---|---|---|
-| `EVO agc: … Step 2 VIABLE` | `libSceAgc.sprx` loads + NIDs resolve in `PPSA99039` | **Step 2 is unblocked** — see A below |
-| `EVO agc: … NOT AVAILABLE` / `partial` | AGC unreachable even from the app module | Step 2 needs raw GNM or is dead — reassess with [agc-implementation.md](agc-implementation.md) |
-| `EVO bc:` / `EVO P8: P8_00 … P8_31` sequence | playback breadcrumbs; the **last one before the crash names the failing call** | fix that call — see B below |
-| `P8_AVLOG …` right before the crash | FFmpeg's own error text for the failure | that's the direct cause |
-| `boot ok - frame loop` and menu renders, but crash on file-select | expected — task 8 | proceed to B |
-
-Pick a **1080p file first** (`rabbit.mp4` or `test.mp4` at the repo root, or copy
-one to the console). Then repeat with a **4K file**.
-
----
-
-## A — if the AGC gate passes: build Step 2
-
-The design is fully worked out in **[agc-implementation.md](agc-implementation.md)**
-(read it — `native_agc_present.cpp` annotated, shader blobs disassembled, the
-port plan). Summary:
-
-1. Write `pp/src/{pp_agc.h, pp_agc.c, agc_blobs.S}` — a mechanical strip of
-   `third_party/ProsperoLight/src/native_agc_present.cpp`: the AGC ABI
-   (runtime-resolved NIDs, like `projects/evoplayer/src/evo_agc_probe.c`), the
-   `shader_memory` layout, `initialize_presenter` + `render_frame`, minus the
-   HUD / keyboard / LAN telemetry. `.incbin` the 5 blobs from
-   `third_party/ProsperoLight/assets/private/`. `#ifdef __PROSPERO__` — a stub
-   on host.
-2. Scope: **video path only.** `pp/src/pp_videoout.c` + `pp/src/pp_playback.c`
-   route the decoder's NV12 frame straight to `pp_agc_present_nv12()` instead of
-   `pp_converter_*` + swizzle + `sceVideoOutSubmitFlip`. Menus keep Step 1's CPU
-   memcpy. OSD composite stays CPU (small, only redraws on state change) until a
-   hand-written RGBA passthrough PS exists.
-3. Settings toggle `Playback → Renderer: Auto / CPU / GPU`.
-4. First device test: `pp_agc_init` + one `render_frame` of a test-pattern NV12
-   buffer → a picture on the TV via the GPU. Then real frames, then plane-hash
-   A/B vs the CPU path.
-
-`llvm-mc-18` in the container assembles GCN (`--mcpu=gfx1030`), so the RGBA PS
-and the Step 3 shaders are hand-writable — see agc-implementation.md §1/§5.
-
-### Then Step 3 — complete UI on the GPU (committed scope)
+## After Step 2 — Step 3: complete UI on the GPU (#28, committed scope)
 
 Once Step 2's pipeline runs on device:
 
@@ -488,25 +503,13 @@ Once Step 2's pipeline runs on device:
 5. Delete the CPU coverage rasteriser from `evo_rmlui_render.cpp` once parity
    holds (plane-hash A/B every screen).
 
-## B — fixing task 8 (the playback crash)
+## B — task 8 (the playback crash) — RESOLVED
 
-The `P8_*` breadcrumb that fires last tells you which call. Likely suspects
-([phase-1b-app-module.md](phase-1b-app-module.md) §8 risk table):
-
-- **R1 — heap.** `malloc_shim.c` is mmap-backed and covers `posix_memalign`, so
-  FFmpeg allocs *should* be fine; the `P8_31` line reports mmap high-water — if
-  it's near a ceiling, that's it. Fix: raise the proc-param heap, or route more
-  through `evo_direct_mem`.
-- **R3 — libm.** Downgraded: host check shows `libm.a` supplies real impls and
-  `package-app.sh` links it. Unlikely; confirm via `P8_AVLOG` / audio A/B.
-- **`exit()` SIGSYS** — a known teardown-path signal; may or may not be the
-  file-select crash.
-- **Sandbox limits** — thread count (decoder frame threads + convert pool +
-  audio), or `sceAudioOutOpen` behaving differently in the app-module sandbox.
-- **Mid-run cred swap** — if `sandbox-unjail` was run, that's a new vector.
-
-Once playback is stable in `PPSA99039`, re-check A/V sync and 4K against `main`
-([validation.md](../validation.md)), then Step 2 layers on top.
+Root cause was `posix_fadvise()` in `evo_stream_io.c` faulting (SIGSYS-class)
+from the `PPSA99039` sandbox on file-open. Fixed `55685aa0` (both call sites
+`#ifndef EVO_APP_MODULE`). 1080p + reasonable-4K play; demanding 4K (GTA
+trailer) needed native decode → #31 (done). History in
+[phase-1b-app-module.md](phase-1b-app-module.md) §8.
 
 ---
 
@@ -516,11 +519,15 @@ Once playback is stable in `PPSA99039`, re-check A/V sync and 4K against `main`
   restart the elfldr host. Console stays otherwise healthy — check with
   `curl http://$PS5_HOST:8080/fs/` (kernel-R/W route; 200 = exploit still live).
   A kernel panic takes *all* network services down.
-- **Wedged app slot**: PS button → close. No remote kill exists for it.
+- **Wedged app slot**: PS button → close. No *clean* remote close exists — see
+  the "remote-close investigation" section. `projects/app_ctl/` `kill` (ELF
+  payload, `kill(pid,SIGKILL)` via kernel R/W) is the only remote lever and is
+  unverified on hardware; etaHEN's IPC `KILL_APP_CMD` would be clean but isn't
+  running here. Never `_exit()` from the app module itself.
 - **Every new probe payload must carry a watchdog thread** that `_exit()`s on a
-  hang — see `projects/agc_probe/main.c`. Prevents the above.
+  hang — see `projects/agc_probe/main.c`.
 - Consider adding `ps5-payload-shsrv` to the jailbreak chain for remote
-  `ps`/`kill`.
+  `ps`/`kill` (would also give a real remote-close path).
 
 ---
 
@@ -549,21 +556,21 @@ Builds verified: `build-evoplayer.sh` (payload) and `package-app.sh --agc-probe`
   target but no `glslang`/`spirv-tools`; a nicer GLSL→SPIR-V→RDNA2 route needs a
   Dockerfile change. Documented in [agc-implementation.md](agc-implementation.md) §7.
 
-## Remaining host work (not blocking — can start before the console session)
+## Remaining host work
 
 Toward Step 2/3:
 
-1. **`pp/src/pp_agc.c` scaffold** — ~80% of Step 2, written + compile-checked
-   before the gate result is known. Mechanical strip of `native_agc_present.cpp`.
-2. **Solid-colour PS + 2D-ortho UI VS** — next shaders (`pp/shaders/`), same
-   `build-shader.sh` workflow.
+1. ~~`pp/src/pp_agc.c` scaffold~~ ✅ — `pp_agc_init` + `agc_render_frame` +
+   `pp_agc_present_nv12` ported; wired into `pp_playback.c`. Builds green.
+   **Uncommitted** on `refactor/main-c-media-modules` pending review + the
+   first device run.
+2. **Solid-colour PS + 2D-ortho UI VS** — the Step 3 shader set
+   (`build-shader.sh` workflow; the `.header.bin` half is still open — reuse
+   ProsperoLight's).
 3. Sketch `ui_rml/src/evo_rmlui_render_agc.cpp` — the `Rml::RenderInterface`→AGC
    mapping (Step 3 §2 in [agc-implementation.md](agc-implementation.md)).
-
-Housekeeping:
-
-4. Fix `projects/app_ctl/` (broken `sysctl` form — use `mib[4]={1,14,8,0}`,
-   `KERN_PROC_PROC`, namelen 4). Gives a `list / kill <pid>` payload.
+4. `projects/app_ctl/` — the `sysctl` form is already fixed in-tree
+   (`mib[4]={1,14,8,0}`); `list` / `kill` still need a hardware test.
 
 > Optimising the CPU rasteriser (`render_triangles_accumulated`) is **not**
 > worth it — Step 3 deletes it. Only touch it if Step 3 slips badly and

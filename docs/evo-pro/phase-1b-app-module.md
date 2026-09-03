@@ -1,14 +1,15 @@
 # Phase 1b — repackage EVO Player as a game-category app module
 
-> **Status (2026-09-02):** Milestone 1 tasks 1–7 ✅ on hardware — **EVO Player
-> runs as `PPSA99039`**: boots to the RmlUi menu, pad nav, VideoOut / RmlUi /
-> FFmpeg / audio / networking init in the sandbox; settings persist to
-> `/download0/evoplayer/` (task 6); directory enumeration via `evo_readdir`
-> (task 6); USB browse works after `./tools/sandbox-unjail.sh` (task 7, re-run
-> per launch). Build/deploy: `./scripts/package-app.sh` →
-> `./scripts/deploy-app.sh` → ShadowMountPlus. **Task 8 (playback) is the only
-> one left and picking a media file currently crashes** — see §8. No native
-> decode in this phase.
+> **Status (2026-09-03): Milestone 1 COMPLETE — EVO Player runs *and plays* as
+> `PPSA99039`.** Tasks 1–7 ✅; **task 8 fixed** — the file-open crash was
+> `posix_fadvise()` faulting SIGSYS-class from the app sandbox
+> (`evo_stream_io.c`, both call sites now `#ifndef EVO_APP_MODULE`, commit
+> `55685aa0`). 1080p + reasonable-4K play through `009_FIRST_FRAME_ENTER`;
+> demanding 4K (GTA trailer) hit the ~450 MB fake-signed flex budget → solved
+> by native decode (#31, done). Self-unjail via PS5-Lapy-JB-Daemon covers
+> `/mnt/usb0` + `/data`. Build/deploy: `./scripts/package-app.sh` →
+> `./scripts/deploy-app.sh` → ShadowMount+. §8 below is the historical
+> task-8 risk table + the resolution.
 >
 > **Predecessors:** Phase 0 (`sce_videodec2.h` / [videodec2-abi.md](videodec2-abi.md))
 > and the Phase 1 go/no-go gate — **PASSED on hardware 2026-09-01** via the

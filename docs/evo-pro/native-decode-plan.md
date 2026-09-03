@@ -1,6 +1,13 @@
 # Native hardware decode — integration plan
 
-> **Status:** Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
+> **Status (2026-09-03):** **Phase 4 DONE — #31 closed.** GTA VI 4K H.264 plays
+> real-time on `sceVideodec2` inside `PPSA99039` (`be=1` NATIVE, `pos` climbs
+> 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the
+> backend behind `evo_vdec.h`. Open: **#32** (seek → frozen picture on the V8
+> 4K path, high) and **Phase 5** (the `Auto / FFmpeg / Native` settings row).
+> History of the gate below.
+>
+> Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
 > "registered app slot" hypothesis is confirmed: from a fake-signed
 > game-category app module the full `sceVideodec2` sequence —
 > `CreateDecoder` **and `Decode`** — returns `0` and produces a valid
@@ -349,11 +356,18 @@ Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
 display-order. Remaining: **seek → frozen picture** on the V8 4K path (filed
 separately, high priority), and Phase 5 (settings row).
 
-- [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`,
-      producing `pp_frame` NV12. Crop applied (`disp_w/h` from the demuxer vs
-      the coded `OutputInfo.width/height`); chroma offset uses the **coded**
-      luma height, `pitch_bytes` for stride. mp4/mkv AUs run through the
-      `*_mp4toannexb` bsf first.
+- [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`.
+      Crop applied (`disp_w/h` from the demuxer vs the coded
+      `OutputInfo.width/height`); chroma offset uses the **coded** luma height,
+      `pitch_bytes` for stride. mp4/mkv AUs run through the `*_mp4toannexb` bsf.
+      **Output format depends on the renderer (#27):** by default `ro_harvest`
+      de-interleaves NV12 → planar **`PP_FRAME_YUV420P`** (EVO's fast / parallel
+      / 4K CPU converters only accept YUV420P — NV12 at 4K silently draws
+      black). When `pp_agc_available()` it emits **straight `PP_FRAME_NV12`**
+      (one flat copy, no CPU touch) for the sceAgc GPU present path, and
+      `pp_frame.coded_height` carries the MB-padded luma height so
+      `pp_agc_present_nv12` can find the UV plane. `pp_playback.c` has an
+      NV12→YUV420P fallback for any path that isn't the AGC one.
 - [x] **Module load before the first `evo_jailbreak_self()`** —
       `evo_vdec_probe()` at `main.c` ~12146, right after `evo_videodec2_probe()`.
       Open HW question (does `CreateDecoder` after `evo_jailbreak_ensure()`
