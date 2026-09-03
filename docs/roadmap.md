@@ -52,6 +52,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | # | Story | Reads |
 |---|---|---|
 | **#17** | CI: unit tests, coverage, Sonar | `docs/tooling.md`, `docs/validation.md`, `docs/converter-perf.md`; `.github/workflows/`, `tools/bench.sh`, `tools/prof_rmlui.sh` |
+| **#33** | Clean up the unattended hw-test harness (`vdec-test.sh` + `EVO_AUTOPLAY`) | commit `fe6c6ed`; `tools/vdec-test.sh`, `scripts/package-app.sh` (`--autoplay`), `main.c` frame-loop autoplay block, `media/src/evo_vdec_native.c` (`note()`) |
 | **#9** | Emby shows raw stream URL, not the title | `docs/addons-emby-nuvio.md`; `projects/evoplayer/addons/src/addon_emby.c`, `ui_rml` list rendering (`evo_rmlui_bridge.cpp` / `evo_rmlui_app.cpp` list path) |
 | **#8** | Codec-sweep decode latency / drop metrics | `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/validation.md`; `pp/include/pp_pipeline_metrics.h`, `main.c` perf counters + `EVO_DIAG_FPS`, `projects/*_test/` |
 | **#3** | Subtitle subsystem + precise overlay timing (meta) | `docs/validation.md`; `media/src/evo_subtitle.c`, `assets/rml/subtitles.rml`, `main.c` subtitle picker/overlay path |
