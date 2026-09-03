@@ -74,14 +74,17 @@ docker compose run --rm ps5-dev bash -lc '
 docker compose run --rm ps5-dev ./tools/klog.sh
 
 # render the UI on the host, no console needed (fast iteration loop)
-./tools/uiview.sh --all
-./tools/uiplay.sh          # then open output/uiplay/index.html, arrow keys to drive it
+./tools/uiview.sh --all    # every RmlUi screen -> output/uiview/rml_*.png
+./tools/uiplay.sh          # contact sheet of them all -> output/uiplay/index.html
 ```
 
-Prefer the host UI renderer (`uiview.sh` / `uiplay.sh`) over a hardware round
-trip whenever the question is about layout, navigation or rendering — it links
-the real drawing code against the real assets. Go to hardware only when the
-question is genuinely about console behavior.
+Prefer the host UI renderer (`uiview.sh` / `uiplay.sh`, both now the RmlUi
+harness `tools/uiview_playback_rml`) over a hardware round trip whenever the
+question is about layout or rendering — it links the real RmlUi documents,
+stylesheets and assets. Add a fixture to `tools/uiview_playback_rml.cpp` for a
+screen or cursor state it doesn't cover. Go to hardware only when the question
+is genuinely about console behavior (theme repaint, overlay-over-video, input
+timing).
 
 Full command reference, all scripts, screenshot measurement tools
 (`shot.sh probe/scan/crop/diff`), env vars: [docs/tooling.md](docs/tooling.md).
@@ -95,8 +98,12 @@ projects/evoplayer/
   main.c        the player: FFmpeg, threads, input, screens, state
   media/        subsystems carved out of main.c (own state/threads, narrow interface)
   pp/           playback backend: VideoOut, converters, clocks, theme
-  ui/           legacy immediate-mode screens/widgets/chrome (no FFmpeg, no VideoOut)
-  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp (the active work)
+  ui/           shared immediate-mode primitives still used by both paths:
+                draw/nav/focus/input/feedback, evo_keyboard (IME modal),
+                evo_widgets (toasts), evo_layout (grid/capacity geometry).
+                The screen renderers (evo_screens.c/evo_chrome.c) were deleted
+                in #44 — every screen now draws through ui_rml.
+  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI
   assets/rml/   .rml/.rcss documents for the RmlUi screens
 scripts/        build/deploy — see docs/tooling.md
 tools/          uiview, klog, shot, bench, gen_icons — see docs/tooling.md
@@ -169,5 +176,5 @@ mock data — everything in the DOM binds to live C structs
   beats one launch per screen — and hardware round trips are the slow, risky
   part of the loop anyway (see the launch-safety rule above).
 - **Prefer `uiview.sh`/`uiplay.sh` over hardware** for anything about layout
-  or navigation — it's the same drawing code, with no console risk and no
-  90s launch cooldown.
+  or rendering — it's the same RmlUi code and assets, with no console risk and
+  no 90s launch cooldown.

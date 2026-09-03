@@ -167,7 +167,7 @@ work as discrete stories:
 
 | Story | What | State |
 |---|---|---|
-| **#44** | Per-screen parity sign-off vs `main` + delete the dead legacy screen code (`ui/src/evo_chrome.c`, `evo_screens.c`, shadowed `draw_*_screen`) — **blocks #28**. **PR 1 done** (#16 folded in, OSD title marquee, host harness extended to every screen, [rmlui-parity.md](rmlui-parity.md) checklist). **PR 2** = the legacy deletion, gated on a hardware pass of the HW-marked rows | open, high |
+| **#44** | Per-screen parity sign-off vs `main` + delete the dead legacy screen code — **blocks #28**. **PR 1 done** (#16 folded in, OSD title marquee, host harness → every screen, [rmlui-parity.md](rmlui-parity.md)). **PR 2 done** (`evo_screens.c`/`evo_chrome.c` deleted → `evo_layout.c`, every `draw_*_screen` legacy tail removed, `uiview`/`uiplay` → RmlUi harness; payload build + tests green). Only a hardware pass of the HW-marked rows remains | open, high |
 | **#16** | Text clamping / widget overflow / title collisions — **done in #44 PR 1** (RCSS clamps on OSD / dialog / browser inspector / media info / settings / changelog / launch hero; OSD marquee) | open |
 | **#45** | Icon swap — Lucide concept icons + Kenney controller glyphs (approved, `docs/icon-swap-handoff.md`) | open, low |
 | **#35** part B | On-video **caption** rendering off legacy `rr_text` → RmlUi | open |
