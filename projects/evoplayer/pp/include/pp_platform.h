@@ -13,6 +13,11 @@ extern "C" {
 #endif
 
 #define PP_VO_ATTR_TILED_BGRA 0x8000000022000000ULL
+/* #27: ProsperoLight's SDR framebuffer attribute (linear, no EVO CPU-tiler
+ * swizzle). pp_videoout_init registers the VO with this instead of
+ * PP_VO_ATTR_TILED_BGRA when the sceAgc GPU present path is armed - the ported
+ * render_frame's render-target bits are tuned to this layout. */
+#define PP_VO_ATTR_SDR_LINEAR 0x8000000000000000ULL
 #define PP_ALIGN_128K         0x20000
 #define PP_MEM_1080P_DOUBLE   0x2000000
 

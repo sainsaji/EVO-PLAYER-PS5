@@ -4,6 +4,7 @@
  */
 #include "pp_videoout.h"
 #include "pp_platform.h"
+#include "pp_agc.h"
 #include "evo_boot_trace.h"
 
 #include <stdio.h>
@@ -259,7 +260,21 @@ int pp_videoout_init(pp_videoout *vo,
     }
     (void)sceVideoOutSetFlipRate(vo->handle, vo->flip_rate);
 
+    /*
+     * #27: when the sceAgc GPU present path is armed (--agc-probe builds only;
+     * pp_agc_available() is 0 in the default .ffpfsc and on host), register the
+     * VO with ProsperoLight's linear SDR attribute. The ported render_frame's
+     * render-target bits are tuned to that layout; running it against EVO's
+     * CPU-tiler attribute is the leading suspect for the first-run GPU hang.
+     * The CPU tiler path is left completely untouched.
+     */
+#if defined(EVO_APP_MODULE)
+    attr_pix = pp_agc_available() ? PP_VO_ATTR_SDR_LINEAR : PP_VO_ATTR_TILED_BGRA;
+#else
     attr_pix = PP_VO_ATTR_TILED_BGRA;
+#endif
+    evo_bt("pp_videoout_init %ux%u attr=%#llx", width, height,
+           (unsigned long long)attr_pix);
     memset(&attr, 0, sizeof(attr));
     sceVideoOutSetBufferAttribute2(&attr, attr_pix, 0, width, height, 0, 0, 0);
     rc = sceVideoOutRegisterBuffers2(vo->handle, 0, 0, vbuf, (int)buffer_count, &attr, 0, NULL);

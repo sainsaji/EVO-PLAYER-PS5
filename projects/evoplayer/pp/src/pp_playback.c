@@ -457,9 +457,21 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
                 return 0;
             }
 
-            /* AGC present failed — hand the buffer back and drop this frame.
-             * pp_agc disables itself after a first-frame fault, so subsequent
-             * frames fall through nv12_to_yuv420p + the CPU converter. */
+            /* #27 B: rc == -2 — the GPU submit blew the 250 ms watchdog. The
+             * worker is abandoned but may still write `idx` and queue its flip,
+             * so hand the buffer to the VO retire watchdog (adopt) rather than
+             * releasing it into the free pool. pp_agc is permanently
+             * unavailable for the rest of the session now. */
+            if (rc == -2) {
+                (void)pp_videoout_adopt_flip(pb->vo, idx, (uint64_t)marker);
+                pp_stage_bc_checkpoint("011_AGC_SUBMIT_WEDGED", "cpu path from here");
+                return -4;
+            }
+
+            /* rc == -1: AGC present failed cleanly — hand the buffer back and
+             * drop this frame. pp_agc disables itself after a first-frame
+             * fault, so subsequent frames fall through nv12_to_yuv420p + the
+             * CPU converter. */
             pp_videoout_release(pb->vo, idx);
             pp_stage_bc_checkpoint("011_AGC_PRESENT_FAIL", "cpu fallback next");
             return -4;

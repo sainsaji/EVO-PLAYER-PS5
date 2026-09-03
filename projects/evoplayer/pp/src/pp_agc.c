@@ -27,6 +27,9 @@
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
+#include <errno.h>
 
 /* --- sceAgc / libSceAgcDriver / libkernel: stub-linked (package-app.sh 6b) - */
 extern int32_t  sceAgcInit(void *state, uint32_t defaults_revision);
@@ -113,7 +116,7 @@ typedef struct agc_submit_description {
 } agc_submit_description_t;
 
 static struct {
-    int       ready;
+    volatile int ready;            /* cleared cross-thread by the watchdog     */
     int       tried;
     uint64_t  state;
     uint8_t  *mem;
@@ -128,10 +131,51 @@ static struct {
     size_t    stage_total;
     size_t    stage_cap;
 
-    int       first_frame_ok;      /* a render_frame has returned 0          */
+    volatile int first_frame_ok;   /* a render_frame has returned 0 (worker)   */
     int       first_frame_logged;
     int       tv_safe;             /* 0 = full-frame (parity with CPU path)  */
+    volatile int submit_wedged;    /* a submit blew the 250ms watchdog once    */
 } g_agc;
+
+/*
+ * #27 B: the GPU submit half of the present runs on a dedicated worker thread
+ * with a 250 ms watchdog. render_frame's GPU-side stall
+ * (sceAgcDriverSubmitDcb -> sceAgcSuspendPoint never returns) is not a CPU
+ * fault, so the first-frame sigsetjmp guard can't catch it - it just wedges
+ * whatever thread called it. Keeping that off the playback push thread means a
+ * wrong GPU-register guess costs a dropped frame + a log line, not a console
+ * power-cycle. Single-slot mailbox: the caller stages NV12, fills the request,
+ * signals `req`, then pthread_cond_timedwait's on `done`. On timeout the worker
+ * is abandoned (still blocked in the syscall - never joined), pp_agc goes
+ * permanently unavailable for the session, and playback drops to the CPU path.
+ */
+static struct {
+    pthread_t       thread;
+    pthread_mutex_t lock;
+    pthread_cond_t  req_cv;
+    pthread_cond_t  done_cv;
+    int             started;
+    int             have_req;
+    int             have_done;
+    int             quit;
+
+    /* request */
+    int         video;
+    int         buffer_index;
+    void       *target;
+    const void *source;
+    size_t      source_bytes;
+    uint32_t    pitch, surface_height;
+    uint32_t    visible_width, visible_height;
+    uint32_t    output_width, output_height;
+    int64_t     render_marker;
+
+    /* response */
+    int32_t     rc;
+    uint32_t    word_count;
+} g_agc_submit;
+
+static int agc_submit_start(void);
 
 static int copy_asset(void *dst, size_t cap, const uint8_t *s, const uint8_t *e)
 {
@@ -494,7 +538,15 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
     g_agc.w = width;
     g_agc.h = height;
     g_agc.ready = 1;
-    evo_boot_log("pp_agc: READY - GPU present path armed (render_frame ported, #27)");
+
+    if (agc_submit_start() != 0) {
+        evo_boot_log("pp_agc: submit worker thread create FAILED - GPU present disabled");
+        pp_agc_shutdown();
+        return -1;
+    }
+
+    evo_boot_log("pp_agc: READY - GPU present path armed (render_frame ported, "
+                 "submit watchdog live, #27)");
     return 0;
 }
 
@@ -554,7 +606,9 @@ static int agc_staging_ensure(size_t need)
     return 0;
 }
 
-/* --- fault guard for the first render_frame (evo_agc_probe.c pattern) ----- */
+/* --- fault guard for the first render_frame (evo_agc_probe.c pattern) -----
+ * Runs on the submit worker thread now (the thread that would fault). Only a
+ * CPU fault is caught here - the GPU-side stall is the watchdog's job. */
 static sigjmp_buf g_agc_jmp;
 static volatile sig_atomic_t g_agc_armed;
 
@@ -567,12 +621,128 @@ static void agc_fault_h(int sig)
     _exit(150 + sig);
 }
 
+/* The GPU submit worker. One request in flight; see g_agc_submit. */
+static void *agc_submit_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        int         video, buffer_index;
+        void       *target;
+        const void *source;
+        size_t      source_bytes;
+        uint32_t    pitch, surface_height, visible_width, visible_height;
+        uint32_t    output_width, output_height;
+        int64_t     render_marker;
+        uint32_t    words = 0;
+        int32_t     rc;
+        int         guard;
+
+        pthread_mutex_lock(&g_agc_submit.lock);
+        while (!g_agc_submit.have_req && !g_agc_submit.quit)
+            pthread_cond_wait(&g_agc_submit.req_cv, &g_agc_submit.lock);
+        if (g_agc_submit.quit) {
+            pthread_mutex_unlock(&g_agc_submit.lock);
+            break;
+        }
+        video          = g_agc_submit.video;
+        buffer_index   = g_agc_submit.buffer_index;
+        target         = g_agc_submit.target;
+        source         = g_agc_submit.source;
+        source_bytes   = g_agc_submit.source_bytes;
+        pitch          = g_agc_submit.pitch;
+        surface_height = g_agc_submit.surface_height;
+        visible_width  = g_agc_submit.visible_width;
+        visible_height = g_agc_submit.visible_height;
+        output_width   = g_agc_submit.output_width;
+        output_height  = g_agc_submit.output_height;
+        render_marker  = g_agc_submit.render_marker;
+        pthread_mutex_unlock(&g_agc_submit.lock);
+
+        guard = !g_agc.first_frame_ok;
+        if (guard) {
+            struct sigaction sa, o_segv, o_bus, o_ill;
+            memset(&sa, 0, sizeof sa);
+            sa.sa_handler = agc_fault_h;
+            sigaction(SIGSEGV, &sa, &o_segv);
+            sigaction(SIGBUS, &sa, &o_bus);
+            sigaction(SIGILL, &sa, &o_ill);
+
+            if (sigsetjmp(g_agc_jmp, 1) != 0) {
+                g_agc_armed = 0;
+                sigaction(SIGSEGV, &o_segv, NULL);
+                sigaction(SIGBUS, &o_bus, NULL);
+                sigaction(SIGILL, &o_ill, NULL);
+                evo_boot_log("pp_agc: FAULT in first agc_render_frame - GPU present "
+                             "DISABLED, playback falls back to the CPU converter");
+                evo_boot_log_flush();
+                g_agc.ready = 0;
+                rc = -99;
+                words = 0;
+                goto reply;
+            }
+            g_agc_armed = 1;
+            rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
+                                  g_agc.vs, g_agc.ps, source, source_bytes, pitch,
+                                  surface_height, visible_width, visible_height,
+                                  output_width, output_height, render_marker, &words);
+            g_agc_armed = 0;
+            sigaction(SIGSEGV, &o_segv, NULL);
+            sigaction(SIGBUS, &o_bus, NULL);
+            sigaction(SIGILL, &o_ill, NULL);
+
+            evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
+                         "pitch=%u codedh=%u marker=%lld",
+                         (unsigned)rc, words, visible_width, visible_height,
+                         output_width, output_height, pitch, surface_height,
+                         (long long)render_marker);
+            evo_boot_log_flush();
+            g_agc.first_frame_logged = 1;
+            if (rc == 0)
+                g_agc.first_frame_ok = 1;
+        } else {
+            rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
+                                  g_agc.vs, g_agc.ps, source, source_bytes, pitch,
+                                  surface_height, visible_width, visible_height,
+                                  output_width, output_height, render_marker, &words);
+        }
+
+    reply:
+        pthread_mutex_lock(&g_agc_submit.lock);
+        g_agc_submit.rc = rc;
+        g_agc_submit.word_count = words;
+        g_agc_submit.have_req = 0;
+        g_agc_submit.have_done = 1;
+        pthread_cond_signal(&g_agc_submit.done_cv);
+        pthread_mutex_unlock(&g_agc_submit.lock);
+    }
+    return NULL;
+}
+
+static int agc_submit_start(void)
+{
+    if (g_agc_submit.started)
+        return 0;
+    pthread_mutex_init(&g_agc_submit.lock, NULL);
+    pthread_cond_init(&g_agc_submit.req_cv, NULL);
+    pthread_cond_init(&g_agc_submit.done_cv, NULL);
+    g_agc_submit.have_req = g_agc_submit.have_done = g_agc_submit.quit = 0;
+    if (pthread_create(&g_agc_submit.thread, NULL, agc_submit_worker, NULL) != 0)
+        return -1;
+    g_agc_submit.started = 1;
+    return 0;
+}
+
+/* Single caller only: pp_playback_push_frame runs on one decode thread and
+ * every call here blocks until the worker replies or the watchdog fires, so
+ * there is never more than one request in flight. */
 int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
                         const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
                         uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
                         int64_t flip_marker)
 {
-    if (!g_agc.ready || !g_agc.mem || !g_agc.vs || !g_agc.ps)
+    if (g_agc.submit_wedged)
+        return -2;
+    if (!g_agc.ready || !g_agc.mem || !g_agc.vs || !g_agc.ps || !g_agc_submit.started)
         return -1;
     if (!nv12 || !gpu_target || vout_handle < 0 || buf_idx >= (uint32_t)PP_VO_MAX_BUFFERS ||
         pitch_bytes == 0 || (pitch_bytes & 1u) || coded_height == 0 ||
@@ -588,58 +758,102 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     memcpy(stage, nv12, need);
     flush_gpu_data(stage, need);
 
-    uint32_t words = 0;
-    int32_t rc;
+    /* 250 ms watchdog on the whole render_frame call (WaitUntilSafeForRendering
+     * + SubmitDcb + SuspendPoint). The cond deadline is CLOCK_REALTIME (the BSD
+     * libc default for pthread_cond_timedwait); a MONOTONIC start is also taken
+     * so a wrong clock basis can only make us re-wait, never declare a wedge
+     * before ~240 ms of real wall time has actually passed. */
+    struct timespec mono_start;
+    clock_gettime(CLOCK_MONOTONIC, &mono_start);
 
-    if (!g_agc.first_frame_ok) {
-        struct sigaction sa, old_segv, old_bus, old_ill;
-        memset(&sa, 0, sizeof sa);
-        sa.sa_handler = agc_fault_h;
-        sigaction(SIGSEGV, &sa, &old_segv);
-        sigaction(SIGBUS, &sa, &old_bus);
-        sigaction(SIGILL, &sa, &old_ill);
-
-        if (sigsetjmp(g_agc_jmp, 1) != 0) {
-            g_agc_armed = 0;
-            sigaction(SIGSEGV, &old_segv, NULL);
-            sigaction(SIGBUS, &old_bus, NULL);
-            sigaction(SIGILL, &old_ill, NULL);
-            evo_boot_log("pp_agc: FAULT in first agc_render_frame - GPU present "
-                         "DISABLED, playback falls back to the CPU converter");
-            evo_boot_log_flush();
-            g_agc.ready = 0;
-            return -1;
-        }
-        g_agc_armed = 1;
-        rc = agc_render_frame(vout_handle, (int)buf_idx, gpu_target, g_agc.mem,
-                              g_agc.vs, g_agc.ps, stage, need, pitch_bytes,
-                              coded_height, vis_w, vis_h, out_w, out_h, flip_marker,
-                              &words);
-        g_agc_armed = 0;
-        sigaction(SIGSEGV, &old_segv, NULL);
-        sigaction(SIGBUS, &old_bus, NULL);
-        sigaction(SIGILL, &old_ill, NULL);
-
-        evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
-                     "pitch=%u codedh=%u marker=%lld",
-                     (unsigned)rc, words, vis_w, vis_h, out_w, out_h,
-                     pitch_bytes, coded_height, (long long)flip_marker);
-        evo_boot_log_flush();
-        g_agc.first_frame_logged = 1;
-        if (rc == 0)
-            g_agc.first_frame_ok = 1;
-    } else {
-        rc = agc_render_frame(vout_handle, (int)buf_idx, gpu_target, g_agc.mem,
-                              g_agc.vs, g_agc.ps, stage, need, pitch_bytes,
-                              coded_height, vis_w, vis_h, out_w, out_h, flip_marker,
-                              &words);
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_nsec += 250L * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec += 1;
+        deadline.tv_nsec -= 1000000000L;
     }
+
+    pthread_mutex_lock(&g_agc_submit.lock);
+    g_agc_submit.video          = vout_handle;
+    g_agc_submit.buffer_index   = (int)buf_idx;
+    g_agc_submit.target         = gpu_target;
+    g_agc_submit.source         = stage;
+    g_agc_submit.source_bytes   = need;
+    g_agc_submit.pitch          = pitch_bytes;
+    g_agc_submit.surface_height = coded_height;
+    g_agc_submit.visible_width  = vis_w;
+    g_agc_submit.visible_height = vis_h;
+    g_agc_submit.output_width   = out_w;
+    g_agc_submit.output_height  = out_h;
+    g_agc_submit.render_marker  = flip_marker;
+    g_agc_submit.have_done      = 0;
+    g_agc_submit.have_req       = 1;
+    pthread_cond_signal(&g_agc_submit.req_cv);
+
+    int timed_out = 0;
+    while (!g_agc_submit.have_done) {
+        if (pthread_cond_timedwait(&g_agc_submit.done_cv, &g_agc_submit.lock,
+                                   &deadline) == ETIMEDOUT) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            int64_t elapsed_ms = (int64_t)(now.tv_sec - mono_start.tv_sec) * 1000
+                               + (now.tv_nsec - mono_start.tv_nsec) / 1000000;
+            if (elapsed_ms >= 240) {
+                timed_out = 1;
+                break;
+            }
+            /* spurious / clock-basis mismatch - extend the cond deadline and
+             * keep waiting for the real 240 ms wall-clock budget. */
+            clock_gettime(CLOCK_REALTIME, &deadline);
+            deadline.tv_nsec += 50L * 1000000L;
+            if (deadline.tv_nsec >= 1000000000L) {
+                deadline.tv_sec += 1;
+                deadline.tv_nsec -= 1000000000L;
+            }
+        }
+    }
+
+    if (timed_out) {
+        /* Abandon the worker - it is still inside the GPU call. Never dispatch
+         * to it again; a late completion has stale request state cleared so it
+         * won't re-run, but it may still write `target` + queue that flip, so
+         * the caller must adopt_flip (not release) this buffer. */
+        g_agc_submit.have_req = 0;
+        g_agc.submit_wedged = 1;
+        g_agc.ready = 0;
+        pthread_mutex_unlock(&g_agc_submit.lock);
+        evo_boot_log("pp_agc: SUBMIT WEDGED (>250ms in agc_render_frame) - GPU "
+                     "present ABANDONED for the session, CPU converter from here. "
+                     "The VO is linear-registered while AGC is on, so the CPU "
+                     "fallback picture may be garbled until the app restarts.");
+        evo_boot_log_flush();
+        return -2;
+    }
+
+    int32_t rc = g_agc_submit.rc;
+    g_agc_submit.have_done = 0;
+    pthread_mutex_unlock(&g_agc_submit.lock);
 
     return rc == 0 ? 0 : -1;
 }
 
 void pp_agc_shutdown(void)
 {
+    /* Stop the worker first - unless it is wedged, in which case it is blocked
+     * in a GPU syscall forever and joining would hang shutdown. Leaking it (and
+     * the mappings it may still touch) is fine: shutdown only runs at exit. */
+    if (g_agc_submit.started && !g_agc.submit_wedged) {
+        pthread_mutex_lock(&g_agc_submit.lock);
+        g_agc_submit.quit = 1;
+        pthread_cond_signal(&g_agc_submit.req_cv);
+        pthread_mutex_unlock(&g_agc_submit.lock);
+        pthread_join(g_agc_submit.thread, NULL);
+        g_agc_submit.started = 0;
+    }
+    if (g_agc.submit_wedged)
+        return;
+
     agc_staging_free();
     if (g_agc.mem) {
         sceKernelMunmap(g_agc.mem, SHADER_MEMORY_BYTES);
