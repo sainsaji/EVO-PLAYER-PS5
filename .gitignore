@@ -122,9 +122,10 @@ desktop.ini
 .env.local
 
 # -----------------------------------------------------------------------------
-# Assembled GPU shader blobs (regenerate: tools/build-shader.sh pp/shaders/*.s)
+# Assembled GPU shader blobs. Checked in (guarded by pp/shaders/SHA256SUMS):
+# agc_ui_blobs.S .incbin's them into the eboot, same as pp/blobs/. Regenerate
+# with tools/build-shader.sh --all.
 # -----------------------------------------------------------------------------
-pp/shaders/*.bin
 
 # Loose media / scratch dropped at the repo root during hardware testing.
 /*.mp4

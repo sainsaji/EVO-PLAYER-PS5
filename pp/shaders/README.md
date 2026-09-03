@@ -6,8 +6,13 @@ assembled to raw `.text` blobs with `tools/build-shader.sh` (which drives
 `llvm-mc-18` — verified working 2026-09-02).
 
 ```
-./tools/build-shader.sh pp/shaders/rgba_ps.s
+./tools/build-shader.sh pp/shaders/rgba_ps.s   # one file
+./tools/build-shader.sh --all                  # every *.s + refresh SHA256SUMS
 ```
+
+The assembled `.bin` code halves and `SHA256SUMS` are checked in here;
+`projects/evoplayer/pp/src/agc_ui_blobs.S` `.incbin`s them (paths
+`../../pp/shaders/*.bin`) alongside the reused ProsperoLight headers.
 
 ## Status
 
@@ -32,17 +37,26 @@ only produces `code`. The `header` (SPI_PS_INPUT_*, VGPR/SGPR counts, the
 resource-count fields ProsperoLight's `render_frame` reads back at shader
 offsets +91/+92) is **not** produced here.
 
-Plan: **reuse ProsperoLight's `pixel.header.bin` and swap only the `.text`.**
-An RGBA shader is a structural subset of its NV12 shader (fewer images, no
-matrix, no gamma), so its header should over-describe rather than
-mis-describe. First device test = confirm `sceAgcCreateShader` accepts the
-pair. If not, the fallback is to hand-build the header from the RDNA2 ISA
-reference + the KytyPS5 / shadPS5 `.sb` parsers.
+**Pixel shaders** — reuse ProsperoLight's `pixel.header.bin` and swap only the
+`.text`. `solid_ps` / `glyph_ps` / `rgba_ps` are each a structural subset of
+the NV12 PS (≤ its images/samplers/CBs, no YUV matrix), so its header should
+over-describe rather than mis-describe. First device test = confirm
+`sceAgcCreateShader` accepts the pair.
+
+**`ui_vs`** — the reuse trick does **not** hold: it needs a third fetched
+attribute (per-vertex colour) and a second exported param vs
+`geometry.text.bin`, which is a header change, not a subset. See the risk note
+at the top of `ui_vs.s` — resolve at the Phase-1 hardware session (colour
+smuggled through the 2-slot fetch / hand-built header / GLSL compiler).
+
+Fallback for any of them: hand-build the header from the RDNA2 ISA reference +
+the KytyPS5 / shadPS5 / SharpProspero `ShaderInfo.cs` `.sb` parsers.
 
 ## Files
 
 | file | shader | needed by |
 |---|---|---|
 | `rgba_ps.s` | textured quad, sample RGBA × vertex colour, export MRT0 | Step 2 OSD composite, Step 3 |
-| _(later)_ `solid_ps.s` | vertex colour only | Step 3 |
-| _(later)_ `ui_vs.s` | 2D-ortho transform of a structured UI vertex | Step 3 |
+| `solid_ps.s` | vertex colour only (rects, borders, gradient meshes) | Step 3 |
+| `glyph_ps.s` | 1-channel coverage atlas × colour (text, R8 clip-mask sample) | Step 3 |
+| `ui_vs.s` | 2D-ortho transform of a structured UI vertex (pos + colour + UV) | Step 3 — **needs its own header** |

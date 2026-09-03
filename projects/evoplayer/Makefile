@@ -129,8 +129,8 @@ ADDON_SRCS := \
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
-# .incbin'd sceAgc shader blobs (#27). Assembled by $(CC).
-ASM_OBJS := pp/src/agc_blobs.o
+# .incbin'd sceAgc shader blobs (#27 video, #28 UI). Assembled by $(CC).
+ASM_OBJS := pp/src/agc_blobs.o pp/src/agc_ui_blobs.o
 C_OBJS   += $(ASM_OBJS)
 
 RMLUI_SRCS := \
@@ -154,6 +154,7 @@ all: $(ELF)
 
 # rebuild the embedded blobs when a .bin changes (recipe = the %.o: %.S rule)
 pp/src/agc_blobs.o: pp/src/agc_blobs.S $(wildcard pp/blobs/*.bin)
+pp/src/agc_ui_blobs.o: pp/src/agc_ui_blobs.S $(wildcard pp/blobs/*.header.bin) $(wildcard ../../pp/shaders/*.bin)
 
 # -----------------------------------------------------------------------------
 # App-module packaging hooks (Phase 1b - docs/evo-pro/phase-1b-app-module.md).
