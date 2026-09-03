@@ -12,7 +12,7 @@
 #include "evo_data_path.h"
 
 #ifndef EMBY_CONF_PATH
-#define EMBY_CONF_PATH EVO_DATA_DIR "/emby.conf"
+#define EMBY_CONF_PATH evo_data_path("emby.conf")
 #endif
 
 #ifndef EMBY_CONF_USB

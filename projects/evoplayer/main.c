@@ -2119,8 +2119,7 @@ void draw_bmp_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 
 /* PROSPERO_LAST_FOLDER_V3_START */
 
-#define PROSPERO_LAST_FOLDER_FILE \
-    EVO_DATA_DIR "/evo_last_folder.cfg"
+#define PROSPERO_LAST_FOLDER_FILE evo_data_path("evo_last_folder.cfg")
 
 
 static int prospero_last_folder_is_safe(
@@ -2288,13 +2287,24 @@ static void scan_search_recursive(const char *base_path, const char *rel_path, c
     evo_closedir(dir);
 }
 
+#ifdef EVO_APP_MODULE
+static void evo_persistence_rebind(void);
+#endif
+
 void load_usb_files(void) {
     file_count = 0;
     file_selected = 0;
 
     /* App module: make sure the per-title sandbox is lifted before we try to
-     * read a real path. No-op on the payload build and once promoted. */
+     * read a real path. No-op on the payload build and once promoted. If this
+     * is the call that finally opens the sandbox, config loaded at boot from
+     * the /download0 fallback has to be re-bound to /data (#46). */
+#ifdef EVO_APP_MODULE
+    if (!evo_jailbreak_is_open() && evo_jailbreak_ensure())
+        evo_persistence_rebind();
+#else
     evo_jailbreak_ensure();
+#endif
 
     /* EVO: the source picker sits above every real path. Its "listing" is
      * the fixed source table, not a directory. */
@@ -3277,7 +3287,10 @@ void draw_image_screen(uint32_t *fb) {
 
 
 
-#define RESUME_FILE "/data/ps5_media_resume.txt"
+/* #46: was a bare hard-coded "/data/ps5_media_resume.txt" for every build.
+ * Now under the resolved data root; evo_migrate_legacy_store() copies the old
+ * file across on first bind. */
+#define RESUME_FILE evo_data_path("ps5_media_resume.txt")
 
 void save_resume_position(void) {
     double pos;
@@ -6774,8 +6787,7 @@ static void rr_browser_icon(
 
 /* PROSPERO_PERSISTENT_SETTINGS_START */
 
-#define PROSPERO_SETTINGS_FILE \
-    EVO_DATA_DIR "/evo_player_settings.cfg"
+#define PROSPERO_SETTINGS_FILE evo_data_path("evo_player_settings.cfg")
 
 
 
@@ -11525,27 +11537,90 @@ static void draw_fps_overlay(uint32_t *fb)
     evo_text_right(fb, x + w - 12, text_y, buf, text_col, EVO_FACE_SMALL);
 }
 
+/* Byte-copy src -> dst. Returns 1 on a complete copy, 0 otherwise (incl. no
+ * src). Used only for the small text config files below. */
+static int evo_copy_file(const char *src, const char *dst)
+{
+    FILE *in = fopen(src, "rb");
+    if (!in)
+        return 0;
+    FILE *out = fopen(dst, "wb");
+    if (!out) { fclose(in); return 0; }
+
+    char b[4096];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(b, 1, sizeof b, in)) > 0) {
+        if (fwrite(b, 1, n, out) != n) { ok = 0; break; }
+    }
+    fclose(in);
+    if (fclose(out) != 0)
+        ok = 0;
+    return ok;
+}
+
 /*
- * App data (favorites, recent, settings, last-folder, Emby config) lives at
- * EVO_DATA_DIR so the player works with no USB stick present at all. As an
- * elfldr payload that is /data/evoplayer/; as the PPSA99039 app module the
- * sandbox has no /data, so it is /download0/evoplayer/ (see evo_data_path.h).
- * Nothing else in the tree ever created that directory - addon_emby.c has
- * been writing EMBY_CONF_PATH there without one existing, which silently
- * failed on any console that never installed the Media-tile launcher.
+ * One-time migration of the config store to its durable home (#46). Two legacy
+ * locations to sweep, never overwriting a file already at the new root:
+ *   - "/data/ps5_media_resume.txt" - the bare resume file every build wrote
+ *     before #46 routed it through evo_data_path().
+ *   - "/download0/evoplayer/*" - where the app module wrote everything while
+ *     EVO_DATA_DIR was a compile-time string; that mount does not survive a
+ *     relaunch, but the *current* boot can still read it once.
+ */
+static void evo_migrate_legacy_store(void)
+{
+    const char *root = evo_data_dir();   /* stable literal, safe to hold */
+    char dst[512];
+
+    snprintf(dst, sizeof dst, "%s/ps5_media_resume.txt", root);
+    if (access(dst, F_OK) != 0 &&
+        evo_copy_file("/data/ps5_media_resume.txt", dst))
+        evo_bt("persistence: migrated ps5_media_resume.txt from /data");
+
+#ifdef EVO_APP_MODULE
+    if (strcmp(root, "/download0/evoplayer") != 0) {
+        static const char *const leaves[] = {
+            "evo_recent.txt", "evo_favorites.txt", "evo_last_folder.cfg",
+            "evo_player_settings.cfg", "emby.conf", "ps5_media_resume.txt",
+        };
+        for (size_t i = 0; i < sizeof leaves / sizeof leaves[0]; i++) {
+            char src[512];
+            snprintf(src, sizeof src, "/download0/evoplayer/%s", leaves[i]);
+            snprintf(dst, sizeof dst, "%s/%s", root, leaves[i]);
+            if (access(dst, F_OK) != 0 && evo_copy_file(src, dst))
+                evo_bt("persistence: migrated %s from /download0", leaves[i]);
+        }
+    }
+#endif
+}
+
+/*
+ * App data (favorites, recent, settings, last-folder, Emby config) lives under
+ * evo_data_dir() so the player works with no USB stick present at all. The root
+ * is resolved at runtime (see evo_data_path.h): /data/evoplayer once the app
+ * sandbox is open (the payload: always), /download0/evoplayer only as a
+ * pre-unjail fallback. Nothing else in the tree ever created that directory.
  */
 static void evo_ensure_data_dir(void)
 {
-#ifndef EVO_APP_MODULE
-    mkdir("/data", 0777);   /* /download0 always exists in the app sandbox */
+    evo_mkdir("/data");   /* payload: ensure the parent; app: no-op / EEXIST */
+    evo_mkdir(evo_data_dir());
+
+#ifdef EVO_APP_MODULE
+    evo_bt("persistence: data root = %s (%s)", evo_data_dir(),
+           evo_jailbreak_is_open() ? "sandbox open"
+                                   : "FALLBACK - unjail not up yet");
 #endif
-    mkdir(EVO_DATA_DIR, 0777);
+
+    evo_migrate_legacy_store();
 
 #ifdef EVO_BOOT_TRACE
     /* Exercise evo_readdir() on a directory that actually has files - the
      * browser's /mnt/usb0 is ENOENT until sandbox-unjail, so it can't. */
     {
-        evo_dir_t *d = evo_opendir(EVO_DATA_DIR);
+        const char *root = evo_data_dir();
+        evo_dir_t *d = evo_opendir(root);
         int n = 0;
         char first[80] = "";
         if (d) {
@@ -11558,10 +11633,35 @@ static void evo_ensure_data_dir(void)
             evo_closedir(d);
         }
         evo_bt("readdir %s: %s%d entries%s",
-               EVO_DATA_DIR, d ? "" : "OPEN FAILED ", n, first);
+               root, d ? "" : "OPEN FAILED ", n, first);
     }
 #endif
 }
+
+#ifdef EVO_APP_MODULE
+/*
+ * The boot self-unjail (evo_jailbreak_self, ~1.2s) can lose the timing race
+ * with the jailbreak daemon. Config then loads from the /download0 fallback and
+ * later saves would split across two roots. Once evo_jailbreak_ensure() finally
+ * opens the sandbox (browser entry), re-point the data root at /data and reload
+ * everything that was read at boot. Cheap - all small text files, each loader
+ * clears before it reads. (#46)
+ */
+static void evo_persistence_rebind(void)
+{
+    evo_data_path_rebind();
+    evo_ensure_data_dir();
+    recent_load();
+    favorites_load();
+    evo_theme_reset();          /* re-scan themes/ under the new root */
+    prospero_settings_load();   /* calls evo_theme_init() + set_by_name() */
+    emby_init();
+    /* Not prospero_last_folder_load() - the user has already entered the
+     * browser by now; re-seeding current_path would yank them out of it. The
+     * file still saves to /data and restores on the next boot. */
+    evo_bt("persistence: rebound to %s after late unjail", evo_data_dir());
+}
+#endif
 
 #ifdef EVO_APP_MODULE
 /* Route FFmpeg's own diagnostics to the app-module notification channel -

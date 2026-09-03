@@ -20,7 +20,7 @@
 
 #include "evo_data_path.h"
 
-#define RECENT_FILE_DB   EVO_DATA_DIR "/evo_recent.txt"
+#define RECENT_FILE_DB   evo_data_path("evo_recent.txt")
 #define MAX_RECENT_FILES 25
 
 typedef struct {

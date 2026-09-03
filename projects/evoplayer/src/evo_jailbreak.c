@@ -24,8 +24,9 @@
 #define JB_FILE   "/download0/etahen_jailbreak"
 
 /* A jailed module's root is remapped, so /data (INTERNAL source) and
- * /mnt/usb0 (USB source) are ENOENT. /data is the reliable probe. */
-static int sandbox_is_open(void)
+ * /mnt/usb0 (USB source) are ENOENT. /data is the reliable probe.
+ * Public (evo_jailbreak.h) so evo_data_path() can pick its root at runtime. */
+int evo_jailbreak_is_open(void)
 {
     int fd = open("/data", O_RDONLY | O_DIRECTORY);
     if (fd >= 0) { close(fd); return 1; }
@@ -61,7 +62,7 @@ static int attempt(int tenths)
     for (int i = 0; i < tenths; i++) {
         usleep(100 * 1000);
         if (!consumed && access(JB_FILE, F_OK) != 0) consumed = 1;
-        if (sandbox_is_open()) { opened = 1; break; }
+        if (evo_jailbreak_is_open()) { opened = 1; break; }
     }
     evo_bt("jailbreak: pid=%d file=%s daemon_saw=%s sandbox=%s (/data errno=%d)",
            (int)getpid(), JB_FILE, consumed ? "yes" : "NO",
@@ -71,7 +72,7 @@ static int attempt(int tenths)
 
 int evo_jailbreak_self(void)
 {
-    if (sandbox_is_open()) {
+    if (evo_jailbreak_is_open()) {
         evo_bt("jailbreak: sandbox already open");
         return 1;
     }
@@ -82,7 +83,7 @@ int evo_jailbreak_self(void)
 
 int evo_jailbreak_ensure(void)
 {
-    if (sandbox_is_open())
+    if (evo_jailbreak_is_open())
         return 1;
     /* Two harder tries - Lapy's own note is that a first attempt can lose a
      * timing race. */

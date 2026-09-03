@@ -171,14 +171,25 @@ Clarksons 720p too.
   `MODE == player`; `tools/vdec-test.sh` + `package-app.sh --autoplay` drive
   the unattended hardware-test loop (FTP log pull, one manual launch press).
 
-**KNOWN BUG — #46, app module persists nothing (high).** Settings / recent /
-favorites / resume all reset every launch; the ELF payload persisted fine.
-Console: `savedata_prospero/` has no `PPSA99039` folder. Cause: `/download0/
-evoplayer/` isn't durable for a fake-signed ShadowMount title, and/or
-`evo_jailbreak_self()` (now at `main()` boot, landed *after* task 6 verified
-persistence 2026-09-02) detaches it. Fix: route to `/data/evoplayer/`
-post-unjail like the payload — `evo_data_path()` becomes a runtime pick;
-`RESUME_FILE` (`/data/...`) too; migrate old config.
+**#46 — app module persists nothing (high). CODE DONE 2026-09-03, HW-VERIFY
+PENDING.** Settings / recent / favorites / resume reset every launch; the ELF
+payload persisted fine. Cause: `/download0/evoplayer/` isn't durable for a
+fake-signed ShadowMount title. Fix landed on `refactor/main-c-media-modules`:
+`evo_data_dir()`/`evo_data_path()` (`src/evo_data_path.c`) now resolve the root
+at **runtime** — `/data/evoplayer` once `evo_jailbreak_is_open()`, the
+`/download0` literal only as a pre-unjail fallback (uncached, self-heals).
+`evo_jailbreak_is_open()` made public. Every compile-time site
+(`RECENT_FILE_DB`, `FAVORITES_FILE_DB`, `EMBY_CONF_PATH`,
+`PROSPERO_LAST_FOLDER_FILE`, `PROSPERO_SETTINGS_FILE`, `RESUME_FILE` — was a
+bare `/data/ps5_media_resume.txt`) routed through `evo_data_path()`.
+`evo_mkdir()` shim uses `sceKernelMkdir` on the app module (libc `mkdir` not in
+the clean-room `libc.prx` surface). Late-unjail race handled by
+`evo_persistence_rebind()` (browser entry re-binds + reloads if the boot
+`attempt(12)` lost the race — chose this over hardening the boot attempt).
+One-shot migration copies `/download0/evoplayer/*` and the old bare resume file
+into `/data/evoplayer/` on first bind. Both builds compile green; **not yet run
+on a console** — verify: theme + favorite + resume → PS-close → relaunch → all
+restored, and `/fs/data/evoplayer/?fmt=json` shows the files.
 
 **KNOWN BUG — #32, scrub shows no player UI on the V8 4K path (high).**
 Reframed 2026-09-03 after a closer hardware look: **not a freeze / deadlock.**

@@ -20,7 +20,7 @@
 
 #include "evo_data_path.h"
 
-#define FAVORITES_FILE_DB EVO_DATA_DIR "/evo_favorites.txt"
+#define FAVORITES_FILE_DB evo_data_path("evo_favorites.txt")
 #define MAX_FAVORITES     100
 
 typedef struct {
