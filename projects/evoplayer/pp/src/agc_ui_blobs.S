@@ -49,3 +49,8 @@ BLOB(pp_agc_rgba_ps_code,   "../../pp/shaders/rgba_ps.bin")
  * reference's reflection block. Not linked into any render path yet. */
 BLOB(pp_agc_rgba_spliced_code,  "../../pp/shaders/rgba_ps_spliced.bin")
 BLOB(pp_agc_glyph_spliced_code, "../../pp/shaders/glyph_ps_spliced.bin")
+
+/* Phase-1 probe option B: textured PS via typed buffer_load_format (V# in
+ * s[0:3]) instead of image_sample. If CreateShader accepts this, hand-written
+ * textured UI shaders are viable (point-sampled from a fixed-width atlas). */
+BLOB(pp_agc_texbuf_ps_code, "../../pp/shaders/texbuf_ps.bin")

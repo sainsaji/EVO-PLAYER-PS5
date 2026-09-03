@@ -78,6 +78,7 @@ extern const uint8_t pp_agc_glyph_ps_code_start[],  pp_agc_glyph_ps_code_end[];
 extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
 extern const uint8_t pp_agc_rgba_spliced_code_start[],  pp_agc_rgba_spliced_code_end[];
 extern const uint8_t pp_agc_glyph_spliced_code_start[], pp_agc_glyph_spliced_code_end[];
+extern const uint8_t pp_agc_texbuf_ps_code_start[],     pp_agc_texbuf_ps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
 #define SHADER_MEMORY_BYTES  0x0d0000u
@@ -713,6 +714,20 @@ int pp_agc_probe_ui_shaders(void)
         }
     } else {
         evo_boot_log("pp_agc UI: spliced blob copy failed");
+    }
+
+    /* Option B: textured PS via typed buffer_load_format (no image_sample). */
+    if (copy_asset(m + OFF_UI_PS_C_CODE, 0x1000, pp_agc_texbuf_ps_code_start,
+                   pp_agc_texbuf_ps_code_end) == 0) {
+        void *ps_tb_p = 0, *ps_tb_g = 0;
+        int32_t c_tp = sceAgcCreateShader(&ps_tb_p, m + OFF_UI_PS_HDR,  m + OFF_UI_PS_C_CODE);
+        int32_t c_tg = sceAgcCreateShader(&ps_tb_g, m + OFF_UI_VS_HDR,  m + OFF_UI_PS_C_CODE);
+        evo_boot_log("pp_agc UI: CreateShader texbuf(pixelhdr)=0x%08x texbuf(geomhdr)=0x%08x  (p=%p g=%p)",
+                     (unsigned)c_tp, (unsigned)c_tg, ps_tb_p, ps_tb_g);
+        if (c_vs == 0 && c_tp == 0) {
+            int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_tb_p, 4);
+            evo_boot_log("pp_agc UI: LinkShaders ui_vs+texbuf (TriList) = 0x%08x", (unsigned)l);
+        }
     }
 
     evo_boot_log("pp_agc UI: probe done (no state changed)");
