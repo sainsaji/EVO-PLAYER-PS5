@@ -568,12 +568,20 @@ static int bsf_build(evo_vdec_native *n)
         return -1;
     if (n->bsf)
         av_bsf_free(&n->bsf);
-    if (av_bsf_alloc(bf, &n->bsf) < 0)
+    if (av_bsf_alloc(bf, &n->bsf) < 0) {
+        n->bsf = NULL;
         return -1;
-    if (avcodec_parameters_copy(n->bsf->par_in, n->bsf_par) < 0)
+    }
+    if (avcodec_parameters_copy(n->bsf->par_in, n->bsf_par) < 0) {
+        av_bsf_free(&n->bsf);
         return -1;
+    }
     n->bsf->time_base_in = (AVRational){ 1, 1000000 };
-    return av_bsf_init(n->bsf) < 0 ? -1 : 0;
+    if (av_bsf_init(n->bsf) < 0) {
+        av_bsf_free(&n->bsf);
+        return -1;
+    }
+    return 0;
 }
 
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
@@ -741,8 +749,25 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
     v->flushing       = 0;
     v->fatal          = 0;
     v->first_err_logged = 0;
-    if (v->bsf)
-        av_bsf_flush(v->bsf);            /* re-emits SPS/PPS on the next IDR */
+    /*
+     * #57: a plain av_bsf_flush() drops h264_mp4toannexb's buffered state but
+     * does NOT re-arm its one-shot SPS/PPS injection, so the first IDR after a
+     * seek reaches sceVideodec2 with no in-band parameter sets and it faults
+     * (0x811d0303) on every AU until playback gives up. Streams that repeat
+     * SPS/PPS in-band per keyframe (e.g. the GTA trailer) happen to survive;
+     * ones that keep them in avcC extradata only (mkv, most .mov) do not.
+     * Rebuild the bsf instead — a fresh filter re-injects the parameter sets
+     * on its first output packet. On rebuild failure, fault so the playback
+     * layer falls back cleanly rather than feeding raw avcC to the decoder.
+     */
+    if (v->bsf_name && v->bsf_par) {
+        if (bsf_build(v) != 0) {
+            v->fatal = 1;
+            note("EVO vdec native: FLUSH (seek) bsf rebuild FAILED -> fatal");
+        }
+    } else if (v->bsf) {
+        av_bsf_flush(v->bsf);
+    }
     if (v->dec)
         sceVideodec2Reset(v->dec);
     note("EVO vdec native: FLUSH (seek)  decodes=%u framesout=%u",

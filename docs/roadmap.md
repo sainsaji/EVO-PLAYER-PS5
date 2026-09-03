@@ -14,7 +14,7 @@ timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 
 Priority labels track this order: **critical** #27 (render_frame ported + wired
 09-03, awaiting a first hardware run) · **high** #32, #36 · **medium** #6, #35,
-#37/#38/#39/#41, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51, #52,
+#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51, #52,
 the rest. `independent` = no cross-deps, work any time in parallel.
 
 **Closed 2026-09-03 (later):** **#46** (persistence — hardware-verified,
@@ -46,7 +46,9 @@ keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
 `f7a340e`; `docs/project-tracking.md`) · #53 `main.c` Track-B carve-up —
 `main.c` logic is at 0% coverage because it can't be host-linked; #53 is the
 prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
-New label `modularisation` = #49 + #53.
+New label `modularisation` = #49 + #53 · **#59** surface active video decoder
+backend in player UI (HW vs SW badge + OSD / Media Info, v1.1.0, `native-decode`,
+`priority: medium`).
 
 ---
 
@@ -98,6 +100,7 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
     #39 decode-thread watchdog (hung call must not wedge the app slot)
     #40 route direct memory via evo_direct_mem + multi-hour soak
     #41 HEVC hardware decode (2nd resident decoder)
+    #59 Surface video decoder backend in player UI (HW vs SW badge + OSD)
     #32 scrub shows no player UI on the V8 4K path (not a freeze — app
         responsive; k4_live never composites the OSD + v8_hold skips the flip) (high)
 ```
@@ -202,6 +205,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 | **#39** | Watchdog the decode thread — a hung `sceVideodec2` call must not wedge the app slot | open |
 | **#40** | Route the resident decoder's direct memory through `evo_direct_mem` + multi-hour soak | open |
 | **#41** | HEVC hardware decode — a 2nd resident `sceVideodec2` decoder (H.264-only today) | open |
+| **#59** | Surface video decoder backend in player UI (Hardware vs Software decode indicator) | open, medium |
 | **#32** | Scrub shows no player UI on the V8 4K path (not a freeze — app responsive) | open, high |
 
 - Reads: **`docs/evo-pro/status.md`**, `docs/evo-pro/native-decode-plan.md`

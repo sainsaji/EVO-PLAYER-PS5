@@ -37,6 +37,7 @@ int    evo_pb_is_active(void);        /* a video decode session is running   */
 int    evo_pb_is_paused(void);        /* was: player_paused                  */
 int    evo_pb_is_eof(void);           /* was: video_decode_done              */
 int    evo_pb_decode_fatal(void);     /* sustained decoder failure — abort   */
+void   evo_pb_reset_decode_fatal(void); /* clear fatal flag + streak (re-open) */
 double evo_pb_position_s(void);       /* audio-preferred media clock         */
 double evo_pb_duration_s(void);
 double evo_pb_audio_clock_s(void);

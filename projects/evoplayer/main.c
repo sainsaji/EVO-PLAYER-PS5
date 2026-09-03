@@ -1672,6 +1672,12 @@ static evo_stream_io_ctx_t *g_stream_io_ctx = NULL;
  */
 evo_vdec *g_vdec = NULL;
 
+/* #57: sticky per-file "don't use the native decoder for this one". Set when
+ * the native backend goes fatal (a post-seek sceVideodec2Reset reject at 4K is
+ * the known case) so the retry reopens on FFmpeg. Cleared in
+ * start_video_playback() whenever a different file is opened. */
+int g_vdec_force_ffmpeg = 0;
+
 struct SwsContext *play_sws = NULL;   /* legacy swscale fallback (exotic fmts) */
 char current_media[128];
 
@@ -3569,6 +3575,16 @@ int start_video_playback(const char *path) {
     enum AVCodecID audio_seen_codec    = AV_CODEC_ID_NONE;
     stop_video_playback();
 
+    /* #57: the FFmpeg-fallback flag is per-file. A genuine new file re-enables
+     * the native decoder; the fallback's own reopen (same path) keeps it. */
+    {
+        static char s_vdec_last_path[512];
+        if (path && strcmp(path, s_vdec_last_path) != 0) {
+            g_vdec_force_ffmpeg = 0;
+            snprintf(s_vdec_last_path, sizeof s_vdec_last_path, "%s", path);
+        }
+    }
+
     EVO_P8("P8_00_ENTER", "%.80s", path ? path : "(null)");
 
     prospero_playback_finished = 0;
@@ -4200,8 +4216,9 @@ int start_video_playback(const char *path) {
              * falls back to FFmpeg on any native bring-up failure. The real
              * Auto/FFmpeg/Native settings row is Phase 5.
              */
-            vp.backend      = evo_vdec_probe() ? EVO_VDEC_BACKEND_NATIVE
-                                               : EVO_VDEC_BACKEND_FFMPEG;
+            vp.backend      = (!g_vdec_force_ffmpeg && evo_vdec_probe())
+                                  ? EVO_VDEC_BACKEND_NATIVE
+                                  : EVO_VDEC_BACKEND_FFMPEG;   /* #57 fallback */
             vp.codec_id     = par->codec_id;
             vp.width        = par->width;
             vp.height       = par->height;
@@ -4348,7 +4365,7 @@ int start_video_playback(const char *path) {
     video_decode_ready = (video_stream_index >= 0) ? 1 : 0;
     /* demux sets video_decode_done on EOF for both video and music */
     video_decode_done = 0;
-    g_pb_decode_fatal = 0;
+    evo_pb_reset_decode_fatal();
 
     packet_queue_clear(&video_packet_queue);
     packet_queue_clear(&audio_packet_queue);
@@ -11018,10 +11035,30 @@ static void prospero_playback_finished_update(
         return;
     }
 
-    /* Decoder gave up (e.g. a 4K frame pool the app-module sandbox can't
-     * satisfy). evo_playback has already toasted + stopped the loop; end the
-     * session now rather than sitting on a frozen last frame. */
+    /* Decoder gave up. evo_playback has already toasted + stopped the loop. */
     if (evo_pb_decode_fatal()) {
+        /*
+         * #57: the native (sceVideodec2) backend rejects the first AU after a
+         * mid-stream reset for some 4K streams (post-seek 0x811d0303 — a
+         * resident-decoder limitation). Before ending the session, retry once
+         * on FFmpeg from the current position: software 4K is slow but it
+         * seeks reliably. g_vdec_force_ffmpeg is sticky for this file, so the
+         * reopen and any later seek stay on FFmpeg.
+         */
+        if (!g_vdec_force_ffmpeg && g_vdec && current_media_path[0] &&
+            evo_vdec_active(g_vdec) == EVO_VDEC_BACKEND_NATIVE) {
+            double pos = resume_base_offset_seconds + prospero_media_clock_seconds();
+            g_vdec_force_ffmpeg = 1;
+            requested_resume_seek_pos = (pos > 1.0) ? pos : 1.0;
+            toast("PLAYBACK", "Switched to software decode");
+#if PP_BACKEND_ENABLED
+            pp_stage_bc_checkpoint("016_VDEC_FFMPEG_FALLBACK",
+                                   "native fatal -> ffmpeg retry");
+#endif
+            start_video_playback(current_media_path);
+            prospero_finish_candidate_ms = 0;
+            return;
+        }
         prospero_playback_finished = 1;
         player_paused = 1;
         screen = SCREEN_PLAYBACK_FINISHED;

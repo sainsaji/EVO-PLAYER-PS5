@@ -81,16 +81,29 @@ double video_fps = 60.0;
 int    video_decode_ready = 0;
 int    video_decode_done = 0;
 
-/* Sustained decoder failure (e.g. a 4K frame pool the app-module sandbox can't
- * satisfy - see issue #26/#29). The decode loop keeps feeding packets to a
+/* Sustained decoder failure. The decode loop keeps feeding packets to a
  * decoder that returns fatal on every receive; the state corrupts (POC errors)
  * and it eventually faults. Instead: count the streak, and once it is clearly
  * not recoverable, raise this flag so main.c ends playback with a toast rather
- * than crashing. Reset per open in start_video_playback. */
+ * than crashing. Reset per open in start_video_playback.
+ *
+ * NOTE: this fires for the hardware (sceVideodec2) backend too, so the toast
+ * must not say "software". A stream whose SPS/PPS the HW decoder rejects after
+ * a seek is the common trigger (#57). */
 int    g_pb_decode_fatal = 0;
 static int s_vdec_fatal_streak = 0;
 #define EVO_VDEC_FATAL_STREAK_LIMIT 16
 int evo_pb_decode_fatal(void) { return g_pb_decode_fatal; }
+
+/* Clear the fatal state AND the streak counter. start_video_playback() calls
+ * this on every (re)open — clearing only g_pb_decode_fatal leaves the streak
+ * latched at the limit, so the first transient fatal after a reopen (e.g. the
+ * FFmpeg-fallback reopen for #57) would re-trip it immediately. */
+void evo_pb_reset_decode_fatal(void)
+{
+    g_pb_decode_fatal   = 0;
+    s_vdec_fatal_streak = 0;
+}
 
 #ifdef EVO_APP_MODULE
 extern void pp_stage_bc(const char *stage_id, const char *detail);
@@ -109,7 +122,7 @@ static void note_vdec_result(int fatal)
 #ifdef EVO_APP_MODULE
     pp_stage_bc("P8_VDEC_FATAL", "decode failed repeatedly - ending playback");
 #endif
-    toast("PLAYBACK", "This file is too demanding for software decode");
+    toast("PLAYBACK", "Video decode failed - can't play this file");
 }
 
 volatile int video_thread_running = 0;
