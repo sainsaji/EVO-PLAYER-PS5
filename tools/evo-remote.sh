@@ -99,14 +99,11 @@ build)
     echo "  >>> launch PPSA99039 from the Games row (ShadowMount+ remounted) <<<"
     ;;
 kill)
-    make -C "${REPO_ROOT}/projects/app_ctl" >/dev/null 2>&1 && \
-      "${SCRIPTS_DIR}/install-homebrew.sh" --name app_ctl \
-        "${REPO_ROOT}/projects/app_ctl/app_ctl.elf" >/dev/null 2>&1 && \
-      curl -sS --max-time 12 --get \
-        --data-urlencode "path=/data/homebrew/app_ctl/eboot.elf" \
-        --data-urlencode "args=kill" --data-urlencode "pipe=1" \
-        "http://${PS5_HOST}:${WEB_PORT}/hbldr" 2>/dev/null || true
-    echo "kill fired (relaunch from the Games row)"
+    # The old app_ctl /hbldr helper is gone with the ELF-push scripts
+    # (2026-09-03). PS-button close on the console is the only reliable way to
+    # free the app slot; ShadowMount+ re-mounts + auto-launches on the next
+    # `evo-remote.sh build`.
+    die "no remote kill. PS-button-close EVO on the console, then re-deploy."
     ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/build-evoplayer.sh - build the EVO Player fork.
+# scripts/build-evoplayer.sh - HOST COMPILE CHECK for the EVO Player fork.
 #
-#   ./scripts/build-evoplayer.sh              build
-#   ./scripts/build-evoplayer.sh --run        build, install as homebrew, launch
+#   ./scripts/build-evoplayer.sh              build the ELF (compile check only)
 #   ./scripts/build-evoplayer.sh --stage 0    build a specific 4K stage
+#
+# This produces output/elf/EVOPlayer.elf purely so the payload / non-app-module
+# code path stays green (issues #31 §4, #36, docs/modularisation-plan.md parity).
+# It does NOT and MUST NOT deploy or launch anything on a console. The ONLY
+# hardware path is the app module:
+#     scripts/package-app.sh --ffpfsc  &&  scripts/deploy-app.sh --ffpfsc
+# The ELF-push scripts (install-homebrew / launch / deploy) were deleted
+# 2026-09-03 - see docs/tooling.md and the `never-elf` rule.
 #
 # Same transitive-link fix as build-prosperoplayer.sh: pacbrew's FFmpeg is
 # built with openssl/ass/freetype/fribidi/harfbuzz, and static archives carry
@@ -15,15 +22,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 DEST="${REPO_ROOT}/projects/evoplayer"
 ELF_NAME="EVOPlayer.elf"
 STAGE=""
-DO_RUN=0
-RUN_TIMEOUT=40
 
 while (( $# )); do
     case "$1" in
-        --run)     DO_RUN=1 ;;
         --stage)   shift; STAGE="${1:?--stage needs a value}" ;;
-        --timeout) shift; RUN_TIMEOUT="${1:?--timeout needs seconds}" ;;
-        -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        --run)     die "--run is gone. EVO deploys via the app module only:
+       scripts/package-app.sh --ffpfsc && scripts/deploy-app.sh --ffpfsc" ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -31,7 +36,6 @@ done
 
 if ! in_container; then
     FWD=()
-    (( DO_RUN )) && FWD+=(--run --timeout "${RUN_TIMEOUT}")
     [[ -n "${STAGE}" ]] && FWD+=(--stage "${STAGE}")
     reexec_in_container "build-evoplayer.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
@@ -104,48 +108,4 @@ fi
 
 validate_elf "${DEST}/${ELF_NAME}"
 cp -f "${DEST}/${ELF_NAME}" "${ELF_OUT}/"
-ok "-> output/elf/${ELF_NAME}"
-
-# Also sync assets if running
-if (( DO_RUN )); then
-    begin "syncing homebrew assets"
-    python3 -c "
-import ftplib, os, sys
-host = '${PS5_HOST:-192.168.0.12}'
-port = 2121
-try:
-    ftp = ftplib.FTP()
-    ftp.connect(host, port, timeout=5)
-    ftp.login()
-    ftp.set_pasv(True)
-    def ensure_dir(d):
-        cur = ''
-        for p in d.strip('/').split('/'):
-            cur += '/' + p
-            try: ftp.mkd(cur)
-            except Exception: pass
-    def upload(src, dst):
-        with open(src, 'rb') as f:
-            ftp.storbinary(f'STOR {dst}', f)
-    for root, dirs, files in os.walk('projects/evoplayer/assets'):
-        rel = os.path.relpath(root, 'projects/evoplayer/assets').replace('\\\\', '/')
-        r_dir = '/data/homebrew/EVOPlayer/assets' + ('/' + rel if rel != '.' else '')
-        ensure_dir(r_dir)
-        for f in files:
-            upload(os.path.join(root, f), r_dir + '/' + f)
-        r_dir2 = '/data/evoplayer/app/assets' + ('/' + rel if rel != '.' else '')
-        ensure_dir(r_dir2)
-        for f in files:
-            upload(os.path.join(root, f), r_dir2 + '/' + f)
-    ftp.quit()
-except Exception as e:
-    pass
-" 2>/dev/null || true
-
-    "${SCRIPTS_DIR}/install-homebrew.sh" --run --timeout "${RUN_TIMEOUT}" \
-        --name EVOPlayer "${ELF_OUT}/${ELF_NAME}"
-else
-    echo ""
-    echo "   Install and launch:"
-    echo "     ./scripts/build-evoplayer.sh --run"
-fi
+ok "-> output/elf/${ELF_NAME}  (compile check only - not a deploy target)"
