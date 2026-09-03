@@ -95,6 +95,16 @@ static int s_vdec_fatal_streak = 0;
 #define EVO_VDEC_FATAL_STREAK_LIMIT 16
 int evo_pb_decode_fatal(void) { return g_pb_decode_fatal; }
 
+/* Clear the fatal state AND the streak counter. start_video_playback() calls
+ * this on every (re)open — clearing only g_pb_decode_fatal leaves the streak
+ * latched at the limit, so the first transient fatal after a reopen (e.g. the
+ * FFmpeg-fallback reopen for #57) would re-trip it immediately. */
+void evo_pb_reset_decode_fatal(void)
+{
+    g_pb_decode_fatal   = 0;
+    s_vdec_fatal_streak = 0;
+}
+
 #ifdef EVO_APP_MODULE
 extern void pp_stage_bc(const char *stage_id, const char *detail);
 #endif
