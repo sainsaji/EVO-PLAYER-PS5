@@ -4,12 +4,20 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 >
-> **RESUME HERE → #27 (GPU Step 2).** #31 (native 4K decode) is DONE + closed.
-> The AGC gate passed and `pp_agc_init` (shader setup) is hardware-verified.
-> **`render_frame` / `pp_agc_present_nv12` FAILED its first hardware run
-> (2026-09-03) — GPU submit hangs then crashes GTA 4K.** It's now gated behind
-> `--agc-probe` (PR #54); default build uses the CPU V8 path. Next: RT
-> buffer-attr / `cx` bits (open unknown #1) before the next `--agc-probe` run.
+> **RESUME HERE → #27 (GPU Step 2), phase C.** #31 (native 4K decode) is DONE +
+> closed. The AGC gate passed and `pp_agc_init` (shader setup) is
+> hardware-verified. `render_frame` / `pp_agc_present_nv12` FAILED its first
+> hardware run (2026-09-03) — GPU submit hangs then crashes GTA 4K.
+> **Plan A+B landed on `feat/27-agc-submit-watchdog`:** the whole `render_frame`
+> now runs on a dedicated worker thread behind a 250 ms watchdog (`pp_agc.c`) —
+> a wedged `sceAgcDriverSubmitDcb` returns `-2`, `pp_agc` goes permanently
+> unavailable for the session, and playback drops to the CPU V8 path instead of
+> freezing the app slot — and `pp_videoout_init` registers the VO with
+> ProsperoLight's linear SDR attr (`0x8000000000000000`) whenever
+> `pp_agc_available()` (i.e. `--agc-probe` builds only). Still `--agc-probe`
+> gated; default build unchanged (CPU V8). **Next: run `--agc-probe` on
+> hardware** — the watchdog makes a wrong RT-attr / `cx` guess cost a dropped
+> frame + a log line, so iterate the picture per `agc-implementation.md` §8.
 > Open bugs from #31: #32 (scrub blanks player UI on the V8 4K path — fix landed
 > via a 1080 scrub overlay, hw-verify pending), #55 (4K V3-fallback buffer
 > overflow), #33 (harness cleanup).
@@ -83,8 +91,11 @@ row (or let ShadowMount auto-launch) → `evo-remote.sh boot` / `play`.
 2. `sceAgcDcbSetFlip` against a handle whose buffers `pp_videoout` (not AGC)
    registered.
 3. Colour: `0xAABBGGRR` framebuffer order vs the shader's MRT0 export.
-4. `sceAgcDriverSubmitDcb` latency on the playback push thread (no watchdog
-   thread yet — first-frame guard only).
+4. ~~`sceAgcDriverSubmitDcb` latency on the playback push thread~~ — **plan B
+   landed (`feat/27-agc-submit-watchdog`):** `render_frame` runs on a dedicated
+   worker, caller `pthread_cond_timedwait`s 250 ms; a wedge → `-2` → `pp_agc`
+   dead + CPU path, no app-slot freeze. Unknown #1's attr fix (plan A) also
+   landed — VO registers `0x8000000000000000` under `pp_agc_available()`.
 5. Type-12 direct-memory headroom for 0xD0000 + ~36 MB staging alongside the
    resident decoder.
 
@@ -107,6 +118,36 @@ The default `.ffpfsc` uses the CPU V8 converter (YUV420P, #31-proven); GTA 4K
 plays again. `--agc-probe` still arms the GPU path for #27 work via
 `evo_agc_probe()`. Next #27 step: register the VO buffer with ProsperoLight's
 `0x80..00` attr (or adjust the `cx` RT bits) before the next `--agc-probe` run.
+
+## 2026-09-03 (night) — #27 plan A+B landed (`feat/27-agc-submit-watchdog`)
+
+The issue's "Plan to finish" comment, B → A in one PR, to make the `--agc-probe`
+loop safe to iterate. **No hardware run yet** — code only, all three builds
+green (host `build-evoplayer.sh`, `package-app.sh --agc-probe`, bare
+`package-app.sh`, `uiview.sh --all`).
+
+- **B — watchdog'd worker (`pp/src/pp_agc.c`).** New `agc_submit_worker` thread
+  (started at the end of `pp_agc_init`) owns the *entire* `agc_render_frame`
+  call — `WaitUntilSafeForRendering` + `SubmitDcb` + `SuspendPoint` — plus the
+  first-frame `sigsetjmp` guard (moved off the caller, since that thread is the
+  one that faults). `pp_agc_present_nv12` stages the NV12 (unchanged), publishes
+  a single-slot mailbox, then `pthread_cond_timedwait`s **250 ms** (CLOCK_REALTIME
+  deadline + a CLOCK_MONOTONIC re-check so a wrong clock basis only re-waits).
+  On timeout: `g_agc.submit_wedged = 1`, `g_agc.ready = 0`, worker abandoned
+  (never joined — it's stuck in the syscall), return **`-2`**.
+- **`pp_playback.c` V8 `agc_path`**: `-2` → `pp_videoout_adopt_flip` (not
+  release — the abandoned worker may still queue that flip), checkpoint
+  `011_AGC_SUBMIT_WEDGED`, CPU path for every frame after. `-1` unchanged.
+- **A — linear VO attr (`pp/src/pp_videoout.c`).** `pp_videoout_init` picks
+  `PP_VO_ATTR_SDR_LINEAR` (`0x8000000000000000`, new in `pp_platform.h`) over
+  `PP_VO_ATTR_TILED_BGRA` when `pp_agc_available()` && `EVO_APP_MODULE`. Auto-
+  scoped to `--agc-probe` builds (default `.ffpfsc` never calls `pp_agc_init`).
+  Known limit: if AGC dies mid-session the CPU fallback tiler writes tiled into
+  a linear-registered buffer → garbled until restart (logged loudly on `-2`).
+
+**Next: `tools/evo-remote.sh build --agc-probe` on hardware.** Expect
+`pp_agc: render_frame rc=…` in `evo_boot.log` with the app still alive; then
+drive the picture per §8 below.
 
 ## 2026-09-03 (later) — #27 shader setup VALIDATED on hardware
 
@@ -445,13 +486,16 @@ the "remote-close investigation" section — there is no clean remote close):
       (`/mnt/usb0/GTAVI_An_Extended_Look.mp4`)
 - [ ] `tools/evo-remote.sh boot` again — read `pp_agc: render_frame rc=…`
   - rc=0 + correct picture → Step 2 works, move to plane-hash A/B
-  - garbled / channel-swapped → RT format/tiling (see the unknowns list above)
-  - `pp_agc: FAULT …` → guard fired, AGC disabled, CPU fallback — debug offline
+  - garbled / channel-swapped → RT format/tiling — adjust `cx[2/4/15]` (plan A's
+    linear VO attr is already applied)
+  - `pp_agc: FAULT …` → first-frame guard fired, AGC disabled, CPU fallback
+  - `pp_agc: SUBMIT WEDGED` / `011_AGC_SUBMIT_WEDGED` → plan-B watchdog fired
+    (submit >250 ms), AGC abandoned, CPU path — app stays alive, debug offline
 
 **Then, in order:**
 - [ ] **#27 Step 2 finish** — plane-hash A/B vs the CPU converter; then remove
-      `pp_converter_fused` / the CPU swizzle from the 4K hot path; submit
-      watchdog thread; P010/HDR present path.
+      `pp_converter_fused` / the CPU swizzle from the 4K hot path; P010/HDR
+      present path.
 - [ ] **#27 settings row** `Playback → Renderer: Auto / CPU / GPU` — coordinate
       with **#37**'s `Video decoder` row (same screen, same fscanf-append
       pattern — land decoder-append first, then renderer).

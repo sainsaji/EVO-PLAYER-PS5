@@ -13,8 +13,12 @@ timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
 Priority labels track this order: **critical** #27 (render_frame FAILED its
-first hardware run 09-03 — GPU submit hangs 4K; gated behind `--agc-probe`,
-default build on the CPU V8 path) · **high** #32, #36, #55 · **medium** #35,
+first hardware run 09-03 — GPU submit hangs 4K. Plan A+B landed on
+`feat/27-agc-submit-watchdog`: the submit now runs on a watchdog'd worker
+thread — a wedge drops to the CPU path instead of freezing the app — and the VO
+registers linear when AGC is armed. Still `--agc-probe`-gated; default build on
+the CPU V8 path. Next: the `--agc-probe` hardware iterate — phase C) · **high**
+#32, #36, #55 · **medium** #35,
 #37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
@@ -87,8 +91,9 @@ Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
   #4 10-bit fast path (CPU stopgap) ───────────┤        (real fix is #27; optional)
                                                ▼
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ──► #28 Step 3
-   (package-app.sh step 6b,      │   gate ✅ + pp_agc_init ✅ hw; render_frame ported
-    unconditional DT_NEEDED)      │   + pp_playback V8 wired 09-03 — awaiting a hw run
+   (package-app.sh step 6b,      │   gate ✅ + pp_agc_init ✅ hw; render_frame ported +
+    unconditional DT_NEEDED)      │   wired; A+B (watchdog thread + linear VO attr)
+                                  │   landed — awaiting the --agc-probe hw iterate (C)
                                  │   (same wall also blocks #34 native IME keyboard)
                                  └─► Route B libSceVideodec2 ✅ #31 CLOSED — GTA 4K
                                      plays real-time on native decode (2026-09-03)
