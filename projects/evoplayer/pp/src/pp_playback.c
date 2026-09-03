@@ -346,12 +346,23 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     /*
      * V8 fused: 1:1 yuv420p → tiled BGRA at live VO size.
      * Supports full 3840x2160 and cinema UHD (e.g. 3840x1920).
+     *
+     * #27: pp_v8_frame_gate only clears YUV420P (the CPU converters' format).
+     * An NV12 UHD frame from the native decoder is also a valid V8 source — the
+     * AGC GPU converter samples NV12 directly (agc_path below), and if AGC is
+     * not taken the NV12→YUV420P de-interleave a few lines down feeds the CPU
+     * converter. Without this an NV12 frame falls to the V3/1080 path, which
+     * overflows at 4K (#55) — the crash seen on the first #27 hardware runs.
      */
+    int v8_src_ok = (pp_v8_frame_gate(src, 30.0) == PP_V8_GATE_OK) ||
+                    (src->format == PP_FRAME_NV12 &&
+                     pp_v8_is_uhd_size(src->width, src->height));
+
     use_v8 = (pb->backend == PP_BACKEND_4K_V8_FUSED && !pb->force_v3_fallback &&
               pb->vo && pb->vo->inited &&
               pb->out_w == pb->vo->width && pb->out_h == pb->vo->height &&
               src->width == pb->out_w && src->height == pb->out_h &&
-              pp_v8_frame_gate(src, 30.0) == PP_V8_GATE_OK);
+              v8_src_ok);
 
     /*
      * V8 is strict 1:1 tile (no FIT/FILL/STRETCH). If the user forced V3 via
