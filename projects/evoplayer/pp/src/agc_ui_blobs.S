@@ -42,3 +42,10 @@ BLOB(pp_agc_ui_vs_code,     "../../pp/shaders/ui_vs.bin")
 BLOB(pp_agc_solid_ps_code,  "../../pp/shaders/solid_ps.bin")
 BLOB(pp_agc_glyph_ps_code,  "../../pp/shaders/glyph_ps.bin")
 BLOB(pp_agc_rgba_ps_code,   "../../pp/shaders/rgba_ps.bin")
+
+/* Phase-1 probe: our ALU spliced into the reference NV12 PS body, keeping its
+ * exact exec size + the "barefoot"/sl00 resource-metadata trailer that
+ * image_sample needs. Tests whether textured UI shaders can borrow the
+ * reference's reflection block. Not linked into any render path yet. */
+BLOB(pp_agc_rgba_spliced_code,  "../../pp/shaders/rgba_ps_spliced.bin")
+BLOB(pp_agc_glyph_spliced_code, "../../pp/shaders/glyph_ps_spliced.bin")

@@ -76,6 +76,8 @@ extern const uint8_t pp_agc_ui_vs_code_start[],     pp_agc_ui_vs_code_end[];
 extern const uint8_t pp_agc_solid_ps_code_start[],  pp_agc_solid_ps_code_end[];
 extern const uint8_t pp_agc_glyph_ps_code_start[],  pp_agc_glyph_ps_code_end[];
 extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
+extern const uint8_t pp_agc_rgba_spliced_code_start[],  pp_agc_rgba_spliced_code_end[];
+extern const uint8_t pp_agc_glyph_spliced_code_start[], pp_agc_glyph_spliced_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
 #define SHADER_MEMORY_BYTES  0x0d0000u
@@ -111,6 +113,8 @@ extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
 #define OFF_UI_PS_C_CODE 0x12000u   /* rgba_ps  */
 #define OFF_UI_LINK_A    0x13000u
 #define OFF_UI_LINK_B    0x14000u
+#define OFF_UI_SPLICE_A  0x15000u   /* rgba_ps_spliced  (up to 0x3000) */
+#define OFF_UI_SPLICE_B  0x18000u   /* glyph_ps_spliced (up to 0x3000) */
 
 /* --- AGC ABI structs (ProsperoLight) ---------------------------------- */
 typedef struct agc_register {
@@ -694,6 +698,23 @@ int pp_agc_probe_ui_shaders(void)
         int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rgba, 4);
         evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba (TriList) = 0x%08x", (unsigned)l);
     }
+
+    /* Textured PS via the reference NV12 body's resource trailer (spliced). */
+    if (copy_asset(m + OFF_UI_SPLICE_A, 0x3000, pp_agc_rgba_spliced_code_start,  pp_agc_rgba_spliced_code_end) == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_B, 0x3000, pp_agc_glyph_spliced_code_start, pp_agc_glyph_spliced_code_end) == 0) {
+        void *ps_rs = 0, *ps_gs = 0;
+        int32_t c_rs = sceAgcCreateShader(&ps_rs, m + OFF_UI_PS_HDR, m + OFF_UI_SPLICE_A);
+        int32_t c_gs = sceAgcCreateShader(&ps_gs, m + OFF_UI_PS_HDR, m + OFF_UI_SPLICE_B);
+        evo_boot_log("pp_agc UI: CreateShader rgba_spliced=0x%08x glyph_spliced=0x%08x  (rs=%p gs=%p)",
+                     (unsigned)c_rs, (unsigned)c_gs, ps_rs, ps_gs);
+        if (c_vs == 0 && c_rs == 0) {
+            int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rs, 4);
+            evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba_spliced (TriList) = 0x%08x", (unsigned)l);
+        }
+    } else {
+        evo_boot_log("pp_agc UI: spliced blob copy failed");
+    }
+
     evo_boot_log("pp_agc UI: probe done (no state changed)");
     evo_boot_log_flush();
     return (c_vs == 0 && c_solid == 0 && c_glyph == 0 && c_rgba == 0) ? 0 : -1;
