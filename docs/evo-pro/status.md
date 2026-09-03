@@ -4,6 +4,18 @@
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
 
+## 2026-09-03 (later) — #27 AGC gate PASSED
+
+`EVO agc: init=0x00000000 defaults=0x8005b4180 -> Step 2 VIABLE` from the app
+module. `sceAgcInit` returns 0 and `sceAgcGetRegisterDefaults()` a valid table
+pointer, via the **positional PRX import stubs** (`libSceAgc` +
+`libSceAgcDriver`, already `DT_NEEDED` for `MODE == player` since #31). No
+`sceKernelLoadStartModule`, no NID/dlsym — `evo_agc_probe.c` rewritten to
+`extern` + call. `evo_boot_log` (new, `src/evo_boot_log.{c,h}`) buffers
+pre-unjail probe output and flushes it to `/mnt/usb0/evo_boot.log` — pulled
+over FTP, no screenshots. **#27 Step 2 port (`pp/src/pp_agc.{h,c}` +
+`agc_blobs.S`) is unblocked.**
+
 ## 2026-09-03 (later) — PHASE 4 (#31) DONE: native 4K decode plays in EVO 🎉
 
 `media/src/evo_vdec_native.c` — the `sceVideodec2` backend behind `evo_vdec.h`.

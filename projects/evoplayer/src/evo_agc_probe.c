@@ -17,6 +17,7 @@
 
 #include "evo_agc_probe.h"
 #include "evo_boot_log.h"
+#include "pp_agc.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -73,6 +74,11 @@ void evo_agc_probe(void)
          (unsigned)rc, defaults,
          (rc == 0 && defaults) ? "VIABLE (stubs bind, sceAgc works)"
                                : "NOT AVAILABLE");
+
+    /* Step 2 next checkpoint: do the blobs load + shaders create + link?
+     * (pp_agc_init logs "pp_agc: create=.. link=.." to evo_boot.log.) */
+    if (rc == 0 && defaults)
+        pp_agc_init(1920, 1080, 0);
 
 restore:
     {

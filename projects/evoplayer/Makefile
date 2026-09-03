@@ -77,6 +77,7 @@ PP_SRCS := \
     pp/src/pp_converter_parallel.c \
     pp/src/pp_converter_fused.c \
     pp/src/pp_compute_pipeline.c \
+    pp/src/pp_agc.c \
     pp/src/pp_audio_clock.c \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \
@@ -129,6 +130,10 @@ ADDON_SRCS := \
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
+# .incbin'd sceAgc shader blobs (#27). Assembled by $(CC).
+ASM_OBJS := pp/src/agc_blobs.o
+C_OBJS   += $(ASM_OBJS)
+
 RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_render.cpp \
     ui_rml/src/evo_rmlui_system.cpp \
@@ -143,7 +148,13 @@ RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
+%.o: %.S
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 all: $(ELF)
+
+# rebuild the embedded blobs when a .bin changes (recipe = the %.o: %.S rule)
+pp/src/agc_blobs.o: pp/src/agc_blobs.S $(wildcard pp/blobs/*.bin)
 
 # -----------------------------------------------------------------------------
 # App-module packaging hooks (Phase 1b - docs/evo-pro/phase-1b-app-module.md).
