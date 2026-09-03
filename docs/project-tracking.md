@@ -5,6 +5,10 @@ tracked and visualised (board, priority table, milestone timeline, blocked
 list). The dependency-ordered narrative still lives in
 [roadmap.md](roadmap.md) — this doc is only about the board.
 
+> **Not stood up yet** — the tooling below is committed but the board itself
+> needs a `gh auth refresh -s project` + one script run + a few UI clicks.
+> Tracked in **issue #52**.
+
 ---
 
 ## First-time setup (once)
