@@ -69,16 +69,19 @@ void evo_agc_probe(void)
     AT("sceAgcGetRegisterDefaults");
     void *defaults = sceAgcGetRegisterDefaults();
 
-    g_armed = 0;
     note("EVO agc: init=0x%08x defaults=%p  -> Step 2 %s",
          (unsigned)rc, defaults,
          (rc == 0 && defaults) ? "VIABLE (stubs bind, sceAgc works)"
                                : "NOT AVAILABLE");
 
     /* Step 2 next checkpoint: do the blobs load + shaders create + link?
-     * (pp_agc_init logs "pp_agc: create=.. link=.." to evo_boot.log.) */
+     * (pp_agc_init logs "pp_agc: create=.. link=.." to evo_boot.log.)
+     * Still fault-guarded — a bad CreateShader offset would otherwise crash
+     * before evo_boot_log_flush() and eat the diagnostic. */
+    AT("pp_agc_init");
     if (rc == 0 && defaults)
         pp_agc_init(1920, 1080, 0);
+    g_armed = 0;
 
 restore:
     {

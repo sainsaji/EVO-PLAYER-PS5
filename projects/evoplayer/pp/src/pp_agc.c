@@ -146,6 +146,7 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
         return -1;
     }
 
+    evo_boot_log("pp_agc: blobs copied, mem=%p - CreateShader", g_agc.mem);
     rc = sceAgcCreateShader(&g_agc.vs, g_agc.mem + OFF_GEO_HDR, g_agc.mem + OFF_GEO_CODE);
     if (rc == 0)
         rc = sceAgcCreateShader(&g_agc.ps, g_agc.mem + OFF_PIX_HDR, g_agc.mem + OFF_PIX_CODE);
