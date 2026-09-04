@@ -165,6 +165,11 @@ int  pp_agc_geo_available(void);
  *   draws           draw_count batches; first_index+index_count must stay in
  *                   range. Emitted in order.
  *   out_w/out_h     VO output dimensions.
+ *   text_bgra       optional w=text_w h=text_h premultiplied 0xAABBGGRR layer
+ *                   (text/icons, transparent elsewhere); composited additively
+ *                   over the solids via the NV12 pixel shader as a 2nd pass.
+ *                   NULL / 0 dims = solids only. Gated OFF at runtime by default
+ *                   (/mnt/usb0/evo_agc_geo_text) - see agc_render_geo.
  *
  * Return codes as pp_agc_present_nv12 (0 submitted / -1 failed / -2 watchdog).
  */
@@ -174,6 +179,7 @@ int  pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
                         const uint32_t *indices, uint32_t index_count,
                         const pp_agc_geo_draw_t *draws, uint32_t draw_count,
                         uint32_t out_w, uint32_t out_h,
+                        const uint32_t *text_bgra, uint32_t text_w, uint32_t text_h,
                         int64_t flip_marker);
 
 void pp_agc_shutdown(void);

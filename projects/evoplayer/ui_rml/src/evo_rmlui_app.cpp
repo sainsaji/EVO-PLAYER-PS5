@@ -154,6 +154,11 @@ int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target
     if (!m_agc_geo_pending || m_agc_geo.Empty())
         return 1;
     m_agc_geo_pending = false;
+    /* m_surface = this frame's CPU text/icon layer (premultiplied, cleared to
+     * transparent in RenderCachedScreen before the diverted render). pp_agc.c
+     * only uses it when /mnt/usb0/evo_agc_geo_text is set. */
+    const uint32_t* text = (m_surface_w == (int)out_w && m_surface_h == (int)out_h &&
+                            !m_surface.empty()) ? m_surface.data() : nullptr;
     return pp_agc_present_geo(vout_handle, buf_idx, gpu_target, target_linear,
                               m_agc_geo.Vertices().data(),
                               (uint32_t)m_agc_geo.Vertices().size(),
@@ -161,7 +166,9 @@ int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target
                               (uint32_t)m_agc_geo.Indices().size(),
                               m_agc_geo.Draws().data(),
                               (uint32_t)m_agc_geo.Draws().size(),
-                              out_w, out_h, flip_marker);
+                              out_w, out_h,
+                              text, text ? (uint32_t)out_w : 0u, text ? (uint32_t)out_h : 0u,
+                              flip_marker);
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {

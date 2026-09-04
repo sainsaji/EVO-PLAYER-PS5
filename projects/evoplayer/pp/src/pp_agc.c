@@ -270,6 +270,9 @@ static struct {
 static int agc_submit_start(void);
 static void agc_geo_init(void);           /* #28 Phase 4 */
 static void agc_geo_staging_free(void);
+static int  agc_ovl_staging_ensure(size_t need);
+static void agc_bgra_to_nv12(uint8_t *y, uint8_t *uv, const uint32_t *bgra,
+                             uint32_t w, uint32_t h);
 
 /* First-frame breadcrumbs -> evo_boot.log, flushed each call, silent once a
  * frame has presented. #27 phase C: pin down where the present path dies when
@@ -874,6 +877,8 @@ static struct {
     uint32_t        draw_count;
     uint32_t        out_w, out_h;
     int64_t         render_marker;
+    const void     *text_nv12;              /* staged premult NV12, or NULL */
+    uint32_t        text_w, text_h;
 
     int32_t         rc;
     uint32_t        word_count;
@@ -890,6 +895,7 @@ static int agc_render_geo(int video, int buffer_index, void *target,
                           const void *idx, uint32_t idx_count,
                           const pp_agc_geo_draw_t *draws, uint32_t draw_count,
                           uint32_t out_w, uint32_t out_h, int64_t render_marker,
+                          const void *text_nv12, uint32_t text_w, uint32_t text_h,
                           uint32_t *word_count)
 {
     static const uint16_t target_offsets[16] = { 0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
@@ -1109,6 +1115,94 @@ static int agc_render_geo(int video, int buffer_index, void *target,
 #undef SET_CX
     if (!g_agc.geo_first_ok) evo_boot_log_flush();
 
+    /* --- #28 Phase 4 (staged, OFF by default - /mnt/usb0/evo_agc_geo_text):
+     *     composite the CPU text/icon layer (premultiplied over black, staged as
+     *     NV12 by the caller) ADDITIVELY over the GPU solids - a 2nd pass in this
+     *     DCB reusing the #27 NV12 pipeline (g_agc.vs/ps, OFF_LINK_A/B,
+     *     bind_pixel_source). src ONE / dst ONE so black adds nothing.
+     *     NOTE: this pass crashed EVO at boot on 2026-09-04 for reasons never
+     *     pinned; kept behind the runtime hook + all-local scratch so the
+     *     default geo build is byte-safe. Bisect plan in docs/evo-pro/status.md. --- */
+    {
+        static int want_text = -1;
+        if (want_text < 0) {
+            want_text = 0;
+            FILE *tf = fopen("/mnt/usb0/evo_agc_geo_text", "r");
+            if (tf) { want_text = 1; fclose(tf); }
+        }
+        if (want_text && text_nv12 && text_w >= 2 && text_h >= 2 &&
+            g_agc.vs && g_agc.ps) {
+            static const uint32_t geo_geom_c[16] = {
+                0x3fa24ce6, 0, 0, 0x3e2f0fdd, 0, 0x3fa21449, 0, 0x3e111049,
+                0, 0, 0xbf800000, 0x80000000, 0, 0, 0, 0x3f800000 };
+            static const uint32_t geo_pix_c[16] = {
+                0x3f800000, 0x3f800000, 0x3f800000, 0, 0x3fed844d, 0xbe3fd0d0, 0, 0,
+                0, 0xbeefad6d, 0x3fc9930c, 0, 0, 0, 0, 0 };
+            agc_register_t *ncx = (agc_register_t *)(memory + OFF_GEO_CX + 0x1000u);
+            uint8_t *ngeo_cb = memory + OFF_GEO_CB + 0x100u;
+            uint8_t *npix_cb = memory + OFF_GEO_CB + 0x200u;
+            agc_register_t *nsh = (agc_register_t *)(memory + OFF_GEO_SH + 0x200u);
+            uint32_t nc = 0, tslot = 0;
+            size_t ty = (size_t)text_w * text_h;
+            size_t tuv = (size_t)text_w * ((text_h + 1u) / 2u);
+
+            if (shader_resource_offset(g_agc.vs, 3, &tslot) == 0) {
+                agc_register_t *vcx = *(agc_register_t **)((uint8_t *)g_agc.vs + 24);
+                agc_register_t *pcx = *(agc_register_t **)((uint8_t *)g_agc.ps + 24);
+                agc_register_t *vsh = *(agc_register_t **)((uint8_t *)g_agc.vs + 32);
+                agc_register_t *psh = *(agc_register_t **)((uint8_t *)g_agc.ps + 32);
+                uint32_t vcn = *((uint8_t *)g_agc.vs + 91), pcn = *((uint8_t *)g_agc.ps + 91);
+                uint32_t vsn = *((uint8_t *)g_agc.vs + 92), psn = *((uint8_t *)g_agc.ps + 92);
+                uint32_t d[8];
+                uint32_t *hdr = (uint32_t *)(memory + OFF_RESOURCES);
+                uintptr_t table = (uintptr_t)(memory + OFF_RESOURCES) + hdr[1];
+                uintptr_t vtxr  = (uintptr_t)(memory + OFF_RESOURCES) + hdr[2];
+                uintptr_t g;
+
+                memcpy(ncx, cx, 16 * sizeof(*ncx));   nc = 16;
+#define NADD(o, v) do { ncx[nc].offset = (o); ncx[nc].pad = 0; ncx[nc].value = (v); nc++; } while (0)
+                NADD(0x10f, float_bits(out_w * .5f));
+                NADD(0x110, float_bits(out_w * .5f));
+                NADD(0x111, float_bits(out_h * -.5f));
+                NADD(0x112, float_bits(out_h * .5f));
+                NADD(0x113, float_bits(1)); NADD(0x114, 0);
+                NADD(0x0b4, 0); NADD(0x0b5, float_bits(1));
+                NADD(0x2fa, float_bits(1)); NADD(0x2fb, float_bits(1));
+                NADD(0x2fc, float_bits(1)); NADD(0x2fd, float_bits(1));
+                NADD(0x090, 0x80000000u); NADD(0x091, out_w | (out_h << 16));
+                NADD(0x08e, 0x0f);
+                NADD(0x1e0, 0x41010101u);   /* additive: src*1 + dst*1 (rgb & a) */
+#undef NADD
+                memcpy(ncx + nc, memory + OFF_LINK_A, 34 * sizeof(*ncx)); nc += 34;
+                memcpy(ncx + nc, vcx, vcn * sizeof(*ncx)); nc += vcn;
+                memcpy(ncx + nc, pcx, pcn * sizeof(*ncx)); nc += pcn;
+                memcpy(nsh, vsh, vsn * sizeof(*nsh));
+                memcpy(nsh + vsn, psh, psn * sizeof(*nsh));
+                sceAgcDcbSetCxRegistersIndirect(&command, ncx, nc);
+                sceAgcDcbSetUcRegistersIndirect(&command, memory + OFF_LINK_B, 3);
+                sceAgcDcbSetShRegistersIndirect(&command, nsh, vsn + psn);
+
+                g = (uintptr_t)ngeo_cb;
+                memcpy(ngeo_cb, geo_geom_c, 64);
+                d[0] = (uint32_t)g;
+                d[1] = (uint32_t)((g >> 32) & 0xffffu) | (16u << 16);
+                d[2] = 4; d[3] = 0x0004dfacu;
+                d[4] = (uint32_t)table; d[5] = (uint32_t)(table >> 32);
+                d[6] = (uint32_t)vtxr;  d[7] = (uint32_t)(vtxr >> 32);
+                sceAgcCbSetShRegisterRangeDirect(&command, 0x8c + tslot, d, 8);
+
+                memcpy(npix_cb, geo_pix_c, 64);
+                ((uint32_t *)npix_cb)[12] = float_bits((float)text_w);
+                ((uint32_t *)npix_cb)[13] = float_bits((float)text_h);
+                ((uint32_t *)npix_cb)[14] = text_w;
+                ((uint32_t *)npix_cb)[15] = text_w / 2u;
+                bind_pixel_source(&command, memory + OFF_RESOURCES, text_nv12, ty, tuv, npix_cb);
+                sceAgcDcbDrawIndexAuto(&command, 4, 2);
+                geo_dbg("Gt text pass %ux%u nc=%u", text_w, text_h, nc);
+            }
+        }
+    }
+
     sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
 
     submit.words = words;
@@ -1135,8 +1229,8 @@ static void *agc_geo_worker(void *arg)
     for (;;) {
         int video, buffer_index;
         void *target;
-        const void *vtx, *idx;
-        uint32_t vtx_count, idx_count, out_w, out_h, draw_count;
+        const void *vtx, *idx, *text_nv12;
+        uint32_t vtx_count, idx_count, out_w, out_h, draw_count, text_w, text_h;
         const pp_agc_geo_draw_t *draws;
         int64_t render_marker;
         uint32_t words = 0;
@@ -1159,6 +1253,9 @@ static void *agc_geo_worker(void *arg)
         out_w        = g_geo_submit.out_w;
         out_h        = g_geo_submit.out_h;
         render_marker = g_geo_submit.render_marker;
+        text_nv12    = g_geo_submit.text_nv12;
+        text_w       = g_geo_submit.text_w;
+        text_h       = g_geo_submit.text_h;
         pthread_mutex_unlock(&g_geo_submit.lock);
 
         guard = !g_agc.geo_first_ok;
@@ -1175,7 +1272,8 @@ static void *agc_geo_worker(void *arg)
             t_agc_armed = 1;
         }
         rc = agc_render_geo(video, buffer_index, target, vtx, vtx_count, idx, idx_count,
-                            draws, draw_count, out_w, out_h, render_marker, &words);
+                            draws, draw_count, out_w, out_h, render_marker,
+                            text_nv12, text_w, text_h, &words);
         if (guard) {
             t_agc_armed = 0;
             evo_boot_log("pp_agc: agc_render_geo rc=0x%08x words=%u draws=%u %ux%u",
@@ -1228,6 +1326,10 @@ static void agc_geo_init(void)
         return;
     }
     flush_gpu_data(m + OFF_MESH_VS_HDR, (OFF_MESH_LINK_UC + 0x1000u) - OFF_MESH_VS_HDR);
+    /* the NV12 link block (OFF_LINK_A/B, written by pp_agc_init's LinkShaders)
+     * is only otherwise flushed by agc_render_frame - the geo text pass reads it
+     * even when no video ever plays, so flush it once here. */
+    flush_gpu_data(m + OFF_LINK_A, (OFF_LINK_B + 0x1000u) - OFF_LINK_A);
     g_agc.geo_stage_start = -1;
 
     pthread_mutex_init(&g_geo_submit.lock, NULL);
@@ -1299,6 +1401,7 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
                        const uint32_t *indices, uint32_t index_count,
                        const pp_agc_geo_draw_t *draws, uint32_t draw_count,
                        uint32_t out_w, uint32_t out_h,
+                       const uint32_t *text_bgra, uint32_t text_w, uint32_t text_h,
                        int64_t flip_marker)
 {
     (void)target_linear;
@@ -1339,6 +1442,20 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
     memcpy(slot, vertices, vtx_bytes);
     memcpy(slot + idx_off, indices, idx_bytes);
     flush_gpu_data(slot, need);
+
+    /* text/icon layer -> premultiplied NV12 in the (reused) overlay slab.
+     * Best-effort: a failure just drops the text layer, never the frame. */
+    const uint8_t *text_stage = 0;
+    uint32_t tw = 0, th = 0;
+    if (text_bgra && text_w >= 2 && text_h >= 2 && !(text_w & 1u) && !(text_h & 1u)) {
+        size_t tneed = (size_t)text_w * text_h + (size_t)text_w * (text_h / 2u);
+        if (agc_ovl_staging_ensure(tneed) == 0) {
+            uint8_t *ts = g_agc.ovl_stage[buf_idx];
+            agc_bgra_to_nv12(ts, ts + (size_t)text_w * text_h, text_bgra, text_w, text_h);
+            flush_gpu_data(ts, tneed);
+            text_stage = ts; tw = text_w; th = text_h;
+        }
+    }
     if (fg) t_agc_armed = 0;
 
     struct timespec mono_start, deadline;
@@ -1360,6 +1477,9 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
     g_geo_submit.out_w        = out_w;
     g_geo_submit.out_h        = out_h;
     g_geo_submit.render_marker = flip_marker;
+    g_geo_submit.text_nv12    = text_stage;
+    g_geo_submit.text_w       = tw;
+    g_geo_submit.text_h       = th;
     g_geo_submit.have_done    = 0;
     g_geo_submit.have_req     = 1;
     pthread_cond_signal(&g_geo_submit.req_cv);
@@ -2008,10 +2128,11 @@ int  pp_agc_ui_ready(void) { return 0; }
 int  pp_agc_geo_available(void) { return 0; }
 int  pp_agc_present_geo(int vh, uint32_t bi, void *gt, int tl, const void *v, uint32_t vc,
                         const uint32_t *ix, uint32_t ic, const pp_agc_geo_draw_t *dr,
-                        uint32_t dc, uint32_t ow, uint32_t oh, int64_t m)
+                        uint32_t dc, uint32_t ow, uint32_t oh,
+                        const uint32_t *tb, uint32_t tw, uint32_t th, int64_t m)
 {
     (void)vh; (void)bi; (void)gt; (void)tl; (void)v; (void)vc; (void)ix; (void)ic;
-    (void)dr; (void)dc; (void)ow; (void)oh; (void)m;
+    (void)dr; (void)dc; (void)ow; (void)oh; (void)tb; (void)tw; (void)th; (void)m;
     return -1;
 }
 void pp_agc_shutdown(void) {}

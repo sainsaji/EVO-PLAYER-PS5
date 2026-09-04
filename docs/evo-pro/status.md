@@ -27,6 +27,28 @@
 > | 3 — GPU menu present (`pp_agc_present_ui`, linear 1080 VO) | **HW-VERIFIED but SHELVED — net negative.** Renders fine, no artifacts, but adds a full-frame BGRA→NV12 convert (~4 ms) to an already-CPU-bound menu → held-scroll 30→16 fps. Doesn't touch the real bottleneck (RmlUi raster). Code stays hook-gated + off; keep for a future Phase-4 linear-menu-VO need. | `/mnt/usb0/evo_agc_ui` (leave unset) |
 > | 4 — held-scroll: GPU *geometry* (`evo_rmlui_render_agc.cpp`) | **SOLIDS PATH HW-VERIFIED WORKING 2026-09-04** (`feat/28-gpu-ui`, committed). The GPU draws the RmlUi solid stream (boxes, gradients, rounded-corner backgrounds, borders) through SharpProspero's `sp_mesh_{vs,ps}`: `agc_geo_init` (CreateShader + LinkShaders(4) = 0x0 on HW) + `agc_render_geo` (DCB from `Graphics/Renderer3D.cs` DrawMesh — RT block byte-identical to `agc_render_frame`, AgcViewport, blend `0x1e0=0x65010501`, ortho MVP, persisted 34-reg link, `AgcBufferDescriptor` Constant/Structured → VS user data, one `DrawIndex(sub-range addr)` + inline-`SetCxRegisterDirect` scissor per batch) + watchdog'd `agc_geo_worker` + per-VO-buf vtx/idx slab. `EvoAgcGeoSink` (`evo_rmlui_render_agc.{h,cpp}`, NOT an Rml::RenderInterface — RmlUi 6 can't swap) fed by `EvoRenderInterface::SetAgcSink` diverting untextured/untransformed/unclipped batches. `EvoRmlApp::AgcGeo{Active,Present}` + bridge + `main.c`. On HW: correct layout + rounded corners, `agc_render_geo rc=0x0` every frame, watchdog never trips, navigable. **Colour fixed** from the real shader source (`Shaders/mesh_{vs,ps}.pssl`): `mesh_vs` unpacks colour as ARGB (fed RGBA → R/B swap); `mesh_ps` does `colour*(0.25+0.75·N·L)` → vertex normal set to `(-0.4,1,0.6)` so N·L=1 = passthrough. **Text/icons still CPU, NOT yet composited over the GPU solids** — the additive-NV12 2nd-pass attempt crashed EVO at boot every time and was reverted; needs offline debug. | `/mnt/usb0/evo_agc_ui` |
 >
+> **#28 Phase 4 text-pass BISECT PLAN (next console session).** The additive-NV12
+> text-overlay 2nd pass (`agc_render_geo`, behind `/mnt/usb0/evo_agc_geo_text`)
+> crashed EVO at *boot*, before any log, on every build 2026-09-04 — cause never
+> pinned (the pass never runs without the `evo_agc_ui` hook, yet its presence
+> bricked boot; a full `make clean` + delete-app + ShadowMount remount didn't
+> help). It's re-staged (all-local scratch, no file-scope changes, `-MMD -MP`
+> dep tracking now active) but UNTESTED. To bisect:
+> 1. Archive-restore + boot the known-good solids build
+>    (`output/app/archive/PPSA99039_*_geo-solids-*.ffpfsc`) — health check.
+> 2. Deploy the text-pass build **without** setting `evo_agc_geo_text`. If it
+>    **boot-crashes** → the crash is compile-time (the pass code or the 16-arg
+>    `pp_agc_present_geo`), not runtime. Comment out the pass body (keep the
+>    signature) → rebuild → if that boots, it's the pass code; bisect the pass
+>    in halves (the `SetCxRegistersIndirect(ncx…)` shader-relink vs the
+>    `bind_pixel_source`+`DrawIndexAuto`). If it still crashes with the body
+>    gone, it's the signature/ABI — check every TU that includes `pp_agc.h`
+>    actually recompiled.
+> 3. If step 2 boots → `STOR /mnt/usb0/evo_agc_geo_text`, relaunch, read
+>    `Gt text pass …` in `evo_boot.log`, check for wedge / garble, screenshot.
+> 4. If the pass works: judge the additive blend on the dark theme, then measure
+>    held-scroll fps on the list screen (the Phase 4 goal).
+>
 > **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
 > then KP — likely the OSD build left the app slot dirty + ShadowMount
 > auto-relaunch stacking). Every #28 GPU path is now behind its own
