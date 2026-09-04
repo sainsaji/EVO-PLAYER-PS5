@@ -1209,6 +1209,8 @@ static int agc_render_geo(int video, int buffer_index, void *target,
             want_text = 0;
             FILE *tf = fopen("/mnt/usb0/evo_agc_geo_text", "r");
             if (tf) { want_text = 1; fclose(tf); }
+            evo_boot_log("pp_agc: geo-text hook check -> want_text=%d", want_text);
+            evo_boot_log_flush();
         }
         if (want_text && text_nv12 && text_w >= 2 && text_h >= 2 &&
             g_agc.vs && g_agc.blit_ps) {
@@ -1301,6 +1303,18 @@ static int agc_render_geo(int video, int buffer_index, void *target,
 
                 sceAgcDcbDrawIndexAuto(&command, 4, 2);
                 geo_dbg("Gt text pass %ux%u nc=%u", text_w, text_h, nc);
+                /* Diagnostic only, NOT gated by geo_first_ok (which almost
+                 * always latches true before this pass is ever armed, from
+                 * ordinary solids-only frames) - without this there is no
+                 * way to confirm the pass actually ran, as opposed to
+                 * evo_rmlui_app.cpp's unconditional CPU fallback copy of
+                 * m_surface carrying the text on its own. One line, once. */
+                static int firing_logged = 0;
+                if (!firing_logged) {
+                    firing_logged = 1;
+                    evo_boot_log("pp_agc: GEO-TEXT PASS FIRED %ux%u src=%p", text_w, text_h, text_nv12);
+                    evo_boot_log_flush();
+                }
             }
         }
     }
