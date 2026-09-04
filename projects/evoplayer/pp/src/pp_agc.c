@@ -878,6 +878,20 @@ int pp_agc_probe_ui_shaders(void)
                                           g_agc.vs, ps_blit, 6);
             evo_boot_log("pp_agc UI: LinkShaders geometry_vs+blit_ps (TriStrip) = 0x%08x",
                          (unsigned)l);
+
+            /* Diagnostic only, no draw: where did the compiler put blit_ps's
+             * texture (kind 1) and sampler (kind 2) resources? bind_pixel_source
+             * hardcodes SH 0x0c for the NV12 PS (a DIFFERENT compiled shader) -
+             * that base is not safe to assume here. Read it back instead of
+             * guessing before writing any real binding code (#67 real
+             * compositing pass, next step). kind 0=CB, 3=buffer, logged too for
+             * completeness. */
+            for (unsigned kind = 0; kind < 4; kind++) {
+                uint32_t off = 0xffffffffu;
+                int32_t r = shader_resource_offset(ps_blit, kind, &off);
+                evo_boot_log("pp_agc UI: blit_ps resource kind=%u -> rc=%d off=0x%x",
+                             kind, r, (unsigned)off);
+            }
         }
         evo_boot_log_flush();
     } else {
