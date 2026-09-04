@@ -46,6 +46,23 @@ extern int     sceKernelGetModuleInfoFromAddr(const void *addr, int flags, void 
 #define PAGE   0x4000u
 #define OUTDIR "/mnt/usb0/evo_shaders"
 
+/* PS5 SceKernelModuleInfoEx (libkernel). Fields past segmentInfo we don't use.
+ * st_size must be set to sizeof(*info) before the call, like the PS4 API. */
+typedef struct { uint64_t addr; uint32_t size; int32_t prot; } sc_seg_t;
+typedef struct {
+    uint64_t st_size;                    /* 0x000 */
+    char     name[256];                  /* 0x008 */
+    int32_t  id;                         /* 0x108 */
+    uint32_t tls_index;                  /* 0x10c */
+    uint64_t tls_init_addr;              /* 0x110 */
+    uint32_t tls_init_size, tls_size, tls_offset, tls_align;  /* 0x118 */
+    uint64_t init_proc, fini_proc, eh_hdr, eh_frame;          /* 0x128 */
+    uint32_t eh_hdr_size, eh_frame_size;                      /* 0x148 */
+    sc_seg_t seg[4];                     /* 0x150 */
+    uint32_t seg_count;                  /* 0x190 */
+    uint32_t ref_count;                  /* 0x194 */
+} sc_modinfo_t;                          /* 0x198 */
+
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_armed;
 
@@ -83,46 +100,6 @@ static int page_readable(const uint8_t *p)
     return 1;
 }
 
-static const uint8_t *find_elf_base(const void *anchor)
-{
-    uintptr_t a = (uintptr_t)anchor & ~(uintptr_t)(PAGE - 1);
-    for (int i = 0; i < 8192; i++) {              /* up to 128 MiB back */
-        const uint8_t *p = (const uint8_t *)(a - (uintptr_t)i * PAGE);
-        if ((uintptr_t)p < PAGE) break;
-        if (!page_readable(p)) continue;
-        uint8_t h[4];
-        if (guarded_copy(h, p, 4) == 4 &&
-            h[0] == 0x7f && h[1] == 'E' && h[2] == 'L' && h[3] == 'F')
-            return p;
-    }
-    return NULL;
-}
-
-static size_t elf_span(const uint8_t *base)
-{
-    uint8_t eh[64];
-    if (guarded_copy(eh, base, sizeof eh) != sizeof eh) return 0;
-    uint64_t phoff = 0;
-    for (int i = 0; i < 8; i++) phoff |= (uint64_t)eh[0x20 + i] << (8 * i);
-    uint16_t phentsize = (uint16_t)(eh[0x36] | (eh[0x37] << 8));
-    uint16_t phnum     = (uint16_t)(eh[0x38] | (eh[0x39] << 8));
-    if (!phentsize || phentsize > 128 || phnum == 0 || phnum > 64) return 0;
-
-    uint64_t hi = 0;
-    uint8_t ph[128];
-    for (int i = 0; i < phnum; i++) {
-        if (guarded_copy(ph, base + phoff + (uint64_t)i * phentsize, phentsize) != phentsize)
-            break;
-        uint32_t type = ph[0] | (ph[1] << 8) | (ph[2] << 16) | ((uint32_t)ph[3] << 24);
-        if (type != 1) continue;                 /* PT_LOAD */
-        uint64_t vaddr = 0, memsz = 0;
-        for (int b = 0; b < 8; b++) vaddr |= (uint64_t)ph[0x10 + b] << (8 * b);
-        for (int b = 0; b < 8; b++) memsz |= (uint64_t)ph[0x28 + b] << (8 * b);
-        if (vaddr + memsz > hi) hi = vaddr + memsz;
-    }
-    return (size_t)hi;
-}
-
 static int g_dump_n;
 
 static void dump(const char *tag, const uint8_t *p, size_t n)
@@ -139,23 +116,16 @@ static void dump(const char *tag, const uint8_t *p, size_t n)
     close(fd);
 }
 
-static void scan_module(const char *tag, const void *anchor)
+/* scan one [base,base+len) region for shader blobs */
+static void scan_region(const char *tag, const uint8_t *base, size_t len,
+                        int *hdrs, int *feet)
 {
-    const uint8_t *base = find_elf_base(anchor);
-    if (!base) { evo_boot_log("shader_scan: %s - no ELF near %p", tag, anchor);
-                 evo_boot_log_flush(); return; }
-    size_t span = elf_span(base);
-    if (!span || span > 0x4000000u) span = 0x1800000u;   /* cap 24 MiB */
-    evo_boot_log("shader_scan: %s base=%p span=%zuKB", tag, base, span >> 10);
-    evo_boot_log_flush();
-
-    int hdrs = 0, feet = 0;
     static uint8_t pg[PAGE + 16];
-    for (size_t off = 0; off < span; off += PAGE) {
+    for (size_t off = 0; off < len; off += PAGE) {
         const uint8_t *pp = base + off;
         if (!page_readable(pp)) continue;
         size_t want = PAGE + 16;
-        if (off + want > span) want = span - off;
+        if (off + want > len) want = len - off;
         if (guarded_copy(pg, pp, want) < 16) continue;
         for (size_t j = 0; j + 16 <= want; j++) {
             const uint8_t *b = pg + j;
@@ -164,21 +134,56 @@ static void scan_module(const char *tag, const void *anchor)
                 if (csz >= 0x100 && csz <= 0x20000 && !(csz & 3)) {
                     char t[48]; snprintf(t, sizeof t, "%s_hdr_c0x%x", tag, csz);
                     dump(t, pp + j, 0x200);
-                    evo_boot_log("shader_scan:   %s hdr @+0x%zx code=0x%x link=%02x%02x%02x%02x",
-                                 tag, off + j, csz, b[0xb3], b[0xb2], b[0xb1], b[0xb0]);
-                    hdrs++;
+                    evo_boot_log("shader_scan:   %s hdr @%p code=0x%x link=%02x%02x%02x%02x",
+                                 tag, (void *)(pp + j), csz, b[0xb3], b[0xb2], b[0xb1], b[0xb0]);
+                    (*hdrs)++;
                 }
             }
             if (!memcmp(b, "barefoot", 8)) {
-                size_t abs = off + j;
-                size_t back = abs > 0x3000 ? 0x3000 : abs;
+                const uint8_t *abs = pp + j;
+                size_t back = (abs - base) > 0x3000 ? 0x3000 : (size_t)(abs - base);
                 char t[32]; snprintf(t, sizeof t, "%s_code", tag);
-                dump(t, base + abs - back, back + 0x40);
-                evo_boot_log("shader_scan:   %s barefoot @+0x%zx link=%02x%02x%02x%02x",
-                             tag, abs, b[11], b[10], b[9], b[8]);
-                feet++;
+                dump(t, abs - back, back + 0x40);
+                evo_boot_log("shader_scan:   %s barefoot @%p link=%02x%02x%02x%02x",
+                             tag, (void *)abs, b[11], b[10], b[9], b[8]);
+                (*feet)++;
             }
         }
+    }
+}
+
+static void scan_module(const char *tag, const void *anchor)
+{
+    static sc_modinfo_t mi;
+    memset(&mi, 0, sizeof mi);
+    mi.st_size = sizeof mi;
+    int rc = sceKernelGetModuleInfoFromAddr(anchor, 1, &mi);
+    if (rc != 0 || mi.seg_count == 0 || mi.seg_count > 4) {
+        evo_boot_log("shader_scan: %s GetModuleInfoFromAddr(%p) rc=0x%x segs=%u",
+                     tag, anchor, (unsigned)rc, mi.seg_count);
+        evo_boot_log_flush();
+        return;
+    }
+    mi.name[sizeof mi.name - 1] = 0;
+    evo_boot_log("shader_scan: %s = '%s' id=%d segs=%u", tag, mi.name, mi.id, mi.seg_count);
+    evo_boot_log_flush();
+    /* if the anchor was an unbound GOT trampoline, GetModuleInfoFromAddr
+     * returns EVO's own module - skip (nothing new to find, our own blobs). */
+    if (strncmp(mi.name, "libSce", 6) != 0 && strncmp(mi.name, "libkernel", 9) != 0) {
+        evo_boot_log("shader_scan: %s not a system module, skipping", tag);
+        evo_boot_log_flush();
+        return;
+    }
+
+    int hdrs = 0, feet = 0;
+    for (uint32_t s = 0; s < mi.seg_count; s++) {
+        if (!mi.seg[s].addr || !mi.seg[s].size || mi.seg[s].size > 0x4000000u)
+            continue;
+        evo_boot_log("shader_scan:   %s seg[%u] %llx +%x prot=%x",
+                     tag, s, (unsigned long long)mi.seg[s].addr,
+                     mi.seg[s].size, mi.seg[s].prot);
+        scan_region(tag, (const uint8_t *)(uintptr_t)mi.seg[s].addr,
+                    mi.seg[s].size, &hdrs, &feet);
     }
     evo_boot_log("shader_scan: %s done - %d hdr, %d code", tag, hdrs, feet);
     evo_boot_log_flush();
@@ -195,6 +200,10 @@ void evo_shader_scan(void)
     evo_mkdir(OUTDIR);
     evo_boot_log("shader_scan: START -> " OUTDIR);
     evo_boot_log_flush();
+
+    /* force-bind the lazy PRX imports so &fn is the real module address */
+    (void)sceVideoOutSubmitFlip(-1, 0, 0, 0);
+    { sc_modinfo_t d; (void)sceKernelGetModuleInfoFromAddr((void *)&sceKernelGetModuleInfoFromAddr, 1, &d); }
 
     scan_module("videoout", (const void *)&sceVideoOutSubmitFlip);
     scan_module("agc",      (const void *)&sceAgcCreateShader);
