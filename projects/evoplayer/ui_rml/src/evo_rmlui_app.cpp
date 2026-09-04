@@ -2,6 +2,7 @@
 #include "evo_rmlui_prof.h"
 #include <iostream>
 #include <vector>
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
@@ -103,6 +104,32 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     bool screen_changed = (screen_id != m_cached_screen);
 
+    /*
+     * #28 Phase 4: GPU geometry mode. Re-render every frame (the CPU only
+     * rasterises text/icons now - the expensive rounded-rect/gradient coverage
+     * is diverted to m_agc_geo for the GPU), leave the CPU text layer in
+     * m_surface / the caller's buffer as the geo-present fallback, and flag the
+     * batch for AgcGeoPresent. No surface cache here - the point is that the
+     * CPU cost is now small.
+     */
+    if (AgcGeoActive()) {
+        m_render->SetFramebuffer(m_surface.data());
+        m_render->SetDimensions(width, height);
+        std::fill(m_surface.begin(), m_surface.end(), 0x00000000u);
+        m_agc_geo.Begin(width, height);
+        m_render->SetAgcSink(&m_agc_geo);
+        EVO_PROF_CTX_RENDER();
+        m_render->SetAgcSink(nullptr);
+        m_frame_dirty = false;
+        m_cached_screen = screen_id;
+        m_agc_geo_pending = !m_agc_geo.Empty();
+        m_agc_geo_screen = screen_id;
+        if (framebuffer != m_surface.data())
+            std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+        return;
+    }
+    m_agc_geo_pending = false;
+
     if (m_frame_dirty || screen_changed || resized) {
         m_render->SetFramebuffer(m_surface.data());
         m_render->SetDimensions(width, height);
@@ -113,6 +140,28 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+}
+
+bool EvoRmlApp::AgcGeoActive() const
+{
+    return m_initialized && pp_agc_geo_available() && pp_agc_ui_ready();
+}
+
+int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target,
+                             int target_linear, unsigned out_w, unsigned out_h,
+                             long long flip_marker)
+{
+    if (!m_agc_geo_pending || m_agc_geo.Empty())
+        return 1;
+    m_agc_geo_pending = false;
+    return pp_agc_present_geo(vout_handle, buf_idx, gpu_target, target_linear,
+                              m_agc_geo.Vertices().data(),
+                              (uint32_t)m_agc_geo.Vertices().size(),
+                              m_agc_geo.Indices().data(),
+                              (uint32_t)m_agc_geo.Indices().size(),
+                              m_agc_geo.Draws().data(),
+                              (uint32_t)m_agc_geo.Draws().size(),
+                              out_w, out_h, flip_marker);
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {

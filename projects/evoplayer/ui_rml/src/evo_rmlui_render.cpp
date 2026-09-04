@@ -1,4 +1,5 @@
 #include "evo_rmlui_render.h"
+#include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_prof.h"
 #include <algorithm>
 #include <cmath>
@@ -1347,6 +1348,19 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
 
     RmlCompiledGeo* geo = reinterpret_cast<RmlCompiledGeo*>(geometry);
     if (geo->vertices.empty() || geo->indices.empty()) return;
+
+    /*
+     * #28 Phase 4: divert solid geometry to the GPU. Only untextured,
+     * untransformed, unclipped batches - text/icons (textured), transformed and
+     * clip-masked geometry keep the CPU path (which composites over the GPU
+     * output afterwards).
+     */
+    if (m_agc_sink && !texture && !m_has_transform && !m_clip_enabled) {
+        m_agc_sink->Add(geo->vertices, geo->indices,
+                        Rml::Vector2f(translation),
+                        m_scissor_enabled, m_scissor_region);
+        return;
+    }
 
 #ifdef EVO_RML_PROFILE
     bool _pg_tri = false;

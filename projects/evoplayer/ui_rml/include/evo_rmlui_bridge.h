@@ -415,6 +415,20 @@ typedef struct {
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* params);
 
+/*
+ * #28 Phase 4: GPU geometry present. evo_rmlui_agc_geo_active() is 1 when the
+ * last cached menu render diverted its solid geometry to the GPU sink (mesh
+ * shaders up + /mnt/usb0/evo_agc_ui set). main.c then calls
+ * evo_rmlui_agc_geo_present() at flip time instead of the CPU tiler /
+ * pp_agc_present_ui: it submits that batch as one DCB + queues the flip.
+ * Returns the pp_agc_present_geo rc (0 submitted / -1 fail / -2 watchdog) or
+ * 1 if there was nothing to present (caller should fall back).
+ */
+int evo_rmlui_agc_geo_active(void);
+int evo_rmlui_agc_geo_present(int vout_handle, uint32_t buf_idx, void* gpu_target,
+                              int target_linear, uint32_t out_w, uint32_t out_h,
+                              int64_t flip_marker);
+
 #ifdef __cplusplus
 }
 #endif

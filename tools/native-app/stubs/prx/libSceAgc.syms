@@ -13,3 +13,10 @@ sceAgcCbSetShRegisterRangeDirect
 sceAgcDcbDrawIndexAuto
 sceAgcDcbSetFlip
 sceAgcSuspendPoint
+# #28 Phase 4 - GPU geometry (indexed draws)
+sceAgcDcbSetCxRegisterDirect
+sceAgcDcbSetIndexSize
+sceAgcDcbSetIndexBuffer
+sceAgcDcbSetIndexCount
+sceAgcDcbDrawIndex
+sceAgcDcbDrawIndexOffset

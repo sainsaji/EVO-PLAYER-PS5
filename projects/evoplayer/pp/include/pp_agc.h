@@ -119,6 +119,63 @@ int  pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
  * EVO_AGC_UI) and pp_agc is ready. Gates the linear menu VO registration. */
 int  pp_agc_ui_ready(void);
 
+/* ------------------------------------------------------------------------- *
+ * #28 Phase 4: GPU geometry present. The RmlUi solid geometry stream (rounded
+ * rects, gradients, borders - the coverage-rasteriser cost) is emitted as
+ * vertex-coloured triangles through SharpProspero's compiler-built mesh
+ * shaders (pp/blobs/sp_mesh_{vs,ps}); text/icons stay on the CPU blitter and
+ * are composited afterwards. See docs/evo-pro/gpu-rendering-plan.md Step 3 and
+ * the plan at ~/.claude/plans/optimized-honking-wilkinson.md.
+ * ------------------------------------------------------------------------- */
+
+/* One vertex the mesh VS reads (SharpProspero Graphics/Vertex.cs layout):
+ *   float pos[3]; float normal[3]; float uv[2]; uint32_t color;   (36 bytes)
+ * color is packed 0xAABBGGRR to match the framebuffer byte order. */
+#define PP_AGC_GEO_VERTEX_STRIDE 36u
+
+typedef struct pp_agc_geo_vertex {
+    float    x, y, z;
+    float    nx, ny, nz;
+    float    u, v;
+    uint32_t color;
+} pp_agc_geo_vertex_t;
+
+/* One batched draw: a contiguous index range with an optional pixel scissor.
+ * scissor_w <= 0 means "no scissor" (draw against the whole target). */
+typedef struct pp_agc_geo_draw {
+    uint32_t first_index;
+    uint32_t index_count;
+    int32_t  scissor_x, scissor_y, scissor_w, scissor_h;
+} pp_agc_geo_draw_t;
+
+/* 1 once the mesh shaders created + linked in pp_agc_init() and the geometry
+ * present path is usable (implies pp_agc_ui_ready()). */
+int  pp_agc_geo_available(void);
+
+/*
+ * Present one UI frame as GPU geometry: an ortho projection of `vertices`
+ * (pixel space, y-down, origin top-left) into `gpu_target`, one DrawIndexOffset
+ * per entry in `draws`, alpha-over blended, then a flip queued in the same DCB.
+ *
+ *   vout_handle / buf_idx / gpu_target / flip_marker  - as pp_agc_present_nv12.
+ *   target_linear   pp_videoout_is_linear(vo) (informational; the RT block
+ *                   mirrors the proven #27 tiled-RT layout regardless).
+ *   vertices        vertex_count entries, PP_AGC_GEO_VERTEX_STRIDE bytes each.
+ *   indices         index_count 32-bit indices into `vertices`.
+ *   draws           draw_count batches; first_index+index_count must stay in
+ *                   range. Emitted in order.
+ *   out_w/out_h     VO output dimensions.
+ *
+ * Return codes as pp_agc_present_nv12 (0 submitted / -1 failed / -2 watchdog).
+ */
+int  pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                        int target_linear,
+                        const void *vertices, uint32_t vertex_count,
+                        const uint32_t *indices, uint32_t index_count,
+                        const pp_agc_geo_draw_t *draws, uint32_t draw_count,
+                        uint32_t out_w, uint32_t out_h,
+                        int64_t flip_marker);
+
 void pp_agc_shutdown(void);
 
 #ifdef __cplusplus
