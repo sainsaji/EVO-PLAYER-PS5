@@ -22,10 +22,10 @@
 > | Phase | State | Gate |
 > |---|---|---|
 > | 0 — shader set + `build-shader.sh --all` + `agc_ui_blobs.S` | landed | — |
-> | 1 — overlay quad in `agc_render_frame` (ProsperoLight `draw_overlay`) | **hw-verified** — test bar composited over GTA 4K, `render_frame rc=0`, 196-word DCB, heartbeat ~1 ms, no wedge | `/mnt/usb0/evo_agc_test_overlay` |
-> | 2 — player OSD composited over 4K (`pp_agc_osd`, `pp_agc_present_nv12_overlay`) | code landed, **1st hw run: compose too slow (~11 ms RGB round-trip) + a committed seek stops frame pushes → "stuck"**. Reworked: YUV-space premultiplied blend, no RGB round-trip. Scrub still drops to the 1080 VO (#32). **hw-verify pending** | `/mnt/usb0/evo_agc_osd` |
-> | 3 — GPU menu present (`pp_agc_present_ui`, linear 1080 VO) | code landed, **not yet on hw** | `/mnt/usb0/evo_agc_ui` |
-> | 4 — held-scroll: `evo_rmlui_render_agc.cpp` solid geometry + GLSL toolchain for text | not started | — |
+> | 1 — overlay quad in `agc_render_frame` (ProsperoLight `draw_overlay`) | **hw-verified** — test bar over GTA 4K, `render_frame rc=0`, 196-word DCB, ~1 ms, no wedge | `/mnt/usb0/evo_agc_test_overlay` |
+> | 2 — player OSD composited over 4K (`pp_agc_osd`, `pp_agc_present_nv12_overlay`) | **HW-VERIFIED, WORKS.** YUV-space premultiplied blend (~1-2 ms/frame), double-buffered publish (no flicker), held-frame snapshot keeps OSD+frame on screen through a seek (`agc_present_held_osd`), 1 px overlay inset (no edge line). "Buttery smooth" over GTA 4K. RGB↔YUV coeffs fixed (were ~0.4% dark). #32's 1080-drop still used for the *committed*-seek settle. | `/mnt/usb0/evo_agc_osd` |
+> | 3 — GPU menu present (`pp_agc_present_ui`, linear 1080 VO) | **HW-VERIFIED but SHELVED — net negative.** Renders fine, no artifacts, but adds a full-frame BGRA→NV12 convert (~4 ms) to an already-CPU-bound menu → held-scroll 30→16 fps. Doesn't touch the real bottleneck (RmlUi raster). Code stays hook-gated + off; keep for a future Phase-4 linear-menu-VO need. | `/mnt/usb0/evo_agc_ui` (leave unset) |
+> | 4 — held-scroll: GPU *geometry* (`evo_rmlui_render_agc.cpp`) | **the only thing that fixes held-scroll.** Solid path (`ui_vs`+`solid_ps`, proven to create+link) needs hardware for the DCB register model. Text/icons **blocked** on the Sony `sl00` shader-metadata wall (header `[0x44]` = code size + `.text` reflection trailer; no open compiler emits it) — needs `sl00` RE or a shader extracted from a real PS5 app. | — |
 >
 > **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
 > then KP — likely the OSD build left the app slot dirty + ShadowMount
