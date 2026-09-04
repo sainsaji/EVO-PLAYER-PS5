@@ -13,7 +13,7 @@ timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
 Priority labels track this order: **high** #32, #36, #55, #28 · **medium** #35,
-#37/#38/#39/#41/#59, #33, #34, #9, #42, #47, #49, #50, #53, #62 · **low** #48, #51,
+#37/#38/#39/#41/#59/#60, #33, #34, #9, #42, #47, #49, #50, #53, #62, #63 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
 **#27 CLOSED 2026-09-04** — sceAgc GPU present path delivered + hardware-verified
@@ -65,7 +65,9 @@ prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
 New label `modularisation` = #49 + #53 · **#59** surface active video decoder
 backend in player UI (HW vs SW badge + OSD / Media Info, v1.1.0, `native-decode`,
 `priority: medium`) · **#60** make `.ffpfsc` self-contained by embedding RmlUi
-assets in binary (eliminate `/data` FTP sync, v0.9.0, `rmlui`, `priority: medium`).
+assets in binary (eliminate `/data` FTP sync, v0.9.0, `rmlui`, `priority: medium`) ·
+**#63** add real-time CPU, GPU, and RAM usage graphs to the player (Diagnostic HUD,
+v0.9.0, `independent`, `priority: medium`).
 
 ---
 
@@ -147,6 +149,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#51** | *(sub-issue of #46)* Quiet the boot breadcrumbs — split the on-screen notification popup from the durable channels: keep `sceKernelDebugOutText` (klog) + `/mnt/usb0/evo_boot.log`, move `sceKernelSendNotificationRequest` behind an opt-in `EVO_BOOT_TRACE_POPUP` (`--breadcrumbs`). Drop `-DEVO_BOOT_TRACE=1` from the default `APP_DEFS` | `include/evo_boot_trace.h`, `src/evo_boot_log.c`, `include/evo_boot_log.h`, `scripts/package-app.sh`, `docs/tooling.md`, `docs/evo-pro/status.md` |
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
+| **#63** | Real-time CPU, GPU, and RAM usage graphs in the player Diagnostic HUD (Stats for Nerds) | `projects/evoplayer/assets/rml/playback.rml`, `projects/evoplayer/assets/rml/playback.rcss`, `pp/include/pp_pipeline_metrics.h`, `media/include/evo_direct_mem.h`, `ui_rml/` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**

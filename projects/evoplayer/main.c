@@ -12144,7 +12144,8 @@ int main(void) {
          * composites it over the 4K plane in the same DCB (no 1080 VO drop).
          * Runs every loop iteration because AGC frames present off the decode
          * thread and never set `linear` here. */
-        if (screen == SCREEN_PLAYER && pp_product_k4_live(screen) && pp_agc_available()) {
+        if (screen == SCREEN_PLAYER && pp_product_k4_live(screen) &&
+            pp_agc_available() && pp_agc_osd_enabled()) {
             static uint64_t s_k4_osd_last_us;
             struct timespec s_now;
             clock_gettime(CLOCK_MONOTONIC, &s_now);

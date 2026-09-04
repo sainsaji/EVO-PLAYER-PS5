@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <time.h>
 
 /*
@@ -32,6 +33,17 @@ static int g_row0, g_row1;   /* non-transparent row span [row0,row1) */
 
 static inline int clamp8(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
 
+int pp_agc_osd_enabled(void)
+{
+    static int e = -1;
+    if (e < 0) {
+        e = 0;
+        if (getenv("EVO_AGC_OSD")) e = 1;
+        else { FILE *f = fopen("/mnt/usb0/evo_agc_osd", "r"); if (f) { e = 1; fclose(f); } }
+    }
+    return e;
+}
+
 static int alloc_planes(void)
 {
     if (g_y) return 0;
@@ -45,7 +57,7 @@ static int alloc_planes(void)
 
 void pp_agc_osd_publish(const uint32_t *bgra, int active)
 {
-    if (!active || !bgra || alloc_planes() != 0) {
+    if (!pp_agc_osd_enabled() || !active || !bgra || alloc_planes() != 0) {
         g_active = 0;
         return;
     }
