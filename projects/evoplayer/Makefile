@@ -78,6 +78,7 @@ PP_SRCS := \
     pp/src/pp_converter_fused.c \
     pp/src/pp_compute_pipeline.c \
     pp/src/pp_agc.c \
+    pp/src/pp_agc_osd.c \
     pp/src/pp_audio_clock.c \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \

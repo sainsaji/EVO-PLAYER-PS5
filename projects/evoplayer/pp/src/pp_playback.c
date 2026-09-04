@@ -1,5 +1,6 @@
 #include "pp_playback.h"
 #include "pp_agc.h"
+#include "pp_agc_osd.h"
 #include "pp_compute_pipeline.h"
 #include "pp_converter_fused.h"
 #include "pp_converter_parallel.h"
@@ -479,10 +480,33 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
                 pthread_mutex_unlock(mtx(pb));
 
             t0 = now_us();
-            rc = pp_agc_present_nv12(pb->vo->handle, idx, gpu,
-                                     src->planes[0], (uint32_t)src->strides[0],
-                                     coded_h, src->width, src->height,
-                                     pb->out_w, pb->out_h, marker);
+            /* #28 Phase 2: if the player OSD is up, compose it over the frame
+             * and present it as a full-frame overlay quad in the same DCB
+             * (replaces #32's drop-to-1080-VO scrub stopgap). Video-only
+             * otherwise. */
+            {
+                const uint8_t *osd = pp_agc_osd_compose(src->planes[0],
+                                                        (uint32_t)src->strides[0], coded_h,
+                                                        pb->out_w, pb->out_h);
+                uint32_t sc = osd ? (pb->out_w / PP_AGC_OSD_W) : 0u;
+                if (sc && PP_AGC_OSD_W * sc <= pb->out_w && PP_AGC_OSD_H * sc <= pb->out_h) {
+                    uint32_t ox = (pb->out_w - PP_AGC_OSD_W * sc) / 2u;
+                    uint32_t oy = (pb->out_h - PP_AGC_OSD_H * sc) / 2u;
+                    static int s_osd_bc;
+                    if (!s_osd_bc) { pp_stage_bc_checkpoint("012C_AGC_OSD_OVERLAY", "osd over 4k"); s_osd_bc = 1; }
+                    rc = pp_agc_present_nv12_overlay(pb->vo->handle, idx, gpu,
+                                                     src->planes[0], (uint32_t)src->strides[0],
+                                                     coded_h, src->width, src->height,
+                                                     pb->out_w, pb->out_h, marker,
+                                                     osd, PP_AGC_OSD_W, PP_AGC_OSD_H,
+                                                     ox, oy, sc, 1.0f);
+                } else {
+                    rc = pp_agc_present_nv12(pb->vo->handle, idx, gpu,
+                                             src->planes[0], (uint32_t)src->strides[0],
+                                             coded_h, src->width, src->height,
+                                             pb->out_w, pb->out_h, marker);
+                }
+            }
             t1 = now_us();
 
             if (rc == 0) {

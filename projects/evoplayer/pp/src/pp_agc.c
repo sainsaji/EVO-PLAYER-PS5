@@ -220,7 +220,7 @@ static struct {
     /* #28 overlay quad (0 = video only) */
     int         draw_overlay;
     const void *ovl_source;                     /* staged overlay NV12, pitch == ovl_w */
-    uint32_t    ovl_w, ovl_h, ovl_x, ovl_y;
+    uint32_t    ovl_w, ovl_h, ovl_x, ovl_y, ovl_scale;
     float       ovl_alpha;
 
     /* response */
@@ -392,7 +392,7 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
                             uint32_t *word_count,
                             int draw_overlay, const void *ovl_source,
                             uint32_t ovl_w, uint32_t ovl_h, uint32_t ovl_x,
-                            uint32_t ovl_y, float ovl_alpha)
+                            uint32_t ovl_y, uint32_t ovl_scale, float ovl_alpha)
 {
     static const uint16_t target_offsets[16] = { 0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
                                                  0x321, 0x323, 0x324, 0x325, 0x390, 0x398,
@@ -563,13 +563,14 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
      * surface. Verbatim from ProsperoLight render_frame()'s draw_overlay
      * branch (SDR: no shader rebind, reuse the NV12 pipeline + resources). */
     if (draw_overlay && ovl_source && ovl_w && ovl_h) {
+        float sc = ovl_scale ? (float)ovl_scale : 1.f;
         size_t ovl_y_bytes  = (size_t)ovl_w * ovl_h;
         size_t ovl_uv_bytes = (size_t)ovl_w * ((ovl_h + 1u) / 2u);
         const agc_register_t state[11] = {
-            { 0x10f, 0, float_bits(ovl_w * .5f) },
-            { 0x110, 0, float_bits(ovl_x + ovl_w * .5f) },
-            { 0x111, 0, float_bits(ovl_h * -.5f) },
-            { 0x112, 0, float_bits(ovl_y + ovl_h * .5f) },
+            { 0x10f, 0, float_bits(ovl_w * sc * .5f) },
+            { 0x110, 0, float_bits(ovl_x + ovl_w * sc * .5f) },
+            { 0x111, 0, float_bits(ovl_h * sc * -.5f) },
+            { 0x112, 0, float_bits(ovl_y + ovl_h * sc * .5f) },
             { 0x113, 0, float_bits(1) },
             { 0x114, 0, 0 },
             { 0x105, 0, float_bits(ovl_alpha) },
@@ -878,7 +879,7 @@ static void *agc_submit_worker(void *arg)
         int64_t     render_marker;
         int         draw_overlay;
         const void *ovl_source;
-        uint32_t    ovl_w, ovl_h, ovl_x, ovl_y;
+        uint32_t    ovl_w, ovl_h, ovl_x, ovl_y, ovl_scale;
         float       ovl_alpha;
         uint32_t    words = 0;
         int32_t     rc;
@@ -909,6 +910,7 @@ static void *agc_submit_worker(void *arg)
         ovl_h          = g_agc_submit.ovl_h;
         ovl_x          = g_agc_submit.ovl_x;
         ovl_y          = g_agc_submit.ovl_y;
+        ovl_scale      = g_agc_submit.ovl_scale;
         ovl_alpha      = g_agc_submit.ovl_alpha;
         pthread_mutex_unlock(&g_agc_submit.lock);
 
@@ -931,7 +933,7 @@ static void *agc_submit_worker(void *arg)
                                   surface_height, visible_width, visible_height,
                                   output_width, output_height, render_marker, &words,
                                   draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
-                                  ovl_alpha);
+                                  ovl_scale, ovl_alpha);
             t_agc_armed = 0;
 
             evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
@@ -949,7 +951,7 @@ static void *agc_submit_worker(void *arg)
                                   surface_height, visible_width, visible_height,
                                   output_width, output_height, render_marker, &words,
                                   draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
-                                  ovl_alpha);
+                                  ovl_scale, ovl_alpha);
         }
 
     reply:
@@ -994,13 +996,16 @@ static int agc_submit_start(void)
  *
  * ovl_nv12 (may be NULL) is a tightly-packed NV12 OSD surface (pitch == ovl_w,
  * interleaved UV at ovl_nv12 + ovl_w*ovl_h); it is composited as a second quad
- * in the same DCB at (ovl_x, ovl_y), constant-alpha blended (ovl_alpha 0..1). */
+ * in the same DCB, upscaled ovl_scale x (0/1 = none) with the bilinear sampler,
+ * its top-left at (ovl_x, ovl_y) in output space, constant-alpha blended
+ * (ovl_alpha 0..1). */
 int pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_target,
                                 const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
                                 uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
                                 int64_t flip_marker,
                                 const void *ovl_nv12, uint32_t ovl_w, uint32_t ovl_h,
-                                uint32_t ovl_x, uint32_t ovl_y, float ovl_alpha)
+                                uint32_t ovl_x, uint32_t ovl_y, uint32_t ovl_scale,
+                                float ovl_alpha)
 {
     if (g_agc.submit_wedged)
         return -2;
@@ -1012,8 +1017,10 @@ int pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_tar
         return -1;
 
     /* Overlay is best-effort: a bad rect just disables it, never fails the frame. */
+    uint32_t ovl_sc = ovl_scale ? ovl_scale : 1u;
     int want_overlay = ovl_nv12 && ovl_w >= 2 && ovl_h >= 2 && (ovl_w & 1u) == 0 &&
-                       (ovl_h & 1u) == 0 && ovl_x + ovl_w <= out_w && ovl_y + ovl_h <= out_h;
+                       (ovl_h & 1u) == 0 &&
+                       ovl_x + ovl_w * ovl_sc <= out_w && ovl_y + ovl_h * ovl_sc <= out_h;
     if (ovl_alpha < 0.f) ovl_alpha = 0.f;
     if (ovl_alpha > 1.f) ovl_alpha = 1.f;
 
@@ -1122,6 +1129,7 @@ int pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_tar
     g_agc_submit.ovl_h          = ovl_h;
     g_agc_submit.ovl_x          = ovl_x;
     g_agc_submit.ovl_y          = ovl_y;
+    g_agc_submit.ovl_scale      = ovl_sc;
     g_agc_submit.ovl_alpha      = ovl_alpha;
     g_agc_submit.have_done      = 0;
     g_agc_submit.have_req       = 1;
@@ -1225,7 +1233,7 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     return pp_agc_present_nv12_overlay(vout_handle, buf_idx, gpu_target, nv12, pitch_bytes,
                                        coded_height, vis_w, vis_h, out_w, out_h, flip_marker,
                                        ovl, ovl ? AGC_TEST_OVL_W : 0u,
-                                       ovl ? AGC_TEST_OVL_H : 0u, ox, oy, 0.6f);
+                                       ovl ? AGC_TEST_OVL_H : 0u, ox, oy, 1u, 0.6f);
 }
 
 void pp_agc_shutdown(void)
@@ -1274,10 +1282,10 @@ int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t 
 int  pp_agc_present_nv12_overlay(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
                                  uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
                                  uint32_t oh, int64_t m, const void *on, uint32_t ow2,
-                                 uint32_t oh2, uint32_t ox, uint32_t oy, float oa)
+                                 uint32_t oh2, uint32_t ox, uint32_t oy, uint32_t os, float oa)
 {
-    (void)vh; (void)bi; (void)gt; (void)n; (void)p; (void)ch; (void)vw; (void)vh2;
-    (void)ow; (void)oh; (void)m; (void)on; (void)ow2; (void)oh2; (void)ox; (void)oy; (void)oa;
+    (void)vh; (void)bi; (void)gt; (void)n; (void)p; (void)ch; (void)vw; (void)vh2; (void)ow;
+    (void)oh; (void)m; (void)on; (void)ow2; (void)oh2; (void)ox; (void)oy; (void)os; (void)oa;
     return -1;
 }
 void pp_agc_shutdown(void) {}
