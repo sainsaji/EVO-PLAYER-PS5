@@ -76,6 +76,10 @@ extern const uint8_t pp_agc_ui_vs_code_start[],     pp_agc_ui_vs_code_end[];
 extern const uint8_t pp_agc_solid_ps_code_start[],  pp_agc_solid_ps_code_end[];
 extern const uint8_t pp_agc_glyph_ps_code_start[],  pp_agc_glyph_ps_code_end[];
 extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
+extern const uint8_t pp_agc_spvs_header_start[], pp_agc_spvs_header_end[];
+extern const uint8_t pp_agc_spvs_code_start[],   pp_agc_spvs_code_end[];
+extern const uint8_t pp_agc_spps_header_start[], pp_agc_spps_header_end[];
+extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
 #define SHADER_MEMORY_BYTES  0x0d0000u
@@ -111,6 +115,7 @@ extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
 #define OFF_UI_PS_C_CODE 0x12000u   /* rgba_ps  */
 #define OFF_UI_LINK_A    0x13000u
 #define OFF_UI_LINK_B    0x14000u
+#define OFF_UI_SPLICE_A  0x15000u   /* Phase 4 probe scratch: sp_mesh_{vs,ps} */
 
 /* --- AGC ABI structs (ProsperoLight) ---------------------------------- */
 typedef struct agc_register {
@@ -755,6 +760,23 @@ int pp_agc_probe_ui_shaders(void)
     if (c_vs == 0 && c_rgba == 0) {
         int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rgba, 4);
         evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba (TriList) = 0x%08x", (unsigned)l);
+    }
+
+    /* #28 Phase 4: SharpProspero's compiler-generated mesh_vs / mesh_ps. */
+    if (copy_asset(m + OFF_UI_SPLICE_A + 0x0000, 0x1000, pp_agc_spvs_header_start, pp_agc_spvs_header_end) == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x1000, 0x1000, pp_agc_spvs_code_start,   pp_agc_spvs_code_end)   == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x2000, 0x1000, pp_agc_spps_header_start, pp_agc_spps_header_end) == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x3000, 0x1000, pp_agc_spps_code_start,   pp_agc_spps_code_end)   == 0) {
+        void *spvs = 0, *spps = 0;
+        int32_t c_v = sceAgcCreateShader(&spvs, m + OFF_UI_SPLICE_A + 0x0000, m + OFF_UI_SPLICE_A + 0x1000);
+        int32_t c_p = sceAgcCreateShader(&spps, m + OFF_UI_SPLICE_A + 0x2000, m + OFF_UI_SPLICE_A + 0x3000);
+        evo_boot_log("pp_agc UI: CreateShader sp_mesh_vs=0x%08x sp_mesh_ps=0x%08x  (v=%p p=%p)",
+                     (unsigned)c_v, (unsigned)c_p, spvs, spps);
+        if (c_v == 0 && c_p == 0) {
+            int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, spvs, spps, 4);
+            evo_boot_log("pp_agc UI: LinkShaders sp_mesh_vs+sp_mesh_ps (TriList) = 0x%08x", (unsigned)l);
+        }
+        evo_boot_log_flush();
     }
 
     /*

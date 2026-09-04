@@ -42,3 +42,14 @@ BLOB(pp_agc_ui_vs_code,     "../../pp/shaders/ui_vs.bin")
 BLOB(pp_agc_solid_ps_code,  "../../pp/shaders/solid_ps.bin")
 BLOB(pp_agc_glyph_ps_code,  "../../pp/shaders/glyph_ps.bin")
 BLOB(pp_agc_rgba_ps_code,   "../../pp/shaders/rgba_ps.bin")
+
+/* #28 Phase 4 probe: SharpProspero's compiler-generated mesh shaders
+ * (Graphics/Agc/Shaders/mesh_{vs,ps}.sb), .shader_header + .shader_text
+ * sections extracted. mesh_vs reads a structured vertex buffer {float3 pos;
+ * float3 normal; float2 uv; uint color} (register t0) - the RmlUi geometry
+ * shape; mesh_ps is pure ALU + f16 export, no resources. Real compiler
+ * headers = a cleaner base than ProsperoLight's Netflix blobs. */
+BLOB(pp_agc_spvs_header, "pp/blobs/sp_mesh_vs.header.bin")
+BLOB(pp_agc_spvs_code,   "pp/blobs/sp_mesh_vs.text.bin")
+BLOB(pp_agc_spps_header, "pp/blobs/sp_mesh_ps.header.bin")
+BLOB(pp_agc_spps_code,   "pp/blobs/sp_mesh_ps.text.bin")
