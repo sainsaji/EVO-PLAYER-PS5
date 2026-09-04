@@ -13,23 +13,27 @@
  * alpha so the decode-thread compose is just a couple of mul-adds per pixel and
  * never round-trips the video through RGB.
  *
- * Premultiplied-alpha "over": out = src + dst*(255-a)/255, and Y/Cb/Cr are all
- * linear in RGB, so the blend works directly in YUV. src here carries the
- * matrix constant offsets scaled by a (the "+128" chroma bias, "+0" luma).
+ * DOUBLE-BUFFERED: publish fills the back plane set then atomically bumps
+ * g_front. The decode-thread compose reads g_front. No window where the OSD
+ * blinks off (that was the flicker).
  *
- * BT.709 full-range, matching pp_agc.c's pixel_constants (the sceAgc NV12->RGB
- * shader). Fixed point <<8.
+ * Premultiplied-alpha "over": out = src + dst*(255-a)/255, and Y/Cb/Cr are all
+ * linear in RGB, so the blend works directly in YUV; g_cb/g_cr carry the "+128"
+ * chroma bias scaled by alpha. BT.709 full-range, matching pp_agc.c's
+ * pixel_constants (the sceAgc NV12->RGB shader). Fixed point <<8.
  */
 #define W  ((int)PP_AGC_OSD_W)
 #define H  ((int)PP_AGC_OSD_H)
 #define FX 8
 
-static int16_t *g_y;      /* W*H  premultiplied luma            */
-static int16_t *g_cb;     /* W*H  premultiplied Cb (incl 128*a) */
-static int16_t *g_cr;     /* W*H  premultiplied Cr              */
-static uint8_t *g_a;      /* W*H  alpha                         */
-static volatile int g_active;
-static int g_row0, g_row1;   /* non-transparent row span [row0,row1) */
+struct plane {
+    int16_t *y, *cb, *cr;    /* W*H premultiplied luma / Cb / Cr */
+    uint8_t *a;              /* W*H alpha                        */
+    int row0, row1;          /* non-transparent row span [row0,row1) */
+    int valid;
+};
+static struct plane g_p[2];
+static volatile int g_front = -1;   /* index of the last fully-published plane */
 
 static inline int clamp8(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
 
@@ -44,34 +48,32 @@ int pp_agc_osd_enabled(void)
     return e;
 }
 
-static int alloc_planes(void)
+static int alloc_plane(struct plane *p)
 {
-    if (g_y) return 0;
-    g_y  = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
-    g_cb = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
-    g_cr = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
-    g_a  = (uint8_t *)malloc((size_t)W * H);
-    if (!g_y || !g_cb || !g_cr || !g_a) return -1;
-    return 0;
+    if (p->y) return 0;
+    p->y  = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
+    p->cb = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
+    p->cr = (int16_t *)malloc((size_t)W * H * sizeof(int16_t));
+    p->a  = (uint8_t *)malloc((size_t)W * H);
+    return (p->y && p->cb && p->cr && p->a) ? 0 : -1;
 }
 
 void pp_agc_osd_publish(const uint32_t *bgra, int active)
 {
-    if (!pp_agc_osd_enabled() || !active || !bgra || alloc_planes() != 0) {
-        g_active = 0;
+    if (!pp_agc_osd_enabled() || !active || !bgra) {
+        g_front = -1;
         return;
     }
 
-    /* No lock with the decode-thread reader: drop active while the planes are
-     * being rewritten so a mid-write compose just skips the overlay for one
-     * frame rather than reading a torn image. */
-    g_active = 0;
+    int b = (g_front == 0) ? 1 : 0;        /* write the buffer we're not showing */
+    struct plane *p = &g_p[b];
+    if (alloc_plane(p) != 0) { g_front = -1; return; }
 
     int r0 = H, r1 = 0;
     for (int r = 0; r < H; r++) {
         const uint32_t *row = bgra + (size_t)r * W;
-        int16_t *yr = g_y + (size_t)r * W, *cbr = g_cb + (size_t)r * W, *crr = g_cr + (size_t)r * W;
-        uint8_t *ar = g_a + (size_t)r * W;
+        int16_t *yr = p->y + (size_t)r * W, *cbr = p->cb + (size_t)r * W, *crr = p->cr + (size_t)r * W;
+        uint8_t *ar = p->a + (size_t)r * W;
         int any = 0;
         for (int c = 0; c < W; c++) {
             uint32_t px = row[c];
@@ -89,22 +91,28 @@ void pp_agc_osd_publish(const uint32_t *bgra, int active)
         if (any) { if (r < r0) r0 = r; r1 = r + 1; }
     }
 
-    if (r1 <= r0) { g_active = 0; return; }
-    g_row0 = r0;
-    g_row1 = r1;
-    g_active = 1;
+    if (r1 <= r0) { g_front = -1; return; }   /* fully transparent = no OSD */
+    p->row0 = r0;
+    p->row1 = r1;
+    p->valid = 1;
+    __sync_synchronize();
+    g_front = b;
 }
 
 int pp_agc_osd_active(void)
 {
-    return g_active;
+    return g_front >= 0;
 }
 
 const uint8_t *pp_agc_osd_compose(const void *vid_nv12, uint32_t pitch, uint32_t vh,
                                   uint32_t ow, uint32_t oh)
 {
     static uint8_t *out;
-    if (!g_active || !vid_nv12 || !pitch || !vh || !ow || !oh || !g_y)
+    int f = g_front;
+    if (f < 0 || !vid_nv12 || !pitch || !vh || !ow || !oh)
+        return 0;
+    const struct plane *p = &g_p[f];
+    if (!p->valid || !p->y)
         return 0;
     if (!out) {
         out = (uint8_t *)malloc(PP_AGC_OSD_NV12_BYTES);
@@ -122,18 +130,13 @@ const uint8_t *pp_agc_osd_compose(const void *vid_nv12, uint32_t pitch, uint32_t
     uint32_t sxr = (ow << 16) / (uint32_t)W;
     uint32_t syr = (oh << 16) / (uint32_t)H;
 
-    int r0 = g_row0 & ~1, r1 = (g_row1 + 1) & ~1;
+    int r0 = p->row0 & ~1, r1 = (p->row1 + 1) & ~1;
     if (r0 < 0) r0 = 0;
     if (r1 > H) r1 = H;
 
     /* rows above / below the OSD band: video luma verbatim */
-    for (int r = 0; r < r0; r++) {
-        uint32_t vsy = (r * syr) >> 16; if (vsy >= vh) vsy = vh - 1;
-        const uint8_t *vyr = vy + (size_t)vsy * pitch;
-        uint8_t *oyr = oy + (size_t)r * W;
-        for (int c = 0; c < W; c++) { uint32_t vsx = (c * sxr) >> 16; if (vsx >= ow) vsx = ow - 1; oyr[c] = vyr[vsx]; }
-    }
-    for (int r = r1; r < H; r++) {
+    for (int r = 0; r < H; r++) {
+        if (r == r0) { r = r1 - 1; continue; }
         uint32_t vsy = (r * syr) >> 16; if (vsy >= vh) vsy = vh - 1;
         const uint8_t *vyr = vy + (size_t)vsy * pitch;
         uint8_t *oyr = oy + (size_t)r * W;
@@ -144,8 +147,8 @@ const uint8_t *pp_agc_osd_compose(const void *vid_nv12, uint32_t pitch, uint32_t
     for (int r = r0; r < r1; r++) {
         uint32_t vsy = (r * syr) >> 16; if (vsy >= vh) vsy = vh - 1;
         const uint8_t *vyr = vy + (size_t)vsy * pitch;
-        const int16_t *yr = g_y + (size_t)r * W;
-        const uint8_t *ar = g_a + (size_t)r * W;
+        const int16_t *yr = p->y + (size_t)r * W;
+        const uint8_t *ar = p->a + (size_t)r * W;
         uint8_t *oyr = oy + (size_t)r * W;
         for (int c = 0; c < W; c++) {
             uint32_t vsx = (c * sxr) >> 16; if (vsx >= ow) vsx = ow - 1;
@@ -162,18 +165,16 @@ const uint8_t *pp_agc_osd_compose(const void *vid_nv12, uint32_t pitch, uint32_t
         const uint8_t *vuvr = vuv + (size_t)(vsy >> 1) * pitch;
         uint8_t *ouvr = ouv + (size_t)(r >> 1) * W;
         int band = (r >= r0 && r < r1);
-        const int16_t *cb0 = g_cb + (size_t)r * W, *cr0 = g_cr + (size_t)r * W;
-        const int16_t *cb1 = g_cb + (size_t)(r + 1 < H ? r + 1 : r) * W;
-        const int16_t *cr1 = g_cr + (size_t)(r + 1 < H ? r + 1 : r) * W;
-        const uint8_t *a0 = g_a + (size_t)r * W, *a1 = g_a + (size_t)(r + 1 < H ? r + 1 : r) * W;
+        const int16_t *cb0 = p->cb + (size_t)r * W, *cr0 = p->cr + (size_t)r * W;
+        const int16_t *cb1 = p->cb + (size_t)(r + 1 < H ? r + 1 : r) * W;
+        const int16_t *cr1 = p->cr + (size_t)(r + 1 < H ? r + 1 : r) * W;
+        const uint8_t *a0 = p->a + (size_t)r * W, *a1 = p->a + (size_t)(r + 1 < H ? r + 1 : r) * W;
         for (int c = 0; c < W; c += 2) {
             uint32_t vsx = (c * sxr) >> 16; if (vsx >= ow) vsx = ow - 1;
             int vcb = vuvr[vsx & ~1u], vcr = vuvr[(vsx & ~1u) + 1];
             int c2 = (c + 1 < W) ? c + 1 : c;
             int amax = band ? (a0[c] | a0[c2] | a1[c] | a1[c2]) : 0;
             if (amax == 0) { ouvr[c] = (uint8_t)vcb; ouvr[c + 1] = (uint8_t)vcr; continue; }
-            /* premultiplied "over" in YUV: out = src_premul + dst*(255-a)/255.
-             * g_cb/g_cr already carry the 128 bias scaled by a; average the 2x2. */
             int scb = (cb0[c] + cb0[c2] + cb1[c] + cb1[c2]) >> 2;
             int scr = (cr0[c] + cr0[c2] + cr1[c] + cr1[c2]) >> 2;
             int aa  = (a0[c] + a0[c2] + a1[c] + a1[c2]) >> 2;

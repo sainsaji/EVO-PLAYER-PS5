@@ -12150,7 +12150,7 @@ int main(void) {
             struct timespec s_now;
             clock_gettime(CLOCK_MONOTONIC, &s_now);
             uint64_t now_us = (uint64_t)s_now.tv_sec * 1000000ull + s_now.tv_nsec / 1000ull;
-            if (now_us - s_k4_osd_last_us >= 12000ull) {   /* cap the OSD re-render at ~80 Hz */
+            if (now_us - s_k4_osd_last_us >= 33000ull) {   /* cap the OSD re-render at ~30 Hz */
                 s_k4_osd_last_us = now_us;
                 if (!g_k4_osd_scratch)
                     g_k4_osd_scratch = calloc((size_t)WIDTH * HEIGHT, 4);

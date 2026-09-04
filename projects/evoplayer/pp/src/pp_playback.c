@@ -197,6 +197,7 @@ void pp_playback_on_file_open(pp_playback *pb)
     pb->seek_discarding = 0;
     pb->display_ready = 0;
     pb->display_pts_us = 0;
+    pb->agc_hold_valid = 0;   /* #28: don't carry a held frame across files */
     if (pb->pending_present && pb->vo)
         pp_videoout_release(pb->vo, pb->pending_vo_idx);
     pb->pending_present = 0;
@@ -349,6 +350,53 @@ static void agc_heartbeat_note(pp_playback *pb, uint64_t present_us, int dropped
     pb->agc_hb_frames = 0;
 }
 
+/*
+ * #28 Phase 2: keep the OSD + a held frame on screen during a seek / scrub
+ * pause on the sceAgc 4K path (no fresh frame is being pushed). Composes the
+ * OSD over the last-good NV12 and presents it as a full-frame overlay quad,
+ * ~60 Hz max. Returns 1 if it presented (screen is alive), 0 to fall through.
+ */
+static int agc_present_held_osd(pp_playback *pb)
+{
+    static uint64_t last_us;
+    uint64_t now;
+
+    if (!pb->vo || !pp_agc_available() || !pb->agc_hold_valid || pb->out_w < 3200u ||
+        !pp_agc_osd_active())
+        return 0;
+
+    now = now_us();
+    if (now - last_us < 16000ull)
+        return 1;   /* throttle - pretend presented, the last flip still stands */
+
+    const unsigned char *osd = (const unsigned char *)pp_agc_osd_compose(
+        pb->agc_hold_nv12, pb->agc_hold_pitch, pb->agc_hold_ch, pb->out_w, pb->out_h);
+    if (!osd)
+        return 0;
+
+    uint32_t idx = 0, pitch = 0;
+    void *lin = pp_videoout_acquire(pb->vo, &idx, &pitch);
+    if (!lin)
+        return 1;   /* all buffers in flight; last frame + OSD still on screen */
+    void *gpu = pp_videoout_gpu_plane(pb->vo, idx);
+    int64_t marker = (int64_t)(++pb->present_seq);
+    uint32_t sc = pb->out_w / PP_AGC_OSD_W;
+    uint32_t ox = sc ? (pb->out_w - PP_AGC_OSD_W * sc) / 2u : 0u;
+    uint32_t oy = sc ? (pb->out_h - PP_AGC_OSD_H * sc) / 2u : 0u;
+    int rc = pp_agc_present_nv12_overlay(pb->vo->handle, idx, gpu,
+                                        pb->agc_hold_nv12, pb->agc_hold_pitch, pb->agc_hold_ch,
+                                        pb->agc_hold_w, pb->agc_hold_h, pb->out_w, pb->out_h,
+                                        marker, osd, PP_AGC_OSD_W, PP_AGC_OSD_H,
+                                        ox, oy, sc ? sc : 1u, 1.0f);
+    if (rc == 0 || rc == -2) {
+        (void)pp_videoout_adopt_flip(pb->vo, idx, (uint64_t)marker);
+        last_us = now;
+        return 1;
+    }
+    pp_videoout_release(pb->vo, idx);
+    return 0;
+}
+
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 {
     uint64_t t0, t1, cus;
@@ -366,6 +414,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pb->seek_discarding) {
         if (src->pts_us < pb->seek_target_us) {
             pb->stats.frames_discarded_seek++;
+            agc_present_held_osd(pb);   /* #28: keep OSD + held frame on screen */
             return 1;
         }
         pp_clock_reset(&pb->clock);
@@ -378,8 +427,10 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
         }
     }
 
-    if (pp_clock_is_paused(&pb->clock))
+    if (pp_clock_is_paused(&pb->clock)) {
+        agc_present_held_osd(pb);   /* #28: keep OSD + held frame on screen */
         return 1;
+    }
 
     need = (size_t)pb->out_w * (size_t)pb->out_h;
     if (need == 0 || need > (size_t)3840u * 2160u)
@@ -514,6 +565,28 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
                  * bookkeeping call returns — never release this buffer now. */
                 (void)pp_videoout_adopt_flip(pb->vo, idx, (uint64_t)marker);
                 cus = t1 - t0;
+
+                /* #28 Phase 2: while the OSD is up, snapshot this NV12 frame so
+                 * a following seek / pause window can present (held frame + OSD)
+                 * instead of a stale plane. ~12 MB memcpy, only when OSD-active. */
+                if (pp_agc_osd_active() && src->planes[0]) {
+                    size_t hn = (size_t)src->strides[0] * coded_h
+                              + (size_t)src->strides[0] * ((coded_h + 1u) / 2u);
+                    if (pb->agc_hold_cap < hn) {
+                        free(pb->agc_hold_nv12);
+                        pb->agc_hold_nv12 = (unsigned char *)malloc(hn);
+                        pb->agc_hold_cap  = pb->agc_hold_nv12 ? hn : 0;
+                    }
+                    if (pb->agc_hold_nv12) {
+                        memcpy(pb->agc_hold_nv12, src->planes[0], hn);
+                        pb->agc_hold_pitch = (uint32_t)src->strides[0];
+                        pb->agc_hold_ch    = coded_h;
+                        pb->agc_hold_w     = src->width;
+                        pb->agc_hold_h     = src->height;
+                        pb->agc_hold_valid = 1;
+                    }
+                }
+
                 pb->stats.frames_converted++;
                 pb->agc_frames++;
                 note_convert(pb, cus);
