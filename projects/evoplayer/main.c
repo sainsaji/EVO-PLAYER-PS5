@@ -121,6 +121,7 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 #include "evo_boot_trace.h"   /* Phase 1b app-module bring-up breadcrumbs */
 #include "evo_agc_probe.h"    /* -DEVO_AGC_PROBE: boot-time sceAgc recon */
 #include "evo_avplayer_probe.h" /* -DEVO_AVPLAYER_PROBE: sceAvPlayer Route A gate */
+#include "evo_shader_scan.h"  /* -DEVO_SHADER_SCAN: rip shader blobs from loaded modules (#67) */
 #include "evo_videodec2_probe.h" /* -DEVO_VIDEODEC2_PROBE: sceVideodec2 Route B gate */
 #include "evo_jailbreak.h"    /* EVO_APP_MODULE: self-unjail via etaHEN IPC */
 #include "evo_usb_remote.h"   /* -DEVO_USB_REMOTE: scriptable dev remote (no-op otherwise) */
@@ -12009,6 +12010,7 @@ int main(void) {
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_boot_log_flush();   /* sandbox open now — dump the pre-unjail probe results to USB */
     evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */
+    evo_shader_scan();      /* no-op unless -DEVO_SHADER_SCAN — rip shader blobs to /mnt/usb0 (#67) */
     evo_boot_log_flush();
 #ifdef EVO_APP_MODULE
     av_log_set_level(AV_LOG_ERROR);

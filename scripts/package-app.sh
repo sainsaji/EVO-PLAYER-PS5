@@ -33,6 +33,7 @@ VIDEODEC2_PROBE=0
 FFPFSC=0
 USB_REMOTE=0
 GEO_TEXT=0
+SHADER_SCAN=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -44,6 +45,7 @@ while (( $# )); do
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --geo-text)     GEO_TEXT=1 ;;     # #28/#67: compile the GPU text 2nd-pass into agc_render_geo
+        --shader-scan)  SHADER_SCAN=1 ;;  # #67: rip PSSL shader blobs from loaded modules -> /mnt/usb0
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -59,6 +61,7 @@ if ! in_container; then
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( GEO_TEXT ))     && FWD+=(--geo-text)
+    (( SHADER_SCAN ))  && FWD+=(--shader-scan)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -263,6 +266,10 @@ else
     # turned out to be the <iostream> static-init crash (#71, fixed df7cbf2), so
     # this is worth re-testing. Still runtime-gated by /mnt/usb0/evo_agc_geo_text.
     (( GEO_TEXT )) && APP_DEFS+=" -DPP_AGC_GEO_TEXT=1"
+    # --shader-scan (#67): rip PSSL shader blobs from EVO's loaded system modules
+    # to /mnt/usb0/evo_shaders/ at boot (need a working RGBA-sampling pixel
+    # shader; the sl00 reflection trailer only ships in real compiler output).
+    (( SHADER_SCAN )) && APP_DEFS+=" -DEVO_SHADER_SCAN=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
