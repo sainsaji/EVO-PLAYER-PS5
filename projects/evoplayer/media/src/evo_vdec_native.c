@@ -322,6 +322,9 @@ struct nat_slot {
     uint8_t *data;
     size_t   cap;
     int      used;
+    int      borrowed;         /* 1 = data points into the decoder frame     */
+                               /*     pool (AGC path), not owned - do not     */
+                               /*     realloc or free it                     */
     int      nv12;              /* 1 = data is straight NV12 (AGC path)      */
     int64_t  pts;
     uint32_t w, h;              /* display size                             */
@@ -420,26 +423,32 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     const size_t y_sz = (size_t)cw * codeh;
     const size_t c_sz = (size_t)cstride * ((codeh + 1u) / 2u);
     const size_t need = y_sz + 2u * c_sz;
-    if (s->cap < need) {
-        uint8_t *g = (uint8_t *)realloc(s->data, need);
-        if (!g)
-            return;
-        s->data = g;
-        s->cap  = need;
-    }
 
     if (n->agc_out) {
-        /* AGC path: keep NV12 exactly as the decoder laid it out — Y then the
-         * interleaved UV plane, contiguous, one flat copy. pp_agc_present_nv12
-         * samples it directly (no CPU touch of the pixels). */
-        const size_t uv_sz = (size_t)cw * ((codeh + 1u) / 2u);
-        memcpy(s->data, out->buffer, y_sz + uv_sz);
+        /* AGC path: the decoder already laid out contiguous NV12 (Y then the
+         * interleaved UV plane) in the frame-pool slot it just wrote. Borrow
+         * that pointer instead of copying it into an owned buffer - the reorder
+         * window (<= RO_SLOTS frames) is far shorter than the FRAME_POOL_SLOTS
+         * cycle before the decoder reuses the slot, so it stays valid until the
+         * present consumes it. Saves ~62 MiB of heap (RO_SLOTS owned frames)
+         * and a ~12 MiB/frame memcpy - both matter at 4K under the fake-signed
+         * flexible-memory ceiling, especially alongside pp_agc's staging. */
+        s->data     = (uint8_t *)out->buffer;
+        s->borrowed = 1;
         s->nv12     = 1;
         s->y_stride = cw;
         s->c_stride = cw;              /* NV12: chroma row pitch == luma pitch */
         s->u_off    = y_sz;
         s->v_off    = y_sz;
     } else {
+        if (s->borrowed) { s->data = NULL; s->cap = 0; s->borrowed = 0; }
+        if (s->cap < need) {
+            uint8_t *g = (uint8_t *)realloc(s->data, need);
+            if (!g)
+                return;
+            s->data = g;
+            s->cap  = need;
+        }
         /* Y: verbatim */
         memcpy(s->data, out->buffer, y_sz);
 
@@ -791,7 +800,8 @@ void evo_vdec_native_close(evo_vdec_native *v)
     if (v->filt_pkt)
         av_packet_free(&v->filt_pkt);
     for (int i = 0; i < RO_SLOTS; i++)
-        free(v->ro[i].data);
+        if (!v->ro[i].borrowed)
+            free(v->ro[i].data);
     free(v);
 }
 
