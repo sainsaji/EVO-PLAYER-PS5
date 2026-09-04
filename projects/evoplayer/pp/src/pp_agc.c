@@ -566,11 +566,16 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
         float sc = ovl_scale ? (float)ovl_scale : 1.f;
         size_t ovl_y_bytes  = (size_t)ovl_w * ovl_h;
         size_t ovl_uv_bytes = (size_t)ovl_w * ((ovl_h + 1u) / 2u);
+        /* Inset the overlay 1 output px on every side: the bilinear sampler
+         * would otherwise reach an out-of-bounds texel at u/v == 1 (the surface
+         * is up to `sc`x upscaled), which shows as a flickering white edge
+         * line. The outer 1px shows the video quad instead (correct content). */
+        float vw = ovl_w * sc - 2.f, vh_ = ovl_h * sc - 2.f;
         const agc_register_t state[11] = {
-            { 0x10f, 0, float_bits(ovl_w * sc * .5f) },
-            { 0x110, 0, float_bits(ovl_x + ovl_w * sc * .5f) },
-            { 0x111, 0, float_bits(ovl_h * sc * -.5f) },
-            { 0x112, 0, float_bits(ovl_y + ovl_h * sc * .5f) },
+            { 0x10f, 0, float_bits(vw * .5f) },
+            { 0x110, 0, float_bits(ovl_x + 1.f + vw * .5f) },
+            { 0x111, 0, float_bits(vh_ * -.5f) },
+            { 0x112, 0, float_bits(ovl_y + 1.f + vh_ * .5f) },
             { 0x113, 0, float_bits(1) },
             { 0x114, 0, 0 },
             { 0x105, 0, float_bits(ovl_alpha) },
