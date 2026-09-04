@@ -91,6 +91,8 @@ extern const uint8_t pp_agc_spvs_header_start[], pp_agc_spvs_header_end[];
 extern const uint8_t pp_agc_spvs_code_start[],   pp_agc_spvs_code_end[];
 extern const uint8_t pp_agc_spps_header_start[], pp_agc_spps_header_end[];
 extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
+extern const uint8_t pp_agc_blit_ps_header_start[], pp_agc_blit_ps_header_end[];
+extern const uint8_t pp_agc_blit_ps_code_start[],   pp_agc_blit_ps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
 /* #28 Phase 4: the GPU text-overlay 2nd pass in agc_render_geo.
@@ -141,6 +143,13 @@ extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
 #define OFF_UI_LINK_A    0x13000u
 #define OFF_UI_LINK_B    0x14000u
 #define OFF_UI_SPLICE_A  0x15000u   /* Phase 4 probe scratch: sp_mesh_{vs,ps} */
+/* #67 probe scratch: ripped blit_ps, paired with the already-created g_agc.vs
+ * (well clear of every offset above - highest in-use address is
+ * OFF_GEO_SH + 0x1000; SHADER_MEMORY_BYTES is 0xd0000, plenty of room). */
+#define OFF_BLIT_PS_HDR  0x30000u
+#define OFF_BLIT_PS_CODE 0x31000u
+#define OFF_BLIT_LINK_A  0x32000u
+#define OFF_BLIT_LINK_B  0x33000u
 
 /* #28 Phase 4 geometry path - permanent homes, clear of the video path's
  * 0x0..0xd000 and the probe scratch at 0xd000..0x19000. g_agc.mem is 0xd0000. */
@@ -848,6 +857,34 @@ int pp_agc_probe_ui_shaders(void)
         evo_boot_log_flush();
     }
 
+    /* #67: blit_ps - a REAL compiler-emitted textured PS this time (ripped,
+     * not hand-written), paired with g_agc.vs (the already-created,
+     * hardware-proven fullscreen-quad VS from pp_agc_init - not re-created
+     * here). If this creates+links where every hand-written textured PS
+     * above failed 0x8a6c001f, it's the #67 fix: composite the RmlUi text/
+     * icon surface onto the GPU solids via this shader instead of abusing
+     * the NV12 path. */
+    if (g_agc.vs &&
+        copy_asset(m + OFF_BLIT_PS_HDR,  0x1000, pp_agc_blit_ps_header_start, pp_agc_blit_ps_header_end) == 0 &&
+        copy_asset(m + OFF_BLIT_PS_CODE, 0x1000, pp_agc_blit_ps_code_start,   pp_agc_blit_ps_code_end)   == 0) {
+        void *ps_blit = 0;
+        int32_t c_blit = sceAgcCreateShader(&ps_blit, m + OFF_BLIT_PS_HDR, m + OFF_BLIT_PS_CODE);
+        evo_boot_log("pp_agc UI: CreateShader blit_ps=0x%08x  (ps=%p)",
+                     (unsigned)c_blit, ps_blit);
+        if (c_blit == 0) {
+            /* TriangleStrip (6), matching g_agc.vs's real topology - not the
+             * TriList (4) the hand-written UI probes above use. */
+            int32_t l = sceAgcLinkShaders(m + OFF_BLIT_LINK_A, m + OFF_BLIT_LINK_B, 0,
+                                          g_agc.vs, ps_blit, 6);
+            evo_boot_log("pp_agc UI: LinkShaders geometry_vs+blit_ps (TriStrip) = 0x%08x",
+                         (unsigned)l);
+        }
+        evo_boot_log_flush();
+    } else {
+        evo_boot_log("pp_agc UI: blit_ps probe skipped (g_agc.vs=%p)", g_agc.vs);
+        evo_boot_log_flush();
+    }
+
     /*
      * Hardware result (2026-09-04, four --agc-probe runs): ui_vs + solid_ps
      * create + link (TriList) clean. Every textured PS - image_sample OR typed
@@ -858,6 +895,8 @@ int pp_agc_probe_ui_shaders(void)
      * NV12/P010 shaders. => the solid GPU path is hand-writable; textured UI
      * (text, icons, art) needs a compiler that emits header+code+sl00 as a
      * matched set (GLSL -> SPIR-V -> AMD ISA; agc-implementation.md §7).
+     * blit_ps result: see the CreateShader/LinkShaders log lines just above -
+     * update this comment once a real hardware run reports back.
      */
     evo_boot_log("pp_agc UI: probe done (no state changed)");
     evo_boot_log_flush();
