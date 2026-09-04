@@ -1275,13 +1275,15 @@ int pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
     uint8_t *y  = nv;
     uint8_t *uv = nv + (size_t)w * h;
 
+    /* BT.709 full-range, coeffs *256 (sum to 256), +128 rounding. Must
+     * round-trip against the sceAgc shader's YUV->RGB (pixel_constants). */
     for (uint32_t r = 0; r < h; r++) {
         const uint32_t *sr = bgra + (size_t)r * w;
         uint8_t *yr = y + (size_t)r * w;
         for (uint32_t c = 0; c < w; c++) {
             uint32_t px = sr[c];
             int R = (int)(px & 0xff), G = (int)((px >> 8) & 0xff), B = (int)((px >> 16) & 0xff);
-            int Y = (54 * R + 183 * G + 18 * B) >> 8;
+            int Y = (54 * R + 183 * G + 19 * B + 128) >> 8;   /* .2126/.7152/.0722 */
             yr[c] = (uint8_t)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
         }
     }
@@ -1296,8 +1298,8 @@ int pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
                      (int)((p2 >> 8) & 0xff) + (int)((p3 >> 8) & 0xff)) >> 2;
             int Bb = ((int)((p0 >> 16) & 0xff) + (int)((p1 >> 16) & 0xff) +
                       (int)((p2 >> 16) & 0xff) + (int)((p3 >> 16) & 0xff)) >> 2;
-            int Cb = ((-29 * R - 99 * G + 128 * Bb) >> 8) + 128;
-            int Cr = ((128 * R - 116 * G - 12 * Bb) >> 8) + 128;
+            int Cb = ((-29 * R - 99 * G + 128 * Bb + 128) >> 8) + 128;   /* -.1146/-.3854/.5 */
+            int Cr = ((128 * R - 116 * G - 12 * Bb + 128) >> 8) + 128;   /* .5/-.4542/-.0458 */
             ur[c]     = (uint8_t)(Cb < 0 ? 0 : Cb > 255 ? 255 : Cb);
             ur[c + 1] = (uint8_t)(Cr < 0 ? 0 : Cr > 255 ? 255 : Cr);
         }

@@ -84,9 +84,9 @@ void pp_agc_osd_publish(const uint32_t *bgra, int active)
             int pr = (int)(px & 0xff);          /* premultiplied R,G,B */
             int pg = (int)((px >> 8) & 0xff);
             int pb = (int)((px >> 16) & 0xff);
-            yr[c]  = (int16_t)((54 * pr + 183 * pg + 18 * pb) >> FX);              /* .2126/.7152/.0722 */
-            cbr[c] = (int16_t)(((-29 * pr - 99 * pg + 128 * pb) >> FX) + 128 * a / 255);
-            crr[c] = (int16_t)(((128 * pr - 116 * pg - 12 * pb) >> FX) + 128 * a / 255);
+            yr[c]  = (int16_t)((54 * pr + 183 * pg + 19 * pb + 128) >> FX);        /* .2126/.7152/.0722 */
+            cbr[c] = (int16_t)(((-29 * pr - 99 * pg + 128 * pb + 128) >> FX) + 128 * a / 255);
+            crr[c] = (int16_t)(((128 * pr - 116 * pg - 12 * pb + 128) >> FX) + 128 * a / 255);
         }
         if (any) { if (r < r0) r0 = r; r1 = r + 1; }
     }
