@@ -91,6 +91,20 @@ extern const uint8_t pp_agc_spps_header_start[], pp_agc_spps_header_end[];
 extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
+/* #28 Phase 4: the GPU text-overlay 2nd pass in agc_render_geo.
+ * DEFAULT 0 - compiling the pass body into agc_render_geo crashes EVO at LOAD
+ * on hardware (2026-09-04), even though the code never executes without the
+ * /mnt/usb0/evo_agc_geo_text hook. Bisected to: any of the pass's CPU-side
+ * setup (fopen + shader-header reads + register memcpys + the NADD block) is
+ * enough to brick boot. It is NOT a logic bug (the path is unreachable) - it's
+ * toolchain/loader-level (native_app_builder ELF->eboot, or -fdata-sections
+ * section handling, or a function-size threshold). Needs a separate
+ * investigation: try the pass in its own .c file, or diff the eboot segment
+ * table. Build with -DPP_AGC_GEO_TEXT=1 only for that. */
+#ifndef PP_AGC_GEO_TEXT
+#define PP_AGC_GEO_TEXT 0
+#endif
+
 #define SHADER_MEMORY_BYTES  0x0d0000u
 #define SHADER_STATIC_BYTES  0x10000u        /* flushed before every submit    */
 #define DIRECT_MEMORY_TYPE   12
@@ -1123,6 +1137,7 @@ static int agc_render_geo(int video, int buffer_index, void *target,
      *     NOTE: this pass crashed EVO at boot on 2026-09-04 for reasons never
      *     pinned; kept behind the runtime hook + all-local scratch so the
      *     default geo build is byte-safe. Bisect plan in docs/evo-pro/status.md. --- */
+#if PP_AGC_GEO_TEXT   /* bisect: body compiled out; see docs/evo-pro/status.md */
     {
         static int want_text = -1;
         if (want_text < 0) {
@@ -1202,6 +1217,9 @@ static int agc_render_geo(int video, int buffer_index, void *target,
             }
         }
     }
+#else
+    (void)text_nv12; (void)text_w; (void)text_h;
+#endif
 
     sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
 
@@ -1209,8 +1227,16 @@ static int agc_render_geo(int video, int buffer_index, void *target,
     submit.word_count = (uint32_t)(command.up - words);
     *word_count = submit.word_count;
     /* CPU-write-back scratch the GPU reads: cx / cb / dcb / sh + the persisted
-     * mesh link block. Vertex + index staging is flushed by the caller. */
+     * mesh link block. Vertex + index staging is flushed by the caller.
+     * With the text pass compiled in, also cover the NV12 link block at
+     * OFF_LINK_A/B (safe here - post-boot, on the worker; agc_render_frame
+     * flushes the same region every video frame. Doing it in agc_geo_init,
+     * right after sceAgcLinkShaders, crashed EVO at boot). */
+#if PP_AGC_GEO_TEXT
+    flush_gpu_data(memory + OFF_LINK_A, (OFF_GEO_SH + 0x1000u) - OFF_LINK_A);
+#else
     flush_gpu_data(memory + OFF_MESH_LINK_CX, (OFF_GEO_SH + 0x1000u) - OFF_MESH_LINK_CX);
+#endif
 
     geo_dbg("G4 DCB built (%u words) -> SubmitDcb", submit.word_count);
     {
@@ -1326,10 +1352,6 @@ static void agc_geo_init(void)
         return;
     }
     flush_gpu_data(m + OFF_MESH_VS_HDR, (OFF_MESH_LINK_UC + 0x1000u) - OFF_MESH_VS_HDR);
-    /* the NV12 link block (OFF_LINK_A/B, written by pp_agc_init's LinkShaders)
-     * is only otherwise flushed by agc_render_frame - the geo text pass reads it
-     * even when no video ever plays, so flush it once here. */
-    flush_gpu_data(m + OFF_LINK_A, (OFF_LINK_B + 0x1000u) - OFF_LINK_A);
     g_agc.geo_stage_start = -1;
 
     pthread_mutex_init(&g_geo_submit.lock, NULL);
@@ -1447,6 +1469,7 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
      * Best-effort: a failure just drops the text layer, never the frame. */
     const uint8_t *text_stage = 0;
     uint32_t tw = 0, th = 0;
+#if PP_AGC_GEO_TEXT
     if (text_bgra && text_w >= 2 && text_h >= 2 && !(text_w & 1u) && !(text_h & 1u)) {
         size_t tneed = (size_t)text_w * text_h + (size_t)text_w * (text_h / 2u);
         if (agc_ovl_staging_ensure(tneed) == 0) {
@@ -1456,6 +1479,9 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
             text_stage = ts; tw = text_w; th = text_h;
         }
     }
+#else
+    (void)text_bgra;
+#endif
     if (fg) t_agc_armed = 0;
 
     struct timespec mono_start, deadline;
