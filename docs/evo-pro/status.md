@@ -25,7 +25,64 @@
 > | 1 — overlay quad in `agc_render_frame` (ProsperoLight `draw_overlay`) | **hw-verified** — test bar over GTA 4K, `render_frame rc=0`, 196-word DCB, ~1 ms, no wedge | `/mnt/usb0/evo_agc_test_overlay` |
 > | 2 — player OSD composited over 4K (`pp_agc_osd`, `pp_agc_present_nv12_overlay`) | **HW-VERIFIED, WORKS.** YUV-space premultiplied blend (~1-2 ms/frame), double-buffered publish (no flicker), held-frame snapshot keeps OSD+frame on screen through a seek (`agc_present_held_osd`), 1 px overlay inset (no edge line). "Buttery smooth" over GTA 4K. RGB↔YUV coeffs fixed (were ~0.4% dark). #32's 1080-drop still used for the *committed*-seek settle. | `/mnt/usb0/evo_agc_osd` |
 > | 3 — GPU menu present (`pp_agc_present_ui`, linear 1080 VO) | **HW-VERIFIED but SHELVED — net negative.** Renders fine, no artifacts, but adds a full-frame BGRA→NV12 convert (~4 ms) to an already-CPU-bound menu → held-scroll 30→16 fps. Doesn't touch the real bottleneck (RmlUi raster). Code stays hook-gated + off; keep for a future Phase-4 linear-menu-VO need. | `/mnt/usb0/evo_agc_ui` (leave unset) |
-> | 4 — held-scroll: GPU *geometry* (`evo_rmlui_render_agc.cpp`) | **UNBLOCKED (2026-09-04).** Held-scroll cost is the coverage rasteriser on rounded rects + gradients = SOLID vertex-coloured geometry (text is already fast on the CPU blitter). SharpProspero's compiler-generated `mesh_vs.sb`/`mesh_ps.sb` (`.shader_header` + `.shader_text` extracted to `pp/blobs/sp_mesh_*`) **CreateShader + LinkShaders(TriList) clean on hardware** — real PSSL-compiler headers, self-contained (no `sl00` trailer). `mesh_vs` reads `{float3 pos; float3 normal; float2 uv; uint color}` at register t0 = the RmlUi geometry shape. Remaining: transcribe SharpProspero `Renderer3D.DrawMesh` DCB register model (hardware iteration), `evo_rmlui_render_agc.cpp` emitting solid draws, composite solid-GPU + text-CPU layers. Textured still needs `sl00`/header RE but now on the clean SharpProspero header format. | — |
+> | 4 — held-scroll: GPU *geometry* (`evo_rmlui_render_agc.cpp`) | **SOLIDS PATH HW-VERIFIED WORKING 2026-09-04** (`feat/28-gpu-ui`, committed). The GPU draws the RmlUi solid stream (boxes, gradients, rounded-corner backgrounds, borders) through SharpProspero's `sp_mesh_{vs,ps}`: `agc_geo_init` (CreateShader + LinkShaders(4) = 0x0 on HW) + `agc_render_geo` (DCB from `Graphics/Renderer3D.cs` DrawMesh — RT block byte-identical to `agc_render_frame`, AgcViewport, blend `0x1e0=0x65010501`, ortho MVP, persisted 34-reg link, `AgcBufferDescriptor` Constant/Structured → VS user data, one `DrawIndex(sub-range addr)` + inline-`SetCxRegisterDirect` scissor per batch) + watchdog'd `agc_geo_worker` + per-VO-buf vtx/idx slab. `EvoAgcGeoSink` (`evo_rmlui_render_agc.{h,cpp}`, NOT an Rml::RenderInterface — RmlUi 6 can't swap) fed by `EvoRenderInterface::SetAgcSink` diverting untextured/untransformed/unclipped batches. `EvoRmlApp::AgcGeo{Active,Present}` + bridge + `main.c`. On HW: correct layout + rounded corners, `agc_render_geo rc=0x0` every frame, watchdog never trips, navigable. **Colour fixed** from the real shader source (`Shaders/mesh_{vs,ps}.pssl`): `mesh_vs` unpacks colour as ARGB (fed RGBA → R/B swap); `mesh_ps` does `colour*(0.25+0.75·N·L)` → vertex normal set to `(-0.4,1,0.6)` so N·L=1 = passthrough. **Text/icons still CPU, NOT yet composited over the GPU solids** — the additive-NV12 2nd-pass attempt crashed EVO at boot every time and was reverted; needs offline debug. | `/mnt/usb0/evo_agc_ui` |
+>
+> **#28 Phase 4 text-pass — BLOCKED at the toolchain level (bisected on HW 2026-09-04).**
+> Compiling the additive-NV12 2nd pass into `agc_render_geo` crashes EVO at
+> *load*, before any log — **even though the code is unreachable** without
+> `/mnt/usb0/evo_agc_geo_text`. Bisected:
+> - 16-arg `pp_agc_present_geo` + `g_geo_submit` fields + all plumbing, pass
+>   body `#if 0` → **boots**.
+> - pass body compiled in (`#if 1`), never executed → **crashes at load**.
+>   Even just its CPU-setup half (fopen + `*(void**)(g_agc.vs+24)` header reads
+>   + `memcpy` + the `NADD` viewport block) → **crashes**.
+> => not logic (path unreachable). native_app_builder ELF→eboot conversion, or
+> `-ffunction-sections`/`-fdata-sections`, or an `agc_render_geo` size threshold.
+> `396a8ef`: `PP_AGC_GEO_TEXT` defaults 0 — pass compiled out, default build =
+> the hw-verified solids path. **Next (not line-bisecting):** (a) move the pass
+> to its own `pp_agc_geo_text.c`; if a separate-TU fn compiled-but-uncalled also
+> bricks load → `readelf -l` diff the eboot between a booting vs crashing build,
+> check segment count/sizes vs any native_app_builder limit. (b) try
+> `-DPP_AGC_GEO_TEXT=1` with `-fno-function-sections -fno-data-sections` on
+> pp_agc.o only. Archived builds for A/B in `output/app/archive/`.
+>
+> **✅ 2026-09-04 evening — `feat/28-gpu-ui` UN-BOOTABLE bug FIXED (#71 closed, `df7cbf2`).**
+> Every build off `93ce6ec` had SIGSEGV'd at LOAD (CE-108255-1, "before KStuff
+> pause", no log). `tools/klog.sh` capture during a launch gave the fault:
+> `_start → _init → _GLOBAL__I_000100` (libc++ `<iostream>`) `→ ios_base::Init::Init()
+> → std::locale::locale() → read [null+0x48] → signal 11`. libc++'s `<iostream>`
+> emits a priority-100 static init that builds the global locale; in the native-app
+> CRT's `_init()` `__init_array` walk it derefs null. **Layout-sensitive** —
+> `9f1a88a` survived by luck; `93ce6ec`'s bigger `.text` shifted addresses and it
+> faulted every launch. Bisect ruled out PRX imports (`9f1a88a` + `93ce6ec`'s full
+> 17-sym `libSceAgc.syms` booted) and the toolchain (3wk stale). Fix: dropped
+> `<iostream>` from `evo_rmlui_app.cpp` + `evo_rmlui_system.cpp` (debug prints →
+> `fprintf(stderr,…)`; the sandbox has no stdout). **Rule: never `#include
+> <iostream>` in the app module.**
+>
+> Also fixed en route (`1cd070e`): `sceAgcDcbDrawIndexOffset` dead PRX import +
+> `package-app.sh` now FAILS on any `.syms` symbol no object imports.
+>
+> **GPU geometry path HW-VERIFIED (`aa5996b`, `evo_agc_ui`):** `agc_render_geo
+> rc=0x0`, 38 batches, no wedge. Renders the RmlUi solid stream (hero/tiles/rows/
+> rail/pills) with the #68 radii. **Solids-only** without the text pass.
+>
+> **#67 (text over GPU solids) — 2nd-pass approach WORKS on HW (`--geo-text` /
+> `PP_AGC_GEO_TEXT=1` / `evo_agc_geo_text`).** `Gt text pass`, DCB 663→723 words,
+> `rc=0x0`. Settings screen shows text+icons+pills over the GPU solids. **Bug:
+> colours wash out** — the pass blends additively (NV12 has no alpha), correct
+> only if `m_surface` is pure black off the glyphs; some solids leak into
+> `m_surface` AND draw on GPU → double-exposed. Next: audit `RenderCachedScreen`
+> geo path + `RenderGeometry` sink rules (clipped solids → sink w/ GPU scissor;
+> `m_surface` = text/icons-on-transparent only).
+>
+> **#68 first pass committed (`aa5996b`):** RCSS corner radii (12 stylesheets) +
+> `EvoAgcGeoSink::Add` folds RmlUi transforms into vertex positions (focus
+> `scale()` stays on the geo path). MSAA → **#69**, SDF AA/shadow shaders → **#70**.
+>
+> **`EVO vdec native: Decode FAIL rc=0x811d0303`** seen 2026-09-04 — resident 4K
+> decoder not coming up this session. Separate from UI; `play <4K H.264>` check
+> needed next session.
 >
 > **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
 > then KP — likely the OSD build left the app slot dirty + ShadowMount

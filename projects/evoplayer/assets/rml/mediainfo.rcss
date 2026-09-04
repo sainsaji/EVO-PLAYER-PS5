@@ -37,7 +37,7 @@ div, span, p {
     background-color: #0b101afc;
     border-width: 1px;
     border-color: #1e293b;
-    border-radius: 16px;
+    border-radius: 24px;
     padding: 38px 48px;
     display: flex;
     flex-direction: column;
@@ -112,7 +112,7 @@ div, span, p {
     background-color: #152033;
     border-width: 1px;
     border-color: #293d5c;
-    border-radius: 6px;
+    border-radius: 10px;
     padding: 6px 14px;
     font-size: 12px;
     font-weight: bold;
@@ -145,7 +145,7 @@ div, span, p {
     background-color: #0f1726d8;
     border-width: 1px;
     border-color: #1c283d;
-    border-radius: 12px;
+    border-radius: 16px;
     padding: 20px 24px;
     display: flex;
     flex-direction: column;

@@ -89,7 +89,7 @@ div, span, p {
     font-weight: bold;
     font-size: 13px;
     padding: 4px 10px;
-    border-radius: 4px;
+    border-radius: 9px;
     letter-spacing: 0.5px;
 }
 
@@ -100,7 +100,7 @@ div, span, p {
     font-weight: bold;
     font-size: 13px;
     padding: 4px 10px;
-    border-radius: 4px;
+    border-radius: 9px;
     letter-spacing: 0.5px;
 }
 
@@ -113,7 +113,7 @@ div, span, p {
     font-weight: bold;
     font-size: 13px;
     padding: 4px 10px;
-    border-radius: 4px;
+    border-radius: 9px;
 }
 
 .badge-fps {
@@ -125,7 +125,7 @@ div, span, p {
     font-weight: bold;
     font-size: 13px;
     padding: 4px 10px;
-    border-radius: 4px;
+    border-radius: 9px;
 }
 
 /* Center Scrubbing & Pause Overlay */
@@ -172,7 +172,7 @@ div, span, p {
     background-color: #0070d1e6;
     border-width: 1px;
     border-color: #38bdf8;
-    border-radius: 6px;
+    border-radius: 12px;
     padding: 10px 26px;
     flex-direction: row;
     align-items: center;
@@ -196,7 +196,7 @@ div, span, p {
     background-color: #080c14f0;
     border-width: 1px;
     border-color: #1e2838;
-    border-radius: 8px;
+    border-radius: 14px;
     padding: 16px 20px;
     flex-direction: column;
     gap: 8px;
@@ -351,7 +351,7 @@ div, span, p {
     border-width: 1px;
     border-color: #2e3e5c;
     padding: 2px 7px;
-    border-radius: 4px;
+    border-radius: 7px;
     font-size: 11px;
     font-weight: bold;
     color: #00d2ff;

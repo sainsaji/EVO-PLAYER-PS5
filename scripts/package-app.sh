@@ -32,6 +32,7 @@ AVPLAYER_PROBE=0
 VIDEODEC2_PROBE=0
 FFPFSC=0
 USB_REMOTE=0
+GEO_TEXT=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -42,6 +43,7 @@ while (( $# )); do
         --videodec2-probe) VIDEODEC2_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
+        --geo-text)     GEO_TEXT=1 ;;     # #28/#67: compile the GPU text 2nd-pass into agc_render_geo
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -56,6 +58,7 @@ if ! in_container; then
     (( VIDEODEC2_PROBE )) && FWD+=(--videodec2-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
+    (( GEO_TEXT ))     && FWD+=(--geo-text)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -255,6 +258,11 @@ else
     # /mnt/usb0/evo_vdec.log append in evo_vdec_native.c's note(). Off by
     # default so a release eboot never touches the user's USB stick per frame.
     (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1 -DEVO_VDEC_LOG=1"
+    # --geo-text (#28/#67): compile the GPU text/icon 2nd-pass into agc_render_geo.
+    # Was default-off after a load crash bisected to "agc_render_geo size" - that
+    # turned out to be the <iostream> static-init crash (#71, fixed df7cbf2), so
+    # this is worth re-testing. Still runtime-gated by /mnt/usb0/evo_agc_geo_text.
+    (( GEO_TEXT )) && APP_DEFS+=" -DPP_AGC_GEO_TEXT=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
@@ -353,17 +361,53 @@ fi
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"
     mkdir -p "${BUILD}/stubs"
+
+    # Every name in a .syms becomes a POSITIONAL (unconditional DT_NEEDED) import
+    # from <module>.prx. If nothing in the objects actually references it, it is a
+    # dead import: the loader still has to bind its NID on the console, and if that
+    # NID is absent from the firmware's .sprx it REJECTS THE WHOLE MODULE -> the
+    # app "crashes" before main() with CE-108255-1 and no log. This cost a full
+    # session once (sceAgcDcbDrawIndexOffset, #28). Refuse to build a stub that
+    # carries a symbol no object imports; annotate a deliberate one with
+    # `# keep: <reason>` on its line.
+    OBJ_UNDEF="${BUILD}/obj-undef.txt"
+    : > "${OBJ_UNDEF}"
+    for o in "${OBJS[@]}" "${LIBC_EXT_O}" "${MALLOC_SHIM_O}"; do
+        [[ -n "${o}" && -f "${o}" ]] && llvm-nm -u "${o}" 2>/dev/null \
+            | grep -oE '\bsce[A-Za-z0-9_]+' >> "${OBJ_UNDEF}" || true
+    done
+    sort -u -o "${OBJ_UNDEF}" "${OBJ_UNDEF}"
+
+    dead_total=0
     for base in "${PRX_STUB_WANT[@]}"; do
         syms="${PRX_STUB_SRC}/${base}.syms"
         need_file "${syms}" "missing PRX stub symbol list: ${base}.syms"
         so="${BUILD}/stubs/${base}.so"
         csrc="${BUILD}/stubs/${base}.c"
         grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
+
+        # dead-import guard (skip lines annotated `# keep:` and, for a probe-only
+        # module, when its probe is off - its objects are not in this build)
+        probe_only=0
+        [[ "${base}" == libSceAvPlayer ]] && (( ! AVPLAYER_PROBE )) && probe_only=1
+        if (( ! probe_only )); then
+            while read -r sym rest; do
+                [[ "${rest}" == *"# keep:"* ]] && continue
+                grep -qxF "${sym}" "${OBJ_UNDEF}" && continue
+                warn "PRX stub ${base}.syms: '${sym}' is not imported by any object"
+                echo "       -> a dead positional import; if its NID is absent on"
+                echo "          firmware the loader rejects the module at load."
+                echo "          Remove it, or annotate the line with '# keep: <why>'."
+                dead_total=$((dead_total + 1))
+            done < <(grep -vE '^\s*(#|$)' "${syms}")
+        fi
+
         "${TCC}" -shared -nostdlib -nodefaultlibs -fPIC \
             -Wl,-soname,"${base}.sprx" -o "${so}" "${csrc}"
         PRX_STUB_SOS+=("${so}")
         printf '     %-22s %s syms\n' "${base}.sprx" "$(wc -l < "${csrc}")"
     done
+    (( dead_total )) && die "${dead_total} dead PRX import(s) - see above (would brick the app at load)"
     ok "built ${#PRX_STUB_SOS[@]} PRX import stubs"
 fi
 

@@ -1,12 +1,17 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
-#include <iostream>
+#include <cstdio>
 #include <vector>
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
 #include <chrono>
+
+/* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
+ * crashes at load in the app module's custom CRT _init() pass, layout-
+ * sensitively - #71. These diagnostics go to stderr (klog) via C stdio. */
 
 #ifdef EVO_RML_PROFILE
 #define EVO_PROF_CTX_RENDER() do {                                      \
@@ -103,6 +108,32 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     bool screen_changed = (screen_id != m_cached_screen);
 
+    /*
+     * #28 Phase 4: GPU geometry mode. Re-render every frame (the CPU only
+     * rasterises text/icons now - the expensive rounded-rect/gradient coverage
+     * is diverted to m_agc_geo for the GPU), leave the CPU text layer in
+     * m_surface / the caller's buffer as the geo-present fallback, and flag the
+     * batch for AgcGeoPresent. No surface cache here - the point is that the
+     * CPU cost is now small.
+     */
+    if (AgcGeoActive()) {
+        m_render->SetFramebuffer(m_surface.data());
+        m_render->SetDimensions(width, height);
+        std::fill(m_surface.begin(), m_surface.end(), 0x00000000u);
+        m_agc_geo.Begin(width, height);
+        m_render->SetAgcSink(&m_agc_geo);
+        EVO_PROF_CTX_RENDER();
+        m_render->SetAgcSink(nullptr);
+        m_frame_dirty = false;
+        m_cached_screen = screen_id;
+        m_agc_geo_pending = !m_agc_geo.Empty();
+        m_agc_geo_screen = screen_id;
+        if (framebuffer != m_surface.data())
+            std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+        return;
+    }
+    m_agc_geo_pending = false;
+
     if (m_frame_dirty || screen_changed || resized) {
         m_render->SetFramebuffer(m_surface.data());
         m_render->SetDimensions(width, height);
@@ -113,6 +144,35 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+}
+
+bool EvoRmlApp::AgcGeoActive() const
+{
+    return m_initialized && pp_agc_geo_available() && pp_agc_ui_ready();
+}
+
+int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target,
+                             int target_linear, unsigned out_w, unsigned out_h,
+                             long long flip_marker)
+{
+    if (!m_agc_geo_pending || m_agc_geo.Empty())
+        return 1;
+    m_agc_geo_pending = false;
+    /* m_surface = this frame's CPU text/icon layer (premultiplied, cleared to
+     * transparent in RenderCachedScreen before the diverted render). pp_agc.c
+     * only uses it when /mnt/usb0/evo_agc_geo_text is set. */
+    const uint32_t* text = (m_surface_w == (int)out_w && m_surface_h == (int)out_h &&
+                            !m_surface.empty()) ? m_surface.data() : nullptr;
+    return pp_agc_present_geo(vout_handle, buf_idx, gpu_target, target_linear,
+                              m_agc_geo.Vertices().data(),
+                              (uint32_t)m_agc_geo.Vertices().size(),
+                              m_agc_geo.Indices().data(),
+                              (uint32_t)m_agc_geo.Indices().size(),
+                              m_agc_geo.Draws().data(),
+                              (uint32_t)m_agc_geo.Draws().size(),
+                              out_w, out_h,
+                              text, text ? (uint32_t)out_w : 0u, text ? (uint32_t)out_h : 0u,
+                              flip_marker);
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {
@@ -133,7 +193,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
     Rml::SetRenderInterface(m_render.get());
 
     if (!Rml::Initialise()) {
-        std::cerr << "[EVO RmlUi] Failed to initialise RmlUi core!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to initialise RmlUi core!\n");
         return false;
     }
 
@@ -155,14 +215,14 @@ bool EvoRmlApp::Initialize(int width, int height) {
             Rml::LoadFontFace(p + "Roboto-Regular.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Bold.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Medium.ttf", true);
-            std::cout << "[EVO RmlUi] Loaded font face from " << p << std::endl;
+            fprintf(stderr, "[EVO RmlUi] Loaded font face from %s\n", p.c_str());
             break;
         }
     }
 
     m_context = Rml::CreateContext("main_context", Rml::Vector2i(width, height));
     if (!m_context) {
-        std::cerr << "[EVO RmlUi] Failed to create RmlUi context!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to create RmlUi context!\n");
         Rml::Shutdown();
         return false;
     }
@@ -233,22 +293,22 @@ bool EvoRmlApp::Initialize(int width, int height) {
         }
     }
 
-    if (!m_launch_doc) std::cerr << "[EVO RmlUi] Failed to load launch.rml!" << std::endl;
-    if (!m_list_doc) std::cerr << "[EVO RmlUi] Failed to load list.rml!" << std::endl;
-    if (!m_browser_doc) std::cerr << "[EVO RmlUi] Failed to load browser.rml!" << std::endl;
-    if (!m_changelog_doc) std::cerr << "[EVO RmlUi] Failed to load changelog.rml!" << std::endl;
-    if (!m_reader_doc) std::cerr << "[EVO RmlUi] Failed to load reader.rml!" << std::endl;
-    if (!m_surround_doc) std::cerr << "[EVO RmlUi] Failed to load surround.rml!" << std::endl;
-    if (!m_playback_doc) std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
-    if (!m_dialog_doc) std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
-    if (!m_settings_doc) std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
-    if (!m_subtitles_doc) std::cerr << "[EVO RmlUi] Failed to load subtitles.rml!" << std::endl;
-    if (!m_mediainfo_doc) std::cerr << "[EVO RmlUi] Failed to load mediainfo.rml!" << std::endl;
-    if (!m_nav_doc) std::cerr << "[EVO RmlUi] Failed to load navbar.rml!" << std::endl;
+    if (!m_launch_doc) fprintf(stderr, "[EVO RmlUi] Failed to load launch.rml!\n");
+    if (!m_list_doc) fprintf(stderr, "[EVO RmlUi] Failed to load list.rml!\n");
+    if (!m_browser_doc) fprintf(stderr, "[EVO RmlUi] Failed to load browser.rml!\n");
+    if (!m_changelog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load changelog.rml!\n");
+    if (!m_reader_doc) fprintf(stderr, "[EVO RmlUi] Failed to load reader.rml!\n");
+    if (!m_surround_doc) fprintf(stderr, "[EVO RmlUi] Failed to load surround.rml!\n");
+    if (!m_playback_doc) fprintf(stderr, "[EVO RmlUi] Failed to load playback.rml!\n");
+    if (!m_dialog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load dialog.rml!\n");
+    if (!m_settings_doc) fprintf(stderr, "[EVO RmlUi] Failed to load settings.rml!\n");
+    if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
+    if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
+    if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
 
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Full Engine initialized successfully ("
-              << width << "x" << height << ")." << std::endl;
+    fprintf(stderr, "[EVO RmlUi] Retained-mode Full Engine initialized successfully (%dx%d).\n",
+            width, height);
     return true;
 }
 

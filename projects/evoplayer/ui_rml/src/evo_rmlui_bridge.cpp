@@ -404,5 +404,16 @@ void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
     EvoRmlApp::Instance().UpdateNavState(state);
 }
 
+int evo_rmlui_agc_geo_active(void) {
+    return EvoRmlApp::Instance().AgcGeoActive() ? 1 : 0;
+}
+
+int evo_rmlui_agc_geo_present(int vout_handle, uint32_t buf_idx, void* gpu_target,
+                              int target_linear, uint32_t out_w, uint32_t out_h,
+                              int64_t flip_marker) {
+    return EvoRmlApp::Instance().AgcGeoPresent(vout_handle, buf_idx, gpu_target,
+                                               target_linear, out_w, out_h, flip_marker);
+}
+
 } // extern "C"
 

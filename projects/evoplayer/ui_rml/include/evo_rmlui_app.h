@@ -6,6 +6,7 @@
 #include <utility>
 #include <unordered_map>
 #include "evo_rmlui_render.h"
+#include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_system.h"
 
 struct EvoPlaybackState {
@@ -499,6 +500,20 @@ public:
 
     bool IsInitialized() const { return m_initialized; }
 
+    /*
+     * #28 Phase 4: GPU geometry present. AgcGeoActive() is true when the mesh
+     * shaders are up (pp_agc_geo_available) and the opt-in hook is set
+     * (pp_agc_ui_ready). When active, RenderCachedScreen diverts the solid
+     * geometry stream into m_agc_geo during the cached render (text/icons stay
+     * on the CPU surface); main.c then calls AgcGeoPresent to submit that
+     * batch as one DCB. Returns the pp_agc_present_geo rc (0 ok / -1 fail /
+     * -2 watchdog), or 1 if there was nothing to present.
+     */
+    bool AgcGeoActive() const;
+    int  AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target,
+                       int target_linear, unsigned out_w, unsigned out_h,
+                       long long flip_marker);
+
 private:
     EvoRmlApp();
     ~EvoRmlApp();
@@ -653,5 +668,11 @@ private:
     int m_surface_h = 0;
     int m_cached_screen = -1;
     void RenderCachedScreen(int screen_id, uint32_t* framebuffer, int width, int height);
+
+    /* #28 Phase 4: solid-geometry batch collected during the last cached
+     * render, and whether it is waiting for AgcGeoPresent to submit it. */
+    EvoAgcGeoSink m_agc_geo;
+    bool m_agc_geo_pending = false;
+    int  m_agc_geo_screen = -1;
 };
 

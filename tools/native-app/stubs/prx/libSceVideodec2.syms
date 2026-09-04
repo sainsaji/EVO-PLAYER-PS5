@@ -7,7 +7,7 @@ sceVideodec2ReleaseComputeQueue
 sceVideodec2QueryDecoderMemoryInfo
 sceVideodec2CreateDecoder
 sceVideodec2DeleteDecoder
-sceVideodec2MapDirectMemory
+sceVideodec2MapDirectMemory   # keep: real 12.70 export, wired by #40 (direct-mem routing)
 sceVideodec2Reset
 sceVideodec2Decode
 sceVideodec2Flush

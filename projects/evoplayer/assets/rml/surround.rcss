@@ -97,7 +97,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     padding: 22px 26px;
     display: flex;
     flex-direction: column;
@@ -156,7 +156,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     margin-bottom: 8px;
     padding-left: 24px;
     padding-top: 12px;
@@ -197,7 +197,7 @@ div, span, p {
     background-color: #0c1526;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 24px;
+    border-radius: 28px;
     padding: 0;
     overflow: hidden;
 }
@@ -268,7 +268,7 @@ div, span, p {
     top: 324px;
     width: 130px;
     height: 66px;
-    border-radius: 14px;
+    border-radius: 18px;
     background-color: #16233aeb;
     border-width: 1px;
     border-color: #2a3b55aa;
@@ -300,7 +300,7 @@ div, span, p {
     position: absolute;
     width: 150px;
     height: 82px;
-    border-radius: 12px;
+    border-radius: 16px;
     border-width: 1px;
     display: flex;
     flex-direction: column;

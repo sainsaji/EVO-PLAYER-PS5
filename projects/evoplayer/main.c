@@ -13166,11 +13166,27 @@ skip_screen_input:
         (void)idx;
         if (!v8_presented && !v8_hold) {
             int ui_presented = 0;
+            /* #28 Phase 4: GPU geometry present - the solid geometry stream
+             * (rounded rects, gradients, borders) was diverted to the GPU sink
+             * during this frame's cached render; submit it as one DCB + flip.
+             * On rc == 1 (nothing batched) or rc == -1 (failed) fall through to
+             * the Phase 3 / CPU paths below. (opt-in: /mnt/usb0/evo_agc_ui) */
+            if (linear && evo_rmlui_agc_geo_active() && g_pp_vo_ready &&
+                pp_videoout_is_linear(&g_pp_vo)) {
+                void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
+                int64_t m = (int64_t)frame + 1;
+                int rc = evo_rmlui_agc_geo_present(g_pp_vo.handle, pp_buf_idx, plane, 1,
+                                                   g_vo_w, g_vo_h, m);
+                if (rc == 0 || rc == -2) {
+                    (void)pp_videoout_adopt_flip(&g_pp_vo, pp_buf_idx, (uint64_t)m);
+                    ui_presented = 1;
+                }
+            }
             /* #28 Phase 3: GPU menu present - convert the CPU-drawn menu buffer
              * to NV12 and present it as the fullscreen quad on the linear VO
              * (opt-in: /mnt/usb0/evo_agc_ui). The CPU tiler must not touch a
              * linear plane. */
-            if (linear && pp_agc_ui_ready() && g_pp_vo_ready &&
+            if (!ui_presented && linear && pp_agc_ui_ready() && g_pp_vo_ready &&
                 pp_videoout_is_linear(&g_pp_vo)) {
                 void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
                 int64_t m = (int64_t)frame + 1;

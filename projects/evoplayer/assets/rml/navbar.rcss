@@ -92,7 +92,7 @@ div, span {
 .rail-item {
     width: 84px;
     height: 50px;
-    border-radius: 10px;
+    border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -188,7 +188,7 @@ div, span {
 .rail-exp-item {
     width: 276px;
     height: 52px;
-    border-radius: 10px;
+    border-radius: 16px;
     display: flex;
     flex-direction: row;
     align-items: center;
