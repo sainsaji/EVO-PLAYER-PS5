@@ -46,36 +46,43 @@
 > `-DPP_AGC_GEO_TEXT=1` with `-fno-function-sections -fno-data-sections` on
 > pp_agc.o only. Archived builds for A/B in `output/app/archive/`.
 >
-> **⛔ `feat/28-gpu-ui` HEAD (`93ce6ec`..`6fe57ab`) IS UN-BOOTABLE — 2026-09-04 evening.**
-> Every player build off `93ce6ec` (`--ffpfsc` AND `--agc-probe`) dies at LOAD:
-> "Game or App Error" / **CE-108255-1**, *"App crashed before KStuff pause"*, no
-> `evo_boot.log`. Bisected on hardware this session:
-> - `ae38ece` (branch point) — **boots**
-> - `9f1a88a` (origin/refactor HEAD = `7d70ee0` merged, OSD Phase 1-2) — **boots**
-> - `9f1a88a` code + `93ce6ec`'s full 17-symbol `libSceAgc.syms` import list —
->   **boots** → the extra `sceAgcDcb*` positional PRX imports are NOT the cause.
-> - `93ce6ec` (adds `agc_render_geo`/`agc_geo_init`/`evo_rmlui_render_agc.cpp`) —
->   **crashes at load**, even a plain `--ffpfsc` build where every new line is
->   dead code that never runs.
-> Toolchain volume unchanged for 3 weeks — not environmental. Same `93ce6ec`
-> code booted earlier the same day (the `b0d0580` bisect: "text `#if 0` → BOOTS"),
-> **before** the mid-day `--agc-probe` KP + power-cycle. So: `93ce6ec`'s binary
-> (section layout, or a static ctor in the new `evo_rmlui_render_agc.cpp` TU)
-> interacts badly with the post-KP console/loader state. **Next: `tools/klog.sh`
-> capture DURING a launch of the crashing build for the fault address** — not
-> more blind bisects. Tracked in a GitHub bug.
+> **✅ 2026-09-04 evening — `feat/28-gpu-ui` UN-BOOTABLE bug FIXED (#71 closed, `df7cbf2`).**
+> Every build off `93ce6ec` had SIGSEGV'd at LOAD (CE-108255-1, "before KStuff
+> pause", no log). `tools/klog.sh` capture during a launch gave the fault:
+> `_start → _init → _GLOBAL__I_000100` (libc++ `<iostream>`) `→ ios_base::Init::Init()
+> → std::locale::locale() → read [null+0x48] → signal 11`. libc++'s `<iostream>`
+> emits a priority-100 static init that builds the global locale; in the native-app
+> CRT's `_init()` `__init_array` walk it derefs null. **Layout-sensitive** —
+> `9f1a88a` survived by luck; `93ce6ec`'s bigger `.text` shifted addresses and it
+> faulted every launch. Bisect ruled out PRX imports (`9f1a88a` + `93ce6ec`'s full
+> 17-sym `libSceAgc.syms` booted) and the toolchain (3wk stale). Fix: dropped
+> `<iostream>` from `evo_rmlui_app.cpp` + `evo_rmlui_system.cpp` (debug prints →
+> `fprintf(stderr,…)`; the sandbox has no stdout). **Rule: never `#include
+> <iostream>` in the app module.**
 >
-> One real fix landed regardless: `sceAgcDcbDrawIndexOffset` was in
-> `libSceAgc.syms` but never called (speculative). Removed, and `package-app.sh`
-> now FAILS the build on any `.syms` symbol no object imports (a dead positional
-> PRX import can't be caught at build time and bricks the app at load with zero
-> diagnostic — this class of bug has cost multiple sessions).
+> Also fixed en route (`1cd070e`): `sceAgcDcbDrawIndexOffset` dead PRX import +
+> `package-app.sh` now FAILS on any `.syms` symbol no object imports.
 >
-> **#68 (GPU UI fidelity) — NOT shipped.** First-pass code (RCSS corner radii +
-> `EvoAgcGeoSink` folding RmlUi transforms into vertex positions) is stashed on
-> `feat/28-gpu-ui` (`git stash`), blocked on the geo path booting. The RCSS-only
-> half was declined (CPU-only isn't the point of #68). MSAA → **#69**, SDF
-> AA/shadow pixel shaders → **#70**.
+> **GPU geometry path HW-VERIFIED (`aa5996b`, `evo_agc_ui`):** `agc_render_geo
+> rc=0x0`, 38 batches, no wedge. Renders the RmlUi solid stream (hero/tiles/rows/
+> rail/pills) with the #68 radii. **Solids-only** without the text pass.
+>
+> **#67 (text over GPU solids) — 2nd-pass approach WORKS on HW (`--geo-text` /
+> `PP_AGC_GEO_TEXT=1` / `evo_agc_geo_text`).** `Gt text pass`, DCB 663→723 words,
+> `rc=0x0`. Settings screen shows text+icons+pills over the GPU solids. **Bug:
+> colours wash out** — the pass blends additively (NV12 has no alpha), correct
+> only if `m_surface` is pure black off the glyphs; some solids leak into
+> `m_surface` AND draw on GPU → double-exposed. Next: audit `RenderCachedScreen`
+> geo path + `RenderGeometry` sink rules (clipped solids → sink w/ GPU scissor;
+> `m_surface` = text/icons-on-transparent only).
+>
+> **#68 first pass committed (`aa5996b`):** RCSS corner radii (12 stylesheets) +
+> `EvoAgcGeoSink::Add` folds RmlUi transforms into vertex positions (focus
+> `scale()` stays on the geo path). MSAA → **#69**, SDF AA/shadow shaders → **#70**.
+>
+> **`EVO vdec native: Decode FAIL rc=0x811d0303`** seen 2026-09-04 — resident 4K
+> decoder not coming up this session. Separate from UI; `play <4K H.264>` check
+> needed next session.
 >
 > **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
 > then KP — likely the OSD build left the app slot dirty + ShadowMount
