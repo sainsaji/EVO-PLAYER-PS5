@@ -11990,16 +11990,19 @@ int main(void) {
     evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
                              * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
                              * sceAgcInit must run first (#27). */
-#if defined(EVO_APP_MODULE) && defined(EVO_AGC_PROBE)
-    /* #27 GPU Step 2: arm the sceAgc NV12 present path. Gated behind
-     * --agc-probe (was unconditional). render_frame / pp_agc_present_nv12 is
-     * still unproven on hardware and it HANGS then crashes GTA VI 4K
-     * (2026-09-03): once armed, the native decoder emits NV12 and pp_playback's
-     * V8 branch routes it into pp_agc_present_nv12, whose GPU submit
-     * (sceAgcDriverSubmitDcb -> sceAgcSuspendPoint) never returns. Without this
-     * the V8 4K path uses the CPU converter (YUV420P, #31-proven). Under
-     * --agc-probe, evo_agc_probe() above already calls pp_agc_init; this call
-     * is the redundant idempotent one. MUST be pre-unjail (evo_vdec_probe). */
+#if defined(EVO_APP_MODULE)
+    /* #27 GPU Step 2: arm the sceAgc NV12 convert + present path. DEFAULT-ON
+     * as of 2026-09-04 - the 2026-09-03 submit hang was fixed in #27 (watchdog
+     * worker + linear VO attr + V8-gate reachability + AGC-death retile) and
+     * re-verified on hardware: GTA 4K decodes + GPU-presents 675 frames
+     * fatal=0, ~1 ms/frame, 0 drops. On any sceAgc init/link failure
+     * pp_agc_available() stays 0 and the V8 4K path falls back to the CPU
+     * converter (YUV420P, #31-proven); a mid-session AGC wedge/fault re-tiles
+     * the VO and resumes on the CPU path. The OSD-over-4K composite and the
+     * GPU menu geometry stay behind their own /mnt/usb0/evo_agc_* hooks.
+     * MUST be pre-unjail (like evo_vdec_probe - libSceAgc may go API-dead after
+     * the credential swap). Under --agc-probe, evo_agc_probe() above already
+     * ran this; the call is idempotent. */
     pp_agc_init(1920, 1080, 0);
     evo_boot_log_flush();
 #endif
