@@ -1,6 +1,10 @@
 #include "evo_rmlui_system.h"
 #include <chrono>
-#include <iostream>
+#include <cstdio>
+
+/* No <iostream>: on the app module its static init (ios_base::Init ->
+ * std::locale::locale()) crashes in the custom CRT's _init() pass, layout-
+ * sensitively (#71). stderr via C stdio has no C++ static-init dependency. */
 
 static auto g_start_time = std::chrono::steady_clock::now();
 
@@ -18,9 +22,9 @@ double EvoSystemInterface::GetElapsedTime() {
 
 bool EvoSystemInterface::LogMessage(Rml::Log::Type type, const Rml::String& message) {
     if (type == Rml::Log::LT_ERROR) {
-        std::cerr << "[RmlUi ERROR] " << message << std::endl;
+        fprintf(stderr, "[RmlUi ERROR] %s\n", message.c_str());
     } else if (type == Rml::Log::LT_WARNING) {
-        std::cerr << "[RmlUi WARN]  " << message << std::endl;
+        fprintf(stderr, "[RmlUi WARN]  %s\n", message.c_str());
     }
     return true;
 }

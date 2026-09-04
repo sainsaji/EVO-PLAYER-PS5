@@ -1,6 +1,6 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
-#include <iostream>
+#include <cstdio>
 #include <vector>
 #include <algorithm>
 #include <cstring>
@@ -8,6 +8,10 @@
 #include <iomanip>
 #include <cmath>
 #include <chrono>
+
+/* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
+ * crashes at load in the app module's custom CRT _init() pass, layout-
+ * sensitively - #71. These diagnostics go to stderr (klog) via C stdio. */
 
 #ifdef EVO_RML_PROFILE
 #define EVO_PROF_CTX_RENDER() do {                                      \
@@ -189,7 +193,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
     Rml::SetRenderInterface(m_render.get());
 
     if (!Rml::Initialise()) {
-        std::cerr << "[EVO RmlUi] Failed to initialise RmlUi core!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to initialise RmlUi core!\n");
         return false;
     }
 
@@ -211,14 +215,14 @@ bool EvoRmlApp::Initialize(int width, int height) {
             Rml::LoadFontFace(p + "Roboto-Regular.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Bold.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Medium.ttf", true);
-            std::cout << "[EVO RmlUi] Loaded font face from " << p << std::endl;
+            fprintf(stderr, "[EVO RmlUi] Loaded font face from %s\n", p.c_str());
             break;
         }
     }
 
     m_context = Rml::CreateContext("main_context", Rml::Vector2i(width, height));
     if (!m_context) {
-        std::cerr << "[EVO RmlUi] Failed to create RmlUi context!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to create RmlUi context!\n");
         Rml::Shutdown();
         return false;
     }
@@ -289,22 +293,22 @@ bool EvoRmlApp::Initialize(int width, int height) {
         }
     }
 
-    if (!m_launch_doc) std::cerr << "[EVO RmlUi] Failed to load launch.rml!" << std::endl;
-    if (!m_list_doc) std::cerr << "[EVO RmlUi] Failed to load list.rml!" << std::endl;
-    if (!m_browser_doc) std::cerr << "[EVO RmlUi] Failed to load browser.rml!" << std::endl;
-    if (!m_changelog_doc) std::cerr << "[EVO RmlUi] Failed to load changelog.rml!" << std::endl;
-    if (!m_reader_doc) std::cerr << "[EVO RmlUi] Failed to load reader.rml!" << std::endl;
-    if (!m_surround_doc) std::cerr << "[EVO RmlUi] Failed to load surround.rml!" << std::endl;
-    if (!m_playback_doc) std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
-    if (!m_dialog_doc) std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
-    if (!m_settings_doc) std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
-    if (!m_subtitles_doc) std::cerr << "[EVO RmlUi] Failed to load subtitles.rml!" << std::endl;
-    if (!m_mediainfo_doc) std::cerr << "[EVO RmlUi] Failed to load mediainfo.rml!" << std::endl;
-    if (!m_nav_doc) std::cerr << "[EVO RmlUi] Failed to load navbar.rml!" << std::endl;
+    if (!m_launch_doc) fprintf(stderr, "[EVO RmlUi] Failed to load launch.rml!\n");
+    if (!m_list_doc) fprintf(stderr, "[EVO RmlUi] Failed to load list.rml!\n");
+    if (!m_browser_doc) fprintf(stderr, "[EVO RmlUi] Failed to load browser.rml!\n");
+    if (!m_changelog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load changelog.rml!\n");
+    if (!m_reader_doc) fprintf(stderr, "[EVO RmlUi] Failed to load reader.rml!\n");
+    if (!m_surround_doc) fprintf(stderr, "[EVO RmlUi] Failed to load surround.rml!\n");
+    if (!m_playback_doc) fprintf(stderr, "[EVO RmlUi] Failed to load playback.rml!\n");
+    if (!m_dialog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load dialog.rml!\n");
+    if (!m_settings_doc) fprintf(stderr, "[EVO RmlUi] Failed to load settings.rml!\n");
+    if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
+    if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
+    if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
 
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Full Engine initialized successfully ("
-              << width << "x" << height << ")." << std::endl;
+    fprintf(stderr, "[EVO RmlUi] Retained-mode Full Engine initialized successfully (%dx%d).\n",
+            width, height);
     return true;
 }
 
