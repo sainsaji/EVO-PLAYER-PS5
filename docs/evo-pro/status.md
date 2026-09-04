@@ -46,6 +46,37 @@
 > `-DPP_AGC_GEO_TEXT=1` with `-fno-function-sections -fno-data-sections` on
 > pp_agc.o only. Archived builds for A/B in `output/app/archive/`.
 >
+> **⛔ `feat/28-gpu-ui` HEAD (`93ce6ec`..`6fe57ab`) IS UN-BOOTABLE — 2026-09-04 evening.**
+> Every player build off `93ce6ec` (`--ffpfsc` AND `--agc-probe`) dies at LOAD:
+> "Game or App Error" / **CE-108255-1**, *"App crashed before KStuff pause"*, no
+> `evo_boot.log`. Bisected on hardware this session:
+> - `ae38ece` (branch point) — **boots**
+> - `9f1a88a` (origin/refactor HEAD = `7d70ee0` merged, OSD Phase 1-2) — **boots**
+> - `9f1a88a` code + `93ce6ec`'s full 17-symbol `libSceAgc.syms` import list —
+>   **boots** → the extra `sceAgcDcb*` positional PRX imports are NOT the cause.
+> - `93ce6ec` (adds `agc_render_geo`/`agc_geo_init`/`evo_rmlui_render_agc.cpp`) —
+>   **crashes at load**, even a plain `--ffpfsc` build where every new line is
+>   dead code that never runs.
+> Toolchain volume unchanged for 3 weeks — not environmental. Same `93ce6ec`
+> code booted earlier the same day (the `b0d0580` bisect: "text `#if 0` → BOOTS"),
+> **before** the mid-day `--agc-probe` KP + power-cycle. So: `93ce6ec`'s binary
+> (section layout, or a static ctor in the new `evo_rmlui_render_agc.cpp` TU)
+> interacts badly with the post-KP console/loader state. **Next: `tools/klog.sh`
+> capture DURING a launch of the crashing build for the fault address** — not
+> more blind bisects. Tracked in a GitHub bug.
+>
+> One real fix landed regardless: `sceAgcDcbDrawIndexOffset` was in
+> `libSceAgc.syms` but never called (speculative). Removed, and `package-app.sh`
+> now FAILS the build on any `.syms` symbol no object imports (a dead positional
+> PRX import can't be caught at build time and bricks the app at load with zero
+> diagnostic — this class of bug has cost multiple sessions).
+>
+> **#68 (GPU UI fidelity) — NOT shipped.** First-pass code (RCSS corner radii +
+> `EvoAgcGeoSink` folding RmlUi transforms into vertex positions) is stashed on
+> `feat/28-gpu-ui` (`git stash`), blocked on the geo path booting. The RCSS-only
+> half was declined (CPU-only isn't the point of #68). MSAA → **#69**, SDF
+> AA/shadow pixel shaders → **#70**.
+>
 > **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
 > then KP — likely the OSD build left the app slot dirty + ShadowMount
 > auto-relaunch stacking). Every #28 GPU path is now behind its own

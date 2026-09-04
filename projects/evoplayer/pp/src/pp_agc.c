@@ -53,8 +53,10 @@ extern uint32_t *sceAgcDcbSetIndexBuffer(void *command, void *index_addr);
 extern uint32_t *sceAgcDcbSetIndexCount(void *command, uint32_t index_count);
 extern uint32_t *sceAgcDcbDrawIndex(void *command, uint32_t index_count, void *index_addr,
                                     uint64_t modifier);
-extern uint32_t *sceAgcDcbDrawIndexOffset(void *command, uint32_t index_offset,
-                                          uint32_t index_count, uint64_t modifier);
+/* sceAgcDcbDrawIndexOffset: NOT used - the geo path draws with sceAgcDcbDrawIndex
+ * and an explicit sub-range address. Do NOT add it to libSceAgc.syms: its NID
+ * does not resolve on 12.70 and a dead positional import bricks the app at load
+ * (CE-108255-1, #28 2026-09-04). */
 extern uint32_t *sceAgcDcbSetFlip(void *command, uint32_t handle, int buffer_index,
                                   uint32_t flip_mode, int64_t flip_argument);
 extern int32_t  sceAgcDriverSubmitDcb(void *description);
@@ -900,7 +902,7 @@ static struct {
 
 /* One presented UI frame. Transcribed from SharpProspero
  * Graphics/Renderer3D.cs DrawMesh(): render-target block + viewport + shader
- * linkage + constant/vertex descriptors, then one DrawIndexOffset per batch,
+ * linkage + constant/vertex descriptors, then one DrawIndex per batch,
  * then the flip - all in one DCB. The render-target block is byte-identical to
  * agc_render_frame's (k8_8_8_8 UNorm, kRenderTarget tiling), which is the layout
  * #27 proved against EVO's linear-attr VO plane. */
@@ -1080,7 +1082,7 @@ static int agc_render_geo(int video, int buffer_index, void *target,
         }
     }
 
-    /* --- one DrawIndexOffset per batch, re-writing the scissor between them.
+    /* --- one DrawIndex per batch, re-writing the scissor between them.
      *     The scissor regs go in as DIRECT (inline) packets - the value is
      *     copied into the DCB word stream, so there is no external register
      *     buffer whose lifetime has to outlast the GPU. (SetCxRegistersIndirect

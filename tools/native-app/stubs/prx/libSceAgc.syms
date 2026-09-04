@@ -2,6 +2,16 @@
 # Start = evo_agc_probe.c's kSyms (minus the two sceAgcDriver* ones).
 # Extend as pp_agc.c / evo_rmlui_render_agc.cpp need more (a link error names
 # the missing symbol). Full ABI: third_party/SharpProspero .../Interop/Agc/SceAgc.cs.
+#
+# EVERY name here becomes a POSITIONAL (unconditional DT_NEEDED) import from
+# libSceAgc.prx in the eboot. A name whose NID does not resolve on the console
+# firmware makes the dynamic loader REJECT the whole module -> "Game or App
+# Error" / CE-108255-1 before main(), no log ("crashed before KStuff pause").
+# So: add a symbol ONLY when an object actually imports it. `sceAgcDcbDrawIndexOffset`
+# was listed here speculatively in #28 (93ce6ec), never called (the geo path uses
+# sceAgcDcbDrawIndex), and its unresolved NID bricked every player build at load
+# for a whole session. package-app.sh now cross-checks this file against the
+# objects' undefined symbols and fails on a dead entry.
 sceAgcInit
 sceAgcGetRegisterDefaults
 sceAgcCreateShader
@@ -19,4 +29,3 @@ sceAgcDcbSetIndexSize
 sceAgcDcbSetIndexBuffer
 sceAgcDcbSetIndexCount
 sceAgcDcbDrawIndex
-sceAgcDcbDrawIndexOffset

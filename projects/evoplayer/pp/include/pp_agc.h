@@ -154,7 +154,7 @@ int  pp_agc_geo_available(void);
 
 /*
  * Present one UI frame as GPU geometry: an ortho projection of `vertices`
- * (pixel space, y-down, origin top-left) into `gpu_target`, one DrawIndexOffset
+ * (pixel space, y-down, origin top-left) into `gpu_target`, one DrawIndex
  * per entry in `draws`, alpha-over blended, then a flip queued in the same DCB.
  *
  *   vout_handle / buf_idx / gpu_target / flip_marker  - as pp_agc_present_nv12.
