@@ -24,7 +24,8 @@ void EvoAgcGeoSink::Add(const std::vector<Rml::Vertex>& verts,
                         const std::vector<int>& inds,
                         Rml::Vector2f translation,
                         bool scissor_enabled,
-                        Rml::Rectanglei scissor)
+                        Rml::Rectanglei scissor,
+                        const Rml::Matrix4f* transform)
 {
     if (verts.empty() || inds.empty())
         return;
@@ -32,11 +33,26 @@ void EvoAgcGeoSink::Add(const std::vector<Rml::Vertex>& verts,
     const uint32_t base = static_cast<uint32_t>(m_verts.size());
     const uint32_t first_index = static_cast<uint32_t>(m_indices.size());
 
+    /* RmlUi renders a transformed batch as clip = projection * T * (pos + translate)
+     * (T in pixel space, possibly with perspective). pp_agc.c's MVP is the
+     * projection; fold T into the pixel position here and do the perspective
+     * divide, so the GPU geometry path still draws focus scales / rotations
+     * instead of punting the batch to the CPU. */
+    const bool has_xf = (transform != nullptr);
+
     m_verts.reserve(m_verts.size() + verts.size());
     for (const Rml::Vertex& v : verts) {
         pp_agc_geo_vertex_t out;
-        out.x = v.position.x + translation.x;
-        out.y = v.position.y + translation.y;
+        float px = v.position.x + translation.x;
+        float py = v.position.y + translation.y;
+        if (has_xf) {
+            Rml::Vector4f p = (*transform) * Rml::Vector4f(px, py, 0.0f, 1.0f);
+            const float w = (p.w != 0.0f) ? p.w : 1.0f;
+            px = p.x / w;
+            py = p.y / w;
+        }
+        out.x = px;
+        out.y = py;
         out.z = 0.0f;
         /* mesh_ps light: lit = colour * (0.25 + 0.75 * saturate(dot(N, -lightDir))),
          * lightDir = normalize(0.4,-1,-0.6). Setting the normal to -lightDir's

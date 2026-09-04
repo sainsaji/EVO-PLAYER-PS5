@@ -105,7 +105,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     margin-bottom: 12px;
     padding-left: 32px;
     padding-right: 32px;
@@ -131,7 +131,7 @@ div, span, p {
     width: 60px;
     height: 60px;
     background-color: #131c2e;
-    border-radius: 10px;
+    border-radius: 15px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -206,7 +206,7 @@ div, span, p {
     background-color: #131d2e;
     border-width: 1px;
     border-color: #243550;
-    border-radius: 7px;
+    border-radius: 10px;
     padding: 8px 16px;
     font-size: 15px;
     font-weight: bold;

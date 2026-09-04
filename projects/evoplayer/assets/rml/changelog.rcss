@@ -110,7 +110,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 12px;
+    border-radius: 18px;
     margin-bottom: 10px;
     padding-left: 22px;
     padding-right: 22px;
@@ -171,7 +171,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     padding: 26px;
 }
 
@@ -228,7 +228,7 @@ div, span, p {
 .clitem-kind {
     width: 128px;
     height: 32px;
-    border-radius: 7px;
+    border-radius: 11px;
     border-width: 1px;
     border-color: #243550;
     background-color: #131d2e;

@@ -1350,15 +1350,17 @@ void EvoRenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     if (geo->vertices.empty() || geo->indices.empty()) return;
 
     /*
-     * #28 Phase 4: divert solid geometry to the GPU. Only untextured,
-     * untransformed, unclipped batches - text/icons (textured), transformed and
-     * clip-masked geometry keep the CPU path (which composites over the GPU
-     * output afterwards).
+     * #28 Phase 4: divert solid geometry to the GPU. Untextured, unclipped
+     * batches only - text/icons (textured) and clip-masked geometry keep the CPU
+     * path (which composites over the GPU output afterwards). A transform (focus
+     * scale, rotation) is folded into the vertex positions by the sink, so those
+     * batches still go to the GPU rather than dropping the whole element to CPU.
      */
-    if (m_agc_sink && !texture && !m_has_transform && !m_clip_enabled) {
+    if (m_agc_sink && !texture && !m_clip_enabled) {
         m_agc_sink->Add(geo->vertices, geo->indices,
                         Rml::Vector2f(translation),
-                        m_scissor_enabled, m_scissor_region);
+                        m_scissor_enabled, m_scissor_region,
+                        m_has_transform ? &m_transform : nullptr);
         return;
     }
 

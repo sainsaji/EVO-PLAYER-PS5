@@ -126,7 +126,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 22px;
     overflow: hidden;
 }
 
@@ -144,7 +144,7 @@ div, span, p {
     top: 2px;
     width: 1698px;
     height: 312px;
-    border-radius: 12px;
+    border-radius: 19px;
 }
 
 /*
@@ -351,7 +351,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     position: relative;
 }
 
@@ -367,7 +367,7 @@ div, span, p {
     top: 2px;
     width: 260px;
     height: 160px;
-    border-radius: 12px;
+    border-radius: 17px;
 }
 
 /* Destination tiles carry a large soft icon top-left instead of a poster. */

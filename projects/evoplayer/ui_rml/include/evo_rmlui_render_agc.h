@@ -20,6 +20,7 @@
  */
 #include <RmlUi/Core/Vertex.h>
 #include <RmlUi/Core/Types.h>
+#include <RmlUi/Core/Matrix4.h>
 #include <cstdint>
 #include <vector>
 
@@ -35,12 +36,17 @@ public:
     /* Record one untextured RmlUi geometry batch. `verts`/`inds` are the
      * compiled geometry; `translation` is RmlUi's per-draw offset; the scissor
      * is the pixel rect currently enabled (scissor_enabled == false -> whole
-     * target). Called from EvoRenderInterface::RenderGeometry. */
+     * target). `transform` is RmlUi's active element transform (e.g. a focus
+     * `scale(1.04)`) in pixel space, or nullptr for none - it is folded into the
+     * vertex positions here so the GPU still draws the batch (rather than the
+     * whole thing dropping to the CPU rasteriser). Called from
+     * EvoRenderInterface::RenderGeometry. */
     void Add(const std::vector<Rml::Vertex>& verts,
              const std::vector<int>& inds,
              Rml::Vector2f translation,
              bool scissor_enabled,
-             Rml::Rectanglei scissor);
+             Rml::Rectanglei scissor,
+             const Rml::Matrix4f* transform = nullptr);
 
     bool Empty() const { return m_draws.empty(); }
     int  Width()  const { return m_w; }

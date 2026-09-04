@@ -128,7 +128,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 12px;
+    border-radius: 18px;
     margin-bottom: 10px;
     padding-left: 26px;
     padding-right: 26px;
@@ -154,7 +154,7 @@ div, span, p {
     width: 54px;
     height: 54px;
     background-color: #131c2e;
-    border-radius: 9px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -217,7 +217,7 @@ div, span, p {
     background-color: #131d2e;
     border-width: 1px;
     border-color: #243550;
-    border-radius: 7px;
+    border-radius: 10px;
     padding: 7px 14px;
     font-size: 15px;
     font-weight: bold;
@@ -307,7 +307,7 @@ div, span, p {
     background-color: #121b2eeb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 14px;
+    border-radius: 20px;
     padding: 20px;
 }
 
@@ -318,7 +318,7 @@ div, span, p {
     width: 524px;
     height: 295px;
     background-color: #0a1120;
-    border-radius: 10px;
+    border-radius: 14px;
     border-width: 1px;
     border-color: #2a3b5566;
     overflow: hidden;
@@ -330,7 +330,7 @@ div, span, p {
     top: 1px;
     width: 522px;
     height: 293px;
-    border-radius: 9px;
+    border-radius: 12px;
 }
 
 #ins-preview-empty {
@@ -351,7 +351,7 @@ div, span, p {
     right: 10px;
     bottom: 10px;
     background-color: #020409d7;
-    border-radius: 6px;
+    border-radius: 9px;
     padding: 6px 12px;
     font-size: 16px;
     font-weight: bold;
@@ -392,7 +392,7 @@ div, span, p {
     background-color: #131d2e;
     border-width: 1px;
     border-color: #243550;
-    border-radius: 6px;
+    border-radius: 9px;
     padding: 5px 11px;
     font-size: 15px;
     font-weight: bold;
