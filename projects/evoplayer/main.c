@@ -10645,14 +10645,11 @@ static void prospero_scrub_overlay_arm(void)
 {
     if (prospero_scrub_ovl_state != SCRUB_OVL_NONE || !pp_product_k4_live(screen))
         return;
-#if PP_BACKEND_ENABLED
-    /* #28 Phase 2: when the sceAgc path is live the OSD composites straight
-     * onto the 4K plane (pp_agc_osd), so there's no need to drop to a 1080
-     * overlay VO for a scrub. Leave the machinery in place for the
-     * AGC-unavailable / CPU fallback. */
-    if (pp_agc_available())
-        return;
-#endif
+    /* #28: during normal playback the OSD composites straight onto the 4K
+     * plane (pp_agc_osd, decode thread). A committed seek stops the decode
+     * thread pushing frames, so the 1080 overlay VO is still used for scrub
+     * on the AGC path too - revisit once pp_playback presents a held frame
+     * during seek_discard. */
     prospero_scrub_ovl_restore_paused = player_paused;
     prospero_scrub_ovl_was_playing    = !player_paused;
     if (prospero_scrub_ovl_was_playing) {
