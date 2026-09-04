@@ -32,6 +32,7 @@ AVPLAYER_PROBE=0
 VIDEODEC2_PROBE=0
 FFPFSC=0
 USB_REMOTE=0
+GEO_TEXT=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -42,6 +43,7 @@ while (( $# )); do
         --videodec2-probe) VIDEODEC2_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
+        --geo-text)     GEO_TEXT=1 ;;     # #28/#67: compile the GPU text 2nd-pass into agc_render_geo
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -56,6 +58,7 @@ if ! in_container; then
     (( VIDEODEC2_PROBE )) && FWD+=(--videodec2-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
+    (( GEO_TEXT ))     && FWD+=(--geo-text)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -255,6 +258,11 @@ else
     # /mnt/usb0/evo_vdec.log append in evo_vdec_native.c's note(). Off by
     # default so a release eboot never touches the user's USB stick per frame.
     (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1 -DEVO_VDEC_LOG=1"
+    # --geo-text (#28/#67): compile the GPU text/icon 2nd-pass into agc_render_geo.
+    # Was default-off after a load crash bisected to "agc_render_geo size" - that
+    # turned out to be the <iostream> static-init crash (#71, fixed df7cbf2), so
+    # this is worth re-testing. Still runtime-gated by /mnt/usb0/evo_agc_geo_text.
+    (( GEO_TEXT )) && APP_DEFS+=" -DPP_AGC_GEO_TEXT=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
