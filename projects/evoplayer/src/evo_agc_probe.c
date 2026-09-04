@@ -79,8 +79,13 @@ void evo_agc_probe(void)
      * Still fault-guarded — a bad CreateShader offset would otherwise crash
      * before evo_boot_log_flush() and eat the diagnostic. */
     AT("pp_agc_init");
-    if (rc == 0 && defaults)
+    if (rc == 0 && defaults) {
         pp_agc_init(1920, 1080, 0);
+        /* #28 Phase 1: does sceAgcCreateShader accept the hand-written UI
+         * shaders + reused headers, and LinkShaders with primitive type 4? */
+        AT("pp_agc_probe_ui_shaders");
+        pp_agc_probe_ui_shaders();
+    }
     g_armed = 0;
 
 restore:

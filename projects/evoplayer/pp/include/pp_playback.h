@@ -91,6 +91,15 @@ typedef struct pp_playback {
     uint64_t agc_present_dropped; /* late/dropped on the AGC path (heartbeat)   */
     uint64_t agc_hb_frames;       /* frames counted toward the current window   */
     int agc_vo_retile_req;        /* #27: CPU path needs the VO re-registered   */
+
+    /* #28 Phase 2: last-good NV12 frame, kept while the OSD is up so a seek /
+     * pause window can still present (held frame + OSD) instead of a stale
+     * or black GPU plane. Lazily allocated; only refreshed when
+     * pp_agc_osd_active(). */
+    unsigned char *agc_hold_nv12;
+    size_t   agc_hold_cap;
+    uint32_t agc_hold_pitch, agc_hold_ch, agc_hold_w, agc_hold_h;
+    int      agc_hold_valid;
                                   /*      tiled - main polls + clears this      */
 
     void *lock;

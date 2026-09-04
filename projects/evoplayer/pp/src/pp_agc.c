@@ -69,6 +69,18 @@ extern const uint8_t pp_agc_pixel_code_start[],      pp_agc_pixel_code_end[];
 extern const uint8_t pp_agc_pixel_hdr_code_start[],  pp_agc_pixel_hdr_code_end[];
 extern const uint8_t pp_agc_resources_start[],       pp_agc_resources_end[];
 
+/* --- embedded UI shader blobs (#28 Phase 0, agc_ui_blobs.S) ------------- */
+extern const uint8_t pp_agc_ui_vs_header_start[],   pp_agc_ui_vs_header_end[];
+extern const uint8_t pp_agc_ui_ps_header_start[],   pp_agc_ui_ps_header_end[];
+extern const uint8_t pp_agc_ui_vs_code_start[],     pp_agc_ui_vs_code_end[];
+extern const uint8_t pp_agc_solid_ps_code_start[],  pp_agc_solid_ps_code_end[];
+extern const uint8_t pp_agc_glyph_ps_code_start[],  pp_agc_glyph_ps_code_end[];
+extern const uint8_t pp_agc_rgba_ps_code_start[],   pp_agc_rgba_ps_code_end[];
+extern const uint8_t pp_agc_spvs_header_start[], pp_agc_spvs_header_end[];
+extern const uint8_t pp_agc_spvs_code_start[],   pp_agc_spvs_code_end[];
+extern const uint8_t pp_agc_spps_header_start[], pp_agc_spps_header_end[];
+extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
+
 /* --- constants (ProsperoLight) ----------------------------------------- */
 #define SHADER_MEMORY_BYTES  0x0d0000u
 #define SHADER_STATIC_BYTES  0x10000u        /* flushed before every submit    */
@@ -91,6 +103,19 @@ extern const uint8_t pp_agc_resources_start[],       pp_agc_resources_end[];
 #define OFF_LINK_A    0x5000u
 #define OFF_LINK_B    0x6000u
 #define OFF_RESOURCES 0xc000u
+
+/* #28 Phase 1 probe: scratch for the UI shader create/link go/no-go check.
+ * Well above the video path's 0x8000..0xc000 DCB + resources; g_agc.mem is
+ * 0xD0000, so 0xd000..0x15000 is free headroom. */
+#define OFF_UI_VS_HDR    0x0d000u
+#define OFF_UI_VS_CODE   0x0e000u
+#define OFF_UI_PS_HDR    0x0f000u
+#define OFF_UI_PS_A_CODE 0x10000u   /* solid_ps */
+#define OFF_UI_PS_B_CODE 0x11000u   /* glyph_ps */
+#define OFF_UI_PS_C_CODE 0x12000u   /* rgba_ps  */
+#define OFF_UI_LINK_A    0x13000u
+#define OFF_UI_LINK_B    0x14000u
+#define OFF_UI_SPLICE_A  0x15000u   /* Phase 4 probe scratch: sp_mesh_{vs,ps} */
 
 /* --- AGC ABI structs (ProsperoLight) ---------------------------------- */
 typedef struct agc_register {
@@ -132,6 +157,13 @@ static struct {
     int64_t   stage_start;
     size_t    stage_total;
     size_t    stage_cap;
+
+    /* #28 Phase 1: per-VO-buffer overlay-NV12 staging (the OSD quad). Separate
+     * slab because the overlay is a different size and updates independently. */
+    uint8_t  *ovl_stage[PP_VO_MAX_BUFFERS];
+    int64_t   ovl_stage_start;
+    size_t    ovl_stage_total;
+    size_t    ovl_stage_cap;
 
     volatile int first_frame_ok;   /* a render_frame has returned 0 (worker)   */
     int       first_frame_logged;
@@ -189,6 +221,12 @@ static struct {
     uint32_t    visible_width, visible_height;
     uint32_t    output_width, output_height;
     int64_t     render_marker;
+
+    /* #28 overlay quad (0 = video only) */
+    int         draw_overlay;
+    const void *ovl_source;                     /* staged overlay NV12, pitch == ovl_w */
+    uint32_t    ovl_w, ovl_h, ovl_x, ovl_y, ovl_scale;
+    float       ovl_alpha;
 
     /* response */
     int32_t     rc;
@@ -346,15 +384,20 @@ static void bind_pixel_source(agc_command_buffer_t *command, uint8_t *resources,
     sceAgcCbSetShRegisterRangeDirect(command, 0x0c, descriptor, 30);
 }
 
-/* One presented frame. Verbatim port of ProsperoLight render_frame(), SDR path
- * only, HUD/overlay branch removed. Scratch offsets inside `memory`. */
+/* One presented frame. Port of ProsperoLight render_frame(), SDR path only.
+ * The optional overlay quad (ovl_*) is #28's OSD composite - a second
+ * DrawIndexAuto in the same DCB, constant-alpha blended, from a tightly-packed
+ * NV12 surface at `ovl_source`. Scratch offsets inside `memory`. */
 static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *memory,
                             void *vertex_shader, void *pixel_shader,
                             const void *source, size_t source_bytes, uint32_t pitch,
                             uint32_t surface_height, uint32_t visible_width,
                             uint32_t visible_height, uint32_t output_width,
                             uint32_t output_height, int64_t render_marker,
-                            uint32_t *word_count)
+                            uint32_t *word_count,
+                            int draw_overlay, const void *ovl_source,
+                            uint32_t ovl_w, uint32_t ovl_h, uint32_t ovl_x,
+                            uint32_t ovl_y, uint32_t ovl_scale, float ovl_alpha)
 {
     static const uint16_t target_offsets[16] = { 0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f,
                                                  0x321, 0x323, 0x324, 0x325, 0x390, 0x398,
@@ -368,6 +411,8 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     agc_register_t *cx = (agc_register_t *)(memory + 0x7000);
     uint8_t *geometry_cb = memory + 0x7800;
     uint8_t *pixel_cb = memory + 0x7900;
+    uint8_t *ovl_pixel_cb = memory + 0x7a00;               /* #28 overlay CB */
+    agc_register_t *ovl_state = (agc_register_t *)(memory + 0x7b00); /* 11 regs */
     uint8_t *resources = memory + 0xc000;
     uint32_t *words = (uint32_t *)(memory + 0x8000);
     agc_command_buffer_t command;
@@ -517,6 +562,47 @@ static int agc_render_frame(int video, int buffer_index, void *target, uint8_t *
     agc_dbg("R3 link/sh done -> bind_pixel_source + draw + flip");
     bind_pixel_source(&command, resources, source, y_bytes, uv_bytes, pixel_cb);
     sceAgcDcbDrawIndexAuto(&command, 4, 2);
+
+    /* #28: overlay quad - a 2nd DrawIndexAuto in the same DCB, viewport moved
+     * to the OSD rect + constant-alpha blend, from a tightly-packed NV12
+     * surface. Verbatim from ProsperoLight render_frame()'s draw_overlay
+     * branch (SDR: no shader rebind, reuse the NV12 pipeline + resources). */
+    if (draw_overlay && ovl_source && ovl_w && ovl_h) {
+        float sc = ovl_scale ? (float)ovl_scale : 1.f;
+        size_t ovl_y_bytes  = (size_t)ovl_w * ovl_h;
+        size_t ovl_uv_bytes = (size_t)ovl_w * ((ovl_h + 1u) / 2u);
+        /* Inset the overlay 1 output px on every side: the bilinear sampler
+         * would otherwise reach an out-of-bounds texel at u/v == 1 (the surface
+         * is up to `sc`x upscaled), which shows as a flickering white edge
+         * line. The outer 1px shows the video quad instead (correct content). */
+        float vw = ovl_w * sc - 2.f, vh_ = ovl_h * sc - 2.f;
+        const agc_register_t state[11] = {
+            { 0x10f, 0, float_bits(vw * .5f) },
+            { 0x110, 0, float_bits(ovl_x + 1.f + vw * .5f) },
+            { 0x111, 0, float_bits(vh_ * -.5f) },
+            { 0x112, 0, float_bits(ovl_y + 1.f + vh_ * .5f) },
+            { 0x113, 0, float_bits(1) },
+            { 0x114, 0, 0 },
+            { 0x105, 0, float_bits(ovl_alpha) },
+            { 0x106, 0, float_bits(ovl_alpha) },
+            { 0x107, 0, float_bits(ovl_alpha) },
+            { 0x108, 0, float_bits(ovl_alpha) },
+            /* src * constAlpha + dst * (1 - constAlpha) */
+            { 0x1e0, 0, 0x40001413u },
+        };
+        memcpy(ovl_pixel_cb, pixel_constants, sizeof(pixel_constants));
+        ((uint32_t *)ovl_pixel_cb)[12] = float_bits((float)ovl_w);
+        ((uint32_t *)ovl_pixel_cb)[13] = float_bits((float)ovl_h);
+        ((uint32_t *)ovl_pixel_cb)[14] = ovl_w;
+        ((uint32_t *)ovl_pixel_cb)[15] = ovl_w / 2u;
+        memcpy(ovl_state, state, sizeof(state));
+        sceAgcDcbSetCxRegistersIndirect(&command, ovl_state, 11);
+        bind_pixel_source(&command, resources, ovl_source, ovl_y_bytes, ovl_uv_bytes, ovl_pixel_cb);
+        sceAgcDcbDrawIndexAuto(&command, 4, 2);
+        agc_dbg("R3b overlay quad  %ux%u @ %u,%u a=%d/100",
+                ovl_w, ovl_h, ovl_x, ovl_y, (int)(ovl_alpha * 100.f));
+    }
+
     sceAgcDcbSetFlip(&command, (uint32_t)video, buffer_index, 1, render_marker);
 
     submit.words = words;
@@ -543,6 +629,7 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
     g_agc.tried = 1;
     g_agc.mem_start = -1;
     g_agc.stage_start = -1;
+    g_agc.ovl_stage_start = -1;
 
     /* sceAgcInit is not idempotent — a second call (e.g. after evo_agc_probe's
      * gate) returns 0x8A6C0004 "already initialized". Only a hard failure to
@@ -614,6 +701,100 @@ int pp_agc_available(void)
     return g_agc.ready;
 }
 
+/*
+ * #28 Phase 1 go/no-go: does sceAgcCreateShader accept the hand-written UI
+ * shaders paired with ProsperoLight's reused headers, and does
+ * sceAgcLinkShaders work with primitive type 4 (triangle list)?
+ *
+ * Pure library calls - no DCB, no draw, no submit, no flip. Runs under
+ * evo_agc_probe()'s fault guard, logs every rc to evo_boot.log. Needs
+ * pp_agc_init() to have mapped g_agc.mem first. Changes no state.
+ *
+ * The pixel headers (pixel.header.bin) should work - each PS is a structural
+ * subset of the NV12 PS. ui_vs against geometry.header.bin is the real
+ * question (see the risk note in pp/shaders/ui_vs.s).
+ */
+int pp_agc_probe_ui_shaders(void)
+{
+    if (!g_agc.mem) {
+        evo_boot_log("pp_agc UI: mem not mapped - run pp_agc_init first");
+        evo_boot_log_flush();
+        return -1;
+    }
+
+    uint8_t *m = g_agc.mem;
+    int bad = 0;
+    bad |= copy_asset(m + OFF_UI_VS_HDR,    0x1000, pp_agc_ui_vs_header_start,  pp_agc_ui_vs_header_end);
+    bad |= copy_asset(m + OFF_UI_PS_HDR,    0x1000, pp_agc_ui_ps_header_start,  pp_agc_ui_ps_header_end);
+    bad |= copy_asset(m + OFF_UI_VS_CODE,   0x1000, pp_agc_ui_vs_code_start,    pp_agc_ui_vs_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_A_CODE, 0x1000, pp_agc_solid_ps_code_start, pp_agc_solid_ps_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_B_CODE, 0x1000, pp_agc_glyph_ps_code_start, pp_agc_glyph_ps_code_end);
+    bad |= copy_asset(m + OFF_UI_PS_C_CODE, 0x1000, pp_agc_rgba_ps_code_start,  pp_agc_rgba_ps_code_end);
+    if (bad) {
+        evo_boot_log("pp_agc UI: blob copy failed");
+        evo_boot_log_flush();
+        return -1;
+    }
+
+    void *vs = 0, *ps_solid = 0, *ps_glyph = 0, *ps_rgba = 0;
+    int32_t c_vs    = sceAgcCreateShader(&vs,       m + OFF_UI_VS_HDR, m + OFF_UI_VS_CODE);
+    int32_t c_solid = sceAgcCreateShader(&ps_solid, m + OFF_UI_PS_HDR, m + OFF_UI_PS_A_CODE);
+    int32_t c_glyph = sceAgcCreateShader(&ps_glyph, m + OFF_UI_PS_HDR, m + OFF_UI_PS_B_CODE);
+    int32_t c_rgba  = sceAgcCreateShader(&ps_rgba,  m + OFF_UI_PS_HDR, m + OFF_UI_PS_C_CODE);
+
+    evo_boot_log("pp_agc UI: CreateShader ui_vs=0x%08x solid=0x%08x glyph=0x%08x rgba=0x%08x",
+                 (unsigned)c_vs, (unsigned)c_solid, (unsigned)c_glyph, (unsigned)c_rgba);
+    evo_boot_log("pp_agc UI:   vs=%p solid=%p glyph=%p rgba=%p", vs, ps_solid, ps_glyph, ps_rgba);
+    evo_boot_log_flush();
+
+    /* LinkShaders(..., 4 == PrimitiveTriangleList) - only where both halves
+     * were created. */
+    if (c_vs == 0 && c_solid == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_solid, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+solid (TriList) = 0x%08x", (unsigned)l);
+    }
+    if (c_vs == 0 && c_glyph == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_glyph, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+glyph (TriList) = 0x%08x", (unsigned)l);
+    }
+    if (c_vs == 0 && c_rgba == 0) {
+        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rgba, 4);
+        evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba (TriList) = 0x%08x", (unsigned)l);
+    }
+
+    /* #28 Phase 4: SharpProspero's compiler-generated mesh_vs / mesh_ps. */
+    if (copy_asset(m + OFF_UI_SPLICE_A + 0x0000, 0x1000, pp_agc_spvs_header_start, pp_agc_spvs_header_end) == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x1000, 0x1000, pp_agc_spvs_code_start,   pp_agc_spvs_code_end)   == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x2000, 0x1000, pp_agc_spps_header_start, pp_agc_spps_header_end) == 0 &&
+        copy_asset(m + OFF_UI_SPLICE_A + 0x3000, 0x1000, pp_agc_spps_code_start,   pp_agc_spps_code_end)   == 0) {
+        void *spvs = 0, *spps = 0;
+        int32_t c_v = sceAgcCreateShader(&spvs, m + OFF_UI_SPLICE_A + 0x0000, m + OFF_UI_SPLICE_A + 0x1000);
+        int32_t c_p = sceAgcCreateShader(&spps, m + OFF_UI_SPLICE_A + 0x2000, m + OFF_UI_SPLICE_A + 0x3000);
+        evo_boot_log("pp_agc UI: CreateShader sp_mesh_vs=0x%08x sp_mesh_ps=0x%08x  (v=%p p=%p)",
+                     (unsigned)c_v, (unsigned)c_p, spvs, spps);
+        if (c_v == 0 && c_p == 0) {
+            int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, spvs, spps, 4);
+            evo_boot_log("pp_agc UI: LinkShaders sp_mesh_vs+sp_mesh_ps (TriList) = 0x%08x", (unsigned)l);
+        }
+        evo_boot_log_flush();
+    }
+
+    /*
+     * Hardware result (2026-09-04, four --agc-probe runs): ui_vs + solid_ps
+     * create + link (TriList) clean. Every textured PS - image_sample OR typed
+     * buffer_load_format, hand-written OR spliced onto the reference NV12 body's
+     * exact trailer - fails 0x8a6c001f. sceAgcCreateShader validates the code
+     * body against the "sl00" resource-metadata block whenever a memory
+     * resource is touched, and ProsperoLight only ships headers for its
+     * NV12/P010 shaders. => the solid GPU path is hand-writable; textured UI
+     * (text, icons, art) needs a compiler that emits header+code+sl00 as a
+     * matched set (GLSL -> SPIR-V -> AMD ISA; agc-implementation.md §7).
+     */
+    evo_boot_log("pp_agc UI: probe done (no state changed)");
+    evo_boot_log_flush();
+    return (c_vs == 0 && c_solid == 0) ? 0 : -1;
+}
+
 /* (re)allocate the double/triple NV12 staging pool in GPU-visible direct
  * memory. One slot per VO buffer — pp_videoout_acquire only hands back a
  * buffer whose previous flip has fully retired, so keying the staging slot to
@@ -665,6 +846,52 @@ static int agc_staging_ensure(size_t need)
     return 0;
 }
 
+/* #28: same grow-only per-VO-buffer slab pattern for the overlay NV12. */
+static void agc_ovl_staging_free(void)
+{
+    if (g_agc.ovl_stage[0]) {
+        sceKernelMunmap(g_agc.ovl_stage[0], g_agc.ovl_stage_total);
+        for (int i = 0; i < PP_VO_MAX_BUFFERS; i++)
+            g_agc.ovl_stage[i] = 0;
+    }
+    if (g_agc.ovl_stage_start >= 0) {
+        sceKernelReleaseDirectMemory(g_agc.ovl_stage_start, g_agc.ovl_stage_total);
+        g_agc.ovl_stage_start = -1;
+    }
+    g_agc.ovl_stage_total = 0;
+    g_agc.ovl_stage_cap = 0;
+}
+
+static int agc_ovl_staging_ensure(size_t need)
+{
+    if (g_agc.ovl_stage[0] && g_agc.ovl_stage_cap >= need)
+        return 0;
+    agc_ovl_staging_free();
+
+    size_t cap = (need + 0xffffu) & ~(size_t)0xffffu;
+    size_t total = cap * (size_t)PP_VO_MAX_BUFFERS;
+    int64_t start = -1;
+    void *base = 0;
+    int64_t limit = sceKernelGetDirectMemorySize();
+    int32_t rc = sceKernelAllocateDirectMemory(0, limit, total, SHADER_ALIGN,
+                                               DIRECT_MEMORY_TYPE, &start);
+    if (rc == 0)
+        rc = sceKernelMapDirectMemory(&base, total, MAP_PROTECTION, 0, start, SHADER_ALIGN);
+    if (rc != 0 || !base) {
+        evo_boot_log("pp_agc: overlay staging alloc/map=0x%08x need=%zu", (unsigned)rc, need);
+        if (start >= 0)
+            sceKernelReleaseDirectMemory(start, total);
+        return -1;
+    }
+    g_agc.ovl_stage_start = start;
+    g_agc.ovl_stage_total = total;
+    g_agc.ovl_stage_cap = cap;
+    for (int i = 0; i < PP_VO_MAX_BUFFERS; i++)
+        g_agc.ovl_stage[i] = (uint8_t *)base + (size_t)i * cap;
+    evo_boot_log("pp_agc: overlay staging %zuKB x%d @ %p", cap >> 10, PP_VO_MAX_BUFFERS, base);
+    return 0;
+}
+
 /* The GPU submit worker. One request in flight; see g_agc_submit. */
 static void *agc_submit_worker(void *arg)
 {
@@ -677,6 +904,10 @@ static void *agc_submit_worker(void *arg)
         uint32_t    pitch, surface_height, visible_width, visible_height;
         uint32_t    output_width, output_height;
         int64_t     render_marker;
+        int         draw_overlay;
+        const void *ovl_source;
+        uint32_t    ovl_w, ovl_h, ovl_x, ovl_y, ovl_scale;
+        float       ovl_alpha;
         uint32_t    words = 0;
         int32_t     rc;
         int         guard;
@@ -700,6 +931,14 @@ static void *agc_submit_worker(void *arg)
         output_width   = g_agc_submit.output_width;
         output_height  = g_agc_submit.output_height;
         render_marker  = g_agc_submit.render_marker;
+        draw_overlay   = g_agc_submit.draw_overlay;
+        ovl_source     = g_agc_submit.ovl_source;
+        ovl_w          = g_agc_submit.ovl_w;
+        ovl_h          = g_agc_submit.ovl_h;
+        ovl_x          = g_agc_submit.ovl_x;
+        ovl_y          = g_agc_submit.ovl_y;
+        ovl_scale      = g_agc_submit.ovl_scale;
+        ovl_alpha      = g_agc_submit.ovl_alpha;
         pthread_mutex_unlock(&g_agc_submit.lock);
 
         guard = !g_agc.first_frame_ok;
@@ -719,7 +958,9 @@ static void *agc_submit_worker(void *arg)
             rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
                                   g_agc.vs, g_agc.ps, source, source_bytes, pitch,
                                   surface_height, visible_width, visible_height,
-                                  output_width, output_height, render_marker, &words);
+                                  output_width, output_height, render_marker, &words,
+                                  draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
+                                  ovl_scale, ovl_alpha);
             t_agc_armed = 0;
 
             evo_boot_log("pp_agc: render_frame rc=0x%08x words=%u  %ux%u -> %ux%u  "
@@ -735,7 +976,9 @@ static void *agc_submit_worker(void *arg)
             rc = agc_render_frame(video, buffer_index, target, g_agc.mem,
                                   g_agc.vs, g_agc.ps, source, source_bytes, pitch,
                                   surface_height, visible_width, visible_height,
-                                  output_width, output_height, render_marker, &words);
+                                  output_width, output_height, render_marker, &words,
+                                  draw_overlay, ovl_source, ovl_w, ovl_h, ovl_x, ovl_y,
+                                  ovl_scale, ovl_alpha);
         }
 
     reply:
@@ -776,11 +1019,20 @@ static int agc_submit_start(void)
 
 /* Single caller only: pp_playback_push_frame runs on one decode thread and
  * every call here blocks until the worker replies or the watchdog fires, so
- * there is never more than one request in flight. */
-int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
-                        const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
-                        uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
-                        int64_t flip_marker)
+ * there is never more than one request in flight.
+ *
+ * ovl_nv12 (may be NULL) is a tightly-packed NV12 OSD surface (pitch == ovl_w,
+ * interleaved UV at ovl_nv12 + ovl_w*ovl_h); it is composited as a second quad
+ * in the same DCB, upscaled ovl_scale x (0/1 = none) with the bilinear sampler,
+ * its top-left at (ovl_x, ovl_y) in output space, constant-alpha blended
+ * (ovl_alpha 0..1). */
+int pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                                const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                                uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                                int64_t flip_marker,
+                                const void *ovl_nv12, uint32_t ovl_w, uint32_t ovl_h,
+                                uint32_t ovl_x, uint32_t ovl_y, uint32_t ovl_scale,
+                                float ovl_alpha)
 {
     if (g_agc.submit_wedged)
         return -2;
@@ -790,6 +1042,14 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
         pitch_bytes == 0 || (pitch_bytes & 1u) || coded_height == 0 ||
         vis_w == 0 || vis_h == 0 || out_w == 0 || out_h == 0)
         return -1;
+
+    /* Overlay is best-effort: a bad rect just disables it, never fails the frame. */
+    uint32_t ovl_sc = ovl_scale ? ovl_scale : 1u;
+    int want_overlay = ovl_nv12 && ovl_w >= 2 && ovl_h >= 2 && (ovl_w & 1u) == 0 &&
+                       (ovl_h & 1u) == 0 &&
+                       ovl_x + ovl_w * ovl_sc <= out_w && ovl_y + ovl_h * ovl_sc <= out_h;
+    if (ovl_alpha < 0.f) ovl_alpha = 0.f;
+    if (ovl_alpha > 1.f) ovl_alpha = 1.f;
 
     /* #27 test hook: /mnt/usb0/evo_agc_no_present (or EVO_AGC_NO_PRESENT env)
      * simulates a mid-clip GPU wedge after ~120 good frames, so the AGC-death ->
@@ -837,6 +1097,25 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     if (fg) agc_dbg("A1 staging ok stage=%p need=%zu -> memcpy + flush", stage, need);
     memcpy(stage, nv12, need);
     flush_gpu_data(stage, need);
+
+    /* Stage the overlay NV12 into its own per-VO-buffer slab. Under the same
+     * first-frame fault guard as the video staging (a bad ovl_nv12 pointer
+     * faults on this thread). On any overlay-staging failure, drop the overlay
+     * and present video-only rather than failing the frame. */
+    const uint8_t *ovl_stage = 0;
+    if (want_overlay) {
+        size_t ovl_need = (size_t)ovl_w * ovl_h + (size_t)ovl_w * ((ovl_h + 1u) / 2u);
+        if (agc_ovl_staging_ensure(ovl_need) == 0) {
+            uint8_t *os = g_agc.ovl_stage[buf_idx];
+            memcpy(os, ovl_nv12, ovl_need);
+            flush_gpu_data(os, ovl_need);
+            ovl_stage = os;
+        } else {
+            want_overlay = 0;
+        }
+        if (fg) agc_dbg("A1b overlay staged=%p %ux%u @ %u,%u", ovl_stage, ovl_w, ovl_h, ovl_x, ovl_y);
+    }
+
     if (fg) {
         t_agc_armed = 0;
         agc_dbg("A2 staged + flushed -> dispatch worker (250ms watchdog)");
@@ -871,6 +1150,14 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     g_agc_submit.output_width   = out_w;
     g_agc_submit.output_height  = out_h;
     g_agc_submit.render_marker  = flip_marker;
+    g_agc_submit.draw_overlay   = want_overlay;
+    g_agc_submit.ovl_source     = ovl_stage;
+    g_agc_submit.ovl_w          = ovl_w;
+    g_agc_submit.ovl_h          = ovl_h;
+    g_agc_submit.ovl_x          = ovl_x;
+    g_agc_submit.ovl_y          = ovl_y;
+    g_agc_submit.ovl_scale      = ovl_sc;
+    g_agc_submit.ovl_alpha      = ovl_alpha;
     g_agc_submit.have_done      = 0;
     g_agc_submit.have_req       = 1;
     pthread_cond_signal(&g_agc_submit.req_cv);
@@ -921,6 +1208,131 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
     return rc == 0 ? 0 : -1;
 }
 
+/* #28 Phase 1 test hook: /mnt/usb0/evo_agc_test_overlay draws a translucent
+ * cyan NV12 bar bottom-centre over the live video, exercising the overlay quad
+ * without the Phase 2 OSD compositor. Verifies the 2nd DrawIndexAuto + blend +
+ * overlay staging + flush path on hardware. */
+#define AGC_TEST_OVL_W 960u
+#define AGC_TEST_OVL_H 160u
+static int agc_test_overlay_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        mode = 0;
+        if (getenv("EVO_AGC_TEST_OVERLAY")) mode = 1;
+        else { FILE *f = fopen("/mnt/usb0/evo_agc_test_overlay", "r"); if (f) { mode = 1; fclose(f); } }
+    }
+    return mode;
+}
+static const uint8_t *agc_test_overlay_surface(void)
+{
+    static uint8_t buf[AGC_TEST_OVL_W * AGC_TEST_OVL_H
+                       + AGC_TEST_OVL_W * (AGC_TEST_OVL_H / 2u)];
+    static int built = 0;
+    if (!built) {
+        uint8_t *y  = buf;
+        uint8_t *uv = buf + AGC_TEST_OVL_W * AGC_TEST_OVL_H;
+        for (uint32_t r = 0; r < AGC_TEST_OVL_H; r++)
+            for (uint32_t c = 0; c < AGC_TEST_OVL_W; c++)
+                y[r * AGC_TEST_OVL_W + c] = (uint8_t)(40u + (c * 180u) / AGC_TEST_OVL_W);
+        for (uint32_t r = 0; r < AGC_TEST_OVL_H / 2u; r++)
+            for (uint32_t c = 0; c < AGC_TEST_OVL_W / 2u; c++) {
+                uv[(r * (AGC_TEST_OVL_W / 2u) + c) * 2u + 0] = 200; /* U -> cyan/blue */
+                uv[(r * (AGC_TEST_OVL_W / 2u) + c) * 2u + 1] = 60;  /* V */
+            }
+        built = 1;
+    }
+    return buf;
+}
+
+int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                        const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                        uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                        int64_t flip_marker)
+{
+    const void *ovl = 0;
+    uint32_t ox = 0, oy = 0;
+    if (agc_test_overlay_mode() && out_w >= AGC_TEST_OVL_W && out_h >= AGC_TEST_OVL_H) {
+        ovl = agc_test_overlay_surface();
+        ox = (out_w - AGC_TEST_OVL_W) / 2u;
+        oy = out_h - AGC_TEST_OVL_H - out_h / 20u;
+    }
+    return pp_agc_present_nv12_overlay(vout_handle, buf_idx, gpu_target, nv12, pitch_bytes,
+                                       coded_height, vis_w, vis_h, out_w, out_h, flip_marker,
+                                       ovl, ovl ? AGC_TEST_OVL_W : 0u,
+                                       ovl ? AGC_TEST_OVL_H : 0u, ox, oy, 1u, 0.6f);
+}
+
+/* #28 Phase 3: opt-in gate for the GPU menu present path (linear menu VO +
+ * pp_agc_present_ui). Default --agc-probe build keeps the CPU-tiled menu VO. */
+int pp_agc_ui_ready(void)
+{
+    static int e = -1;
+    if (e < 0) {
+        e = 0;
+        if (getenv("EVO_AGC_UI")) e = 1;
+        else { FILE *f = fopen("/mnt/usb0/evo_agc_ui", "r"); if (f) { e = 1; fclose(f); } }
+    }
+    return e && g_agc.ready;
+}
+
+/* BT.709 full-range RGB->YUV, matching the sceAgc NV12->RGB shader
+ * (pixel_constants). BGRA 0xAABBGGRR in, tightly-packed NV12 out. */
+int pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                      const uint32_t *bgra, uint32_t w, uint32_t h,
+                      uint32_t out_w, uint32_t out_h, int64_t flip_marker)
+{
+    static uint8_t *nv;
+    static size_t   nv_cap;
+    if (!bgra || !w || !h || (w & 1u) || (h & 1u))
+        return -1;
+
+    size_t need = (size_t)w * h + (size_t)w * (h / 2u);
+    if (nv_cap < need) {
+        free(nv);
+        nv = (uint8_t *)malloc(need);
+        nv_cap = nv ? need : 0;
+        if (!nv) return -1;
+    }
+    uint8_t *y  = nv;
+    uint8_t *uv = nv + (size_t)w * h;
+
+    /* BT.709 full-range, coeffs *256 (sum to 256), +128 rounding. Must
+     * round-trip against the sceAgc shader's YUV->RGB (pixel_constants). */
+    for (uint32_t r = 0; r < h; r++) {
+        const uint32_t *sr = bgra + (size_t)r * w;
+        uint8_t *yr = y + (size_t)r * w;
+        for (uint32_t c = 0; c < w; c++) {
+            uint32_t px = sr[c];
+            int R = (int)(px & 0xff), G = (int)((px >> 8) & 0xff), B = (int)((px >> 16) & 0xff);
+            int Y = (54 * R + 183 * G + 19 * B + 128) >> 8;   /* .2126/.7152/.0722 */
+            yr[c] = (uint8_t)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
+        }
+    }
+    for (uint32_t r = 0; r < h; r += 2) {
+        const uint32_t *s0 = bgra + (size_t)r * w;
+        const uint32_t *s1 = bgra + (size_t)(r + 1) * w;
+        uint8_t *ur = uv + (size_t)(r / 2u) * w;
+        for (uint32_t c = 0; c < w; c += 2) {
+            uint32_t p0 = s0[c], p1 = s0[c + 1], p2 = s1[c], p3 = s1[c + 1];
+            int R = ((int)(p0 & 0xff) + (int)(p1 & 0xff) + (int)(p2 & 0xff) + (int)(p3 & 0xff)) >> 2;
+            int G = ((int)((p0 >> 8) & 0xff) + (int)((p1 >> 8) & 0xff) +
+                     (int)((p2 >> 8) & 0xff) + (int)((p3 >> 8) & 0xff)) >> 2;
+            int Bb = ((int)((p0 >> 16) & 0xff) + (int)((p1 >> 16) & 0xff) +
+                      (int)((p2 >> 16) & 0xff) + (int)((p3 >> 16) & 0xff)) >> 2;
+            int Cb = ((-29 * R - 99 * G + 128 * Bb + 128) >> 8) + 128;   /* -.1146/-.3854/.5 */
+            int Cr = ((128 * R - 116 * G - 12 * Bb + 128) >> 8) + 128;   /* .5/-.4542/-.0458 */
+            ur[c]     = (uint8_t)(Cb < 0 ? 0 : Cb > 255 ? 255 : Cb);
+            ur[c + 1] = (uint8_t)(Cr < 0 ? 0 : Cr > 255 ? 255 : Cr);
+        }
+    }
+
+    /* nv12=nv, pitch=w, coded_h=h, vis=w x h, out=out_w x out_h, no overlay */
+    return pp_agc_present_nv12_overlay(vout_handle, buf_idx, gpu_target, nv, w, h,
+                                       w, h, out_w, out_h, flip_marker,
+                                       0, 0, 0, 0, 0, 0, 0.f);
+}
+
 void pp_agc_shutdown(void)
 {
     /* Stop the worker first - unless it is wedged, in which case it is blocked
@@ -938,6 +1350,7 @@ void pp_agc_shutdown(void)
         return;
 
     agc_staging_free();
+    agc_ovl_staging_free();
     if (g_agc.mem) {
         sceKernelMunmap(g_agc.mem, SHADER_MEMORY_BYTES);
         g_agc.mem = 0;
@@ -954,6 +1367,7 @@ void pp_agc_shutdown(void)
 
 int  pp_agc_init(uint32_t w, uint32_t h, int hdr) { (void)w; (void)h; (void)hdr; return -1; }
 int  pp_agc_available(void) { return 0; }
+int  pp_agc_probe_ui_shaders(void) { return -1; }
 int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
                          uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
                          uint32_t oh, int64_t m)
@@ -962,6 +1376,22 @@ int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t 
     (void)vw; (void)vh2; (void)ow; (void)oh; (void)m;
     return -1;
 }
+int  pp_agc_present_nv12_overlay(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
+                                 uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
+                                 uint32_t oh, int64_t m, const void *on, uint32_t ow2,
+                                 uint32_t oh2, uint32_t ox, uint32_t oy, uint32_t os, float oa)
+{
+    (void)vh; (void)bi; (void)gt; (void)n; (void)p; (void)ch; (void)vw; (void)vh2; (void)ow;
+    (void)oh; (void)m; (void)on; (void)ow2; (void)oh2; (void)ox; (void)oy; (void)os; (void)oa;
+    return -1;
+}
+int  pp_agc_present_ui(int vh, uint32_t bi, void *gt, const uint32_t *b, uint32_t w,
+                       uint32_t h, uint32_t ow, uint32_t oh, int64_t m)
+{
+    (void)vh; (void)bi; (void)gt; (void)b; (void)w; (void)h; (void)ow; (void)oh; (void)m;
+    return -1;
+}
+int  pp_agc_ui_ready(void) { return 0; }
 void pp_agc_shutdown(void) {}
 
 #endif /* EVO_APP_MODULE */

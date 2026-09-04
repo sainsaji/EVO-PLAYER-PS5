@@ -22,6 +22,8 @@
 #include <libavutil/opt.h>
 #include "pp_videoout.h"
 #include "pp_playback.h"
+#include "pp_agc.h"
+#include "pp_agc_osd.h"
 #include "pp_output_policy.h"
 #include "pp_product_path.h"
 #include "pp_4k_sdr_policy.h"
@@ -195,6 +197,12 @@ enum {
     SCRUB_OVL_LEAVING,
 };
 static int              prospero_scrub_ovl_state = SCRUB_OVL_NONE;
+
+/* #28 Phase 2: when set, draw_player_screen() renders the OSD into a 1920x1080
+ * scratch (no video draw) and publishes it via pp_agc_osd_publish() for the
+ * sceAgc 4K present path to composite - instead of painting into a VO buffer. */
+static uint32_t        *g_k4_osd_scratch = 0;
+static int              g_k4_osd_publish = 0;
 
 static int g_pp_vo_ready = 0;
 /* Progressive 4K product diag (G-H). Set when gated 4K session opens. */
@@ -381,7 +389,7 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers,
 #if defined(EVO_APP_MODULE)
     /* Must mirror pp_videoout_init's attr choice, so a same-size reconfig that
      * only flips the attr (#27: AGC died -> need a tiled VO) is not skipped. */
-    want_linear = (pp_agc_available() && w >= 3200u) ? 1 : 0;
+    want_linear = ((pp_agc_available() && w >= 3200u) || pp_agc_ui_ready()) ? 1 : 0;
 #endif
     if (g_pp_vo_ready && g_pp_vo.inited && g_vo_w == w && g_vo_h == h &&
         g_pp_vo.buffer_count == buffers &&
@@ -3382,6 +3390,9 @@ void stop_video_playback(void) {
     g_vo_saved_valid   = 0;
     g_osd_clock_paused = 0;
     prospero_scrub_ovl_state = SCRUB_OVL_NONE;   /* #32: don't carry a scrub overlay across sessions */
+#if PP_BACKEND_ENABLED
+    pp_agc_osd_publish(0, 0);                     /* #28: clear the GPU OSD overlay */
+#endif
 #endif
 
     save_resume_position();
@@ -5952,7 +5963,12 @@ void draw_player_screen(uint32_t *fb) {
      * every one of them overwritten by the frame on the very next line: 8 MB
      * a frame, ~500 MB/s of memory traffic at 60fps, for nothing.
      */
-    if (!prospero_music_mode) {
+    if (g_k4_osd_publish) {
+        /* #28: OSD-only pass for the sceAgc 4K present path - the video plane
+         * is already on screen (pp_playback), so paint the OSD over a
+         * transparent 1920x1080 scratch and skip the video draw entirely. */
+        memset(fb, 0, (size_t)WIDTH * HEIGHT * 4u);
+    } else if (!prospero_music_mode) {
         draw_video_frame_to_fb(
             fb,
             0,
@@ -6464,6 +6480,11 @@ double percentage = 0.0;
         }
     }
     /* PROSPERO_STATS_V2_END */
+
+#if PP_BACKEND_ENABLED
+    if (g_k4_osd_publish)
+        pp_agc_osd_publish(fb, osd_visibility > 0);
+#endif
 }
 
 
@@ -10624,6 +10645,11 @@ static void prospero_scrub_overlay_arm(void)
 {
     if (prospero_scrub_ovl_state != SCRUB_OVL_NONE || !pp_product_k4_live(screen))
         return;
+    /* #28: during normal playback the OSD composites straight onto the 4K
+     * plane (pp_agc_osd, decode thread). A committed seek stops the decode
+     * thread pushing frames, so the 1080 overlay VO is still used for scrub
+     * on the AGC path too - revisit once pp_playback presents a held frame
+     * during seek_discard. */
     prospero_scrub_ovl_restore_paused = player_paused;
     prospero_scrub_ovl_was_playing    = !player_paused;
     if (prospero_scrub_ovl_was_playing) {
@@ -12113,6 +12139,29 @@ int main(void) {
          * once the decode thread has parked). Before apply so it lands now. */
         prospero_scrub_overlay_pump();
 
+        /* #28 Phase 2: on the sceAgc 4K present path, render the player OSD
+         * into a 1920x1080 scratch and publish it - the decode thread
+         * composites it over the 4K plane in the same DCB (no 1080 VO drop).
+         * Runs every loop iteration because AGC frames present off the decode
+         * thread and never set `linear` here. */
+        if (screen == SCREEN_PLAYER && pp_product_k4_live(screen) &&
+            pp_agc_available() && pp_agc_osd_enabled()) {
+            static uint64_t s_k4_osd_last_us;
+            struct timespec s_now;
+            clock_gettime(CLOCK_MONOTONIC, &s_now);
+            uint64_t now_us = (uint64_t)s_now.tv_sec * 1000000ull + s_now.tv_nsec / 1000ull;
+            if (now_us - s_k4_osd_last_us >= 33000ull) {   /* cap the OSD re-render at ~30 Hz */
+                s_k4_osd_last_us = now_us;
+                if (!g_k4_osd_scratch)
+                    g_k4_osd_scratch = calloc((size_t)WIDTH * HEIGHT, 4);
+                if (g_k4_osd_scratch) {
+                    g_k4_osd_publish = 1;
+                    draw_player_screen(g_k4_osd_scratch);
+                    g_k4_osd_publish = 0;
+                }
+            }
+        }
+
         /*
          * #27: the sceAgc GPU present died mid-clip (fault / wedge / test hook)
          * and the decode thread hit a CPU-path frame while the VO is still
@@ -13116,7 +13165,28 @@ skip_screen_input:
 #if PP_BACKEND_ENABLED
         (void)idx;
         if (!v8_presented && !v8_hold) {
-            if (pp_videoout_present(&g_pp_vo, pp_buf_idx, (uint64_t)frame) != 0) {
+            int ui_presented = 0;
+            /* #28 Phase 3: GPU menu present - convert the CPU-drawn menu buffer
+             * to NV12 and present it as the fullscreen quad on the linear VO
+             * (opt-in: /mnt/usb0/evo_agc_ui). The CPU tiler must not touch a
+             * linear plane. */
+            if (linear && pp_agc_ui_ready() && g_pp_vo_ready &&
+                pp_videoout_is_linear(&g_pp_vo)) {
+                void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
+                int64_t m = (int64_t)frame + 1;
+                int rc = pp_agc_present_ui(g_pp_vo.handle, pp_buf_idx, plane, linear,
+                                           (uint32_t)WIDTH, (uint32_t)HEIGHT,
+                                           g_vo_w, g_vo_h, m);
+                if (rc == 0 || rc == -2) {
+                    (void)pp_videoout_adopt_flip(&g_pp_vo, pp_buf_idx, (uint64_t)m);
+                    ui_presented = 1;
+                } else {
+                    pp_videoout_release(&g_pp_vo, pp_buf_idx);
+                    ui_presented = 1;   /* buffer handled; drop this frame */
+                }
+            }
+            if (!ui_presented &&
+                pp_videoout_present(&g_pp_vo, pp_buf_idx, (uint64_t)frame) != 0) {
                 /* present failed; buffer already released by backend */
             }
         } else if (v8_hold) {

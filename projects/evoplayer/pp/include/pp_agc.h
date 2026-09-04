@@ -38,6 +38,16 @@ int  pp_agc_init(uint32_t width, uint32_t height, int hdr);
 int  pp_agc_available(void);
 
 /*
+ * #28 Phase 1 go/no-go: create + link the hand-written UI shaders (ui_vs +
+ * solid/glyph/rgba PS) against ProsperoLight's reused headers and log every rc
+ * to evo_boot.log. Pure library calls - no DCB, no draw, no flip; changes no
+ * state. Needs pp_agc_init() to have mapped the shader scratch first. Called
+ * from evo_agc_probe() (--agc-probe builds only). Returns 0 iff all four
+ * CreateShader calls returned 0.
+ */
+int  pp_agc_probe_ui_shaders(void);
+
+/*
  * Present one decoded NV12 frame on the GPU: YUV->RGB fullscreen convert into
  * `gpu_target`, then a flip queued in the same DCB.
  *
@@ -73,6 +83,41 @@ int  pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
                          const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
                          uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
                          int64_t flip_marker);
+
+/*
+ * #28: as pp_agc_present_nv12, plus an OSD quad composited over the video in
+ * the same DCB (2nd DrawIndexAuto, constant-alpha blend). `ovl_nv12` is a
+ * tightly-packed NV12 surface (pitch == ovl_w, interleaved UV at
+ * ovl_nv12 + ovl_w*ovl_h), upscaled ovl_scale x (0/1 = none) with the bilinear
+ * sampler, top-left at (ovl_x, ovl_y) in output space, drawn with ovl_alpha
+ * (0..1). Pass ovl_nv12 = NULL for video-only (pp_agc_present_nv12 does that).
+ * The overlay is best-effort: a bad rect / staging failure drops the overlay
+ * and presents video-only, it never fails the frame. Return codes as
+ * pp_agc_present_nv12.
+ */
+int  pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                                 const void *nv12, uint32_t pitch_bytes, uint32_t coded_height,
+                                 uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h,
+                                 int64_t flip_marker,
+                                 const void *ovl_nv12, uint32_t ovl_w, uint32_t ovl_h,
+                                 uint32_t ovl_x, uint32_t ovl_y, uint32_t ovl_scale,
+                                 float ovl_alpha);
+
+/*
+ * #28 Phase 3: present a CPU-rendered menu/UI frame on the GPU. `bgra` is a
+ * w x h premultiplied 0xAABBGGRR image (an opaque menu surface); it is
+ * converted to NV12 (BT.709 full-range) and presented as the fullscreen quad
+ * scaled to out_w x out_h, then flipped - no video pass. As pp_agc_present_nv12,
+ * the caller adopts the GPU-queued flip on rc == 0 / -2. Only meaningful when
+ * the VO plane is linear-registered (pp_agc_ui_ready()).
+ */
+int  pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                       const uint32_t *bgra, uint32_t w, uint32_t h,
+                       uint32_t out_w, uint32_t out_h, int64_t flip_marker);
+
+/* 1 when the GPU menu present path is opted in (/mnt/usb0/evo_agc_ui or env
+ * EVO_AGC_UI) and pp_agc is ready. Gates the linear menu VO registration. */
+int  pp_agc_ui_ready(void);
 
 void pp_agc_shutdown(void);
 

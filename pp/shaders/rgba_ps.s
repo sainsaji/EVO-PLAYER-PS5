@@ -7,13 +7,16 @@
 ; ProsperoLight's pixel.text.linear-buffer.bin (see README.md). Assemble:
 ;   ./tools/build-shader.sh pp/shaders/rgba_ps.s
 ;
-; Inputs (from the linked VS / SPI setup, per the .header.bin):
-;   s[28:29]  descriptor-table base
-;   s[0:7]    tex0 image descriptor (T#)
-;   s[16:19]  tex0 sampler (S#)
-;   v0, v1    barycentric I, J
-;   m0        interpolation state (from s30)
-;   attr0.xy  UV
+; Inputs — the driver pre-loads the resource descriptors into these SGPRs from
+; the SH register block (sceAgcCbSetShRegisterRangeDirect at SH 0x0c, as in
+; #27's bind_pixel_source), so the shader samples them DIRECTLY. Do NOT s_load
+; over s[0:7] / s[16:19] — the reused pixel.header.bin declares them as live
+; inputs and sceAgcCreateShader rejects code that clobbers them (0x8a6c001f).
+;   s[0:7]      tex0 image descriptor (T#)   — pre-loaded
+;   s[16:19]    tex0 sampler (S#)            — pre-loaded
+;   v0, v1      barycentric I, J
+;   m0          interpolation state (from s30)
+;   attr0.xy    UV
 ;   attr1.xyzw  premultiplied vertex colour (RmlUi ColourbPremultiplied)
 ;
 ; Output:
@@ -38,12 +41,7 @@
 	v_interp_p1_f32_e32 v11, v0, attr1.w
 	v_interp_p2_f32_e32 v11, v1, attr1.w
 
-	; load tex0 image + sampler descriptors
-	s_load_dwordx8 s[0:7],  s[28:29], 0x0
-	s_load_dwordx4 s[16:19], s[28:29], 0x20
-	s_waitcnt lgkmcnt(0)
-
-	; sample -> v4..v7 (RGBA)
+	; sample -> v4..v7 (RGBA) — descriptors already in s[0:7] / s[16:19]
 	image_sample v[4:7], v[2:3], s[0:7], s[16:19] dmask:0xf dim:SQ_RSRC_IMG_2D
 	s_waitcnt vmcnt(0)
 

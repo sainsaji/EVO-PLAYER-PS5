@@ -430,6 +430,43 @@ resource layout. Plan: reuse ProsperoLight's `pixel.header.bin` with our
 reference (doc 70648) + the `.sb` parsers in KytyPS5 / shadPS5 / SharpProspero's
 `ShaderInfo.cs`.
 
+**HARDWARE RESULT (2026-09-04, `pp_agc_probe_ui_shaders`, `--agc-probe`):** the
+reused-`pixel.header.bin` trick works for `solid_ps` (`CreateShader 0x0`,
+`LinkShaders(ui_vs+solid, TriList) 0x0`) but **fails `0x8a6c001f` for every
+textured PS** — `image_sample`, typed `buffer_load_format`, hand-written, and
+our ALU spliced onto the reference NV12 body's *exact* size + `"barefoot"`/`sl00`
+trailer. `sceAgcCreateShader` validates the code body against the header's
+`sl00` resource-metadata whenever a memory resource is touched, and ProsperoLight
+ships that block only for its NV12/P010 shaders.
+
+**Mechanism (confirmed by disassembly + the SharpProspero `ShaderBinary` /
+`AgcShader` parsers):** `sceAgcCreateShader(header, code)` takes only those two
+pointers — there is no separate `sl00` argument. The header (magic `"1234"` /
+`0x34333231` at +0, header size at `[0x40]`, **expected code size at `[0x44]`**,
+program type `[90]`, ctx-reg count `[91]`, sh-reg count `[92]`, `m_userData`
+resource-layout pointer relocated at `+8`) is prepared *in place* and becomes
+the runtime shader object. `pixel.header.bin` `[0x44]` = `0x900` = 2304 = the
+size of `pixel.text.linear-buffer.bin` **including** its post-`s_endpgm`
+`"barefoot"`/`sl00` trailer (`~0x750..0x900`), which carries the per-instruction
+resource-slot / GPR / scoreboard reflection. For a resource-using PS,
+`sceAgcCreateShader` walks that trailer at a header-driven offset — our 92-byte
+hand-written code has nothing there, and our splice (reference trailer, exact
+2304 B) has a trailer that no longer matches the replaced instructions → both
+`0x8a6c001f`. (`ui_vs` passes against `geometry.header.bin` despite being
+184 B < the declared 736 — the VS path is lenient / its resource info is
+self-contained in the header.)
+
+**The GLSL toolchain does NOT fix this.** `glslang` + `SPIRV-LLVM-Translator` /
+RGA emit AMD's standard code-object metadata, not Sony's `sl00`/`barefoot`
+block. A textured hand-authored PS needs one of: (a) RE + synthesise the `sl00`
+trailer format (KytyPS5 / shadPS5 / mattias800/prosper parsers *read* it —
+invert one); (b) extract a plain "sample texture × vertex colour"
+`(header, .text-with-trailer)` pair from a real PS5 app (how ProsperoLight got
+its NV12 blobs — they're from Netflix); (c) `orbis-wave-psslc` (Sony SDK, not
+available). Until then, textured UI (text/icons/art) stays on the CPU-raster →
+NV12 → overlay-quad path (§0, ProsperoLight's HUD model); the GPU geometry path
+is solid-colour only.
+
 **The nicer path (needs a Dockerfile change, not blocking):**
 GLSL → SPIR-V → RDNA2 ISA with open tooling, so Step 3's shader set can be
 written in GLSL (port RmlUi's own GL3/Vulkan backend shaders) instead of
