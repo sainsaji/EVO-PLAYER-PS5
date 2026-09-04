@@ -103,6 +103,22 @@ int  pp_agc_present_nv12_overlay(int vout_handle, uint32_t buf_idx, void *gpu_ta
                                  uint32_t ovl_x, uint32_t ovl_y, uint32_t ovl_scale,
                                  float ovl_alpha);
 
+/*
+ * #28 Phase 3: present a CPU-rendered menu/UI frame on the GPU. `bgra` is a
+ * w x h premultiplied 0xAABBGGRR image (an opaque menu surface); it is
+ * converted to NV12 (BT.709 full-range) and presented as the fullscreen quad
+ * scaled to out_w x out_h, then flipped - no video pass. As pp_agc_present_nv12,
+ * the caller adopts the GPU-queued flip on rc == 0 / -2. Only meaningful when
+ * the VO plane is linear-registered (pp_agc_ui_ready()).
+ */
+int  pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                       const uint32_t *bgra, uint32_t w, uint32_t h,
+                       uint32_t out_w, uint32_t out_h, int64_t flip_marker);
+
+/* 1 when the GPU menu present path is opted in (/mnt/usb0/evo_agc_ui or env
+ * EVO_AGC_UI) and pp_agc is ready. Gates the linear menu VO registration. */
+int  pp_agc_ui_ready(void);
+
 void pp_agc_shutdown(void);
 
 #ifdef __cplusplus

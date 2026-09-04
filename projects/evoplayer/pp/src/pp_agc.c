@@ -1236,6 +1236,74 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
                                        ovl ? AGC_TEST_OVL_H : 0u, ox, oy, 1u, 0.6f);
 }
 
+/* #28 Phase 3: opt-in gate for the GPU menu present path (linear menu VO +
+ * pp_agc_present_ui). Default --agc-probe build keeps the CPU-tiled menu VO. */
+int pp_agc_ui_ready(void)
+{
+    static int e = -1;
+    if (e < 0) {
+        e = 0;
+        if (getenv("EVO_AGC_UI")) e = 1;
+        else { FILE *f = fopen("/mnt/usb0/evo_agc_ui", "r"); if (f) { e = 1; fclose(f); } }
+    }
+    return e && g_agc.ready;
+}
+
+/* BT.709 full-range RGB->YUV, matching the sceAgc NV12->RGB shader
+ * (pixel_constants). BGRA 0xAABBGGRR in, tightly-packed NV12 out. */
+int pp_agc_present_ui(int vout_handle, uint32_t buf_idx, void *gpu_target,
+                      const uint32_t *bgra, uint32_t w, uint32_t h,
+                      uint32_t out_w, uint32_t out_h, int64_t flip_marker)
+{
+    static uint8_t *nv;
+    static size_t   nv_cap;
+    if (!bgra || !w || !h || (w & 1u) || (h & 1u))
+        return -1;
+
+    size_t need = (size_t)w * h + (size_t)w * (h / 2u);
+    if (nv_cap < need) {
+        free(nv);
+        nv = (uint8_t *)malloc(need);
+        nv_cap = nv ? need : 0;
+        if (!nv) return -1;
+    }
+    uint8_t *y  = nv;
+    uint8_t *uv = nv + (size_t)w * h;
+
+    for (uint32_t r = 0; r < h; r++) {
+        const uint32_t *sr = bgra + (size_t)r * w;
+        uint8_t *yr = y + (size_t)r * w;
+        for (uint32_t c = 0; c < w; c++) {
+            uint32_t px = sr[c];
+            int R = (int)(px & 0xff), G = (int)((px >> 8) & 0xff), B = (int)((px >> 16) & 0xff);
+            int Y = (54 * R + 183 * G + 18 * B) >> 8;
+            yr[c] = (uint8_t)(Y < 0 ? 0 : Y > 255 ? 255 : Y);
+        }
+    }
+    for (uint32_t r = 0; r < h; r += 2) {
+        const uint32_t *s0 = bgra + (size_t)r * w;
+        const uint32_t *s1 = bgra + (size_t)(r + 1) * w;
+        uint8_t *ur = uv + (size_t)(r / 2u) * w;
+        for (uint32_t c = 0; c < w; c += 2) {
+            uint32_t p0 = s0[c], p1 = s0[c + 1], p2 = s1[c], p3 = s1[c + 1];
+            int R = ((int)(p0 & 0xff) + (int)(p1 & 0xff) + (int)(p2 & 0xff) + (int)(p3 & 0xff)) >> 2;
+            int G = ((int)((p0 >> 8) & 0xff) + (int)((p1 >> 8) & 0xff) +
+                     (int)((p2 >> 8) & 0xff) + (int)((p3 >> 8) & 0xff)) >> 2;
+            int Bb = ((int)((p0 >> 16) & 0xff) + (int)((p1 >> 16) & 0xff) +
+                      (int)((p2 >> 16) & 0xff) + (int)((p3 >> 16) & 0xff)) >> 2;
+            int Cb = ((-29 * R - 99 * G + 128 * Bb) >> 8) + 128;
+            int Cr = ((128 * R - 116 * G - 12 * Bb) >> 8) + 128;
+            ur[c]     = (uint8_t)(Cb < 0 ? 0 : Cb > 255 ? 255 : Cb);
+            ur[c + 1] = (uint8_t)(Cr < 0 ? 0 : Cr > 255 ? 255 : Cr);
+        }
+    }
+
+    /* nv12=nv, pitch=w, coded_h=h, vis=w x h, out=out_w x out_h, no overlay */
+    return pp_agc_present_nv12_overlay(vout_handle, buf_idx, gpu_target, nv, w, h,
+                                       w, h, out_w, out_h, flip_marker,
+                                       0, 0, 0, 0, 0, 0, 0.f);
+}
+
 void pp_agc_shutdown(void)
 {
     /* Stop the worker first - unless it is wedged, in which case it is blocked
@@ -1288,6 +1356,13 @@ int  pp_agc_present_nv12_overlay(int vh, uint32_t bi, void *gt, const void *n, u
     (void)oh; (void)m; (void)on; (void)ow2; (void)oh2; (void)ox; (void)oy; (void)os; (void)oa;
     return -1;
 }
+int  pp_agc_present_ui(int vh, uint32_t bi, void *gt, const uint32_t *b, uint32_t w,
+                       uint32_t h, uint32_t ow, uint32_t oh, int64_t m)
+{
+    (void)vh; (void)bi; (void)gt; (void)b; (void)w; (void)h; (void)ow; (void)oh; (void)m;
+    return -1;
+}
+int  pp_agc_ui_ready(void) { return 0; }
 void pp_agc_shutdown(void) {}
 
 #endif /* EVO_APP_MODULE */

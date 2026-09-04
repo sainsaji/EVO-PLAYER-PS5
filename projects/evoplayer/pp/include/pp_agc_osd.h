@@ -12,8 +12,8 @@
  * This replaces #32's drop-to-1080-VO scrub stopgap: the OSD now composites on
  * the 4K plane in the same DCB as the video.
  */
-#ifndef PP_AGC_OSD_H
-#define PP_AGC_OSD_H
+#ifndef PP_AGC_OSD_H_INCLUDED
+#define PP_AGC_OSD_H_INCLUDED
 
 #include <stddef.h>
 #include <stdint.h>
@@ -60,4 +60,4 @@ int  pp_agc_osd_enabled(void);
 }
 #endif
 
-#endif /* PP_AGC_OSD_H */
+#endif /* PP_AGC_OSD_H_INCLUDED */

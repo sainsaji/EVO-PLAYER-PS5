@@ -272,7 +272,10 @@ int pp_videoout_init(pp_videoout *vo,
      * the V3-fallback overflow from the unreachable-AGC bug, since fixed.
      */
 #if defined(EVO_APP_MODULE)
-    vo->attr_linear = (pp_agc_available() && width >= 3200u) ? 1 : 0;
+    /* UHD playback VO: linear when the sceAgc video path is armed (#27).
+     * 1080 menu VO: linear only when the GPU menu present path is opted in
+     * (#28 Phase 3, pp_agc_ui_ready) - otherwise the CPU tiler garbles it. */
+    vo->attr_linear = ((pp_agc_available() && width >= 3200u) || pp_agc_ui_ready()) ? 1 : 0;
 #else
     vo->attr_linear = 0;
 #endif

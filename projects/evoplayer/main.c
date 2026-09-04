@@ -389,7 +389,7 @@ static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers,
 #if defined(EVO_APP_MODULE)
     /* Must mirror pp_videoout_init's attr choice, so a same-size reconfig that
      * only flips the attr (#27: AGC died -> need a tiled VO) is not skipped. */
-    want_linear = (pp_agc_available() && w >= 3200u) ? 1 : 0;
+    want_linear = ((pp_agc_available() && w >= 3200u) || pp_agc_ui_ready()) ? 1 : 0;
 #endif
     if (g_pp_vo_ready && g_pp_vo.inited && g_vo_w == w && g_vo_h == h &&
         g_pp_vo.buffer_count == buffers &&
@@ -13165,7 +13165,28 @@ skip_screen_input:
 #if PP_BACKEND_ENABLED
         (void)idx;
         if (!v8_presented && !v8_hold) {
-            if (pp_videoout_present(&g_pp_vo, pp_buf_idx, (uint64_t)frame) != 0) {
+            int ui_presented = 0;
+            /* #28 Phase 3: GPU menu present - convert the CPU-drawn menu buffer
+             * to NV12 and present it as the fullscreen quad on the linear VO
+             * (opt-in: /mnt/usb0/evo_agc_ui). The CPU tiler must not touch a
+             * linear plane. */
+            if (linear && pp_agc_ui_ready() && g_pp_vo_ready &&
+                pp_videoout_is_linear(&g_pp_vo)) {
+                void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
+                int64_t m = (int64_t)frame + 1;
+                int rc = pp_agc_present_ui(g_pp_vo.handle, pp_buf_idx, plane, linear,
+                                           (uint32_t)WIDTH, (uint32_t)HEIGHT,
+                                           g_vo_w, g_vo_h, m);
+                if (rc == 0 || rc == -2) {
+                    (void)pp_videoout_adopt_flip(&g_pp_vo, pp_buf_idx, (uint64_t)m);
+                    ui_presented = 1;
+                } else {
+                    pp_videoout_release(&g_pp_vo, pp_buf_idx);
+                    ui_presented = 1;   /* buffer handled; drop this frame */
+                }
+            }
+            if (!ui_presented &&
+                pp_videoout_present(&g_pp_vo, pp_buf_idx, (uint64_t)frame) != 0) {
                 /* present failed; buffer already released by backend */
             }
         } else if (v8_hold) {
