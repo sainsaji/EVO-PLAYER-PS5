@@ -991,6 +991,14 @@ static int agc_render_geo(int video, int buffer_index, void *target,
     agc_register_t **blocks;
     uint32_t default_count;
     uint32_t cx_count = 16;
+    /* #67 diagnostic: geo_dbg() below goes silent after the FIRST successful
+     * geo frame ever (geo_first_ok latches from ordinary solids-only frames,
+     * long before the text pass is armed) - so it can show a clean first
+     * text-pass frame and then say nothing about the one that actually wedges.
+     * Un-gate G4/G5/G6 unconditionally for the first few frames where the
+     * text pass fires specifically, bounded so it doesn't flood. */
+    static int text_pass_frame_n = 0;
+    int text_pass_this_frame = 0;
 
     if (!defaults || !target || !g_agc.mesh_vs || !g_agc.mesh_ps ||
         out_w == 0 || out_h == 0 || vtx_count == 0 || idx_count == 0 || draw_count == 0)
@@ -1303,16 +1311,18 @@ static int agc_render_geo(int video, int buffer_index, void *target,
 
                 sceAgcDcbDrawIndexAuto(&command, 4, 2);
                 geo_dbg("Gt text pass %ux%u nc=%u", text_w, text_h, nc);
-                /* Diagnostic only, NOT gated by geo_first_ok (which almost
-                 * always latches true before this pass is ever armed, from
-                 * ordinary solids-only frames) - without this there is no
-                 * way to confirm the pass actually ran, as opposed to
-                 * evo_rmlui_app.cpp's unconditional CPU fallback copy of
-                 * m_surface carrying the text on its own. One line, once. */
-                static int firing_logged = 0;
-                if (!firing_logged) {
-                    firing_logged = 1;
-                    evo_boot_log("pp_agc: GEO-TEXT PASS FIRED %ux%u src=%p", text_w, text_h, text_nv12);
+                /* Diagnostic only, NOT gated by geo_first_ok - without this
+                 * there is no way to confirm the pass actually ran, as
+                 * opposed to evo_rmlui_app.cpp's unconditional CPU fallback
+                 * copy of m_surface carrying the text on its own. Bounded to
+                 * the first few text-pass frames (see text_pass_frame_n
+                 * above) so the SubmitDcb/SuspendPoint results below are
+                 * still visible even after geo_first_ok silences geo_dbg. */
+                text_pass_this_frame = 1;
+                if (text_pass_frame_n < 5) {
+                    evo_boot_log("pp_agc: GEO-TEXT PASS FIRED #%d %ux%u src=%p tex=0x%08x,0x%08x,0x%08x,0x%08x",
+                                 text_pass_frame_n, text_w, text_h, text_nv12,
+                                 tex[0], tex[1], tex[2], tex[3]);
                     evo_boot_log_flush();
                 }
             }
@@ -1339,13 +1349,28 @@ static int agc_render_geo(int video, int buffer_index, void *target,
      * describe is gone with it), so one flush range covers both cases. */
     flush_gpu_data(memory + OFF_MESH_LINK_CX, (OFF_GEO_SH + 0x1000u) - OFF_MESH_LINK_CX);
 
+    int unconditional_log = text_pass_this_frame && text_pass_frame_n < 5;
     geo_dbg("G4 DCB built (%u words) -> SubmitDcb", submit.word_count);
+    if (unconditional_log) {
+        evo_boot_log("pp_agc: G4t (text-pass frame #%d) DCB built (%u words) -> SubmitDcb",
+                     text_pass_frame_n, submit.word_count);
+        evo_boot_log_flush();
+    }
     {
         int32_t result = sceAgcDriverSubmitDcb(&submit);
         geo_dbg("G5 SubmitDcb=0x%08x -> SuspendPoint", (unsigned)result);
+        if (unconditional_log) {
+            evo_boot_log("pp_agc: G5t SubmitDcb=0x%08x -> SuspendPoint", (unsigned)result);
+            evo_boot_log_flush();
+        }
         if (result == 0)
             result = sceAgcSuspendPoint();
         geo_dbg("G6 SuspendPoint done, result=0x%08x", (unsigned)result);
+        if (unconditional_log) {
+            evo_boot_log("pp_agc: G6t SuspendPoint done, result=0x%08x", (unsigned)result);
+            evo_boot_log_flush();
+            text_pass_frame_n++;
+        }
         return result;
     }
 }
