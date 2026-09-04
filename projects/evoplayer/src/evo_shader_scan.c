@@ -43,8 +43,13 @@ extern int32_t sceAgcDriverSubmitDcb(void *desc);
 extern int     sceVideoOutSubmitFlip(int h, int idx, uint32_t mode, int64_t arg);
 extern int     sceKernelGetModuleInfoFromAddr(const void *addr, int flags, void *info);
 
-#define PAGE   0x4000u
 #define OUTDIR "/mnt/usb0/evo_shaders"
+
+/* The scan body below KP'd the console (2026-09-04) and is kept only as a
+ * record of the approach - #if 0'd out. The working textured pixel shader
+ * (pp/blobs/blit_ps.*) was ripped OFFLINE from a decrypted game dump instead. */
+#if 0
+#define PAGE   0x4000u
 
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_armed;
@@ -171,30 +176,18 @@ static void scan_module(const char *tag, const void *anchor)
     evo_boot_log_flush();
 }
 
+#endif /* 0 - disabled scan body */
+
 void evo_shader_scan(void)
 {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_handler = seg_h;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS,  &sa, NULL);
-
-    evo_mkdir(OUTDIR);
-    evo_boot_log("shader_scan: START -> " OUTDIR);
+    /* DISABLED - the in-process module scan KP'd the console (2026-09-04).
+     * The working textured pixel shader (pp/blobs/blit_ps.*) was ripped OFFLINE
+     * from a decrypted game dump instead (commit be90091). Kept flag-gated so a
+     * stray --shader-scan build can't brick a console. */
+    evo_boot_log("shader_scan: DISABLED (KP risk) - see pp/blobs/blit_ps");
     evo_boot_log_flush();
-
-    /* force-bind the lazy PRX imports so &fn is the real module address */
-    (void)sceVideoOutSubmitFlip(-1, 0, 0, 0);
-    { uint64_t d[64]; d[0] = sizeof d;
-      (void)sceKernelGetModuleInfoFromAddr((void *)&sceKernelGetModuleInfoFromAddr, 1, d); }
-
-    scan_module("videoout", (const void *)&sceVideoOutSubmitFlip);
-    scan_module("agc",      (const void *)&sceAgcCreateShader);
-    scan_module("agcdrv",   (const void *)&sceAgcDriverSubmitDcb);
-    scan_module("libc",     (const void *)&sceKernelGetModuleInfoFromAddr);
-
-    evo_boot_log("shader_scan: DONE - %d files", g_dump_n);
-    evo_boot_log_flush();
+    (void)sceAgcCreateShader; (void)sceAgcDriverSubmitDcb;
+    (void)sceVideoOutSubmitFlip; (void)sceKernelGetModuleInfoFromAddr;
 }
 
 #endif /* EVO_SHADER_SCAN */
