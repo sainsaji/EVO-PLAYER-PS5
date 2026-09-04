@@ -2,7 +2,45 @@
 
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
-> Last updated **2026-09-03**. Branch: **`refactor/main-c-media-modules`**.
+> Last updated **2026-09-04**. Branch: **`feat/28-gpu-ui`** (off `refactor/main-c-media-modules`).
+>
+> ## #28 (GPU Step 3 — RmlUi/OSD on sceAgc) — IN PROGRESS on `feat/28-gpu-ui`
+>
+> **Shader question settled (4 `--agc-probe` runs, 2026-09-04):** `ui_vs` +
+> `solid_ps` create + link (triangle list) clean — the **solid-colour GPU
+> geometry path is hand-writable**. **Every textured pixel shader fails
+> `0x8a6c001f`** (`image_sample` and typed `buffer_load_format`, hand-written and
+> spliced-onto-the-reference-trailer alike) — `sceAgcCreateShader` validates code
+> against the header's `sl00` resource-metadata whenever memory is touched, and
+> ProsperoLight ships headers only for its NV12/P010 shaders. Textured UI (text,
+> icons, art) as GPU geometry needs a GLSL→SPIR-V→AMD-ISA compiler (Dockerfile).
+>
+> **Research payoff:** ProsperoLight renders its HUD with **zero custom shaders**
+> — CPU-raster → NV12 → 2nd quad in the same DCB (constant-alpha blend `0x1e0 =
+> 0x40001413`), reusing the NV12 shader. This is the basis for Phases 1–3.
+>
+> | Phase | State | Gate |
+> |---|---|---|
+> | 0 — shader set + `build-shader.sh --all` + `agc_ui_blobs.S` | landed | — |
+> | 1 — overlay quad in `agc_render_frame` (ProsperoLight `draw_overlay`) | **hw-verified** — test bar composited over GTA 4K, `render_frame rc=0`, 196-word DCB, heartbeat ~1 ms, no wedge | `/mnt/usb0/evo_agc_test_overlay` |
+> | 2 — player OSD composited over 4K (`pp_agc_osd`, `pp_agc_present_nv12_overlay`) | code landed, **1st hw run: compose too slow (~11 ms RGB round-trip) + a committed seek stops frame pushes → "stuck"**. Reworked: YUV-space premultiplied blend, no RGB round-trip. Scrub still drops to the 1080 VO (#32). **hw-verify pending** | `/mnt/usb0/evo_agc_osd` |
+> | 3 — GPU menu present (`pp_agc_present_ui`, linear 1080 VO) | code landed, **not yet on hw** | `/mnt/usb0/evo_agc_ui` |
+> | 4 — held-scroll: `evo_rmlui_render_agc.cpp` solid geometry + GLSL toolchain for text | not started | — |
+>
+> **A `--agc-probe` deploy on 2026-09-04 ended in a kernel panic** (deploy exit 1
+> then KP — likely the OSD build left the app slot dirty + ShadowMount
+> auto-relaunch stacking). Every #28 GPU path is now behind its own
+> `/mnt/usb0/evo_agc_*` hook — the default `--agc-probe` build presents the
+> proven #27 video-only path. **Boot the previous build first to confirm console
+> health before deploying a new one.**
+>
+> **RESUME #28 →** console session: `evo-remote.sh build --agc-probe`, boot the
+> OLD image once (health check), PS-close, deploy new, then per phase drop the
+> hook file (`ftp STOR /mnt/usb0/evo_agc_osd` etc.), play a 4K H.264, check
+> `pp_agc_osd: compose avg=…us`, `012C_AGC_OSD_OVERLAY`, no wedge. Full plan:
+> `~/.claude/plans/optimized-honking-wilkinson.md`.
+>
+> ---
 >
 > **#27 (GPU Step 2) — ✅ CLOSED 2026-09-04, PR #61 merged** to
 > `refactor/main-c-media-modules`. GTA 4K plays through the sceAgc GPU present
