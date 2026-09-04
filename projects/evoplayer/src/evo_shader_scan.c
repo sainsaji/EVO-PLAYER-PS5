@@ -46,23 +46,6 @@ extern int     sceKernelGetModuleInfoFromAddr(const void *addr, int flags, void 
 #define PAGE   0x4000u
 #define OUTDIR "/mnt/usb0/evo_shaders"
 
-/* PS5 SceKernelModuleInfoEx (libkernel). Fields past segmentInfo we don't use.
- * st_size must be set to sizeof(*info) before the call, like the PS4 API. */
-typedef struct { uint64_t addr; uint32_t size; int32_t prot; } sc_seg_t;
-typedef struct {
-    uint64_t st_size;                    /* 0x000 */
-    char     name[256];                  /* 0x008 */
-    int32_t  id;                         /* 0x108 */
-    uint32_t tls_index;                  /* 0x10c */
-    uint64_t tls_init_addr;              /* 0x110 */
-    uint32_t tls_init_size, tls_size, tls_offset, tls_align;  /* 0x118 */
-    uint64_t init_proc, fini_proc, eh_hdr, eh_frame;          /* 0x128 */
-    uint32_t eh_hdr_size, eh_frame_size;                      /* 0x148 */
-    sc_seg_t seg[4];                     /* 0x150 */
-    uint32_t seg_count;                  /* 0x190 */
-    uint32_t ref_count;                  /* 0x194 */
-} sc_modinfo_t;                          /* 0x198 */
-
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_armed;
 
@@ -154,36 +137,35 @@ static void scan_region(const char *tag, const uint8_t *base, size_t len,
 
 static void scan_module(const char *tag, const void *anchor)
 {
-    static sc_modinfo_t mi;
-    memset(&mi, 0, sizeof mi);
-    mi.st_size = sizeof mi;
-    int rc = sceKernelGetModuleInfoFromAddr(anchor, 1, &mi);
-    if (rc != 0 || mi.seg_count == 0 || mi.seg_count > 4) {
-        evo_boot_log("shader_scan: %s GetModuleInfoFromAddr(%p) rc=0x%x segs=%u",
-                     tag, anchor, (unsigned)rc, mi.seg_count);
-        evo_boot_log_flush();
-        return;
-    }
-    mi.name[sizeof mi.name - 1] = 0;
-    evo_boot_log("shader_scan: %s = '%s' id=%d segs=%u", tag, mi.name, mi.id, mi.seg_count);
-    evo_boot_log_flush();
-    /* if the anchor was an unbound GOT trampoline, GetModuleInfoFromAddr
-     * returns EVO's own module - skip (nothing new to find, our own blobs). */
-    if (strncmp(mi.name, "libSce", 6) != 0 && strncmp(mi.name, "libkernel", 9) != 0) {
-        evo_boot_log("shader_scan: %s not a system module, skipping", tag);
-        evo_boot_log_flush();
-        return;
-    }
+    static uint64_t raw[64];   /* 512 B - enough for the whole ModuleInfoEx */
+    memset(raw, 0, sizeof raw);
+    raw[0] = sizeof raw;       /* st_size */
+    int rc = sceKernelGetModuleInfoFromAddr(anchor, 1, raw);
 
+    /* dump the struct so we can pin the real layout (name @ 0x08 is ASCII;
+     * segment addrs are 0x8000xxxxx; count is a small int nearby). */
+    const uint8_t *r = (const uint8_t *)raw;
+    evo_boot_log("shader_scan: %s rc=0x%x name='%.40s'", tag, (unsigned)rc, r + 8);
+    for (int q = 0x100; q < 0x1c0; q += 0x20)
+        evo_boot_log("  +%03x: %016llx %016llx %016llx %016llx", q,
+                     (unsigned long long)*(uint64_t *)(r + q),
+                     (unsigned long long)*(uint64_t *)(r + q + 8),
+                     (unsigned long long)*(uint64_t *)(r + q + 16),
+                     (unsigned long long)*(uint64_t *)(r + q + 24));
+    evo_boot_log_flush();
+
+    /* heuristic scan: walk 0x108..0x1a0 for (addr in 0x800000000..0x900000000,
+     * size 0x1000..0x4000000) triples and scan each. */
     int hdrs = 0, feet = 0;
-    for (uint32_t s = 0; s < mi.seg_count; s++) {
-        if (!mi.seg[s].addr || !mi.seg[s].size || mi.seg[s].size > 0x4000000u)
-            continue;
-        evo_boot_log("shader_scan:   %s seg[%u] %llx +%x prot=%x",
-                     tag, s, (unsigned long long)mi.seg[s].addr,
-                     mi.seg[s].size, mi.seg[s].prot);
-        scan_region(tag, (const uint8_t *)(uintptr_t)mi.seg[s].addr,
-                    mi.seg[s].size, &hdrs, &feet);
+    for (int q = 0x100; q < 0x1a0; q += 8) {
+        uint64_t a = *(uint64_t *)(r + q);
+        uint32_t sz = *(uint32_t *)(r + q + 8);
+        if (a >= 0x800000000ull && a < 0x900000000ull &&
+            sz >= 0x1000 && sz <= 0x4000000u) {
+            evo_boot_log("shader_scan:   %s cand seg @%llx +%x", tag,
+                         (unsigned long long)a, sz);
+            scan_region(tag, (const uint8_t *)(uintptr_t)a, sz, &hdrs, &feet);
+        }
     }
     evo_boot_log("shader_scan: %s done - %d hdr, %d code", tag, hdrs, feet);
     evo_boot_log_flush();
@@ -203,7 +185,8 @@ void evo_shader_scan(void)
 
     /* force-bind the lazy PRX imports so &fn is the real module address */
     (void)sceVideoOutSubmitFlip(-1, 0, 0, 0);
-    { sc_modinfo_t d; (void)sceKernelGetModuleInfoFromAddr((void *)&sceKernelGetModuleInfoFromAddr, 1, &d); }
+    { uint64_t d[64]; d[0] = sizeof d;
+      (void)sceKernelGetModuleInfoFromAddr((void *)&sceKernelGetModuleInfoFromAddr, 1, d); }
 
     scan_module("videoout", (const void *)&sceVideoOutSubmitFlip);
     scan_module("agc",      (const void *)&sceAgcCreateShader);
