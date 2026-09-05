@@ -281,6 +281,7 @@ work as discrete stories:
 | **#35** part B | On-video **caption** rendering off legacy `rr_text` → RmlUi | open |
 | **#28** | Bind `Rml::RenderInterface` → `sceAgc` + delete the CPU coverage rasteriser (GPU Step 3, after #27) | open, low |
 | ~~#60~~ | ✅ **CLOSED 2026-09-05, hardware-verified.** Make `.ffpfsc` self-contained: embedded RmlUi assets in binary via `evo_rmlui_bundle_data.cpp` (`tools/bundle_rml_assets.py`) + `EvoRmlFileInterface`, `#44`'s out-of-band FTP asset sync deleted from `deploy-app.sh`. Hardware-verified on PPSA99039 with `/data/evoplayer/app/assets/` completely absent. |
+| **#74** | Revamp About screen with dedicated RmlUi layout & Codec Capabilities Matrix | code complete (`8a2af88`), pending hw verify |
 | **#68** | Enhance UI geometry and styling on GPU: fluid curves, shadows, and analytical anti-aliasing | open, medium |
 
 - Reads: `docs/rmlui-integration-guide.md` (§7 per-screen parity specs),
