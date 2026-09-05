@@ -80,13 +80,28 @@ blanking (evo_cover_budget cache check, v0.9.0, bug, `priority: medium`) ·
 These edges are also wired as **native GitHub relationships** (2026-09-03) so
 the issue UI shows blockers / sub-tasks directly:
 
-- **Sub-issues:** #46 → #50, #51  (#44 → #16 both ✅ closed)
-- **Blocking → blocked:** #35 → #43 · #37 → #38 · #8 → #38 ·
-  #53 → #50 (`main.c` logic can't be host-linked for tests until the carve-up).
-  #6 + #27 both closed → **#28 unblocked** (2026-09-04).
+- **Sub-issues:**
+  - #68 → #69, #70 (GPU geometry: 4x MSAA & analytical SDF shaders)
+  - #46 → #50, #51 (data-root test coverage & breadcrumb quieting)
+  - #44 → #16 (RmlUi screen parity & text clamps, both closed)
+  - #29 → #30, #31 (native decode phases, both closed)
+  - #25 → #44, #45 (RmlUi umbrella, closed)
+  - #3 → #42, #43 (subtitle meta tracker, closed)
+- **Blocking → blocked:**
+  - #67 → #68, #69, #70 (compositing CPU text over GPU geometry blocks GPU UI fidelity)
+  - #60 → #36 (self-contained `.ffpfsc` blocks release pipeline packaging)
+  - #37 → #38, #41, #47, #59 (video decoder toggle blocks benchmark, HEVC, audio passthrough, and UI badge)
+  - #59 → #63 (decoder indicator blocks Diagnostic HUD graphs)
+  - #4 → #5 (10-bit fast path before swscale multi-threading)
+  - #31 → #39, #40 (native decoder backend blocks hang recovery & memory tidy)
+  - #46 → #72 (persistence & data root blocks Lapy JB internal storage fix)
+  - #35 → #43 (caption overlay blocks styled `.ass`)
+  - #53 → #50 (`main.c` carve-up blocks test suite)
+  - #6 + #27 both closed → #28 unblocked → #67 (text-over-GPU underway).
 
-Every open issue also carries a prose `<!-- rel -->` block (Depends on / Blocks
-/ Related) — softer "coordinate with" / "do before" links live there only.
+All relationships are wired natively via GitHub's Issue Relationships
+(`blocked-by`, `blocking`, and `sub-issues` / `parent`), visible directly in the
+GitHub issue sidebar and Project #5 board.
 
 ```
                  ┌─────────────────── independent, any order, no console ───────────────────┐
@@ -150,7 +165,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#34** | App module crashes when the native PS5 IME keyboard is opened (directory search). Same `sceKernelLoadStartModule`/undeclared-PRX wall as #27/#31 — `libSceImeDialog`/`libSceCommonDialog` aren't linked or PRX-stubbed for `PPSA99039`. Stopgap: force the virtual keyboard in the app module | `projects/evoplayer/ui/src/evo_keyboard.c`, `ui/include/evo_ime_dialog.h`, `main.c` (~L12504 search, ~L7581 kb toggle), `scripts/package-app.sh` (steps 5 + 6b), `tools/native-app/stubs/prx/README.md` |
 | ~~#46~~ | ✅ **CLOSED 2026-09-03, hardware-verified.** Runtime data-root resolution (`/data/evoplayer` once `evo_jailbreak_is_open()`, `/download0` fallback) + `evo_mkdir`=`sceKernelMkdir` + `evo_persistence_rebind()` + one-shot store migration. `788b1a0`. Follow-ups: #50 (tests), #51 (breadcrumbs). |
 | **#50** | *(sub-issue of #46)* Grow the host test suite over the #46 runtime data-root logic (`evo_data_path` join / rebind / `evo_mkdir`) and the persistence parsers (`evo_recent`, `evo_favorites`), plus `evo_theme` parse + `evo_theme_reset`, `evo_layout` geometry. Host-only; CI wiring stays with #17 | `tests/run_tests.sh` (SRCS), `tests/test_runner.c`, `src/evo_data_path.c`, `src/evo_recent.c`, `src/evo_favorites.c`, `pp/src/evo_theme.c`, `ui/src/evo_layout.c` |
-| ~~#51~~ | *(sub-issue of #46)* **Landed, `hw-verify-pending`.** Split the on-screen notification popup from the durable channels: `evo_bt_()`'s guard moved from `EVO_BOOT_TRACE` to `EVO_APP_MODULE` so `sceKernelDebugOutText` (klog) is unconditional; `sceKernelSendNotificationRequest` in both `evo_bt_()` and `evo_boot_log()` moved behind opt-in `EVO_BOOT_TRACE_POPUP` (`package-app.sh --breadcrumbs`). Default `APP_DEFS` no longer sets `-DEVO_BOOT_TRACE=1`; `main.c`'s readdir self-test re-gated on `EVO_BOOT_TRACE_POPUP` (same opt-in) since the bare `EVO_BOOT_TRACE` macro no longer exists. Both default and `--breadcrumbs` builds verified compile-clean via `package-app.sh --ffpfsc`; needs a hardware boot to confirm klog still shows `EVO boot:` lines with the popups gone. | `include/evo_boot_trace.h`, `src/evo_boot_log.c`, `include/evo_boot_log.h`, `main.c`, `scripts/package-app.sh`, `docs/tooling.md`, `docs/evo-pro/status.md` |
+| ~~#51~~ | ✅ **CLOSED 2026-09-05, hardware-verified.** *(sub-issue of #46)* Split the on-screen notification popup from the durable channels: `evo_bt_()`'s guard moved from `EVO_BOOT_TRACE` to `EVO_APP_MODULE` so `sceKernelDebugOutText` (klog) is unconditional; `sceKernelSendNotificationRequest` moved behind opt-in `EVO_BOOT_TRACE_POPUP` (`package-app.sh --breadcrumbs`). Default `APP_DEFS` no longer sets `-DEVO_BOOT_TRACE=1`; `main.c`'s readdir self-test re-gated on `EVO_BOOT_TRACE_POPUP` since the bare `EVO_BOOT_TRACE` macro no longer exists. **Scope grew during hw testing**: two more unconditional popup sources turned up and got the same treatment — `pp_stage_bc()` (`pp_stage_breadcrumb.c`, fires on every `P8_AVLOG`/`SEEK_AVFRAME`/`P8_VDEC_FATAL` checkpoint, i.e. routinely *during playback*) and `evo_vdec_native.c`'s `note()` (decode heartbeat/errors — the reported recurring "EVO vdec native:" popups mid-playback). Both now gated on the same `EVO_BOOT_TRACE_POPUP`, klog/file trails left unconditional. Hardware-verified: default build boots + plays with popups gone, confirmed by the user. | `include/evo_boot_trace.h`, `src/evo_boot_log.c`, `include/evo_boot_log.h`, `pp/src/pp_stage_breadcrumb.c`, `media/src/evo_vdec_native.c`, `main.c`, `scripts/package-app.sh`, `docs/tooling.md`, `docs/evo-pro/status.md` |
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc` — the ELF/hbldr context has no hw decode / GPU / user session (#27/#31), so a tagged ELF release ships a player that can't do the headline features. Rework `release.yml` build + verify + notes (ShadowMount+ install), CI `package-app --ffpfsc` link-check, version consistency (VERSION ↔ tag ↔ `param.json`), doc flip. Decision owed: fate of the ELF artifacts (recommend: keep `player-only.elf` labelled "limited" for 1–2 releases, then drop) | `.github/workflows/{release,build}.yml`, `scripts/{package-app,deploy-app,setup-pfs-tool,build-media-tile,package-pkg}.sh`, `projects/evoplayer/{VERSION,CHANGELOG.md,sce_sys/param.json}`, `docs/{packaging,tooling,validation}.md` |
 | **#63** | Real-time CPU, GPU, and RAM usage graphs in the player Diagnostic HUD (Stats for Nerds) | `projects/evoplayer/assets/rml/playback.rml`, `projects/evoplayer/assets/rml/playback.rcss`, `pp/include/pp_pipeline_metrics.h`, `media/include/evo_direct_mem.h`, `ui_rml/` |

@@ -82,5 +82,5 @@ and `ADD_TO_PROJECT_PAT` secret (instructions in the file header).
 | New milestone / due date | edit the milestone; the Roadmap view picks it up |
 
 The board is a **view** of the issues, never the source of truth — labels,
-milestones and the `<!-- rel -->` blocks in the issue bodies stay
-authoritative.
+milestones and native GitHub issue relationships (sub-issues & dependencies)
+stay authoritative.

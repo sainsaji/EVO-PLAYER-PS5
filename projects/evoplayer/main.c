@@ -132,8 +132,10 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 
 /*
  * Phase 1b task 8: playback path breadcrumbs. In the app-module sandbox
- * pp_stage_bc() pushes to the notification popup + klog (see
- * pp_stage_breadcrumb.c). The existing 001..012 checkpoints are all inside
+ * pp_stage_bc() pushes to klog (see pp_stage_breadcrumb.c; the notification
+ * popup is opt-in behind EVO_BOOT_TRACE_POPUP since #51 - these fire
+ * routinely during playback, not just at boot, and were pure TV noise
+ * unconditionally on). The existing 001..012 checkpoints are all inside
  * the 4K branch, so a 1080p test file hits almost none - these fill the gap.
  * Free (compiled out) in the normal payload build.
  */
