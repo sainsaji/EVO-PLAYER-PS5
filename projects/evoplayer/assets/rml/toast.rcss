@@ -1,0 +1,117 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Toast Notification Stylesheet (RCSS)
+ * #75: RmlUi replacement for the CPU-rasterised evo_widget_toast().
+ *
+ * Rendered in its own Rml::Context, on top of whatever screen is already on
+ * screen - see the comment on EvoToastState. The body stays fully
+ * transparent so only the card itself ever touches the framebuffer, the same
+ * convention playback.rcss uses to composite the OSD over live video.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Top-right floating card, positioned below every screen's own header
+ * (checked against launch/list/browser/settings/playback - the deepest
+ * clears at ~150px) rather than the issue's literal top:48px, which
+ * collided with the launch screen's clock/version header at top:72px -
+ * caught via the host preview (rml_toast_over_launch), not on hardware.
+ * Opacity and the slide-in transform are pushed from C++ every frame
+ * (EvoRmlApp::UpdateToastState) - the same caller-owns-the-animation
+ * convention the old evo_toast.c timing used, not an RCSS transition
+ * (unproven in this RmlUi build - see evo_rmlui_app.cpp). */
+#toast-card {
+    position: absolute;
+    top: 172px;
+    right: 54px;
+    width: 460px;
+    min-height: 96px;
+    background-color: #10182bf5;
+    border-width: 1px;
+    border-color: #2a3c5e;
+    border-radius: 20px;
+    padding: 22px 26px 22px 22px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 18px;
+}
+
+/* Accent rail down the left edge - the same vocabulary a selected menu row
+ * uses, so a toast reads as part of the same system. Colour is pushed from
+ * C++ (theme accent / accent_alt, or a fixed danger red - see
+ * UpdateToastState, EvoThemeColors carries no "danger" channel today). */
+#toast-rail {
+    width: 4px;
+    align-self: stretch;
+    border-radius: 2px;
+    background-color: #ffcd00;
+}
+
+#toast-icon-wrap {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#toast-icon {
+    width: 32px;
+    height: 32px;
+}
+
+/* Column, centred - a title-only toast (no message) centres vertically for
+ * free instead of the CPU renderer's measured-baseline math
+ * (evo_text_y_centred / evo_text_y_stacked). */
+#toast-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#toast-title {
+    font-size: 17px;
+    font-weight: bold;
+    color: #fff3ec;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#toast-message {
+    font-size: 14px;
+    font-weight: normal;
+    color: #ccb29f;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* .toast-info / .toast-ok / .toast-error share this layout; only the rail
+ * colour, icon and (for tech) text colour vary - all pushed from C++ so they
+ * follow the live theme instead of being baked into four static classes. */
+.toast-tech #toast-title,
+.toast-tech #toast-message {
+    color: #8c715e;
+}

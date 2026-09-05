@@ -294,6 +294,23 @@ void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderDialog(framebuffer, width, height);
 }
 
+void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* p) {
+    if (!p) return;
+    EvoToastState state;
+    state.title = p->title ? p->title : "";
+    state.message = p->message ? p->message : "";
+    state.kind = p->kind;
+    state.visible = (p->visible != 0);
+    state.alpha = p->alpha;
+    state.slide = p->slide;
+
+    EvoRmlApp::Instance().UpdateToastState(state);
+}
+
+void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderToast(framebuffer, width, height);
+}
+
 void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
     if (!p) return;
     EvoSettingsState state;

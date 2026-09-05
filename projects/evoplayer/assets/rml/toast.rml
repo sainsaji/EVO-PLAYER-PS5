@@ -1,0 +1,17 @@
+<rml>
+<head>
+    <link type="text/rcss" href="toast.rcss"/>
+</head>
+<body id="toast-body">
+    <div id="toast-card" class="toast-info">
+        <div id="toast-rail"></div>
+        <div id="toast-icon-wrap">
+            <img id="toast-icon" src="../icons/icon_about_support.png"/>
+        </div>
+        <div id="toast-text">
+            <div id="toast-title">EVO PLAYER</div>
+            <div id="toast-message"></div>
+        </div>
+    </div>
+</body>
+</rml>

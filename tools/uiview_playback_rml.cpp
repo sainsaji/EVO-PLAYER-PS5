@@ -821,6 +821,94 @@ static void render_dialog_screens(std::vector<uint32_t>& fb, int width, int heig
  * Media Info — technical specs deck, over video. Includes a #16
  * long-string stress pass.
  * ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Toast notifications (#75) — one composite per kind, at rest (alpha 255,
+ * slide 0), over a plain background. RenderToast() only draws the card
+ * itself (transparent body), so unlike the dialog/modal shots this is a
+ * genuine "on top of whatever's already there" composite, same as the real
+ * draw_prospero_toast() call site in main.c.
+ * ------------------------------------------------------------------ */
+static void render_toast_screens(std::vector<uint32_t>& fb, int width, int height) {
+    hide_nav();
+
+    auto shoot = [&](const char* name, const char* title, const char* message, int kind) {
+        std::fill(fb.begin(), fb.end(), 0xFF0E1420);
+
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = title;
+        p.message = message;
+        p.kind = kind;
+        p.visible = 1;
+        p.alpha = 255;
+        p.slide = 0;
+
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24((std::string("output/uiview/") + name + ".bmp").c_str(),
+                    fb.data(), width, height);
+    };
+
+    shoot("rml_toast_info",  "SUBTITLES", "English (SRT)", 0);
+    shoot("rml_toast_tech",  "DECODER", "sceVideodec2 native, 3840x2160", 1);
+    shoot("rml_toast_error", "SEEK", "Unable to submit seek", 2);
+    shoot("rml_toast_ok",    "SCREENSHOT", "Saved to /mnt/usb0/evo_shots", 3);
+
+    /* #16-style stress: a long title/message must ellipsise, not overflow
+     * the fixed-width card. */
+    shoot("rml_toast_stress", "A VERY LONG TOAST TITLE THAT MUST ELLIPSISE",
+          "And an equally long message that also has to stay inside the card", 0);
+
+    {
+        /* Title-only: #toast-text centres it vertically via flexbox instead
+         * of the old CPU renderer's measured-baseline math. */
+        std::fill(fb.begin(), fb.end(), 0xFF0E1420);
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "BOOKMARK SAVED";
+        p.message = "";
+        p.kind = 0;
+        p.visible = 1;
+        p.alpha = 255;
+        p.slide = 0;
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_toast_title_only.bmp", fb.data(), width, height);
+    }
+
+    {
+        /* Mid slide-in, over the launch hero rather than a flat fill - the
+         * real integration point (composited over whatever screen is
+         * already drawn into the same framebuffer). */
+        evo_rmlui_launch_params_t lp;
+        memset(&lp, 0, sizeof(lp));
+        lp.app_name = "EVO PLAYER";
+        lp.version = "VERSION 0.7.0";
+        lp.clock = "21:48";
+        lp.theme_name = "MIDNIGHT";
+        lp.hero_eyebrow = "WELCOME";
+        lp.hero_title = "EVO PLAYER";
+        lp.hero_detail = "Play video and audio from USB storage";
+        lp.hero_action = "BROWSE USB";
+        lp.hero_progress = -1;
+        lp.hero_focused = 1;
+        evo_rmlui_update_launch(&lp);
+        evo_rmlui_render_launch(fb.data(), width, height);
+
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "FAVORITES";
+        p.message = "Added to your list";
+        p.kind = 3;
+        p.visible = 1;
+        p.alpha = 180;
+        p.slide = 45;
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_toast_over_launch.bmp", fb.data(), width, height);
+    }
+}
+
 static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int height) {
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
@@ -1111,6 +1199,7 @@ int main(int argc, char** argv) {
     render_reader_screen(fb, width, height);
     render_surround_screen(fb, width, height);
     render_dialog_screens(fb, width, height);
+    render_toast_screens(fb, width, height);
     render_mediainfo_screen(fb, width, height);
     render_subtitles_screen(fb, width, height);
     render_stress_screens(fb, width, height);

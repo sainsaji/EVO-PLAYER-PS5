@@ -451,6 +451,25 @@ struct EvoNavState {
     bool operator!=(const EvoNavState& o) const { return !(*this == o); }
 };
 
+/*
+ * #75: toast notifications. Lives in its OWN Rml::Context (m_toast_context),
+ * separate from the menu/OSD documents in m_context - a toast has to
+ * composite on top of whichever screen is active (menu, playback OSD,
+ * dialog, ...) without disturbing that screen's own Show()/Hide() state or,
+ * for cached menu screens (RenderCachedScreen), forcing a full re-rasterise
+ * on every animation frame the way sharing the main context would. Its own
+ * context is cheap to render every frame regardless - the document is a
+ * single small card, nothing like a full 1920x1080 screen.
+ */
+struct EvoToastState {
+    std::string title;
+    std::string message;
+    int kind = 0;        /* 0=info 1=tech 2=error 3=ok - see evo_rmlui_bridge.h */
+    bool visible = false;
+    int alpha = 0;        /* 0..255, caller owns the fade (matches the old evo_toast timing) */
+    int slide = 0;        /* px still to travel on the way in */
+};
+
 class EvoRmlApp {
 
 public:
@@ -499,6 +518,16 @@ public:
     /* Sidebar navigation rail — call UpdateNavState before any Render* call */
     void UpdateNavState(const EvoNavState& state);
 
+    /*
+     * #75: toast notifications - own context (see EvoToastState), composited
+     * over whatever the caller already rendered into framebuffer this frame.
+     * Call RenderToast() AFTER the screen's own Render*() call, every frame
+     * evo_toast.c's timing considers the toast live (matches the old
+     * draw_prospero_toast(fb) call site in main.c exactly).
+     */
+    void UpdateToastState(const EvoToastState& state);
+    void RenderToast(uint32_t* framebuffer, int width, int height);
+
     bool IsInitialized() const { return m_initialized; }
 
     /*
@@ -542,6 +571,16 @@ private:
     Rml::ElementDocument* m_subtitles_doc = nullptr;
     Rml::ElementDocument* m_mediainfo_doc = nullptr;
     Rml::ElementDocument* m_nav_doc = nullptr;
+
+    /* #75: separate context - see the comment on EvoToastState. Content
+     * (title/message/kind) is diffed separately from the per-frame
+     * alpha/slide animation values, which always re-apply - see
+     * UpdateToastState. */
+    Rml::Context* m_toast_context = nullptr;
+    Rml::ElementDocument* m_toast_doc = nullptr;
+    std::string m_toast_last_title;
+    std::string m_toast_last_message;
+    int m_toast_last_kind = -1;
 
     EvoThemeColors m_theme;
     std::string m_version;

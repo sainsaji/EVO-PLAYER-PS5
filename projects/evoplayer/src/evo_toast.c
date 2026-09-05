@@ -24,8 +24,9 @@ extern int current_profile;
 /* now_ms() — declared in main.c, linked into the same binary. */
 extern long long now_ms(void);
 
-/* evo_widget_toast — UI layer renderer, declared in evo_widgets.h. */
-#include "evo_widgets.h"
+/* #75: RmlUi bridge — replaces the CPU-rasterised evo_widget_toast(). */
+#include "evo_rmlui_bridge.h"
+#include "evo_metrics.h"   /* EVO_SCREEN_W/H — the toast document's fixed canvas */
 
 /* --------------------------------------------------------------------------
  * State
@@ -144,12 +145,15 @@ void toast(const char *title, const char *msg)
 void draw_prospero_toast(uint32_t *fb)
 {
     /*
-     * Timing and state live here; every pixel is evo_widget_toast's.
+     * #75: timing and state still live here; every pixel is now
+     * evo_rmlui_render_toast()'s (its own RmlUi context — see the comment on
+     * EvoToastState in evo_rmlui_app.h). The RmlUi document IS the theme —
+     * SetTheme-driven colours instead of the CPU renderer's baked literals,
+     * which used to stay cyan under CARBON, EMBER and AURORA.
      *
-     * The old renderer built the panel out of eight hardcoded literals —
-     * a cyan border, a near-black fill, pale blue text — so it stayed cyan
-     * under CARBON, EMBER and AURORA. It was the last thing on screen that
-     * ignored the theme.
+     * evo_rmlui_update_toast() is called even while inactive, with
+     * visible=0, so a toast that just expired hides its RmlUi document
+     * immediately rather than leaving the last frame's card on screen.
      */
     const int hold_ms  = 2200;
     const int fade_ms  = 360;
@@ -157,30 +161,37 @@ void draw_prospero_toast(uint32_t *fb)
     const int slide_px = 90;
 
     long long elapsed;
-    evo_toast t;
+    evo_rmlui_toast_params_t p;
 
-    if (!prospero_toast_active) return;
+    memset(&p, 0, sizeof p);
+
+    if (!prospero_toast_active) {
+        evo_rmlui_update_toast(&p);
+        return;
+    }
 
     elapsed = now_ms() - prospero_toast_started_ms;
 
     if (elapsed >= hold_ms + fade_ms) {
         prospero_toast_active = 0;
+        evo_rmlui_update_toast(&p);
         return;
     }
 
-    memset(&t, 0, sizeof(t));
-    t.title   = prospero_toast_title;
-    t.message = prospero_toast_message;
-    t.kind    = (prospero_toast_kind == 2) ? EVO_TOAST_ERROR : EVO_TOAST_INFO;
+    p.title   = prospero_toast_title;
+    p.message = prospero_toast_message;
+    p.kind    = prospero_toast_kind;   /* 0=info 1=tech 2=error - evo_rmlui_toast_params_t matches */
+    p.visible = 1;
 
-    t.alpha = (elapsed > hold_ms)
+    p.alpha = (elapsed > hold_ms)
         ? 255 - (int)((elapsed - hold_ms) * 255 / fade_ms)
         : 255;
-    if (t.alpha < 0) t.alpha = 0;
+    if (p.alpha < 0) p.alpha = 0;
 
-    t.slide = (elapsed < slide_ms)
+    p.slide = (elapsed < slide_ms)
         ? slide_px - (int)(elapsed * slide_px / slide_ms)
         : 0;
 
-    evo_widget_toast(fb, &t);
+    evo_rmlui_update_toast(&p);
+    evo_rmlui_render_toast(fb, EVO_SCREEN_W, EVO_SCREEN_H);
 }

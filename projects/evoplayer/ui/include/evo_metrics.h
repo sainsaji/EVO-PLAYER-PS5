@@ -147,15 +147,6 @@
  */
 #define EVO_TILE_CAPTION_H  62
 
-/* ---- toast ------------------------------------------------------------- */
-
-#define EVO_TOAST_W         540
-#define EVO_TOAST_H         128
-#define EVO_TOAST_MARGIN    58
-#define EVO_TOAST_Y         (EVO_FOOTER_RULE_Y - EVO_TOAST_H - 28)
-#define EVO_TOAST_PAD       30
-#define EVO_TOAST_RAIL_W    5
-
 /* ---- motion ------------------------------------------------------------ */
 
 /*

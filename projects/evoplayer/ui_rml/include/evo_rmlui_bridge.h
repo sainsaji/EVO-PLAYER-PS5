@@ -42,6 +42,19 @@ typedef struct {
     } actions[3];
 } evo_rmlui_dialog_params_t;
 
+/* #75: toast notifications. kind: 0=info 1=tech 2=error 3=ok. alpha/slide
+ * are the caller-owned fade/slide-in values evo_toast.c already computes
+ * (0..255 and px-still-to-travel, matching the old evo_toast/evo_widget_toast
+ * struct exactly) - the bridge just forwards them to CSS opacity/transform. */
+typedef struct {
+    const char* title;
+    const char* message;
+    int kind;
+    int visible;
+    int alpha;
+    int slide;
+} evo_rmlui_toast_params_t;
+
 typedef struct {
     const char* title;
     const char* detail;
@@ -345,6 +358,12 @@ void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height)
 /* Confirmation & Modal Dialog API */
 void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* params);
 void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
+
+/* Toast notification API (#75). Renders in its own RmlUi context, composited
+ * over whatever the caller already rendered into framebuffer this frame -
+ * call evo_rmlui_render_toast() AFTER the screen's own render call. */
+void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* params);
+void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height);
 
 /* Launch / home screen API */
 void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* params);

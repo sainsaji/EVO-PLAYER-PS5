@@ -313,6 +313,24 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
     if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
 
+    /* #75: toast lives in its own context - see the comment on
+     * EvoToastState for why. Its own tiny context, so a load failure here
+     * is a missing notification, never a missing screen - non-fatal. */
+    m_toast_context = Rml::CreateContext("toast_context", Rml::Vector2i(width, height));
+    if (m_toast_context) {
+        for (const auto& p : rml_prefixes) {
+            if (m_toast_doc) break;
+            m_toast_doc = m_toast_context->LoadDocument(p + "toast.rml");
+        }
+        if (m_toast_doc) {
+            m_toast_doc->Hide();
+        } else {
+            fprintf(stderr, "[EVO RmlUi] Failed to load toast.rml!\n");
+        }
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create toast context!\n");
+    }
+
     m_initialized = true;
     fprintf(stderr, "[EVO RmlUi] Retained-mode Full Engine initialized successfully (%dx%d).\n",
             width, height);
@@ -385,6 +403,16 @@ void EvoRmlApp::Shutdown() {
     if (m_context) {
         Rml::RemoveContext(m_context->GetName());
         m_context = nullptr;
+    }
+
+    if (m_toast_doc) {
+        m_toast_doc->Close();
+        m_toast_doc = nullptr;
+    }
+
+    if (m_toast_context) {
+        Rml::RemoveContext(m_toast_context->GetName());
+        m_toast_context = nullptr;
     }
 
     Rml::Shutdown();
@@ -2475,5 +2503,108 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
         }
     }
+}
+
+/* ==========================================================================
+ * Toast notifications (#75)
+ * ========================================================================== */
+
+void EvoRmlApp::UpdateToastState(const EvoToastState& state) {
+    if (!m_initialized || !m_toast_doc) return;
+
+    if (!state.visible) {
+        m_toast_doc->Hide();
+        return;
+    }
+
+    /* Content only actually changes at the start of a toast (evo_toast.c
+     * fires a fresh title/message/kind); alpha/slide tick every frame while
+     * it's up. Diffing content separately from the per-frame animation
+     * values avoids the SetInnerRML/SetAttribute calls (a real relayout)
+     * firing every frame for no reason - the animation values below are
+     * cheap inline-style pushes, fine to always re-apply. */
+    bool content_changed = (state.title != m_toast_last_title ||
+                            state.message != m_toast_last_message ||
+                            state.kind != m_toast_last_kind);
+
+    if (content_changed) {
+        m_toast_last_title = state.title;
+        m_toast_last_message = state.message;
+        m_toast_last_kind = state.kind;
+
+        Rml::Element* el_card = m_toast_doc->GetElementById("toast-card");
+        Rml::Element* el_rail = m_toast_doc->GetElementById("toast-rail");
+        Rml::Element* el_icon = m_toast_doc->GetElementById("toast-icon");
+        Rml::Element* el_title = m_toast_doc->GetElementById("toast-title");
+        Rml::Element* el_msg = m_toast_doc->GetElementById("toast-message");
+
+        if (el_title) el_title->SetInnerRML(state.title.empty() ? "EVO PLAYER" : state.title);
+        if (el_msg) {
+            el_msg->SetInnerRML(state.message);
+            el_msg->SetProperty("display", state.message.empty() ? "none" : "block");
+        }
+
+        /* Same icon/colour pairing evo_widget_toast used: info and error
+         * share the "about" glyph and differ only by colour, ok borrows the
+         * resume glyph, tech gets its own (previously tech rendered
+         * identically to info - #75 gives it the muted styling the issue
+         * asked for). EvoThemeColors carries no "danger" channel (nothing
+         * else in the RmlUi bridge needed one yet), so error uses a fixed
+         * red matching the four legacy themes' near-identical danger colours
+         * rather than threading a new field through SetTheme for this alone. */
+        static const char* kDangerRed = "#ff5c5c";
+        std::string accent;
+        std::string icon_path;
+        switch (state.kind) {
+            case 1: /* tech */
+                accent = to_hex_rgb(m_theme.text_muted);
+                icon_path = "../icons/icon_developer_tools.png";
+                break;
+            case 2: /* error */
+                accent = kDangerRed;
+                icon_path = "../icons/icon_about_support.png";
+                break;
+            case 3: /* ok */
+                accent = to_hex_rgb(m_theme.accent_alt);
+                icon_path = "../icons/icon_resume.png";
+                break;
+            default: /* info */
+                accent = to_hex_rgb(m_theme.accent);
+                icon_path = "../icons/icon_about_support.png";
+                break;
+        }
+
+        if (el_card) el_card->SetClass("toast-tech", state.kind == 1);
+        if (el_rail) el_rail->SetProperty("background-color", accent);
+        if (el_icon) {
+            el_icon->SetAttribute("src", icon_path);
+            SetImageColor(el_icon, accent);
+        }
+    }
+
+    Rml::Element* el_card = m_toast_doc->GetElementById("toast-card");
+    if (el_card) {
+        double opacity = state.alpha / 255.0;
+        if (opacity < 0.0) opacity = 0.0;
+        if (opacity > 1.0) opacity = 1.0;
+        el_card->SetProperty("opacity", std::to_string(opacity));
+        el_card->SetProperty("transform",
+            "translateX(" + std::to_string(state.slide) + "px)");
+    }
+
+    m_toast_doc->Show();
+}
+
+void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_toast_context || !m_toast_doc || !framebuffer) return;
+    if (!m_toast_doc->IsVisible()) return;
+
+    /* Own context: no other document to hide, and nothing here touches
+     * m_frame_dirty / the RenderCachedScreen surface cache for whichever
+     * menu screen is underneath - see the comment on EvoToastState. */
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_toast_context->Update();
+    m_toast_context->Render();
 }
 
