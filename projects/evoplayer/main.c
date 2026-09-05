@@ -4346,6 +4346,19 @@ int start_video_playback(const char *path) {
                 stop_video_playback();
                 return 0;
             }
+            /*
+             * #37 follow-up: AUTO silently degrading to FFmpeg is the whole
+             * point of AUTO. An explicit NATIVE preference is a hard request
+             * — degrading it just as silently makes the setting a no-op, so
+             * say so instead of letting the user find out from Media Info.
+             * (g_vdec_force_ffmpeg is excluded: that's the separate #57
+             * fatal-streak reopen, which already toasts its own message.)
+             */
+            if (prospero_vdec_pref == EVO_VDEC_PREF_NATIVE &&
+                !g_vdec_force_ffmpeg &&
+                vdec_chosen != EVO_VDEC_BACKEND_NATIVE) {
+                toast("VIDEO DECODER", "Native unsupported for this file - using Software");
+            }
 #if PP_BACKEND_ENABLED
             {
                 char d[96];

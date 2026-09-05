@@ -419,10 +419,18 @@ hw-verify pending — and Phase 5 (settings row).
     `evo_vdec_native.c` supports today), else FFmpeg.
   - `FFMPEG` → always FFmpeg.
   - `NATIVE` → requests native regardless of codec; `evo_vdec_open()`'s
-    existing "never NULL when FFmpeg could open" fallback silently downgrades
-    it when the probe failed or the codec is unsupported. The settings row
-    badge reads `evo_vdec_probe()` directly to show "Native (unavailable)" in
-    that case.
+    existing "never NULL when FFmpeg could open" fallback still downgrades it
+    when the probe failed or the codec is unsupported (the FFmpeg path stays
+    the always-available default — a non-negotiable constraint from §2 — so
+    this can never refuse to play). Unlike `AUTO`, this downgrade is not
+    silent: `NATIVE` is a hard request, so degrading it exactly as quietly as
+    `AUTO` does would make the setting a no-op. `start_video_playback()`
+    compares the resolved preference against `evo_vdec_open()`'s actual
+    `*chosen` backend and toasts "Native unsupported for this file - using
+    Software" whenever they disagree (excluding the separate #57
+    fatal-streak reopen, which already toasts its own message). The settings
+    row badge also reads `evo_vdec_probe()` directly to show "Native
+    (unavailable)" when the whole session has no native decode at all.
   - `g_vdec_force_ffmpeg` (#57's per-file fatal-streak flag) still overrides
     all three — a native crash mid-file pins FFmpeg for the rest of that file
     even under an explicit `NATIVE` preference.
