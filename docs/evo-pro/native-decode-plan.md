@@ -418,22 +418,33 @@ hw-verify pending — and Phase 5 (settings row).
   - `AUTO` → native if the probe passed and the codec is H.264 (the only one
     `evo_vdec_native.c` supports today), else FFmpeg.
   - `FFMPEG` → always FFmpeg.
-  - `NATIVE` → requests native regardless of codec; `evo_vdec_open()`'s
-    existing "never NULL when FFmpeg could open" fallback still downgrades it
-    when the probe failed or the codec is unsupported (the FFmpeg path stays
-    the always-available default — a non-negotiable constraint from §2 — so
-    this can never refuse to play). Unlike `AUTO`, this downgrade is not
-    silent: `NATIVE` is a hard request, so degrading it exactly as quietly as
-    `AUTO` does would make the setting a no-op. `start_video_playback()`
-    compares the resolved preference against `evo_vdec_open()`'s actual
-    `*chosen` backend and toasts "Native unsupported for this file - using
-    Software" whenever they disagree (excluding the separate #57
-    fatal-streak reopen, which already toasts its own message). The settings
-    row badge also reads `evo_vdec_probe()` directly to show "Native
-    (unavailable)" when the whole session has no native decode at all.
-  - `g_vdec_force_ffmpeg` (#57's per-file fatal-streak flag) still overrides
-    all three — a native crash mid-file pins FFmpeg for the rest of that file
-    even under an explicit `NATIVE` preference.
+  - `NATIVE` → **hard**, refuses FFmpeg outright — this is what makes the
+    switch meaningful rather than a slower-to-type `AUTO`. `evo_vdec_open()`'s
+    "never NULL when FFmpeg could open" fallback still exists underneath (it's
+    what `AUTO`/`FFMPEG` and the §2 always-available-default constraint rely
+    on), but `start_video_playback()` compares the resolved preference against
+    `evo_vdec_open()`'s actual `*chosen` backend, and under `NATIVE` a
+    disagreement is treated as a hard failure: closes the FFmpeg decoder
+    `evo_vdec_open()` had already opened for it, shows "NATIVE DECODE
+    UNSUPPORTED" (via `prospero_codec_error`) instead of playing, and returns
+    to the browser — same "toast + stop_video_playback + return" shape as a
+    genuine decoder-init failure. The user reads the message, opens Settings,
+    and switches to `AUTO` or `FFMPEG` themselves; nothing plays silently on
+    software in the meantime. Applies whether the reason is an unsupported
+    codec, a failed probe, or a native bring-up error. The settings row badge
+    also reads `evo_vdec_probe()` directly to show "Native (unavailable)"
+    up front, before a file is even opened.
+  - The **only** exception is `g_vdec_force_ffmpeg` (#57's per-file
+    fatal-streak flag) once it's already latched — see below, it can't latch
+    at all under `NATIVE` any more.
+- [x] Mid-stream native fatal (#57's post-seek `sceVideodec2Reset` reject) is
+      gated the same way: `prospero_playback_finished_update()`'s
+      retry-once-on-FFmpeg only fires when the preference **isn't** `NATIVE`.
+      Under `NATIVE` a mid-file fatal falls straight to the ordinary
+      `SCREEN_PLAYBACK_FINISHED` path (evo_playback's own fatal toast, no
+      FFmpeg reopen) instead of quietly finishing the file on software —
+      consistent with `NATIVE` never falling back, and the reason
+      `g_vdec_force_ffmpeg` can't latch while `NATIVE` is selected.
 - [x] Config migration in `prospero_settings_save` / `_load`: appended one
       `%d` after `evo_keyboard_get_type()` in the `fprintf`, one field + one
       default (`EVO_VDEC_PREF_AUTO`) in the `fscanf` — the same

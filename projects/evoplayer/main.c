@@ -4348,16 +4348,27 @@ int start_video_playback(const char *path) {
             }
             /*
              * #37 follow-up: AUTO silently degrading to FFmpeg is the whole
-             * point of AUTO. An explicit NATIVE preference is a hard request
-             * — degrading it just as silently makes the setting a no-op, so
-             * say so instead of letting the user find out from Media Info.
-             * (g_vdec_force_ffmpeg is excluded: that's the separate #57
-             * fatal-streak reopen, which already toasts its own message.)
+             * point of AUTO. NATIVE is a hard request — the user picked it to
+             * refuse anything but the hardware decoder, so degrading to
+             * FFmpeg and playing anyway makes the setting a no-op. Close
+             * what evo_vdec_open() already opened for us and refuse to play,
+             * the same "toast + stop_video_playback + return" shape as the
+             * !g_vdec branch above. (g_vdec_force_ffmpeg is excluded: that's
+             * the separate #57 fatal-streak reopen, gated the same way in
+             * prospero_playback_finished_update().)
              */
             if (prospero_vdec_pref == EVO_VDEC_PREF_NATIVE &&
                 !g_vdec_force_ffmpeg &&
                 vdec_chosen != EVO_VDEC_BACKEND_NATIVE) {
-                toast("VIDEO DECODER", "Native unsupported for this file - using Software");
+                evo_vdec_close(g_vdec);
+                g_vdec = NULL;
+                prospero_codec_error(
+                    "NATIVE DECODE UNSUPPORTED",
+                    par->codec_id,
+                    "switch to Auto or FFmpeg in Settings"
+                );
+                stop_video_playback();
+                return 0;
             }
 #if PP_BACKEND_ENABLED
             {
@@ -11402,8 +11413,14 @@ static void prospero_playback_finished_update(
          * on FFmpeg from the current position: software 4K is slow but it
          * seeks reliably. g_vdec_force_ffmpeg is sticky for this file, so the
          * reopen and any later seek stay on FFmpeg.
+         *
+         * #37: not when the user's preference is the hard NATIVE setting —
+         * that setting means refuse FFmpeg outright, so a mid-stream native
+         * fatal falls through to the ordinary SCREEN_PLAYBACK_FINISHED path
+         * below instead of quietly continuing on software.
          */
-        if (!g_vdec_force_ffmpeg && g_vdec && current_media_path[0] &&
+        if (prospero_vdec_pref != EVO_VDEC_PREF_NATIVE &&
+            !g_vdec_force_ffmpeg && g_vdec && current_media_path[0] &&
             evo_vdec_active(g_vdec) == EVO_VDEC_BACKEND_NATIVE) {
             double pos = resume_base_offset_seconds + prospero_media_clock_seconds();
             g_vdec_force_ffmpeg = 1;
