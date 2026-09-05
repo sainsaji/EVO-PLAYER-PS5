@@ -12,7 +12,7 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **high** #32, #36, #55, #28, #72 · **medium** #35,
+Priority labels track this order: **critical** #32 · **high** #36, #55, #28, #72, #76 · **medium** #35,
 #37/#38/#39/#41/#59/#60, #33, #34, #9, #42, #47, #49, #50, #53, #62, #63, #64, #65, #68, #73, #74, #75 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
@@ -63,18 +63,19 @@ keep `klog` + `evo_boot.log`, drop the notification popups (v0.9.0,
 `main.c` logic is at 0% coverage because it can't be host-linked; #53 is the
 prerequisite for meaningful test coverage and **blocks #50**'s `main.c` part.
 New label `modularisation` = #49 + #53 · **#59** surface active video decoder
-backend in player UI (HW vs SW badge + OSD / Media Info, v1.1.0, `native-decode`,
+backend in player UI (HW vs SW badge, start/fallback toasts, OSD / Media Info, v1.1.0, `native-decode`,
 `priority: medium`) · **#60** make `.ffpfsc` self-contained by embedding RmlUi
 assets in binary (eliminate `/data` FTP sync, v0.9.0, `rmlui`, `priority: medium`) ·
 **#63** add real-time CPU, GPU, and RAM usage graphs to the player (Diagnostic HUD,
 v0.9.0, `independent`, `priority: medium`) · **#64** fix Launch screen recent thumbnails
-blanking & artwork card overflow (evo_cover_budget cache check, tile overflow:hidden, v0.9.0, bug, `priority: medium`) ·
+blanking, artwork card overflow & missing corner pixels (evo_cover_budget cache check, tile overflow:hidden, concentric radius alignment, v0.9.0, bug, `priority: medium`) ·
 **#65** support D-pad navigation on playback exit confirmation dialog (v0.9.0, `ui`, `priority: medium`) ·
 **#68** enhance UI geometry and styling on GPU (curves, shadows, analytical AA, v1.0.0, `rmlui`/`ui`/`gpu`, `priority: medium`) ·
 **#72** fix internal storage browsing failure under Lapy JB (POSIX permissions, `O_DIRECTORY` fallback, `DT_UNKNOWN` resolution, v0.9.0, `app-module`/`ui`, `priority: high`) ·
-**#73** auto-resume playback after seek/scrub confirm instead of remaining paused (v0.9.0, `playback`/`ui`, `priority: medium`) ·
-**#74** revamp About screen with dedicated RmlUi layout (replace faux-menu cards with info dashboard & distinct action buttons, v0.9.0, `rmlui`/`ui`, `priority: medium`) ·
-**#75** modernise toast notifications with dedicated RmlUi overlay (replace legacy CPU software rasterizer, v0.9.0, `rmlui`/`ui`, `priority: medium`).
+**#73** auto-resume playback after seek/scrub confirm & display OSD on start then hide (v0.9.0, `playback`/`ui`, `priority: medium`) ·
+**#74** revamp About screen with dedicated RmlUi layout (replace faux-menu cards with info dashboard, native vs FFmpeg codec matrix & distinct action buttons, v0.9.0, `rmlui`/`ui`, `priority: medium`) ·
+**#75** modernise toast notifications with dedicated RmlUi overlay (replace legacy CPU software rasterizer, v0.9.0, `rmlui`/`ui`, `priority: medium`) ·
+**#76** fix 4K native playback aspect ratio toggle corrupting screen colors & failing to scale on GPU (v0.9.0, `gpu`/`playback`/`ui`, `priority: high`).
 
 ---
 
@@ -143,8 +144,7 @@ GitHub issue sidebar and Project #5 board.
     #40 route direct memory via evo_direct_mem + multi-hour soak
     #41 HEVC hardware decode (2nd resident decoder)
     #59 Surface video decoder backend in player UI (HW vs SW badge + OSD)
-    #32 scrub blanks player UI on the V8 4K path (fix landed — 1080 scrub
-        overlay; hw-verify pending) (high)
+    #32 4K native playback: seeking plays audio but video shows black (critical)
 ```
 
 ---
@@ -172,12 +172,13 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#35** | Subtitles only render English — `prospero_subtitle_clean_line` folds every non-ASCII char to `?` because the legacy bitmap atlas is ASCII-only. Parts A (stop mangling) + C (SRT charset detect via iconv) + D (sidecar formats/naming) are independent; part B (RmlUi caption overlay + Noto fallback fonts + HarfBuzz/BiDi) needs #44. Related: #42 (cue counts), #43 (`.ass` styling) | `media/src/evo_subtitle.c` (~L1147–1356, ~L1453), `main.c` (`prospero_subtitle_draw` ~L5041, `rr_text` ~L4860), `ui/include/evo_font.h`, `ui_rml/src/evo_rmlui_app.cpp` (~L150), `assets/rml/*.rcss`, `assets/fonts/`, `scripts/package-app.sh` |
 | **#36** | Switch the release pipeline (`release.yml`) from ELF payloads to `EVOPlayer-<tag>.ffpfsc`. **§1/§2/§6 landed 2026-09-05** (pipeline mechanics untested-on-a-real-tag but locally dry-run verified): `release.yml` now builds + PFS-packs via `package-app.sh --ffpfsc` and publishes `EVOPlayer-<tag>-PPSA99039.ffpfsc` + `SHA256SUMS.txt` (all ELF/tile/homebrew-zip build steps removed — Option A from §5, since CLAUDE.md already asserts `.ffpfsc` as the sole release/deploy path); `build.yml` gained a `package-app` job (`--ffpfsc` on every PR, archived as an artifact); both verify steps check the signed container (`ps5-native-tool self --inspect`, not `file`/`readelf` — `eboot.bin` is FSELF-wrapped and reads as opaque `data`; the pre-sign ELF at `output/app/.build/eboot.elf` is what's ELF-type-checked), `param.json` `titleId`, `libc.prx` presence, and a non-trivial `assets/` size (guards #60's embedded bundle landing empty too). Ported from the sibling `ShaderRip-PS5` repo's `release.yml`/`build.yml` (its `build.yml` has real passing CI runs proving the same Docker-in-Actions pattern; its `release.yml` has never actually been tag-triggered, so treat that lineage as design-reviewed, not battle-tested). **Still open:** §3 (VERSION → `contentVersion`/`masterVersion` mapping — deliberately not invented; current `01.000.001` predates this pipeline), §4 full docs flip (`docs/packaging.md`, README, `docs/validation.md`), §8 reproducibility audit (MkPFS/FSELF determinism unverified). Needs a real tag push to confirm the release job end-to-end (local dry-run only covered the build+verify steps, not the GH release upload). | `.github/workflows/{release,build}.yml` (done), `scripts/{package-app,deploy-app,setup-pfs-tool}.sh` (untouched, reused as-is), `projects/evoplayer/{VERSION,sce_sys/param.json}`, `CHANGELOG.md`, `docs/{packaging,tooling,validation}.md` (tooling.md done, others open) |
 | **#63** | Real-time CPU, GPU, and RAM usage graphs in the player Diagnostic HUD (Stats for Nerds) | `projects/evoplayer/assets/rml/playback.rml`, `projects/evoplayer/assets/rml/playback.rcss`, `pp/include/pp_pipeline_metrics.h`, `media/include/evo_direct_mem.h`, `ui_rml/` |
-| **#64** | Fix Launch screen recent thumbnails blanking and artwork card overflow | `projects/evoplayer/main.c` (~L7996, ~L8149), `projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp`, `projects/evoplayer/assets/rml/launch.rcss` |
+| **#64** | Fix Launch screen recent thumbnails blanking, artwork card overflow, and missing corner pixels | `projects/evoplayer/main.c` (~L7996, ~L8149), `projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp`, `projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp`, `projects/evoplayer/assets/rml/launch.rcss` |
 | **#65** | Playback exit confirmation dialog: support D-pad navigation between actions | `projects/evoplayer/main.c` (~L10254, ~L12698), `projects/evoplayer/assets/rml/dialog.rml`, `projects/evoplayer/assets/rml/dialog.rcss` |
 | **#72** | Fix internal storage browsing under Lapy JB while USB drive is accessible (`/data` permissions, `O_DIRECTORY` fallback, `DT_UNKNOWN` resolution) | `projects/evoplayer/main.c`, `projects/evoplayer/src/evo_readdir.c`, `projects/evoplayer/src/evo_jailbreak.c`, `projects/sandbox_unjail/main.c` |
-| **#73** | Auto-resume playback after seek/scrub confirm instead of remaining paused | `projects/evoplayer/main.c` (~L10909, ~L10727), `projects/evoplayer/media/src/evo_demux.c` (~L358), `projects/evoplayer/pp/src/pp_playback.c` |
-| **#74** | Revamp About screen with dedicated RmlUi layout — replace faux-menu list with information dashboard and distinct action buttons | `projects/evoplayer/assets/rml/about.{rml,rcss}`, `projects/evoplayer/ui_rml/`, `projects/evoplayer/main.c` (~L10022, ~L10087, ~L12871) |
+| ~~#73~~ | **Landed 2026-09-05, `hw-verify-pending`.** Auto-resume playback after seek confirm and display OSD initially on start then auto-hide. `prospero_scrub_confirm()` now always resumes (`restore_paused = 0`, `prospero_scrub_was_paused` cleared) regardless of the pre-scrub pause state — `evo_demux.c`'s seek settlement (`~L358`) already unpaused correctly when told to, the bug was that a scrub begun while paused always told it to stay paused. `prospero_scrub_overlay_pump()`'s `SCRUB_OVL_LEAVING` settle now branches on `prospero_scrub_ovl_wait_seek` (confirmed seek → force-resume; cancel/release → still restores the pre-scrub state, so Circle is unaffected). `prospero_chapter_jump()` gets the same always-resume treatment. `start_video_playback()` now stamps `controls_last_used_ms` on success so the OSD shows for ~3.5s on open instead of starting bare. Compile-checked (host + full app-module build, 0 warnings); needs a hardware pass to confirm feel/timing and that Circle-cancel truly still restores state. | `projects/evoplayer/main.c` (`start_video_playback` ~L4524, `prospero_scrub_overlay_pump` ~L10731, `prospero_chapter_jump` ~L10872, `prospero_scrub_confirm` ~L10944), `projects/evoplayer/media/src/evo_demux.c` (~L354-359, verified correct, untouched) |
+| **#74** | Revamp About screen with dedicated RmlUi layout — replace faux-menu list with information dashboard, codec capabilities matrix (native vs FFmpeg), and distinct action buttons | `projects/evoplayer/assets/rml/about.{rml,rcss}`, `projects/evoplayer/ui_rml/`, `projects/evoplayer/main.c` (~L10022, ~L10087, ~L12871) |
 | **#75** | Modernise toast notifications with dedicated RmlUi overlay — replace legacy CPU rasterizer | `projects/evoplayer/assets/rml/toast.{rml,rcss}`, `projects/evoplayer/ui_rml/`, `projects/evoplayer/src/evo_toast.c`, `projects/evoplayer/ui/src/evo_widgets.c` |
+| **#76** | Fix 4K native playback aspect ratio toggle corrupting screen colors and missing GPU scaling | `projects/evoplayer/pp/src/pp_agc.c`, `projects/evoplayer/main.c` (~L1605), `projects/evoplayer/pp/src/pp_videoout.c` (~L356) |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**
@@ -252,7 +253,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 | **#40** | Route the resident decoder's direct memory through `evo_direct_mem` + multi-hour soak | open |
 | **#41** | HEVC hardware decode — a 2nd resident `sceVideodec2` decoder (H.264-only today) | open |
 | **#59** | Surface video decoder backend in player UI (Hardware vs Software decode indicator) | open, medium |
-| **#32** | Scrub blanks player UI on the V8 4K path — fix landed (1080 scrub overlay), hw-verify pending | open, high |
+| **#32** | 4K native playback: seeking plays audio but video shows black (blank screen on GPU present) | open, critical |
 
 - Reads: **`docs/evo-pro/status.md`**, `docs/evo-pro/native-decode-plan.md`
   (§3 architecture, Phases 4–6, kill criteria §8), `docs/evo-pro/videodec2-abi.md`
