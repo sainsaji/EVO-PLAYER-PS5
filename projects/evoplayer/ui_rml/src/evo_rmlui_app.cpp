@@ -286,6 +286,10 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_settings_doc = m_context->LoadDocument(p + "settings.rml");
             if (m_settings_doc) m_settings_doc->Hide();
         }
+        if (!m_about_doc) {
+            m_about_doc = m_context->LoadDocument(p + "about.rml");
+            if (m_about_doc) m_about_doc->Hide();
+        }
         if (!m_subtitles_doc) {
             m_subtitles_doc = m_context->LoadDocument(p + "subtitles.rml");
             if (m_subtitles_doc) m_subtitles_doc->Hide();
@@ -309,6 +313,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_playback_doc) fprintf(stderr, "[EVO RmlUi] Failed to load playback.rml!\n");
     if (!m_dialog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load dialog.rml!\n");
     if (!m_settings_doc) fprintf(stderr, "[EVO RmlUi] Failed to load settings.rml!\n");
+    if (!m_about_doc) fprintf(stderr, "[EVO RmlUi] Failed to load about.rml!\n");
     if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
     if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
     if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
@@ -321,6 +326,11 @@ bool EvoRmlApp::Initialize(int width, int height) {
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_about_doc) {
+        m_about_doc->Close();
+        m_about_doc = nullptr;
+    }
 
     if (m_mediainfo_doc) {
         m_mediainfo_doc->Close();
@@ -807,6 +817,7 @@ void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_list_doc)      m_list_doc->Hide();
@@ -1009,6 +1020,7 @@ void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_browser_doc)   m_browser_doc->Hide();
@@ -1237,6 +1249,7 @@ void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_changelog_doc) m_changelog_doc->Hide();
@@ -1393,6 +1406,7 @@ void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();
@@ -1509,6 +1523,7 @@ void EvoRmlApp::RenderReader(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_surround_doc)  m_surround_doc->Hide();
@@ -1688,6 +1703,7 @@ void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc)  m_playback_doc->Hide();
     if (m_dialog_doc)    m_dialog_doc->Hide();
     if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();
@@ -1871,6 +1887,7 @@ void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) 
     if (m_changelog_doc) m_changelog_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_about_doc) m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_nav_doc) m_nav_doc->Hide();
@@ -1966,6 +1983,7 @@ void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     if (m_changelog_doc) m_changelog_doc->Hide();
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_about_doc)    m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();
@@ -2110,6 +2128,7 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     if (m_changelog_doc) m_changelog_doc->Hide();
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
+    if (m_about_doc)  m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();
@@ -2125,6 +2144,77 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     }
 
     RenderCachedScreen(6, framebuffer, width, height);
+}
+
+void EvoRmlApp::UpdateAboutState(const EvoAboutState& state) {
+    if (!m_initialized || !m_about_doc) return;
+    if (state == m_last_about && m_theme_generation == m_theme_gen_about) return;
+    m_theme_gen_about = m_theme_generation;
+    m_frame_dirty = true;
+
+    m_last_about = state;
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-title"))
+        el->SetInnerRML(state.app_name);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-version-pill")) {
+        std::string v = state.version.empty() ? ("v" + m_version) : state.version;
+        el->SetInnerRML(v);
+        el->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+        el->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+    }
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-build-tag"))
+        el->SetInnerRML(state.build_tag);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-tagline"))
+        el->SetInnerRML(state.tagline);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-themes-detail"))
+        el->SetInnerRML(state.themes_info);
+
+    if (Rml::Element* el_ind = m_about_doc->GetElementById("header-indicator"))
+        el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+
+    if (Rml::Element* btn = m_about_doc->GetElementById("action-changelog")) {
+        bool focused = state.action_focused;
+        btn->SetClass("btn-focused", focused);
+        if (focused) {
+            btn->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+            btn->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+        } else {
+            btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
+            btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
+        }
+    }
+}
+
+void EvoRmlApp::RenderAbout(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_about_doc || !framebuffer) return;
+
+    if (m_launch_doc)    m_launch_doc->Hide();
+    if (m_list_doc)      m_list_doc->Hide();
+    if (m_browser_doc)   m_browser_doc->Hide();
+    if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_playback_doc)  m_playback_doc->Hide();
+    if (m_dialog_doc)    m_dialog_doc->Hide();
+    if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
+    m_about_doc->Show();
+
+    /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
+    if (m_nav_doc) {
+        if (m_last_nav.visible)
+            m_nav_doc->Show();
+        else
+            m_nav_doc->Hide();
+    }
+
+    RenderCachedScreen(7, framebuffer, width, height);
 }
 
 void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
@@ -2226,8 +2316,9 @@ void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     if (m_browser_doc) m_browser_doc->Hide();
     if (m_changelog_doc) m_changelog_doc->Hide();
     if (m_playback_doc) m_playback_doc->Hide();
-    if (m_dialog_doc) m_dialog_doc->Hide();
-    if (m_settings_doc) m_settings_doc->Hide();
+    if (m_dialog_doc)    m_dialog_doc->Hide();
+    if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
     if (m_mediainfo_doc) m_mediainfo_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();
     if (m_surround_doc)  m_surround_doc->Hide();
@@ -2357,6 +2448,7 @@ void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
     if (m_playback_doc) m_playback_doc->Hide();
     if (m_dialog_doc) m_dialog_doc->Hide();
     if (m_settings_doc) m_settings_doc->Hide();
+    if (m_about_doc)    m_about_doc->Hide();
     if (m_subtitles_doc) m_subtitles_doc->Hide();
     if (m_nav_doc) m_nav_doc->Hide();
     if (m_reader_doc)    m_reader_doc->Hide();

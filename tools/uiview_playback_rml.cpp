@@ -1610,6 +1610,33 @@ int main(int argc, char** argv) {
         evo_rmlui_set_theme(&midnight_th);
     }
 
+    // -------------------------------------------------------------
+    // About & Support Screen (#74)
+    // -------------------------------------------------------------
+    {
+        evo_rmlui_nav_params_t nav;
+        memset(&nav, 0, sizeof(nav));
+        nav.active_section = 6;
+        nav.rail_focused = 0;
+        nav.cursor_index = 6;
+        nav.visible = 1;
+        evo_rmlui_update_nav(&nav);
+
+        evo_rmlui_about_params_t ab;
+        memset(&ab, 0, sizeof(ab));
+        ab.app_name = "EVO PLAYER PRO";
+        ab.version = "v0.9.0";
+        ab.build_tag = "PS5 HOMEBREW";
+        ab.tagline = "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
+        ab.themes_info = "4 AVAILABLE - DROP .THEME FILES ON USB0";
+        ab.action_focused = 1;
+
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_about(&ab);
+        evo_rmlui_render_about(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_about_support.bmp", fb.data(), width, height);
+    }
+
     std::cout << "Rendered all settings screens successfully" << std::endl;
     return 0;
 }

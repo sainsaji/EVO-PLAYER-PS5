@@ -374,6 +374,19 @@ void evo_rmlui_render_surround(uint32_t* framebuffer, int width, int height);
 void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* params);
 void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height);
 
+/* About & Support Screen API */
+typedef struct {
+    const char* app_name;        /* "EVO PLAYER PRO" */
+    const char* version;         /* "v0.9.0" */
+    const char* build_tag;       /* "PS5 HOMEBREW" */
+    const char* tagline;         /* "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW" */
+    const char* themes_info;     /* "X AVAILABLE - DROP .THEME FILES ON USB0" */
+    int         action_focused;  /* 1 if "View Changelog" button is focused, 0 if rail is focused */
+} evo_rmlui_about_params_t;
+
+void evo_rmlui_update_about(const evo_rmlui_about_params_t* params);
+void evo_rmlui_render_about(uint32_t* framebuffer, int width, int height);
+
 /* Subtitles Track Selection Modal API */
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* params);
 void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height);

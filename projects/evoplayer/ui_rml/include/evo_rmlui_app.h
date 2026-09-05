@@ -99,6 +99,22 @@ struct EvoSettingsState {
     bool operator!=(const EvoSettingsState& o) const { return !(*this == o); }
 };
 
+struct EvoAboutState {
+    std::string app_name = "EVO PLAYER PRO";
+    std::string version;
+    std::string build_tag = "PS5 HOMEBREW";
+    std::string tagline;
+    std::string themes_info;
+    bool action_focused = true;
+
+    bool operator==(const EvoAboutState& o) const {
+        return app_name == o.app_name && version == o.version &&
+               build_tag == o.build_tag && tagline == o.tagline &&
+               themes_info == o.themes_info && action_focused == o.action_focused;
+    }
+    bool operator!=(const EvoAboutState& o) const { return !(*this == o); }
+};
+
 struct EvoSubtitlesTrack {
     std::string label;
     std::string detail;
@@ -490,6 +506,9 @@ public:
     void UpdateSettingsState(const EvoSettingsState& state);
     void RenderSettings(uint32_t* framebuffer, int width, int height);
 
+    void UpdateAboutState(const EvoAboutState& state);
+    void RenderAbout(uint32_t* framebuffer, int width, int height);
+
     void UpdateSubtitlesState(const EvoSubtitlesState& state);
     void RenderSubtitles(uint32_t* framebuffer, int width, int height);
 
@@ -539,6 +558,7 @@ private:
     Rml::ElementDocument* m_playback_doc = nullptr;
     Rml::ElementDocument* m_dialog_doc = nullptr;
     Rml::ElementDocument* m_settings_doc = nullptr;
+    Rml::ElementDocument* m_about_doc = nullptr;
     Rml::ElementDocument* m_subtitles_doc = nullptr;
     Rml::ElementDocument* m_mediainfo_doc = nullptr;
     Rml::ElementDocument* m_nav_doc = nullptr;
@@ -578,6 +598,7 @@ private:
     int m_theme_gen_playback = -1;
     int m_theme_gen_dialog = -1;
     int m_theme_gen_settings = -1;
+    int m_theme_gen_about = -1;
     int m_theme_gen_subtitles = -1;
     int m_theme_gen_mediainfo = -1;
     int m_theme_gen_nav = -1;
@@ -616,6 +637,7 @@ private:
                           const std::string& tag);
     EvoDialogState m_last_dialog;
     EvoSettingsState m_last_settings;
+    EvoAboutState m_last_about;
     EvoSubtitlesState m_last_subtitles;
     EvoMediaInfoState m_last_mediainfo;
     EvoNavState m_last_nav;

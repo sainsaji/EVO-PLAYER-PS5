@@ -10020,9 +10020,9 @@ void draw_emby_browse_screen(uint32_t *fb)
 
 /* ---- about --------------------------------------------------------------- */
 
-/* Rows 0-4 state facts; row EVO_ABOUT_ROW_CHANGELOG is the one you can open. */
-#define EVO_ABOUT_ROWS          6
-#define EVO_ABOUT_ROW_CHANGELOG 5
+/* Only actionable buttons receive cursor focus; static facts do not trap D-pad. */
+#define EVO_ABOUT_ACTIONS        1
+#define EVO_ABOUT_ACT_CHANGELOG  0
 
 static int            evo_about_selected;
 
@@ -10030,69 +10030,25 @@ void draw_about_support_screen(uint32_t *fb)
 {
     static char themes_detail[64];
 
-    evo_page_sync(&evo_about_selected, EVO_ABOUT_ROWS);
+    evo_page_sync(&evo_about_selected, EVO_ABOUT_ACTIONS);
 
     snprintf(themes_detail, sizeof(themes_detail),
              "%d AVAILABLE - DROP .THEME FILES ON USB0",
              evo_theme_count());
 
     if (evo_rmlui_is_initialized()) {
-        evo_rmlui_settings_params_t p;
+        evo_rmlui_about_params_t p;
         memset(&p, 0, sizeof(p));
-        p.title = "ABOUT & SUPPORT";
-        p.subtitle = "CREDITS, ENGINE & PROJECT INFO";
-        char cnt[32];
-        snprintf(cnt, sizeof(cnt), "%d OF %d", evo_about_selected + 1, EVO_ABOUT_ROWS);
-        p.counter = cnt;
-        p.rail_active_idx = 6;
-        p.rail_focused = evo_rail_focused;
-        p.row_count = 6;
+        p.app_name       = "EVO PLAYER PRO";
+        p.version        = "v" EVO_PLAYER_VERSION;
+        p.build_tag      = "PS5 HOMEBREW";
+        p.tagline        = "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
+        p.themes_info    = themes_detail;
+        p.action_focused = !evo_rail_focused;
 
-        p.rows[0].title = "VERSION";
-        p.rows[0].detail = EVO_PLAYER_VERSION;
-        p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_about_support.png";
-        p.rows[0].badge = "v" EVO_PLAYER_VERSION;
-        p.rows[0].has_chevron = 0;
-        p.rows[0].is_focused = (evo_about_selected == 0);
-
-        p.rows[1].title = "EVO PLAYER PRO";
-        p.rows[1].detail = "CINEMATIC MEDIA PLAYER FOR PS5 HOMEBREW";
-        p.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        p.rows[1].badge = "";
-        p.rows[1].has_chevron = 0;
-        p.rows[1].is_focused = (evo_about_selected == 1);
-
-        p.rows[2].title = "BUILT ON";
-        p.rows[2].detail = "FFMPEG, RMLUI & PS5 PAYLOAD SDK";
-        p.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        p.rows[2].badge = "";
-        p.rows[2].has_chevron = 0;
-        p.rows[2].is_focused = (evo_about_selected == 2);
-
-        p.rows[3].title = "THEMES";
-        p.rows[3].detail = themes_detail;
-        p.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
-        p.rows[3].badge = "";
-        p.rows[3].has_chevron = 0;
-        p.rows[3].is_focused = (evo_about_selected == 3);
-
-        p.rows[4].title = "SCREENSHOTS";
-        p.rows[4].detail = "PRESS L3 OR R3 IN ANY MENU";
-        p.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
-        p.rows[4].badge = "";
-        p.rows[4].has_chevron = 0;
-        p.rows[4].is_focused = (evo_about_selected == 4);
-
-        p.rows[5].title = "CHANGELOG";
-        p.rows[5].detail = "WHAT CHANGED IN EACH RELEASE";
-        p.rows[5].icon_path = "projects/evoplayer/assets/icons/icon_recent_files.png";
-        p.rows[5].badge = "VIEW";
-        p.rows[5].has_chevron = 1;
-        p.rows[5].is_focused = (evo_about_selected == 5);
-
-        evo_rmlui_update_settings(&p);
-        evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
-        evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
+        evo_rmlui_update_about(&p);
+        evo_sync_rmlui_nav(EVO_SECTION_ABOUT, evo_rail_focused, evo_rail_index, 1);
+        evo_rmlui_render_about(fb, WIDTH, HEIGHT);
     }
 }
 
@@ -12545,7 +12501,7 @@ int main(void) {
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, +1);
                 else if (screen == SCREEN_EMBY_SETUP) evo_page_nav(&emby_setup_selected, EMBY_SETUP_COUNT, +1);
                 else if (screen == SCREEN_EMBY_BROWSE && emby_item_count > 0) evo_page_nav(&emby_browse_selected, emby_item_count, +1);
-                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, +1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ACTIONS, +1);
                 else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, +1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, +1);
                 else if (screen == SCREEN_THEME_SELECT) evo_page_nav(&theme_selected, evo_theme_count(), +1);
@@ -12581,7 +12537,7 @@ int main(void) {
                 else if (screen == SCREEN_DEVELOPER_TOOLS) evo_page_nav(&evo_tools_selected, EVO_TOOL_COUNT, -1);
                 else if (screen == SCREEN_EMBY_SETUP) evo_page_nav(&emby_setup_selected, EMBY_SETUP_COUNT, -1);
                 else if (screen == SCREEN_EMBY_BROWSE && emby_item_count > 0) evo_page_nav(&emby_browse_selected, emby_item_count, -1);
-                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ROWS, -1);
+                else if (screen == SCREEN_ABOUT_SUPPORT) evo_page_nav(&evo_about_selected, EVO_ABOUT_ACTIONS, -1);
                 else if (screen == SCREEN_CHANGELOG) evo_page_nav(&evo_changelog_selected, EVO_CHANGELOG_RELEASE_COUNT, -1);
                 else if (screen == SCREEN_PROFILE_SELECT) evo_page_nav(&profile_selected, 4, -1);
                 else if (screen == SCREEN_THEME_SELECT) evo_page_nav(&theme_selected, evo_theme_count(), -1);
@@ -12925,10 +12881,9 @@ int main(void) {
                 } else if (screen == SCREEN_EMBY_BROWSE) {
                     evo_emby_browse_activate();
                 } else if (screen == SCREEN_ABOUT_SUPPORT) {
-                    /* Only the changelog row goes anywhere; the other five
-                     * state facts and CROSS on them should do nothing rather
-                     * than feel broken. */
-                    if (evo_about_selected == EVO_ABOUT_ROW_CHANGELOG) {
+                    /* Only actionable buttons can be activated; static info cards
+                     * do not participate in focus. */
+                    if (evo_about_selected == EVO_ABOUT_ACT_CHANGELOG) {
                         evo_changelog_selected = 0;
                         screen = SCREEN_CHANGELOG;
                         evo_feedback(EVO_FB_CONFIRM);
