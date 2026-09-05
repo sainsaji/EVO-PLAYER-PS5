@@ -12,6 +12,9 @@
 #   ./scripts/package-app.sh --videodec2-probe + sceVideodec2 gate (Route B, the one)
 #   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
 #                                             ProsperoLight (needs MkPFS)
+#   ./scripts/package-app.sh --breadcrumbs    + boot-trace notification
+#                                             popups (#51, off by default —
+#                                             klog carries these otherwise)
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -34,6 +37,7 @@ FFPFSC=0
 USB_REMOTE=0
 GEO_TEXT=0
 SHADER_SCAN=0
+BREADCRUMBS=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -46,7 +50,8 @@ while (( $# )); do
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --geo-text)     GEO_TEXT=1 ;;     # #28/#67: compile the GPU text 2nd-pass into agc_render_geo
         --shader-scan)  SHADER_SCAN=1 ;;  # #67: rip PSSL shader blobs from loaded modules -> /mnt/usb0
-        -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
+        --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
+        -h|--help)      sed -n '2,17p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -62,6 +67,7 @@ if ! in_container; then
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( GEO_TEXT ))     && FWD+=(--geo-text)
     (( SHADER_SCAN ))  && FWD+=(--shader-scan)
+    (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -237,8 +243,6 @@ else
     begin "compiling ${APP_NAME} objects (${TCC} ${TFLAGS[*]})"
     # EVO's Makefile owns the source list, include paths and -D flags; we only
     # add the native-app link-tail flags via EXTRA_CFLAGS.
-    # EVO_BOOT_TRACE: system-notification breadcrumbs through main()'s init
-    # (only channel visible before VideoOut). Drop once milestone 1 is signed.
     # EVO_APP_MODULE: routes data paths to /download0/evoplayer and directory
     # enumeration through getdents (opendir fails EPERM in the sandbox).
     # Build fingerprint — main()'s FIRST notification, so a stale ShadowMount /
@@ -253,7 +257,7 @@ else
     # main.c bakes EVO_BUILD_ID in but the Makefile tracks source mtimes, not
     # this generated header - drop main.o so the id on screen is always current.
     rm -f "${EVO}/main.o"
-    APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
+    APP_DEFS="-DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
     (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
     (( AVPLAYER_PROBE )) && APP_DEFS+=" -DEVO_AVPLAYER_PROBE=1"
     (( VIDEODEC2_PROBE )) && APP_DEFS+=" -DEVO_VIDEODEC2_PROBE=1"
@@ -270,10 +274,15 @@ else
     # to /mnt/usb0/evo_shaders/ at boot (need a working RGBA-sampling pixel
     # shader; the sl00 reflection trailer only ships in real compiler output).
     (( SHADER_SCAN )) && APP_DEFS+=" -DEVO_SHADER_SCAN=1"
+    # --breadcrumbs (#51): bring back the on-screen boot-trace notification
+    # popups (evo_bt / evo_boot_log). Off by default - klog
+    # (tools/klog.sh) carries the same lines unconditionally in the app
+    # module now, so the popups are only useful watching the TV without klog.
+    (( BREADCRUMBS )) && APP_DEFS+=" -DEVO_BOOT_TRACE_POPUP=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
-    # (EVO_APP_MODULE, EVO_BOOT_TRACE, ...) differ from build-evoplayer.sh's, so
+    # (EVO_APP_MODULE, EVO_BOOT_TRACE_POPUP, ...) differ from build-evoplayer.sh's, so
     # `make objects` would silently reuse payload .o files - which is exactly
     # how three console sessions shipped an eboot with none of the app-module
     # code. Force a clean object build whenever the flag set changed.

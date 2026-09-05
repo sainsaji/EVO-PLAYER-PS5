@@ -745,7 +745,10 @@ image, PFS-compressed — ProsperoLight's format). `eboot.bin` +
 `sce_module/libc.prx` + `sce_sys/param.json` (`PPSA99039`, game category) +
 `assets/`. Compile flags: `EVO_APP_MODULE=1` (data paths, self-unjail,
 `P8_*` breadcrumbs, `av_log`→notify), `EVO_AGC_PROBE=1` (`evo_agc_probe.c`
-→ `EVO agc:` popup + `pp_agc_init`), `EVO_BOOT_TRACE=1`. Always: `malloc_shim`
+→ `EVO agc:` popup + `pp_agc_init`). `EVO_BOOT_TRACE_POPUP=1` (`--breadcrumbs`,
+#51) is now off by default — klog carries the `evo_bt`/`EVO_P8` lines
+unconditionally in the app module; the popup is opt-in for a TV-only session.
+Always: `malloc_shim`
 (flexible-mem allocator), `libc_ext`, the RmlUi Step 1 surface cache. #31's
 native decode + #27's `pp_agc` are unconditional for `MODE == player`.
 `tools/evo-remote.sh build` adds `--usb-remote` (the `/mnt/usb0/evo_cmd` /

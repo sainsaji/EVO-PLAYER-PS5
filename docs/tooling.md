@@ -98,7 +98,7 @@ docker compose run --rm ps5-dev bash -lc '
 
 | Script | What it does |
 |---|---|
-| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--agc-probe` adds the boot-time `sceAgc` reachability recon. `--probe` builds the sandbox probe instead of the player. |
+| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--agc-probe` adds the boot-time `sceAgc` reachability recon. `--probe` builds the sandbox probe instead of the player. `--breadcrumbs` (#51) brings back the on-screen boot-trace notification popups — off by default since klog carries the same lines. |
 | `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
 | `setup-pfs-tool.sh` | Fetches MkPFS into `.deps/` (pinned, isolated venv). Called by `--ffpfsc`; needs network on first run. |
 | `setup-native-app-deps.sh` | Bootstraps the static zlib the host converter needs. Called by `package-app.sh`. |
@@ -109,10 +109,15 @@ between the folder and the `.ffpfsc` — the image is just a different container
 
 Iteration still needs a manual mount + launch per cycle (no remote
 `SceSystemServiceLaunchApp` for an unregistered title). Diagnostics come back
-as **system-notification popups + klog** (`-DEVO_APP_MODULE` routes the
-`pp_stage_bc` / `evo_bt` / `EVO_P8` breadcrumbs there — `/mnt/usb0` is ENOENT
-inside the sandbox, so file-based breadcrumbs are invisible). USB media browse
-needs `tools/sandbox-unjail.sh`, re-run per launch.
+as **klog** by default (`-DEVO_APP_MODULE` routes the `pp_stage_bc` / `evo_bt`
+/ `EVO_P8` breadcrumbs there via `sceKernelDebugOutText` — `/mnt/usb0` is
+ENOENT inside the sandbox, so file-based breadcrumbs are invisible pre-unjail).
+The on-screen system-notification popups those breadcrumbs used to always pop
+are **off by default since #51** — they were only useful while bringing the
+app module up blind and are just TV noise now that it boots reliably. Pass
+`package-app.sh --breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) to bring them back
+for a session where you're watching the TV without klog attached. USB media
+browse needs `tools/sandbox-unjail.sh`, re-run per launch.
 
 ### The removed ELF-payload route
 
