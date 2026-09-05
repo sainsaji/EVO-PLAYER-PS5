@@ -103,6 +103,10 @@
                         <span class="spec-key">RENDERER</span>
                         <span id="spec-renderer" class="spec-val">Prospero Native 60Hz</span>
                     </div>
+                    <div class="spec-row">
+                        <span class="spec-key">DECODER</span>
+                        <span id="spec-decoder" class="spec-val">Software (FFmpeg)</span>
+                    </div>
                 </div>
             </div>
 

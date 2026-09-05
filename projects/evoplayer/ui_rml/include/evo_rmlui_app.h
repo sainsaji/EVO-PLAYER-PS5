@@ -147,6 +147,7 @@ struct EvoMediaInfoState {
     std::string subtitles;
     std::string output;
     std::string renderer;
+    std::string decoder;
 
     bool operator==(const EvoMediaInfoState& o) const {
         return title == o.title && path == o.path && res_badge == o.res_badge &&
@@ -156,7 +157,8 @@ struct EvoMediaInfoState {
                video_codec == o.video_codec && resolution == o.resolution &&
                color_hdr == o.color_hdr && audio_codec == o.audio_codec &&
                channels == o.channels && sample_rate == o.sample_rate &&
-               subtitles == o.subtitles && output == o.output && renderer == o.renderer;
+               subtitles == o.subtitles && output == o.output && renderer == o.renderer &&
+               decoder == o.decoder;
     }
     bool operator!=(const EvoMediaInfoState& o) const { return !(*this == o); }
 };

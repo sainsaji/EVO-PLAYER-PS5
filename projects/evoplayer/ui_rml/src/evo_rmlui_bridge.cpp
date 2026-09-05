@@ -384,6 +384,7 @@ void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
     state.subtitles = p->subtitles ? p->subtitles : "";
     state.output = p->output ? p->output : "";
     state.renderer = p->renderer ? p->renderer : "";
+    state.decoder = p->decoder ? p->decoder : "";
 
     EvoRmlApp::Instance().UpdateMediaInfoState(state);
 }

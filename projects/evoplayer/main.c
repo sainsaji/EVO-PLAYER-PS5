@@ -297,7 +297,7 @@ static int g_playback_return_screen = SCREEN_USB_BROWSER;
 #define SCREEN_THEME_SELECT       29
 
 #define EVO_SETTINGS_COUNT 4
-#define EVO_SETTINGS_PLAYBACK_COUNT 4
+#define EVO_SETTINGS_PLAYBACK_COUNT 5
 #define EVO_SETTINGS_SUBTITLES_COUNT 2
 #define EVO_SETTINGS_INTERFACE_COUNT 5
 #define EVO_SETTINGS_SYSTEM_COUNT 3
@@ -1718,6 +1718,13 @@ evo_vdec *g_vdec = NULL;
  * the known case) so the retry reopens on FFmpeg. Cleared in
  * start_video_playback() whenever a different file is opened. */
 int g_vdec_force_ffmpeg = 0;
+
+/* #37: user-facing "Video decoder" setting (Playback settings, row 4).
+ * AUTO/FFMPEG/NATIVE, persisted in evo_player_settings.cfg — see
+ * prospero_settings_save/_load. Read at open_file time through
+ * evo_vdec_pref_resolve(); g_vdec_force_ffmpeg above still overrides it when
+ * the native backend has gone fatal mid-session. */
+static int prospero_vdec_pref = EVO_VDEC_PREF_AUTO;
 
 struct SwsContext *play_sws = NULL;   /* legacy swscale fallback (exotic fmts) */
 char current_media[128];
@@ -4256,14 +4263,17 @@ int start_video_playback(const char *path) {
             evo_vdec_open_params vp;
             memset(&vp, 0, sizeof(vp));
             /*
-             * Hidden AUTO for now (Phase 4, #31): request native decode when
-             * the boot-time probe armed it, else FFmpeg. evo_vdec_open() still
-             * falls back to FFmpeg on any native bring-up failure. The real
-             * Auto/FFmpeg/Native settings row is Phase 5.
+             * #37: resolve the user's Auto/FFmpeg/Native settings row against
+             * the boot-time probe + codec. evo_vdec_open() still falls back to
+             * FFmpeg on any native bring-up failure regardless of what this
+             * returns. g_vdec_force_ffmpeg (#57) wins outright: a native
+             * fatal-streak earlier in this file's playback pins FFmpeg for the
+             * rest of it even if the user's preference is NATIVE.
              */
-            vp.backend      = (!g_vdec_force_ffmpeg && evo_vdec_probe())
-                                  ? EVO_VDEC_BACKEND_NATIVE
-                                  : EVO_VDEC_BACKEND_FFMPEG;   /* #57 fallback */
+            vp.backend      = g_vdec_force_ffmpeg
+                                  ? EVO_VDEC_BACKEND_FFMPEG
+                                  : evo_vdec_pref_resolve((evo_vdec_pref)prospero_vdec_pref,
+                                                           (int)par->codec_id);
             vp.codec_id     = par->codec_id;
             vp.width        = par->width;
             vp.height       = par->height;
@@ -6908,7 +6918,7 @@ static void prospero_settings_save(void)
 
     fprintf(
         file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n",
         (int)current_profile,
         prospero_resume_playback_enabled,
         prospero_default_view_mode,
@@ -6926,7 +6936,8 @@ static void prospero_settings_save(void)
         evo_feedback_sound_enabled(),
         evo_feedback_lightbar_enabled(),
         prospero_subtitle_face,
-        evo_keyboard_get_type()
+        evo_keyboard_get_type(),
+        prospero_vdec_pref   /* #37: appended after keyboard type, see load() */
     );
 
     fclose(file);
@@ -6994,6 +7005,10 @@ static void prospero_settings_load(void)
     int loaded_lightbar = 1;
     int loaded_sub_face = 1;
     int loaded_kb_type = 1;
+    /* #37: video decoder preference, appended after keyboard type. Same
+     * append pattern as the rest of this block — an older file still parses
+     * and keeps AUTO. */
+    int loaded_vdec_pref = EVO_VDEC_PREF_AUTO;
 
     FILE *file =
         fopen(
@@ -7007,7 +7022,7 @@ static void prospero_settings_load(void)
         int values_read =
             fscanf(
                 file,
-                "%d%d%d%d%d%d %23[^\n]%d%d%d%d",
+                "%d%d%d%d%d%d %23[^\n]%d%d%d%d%d",
                 &loaded_profile,
                 &loaded_resume,
                 &loaded_view,
@@ -7018,14 +7033,15 @@ static void prospero_settings_load(void)
                 &loaded_sound,
                 &loaded_lightbar,
                 &loaded_sub_face,
-                &loaded_kb_type
+                &loaded_kb_type,
+                &loaded_vdec_pref
             );
 
         fclose(file);
 
         /*
-         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9, 10 or 11.
-         * Fewer than 5 is corrupt.
+         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9, 10, 11 or
+         * 12. Fewer than 5 is corrupt.
          */
         if (values_read < 5) {
             loaded_profile = 0;
@@ -7046,6 +7062,7 @@ static void prospero_settings_load(void)
         if (values_read < 9) loaded_lightbar = 1;
         if (values_read < 10) loaded_sub_face = 1;
         if (values_read < 11) loaded_kb_type = 1;
+        if (values_read < 12) loaded_vdec_pref = EVO_VDEC_PREF_AUTO;
     }
 
     if (loaded_sub_face != EVO_FACE_SUB && loaded_sub_face != EVO_FACE_TITLE)
@@ -7054,6 +7071,11 @@ static void prospero_settings_load(void)
 
     evo_sort_folders_first = loaded_sort ? 1 : 0;
     evo_keyboard_set_type(loaded_kb_type);
+
+    prospero_vdec_pref =
+        (loaded_vdec_pref == EVO_VDEC_PREF_FFMPEG || loaded_vdec_pref == EVO_VDEC_PREF_NATIVE)
+            ? loaded_vdec_pref
+            : EVO_VDEC_PREF_AUTO;
 
 
     /*
@@ -7364,6 +7386,26 @@ static void evo_surround_trigger(int mode, int ch)
     evo_surround_start_thread();
 }
 
+/*
+ * #37: row text for the Video decoder setting. AUTO and NATIVE read the
+ * cached boot probe so the badge always reflects whether native decode is
+ * actually available this session (host + payload builds: evo_vdec_probe()
+ * is a no-op returning 0, so this naturally shows "Auto (FFmpeg)" /
+ * "Native (unavailable)" there — no separate host-only branch needed).
+ */
+static const char *evo_vdec_pref_badge(int pref)
+{
+    switch (pref) {
+        case EVO_VDEC_PREF_FFMPEG:
+            return "FFmpeg";
+        case EVO_VDEC_PREF_NATIVE:
+            return evo_vdec_probe() ? "Native" : "Native (unavailable)";
+        case EVO_VDEC_PREF_AUTO:
+        default:
+            return evo_vdec_probe() ? "Auto (Native)" : "Auto (FFmpeg)";
+    }
+}
+
 static void settings_playback_activate(void)
 {
     if (settings_playback_selected == 0) {
@@ -7385,6 +7427,14 @@ static void settings_playback_activate(void)
         surround_test_selected = 0;
         screen = SCREEN_SURROUND_TEST;
         evo_feedback(EVO_FB_OPEN);
+    } else if (settings_playback_selected == 4) {
+        prospero_vdec_pref = (prospero_vdec_pref + 1) % 3;
+        prospero_settings_save();
+        evo_feedback(EVO_FB_TOGGLE);
+        /* Never hot-swap a live decoder — the new preference is read the
+         * next time evo_vdec_open() runs, i.e. the next open_file(). */
+        toast("VIDEO DECODER",
+              g_vdec ? "Applies to next video" : evo_vdec_pref_badge(prospero_vdec_pref));
     }
 }
 
@@ -9333,6 +9383,13 @@ void draw_settings_playback_screen(uint32_t *fb)
         p.rows[3].has_chevron = 1;
         p.rows[3].is_focused = (settings_playback_selected == 3);
 
+        p.rows[4].title = "VIDEO DECODER";
+        p.rows[4].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
+        p.rows[4].icon_path = "../icons/icon_developer_tools.png";
+        p.rows[4].badge = evo_vdec_pref_badge(prospero_vdec_pref);
+        p.rows[4].has_chevron = 1;
+        p.rows[4].is_focused = (settings_playback_selected == 4);
+
         evo_rmlui_update_settings(&p);
         evo_sync_rmlui_nav(5, evo_rail_focused, evo_rail_index, 1);
         evo_rmlui_render_settings(fb, WIDTH, HEIGHT);
@@ -10327,6 +10384,7 @@ void draw_media_info_screen(uint32_t *fb)
         char ch_str[64] = "";
         char rate_str[32] = "";
         char color_hdr[64] = "BT.709 (SDR)";
+        char decoder_badge[64] = "";
 
         if (g_vdec) {
             int vc_w = evo_vdec_ffmpeg_width(g_vdec);
@@ -10365,6 +10423,12 @@ void draw_media_info_screen(uint32_t *fb)
             }
 
             if (evo_pb_video_fps() > 1.0) snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(evo_pb_video_fps()));
+
+            /* #37: surface which decoder actually produced this stream. */
+            snprintf(decoder_badge, sizeof(decoder_badge), "%s",
+                     evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE
+                         ? "Hardware (sceVideodec2)"
+                         : "Software (FFmpeg)");
         }
 
         snprintf(ch_str, sizeof(ch_str), "%d Channels (%s)", evo_audio_channels,
@@ -10391,6 +10455,7 @@ void draw_media_info_screen(uint32_t *fb)
         p.subtitles = prospero_subtitle_enabled ? "Active" : (md->has_subtitles ? "Available (Off)" : "None");
         p.output = "PS5 Linear Audio Out";
         p.renderer = "Prospero Hardware Vsync";
+        p.decoder = decoder_badge[0] ? decoder_badge : "Unknown";
 
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb, WIDTH, HEIGHT);

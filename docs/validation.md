@@ -180,3 +180,25 @@ render pairs (`tools/uiview_playback_rml.sh` vs `tools/uiview.sh --all`), with
 | D-pad focus / navigation order + timing | Host fixtures set focus directly; real nav is `evo_focus` / `evo_nav` driving the DOM | not run |
 
 Record results here (date, `.ffpfsc` sha, screen, pass/fail, photo).
+
+---
+
+## Video decoder setting (#37)
+
+Code-complete, hw-verify-pending (2026-09-05): the Auto/FFmpeg/Native settings
+row, config migration and the Media Info decoder badge — see
+[evo-pro/native-decode-plan.md](evo-pro/native-decode-plan.md) § Phase 5.
+Host preview (`tools/uiview_playback_rml.sh`) confirms the row/badge render;
+the following need a hardware pass:
+
+| Check | Status |
+|---|---|
+| `AUTO` with the probe armed opens native on an H.264 file | not run |
+| `FFMPEG` forces software decode on the same clip | not run |
+| `NATIVE` with the probe failed shows "Native (unavailable)" and plays on FFmpeg | not run |
+| Old (pre-#37) config file loads with `AUTO` and keeps every other setting | not run |
+| Toggling mid-file toasts "Applies to next video"; current file unaffected, next file honours it | not run |
+| Media Info's DECODER row matches the file actually playing, for both backends | not run |
+
+A per-codec decode-backend column with ms/frame + dropped-frame counts is
+Phase 6 / **#38**'s job (FFmpeg-vs-native A/B benchmark), not this table.

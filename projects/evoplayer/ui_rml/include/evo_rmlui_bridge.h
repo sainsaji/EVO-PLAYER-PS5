@@ -110,6 +110,7 @@ typedef struct {
     const char* subtitles;
     const char* output;
     const char* renderer;
+    const char* decoder;   /* #37: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
 } evo_rmlui_mediainfo_params_t;
 
 /*

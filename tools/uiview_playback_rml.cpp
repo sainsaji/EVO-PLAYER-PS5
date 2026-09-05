@@ -933,6 +933,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.subtitles = "3 tracks  -  English, French, Spanish";
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode";
+        p.decoder = "Software (FFmpeg)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo.bmp", fb.data(), width, height);
@@ -961,6 +962,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.subtitles = "7 tracks  -  English SDH, French, German, Spanish, Italian";
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode (slice-threaded, 12 threads)";
+        p.decoder = "Hardware (sceVideodec2)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo_stress.bmp", fb.data(), width, height);
@@ -1253,10 +1255,10 @@ int main(int argc, char** argv) {
         memset(&set, 0, sizeof(set));
         set.title = "PLAYBACK & VIDEO";
         set.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
-        set.counter = "1 OF 4";
+        set.counter = "1 OF 5";
         set.rail_active_idx = 5;
         set.rail_focused = 0;
-        set.row_count = 4;
+        set.row_count = 5;
 
         set.rows[0].title = "PLAYBACK PROFILE";
         set.rows[0].detail = "SELECT ENGINE PROFILE";
@@ -1285,6 +1287,15 @@ int main(int argc, char** argv) {
         set.rows[3].badge = "";
         set.rows[3].has_chevron = 1;
         set.rows[3].is_focused = 0;
+
+        /* #37: native decode never runs on host — evo_vdec_probe() is a
+         * no-op there, so this is what a real build shows too. */
+        set.rows[4].title = "VIDEO DECODER";
+        set.rows[4].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
+        set.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[4].badge = "Auto (FFmpeg)";
+        set.rows[4].has_chevron = 1;
+        set.rows[4].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
