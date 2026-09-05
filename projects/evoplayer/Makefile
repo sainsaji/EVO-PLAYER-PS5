@@ -140,7 +140,10 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_render_agc.cpp \
     ui_rml/src/evo_rmlui_system.cpp \
     ui_rml/src/evo_rmlui_app.cpp \
-    ui_rml/src/evo_rmlui_bridge.cpp
+    ui_rml/src/evo_rmlui_bridge.cpp \
+    ui_rml/src/evo_rmlui_fileinterface.cpp \
+    ui_rml/src/evo_rmlui_bundle.cpp \
+    ui_rml/src/evo_rmlui_bundle_data.cpp
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 

@@ -11,6 +11,10 @@ fi
 
 cd "${REPO_ROOT}"
 
+# #60: keep the embedded asset bundle in step with assets/{rml,fonts,icons} -
+# evo_rmlui_app.cpp now links against it unconditionally.
+python3 tools/bundle_rml_assets.py
+
 echo "--- building prof_rmlui (-DEVO_RML_PROFILE, -O2)"
 g++ -O2 -std=c++17 -DEVO_RML_PROFILE \
     -Iprojects/evoplayer \
@@ -26,6 +30,9 @@ g++ -O2 -std=c++17 -DEVO_RML_PROFILE \
     projects/evoplayer/ui_rml/src/evo_rmlui_system.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bridge.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_fileinterface.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle_data.cpp \
     projects/evoplayer/pp/src/pp_agc.c \
     -Lbuild/rmlui-host-dist/lib \
     -Lbuild/rmlui-host/RmlUi/build \

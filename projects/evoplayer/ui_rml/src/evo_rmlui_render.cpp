@@ -1,6 +1,7 @@
 #include "evo_rmlui_render.h"
 #include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_prof.h"
+#include "evo_rmlui_bundle.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -325,43 +326,57 @@ Rml::TextureHandle EvoRenderInterface::LoadTexture(Rml::Vector2i& texture_dimens
         filename = source.substr(last_slash + 1);
     }
 
-    std::vector<std::string> candidates = {
-        source,
-        "assets/icons/" + filename,
-        "assets/rml/icons/" + filename,
-        "assets/rml/" + source,
-        "assets/" + source,
-        "/data/evoplayer/app/assets/icons/" + filename,
-        "/data/evoplayer/app/assets/rml/icons/" + filename,
-        "/data/evoplayer/app/assets/rml/" + source,
-        "/data/evoplayer/app/assets/" + source,
-        "/data/homebrew/EVOPlayer/assets/icons/" + filename,
-        "/data/homebrew/EVOPlayer/assets/rml/icons/" + filename,
-        "/data/homebrew/EVOPlayer/assets/rml/" + source,
-        "/data/homebrew/EVOPlayer/assets/" + source,
-        "/app0/assets/icons/" + filename,
-        "/app0/assets/rml/icons/" + filename,
-        "/app0/assets/rml/" + source,
-        "/app0/assets/" + source,
-        "projects/evoplayer/assets/icons/" + filename,
-        "projects/evoplayer/assets/rml/icons/" + filename,
-        "projects/evoplayer/assets/rml/" + source,
-        "projects/evoplayer/assets/" + source,
-        "/workspace/projects/evoplayer/assets/icons/" + filename,
-        "/workspace/projects/evoplayer/assets/rml/icons/" + filename,
-        "/workspace/projects/evoplayer/assets/rml/" + source,
-        "/workspace/projects/evoplayer/assets/" + source,
-        "/mnt/usb0/assets/icons/" + filename,
-        "/mnt/usb0/assets/rml/icons/" + filename
-    };
-
     int width = 0, height = 0, channels = 0;
     unsigned char* data = nullptr;
 
-    for (const auto& path : candidates) {
-        data = stbi_load(path.c_str(), &width, &height, &channels, 4);
-        if (data) {
-            break;
+    /*
+     * #60: embedded icons first - see evo_rmlui_bundle.h. RmlUi's render
+     * interface loads textures itself (stbi_load) rather than through
+     * Rml::FileInterface, so the bundle lookup is duplicated here rather than
+     * reused from EvoRmlFileInterface. `source` is usually already a bare
+     * filename or "icons/<file>"-shaped path from the RCSS; try both that and
+     * the explicit icons/ form the .rcss files actually use.
+     */
+    const EvoRmlBundleFile* bundled = evo_rmlui_bundle_find(source);
+    if (!bundled) bundled = evo_rmlui_bundle_find("icons/" + filename);
+    if (bundled) {
+        data = stbi_load_from_memory(bundled->data, (int)bundled->size,
+                                     &width, &height, &channels, 4);
+    }
+
+    if (!data) {
+        /* Not bundled (or the bundle is stale/missing) - fall back to disk,
+         * same prefixes evo_rmlui_app.cpp tries for .rml/.rcss/fonts. The
+         * #44 out-of-band /data/evoplayer/app/assets/ sync target and the
+         * defunct ELF-payload /data/homebrew/EVOPlayer/ path are gone - #60
+         * makes the package self-contained instead of leaning on either. */
+        std::vector<std::string> candidates = {
+            source,
+            "assets/icons/" + filename,
+            "assets/rml/icons/" + filename,
+            "assets/rml/" + source,
+            "assets/" + source,
+            "/app0/assets/icons/" + filename,
+            "/app0/assets/rml/icons/" + filename,
+            "/app0/assets/rml/" + source,
+            "/app0/assets/" + source,
+            "projects/evoplayer/assets/icons/" + filename,
+            "projects/evoplayer/assets/rml/icons/" + filename,
+            "projects/evoplayer/assets/rml/" + source,
+            "projects/evoplayer/assets/" + source,
+            "/workspace/projects/evoplayer/assets/icons/" + filename,
+            "/workspace/projects/evoplayer/assets/rml/icons/" + filename,
+            "/workspace/projects/evoplayer/assets/rml/" + source,
+            "/workspace/projects/evoplayer/assets/" + source,
+            "/mnt/usb0/assets/icons/" + filename,
+            "/mnt/usb0/assets/rml/icons/" + filename
+        };
+
+        for (const auto& path : candidates) {
+            data = stbi_load(path.c_str(), &width, &height, &channels, 4);
+            if (data) {
+                break;
+            }
         }
     }
 

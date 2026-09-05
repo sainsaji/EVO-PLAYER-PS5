@@ -285,6 +285,13 @@ else
         printf '%s' "${WANT}" > "${STAMP}"
     fi
 
+    # #60: regenerate the embedded RmlUi asset bundle (rml/rcss/fonts/icons)
+    # so the .ffpfsc is always built from whatever assets/ currently holds -
+    # never from a stale evo_rmlui_bundle_data.cpp left over from a previous
+    # commit. See tools/bundle_rml_assets.py and evo_rmlui_fileinterface.cpp.
+    begin "bundling RmlUi assets into evo_rmlui_bundle_data.cpp"
+    python3 "${REPO_ROOT}/tools/bundle_rml_assets.py"
+
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
         EXTRA_CFLAGS="${WANT}" \

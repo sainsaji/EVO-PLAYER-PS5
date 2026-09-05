@@ -103,64 +103,12 @@ with FTP() as ftp:
     print(f"done: ftp://{host}:{port}{remote}")
 PY
 
-    # #44: the app reads UI assets from /data/evoplayer/app/assets/ (payload-era
-    # path, but the only one reliably reachable inside the sandbox). It is NOT
-    # inside the .ffpfsc, so it goes stale across deploys and shadows the #16
-    # RCSS fixes. Wipe + re-push the freshly packaged tree every time.
-    if [[ -d "${APPDIR}/assets" ]]; then
-        begin "sync ${TITLE_ID} UI assets -> /data/evoplayer/app/assets/"
-        python3 - "${PS5_HOST}" "${FTP_PORT}" "${APPDIR}/assets" <<'PY'
-import os, sys
-from ftplib import FTP, error_perm
-from posixpath import join
-
-host, port, src = sys.argv[1:]
-DST = "/data/evoplayer/app/assets"
-
-with FTP() as ftp:
-    ftp.connect(host, int(port), timeout=20)
-    ftp.login()
-    try: ftp.set_pasv(True)
-    except Exception: pass
-
-    def rmtree(path):
-        try:
-            ftp.cwd(path)
-        except error_perm:
-            return
-        names = [n for n, _ in ftp.mlsd() if n not in (".", "..")]
-        ftp.cwd("/")
-        for n in names:
-            p = join(path, n)
-            try:
-                ftp.sendcmd(f"DELE {p}")
-            except error_perm:
-                rmtree(p)
-        try: ftp.rmd(path)
-        except error_perm: pass
-
-    def ensure(path):
-        cur = ""
-        for part in path.strip("/").split("/"):
-            cur += "/" + part
-            try: ftp.mkd(cur)
-            except error_perm: pass
-
-    rmtree(DST)
-    n = 0
-    for root, _dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src).replace(os.sep, "/")
-        rdir = DST if rel == "." else f"{DST}/{rel}"
-        ensure(rdir)
-        for f in files:
-            with open(os.path.join(root, f), "rb") as fh:
-                ftp.storbinary(f"STOR {rdir}/{f}", fh, blocksize=256 * 1024)
-            n += 1
-    print(f"synced {n} asset files")
-PY
-        ok "assets synced"
-    fi
-
+    # #60: the .ffpfsc is self-contained now - RmlUi's .rml/.rcss/.ttf/.png
+    # assets are embedded in the binary (evo_rmlui_bundle_data.cpp) instead of
+    # being read from disk at runtime, so the #44 out-of-band FTP push to
+    # /data/evoplayer/app/assets/ is no longer needed. This block used to wipe
+    # and re-upload that loose tree on every deploy; deleting
+    # /data/evoplayer/app/assets/ on the console now has zero effect on the UI.
     ok "deploy complete"
     echo "   Mount + launch from the Games row (ShadowMountPlus). Never stack launches."
     exit 0
