@@ -158,6 +158,77 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
+  # #36: catch a broken app-module package (link tail, PRX stubs, MkPFS pack)
+  # on every PR, instead of finding out on a release tag. Runs --ffpfsc so a
+  # regression in the PFS packing itself (not just the compile) is also
+  # caught here rather than only in release.yml.
+  package-app:
+    name: Package app module (.ffpfsc)
+    needs: build-image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load < /tmp/evo-image.tar.gz
+
+      - name: Cache MkPFS toolchain
+        uses: actions/cache@v4
+        with:
+          path: .deps/MkPFS
+          key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
+
+      - name: package-app.sh --ffpfsc
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc './scripts/package-app.sh --ffpfsc'
+
+      # Same independent checks as release.yml's "Verify the release image" -
+      # kept in sync by hand since GHA has no clean way to share a step body
+      # across workflows without a composite action.
+      - name: Verify the app module is a validly-signed, non-empty PS5 module
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            evo-player/ps5-dev:ci bash -lc '
+              set -e
+              APPDIR="output/app/PPSA99039"
+              IMG="output/app/PPSA99039.ffpfsc"
+
+              [ -f "$IMG" ] || { echo "missing $IMG - MkPFS pack failed"; exit 1; }
+
+              # eboot.bin is FSELF-wrapped (fake-signed) - file/readelf see
+              # its custom container header and report "data", not an ELF
+              # header. Check the pre-sign ELF package-app.sh keeps around
+              # for the "is this a real, non-host PS5 binary" question.
+              PRESIGN="output/app/.build/eboot.elf"
+              file "$PRESIGN" | grep -q "ELF 64-bit LSB.*x86-64" \
+                || { echo "$PRESIGN is not a PS5 ELF"; exit 1; }
+              llvm-readelf -l "$PRESIGN" | grep -q "/lib64/ld-linux" \
+                && { echo "$PRESIGN links the HOST loader - wrong compiler"; exit 1; }
+
+              F="$APPDIR/eboot.bin"
+              [ -f "$F" ] || { echo "missing $F"; exit 1; }
+              output/app/.build/host/ps5-native-tool self --inspect --file "$F" \
+                | tee /dev/stderr | grep -q "integrity: valid" \
+                || { echo "eboot.bin did not report a valid signed container"; exit 1; }
+
+              ASSET_BYTES="$(du -sb "$APPDIR/assets" | cut -f1)"
+              [ "$ASSET_BYTES" -gt 1000000 ] || { echo "assets/ is suspiciously small ($ASSET_BYTES bytes)"; exit 1; }
+
+              echo "ok: $IMG  $(stat -c %s "$IMG") bytes, assets ${ASSET_BYTES} bytes"
+            '
+
+      - name: Archive app module
+        uses: actions/upload-artifact@v4
+        with:
+          name: evoplayer-app-module
+          path: |
+            output/app/PPSA99039.ffpfsc
+            output/app/PPSA99039/
+          if-no-files-found: error
+          retention-days: 14
+
+  # ===========================================================================
   package:
     name: Package homebrew bundles
     needs: build-projects
