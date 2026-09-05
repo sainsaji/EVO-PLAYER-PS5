@@ -4521,6 +4521,13 @@ int start_video_playback(const char *path) {
     } else
 #endif
         EVO_P8("P8_31_RETURN_OK", "playback threads up");
+
+    /* #73: show the OSD (title/timeline/badges) for the first ~3.5s of
+     * playback instead of starting bare - wants_controls (draw_player_screen)
+     * only shows it within that window of controls_last_used_ms, which
+     * otherwise stays at whatever it was from the previous screen (often
+     * long expired), or 0 on a cold boot. */
+    controls_last_used_ms = now_ms();
     return 1;
 }
 
@@ -10724,9 +10731,21 @@ static void prospero_scrub_overlay_pump(void)
         if (g_pending_vo_reconfig || !g_vo_decode_gate)
             return;                                  /* wait for 4K VO to come live */
 
-        player_paused = prospero_scrub_ovl_restore_paused;
-        if (!player_paused && prospero_scrub_ovl_was_playing)
+        /* #73: a confirmed seek (prospero_scrub_ovl_wait_seek, set by
+         * prospero_scrub_overlay_hold_for_seek) always resumes playback -
+         * matches prospero_scrub_confirm's restore_paused=0 below the
+         * overlay. A cancel/release (prospero_scrub_overlay_release, no
+         * seek submitted) still restores exactly the state the overlay was
+         * armed with, so Circle continues to return to the pre-scrub
+         * position/state as-is. */
+        if (prospero_scrub_ovl_wait_seek) {
+            player_paused = 0;
             pp_playback_resume(&g_pp_pb);
+        } else {
+            player_paused = prospero_scrub_ovl_restore_paused;
+            if (!player_paused && prospero_scrub_ovl_was_playing)
+                pp_playback_resume(&g_pp_pb);
+        }
         g_osd_clock_paused = 0;
         prospero_scrub_ovl_state = SCRUB_OVL_NONE;
         return;
@@ -10853,9 +10872,13 @@ static void prospero_chapter_jump(int direction)
     /* A chapter jump is a fire-and-forget seek, not an interactive mode - it
      * stays on the k4_live path and shows the held frame during the (brief)
      * discard, same as before #32. OSD-over-4K for it needs the GPU composite
-     * (#27); the 1080 scrub overlay is scoped to the interactive scrub. */
+     * (#27); the 1080 scrub overlay is scoped to the interactive scrub.
+     *
+     * #73: like a confirmed scrub, a chapter jump always resumes playback -
+     * jumping to a chapter implies "watch from here" the same way seeking
+     * does, rather than requiring a separate Play/Cross press. */
     if (!prospero_request_inplace_seek(
-            prospero_chapter_start[next], player_paused)) {
+            prospero_chapter_start[next], 0)) {
         toast("CHAPTER", "Seek failed");
         return;
     }
@@ -10921,8 +10944,13 @@ static int prospero_scrub_confirm(void) {
             prospero_scrub_target
         );
 
-    int restore_paused =
-        prospero_scrub_was_paused;
+    /* #73: confirming a scrub always resumes playback, regardless of
+     * whether playback was paused when the scrub began - seeking implies
+     * "watch from here", so no extra Play/Cross press should be needed.
+     * (Circle/prospero_scrub_cancel is untouched: cancelling still restores
+     * the pre-scrub state.) */
+    int restore_paused = 0;
+    prospero_scrub_was_paused = 0;
 
     prospero_scrub_active = 0;
     controls_last_used_ms = now_ms();
