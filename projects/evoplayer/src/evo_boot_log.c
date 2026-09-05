@@ -10,8 +10,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef EVO_BOOT_TRACE_POPUP
 struct bl_note { char pad[45]; char msg[3075]; };
 extern int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
+#endif
 
 #define BL_CAP 16384
 static char  g_buf[BL_CAP];
@@ -26,10 +28,14 @@ void evo_boot_log(const char *fmt, ...)
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
 
+#ifdef EVO_BOOT_TRACE_POPUP
+    /* #51: on-screen popup - opt-in (--breadcrumbs). Off by default; the
+     * buffered /mnt/usb0/evo_boot.log below is the durable channel. */
     struct bl_note n;
     memset(&n, 0, sizeof n);
     snprintf(n.msg, sizeof n.msg, "%s", line);
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
+#endif
 
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

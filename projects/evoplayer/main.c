@@ -11879,9 +11879,12 @@ static void evo_ensure_data_dir(void)
 
     evo_migrate_legacy_store();
 
-#ifdef EVO_BOOT_TRACE
-    /* Exercise evo_readdir() on a directory that actually has files - the
-     * browser's /mnt/usb0 is ENOENT until sandbox-unjail, so it can't. */
+#ifdef EVO_BOOT_TRACE_POPUP
+    /* #51: this extra self-test only earns its keep during a --breadcrumbs
+     * session (was gated on EVO_BOOT_TRACE, which no longer exists — klog
+     * output no longer needs a flag, see evo_boot_trace.h). Exercise
+     * evo_readdir() on a directory that actually has files - the browser's
+     * /mnt/usb0 is ENOENT until sandbox-unjail, so it can't. */
     {
         const char *root = evo_data_dir();
         evo_dir_t *d = evo_opendir(root);
