@@ -1,0 +1,419 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Dedicated About & Capabilities RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16px;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Content pane leaving the channel for the standalone navbar rail */
+#content-pane {
+    position: absolute;
+    left: 152px;
+    top: 0;
+    width: 1768px;
+    height: 1080px;
+}
+
+/* =============================== Hero Header =============================== */
+
+#about-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 56px;
+    margin-bottom: 22px;
+    width: 1704px;
+}
+
+#header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#header-indicator {
+    width: 5px;
+    height: 64px;
+    background-color: #0070d1;
+    border-radius: 2px;
+    margin-right: 18px;
+}
+
+#header-icon-box {
+    width: 60px;
+    height: 60px;
+    background-color: #131c2e;
+    border-width: 1px;
+    border-color: #1e2c44;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 20px;
+}
+
+#header-icon {
+    width: 32px;
+    height: 32px;
+    display: inline-block;
+}
+
+#header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#header-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+}
+
+#about-title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#about-version-pill {
+    background-color: #0070d1;
+    border-width: 1px;
+    border-color: #38bdf8;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+#about-build-tag {
+    background-color: #131d2e;
+    border-width: 1px;
+    border-color: #243550;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+}
+
+#about-tagline {
+    font-size: 14px;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1px;
+    margin-top: 4px;
+}
+
+/* ============================ Action Buttons Bar ============================ */
+
+#header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.action-btn {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 26px;
+    border-radius: 18px;
+    background-color: #0c1322;
+    border-width: 1px;
+    border-color: #172338;
+}
+
+.action-btn.btn-focused {
+    background-color: #142036;
+    border-width: 1.5px;
+    border-color: #38bdf8;
+}
+
+.btn-cross-icon {
+    width: 22px;
+    height: 22px;
+    display: inline-block;
+}
+
+.btn-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-block;
+}
+
+.btn-label {
+    font-size: 15px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.8px;
+}
+
+/* =================== Codec & Capabilities Matrix =================== */
+
+#matrix-section {
+    width: 1704px;
+    margin-bottom: 22px;
+}
+
+.section-header {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+}
+
+.section-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+}
+
+.section-subtitle {
+    font-size: 13px;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 0.5px;
+}
+
+#matrix-grid {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 1704px;
+}
+
+/* Non-interactive static cards: no hover outlines or selection halos */
+.matrix-card {
+    width: 840px;
+    height: 340px;
+    background-color: #0c1322;
+    border-width: 1px;
+    border-color: #172338;
+    border-radius: 20px;
+    padding: 22px 28px;
+    display: flex;
+    flex-direction: column;
+}
+
+.card-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.card-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+.card-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+}
+
+.dot-hw {
+    background-color: #10b981;
+}
+
+.dot-sw {
+    background-color: #38bdf8;
+}
+
+.card-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5px;
+}
+
+.card-badge {
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.badge-hw {
+    background-color: #064e3b;
+    border-width: 1px;
+    border-color: #059669;
+    color: #34d399;
+}
+
+.badge-sw {
+    background-color: #172554;
+    border-width: 1px;
+    border-color: #1d4ed8;
+    color: #60a5fa;
+}
+
+.card-engine-tag {
+    font-size: 13px;
+    font-weight: bold;
+    color: #7e92ab;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+}
+
+.matrix-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.matrix-row {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-bottom-color: #141d2e;
+}
+
+.matrix-row-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+}
+
+.matrix-row-desc {
+    font-size: 13px;
+    font-weight: normal;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+
+/* =================== Technical Specs & Environment Grid =================== */
+
+#specs-section {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 1704px;
+}
+
+/* Non-interactive spec cards */
+.spec-card {
+    width: 552px;
+    height: 228px;
+    background-color: #090f1b;
+    border-width: 1px;
+    border-color: #152033;
+    border-radius: 18px;
+    padding: 18px 24px;
+    display: flex;
+    flex-direction: column;
+}
+
+.spec-card-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom-width: 1px;
+    border-bottom-color: #152033;
+}
+
+.spec-item {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.spec-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 0.5px;
+}
+
+.spec-value {
+    font-size: 14px;
+    font-weight: normal;
+    color: #e2e8f0;
+}
+
+/* =============================== Footer Hints =============================== */
+
+#about-footer {
+    position: absolute;
+    bottom: 36px;
+    left: 0;
+    width: 1704px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32px;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.glyph-badge {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 18px;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 24px;
+    height: 24px;
+}
+
+.footer-text {
+    font-size: 14px;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1px;
+}
+
+#footer-build-meta {
+    margin-left: auto;
+    font-size: 14px;
+    font-weight: bold;
+    color: #475569;
+    letter-spacing: 0.8px;
+}

@@ -338,6 +338,23 @@ void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderSettings(framebuffer, width, height);
 }
 
+void evo_rmlui_update_about(const evo_rmlui_about_params_t* p) {
+    if (!p) return;
+    EvoAboutState state;
+    state.app_name = p->app_name ? p->app_name : "EVO PLAYER PRO";
+    state.version = p->version ? p->version : "";
+    state.build_tag = p->build_tag ? p->build_tag : "PS5 HOMEBREW";
+    state.tagline = p->tagline ? p->tagline : "";
+    state.themes_info = p->themes_info ? p->themes_info : "";
+    state.action_focused = (p->action_focused != 0);
+
+    EvoRmlApp::Instance().UpdateAboutState(state);
+}
+
+void evo_rmlui_render_about(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderAbout(framebuffer, width, height);
+}
+
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     if (!p) return;
     EvoSubtitlesState state;
