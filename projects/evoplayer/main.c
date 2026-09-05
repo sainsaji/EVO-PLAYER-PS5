@@ -10608,6 +10608,13 @@ static int prospero_scrub_was_paused = 0;
 static double prospero_scrub_origin = 0.0;
 static double prospero_scrub_target = 0.0;
 
+/* #73: seeking auto-commits after a short pause in scrub input instead of
+ * requiring an explicit Cross press - see prospero_scrub_autocommit_tick()
+ * near PROSPERO_SCRUB_HOLD_END. Cross still works as an immediate-confirm
+ * shortcut (prospero_scrub_confirm() is idempotent once !prospero_scrub_active). */
+#define PROSPERO_SCRUB_AUTOCOMMIT_MS 450
+static long long prospero_scrub_last_move_ms = 0;
+
 #if PP_BACKEND_ENABLED
 /*
  * #32 scrub overlay state machine.
@@ -10713,6 +10720,7 @@ static void prospero_scrub_overlay_pump(void)
         int seek_started = g_pp_pb.stats.seek_requests != prospero_scrub_ovl_seek_req;
         int settled = !prospero_scrub_ovl_wait_seek ||
                       (seek_started && !g_pp_pb.seek_discarding);
+
         if (!settled && now_ms() < prospero_scrub_ovl_deadline_ms)
             return;
 
@@ -10836,6 +10844,7 @@ static void prospero_scrub_move(
         );
 
     controls_last_used_ms = now_ms();
+    prospero_scrub_last_move_ms = controls_last_used_ms;
 }
 
 static void prospero_chapter_jump(int direction)
@@ -11124,6 +11133,24 @@ static void prospero_scrub_hold_update(
 }
 
 /* PROSPERO_SCRUB_HOLD_END */
+
+/*
+ * #73: auto-commits an in-progress scrub once the user has left the target
+ * alone for PROSPERO_SCRUB_AUTOCOMMIT_MS - no explicit Cross press required.
+ * Call once per frame (alongside prospero_scrub_hold_update, which is what
+ * keeps prospero_scrub_last_move_ms refreshed while a D-pad hold repeats).
+ */
+static void prospero_scrub_autocommit_tick(void) {
+    if (!prospero_scrub_active) {
+        return;
+    }
+
+    if (now_ms() - prospero_scrub_last_move_ms < PROSPERO_SCRUB_AUTOCOMMIT_MS) {
+        return;
+    }
+
+    prospero_scrub_confirm();
+}
 
 
 /* PROSPERO_USB_FAVORITES_START */
@@ -12296,6 +12323,7 @@ int main(void) {
         if (pad >= 0 && scePadReadState(pad, &padData) == 0) {
             uint32_t pressed = padData.buttons & ~lastButtons;
             prospero_scrub_hold_update(padData.buttons);
+            prospero_scrub_autocommit_tick();
             int prompt_button_handled = 0;
 
             /* EVO: semantic actions with auto-repeat. Holding a direction
