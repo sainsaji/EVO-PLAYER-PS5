@@ -107,6 +107,19 @@ docker compose run --rm ps5-dev bash -lc '
 on every build. The `eboot.bin` / `param.json` / `libc.prx` are byte-identical
 between the folder and the `.ffpfsc` — the image is just a different container.
 
+**#36: this is also what CI and releases build now.** `.github/workflows/build.yml`
+runs `package-app.sh --ffpfsc` on every PR (job `package-app`) and verifies
+the signed container + `assets/` bundle aren't empty — a broken PFS pack or
+link tail is caught before a tag. `.github/workflows/release.yml` publishes
+`EVOPlayer-<tag>-PPSA99039.ffpfsc` as the release artifact (replacing the old
+Media-tile ELF / homebrew-zip release, which reached none of the app module's
+hardware features). Neither runner has a console, so nothing there is
+hardware-tested — CI's job is proving the image builds and packs cleanly.
+`eboot.bin` inside `output/app/.build/eboot.elf` is the pre-sign ELF; the
+signed `eboot.bin` itself is FSELF-wrapped and reads as opaque `data` to
+`file`/`readelf` — verify it with `ps5-native-tool self --inspect` instead
+(see either workflow's "Verify" step for the exact checks).
+
 Iteration still needs a manual mount + launch per cycle (no remote
 `SceSystemServiceLaunchApp` for an unregistered title). Diagnostics come back
 as **klog** by default (`-DEVO_APP_MODULE` routes the `pp_stage_bc` / `evo_bt`
