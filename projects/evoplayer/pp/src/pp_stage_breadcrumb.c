@@ -16,26 +16,40 @@ static uint64_t bc_now_us(void)
  * App-module diagnostic channel. In the PPSA99039 sandbox /mnt/usb0 is ENOENT,
  * so the file writes below silently no-op and the whole breadcrumb trail is
  * invisible. When EVO_APP_MODULE is set (scripts/package-app.sh), also push
- * every checkpoint to the system-notification popup + the kernel log - the
- * only channels that reach out of the sandbox. This lights up the existing
- * 001..012 playback trail with no new call sites; Phase 1b task 8.
+ * every checkpoint to the kernel log - a channel that reaches out of the
+ * sandbox without touching the TV. This lights up the existing 001..012
+ * playback trail with no new call sites; Phase 1b task 8.
+ *
+ * #51 follow-up: this fires on every P8_AVLOG / SEEK_AVFRAME / P8_VDEC_FATAL
+ * checkpoint - i.e. routinely *during playback*, not just at boot - and used
+ * to always pop a system notification too. Right while chasing a Phase 1b
+ * crash, pure noise once the pipeline is stable. The popup now shares
+ * evo_bt()'s EVO_BOOT_TRACE_POPUP opt-in (scripts/package-app.sh
+ * --breadcrumbs) - klog and the /mnt/usb0 file trail stay unconditional.
  */
 #if defined(EVO_APP_MODULE)
+extern int sceKernelDebugOutText(int, const char *);
+#if defined(EVO_BOOT_TRACE_POPUP)
 struct pp_bc_note { char pad[45]; char msg[3075]; };
 extern int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
-extern int sceKernelDebugOutText(int, const char *);
+#endif
 
 static void pp_bc_notify(const char *stage_id, const char *detail)
 {
-    struct pp_bc_note n;
     char line[512];
+    char msg[3075];
 
-    memset(&n, 0, sizeof n);
-    snprintf(n.msg, sizeof n.msg, "EVO bc: %s%s%s", stage_id,
+    snprintf(msg, sizeof msg, "EVO bc: %s%s%s", stage_id,
              (detail && detail[0]) ? " " : "", detail ? detail : "");
-    sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
 
-    snprintf(line, sizeof line, "%s\n", n.msg);
+#if defined(EVO_BOOT_TRACE_POPUP)
+    struct pp_bc_note n;
+    memset(&n, 0, sizeof n);
+    snprintf(n.msg, sizeof n.msg, "%s", msg);
+    sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
+#endif
+
+    snprintf(line, sizeof line, "%s\n", msg);
     sceKernelDebugOutText(0, line);
 }
 #else

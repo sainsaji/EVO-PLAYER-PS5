@@ -93,11 +93,17 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
 
-/* App-module diagnostics: always a notification popup (visible on the TV);
- * under -DEVO_VDEC_LOG (package-app.sh --usb-remote) ALSO an fsync'd append to
- * /mnt/usb0/evo_vdec.log for an FTP pull. The per-frame fsync is dev-only —
- * a release eboot just gets the notifications. */
+/* App-module diagnostics: under -DEVO_VDEC_LOG (package-app.sh --usb-remote)
+ * an fsync'd append to /mnt/usb0/evo_vdec.log for an FTP pull; the per-frame
+ * fsync is dev-only. The notification popup below used to be unconditional -
+ * "always visible on the TV" - but this fires on every decode heartbeat/
+ * error, i.e. routinely *during playback*, not just at boot/open/close, and
+ * was reported as recurring "EVO vdec native:" popups mid-playback (#51
+ * follow-up). It now shares evo_bt()'s EVO_BOOT_TRACE_POPUP opt-in
+ * (scripts/package-app.sh --breadcrumbs). */
+#if defined(EVO_BOOT_TRACE_POPUP)
 struct v2n_note { char pad[45]; char msg[3075]; };
+#endif
 static void note(const char *fmt, ...)
 {
     char msg[1024];
@@ -106,10 +112,12 @@ static void note(const char *fmt, ...)
     vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
 
+#if defined(EVO_BOOT_TRACE_POPUP)
     struct v2n_note n;
     memset(&n, 0, sizeof n);
     snprintf(n.msg, sizeof n.msg, "%s", msg);
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
+#endif
 
     /* evo_vdec_native_probe() runs pre-unjail — route it to the buffered
      * boot log too (harmless overlap once /mnt/usb0 is up). */
