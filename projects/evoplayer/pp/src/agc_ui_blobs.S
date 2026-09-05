@@ -53,3 +53,14 @@ BLOB(pp_agc_spvs_header, "pp/blobs/sp_mesh_vs.header.bin")
 BLOB(pp_agc_spvs_code,   "pp/blobs/sp_mesh_vs.text.bin")
 BLOB(pp_agc_spps_header, "pp/blobs/sp_mesh_ps.header.bin")
 BLOB(pp_agc_spps_code,   "pp/blobs/sp_mesh_ps.text.bin")
+
+/* #67 probe: a textured RGBA-blit pixel shader ripped from a decrypted game
+ * dump (tools/shader-rip.py; see pp/blobs/ SHA256SUMS + the shader-rip repo's
+ * rip-shaders-from-game-dumps notes). Own header - NOT a ProsperoLight reuse
+ * like the pixel_* blobs above, since this is a genuinely different compiled
+ * shader with its own sl00/barefoot trailer. Pairs with the already-proven
+ * fullscreen-quad VS (pp_agc_geometry_*, agc_blobs.S / g_agc.vs) - blit_ps
+ * interpolates UV from attr0 exactly like the NV12 pixel shader it sits next
+ * to, same VS contract. */
+BLOB(pp_agc_blit_ps_header, "pp/blobs/blit_ps.header.bin")
+BLOB(pp_agc_blit_ps_code,   "pp/blobs/blit_ps.text.bin")

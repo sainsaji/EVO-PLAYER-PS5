@@ -184,6 +184,10 @@ tools/native-app/runtime/libc.prx
 # Packaged app-module output (scripts/package-app.sh).
 output/app/
 
+# Shader blobs ripped from game dumps (tools/shader-rip.py). Derived + 3rd-party
+# code - keep them local. Vet + copy a chosen blob into pp/blobs/ deliberately.
+output/shaderrip/
+
 # ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
 /klog.txt
 projects/evoplayer/include/evo_build_id.h

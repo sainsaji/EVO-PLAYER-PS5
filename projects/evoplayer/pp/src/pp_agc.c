@@ -91,6 +91,8 @@ extern const uint8_t pp_agc_spvs_header_start[], pp_agc_spvs_header_end[];
 extern const uint8_t pp_agc_spvs_code_start[],   pp_agc_spvs_code_end[];
 extern const uint8_t pp_agc_spps_header_start[], pp_agc_spps_header_end[];
 extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
+extern const uint8_t pp_agc_blit_ps_header_start[], pp_agc_blit_ps_header_end[];
+extern const uint8_t pp_agc_blit_ps_code_start[],   pp_agc_blit_ps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
 /* #28 Phase 4: the GPU text-overlay 2nd pass in agc_render_geo.
@@ -141,6 +143,19 @@ extern const uint8_t pp_agc_spps_code_start[],   pp_agc_spps_code_end[];
 #define OFF_UI_LINK_A    0x13000u
 #define OFF_UI_LINK_B    0x14000u
 #define OFF_UI_SPLICE_A  0x15000u   /* Phase 4 probe scratch: sp_mesh_{vs,ps} */
+/* #67: ripped blit_ps, paired with the already-created g_agc.vs (well clear
+ * of every offset above - highest in-use address is OFF_GEO_SH + 0x1000;
+ * SHADER_MEMORY_BYTES is 0xd0000, plenty of room). HDR/CODE are read-only
+ * CreateShader input, reused by both the one-shot --agc-probe check and
+ * agc_geo_init(); LINK_A/B there are throwaway probe scratch. The real
+ * render path needs its OWN persistent link storage (read every frame, like
+ * OFF_MESH_LINK_CX/UC below) so a probe run can never clobber it. */
+#define OFF_BLIT_PS_HDR       0x30000u
+#define OFF_BLIT_PS_CODE      0x31000u
+#define OFF_BLIT_LINK_A       0x32000u   /* --agc-probe scratch only */
+#define OFF_BLIT_LINK_B       0x33000u   /* --agc-probe scratch only */
+#define OFF_BLIT_GEO_LINK_CX  0x34000u   /* persistent: agc_geo_init -> every geo-text frame */
+#define OFF_BLIT_GEO_LINK_UC  0x35000u
 
 /* #28 Phase 4 geometry path - permanent homes, clear of the video path's
  * 0x0..0xd000 and the probe scratch at 0xd000..0x19000. g_agc.mem is 0xd0000. */
@@ -208,6 +223,10 @@ static struct {
     volatile int geo_ready;        /* mesh shaders created + linked            */
     void     *mesh_vs;
     void     *mesh_ps;
+    /* #67: ripped RGBA-blit PS, paired with the video path's g_agc.vs (same
+     * fullscreen-quad VS - blit_ps reads UV from attr0 exactly like the NV12
+     * pixel shader it sits next to). Created once here, not per-frame. */
+    void     *blit_ps;
     uint8_t  *geo_stage[PP_VO_MAX_BUFFERS];  /* [vertices | indices] per VO buf */
     int64_t   geo_stage_start;
     size_t    geo_stage_total;
@@ -848,6 +867,48 @@ int pp_agc_probe_ui_shaders(void)
         evo_boot_log_flush();
     }
 
+    /* #67: blit_ps - a REAL compiler-emitted textured PS this time (ripped,
+     * not hand-written), paired with g_agc.vs (the already-created,
+     * hardware-proven fullscreen-quad VS from pp_agc_init - not re-created
+     * here). If this creates+links where every hand-written textured PS
+     * above failed 0x8a6c001f, it's the #67 fix: composite the RmlUi text/
+     * icon surface onto the GPU solids via this shader instead of abusing
+     * the NV12 path. */
+    if (g_agc.vs &&
+        copy_asset(m + OFF_BLIT_PS_HDR,  0x1000, pp_agc_blit_ps_header_start, pp_agc_blit_ps_header_end) == 0 &&
+        copy_asset(m + OFF_BLIT_PS_CODE, 0x1000, pp_agc_blit_ps_code_start,   pp_agc_blit_ps_code_end)   == 0) {
+        void *ps_blit = 0;
+        int32_t c_blit = sceAgcCreateShader(&ps_blit, m + OFF_BLIT_PS_HDR, m + OFF_BLIT_PS_CODE);
+        evo_boot_log("pp_agc UI: CreateShader blit_ps=0x%08x  (ps=%p)",
+                     (unsigned)c_blit, ps_blit);
+        if (c_blit == 0) {
+            /* TriangleStrip (6), matching g_agc.vs's real topology - not the
+             * TriList (4) the hand-written UI probes above use. */
+            int32_t l = sceAgcLinkShaders(m + OFF_BLIT_LINK_A, m + OFF_BLIT_LINK_B, 0,
+                                          g_agc.vs, ps_blit, 6);
+            evo_boot_log("pp_agc UI: LinkShaders geometry_vs+blit_ps (TriStrip) = 0x%08x",
+                         (unsigned)l);
+
+            /* Diagnostic only, no draw: where did the compiler put blit_ps's
+             * texture (kind 1) and sampler (kind 2) resources? bind_pixel_source
+             * hardcodes SH 0x0c for the NV12 PS (a DIFFERENT compiled shader) -
+             * that base is not safe to assume here. Read it back instead of
+             * guessing before writing any real binding code (#67 real
+             * compositing pass, next step). kind 0=CB, 3=buffer, logged too for
+             * completeness. */
+            for (unsigned kind = 0; kind < 4; kind++) {
+                uint32_t off = 0xffffffffu;
+                int32_t r = shader_resource_offset(ps_blit, kind, &off);
+                evo_boot_log("pp_agc UI: blit_ps resource kind=%u -> rc=%d off=0x%x",
+                             kind, r, (unsigned)off);
+            }
+        }
+        evo_boot_log_flush();
+    } else {
+        evo_boot_log("pp_agc UI: blit_ps probe skipped (g_agc.vs=%p)", g_agc.vs);
+        evo_boot_log_flush();
+    }
+
     /*
      * Hardware result (2026-09-04, four --agc-probe runs): ui_vs + solid_ps
      * create + link (TriList) clean. Every textured PS - image_sample OR typed
@@ -858,6 +919,8 @@ int pp_agc_probe_ui_shaders(void)
      * NV12/P010 shaders. => the solid GPU path is hand-writable; textured UI
      * (text, icons, art) needs a compiler that emits header+code+sl00 as a
      * matched set (GLSL -> SPIR-V -> AMD ISA; agc-implementation.md §7).
+     * blit_ps result: see the CreateShader/LinkShaders log lines just above -
+     * update this comment once a real hardware run reports back.
      */
     evo_boot_log("pp_agc UI: probe done (no state changed)");
     evo_boot_log_flush();
@@ -928,6 +991,14 @@ static int agc_render_geo(int video, int buffer_index, void *target,
     agc_register_t **blocks;
     uint32_t default_count;
     uint32_t cx_count = 16;
+    /* #67 diagnostic: geo_dbg() below goes silent after the FIRST successful
+     * geo frame ever (geo_first_ok latches from ordinary solids-only frames,
+     * long before the text pass is armed) - so it can show a clean first
+     * text-pass frame and then say nothing about the one that actually wedges.
+     * Un-gate G4/G5/G6 unconditionally for the first few frames where the
+     * text pass fires specifically, bounded so it doesn't flood. */
+    static int text_pass_frame_n = 0;
+    int text_pass_this_frame = 0;
 
     if (!defaults || !target || !g_agc.mesh_vs || !g_agc.mesh_ps ||
         out_w == 0 || out_h == 0 || vtx_count == 0 || idx_count == 0 || draw_count == 0)
@@ -1146,35 +1217,30 @@ static int agc_render_geo(int video, int buffer_index, void *target,
             want_text = 0;
             FILE *tf = fopen("/mnt/usb0/evo_agc_geo_text", "r");
             if (tf) { want_text = 1; fclose(tf); }
+            evo_boot_log("pp_agc: geo-text hook check -> want_text=%d", want_text);
+            evo_boot_log_flush();
         }
         if (want_text && text_nv12 && text_w >= 2 && text_h >= 2 &&
-            g_agc.vs && g_agc.ps) {
+            g_agc.vs && g_agc.blit_ps) {
             static const uint32_t geo_geom_c[16] = {
                 0x3fa24ce6, 0, 0, 0x3e2f0fdd, 0, 0x3fa21449, 0, 0x3e111049,
                 0, 0, 0xbf800000, 0x80000000, 0, 0, 0, 0x3f800000 };
-            static const uint32_t geo_pix_c[16] = {
-                0x3f800000, 0x3f800000, 0x3f800000, 0, 0x3fed844d, 0xbe3fd0d0, 0, 0,
-                0, 0xbeefad6d, 0x3fc9930c, 0, 0, 0, 0, 0 };
             agc_register_t *ncx = (agc_register_t *)(memory + OFF_GEO_CX + 0x1000u);
             uint8_t *ngeo_cb = memory + OFF_GEO_CB + 0x100u;
-            uint8_t *npix_cb = memory + OFF_GEO_CB + 0x200u;
             agc_register_t *nsh = (agc_register_t *)(memory + OFF_GEO_SH + 0x200u);
             uint32_t nc = 0, tslot = 0;
-            size_t ty = (size_t)text_w * text_h;
-            size_t tuv = (size_t)text_w * ((text_h + 1u) / 2u);
 
             if (shader_resource_offset(g_agc.vs, 3, &tslot) == 0) {
                 agc_register_t *vcx = *(agc_register_t **)((uint8_t *)g_agc.vs + 24);
-                agc_register_t *pcx = *(agc_register_t **)((uint8_t *)g_agc.ps + 24);
+                agc_register_t *pcx = *(agc_register_t **)((uint8_t *)g_agc.blit_ps + 24);
                 agc_register_t *vsh = *(agc_register_t **)((uint8_t *)g_agc.vs + 32);
-                agc_register_t *psh = *(agc_register_t **)((uint8_t *)g_agc.ps + 32);
-                uint32_t vcn = *((uint8_t *)g_agc.vs + 91), pcn = *((uint8_t *)g_agc.ps + 91);
-                uint32_t vsn = *((uint8_t *)g_agc.vs + 92), psn = *((uint8_t *)g_agc.ps + 92);
+                agc_register_t *psh = *(agc_register_t **)((uint8_t *)g_agc.blit_ps + 32);
+                uint32_t vcn = *((uint8_t *)g_agc.vs + 91), pcn = *((uint8_t *)g_agc.blit_ps + 91);
+                uint32_t vsn = *((uint8_t *)g_agc.vs + 92), psn = *((uint8_t *)g_agc.blit_ps + 92);
                 uint32_t d[8];
-                uint32_t *hdr = (uint32_t *)(memory + OFF_RESOURCES);
-                uintptr_t table = (uintptr_t)(memory + OFF_RESOURCES) + hdr[1];
-                uintptr_t vtxr  = (uintptr_t)(memory + OFF_RESOURCES) + hdr[2];
-                uintptr_t g;
+                uint32_t tex[12];
+                uintptr_t g, src = (uintptr_t)text_nv12;
+                uint32_t width_m1 = text_w - 1u, height_m1 = text_h - 1u;
 
                 memcpy(ncx, cx, 16 * sizeof(*ncx));   nc = 16;
 #define NADD(o, v) do { ncx[nc].offset = (o); ncx[nc].pad = 0; ncx[nc].value = (v); nc++; } while (0)
@@ -1188,34 +1254,77 @@ static int agc_render_geo(int video, int buffer_index, void *target,
                 NADD(0x2fc, float_bits(1)); NADD(0x2fd, float_bits(1));
                 NADD(0x090, 0x80000000u); NADD(0x091, out_w | (out_h << 16));
                 NADD(0x08e, 0x0f);
-                NADD(0x1e0, 0x41010101u);   /* additive: src*1 + dst*1 (rgb & a) */
+                /* premultiplied alpha-over - the SAME formula already proven
+                 * for the solids pass a few dozen lines above (0x65010501):
+                 * enable | sepAlpha | colorSrc kOne | colorDst
+                 * kOneMinusSrcAlpha | alphaSrc kOne | alphaDst
+                 * kOneMinusSrcAlpha. NOT additive (0x41010101) - that was
+                 * #67's actual bug (wash + navbar doubling): additive only
+                 * ever brightens, it never replaces. */
+                NADD(0x1e0, 0x65010501u);
 #undef NADD
-                memcpy(ncx + nc, memory + OFF_LINK_A, 34 * sizeof(*ncx)); nc += 34;
+                memcpy(ncx + nc, memory + OFF_BLIT_GEO_LINK_CX, 34 * sizeof(*ncx)); nc += 34;
                 memcpy(ncx + nc, vcx, vcn * sizeof(*ncx)); nc += vcn;
                 memcpy(ncx + nc, pcx, pcn * sizeof(*ncx)); nc += pcn;
                 memcpy(nsh, vsh, vsn * sizeof(*nsh));
                 memcpy(nsh + vsn, psh, psn * sizeof(*nsh));
                 sceAgcDcbSetCxRegistersIndirect(&command, ncx, nc);
-                sceAgcDcbSetUcRegistersIndirect(&command, memory + OFF_LINK_B, 3);
+                sceAgcDcbSetUcRegistersIndirect(&command, memory + OFF_BLIT_GEO_LINK_UC, 3);
                 sceAgcDcbSetShRegistersIndirect(&command, nsh, vsn + psn);
 
+                /* VS's own constant buffer - the same geometry_constants block
+                 * the video path uses (position/scale for the fullscreen
+                 * quad). kind=3=CB, cross-checked against the ALSO-hardware-
+                 * verified mesh_vs CB binding earlier in this function. */
                 g = (uintptr_t)ngeo_cb;
                 memcpy(ngeo_cb, geo_geom_c, 64);
                 d[0] = (uint32_t)g;
                 d[1] = (uint32_t)((g >> 32) & 0xffffu) | (16u << 16);
                 d[2] = 4; d[3] = 0x0004dfacu;
-                d[4] = (uint32_t)table; d[5] = (uint32_t)(table >> 32);
-                d[6] = (uint32_t)vtxr;  d[7] = (uint32_t)(vtxr >> 32);
+                d[4] = 0; d[5] = 0; d[6] = 0; d[7] = 0;
                 sceAgcCbSetShRegisterRangeDirect(&command, 0x8c + tslot, d, 8);
 
-                memcpy(npix_cb, geo_pix_c, 64);
-                ((uint32_t *)npix_cb)[12] = float_bits((float)text_w);
-                ((uint32_t *)npix_cb)[13] = float_bits((float)text_h);
-                ((uint32_t *)npix_cb)[14] = text_w;
-                ((uint32_t *)npix_cb)[15] = text_w / 2u;
-                bind_pixel_source(&command, memory + OFF_RESOURCES, text_nv12, ty, tuv, npix_cb);
+                /* blit_ps's texture (T#, kind=0, SH 0x0c+0) + sampler (S#,
+                 * kind=2, SH 0x0c+8) - offsets confirmed against blit_ps's own
+                 * reflection data via shader_resource_offset (2026-09-04
+                 * hardware probe: kind0 off=0x0, kind2 off=0x8), matching its
+                 * disassembly's s[0:7]=image / s[8:11]=sampler exactly. A REAL
+                 * T# (SQ_RSRC_IMG_2D) this time, not bind_pixel_source's
+                 * buffer-shaped NV12 layout - bit layout from
+                 * third_party/SharpProspero's AgcTextureDescriptor. Linear
+                 * tiling (0): a CPU-written surface, no tiler involved. Format
+                 * 56 = k8_8_8_8UNorm; m_surface is R,G,B,A ascending in memory
+                 * (confirmed via agc_bgra_to_nv12's own R=px&0xff decode a
+                 * few hundred lines down), so identity channel order matches
+                 * directly. */
+                memset(tex, 0, sizeof tex);
+                tex[0] = (uint32_t)(src >> 8);
+                tex[1] = (uint32_t)((src >> 32) & 0xffu) | (56u << 20) | ((width_m1 & 0x3u) << 30);
+                tex[2] = ((width_m1 >> 2) & 0xfffu) | ((height_m1 & 0x3fffu) << 14);
+                tex[3] = 0xfacu | (9u << 28);   /* identity R,G,B,A + Texture2D */
+                /* proven bilinear S# words - same as bind_pixel_source uses
+                 * for the hardware-verified NV12 present path. */
+                tex[8]  = 0x00000092u;
+                tex[9]  = 0x00fff000u;
+                tex[10] = AGC_BILINEAR_SAMPLER_WORD;
+                sceAgcCbSetShRegisterRangeDirect(&command, 0x0c, tex, 12);
+
                 sceAgcDcbDrawIndexAuto(&command, 4, 2);
                 geo_dbg("Gt text pass %ux%u nc=%u", text_w, text_h, nc);
+                /* Diagnostic only, NOT gated by geo_first_ok - without this
+                 * there is no way to confirm the pass actually ran, as
+                 * opposed to evo_rmlui_app.cpp's unconditional CPU fallback
+                 * copy of m_surface carrying the text on its own. Bounded to
+                 * the first few text-pass frames (see text_pass_frame_n
+                 * above) so the SubmitDcb/SuspendPoint results below are
+                 * still visible even after geo_first_ok silences geo_dbg. */
+                text_pass_this_frame = 1;
+                if (text_pass_frame_n < 5) {
+                    evo_boot_log("pp_agc: GEO-TEXT PASS FIRED #%d %ux%u src=%p tex=0x%08x,0x%08x,0x%08x,0x%08x",
+                                 text_pass_frame_n, text_w, text_h, text_nv12,
+                                 tex[0], tex[1], tex[2], tex[3]);
+                    evo_boot_log_flush();
+                }
             }
         }
     }
@@ -1230,23 +1339,38 @@ static int agc_render_geo(int video, int buffer_index, void *target,
     *word_count = submit.word_count;
     /* CPU-write-back scratch the GPU reads: cx / cb / dcb / sh + the persisted
      * mesh link block. Vertex + index staging is flushed by the caller.
-     * With the text pass compiled in, also cover the NV12 link block at
-     * OFF_LINK_A/B (safe here - post-boot, on the worker; agc_render_frame
-     * flushes the same region every video frame. Doing it in agc_geo_init,
-     * right after sceAgcLinkShaders, crashed EVO at boot). */
-#if PP_AGC_GEO_TEXT
-    flush_gpu_data(memory + OFF_LINK_A, (OFF_GEO_SH + 0x1000u) - OFF_LINK_A);
-#else
+     * The text pass's own resource table (T#/S# for blit_ps) goes through
+     * sceAgcCbSetShRegisterRangeDirect from a LOCAL stack array - same
+     * pattern the (unconditionally hardware-verified) mesh_vs CB/VB binding
+     * above already uses - so it needs no flush of its own, and its
+     * persistent link block (OFF_BLIT_GEO_LINK_CX/UC) is flushed once in
+     * agc_geo_init, not per frame. Nothing below OFF_MESH_LINK_CX is touched
+     * per frame any more (the old NV12-link-block reuse this comment used to
+     * describe is gone with it), so one flush range covers both cases. */
     flush_gpu_data(memory + OFF_MESH_LINK_CX, (OFF_GEO_SH + 0x1000u) - OFF_MESH_LINK_CX);
-#endif
 
+    int unconditional_log = text_pass_this_frame && text_pass_frame_n < 5;
     geo_dbg("G4 DCB built (%u words) -> SubmitDcb", submit.word_count);
+    if (unconditional_log) {
+        evo_boot_log("pp_agc: G4t (text-pass frame #%d) DCB built (%u words) -> SubmitDcb",
+                     text_pass_frame_n, submit.word_count);
+        evo_boot_log_flush();
+    }
     {
         int32_t result = sceAgcDriverSubmitDcb(&submit);
         geo_dbg("G5 SubmitDcb=0x%08x -> SuspendPoint", (unsigned)result);
+        if (unconditional_log) {
+            evo_boot_log("pp_agc: G5t SubmitDcb=0x%08x -> SuspendPoint", (unsigned)result);
+            evo_boot_log_flush();
+        }
         if (result == 0)
             result = sceAgcSuspendPoint();
         geo_dbg("G6 SuspendPoint done, result=0x%08x", (unsigned)result);
+        if (unconditional_log) {
+            evo_boot_log("pp_agc: G6t SuspendPoint done, result=0x%08x", (unsigned)result);
+            evo_boot_log_flush();
+            text_pass_frame_n++;
+        }
         return result;
     }
 }
@@ -1354,6 +1478,27 @@ static void agc_geo_init(void)
         return;
     }
     flush_gpu_data(m + OFF_MESH_VS_HDR, (OFF_MESH_LINK_UC + 0x1000u) - OFF_MESH_VS_HDR);
+
+    /* #67: blit_ps, paired with g_agc.vs (created earlier in pp_agc_init, the
+     * same fullscreen-quad VS the video path uses). Best-effort - a failure
+     * here just leaves the text/icon layer un-composited, same as any other
+     * geo-init failure; it does not affect solids or video. */
+    if (g_agc.vs &&
+        copy_asset(m + OFF_BLIT_PS_HDR,  0x1000, pp_agc_blit_ps_header_start, pp_agc_blit_ps_header_end) == 0 &&
+        copy_asset(m + OFF_BLIT_PS_CODE, 0x1000, pp_agc_blit_ps_code_start,   pp_agc_blit_ps_code_end)   == 0) {
+        int32_t bc = sceAgcCreateShader(&g_agc.blit_ps, m + OFF_BLIT_PS_HDR, m + OFF_BLIT_PS_CODE);
+        int32_t bl = -1;
+        if (bc == 0)
+            bl = sceAgcLinkShaders(m + OFF_BLIT_GEO_LINK_CX, m + OFF_BLIT_GEO_LINK_UC, 0,
+                                   g_agc.vs, g_agc.blit_ps, 6 /* PrimitiveTriangleStrip */);
+        evo_boot_log("pp_agc geo: blit_ps create=0x%08x link=0x%08x (ps=%p)",
+                     (unsigned)bc, (unsigned)bl, g_agc.blit_ps);
+        if (bc != 0 || bl != 0) {
+            g_agc.blit_ps = 0;
+        } else {
+            flush_gpu_data(m + OFF_BLIT_GEO_LINK_CX, 0x2000u);
+        }
+    }
     g_agc.geo_stage_start = -1;
 
     pthread_mutex_init(&g_geo_submit.lock, NULL);
@@ -1467,16 +1612,21 @@ int pp_agc_present_geo(int vout_handle, uint32_t buf_idx, void *gpu_target,
     memcpy(slot + idx_off, indices, idx_bytes);
     flush_gpu_data(slot, need);
 
-    /* text/icon layer -> premultiplied NV12 in the (reused) overlay slab.
+    /* text/icon layer -> staged verbatim (premultiplied RGBA, no conversion)
+     * in the (reused) overlay slab, for blit_ps to sample directly. #67: used
+     * to go through a BGRA->NV12 conversion so the video pixel shader's YUV
+     * path could (mis)handle it - that's what caused the wash + doubling.
+     * blit_ps samples RGBA directly, so no conversion, and no even-dimension
+     * requirement either (that was only for NV12 chroma subsampling).
      * Best-effort: a failure just drops the text layer, never the frame. */
     const uint8_t *text_stage = 0;
     uint32_t tw = 0, th = 0;
 #if PP_AGC_GEO_TEXT
-    if (text_bgra && text_w >= 2 && text_h >= 2 && !(text_w & 1u) && !(text_h & 1u)) {
-        size_t tneed = (size_t)text_w * text_h + (size_t)text_w * (text_h / 2u);
+    if (text_bgra && text_w >= 2 && text_h >= 2) {
+        size_t tneed = (size_t)text_w * text_h * 4u;
         if (agc_ovl_staging_ensure(tneed) == 0) {
             uint8_t *ts = g_agc.ovl_stage[buf_idx];
-            agc_bgra_to_nv12(ts, ts + (size_t)text_w * text_h, text_bgra, text_w, text_h);
+            memcpy(ts, text_bgra, tneed);
             flush_gpu_data(ts, tneed);
             text_stage = ts; tw = text_w; th = text_h;
         }

@@ -8,6 +8,7 @@
 #include "evo_rmlui_render.h"
 #include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_system.h"
+#include "evo_rmlui_fileinterface.h"
 
 struct EvoPlaybackState {
     std::string title;
@@ -524,6 +525,10 @@ private:
 
     std::unique_ptr<EvoSystemInterface> m_system;
     std::unique_ptr<EvoRenderInterface> m_render;
+    /* #60: serves .rml/.rcss/.ttf out of the embedded bundle - see
+     * evo_rmlui_fileinterface.h. Owned here so it outlives Rml::Initialise(),
+     * which only stores the raw pointer Rml::SetFileInterface() is given. */
+    std::unique_ptr<EvoRmlFileInterface> m_file_interface;
     Rml::Context* m_context = nullptr;
     Rml::ElementDocument* m_launch_doc = nullptr;
     Rml::ElementDocument* m_list_doc = nullptr;

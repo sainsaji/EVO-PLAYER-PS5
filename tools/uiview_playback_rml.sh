@@ -11,6 +11,11 @@ fi
 
 cd "${REPO_ROOT}"
 
+# #60: regenerate the embedded RmlUi asset bundle before compiling, so the
+# host preview always renders whatever assets/{rml,fonts,icons} currently
+# contains - see tools/bundle_rml_assets.py.
+python3 tools/bundle_rml_assets.py
+
 echo "--- building uiview_playback_rml"
 g++ -O2 -std=c++17 \
     -Iprojects/evoplayer \
@@ -26,6 +31,9 @@ g++ -O2 -std=c++17 \
     projects/evoplayer/ui_rml/src/evo_rmlui_system.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bridge.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_fileinterface.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle_data.cpp \
     projects/evoplayer/pp/src/pp_agc.c \
     -Lbuild/rmlui-host-dist/lib \
     -Lbuild/rmlui-host/RmlUi/build \

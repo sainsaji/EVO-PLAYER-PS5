@@ -119,6 +119,7 @@ MEDIA_SRCS := \
     src/evo_agc_probe.c \
     src/evo_avplayer_probe.c \
     src/evo_videodec2_probe.c \
+    src/evo_shader_scan.c \
     src/evo_usb_remote.c \
     src/evo_jailbreak.c
 
@@ -139,7 +140,10 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_render_agc.cpp \
     ui_rml/src/evo_rmlui_system.cpp \
     ui_rml/src/evo_rmlui_app.cpp \
-    ui_rml/src/evo_rmlui_bridge.cpp
+    ui_rml/src/evo_rmlui_bridge.cpp \
+    ui_rml/src/evo_rmlui_fileinterface.cpp \
+    ui_rml/src/evo_rmlui_bundle.cpp \
+    ui_rml/src/evo_rmlui_bundle_data.cpp
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 
