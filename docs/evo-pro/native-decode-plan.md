@@ -5,9 +5,13 @@
 > 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the
 > backend behind `evo_vdec.h`.
 >
+> **Phase 5 done — #37 closed 2026-09-05** (code-complete, hw-verify-pending):
+> the `Auto / FFmpeg / Native` settings row, `evo_vdec_pref_resolve()`, config
+> migration and the Media Info decoder badge all landed — see the Phase 5
+> section below for what shipped.
+>
 > **The #29 umbrella is retired** — the remaining work is discrete GitHub
-> stories under the **`native-decode`** label: **#37** (Phase 5 — `Auto /
-> FFmpeg / Native` settings toggle + probe + config), **#38** (Phase 6 —
+> stories under the **`native-decode`** label: **#38** (Phase 6 —
 > validation sweep + FFmpeg-vs-native A/B benchmark + docs), **#39**
 > (decode-thread watchdog), **#40** (route direct memory via `evo_direct_mem` +
 > soak), **#41** (HEVC — 2nd resident decoder), plus **#32** (scrub shows no
@@ -400,42 +404,68 @@ hw-verify pending — and Phase 5 (settings row).
 - [ ] HEVC — a 2nd resident `sceVideodec2` decoder — **#41** (H.264 8-bit ≤4K
       only today; HEVC / >4K / 10-bit fall back to FFmpeg).
 
-### Phase 5 — settings toggle + runtime probe — **#37**
+### Phase 5 — settings toggle + runtime probe — **#37** ✅ done 2026-09-05
 
-- [ ] `evo_vdec_probe()` at startup (or first playback): load the module,
+- [x] `evo_vdec_probe()` at startup (or first playback): load the module,
       resolve NIDs, run the cheapest non-destructive check
       (`QueryComputeMemoryInfo`, or `sceAvPlayerInit`+`Close`). Cache the
-      result. Never probe on the render thread.
-- [ ] Settings model — a new tri-state in the flat config:
-      `EVO_VDEC_PREF_AUTO` / `_FFMPEG` / `_NATIVE`.
-  - `AUTO` → native if the probe passed and the codec is supported (H.264,
-    later HEVC), else FFmpeg.
+      result. Never probe on the render thread. *(Already existed from Phase
+      4 — `evo_vdec_native_probe()` is called once pre-unjail and cached; this
+      phase just added the user-facing preference on top of it.)*
+- [x] Settings model — a new tri-state in `evo_vdec.h`:
+      `EVO_VDEC_PREF_AUTO` / `_FFMPEG` / `_NATIVE`, resolved by
+      `evo_vdec_pref_resolve(pref, codec_id)` (`media/src/evo_vdec_ffmpeg.c`).
+  - `AUTO` → native if the probe passed and the codec is H.264 (the only one
+    `evo_vdec_native.c` supports today), else FFmpeg.
   - `FFMPEG` → always FFmpeg.
-  - `NATIVE` → native; if the probe failed, show it greyed with "unavailable"
-    and behave as FFmpeg.
-- [ ] Config migration in `prospero_settings_save` / `_load`
-      ([main.c:12428](../../projects/evoplayer/main.c#L12428) /
-      [:12511](../../projects/evoplayer/main.c#L12511)): append **one `%d`** after
-      `evo_keyboard_get_type()` in the `fprintf`, add one field to the
-      `fscanf` format and one default (`loaded_vdec_pref = 0`). This is the
-      exact pattern the file's own comments describe for the theme-name /
-      feedback / subtitle-face / keyboard-type appends — an older file still
-      parses and keeps the default.
-- [ ] Settings screen — add a **"Video decoder"** row to
-      `SCREEN_SETTINGS_PLAYBACK`:
-  - bump `EVO_SETTINGS_PLAYBACK_COUNT` 4 → 5
-      ([main.c:232](../../projects/evoplayer/main.c#L232));
-  - add the `settings_playback_selected == 4` branch in
-    `settings_playback_activate()`
-    ([main.c:12901](../../projects/evoplayer/main.c#L12901)) cycling
-    AUTO→FFMPEG→NATIVE with a `toast()` and `prospero_settings_save()`;
-  - render the row + current value in the playback-settings draw code (same
-    place the other four rows draw);
-  - mirror it into the RmlUi settings document
-    (`assets/rml/`, `evo_rmlui_bridge.cpp`) if that screen has been migrated —
-    check `docs/rmlui-integration-guide.md` for current parity.
-- [ ] Changing the toggle mid-playback: apply on next `open_file`, toast
-      "applies to next video". Don't hot-swap a live decoder.
+  - `NATIVE` → **hard**, refuses FFmpeg outright — this is what makes the
+    switch meaningful rather than a slower-to-type `AUTO`. `evo_vdec_open()`'s
+    "never NULL when FFmpeg could open" fallback still exists underneath (it's
+    what `AUTO`/`FFMPEG` and the §2 always-available-default constraint rely
+    on), but `start_video_playback()` compares the resolved preference against
+    `evo_vdec_open()`'s actual `*chosen` backend, and under `NATIVE` a
+    disagreement is treated as a hard failure: closes the FFmpeg decoder
+    `evo_vdec_open()` had already opened for it, shows "NATIVE DECODE
+    UNSUPPORTED" (via `prospero_codec_error`) instead of playing, and returns
+    to the browser — same "toast + stop_video_playback + return" shape as a
+    genuine decoder-init failure. The user reads the message, opens Settings,
+    and switches to `AUTO` or `FFMPEG` themselves; nothing plays silently on
+    software in the meantime. Applies whether the reason is an unsupported
+    codec, a failed probe, or a native bring-up error. The settings row badge
+    also reads `evo_vdec_probe()` directly to show "Native (unavailable)"
+    up front, before a file is even opened.
+  - The **only** exception is `g_vdec_force_ffmpeg` (#57's per-file
+    fatal-streak flag) once it's already latched — see below, it can't latch
+    at all under `NATIVE` any more.
+- [x] Mid-stream native fatal (#57's post-seek `sceVideodec2Reset` reject) is
+      gated the same way: `prospero_playback_finished_update()`'s
+      retry-once-on-FFmpeg only fires when the preference **isn't** `NATIVE`.
+      Under `NATIVE` a mid-file fatal falls straight to the ordinary
+      `SCREEN_PLAYBACK_FINISHED` path (evo_playback's own fatal toast, no
+      FFmpeg reopen) instead of quietly finishing the file on software —
+      consistent with `NATIVE` never falling back, and the reason
+      `g_vdec_force_ffmpeg` can't latch while `NATIVE` is selected.
+- [x] Config migration in `prospero_settings_save` / `_load`: appended one
+      `%d` after `evo_keyboard_get_type()` in the `fprintf`, one field + one
+      default (`EVO_VDEC_PREF_AUTO`) in the `fscanf` — the same
+      older-file-still-parses pattern the function's own comments describe
+      for the theme-name / feedback / subtitle-face / keyboard-type appends.
+- [x] Settings screen — added a **"Video decoder"** row to
+      `SCREEN_SETTINGS_PLAYBACK` (`EVO_SETTINGS_PLAYBACK_COUNT` 4 → 5): cycles
+      AUTO→FFMPEG→NATIVE in `settings_playback_activate()`, toasts "Applies to
+      next video" when changed during a loaded file (never hot-swaps the live
+      decoder) or the resolved badge text otherwise, persists via
+      `prospero_settings_save()`. The row is entirely data-driven through
+      `evo_rmlui_settings_params_t` (generic 8-row array, RmlUi template has 6
+      pre-built row slots) — no `.rml`/`.rcss` change needed.
+- [x] Surfaced the active backend: Media Info's "Subtitles & Engine" card
+      gained a **DECODER** row (`spec-decoder` / `evo_rmlui_mediainfo_params_t
+      ::decoder`) showing "Hardware (sceVideodec2)" / "Software (FFmpeg)" from
+      `evo_pb_active_backend()`.
+- [x] Host preview: `tools/uiview_playback_rml.cpp`'s playback-settings and
+      media-info fixtures cover the new row/field — `evo_vdec_probe()` is
+      already a no-op on host, so the badge naturally reads "Auto (FFmpeg)" /
+      "Native (unavailable)" there with no host-only branch.
 
 ### Phase 6 — host preview, validation, docs — **#38**
 

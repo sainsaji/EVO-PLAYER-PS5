@@ -74,6 +74,23 @@ typedef struct {
  * back to FFmpeg if bring-up fails. Idempotent. */
 int evo_vdec_probe(void);
 
+/* User-facing decoder preference (settings row, #37). Persisted as one int
+ * in evo_player_settings.cfg — see prospero_settings_save/_load in main.c. */
+typedef enum {
+    EVO_VDEC_PREF_AUTO   = 0,   /* default: native when the probe passed, else FFmpeg */
+    EVO_VDEC_PREF_FFMPEG = 1,   /* always software */
+    EVO_VDEC_PREF_NATIVE = 2    /* native; falls back to FFmpeg if unavailable */
+} evo_vdec_pref;
+
+/* Resolve a settings-row preference (+ the codec about to be opened) into the
+ * backend evo_vdec_open() should be asked for. This is advisory, not final:
+ * evo_vdec_open() is still the authority and downgrades to FFmpeg on its own
+ * for an unsupported codec or a native bring-up failure, regardless of what
+ * this returns — so a NATIVE request that can't be honoured never crashes,
+ * it just silently opens FFmpeg one call later. Never probes twice; reuses
+ * the cached evo_vdec_probe() result. */
+evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id);
+
 /* Open a decoder. Returns NULL on failure. `*chosen` (may be NULL) reports the
  * backend actually created. A EVO_VDEC_BACKEND_NATIVE request that cannot be
  * honoured (probe failed, unsupported codec, bring-up error) silently opens

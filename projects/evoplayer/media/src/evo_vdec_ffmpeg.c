@@ -43,6 +43,20 @@ int evo_vdec_probe(void)
     return evo_vdec_native_probe();
 }
 
+evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id)
+{
+    if (pref == EVO_VDEC_PREF_FFMPEG)
+        return EVO_VDEC_BACKEND_FFMPEG;
+    if (!evo_vdec_probe())
+        return EVO_VDEC_BACKEND_FFMPEG;   /* NATIVE or AUTO, but nothing to open */
+    /* AUTO only asks for native on a codec the backend actually supports
+     * today (H.264) — an explicit NATIVE request is still passed through
+     * unsupported, since evo_vdec_open() downgrades that itself. */
+    if (pref == EVO_VDEC_PREF_AUTO && codec_id != AV_CODEC_ID_H264)
+        return EVO_VDEC_BACKEND_FFMPEG;
+    return EVO_VDEC_BACKEND_NATIVE;
+}
+
 /* ---------------------------------------------------------------------------
  * 10-bit planar 4:2:0 -> 8-bit yuv420p fast pack. Verbatim from main.c.
  * ------------------------------------------------------------------------ */
