@@ -31,6 +31,10 @@ void evo_rmlui_gl_end_frame(void) {
     EvoRmlApp::Instance().GlEndFrame();
 }
 
+int evo_rmlui_gl_blit_mode(void) {
+    return EvoRmlApp::Instance().GlBlitMode() ? 1 : 0;
+}
+
 void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* p) {
     if (!p) return;
     EvoChangelogState state;

@@ -152,6 +152,106 @@ extern "C" void evo_gl_frame_begin(void)
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
+/* ===================================================================== *
+ *  CPU-rasterise + GL-blit present (GL-3 B2 default path)
+ * ===================================================================== */
+namespace {
+
+GLuint g_blit_prog = 0, g_blit_vao = 0, g_blit_vbo = 0, g_blit_tex = 0;
+int    g_blit_tw = 0, g_blit_th = 0;
+
+const char *k_blit_vs =
+    "#version 330 core\n"
+    "out vec2 vUV;\n"
+    "void main(){\n"
+    /* fullscreen triangle; flip V so a top-down EVO buffer samples upright */
+    "  vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2);\n"
+    "  vUV = vec2(p.x, 1.0 - p.y);\n"
+    "  gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);\n"
+    "}\n";
+const char *k_blit_fs =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c; uniform sampler2D uTex;\n"
+    /* EVO's rasteriser output is BGRA-in-memory (the sceVideoOut plane format);
+     * uploaded as GL_RGBA the sampler hands back B,G,R - swizzle .bgr back to
+     * R,G,B. (B1's glClearColor path takes explicit floats, no texture, hence
+     * it looked right regardless.) */
+    "void main(){ c = vec4(texture(uTex, vUV).bgr, 1.0); }\n";
+
+GLuint blit_compile(GLenum type, const char *src)
+{
+    GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = 0; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512]; GLsizei n = 0; glGetShaderInfoLog(s, sizeof log, &n, log);
+        evo_bt_("GL blit: shader compile failed: %.*s", (int)n, log);
+        glDeleteShader(s); return 0;
+    }
+    return s;
+}
+
+bool blit_init(void)
+{
+    if (g_blit_prog) return true;
+    GLuint vs = blit_compile(GL_VERTEX_SHADER, k_blit_vs);
+    GLuint fs = blit_compile(GL_FRAGMENT_SHADER, k_blit_fs);
+    if (!vs || !fs) return false;
+    g_blit_prog = glCreateProgram();
+    glAttachShader(g_blit_prog, vs);
+    glAttachShader(g_blit_prog, fs);
+    glLinkProgram(g_blit_prog);
+    GLint ok = 0; glGetProgramiv(g_blit_prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512]; GLsizei n = 0; glGetProgramInfoLog(g_blit_prog, sizeof log, &n, log);
+        evo_bt_("GL blit: link failed: %.*s", (int)n, log);
+        glDeleteProgram(g_blit_prog); g_blit_prog = 0; return false;
+    }
+    glDeleteShader(vs); glDeleteShader(fs);
+    glGenVertexArrays(1, &g_blit_vao);   /* attribute-less; VAO still required in core */
+    glGenTextures(1, &g_blit_tex);
+    glBindTexture(GL_TEXTURE_2D, g_blit_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    evo_bt_("GL blit: initialised");
+    return true;
+}
+
+} // namespace
+
+extern "C" void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
+{
+    if (!g_ready || !fb || w <= 0 || h <= 0)
+        return;
+    if (!blit_init())
+        return;
+
+    glBindTexture(GL_TEXTURE_2D, g_blit_tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    if (w != g_blit_tw || h != g_blit_th) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, fb);
+        g_blit_tw = w; g_blit_th = h;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h,
+                        GL_RGBA, GL_UNSIGNED_BYTE, fb);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, g_w, g_h);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glUseProgram(g_blit_prog);
+    glBindVertexArray(g_blit_vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_blit_tex);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
 extern "C" void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)
 {
     if (!g_ready || !bgra || w <= 0 || h <= 0)

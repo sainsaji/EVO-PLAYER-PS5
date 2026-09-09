@@ -13420,7 +13420,16 @@ skip_screen_input:
          * ps5-opengl is too slow to re-raster + swap at 60 Hz. */
         if (gl_active) {
             uint64_t _dispatch_ms = (uint64_t)now_ms() - _gl_disp_t0;
-            int _drew = evo_rmlui_gl_consume_drew();
+            int _drew;
+            if (evo_rmlui_gl_blit_mode()) {
+                /* Mode A: the CPU rasteriser filled gl_scratch (menu +
+                 * overlays); upload it as one GL quad. */
+                evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
+                _drew = 1;
+            } else {
+                /* Mode B: RmlUi already rendered to fb 0 (or nothing changed). */
+                _drew = evo_rmlui_gl_consume_drew();
+            }
             uint64_t _t0 = (uint64_t)now_ms();
             if (_drew) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
             uint64_t _swap_ms = (uint64_t)now_ms() - _t0;

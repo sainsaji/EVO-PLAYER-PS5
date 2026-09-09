@@ -363,6 +363,9 @@ int  evo_rmlui_gl_consume_drew(void);
 void evo_rmlui_gl_set_active(int active);
 /* Called after a successful present: clears the UI-dirty flag. */
 void evo_rmlui_gl_end_frame(void);
+/* 1 = CPU rasterise + GL blit (default), 0 = RmlUi renders itself through GL3
+ * (the /mnt/usb0/evo_gl_rmlui path). Decides the main.c present step. */
+int  evo_rmlui_gl_blit_mode(void);
 
 /* Playback OSD API */
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* params);

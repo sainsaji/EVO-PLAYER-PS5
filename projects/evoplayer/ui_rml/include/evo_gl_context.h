@@ -54,6 +54,12 @@ void evo_gl_frame_begin(void);
  * screenshot path. No-op on the host. */
 void evo_gl_read_default_fb(uint32_t *bgra, int w, int h);
 
+/* GL-3 (#79) B2, device only. Upload a top-down EVO framebuffer (0xAABBGGRR)
+ * and draw it as one fullscreen quad into fb 0 - the CPU-rasterise + GL-blit
+ * present path (the fast path on ps5-opengl: one textured quad, no
+ * render-to-texture). Follow with evo_gl_context_present(). No-op on host. */
+void evo_gl_blit_bgra(const uint32_t *fb, int w, int h);
+
 #ifdef __cplusplus
 }
 #endif

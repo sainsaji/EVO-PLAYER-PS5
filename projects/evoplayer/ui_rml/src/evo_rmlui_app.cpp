@@ -20,6 +20,7 @@
 #endif
 #if defined(EVO_GL_DEVICE)
 #include "evo_boot_log.h"   /* GL-3 (#79): trace the GL interface selection to evo.log */
+#include <unistd.h>         /* access() - the /mnt/usb0/evo_gl_rmlui mode switch */
 #endif
 
 /* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
@@ -125,22 +126,26 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
                                    int width, int height)
 {
 #if defined(EVO_GL_DEVICE)
-    /* GL-3 (#79) B2: no m_surface cache, no CPU blit. RmlUi renders straight to
-     * the GL default framebuffer (FrameEnd composites there); main.c cleared
-     * fb 0 and will eglSwapBuffers. Only render on an "active" frame - the
-     * device loop decided this frame is a redraw (GlNeedsFrame). The B4 cleanup
-     * deletes the rest of this function. */
-    (void)framebuffer;
-    if (!m_render->IsGpu())
-        return;   /* GL interface failed to construct - never rasterise to NULL */
+    /* GL-3 (#79) B2. Both modes: only touch anything on an "active" frame - the
+     * device loop decided this iteration is a redraw (GlNeedsFrame); otherwise
+     * the front buffer holds. */
     if (!m_gl_active)
-        return;   /* holding the front buffer this frame */
-    m_render->SetFramebuffer(nullptr);
-    m_render->SetDimensions(width, height);
-    EVO_PROF_CTX_RENDER();   /* also sets m_gl_drew */
-    m_cached_screen = screen_id;
-    return;
-#else
+        return;
+    if (!m_gl_blit_mode) {
+        /* Mode B: RmlUi renders itself straight to the GL default framebuffer;
+         * main.c eglSwapBuffers. No m_surface. */
+        (void)framebuffer;
+        m_render->SetFramebuffer(nullptr);
+        m_render->SetDimensions(width, height);
+        EVO_PROF_CTX_RENDER();   /* also sets m_gl_drew */
+        m_cached_screen = screen_id;
+        return;
+    }
+    /* Mode A (default): CPU coverage rasteriser into m_surface -> `framebuffer`
+     * (the loop's scratch); main.c uploads it as one GL quad. Falls through to
+     * the shared cached-raster path below. */
+#endif
+    {
     const size_t px = (size_t)width * (size_t)height;
 
     bool resized = (width != m_surface_w || height != m_surface_h);
@@ -189,7 +194,10 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
-#endif /* !EVO_GL_DEVICE */
+    }
+#if defined(EVO_GL_DEVICE)
+    m_gl_drew = true;   /* Mode A rasterised into `framebuffer` this frame */
+#endif
 }
 
 bool EvoRmlApp::AgcGeoActive() const
@@ -267,25 +275,29 @@ bool EvoRmlApp::Initialize(int width, int height) {
     }
 #endif
 #ifdef EVO_GL_DEVICE
-    /* GL-3 (#79): the device always renders through OpenGL - ps5-opengl owns
-     * sceVideoOut for the whole session. The context was created in main()'s
-     * pre-unjail slot (evo_gl_context_device.cpp). */
-    evo_log("RmlUi GL-3: ctx_ok=%d - constructing GL render interface", evo_gl_context_ok());
-    evo_log_flush();
-    if (evo_gl_context_ok()) {
+    /* GL-3 (#79): ps5-opengl owns sceVideoOut for the whole session; the context
+     * was created in main()'s pre-unjail slot (evo_gl_context_device.cpp).
+     *
+     * Default = CPU coverage rasteriser + one GL blit: RmlUi through
+     * RenderInterface_GL3 is ~1.2 s/frame on ps5-opengl G47 (its
+     * render-to-texture path is synchronous with a full CPU surface copy per
+     * draw). Drop /mnt/usb0/evo_gl_rmlui to force the RmlUi-native GL3 path
+     * instead - for when that driver limitation is lifted. */
+    m_gl_blit_mode = (access("/mnt/usb0/evo_gl_rmlui", F_OK) != 0);
+    if (!m_gl_blit_mode && evo_gl_context_ok()) {
         auto gl = std::make_unique<EvoRenderInterfaceGL>(width, height);
         bool ok = gl->Ok();
-        evo_log("RmlUi GL-3: EvoRenderInterfaceGL constructed, Ok=%d", (int)ok);
+        evo_log("RmlUi GL-3: evo_gl_rmlui hook set - EvoRenderInterfaceGL Ok=%d", (int)ok);
         evo_log_flush();
         if (ok) {
             m_render = std::move(gl);
-            fprintf(stderr, "[EVO RmlUi] device OpenGL render interface active\n");
+            fprintf(stderr, "[EVO RmlUi] device: RmlUi-native GL3 render path\n");
         } else {
-            evo_log("RmlUi GL-3: FATAL - GL interface failed to construct (shader compile?)");
-            evo_log_flush();
+            m_gl_blit_mode = true;   /* fall back to the fast path */
         }
-    } else {
-        evo_log("RmlUi GL-3: FATAL - no device GL context");
+    }
+    if (m_gl_blit_mode) {
+        evo_log("RmlUi GL-3: CPU rasterise + GL blit present path");
         evo_log_flush();
     }
 #endif

@@ -4,8 +4,9 @@ evo-panel.py - a Tkinter control panel for EVO Player's dev workflow.
 
 One window over the scripts in scripts/ and tools/: package the app module with
 any flag combination, deploy it, run the host compile check, drive the console
-over the FTP dev remote, pull /mnt/usb0 logs, render the UI on the host, watch
-klog, grab screenshots. Every button just shells out to the same script you'd
+over the FTP dev remote, toggle the GL-3 render path (evo_gl_rmlui hook), pull
+/mnt/usb0 logs, render the UI on the host, watch klog, grab screenshots. Every
+button just shells out to the same script you'd
 run by hand (`bash scripts/package-app.sh --ffpfsc` ...) and streams its output
 into the console pane - the scripts re-exec themselves through
 `docker compose run ps5-dev`, so nothing here needs the container directly.
@@ -58,6 +59,7 @@ PACKAGE_FLAGS = [
     ("--ffpfsc", "PFS image (.ffpfsc) - the hardware path", True),
     ("--usb-remote", "scriptable FTP remote + verbose vdec log", False),
     ("--breadcrumbs", "on-screen boot-trace popups (#51)", False),
+    ("--gl", "GL-3 (#79): boot on ps5-opengl (GL owns sceVideoOut)", False),
     ("--rebuild-libc", "force-regenerate the runtime libc shim", False),
 ]
 
@@ -169,6 +171,39 @@ def ftp_delete(host: str, port: int, remotes: list[str]) -> list[str]:
             except error_perm:
                 pass
     return done
+
+
+def ftp_put(host: str, port: int, remote: str, data: bytes = b"1\n") -> None:
+    """Create/overwrite a small file on the console (STOR to /mnt/usb0 works -
+    it's how evo-remote.sh delivers evo_cmd)."""
+    import io as _io
+    with FTP() as f:
+        f.connect(host, port, timeout=15)
+        f.login()
+        try:
+            f.set_pasv(True)
+        except Exception:
+            pass
+        f.storbinary("STOR " + remote, _io.BytesIO(data))
+
+
+def ftp_exists(host: str, port: int, remote: str) -> bool:
+    try:
+        with FTP() as f:
+            f.connect(host, port, timeout=10)
+            f.login()
+            try:
+                f.set_pasv(True)
+            except Exception:
+                pass
+            return f.size(remote) is not None
+    except Exception:
+        return False
+
+
+# Runtime hook files EVO access()-checks at boot (survive until the next
+# deploy-app.sh --ffpfsc, which wipes /mnt/usb0/evo_*).
+HOOK_GL_RMLUI = "/mnt/usb0/evo_gl_rmlui"
 
 
 # ======================================================================
@@ -350,6 +385,18 @@ class EvoPanel:
         ttk.Label(s, text="watch streams until you press Stop.  build = package --usb-remote + deploy.",
                   foreground="#888").pack(anchor="w", pady=(4, 0))
 
+        # ---- GL-3 (#79) render mode switch ----
+        g = self._section(t, "GL-3 render path  ·  /mnt/usb0/evo_gl_rmlui  (takes effect next launch)")
+        self.gl_mode = tk.StringVar(value="?")
+        rr = ttk.Frame(g)
+        rr.pack(anchor="w", pady=2)
+        ttk.Button(rr, text="CPU raster + GL blit  (default, fast)", width=36,
+                   command=lambda: self._set_gl_mode(False)).pack(side="left")
+        ttk.Button(rr, text="RmlUi-GL3  (slow on ps5-opengl G47)", width=36,
+                   command=lambda: self._set_gl_mode(True)).pack(side="left", padx=6)
+        ttk.Button(rr, text="check", width=7, command=self._check_gl_mode).pack(side="left")
+        ttk.Label(g, textvariable=self.gl_mode, foreground="#888").pack(anchor="w", pady=(2, 0))
+
     def _remote(self, sub: str, arg: str = ""):
         argv = [BASH, "tools/evo-remote.sh", sub]
         if arg.strip():
@@ -358,6 +405,45 @@ class EvoPanel:
             messagebox.showinfo("evo-remote", f"{sub} needs a value.")
             return
         self.run(argv, f"evo-remote {sub}")
+
+    # ---- GL-3 render mode (evo_gl_rmlui hook) --------------------
+    def _hostport(self):
+        return self.host.get().strip(), int(self.port.get())
+
+    def _set_gl_mode(self, rmlui_gl3: bool):
+        try:
+            host, port = self._hostport()
+        except ValueError:
+            return
+
+        def work():
+            try:
+                if rmlui_gl3:
+                    ftp_put(host, port, HOOK_GL_RMLUI)
+                    msg = "created evo_gl_rmlui → RmlUi-GL3 path on next launch"
+                else:
+                    ftp_delete(host, port, [HOOK_GL_RMLUI])
+                    msg = "removed evo_gl_rmlui → CPU raster + GL blit on next launch"
+            except Exception as e:
+                msg = f"!! {e}"
+            self.q.put(("gl_mode", msg))
+
+        self.gl_mode.set("working…")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _check_gl_mode(self):
+        try:
+            host, port = self._hostport()
+        except ValueError:
+            return
+
+        def work():
+            on = ftp_exists(host, port, HOOK_GL_RMLUI)
+            self.q.put(("gl_mode", "current: RmlUi-GL3" if on
+                        else "current: CPU raster + GL blit (default)"))
+
+        self.gl_mode.set("checking…")
+        threading.Thread(target=work, daemon=True).start()
 
     # ---- Logs (FTP pull) ------------------------------------------
     def _tab_logs(self, nb):
@@ -574,6 +660,9 @@ class EvoPanel:
                     self.log_view.delete("1.0", "end")
                     self.log_view.insert("1.0", text)
                     self.status.set(msg)
+                elif kind == "gl_mode":
+                    self.gl_mode.set(payload)
+                    self.status.set(payload)
         except queue.Empty:
             pass
         self.root.after(80, self._drain)

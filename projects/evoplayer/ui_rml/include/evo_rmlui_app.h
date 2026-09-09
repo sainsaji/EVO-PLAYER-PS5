@@ -754,10 +754,16 @@ public:
     bool GlActive() const { return m_gl_active; }
     bool GlConsumeDrew() { bool d = m_gl_drew; m_gl_drew = false; return d; }
     void GlEndFrame() { m_frame_dirty = false; }
+    /* true  = CPU coverage rasteriser + one GL blit (default; ps5-opengl's fast
+     *         path). false = RmlUi renders itself through RenderInterface_GL3
+     *         (selectable via /mnt/usb0/evo_gl_rmlui - slow on ps5-opengl G47,
+     *         kept for when the driver's render-to-texture path improves). */
+    bool GlBlitMode() const { return m_gl_blit_mode; }
 private:
     int  m_gl_warmup = 3;
     bool m_gl_drew = false;
     bool m_gl_active = false;
+    bool m_gl_blit_mode = true;
 
     /* #28 Phase 4: solid-geometry batch collected during the last cached
      * render, and whether it is waiting for AgcGeoPresent to submit it. */
