@@ -12,7 +12,7 @@ For a **visual** view of the same issues — kanban, priority table, milestone
 timeline, blocked list — see the "EVO Player Roadmap" GitHub Project;
 [project-tracking.md](project-tracking.md) has the one-command setup.
 
-Priority labels track this order: **critical** #32 · **high** #36, #55, #28, #72, #76 · **medium** #35,
+Priority labels track this order: **critical** #32 · **high** #36, #72, #76, #77 · **medium** #35,
 #37/#38/#39/#41/#59/#60, #33, #34, #9, #42, #47, #49, #50, #53, #62, #63, #64, #65, #68, #73, #74, #75 · **low** #48, #51,
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
@@ -42,10 +42,21 @@ dependency #44 is done); **#28 unblocked** (#27 closed 2026-09-04).
 
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
 `rmlui` = #45, #28, #49, #60, #68 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
-`modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)). (#26 closed
-2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
+`modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)) ·
+`render-overhaul` = #77–#82 (collapse every present route / font system / converter into one
+OpenGL funnel — [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md)).
+(#26 closed 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
 H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
 only a hardware pass left.)
+
+**Render overhaul (2026-09-09):** the sceAgc rendering is spread across 5 present
+routes, 3 font systems and CPU+GPU converters — a maintenance sink (#76 is the
+canonical failure). Plan: [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
+New chain **#77 → #78 → #79 → #80 → #81 → #82** (`GL-1`…`GL-6`); #77 is a hard
+go/no-go (does `third_party/ps5-opengl/` render on FW 12.70). **Superseded/closed:**
+#67, #69, #70, #5. **Rescoped:** #68 (mechanism → GLSL/RCSS, absorbs #70), #62
+(→ GL video parity), #4 (→ P010 in the GL shader), #49 (folded into #79). #35/#34/#63
+delivered by #81; #76 root-caused-out by #80.
 
 **New stories (2026-09-03):** #47 native audio decode + Dolby/DTS bitstream
 passthrough (v1.1.0, alongside `native-decode`) · #48 re-probe controller
@@ -92,7 +103,8 @@ the issue UI shows blockers / sub-tasks directly:
   - #25 → #44, #45 (RmlUi umbrella, closed)
   - #3 → #42, #43 (subtitle meta tracker, closed)
 - **Blocking → blocked:**
-  - #67 → #68, #69, #70 (compositing CPU text over GPU geometry blocks GPU UI fidelity)
+  - #77 → #78 → #79 → #80 → #81 → #82 (`render-overhaul` GL-1…GL-6; #77 is go/no-go on `ps5-opengl` @ FW 12.70)
+  - #79 folds in #49 · #80 closes #76 + resolves #62 · #81 delivers #34, #35, #63 · #68 blocked-by #79
   - #60 → #36 (self-contained `.ffpfsc` blocks release pipeline packaging)
   - #37 → #38, #41, #47, #59 (video decoder toggle blocks benchmark, HEVC, audio passthrough, and UI badge)
   - #59 → #63 (decoder indicator blocks Diagnostic HUD graphs)
@@ -179,6 +191,12 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | ~~#74~~ | ✅ **CLOSED 2026-09-05, hardware-verified.** Revamp About screen with dedicated RmlUi layout — replaced faux-menu list with information dashboard, 2-column comparative Codec Capabilities Matrix (Native Hardware Decode via `sceVideodec2` + `sceAgc` Direct GPU vs FFmpeg 6.x Multithreaded Software Fallback), 3-column technical specification grid, non-interactive card affordances, and distinct action bar with primary `[View Changelog]` button. Hardware-verified on console: renders cleanly on PS5, layout, font rendering, and D-pad navigation verified. | `projects/evoplayer/assets/rml/about.{rml,rcss}`, `projects/evoplayer/ui_rml/`, `projects/evoplayer/main.c` |
 | ~~#75~~ | ✅ **CLOSED 2026-09-05, hardware-verified.** Modernise toast notifications with dedicated RmlUi overlay — replace legacy CPU rasterizer. `toast.rml`/`toast.rcss` render in their **own `Rml::Context`** (`m_toast_context`), separate from the menu/OSD context - a toast composites on top of *whatever* screen is active without disturbing its Show/Hide state or, for cached menu screens (`RenderCachedScreen`), forcing a full re-rasterise every animation frame the way sharing the main context would (the marquee-vs-cache problem this sidesteps entirely). Same caller-owns-the-animation convention as the CPU version: `evo_toast.c`'s existing hold/fade/slide timing pushes `alpha`/`slide` every frame via `evo_rmlui_update_toast()`, rendered via `evo_rmlui_render_toast()` at the exact old `draw_prospero_toast(fb)` call site in `main.c` - **zero main.c changes needed**. 4 kinds (info/tech/error/ok) with matching icons; `EvoThemeColors` has no `danger` channel so error uses a fixed red matching the 4 legacy themes' near-identical danger colours rather than threading a new field through `SetTheme` for this alone. Legacy `evo_widget_toast()` + its `evo_toast`/`evo_toast_kind` types **removed** (not just bypassed) from `evo_widgets.{c,h}`, along with the now-unused `EVO_TOAST_*` metrics. **Position note:** the issue's proposed `top:48px` collided with the launch screen's header (clock/version) - caught via a new host-preview fixture (`tools/uiview_playback_rml.cpp`'s `render_toast_screens`, `rml_toast_over_launch.png`) before ever touching hardware; moved to `top:172px`, clear of every screen's header. Host preview + full app-module build both compile clean (0 warnings). Hardware-verified: toasts render correctly over live playback video and over menu screens alike, colours/icons correct. | `projects/evoplayer/assets/rml/toast.{rml,rcss}`, `projects/evoplayer/ui_rml/{include,src}/evo_rmlui_{app,bridge}.{h,cpp}`, `projects/evoplayer/src/evo_toast.c`, `projects/evoplayer/ui/{include,src}/evo_widgets.{h,c}`, `projects/evoplayer/ui/include/evo_metrics.h`, `tools/uiview_playback_rml.cpp` |
 | **#76** | Fix 4K native playback aspect ratio toggle corrupting screen colors and missing GPU scaling | `projects/evoplayer/pp/src/pp_agc.c`, `projects/evoplayer/main.c` (~L1605), `projects/evoplayer/pp/src/pp_videoout.c` (~L356) |
+| **#77** | `render-overhaul` GL-1 — spike + vendor `ps5-opengl`, prove it renders on FW 12.70 (**go/no-go**) | `docs/evo-pro/opengl-render-overhaul.md`, `third_party/ps5-opengl/` (`docs/building.md`, `docs/consumer-build.md`, `native-app/`, `src/platform/`), `projects/evoplayer/main.c` (~L12100 init order), `tools/native-app/stubs/malloc_shim.c` |
+| **#78** | `render-overhaul` GL-2 — RmlUi `RenderInterface_GL3`, host-proven | RmlUi `Backends/RmlUi_Renderer_GL3.cpp`, `projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp` + `include/evo_rmlui_render.h`, `evo_rmlui_fileinterface.cpp`, `tools/uiview_playback_rml.cpp`, `third_party/ps5-opengl/examples/core33-imgui/` |
+| **#79** | `render-overhaul` GL-3 — GL owns the menu framebuffer; delete the dual RmlUi path (folds in #49) | `projects/evoplayer/main.c` (frame loop ~L12247–13332, dispatch ~L13167), `ui_rml/src/evo_rmlui_app.cpp` (`RenderCachedScreen`, `AgcGeoPresent`), `evo_rmlui_render_agc.cpp`, `pp/src/pp_agc.c` (`pp_agc_present_ui`) |
+| **#80** | `render-overhaul` GL-4 — video into the funnel: GLSL YUV→RGB + composite + one flip; delete the CPU converters (closes #76, resolves #62) | `projects/evoplayer/pp/src/` (`pp_converter_*.c`, `pp_compute_pipeline.c`, `tile_copy.c`, `pp_videoout.c`, `pp_playback.c`, `pp_agc.c` `agc_render_frame`), `main.c` (present dispatch, `prospero_apply_view_mode` ~L1605), `media/src/evo_vdec_native.c` |
+| **#81** | `render-overhaul` GL-5 — subtitles / keyboard / image viewer / HUD → GL; delete the bitmap fonts (delivers #34, #35, #63) | `projects/evoplayer/main.c` (`prospero_subtitle_draw` ~L5161, `draw_char`/`draw_text` ~L2661, `draw_image_screen` ~L3059, `draw_fps_overlay` ~L11887), `ui/src/{evo_keyboard,evo_draw,evo_widgets}.c`, `media/src/evo_subtitle.c` |
+| **#82** | `render-overhaul` GL-6 — cutover: GL default, delete `pp_agc` / CPU rasteriser / #32 overlay machine, rewrite docs (closes #67/#69/#70/#5) | `projects/evoplayer/pp/src/pp_agc*.c`, `ui_rml/src/evo_rmlui_render.cpp`, `main.c` (`prospero_scrub_ovl_*`, `pp_product_overlay_*`), `docs/gpu-notes.md`, `docs/evo-pro/gpu-rendering-plan.md`, `docs/architecture.md` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**
