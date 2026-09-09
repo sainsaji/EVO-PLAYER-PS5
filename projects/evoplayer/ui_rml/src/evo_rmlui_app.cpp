@@ -1928,6 +1928,25 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         }
     }
 
+    // #59: decoder backend badge (Hardware / Software)
+    if (Rml::Element* el_dec = m_playback_doc->GetElementById("badge-decoder")) {
+        if (state.decoder_badge.empty()) {
+            el_dec->SetProperty("display", "none");
+        } else {
+            el_dec->SetProperty("display", "inline-block");
+            el_dec->SetInnerRML(state.decoder_badge);
+            bool hw = state.decoder_badge.find("Hardware") != std::string::npos;
+            el_dec->SetProperty("background-color", hw ? to_hex_rgb(m_theme.accent)
+                                                       : to_hex_rgba(m_theme.surface));
+            el_dec->SetProperty("color", hw ? to_hex_rgb(m_theme.bg_bottom) : "#e2e8f0");
+        }
+    }
+    if (Rml::Element* el_sd = m_playback_doc->GetElementById("stats-v-decoder"))
+        el_sd->SetInnerRML(state.decoder_badge.empty() ? "Unknown" : state.decoder_badge);
+    if (Rml::Element* el_se = m_playback_doc->GetElementById("stats-v-engine"))
+        el_se->SetInnerRML(state.decoder_badge.find("Hardware") != std::string::npos
+                               ? "sceVideodec2 ASIC" : "FFmpeg CPU (SIMD)");
+
     // 3. Times & Progress
     double cur_pos = state.scrub_active ? state.scrub_target : state.position_sec;
     std::string cur_str = format_time(cur_pos);
@@ -2098,6 +2117,9 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                 el_btn->SetClass("btn-primary", state.actions[i].is_primary);
                 el_btn->SetClass("btn-secondary", !state.actions[i].is_primary);
 
+                bool focused = (i == state.focused_action);
+                el_btn->SetClass("btn-focused", focused);
+
                 if (state.actions[i].is_primary) {
                     el_btn->SetProperty("background-color", to_hex_rgb(m_theme.accent));
                     el_btn->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
@@ -2106,6 +2128,14 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                     el_btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
                     el_btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
                     el_btn->SetProperty("color", "#e2e8f0");
+                }
+                // #65: D-pad focus ring — a bright accent border over whatever
+                // the primary/secondary style set.
+                if (focused) {
+                    el_btn->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                    el_btn->SetProperty("border-width", "3px");
+                } else {
+                    el_btn->SetProperty("border-width", "2px");
                 }
 
                 if (el_icon) el_icon->SetAttribute("src", state.actions[i].icon_path);

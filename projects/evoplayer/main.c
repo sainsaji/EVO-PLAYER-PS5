@@ -1600,6 +1600,9 @@ double resume_base_offset_seconds = 0.0;
 char pending_resume_path[512] = {0};
 int video_view_mode = 1; // 0=FIT 1=FILL 2=STRETCH
 long long controls_last_used_ms = 0;
+/* #65: which action button the exit-confirm dialog has D-pad-focused
+ * (0 = KEEP WATCHING, 1 = STOP). Defaults to STOP so a bare X still stops. */
+static int g_exit_confirm_focus = 1;
 
 #if PP_BACKEND_ENABLED
 /* Map UI view mode → product convert aspect (HEVC soft + 4K paths). */
@@ -4403,6 +4406,11 @@ int start_video_playback(const char *path) {
             }
 #endif
 
+            /* #59: tell the user which decoder opened. */
+            toast("DECODER", vdec_chosen == EVO_VDEC_BACKEND_NATIVE
+                                  ? "Hardware (sceVideodec2)"
+                                  : "Software (FFmpeg)");
+
             video_stream_index = (int)i;
 
             AVRational fr = play_fmt->streams[i]->avg_frame_rate;
@@ -6260,6 +6268,11 @@ double percentage = 0.0;
                                    ? "Active"
                                    : "None";
 
+        /* #59: which decoder is actually producing this stream, right now. */
+        const char *decoder_badge = prospero_music_mode ? "" :
+            (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE
+                 ? "Hardware (sceVideodec2)" : "Software (FFmpeg)");
+
         evo_playback_osd_params_t p;
         memset(&p, 0, sizeof(p));
         p.title = title[0] ? title : "Video Playback";
@@ -6269,6 +6282,7 @@ double percentage = 0.0;
         p.codec_badge = codec_badge;
         p.fps_badge = fps_badge;
         p.audio_badge = audio_badge;
+        p.decoder_badge = decoder_badge;
         p.position_sec = display_position;
         p.duration_sec = media_duration_sec;
         p.percentage = percentage;
@@ -10251,6 +10265,18 @@ void draw_changelog_screen(uint32_t *fb)
  * RmlUi (evo_rmlui_render_dialog / _mediainfo).
  * ======================================================================== */
 
+/* #9: the display title for the stream now playing. `current_media_path` is a
+ * filename for local/USB files but a raw HTTP URL for Emby/Jellyfin streams;
+ * g_current_media_title carries the real item title in that case (set in
+ * evo_emby_browse_activate). Falls back to the cleaned path. */
+static const char *active_media_title(char *buf, size_t n)
+{
+    if (g_current_media_title[0])
+        return g_current_media_title;
+    clean_media_title(current_media_path, buf, n, NULL, 0);
+    return buf;
+}
+
 void draw_resume_prompt(uint32_t *fb)
 {
     static char title[192];
@@ -10272,6 +10298,7 @@ void draw_resume_prompt(uint32_t *fb)
     if (evo_rmlui_is_initialized()) {
         evo_rmlui_dialog_params_t dlg;
         memset(&dlg, 0, sizeof(dlg));
+        dlg.focused_action = -1;
         dlg.eyebrow = "RESUME PLAYBACK";
         dlg.title = title[0] ? title : pending_resume_path;
         dlg.detail = detail;
@@ -10292,13 +10319,14 @@ void draw_resume_prompt(uint32_t *fb)
 static void draw_playback_finished_screen(uint32_t *fb)
 {
     static char title[192];
-    clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
+    const char *dtitle = active_media_title(title, sizeof(title));   /* #9 */
 
     if (evo_rmlui_is_initialized()) {
         evo_rmlui_dialog_params_t dlg;
         memset(&dlg, 0, sizeof(dlg));
+        dlg.focused_action = -1;
         dlg.eyebrow = "FINISHED";
-        dlg.title = title[0] ? title : current_media_path;
+        dlg.title = (dtitle && dtitle[0]) ? dtitle : current_media_path;
         dlg.detail = "PLAYBACK REACHED THE END OF THE FILE";
         dlg.progress_pct = 1.0;
         dlg.action_count = 3;
@@ -10328,7 +10356,7 @@ static void draw_exit_confirm_screen(uint32_t *fb)
     char        at[32], total[32];
     double position = prospero_player_position();
 
-    clean_media_title(current_media_path, title, sizeof(title), NULL, 0);
+    const char *dtitle = active_media_title(title, sizeof(title));   /* #9 */
 
     evo_fmt_duration(at, sizeof(at), position);
     evo_fmt_duration(total, sizeof(total), media_duration_sec);
@@ -10345,10 +10373,11 @@ static void draw_exit_confirm_screen(uint32_t *fb)
         evo_rmlui_dialog_params_t dlg;
         memset(&dlg, 0, sizeof(dlg));
         dlg.eyebrow = "STOP PLAYBACK";
-        dlg.title = title[0] ? title : current_media_path;
+        dlg.title = (dtitle && dtitle[0]) ? dtitle : current_media_path;
         dlg.detail = detail;
         dlg.progress_pct = pct;
         dlg.action_count = 2;
+        dlg.focused_action = g_exit_confirm_focus;   /* #65: D-pad focus */
         dlg.actions[0].icon_path = "icons/btn_circle.png";
         dlg.actions[0].label = "KEEP WATCHING";
         dlg.actions[0].is_primary = 1;
@@ -10377,8 +10406,8 @@ void draw_media_info_screen(uint32_t *fb)
         res_s[0] = 0;
 
     if (evo_rmlui_is_initialized()) {
-        char clean_title[192];
-        clean_media_title(current_media_path, clean_title, sizeof(clean_title), NULL, 0);
+        char clean_title_buf[192];
+        const char *clean_title = active_media_title(clean_title_buf, sizeof(clean_title_buf));  /* #9 */
 
         char res_badge[32] = "";
         char hdr_badge[32] = "";
@@ -12907,9 +12936,25 @@ int main(void) {
              * dismisses it, so a double press goes back to the film rather
              * than through the prompt and out of the file.
              */
+            /* #65: D-pad moves focus between KEEP WATCHING (0) and STOP (1). */
+            if (screen == SCREEN_EXIT_CONFIRM &&
+                (pressed & (PS5_PAD_BUTTON_LEFT | PS5_PAD_BUTTON_RIGHT))) {
+                int want = (pressed & PS5_PAD_BUTTON_LEFT) ? 0 : 1;
+                if (want != g_exit_confirm_focus) {
+                    g_exit_confirm_focus = want;
+                    evo_feedback(EVO_FB_MOVE);
+                }
+                controls_last_used_ms = now_ms();
+                prompt_button_handled = 1;
+            }
+
+            /* KEEP WATCHING: CIRCLE (the button that opened the prompt — a
+             * double-press goes back to the film), or CROSS while KEEP is the
+             * focused action. */
             if (
                 screen == SCREEN_EXIT_CONFIRM &&
-                (pressed & PS5_PAD_BUTTON_CIRCLE)
+                ((pressed & PS5_PAD_BUTTON_CIRCLE) ||
+                 ((pressed & PS5_PAD_BUTTON_CROSS) && g_exit_confirm_focus == 0))
             ) {
 #if PP_BACKEND_ENABLED
                 /* Re-base the clock and put a 4K surface back before the
@@ -12922,9 +12967,11 @@ int main(void) {
                 prompt_button_handled = 1;
             }
 
-            if (
+            /* STOP: CROSS while STOP is the focused action. */
+            else if (
                 screen == SCREEN_EXIT_CONFIRM &&
-                (pressed & PS5_PAD_BUTTON_CROSS)
+                (pressed & PS5_PAD_BUTTON_CROSS) &&
+                g_exit_confirm_focus == 1
             ) {
                 /* Identical to what CIRCLE on the player used to do outright,
                  * including writing the resume position before the decoder
@@ -13171,6 +13218,7 @@ int main(void) {
                     pp_product_overlay_enter();
 #endif
                     screen = SCREEN_EXIT_CONFIRM;
+                    g_exit_confirm_focus = 1;   /* #65: default focus = STOP */
                     controls_last_used_ms = now_ms();
                     evo_feedback(EVO_FB_OPEN);
                 } else if (screen == 1) {

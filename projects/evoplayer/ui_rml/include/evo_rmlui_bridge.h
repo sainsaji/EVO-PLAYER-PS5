@@ -16,6 +16,7 @@ typedef struct {
     const char* codec_badge;
     const char* fps_badge;
     const char* audio_badge;
+    const char* decoder_badge;   /* #59: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
     double position_sec;
     double duration_sec;
     double percentage;
@@ -35,6 +36,7 @@ typedef struct {
     const char* detail;
     double progress_pct; // 0.0 to 1.0, or -1.0
     int action_count;
+    int focused_action;  /* #65: index of the D-pad-focused button, -1 = none */
     struct {
         const char* icon_path;
         const char* label;

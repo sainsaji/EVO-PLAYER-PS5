@@ -272,6 +272,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.codec_badge = p->codec_badge ? p->codec_badge : "";
     state.fps_badge = p->fps_badge ? p->fps_badge : "";
     state.audio_badge = p->audio_badge ? p->audio_badge : "";
+    state.decoder_badge = p->decoder_badge ? p->decoder_badge : "";
     state.position_sec = p->position_sec;
     state.duration_sec = p->duration_sec;
     state.percentage = p->percentage;
@@ -298,6 +299,7 @@ void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
     state.title = p->title ? p->title : "";
     state.detail = p->detail ? p->detail : "";
     state.progress_pct = p->progress_pct;
+    state.focused_action = p->focused_action;
 
     for (int i = 0; i < p->action_count && i < 3; i++) {
         EvoDialogAction act;

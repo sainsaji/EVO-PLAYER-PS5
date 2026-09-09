@@ -14,6 +14,7 @@
             <span id="badge-hdr" class="badge-hdr"></span>
             <span id="badge-codec" class="badge-codec"></span>
             <span id="badge-fps" class="badge-fps"></span>
+            <span id="badge-decoder" class="badge-decoder"></span>
         </div>
     </div>
 
@@ -31,8 +32,8 @@
     <!-- Stats for Nerds HUD (Diagnostic Overlay) -->
     <div id="stats-hud">
         <div class="stats-title">STREAM &amp; HARDWARE DIAGNOSTICS</div>
-        <div class="stats-row"><span class="stats-k">VIDEO ENGINE</span><span id="stats-v-engine" class="stats-v">Stage 4 Hardware ASIC</span></div>
-        <div class="stats-row"><span class="stats-k">DECODER CORE</span><span id="stats-v-decoder" class="stats-v">libSceAvPlayer HW</span></div>
+        <div class="stats-row"><span class="stats-k">VIDEO ENGINE</span><span id="stats-v-engine" class="stats-v">--</span></div>
+        <div class="stats-row"><span class="stats-k">DECODER CORE</span><span id="stats-v-decoder" class="stats-v">--</span></div>
         <div class="stats-row"><span class="stats-k">AUDIO BITSTREAM</span><span id="stats-v-audio" class="stats-v">SceAudioOut Direct PCM</span></div>
         <div class="stats-row"><span class="stats-k">DROPPED FRAMES</span><span id="stats-v-drops" class="stats-v text-green">0 (0.00%)</span></div>
         <div class="stats-row"><span class="stats-k">DISPLAY CADENCE</span><span id="stats-v-fps" class="stats-v text-cyan">60.0 FPS Stable</span></div>

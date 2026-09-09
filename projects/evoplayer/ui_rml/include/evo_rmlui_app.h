@@ -18,6 +18,7 @@ struct EvoPlaybackState {
     std::string codec_badge;
     std::string fps_badge;
     std::string audio_badge;
+    std::string decoder_badge;   // #59
     double position_sec = 0.0;
     double duration_sec = 0.0;
     double percentage = 0.0;
@@ -34,6 +35,7 @@ struct EvoPlaybackState {
         return title == o.title && meta == o.meta && res_badge == o.res_badge &&
                hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
                fps_badge == o.fps_badge && audio_badge == o.audio_badge &&
+               decoder_badge == o.decoder_badge &&
                position_sec == o.position_sec && duration_sec == o.duration_sec &&
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
@@ -59,11 +61,13 @@ struct EvoDialogState {
     std::string title;
     std::string detail;
     double progress_pct = -1.0; // 0.0 to 1.0, or -1.0 to hide
+    int focused_action = -1;    // #65: D-pad-focused button index, -1 = none
     std::vector<EvoDialogAction> actions;
 
     bool operator==(const EvoDialogState& o) const {
         return eyebrow == o.eyebrow && title == o.title && detail == o.detail &&
-               progress_pct == o.progress_pct && actions == o.actions;
+               progress_pct == o.progress_pct && focused_action == o.focused_action &&
+               actions == o.actions;
     }
     bool operator!=(const EvoDialogState& o) const { return !(*this == o); }
 };
