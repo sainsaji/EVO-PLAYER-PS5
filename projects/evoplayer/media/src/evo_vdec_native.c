@@ -267,6 +267,9 @@ static int boot_bringup(int w, int h, const char **stage)
     return 0;
 }
 
+static int g_prefer_nv12 = 0;
+void evo_vdec_native_prefer_nv12(int on) { g_prefer_nv12 = on ? 1 : 0; }
+
 int evo_vdec_native_probe(void)
 {
     if (g_boot.tried)
@@ -621,7 +624,7 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     /* #27: when the GPU present path is up, emit NV12 straight from the decoder
      * — pp_agc's shader samples NV12 and does the YUV->RGB + scale on-GPU, so
      * the CPU never touches the pixels. Fixed for the stream's lifetime. */
-    n->agc_out    = pp_agc_available();
+    n->agc_out    = pp_agc_available() || g_prefer_nv12;
 
     if (par->extradata && par->extradata_size >= 4 && par->extradata[0] == 1) {
         n->bsf_name = "h264_mp4toannexb";
@@ -798,6 +801,7 @@ void evo_vdec_native_close(evo_vdec_native *v)
 #else /* !EVO_APP_MODULE — host + payload: native decode is unavailable */
 
 int evo_vdec_native_probe(void) { return 0; }
+void evo_vdec_native_prefer_nv12(int on) { (void)on; }
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p) { (void)p; return 0; }
 int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *d, int s, int64_t p)
 { (void)v; (void)d; (void)s; (void)p; return -1; }

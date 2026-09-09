@@ -60,6 +60,27 @@ void evo_gl_read_default_fb(uint32_t *bgra, int w, int h);
  * render-to-texture). Follow with evo_gl_context_present(). No-op on host. */
 void evo_gl_blit_bgra(const uint32_t *fb, int w, int h);
 
+/* GL-4 (#80), device only. Draw a decoded YUV 4:2:0 frame as one fullscreen
+ * quad into fb 0, YUV->RGB (BT.601 limited) in the fragment shader. Zero-copy:
+ * the planes point straight into decoder / AVFrame memory, uploaded as R8 (+
+ * RG8) textures that dodge the RGBA8 staging-copy wall. NV12 is
+ * (y,uv,NULL,NULL); planar I420 is (y,NULL,u,v). coded_w/h is the padded luma
+ * (texture) size, disp_w/h the region shown. Follow with
+ * evo_gl_context_present(). No-op on host. */
+void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
+                     const uint8_t *uv, int uv_pitch,
+                     const uint8_t *u,  int u_pitch,
+                     const uint8_t *v,  int v_pitch,
+                     int coded_w, int coded_h, int disp_w, int disp_h,
+                     int view_mode);   /* 0=FIT 1=FILL 2=STRETCH */
+
+/* GL-4 (#80), device only. Composite an EVO BGRA scratch (0xAABBGGRR, alpha in
+ * the top byte) over whatever is already in fb 0 — the player OSD on top of the
+ * video quad. `upload` re-sends the pixels (a slow RGBA8 staging copy — do it
+ * only when the scratch changed); otherwise the last upload is reused. Alpha
+ * blended. No-op on host. */
+void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload);
+
 #ifdef __cplusplus
 }
 #endif

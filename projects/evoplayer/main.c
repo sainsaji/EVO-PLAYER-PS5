@@ -12162,6 +12162,10 @@ int main(void) {
             evo_gl_frame_begin();
             evo_gl_context_present();
         }
+        /* GL-4 (#80): the player frame goes up as NV12 (R8+RG8) + a YUV->RGB
+         * shader instead of a CPU-converted RGBA8 blit (the ~65 ms/frame
+         * staging wall). gl_video is armed after pp_playback_init below (init
+         * memsets the struct); the present block then calls evo_gl_blit_yuv. */
     }
 #endif
 #if !defined(EVO_GL_DEVICE)
@@ -12266,6 +12270,13 @@ int main(void) {
     (void)pp_buf_idx; (void)pp_pitch;
     memset(&g_pp_vo, 0, sizeof(g_pp_vo));
     pp_playback_init(&g_pp_pb);
+#if defined(EVO_GL_DEVICE)
+    /* GL-4 (#80): NV12 video quad path — set after init (init memsets pb).
+     * Ask the native decoder for NV12 straight (no I420 de-interleave — the
+     * GL shader samples NV12). */
+    pp_playback_set_gl_video(&g_pp_pb, 1);
+    evo_vdec_prefer_nv12(1);
+#endif
 #if !defined(EVO_GL_DEVICE)
     if (pp_videoout_init(&g_pp_vo, WIDTH, HEIGHT, PP_PIXEL_BGRA32_TILED, 2) != 0) {
         toast("VIDEOOUT", "pp_videoout_init failed");
@@ -12445,7 +12456,10 @@ int main(void) {
         if (gl_active)
             evo_gl_frame_begin();
         linear = gl_scratch;
-        if (gl_active && gl_scratch)
+        /* GL-4: the NV12 player path never touches gl_scratch — skip the 8 MB
+         * clear. Music (audio-only) and every other screen still rasterise. */
+        if (gl_active && gl_scratch &&
+            !(screen == SCREEN_PLAYER && g_pp_pb.gl_video && !prospero_music_mode))
             memset(gl_scratch, 0, (size_t)WIDTH * (size_t)HEIGHT * 4u);
 #else
         int idx = frame % 2;
@@ -13255,7 +13269,15 @@ skip_screen_input:
         else if (screen == 1)
             draw_usb_browser(linear);
         else if (screen == 2)
+#if defined(EVO_GL_DEVICE)
+            /* GL-4: video-only screens present the frame as an NV12 quad in the
+             * present block below — no CPU rasterise into gl_scratch. Music
+             * (audio-only) has no video plane, so it still draws here. The OSD
+             * returns in GL-4 Stage 2c. */
+            { if (!g_pp_pb.gl_video || prospero_music_mode) draw_player_screen(linear); }
+#else
             draw_player_screen(linear);
+#endif
         else if (screen == 3)
             draw_image_screen(linear);
         else if (screen == 4)
@@ -13453,6 +13475,8 @@ skip_screen_input:
          * pp_playback paces publication) or an OSD change. */
         if (gl_active) {
             int _swap = 1;
+            int _nv12 = (screen == SCREEN_PLAYER && g_pp_pb.gl_video &&
+                         !prospero_music_mode);
             if (screen == SCREEN_PLAYER) {
                 static int64_t s_last_pts;
                 int64_t pts = g_pp_pb.display_pts_us;
@@ -13460,7 +13484,52 @@ skip_screen_input:
                 s_last_pts = pts;
             }
             uint64_t _b0 = (uint64_t)now_ms();
-            if (evo_rmlui_gl_blit_mode()) {
+            if (_nv12) {
+                /* GL-4 (#80): zero-copy video quad — the decoder's YUV planes
+                 * go straight to R8/RG8 textures + a YUV->RGB shader. The OSD
+                 * (Stage 2c) rasterises into gl_scratch (~2 ms) and composites
+                 * on top; its slow RGBA8 upload is gated on a sample-hash so a
+                 * static OSD costs only the composite draw. */
+                pp_gl_nv12_frame _f;
+                int _have = (pp_playback_get_nv12(&g_pp_pb, &_f) && _f.ready);
+
+                long long _nowms = now_ms();
+                int _osd_active = player_paused || prospero_scrub_active ||
+                                  show_stats_for_nerds || prospero_music_mode ||
+                                  (_nowms - controls_last_used_ms < 4200);
+                static int _osd_was;
+                int _osd_changed = 0;
+                if (_osd_active || _osd_was) {
+                    g_k4_osd_publish = 1;
+                    draw_player_screen(gl_scratch);   /* transparent bg + OSD only */
+                    g_k4_osd_publish = 0;
+                    uint32_t _h = 2166136261u;
+                    size_t _n = (size_t)WIDTH * (size_t)HEIGHT;
+                    for (size_t _i = 0; _i < _n; _i += 37u)
+                        _h = (_h ^ gl_scratch[_i]) * 16777619u;
+                    static uint32_t _osd_hash;
+                    _osd_changed = (_h != _osd_hash);
+                    _osd_hash = _h;
+                }
+                _osd_was = _osd_active;
+
+                int _present = (_swap && _have) || _osd_changed;
+                if (_present && _have) {
+                    evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
+                                    _f.u, _f.u_pitch, _f.v, _f.v_pitch,
+                                    (int)_f.coded_w, (int)_f.coded_h,
+                                    (int)_f.disp_w, (int)_f.disp_h,
+                                    video_view_mode);
+                    if (_osd_active)
+                        evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
+                    _swap = 1;
+                } else if (_present && _osd_active) {
+                    evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
+                    _swap = 1;
+                } else {
+                    _swap = 0;   /* nothing new — hold the frame on screen */
+                }
+            } else if (evo_rmlui_gl_blit_mode()) {
                 if (_swap) evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
             } else {
                 _swap = evo_rmlui_gl_consume_drew();

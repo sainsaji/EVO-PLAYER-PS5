@@ -74,6 +74,11 @@ typedef struct {
  * back to FFmpeg if bring-up fails. Idempotent. */
 int evo_vdec_probe(void);
 
+/* GL-4 (#80): ask the native backend to emit NV12 (Y + interleaved UV) rather
+ * than de-interleaving to planar I420 — the EVO_GL_DEVICE GL video path samples
+ * NV12 directly on the GPU. No-op for FFmpeg / host / payload. Set once at boot. */
+void evo_vdec_prefer_nv12(int on);
+
 /* User-facing decoder preference (settings row, #37). Persisted as one int
  * in evo_player_settings.cfg — see prospero_settings_save/_load in main.c. */
 typedef enum {

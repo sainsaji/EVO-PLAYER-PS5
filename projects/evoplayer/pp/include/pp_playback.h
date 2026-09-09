@@ -102,6 +102,31 @@ typedef struct pp_playback {
     int      agc_hold_valid;
                                   /*      tiled - main polls + clears this      */
 
+    /*
+     * GL-4 (#80): EVO_GL_DEVICE video path. When gl_video is set, push_frame
+     * skips the CPU YUV->RGB convert entirely — it paces the frame on the
+     * clock and stashes the decoded planes as NV12 (Y + interleaved UV) in an
+     * owned double buffer at *source* resolution. The GL render loop uploads
+     * them as R8 / RG8 textures and a GLSL shader does YUV->RGB on the quad
+     * (glTexSubImage2D of a 4-channel RGBA8 frame is the ~68 ms wall; R8/RG8
+     * are ~free — see docs/evo-pro/gl4-video-path-plan.md).
+     */
+    int      gl_video;
+    /*
+     * The decoded frame's planes, borrowed from the decoder's frame pool (or
+     * FFmpeg's AVFrame) — valid because push_frame pace-sleeps on this frame's
+     * PTS before returning, so the decoder can't recycle the slot until the
+     * render thread has had its turn. pp_playback_get_nv12() hands these
+     * straight out (under the lock, no pixel copy); the GL uploader reads them.
+     * gl_src_uv != NULL => NV12 (RG8 chroma); else gl_src_u/_v are planar I420.
+     */
+    const uint8_t *gl_src_y, *gl_src_uv, *gl_src_u, *gl_src_v;
+    int      gl_src_ypitch, gl_src_uvpitch, gl_src_upitch, gl_src_vpitch;
+    uint32_t gl_nv12_pitch;            /* R8 luma texture width / dst row bytes */
+    uint32_t gl_nv12_cw, gl_nv12_ch;   /* coded (padded) luma w/h = texture size */
+    uint32_t gl_nv12_dw, gl_nv12_dh;   /* display (cropped) w/h                  */
+    int      gl_nv12_ready;
+
     void *lock;
     pp_playback_stats stats;
 } pp_playback;
@@ -157,6 +182,33 @@ int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_byte
                              uint32_t dst_w, uint32_t dst_h);
 
 int pp_playback_has_display(const pp_playback *pb);
+
+/**
+ * GL-4 (#80): enable the EVO_GL_DEVICE NV12 video path (no CPU convert).
+ * Call once at GL context bring-up.
+ */
+void pp_playback_set_gl_video(pp_playback *pb, int on);
+
+/**
+ * The ready NV12 frame's borrowed planes — no pixel copy. The pointers point
+ * into the decoder's frame pool (or an FFmpeg AVFrame); they stay valid while
+ * the render loop uploads (push_frame pace-sleeps on each frame's PTS, so the
+ * decoder is ~1 frame behind reusing a 12-slot pool). For an FFmpeg planar
+ * source `uv` is NULL and `u`/`v` are the separate chroma planes.
+ */
+typedef struct pp_gl_nv12_frame {
+    const uint8_t *y, *uv, *u, *v;
+    int      y_pitch, uv_pitch, u_pitch, v_pitch;
+    uint32_t coded_w, coded_h;   /* padded luma plane = R8 texture size */
+    uint32_t disp_w, disp_h;     /* valid (cropped) region              */
+    int      ready;
+} pp_gl_nv12_frame;
+
+/**
+ * Fill *f with the ready frame's borrowed planes under the display lock (a
+ * pointer/int copy, no pixels). Returns 1 if ready, 0 otherwise.
+ */
+int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f);
 
 /**
  * #27: 1 (and clears the request) if a frame took the CPU path while the VO was

@@ -1,10 +1,57 @@
 # GL-4 (#80) — video into the GL funnel
 
-> **Status: Stage 1 (bump + re-measure) done + hw-verified 2026-09-10.** The
-> re-measure **removed the zero-copy requirement** — see below. Stage 2 (the
-> NV12 GL video path) and Stage 3 (converter demolition) are scoped but not
-> started. Parent: [opengl-render-overhaul.md](opengl-render-overhaul.md) (GL-4
-> row). Handoff: [#80 comment](https://github.com/sainsaji/EVO-PLAYER-PS5/issues/80#issuecomment-5607427903).
+> **Status: Stage 1 + Stage 2a/2b/2c done + hw-verified 2026-09-10.** GTA 4K
+> native + 1080p play smooth through the GL NV12 path (`late_drop` 0–1), OSD
+> composites over the video, aspect (Fit/Fill/Stretch) works, colours correct.
+> **Stage 2d (seek) and Stage 3 (converter demolition) not started.** Parent:
+> [opengl-render-overhaul.md](opengl-render-overhaul.md) (GL-4 row). Handoff:
+> [#80 comment](https://github.com/sainsaji/EVO-PLAYER-PS5/issues/80#issuecomment-5607427903).
+
+## Stage 2 progress (hardware, 2026-09-10)
+
+- **2a (NV12 video quad) — works.** GTA 4K native + 1080p play through the GL
+  path; `GL-3 player: blit~3-4ms` (was ~65). Zero-copy: decoder planes →
+  R8/RG8 textures directly, `pp_playback_get_nv12()` hands out borrowed
+  pointers, no copy anywhere. Native decoder emits NV12 straight
+  (`evo_vdec_prefer_nv12`).
+- **Colour fix:** the ps5-opengl default framebuffer scans out BGRA, so the
+  YUV→RGB shader output is swizzled `.bgr` (same as `evo_gl_blit_bgra`).
+- **2b (aspect) + 2c (OSD) — done + hw-verified.** Aspect is a `uScale` on the
+  vertex quad (FIT letterbox / FILL crop / STRETCH; 16:9 content shows no
+  change on a 16:9 panel, as expected); the OSD rasterises into `gl_scratch`
+  via `draw_player_screen`'s `g_k4_osd_publish` mode and `evo_gl_composite_bgra`
+  blends it over the video — the slow RGBA8 OSD upload is sample-hash-gated so a
+  static OSD costs only a draw. Per-frame OSD cost ~7 ms at 4K (memset + OSD
+  rasterise + hash) → `blit~10-13ms`, well inside the 33 ms budget.
+- **2d (seek) — not done.** Seek is rough (no held-frame feedback during the
+  discard window; `seek_to_first_ms` ~2–6 s, GOP-bound on long-GOP 4K). The
+  `#32` scrub-overlay machine is inert on the GL path.
+- **Not GL-4:** Tears of Steel 4K (H.264 3840×1714) hits the resident
+  decoder's `0x811d0303` on decode #1 → FFmpeg-4K fallback → struggles. This
+  is the pre-existing `native-decode` limitation (main.c ~L11390), not the GL
+  path. GTA 4K's encode is accepted; ToS4K's isn't.
+
+## Stage 2a — what landed (hw-verify-pending)
+
+- `pp_playback`: `gl_video` flag (`pp_playback_set_gl_video`), an owned NV12
+  double buffer, a `pp_playback_copy_nv12()` that copies under the display lock.
+  `push_frame` gets an early `gl_video` branch that paces on the clock and
+  normalises the frame to NV12 at *source* resolution (native NV12 → verbatim;
+  FFmpeg I420 → interleave UV) — no CPU YUV→RGB, no `pb->display`.
+- `evo_gl_context_device.cpp`: `evo_gl_blit_nv12()` — R8 luma + RG8 chroma
+  upload, a GLSL fragment shader doing BT.601-limited YUV→RGB
+  (298/409/516/-100/-208 >> 8 → /256 float constants, matches
+  `pp_converter.c`), fullscreen triangle, `uCrop` = disp/coded to trim MB
+  padding.
+- `main.c`: `pp_playback_set_gl_video(1)` at GL bring-up; the player screen no
+  longer rasterises into `gl_scratch` (`draw_player_screen` skipped for
+  `screen==2` unless music/audio-only) — the present block copies NV12 into
+  4K-sized staging and calls `evo_gl_blit_nv12`.
+
+**Known gaps (Stage 2b/2c):** no OSD / progress bar during playback; aspect is
+always FIT 1:1 (Fill/Stretch ignored); `SCREEN_EXIT_CONFIRM` /
+`SCREEN_SUBTITLE_PICKER` show their dialog over black instead of the frozen
+frame. All restored in 2c.
 
 ## The upload wall — and the way past it
 

@@ -43,6 +43,11 @@ int evo_vdec_probe(void)
     return evo_vdec_native_probe();
 }
 
+void evo_vdec_prefer_nv12(int on)
+{
+    evo_vdec_native_prefer_nv12(on);
+}
+
 evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id)
 {
     if (pref == EVO_VDEC_PREF_FFMPEG)

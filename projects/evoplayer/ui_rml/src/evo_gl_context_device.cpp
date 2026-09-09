@@ -256,6 +256,268 @@ extern "C" void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
+/* ===================================================================== *
+ *  GL-4 (#80): YUV 4:2:0 video present — R8 (+ RG8) planes + YUV->RGB shader
+ *
+ *  glTexSubImage2D of a 1080p RGBA8 frame is ~65 ms on ps5-opengl G55 (a
+ *  synchronous CPU staging copy); R8 / RG8 uploads take a fast path and are
+ *  ~free (0.10 / 0.03 ms at 1080p). Zero-copy: the planes come straight from
+ *  the decoder's frame pool (no CPU YUV->RGB, no intermediate buffer) and the
+ *  shader does the conversion on the quad. Matrix matches the CPU converter
+ *  (pp_converter.c: 298/409/516/-100/-208 >> 8, BT.601 limited) for #62 parity.
+ * ===================================================================== */
+namespace {
+
+GLuint g_yuv_vao = 0;
+GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0;
+GLuint g_yuv_ytex = 0, g_yuv_uvtex = 0, g_yuv_utex = 0, g_yuv_vtex = 0;
+int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1;
+GLint  g_yuv_nv_crop = -1, g_yuv_nv_scale = -1;
+GLint  g_yuv_pl_crop = -1, g_yuv_pl_scale = -1;
+
+const char *k_yuv_vs =
+    "#version 330 core\n"
+    "out vec2 vUV;\n"
+    "uniform vec2 uCrop;\n"    /* disp/coded — trims MB padding                 */
+    "uniform vec2 uScale;\n"   /* aspect: letterbox (<1) / fill-overflow (>1)   */
+    "void main(){\n"
+    "  vec2 p = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);\n"  /* quad strip */
+    /* flip V (EVO frames are top-down); scale into the valid disp region */
+    "  vUV = vec2(p.x, 1.0 - p.y) * uCrop;\n"
+    "  gl_Position = vec4((p*2.0-1.0) * uScale, 0.0, 1.0);\n"
+    "}\n";
+/* BT.601 limited, constants = the CPU converter's 298/409/516/-100/-208 / 256.
+ * Output is swizzled .bgr — the ps5-opengl default framebuffer scans out as
+ * BGRA (same reason evo_gl_blit_bgra's sampler swizzles). */
+#define YUV_MATRIX_GLSL \
+    "  float Y = (y - 0.0625) * 1.164062;\n" \
+    "  vec3 rgb = vec3(Y + 1.597656*V,\n" \
+    "                  Y - 0.390625*U - 0.812500*V,\n" \
+    "                  Y + 2.015625*U);\n" \
+    "  c = vec4(clamp(rgb, 0.0, 1.0).bgr, 1.0);\n"
+const char *k_yuv_fs_nv =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uUV;\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r;\n"
+    "  vec2 uv = texture(uUV, vUV).rg;\n"
+    "  float U = uv.x - 0.5; float V = uv.y - 0.5;\n"
+    YUV_MATRIX_GLSL
+    "}\n";
+const char *k_yuv_fs_pl =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uU; uniform sampler2D uV;\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r;\n"
+    "  float U = texture(uU, vUV).r - 0.5;\n"
+    "  float V = texture(uV, vUV).r - 0.5;\n"
+    YUV_MATRIX_GLSL
+    "}\n";
+
+GLuint yuv_link(const char *fs_src)
+{
+    GLuint vs = blit_compile(GL_VERTEX_SHADER, k_yuv_vs);
+    GLuint fs = blit_compile(GL_FRAGMENT_SHADER, fs_src);
+    if (!vs || !fs) return 0;
+    GLuint p = glCreateProgram();
+    glAttachShader(p, vs); glAttachShader(p, fs);
+    glLinkProgram(p);
+    GLint ok = 0; glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512]; GLsizei n = 0; glGetProgramInfoLog(p, sizeof log, &n, log);
+        evo_bt_("GL yuv: link failed: %.*s", (int)n, log);
+        glDeleteProgram(p); p = 0;
+    }
+    glDeleteShader(vs); glDeleteShader(fs);
+    return p;
+}
+
+bool yuv_init(void)
+{
+    if (g_yuv_nv_prog && g_yuv_pl_prog) return true;
+    if (!g_yuv_nv_prog) g_yuv_nv_prog = yuv_link(k_yuv_fs_nv);
+    if (!g_yuv_pl_prog) g_yuv_pl_prog = yuv_link(k_yuv_fs_pl);
+    if (!g_yuv_nv_prog || !g_yuv_pl_prog) return false;
+    if (!g_yuv_vao) glGenVertexArrays(1, &g_yuv_vao);
+    if (!g_yuv_ytex) {
+        glGenTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_uvtex);
+        glGenTextures(1, &g_yuv_utex);  glGenTextures(1, &g_yuv_vtex);
+    }
+    glUseProgram(g_yuv_nv_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_nv_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_nv_prog, "uUV"), 1);
+    g_yuv_nv_crop  = glGetUniformLocation(g_yuv_nv_prog, "uCrop");
+    g_yuv_nv_scale = glGetUniformLocation(g_yuv_nv_prog, "uScale");
+    glUseProgram(g_yuv_pl_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl_prog, "uU"), 1);
+    glUniform1i(glGetUniformLocation(g_yuv_pl_prog, "uV"), 2);
+    g_yuv_pl_crop  = glGetUniformLocation(g_yuv_pl_prog, "uCrop");
+    g_yuv_pl_scale = glGetUniformLocation(g_yuv_pl_prog, "uScale");
+    evo_bt_("GL yuv: initialised");
+    return true;
+}
+
+void yuv_tex_setup(GLuint tex, GLenum ifmt, int w, int h)
+{
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexStorage2D(GL_TEXTURE_2D, 1, ifmt, w, h);
+}
+
+} // namespace
+
+extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
+                                const uint8_t *uv, int uv_pitch,
+                                const uint8_t *u,  int u_pitch,
+                                const uint8_t *v,  int v_pitch,
+                                int coded_w, int coded_h, int disp_w, int disp_h,
+                                int view_mode)
+{
+    if (!g_ready || !y || y_pitch <= 0 || coded_w <= 0 || coded_h <= 0)
+        return;
+    const int planar = (uv == nullptr);
+    if (planar ? (!u || !v) : (uv == nullptr))
+        return;
+    if (!yuv_init())
+        return;
+
+    const int tw = coded_w, th = coded_h;   /* luma texture = coded image (stride via ROW_LENGTH) */
+    const int cw2 = tw / 2, ch2 = th / 2;
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+    if (tw != g_yuv_tw || th != g_yuv_th || planar != g_yuv_planar) {
+        glDeleteTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_ytex);
+        glDeleteTextures(1, &g_yuv_uvtex); glGenTextures(1, &g_yuv_uvtex);
+        glDeleteTextures(1, &g_yuv_utex);  glGenTextures(1, &g_yuv_utex);
+        glDeleteTextures(1, &g_yuv_vtex);  glGenTextures(1, &g_yuv_vtex);
+        yuv_tex_setup(g_yuv_ytex, GL_R8, tw, th);
+        if (planar) {
+            yuv_tex_setup(g_yuv_utex, GL_R8, cw2, ch2);
+            yuv_tex_setup(g_yuv_vtex, GL_R8, cw2, ch2);
+        } else {
+            yuv_tex_setup(g_yuv_uvtex, GL_RG8, cw2, ch2);
+        }
+        g_yuv_tw = tw; g_yuv_th = th; g_yuv_planar = planar;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_yuv_ytex);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, y_pitch);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tw, th, GL_RED, GL_UNSIGNED_BYTE, y);
+    if (planar) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, g_yuv_utex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, u_pitch);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, GL_UNSIGNED_BYTE, u);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, g_yuv_vtex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, v_pitch);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, GL_UNSIGNED_BYTE, v);
+    } else {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, g_yuv_uvtex);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, uv_pitch / 2);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RG, GL_UNSIGNED_BYTE, uv);
+    }
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, g_w, g_h);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    GLuint prog  = planar ? g_yuv_pl_prog  : g_yuv_nv_prog;
+    GLint  crop  = planar ? g_yuv_pl_crop  : g_yuv_nv_crop;
+    GLint  scale = planar ? g_yuv_pl_scale : g_yuv_nv_scale;
+    glUseProgram(prog);
+    float cx = (disp_w > 0 && disp_w <= tw) ? (float)disp_w / (float)tw : 1.0f;
+    float cy = (disp_h > 0 && disp_h <= th) ? (float)disp_h / (float)th : 1.0f;
+    glUniform2f(crop, cx, cy);
+
+    /* Aspect: 0=FIT (letterbox), 1=FILL (crop overflow), 2=STRETCH. */
+    float sx = 1.0f, sy = 1.0f;
+    if (view_mode != 2 && disp_w > 0 && disp_h > 0 && g_w > 0 && g_h > 0) {
+        float va = (float)disp_w / (float)disp_h;   /* video aspect  */
+        float sa = (float)g_w    / (float)g_h;      /* screen aspect */
+        if (view_mode == 0) {                       /* FIT           */
+            if (va > sa) sy = sa / va; else sx = va / sa;
+        } else {                                     /* FILL          */
+            if (va > sa) sx = va / sa; else sy = sa / va;
+        }
+    }
+    glUniform2f(scale, sx, sy);
+
+    glBindVertexArray(g_yuv_vao);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glActiveTexture(GL_TEXTURE0);   /* leave unit 0 active for the blit path */
+}
+
+/* ---- OSD composite over the video quad (GL-4 Stage 2c) ---------------- */
+namespace {
+GLuint g_osd_prog = 0, g_osd_vao = 0, g_osd_tex = 0;
+int    g_osd_tw = 0, g_osd_th = 0;
+const char *k_osd_fs =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c; uniform sampler2D uTex;\n"
+    /* EVO scratch is BGRA-in-memory; keep alpha for the blend. */
+    "void main(){ vec4 t = texture(uTex, vUV); c = vec4(t.bgr, t.a); }\n";
+} // namespace
+
+extern "C" void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload)
+{
+    if (!g_ready || !fb || w <= 0 || h <= 0)
+        return;
+    if (!g_osd_prog) {
+        GLuint vs = blit_compile(GL_VERTEX_SHADER, k_blit_vs);
+        GLuint fs = blit_compile(GL_FRAGMENT_SHADER, k_osd_fs);
+        if (!vs || !fs) return;
+        g_osd_prog = glCreateProgram();
+        glAttachShader(g_osd_prog, vs); glAttachShader(g_osd_prog, fs);
+        glLinkProgram(g_osd_prog);
+        GLint ok = 0; glGetProgramiv(g_osd_prog, GL_LINK_STATUS, &ok);
+        if (!ok) { glDeleteProgram(g_osd_prog); g_osd_prog = 0; return; }
+        glDeleteShader(vs); glDeleteShader(fs);
+        glGenVertexArrays(1, &g_osd_vao);
+        glGenTextures(1, &g_osd_tex);
+        glUseProgram(g_osd_prog);
+        glUniform1i(glGetUniformLocation(g_osd_prog, "uTex"), 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_osd_tex);
+    if (w != g_osd_tw || h != g_osd_th) {
+        glDeleteTextures(1, &g_osd_tex); glGenTextures(1, &g_osd_tex);
+        glBindTexture(GL_TEXTURE_2D, g_osd_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
+        g_osd_tw = w; g_osd_th = h;
+        upload = 1;
+    }
+    if (upload) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, fb);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, g_w, g_h);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glUseProgram(g_osd_prog);
+    glBindVertexArray(g_osd_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDisable(GL_BLEND);
+}
+
 extern "C" void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)
 {
     if (!g_ready || !bgra || w <= 0 || h <= 0)

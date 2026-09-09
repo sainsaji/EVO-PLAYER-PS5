@@ -83,6 +83,17 @@ void pp_playback_set_backend(pp_playback *pb, pp_video_backend backend)
         pthread_mutex_unlock(mtx(pb));
 }
 
+void pp_playback_set_gl_video(pp_playback *pb, int on)
+{
+    if (!pb)
+        return;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    pb->gl_video = on ? 1 : 0;
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+}
+
 void pp_playback_force_v3_fallback(pp_playback *pb, int enable)
 {
     if (!pb)
@@ -110,6 +121,8 @@ void pp_playback_shutdown(pp_playback *pb)
     free(pb->nv12_fb);
     pb->nv12_fb = NULL;
     pb->nv12_fb_cap = 0;
+    pb->gl_nv12_ready = 0;
+    pb->gl_src_y = pb->gl_src_uv = pb->gl_src_u = pb->gl_src_v = NULL;
     if (pb->lock) {
         pthread_mutex_destroy(mtx(pb));
         free(pb->lock);
@@ -197,6 +210,7 @@ void pp_playback_on_file_open(pp_playback *pb)
     pb->seek_discarding = 0;
     pb->display_ready = 0;
     pb->display_pts_us = 0;
+    pb->gl_nv12_ready = 0;    /* GL-4: don't show the previous file's last frame */
     pb->agc_hold_valid = 0;   /* #28: don't carry a held frame across files */
     if (pb->pending_present && pb->vo)
         pp_videoout_release(pb->vo, pb->pending_vo_idx);
@@ -226,6 +240,7 @@ void pp_playback_on_file_close(pp_playback *pb)
         pp_videoout_release(pb->vo, pb->pending_vo_idx);
     pb->pending_present = 0;
     pb->display_ready = 0;
+    pb->gl_nv12_ready = 0;
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
 }
@@ -430,6 +445,76 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pp_clock_is_paused(&pb->clock)) {
         agc_present_held_osd(pb);   /* #28: keep OSD + held frame on screen */
         return 1;
+    }
+
+    /*
+     * GL-4 (#80): EVO_GL_DEVICE video path — no CPU YUV->RGB, no copy. Pace the
+     * frame on the clock, then publish the decoder's borrowed planes; the GL
+     * render loop uploads them as R8/RG8 textures and a shader converts on the
+     * quad. pp_playback_get_nv12() hands the pointers out.
+     */
+    if (pb->gl_video) {
+        uint32_t cw, ch, dw, dh;
+        int syp;
+
+        if (!pb->clock.started) {
+            pp_clock_start(&pb->clock, src->pts_us);
+        } else if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) == PP_CLOCK_DROP) {
+            pb->stats.frames_late_dropped++;
+            if (++pb->late_drop_streak < PP_LATE_DROP_RESYNC)
+                return 1;
+            pp_clock_reset(&pb->clock);
+            pp_clock_start(&pb->clock, src->pts_us);
+            pb->stats.clock_resets++;
+            pb->late_drop_streak = 0;
+        } else {
+            pb->late_drop_streak = 0;
+        }
+
+        if (!src->planes[0])
+            return -4;
+        if (src->format != PP_FRAME_NV12 && src->format != PP_FRAME_YUV420P)
+            return -4;
+
+        dw = src->width;
+        dh = src->height;
+        cw = (dw + 1u) & ~1u;                 /* even luma width -> R8 texture width */
+        ch = src->coded_height ? src->coded_height : src->height;
+        if (ch < dh) ch = dh;
+        ch = (ch + 1u) & ~1u;                 /* even -> UV plane is ch/2 rows      */
+        syp = src->strides[0] > 0 ? src->strides[0] : (int)src->width;
+
+        /*
+         * Stash the borrowed decoder planes — no copy anywhere. push_frame is on
+         * the decode thread and has just pace-slept to this frame's PTS, so the
+         * decoder won't recycle the pool slot before the render loop's
+         * pp_playback_get_nv12() + upload runs (~1 frame; the pool is 12 slots).
+         */
+        if (pb->lock) pthread_mutex_lock(mtx(pb));
+        pb->gl_src_y  = src->planes[0];
+        pb->gl_src_ypitch = syp;
+        if (src->format == PP_FRAME_NV12) {
+            pb->gl_src_uv = src->planes[1];
+            pb->gl_src_uvpitch = src->strides[1] > 0 ? src->strides[1] : syp;
+            pb->gl_src_u = pb->gl_src_v = NULL;
+        } else {
+            pb->gl_src_uv = NULL;
+            pb->gl_src_u = src->planes[1];
+            pb->gl_src_v = src->planes[2];
+            pb->gl_src_upitch = src->strides[1] > 0 ? src->strides[1] : (int)((src->width + 1u) / 2u);
+            pb->gl_src_vpitch = src->strides[2] > 0 ? src->strides[2] : pb->gl_src_upitch;
+        }
+        pb->gl_nv12_pitch = (uint32_t)syp;
+        pb->gl_nv12_cw = cw;
+        pb->gl_nv12_ch = ch;
+        pb->gl_nv12_dw = dw;
+        pb->gl_nv12_dh = dh;
+        pb->gl_nv12_ready = 1;
+        pb->display_pts_us = src->pts_us;
+        pb->stats.frames_converted++;
+        pb->stats.frames_published++;
+        if (pb->lock) pthread_mutex_unlock(mtx(pb));
+        return 0;
     }
 
     need = (size_t)pb->out_w * (size_t)pb->out_h;
@@ -915,6 +1000,36 @@ int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_byte
 int pp_playback_has_display(const pp_playback *pb)
 {
     return pb && pb->display_ready;
+}
+
+int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
+{
+    int got = 0;
+    if (f)
+        memset(f, 0, sizeof(*f));
+    if (!pb || !f)
+        return 0;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    if (pb->gl_nv12_ready && pb->gl_src_y) {
+        f->y        = pb->gl_src_y;
+        f->uv       = pb->gl_src_uv;
+        f->u        = pb->gl_src_u;
+        f->v        = pb->gl_src_v;
+        f->y_pitch  = pb->gl_src_ypitch;
+        f->uv_pitch = pb->gl_src_uvpitch;
+        f->u_pitch  = pb->gl_src_upitch;
+        f->v_pitch  = pb->gl_src_vpitch;
+        f->coded_w  = pb->gl_nv12_cw;
+        f->coded_h  = pb->gl_nv12_ch;
+        f->disp_w   = pb->gl_nv12_dw;
+        f->disp_h   = pb->gl_nv12_dh;
+        f->ready    = 1;
+        got = 1;
+    }
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+    return got;
 }
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
