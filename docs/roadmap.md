@@ -20,7 +20,7 @@ Priority labels track this order: **critical** #32 · **high** #36, #72, #76, #7
 (PR #61: watchdog worker thread, linear UHD VO, V8-gate reachability fix,
 AGC-death VO-retile recovery, #55 folded in). 982 µs/frame, `--agc-probe`-gated,
 default build unchanged. Leftovers split: **#62** plane-hash A/B parity ·
-**#37** the Renderer settings row · **#41** P010 present · #28 gets GPU
+**#37** the Renderer settings row · **#41** HEVC + VP9 native decode · #28 gets GPU
 OSD-over-4K. **#28 (Step 3) is unblocked.**
 
 **Closed 2026-09-03 (evening):** **#6** (video buffers → direct mem — landed as
@@ -40,7 +40,7 @@ hardware by a stale `/data/evoplayer/app/assets/` until `edc3a08` made
 `deploy-app.sh --ffpfsc` re-sync the asset tree. #35 is now unblocked (part B's
 dependency #44 is done); **#28 unblocked** (#27 closed 2026-09-04).
 
-**Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed) ·
+**Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed; #41 = codec-independent H.264/HEVC/VP9 backend, research base `third_party/ps5-hardware-video-decoding-research/`) ·
 `rmlui` = #45, #28, #49, #60, #68 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
 `modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)) ·
 `render-overhaul` = #77–#82 (collapse every present route / font system / converter into one
@@ -96,7 +96,7 @@ These edges are also wired as **native GitHub relationships** (2026-09-03) so
 the issue UI shows blockers / sub-tasks directly:
 
 - **Sub-issues:**
-  - #68 → #69, #70 (GPU geometry: 4x MSAA & analytical SDF shaders)
+  - #68 → #69, #70 (closed — superseded by the OpenGL overhaul; MSAA/SDF are GLSL now)
   - #46 → #50, #51 (data-root test coverage & breadcrumb quieting)
   - #44 → #16 (RmlUi screen parity & text clamps, both closed)
   - #29 → #30, #31 (native decode phases, both closed)
@@ -108,7 +108,7 @@ the issue UI shows blockers / sub-tasks directly:
   - #60 → #36 (self-contained `.ffpfsc` blocks release pipeline packaging)
   - #37 → #38, #41, #47, #59 (video decoder toggle blocks benchmark, HEVC, audio passthrough, and UI badge)
   - #59 → #63 (decoder indicator blocks Diagnostic HUD graphs)
-  - #4 → #5 (10-bit fast path before swscale multi-threading)
+  - #4 → #5 (#5 closed — CPU converter deleted by #80; #4 rescoped to P010 in the GL shader)
   - #31 → #39, #40 (native decoder backend blocks hang recovery & memory tidy)
   - #46 → #72 (persistence & data root blocks Lapy JB internal storage fix)
   - #35 → #43 (caption overlay blocks styled `.ass`)
@@ -131,7 +131,7 @@ GitHub issue sidebar and Project #5 board.
 
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ─ ✅ CLOSED
    (package-app.sh step 6b,      │   2026-09-04, PR #61 — GTA 4K on GPU, correct colour,
-    unconditional DT_NEEDED)      │   982µs/frame. Leftovers: #62 A/B, #37 row, #41 P010
+    unconditional DT_NEEDED)      │   982µs/frame. Leftovers: #62 A/B, #37 row, #41 HEVC+VP9
                                   │      │
                                   │      └─► #28 Step 3: RmlUi on sceAgc (unblocked)
                                   │   (same PRX-stub wall also blocks #34 native IME kb)
@@ -154,7 +154,7 @@ GitHub issue sidebar and Project #5 board.
     #38 validation sweep + FFmpeg-vs-native A/B benchmark + docs
     #39 decode-thread watchdog (hung call must not wedge the app slot)
     #40 route direct memory via evo_direct_mem + multi-hour soak
-    #41 HEVC hardware decode (2nd resident decoder)
+    #41 codec-independent NativeVideoBackend (H.264 ✅ + HEVC + VP9)
     #59 Surface video decoder backend in player UI (HW vs SW badge + OSD)
     #32 4K native playback: seeking plays audio but video shows black (critical)
 ```
@@ -242,7 +242,7 @@ GPU YUV→RGB → GPU flip, correct colour, 982 µs/frame (3% of the 30 fps budg
 CPU swizzle off the 4K path. `render_frame` runs on a watchdog'd worker thread; a
 wedge/fault re-registers the VO tiled and the CPU path resumes. `--agc-probe`-gated,
 default build unchanged. #55 fixed alongside. Leftovers: **#62** (plane-hash A/B),
-**#37** (Renderer settings row), **#41** (P010), **#28** (GPU OSD over 4K).
+**#37** (Renderer settings row), **#41** (HEVC + VP9 native decode), **#28** (GPU OSD over 4K).
 See `docs/evo-pro/status.md` + `agc-implementation.md` for the full write-up.
 
 ### 5 · `#28` — GPU Step 3: complete RmlUi on sceAgc — **unblocked**
@@ -269,7 +269,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 | **#38** | Validation sweep (backend column) + FFmpeg-vs-native A/B benchmark + docs rewrite (Phase 6) | open |
 | **#39** | Watchdog the decode thread — a hung `sceVideodec2` call must not wedge the app slot | open |
 | **#40** | Route the resident decoder's direct memory through `evo_direct_mem` + multi-hour soak | open |
-| **#41** | HEVC hardware decode — a 2nd resident `sceVideodec2` decoder (H.264-only today) | open |
+| **#41** | Codec-independent `NativeVideoBackend` — H.264 (done) + HEVC + VP9 on `sceVideodec2`, one interface, common presentation, auto FFmpeg fallback. Research base: `third_party/ps5-hardware-video-decoding-research/` (FW 6.02+12.70; ignore EVO's in-tree decode docs) | open |
 | **#59** | Surface video decoder backend in player UI (Hardware vs Software decode indicator) | open, medium |
 | **#32** | 4K native playback: seeking plays audio but video shows black (blank screen on GPU present) | open, critical |
 
