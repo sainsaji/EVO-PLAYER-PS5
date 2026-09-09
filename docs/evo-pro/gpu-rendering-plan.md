@@ -1,5 +1,8 @@
 # GPU rendering — moving convert + composite + UI off the CPU
 
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
 > **Status (2026-09-03):** Step 1 ✅ shipped + hardware-verified (idle menus
 > 11 → ~55–60 fps). **Step 2 (#27): AGC gate PASSED, `pp_agc_init` (shader
 > setup) hardware-verified, `render_frame` ported + present path wired

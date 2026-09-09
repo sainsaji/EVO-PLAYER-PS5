@@ -61,11 +61,6 @@ KNOWN_LOGS = [
 PACKAGE_FLAGS = [
     ("--ffpfsc", "PFS image (.ffpfsc) - the hardware path", True),
     ("--usb-remote", "scriptable FTP remote + verbose vdec log", False),
-    ("--agc-probe", "boot-time sceAgc reachability recon (#27)", False),
-    ("--videodec2-probe", "sceVideodec2 gate (#31)", False),
-    ("--avplayer-probe", "libSceAvPlayer gate (Route A - dead)", False),
-    ("--geo-text", "compile the GPU text 2nd-pass (#28/#67)", False),
-    ("--shader-scan", "rip PSSL shader blobs -> /mnt/usb0 (#67)", False),
     ("--breadcrumbs", "on-screen boot-trace popups (#51)", False),
     ("--rebuild-libc", "force-regenerate the runtime libc shim", False),
 ]

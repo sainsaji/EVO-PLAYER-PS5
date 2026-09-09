@@ -216,10 +216,8 @@ typedef struct SceAvPlayerFrameInfoEx {
  *   JumpToTime / StreamCount / GetStreamInfo / EnableStream — resolve by name
  *   via nid_encode(); do not hardcode.
  *
- * Do NOT paste NID literals into calling code — compute them (nid_encode, or
- * the inline SHA1 in evo_agc_probe.c) so a typo can't silently resolve the
- * wrong symbol. The scrambled table in an earlier avplayer_test draft is the
- * cautionary tale. */
+ * Do NOT paste NID literals into calling code — compute them (nid_encode) so a
+ * typo can't silently resolve the wrong symbol. */
 
 void    *sceAvPlayerInit(const SceAvPlayerInitData *init_data);           /* handle, or NULL */
 int32_t  sceAvPlayerAddSource(void *handle, const char *path);

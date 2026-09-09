@@ -95,19 +95,12 @@ extern const uint8_t pp_agc_blit_ps_header_start[], pp_agc_blit_ps_header_end[];
 extern const uint8_t pp_agc_blit_ps_code_start[],   pp_agc_blit_ps_code_end[];
 
 /* --- constants (ProsperoLight) ----------------------------------------- */
-/* #28 Phase 4: the GPU text-overlay 2nd pass in agc_render_geo.
- * DEFAULT 0 - compiling the pass body into agc_render_geo crashes EVO at LOAD
- * on hardware (2026-09-04), even though the code never executes without the
- * /mnt/usb0/evo_agc_geo_text hook. Bisected to: any of the pass's CPU-side
- * setup (fopen + shader-header reads + register memcpys + the NADD block) is
- * enough to brick boot. It is NOT a logic bug (the path is unreachable) - it's
- * toolchain/loader-level (native_app_builder ELF->eboot, or -fdata-sections
- * section handling, or a function-size threshold). Needs a separate
- * investigation: try the pass in its own .c file, or diff the eboot segment
- * table. Build with -DPP_AGC_GEO_TEXT=1 only for that. */
-#ifndef PP_AGC_GEO_TEXT
+/* #28 Phase 4: the GPU text-overlay 2nd pass in agc_render_geo. Permanently
+ * off - the --geo-text build flag was removed 2026-09-09 (the pass bricked EVO
+ * at load and never shipped). The `#if PP_AGC_GEO_TEXT` blocks below are dead
+ * and go with the rest of the sceAgc geo path in the OpenGL render overhaul
+ * (docs/evo-pro/opengl-render-overhaul.md, GL-3). */
 #define PP_AGC_GEO_TEXT 0
-#endif
 
 #define SHADER_MEMORY_BYTES  0x0d0000u
 #define SHADER_STATIC_BYTES  0x10000u        /* flushed before every submit    */
@@ -146,15 +139,15 @@ extern const uint8_t pp_agc_blit_ps_code_start[],   pp_agc_blit_ps_code_end[];
 /* #67: ripped blit_ps, paired with the already-created g_agc.vs (well clear
  * of every offset above - highest in-use address is OFF_GEO_SH + 0x1000;
  * SHADER_MEMORY_BYTES is 0xd0000, plenty of room). HDR/CODE are read-only
- * CreateShader input, reused by both the one-shot --agc-probe check and
- * agc_geo_init(); LINK_A/B there are throwaway probe scratch. The real
+ * CreateShader input, reused by agc_geo_init(); LINK_A/B there are throwaway
+ * probe scratch. The real
  * render path needs its OWN persistent link storage (read every frame, like
  * OFF_MESH_LINK_CX/UC below) so a probe run can never clobber it. */
 #define OFF_BLIT_PS_HDR       0x30000u
 #define OFF_BLIT_PS_CODE      0x31000u
-#define OFF_BLIT_LINK_A       0x32000u   /* --agc-probe scratch only */
-#define OFF_BLIT_LINK_B       0x33000u   /* --agc-probe scratch only */
-#define OFF_BLIT_GEO_LINK_CX  0x34000u   /* persistent: agc_geo_init -> every geo-text frame */
+#define OFF_BLIT_LINK_A       0x32000u   /* one-shot probe scratch */
+#define OFF_BLIT_LINK_B       0x33000u   /* one-shot probe scratch */
+#define OFF_BLIT_GEO_LINK_CX  0x34000u   /* persistent: agc_geo_init -> every geo frame */
 #define OFF_BLIT_GEO_LINK_UC  0x35000u
 
 /* #28 Phase 4 geometry path - permanent homes, clear of the video path's
@@ -715,8 +708,8 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
     g_agc.stage_start = -1;
     g_agc.ovl_stage_start = -1;
 
-    /* sceAgcInit is not idempotent — a second call (e.g. after evo_agc_probe's
-     * gate) returns 0x8A6C0004 "already initialized". Only a hard failure to
+    /* sceAgcInit is not idempotent — a second call returns 0x8A6C0004
+     * "already initialized". Only a hard failure to
      * make the library usable matters, and CreateShader/LinkShaders below will
      * catch that; so log the rc and press on. */
     int32_t rc = sceAgcInit(&g_agc.state, 8);
@@ -787,144 +780,6 @@ int pp_agc_init(uint32_t width, uint32_t height, int hdr)
 int pp_agc_available(void)
 {
     return g_agc.ready;
-}
-
-/*
- * #28 Phase 1 go/no-go: does sceAgcCreateShader accept the hand-written UI
- * shaders paired with ProsperoLight's reused headers, and does
- * sceAgcLinkShaders work with primitive type 4 (triangle list)?
- *
- * Pure library calls - no DCB, no draw, no submit, no flip. Runs under
- * evo_agc_probe()'s fault guard, logs every rc to evo_boot.log. Needs
- * pp_agc_init() to have mapped g_agc.mem first. Changes no state.
- *
- * The pixel headers (pixel.header.bin) should work - each PS is a structural
- * subset of the NV12 PS. ui_vs against geometry.header.bin is the real
- * question (see the risk note in pp/shaders/ui_vs.s).
- */
-int pp_agc_probe_ui_shaders(void)
-{
-    if (!g_agc.mem) {
-        evo_boot_log("pp_agc UI: mem not mapped - run pp_agc_init first");
-        evo_boot_log_flush();
-        return -1;
-    }
-
-    uint8_t *m = g_agc.mem;
-    int bad = 0;
-    bad |= copy_asset(m + OFF_UI_VS_HDR,    0x1000, pp_agc_ui_vs_header_start,  pp_agc_ui_vs_header_end);
-    bad |= copy_asset(m + OFF_UI_PS_HDR,    0x1000, pp_agc_ui_ps_header_start,  pp_agc_ui_ps_header_end);
-    bad |= copy_asset(m + OFF_UI_VS_CODE,   0x1000, pp_agc_ui_vs_code_start,    pp_agc_ui_vs_code_end);
-    bad |= copy_asset(m + OFF_UI_PS_A_CODE, 0x1000, pp_agc_solid_ps_code_start, pp_agc_solid_ps_code_end);
-    bad |= copy_asset(m + OFF_UI_PS_B_CODE, 0x1000, pp_agc_glyph_ps_code_start, pp_agc_glyph_ps_code_end);
-    bad |= copy_asset(m + OFF_UI_PS_C_CODE, 0x1000, pp_agc_rgba_ps_code_start,  pp_agc_rgba_ps_code_end);
-    if (bad) {
-        evo_boot_log("pp_agc UI: blob copy failed");
-        evo_boot_log_flush();
-        return -1;
-    }
-
-    void *vs = 0, *ps_solid = 0, *ps_glyph = 0, *ps_rgba = 0;
-    int32_t c_vs    = sceAgcCreateShader(&vs,       m + OFF_UI_VS_HDR, m + OFF_UI_VS_CODE);
-    int32_t c_solid = sceAgcCreateShader(&ps_solid, m + OFF_UI_PS_HDR, m + OFF_UI_PS_A_CODE);
-    int32_t c_glyph = sceAgcCreateShader(&ps_glyph, m + OFF_UI_PS_HDR, m + OFF_UI_PS_B_CODE);
-    int32_t c_rgba  = sceAgcCreateShader(&ps_rgba,  m + OFF_UI_PS_HDR, m + OFF_UI_PS_C_CODE);
-
-    evo_boot_log("pp_agc UI: CreateShader ui_vs=0x%08x solid=0x%08x glyph=0x%08x rgba=0x%08x",
-                 (unsigned)c_vs, (unsigned)c_solid, (unsigned)c_glyph, (unsigned)c_rgba);
-    evo_boot_log("pp_agc UI:   vs=%p solid=%p glyph=%p rgba=%p", vs, ps_solid, ps_glyph, ps_rgba);
-    evo_boot_log_flush();
-
-    /* LinkShaders(..., 4 == PrimitiveTriangleList) - only where both halves
-     * were created. */
-    if (c_vs == 0 && c_solid == 0) {
-        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_solid, 4);
-        evo_boot_log("pp_agc UI: LinkShaders ui_vs+solid (TriList) = 0x%08x", (unsigned)l);
-    }
-    if (c_vs == 0 && c_glyph == 0) {
-        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_glyph, 4);
-        evo_boot_log("pp_agc UI: LinkShaders ui_vs+glyph (TriList) = 0x%08x", (unsigned)l);
-    }
-    if (c_vs == 0 && c_rgba == 0) {
-        int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, vs, ps_rgba, 4);
-        evo_boot_log("pp_agc UI: LinkShaders ui_vs+rgba (TriList) = 0x%08x", (unsigned)l);
-    }
-
-    /* #28 Phase 4: SharpProspero's compiler-generated mesh_vs / mesh_ps. */
-    if (copy_asset(m + OFF_UI_SPLICE_A + 0x0000, 0x1000, pp_agc_spvs_header_start, pp_agc_spvs_header_end) == 0 &&
-        copy_asset(m + OFF_UI_SPLICE_A + 0x1000, 0x1000, pp_agc_spvs_code_start,   pp_agc_spvs_code_end)   == 0 &&
-        copy_asset(m + OFF_UI_SPLICE_A + 0x2000, 0x1000, pp_agc_spps_header_start, pp_agc_spps_header_end) == 0 &&
-        copy_asset(m + OFF_UI_SPLICE_A + 0x3000, 0x1000, pp_agc_spps_code_start,   pp_agc_spps_code_end)   == 0) {
-        void *spvs = 0, *spps = 0;
-        int32_t c_v = sceAgcCreateShader(&spvs, m + OFF_UI_SPLICE_A + 0x0000, m + OFF_UI_SPLICE_A + 0x1000);
-        int32_t c_p = sceAgcCreateShader(&spps, m + OFF_UI_SPLICE_A + 0x2000, m + OFF_UI_SPLICE_A + 0x3000);
-        evo_boot_log("pp_agc UI: CreateShader sp_mesh_vs=0x%08x sp_mesh_ps=0x%08x  (v=%p p=%p)",
-                     (unsigned)c_v, (unsigned)c_p, spvs, spps);
-        if (c_v == 0 && c_p == 0) {
-            int32_t l = sceAgcLinkShaders(m + OFF_UI_LINK_A, m + OFF_UI_LINK_B, 0, spvs, spps, 4);
-            evo_boot_log("pp_agc UI: LinkShaders sp_mesh_vs+sp_mesh_ps (TriList) = 0x%08x", (unsigned)l);
-        }
-        evo_boot_log_flush();
-    }
-
-    /* #67: blit_ps - a REAL compiler-emitted textured PS this time (ripped,
-     * not hand-written), paired with g_agc.vs (the already-created,
-     * hardware-proven fullscreen-quad VS from pp_agc_init - not re-created
-     * here). If this creates+links where every hand-written textured PS
-     * above failed 0x8a6c001f, it's the #67 fix: composite the RmlUi text/
-     * icon surface onto the GPU solids via this shader instead of abusing
-     * the NV12 path. */
-    if (g_agc.vs &&
-        copy_asset(m + OFF_BLIT_PS_HDR,  0x1000, pp_agc_blit_ps_header_start, pp_agc_blit_ps_header_end) == 0 &&
-        copy_asset(m + OFF_BLIT_PS_CODE, 0x1000, pp_agc_blit_ps_code_start,   pp_agc_blit_ps_code_end)   == 0) {
-        void *ps_blit = 0;
-        int32_t c_blit = sceAgcCreateShader(&ps_blit, m + OFF_BLIT_PS_HDR, m + OFF_BLIT_PS_CODE);
-        evo_boot_log("pp_agc UI: CreateShader blit_ps=0x%08x  (ps=%p)",
-                     (unsigned)c_blit, ps_blit);
-        if (c_blit == 0) {
-            /* TriangleStrip (6), matching g_agc.vs's real topology - not the
-             * TriList (4) the hand-written UI probes above use. */
-            int32_t l = sceAgcLinkShaders(m + OFF_BLIT_LINK_A, m + OFF_BLIT_LINK_B, 0,
-                                          g_agc.vs, ps_blit, 6);
-            evo_boot_log("pp_agc UI: LinkShaders geometry_vs+blit_ps (TriStrip) = 0x%08x",
-                         (unsigned)l);
-
-            /* Diagnostic only, no draw: where did the compiler put blit_ps's
-             * texture (kind 1) and sampler (kind 2) resources? bind_pixel_source
-             * hardcodes SH 0x0c for the NV12 PS (a DIFFERENT compiled shader) -
-             * that base is not safe to assume here. Read it back instead of
-             * guessing before writing any real binding code (#67 real
-             * compositing pass, next step). kind 0=CB, 3=buffer, logged too for
-             * completeness. */
-            for (unsigned kind = 0; kind < 4; kind++) {
-                uint32_t off = 0xffffffffu;
-                int32_t r = shader_resource_offset(ps_blit, kind, &off);
-                evo_boot_log("pp_agc UI: blit_ps resource kind=%u -> rc=%d off=0x%x",
-                             kind, r, (unsigned)off);
-            }
-        }
-        evo_boot_log_flush();
-    } else {
-        evo_boot_log("pp_agc UI: blit_ps probe skipped (g_agc.vs=%p)", g_agc.vs);
-        evo_boot_log_flush();
-    }
-
-    /*
-     * Hardware result (2026-09-04, four --agc-probe runs): ui_vs + solid_ps
-     * create + link (TriList) clean. Every textured PS - image_sample OR typed
-     * buffer_load_format, hand-written OR spliced onto the reference NV12 body's
-     * exact trailer - fails 0x8a6c001f. sceAgcCreateShader validates the code
-     * body against the "sl00" resource-metadata block whenever a memory
-     * resource is touched, and ProsperoLight only ships headers for its
-     * NV12/P010 shaders. => the solid GPU path is hand-writable; textured UI
-     * (text, icons, art) needs a compiler that emits header+code+sl00 as a
-     * matched set (GLSL -> SPIR-V -> AMD ISA; agc-implementation.md §7).
-     * blit_ps result: see the CreateShader/LinkShaders log lines just above -
-     * update this comment once a real hardware run reports back.
-     */
-    evo_boot_log("pp_agc UI: probe done (no state changed)");
-    evo_boot_log_flush();
-    return (c_vs == 0 && c_solid == 0) ? 0 : -1;
 }
 
 /* ===================================================================== *
@@ -2163,7 +2018,7 @@ int pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target,
 }
 
 /* #28 Phase 3: opt-in gate for the GPU menu present path (linear menu VO +
- * pp_agc_present_ui). Default --agc-probe build keeps the CPU-tiled menu VO. */
+ * pp_agc_present_ui). Off by default; the default build keeps the CPU-tiled menu VO. */
 int pp_agc_ui_ready(void)
 {
     static int e = -1;
@@ -2278,7 +2133,6 @@ void pp_agc_shutdown(void)
 
 int  pp_agc_init(uint32_t w, uint32_t h, int hdr) { (void)w; (void)h; (void)hdr; return -1; }
 int  pp_agc_available(void) { return 0; }
-int  pp_agc_probe_ui_shaders(void) { return -1; }
 int  pp_agc_present_nv12(int vh, uint32_t bi, void *gt, const void *n, uint32_t p,
                          uint32_t ch, uint32_t vw, uint32_t vh2, uint32_t ow,
                          uint32_t oh, int64_t m)

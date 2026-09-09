@@ -4,7 +4,7 @@
  * sceVideodec2 hardware-decode backend (evo_vdec_native.c).
  *
  * Native-decode plan Phase 4 (#31). The backend is a near-verbatim port of the
- * hardware-verified bring-up in projects/evoplayer/src/evo_videodec2_probe.c —
+ * hardware-verified sceVideodec2 bring-up proven in the PPSA99039 player —
  * see docs/evo-pro/videodec2-abi.md.
  *
  * Everything here is a hard stub on host + payload builds: evo_vdec_native.c

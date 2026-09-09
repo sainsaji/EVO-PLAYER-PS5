@@ -261,8 +261,9 @@ int pp_videoout_init(pp_videoout *vo,
     (void)sceVideoOutSetFlipRate(vo->handle, vo->flip_rate);
 
     /*
-     * #27 plan A: when the sceAgc GPU present path is armed (--agc-probe only;
-     * pp_agc_available() is 0 in the default .ffpfsc and on host) AND this is the
+     * #27 plan A: when the sceAgc GPU present path is available (default-on in
+     * the app module; pp_agc_available() is 0 on host / on any sceAgc failure)
+     * AND this is the
      * UHD playback VO, register with ProsperoLight's linear SDR attribute.
      * render_frame's whole matched set - RT bits, YUV->RGB coefficients, MRT0
      * export order - is tuned to that layout; against EVO's CPU-tiler attribute

@@ -9,7 +9,7 @@
 #
 #   PS5_HOST=192.168.0.6 ./tools/evo-remote.sh <subcommand>
 #
-#   build [--probe|--videodec2-probe ...]   package --usb-remote + deploy .ffpfsc
+#   build [--breadcrumbs ...]               package --usb-remote + deploy .ffpfsc
 #   kill                                    SIGKILL the running eboot (app_ctl)
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek

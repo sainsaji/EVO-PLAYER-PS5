@@ -1,5 +1,8 @@
 # Phase 1b — repackage EVO Player as a game-category app module
 
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
 > **Status (2026-09-03): Milestone 1 COMPLETE — EVO Player runs *and plays* as
 > `PPSA99039`.** Tasks 1–7 ✅; **task 8 fixed** — the file-open crash was
 > `posix_fadvise()` faulting SIGSYS-class from the app sandbox

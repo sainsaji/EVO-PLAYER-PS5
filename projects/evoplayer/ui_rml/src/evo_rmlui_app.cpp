@@ -159,8 +159,9 @@ int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target
         return 1;
     m_agc_geo_pending = false;
     /* m_surface = this frame's CPU text/icon layer (premultiplied, cleared to
-     * transparent in RenderCachedScreen before the diverted render). pp_agc.c
-     * only uses it when /mnt/usb0/evo_agc_geo_text is set. */
+     * transparent in RenderCachedScreen before the diverted render). The
+     * text-over-geo composite in pp_agc.c is dead code (PP_AGC_GEO_TEXT 0);
+     * the geo path itself is retired in the OpenGL render overhaul (GL-3). */
     const uint32_t* text = (m_surface_w == (int)out_w && m_surface_h == (int)out_h &&
                             !m_surface.empty()) ? m_surface.data() : nullptr;
     return pp_agc_present_geo(vout_handle, buf_idx, gpu_target, target_linear,

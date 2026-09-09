@@ -6,12 +6,11 @@
 #                                             player (Phase 1b task 4+)
 #   ./scripts/package-app.sh --probe          build the sandbox probe instead
 #   ./scripts/package-app.sh --rebuild-libc   force-regenerate the runtime shim
-#   ./scripts/package-app.sh --agc-probe      + boot-time sceAgc reachability
-#                                             recon (GPU rendering Step 2 gate)
-#   ./scripts/package-app.sh --avplayer-probe + libSceAvPlayer gate (Route A — DEAD)
-#   ./scripts/package-app.sh --videodec2-probe + sceVideodec2 gate (Route B, the one)
 #   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
 #                                             ProsperoLight (needs MkPFS)
+#   ./scripts/package-app.sh --usb-remote     + the scriptable FTP dev remote
+#                                             (/mnt/usb0/evo_cmd + evo_status +
+#                                             verbose vdec log) — off in release
 #   ./scripts/package-app.sh --breadcrumbs    + boot-trace notification
 #                                             popups (#51, off by default —
 #                                             klog carries these otherwise)
@@ -30,28 +29,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 MODE="player"
 REBUILD_LIBC=0
-AGC_PROBE=0
-AVPLAYER_PROBE=0
-VIDEODEC2_PROBE=0
 FFPFSC=0
 USB_REMOTE=0
-GEO_TEXT=0
-SHADER_SCAN=0
 BREADCRUMBS=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
-        --agc-probe)    AGC_PROBE=1 ;;
-        --avplayer-probe) AVPLAYER_PROBE=1 ;;
-        --videodec2-probe) VIDEODEC2_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
-        --geo-text)     GEO_TEXT=1 ;;     # #28/#67: compile the GPU text 2nd-pass into agc_render_geo
-        --shader-scan)  SHADER_SCAN=1 ;;  # #67: rip PSSL shader blobs from loaded modules -> /mnt/usb0
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
-        -h|--help)      sed -n '2,17p' "$0"; exit 0 ;;
+        -h|--help)      sed -n '2,16p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -60,13 +49,8 @@ done
 if ! in_container; then
     FWD=(--"${MODE}")
     (( REBUILD_LIBC )) && FWD+=(--rebuild-libc)
-    (( AGC_PROBE ))    && FWD+=(--agc-probe)
-    (( AVPLAYER_PROBE )) && FWD+=(--avplayer-probe)
-    (( VIDEODEC2_PROBE )) && FWD+=(--videodec2-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
-    (( GEO_TEXT ))     && FWD+=(--geo-text)
-    (( SHADER_SCAN ))  && FWD+=(--shader-scan)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
@@ -224,10 +208,6 @@ if [[ "${MODE}" == "probe" ]]; then
     PROBE_SRCS=("${REPO_ROOT}/projects/sandbox_probe/main.c"
                "${REPO_ROOT}/projects/common/src/evo_notify.c")
     PROBE_DEFS=()
-    if (( VIDEODEC2_PROBE )); then
-        PROBE_SRCS+=("${REPO_ROOT}/projects/evoplayer/src/evo_videodec2_probe.c")
-        PROBE_DEFS+=(-DEVO_VIDEODEC2_PROBE=1)
-    fi
     for src in "${PROBE_SRCS[@]}"; do
         obj="${BUILD}/obj/$(echo "${src#"${REPO_ROOT}/"}" | tr '/.' '__').o"
         "${TCC}" -std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter \
@@ -258,22 +238,10 @@ else
     # this generated header - drop main.o so the id on screen is always current.
     rm -f "${EVO}/main.o"
     APP_DEFS="-DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
-    (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
-    (( AVPLAYER_PROBE )) && APP_DEFS+=" -DEVO_AVPLAYER_PROBE=1"
-    (( VIDEODEC2_PROBE )) && APP_DEFS+=" -DEVO_VIDEODEC2_PROBE=1"
     # --usb-remote: the scriptable dev remote (evo_usb_remote.c) + the verbose
     # /mnt/usb0/evo_vdec.log append in evo_vdec_native.c's note(). Off by
     # default so a release eboot never touches the user's USB stick per frame.
     (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1 -DEVO_VDEC_LOG=1"
-    # --geo-text (#28/#67): compile the GPU text/icon 2nd-pass into agc_render_geo.
-    # Was default-off after a load crash bisected to "agc_render_geo size" - that
-    # turned out to be the <iostream> static-init crash (#71, fixed df7cbf2), so
-    # this is worth re-testing. Still runtime-gated by /mnt/usb0/evo_agc_geo_text.
-    (( GEO_TEXT )) && APP_DEFS+=" -DPP_AGC_GEO_TEXT=1"
-    # --shader-scan (#67): rip PSSL shader blobs from EVO's loaded system modules
-    # to /mnt/usb0/evo_shaders/ at boot (need a working RGBA-sampling pixel
-    # shader; the sl00 reflection trailer only ships in real compiler output).
-    (( SHADER_SCAN )) && APP_DEFS+=" -DEVO_SHADER_SCAN=1"
     # --breadcrumbs (#51): bring back the on-screen boot-trace notification
     # popups (evo_bt / evo_boot_log). Off by default - klog
     # (tools/klog.sh) carries the same lines unconditionally in the app
@@ -376,11 +344,10 @@ PRX_STUB_WANT=()
 # that; EVO must do the same or libSceVideodec2 loads broken.
 # The native decode backend (media/src/evo_vdec_native.c, #31) is compiled into
 # every MODE == player eboot, so libSceVideodec2 + its GPU-driver deps must be
-# positional DT_NEEDED unconditionally now - not just under --videodec2-probe.
-if [[ "${MODE}" == "player" ]] || (( VIDEODEC2_PROBE )); then
+# positional DT_NEEDED.
+if [[ "${MODE}" == "player" ]]; then
     PRX_STUB_WANT+=(libSceVideodec2 libSceAgc libSceAgcDriver)
 fi
-(( AVPLAYER_PROBE ))  && PRX_STUB_WANT+=(libSceAvPlayer)
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"
     mkdir -p "${BUILD}/stubs"
@@ -409,21 +376,16 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         csrc="${BUILD}/stubs/${base}.c"
         grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
 
-        # dead-import guard (skip lines annotated `# keep:` and, for a probe-only
-        # module, when its probe is off - its objects are not in this build)
-        probe_only=0
-        [[ "${base}" == libSceAvPlayer ]] && (( ! AVPLAYER_PROBE )) && probe_only=1
-        if (( ! probe_only )); then
-            while read -r sym rest; do
-                [[ "${rest}" == *"# keep:"* ]] && continue
-                grep -qxF "${sym}" "${OBJ_UNDEF}" && continue
-                warn "PRX stub ${base}.syms: '${sym}' is not imported by any object"
-                echo "       -> a dead positional import; if its NID is absent on"
-                echo "          firmware the loader rejects the module at load."
-                echo "          Remove it, or annotate the line with '# keep: <why>'."
-                dead_total=$((dead_total + 1))
-            done < <(grep -vE '^\s*(#|$)' "${syms}")
-        fi
+        # dead-import guard (skip lines annotated `# keep:`)
+        while read -r sym rest; do
+            [[ "${rest}" == *"# keep:"* ]] && continue
+            grep -qxF "${sym}" "${OBJ_UNDEF}" && continue
+            warn "PRX stub ${base}.syms: '${sym}' is not imported by any object"
+            echo "       -> a dead positional import; if its NID is absent on"
+            echo "          firmware the loader rejects the module at load."
+            echo "          Remove it, or annotate the line with '# keep: <why>'."
+            dead_total=$((dead_total + 1))
+        done < <(grep -vE '^\s*(#|$)' "${syms}")
 
         "${TCC}" -shared -nostdlib -nodefaultlibs -fPIC \
             -Wl,-soname,"${base}.sprx" -o "${so}" "${csrc}"

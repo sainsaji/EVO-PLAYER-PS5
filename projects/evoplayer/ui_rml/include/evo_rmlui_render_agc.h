@@ -16,7 +16,7 @@
  * untransformed draws here instead of CPU-rasterising them.
  *
  * Everything here is host-safe (plain std::vector); the GPU present is behind
- * EVO_APP_MODULE + --agc-probe + /mnt/usb0/evo_agc_ui in pp_agc.c.
+ * EVO_APP_MODULE + /mnt/usb0/evo_agc_ui in pp_agc.c.
  */
 #include <RmlUi/Core/Vertex.h>
 #include <RmlUi/Core/Types.h>

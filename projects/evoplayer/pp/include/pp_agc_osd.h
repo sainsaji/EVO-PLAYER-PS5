@@ -50,7 +50,7 @@ int  pp_agc_osd_active(void);
 
 /*
  * Opt-in gate for the whole GPU-OSD path. Until #28 Phase 2 is hardware-proven
- * the default --agc-probe build presents video-only (the #27 path); the OSD
+ * the default build presents video-only (the #27 path); the OSD
  * compositor engages only when /mnt/usb0/evo_agc_osd (or env EVO_AGC_OSD) is
  * present. Checked once, cached.
  */

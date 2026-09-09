@@ -119,10 +119,6 @@ int sceAudioOutSetVolume(int handle, int flag, const int *vol);
 #define HEIGHT 1080
 
 #include "evo_boot_trace.h"   /* Phase 1b app-module bring-up breadcrumbs */
-#include "evo_agc_probe.h"    /* -DEVO_AGC_PROBE: boot-time sceAgc recon */
-#include "evo_avplayer_probe.h" /* -DEVO_AVPLAYER_PROBE: sceAvPlayer Route A gate */
-#include "evo_shader_scan.h"  /* -DEVO_SHADER_SCAN: rip shader blobs from loaded modules (#67) */
-#include "evo_videodec2_probe.h" /* -DEVO_VIDEODEC2_PROBE: sceVideodec2 Route B gate */
 #include "evo_jailbreak.h"    /* EVO_APP_MODULE: self-unjail via etaHEN IPC */
 #include "evo_usb_remote.h"   /* -DEVO_USB_REMOTE: scriptable dev remote (no-op otherwise) */
 #include "evo_boot_log.h"     /* pre-unjail diagnostics -> /mnt/usb0/evo_boot.log */
@@ -12089,19 +12085,11 @@ int main(void) {
     evo_bt("BUILD " EVO_BUILD_ID);   /* first thing on screen — catches a stale mount */
 #endif
     evo_bt("main() entry");
-    /* Route B probe BEFORE the self-unjail. The minimal sandbox_probe eboot
-     * (which never unjails) decoded a frame; the full player (which unjails
-     * first) can't call libSceVideodec2. The mid-run credential swap in
-     * evo_jailbreak_self() is the prime suspect for poisoning
-     * sceSysmoduleLoadModule. The probe uses a bundled AU, so it needs no
-     * filesystem access and can run pre-unjail. */
-    evo_videodec2_probe();  /* no-op unless -DEVO_VIDEODEC2_PROBE — Route B, bundled AU */
-    evo_vdec_probe();       /* app module: preload libSceVideodec2 for the native decode backend
-                             * (#31). MUST be here — before the self-unjail poisons sysmodule 207.
-                             * No-op returning 0 on host + payload. */
-    evo_agc_probe();        /* no-op unless -DEVO_AGC_PROBE. Before the unjail too — if
-                             * libSceAgc behaves like libSceVideodec2 (API dead post-unjail),
-                             * sceAgcInit must run first (#27). */
+    /* Preload libSceVideodec2 BEFORE the self-unjail: the mid-run credential
+     * swap in evo_jailbreak_self() poisons sceSysmoduleLoadModule(207), so the
+     * native decode backend (#31) must resolve its module first. No-op
+     * returning 0 on host + payload. */
+    evo_vdec_probe();
 #if defined(EVO_APP_MODULE)
     /* #27 GPU Step 2: arm the sceAgc NV12 convert + present path. DEFAULT-ON
      * as of 2026-09-04 - the 2026-09-03 submit hang was fixed in #27 (watchdog
@@ -12113,16 +12101,12 @@ int main(void) {
      * the VO and resumes on the CPU path. The OSD-over-4K composite and the
      * GPU menu geometry stay behind their own /mnt/usb0/evo_agc_* hooks.
      * MUST be pre-unjail (like evo_vdec_probe - libSceAgc may go API-dead after
-     * the credential swap). Under --agc-probe, evo_agc_probe() above already
-     * ran this; the call is idempotent. */
+     * the credential swap). */
     pp_agc_init(1920, 1080, 0);
     evo_boot_log_flush();
 #endif
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
-    evo_boot_log_flush();   /* sandbox open now — dump the pre-unjail probe results to USB */
-    evo_avplayer_probe();   /* no-op unless -DEVO_AVPLAYER_PROBE — runs after unjail (needs /data) */
-    evo_shader_scan();      /* no-op unless -DEVO_SHADER_SCAN — rip shader blobs to /mnt/usb0 (#67) */
-    evo_boot_log_flush();
+    evo_boot_log_flush();   /* sandbox open now — flush the pre-unjail trace to USB */
 #ifdef EVO_APP_MODULE
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);

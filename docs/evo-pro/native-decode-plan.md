@@ -1,5 +1,8 @@
 # Native hardware decode — integration plan
 
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
 > **Status (2026-09-03):** **Phase 4 DONE — #31 closed.** GTA VI 4K H.264 plays
 > real-time on `sceVideodec2` inside `PPSA99039` (`be=1` NATIVE, `pos` climbs
 > 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the

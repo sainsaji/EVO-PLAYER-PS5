@@ -39,9 +39,14 @@ docker compose run --rm ps5-dev bash -lc '
   ./scripts/deploy-app.sh --ffpfsc'
 ```
 
-- Add `--agc-probe` only for #27 GPU Step 2 work (boot `sceAgc` recon + `P8_*`
-  breadcrumbs). Plain `--ffpfsc` otherwise — the self-unjail + `EVO_APP_MODULE`
-  + boot trace are always on.
+- Flags: `--ffpfsc` (the image), `--usb-remote` (the scriptable FTP dev
+  remote + verbose vdec log), `--breadcrumbs` (on-screen boot popups),
+  `--rebuild-libc`. The self-unjail + `EVO_APP_MODULE` + `sceAgc` present +
+  boot trace are always on. (The `--agc-probe` / `--videodec2-probe` /
+  `--avplayer-probe` / `--geo-text` / `--shader-scan` probe flags were removed
+  2026-09-09.)
+- `deploy-app.sh --ffpfsc` DELETEs every `/mnt/usb0/evo_*` + `pp_4k_stage_*`
+  file, so each launch starts with a fresh log set.
 - **Before deploying, check the console is up:** `nc -w4 -vz $PS5_HOST 2121`.
   Timeout → stop; the console is off / rest mode / jailbreak lapsed.
 - Deploy FTPs `PPSA99039.ffpfsc` to `/data/homebrew/`. The user's

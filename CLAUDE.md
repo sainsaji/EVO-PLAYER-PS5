@@ -62,8 +62,8 @@ the dependency-ordered plan; each issue body also carries its own
 ```bash
 # DEPLOY - the ONLY hardware path (app module, PPSA99039)
 docker compose run --rm ps5-dev bash -lc '
-  ./scripts/package-app.sh --ffpfsc     # add --agc-probe only for #27 GPU Step 2
-  ./scripts/deploy-app.sh --ffpfsc'
+  ./scripts/package-app.sh --ffpfsc     # + --usb-remote for the FTP dev remote
+  ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
 # ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
 # Diagnostics = on-screen notification popups (+ klog for -DEVO_APP_MODULE).

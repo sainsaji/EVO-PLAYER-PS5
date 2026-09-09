@@ -1,5 +1,8 @@
 # libSceAvPlayer — ABI reference and spike plan (Route A)
 
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
 **Status: Phase 0 done; Phase 2 gate ran on hardware 2026-09-03 — BLOCKED at
 module load.** This is the native-decode plan's **Route A** (`sceAvPlayer` —
 hardware demux + decode + A/V sync in one API). Header:

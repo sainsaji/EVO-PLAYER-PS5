@@ -116,10 +116,6 @@ MEDIA_SRCS := \
     src/evo_data_path.c \
     src/evo_readdir.c \
     src/evo_boot_log.c \
-    src/evo_agc_probe.c \
-    src/evo_avplayer_probe.c \
-    src/evo_videodec2_probe.c \
-    src/evo_shader_scan.c \
     src/evo_usb_remote.c \
     src/evo_jailbreak.c
 

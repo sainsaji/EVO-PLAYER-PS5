@@ -1,6 +1,6 @@
 /*
  * evo_boot_log.h — capture boot-time diagnostics that happen BEFORE the
- * sandbox is unjailed (evo_agc_probe, evo_vdec_probe, the jailbreak result
+ * sandbox is unjailed (evo_vdec_probe, pp_agc_init, the jailbreak result
  * itself), so they can be pulled off the console as a file instead of
  * screenshotted one notification at a time.
  *

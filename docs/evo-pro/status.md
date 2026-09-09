@@ -1,5 +1,8 @@
 # EVO Pro — status & next actions
 
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
 > **Purpose:** point an AI (or yourself) here when console access is available.
 > It says exactly what to run, what each result means, and where to go next.
 > Last updated **2026-09-04**. Branch: **`feat/28-gpu-ui`** (off `refactor/main-c-media-modules`).
