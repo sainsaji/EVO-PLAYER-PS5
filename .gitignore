@@ -88,6 +88,13 @@ third_party/ProsperoLight/
 # its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.
 third_party/SharpProspero/
 
+# Local reference clones: blackbearreloaded PS5 research repos (OpenGL/Mesa
+# Gallium port, audio decoding + AJM offload, GPU/sceAgc internals). Studied for
+# #27/#28 (GPU) and the audio pipeline. Kept on disk, never committed.
+third_party/ps5-opengl/
+third_party/ps5-audio-decoding-research/
+third_party/ps5-gpu-research/
+
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson
 # -----------------------------------------------------------------------------
