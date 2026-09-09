@@ -89,11 +89,14 @@ third_party/ProsperoLight/
 third_party/SharpProspero/
 
 # Local reference clones: blackbearreloaded PS5 research repos (OpenGL/Mesa
-# Gallium port, audio decoding + AJM offload, GPU/sceAgc internals). Studied for
-# #27/#28 (GPU) and the audio pipeline. Kept on disk, never committed.
+# Gallium port, audio decoding + AJM offload, GPU/sceAgc internals, hardware
+# video decoding — H.264/HEVC/VP9/HDR on libSceVideodec2, FW 6.02 + 12.70).
+# Studied for the render overhaul (#77–#82), native decode (#41), and audio.
+# Kept on disk, never committed.
 third_party/ps5-opengl/
 third_party/ps5-audio-decoding-research/
 third_party/ps5-gpu-research/
+third_party/ps5-hardware-video-decoding-research/
 
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson
