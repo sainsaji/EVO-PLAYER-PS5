@@ -22,6 +22,7 @@
 #include "evo_gl_context.h"
 
 #include <cstdlib>
+#include <cstring>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -172,10 +173,9 @@ const char *k_blit_vs =
 const char *k_blit_fs =
     "#version 330 core\n"
     "in vec2 vUV; out vec4 c; uniform sampler2D uTex;\n"
-    /* EVO's rasteriser output is BGRA-in-memory (the sceVideoOut plane format);
-     * uploaded as GL_RGBA the sampler hands back B,G,R - swizzle .bgr back to
-     * R,G,B. (B1's glClearColor path takes explicit floats, no texture, hence
-     * it looked right regardless.) */
+    /* Immutable single-mip RGBA8 storage (glTexStorage2D) is ps5-opengl's fast
+     * texture path (its G13 note). EVO's buffer is BGRA-in-memory, so upload it
+     * as GL_RGBA and swizzle .bgr in the sampler. */
     "void main(){ c = vec4(texture(uTex, vUV).bgr, 1.0); }\n";
 
 GLuint blit_compile(GLenum type, const char *src)
@@ -210,12 +210,7 @@ bool blit_init(void)
     }
     glDeleteShader(vs); glDeleteShader(fs);
     glGenVertexArrays(1, &g_blit_vao);   /* attribute-less; VAO still required in core */
-    glGenTextures(1, &g_blit_tex);
-    glBindTexture(GL_TEXTURE_2D, g_blit_tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenTextures(1, &g_blit_tex);       /* storage allocated lazily in the blit */
     evo_bt_("GL blit: initialised");
     return true;
 }
@@ -231,14 +226,23 @@ extern "C" void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
 
     glBindTexture(GL_TEXTURE_2D, g_blit_tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
     if (w != g_blit_tw || h != g_blit_th) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0,
-                     GL_RGBA, GL_UNSIGNED_BYTE, fb);
+        /* Immutable single-mip RGBA8 storage - ps5-opengl's least-slow texture
+         * path (its "G13"). It still does a CPU staging copy on the upload
+         * (~68 ms for 1080p on G47) - the video stutters until that's fixed
+         * driver-side or the video path switches to a zero-copy / smaller
+         * upload (GL-4). Re-create on a resolution change. */
+        if (g_blit_tw) { glDeleteTextures(1, &g_blit_tex); glGenTextures(1, &g_blit_tex); }
+        glBindTexture(GL_TEXTURE_2D, g_blit_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
         g_blit_tw = w; g_blit_th = h;
-    } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h,
-                        GL_RGBA, GL_UNSIGNED_BYTE, fb);
     }
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, fb);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, g_w, g_h);

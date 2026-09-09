@@ -495,6 +495,23 @@ static void pp_product_request_vo(uint32_t w, uint32_t h, uint32_t buffers,
                                   pp_video_backend backend,
                                   uint32_t out_w, uint32_t out_h)
 {
+#if defined(EVO_GL_DEVICE)
+    /* GL-3 (#79) B3: no VideoOut - ps5-opengl owns it. The CPU converter always
+     * targets 1080 into pp_playback's `display` buffer; the render loop blits
+     * that as a GL texture and the quad scales to the panel. 4K goes through the
+     * converter's downscale for now (GL-4 replaces it with a full-res GLSL NV12
+     * sampler). No VO reconfig, no V8/V3 backend, no decode gate to juggle. */
+    (void)w; (void)h; (void)buffers; (void)backend; (void)out_w; (void)out_h;
+    g_pp_backend = PP_BACKEND_1080_STANDARD;
+    pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
+    pp_playback_set_output(&g_pp_pb, (uint32_t)WIDTH, (uint32_t)HEIGHT, PP_ASPECT_FIT);
+    g_vo_decode_gate = 1;
+    g_pending_vo_reconfig = 0;
+    g_4k_diag_active = 0;
+    g_4k_suppress_audio = 0;
+    g_4k_suppress_ui = 0;
+    return;
+#else
     int size_change;
 
     g_pending_vo_w = w;
@@ -530,6 +547,7 @@ static void pp_product_request_vo(uint32_t w, uint32_t h, uint32_t buffers,
                  w, h, buffers, (int)backend, size_change);
         pp_stage_bc_checkpoint("005B_VO_RECONFIG_QUEUED", d);
     }
+#endif /* !EVO_GL_DEVICE */
 }
 
 static void pp_product_apply_pending_vo(void)
@@ -12420,7 +12438,9 @@ int main(void) {
          * calls set the UI-dirty flag from this frame's input); it only
          * *renders* on a redraw frame. gl_active decided once here. */
         int idx = 0; (void)idx;
-        int gl_active = evo_rmlui_gl_needs_frame();
+        /* B3: the player screen always redraws (the video frame changes every
+         * tick); menus are change-gated. */
+        int gl_active = (screen == SCREEN_PLAYER) || evo_rmlui_gl_needs_frame();
         evo_rmlui_gl_set_active(gl_active);
         if (gl_active)
             evo_gl_frame_begin();
@@ -13201,20 +13221,6 @@ skip_screen_input:
         }
 #endif
 
-#if defined(EVO_GL_DEVICE)
-        /* GL-3 (#79) B2: the player present path is B3. Bounce any player-family
-         * screen back to the browser so the menu-only cutover is what runs. */
-        if (screen == SCREEN_PLAYER || screen == SCREEN_SUBTITLE_PICKER ||
-            screen == SCREEN_EXIT_CONFIRM || screen == SCREEN_PLAYBACK_FINISHED) {
-            static int s_gl_player_toast;
-            if (!s_gl_player_toast) {
-                toast("GL-3 B2", "player present is B3 - menus only");
-                s_gl_player_toast = 1;
-            }
-            screen = SCREEN_USB_BROWSER;
-            evo_nav_reset((evo_screen_id)screen);
-        }
-#endif
 
 #if defined(EVO_GL_DEVICE)
         uint64_t _gl_disp_t0 = gl_active ? (uint64_t)now_ms() : 0;
@@ -13307,6 +13313,9 @@ skip_screen_input:
             draw_exit_confirm_screen(linear);
         }
         else if (screen == SCREEN_PLAYBACK_FINISHED) {
+#if defined(EVO_GL_DEVICE)
+            draw_playback_finished_screen(linear);   /* no VO to wait on */
+#else
             /* Wait one frame if 1080 restore still pending */
             if (g_vo_w == 1920u && g_vo_h == 1080u)
                 draw_playback_finished_screen(linear);
@@ -13316,10 +13325,15 @@ skip_screen_input:
                 for (size_t i = 0; i < n; i++)
                     linear[i] = 0xFF000000u;
             }
+#endif
         }
         else
             draw_menu_linear(linear);
 
+#if defined(EVO_GL_DEVICE)
+        uint64_t _gl_scr_ms = (screen == SCREEN_PLAYER)
+                              ? (uint64_t)now_ms() - _gl_disp_t0 : 0;
+#endif
         /* Virtual Keyboard modal overlay */
         if (evo_keyboard_is_open())
             evo_screen_keyboard(linear);
@@ -13329,6 +13343,24 @@ skip_screen_input:
             draw_prospero_toast(linear);
 
         draw_fps_overlay(linear);
+#if defined(EVO_GL_DEVICE)
+        if (screen == SCREEN_PLAYER) {
+            static uint64_t s_pf_t0, s_pf_n, s_pf_scr, s_pf_ovl;
+            uint64_t _now2 = (uint64_t)now_ms();
+            s_pf_n++;
+            s_pf_scr += _gl_scr_ms;
+            s_pf_ovl += (_now2 - _gl_disp_t0) - _gl_scr_ms;
+            if (!s_pf_t0) s_pf_t0 = _now2;
+            if (_now2 - s_pf_t0 >= 2000 && s_pf_n) {
+                evo_bt("GL-3 player: draw_player_screen~%llums overlays~%llums (n=%llu)",
+                       (unsigned long long)(s_pf_scr / s_pf_n),
+                       (unsigned long long)(s_pf_ovl / s_pf_n),
+                       (unsigned long long)s_pf_n);
+                evo_boot_log_flush();
+                s_pf_t0 = _now2; s_pf_n = s_pf_scr = s_pf_ovl = 0;
+            }
+        }
+#endif
 
         /* EVO: screenshot. Taken here, after everything has been drawn into
          * the linear staging buffer but before it is swizzled and flipped,
@@ -13352,8 +13384,9 @@ skip_screen_input:
         if (evo_screenshot_request) {
             evo_screenshot_request = 0;
 #if defined(EVO_GL_DEVICE)
-            /* GL-3 (#79) B2: the menu is on fb 0, not in `linear`. Read it back. */
-            if (linear)
+            /* Mode A: gl_scratch already holds the composited frame. Mode B:
+             * RmlUi rendered to fb 0 - read it back. */
+            if (linear && !evo_rmlui_gl_blit_mode())
                 evo_gl_read_default_fb(linear, (int)WIDTH, (int)HEIGHT);
             int shot_rc = evo_screenshot_write(linear, (int)WIDTH, (int)HEIGHT);
 #else
@@ -13414,54 +13447,57 @@ skip_screen_input:
             usleep(2000);
         }
 #elif defined(EVO_GL_DEVICE)
-        /* GL-3 (#79) B2: swap only when a Context::Render() actually composited
-         * onto fb 0 this frame (menu changed / overlay visible / warm-up).
-         * Otherwise the front buffer holds and we just keep polling input -
-         * ps5-opengl is too slow to re-raster + swap at 60 Hz. */
+        /* GL-3 (#79): present through the GL blit quad. Menus are change-gated
+         * (gl_active only on a UI change / overlay / warm-up); the player draws
+         * every tick but only *swaps* on a new decoded frame (the A/V clock in
+         * pp_playback paces publication) or an OSD change. */
         if (gl_active) {
-            uint64_t _dispatch_ms = (uint64_t)now_ms() - _gl_disp_t0;
-            int _drew;
-            if (evo_rmlui_gl_blit_mode()) {
-                /* Mode A: the CPU rasteriser filled gl_scratch (menu +
-                 * overlays); upload it as one GL quad. */
-                evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
-                _drew = 1;
-            } else {
-                /* Mode B: RmlUi already rendered to fb 0 (or nothing changed). */
-                _drew = evo_rmlui_gl_consume_drew();
+            int _swap = 1;
+            if (screen == SCREEN_PLAYER) {
+                static int64_t s_last_pts;
+                int64_t pts = g_pp_pb.display_pts_us;
+                _swap = (pts != s_last_pts) || evo_rmlui_gl_consume_drew();
+                s_last_pts = pts;
             }
-            uint64_t _t0 = (uint64_t)now_ms();
-            if (_drew) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
-            uint64_t _swap_ms = (uint64_t)now_ms() - _t0;
-            static uint64_t s_gl_redraws;
-            if (_drew) s_gl_redraws++;
-            if (_drew && s_gl_redraws <= 12)
-                evo_bt("GL-3 B2: redraw #%llu screen=%d dispatch=%llums swap=%llums",
-                       (unsigned long long)s_gl_redraws, screen,
-                       (unsigned long long)_dispatch_ms,
-                       (unsigned long long)_swap_ms);
-            else if (_drew && (s_gl_redraws % 30) == 0)
-                evo_bt("GL-3 B2: redraw #%llu dispatch=%llums swap=%llums",
-                       (unsigned long long)s_gl_redraws,
-                       (unsigned long long)_dispatch_ms,
-                       (unsigned long long)_swap_ms);
-            if (_drew) evo_boot_log_flush();
+            uint64_t _b0 = (uint64_t)now_ms();
+            if (evo_rmlui_gl_blit_mode()) {
+                if (_swap) evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
+            } else {
+                _swap = evo_rmlui_gl_consume_drew();
+            }
+            uint64_t _b1 = (uint64_t)now_ms();
+            if (_swap) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
+            uint64_t _b2 = (uint64_t)now_ms();
+            if (_swap && screen == SCREEN_PLAYER) {
+                static uint64_t s_bt0, s_bn, s_bl, s_sw;
+                s_bn++; s_bl += _b1 - _b0; s_sw += _b2 - _b1;
+                if (!s_bt0) s_bt0 = _b2;
+                if (_b2 - s_bt0 >= 2000 && s_bn) {
+                    evo_bt("GL-3 player: blit~%llums swap~%llums (n=%llu)",
+                           (unsigned long long)(s_bl / s_bn),
+                           (unsigned long long)(s_sw / s_bn),
+                           (unsigned long long)s_bn);
+                    evo_boot_log_flush();
+                    s_bt0 = _b2; s_bn = s_bl = s_sw = 0;
+                }
+            }
         }
         {
-            static uint64_t s_hb_t0, s_hb_iters, s_hb_redraws2;
+            static uint64_t s_hb_t0, s_hb_iters, s_hb_redraws;
             uint64_t _now = (uint64_t)now_ms();
             s_hb_iters++;
-            if (gl_active) s_hb_redraws2++;
+            if (gl_active) s_hb_redraws++;
             if (!s_hb_t0) s_hb_t0 = _now;
-            if (_now - s_hb_t0 >= 1000) {
-                evo_bt("GL-3 B2: loop %llu it/s, %llu redraw/s",
-                       (unsigned long long)s_hb_iters,
-                       (unsigned long long)s_hb_redraws2);
+            if (_now - s_hb_t0 >= 2000) {
+                evo_bt("GL-3: loop %llu/s, redraw %llu/s, dispatch=%llums",
+                       (unsigned long long)(s_hb_iters / 2),
+                       (unsigned long long)(s_hb_redraws / 2),
+                       (unsigned long long)((uint64_t)now_ms() - _gl_disp_t0));
                 evo_boot_log_flush();
-                s_hb_t0 = _now; s_hb_iters = 0; s_hb_redraws2 = 0;
+                s_hb_t0 = _now; s_hb_iters = 0; s_hb_redraws = 0;
             }
         }
-        usleep(2000);
+        usleep(screen == SCREEN_PLAYER ? 3000 : 2000);
 #else
         PS5_DrawPixelsAsTiles(linear, (uint32_t*)vbuf[idx].data, WIDTH, HEIGHT);
 
