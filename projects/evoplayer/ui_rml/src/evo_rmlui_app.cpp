@@ -1,6 +1,7 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <algorithm>
 #include <cstring>
@@ -9,20 +10,35 @@
 #include <cmath>
 #include <chrono>
 
+/* render-overhaul GL-2 (#78): the OpenGL RmlUi interface is host-only - it
+ * pulls in the glad GL loader, which must never reach any PS5 build (neither
+ * the .ffpfsc app module nor the build-evoplayer.sh compile check). Only the
+ * host preview harness defines EVO_RML_GL_HOST. The device GL path is GL-3. */
+#ifdef EVO_RML_GL_HOST
+#include "evo_rmlui_render_gl.h"
+#include "evo_gl_context.h"
+#endif
+
 /* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
  * crashes at load in the app module's custom CRT _init() pass, layout-
  * sensitively - #71. These diagnostics go to stderr (klog) via C stdio. */
 
+/* FrameBegin/FrameEnd bracket every Context::Render(): no-ops on the CPU
+ * rasteriser, bind-FBO / read-back on the GL interface (GL-2, #78). */
 #ifdef EVO_RML_PROFILE
 #define EVO_PROF_CTX_RENDER() do {                                      \
         double _c0 = evo_prof_now_ms(); m_context->Update();            \
-        double _c1 = evo_prof_now_ms(); m_context->Render();            \
+        double _c1 = evo_prof_now_ms();                                 \
+        m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
         double _c2 = evo_prof_now_ms();                                 \
         g_evo_rml_prof.update_ms += _c1 - _c0; g_evo_rml_prof.update_n++;\
         g_evo_rml_prof.render_ms += _c2 - _c1; g_evo_rml_prof.render_n++;\
     } while (0)
 #else
-#define EVO_PROF_CTX_RENDER() do { m_context->Update(); m_context->Render(); } while (0)
+#define EVO_PROF_CTX_RENDER() do {                                      \
+        m_context->Update();                                           \
+        m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
+    } while (0)
 #endif
 
 EvoRmlApp& EvoRmlApp::Instance() {
@@ -188,14 +204,34 @@ bool EvoRmlApp::Initialize(int width, int height) {
     m_frame_dirty = true;
 
     m_system = std::make_unique<EvoSystemInterface>();
-    m_render = std::make_unique<EvoRenderInterface>(width, height);
+
+#ifdef EVO_RML_GL_HOST
+    /* GL-2 (#78): opt into the OpenGL render interface on the host when a GL
+     * context is up and EVO_RML_GL is set. Falls through to the CPU rasteriser
+     * on any failure so the harness always renders something. */
+    if (const char* g = std::getenv("EVO_RML_GL"); g && *g && *g != '0') {
+        if (evo_gl_context_ok()) {
+            auto gl = std::make_unique<EvoRenderInterfaceGL>(width, height);
+            if (gl->Ok()) {
+                m_render = std::move(gl);
+                fprintf(stderr, "[EVO RmlUi] OpenGL render interface active\n");
+            } else {
+                fprintf(stderr, "[EVO RmlUi] GL render interface failed to construct; using CPU\n");
+            }
+        } else {
+            fprintf(stderr, "[EVO RmlUi] EVO_RML_GL set but no GL context; using CPU\n");
+        }
+    }
+#endif
+    if (!m_render)
+        m_render = std::make_unique<EvoRenderInterface>(width, height);
     /* #60: must be registered before Rml::Initialise() so every subsequent
      * LoadFontFace/LoadDocument call resolves through the embedded bundle
      * first, never touching the /app0 sandbox's broken directory traversal. */
     m_file_interface = std::make_unique<EvoRmlFileInterface>();
 
     Rml::SetSystemInterface(m_system.get());
-    Rml::SetRenderInterface(m_render.get());
+    Rml::SetRenderInterface(m_render->AsRml());
     Rml::SetFileInterface(m_file_interface.get());
 
     if (!Rml::Initialise()) {
@@ -460,7 +496,7 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
 
     if (!pixels || w <= 0 || h <= 0) {
         if (!m_art_source[slot].empty()) {
-            Rml::ReleaseTexture(m_art_source[slot], m_render.get());
+            Rml::ReleaseTexture(m_art_source[slot], m_render->AsRml());
             m_render->DropMemoryTexture(m_art_source[slot]);
             m_art_source[slot].clear();
         }
@@ -477,7 +513,7 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
     if (unchanged) return m_art_source[slot];
 
     if (!m_art_source[slot].empty()) {
-        Rml::ReleaseTexture(m_art_source[slot], m_render.get());
+        Rml::ReleaseTexture(m_art_source[slot], m_render->AsRml());
         m_render->DropMemoryTexture(m_art_source[slot]);
     }
 
@@ -2701,6 +2737,8 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
     m_toast_context->Update();
+    m_render->FrameBegin();
     m_toast_context->Render();
+    m_render->FrameEnd();
 }
 

@@ -166,6 +166,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     #    lives on a named volume (see docker-compose.yml).
     ccache \
     \
+    # -- host OpenGL for the UI preview harness (render-overhaul GL-2, #78).
+    #    tools/uiview_playback_rml renders the RmlUi screens through RmlUi's
+    #    RenderInterface_GL3 to prove the GL port against the CPU rasteriser,
+    #    with NO console. The container has no display, so it uses an EGL
+    #    surfaceless context backed by Mesa's llvmpipe software renderer:
+    #      libegl-dev / libgl-dev / libgles-dev / mesa-common-dev -> EGL + GL
+    #        3.3 core headers and the libglvnd dispatch libs (-lEGL -lGL).
+    #      libgl1-mesa-dri -> the actual llvmpipe / swrast driver so a context
+    #        can be created with no GPU and no /dev/dri.
+    #      libglvnd-dev -> eglGetProcAddress / the GLdispatch dev files.
+    #      mesa-utils / mesa-utils-extra -> eglinfo, used as a build-time probe.
+    #    Host-only: nothing in the .ffpfsc app-module link touches these (the
+    #    device GL path is ps5-opengl, added by Dockerfile.ps5-opengl).
+    libegl-dev \
+    libgl-dev \
+    libgles-dev \
+    mesa-common-dev \
+    libgl1-mesa-dri \
+    libglvnd-dev \
+    mesa-utils \
+    mesa-utils-extra \
+    \
     # -- sudo: the container runs as a non-root developer user for bind-mount
     #    file ownership sanity; sudo lets that user write to /opt.
     sudo \

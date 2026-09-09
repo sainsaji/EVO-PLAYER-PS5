@@ -4,16 +4,19 @@
 #include <cstdint>
 #include <string>
 #include <map>
+#include "evo_rmlui_render_bridge.h"
 
 class EvoAgcGeoSink;   /* #28 Phase 4 - evo_rmlui_render_agc.h */
 
-class EvoRenderInterface : public Rml::RenderInterface {
+class EvoRenderInterface : public Rml::RenderInterface, public EvoRenderBridge {
 public:
     EvoRenderInterface(int width, int height);
     virtual ~EvoRenderInterface();
 
-    void SetFramebuffer(uint32_t* fb) { m_fb = fb; }
-    void SetDimensions(int w, int h) { m_width = w; m_height = h; }
+    Rml::RenderInterface* AsRml() override { return this; }
+
+    void SetFramebuffer(uint32_t* fb) override { m_fb = fb; }
+    void SetDimensions(int w, int h) override { m_width = w; m_height = h; }
 
     /*
      * #28 Phase 4: when a sink is set, RenderGeometry() diverts untextured,
@@ -22,7 +25,7 @@ public:
      * and clip-masked geometry still go to the CPU framebuffer. nullptr = the
      * normal all-CPU path.
      */
-    void SetAgcSink(EvoAgcGeoSink* sink) { m_agc_sink = sink; }
+    void SetAgcSink(EvoAgcGeoSink* sink) override { m_agc_sink = sink; }
 
     /*
      * Artwork the engine produces at runtime — decoded posters, the hero
@@ -31,8 +34,8 @@ public:
      * resolves that name out of this map instead of hitting the filesystem.
      * The pixels are copied because the caller's buffer is a rotating cache.
      */
-    void SetMemoryTexture(const std::string& key, const uint32_t* bgra, int w, int h);
-    void DropMemoryTexture(const std::string& key);
+    void SetMemoryTexture(const std::string& key, const uint32_t* bgra, int w, int h) override;
+    void DropMemoryTexture(const std::string& key) override;
 
     void SetScissorRegion(Rml::Rectanglei region) override;
     void EnableScissorRegion(bool enable) override;

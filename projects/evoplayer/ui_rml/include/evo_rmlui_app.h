@@ -574,7 +574,11 @@ private:
     int m_height = 1080;
 
     std::unique_ptr<EvoSystemInterface> m_system;
-    std::unique_ptr<EvoRenderInterface> m_render;
+    /* The active RmlUi render interface, behind the EvoRenderBridge seam:
+     * EvoRenderInterface (CPU coverage rasteriser, the device path) or, on the
+     * host with EVO_RML_GL set, EvoRenderInterfaceGL (RmlUi's GL3 backend -
+     * render-overhaul GL-2, #78). */
+    std::unique_ptr<EvoRenderBridge> m_render;
     /* #60: serves .rml/.rcss/.ttf out of the embedded bundle - see
      * evo_rmlui_fileinterface.h. Owned here so it outlives Rml::Initialise(),
      * which only stores the raw pointer Rml::SetFileInterface() is given. */

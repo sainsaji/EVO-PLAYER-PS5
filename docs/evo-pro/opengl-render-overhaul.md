@@ -1,13 +1,13 @@
 # OpenGL render overhaul — one funnel for every pixel
 
-> **Status (2026-09-09): GL-1 (#77) PASSED — go/no-go is GO.** The GL smoke
-> rendered on the FW-12.70 console (Mesa 26.2, GL 3.3 Core, GLSL 330, PS5 AGC
-> backend, pixel-exact readback, no driver fail-stop) —
-> [gl1-spike.md §7](gl1-spike.md#7-hardware-receipt--go-2026-09-09). `ps5-opengl`
-> vendored as a submodule, `_Exit` patch + allocator + pre-unjail settled, the
-> from-source SDK builds, and `package-app.sh --gl-smoke` links + signs a
-> `.ffpfsc`. **GL-2 (#78) is unblocked.** Supersedes the hand-rolled `sceAgc`
-> UI/geo route (`#28` closed, `#67`/`#68`/`#69`/`#70` open) and the CPU
+> **Status (2026-09-09): GL-1 (#77) PASSED, GL-2 (#78) host pass DONE.** GL-1:
+> the GL smoke rendered on FW-12.70 (Mesa 26.2, GL 3.3 Core, PS5 AGC backend,
+> pixel-exact) — [gl1-spike.md §7](gl1-spike.md#7-hardware-receipt--go-2026-09-09).
+> GL-2: RmlUi's `RenderInterface_GL3` + EVO adapters render every screen in the
+> host harness (`UIVIEW_GL=1 uiview.sh --all`) within AA tolerance of the CPU
+> rasteriser — [gl2-render-interface.md](gl2-render-interface.md). **GL-3 (#79)
+> is unblocked** — device cutover for menu screens. Supersedes the hand-rolled
+> `sceAgc` UI/geo route (`#28` closed, `#67`/`#68`/`#69`/`#70` open) and the CPU
 > converter/present stack. Stories: the **`render-overhaul`** label
 > (`GL-1` … `GL-6`).
 
@@ -168,7 +168,7 @@ recovery path.
 | Story | Scope | Gate |
 |---|---|---|
 | **GL-1** (#77) ✅ | Spike + vendor + build. Submodule `ps5-opengl`; from-source SDK builds; GL smoke inside EVO's `.ffpfsc` (`--gl-smoke`) **rendered on 12.70** — Mesa 26.2 / GL 3.3 Core / PS5 AGC, pixel-exact. Allocator + `_Exit` + pre-unjail resolved. [gl1-spike.md](gl1-spike.md). | **GO.** Overhaul proceeds. |
-| **GL-2** | RmlUi `RenderInterface_GL3` — host only. Adapt the upstream backend: `SetMemoryTexture` → `glTexImage2D`, clip-mask → stencil, `GenerateTexture`/`LoadTexture`. Prove in `tools/uiview_playback_rml` against `ps5-opengl`. | `uiview.sh --all` renders every screen through GL, byte-comparable to the CPU rasteriser within AA tolerance. |
+| **GL-2** (#78) ✅ host | RmlUi `RenderInterface_GL3` — host only. Vendored verbatim (`ui_rml/src/rmlui_gl3/`) + `EvoRenderInterfaceGL` adapters (`LoadTexture` bundle/`evo:mem/`/premultiply, `SetMemoryTexture`); geometry / stencil clip-mask / MVP transform / scissor inherited. `EvoRenderBridge` seam so `EvoRmlApp` holds either. Headless EGL-surfaceless + llvmpipe context (`evo_gl_context_host.cpp`). [gl2-render-interface.md](gl2-render-interface.md). | **MET (host).** `UIVIEW_GL=1 uiview.sh --all` renders every screen through GL; ≤0.2% pixels differ from the CPU rasteriser (MSAA on edges — the improvement). Overlays composite correctly. |
 | **GL-3** | GL owns the framebuffer for **menu (non-player) screens** on device. EGL surface, GL clear + swap. Delete the `m_surface` / `AgcGeoPresent` dual path and the `#28` geo sink. Player stays on `pp/` for now. | Menus render on hardware through GL; one present route retired; `#49` seam work lands in the same pass. |
 | **GL-4** | Video into the funnel. Decoded NV12/P010 → GL texture → YUV→RGB fragment shader → composite UI → single flip. Delete `pp_converter_fused/_parallel`, `pp_compute_pipeline`, `tile_copy`, the CPU present path, the 5-way dispatch, the V8/V3/1080 backend enum. Aspect-ratio math moves into the vertex quad (closes `#76`). | GTA 4K + 1080p play through GL; `#62` parity check vs a reference frame; `#76` fixed. |
 | **GL-5** | Fold in the strays. GL text pass for subtitles (Unicode + Noto — closes `#35`), keyboard (RmlUi doc), image viewer (textured quad), FPS/HUD overlay (`#63`). Delete `draw_char`/`draw_text`, `evo_draw` bitmap font, `evo_widgets`, `evo_keyboard` immediate mode. | Every screen and overlay is GL; three font systems become one; `#34`/`#35` closed. |

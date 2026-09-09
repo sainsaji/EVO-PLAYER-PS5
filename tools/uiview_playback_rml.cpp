@@ -8,6 +8,8 @@
 #include <thread>
 #include <chrono>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include "../projects/evoplayer/ui_rml/include/evo_gl_context.h"
+#include <cstdlib>
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
     std::ofstream file(filename, std::ios::binary);
@@ -1187,6 +1189,17 @@ int main(int argc, char** argv) {
     const int width = 1920;
     const int height = 1080;
     std::vector<uint32_t> fb(width * height, 0xFF06090E);
+
+    /* GL-2 (#78): when EVO_RML_GL is set, bring up the headless EGL/GL 3.3
+     * context before RmlUi init so evo_rmlui_init() picks EvoRenderInterfaceGL.
+     * A failure here just logs - RmlUi then falls back to the CPU rasteriser. */
+    const char* want_gl = std::getenv("EVO_RML_GL");
+    if (want_gl && *want_gl && *want_gl != '0') {
+        if (evo_gl_context_create(width, height))
+            std::cerr << "[uiview] OpenGL render path enabled" << std::endl;
+        else
+            std::cerr << "[uiview] EVO_RML_GL set but GL context creation failed; CPU path" << std::endl;
+    }
 
     if (!evo_rmlui_init(width, height)) {
         std::cerr << "Failed to initialize RmlUi playback engine!" << std::endl;
