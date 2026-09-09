@@ -8116,11 +8116,37 @@ static int evo_progress_permille(double pos, double dur)
  */
 static int evo_cover_budget;
 
+/* Already-resolved cover, no decode, no I/O — cheap enough to call every frame
+ * for every tile. */
+static const uint32_t *prospero_cover_peek(const char *path)
+{
+    ProsperoCoverEntry *slot;
+    if (!path || !path[0]) return NULL;
+    slot = prospero_cover_find_slot(path);
+    if (slot && slot->tried && slot->valid &&
+        strcmp(slot->path_key, path) == 0)
+        return slot->pixels;
+    return NULL;
+}
+
 static const uint32_t *evo_cover_pixels(const char *path)
 {
     const ProsperoCoverEntry *e;
+    const uint32_t *cached;
 
     if (!path || !path[0]) return NULL;
+
+    /*
+     * #64: a cover that is already decoded costs nothing to hand back, so do
+     * it *before* touching evo_cover_budget. The old code spent the single
+     * per-frame token on tile 0 (which is cached after the first frame) on
+     * every frame, permanently starving tiles 1..N. Now the budget is only
+     * spent on an uncached tile, so one new poster resolves per frame and the
+     * shelf fills in over the next few frames (each decode changes the launch
+     * model -> the RmlUi frame goes dirty -> the next frame resolves the next).
+     */
+    cached = prospero_cover_peek(path);
+    if (cached) return cached;
 
     if (evo_cover_budget <= 0) return NULL;
     evo_cover_budget--;

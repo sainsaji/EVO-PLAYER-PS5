@@ -138,13 +138,15 @@ div, span, p {
  * overflow does not clip absolutely-positioned children here — it painted
  * the poster across the whole page.
  */
+/* #64: concentric with #hero (1704x318, radius 22). Inset 2px -> 1700x314,
+ * radius 22-2 = 20 (was 1698x312 r19: a 2px gap right + bottom, radius off). */
 #hero-art {
     position: absolute;
     left: 2px;
     top: 2px;
-    width: 1698px;
-    height: 312px;
-    border-radius: 19px;
+    width: 1700px;
+    height: 314px;
+    border-radius: 20px;
 }
 
 /*
@@ -157,7 +159,7 @@ div, span, p {
     left: 2px;
     top: 2px;
     width: 477px;
-    height: 312px;
+    height: 314px;
     background-color: #121b2eff;
 }
 
@@ -166,7 +168,7 @@ div, span, p {
     left: 479px;
     top: 2px;
     width: 545px;
-    height: 312px;
+    height: 314px;
     decorator: horizontal-gradient(#121b2eff #121b2e00);
 }
 
@@ -175,7 +177,7 @@ div, span, p {
     position: absolute;
     left: 2px;
     bottom: 2px;
-    width: 1698px;
+    width: 1700px;
     height: 138px;
     decorator: vertical-gradient(#00000000 #000000d7);
 }
@@ -353,6 +355,12 @@ div, span, p {
     border-color: #2a3b55aa;
     border-radius: 20px;
     position: relative;
+    /* #64: clip the poster (an abs-positioned child with an image decorator,
+     * which RmlUi does NOT round on its own) to the card's rounded shape.
+     * RmlUi 6.2 renders this via RenderToClipMask, which the EVO rasteriser
+     * implements — so it works here even though an older comment claimed
+     * overflow doesn't clip abs children. */
+    overflow: hidden;
 }
 
 .tile-focused {
@@ -361,13 +369,15 @@ div, span, p {
     border-color: #ffcd00;
 }
 
+/* #64: fill the whole card; .tile's overflow:hidden rounds it to the card
+ * shape. No inset / radius juggling — the clip does it, and it stays correct
+ * when the focus border grows from 1px to 2px. */
 .tile-art {
     position: absolute;
-    left: 2px;
-    top: 2px;
-    width: 260px;
-    height: 160px;
-    border-radius: 17px;
+    left: 0;
+    top: 0;
+    width: 264px;
+    height: 166px;
 }
 
 /* Destination tiles carry a large soft icon top-left instead of a poster. */
