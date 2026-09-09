@@ -1,0 +1,9 @@
+[submodule "third_party/ps5-opengl"]
+	path = third_party/ps5-opengl
+	url = https://github.com/blackbearreloaded/ps5-opengl.git
+	# Pinned by the gitlink SHA for #77 (render-overhaul GL-1). No `branch =`
+	# on purpose: `git submodule update` must only ever check out the recorded
+	# commit, never fast-forward to a moving branch. Bump deliberately, refresh
+	# patches/ps5-opengl/0001-recoverable-fail.patch, re-run the GL-1 smoke on
+	# hardware, and record the new receipt in docs/evo-pro/gl1-spike.md.
+	update = checkout

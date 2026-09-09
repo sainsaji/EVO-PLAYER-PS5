@@ -88,15 +88,19 @@ third_party/ProsperoLight/
 # its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.
 third_party/SharpProspero/
 
-# Local reference clones: blackbearreloaded PS5 research repos (OpenGL/Mesa
-# Gallium port, audio decoding + AJM offload, GPU/sceAgc internals, hardware
-# video decoding — H.264/HEVC/VP9/HDR on libSceVideodec2, FW 6.02 + 12.70).
-# Studied for the render overhaul (#77–#82), native decode (#41), and audio.
+# Local reference clones: blackbearreloaded PS5 research repos (audio decoding +
+# AJM offload, GPU/sceAgc internals, hardware video decoding — H.264/HEVC/VP9/HDR
+# on libSceVideodec2, FW 6.02 + 12.70). Studied for native decode (#41) and audio.
 # Kept on disk, never committed.
-third_party/ps5-opengl/
 third_party/ps5-audio-decoding-research/
 third_party/ps5-gpu-research/
 third_party/ps5-hardware-video-decoding-research/
+
+# third_party/ps5-opengl/ is a git SUBMODULE (#77, render overhaul GL-1..GL-6),
+# pinned in .gitmodules — its tree is a gitlink, not committed content. Only the
+# local SDK build tree under it is ignored. The `third_party/**/src/` rule below
+# does not reach a submodule's gitlink.
+third_party/ps5-opengl/build/
 
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson

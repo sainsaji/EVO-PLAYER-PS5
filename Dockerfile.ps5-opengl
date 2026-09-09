@@ -1,0 +1,69 @@
+# =============================================================================
+# Dockerfile.ps5-opengl - OPT-IN toolchain overlay for building the ps5-opengl
+# (Mesa + PS5 Gallium + patched PSBC) SDK. #77 / render-overhaul GL-1.
+#
+# NOT part of the default image. The base dev image (Dockerfile ->
+# evo-player/ps5-dev:llvm18-sdk-v0.42) is LLVM 18 + meson-from-apt, which is
+# everything EVO itself needs. ps5-opengl's Mesa/PSBC build wants a heavier
+# toolchain; this layer adds it without disturbing the pinned base.
+#
+# Build + use:
+#   docker compose -f docker-compose.yml -f docker-compose.ps5-opengl.yml build ps5-dev
+#   docker compose -f docker-compose.yml -f docker-compose.ps5-opengl.yml \
+#     run --rm ps5-dev ./scripts/build-ps5-opengl.sh
+#
+# See docs/evo-pro/gl1-spike.md for the toolchain gap analysis and the pins in
+# third_party/ps5-opengl/dependencies.json.
+# =============================================================================
+ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.42
+FROM ${BASE_IMAGE}
+
+# The base image drops to a non-root user; apt needs root.
+USER root
+
+# ps5-opengl/docs/building.md: "Clang/LLD selected by the public SDK wrappers
+# (21.1.8 in the recorded Mesa/PSBC builds)" + "Clang/LLD 18 for the native app
+# adapter". clang-18 is already in the base; add the 21 line from apt.llvm.org
+# (Ubuntu 24.04 has no clang-21 in-archive).
+ARG LLVM_OPENGL_VERSION=21
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget gnupg ca-certificates lsb-release software-properties-common \
+ && wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+      | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-${LLVM_OPENGL_VERSION} main" \
+      > /etc/apt/sources.list.d/llvm-${LLVM_OPENGL_VERSION}.list \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      clang-${LLVM_OPENGL_VERSION} \
+      lld-${LLVM_OPENGL_VERSION} \
+      llvm-${LLVM_OPENGL_VERSION} \
+      llvm-${LLVM_OPENGL_VERSION}-dev \
+      llvm-${LLVM_OPENGL_VERSION}-tools \
+ && rm -rf /var/lib/apt/lists/*
+
+# Mesa 26.2 codegen + shader-compiler check tools. The base image has ninja,
+# python 3.12, bison and flex; it is missing these, plus meson (apt's is 1.3.2,
+# Mesa 26.2 needs >= 1.4.0 and the recorded build used 1.10.1 -> pip).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      glslang-tools \
+      spirv-tools \
+      python3-mako \
+      python3-packaging \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip3 install --no-cache-dir --break-system-packages 'meson==1.10.1'
+
+# pip drops meson in /usr/local/bin, ahead of apt's /usr/bin on PATH.
+RUN meson --version | grep -qx 1.10.1
+
+# glslangValidator is the classic name; newer glslang-tools ships `glslang`.
+RUN if ! command -v glslangValidator >/dev/null 2>&1 && command -v glslang >/dev/null 2>&1; then \
+      ln -s "$(command -v glslang)" /usr/local/bin/glslangValidator; \
+    fi
+
+USER dev
+
+# NOTE: ps5-opengl's Makefile expects the payload SDK wrappers (prospero-clang)
+# to resolve to clang 21. The base image's SDK (v0.42, BUILD_SDK_FROM_SOURCE=0)
+# is wired to llvm-config-18. If `build-ps5-opengl.sh --check` still flags the
+# wrapper-clang version after this overlay, rebuild the base with
+# --build-arg LLVM_VERSION=21 --build-arg BUILD_SDK_FROM_SOURCE=1, or point
+# PS5_OPENGL at a from-source SDK. Tracked in docs/evo-pro/gl1-spike.md.

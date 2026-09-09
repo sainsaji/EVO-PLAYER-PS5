@@ -124,6 +124,20 @@ ADDON_SRCS := \
     addons/src/evo_net.c \
     addons/src/addon_emby.c
 
+# --gl-smoke (#77, render-overhaul GL-1): compile the ps5-opengl smoke probe
+# into the .ffpfsc. Off by default so build-evoplayer.sh and a normal
+# package-app.sh --ffpfsc are byte-unchanged. package-app.sh passes GL_SMOKE=1
+# plus the ps5-opengl-core33.mk cflags/archives; see docs/evo-pro/gl1-spike.md.
+GL_SMOKE ?= 0
+ifeq ($(GL_SMOKE),1)
+    PP_SRCS  += pp/src/pp_gl_smoke.c pp/src/pp_gl_fatal.c
+    CFLAGS   += -DEVO_GL_SMOKE=1
+    CXXFLAGS += -DEVO_GL_SMOKE=1
+    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
+        CFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
+    endif
+endif
+
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 

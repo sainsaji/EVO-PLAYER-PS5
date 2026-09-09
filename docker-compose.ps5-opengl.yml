@@ -1,0 +1,19 @@
+# =============================================================================
+# docker-compose.ps5-opengl.yml - OPT-IN overlay that swaps the ps5-dev image
+# build for the ps5-opengl toolchain layer (Dockerfile.ps5-opengl).
+#
+# Use with an explicit -f chain so it never affects a plain `docker compose`:
+#   docker compose -f docker-compose.yml -f docker-compose.ps5-opengl.yml build ps5-dev
+#   docker compose -f docker-compose.yml -f docker-compose.ps5-opengl.yml \
+#     run --rm ps5-dev ./scripts/build-ps5-opengl.sh
+#
+# #77 / render-overhaul GL-1. See docs/evo-pro/gl1-spike.md.
+# =============================================================================
+services:
+  ps5-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.ps5-opengl
+      args:
+        BASE_IMAGE: "evo-player/ps5-dev:llvm18-sdk-v0.42"
+    image: evo-player/ps5-dev:llvm18-sdk-v0.42-opengl

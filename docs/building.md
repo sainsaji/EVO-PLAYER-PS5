@@ -82,6 +82,7 @@ docker run --rm hello-world
 ```powershell
 git clone <your-fork-url> "EVO Player"
 cd "EVO Player"
+git submodule update --init    # third_party/ps5-opengl (render overhaul, #77)
 ```
 
 Set your console's address in a **git-ignored** `.env` at the repository root.
@@ -380,6 +381,12 @@ custom shader if that proves insufficient (likely for 10-bit P010).
 
 `gpu_test` probes what actually resolves at run time. Details:
 **[docs/gpu-notes.md](gpu-notes.md)**.
+
+The **render overhaul** (`render-overhaul` label, #77–#82) replaces all of this
+with `third_party/ps5-opengl` (Mesa + a PS5 Gallium driver + a patched PSBC),
+built via `./scripts/build-ps5-opengl.sh` (needs the opt-in toolchain overlay —
+`docker compose -f docker-compose.yml -f docker-compose.ps5-opengl.yml build`).
+GL-1 (#77) is the FW-12.70 go/no-go gate: **[docs/evo-pro/gl1-spike.md](evo-pro/gl1-spike.md)**.
 
 ## 14. Video decoder research
 

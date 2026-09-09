@@ -32,6 +32,9 @@
 #include "pp_stage_breadcrumb.h"
 #include "pp_frame.h"
 #include "pp_converter.h"
+#ifdef EVO_GL_SMOKE
+#include "pp_gl_smoke.h"       /* #77 GL-1 go/no-go probe (--gl-smoke builds only) */
+#endif
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
 #include <sys/event.h>
@@ -12094,6 +12097,29 @@ int main(void) {
      * GPU menu geometry stay behind their own /mnt/usb0/evo_agc_* hooks.
      * MUST be pre-unjail (like evo_vdec_probe - libSceAgc may go API-dead after
      * the credential swap). */
+#if defined(EVO_GL_SMOKE)
+    /* #77 / render-overhaul GL-1 go/no-go: prove ps5-opengl (Mesa + PS5 Gallium
+     * + patched PSBC) renders on FW 12.70. A --gl-smoke build is a dedicated
+     * diagnostic eboot (never shipped), so run the probe unconditionally at boot
+     * INSTEAD of pp_agc_init and the normal path — ps5-opengl owns sceAgc +
+     * sceVideoOut and a second sceVideoOut open panics the console. Must be
+     * pre-unjail (libSceAgc* / libSceVideoOut go API-dead after the credential
+     * swap). Writes one GL-1 SMOKE receipt line to /mnt/usb0/evo.log (pulled by
+     * tools/evo-remote.sh log), then parks — read the log, reboot. The USB stick
+     * is read-only over FTP so a runtime hook file isn't reachable; the build
+     * flag is the switch. See docs/evo-pro/gl1-spike.md. */
+    {
+        evo_bt("GL-1 smoke");
+        int rc = pp_gl_smoke_run();
+        evo_bt("GL-1 smoke done rc=%d", rc);
+        /* The probe + its receipt ran pre-unjail (klog has them). Unjail now so
+         * /mnt/usb0/evo.log becomes writable and the buffered trace flushes for
+         * tools/evo-remote.sh log; then park. GL is already torn down. */
+        evo_jailbreak_self();
+        evo_boot_log_flush();
+        for (;;) { evo_boot_log_flush(); sleep(30); }
+    }
+#endif
     pp_agc_init(1920, 1080, 0);
     evo_boot_log_flush();
 #endif

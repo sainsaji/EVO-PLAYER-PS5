@@ -1,10 +1,15 @@
 # OpenGL render overhaul — one funnel for every pixel
 
-> **Status (2026-09-09):** proposed. No code yet. Supersedes the hand-rolled
-> `sceAgc` UI/geo route (`#28` closed, `#67`/`#68`/`#69`/`#70` open) and the
-> CPU converter/present stack. Reference clone at
-> `third_party/ps5-opengl/` (blackbearreloaded, GPL-3.0 — EVO is already GPLv3).
-> Stories: the **`render-overhaul`** label (`GL-1` … `GL-6`).
+> **Status (2026-09-09): GL-1 (#77) PASSED — go/no-go is GO.** The GL smoke
+> rendered on the FW-12.70 console (Mesa 26.2, GL 3.3 Core, GLSL 330, PS5 AGC
+> backend, pixel-exact readback, no driver fail-stop) —
+> [gl1-spike.md §7](gl1-spike.md#7-hardware-receipt--go-2026-09-09). `ps5-opengl`
+> vendored as a submodule, `_Exit` patch + allocator + pre-unjail settled, the
+> from-source SDK builds, and `package-app.sh --gl-smoke` links + signs a
+> `.ffpfsc`. **GL-2 (#78) is unblocked.** Supersedes the hand-rolled `sceAgc`
+> UI/geo route (`#28` closed, `#67`/`#68`/`#69`/`#70` open) and the CPU
+> converter/present stack. Stories: the **`render-overhaul`** label
+> (`GL-1` … `GL-6`).
 
 ## Why
 
@@ -130,23 +135,29 @@ recovery path.
   — it replaces that work rather than building beside it.
 - **`_Exit(EXIT_FAILURE)` inside `ps5-opengl`'s Gallium driver** on submit
   errors (`src/gallium/ps5/ps5_screen.c` ×3, `src/platform/…` ×1) — violates
-  the "never `_exit()` from the app module" rule. Must be patched to a
-  recoverable fail path before it can ship.
-- **FW 6.02 → 12.70.** Public `sceAgc` / `sceVideoOut` APIs (which EVO already
-  runs on 12.70 for `#27`/`#31`) are the bulk of it, but `ps5-opengl`'s
-  `dlopen` assumptions, NID stubs, and register defaults are unverified on
-  12.70. **GL-1 is a hard go/no-go gate: does `ps5-opengl`'s own ImGui native
-  title boot on the 12.70 console.**
-- **Allocator.** The mandatory `--wrap=malloc…` set + 128 MiB owned heap
-  collides with `malloc_shim`. Reconcile in GL-1.
-- **Pre-unjail sequencing.** `libSceAgc*` goes API-dead after
-  `evo_jailbreak_self()` (`0x811D0111`; sysmodule 207 → `ESDKVERSION`). GL init
-  must run **before** the self-unjail at `main.c:~12121`, next to
-  `pp_agc_init`. Fits the existing order — but GL cannot be lazily initialised
-  on first UI draw.
-- **Build.** Adds Mesa + Meson 1.10.1 + Clang 21.1.8 + patched PSBC to the
-  pinned SDK container, or consumes a prebuilt `ps5-opengl-core33` SDK archive.
-  Decide in GL-1.
+  the "never `_exit()` from the app module" rule. **RESOLVED (GL-1):**
+  `patches/ps5-opengl/0001-recoverable-fail.patch` routes all four through a
+  weak `ps5gl_fatal()`; EVO's strong override (`pp/src/pp_gl_fatal.c`) logs +
+  `longjmp`s to a fence or parks, plus a `--wrap=_Exit` backstop.
+  See [gl1-spike.md §2](gl1-spike.md#2-_exit--recoverable).
+- **FW 6.02 → 12.70.** **RESOLVED (GL-1):** the GL smoke (EGL + GL 3.3 clear +
+  triangle + `glReadPixels`) compiled into EVO's own `.ffpfsc` (`--gl-smoke`)
+  rendered on the 12.70 console — `result=PASS`, `renderer="PS5 AGC"`,
+  `gl="3.3 (Core Profile) Mesa 26.2.0"`, pixel-exact. See
+  [gl1-spike.md §7](gl1-spike.md#7-hardware-receipt--go-2026-09-09).
+- **Allocator.** **RESOLVED (GL-1):** EVO's `malloc_shim` already wraps the
+  mandatory set and draws from the full flexible-memory budget, so it wins —
+  `ps5-opengl`'s `app_heap.c` is **not** linked.
+  See [gl1-spike.md §3](gl1-spike.md#3-allocator-coexistence--malloc_shim-wins).
+- **Pre-unjail sequencing.** **RESOLVED (GL-1):** GL init slot is `main.c` ~L12100,
+  immediately before `pp_agc_init`, inside `#if defined(EVO_APP_MODULE)`. GL
+  cannot be lazily initialised on first UI draw.
+  See [gl1-spike.md §4](gl1-spike.md#4-pre-unjail-init-slot--confirmed).
+- **Build.** **DECIDED (GL-1):** submodule + build from source via
+  `scripts/build-ps5-opengl.sh`, needing an opt-in toolchain overlay
+  (`Dockerfile.ps5-opengl`: Clang 21.1.8 / Meson 1.10.1 / glslang / spirv-tools
+  on top of the pinned base). Prebuilt `ps5-opengl-core33` archive is the
+  fallback (`--frozen-archive`). See [gl1-spike.md §5](gl1-spike.md#5-build-toolchain-gap).
 - **Perf floor for change-frames.** Menu re-raster is change-only (RmlUi
   retained mode + `RenderCachedScreen`), so a slow readback on a state change
   is tolerable; the every-frame paths (video, OSD, subtitles, scrub) must be
@@ -156,7 +167,7 @@ recovery path.
 
 | Story | Scope | Gate |
 |---|---|---|
-| **GL-1** | Spike + vendor + build. Build the `ps5-opengl` SDK; run **its** ImGui native title on the 12.70 console. Reconcile the allocator wrap set; patch `_Exit` → recoverable. Decide: build-from-source vs prebuilt archive. | **Go/no-go for the whole overhaul.** If the ImGui title does not render on 12.70, stop here. |
+| **GL-1** (#77) ✅ | Spike + vendor + build. Submodule `ps5-opengl`; from-source SDK builds; GL smoke inside EVO's `.ffpfsc` (`--gl-smoke`) **rendered on 12.70** — Mesa 26.2 / GL 3.3 Core / PS5 AGC, pixel-exact. Allocator + `_Exit` + pre-unjail resolved. [gl1-spike.md](gl1-spike.md). | **GO.** Overhaul proceeds. |
 | **GL-2** | RmlUi `RenderInterface_GL3` — host only. Adapt the upstream backend: `SetMemoryTexture` → `glTexImage2D`, clip-mask → stencil, `GenerateTexture`/`LoadTexture`. Prove in `tools/uiview_playback_rml` against `ps5-opengl`. | `uiview.sh --all` renders every screen through GL, byte-comparable to the CPU rasteriser within AA tolerance. |
 | **GL-3** | GL owns the framebuffer for **menu (non-player) screens** on device. EGL surface, GL clear + swap. Delete the `m_surface` / `AgcGeoPresent` dual path and the `#28` geo sink. Player stays on `pp/` for now. | Menus render on hardware through GL; one present route retired; `#49` seam work lands in the same pass. |
 | **GL-4** | Video into the funnel. Decoded NV12/P010 → GL texture → YUV→RGB fragment shader → composite UI → single flip. Delete `pp_converter_fused/_parallel`, `pp_compute_pipeline`, `tile_copy`, the CPU present path, the 5-way dispatch, the V8/V3/1080 backend enum. Aspect-ratio math moves into the vertex quad (closes `#76`). | GTA 4K + 1080p play through GL; `#62` parity check vs a reference frame; `#76` fixed. |
