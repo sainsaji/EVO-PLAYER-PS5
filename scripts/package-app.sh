@@ -21,6 +21,14 @@
 #                                             --breadcrumbs. Runs on the console
 #                                             only when /mnt/usb0/evo_gl_smoke
 #                                             exists; see docs/evo-pro/gl1-spike.md
+#   ./scripts/package-app.sh --gl             #79 GL-3: cut the boot over to a
+#                                             persistent ps5-opengl GL/EGL
+#                                             context (replaces pp_agc_init + the
+#                                             normal present path). Needs
+#                                             ./scripts/build-ps5-opengl.sh
+#                                             first. Mutually exclusive with
+#                                             --gl-smoke. See docs/evo-pro/
+#                                             opengl-render-overhaul.md
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -40,6 +48,7 @@ FFPFSC=0
 USB_REMOTE=0
 BREADCRUMBS=0
 GL_SMOKE=0
+GL_DEVICE=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -49,11 +58,15 @@ while (( $# )); do
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
-        -h|--help)      sed -n '2,23p' "$0"; exit 0 ;;
+        --gl)           GL_DEVICE=1 ;;    # #79 GL-3: persistent device GL context (boot cutover to GL/EGL)
+        -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
 done
+(( GL_SMOKE && GL_DEVICE )) && die "--gl and --gl-smoke are mutually exclusive (both cut the boot over to ps5-opengl)"
+# Both flags link ps5-opengl + share the SDK-consumption / undef-harvest / _Exit-wrap machinery.
+GL_LINK=$(( GL_SMOKE || GL_DEVICE ))
 
 if ! in_container; then
     FWD=(--"${MODE}")
@@ -62,18 +75,19 @@ if ! in_container; then
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( GL_SMOKE ))     && FWD+=(--gl-smoke)
+    (( GL_DEVICE ))    && FWD+=(--gl)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
-# --gl-smoke (#77, render-overhaul GL-1): consume the ps5-opengl-core33 SDK that
-# scripts/build-ps5-opengl.sh produced, compile pp_gl_smoke.c/pp_gl_fatal.c into
-# the eboot, and link the Mesa/Gallium/PSBC archives. Opt-in — a plain --ffpfsc
-# is byte-unchanged. See docs/evo-pro/gl1-spike.md.
+# --gl-smoke (#77, GL-1) / --gl (#79, GL-3): consume the ps5-opengl-core33 SDK
+# that scripts/build-ps5-opengl.sh produced, compile the GL glue into the eboot,
+# and link the Mesa/Gallium/PSBC archives. Opt-in — a plain --ffpfsc is
+# byte-unchanged. See docs/evo-pro/gl1-spike.md / gl2-render-interface.md.
 GL_LINK_LIBS=()         # -L / -l args from the installed .mk, minus what EVO already links
 GL_PUBLIC_CFLAGS=""
 GL_FORCE_UNDEF=()
-if (( GL_SMOKE )); then
-    [[ "${MODE}" == "player" ]] || die "--gl-smoke only applies to the player build"
+if (( GL_LINK )); then
+    [[ "${MODE}" == "player" ]] || die "--gl / --gl-smoke only apply to the player build"
     GL_SDK="${REPO_ROOT}/third_party/ps5-opengl/build/sdk/ps5-opengl-core33"
     GL_MK="${GL_SDK}/share/ps5-opengl-core33/ps5-opengl-core33.mk"
     need_file "${GL_MK}" "ps5-opengl SDK not built. Run:  ./scripts/build-ps5-opengl.sh"
@@ -109,7 +123,7 @@ if (( GL_SMOKE )); then
     while IFS= read -r s; do [[ -n "${s}" ]] && GL_SCE_UNDEF+=("${s}"); done < <(
         for a in "${GL_SDK}"/lib/*.a; do llvm-nm "${a}" 2>/dev/null || true; done \
         | awk '$1=="U"{print $2}' | grep -E '^sce[A-Za-z0-9_]+$' | sort -u || true)
-    ok "--gl-smoke: ps5-opengl SDK at ${GL_SDK#"${REPO_ROOT}/"} (${#GL_LINK_LIBS[@]} link args, ${#GL_FORCE_UNDEF[@]} forced undefs, ${#GL_SCE_UNDEF[@]} sce imports)"
+    ok "$( (( GL_DEVICE )) && echo --gl || echo --gl-smoke ): ps5-opengl SDK at ${GL_SDK#"${REPO_ROOT}/"} (${#GL_LINK_LIBS[@]} link args, ${#GL_FORCE_UNDEF[@]} forced undefs, ${#GL_SCE_UNDEF[@]} sce imports)"
 fi
 
 load_sdk
@@ -308,6 +322,9 @@ else
     # --gl-smoke (#77): EVO_GL_SMOKE gate in main.c + the pp_gl_smoke/pp_gl_fatal
     # objects (the Makefile adds them to PP_SRCS when GL_SMOKE=1).
     (( GL_SMOKE )) && APP_DEFS+=" -DEVO_GL_SMOKE=1"
+    # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
+    # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
+    (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
@@ -332,7 +349,7 @@ else
 
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
-        GL_SMOKE="${GL_SMOKE}" \
+        GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" \
         EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
@@ -341,7 +358,7 @@ else
         }
     while read -r rel; do
         OBJS+=("${EVO}/${rel}")
-    done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
+    done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
 
     # Static archives EVO links (Makefile LIBS + build-evoplayer.sh transitive
@@ -355,10 +372,10 @@ else
         need_file "${f}" "expected port archive missing: ${a}.a (pacbrew sysroot incomplete)"
         ARCHIVE_GROUP+=("${f}")
     done
-    # --gl-smoke: ps5-opengl-core33 (Mesa + PS5 Gallium + PSBC). The .mk names
-    # them via -L/-l; add those as raw link args INSIDE the archive group so the
-    # circular Mesa<->driver refs resolve.
-    (( GL_SMOKE )) && ARCHIVE_GROUP+=("${GL_LINK_LIBS[@]}")
+    # --gl / --gl-smoke: ps5-opengl-core33 (Mesa + PS5 Gallium + PSBC). The .mk
+    # names them via -L/-l; add those as raw link args INSIDE the archive group
+    # so the circular Mesa<->driver refs resolve.
+    (( GL_LINK )) && ARCHIVE_GROUP+=("${GL_LINK_LIBS[@]}")
 fi
 
 # ---------------------------------------------------------------------------
@@ -432,8 +449,8 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         [[ -n "${o}" && -f "${o}" ]] && llvm-nm -u "${o}" 2>/dev/null \
             | grep -oE '\bsce[A-Za-z0-9_]+' >> "${OBJ_UNDEF}" || true
     done
-    # --gl-smoke: the ps5-opengl archives import these too (harvested above).
-    (( GL_SMOKE )) && printf '%s\n' "${GL_SCE_UNDEF[@]}" >> "${OBJ_UNDEF}"
+    # --gl / --gl-smoke: the ps5-opengl archives import these too (harvested above).
+    (( GL_LINK )) && printf '%s\n' "${GL_SCE_UNDEF[@]}" >> "${OBJ_UNDEF}"
     sort -u -o "${OBJ_UNDEF}" "${OBJ_UNDEF}"
 
     dead_total=0
@@ -443,10 +460,10 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         so="${BUILD}/stubs/${base}.so"
         csrc="${BUILD}/stubs/${base}.c"
         grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
-        # --gl-smoke: add the sceAgc* / sceAgcDriver* names ps5-opengl links that
-        # this .syms doesn't already carry. Routed by prefix; sceVideoOut* etc.
-        # resolve from target/lib/*.so and are left alone.
-        if (( GL_SMOKE )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
+        # --gl / --gl-smoke: add the sceAgc* / sceAgcDriver* names ps5-opengl
+        # links that this .syms doesn't already carry. Routed by prefix;
+        # sceVideoOut* etc. resolve from target/lib/*.so and are left alone.
+        if (( GL_LINK )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
             existing="$(grep -vE '^\s*(#|$)' "${syms}" | awk '{print $1}')"
             for s in "${GL_SCE_UNDEF[@]}"; do
                 if [[ "${base}" == libSceAgcDriver ]]; then
@@ -511,11 +528,11 @@ LINK_TAIL=(--as-needed "${STUBDIR}"/*.so)
 [[ "${MODE}" == "player" ]] && \
     LINK_TAIL+=(--start-group "${PS5_SYSROOT}/lib/libc.a" --end-group)
 
-# --gl-smoke: --wrap=_Exit routes any stray _Exit (past the 4 patched sites)
-# through pp_gl_fatal.c; -u ps5_agc_gate2_run keeps the ps5-opengl submit entry
-# against --gc-sections (mirrors toolchain/ps5-opengl-core33.mk).
+# --gl / --gl-smoke: --wrap=_Exit routes any stray _Exit (past the 4 patched
+# sites) through pp_gl_fatal.c; -u ps5_agc_gate2_run keeps the ps5-opengl submit
+# entry against --gc-sections (mirrors toolchain/ps5-opengl-core33.mk).
 GL_LINK_EXTRA=()
-if (( GL_SMOKE )); then
+if (( GL_LINK )); then
     GL_LINK_EXTRA+=(--wrap=_Exit "${GL_FORCE_UNDEF[@]}")
 fi
 

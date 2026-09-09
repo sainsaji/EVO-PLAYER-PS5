@@ -35,6 +35,11 @@
 #ifdef EVO_GL_SMOKE
 #include "pp_gl_smoke.h"       /* #77 GL-1 go/no-go probe (--gl-smoke builds only) */
 #endif
+#ifdef EVO_GL_DEVICE
+#include "evo_gl_context.h"    /* render-overhaul GL-3 (#79): device GL context (--gl builds) */
+#include <EGL/egl.h>
+#include <GL/gl.h>
+#endif
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
 #include <sys/event.h>
@@ -12118,6 +12123,40 @@ int main(void) {
         evo_jailbreak_self();
         evo_boot_log_flush();
         for (;;) { evo_boot_log_flush(); sleep(30); }
+    }
+#endif
+#if defined(EVO_GL_DEVICE)
+    /* render-overhaul GL-3 (#79) B1: ps5-opengl owns sceAgc + sceVideoOut for
+     * the whole session. Bring the device GL context up here - the same
+     * pre-unjail slot pp_agc_init used - INSTEAD of pp_agc_init and the normal
+     * PP_BACKEND present path (a second sceVideoOut open panics the console).
+     * GL cannot be lazily initialised on first draw (libSceAgc* / libSceVideoOut
+     * go API-dead after the credential swap). B1 stops here: clear + swap a
+     * solid colour forever so the cutover can be proven on hardware (boots,
+     * shows the colour, stays up, PS-button frees the slot). B2 replaces this
+     * loop with the real per-screen RmlUi GL render. */
+    {
+        evo_bt("GL-3 B1: device GL context");
+        int glok = evo_gl_context_create(1920, 1080);
+        evo_bt("GL-3 B1: evo_gl_context_create -> %d", glok);
+        evo_jailbreak_self();      /* first try - daemon may not be polling yet */
+        evo_boot_log_flush();
+        int frame = 0;
+        for (;;) {
+            if (glok) {
+                /* teal - matches the GL-1 smoke clear colour */
+                glClearColor(0x18 / 255.0f, 0x9E / 255.0f, 0x8C / 255.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                evo_gl_context_present();
+            }
+            /* Keep trying to open the sandbox so /mnt/usb0/evo.log flushes for
+             * tools/evo-remote.sh log (the boot trace ran pre-unjail). */
+            if (!evo_jailbreak_is_open() && (frame % 300) == 60)
+                evo_jailbreak_ensure();
+            if ((frame++ & 255) == 0)
+                evo_boot_log_flush();
+            usleep(16000);
+        }
     }
 #endif
     pp_agc_init(1920, 1080, 0);

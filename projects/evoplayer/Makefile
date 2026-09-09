@@ -138,6 +138,22 @@ ifeq ($(GL_SMOKE),1)
     endif
 endif
 
+# --gl (render-overhaul GL-3, #79): persistent device GL context through
+# ps5-opengl. Cuts the boot over to GL/EGL; --gl and --gl-smoke are mutually
+# exclusive (both replace pp_agc_init + the normal present path). Off by default;
+# package-app.sh --gl passes GL_DEVICE=1 plus the ps5-opengl-core33.mk archives.
+# (RMLUI_SRCS gets evo_gl_context_device.cpp appended below, after it is set.)
+GL_DEVICE ?= 0
+ifeq ($(GL_DEVICE),1)
+    PP_SRCS  += pp/src/pp_gl_fatal.c
+    CFLAGS   += -DEVO_GL_DEVICE=1
+    CXXFLAGS += -DEVO_GL_DEVICE=1
+    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
+        CFLAGS   += $(PS5_OPENGL_PUBLIC_CFLAGS)
+        CXXFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
+    endif
+endif
+
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
@@ -154,6 +170,11 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_fileinterface.cpp \
     ui_rml/src/evo_rmlui_bundle.cpp \
     ui_rml/src/evo_rmlui_bundle_data.cpp
+
+# --gl (GL-3, #79): the device GL context, once RMLUI_SRCS exists.
+ifeq ($(GL_DEVICE),1)
+    RMLUI_SRCS += ui_rml/src/evo_gl_context_device.cpp
+endif
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 

@@ -1,0 +1,137 @@
+/*
+ * evo_gl_context_device.cpp - persistent EGL/GL 3.3 core context on the PS5,
+ * through ps5-opengl (render-overhaul GL-3, #79). See evo_gl_context.h.
+ *
+ * Device only. Compiled solely into a `--gl` .ffpfsc (EVO_GL_DEVICE, the
+ * Makefile GL_DEVICE=1 branch). The host preview harness gets its context from
+ * evo_gl_context_host.cpp (EVO_RML_GL_HOST) instead.
+ *
+ * Unlike pp_gl_smoke.c (the GL-1 go/no-go probe, which brings GL up, reads one
+ * pixel back and tears it all down) this context is PROCESS-LIFETIME: created
+ * once in main()'s pre-unjail slot, next to where pp_agc_init used to run, and
+ * never destroyed. ps5-opengl calls sceAgcInit and owns the sceVideoOut flip
+ * queue for the whole session - pp_videoout / pp_agc present are removed, not
+ * run alongside (a second sceVideoOut open panics the console).
+ *
+ * B1 scope: EGL window surface + GL 3.3 core context + eglSwapBuffers. No RmlUi
+ * wiring yet - main()'s B1 loop just glClear()s a solid colour and presents.
+ * B2 grafts RmlGL3 / EvoRenderInterfaceGL onto this same context.
+ */
+#if defined(EVO_GL_DEVICE)
+
+#include "evo_gl_context.h"
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GL/gl.h>
+
+#include "evo_boot_log.h"
+#include "evo_boot_trace.h"   /* evo_bt_ -> klog (live, pre-unjail) + evo.log */
+
+namespace {
+
+EGLDisplay g_dpy = EGL_NO_DISPLAY;
+EGLSurface g_srf = EGL_NO_SURFACE;
+EGLContext g_ctx = EGL_NO_CONTEXT;
+int        g_w = 0, g_h = 0;
+bool       g_ready = false;
+
+const EGLint k_cfg_attr[] = {
+    EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
+    EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+    EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+    EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
+    EGL_NONE,
+};
+const EGLint k_ctx_attr[] = {
+    EGL_CONTEXT_MAJOR_VERSION_KHR, 3,
+    EGL_CONTEXT_MINOR_VERSION_KHR, 3,
+    EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR,
+    EGL_NONE,
+};
+
+} // namespace
+
+extern "C" int evo_gl_context_create(int width, int height)
+{
+    if (g_ready)
+        return 1;
+    if (width  < 1) width  = 1920;
+    if (height < 1) height = 1080;
+    g_w = width;
+    g_h = height;
+
+    /* 1: EGL display + init. ps5-opengl's platform layer routes
+     * EGL_DEFAULT_DISPLAY to its own sceVideoOut-backed display. */
+    g_dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    EGLint egl_major = 0, egl_minor = 0;
+    if (g_dpy == EGL_NO_DISPLAY || !eglInitialize(g_dpy, &egl_major, &egl_minor)) {
+        evo_bt_("GL ctx: eglInitialize failed (0x%x)", eglGetError());
+        return 0;
+    }
+    evo_bt_("GL ctx: EGL %d.%d up", egl_major, egl_minor);
+
+    /* 2: bind the desktop-GL API + choose a config */
+    EGLConfig cfg = nullptr;
+    EGLint    cfg_n = 0;
+    if (!eglBindAPI(EGL_OPENGL_API) ||
+        !eglChooseConfig(g_dpy, k_cfg_attr, &cfg, 1, &cfg_n) || cfg_n != 1) {
+        evo_bt_("GL ctx: eglChooseConfig failed (0x%x, n=%d)", eglGetError(), cfg_n);
+        return 0;
+    }
+
+    /* 3: fullscreen window surface + context + make current. ps5-opengl takes a
+     * null native window and drives the flip queue itself. */
+    g_srf = eglCreateWindowSurface(g_dpy, cfg, (EGLNativeWindowType)0, nullptr);
+    g_ctx = eglCreateContext(g_dpy, cfg, EGL_NO_CONTEXT, k_ctx_attr);
+    if (g_srf == EGL_NO_SURFACE || g_ctx == EGL_NO_CONTEXT ||
+        !eglMakeCurrent(g_dpy, g_srf, g_srf, g_ctx)) {
+        evo_bt_("GL ctx: surface/context/makeCurrent failed (0x%x)", eglGetError());
+        return 0;
+    }
+
+    const char *v_vendor = (const char *)glGetString(GL_VENDOR);
+    const char *v_render = (const char *)glGetString(GL_RENDERER);
+    const char *v_ver    = (const char *)glGetString(GL_VERSION);
+    const char *v_glsl   = (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION);
+    evo_bt_("GL ctx: current - %s / %s / GL %s / GLSL %s",
+            v_vendor ? v_vendor : "?", v_render ? v_render : "?",
+            v_ver ? v_ver : "?", v_glsl ? v_glsl : "?");
+
+    glViewport(0, 0, g_w, g_h);
+    g_ready = true;
+    return 1;
+}
+
+extern "C" void evo_gl_context_destroy(void)
+{
+    if (g_dpy == EGL_NO_DISPLAY)
+        return;
+    eglMakeCurrent(g_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (g_ctx != EGL_NO_CONTEXT) eglDestroyContext(g_dpy, g_ctx);
+    if (g_srf != EGL_NO_SURFACE) eglDestroySurface(g_dpy, g_srf);
+    eglTerminate(g_dpy);
+    g_dpy = EGL_NO_DISPLAY;
+    g_srf = EGL_NO_SURFACE;
+    g_ctx = EGL_NO_CONTEXT;
+    g_ready = false;
+}
+
+extern "C" int evo_gl_context_ok(void)
+{
+    return g_ready ? 1 : 0;
+}
+
+extern "C" void evo_gl_context_present(void)
+{
+    if (g_ready)
+        eglSwapBuffers(g_dpy, g_srf);
+}
+
+extern "C" void evo_gl_context_size(int *w, int *h)
+{
+    if (w) *w = g_ready ? g_w : 0;
+    if (h) *h = g_ready ? g_h : 0;
+}
+
+#endif /* EVO_GL_DEVICE */
