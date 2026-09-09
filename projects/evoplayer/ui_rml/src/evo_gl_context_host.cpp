@@ -161,4 +161,16 @@ extern "C" int evo_gl_context_ok(void)
     return g_ready ? 1 : 0;
 }
 
+extern "C" void evo_gl_context_present(void)
+{
+    /* Surfaceless pbuffer: nothing to present. EvoRenderInterfaceGL reads the
+     * backbuffer back into the caller's framebuffer in FrameEnd(). */
+}
+
+extern "C" void evo_gl_context_size(int *w, int *h)
+{
+    if (w) *w = g_ready ? 1920 : 0;
+    if (h) *h = g_ready ? 1080 : 0;
+}
+
 #endif /* EVO_RML_GL_HOST */

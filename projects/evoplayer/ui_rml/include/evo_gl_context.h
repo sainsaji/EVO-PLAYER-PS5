@@ -34,6 +34,13 @@ void evo_gl_context_destroy(void);
 /* 1 once a context is current and GL is loaded. */
 int  evo_gl_context_ok(void);
 
+/* Present the default framebuffer to the display (device: eglSwapBuffers;
+ * host surfaceless: no-op - the harness reads the pbuffer back instead). */
+void evo_gl_context_present(void);
+
+/* Advisory backbuffer size for the current context (0,0 if none). */
+void evo_gl_context_size(int *w, int *h);
+
 #ifdef __cplusplus
 }
 #endif
