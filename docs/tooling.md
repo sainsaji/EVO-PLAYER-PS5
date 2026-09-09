@@ -32,6 +32,10 @@ docker compose run --rm ps5-dev ./tools/evo-remote.sh status
 
 # a UI/layout question? render on the host, no console:
 ./tools/uiview.sh --all      # -> output/uiview/rml_*.png
+
+# prefer a window? one panel over all of the above:
+python tools/evo-panel.py    # package (all flags) / deploy / evo-remote /
+                             # log pull / uiview / klog / shot — streamed output
 ```
 
 **There is no ELF-payload deploy loop any more.** `install-homebrew.sh`,
