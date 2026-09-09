@@ -1,15 +1,21 @@
 /*
- * evo_boot_log.h — capture boot-time diagnostics that happen BEFORE the
- * sandbox is unjailed (evo_vdec_probe, pp_agc_init, the jailbreak result
- * itself), so they can be pulled off the console as a file instead of
- * screenshotted one notification at a time.
+ * evo_boot_log.h — EVO's single diagnostic log: /mnt/usb0/evo.log
  *
- * evo_boot_log() buffers the line in memory (app module only) and, when
- * EVO_BOOT_TRACE_POPUP is defined (#51 opt-in, scripts/package-app.sh
- * --breadcrumbs), also pops a notification. evo_boot_log_flush() appends the
- * buffer to /mnt/usb0/evo_boot.log once /mnt/usb0 is reachable. Call flush
- * right after evo_jailbreak_self() and again periodically. No-op on host /
- * payload.
+ * Every diagnostic stream funnels here — the boot trace (evo_bt / pp_agc /
+ * jailbreak result), the playback breadcrumbs (pp_stage_bc), the native
+ * decoder notes, the VO-debug trace, the per-file playback stats — one
+ * timestamped, append-only file so there is a single place to look.
+ *
+ * evo_boot_log() timestamps the line and, before /mnt/usb0 is reachable,
+ * buffers it in memory; evo_boot_log_flush() opens the file once the sandbox
+ * is unjailed, drains the buffer, and thereafter every line is written
+ * straight through. Call flush right after evo_jailbreak_self() and again
+ * periodically (the render loop does, every 64 frames). With
+ * EVO_BOOT_TRACE_POPUP (--breadcrumbs) each line also pops a notification.
+ * No-op on host / payload builds.
+ *
+ * NOT funnelled here: evo_status (a live one-line state snapshot the dev
+ * remote polls) and evo_compat_report.txt (a user-triggered report).
  */
 #ifndef EVO_BOOT_LOG_H
 #define EVO_BOOT_LOG_H
@@ -24,6 +30,10 @@ void evo_boot_log(const char *fmt, ...)
 #endif
     ;
 void evo_boot_log_flush(void);
+
+/* Preferred names for new code — the file carries far more than the boot. */
+#define evo_log        evo_boot_log
+#define evo_log_flush  evo_boot_log_flush
 
 #ifdef __cplusplus
 }

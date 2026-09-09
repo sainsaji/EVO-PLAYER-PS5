@@ -4,8 +4,9 @@
 #
 # One deployed build (built with --usb-remote) is driven over FTP with no
 # controller and no rebuild between tests. It writes /mnt/usb0/evo_status once
-# a second and reads /mnt/usb0/evo_cmd for commands; evo_vdec_native.c's note()
-# also appends to /mnt/usb0/evo_vdec.log.
+# a second and reads /mnt/usb0/evo_cmd for commands. Every build also writes
+# ONE diagnostic log, /mnt/usb0/evo.log (boot trace + breadcrumbs + decoder
+# notes + playback stats, timestamped).
 #
 #   PS5_HOST=192.168.0.6 ./tools/evo-remote.sh <subcommand>
 #
@@ -14,10 +15,9 @@
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   status                                  print /mnt/usb0/evo_status once
-#   boot                                    print evo_boot.log (pre-unjail probe results)
-#   watch [seconds]                         stream evo_status + new evo_vdec.log lines
-#   log                                     pull evo_boot.log + evo_vdec.log + breadcrumb tail
-#   clear                                   delete the USB status / log / breadcrumb files
+#   log                                     pull /mnt/usb0/evo.log (-> output/logs/)
+#   watch [seconds]                         stream evo_status + new evo.log lines
+#   clear                                   delete evo.log + evo_status
 #
 # The one thing this can't do: launch the title (sceSystemServiceLaunchApp from
 # a payload returns 0x80940005). After `build` / `kill`, launch once from the
@@ -85,15 +85,12 @@ PY
 }
 
 USB_STATUS="/mnt/usb0/evo_status"
-USB_VDEC="/mnt/usb0/evo_vdec.log"
-USB_BOOT="/mnt/usb0/evo_boot.log"
-USB_BC="/mnt/usb0/pp_4k_stage_breadcrumb.txt"
+USB_LOG="/mnt/usb0/evo.log"
 
 case "${SUB}" in
 build)
     "${SCRIPTS_DIR}/package-app.sh" --ffpfsc --usb-remote "$@"
-    del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BOOT}" "${USB_BC}" \
-              /mnt/usb0/pp_4k_stage_last.txt || true
+    del_files "${USB_STATUS}" "${USB_LOG}" || true
     "${SCRIPTS_DIR}/deploy-app.sh" --ffpfsc
     echo ""
     echo "  >>> launch PPSA99039 from the Games row (ShadowMount+ remounted) <<<"
@@ -107,17 +104,12 @@ kill)
     ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
-clear)  del_files "${USB_STATUS}" "${USB_VDEC}" "${USB_BOOT}" "${USB_BC}" /mnt/usb0/pp_4k_stage_last.txt ;;
+clear)  del_files "${USB_STATUS}" "${USB_LOG}" ;;
 status) get_file "${USB_STATUS}" || echo "(no evo_status — launched? built --usb-remote?)" ;;
-boot)   get_file "${USB_BOOT}"   || echo "(no evo_boot.log — launched? sandbox open?)" ;;
-log)
+boot|log)
     mkdir -p "${LOG_OUT}"
-    echo "=== evo_boot.log (pre-unjail probes) ==="
-    get_file "${USB_BOOT}" 2>/dev/null | tee "${LOG_OUT}/evo_boot.log" || true
-    echo "=== evo_vdec.log ==="
-    get_file "${USB_VDEC}" 2>/dev/null | tee "${LOG_OUT}/evo_vdec.log" || true
-    echo "=== breadcrumb tail ==="
-    get_file "${USB_BC}" 2>/dev/null | grep -E 'REMOTE|SEEK|FLUSH|VDEC|012_|009_|AVLOG|RECONFIG|FINISH' | tail -40 || true
+    get_file "${USB_LOG}" 2>/dev/null | tee "${LOG_OUT}/evo.log" \
+        || echo "(no evo.log — launched? sandbox open?)"
     ;;
 watch)
     SECS="${1:-180}"
@@ -142,7 +134,7 @@ while time.time() < dl:
     st = get("/mnt/usb0/evo_status")
     if st and st.strip() and st.strip() != last:
         print(st.strip()); last = st.strip()
-    v = get("/mnt/usb0/evo_vdec.log") or ""
+    v = get("/mnt/usb0/evo.log") or ""
     if len(v) > vlen:
         for ln in v[vlen:].splitlines():
             if ln.strip(): print("  " + ln)

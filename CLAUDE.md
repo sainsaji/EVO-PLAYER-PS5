@@ -38,11 +38,14 @@ the dependency-ordered plan; each issue body also carries its own
 - **The console's `/fs` web route is read-only**, no `DELETE`. Don't attempt
   to script deletion of USB screenshots through it — `tools/shot.sh clean`
   explains the two routes that actually work.
-- **App-module diagnostics are on-screen notification popups.** klog only gets
-  `sceKernelDebugOutText` lines (`-DEVO_APP_MODULE`); the sandbox has no visible
-  stdout. `tools/evo-remote.sh` pulls `/mnt/usb0/evo_*` logs over FTP when the
-  build carries `--usb-remote`. A `timeout`/`curl` timeout on an `evo-remote.sh`
-  call is the normal, successful outcome.
+- **App-module diagnostics: one file — `/mnt/usb0/evo.log`.** Every build
+  writes it (boot trace + playback breadcrumbs + decoder notes + per-file
+  stats, all timestamped). `klog` also gets the same lines live via
+  `sceKernelDebugOutText` (`-DEVO_APP_MODULE`); popups only with `--breadcrumbs`.
+  `tools/evo-remote.sh log` pulls `evo.log` over FTP → `output/logs/evo.log`.
+  A `timeout`/`curl` timeout on an `evo-remote.sh` call is the normal,
+  successful outcome. (`evo_status` — a live one-line state snapshot for the
+  dev remote — is the only other file, `--usb-remote` builds only.)
 - **Everything toolchain-related runs in the pinned Docker container.**
   Scripts under `scripts/` and `tools/` re-exec themselves through
   `docker compose` when run from Windows.
@@ -66,7 +69,7 @@ docker compose run --rm ps5-dev bash -lc '
   ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
 # ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
-# Diagnostics = on-screen notification popups (+ klog for -DEVO_APP_MODULE).
+# Diagnostics = /mnt/usb0/evo.log (one file) + klog live; popups with --breadcrumbs.
 # Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
 
 # COMPILE CHECK ONLY - keeps the non-app-module path green (#31/#36/modularisation)

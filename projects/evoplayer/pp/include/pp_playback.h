@@ -171,7 +171,7 @@ void pp_playback_notify_seek_end(pp_playback *pb, int success,
 
 void pp_playback_get_stats(const pp_playback *pb, pp_playback_stats *out);
 uint64_t pp_playback_convert_p95_us(const pp_playback *pb);
-void pp_playback_write_stats_file(const pp_playback *pb, const char *path);
+void pp_playback_log_stats(const pp_playback *pb);   /* -> /mnt/usb0/evo.log */
 
 int pp_playback_choose_output_mode(const pp_source_caps *src,
                                    uint32_t display_max_w,

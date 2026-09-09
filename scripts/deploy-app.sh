@@ -11,8 +11,8 @@
 # sce_sys/param.json are uploaded LAST so a half-finished folder is never
 # mountable. After this, mount + launch from the Games row with ShadowMountPlus.
 #
-# The --ffpfsc deploy also DELETEs every /mnt/usb0/evo_*  /  pp_4k_stage_* file
-# EVO writes, so each launch starts with a fresh log set.
+# The --ffpfsc deploy also DELETEs /mnt/usb0/{evo.log, evo_status,
+# evo_compat_report.txt}, so each launch starts with a fresh log.
 #
 # This does NOT launch anything - launch safety (never stack launches) is on
 # you and ShadowMountPlus. See docs/evo-pro/phase-1b-app-module.md.
@@ -90,13 +90,9 @@ def rmtree(ftp, path):
         pass
 
 
-# Every /mnt/usb0 file the app module writes - cleared on each deploy so a
-# launch always starts a fresh set (evo-remote.sh / evo-panel read these back).
-USB_LOGS = [
-    "evo_status", "evo_vdec.log", "evo_boot.log", "evo_vo_debug.log",
-    "evo_compat_report.txt", "pp_playback_stats.txt",
-    "pp_4k_stage_breadcrumb.txt", "pp_4k_stage_last.txt",
-]
+# The runtime files the app module writes - cleared on each deploy so a launch
+# always starts fresh (evo-remote.sh / evo-panel read these back).
+USB_LOGS = ["evo.log", "evo_status", "evo_compat_report.txt"]
 
 with FTP() as ftp:
     ftp.connect(host, int(port), timeout=15)

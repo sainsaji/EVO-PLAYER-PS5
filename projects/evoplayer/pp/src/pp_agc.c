@@ -302,7 +302,7 @@ static int  agc_ovl_staging_ensure(size_t need);
 static void agc_bgra_to_nv12(uint8_t *y, uint8_t *uv, const uint32_t *bgra,
                              uint32_t w, uint32_t h);
 
-/* First-frame breadcrumbs -> evo_boot.log, flushed each call, silent once a
+/* First-frame breadcrumbs -> evo.log, flushed each call, silent once a
  * frame has presented. #27 phase C: pin down where the present path dies when
  * neither the sigsetjmp guard nor the submit watchdog fires. */
 #define agc_dbg(...) do { \
@@ -314,7 +314,7 @@ static void agc_bgra_to_nv12(uint8_t *y, uint8_t *uv, const uint32_t *bgra,
 
 /* #28 Phase 4: same, but keyed to the geometry path's own first-frame flag so
  * it goes quiet after one good geo frame even when no video has played (else it
- * floods evo_boot.log every menu frame and the USB write dominates the frame). */
+ * floods evo.log every menu frame and the USB write dominates the frame). */
 #define geo_dbg(...) do { \
         if (!g_agc.geo_first_ok) { \
             evo_boot_log("pp_agc: " __VA_ARGS__); \

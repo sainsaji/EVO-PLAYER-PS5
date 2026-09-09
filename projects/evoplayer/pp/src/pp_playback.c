@@ -325,7 +325,7 @@ static int nv12_to_yuv420p(pp_playback *pb, const pp_frame *s, pp_frame *out)
 }
 
 /* #27: steady-state GPU present timing, mirrors evo_vdec_native's decode
- * heartbeat. One line to evo_boot.log per window so evo-remote.sh boot shows
+ * heartbeat. One line to evo.log per window so evo-remote.sh log shows
  * whether the convert+flip holds the frame budget. */
 #define PP_AGC_HEARTBEAT_FRAMES 300u
 static void agc_heartbeat_note(pp_playback *pb, uint64_t present_us, int dropped)
@@ -984,42 +984,36 @@ uint64_t pp_playback_convert_p95_us(const pp_playback *pb)
     return tmp[idx];
 }
 
-void pp_playback_write_stats_file(const pp_playback *pb, const char *path)
+void pp_playback_log_stats(const pp_playback *pb)
 {
-    FILE *f;
     pp_clock_stats cs;
     uint64_t avg = 0;
-    if (!pb || !path)
-        return;
-    f = fopen(path, "w");
-    if (!f)
+    if (!pb)
         return;
     pp_clock_get_stats(&pb->clock, &cs);
     if (pb->stats.frames_converted)
         avg = pb->stats.convert_us_total / pb->stats.frames_converted;
-    fprintf(f, "pp_playback_stats\n");
-    fprintf(f, "output=%ux%u aspect=%d\n", pb->out_w, pb->out_h, (int)pb->cfg.aspect);
-    fprintf(f, "frames_in=%llu converted=%llu published=%llu late_drop=%llu seek_disc=%llu\n",
+    evo_boot_log("stats output=%ux%u aspect=%d", pb->out_w, pb->out_h, (int)pb->cfg.aspect);
+    evo_boot_log("stats frames_in=%llu converted=%llu published=%llu late_drop=%llu seek_disc=%llu",
             (unsigned long long)pb->stats.frames_in,
             (unsigned long long)pb->stats.frames_converted,
             (unsigned long long)pb->stats.frames_published,
             (unsigned long long)pb->stats.frames_late_dropped,
             (unsigned long long)pb->stats.frames_discarded_seek);
-    fprintf(f, "convert_us_avg=%llu convert_us_p95=%llu convert_us_max=%llu\n",
+    evo_boot_log("stats convert_us_avg=%llu p95=%llu max=%llu",
             (unsigned long long)avg,
             (unsigned long long)pp_playback_convert_p95_us(pb),
             (unsigned long long)pb->stats.convert_us_max);
-    fprintf(f, "seek_requests=%llu seek_ok=%llu seek_fail=%llu clock_resets=%llu seek_to_first_ms=%llu\n",
+    evo_boot_log("stats seek_req=%llu ok=%llu fail=%llu clock_resets=%llu seek_to_first_ms=%llu",
             (unsigned long long)pb->stats.seek_requests,
             (unsigned long long)pb->stats.seek_successes,
             (unsigned long long)pb->stats.seek_failures,
             (unsigned long long)pb->stats.clock_resets,
             (unsigned long long)pb->stats.seek_to_first_frame_ms);
-    fprintf(f, "clock_late_drops=%llu early_sleeps=%llu pause=%llu resume=%llu\n",
+    evo_boot_log("stats clock_late_drops=%llu early_sleeps=%llu pause=%llu resume=%llu sample_bgra=0x%08X",
             (unsigned long long)cs.late_drops,
             (unsigned long long)cs.early_sleeps,
             (unsigned long long)cs.pause_count,
-            (unsigned long long)cs.resume_count);
-    fprintf(f, "sample_bgra=0x%08X\n", (unsigned)pb->stats.sample_bgra);
-    fclose(f);
+            (unsigned long long)cs.resume_count,
+            (unsigned)pb->stats.sample_bgra);
 }

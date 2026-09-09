@@ -102,7 +102,7 @@ docker compose run --rm ps5-dev bash -lc '
 
 | Script | What it does |
 |---|---|
-| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--agc-probe` adds the boot-time `sceAgc` reachability recon. `--probe` builds the sandbox probe instead of the player. `--breadcrumbs` (#51) brings back the on-screen boot-trace notification popups — off by default since klog carries the same lines. |
+| `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--usb-remote` adds the scriptable FTP dev remote (`evo_status` + `evo_cmd`). `--probe` builds the sandbox probe instead of the player. `--breadcrumbs` (#51) also pops each diagnostic line as an on-screen notification — off by default since `/mnt/usb0/evo.log` + klog carry them all. |
 | `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
 | `setup-pfs-tool.sh` | Fetches MkPFS into `.deps/` (pinned, isolated venv). Called by `--ffpfsc`; needs network on first run. |
 | `setup-native-app-deps.sh` | Bootstraps the static zlib the host converter needs. Called by `package-app.sh`. |
@@ -126,15 +126,15 @@ signed `eboot.bin` itself is FSELF-wrapped and reads as opaque `data` to
 
 Iteration still needs a manual mount + launch per cycle (no remote
 `SceSystemServiceLaunchApp` for an unregistered title). Diagnostics come back
-as **klog** by default (`-DEVO_APP_MODULE` routes the `pp_stage_bc` / `evo_bt`
-/ `EVO_P8` breadcrumbs there via `sceKernelDebugOutText` — `/mnt/usb0` is
-ENOENT inside the sandbox, so file-based breadcrumbs are invisible pre-unjail).
-The on-screen system-notification popups those breadcrumbs used to always pop
-are **off by default since #51** — they were only useful while bringing the
-app module up blind and are just TV noise now that it boots reliably. Pass
-`package-app.sh --breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) to bring them back
-for a session where you're watching the TV without klog attached. USB media
-browse needs `tools/sandbox-unjail.sh`, re-run per launch.
+two ways, both carrying the same lines: **`/mnt/usb0/evo.log`** — one
+timestamped file with the boot trace, the `pp_stage_bc` / `evo_bt` / `EVO_P8`
+breadcrumbs, the decoder notes and the per-file playback stats (pre-unjail
+lines are buffered and flushed once `/mnt/usb0` resolves) — pull it with
+`tools/evo-remote.sh log`; and **klog** live via `sceKernelDebugOutText`,
+useful before the sandbox opens. On-screen notification popups of each line
+are **off by default since #51** (just TV noise) — `package-app.sh
+--breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) brings them back. USB media browse
+still needs the self-unjail (`evo_jailbreak_self`, or `tools/sandbox-unjail.sh`).
 
 ### The removed ELF-payload route
 
@@ -505,7 +505,7 @@ Which services need to be running on the console:
 | Task | Needs |
 |---|---|
 | `deploy-app.sh`, `tools/evo-remote.sh` | `ps5-payload-ftpsrv` (2121) + ShadowMountPlus to mount + launch |
-| `tools/shot.sh`, `evo-remote.sh` boot-log pull | `ps5-payload-websrv` (8080) |
+| `tools/shot.sh`, `evo-remote.sh` log pull | `ps5-payload-websrv` (8080) |
 | `tools/sandbox-unjail.sh` (rarely) | `ps5-payload-elfldr` (9021) |
 | `klog.sh` | `ps5-payload-klogsrv` (3232) |
 

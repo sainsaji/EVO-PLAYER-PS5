@@ -92,14 +92,12 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
 
-/* App-module diagnostics: under -DEVO_VDEC_LOG (package-app.sh --usb-remote)
- * an fsync'd append to /mnt/usb0/evo_vdec.log for an FTP pull; the per-frame
- * fsync is dev-only. The notification popup below used to be unconditional -
- * "always visible on the TV" - but this fires on every decode heartbeat/
- * error, i.e. routinely *during playback*, not just at boot/open/close, and
- * was reported as recurring "EVO vdec native:" popups mid-playback (#51
- * follow-up). It now shares evo_bt()'s EVO_BOOT_TRACE_POPUP opt-in
- * (scripts/package-app.sh --breadcrumbs). */
+/* Decoder notes go to /mnt/usb0/evo.log (via evo_boot_log — one file, shared
+ * with the boot trace + breadcrumbs). They are already gated at the call sites
+ * (first 3 decodes, first error, a 300-decode heartbeat) so they never spam.
+ * The notification popup shares evo_bt()'s EVO_BOOT_TRACE_POPUP opt-in
+ * (scripts/package-app.sh --breadcrumbs) — it used to be unconditional and
+ * was reported as recurring "EVO vdec native:" popups mid-playback. */
 #if defined(EVO_BOOT_TRACE_POPUP)
 struct v2n_note { char pad[45]; char msg[3075]; };
 #endif
@@ -118,22 +116,7 @@ static void note(const char *fmt, ...)
     sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
 #endif
 
-    /* evo_vdec_native_probe() runs pre-unjail — route it to the buffered
-     * boot log too (harmless overlap once /mnt/usb0 is up). */
     evo_boot_log("%s", msg);
-
-#ifdef EVO_VDEC_LOG
-    FILE *f = fopen("/mnt/usb0/evo_vdec.log", "a");
-    if (f) {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        fprintf(f, "[%lld.%03ld] %s\n", (long long)ts.tv_sec,
-                ts.tv_nsec / 1000000L, msg);
-        fflush(f);
-        fsync(fileno(f));
-        fclose(f);
-    }
-#endif
 }
 
 static size_t align16k(size_t v) { return (v + 0x3fffu) & ~(size_t)0x3fffu; }

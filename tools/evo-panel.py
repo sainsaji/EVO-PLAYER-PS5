@@ -45,16 +45,12 @@ LOG_OUT = REPO_ROOT / "output" / "logs"
 DEFAULT_FTP_PORT = 2121
 BASH = shutil.which("bash") or "bash"
 
-# ---- /mnt/usb0 logs EVO writes (see the code inventory) --------------------
+# ---- the files EVO writes to /mnt/usb0 -------------------------------------
 KNOWN_LOGS = [
-    ("/mnt/usb0/evo_boot.log", "evo_boot.log  (boot trace / probes)", True),
-    ("/mnt/usb0/pp_4k_stage_breadcrumb.txt", "pp_4k_stage_breadcrumb.txt", True),
-    ("/mnt/usb0/pp_4k_stage_last.txt", "pp_4k_stage_last.txt", True),
-    ("/mnt/usb0/pp_playback_stats.txt", "pp_playback_stats.txt", True),
-    ("/mnt/usb0/evo_status", "evo_status  (--usb-remote)", False),
-    ("/mnt/usb0/evo_vdec.log", "evo_vdec.log  (--usb-remote)", False),
-    ("/mnt/usb0/evo_vo_debug.log", "evo_vo_debug.log  (-DEVO_VO_DEBUG)", False),
-    ("/mnt/usb0/evo_compat_report.txt", "evo_compat_report.txt", False),
+    ("/mnt/usb0/evo.log", "evo.log  —  the one diagnostic log "
+                          "(boot + breadcrumbs + decode + stats)", True),
+    ("/mnt/usb0/evo_status", "evo_status  —  live state snapshot (--usb-remote)", False),
+    ("/mnt/usb0/evo_compat_report.txt", "evo_compat_report.txt  —  saved report", False),
 ]
 
 # ---- package-app.sh flags (case block in the script) ----------------------

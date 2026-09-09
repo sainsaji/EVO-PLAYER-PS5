@@ -1,14 +1,13 @@
 /*
  * evo_boot_trace.h - Phase 1b app-module bring-up breadcrumbs.
  *
- * #51: evo_bt("...") always logs to the kernel log (tools/klog.sh) whenever
- * EVO_APP_MODULE is defined - that's the only diagnostics channel visible
- * before VideoOut is up, and it's cheap enough to leave on unconditionally.
- * It ALSO used to pop a system notification on every single call, which was
- * right while debugging blind at Phase 1b but is just noise on the TV now
- * that the app module boots fine. The popup is opt-in: define
- * EVO_BOOT_TRACE_POPUP (scripts/package-app.sh --breadcrumbs) to bring it
- * back for a session where you're watching the TV without klog attached.
+ * #51: evo_bt("...") writes to three places whenever EVO_APP_MODULE is defined:
+ *   - the single diagnostic log /mnt/usb0/evo.log (via evo_boot_log) — durable,
+ *     the place to look after the fact;
+ *   - the kernel log (tools/klog.sh) — visible live before VideoOut is up and
+ *     without a USB stick;
+ *   - a system notification, but only with EVO_BOOT_TRACE_POPUP
+ *     (scripts/package-app.sh --breadcrumbs) — noise on the TV otherwise.
  *
  * Compiles to nothing outside the app module (host / payload builds).
  */
@@ -20,6 +19,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "evo_boot_log.h"   /* evo_bt lines also land in /mnt/usb0/evo.log */
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,9 @@ static inline void evo_bt_(const char *fmt, ...)
      * klog attached. */
     sceKernelSendNotificationRequest(0, &r, sizeof r, 0);
 #endif
+
+    /* Durable: the one diagnostic log. */
+    evo_boot_log("%s", r.msg);
 
     /* Kernel log - captured remotely by tools/klog.sh, so an unattended
      * deploy/launch/collect loop needs no TV. Always on in the app module. */

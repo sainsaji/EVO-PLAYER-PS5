@@ -238,10 +238,11 @@ else
     # this generated header - drop main.o so the id on screen is always current.
     rm -f "${EVO}/main.o"
     APP_DEFS="-DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
-    # --usb-remote: the scriptable dev remote (evo_usb_remote.c) + the verbose
-    # /mnt/usb0/evo_vdec.log append in evo_vdec_native.c's note(). Off by
+    # --usb-remote: the scriptable dev remote (evo_usb_remote.c) — the
+    # /mnt/usb0/evo_status snapshot + the evo_cmd command channel. Off by
     # default so a release eboot never touches the user's USB stick per frame.
-    (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1 -DEVO_VDEC_LOG=1"
+    # The diagnostic log (/mnt/usb0/evo.log) is written by every build.
+    (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1"
     # --breadcrumbs (#51): bring back the on-screen boot-trace notification
     # popups (evo_bt / evo_boot_log). Off by default - klog
     # (tools/klog.sh) carries the same lines unconditionally in the app
