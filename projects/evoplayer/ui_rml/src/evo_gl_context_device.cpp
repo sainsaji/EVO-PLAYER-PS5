@@ -21,9 +21,13 @@
 
 #include "evo_gl_context.h"
 
+#include <cstdlib>
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#define GL_GLEXT_PROTOTYPES 1
 #include <GL/gl.h>
+#include <GL/glext.h>
 
 #include "evo_boot_log.h"
 #include "evo_boot_trace.h"   /* evo_bt_ -> klog (live, pre-unjail) + evo.log */
@@ -98,6 +102,12 @@ extern "C" int evo_gl_context_create(int width, int height)
             v_vendor ? v_vendor : "?", v_render ? v_render : "?",
             v_ver ? v_ver : "?", v_glsl ? v_glsl : "?");
 
+    /* Don't block the frame loop on vblank inside eglSwapBuffers - the loop
+     * needs to keep polling the pad. Menu redraws are change-only (GL-3 B2), so
+     * tearing is a non-issue; a slow synchronous flip here was eating button
+     * presses. */
+    eglSwapInterval(g_dpy, 0);
+
     glViewport(0, 0, g_w, g_h);
     g_ready = true;
     return 1;
@@ -126,6 +136,45 @@ extern "C" void evo_gl_context_present(void)
 {
     if (g_ready)
         eglSwapBuffers(g_dpy, g_srf);
+}
+
+extern "C" void evo_gl_frame_begin(void)
+{
+    if (!g_ready)
+        return;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, g_w, g_h);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    /* Menu backdrop - dark neutral. Most RmlUi screens paint an opaque body
+     * over this; it only shows through translucent overlays / letterboxing. */
+    glClearColor(0x0d / 255.0f, 0x0d / 255.0f, 0x10 / 255.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
+extern "C" void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)
+{
+    if (!g_ready || !bgra || w <= 0 || h <= 0)
+        return;
+    /* fb 0 bytes are R,G,B,A == 0xAABBGGRR in memory, y-up. Read into a scratch
+     * row-reversed into the caller's top-down buffer, alpha forced opaque. */
+    static uint32_t *s_row = nullptr;
+    static int s_row_w = 0;
+    if (s_row_w < w) {
+        free(s_row);
+        s_row = (uint32_t *)malloc((size_t)w * 4);
+        s_row_w = s_row ? w : 0;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    for (int y = 0; y < h; y++) {
+        uint32_t *dst = &bgra[(size_t)y * w];
+        if (s_row) {
+            glReadPixels(0, h - 1 - y, w, 1, GL_RGBA, GL_UNSIGNED_BYTE, s_row);
+            for (int x = 0; x < w; x++)
+                dst[x] = 0xFF000000u | (s_row[x] & 0x00FFFFFFu);
+        }
+    }
 }
 
 extern "C" void evo_gl_context_size(int *w, int *h)

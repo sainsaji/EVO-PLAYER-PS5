@@ -8,9 +8,15 @@
 #include "evo_rmlui_render_gl.h"
 #include "evo_rmlui_bundle.h"
 
-/* glad GL function-pointer declarations (the definitions / loader live in
- * rmlui_gl3/RmlUi_Renderer_GL3.cpp, which #defines GLAD_GL_IMPLEMENTATION). */
+/* GL entry points. Host (GL-2): glad declarations (definitions + loader live in
+ * rmlui_gl3/RmlUi_Renderer_GL3.cpp, which #defines GLAD_GL_IMPLEMENTATION).
+ * Device (GL-3, #79): RMLUI_GL3_CUSTOM_LOADER - ps5-opengl links GL directly, no
+ * glad, so pull the same prototype header RmlUi_Renderer_GL3.cpp uses. */
+#if defined(RMLUI_GL3_CUSTOM_LOADER)
+#include RMLUI_GL3_CUSTOM_LOADER
+#else
 #include "rmlui_gl3/RmlUi_Include_GL3.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -43,13 +49,21 @@ void EvoRenderInterfaceGL::SetDimensions(int w, int h)
 
 void EvoRenderInterfaceGL::FrameBegin()
 {
-    /* Clear the default framebuffer (the pbuffer backbuffer). RenderInterface_GL3
-     * clears its own layer stack in BeginFrame() but NOT fb 0, and its EndFrame()
-     * composites onto fb 0 with premultiplied-alpha blending - so without this
-     * an overlay pass (toast / dialog over a menu) that leaves most of the frame
-     * transparent would show the *previous* frame's fb 0 contents underneath. We
-     * re-read fb 0 and composite over m_target ourselves, so a clean transparent
-     * fb 0 each frame is exactly what we want. */
+#if defined(EVO_GL_DEVICE)
+    /* Device (GL-3, #79): main.c clears fb 0 once per frame (evo_gl_frame_begin)
+     * BEFORE the screen dispatch, then each screen / overlay pass composites
+     * over it - so no per-pass fb 0 clear here. EndFrame() blits straight to
+     * fb 0 and eglSwapBuffers presents it; there is no readback. */
+    BeginFrame();
+    return;
+#else
+    /* Host (GL-2): clear the pbuffer backbuffer. RenderInterface_GL3 clears its
+     * own layer stack in BeginFrame() but NOT fb 0, and EndFrame() composites
+     * onto fb 0 with premultiplied blending - so without this an overlay pass
+     * (toast / dialog over a menu) that leaves most of the frame transparent
+     * would show the *previous* frame's fb 0 underneath. We re-read fb 0 and
+     * composite over m_target ourselves, so a clean transparent fb 0 is what we
+     * want. */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -57,12 +71,16 @@ void EvoRenderInterfaceGL::FrameBegin()
     glClear(GL_COLOR_BUFFER_BIT);
 
     BeginFrame();   /* RmlUi: binds + clears the layer stack to transparent black */
+#endif
 }
 
 void EvoRenderInterfaceGL::FrameEnd()
 {
     EndFrame();     /* RmlUi: resolves MSAA + blits the composite to fb 0 */
 
+#if defined(EVO_GL_DEVICE)
+    return;         /* composited straight to fb 0; main.c does eglSwapBuffers */
+#else
     if (!m_target || m_width <= 0 || m_height <= 0)
         return;
 
@@ -105,6 +123,7 @@ void EvoRenderInterfaceGL::FrameEnd()
             dst[x] = 0xFF000000u | (b << 16) | (g << 8) | r;
         }
     }
+#endif /* !EVO_GL_DEVICE */
 }
 
 /* ===================================================================== *

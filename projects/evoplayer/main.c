@@ -42,6 +42,7 @@
 #endif
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/cpu.h>
 #include <sys/event.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -12126,47 +12127,46 @@ int main(void) {
     }
 #endif
 #if defined(EVO_GL_DEVICE)
-    /* render-overhaul GL-3 (#79) B1: ps5-opengl owns sceAgc + sceVideoOut for
-     * the whole session. Bring the device GL context up here - the same
-     * pre-unjail slot pp_agc_init used - INSTEAD of pp_agc_init and the normal
-     * PP_BACKEND present path (a second sceVideoOut open panics the console).
-     * GL cannot be lazily initialised on first draw (libSceAgc* / libSceVideoOut
-     * go API-dead after the credential swap). B1 stops here: clear + swap a
-     * solid colour forever so the cutover can be proven on hardware (boots,
-     * shows the colour, stays up, PS-button frees the slot). B2 replaces this
-     * loop with the real per-screen RmlUi GL render. */
+    /* render-overhaul GL-3 (#79): ps5-opengl owns sceAgc + sceVideoOut for the
+     * whole session. Bring the device GL context up here - the same pre-unjail
+     * slot pp_agc_init used - INSTEAD of pp_agc_init and the normal PP_BACKEND
+     * present path (a second sceVideoOut open panics the console). GL cannot be
+     * lazily initialised on first draw (libSceAgc* / libSceVideoOut go API-dead
+     * after the credential swap). B1 proved the cutover (teal clear + swap); B2
+     * renders every non-player RmlUi screen through this context to fb 0. */
     {
-        evo_bt("GL-3 B1: device GL context");
+        evo_bt("GL-3: device GL context");
         int glok = evo_gl_context_create(1920, 1080);
-        evo_bt("GL-3 B1: evo_gl_context_create -> %d", glok);
-        evo_jailbreak_self();      /* first try - daemon may not be polling yet */
-        evo_boot_log_flush();
-        int frame = 0;
-        for (;;) {
-            if (glok) {
-                /* teal - matches the GL-1 smoke clear colour */
-                glClearColor(0x18 / 255.0f, 0x9E / 255.0f, 0x8C / 255.0f, 1.0f);
-                glClear(GL_COLOR_BUFFER_BIT);
-                evo_gl_context_present();
-            }
-            /* Keep trying to open the sandbox so /mnt/usb0/evo.log flushes for
-             * tools/evo-remote.sh log (the boot trace ran pre-unjail). */
-            if (!evo_jailbreak_is_open() && (frame % 300) == 60)
-                evo_jailbreak_ensure();
-            if ((frame++ & 255) == 0)
-                evo_boot_log_flush();
-            usleep(16000);
+        evo_bt("GL-3: evo_gl_context_create -> %d", glok);
+        /* One teal frame so the panel shows *something* while boot continues
+         * (font build, theme load, RmlUi init all run before the frame loop). */
+        if (glok) {
+            evo_gl_frame_begin();
+            evo_gl_context_present();
         }
     }
 #endif
+#if !defined(EVO_GL_DEVICE)
     pp_agc_init(1920, 1080, 0);
-    evo_boot_log_flush();
 #endif
+    evo_boot_log_flush();
+#endif  /* EVO_APP_MODULE */
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
     evo_boot_log_flush();   /* sandbox open now — flush the pre-unjail trace to USB */
 #ifdef EVO_APP_MODULE
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
+#endif
+#if defined(EVO_GL_DEVICE)
+    /* GL-3 (#79): ps5-opengl's runtime sets up JIT / executable memory for the
+     * Mesa shader compiler. That flips FFmpeg swscale's legacy MMX path from
+     * "exec-alloc fails, use C" to "exec-alloc succeeds, then memcpy the MMX
+     * loop templates out of .text" - and PS5 maps .text execute-only, so that
+     * read is a SYSTEM_XO_VIOLATION (crash in ff_init_hscaler_mmxext, frame 0,
+     * decoding a launch-screen thumbnail). Force the C paths; swscale here is
+     * only thumbnails / poster extraction and is on its way out in GL-4/GL-5. */
+    av_force_cpu_flags(0);
+    evo_bt("GL-3: FFmpeg CPU flags forced to 0 (swscale XO-violation guard)");
 #endif
     /* Initialize the 2MB-aligned Direct Memory Region. Sized (#6) for the 4K
      * CPU video working set so the rotate ring / pp_playback display / VO
@@ -12242,8 +12242,13 @@ int main(void) {
     bool running = true;
 
 #if PP_BACKEND_ENABLED
+    uint32_t *linear = NULL;
+    uint32_t pp_buf_idx = 0;
+    uint32_t pp_pitch = 0;
+    (void)pp_buf_idx; (void)pp_pitch;
     memset(&g_pp_vo, 0, sizeof(g_pp_vo));
     pp_playback_init(&g_pp_pb);
+#if !defined(EVO_GL_DEVICE)
     if (pp_videoout_init(&g_pp_vo, WIDTH, HEIGHT, PP_PIXEL_BGRA32_TILED, 2) != 0) {
         toast("VIDEOOUT", "pp_videoout_init failed");
         evo_bt("pp_videoout_init FAILED step=%d rc=%d (10=Open 11=AllocDmem "
@@ -12254,9 +12259,13 @@ int main(void) {
     g_pp_vo_ready = 1;
     pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
     pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
-    uint32_t *linear = NULL;
-    uint32_t pp_buf_idx = 0;
-    uint32_t pp_pitch = 0;
+#else
+    /* GL-3 (#79) B2: ps5-opengl owns the flip queue - no pp_videoout. RmlUi
+     * renders straight to the GL default framebuffer; this scratch only absorbs
+     * the immediate-mode overlays (virtual keyboard, FPS overlay) that GL-5
+     * moves onto GL, so they don't crash on a NULL fb. */
+    uint32_t *gl_scratch = calloc((size_t)WIDTH * (size_t)HEIGHT, 4);
+#endif
 #else
     int handle = sceVideoOutOpen(0xff, 0, 0, NULL);
     size_t memsize = 0x2000000;
@@ -12291,7 +12300,7 @@ int main(void) {
         if ((frame & 63) == 0)
             evo_boot_log_flush();   /* cheap no-op once drained; catches a late sandbox open */
 
-#if PP_BACKEND_ENABLED
+#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
         /* #32: drive the scrub-overlay state machine (may queue a VO reconfig
          * once the decode thread has parked). Before apply so it lands now. */
         prospero_scrub_overlay_pump();
@@ -12406,6 +12415,18 @@ int main(void) {
         } else if (v8_presented) {
             linear = NULL;
         }
+#elif defined(EVO_GL_DEVICE)
+        /* GL-3 (#79) B2: no VO acquire. The dispatch always runs (its update
+         * calls set the UI-dirty flag from this frame's input); it only
+         * *renders* on a redraw frame. gl_active decided once here. */
+        int idx = 0; (void)idx;
+        int gl_active = evo_rmlui_gl_needs_frame();
+        evo_rmlui_gl_set_active(gl_active);
+        if (gl_active)
+            evo_gl_frame_begin();
+        linear = gl_scratch;
+        if (gl_active && gl_scratch)
+            memset(gl_scratch, 0, (size_t)WIDTH * (size_t)HEIGHT * 4u);
 #else
         int idx = frame % 2;
 #endif
@@ -13166,7 +13187,7 @@ skip_screen_input:
         }
 #endif
 
-#if PP_BACKEND_ENABLED
+#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
         /*
          * After stop / leave-player while VO is still 4K: do not draw 1080 UI
          * into the 4K plane (one-frame stacked flash). Drop the buffer; next
@@ -13180,6 +13201,24 @@ skip_screen_input:
         }
 #endif
 
+#if defined(EVO_GL_DEVICE)
+        /* GL-3 (#79) B2: the player present path is B3. Bounce any player-family
+         * screen back to the browser so the menu-only cutover is what runs. */
+        if (screen == SCREEN_PLAYER || screen == SCREEN_SUBTITLE_PICKER ||
+            screen == SCREEN_EXIT_CONFIRM || screen == SCREEN_PLAYBACK_FINISHED) {
+            static int s_gl_player_toast;
+            if (!s_gl_player_toast) {
+                toast("GL-3 B2", "player present is B3 - menus only");
+                s_gl_player_toast = 1;
+            }
+            screen = SCREEN_USB_BROWSER;
+            evo_nav_reset((evo_screen_id)screen);
+        }
+#endif
+
+#if defined(EVO_GL_DEVICE)
+        uint64_t _gl_disp_t0 = gl_active ? (uint64_t)now_ms() : 0;
+#endif
         /* V8 direct present: video already on screen; skip UI composite this frame. */
         if (linear) {
         if (screen == 2 && pp_product_k4_live(screen)) {
@@ -13312,14 +13351,22 @@ skip_screen_input:
 
         if (evo_screenshot_request) {
             evo_screenshot_request = 0;
-            if (evo_screenshot_write(linear, (int)g_vo_w, (int)g_vo_h) == 0)
+#if defined(EVO_GL_DEVICE)
+            /* GL-3 (#79) B2: the menu is on fb 0, not in `linear`. Read it back. */
+            if (linear)
+                evo_gl_read_default_fb(linear, (int)WIDTH, (int)HEIGHT);
+            int shot_rc = evo_screenshot_write(linear, (int)WIDTH, (int)HEIGHT);
+#else
+            int shot_rc = evo_screenshot_write(linear, (int)g_vo_w, (int)g_vo_h);
+#endif
+            if (shot_rc == 0)
                 toast("SCREENSHOT", "SAVED TO USB");
             else
                 toast("SCREENSHOT", "SAVE FAILED");
         }
         } /* if (linear) */
 
-#if PP_BACKEND_ENABLED
+#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
         (void)idx;
         if (!v8_presented && !v8_hold) {
             int ui_presented = 0;
@@ -13366,6 +13413,46 @@ skip_screen_input:
             /* Light sleep so we don't spin at kHz while holding last V8 frame */
             usleep(2000);
         }
+#elif defined(EVO_GL_DEVICE)
+        /* GL-3 (#79) B2: swap only when a Context::Render() actually composited
+         * onto fb 0 this frame (menu changed / overlay visible / warm-up).
+         * Otherwise the front buffer holds and we just keep polling input -
+         * ps5-opengl is too slow to re-raster + swap at 60 Hz. */
+        if (gl_active) {
+            uint64_t _dispatch_ms = (uint64_t)now_ms() - _gl_disp_t0;
+            int _drew = evo_rmlui_gl_consume_drew();
+            uint64_t _t0 = (uint64_t)now_ms();
+            if (_drew) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
+            uint64_t _swap_ms = (uint64_t)now_ms() - _t0;
+            static uint64_t s_gl_redraws;
+            if (_drew) s_gl_redraws++;
+            if (_drew && s_gl_redraws <= 12)
+                evo_bt("GL-3 B2: redraw #%llu screen=%d dispatch=%llums swap=%llums",
+                       (unsigned long long)s_gl_redraws, screen,
+                       (unsigned long long)_dispatch_ms,
+                       (unsigned long long)_swap_ms);
+            else if (_drew && (s_gl_redraws % 30) == 0)
+                evo_bt("GL-3 B2: redraw #%llu dispatch=%llums swap=%llums",
+                       (unsigned long long)s_gl_redraws,
+                       (unsigned long long)_dispatch_ms,
+                       (unsigned long long)_swap_ms);
+            if (_drew) evo_boot_log_flush();
+        }
+        {
+            static uint64_t s_hb_t0, s_hb_iters, s_hb_redraws2;
+            uint64_t _now = (uint64_t)now_ms();
+            s_hb_iters++;
+            if (gl_active) s_hb_redraws2++;
+            if (!s_hb_t0) s_hb_t0 = _now;
+            if (_now - s_hb_t0 >= 1000) {
+                evo_bt("GL-3 B2: loop %llu it/s, %llu redraw/s",
+                       (unsigned long long)s_hb_iters,
+                       (unsigned long long)s_hb_redraws2);
+                evo_boot_log_flush();
+                s_hb_t0 = _now; s_hb_iters = 0; s_hb_redraws2 = 0;
+            }
+        }
+        usleep(2000);
 #else
         PS5_DrawPixelsAsTiles(linear, (uint32_t*)vbuf[idx].data, WIDTH, HEIGHT);
 
@@ -13398,7 +13485,7 @@ skip_screen_input:
             usleep(250);
     }
 
-#if PP_BACKEND_ENABLED
+#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
     stop_video_playback();
     /* Restore 1080 VO for clean exit if still on 4K */
     if (g_vo_w != 1920u || g_vo_h != 1080u)
@@ -13406,6 +13493,9 @@ skip_screen_input:
     pp_playback_shutdown(&g_pp_pb);
     if (g_pp_vo_ready)
         pp_videoout_shutdown(&g_pp_vo);
+#elif defined(EVO_GL_DEVICE)
+    pp_playback_shutdown(&g_pp_pb);
+    evo_gl_context_destroy();
 #endif
 
     return 0;

@@ -14,9 +14,12 @@
  * pulls in the glad GL loader, which must never reach any PS5 build (neither
  * the .ffpfsc app module nor the build-evoplayer.sh compile check). Only the
  * host preview harness defines EVO_RML_GL_HOST. The device GL path is GL-3. */
-#ifdef EVO_RML_GL_HOST
+#if defined(EVO_RML_GL_HOST) || defined(EVO_GL_DEVICE)
 #include "evo_rmlui_render_gl.h"
 #include "evo_gl_context.h"
+#endif
+#if defined(EVO_GL_DEVICE)
+#include "evo_boot_log.h"   /* GL-3 (#79): trace the GL interface selection to evo.log */
 #endif
 
 /* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
@@ -25,12 +28,20 @@
 
 /* FrameBegin/FrameEnd bracket every Context::Render(): no-ops on the CPU
  * rasteriser, bind-FBO / read-back on the GL interface (GL-2, #78). */
+/* GL-3 (#79): mark that a real Context::Render() reached the GL default
+ * framebuffer this frame, so the device loop knows to eglSwapBuffers. */
+#if defined(EVO_GL_DEVICE)
+#define EVO_GL_MARK_DREW() (m_gl_drew = true)
+#else
+#define EVO_GL_MARK_DREW() ((void)0)
+#endif
+
 #ifdef EVO_RML_PROFILE
 #define EVO_PROF_CTX_RENDER() do {                                      \
         double _c0 = evo_prof_now_ms(); m_context->Update();            \
         double _c1 = evo_prof_now_ms();                                 \
         m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
-        double _c2 = evo_prof_now_ms();                                 \
+        double _c2 = evo_prof_now_ms(); EVO_GL_MARK_DREW();             \
         g_evo_rml_prof.update_ms += _c1 - _c0; g_evo_rml_prof.update_n++;\
         g_evo_rml_prof.render_ms += _c2 - _c1; g_evo_rml_prof.render_n++;\
     } while (0)
@@ -38,6 +49,7 @@
 #define EVO_PROF_CTX_RENDER() do {                                      \
         m_context->Update();                                           \
         m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
+        EVO_GL_MARK_DREW();                                            \
     } while (0)
 #endif
 
@@ -112,6 +124,23 @@ void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
 void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
                                    int width, int height)
 {
+#if defined(EVO_GL_DEVICE)
+    /* GL-3 (#79) B2: no m_surface cache, no CPU blit. RmlUi renders straight to
+     * the GL default framebuffer (FrameEnd composites there); main.c cleared
+     * fb 0 and will eglSwapBuffers. Only render on an "active" frame - the
+     * device loop decided this frame is a redraw (GlNeedsFrame). The B4 cleanup
+     * deletes the rest of this function. */
+    (void)framebuffer;
+    if (!m_render->IsGpu())
+        return;   /* GL interface failed to construct - never rasterise to NULL */
+    if (!m_gl_active)
+        return;   /* holding the front buffer this frame */
+    m_render->SetFramebuffer(nullptr);
+    m_render->SetDimensions(width, height);
+    EVO_PROF_CTX_RENDER();   /* also sets m_gl_drew */
+    m_cached_screen = screen_id;
+    return;
+#else
     const size_t px = (size_t)width * (size_t)height;
 
     bool resized = (width != m_surface_w || height != m_surface_h);
@@ -160,6 +189,7 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+#endif /* !EVO_GL_DEVICE */
 }
 
 bool EvoRmlApp::AgcGeoActive() const
@@ -192,6 +222,19 @@ int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target
                               flip_marker);
 }
 
+bool EvoRmlApp::GlNeedsFrame()
+{
+    /* Retained-mode + ps5-opengl can't re-raster + MSAA-resolve + swap at 60 Hz,
+     * so the device loop only redraws on change. Marquee / RCSS animation is
+     * deferred to GL-5; the overlay docs that animate (toast slide, dialog) are
+     * caught by the IsVisible checks. Called exactly once per frame by main.c. */
+    if (m_gl_warmup > 0) { m_gl_warmup--; return true; }
+    if (m_frame_dirty) return true;
+    if (m_toast_doc && m_toast_doc->IsVisible()) return true;
+    if (m_dialog_doc && m_dialog_doc->IsVisible()) return true;
+    return false;
+}
+
 bool EvoRmlApp::Initialize(int width, int height) {
     if (m_initialized) return true;
 
@@ -221,6 +264,29 @@ bool EvoRmlApp::Initialize(int width, int height) {
         } else {
             fprintf(stderr, "[EVO RmlUi] EVO_RML_GL set but no GL context; using CPU\n");
         }
+    }
+#endif
+#ifdef EVO_GL_DEVICE
+    /* GL-3 (#79): the device always renders through OpenGL - ps5-opengl owns
+     * sceVideoOut for the whole session. The context was created in main()'s
+     * pre-unjail slot (evo_gl_context_device.cpp). */
+    evo_log("RmlUi GL-3: ctx_ok=%d - constructing GL render interface", evo_gl_context_ok());
+    evo_log_flush();
+    if (evo_gl_context_ok()) {
+        auto gl = std::make_unique<EvoRenderInterfaceGL>(width, height);
+        bool ok = gl->Ok();
+        evo_log("RmlUi GL-3: EvoRenderInterfaceGL constructed, Ok=%d", (int)ok);
+        evo_log_flush();
+        if (ok) {
+            m_render = std::move(gl);
+            fprintf(stderr, "[EVO RmlUi] device OpenGL render interface active\n");
+        } else {
+            evo_log("RmlUi GL-3: FATAL - GL interface failed to construct (shader compile?)");
+            evo_log_flush();
+        }
+    } else {
+        evo_log("RmlUi GL-3: FATAL - no device GL context");
+        evo_log_flush();
     }
 #endif
     if (!m_render)
@@ -2740,5 +2806,8 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
     m_render->FrameBegin();
     m_toast_context->Render();
     m_render->FrameEnd();
+#if defined(EVO_GL_DEVICE)
+    m_gl_drew = true;
+#endif
 }
 

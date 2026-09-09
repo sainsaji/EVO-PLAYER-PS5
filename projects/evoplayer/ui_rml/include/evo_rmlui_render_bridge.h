@@ -49,4 +49,9 @@ public:
 
     virtual void FrameBegin() {}
     virtual void FrameEnd() {}
+
+    /* GL-3 (#79): true for the OpenGL interface (renders to fb 0, ignores the
+     * caller framebuffer). The device RenderCachedScreen path must not fall
+     * through to a CPU rasteriser writing a NULL framebuffer. */
+    virtual bool IsGpu() const { return false; }
 };

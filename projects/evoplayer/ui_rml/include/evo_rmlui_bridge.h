@@ -352,6 +352,18 @@ bool evo_rmlui_init(int screen_width, int screen_height);
 void evo_rmlui_shutdown(void);
 bool evo_rmlui_is_initialized(void);
 
+/* GL-3 (#79) B2: 1 if the UI changed since the last render and the device GL
+ * frame loop should redraw + eglSwapBuffers this iteration; 0 to hold the front
+ * buffer (retained-mode + ps5-opengl is too slow to re-raster every frame). */
+int  evo_rmlui_gl_needs_frame(void);
+/* 1 if a Context::Render() actually composited to fb 0 since the last call
+ * (clears the flag). The device loop swaps only when this is set. */
+int  evo_rmlui_gl_consume_drew(void);
+/* Gate for this frame: 1 = the dispatch may render (a redraw frame), 0 = hold. */
+void evo_rmlui_gl_set_active(int active);
+/* Called after a successful present: clears the UI-dirty flag. */
+void evo_rmlui_gl_end_frame(void);
+
 /* Playback OSD API */
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* params);
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height);

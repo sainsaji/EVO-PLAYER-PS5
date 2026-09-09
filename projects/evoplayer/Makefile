@@ -148,6 +148,14 @@ ifeq ($(GL_DEVICE),1)
     PP_SRCS  += pp/src/pp_gl_fatal.c
     CFLAGS   += -DEVO_GL_DEVICE=1
     CXXFLAGS += -DEVO_GL_DEVICE=1
+    # B2: RmlUi's upstream GL3 render interface. ps5-opengl links GL directly, so
+    # skip glad's dlopen loader - RMLUI_GL3_CUSTOM_LOADER points at a header that
+    # just pulls <GL/gl.h> + prototypes (evo_gl3_device_loader.h).
+    CXXFLAGS += -DRMLUI_GL3_CUSTOM_LOADER='"rmlui_gl3/evo_gl3_device_loader.h"'
+    CXXFLAGS += -Iui_rml/src
+    # B2 perf: ps5-opengl multisample-resolve is expensive. Menu AA can come back
+    # once the render path is fast (or via EGL_SAMPLES on the window surface).
+    CXXFLAGS += -DRMLUI_NUM_MSAA_SAMPLES=0
     ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
         CFLAGS   += $(PS5_OPENGL_PUBLIC_CFLAGS)
         CXXFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
@@ -171,9 +179,12 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_bundle.cpp \
     ui_rml/src/evo_rmlui_bundle_data.cpp
 
-# --gl (GL-3, #79): the device GL context, once RMLUI_SRCS exists.
+# --gl (GL-3, #79): the device GL context + the RmlUi GL3 render interface,
+# once RMLUI_SRCS exists.
 ifeq ($(GL_DEVICE),1)
-    RMLUI_SRCS += ui_rml/src/evo_gl_context_device.cpp
+    RMLUI_SRCS += ui_rml/src/evo_gl_context_device.cpp \
+                  ui_rml/src/evo_rmlui_render_gl.cpp \
+                  ui_rml/src/rmlui_gl3/RmlUi_Renderer_GL3.cpp
 endif
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)

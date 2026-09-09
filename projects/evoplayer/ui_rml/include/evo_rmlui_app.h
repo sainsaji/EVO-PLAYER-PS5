@@ -741,6 +741,24 @@ private:
     int m_cached_screen = -1;
     void RenderCachedScreen(int screen_id, uint32_t* framebuffer, int width, int height);
 
+public:
+    /* GL-3 (#79) B2 device loop. Retained-mode + ps5-opengl can't re-raster at
+     * 60 Hz, so the loop only redraws + swaps on change. Per frame, main.c:
+     *   a = GlNeedsFrame();          // dirty || overlay visible || warm-up
+     *   GlSetActive(a);              // gate for RenderCachedScreen this frame
+     *   ... run the dispatch (update calls always run, so input sets dirty) ...
+     *   if (a && GlConsumeDrew()) { present(); GlEndFrame(); }  // clears dirty
+     */
+    bool GlNeedsFrame();
+    void GlSetActive(bool a) { m_gl_active = a; }
+    bool GlActive() const { return m_gl_active; }
+    bool GlConsumeDrew() { bool d = m_gl_drew; m_gl_drew = false; return d; }
+    void GlEndFrame() { m_frame_dirty = false; }
+private:
+    int  m_gl_warmup = 3;
+    bool m_gl_drew = false;
+    bool m_gl_active = false;
+
     /* #28 Phase 4: solid-geometry batch collected during the last cached
      * render, and whether it is waiting for AgcGeoPresent to submit it. */
     EvoAgcGeoSink m_agc_geo;

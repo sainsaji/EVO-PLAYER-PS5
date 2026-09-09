@@ -15,6 +15,22 @@ bool evo_rmlui_is_initialized(void) {
     return EvoRmlApp::Instance().IsInitialized();
 }
 
+int evo_rmlui_gl_needs_frame(void) {
+    return EvoRmlApp::Instance().GlNeedsFrame() ? 1 : 0;
+}
+
+int evo_rmlui_gl_consume_drew(void) {
+    return EvoRmlApp::Instance().GlConsumeDrew() ? 1 : 0;
+}
+
+void evo_rmlui_gl_set_active(int active) {
+    EvoRmlApp::Instance().GlSetActive(active != 0);
+}
+
+void evo_rmlui_gl_end_frame(void) {
+    EvoRmlApp::Instance().GlEndFrame();
+}
+
 void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* p) {
     if (!p) return;
     EvoChangelogState state;

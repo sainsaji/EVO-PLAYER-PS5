@@ -18,6 +18,8 @@
  * (RmlGL3::Initialize). It is not lazily initialisable.
  */
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,6 +42,17 @@ void evo_gl_context_present(void);
 
 /* Advisory backbuffer size for the current context (0,0 if none). */
 void evo_gl_context_size(int *w, int *h);
+
+/* GL-3 (#79) B2, device only. Called once per frame BEFORE the screen dispatch:
+ * bind fb 0, set the viewport, clear it to the menu backdrop. Each RmlUi screen
+ * / overlay pass then composites over it; evo_gl_context_present() swaps.
+ * No-op on the host. */
+void evo_gl_frame_begin(void);
+
+/* GL-3 (#79) B2, device only. glReadPixels the composited default framebuffer
+ * into a caller BGRA buffer (0xAABBGGRR, y-flipped to top-down) - the menu
+ * screenshot path. No-op on the host. */
+void evo_gl_read_default_fb(uint32_t *bgra, int w, int h);
 
 #ifdef __cplusplus
 }
