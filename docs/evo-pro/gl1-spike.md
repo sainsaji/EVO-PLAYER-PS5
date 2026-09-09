@@ -20,7 +20,11 @@ do not start) and this doc records where it failed.
 ## 1. Vendor decision — git submodule
 
 `third_party/ps5-opengl` is a **git submodule** (`.gitmodules`), pinned to
-`23a594c` (`sdk-0.1.0-perf20260909-g47-hfr-sdl2-focused~24`).
+`9eb75fc` (`sdk-0.1.0-perf20260909-g55-hfr-sdl2-focused`). Bumped G47
+(`23a594c`) → G55 for GL-4 (#80). GL-1 smoke re-verified on hardware (§7a);
+the re-measure showed the `glTexSubImage2D` staging copy is **RGBA8-only** —
+R8/RG8 uploads are free, so GL-4's NV12 path needs no zero-copy. See
+[gl4-video-path-plan.md](gl4-video-path-plan.md).
 
 - Submodule, not a vendored copy: the tree is Mesa-sized and has its own fast
   release cadence; a gitlink keeps EVO's history clean and the pin explicit.
@@ -40,11 +44,11 @@ do not start) and this doc records where it failed.
 module strands the PS5 app slot (only a PS-button close frees it), loses resume
 state, and skips teardown — forbidden by `CLAUDE.md`.
 
-| File | Site |
+| File | Site (line @ G55) |
 |---|---|
-| `src/gallium/ps5/ps5_screen.c:3121` | `ps5_release_resource_memory` — unmap/release failed |
-| `src/gallium/ps5/ps5_screen.c:7801` | `ps5_context_queue_present` — queued present failed |
-| `src/gallium/ps5/ps5_screen.c:7819` | `ps5_draw_batch_flush_locked` — deferred batch cleanup failed |
+| `src/gallium/ps5/ps5_screen.c:3139` | `ps5_release_resource_memory` — unmap/release failed |
+| `src/gallium/ps5/ps5_screen.c:7908` | `ps5_context_queue_present` — queued present failed |
+| `src/gallium/ps5/ps5_screen.c:7926` | `ps5_draw_batch_flush_locked` — deferred batch cleanup failed |
 | `src/platform/ps5_agc_native_runtime.c:774` | `runtime_require_retirement` — submission retirement failed |
 
 **`patches/ps5-opengl/0001-recoverable-fail.patch`** replaces each
@@ -253,6 +257,33 @@ EVO boot: GL-1 smoke done rc=0
 
 **VERDICT: GO.** ps5-opengl renders on FW 12.70. GL-2 (#78) is unblocked; the
 overhaul proceeds.
+
+### 7a. G55 re-verification — ✅ (GL-4 #80 Stage 1, 2026-09-10)
+
+Console `192.168.0.13`, FW 12.70, `--gl-smoke` `.ffpfsc` (BUILD
+`6f4ce974-dirty_0909-2012`), klog:
+
+```
+GL bench: 1080p RGBA8      1920x1080 RGBA8      mean=65.53ms p95=65.73ms  min=65.00ms
+GL bench: 1080p RGBA8 PBO  1920x1080 RGBA8 PBO  mean=65.74ms p95=66.23ms  min=65.40ms
+GL bench: 1080p luma R8    1920x1080 R8         mean=0.10ms  p95=0.11ms   min=0.10ms
+GL bench: 1080p chroma RG8  960x540  RG8        mean=0.03ms  p95=0.03ms   min=0.03ms
+GL bench: 4K RGBA8         3840x2160 RGBA8      mean=252.79ms p95=254.24ms
+GL bench: 4K luma R8       3840x2160 R8         mean=0.90ms  p95=0.96ms
+GL bench: 4K chroma RG8    1920x1080 RG8        mean=0.46ms  p95=0.50ms
+GL-1 SMOKE: result=PASS stage=7 dead=0 px=189E8C want=189E8C
+           renderer="PS5 AGC" gl="3.3 (Core Profile) Mesa 26.2.0" glsl="3.30"
+EVO boot: jailbreak: ... sandbox=OPEN (/data errno=0)
+```
+
+- **GL-1 PASS on G55** — no regression from the bump. `sandbox=OPEN` this run
+  (the G47 receipt's `errno=2` park-loop unjail gap didn't recur).
+- **The staging copy is RGBA8-only.** R8 / RG8 uploads are effectively free
+  → NV12 two-plane upload = 0.13 ms/frame (1080p) / 1.36 ms/frame (4K). GL-4
+  needs **no** zero-copy import. See
+  [gl4-video-path-plan.md](gl4-video-path-plan.md).
+- PBO (`GL_MAP_UNSYNCHRONIZED_BIT`) makes no difference — the copy is inside
+  `glTexSubImage2D`, past the map.
 
 Follow-up nits (not blockers):
 - klogsrv on this console drops the TCP connection every ~5 s; `klog.sh`

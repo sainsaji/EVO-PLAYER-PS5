@@ -7,6 +7,8 @@
 #include <setjmp.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -54,6 +56,120 @@ static GLuint compile_one(GLenum type, const char *src)
         return 0;
     }
     return sh;
+}
+
+/* ===================================================================== *
+ *  GL-4 (#80) texture-upload micro-benchmark
+ *
+ *  GL-3 B3 measured glTexSubImage2D of a 1080p RGBA8 frame at ~68 ms on
+ *  ps5-opengl G47 (synchronous CPU staging copy per upload) — the ~14 fps
+ *  video-stutter wall. This runs after the smoke's render/readback and times
+ *  the client-upload path for the formats a GL video path would use, so GL-4
+ *  has a hard baseline to measure a zero-copy import against and a G55
+ *  regression datapoint. Bench only — the smoke result stays the triangle
+ *  readback. All GL calls stay inside the smoke's g_pp_gl_fence guard.
+ * ===================================================================== */
+static double mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+}
+
+static int cmp_double(const void *a, const void *b)
+{
+    double d = *(const double *)a - *(const double *)b;
+    return (d > 0) - (d < 0);
+}
+
+#define BENCH_ITERS 32
+
+/* One case: glTexStorage2D once, then time BENCH_ITERS glTexSubImage2D+glFinish.
+ * pbo != 0 routes the upload through a mapped GL_PIXEL_UNPACK_BUFFER
+ * (GL_MAP_UNSYNCHRONIZED_BIT) — the variant GL-3 tried with no effect on G47. */
+static void bench_upload_case(const char *name, GLenum internalfmt, GLenum fmt,
+                              GLenum type, int w, int h, int bpp, int pbo)
+{
+    const size_t bytes = (size_t)w * (size_t)h * (size_t)bpp;
+    uint8_t *src = (uint8_t *)malloc(bytes);
+    if (!src) {
+        evo_bt_("GL bench: %-16s alloc %zuKiB FAILED", name, bytes / 1024);
+        return;
+    }
+    memset(src, 0x7F, bytes);
+
+    GLuint tex = 0, buf = 0;
+    double s[BENCH_ITERS];
+    double sum = 0.0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexStorage2D(GL_TEXTURE_2D, 1, internalfmt, w, h);
+
+    if (pbo) {
+        glGenBuffers(1, &buf);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buf);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, (GLsizeiptr)bytes, NULL, GL_STREAM_DRAW);
+    }
+
+    if (glGetError() != GL_NO_ERROR) {
+        evo_bt_("GL bench: %-16s setup GL error — skipped", name);
+        goto out;
+    }
+
+    for (int i = -3; i < BENCH_ITERS; ++i) {         /* -3..-1 = warm-up */
+        src[(size_t)(i & 0x3FF)] ^= 0xFFu;           /* defeat any content cache */
+        double t0 = mono_ms();
+        if (pbo) {
+            void *p = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, (GLsizeiptr)bytes,
+                                      GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT |
+                                      GL_MAP_UNSYNCHRONIZED_BIT);
+            if (p) { memcpy(p, src, bytes); glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER); }
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, type, (const void *)0);
+        } else {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, type, src);
+        }
+        glFinish();
+        double dt = mono_ms() - t0;
+        if (i >= 0)
+            s[i] = dt;
+    }
+
+    qsort(s, BENCH_ITERS, sizeof s[0], cmp_double);
+    for (int i = 0; i < BENCH_ITERS; ++i)
+        sum += s[i];
+    evo_bt_("GL bench: %-16s %4dx%-4d %-5s%s mean=%.2fms p50=%.2fms p95=%.2fms "
+            "min=%.2fms (%zuKiB, n=%d)",
+            name, w, h,
+            internalfmt == GL_RGBA8 ? "RGBA8" :
+            internalfmt == GL_R8    ? "R8"    :
+            internalfmt == GL_RG8   ? "RG8"   : "?",
+            pbo ? " PBO" : "    ",
+            sum / BENCH_ITERS, s[BENCH_ITERS / 2], s[(BENCH_ITERS * 95) / 100],
+            s[0], bytes / 1024, BENCH_ITERS);
+
+out:
+    if (pbo) { glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0); glDeleteBuffers(1, &buf); }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDeleteTextures(1, &tex);
+    free(src);
+}
+
+static void smoke_bench_uploads(void)
+{
+    evo_boot_log("GL-4 bench: glTexSubImage2D client-upload cost (GL-3 B3 wall = ~68ms/1080p-RGBA8 on G47)");
+    evo_boot_log_flush();
+    /*                     name              internalfmt  fmt      type               w     h     bpp pbo */
+    bench_upload_case("1080p RGBA8",     GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 1920, 1080, 4, 0);
+    bench_upload_case("1080p RGBA8 PBO", GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 1920, 1080, 4, 1);
+    bench_upload_case("1080p luma R8",   GL_R8,    GL_RED,  GL_UNSIGNED_BYTE, 1920, 1080, 1, 0);
+    bench_upload_case("1080p chroma RG8",GL_RG8,   GL_RG,   GL_UNSIGNED_BYTE,  960,  540, 2, 0);
+    bench_upload_case("4K RGBA8",        GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 3840, 2160, 4, 0);
+    bench_upload_case("4K luma R8",      GL_R8,    GL_RED,  GL_UNSIGNED_BYTE, 3840, 2160, 1, 0);
+    bench_upload_case("4K chroma RG8",   GL_RG8,   GL_RG,   GL_UNSIGNED_BYTE, 1920, 1080, 2, 0);
+    evo_boot_log_flush();
 }
 
 int pp_gl_smoke_run(void)
@@ -188,6 +304,12 @@ int pp_gl_smoke_run(void)
         glDrawArrays(GL_TRIANGLES, 0, 3);
         eglSwapBuffers(dpy, srf);
     }
+
+    /* 7b: GL-4 (#80) — texture-upload cost baseline. Bench only; does not
+     * affect `result`. Still under the fence (armed until `done:`). */
+    stage = 71;
+    smoke_bench_uploads();
+    stage = 7;
 
     result = near ? 0 : 8;   /* rendered but wrong pixel => stage 8 */
 
