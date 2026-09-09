@@ -50,8 +50,24 @@ otherwise show the previous frame's fb 0.
 
 `diff_*` / `*_gl.png` land in `output/uiview/`.
 
+## Next: GL-3 (#79) — device cutover
+
+The GL-2 investigation settled GL-3's architecture (see the
+[#79 alignment comment](https://github.com/sainsaji/EVO-PLAYER-PS5/issues/79#issuecomment-5605332303)):
+**`ps5-opengl` owns `sceVideoOut` for the whole session** — no VO handoff,
+`pp_videoout` / `pp_agc` present removed not run alongside. Because of that
+single-owner constraint the player frame's *present* also moves into GL-3 (a
+GL texture blit of `pp/`'s already-CPU-converted RGBA frame); `pp/` keeps
+decode + convert + clock. GL-4 (#80) then replaces that CPU convert with a
+GLSL shader.
+
+Staged B1 (persistent device GL context + `--gl` flag + boot cutover) → B2
+(menu screens through GL) → B3 (player present via GL texture, kills the #32
+overlay machine) → B4 (delete the dual path, retire routes #2/#3) → B5 (#49
+seam cleanup). Each is its own hardware-verified commit.
+
 ## Not done here (later stories)
 
-Device GL (GL-3), video into the funnel (GL-4), the strays — subtitles font,
-keyboard, image viewer, FPS overlay (GL-5), deleting `evo_rmlui_render.cpp` /
-`pp_agc.c` present (GL-6).
+Device GL (GL-3, #79), GLSL YUV→RGB + CPU-converter deletion (GL-4, #80), the
+strays — subtitles font, keyboard, image viewer, FPS overlay (GL-5), deleting
+`evo_rmlui_render.cpp` / `pp_agc.c` the files (GL-6).
