@@ -1,0 +1,30 @@
+<rml>
+<head>
+    <link type="text/rcss" href="image.rcss"/>
+</head>
+<body id="image-body">
+    <div id="img-header">
+        <div id="img-accent"></div>
+        <div id="img-head-text">
+            <div id="img-eyebrow">IMAGE VIEWER</div>
+            <div id="img-title">IMAGE</div>
+        </div>
+        <div id="img-dims">IMAGE FILE</div>
+    </div>
+
+    <div id="img-frame">
+        <div id="img-canvas"></div>
+        <div id="img-error">
+            <div id="img-error-title">IMAGE COULD NOT BE DISPLAYED</div>
+            <div id="img-error-sub">UNSUPPORTED OR INVALID FILE</div>
+        </div>
+    </div>
+
+    <div id="img-footer">
+        <div class="img-hint">
+            <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+            <span class="img-hint-text">BACK</span>
+        </div>
+    </div>
+</body>
+</rml>

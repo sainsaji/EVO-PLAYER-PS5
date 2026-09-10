@@ -87,13 +87,11 @@ PP_SRCS := \
     pp/src/evo_ui.c
 
 UI_SRCS := \
-    ui/src/evo_draw.c \
     ui/src/evo_nav.c \
     ui/src/evo_focus.c \
     ui/src/evo_input.c \
     ui/src/evo_feedback.c \
     ui/src/evo_layout.c \
-    ui/src/evo_widgets.c \
     ui/src/evo_keyboard.c
 
 MEDIA_SRCS := \
@@ -105,6 +103,7 @@ MEDIA_SRCS := \
     media/src/evo_audio_resample.c \
     media/src/evo_audio_out.c \
     media/src/evo_subtitle.c \
+    media/src/evo_perf_monitor.c \
     media/src/evo_demux.c \
     media/src/evo_vdec_ffmpeg.c \
     media/src/evo_vdec_native.c \

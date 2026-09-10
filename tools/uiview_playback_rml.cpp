@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
 #include "../projects/evoplayer/ui_rml/include/evo_gl_context.h"
 #include <cstdlib>
@@ -595,14 +596,91 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     p.scrub_active = 0;
     p.scrub_target = 0.0;
     p.audio_track = "DTS-HD MA 5.1";
-    p.sub_track = "English";
+    p.sub_track = "Ελληνικά";
     p.view_mode = 0;
     p.show_stats = 0;
     p.alpha = 255;
+    /* #81: Unicode caption over the OSD - Cyrillic / Greek / accented Latin
+     * should all render via the Noto/DejaVu fallback faces, not as '?'. */
+    p.subtitle_text = "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xE2\x80\x94 "
+                      "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1 \xE2\x80\x94 "
+                      "\xC3\xA7" "a va?";
+    p.subtitle_face = 2;
+    p.subtitle_raised = 1;
 
     evo_rmlui_update_playback_params(&p);
     evo_rmlui_render_playback_osd(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_playback_paused.bmp", fb.data(), width, height);
+
+    /* #81 / #63: diagnostic HUD with live-ish telemetry graphs. */
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    evo_playback_osd_params_t ps = p;
+    ps.paused = 1;
+    ps.show_stats = 1;
+    ps.debug_overlay = 1;
+    ps.fps = 60;
+    ps.subtitle_text = nullptr;
+    evo_rmlui_update_playback_params(&ps);
+    {
+        static float gpu[48], ram[48], cpu[48];
+        for (int i = 0; i < 48; i++) {
+            gpu[i] = 0.18f + 0.10f * std::sin(i * 0.4f);
+            ram[i] = 0.30f + 0.004f * i;
+            cpu[i] = 0.42f + 0.16f * std::sin(i * 0.9f + 1.0f);
+        }
+        evo_perf_hud_t h;
+        memset(&h, 0, sizeof(h));
+        h.line_video  = "VIDEO  hevc  3840x2160  23.976 fps  (Hardware sceVideodec2)";
+        h.line_audio  = "AUDIO  truehd  eng  8ch  48000 Hz";
+        h.line_subs   = "SUBS  ON  /  EMBEDDED";
+        h.line_perf   = "RENDER 60 fps  /  DECODE 24 fps";
+        h.line_queues = "QUEUES  video 12/48  audio 40/128  pcm 3";
+        h.line_clocks = "CLOCKS  video 1234.50  audio 1234.48  delta 0.020";
+        h.hist_len = 48;
+        h.gpu_hist = gpu; h.ram_hist = ram; h.cpu_hist = cpu;
+        h.gpu_pct = 22; h.gpu_peak_pct = 34;
+        h.ram_mb = 41; h.ram_peak_mb = 44; h.ram_total_mb = 64;
+        h.cpu_pct = 47; h.cpu_peak_pct = 63;
+        evo_rmlui_update_perf_hud(&h);
+    }
+    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback_stats_hud.bmp", fb.data(), width, height);
+
+    /* #81: NOW PLAYING music visualiser */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF000000);
+        evo_playback_osd_params_t m;
+        memset(&m, 0, sizeof(m));
+        m.title = "Kavinsky - Nightcall";
+        m.metadata = "FLAC 24-BIT / 96 KHZ";
+        m.audio_track = "FLAC 2.0";
+        m.sub_track = "None";
+        m.position_sec = 74.0;
+        m.duration_sec = 258.0;
+        m.percentage = m.position_sec / m.duration_sec;
+        m.paused = 0;
+        m.view_mode = 0;
+        m.alpha = 255;
+        m.music_mode = 1;
+        m.music_codec = "FLAC";
+        evo_rmlui_update_playback_params(&m);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_music.bmp", fb.data(), width, height);
+    }
+
+    /* #81: caption-only mode - controls faded, one non-Latin line over video. */
+    std::fill(fb.begin(), fb.end(), 0xFF10161F);
+    evo_playback_osd_params_t q;
+    memset(&q, 0, sizeof(q));
+    q.title = "Blade Runner 2049";
+    q.view_mode = 0;
+    q.subtitle_text = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D \xD7\xA2\xD7\x95\xD7\x9C\xD7\x9D\n"
+                      "\xC3\x89v\xC3\xA9nement \xC3\xA0 pr\xC3\xA9voir";
+    q.subtitle_face = 3;
+    q.chrome_hidden = 1;
+    evo_rmlui_update_playback_params(&q);
+    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback_subtitle_only.bmp", fb.data(), width, height);
 }
 
 static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int height) {
@@ -1218,6 +1296,63 @@ int main(int argc, char** argv) {
     render_mediainfo_screen(fb, width, height);
     render_subtitles_screen(fb, width, height);
     render_stress_screens(fb, width, height);
+
+    /* #81: virtual keyboard modal over a screen */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0A0E16);
+        evo_keyboard_params_t k;
+        memset(&k, 0, sizeof(k));
+        k.visible = 1;
+        k.title = "SEARCH IN DIRECTORY";
+        k.text = "blade runner";
+        k.mode_label = "LOWERCASE";
+        static const char* rows[4] = { "1234567890", "qwertyuiop", "asdfghjkl.", "zxcvbnm_-:" };
+        static const char* acts[6] = { "123 / ABC", "SPACE", "BACKSPACE", "CLEAR", "CANCEL", "DONE" };
+        for (int i = 0; i < 4; i++) k.rows[i] = rows[i];
+        for (int i = 0; i < 6; i++) k.action_labels[i] = acts[i];
+        k.len = 12; k.max_len = 48;
+        k.focus_row = 2; k.focus_col = 3;   /* 'f' */
+        k.show_caret = 1;
+        evo_rmlui_update_keyboard(&k);
+        evo_rmlui_render_keyboard(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_keyboard.bmp", fb.data(), width, height);
+
+        k.focus_row = 4; k.focus_col = 5;   /* DONE */
+        evo_rmlui_update_keyboard(&k);
+        std::fill(fb.begin(), fb.end(), 0xFF0A0E16);
+        evo_rmlui_render_keyboard(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_keyboard_done.bmp", fb.data(), width, height);
+
+        k.visible = 0;
+        evo_rmlui_update_keyboard(&k);
+    }
+
+    /* #81: image viewer */
+    {
+        static std::vector<uint32_t> img(640 * 400);
+        for (int y = 0; y < 400; y++)
+            for (int x = 0; x < 640; x++)
+                img[y * 640 + x] = 0xFF000000u | (uint32_t)(x * 255 / 640)
+                                 | ((uint32_t)(y * 255 / 400) << 8)
+                                 | ((uint32_t)(160) << 16);
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_image_params_t ip;
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "sunset-over-the-bay.jpg";
+        ip.pixels = img.data();
+        ip.w = 640; ip.h = 400; ip.loaded = 1;
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_image_viewer.bmp", fb.data(), width, height);
+
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "broken-file.bmp";
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_image_error.bmp", fb.data(), width, height);
+    }
+
     set_nav(5, 0);
 
     // 1. Settings Main Hub

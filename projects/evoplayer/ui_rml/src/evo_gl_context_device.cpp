@@ -269,11 +269,12 @@ extern "C" void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
 namespace {
 
 GLuint g_yuv_vao = 0;
-GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0;
+GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0, g_yuv_pl10_prog = 0;
 GLuint g_yuv_ytex = 0, g_yuv_uvtex = 0, g_yuv_utex = 0, g_yuv_vtex = 0;
-int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1;
+int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1, g_yuv_ten = -1;
 GLint  g_yuv_nv_crop = -1, g_yuv_nv_scale = -1;
 GLint  g_yuv_pl_crop = -1, g_yuv_pl_scale = -1;
+GLint  g_yuv_pl10_crop = -1, g_yuv_pl10_scale = -1;
 
 const char *k_yuv_vs =
     "#version 330 core\n"
@@ -324,6 +325,27 @@ const char *k_yuv_fs_pl =
     "  float V = texture(uV, vUV).r - 0.5;\n"
     YUV_MATRIX_GLSL
     "}\n";
+/*
+ * GL-5 (#81): planar 10-bit (yuv420p10le). GL_R16 normalises the sample by
+ * /65535, but the 10 significant bits sit in the low bits (max value 1023), so
+ * scale back up by 65535/1023 to land 1023 -> 1.0. After that the same BT.601
+ * limited matrix applies unchanged: the 8-bit black level 16/255 = 0.0627 and
+ * the 10-bit 64/1023 = 0.0626 are the same number to within 1e-4, likewise
+ * 512/1023 vs 0.5 for neutral chroma. SDR only - a PQ/HLG EOTF + tone-map would
+ * go here (#4).
+ */
+const char *k_yuv_fs_pl10 =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uU; uniform sampler2D uV;\n"
+    "const float S = 65535.0 / 1023.0;\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r * S;\n"
+    "  float U = texture(uU, vUV).r * S - 0.5;\n"
+    "  float V = texture(uV, vUV).r * S - 0.5;\n"
+    /* #4: PQ/HLG EOTF + SDR tone-map seam - would transform (y,U,V) here. */
+    YUV_MATRIX_GLSL
+    "}\n";
 
 GLuint yuv_link(const char *fs_src)
 {
@@ -345,10 +367,11 @@ GLuint yuv_link(const char *fs_src)
 
 bool yuv_init(void)
 {
-    if (g_yuv_nv_prog && g_yuv_pl_prog) return true;
-    if (!g_yuv_nv_prog) g_yuv_nv_prog = yuv_link(k_yuv_fs_nv);
-    if (!g_yuv_pl_prog) g_yuv_pl_prog = yuv_link(k_yuv_fs_pl);
-    if (!g_yuv_nv_prog || !g_yuv_pl_prog) return false;
+    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog) return true;
+    if (!g_yuv_nv_prog)   g_yuv_nv_prog   = yuv_link(k_yuv_fs_nv);
+    if (!g_yuv_pl_prog)   g_yuv_pl_prog   = yuv_link(k_yuv_fs_pl);
+    if (!g_yuv_pl10_prog) g_yuv_pl10_prog = yuv_link(k_yuv_fs_pl10);
+    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog) return false;
     if (!g_yuv_vao) glGenVertexArrays(1, &g_yuv_vao);
     if (!g_yuv_ytex) {
         glGenTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_uvtex);
@@ -365,6 +388,12 @@ bool yuv_init(void)
     glUniform1i(glGetUniformLocation(g_yuv_pl_prog, "uV"), 2);
     g_yuv_pl_crop  = glGetUniformLocation(g_yuv_pl_prog, "uCrop");
     g_yuv_pl_scale = glGetUniformLocation(g_yuv_pl_prog, "uScale");
+    glUseProgram(g_yuv_pl10_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_prog, "uU"), 1);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_prog, "uV"), 2);
+    g_yuv_pl10_crop  = glGetUniformLocation(g_yuv_pl10_prog, "uCrop");
+    g_yuv_pl10_scale = glGetUniformLocation(g_yuv_pl10_prog, "uScale");
     evo_bt_("GL yuv: initialised");
     return true;
 }
@@ -386,48 +415,56 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                                 const uint8_t *u,  int u_pitch,
                                 const uint8_t *v,  int v_pitch,
                                 int coded_w, int coded_h, int disp_w, int disp_h,
-                                int view_mode)
+                                int view_mode, int ten_bit)
 {
     if (!g_ready || !y || y_pitch <= 0 || coded_w <= 0 || coded_h <= 0)
         return;
     const int planar = (uv == nullptr);
     if (planar ? (!u || !v) : (uv == nullptr))
         return;
+    if (ten_bit && !planar)          /* 10-bit is planar-only (yuv420p10le) */
+        return;
     if (!yuv_init())
         return;
 
     const int tw = coded_w, th = coded_h;   /* luma texture = coded image (stride via ROW_LENGTH) */
     const int cw2 = tw / 2, ch2 = th / 2;
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    /* 10-bit planes are 16-bit; pitches arrive in bytes, ROW_LENGTH wants
+     * samples. GL_UNPACK_ALIGNMENT 2 for GL_UNSIGNED_SHORT rows. */
+    const int   sdiv = ten_bit ? 2 : 1;
+    const GLenum luma_ifmt = ten_bit ? GL_R16 : GL_R8;
+    const GLenum utype     = ten_bit ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
+    glPixelStorei(GL_UNPACK_ALIGNMENT, ten_bit ? 2 : 1);
 
-    if (tw != g_yuv_tw || th != g_yuv_th || planar != g_yuv_planar) {
+    if (tw != g_yuv_tw || th != g_yuv_th || planar != g_yuv_planar ||
+        ten_bit != g_yuv_ten) {
         glDeleteTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_ytex);
         glDeleteTextures(1, &g_yuv_uvtex); glGenTextures(1, &g_yuv_uvtex);
         glDeleteTextures(1, &g_yuv_utex);  glGenTextures(1, &g_yuv_utex);
         glDeleteTextures(1, &g_yuv_vtex);  glGenTextures(1, &g_yuv_vtex);
-        yuv_tex_setup(g_yuv_ytex, GL_R8, tw, th);
+        yuv_tex_setup(g_yuv_ytex, luma_ifmt, tw, th);
         if (planar) {
-            yuv_tex_setup(g_yuv_utex, GL_R8, cw2, ch2);
-            yuv_tex_setup(g_yuv_vtex, GL_R8, cw2, ch2);
+            yuv_tex_setup(g_yuv_utex, luma_ifmt, cw2, ch2);
+            yuv_tex_setup(g_yuv_vtex, luma_ifmt, cw2, ch2);
         } else {
             yuv_tex_setup(g_yuv_uvtex, GL_RG8, cw2, ch2);
         }
-        g_yuv_tw = tw; g_yuv_th = th; g_yuv_planar = planar;
+        g_yuv_tw = tw; g_yuv_th = th; g_yuv_planar = planar; g_yuv_ten = ten_bit;
     }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_yuv_ytex);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, y_pitch);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tw, th, GL_RED, GL_UNSIGNED_BYTE, y);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, y_pitch / sdiv);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tw, th, GL_RED, utype, y);
     if (planar) {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, g_yuv_utex);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, u_pitch);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, GL_UNSIGNED_BYTE, u);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, u_pitch / sdiv);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, utype, u);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, g_yuv_vtex);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, v_pitch);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, GL_UNSIGNED_BYTE, v);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, v_pitch / sdiv);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RED, utype, v);
     } else {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, g_yuv_uvtex);
@@ -435,15 +472,16 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RG, GL_UNSIGNED_BYTE, uv);
     }
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, g_w, g_h);
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
-    GLuint prog  = planar ? g_yuv_pl_prog  : g_yuv_nv_prog;
-    GLint  crop  = planar ? g_yuv_pl_crop  : g_yuv_nv_crop;
-    GLint  scale = planar ? g_yuv_pl_scale : g_yuv_nv_scale;
+    GLuint prog  = ten_bit ? g_yuv_pl10_prog  : (planar ? g_yuv_pl_prog  : g_yuv_nv_prog);
+    GLint  crop  = ten_bit ? g_yuv_pl10_crop  : (planar ? g_yuv_pl_crop  : g_yuv_nv_crop);
+    GLint  scale = ten_bit ? g_yuv_pl10_scale : (planar ? g_yuv_pl_scale : g_yuv_nv_scale);
     glUseProgram(prog);
     float cx = (disp_w > 0 && disp_w <= tw) ? (float)disp_w / (float)tw : 1.0f;
     float cy = (disp_h > 0 && disp_h <= th) ? (float)disp_h / (float)th : 1.0f;

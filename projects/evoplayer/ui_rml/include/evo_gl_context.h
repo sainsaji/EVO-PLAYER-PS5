@@ -72,13 +72,18 @@ void evo_gl_blit_bgra(const uint32_t *fb, int w, int h);
  * RG8) textures that dodge the RGBA8 staging-copy wall. NV12 is
  * (y,uv,NULL,NULL); planar I420 is (y,NULL,u,v). coded_w/h is the padded luma
  * (texture) size, disp_w/h the region shown. Follow with
- * evo_gl_context_present(). No-op on host. */
+ * evo_gl_context_present(). No-op on host.
+ *
+ * GL-5 (#81): ten_bit != 0 means the planar source is 16-bit little-endian
+ * (yuv420p10le), pitches are in bytes (2x samples); it is uploaded as GL_R16 and
+ * presented SDR (no PQ/HLG tone-map - that is #4's tail). */
 void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                      const uint8_t *uv, int uv_pitch,
                      const uint8_t *u,  int u_pitch,
                      const uint8_t *v,  int v_pitch,
                      int coded_w, int coded_h, int disp_w, int disp_h,
-                     int view_mode);   /* 0=FIT 1=FILL 2=STRETCH */
+                     int view_mode,     /* 0=FIT 1=FILL 2=STRETCH */
+                     int ten_bit);
 
 /* GL-4 (#80), device only. Composite an EVO BGRA scratch (0xAABBGGRR, alpha in
  * the top byte) over whatever is already in fb 0 — the player OSD on top of the

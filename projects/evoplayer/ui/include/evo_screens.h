@@ -20,7 +20,6 @@
 #include "evo_chrome.h"
 #include "evo_focus.h"
 #include "evo_nav.h"
-#include "evo_widgets.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -217,22 +216,8 @@ typedef struct evo_dialog_model {
 
 /* ---- media info --------------------------------------------------------- */
 
-/*
- * The property panel for whatever is playing. Same shape as the browser's
- * inspector, given the whole page instead of a 560px column - so it is two
- * columns of properties beside a preview rather than a third implementation
- * of a key/value table.
- */
-typedef struct evo_info_model {
-    const char *title;
-    const char *subtitle;
-
-    const evo_prop *props;
-    int             prop_count;
-
-    evo_art     art;
-    const char *art_badge;
-} evo_info_model;
+/* (evo_info_model / the media-info property panel model was removed with the
+ * bitmap-font UI in #81 - Media Info is an RmlUi document, see mediainfo.rml.) */
 
 /* ---- changelog screen --------------------------------------------------- */
 

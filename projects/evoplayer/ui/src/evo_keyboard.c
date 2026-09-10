@@ -8,20 +8,27 @@
 
 #include "evo_keyboard.h"
 #include "evo_ime_dialog.h"
-#include "evo_theme.h"
-#include "evo_ui.h"
 #include "evo_feedback.h"
-#include "evo_draw.h"
-#include "evo_widgets.h"
+#include "evo_rmlui_bridge.h"   /* #81: the modal is an RmlUi document now */
 
 #define KB_MAX_BUF 256
 
+/*
+ * #34: a fake-signed app module cannot reach libSceImeDialog / libSceCommonDialog
+ * (they are not linked and cannot be sceKernelLoadStartModule'd), so the native
+ * IME path SIGSEGVs on the first open. On the app module the backend is pinned to
+ * the (now RmlUi) virtual keyboard regardless of the persisted setting.
+ */
+#if defined(EVO_APP_MODULE)
+static int g_kb_type = EVO_KEYBOARD_TYPE_VIRTUAL;
+void evo_keyboard_set_type(int type) { (void)type; g_kb_type = EVO_KEYBOARD_TYPE_VIRTUAL; }
+#else
 static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
-
 void evo_keyboard_set_type(int type)
 {
     g_kb_type = (type == EVO_KEYBOARD_TYPE_VIRTUAL) ? EVO_KEYBOARD_TYPE_VIRTUAL : EVO_KEYBOARD_TYPE_NATIVE;
 }
+#endif
 
 int evo_keyboard_get_type(void)
 {
@@ -514,179 +521,45 @@ int evo_keyboard_handle_input(uint32_t pressed)
     return 0;
 }
 
-static uint32_t with_alpha(uint32_t bgra, uint8_t a)
-{
-    return (bgra & 0x00FFFFFFu) | ((uint32_t)a << 24);
-}
-
+/*
+ * #81: the keyboard modal is an RmlUi document (assets/rml/keyboard.rml) in its
+ * own Rml::Context now — this pushes g_kb's state (buffer / layer / D-pad focus)
+ * to the bridge and composites it over the framebuffer, exactly where the old
+ * immediate-mode renderer used to draw. All the state + input handling above is
+ * unchanged. Closes #34 (the native IME path stays only as an opt-in for
+ * non-app builds; the app module defaults to virtual).
+ */
 void evo_screen_keyboard(uint32_t *fb)
 {
-    if (!g_kb.is_open) return;
+    evo_keyboard_params_t p;
+    memset(&p, 0, sizeof(p));
 
-    const evo_theme *th = evo_theme_current();
-
-    if (g_kb.is_native_active) {
-        /* Soft scrim dim behind native PlayStation OS keyboard */
-        evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
-                          with_alpha(th->bg_bottom, 160),
-                          with_alpha(th->bg_top, 180));
+    if (!g_kb.is_open) {
+        evo_rmlui_update_keyboard(&p);   /* visible = 0 -> hide the doc */
         return;
     }
 
-    /* 1. Scrim background (smooth dark dim over current screen) */
-    evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
-                      with_alpha(th->bg_bottom, 220),
-                      with_alpha(th->bg_top, 240));
-
-    /* 2. Main modal card panel */
-    int panel_x = 260;
-    int panel_y = 140;
-    int panel_w = 1400;
-    int panel_h = 800;
-    int radius  = 20;
-
-    evo_ui_round_rect(fb, panel_x, panel_y, panel_w, panel_h, radius,
-                      with_alpha(th->surface, 250),
-                      with_alpha(th->surface_sel, 250),
-                      with_alpha(th->border, 180), 2,
-                      with_alpha(th->shadow, 140), 24);
-
-    /* 3. Title & Header Hints */
-    int title_y = panel_y + 36;
-    evo_text(fb, panel_x + 50, title_y, g_kb.title, th->text_primary, EVO_FACE_TITLE);
-
-    /* Mode indicator tag */
-    const char *mode_str = (g_kb.mode == 0) ? "LOWERCASE" :
-                           (g_kb.mode == 1) ? "UPPERCASE" : "SYMBOLS";
-    evo_text(fb, panel_x + panel_w - 200, title_y + 4, mode_str, th->accent, EVO_FACE_SUB);
-
-    /* 4. Text Input Field Box */
-    int input_x = panel_x + 50;
-    int input_y = panel_y + 96;
-    int input_w = panel_w - 100;
-    int input_h = 76;
-
-    evo_ui_round_rect(fb, input_x, input_y, input_w, input_h, 12,
-                      with_alpha(th->bg_top, 240),
-                      with_alpha(th->bg_bottom, 240),
-                      with_alpha(th->accent, 160), 2,
-                      with_alpha(th->shadow, 80), 8);
-
-    /* Text display */
-    char disp_buf[KB_MAX_BUF + 2];
-    snprintf(disp_buf, sizeof(disp_buf), "%s", g_kb.buffer);
+    p.visible     = 1;
+    p.native_only = g_kb.is_native_active;
+    p.title       = g_kb.title;
+    p.text        = g_kb.buffer;
+    p.mode_label  = (g_kb.mode == 0) ? "LOWERCASE"
+                  : (g_kb.mode == 1) ? "UPPERCASE" : "SYMBOLS";
+    {
+        const char *const *grid = (g_kb.mode == 0) ? GRID_LOWER
+                                : (g_kb.mode == 1) ? GRID_UPPER : GRID_SYMBOLS;
+        for (int i = 0; i < 4; i++) p.rows[i] = grid[i];
+    }
+    for (int i = 0; i < KB_ACT_COUNT; i++) p.action_labels[i] = ACTION_LABELS[i];
+    p.len       = (int)strlen(g_kb.buffer);
+    p.max_len   = g_kb.max_len;
+    p.focus_row = g_kb.row;
+    p.focus_col = g_kb.col;
 
     g_kb.blink_timer = (g_kb.blink_timer + 1) % 60;
-    int show_cursor = (g_kb.blink_timer < 36);
+    p.show_caret = (g_kb.blink_timer < 36);
 
-    int text_x = input_x + 24;
-    int text_y = input_y + 20;
-
-    if (g_kb.buffer[0]) {
-        evo_text(fb, text_x, text_y, disp_buf, th->text_primary, EVO_FACE_MENU);
-        int tw = evo_text_w(disp_buf, EVO_FACE_MENU);
-        if (show_cursor) {
-            evo_ui_round_rect(fb, text_x + tw + 4, text_y - 2, 4, 34, 2,
-                              th->accent, th->accent, 0, 0, 0, 0);
-        }
-    } else {
-        evo_text(fb, text_x, text_y, "Type here using controller or connected keyboard...",
-                 with_alpha(th->text_muted, 120), EVO_FACE_MENU);
-        if (show_cursor) {
-            evo_ui_round_rect(fb, text_x, text_y - 2, 4, 34, 2,
-                              th->accent, th->accent, 0, 0, 0, 0);
-        }
-    }
-
-    /* Counter indicator */
-    char count_str[32];
-    snprintf(count_str, sizeof(count_str), "%d / %d", (int)strlen(g_kb.buffer), g_kb.max_len);
-    evo_text(fb, input_x + input_w - 120, text_y + 4, count_str, th->text_muted, EVO_FACE_SUB);
-
-    /* 5. Key Grid Rows 0..3 */
-    int grid_start_y = input_y + input_h + 30;
-    int key_w = 118;
-    int key_h = 68;
-    int gap_x = 12;
-    int gap_y = 12;
-    int grid_start_x = panel_x + 55;
-
-    for (int r = 0; r < 4; r++) {
-        const char *chars = (g_kb.mode == 0) ? GRID_LOWER[r] :
-                            (g_kb.mode == 1) ? GRID_UPPER[r] : GRID_SYMBOLS[r];
-        int ky = grid_start_y + r * (key_h + gap_y);
-
-        for (int c = 0; c < 10; c++) {
-            int kx = grid_start_x + c * (key_w + gap_x);
-            int is_focused = (g_kb.row == r && g_kb.col == c);
-
-            uint32_t fill_top = is_focused ? th->surface_sel : th->surface;
-            uint32_t fill_bot = is_focused ? th->accent : th->bg_top;
-            uint32_t border   = is_focused ? th->accent : with_alpha(th->border, 100);
-            int border_px     = is_focused ? 3 : 1;
-
-            evo_ui_round_rect(fb, kx, ky, key_w, key_h, 10,
-                              fill_top, fill_bot, border, border_px,
-                              is_focused ? with_alpha(th->accent, 100) : 0, is_focused ? 10 : 0);
-
-            char key_str[2] = { chars[c], '\0' };
-            int kw = evo_text_w(key_str, EVO_FACE_MENU);
-            int tx = kx + (key_w - kw) / 2;
-            int ty = ky + (key_h - 28) / 2;
-
-            uint32_t text_col = is_focused ? 0xFFFFFFFFu : th->text_primary;
-            evo_text(fb, tx, ty, key_str, text_col, EVO_FACE_MENU);
-        }
-    }
-
-    /* 6. Action Bar Row 4 */
-    int action_y = grid_start_y + 4 * (key_h + gap_y);
-    int act_widths[KB_ACT_COUNT] = { 180, 360, 200, 160, 160, 180 };
-    int cur_act_x = grid_start_x;
-
-    for (int a = 0; a < KB_ACT_COUNT; a++) {
-        int aw = act_widths[a];
-        int is_focused = (g_kb.row == 4 && g_kb.col == a);
-
-        uint32_t fill_top = is_focused ? th->surface_sel : th->surface;
-        uint32_t fill_bot = is_focused ? th->accent : th->bg_top;
-        uint32_t border   = is_focused ? th->accent : with_alpha(th->border, 100);
-        int border_px     = is_focused ? 3 : 1;
-
-        if (a == KB_ACT_DONE && is_focused) {
-            fill_bot = 0xFF24A024u; /* Vibrant green hint for Done */
-        }
-
-        evo_ui_round_rect(fb, cur_act_x, action_y, aw, key_h, 10,
-                          fill_top, fill_bot, border, border_px,
-                          is_focused ? with_alpha(th->accent, 100) : 0, is_focused ? 10 : 0);
-
-        int tw = evo_text_w(ACTION_LABELS[a], EVO_FACE_SUB);
-        int tx = cur_act_x + (aw - tw) / 2;
-        int ty = action_y + (key_h - 20) / 2;
-
-        uint32_t text_col = is_focused ? 0xFFFFFFFFu : th->text_primary;
-        evo_text(fb, tx, ty, ACTION_LABELS[a], text_col, EVO_FACE_SUB);
-
-        cur_act_x += aw + gap_x;
-    }
-
-    /* 7. Bottom Controller Shortcut Hints */
-    int hint_x = panel_x + 60;
-    int hint_y = panel_y + panel_h - 38;
-
-    struct { int glyph; const char *lbl; } hints[] = {
-        { EVO_GLYPH_CROSS,    "SELECT" },
-        { EVO_GLYPH_SQUARE,   "BACKSPACE" },
-        { EVO_GLYPH_TRIANGLE, "DONE" },
-        { EVO_GLYPH_CIRCLE,   "CANCEL" },
-        { EVO_GLYPH_LSTICK,   "SHIFT (L1/R1)" }
-    };
-    int hint_count = 5;
-    int hx = hint_x;
-    for (int i = 0; i < hint_count; i++) {
-        evo_glyph_tinted(fb, hx, hint_y - 20, hints[i].glyph, th->accent);
-        evo_text(fb, hx + 52, hint_y - 8, hints[i].lbl, th->text_muted, EVO_FACE_SMALL);
-        hx += 52 + evo_text_w(hints[i].lbl, EVO_FACE_SMALL) + 44;
-    }
+    evo_rmlui_update_keyboard(&p);
+    evo_rmlui_render_keyboard(fb, 1920, 1080);
 }
+

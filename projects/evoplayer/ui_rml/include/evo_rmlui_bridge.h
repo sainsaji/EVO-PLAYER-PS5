@@ -28,7 +28,44 @@ typedef struct {
     int view_mode;
     int show_stats;
     int alpha;
+    /* GL-5 (#81): on-video caption overlay, rendered by RmlUi (Unicode) instead
+     * of the old ASCII bitmap path. subtitle_text is the active cue as UTF-8,
+     * "\n"-separated lines, NULL/"" when nothing is showing. subtitle_face is
+     * EVO_FACE_SUB/MENU/TITLE (small/medium/large). chrome_hidden = 1 renders
+     * only the caption with the rest of the OSD suppressed (controls faded). */
+    const char* subtitle_text;
+    int subtitle_face;
+    int subtitle_raised;
+    int chrome_hidden;
+    /* GL-5 (#81): dev FPS pill (#fps-pill), independent of the OSD chrome. */
+    int fps;
+    int debug_overlay;
+    /* GL-5 (#81): audio-only playback shows the NOW PLAYING visualiser
+     * (#music-view) instead of the video-centric centre overlay / captions. */
+    int music_mode;
+    const char* music_codec;
 } evo_playback_osd_params_t;
+
+/*
+ * GL-5 (#81) / #63 first pass: the playback diagnostic HUD ("stats for nerds").
+ * line_* are preformatted rows; the *_hist arrays are 0..1 sparkline samples
+ * (oldest first, `hist_len` valid). Pushed only while the HUD is visible.
+ */
+typedef struct {
+    const char* line_video;
+    const char* line_audio;
+    const char* line_subs;
+    const char* line_perf;
+    const char* line_queues;
+    const char* line_clocks;
+    int          hist_len;
+    const float* gpu_hist;
+    const float* ram_hist;
+    const float* cpu_hist;
+    float gpu_pct, gpu_peak_pct;
+    float ram_mb,  ram_peak_mb, ram_total_mb;
+    float cpu_pct, cpu_peak_pct;
+} evo_perf_hud_t;
 
 typedef struct {
     const char* eyebrow;
@@ -371,6 +408,7 @@ int  evo_rmlui_gl_blit_mode(void);
 
 /* Playback OSD API */
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* params);
+void evo_rmlui_update_perf_hud(const evo_perf_hud_t* hud);   /* #81/#63 */
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height);
 
 /* Confirmation & Modal Dialog API */
@@ -382,6 +420,27 @@ void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
  * call evo_rmlui_render_toast() AFTER the screen's own render call. */
 void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* params);
 void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height);
+
+/* Virtual keyboard modal API (#81 / closes #34). evo_keyboard.c keeps the
+ * buffer, layer and D-pad navigation state and pushes it here; this renders it
+ * as an RmlUi document in its own context, composited over the screen like the
+ * toast. */
+typedef struct {
+    int visible;
+    int native_only;          /* native IME up: just dim, no panel */
+    const char* title;
+    const char* text;         /* current buffer (UTF-8) */
+    const char* mode_label;   /* "LOWERCASE" / "UPPERCASE" / "SYMBOLS" */
+    const char* rows[4];      /* 10 glyphs each, current layer */
+    const char* action_labels[6];
+    int len;
+    int max_len;
+    int focus_row;            /* 0..4 (4 = action bar) */
+    int focus_col;
+    int show_caret;
+} evo_keyboard_params_t;
+void evo_rmlui_update_keyboard(const evo_keyboard_params_t* params);
+void evo_rmlui_render_keyboard(uint32_t* framebuffer, int width, int height);
 
 /* Launch / home screen API */
 void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* params);
@@ -402,6 +461,19 @@ void evo_rmlui_render_changelog(uint32_t* framebuffer, int width, int height);
 /* Text reader API */
 void evo_rmlui_update_reader(const evo_rmlui_reader_params_t* params);
 void evo_rmlui_render_reader(uint32_t* framebuffer, int width, int height);
+
+/* Full-screen image viewer (#81). `pixels` is a decoded RGBA (0xAABBGGRR)
+ * buffer owned by the caller (main.c's bmp_pixels); NULL / loaded==0 shows the
+ * error card. */
+typedef struct {
+    const char* title;
+    const uint32_t* pixels;
+    int w;
+    int h;
+    int loaded;
+} evo_rmlui_image_params_t;
+void evo_rmlui_update_image(const evo_rmlui_image_params_t* params);
+void evo_rmlui_render_image(uint32_t* framebuffer, int width, int height);
 
 /* Surround sound test API */
 void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* params);

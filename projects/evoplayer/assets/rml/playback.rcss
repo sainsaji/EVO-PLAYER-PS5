@@ -141,6 +141,136 @@ div, span, p {
     border-radius: 9px;
 }
 
+/* On-video caption overlay (#81)
+ *
+ * Full-width layer, text centred; the box shrink-wraps the caption and carries a
+ * translucent plate so white text stays legible over any frame. `raised` lifts
+ * it clear of the bottom controller bar while the OSD is up. Size classes map to
+ * prospero_subtitle_face (SUB / MENU / TITLE = small / medium / large). */
+#subtitle-layer {
+    position: absolute;
+    left: 0;
+    width: 1920px;
+    bottom: 96px;
+    text-align: center;
+    z-index: 5;
+}
+
+#subtitle-layer.raised {
+    bottom: 300px;
+}
+
+#subtitle-box {
+    display: none;
+    max-width: 1560px;
+    background-color: #000000a0;
+    border-radius: 8px;
+    padding: 4px 20px;
+    color: #fbfcff;
+    font-weight: bold;
+    font-size: 40px;
+    line-height: 1.28;
+    text-align: center;
+    letter-spacing: 0.3px;
+}
+
+#subtitle-box.sub-small  { font-size: 31px; }
+#subtitle-box.sub-medium { font-size: 40px; }
+#subtitle-box.sub-large  { font-size: 52px; }
+
+/* Music "NOW PLAYING" visualiser (#81) */
+#music-view {
+    display: none;
+    position: absolute;
+    left: 460px;
+    top: 220px;
+    width: 1000px;
+    height: 360px;
+    flex-direction: column;
+}
+
+#music-card {
+    width: 1000px;
+    height: 220px;
+    background-color: #0c1524e6;
+    border-width: 1px;
+    border-color: #00b6f5a0;
+    border-radius: 28px;
+    padding: 40px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#music-art {
+    width: 96px;
+    height: 96px;
+    background-color: #00d2ffcc;
+    border-radius: 14px;
+    margin-right: 40px;
+    flex-shrink: 0;
+}
+
+#music-lines { display: flex; flex-direction: column; }
+
+#music-title {
+    font-size: 30px;
+    font-weight: bold;
+    color: #eaf6ff;
+    letter-spacing: 0.5px;
+}
+
+#music-state {
+    font-size: 22px;
+    font-weight: bold;
+    color: #00d2ff;
+    margin-top: 12px;
+}
+
+#music-hint {
+    font-size: 15px;
+    font-weight: bold;
+    color: #86b7d0;
+    margin-top: 16px;
+}
+
+#music-bars {
+    margin-top: 40px;
+    width: 1000px;
+    height: 100px;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 14px;
+}
+
+@keyframes mbar-pulse {
+    0%   { height: 22px; }
+    50%  { height: 96px; }
+    100% { height: 22px; }
+}
+
+.mbar {
+    width: 22px;
+    height: 40px;
+    background-color: #12b6ea;
+    border-radius: 3px;
+    animation: 1.1s cubic-in-out -0.05s infinite alternate mbar-pulse;
+}
+
+/* Stagger the wave and vary the resting heights so it reads as an equaliser
+ * even if the driver skips the animation. */
+.mbar:nth-child(2n) { height: 74px; background-color: #23c6f0;
+    animation: 1.1s cubic-in-out -0.30s infinite alternate mbar-pulse; }
+.mbar:nth-child(3n) { height: 30px; background-color: #3ad0f5;
+    animation: 1.1s cubic-in-out -0.55s infinite alternate mbar-pulse; }
+.mbar:nth-child(4n) { height: 92px;
+    animation: 1.1s cubic-in-out -0.80s infinite alternate mbar-pulse; }
+.mbar:nth-child(5n) { height: 52px; background-color: #1aa8dd;
+    animation: 1.1s cubic-in-out -0.15s infinite alternate mbar-pulse; }
+
+#music-view.paused .mbar { animation: none; height: 24px; }
+
 /* Center Scrubbing & Pause Overlay */
 #center-overlay {
     position: absolute;
@@ -199,20 +329,39 @@ div, span, p {
     letter-spacing: 2px;
 }
 
-/* Stats for Nerds HUD */
+/* Dev FPS pill (#81) — top-right, independent of the OSD chrome */
+#fps-pill {
+    display: none;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background-color: #000000aa;
+    border-radius: 6px;
+    padding: 4px 10px;
+    z-index: 8;
+}
+
+#fps-value {
+    font-size: 15px;
+    font-weight: bold;
+    color: #f8fafc;
+    letter-spacing: 0.5px;
+}
+
+/* Playback diagnostic HUD (#81 / #63) */
 #stats-hud {
     display: none;
     position: absolute;
     top: 150px;
     left: 60px;
-    width: 480px;
-    background-color: #080c14f0;
+    width: 560px;
+    background-color: #080c14f2;
     border-width: 1px;
     border-color: #1e2838;
     border-radius: 14px;
     padding: 16px 20px;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .stats-title {
@@ -225,27 +374,67 @@ div, span, p {
     padding-bottom: 6px;
 }
 
-.stats-row {
+.stats-line {
+    font-size: 13px;
+    font-weight: bold;
+    color: #d4dde8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.stats-sep {
+    height: 1px;
+    background-color: #1a2332;
+    margin-top: 4px;
+    margin-bottom: 2px;
+}
+
+.graph-row {
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
+    gap: 10px;
+    height: 40px;
 }
 
-.stats-k {
-    font-size: 13px;
-    color: #8c9bb0;
+.graph-label {
+    font-size: 12px;
     font-weight: bold;
+    width: 38px;
+    flex-shrink: 0;
 }
 
-.stats-v {
-    font-size: 14px;
+.graph {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    height: 36px;
+    width: 400px;
+    background-color: #0c121c;
+    border-radius: 4px;
+    padding: 2px;
+    flex-shrink: 0;
+}
+
+.graph-bar {
+    width: 6px;
+    margin-right: 1px;
+    min-height: 1px;
+    background-color: #38506e;
+}
+
+.graph-val {
+    font-size: 12px;
     font-weight: bold;
-    color: #f8fafc;
+    width: 58px;
+    flex-shrink: 0;
+    text-align: right;
 }
 
 .text-green { color: #00ffaa; }
 .text-cyan  { color: #00d2ff; }
+.text-amber { color: #ffb020; }
 
 /* Bottom Controller Console */
 #bottom-scrim {

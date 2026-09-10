@@ -1,0 +1,47 @@
+<rml>
+<head>
+    <link type="text/rcss" href="keyboard.rcss"/>
+</head>
+<body id="kb-root">
+    <div id="kb-scrim"></div>
+    <div id="kb-panel">
+        <div id="kb-header">
+            <span id="kb-title">ENTER TEXT</span>
+            <span id="kb-mode">LOWERCASE</span>
+        </div>
+        <div id="kb-field">
+            <span id="kb-text"></span><span id="kb-caret">|</span>
+            <span id="kb-count">0 / 0</span>
+        </div>
+        <div id="kb-grid">
+            <div class="kb-row">
+                <span class="kb-key" id="k0"></span><span class="kb-key" id="k1"></span><span class="kb-key" id="k2"></span><span class="kb-key" id="k3"></span><span class="kb-key" id="k4"></span><span class="kb-key" id="k5"></span><span class="kb-key" id="k6"></span><span class="kb-key" id="k7"></span><span class="kb-key" id="k8"></span><span class="kb-key" id="k9"></span>
+            </div>
+            <div class="kb-row">
+                <span class="kb-key" id="k10"></span><span class="kb-key" id="k11"></span><span class="kb-key" id="k12"></span><span class="kb-key" id="k13"></span><span class="kb-key" id="k14"></span><span class="kb-key" id="k15"></span><span class="kb-key" id="k16"></span><span class="kb-key" id="k17"></span><span class="kb-key" id="k18"></span><span class="kb-key" id="k19"></span>
+            </div>
+            <div class="kb-row">
+                <span class="kb-key" id="k20"></span><span class="kb-key" id="k21"></span><span class="kb-key" id="k22"></span><span class="kb-key" id="k23"></span><span class="kb-key" id="k24"></span><span class="kb-key" id="k25"></span><span class="kb-key" id="k26"></span><span class="kb-key" id="k27"></span><span class="kb-key" id="k28"></span><span class="kb-key" id="k29"></span>
+            </div>
+            <div class="kb-row">
+                <span class="kb-key" id="k30"></span><span class="kb-key" id="k31"></span><span class="kb-key" id="k32"></span><span class="kb-key" id="k33"></span><span class="kb-key" id="k34"></span><span class="kb-key" id="k35"></span><span class="kb-key" id="k36"></span><span class="kb-key" id="k37"></span><span class="kb-key" id="k38"></span><span class="kb-key" id="k39"></span>
+            </div>
+        </div>
+        <div id="kb-actions">
+            <span class="kb-act" id="a0">123 / ABC</span>
+            <span class="kb-act kb-act-wide" id="a1">SPACE</span>
+            <span class="kb-act" id="a2">BACKSPACE</span>
+            <span class="kb-act" id="a3">CLEAR</span>
+            <span class="kb-act" id="a4">CANCEL</span>
+            <span class="kb-act kb-act-done" id="a5">DONE</span>
+        </div>
+        <div id="kb-hints">
+            <span>&#215; SELECT</span>
+            <span>&#9633; BACKSPACE</span>
+            <span>&#9651; DONE</span>
+            <span>&#9675; CANCEL</span>
+            <span>L1 / R1 SHIFT</span>
+        </div>
+    </div>
+</body>
+</rml>

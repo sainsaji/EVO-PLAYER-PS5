@@ -28,8 +28,8 @@
 
 /* ---------------------------------------------------------------------------
  * TRANSITIONAL: playback-core / resume state still owned by main.c.
- * Replaced by the evo_pb_*() façade at A8. prospero_subtitle_draw() stays in
- * main.c — it is welded to the 335k-line font-atlas headers and rr_text.
+ * Replaced by the evo_pb_*() façade at A8. The on-video caption is now drawn by
+ * the RmlUi playback OSD (#81); main.c only resolves the active cue text here.
  * ------------------------------------------------------------------------ */
 extern int              screen;
 extern int              player_paused;
@@ -1014,7 +1014,7 @@ int prospero_embedded_subtitle_text_at(
 
 #define PROSPERO_SUBTITLE_MAX_CUES 2048
 /* PROSPERO_SUBTITLE_{TEXT_SIZE,MAX_LINES,LINE_SIZE} and the ProsperoSubtitleCue
- * type are in evo_subtitle.h now (prospero_subtitle_draw in main.c needs them). */
+ * type are in evo_subtitle.h now (main.c reads cues via prospero_subtitle_active_cue). */
 
 static ProsperoSubtitleCue prospero_subtitle_cues[
     PROSPERO_SUBTITLE_MAX_CUES
@@ -1325,23 +1325,14 @@ static void prospero_subtitle_clean_line(
             continue;
         }
 
-        if (value >= 128) {
-            output[write_index++] = '?';
-
-            while (
-                input[index + 1] &&
-                (
-                    (
-                        (unsigned char)
-                        input[index + 1]
-                    ) & 0xC0
-                ) == 0x80
-            ) {
-                index++;
-            }
-
-            continue;
-        }
+        /*
+         * #81: pass UTF-8 through untouched. The old code folded every byte
+         * >= 128 to '?' because the bitmap caption font was ASCII-only; the
+         * RmlUi caption overlay renders real Unicode (Noto / DejaVu fallback
+         * faces). Continuation bytes fall through to the copy below, so the
+         * whole sequence is preserved. The curly-quote / dash / ellipsis
+         * normalisation above still runs (harmless, and keeps lines compact).
+         */
 
         if (value == '\t') {
             value = ' ';

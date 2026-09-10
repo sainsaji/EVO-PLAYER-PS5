@@ -339,6 +339,17 @@ bool EvoRmlApp::Initialize(int width, int height) {
             Rml::LoadFontFace(p + "Roboto-Regular.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Bold.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Medium.ttf", true);
+            /* GL-5 (#81): Unicode fallback faces for subtitles (and any other
+             * non-Latin text). NotoSans covers Latin-ext / Cyrillic / Greek /
+             * Vietnamese; DejaVuSans adds Hebrew / Arabic / Armenian / Georgian
+             * and more. RmlUi's default FreeType engine has no complex shaping
+             * or BiDi, so Arabic renders unjoined and Hebrew LTR, and there is
+             * still no CJK face - those are subtitle follow-ups (#42/#43). What
+             * this does fix outright: the #35 "every non-ASCII char -> ?" fold. */
+            Rml::LoadFontFace(p + "NotoSans-Regular.ttf", true);
+            Rml::LoadFontFace(p + "NotoSans-Bold.ttf", true);
+            Rml::LoadFontFace(p + "DejaVuSans.ttf", true);
+            Rml::LoadFontFace(p + "DejaVuSans-Bold.ttf", true);
             fprintf(stderr, "[EVO RmlUi] Loaded font face from %s\n", p.c_str());
             break;
         }
@@ -384,6 +395,10 @@ bool EvoRmlApp::Initialize(int width, int height) {
         if (!m_reader_doc) {
             m_reader_doc = m_context->LoadDocument(p + "reader.rml");
             if (m_reader_doc) m_reader_doc->Hide();
+        }
+        if (!m_image_doc) {
+            m_image_doc = m_context->LoadDocument(p + "image.rml");
+            if (m_image_doc) m_image_doc->Hide();
         }
         if (!m_surround_doc) {
             m_surround_doc = m_context->LoadDocument(p + "surround.rml");
@@ -432,6 +447,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
     if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
     if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
+    if (!m_image_doc) fprintf(stderr, "[EVO RmlUi] Failed to load image.rml!\n");
 
     /* #75: toast lives in its own context - see the comment on
      * EvoToastState for why. Its own tiny context, so a load failure here
@@ -449,6 +465,21 @@ bool EvoRmlApp::Initialize(int width, int height) {
         }
     } else {
         fprintf(stderr, "[EVO RmlUi] Failed to create toast context!\n");
+    }
+
+    /* #81: virtual keyboard - own context (same rationale as the toast). A load
+     * failure just means text entry falls back to nothing on screen, which is a
+     * bug but not a crash - evo_keyboard.c still has the state. */
+    m_keyboard_context = Rml::CreateContext("keyboard_context", Rml::Vector2i(width, height));
+    if (m_keyboard_context) {
+        for (const auto& p : rml_prefixes) {
+            if (m_keyboard_doc) break;
+            m_keyboard_doc = m_keyboard_context->LoadDocument(p + "keyboard.rml");
+        }
+        if (m_keyboard_doc) m_keyboard_doc->Hide();
+        else fprintf(stderr, "[EVO RmlUi] Failed to load keyboard.rml!\n");
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create keyboard context!\n");
     }
 
     m_initialized = true;
@@ -520,6 +551,11 @@ void EvoRmlApp::Shutdown() {
         m_reader_doc = nullptr;
     }
 
+    if (m_image_doc) {
+        m_image_doc->Close();
+        m_image_doc = nullptr;
+    }
+
     if (m_surround_doc) {
         m_surround_doc->Close();
         m_surround_doc = nullptr;
@@ -538,6 +574,15 @@ void EvoRmlApp::Shutdown() {
     if (m_toast_context) {
         Rml::RemoveContext(m_toast_context->GetName());
         m_toast_context = nullptr;
+    }
+
+    if (m_keyboard_doc) {
+        m_keyboard_doc->Close();
+        m_keyboard_doc = nullptr;
+    }
+    if (m_keyboard_context) {
+        Rml::RemoveContext(m_keyboard_context->GetName());
+        m_keyboard_context = nullptr;
     }
 
     Rml::Shutdown();
@@ -1656,6 +1701,55 @@ void EvoRmlApp::UpdateReaderState(const EvoReaderState& state) {
     }
 }
 
+/* #81: full-screen image viewer. */
+void EvoRmlApp::UpdateImageState(const EvoImageState& state) {
+    if (!m_initialized || !m_image_doc) return;
+    if (state == m_last_image && m_theme_generation == m_theme_gen_image) return;
+    m_theme_gen_image = m_theme_generation;
+    m_frame_dirty = true;
+    m_last_image = state;
+
+    auto el = [&](const char* id) { return m_image_doc->GetElementById(id); };
+    if (Rml::Element* e = el("img-accent"))
+        e->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    if (Rml::Element* e = el("img-title"))
+        e->SetInnerRML(state.title.empty() ? "IMAGE" : state.title);
+    if (Rml::Element* e = el("img-dims"))
+        e->SetInnerRML(state.dims.empty() ? "IMAGE FILE" : state.dims);
+
+    std::string src = ArtSource(kImageArtSlot,
+                                state.loaded ? state.pixels : nullptr,
+                                state.w, state.h, state.title);
+    if (Rml::Element* e = el("img-canvas")) {
+        e->SetProperty("display", state.loaded ? "block" : "none");
+        if (state.loaded && !src.empty())
+            e->SetProperty("decorator", "image(" + src + " contain)");
+    }
+    if (Rml::Element* e = el("img-error"))
+        e->SetProperty("display", state.loaded ? "none" : "flex");
+}
+
+void EvoRmlApp::RenderImage(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_image_doc || !framebuffer) return;
+
+    if (m_launch_doc)    m_launch_doc->Hide();
+    if (m_list_doc)      m_list_doc->Hide();
+    if (m_browser_doc)   m_browser_doc->Hide();
+    if (m_changelog_doc) m_changelog_doc->Hide();
+    if (m_reader_doc)    m_reader_doc->Hide();
+    if (m_playback_doc)  m_playback_doc->Hide();
+    if (m_dialog_doc)    m_dialog_doc->Hide();
+    if (m_settings_doc)  m_settings_doc->Hide();
+    if (m_about_doc)     m_about_doc->Hide();
+    if (m_subtitles_doc) m_subtitles_doc->Hide();
+    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
+    if (m_surround_doc)  m_surround_doc->Hide();
+    if (m_nav_doc)       m_nav_doc->Hide();
+    m_image_doc->Show();
+
+    RenderCachedScreen(11, framebuffer, width, height);
+}
+
 void EvoRmlApp::RenderReader(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_reader_doc || !framebuffer) return;
 
@@ -1871,6 +1965,65 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
 
     m_last_state = state;
 
+    /* GL-5 (#81): caption-only mode — a subtitle cue is up but the playback
+     * controls have faded. Suppress the scrims/capsule as a group so only
+     * #subtitle-layer shows over the video. */
+    {
+        const char* scrim = state.chrome_hidden ? "none" : "flex";
+        if (auto* e = m_playback_doc->GetElementById("top-scrim"))      e->SetProperty("display", scrim);
+        if (auto* e = m_playback_doc->GetElementById("bottom-scrim"))   e->SetProperty("display", scrim);
+        if (auto* e = m_playback_doc->GetElementById("center-overlay"))
+            e->SetProperty("display", (state.chrome_hidden || state.music_mode) ? "none" : "flex");
+    }
+
+    /* #81: NOW PLAYING visualiser for audio-only playback. */
+    {
+        Rml::Element* mv = m_playback_doc->GetElementById("music-view");
+        if (mv) {
+            mv->SetProperty("display", state.music_mode ? "flex" : "none");
+            if (state.music_mode) {
+                mv->SetClass("paused", state.paused);
+                if (auto* e = m_playback_doc->GetElementById("music-state"))
+                    e->SetInnerRML(state.paused ? "PAUSED" : "PLAYING");
+                if (auto* e = m_playback_doc->GetElementById("music-hint")) {
+                    std::string h = (state.music_codec.empty() ? std::string("AUDIO")
+                                                              : state.music_codec);
+                    e->SetInnerRML(h + " \xC2\xB7 CROSS PAUSE \xC2\xB7 L/R SEEK");
+                }
+            }
+        }
+    }
+
+    // 0. Subtitle caption overlay (#81)
+    {
+        Rml::Element* el_sub_box   = m_playback_doc->GetElementById("subtitle-box");
+        Rml::Element* el_sub_layer = m_playback_doc->GetElementById("subtitle-layer");
+        if (el_sub_box && el_sub_layer) {
+            if (state.subtitle_text.empty()) {
+                el_sub_box->SetProperty("display", "none");
+            } else {
+                std::string rml;
+                rml.reserve(state.subtitle_text.size() + 16);
+                for (char c : state.subtitle_text) {
+                    switch (c) {
+                        case '&':  rml += "&amp;";  break;
+                        case '<':  rml += "&lt;";   break;
+                        case '>':  rml += "&gt;";   break;
+                        case '\n': rml += "<br/>";  break;
+                        case '\r': break;
+                        default:   rml += c;        break;
+                    }
+                }
+                el_sub_box->SetProperty("display", "inline-block");
+                el_sub_box->SetInnerRML(rml);
+                el_sub_box->SetClass("sub-small",  state.subtitle_face == 1);
+                el_sub_box->SetClass("sub-medium", state.subtitle_face == 2);
+                el_sub_box->SetClass("sub-large",  state.subtitle_face == 3);
+            }
+            el_sub_layer->SetClass("raised", state.subtitle_raised);
+        }
+    }
+
     // 1. Title & Meta
     Rml::Element* el_title = m_playback_doc->GetElementById("media-title");
     if (el_title) {
@@ -1941,11 +2094,12 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             el_dec->SetProperty("color", hw ? to_hex_rgb(m_theme.bg_bottom) : "#e2e8f0");
         }
     }
-    if (Rml::Element* el_sd = m_playback_doc->GetElementById("stats-v-decoder"))
-        el_sd->SetInnerRML(state.decoder_badge.empty() ? "Unknown" : state.decoder_badge);
-    if (Rml::Element* el_se = m_playback_doc->GetElementById("stats-v-engine"))
-        el_se->SetInnerRML(state.decoder_badge.find("Hardware") != std::string::npos
-                               ? "sceVideodec2 ASIC" : "FFmpeg CPU (SIMD)");
+    /* #81: dev FPS pill — independent of the OSD chrome (shows with controls faded). */
+    if (Rml::Element* el_fps_pill = m_playback_doc->GetElementById("fps-pill")) {
+        el_fps_pill->SetProperty("display", state.debug_overlay ? "block" : "none");
+        if (Rml::Element* el_fps_val = m_playback_doc->GetElementById("fps-value"))
+            el_fps_val->SetInnerRML(std::to_string(state.fps) + " FPS");
+    }
 
     // 3. Times & Progress
     double cur_pos = state.scrub_active ? state.scrub_target : state.position_sec;
@@ -2036,7 +2190,65 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     // 7. Stats for Nerds HUD
     Rml::Element* el_stats = m_playback_doc->GetElementById("stats-hud");
     if (el_stats) {
-        el_stats->SetProperty("display", state.show_stats ? "flex" : "none");
+        el_stats->SetProperty("display",
+            (state.show_stats && !state.chrome_hidden) ? "flex" : "none");
+    }
+}
+
+/* #81 / #63: the playback diagnostic HUD. Only called while the HUD is visible
+ * (OPTIONS on the player), at ~2 Hz, so it writes the elements directly rather
+ * than going through the state-diff dance. */
+void EvoRmlApp::UpdatePerfHud(const evo_perf_hud_t* h) {
+    if (!m_initialized || !m_playback_doc || !h) return;
+    m_frame_dirty = true;
+
+    auto set_line = [&](const char* id, const char* text) {
+        if (Rml::Element* e = m_playback_doc->GetElementById(id))
+            e->SetInnerRML(text && text[0] ? text : "--");
+    };
+    set_line("stats-video",  h->line_video);
+    set_line("stats-audio",  h->line_audio);
+    set_line("stats-subs",   h->line_subs);
+    set_line("stats-perf",   h->line_perf);
+    set_line("stats-queues", h->line_queues);
+    set_line("stats-clocks", h->line_clocks);
+
+    struct GraphSpec { const char* graph_id; const char* val_id; const char* colour;
+                       const float* hist; float cur; float peak; const char* unit; };
+    char gpu_v[48], ram_v[48], cpu_v[48];
+    std::snprintf(gpu_v, sizeof gpu_v, "%.0f%% / %.0f", h->gpu_pct, h->gpu_peak_pct);
+    std::snprintf(ram_v, sizeof ram_v, "%.0f / %.0fM", h->ram_mb, h->ram_total_mb);
+    std::snprintf(cpu_v, sizeof cpu_v, "%.0f%% / %.0f", h->cpu_pct, h->cpu_peak_pct);
+    const GraphSpec specs[3] = {
+        { "graph-gpu", "graph-gpu-val", "#00d2ff", h->gpu_hist, h->gpu_pct, h->gpu_peak_pct, gpu_v },
+        { "graph-ram", "graph-ram-val", "#ffb020", h->ram_hist, h->ram_mb,  h->ram_peak_mb,  ram_v },
+        { "graph-cpu", "graph-cpu-val", "#00ffaa", h->cpu_hist, h->cpu_pct, h->cpu_peak_pct, cpu_v },
+    };
+
+    int n = h->hist_len;
+    if (n < 0) n = 0;
+    for (const GraphSpec& s : specs) {
+        Rml::Element* g = m_playback_doc->GetElementById(s.graph_id);
+        if (!g) continue;
+        /* Lazily create the bar elements once, then only move their heights. */
+        while ((int)g->GetNumChildren() < n) {
+            Rml::ElementPtr bar = g->GetOwnerDocument()->CreateElement("div");
+            bar->SetClass("graph-bar", true);
+            bar->SetProperty("background-color", s.colour);
+            g->AppendChild(std::move(bar));
+        }
+        for (int i = 0; i < (int)g->GetNumChildren(); i++) {
+            Rml::Element* bar = g->GetChild(i);
+            if (i >= n || !s.hist) { bar->SetProperty("height", "0px"); continue; }
+            float v = s.hist[i];
+            if (v < 0.0f) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            char hbuf[16];
+            std::snprintf(hbuf, sizeof hbuf, "%.0fpx", 2.0f + v * 30.0f);
+            bar->SetProperty("height", hbuf);
+        }
+        if (Rml::Element* v = m_playback_doc->GetElementById(s.val_id))
+            v->SetInnerRML(s.unit);
     }
 }
 
@@ -2847,6 +3059,104 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
     m_toast_context->Update();
     m_render->FrameBegin();
     m_toast_context->Render();
+    m_render->FrameEnd();
+#if defined(EVO_GL_DEVICE)
+    m_gl_drew = true;
+#endif
+}
+
+/* ---- #81: virtual keyboard modal ------------------------------------- */
+
+static std::string kb_esc(const char* s) {
+    std::string o;
+    if (!s) return o;
+    for (const char* p = s; *p; ++p) {
+        switch (*p) {
+            case '&': o += "&amp;"; break;
+            case '<': o += "&lt;";  break;
+            case '>': o += "&gt;";  break;
+            default:  o += *p;      break;
+        }
+    }
+    return o;
+}
+
+void EvoRmlApp::UpdateKeyboard(const evo_keyboard_params_t* p) {
+    if (!m_initialized || !m_keyboard_doc || !p) return;
+
+    if (!p->visible) {
+        if (m_keyboard_doc->IsVisible()) {
+            m_keyboard_doc->Hide();
+            m_frame_dirty = true;   /* force the screen underneath to redraw clean */
+        }
+        m_kb_sig.clear();
+        return;
+    }
+
+    /* cheap change gate */
+    std::string sig;
+    sig.reserve(160);
+    sig += p->native_only ? "N" : "V";
+    sig += p->title ? p->title : "";     sig += '\x1f';
+    sig += p->text ? p->text : "";       sig += '\x1f';
+    sig += p->mode_label ? p->mode_label : "";
+    for (int i = 0; i < 4; i++) { sig += '\x1f'; sig += (p->rows[i] ? p->rows[i] : ""); }
+    sig += char('0' + (p->focus_row & 7));
+    sig += char('0' + (p->focus_col & 15));
+    sig += p->show_caret ? '1' : '0';
+    { char b[24]; std::snprintf(b, sizeof b, "|%d/%d", p->len, p->max_len); sig += b; }
+
+    if (!m_keyboard_doc->IsVisible()) m_keyboard_doc->Show();
+    if (sig == m_kb_sig) return;
+    m_kb_sig = sig;
+    m_frame_dirty = true;   /* a keystroke / focus move -> redraw the screen + modal */
+
+    Rml::Element* panel = m_keyboard_doc->GetElementById("kb-panel");
+    if (panel) panel->SetProperty("display", p->native_only ? "none" : "flex");
+    if (p->native_only) return;
+
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-title"))
+        e->SetInnerRML(kb_esc(p->title && p->title[0] ? p->title : "ENTER TEXT"));
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-mode"))
+        e->SetInnerRML(p->mode_label ? p->mode_label : "");
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-text"))
+        e->SetInnerRML(kb_esc(p->text));
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-caret"))
+        e->SetClass("hidden", !p->show_caret);
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-count")) {
+        char b[24]; std::snprintf(b, sizeof b, "%d / %d", p->len, p->max_len);
+        e->SetInnerRML(b);
+    }
+
+    for (int r = 0; r < 4; r++) {
+        const char* row = p->rows[r] ? p->rows[r] : "";
+        int rl = (int)std::strlen(row);
+        for (int c = 0; c < 10; c++) {
+            char id[8]; std::snprintf(id, sizeof id, "k%d", r * 10 + c);
+            Rml::Element* key = m_keyboard_doc->GetElementById(id);
+            if (!key) continue;
+            char ch[2] = { c < rl ? row[c] : ' ', 0 };
+            key->SetInnerRML(kb_esc(ch));
+            key->SetClass("focused", p->focus_row == r && p->focus_col == c);
+        }
+    }
+    for (int a = 0; a < 6; a++) {
+        char id[8]; std::snprintf(id, sizeof id, "a%d", a);
+        Rml::Element* act = m_keyboard_doc->GetElementById(id);
+        if (!act) continue;
+        if (p->action_labels[a]) act->SetInnerRML(p->action_labels[a]);
+        act->SetClass("focused", p->focus_row == 4 && p->focus_col == a);
+    }
+}
+
+void EvoRmlApp::RenderKeyboard(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_keyboard_context || !m_keyboard_doc || !framebuffer) return;
+    if (!m_keyboard_doc->IsVisible()) return;
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_keyboard_context->Update();
+    m_render->FrameBegin();
+    m_keyboard_context->Render();
     m_render->FrameEnd();
 #if defined(EVO_GL_DEVICE)
     m_gl_drew = true;

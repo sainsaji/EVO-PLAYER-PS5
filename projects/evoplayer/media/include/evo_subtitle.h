@@ -27,8 +27,8 @@ extern "C" {
  * Used by the embedded-track scorer and the media-info track picker. */
 #define PROSPERO_SUBTITLE_MIN_USEFUL_CUES 10
 
-/* External-SRT cue geometry — prospero_subtitle_draw() (still in main.c)
- * consumes cues and wraps them with these bounds. */
+/* External-SRT cue text buffer. The RmlUi caption overlay (#81) wraps and
+ * shapes the text itself; MAX_LINES/LINE_SIZE are legacy and unused. */
 #define PROSPERO_SUBTITLE_TEXT_SIZE  512
 #define PROSPERO_SUBTITLE_MAX_LINES  3
 #define PROSPERO_SUBTITLE_LINE_SIZE  160

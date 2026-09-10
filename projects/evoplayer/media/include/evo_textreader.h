@@ -99,8 +99,9 @@ void evo_text_free(evo_text_doc *doc);
  * the same place in the document. Cheap enough to call when nothing changed:
  * it returns immediately if the width and face already match.
  *
- * `measure` is the text measurer - evo_font_text_width, or the draw vtable's,
- * so the module never has to know which program it is linked into.
+ * `measure` is a caller-supplied per-face width estimate (main.c's
+ * reader_measure since #81), so the module never has to know which program it
+ * is linked into or how text is finally rendered.
  */
 void evo_text_wrap(evo_text_doc *doc, int wrap_px,
                    int (*measure)(const char *s, int len, int face));

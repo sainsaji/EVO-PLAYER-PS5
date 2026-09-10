@@ -7,8 +7,9 @@
  * FFmpeg-free pp_frame. PURE: no clocks, no sleeps, no pp_playback, no
  * globals — pacing and present stay in the play loop.
  *
- * pp_map_avframe / pp_map_yuv420p10_to_8 / pp_pack_plane_u16_to_u8 and the
- * 10-bit pack scratch moved here verbatim.
+ * pp_map_avframe adapts a decoded AVFrame into a pp_frame. GL-5 (#81) removed
+ * the old pp_map_yuv420p10_to_8 CPU pack — 10-bit planar goes through as
+ * PP_FRAME_YUV420P10 and the GL shader samples it as GL_R16.
  */
 #include "evo_vdec.h"
 #include "evo_vdec_native.h"   /* sceVideodec2 backend (stubs off the app module) */
@@ -23,9 +24,6 @@
 #ifndef FF_PROFILE_UNKNOWN
 #define FF_PROFILE_UNKNOWN (-99)
 #endif
-
-/* One-shot user toast used by the 10-bit fast-path notice (kept verbatim). */
-void toast(const char *title, const char *msg);
 
 /*
  * This file owns the public evo_vdec.h surface and dispatches: a NATIVE
@@ -70,112 +68,6 @@ evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id)
     return EVO_VDEC_BACKEND_NATIVE;
 }
 
-/* ---------------------------------------------------------------------------
- * 10-bit planar 4:2:0 -> 8-bit yuv420p fast pack. Verbatim from main.c.
- * ------------------------------------------------------------------------ */
-static uint8_t *s_p10_y = NULL;
-static uint8_t *s_p10_u = NULL;
-static uint8_t *s_p10_v = NULL;
-static int s_p10_w = 0;
-static int s_p10_h = 0;
-static int s_p10_pack_toasted = 0;
-
-static void pp_p10_scratch_free(void)
-{
-    free(s_p10_y); s_p10_y = NULL;
-    free(s_p10_u); s_p10_u = NULL;
-    free(s_p10_v); s_p10_v = NULL;
-    s_p10_w = 0;
-    s_p10_h = 0;
-    s_p10_pack_toasted = 0;
-}
-
-static int pp_p10_scratch_ensure(int w, int h)
-{
-    size_t ysz, csz;
-    if (w <= 0 || h <= 0 || (w & 1) || (h & 1))
-        return -1;
-    if (s_p10_y && s_p10_w == w && s_p10_h == h)
-        return 0;
-    pp_p10_scratch_free();
-    ysz = (size_t)w * (size_t)h;
-    csz = (size_t)(w / 2) * (size_t)(h / 2);
-    s_p10_y = (uint8_t *)malloc(ysz);
-    s_p10_u = (uint8_t *)malloc(csz);
-    s_p10_v = (uint8_t *)malloc(csz);
-    if (!s_p10_y || !s_p10_u || !s_p10_v) {
-        pp_p10_scratch_free();
-        return -2;
-    }
-    s_p10_w = w;
-    s_p10_h = h;
-    return 0;
-}
-
-static void pp_pack_plane_u16_to_u8(const uint8_t *src, int src_stride,
-                                    uint8_t *dst, int dst_stride,
-                                    int width, int height, int shift)
-{
-    int y, x;
-    for (y = 0; y < height; y++) {
-        const uint16_t *s = (const uint16_t *)(src + (size_t)y * (size_t)src_stride);
-        uint8_t *d = dst + (size_t)y * (size_t)dst_stride;
-        /* Unroll 8-wide — 10-bit pack was a multi-ms stall before convert */
-        x = 0;
-        for (; x + 8 <= width; x += 8) {
-            d[x + 0] = (uint8_t)(s[x + 0] >> shift);
-            d[x + 1] = (uint8_t)(s[x + 1] >> shift);
-            d[x + 2] = (uint8_t)(s[x + 2] >> shift);
-            d[x + 3] = (uint8_t)(s[x + 3] >> shift);
-            d[x + 4] = (uint8_t)(s[x + 4] >> shift);
-            d[x + 5] = (uint8_t)(s[x + 5] >> shift);
-            d[x + 6] = (uint8_t)(s[x + 6] >> shift);
-            d[x + 7] = (uint8_t)(s[x + 7] >> shift);
-        }
-        for (; x < width; x++)
-            d[x] = (uint8_t)(s[x] >> shift);
-    }
-}
-
-static int pp_map_yuv420p10_to_8(const AVFrame *frame, pp_frame *out, int64_t pts_us)
-{
-    int w = frame->width;
-    int h = frame->height;
-    int cw = w / 2;
-    int ch = h / 2;
-    const int shift = 2; /* 10-bit in low bits of uint16 */
-
-    if (pp_p10_scratch_ensure(w, h) != 0)
-        return -3;
-    if (!frame->data[0] || !frame->data[1] || !frame->data[2])
-        return -4;
-
-    pp_pack_plane_u16_to_u8(frame->data[0], frame->linesize[0],
-                            s_p10_y, w, w, h, shift);
-    pp_pack_plane_u16_to_u8(frame->data[1], frame->linesize[1],
-                            s_p10_u, cw, cw, ch, shift);
-    pp_pack_plane_u16_to_u8(frame->data[2], frame->linesize[2],
-                            s_p10_v, cw, cw, ch, shift);
-
-    memset(out, 0, sizeof(*out));
-    out->format = PP_FRAME_YUV420P;
-    out->width = (uint32_t)w;
-    out->height = (uint32_t)h;
-    out->pts_us = pts_us;
-    out->planes[0] = s_p10_y;
-    out->planes[1] = s_p10_u;
-    out->planes[2] = s_p10_v;
-    out->strides[0] = w;
-    out->strides[1] = cw;
-    out->strides[2] = cw;
-
-    if (!s_p10_pack_toasted) {
-        toast("CONVERT", "10-bit pack -> fast path");
-        s_p10_pack_toasted = 1;
-    }
-    return 0;
-}
-
 static int pp_map_avframe(const AVFrame *frame, pp_frame *out, int64_t pts_us)
 {
     if (!frame || !out) return -1;
@@ -183,6 +75,7 @@ static int pp_map_avframe(const AVFrame *frame, pp_frame *out, int64_t pts_us)
     out->width = (uint32_t)frame->width;
     out->height = (uint32_t)frame->height;
     out->pts_us = pts_us;
+    out->color_trc = (int)frame->color_trc;
     if (frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P) {
         out->format = PP_FRAME_YUV420P;
         out->planes[0] = frame->data[0];
@@ -201,10 +94,19 @@ static int pp_map_avframe(const AVFrame *frame, pp_frame *out, int64_t pts_us)
         out->strides[1] = frame->linesize[1];
         return 0;
     }
-    /* 10-bit 4:2:0 planar -> pack to 8-bit, keep fast convert */
-    if (frame->format == AV_PIX_FMT_YUV420P10LE ||
-        frame->format == AV_PIX_FMT_YUV420P10BE) {
-        return pp_map_yuv420p10_to_8(frame, out, pts_us);
+    /* GL-5 (#81): 10-bit planar 4:2:0 goes straight through as a 16-bit frame -
+     * the GL video shader samples it as GL_R16. No CPU pack. Little-endian only
+     * (PS5 is LE, and yuv420p10be effectively never occurs in real files) - a BE
+     * frame falls through to the swscale path like any other exotic format. */
+    if (frame->format == AV_PIX_FMT_YUV420P10LE) {
+        out->format = PP_FRAME_YUV420P10;
+        out->planes[0] = frame->data[0];
+        out->planes[1] = frame->data[1];
+        out->planes[2] = frame->data[2];
+        out->strides[0] = frame->linesize[0];   /* bytes (= 2 * samples) */
+        out->strides[1] = frame->linesize[1];
+        out->strides[2] = frame->linesize[2];
+        return 0;
     }
     return -2;
 }
@@ -393,7 +295,6 @@ void evo_vdec_close(evo_vdec *v)
     if (v->ctx)
         avcodec_free_context(&v->ctx);
     free(v);
-    pp_p10_scratch_free();
 }
 
 evo_vdec_backend evo_vdec_active(const evo_vdec *v)

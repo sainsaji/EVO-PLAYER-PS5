@@ -15,7 +15,13 @@ typedef enum pp_frame_format {
     PP_FRAME_NV12 = 0,
     PP_FRAME_YUV420P = 1,
     PP_FRAME_RGBA = 2,
-    PP_FRAME_BGRA = 3
+    PP_FRAME_BGRA = 3,
+    /* GL-5 (#81): planar 4:2:0, 16-bit little-endian samples with 10 significant
+     * bits in the low bits — what FFmpeg's software HEVC/VP9 decoders hand back
+     * as yuv420p10le. Same plane layout as PP_FRAME_YUV420P; the strides are in
+     * bytes (= 2 * samples). The GL video shader samples it as GL_R16 and skips
+     * the old CPU pack-to-8-bit step. */
+    PP_FRAME_YUV420P10 = 4
 } pp_frame_format;
 
 /*
@@ -42,6 +48,10 @@ typedef struct pp_frame {
     const uint8_t *planes[4];
     int strides[4];
     int64_t pts_us;
+    /* Raw AVColorTransferCharacteristic of the source (0 = unspecified). Carried
+     * for the HDR badge and #4's PQ/HLG tone-map tail; GL-5 does not act on it —
+     * 10-bit is presented as SDR-with-more-precision. */
+    int color_trc;
 } pp_frame;
 
 #ifdef __cplusplus

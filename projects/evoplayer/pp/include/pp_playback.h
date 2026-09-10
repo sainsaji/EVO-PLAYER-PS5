@@ -78,6 +78,7 @@ typedef struct pp_playback {
     uint32_t gl_cw, gl_ch;      /* coded (padded) luma w/h = texture size */
     uint32_t gl_dw, gl_dh;      /* display (cropped) w/h                  */
     int      gl_ready;
+    int      gl_ten_bit;        /* GL-5 (#81): planar source is 16-bit (yuv420p10le) */
 
     /*
      * GL-4 Stage 2d: a seek's discard window is the one time the borrowed
@@ -93,6 +94,7 @@ typedef struct pp_playback {
     size_t   hold_cap;
     int      hold_valid;        /* serve hold_buf from get_nv12           */
     int      hold_planar;
+    int      hold_ten_bit;
     int      hold_ypitch, hold_uvpitch, hold_upitch, hold_vpitch;
     size_t   hold_uv_off, hold_u_off, hold_v_off;
     uint32_t hold_cw, hold_ch, hold_dw, hold_dh;
@@ -135,11 +137,12 @@ int pp_playback_has_display(const pp_playback *pb);
  */
 typedef struct pp_gl_nv12_frame {
     const uint8_t *y, *uv, *u, *v;
-    int      y_pitch, uv_pitch, u_pitch, v_pitch;
-    uint32_t coded_w, coded_h;   /* padded luma plane = R8 texture size */
+    int      y_pitch, uv_pitch, u_pitch, v_pitch;   /* bytes (2x samples when ten_bit) */
+    uint32_t coded_w, coded_h;   /* padded luma plane = R8/R16 texture size */
     uint32_t disp_w, disp_h;     /* valid (cropped) region              */
     int      ready;
     int      held;               /* 1 = the frozen mid-seek snapshot    */
+    int      ten_bit;            /* GL-5 (#81): planar 16-bit (yuv420p10le), sample as GL_R16 */
 } pp_gl_nv12_frame;
 
 /**

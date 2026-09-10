@@ -94,6 +94,28 @@ void evo_rmlui_render_reader(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderReader(framebuffer, width, height);
 }
 
+void evo_rmlui_update_image(const evo_rmlui_image_params_t* p) {
+    if (!p) return;
+    EvoImageState s;
+    s.title  = p->title ? p->title : "";
+    s.loaded = (p->loaded != 0 && p->pixels && p->w > 0 && p->h > 0);
+    s.pixels = s.loaded ? p->pixels : nullptr;
+    s.w = s.loaded ? p->w : 0;
+    s.h = s.loaded ? p->h : 0;
+    if (s.loaded) {
+        char b[48];
+        std::snprintf(b, sizeof b, "%d x %d", p->w, p->h);
+        s.dims = b;
+    } else {
+        s.dims = "IMAGE FILE";
+    }
+    EvoRmlApp::Instance().UpdateImageState(s);
+}
+
+void evo_rmlui_render_image(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderImage(framebuffer, width, height);
+}
+
 void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
     if (!p) return;
     EvoSurroundState state;
@@ -284,8 +306,28 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.view_mode = p->view_mode;
     state.show_stats = (p->show_stats != 0);
     state.alpha = p->alpha;
+    state.subtitle_text = p->subtitle_text ? p->subtitle_text : "";
+    state.subtitle_face = p->subtitle_face;
+    state.subtitle_raised = (p->subtitle_raised != 0);
+    state.chrome_hidden = (p->chrome_hidden != 0);
+    state.fps = p->fps;
+    state.debug_overlay = (p->debug_overlay != 0);
+    state.music_mode = (p->music_mode != 0);
+    state.music_codec = p->music_codec ? p->music_codec : "";
 
     EvoRmlApp::Instance().UpdatePlaybackState(state);
+}
+
+void evo_rmlui_update_perf_hud(const evo_perf_hud_t* p) {
+    if (p) EvoRmlApp::Instance().UpdatePerfHud(p);
+}
+
+void evo_rmlui_update_keyboard(const evo_keyboard_params_t* p) {
+    if (p) EvoRmlApp::Instance().UpdateKeyboard(p);
+}
+
+void evo_rmlui_render_keyboard(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderKeyboard(framebuffer, width, height);
 }
 
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height) {

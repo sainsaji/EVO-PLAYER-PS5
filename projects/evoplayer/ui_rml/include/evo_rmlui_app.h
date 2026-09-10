@@ -9,6 +9,7 @@
 #include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_system.h"
 #include "evo_rmlui_fileinterface.h"
+#include "evo_rmlui_bridge.h"   /* evo_perf_hud_t */
 
 struct EvoPlaybackState {
     std::string title;
@@ -30,6 +31,14 @@ struct EvoPlaybackState {
     int view_mode = 0; // 0=FIT, 1=FILL, 2=STRETCH
     bool show_stats = false;
     int alpha = 255;
+    std::string subtitle_text;   // #81: active caption, UTF-8, "\n"-separated
+    int subtitle_face = 2;       // EVO_FACE_SUB/MENU/TITLE
+    bool subtitle_raised = false;
+    bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
+    int fps = 0;                 // #81: dev FPS pill
+    bool debug_overlay = false;
+    bool music_mode = false;     // #81: NOW PLAYING visualiser
+    std::string music_codec;
 
     bool operator==(const EvoPlaybackState& o) const {
         return title == o.title && meta == o.meta && res_badge == o.res_badge &&
@@ -40,7 +49,11 @@ struct EvoPlaybackState {
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
                audio_track == o.audio_track && sub_track == o.sub_track &&
-               view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha;
+               view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha &&
+               subtitle_text == o.subtitle_text && subtitle_face == o.subtitle_face &&
+               subtitle_raised == o.subtitle_raised && chrome_hidden == o.chrome_hidden &&
+               fps == o.fps && debug_overlay == o.debug_overlay &&
+               music_mode == o.music_mode && music_codec == o.music_codec;
     }
     bool operator!=(const EvoPlaybackState& o) const { return !(*this == o); }
 };
@@ -404,6 +417,22 @@ struct EvoReaderState {
     bool operator!=(const EvoReaderState& o) const { return !(*this == o); }
 };
 
+/* #81: full-screen photo / image viewer (replaces main.c's draw_image_screen). */
+struct EvoImageState {
+    std::string title;
+    std::string dims;         // "1920 x 1080" or "IMAGE FILE"
+    bool loaded = false;
+    const uint32_t* pixels = nullptr;
+    int w = 0;
+    int h = 0;
+
+    bool operator==(const EvoImageState& o) const {
+        return title == o.title && dims == o.dims && loaded == o.loaded &&
+               pixels == o.pixels && w == o.w && h == o.h;
+    }
+    bool operator!=(const EvoImageState& o) const { return !(*this == o); }
+};
+
 struct EvoSurroundSpeaker {
     std::string name;
     std::string label;
@@ -510,6 +539,9 @@ public:
     void UpdateReaderState(const EvoReaderState& state);
     void RenderReader(uint32_t* framebuffer, int width, int height);
 
+    void UpdateImageState(const EvoImageState& state);   // #81
+    void RenderImage(uint32_t* framebuffer, int width, int height);
+
     void UpdateSurroundState(const EvoSurroundState& state);
     void RenderSurround(uint32_t* framebuffer, int width, int height);
 
@@ -523,6 +555,7 @@ public:
     void RenderLaunch(uint32_t* framebuffer, int width, int height);
 
     void UpdatePlaybackState(const EvoPlaybackState& state);
+    void UpdatePerfHud(const evo_perf_hud_t* hud);   // #81/#63 diagnostic HUD
     void RenderPlaybackOSD(uint32_t* framebuffer, int width, int height);
 
     void UpdateDialogState(const EvoDialogState& state);
@@ -552,6 +585,10 @@ public:
      */
     void UpdateToastState(const EvoToastState& state);
     void RenderToast(uint32_t* framebuffer, int width, int height);
+
+    /* #81: virtual keyboard modal - own context, composited over the screen. */
+    void UpdateKeyboard(const evo_keyboard_params_t* p);
+    void RenderKeyboard(uint32_t* framebuffer, int width, int height);
 
     bool IsInitialized() const { return m_initialized; }
 
@@ -593,6 +630,7 @@ private:
     Rml::ElementDocument* m_browser_doc = nullptr;
     Rml::ElementDocument* m_changelog_doc = nullptr;
     Rml::ElementDocument* m_reader_doc = nullptr;
+    Rml::ElementDocument* m_image_doc = nullptr;   // #81
     Rml::ElementDocument* m_surround_doc = nullptr;
     Rml::ElementDocument* m_playback_doc = nullptr;
     Rml::ElementDocument* m_dialog_doc = nullptr;
@@ -612,6 +650,11 @@ private:
     std::string m_toast_last_message;
     int m_toast_last_kind = -1;
 
+    /* #81: virtual keyboard - own context (same rationale as the toast). */
+    Rml::Context* m_keyboard_context = nullptr;
+    Rml::ElementDocument* m_keyboard_doc = nullptr;
+    std::string m_kb_sig;   /* cheap change gate for UpdateKeyboard */
+
     EvoThemeColors m_theme;
     std::string m_version;
     EvoLaunchState m_last_launch;
@@ -619,6 +662,7 @@ private:
     EvoBrowserState m_last_browser;
     EvoChangelogState m_last_changelog;
     EvoReaderState m_last_reader;
+    EvoImageState  m_last_image;
     EvoSurroundState m_last_surround;
     EvoPlaybackState m_last_state;
 
@@ -643,6 +687,7 @@ private:
     int m_theme_gen_browser = -1;
     int m_theme_gen_changelog = -1;
     int m_theme_gen_reader = -1;
+    int m_theme_gen_image = -1;
     int m_theme_gen_surround = -1;
     int m_theme_gen_playback = -1;
     int m_theme_gen_dialog = -1;
@@ -672,9 +717,11 @@ private:
     static const int kReaderLines = 64;
     static const int kSurroundSpeakers = 8;
 
-    /* 0 = hero, 1..6 = the recent shelf, 7 = the browser preview. */
+    /* 0 = hero, 1..6 = the recent shelf, 7 = the browser preview,
+     * 8 = the #81 full-screen image viewer. */
     static const int kBrowserArtSlot = 7;
-    static const int kArtSlots = 1 + 6 + 1;
+    static const int kImageArtSlot = 8;
+    static const int kArtSlots = 1 + 6 + 1 + 1;
     int m_art_generation[kArtSlots] = {};
     const uint32_t* m_art_last_ptr[kArtSlots] = {};
     int m_art_last_dims[kArtSlots][2] = {};

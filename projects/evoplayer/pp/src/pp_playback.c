@@ -237,6 +237,7 @@ static int hold_snapshot(pp_playback *pb)
     }
 
     pb->hold_planar  = planar;
+    pb->hold_ten_bit = pb->gl_ten_bit;
     pb->hold_ypitch  = pb->gl_src_ypitch;
     pb->hold_uvpitch = pb->gl_src_uvpitch;
     pb->hold_upitch  = pb->gl_src_upitch;
@@ -301,16 +302,21 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 
     if (!src->planes[0])
         return -4;
-    if (src->format != PP_FRAME_NV12 && src->format != PP_FRAME_YUV420P)
+    if (src->format != PP_FRAME_NV12 && src->format != PP_FRAME_YUV420P &&
+        src->format != PP_FRAME_YUV420P10)
         return -4;
 
-    dw = src->width;
-    dh = src->height;
-    cw = (dw + 1u) & ~1u;                 /* even luma width -> R8 texture width */
-    ch = src->coded_height ? src->coded_height : src->height;
-    if (ch < dh) ch = dh;
-    ch = (ch + 1u) & ~1u;                 /* even -> UV plane is ch/2 rows      */
-    syp = src->strides[0] > 0 ? src->strides[0] : (int)src->width;
+    {
+        int ten = (src->format == PP_FRAME_YUV420P10);
+        int bpp = ten ? 2 : 1;
+        dw = src->width;
+        dh = src->height;
+        cw = (dw + 1u) & ~1u;             /* even luma width -> texture width  */
+        ch = src->coded_height ? src->coded_height : src->height;
+        if (ch < dh) ch = dh;
+        ch = (ch + 1u) & ~1u;             /* even -> UV plane is ch/2 rows     */
+        syp = src->strides[0] > 0 ? src->strides[0] : (int)src->width * bpp;
+    }
 
     t0 = now_us();
 
@@ -323,6 +329,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
      * — hold_snapshot() covers it.
      */
     if (pb->lock) pthread_mutex_lock(mtx(pb));
+    pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10);
     pb->gl_src_y  = src->planes[0];
     pb->gl_src_ypitch = syp;
     if (src->format == PP_FRAME_NV12) {
@@ -330,10 +337,11 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
         pb->gl_src_uvpitch = src->strides[1] > 0 ? src->strides[1] : syp;
         pb->gl_src_u = pb->gl_src_v = NULL;
     } else {
+        int cbpp = pb->gl_ten_bit ? 2 : 1;
         pb->gl_src_uv = NULL;
         pb->gl_src_u = src->planes[1];
         pb->gl_src_v = src->planes[2];
-        pb->gl_src_upitch = src->strides[1] > 0 ? src->strides[1] : (int)((src->width + 1u) / 2u);
+        pb->gl_src_upitch = src->strides[1] > 0 ? src->strides[1] : (int)((src->width + 1u) / 2u) * cbpp;
         pb->gl_src_vpitch = src->strides[2] > 0 ? src->strides[2] : pb->gl_src_upitch;
     }
     pb->gl_cw = cw;
@@ -385,6 +393,7 @@ int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
         f->coded_h  = pb->hold_ch;
         f->disp_w   = pb->hold_dw;
         f->disp_h   = pb->hold_dh;
+        f->ten_bit  = pb->hold_ten_bit;
         f->ready    = 1;
         f->held     = 1;
         got = 1;
@@ -401,6 +410,7 @@ int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
         f->coded_h  = pb->gl_ch;
         f->disp_w   = pb->gl_dw;
         f->disp_h   = pb->gl_dh;
+        f->ten_bit  = pb->gl_ten_bit;
         f->ready    = 1;
         got = 1;
     }
