@@ -1,94 +1,79 @@
-# GPU on the PS5 payload SDK
+# GPU on the PS5 — the `ps5-opengl` funnel
 
-Findings from the v0.42 audit, and what they mean for the GPU YUV renderer.
+> **Superseded 2026-09-10 (GL-6 / #82).** This file used to conclude "there is
+> no open hardware GL/Vulkan path on this SDK". That is no longer true. EVO now
+> renders **everything** — menus, video, OSD, subtitles, keyboard, HUD — through
+> a single OpenGL context on `third_party/ps5-opengl/` (Mesa + a bespoke PS5
+> Gallium driver + a patched PSSL compiler → `sceAgc`). The hand-rolled `sceAgc`
+> present path (`pp_agc*`, `pp_videoout`) and the CPU YUV→BGRA converters that
+> this document weighed are all deleted. The reverse-engineering history below
+> is kept for context.
 
-## What exists
-
-`sce_stubs/libSceGnmDriver.c` gives link-time symbols for the GNM driver:
-
-```
-sceGnmSubmitCommandBuffers          sceGnmSubmitAndFlipCommandBuffers
-sceGnmSubmitCommandBuffersForWorkload   sceGnmSubmitDone
-sceGnmAreSubmitsAllowed             sceGnmRequestFlipAndSubmitDone
-sceGnmInsertWaitFlipDone            sceGnmValidateOnSubmitEnabled
-```
-
-`libSceGnmDriverForNeoMode.c` also exists — that is the PS4-Pro-mode variant
-and **not** what a PS5 payload wants.
-
-`projects/gpu_test` probes all of this at run time and reports what resolves.
-
-## What does not exist
-
-- **No GNM headers.** `include/ps5/` has `kernel.h`, `klog.h`, `mdbg.h`,
-  `nid.h`, `payload.h` and nothing else.
-- **No Gnmx.** Sony's C++ helper library that builds command buffers for you is
-  proprietary and is not reproduced anywhere open.
-- **No shader compiler.** There is no open PSSL compiler producing PS5 shader
-  binaries.
-
-So you can *call* `sceGnmSubmitCommandBuffers`, but you must hand-assemble the
-PM4 packet stream and supply pre-compiled shader binaries to have anything
-worth submitting. That is a large reverse-engineering project on its own.
-
-## The mesa + SDL2 route does NOT work — measured 2026-08-09
-
-An earlier version of this document recommended SDL2 NV12 textures on the
-grounds that the sysroot ships mesa and that mesa's `radeonsi` driver targets
-the same RDNA2 hardware. **That was wrong**, and it was wrong in the one way
-that matters: what is shipped is a *software* rasteriser.
-
-Checked directly against the image:
+## What runs today
 
 ```
-libGL.so -> libOSMesa.so -> libOSMesa.so.8.0.0     (92 MB, Off-Screen Mesa)
-
-gallium drivers linked inside it:
-  radeonsi   0        <-- the hardware driver is absent
-  llvmpipe   575
-  softpipe   380
-  swr        156
-
-/dev/dri, renderD references:  none
-no libradeonsi, libamdgpu, libgallium, libvulkan or DRI modules in the sysroot
-
-SDL2 2.30.12 video drivers compiled in:  dummy, offscreen
-                                         (no PS5, GNM or KMSDRM backend)
+decode (CPU, sceVideodec2 / FFmpeg) ─ NV12/P010 ─┐
+                                                 ├─► GL: video quad (YUV→RGB fragment shader)
+RmlUi context (all screens + overlays) ───────────┤        + UI pass + HUD pass
+                                                 └─► eglSwapBuffers ─► ps5-opengl ─► sceAgc DCB + sceVideoOut flip
 ```
 
-So `SDL_RenderCopy` on an NV12 texture would convert **on the CPU through
-llvmpipe**, and SDL2 has no video backend that can present on this platform
-anyway. It would be slower than `pp/src/pp_converter_fused.c`, which is
-already multithreaded and writes straight into the PS5 tile layout.
+- **One graphics context**, created in `main()`'s pre-unjail slot
+  (`ui_rml/src/evo_gl_context_device.cpp`) — `libSceAgc*` / `libSceVideoOut` go
+  API-dead after the self-unjail credential swap, so GL cannot be lazily
+  brought up on first draw. A second `sceVideoOut` open panics the console, so
+  `ps5-opengl` is the sole owner of `sceAgc` **and** the flip queue.
+- **Mesa 26.2 / GL 3.3 Core**, validated on FW 12.70 (GL-1, `--gl-smoke`
+  receipt — [evo-pro/gl1-spike.md](evo-pro/gl1-spike.md)).
+- The video path uploads NV12 as R8 + RG8 textures (zero-copy from the decode
+  frame pool) and does YUV→RGB + scale + OSD composite in one GLSL pass — see
+  [evo-pro/gl4-video-path-plan.md](evo-pro/gl4-video-path-plan.md).
+- Full plan, phasing and the pixel-path inventory:
+  [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
 
-`SDL_UpdateNVTexture` and `SDL_PIXELFORMAT_NV12` *do* exist in the headers
-(SDL 2.30.12), which is presumably what made the original claim look safe.
-Their presence says nothing about acceleration.
+## Build
 
-## What that leaves
+`ps5-opengl` is a git submodule built from source through the opt-in toolchain
+overlay — `scripts/build-ps5-opengl.sh` + `docker-compose.ps5-opengl.yml`. It
+must have been built once before `scripts/package-app.sh --ffpfsc`. `--gl` is
+the default (and only) app-module present path; `--no-gl` was retired by GL-4.
 
-There is no open hardware GL/Vulkan path on this SDK today. The options are:
+## HDR / 10-bit
 
-1. **Keep improving the CPU converter.** `pp_converter_fused.c` is the real
-   lever and it is measurable on the host — no console needed to benchmark a
-   YUV→BGRA+swizzle kernel. Wider SIMD, fewer passes and better cache
-   behaviour are all on the table.
-2. **Raw GNM.** `libSceGnmDriver.so` resolves the submit entry points, but you
-   must hand-assemble the PM4 stream and supply precompiled shader binaries,
-   with no headers, no Gnmx and no PSSL compiler. Large, speculative.
-3. **Wait for the ecosystem.** If a radeonsi/DRI port lands in pacbrew, this
-   reopens cheaply — re-run the checks above to find out.
+10-bit (P010 / HEVC Main10) decodes and plays as SDR with BT.601-limited
+unpack + a naive tone-map in the GL video shader (GL-5). A proper PQ/HLG
+tone-map and `sceVideoOutSetHdrMetadata` HDR *output* are the remaining tail of
+`#4`.
 
-Do not re-scaffold `projects/yuv_gpu_test` against SDL2 without re-checking
-the driver list first. That is the assumption that failed.
+---
 
-## HDR
+## History — the reverse-engineering that got here
 
-`sceVideoOutSetHdrMetadata` and `sceVideoOutSysSetHdrMetadata` are present in
-the VideoOut stub, and the pixel-format constants include
-`A16R16G16B16_FLOAT`. So the *plumbing* exists. Whether HDR output can actually
-be driven from a payload — as opposed to from a licensed title — is unverified
-and should be treated as an open research question, not a planned feature.
+### v0.42 audit: no Gnmx, no PSSL compiler, mesa ships software-only
 
-Investigate in this order: get 10-bit HEVC decoding to P010, present it as SDR
-with correct tone mapping, and only then experiment with HDR metadata.
+`sce_stubs/libSceGnmDriver.c` gave link-time symbols
+(`sceGnmSubmitCommandBuffers`, `sceGnmSubmitDone`, …) but there were **no GNM
+headers, no Gnmx, no open PSSL compiler**, and the sysroot's `libGL.so` was
+Off-Screen Mesa with only `llvmpipe` / `softpipe` / `swr` — `radeonsi` (the
+hardware driver) absent, no `/dev/dri`. SDL2 was compiled with `dummy` /
+`offscreen` video only. So `SDL_RenderCopy` on an NV12 texture would have
+converted on the CPU through llvmpipe with no way to present.
+
+### The hand-rolled `sceAgc` route (#27 / #28)
+
+EVO then reverse-engineered ProsperoLight / SharpProspero's `sceAgc` usage and
+built a hand-assembled DCB present path (`pp_agc.c`): `sceAgcInit`, shader
+create/link from vendored blobs, a per-frame CX register block, NV12→RGB on the
+GPU, `sceAgcDcbSetFlip`. This **worked** — GTA 4K at 982 µs/frame — but every
+*textured* pixel shader failed `sceAgcCreateShader` validation (`0x8a6c001f`)
+because Sony's compiler emits an `sl00` resource-metadata trailer that can't be
+hand-authored. Textured UI (text, icons, art) as GPU geometry was blocked at
+the toolchain level.
+
+### `ps5-opengl` (the render overhaul)
+
+`ps5-opengl` resolves exactly that wall: Mesa's PSBC path compiles ordinary
+GLSL to working PS5 shaders. It is the *same* `sceAgc` route, so the hand-rolled
+present path had to be **removed, not run alongside** (dual `sceVideoOut`
+ownership panics). GL-1…GL-6 did that migration; GL-6 deleted `pp_agc*` /
+`pp_videoout` / the CPU converters.

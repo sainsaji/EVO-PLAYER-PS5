@@ -44,7 +44,6 @@ public:
     void SetDimensions(int w, int h) override;
     void SetMemoryTexture(const std::string& key, const uint32_t* bgra, int w, int h) override;
     void DropMemoryTexture(const std::string& key) override;
-    void SetAgcSink(EvoAgcGeoSink*) override {}   /* retired in GL-3 */
     bool IsGpu() const override { return true; }
     void FrameBegin() override;
     void FrameEnd() override;

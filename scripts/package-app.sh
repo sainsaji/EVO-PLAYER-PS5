@@ -457,7 +457,11 @@ PRX_STUB_WANT=()
 # libSceVideodec2's own startup load needs the GPU driver stack present
 # (sceVideodec2AllocateComputeQueue allocates a GPU compute queue). ProsperoLight
 # links libSceAgc + libSceAgcDriver, which pull in libSceGnmDriver and satisfy
-# that; EVO must do the same or libSceVideodec2 loads broken.
+# that; EVO must do the same or libSceVideodec2 loads broken. ps5-opengl's
+# Gallium driver also imports sceAgc* / sceAgcDriver* directly, and --gl is the
+# only app-module build - the libSceAgc/libSceAgcDriver .syms are comment-only
+# now (GL-6 deleted pp_agc.c) and the actual symbol list is populated from the
+# ps5-opengl archives (GL_SCE_UNDEF) in the augmentation block below.
 # The native decode backend (media/src/evo_vdec_native.c, #31) is compiled into
 # every MODE == player eboot, so libSceVideodec2 + its GPU-driver deps must be
 # positional DT_NEEDED.
@@ -492,12 +496,14 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         need_file "${syms}" "missing PRX stub symbol list: ${base}.syms"
         so="${BUILD}/stubs/${base}.so"
         csrc="${BUILD}/stubs/${base}.c"
-        grep -vE '^\s*(#|$)' "${syms}" | awk '{print "void " $1 "(void){}"}' > "${csrc}"
+        # (a comment-only .syms - libSceAgc/libSceAgcDriver post-GL-6 - greps to
+        #  nothing; `|| true` so the empty result isn't a pipeline failure.)
+        { grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print "void " $1 "(void){}"}' > "${csrc}"
         # --gl / --gl-smoke: add the sceAgc* / sceAgcDriver* names ps5-opengl
         # links that this .syms doesn't already carry. Routed by prefix;
         # sceVideoOut* etc. resolve from target/lib/*.so and are left alone.
         if (( GL_LINK )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
-            existing="$(grep -vE '^\s*(#|$)' "${syms}" | awk '{print $1}')"
+            existing="$({ grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print $1}')"
             for s in "${GL_SCE_UNDEF[@]}"; do
                 if [[ "${base}" == libSceAgcDriver ]]; then
                     [[ "${s}" == sceAgcDriver* ]] || continue
@@ -519,7 +525,7 @@ if (( ${#PRX_STUB_WANT[@]} )); then
             echo "          firmware the loader rejects the module at load."
             echo "          Remove it, or annotate the line with '# keep: <why>'."
             dead_total=$((dead_total + 1))
-        done < <(grep -vE '^\s*(#|$)' "${syms}")
+        done < <(grep -vE '^\s*(#|$)' "${syms}" || true)
 
         "${TCC}" -shared -nostdlib -nodefaultlibs -fPIC \
             -Wl,-soname,"${base}.sprx" -o "${so}" "${csrc}"

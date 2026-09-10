@@ -3,7 +3,6 @@
 #include <string>
 
 namespace Rml { class RenderInterface; }
-class EvoAgcGeoSink;   /* #28 geo sink - non-owning, retired in GL-3 */
 
 /*
  * The seam that lets EvoRmlApp hold either render interface.
@@ -42,10 +41,6 @@ public:
     virtual void SetMemoryTexture(const std::string& key, const uint32_t* bgra,
                                   int w, int h) = 0;
     virtual void DropMemoryTexture(const std::string& key) = 0;
-
-    /* #28 Phase 4 geometry divert. No-op on the GL interface (GL-3 deletes the
-     * sink entirely); kept on the bridge so call sites compile unchanged. */
-    virtual void SetAgcSink(EvoAgcGeoSink* sink) = 0;
 
     virtual void FrameBegin() {}
     virtual void FrameEnd() {}

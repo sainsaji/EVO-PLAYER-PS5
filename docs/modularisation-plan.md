@@ -2,7 +2,11 @@
 
 > **Status:** in progress. `src/evo_toast.c`, `src/evo_recent.c`,
 > `src/evo_favorites.c` and four `media/src/*.c` modules are already carved
-> out; `main.c` is **~12,900 lines / ~290 top-level functions** (2026-09-03).
+> out; `main.c` is **~11,000 lines** (2026-09-10, down from ~12,900 on
+> 2026-09-03 — the render overhaul GL-4/GL-5/GL-6 removed the present
+> dispatch, the bitmap fonts, the subtitle rasteriser, the image blitter and
+> the `#32` overlay machine). The line-number spans in the region map below
+> pre-date that and are stale; re-run the marker scan before an extraction.
 > The Makefile compiles per-object (`%.o: %.c`), so each extraction genuinely
 > buys rebuild time.
 >

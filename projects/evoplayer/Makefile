@@ -73,12 +73,11 @@ LIBS := \
 
 # GL-4 (#80) Stage 3: the CPU YUV->BGRA converters (pp_converter[_parallel
 # |_fused], pp_compute_pipeline) and the tiled VideoOut blit (tile_copy) are
-# gone - the video goes up as R8/RG8 planes + a GLSL shader. pp_agc* and
-# pp_videoout are dead code until GL-6 deletes them.
+# gone - the video goes up as R8/RG8 planes + a GLSL shader.
+# GL-6 (#82): the hand-rolled sceAgc present/geo/OSD path (pp_agc*) and the
+# sceVideoOut buffer manager (pp_videoout) are deleted - ps5-opengl owns
+# sceAgc + sceVideoOut for the whole session (evo_gl_context_device.cpp).
 PP_SRCS := \
-    pp/src/pp_videoout.c \
-    pp/src/pp_agc.c \
-    pp/src/pp_agc_osd.c \
     pp/src/pp_audio_clock.c \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \
@@ -170,13 +169,8 @@ endif
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
-# .incbin'd sceAgc shader blobs (#27 video, #28 UI). Assembled by $(CC).
-ASM_OBJS := pp/src/agc_blobs.o pp/src/agc_ui_blobs.o
-C_OBJS   += $(ASM_OBJS)
-
 RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_render.cpp \
-    ui_rml/src/evo_rmlui_render_agc.cpp \
     ui_rml/src/evo_rmlui_system.cpp \
     ui_rml/src/evo_rmlui_app.cpp \
     ui_rml/src/evo_rmlui_bridge.cpp \
@@ -196,9 +190,9 @@ RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 
 # -MMD -MP: emit a .d next to each .o listing its header prerequisites, so an
 # object rebuilds when a header it includes changes. Without this, editing e.g.
-# pp_agc.h left stale .o files linked against the old ABI (#28, cost real
-# hardware cycles). package-app.sh's app-cflags.stamp only force-cleans on a
-# *flag* change, not a header edit.
+# a shared ABI header left stale .o files linked against the old ABI (#28, cost
+# real hardware cycles). package-app.sh's app-cflags.stamp only force-cleans on
+# a *flag* change, not a header edit.
 DEPFLAGS := -MMD -MP
 ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d)
 
@@ -208,16 +202,9 @@ ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
-%.o: %.S
-	$(CC) $(CFLAGS) -c -o $@ $<
-
 all: $(ELF)
 
 -include $(ALL_DEPS)
-
-# rebuild the embedded blobs when a .bin changes (recipe = the %.o: %.S rule)
-pp/src/agc_blobs.o: pp/src/agc_blobs.S $(wildcard pp/blobs/*.bin)
-pp/src/agc_ui_blobs.o: pp/src/agc_ui_blobs.S $(wildcard pp/blobs/*.header.bin) $(wildcard ../../pp/shaders/*.bin)
 
 # -----------------------------------------------------------------------------
 # App-module packaging hooks (Phase 1b - docs/evo-pro/phase-1b-app-module.md).

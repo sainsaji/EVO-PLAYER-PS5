@@ -375,6 +375,14 @@ void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderToast(framebuffer, width, height);
 }
 
+void evo_rmlui_update_debug_overlay(int fps, int visible) {
+    EvoRmlApp::Instance().UpdateDebugOverlay(fps, visible != 0);
+}
+
+void evo_rmlui_render_debug_overlay(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderDebugOverlay(framebuffer, width, height);
+}
+
 void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
     if (!p) return;
     EvoSettingsState state;
@@ -501,17 +509,6 @@ void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
     state.cursor_index   = p->cursor_index;
     state.visible        = (p->visible != 0);
     EvoRmlApp::Instance().UpdateNavState(state);
-}
-
-int evo_rmlui_agc_geo_active(void) {
-    return EvoRmlApp::Instance().AgcGeoActive() ? 1 : 0;
-}
-
-int evo_rmlui_agc_geo_present(int vout_handle, uint32_t buf_idx, void* gpu_target,
-                              int target_linear, uint32_t out_w, uint32_t out_h,
-                              int64_t flip_marker) {
-    return EvoRmlApp::Instance().AgcGeoPresent(vout_handle, buf_idx, gpu_target,
-                                               target_linear, out_w, out_h, flip_marker);
 }
 
 } // extern "C"

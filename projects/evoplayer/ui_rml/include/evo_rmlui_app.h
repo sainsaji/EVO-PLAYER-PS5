@@ -6,7 +6,6 @@
 #include <utility>
 #include <unordered_map>
 #include "evo_rmlui_render.h"
-#include "evo_rmlui_render_agc.h"
 #include "evo_rmlui_system.h"
 #include "evo_rmlui_fileinterface.h"
 #include "evo_rmlui_bridge.h"   /* evo_perf_hud_t */
@@ -590,21 +589,18 @@ public:
     void UpdateKeyboard(const evo_keyboard_params_t* p);
     void RenderKeyboard(uint32_t* framebuffer, int width, int height);
 
-    bool IsInitialized() const { return m_initialized; }
-
     /*
-     * #28 Phase 4: GPU geometry present. AgcGeoActive() is true when the mesh
-     * shaders are up (pp_agc_geo_available) and the opt-in hook is set
-     * (pp_agc_ui_ready). When active, RenderCachedScreen diverts the solid
-     * geometry stream into m_agc_geo during the cached render (text/icons stay
-     * on the CPU surface); main.c then calls AgcGeoPresent to submit that
-     * batch as one DCB. Returns the pp_agc_present_geo rc (0 ok / -1 fail /
-     * -2 watchdog), or 1 if there was nothing to present.
+     * Dev debug overlay - the menu-screen FPS pill (GL-5 kept it player-only;
+     * this restores it for every other screen). Own context, same convention as
+     * the toast: call UpdateDebugOverlay() then RenderDebugOverlay() AFTER the
+     * screen's own Render* call. `visible` follows show_debug_overlay; when it
+     * is up GlNeedsFrame() ticks ~2 Hz so the number keeps counting on an
+     * otherwise-idle (change-gated) menu.
      */
-    bool AgcGeoActive() const;
-    int  AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target,
-                       int target_linear, unsigned out_w, unsigned out_h,
-                       long long flip_marker);
+    void UpdateDebugOverlay(int fps, bool visible);
+    void RenderDebugOverlay(uint32_t* framebuffer, int width, int height);
+
+    bool IsInitialized() const { return m_initialized; }
 
 private:
     EvoRmlApp();
@@ -654,6 +650,13 @@ private:
     Rml::Context* m_keyboard_context = nullptr;
     Rml::ElementDocument* m_keyboard_doc = nullptr;
     std::string m_kb_sig;   /* cheap change gate for UpdateKeyboard */
+
+    /* Dev debug overlay (menu FPS pill) - own context, same rationale. */
+    Rml::Context* m_debug_context = nullptr;
+    Rml::ElementDocument* m_debug_doc = nullptr;
+    bool m_debug_visible = false;
+    int  m_debug_last_fps = -1;
+    long long m_debug_tick_ms = 0;   /* GlNeedsFrame ~2 Hz refresh timer */
 
     EvoThemeColors m_theme;
     std::string m_version;
@@ -815,11 +818,5 @@ private:
     bool m_gl_drew = false;
     bool m_gl_active = false;
     bool m_gl_blit_mode = true;
-
-    /* #28 Phase 4: solid-geometry batch collected during the last cached
-     * render, and whether it is waiting for AgcGeoPresent to submit it. */
-    EvoAgcGeoSink m_agc_geo;
-    bool m_agc_geo_pending = false;
-    int  m_agc_geo_screen = -1;
 };
 

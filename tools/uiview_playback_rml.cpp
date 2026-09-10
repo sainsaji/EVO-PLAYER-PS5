@@ -989,6 +989,31 @@ static void render_toast_screens(std::vector<uint32_t>& fb, int width, int heigh
     }
 }
 
+/* The dev menu FPS pill (own context, composited over any non-player screen
+ * when Settings -> System -> Debug Overlay is on). */
+static void render_debug_overlay_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    hide_nav();
+    evo_rmlui_launch_params_t lp;
+    memset(&lp, 0, sizeof(lp));
+    lp.app_name = "EVO PLAYER";
+    lp.version = "VERSION 0.7.0";
+    lp.clock = "21:48";
+    lp.theme_name = "MIDNIGHT";
+    lp.hero_eyebrow = "WELCOME";
+    lp.hero_title = "EVO PLAYER";
+    lp.hero_detail = "Play video and audio from USB storage";
+    lp.hero_action = "BROWSE USB";
+    lp.hero_progress = -1;
+    lp.hero_focused = 1;
+    evo_rmlui_update_launch(&lp);
+    evo_rmlui_render_launch(fb.data(), width, height);
+
+    evo_rmlui_update_debug_overlay(58, 1);
+    evo_rmlui_render_debug_overlay(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_debug_overlay.bmp", fb.data(), width, height);
+}
+
 static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int height) {
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
@@ -1293,6 +1318,7 @@ int main(int argc, char** argv) {
     render_surround_screen(fb, width, height);
     render_dialog_screens(fb, width, height);
     render_toast_screens(fb, width, height);
+    render_debug_overlay_screen(fb, width, height);
     render_mediainfo_screen(fb, width, height);
     render_subtitles_screen(fb, width, height);
     render_stress_screens(fb, width, height);

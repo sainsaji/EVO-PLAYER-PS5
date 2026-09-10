@@ -106,14 +106,13 @@ projects/evoplayer/
   main.c        the player: FFmpeg, threads, input, screens, state
   media/        subsystems carved out of main.c (own state/threads, narrow interface)
   pp/           playback: pace + presentation clock + seek (pp_playback),
-                theme. The CPU converters, tile_copy and the V8/V3/1080 backend
-                dispatch were deleted by GL-4 (#80); pp_agc*/pp_videoout are
-                dead code awaiting GL-6.
-  ui/           shared immediate-mode primitives still used by both paths:
-                draw/nav/focus/input/feedback, evo_keyboard (IME modal),
-                evo_widgets (toasts), evo_layout (grid/capacity geometry).
-                The screen renderers (evo_screens.c/evo_chrome.c) were deleted
-                in #44 — every screen now draws through ui_rml.
+                theme. The CPU converters, tile_copy, the V8/V3/1080 backend
+                dispatch (GL-4 #80) and pp_agc*/pp_videoout/pp_platform.h
+                (GL-6 #82) are all deleted — ps5-opengl owns present + VideoOut.
+  ui/           shared primitives: nav/focus/input/feedback/layout + evo_keyboard
+                (D-pad/buffer state; its immediate-mode renderer went in GL-5 #81,
+                evo_draw/evo_widgets with it). Screen renderers (evo_screens.c/
+                evo_chrome.c) deleted in #44 — every screen draws through ui_rml.
   ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI —
                 plus evo_gl_context_device.cpp, the GL/EGL context and the
                 video quad (stubbed out by evo_gl_context_stub.c off-device)
@@ -160,10 +159,10 @@ mock data — everything in the DOM binds to live C structs
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
-| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)** (top block = current front: the **OpenGL render overhaul**; GL-4/#80 CLOSED + hw-verified 2026-09-10, next is GL-5/#81). **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). **#27 AGC gate PASSED + `pp_agc_init` shader setup hw-verified** (`pp/src/pp_agc.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP — no popup screenshots). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (Step 2/3 how-to) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md), [avplayer-abi.md](docs/evo-pro/avplayer-abi.md) (Route A — dead) |
-| [evo-pro/opengl-render-overhaul.md](docs/evo-pro/opengl-render-overhaul.md) | **Collapse all 5 present routes + 3 font systems + CPU/GPU converters into one OpenGL funnel** (`third_party/ps5-opengl/` submodule). Full pixel-path inventory, phasing (`render-overhaul` label, `GL-1`…`GL-6`), and which open issues it rescopes/supersedes |
+| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)** (top block = current front: the **OpenGL render overhaul** — **GL-1…GL-6 DONE**, GL-6/#82 deleted `pp_agc*`/`pp_videoout`). **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP — no popup screenshots). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (**historical** — the pre-`ps5-opengl` hand-rolled sceAgc path) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md), [avplayer-abi.md](docs/evo-pro/avplayer-abi.md) (Route A — dead) |
+| [evo-pro/opengl-render-overhaul.md](docs/evo-pro/opengl-render-overhaul.md) | **The one OpenGL funnel** (`third_party/ps5-opengl/` submodule) — every pixel is a GL draw or texture; ps5-opengl (Mesa + PS5 Gallium + patched PSSL) owns `sceAgc` / `sceVideoOut`. Full pixel-path inventory, `GL-1`…`GL-6` phase table (all done), the issues it superseded |
 | [evo-pro/gl1-spike.md](docs/evo-pro/gl1-spike.md) | **#77 GL-1 — GO (hw-verified 2026-09-09).** `ps5-opengl` submodule + `_Exit` patch + from-source SDK + `pp_gl_smoke` in the `.ffpfsc` (`package-app.sh --gl-smoke`, `scripts/build-ps5-opengl.sh`, overlay `docker-compose.ps5-opengl.yml`). Mesa 26.2 / GL 3.3 renders on 12.70. #78 unblocked. |
-| [gpu-notes.md](docs/gpu-notes.md) | Why there's no hardware GL driver (pre-`ps5-opengl`; see opengl-render-overhaul.md) |
+| [gpu-notes.md](docs/gpu-notes.md) | The `ps5-opengl` funnel (what runs) + the reverse-engineering history that got there |
 | [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted by GL-4 (#80). Kept for the BT.601 reference matrix |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/media-tile.md) | Media tile / metadata handling |

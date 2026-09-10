@@ -158,32 +158,6 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     bool screen_changed = (screen_id != m_cached_screen);
 
-    /*
-     * #28 Phase 4: GPU geometry mode. Re-render every frame (the CPU only
-     * rasterises text/icons now - the expensive rounded-rect/gradient coverage
-     * is diverted to m_agc_geo for the GPU), leave the CPU text layer in
-     * m_surface / the caller's buffer as the geo-present fallback, and flag the
-     * batch for AgcGeoPresent. No surface cache here - the point is that the
-     * CPU cost is now small.
-     */
-    if (AgcGeoActive()) {
-        m_render->SetFramebuffer(m_surface.data());
-        m_render->SetDimensions(width, height);
-        std::fill(m_surface.begin(), m_surface.end(), 0x00000000u);
-        m_agc_geo.Begin(width, height);
-        m_render->SetAgcSink(&m_agc_geo);
-        EVO_PROF_CTX_RENDER();
-        m_render->SetAgcSink(nullptr);
-        m_frame_dirty = false;
-        m_cached_screen = screen_id;
-        m_agc_geo_pending = !m_agc_geo.Empty();
-        m_agc_geo_screen = screen_id;
-        if (framebuffer != m_surface.data())
-            std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
-        return;
-    }
-    m_agc_geo_pending = false;
-
     if (m_frame_dirty || screen_changed || resized) {
         m_render->SetFramebuffer(m_surface.data());
         m_render->SetDimensions(width, height);
@@ -200,36 +174,6 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 #endif
 }
 
-bool EvoRmlApp::AgcGeoActive() const
-{
-    return m_initialized && pp_agc_geo_available() && pp_agc_ui_ready();
-}
-
-int EvoRmlApp::AgcGeoPresent(int vout_handle, unsigned buf_idx, void* gpu_target,
-                             int target_linear, unsigned out_w, unsigned out_h,
-                             long long flip_marker)
-{
-    if (!m_agc_geo_pending || m_agc_geo.Empty())
-        return 1;
-    m_agc_geo_pending = false;
-    /* m_surface = this frame's CPU text/icon layer (premultiplied, cleared to
-     * transparent in RenderCachedScreen before the diverted render). The
-     * text-over-geo composite in pp_agc.c is dead code (PP_AGC_GEO_TEXT 0);
-     * the geo path itself is retired in the OpenGL render overhaul (GL-3). */
-    const uint32_t* text = (m_surface_w == (int)out_w && m_surface_h == (int)out_h &&
-                            !m_surface.empty()) ? m_surface.data() : nullptr;
-    return pp_agc_present_geo(vout_handle, buf_idx, gpu_target, target_linear,
-                              m_agc_geo.Vertices().data(),
-                              (uint32_t)m_agc_geo.Vertices().size(),
-                              m_agc_geo.Indices().data(),
-                              (uint32_t)m_agc_geo.Indices().size(),
-                              m_agc_geo.Draws().data(),
-                              (uint32_t)m_agc_geo.Draws().size(),
-                              out_w, out_h,
-                              text, text ? (uint32_t)out_w : 0u, text ? (uint32_t)out_h : 0u,
-                              flip_marker);
-}
-
 bool EvoRmlApp::GlNeedsFrame()
 {
     /* Retained-mode + ps5-opengl can't re-raster + MSAA-resolve + swap at 60 Hz,
@@ -240,6 +184,13 @@ bool EvoRmlApp::GlNeedsFrame()
     if (m_frame_dirty) return true;
     if (m_toast_doc && m_toast_doc->IsVisible()) return true;
     if (m_dialog_doc && m_dialog_doc->IsVisible()) return true;
+    /* Dev debug overlay: keep the menu FPS number counting on an idle screen -
+     * force a redraw ~2 Hz while it is up. */
+    if (m_debug_visible) {
+        long long now = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (now - m_debug_tick_ms >= 500) { m_debug_tick_ms = now; return true; }
+    }
     return false;
 }
 
@@ -482,6 +433,20 @@ bool EvoRmlApp::Initialize(int width, int height) {
         fprintf(stderr, "[EVO RmlUi] Failed to create keyboard context!\n");
     }
 
+    /* Dev debug overlay (menu FPS pill) - own context, same rationale as the
+     * toast. A load failure just means no menu FPS readout - never a crash. */
+    m_debug_context = Rml::CreateContext("debug_context", Rml::Vector2i(width, height));
+    if (m_debug_context) {
+        for (const auto& p : rml_prefixes) {
+            if (m_debug_doc) break;
+            m_debug_doc = m_debug_context->LoadDocument(p + "debug.rml");
+        }
+        if (m_debug_doc) m_debug_doc->Hide();
+        else fprintf(stderr, "[EVO RmlUi] Failed to load debug.rml!\n");
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create debug context!\n");
+    }
+
     m_initialized = true;
     fprintf(stderr, "[EVO RmlUi] Retained-mode Full Engine initialized successfully (%dx%d).\n",
             width, height);
@@ -583,6 +548,15 @@ void EvoRmlApp::Shutdown() {
     if (m_keyboard_context) {
         Rml::RemoveContext(m_keyboard_context->GetName());
         m_keyboard_context = nullptr;
+    }
+
+    if (m_debug_doc) {
+        m_debug_doc->Close();
+        m_debug_doc = nullptr;
+    }
+    if (m_debug_context) {
+        Rml::RemoveContext(m_debug_context->GetName());
+        m_debug_context = nullptr;
     }
 
     Rml::Shutdown();
@@ -3157,6 +3131,36 @@ void EvoRmlApp::RenderKeyboard(uint32_t* framebuffer, int width, int height) {
     m_keyboard_context->Update();
     m_render->FrameBegin();
     m_keyboard_context->Render();
+    m_render->FrameEnd();
+#if defined(EVO_GL_DEVICE)
+    m_gl_drew = true;
+#endif
+}
+
+void EvoRmlApp::UpdateDebugOverlay(int fps, bool visible) {
+    if (!m_initialized || !m_debug_doc) return;
+    m_debug_visible = visible;
+    if (!visible) {
+        if (m_debug_doc->IsVisible()) m_debug_doc->Hide();
+        m_debug_last_fps = -1;
+        return;
+    }
+    if (!m_debug_doc->IsVisible()) m_debug_doc->Show();
+    if (fps != m_debug_last_fps) {
+        m_debug_last_fps = fps;
+        if (Rml::Element* e = m_debug_doc->GetElementById("debug-fps"))
+            e->SetInnerRML(std::to_string(fps) + " FPS");
+    }
+}
+
+void EvoRmlApp::RenderDebugOverlay(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_debug_context || !m_debug_doc || !framebuffer) return;
+    if (!m_debug_doc->IsVisible()) return;
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_debug_context->Update();
+    m_render->FrameBegin();
+    m_debug_context->Render();
     m_render->FrameEnd();
 #if defined(EVO_GL_DEVICE)
     m_gl_drew = true;

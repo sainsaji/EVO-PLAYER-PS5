@@ -33,7 +33,6 @@ g++ -O2 -std=c++17 \
     -o output/uiview/uiview_playback_rml \
     tools/uiview_playback_rml.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp \
-    projects/evoplayer/ui_rml/src/evo_rmlui_render_agc.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render_gl.cpp \
     projects/evoplayer/ui_rml/src/evo_gl_context_host.cpp \
     projects/evoplayer/ui_rml/src/rmlui_gl3/RmlUi_Renderer_GL3.cpp \
@@ -43,7 +42,6 @@ g++ -O2 -std=c++17 \
     projects/evoplayer/ui_rml/src/evo_rmlui_fileinterface.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bundle.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bundle_data.cpp \
-    projects/evoplayer/pp/src/pp_agc.c \
     -Lbuild/rmlui-host-dist/lib \
     -Lbuild/rmlui-host/RmlUi/build \
     -lrmlui -lfreetype -lpng16 -lz -lpthread -lEGL -lGL \

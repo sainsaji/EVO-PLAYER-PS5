@@ -76,8 +76,8 @@ int evo_direct_mem_init(size_t pool_size_bytes)
     /* PS5 Direct Memory: memoryType 3 = WB_ONION (CPU cacheable + GPU shared).
      *
      * #6: the pool is now sized for the 4K CPU video working set (rotate ring,
-     * pp_playback display, pp_videoout linear staging), which is far larger
-     * than the original 64 MiB. If the console cannot satisfy the full request
+     * pp_playback display / held-frame snapshot), which is far larger than the
+     * original 64 MiB. If the console cannot satisfy the full request
      * from physical direct memory, step down rather than fall through to the
      * heap fallback below (posix_memalign here means flexible memory on the
      * app module, and the whole point of #6 is to keep these buffers OFF the

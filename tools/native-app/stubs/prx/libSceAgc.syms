@@ -1,31 +1,16 @@
-# libSceAgc — GPU command-buffer / shader ABI (#27 GPU Step 2/3).
-# Start = evo_agc_probe.c's kSyms (minus the two sceAgcDriver* ones).
-# Extend as pp_agc.c / evo_rmlui_render_agc.cpp need more (a link error names
-# the missing symbol). Full ABI: third_party/SharpProspero .../Interop/Agc/SceAgc.cs.
+# libSceAgc — GPU command-buffer / shader ABI.
 #
 # EVERY name here becomes a POSITIONAL (unconditional DT_NEEDED) import from
 # libSceAgc.prx in the eboot. A name whose NID does not resolve on the console
 # firmware makes the dynamic loader REJECT the whole module -> "Game or App
 # Error" / CE-108255-1 before main(), no log ("crashed before KStuff pause").
-# So: add a symbol ONLY when an object actually imports it. `sceAgcDcbDrawIndexOffset`
-# was listed here speculatively in #28 (93ce6ec), never called (the geo path uses
-# sceAgcDcbDrawIndex), and its unresolved NID bricked every player build at load
-# for a whole session. package-app.sh now cross-checks this file against the
-# objects' undefined symbols and fails on a dead entry.
-sceAgcInit
-sceAgcGetRegisterDefaults
-sceAgcCreateShader
-sceAgcLinkShaders
-sceAgcDcbSetCxRegistersIndirect
-sceAgcDcbSetUcRegistersIndirect
-sceAgcDcbSetShRegistersIndirect
-sceAgcCbSetShRegisterRangeDirect
-sceAgcDcbDrawIndexAuto
-sceAgcDcbSetFlip
-sceAgcSuspendPoint
-# #28 Phase 4 - GPU geometry (indexed draws)
-sceAgcDcbSetCxRegisterDirect
-sceAgcDcbSetIndexSize
-sceAgcDcbSetIndexBuffer
-sceAgcDcbSetIndexCount
-sceAgcDcbDrawIndex
+#
+# GL-6 (#82) deleted pp_agc.c (the hand-rolled sceAgc present/geo/OSD path), so
+# this file no longer lists symbols directly. --gl is the only app-module build
+# and ps5-opengl's Gallium driver imports sceAgc* itself; package-app.sh
+# harvests those from the ps5-opengl archives (GL_SCE_UNDEF) and appends them to
+# this stub's generated .c, so the stub stays populated and NEEDED without a
+# hand-maintained (and easily-stale, easily-bricking) list here.
+#
+# Add an explicit symbol below ONLY if an EVO object imports it directly and it
+# is not already in the ps5-opengl set (a link error will name it).

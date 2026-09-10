@@ -1,10 +1,10 @@
 /*
  * evo_boot_log.h — EVO's single diagnostic log: /mnt/usb0/evo.log
  *
- * Every diagnostic stream funnels here — the boot trace (evo_bt / pp_agc /
+ * Every diagnostic stream funnels here — the boot trace (evo_bt / GL context /
  * jailbreak result), the playback breadcrumbs (pp_stage_bc), the native
- * decoder notes, the VO-debug trace, the per-file playback stats — one
- * timestamped, append-only file so there is a single place to look.
+ * decoder notes, the per-file playback stats — one timestamped, append-only
+ * file so there is a single place to look.
  *
  * evo_boot_log() timestamps the line and, before /mnt/usb0 is reachable,
  * buffers it in memory; evo_boot_log_flush() opens the file once the sandbox

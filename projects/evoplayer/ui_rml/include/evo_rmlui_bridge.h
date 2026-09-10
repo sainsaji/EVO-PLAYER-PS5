@@ -421,6 +421,13 @@ void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
 void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* params);
 void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height);
 
+/* Dev debug overlay - the menu-screen FPS pill (GL-5 kept the FPS readout
+ * player-only; this restores it for every non-player screen). Own RmlUi
+ * context, composited like the toast: call update then render AFTER the
+ * screen's own render call. `visible` follows show_debug_overlay. */
+void evo_rmlui_update_debug_overlay(int fps, int visible);
+void evo_rmlui_render_debug_overlay(uint32_t* framebuffer, int width, int height);
+
 /* Virtual keyboard modal API (#81 / closes #34). evo_keyboard.c keeps the
  * buffer, layer and D-pad navigation state and pushes it here; this renders it
  * as an RmlUi document in its own context, composited over the screen like the
@@ -536,20 +543,6 @@ typedef struct {
 } evo_rmlui_nav_params_t;
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* params);
-
-/*
- * #28 Phase 4: GPU geometry present. evo_rmlui_agc_geo_active() is 1 when the
- * last cached menu render diverted its solid geometry to the GPU sink (mesh
- * shaders up + /mnt/usb0/evo_agc_ui set). main.c then calls
- * evo_rmlui_agc_geo_present() at flip time instead of the CPU tiler /
- * pp_agc_present_ui: it submits that batch as one DCB + queues the flip.
- * Returns the pp_agc_present_geo rc (0 submitted / -1 fail / -2 watchdog) or
- * 1 if there was nothing to present (caller should fall back).
- */
-int evo_rmlui_agc_geo_active(void);
-int evo_rmlui_agc_geo_present(int vout_handle, uint32_t buf_idx, void* gpu_target,
-                              int target_linear, uint32_t out_w, uint32_t out_h,
-                              int64_t flip_marker);
 
 #ifdef __cplusplus
 }

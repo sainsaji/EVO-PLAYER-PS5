@@ -39,10 +39,10 @@ int evo_vdec_native_probe(void);
 
 /*
  * GL-4 (#80): ask the decoder to emit NV12 (Y + interleaved UV, borrowed from
- * the decode frame pool — zero copy) instead of de-interleaving to planar I420.
+ * the decode frame pool - zero copy) instead of de-interleaving to planar I420.
  * The EVO_GL_DEVICE video path samples NV12 directly on the GPU, so the I420
- * split is pure waste there. Also implied whenever pp_agc_available(). Set once
- * before the first evo_vdec_native_open(); applies to decoders opened after.
+ * split is pure waste there. Set once before the first evo_vdec_native_open();
+ * applies to decoders opened after.
  */
 void evo_vdec_native_prefer_nv12(int on);
 

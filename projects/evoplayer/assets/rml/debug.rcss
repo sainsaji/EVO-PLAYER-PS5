@@ -1,0 +1,48 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Dev debug overlay (menu FPS pill)
+ *
+ * GL-5 (#81) moved the dev FPS readout into the player OSD (#fps-pill in
+ * playback.rml) and dropped the menu case. This restores it for every
+ * non-player screen: a tiny fixed pill in its OWN Rml::Context, composited on
+ * top of whatever menu is underneath - the same pattern toast.rcss uses - so
+ * it never disturbs the RenderCachedScreen surface cache. Visibility + the
+ * number are pushed from C++ (EvoRmlApp::UpdateDebugOverlay), gated on the
+ * Settings -> System -> "Debug Overlay" toggle (show_debug_overlay).
+ * Matches the old draw_fps_overlay position (top-right, 12px inset) and the
+ * player #fps-pill style.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 15px;
+    color: #f8fafc;
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span {
+    box-sizing: border-box;
+}
+
+#debug-pill {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background-color: #000000aa;
+    border-radius: 6px;
+    padding: 4px 10px;
+    z-index: 9;
+}
+
+#debug-fps {
+    font-size: 15px;
+    font-weight: bold;
+    color: #f8fafc;
+    letter-spacing: 0.5px;
+}

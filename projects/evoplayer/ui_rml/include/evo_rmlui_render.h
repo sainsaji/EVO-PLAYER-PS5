@@ -6,8 +6,6 @@
 #include <map>
 #include "evo_rmlui_render_bridge.h"
 
-class EvoAgcGeoSink;   /* #28 Phase 4 - evo_rmlui_render_agc.h */
-
 class EvoRenderInterface : public Rml::RenderInterface, public EvoRenderBridge {
 public:
     EvoRenderInterface(int width, int height);
@@ -17,15 +15,6 @@ public:
 
     void SetFramebuffer(uint32_t* fb) override { m_fb = fb; }
     void SetDimensions(int w, int h) override { m_width = w; m_height = h; }
-
-    /*
-     * #28 Phase 4: when a sink is set, RenderGeometry() diverts untextured,
-     * untransformed, unclipped batches (rounded rects, gradients, borders) to
-     * it for GPU rendering instead of CPU-rasterising them. Text/icons (textured)
-     * and clip-masked geometry still go to the CPU framebuffer. nullptr = the
-     * normal all-CPU path.
-     */
-    void SetAgcSink(EvoAgcGeoSink* sink) override { m_agc_sink = sink; }
 
     /*
      * Artwork the engine produces at runtime — decoded posters, the hero
@@ -59,7 +48,6 @@ private:
     int m_width;
     int m_height;
     uint32_t* m_fb;
-    EvoAgcGeoSink* m_agc_sink = nullptr;   /* #28 Phase 4, non-owning */
     bool m_scissor_enabled;
     Rml::Rectanglei m_scissor_region;
     bool m_has_transform;

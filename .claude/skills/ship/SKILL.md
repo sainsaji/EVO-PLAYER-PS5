@@ -73,18 +73,11 @@ docker compose run --rm ps5-dev bash -lc '
 ./tools/uiplay.sh                # contact sheet -> output/uiplay/index.html
 ./tools/uiview_playback_rml.sh   # the RmlUi playback / menu / cursor states
 ./tools/prof_rmlui.sh            # RmlUi frame profiler (-DEVO_RML_PROFILE)
-./tools/bench.sh                 # CPU converter timings
 ```
 
 Same RmlUi code, real `.rml`/`.rcss`/assets, no console risk, no cooldown. Add
 a fixture to `tools/uiview_playback_rml.cpp` for a screen/state it misses.
 Go to hardware only when the question is genuinely about console behaviour.
-
-## 4. GPU shaders
-
-```bash
-./tools/build-shader.sh pp/shaders/<name>.s     # GCN .s -> raw .text blob
-```
 
 ## After any hardware deploy
 

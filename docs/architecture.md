@@ -18,11 +18,15 @@ inner layer compiles and runs without the one outside it.
     ├── media/      subsystems carved out of main.c. Own state and threads,
     │               narrow interfaces. Depend on FFmpeg, not on the player.
     │
-    ├── pp/         playback backend: VideoOut, converters, clocks, theme.
-    │               No UI, no decoder ownership.
+    ├── pp/         playback backend: pace, presentation clock, seek, theme.
+    │               No UI, no decoder ownership. (Present + VideoOut now belong
+    │               to the GL context in ui_rml/ - GL-6.)
     │
-    └── ui/         screens, widgets, chrome, layout. No FFmpeg, no VideoOut,
-                    no assets - draws through a vtable of function pointers.
+    ├── ui_rml/     the UI: RmlUi integration + the one OpenGL context
+    │               (evo_gl_context_device.cpp -> ps5-opengl -> sceAgc /
+    │               sceVideoOut) that every pixel goes through.
+    │
+    └── ui/         shared immediate-mode primitives (nav/focus/input/layout).
 ```
 
 The `ui/` boundary is what makes `tools/uiview.sh` possible: because screens
@@ -132,8 +136,9 @@ EVO Player/
 │   └── evoplayer/              the fork
 │       ├── main.c              the player (see "why main.c is still large")
 │       ├── assets/             font atlas, generated icons, punctuation
-│       ├── ui/{include,src}/   screens, widgets, chrome - no FFmpeg, no assets
-│       ├── pp/{include,src}/   VideoOut, converters, clocks, theme
+│       ├── ui/{include,src}/   shared immediate-mode primitives (nav/focus/input)
+│       ├── ui_rml/{include,src} RmlUi integration + the one GL/EGL context
+│       ├── pp/{include,src}/   pace, presentation clock, seek, theme
 │       └── media/{include,src} subsystems carved out of main.c
 ├── third_party/ffmpeg/         sources (git-ignored)
 ├── output/{elf,pkg,logs}/      artifacts

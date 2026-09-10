@@ -24,10 +24,10 @@ console is available, and what each result means. Point an AI at it to resume.
 | [avplayer-abi.md](avplayer-abi.md) | **Phase 0 (Route A)** — `libSceAvPlayer` ABI from SharpProspero (`SceAvPlayerInitData` 120B, `...FrameInfoEx` pitch+crop, callback port, memory-typing diff vs the old `WC_GARLIC` try); header `sce/sce_avplayer.h`; spike `projects/avplayer_test/` | ✅ transcribed + spike compile-clean; not yet hardware-run |
 | [native-decode-plan.md](native-decode-plan.md) | The master plan — 9 phases from ABI harvest to a shipped Auto/FFmpeg/Native decoder toggle, with kill criteria | **Phase 4 ✅ DONE on hardware (#31 closed)** — GTA 4K H.264 plays on `sceVideodec2`; Phase 5 (settings toggle) next |
 | [phase-1b-app-module.md](phase-1b-app-module.md) | **Phase 1b** — repackage EVO as app module `PPSA99039` (fork the `ps5-native-app-boilerplate` build tail, clean-room `libc.prx`, ShadowMountPlus). **Milestone 1:** the unchanged FFmpeg-software player running in the app sandbox | ✅ **DONE** — boots to menu; task 8 (playback crash) was `posix_fadvise` from the sandbox, fixed `55685aa0`; 1080p + reasonable-4K play, demanding 4K needs native decode (#31, done) |
-| [gpu-rendering-plan.md](gpu-rendering-plan.md) | Move YUV convert + composite + UI off the CPU onto `sceAgc` — the fix for the ~11 fps RmlUi frame. Step 1 (dirty-flag the RmlUi surface) DONE + hardware-verified (idle menus 11→~60 fps). | 🟢 Step 1 shipped; **Step 2 (#27): AGC gate PASSED, `pp_agc_init` hw-verified, `render_frame` ported + wired — awaiting a hardware run** |
-| [agc-implementation.md](agc-implementation.md) | **Step 2/3 how-to** — `native_agc_present.cpp` read line by line, the ProsperoLight shader blobs disassembled (`llvm-mc-18` assembles GCN, so hand-written shaders are possible), `render_frame` DCB annotated, and the concrete `pp/src/pp_agc.c` port + wiring plan | 🟢 **port done** — `pp/src/pp_agc.c` `agc_render_frame` + `pp_agc_present_nv12` + `pp_playback` V8 wiring; builds green, not run on hardware |
-| [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md) | Study of `SvenGDK/SharpProspero`'s `sceAgc` GPU path (cloned to `third_party/SharpProspero/`, git-ignored) — full `libSceAgc` ABI, DCB layout, render-target register model, clean-room swizzle library; complements the ProsperoLight C++ reference | 📖 reference |
-| [opengl-render-overhaul.md](opengl-render-overhaul.md) | **Proposed: one OpenGL funnel for every pixel** — collapse the 5 present routes / 3 font systems / CPU+GPU converters / dual RmlUi path into RmlUi-on-GL + a GL video pass, with `third_party/ps5-opengl/` (Mesa→`sceAgc`) as the only GPU talker. Full pixel-path inventory + `GL-1`…`GL-6` phasing (`render-overhaul` label, #77–#82). Supersedes the hand-rolled `sceAgc` UI route. | 🟡 proposed — #77 is the FW-12.70 go/no-go |
+| [gpu-rendering-plan.md](gpu-rendering-plan.md) | The hand-rolled `sceAgc` convert/present/UI plan (#27/#28). | 📜 **historical** — superseded by the OpenGL render overhaul; `pp_agc*` deleted (GL-6) |
+| [agc-implementation.md](agc-implementation.md) | Line-by-line reverse-engineering of the ProsperoLight `sceAgc` path — DCB layout, CX registers, shader-blob format. | 📖 reference (the code it describes is deleted) |
+| [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md) | Study of `SvenGDK/SharpProspero`'s `sceAgc` GPU path — full `libSceAgc` ABI, DCB layout, render-target register model, swizzle library. | 📖 reference |
+| [opengl-render-overhaul.md](opengl-render-overhaul.md) | **The one OpenGL funnel for every pixel** — `ps5-opengl` (Mesa + PS5 Gallium + patched PSSL) is the only GPU talker; RmlUi-on-GL + a GL video pass. Full pixel-path inventory + `GL-1`…`GL-6` phasing (#77–#82). | ✅ **GL-1…GL-6 DONE (2026-09-10)** |
 
 Prerequisite (not EVO-Pro-specific, lives in [../modularisation-plan.md](../modularisation-plan.md)):
 **Track A** — the decoder seam (`evo_vdec.h`, `evo_vdec_ffmpeg.c`). Mostly
@@ -50,11 +50,11 @@ Phase 4  evo_vdec_native.c  (continuous stream, seek, HEVC) ✅ #31 CLOSED
 Phase 5  settings toggle  Auto / FFmpeg / Native  + runtime probe  ◀── next
 Phase 6  host preview, validation, docs
 
-GPU rendering track (parallel):
-  Step 1  dirty-flag the RmlUi surface     ✅ shipped + hw-verified
-  Step 2  AGC present + convert + flip (#27)  ◀── gate PASSED, pp_agc_init
-          hw-verified, render_frame ported + wired, awaiting a hardware run
-  Step 3  full RmlUi GPU geometry backend (#28)  committed, after Step 2
+GPU rendering track — REPLACED by the OpenGL render overhaul (#77–#82):
+  Step 1  dirty-flag the RmlUi surface       ✅ shipped + hw-verified (kept)
+  Step 2  hand-rolled sceAgc present (#27)    ✅ hw-verified, then deleted by GL-6
+  Step 3  hand-rolled sceAgc UI geo (#28)     ✅ solids hw-verified, then deleted
+  GL-1…GL-6  one ps5-opengl funnel            ✅ DONE 2026-09-10
 ```
 
 ## What to expect out of EVO at each stage
@@ -63,8 +63,8 @@ GPU rendering track (parallel):
 |---|---|---|---|
 | Phase 1b m1 | A home-screen title, FFmpeg decode, in the app sandbox | Launch from the Games row; settings in `/download0`; USB works after self-unjail. Same picture/sound/menus. | ✅ done |
 | GPU Step 1 | UI rasterised only on change | RmlUi menus stop dropping frames when idle | ✅ done |
-| Phase 4 | `sceVideodec2` as a second decode backend | Demanding 4K (GTA trailer) plays smoothly; FFmpeg auto-fallback | ✅ done; seek → #32 |
-| GPU Step 2 | NV12→RGB convert + flip on the GPU (video path) | 4K CPU cost drops; the CPU converter/swizzle leaves the hot path | 🟢 ported+wired, untested on HW |
+| Phase 4 | `sceVideodec2` as a second decode backend | Demanding 4K (GTA trailer) plays smoothly; FFmpeg auto-fallback | ✅ done |
+| GL-1…GL-6 | Every pixel through one `ps5-opengl` GL context | 4K/1080p video, menus, OSD, subtitles, keyboard, HUD all on the GPU; the CPU converters / bitmap fonts / hand-rolled `sceAgc` path are gone | ✅ done 2026-09-10 |
 | Phase 5 | "Video decoder" + "Renderer" settings rows | Pick per preference; never breaks playback | ◻ next |
 
 ## Key constraints (carried across all docs)

@@ -53,7 +53,6 @@
  */
 #include "evo_vdec_native.h"
 #include "evo_boot_log.h"
-#include "pp_agc.h"
 
 #ifdef EVO_APP_MODULE
 
@@ -486,9 +485,9 @@ struct nat_slot {
     size_t   cap;
     int      used;
     int      borrowed;         /* 1 = data points into the decoder frame     */
-                               /*     pool (AGC path), not owned - do not     */
+                               /*     pool (NV12 path), not owned - do not    */
                                /*     realloc or free it                     */
-    int      nv12;              /* 1 = data is straight NV12 (AGC path)      */
+    int      nv12;              /* 1 = data is straight NV12 (GL video path)  */
     int64_t  pts;
     uint32_t w, h;              /* display size                             */
     uint32_t coded_h;           /* MB-padded luma rows (UV starts here)      */
@@ -509,7 +508,7 @@ struct evo_vdec_native {
     unsigned frames_out;
     int      flushing;
     int      fatal;
-    int      agc_out;       /* pp_agc_available() at open — emit NV12, not I420 */
+    int      nv12_out;      /* emit NV12 straight through (GL samples it), not I420 */
     int      first_valid_logged;
     int      first_err_logged;
 
@@ -588,15 +587,15 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     const size_t c_sz = (size_t)cstride * ((codeh + 1u) / 2u);
     const size_t need = y_sz + 2u * c_sz;
 
-    if (n->agc_out) {
-        /* AGC path: the decoder already laid out contiguous NV12 (Y then the
+    if (n->nv12_out) {
+        /* NV12 path: the decoder already laid out contiguous NV12 (Y then the
          * interleaved UV plane) in the frame-pool slot it just wrote. Borrow
          * that pointer instead of copying it into an owned buffer - the reorder
          * window (<= RO_SLOTS frames) is far shorter than the FRAME_POOL_SLOTS
          * cycle before the decoder reuses the slot, so it stays valid until the
          * present consumes it. Saves ~62 MiB of heap (RO_SLOTS owned frames)
          * and a ~12 MiB/frame memcpy - both matter at 4K under the fake-signed
-         * flexible-memory ceiling, especially alongside pp_agc's staging. */
+         * flexible-memory ceiling. The GL video shader samples NV12 directly. */
         s->data     = (uint8_t *)out->buffer;
         s->borrowed = 1;
         s->nv12     = 1;
@@ -842,10 +841,11 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     n->frame_size = slot->frame_size;
     n->disp_w     = par->width  > 0 ? (uint32_t)par->width  : 0;
     n->disp_h     = par->height > 0 ? (uint32_t)par->height : 0;
-    /* #27: when the GPU present path is up, emit NV12 straight from the decoder
-     * — pp_agc's shader samples NV12 and does the YUV->RGB + scale on-GPU, so
-     * the CPU never touches the pixels. Fixed for the stream's lifetime. */
-    n->agc_out    = pp_agc_available() || g_prefer_nv12;
+    /* GL video path: emit NV12 straight from the decoder - the GLSL video
+     * shader samples NV12 and does the YUV->RGB + scale on-GPU, so the CPU
+     * never touches the pixels. Fixed for the stream's lifetime.
+     * (g_prefer_nv12 is set unconditionally at boot; kept as a switch.) */
+    n->nv12_out   = g_prefer_nv12;
 
     /* AU adaptation: VP9 always runs the superframe split; AVC/HEVC only when
      * the extradata is a mp4-style avcC/hvcC wrapper (configurationVersion 1),

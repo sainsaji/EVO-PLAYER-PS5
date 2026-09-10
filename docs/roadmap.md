@@ -17,11 +17,9 @@ Priority labels track this order: **critical** #32 · **high** #36, #72, #76, #7
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
 **#27 CLOSED 2026-09-04** — sceAgc GPU present path delivered + hardware-verified
-(PR #61: watchdog worker thread, linear UHD VO, V8-gate reachability fix,
-AGC-death VO-retile recovery, #55 folded in). 982 µs/frame, `--agc-probe`-gated,
-default build unchanged. Leftovers split: **#62** plane-hash A/B parity ·
-**#37** the Renderer settings row · **#41** HEVC + VP9 native decode · #28 gets GPU
-OSD-over-4K. **#28 (Step 3) is unblocked.**
+(PR #61). 982 µs/frame. **Superseded by the render overhaul: GL-6 (#82) deleted
+`pp_agc*` — `ps5-opengl` is the present path now.** Historical leftovers: **#41**
+HEVC + VP9 native decode remains open; #62/#37/#28 folded into GL-4/GL-5.
 
 **Closed 2026-09-03 (evening):** **#6** (video buffers → direct mem — landed as
 the swscale rotate-ring slab move + `--agc-probe` gate; PR #54, hw-verified) ·
@@ -49,14 +47,16 @@ OpenGL funnel — [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-over
 H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
 only a hardware pass left.)
 
-**Render overhaul (2026-09-09):** the sceAgc rendering is spread across 5 present
-routes, 3 font systems and CPU+GPU converters — a maintenance sink (#76 is the
-canonical failure). Plan: [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
-New chain **#77 → #78 → #79 → #80 → #81 → #82** (`GL-1`…`GL-6`); #77 is a hard
-go/no-go (does `third_party/ps5-opengl/` render on FW 12.70). **Superseded/closed:**
-#67, #69, #70, #5. **Rescoped:** #68 (mechanism → GLSL/RCSS, absorbs #70), #62
-(→ GL video parity), #4 (P010 → #81's GL shader; #4 keeps the HDR-output-metadata tail), #49 (folded
-into #79). #35/#34/#63 delivered by #81; #76 closed by #80.
+**Render overhaul — COMPLETE (2026-09-10):** the sceAgc rendering used to be
+spread across 5 present routes, 3 font systems and CPU+GPU converters. Chain
+**#77 → #78 → #79 → #80 → #81 → #82** (`GL-1`…`GL-6`) collapsed it into one
+`ps5-opengl` GL/EGL context. Plan:
+[evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
+**All six done.** GL-6 (#82) deleted `pp_agc*` / `pp_videoout` / `pp_platform.h`
+/ the `#28` geo sink / the shader blobs and closed **#67, #69, #70, #5**.
+**Rescoped/open:** #68 (mechanism → GLSL/RCSS, absorbs #70), #4 (P010 shipped in
+#81; #4 keeps the HDR-output-metadata + PQ/HLG tail). Delivered along the way:
+#62 (GL video parity, #80), #35/#34/#63 (#81), #76 (#80), #49 (folded into #79).
 
 **New stories (2026-09-03):** #47 native audio decode + Dolby/DTS bitstream
 passthrough (v1.1.0, alongside `native-decode`) · #48 re-probe controller
@@ -196,7 +196,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#79** | `render-overhaul` GL-3 — GL owns the menu framebuffer; delete the dual RmlUi path (folds in #49) | `projects/evoplayer/main.c` (frame loop ~L12247–13332, dispatch ~L13167), `ui_rml/src/evo_rmlui_app.cpp` (`RenderCachedScreen`, `AgcGeoPresent`), `evo_rmlui_render_agc.cpp`, `pp/src/pp_agc.c` (`pp_agc_present_ui`) |
 | **#80** | ✅ **CLOSED 2026-09-10** (`c49b317`, hw-verified). `render-overhaul` GL-4 — one GL present path: NV12 R8/RG8 + GLSL YUV→RGB + RG8 OSD composite + one flip; deleted the CPU converters / `tile_copy` / backend enum / 5-way dispatch / `#32` overlay machine; held-frame seek; retired `--no-gl`. Closed #76, resolved #62 (`tools/gl_yuv_parity.py`). **P010 → #81.** Plan: [evo-pro/gl4-video-path-plan.md](evo-pro/gl4-video-path-plan.md). | `projects/evoplayer/pp/src/` (`pp_converter_*.c`, `pp_compute_pipeline.c`, `tile_copy.c`, `pp_videoout.c`, `pp_playback.c`, `pp_agc.c` `agc_render_frame`), `main.c` (present dispatch, `prospero_apply_view_mode` ~L1605), `media/src/evo_vdec_native.c`, `ui_rml/src/evo_gl_context_device.cpp`, `pp/src/pp_gl_smoke.c`, `patches/ps5-opengl/` |
 | **#81** | `render-overhaul` GL-5 — subtitles / keyboard / image viewer / HUD / **P010+tone-map** → GL; delete the bitmap fonts + `pp_map_yuv420p10_to_8` (delivers #34, #35, #63; P010 moved from #80) | `projects/evoplayer/main.c` (`prospero_subtitle_draw` ~L5161, `draw_char`/`draw_text` ~L2661, `draw_image_screen` ~L3059, `draw_fps_overlay` ~L11887), `ui/src/{evo_keyboard,evo_draw,evo_widgets}.c`, `media/src/evo_subtitle.c` |
-| **#82** | `render-overhaul` GL-6 — cutover: GL default, delete `pp_agc` / CPU rasteriser / #32 overlay machine, rewrite docs (closes #67/#69/#70/#5) | `projects/evoplayer/pp/src/pp_agc*.c`, `ui_rml/src/evo_rmlui_render.cpp`, `main.c` (`prospero_scrub_ovl_*`, `pp_product_overlay_*`), `docs/gpu-notes.md`, `docs/evo-pro/gpu-rendering-plan.md`, `docs/architecture.md` |
+| **#82** | ✅ **DONE 2026-09-10.** `render-overhaul` GL-6 — deleted `pp_agc.c`/`pp_agc_osd.c`/`pp_videoout.c`/`pp_platform.h`/`evo_rmlui_render_agc.cpp` + the `#28` geo sink + the vendored shader blobs (`pp/blobs/`, `pp/shaders/`, `agc_blobs.S`, `agc_ui_blobs.S`, `tools/build-shader.sh`); `evo_vdec_native` drops `pp_agc`; PRX stubs populated from ps5-opengl imports; rewrote `gpu-notes.md` / `gpu-rendering-plan.md` / `agc-implementation.md` / `architecture.md` / `status.md` / `CLAUDE.md`; closed #67/#69/#70/#5. **Kept** (user decision): both RmlUi render interfaces + the `EvoRenderBridge` seam. `main.c` ~11,000 lines. | `projects/evoplayer/pp/src/pp_agc*.c`, `pp_videoout.c`, `ui_rml/src/evo_rmlui_{app,bridge,render}.*`, `media/src/evo_vdec_native.c`, `scripts/package-app.sh`, `docs/gpu-notes.md`, `docs/evo-pro/{gpu-rendering-plan,agc-implementation,status,opengl-render-overhaul}.md`, `docs/architecture.md`, `CLAUDE.md` |
 | **#31** | Phase 4 — `evo_vdec_native.c`, `sceVideodec2` backend behind `evo_vdec.h` (Route B **proven on hw 09-03**) | `docs/evo-pro/status.md` (cold-start plan), `docs/evo-pro/native-decode-plan.md` Phase 4, `docs/evo-pro/videodec2-abi.md`; `projects/evoplayer/src/evo_videodec2_probe.c` (port this), `media/include/{evo_vdec.h,sce/sce_videodec2.h}`, `media/src/evo_vdec_ffmpeg.c`, `tools/native-app/stubs/prx/`, `scripts/package-app.sh` |
 
 ### 1 · `#26` — app-module playback crash — **CLOSED 2026-09-02**

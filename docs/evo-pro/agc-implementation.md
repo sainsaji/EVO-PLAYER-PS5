@@ -1,6 +1,13 @@
 # AGC implementation guide — GPU rendering Step 2/3
 
-> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+> **HISTORICAL (2026-09-10, GL-6 / #82).** The `sceAgc` present/geo/OSD path
+> this guide documents (`pp_agc.c`, `pp_agc_osd.c`, `evo_rmlui_render_agc.cpp`,
+> the vendored shader blobs) was **deleted in GL-6**. `ps5-opengl` (Mesa + PS5
+> Gallium + patched PSSL compiler) is the render path now — see
+> [opengl-render-overhaul.md](opengl-render-overhaul.md) and
+> [gl4-video-path-plan.md](gl4-video-path-plan.md). This page stays as the
+> line-by-line reverse-engineering of the ProsperoLight AGC path (DCB layout,
+> CX registers, shader-blob format) — reference, not current state.
 >
 
 > Companion to [gpu-rendering-plan.md](gpu-rendering-plan.md). That doc is the

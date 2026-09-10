@@ -9611,9 +9611,10 @@ static void evo_vo_trace(const char *tag)
 
 /*
  * GL-5 (#81): the dev FPS readout moved into the RmlUi playback OSD (#fps-pill,
- * driven by evo_playback_osd_params_t.debug_overlay). It is player-only now -
- * menu FPS lives in the GL-3 loop heartbeat in klog. The full "stats for nerds"
- * panel is the RmlUi #stats-hud (evo_rmlui_update_perf_hud, #63).
+ * driven by evo_playback_osd_params_t.debug_overlay). The menu-screen pill was
+ * restored afterwards as its own RmlUi overlay context
+ * (evo_rmlui_{update,render}_debug_overlay, debug.rml). The full "stats for
+ * nerds" panel is the RmlUi #stats-hud (evo_rmlui_update_perf_hud, #63).
  */
 
 /* Byte-copy src -> dst. Returns 1 on a complete copy, 0 otherwise (incl. no
@@ -9806,9 +9807,8 @@ int main(void) {
      * The graphics stack has to come up HERE, in the pre-unjail slot next to
      * evo_vdec_probe: libSceAgc* / libSceVideoOut go API-dead after the
      * credential swap, so nothing below can lazily initialise them on first
-     * draw. This slot used to hold pp_agc_init (#27's sceAgc present path);
-     * since GL-3/GL-4 ps5-opengl owns sceAgc and sceVideoOut for the whole
-     * session and there is exactly one thing to bring up.
+     * draw. Since GL-3/GL-4 ps5-opengl owns sceAgc and sceVideoOut for the
+     * whole session and there is exactly one thing to bring up.
      */
 #if defined(EVO_GL_SMOKE)
     /* #77 / render-overhaul GL-1 go/no-go: prove ps5-opengl (Mesa + PS5 Gallium
@@ -10821,6 +10821,15 @@ skip_screen_input:
         evo_screen_keyboard(linear);
 
         draw_prospero_toast(linear);
+
+        /* Dev debug overlay: the menu-screen FPS pill. The player screen has
+         * its own #fps-pill in the OSD doc (GL-5), so this is every other
+         * screen. Gated on Settings -> System -> Debug Overlay. */
+        if (evo_rmlui_is_initialized()) {
+            evo_rmlui_update_debug_overlay(perf_render_fps,
+                                           show_debug_overlay && screen != SCREEN_PLAYER);
+            evo_rmlui_render_debug_overlay(linear, WIDTH, HEIGHT);
+        }
 
         if (screen == SCREEN_PLAYER) {
             static uint64_t s_pf_t0, s_pf_n, s_pf_scr, s_pf_ovl;

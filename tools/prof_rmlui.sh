@@ -26,14 +26,12 @@ g++ -O2 -std=c++17 -DEVO_RML_PROFILE \
     -o output/uiview/prof_rmlui \
     tools/prof_rmlui.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp \
-    projects/evoplayer/ui_rml/src/evo_rmlui_render_agc.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_system.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bridge.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_fileinterface.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bundle.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bundle_data.cpp \
-    projects/evoplayer/pp/src/pp_agc.c \
     -Lbuild/rmlui-host-dist/lib \
     -Lbuild/rmlui-host/RmlUi/build \
     -lrmlui -lfreetype -lpng16 -lz -lpthread \
