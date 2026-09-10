@@ -26,11 +26,6 @@
 #include "evo_vdec.h"
 #include "pp_stage_breadcrumb.h"
 
-/* Matches main.c: the product video backend is always on in this build. */
-#ifndef PP_BACKEND_ENABLED
-#define PP_BACKEND_ENABLED 1
-#endif
-
 /* ---------------------------------------------------------------------------
  * TRANSITIONAL: playback-core decode context + flags + the app playback
  * object, all still owned by main.c. Replaced by the evo_pb_*() façade and a
@@ -171,12 +166,10 @@ static int prospero_process_seek_request(void) {
         &prospero_seek_mutex
     );
 
-#if PP_BACKEND_ENABLED
     pp_playback_notify_seek_begin(
         &g_pp_pb,
         (int64_t)(target_seconds * 1000000.0)
     );
-#endif
 
     /*
      * Let decoder/output threads observe player_paused.
@@ -339,7 +332,6 @@ packet_queue_clear(
 
     prospero_seek_in_progress = 0;
 
-#if PP_BACKEND_ENABLED
     pp_playback_notify_seek_end(
         &g_pp_pb,
         result >= 0,
@@ -351,7 +343,6 @@ packet_queue_clear(
      * and leaves the clock paused, which drops every frame -> frozen picture. */
     if (!restore_paused)
         pp_playback_resume(&g_pp_pb);
-#endif
 
     player_paused =
         restore_paused ? 1 : 0;

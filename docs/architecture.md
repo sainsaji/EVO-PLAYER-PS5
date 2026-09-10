@@ -99,14 +99,14 @@ as much as possible is verifiable on the host:
 | | |
 |---|---|
 | `./tools/uiview.sh --all` | render every screen to PNG |
-| `./tools/bench.sh` | the video converter, with output hashes |
-| `./tools/bench.sh --asan` / `--tsan` | overruns and data races |
+| `python3 tools/gl_yuv_parity.py` | the video colour matrix, against the pre-GL-4 CPU reference |
 | `python3 tools/gen_icons.py` | icons and font punctuation, with contact sheets |
 | `python3 tools/measure_font.py` | re-derive the font metrics |
 
-`bench.sh` hashes the output plane and **refuses to print timings if the pixels
-moved**, so a converter change is accepted or rejected before it ever reaches
-hardware.
+`gl_yuv_parity.py` sweeps every `(Y,U,V)` triple through both the shader and the
+CPU matrix EVO shipped until GL-4, so a change to the video colour path is
+accepted or rejected before it ever reaches hardware. (It replaced `bench.sh`,
+which timed the CPU converters — deleted by GL-4 / #80.)
 
 ---
 

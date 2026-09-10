@@ -25,7 +25,6 @@
 
 #include "pp_playback.h"
 #include "pp_frame.h"
-#include "pp_output_policy.h"
 #include "pp_stage_breadcrumb.h"
 
 #include "evo_vdec.h"
@@ -36,11 +35,6 @@
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
-#endif
-
-/* Matches main.c: the product video backend is always compiled in. */
-#ifndef PP_BACKEND_ENABLED
-#define PP_BACKEND_ENABLED 1
 #endif
 
 #define WIDTH  1920
@@ -58,8 +52,6 @@ extern AVFormatContext    *play_fmt;
 
 extern evo_vdec           *g_vdec;   /* the live video decoder (A6, owned by main.c) */
 extern pp_playback         g_pp_pb;
-extern pp_video_backend    g_pp_backend;
-extern volatile int        g_vo_decode_gate;
 extern int                 g_first_frame_bc_done;
 
 extern int       dbg_video_frames;
@@ -130,9 +122,9 @@ pthread_t    video_thread;
 
 /*
  * 1 while the decode thread is idling (paused / off-screen / not ready) and is
- * therefore NOT inside pp_playback_push_frame's unlocked convert. main.c waits
- * for this before reconfiguring the VideoOut for the #32 scrub overlay, so the
- * VO teardown can't free pb->display under pp_converter_to_display.
+ * therefore NOT inside pp_playback_push_frame. Kept as a debug/diagnostic
+ * signal; the VO reconfigure it used to guard (#32) went with the CPU present
+ * path in GL-4.
  */
 volatile int video_decode_parked = 1;
 
@@ -195,33 +187,17 @@ double prospero_media_clock_seconds(void)
  */
 static int present_pp_frame(const pp_frame *pf)
 {
-#if PP_BACKEND_ENABLED
-    /* Wait briefly for deferred 4K VO — do not convert into dying buffers */
-    if (!g_vo_decode_gate) {
-        int spins = 0;
-        while (!g_vo_decode_gate && spins < 200) {
-            usleep(1000);
-            spins++;
-        }
-        if (!g_vo_decode_gate)
-            return 0; /* drop frame; VO not ready */
-    }
-    if (!g_first_frame_bc_done && g_vo_decode_gate) {
+    if (!g_first_frame_bc_done) {
         char d[80];
-        snprintf(d, sizeof(d), "fmt=%d %ux%u be=%d",
-                 (int)pf->format, pf->width, pf->height, (int)g_pp_backend);
+        snprintf(d, sizeof(d), "fmt=%d %ux%u", (int)pf->format, pf->width, pf->height);
         pp_stage_bc_checkpoint("009_FIRST_FRAME_ENTER", d);
         g_first_frame_bc_done = 1;
     }
-    g_pp_pb.cfg.aspect = prospero_view_mode_to_aspect();
-    g_pp_pb.stats.aspect = (int)g_pp_pb.cfg.aspect;
+    g_pp_pb.aspect = prospero_view_mode_to_aspect();
+    g_pp_pb.stats.aspect = (int)g_pp_pb.aspect;
     (void)pp_playback_push_frame(&g_pp_pb, (pp_frame *)pf);
     video_frame_loaded = pp_playback_has_display(&g_pp_pb);
     return 1;
-#else
-    (void)pf;
-    return 0;
-#endif
 }
 
 /*
@@ -466,19 +442,6 @@ int decode_next_video_frame(void)
                     (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
             }
 
-#if !PP_BACKEND_ENABLED
-            {
-                double avdiff = audio_pts_seconds - video_clock_seconds;
-                if (audio_pts_seconds > 0.1 && avdiff < -0.04) {
-                    int sleep_us = (int)((-avdiff - 0.04) * 1000000.0);
-                    if (sleep_us > 60000)
-                        sleep_us = 60000;
-                    if (sleep_us < 1000)
-                        sleep_us = 1000;
-                    usleep(sleep_us);
-                }
-            }
-#endif
 
             /* jobs 3+4 — present. Always show something (skip = frozen). */
             if (recv_ret == 1 && g_pp_pb.active)
@@ -566,33 +529,9 @@ void *video_decode_thread_func(void *arg) {
         video_decode_parked = 0;
         dbg_video_thread_alive++;
 
-#if PP_BACKEND_ENABLED
         /* Audio-master wait is inside decode_next_video_frame. */
         decode_next_video_frame();
         usleep(playback_profile >= 2 ? 100 : 200);
-#else
-        if (video_fps > 1.0) frame_ms = 1000.0 / video_fps;
-
-        long long now = now_ms();
-
-        if (next_ms == 0) {
-            next_ms = now;
-        }
-
-        if (now >= next_ms) {
-            decode_next_video_frame();
-            next_ms += (long long)(frame_ms);
-
-            static double frac = 0.0;
-            frac += frame_ms - (long long)frame_ms;
-            if (frac >= 1.0) {
-                next_ms += 1;
-                frac -= 1.0;
-            }
-        } else {
-            usleep(500);
-        }
-#endif
     }
 
     return NULL;

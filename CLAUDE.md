@@ -69,10 +69,9 @@ docker compose run --rm ps5-dev bash -lc '
   ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
 # ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
-# GL is ON by default (2026-09-10): the boot cuts over to the persistent
-# ps5-opengl GL/EGL context, so `scripts/build-ps5-opengl.sh` must have run
-# once. `--no-gl` selects the legacy pp_agc_init + pp_videoout path, which is
-# UNMAINTAINED and known-broken at boot since GL-3/GL-4 — escape hatch only.
+# GL is the ONLY present path (#80 GL-4 deleted the other one): the boot runs on
+# a persistent ps5-opengl GL/EGL context, so `scripts/build-ps5-opengl.sh` must
+# have run once. `--no-gl` is retired and now fails with that explanation.
 # Diagnostics = /mnt/usb0/evo.log (one file) + klog live; popups with --breadcrumbs.
 # Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
 
@@ -106,16 +105,21 @@ Full command reference, all scripts, screenshot measurement tools
 projects/evoplayer/
   main.c        the player: FFmpeg, threads, input, screens, state
   media/        subsystems carved out of main.c (own state/threads, narrow interface)
-  pp/           playback backend: VideoOut, converters, clocks, theme
+  pp/           playback: pace + presentation clock + seek (pp_playback),
+                theme. The CPU converters, tile_copy and the V8/V3/1080 backend
+                dispatch were deleted by GL-4 (#80); pp_agc*/pp_videoout are
+                dead code awaiting GL-6.
   ui/           shared immediate-mode primitives still used by both paths:
                 draw/nav/focus/input/feedback, evo_keyboard (IME modal),
                 evo_widgets (toasts), evo_layout (grid/capacity geometry).
                 The screen renderers (evo_screens.c/evo_chrome.c) were deleted
                 in #44 — every screen now draws through ui_rml.
-  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI
+  ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI —
+                plus evo_gl_context_device.cpp, the GL/EGL context and the
+                video quad (stubbed out by evo_gl_context_stub.c off-device)
   assets/rml/   .rml/.rcss documents for the RmlUi screens
 scripts/        build/deploy — see docs/tooling.md
-tools/          uiview, klog, shot, bench, gen_icons — see docs/tooling.md
+tools/          uiview, klog, shot, evo-remote, gen_icons — see docs/tooling.md
 docs/           everything below
 ```
 
@@ -156,11 +160,11 @@ mock data — everything in the DOM binds to live C structs
 | [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
-| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)** (top block = current front: **#27 GPU Step 2**, render_frame port). **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). **#27 AGC gate PASSED + `pp_agc_init` shader setup hw-verified** (`pp/src/pp_agc.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP — no popup screenshots). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (Step 2/3 how-to) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md), [avplayer-abi.md](docs/evo-pro/avplayer-abi.md) (Route A — dead) |
+| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)** (top block = current front: the **OpenGL render overhaul**; GL-4/#80 Stage 2d + 3 are hw-verify-pending). **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). **#27 AGC gate PASSED + `pp_agc_init` shader setup hw-verified** (`pp/src/pp_agc.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP — no popup screenshots). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (Step 2/3 how-to) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md), [avplayer-abi.md](docs/evo-pro/avplayer-abi.md) (Route A — dead) |
 | [evo-pro/opengl-render-overhaul.md](docs/evo-pro/opengl-render-overhaul.md) | **Collapse all 5 present routes + 3 font systems + CPU/GPU converters into one OpenGL funnel** (`third_party/ps5-opengl/` submodule). Full pixel-path inventory, phasing (`render-overhaul` label, `GL-1`…`GL-6`), and which open issues it rescopes/supersedes |
 | [evo-pro/gl1-spike.md](docs/evo-pro/gl1-spike.md) | **#77 GL-1 — GO (hw-verified 2026-09-09).** `ps5-opengl` submodule + `_Exit` patch + from-source SDK + `pp_gl_smoke` in the `.ffpfsc` (`package-app.sh --gl-smoke`, `scripts/build-ps5-opengl.sh`, overlay `docker-compose.ps5-opengl.yml`). Mesa 26.2 / GL 3.3 renders on 12.70. #78 unblocked. |
 | [gpu-notes.md](docs/gpu-notes.md) | Why there's no hardware GL driver (pre-`ps5-opengl`; see opengl-render-overhaul.md) |
-| [converter-perf.md](docs/converter-perf.md) | YUV→BGRA+swizzle perf, `bench.sh` findings |
+| [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted by GL-4 (#80). Kept for the BT.601 reference matrix |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/media-tile.md) | Media tile / metadata handling |
 | [addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby/Nuvio addon integration |

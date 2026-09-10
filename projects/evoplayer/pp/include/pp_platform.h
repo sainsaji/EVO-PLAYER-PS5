@@ -70,9 +70,6 @@ typedef struct PP_VideoOutFlipStatus {
 
 int sceVideoOutGetFlipStatus(int, PP_VideoOutFlipStatus *);
 
-void pp_draw_pixels_as_tiles(uint32_t *src, uint32_t *dst, int frame_width,
-                             int frame_height);
-
 #ifdef __cplusplus
 }
 #endif

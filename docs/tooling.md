@@ -443,32 +443,26 @@ hardware screenshot had happened to capture.
 
 ---
 
-## `tools/bench.sh` — the converter, measured on the host
+## `tools/gl_yuv_parity.py` — the video colour matrix, measured on the host
 
-The YUV→BGRA+swizzle path needs no console: it takes a plain `pp_frame` in and
-writes a plain buffer out. Since there is no hardware GL driver available (see
-[`gpu-notes.md`](gpu-notes.md)), this is the main performance lever there is.
+GL-4 (#80) deleted the CPU converters, and with them `tools/bench.sh` — there is
+nothing left to benchmark, because the YUV→RGB now happens in a GLSL fragment
+shader on the video quad and costs no measurable CPU. What replaced the
+benchmark is a correctness check:
 
 ```bash
-./tools/bench.sh          # timings, worker scaling, budget check
-./tools/bench.sh 100      # more iterations, steadier numbers
-./tools/bench.sh --asan   # overruns and UB
-./tools/bench.sh --tsan   # data races
+python3 tools/gl_yuv_parity.py            # summary
+python3 tools/gl_yuv_parity.py --verbose  # + the worst-disagreeing triples
 ```
 
-It hashes the output plane and **refuses to report timings** if worker counts
-disagree — a faster converter that produces different pixels is not faster.
+It evaluates the shader's matrix and the deleted CPU converter's fixed-point
+matrix over all 2^24 `(Y,U,V)` triples and exits non-zero if any channel differs
+by more than 1/255. Run it after touching `YUV_MATRIX_GLSL` in
+`ui_rml/src/evo_gl_context_device.cpp`. Result and what it caught:
+[`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80).
 
-Findings and reference hashes: [`converter-perf.md`](converter-perf.md).
-
-> ThreadSanitizer needs Docker's seccomp profile relaxed, or it aborts with
-> `personality(ADDR_NO_RANDOMIZE)` failing. `docker compose run` cannot pass
-> that, so use:
-> ```bash
-> MSYS_NO_PATHCONV=1 docker run --rm --security-opt seccomp=unconfined \
->   -v "/d/Projects/EVO Player:/workspace" -w /workspace \
->   evo-player/ps5-dev:llvm18-sdk-v0.42 bash -lc './tools/bench.sh --tsan'
-> ```
+Historical converter timings, and why the CPU path was shaped the way it was:
+[`converter-perf.md`](converter-perf.md).
 
 ---
 

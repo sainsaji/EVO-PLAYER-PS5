@@ -195,3 +195,11 @@ void draw_prospero_toast(uint32_t *fb)
     evo_rmlui_update_toast(&p);
     evo_rmlui_render_toast(fb, EVO_SCREEN_W, EVO_SCREEN_H);
 }
+
+int evo_toast_visible(void)
+{
+    /* Cleared lazily by draw_prospero_toast() once hold+fade elapses; the
+     * render loop calls that before it consults this, so the answer is
+     * current for the frame being composited. */
+    return prospero_toast_active;
+}

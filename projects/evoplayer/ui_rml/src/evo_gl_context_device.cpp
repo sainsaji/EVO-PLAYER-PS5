@@ -286,13 +286,22 @@ const char *k_yuv_vs =
     "  vUV = vec2(p.x, 1.0 - p.y) * uCrop;\n"
     "  gl_Position = vec4((p*2.0-1.0) * uScale, 0.0, 1.0);\n"
     "}\n";
-/* BT.601 limited, constants = the CPU converter's 298/409/516/-100/-208 / 256.
+/*
+ * BT.601 limited range. The coefficients are the CPU converter's fixed-point
+ * matrix divided by 256 (298/409/516/-100/-208 -> exact binary fractions), and
+ * the offsets are its `y - 16` / `uv - 128` expressed in the 0..1 the sampler
+ * hands back: 16/255 and 128/255, NOT 16/256 and 0.5. Using the power-of-two
+ * offsets instead costs up to 2/255 per channel against the reference - see
+ * tools/gl_yuv_parity.py, which sweeps all 2^24 triples and is what #62's
+ * parity claim rests on.
+ *
  * Output is swizzled .bgr — the ps5-opengl default framebuffer scans out as
- * BGRA (same reason evo_gl_blit_bgra's sampler swizzles). */
+ * BGRA (same reason evo_gl_blit_bgra's sampler swizzles).
+ */
 #define YUV_MATRIX_GLSL \
-    "  float Y = (y - 0.0625) * 1.164062;\n" \
-    "  vec3 rgb = vec3(Y + 1.597656*V,\n" \
-    "                  Y - 0.390625*U - 0.812500*V,\n" \
+    "  float Y = (y - 0.0627451) * 1.1640625;\n" \
+    "  vec3 rgb = vec3(Y + 1.59765625*V,\n" \
+    "                  Y - 0.390625*U - 0.8125*V,\n" \
     "                  Y + 2.015625*U);\n" \
     "  c = vec4(clamp(rgb, 0.0, 1.0).bgr, 1.0);\n"
 const char *k_yuv_fs_nv =
@@ -458,53 +467,83 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     glActiveTexture(GL_TEXTURE0);   /* leave unit 0 active for the blit path */
 }
 
-/* ---- OSD composite over the video quad (GL-4 Stage 2c) ---------------- */
+/* ---- OSD composite over the video quad (GL-4 Stage 2c) ----------------
+ *
+ * The scratch is a full-frame BGRA buffer, and a 4-channel RGBA8
+ * glTexSubImage2D of it is ps5-opengl's ~65 ms synchronous staging copy — so a
+ * subtitle cue change (or the progress bar ticking) was a ~65 ms hitch every
+ * time. RG8 uploads dodge that wall (same as the video Y/UV planes). So the
+ * BGRA buffer is uploaded as an RG8 texture 2× the width: source pixel x is
+ * texels 2x (= R,G) and 2x+1 (= B,A) in memory byte order, and the shader
+ * reassembles with texelFetch. ~0.2 ms instead of ~65 ms.
+ */
 namespace {
 GLuint g_osd_prog = 0, g_osd_vao = 0, g_osd_tex = 0;
 int    g_osd_tw = 0, g_osd_th = 0;
+GLint  g_osd_size = -1;
 const char *k_osd_fs =
     "#version 330 core\n"
-    "in vec2 vUV; out vec4 c; uniform sampler2D uTex;\n"
-    /* EVO scratch is BGRA-in-memory; keep alpha for the blend. */
-    "void main(){ vec4 t = texture(uTex, vUV); c = vec4(t.bgr, t.a); }\n";
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uTex;\n"   /* RG8, 2*W wide */
+    "uniform ivec2 uSize;\n"      /* W, H of the source scratch */
+    "void main(){\n"
+    "  ivec2 p = clamp(ivec2(vUV * vec2(uSize)), ivec2(0), uSize - 1);\n"
+    "  vec2 rg = texelFetch(uTex, ivec2(p.x*2,   p.y), 0).rg;\n"  /* R,G */
+    "  vec2 ba = texelFetch(uTex, ivec2(p.x*2+1, p.y), 0).rg;\n"  /* B,A */
+    /* memory order is R,G,B,A; the default framebuffer scans out BGRA */
+    "  c = vec4(ba.x, rg.y, rg.x, ba.y);\n"
+    "}\n";
+
+bool osd_init(void)
+{
+    if (g_osd_prog) return true;
+    GLuint vs = blit_compile(GL_VERTEX_SHADER, k_blit_vs);
+    GLuint fs = blit_compile(GL_FRAGMENT_SHADER, k_osd_fs);
+    if (!vs || !fs) return false;
+    g_osd_prog = glCreateProgram();
+    glAttachShader(g_osd_prog, vs); glAttachShader(g_osd_prog, fs);
+    glLinkProgram(g_osd_prog);
+    GLint ok = 0; glGetProgramiv(g_osd_prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[512]; GLsizei n = 0; glGetProgramInfoLog(g_osd_prog, sizeof log, &n, log);
+        evo_bt_("GL osd: link failed: %.*s", (int)n, log);
+        glDeleteProgram(g_osd_prog); g_osd_prog = 0; return false;
+    }
+    glDeleteShader(vs); glDeleteShader(fs);
+    glGenVertexArrays(1, &g_osd_vao);
+    glGenTextures(1, &g_osd_tex);
+    glUseProgram(g_osd_prog);
+    glUniform1i(glGetUniformLocation(g_osd_prog, "uTex"), 0);
+    g_osd_size = glGetUniformLocation(g_osd_prog, "uSize");
+    evo_bt_("GL osd: initialised");
+    return true;
+}
 } // namespace
 
 extern "C" void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload)
 {
     if (!g_ready || !fb || w <= 0 || h <= 0)
         return;
-    if (!g_osd_prog) {
-        GLuint vs = blit_compile(GL_VERTEX_SHADER, k_blit_vs);
-        GLuint fs = blit_compile(GL_FRAGMENT_SHADER, k_osd_fs);
-        if (!vs || !fs) return;
-        g_osd_prog = glCreateProgram();
-        glAttachShader(g_osd_prog, vs); glAttachShader(g_osd_prog, fs);
-        glLinkProgram(g_osd_prog);
-        GLint ok = 0; glGetProgramiv(g_osd_prog, GL_LINK_STATUS, &ok);
-        if (!ok) { glDeleteProgram(g_osd_prog); g_osd_prog = 0; return; }
-        glDeleteShader(vs); glDeleteShader(fs);
-        glGenVertexArrays(1, &g_osd_vao);
-        glGenTextures(1, &g_osd_tex);
-        glUseProgram(g_osd_prog);
-        glUniform1i(glGetUniformLocation(g_osd_prog, "uTex"), 0);
-    }
+    if (!osd_init())
+        return;
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_osd_tex);
     if (w != g_osd_tw || h != g_osd_th) {
         glDeleteTextures(1, &g_osd_tex); glGenTextures(1, &g_osd_tex);
         glBindTexture(GL_TEXTURE_2D, g_osd_tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
+        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RG8, w * 2, h);
         g_osd_tw = w; g_osd_th = h;
         upload = 1;
     }
     if (upload) {
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, fb);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w * 2, h, GL_RG, GL_UNSIGNED_BYTE, fb);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, g_w, g_h);
@@ -513,9 +552,28 @@ extern "C" void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int uplo
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
     glUseProgram(g_osd_prog);
+    glUniform2i(g_osd_size, w, h);
     glBindVertexArray(g_osd_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glDisable(GL_BLEND);
+    glActiveTexture(GL_TEXTURE0);
+}
+
+/* Compile every shader + allocate every VAO now, at boot, instead of lazily on
+ * the first frame that needs each. A lazy GLSL compile through ps5-opengl's
+ * PSBC is tens of ms; paying it inside the frame loop stalled the render thread
+ * for ~2 s at the first video / first OSD and the presentation clock late-drop-
+ * dropped everything that piled up behind it. Boot has a teal frame + font
+ * build going anyway. */
+extern "C" void evo_gl_warm(void)
+{
+    if (!g_ready)
+        return;
+    blit_init();
+    yuv_init();
+    osd_init();
+    glFinish();
+    evo_bt_("GL warm: shaders + VAOs ready");
 }
 
 extern "C" void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)

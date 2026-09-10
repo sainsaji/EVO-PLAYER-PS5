@@ -211,3 +211,57 @@ retry-on-FFmpeg path is skipped under `NATIVE`). Re-verify pending:
 
 A per-codec decode-backend column with ms/frame + dropped-frame counts is
 Phase 6 / **#38**'s job (FFmpeg-vs-native A/B benchmark), not this table.
+
+---
+
+## GL video path colour parity (#62, delivered by GL-4 / #80)
+
+`#62` was originally "plane-hash A/B: sceAgc vs the CPU converter". GL-4 deleted
+the CPU converter, so the question became: does the GLSL fragment shader that
+now does YUV→RGB on the video quad produce the same picture the CPU converter
+did?
+
+The reference is `pp/src/pp_converter.c`'s `yuv_to_bgra()` as of `b8c42b7` — the
+last commit before Stage 3 removed it (`git show b8c42b7:projects/evoplayer/pp/src/pp_converter.c`).
+BT.601 limited range, fixed point: `298/409/516/-100/-208`, `(… + 128) >> 8`,
+`y - 16`, `uv - 128`. The shader under test is `YUV_MATRIX_GLSL` in
+`ui_rml/src/evo_gl_context_device.cpp`.
+
+**Reproduce (host, no console):**
+
+```bash
+python3 tools/gl_yuv_parity.py --verbose
+```
+
+It evaluates both arithmetics over all 2^24 `(Y,U,V)` triples — a stronger
+statement than any single reference frame, which only visits the few thousand
+triples that happen to be in it — and fails if any channel differs by more than
+1/255.
+
+**Result, 2026-09-10:**
+
+| per-channel Δ | samples | share |
+|---|---|---|
+| 0 (bit-exact) | 16,674,957 | 99.390% |
+| 1 | 102,259 | 0.610% |
+| ≥2 | 0 | 0% |
+
+`PASS`. The residual ±1 is rounding, and is not removable: the CPU path rounds a
+fixed-point integer (`+128 >> 8`), the shader rounds float→unorm8 in the ROP.
+
+**What the check caught.** The shader as first written (Stage 2a) used `0.0625`
+and `0.5` for the black/chroma offsets — 16/256 and 128/256. The CPU converter
+works in 0–255, so the offsets are 16/**255** and 128/**255**. That drift cost up
+to **2/255 per channel on 3.83% of triples**, worst on saturated reds and greens.
+Corrected to `0.0627451` / `0.5019608`, which is what the table above measures.
+Colour on the panel looked right either way — this is exactly the class of error
+a numeric check exists to find.
+
+**Not covered here** (needs hardware, and is the remaining half of the row):
+
+| Check | Status |
+|---|---|
+| Panel scanout order — the shader's `.bgr` swizzle matches the ps5-opengl default framebuffer | **verified** (GL-4 hw pass 2026-09-10: correct colour on the video quad and the RG8 OSD composite, no R↔B swap) |
+| Chroma siting / bilinear upsample vs the CPU converter's nearest-neighbour | not run — the shader samples chroma with `GL_LINEAR`, so smooth gradients differ slightly by design |
+| Full-range (JPEG) sources | not run — both paths assume limited range; `uRange` is a GL-4 leftover hook, not wired to `evo_settings` |
+| P010 / 10-bit | not applicable — `#4`'s tail |

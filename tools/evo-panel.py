@@ -542,18 +542,19 @@ class EvoPanel:
         ttk.Label(s, text="→ output/uiview/rml_*.png   ·   output/uiplay/index.html",
                   foreground="#888").pack(anchor="w", pady=(4, 0))
 
-        p = self._section(t, "Profilers / benchmarks")
+        p = self._section(t, "Profilers / checks")
         pr = ttk.Frame(p)
         pr.pack(anchor="w")
         ttk.Button(pr, text="prof_rmlui", width=16,
                    command=lambda: self.run([BASH, "tools/prof_rmlui.sh"], "prof_rmlui")).pack(side="left")
-        ttk.Button(pr, text="bench.sh", width=12,
+        # bench.sh went with the CPU converters (GL-4 / #80). What replaced it
+        # is a correctness check on the GL video shader's colour matrix.
+        ttk.Button(pr, text="yuv parity", width=12,
                    command=lambda: self.run(
-                       [BASH, "tools/bench.sh"] + ([self.bench_arg.get().strip()] if self.bench_arg.get().strip() else []),
-                       "bench")).pack(side="left", padx=6)
-        self.bench_arg = tk.StringVar(value="")
-        ttk.Entry(pr, textvariable=self.bench_arg, width=12).pack(side="left")
-        ttk.Label(pr, text="iterations, or --asan / --tsan", foreground="#888").pack(side="left", padx=4)
+                       ["python3", "tools/gl_yuv_parity.py", "--verbose"],
+                       "yuv-parity")).pack(side="left", padx=6)
+        ttk.Label(pr, text="GL shader vs the pre-GL-4 CPU matrix",
+                  foreground="#888").pack(side="left", padx=4)
 
     # ---- klog -------------------------------------------------
     def _tab_klog(self, nb):

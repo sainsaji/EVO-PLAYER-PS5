@@ -1,20 +1,21 @@
 /*
- * pp_playback — product session façade over converter + clock.
- * VideoOut is owned by the app (main); session publishes display frames
- * or (V8) prepares pre-tiled VO presents.
+ * pp_playback — product session façade over the presentation clock.
+ *
+ * Since GL-4 (#80) this is decode + pace + clock + seek and nothing else. The
+ * decoded frame's planes are published as-is (borrowed, no copy); the GL render
+ * loop uploads them as R8/RG8 textures and a GLSL shader does YUV->RGB on the
+ * quad. The CPU converters, the tiled VideoOut present, the V8/V3/1080 backend
+ * enum and the `display` BGRA double buffer are all gone.
+ *
  * No FFmpeg types in this header.
  */
 #ifndef PP_PLAYBACK_H
 #define PP_PLAYBACK_H
 
-#include "pp_agc.h"
 #include "pp_clock.h"
-#include "pp_converter.h"
 #include "pp_frame.h"
-#include "pp_output_policy.h"
-#include "pp_product_path.h"
-#include "pp_videoout.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -23,7 +24,7 @@ extern "C" {
 
 typedef struct pp_playback_stats {
     uint64_t frames_in;
-    uint64_t frames_converted;
+    uint64_t frames_converted;   /* == frames handed to the GL uploader */
     uint64_t frames_published;
     uint64_t frames_late_dropped;
     uint64_t frames_discarded_seek;
@@ -36,24 +37,18 @@ typedef struct pp_playback_stats {
     uint64_t seek_failures;
     uint64_t clock_resets;
     uint64_t seek_to_first_frame_ms;
-    uint32_t sample_bgra;
+    uint8_t  sample_luma;        /* first published Y byte - "is there a picture" probe */
     int output_w;
     int output_h;
     int aspect;
-    int backend; /* pp_video_backend */
 } pp_playback_stats;
 
 typedef struct pp_playback {
-    pp_videoout *vo; /* non-owning; may be NULL if only convert/clock used */
     pp_clock clock;
-    pp_converter_config cfg;
+    pp_aspect_mode aspect;
 
-    uint32_t out_w;
+    uint32_t out_w;             /* panel size; reporting only since GL-4 */
     uint32_t out_h;
-    uint32_t *display;      /* linear BGRA front (published) */
-    uint32_t *display_back; /* convert target; swapped under lock */
-    size_t   display_cap;   /* bytes allocated for EACH of display/display_back */
-    int display_ready;
     int64_t display_pts_us;
 
     int active;
@@ -70,62 +65,37 @@ typedef struct pp_playback {
      */
     int late_drop_streak;
 
-    /* Product path */
-    pp_video_backend backend;
-    int force_v3_fallback; /* runtime emergency switch */
-
-    /* V8: convert wrote tiled GPU plane; main should present_pre_tiled */
-    int pending_present;
-    uint32_t pending_vo_idx;
-    uint64_t pending_frame_id;
-    uint64_t present_seq;
-
-    /* #27: scratch for the rare NV12->YUV420P de-interleave fallback — the
-     * native decoder emitted NV12 for the sceAgc GPU path but pp_agc is not
-     * available (host preview, or a first-frame fault disabled it). */
-    uint8_t *nv12_fb;
-    size_t   nv12_fb_cap;
-    uint64_t agc_frames;      /* frames presented through pp_agc_present_nv12   */
-    uint64_t agc_present_us_sum;  /* rolling since the last heartbeat           */
-    uint64_t agc_present_us_max;
-    uint64_t agc_present_dropped; /* late/dropped on the AGC path (heartbeat)   */
-    uint64_t agc_hb_frames;       /* frames counted toward the current window   */
-    int agc_vo_retile_req;        /* #27: CPU path needs the VO re-registered   */
-
-    /* #28 Phase 2: last-good NV12 frame, kept while the OSD is up so a seek /
-     * pause window can still present (held frame + OSD) instead of a stale
-     * or black GPU plane. Lazily allocated; only refreshed when
-     * pp_agc_osd_active(). */
-    unsigned char *agc_hold_nv12;
-    size_t   agc_hold_cap;
-    uint32_t agc_hold_pitch, agc_hold_ch, agc_hold_w, agc_hold_h;
-    int      agc_hold_valid;
-                                  /*      tiled - main polls + clears this      */
-
     /*
-     * GL-4 (#80): EVO_GL_DEVICE video path. When gl_video is set, push_frame
-     * skips the CPU YUV->RGB convert entirely — it paces the frame on the
-     * clock and stashes the decoded planes as NV12 (Y + interleaved UV) in an
-     * owned double buffer at *source* resolution. The GL render loop uploads
-     * them as R8 / RG8 textures and a GLSL shader does YUV->RGB on the quad
-     * (glTexSubImage2D of a 4-channel RGBA8 frame is the ~68 ms wall; R8/RG8
-     * are ~free — see docs/evo-pro/gl4-video-path-plan.md).
-     */
-    int      gl_video;
-    /*
-     * The decoded frame's planes, borrowed from the decoder's frame pool (or
-     * FFmpeg's AVFrame) — valid because push_frame pace-sleeps on this frame's
-     * PTS before returning, so the decoder can't recycle the slot until the
-     * render thread has had its turn. pp_playback_get_nv12() hands these
+     * GL-4 (#80): the decoded frame's planes, borrowed from the decoder's frame
+     * pool (or FFmpeg's AVFrame) — valid because push_frame pace-sleeps on this
+     * frame's PTS before returning, so the decoder can't recycle the slot until
+     * the render thread has had its turn. pp_playback_get_nv12() hands these
      * straight out (under the lock, no pixel copy); the GL uploader reads them.
      * gl_src_uv != NULL => NV12 (RG8 chroma); else gl_src_u/_v are planar I420.
      */
     const uint8_t *gl_src_y, *gl_src_uv, *gl_src_u, *gl_src_v;
     int      gl_src_ypitch, gl_src_uvpitch, gl_src_upitch, gl_src_vpitch;
-    uint32_t gl_nv12_pitch;            /* R8 luma texture width / dst row bytes */
-    uint32_t gl_nv12_cw, gl_nv12_ch;   /* coded (padded) luma w/h = texture size */
-    uint32_t gl_nv12_dw, gl_nv12_dh;   /* display (cropped) w/h                  */
-    int      gl_nv12_ready;
+    uint32_t gl_cw, gl_ch;      /* coded (padded) luma w/h = texture size */
+    uint32_t gl_dw, gl_dh;      /* display (cropped) w/h                  */
+    int      gl_ready;
+
+    /*
+     * GL-4 Stage 2d: a seek's discard window is the one time the borrowed
+     * pointers go bad — the decode thread runs flat out into the same pool with
+     * nothing published, so the slot under gl_src_y is overwritten mid-upload
+     * and the "held" frame tears into garbage for the seconds a long-GOP 4K
+     * seek takes. Snapshot the last published frame into memory pp_playback
+     * owns when the seek starts, serve that until the first post-seek frame
+     * lands, and the picture behind the scrub OSD simply freezes. One copy per
+     * seek, not per frame — the steady state stays zero-copy.
+     */
+    uint8_t *hold_buf;
+    size_t   hold_cap;
+    int      hold_valid;        /* serve hold_buf from get_nv12           */
+    int      hold_planar;
+    int      hold_ypitch, hold_uvpitch, hold_upitch, hold_vpitch;
+    size_t   hold_uv_off, hold_u_off, hold_v_off;
+    uint32_t hold_cw, hold_ch, hold_dw, hold_dh;
 
     void *lock;
     pp_playback_stats stats;
@@ -134,16 +104,13 @@ typedef struct pp_playback {
 void pp_playback_init(pp_playback *pb);
 void pp_playback_shutdown(pp_playback *pb);
 
-void pp_playback_attach_videoout(pp_playback *pb, pp_videoout *vo);
-
+/**
+ * Record the panel size + aspect mode. Since GL-4 nothing is scaled on the CPU
+ * (the quad's vertex transform does FIT/FILL/STRETCH), so this only feeds the
+ * stats line.
+ */
 int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
                            pp_aspect_mode aspect);
-
-/** Set product backend (1080 standard / 4K V8 / 4K V3 fallback). */
-void pp_playback_set_backend(pp_playback *pb, pp_video_backend backend);
-
-/** Runtime emergency: force V3 fallback for 4K. */
-void pp_playback_force_v3_fallback(pp_playback *pb, int enable);
 
 void pp_playback_on_file_open(pp_playback *pb);
 void pp_playback_on_file_close(pp_playback *pb);
@@ -152,49 +119,19 @@ void pp_playback_pause(pp_playback *pb);
 void pp_playback_resume(pp_playback *pb);
 
 /**
- * Convert + pace.
- * V8 4K with VO: fused write to GPU plane, sets pending present.
- * Else: linear display buffer (V3 / 1080).
- * Returns 0 published, 1 late-drop/discard, <0 error.
+ * Pace the frame on the presentation clock and publish its planes.
+ * Returns 0 published, 1 late-drop/paused/seek-discard, <0 error.
  */
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src);
 
-/**
- * If V8 left a pre-tiled present ready, fill *idx / *frame_id and clear pending.
- * Returns 1 if caller should pp_videoout_present_pre_tiled.
- */
-int pp_playback_take_pending_present(pp_playback *pb, uint32_t *idx, uint64_t *frame_id);
-
-/**
- * Blit the ready display frame into dst, and leave EVERY pixel of the
- * dst_w x dst_h rect defined: the frame where there is one, opaque black
- * everywhere else (no frame yet, mid-seek, or a display smaller than dst).
- *
- * That guarantee is the point. The caller used to clear the whole frame to
- * black first and then have this overwrite all of it - 8 MB of pure waste per
- * frame at 1080p. It cannot decide to skip the clear by asking first, because
- * the seek thread can retire the display between the question and the answer;
- * so the clearing belongs here, where it happens under the same lock.
- *
- * Returns 1 if video was copied, 0 if dst was only cleared.
- */
-int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_bytes,
-                             uint32_t dst_w, uint32_t dst_h);
-
+/** 1 once a frame has been published for the current file. */
 int pp_playback_has_display(const pp_playback *pb);
 
 /**
- * GL-4 (#80): enable the EVO_GL_DEVICE NV12 video path (no CPU convert).
- * Call once at GL context bring-up.
- */
-void pp_playback_set_gl_video(pp_playback *pb, int on);
-
-/**
- * The ready NV12 frame's borrowed planes — no pixel copy. The pointers point
- * into the decoder's frame pool (or an FFmpeg AVFrame); they stay valid while
- * the render loop uploads (push_frame pace-sleeps on each frame's PTS, so the
- * decoder is ~1 frame behind reusing a 12-slot pool). For an FFmpeg planar
- * source `uv` is NULL and `u`/`v` are the separate chroma planes.
+ * The ready frame's planes — normally borrowed from the decoder (no pixel
+ * copy). During a seek's discard window these point at pp_playback's own
+ * snapshot of the last published frame instead, so the picture holds still.
+ * For an FFmpeg planar source `uv` is NULL and `u`/`v` are the chroma planes.
  */
 typedef struct pp_gl_nv12_frame {
     const uint8_t *y, *uv, *u, *v;
@@ -202,20 +139,14 @@ typedef struct pp_gl_nv12_frame {
     uint32_t coded_w, coded_h;   /* padded luma plane = R8 texture size */
     uint32_t disp_w, disp_h;     /* valid (cropped) region              */
     int      ready;
+    int      held;               /* 1 = the frozen mid-seek snapshot    */
 } pp_gl_nv12_frame;
 
 /**
- * Fill *f with the ready frame's borrowed planes under the display lock (a
- * pointer/int copy, no pixels). Returns 1 if ready, 0 otherwise.
+ * Fill *f with the ready frame's planes under the display lock (a pointer/int
+ * copy, no pixels). Returns 1 if ready, 0 otherwise.
  */
 int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f);
-
-/**
- * #27: 1 (and clears the request) if a frame took the CPU path while the VO was
- * linear-registered for sceAgc - main must re-register the VO tiled. Returns 0
- * otherwise.
- */
-int pp_playback_take_vo_retile_req(pp_playback *pb);
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us);
 void pp_playback_notify_seek_end(pp_playback *pb, int success,
@@ -224,10 +155,6 @@ void pp_playback_notify_seek_end(pp_playback *pb, int success,
 void pp_playback_get_stats(const pp_playback *pb, pp_playback_stats *out);
 uint64_t pp_playback_convert_p95_us(const pp_playback *pb);
 void pp_playback_log_stats(const pp_playback *pb);   /* -> /mnt/usb0/evo.log */
-
-int pp_playback_choose_output_mode(const pp_source_caps *src,
-                                   uint32_t display_max_w,
-                                   uint32_t display_max_h);
 
 #ifdef __cplusplus
 }

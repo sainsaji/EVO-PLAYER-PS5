@@ -20,26 +20,16 @@
 #include <libavutil/avutil.h>
 #include <libavutil/error.h>
 #include <libavutil/opt.h>
-#include "pp_videoout.h"
 #include "pp_playback.h"
-#include "pp_agc.h"
-#include "pp_agc_osd.h"
-#include "pp_output_policy.h"
-#include "pp_product_path.h"
-#include "pp_4k_sdr_policy.h"
-#include "pp_4k_product_stage.h"
-#include "pp_v8_gate.h"
 #include "pp_stage_breadcrumb.h"
 #include "pp_frame.h"
-#include "pp_converter.h"
 #ifdef EVO_GL_SMOKE
 #include "pp_gl_smoke.h"       /* #77 GL-1 go/no-go probe (--gl-smoke builds only) */
 #endif
-#ifdef EVO_GL_DEVICE
-#include "evo_gl_context.h"    /* render-overhaul GL-3 (#79): device GL context (--gl builds) */
-#include <EGL/egl.h>
-#include <GL/gl.h>
-#endif
+/* render-overhaul GL-3/GL-4 (#79/#80): the one present path. A --gl .ffpfsc
+ * links the device implementation (evo_gl_context_device.cpp); everything else
+ * links the no-op stubs, so nothing here needs the GL headers. */
+#include "evo_gl_context.h"
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/cpu.h>
@@ -161,79 +151,29 @@ extern void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
 #  define EVO_P8(id, ...) ((void)0)
 #endif
 
-/* Product video backend (pp_videoout + converter + clock). */
-#define PP_BACKEND_ENABLED 1
-static pp_videoout g_pp_vo;
 /* Non-static: evo_demux.c's seek executor calls pp_playback_notify_seek_*()
  * on it (A5, transitional — becomes a passed-in pointer at A7). */
 pp_playback g_pp_pb;
-/* VO dimensions may be 1080 (UI) or 4K (V8 playback). */
-static uint32_t g_vo_w = 1920;
-static uint32_t g_vo_h = 1080;
-pp_video_backend g_pp_backend = PP_BACKEND_1080_STANDARD;
-
-/*
- * What the video path was configured with before a 1080-only overlay (Media
- * Info) took the surface away from it.
- *
- * Media Info is drawn at 1080 and would otherwise paint into the top-left
- * corner of a 4K plane, so entering it forces the VO back to 1080 standard.
- * Leaving it used to restore nothing: the decoder carried on producing 4K
- * frames into a presentation path that no longer matched, so video froze
- * while audio - a separate thread on its own port - kept playing. Pausing
- * first happened to mask it, because resume re-established presentation.
- */
-static pp_video_backend g_vo_saved_backend;
-static uint32_t         g_vo_saved_w, g_vo_saved_h, g_vo_saved_bufs;
-static uint32_t         g_vo_saved_out_w, g_vo_saved_out_h;
-static int              g_vo_saved_diag, g_vo_saved_sup_audio, g_vo_saved_sup_ui;
-static int              g_vo_saved_valid;
 
 /*
  * Set when a modal overlay paused the presentation clock on playback's
  * behalf, so it is only resumed if it was not the user who paused.
+ *
+ * The overlay itself no longer touches the display surface. Before GL-4 (#80),
+ * covering 4K video with a 1080 panel meant tearing the VideoOut down and
+ * rebuilding it - the whole g_vo_saved_* / pp_product_overlay_enter machinery,
+ * and the #32 scrub-overlay state machine that had to wait for the decode
+ * thread to park before either transition. GL renders the video quad and the
+ * panel into the same framebuffer at whatever size each one is, so all that is
+ * left of it is this pause flag.
  */
 static int              g_osd_clock_paused;
 
-/* #32 scrub-overlay state machine (definition + helpers live with the scrub
- * code further down; the state itself is declared here because
- * stop_video_playback() resets it). */
-enum {
-    SCRUB_OVL_NONE = 0,
-    SCRUB_OVL_ENTERING,
-    SCRUB_OVL_ACTIVE,
-    SCRUB_OVL_LEAVING,
-};
-static int              prospero_scrub_ovl_state = SCRUB_OVL_NONE;
-
-/* #28 Phase 2: when set, draw_player_screen() renders the OSD into a 1920x1080
- * scratch (no video draw) and publishes it via pp_agc_osd_publish() for the
- * sceAgc 4K present path to composite - instead of painting into a VO buffer. */
-static uint32_t        *g_k4_osd_scratch = 0;
+/* When set, draw_player_screen() paints the OSD onto a transparent 1920x1080
+ * scratch and skips the video draw: the frame itself is already on screen as
+ * the GL video quad, and the scratch composites over it (evo_gl_composite_bgra). */
 static int              g_k4_osd_publish = 0;
 
-static int g_pp_vo_ready = 0;
-/* Progressive 4K product diag (G-H). Set when gated 4K session opens. */
-static int g_4k_diag_active = 0;
-static int g_4k_suppress_audio = 0; /* stage < G_AUDIO */
-static int g_4k_suppress_ui = 0;   /* stage < H_FULL */
-/* Defer VO reconfig to frame-loop top (never while a buffer is held). */
-static int g_pending_vo_reconfig = 0;
-static uint32_t g_pending_vo_w = 1920;
-static uint32_t g_pending_vo_h = 1080;
-/* EVO: triple buffered.
- *
- * Correct flip retirement (see pp_videoout.c retire_old_inflight) means a
- * buffer is only reusable once it is no longer the plane being scanned out.
- * With two buffers that leaves the renderer stalled for a full frame after
- * every flip - the tear becomes judder. A third buffer lets frame N+1 be
- * prepared while N is on screen and N-1 drains. */
-static uint32_t g_pending_vo_buffers = 3;
-static pp_video_backend g_pending_backend = PP_BACKEND_1080_STANDARD;
-static uint32_t g_pending_out_w = 1920;
-static uint32_t g_pending_out_h = 1080;
-/* 0 while VO reconfig in flight — video thread must not touch VO */
-volatile int g_vo_decode_gate = 1;
 int g_first_frame_bc_done = 0;
 
 // EVO Player 1.0 UI state
@@ -377,316 +317,35 @@ long long now_ms(void);
 static void format_file_size(char *out, size_t outsz, long long bytes);
 const char* profile_name(PlaybackProfile profile);
 
-#if PP_BACKEND_ENABLED
-/**
- * Transactional VO reconfiguration (004Q crash isolation).
- * Stops pending presents / purges before destroying old framebuffers.
- */
-/*
- * open_gate: 1 = this call is the whole reconfig, re-open g_vo_decode_gate on
- * success. 0 = the caller (pp_product_apply_pending_vo) still has to set the
- * backend + pp_playback_set_output for the NEW resolution and will open the
- * gate itself afterward. Opening it here first is #55 — the decode thread pushes
- * a frame into a pb->display still sized for the old resolution.
- */
-static int pp_product_reconfigure_vo(uint32_t w, uint32_t h, uint32_t buffers,
-                                     int open_gate)
-{
-    char detail[96];
-    int want_linear = 0;
-#if defined(EVO_APP_MODULE)
-    /* Must mirror pp_videoout_init's attr choice, so a same-size reconfig that
-     * only flips the attr (#27: AGC died -> need a tiled VO) is not skipped. */
-    want_linear = ((pp_agc_available() && w >= 3200u) || pp_agc_ui_ready()) ? 1 : 0;
-#endif
-    if (g_pp_vo_ready && g_pp_vo.inited && g_vo_w == w && g_vo_h == h &&
-        g_pp_vo.buffer_count == buffers &&
-        pp_videoout_is_linear(&g_pp_vo) == want_linear)
-        return 0;
-
-    /* Block decode/present against this VO until re-init completes */
-    g_vo_decode_gate = 0;
-    pp_stage_bc_checkpoint("003_OLD_WORKERS_STOPPED", "no dedicated V8 workers in app");
-    /* Block new V8 presents; release any pending acquired buffer */
-    if (g_pp_vo_ready) {
-        uint32_t pidx = 0;
-        uint64_t pfid = 0;
-        while (pp_playback_take_pending_present(&g_pp_pb, &pidx, &pfid)) {
-            pp_videoout_release(&g_pp_vo, pidx);
-        }
-        pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-        g_pp_backend = PP_BACKEND_1080_STANDARD;
-    }
-    pp_stage_bc_checkpoint("004_OLD_QUEUES_PURGED", "pending present cleared");
-
-    if (g_pp_vo_ready) {
-        pp_stage_bc_checkpoint("005_OLD_VIDEOOUT_SHUTDOWN", "before destroy");
-        /* Ensure no buffer left acquired/in-flight; video thread may still spin */
-        usleep(80000);
-        pp_videoout_shutdown(&g_pp_vo);
-        usleep(20000);
-        g_pp_vo_ready = 0;
-    }
-    memset(&g_pp_vo, 0, sizeof(g_pp_vo));
-
-    snprintf(detail, sizeof(detail), "w=%u h=%u buf=%u", w, h, buffers);
-    if (pp_videoout_init(&g_pp_vo, w, h, PP_PIXEL_BGRA32_TILED, buffers) != 0) {
-        g_pp_vo_ready = 0;
-        pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_FAIL", detail);
-        /*
-         * PS5 VideoOut only likes a few modes. Nonstandard sizes like
-         * 3840x1920 often fail — try standard 3840x2160, then 1080.
-         */
-        if ((w != 3840u || h != 2160u) && (w > 1920u || h > 1080u)) {
-            if (pp_videoout_init(&g_pp_vo, 3840, 2160, PP_PIXEL_BGRA32_TILED,
-                                 buffers >= 2 ? buffers : 3) == 0) {
-                g_vo_w = 3840;
-                g_vo_h = 2160;
-                g_pp_vo_ready = 1;
-                pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
-                if (open_gate)
-                    g_vo_decode_gate = 1;
-                toast("PLAYBACK", "4K VO @ 3840x2160");
-                pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_OK",
-                                      "fallback 3840x2160");
-                return 0;
-            }
-        }
-        if (w != 1920u || h != 1080u) {
-            if (pp_videoout_init(&g_pp_vo, 1920, 1080, PP_PIXEL_BGRA32_TILED, 3) == 0) {
-                g_vo_w = 1920;
-                g_vo_h = 1080;
-                g_pp_vo_ready = 1;
-                pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
-                pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-                g_pp_backend = PP_BACKEND_1080_STANDARD;
-                pp_playback_set_output(&g_pp_pb, 1920, 1080, PP_ASPECT_FIT);
-                if (open_gate)
-                    g_vo_decode_gate = 1;
-                /* Friendly — console rejected UHD mode, not a hard crash */
-                toast("PLAYBACK", "Present @ 1080 (VO mode)");
-                return -1;
-            }
-        }
-        toast("VIDEOOUT", "display init failed");
-        return -2;
-    }
-    g_vo_w = w;
-    g_vo_h = h;
-    g_pp_vo_ready = 1;
-    pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
-    /* Brief settle after 4K register — first-open race was here */
-    if (w >= 3840u)
-        usleep(30000);
-    if (open_gate)
-        g_vo_decode_gate = 1;
-    pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_OK", detail);
-    return 0;
-}
-
-/**
- * Queue VO reconfig for next frame start (safe: no buffer held).
- *
- * CRITICAL: do NOT arm V8/4K backend or 4K output dims until apply succeeds.
- * Arming early made the convert/present path write 4K tiles into a 1080 plane
- * (or draw 1080 UI into a 4K plane) → stacked/split layout on every page.
- */
-static void pp_product_request_vo(uint32_t w, uint32_t h, uint32_t buffers,
-                                  pp_video_backend backend,
-                                  uint32_t out_w, uint32_t out_h)
-{
-#if defined(EVO_GL_DEVICE)
-    /* GL-3 (#79) B3: no VideoOut - ps5-opengl owns it. The CPU converter always
-     * targets 1080 into pp_playback's `display` buffer; the render loop blits
-     * that as a GL texture and the quad scales to the panel. 4K goes through the
-     * converter's downscale for now (GL-4 replaces it with a full-res GLSL NV12
-     * sampler). No VO reconfig, no V8/V3 backend, no decode gate to juggle. */
-    (void)w; (void)h; (void)buffers; (void)backend; (void)out_w; (void)out_h;
-    g_pp_backend = PP_BACKEND_1080_STANDARD;
-    pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-    pp_playback_set_output(&g_pp_pb, (uint32_t)WIDTH, (uint32_t)HEIGHT, PP_ASPECT_FIT);
-    g_vo_decode_gate = 1;
-    g_pending_vo_reconfig = 0;
-    g_4k_diag_active = 0;
-    g_4k_suppress_audio = 0;
-    g_4k_suppress_ui = 0;
-    return;
-#else
-    int size_change;
-
-    g_pending_vo_w = w;
-    g_pending_vo_h = h;
-    g_pending_vo_buffers = buffers;
-    g_pending_backend = backend;
-    g_pending_out_w = out_w;
-    g_pending_out_h = out_h;
-    g_pending_vo_reconfig = 1;
-
-    size_change =
-        (w != g_vo_w || h != g_vo_h ||
-         buffers != (g_pp_vo_ready ? g_pp_vo.buffer_count : 0));
-
-    if (size_change) {
-        /* Transition lock: stay on current safe backend until VO matches. */
-        g_vo_decode_gate = 0;
-        g_pp_backend = PP_BACKEND_1080_STANDARD;
-        pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-        /* Keep output dims matching live VO so convert never 4K→1080 plane. */
-        pp_playback_set_output(&g_pp_pb,
-                               g_vo_w ? g_vo_w : (uint32_t)WIDTH,
-                               g_vo_h ? g_vo_h : (uint32_t)HEIGHT,
-                               PP_ASPECT_FIT);
-    } else {
-        g_pp_backend = backend;
-        pp_playback_set_backend(&g_pp_pb, backend);
-        pp_playback_set_output(&g_pp_pb, out_w, out_h, PP_ASPECT_FIT);
-    }
-    {
-        char d[96];
-        snprintf(d, sizeof(d), "req %ux%u buf=%u be=%d chg=%d",
-                 w, h, buffers, (int)backend, size_change);
-        pp_stage_bc_checkpoint("005B_VO_RECONFIG_QUEUED", d);
-    }
-#endif /* !EVO_GL_DEVICE */
-}
-
-static void pp_product_apply_pending_vo(void)
-{
-    if (!g_pending_vo_reconfig)
-        return;
-    g_pending_vo_reconfig = 0;
-    if (pp_product_reconfigure_vo(g_pending_vo_w, g_pending_vo_h,
-                                  g_pending_vo_buffers, 0 /* gate opened below */) != 0) {
-        g_pp_backend = PP_BACKEND_1080_STANDARD;
-        pp_playback_set_backend(&g_pp_pb, g_pp_backend);
-        pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
-        g_4k_diag_active = 0;
-        g_4k_suppress_audio = 0;
-        g_4k_suppress_ui = 0;
-        g_vo_decode_gate = 1;
-        toast("PLAYBACK", "Present @ 1080 (VO mode)");
-        pp_stage_bc_checkpoint("006_4K_VIDEOOUT_INIT_FAIL", "pending apply");
-        return;
-    }
-    /*
-     * Arm backend after VO is live. If we requested a nonstandard size but
-     * init fell back to 3840x2160, keep V8 only when source is full UHD
-     * 1:1; otherwise V3 letterbox/fit into the live VO size.
-     */
-    if (g_vo_w == 3840u && g_vo_h == 2160u &&
-        g_pending_out_w == 3840u && g_pending_out_h == 2160u &&
-        g_pending_backend == PP_BACKEND_4K_V8_FUSED) {
-        g_pp_backend = PP_BACKEND_4K_V8_FUSED;
-        pp_playback_set_backend(&g_pp_pb, g_pp_backend);
-        pp_playback_set_output(&g_pp_pb, 3840, 2160, PP_ASPECT_FIT);
-    } else if (g_vo_w >= 3200u && g_vo_h >= 1600u &&
-               g_pending_backend != PP_BACKEND_1080_STANDARD) {
-        /* Live UHD VO but source not 1:1 — V3 fit/letterbox */
-        g_pp_backend = PP_BACKEND_4K_V3_FALLBACK;
-        pp_playback_set_backend(&g_pp_pb, g_pp_backend);
-        pp_playback_set_output(&g_pp_pb, g_vo_w, g_vo_h, PP_ASPECT_FIT);
-    } else {
-        g_pp_backend = g_pending_backend;
-        pp_playback_set_backend(&g_pp_pb, g_pp_backend);
-        pp_playback_set_output(&g_pp_pb, g_pending_out_w, g_pending_out_h,
-                               PP_ASPECT_FIT);
-    }
-    g_vo_decode_gate = 1;
-    pp_stage_bc_checkpoint("006B_VO_RECONFIG_APPLIED",
-                          pp_4k_stage_name(PP_4K_PRODUCT_STAGE));
-}
-
-/** True only when player is allowed to keep a native UHD surface. */
-static int pp_product_k4_live(int scr)
-{
-    return (scr == SCREEN_PLAYER &&
-            (g_pp_backend == PP_BACKEND_4K_V8_FUSED ||
-             g_pp_backend == PP_BACKEND_4K_V3_FALLBACK) &&
-            g_pp_vo_ready && g_pp_vo.inited &&
-            g_vo_w == g_pp_vo.width && g_vo_h == g_pp_vo.height &&
-            pp_v8_is_uhd_size(g_vo_w, g_vo_h));
-}
-
-/**
- * Force 1080 UI surface. Call only with no buffer held.
- * Returns 1 if VO is safe for 1080 UI draw, 0 if still wrong (skip frame).
- */
-static int pp_product_ensure_ui_1080(void)
-{
-    if (g_vo_w == 1920u && g_vo_h == 1080u &&
-        g_pp_backend == PP_BACKEND_1080_STANDARD &&
-        g_pp_vo_ready && g_pp_vo.inited &&
-        g_pp_vo.width == 1920u && g_pp_vo.height == 1080u &&
-        !g_pending_vo_reconfig)
-        return 1;
-
-    g_pp_backend = PP_BACKEND_1080_STANDARD;
-    pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-    if (g_vo_w != 1920u || g_vo_h != 1080u ||
-        !g_pp_vo_ready || g_pp_vo.buffer_count != 2 ||
-        g_pp_vo.width != 1920u || g_pp_vo.height != 1080u) {
-        pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
-                              WIDTH, HEIGHT);
-        pp_product_apply_pending_vo();
-    } else if (g_pending_vo_reconfig) {
-        pp_product_apply_pending_vo();
-    }
-
-    return (g_vo_w == 1920u && g_vo_h == 1080u &&
-            g_pp_vo_ready && g_pp_vo.inited &&
-            g_pp_vo.width == 1920u && g_pp_vo.height == 1080u);
-}
-
 /* Defined with the rest of the player state further down. Declared here
  * because the overlay helpers below have to know whether the pause they are
  * about to lift was theirs or the user's. */
 extern int player_paused;
 
-/**
- * Enter a 1080 UI overlay from playback, remembering what to put back.
+/*
+ * Enter / leave a modal overlay from playback (Media Info, the stop prompt,
+ * the subtitle picker).
  *
- * Media Info and the stop-playback prompt both cover the video with a 1080
- * panel, and both have to leave a 4K surface to do it. This was written out
- * twice; the second copy is how a 4K session comes back from an overlay in
- * standard 1080 and stays there.
+ * All these do now is suspend the presentation clock. Nothing is pushed to the
+ * display while the overlay is up, but the clock's wall-time base keeps
+ * running, so on return it judges every arriving frame late by however long the
+ * overlay was open and drops all of them - a frozen picture with audio still
+ * playing. That is the 0.1.3 Media Info freeze; it is the same trap for any
+ * overlay.
  *
- * Also suspends the presentation clock. Nothing is pushed to the display
- * while the overlay is up, but the clock's wall-time base keeps running, so
- * on return it judges every arriving frame late by however long the overlay
- * was open and drops all of them - a frozen picture with audio still playing.
- * That is the 0.1.3 Media Info freeze; it is the same trap for any overlay.
+ * The surface half - dropping a 4K VideoOut back to 1080 so a 1080 panel could
+ * be drawn over it, and putting it back afterwards - went with GL-4 (#80).
+ * The GL frame composites the panel over the video quad at any size.
  */
 static void pp_product_overlay_enter(void)
 {
-    if (g_vo_w != 1920u || g_vo_h != 1080u ||
-        g_pp_backend == PP_BACKEND_4K_V8_FUSED) {
-        g_vo_saved_backend   = g_pp_backend;
-        g_vo_saved_w         = g_vo_w;
-        g_vo_saved_h         = g_vo_h;
-        g_vo_saved_bufs      = g_pp_vo.buffer_count;
-        g_vo_saved_out_w     = g_vo_w;
-        g_vo_saved_out_h     = g_vo_h;
-        g_vo_saved_diag      = g_4k_diag_active;
-        g_vo_saved_sup_audio = g_4k_suppress_audio;
-        g_vo_saved_sup_ui    = g_4k_suppress_ui;
-        g_vo_saved_valid     = 1;
-
-        g_4k_diag_active   = 0;
-        g_4k_suppress_ui   = 0;
-
-        g_pp_backend = PP_BACKEND_1080_STANDARD;
-        pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-        pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
-                              WIDTH, HEIGHT);
-    }
-
     if (!player_paused) {
         pp_playback_pause(&g_pp_pb);
         g_osd_clock_paused = 1;
     }
 }
 
-/** Put the video path back the way playback had it. Safe to call twice. */
+/** Resume the clock the overlay paused. Safe to call twice. */
 static void pp_product_overlay_leave(void)
 {
     if (g_osd_clock_paused) {
@@ -694,21 +353,7 @@ static void pp_product_overlay_leave(void)
         if (!player_paused)
             pp_playback_resume(&g_pp_pb);
     }
-
-    if (g_vo_saved_valid) {
-        g_4k_diag_active    = g_vo_saved_diag;
-        g_4k_suppress_audio = g_vo_saved_sup_audio;
-        g_4k_suppress_ui    = g_vo_saved_sup_ui;
-
-        g_pp_backend = g_vo_saved_backend;
-        pp_playback_set_backend(&g_pp_pb, g_vo_saved_backend);
-        pp_product_request_vo(g_vo_saved_w, g_vo_saved_h,
-                              g_vo_saved_bufs, g_vo_saved_backend,
-                              g_vo_saved_out_w, g_vo_saved_out_h);
-        g_vo_saved_valid = 0;
-    }
 }
-#endif
 
 
 
@@ -1604,7 +1249,6 @@ long long controls_last_used_ms = 0;
  * (0 = KEEP WATCHING, 1 = STOP). Defaults to STOP so a bare X still stops. */
 static int g_exit_confirm_focus = 1;
 
-#if PP_BACKEND_ENABLED
 /* Map UI view mode → product convert aspect (HEVC soft + 4K paths). */
 pp_aspect_mode prospero_view_mode_to_aspect(void)
 {
@@ -1616,42 +1260,25 @@ pp_aspect_mode prospero_view_mode_to_aspect(void)
 }
 
 /*
- * Apply Fit/Fill/Stretch to the live convert path.
- * H.264 software blit used video_view_mode directly; HEVC/4K used g_pp_pb
- * and previously ignored Triangle unless aspect was pushed each frame — and
- * native UHD V8 is 1:1 only, so we fall back to V3 convert with aspect.
+ * Apply Fit/Fill/Stretch.
+ *
+ * GL-4 (#80) closed #76 here: the aspect is a scale on the video quad's
+ * clip-space corners (evo_gl_blit_yuv reads video_view_mode straight), so all
+ * this has to do is record it. It used to force the 4K V8 path down to the V3
+ * converter and re-target the output at the live VO size, which is what made
+ * an aspect cycle on 4K native corrupt the plane - V8 registers the VideoOut
+ * linear, V3 writes it tiled, and nothing re-registered it in between.
  */
 static void prospero_apply_view_mode(void)
 {
     pp_aspect_mode am = prospero_view_mode_to_aspect();
 
-    g_pp_pb.cfg.aspect = am;
+    g_pp_pb.aspect = am;
     g_pp_pb.stats.aspect = (int)am;
-
-    if (g_pp_backend == PP_BACKEND_4K_V8_FUSED ||
-        g_pp_backend == PP_BACKEND_4K_V3_FALLBACK) {
-        /*
-         * V8 fused ignores aspect (1:1 tile). Switch to V3 so FIT/FILL/STRETCH
-         * scale into the live UHD (or 1080) plane.
-         */
-        pp_playback_force_v3_fallback(&g_pp_pb, 1);
-        g_pp_backend = PP_BACKEND_4K_V3_FALLBACK;
-        pp_playback_set_backend(&g_pp_pb, PP_BACKEND_4K_V3_FALLBACK);
-        if (g_vo_w >= 1920u && g_vo_h >= 1080u)
-            (void)pp_playback_set_output(&g_pp_pb, g_vo_w, g_vo_h, am);
-        else
-            (void)pp_playback_set_output(&g_pp_pb, (uint32_t)WIDTH,
-                                         (uint32_t)HEIGHT, am);
-    } else {
-        /* Soft 1080 path: keep buffer size, only aspect changes. */
-        g_pp_pb.cfg.aspect = am;
-        g_pp_pb.stats.aspect = (int)am;
-        if (g_pp_pb.out_w == 0 || g_pp_pb.out_h == 0)
-            (void)pp_playback_set_output(&g_pp_pb, (uint32_t)WIDTH,
-                                         (uint32_t)HEIGHT, am);
-    }
+    if (g_pp_pb.out_w == 0 || g_pp_pb.out_h == 0)
+        (void)pp_playback_set_output(&g_pp_pb, (uint32_t)WIDTH,
+                                     (uint32_t)HEIGHT, am);
 }
-#endif
 uint32_t *video_frame_back_pixels = NULL;
 uint32_t *video_frame_third_pixels = NULL;
 
@@ -1684,6 +1311,22 @@ long long playback_start_ms = 0;
 /* video_stream_index / audio_stream_index moved to media/evo_demux.c (A5). */
 /* 1 = audio-only file (music); no video track / video thread */
 static int prospero_music_mode = 0;
+
+/*
+ * 1 when the decoded frame is on screen as the GL video quad rather than
+ * rasterised into gl_scratch.
+ *
+ * Only the player. The subtitle picker and the stop-playback prompt sit over
+ * the film conceptually, but both are RmlUi documents with a full-screen scrim
+ * (dialog.rcss #dialog-scrim, #000000b8) and EVO's CPU rasteriser blends
+ * source-over to an OPAQUE result (evo_blend.h) - so compositing that scratch
+ * over the video quad would paint solid black across it anyway. They keep the
+ * whole-scratch blit until GL-5 renders RmlUi through GL with real alpha.
+ */
+static int gl_video_quad_screen(int scr)
+{
+    return scr == SCREEN_PLAYER && !prospero_music_mode;
+}
 AVCodecContext *audio_ctx = NULL;
 
 /* ---------------------------------------------------------------------------
@@ -3420,16 +3063,7 @@ double load_resume_position(const char *path) {
 
 
 void stop_video_playback(void) {
-    /* Any saved 4K surface belongs to the playback that is ending. Leaving it
-     * set would restore a dead configuration the next time Media Info closes. */
-#if PP_BACKEND_ENABLED
-    g_vo_saved_valid   = 0;
     g_osd_clock_paused = 0;
-    prospero_scrub_ovl_state = SCRUB_OVL_NONE;   /* #32: don't carry a scrub overlay across sessions */
-#if PP_BACKEND_ENABLED
-    pp_agc_osd_publish(0, 0);                     /* #28: clear the GPU OSD overlay */
-#endif
-#endif
 
     save_resume_position();
     player_paused = 0;
@@ -3529,26 +3163,10 @@ void stop_video_playback(void) {
     /* Drop scrub demux so the next file does not reuse a stale context */
     prospero_thumbnail_close_context();
 
-#if PP_BACKEND_ENABLED
     pp_playback_on_file_close(&g_pp_pb);
     pp_playback_log_stats(&g_pp_pb);
-    /*
-     * Always return to 1080 UI surface after any session.
-     * Main loop applies this on the next frame (no buffer held here).
-     * Also clear V8 backend so menus never tile at 4K.
-     */
-    g_pp_backend = PP_BACKEND_1080_STANDARD;
-    pp_playback_set_backend(&g_pp_pb, PP_BACKEND_1080_STANDARD);
-    if (g_vo_w != 1920u || g_vo_h != 1080u || g_pending_vo_reconfig) {
-        pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
-                              WIDTH, HEIGHT);
-    }
     /* the 10-bit pack scratch is freed by evo_vdec_close() (A6) */
-    g_4k_diag_active = 0;
-    g_4k_suppress_audio = 0;
-    g_4k_suppress_ui = 0;
     g_first_frame_bc_done = 0;
-#endif
 
 }
 
@@ -3671,13 +3289,11 @@ int start_video_playback(const char *path) {
     video_view_mode =
         prospero_default_view_mode;
 
-#if PP_BACKEND_ENABLED
     pp_playback_on_file_open(&g_pp_pb);
     {
         pp_aspect_mode am = prospero_view_mode_to_aspect();
         (void)pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, am);
     }
-#endif
 
 
     if (requested_resume_seek_pos <= 0.0)
@@ -3806,65 +3422,6 @@ int start_video_playback(const char *path) {
         media_duration_sec = (double)play_fmt->duration / (double)AV_TIME_BASE;
     else
         media_duration_sec = 0.0;
-    /*
-     * Pre-scan: decide 4K stage / audio suppress BEFORE opening audio.
-     * (Audio streams often appear before video in the container.)
-     */
-#if PP_BACKEND_ENABLED
-    {
-        int pre_gate = 0;
-        double pre_fps = 30.0;
-        for (unsigned int pi = 0; pi < play_fmt->nb_streams; pi++) {
-            AVCodecParameters *ppar = play_fmt->streams[pi]->codecpar;
-            if (ppar->codec_type != AVMEDIA_TYPE_VIDEO)
-                continue;
-            if (!pp_v8_is_uhd_size((uint32_t)ppar->width,
-                                  (uint32_t)ppar->height))
-                continue;
-            {
-                pp_v8_source_info v8i;
-                AVStream *vs = play_fmt->streams[pi];
-                int bpp = 8, is_pq = 0, is_hlg = 0;
-                if (vs->avg_frame_rate.num > 0)
-                    pre_fps = av_q2d(vs->avg_frame_rate);
-                else if (vs->r_frame_rate.num > 0)
-                    pre_fps = av_q2d(vs->r_frame_rate);
-                if (ppar->bits_per_raw_sample > 8)
-                    bpp = ppar->bits_per_raw_sample;
-                else if (ppar->format == AV_PIX_FMT_YUV420P10LE ||
-                         ppar->format == AV_PIX_FMT_YUV420P10BE)
-                    bpp = 10;
-                if (ppar->color_trc == AVCOL_TRC_SMPTE2084)
-                    is_pq = 1;
-                if (ppar->color_trc == AVCOL_TRC_ARIB_STD_B67)
-                    is_hlg = 1;
-                memset(&v8i, 0, sizeof(v8i));
-                v8i.width = (uint32_t)ppar->width;
-                v8i.height = (uint32_t)ppar->height;
-                v8i.fps = pre_fps;
-                v8i.format = PP_FRAME_YUV420P;
-                v8i.bits_per_component = bpp;
-                v8i.is_pq = is_pq;
-                v8i.is_hlg = is_hlg;
-                v8i.has_hdr_metadata = is_pq || is_hlg;
-                pre_gate = (pp_v8_source_gate(&v8i) == PP_V8_GATE_OK);
-            }
-            if (pre_gate && PP_4K_STAGE_WANTS_4K_VO) {
-                g_4k_diag_active = 1;
-                g_4k_suppress_audio = !PP_4K_STAGE_WANTS_AUDIO;
-                g_4k_suppress_ui = !PP_4K_STAGE_WANTS_UI;
-                {
-                    char d[80];
-                    snprintf(d, sizeof(d), "pre stage=%d suppressA=%d",
-                             PP_4K_PRODUCT_STAGE, g_4k_suppress_audio);
-                    pp_stage_bc_checkpoint("000_4K_PRESCAN", d);
-                }
-            }
-            break;
-        }
-    }
-#endif
-
     for (unsigned int i = 0; i < play_fmt->nb_streams; i++) {
         AVCodecParameters *par = play_fmt->streams[i]->codecpar;
 
@@ -3880,10 +3437,6 @@ int start_video_playback(const char *path) {
              * Open only the first audio stream that FFmpeg and the
              * PS5 output path can initialize successfully.
              */
-            if (g_4k_suppress_audio) {
-                /* G-H stage < G_AUDIO: video-only isolation */
-                continue;
-            }
             if (audio_stream_index >= 0) {
                 continue;
             }
@@ -4097,9 +3650,7 @@ int start_video_playback(const char *path) {
                 video_packet_cap = 48;
                 audio_packet_cap = 64;
                 decoder_thread_count = 6;
-            } else if (pp_v8_is_uhd_size((uint32_t)par->width,
-                                         (uint32_t)par->height) ||
-                       is_uhd) {
+            } else if (is_uhd) {
                 /*
                  * UHD: leave CPU for audio. H.264 4K soft@1080 needs fewer
                  * video threads so the audio queue does not underrun.
@@ -4115,18 +3666,19 @@ int start_video_playback(const char *path) {
                 decoder_thread_count = is_h264 ? 6 : 8;
                 if (decoder_thread_count > 10)
                     decoder_thread_count = 10;
-#if PP_BACKEND_ENABLED
                 {
-                    pp_v8_source_info v8i;
+                    /*
+                     * 4K source note for the log. GL-4 (#80): there is no VO to
+                     * pick any more - the frame goes up at its own resolution as
+                     * a GL texture and the quad scales it - so the whole
+                     * V8-gate / 4K-VideoOut / soft@1080 decision this used to
+                     * drive is gone. What is left is the breadcrumb that says
+                     * what came through the door.
+                     */
                     double fps = 30.0;
                     AVStream *vs = play_fmt->streams[i];
                     char det[160];
-                    int gate_ok;
-                    pp_video_backend be;
                     int bpp = 8;
-                    int is_pq = 0, is_hlg = 0;
-                    uint32_t src_w = (uint32_t)par->width;
-                    uint32_t src_h = (uint32_t)par->height;
 
                     if (vs->avg_frame_rate.num > 0)
                         fps = av_q2d(vs->avg_frame_rate);
@@ -4143,95 +3695,15 @@ int start_video_playback(const char *path) {
                              par->profile == FF_PROFILE_HEVC_MAIN_10)
                         bpp = 10;
 #endif
-                    if (par->color_trc == AVCOL_TRC_SMPTE2084)
-                        is_pq = 1;
-                    if (par->color_trc == AVCOL_TRC_ARIB_STD_B67)
-                        is_hlg = 1;
 
                     pp_stage_bc_checkpoint("001_MEDIA_OPEN_BEGIN", "4K source detected");
-                    memset(&v8i, 0, sizeof(v8i));
-                    v8i.width = src_w;
-                    v8i.height = src_h;
-                    v8i.fps = fps;
-                    v8i.format = PP_FRAME_YUV420P;
-                    v8i.bits_per_component = bpp;
-                    v8i.is_pq = is_pq;
-                    v8i.is_hlg = is_hlg;
-                    v8i.has_hdr_metadata = is_pq || is_hlg;
-                    v8i.has_dolby_vision = 0;
-                    gate_ok = (pp_v8_source_gate(&v8i) == PP_V8_GATE_OK);
-                    be = pp_select_video_backend(PP_OUT_4K_SDR, gate_ok);
-
-                    snprintf(det, sizeof(det),
-                             "w=%d h=%d fps=%.2f bpp=%d trc=%d gate=%d be=%d",
+                    snprintf(det, sizeof(det), "w=%d h=%d fps=%.2f bpp=%d trc=%d 10bit=%d",
                              par->width, par->height, fps, bpp,
-                             (int)par->color_trc, gate_ok, (int)be);
+                             (int)par->color_trc, is10);
                     pp_stage_bc_checkpoint("002_MEDIA_INSPECT_OK", det);
-
-                    /*
-                     * Progressive product 4K (G-H). Stage 0 = safe 1080.
-                     * Stage 1 = 4K VO + V3, no audio/UI.
-                     * Stage 2 = 4K VO + V8, no audio/UI.
-                     * Stage 3 = + audio. Stage 4 = + UI.
-                     */
-                    g_4k_diag_active = 0;
-                    g_4k_suppress_audio = 0;
-                    g_4k_suppress_ui = 0;
-                    {
-                        char st[96];
-                        snprintf(st, sizeof(st), "stage=%d %s gate=%d be=%d",
-                                 PP_4K_PRODUCT_STAGE,
-                                 pp_4k_stage_name(PP_4K_PRODUCT_STAGE),
-                                 gate_ok, (int)be);
-                        pp_stage_bc_checkpoint("002B_PRODUCT_STAGE", st);
-                    }
-
-                    /*
-                     * UHD HEVC (HOTD etc.): always soft@1080 — native 4K VO
-                     * costs more convert CPU and steals from audio.
-                     * H.264 8-bit full 2160 can try native; cinema 1920-tall
-                     * uses soft@1080 for A/V smoothness.
-                     */
-                    if (is_hevc || bpp > 8 || is_pq || is_hlg ||
-                        src_h < 2160u || !gate_ok || !PP_4K_STAGE_WANTS_4K_VO ||
-                        !PP_4K_NATIVE_VO) {
-                        g_4k_diag_active = 0;
-                        g_4k_suppress_audio = 0;
-                        g_4k_suppress_ui = 0;
-                        pp_product_request_vo(1920, 1080, 2,
-                                              PP_BACKEND_1080_STANDARD,
-                                              WIDTH, HEIGHT);
-                        if (is_hevc)
-                            toast("PLAYBACK",
-                                  is10 ? "4K HEVC soft@1080" : "4K HEVC soft@1080");
-                        else
-                            toast("PLAYBACK", "4K soft@1080");
-                        pp_stage_bc_checkpoint("007_DECODER_INIT_PENDING",
-                                              "UHD soft present 1080");
-                    } else {
-                        int exact_uhd =
-                            (src_w == 3840u && src_h == 2160u);
-                        if (exact_uhd && be == PP_BACKEND_4K_V8_FUSED &&
-                            PP_4K_V8_PRODUCT_ENABLE)
-                            be = PP_BACKEND_4K_V8_FUSED;
-                        else
-                            be = PP_BACKEND_4K_V3_FALLBACK;
-                        g_4k_diag_active = 1;
-                        g_4k_suppress_audio = !PP_4K_STAGE_WANTS_AUDIO;
-                        g_4k_suppress_ui = !PP_4K_STAGE_WANTS_UI;
-                        pp_product_request_vo(3840, 2160, PP_4K_SDR_VO_BUFFERS,
-                                              be, 3840, 2160);
-                        toast("PLAYBACK",
-                              be == PP_BACKEND_4K_V8_FUSED
-                                  ? "4K V8 native"
-                                  : "4K fit@2160");
-                        pp_stage_bc_checkpoint("007_DECODER_INIT_PENDING",
-                                              pp_4k_stage_name(PP_4K_PRODUCT_STAGE));
-                    }
+                    toast("PLAYBACK", is_hevc ? "4K HEVC" : "4K");
+                    pp_stage_bc_checkpoint("007_DECODER_INIT_PENDING", "gl video path");
                 }
-#else
-                toast("PLAYBACK", is_hevc ? "4K HEVC soft" : "4K soft");
-#endif
             } else if (is_uhd && is_hevc) {
                 playback_profile = 3;
                 video_packet_cap = 6;
@@ -4396,7 +3868,6 @@ int start_video_playback(const char *path) {
                 stop_video_playback();
                 return 0;
             }
-#if PP_BACKEND_ENABLED
             {
                 char d[96];
                 snprintf(d, sizeof(d), "codec=%d %dx%d thr=%d",
@@ -4404,7 +3875,6 @@ int start_video_playback(const char *path) {
                          decoder_thread_count);
                 pp_stage_bc_checkpoint("008_DECODER_OPEN_OK", d);
             }
-#endif
 
             /* #59: tell the user which decoder opened. */
             toast("DECODER", vdec_chosen == EVO_VDEC_BACKEND_NATIVE
@@ -4439,7 +3909,7 @@ int start_video_playback(const char *path) {
         );
         stop_video_playback();
         return 0;
-    } else if (audio_stream_index < 0 && !g_4k_suppress_audio) {
+    } else if (audio_stream_index < 0) {
         /*
          * This used to read "Silent: need AAC/MP3 (E-AC3/DDP unsupported)"
          * unconditionally, and its comment claimed libavcodec here had only
@@ -4611,21 +4081,12 @@ long long now_ms(void) {
  * that this function immediately overwrote.
  */
 void draw_video_frame_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h) {
-#if PP_BACKEND_ENABLED
-    if (g_pp_pb.active) {
-        /*
-         * Already converted + aspect-scaled to output size, and
-         * pp_playback_copy_display blacks whatever it does not fill - so this
-         * covers "no frame ready yet" and "mid-seek" without a separate clear
-         * and, more to the point, without a window where the seek thread can
-         * retire the display between a has_display() question and the copy.
-         *
-         * Sub-rect requests copy the full plane, as they always did (rare).
-         */
-        (void)pp_playback_copy_display(&g_pp_pb, fb, (uint32_t)(WIDTH * 4), WIDTH, HEIGHT);
-        return;
-    }
-#endif
+    /*
+     * Only the legacy swscale RGBA ring reaches here now (evo_vdec_receive()
+     * == 2 - a pixel format pp_frame can't carry). The product path's frames
+     * never touch a CPU framebuffer since GL-4 (#80): they go straight from the
+     * decoder to R8/RG8 textures and the video quad.
+     */
     pthread_mutex_lock(&video_frame_mutex);
 
     if (!video_frame_loaded || !video_frame_pixels || video_frame_w <= 0 || video_frame_h <= 0) {
@@ -5752,9 +5213,7 @@ static void evo_subs_step_size(int delta)
 
 static void evo_subs_open(void)
 {
-#if PP_BACKEND_ENABLED
     pp_product_overlay_enter();
-#endif
     evo_subs_sync();
 
     /* Open on whatever is playing, not on row zero - the list is long and
@@ -5792,9 +5251,7 @@ static void evo_subs_activate(void)
 
     track = evo_subs_tracks[evo_subs_focus.index];
 
-#if PP_BACKEND_ENABLED
     pp_product_overlay_leave();
-#endif
     screen = SCREEN_PLAYER;
 
     /*
@@ -6564,10 +6021,6 @@ double percentage = 0.0;
     }
     /* PROSPERO_STATS_V2_END */
 
-#if PP_BACKEND_ENABLED
-    if (g_k4_osd_publish)
-        pp_agc_osd_publish(fb, osd_visibility > 0);
-#endif
 }
 
 
@@ -10742,152 +10195,22 @@ static double prospero_scrub_target = 0.0;
 #define PROSPERO_SCRUB_AUTOCOMMIT_MS 450
 static long long prospero_scrub_last_move_ms = 0;
 
-#if PP_BACKEND_ENABLED
 /*
- * #32 scrub overlay state machine.
+ * The #32 scrub-overlay state machine used to live here.
  *
- * On the native-UHD present path (`pp_product_k4_live`) the render loop presents
- * the V8 4K plane directly and never composites `draw_player_screen`, and the
- * seek-discard window (`v8_hold`) skips the flip entirely - so a scrub or
- * chapter jump on 4K blanked the whole player screen (no video update, no scrub
- * bar, no OSD).
+ * It existed because the native-UHD present path put the V8 4K plane straight
+ * on screen and never composited draw_player_screen, so a scrub on 4K blanked
+ * the player: no video update, no scrub bar, no OSD. The workaround was to drop
+ * to a 1080 VideoOut for the duration of the scrub - which meant tearing the VO
+ * down while the decode thread was mid-convert, hence the ENTERING/ACTIVE/
+ * LEAVING states and the video_decode_parked handshake.
  *
- * Fix: run the scrub/seek under the 1080 overlay VO - exactly what Media Info,
- * the exit prompt and the subtitle picker do - where `draw_player_screen`
- * composites the OSD over a held frame.
- *
- * The catch: the VO reconfigure frees `pb->display`, and pp_playback's convert
- * (`pp_converter_to_display`) runs UNLOCKED on the decode thread. So the
- * reconfigure - both directions - must happen only while the decode thread is
- * parked (`video_decode_parked`). Both transitions are therefore deferred to
- * the render loop, which drives this:
- *
- *   NONE  --scrub/seek begins on k4_live-->  ENTERING
- *   ENTERING --decode parked-->  pp_product_overlay_enter(); ACTIVE
- *   ACTIVE --scrub committed / cancelled-->  LEAVING
- *   LEAVING --seek settled, decode re-parked-->  pp_product_overlay_leave()
- *          --4K VO live-->  restore player_paused; NONE
+ * GL-4 (#80) removed the premise. There is one surface, the video is a textured
+ * quad at its own resolution and the OSD composites over it in the same GL
+ * frame, at 4K exactly as at 1080. A scrub needs no surface change at all - and
+ * the discard window is covered instead by pp_playback's held-frame snapshot
+ * (Stage 2d), so the picture freezes on the last frame rather than tearing.
  */
-/* SCRUB_OVL_* enum + prospero_scrub_ovl_state are declared up near the other
- * playback-overlay state (stop_video_playback resets the state). */
-static int       prospero_scrub_ovl_was_playing = 0;   /* clock ran when scrub began   */
-static int       prospero_scrub_ovl_restore_paused = 0;/* player_paused to restore to   */
-static int       prospero_scrub_ovl_wait_seek = 0;     /* LEAVING: wait for a seek      */
-static uint64_t  prospero_scrub_ovl_seek_req = 0;
-static long long prospero_scrub_ovl_deadline_ms = 0;
-
-static int prospero_scrub_overlay_engaged(void)
-{
-    return prospero_scrub_ovl_state != SCRUB_OVL_NONE;
-}
-
-/* Arm the overlay for a k4_live scrub/chapter-jump. Call BEFORE the caller
- * forces player_paused = 1, so the pre-scrub pause state is captured and the
- * presentation clock is frozen (a cancel must not come back to a clock that
- * judges every frame late - the 0.1.3 Media Info freeze). */
-static void prospero_scrub_overlay_arm(void)
-{
-    if (prospero_scrub_ovl_state != SCRUB_OVL_NONE || !pp_product_k4_live(screen))
-        return;
-    /* #28: during normal playback the OSD composites straight onto the 4K
-     * plane (pp_agc_osd, decode thread). A committed seek stops the decode
-     * thread pushing frames, so the 1080 overlay VO is still used for scrub
-     * on the AGC path too - revisit once pp_playback presents a held frame
-     * during seek_discard. */
-    prospero_scrub_ovl_restore_paused = player_paused;
-    prospero_scrub_ovl_was_playing    = !player_paused;
-    if (prospero_scrub_ovl_was_playing) {
-        pp_playback_pause(&g_pp_pb);
-        g_osd_clock_paused = 1;
-    }
-    prospero_scrub_ovl_state = SCRUB_OVL_ENTERING;
-}
-
-/* Scrub committed a seek: hold the overlay until the discard window closes. */
-static void prospero_scrub_overlay_hold_for_seek(void)
-{
-    if (prospero_scrub_ovl_state == SCRUB_OVL_NONE)
-        return;
-    prospero_scrub_ovl_wait_seek    = 1;
-    prospero_scrub_ovl_seek_req     = g_pp_pb.stats.seek_requests;
-    prospero_scrub_ovl_deadline_ms  = now_ms() + 8000;
-    prospero_scrub_ovl_state        = SCRUB_OVL_LEAVING;
-}
-
-/* Scrub cancelled / seek not submitted: no seek to wait on. */
-static void prospero_scrub_overlay_release(void)
-{
-    if (prospero_scrub_ovl_state == SCRUB_OVL_NONE)
-        return;
-    prospero_scrub_ovl_wait_seek   = 0;
-    prospero_scrub_ovl_deadline_ms = now_ms();
-    prospero_scrub_ovl_state       = SCRUB_OVL_LEAVING;
-}
-
-/* Render-loop pump - one call per frame, before pp_product_apply_pending_vo(). */
-static void prospero_scrub_overlay_pump(void)
-{
-    switch (prospero_scrub_ovl_state) {
-    case SCRUB_OVL_NONE:
-    case SCRUB_OVL_ACTIVE:
-        return;
-
-    case SCRUB_OVL_ENTERING:
-        if (!pp_product_k4_live(screen)) {          /* left 4K before we entered */
-            prospero_scrub_ovl_state = SCRUB_OVL_NONE;
-            return;
-        }
-        if (!video_decode_parked)
-            return;                                  /* wait out the live convert */
-        pp_product_overlay_enter();                   /* race-free: decode parked  */
-        prospero_scrub_ovl_state = SCRUB_OVL_ACTIVE;
-        return;
-
-    case SCRUB_OVL_LEAVING: {
-        int seek_started = g_pp_pb.stats.seek_requests != prospero_scrub_ovl_seek_req;
-        int settled = !prospero_scrub_ovl_wait_seek ||
-                      (seek_started && !g_pp_pb.seek_discarding);
-
-        if (!settled && now_ms() < prospero_scrub_ovl_deadline_ms)
-            return;
-
-        /* Re-park the decode thread across the VO teardown. */
-        if (!player_paused) {
-            player_paused = 1;
-            pp_playback_pause(&g_pp_pb);
-        }
-        if (!video_decode_parked)
-            return;
-
-        if (g_vo_saved_valid) {                       /* overlay is up: hand it back */
-            pp_product_overlay_leave();               /* queues the 4K VO reconfig  */
-            return;                                   /* apply runs after us; recheck */
-        }
-        if (g_pending_vo_reconfig || !g_vo_decode_gate)
-            return;                                  /* wait for 4K VO to come live */
-
-        /* #73: a confirmed seek (prospero_scrub_ovl_wait_seek, set by
-         * prospero_scrub_overlay_hold_for_seek) always resumes playback -
-         * matches prospero_scrub_confirm's restore_paused=0 below the
-         * overlay. A cancel/release (prospero_scrub_overlay_release, no
-         * seek submitted) still restores exactly the state the overlay was
-         * armed with, so Circle continues to return to the pre-scrub
-         * position/state as-is. */
-        if (prospero_scrub_ovl_wait_seek) {
-            player_paused = 0;
-            pp_playback_resume(&g_pp_pb);
-        } else {
-            player_paused = prospero_scrub_ovl_restore_paused;
-            if (!player_paused && prospero_scrub_ovl_was_playing)
-                pp_playback_resume(&g_pp_pb);
-        }
-        g_osd_clock_paused = 0;
-        prospero_scrub_ovl_state = SCRUB_OVL_NONE;
-        return;
-    }
-    }
-}
-#endif
 
 static double prospero_player_position(void) {
     double position =
@@ -10942,12 +10265,15 @@ static void prospero_scrub_begin(void) {
     prospero_scrub_was_paused =
         player_paused;
 
-#if PP_BACKEND_ENABLED
-    /* Arm the 1080 overlay while player_paused still reflects the user's state
-     * (#32). The actual VO switch is deferred to the render loop, which waits
-     * for the decode thread to park first. */
-    prospero_scrub_overlay_arm();
-#endif
+    /*
+      * Freeze the presentation clock for the duration of the scrub. A cancel
+      * must not come back to a clock that judges every frame late - the 0.1.3
+      * Media Info freeze.
+      */
+    if (!player_paused) {
+        pp_playback_pause(&g_pp_pb);
+        g_osd_clock_paused = 1;
+    }
 
     player_paused = 1;
     prospero_scrub_active = 1;
@@ -11049,18 +10375,12 @@ static void prospero_scrub_cancel(void) {
     prospero_scrub_target =
         prospero_scrub_origin;
 
-#if PP_BACKEND_ENABLED
-    if (prospero_scrub_overlay_engaged()) {
-        /* Stay paused; the render-loop pump restores 4K + player_paused once
-         * the decode thread is parked and the VO is back. */
-        prospero_scrub_overlay_release();
-    } else {
-        player_paused = prospero_scrub_was_paused;
+    player_paused = prospero_scrub_was_paused;
+    if (g_osd_clock_paused) {
+        g_osd_clock_paused = 0;
+        if (!player_paused)
+            pp_playback_resume(&g_pp_pb);
     }
-#else
-    player_paused =
-        prospero_scrub_was_paused;
-#endif
 
     controls_last_used_ms = now_ms();
 }
@@ -11100,12 +10420,11 @@ static int prospero_scrub_confirm(void) {
         player_paused =
             restore_paused;
 
-#if PP_BACKEND_ENABLED
-        if (prospero_scrub_overlay_engaged()) {
-            player_paused = 1;              /* pump owns the un-pause */
-            prospero_scrub_overlay_release();
+        if (g_osd_clock_paused) {
+            g_osd_clock_paused = 0;
+            if (!player_paused)
+                pp_playback_resume(&g_pp_pb);
         }
-#endif
 
         toast(
             "SEEK",
@@ -11115,13 +10434,13 @@ static int prospero_scrub_confirm(void) {
         return 0;
     }
 
-#if PP_BACKEND_ENABLED
-    /* Seek submitted: hold the 1080 overlay (OSD over a held frame) until the
-     * discard window closes, then the render-loop pump re-parks the decode
-     * thread, restores the 4K surface and un-pauses. */
-    if (prospero_scrub_overlay_engaged())
-        prospero_scrub_overlay_hold_for_seek();
-#endif
+    /*
+     * Seek submitted. pp_playback froze the last decoded frame at
+     * notify_seek_begin, so the picture holds still under the scrub OSD until
+     * the discard window closes - no surface change, nothing to un-wind.
+     * prospero_request_inplace_seek already lifted the clock pause.
+     */
+    g_osd_clock_paused = 0;
 
     char time_text[32];
     char message[96];
@@ -11464,10 +10783,8 @@ static void prospero_playback_finished_update(
             g_vdec_force_ffmpeg = 1;
             requested_resume_seek_pos = (pos > 1.0) ? pos : 1.0;
             toast("PLAYBACK", "Switched to software decode");
-#if PP_BACKEND_ENABLED
             pp_stage_bc_checkpoint("016_VDEC_FFMPEG_FALLBACK",
                                    "native fatal -> ffmpeg retry");
-#endif
             start_video_playback(current_media_path);
             prospero_finish_candidate_ms = 0;
             return;
@@ -11476,16 +10793,7 @@ static void prospero_playback_finished_update(
         player_paused = 1;
         screen = SCREEN_PLAYBACK_FINISHED;
         controls_last_used_ms = now_ms();
-#if PP_BACKEND_ENABLED
-        g_4k_diag_active = 0;
-        g_4k_suppress_audio = 0;
-        g_4k_suppress_ui = 0;
-        if (g_vo_w != 1920u || g_vo_h != 1080u || g_pending_vo_reconfig) {
-            pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
-                                  WIDTH, HEIGHT);
-            pp_stage_bc_checkpoint("015_FINISH_UI_1080", "decode abort");
-        }
-#endif
+        pp_stage_bc_checkpoint("015_FINISH_UI", "decode abort");
         prospero_finish_candidate_ms = 0;
         return;
     }
@@ -11560,21 +10868,7 @@ static void prospero_playback_finished_update(
     controls_last_used_ms =
         current_ms;
 
-#if PP_BACKEND_ENABLED
-    /*
-     * Finished/menu UI is laid out for 1920x1080. If we stay on a 4K VO
-     * the card is drawn only in the top-left (looks "smashed") and can
-     * appear doubled with leftover video. Restore 1080 before next paint.
-     */
-    g_4k_diag_active = 0;
-    g_4k_suppress_audio = 0;
-    g_4k_suppress_ui = 0;
-    if (g_vo_w != 1920u || g_vo_h != 1080u || g_pending_vo_reconfig) {
-        pp_product_request_vo(1920, 1080, 2, PP_BACKEND_1080_STANDARD,
-                              WIDTH, HEIGHT);
-        pp_stage_bc_checkpoint("015_FINISH_UI_1080", "restore VO for end screen");
-    }
-#endif
+    pp_stage_bc_checkpoint("015_FINISH_UI", "end screen");
 }
 
 
@@ -11924,21 +11218,18 @@ static void prospero_playback_finished_back(
 static void evo_vo_trace(const char *tag)
 {
     evo_boot_log(
-        "vo %8lld %-14s screen=%2d backend=%d vo=%ux%u pv=%ux%u ready=%d "
-        "pending=%d k4live=%d pb_active=%d has_disp=%d paused=%d "
-        "diag=%d supUI=%d | conv=%llu pub=%llu decf=%d vpkt=%d gate=%d "
+        "vo %8lld %-14s screen=%2d pb_active=%d has_disp=%d paused=%d "
+        "seekdisc=%d | conv=%llu pub=%llu decf=%d vpkt=%d "
         "dfps=%d rfps=%d aclk=%.2f vclk=%.2f | sub_en=%d sub_auto=%d "
         "sub_emb=%d sub_cues=%d sub_ext=%d sub_useext=%d "
         "| sdemux=%d sent=%d sblank=%d sadd=%d scid=%d srip=%d",
-        now_ms(), tag, screen, (int)g_pp_backend,
-        g_vo_w, g_vo_h, g_pp_vo.width, g_pp_vo.height, g_pp_vo_ready,
-        g_pending_vo_reconfig, pp_product_k4_live(screen),
+        now_ms(), tag, screen,
         g_pp_pb.active, pp_playback_has_display(&g_pp_pb),
-        player_paused, g_4k_diag_active, g_4k_suppress_ui,
+        player_paused, g_pp_pb.seek_discarding,
         (unsigned long long)g_pp_pb.stats.frames_converted,
         (unsigned long long)g_pp_pb.stats.frames_published,
         dbg_video_frames, dbg_video_packets,
-        g_vo_decode_gate, perf_decode_fps, perf_render_fps,
+        perf_decode_fps, perf_render_fps,
         (double)audio_clock_seconds, evo_pb_video_clock_s(),
         prospero_subtitle_enabled, prospero_auto_subtitles_enabled,
         prospero_embedded_subtitle_stream_index,
@@ -12169,17 +11460,14 @@ int main(void) {
      * returning 0 on host + payload. */
     evo_vdec_probe();
 #if defined(EVO_APP_MODULE)
-    /* #27 GPU Step 2: arm the sceAgc NV12 convert + present path. DEFAULT-ON
-     * as of 2026-09-04 - the 2026-09-03 submit hang was fixed in #27 (watchdog
-     * worker + linear VO attr + V8-gate reachability + AGC-death retile) and
-     * re-verified on hardware: GTA 4K decodes + GPU-presents 675 frames
-     * fatal=0, ~1 ms/frame, 0 drops. On any sceAgc init/link failure
-     * pp_agc_available() stays 0 and the V8 4K path falls back to the CPU
-     * converter (YUV420P, #31-proven); a mid-session AGC wedge/fault re-tiles
-     * the VO and resumes on the CPU path. The OSD-over-4K composite and the
-     * GPU menu geometry stay behind their own /mnt/usb0/evo_agc_* hooks.
-     * MUST be pre-unjail (like evo_vdec_probe - libSceAgc may go API-dead after
-     * the credential swap). */
+    /*
+     * The graphics stack has to come up HERE, in the pre-unjail slot next to
+     * evo_vdec_probe: libSceAgc* / libSceVideoOut go API-dead after the
+     * credential swap, so nothing below can lazily initialise them on first
+     * draw. This slot used to hold pp_agc_init (#27's sceAgc present path);
+     * since GL-3/GL-4 ps5-opengl owns sceAgc and sceVideoOut for the whole
+     * session and there is exactly one thing to bring up.
+     */
 #if defined(EVO_GL_SMOKE)
     /* #77 / render-overhaul GL-1 go/no-go: prove ps5-opengl (Mesa + PS5 Gallium
      * + patched PSBC) renders on FW 12.70. A --gl-smoke build is a dedicated
@@ -12203,14 +11491,10 @@ int main(void) {
         for (;;) { evo_boot_log_flush(); sleep(30); }
     }
 #endif
-#if defined(EVO_GL_DEVICE)
-    /* render-overhaul GL-3 (#79): ps5-opengl owns sceAgc + sceVideoOut for the
-     * whole session. Bring the device GL context up here - the same pre-unjail
-     * slot pp_agc_init used - INSTEAD of pp_agc_init and the normal PP_BACKEND
-     * present path (a second sceVideoOut open panics the console). GL cannot be
-     * lazily initialised on first draw (libSceAgc* / libSceVideoOut go API-dead
-     * after the credential swap). B1 proved the cutover (teal clear + swap); B2
-     * renders every non-player RmlUi screen through this context to fb 0. */
+    /* render-overhaul GL-3/GL-4 (#79/#80): the session's one graphics context.
+     * A second sceVideoOut open panics the console, so nothing else may open
+     * one. B1 proved the cutover (teal clear + swap); B2 put every non-player
+     * RmlUi screen through it; B3/GL-4 put the video on it as a YUV quad. */
     {
         evo_bt("GL-3: device GL context");
         int glok = evo_gl_context_create(1920, 1080);
@@ -12220,16 +11504,13 @@ int main(void) {
         if (glok) {
             evo_gl_frame_begin();
             evo_gl_context_present();
+            evo_gl_warm();   /* compile all shaders now, not in the frame loop */
         }
         /* GL-4 (#80): the player frame goes up as NV12 (R8+RG8) + a YUV->RGB
          * shader instead of a CPU-converted RGBA8 blit (the ~65 ms/frame
          * staging wall). gl_video is armed after pp_playback_init below (init
          * memsets the struct); the present block then calls evo_gl_blit_yuv. */
     }
-#endif
-#if !defined(EVO_GL_DEVICE)
-    pp_agc_init(1920, 1080, 0);
-#endif
     evo_boot_log_flush();
 #endif  /* EVO_APP_MODULE */
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */
@@ -12238,7 +11519,6 @@ int main(void) {
     av_log_set_level(AV_LOG_ERROR);
     av_log_set_callback(evo_av_log_cb);
 #endif
-#if defined(EVO_GL_DEVICE)
     /* GL-3 (#79): ps5-opengl's runtime sets up JIT / executable memory for the
      * Mesa shader compiler. That flips FFmpeg swscale's legacy MMX path from
      * "exec-alloc fails, use C" to "exec-alloc succeeds, then memcpy the MMX
@@ -12248,7 +11528,6 @@ int main(void) {
      * only thumbnails / poster extraction and is on its way out in GL-4/GL-5. */
     av_force_cpu_flags(0);
     evo_bt("GL-3: FFmpeg CPU flags forced to 0 (swscale XO-violation guard)");
-#endif
     /* Initialize the 2MB-aligned Direct Memory Region. Sized (#6) for the 4K
      * CPU video working set so the rotate ring / pp_playback display / VO
      * linear staging come from this fixed slab instead of churning the heap. */
@@ -12322,64 +11601,17 @@ int main(void) {
     uint32_t lastButtons = 0;
     bool running = true;
 
-#if PP_BACKEND_ENABLED
     uint32_t *linear = NULL;
-    uint32_t pp_buf_idx = 0;
-    uint32_t pp_pitch = 0;
-    (void)pp_buf_idx; (void)pp_pitch;
-    memset(&g_pp_vo, 0, sizeof(g_pp_vo));
     pp_playback_init(&g_pp_pb);
-#if defined(EVO_GL_DEVICE)
-    /* GL-4 (#80): NV12 video quad path — set after init (init memsets pb).
-     * Ask the native decoder for NV12 straight (no I420 de-interleave — the
-     * GL shader samples NV12). */
-    pp_playback_set_gl_video(&g_pp_pb, 1);
-    evo_vdec_prefer_nv12(1);
-#endif
-#if !defined(EVO_GL_DEVICE)
-    if (pp_videoout_init(&g_pp_vo, WIDTH, HEIGHT, PP_PIXEL_BGRA32_TILED, 2) != 0) {
-        toast("VIDEOOUT", "pp_videoout_init failed");
-        evo_bt("pp_videoout_init FAILED step=%d rc=%d (10=Open 11=AllocDmem "
-               "12=MapDmem 14=RegBuf2 15=malloc) -> exit(1)",
-               pp_videoout_last_step, pp_videoout_last_rc);
-        return 1;
-    }
-    g_pp_vo_ready = 1;
-    pp_playback_attach_videoout(&g_pp_pb, &g_pp_vo);
     pp_playback_set_output(&g_pp_pb, WIDTH, HEIGHT, PP_ASPECT_FIT);
-#else
-    /* GL-3 (#79) B2: ps5-opengl owns the flip queue - no pp_videoout. RmlUi
-     * renders straight to the GL default framebuffer; this scratch only absorbs
-     * the immediate-mode overlays (virtual keyboard, FPS overlay) that GL-5
-     * moves onto GL, so they don't crash on a NULL fb. */
+    /* GL-4 (#80): ask the native decoder for NV12 straight - no I420
+     * de-interleave, the video shader samples NV12. */
+    evo_vdec_prefer_nv12(1);
+    /* ps5-opengl owns the flip queue - there is no VideoOut plane to draw into.
+     * Every screen except the video quad rasterises into this scratch, which is
+     * then uploaded as one texture (menus) or composited over the video (the
+     * player OSD and the modal panels). */
     uint32_t *gl_scratch = calloc((size_t)WIDTH * (size_t)HEIGHT, 4);
-#endif
-#else
-    int handle = sceVideoOutOpen(0xff, 0, 0, NULL);
-    size_t memsize = 0x2000000;
-    intptr_t paddr = 0;
-    void* vaddr = NULL;
-
-    sceKernelAllocateMainDirectMemory(memsize, 0x20000, 3, &paddr);
-    sceKernelMapDirectMemory(&vaddr, memsize, 0x33, 0, paddr, 0x20000);
-
-    PS5_VideoBuf vbuf[2];
-    memset(vbuf, 0, sizeof(vbuf));
-    vbuf[0].data = vaddr;
-    vbuf[1].data = (void*)((uintptr_t)vaddr + memsize / 2);
-
-    uint32_t *linear = malloc(WIDTH * HEIGHT * 4);
-
-    struct kevent* queue = NULL;
-    sceKernelCreateEqueue(&queue, "menu flip queue");
-    sceVideoOutAddFlipEvent(queue, handle, NULL);
-    sceVideoOutSetFlipRate(handle, 0);
-
-    PS5_VideoAttr attr;
-    memset(&attr, 0, sizeof(attr));
-    sceVideoOutSetBufferAttribute2(&attr, 0x8000000022000000UL, 0, WIDTH, HEIGHT, 0, 0, 0);
-    sceVideoOutRegisterBuffers2(handle, 0, 0, vbuf, 2, &attr, 0, NULL);
-#endif
 
     evo_bt("boot ok - frame loop");
     for (int frame = 0; running; frame++) {
@@ -12388,126 +11620,9 @@ int main(void) {
         if ((frame & 63) == 0)
             evo_boot_log_flush();   /* cheap no-op once drained; catches a late sandbox open */
 
-#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
-        /* #32: drive the scrub-overlay state machine (may queue a VO reconfig
-         * once the decode thread has parked). Before apply so it lands now. */
-        prospero_scrub_overlay_pump();
-
-        /* #28 Phase 2: on the sceAgc 4K present path, render the player OSD
-         * into a 1920x1080 scratch and publish it - the decode thread
-         * composites it over the 4K plane in the same DCB (no 1080 VO drop).
-         * Runs every loop iteration because AGC frames present off the decode
-         * thread and never set `linear` here. */
-        if (screen == SCREEN_PLAYER && pp_product_k4_live(screen) &&
-            pp_agc_available() && pp_agc_osd_enabled()) {
-            static uint64_t s_k4_osd_last_us;
-            struct timespec s_now;
-            clock_gettime(CLOCK_MONOTONIC, &s_now);
-            uint64_t now_us = (uint64_t)s_now.tv_sec * 1000000ull + s_now.tv_nsec / 1000ull;
-            if (now_us - s_k4_osd_last_us >= 33000ull) {   /* cap the OSD re-render at ~30 Hz */
-                s_k4_osd_last_us = now_us;
-                if (!g_k4_osd_scratch)
-                    g_k4_osd_scratch = calloc((size_t)WIDTH * HEIGHT, 4);
-                if (g_k4_osd_scratch) {
-                    g_k4_osd_publish = 1;
-                    draw_player_screen(g_k4_osd_scratch);
-                    g_k4_osd_publish = 0;
-                }
-            }
-        }
-
-        /*
-         * #27: the sceAgc GPU present died mid-clip (fault / wedge / test hook)
-         * and the decode thread hit a CPU-path frame while the VO is still
-         * linear-registered. Re-register the VO tiled at the same size so the
-         * CPU converter path is correct from here.
-         */
-        if (pp_playback_take_vo_retile_req(&g_pp_pb) &&
-            pp_videoout_is_linear(&g_pp_vo) &&
-            g_pp_vo_ready && g_vo_w >= 3200u) {
-            pp_product_request_vo(g_vo_w, g_vo_h, g_pp_vo.buffer_count,
-                                  g_pp_backend, g_vo_w, g_vo_h);
-            pp_stage_bc_checkpoint("013_AGC_VO_RETILE", "linear -> tiled, cpu path");
-        }
-
-        /* Safe point: no buffer held — apply deferred 4K/1080 VO reconfig */
-        pp_product_apply_pending_vo();
-
-        /*
-         * HARD UI RULE: non-player screens only draw on a live 1080 VO.
-         * Skip the frame until restore succeeds (never 1080 UI into 4K plane).
-         */
-        if (screen != SCREEN_PLAYER) {
-            if (!pp_product_ensure_ui_1080()) {
-                usleep(3000);
-                continue;
-            }
-        } else if (!pp_product_k4_live(screen) &&
-                   (g_vo_w != 1920u || g_vo_h != 1080u)) {
-            if (!pp_product_ensure_ui_1080()) {
-                usleep(3000);
-                continue;
-            }
-        }
-
-        int idx = 0;
-        uint32_t v8_idx = 0;
-        uint64_t v8_fid = 0;
-        int v8_presented = 0;
-
-        /*
-         * V8 4K path only when live VO is actually 3840x2160 (k4_live).
-         */
-#if PP_4K_V8_PRODUCT_ENABLE
-        int v8_hold = 0;
-        if (pp_product_k4_live(screen) &&
-            g_pp_backend == PP_BACKEND_4K_V8_FUSED) {
-            if (pp_playback_take_pending_present(&g_pp_pb, &v8_idx, &v8_fid)) {
-                if (pp_videoout_present_pre_tiled(&g_pp_vo, v8_idx, v8_fid) == 0) {
-                    static int s_v8_first_present;
-                    if (!s_v8_first_present) {
-                        pp_stage_bc_checkpoint("012_FIRST_FRAME_PRESENTED",
-                                              "v8 pre_tiled");
-                        s_v8_first_present = 1;
-                    }
-                    v8_presented = 1;
-                }
-            } else {
-                v8_hold = 1;
-                linear = NULL;
-            }
-        }
-#else
-        int v8_hold = 0;
-        (void)v8_idx;
-        (void)v8_fid;
-#endif
-
-        if (!v8_presented && !v8_hold) {
-            if (screen != SCREEN_PLAYER || !pp_product_k4_live(screen)) {
-                if (g_vo_w != 1920u || g_vo_h != 1080u ||
-                    !g_pp_vo_ready || g_pp_vo.width != 1920u ||
-                    g_pp_vo.height != 1080u) {
-                    usleep(2000);
-                    continue;
-                }
-            }
-            linear = (uint32_t *)pp_videoout_acquire(&g_pp_vo, &pp_buf_idx, &pp_pitch);
-            if (!linear) {
-                usleep(500);
-                continue;
-            }
-            if (screen == SCREEN_PLAYER) {
-                memset(linear, 0, (size_t)g_vo_w * (size_t)g_vo_h * 4u);
-            }
-        } else if (v8_presented) {
-            linear = NULL;
-        }
-#elif defined(EVO_GL_DEVICE)
         /* GL-3 (#79) B2: no VO acquire. The dispatch always runs (its update
          * calls set the UI-dirty flag from this frame's input); it only
          * *renders* on a redraw frame. gl_active decided once here. */
-        int idx = 0; (void)idx;
         /* B3: the player screen always redraws (the video frame changes every
          * tick); menus are change-gated. */
         int gl_active = (screen == SCREEN_PLAYER) || evo_rmlui_gl_needs_frame();
@@ -12517,12 +11632,8 @@ int main(void) {
         linear = gl_scratch;
         /* GL-4: the NV12 player path never touches gl_scratch — skip the 8 MB
          * clear. Music (audio-only) and every other screen still rasterise. */
-        if (gl_active && gl_scratch &&
-            !(screen == SCREEN_PLAYER && g_pp_pb.gl_video && !prospero_music_mode))
+        if (gl_active && gl_scratch && !gl_video_quad_screen(screen))
             memset(gl_scratch, 0, (size_t)WIDTH * (size_t)HEIGHT * 4u);
-#else
-        int idx = frame % 2;
-#endif
 
         memset(&padData, 0, sizeof(padData));
 
@@ -12626,19 +11737,12 @@ int main(void) {
             }
 
             if (pressed & PS5_PAD_BUTTON_SQUARE) {
-                if (screen == 2 && !prospero_scrub_active
-#if PP_BACKEND_ENABLED
-                    && !prospero_scrub_overlay_engaged()
-#endif
-                   ) {
-                    /* Media Info is a 1080 panel over the video: leave the 4K
-                     * surface and hold the clock, remembering both. Suppressed
-                     * mid-scrub - the scrub already owns the 1080 overlay's
-                     * saved-VO slot (#32), and nesting a second enter/leave
-                     * pair over it would strand the restore. */
-#if PP_BACKEND_ENABLED
+                if (screen == 2 && !prospero_scrub_active) {
+                    /* Media Info covers the video with an opaque panel: hold
+                     * the presentation clock so it does not come back judging
+                     * every frame late. Suppressed mid-scrub, which owns the
+                     * clock pause itself. */
                     pp_product_overlay_enter();
-#endif
                     screen = SCREEN_MEDIA_INFO;
                 } else if (screen == SCREEN_SUBTITLE_PICKER) {
                     evo_subs_cycle_size();
@@ -12695,9 +11799,7 @@ int main(void) {
                     video_view_mode++;
                     if (video_view_mode > 2)
                         video_view_mode = 0;
-#if PP_BACKEND_ENABLED
                     prospero_apply_view_mode();
-#endif
                     if (video_view_mode == 0)
                         toast("VIEW MODE", "FIT");
                     else if (video_view_mode == 1)
@@ -12953,9 +12055,7 @@ int main(void) {
                 screen == SCREEN_SUBTITLE_PICKER &&
                 (pressed & PS5_PAD_BUTTON_CIRCLE)
             ) {
-#if PP_BACKEND_ENABLED
                 pp_product_overlay_leave();
-#endif
                 screen = SCREEN_PLAYER;
                 controls_last_used_ms = now_ms();
                 prompt_button_handled = 1;
@@ -12986,11 +12086,9 @@ int main(void) {
                 ((pressed & PS5_PAD_BUTTON_CIRCLE) ||
                  ((pressed & PS5_PAD_BUTTON_CROSS) && g_exit_confirm_focus == 0))
             ) {
-#if PP_BACKEND_ENABLED
                 /* Re-base the clock and put a 4K surface back before the
                  * decode thread wakes up. */
                 pp_product_overlay_leave();
-#endif
                 screen = SCREEN_PLAYER;
                 controls_last_used_ms = now_ms();
                 evo_feedback(EVO_FB_CANCEL);
@@ -13158,12 +12256,10 @@ int main(void) {
                     }
                 } else if (screen == 2) {
                     player_paused = !player_paused;
-#if PP_BACKEND_ENABLED
                     if (player_paused)
                         pp_playback_pause(&g_pp_pb);
                     else
                         pp_playback_resume(&g_pp_pb);
-#endif
                     controls_last_used_ms = now_ms();
                     toast("PLAYBACK", player_paused ? "Paused" : "Playing");
                 } else if (screen == 1) {
@@ -13218,9 +12314,7 @@ int main(void) {
                 } else if (screen == SCREEN_EMBY_BROWSE) {
                     evo_emby_browse_back();
                 } else if (screen == SCREEN_MEDIA_INFO) {
-#if PP_BACKEND_ENABLED
                     pp_product_overlay_leave();
-#endif
                     screen = 2;
                 } else if (screen == 3) {
                     screen = 1;
@@ -13235,7 +12329,6 @@ int main(void) {
                      * Where it returns to is decided when the prompt is
                      * accepted, not here - see SCREEN_EXIT_CONFIRM above.
                      */
-#if PP_BACKEND_ENABLED
                     /*
                      * Same overlay treatment Media Info gets, and for the same
                      * reason: leaving `screen` off SCREEN_PLAYER already
@@ -13246,7 +12339,6 @@ int main(void) {
                      * would have come straight back here.
                      */
                     pp_product_overlay_enter();
-#endif
                     screen = SCREEN_EXIT_CONFIRM;
                     g_exit_confirm_focus = 1;   /* #65: default focus = STOP */
                     controls_last_used_ms = now_ms();
@@ -13299,63 +12391,23 @@ skip_screen_input:
         }
 #endif
 
-#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
-        /*
-         * After stop / leave-player while VO is still 4K: do not draw 1080 UI
-         * into the 4K plane (one-frame stacked flash). Drop the buffer; next
-         * frame top-of-loop applies 1080 and redraws cleanly.
-         */
-        if (linear && screen != SCREEN_PLAYER &&
-            (g_vo_w != 1920u || g_vo_h != 1080u || g_pending_vo_reconfig)) {
-            pp_videoout_release(&g_pp_vo, pp_buf_idx);
-            linear = NULL;
-            v8_hold = 1;
-        }
-#endif
 
 
-#if defined(EVO_GL_DEVICE)
         uint64_t _gl_disp_t0 = gl_active ? (uint64_t)now_ms() : 0;
-#endif
-        /* V8 direct present: video already on screen; skip UI composite this frame. */
         if (linear) {
-        if (screen == 2 && pp_product_k4_live(screen)) {
-            /*
-             * Native UHD VO: draw_player_screen is 1080-only and would only
-             * paint the top-left of a 4K buffer (choppy/wrong). Copy full VO
-             * plane from the convert path (V3 letterbox or full).
-             */
-            if (g_pp_pb.active && pp_playback_has_display(&g_pp_pb)) {
-                (void)pp_playback_copy_display(
-                    &g_pp_pb, linear, g_vo_w * 4u, g_vo_w, g_vo_h);
-            }
-            {
-                static int s_noui_bc;
-                if (!s_noui_bc) {
-                    pp_stage_bc_checkpoint("012B_UHD_FULL_PLANE_PRESENT",
-                                          pp_4k_stage_name(PP_4K_PRODUCT_STAGE));
-                    s_noui_bc = 1;
-                }
-            }
-        } else if (screen == 2 && g_4k_diag_active && g_4k_suppress_ui) {
-            if (g_pp_pb.active && pp_playback_has_display(&g_pp_pb)) {
-                (void)pp_playback_copy_display(
-                    &g_pp_pb, linear, g_vo_w * 4u, g_vo_w, g_vo_h);
-            }
-        } else if (screen == 0)
+        if (screen == 0)
             draw_menu_linear(linear);
         else if (screen == 1)
             draw_usb_browser(linear);
         else if (screen == 2)
-#if defined(EVO_GL_DEVICE)
-            /* GL-4: video-only screens present the frame as an NV12 quad in the
-             * present block below — no CPU rasterise into gl_scratch. Music
-             * (audio-only) has no video plane, so it still draws here. The OSD
-             * returns in GL-4 Stage 2c. */
-            { if (!g_pp_pb.gl_video || prospero_music_mode) draw_player_screen(linear); }
-#else
-            draw_player_screen(linear);
-#endif
+            /*
+             * GL-4 (#80): the frame itself goes up as the video quad in the
+             * present block below, so nothing is rasterised here. The OSD is
+             * drawn there too, into a transparent scratch, and only when it is
+             * actually visible. Music (audio-only) has no video plane and still
+             * draws its visualiser the ordinary way.
+             */
+            { if (prospero_music_mode) draw_player_screen(linear); }
         else if (screen == 3)
             draw_image_screen(linear);
         else if (screen == 4)
@@ -13401,6 +12453,7 @@ skip_screen_input:
              * new track has to do is catch up, and pausing around a screen
              * change is exactly what desynced the presentation clock in the
              * media-info freeze.
+             *
              */
             draw_player_screen(linear);
             draw_subtitle_picker(linear);
@@ -13413,37 +12466,20 @@ skip_screen_input:
             draw_exit_confirm_screen(linear);
         }
         else if (screen == SCREEN_PLAYBACK_FINISHED) {
-#if defined(EVO_GL_DEVICE)
             draw_playback_finished_screen(linear);   /* no VO to wait on */
-#else
-            /* Wait one frame if 1080 restore still pending */
-            if (g_vo_w == 1920u && g_vo_h == 1080u)
-                draw_playback_finished_screen(linear);
-            else {
-                /* fill black until VO is 1080 */
-                size_t n = (size_t)g_vo_w * (size_t)g_vo_h;
-                for (size_t i = 0; i < n; i++)
-                    linear[i] = 0xFF000000u;
-            }
-#endif
         }
         else
             draw_menu_linear(linear);
 
-#if defined(EVO_GL_DEVICE)
         uint64_t _gl_scr_ms = (screen == SCREEN_PLAYER)
                               ? (uint64_t)now_ms() - _gl_disp_t0 : 0;
-#endif
         /* Virtual Keyboard modal overlay */
         if (evo_keyboard_is_open())
             evo_screen_keyboard(linear);
 
-        /* Toasts only when UI allowed (or menus); stage 1-3 video-only skips toast draw */
-        if (!(screen == 2 && g_4k_diag_active && g_4k_suppress_ui))
-            draw_prospero_toast(linear);
+        draw_prospero_toast(linear);
 
         draw_fps_overlay(linear);
-#if defined(EVO_GL_DEVICE)
         if (screen == SCREEN_PLAYER) {
             static uint64_t s_pf_t0, s_pf_n, s_pf_scr, s_pf_ovl;
             uint64_t _now2 = (uint64_t)now_ms();
@@ -13460,7 +12496,6 @@ skip_screen_input:
                 s_pf_t0 = _now2; s_pf_n = s_pf_scr = s_pf_ovl = 0;
             }
         }
-#endif
 
         /* EVO: screenshot. Taken here, after everything has been drawn into
          * the linear staging buffer but before it is swizzled and flipped,
@@ -13483,15 +12518,11 @@ skip_screen_input:
 
         if (evo_screenshot_request) {
             evo_screenshot_request = 0;
-#if defined(EVO_GL_DEVICE)
             /* Mode A: gl_scratch already holds the composited frame. Mode B:
              * RmlUi rendered to fb 0 - read it back. */
             if (linear && !evo_rmlui_gl_blit_mode())
                 evo_gl_read_default_fb(linear, (int)WIDTH, (int)HEIGHT);
             int shot_rc = evo_screenshot_write(linear, (int)WIDTH, (int)HEIGHT);
-#else
-            int shot_rc = evo_screenshot_write(linear, (int)g_vo_w, (int)g_vo_h);
-#endif
             if (shot_rc == 0)
                 toast("SCREENSHOT", "SAVED TO USB");
             else
@@ -13499,88 +12530,66 @@ skip_screen_input:
         }
         } /* if (linear) */
 
-#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
-        (void)idx;
-        if (!v8_presented && !v8_hold) {
-            int ui_presented = 0;
-            /* #28 Phase 4: GPU geometry present - the solid geometry stream
-             * (rounded rects, gradients, borders) was diverted to the GPU sink
-             * during this frame's cached render; submit it as one DCB + flip.
-             * On rc == 1 (nothing batched) or rc == -1 (failed) fall through to
-             * the Phase 3 / CPU paths below. (opt-in: /mnt/usb0/evo_agc_ui) */
-            if (linear && evo_rmlui_agc_geo_active() && g_pp_vo_ready &&
-                pp_videoout_is_linear(&g_pp_vo)) {
-                void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
-                int64_t m = (int64_t)frame + 1;
-                int rc = evo_rmlui_agc_geo_present(g_pp_vo.handle, pp_buf_idx, plane, 1,
-                                                   g_vo_w, g_vo_h, m);
-                if (rc == 0 || rc == -2) {
-                    (void)pp_videoout_adopt_flip(&g_pp_vo, pp_buf_idx, (uint64_t)m);
-                    ui_presented = 1;
-                }
-            }
-            /* #28 Phase 3: GPU menu present - convert the CPU-drawn menu buffer
-             * to NV12 and present it as the fullscreen quad on the linear VO
-             * (opt-in: /mnt/usb0/evo_agc_ui). The CPU tiler must not touch a
-             * linear plane. */
-            if (!ui_presented && linear && pp_agc_ui_ready() && g_pp_vo_ready &&
-                pp_videoout_is_linear(&g_pp_vo)) {
-                void *plane = pp_videoout_gpu_plane(&g_pp_vo, pp_buf_idx);
-                int64_t m = (int64_t)frame + 1;
-                int rc = pp_agc_present_ui(g_pp_vo.handle, pp_buf_idx, plane, linear,
-                                           (uint32_t)WIDTH, (uint32_t)HEIGHT,
-                                           g_vo_w, g_vo_h, m);
-                if (rc == 0 || rc == -2) {
-                    (void)pp_videoout_adopt_flip(&g_pp_vo, pp_buf_idx, (uint64_t)m);
-                    ui_presented = 1;
-                } else {
-                    pp_videoout_release(&g_pp_vo, pp_buf_idx);
-                    ui_presented = 1;   /* buffer handled; drop this frame */
-                }
-            }
-            if (!ui_presented &&
-                pp_videoout_present(&g_pp_vo, pp_buf_idx, (uint64_t)frame) != 0) {
-                /* present failed; buffer already released by backend */
-            }
-        } else if (v8_hold) {
-            /* Light sleep so we don't spin at kHz while holding last V8 frame */
-            usleep(2000);
-        }
-#elif defined(EVO_GL_DEVICE)
-        /* GL-3 (#79): present through the GL blit quad. Menus are change-gated
-         * (gl_active only on a UI change / overlay / warm-up); the player draws
-         * every tick but only *swaps* on a new decoded frame (the A/V clock in
-         * pp_playback paces publication) or an OSD change. */
+        /* GL-3/GL-4 (#79/#80): present through GL. Menus are change-gated
+         * (gl_active only on a UI change / overlay / warm-up); the video screens
+         * draw every tick but only *swap* on a newly published frame (the A/V
+         * clock in pp_playback paces publication) or a changed overlay. */
         if (gl_active) {
             int _swap = 1;
-            int _nv12 = (screen == SCREEN_PLAYER && g_pp_pb.gl_video &&
-                         !prospero_music_mode);
-            if (screen == SCREEN_PLAYER) {
-                static int64_t s_last_pts;
-                int64_t pts = g_pp_pb.display_pts_us;
-                _swap = (pts != s_last_pts) || evo_rmlui_gl_consume_drew();
-                s_last_pts = pts;
-            }
+            int _video = gl_video_quad_screen(screen);
             uint64_t _b0 = (uint64_t)now_ms();
-            if (_nv12) {
-                /* GL-4 (#80): zero-copy video quad — the decoder's YUV planes
-                 * go straight to R8/RG8 textures + a YUV->RGB shader. The OSD
-                 * (Stage 2c) rasterises into gl_scratch (~2 ms) and composites
-                 * on top; its slow RGBA8 upload is gated on a sample-hash so a
-                 * static OSD costs only the composite draw. */
+            if (_video) {
+                /*
+                 * Zero-copy video quad — the decoder's YUV planes go straight to
+                 * R8/RG8 textures and a YUV->RGB shader converts on the quad.
+                 * The OSD rasterises into a transparent gl_scratch and is
+                 * alpha-composited on top; that upload is RGBA8 and therefore
+                 * slow, so it is gated on a sample hash - a static OSD costs
+                 * only the composite draw.
+                 */
                 pp_gl_nv12_frame _f;
                 int _have = (pp_playback_get_nv12(&g_pp_pb, &_f) && _f.ready);
 
+                static int64_t s_last_pts;
+                int _new_frame = (g_pp_pb.display_pts_us != s_last_pts);
+                s_last_pts = g_pp_pb.display_pts_us;
+
                 long long _nowms = now_ms();
+                /*
+                 * Is there anything on the OSD scratch worth compositing over
+                 * the video quad this frame?
+                 *
+                 *  - the playback controls (shown 4.2 s after any input, or
+                 *    while paused / scrubbing / stats-open);
+                 *  - Stage 2d: the whole seek-discard window, so the scrub bar
+                 *    sits over pp_playback's frozen last-frame snapshot
+                 *    (_f.held) rather than over recycled decoder memory;
+                 *  - SUBTITLES — draw_player_screen() rasterises them onto the
+                 *    same scratch, and they must stay on screen with the
+                 *    controls hidden (this is why "no subs 4 s after the last
+                 *    button press" was a GL-4 regression);
+                 *  - a toast, or the dev FPS overlay.
+                 */
+                int _subs_live = prospero_subtitle_enabled &&
+                                 (prospero_subtitle_count > 0 ||
+                                  prospero_embedded_subtitle_count > 0);
                 int _osd_active = player_paused || prospero_scrub_active ||
-                                  show_stats_for_nerds || prospero_music_mode ||
+                                  show_stats_for_nerds || g_pp_pb.seek_discarding ||
+                                  _subs_live || evo_toast_visible() ||
+                                  show_debug_overlay ||
                                   (_nowms - controls_last_used_ms < 4200);
                 static int _osd_was;
                 int _osd_changed = 0;
                 if (_osd_active || _osd_was) {
                     g_k4_osd_publish = 1;
-                    draw_player_screen(gl_scratch);   /* transparent bg + OSD only */
+                    draw_player_screen(gl_scratch);   /* transparent bg + OSD + subtitles */
                     g_k4_osd_publish = 0;
+                    /* Redraw these onto the scratch AFTER draw_player_screen's
+                     * memset — the dispatch drew them earlier in the frame but
+                     * that clear wiped them. Cheap: no-ops unless a toast is up
+                     * / the dev overlay is on. */
+                    draw_prospero_toast(gl_scratch);
+                    draw_fps_overlay(gl_scratch);
                     uint32_t _h = 2166136261u;
                     size_t _n = (size_t)WIDTH * (size_t)HEIGHT;
                     for (size_t _i = 0; _i < _n; _i += 37u)
@@ -13591,7 +12600,8 @@ skip_screen_input:
                 }
                 _osd_was = _osd_active;
 
-                int _present = (_swap && _have) || _osd_changed;
+                int _present = (_new_frame && _have) || _osd_changed ||
+                               evo_rmlui_gl_consume_drew();
                 if (_present && _have) {
                     evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
@@ -13643,13 +12653,11 @@ skip_screen_input:
                 evo_boot_log_flush();
                 s_hb_t0 = _now; s_hb_iters = 0; s_hb_redraws = 0;
             }
+            /* evo_bt compiles to nothing outside the app module; keep the
+             * counters "used" so -Wall stays quiet in the ELF compile check. */
+            (void)s_hb_iters; (void)s_hb_redraws;
         }
         usleep(screen == SCREEN_PLAYER ? 3000 : 2000);
-#else
-        PS5_DrawPixelsAsTiles(linear, (uint32_t*)vbuf[idx].data, WIDTH, HEIGHT);
-
-        sceVideoOutSubmitFlip(handle, idx, 1, frame);
-#endif
 
         perf_render_frames++;
         {
@@ -13669,26 +12677,17 @@ skip_screen_input:
             }
         }
         /*
-         * UI menus are synchronized to hardware VSYNC via pp_videoout_acquire /
-         * sceVideoOutSubmitFlip at 60 Hz. Do not add artificial multi-millisecond
-         * sleeps in menu mode, which causes missed VSYNC deadlines and frame drops.
+         * Menus are change-gated and eglSwapBuffers runs with swap interval 0
+         * (the loop has to keep polling the pad), so an idle menu spins here.
+         * Keep the sleep short: a multi-millisecond one in menu mode eats
+         * button presses.
          */
         if (screen == SCREEN_PLAYER)
             usleep(250);
     }
 
-#if PP_BACKEND_ENABLED && !defined(EVO_GL_DEVICE)
-    stop_video_playback();
-    /* Restore 1080 VO for clean exit if still on 4K */
-    if (g_vo_w != 1920u || g_vo_h != 1080u)
-        (void)pp_product_reconfigure_vo(1920, 1080, 2, 1 /* open gate */);
-    pp_playback_shutdown(&g_pp_pb);
-    if (g_pp_vo_ready)
-        pp_videoout_shutdown(&g_pp_vo);
-#elif defined(EVO_GL_DEVICE)
     pp_playback_shutdown(&g_pp_pb);
     evo_gl_context_destroy();
-#endif
 
     return 0;
 }

@@ -18,6 +18,18 @@ typedef enum pp_frame_format {
     PP_FRAME_BGRA = 3
 } pp_frame_format;
 
+/*
+ * How the frame is fitted to the panel. Since GL-4 (#80) this is a scale on the
+ * video quad's clip-space corners (evo_gl_blit_yuv), not a CPU rescale — it
+ * lives here because it describes the frame's presentation, and the converter
+ * header that used to own it is gone.
+ */
+typedef enum pp_aspect_mode {
+    PP_ASPECT_FIT = 0,     /* letterbox / pillarbox, preserve AR */
+    PP_ASPECT_FILL = 1,    /* crop source to fill, preserve AR */
+    PP_ASPECT_STRETCH = 2  /* ignore AR */
+} pp_aspect_mode;
+
 typedef struct pp_frame {
     pp_frame_format format;
     uint32_t width;

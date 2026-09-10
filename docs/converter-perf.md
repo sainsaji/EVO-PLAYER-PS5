@@ -1,5 +1,16 @@
 # The CPU converter — measurement and findings
 
+> **History, not current state.** GL-4 (#80) deleted every CPU converter
+> (`pp_converter.c`, `_parallel`, `_fused`, `pp_compute_pipeline`, `tile_copy`)
+> and the `tools/bench.sh` harness that measured them: the frame now goes to the
+> GPU as R8/RG8 planes and a GLSL shader does YUV→RGB on the quad, for no
+> measurable CPU. Recover the sources with `git show b8c42b7:<path>`. Kept
+> because the findings below explain why the CPU path was shaped the way it was,
+> and because the BT.601 matrix here is the reference the GL shader is checked
+> against — see
+> [`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80)
+> and `tools/gl_yuv_parity.py`.
+
 With no hardware GL or Vulkan driver in the sysroot (see
 [`gpu-notes.md`](gpu-notes.md) — what ships is OSMesa/llvmpipe, a *software*
 rasteriser), the CPU YUV→BGRA+swizzle path is the only remaining lever on 4K

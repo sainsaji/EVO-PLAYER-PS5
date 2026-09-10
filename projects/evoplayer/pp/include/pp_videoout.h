@@ -63,14 +63,12 @@ typedef struct pp_videoout {
     size_t plane_bytes;    /* bytes per registered buffer */
     uint32_t width;
     uint32_t height;
-    uint32_t pitch;        /* CPU staging pitch in bytes (width*4) */
+    uint32_t pitch;        /* scanout row pitch in bytes (width*4) */
     uint32_t buffer_count;
     pp_pixel_format format;
     int flip_rate;
 
-    void *gpu_bufs[PP_VO_MAX_BUFFERS];   /* registered tiled planes */
-    uint32_t *cpu_bufs[PP_VO_MAX_BUFFERS]; /* linear staging (CPU) */
-    size_t cpu_bytes;
+    void *gpu_bufs[PP_VO_MAX_BUFFERS];   /* registered scanout planes */
 
     uint8_t state[PP_VO_MAX_BUFFERS]; /* 0 free, 1 acquired, 2 in_flight */
     uint64_t submit_tsc[PP_VO_MAX_BUFFERS];
@@ -81,9 +79,7 @@ typedef struct pp_videoout {
     int inited;
     int registered;
     /* #27: 1 when the VO buffers were registered with the linear SDR attribute
-     * (PP_VO_ATTR_SDR_LINEAR) for the sceAgc GPU present path. In that mode
-     * nothing may tile into the plane - pp_videoout_present does a straight copy
-     * and every CPU converter must emit linear BGRA. */
+     * (PP_VO_ATTR_SDR_LINEAR) for the sceAgc GPU present path. */
     int attr_linear;
 } pp_videoout;
 
@@ -98,23 +94,8 @@ int pp_videoout_init(pp_videoout *vo,
                      pp_pixel_format format,
                      uint32_t buffer_count);
 
-/**
- * Acquire a free CPU-writable linear buffer.
- * *buffer_index = slot, *pitch = row pitch in bytes, return = pointer to plane.
- * Blocks (wait_available) if all buffers are in-flight.
- * Returns NULL on failure.
- */
-void *pp_videoout_acquire(pp_videoout *vo, uint32_t *buffer_index, uint32_t *pitch);
-
 /** Return an ACQUIRED buffer without presenting (e.g. convert failure). */
 void pp_videoout_release(pp_videoout *vo, uint32_t buffer_index);
-
-/**
- * Tile/copy staging → registered buffer and SubmitFlip.
- * buffer_index must be currently ACQUIRED by this backend.
- * Returns 0 on success.
- */
-int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id);
 
 /**
  * SubmitFlip only — GPU plane already holds final tiled BGRA (V8 fused path).

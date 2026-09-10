@@ -71,19 +71,18 @@ LIBS := \
     -lSceImeDialog \
     -lc++ -lc++abi -lpthread
 
+# GL-4 (#80) Stage 3: the CPU YUV->BGRA converters (pp_converter[_parallel
+# |_fused], pp_compute_pipeline) and the tiled VideoOut blit (tile_copy) are
+# gone - the video goes up as R8/RG8 planes + a GLSL shader. pp_agc* and
+# pp_videoout are dead code until GL-6 deletes them.
 PP_SRCS := \
     pp/src/pp_videoout.c \
-    pp/src/pp_converter.c \
-    pp/src/pp_converter_parallel.c \
-    pp/src/pp_converter_fused.c \
-    pp/src/pp_compute_pipeline.c \
     pp/src/pp_agc.c \
     pp/src/pp_agc_osd.c \
     pp/src/pp_audio_clock.c \
     pp/src/pp_stage_breadcrumb.c \
     pp/src/pp_clock.c \
     pp/src/pp_playback.c \
-    pp/src/tile_copy.c \
     pp/src/evo_theme.c \
     pp/src/evo_ui.c
 
@@ -144,6 +143,13 @@ endif
 # package-app.sh --gl passes GL_DEVICE=1 plus the ps5-opengl-core33.mk archives.
 # (RMLUI_SRCS gets evo_gl_context_device.cpp appended below, after it is set.)
 GL_DEVICE ?= 0
+# GL-4 (#80) Stage 3: main.c's frame loop calls the evo_gl_* seam
+# unconditionally. GL_DEVICE=1 appends the real device context to RMLUI_SRCS
+# below; every other configuration links no-op stubs, so the ELF compile check
+# (scripts/build-evoplayer.sh) still builds without ps5-opengl.
+ifneq ($(GL_DEVICE),1)
+    PP_SRCS += ui_rml/src/evo_gl_context_stub.c
+endif
 ifeq ($(GL_DEVICE),1)
     PP_SRCS  += pp/src/pp_gl_fatal.c
     CFLAGS   += -DEVO_GL_DEVICE=1

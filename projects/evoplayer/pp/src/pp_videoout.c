@@ -210,7 +210,6 @@ int pp_videoout_init(pp_videoout *vo,
     vo->flip_rate = 0;
     vo->plane_bytes = calc_plane_bytes(width, height);
     vo->memsize = vo->plane_bytes * (size_t)buffer_count;
-    vo->cpu_bytes = (size_t)width * (size_t)height * 4u;
 
     vo->handle = sceVideoOutOpen(0xff, 0, 0, NULL);
     if (vo->handle < 0) {
@@ -236,17 +235,6 @@ int pp_videoout_init(pp_videoout *vo,
     for (i = 0; i < buffer_count; i++) {
         vo->gpu_bufs[i] = (void *)((uintptr_t)vo->vaddr + vo->plane_bytes * (size_t)i);
         vbuf[i].data = vo->gpu_bufs[i];
-        /* #6: NOT routed through evo_direct_mem — at 4K this is 3x33 MB and the
-         * V8 present path never reads it (present_pre_tiled / AGC only touch the
-         * GPU plane); keeping it on malloc leaves the direct-memory slab for the
-         * GPU/AGC budget. */
-        vo->cpu_bufs[i] = (uint32_t *)malloc(vo->cpu_bytes);
-        if (!vo->cpu_bufs[i]) {
-            fail(15, (int)i);
-            pp_videoout_shutdown(vo);
-            return -15;
-        }
-        memset(vo->cpu_bufs[i], 0, vo->cpu_bytes);
         vo->state[i] = PP_BUF_FREE;
     }
 
@@ -299,37 +287,14 @@ int pp_videoout_init(pp_videoout *vo,
     return 0;
 }
 
-void *pp_videoout_acquire(pp_videoout *vo, uint32_t *buffer_index, uint32_t *pitch)
-{
-    uint32_t i, tries;
-
-    if (!vo || !vo->inited || !buffer_index || !pitch)
-        return NULL;
-
-    for (tries = 0; tries < 120; tries++) {
-        retire_old_inflight(vo);
-        for (i = 0; i < vo->buffer_count; i++) {
-            uint32_t idx = (vo->next_index + i) % vo->buffer_count;
-            if (vo->state[idx] == PP_BUF_FREE) {
-                vo->state[idx] = PP_BUF_ACQUIRED;
-                vo->next_index = (idx + 1) % vo->buffer_count;
-                vo->stats.acquires++;
-                *buffer_index = idx;
-                *pitch = vo->pitch;
-                return vo->cpu_bufs[idx];
-            }
-        }
-        vo->stats.reuse_blocked++;
-        for (i = 0; i < vo->buffer_count; i++) {
-            if (vo->state[i] == PP_BUF_IN_FLIGHT) {
-                (void)pp_videoout_wait_available(vo, i, 16);
-                break;
-            }
-        }
-    }
-    return NULL;
-}
-
+/*
+ * GL-4 (#80) Stage 3: pp_videoout_acquire() + pp_videoout_present() are gone
+ * with the CPU present path. They handed out a linear staging buffer and then
+ * swizzled it into the tiled scanout plane (pp_draw_pixels_as_tiles, tile_copy.c
+ * — deleted). Nothing writes a scanout plane on the CPU any more; ps5-opengl
+ * owns the flip queue and the video is a GL quad. pp_videoout_release() stays
+ * for the release-on-teardown paths.
+ */
 void pp_videoout_release(pp_videoout *vo, uint32_t buffer_index)
 {
     if (!vo || !vo->inited)
@@ -338,39 +303,6 @@ void pp_videoout_release(pp_videoout *vo, uint32_t buffer_index)
         return;
     if (vo->state[buffer_index] == PP_BUF_ACQUIRED)
         vo->state[buffer_index] = PP_BUF_FREE;
-}
-
-int pp_videoout_present(pp_videoout *vo, uint32_t buffer_index, uint64_t frame_id)
-{
-    int rc;
-
-    if (!vo || !vo->inited)
-        return -1;
-    if (buffer_index >= vo->buffer_count)
-        return -2;
-    if (vo->state[buffer_index] != PP_BUF_ACQUIRED)
-        return -3;
-
-    /* #27: a linear-registered plane (sceAgc path) must never reach here on the
-     * CPU route - pp_playback requests a tiled re-register instead. If it
-     * somehow does, tiling is no more wrong than a plain copy would be. */
-    pp_draw_pixels_as_tiles(vo->cpu_bufs[buffer_index],
-                            (uint32_t *)vo->gpu_bufs[buffer_index],
-                            (int)vo->width,
-                            (int)vo->height);
-
-    vo->stats.presents++;
-    rc = sceVideoOutSubmitFlip(vo->handle, (int)buffer_index, 1, (int64_t)frame_id);
-    if (rc == 0) {
-        vo->stats.flips_ok++;
-        vo->state[buffer_index] = PP_BUF_IN_FLIGHT;
-        vo->submit_tsc[buffer_index] = now_us();
-        vo->submit_frame[buffer_index] = frame_id;
-    } else {
-        vo->stats.flips_fail++;
-        vo->state[buffer_index] = PP_BUF_FREE;
-    }
-    return rc;
 }
 
 void *pp_videoout_gpu_plane(pp_videoout *vo, uint32_t buffer_index)
@@ -503,10 +435,6 @@ void pp_videoout_shutdown(pp_videoout *vo)
     vo->plane_bytes = 0;
 
     for (i = 0; i < PP_VO_MAX_BUFFERS; i++) {
-        if (vo->cpu_bufs[i]) {
-            free(vo->cpu_bufs[i]);
-            vo->cpu_bufs[i] = NULL;
-        }
         vo->gpu_bufs[i] = NULL;
     }
 

@@ -1,11 +1,20 @@
 # GL-4 (#80) — video into the GL funnel
 
-> **Status: Stage 1 + Stage 2a/2b/2c done + hw-verified 2026-09-10.** GTA 4K
-> native + 1080p play smooth through the GL NV12 path (`late_drop` 0–1), OSD
-> composites over the video, aspect (Fit/Fill/Stretch) works, colours correct.
-> **Stage 2d (seek) and Stage 3 (converter demolition) not started.** Parent:
-> [opengl-render-overhaul.md](opengl-render-overhaul.md) (GL-4 row). Handoff:
-> [#80 comment](https://github.com/sainsaji/EVO-PLAYER-PS5/issues/80#issuecomment-5607427903).
+> **Status: DONE — all stages hw-verified 2026-09-10.** GTA 4K native + 1080p
+> play smooth through the GL NV12 path, OSD composites over the video, aspect
+> (Fit/Fill/Stretch) works, colours correct and measured (`#62`, see below).
+> Stage 2d freezes the last frame under the scrub OSD for the whole
+> seek-discard window; Stage 3 deleted the CPU converters, `tile_copy`, the
+> backend enum, the 5-way present dispatch and the `#32` scrub-overlay machine,
+> and retired `--no-gl`. Two issues the hardware pass caught, both fixed the
+> same day: a subtitle regression (subs vanished 4.2 s after the last input —
+> the OSD scratch was only composited while the controls were up), and a
+> ~65 ms hitch per subtitle-cue / OSD change (the scratch went up as a
+> full-frame RGBA8 texture — the ps5-opengl staging wall; now uploaded as RG8,
+> ~0.2 ms). Plus a boot shader warm-up so the first video frame does not pay a
+> lazy GLSL compile inside the loop. `late_drop` 0 on a clean session,
+> `blit~5 ms`. Parent: [opengl-render-overhaul.md](opengl-render-overhaul.md)
+> (GL-4 row).
 
 ## Stage 2 progress (hardware, 2026-09-10)
 
@@ -23,35 +32,11 @@
   blends it over the video — the slow RGBA8 OSD upload is sample-hash-gated so a
   static OSD costs only a draw. Per-frame OSD cost ~7 ms at 4K (memset + OSD
   rasterise + hash) → `blit~10-13ms`, well inside the 33 ms budget.
-- **2d (seek) — not done.** Seek is rough (no held-frame feedback during the
-  discard window; `seek_to_first_ms` ~2–6 s, GOP-bound on long-GOP 4K). The
-  `#32` scrub-overlay machine is inert on the GL path.
+- **2d (seek) — done + hw-verified 2026-09-10.** See "Stage 2d" below.
 - **Not GL-4:** Tears of Steel 4K (H.264 3840×1714) hits the resident
   decoder's `0x811d0303` on decode #1 → FFmpeg-4K fallback → struggles. This
   is the pre-existing `native-decode` limitation (main.c ~L11390), not the GL
   path. GTA 4K's encode is accepted; ToS4K's isn't.
-
-## Stage 2a — what landed (hw-verify-pending)
-
-- `pp_playback`: `gl_video` flag (`pp_playback_set_gl_video`), an owned NV12
-  double buffer, a `pp_playback_copy_nv12()` that copies under the display lock.
-  `push_frame` gets an early `gl_video` branch that paces on the clock and
-  normalises the frame to NV12 at *source* resolution (native NV12 → verbatim;
-  FFmpeg I420 → interleave UV) — no CPU YUV→RGB, no `pb->display`.
-- `evo_gl_context_device.cpp`: `evo_gl_blit_nv12()` — R8 luma + RG8 chroma
-  upload, a GLSL fragment shader doing BT.601-limited YUV→RGB
-  (298/409/516/-100/-208 >> 8 → /256 float constants, matches
-  `pp_converter.c`), fullscreen triangle, `uCrop` = disp/coded to trim MB
-  padding.
-- `main.c`: `pp_playback_set_gl_video(1)` at GL bring-up; the player screen no
-  longer rasterises into `gl_scratch` (`draw_player_screen` skipped for
-  `screen==2` unless music/audio-only) — the present block copies NV12 into
-  4K-sized staging and calls `evo_gl_blit_nv12`.
-
-**Known gaps (Stage 2b/2c):** no OSD / progress bar during playback; aspect is
-always FIT 1:1 (Fill/Stretch ignored); `SCREEN_EXIT_CONFIRM` /
-`SCREEN_SUBTITLE_PICKER` show their dialog over black instead of the frozen
-frame. All restored in 2c.
 
 ## The upload wall — and the way past it
 
@@ -99,98 +84,210 @@ memory — but it is a fallback, not the plan. Sketch kept in "Appendix" below.)
 - SDK rebuilt from G55 source (needed a pristine re-extract of
   `third_party/mesa-26.2.0/` — G55's `mesa-ps5.patch` differs from G47's).
 
-## Stage 2 — the NV12 GL video path
+## Stage 2 — the NV12 GL video path — done
 
-### 2a. Keep NV12 out of `evo_vdec_native.c`'s I420 branch
+The design sketch that used to sit here has been replaced by the code. What
+actually shipped, and where to read it:
 
-`ro_harvest` (`media/src/evo_vdec_native.c:393`) already has an `agc_out` path
-that **borrows** the decoder's NV12 pointer (no copy). The non-`agc_out` branch
-de-interleaves NV12 → planar I420 *only* because the CPU converters need it.
-When the GL path is active, always take the NV12/borrow branch — emit
-`PP_FRAME_NV12` with `planes[0]` = Y, `planes[1]` = interleaved UV, strides +
-coded height. (`pp_frame` already carries `planes[]` + `strides[]`; the CPU
-converters ignore them, `pp_agc` uses them.)
+**Decoder → planes, no copy.** `evo_vdec_prefer_nv12(1)` at boot makes
+`ro_harvest` (`media/src/evo_vdec_native.c`) take its borrow branch and emit
+`PP_FRAME_NV12` — `planes[0]` = Y, `planes[1]` = interleaved UV, plus strides and
+the MB-padded coded height. The I420 de-interleave it used to do existed only
+because the CPU converters could not read NV12. `pp_playback_push_frame` paces
+the frame on the presentation clock and stashes those borrowed pointers;
+`pp_playback_get_nv12()` hands them out under the display lock. No pixel is
+copied between the decoder and the GPU — except once per seek, see Stage 2d.
 
-### 2b. NV12 upload + GLSL YUV→RGB — `ui_rml/src/evo_gl_context_device.cpp`
+**Upload + convert.** `evo_gl_blit_yuv()` in
+`ui_rml/src/evo_gl_context_device.cpp`: a `GL_R8` luma texture at `coded_w ×
+coded_h` and a `GL_RG8` chroma texture at half that (or three `GL_R8` planes for
+an FFmpeg I420 source), `glTexStorage2D` once per resolution and
+`glTexSubImage2D` per frame with `GL_UNPACK_ROW_LENGTH` carrying the stride. A
+quad-strip vertex shader and a fragment shader that does the YUV→RGB.
 
-Replace the RGBA path in `evo_gl_blit_bgra()` (or add `evo_gl_blit_nv12()`):
+Two things the sketch got wrong, both settled by hardware and by
+`tools/gl_yuv_parity.py`:
 
-- Two textures: `GL_R8` (`w`×`coded_h`, luma), `GL_RG8` (`w/2`×`coded_h/2`,
-  chroma). `glTexStorage2D` once; `glTexSubImage2D` per frame from `planes[0]` /
-  `planes[1]`. Respect `strides[]` via `glPixelStorei(GL_UNPACK_ROW_LENGTH, …)`.
-- Fullscreen triangle (existing attribute-less VS) + a fragment shader:
+- The output **is** `.bgr`-swizzled. The ps5-opengl default framebuffer scans
+  out BGRA, so the shader has to swap R and B exactly as `evo_gl_blit_bgra`'s
+  sampler does. Without it the picture is R↔B swapped.
+- The offsets are **16/255 and 128/255**, not 16/256 and 0.5. The CPU reference
+  works in 0–255 units. See the parity write-up.
 
-  **Parity target = BT.601 limited-range** — that is what every CPU converter
-  does today (`pp_converter.c:24`, integer `298/409/516/-100/-208`, `Y-16` /
-  `UV-128`), *not* BT.709. `#62` parity = match this. A move to BT.709 is a
-  separate, deliberate change — flag it, don't slip it in.
+Parity target is BT.601 **limited** range — what every CPU converter did. A move
+to BT.709 would be a separate, deliberate change; do not slip it in. `uRange`
+exists as a hook but is not wired to `evo_settings`. P010 (`#4`'s tail) drops in
+as `GL_R16` / `GL_RG16` with a `* 64.0` unpack and the same matrix.
 
-  ```glsl
-  float y = texture(uLuma,  vUV).r;
-  vec2  uv = texture(uChroma, vUV).rg;
-  float c = (y - 16.0/255.0) * 1.16438;
-  float d = uv.x - 128.0/255.0;
-  float e = uv.y - 128.0/255.0;
-  vec3 rgb = vec3(c + 1.59603*e,
-                  c - 0.39176*d - 0.81297*e,
-                  c + 2.01723*d);
-  fragColor = vec4(clamp(rgb, 0.0, 1.0), 1.0);
-  ```
-  - `uRange` uniform (limited/full) for a later `evo_settings` hook; default
-    limited.
-  - Default framebuffer byte order matches what B2/B3 already write — emit RGB
-    straight, **no `.bgr` swizzle** (that swizzle in the B2 blit compensates for
-    EVO's *CPU rasteriser* buffer, not this path).
-  - Leave room for **P010** (`#4` tail): `GL_R16` / `GL_RG16`, `* 64.0` unpack,
-    same matrix. Implement 8-bit NV12 only now.
+**Aspect.** FIT / FILL / STRETCH is a `uScale` on the quad's clip-space corners,
+computed from the frame's display aspect against the panel's. That is the whole
+of `#76`'s fix: `prospero_apply_view_mode` now only records the mode, instead of
+forcing the 4K V8 path down to the V3 converter and re-targeting the output at
+the live VO size — which left the VideoOut registered linear while a tiled
+converter wrote it, and corrupted the plane.
 
-### 2c. Aspect in the vertex quad — closes #76
+**OSD.** `draw_player_screen` under `g_k4_osd_publish` paints the OSD (and the
+subtitles) onto a transparent 1920×1080 scratch and skips the video draw
+entirely; the present block alpha-composites it over the quad with
+`evo_gl_composite_bgra`. The scratch is uploaded as an **RG8** texture 2× the
+width (source pixel x = texels 2x/2x+1, the shader reassembles with
+`texelFetch`) — a 4-channel RGBA8 `glTexSubImage2D` is the ~65 ms staging wall,
+RG8 dodges it (~0.2 ms), the same trick as the video Y/UV planes. It is still
+gated on a sample hash so a static overlay costs one composite draw and no
+upload. One `eglSwapBuffers` for video + OSD together. `_osd_active` (the gate
+that decides whether to draw + composite the scratch) covers the controls
+window, pause / scrub / stats / seek-discard, **a visible subtitle track**, a
+live toast and the dev FPS overlay — the subtitle term is why "no subs 4 s
+after the last button press" was a regression the hardware pass caught.
 
-FIT / FILL / STRETCH (`video_view_mode` 0/1/2, `prospero_view_mode_to_aspect`,
-`main.c:1606`) become a scale on the quad's clip-space corners (display AR vs
-16:9 output). Removes `pp_playback_force_v3_fallback` + the
-`PP_BACKEND_4K_V8_FUSED → _V3_FALLBACK` switch in `prospero_apply_view_mode`
-(`main.c:1621`) and the linear-vs-tiled attr mismatch that corrupts the 4K plane
-on an aspect cycle (**#76**).
+**Not on the quad:** the subtitle picker and the stop-playback prompt. Both are
+RmlUi documents with a full-screen scrim (`dialog.rcss` `#dialog-scrim`,
+`#000000b8`) and EVO's CPU rasteriser blends source-over to an **opaque** result
+(`evo_blend.h`), so compositing their scratch over the video would paint solid
+black across it anyway. They keep the whole-scratch blit until GL-5 renders
+RmlUi through GL with real alpha.
 
-### 2d. Present integration
 
-- Player branch in `main.c` ~L13449 (`EVO_GL_DEVICE`): swap still gated on
-  `g_pp_pb.display_pts_us`; calls `evo_gl_blit_nv12()` with the NV12 planes
-  instead of `evo_gl_blit_bgra(gl_scratch,…)`.
-- OSD composites in the same GL frame — `draw_player_screen` renders the OSD to
-  a small RGBA overlay texture (or the RmlUi GL3 context) drawn over the video
-  quad; one `eglSwapBuffers`.
-- The `#32` `prospero_scrub_ovl_state` machine + `pp_product_overlay_enter/leave`
-  go inert (GL-6 deletes them). Stage 2 must **verify seek/scrub needs no
-  overlay drop** on the GL path.
-- `pp_product_request_vo()`'s `EVO_GL_DEVICE` early-return unchanged.
+## Stage 2d — seek — done (hw-verify-pending)
 
-## Stage 3 — demolition
+**The bug.** In the steady state the published planes are *borrowed* from the
+decoder: `push_frame` pace-sleeps to the frame's PTS before returning, so the
+decoder cannot recycle the pool slot before the render loop has uploaded it. A
+seek's discard window is the one place that argument fails — the decode thread
+runs flat out, publishing nothing, decoding straight through the pool. The
+render loop keeps re-uploading `gl_src_y`, which is now whatever discarded frame
+the decoder happens to be writing. On a long-GOP 4K seek that is 2–6 seconds of
+tearing garbage under the scrub bar.
 
-Once GTA 4K native + a 1080p clip play real-time through the GL NV12 path with
-#62 parity:
+**The fix.** `pp_playback` takes one snapshot of the last published frame into
+memory it owns, at `notify_seek_begin` — the instant the seek is submitted, while
+the native decoder's 12-slot pool and FFmpeg's receive `AVFrame` both still hold
+it. `pp_playback_get_nv12()` serves that copy (`f->held == 1`) until the first
+post-seek frame publishes, which clears it. One copy per seek; the steady state
+stays zero-copy.
 
-- **Delete:** `pp/src/pp_converter_fused.c`, `pp_converter_parallel.c`,
-  `pp_compute_pipeline.c`, `tile_copy.c`; the CPU present path in
-  `pp_videoout.c` + its linear/tiled attr juggling + `013_AGC_VO_RETILE`; the
-  5-way present dispatch in `main.c` (~L13210–13505); the
-  `PP_BACKEND_4K_V8_FUSED` / `_V3_FALLBACK` / `_1080_STANDARD` enum and every
-  branch; `pp_playback`'s convert/present halves + the backend field.
-- **Keep:** `pp_playback` decode + pace + clock + seek; `pp_playback_log_stats`
-  / the stats file (verify it still produces sane numbers — #80 "done when").
-- `pp_agc.c` present/geo/osd stop being called here; **GL-6** deletes the files.
-- `#62` parity write-up + reference frame → `docs/validation.md`.
+`main.c` keeps the OSD up for the whole window (`|| g_pp_pb.seek_discarding` in
+the OSD-visible test) rather than the usual 4.2 s idle timeout, so a slow seek
+shows a scrub bar over a still picture instead of going quiet.
+
+**What this replaced.** The `#32` `prospero_scrub_ovl_state` machine — a
+four-state ENTERING/ACTIVE/LEAVING handshake with `video_decode_parked`, whose
+whole job was to drop the 4K VideoOut to a 1080 one for the duration of a scrub
+because the V8 present path never composited the OSD. There is one surface now
+and the OSD composites over the quad at any resolution, so the premise is gone.
+Deleted, along with `pp_product_overlay_enter/leave`'s surface half — those two
+are now just the presentation-clock pause that stops an overlay coming back and
+judging every frame late (the 0.1.3 Media Info freeze).
+
+**Still GOP-bound.** `seek_to_first_ms` is unchanged: the discard window is as
+long as the codec makes it. Stage 2d makes it *look* like a seek instead of like
+a fault; it does not make it shorter.
+
+**Regression caught + fixed before the hardware pass (2026-09-10).** Stage 2c's
+OSD gate (`_osd_active`) only composited the `gl_scratch` overlay while the
+playback controls were up — but `draw_player_screen()` also rasterises
+**subtitles** onto that same scratch, so subs vanished 4.2 s after the last
+button press during normal playback. `_osd_active` now also covers "subtitles
+enabled and the file has a subtitle track", a visible toast (`evo_toast_visible()`
+— new accessor in `evo_toast.c`), and the dev FPS overlay; and the present block
+re-draws the toast / FPS overlay onto the scratch *after* `draw_player_screen`'s
+memset (the dispatch draws them earlier in the frame, where that clear wiped
+them). This makes the "subtitles stay up with the OSD hidden" and "a toast fired
+without a recent button press" checks part of the hardware pass.
+
+## Stage 3 — demolition — done (hw-verify-pending)
+
+**Deleted outright**
+
+| | |
+|---|---|
+| `pp/src/pp_converter.c` + `.h` | the BT.601 reference matrix — preserved in `tools/gl_yuv_parity.py` and in git (`b8c42b7`) |
+| `pp/src/pp_converter_parallel.c` + `.h` | V3 worker-pool convert |
+| `pp/src/pp_converter_fused.c` + `.h` | V8 fused convert+tile |
+| `pp/src/pp_compute_pipeline.c` + `.h` | the SIMD/workgroup convert front end |
+| `pp/src/tile_copy.c` | `pp_draw_pixels_as_tiles`, the CPU scanout swizzle |
+| `pp/include/pp_product_path.h` | `pp_video_backend` + `pp_select_video_backend` |
+| `pp_output_policy.h`, `pp_4k_sdr_policy.h`, `pp_4k_product_stage.h`, `pp_v8_gate.h` | the 4K stage ladder and its gates — nothing selects a backend any more |
+| `tools/bench.sh`, `tools/bench_converter.c` | the converter benchmark harness ([converter-perf.md](../converter-perf.md) is now history) |
+
+**Cut back**
+
+- `pp_playback` — 1134 → ~500 lines. Gone: `display`/`display_back`, the backend
+  field, `force_v3_fallback`, the pending-present handshake, the `nv12_fb`
+  de-interleave scratch, the whole sceAgc present branch and the `agc_hold_*`
+  frame. What is left is decode + pace + clock + seek + publish. `pp_aspect_mode`
+  moved to `pp_frame.h`, which is where a frame-presentation type belongs now
+  that the converter header that owned it is gone.
+- `pp_videoout.c` — `pp_videoout_acquire()` / `pp_videoout_present()` and the
+  `cpu_bufs` linear staging are gone (they were the CPU present path). The rest
+  of the file is dead code until GL-6 deletes it.
+- `main.c` — 13694 → ~12700 lines. Gone: `pp_product_reconfigure_vo` /
+  `_request_vo` / `_apply_pending_vo` / `_k4_live` / `_ensure_ui_1080`, the
+  `g_vo_*` / `g_pending_*` / `g_4k_*` globals, the 5-way present dispatch, the
+  4K source pre-scan and backend selection, the `#32` overlay machine, and the
+  `PP_BACKEND_ENABLED` / `EVO_GL_DEVICE` conditional pairs (there is one path, so
+  the branches went with them).
+
+**The build**
+
+`--no-gl` is retired: it selected a present path that no longer exists, and
+`package-app.sh` now fails with that explanation rather than producing an eboot
+that boots to nothing. `main.c` calls the `evo_gl_*` seam unconditionally; the
+app module links `evo_gl_context_device.cpp`, and every other configuration
+(`build-evoplayer.sh`'s ELF compile check, `--probe`, `--gl-smoke`) links
+`ui_rml/src/evo_gl_context_stub.c`, a set of no-ops. The ELF build therefore
+still compiles `main.c` / `pp` / `media` for the modularisation work, and still
+has no graphics — which it never had.
+
+**Left for GL-6**, because they still compile and something still references
+them: `pp_agc.c` / `pp_agc_osd.c` (nothing calls them — `pp_agc_init` went with
+the boot cutover), `pp_videoout.c`'s remainder, `evo_rmlui_render_agc.cpp`.
+
+**#62 parity** — `tools/gl_yuv_parity.py` sweeps all 2^24 `(Y,U,V)` triples
+through both the deleted CPU matrix and the GLSL shader: 99.390% bit-exact, max
+per-channel delta 1/255, and it found a real error (16/256 vs 16/255 offsets,
+worth up to 2/255 on 3.8% of triples) that the panel could not show. Written up
+in [../validation.md](../validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80).
 
 ## Done when (from #80)
 
-- [ ] GTA 4K (native) + a 1080p clip through the GL video path, correct colour,
-      real-time.
-- [ ] `#62` parity vs a known-good reference frame in `docs/validation.md`.
-- [ ] `#76` fixed — aspect cycle on 4K native, no corruption, no stutter.
-- [ ] CPU converters + `tile_copy` + backend enum + 5-way dispatch deleted.
-- [ ] Seek / scrub works without the `#32` overlay machine.
-- [ ] `pp_playback` stats file still sane.
+- [x] GTA 4K (native) + a 1080p clip through the GL video path, correct colour,
+      real-time. *(hw-verified 2026-09-10, Stage 2a-c)*
+- [x] `#62` parity vs the reference conversion, in
+      [../validation.md](../validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80).
+      *(exhaustive host sweep - stronger than any single frame, which only
+      visits the few thousand triples it happens to contain)*
+- [x] `#76` fixed - aspect is a vertex-quad scale; `force_v3_fallback` and the
+      linear-vs-tiled attr mismatch that corrupted the 4K plane are both deleted.
+- [x] CPU converters + `tile_copy` + backend enum + 5-way dispatch deleted.
+- [x] Seek / scrub works without the `#32` overlay machine - the machine is
+      deleted; the held-frame snapshot replaces it. **hw-verified 2026-09-10.**
+- [x] `pp_playback` stats file still sane - `pp_playback_log_stats` keeps every
+      counter; `convert_us_*` now measures publish cost and the line is
+      relabelled `publish_us_*`. **hw-verified** — `late_drop=0` on a clean
+      session, `blit~5 ms`, no `clock_late_drops` growth.
+
+## Hardware pass — done 2026-09-10
+
+All checks passed on `192.168.0.7` (FW 12.70). Residual: a one-time ~20-frame
+late-drop burst at the very first file open (texture alloc + decode-thread
+ramp, not a stall) — not perceptible, left as-is.
+
+1. GTA 4K native - plays real-time, correct colour, `late_drop` 0-1.
+2. A 1080p clip - same.
+3. Triangle cycles Fit/Fill/Stretch on the 4K file: no corruption, no stutter
+   (`#76`).
+4. D-pad scrub then Cross on the 4K file: the picture **freezes** on the last
+   frame under the scrub bar for the whole discard window, then resumes at the
+   target. No tearing, no black.
+5. Square (Media Info) and Circle (stop prompt) over playback still return to
+   moving video with audio in sync - the clock-pause half of the old overlay.
+6. **Subtitles** on a subtitled file: they stay on screen after the playback
+   controls fade (this is the Stage 2c regression that was fixed). Cycle to a
+   non-subtitled file and back - no stale caption.
+7. A toast during playback with no recent button press (e.g. let one auto-fire,
+   or take a screenshot then wait) shows over the video.
+8. `tools/evo-remote.sh log` - the `stats ...` block has sane numbers.
 
 ## Appendix — zero-copy (fallback only, not the plan)
 

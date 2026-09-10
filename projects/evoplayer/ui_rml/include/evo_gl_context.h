@@ -30,6 +30,12 @@ extern "C" {
  * (message logged to stderr). */
 int  evo_gl_context_create(int width, int height);
 
+/* Device only. Compile every shader + allocate every VAO up front so the first
+ * video frame / first OSD does not pay a multi-tens-of-ms GLSL compile inside
+ * the frame loop. Call once, right after evo_gl_context_create(). No-op on the
+ * host and when no context is up. */
+void evo_gl_warm(void);
+
 /* Tear the context down. Safe to call when none was created. */
 void evo_gl_context_destroy(void);
 
