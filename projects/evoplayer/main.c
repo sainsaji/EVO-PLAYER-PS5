@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -2212,9 +2213,34 @@ void file_action(const char *name) {
         return;
     }
 
-    if (has_ext(name, ".mkv")) {
+    /*
+     * One branch for every video container, not one per extension.
+     *
+     * This used to be four near-identical copies (.mkv / .mp4 / .avi / .mov)
+     * and an else that toasted "FILE SELECTED" — so .webm, .ts, .m2ts, .m4v,
+     * .mpg and .mpeg were listed as VIDEO by the browser, were selectable, and
+     * then did nothing when opened. (Found chasing a VP9 .webm that would not
+     * play; the decoder was fine, the file never reached it.) The .avi copy had
+     * drifted further still: it switched to the player screen and never called
+     * start_video_playback, so it hung on a black player.
+     *
+     * prospero_cover_path_is_video() is the same predicate the cover extractor
+     * and the launch shelf already use, so "EVO thinks this is a video" now has
+     * one answer everywhere.
+     */
+    if (prospero_cover_path_is_video(name)) {
         snprintf(current_media, sizeof(current_media), "%s", name);
         snprintf(current_media_path, sizeof(current_media_path), "%s/%s", current_path, name);
+
+        /* Keep the old per-format toast wording ("MKV SELECTED", ...), now
+         * derived from the extension so a new container reads the same way. */
+        char label[32];
+        const char *dot = strrchr(name, '.');
+        size_t li = 0;
+        for (const char *c = dot ? dot + 1 : ""; *c && li < sizeof(label) - 11; c++)
+            label[li++] = (char)toupper((unsigned char)*c);
+        snprintf(label + li, sizeof(label) - li, " SELECTED");
+
         double rp =
             prospero_resume_playback_enabled
                 ? load_resume_position(
@@ -2228,50 +2254,7 @@ void file_action(const char *name) {
             screen = 4;
         } else {
             screen = 2;
-            toast("MKV SELECTED", name);
-            start_video_playback(current_media_path);
-        }
-    } else if (has_ext(name, ".mp4")) {
-        snprintf(current_media, sizeof(current_media), "%s", name);
-        snprintf(current_media_path, sizeof(current_media_path), "%s/%s", current_path, name);
-        double rp =
-            prospero_resume_playback_enabled
-                ? load_resume_position(
-                    current_media_path
-                )
-                : 0.0;
-        if (rp > 0.0) {
-            pending_resume_pos = rp;
-            snprintf(pending_resume_path, sizeof(pending_resume_path), "%s", current_media_path);
-            resume_prompt_active = 1;
-            screen = 4;
-        } else {
-            screen = 2;
-            toast("MP4 SELECTED", name);
-            start_video_playback(current_media_path);
-        }
-    } else if (has_ext(name, ".avi")) {
-        snprintf(current_media, sizeof(current_media), "%s", name);
-        snprintf(current_media_path, sizeof(current_media_path), "%s/%s", current_path, name);
-        screen = 2;
-        toast("AVI SELECTED", name);
-    } else if (has_ext(name, ".mov")) {
-        snprintf(current_media, sizeof(current_media), "%s", name);
-        snprintf(current_media_path, sizeof(current_media_path), "%s/%s", current_path, name);
-        double rp =
-            prospero_resume_playback_enabled
-                ? load_resume_position(
-                    current_media_path
-                )
-                : 0.0;
-        if (rp > 0.0) {
-            pending_resume_pos = rp;
-            snprintf(pending_resume_path, sizeof(pending_resume_path), "%s", current_media_path);
-            resume_prompt_active = 1;
-            screen = 4;
-        } else {
-            screen = 2;
-            toast("MOV SELECTED", name);
+            toast(label, name);
             start_video_playback(current_media_path);
         }
     } else if (
@@ -4856,15 +4839,10 @@ static const char *usb_browser_type_label(
 
     const char *ext = usb_browser_extension(name);
 
-    if (
-        usb_browser_extension_is(ext, "mkv") ||
-        usb_browser_extension_is(ext, "mp4") ||
-        usb_browser_extension_is(ext, "mov") ||
-        usb_browser_extension_is(ext, "avi") ||
-        usb_browser_extension_is(ext, "webm") ||
-        usb_browser_extension_is(ext, "m2ts") ||
-        usb_browser_extension_is(ext, "ts")
-    ) {
+    /* Same predicate file_action() opens with, so the row cannot say VIDEO for
+     * something that will not play (or say FILE for something that will) —
+     * .m4v / .mpg / .mpeg were missing from this list. */
+    if (prospero_cover_path_is_video(name)) {
         return "VIDEO";
     }
 

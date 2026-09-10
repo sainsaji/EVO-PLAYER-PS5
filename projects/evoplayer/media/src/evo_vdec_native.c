@@ -128,15 +128,21 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
 
-/* Secondary (HEVC / VP9) resident decoders — OFF by default (#41).
+/* Secondary (HEVC / VP9) resident decoders — still OFF by default (#41).
  *
- * 2026-09-10: the first build that brought HEVC + VP9 decoders up at boot
- * crashed PPSA99039 before any diagnostic flushed — a pre-unjail
- * sceVideodec2CreateDecoder / QueryDecoderMemoryInfo fault with a non-AVC
- * codec_type is the prime suspect (VP9's codec tag is marked unverified in the
- * header; HEVC max_level scale is a guess). Until that's isolated on hardware
- * with --breadcrumbs, the default .ffpfsc is byte-identical to the working #31
- * AVC-only behaviour. Build -DEVO_VDEC_NATIVE_SECONDARY=1 to bring them up. */
+ * BRING-UP IS CLEAN ON HARDWARE (klog, 2026-09-10, build d14029b0): AVC 4K +
+ * HEVC 1080p + VP9 1080p all created and Reset with rc=0, across two boots.
+ * The earlier "crashed before any diagnostic flushed" attempt does NOT
+ * reproduce — and note() was blind at the time, buffering into evo_boot_log
+ * pre-unjail, so that crash was never actually attributed to this code. Both
+ * codec_type constants are confirmed accepted by sceVideodec2CreateDecoder.
+ *
+ * What is still unverified is DECODE: no 8-bit HEVC Main or VP9 Profile 0
+ * stream has been played through these slots yet (the first HEVC test file was
+ * Main10, correctly refused by evo_vdec_native_supports -> FFmpeg). Until a
+ * frame comes out with correct colours the default .ffpfsc stays byte-identical
+ * to the working #31 AVC-only behaviour.
+ * Build -DEVO_VDEC_NATIVE_SECONDARY=1 (package-app.sh --native-secondary). */
 #ifndef EVO_VDEC_NATIVE_SECONDARY
 #define EVO_VDEC_NATIVE_SECONDARY 0
 #endif
@@ -199,6 +205,8 @@ static const nat_codec_desc *codec_desc_for(int codec_id)
 #if defined(EVO_BOOT_TRACE_POPUP)
 struct v2n_note { char pad[45]; char msg[3075]; };
 #endif
+extern int sceKernelDebugOutText(int, const char *);   /* -> klog, live */
+
 static void note(const char *fmt, ...)
 {
     char msg[1024];
@@ -215,6 +223,22 @@ static void note(const char *fmt, ...)
 #endif
 
     evo_boot_log("%s", msg);
+
+    /*
+     * Also straight to klog, live — the reason #41's HEVC/VP9 bring-up was
+     * unobservable.
+     *
+     * evo_vdec_native_probe() runs PRE-UNJAIL, and evo_boot_log only buffers in
+     * memory until /mnt/usb0 opens after evo_jailbreak_self(). So a fault
+     * anywhere inside a bring-up takes every line describing where it got to
+     * down with it: "crashed pre-log", which is exactly how the 2026-09-10
+     * attempt presented. The kernel writes klog straight through, so it
+     * survives the process dying. Costs nothing — this is boot + gated
+     * playback notes, never a per-frame path. Capture with tools/klog.sh.
+     */
+    char line[1088];
+    snprintf(line, sizeof line, "%s\n", msg);
+    sceKernelDebugOutText(0, line);
 }
 
 static size_t align16k(size_t v) { return (v + 0x3fffu) & ~(size_t)0x3fffu; }
@@ -273,6 +297,21 @@ static void slot_teardown(struct dec_slot *s)
     memset(s, 0, sizeof *s);
 }
 
+/*
+ * Name each step as it is entered, not only when one returns an error.
+ *
+ * Half of these calls are Sony code that can fault rather than return: a bad
+ * codec_type or max_level takes the process with it, and then the rc-on-failure
+ * report never runs. The breadcrumb before the call is the only thing that
+ * survives — the last klog line names what killed it. #41's HEVC/VP9 bring-up
+ * was invisible for exactly this reason. Boot-only (at most three slots, a
+ * dozen lines each), so it is not on any hot path.
+ */
+#define STAGE(name) do {                                                       \
+        *stage = (name);                                                       \
+        note("EVO vdec native: %s %dx%d [%s]", d->tag, w, h, *stage);          \
+    } while (0)
+
 /* Full bring-up for `d`'s decoder at (w x h). Returns 0 on success with
  * everything stored in `*s`; non-zero rc (and `*s` left torn down) on any
  * failure. MUST be called before the first evo_jailbreak_self(). */
@@ -290,16 +329,16 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     memset(&cm, 0, sizeof cm);
     memset(&cc, 0, sizeof cc);
     cm.size = sizeof cm;
-    *stage = "QueryComputeMemoryInfo";
+    STAGE("QueryComputeMemoryInfo");
     if ((rc = sceVideodec2QueryComputeMemoryInfo(&cm)) != 0) return rc;
     s->compute_size = align16k((size_t)cm.cpu_gpu_size);
-    *stage = "alloc(compute)";
+    STAGE("alloc(compute)");
     if ((rc = alloc_direct(s->compute_size, 0x33, dm,
                            &s->compute_start, &s->compute_mem)) != 0) return rc;
     cm.cpu_gpu      = s->compute_mem;
     cm.cpu_gpu_size = s->compute_size;
     cc.size = sizeof cc;
-    *stage = "AllocateComputeQueue";
+    STAGE("AllocateComputeQueue");
     if ((rc = sceVideodec2AllocateComputeQueue(&cc, &cm, &s->compute_queue)) != 0) return rc;
     if (!s->compute_queue) return -1;
 
@@ -322,11 +361,19 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     config.optimize_progressive = 1;
 
     mem.size = sizeof mem;
-    *stage = "QueryDecoderMemoryInfo";
+    /* The three values under suspicion for the 2026-09-10 crash, on the record
+     * before the first call that consumes them: VP9's codec_type tag is marked
+     * unverified in sce_videodec2.h, and HEVC's max_level x30 scale is inferred
+     * from ProsperoLight rather than measured. */
+    note("EVO vdec native: %s config codec_type=%u profile=%u max_level=%d "
+         "max=%dx%d dpb=auto depth=%u",
+         d->tag, (unsigned)config.codec_type, (unsigned)config.profile,
+         (int)config.max_level, w, h, (unsigned)config.pipeline_depth);
+    STAGE("QueryDecoderMemoryInfo");
     if ((rc = sceVideodec2QueryDecoderMemoryInfo(&config, &mem)) != 0) return rc;
 
     s->cpu_map = align16k((size_t)mem.cpu_size);
-    *stage = "MapNamedFlexibleMemory";
+    STAGE("MapNamedFlexibleMemory");
     if ((rc = sceKernelMapNamedFlexibleMemory(&mem.cpu, s->cpu_map, 0x03, 0,
                                               "EvoVdecNative")) != 0) return rc;
     if (!mem.cpu) return -1;
@@ -341,31 +388,31 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     mem.gpu_size = s->gpu_size;
     if (s->cpu_gpu_size) mem.cpu_gpu_size = s->cpu_gpu_size;
 
-    *stage = "alloc(gpu)";
+    STAGE("alloc(gpu)");
     if ((rc = alloc_direct(s->gpu_size, 0x32, dm, &s->gpu_start, &s->gpu_mem)) != 0) return rc;
     mem.gpu = s->gpu_mem;
     if (s->cpu_gpu_size) {
-        *stage = "alloc(cpu_gpu)";
+        STAGE("alloc(cpu_gpu)");
         if ((rc = alloc_direct(s->cpu_gpu_size, 0x33, dm,
                                &s->cpu_gpu_start, &s->cpu_gpu_mem)) != 0) return rc;
         mem.cpu_gpu = s->cpu_gpu_mem;
     }
-    *stage = "alloc(input)";
+    STAGE("alloc(input)");
     if ((rc = alloc_direct(s->input_pool, 0x32, dm,
                            &s->input_start, &s->input_mem)) != 0) return rc;
-    *stage = "alloc(frame)";
+    STAGE("alloc(frame)");
     if ((rc = alloc_direct(s->frame_pool, 0x32, dm,
                            &s->frame_start, &s->frame_mem)) != 0) return rc;
 
-    *stage = "CreateDecoder";
+    STAGE("CreateDecoder");
     if ((rc = sceVideodec2CreateDecoder(&config, &mem, &s->decoder)) != 0) return rc;
     if (!s->decoder) return -1;
-    *stage = "Reset";
+    STAGE("Reset");
     if ((rc = sceVideodec2Reset(s->decoder)) != 0) return rc;
 
     s->max_w = (uint32_t)w;
     s->max_h = (uint32_t)h;
-    *stage = "ok";
+    STAGE("ok");
     return 0;
 }
 
