@@ -69,6 +69,10 @@ docker compose run --rm ps5-dev bash -lc '
   ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
 # ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
+# GL is ON by default (2026-09-10): the boot cuts over to the persistent
+# ps5-opengl GL/EGL context, so `scripts/build-ps5-opengl.sh` must have run
+# once. `--no-gl` selects the legacy pp_agc_init + pp_videoout path, which is
+# UNMAINTAINED and known-broken at boot since GL-3/GL-4 — escape hatch only.
 # Diagnostics = /mnt/usb0/evo.log (one file) + klog live; popups with --breadcrumbs.
 # Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
 

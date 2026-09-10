@@ -24,11 +24,22 @@
 #   ./scripts/package-app.sh --gl             #79 GL-3: cut the boot over to a
 #                                             persistent ps5-opengl GL/EGL
 #                                             context (replaces pp_agc_init + the
-#                                             normal present path). Needs
+#                                             normal present path). DEFAULT ON
+#                                             as of 2026-09-10 - pass it only to
+#                                             be explicit. Needs
 #                                             ./scripts/build-ps5-opengl.sh
 #                                             first. Mutually exclusive with
 #                                             --gl-smoke. See docs/evo-pro/
 #                                             opengl-render-overhaul.md
+#   ./scripts/package-app.sh --no-gl          legacy pre-GL present path
+#                                             (pp_agc_init + pp_videoout). It is
+#                                             UNMAINTAINED and known-broken at
+#                                             boot since the GL-3/GL-4 work - it
+#                                             was the default until 2026-09-10
+#                                             and no GL-era commit was ever
+#                                             verified on it. Escape hatch only,
+#                                             e.g. when the ps5-opengl SDK is
+#                                             not built.
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -48,7 +59,7 @@ FFPFSC=0
 USB_REMOTE=0
 BREADCRUMBS=0
 GL_SMOKE=0
-GL_DEVICE=0
+GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the player build)
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
 while (( $# )); do
@@ -60,15 +71,25 @@ while (( $# )); do
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
-        --gl)           GL_DEVICE=1 ;;    # #79 GL-3: persistent device GL context (boot cutover to GL/EGL)
+        --gl)           GL_DEVICE=1 ;;    # #79 GL-3: persistent device GL context (boot cutover to GL/EGL) - now the default
+        --no-gl)        GL_DEVICE=0 ;;    # opt out: legacy pp_agc_init + pp_videoout path (unmaintained, see --help)
         --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: bring up HEVC + VP9 resident decoders at boot (default 1080p) — UNVERIFIED, crashed 2026-09-10, use with --breadcrumbs
         --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: + raise HEVC/VP9 slots to the 4K ceiling
-        -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
+        -h|--help)      sed -n '2,43p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
 done
+# GL is the default present path for the player build as of 2026-09-10 (#79/#80).
+# Resolved here, after parsing, so flag ORDER never matters:
+#   --gl-smoke  is its own boot cutover and mutually exclusive with --gl, so it
+#               implies --no-gl unless --gl was asked for explicitly (-> die).
+#   --probe     is the sandbox probe, not the player; GL does not apply.
+if (( GL_DEVICE == -1 )); then
+    if (( GL_SMOKE )) || [[ "${MODE}" != "player" ]]; then GL_DEVICE=0; else GL_DEVICE=1; fi
+fi
 (( GL_SMOKE && GL_DEVICE )) && die "--gl and --gl-smoke are mutually exclusive (both cut the boot over to ps5-opengl)"
+(( GL_DEVICE )) && [[ "${MODE}" != "player" ]] && die "--gl only applies to the player build (drop --gl, or use --no-gl with --${MODE})"
 # Both flags link ps5-opengl + share the SDK-consumption / undef-harvest / _Exit-wrap machinery.
 GL_LINK=$(( GL_SMOKE || GL_DEVICE ))
 
@@ -79,7 +100,9 @@ if ! in_container; then
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( GL_SMOKE ))     && FWD+=(--gl-smoke)
-    (( GL_DEVICE ))    && FWD+=(--gl)
+    # Forward the RESOLVED choice, never the default, so the in-container build
+    # cannot disagree with the host-side one.
+    if (( GL_DEVICE )); then FWD+=(--gl); else FWD+=(--no-gl); fi
     (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     reexec_in_container "package-app.sh" "${FWD[@]}"
@@ -87,8 +110,9 @@ fi
 
 # --gl-smoke (#77, GL-1) / --gl (#79, GL-3): consume the ps5-opengl-core33 SDK
 # that scripts/build-ps5-opengl.sh produced, compile the GL glue into the eboot,
-# and link the Mesa/Gallium/PSBC archives. Opt-in — a plain --ffpfsc is
-# byte-unchanged. See docs/evo-pro/gl1-spike.md / gl2-render-interface.md.
+# and link the Mesa/Gallium/PSBC archives. --gl is ON by default as of
+# 2026-09-10, so a plain --ffpfsc needs the ps5-opengl SDK built; --no-gl opts
+# back out. See docs/evo-pro/gl1-spike.md / gl2-render-interface.md.
 GL_LINK_LIBS=()         # -L / -l args from the installed .mk, minus what EVO already links
 GL_PUBLIC_CFLAGS=""
 GL_FORCE_UNDEF=()
