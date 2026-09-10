@@ -116,8 +116,9 @@ Two things the sketch got wrong, both settled by hardware and by
 
 Parity target is BT.601 **limited** range — what every CPU converter did. A move
 to BT.709 would be a separate, deliberate change; do not slip it in. `uRange`
-exists as a hook but is not wired to `evo_settings`. P010 (`#4`'s tail) drops in
-as `GL_R16` / `GL_RG16` with a `* 64.0` unpack and the same matrix.
+exists as a hook but is not wired to `evo_settings`. **P010 / 10-bit moved to
+GL-5 (#81)** — GL-4 is 8-bit only; the shader leaves room (`GL_R16` / `GL_RG16`,
+`* 64.0` unpack, plus an SDR tone-map) but it is not wired.
 
 **Aspect.** FIT / FILL / STRETCH is a `uScale` on the quad's clip-space corners,
 computed from the frame's display aspect against the panel's. That is the whole
@@ -148,7 +149,7 @@ black across it anyway. They keep the whole-scratch blit until GL-5 renders
 RmlUi through GL with real alpha.
 
 
-## Stage 2d — seek — done (hw-verify-pending)
+## Stage 2d — seek — done + hw-verified 2026-09-10
 
 **The bug.** In the steady state the published planes are *borrowed* from the
 decoder: `push_frame` pace-sleeps to the frame's PTS before returning, so the
@@ -195,7 +196,7 @@ memset (the dispatch draws them earlier in the frame, where that clear wiped
 them). This makes the "subtitles stay up with the OSD hidden" and "a toast fired
 without a recent button press" checks part of the hardware pass.
 
-## Stage 3 — demolition — done (hw-verify-pending)
+## Stage 3 — demolition — done + hw-verified 2026-09-10
 
 **Deleted outright**
 

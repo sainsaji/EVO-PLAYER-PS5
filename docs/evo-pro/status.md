@@ -3,11 +3,10 @@
 > ## Current front (2026-09-10): the OpenGL render overhaul
 >
 > Everything renders through **one** path now: a persistent ps5-opengl GL/EGL
-> context, brought up in the pre-unjail boot slot. GL-1 … GL-4 are landed on
-> `refactor/main-c-media-modules`; **GL-4 (#80) Stage 2d + Stage 3 are
-> code-complete and hw-verify-pending** — see
-> [gl4-video-path-plan.md](gl4-video-path-plan.md) § "Hardware pass still owed"
-> for the exact six checks, and
+> context, brought up in the pre-unjail boot slot. GL-1 … GL-4 are done on `refactor/main-c-media-modules`; **GL-4 (#80) closed
+> 2026-09-10, hw-verified (`c49b317`)** — one GL present path, CPU converters
+> gone, held-frame seek, `--no-gl` retired. See
+> [gl4-video-path-plan.md](gl4-video-path-plan.md) and
 > [opengl-render-overhaul.md](opengl-render-overhaul.md) for the phase table.
 >
 > GL-4 deleted the CPU converters, `tile_copy`, the V8/V3/1080 backend enum, the
@@ -18,9 +17,10 @@
 > GL-6 deletes. Read what follows as the record of how the GPU present path was
 > reverse-engineered, not as a description of what runs.
 >
-> Next after the hardware pass: **GL-5** (subtitles / keyboard / image viewer /
-> HUD onto GL — closes `#34`, `#35`, `#63`), then **GL-6** (delete `pp_agc*`,
-> `pp_videoout`, `evo_rmlui_render*_agc`; rewrite the GPU docs).
+> Next: **GL-5 (#81)** — subtitles / keyboard / image viewer / HUD onto GL, plus
+> **P010 / 10-bit + SDR tone-map** in the GL video shader (moved from GL-4);
+> closes `#34`, `#35`, `#63`. Then **GL-6 (#82)** — delete `pp_agc*`,
+> `pp_videoout`, `evo_rmlui_render*_agc`; rewrite the GPU docs.
 
 
 > **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
