@@ -47,11 +47,24 @@ int evo_vdec_native_probe(void);
 void evo_vdec_native_prefer_nv12(int on);
 
 /*
+ * Codec-independent capability query (#41). Returns 1 iff the resident decoder
+ * for codec_id is up and can take this (profile, bit_depth, w, h):
+ *   - H.264  Baseline/Main/High 8-bit 4:2:0
+ *   - HEVC   Main 8-bit 4:2:0
+ *   - VP9    Profile 0 8-bit 4:2:0
+ * 10-bit (HEVC Main10, VP9 Profile 2) and AV1 always return 0 — they stay on
+ * the FFmpeg CPU path (10-bit pending the P010 present, #4). Pass w==0/h==0 to
+ * skip the dimension gate (codec/profile capability only). Cheap: reuses the
+ * cached evo_vdec_native_probe() result.
+ */
+int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
+                             int w, int h);
+
+/*
  * Bring up a decoder. Returns NULL unless: this is the app module, the probe
- * passed, p->backend == EVO_VDEC_BACKEND_NATIVE, the codec is supported
- * (H.264 8-bit and HEVC Main today — HEVC Main10/P010 is deferred to the
- * converter change in the plan §3 and falls back), and every sceVideodec2
- * bring-up call returned 0. On any failure the dispatcher opens FFmpeg.
+ * passed, p->backend == EVO_VDEC_BACKEND_NATIVE, evo_vdec_native_supports()
+ * accepts the stream, and every sceVideodec2 bring-up call returned 0. On any
+ * failure the dispatcher opens FFmpeg.
  */
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p);
 

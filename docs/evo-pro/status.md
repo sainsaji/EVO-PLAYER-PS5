@@ -379,6 +379,37 @@ pre-unjail probe output and flushes it to `/mnt/usb0/evo_boot.log` — pulled
 over FTP, no screenshots. **#27 Step 2 port (`pp/src/pp_agc.{h,c}` +
 `agc_blobs.S`) is unblocked.**
 
+## 2026-09-10 — #41 codec-independent NativeVideoBackend — CODE LANDED, hw-verify-pending
+
+`media/src/evo_vdec_native.c` generalised from AVC-only to a **codec mode table**
+(`g_codec[]`: AVC / HEVC Main / VP9 Profile 0, all 8-bit 4:2:0 → NV12). One
+`struct dec_slot` **per codec** (`g_dec[NAT_CODEC_COUNT]`), each brought up once
+pre-unjail in `evo_vdec_native_probe()`:
+
+- **AVC** slot: 4K, with the #31 1080p retry — unchanged behaviour.
+- **HEVC + VP9** slots: **default 1080p** (three resident 4K decoders is
+  unmeasured against the fake-signed budget). `-DEVO_VDEC_NATIVE_SECONDARY_4K=1`
+  raises both to 4K. A secondary bring-up failure is **non-fatal** — that codec
+  falls back to FFmpeg, AVC stays up.
+- New `evo_vdec_native_supports(codec_id, profile, bit_depth, w, h)` is the one
+  gate (`evo_vdec_pref_resolve` AUTO + `evo_vdec_native_open` both use it).
+  10-bit (HEVC Main10 / VP9 Profile 2) and AV1 → 0 (FFmpeg, 10-bit pending #4).
+- Per-codec AU adaptation behind the interface: `h264_mp4toannexb` /
+  `hevc_mp4toannexb` for wrapped avcC/hvcC; **VP9 → `vp9_superframe_split`** bsf
+  (compound superframe rejected whole by the decoder) + a small
+  `vp9_frame_is_shown()` uncompressed-header parse so hidden alt-ref frames are
+  submitted-for-reference but not presented.
+- `receive()` / `ro_harvest` unchanged — VP9 Profile 0 is 8-bit two-plane, same
+  NV12/I420 path as AVC.
+
+Both builds green (`build-evoplayer.sh` host + `package-app.sh` app module).
+**Needs hardware:** confirm HEVC Main + VP9 Profile 0 slots come up (check
+`/mnt/usb0/evo.log` `RESIDENT HEVC/VP9 decoder up`); play a 1080p HEVC and a
+1080p VP9 file (`evo_pb_active_backend()` → NATIVE); measure whether
+`-DEVO_VDEC_NATIVE_SECONDARY_4K=1` fits (4K HEVC is the #41 acceptance target);
+watch VP9 alt-ref content for out-of-order frames. `tools/evo-remote.sh
+play <path>` is the loop.
+
 ## 2026-09-03 (later) — PHASE 4 (#31) DONE: native 4K decode plays in EVO 🎉
 
 `media/src/evo_vdec_native.c` — the `sceVideodec2` backend behind `evo_vdec.h`.

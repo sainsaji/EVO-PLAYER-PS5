@@ -6242,6 +6242,8 @@ double percentage = 0.0;
             }
 
             const char *cname = evo_vdec_ffmpeg_codec_name(g_vdec);
+            if (!cname[0])   /* native backend: name from the stream's codec id */
+                cname = avcodec_get_name((enum AVCodecID)evo_vdec_codec_id(g_vdec));
             if (cname[0]) {
                 if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) {
                     snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
@@ -10472,6 +10474,8 @@ void draw_media_info_screen(uint32_t *fb)
                             vc_pf == AV_PIX_FMT_YUV444P10LE);
 
             const char *cname = evo_vdec_ffmpeg_codec_name(g_vdec);
+            if (!cname[0])   /* native backend: name from the stream's codec id */
+                cname = avcodec_get_name((enum AVCodecID)evo_vdec_codec_id(g_vdec));
             if (cname[0]) {
                 if (strcasecmp(cname, "hevc") == 0 || strcasecmp(cname, "h265") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "HEVC 10-BIT" : "HEVC");
                 else if (strcasecmp(cname, "h264") == 0 || strcasecmp(cname, "avc") == 0) snprintf(codec_badge, sizeof(codec_badge), is_10bit ? "AVC 10-BIT" : "AVC / H.264");

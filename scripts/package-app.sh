@@ -49,6 +49,8 @@ USB_REMOTE=0
 BREADCRUMBS=0
 GL_SMOKE=0
 GL_DEVICE=0
+NATIVE_SECONDARY=0
+NATIVE_SECONDARY_4K=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -59,6 +61,8 @@ while (( $# )); do
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
         --gl)           GL_DEVICE=1 ;;    # #79 GL-3: persistent device GL context (boot cutover to GL/EGL)
+        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: bring up HEVC + VP9 resident decoders at boot (default 1080p) — UNVERIFIED, crashed 2026-09-10, use with --breadcrumbs
+        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: + raise HEVC/VP9 slots to the 4K ceiling
         -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -76,6 +80,8 @@ if ! in_container; then
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( GL_SMOKE ))     && FWD+=(--gl-smoke)
     (( GL_DEVICE ))    && FWD+=(--gl)
+    (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
+    (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -322,6 +328,12 @@ else
     # --gl-smoke (#77): EVO_GL_SMOKE gate in main.c + the pp_gl_smoke/pp_gl_fatal
     # objects (the Makefile adds them to PP_SRCS when GL_SMOKE=1).
     (( GL_SMOKE )) && APP_DEFS+=" -DEVO_GL_SMOKE=1"
+    # --native-secondary (#41): bring HEVC + VP9 resident sceVideodec2 decoders
+    # up at boot (evo_vdec_native.c). OFF by default — the first build that did
+    # this crashed PPSA99039 pre-log 2026-09-10. Pair with --breadcrumbs to see
+    # which probe_slot() faults. --native-secondary-4k also lifts them to 4K.
+    (( NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=1"
+    (( NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
     # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
     # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
     (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"

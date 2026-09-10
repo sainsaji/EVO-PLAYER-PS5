@@ -122,6 +122,11 @@ void evo_vdec_flush(evo_vdec *v);      /* seek: drop all buffered state */
 void evo_vdec_close(evo_vdec *v);
 evo_vdec_backend evo_vdec_active(const evo_vdec *v);
 
+/* AVCodecID of the stream this decoder is playing — backend-independent (the
+ * FFmpeg codec-name accessors below return "" on the native backend). Use with
+ * avcodec_get_name() for the UI codec badge. 0 (AV_CODEC_ID_NONE) if v==NULL. */
+int evo_vdec_codec_id(const evo_vdec *v);
+
 /* ---- FFmpeg-backend-only accessors.
  *      CONTRACT: the native backend implements these as hard stubs —
  *      the int accessors return 0, evo_vdec_ffmpeg_codec_name() returns NULL,

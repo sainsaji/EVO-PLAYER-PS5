@@ -12,20 +12,38 @@
  * builds get the stubs at the bottom, so the dispatcher (evo_vdec_ffmpeg.c)
  * always downgrades to FFmpeg.
  *
- * RESIDENT DECODER — the sequencing constraint, learned on hardware 2026-09-03.
+ * CODEC-INDEPENDENT BACKEND (#41). One interface, one small mode table
+ * (g_codec[]): H.264, HEVC Main and VP9 Profile 0, all 8-bit 4:2:0 -> NV12.
+ * open / send / receive / present are shared; only the AU->submit adaptation
+ * (bitstream filter, VP9 superframe split + hidden-frame suppression) is
+ * per-codec, and it hides behind the same struct. HEVC Main10 and VP9
+ * Profile 2 are 10-bit two-plane and stay on FFmpeg until the P010 present
+ * lands (#4); AV1 has no sceVideodec2 route at all.
+ *
+ * RESIDENT DECODERS — the sequencing constraint, learned on hardware 2026-09-03.
  * The self-unjail (evo_jailbreak_self / _ensure) swaps process credentials
  * mid-run, after which EVERY libSceVideodec2 call fails
  * (sceVideodec2QueryComputeMemoryInfo -> 0x811D0111), not just
- * sceSysmoduleLoadModule. So the compute queue + decoder are brought up ONCE
- * at boot in evo_vdec_native_probe() — before the first evo_jailbreak_self() —
- * as a session-resident singleton (g_boot), sized for 4K AVC High. Each
- * evo_vdec_native_open() just sceVideodec2Reset()s that decoder and feeds it;
- * nothing is created or destroyed at playback time. HEVC and >4K fall back to
- * FFmpeg (a second resident HEVC decoder is a later step).
+ * sceSysmoduleLoadModule. So each decoder is brought up ONCE at boot in
+ * evo_vdec_native_probe() — before the first evo_jailbreak_self() — as a
+ * session-resident slot (g_dec[]). Lazy per-playback creation is impossible:
+ * by open() time the unjail has already happened. Each evo_vdec_native_open()
+ * just sceVideodec2Reset()s the matching slot and feeds it; nothing is created
+ * or destroyed at playback time.
  *
- * DEMUX -> AU FORMAT. sceVideodec2 wants Annex-B (start-code NALs, SPS/PPS
- * in-band). For mp4/mkv (avcC extradata) we run AUs through the
- * h264_mp4toannexb bitstream filter; already-Annex-B streams pass through.
+ * MEMORY. Three resident 4K decoders is a lot of direct memory against the
+ * fake-signed budget. The AVC slot is 4K (the case native decode exists for —
+ * 4K H.264 that blows the software frame pool). HEVC + VP9 default to 1080p and
+ * are raised to 4K with -DEVO_VDEC_NATIVE_SECONDARY_4K=1 once the budget has
+ * been measured on hardware. A secondary bring-up failure is non-fatal: that
+ * codec falls back to FFmpeg and the AVC slot stays up.
+ *
+ * DEMUX -> AU FORMAT. sceVideodec2 wants Annex-B for AVC/HEVC (start-code NALs,
+ * VPS/SPS/PPS in-band). For mp4/mkv (avcC/hvcC extradata) we run AUs through
+ * h264_mp4toannexb / hevc_mp4toannexb; already-Annex-B streams pass through.
+ * VP9 has no Annex-B: a compound superframe packet is rejected whole, so every
+ * AU goes through vp9_superframe_split and hidden (alt-ref, show_frame=0)
+ * coded frames are submitted for reference but their output is suppressed.
  *
  * FRAME ORDER. SceVideodec2OutputInfo carries no PTS and no picture-detail
  * hook is bound. This backend assumes DISPLAY-order emission + min-PTS pairing,
@@ -52,6 +70,25 @@
 #include <libavutil/rational.h>
 
 #include "sce/sce_videodec2.h"
+
+/* FFmpeg profile-id fallbacks — the pinned build has the FF_PROFILE_* spelling
+ * (main.c uses FF_PROFILE_HEVC_MAIN_10); keep numeric fallbacks in case that
+ * changes to AV_PROFILE_*. Values are per-codec namespaced. */
+#ifndef FF_PROFILE_UNKNOWN
+#define FF_PROFILE_UNKNOWN       (-99)
+#endif
+#ifndef FF_PROFILE_HEVC_MAIN
+#define FF_PROFILE_HEVC_MAIN     1
+#endif
+#ifndef FF_PROFILE_HEVC_MAIN_10
+#define FF_PROFILE_HEVC_MAIN_10  2
+#endif
+#ifndef FF_PROFILE_VP9_0
+#define FF_PROFILE_VP9_0         0
+#endif
+#ifndef FF_PROFILE_VP9_2
+#define FF_PROFILE_VP9_2         2
+#endif
 
 /* --- externs (libkernel + libSceSysmodule, both already DT_NEEDED) --------- */
 extern int      sceKernelSendNotificationRequest(int, void *, unsigned long, int);
@@ -91,6 +128,68 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #ifndef EVO_VDEC_NATIVE_MAX_H
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
+
+/* Secondary (HEVC / VP9) resident decoders — OFF by default (#41).
+ *
+ * 2026-09-10: the first build that brought HEVC + VP9 decoders up at boot
+ * crashed PPSA99039 before any diagnostic flushed — a pre-unjail
+ * sceVideodec2CreateDecoder / QueryDecoderMemoryInfo fault with a non-AVC
+ * codec_type is the prime suspect (VP9's codec tag is marked unverified in the
+ * header; HEVC max_level scale is a guess). Until that's isolated on hardware
+ * with --breadcrumbs, the default .ffpfsc is byte-identical to the working #31
+ * AVC-only behaviour. Build -DEVO_VDEC_NATIVE_SECONDARY=1 to bring them up. */
+#ifndef EVO_VDEC_NATIVE_SECONDARY
+#define EVO_VDEC_NATIVE_SECONDARY 0
+#endif
+
+/* When secondary decoders are on: 1080p by default (three 4K decoders against
+ * the fake-signed budget is unmeasured); -DEVO_VDEC_NATIVE_SECONDARY_4K=1 for
+ * the AVC ceiling (#41 acceptance: 4K HEVC). */
+#ifndef EVO_VDEC_NATIVE_SECONDARY_4K
+#define EVO_VDEC_NATIVE_SECONDARY_4K 0
+#endif
+#if EVO_VDEC_NATIVE_SECONDARY_4K
+#define EVO_VDEC_NATIVE_SECONDARY_MAX_W  EVO_VDEC_NATIVE_MAX_W
+#define EVO_VDEC_NATIVE_SECONDARY_MAX_H  EVO_VDEC_NATIVE_MAX_H
+#else
+#define EVO_VDEC_NATIVE_SECONDARY_MAX_W  1920
+#define EVO_VDEC_NATIVE_SECONDARY_MAX_H  1088
+#endif
+
+/* ---- codec-independent mode table (#41) ---------------------------------- */
+typedef enum { NAT_H264 = 0, NAT_HEVC = 1, NAT_VP9 = 2, NAT_CODEC_COUNT } nat_codec;
+
+typedef struct {
+    nat_codec    idx;
+    int          codec_id;      /* AVCodecID from the demuxer                 */
+    uint32_t     codec_type;    /* SCE_VIDEODEC2_CODEC_*                      */
+    uint32_t     profile_cfg;   /* profile_idc handed to CreateDecoder        */
+    int          level_1080;    /* max_level for <=1080p                      */
+    int          level_4k;      /* max_level for >1080p                       */
+    const char  *bsf_name;      /* AU adaptation bitstream filter, or NULL    */
+    int          is_vp9;        /* always run the bsf; suppress hidden frames */
+    const char  *tag;
+} nat_codec_desc;
+
+/* max_level scale is per-codec: AVC = level x10 (51 = 5.1); HEVC =
+ * general_level_idc = level x30 (123/150/153 for 1080/1440/2160, as
+ * ProsperoLight passes); VP9 x10 is a best guess pending hardware. */
+static const nat_codec_desc g_codec[NAT_CODEC_COUNT] = {
+    { NAT_H264, AV_CODEC_ID_H264, SCE_VIDEODEC2_CODEC_AVC,  100,  51,  52,
+      "h264_mp4toannexb",     0, "AVC"  },
+    { NAT_HEVC, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   1, 123, 153,
+      "hevc_mp4toannexb",     0, "HEVC" },
+    { NAT_VP9,  AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    0,  41,  51,
+      "vp9_superframe_split", 1, "VP9"  },
+};
+
+static const nat_codec_desc *codec_desc_for(int codec_id)
+{
+    for (int i = 0; i < NAT_CODEC_COUNT; i++)
+        if (g_codec[i].codec_id == codec_id)
+            return &g_codec[i];
+    return NULL;
+}
 
 /* Decoder notes go to /mnt/usb0/evo.log (via evo_boot_log — one file, shared
  * with the boot trace + breadcrumbs). They are already gated at the call sites
@@ -137,11 +236,11 @@ static void free_direct(void *addr, int64_t start, size_t size)
 }
 
 /* ---------------------------------------------------------------------------
- * Session-resident decoder — created ONCE, pre-unjail, in evo_vdec_native_probe().
+ * Session-resident decoders — one slot per codec, each created ONCE, pre-unjail,
+ * in evo_vdec_native_probe().
  * ------------------------------------------------------------------------ */
 
-static struct {
-    int      tried;
+struct dec_slot {
     int      ready;
     void    *compute_queue;
     void    *compute_mem;   int64_t compute_start; size_t compute_size;
@@ -153,35 +252,39 @@ static struct {
     void    *frame_mem;     int64_t frame_start;   size_t frame_pool;
     size_t   frame_size;
     uint32_t max_w, max_h;
-} g_boot;
+};
 
-static void boot_teardown(void)
+static int             g_boot_tried;
+static int             g_boot_any;
+static struct dec_slot g_dec[NAT_CODEC_COUNT];
+
+static void slot_teardown(struct dec_slot *s)
 {
-    if (g_boot.decoder) { sceVideodec2DeleteDecoder(g_boot.decoder); g_boot.decoder = NULL; }
-    free_direct(g_boot.frame_mem,   g_boot.frame_start,   g_boot.frame_pool);
-    free_direct(g_boot.input_mem,   g_boot.input_start,   g_boot.input_pool);
-    free_direct(g_boot.cpu_gpu_mem, g_boot.cpu_gpu_start, g_boot.cpu_gpu_size);
-    free_direct(g_boot.gpu_mem,     g_boot.gpu_start,     g_boot.gpu_size);
-    if (g_boot.cpu_mem) {
-        sceKernelReleaseFlexibleMemory(g_boot.cpu_mem, g_boot.cpu_map);
-        sceKernelMunmap(g_boot.cpu_mem, g_boot.cpu_map);
+    if (s->decoder) { sceVideodec2DeleteDecoder(s->decoder); s->decoder = NULL; }
+    free_direct(s->frame_mem,   s->frame_start,   s->frame_pool);
+    free_direct(s->input_mem,   s->input_start,   s->input_pool);
+    free_direct(s->cpu_gpu_mem, s->cpu_gpu_start, s->cpu_gpu_size);
+    free_direct(s->gpu_mem,     s->gpu_start,     s->gpu_size);
+    if (s->cpu_mem) {
+        sceKernelReleaseFlexibleMemory(s->cpu_mem, s->cpu_map);
+        sceKernelMunmap(s->cpu_mem, s->cpu_map);
     }
-    if (g_boot.compute_queue) { sceVideodec2ReleaseComputeQueue(g_boot.compute_queue); g_boot.compute_queue = NULL; }
-    free_direct(g_boot.compute_mem, g_boot.compute_start, g_boot.compute_size);
-    memset(&g_boot, 0, sizeof g_boot);
-    g_boot.tried = 1;
+    if (s->compute_queue) { sceVideodec2ReleaseComputeQueue(s->compute_queue); s->compute_queue = NULL; }
+    free_direct(s->compute_mem, s->compute_start, s->compute_size);
+    memset(s, 0, sizeof *s);
 }
 
-/* Full bring-up for an AVC High decoder at (w x h). Returns 0 on success with
- * everything stored in g_boot; non-zero rc (and g_boot left torn down) on any
+/* Full bring-up for `d`'s decoder at (w x h). Returns 0 on success with
+ * everything stored in `*s`; non-zero rc (and `*s` left torn down) on any
  * failure. MUST be called before the first evo_jailbreak_self(). */
-static int boot_bringup(int w, int h, const char **stage)
+static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
+                        int w, int h, const char **stage)
 {
     int64_t dm = sceKernelGetDirectMemorySize();
     int rc;
 
-    g_boot.compute_start = g_boot.gpu_start = g_boot.cpu_gpu_start =
-        g_boot.input_start = g_boot.frame_start = -1;
+    s->compute_start = s->gpu_start = s->cpu_gpu_start =
+        s->input_start = s->frame_start = -1;
 
     SceVideodec2ComputeMemoryInfo cm;
     SceVideodec2ComputeConfigInfo cc;
@@ -190,16 +293,16 @@ static int boot_bringup(int w, int h, const char **stage)
     cm.size = sizeof cm;
     *stage = "QueryComputeMemoryInfo";
     if ((rc = sceVideodec2QueryComputeMemoryInfo(&cm)) != 0) return rc;
-    g_boot.compute_size = align16k((size_t)cm.cpu_gpu_size);
+    s->compute_size = align16k((size_t)cm.cpu_gpu_size);
     *stage = "alloc(compute)";
-    if ((rc = alloc_direct(g_boot.compute_size, 0x33, dm,
-                           &g_boot.compute_start, &g_boot.compute_mem)) != 0) return rc;
-    cm.cpu_gpu      = g_boot.compute_mem;
-    cm.cpu_gpu_size = g_boot.compute_size;
+    if ((rc = alloc_direct(s->compute_size, 0x33, dm,
+                           &s->compute_start, &s->compute_mem)) != 0) return rc;
+    cm.cpu_gpu      = s->compute_mem;
+    cm.cpu_gpu_size = s->compute_size;
     cc.size = sizeof cc;
     *stage = "AllocateComputeQueue";
-    if ((rc = sceVideodec2AllocateComputeQueue(&cc, &cm, &g_boot.compute_queue)) != 0) return rc;
-    if (!g_boot.compute_queue) return -1;
+    if ((rc = sceVideodec2AllocateComputeQueue(&cc, &cm, &s->compute_queue)) != 0) return rc;
+    if (!s->compute_queue) return -1;
 
     SceVideodec2DecoderConfigInfo config;
     SceVideodec2DecoderMemoryInfo mem;
@@ -207,14 +310,14 @@ static int boot_bringup(int w, int h, const char **stage)
     memset(&mem, 0, sizeof mem);
     config.size                 = sizeof config;
     config.resource_type        = SCE_VIDEODEC2_RESOURCE_COMPUTE;
-    config.codec_type           = SCE_VIDEODEC2_CODEC_AVC;
-    config.profile              = 100;                       /* High (superset)  */
-    config.max_level            = (w > 1920 || h > 1088) ? 52 : 51;
+    config.codec_type           = d->codec_type;
+    config.profile              = d->profile_cfg;
+    config.max_level            = (w > 1920 || h > 1088) ? d->level_4k : d->level_1080;
     config.max_width            = w;
     config.max_height           = h;
     config.max_dpb_frames       = SCE_VIDEODEC2_AUTO_FRAMES;   /* decoder self-sizes */
     config.pipeline_depth       = DECODE_INPUT_QUEUE_DEPTH;
-    config.compute_queue        = (uint64_t)g_boot.compute_queue;
+    config.compute_queue        = (uint64_t)s->compute_queue;
     config.cpu_affinity         = 0x3f;
     config.cpu_priority         = 700;
     config.optimize_progressive = 1;
@@ -223,46 +326,46 @@ static int boot_bringup(int w, int h, const char **stage)
     *stage = "QueryDecoderMemoryInfo";
     if ((rc = sceVideodec2QueryDecoderMemoryInfo(&config, &mem)) != 0) return rc;
 
-    g_boot.cpu_map = align16k((size_t)mem.cpu_size);
+    s->cpu_map = align16k((size_t)mem.cpu_size);
     *stage = "MapNamedFlexibleMemory";
-    if ((rc = sceKernelMapNamedFlexibleMemory(&mem.cpu, g_boot.cpu_map, 0x03, 0,
+    if ((rc = sceKernelMapNamedFlexibleMemory(&mem.cpu, s->cpu_map, 0x03, 0,
                                               "EvoVdecNative")) != 0) return rc;
     if (!mem.cpu) return -1;
-    g_boot.cpu_mem = mem.cpu;
+    s->cpu_mem = mem.cpu;
 
-    g_boot.gpu_size     = align16k((size_t)mem.gpu_size);
-    g_boot.cpu_gpu_size = align16k((size_t)mem.cpu_gpu_size);
-    g_boot.frame_size   = align16k((size_t)mem.max_frame_size);
-    g_boot.input_pool   = (size_t)INPUT_SLOT_BYTES * PIPELINE_BUFFER_COUNT;
-    g_boot.frame_pool   = g_boot.frame_size * FRAME_POOL_SLOTS;
-    if (g_boot.frame_size == 0) return -1;
-    mem.gpu_size = g_boot.gpu_size;
-    if (g_boot.cpu_gpu_size) mem.cpu_gpu_size = g_boot.cpu_gpu_size;
+    s->gpu_size     = align16k((size_t)mem.gpu_size);
+    s->cpu_gpu_size = align16k((size_t)mem.cpu_gpu_size);
+    s->frame_size   = align16k((size_t)mem.max_frame_size);
+    s->input_pool   = (size_t)INPUT_SLOT_BYTES * PIPELINE_BUFFER_COUNT;
+    s->frame_pool   = s->frame_size * FRAME_POOL_SLOTS;
+    if (s->frame_size == 0) return -1;
+    mem.gpu_size = s->gpu_size;
+    if (s->cpu_gpu_size) mem.cpu_gpu_size = s->cpu_gpu_size;
 
     *stage = "alloc(gpu)";
-    if ((rc = alloc_direct(g_boot.gpu_size, 0x32, dm, &g_boot.gpu_start, &g_boot.gpu_mem)) != 0) return rc;
-    mem.gpu = g_boot.gpu_mem;
-    if (g_boot.cpu_gpu_size) {
+    if ((rc = alloc_direct(s->gpu_size, 0x32, dm, &s->gpu_start, &s->gpu_mem)) != 0) return rc;
+    mem.gpu = s->gpu_mem;
+    if (s->cpu_gpu_size) {
         *stage = "alloc(cpu_gpu)";
-        if ((rc = alloc_direct(g_boot.cpu_gpu_size, 0x33, dm,
-                               &g_boot.cpu_gpu_start, &g_boot.cpu_gpu_mem)) != 0) return rc;
-        mem.cpu_gpu = g_boot.cpu_gpu_mem;
+        if ((rc = alloc_direct(s->cpu_gpu_size, 0x33, dm,
+                               &s->cpu_gpu_start, &s->cpu_gpu_mem)) != 0) return rc;
+        mem.cpu_gpu = s->cpu_gpu_mem;
     }
     *stage = "alloc(input)";
-    if ((rc = alloc_direct(g_boot.input_pool, 0x32, dm,
-                           &g_boot.input_start, &g_boot.input_mem)) != 0) return rc;
+    if ((rc = alloc_direct(s->input_pool, 0x32, dm,
+                           &s->input_start, &s->input_mem)) != 0) return rc;
     *stage = "alloc(frame)";
-    if ((rc = alloc_direct(g_boot.frame_pool, 0x32, dm,
-                           &g_boot.frame_start, &g_boot.frame_mem)) != 0) return rc;
+    if ((rc = alloc_direct(s->frame_pool, 0x32, dm,
+                           &s->frame_start, &s->frame_mem)) != 0) return rc;
 
     *stage = "CreateDecoder";
-    if ((rc = sceVideodec2CreateDecoder(&config, &mem, &g_boot.decoder)) != 0) return rc;
-    if (!g_boot.decoder) return -1;
+    if ((rc = sceVideodec2CreateDecoder(&config, &mem, &s->decoder)) != 0) return rc;
+    if (!s->decoder) return -1;
     *stage = "Reset";
-    if ((rc = sceVideodec2Reset(g_boot.decoder)) != 0) return rc;
+    if ((rc = sceVideodec2Reset(s->decoder)) != 0) return rc;
 
-    g_boot.max_w = (uint32_t)w;
-    g_boot.max_h = (uint32_t)h;
+    s->max_w = (uint32_t)w;
+    s->max_h = (uint32_t)h;
     *stage = "ok";
     return 0;
 }
@@ -270,38 +373,105 @@ static int boot_bringup(int w, int h, const char **stage)
 static int g_prefer_nv12 = 0;
 void evo_vdec_native_prefer_nv12(int on) { g_prefer_nv12 = on ? 1 : 0; }
 
+/* Bring up one codec slot with an automatic 1080p retry on a 4K failure.
+ * `required` streams also log at failure; a non-required (HEVC/VP9) failure is
+ * quiet-ish and just leaves that slot !ready. */
+static void probe_slot(nat_codec c, int w, int h, int required, unsigned sm)
+{
+    struct dec_slot *s = &g_dec[c];
+    const nat_codec_desc *d = &g_codec[c];
+    const char *stage = "?";
+
+    int rc = slot_bringup(s, d, w, h, &stage);
+    if (rc != 0 && (w > 1920 || h > 1088)) {
+        note("EVO vdec native: %s 4K bring-up FAILED at [%s] rc=0x%08x - trying 1080p",
+             d->tag, stage, (unsigned)rc);
+        slot_teardown(s);
+        rc = slot_bringup(s, d, 1920, 1088, &stage);
+    }
+    if (rc == 0) {
+        s->ready   = 1;
+        g_boot_any = 1;
+        note("EVO vdec native: RESIDENT %s decoder up  %ux%u  frame=%zuKB  sysmod=0x%08x",
+             d->tag, s->max_w, s->max_h, s->frame_size >> 10, sm);
+        return;
+    }
+    note("EVO vdec native: %s bring-up FAILED at [%s] rc=0x%08x sysmod=0x%08x -> %s",
+         d->tag, stage, (unsigned)rc, sm,
+         required ? "no AVC native decode" : "FFmpeg for that codec");
+    slot_teardown(s);
+}
+
 int evo_vdec_native_probe(void)
 {
-    if (g_boot.tried)
-        return g_boot.ready;
-    g_boot.tried = 1;
+    if (g_boot_tried)
+        return g_boot_any;
+    g_boot_tried = 1;
 
-    int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
+    unsigned sm = (unsigned)sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
 
-    const char *stage = "?";
-    int rc = boot_bringup(EVO_VDEC_NATIVE_MAX_W, EVO_VDEC_NATIVE_MAX_H, &stage);
-    if (rc != 0) {
-        note("EVO vdec native: 4K bring-up FAILED at [%s] rc=0x%08x - trying 1080p",
-             stage, (unsigned)rc);
-        boot_teardown();
-        g_boot.tried = 1;
-        rc = boot_bringup(1920, 1088, &stage);
-    }
-    if (rc != 0) {
-        note("EVO vdec native: bring-up FAILED at [%s] rc=0x%08x sysmod=0x%08x "
-             "-> FFmpeg only", stage, (unsigned)rc, (unsigned)sm);
-        boot_teardown();
+    /* AVC — the compatibility baseline, 4K (with the #31 1080p retry). */
+    probe_slot(NAT_H264, EVO_VDEC_NATIVE_MAX_W, EVO_VDEC_NATIVE_MAX_H, 1, sm);
+
+#if EVO_VDEC_NATIVE_SECONDARY
+    /* HEVC + VP9 — secondary, non-fatal, independent of the AVC result.
+     * Gated: see the EVO_VDEC_NATIVE_SECONDARY note above (2026-09-10 crash). */
+    probe_slot(NAT_HEVC, EVO_VDEC_NATIVE_SECONDARY_MAX_W,
+               EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
+    probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_SECONDARY_MAX_W,
+               EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
+#endif
+
+    if (!g_boot_any)
+        note("EVO vdec native: no resident decoder -> FFmpeg only (sysmod=0x%08x)", sm);
+    return g_boot_any;
+}
+
+int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
+                             int w, int h)
+{
+    if (!evo_vdec_native_probe())
+        return 0;
+    const nat_codec_desc *d = codec_desc_for(codec_id);
+    if (!d)
+        return 0;
+    const struct dec_slot *s = &g_dec[d->idx];
+    if (!s->ready)
+        return 0;
+    if (bit_depth > 8)
+        return 0;                       /* 10-bit two-plane -> FFmpeg (#4)   */
+
+    switch (codec_id) {
+    case AV_CODEC_ID_H264:
+        /* Baseline / Main / High / constrained-High (578). Anything above
+         * High (Hi10 / Hi422 / Hi444) the 8-bit NV12 decoder cannot do. */
+        if (profile != FF_PROFILE_UNKNOWN && profile > 100 && profile != 578)
+            return 0;
+        break;
+    case AV_CODEC_ID_HEVC:
+        if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN)
+            return 0;                   /* Main10 / RExt / SCC -> FFmpeg     */
+        break;
+    case AV_CODEC_ID_VP9:
+        if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_0)
+            return 0;                   /* Profile 1 (4:4:4) / 2 / 3 -> FFmpeg */
+        break;
+    default:
         return 0;
     }
 
-    g_boot.ready = 1;
-    note("EVO vdec native: RESIDENT decoder up  %ux%u  frame=%zuKB  sysmod=0x%08x",
-         g_boot.max_w, g_boot.max_h, g_boot.frame_size >> 10, (unsigned)sm);
+    if (w > 0 && h > 0) {
+        int rw = roundup16(w), rh = roundup16(h);
+        if (rw < 16 || rh < 16)
+            return 0;
+        if ((uint32_t)rw > s->max_w || (uint32_t)rh > s->max_h)
+            return 0;
+    }
     return 1;
 }
 
 /* ---------------------------------------------------------------------------
- * Per-playback wrapper — borrows g_boot.decoder, never creates/destroys it.
+ * Per-playback wrapper — borrows g_dec[codec].decoder, never creates/destroys it.
  * ------------------------------------------------------------------------ */
 
 /*
@@ -327,9 +497,10 @@ struct nat_slot {
 };
 
 struct evo_vdec_native {
-    void    *dec;           /* == g_boot.decoder (borrowed)   */
-    uint8_t *input_mem;     /* == g_boot.input_mem            */
-    uint8_t *frame_mem;     /* == g_boot.frame_mem            */
+    const nat_codec_desc *desc;  /* selected codec mode                */
+    void    *dec;           /* == g_dec[desc->idx].decoder (borrowed)  */
+    uint8_t *input_mem;     /* == g_dec[desc->idx].input_mem           */
+    uint8_t *frame_mem;     /* == g_dec[desc->idx].frame_mem           */
     size_t   frame_size;
 
     uint32_t disp_w, disp_h;
@@ -474,7 +645,12 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     n->ro_count++;
 }
 
-static int decode_one(evo_vdec_native *n, const uint8_t *au, int size, int64_t pts)
+/* `present` == 0 for a VP9 hidden (alt-ref / show_frame=0) coded frame: the
+ * decoder still needs it for reference, but its output must not be paired to a
+ * PTS or handed to the presenter (research repo, packetization.cpp). Always 1
+ * for AVC / HEVC. */
+static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
+                      int64_t pts, int present)
 {
     if (size <= 0 || (size_t)size > INPUT_SLOT_BYTES)
         return -1;
@@ -522,10 +698,14 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size, int64_t p
         return -1;
     }
 
-    pts_push(n, pts);
+    if (present)
+        pts_push(n, pts);
     if (out.valid && !out.error && out.picture_count) {
-        n->frames_out++;
-        ro_harvest(n, &out);
+        if (present) {
+            n->frames_out++;
+            ro_harvest(n, &out);
+        }
+        /* hidden VP9 frame produced an output: consume it silently */
     }
     if (n->dec_calls % 300u == 0)
         note("EVO vdec native: heartbeat  decodes=%u framesout=%u ro=%d",
@@ -586,6 +766,43 @@ static int bsf_build(evo_vdec_native *n)
     return 0;
 }
 
+/* Read bit `*pos` (MSB-first) from a byte buffer, advancing the cursor; 0 past
+ * the end. */
+static int bitrd(const uint8_t *b, int size, int *pos)
+{
+    int i = (*pos)++;
+    if (i < 0 || (i >> 3) >= size)
+        return 0;
+    return (b[i >> 3] >> (7 - (i & 7))) & 1;
+}
+
+/* VP9 uncompressed-header prefix (6.2 of the spec): is this coded frame shown?
+ * Hidden alt-ref frames (show_frame=0) must be decoded for reference but never
+ * presented; show_existing_frame commands ARE presented (the tested decoder
+ * materialises the referenced picture into the supplied slot). Anything we
+ * can't parse defaults to "present". */
+static int vp9_frame_is_shown(const uint8_t *b, int size)
+{
+    int p = 0;
+    if (bitrd(b, size, &p) != 1 || bitrd(b, size, &p) != 0)   /* frame_marker 0b10 */
+        return 1;
+    int prof = bitrd(b, size, &p);                            /* profile_low_bit  */
+    prof |= bitrd(b, size, &p) << 1;                          /* profile_high_bit */
+    if (prof == 3)
+        (void)bitrd(b, size, &p);                             /* reserved_zero    */
+    if (bitrd(b, size, &p))                                   /* show_existing_frame */
+        return 1;
+    (void)bitrd(b, size, &p);                                 /* frame_type       */
+    return bitrd(b, size, &p);                                /* show_frame       */
+}
+
+static int pkt_present(const evo_vdec_native *n, const AVPacket *pkt)
+{
+    if (n->desc && n->desc->is_vp9)
+        return vp9_frame_is_shown(pkt->data, pkt->size);
+    return 1;
+}
+
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 {
     if (!evo_vdec_native_probe())
@@ -594,31 +811,35 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         return NULL;
 
     const AVCodecParameters *par = (const AVCodecParameters *)p->avctx_params;
+    const nat_codec_desc *d = codec_desc_for(par->codec_id);
+    if (!d)
+        return NULL;                     /* AV1 / anything with no sce route */
 
-    /* Resident decoder is AVC High only for now. */
-    if (par->codec_id != AV_CODEC_ID_H264)
-        return NULL;
-    if ((par->profile > 100 && par->profile != 578) || par->bits_per_raw_sample > 8) {
-        note("EVO vdec native: profile %d unsupported -> FFmpeg", par->profile);
+    int bit_depth = par->bits_per_raw_sample > 8 ? par->bits_per_raw_sample : 8;
+    if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE)
+        bit_depth = 10;
+
+    int w = par->width  > 0 ? par->width  : p->width;
+    int h = par->height > 0 ? par->height : p->height;
+
+    if (!evo_vdec_native_supports(par->codec_id, par->profile, bit_depth, w, h)) {
+        note("EVO vdec native: %s prof=%d %d-bit %dx%d unsupported -> FFmpeg",
+             d->tag, par->profile, bit_depth, w, h);
         return NULL;
     }
 
-    int w = roundup16(par->width  > 0 ? par->width  : p->width);
-    int h = roundup16(par->height > 0 ? par->height : p->height);
-    if (w < 16 || h < 16 ||
-        (uint32_t)w > g_boot.max_w || (uint32_t)h > g_boot.max_h) {
-        note("EVO vdec native: %dx%d exceeds resident %ux%u -> FFmpeg",
-             w, h, g_boot.max_w, g_boot.max_h);
-        return NULL;
-    }
+    struct dec_slot *slot = &g_dec[d->idx];
+    w = roundup16(w);
+    h = roundup16(h);
 
     evo_vdec_native *n = (evo_vdec_native *)calloc(1, sizeof *n);
     if (!n)
         return NULL;
-    n->dec        = g_boot.decoder;
-    n->input_mem  = (uint8_t *)g_boot.input_mem;
-    n->frame_mem  = (uint8_t *)g_boot.frame_mem;
-    n->frame_size = g_boot.frame_size;
+    n->desc       = d;
+    n->dec        = slot->decoder;
+    n->input_mem  = (uint8_t *)slot->input_mem;
+    n->frame_mem  = (uint8_t *)slot->frame_mem;
+    n->frame_size = slot->frame_size;
     n->disp_w     = par->width  > 0 ? (uint32_t)par->width  : 0;
     n->disp_h     = par->height > 0 ? (uint32_t)par->height : 0;
     /* #27: when the GPU present path is up, emit NV12 straight from the decoder
@@ -626,13 +847,18 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
      * the CPU never touches the pixels. Fixed for the stream's lifetime. */
     n->agc_out    = pp_agc_available() || g_prefer_nv12;
 
-    if (par->extradata && par->extradata_size >= 4 && par->extradata[0] == 1) {
-        n->bsf_name = "h264_mp4toannexb";
+    /* AU adaptation: VP9 always runs the superframe split; AVC/HEVC only when
+     * the extradata is a mp4-style avcC/hvcC wrapper (configurationVersion 1),
+     * not already-Annex-B (TS). */
+    int need_bsf = d->is_vp9 ||
+        (par->extradata && par->extradata_size >= 4 && par->extradata[0] == 1);
+    if (need_bsf && d->bsf_name) {
+        n->bsf_name = d->bsf_name;
         n->bsf_par  = avcodec_parameters_alloc();
         if (!n->bsf_par || avcodec_parameters_copy(n->bsf_par, par) < 0 ||
             bsf_build(n) != 0) {
-            note("EVO vdec native: bsf setup failed (ex=%d) -> FFmpeg",
-                 par->extradata_size);
+            note("EVO vdec native: %s bsf '%s' setup failed (ex=%d) -> FFmpeg",
+                 d->tag, d->bsf_name, par->extradata_size);
             evo_vdec_native_close(n);
             return NULL;
         }
@@ -646,8 +872,9 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 
     sceVideodec2Reset(n->dec);   /* fresh state for this stream */
 
-    note("EVO vdec native: OPEN ok  resident AVC decoder  %dx%d (disp %ux%u) depth=%d",
-         w, h, n->disp_w, n->disp_h, EVO_VDEC_REORDER_DEPTH);
+    note("EVO vdec native: OPEN ok  resident %s decoder  %dx%d (disp %ux%u) bsf=%s depth=%d",
+         d->tag, w, h, n->disp_w, n->disp_h,
+         n->bsf_name ? n->bsf_name : "-", EVO_VDEC_REORDER_DEPTH);
     return n;
 }
 
@@ -663,7 +890,8 @@ int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *data, int size,
             while (av_bsf_receive_packet(v->bsf, v->filt_pkt) == 0) {
                 int64_t fp = v->filt_pkt->pts == AV_NOPTS_VALUE
                                  ? INT64_MIN : v->filt_pkt->pts;
-                int dr = decode_one(v, v->filt_pkt->data, v->filt_pkt->size, fp);
+                int dr = decode_one(v, v->filt_pkt->data, v->filt_pkt->size, fp,
+                                    pkt_present(v, v->filt_pkt));
                 av_packet_unref(v->filt_pkt);
                 if (dr < 0) break;
             }
@@ -688,14 +916,15 @@ int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *data, int size,
         while (av_bsf_receive_packet(v->bsf, v->filt_pkt) == 0) {
             int64_t fp = v->filt_pkt->pts == AV_NOPTS_VALUE
                              ? INT64_MIN : v->filt_pkt->pts;
-            int dr = decode_one(v, v->filt_pkt->data, v->filt_pkt->size, fp);
+            int dr = decode_one(v, v->filt_pkt->data, v->filt_pkt->size, fp,
+                                pkt_present(v, v->filt_pkt));
             av_packet_unref(v->filt_pkt);
             if (dr < 0) { v->fatal = 1; return -1; }
         }
         return 0;
     }
 
-    if (decode_one(v, data, size, pts_us) < 0) {
+    if (decode_one(v, data, size, pts_us, 1) < 0) {
         v->fatal = 1;
         return -1;
     }
@@ -802,6 +1031,8 @@ void evo_vdec_native_close(evo_vdec_native *v)
 
 int evo_vdec_native_probe(void) { return 0; }
 void evo_vdec_native_prefer_nv12(int on) { (void)on; }
+int evo_vdec_native_supports(int codec_id, int profile, int bit_depth, int w, int h)
+{ (void)codec_id; (void)profile; (void)bit_depth; (void)w; (void)h; return 0; }
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p) { (void)p; return 0; }
 int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *d, int s, int64_t p)
 { (void)v; (void)d; (void)s; (void)p; return -1; }

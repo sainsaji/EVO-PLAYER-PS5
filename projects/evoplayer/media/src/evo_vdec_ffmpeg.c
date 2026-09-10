@@ -20,6 +20,10 @@
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
 
+#ifndef FF_PROFILE_UNKNOWN
+#define FF_PROFILE_UNKNOWN (-99)
+#endif
+
 /* One-shot user toast used by the 10-bit fast-path notice (kept verbatim). */
 void toast(const char *title, const char *msg);
 
@@ -32,6 +36,7 @@ void toast(const char *title, const char *msg);
  */
 struct evo_vdec {
     evo_vdec_backend backend;
+    int              codec_id;   /* AVCodecID — backend-independent, for the UI */
     AVCodecContext  *ctx;
     AVFrame         *frame;   /* scratch for receive; planes borrowed until next call */
     AVPacket        *pkt;     /* scratch for send */
@@ -54,10 +59,13 @@ evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id)
         return EVO_VDEC_BACKEND_FFMPEG;
     if (!evo_vdec_probe())
         return EVO_VDEC_BACKEND_FFMPEG;   /* NATIVE or AUTO, but nothing to open */
-    /* AUTO only asks for native on a codec the backend actually supports
-     * today (H.264) — an explicit NATIVE request is still passed through
-     * unsupported, since evo_vdec_open() downgrades that itself. */
-    if (pref == EVO_VDEC_PREF_AUTO && codec_id != AV_CODEC_ID_H264)
+    /* AUTO only asks for native on a codec whose resident decoder actually came
+     * up this session (H.264 / HEVC Main / VP9 Profile 0) — an explicit NATIVE
+     * request is still passed through unsupported, since evo_vdec_open()
+     * downgrades that itself. Profile/bit-depth/dimension gating happens in
+     * evo_vdec_native_open(); here we only need the codec-level check. */
+    if (pref == EVO_VDEC_PREF_AUTO &&
+        !evo_vdec_native_supports(codec_id, FF_PROFILE_UNKNOWN, 8, 0, 0))
         return EVO_VDEC_BACKEND_FFMPEG;
     return EVO_VDEC_BACKEND_NATIVE;
 }
@@ -237,7 +245,8 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
         if (nat) {
             evo_vdec *v = (evo_vdec *)calloc(1, sizeof(*v));
             if (v) {
-                v->backend = EVO_VDEC_BACKEND_NATIVE;
+                v->backend  = EVO_VDEC_BACKEND_NATIVE;
+                v->codec_id = p->codec_id;
                 v->nat = nat;
                 if (chosen)
                     *chosen = EVO_VDEC_BACKEND_NATIVE;
@@ -254,7 +263,8 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
     evo_vdec *v = (evo_vdec *)calloc(1, sizeof(*v));
     if (!v)
         return NULL;
-    v->backend = EVO_VDEC_BACKEND_FFMPEG;
+    v->backend  = EVO_VDEC_BACKEND_FFMPEG;
+    v->codec_id = p->codec_id;
 
     v->ctx = avcodec_alloc_context3(dec);
     v->frame = av_frame_alloc();
@@ -389,6 +399,11 @@ void evo_vdec_close(evo_vdec *v)
 evo_vdec_backend evo_vdec_active(const evo_vdec *v)
 {
     return v ? v->backend : EVO_VDEC_BACKEND_FFMPEG;
+}
+
+int evo_vdec_codec_id(const evo_vdec *v)
+{
+    return v ? v->codec_id : 0 /* AV_CODEC_ID_NONE */;
 }
 
 /* ---- FFmpeg-backend accessors ---- */
