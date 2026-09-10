@@ -54,8 +54,9 @@ spread across 5 present routes, 3 font systems and CPU+GPU converters. Chain
 [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
 **All six done.** GL-6 (#82) deleted `pp_agc*` / `pp_videoout` / `pp_platform.h`
 / the `#28` geo sink / the shader blobs and closed **#67, #69, #70, #5**.
-**Rescoped/open:** #68 (mechanism → GLSL/RCSS, absorbs #70), #4 (P010 shipped in
-#81; #4 keeps the HDR-output-metadata + PQ/HLG tail). Delivered along the way:
+**Rescoped/open:** #68 (mechanism → GLSL/RCSS, absorbs #70). #4 is gone —
+P010 sampling shipped in #81 and its HDR-output-metadata + PQ/HLG tail was
+folded into #41 §4, then #4 was deleted (2026-09-11). Delivered along the way:
 #62 (GL video parity, #80), #35/#34/#63 (#81), #76 (#80), #49 (folded into #79).
 
 **New stories (2026-09-03):** #47 native audio decode + Dolby/DTS bitstream
@@ -108,7 +109,6 @@ the issue UI shows blockers / sub-tasks directly:
   - #60 → #36 (self-contained `.ffpfsc` blocks release pipeline packaging)
   - #37 → #38, #41, #47, #59 (video decoder toggle blocks benchmark, HEVC, audio passthrough, and UI badge)
   - #59 → #63 (decoder indicator blocks Diagnostic HUD graphs)
-  - #4 → #5 (#5 closed — CPU converter deleted by #80; P010 sampling + tone-map → #81; #4 keeps only HDR output metadata)
   - #31 → #39, #40 (native decoder backend blocks hang recovery & memory tidy)
   - #46 → #72 (persistence & data root blocks Lapy JB internal storage fix)
   - #35 → #43 (caption overlay blocks styled `.ass`)
@@ -227,13 +227,13 @@ it first to avoid a merge tangle.
   - Seek on native 4K → "too demanding" (`0x811d0303` after flush) is
     pre-existing, unrelated — native-decode seek robustness (#32 area).
 
-### 3 · `#4` — 10-bit fast path *(optional CPU stopgap)*
+### 3 · `#4` — **deleted 2026-09-11, folded into `#41` §4**
 
-The real fix is #27 (GPU P010 shader). Only do a CPU-side improvement here if
-#27 slips.
-
-- Reads: `docs/converter-perf.md`, `docs/hardware-decode.md`, `docs/evo-pro/gpu-rendering-plan.md`
-- Files: `main.c` `start_video_playback` (`is10` / `bpp>8` gating), `pp/src/pp_v8_gate.c`, `pp/src/pp_compute_pipeline.c`
+Nothing to start here. The CPU stopgap it described was made moot by GL-4 (#80)
+deleting the converter, P010 sampling + an SDR tone-map shipped in GL-5 (#81),
+and the residue — a real PQ/HLG tone-map, HDR output signalling, and the
+two-plane 10-bit GL path that would put HEVC Main10 on the hardware decoder —
+lives in `#41` section 4 together with the decoder work it depends on.
 
 ### 4 · `#27` — GPU Step 2: sceAgc video convert + present — **✅ CLOSED 2026-09-04**
 

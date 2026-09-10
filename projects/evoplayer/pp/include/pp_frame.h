@@ -49,7 +49,7 @@ typedef struct pp_frame {
     int strides[4];
     int64_t pts_us;
     /* Raw AVColorTransferCharacteristic of the source (0 = unspecified). Carried
-     * for the HDR badge and #4's PQ/HLG tone-map tail; GL-5 does not act on it —
+     * for the HDR badge and #41's PQ/HLG tone-map tail; GL-5 does not act on it —
      * 10-bit is presented as SDR-with-more-precision. */
     int color_trc;
 } pp_frame;

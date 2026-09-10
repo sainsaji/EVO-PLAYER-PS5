@@ -332,7 +332,7 @@ const char *k_yuv_fs_pl =
  * limited matrix applies unchanged: the 8-bit black level 16/255 = 0.0627 and
  * the 10-bit 64/1023 = 0.0626 are the same number to within 1e-4, likewise
  * 512/1023 vs 0.5 for neutral chroma. SDR only - a PQ/HLG EOTF + tone-map would
- * go here (#4).
+ * go here (#41).
  */
 const char *k_yuv_fs_pl10 =
     "#version 330 core\n"
@@ -343,7 +343,7 @@ const char *k_yuv_fs_pl10 =
     "  float y = texture(uY, vUV).r * S;\n"
     "  float U = texture(uU, vUV).r * S - 0.5;\n"
     "  float V = texture(uV, vUV).r * S - 0.5;\n"
-    /* #4: PQ/HLG EOTF + SDR tone-map seam - would transform (y,U,V) here. */
+    /* #41: PQ/HLG EOTF + SDR tone-map seam - would transform (y,U,V) here. */
     YUV_MATRIX_GLSL
     "}\n";
 

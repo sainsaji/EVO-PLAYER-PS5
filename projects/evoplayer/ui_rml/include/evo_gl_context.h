@@ -76,7 +76,7 @@ void evo_gl_blit_bgra(const uint32_t *fb, int w, int h);
  *
  * GL-5 (#81): ten_bit != 0 means the planar source is 16-bit little-endian
  * (yuv420p10le), pitches are in bytes (2x samples); it is uploaded as GL_R16 and
- * presented SDR (no PQ/HLG tone-map - that is #4's tail). */
+ * presented SDR (no PQ/HLG tone-map - that is #41's tail). */
 void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                      const uint8_t *uv, int uv_pitch,
                      const uint8_t *u,  int u_pitch,

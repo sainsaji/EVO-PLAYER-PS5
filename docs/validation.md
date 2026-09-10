@@ -264,4 +264,4 @@ a numeric check exists to find.
 | Panel scanout order — the shader's `.bgr` swizzle matches the ps5-opengl default framebuffer | **verified** (GL-4 hw pass 2026-09-10: correct colour on the video quad and the RG8 OSD composite, no R↔B swap) |
 | Chroma siting / bilinear upsample vs the CPU converter's nearest-neighbour | not run — the shader samples chroma with `GL_LINEAR`, so smooth gradients differ slightly by design |
 | Full-range (JPEG) sources | not run — both paths assume limited range; `uRange` is a GL-4 leftover hook, not wired to `evo_settings` |
-| P010 / 10-bit | not applicable — `#4`'s tail |
+| P010 / 10-bit | not applicable — `#41`'s tail |

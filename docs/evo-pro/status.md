@@ -421,7 +421,7 @@ pre-unjail in `evo_vdec_native_probe()`:
   falls back to FFmpeg, AVC stays up.
 - New `evo_vdec_native_supports(codec_id, profile, bit_depth, w, h)` is the one
   gate (`evo_vdec_pref_resolve` AUTO + `evo_vdec_native_open` both use it).
-  10-bit (HEVC Main10 / VP9 Profile 2) and AV1 → 0 (FFmpeg, 10-bit pending #4).
+  10-bit (HEVC Main10 / VP9 Profile 2) and AV1 → 0 (FFmpeg, 10-bit pending #41).
 - Per-codec AU adaptation behind the interface: `h264_mp4toannexb` /
   `hevc_mp4toannexb` for wrapped avcC/hvcC; **VP9 → `vp9_superframe_split`** bsf
   (compound superframe rejected whole by the decoder) + a small

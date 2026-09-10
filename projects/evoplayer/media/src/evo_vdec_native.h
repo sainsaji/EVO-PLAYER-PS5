@@ -53,7 +53,7 @@ void evo_vdec_native_prefer_nv12(int on);
  *   - HEVC   Main 8-bit 4:2:0
  *   - VP9    Profile 0 8-bit 4:2:0
  * 10-bit (HEVC Main10, VP9 Profile 2) and AV1 always return 0 — they stay on
- * the FFmpeg CPU path (10-bit pending the P010 present, #4). Pass w==0/h==0 to
+ * the FFmpeg CPU path (10-bit pending the two-plane present, #41). Pass w==0/h==0 to
  * skip the dimension gate (codec/profile capability only). Cheap: reuses the
  * cached evo_vdec_native_probe() result.
  */

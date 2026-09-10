@@ -6,7 +6,7 @@
 > in the pre-unjail boot slot. GL-6 (#82) deleted the hand-rolled `sceAgc`
 > present/geo/OSD path (`pp_agc*`, `pp_videoout`), the `#28` geometry sink and
 > the vendored shader blobs, and closed `#67` / `#69` / `#70` / `#5`. `#68`
-> (UI fidelity) and `#4` (HDR output metadata) carry the residual work.
+> (UI fidelity) and `#41` (10-bit / HDR output metadata) carry the residual work.
 > The CPU coverage rasteriser (`evo_rmlui_render.cpp`) and RmlUi-native GL3
 > (`evo_rmlui_render_gl.cpp`) both remain behind the `EvoRenderBridge` seam —
 > the device menu path is still CPU-raster → one GL blit; choosing one is a
@@ -134,7 +134,7 @@ suspend/resume helpers for modal overlays (Media Info, stop prompt).
    attr flip, 3-buffer rotation, and AGC-death retile in `pp_videoout.c` go
    away.
 8. **HDR / P010** — 10-bit sampling + SDR tone-map in the GL video shader.
-   GL-4 shipped 8-bit; this moved to **GL-5** (2026-09-10). `#4` narrows to
+   GL-4 shipped 8-bit; this moved to **GL-5** (2026-09-10). The tail moved to `#41`;
    its HDR *output* metadata tail.
 
 ## Risks / decisions (settle before GL-2)
@@ -197,7 +197,7 @@ finishes only for the pure-host adapter work.
 | `#70` (hand-authored SDF pixel shader) | **CLOSED (GL-6, #82)** — becomes a GLSL fragment shader under `#68` |
 | `#62` (plane-hash A/B: sceAgc vs CPU) | **Delivered by GL-4** — the CPU converter is deleted, so it became GL-video-shader-vs-CPU-matrix parity: `tools/gl_yuv_parity.py`, written up in [validation.md](../validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80) |
 | `#5` (speed up CPU colour conversion) | **CLOSED (GL-6, #82)** — the CPU converter is deleted |
-| `#4` (10-bit / HDR slow path) | **Split** — P010 sampling + SDR tone-map shipped in GL-5 (#81); `#4` keeps only the HDR *output* metadata (`sceVideoOutSetHdrMetadata`) + PQ/HLG tone-map tail |
+| `#4` (10-bit / HDR slow path) | **Split, then deleted 2026-09-11** — P010 sampling + SDR tone-map shipped in GL-5 (#81); the HDR *output* metadata (`sceVideoOutSetHdrMetadata`) + PQ/HLG tone-map tail was folded into `#41` §4 |
 | `#35` (non-English subtitles → `?`) | Kept; delivered by GL-5 (Unicode GL text pass) |
 | `#34` (keyboard crash) | Kept; keyboard moves to RmlUi under GL-5 |
 | `#76` (aspect-ratio cycle corrupts 4K) | **Closed by GL-4** - aspect is a vertex-quad scale; `force_v3_fallback` and the linear-vs-tiled attr mismatch are deleted |

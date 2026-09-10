@@ -43,7 +43,7 @@ the default (and only) app-module present path; `--no-gl` was retired by GL-4.
 10-bit (P010 / HEVC Main10) decodes and plays as SDR with BT.601-limited
 unpack + a naive tone-map in the GL video shader (GL-5). A proper PQ/HLG
 tone-map and `sceVideoOutSetHdrMetadata` HDR *output* are the remaining tail of
-`#4`.
+`#41`.
 
 ---
 

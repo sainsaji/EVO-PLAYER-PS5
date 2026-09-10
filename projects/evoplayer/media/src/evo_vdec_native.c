@@ -18,7 +18,7 @@
  * (bitstream filter, VP9 superframe split + hidden-frame suppression) is
  * per-codec, and it hides behind the same struct. HEVC Main10 and VP9
  * Profile 2 are 10-bit two-plane and stay on FFmpeg until the P010 present
- * lands (#4); AV1 has no sceVideodec2 route at all.
+ * lands (#41 section 4); AV1 has no sceVideodec2 route at all.
  *
  * RESIDENT DECODERS — the sequencing constraint, learned on hardware 2026-09-03.
  * The self-unjail (evo_jailbreak_self / _ensure) swaps process credentials
@@ -137,11 +137,14 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
  * pre-unjail, so that crash was never actually attributed to this code. Both
  * codec_type constants are confirmed accepted by sceVideodec2CreateDecoder.
  *
- * What is still unverified is DECODE: no 8-bit HEVC Main or VP9 Profile 0
- * stream has been played through these slots yet (the first HEVC test file was
- * Main10, correctly refused by evo_vdec_native_supports -> FFmpeg). Until a
- * frame comes out with correct colours the default .ffpfsc stays byte-identical
- * to the working #31 AVC-only behaviour.
+ * DECODE IS VERIFIED TOO, same session: HEVC Main 8-bit 1080p via
+ * hevc_mp4toannexb (475 frames out, fatal=0) and VP9 Profile 0 1080p via
+ * vp9_superframe_split with real alt-ref superframes (477 frames, fatal=0),
+ * both at pitch 2048 — the pitch the research repo documents for 8-bit 1080p.
+ *
+ * Still 0 only because turning it on is its own #41 item, together with the 4K
+ * ceiling: three resident 4K decoders against the fake-signed direct-memory
+ * budget is unmeasured, and the 1080p secondary slots are what has been proven.
  * Build -DEVO_VDEC_NATIVE_SECONDARY=1 (package-app.sh --native-secondary). */
 #ifndef EVO_VDEC_NATIVE_SECONDARY
 #define EVO_VDEC_NATIVE_SECONDARY 0
@@ -485,7 +488,7 @@ int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
     if (!s->ready)
         return 0;
     if (bit_depth > 8)
-        return 0;                       /* 10-bit two-plane -> FFmpeg (#4)   */
+        return 0;                       /* 10-bit two-plane -> FFmpeg (#41)  */
 
     switch (codec_id) {
     case AV_CODEC_ID_H264:
