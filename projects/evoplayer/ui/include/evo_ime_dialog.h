@@ -104,6 +104,23 @@ int sceImeDialogAbort(void);
 int sceImeDialogTerm(void);
 int sceImeDialogGetPanelSizeExtended(const SceImeDialogParam *param, void *extendedParam, uint32_t *width, uint32_t *height);
 
+/*
+ * #34: a CommonDialog must be initialised once per process before any dialog in
+ * the family (the IME included) will start. There is no libSceCommonDialog.so in
+ * the SDK, so the app module imports this through a positional PRX stub
+ * (tools/native-app/stubs/prx/libSceCommonDialog.syms, wired in
+ * scripts/package-app.sh) - the same mechanism #31 used for libSceVideodec2.
+ * Non-app builds have no such import and reach it via sceKernelDlsym instead.
+ */
+int sceCommonDialogInitialize(void);
+
+/*
+ * #34: libSceImeDialog is a *loadable* system module. Its stubs link and its
+ * .sprx is NEEDED, but every entry point faults until its sysmodule is loaded —
+ * the crash this issue is about. Load it once, pre-unjail (evo_keyboard_ime_probe).
+ */
+int sceSysmoduleLoadModule(uint16_t id);
+
 int sceUserServiceGetInitialUser(int *userId);
 int sceUserServiceGetLoginUserIdList(int *userIdList);
 

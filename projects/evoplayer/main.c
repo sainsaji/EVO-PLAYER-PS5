@@ -5046,7 +5046,7 @@ static void prospero_settings_save(void)
 
     fprintf(
         file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n",
         (int)current_profile,
         prospero_resume_playback_enabled,
         prospero_default_view_mode,
@@ -5065,7 +5065,17 @@ static void prospero_settings_save(void)
         evo_feedback_lightbar_enabled(),
         prospero_subtitle_face,
         evo_keyboard_get_type(),
-        prospero_vdec_pref   /* #37: appended after keyboard type, see load() */
+        prospero_vdec_pref,  /* #37: appended after keyboard type, see load() */
+        /*
+         * #34: "the keyboard backend in this file is the user's choice".
+         *
+         * The app module used to pin itself to the virtual keyboard, and saved
+         * that pin as if it were a preference - so every settings file written
+         * by one of those builds says VIRTUAL whatever the user wanted. Now
+         * that the native IME works there, a file without this marker has its
+         * keyboard field ignored and reset to the NATIVE default on load.
+         */
+        1
     );
 
     fclose(file);
@@ -5137,6 +5147,9 @@ static void prospero_settings_load(void)
      * append pattern as the rest of this block — an older file still parses
      * and keeps AUTO. */
     int loaded_vdec_pref = EVO_VDEC_PREF_AUTO;
+    /* #34: 1 = the keyboard field in this file is a real user choice. Absent in
+     * anything written before the native IME came back — see save(). */
+    int loaded_kb_is_choice = 0;
 
     FILE *file =
         fopen(
@@ -5150,7 +5163,7 @@ static void prospero_settings_load(void)
         int values_read =
             fscanf(
                 file,
-                "%d%d%d%d%d%d %23[^\n]%d%d%d%d%d",
+                "%d%d%d%d%d%d %23[^\n]%d%d%d%d%d%d",
                 &loaded_profile,
                 &loaded_resume,
                 &loaded_view,
@@ -5162,14 +5175,15 @@ static void prospero_settings_load(void)
                 &loaded_lightbar,
                 &loaded_sub_face,
                 &loaded_kb_type,
-                &loaded_vdec_pref
+                &loaded_vdec_pref,
+                &loaded_kb_is_choice
             );
 
         fclose(file);
 
         /*
-         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9, 10, 11 or
-         * 12. Fewer than 5 is corrupt.
+         * Accept 5 (pre-EVO), 6 (pre-theme), 7 (pre-feedback), 8, 9, 10, 11,
+         * 12 or 13. Fewer than 5 is corrupt.
          */
         if (values_read < 5) {
             loaded_profile = 0;
@@ -5191,6 +5205,9 @@ static void prospero_settings_load(void)
         if (values_read < 10) loaded_sub_face = 1;
         if (values_read < 11) loaded_kb_type = 1;
         if (values_read < 12) loaded_vdec_pref = EVO_VDEC_PREF_AUTO;
+        /* #34: no marker -> the keyboard field was written by a build that
+         * pinned the backend rather than by the user. Back to the default. */
+        if (values_read < 13 || !loaded_kb_is_choice) loaded_kb_type = 1;
     }
 
     if (loaded_sub_face != EVO_FACE_SUB && loaded_sub_face != EVO_FACE_TITLE)
@@ -9853,6 +9870,16 @@ int main(void) {
          * staging wall). gl_video is armed after pp_playback_init below (init
          * memsets the struct); the present block then calls evo_gl_blit_yuv. */
     }
+    /*
+     * #34: the native IME keyboard, for the same reason everything else in this
+     * block is here. libSceImeDialog is a loadable system module, and
+     * sceSysmoduleLoadModule stops working once evo_jailbreak_self() swaps
+     * credentials - so loading it on the first keyboard-open (which is what the
+     * old code tried) leaves the module unloaded and the first sceImeDialog*
+     * call faults. Cheap, and a failure just latches the virtual keyboard.
+     * Kept after the GL block so the graphics bring-up sequence is untouched.
+     */
+    evo_keyboard_ime_probe();
     evo_boot_log_flush();
 #endif  /* EVO_APP_MODULE */
     evo_jailbreak_self();   /* app module: self-unjail via the Lapy/etaHEN file-drop (no-op on payload) */

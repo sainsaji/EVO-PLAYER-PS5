@@ -115,7 +115,9 @@ projects/evoplayer/
                 evo_chrome.c) deleted in #44 — every screen draws through ui_rml.
   ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI —
                 plus evo_gl_context_device.cpp, the GL/EGL context and the
-                video quad (stubbed out by evo_gl_context_stub.c off-device)
+                video quad (stubbed out by evo_gl_context_stub.c off-device).
+                src/rmlui_patch/ is one upstream RmlUi TU with a finer corner
+                tessellation, swapped into librmlui.a at package time (#68)
   assets/rml/   .rml/.rcss documents for the RmlUi screens
 scripts/        build/deploy — see docs/tooling.md
 tools/          uiview, klog, shot, evo-remote, gen_icons — see docs/tooling.md

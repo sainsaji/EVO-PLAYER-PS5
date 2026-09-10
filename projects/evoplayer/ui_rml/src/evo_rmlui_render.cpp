@@ -857,27 +857,41 @@ static void emit_coverage(CovTarget target, uint32_t* fb, uint8_t* mask, int scr
         return;
     }
 
+    /*
+     * Mask targets sweep the WHOLE accumulator rect, not just the touched span
+     * of each row.
+     *
+     * A pixel the geometry misses still has a defined value in the new mask -
+     * zero for Set/Intersect, opaque for SetInverse - and it is precisely the
+     * missed pixels that make a rounded corner round. Draining only the touched
+     * span leaves those pixels holding whatever the PREVIOUS mask wrote there,
+     * so a corner sitting where an earlier screen's clip region was opaque came
+     * out square: the poster inside a .tile lost its rounded corners as soon as
+     * anything else (the player OSD, a dialog) had drawn a clip mask over that
+     * part of the screen. Correct on a fresh boot, wrong after playing a video
+     * and coming back - which is exactly how it presented.
+     *
+     * Untouched accumulator cells are zero by the invariant this file relies on
+     * everywhere (grown zeroed, always cleared as they are consumed), so cov
+     * reads 0 for them with no extra bookkeeping.
+     */
     for (int j = 0; j < acc_h; j++) {
-        int lo = g_cov_lo[j];
-        int hi = g_cov_hi[j];
-        if (lo > hi) continue;
-
         CovPixel* arow = &g_cov[(size_t)j * acc_w];
         uint8_t* mrow = &mask[(size_t)(acc_y0 + j) * screen_w + acc_x0];
 
-        for (int x = lo; x <= hi; x++) {
-            int i = x - acc_x0;
+        for (int i = 0; i < acc_w; i++) {
             CovPixel& p = arow[i];
+            uint32_t cov = 0;
             if (p.w > 0.0f) {
-                uint32_t cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
+                cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
                 p = CovPixel{};
+            }
 
-                switch (target) {
-                case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
-                case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
-                case CovTarget::MaskIntersect: mrow[i] = (uint8_t)(((uint32_t)mrow[i] * cov + 127) / 255); break;
-                default: break;
-                }
+            switch (target) {
+            case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
+            case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
+            case CovTarget::MaskIntersect: mrow[i] = (uint8_t)(((uint32_t)mrow[i] * cov + 127) / 255); break;
+            default: break;
             }
         }
     }
@@ -1001,11 +1015,13 @@ void EvoRenderInterface::RenderToClipMask(Rml::ClipMaskOperation operation,
     }
 
     /*
-     * Where the mask ends up meaning anything. Set and Intersect both write
-     * every pixel of that region, so nothing has to be cleared first: outside
-     * it the mask reads as zero by definition. SetInverse is the exception -
-     * its shape is the whole screen with a hole in it - and pays for a
-     * full-screen pass, which is why it is worth not being the common case.
+     * Where the mask ends up meaning anything. emit_coverage writes EVERY pixel
+     * of that region for a mask target - covered or not - so nothing has to be
+     * cleared first, and outside it the mask reads as zero by definition
+     * (ClipMask::at). SetInverse is the exception - its shape is the whole
+     * screen with a hole in it - and pays for a full-screen pass, which is why
+     * it is worth not being the common case (RmlUi only asks for it under a
+     * box-shadow).
      */
     int nx0, ny0, nx1, ny1;
     CovTarget target;

@@ -394,9 +394,34 @@ else
     done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
 
+    # #68: RmlUi puts only `3 + R/6` points on a corner arc, so a 20 px radius is
+    # a 5-segment polygon that sags a quarter-pixel inside the true circle -
+    # visible faceting on every rounded card, and a geometry error no rasteriser
+    # or MSAA can undo. ui_rml/src/rmlui_patch/ carries that one RmlUi TU with a
+    # finer GetNumPoints(); compile it here and swap it over the matching member
+    # of a build-local COPY of the pacbrew archive (same RmlUi 6.2 release - the
+    # public headers are byte-identical - so this is a like-for-like member
+    # replacement, and the sysroot archive is never touched).
+    # See ui_rml/src/rmlui_patch/VENDORED.md.
+    begin "patching librmlui.a corner tessellation (#68)"
+    RML_PATCH_O="${BUILD}/obj/GeometryBackgroundBorder.cpp.o"
+    "${TCXX}" -std=c++17 -O2 "${TFLAGS[@]}" \
+        -I"${HB}/include" \
+        -c "${EVO}/ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp" \
+        -o "${RML_PATCH_O}"
+    RML_A="${BUILD}/librmlui.a"
+    cp -f "${HB}/lib/librmlui.a" "${RML_A}"
+    llvm-ar r "${RML_A}" "${RML_PATCH_O}"
+    # The swap is only a swap if the member name matched - a typo would silently
+    # ADD a member and leave upstream's tessellation linked ahead of it.
+    [[ "$(llvm-ar t "${RML_A}" | grep -c '^GeometryBackgroundBorder\.cpp\.o$')" == "1" ]] \
+        || die "librmlui.a member swap failed - GeometryBackgroundBorder.cpp.o not unique"
+    ok "librmlui.a patched"
+    ARCHIVE_GROUP+=("${RML_A}")
+
     # Static archives EVO links (Makefile LIBS + build-evoplayer.sh transitive
     # set). Order-independent inside the group.
-    for a in librmlui libSDL2 \
+    for a in libSDL2 \
              libavformat libavcodec libswresample libavutil libswscale \
              libass libfreetype libharfbuzz libharfbuzz-subset libfribidi \
              libpng16 libsamplerate libssl libcrypto libiconv \
@@ -465,8 +490,11 @@ PRX_STUB_WANT=()
 # The native decode backend (media/src/evo_vdec_native.c, #31) is compiled into
 # every MODE == player eboot, so libSceVideodec2 + its GPU-driver deps must be
 # positional DT_NEEDED.
+# #34: the native IME keyboard. libSceImeDialog has a real SDK stub .so and
+# resolves through the link tail; libSceCommonDialog has none, and
+# sceCommonDialogInitialize() must run before any common dialog will start.
 if [[ "${MODE}" == "player" ]]; then
-    PRX_STUB_WANT+=(libSceVideodec2 libSceAgc libSceAgcDriver)
+    PRX_STUB_WANT+=(libSceVideodec2 libSceAgc libSceAgcDriver libSceCommonDialog)
 fi
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"

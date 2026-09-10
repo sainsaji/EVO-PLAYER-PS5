@@ -111,6 +111,23 @@ docker compose run --rm ps5-dev bash -lc '
 on every build. The `eboot.bin` / `param.json` / `libc.prx` are byte-identical
 between the folder and the `.ffpfsc` — the image is just a different container.
 
+**Two things in the link are worth knowing about:**
+
+- **System PRXs the SDK ships no stub for** become positional
+  `DT_NEEDED` imports built from `tools/native-app/stubs/prx/*.syms` (step 6b).
+  Today: `libSceVideodec2`, `libSceAgc`, `libSceAgcDriver`, and
+  `libSceCommonDialog` (#34, so the native IME keyboard can initialise the
+  common-dialog family). A name in one of those files that no object imports —
+  or that the firmware's `.sprx` does not export — makes the loader reject the
+  whole module at launch with no log, so the script refuses to build a dead
+  import.
+- **`librmlui.a` is patched in place** (#68): step 5 compiles
+  `ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp` — RmlUi's corner
+  tessellation with a finer `GetNumPoints()` — and swaps it over the matching
+  member of a build-local **copy** of the pacbrew archive. Upstream's `3 + R/6`
+  points make a 20 px radius a 5-segment polygon that visibly facets. See
+  `ui_rml/src/rmlui_patch/VENDORED.md`.
+
 **#36: this is also what CI and releases build now.** `.github/workflows/build.yml`
 runs `package-app.sh --ffpfsc` on every PR (job `package-app`) and verifies
 the signed container + `assets/` bundle aren't empty — a broken PFS pack or
@@ -395,6 +412,22 @@ had shipped to hardware unnoticed:
 
 Both are the kind of thing you notice instantly in a still and never quite
 pin down at ten feet.
+
+### The regression pass — bugs that only exist in sequence
+
+Rendering each screen once misses anything that leaks *between* screens, and
+two such bugs shipped: rounded posters that came back square after you played
+something, and the last photo you opened showing instead of the film. Both are
+state left behind by an earlier screen, so the harness ends with a deliberate
+sequence (`render_regression_screens()` in `tools/uiview_playback_rml.cpp`):
+
+| Shot | What it proves |
+|---|---|
+| `rml_launch_recent_first` / `rml_launch_recent_return` | the home screen either side of a detour through the resume dialog, the image viewer and the player. **Must be pixel-identical** — `python3 tools/shot.py diff` on the two BMPs. A non-zero diff at a tile corner is the clip mask carrying a previous screen's coverage. |
+| `rml_playback_after_image` | the playback OSD entered straight from the image viewer. The "film" is a flat green fill; any of the photo showing through means a screen document was left visible under the OSD's transparent background. |
+
+Add to it whenever a bug turns out to be one screen poisoning the next — a
+still of each screen on its own will never catch that class.
 
 ### Walking through it: `tools/uiplay.sh`
 

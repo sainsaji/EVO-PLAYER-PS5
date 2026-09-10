@@ -104,11 +104,24 @@ struct DemoRecent {
     int progress;
 };
 
-static void render_launch_screens(std::vector<uint32_t>& fb, int width, int height) {
+/*
+ * Fill in the home screen's parameters.
+ *
+ * row: 0 = hero, 1 = the recent shelf, 2 = the library shelf.
+ * col: which tile in that shelf carries the cursor.
+ *
+ * File scope (and static artwork) so the regression pass at the bottom can
+ * re-render the exact same home screen after every other screen has been
+ * through the renderer - see render_regression_screens().
+ */
+static void launch_build(evo_rmlui_launch_params_t& p, int row, int col, bool with_recent) {
     /* Cover cache is 320x180; the hero still is 560 wide. */
-    std::vector<uint32_t> hero_art = make_demo_art(560, 315, 3);
-    std::vector<std::vector<uint32_t>> covers;
-    for (int i = 0; i < 6; i++) covers.push_back(make_demo_art(320, 180, 5 + i * 7));
+    static std::vector<uint32_t> hero_art = make_demo_art(560, 315, 3);
+    static std::vector<std::vector<uint32_t>> covers = [] {
+        std::vector<std::vector<uint32_t>> c;
+        for (int i = 0; i < 6; i++) c.push_back(make_demo_art(320, 180, 5 + i * 7));
+        return c;
+    }();
 
     static const DemoRecent recents[6] = {
         { "Blade Runner 2049",            "1H 42M LEFT",      412 },
@@ -139,12 +152,7 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
         "projects/evoplayer/assets/icons/icon_about_support.png"
     };
 
-    /*
-     * row: 0 = hero, 1 = the recent shelf, 2 = the library shelf.
-     * col: which tile in that shelf carries the cursor.
-     */
-    auto build = [&](evo_rmlui_launch_params_t& p, int row, int col,
-                     bool with_recent) {
+    {
         memset(&p, 0, sizeof(p));
         p.app_name = "EVO PLAYER";
         p.version = "VERSION 0.7.0";
@@ -194,8 +202,10 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
             p.library[i].progress = -1;
             p.library[i].is_focused = (row == 2 && i == col) ? 1 : 0;
         }
-    };
+    }
+}
 
+static void render_launch_screens(std::vector<uint32_t>& fb, int width, int height) {
     evo_rmlui_nav_params_t nav;
     memset(&nav, 0, sizeof(nav));
     nav.active_section = 0;   /* HOME */
@@ -219,7 +229,7 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
         evo_rmlui_update_nav(&nav);
 
         evo_rmlui_launch_params_t p;
-        build(p, s.row, s.col, s.recent);
+        launch_build(p, s.row, s.col, s.recent);
         evo_rmlui_update_launch(&p);
         evo_rmlui_render_launch(fb.data(), width, height);
 
@@ -1288,6 +1298,110 @@ static void render_stress_screens(std::vector<uint32_t>& fb, int width, int heig
     }
 }
 
+/* ------------------------------------------------------------------
+ * Regression pass — screens whose bug only shows up in SEQUENCE.
+ *
+ * Everything above renders each screen roughly once, which is exactly why two
+ * state-leak bugs survived the harness:
+ *
+ *   rml_launch_recent_first /  The same home screen either side of a detour
+ *   rml_launch_recent_return   through the image viewer and the player. The
+ *                              clip mask that rounds a poster to its card only
+ *                              wrote the pixels the geometry covered, so the
+ *                              corners kept whatever an earlier screen's mask
+ *                              had left there and the posters came back square.
+ *                              The two must be pixel-identical:
+ *                                tools/shot.py diff rml_launch_recent_first.bmp \
+ *                                                   rml_launch_recent_return.bmp
+ *
+ *   rml_playback_after_image   Playback OSD entered straight from the image
+ *                              viewer. image.rml was in no other screen's hide
+ *                              list, so it stayed visible underneath and painted
+ *                              the whole frame through the OSD's transparent
+ *                              background - on the console, the last photo you
+ *                              opened instead of the film. The film here is the
+ *                              green fill; any of the photo's magenta/orange
+ *                              gradient showing through is the bug.
+ * ------------------------------------------------------------------ */
+static void render_regression_screens(std::vector<uint32_t>& fb, int width, int height) {
+    /* --- home screen, before and after a detour through other screens --- */
+    auto draw_home = [&](const char* out) {
+        evo_rmlui_nav_params_t nav;
+        memset(&nav, 0, sizeof(nav));
+        nav.active_section = 0;   /* HOME */
+        nav.cursor_index = 0;
+        nav.visible = 1;
+        nav.rail_focused = 0;
+        evo_rmlui_update_nav(&nav);
+
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        evo_rmlui_launch_params_t p;
+        launch_build(p, 1, 2, true);          /* same shot as rml_launch_recent */
+        evo_rmlui_update_launch(&p);
+        evo_rmlui_render_launch(fb.data(), width, height);
+        save_bmp_24(out, fb.data(), width, height);
+    };
+
+    /* The pair is rendered here rather than diffed against rml_launch_recent
+     * from the top of the run, because the theme fixtures in between change the
+     * palette - the whole screen would differ for a reason that is not a bug. */
+    draw_home("output/uiview/rml_launch_recent_first.bmp");
+
+    /* The resume dialog is the mask writer that matters here: its panel is
+     * rounded + overflow:hidden and it lands right on top of the shelves, which
+     * is why "play something, come back" was the repro. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_dialog_params_t d;
+        memset(&d, 0, sizeof(d));
+        d.eyebrow = "RESUME PLAYBACK";
+        d.title = "Blade Runner 2049 (2017)";
+        d.detail = "STOPPED AT 02:22:15 OF 09:56:00";
+        d.progress_pct = 0.35;
+        d.action_count = 2;
+        d.actions[0] = { "projects/evoplayer/assets/icons/btn_cross.png", "RESUME", 1 };
+        d.actions[1] = { "projects/evoplayer/assets/icons/btn_circle.png", "START OVER", 0 };
+        evo_rmlui_update_dialog(&d);
+        evo_rmlui_render_dialog(fb.data(), width, height);
+    }
+
+    /* --- image viewer, back out, play a video --- */
+    {
+        static std::vector<uint32_t> img(640 * 400);
+        for (int y = 0; y < 400; y++)
+            for (int x = 0; x < 640; x++)
+                img[y * 640 + x] = 0xFF000000u | 0x00FF00FFu;   /* flat magenta */
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_image_params_t ip;
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "sunset-over-the-bay.jpg";
+        ip.pixels = img.data();
+        ip.w = 640; ip.h = 400; ip.loaded = 1;
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+
+        /* Now the player. The scratch the OSD rasterises into starts transparent
+         * over the video quad; here a flat green stands in for the film. */
+        std::fill(fb.begin(), fb.end(), 0xFF1E7A32);
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Blade Runner 2049";
+        p.metadata = "1H 42M LEFT";
+        p.position_sec = 1234.0;
+        p.duration_sec = 9780.0;
+        p.percentage = p.position_sec / p.duration_sec;
+        p.paused = 1;
+        p.alpha = 255;
+        evo_rmlui_update_playback_params(&p);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_after_image.bmp", fb.data(), width, height);
+    }
+
+    /* Home again, after the image viewer + the player have both drawn clip
+     * masks over it. Must be byte-identical to rml_launch_recent_first. */
+    draw_home("output/uiview/rml_launch_recent_return.bmp");
+}
+
 int main(int argc, char** argv) {
     const int width = 1920;
     const int height = 1080;
@@ -1910,6 +2024,8 @@ int main(int argc, char** argv) {
         evo_rmlui_render_about(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_about_support.bmp", fb.data(), width, height);
     }
+
+    render_regression_screens(fb, width, height);
 
     std::cout << "Rendered all settings screens successfully" << std::endl;
     return 0;

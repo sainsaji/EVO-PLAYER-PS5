@@ -795,6 +795,22 @@ private:
     int m_cached_screen = -1;
     void RenderCachedScreen(int screen_id, uint32_t* framebuffer, int width, int height);
 
+    /*
+     * Show `keep` and hide every other full-screen document in the main context.
+     *
+     * Each Render* used to carry its own hand-maintained hide list, and adding a
+     * screen meant remembering to add it to twelve of them. image.rml (#81) was
+     * added to none: the image viewer's document stayed visible under every
+     * later screen, invisible behind an opaque menu but painting the whole frame
+     * through the playback OSD's transparent background - so starting a video
+     * after viewing an image showed the image instead of the film. One list, in
+     * one place, is the fix for the class rather than the instance.
+     *
+     * The nav rail is deliberately not included: it is a companion document
+     * whose visibility comes from UpdateNavState, and each caller handles it.
+     */
+    void ShowOnlyScreen(Rml::ElementDocument* keep);
+
 public:
     /* GL-3 (#79) B2 device loop. Retained-mode + ps5-opengl can't re-raster at
      * 60 Hz, so the loop only redraws + swaps on change. Per frame, main.c:

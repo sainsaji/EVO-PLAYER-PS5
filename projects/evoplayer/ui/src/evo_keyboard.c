@@ -9,26 +9,36 @@
 #include "evo_keyboard.h"
 #include "evo_ime_dialog.h"
 #include "evo_feedback.h"
+#include "evo_boot_log.h"       /* #34: every native-IME step lands in evo.log */
+#include "evo_boot_trace.h"     /* evo_bt: the pre-unjail probe also goes to klog */
 #include "evo_rmlui_bridge.h"   /* #81: the modal is an RmlUi document now */
 
 #define KB_MAX_BUF 256
 
 /*
- * #34: a fake-signed app module cannot reach libSceImeDialog / libSceCommonDialog
- * (they are not linked and cannot be sceKernelLoadStartModule'd), so the native
- * IME path SIGSEGVs on the first open. On the app module the backend is pinned to
- * the (now RmlUi) virtual keyboard regardless of the persisted setting.
+ * #34: the native PS5 IME is back on the app module.
+ *
+ * It used to be pinned off there: libSceImeDialog's symbols were reachable only
+ * through the SDK stub, libSceCommonDialog was not linked at all, and the code
+ * tried to sceKernelLoadStartModule it at open time - which a fake-signed module
+ * cannot do. Now libSceCommonDialog is a positional PRX import
+ * (tools/native-app/stubs/prx, scripts/package-app.sh step 6b) exactly like
+ * libSceVideodec2, and sceCommonDialogInitialize is called directly.
+ *
+ * The dialog is still Sony code reached from a fake-signed process, so nothing
+ * here assumes it works: every native open is checked, and the FIRST failure
+ * latches g_native_ime_broken for the rest of the session so the virtual
+ * keyboard takes over silently instead of failing once per keystroke-prompt.
+ * Settings -> Interface -> Keyboard Input still chooses, and the choice
+ * persists.
  */
-#if defined(EVO_APP_MODULE)
-static int g_kb_type = EVO_KEYBOARD_TYPE_VIRTUAL;
-void evo_keyboard_set_type(int type) { (void)type; g_kb_type = EVO_KEYBOARD_TYPE_VIRTUAL; }
-#else
 static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
+static int g_native_ime_broken = 0;   /* latched after a failed native open */
+
 void evo_keyboard_set_type(int type)
 {
     g_kb_type = (type == EVO_KEYBOARD_TYPE_VIRTUAL) ? EVO_KEYBOARD_TYPE_VIRTUAL : EVO_KEYBOARD_TYPE_NATIVE;
 }
-#endif
 
 int evo_keyboard_get_type(void)
 {
@@ -42,30 +52,84 @@ static uint16_t g_ime_placeholder[256];
 
 void toast(const char *title, const char *msg);
 
-static void init_native_ime_subsystem(void)
-{
-    static int s_common_dlg_inited = 0;
-    if (s_common_dlg_inited) return;
+/* 0 once the IME subsystem is up and a dialog may be opened. */
+static int s_ime_attempted = 0;
+static int s_ime_result = -1;
 
+/*
+ * Bring the CommonDialog family up once per process.
+ *
+ * Returns 0 when the IME can be opened, negative when it cannot. A second
+ * initialise returns SCE_COMMON_DIALOG_ERROR_ALREADY_INITIALIZED (0x80B80002),
+ * which is a success as far as we are concerned - hence the cached result.
+ */
+static int init_native_ime_subsystem(void)
+{
+    if (s_ime_attempted) return s_ime_result;
+    s_ime_attempted = 1;
+
+#if defined(EVO_APP_MODULE)
+    /*
+     * App module: this only ever runs from evo_keyboard_ime_probe(), in main()'s
+     * pre-unjail slot. Both halves have to happen there.
+     *
+     * sceSysmoduleLoadModule is the half that #34 was missing. libSceImeDialog
+     * links, its .sprx is NEEDED, and sceCommonDialogInitialize() returns 0 -
+     * and then the first sceImeDialog* call faults, because the dialog's own
+     * loadable module was never brought in. Same pre-unjail rule as
+     * libSceVideodec2 (#31): after evo_jailbreak_self() swaps credentials
+     * sceSysmoduleLoadModule stops working, so loading it lazily on the first
+     * keyboard-open - which is what the old code did - cannot work either.
+     */
+    int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_IME_DIALOG);
+    evo_bt("ime: sceSysmoduleLoadModule(0x96) -> 0x%08x", (unsigned)sm);
+    if (sm < 0) {
+        s_ime_result = sm;
+        return s_ime_result;
+    }
+
+    /* Direct import - libSceCommonDialog.sprx is a positional DT_NEEDED here. */
+    int rc = sceCommonDialogInitialize();
+    evo_bt("ime: sceCommonDialogInitialize() -> 0x%08x", (unsigned)rc);
+#else
+    /* Payload / host builds: no such import, so go the long way round. */
+    int rc = -1;
     int res = 0;
     int mod = sceKernelLoadStartModule("libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
-    if (mod <= 0) {
+    if (mod <= 0)
         mod = sceKernelLoadStartModule("/system/common/lib/libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
-    }
     printf("[evo-ime] libSceCommonDialog handle=%d res=%d\n", mod, res);
-
     if (mod > 0) {
         int (*p_cmn_init)(void) = NULL;
-        if (sceKernelDlsym(mod, "sceCommonDialogInitialize", (void**)&p_cmn_init) == 0 && p_cmn_init) {
-            int rc = p_cmn_init();
-            printf("[evo-ime] sceCommonDialogInitialize() => 0x%08x (%d)\n", (unsigned)rc, rc);
-        } else if (sceKernelDlsym(mod, "uoUpLGNkygk", (void**)&p_cmn_init) == 0 && p_cmn_init) {
-            int rc = p_cmn_init();
-            printf("[evo-ime] sceCommonDialogInitialize(NID) => 0x%08x (%d)\n", (unsigned)rc, rc);
-        }
+        if (sceKernelDlsym(mod, "sceCommonDialogInitialize", (void**)&p_cmn_init) == 0 && p_cmn_init)
+            rc = p_cmn_init();
+        else if (sceKernelDlsym(mod, "uoUpLGNkygk", (void**)&p_cmn_init) == 0 && p_cmn_init)
+            rc = p_cmn_init();
+        printf("[evo-ime] sceCommonDialogInitialize() => 0x%08x (%d)\n", (unsigned)rc, rc);
     }
-    s_common_dlg_inited = 1;
+#endif
+
+    /* 0x80B80002 = ALREADY_INITIALIZED: someone (or a previous open) got there
+     * first, which is exactly the state we want to be in. */
+    s_ime_result = (rc == 0 || (unsigned)rc == 0x80B80002u) ? 0 : (rc ? rc : -1);
+    return s_ime_result;
 }
+#endif /* EVO_TARGET_PS5 || __FreeBSD__ */
+
+/* See evo_keyboard.h — must run in main()'s pre-unjail slot. */
+void evo_keyboard_ime_probe(void)
+{
+#if defined(EVO_APP_MODULE) && (defined(EVO_TARGET_PS5) || defined(__FreeBSD__))
+    if (init_native_ime_subsystem() != 0) {
+        g_native_ime_broken = 1;
+        evo_bt("ime: native IME unavailable - virtual keyboard for this session");
+    } else {
+        evo_bt("ime: native IME ready");
+    }
+#endif
+}
+
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
 
 static void utf8_to_utf16(const char *src, uint16_t *dst, size_t max_dst)
 {
@@ -242,8 +306,17 @@ void evo_keyboard_open(const char *title,
     g_kb.userdata = userdata;
 
 #if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
-    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE) {
-        init_native_ime_subsystem();
+    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken) {
+        int cd_rc = init_native_ime_subsystem();
+        if (cd_rc != 0) {
+            /* No CommonDialog, no IME. Don't try again this session. */
+            g_native_ime_broken = 1;
+            evo_log("ime: CommonDialog unavailable (0x%08x) - virtual keyboard",
+                    (unsigned)cd_rc);
+            evo_log_flush();
+            toast("KEYBOARD", "USING VIRTUAL KEYBOARD");
+            goto virtual_keyboard;
+        }
 
         utf8_to_utf16(g_kb.title, g_ime_title, 256);
         utf8_to_utf16(initial_value ? initial_value : "", g_ime_buf, 1024);
@@ -276,7 +349,12 @@ int prospero_get_initial_user_id(void);
         param.title = g_ime_title;
         param.placeholder = g_ime_placeholder;
 
+        /* One breadcrumb per system call: a fault inside libSceImeDialog kills
+         * the process outright, so the last line in evo.log is the only way to
+         * know which call did it. This is how #34's second failure was found. */
         uint32_t width = 0, height = 0;
+        evo_log("ime: -> sceImeDialogGetPanelSizeExtended");
+        evo_log_flush();
         if (sceImeDialogGetPanelSizeExtended(&param, NULL, &width, &height) >= 0 && width > 0 && height > 0) {
             param.posx = (1920.0f - (float)width) / 2.0f;
             param.posy = (1080.0f - (float)height) / 2.0f;
@@ -284,7 +362,14 @@ int prospero_get_initial_user_id(void);
             param.verticalAlignment = SCE_IME_VALIGN_TOP;
         }
 
+        evo_log("ime: -> sceImeDialogInit (panel %ux%u)",
+                (unsigned)width, (unsigned)height);
+        evo_log_flush();
         int rc = sceImeDialogInit(&param, NULL);
+        evo_log("ime: sceImeDialogInit userId=0x%08x len=%u panel=%ux%u -> 0x%08x",
+                (unsigned)userId, (unsigned)param.maxTextLength,
+                (unsigned)width, (unsigned)height, (unsigned)rc);
+        evo_log_flush();
         printf("[evo-ime] sceImeDialogInit userId=0x%08x len=%u rc=0x%08x (%d)\n",
                (unsigned)userId, (unsigned)param.maxTextLength, (unsigned)rc, rc);
         fflush(stdout);
@@ -295,11 +380,14 @@ int prospero_get_initial_user_id(void);
             return;
         }
 
-        /* Diagnostic feedback if native IME failed */
+        /* Latch: if the system dialog won't start once it won't start later
+         * either, and a failed toast per prompt is worse than just typing. */
+        g_native_ime_broken = 1;
         char err_msg[64];
         snprintf(err_msg, sizeof(err_msg), "ERR 0x%08X", (unsigned)rc);
         toast("NATIVE IME FALLBACK", err_msg);
     }
+virtual_keyboard:   /* both native bail-outs land here */
 #endif
 
 

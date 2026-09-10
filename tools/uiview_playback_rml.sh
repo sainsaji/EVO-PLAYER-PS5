@@ -16,6 +16,10 @@ cd "${REPO_ROOT}"
 # contains - see tools/bundle_rml_assets.py.
 python3 tools/bundle_rml_assets.py
 
+# #68: ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp is RmlUi's corner
+# tessellation with a finer GetNumPoints(); compiled into the binary it preempts
+# librmlui.so's copies of that TU. See rmlui_patch/VENDORED.md.
+#
 # render-overhaul GL-2 (#78): the harness also links RmlUi's upstream
 # RenderInterface_GL3 (vendored verbatim under ui_rml/src/rmlui_gl3/) plus EVO's
 # GL adapters and a headless EGL/llvmpipe context. The CPU rasteriser stays the
@@ -32,6 +36,7 @@ g++ -O2 -std=c++17 \
     -Ibuild/rmlui-host-dist/include/freetype2 \
     -o output/uiview/uiview_playback_rml \
     tools/uiview_playback_rml.cpp \
+    projects/evoplayer/ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render_gl.cpp \
     projects/evoplayer/ui_rml/src/evo_gl_context_host.cpp \
