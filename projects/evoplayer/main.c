@@ -4733,9 +4733,15 @@ double percentage = 0.0;
                                    : "None";
 
         /* #59: which decoder is actually producing this stream, right now. */
-        const char *decoder_badge = prospero_music_mode ? "" :
-            (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE
-                 ? "Hardware (sceVideodec2)" : "Software (FFmpeg)");
+        char decoder_badge[64] = "";
+        if (!prospero_music_mode) {
+            const char *backend = evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE
+                                       ? "Hardware (sceVideodec2)" : "Software (FFmpeg)";
+            if (codec_badge[0])
+                snprintf(decoder_badge, sizeof(decoder_badge), "%s — %s", backend, codec_badge);
+            else
+                snprintf(decoder_badge, sizeof(decoder_badge), "%s", backend);
+        }
 
         evo_playback_osd_params_t p;
         memset(&p, 0, sizeof(p));
@@ -8302,10 +8308,10 @@ void draw_media_info_screen(uint32_t *fb)
             if (evo_pb_video_fps() > 1.0) snprintf(fps_badge, sizeof(fps_badge), "%d FPS", (int)round(evo_pb_video_fps()));
 
             /* #37: surface which decoder actually produced this stream. */
-            snprintf(decoder_badge, sizeof(decoder_badge), "%s",
+            snprintf(decoder_badge, sizeof(decoder_badge), "%s%s%s",
                      evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE
-                         ? "Hardware (sceVideodec2)"
-                         : "Software (FFmpeg)");
+                         ? "Hardware (sceVideodec2)" : "Software (FFmpeg)",
+                     codec_badge[0] ? " — " : "", codec_badge);
         }
 
         snprintf(ch_str, sizeof(ch_str), "%d Channels (%s)", evo_audio_channels,
