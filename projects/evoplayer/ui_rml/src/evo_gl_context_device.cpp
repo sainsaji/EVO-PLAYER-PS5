@@ -785,6 +785,37 @@ extern "C" void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)
     }
 }
 
+extern "C" int evo_gl_probe_rgb(uint8_t *rgb, int n)
+{
+    if (!g_ready || !rgb || n <= 0)
+        return 0;
+    /* #8: sparse colour probe for the codec sweep. A full evo_gl_read_default_fb
+     * would pull 33 MB at 4K; the sweep only needs enough pixels to notice that
+     * a clip decoded but was tone-mapped, matrixed or swizzled wrong, so sample
+     * a fixed low-discrepancy spread instead. Deterministic across runs, which
+     * is what makes the hash comparable between backends. */
+    static const float kGolden = 0.61803398875f;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    float fx = 0.5f, fy = 0.5f;
+    for (int i = 0; i < n; i++) {
+        /* Two-dimensional additive-recurrence sequence, inset from the edges so
+         * letterbox bars can't dominate the sample. */
+        fx += kGolden;        if (fx >= 1.0f) fx -= 1.0f;
+        fy += kGolden * 0.5f; if (fy >= 1.0f) fy -= 1.0f;
+        int x = (int)((0.1f + 0.8f * fx) * (float)g_w);
+        int y = (int)((0.1f + 0.8f * fy) * (float)g_h);
+        if (x < 0) x = 0; if (x >= g_w) x = g_w - 1;
+        if (y < 0) y = 0; if (y >= g_h) y = g_h - 1;
+        uint8_t px[4] = { 0, 0, 0, 0 };
+        glReadPixels(x, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        rgb[i * 3 + 0] = px[0];
+        rgb[i * 3 + 1] = px[1];
+        rgb[i * 3 + 2] = px[2];
+    }
+    return n;
+}
+
 extern "C" void evo_gl_context_size(int *w, int *h)
 {
     if (w) *w = g_ready ? g_w : 0;

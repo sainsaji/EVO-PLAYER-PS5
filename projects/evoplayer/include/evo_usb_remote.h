@@ -12,6 +12,8 @@
  *   seek <sec>         seek to absolute <sec>
  *   seek +<sec>        seek forward
  *   seek -<sec>        seek back
+ *   stop               end playback, back to the browser (#8: flushes the
+ *                      per-file `sweep` line, which the decoder close writes)
  *
  * Status line: build=<id> t=<s> scr=<n> be=<0|1> pos=<s> dur=<s> fps=<n>
  *              fatal=<0|1> eof=<0|1> active=<0|1>
@@ -34,6 +36,9 @@ void evo_usb_remote_poll(void);
 /* Provided by the host (main.c): open <path> from the beginning, mirroring the
  * browse->select path (nav push, return screen, start_video_playback). */
 void evo_open_media_path(const char *path);
+
+/* Provided by the host (main.c): end playback and return to the browser. */
+void evo_stop_media_playback(void);
 
 #ifdef __cplusplus
 }

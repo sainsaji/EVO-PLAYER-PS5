@@ -55,6 +55,10 @@ static void run_command(const char *line)
         evo_open_media_path(buf + 5);
         return;
     }
+    if (strcmp(buf, "stop") == 0) {
+        evo_stop_media_playback();
+        return;
+    }
     if (strncmp(buf, "seek ", 5) == 0) {
         const char *arg = buf + 5;
         double target;
@@ -77,14 +81,31 @@ void evo_usb_remote_poll(void)
     static long long last_status = 0;
     long long now = now_ms_local();
 
-    /* Command file — consume then delete so each command runs once. */
+    /*
+     * Command file — consume then delete so each command runs once.
+     *
+     * The frame loop polls ~300 times a second and the writer is an FTP STOR,
+     * so the file is routinely opened while it is still being written: the
+     * read then yields nothing (or half a path), the command is lost, and the
+     * remove() hides the evidence. Only consume a COMPLETE line — one that
+     * arrived with its terminating newline. Anything else is a write still in
+     * flight, and is left alone for the next poll.
+     */
     FILE *cf = fopen(CMD_PATH, "r");
     if (cf) {
         char line[600];
-        if (fgets(line, sizeof line, cf))
-            run_command(line);
+        int  got = (fgets(line, sizeof line, cf) != NULL);
+        int  complete = got && strchr(line, '\n') != NULL;
+        /* A full buffer with no newline is not a partial write, it is junk —
+         * drop it rather than wedging the remote on it forever. */
+        int  junk = got && !complete && strlen(line) >= sizeof line - 1;
         fclose(cf);
-        remove(CMD_PATH);
+        if (complete) {
+            remove(CMD_PATH);
+            run_command(line);
+        } else if (junk) {
+            remove(CMD_PATH);
+        }
     }
 
     /* Status once a second. */

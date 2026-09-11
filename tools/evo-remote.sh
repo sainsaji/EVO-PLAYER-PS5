@@ -14,10 +14,17 @@
 #   kill                                    SIGKILL the running eboot (app_ctl)
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
+#   stop                                    end playback, back to the browser
 #   status                                  print /mnt/usb0/evo_status once
 #   log                                     pull /mnt/usb0/evo.log (-> output/logs/)
 #   watch [seconds]                         stream evo_status + new evo.log lines
 #   clear                                   delete evo.log + evo_status
+#   sweep [--dir p] [--secs n] [--max n]    #8 codec sweep: play every clip in a
+#         [--skip substr]...                directory, harvest the per-file
+#                                           metrics, render output/logs/sweep.md
+#                                           (--skip fences off a clip that is
+#                                           known to take the app down)
+#   report [evo.log]                        re-render that table offline
 #
 # The one thing this can't do: launch the title (sceSystemServiceLaunchApp from
 # a payload returns 0x80940005). After `build` / `kill`, launch once from the
@@ -104,6 +111,44 @@ kill)
     ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
+stop)   put_cmd "stop" ;;
+sweep)
+    # #8 — the codec sweep. Plays every clip in a directory for a fixed window,
+    # then harvests the per-file `sweep` lines EVO wrote into evo.log and renders
+    # the docs/validation.md table. Each `play` implicitly closes the previous
+    # file (start_video_playback stops first), which is what flushes its row; the
+    # trailing `stop` flushes the last one.
+    SWEEP_DIR="/mnt/usb0/test_files_aud_vid"
+    SWEEP_SECS=30
+    SWEEP_MAX=0
+    SWEEP_SKIP=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir)  SWEEP_DIR="$2"; shift 2 ;;
+            --secs) SWEEP_SECS="$2"; shift 2 ;;
+            --max)  SWEEP_MAX="$2"; shift 2 ;;
+            # repeatable; a clip whose name contains any of these is not played
+            --skip) SWEEP_SKIP="${SWEEP_SKIP:+${SWEEP_SKIP},}$2"; shift 2 ;;
+            *) die "usage: evo-remote.sh sweep [--dir <path>] [--secs <n>] [--max <n>] [--skip <substr>]..." ;;
+        esac
+    done
+    mkdir -p "${LOG_OUT}"
+    PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" \
+    SWEEP_DIR="${SWEEP_DIR}" SWEEP_SECS="${SWEEP_SECS}" SWEEP_MAX="${SWEEP_MAX}" \
+    SWEEP_SKIP="${SWEEP_SKIP}" \
+    python3 "$(dirname "${BASH_SOURCE[0]}")/sweep_run.py" || die "sweep aborted"
+    get_file "${USB_LOG}" > "${LOG_OUT}/evo.log" || die "could not pull evo.log"
+    python3 "$(dirname "${BASH_SOURCE[0]}")/sweep_report.py" \
+        "${LOG_OUT}/evo.log" -o "${LOG_OUT}/sweep.md"
+    echo ""
+    echo "  table -> output/logs/sweep.md   (paste into docs/validation.md)"
+    ;;
+report)
+    # Re-render the table from an evo.log already on disk; no console needed.
+    mkdir -p "${LOG_OUT}"
+    python3 "$(dirname "${BASH_SOURCE[0]}")/sweep_report.py" \
+        "${1:-${LOG_OUT}/evo.log}" -o "${LOG_OUT}/sweep.md"
+    ;;
 clear)  del_files "${USB_STATUS}" "${USB_LOG}" ;;
 status) get_file "${USB_STATUS}" || echo "(no evo_status — launched? built --usb-remote?)" ;;
 boot|log)

@@ -68,6 +68,7 @@ extern int g_ps5_register_buffers2_rc;
 #include "evo_perf_monitor.h"
 #include "evo_demux.h"
 #include "evo_vdec.h"
+#include "evo_sweep.h"        /* #8: per-file codec-sweep measurement */
 #include "evo_playback.h"
 #include "prospero_thumbnail.h"
 #include "evo_rmlui_bridge.h"
@@ -2599,6 +2600,14 @@ void stop_video_playback(void) {
     }
 
     if (g_vdec) {
+        /* #8: the decode counters live in the decoder, so the sweep row has to
+         * be written while it is still open. pp_playback's own stats are read
+         * separately below and are unaffected by the close. */
+        {
+            pp_playback_stats _sw_ps;
+            pp_playback_get_stats(&g_pp_pb, &_sw_ps);
+            evo_sweep_file_end(g_vdec, &_sw_ps);
+        }
         evo_vdec_close(g_vdec);
         g_vdec = NULL;
     }
@@ -3311,6 +3320,14 @@ int start_video_playback(const char *path) {
             g_vdec = evo_vdec_open(&vp, &vdec_chosen);
             EVO_P8("P8_21_VDEC_RC", "vdec=%p", (void *)g_vdec);
             if (!g_vdec) {
+                /* #8: a clip that never reached a decoder still belongs in the
+                 * sweep table — with the reason, so "this firmware has no
+                 * decoder for AV1" doesn't read the same as "it was too slow". */
+                evo_sweep_file_failed(current_media_path,
+                                      avcodec_get_name(par->codec_id),
+                                      par->width, par->height,
+                                      (int)evo_vdec_last_open_result(),
+                                      "vdec_open_null");
                 prospero_codec_error(
                     "VIDEO ERROR",
                     par->codec_id,
@@ -3335,6 +3352,11 @@ int start_video_playback(const char *path) {
                 vdec_chosen != EVO_VDEC_BACKEND_NATIVE) {
                 evo_vdec_close(g_vdec);
                 g_vdec = NULL;
+                evo_sweep_file_failed(current_media_path,
+                                      avcodec_get_name(par->codec_id),
+                                      par->width, par->height,
+                                      (int)EVO_VDEC_OPEN_DOWNGRADED,
+                                      "native_pref_refused");
                 prospero_codec_error(
                     "NATIVE DECODE UNSUPPORTED",
                     par->codec_id,
@@ -3364,6 +3386,18 @@ int start_video_playback(const char *path) {
             } else {
                 video_fps = 60.0;
             }
+
+            /* #8: start measuring. Everything the sweep line needs that is not
+             * a counter is known by now — codec, geometry, frame rate, duration
+             * and which backend actually opened. */
+            evo_sweep_file_begin(current_media_path,
+                                 avcodec_get_name(par->codec_id),
+                                 par->width, par->height, video_fps,
+                                 (play_fmt->duration > 0)
+                                     ? (double)play_fmt->duration / (double)AV_TIME_BASE
+                                     : 0.0,
+                                 (int)vdec_chosen,
+                                 (int)evo_vdec_last_open_result());
 
             continue;
         }
@@ -7681,6 +7715,39 @@ static int               emby_is_loading = 0;
 static char              emby_active_item_id[128] = {0};
 static int64_t           emby_last_report_sec = 0;
 
+/*
+ * End playback and return to the browser — the exit-confirm path without the
+ * prompt. The dev remote needs this for the codec sweep (#8): the per-file
+ * `sweep` line is written when the decoder closes, so the last clip of a run
+ * would otherwise never be recorded.
+ *
+ * Lives here rather than next to evo_open_media_path() only because it has to
+ * report the stop to Emby, and emby_active_item_id is declared just above.
+ * Non-static on purpose (evo_usb_remote.c calls it).
+ */
+void evo_stop_media_playback(void)
+{
+    /*
+     * Deliberately unguarded. A clip that ran to EOF leaves the decoder open on
+     * SCREEN_PLAYBACK_FINISHED with the playback state already inactive, so any
+     * "is something playing?" test here skips exactly the case the sweep needs:
+     * the last clip of a run, whose row is written by the decoder close.
+     * stop_video_playback() is idempotent.
+     */
+    recent_update_current_position();
+    if (emby_active_item_id[0]) {
+        emby_report_playback_stop(emby_active_item_id,
+                                  (int64_t)prospero_media_clock_seconds());
+        emby_active_item_id[0] = '\0';
+    }
+    stop_video_playback();
+    if (screen == SCREEN_PLAYER || screen == SCREEN_PLAYBACK_FINISHED) {
+        screen = g_playback_return_screen;
+        if (screen == SCREEN_USB_BROWSER && file_count <= 0)
+            load_usb_files();
+    }
+}
+
 static void on_emby_auth_result(int success, const char *msg, void *userdata)
 {
     (void)userdata;
@@ -10972,6 +11039,8 @@ skip_screen_input:
             int _swap = 1;
             int _video = gl_video_quad_screen(screen);
             uint64_t _b0 = (uint64_t)now_ms();
+            uint64_t _sw_p0 = evo_sweep_now_us();   /* #8: µs present cost */
+            int _sw_new_video = 0;
             if (_video) {
                 /*
                  * Zero-copy video quad — the decoder's YUV planes go straight to
@@ -11048,9 +11117,14 @@ skip_screen_input:
                                     (int)_f.coded_w, (int)_f.coded_h,
                                     (int)_f.disp_w, (int)_f.disp_h,
                                     video_view_mode, _f.ten_bit, _f.color_trc);
+                    /* #8: probe the video quad BEFORE the OSD lands on top of
+                     * it, so the colour signature is decoder+shader output and
+                     * not whatever the OSD happened to be covering. */
+                    evo_sweep_probe_colour();
                     if (_osd_active && !g_ps5_video_out_hdr)
                         evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
                     _swap = 1;
+                    _sw_new_video = 1;
                 } else if (_present && _osd_active) {
                     /* OSD-only redraw (paused / scrubbing / subtitles / toast) -
                      * no new video frame, so the quad already on screen is
@@ -11079,9 +11153,16 @@ skip_screen_input:
                 _swap = evo_rmlui_gl_consume_drew();
             }
             uint64_t _b1 = (uint64_t)now_ms();
+            uint64_t _sw_p1 = evo_sweep_now_us();
             if (_swap) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
             uint64_t _b2 = (uint64_t)now_ms();
             if (_swap && screen == SCREEN_PLAYER) {
+                /* #8: µs blit/swap cost for the codec sweep, split at the
+                 * present call — the swap half is the vblank wait and pins to
+                 * the refresh period regardless of how much work the frame was.
+                 * now_ms() is too coarse for either (a blit is ~1 ms). */
+                evo_sweep_note_present(_sw_p0, _sw_p1, evo_sweep_now_us(),
+                                       _sw_new_video);
                 /* #63: exponential-moving present cost for the diagnostic HUD. */
                 g_gl_present_ms = g_gl_present_ms * 0.85 + (double)(_b2 - _b0) * 0.15;
                 static uint64_t s_bt0, s_bn, s_bl, s_sw;

@@ -93,6 +93,14 @@ void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
  * blended. No-op on host. */
 void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload);
 
+/* #8, device only. Read `n` pixels from a fixed, deterministic spread across the
+ * composited default framebuffer into `rgb` (3 bytes each, R,G,B). The codec
+ * sweep's colour-correctness probe: cheap enough to run once per clip, and
+ * comparable run-to-run and backend-to-backend because the sample positions
+ * never move. Returns the number of pixels written (0 when no context / host).
+ * Caller supplies 3*n bytes. */
+int evo_gl_probe_rgb(uint8_t *rgb, int n);
+
 #ifdef __cplusplus
 }
 #endif

@@ -518,8 +518,10 @@ UI string per state, shown on the row and in the toast:
 | NATIVE | `Native` | `Native — unavailable` (acts as FFmpeg) |
 
 A one-line status under the row when native is active:
-`H.264 · Sony decoder · 3.1 ms/frame` (from the pipeline metrics EVO already
-collects — `pp_pipeline_metrics.h`).
+`H.264 · Sony decoder · 3.1 ms/frame` (from the decode timers in the `evo_vdec`
+seam — `evo_vdec_get_stats()` / `evo_vdec_decode_p95_us()`, #8. The
+`pp_pipeline_metrics.h` this used to point at was never written to by anything
+and was deleted with #8.)
 
 ---
 

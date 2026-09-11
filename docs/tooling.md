@@ -476,6 +476,46 @@ hardware screenshot had happened to capture.
 
 ---
 
+## `tools/evo-remote.sh sweep` — the codec sweep, measured (#8)
+
+The 29-file test set, played end to end with numbers attached instead of
+checkmarks. One deployed `--usb-remote` build, launched once, then hands-off:
+
+```bash
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep --dir /mnt/usb0/clips --secs 45
+docker compose run --rm ps5-dev ./tools/evo-remote.sh sweep --max 3      # smoke it first
+```
+
+`sweep` lists the directory over FTP, plays each clip for a 30 s window
+(`--secs`), and moves on when the window is reached, the clip ends, or it
+stalls. EVO does the measuring: each file writes one `sweep v=1 …` line to
+`/mnt/usb0/evo.log` **when its decoder closes**, which is why the runner's next
+`play` (and a trailing `stop`) matter — they are what flush the previous row.
+Then it pulls the log and renders `output/logs/sweep.md`.
+
+Two supporting pieces:
+
+- `tools/sweep_run.py` — the driver. Every FTP call is timeout-bounded; a clip
+  that never starts is recorded and skipped rather than hanging the run.
+- `tools/sweep_report.py` — log → markdown table. Host-only, so a table can be
+  re-rendered from any log after the fact, and `--colour-ref <earlier evo.log>`
+  turns the colour column into match/differs against a baseline run.
+
+```bash
+python3 tools/sweep_report.py output/logs/evo.log -o output/logs/sweep.md
+docker compose run --rm ps5-dev ./tools/evo-remote.sh report   # same, in-container
+```
+
+What each column means, and why a colour signature is in there at all:
+[`validation.md`](validation.md#codec-sweep--decode-speed-drops-and-colour-8).
+
+The instrumentation itself is `media/src/evo_sweep.c` plus the decode timers in
+the `evo_vdec` seam — it is compiled into every build, not just `--usb-remote`,
+so the same per-file line is in `evo.log` after any ordinary playback session.
+
+---
+
 ## `tools/gl_yuv_parity.py` — the video colour matrix, measured on the host
 
 GL-4 (#80) deleted the CPU converters, and with them `tools/bench.sh` — there is

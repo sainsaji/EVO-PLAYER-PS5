@@ -16,6 +16,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
@@ -39,7 +40,111 @@ struct evo_vdec {
     AVFrame         *frame;   /* scratch for receive; planes borrowed until next call */
     AVPacket        *pkt;     /* scratch for send */
     evo_vdec_native *nat;     /* sceVideodec2 sub-backend, or NULL */
+
+    /* #8 instrumentation. `pending_us` accumulates the cost of the send() calls
+     * and the empty receive() polls since the last frame came out, so the cost
+     * of a frame includes the work that produced it rather than only the call
+     * that collected it — a decoder with a 4-deep pipeline otherwise reports
+     * near-zero per-frame times. */
+    evo_vdec_stats stats;
+    uint64_t       pending_us;
 };
+
+/* ---------------------------------------------------------------------------
+ * #8 — decode timing at the seam
+ * ------------------------------------------------------------------------ */
+
+static int vdec_send_inner(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us);
+static int vdec_receive_inner(evo_vdec *v, pp_frame *out);
+
+static evo_vdec_open_result g_last_open_result = EVO_VDEC_OPEN_OK;
+
+static uint64_t vdec_now_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)(ts.tv_nsec / 1000);
+}
+
+/* Charge `us` to the decoder. `produced` marks the call that yielded a frame:
+ * the accumulated pending cost is flushed into the per-frame ring with it. */
+static void vdec_note(evo_vdec *v, uint64_t us, int produced)
+{
+    v->stats.decode_us_total += us;
+    v->pending_us += us;
+    if (!produced)
+        return;
+    uint64_t frame_us = v->pending_us;
+    v->pending_us = 0;
+    if (frame_us > v->stats.decode_us_max)
+        v->stats.decode_us_max = frame_us;
+    /* Rolling ring of the last 256 frames, same shape as pp_playback's. */
+    uint32_t i;
+    if (v->stats.decode_ring_count < 256u) {
+        i = v->stats.decode_ring_count;
+        v->stats.decode_ring_count++;
+    } else {
+        i = (uint32_t)(v->stats.frames_out % 256u);
+    }
+    v->stats.decode_ring[i] = frame_us;
+}
+
+evo_vdec_open_result evo_vdec_last_open_result(void)
+{
+    return g_last_open_result;
+}
+
+const char *evo_vdec_open_result_name(evo_vdec_open_result r)
+{
+    switch (r) {
+    case EVO_VDEC_OPEN_OK:         return "ok";
+    case EVO_VDEC_OPEN_DOWNGRADED: return "downgraded";
+    case EVO_VDEC_OPEN_NO_DECODER: return "no_decoder";
+    case EVO_VDEC_OPEN_CTX_FAIL:   return "ctx_fail";
+    case EVO_VDEC_OPEN_BAD_ARGS:   return "bad_args";
+    }
+    return "?";
+}
+
+void evo_vdec_get_stats(const evo_vdec *v, evo_vdec_stats *out)
+{
+    if (!out)
+        return;
+    if (!v) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    *out = v->stats;
+    out->backend  = v->backend;
+    out->codec_id = v->codec_id;
+}
+
+uint64_t evo_vdec_decode_p95_us(const evo_vdec *v)
+{
+    uint64_t tmp[256];
+    uint32_t n, i, j, idx;
+    if (!v)
+        return 0;
+    n = v->stats.decode_ring_count;
+    if (n == 0)
+        return 0;
+    if (n > 256u)
+        n = 256u;
+    memcpy(tmp, v->stats.decode_ring, n * sizeof(uint64_t));
+    for (i = 1; i < n; i++) {          /* insertion sort, n <= 256 */
+        uint64_t val = tmp[i];
+        j = i;
+        while (j > 0 && tmp[j - 1] > val) {
+            tmp[j] = tmp[j - 1];
+            j--;
+        }
+        tmp[j] = val;
+    }
+    idx = (n * 95u) / 100u;
+    if (idx >= n)
+        idx = n - 1;
+    return tmp[idx];
+}
 
 int evo_vdec_probe(void)
 {
@@ -137,8 +242,10 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
 {
     if (chosen)
         *chosen = EVO_VDEC_BACKEND_FFMPEG;
+    g_last_open_result = EVO_VDEC_OPEN_BAD_ARGS;
     if (!p)
         return NULL;
+    int wanted_native = (p->backend == EVO_VDEC_BACKEND_NATIVE);
 
     /* Native first, if asked. Any failure falls through to FFmpeg — the seam
      * contract is "never NULL when FFmpeg could have opened". */
@@ -152,15 +259,22 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
                 v->nat = nat;
                 if (chosen)
                     *chosen = EVO_VDEC_BACKEND_NATIVE;
+                g_last_open_result = EVO_VDEC_OPEN_OK;
                 return v;
             }
             evo_vdec_native_close(nat);
         }
     }
 
+    /* Past this point any failure is FFmpeg's, so the sweep can separate "no
+     * decoder exists" from "the decoder exists but would not come up". */
+    g_last_open_result = EVO_VDEC_OPEN_CTX_FAIL;
+
     const AVCodec *dec = avcodec_find_decoder((enum AVCodecID)p->codec_id);
-    if (!dec)
+    if (!dec) {
+        g_last_open_result = EVO_VDEC_OPEN_NO_DECODER;
         return NULL;
+    }
 
     evo_vdec *v = (evo_vdec *)calloc(1, sizeof(*v));
     if (!v)
@@ -193,6 +307,8 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
         evo_vdec_close(v);
         return NULL;
     }
+    g_last_open_result = wanted_native ? EVO_VDEC_OPEN_DOWNGRADED
+                                       : EVO_VDEC_OPEN_OK;
     return v;
 }
 
@@ -200,6 +316,19 @@ int evo_vdec_send(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us)
 {
     if (!v)
         return -1;
+    uint64_t t0 = vdec_now_us();
+    int r = vdec_send_inner(v, data, size, pts_us);
+    vdec_note(v, vdec_now_us() - t0, 0);
+    v->stats.send_calls++;
+    if (r > 0)
+        v->stats.send_stalls++;
+    else if (r < 0)
+        v->stats.fatal_errors++;
+    return r;
+}
+
+static int vdec_send_inner(evo_vdec *v, const uint8_t *data, int size, int64_t pts_us)
+{
     if (v->backend == EVO_VDEC_BACKEND_NATIVE)
         return evo_vdec_native_send(v->nat, data, size, pts_us);
     if (!v->ctx)
@@ -237,6 +366,21 @@ int evo_vdec_receive(evo_vdec *v, pp_frame *out)
 {
     if (!v || !out)
         return -1;
+    uint64_t t0 = vdec_now_us();
+    int r = vdec_receive_inner(v, out);
+    vdec_note(v, vdec_now_us() - t0, r > 0);
+    if (r > 0) {
+        v->stats.frames_out++;
+        if (r == 2)
+            v->stats.frames_sw_mapped++;
+    } else if (r < 0) {
+        v->stats.fatal_errors++;
+    }
+    return r;
+}
+
+static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
+{
     if (v->backend == EVO_VDEC_BACKEND_NATIVE)
         return evo_vdec_native_receive(v->nat, out);   /* 1 / 0 / <0, never 2 */
     if (!v->ctx)
@@ -267,6 +411,7 @@ void evo_vdec_flush(evo_vdec *v)
 {
     if (!v)
         return;
+    v->pending_us = 0;   /* #8: don't charge pre-seek work to the next frame */
     if (v->backend == EVO_VDEC_BACKEND_NATIVE) {
         evo_vdec_native_flush(v->nat);
         return;

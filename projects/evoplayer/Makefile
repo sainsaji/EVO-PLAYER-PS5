@@ -106,6 +106,7 @@ MEDIA_SRCS := \
     media/src/evo_demux.c \
     media/src/evo_vdec_ffmpeg.c \
     media/src/evo_vdec_native.c \
+    media/src/evo_sweep.c \
     media/src/evo_playback.c \
     src/evo_toast.c \
     src/evo_recent.c \

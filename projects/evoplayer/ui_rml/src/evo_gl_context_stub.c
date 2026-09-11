@@ -67,6 +67,12 @@ void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload)
     (void)fb; (void)w; (void)h; (void)upload;
 }
 
+int evo_gl_probe_rgb(uint8_t *rgb, int n)
+{
+    (void)rgb; (void)n;
+    return 0;
+}
+
 int g_ps5_video_out_hdr = 0;
 
 #endif /* !EVO_GL_DEVICE && !EVO_RML_GL_HOST */

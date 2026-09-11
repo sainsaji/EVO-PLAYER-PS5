@@ -122,6 +122,46 @@ void evo_vdec_flush(evo_vdec *v);      /* seek: drop all buffered state */
 void evo_vdec_close(evo_vdec *v);
 evo_vdec_backend evo_vdec_active(const evo_vdec *v);
 
+/* ---- #8: codec-sweep instrumentation -------------------------------------
+ * The seam is the only place both backends are visible, so decode cost is
+ * measured here once and is directly comparable between FFmpeg and native
+ * (#38's A/B). "Decode" = wall time inside evo_vdec_send() + evo_vdec_receive(),
+ * charged to the frames that came out; it excludes demux, pacing and present.
+ */
+
+/* Why an open produced the backend it did. Recorded per attempt so a sweep can
+ * tell "this console has no decoder for that codec" apart from "it decoded, but
+ * not fast enough" — the two look identical in a pass/fail table. */
+typedef enum {
+    EVO_VDEC_OPEN_OK          = 0,  /* opened on the backend that was asked for  */
+    EVO_VDEC_OPEN_DOWNGRADED  = 1,  /* NATIVE asked, FFmpeg delivered            */
+    EVO_VDEC_OPEN_NO_DECODER  = 2,  /* no FFmpeg decoder built for this codec    */
+    EVO_VDEC_OPEN_CTX_FAIL    = 3,  /* decoder exists; alloc/params/open2 failed */
+    EVO_VDEC_OPEN_BAD_ARGS    = 4
+} evo_vdec_open_result;
+
+/* Outcome of the most recent evo_vdec_open() on any thread. Valid until the
+ * next open. Kept out of `evo_vdec` so it survives a NULL return. */
+evo_vdec_open_result evo_vdec_last_open_result(void);
+const char *evo_vdec_open_result_name(evo_vdec_open_result r);
+
+typedef struct {
+    evo_vdec_backend backend;       /* what actually decoded                    */
+    int      codec_id;
+    uint64_t frames_out;            /* receive() == 1 or 2                      */
+    uint64_t frames_sw_mapped;      /* receive() == 2: the swscale detour       */
+    uint64_t send_calls;
+    uint64_t send_stalls;           /* send() == 1, "drain first"               */
+    uint64_t decode_us_total;       /* send + receive, all calls                */
+    uint64_t decode_us_max;
+    uint64_t fatal_errors;          /* send/receive < 0                         */
+    uint64_t decode_ring[256];      /* per-output-frame cost, for p95           */
+    uint32_t decode_ring_count;
+} evo_vdec_stats;
+
+void     evo_vdec_get_stats(const evo_vdec *v, evo_vdec_stats *out);
+uint64_t evo_vdec_decode_p95_us(const evo_vdec *v);
+
 /* AVCodecID of the stream this decoder is playing — backend-independent (the
  * FFmpeg codec-name accessors below return "" on the native backend). Use with
  * avcodec_get_name() for the UI codec badge. 0 (AV_CODEC_ID_NONE) if v==NULL. */
