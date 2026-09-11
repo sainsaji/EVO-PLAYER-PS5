@@ -481,12 +481,21 @@ static void probe_slot(nat_codec c, int w, int h, int required, unsigned sm)
     if (rc == 0) {
         s->ready   = 1;
         g_boot_any = 1;
+        /* flex=cpu_map: the ONE flexible-memory allocation per slot
+         * (sceKernelMapNamedFlexibleMemory, sized from the decoder's own
+         * QueryDecoderMemoryInfo response) - a separate pool from the five
+         * direct-memory fields above it, and the one FFmpeg's own
+         * get_buffer()/av_malloc calls actually compete against (#38). Never
+         * logged before 2026-09-11 because the flex-vs-direct distinction
+         * was found only after HEVC10/VP9-2 broke home-screen thumbnail
+         * decode - this is what should have been measured from the start. */
         note("EVO vdec native: RESIDENT %s decoder up  %ux%u  frame=%zuKB  "
-             "total=%zuKB (compute=%zuKB gpu=%zuKB cpu_gpu=%zuKB input=%zuKB frame_pool=%zuKB)  sysmod=0x%08x",
+             "total=%zuKB (compute=%zuKB gpu=%zuKB cpu_gpu=%zuKB input=%zuKB frame_pool=%zuKB)  "
+             "flex=%zuKB  sysmod=0x%08x",
              d->tag, s->max_w, s->max_h, s->frame_size >> 10,
              (s->compute_size + s->gpu_size + s->cpu_gpu_size + s->input_pool + s->frame_pool) >> 10,
              s->compute_size >> 10, s->gpu_size >> 10, s->cpu_gpu_size >> 10,
-             s->input_pool >> 10, s->frame_pool >> 10, sm);
+             s->input_pool >> 10, s->frame_pool >> 10, s->cpu_map >> 10, sm);
         return;
     }
     note("EVO vdec native: %s bring-up FAILED at [%s] rc=0x%08x sysmod=0x%08x -> %s",
