@@ -11037,7 +11037,12 @@ skip_screen_input:
                 int _present = (_new_frame && _have) || _osd_changed ||
                                evo_rmlui_gl_consume_drew();
                 if (_present && _have) {
-                    g_ps5_video_out_hdr = (_f.color_trc == 16) ? 1 : 0;
+                    int _want_hdr = (_f.color_trc == 16) ? 1 : 0;
+                    if (_want_hdr != g_ps5_video_out_hdr) {
+                        evo_bt("HDR flag %d -> %d (color_trc=%d screen=%d ten_bit=%d)",
+                               g_ps5_video_out_hdr, _want_hdr, _f.color_trc, screen, _f.ten_bit);
+                    }
+                    g_ps5_video_out_hdr = _want_hdr;
                     evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
                                     (int)_f.coded_w, (int)_f.coded_h,
@@ -11063,9 +11068,13 @@ skip_screen_input:
                     _swap = 0;   /* nothing new — hold the frame on screen */
                 }
             } else if (evo_rmlui_gl_blit_mode()) {
+                if (g_ps5_video_out_hdr)
+                    evo_bt("HDR flag %d -> 0 (menu, blit mode, screen=%d)", g_ps5_video_out_hdr, screen);
                 g_ps5_video_out_hdr = 0;
                 if (_swap) evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
             } else {
+                if (g_ps5_video_out_hdr)
+                    evo_bt("HDR flag %d -> 0 (menu, native mode, screen=%d)", g_ps5_video_out_hdr, screen);
                 g_ps5_video_out_hdr = 0;
                 _swap = evo_rmlui_gl_consume_drew();
             }
