@@ -64,7 +64,10 @@ static void run_command(const char *line)
         double target;
         if (arg[0] == '+' || arg[0] == '-') {
             double rel = atof(arg);              /* atof reads the sign */
-            target = evo_pb_position_s() + rel;
+            /* Absolute position, not evo_pb_position_s(): the raw clock
+             * restarts at 0 on a seek, so relative seeks compounded off it
+             * landed nowhere near where they were asked to. */
+            target = evo_player_position_s() + rel;
         } else {
             target = atof(arg);
         }
@@ -120,7 +123,7 @@ void evo_usb_remote_poll(void)
             "build=%s t=%lld scr=%d be=%d pos=%.2f dur=%.1f fps=%.1f "
             "fatal=%d eof=%d active=%d\n",
             EVO_BUILD_ID, now / 1000, screen, evo_pb_active_backend(),
-            evo_pb_position_s(), evo_pb_duration_s(), evo_pb_video_fps(),
+            evo_player_position_s(), evo_pb_duration_s(), evo_pb_video_fps(),
             evo_pb_decode_fatal(), evo_pb_is_eof(), evo_pb_is_active());
     fclose(sf);
 }

@@ -40,6 +40,11 @@ void evo_open_media_path(const char *path);
 /* Provided by the host (main.c): end playback and return to the browser. */
 void evo_stop_media_playback(void);
 
+/* Provided by the host (main.c): ABSOLUTE media position, seek base included.
+ * evo_pb_position_s() is the raw clock and restarts at 0 on every seek — use
+ * this for anything user-meaningful (relative seeks, the status line). */
+double evo_player_position_s(void);
+
 #ifdef __cplusplus
 }
 #endif

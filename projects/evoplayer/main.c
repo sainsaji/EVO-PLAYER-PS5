@@ -4688,9 +4688,10 @@ double percentage = 0.0;
      */
     char active_sub_text[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
     if (prospero_subtitle_enabled && !prospero_music_mode) {
-        double sub_pos = resume_base_offset_seconds +
-            ((audio_ctx && audio_handle >= 1) ? audio_clock_seconds
-                                              : evo_pb_video_clock_s()) -
+        int    sub_from_audio = (audio_ctx && audio_handle >= 1);
+        double sub_clock = sub_from_audio ? audio_clock_seconds
+                                          : evo_pb_video_clock_s();
+        double sub_pos = resume_base_offset_seconds + sub_clock -
             ((double)prospero_subtitle_delay_ms / 1000.0);
         if (sub_pos < 0.0) sub_pos = 0.0;
         if (prospero_subtitle_use_external) {
@@ -4700,6 +4701,49 @@ double percentage = 0.0;
         } else {
             prospero_embedded_subtitle_text_at(sub_pos, active_sub_text,
                                                sizeof(active_sub_text));
+        }
+
+        /*
+         * Subtitle-sync trace. Drop /mnt/usb0/evo_subsync to enable — the same
+         * shape as the other diagnostic hooks, and off by default because this
+         * is a per-frame site.
+         *
+         * sub_pos is a sum, and a desync is a question about which term moved:
+         * `base` is re-based by a seek, `clk` is the A/V clock, and the two are
+         * added. Logging only the total would say a subtitle is late without
+         * saying whether the seek or the clock put it there, which is the whole
+         * question after a seek-back. `pos` is the media clock the OSD shows —
+         * if it disagrees with base+clk, that is its own bug.
+         */
+        {
+            static int    s_subsync = -1;
+            static double s_last_log_ms = 0.0;
+            static char   s_last_text[64] = {0};
+            if (s_subsync < 0)
+                s_subsync = (access("/mnt/usb0/evo_subsync", F_OK) == 0);
+            if (s_subsync) {
+                double now = (double)now_ms();
+                int changed = (strncmp(s_last_text, active_sub_text,
+                                       sizeof(s_last_text) - 1) != 0);
+                if (changed || now - s_last_log_ms >= 1000.0) {
+                    /* A cue is legitimately multi-line; the log is not. */
+                    char flat[96];
+                    size_t fi = 0;
+                    for (const char *c = active_sub_text; *c && fi < sizeof(flat) - 1; c++)
+                        flat[fi++] = (*c == '\n' || *c == '\r') ? ' ' : *c;
+                    flat[fi] = 0;
+
+                    s_last_log_ms = now;
+                    snprintf(s_last_text, sizeof(s_last_text), "%s", active_sub_text);
+                    evo_boot_log("subsync pos=%.3f base=%.3f clk=%.3f src=%s "
+                                 "delay=%d mode=%s mclk=%.3f cue=\"%s\"",
+                                 sub_pos, resume_base_offset_seconds, sub_clock,
+                                 sub_from_audio ? "aud" : "vid",
+                                 prospero_subtitle_delay_ms,
+                                 prospero_subtitle_use_external ? "ext" : "emb",
+                                 evo_pb_position_s(), flat[0] ? flat : "-");
+                }
+            }
         }
     }
 
@@ -6351,6 +6395,23 @@ static void evo_play_recent(int index)
     screen = SCREEN_PLAYER;
 
     start_video_playback(current_media_path);
+}
+
+/*
+ * Absolute media position, for the dev remote — the same basis the OSD, the
+ * scrub and the resume file use.
+ *
+ * NOT evo_pb_position_s(): that returns the raw A/V clock, which a seek
+ * restarts at zero, with the seek target carried separately in
+ * resume_base_offset_seconds. Anything treating it as an absolute position is
+ * wrong the moment a seek happens — `seek -40` from 0:60 computed 17.4-40 and
+ * clamped to 0, and evo_status reported pos=5 while the file played at 2:05.
+ * Non-static on purpose (evo_usb_remote.c).
+ */
+double evo_player_position_s(void)
+{
+    double p = resume_base_offset_seconds + prospero_media_clock_seconds();
+    return p < 0.0 ? 0.0 : p;
 }
 
 /* Open a path from the beginning — the browse->select sequence without the

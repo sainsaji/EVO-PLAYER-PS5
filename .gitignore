@@ -52,6 +52,9 @@ output/coverage/
 # tools/make_sweep_clips.sh rather than carrying it in the repo.
 output/sweep_clips/
 
+# Subtitle-sync test SRT (tools/subsync_run.py) - regenerable, not source.
+output/subsync/
+
 # Records the last launch time so tools/launch.sh can refuse to stack
 # instances. Machine-local state, not project state.
 output/.last-launch
