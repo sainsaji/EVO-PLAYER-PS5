@@ -131,7 +131,7 @@ GitHub issue sidebar and Project #5 board.
 
   positional PRX import stubs ─┬─► #27 GPU Step 2: sceAgc convert+present ─ ✅ CLOSED
    (package-app.sh step 6b,      │   2026-09-04, PR #61 — GTA 4K on GPU, correct colour,
-    unconditional DT_NEEDED)      │   982µs/frame. Leftovers: #62 A/B, #37 row, #41 HEVC+VP9
+    unconditional DT_NEEDED)      │   982µs/frame. Leftovers: #62 A/B, #37 row, #41 (HEVC+VP9 ✅ verified)
                                   │      │
                                   │      └─► #28 Step 3: RmlUi on sceAgc (unblocked)
                                   │   (same PRX-stub wall also blocks #34 native IME kb)
@@ -154,7 +154,7 @@ GitHub issue sidebar and Project #5 board.
     #38 validation sweep + FFmpeg-vs-native A/B benchmark + docs
     #39 decode-thread watchdog (hung call must not wedge the app slot)
     #40 route direct memory via evo_direct_mem + multi-hour soak
-    #41 codec-independent NativeVideoBackend (H.264 ✅ + HEVC + VP9)
+    #41 codec-independent NativeVideoBackend (H.264 + HEVC + VP9 ✅ verified — see issue for the phased plan on what's left)
     #59 Surface video decoder backend in player UI (HW vs SW badge + OSD)
     #32 4K native playback: seeking plays audio but video shows black (critical)
 ```
@@ -269,7 +269,7 @@ correct, no judder, display-order frames). Route A (`sceAvPlayer`) is dead.
 | **#38** | Validation sweep (backend column) + FFmpeg-vs-native A/B benchmark + docs rewrite (Phase 6) | open |
 | **#39** | Watchdog the decode thread — a hung `sceVideodec2` call must not wedge the app slot | open |
 | **#40** | Route the resident decoder's direct memory through `evo_direct_mem` + multi-hour soak | open |
-| **#41** | Codec-independent `NativeVideoBackend` — H.264 (done) + HEVC + VP9 on `sceVideodec2`, one interface, common presentation, auto FFmpeg fallback. Research base: `third_party/ps5-hardware-video-decoding-research/` (FW 6.02+12.70; ignore EVO's in-tree decode docs) | open |
+| **#41** | Codec-independent `NativeVideoBackend` — H.264 + HEVC + VP9 all **hardware-verified** on `sceVideodec2` (2026-09-10/11); one interface, common presentation, auto FFmpeg fallback, zero-copy. Left: turn HEVC/VP9 on by default, 4K, 10-bit, codec badge — see the issue's phased plan. Research base: `third_party/ps5-hardware-video-decoding-research/` (FW 6.02+12.70; ignore EVO's in-tree decode docs) | open |
 | **#59** | Surface video decoder backend in player UI (Hardware vs Software decode indicator) | open, medium |
 | **#32** | 4K native playback: seeking plays audio but video shows black (blank screen on GPU present) | open, critical |
 
