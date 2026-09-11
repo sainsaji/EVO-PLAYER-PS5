@@ -27,11 +27,11 @@
 #ifdef EVO_GL_SMOKE
 #include "pp_gl_smoke.h"       /* #77 GL-1 go/no-go probe (--gl-smoke builds only) */
 #endif
+extern int g_ps5_video_out_hdr;
 #if defined(EVO_GL_HDR_PROBE)
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GL/gl.h>
-extern int g_ps5_video_out_hdr;
 extern int g_ps5_register_buffers2_rc;
 #endif
 /* render-overhaul GL-3/GL-4 (#79/#80): the one present path. A --gl .ffpfsc
@@ -11037,23 +11037,36 @@ skip_screen_input:
                 int _present = (_new_frame && _have) || _osd_changed ||
                                evo_rmlui_gl_consume_drew();
                 if (_present && _have) {
+                    g_ps5_video_out_hdr = (_f.color_trc == 16) ? 1 : 0;
                     evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
                                     (int)_f.coded_w, (int)_f.coded_h,
                                     (int)_f.disp_w, (int)_f.disp_h,
                                     video_view_mode, _f.ten_bit, _f.color_trc);
-                    if (_osd_active)
+                    if (_osd_active && !g_ps5_video_out_hdr)
                         evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
                     _swap = 1;
                 } else if (_present && _osd_active) {
+                    /* OSD-only redraw (paused / scrubbing / subtitles / toast) -
+                     * no new video frame, so the quad already on screen is
+                     * whatever the last real frame drew it as. Do NOT touch
+                     * g_ps5_video_out_hdr here: forcing it to 0 would flip
+                     * VideoOut back to SDR while the buffer still holds
+                     * HDR-rendered pixels - a visible color shift on every
+                     * ordinary pause of an HDR file, and a VideoOut re-acquire
+                     * on every OSD refresh during playback, not just on
+                     * entering/leaving the file. Leave it as the last real
+                     * frame set it. */
                     evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
                     _swap = 1;
                 } else {
                     _swap = 0;   /* nothing new — hold the frame on screen */
                 }
             } else if (evo_rmlui_gl_blit_mode()) {
+                g_ps5_video_out_hdr = 0;
                 if (_swap) evo_gl_blit_bgra(gl_scratch, WIDTH, HEIGHT);
             } else {
+                g_ps5_video_out_hdr = 0;
                 _swap = evo_rmlui_gl_consume_drew();
             }
             uint64_t _b1 = (uint64_t)now_ms();
