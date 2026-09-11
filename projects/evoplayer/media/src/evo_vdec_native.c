@@ -128,7 +128,7 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_MAX_H  2176
 #endif
 
-/* Secondary (HEVC / VP9) resident decoders — still OFF by default (#41).
+/* Secondary (HEVC / VP9) resident decoders — ON by default since 2026-09-11 (#41).
  *
  * BRING-UP IS CLEAN ON HARDWARE (klog, 2026-09-10, build d14029b0): AVC 4K +
  * HEVC 1080p + VP9 1080p all created and Reset with rc=0, across two boots.
@@ -142,12 +142,13 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
  * vp9_superframe_split with real alt-ref superframes (477 frames, fatal=0),
  * both at pitch 2048 — the pitch the research repo documents for 8-bit 1080p.
  *
- * Still 0 only because turning it on is its own #41 item, together with the 4K
- * ceiling: three resident 4K decoders against the fake-signed direct-memory
- * budget is unmeasured, and the 1080p secondary slots are what has been proven.
- * Build -DEVO_VDEC_NATIVE_SECONDARY=1 (package-app.sh --native-secondary). */
+ * DEFAULT-ON since 2026-09-11: both are hardware-verified at 1080p (HEVC 475
+ * frames out, VP9 477 frames, fatal=0 on both). The 4K ceiling is separate and
+ * still unmeasured against the fake-signed direct-memory budget — see
+ * EVO_VDEC_NATIVE_SECONDARY_4K below. Build -DEVO_VDEC_NATIVE_SECONDARY=0
+ * (package-app.sh --no-native-secondary) to go back to AVC-only. */
 #ifndef EVO_VDEC_NATIVE_SECONDARY
-#define EVO_VDEC_NATIVE_SECONDARY 0
+#define EVO_VDEC_NATIVE_SECONDARY 1
 #endif
 
 /* When secondary decoders are on: 1080p by default (three 4K decoders against

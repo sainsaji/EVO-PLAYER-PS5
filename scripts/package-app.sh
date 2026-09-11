@@ -56,6 +56,7 @@ GL_SMOKE=0
 GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the player build)
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
+NO_NATIVE_SECONDARY=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -70,8 +71,9 @@ while (( $# )); do
        tile_copy and the V8/V3/1080 backend dispatch it selected are deleted.
        GL is the only present path. Build the SDK once with
        ./scripts/build-ps5-opengl.sh, then package normally." ;;
-        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: bring up HEVC + VP9 resident decoders at boot (default 1080p) — UNVERIFIED, crashed 2026-09-10, use with --breadcrumbs
-        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: + raise HEVC/VP9 slots to the 4K ceiling
+        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (1080p) since 2026-09-11 — this flag is now a no-op kept for back-compat
+        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: raise HEVC/VP9 slots to the 4K ceiling (still unmeasured — Phase B)
+        --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
         -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -102,6 +104,7 @@ if ! in_container; then
     (( GL_DEVICE )) && FWD+=(--gl)
     (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
+    (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -355,6 +358,7 @@ else
     # which probe_slot() faults. --native-secondary-4k also lifts them to 4K.
     (( NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=1"
     (( NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
+    (( NO_NATIVE_SECONDARY )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
     # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
     # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
     (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"
