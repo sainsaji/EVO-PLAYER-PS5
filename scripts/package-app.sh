@@ -57,6 +57,7 @@ GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the pla
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
+NO_NATIVE_SECONDARY_4K=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -71,9 +72,10 @@ while (( $# )); do
        tile_copy and the V8/V3/1080 backend dispatch it selected are deleted.
        GL is the only present path. Build the SDK once with
        ./scripts/build-ps5-opengl.sh, then package normally." ;;
-        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (1080p) since 2026-09-11 — this flag is now a no-op kept for back-compat
-        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: raise HEVC/VP9 slots to the 4K ceiling (still unmeasured — Phase B)
+        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (4K, since 2026-09-11) — this flag is now a no-op kept for back-compat
+        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
         --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
+        --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
         -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -105,6 +107,7 @@ if ! in_container; then
     (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
+    (( NO_NATIVE_SECONDARY_4K )) && FWD+=(--no-native-secondary-4k)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -352,13 +355,14 @@ else
     # --gl-smoke (#77): EVO_GL_SMOKE gate in main.c + the pp_gl_smoke/pp_gl_fatal
     # objects (the Makefile adds them to PP_SRCS when GL_SMOKE=1).
     (( GL_SMOKE )) && APP_DEFS+=" -DEVO_GL_SMOKE=1"
-    # --native-secondary (#41): bring HEVC + VP9 resident sceVideodec2 decoders
-    # up at boot (evo_vdec_native.c). OFF by default — the first build that did
-    # this crashed PPSA99039 pre-log 2026-09-10. Pair with --breadcrumbs to see
-    # which probe_slot() faults. --native-secondary-4k also lifts them to 4K.
-    (( NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=1"
-    (( NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
-    (( NO_NATIVE_SECONDARY )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
+    # --native-secondary (#41): HEVC + VP9 resident sceVideodec2 decoders, at
+    # 4K since 2026-09-11 — both hardware-verified (evo_vdec_native.c has the
+    # full evidence). --no-native-secondary / --no-native-secondary-4k are the
+    # rollback escape hatches.
+    (( NATIVE_SECONDARY ))       && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=1"
+    (( NATIVE_SECONDARY_4K ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
+    (( NO_NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
+    (( NO_NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=0"
     # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
     # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
     (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"

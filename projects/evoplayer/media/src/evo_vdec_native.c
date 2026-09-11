@@ -32,11 +32,10 @@
  * or destroyed at playback time.
  *
  * MEMORY. Three resident 4K decoders is a lot of direct memory against the
- * fake-signed budget. The AVC slot is 4K (the case native decode exists for —
- * 4K H.264 that blows the software frame pool). HEVC + VP9 default to 1080p and
- * are raised to 4K with -DEVO_VDEC_NATIVE_SECONDARY_4K=1 once the budget has
- * been measured on hardware. A secondary bring-up failure is non-fatal: that
- * codec falls back to FFmpeg and the AVC slot stays up.
+ * fake-signed budget - measured at ~1.76 GB total on hardware 2026-09-11
+ * (AVC 505 MB + HEVC 549 MB + VP9 748 MB), all three at 4K, nothing failed.
+ * A secondary bring-up failure is non-fatal: that codec falls back to FFmpeg
+ * and the AVC slot stays up.
  *
  * DEMUX -> AU FORMAT. sceVideodec2 wants Annex-B for AVC/HEVC (start-code NALs,
  * VPS/SPS/PPS in-band). For mp4/mkv (avcC/hvcC extradata) we run AUs through
@@ -130,32 +129,35 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 
 /* Secondary (HEVC / VP9) resident decoders — ON by default since 2026-09-11 (#41).
  *
- * BRING-UP IS CLEAN ON HARDWARE (klog, 2026-09-10, build d14029b0): AVC 4K +
- * HEVC 1080p + VP9 1080p all created and Reset with rc=0, across two boots.
- * The earlier "crashed before any diagnostic flushed" attempt does NOT
- * reproduce — and note() was blind at the time, buffering into evo_boot_log
- * pre-unjail, so that crash was never actually attributed to this code. Both
- * codec_type constants are confirmed accepted by sceVideodec2CreateDecoder.
+ * Bring-up, decode and the direct-memory footprint are all hardware-verified,
+ * two sessions:
+ *   2026-09-10, 1080p: AVC/HEVC/VP9 bring-up rc=0; decode HEVC 475 frames,
+ *     VP9 477 frames (vp9_superframe_split, real alt-ref superframes), both
+ *     fatal=0, pitch 2048 (matches the research repo's documented 8-bit
+ *     1080p pitch).
+ *   2026-09-11, 4K: all three bring up at 4K with NO fallback-to-1080p retry
+ *     firing; decode AVC 437 frames, HEVC 355 frames (both fatal=0), VP9
+ *     clean mid-session heartbeat with the superframe splitter engaged.
+ *     Direct-memory footprint ~1.76 GB total (AVC 505 MB + HEVC 549 MB +
+ *     VP9 748 MB) against an unmeasured ceiling — nothing failed, but this
+ *     is one clip per codec in one session each, not a soak test.
  *
- * DECODE IS VERIFIED TOO, same session: HEVC Main 8-bit 1080p via
- * hevc_mp4toannexb (475 frames out, fatal=0) and VP9 Profile 0 1080p via
- * vp9_superframe_split with real alt-ref superframes (477 frames, fatal=0),
- * both at pitch 2048 — the pitch the research repo documents for 8-bit 1080p.
+ * The earlier "crashed before any diagnostic flushed" 2026-09-10 attempt does
+ * NOT reproduce, and was likely never this code's fault: note() was blind at
+ * the time, buffering into evo_boot_log pre-unjail, so a crash there would
+ * have taken every diagnostic line with it regardless of cause.
  *
- * DEFAULT-ON since 2026-09-11: both are hardware-verified at 1080p (HEVC 475
- * frames out, VP9 477 frames, fatal=0 on both). The 4K ceiling is separate and
- * still unmeasured against the fake-signed direct-memory budget — see
- * EVO_VDEC_NATIVE_SECONDARY_4K below. Build -DEVO_VDEC_NATIVE_SECONDARY=0
- * (package-app.sh --no-native-secondary) to go back to AVC-only. */
+ * Build -DEVO_VDEC_NATIVE_SECONDARY=0 (package-app.sh --no-native-secondary)
+ * to go back to AVC-only. */
 #ifndef EVO_VDEC_NATIVE_SECONDARY
 #define EVO_VDEC_NATIVE_SECONDARY 1
 #endif
 
-/* When secondary decoders are on: 1080p by default (three 4K decoders against
- * the fake-signed budget is unmeasured); -DEVO_VDEC_NATIVE_SECONDARY_4K=1 for
- * the AVC ceiling (#41 acceptance: 4K HEVC). */
+/* DEFAULT-ON since 2026-09-11 (see the verification note above). Build
+ * -DEVO_VDEC_NATIVE_SECONDARY_4K=0 (package-app.sh --no-native-secondary-4k)
+ * to drop HEVC/VP9 back to 1080p while keeping them on. */
 #ifndef EVO_VDEC_NATIVE_SECONDARY_4K
-#define EVO_VDEC_NATIVE_SECONDARY_4K 0
+#define EVO_VDEC_NATIVE_SECONDARY_4K 1
 #endif
 #if EVO_VDEC_NATIVE_SECONDARY_4K
 #define EVO_VDEC_NATIVE_SECONDARY_MAX_W  EVO_VDEC_NATIVE_MAX_W
