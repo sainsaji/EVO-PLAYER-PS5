@@ -21,7 +21,13 @@ typedef enum pp_frame_format {
      * as yuv420p10le. Same plane layout as PP_FRAME_YUV420P; the strides are in
      * bytes (= 2 * samples). The GL video shader samples it as GL_R16 and skips
      * the old CPU pack-to-8-bit step. */
-    PP_FRAME_YUV420P10 = 4
+    PP_FRAME_YUV420P10 = 4,
+    /* #41 Phase D: two-plane semi-planar 4:2:0 NV12 with 10-bit little-endian
+     * samples low-aligned in 16-bit words — what native sceVideodec2 HEVC Main10
+     * and VP9 Profile 2 decoders output.
+     * Plane 0: Luma (Y), 16-bit words, stride in bytes (= 2 * samples).
+     * Plane 1: Interleaved chroma (UV), 16-bit words, stride in bytes (= 2 * samples). */
+    PP_FRAME_NV12_10 = 5
 } pp_frame_format;
 
 /*

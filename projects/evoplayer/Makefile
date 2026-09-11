@@ -135,6 +135,18 @@ ifeq ($(GL_SMOKE),1)
     endif
 endif
 
+# --gl-hdr-probe (Task 1): compile the ps5-opengl HDR VideoOut probe
+GL_HDR_PROBE ?= 0
+ifeq ($(GL_HDR_PROBE),1)
+    PP_SRCS  += pp/src/pp_gl_fatal.c
+    CFLAGS   += -DEVO_GL_HDR_PROBE=1
+    CXXFLAGS += -DEVO_GL_HDR_PROBE=1
+    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
+        CFLAGS   += $(PS5_OPENGL_PUBLIC_CFLAGS)
+        CXXFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
+    endif
+endif
+
 # --gl (render-overhaul GL-3, #79): persistent device GL context through
 # ps5-opengl. Cuts the boot over to GL/EGL; --gl and --gl-smoke are mutually
 # exclusive (both replace pp_agc_init + the normal present path). Off by default;

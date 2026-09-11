@@ -168,7 +168,14 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #endif
 
 /* ---- codec-independent mode table (#41) ---------------------------------- */
-typedef enum { NAT_H264 = 0, NAT_HEVC = 1, NAT_VP9 = 2, NAT_CODEC_COUNT } nat_codec;
+typedef enum {
+    NAT_H264   = 0,
+    NAT_HEVC   = 1,
+    NAT_VP9    = 2,
+    NAT_HEVC10 = 3,
+    NAT_VP92   = 4,
+    NAT_CODEC_COUNT
+} nat_codec;
 
 typedef struct {
     nat_codec    idx;
@@ -184,21 +191,36 @@ typedef struct {
 
 /* max_level scale is per-codec: AVC = level x10 (51 = 5.1); HEVC =
  * general_level_idc = level x30 (123/150/153 for 1080/1440/2160, as
- * ProsperoLight passes); VP9 x10 is a best guess pending hardware. */
+ * ProsperoLight passes); VP9 x10 is a best guess pending hardware.
+ * #41 Phase D: HEVC10 (Main10, profile_cfg=2, level 4.1=123) and
+ * VP9-2 (Profile 2, profile_cfg=2, level 4.1=41) resident decoders (1080p only). */
 static const nat_codec_desc g_codec[NAT_CODEC_COUNT] = {
-    { NAT_H264, AV_CODEC_ID_H264, SCE_VIDEODEC2_CODEC_AVC,  100,  51,  52,
-      "h264_mp4toannexb",     0, "AVC"  },
-    { NAT_HEVC, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   1, 123, 153,
-      "hevc_mp4toannexb",     0, "HEVC" },
-    { NAT_VP9,  AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    0,  41,  51,
-      "vp9_superframe_split", 1, "VP9"  },
+    { NAT_H264,   AV_CODEC_ID_H264, SCE_VIDEODEC2_CODEC_AVC,  100,  51,  52,
+      "h264_mp4toannexb",     0, "AVC"    },
+    { NAT_HEVC,   AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   1, 123, 153,
+      "hevc_mp4toannexb",     0, "HEVC"   },
+    { NAT_VP9,    AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    0,  41,  51,
+      "vp9_superframe_split", 1, "VP9"    },
+    { NAT_HEVC10, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   2, 123, 123,
+      "hevc_mp4toannexb",     0, "HEVC10" },
+    { NAT_VP92,   AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    2,  41,  41,
+      "vp9_superframe_split", 1, "VP9-2"  },
 };
 
-static const nat_codec_desc *codec_desc_for(int codec_id)
+static const nat_codec_desc *codec_desc_for(int codec_id, int profile, int bit_depth)
 {
-    for (int i = 0; i < NAT_CODEC_COUNT; i++)
-        if (g_codec[i].codec_id == codec_id)
-            return &g_codec[i];
+    if (codec_id == AV_CODEC_ID_H264)
+        return &g_codec[NAT_H264];
+    if (codec_id == AV_CODEC_ID_HEVC) {
+        if (bit_depth == 10 || profile == FF_PROFILE_HEVC_MAIN_10)
+            return &g_codec[NAT_HEVC10];
+        return &g_codec[NAT_HEVC];
+    }
+    if (codec_id == AV_CODEC_ID_VP9) {
+        if (bit_depth == 10 || profile == FF_PROFILE_VP9_2)
+            return &g_codec[NAT_VP92];
+        return &g_codec[NAT_VP9];
+    }
     return NULL;
 }
 
@@ -476,6 +498,19 @@ int evo_vdec_native_probe(void)
                EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
     probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_SECONDARY_MAX_W,
                EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
+
+    /* #41 Phase D: 10-bit resident decoders (HEVC Main10 + VP9 Profile 2).
+     * 1080p only (1920x1088), non-fatal.
+     *
+     * TWO MORE resident decoders on top of the three from Phase B - five
+     * total when EVO_VDEC_NATIVE_SECONDARY is on (the default). Phase B
+     * already found the existing three starve FFmpeg's flex-memory budget
+     * for 10-bit fallback content (#38, 2026-09-11: avail dropped to 0-1M,
+     * fail=590+). These two make that pool tighter, not looser, and they
+     * exist specifically to decode the content class that triggers it.
+     * Not fixed here - flagging so it isn't found by surprise. */
+    probe_slot(NAT_HEVC10, 1920, 1088, 0, sm);
+    probe_slot(NAT_VP92,   1920, 1088, 0, sm);
 #endif
 
     if (!g_boot_any)
@@ -488,29 +523,43 @@ int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
 {
     if (!evo_vdec_native_probe())
         return 0;
-    const nat_codec_desc *d = codec_desc_for(codec_id);
+    const nat_codec_desc *d = codec_desc_for(codec_id, profile, bit_depth);
     if (!d)
         return 0;
     const struct dec_slot *s = &g_dec[d->idx];
     if (!s->ready)
         return 0;
-    if (bit_depth > 8)
-        return 0;                       /* 10-bit two-plane -> FFmpeg (#41)  */
+    if (bit_depth > 10)
+        return 0;
+    if (bit_depth > 8 && d->idx != NAT_HEVC10 && d->idx != NAT_VP92)
+        return 0;
 
     switch (codec_id) {
     case AV_CODEC_ID_H264:
+        if (bit_depth > 8)
+            return 0;
         /* Baseline / Main / High / constrained-High (578). Anything above
          * High (Hi10 / Hi422 / Hi444) the 8-bit NV12 decoder cannot do. */
         if (profile != FF_PROFILE_UNKNOWN && profile > 100 && profile != 578)
             return 0;
         break;
     case AV_CODEC_ID_HEVC:
-        if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN)
-            return 0;                   /* Main10 / RExt / SCC -> FFmpeg     */
+        if (bit_depth == 10) {
+            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN_10)
+                return 0;
+        } else {
+            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN)
+                return 0;
+        }
         break;
     case AV_CODEC_ID_VP9:
-        if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_0)
-            return 0;                   /* Profile 1 (4:4:4) / 2 / 3 -> FFmpeg */
+        if (bit_depth == 10) {
+            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_2)
+                return 0;
+        } else {
+            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_0)
+                return 0;
+        }
         break;
     default:
         return 0;
@@ -568,6 +617,7 @@ struct evo_vdec_native {
     int      nv12_out;      /* emit NV12 straight through (GL samples it), not I420 */
     int      first_valid_logged;
     int      first_err_logged;
+    int      color_trc;     /* AVColorTransferCharacteristic from demuxer */
 
     AVBSFContext        *bsf;
     const char          *bsf_name;   /* for rebuild on seek */
@@ -631,7 +681,10 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     if (!out->buffer)
         return;
 
-    const uint32_t cw    = out->pitch_bytes ? out->pitch_bytes : out->pitch;
+    int is_10bit = (n->desc->idx == NAT_HEVC10 || n->desc->idx == NAT_VP92);
+    uint32_t cw = out->pitch_bytes ? out->pitch_bytes : out->pitch;
+    if (is_10bit && cw < out->pitch * 2u)
+        cw = out->pitch * 2u;
     const uint32_t codeh = out->height;                 /* MB-padded luma rows */
     const uint32_t dw = (n->disp_w && n->disp_w < out->width)  ? n->disp_w : out->width;
     const uint32_t dh = (n->disp_h && n->disp_h < out->height) ? n->disp_h : out->height;
@@ -644,7 +697,7 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     const size_t c_sz = (size_t)cstride * ((codeh + 1u) / 2u);
     const size_t need = y_sz + 2u * c_sz;
 
-    if (n->nv12_out) {
+    if (n->nv12_out || is_10bit) {
         /* NV12 path: the decoder already laid out contiguous NV12 (Y then the
          * interleaved UV plane) in the frame-pool slot it just wrote. Borrow
          * that pointer instead of copying it into an owned buffer - the reorder
@@ -737,7 +790,13 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
     int rc = sceVideodec2Decode(n->dec, &in, &fb, &out);
     n->dec_calls++;
     if (n->dec_calls <= 3 || (out.valid && !n->first_valid_logged)) {
-        if (out.valid) n->first_valid_logged = 1;
+        if (out.valid) {
+            n->first_valid_logged = 1;
+            if (n->desc->idx == NAT_HEVC10 || n->desc->idx == NAT_VP92) {
+                note("EVO vdec native: 10-bit first frame: %ux%u pitch=%u pitch_bytes=%u (expected 1920/3840)",
+                     out.width, out.height, out.pitch, out.pitch_bytes);
+            }
+        }
         note("EVO vdec native: Decode #%u rc=0x%08x acc=%u valid=%u err=%u %ux%u "
              "pitch=%u", n->dec_calls, (unsigned)rc, (unsigned)fb.accepted,
              (unsigned)out.valid, (unsigned)out.error,
@@ -867,13 +926,13 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         return NULL;
 
     const AVCodecParameters *par = (const AVCodecParameters *)p->avctx_params;
-    const nat_codec_desc *d = codec_desc_for(par->codec_id);
-    if (!d)
-        return NULL;                     /* AV1 / anything with no sce route */
-
     int bit_depth = par->bits_per_raw_sample > 8 ? par->bits_per_raw_sample : 8;
     if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE)
         bit_depth = 10;
+
+    const nat_codec_desc *d = codec_desc_for(par->codec_id, par->profile, bit_depth);
+    if (!d)
+        return NULL;                     /* AV1 / anything with no sce route */
 
     int w = par->width  > 0 ? par->width  : p->width;
     int h = par->height > 0 ? par->height : p->height;
@@ -898,6 +957,7 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     n->frame_size = slot->frame_size;
     n->disp_w     = par->width  > 0 ? (uint32_t)par->width  : 0;
     n->disp_h     = par->height > 0 ? (uint32_t)par->height : 0;
+    n->color_trc  = (int)par->color_trc;
     /* GL video path: emit NV12 straight from the decoder - the GLSL video
      * shader samples NV12 and does the YUV->RGB + scale on-GPU, so the CPU
      * never touches the pixels. Fixed for the stream's lifetime.
@@ -1009,8 +1069,12 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
     if (!best)
         return 0;
 
+    int is_10bit = (v->desc->idx == NAT_HEVC10 || v->desc->idx == NAT_VP92);
     memset(out, 0, sizeof(*out));
-    out->format       = best->nv12 ? PP_FRAME_NV12 : PP_FRAME_YUV420P;
+    if (is_10bit)
+        out->format   = PP_FRAME_NV12_10;
+    else
+        out->format   = best->nv12 ? PP_FRAME_NV12 : PP_FRAME_YUV420P;
     out->width        = best->w;
     out->height       = best->h;
     out->coded_height = best->coded_h;
@@ -1021,6 +1085,7 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
     out->strides[1]   = (int)best->c_stride;
     out->strides[2]   = (int)best->c_stride;
     out->pts_us       = best->pts;
+    out->color_trc    = v->color_trc;
 
     best->used = 0;
     v->ro_count--;

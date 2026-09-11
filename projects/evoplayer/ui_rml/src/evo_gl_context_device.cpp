@@ -270,12 +270,14 @@ namespace {
 
 GLuint g_yuv_vao = 0;
 GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0, g_yuv_pl10_prog = 0, g_yuv_pl10_hdr_prog = 0;
+GLuint g_yuv_pl10_nv_hdr_prog = 0;
 GLuint g_yuv_ytex = 0, g_yuv_uvtex = 0, g_yuv_utex = 0, g_yuv_vtex = 0;
 int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1, g_yuv_ten = -1;
 GLint  g_yuv_nv_crop = -1, g_yuv_nv_scale = -1;
 GLint  g_yuv_pl_crop = -1, g_yuv_pl_scale = -1;
 GLint  g_yuv_pl10_crop = -1, g_yuv_pl10_scale = -1;
 GLint  g_yuv_pl10_hdr_crop = -1, g_yuv_pl10_hdr_scale = -1;
+GLint  g_yuv_pl10_nv_hdr_crop = -1, g_yuv_pl10_nv_hdr_scale = -1;
 
 const char *k_yuv_vs =
     "#version 330 core\n"
@@ -387,6 +389,32 @@ const char *k_yuv_fs_pl10_hdr =
     "  c = vec4(rgb.bgr, 1.0);\n"
     "}\n";
 
+const char *k_yuv_fs_pl10_nv_hdr =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uUV;\n"
+    "const float S = 65535.0 / 1023.0;\n"
+    "vec3 yuv2020(float y, float U, float V) {\n"
+    "  float Yp = (y - 0.0627451) * 1.1640625;\n"
+    "  return vec3(Yp + 1.4746*V, Yp - 0.16455*U - 0.57135*V, Yp + 1.8814*U);\n"
+    "}\n"
+    "float pq_eotf(float n) {\n"
+    "  const float m1=0.1593017578125, m2=78.84375, c1=0.8359375, c2=18.8515625, c3=18.6875;\n"
+    "  float np = pow(max(n,0.0), 1.0/m2);\n"
+    "  return pow(max(np-c1,0.0) / (c2 - c3*np), 1.0/m1);\n"
+    "}\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r * S;\n"
+    "  vec2 uv = texture(uUV, vUV).rg * S - 0.5;\n"
+    "  float U = uv.x;\n"
+    "  float V = uv.y;\n"
+    "  vec3 pq_rgb = clamp(yuv2020(y, U, V), 0.0, 1.0);\n"
+    "  vec3 nits = vec3(pq_eotf(pq_rgb.r), pq_eotf(pq_rgb.g), pq_eotf(pq_rgb.b)) * 100.0;\n"
+    "  vec3 sdr_linear = nits / (1.0 + nits);\n"
+    "  vec3 rgb = pow(sdr_linear, vec3(1.0/2.2));\n"
+    "  c = vec4(rgb.bgr, 1.0);\n"
+    "}\n";
+
 GLuint yuv_link(const char *fs_src)
 {
     GLuint vs = blit_compile(GL_VERTEX_SHADER, k_yuv_vs);
@@ -407,12 +435,13 @@ GLuint yuv_link(const char *fs_src)
 
 bool yuv_init(void)
 {
-    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog && g_yuv_pl10_hdr_prog) return true;
-    if (!g_yuv_nv_prog)       g_yuv_nv_prog       = yuv_link(k_yuv_fs_nv);
-    if (!g_yuv_pl_prog)       g_yuv_pl_prog       = yuv_link(k_yuv_fs_pl);
-    if (!g_yuv_pl10_prog)     g_yuv_pl10_prog     = yuv_link(k_yuv_fs_pl10);
-    if (!g_yuv_pl10_hdr_prog) g_yuv_pl10_hdr_prog = yuv_link(k_yuv_fs_pl10_hdr);
-    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog || !g_yuv_pl10_hdr_prog) return false;
+    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog && g_yuv_pl10_hdr_prog && g_yuv_pl10_nv_hdr_prog) return true;
+    if (!g_yuv_nv_prog)          g_yuv_nv_prog          = yuv_link(k_yuv_fs_nv);
+    if (!g_yuv_pl_prog)          g_yuv_pl_prog          = yuv_link(k_yuv_fs_pl);
+    if (!g_yuv_pl10_prog)        g_yuv_pl10_prog        = yuv_link(k_yuv_fs_pl10);
+    if (!g_yuv_pl10_hdr_prog)    g_yuv_pl10_hdr_prog    = yuv_link(k_yuv_fs_pl10_hdr);
+    if (!g_yuv_pl10_nv_hdr_prog) g_yuv_pl10_nv_hdr_prog = yuv_link(k_yuv_fs_pl10_nv_hdr);
+    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog || !g_yuv_pl10_hdr_prog || !g_yuv_pl10_nv_hdr_prog) return false;
     if (!g_yuv_vao) glGenVertexArrays(1, &g_yuv_vao);
     if (!g_yuv_ytex) {
         glGenTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_uvtex);
@@ -441,6 +470,11 @@ bool yuv_init(void)
     glUniform1i(glGetUniformLocation(g_yuv_pl10_hdr_prog, "uV"), 2);
     g_yuv_pl10_hdr_crop  = glGetUniformLocation(g_yuv_pl10_hdr_prog, "uCrop");
     g_yuv_pl10_hdr_scale = glGetUniformLocation(g_yuv_pl10_hdr_prog, "uScale");
+    glUseProgram(g_yuv_pl10_nv_hdr_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uUV"), 1);
+    g_yuv_pl10_nv_hdr_crop  = glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uCrop");
+    g_yuv_pl10_nv_hdr_scale = glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uScale");
     evo_bt_("GL yuv: initialised");
     return true;
 }
@@ -469,8 +503,6 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     const int planar = (uv == nullptr);
     if (planar ? (!u || !v) : (uv == nullptr))
         return;
-    if (ten_bit && !planar)          /* 10-bit is planar-only (yuv420p10le) */
-        return;
     if (!yuv_init())
         return;
 
@@ -494,7 +526,7 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
             yuv_tex_setup(g_yuv_utex, luma_ifmt, cw2, ch2);
             yuv_tex_setup(g_yuv_vtex, luma_ifmt, cw2, ch2);
         } else {
-            yuv_tex_setup(g_yuv_uvtex, GL_RG8, cw2, ch2);
+            yuv_tex_setup(g_yuv_uvtex, ten_bit ? GL_RG16 : GL_RG8, cw2, ch2);
         }
         g_yuv_tw = tw; g_yuv_th = th; g_yuv_planar = planar; g_yuv_ten = ten_bit;
     }
@@ -515,8 +547,8 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     } else {
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, g_yuv_uvtex);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, uv_pitch / 2);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RG, GL_UNSIGNED_BYTE, uv);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, ten_bit ? (uv_pitch / 4) : (uv_pitch / 2));
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cw2, ch2, GL_RG, utype, uv);
     }
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -527,12 +559,32 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
     /* 16 is AVCOL_TRC_SMPTE2084 (PQ). HLG (18) left on k_yuv_fs_pl10 passthrough for now (known gap). */
-    GLuint prog  = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_prog : g_yuv_pl10_prog)
-                           : (planar ? g_yuv_pl_prog : g_yuv_nv_prog);
-    GLint  crop  = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_crop : g_yuv_pl10_crop)
-                           : (planar ? g_yuv_pl_crop : g_yuv_nv_crop);
-    GLint  scale = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_scale : g_yuv_pl10_scale)
-                           : (planar ? g_yuv_pl_scale : g_yuv_nv_scale);
+    GLuint prog;
+    GLint  crop, scale;
+    if (ten_bit) {
+        if (!planar) {
+            /* #41 Phase D: two-plane 10-bit is native-decoder-only today
+             * (evo_vdec_native_supports() gates it to HEVC Main10 / VP9
+             * Profile 2), and there is no non-PQ two-plane 10-bit shader, so
+             * this always tone-maps. Fine while the only source is that gate
+             * - the research repo's own Main10/Profile2 test streams were
+             * BT.2020/PQ - but the gate itself doesn't check color_trc, so a
+             * Main10-profiled file that ISN'T actually PQ-tagged would still
+             * wash out here. Add a plain two-plane BT.601 passthrough
+             * (mirroring k_yuv_fs_pl) if that ever turns out to matter. */
+            prog  = g_yuv_pl10_nv_hdr_prog;
+            crop  = g_yuv_pl10_nv_hdr_crop;
+            scale = g_yuv_pl10_nv_hdr_scale;
+        } else {
+            prog  = (color_trc == 16) ? g_yuv_pl10_hdr_prog : g_yuv_pl10_prog;
+            crop  = (color_trc == 16) ? g_yuv_pl10_hdr_crop : g_yuv_pl10_crop;
+            scale = (color_trc == 16) ? g_yuv_pl10_hdr_scale : g_yuv_pl10_scale;
+        }
+    } else {
+        prog  = planar ? g_yuv_pl_prog : g_yuv_nv_prog;
+        crop  = planar ? g_yuv_pl_crop : g_yuv_nv_crop;
+        scale = planar ? g_yuv_pl_scale : g_yuv_nv_scale;
+    }
     glUseProgram(prog);
     float cx = (disp_w > 0 && disp_w <= tw) ? (float)disp_w / (float)tw : 1.0f;
     float cy = (disp_h > 0 && disp_h <= th) ? (float)disp_h / (float)th : 1.0f;

@@ -53,6 +53,7 @@ FFPFSC=0
 USB_REMOTE=0
 BREADCRUMBS=0
 GL_SMOKE=0
+GL_HDR_PROBE=0
 GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the player build)
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
@@ -67,6 +68,7 @@ while (( $# )); do
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
+        --gl-hdr-probe) GL_HDR_PROBE=1 ;; # Task 1: isolated HDR VideoOut probe
         --gl)           GL_DEVICE=1 ;;    # #79 GL-3 / #80 GL-4: persistent device GL context - the only present path
         --no-gl)        die "--no-gl was retired by GL-4 (#80): the CPU converters,
        tile_copy and the V8/V3/1080 backend dispatch it selected are deleted.
@@ -87,12 +89,14 @@ done
 #               parks before the frame loop, so it links the no-op GL stubs.
 #   --probe     is the sandbox probe, not the player; it never presents.
 if (( GL_DEVICE == -1 )); then
-    if (( GL_SMOKE )) || [[ "${MODE}" != "player" ]]; then GL_DEVICE=0; else GL_DEVICE=1; fi
+    if (( GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then GL_DEVICE=0; else GL_DEVICE=1; fi
 fi
 (( GL_SMOKE && GL_DEVICE )) && die "--gl and --gl-smoke are mutually exclusive (both cut the boot over to ps5-opengl)"
+(( GL_HDR_PROBE && GL_DEVICE )) && die "--gl and --gl-hdr-probe are mutually exclusive (both cut the boot over to ps5-opengl)"
+(( GL_SMOKE && GL_HDR_PROBE )) && die "--gl-smoke and --gl-hdr-probe are mutually exclusive"
 (( GL_DEVICE )) && [[ "${MODE}" != "player" ]] && die "--gl only applies to the player build (drop --gl with --${MODE})"
-# Both flags link ps5-opengl + share the SDK-consumption / undef-harvest / _Exit-wrap machinery.
-GL_LINK=$(( GL_SMOKE || GL_DEVICE ))
+# Flags that link ps5-opengl + share the SDK-consumption / undef-harvest / _Exit-wrap machinery.
+GL_LINK=$(( GL_SMOKE || GL_DEVICE || GL_HDR_PROBE ))
 
 if ! in_container; then
     FWD=(--"${MODE}")
@@ -101,6 +105,7 @@ if ! in_container; then
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( GL_SMOKE ))     && FWD+=(--gl-smoke)
+    (( GL_HDR_PROBE )) && FWD+=(--gl-hdr-probe)
     # Forward the RESOLVED choice, never the default, so the in-container build
     # cannot disagree with the host-side one.
     (( GL_DEVICE )) && FWD+=(--gl)
@@ -156,7 +161,10 @@ if (( GL_LINK )); then
     while IFS= read -r s; do [[ -n "${s}" ]] && GL_SCE_UNDEF+=("${s}"); done < <(
         for a in "${GL_SDK}"/lib/*.a; do llvm-nm "${a}" 2>/dev/null || true; done \
         | awk '$1=="U"{print $2}' | grep -E '^sce[A-Za-z0-9_]+$' | sort -u || true)
-    ok "$( (( GL_DEVICE )) && echo --gl || echo --gl-smoke ): ps5-opengl SDK at ${GL_SDK#"${REPO_ROOT}/"} (${#GL_LINK_LIBS[@]} link args, ${#GL_FORCE_UNDEF[@]} forced undefs, ${#GL_SCE_UNDEF[@]} sce imports)"
+    probe_name="--gl"
+    (( GL_SMOKE )) && probe_name="--gl-smoke"
+    (( GL_HDR_PROBE )) && probe_name="--gl-hdr-probe"
+    ok "${probe_name}: ps5-opengl SDK at ${GL_SDK#"${REPO_ROOT}/"} (${#GL_LINK_LIBS[@]} link args, ${#GL_FORCE_UNDEF[@]} forced undefs, ${#GL_SCE_UNDEF[@]} sce imports)"
 fi
 
 load_sdk
@@ -355,6 +363,8 @@ else
     # --gl-smoke (#77): EVO_GL_SMOKE gate in main.c + the pp_gl_smoke/pp_gl_fatal
     # objects (the Makefile adds them to PP_SRCS when GL_SMOKE=1).
     (( GL_SMOKE )) && APP_DEFS+=" -DEVO_GL_SMOKE=1"
+    # --gl-hdr-probe (Task 1): EVO_GL_HDR_PROBE gate in main.c + pp_gl_fatal.c.
+    (( GL_HDR_PROBE )) && APP_DEFS+=" -DEVO_GL_HDR_PROBE=1"
     # --native-secondary (#41): HEVC + VP9 resident sceVideodec2 decoders, at
     # 4K since 2026-09-11 — both hardware-verified (evo_vdec_native.c has the
     # full evidence). --no-native-secondary / --no-native-secondary-4k are the
@@ -390,7 +400,7 @@ else
 
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
-        GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" \
+        GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" \
         EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
@@ -399,7 +409,7 @@ else
         }
     while read -r rel; do
         OBJS+=("${EVO}/${rel}")
-    done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
+    done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
 
     # #68: RmlUi puts only `3 + R/6` points on a corner arc, so a 20 px radius is

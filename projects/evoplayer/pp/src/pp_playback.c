@@ -304,11 +304,11 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (!src->planes[0])
         return -4;
     if (src->format != PP_FRAME_NV12 && src->format != PP_FRAME_YUV420P &&
-        src->format != PP_FRAME_YUV420P10)
+        src->format != PP_FRAME_YUV420P10 && src->format != PP_FRAME_NV12_10)
         return -4;
 
     {
-        int ten = (src->format == PP_FRAME_YUV420P10);
+        int ten = (src->format == PP_FRAME_YUV420P10 || src->format == PP_FRAME_NV12_10);
         int bpp = ten ? 2 : 1;
         dw = src->width;
         dh = src->height;
@@ -330,11 +330,11 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
      * — hold_snapshot() covers it.
      */
     if (pb->lock) pthread_mutex_lock(mtx(pb));
-    pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10);
+    pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10 || src->format == PP_FRAME_NV12_10);
     pb->gl_color_trc = src->color_trc;
     pb->gl_src_y  = src->planes[0];
     pb->gl_src_ypitch = syp;
-    if (src->format == PP_FRAME_NV12) {
+    if (src->format == PP_FRAME_NV12 || src->format == PP_FRAME_NV12_10) {
         pb->gl_src_uv = src->planes[1];
         pb->gl_src_uvpitch = src->strides[1] > 0 ? src->strides[1] : syp;
         pb->gl_src_u = pb->gl_src_v = NULL;
