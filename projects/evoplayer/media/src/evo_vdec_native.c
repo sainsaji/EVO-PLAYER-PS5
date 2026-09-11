@@ -442,8 +442,12 @@ static void probe_slot(nat_codec c, int w, int h, int required, unsigned sm)
     if (rc == 0) {
         s->ready   = 1;
         g_boot_any = 1;
-        note("EVO vdec native: RESIDENT %s decoder up  %ux%u  frame=%zuKB  sysmod=0x%08x",
-             d->tag, s->max_w, s->max_h, s->frame_size >> 10, sm);
+        note("EVO vdec native: RESIDENT %s decoder up  %ux%u  frame=%zuKB  "
+             "total=%zuKB (compute=%zuKB gpu=%zuKB cpu_gpu=%zuKB input=%zuKB frame_pool=%zuKB)  sysmod=0x%08x",
+             d->tag, s->max_w, s->max_h, s->frame_size >> 10,
+             (s->compute_size + s->gpu_size + s->cpu_gpu_size + s->input_pool + s->frame_pool) >> 10,
+             s->compute_size >> 10, s->gpu_size >> 10, s->cpu_gpu_size >> 10,
+             s->input_pool >> 10, s->frame_pool >> 10, sm);
         return;
     }
     note("EVO vdec native: %s bring-up FAILED at [%s] rc=0x%08x sysmod=0x%08x -> %s",
