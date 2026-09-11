@@ -167,6 +167,21 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_SECONDARY_MAX_H  1088
 #endif
 
+/* #41 Phase D: the two 10-bit resident decoders (HEVC Main10, VP9 Profile 2) -
+ * OFF by default (2026-09-11). DEFAULT-ON was wrong: with the three from
+ * Phase B already resident, adding these two left only ~3 MB of flex memory
+ * free AT BOOT - not during playback, at boot, before any file is opened -
+ * breaking the home screen's own thumbnail decode for the Recent/Jump Back In
+ * shelf (get_buffer() failed, avail=3M, fail climbing). Decode + the pitch
+ * math are still hardware-verified (see the comment above
+ * EVO_VDEC_NATIVE_SECONDARY); what's reverted is only "on by default" until
+ * #38's flex-memory budget is actually fixed. Build
+ * -DEVO_VDEC_NATIVE_10BIT=1 (package-app.sh --native-10bit) to bring them
+ * back for testing. */
+#ifndef EVO_VDEC_NATIVE_10BIT
+#define EVO_VDEC_NATIVE_10BIT 0
+#endif
+
 /* ---- codec-independent mode table (#41) ---------------------------------- */
 typedef enum {
     NAT_H264   = 0,
@@ -499,18 +514,14 @@ int evo_vdec_native_probe(void)
     probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_SECONDARY_MAX_W,
                EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
 
+#if EVO_VDEC_NATIVE_10BIT
     /* #41 Phase D: 10-bit resident decoders (HEVC Main10 + VP9 Profile 2).
-     * 1080p only (1920x1088), non-fatal.
-     *
-     * TWO MORE resident decoders on top of the three from Phase B - five
-     * total when EVO_VDEC_NATIVE_SECONDARY is on (the default). Phase B
-     * already found the existing three starve FFmpeg's flex-memory budget
-     * for 10-bit fallback content (#38, 2026-09-11: avail dropped to 0-1M,
-     * fail=590+). These two make that pool tighter, not looser, and they
-     * exist specifically to decode the content class that triggers it.
-     * Not fixed here - flagging so it isn't found by surprise. */
+     * 1080p only (1920x1088), non-fatal. OFF by default - see the comment
+     * above EVO_VDEC_NATIVE_10BIT: confirmed on hardware to break home-screen
+     * thumbnail decode when on by default alongside Phase B's three. */
     probe_slot(NAT_HEVC10, 1920, 1088, 0, sm);
     probe_slot(NAT_VP92,   1920, 1088, 0, sm);
+#endif
 #endif
 
     if (!g_boot_any)

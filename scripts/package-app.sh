@@ -59,6 +59,7 @@ NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
 NO_NATIVE_SECONDARY_4K=0
+NATIVE_10BIT=0
 while (( $# )); do
     case "$1" in
         --probe)        MODE="probe" ;;
@@ -78,6 +79,7 @@ while (( $# )); do
         --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
         --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
         --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
+        --native-10bit)         NATIVE_10BIT=1 ;;                           # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — OFF by default, confirmed to break home-screen thumbnail decode alongside Phase B's three (2026-09-11)
         -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -113,6 +115,7 @@ if ! in_container; then
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
     (( NO_NATIVE_SECONDARY_4K )) && FWD+=(--no-native-secondary-4k)
+    (( NATIVE_10BIT ))        && FWD+=(--native-10bit)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -373,6 +376,7 @@ else
     (( NATIVE_SECONDARY_4K ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
     (( NO_NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
     (( NO_NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=0"
+    (( NATIVE_10BIT ))        && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=1"
     # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
     # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
     (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"
