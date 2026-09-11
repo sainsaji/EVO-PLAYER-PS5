@@ -202,6 +202,16 @@ typedef struct {
     const char  *bsf_name;      /* AU adaptation bitstream filter, or NULL    */
     int          is_vp9;        /* always run the bsf; suppress hidden frames */
     const char  *tag;
+    /* #38/#41: per-codec CreateDecoder pipeline depth. The research repo
+     * documents this as a real memory/throughput tradeoff ("depth 1 is the
+     * production default; deeper improves throughput but raises frame
+     * residency") - it feeds the decoder's own reported flex-memory need
+     * (mem.cpu_size / QueryDecoderMemoryInfo), a separate, previously
+     * unmeasured pool from the five direct-memory fields. The three proven
+     * codecs keep DECODE_INPUT_QUEUE_DEPTH (4) unchanged; the two 10-bit
+     * decoders - low-priority, off by default, no throughput requirement -
+     * get a shallower one to shrink their flex footprint. */
+    int          pipeline_depth;
 } nat_codec_desc;
 
 /* max_level scale is per-codec: AVC = level x10 (51 = 5.1); HEVC =
@@ -211,15 +221,18 @@ typedef struct {
  * VP9-2 (Profile 2, profile_cfg=2, level 4.1=41) resident decoders (1080p only). */
 static const nat_codec_desc g_codec[NAT_CODEC_COUNT] = {
     { NAT_H264,   AV_CODEC_ID_H264, SCE_VIDEODEC2_CODEC_AVC,  100,  51,  52,
-      "h264_mp4toannexb",     0, "AVC"    },
+      "h264_mp4toannexb",     0, "AVC",    DECODE_INPUT_QUEUE_DEPTH },
     { NAT_HEVC,   AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   1, 123, 153,
-      "hevc_mp4toannexb",     0, "HEVC"   },
+      "hevc_mp4toannexb",     0, "HEVC",   DECODE_INPUT_QUEUE_DEPTH },
     { NAT_VP9,    AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    0,  41,  51,
-      "vp9_superframe_split", 1, "VP9"    },
+      "vp9_superframe_split", 1, "VP9",    DECODE_INPUT_QUEUE_DEPTH },
+    /* #38: shallower pipeline (2, not the proven codecs' 4) to shrink the
+     * decoder's own reported flex-memory need - these two are off by default
+     * and have no throughput requirement to justify the deeper pipeline. */
     { NAT_HEVC10, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   2, 123, 123,
-      "hevc_mp4toannexb",     0, "HEVC10" },
+      "hevc_mp4toannexb",     0, "HEVC10", 2 },
     { NAT_VP92,   AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    2,  41,  41,
-      "vp9_superframe_split", 1, "VP9-2"  },
+      "vp9_superframe_split", 1, "VP9-2",  2 },
 };
 
 static const nat_codec_desc *codec_desc_for(int codec_id, int profile, int bit_depth)
@@ -397,7 +410,7 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     config.max_width            = w;
     config.max_height           = h;
     config.max_dpb_frames       = SCE_VIDEODEC2_AUTO_FRAMES;   /* decoder self-sizes */
-    config.pipeline_depth       = DECODE_INPUT_QUEUE_DEPTH;
+    config.pipeline_depth       = (uint32_t)d->pipeline_depth;
     config.compute_queue        = (uint64_t)s->compute_queue;
     config.cpu_affinity         = 0x3f;
     config.cpu_priority         = 700;
