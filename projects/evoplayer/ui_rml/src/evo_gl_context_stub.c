@@ -53,12 +53,13 @@ void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                      const uint8_t *u,  int u_pitch,
                      const uint8_t *v,  int v_pitch,
                      int coded_w, int coded_h, int disp_w, int disp_h,
-                     int view_mode, int ten_bit)
+                     int view_mode, int ten_bit,
+                     int color_trc)
 {
     (void)y; (void)y_pitch; (void)uv; (void)uv_pitch;
     (void)u; (void)u_pitch; (void)v; (void)v_pitch;
     (void)coded_w; (void)coded_h; (void)disp_w; (void)disp_h;
-    (void)view_mode; (void)ten_bit;
+    (void)view_mode; (void)ten_bit; (void)color_trc;
 }
 
 void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload)

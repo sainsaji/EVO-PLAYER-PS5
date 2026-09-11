@@ -10969,7 +10969,7 @@ skip_screen_input:
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
                                     (int)_f.coded_w, (int)_f.coded_h,
                                     (int)_f.disp_w, (int)_f.disp_h,
-                                    video_view_mode, _f.ten_bit);
+                                    video_view_mode, _f.ten_bit, _f.color_trc);
                     if (_osd_active)
                         evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
                     _swap = 1;

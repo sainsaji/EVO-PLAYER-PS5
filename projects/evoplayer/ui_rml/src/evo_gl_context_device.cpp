@@ -269,12 +269,13 @@ extern "C" void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
 namespace {
 
 GLuint g_yuv_vao = 0;
-GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0, g_yuv_pl10_prog = 0;
+GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0, g_yuv_pl10_prog = 0, g_yuv_pl10_hdr_prog = 0;
 GLuint g_yuv_ytex = 0, g_yuv_uvtex = 0, g_yuv_utex = 0, g_yuv_vtex = 0;
 int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1, g_yuv_ten = -1;
 GLint  g_yuv_nv_crop = -1, g_yuv_nv_scale = -1;
 GLint  g_yuv_pl_crop = -1, g_yuv_pl_scale = -1;
 GLint  g_yuv_pl10_crop = -1, g_yuv_pl10_scale = -1;
+GLint  g_yuv_pl10_hdr_crop = -1, g_yuv_pl10_hdr_scale = -1;
 
 const char *k_yuv_vs =
     "#version 330 core\n"
@@ -347,6 +348,45 @@ const char *k_yuv_fs_pl10 =
     YUV_MATRIX_GLSL
     "}\n";
 
+const char *k_yuv_fs_pl10_hdr =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uU; uniform sampler2D uV;\n"
+    "const float S = 65535.0 / 1023.0;\n"
+    /* BT.2020 non-constant-luminance YCbCr -> R'G'B' (still PQ-encoded, not
+     * linear yet) - Kr=0.2627 Kb=0.0593, same published matrix ffmpeg/zscale
+     * use. Distinct from BT.601 (#62's matrix): using 601 on 2020 content is
+     * a real color error, not just a missing tone-curve. */
+    "vec3 yuv2020(float y, float U, float V) {\n"
+    "  float Yp = (y - 0.0627451) * 1.1640625;\n"
+    "  return vec3(Yp + 1.4746*V, Yp - 0.16455*U - 0.57135*V, Yp + 1.8814*U);\n"
+    "}\n"
+    /* ST.2084 (PQ) inverse EOTF: PQ code value (0..1) -> linear light,
+     * normalized so 1.0 == 10000 nits. Constants are the published SMPTE
+     * ST.2084 m1/m2/c1/c2/c3 - do not approximate these. */
+    "float pq_eotf(float n) {\n"
+    "  const float m1=0.1593017578125, m2=78.84375, c1=0.8359375, c2=18.8515625, c3=18.6875;\n"
+    "  float np = pow(max(n,0.0), 1.0/m2);\n"
+    "  return pow(max(np-c1,0.0) / (c2 - c3*np), 1.0/m1);\n"
+    "}\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r * S;\n"
+    "  float U = texture(uU, vUV).r * S - 0.5;\n"
+    "  float V = texture(uV, vUV).r * S - 0.5;\n"
+    "  vec3 pq_rgb = clamp(yuv2020(y, U, V), 0.0, 1.0);\n"
+    /* Per-channel EOTF -> absolute nits, rescaled so 1.0 == 100-nit SDR white. */
+    "  vec3 nits = vec3(pq_eotf(pq_rgb.r), pq_eotf(pq_rgb.g), pq_eotf(pq_rgb.b)) * 100.0;\n"
+    /* Reinhard: simplest stable tone-map, folds unbounded highlights into
+     * 0..1 without clipping. Swap for a filmic curve (Hable/ACES) later -
+     * nothing else in this chain changes. */
+    "  vec3 sdr_linear = nits / (1.0 + nits);\n"
+    /* Re-encode for SDR scanout. The BT.601 shader never needed this step -
+     * studio YCbCr there is already gamma-encoded; here we decoded all the
+     * way to scene-linear to tone-map correctly, so it must go back. */
+    "  vec3 rgb = pow(sdr_linear, vec3(1.0/2.2));\n"
+    "  c = vec4(rgb.bgr, 1.0);\n"
+    "}\n";
+
 GLuint yuv_link(const char *fs_src)
 {
     GLuint vs = blit_compile(GL_VERTEX_SHADER, k_yuv_vs);
@@ -367,11 +407,12 @@ GLuint yuv_link(const char *fs_src)
 
 bool yuv_init(void)
 {
-    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog) return true;
-    if (!g_yuv_nv_prog)   g_yuv_nv_prog   = yuv_link(k_yuv_fs_nv);
-    if (!g_yuv_pl_prog)   g_yuv_pl_prog   = yuv_link(k_yuv_fs_pl);
-    if (!g_yuv_pl10_prog) g_yuv_pl10_prog = yuv_link(k_yuv_fs_pl10);
-    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog) return false;
+    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog && g_yuv_pl10_hdr_prog) return true;
+    if (!g_yuv_nv_prog)       g_yuv_nv_prog       = yuv_link(k_yuv_fs_nv);
+    if (!g_yuv_pl_prog)       g_yuv_pl_prog       = yuv_link(k_yuv_fs_pl);
+    if (!g_yuv_pl10_prog)     g_yuv_pl10_prog     = yuv_link(k_yuv_fs_pl10);
+    if (!g_yuv_pl10_hdr_prog) g_yuv_pl10_hdr_prog = yuv_link(k_yuv_fs_pl10_hdr);
+    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog || !g_yuv_pl10_hdr_prog) return false;
     if (!g_yuv_vao) glGenVertexArrays(1, &g_yuv_vao);
     if (!g_yuv_ytex) {
         glGenTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_uvtex);
@@ -394,6 +435,12 @@ bool yuv_init(void)
     glUniform1i(glGetUniformLocation(g_yuv_pl10_prog, "uV"), 2);
     g_yuv_pl10_crop  = glGetUniformLocation(g_yuv_pl10_prog, "uCrop");
     g_yuv_pl10_scale = glGetUniformLocation(g_yuv_pl10_prog, "uScale");
+    glUseProgram(g_yuv_pl10_hdr_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_hdr_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_hdr_prog, "uU"), 1);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_hdr_prog, "uV"), 2);
+    g_yuv_pl10_hdr_crop  = glGetUniformLocation(g_yuv_pl10_hdr_prog, "uCrop");
+    g_yuv_pl10_hdr_scale = glGetUniformLocation(g_yuv_pl10_hdr_prog, "uScale");
     evo_bt_("GL yuv: initialised");
     return true;
 }
@@ -415,7 +462,7 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                                 const uint8_t *u,  int u_pitch,
                                 const uint8_t *v,  int v_pitch,
                                 int coded_w, int coded_h, int disp_w, int disp_h,
-                                int view_mode, int ten_bit)
+                                int view_mode, int ten_bit, int color_trc)
 {
     if (!g_ready || !y || y_pitch <= 0 || coded_w <= 0 || coded_h <= 0)
         return;
@@ -479,9 +526,13 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
-    GLuint prog  = ten_bit ? g_yuv_pl10_prog  : (planar ? g_yuv_pl_prog  : g_yuv_nv_prog);
-    GLint  crop  = ten_bit ? g_yuv_pl10_crop  : (planar ? g_yuv_pl_crop  : g_yuv_nv_crop);
-    GLint  scale = ten_bit ? g_yuv_pl10_scale : (planar ? g_yuv_pl_scale : g_yuv_nv_scale);
+    /* 16 is AVCOL_TRC_SMPTE2084 (PQ). HLG (18) left on k_yuv_fs_pl10 passthrough for now (known gap). */
+    GLuint prog  = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_prog : g_yuv_pl10_prog)
+                           : (planar ? g_yuv_pl_prog : g_yuv_nv_prog);
+    GLint  crop  = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_crop : g_yuv_pl10_crop)
+                           : (planar ? g_yuv_pl_crop : g_yuv_nv_crop);
+    GLint  scale = ten_bit ? (color_trc == 16 ? g_yuv_pl10_hdr_scale : g_yuv_pl10_scale)
+                           : (planar ? g_yuv_pl_scale : g_yuv_nv_scale);
     glUseProgram(prog);
     float cx = (disp_w > 0 && disp_w <= tw) ? (float)disp_w / (float)tw : 1.0f;
     float cy = (disp_h > 0 && disp_h <= th) ? (float)disp_h / (float)th : 1.0f;

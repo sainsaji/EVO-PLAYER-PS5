@@ -79,6 +79,7 @@ typedef struct pp_playback {
     uint32_t gl_dw, gl_dh;      /* display (cropped) w/h                  */
     int      gl_ready;
     int      gl_ten_bit;        /* GL-5 (#81): planar source is 16-bit (yuv420p10le) */
+    int      gl_color_trc;
 
     /*
      * GL-4 Stage 2d: a seek's discard window is the one time the borrowed
@@ -95,6 +96,7 @@ typedef struct pp_playback {
     int      hold_valid;        /* serve hold_buf from get_nv12           */
     int      hold_planar;
     int      hold_ten_bit;
+    int      hold_color_trc;
     int      hold_ypitch, hold_uvpitch, hold_upitch, hold_vpitch;
     size_t   hold_uv_off, hold_u_off, hold_v_off;
     uint32_t hold_cw, hold_ch, hold_dw, hold_dh;
@@ -143,6 +145,7 @@ typedef struct pp_gl_nv12_frame {
     int      ready;
     int      held;               /* 1 = the frozen mid-seek snapshot    */
     int      ten_bit;            /* GL-5 (#81): planar 16-bit (yuv420p10le), sample as GL_R16 */
+    int      color_trc;
 } pp_gl_nv12_frame;
 
 /**

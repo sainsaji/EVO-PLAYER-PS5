@@ -238,6 +238,7 @@ static int hold_snapshot(pp_playback *pb)
 
     pb->hold_planar  = planar;
     pb->hold_ten_bit = pb->gl_ten_bit;
+    pb->hold_color_trc = pb->gl_color_trc;
     pb->hold_ypitch  = pb->gl_src_ypitch;
     pb->hold_uvpitch = pb->gl_src_uvpitch;
     pb->hold_upitch  = pb->gl_src_upitch;
@@ -330,6 +331,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
      */
     if (pb->lock) pthread_mutex_lock(mtx(pb));
     pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10);
+    pb->gl_color_trc = src->color_trc;
     pb->gl_src_y  = src->planes[0];
     pb->gl_src_ypitch = syp;
     if (src->format == PP_FRAME_NV12) {
@@ -394,6 +396,7 @@ int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
         f->disp_w   = pb->hold_dw;
         f->disp_h   = pb->hold_dh;
         f->ten_bit  = pb->hold_ten_bit;
+        f->color_trc = pb->hold_color_trc;
         f->ready    = 1;
         f->held     = 1;
         got = 1;
@@ -411,6 +414,7 @@ int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
         f->disp_w   = pb->gl_dw;
         f->disp_h   = pb->gl_dh;
         f->ten_bit  = pb->gl_ten_bit;
+        f->color_trc = pb->gl_color_trc;
         f->ready    = 1;
         got = 1;
     }

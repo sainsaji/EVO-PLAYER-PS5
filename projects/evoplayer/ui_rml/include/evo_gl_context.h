@@ -83,7 +83,8 @@ void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
                      const uint8_t *v,  int v_pitch,
                      int coded_w, int coded_h, int disp_w, int disp_h,
                      int view_mode,     /* 0=FIT 1=FILL 2=STRETCH */
-                     int ten_bit);
+                     int ten_bit,
+                     int color_trc);
 
 /* GL-4 (#80), device only. Composite an EVO BGRA scratch (0xAABBGGRR, alpha in
  * the top byte) over whatever is already in fb 0 — the player OSD on top of the
