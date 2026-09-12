@@ -99,11 +99,6 @@ jobs:
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
-      - name: Build all projects (Make)
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build.sh'
-
       - name: Build EVO Player
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
@@ -242,15 +237,6 @@ jobs:
         with: { name: ps5-elf-payloads, path: output/elf }
 
       # Packaging is not on the critical path for ELF development, so it runs
-      # last and only produces the no-proprietary-tooling formats.
-      - name: Build websrv homebrew bundles
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc '
-              bash ./scripts/package-pkg.sh --format homebrew output/elf/hello_world.elf
-              bash ./scripts/package-pkg.sh --format homebrew output/elf/videoout_test.elf
-            '
-
       - name: Archive PKG artifacts
         uses: actions/upload-artifact@v4
         with:

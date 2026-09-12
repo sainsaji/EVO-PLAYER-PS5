@@ -48,7 +48,7 @@
 #      that is not a PKG.
 #
 # PKG packaging is deliberately NOT a dependency of the ELF workflow: nothing
-# in scripts/build.sh or deploy.sh calls this.
+# nothing in the tree calls this; it is a manual homebrew-PKG helper.
 # ---------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -85,7 +85,7 @@ if [[ ! -f "${ELF}" ]]; then
         [[ -f "${cand}" ]] && { ELF="${cand}"; break; }
     done
 fi
-need_file "${ELF}" "Build it first with ./scripts/build.sh"
+need_file "${ELF}" "Pass the path to an already-built ELF."
 validate_elf "${ELF}"
 
 load_sdk

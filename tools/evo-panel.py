@@ -599,8 +599,6 @@ class EvoPanel:
         jb = self._section(t, "Sandbox / assets")
         r2 = ttk.Frame(jb)
         r2.pack(anchor="w")
-        ttk.Button(r2, text="sandbox-unjail", width=16,
-                   command=lambda: self.run([BASH, "tools/sandbox-unjail.sh"], "sandbox-unjail")).pack(side="left")
         ttk.Button(r2, text="bundle RmlUi assets", width=20,
                    command=lambda: self.run([BASH, "-lc", "python3 tools/bundle_rml_assets.py"], "bundle assets")).pack(side="left", padx=6)
         ttk.Button(r2, text="gen icons", width=12,

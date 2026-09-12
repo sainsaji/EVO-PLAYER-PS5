@@ -14,7 +14,6 @@ WHY THIS EXISTS
     file and re-rendering at any size.
 
 OUTPUT
-    projects/evoplayer/prospero_media_standalone/assets/icon0.png   512x512
     output/screenshots/app_icon_preview.png                         same image
 
 USAGE
@@ -175,8 +174,6 @@ def main():
 
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
-    dest = os.path.join(root, "projects", "evoplayer",
-                        "prospero_media_standalone", "assets", "icon0.png")
     prev = os.path.join(root, "output", "screenshots", "app_icon_preview.png")
     os.makedirs(os.path.dirname(prev), exist_ok=True)
 

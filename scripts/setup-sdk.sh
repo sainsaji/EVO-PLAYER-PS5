@@ -132,5 +132,5 @@ validate_elf "${SMOKE}/hello_world.elf"
 
 echo ""
 log "${_C_GRN}SDK environment OK${_C_OFF}"
-echo "   next:  ./scripts/build.sh              build the sample suite"
+echo "   next:  ./scripts/package-app.sh --ffpfsc   build the app module"
 echo "          ./scripts/package-app.sh --ffpfsc && ./scripts/deploy-app.sh --ffpfsc"
