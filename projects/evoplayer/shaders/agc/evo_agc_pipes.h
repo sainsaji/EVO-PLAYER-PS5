@@ -3,5 +3,9 @@
 #define EVO_AGC_PIPES_H
 
 #include "ui_screen_2d_pipe.h"
+#include "video_yuv_nv12_pipe.h"
+#include "video_yuv_p010_hdr_pipe.h"
+#include "video_yuv_p010_hlg_pipe.h"
+#include "video_yuv_planar_pipe.h"
 
 #endif /* EVO_AGC_PIPES_H */

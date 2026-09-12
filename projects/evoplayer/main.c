@@ -11294,6 +11294,25 @@ skip_screen_input:
                                      (int)_f.disp_w, (int)_f.disp_h,
                                      video_view_mode, _f.ten_bit, _f.color_trc,
                                      _is_direct);
+                    /* Re-dispatch the OSD AFTER the video quad.
+                     *
+                     * In --agc builds RenderPlaybackOSD() draws through the AGC
+                     * render interface as GPU geometry, not into gl_scratch -
+                     * so the OSD emitted earlier in this frame has just been
+                     * painted over by the fullscreen video quad, which draws
+                     * with BLEND_NONE. Re-running it puts it back on top.
+                     *
+                     * Costs one redundant OSD pass per frame (the first one is
+                     * entirely overdrawn). The clean fix is to reorder the loop
+                     * so the video blit happens before the OSD dispatch; doing
+                     * that safely means untangling _osd_changed/_osd_was, which
+                     * is a bigger change than this is worth right now. */
+                    if (_osd_active) {
+                        g_k4_osd_publish = 1;
+                        draw_player_screen(gl_scratch);
+                        g_k4_osd_publish = 0;
+                        draw_prospero_toast(gl_scratch);
+                    }
 #else
                     evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,

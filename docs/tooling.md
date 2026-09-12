@@ -15,6 +15,12 @@ Two rules that save time:
 
 ## The short version
 
+**Two build flavours, and they are not interchangeable.** `--agc` renders the UI
+on bare-metal `sceAgc`; `--gl` (the default) renders it with a CPU rasteriser
+blitted through ps5-opengl. Changing a shader means rebuilding it in a *second*
+Docker image. Read [Shader pipelines](#shader-pipelines---agc-builds) before
+touching anything under `projects/evoplayer/shaders/agc/`.
+
 ```bash
 # the ONLY hardware path — build + deploy the app module
 docker compose run --rm ps5-dev bash -lc '
@@ -190,6 +196,7 @@ Historical detail on why the payload context was a dead end:
 | `package-pkg.sh` | Produces a distributable PKG. |
 | `gen-compile-commands.sh` | Regenerates `compile_commands.json` for clangd. |
 | `shell.sh` | Drops you into a container shell. |
+| `build-ps5-opengl.sh` | Builds the ps5-opengl SDK. Required once for `--gl`; **not** needed for `--agc`. |
 
 ### Build switches
 
@@ -200,6 +207,53 @@ Passed through `EXTRA_CFLAGS`, empty in shipping builds:
 | `-DEVO_AUTOSHOT=N` | Capture the framebuffer to `/mnt/usb0/` N seconds after launch |
 | `-DEVO_START_SCREEN=n` | Boot straight into a screen — `0` launch, `1` browser, `10` settings, `11` profile |
 | `-DEVO_PAD_DEBUG=1` | Print the raw pad mask on every press |
+
+### `--agc` vs `--gl`
+
+```bash
+./scripts/package-app.sh --ffpfsc --agc    # UI on bare-metal sceAgc
+./scripts/package-app.sh --ffpfsc          # default: --gl
+```
+
+| | `--agc` | `--gl` (default) |
+|---|---|---|
+| UI rendering | `EvoRenderInterfaceAGC`, hand-built `sceAgc` DCBs | CPU coverage rasteriser + one GL blit |
+| Video present | AGC video pipelines | ps5-opengl |
+| Shaders | `.pipe` -> amdllpc (see below) | GLSL compiled by ps5-opengl's Mesa |
+| Needs `scripts/build-ps5-opengl.sh` | no | **yes**, once |
+
+Mutually exclusive - `package-app.sh` rejects both together. Deploy is identical
+either way; only the `.ffpfsc` contents differ. **`--gl` is still the shipping
+default**; `--agc` is faster and is where the work is going.
+
+### Shader pipelines - `--agc` builds
+
+AGC shaders live in `projects/evoplayer/shaders/agc/*.pipe` and are compiled by
+**amdllpc**, AMD's open-source LLPC compiler, in a *separate* Docker image.
+
+```bash
+# one-time: build the compiler image (LLVM-scale, ~1h, cached afterwards)
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml build ps5-dev
+
+# recompile the shaders after editing any .pipe
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml   run --rm ps5-dev python3 tools/build_agc_pipes.py
+```
+
+Things that will otherwise cost a debugging session:
+
+- **`package-app.sh` does NOT rebuild shaders.** Edit a `.pipe`, run a normal
+  build, and it silently ships the previously generated `*_pipe.h`. Run
+  `build_agc_pipes.py` first, in the amdllpc image.
+- **The amdllpc image is a different image** from the normal `ps5-dev` one. A
+  plain `docker compose run` has no `amdllpc` and no PyYAML; the script says so
+  rather than half-working.
+- **Never hand-edit `*_pipe.h`.** Generated: ISA blobs plus register tables
+  derived from the compiler's PAL metadata.
+- **`gen_video_pipes.py` owns the four video `.pipe` files.** Edit the generator,
+  not its output - they share one vertex stage and it rewrites all four.
+
+Why this toolchain exists and what the generated values mean:
+[agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md).
 
 ### Seeing payload `printf`
 

@@ -29,6 +29,16 @@ struct EvoAgcCompiledGeometry {
     uint32_t index_count = 0;
 
     uint32_t vsharp[EVO_AGC_VSHARP_DWORDS] = {0};
+
+    /* Untranslated bounding box of the vertices, in document pixels. Only used
+     * when this geometry is handed to RenderToClipMask: a clip mask we cannot
+     * render into the stencil is approximated by scissoring to this box. */
+    float    bb_min_x = 0.0f, bb_min_y = 0.0f;
+    float    bb_max_x = 0.0f, bb_max_y = 0.0f;
+    /* Corner radii recovered from the tessellation, in RmlUi's corner order:
+     * top-left, top-right, bottom-right, bottom-left. Zero for a square box.
+     * Only meaningful for clip-mask geometry. */
+    float    bb_radius[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 class EvoRenderInterfaceAGC : public Rml::RenderInterface, public EvoRenderBridge {
@@ -68,11 +78,46 @@ public:
 
     void SetTransform(const Rml::Matrix4f* transform) override;
 
+    /* Clip masks. RmlUi uses these for border-radius clipping and masked
+     * overlays; leaving them unimplemented means children are never clipped to
+     * a rounded container - square thumbnail corners, gradient masks in the
+     * wrong place. Backed by the stencil buffer in evo_agc_runtime.c. */
+    void EnableClipMask(bool enable) override;
+    void RenderToClipMask(Rml::ClipMaskOperation operation,
+                          Rml::CompiledGeometryHandle geometry,
+                          Rml::Vector2f translation) override;
+
 private:
     int m_width;
     int m_height;
     bool m_scissor_enabled;
     Rml::Rectanglei m_scissor_region;
+
+    /*
+     * Bounding-box approximation of a clip mask.
+     *
+     * RmlUi only reaches for a clip mask when the clip is not a plain
+     * rectangle - a rounded container, most often. The exact shape needs the
+     * stencil buffer; the *extent* does not, and scissoring to the mask's
+     * bounding box gets everything except the corner radius right. Without it
+     * a rounded, overflow:hidden container does not clip its children at all:
+     * the thumbnail art spills past its frame and paints over the focus border
+     * the parent drew underneath it.
+     *
+     * The effective scissor is always the intersection of RmlUi's own scissor
+     * region and this box - see ApplyScissorState().
+     */
+    bool m_clip_mask_enabled = false;
+    bool m_clip_mask_valid = false;
+    Rml::Rectanglei m_clip_mask_box;
+
+    /* The same clip, in the form the fragment shader takes: document-pixel
+     * rect plus corner radius. This is what actually does the clipping; the
+     * scissor box above only culls. */
+    float m_clip_rect[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float m_clip_radius[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+    void ApplyScissorState();
 
     std::unique_ptr<EvoAgcTexture> m_white_texture;
 

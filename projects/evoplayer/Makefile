@@ -188,8 +188,11 @@ ifeq ($(AGC_DEVICE),1)
         media/src/evo_agc_writer.c \
         media/src/evo_agc_shader_header.c \
         media/src/evo_agc_runtime.c
-    CFLAGS   += -DEVO_AGC_DEVICE=1 -Ishaders/agc
-    CXXFLAGS += -DEVO_AGC_DEVICE=1 -Ishaders/agc
+    # EVO_AGC_HAVE_VIDEO_PIPES: the four video pipelines are converted to .pipe
+    # and compiled by tools/build_agc_pipes.py, so the video present path is
+    # live. Drop it to bring the runtime up with the UI pipeline only.
+    CFLAGS   += -DEVO_AGC_DEVICE=1 -DEVO_AGC_HAVE_VIDEO_PIPES=1 -Ishaders/agc
+    CXXFLAGS += -DEVO_AGC_DEVICE=1 -DEVO_AGC_HAVE_VIDEO_PIPES=1 -Ishaders/agc
 endif
 
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)

@@ -63,6 +63,20 @@ void evo_agc_runtime_bind_pipeline(int pipeline_id);
 void evo_agc_runtime_set_scissor(int x, int y, int w, int h);
 void evo_agc_runtime_set_blend(int blend_mode);
 
+/* RmlUi clip masks, backed by the stencil buffer. Without these, border-radius
+ * clipping and masked overlays silently do nothing - children of a rounded
+ * container are not clipped to it. operation matches Rml::ClipMaskOperation:
+ * 0 = Set, 1 = SetInverse, 2 = Intersect. Bracket the mask geometry with
+ * _begin()/_end(); _set_clip_mask() toggles the test for normal drawing. */
+/* 0 when the stencil clip-mask path is compiled out. Callers MUST skip drawing
+ * the mask geometry entirely in that case: it is shape-only geometry that is
+ * never meant to reach the colour buffer, so drawing it paints opaque
+ * rectangles over the UI (RmlUi issues ~13 of them per frame). */
+int  evo_agc_runtime_clip_mask_supported(void);
+void evo_agc_runtime_set_clip_mask(int enable);
+void evo_agc_runtime_clip_mask_begin(int operation);
+void evo_agc_runtime_clip_mask_end(void);
+
 /* clflush + mfence a range of CPU-written, GPU-read direct memory. Mandatory
  * before the GPU (shader texture-fetch, PM4 indirect-register DMA, or VideoOut
  * scanout) reads anything the CPU just wrote into it - direct memory here is
@@ -100,6 +114,11 @@ SceAgcCommandBuffer      *evo_agc_runtime_get_current_cb(void);
 evo_agc_transient_ring_t *evo_agc_runtime_get_transient_ring(void);
 uint32_t                  evo_agc_runtime_get_current_slot(void);
 void                      evo_agc_runtime_get_size(int *width, int *height);
+
+/* Composite a premultiplied 0xAABBGGRR OSD buffer over the current frame.
+ * `upload` = "the buffer changed since last call"; when 0 the previous upload is
+ * redrawn. Called via evo_gl_composite_bgra() so main.c stays backend-agnostic. */
+void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload);
 
 void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,

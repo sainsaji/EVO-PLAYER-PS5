@@ -15,6 +15,9 @@
 #if !defined(EVO_GL_DEVICE) && !defined(EVO_RML_GL_HOST)
 
 #include "evo_gl_context.h"
+#if defined(EVO_AGC_DEVICE)
+#include "evo_agc_runtime.h"
+#endif
 
 int evo_gl_context_create(int width, int height)
 {
@@ -64,7 +67,15 @@ void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
 
 void evo_gl_composite_bgra(const uint32_t *fb, int w, int h, int upload)
 {
+#if defined(EVO_AGC_DEVICE)
+    /* --agc has no GL context, but it does have a GPU: hand the OSD to the AGC
+     * compositor rather than dropping it. Without this, playback rendered the
+     * OSD into gl_scratch every frame and then discarded it - video played with
+     * no scrub bar, subtitles or HUD. */
+    evo_agc_composite_bgra(fb, w, h, upload);
+#else
     (void)fb; (void)w; (void)h; (void)upload;
+#endif
 }
 
 int evo_gl_probe_rgb(uint8_t *rgb, int n)

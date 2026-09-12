@@ -55,6 +55,11 @@ typedef struct evo_agc_shader_metadata {
     uint32_t             pre_raster_cx_count;
     const evo_agc_reg_t *pixel_cx;
     uint32_t             pixel_cx_count;
+    /* SPI_PS_INPUT_CNTL_0..N. Kept out of pixel_cx because the shader-header
+     * arena's CX array is a fixed console ABI of exactly 9 pixel registers;
+     * these ride with the pipeline's bind-time context registers instead. */
+    const evo_agc_reg_t *ps_input_cntl;
+    uint32_t             ps_input_cntl_count;
     /* User-SGPR layout, derived from the PAL metadata's .user_data_reg_map
      * rather than assumed. These say which dword of the block written at SH
      * 0x8c (vertex) / 0x0c (pixel) holds which [ResourceMapping] pointer.

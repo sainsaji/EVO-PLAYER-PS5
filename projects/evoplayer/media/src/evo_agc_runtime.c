@@ -40,10 +40,26 @@
 #define EVO_AGC_COMMAND_BUFFER_SIZE UINT64_C(0x00600000) /* 6 MB (2 MB per slot * 3) */
 #define EVO_AGC_SHADER_STORAGE_SIZE UINT64_C(0x00400000) /* 4 MB shader storage */
 #define EVO_AGC_FENCE_STORAGE_SIZE  UINT64_C(0x00010000) /* 64 KB fence storage */
+/* Persistent 1920x1080 BGRA staging texture for the OSD composite, plus its
+ * quad. main.c rasterises the OSD into gl_scratch and hands it to
+ * evo_gl_composite_bgra(); in --agc builds that used to be a no-op stub, so the
+ * OSD simply never reached the panel during playback. */
+#define EVO_AGC_COMPOSITE_SIZE      UINT64_C(0x01000000) /* 16 MB */
+/* Stencil buffer for RmlUi clip masks (border-radius clipping and masked
+ * overlays). S8 at 1920x1080 is ~2 MB raw; 8 MB covers the 64KB_Z_X tiled
+ * padding with room to spare. Depth is left disabled - nothing here needs a
+ * Z test, only stencil. */
+#define EVO_AGC_STENCIL_SIZE        UINT64_C(0x00800000) /* 8 MB */
+/* D32F at 1920x1080 is ~8 MB raw; 16 MB covers the tiled padding. The depth
+ * TEST is never enabled - the surface exists because configuring DB with an
+ * invalid Z format stopped the stencil planes working. */
+#define EVO_AGC_DEPTH_SIZE          UINT64_C(0x01000000) /* 16 MB */
 
 #define EVO_AGC_TOTAL_DIRECT_MEM \
     (EVO_AGC_SCANOUT_TOTAL + EVO_AGC_TRANSIENT_RING_SIZE + \
-     EVO_AGC_COMMAND_BUFFER_SIZE + EVO_AGC_SHADER_STORAGE_SIZE + EVO_AGC_FENCE_STORAGE_SIZE)
+     EVO_AGC_COMMAND_BUFFER_SIZE + EVO_AGC_SHADER_STORAGE_SIZE + \
+     EVO_AGC_FENCE_STORAGE_SIZE + EVO_AGC_COMPOSITE_SIZE + \
+     EVO_AGC_STENCIL_SIZE + EVO_AGC_DEPTH_SIZE)
 
 /*
  * VideoOut buffer attribute. 0x...22000000 is the TILED BGRA attribute and
@@ -145,6 +161,21 @@ typedef struct evo_agc_device {
     int                     bound_pipeline;
 
     uint16_t               *quad_indices;
+    uint8_t                *composite_pixels;   /* 256-aligned, pitched */
+    uint32_t                composite_pitch;
+    void                   *composite_quad;     /* 4 verts, Rml::Vertex layout */
+    uint8_t                *stencil_base;
+    uint8_t                *depth_base;
+    /* RmlUi clip-mask state. Rather than clearing the stencil buffer before
+     * every Set (a multi-MB fill per mask), each Set claims the next unused
+     * value and the test compares against it. The buffer is zeroed once per
+     * frame, so an unwritten texel can never collide with a live mask. */
+    uint32_t                stencil_ref;        /* value the test compares to */
+    uint32_t                stencil_counter;    /* last value handed out */
+    int                     stencil_func_equal; /* 0 = NOTEQUAL (SetInverse) */
+    int                     clip_mask_enabled;
+    uint32_t                clip_mask_calls;    /* RenderToClipMask this frame */
+    uint32_t                clip_enable_calls;  /* EnableClipMask this frame   */
     int                     frame_active;
     /* Whether any draw was emitted into the current frame's DCB. */
     int                     frame_has_draws;
@@ -165,6 +196,7 @@ typedef struct evo_agc_device {
 
 typedef struct evo_agc_gpu_regs {
     SceAgcRegister color_targets[2][16];
+    SceAgcRegister depth_target[16];
     struct {
         SceAgcRegister cx_regs[128];
         SceAgcRegister sh_regs[32];
@@ -384,6 +416,15 @@ static int compile_agc_pipeline(evo_agc_pipeline_t *pipe, uint8_t *storage_base,
     memcpy(pipe->cx_regs + cx_total, ps_arena->cx,
            meta->pixel_cx_count * sizeof(SceAgcRegister));
     cx_total += meta->pixel_cx_count;
+    /* SPI_PS_INPUT_CNTL_0..N - the parameter slot and flat/interpolated mode
+     * for each pixel-stage input. These cannot go in the arena (its CX array
+     * is a fixed 9 for the pixel stage), so they are appended here. */
+    if (meta->ps_input_cntl && meta->ps_input_cntl_count &&
+        cx_total + meta->ps_input_cntl_count <= 128u) {
+        memcpy(pipe->cx_regs + cx_total, meta->ps_input_cntl,
+               meta->ps_input_cntl_count * sizeof(SceAgcRegister));
+        cx_total += meta->ps_input_cntl_count;
+    }
     pipe->cx_reg_count = cx_total;
 
     memcpy(pipe->sh_regs, gs_arena->sh, 6u * sizeof(SceAgcRegister));
@@ -489,6 +530,195 @@ static int setup_color_target(SceAgcRegister out[16], void *defaults, void *targ
 }
 
 /* -------------------------------------------------------------------------
+ * Stencil / clip mask
+ *
+ * RmlUi clips to non-rectangular shapes - rounded-corner containers and masked
+ * overlays - through EnableClipMask()/RenderToClipMask(). The AGC interface
+ * implemented neither, so those calls hit base-class no-ops: rounded containers
+ * drew rounded but their children were never clipped to them (square thumbnail
+ * corners), and gradient masks covered the wrong region. Anything rectangular
+ * still worked, because that goes through the scissor instead.
+ *
+ * Register layout follows ps5-opengl's append_depth_target_state().
+ * ------------------------------------------------------------------------- */
+
+enum {
+    /* DB_DEPTH_CONTROL (0x200) */
+    DB_STENCIL_ENABLE   = 1u << 0,
+    DB_Z_ENABLE         = 1u << 1,      /* must be on even for stencil-only */
+    DB_ZFUNC_SHIFT      = 4,            /* bits [6:4] */
+    DB_STENCILFUNC_SHIFT = 8,           /* bits [10:8] */
+    /* Compare functions */
+    DB_CMP_NEVER = 0, DB_CMP_EQUAL = 2, DB_CMP_NOTEQUAL = 5, DB_CMP_ALWAYS = 7,
+    /* Stencil ops, DB_STENCIL_CONTROL (0x10b) */
+    DB_STENCIL_KEEP = 0, DB_STENCIL_REPLACE = 2, DB_STENCIL_INCR_CLAMP = 3,
+};
+
+static int setup_depth_target(SceAgcRegister out[16], const uint8_t *depth,
+                              const uint8_t *stencil,
+                              uint32_t width, uint32_t height)
+{
+    static const uint16_t db_offsets[16] = {
+        0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x001a, 0x001b,
+        0x001c, 0x001d, 0x001e, 0x0002, 0x0005, 0x0007, 0x000b, 0x000a,
+    };
+    const uintptr_t z = (uintptr_t)depth;
+    const uintptr_t s = (uintptr_t)stencil;
+    for (uint32_t i = 0; i < 16; ++i)
+        out[i] = (SceAgcRegister){db_offsets[i], 0u};
+
+    /* Exactly ps5-opengl's values. An earlier revision set FORMAT=0 here to
+     * avoid allocating a depth surface, reasoning that only stencil was needed;
+     * the stencil planes then never went live and every clip mask tested as
+     * empty, so content inside a rounded container vanished. The depth surface
+     * is allocated and configured even though the depth TEST stays off. */
+    out[0].value = 0x80000183u;                 /* DB_Z_INFO: D32F, 64KB_Z_X   */
+    out[1].value = 0x20000181u;                 /* DB_STENCIL_INFO: S8, 64KB_Z_X */
+    out[2].value = (uint32_t)(z >> 8);          /* Z_READ_BASE        */
+    out[3].value = (uint32_t)(s >> 8);          /* STENCIL_READ_BASE  */
+    out[4].value = (uint32_t)(z >> 8);          /* Z_WRITE_BASE       */
+    out[5].value = (uint32_t)(s >> 8);          /* STENCIL_WRITE_BASE */
+    out[6].value = (uint32_t)(z >> 40);         /* Z_READ_BASE_HI     */
+    out[7].value = (uint32_t)(s >> 40);         /* STENCIL_READ_BASE_HI  */
+    out[8].value = (uint32_t)(z >> 40);         /* Z_WRITE_BASE_HI    */
+    out[9].value = (uint32_t)(s >> 40);         /* STENCIL_WRITE_BASE_HI */
+    out[13].value = (width - 1u) | ((height - 1u) << 16);
+    return 0;
+}
+
+/* Emit the four stencil state registers for the current mask state. */
+static void emit_stencil_state(int stencil_enable, uint32_t func, uint32_t ref,
+                               uint32_t zpass_op, int colour_writes)
+{
+    SceAgcRegister *r = alloc_transient_cx(5);
+    if (!r)
+        return;
+    /* Z_ENABLE with ZFUNC=ALWAYS and Z_WRITE_ENABLE off: the depth test always
+     * passes and nothing is written, but the depth block stays active. Leaving
+     * Z_ENABLE clear bypasses DB entirely, so the stencil op never executes and
+     * every mask reads back empty - three earlier attempts at this bug were
+     * looking at the stencil registers when the depth enable was the problem. */
+    r[0] = (SceAgcRegister){0x0200, stencil_enable
+                                ? (DB_STENCIL_ENABLE | DB_Z_ENABLE |
+                                   ((uint32_t)DB_CMP_ALWAYS << DB_ZFUNC_SHIFT) |
+                                   (func << DB_STENCILFUNC_SHIFT))
+                                : 0u};
+    r[1] = (SceAgcRegister){0x010b, (uint32_t)DB_STENCIL_KEEP |
+                                    (zpass_op << 4) |
+                                    ((uint32_t)DB_STENCIL_KEEP << 8)};
+    /* ref | read mask | write mask | STENCILOPVAL.
+     * REPLACE writes STENCILTESTVAL, but INCR/DECR step by STENCILOPVAL in bits
+     * [31:24]; leaving it 0 made Intersect increment by nothing. */
+    const uint32_t refmask = (ref & 0xffu) | (0xffu << 8) | (0xffu << 16) |
+                             (1u << 24);
+    r[2] = (SceAgcRegister){0x010c, refmask};
+    r[3] = (SceAgcRegister){0x010d, refmask};
+    /* CB_TARGET_MASK: writing the mask must not touch colour. */
+    r[4] = (SceAgcRegister){0x008e, colour_writes ? 0x0000000fu : 0u};
+    evo_agc_writer_set_cx_indirect(&g_agc_dev.current_cb, r, 5);
+}
+
+/*
+ * Clip masks are OFF by default.
+ *
+ * The stencil path is written and the DB registers demonstrably bind
+ * (z_info=0x80000183 s_info=0x20000181 in the boot log), but on hardware every
+ * mask tests as empty: content drawn inside a rounded container disappears
+ * while everything outside one renders normally. Until that is understood, the
+ * feature fails OPEN - square corners with visible content beats rounded
+ * corners with none.
+ *
+ * Modes: 0 = off entirely. 1 = full (write + test). 2 = DIAGNOSTIC - write the
+ * masks but never enable the test, so the UI is identical to mode 0 while the
+ * stencil buffer still gets written. Mode 2 plus the read-back below answers
+ * "do the mask writes land at all?" without shipping a broken screen.
+ *
+ * Build with -DEVO_AGC_CLIP_MASK=1 to turn it fully on for debugging. The
+ * counters below are logged either way; they show RmlUi issuing ~13 masks per
+ * frame, so this is worth finishing.
+ *
+ * Ruled out by hardware, do not retry:
+ *   1. DB_Z_INFO FORMAT=0 with no depth surface  - allocate D32F, use
+ *      0x80000183 exactly as ps5-opengl does.
+ *   2. STENCILOPVAL left 0 (bits [31:24] of DB_STENCILREFMASK) - breaks
+ *      INCR/Intersect, but not plain Set.
+ *   3. DB_DEPTH_CONTROL with Z_ENABLE clear - tried both with and without;
+ *      neither makes the mask test pass.
+ *   4. Clearing only width*height bytes of a tiled S8 surface instead of its
+ *      full ~2.6 MB footprint.
+ * All four are fixed in the code below and the masks still test empty, so the
+ * fault is elsewhere. The next step is NOT another register guess: read the
+ * stencil buffer back after a masked frame (as agc_dump_scanout does for
+ * colour) and count non-zero bytes. Zero means the mask WRITE never happens and
+ * the fault is in the DB/write path; non-zero means writes land and the
+ * comparison is wrong. That splits the problem in one launch.
+ */
+#ifndef EVO_AGC_CLIP_MASK
+#define EVO_AGC_CLIP_MASK 0
+#endif
+
+int evo_agc_runtime_clip_mask_supported(void)
+{
+    return EVO_AGC_CLIP_MASK;
+}
+
+void evo_agc_runtime_set_clip_mask(int enable)
+{
+    if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
+        return;
+    g_agc_dev.clip_enable_calls++;
+    if (EVO_AGC_CLIP_MASK != 1)
+        return;          /* mode 2 writes masks but never tests against them */
+    g_agc_dev.clip_mask_enabled = enable ? 1 : 0;
+    emit_stencil_state(g_agc_dev.clip_mask_enabled,
+                       g_agc_dev.stencil_func_equal ? DB_CMP_EQUAL : DB_CMP_NOTEQUAL,
+                       g_agc_dev.stencil_ref, DB_STENCIL_KEEP, 1);
+}
+
+void evo_agc_runtime_clip_mask_begin(int operation)
+{
+    if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
+        return;
+    g_agc_dev.clip_mask_calls++;
+    if (!EVO_AGC_CLIP_MASK)
+        return;
+    uint32_t zpass;
+    switch (operation) {
+    case 0:  /* Set - claim a fresh value and stamp it where the geometry covers */
+    case 1:  /* SetInverse - same stamp, but the test is inverted afterwards */
+        if (g_agc_dev.stencil_counter >= 255u)
+            g_agc_dev.stencil_counter = 0u;   /* 255 masks/frame is not a real case */
+        g_agc_dev.stencil_ref = ++g_agc_dev.stencil_counter;
+        g_agc_dev.stencil_func_equal = (operation == 0);
+        zpass = DB_STENCIL_REPLACE;
+        break;
+    default: /* Intersect - increment, so only texels already carrying the
+              * previous value reach ref+1 */
+        g_agc_dev.stencil_ref += 1u;
+        g_agc_dev.stencil_func_equal = 1;
+        zpass = DB_STENCIL_INCR_CLAMP;
+        break;
+    }
+    /* Always pass the test while writing the mask; colour writes off. */
+    emit_stencil_state(1, DB_CMP_ALWAYS, g_agc_dev.stencil_ref, zpass, 0);
+}
+
+void evo_agc_runtime_clip_mask_end(void)
+{
+    if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
+        return;
+    if (EVO_AGC_CLIP_MASK != 1) {
+        /* Diagnostic mode: stop writing the mask and restore colour writes, but
+         * leave the stencil test disabled so drawing is unaffected. */
+        emit_stencil_state(0, DB_CMP_ALWAYS, 0u, DB_STENCIL_KEEP, 1);
+        return;
+    }
+    g_agc_dev.clip_mask_enabled = 1;
+    emit_stencil_state(1, g_agc_dev.stencil_func_equal ? DB_CMP_EQUAL : DB_CMP_NOTEQUAL,
+                       g_agc_dev.stencil_ref, DB_STENCIL_KEEP, 1);
+}
+
+/* -------------------------------------------------------------------------
  * Public AGC Runtime Lifecycle
  * ------------------------------------------------------------------------- */
 
@@ -575,6 +805,34 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         g_agc_dev.pipelines[i].uc_regs = g_agc_dev.gpu_regs->pipes[i].uc_regs;
     }
 
+    /* OSD composite staging texture + its quad. 256-byte aligned because a
+     * GFX10 image descriptor stores address>>8. */
+    {
+        uint8_t *comp = g_agc_dev.direct_mem_base + cur_offset;
+        comp = (uint8_t *)(((uintptr_t)comp + 255u) & ~(uintptr_t)255);
+        g_agc_dev.composite_pitch =
+            ((uint32_t)g_agc_dev.width * 4u + 255u) & ~255u;
+        g_agc_dev.composite_pixels = comp;
+        g_agc_dev.composite_quad = comp +
+            ((size_t)g_agc_dev.composite_pitch * (size_t)g_agc_dev.height + 255u
+             & ~(size_t)255);
+        cur_offset += EVO_AGC_COMPOSITE_SIZE;
+    }
+
+    /* Stencil buffer, 2 MB aligned like the scanout: DB bases are address>>8
+     * and the surface is tiled, so a tightly-aligned base is not enough. */
+    {
+        uint8_t *st = g_agc_dev.direct_mem_base + cur_offset;
+        g_agc_dev.stencil_base =
+            (uint8_t *)(((uintptr_t)st + 0x1fffffu) & ~(uintptr_t)0x1fffff);
+        cur_offset += EVO_AGC_STENCIL_SIZE;
+
+        uint8_t *dp = g_agc_dev.direct_mem_base + cur_offset;
+        g_agc_dev.depth_base =
+            (uint8_t *)(((uintptr_t)dp + 0x1fffffu) & ~(uintptr_t)0x1fffff);
+        cur_offset += EVO_AGC_DEPTH_SIZE;
+    }
+
     /* Shader storage */
     uint8_t *shader_storage = g_agc_dev.direct_mem_base + cur_offset;
     size_t shader_storage_used = 0;
@@ -601,6 +859,14 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                                  g_agc_dev.scanout_buffers[0], g_agc_dev.width, g_agc_dev.height);
     int ct1 = setup_color_target(g_agc_dev.gpu_regs->color_targets[1], agc_defaults,
                                  g_agc_dev.scanout_buffers[1], g_agc_dev.width, g_agc_dev.height);
+    setup_depth_target(g_agc_dev.gpu_regs->depth_target, g_agc_dev.depth_base,
+                       g_agc_dev.stencil_base,
+                       (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+    evo_boot_log("agc stencil base=%p z_info=%#x s_info=%#x size_xy=%#x",
+                 (void *)g_agc_dev.stencil_base,
+                 (unsigned)g_agc_dev.gpu_regs->depth_target[0].value,
+                 (unsigned)g_agc_dev.gpu_regs->depth_target[1].value,
+                 (unsigned)g_agc_dev.gpu_regs->depth_target[13].value);
     evo_boot_log("agc color_target rc=%d/%d base0=%#x info=%#x (comp_swap=%u) view=%#x attrib=%#x",
                  ct0, ct1,
                  (unsigned)g_agc_dev.gpu_regs->color_targets[0][0].value,
@@ -890,6 +1156,27 @@ void evo_agc_runtime_frame_begin(void)
     evo_agc_writer_set_target(&g_agc_dev.current_cb,
                               g_agc_dev.gpu_regs->color_targets[g_agc_dev.active_backbuffer], 16);
 
+    /* Bind the stencil target, then zero the stencil planes for this frame.
+     * Clearing once here is what lets each RmlUi clip mask claim its own value
+     * instead of clearing a multi-MB surface per mask. The DMA fill is CP-synced
+     * so it completes before any draw in this DCB reads the buffer. */
+    evo_agc_writer_set_cx_indirect(&g_agc_dev.current_cb,
+                                   g_agc_dev.gpu_regs->depth_target, 16);
+    if (g_agc_dev.stencil_base) {
+        sceAgcDcbDmaData(&g_agc_dev.current_cb, 0u, 3u, 0u,
+                         (uint64_t)(uintptr_t)g_agc_dev.stencil_base,
+                         2u, 0u, 0u,
+                         /* 4 MB covers the 64KB_Z_X tiled footprint of an S8
+                          * 1920x1080 surface (~2.6 MB) with margin; a
+                          * width*height linear fill leaves the padding dirty. */
+                         (uint32_t)(4u * 1024u * 1024u),
+                         0u, 0u, 1u /* cp_sync */);
+    }
+    g_agc_dev.stencil_ref = 0u;
+    g_agc_dev.stencil_counter = 0u;
+    g_agc_dev.stencil_func_equal = 1;
+    g_agc_dev.clip_mask_enabled = 0;
+
     /* Set default viewport & scissor */
     evo_agc_writer_set_viewport(&g_agc_dev.current_cb, alloc_transient_cx(12), 0.0f, 0.0f,
                                 (float)g_agc_dev.width, (float)g_agc_dev.height);
@@ -1099,6 +1386,11 @@ void evo_agc_runtime_frame_end(void)
                      g_agc_dev.ring_alloc_fail, g_agc_dev.tex_alloc_fail,
                      dm.allocated_bytes, dm.total_bytes, dm.peak_bytes,
                      dm.num_allocations);
+        evo_boot_log("agc health clip_masks=%u clip_enables=%u (feature=%d)",
+                     g_agc_dev.clip_mask_calls, g_agc_dev.clip_enable_calls,
+                     EVO_AGC_CLIP_MASK);
+        g_agc_dev.clip_mask_calls = 0;
+        g_agc_dev.clip_enable_calls = 0;
         evo_boot_log("agc health presents=%u dcb_min_presented=%u flip_waits=%u timeouts=%u",
                      g_agc_dev.presents, g_agc_dev.dcb_min_presented,
                      g_agc_dev.flip_waits, g_agc_dev.flip_timeouts);
@@ -1324,6 +1616,107 @@ static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
     return 0;
 }
 
+/*
+ * Composite the CPU-rasterised OSD over whatever is already in the frame.
+ *
+ * main.c rasterises the playback OSD into gl_scratch and hands it to
+ * evo_gl_composite_bgra(). In --agc builds that symbol resolves to the no-op in
+ * evo_gl_context_stub.c, so the OSD was rendered every frame and then thrown
+ * away - video played with no scrub bar, no subtitles, no HUD. The stub now
+ * forwards here.
+ *
+ * `fb` is 0xAABBGGRR, which little-endian is the byte order R,G,B,A - exactly
+ * what the texture descriptor's XYZW selects expect, so no swizzle is needed.
+ * Alpha is premultiplied (see evo_rmlui_render.cpp), hence BLEND_PREMULTIPLIED.
+ *
+ * `upload` is main.c's "the OSD actually changed" hint: the 8 MB copy is skipped
+ * when it has not, and the previous contents are drawn again.
+ */
+void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
+{
+    if (!g_agc_dev.initialized || !fb || w <= 0 || h <= 0 ||
+        !g_agc_dev.composite_pixels || !g_agc_dev.frame_active)
+        return;
+    if (w > g_agc_dev.width || h > g_agc_dev.height)
+        return;
+
+    const uint32_t pitch = g_agc_dev.composite_pitch;
+    if (upload) {
+        for (int row = 0; row < h; ++row)
+            memcpy(g_agc_dev.composite_pixels + (size_t)row * pitch,
+                   fb + (size_t)row * w, (size_t)w * 4u);
+        evo_agc_runtime_cache_flush(g_agc_dev.composite_pixels,
+                                    (size_t)pitch * (size_t)h);
+    }
+
+    evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
+    const uint32_t slot = g_agc_dev.current_slot;
+
+    /* Full-screen quad in pixel space, white vertex colour so the texture
+     * passes through untinted. */
+    struct { float x, y; uint32_t rgba; float u, v; } *quad =
+        (void *)g_agc_dev.composite_quad;
+    quad[0] = (typeof(*quad)){0.0f,        0.0f,        0xffffffffu, 0.0f, 0.0f};
+    quad[1] = (typeof(*quad)){(float)w,    0.0f,        0xffffffffu, 1.0f, 0.0f};
+    quad[2] = (typeof(*quad)){0.0f,        (float)h,    0xffffffffu, 0.0f, 1.0f};
+    quad[3] = (typeof(*quad)){(float)w,    (float)h,    0xffffffffu, 1.0f, 1.0f};
+    evo_agc_runtime_cache_flush(quad, 4 * 20);
+
+    evo_agc_transient_slice_t cons, cons_d, vsh, tex_d;
+    if (evo_agc_transient_ring_alloc(ring, slot, 80, 16, &cons) != EVO_AGC_TRANSIENT_OK ||
+        evo_agc_transient_ring_alloc(ring, slot, 16, 16, &cons_d) != EVO_AGC_TRANSIENT_OK ||
+        evo_agc_transient_ring_alloc(ring, slot, 16, 16, &vsh) != EVO_AGC_TRANSIENT_OK ||
+        evo_agc_transient_ring_alloc(ring, slot, 48, 16, &tex_d) != EVO_AGC_TRANSIENT_OK) {
+        g_agc_dev.ring_alloc_fail++;
+        return;
+    }
+
+    float *m = (float *)cons.cpu;                 /* pixel space -> NDC */
+    memset(m, 0, 80);
+    m[0]  =  2.0f / (float)g_agc_dev.width;
+    m[5]  = -2.0f / (float)g_agc_dev.height;
+    m[10] =  1.0f;
+    m[12] = -1.0f;
+    m[13] =  1.0f;
+    m[15] =  1.0f;
+
+    evo_agc_build_constant_vsharp((uint32_t *)cons_d.cpu, cons.gpu_addr, 80);
+    evo_agc_build_vsharp((uint32_t *)vsh.cpu,
+                         (uint64_t)(uintptr_t)g_agc_dev.composite_quad, 20, 4);
+    if (evo_agc_build_tsharp_rgba8((uint32_t *)tex_d.cpu,
+                                   (uint64_t)(uintptr_t)g_agc_dev.composite_pixels,
+                                   (uint32_t)w, (uint32_t)h, pitch) != 0) {
+        g_agc_dev.tex_alloc_fail++;
+        return;
+    }
+    evo_agc_build_ssharp((uint32_t *)tex_d.cpu + 8, 1 /* clamp */, 0 /* point */);
+
+    g_agc_dev.bound_pipeline = -1;                /* video pipeline was bound */
+    evo_agc_runtime_bind_pipeline(EVO_AGC_PIPE_UI);
+    evo_agc_runtime_set_blend(EVO_AGC_BLEND_PREMULTIPLIED);
+    evo_agc_writer_set_scissor(&g_agc_dev.current_cb, alloc_transient_cx(2), 0, 0,
+                               (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+
+    const evo_agc_user_data_layout_t ud =
+        evo_agc_runtime_get_user_data_layout(EVO_AGC_PIPE_UI);
+    if (!ud.vs_count || ud.vs_const_table_dword < 0 ||
+        ud.vs_vertex_table_dword < 0 || ud.ps_texture_table_dword < 0 ||
+        ud.vs_count > 16 || ud.ps_count > 16)
+        return;
+
+    uint32_t vs_user[16] = {0};
+    vs_user[ud.vs_const_table_dword]  = (uint32_t)cons_d.gpu_addr;
+    vs_user[ud.vs_vertex_table_dword] = (uint32_t)vsh.gpu_addr;
+    evo_agc_writer_set_user_data_gs(&g_agc_dev.current_cb, vs_user, ud.vs_count);
+
+    uint32_t ps_user[16] = {0};
+    ps_user[ud.ps_texture_table_dword] = (uint32_t)tex_d.gpu_addr;
+    evo_agc_writer_set_user_data_ps(&g_agc_dev.current_cb, ps_user, ud.ps_count);
+
+    evo_agc_writer_draw_index(&g_agc_dev.current_cb, 6, g_agc_dev.quad_indices);
+    evo_agc_runtime_note_draw();
+}
+
 void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,
                       const uint8_t *u,  int u_pitch,
@@ -1401,14 +1794,23 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         return;
     evo_agc_build_constant_vsharp((uint32_t *)vsharp_slice.cpu, const_slice.gpu_addr, sizeof(constants));
 
-    /* VS user SGPR (GS stage: compact register 0x8c) */
-    uint32_t vs_user[4] = {
-        0,
-        0,
-        (uint32_t)vsharp_slice.gpu_addr,
-        512
-    };
-    evo_agc_writer_set_user_data_gs(&g_agc_dev.current_cb, vs_user, 4);
+    /* VS user SGPR (GS stage: compact register 0x8c).
+     *
+     * Slots come from the compiled pipeline's PAL metadata, never from
+     * constants here - this used to hardcode the psbc layout (const buffer at
+     * dword 2 plus an ngg_lds_layout at 3), and LLPC puts the constant table at
+     * dword 1 with no ngg_lds entry at all. Writing a pointer to the wrong
+     * dword is silent: the shader reads its crop/scale through an unset pointer
+     * and the quad lands nowhere. */
+    const evo_agc_user_data_layout_t vud =
+        evo_agc_runtime_get_user_data_layout(pipe_id);
+    if (!vud.vs_count || vud.vs_const_table_dword < 0 ||
+        vud.ps_texture_table_dword < 0 || vud.vs_count > 16 || vud.ps_count > 16)
+        return;
+
+    uint32_t vs_user[16] = {0};
+    vs_user[vud.vs_const_table_dword] = (uint32_t)vsharp_slice.gpu_addr;
+    evo_agc_writer_set_user_data_gs(&g_agc_dev.current_cb, vs_user, vud.vs_count);
 
     /* 4. Prepare Texture Descriptors (T#) and Samplers (S#) */
     const uint32_t bpp = ten_bit ? 2u : 1u;
@@ -1480,14 +1882,14 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         evo_agc_build_ssharp(desc + 20, 1, 1);
     }
 
-    /* PS user SGPR (PS stage: compact register 0x0c) */
-    uint32_t ps_user[3] = {
-        0,
-        0,
-        (uint32_t)desc_slice.gpu_addr
-    };
-    evo_agc_writer_set_user_data_ps(&g_agc_dev.current_cb, ps_user, 3);
+    /* PS user SGPR (PS stage: compact register 0x0c) - same derivation. */
+    uint32_t ps_user[16] = {0};
+    ps_user[vud.ps_texture_table_dword] = (uint32_t)desc_slice.gpu_addr;
+    evo_agc_writer_set_user_data_ps(&g_agc_dev.current_cb, ps_user, vud.ps_count);
 
     /* 5. Dispatch hardware quad draw call */
     evo_agc_writer_draw_index(&g_agc_dev.current_cb, 6, g_agc_dev.quad_indices);
+    /* Without this the frame carries no recorded draw and frame_end discards it
+     * instead of presenting - video would decode and never reach the panel. */
+    evo_agc_runtime_note_draw();
 }

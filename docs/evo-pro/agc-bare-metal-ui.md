@@ -27,12 +27,20 @@ driver limitation. Going straight to AGC was the only route to a fast UI.
 |---|---|---|
 | RmlUi UI (menus, text, icons, thumbnails) | `EvoRenderInterfaceAGC` -> `sceAgc` DCB | **yes** |
 | Video decode | `sceVideodec2` resident decoders | **yes** (dedicated block) |
-| Video present | **not ported** — the 4 video `.pipe`s are unconverted | **no** |
+| Video present | 4 AGC video pipelines (NV12 / planar / P010 PQ / P010 HLG) | **yes** |
+| Playback OSD | RmlUi geometry, re-dispatched after the video quad | **yes** |
 | CPU coverage rasteriser | still compiled; unused once AGC constructs | dormant |
 
-`agc video pipelines not built yet (.pipe conversion pending)` in `evo.log` is
-the runtime saying exactly that. Only the UI pipeline is mandatory at init; a
-missing video pipeline disables that path rather than aborting the runtime.
+Only the UI pipeline is mandatory at init — a video pipeline that fails to
+compile disables that path and logs it rather than aborting the runtime. Build
+`--agc` without `EVO_AGC_HAVE_VIDEO_PIPES` to bring the runtime up UI-only.
+
+The OSD ordering is worth knowing: `RenderPlaybackOSD()` draws through the AGC
+interface as GPU geometry (it does **not** fill `gl_scratch` the way the GL path
+does), and `main.c` dispatches it *before* the video blit — which then paints
+over it with `BLEND_NONE`. It is therefore re-dispatched after the blit. That
+costs one redundant OSD pass; the clean fix is reordering the loop so video
+draws first, which means untangling `_osd_changed`/`_osd_was`.
 
 ---
 
@@ -61,6 +69,63 @@ Ported from `ps5-xash3d-halflife` (`tools/build_shader.py`,
 3D game on this firmware through the same chain. That project publishes its
 source but **no compiled shaders**, so it is a structural reference only — it
 cannot be run, and there is no working command stream to diff against.
+
+### The scripts, and what each one owns
+
+Three Python files carry this toolchain, and **none** of them run in the normal
+`ps5-dev` container. Two need the **amdllpc image**; the third runs inside the
+Docker image build itself.
+
+| File | Runs | Owns |
+|---|---|---|
+| `tools/build_agc_pipes.py` | amdllpc image | `.pipe` -> `*_pipe.h`. The whole compile chain. |
+| `tools/gen_video_pipes.py` | amdllpc image | Writes the four video `.pipe` files from one shared vertex stage. |
+| `tools/patches/llpc-add-gfx1013.py` | `Dockerfile.amdllpc`, at image build | Adds gfx1013 to LLPC's GPU table. |
+| `tools/build_agc_shaders.py` | **deleted** | The old opengnm-psbc wrapper. Gone; do not resurrect. |
+
+**`tools/build_agc_pipes.py`** — the only thing that turns a `.pipe` into
+something the runtime can load. Per pipeline it runs `amdllpc -gfxip=10.1.3`,
+dumps `.text` with `llvm-objcopy`, slices it at the `_amdgpu_gs_main` /
+`_amdgpu_ps_main` symbol extents from `llvm-readelf --symbols`, decodes the PAL
+metadata YAML out of the AMDGPU note, and *derives* every AGC register from it
+(`derive()` is a port of ps5-xash3d's `generate_agc_metadata.py`). It writes
+`<name>_pipe.h` plus an `evo_agc_pipes.h` that includes them all, and a
+`build/agc_pipes/<name>.manifest.json` with the raw metadata for debugging.
+
+It refuses to emit a header rather than emit a wrong one:
+
+- the pipeline must be a relocation-free gfx1013 **NGG** pipeline;
+- the ELF must carry no unresolved relocations;
+- every required `[ResourceMapping]` node must have a user-SGPR slot. The
+  *vertex-buffer* table is allowed to be absent (`vtx=-1`) because the video
+  pipelines build their quad from `gl_VertexIndex`, but a missing constant-buffer
+  or texture table is fatal — that is precisely the silent failure the psbc
+  chain shipped, where a shader read a resource through an unset pointer, drew
+  nothing, and faulted nothing.
+
+Its one-line-per-pipeline output is the receipt worth reading:
+
+```
+ui_screen_2d: gs=352B ps=164B esgs_itemsize=1 draw_modifier=0x5
+              user_dwords(const=1,vtx=2,tex=1) write(vs=3,ps=2)
+```
+
+`esgs_itemsize` must be **1**, `draw_modifier` **0x5**, and the `user_dwords`
+are what the runtime writes into the user-SGPR block. If any of those move, the
+runtime's expectations move with them — they are read at runtime through
+`evo_agc_runtime_get_user_data_layout()`, never hardcoded.
+
+**`tools/gen_video_pipes.py`** — the four video pipelines are the same fullscreen
+quad with four different fragment stages, so the vertex shader and the
+`[ResourceMapping]` skeleton live in the generator instead of being copy-pasted.
+Two things it encodes that are easy to get wrong by hand: the vertex stage takes
+**no vertex buffer** (hence no `IndirectUserDataVaPtr` and no
+`[VertexInputState]`), and the fragment samplers must sit at **set 1**, because
+the vertex stage already owns set 0 binding 0 for its uniform block. Edit this
+file and re-run it; never edit the generated `.pipe` files.
+
+**`tools/patches/llpc-add-gfx1013.py`** — runs once inside the image build, not
+by hand. See "gfx1013 is not in public AMDVLK" below.
 
 ### Building the compiler
 
@@ -159,6 +224,7 @@ round-trips. Recorded because the failure signatures are not obvious from code.
 | Some glyph atlases garbled, others perfect | textures were 64-byte aligned; a GFX10 image descriptor stores `address >> 8` and needs **256** | over-allocate and align; `build_tsharp_2d_internal` now *rejects* a misaligned base |
 | Whole UI colour-swapped (blue theme -> gold) | the scanout is BGRA-ordered; the CB was storing RGBA | `COMP_SWAP = ALT` in `CB_COLOR0_INFO` |
 | Black band creeping down the picture while loading | `sceVideoOutSubmitFlip` is async and was never waited on; with 2 buffers the CPU clear wiped the **live** framebuffer | poll `sceVideoOutGetFlipStatus` until `status[3] == flip_arg` |
+| Square corners on rounded containers; masked overlays in the wrong place | `EnableClipMask`/`RenderToClipMask` were never implemented, so RmlUi's non-rectangular clipping hit base-class no-ops (rectangular clipping still worked - that goes through the scissor) | stencil buffer + the two overrides |
 | UI flashing, alternating with blank | frames with no draws were still cleared and flipped | skip present when `frame_has_draws == 0` |
 
 Two pieces that were always required and simply missing:
@@ -209,13 +275,41 @@ it before theorising about channel order.
 
 ---
 
+## Clip masks
+
+RmlUi clips to non-rectangular shapes - rounded containers, masked overlays -
+through `EnableClipMask()` / `RenderToClipMask()`, backed here by an 8 MB S8
+stencil surface. Depth is deliberately left disabled (`DB_Z_INFO` format 0):
+nothing needs a Z test, so no depth buffer is allocated at all. The DB register
+layout follows ps5-opengl's `append_depth_target_state()`.
+
+`RenderToClipMask` mirrors RmlUi's own GL3 backend - stencil to write mode with
+`CB_TARGET_MASK = 0` so the mask cannot touch colour, draw the geometry through
+the normal path, then switch to testing against it.
+
+**One deliberate divergence.** RmlUi's reference clears the stencil buffer before
+every `Set`. Here that would be a multi-megabyte fill per mask, many times a
+frame. Instead the buffer is zeroed once per frame with a CP-synced DMA fill and
+each `Set` claims the next unused value (1, 2, 3...), with the test comparing
+against it; an untouched texel is always 0 and so can never collide with a live
+mask. `Intersect` still increments, so only texels already carrying the previous
+value reach `ref + 1`. `SetInverse` stamps the same way but tests NOTEQUAL.
+
+This is the one piece with no reference implementation to copy the state machine
+from - the registers come from ps5-opengl, the mask-value scheme does not. If
+corners come back square the DB binding did not take (`agc stencil base=...
+s_info=0x20000181` in the log says whether it did); if clipping is inverted or
+content vanishes entirely, the compare function or the `ref` bookkeeping is wrong.
+
 ## Not done
 
-- **The four video pipelines** (`video_yuv_nv12`, `_p010_hdr`, `_p010_hlg`,
-  `_planar`) are not converted to `.pipe`; they sit behind
-  `EVO_AGC_HAVE_VIDEO_PIPES`, which is never defined. Video playback in an
-  `--agc` build therefore has no GPU present path.
-- **The CPU coverage rasteriser** is still compiled in and remains the default
-  for non-`--agc` (GL) builds.
+- **The CPU coverage rasteriser** is still compiled in and remains the UI
+  renderer for non-`--agc` (GL) builds, which are still the shipping default. It
+  cannot be deleted until `--agc` is the only build.
+- **Scanout resolution is hardcoded 1920x1080** (`WIDTH`/`HEIGHT` in `main.c`);
+  nothing calls `sceVideoOutGetResolutionStatus`, so VideoOut upscales to the
+  panel's actual mode. Rendering natively needs the RmlUi context sized to match
+  as well, and the RCSS is authored entirely in `px` (1388 uses, zero `dp`), so
+  the layout would shrink unless it moves to density-independent units first.
 - The GPU-side `SetFlip` packet in the DCB is unused; the CPU flip is the proven
   path. Revisiting it would save a CPU round trip per frame.

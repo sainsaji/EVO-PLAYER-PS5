@@ -71,27 +71,45 @@ static uint32_t evo_demo_bgra(int r, int g, int b) {
 
 static std::vector<uint32_t> make_demo_art(int w, int h, int seed) {
     std::vector<uint32_t> px((size_t)w * (size_t)h);
+
+    /*
+     * A deliberately hard-edged test pattern, not a soft wash.
+     *
+     * The point of these stand-ins is to show whether the card's rounded clip
+     * is doing its job. A gradient cannot: it fades to near the card colour at
+     * the edges, so a poster bleeding a pixel or two past the corner looks
+     * identical to one clipped correctly. Saturated bars with a WHITE frame
+     * hard against all four edges make any escape obvious - white outside the
+     * curve is a bleed, full stop.
+     */
+    static const uint8_t bars[8][3] = {
+        {255, 255, 255}, {255, 255,   0}, {  0, 255, 255}, {  0, 255,   0},
+        {255,   0, 255}, {255,   0,   0}, {  0,   0, 255}, { 20,  20,  20},
+    };
+    const int shift = seed % 8;
+
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            float fx = (float)x / (float)w;
-            float fy = (float)y / (float)h;
-            /* A soft diagonal wash plus a vignette — enough structure to see
-             * the cover-crop and the scrims doing their job. */
-            float d = 0.55f * fx + 0.45f * (1.0f - fy);
-            float vig = 1.0f - 0.45f * ((fx - 0.5f) * (fx - 0.5f) +
-                                        (fy - 0.5f) * (fy - 0.5f)) * 4.0f;
-            if (vig < 0.0f) vig = 0.0f;
+            const int bar = ((x * 8) / (w > 0 ? w : 1) + shift) % 8;
+            int r = bars[bar][0], g = bars[bar][1], b = bars[bar][2];
 
-            int base_r = (seed * 53) % 90 + 20;
-            int base_g = (seed * 97) % 70 + 25;
-            int base_b = (seed * 31) % 110 + 60;
+            /* Lower third: a black/white ramp, so the bottom edge - where a
+             * bleed shows up first against the card - is high contrast too. */
+            if (y > (h * 2) / 3) {
+                const int v = (x * 255) / (w > 1 ? w - 1 : 1);
+                r = g = b = v;
+            }
 
-            int r = (int)((base_r + d * 150.0f) * vig);
-            int g = (int)((base_g + d * 120.0f) * vig);
-            int b = (int)((base_b + d * 170.0f) * vig);
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
+            /*
+             * No synthetic border here. An earlier version drew a white 2px
+             * frame as a bleed detector, but a full-bleed poster legitimately
+             * touches the card edge, so that frame rendered as a white rim
+             * just inside the border and read as a clipping fault when the
+             * clip was in fact correct. The saturated bars already run to the
+             * edge, so anything escaping the corner shows up as colour outside
+             * the curve - without inventing an artefact.
+             */
+
             px[(size_t)y * w + x] = evo_demo_bgra(r, g, b);
         }
     }

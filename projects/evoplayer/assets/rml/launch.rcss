@@ -371,13 +371,20 @@ div, span, p {
 
 /* #64: fill the whole card; .tile's overflow:hidden rounds it to the card
  * shape. No inset / radius juggling — the clip does it, and it stays correct
- * when the focus border grows from 1px to 2px. */
+ * when the focus border grows from 1px to 2px.
+ *
+ * Stretched with left/top/right/bottom rather than a fixed 264x166, so the
+ * poster is exactly the padding box at any border width. At the fixed size it
+ * overhung the padding box by the border on the right and bottom and relied on
+ * the clip to cut the overhang away, which put its outermost row on the clip
+ * boundary — a bright-edged poster then read as a rim just inside the border. */
 .tile-art {
     position: absolute;
     left: 0;
     top: 0;
-    width: 264px;
-    height: 166px;
+    right: 0;
+    bottom: 0;
+    border-radius: 20px;
 }
 
 /* Destination tiles carry a large soft icon top-left instead of a poster. */
@@ -427,9 +434,9 @@ div, span, p {
  * failure mode of every poster grid. EVO_TILE_CAPTION_H + 16. */
 .tile-scrim {
     position: absolute;
-    left: 2px;
-    bottom: 2px;
-    width: 260px;
+    left: 0;
+    right: 0;
+    bottom: 0;
     height: 92px;
     decorator: vertical-gradient(#00000000 #000000f5);
 }
@@ -437,8 +444,8 @@ div, span, p {
 .tile-caption {
     position: absolute;
     left: 18px;
+    right: 18px;
     bottom: 16px;
-    width: 228px;
     display: flex;
     flex-direction: column;
 }
@@ -472,18 +479,18 @@ div, span, p {
 .tile-progress-track {
     position: absolute;
     left: 18px;
+    right: 18px;
     bottom: 8px;
-    width: 228px;
-    height: 4px;
-    border-radius: 2px;
+    height: 6px;
+    border-radius: 3px;
     background-color: #2a3b5599;
 }
 
 .tile-progress-fill {
     display: block;
     width: 0%;
-    height: 4px;
-    border-radius: 2px;
+    height: 6px;
+    border-radius: 3px;
     background-color: #ffcd00;
 }
 

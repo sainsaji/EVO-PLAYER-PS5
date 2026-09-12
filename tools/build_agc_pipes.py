@@ -205,7 +205,15 @@ def derive(manifest: dict) -> dict:
         (0x207, 0),
         (0x1C2, graphics[".spi_shader_idx_format"] & 0xF),
         (0x1C3, pack(graphics[".spi_shader_pos_format"], 4)),
-        (0x1B1, bit(graphics[".spi_vs_out_config"].get(".no_pc_export")) << 7),
+        # SPI_VS_OUT_CONFIG. VS_EXPORT_COUNT is bits [1:5] and holds
+        # (parameter exports - 1); leaving it at zero tells the hardware the
+        # vertex stage exports ONE parameter. A pipeline whose PS then reads
+        # more interpolants than that gets a parameter-cache allocation too
+        # small for what the VS writes, and the extra attributes come back as
+        # garbage that varies per triangle - diagonal wedges across every quad.
+        # Two varyings survived the omission; four did not.
+        (0x1B1, ((graphics[".spi_vs_out_config"].get(".vs_export_count", 0) & 0x1F) << 1) |
+                (bit(graphics[".spi_vs_out_config"].get(".no_pc_export")) << 7)),
         (0x2AB, graphics[".vgt_esgs_ring_itemsize"] & 0x7FFF),
         (0x2E4, 0),
         (0x2CE, graphics[".vgt_gs_max_vert_out"] & 0x7FF),
@@ -239,6 +247,27 @@ def derive(manifest: dict) -> dict:
                 (bit(ps["wavefront_size"] == 32) << 15)),
         (0x1C5, pack(list(graphics[".spi_shader_col_format"].values()), 4)),
         (0x1C4, 0),
+    ]
+
+
+    # SPI_PS_INPUT_CNTL_0..N (0x191 + i): where each PS interpolant reads its
+    # parameter from, and whether it is flat-shaded. Without these every input
+    # defaults to offset 0 with interpolation on, so a `flat` varying is
+    # interpolated from the wrong slot - garbage, not just a wrong colour.
+    #
+    # These do NOT go in pixel_cx. The shader-header arena is a fixed 0x148-byte
+    # console ABI whose CX array holds exactly 9 pixel registers; a tenth makes
+    # sceAgc reject the header and the whole renderer fails to initialise. They
+    # are emitted with the pipeline's other bind-time context registers instead.
+    ps_input_cntl = [
+        (cntl.get(".offset", 0) & 0x3F) |
+        ((cntl.get(".default_val", 0) & 3) << 8) |
+        (bit(cntl.get(".flat_shade")) << 10) |
+        (bit(cntl.get(".pt_sprite_tex")) << 17) |
+        (bit(cntl.get(".fp16_interp_mode")) << 19) |
+        ((cntl.get(".attr0_valid", 0) & 1) << 24) |
+        ((cntl.get(".attr1_valid", 0) & 1) << 25)
+        for cntl in graphics.get(".spi_ps_input_cntl", [])
     ]
 
     def rsrc1(stage: dict, wave32: bool, component: int, gs_stage: bool) -> int:
@@ -286,10 +315,11 @@ def derive(manifest: dict) -> dict:
         # to the last slot it owns. BaseVertex/BaseInstance sit above that and
         # are filled by the draw packet (see draw_modifier), never by us.
         "vs_write_count": max(slot_of(gs_map, 0),
-                              slot_of(gs_map, PAL_VERTEX_BUFFER_TABLE)) + 1,
+                              slot_of(gs_map, PAL_VERTEX_BUFFER_TABLE), 0) + 1,
         "ps_write_count": slot_of(ps_map, 0) + 1,
         "pre_raster_cx": pre_cx,
         "pixel_cx": pixel_cx,
+        "ps_input_cntl": ps_input_cntl,
     }
 
 
@@ -352,6 +382,8 @@ static const uint8_t {name}_ps_isa[{len(ps)}] __attribute__((aligned(256))) = {{
 
 {regs(f"{name}_pixel_cx", values["pixel_cx"])}
 
+{regs(f"{name}_ps_input_cntl", [(0x191 + i, v) for i, v in enumerate(values["ps_input_cntl"])])}
+
 static const evo_agc_shader_metadata_t {name}_metadata = {{
     .gs_isa = {name}_gs_isa,
     .gs_isa_bytes = {len(gs)}u,
@@ -369,6 +401,8 @@ static const evo_agc_shader_metadata_t {name}_metadata = {{
     .pre_raster_cx_count = {len(values['pre_raster_cx'])}u,
     .pixel_cx = {name}_pixel_cx,
     .pixel_cx_count = {len(values['pixel_cx'])}u,
+    .ps_input_cntl = {name}_ps_input_cntl,
+    .ps_input_cntl_count = {len(values['ps_input_cntl'])}u,
     .vs_user_sgpr_count = {values['vs_write_count']}u,
     .ps_user_sgpr_count = {values['ps_write_count']}u,
     .vs_const_table_dword = {values['vs_const_table_dword']},
@@ -422,12 +456,15 @@ def build_pipe(pipe: Path, out_dir: Path, amdllpc: str, readelf: str,
     (SHADER_DIR / f"{name}_pipe.h").write_text(
         emit_header(name, blobs["gs"], blobs["ps"], values)
     )
-    if min(values["vs_const_table_dword"], values["vs_vertex_table_dword"],
-           values["ps_texture_table_dword"]) < 0:
+    # The vertex-buffer table is optional: the video pipelines build their quad
+    # from gl_VertexIndex and declare no IndirectUserDataVaPtr, so -1 there is
+    # correct rather than a missing binding. The constant-buffer and texture
+    # tables are always required - a -1 for either means the shader would read
+    # that resource through an unset pointer and silently draw nothing.
+    if min(values["vs_const_table_dword"], values["ps_texture_table_dword"]) < 0:
         raise SystemExit(
-            f"[{name}] a [ResourceMapping] node has no user SGPR slot: "
+            f"[{name}] a required [ResourceMapping] node has no user SGPR slot: "
             f"const={values['vs_const_table_dword']} "
-            f"vertex={values['vs_vertex_table_dword']} "
             f"texture={values['ps_texture_table_dword']}. The shader would read "
             f"that resource from an unset pointer."
         )

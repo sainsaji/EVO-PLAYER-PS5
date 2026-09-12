@@ -1,4 +1,6 @@
 #include "evo_rmlui_render_agc.h"
+
+#include <cmath>
 #include "evo_rmlui_bundle.h"
 #include "evo_direct_mem.h"
 #include "evo_boot_log.h"
@@ -76,6 +78,54 @@ Rml::CompiledGeometryHandle EvoRenderInterfaceAGC::CompileGeometry(
         return 0;
     }
     memcpy(geom->vertex_data, vertices.data(), vertices.size() * sizeof(Rml::Vertex));
+
+    /* Bounding box, for the clip-mask approximation in RenderToClipMask(). */
+    geom->bb_min_x = geom->bb_max_x = vertices[0].position.x;
+    geom->bb_min_y = geom->bb_max_y = vertices[0].position.y;
+    for (size_t i = 1; i < vertices.size(); ++i) {
+        const Rml::Vector2f p = vertices[i].position;
+        if (p.x < geom->bb_min_x) geom->bb_min_x = p.x;
+        if (p.x > geom->bb_max_x) geom->bb_max_x = p.x;
+        if (p.y < geom->bb_min_y) geom->bb_min_y = p.y;
+        if (p.y > geom->bb_max_y) geom->bb_max_y = p.y;
+    }
+
+    /*
+     * Recover the corner radii from the tessellation. RmlUi builds a rounded
+     * box whose straight top edge runs from (min_x + r_tl) to (max_x - r_tr),
+     * so the arc meets the edge EXACTLY on y == min_y and the extreme x there
+     * is one radius in. A square box has a vertex at the corner and yields 0.
+     *
+     * The match on y has to be exact. Allowing half a pixel of slop picks up
+     * the next vertex around the arc instead, and near a circle's tangent
+     * point x moves as sqrt(2*r*dy) - so 0.5px of slop cost ~4px of radius
+     * (a 19px corner measured as 16), leaving every corner under-rounded and
+     * content bleeding out past it.
+     */
+    {
+        const float eps = 0.01f;
+        float top_min_x = geom->bb_max_x, top_max_x = geom->bb_min_x;
+        float bot_min_x = geom->bb_max_x, bot_max_x = geom->bb_min_x;
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            const Rml::Vector2f p = vertices[i].position;
+            if (p.y - geom->bb_min_y < eps) {
+                if (p.x < top_min_x) top_min_x = p.x;
+                if (p.x > top_max_x) top_max_x = p.x;
+            }
+            if (geom->bb_max_y - p.y < eps) {
+                if (p.x < bot_min_x) bot_min_x = p.x;
+                if (p.x > bot_max_x) bot_max_x = p.x;
+            }
+        }
+        const float r[4] = {
+            top_min_x - geom->bb_min_x,   /* top-left     */
+            geom->bb_max_x - top_max_x,   /* top-right    */
+            geom->bb_max_x - bot_max_x,   /* bottom-right */
+            bot_min_x - geom->bb_min_x,   /* bottom-left  */
+        };
+        for (int i = 0; i < 4; ++i)
+            geom->bb_radius[i] = (r[i] > 0.0f) ? r[i] : 0.0f;
+    }
     /* This vertex buffer is read by the GPU (via the V# descriptor built
      * below) on every draw from now on, but the CPU only ever writes it once,
      * right here - flush it once now rather than every frame it's used. */
@@ -141,14 +191,14 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
 
     /* 1. Allocate ScreenConstants slice (80 bytes) in the transient ring */
     evo_agc_transient_slice_t const_slice;
-    if (evo_agc_transient_ring_alloc(ring, slot, 80, 16, &const_slice) != EVO_AGC_TRANSIENT_OK) {
+    if (evo_agc_transient_ring_alloc(ring, slot, 128, 16, &const_slice) != EVO_AGC_TRANSIENT_OK) {
         evo_agc_runtime_note_drop(0);
         return;
     }
 
     /* Orthographic projection matrix: maps (0..width, 0..height) to (-1..1, 1..-1) */
     float *constants = reinterpret_cast<float *>(const_slice.cpu);
-    memset(constants, 0, 80);
+    memset(constants, 0, 128);
 
     /* mat4 projection (column-major) */
     constants[0]  =  2.0f / (float)m_width;
@@ -164,6 +214,21 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     constants[18] = 0.0f;
     constants[19] = 0.0f;
 
+    /* vec4 clip_rect + vec4 clip_params - the rounded-box clip the fragment
+     * shader applies. Disabled leaves clip_params.y at zero from the memset. */
+    if (m_clip_mask_enabled && m_clip_mask_valid) {
+        constants[20] = m_clip_rect[0];
+        constants[21] = m_clip_rect[1];
+        constants[22] = m_clip_rect[2];
+        constants[23] = m_clip_rect[3];
+        constants[24] = 0.0f;
+        constants[25] = 1.0f;
+        constants[28] = m_clip_radius[0];
+        constants[29] = m_clip_radius[1];
+        constants[30] = m_clip_radius[2];
+        constants[31] = m_clip_radius[3];
+    }
+
     /* 2. Build constant V# descriptor in transient ring (16 bytes) */
     evo_agc_transient_slice_t desc_slice;
     if (evo_agc_transient_ring_alloc(ring, slot, 16, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
@@ -172,7 +237,7 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     }
 
     evo_agc_build_constant_vsharp(reinterpret_cast<uint32_t *>(desc_slice.cpu),
-                                  const_slice.gpu_addr, 80);
+                                  const_slice.gpu_addr, 128);
 
     /* 2b. Stage V# descriptor in transient ring (16 bytes) */
     evo_agc_transient_slice_t vsharp_slice;
@@ -230,28 +295,144 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
  * Scissoring & Transforms
  * ------------------------------------------------------------------------- */
 
+/*
+ * The hardware has one scissor rectangle but two things want to clip: RmlUi's
+ * own scissor region, and the bounding-box stand-in for a clip mask. Both go
+ * through here so neither can clobber the other - setting a scissor while a
+ * mask is up used to drop the mask, which is exactly when a scrolling rounded
+ * container needs both.
+ */
+void EvoRenderInterfaceAGC::ApplyScissorState()
+{
+    int left = 0, top = 0, right = m_width, bottom = m_height;
+
+    if (m_scissor_enabled) {
+        left   = m_scissor_region.Left();
+        top    = m_scissor_region.Top();
+        right  = m_scissor_region.Right();
+        bottom = m_scissor_region.Bottom();
+    }
+    if (m_clip_mask_enabled && m_clip_mask_valid) {
+        if (m_clip_mask_box.Left()   > left)   left   = m_clip_mask_box.Left();
+        if (m_clip_mask_box.Top()    > top)    top    = m_clip_mask_box.Top();
+        if (m_clip_mask_box.Right()  < right)  right  = m_clip_mask_box.Right();
+        if (m_clip_mask_box.Bottom() < bottom) bottom = m_clip_mask_box.Bottom();
+    }
+
+    evo_agc_runtime_set_scissor(left, top, right - left, bottom - top);
+}
+
 void EvoRenderInterfaceAGC::EnableScissorRegion(bool enable)
 {
     m_scissor_enabled = enable;
-    if (enable) {
-        SetScissorRegion(m_scissor_region);
-    } else {
-        evo_agc_runtime_set_scissor(0, 0, m_width, m_height);
-    }
+    ApplyScissorState();
 }
 
 void EvoRenderInterfaceAGC::SetScissorRegion(Rml::Rectanglei region)
 {
     m_scissor_region = region;
-    if (m_scissor_enabled) {
-        evo_agc_runtime_set_scissor(region.Left(), region.Top(),
-                                    region.Width(), region.Height());
-    }
+    ApplyScissorState();
 }
 
 void EvoRenderInterfaceAGC::SetTransform(const Rml::Matrix4f *transform)
 {
     (void)transform;
+}
+
+void EvoRenderInterfaceAGC::EnableClipMask(bool enable)
+{
+    m_clip_mask_enabled = enable;
+    if (!enable)
+        m_clip_mask_valid = false;
+    ApplyScissorState();
+    evo_agc_runtime_set_clip_mask(enable ? 1 : 0);
+}
+
+void EvoRenderInterfaceAGC::RenderToClipMask(Rml::ClipMaskOperation operation,
+                                             Rml::CompiledGeometryHandle geometry,
+                                             Rml::Vector2f translation)
+{
+    const auto *geom = reinterpret_cast<const EvoAgcCompiledGeometry *>(geometry);
+    if (!geom)
+        return;
+
+    /*
+     * Bounding-box path (see m_clip_mask_box). Round outwards, so the box is
+     * never smaller than the shape it stands in for - rounding inwards would
+     * shave a pixel off every clipped edge in the UI.
+     */
+    Rml::Rectanglei box = Rml::Rectanglei::FromCorners(
+        Rml::Vector2i((int)std::floor(geom->bb_min_x + translation.x),
+                      (int)std::floor(geom->bb_min_y + translation.y)),
+        Rml::Vector2i((int)std::ceil(geom->bb_max_x + translation.x),
+                      (int)std::ceil(geom->bb_max_y + translation.y)));
+
+    const float fx0 = geom->bb_min_x + translation.x;
+    const float fy0 = geom->bb_min_y + translation.y;
+    const float fx1 = geom->bb_max_x + translation.x;
+    const float fy1 = geom->bb_max_y + translation.y;
+
+    switch (operation) {
+    case Rml::ClipMaskOperation::Set:
+        m_clip_mask_box = box;
+        m_clip_mask_valid = true;
+        m_clip_rect[0] = fx0; m_clip_rect[1] = fy0;
+        m_clip_rect[2] = fx1; m_clip_rect[3] = fy1;
+        for (int i = 0; i < 4; ++i) m_clip_radius[i] = geom->bb_radius[i];
+        break;
+    case Rml::ClipMaskOperation::Intersect:
+        if (m_clip_mask_valid) {
+            m_clip_mask_box = m_clip_mask_box.IntersectIfValid(box);
+            /* Two rounded rects intersected is not a rounded rect. Keep the
+             * tighter extent and the larger radius: that is the intersection
+             * wherever the two boxes share an edge, which is the nesting RmlUi
+             * actually produces (a rounded card inside a rounded panel). */
+            if (fx0 > m_clip_rect[0]) m_clip_rect[0] = fx0;
+            if (fy0 > m_clip_rect[1]) m_clip_rect[1] = fy0;
+            if (fx1 < m_clip_rect[2]) m_clip_rect[2] = fx1;
+            if (fy1 < m_clip_rect[3]) m_clip_rect[3] = fy1;
+            for (int i = 0; i < 4; ++i)
+                if (geom->bb_radius[i] > m_clip_radius[i])
+                    m_clip_radius[i] = geom->bb_radius[i];
+        } else {
+            m_clip_mask_box = box;
+            m_clip_mask_valid = true;
+            m_clip_rect[0] = fx0; m_clip_rect[1] = fy0;
+            m_clip_rect[2] = fx1; m_clip_rect[3] = fy1;
+            for (int i = 0; i < 4; ++i) m_clip_radius[i] = geom->bb_radius[i];
+        }
+        break;
+    case Rml::ClipMaskOperation::SetInverse:
+        /* "Everything outside this shape" is not a rectangle, so a scissor
+         * cannot express it. Clipping to the box would hide exactly the wrong
+         * half; clip to nothing and let the content draw unclipped. */
+        m_clip_mask_valid = false;
+        break;
+    }
+    ApplyScissorState();
+
+    /*
+     * The exact shape, when the stencil path is compiled in. Same shape as
+     * RmlUi's own GL3 backend: switch the stencil to write mode with colour
+     * writes off, draw the mask geometry through the normal path, then switch
+     * back to testing against it.
+     *
+     * With the stencil compiled out, this geometry must NOT be drawn - it
+     * describes a clipping shape, not something visible, and rendering it
+     * normally covers the UI in opaque quads.
+     */
+    if (!evo_agc_runtime_clip_mask_supported())
+        return;
+
+    int op = 2; /* Intersect */
+    if (operation == Rml::ClipMaskOperation::Set)
+        op = 0;
+    else if (operation == Rml::ClipMaskOperation::SetInverse)
+        op = 1;
+
+    evo_agc_runtime_clip_mask_begin(op);
+    RenderGeometry(geometry, translation, 0);
+    evo_agc_runtime_clip_mask_end();
 }
 
 /* -------------------------------------------------------------------------
