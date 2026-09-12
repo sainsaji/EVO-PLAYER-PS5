@@ -20,13 +20,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/frame.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/frame.h>
 
 #define EVO_AUDIO_MAX_CH    8
 #define AUDIO_QUEUE_BLOCKS  64

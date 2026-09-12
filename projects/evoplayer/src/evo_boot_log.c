@@ -38,6 +38,9 @@ void evo_boot_log(const char *fmt, ...)
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
 
+    printf("EVO boot: %s\n", line);
+    fflush(stdout);
+
 #ifdef EVO_BOOT_TRACE_POPUP
     /* #51: on-screen popup — opt-in (--breadcrumbs). Off by default; the
      * EVO_LOG_PATH file is the durable channel and is always written. */

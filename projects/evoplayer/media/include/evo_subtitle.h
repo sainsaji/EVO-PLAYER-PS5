@@ -16,12 +16,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 
 /* Below this a subtitle track is signage or a watermark, not dialogue.
  * Used by the embedded-track scorer and the media-info track picker. */

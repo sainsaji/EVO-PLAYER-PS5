@@ -20,6 +20,7 @@ EXTRA_CFLAGS ?=
 CXXFLAGS := -Wall -g -O2 -std=c++17 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -DEVO_TARGET_PS5=1 \
+    -Icore/include \
     -Iinclude \
     -Ipp/include \
     -Iui/include \
@@ -34,6 +35,7 @@ CXXFLAGS := -Wall -g -O2 -std=c++17 $(EXTRA_CFLAGS) \
 CFLAGS := -Wall -g -O2 $(EXTRA_CFLAGS) \
     -DEVO_PLAYER_VERSION=\"$(EVO_VERSION)\" \
     -DEVO_TARGET_PS5=1 \
+    -Icore/include \
     -Iinclude \
     -Ipp/include \
     -Iui/include \
@@ -195,8 +197,40 @@ ifeq ($(AGC_DEVICE),1)
     CXXFLAGS += -DEVO_AGC_DEVICE=1 -DEVO_AGC_HAVE_VIDEO_PIPES=1 -Ishaders/agc
 endif
 
-C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
+C_SRCS := $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
+
+CORE_SRCS := \
+    main.cpp \
+    core/src/Application.cpp \
+    core/src/Bridge.cpp \
+    core/src/services/SettingsService.cpp \
+    core/src/services/MediaMetadataService.cpp \
+    core/src/services/CoverArtService.cpp \
+    core/src/services/SoundEffectEngine.cpp \
+    core/src/services/SurroundTestService.cpp \
+    core/src/services/FileSystemBrowser.cpp \
+    core/src/services/PlaybackController.cpp \
+    core/src/screens/ScreenManager.cpp \
+    core/src/screens/LaunchScreen.cpp \
+    core/src/screens/BrowserScreen.cpp \
+    core/src/screens/PlayerScreen.cpp \
+    core/src/screens/SettingsScreen.cpp \
+    core/src/screens/SubtitlePickerScreen.cpp \
+    core/src/screens/TextReaderScreen.cpp \
+    core/src/screens/MediaInfoScreen.cpp \
+    core/src/screens/SurroundTestScreen.cpp \
+    core/src/screens/DeveloperToolsScreen.cpp \
+    core/src/screens/EmbyScreen.cpp \
+    core/src/screens/RecentFilesScreen.cpp \
+    core/src/screens/FavoritesScreen.cpp \
+    core/src/screens/AboutSupportScreen.cpp \
+    core/src/screens/ChangelogScreen.cpp \
+    core/src/screens/ImageViewerScreen.cpp \
+    core/src/screens/ModalDialogScreen.cpp \
+    core/src/screens/StatefulScreen.cpp
+
+CORE_OBJS := $(CORE_SRCS:.cpp=.o)
 
 RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_render.cpp \
@@ -227,7 +261,7 @@ RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 # real hardware cycles). package-app.sh's app-cflags.stamp only force-cleans on
 # a *flag* change, not a header edit.
 DEPFLAGS := -MMD -MP
-ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d)
+ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
@@ -248,17 +282,17 @@ all: $(ELF)
 #   print-objects  emit the object paths (relative to this dir), space-separated
 # -----------------------------------------------------------------------------
 .PHONY: objects print-objects
-objects: $(C_OBJS) $(RMLUI_OBJS)
+objects: $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
 
 print-objects:
-	@echo $(C_OBJS) $(RMLUI_OBJS)
+	@echo $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
 
-$(ELF): $(C_OBJS) $(RMLUI_OBJS)
+$(ELF): $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
 	$(CXX) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@
 	@ls -la $@
 
 clean:
-	rm -f $(ELF) $(C_OBJS) $(RMLUI_OBJS) $(ALL_DEPS)
+	rm -f $(ELF) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(ALL_DEPS)
 	rm -rf artifacts/4k_stages

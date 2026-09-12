@@ -14,14 +14,14 @@
 #ifndef EVO_AUDIO_RESAMPLE_H
 #define EVO_AUDIO_RESAMPLE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /* AudioOut always runs at 48 kHz; the resampler output rate is fixed to it. */
 #define PROSPERO_AUDIO_OUTPUT_RATE 48000

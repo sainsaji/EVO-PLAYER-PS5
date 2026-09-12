@@ -20,6 +20,10 @@
 
 #include "evo_data_path.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define RECENT_FILE_DB   evo_data_path("evo_recent.txt")
 #define MAX_RECENT_FILES 25
 
@@ -42,5 +46,9 @@ void   recent_update_current_position(void);
 void   recent_save(void);
 void   recent_load(void);
 double recent_lookup(const char *path);   /* returns last_pos or 0.0 */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* EVO_RECENT_H */

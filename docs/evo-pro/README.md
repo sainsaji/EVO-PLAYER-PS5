@@ -28,6 +28,7 @@ console is available, and what each result means. Point an AI at it to resume.
 | [agc-implementation.md](agc-implementation.md) | Line-by-line reverse-engineering of the ProsperoLight `sceAgc` path — DCB layout, CX registers, shader-blob format. | 📖 reference (the code it describes is deleted) |
 | [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md) | Study of `SvenGDK/SharpProspero`'s `sceAgc` GPU path — full `libSceAgc` ABI, DCB layout, render-target register model, swizzle library. | 📖 reference |
 | [opengl-render-overhaul.md](opengl-render-overhaul.md) | **The one OpenGL funnel for every pixel** — `ps5-opengl` (Mesa + PS5 Gallium + patched PSSL) is the only GPU talker; RmlUi-on-GL + a GL video pass. Full pixel-path inventory + `GL-1`…`GL-6` phasing (#77–#82). | ✅ **GL-1…GL-6 DONE (2026-09-10)** |
+| [core-architecture-and-legacy-migration.md](core-architecture-and-legacy-migration.md) | **Core Architecture & Legacy Migration Guide** — modern `core/` C++ architecture, screen and service taxonomy, how to use `main.c.legacy` as golden truth, and case studies (hover crash, browser scrolling, text reader, image viewer). | 📖 reference & architecture |
 
 Prerequisite (not EVO-Pro-specific, lives in [../modularisation-plan.md](../modularisation-plan.md)):
 **Track A** — the decoder seam (`evo_vdec.h`, `evo_vdec_ffmpeg.c`). Mostly

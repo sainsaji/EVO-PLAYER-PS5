@@ -15,8 +15,8 @@ Two rules that save time:
 
 ## The short version
 
-**Two build flavours, and they are not interchangeable.** `--agc` renders the UI
-on bare-metal `sceAgc`; `--gl` (the default) renders it with a CPU rasteriser
+**Two build flavours, and they are not interchangeable.** `--agc` (the default)
+renders the UI on bare-metal `sceAgc`; `--gl` renders it with a CPU rasteriser
 blitted through ps5-opengl. Changing a shader means rebuilding it in a *second*
 Docker image. Read [Shader pipelines](#shader-pipelines---agc-builds) before
 touching anything under `projects/evoplayer/shaders/agc/`.
@@ -208,14 +208,14 @@ Passed through `EXTRA_CFLAGS`, empty in shipping builds:
 | `-DEVO_START_SCREEN=n` | Boot straight into a screen — `0` launch, `1` browser, `10` settings, `11` profile |
 | `-DEVO_PAD_DEBUG=1` | Print the raw pad mask on every press |
 
-### `--agc` vs `--gl`
-
+#### `--agc` vs `--gl`
+ 
 ```bash
-./scripts/package-app.sh --ffpfsc --agc    # UI on bare-metal sceAgc
-./scripts/package-app.sh --ffpfsc          # default: --gl
+./scripts/package-app.sh --ffpfsc          # default: --agc (UI on bare-metal sceAgc)
+./scripts/package-app.sh --ffpfsc --gl     # Mesa GL context fallback
 ```
 
-| | `--agc` | `--gl` (default) |
+| | `--agc` (default) | `--gl` |
 |---|---|---|
 | UI rendering | `EvoRenderInterfaceAGC`, hand-built `sceAgc` DCBs | CPU coverage rasteriser + one GL blit |
 | Video present | AGC video pipelines | ps5-opengl |
@@ -223,8 +223,9 @@ Passed through `EXTRA_CFLAGS`, empty in shipping builds:
 | Needs `scripts/build-ps5-opengl.sh` | no | **yes**, once |
 
 Mutually exclusive - `package-app.sh` rejects both together. Deploy is identical
-either way; only the `.ffpfsc` contents differ. **`--gl` is still the shipping
-default**; `--agc` is faster and is where the work is going.
+either way; only the `.ffpfsc` contents differ. **`--agc` is the shipping
+default** so the UI renders smoothly on hardware; `--gl` remains available for
+fallback.
 
 ### Shader pipelines - `--agc` builds
 

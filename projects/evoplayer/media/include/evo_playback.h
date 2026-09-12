@@ -18,11 +18,11 @@
 #include <pthread.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/avcodec.h>
 
 /*
  * Slots in the swscale-fallback present ring (convert_frame_via_sws). #6:

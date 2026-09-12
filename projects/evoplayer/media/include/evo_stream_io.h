@@ -8,14 +8,15 @@
 #ifndef EVO_STREAM_IO_H
 #define EVO_STREAM_IO_H
 
-#include <libavformat/avformat.h>
-#include <libavformat/avio.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavformat/avformat.h>
+#include <libavformat/avio.h>
 
 typedef struct {
     size_t ring_buffer_size;  /* default 8 MiB (8 * 1024 * 1024) */

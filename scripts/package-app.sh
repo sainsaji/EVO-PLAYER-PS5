@@ -21,19 +21,14 @@
 #                                             --breadcrumbs. Runs on the console
 #                                             only when /mnt/usb0/evo_gl_smoke
 #                                             exists; see docs/evo-pro/gl1-spike.md
+#   ./scripts/package-app.sh --agc            Bare-metal sceAgc GPU render interface (DEFAULT
+#                                             for player builds). RmlUi renders directly via
+#                                             hardware command buffers with vsync pacing.
 #   ./scripts/package-app.sh --gl             #79 GL-3 / #80 GL-4: the boot runs
 #                                             on a persistent ps5-opengl GL/EGL
-#                                             context. ALWAYS ON for the player
-#                                             build - pass it only to be
-#                                             explicit. Needs
-#                                             ./scripts/build-ps5-opengl.sh
-#                                             first. Mutually exclusive with
-#                                             --gl-smoke. See docs/evo-pro/
-#                                             opengl-render-overhaul.md
-#                                             (--no-gl was retired by GL-4: the
-#                                             CPU converters + tiled VideoOut
-#                                             present it selected no longer
-#                                             exist.)
+#                                             context. Needs ./scripts/build-ps5-opengl.sh
+#                                             first. Mutually exclusive with --agc. See
+#                                             docs/evo-pro/opengl-render-overhaul.md.
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -87,15 +82,19 @@ while (( $# )); do
     shift
 done
 # Present path resolution:
-#   --agc       bare-metal AGC; links libSceAgc without ps5-opengl.
-#   --gl        persistent device GL context via ps5-opengl (default when not --agc).
+#   --agc       bare-metal AGC; links libSceAgc without ps5-opengl (default for the player build).
+#   --gl        persistent device GL context via ps5-opengl.
 #   --gl-smoke  is its own boot cutover and mutually exclusive with --gl / --agc.
 #   --probe     is the sandbox probe, not the player; it never presents.
 if (( GL_DEVICE == -1 )); then
-    if (( AGC_DEVICE || GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then
+    if (( GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then
+        GL_DEVICE=0
+    elif (( AGC_DEVICE )); then
         GL_DEVICE=0
     else
-        GL_DEVICE=1
+        # Default to --agc for player build so bare-metal AGC renders UI smoothly
+        AGC_DEVICE=1
+        GL_DEVICE=0
     fi
 fi
 (( AGC_DEVICE && GL_DEVICE )) && die "--agc and --gl are mutually exclusive"
