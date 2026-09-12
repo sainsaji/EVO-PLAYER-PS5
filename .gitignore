@@ -212,3 +212,8 @@ output/shaderrip/
 # ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
 /klog.txt
 projects/evoplayer/include/evo_build_id.h
+
+# Reference clone, studied but never vendored: its .pipe/LLPC shader chain is
+# the model for tools/build_agc_pipes.py and evo_agc_shader_header.c.
+# See docs/evo-pro/agc-bare-metal-ui.md.
+third_party/ps5-xash3d-halflife/

@@ -445,7 +445,7 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     if (s->cpu_gpu_size) mem.cpu_gpu_size = s->cpu_gpu_size;
 
     STAGE("alloc(gpu)");
-    if ((rc = alloc_direct(s->gpu_size, 0x32, dm, &s->gpu_start, &s->gpu_mem)) != 0) return rc;
+    if ((rc = alloc_direct(s->gpu_size, 0x33, dm, &s->gpu_start, &s->gpu_mem)) != 0) return rc;
     mem.gpu = s->gpu_mem;
     if (s->cpu_gpu_size) {
         STAGE("alloc(cpu_gpu)");
@@ -454,10 +454,10 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
         mem.cpu_gpu = s->cpu_gpu_mem;
     }
     STAGE("alloc(input)");
-    if ((rc = alloc_direct(s->input_pool, 0x32, dm,
+    if ((rc = alloc_direct(s->input_pool, 0x33, dm,
                            &s->input_start, &s->input_mem)) != 0) return rc;
     STAGE("alloc(frame)");
-    if ((rc = alloc_direct(s->frame_pool, 0x32, dm,
+    if ((rc = alloc_direct(s->frame_pool, 0x33, dm,
                            &s->frame_start, &s->frame_mem)) != 0) return rc;
 
     STAGE("CreateDecoder");

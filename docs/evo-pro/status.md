@@ -1,31 +1,28 @@
 # EVO Pro — status & next actions
 
-> ## Current front (2026-09-10): the OpenGL render overhaul — GL-1…GL-6 DONE
+> ## Current front (2026-09-12): the UI renders on bare-metal `sceAgc`
 >
-> Everything renders through **one** path: a persistent ps5-opengl GL/EGL
-> context, brought up in the pre-unjail boot slot
-> (`ui_rml/src/evo_gl_context_device.cpp`). GL-1 … GL-6 are done on
-> `refactor/main-c-media-modules`. See
-> [gl4-video-path-plan.md](gl4-video-path-plan.md) and
-> [opengl-render-overhaul.md](opengl-render-overhaul.md) for the phase table.
+> **[agc-bare-metal-ui.md](agc-bare-metal-ui.md) — read this first.**
+> Hardware-verified 2026-09-12: RmlUi draws through hand-built `sceAgc` command
+> buffers, vsync-paced, no Mesa and no CPU rasteriser in the path. Shaders are
+> compiled by **amdllpc** from `.pipe` sources (`tools/build_agc_pipes.py`,
+> `Dockerfile.amdllpc`) with every AGC register derived from PAL metadata.
 >
-> - **GL-4 (#80)** closed 2026-09-10, hw-verified (`c49b317`) — one GL present
->   path, CPU converters / `tile_copy` / backend enum / 5-way dispatch / 4K VO
->   reconfigure machinery / `#32` scrub-overlay state machine / `--no-gl` all
->   deleted; held-frame seek.
-> - **GL-5 (#81)** `f367edd` — subtitles / keyboard / image viewer / HUD /
->   P010+tone-map onto GL; the bitmap fonts deleted (one font system left).
->   Closes `#34`, `#35`, `#63`.
-> - **GL-6 (#82)** — **deleted** `pp_agc.c`, `pp_agc_osd.c`, `pp_videoout.c`,
->   `evo_rmlui_render_agc.cpp`, `pp_platform.h`, the vendored shader blobs
->   (`pp/blobs/`, `pp/shaders/`) and the `#28` RmlUi→AGC geometry sink;
->   rewrote the GPU docs; closed `#67` / `#69` / `#70` / `#5`. `main.c` is
->   ~11,000 lines (was ~12,900 on 2026-09-03).
+> This reverses the GL-6 position recorded below. GL-6 (#82) deleted
+> `evo_rmlui_render_agc.cpp` on the grounds that ps5-opengl owned `sceAgc`; the
+> UI was in fact being rasterised on the CPU and blitted, because RmlUi-native
+> GL3 runs at ~1.2 s/frame on that driver. Bare-metal AGC is what made the UI
+> fast, so the `#27`/`#28` sceAgc material below is **live reference again**,
+> not history.
 >
-> **The `#27` / `#28` sceAgc work described below is history** — `ps5-opengl`
-> (Mesa + PS5 Gallium + patched PSSL compiler) owns `sceAgc` + `sceVideoOut`.
-> Read what follows as the record of how the GPU present path was
-> reverse-engineered, not as a description of what runs.
+> **On the GPU:** the RmlUi UI (bare-metal AGC) and video *decode*
+> (`sceVideodec2`).
+> **Not on the GPU:** video *present* in `--agc` builds — the four video
+> pipelines are not yet converted to `.pipe` and are gated off behind
+> `EVO_AGC_HAVE_VIDEO_PIPES`. Video still presents through GL in `--gl` builds.
+>
+> The GL-1…GL-6 record below remains accurate for the GL path, which is still
+> the default build and still owns video.
 
 
 > **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.

@@ -35,6 +35,12 @@ int evo_jailbreak_self(void);
 /* Called on media-browser entry - two harder attempts. Idempotent; returns
  * early if already promoted. */
 int evo_jailbreak_ensure(void);
+/* Called every render-loop iteration - cheap, throttled, and self-disabling
+ * once promoted. Re-drops the request until the daemon finally lands it, so a
+ * lost boot race is recoverable without the media browser (which a closed
+ * sandbox makes unreachable). Returns 1 exactly once: on the call that sees the
+ * sandbox open, for the caller to rebind persistence and force a repaint. */
+int evo_jailbreak_poll(void);
 /* 1 once the per-title sandbox has been lifted (probes /data). evo_data_path()
  * uses this to pick the durable data root at runtime - see issue #46. */
 int evo_jailbreak_is_open(void);
@@ -42,6 +48,7 @@ int evo_jailbreak_is_open(void);
 #define evo_jailbreak_self()    (1)
 #define evo_jailbreak_ensure()  (1)
 #define evo_jailbreak_is_open() (1)
+#define evo_jailbreak_poll()    (0)   /* payload/host: never jailed, never flips */
 #endif
 
 #ifdef __cplusplus

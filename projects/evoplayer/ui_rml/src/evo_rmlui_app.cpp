@@ -14,6 +14,11 @@
  * pulls in the glad GL loader, which must never reach any PS5 build (neither
  * the .ffpfsc app module nor the build-evoplayer.sh compile check). Only the
  * host preview harness defines EVO_RML_GL_HOST. The device GL path is GL-3. */
+#if defined(EVO_AGC_DEVICE)
+#include "evo_rmlui_render_agc.h"
+#include "evo_agc_runtime.h"
+#include "evo_boot_log.h"
+#endif
 #if defined(EVO_RML_GL_HOST) || defined(EVO_GL_DEVICE)
 #include "evo_rmlui_render_gl.h"
 #include "evo_gl_context.h"
@@ -29,9 +34,9 @@
 
 /* FrameBegin/FrameEnd bracket every Context::Render(): no-ops on the CPU
  * rasteriser, bind-FBO / read-back on the GL interface (GL-2, #78). */
-/* GL-3 (#79): mark that a real Context::Render() reached the GL default
- * framebuffer this frame, so the device loop knows to eglSwapBuffers. */
-#if defined(EVO_GL_DEVICE)
+/* GL-3 (#79) / AGC: mark that a real Context::Render() reached the default
+ * framebuffer this frame, so the device loop knows to present. */
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
 #define EVO_GL_MARK_DREW() (m_gl_drew = true)
 #else
 #define EVO_GL_MARK_DREW() ((void)0)
@@ -125,15 +130,15 @@ void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
 void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
                                    int width, int height)
 {
-#if defined(EVO_GL_DEVICE)
-    /* GL-3 (#79) B2. Both modes: only touch anything on an "active" frame - the
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
+    /* GL-3 (#79) / AGC. Both modes: only touch anything on an "active" frame - the
      * device loop decided this iteration is a redraw (GlNeedsFrame); otherwise
      * the front buffer holds. */
     if (!m_gl_active)
         return;
     if (!m_gl_blit_mode) {
-        /* Mode B: RmlUi renders itself straight to the GL default framebuffer;
-         * main.c eglSwapBuffers. No m_surface. */
+        /* Mode B / AGC: RmlUi renders itself straight to the hardware default framebuffer;
+         * main.c presents. No m_surface. */
         (void)framebuffer;
         m_render->SetFramebuffer(nullptr);
         m_render->SetDimensions(width, height);
@@ -141,7 +146,7 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
         m_cached_screen = screen_id;
         return;
     }
-    /* Mode A (default): CPU coverage rasteriser into m_surface -> `framebuffer`
+    /* Mode A (default GL): CPU coverage rasteriser into m_surface -> `framebuffer`
      * (the loop's scratch); main.c uploads it as one GL quad. Falls through to
      * the shared cached-raster path below. */
 #endif
@@ -169,7 +174,7 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
     }
-#if defined(EVO_GL_DEVICE)
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
     m_gl_drew = true;   /* Mode A rasterised into `framebuffer` this frame */
 #endif
 }
@@ -237,6 +242,26 @@ bool EvoRmlApp::Initialize(int width, int height) {
             }
         } else {
             fprintf(stderr, "[EVO RmlUi] EVO_RML_GL set but no GL context; using CPU\n");
+        }
+    }
+#endif
+#ifdef EVO_AGC_DEVICE
+    if (evo_agc_runtime_is_active()) {
+        int w = 0, h = 0;
+        evo_agc_runtime_get_size(&w, &h);
+        if (w <= 0 || h <= 0) {
+            w = width;
+            h = height;
+        }
+        auto agc = std::make_unique<EvoRenderInterfaceAGC>(w, h);
+        if (agc->Ok()) {
+            m_render = std::move(agc);
+            m_gl_blit_mode = false;
+            evo_log("RmlUi AGC: bare-metal GPU render interface active (%dx%d)", w, h);
+            evo_log_flush();
+        } else {
+            evo_log("RmlUi AGC: failed to construct EvoRenderInterfaceAGC");
+            evo_log_flush();
         }
     }
 #endif
@@ -2904,7 +2929,7 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
     m_render->FrameBegin();
     m_toast_context->Render();
     m_render->FrameEnd();
-#if defined(EVO_GL_DEVICE)
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
     m_gl_drew = true;
 #endif
 }
@@ -3002,7 +3027,7 @@ void EvoRmlApp::RenderKeyboard(uint32_t* framebuffer, int width, int height) {
     m_render->FrameBegin();
     m_keyboard_context->Render();
     m_render->FrameEnd();
-#if defined(EVO_GL_DEVICE)
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
     m_gl_drew = true;
 #endif
 }
@@ -3032,7 +3057,7 @@ void EvoRmlApp::RenderDebugOverlay(uint32_t* framebuffer, int width, int height)
     m_render->FrameBegin();
     m_debug_context->Render();
     m_render->FrameEnd();
-#if defined(EVO_GL_DEVICE)
+#if defined(EVO_GL_DEVICE) || defined(EVO_AGC_DEVICE)
     m_gl_drew = true;
 #endif
 }

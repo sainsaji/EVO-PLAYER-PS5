@@ -102,7 +102,7 @@ int evo_direct_mem_init(size_t pool_size_bytes)
             if (ret != 0 || phys == 0)
                 continue;
             void *mapped = NULL;
-            ret = sceKernelMapDirectMemory(&mapped, want, 0x3 /* PROT_READ|PROT_WRITE */,
+            ret = sceKernelMapDirectMemory(&mapped, want, 0x33 /* PROT_CPU_RW | PROT_GPU_RW */,
                                            0, phys, align_2mb);
             if (ret == 0 && mapped != NULL) {
                 base = mapped;

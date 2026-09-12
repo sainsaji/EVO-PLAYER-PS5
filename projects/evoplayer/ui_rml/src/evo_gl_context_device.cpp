@@ -271,6 +271,7 @@ namespace {
 GLuint g_yuv_vao = 0;
 GLuint g_yuv_nv_prog = 0, g_yuv_pl_prog = 0, g_yuv_pl10_prog = 0, g_yuv_pl10_hdr_prog = 0;
 GLuint g_yuv_pl10_hlg_prog = 0, g_yuv_pl10_nv_hdr_prog = 0;
+GLuint g_yuv_pl10_nv_prog = 0, g_yuv_pl10_nv_hlg_prog = 0;
 GLuint g_yuv_ytex = 0, g_yuv_uvtex = 0, g_yuv_utex = 0, g_yuv_vtex = 0;
 int    g_yuv_tw = 0, g_yuv_th = 0, g_yuv_planar = -1, g_yuv_ten = -1;
 GLint  g_yuv_nv_crop = -1, g_yuv_nv_scale = -1;
@@ -279,6 +280,8 @@ GLint  g_yuv_pl10_crop = -1, g_yuv_pl10_scale = -1;
 GLint  g_yuv_pl10_hdr_crop = -1, g_yuv_pl10_hdr_scale = -1;
 GLint  g_yuv_pl10_hlg_crop = -1, g_yuv_pl10_hlg_scale = -1;
 GLint  g_yuv_pl10_nv_hdr_crop = -1, g_yuv_pl10_nv_hdr_scale = -1;
+GLint  g_yuv_pl10_nv_crop = -1, g_yuv_pl10_nv_scale = -1;
+GLint  g_yuv_pl10_nv_hlg_crop = -1, g_yuv_pl10_nv_hlg_scale = -1;
 
 const char *k_yuv_vs =
     "#version 330 core\n"
@@ -422,6 +425,53 @@ const char *k_yuv_fs_pl10_hlg =
     "  c = vec4(rgb.bgr, 1.0);\n"
     "}\n";
 
+/*
+ * #41: two-plane (NV12-style) 10-bit, NOT tone-mapped - the SDR counterpart of
+ * k_yuv_fs_pl10_nv_hdr, mirroring k_yuv_fs_pl10 for the two-plane layout.
+ *
+ * Needed because the native decoder emits two-plane 10-bit for EVERY Main10 /
+ * VP9-Profile-2 file, whatever its transfer curve, so without this the branch
+ * below had only the PQ program to choose from and washed out any 10-bit file
+ * that was not actually PQ-tagged.
+ */
+const char *k_yuv_fs_pl10_nv =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uUV;\n"
+    "const float S = 65535.0 / 1023.0;\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r * S;\n"
+    "  vec2 uv = texture(uUV, vUV).rg * S - 0.5;\n"
+    "  float U = uv.x; float V = uv.y;\n"
+    YUV_MATRIX_GLSL
+    "}\n";
+
+/* #41: two-plane 10-bit HLG (ARIB STD-B67) - same curve + OOTF as
+ * k_yuv_fs_pl10_hlg, two-plane chroma fetch. */
+const char *k_yuv_fs_pl10_nv_hlg =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 c;\n"
+    "uniform sampler2D uY; uniform sampler2D uUV;\n"
+    "const float S = 65535.0 / 1023.0;\n"
+    "vec3 yuv2020(float y, float U, float V) {\n"
+    "  float Yp = (y - 0.0627451) * 1.1640625;\n"
+    "  return vec3(Yp + 1.4746*V, Yp - 0.16455*U - 0.57135*V, Yp + 1.8814*U);\n"
+    "}\n"
+    "float hlg_eotf(float e) {\n"
+    "  const float a=0.17883277, b=0.28466892, cc=0.55991073;\n"
+    "  return (e <= 0.5) ? (e*e/3.0) : (exp((e-cc)/a) + b) / 12.0;\n"
+    "}\n"
+    "void main(){\n"
+    "  float y = texture(uY, vUV).r * S;\n"
+    "  vec2 uv = texture(uUV, vUV).rg * S - 0.5;\n"
+    "  vec3 hlg_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);\n"
+    "  vec3 scene = vec3(hlg_eotf(hlg_rgb.r), hlg_eotf(hlg_rgb.g), hlg_eotf(hlg_rgb.b));\n"
+    "  vec3 nits = pow(max(scene, 0.0), vec3(1.2)) * 100.0;\n"
+    "  vec3 sdr_linear = nits / (1.0 + nits);\n"
+    "  vec3 rgb = pow(sdr_linear, vec3(1.0/2.2));\n"
+    "  c = vec4(rgb.bgr, 1.0);\n"
+    "}\n";
+
 const char *k_yuv_fs_pl10_nv_hdr =
     "#version 330 core\n"
     "in vec2 vUV; out vec4 c;\n"
@@ -468,14 +518,16 @@ GLuint yuv_link(const char *fs_src)
 
 bool yuv_init(void)
 {
-    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog && g_yuv_pl10_hdr_prog && g_yuv_pl10_hlg_prog && g_yuv_pl10_nv_hdr_prog) return true;
+    if (g_yuv_nv_prog && g_yuv_pl_prog && g_yuv_pl10_prog && g_yuv_pl10_hdr_prog && g_yuv_pl10_hlg_prog && g_yuv_pl10_nv_hdr_prog && g_yuv_pl10_nv_prog && g_yuv_pl10_nv_hlg_prog) return true;
     if (!g_yuv_nv_prog)          g_yuv_nv_prog          = yuv_link(k_yuv_fs_nv);
     if (!g_yuv_pl_prog)          g_yuv_pl_prog          = yuv_link(k_yuv_fs_pl);
     if (!g_yuv_pl10_prog)        g_yuv_pl10_prog        = yuv_link(k_yuv_fs_pl10);
     if (!g_yuv_pl10_hdr_prog)    g_yuv_pl10_hdr_prog    = yuv_link(k_yuv_fs_pl10_hdr);
     if (!g_yuv_pl10_hlg_prog)    g_yuv_pl10_hlg_prog    = yuv_link(k_yuv_fs_pl10_hlg);
     if (!g_yuv_pl10_nv_hdr_prog) g_yuv_pl10_nv_hdr_prog = yuv_link(k_yuv_fs_pl10_nv_hdr);
-    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog || !g_yuv_pl10_hdr_prog || !g_yuv_pl10_hlg_prog || !g_yuv_pl10_nv_hdr_prog) return false;
+    if (!g_yuv_pl10_nv_prog)     g_yuv_pl10_nv_prog     = yuv_link(k_yuv_fs_pl10_nv);
+    if (!g_yuv_pl10_nv_hlg_prog) g_yuv_pl10_nv_hlg_prog = yuv_link(k_yuv_fs_pl10_nv_hlg);
+    if (!g_yuv_nv_prog || !g_yuv_pl_prog || !g_yuv_pl10_prog || !g_yuv_pl10_hdr_prog || !g_yuv_pl10_hlg_prog || !g_yuv_pl10_nv_hdr_prog || !g_yuv_pl10_nv_prog || !g_yuv_pl10_nv_hlg_prog) return false;
     if (!g_yuv_vao) glGenVertexArrays(1, &g_yuv_vao);
     if (!g_yuv_ytex) {
         glGenTextures(1, &g_yuv_ytex);  glGenTextures(1, &g_yuv_uvtex);
@@ -515,6 +567,16 @@ bool yuv_init(void)
     glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uUV"), 1);
     g_yuv_pl10_nv_hdr_crop  = glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uCrop");
     g_yuv_pl10_nv_hdr_scale = glGetUniformLocation(g_yuv_pl10_nv_hdr_prog, "uScale");
+    glUseProgram(g_yuv_pl10_nv_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_prog, "uUV"), 1);
+    g_yuv_pl10_nv_crop  = glGetUniformLocation(g_yuv_pl10_nv_prog, "uCrop");
+    g_yuv_pl10_nv_scale = glGetUniformLocation(g_yuv_pl10_nv_prog, "uScale");
+    glUseProgram(g_yuv_pl10_nv_hlg_prog);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_hlg_prog, "uY"), 0);
+    glUniform1i(glGetUniformLocation(g_yuv_pl10_nv_hlg_prog, "uUV"), 1);
+    g_yuv_pl10_nv_hlg_crop  = glGetUniformLocation(g_yuv_pl10_nv_hlg_prog, "uCrop");
+    g_yuv_pl10_nv_hlg_scale = glGetUniformLocation(g_yuv_pl10_nv_hlg_prog, "uScale");
     evo_bt_("GL yuv: initialised");
     return true;
 }
@@ -603,18 +665,19 @@ extern "C" void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,
     GLint  crop, scale;
     if (ten_bit) {
         if (!planar) {
-            /* #41 Phase D: two-plane 10-bit is native-decoder-only today
+            /* #41 Phase D: two-plane 10-bit is native-decoder-only
              * (evo_vdec_native_supports() gates it to HEVC Main10 / VP9
-             * Profile 2), and there is no non-PQ two-plane 10-bit shader, so
-             * this always tone-maps. Fine while the only source is that gate
-             * - the research repo's own Main10/Profile2 test streams were
-             * BT.2020/PQ - but the gate itself doesn't check color_trc, so a
-             * Main10-profiled file that ISN'T actually PQ-tagged would still
-             * wash out here. Add a plain two-plane BT.601 passthrough
-             * (mirroring k_yuv_fs_pl) if that ever turns out to matter. */
-            prog  = g_yuv_pl10_nv_hdr_prog;
-            crop  = g_yuv_pl10_nv_hdr_crop;
-            scale = g_yuv_pl10_nv_hdr_scale;
+             * Profile 2). This used to have only the PQ program to pick from
+             * and so tone-mapped unconditionally - which washed out every
+             * 10-bit file that was not actually PQ-tagged, since the decoder
+             * gate keys off PROFILE, not color_trc. Select on the transfer
+             * curve exactly like the planar branch below. */
+            prog  = (color_trc == 16) ? g_yuv_pl10_nv_hdr_prog
+                  : (color_trc == 18) ? g_yuv_pl10_nv_hlg_prog : g_yuv_pl10_nv_prog;
+            crop  = (color_trc == 16) ? g_yuv_pl10_nv_hdr_crop
+                  : (color_trc == 18) ? g_yuv_pl10_nv_hlg_crop : g_yuv_pl10_nv_crop;
+            scale = (color_trc == 16) ? g_yuv_pl10_nv_hdr_scale
+                  : (color_trc == 18) ? g_yuv_pl10_nv_hlg_scale : g_yuv_pl10_nv_scale;
         } else {
             prog  = (color_trc == 16) ? g_yuv_pl10_hdr_prog
                   : (color_trc == 18) ? g_yuv_pl10_hlg_prog : g_yuv_pl10_prog;

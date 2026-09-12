@@ -55,6 +55,7 @@ BREADCRUMBS=0
 GL_SMOKE=0
 GL_HDR_PROBE=0
 GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the player build)
+AGC_DEVICE=0
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
@@ -70,11 +71,11 @@ while (( $# )); do
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
         --gl-hdr-probe) GL_HDR_PROBE=1 ;; # Task 1: isolated HDR VideoOut probe
-        --gl)           GL_DEVICE=1 ;;    # #79 GL-3 / #80 GL-4: persistent device GL context - the only present path
+        --gl)           GL_DEVICE=1 ;;    # #79 GL-3 / #80 GL-4: persistent device GL context
+        --agc)          AGC_DEVICE=1; GL_DEVICE=0 ;; # Bare-metal PS5 AGC: 100% GPU render interface
         --no-gl)        die "--no-gl was retired by GL-4 (#80): the CPU converters,
        tile_copy and the V8/V3/1080 backend dispatch it selected are deleted.
-       GL is the only present path. Build the SDK once with
-       ./scripts/build-ps5-opengl.sh, then package normally." ;;
+       GL or AGC are the only present paths." ;;
         --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (4K, since 2026-09-11) — this flag is now a no-op kept for back-compat
         --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
         --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
@@ -85,14 +86,22 @@ while (( $# )); do
     esac
     shift
 done
-# GL is the ONLY present path for the player build (#80 GL-4 deleted the other
-# one). Resolved here, after parsing, so flag ORDER never matters:
-#   --gl-smoke  is its own boot cutover and mutually exclusive with --gl; it
-#               parks before the frame loop, so it links the no-op GL stubs.
+# Present path resolution:
+#   --agc       bare-metal AGC; links libSceAgc without ps5-opengl.
+#   --gl        persistent device GL context via ps5-opengl (default when not --agc).
+#   --gl-smoke  is its own boot cutover and mutually exclusive with --gl / --agc.
 #   --probe     is the sandbox probe, not the player; it never presents.
 if (( GL_DEVICE == -1 )); then
-    if (( GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then GL_DEVICE=0; else GL_DEVICE=1; fi
+    if (( AGC_DEVICE || GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then
+        GL_DEVICE=0
+    else
+        GL_DEVICE=1
+    fi
 fi
+(( AGC_DEVICE && GL_DEVICE )) && die "--agc and --gl are mutually exclusive"
+(( AGC_DEVICE && GL_SMOKE )) && die "--agc and --gl-smoke are mutually exclusive"
+(( AGC_DEVICE && GL_HDR_PROBE )) && die "--agc and --gl-hdr-probe are mutually exclusive"
+(( AGC_DEVICE )) && [[ "${MODE}" != "player" ]] && die "--agc only applies to the player build (drop --agc with --${MODE})"
 (( GL_SMOKE && GL_DEVICE )) && die "--gl and --gl-smoke are mutually exclusive (both cut the boot over to ps5-opengl)"
 (( GL_HDR_PROBE && GL_DEVICE )) && die "--gl and --gl-hdr-probe are mutually exclusive (both cut the boot over to ps5-opengl)"
 (( GL_SMOKE && GL_HDR_PROBE )) && die "--gl-smoke and --gl-hdr-probe are mutually exclusive"
@@ -110,7 +119,8 @@ if ! in_container; then
     (( GL_HDR_PROBE )) && FWD+=(--gl-hdr-probe)
     # Forward the RESOLVED choice, never the default, so the in-container build
     # cannot disagree with the host-side one.
-    (( GL_DEVICE )) && FWD+=(--gl)
+    (( AGC_DEVICE ))   && FWD+=(--agc)
+    (( GL_DEVICE ))    && FWD+=(--gl)
     (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
@@ -380,6 +390,8 @@ else
     # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
     # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
     (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"
+    # --agc: EVO_AGC_DEVICE gate in main.c + evo_agc_* + evo_rmlui_render_agc.cpp
+    (( AGC_DEVICE )) && APP_DEFS+=" -DEVO_AGC_DEVICE=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
@@ -404,6 +416,7 @@ else
 
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
+        AGC_DEVICE="${AGC_DEVICE}" \
         GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" \
         EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
@@ -413,7 +426,7 @@ else
         }
     while read -r rel; do
         OBJS+=("${EVO}/${rel}")
-    done < <(make -C "${EVO}" -s GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
+    done < <(make -C "${EVO}" -s AGC_DEVICE="${AGC_DEVICE}" GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
 
     # #68: RmlUi puts only `3 + R/6` points on a corner arc, so a 20 px radius is
@@ -549,12 +562,18 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         # (a comment-only .syms - libSceAgc/libSceAgcDriver post-GL-6 - greps to
         #  nothing; `|| true` so the empty result isn't a pipeline failure.)
         { grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print "void " $1 "(void){}"}' > "${csrc}"
-        # --gl / --gl-smoke: add the sceAgc* / sceAgcDriver* names ps5-opengl
-        # links that this .syms doesn't already carry. Routed by prefix;
-        # sceVideoOut* etc. resolve from target/lib/*.so and are left alone.
-        if (( GL_LINK )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
+        # --gl / --gl-smoke / --agc: add the sceAgc* / sceAgcDriver* names that
+        # this .syms doesn't already carry. Routed by prefix; sceVideoOut* etc.
+        # resolve from target/lib/*.so and are left alone.
+        if (( GL_LINK || AGC_DEVICE )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
             existing="$({ grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print $1}')"
-            for s in "${GL_SCE_UNDEF[@]}"; do
+            source_syms=()
+            if (( GL_LINK )); then
+                source_syms=("${GL_SCE_UNDEF[@]}")
+            else
+                while IFS= read -r s; do [[ -n "${s}" ]] && source_syms+=("${s}"); done < "${OBJ_UNDEF}"
+            fi
+            for s in "${source_syms[@]}"; do
                 if [[ "${base}" == libSceAgcDriver ]]; then
                     [[ "${s}" == sceAgcDriver* ]] || continue
                 else
@@ -562,7 +581,7 @@ if (( ${#PRX_STUB_WANT[@]} )); then
                 fi
                 grep -qxF "${s}" <<<"${existing}" && continue
                 echo "void ${s}(void){}" >> "${csrc}"
-                echo "     + ${base}: ${s} (ps5-opengl)"
+                echo "     + ${base}: ${s}"
             done
         fi
 

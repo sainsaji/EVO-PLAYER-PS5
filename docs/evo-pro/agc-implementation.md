@@ -1,5 +1,12 @@
 # AGC implementation guide — GPU rendering Step 2/3
 
+> **LIVE REFERENCE AGAIN (2026-09-12).** GL-6 marked this historical on the
+> grounds that ps5-opengl owned `sceAgc`. The UI now renders on bare-metal
+> `sceAgc` again — see [agc-bare-metal-ui.md](agc-bare-metal-ui.md) for what
+> actually ships. The register layouts, descriptor formats and ABI notes below
+> were used to build it and remain accurate; the *file names* it cites
+> (`pp_agc.c`, `pp_agc_osd.c`) are still gone.
+>
 > **HISTORICAL (2026-09-10, GL-6 / #82).** The `sceAgc` present/geo/OSD path
 > this guide documents (`pp_agc.c`, `pp_agc_osd.c`, `evo_rmlui_render_agc.cpp`,
 > the vendored shader blobs) was **deleted in GL-6**. `ps5-opengl` (Mesa + PS5

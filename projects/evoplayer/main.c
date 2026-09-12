@@ -37,6 +37,9 @@ extern int g_ps5_register_buffers2_rc;
 /* render-overhaul GL-3/GL-4 (#79/#80): the one present path. A --gl .ffpfsc
  * links the device implementation (evo_gl_context_device.cpp); everything else
  * links the no-op stubs, so nothing here needs the GL headers. */
+#if defined(EVO_AGC_DEVICE)
+#include "evo_agc_runtime.h"
+#endif
 #include "evo_gl_context.h"
 #include <libavutil/mathematics.h>
 #include <libavutil/pixdesc.h>
@@ -10038,6 +10041,21 @@ int main(void) {
      * A second sceVideoOut open panics the console, so nothing else may open
      * one. B1 proved the cutover (teal clear + swap); B2 put every non-player
      * RmlUi screen through it; B3/GL-4 put the video on it as a YUV quad. */
+#if defined(EVO_AGC_DEVICE)
+    {
+        evo_bt("AGC: bare-metal AGC device context");
+        int agcok = evo_agc_runtime_init(1920, 1080, 0);
+        evo_bt("AGC: evo_agc_runtime_init -> %d", agcok);
+        if (agcok == 0) {
+            /* One frame so the panel shows something while boot continues.
+             * (A 10x repeat of this ran clean through every slot, twice over,
+             * with no hang - which is how the submit/suspend/fence plumbing
+             * was cleared of suspicion and the search moved to draw content.) */
+            evo_agc_runtime_frame_begin();
+            evo_agc_runtime_present();
+        }
+    }
+#else
     {
         evo_bt("GL-3: device GL context");
         int glok = evo_gl_context_create(1920, 1080);
@@ -10054,6 +10072,7 @@ int main(void) {
          * staging wall). gl_video is armed after pp_playback_init below (init
          * memsets the struct); the present block then calls evo_gl_blit_yuv. */
     }
+#endif
     /*
      * #34: the native IME keyboard, for the same reason everything else in this
      * block is here. libSceImeDialog is a loadable system module, and
@@ -10153,6 +10172,27 @@ int main(void) {
      * then uploaded as one texture (menus) or composited over the video (the
      * player OSD and the modal panels). */
     uint32_t *gl_scratch = calloc((size_t)WIDTH * (size_t)HEIGHT, 4);
+    /*
+     * #38: that is ~8 MB of FLEXIBLE memory, claimed after the resident 4K
+     * decoders have already taken ~159 MB of the 448 MB FMEM budget. It used to
+     * fail silently - linear = NULL, every menu rasterises nowhere, and
+     * evo_gl_blit_bgra() uploads a null pointer. The result is a black screen
+     * behind a frame loop whose counters (loop/s, redraw/s) all look perfectly
+     * healthy, which is exactly how this presented. Never let it be silent.
+     */
+    {
+        unsigned long long _sc_kb =
+            (unsigned long long)((size_t)WIDTH * (size_t)HEIGHT * 4u / 1024u);
+#ifdef EVO_APP_MODULE
+        uint64_t _mf = 0, _sf = 0, _sa = 0, _fa = 0;
+        if (evo_alloc_map_info) evo_alloc_map_info(&_mf, &_sf, &_sa, &_fa);
+        evo_bt("GL-3: gl_scratch %s (%lluKB) - flex avail=%lluM alloc_fails=%llu",
+               gl_scratch ? "ok" : "FAILED", _sc_kb,
+               (unsigned long long)(_fa >> 20), (unsigned long long)_mf);
+#else
+        (void)_sc_kb;
+#endif
+    }
 
     evo_bt("boot ok - frame loop");
     for (int frame = 0; running; frame++) {
@@ -10161,15 +10201,41 @@ int main(void) {
         if ((frame & 63) == 0)
             evo_boot_log_flush();   /* cheap no-op once drained; catches a late sandbox open */
 
+        /*
+         * Keep asking for the sandbox until the daemon lands it - the 1.2 s at
+         * boot is not enough on a console that has just rebooted, and until
+         * this existed a lost race meant a permanently black screen with the
+         * only retry sitting behind a browser the user could not reach. See
+         * evo_jailbreak_poll(). No-op on payload/host builds.
+         */
+        static int jb_repaint = 0;
+        if (evo_jailbreak_poll()) {
+#ifdef EVO_APP_MODULE
+            evo_persistence_rebind();   /* #46: re-read boot config off /data */
+#endif
+            /* The toast is not decoration: a change-gated menu is clean
+             * forever once settings failed to load, so something visible has
+             * to mark RmlUi dirty or the recovered app keeps showing black. */
+            toast("STORAGE", "READY");
+            jb_repaint = 8;
+        }
+
         /* GL-3 (#79) B2: no VO acquire. The dispatch always runs (its update
          * calls set the UI-dirty flag from this frame's input); it only
          * *renders* on a redraw frame. gl_active decided once here. */
         /* B3: the player screen always redraws (the video frame changes every
          * tick); menus are change-gated. */
-        int gl_active = (screen == SCREEN_PLAYER) || evo_rmlui_gl_needs_frame();
+        int gl_active = (screen == SCREEN_PLAYER) || evo_rmlui_gl_needs_frame() ||
+                        jb_repaint > 0;
+        if (jb_repaint > 0) jb_repaint--;
         evo_rmlui_gl_set_active(gl_active);
-        if (gl_active)
+        if (gl_active) {
+#if defined(EVO_AGC_DEVICE)
+            evo_agc_runtime_frame_begin();
+#else
             evo_gl_frame_begin();
+#endif
+        }
         linear = gl_scratch;
         /* GL-4: the NV12 player path never touches gl_scratch — skip the 8 MB
          * clear. Music (audio-only) and every other screen still rasterise. */
@@ -11082,8 +11148,17 @@ skip_screen_input:
             evo_screenshot_request = 0;
             /* Mode A: gl_scratch already holds the composited frame. Mode B:
              * RmlUi rendered to fb 0 - read it back. */
+#if defined(EVO_AGC_DEVICE)
+            /* An --agc build never renders into gl_scratch, and
+             * evo_gl_read_default_fb is the no-op stub here - without this
+             * every capture was a pure black gl_scratch. Read the scanout
+             * buffer that is actually on screen instead. */
+            if (linear)
+                evo_agc_runtime_read_scanout(linear, (int)WIDTH, (int)HEIGHT);
+#else
             if (linear && !evo_rmlui_gl_blit_mode())
                 evo_gl_read_default_fb(linear, (int)WIDTH, (int)HEIGHT);
+#endif
             int shot_rc = evo_screenshot_write(linear, (int)WIDTH, (int)HEIGHT);
             if (shot_rc == 0)
                 toast("SCREENSHOT", "SAVED TO USB");
@@ -11102,6 +11177,12 @@ skip_screen_input:
             uint64_t _b0 = (uint64_t)now_ms();
             uint64_t _sw_p0 = evo_sweep_now_us();   /* #8: µs present cost */
             int _sw_new_video = 0;
+            /* seek-stutter trace: summarize what this frame did, at outer
+             * scope because _osd_active/_osd_changed live inside `if (_video)`
+             * and the trace fires after that block closes. */
+            int      _sk_osd_active = 0, _sk_osd_changed = 0, _sk_have = 0, _sk_held = 0;
+            uint64_t _sk_osd_draw_us = 0;
+            int64_t  _sk_pts = g_pp_pb.display_pts_us;
             if (_video) {
                 /*
                  * Zero-copy video quad — the decoder's YUV planes go straight to
@@ -11145,6 +11226,7 @@ skip_screen_input:
                 static int _osd_was;
                 int _osd_changed = 0;
                 if (_osd_active || _osd_was) {
+                    uint64_t _sk_od0 = evo_sweep_now_us();
                     g_k4_osd_publish = 1;
                     draw_player_screen(gl_scratch);   /* transparent bg + OSD + subtitles */
                     g_k4_osd_publish = 0;
@@ -11154,6 +11236,7 @@ skip_screen_input:
                      * FPS pill + stats HUD are RmlUi elements in the OSD doc now,
                      * so draw_player_screen already painted them.) */
                     draw_prospero_toast(gl_scratch);
+                    _sk_osd_draw_us = evo_sweep_now_us() - _sk_od0;
                     uint32_t _h = 2166136261u;
                     size_t _n = (size_t)WIDTH * (size_t)HEIGHT;
                     for (size_t _i = 0; _i < _n; _i += 37u)
@@ -11163,27 +11246,69 @@ skip_screen_input:
                     _osd_hash = _h;
                 }
                 _osd_was = _osd_active;
+                _sk_osd_active = _osd_active;
+                _sk_osd_changed = _osd_changed;
+                _sk_have = _have;
+                _sk_held = _f.held;
+                _sk_pts = g_pp_pb.display_pts_us;
 
                 int _present = (_new_frame && _have) || _osd_changed ||
                                evo_rmlui_gl_consume_drew();
                 if (_present && _have) {
-                    int _want_hdr = (_f.color_trc == 16) ? 1 : 0;
+                    /*
+                     * #41: HDR VideoOut and the PQ tone-map are MUTUALLY
+                     * EXCLUSIVE, and running both is what produced the "weird
+                     * colors" on PQ files.
+                     *
+                     * The shader for color_trc==16 applies the PQ inverse-EOTF
+                     * and tone-maps all the way down to SDR, ending in
+                     * pow(sdr_linear, 1/2.2) - i.e. it emits gamma-2.2 SDR
+                     * pixels. Setting g_ps5_video_out_hdr then tells VideoOut
+                     * those same pixels are 10-bit BT.2020 PQ, so the display
+                     * applies the PQ EOTF to an SDR-encoded signal. The
+                     * tone-map alone was hardware-verified correct (Phase E,
+                     * bf5ee4d) BEFORE Task B added this switch on top of it.
+                     *
+                     * Real HDR output needs the other half: a BT.2020 PQ
+                     * PASSTHROUGH shader (matrix only, curve left alone) used
+                     * whenever the flag is set. Until that exists, keep the
+                     * proven SDR path. Task B's mode-switch machinery stays
+                     * built and reachable via -DEVO_GL_HDR_VIDEOOUT=1.
+                     */
+#ifndef EVO_GL_HDR_VIDEOOUT
+#define EVO_GL_HDR_VIDEOOUT 0
+#endif
+                    int _want_hdr = EVO_GL_HDR_VIDEOOUT &&
+                                    (_f.color_trc == 16) ? 1 : 0;
                     if (_want_hdr != g_ps5_video_out_hdr) {
                         evo_bt("HDR flag %d -> %d (color_trc=%d screen=%d ten_bit=%d)",
                                g_ps5_video_out_hdr, _want_hdr, _f.color_trc, screen, _f.ten_bit);
                     }
                     g_ps5_video_out_hdr = _want_hdr;
+#if defined(EVO_AGC_DEVICE)
+                    int _is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE &&
+                                      !_f.held && _f.uv != NULL);
+                    evo_agc_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
+                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
+                                     (int)_f.coded_w, (int)_f.coded_h,
+                                     (int)_f.disp_w, (int)_f.disp_h,
+                                     video_view_mode, _f.ten_bit, _f.color_trc,
+                                     _is_direct);
+#else
                     evo_gl_blit_yuv(_f.y, _f.y_pitch, _f.uv, _f.uv_pitch,
                                     _f.u, _f.u_pitch, _f.v, _f.v_pitch,
                                     (int)_f.coded_w, (int)_f.coded_h,
                                     (int)_f.disp_w, (int)_f.disp_h,
                                     video_view_mode, _f.ten_bit, _f.color_trc);
+#endif
                     /* #8: probe the video quad BEFORE the OSD lands on top of
                      * it, so the colour signature is decoder+shader output and
                      * not whatever the OSD happened to be covering. */
                     evo_sweep_probe_colour();
+#if !defined(EVO_AGC_DEVICE)
                     if (_osd_active && !g_ps5_video_out_hdr)
                         evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
+#endif
                     _swap = 1;
                     _sw_new_video = 1;
                 } else if (_present && _osd_active) {
@@ -11197,7 +11322,9 @@ skip_screen_input:
                      * on every OSD refresh during playback, not just on
                      * entering/leaving the file. Leave it as the last real
                      * frame set it. */
+#if !defined(EVO_AGC_DEVICE)
                     evo_gl_composite_bgra(gl_scratch, WIDTH, HEIGHT, _osd_changed);
+#endif
                     _swap = 1;
                 } else {
                     _swap = 0;   /* nothing new — hold the frame on screen */
@@ -11215,8 +11342,76 @@ skip_screen_input:
             }
             uint64_t _b1 = (uint64_t)now_ms();
             uint64_t _sw_p1 = evo_sweep_now_us();
+#if defined(EVO_AGC_DEVICE)
+            if (_swap) { evo_agc_runtime_present(); evo_rmlui_gl_end_frame(); }
+#else
             if (_swap) { evo_gl_context_present(); evo_rmlui_gl_end_frame(); }
+#endif
             uint64_t _b2 = (uint64_t)now_ms();
+            /*
+             * Seek-stutter trace. Drop /mnt/usb0/evo_seektrace to enable — off
+             * by default, this is a per-frame site during the traced window.
+             *
+             * Logs EVERY render-loop tick (whether or not it swapped) for a
+             * fixed window starting the instant a seek commits
+             * (g_pp_pb.seek_discarding: 1 -> 0), because a felt stutter is as
+             * likely to be a tick that should have presented and didn't as one
+             * that took too long. Each line carries the OSD draw cost
+             * separately from blit/swap, since draw_player_screen (CPU
+             * rasterise + RmlUi OSD doc) and evo_gl_composite_bgra (a ~65ms
+             * synchronous RGBA8 staging copy on ps5-opengl G55, see
+             * evo_gl_context_device.cpp) are the two candidates a felt hitch
+             * right at the discard-clear boundary would come from — the OSD
+             * is forced through one more redraw+composite there even when
+             * nothing else changed, to erase the scrub bar.
+             */
+            if (screen == SCREEN_PLAYER) {
+                static int    s_sk_enabled = -1;
+                static int    s_sk_was_discarding = 0;
+                static uint64_t s_sk_until_ms = 0;
+                static uint64_t s_sk_seek_t0 = 0;
+                if (s_sk_enabled < 0)
+                    s_sk_enabled = (access("/mnt/usb0/evo_seektrace", F_OK) == 0);
+                if (s_sk_enabled) {
+                    int discarding = g_pp_pb.seek_discarding;
+                    if (discarding && !s_sk_was_discarding) {
+                        s_sk_seek_t0 = evo_sweep_now_us();
+                        evo_boot_log("seekstutter SEEK_BEGIN target_pts=%lld",
+                                     (long long)g_pp_pb.seek_target_us);
+                    } else if (!discarding && s_sk_was_discarding) {
+                        evo_boot_log("seekstutter SEEK_COMMIT pts=%lld "
+                                     "to_first_frame_us=%llu",
+                                     (long long)_sk_pts,
+                                     (unsigned long long)(evo_sweep_now_us() - s_sk_seek_t0));
+                        /* Long enough to cover the OSD's own fade-out: seek
+                         * commit re-stamps controls_last_used_ms, so
+                         * _osd_active (controls visible) only goes false
+                         * ~4.2s later, at which point ONE more redraw fires
+                         * to clear the scratch — 3s missed that transition
+                         * entirely on the first pass. */
+                        s_sk_until_ms = (uint64_t)now_ms() + 6000;
+                    }
+                    s_sk_was_discarding = discarding;
+
+                    /* The discard window itself: hold_buf is supposed to
+                     * freeze the last frame smoothly here. If IT is where a
+                     * felt hitch actually lives — a redundant re-upload, a
+                     * flicker while frozen — the post-commit-only window
+                     * above would never have seen it. */
+                    if (discarding || (uint64_t)now_ms() < s_sk_until_ms) {
+                        evo_boot_log("seekstutter tick swap=%d newvid=%d have=%d held=%d "
+                                     "disc=%d pts=%lld osd_act=%d osd_chg=%d "
+                                     "osd_us=%llu blit_us=%llu swap_us=%llu tot_ms=%llu",
+                                     _swap, _sw_new_video, _sk_have, _sk_held,
+                                     discarding, (long long)_sk_pts,
+                                     _sk_osd_active, _sk_osd_changed,
+                                     (unsigned long long)_sk_osd_draw_us,
+                                     (unsigned long long)(_sw_p1 - _sw_p0),
+                                     (unsigned long long)(evo_sweep_now_us() - _sw_p1),
+                                     (unsigned long long)(_b2 - _b0));
+                    }
+                }
+            }
             if (_swap && screen == SCREEN_PLAYER) {
                 /* #8: µs blit/swap cost for the codec sweep, split at the
                  * present call — the swap half is the vblank wait and pins to
@@ -11289,7 +11484,11 @@ skip_screen_input:
     }
 
     pp_playback_shutdown(&g_pp_pb);
+#if defined(EVO_AGC_DEVICE)
+    evo_agc_runtime_shutdown();
+#else
     evo_gl_context_destroy();
+#endif
 
     return 0;
 }

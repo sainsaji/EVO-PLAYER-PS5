@@ -1,5 +1,10 @@
 # GPU rendering — moving convert + composite + UI off the CPU
 
+> **PARTIALLY LIVE AGAIN (2026-09-12).** The #28 "UI on GPU" half of this plan
+> is done and shipping via bare-metal `sceAgc` —
+> [agc-bare-metal-ui.md](agc-bare-metal-ui.md). The #27 convert/present half
+> is still GL's. Read the analysis, not the file names.
+>
 > **HISTORICAL (2026-09-10, GL-6 / #82).** This is the hand-rolled `sceAgc`
 > plan (#27 convert/present, #28 UI-on-GPU). It shipped and was
 > hardware-verified — GTA 4K through `sceAgc` at 982 µs/frame — but textured

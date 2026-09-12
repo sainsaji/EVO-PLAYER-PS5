@@ -19,9 +19,9 @@ console is available, and what each result means. Point an AI at it to resume.
 
 | Doc | What it is | Status |
 |---|---|---|
+| [agc-bare-metal-ui.md](agc-bare-metal-ui.md) | **The UI on bare-metal `sceAgc`** — the amdllpc/`.pipe` shader toolchain, the gfx1013 patch, the runtime bugs and how to verify a build | WORKING, hw-verified 2026-09-12 |
 | [status.md](status.md) | **Resume-here** — next actions, decision tree, what's done/blocked | 🧭 living |
 | [videodec2-abi.md](videodec2-abi.md) | **Phase 0 (Route B)** — verified `libSceVideodec2` structs + exact call sequence; header `projects/evoplayer/media/include/sce/sce_videodec2.h` | ✅ done, hardware-verified |
-| [avplayer-abi.md](avplayer-abi.md) | **Phase 0 (Route A)** — `libSceAvPlayer` ABI from SharpProspero (`SceAvPlayerInitData` 120B, `...FrameInfoEx` pitch+crop, callback port, memory-typing diff vs the old `WC_GARLIC` try); header `sce/sce_avplayer.h`; spike `projects/avplayer_test/` | ✅ transcribed + spike compile-clean; not yet hardware-run |
 | [native-decode-plan.md](native-decode-plan.md) | The master plan — 9 phases from ABI harvest to a shipped Auto/FFmpeg/Native decoder toggle, with kill criteria | **Phase 4 ✅ DONE on hardware (#31 closed)** — GTA 4K H.264 plays on `sceVideodec2`; Phase 5 (settings toggle) next |
 | [phase-1b-app-module.md](phase-1b-app-module.md) | **Phase 1b** — repackage EVO as app module `PPSA99039` (fork the `ps5-native-app-boilerplate` build tail, clean-room `libc.prx`, ShadowMountPlus). **Milestone 1:** the unchanged FFmpeg-software player running in the app sandbox | ✅ **DONE** — boots to menu; task 8 (playback crash) was `posix_fadvise` from the sandbox, fixed `55685aa0`; 1080p + reasonable-4K play, demanding 4K needs native decode (#31, done) |
 | [gpu-rendering-plan.md](gpu-rendering-plan.md) | The hand-rolled `sceAgc` convert/present/UI plan (#27/#28). | 📜 **historical** — superseded by the OpenGL render overhaul; `pp_agc*` deleted (GL-6) |

@@ -179,6 +179,19 @@ ifeq ($(GL_DEVICE),1)
     endif
 endif
 
+# --agc: bare-metal PS5 AGC device context and 100% GPU RmlUi render interface.
+# Mutually exclusive with --gl; package-app.sh --agc passes AGC_DEVICE=1.
+AGC_DEVICE ?= 0
+ifeq ($(AGC_DEVICE),1)
+    MEDIA_SRCS += \
+        media/src/evo_agc_transient_ring.c \
+        media/src/evo_agc_writer.c \
+        media/src/evo_agc_shader_header.c \
+        media/src/evo_agc_runtime.c
+    CFLAGS   += -DEVO_AGC_DEVICE=1 -Ishaders/agc
+    CXXFLAGS += -DEVO_AGC_DEVICE=1 -Ishaders/agc
+endif
+
 C_SRCS := main.c $(PP_SRCS) $(UI_SRCS) $(MEDIA_SRCS) $(ADDON_SRCS)
 C_OBJS := $(C_SRCS:.c=.o)
 
@@ -197,6 +210,10 @@ ifeq ($(GL_DEVICE),1)
     RMLUI_SRCS += ui_rml/src/evo_gl_context_device.cpp \
                   ui_rml/src/evo_rmlui_render_gl.cpp \
                   ui_rml/src/rmlui_gl3/RmlUi_Renderer_GL3.cpp
+endif
+
+ifeq ($(AGC_DEVICE),1)
+    RMLUI_SRCS += ui_rml/src/evo_rmlui_render_agc.cpp
 endif
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)

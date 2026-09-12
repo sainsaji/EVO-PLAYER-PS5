@@ -1,0 +1,221 @@
+# Bare-metal AGC UI — the RmlUi renderer on `sceAgc` directly
+
+**Status: WORKING, hardware-verified 2026-09-12.** The RmlUi interface renders
+through hand-built `sceAgc` command buffers — no Mesa, no GL, no CPU rasteriser.
+Snappy, vsync-paced, no visual artefacts.
+
+This supersedes the "the `#27`/`#28` sceAgc work is history" framing in
+[status.md](status.md): bare-metal AGC is the UI path in `--agc` builds.
+
+---
+
+## Why
+
+The UI was slow, and the cause was not API overhead — the UI was being
+**rasterised on the CPU**. `evo_rmlui_app.cpp` defaults `m_gl_blit_mode` to
+true, selecting `EvoRenderInterface` (`evo_rmlui_render.cpp`, ~1450 lines of
+coverage rasteriser) and blitting the result as one GL texture. RmlUi's native
+GL3 path measures **~1.2 s/frame** on ps5-opengl, because that driver's
+render-to-texture is synchronous with a full CPU surface copy per draw.
+
+Neither existing option was fast: one rasterises on the CPU, the other is a
+driver limitation. Going straight to AGC was the only route to a fast UI.
+
+## What runs on the GPU today
+
+| Subsystem | Path | GPU? |
+|---|---|---|
+| RmlUi UI (menus, text, icons, thumbnails) | `EvoRenderInterfaceAGC` -> `sceAgc` DCB | **yes** |
+| Video decode | `sceVideodec2` resident decoders | **yes** (dedicated block) |
+| Video present | **not ported** — the 4 video `.pipe`s are unconverted | **no** |
+| CPU coverage rasteriser | still compiled; unused once AGC constructs | dormant |
+
+`agc video pipelines not built yet (.pipe conversion pending)` in `evo.log` is
+the runtime saying exactly that. Only the UI pipeline is mandatory at init; a
+missing video pipeline disables that path rather than aborting the runtime.
+
+---
+
+## The shader toolchain
+
+Shaders are **not** hand-assembled and their registers are **not** guessed.
+
+```
+projects/evoplayer/shaders/agc/*.pipe        AMD LLPC pipeline source
+  -> amdllpc -gfxip=10.1.3 -o=X.pal.elf      (gfx1013 = the PS5 GPU)
+  -> llvm-objcopy --dump-section=.text       slice at _amdgpu_gs_main /
+  -> llvm-readelf --symbols                     _amdgpu_ps_main extents
+  -> llvm-readelf --notes                    AMDGPU Metadata (PAL) YAML
+  -> tools/build_agc_pipes.py                derive AGC registers
+  -> projects/evoplayer/shaders/agc/*_pipe.h ISA blobs + register tables
+  -> evo_agc_shader_header.c                 build the 0x148 arena
+  -> sceAgcCreateShader + sceAgcLinkShaders
+```
+
+`.pipe` is AMD's public LLPC format: GLSL 450 in `[VsGlsl]`/`[FsGlsl]` plus a
+`[ResourceMapping]` block declaring the user-data layout **beside the shader
+source**. That placement is the point — see "Why the toolchain changed".
+
+Ported from `ps5-xash3d-halflife` (`tools/build_shader.py`,
+`tools/generate_agc_metadata.py`, `src/ps5_shader_header.c`), which drives a full
+3D game on this firmware through the same chain. That project publishes its
+source but **no compiled shaders**, so it is a structural reference only — it
+cannot be run, and there is no working command stream to diff against.
+
+### Building the compiler
+
+```
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml build ps5-dev
+docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml \
+  run --rm ps5-dev python3 tools/build_agc_pipes.py
+```
+
+One-time, LLVM-scale (~1 h at `-j4`), cached in the image. Two non-obvious
+requirements, both explained in `Dockerfile.amdllpc`:
+
+- **`dxc`.** LLPC's `gfxruntime` compiles an HLSL "advanced blend" library and
+  hard-fails configure without Microsoft's DirectX compiler. There is no skip
+  option, unlike `gpurt` (turned off with `-DVKI_RAY_TRACING=OFF`).
+- **`-j4`, link jobs 1.** The AMDGPU CodeGen translation units peak at 2-4 GB of
+  GCC each; one per core exhausted the Docker VM at object ~2080/2383 twice,
+  once taking the whole Docker engine down with it.
+
+### gfx1013 is not in public AMDVLK
+
+`amdllpc -gfxip=10.1.3` fails with `Invalid gfxip: gfx1013`. The chain is
+`amdllpc.cpp` -> `LgcContext::isGpuNameValid` -> `TargetInfo::setTargetInfo`,
+whose `gpuNameMap` lists gfx1010/1011/1012 and 1030+ and **omits 1013** — AMD
+does not ship the PS5's semi-custom part. It is not behind a build flag.
+
+LLVM's own AMDGPU backend knows the target (`llc-18 -march=amdgcn -mcpu=help`
+lists `gfx1013`), so only that table is in the way.
+`tools/patches/llpc-add-gfx1013.py` clones `setGfx1011Info` (Navi12, the closest
+GFX10.1 sibling, including the integer-dot caps that separate it from 1010) and
+registers `{"gfx1013", "Navi10Lite", ...}`. The Dockerfile `grep -q`s afterwards,
+so a silently-failed patch cannot produce a compiler-less image.
+
+> If a shader ever miscompiles in a way that smells like a missing hardware
+> erratum workaround, that cloned workaround table is the first place to look.
+
+---
+
+## Why the toolchain changed
+
+The previous chain (`tools/build_agc_shaders.py`, now deleted) was a hand-written
+wrapper around `opengnm-psbc` that reimplemented ps5-opengl's Gallium caller but
+not its overrides. It shipped two silent, hardware-only defects:
+
+1. **`VGT_ESGS_RING_ITEMSIZE` packaged as 4 instead of 1.** For NGG whose source
+   stage is vertex, non-passthrough multiplies every vertex index by this value
+   before using it for primitive exports and LDS addressing. The GPU wedged on
+   the first DCB containing a real draw, `sceAgcSuspendPoint()` never returned,
+   and the OS killed the process ~55 s later. ps5-opengl's `ps5_agc_package.c`
+   hardcodes the override; its Gallium caller passes 4 and lets the builder
+   correct it. The wrapper copied the caller and not the correction.
+2. **No `--descriptor-binding` for the vertex stage.** Both vertex shaders
+   declare `layout(set=0, binding=0) uniform ...`, and only the *fragment*
+   shaders were given bindings. The compiler was never told set 0's layout for
+   that stage, so the shader read its projection matrix from a descriptor slot
+   nobody had described. Draws executed, retired, faulted nothing, and produced
+   **exactly zero fragments**.
+
+Neither was detectable without hardware, and neither is expressible in `.pipe`:
+`[ResourceMapping]` lives beside the shader and every register is derived from
+PAL metadata. That is the whole argument for the migration.
+
+### User-SGPR slots are derived, never hardcoded
+
+`build_agc_pipes.py` reads PAL's `.user_data_reg_map` and fails the build if any
+`[ResourceMapping]` node has no slot. For `ui_screen_2d` the vertex stage is:
+
+```
+slot 0 = 0x10000000 GlobalTable          (driver-supplied)
+slot 1 = 0          -> const-buffer table
+slot 2 = 0x1000000f VertexBufferTable    (from IndirectUserDataVaPtr)
+slot 3 = 0x10000003 BaseVertex           (supplied by the draw packet)
+slot 4 = 0x10000004 BaseInstance         (supplied by the draw packet)
+```
+
+The vertex-buffer table is a PAL **special**, not resource-mapping index 1 —
+`IndirectUserDataVaPtr` is hardware-managed, so searching for the node's own
+index finds nothing. LLPC's layout also differs from psbc's (`const=1 vtx=2
+tex=1` against psbc's `vtx=0 base=1 const=2`), so any hardcoded guess would have
+been silently wrong again. The runtime reads the layout off the compiled
+pipeline through `evo_agc_runtime_get_user_data_layout()`.
+
+---
+
+## Runtime bugs fixed along the way
+
+Every one produced a *silent* wrong result, which is why they cost hardware
+round-trips. Recorded because the failure signatures are not obvious from code.
+
+| Symptom on screen | Cause | Fix |
+|---|---|---|
+| GPU wedges, process killed ~55 s later | `VGT_ESGS_RING_ITEMSIZE` = 4 | derive from PAL (= 1) |
+| Draws retire, **zero** pixels written | vertex stage compiled with no descriptor binding | `.pipe` `[ResourceMapping]` |
+| UI draws once then freezes; navigation dead | `seal(slot, token)` then `begin(slot, 0, 1)` gives `TOKEN_MISMATCH`; the return was ignored, so every slot stayed sealed and all allocations failed | store the seal token, hand it back once the fence proves completion; log begin failures |
+| Blank screen, every frame discarded | discarding a frame called `_seal()` (needs a token only a submit can clear) instead of `_abort()` | `evo_agc_transient_ring_abort()` |
+| Some glyph atlases garbled, others perfect | textures were 64-byte aligned; a GFX10 image descriptor stores `address >> 8` and needs **256** | over-allocate and align; `build_tsharp_2d_internal` now *rejects* a misaligned base |
+| Whole UI colour-swapped (blue theme -> gold) | the scanout is BGRA-ordered; the CB was storing RGBA | `COMP_SWAP = ALT` in `CB_COLOR0_INFO` |
+| Black band creeping down the picture while loading | `sceVideoOutSubmitFlip` is async and was never waited on; with 2 buffers the CPU clear wiped the **live** framebuffer | poll `sceVideoOutGetFlipStatus` until `status[3] == flip_arg` |
+| UI flashing, alternating with blank | frames with no draws were still cleared and flipped | skip present when `frame_has_draws == 0` |
+
+Two pieces that were always required and simply missing:
+
+- **End-of-pipe cache protocol.** `FLUSH_AND_INV_CB_DATA_TS` (event 45, GCR 12)
+  then `CACHE_FLUSH_AND_INV_TS` (event 40, GCR `0x30c` = GLV/GL1/GL2 invalidate
+  **plus GL2 writeback**) via `sceAgcCbReleaseMem`. Without both, the colour
+  block and L2 hold the frame while the display — not a coherent client — scans
+  out stale DRAM.
+- **Init-time cache flush** of `shader_storage` (the ISA the GPU fetches) and
+  `gpu_regs` (register arrays the CP DMA-reads, including the shader entry
+  address). Written once by the CPU into write-back memory, read by the GPU for
+  the life of the process.
+
+---
+
+## Verifying a build
+
+`evo.log` carries everything needed to separate a good run from a bad one:
+
+```
+agc pipe ui_screen_2d cx=53 sh=12 uc=3 modifier=0x5 gs_pgm=0286e120:00000000 ...
+agc pipe ui_screen_2d user_data vs_n=3 ps_n=2 const=1 vtx=2 tex=1
+agc color_target rc=0/0 base0=0x27a8000 info=0x8828 (comp_swap=1) ...
+agc health frame=240 dcb=11872/524288 peak=12178 ring_fail=0 tex_fail=0 \
+           direct_mem=6249472/67108864 peak=6257664 allocs=347
+agc health presents=120 dcb_min_presented=2845 flip_waits=120 timeouts=0
+```
+
+- `gs_pgm` / `ps_pgm` **non-zero** — `sceAgcCreateShader` resolved the entries.
+- `comp_swap=1` — the CB stores BGRA. Without it the whole UI is R-B swapped.
+- `ring_fail` / `tex_fail` **0** — nothing is silently dropped. These counters
+  exist because `RenderGeometry` has several early-returns that otherwise make
+  content vanish with no error anywhere.
+- `flip_waits == presents` — exactly one vblank per present, correctly paced.
+  `timeouts` must be 0.
+- `direct_mem` / `allocs` stable across windows — no leak.
+
+**Check the build marker before trusting any of it.** Two debugging rounds were
+wasted reading a stale `.ffpfsc`; a log line whose format predates the change
+under test means the deploy did not land.
+
+`agc_dump_scanout()` reads the framebuffer back once at frame 40 and logs a
+luminance thumbnail plus the most common colours. That is what settled the
+colour bug: the buffer held `ffedbe00` (correct cyan for `#00cdff`) while the
+panel showed gold, proving the swap happened *after* the framebuffer. Reach for
+it before theorising about channel order.
+
+---
+
+## Not done
+
+- **The four video pipelines** (`video_yuv_nv12`, `_p010_hdr`, `_p010_hlg`,
+  `_planar`) are not converted to `.pipe`; they sit behind
+  `EVO_AGC_HAVE_VIDEO_PIPES`, which is never defined. Video playback in an
+  `--agc` build therefore has no GPU present path.
+- **The CPU coverage rasteriser** is still compiled in and remains the default
+  for non-`--agc` (GL) builds.
+- The GPU-side `SetFlip` packet in the DCB is unused; the CPU flip is the proven
+  path. Revisiting it would save a CPU round trip per frame.

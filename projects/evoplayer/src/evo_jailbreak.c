@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -89,6 +90,71 @@ int evo_jailbreak_ensure(void)
      * timing race. */
     if (attempt(25)) return 1;
     return attempt(25);
+}
+
+static uint64_t jb_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
+}
+
+/*
+ * Render-loop retry.
+ *
+ * evo_jailbreak_self() waits 1.2 s at boot, which is a coin flip on a console
+ * that has just come up: after the 2026-09-11 panic reboot etaHEN was still
+ * patching shellui when EVO launched 4 s later, so the daemon consumed the
+ * request (daemon_saw=yes) but /data had not resolved before the wait expired.
+ *
+ * Losing that race used to be terminal, not cosmetic. The only other attempt
+ * lives in load_usb_files() - i.e. behind the media browser - and a closed
+ * sandbox is precisely what makes the browser unreachable: settings never load,
+ * so the debug overlay's 2 Hz tick is off, so RmlUi is never dirty again, so
+ * nothing ever swaps and the screen stays black. The app looks dead while the
+ * daemon on the other side is alive and willing.
+ *
+ * So keep asking. Probing is one open("/data") every 250 ms and stops entirely
+ * once promoted; a fresh request is dropped at most once every JB_RETRY_MS.
+ * Returns 1 on the single call that observes the sandbox opening, so the caller
+ * can rebind persistence (#46) and force the repaint the UI will not ask for.
+ */
+#define JB_PROBE_MS   250u
+#define JB_RETRY_MS  3000u
+
+int evo_jailbreak_poll(void)
+{
+    static int      settled = 0;
+    static int      seen_closed = 0;
+    static uint64_t next_probe_ms = 0;
+    static uint64_t last_drop_ms = 0;
+
+    if (settled)
+        return 0;
+
+    uint64_t now = jb_now_ms();
+    if (now < next_probe_ms)
+        return 0;
+    next_probe_ms = now + JB_PROBE_MS;
+
+    if (evo_jailbreak_is_open()) {
+        settled = 1;
+        /* Only a real closed->open TRANSITION is worth reporting. When the boot
+         * attempt already succeeded, the first poll would otherwise announce a
+         * "retry" that never happened and make the caller redo persistence and
+         * pop a toast on every single launch. */
+        if (!seen_closed)
+            return 0;
+        evo_bt("jailbreak: sandbox opened on a render-loop retry (pid=%d)",
+               (int)getpid());
+        return 1;
+    }
+    seen_closed = 1;
+    if (!last_drop_ms || (now - last_drop_ms) >= JB_RETRY_MS) {
+        last_drop_ms = now;
+        drop_request();
+    }
+    return 0;
 }
 
 #endif /* EVO_APP_MODULE */
