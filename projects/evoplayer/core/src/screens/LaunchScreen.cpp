@@ -8,6 +8,7 @@
 
 #include "evo_boot_trace.h"
 #include "evo_boot_log.h"
+#include "evo/animation/AnimationManager.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -41,6 +42,7 @@ void LaunchScreen::initLaunchStateMachine() {
 
 void LaunchScreen::onEnter() {
     StatefulScreen::onEnter();
+    evo::animation::AnimationManager::getInstance().setContinuousAnimation(true);
     m_selectedRow = (recent_file_count > 0) ? 0 : 2;
     m_selectedCol = 0;
     if (m_selectedRow == 0) m_launchFsm.postEvent(LaunchScreenEvent::FocusHero);
@@ -49,6 +51,7 @@ void LaunchScreen::onEnter() {
 }
 
 void LaunchScreen::onExit() {
+    evo::animation::AnimationManager::getInstance().setContinuousAnimation(false);
     StatefulScreen::onExit();
 }
 
@@ -58,6 +61,7 @@ void LaunchScreen::update(double deltaMs) {
 }
 
 void LaunchScreen::navigate(int dx, int dy) {
+    evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
     if (dy < 0) {
         if (m_selectedRow == 2) {
             m_selectedRow = (recent_file_count > 0) ? 1 : 0;
@@ -201,10 +205,20 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
 
     auto coverService = Application::getInstance().getCoverArtService();
 
+    bool railFocused = false;
+    if (auto sm = Application::getInstance().getScreenManager()) {
+        railFocused = sm->isRailFocused();
+    }
+    params.hero_focused = (!railFocused && m_selectedRow == 0);
+
     // Hero
     if (recent_file_count > 0) {
-        const auto& r = recent_files[0];
-        params.hero_eyebrow = (r.last_pos > 1.0) ? "CONTINUE WATCHING" : "PLAY NEXT";
+        int heroIdx = 0;
+        if (!railFocused && m_selectedRow == 1 && m_selectedCol >= 0 && m_selectedCol < recent_file_count) {
+            heroIdx = m_selectedCol;
+        }
+        const auto& r = recent_files[heroIdx];
+        params.hero_eyebrow = (r.last_pos > 1.0) ? "CONTINUE WATCHING" : "START WATCHING";
         params.hero_title = r.title[0] ? r.title : r.path;
         params.hero_detail = r.path;
         params.hero_action = (r.last_pos > 1.0) ? "RESUME" : "PLAY";
@@ -226,11 +240,18 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         params.hero_action = "BROWSE USB";
         params.hero_progress = -1;
     }
-    bool railFocused = false;
-    if (auto sm = Application::getInstance().getScreenManager()) {
-        railFocused = sm->isRailFocused();
+
+    // If hovering library shelf, preview library destination in hero
+    if (!railFocused && m_selectedRow == 2 && m_selectedCol >= 0 && m_selectedCol < 6) {
+        const evo_section_info* info = evo_section_get(static_cast<evo_section>(m_selectedCol + 1));
+        if (info) {
+            params.hero_eyebrow = "LIBRARY";
+            params.hero_title = info->label;
+            params.hero_detail = info->blurb;
+            params.hero_action = "OPEN";
+            params.hero_progress = -1;
+        }
     }
-    params.hero_focused = (!railFocused && m_selectedRow == 0);
 
     // Recent shelf
     params.recent_total = recent_file_count;

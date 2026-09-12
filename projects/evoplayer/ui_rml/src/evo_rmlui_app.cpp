@@ -204,6 +204,7 @@ bool EvoRmlApp::GlNeedsFrame()
     if (m_frame_dirty) return true;
     if (m_toast_doc && m_toast_doc->IsVisible()) return true;
     if (m_dialog_doc && m_dialog_doc->IsVisible()) return true;
+    if (m_launch_doc && m_launch_doc->IsVisible()) return true;
     /* Dev debug overlay: keep the menu FPS number counting on an idle screen -
      * force a redraw ~2 Hz while it is up. */
     if (m_debug_visible) {

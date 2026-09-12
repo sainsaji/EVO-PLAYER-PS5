@@ -2,6 +2,7 @@
 #include "evo/screens/TextReaderScreen.hpp"
 #include "evo/screens/ImageViewerScreen.hpp"
 #include "evo/screens/ModalDialogScreen.hpp"
+#include "evo/animation/AnimationManager.hpp"
 #include "evo/Application.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_keyboard.h"
@@ -86,6 +87,7 @@ void BrowserScreen::navigate(int delta) {
 
     m_settleMs = 0.0;
     m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
+    evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
     int count = static_cast<int>(browser->getEntryCount());
     m_selectedIndex += delta;
 

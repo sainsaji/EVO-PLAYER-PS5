@@ -19,7 +19,7 @@
 EvoRenderInterfaceAGC::EvoRenderInterfaceAGC(int width, int height)
     : m_width(width), m_height(height), m_scissor_enabled(false)
 {
-    m_scissor_region = Rml::Rectanglei::FromSize({width, height});
+    SetDimensions(width, height);
 
     /* Create 1x1 opaque white texture for untextured rendering */
     const uint32_t white_pixel = 0xffffffff;
@@ -44,6 +44,13 @@ void EvoRenderInterfaceAGC::SetDimensions(int w, int h)
     if (!m_scissor_enabled) {
         m_scissor_region = Rml::Rectanglei::FromSize({w, h});
     }
+    m_projection = Rml::Matrix4f::FromColumns(
+        Rml::Vector4f(2.0f / (float)m_width, 0.0f, 0.0f, 0.0f),
+        Rml::Vector4f(0.0f, -2.0f / (float)m_height, 0.0f, 0.0f),
+        Rml::Vector4f(0.0f, 0.0f, 1.0f, 0.0f),
+        Rml::Vector4f(-1.0f, 1.0f, 0.0f, 1.0f)
+    );
+    SetTransform(nullptr);
 }
 
 void EvoRenderInterfaceAGC::FrameBegin()
@@ -200,13 +207,8 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     float *constants = reinterpret_cast<float *>(const_slice.cpu);
     memset(constants, 0, 128);
 
-    /* mat4 projection (column-major) */
-    constants[0]  =  2.0f / (float)m_width;
-    constants[5]  = -2.0f / (float)m_height;
-    constants[10] =  1.0f;
-    constants[12] = -1.0f;
-    constants[13] =  1.0f;
-    constants[15] =  1.0f;
+    /* mat4 projection / transform (column-major) */
+    memcpy(constants, m_transform.data(), 16 * sizeof(float));
 
     /* vec4 translation */
     constants[16] = translation.x;
@@ -336,7 +338,13 @@ void EvoRenderInterfaceAGC::SetScissorRegion(Rml::Rectanglei region)
 
 void EvoRenderInterfaceAGC::SetTransform(const Rml::Matrix4f *transform)
 {
-    (void)transform;
+    if (transform) {
+        m_transform = m_projection * (*transform);
+        m_transform_active = true;
+    } else {
+        m_transform = m_projection;
+        m_transform_active = false;
+    }
 }
 
 void EvoRenderInterfaceAGC::EnableClipMask(bool enable)

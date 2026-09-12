@@ -92,25 +92,27 @@ div, span {
 .rail-item {
     width: 84px;
     height: 50px;
-    border-radius: 16px;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     background-color: transparent;
     border-width: 0px;
     border-color: transparent;
+    transition: transform 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .rail-item-active {
-    background-color: #1b2e4ceb;
+    background-color: #263e64b8;
     border-width: 1px;
-    border-color: #2a3b55aa;
+    border-color: #5a7db44d;
 }
 
 .rail-item-cursor {
-    background-color: #00cdffe6;
+    background-color: #00cdffd9;
     border-width: 1px;
     border-color: #ffffff;
+    transform: scale(1.06);
 }
 
 .rail-icon {

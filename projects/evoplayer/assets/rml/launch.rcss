@@ -138,8 +138,11 @@ div, span, p {
  * overflow does not clip absolutely-positioned children here — it painted
  * the poster across the whole page.
  */
-/* #64: concentric with #hero (1704x318, radius 22). Inset 2px -> 1700x314,
- * radius 22-2 = 20 (was 1698x312 r19: a 2px gap right + bottom, radius off). */
+@keyframes heroKen {
+    from { transform: scale(1.02); }
+    to   { transform: scale(1.10); }
+}
+
 #hero-art {
     position: absolute;
     left: 2px;
@@ -147,6 +150,7 @@ div, span, p {
     width: 1700px;
     height: 314px;
     border-radius: 20px;
+    animation: 20s cubic-in-out infinite alternate heroKen;
 }
 
 /*
@@ -246,12 +250,11 @@ div, span, p {
     height: 6px;
     border-radius: 3px;
     background-color: #ffcd00;
+    transition: width 0.35s cubic-out;
 }
 
 /*
- * Chip geometry spelled out, because guessing it put the glyph and the label
- * on top of each other in the immediate-mode original: 14 left pad, a 28 px
- * controller glyph, 14 of gap, the label, 18 right pad.
+ * Chip geometry with smooth transitions matching ui.html
  */
 #hero-chip {
     height: 62px;
@@ -265,6 +268,14 @@ div, span, p {
     padding-left: 14px;
     padding-right: 18px;
     gap: 14px;
+    transition: transform 0.2s cubic-out, background-color 0.2s cubic-out, border-color 0.2s cubic-out;
+}
+
+#hero.hero-focused #hero-chip,
+.hero-chip-focused {
+    transform: scale(1.05);
+    background-color: #1e2e4af5;
+    border-color: #00cdff;
 }
 
 #hero-chip-glyph {
@@ -350,23 +361,31 @@ div, span, p {
 .tile {
     width: 264px;
     height: 166px;
-    background-color: #121b2eeb;
+    background-color: #101a2ceb;
     border-width: 1px;
     border-color: #2a3b55aa;
-    border-radius: 20px;
+    border-radius: 18px;
     position: relative;
-    /* #64: clip the poster (an abs-positioned child with an image decorator,
-     * which RmlUi does NOT round on its own) to the card's rounded shape.
-     * RmlUi 6.2 renders this via RenderToClipMask, which the EVO rasteriser
-     * implements — so it works here even though an older comment claimed
-     * overflow doesn't clip abs children. */
     overflow: hidden;
+    transition: transform 0.2s cubic-out, border-color 0.2s cubic-out, background-color 0.2s cubic-out;
 }
 
 .tile-focused {
-    background-color: #1b2e4cf5;
+    background-color: #16223af5;
     border-width: 2px;
     border-color: #ffcd00;
+    transform: scale(1.04);
+}
+
+.tile-destination {
+    background-color: #0f1828eb;
+}
+
+.tile-destination.tile-focused {
+    background-color: #16223af5;
+    border-width: 2px;
+    border-color: #00cdff;
+    transform: scale(1.04);
 }
 
 /* #64: fill the whole card; .tile's overflow:hidden rounds it to the card

@@ -136,12 +136,14 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    transition: transform 0.16s cubic-out, border-color 0.16s cubic-out, background-color 0.16s cubic-out;
 }
 
 .brow-focused {
-    background-color: #1b2e4cf5;
+    background-color: #16223af5;
     border-width: 1.5px;
-    border-color: #00cdff;
+    border-color: #ffcd00;
+    transform: scale(1.015);
 }
 
 .brow-left {
@@ -304,11 +306,12 @@ div, span, p {
     top: 222px;
     width: 564px;
     height: 714px;
-    background-color: #121b2eeb;
+    background-color: #10192bf0;
     border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 20px;
+    border-color: #2a3b5588;
+    border-radius: 18px;
     padding: 20px;
+    transition: transform 0.2s cubic-out, opacity 0.2s cubic-out;
 }
 
 /* 16:9 at the panel's inner width, so a frame from the file is shown at the

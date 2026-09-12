@@ -15,6 +15,7 @@
 #include "evo/screens/AboutSupportScreen.hpp"
 #include "evo/screens/ImageViewerScreen.hpp"
 #include "evo/screens/ChangelogScreen.hpp"
+#include "evo/animation/AnimationManager.hpp"
 
 #include "evo_boot_log.h"
 #include "evo_boot_trace.h"
@@ -358,6 +359,9 @@ int Application::run() {
             if (evo_input_fired(&evo_pad_state, EVO_ACT_RIGHT)) pressed |= PadButtons::Right;
 
             hasInput = (pressed != 0 || released != 0 || evo_input_any(&evo_pad_state));
+            if (hasInput) {
+                evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
+            }
 
             if (evo_keyboard_is_open()) {
                 evo_keyboard_update();
@@ -373,12 +377,14 @@ int Application::run() {
             lastButtons = padData.buttons;
         }
 
-        // 2. Update screen logic
+        // 2. Update animation engine and screen logic
+        evo::animation::AnimationManager::getInstance().update(16.667);
         m_screenManager->update(16.667);
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
-        int glActive = (frame < 10) || isPlayer || hasInput || evo_rmlui_gl_needs_frame() || (jb_repaint > 0);
+        bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
+        int glActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_gl_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;
         evo_rmlui_gl_set_active(glActive);
 

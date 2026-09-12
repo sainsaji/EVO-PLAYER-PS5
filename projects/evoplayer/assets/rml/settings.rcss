@@ -109,12 +109,14 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    transition: transform 0.16s cubic-out, border-color 0.16s cubic-out, background-color 0.16s cubic-out;
 }
 
 .row-focused {
-    background-color: #142036;
+    background-color: #16223af5;
     border-width: 1.5px;
-    border-color: #38bdf8;
+    border-color: #ffcd00;
+    transform: scale(1.012);
 }
 
 .row-left {

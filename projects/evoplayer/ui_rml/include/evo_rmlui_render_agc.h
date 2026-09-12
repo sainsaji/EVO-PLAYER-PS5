@@ -93,6 +93,10 @@ private:
     bool m_scissor_enabled;
     Rml::Rectanglei m_scissor_region;
 
+    Rml::Matrix4f m_projection;
+    Rml::Matrix4f m_transform;
+    bool m_transform_active = false;
+
     /*
      * Bounding-box approximation of a clip mask.
      *

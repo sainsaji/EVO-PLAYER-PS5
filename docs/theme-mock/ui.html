@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EVO Player Home</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap">
+<style>
+:root{
+  --ink:#eef4ff; --mute:#a3b6d0; --dim:#5e718c;
+  --accent:#ffcd00; --cyan:#00cdff; --hero-bg:#0f1829;
+  --line:rgba(90,125,180,.20);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:#04060a;color:var(--ink);font-family:Lato,"Segoe UI",system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;-webkit-font-smoothing:antialiased}
+.fit{width:100%;max-width:1920px}
+.viewport{position:relative;width:100%;overflow:hidden;border-radius:16px}
+.stage{
+  position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;font-size:16px;
+  background:
+    radial-gradient(900px 600px at 78% -8%, rgba(94,52,132,.20), transparent 62%),
+    radial-gradient(700px 500px at 6% 104%, rgba(0,205,255,.06), transparent 66%),
+    linear-gradient(180deg,#080d16 0%,#05080f 58%,#03050a 100%);
+}
+
+/* rail */
+.rail{position:absolute;left:0;top:0;width:108px;height:1080px;background:rgba(6,10,20,.72);border-right:1px solid var(--line);z-index:5}
+.rail-logo{position:absolute;left:0;top:22px;width:108px;height:52px;display:flex;align-items:center;justify-content:center}
+.rail-logo svg{filter:drop-shadow(0 0 10px rgba(0,205,255,.35))}
+.rail-items{position:absolute;left:0;top:88px;width:108px;display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:2px}
+.rail-wrap{position:relative;width:108px;height:54px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.rail-bar{position:absolute;left:0;top:14px;width:3px;height:26px;border-radius:2px;background:var(--cyan)}
+.rail-item{width:84px;height:50px;border-radius:14px;display:flex;align-items:center;justify-content:center;transition:background .2s ease}
+.rail-wrap:hover .rail-item{background:rgba(40,60,92,.55)}
+.rail-item.active{background:rgba(38,62,100,.72);border:1px solid rgba(90,125,180,.30)}
+.rail-item.cursor{background:rgba(0,205,255,.85)}
+.rail-item svg{width:32px;height:32px;display:block}
+
+.pane{position:absolute;left:152px;top:0;width:1768px;height:1080px;z-index:4}
+.header{position:absolute;left:0;top:72px;width:1704px;height:88px;display:flex;justify-content:space-between;align-items:center}
+.brand{display:flex;align-items:center}
+.brand-mark{width:76px;height:76px;border-radius:38px;background:rgba(255,205,0,.10);border:1px solid rgba(255,205,0,.22);display:flex;align-items:center;justify-content:center;margin-right:18px}
+.brand-mark svg{filter:drop-shadow(0 0 8px rgba(255,205,0,.40))}
+.brand-name{font-size:32px;font-weight:900;letter-spacing:3px}
+.brand-version{font-size:14px;font-weight:700;color:var(--dim);letter-spacing:2.5px;margin-top:5px}
+.status{display:flex;flex-direction:column;align-items:flex-end}
+.clock{font-size:32px;font-weight:700;letter-spacing:1.5px;font-variant-numeric:tabular-nums}
+.theme-name{font-size:14px;font-weight:700;color:var(--dim);letter-spacing:2.5px;margin-top:5px;display:flex;align-items:center;gap:8px}
+.theme-name::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--cyan)}
+
+.hero{position:absolute;left:0;top:200px;width:1704px;height:318px;background:var(--hero-bg);border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 40px 80px -50px rgba(0,0,0,1);isolation:isolate}
+.hero-art{position:absolute;left:1px;top:1px;width:1702px;height:316px;border-radius:21px;overflow:hidden;background:#161a30}
+.hero-art img{width:100%;height:100%;object-fit:cover;object-position:center 34%;filter:saturate(1.02) brightness(.82);animation:heroKen 40s ease-in-out infinite alternate;transition:opacity .35s ease}
+.hero-art img.swapping{opacity:0}
+@keyframes heroKen{from{transform:scale(1.03)}to{transform:scale(1.10)}}
+.hero-fade-l{position:absolute;left:1px;top:1px;width:520px;height:316px;background:var(--hero-bg);z-index:3}
+.hero-fade-h{position:absolute;left:521px;top:1px;width:600px;height:316px;z-index:3;background:linear-gradient(90deg,var(--hero-bg),rgba(15,24,41,0))}
+.hero-fade-b{position:absolute;left:1px;bottom:1px;width:1702px;height:170px;z-index:3;background:linear-gradient(180deg,rgba(2,4,10,0),rgba(2,4,10,.86))}
+.hero-copy{position:absolute;left:56px;top:38px;width:900px;display:flex;flex-direction:column;z-index:4}
+.hero-eyebrow{font-size:15px;font-weight:700;color:var(--accent);letter-spacing:2.6px;display:flex;align-items:center;gap:10px}
+.hero-eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.hero-title{font-size:44px;font-weight:900;color:#fff;letter-spacing:.5px;margin-top:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-detail{font-size:19px;color:var(--mute);letter-spacing:.5px;margin-top:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-foot{position:absolute;left:56px;bottom:28px;width:800px;display:flex;flex-direction:column;align-items:flex-start;z-index:4}
+.hero-track{width:560px;height:5px;border-radius:3px;background:rgba(120,150,200,.20);margin-bottom:18px;overflow:hidden}
+.hero-fill{height:5px;border-radius:3px;width:38%;background:var(--accent);transition:width .5s ease}
+.hero-chip{height:58px;border-radius:29px;background:rgba(22,34,56,.92);border:1px solid rgba(0,205,255,.28);display:inline-flex;align-items:center;padding-left:14px;padding-right:20px;gap:12px;transition:background .2s ease, border-color .2s ease;cursor:pointer}
+.hero-chip:hover{background:rgba(30,46,74,.95);border-color:rgba(0,205,255,.5)}
+.hero-chip:active{background:rgba(16,26,44,.95)}
+.hero-chip .glyph{width:34px;height:34px;border-radius:17px;background:rgba(0,205,255,.12);border:1px solid rgba(0,205,255,.45);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--cyan)}
+.hero-chip-label{font-size:21px;font-weight:900;color:var(--ink);letter-spacing:2px}
+
+.shelves{position:absolute;left:0;top:556px;width:1704px;display:flex;flex-direction:column}
+.shelf{width:1704px;margin-bottom:26px}
+.shelf-head{width:1704px;height:36px;display:flex;justify-content:space-between;align-items:center}
+.shelf-label{display:flex;align-items:center}
+.shelf-tick{width:3px;height:18px;border-radius:2px;margin-right:14px;background:var(--accent)}
+.shelf-title{font-size:22px;font-weight:900;color:#c2d2e8;letter-spacing:2.2px}
+.shelf-count{font-size:14px;font-weight:700;color:var(--dim);letter-spacing:2px}
+.shelf-tiles{width:1704px;height:166px;display:flex;gap:24px}
+
+.tile{position:relative;width:264px;height:166px;background:#101a2c;border:1px solid var(--line);border-radius:18px;overflow:hidden;flex:0 0 auto;transition:border-color .18s ease, background .18s ease;cursor:pointer}
+.tile:hover{border-color:rgba(140,180,240,.38)}
+.tile.focused{border-color:var(--accent);background:#16223a}
+.tile.kb-focus{outline:2px dashed rgba(255,255,255,.6);outline-offset:3px}
+.tile-art{position:absolute;inset:0;border-radius:18px;overflow:hidden;background:#141c30}
+.tile-art img{width:100%;height:100%;object-fit:cover;filter:saturate(1.02) brightness(.85);transition:filter .3s ease}
+.tile:hover .tile-art img{filter:saturate(1.06) brightness(.95)}
+.tile-scrim{position:absolute;left:0;right:0;bottom:0;height:110px;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.55) 42%,rgba(0,0,0,.94) 100%)}
+.tile-caption{position:absolute;left:18px;right:18px;bottom:16px;z-index:3;display:flex;flex-direction:column}
+.tile-title{font-size:20px;font-weight:900;color:#fff;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile-detail{font-size:15px;color:#c3d2e6;letter-spacing:.6px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile-track{position:absolute;left:18px;right:18px;bottom:8px;height:5px;z-index:4;border-radius:3px;background:rgba(120,150,200,.22);overflow:hidden}
+.tile-fill{height:5px;border-radius:3px;background:var(--accent)}
+.tile-badge{position:absolute;right:14px;top:14px;z-index:3;height:24px;padding:0 10px;border-radius:12px;background:rgba(6,12,22,.78);border:1px solid rgba(120,150,200,.28);display:flex;align-items:center;font-size:11px;font-weight:700;color:#a3b6d0;letter-spacing:1.4px}
+
+.tile.lib{background:#0f1828}
+.tile.lib:hover{background:#16223a;border-color:rgba(0,205,255,.45)}
+.tile.lib.selected{border-color:var(--cyan);background:#16223a}
+.tile-iconbox{position:absolute;left:20px;top:20px;z-index:3;width:52px;height:52px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:rgba(0,205,255,.08);border:1px solid rgba(0,205,255,.20);transition:background .2s ease, border-color .2s ease}
+.tile.lib:hover .tile-iconbox{background:rgba(0,205,255,.14);border-color:rgba(0,205,255,.45)}
+.tile.lib.selected .tile-iconbox{background:rgba(0,205,255,.16);border-color:var(--cyan)}
+.tile-iconbox svg{width:30px;height:30px;stroke:#9fb2cc;transition:stroke .2s ease}
+.tile.lib:hover .tile-iconbox svg{stroke:var(--cyan)}
+.tile.lib.selected .tile-iconbox svg{stroke:var(--cyan)}
+.tile-index{position:absolute;right:16px;top:18px;z-index:3;font-size:12px;font-weight:900;letter-spacing:2px;color:rgba(160,190,230,.35)}
+.tile.lib .tile-scrim{height:100px;background:linear-gradient(180deg, rgba(10,16,28,0), rgba(8,13,24,.85) 60%, rgba(6,10,20,.95))}
+.tile-status{position:absolute;right:16px;bottom:20px;z-index:3;width:7px;height:7px;border-radius:50%;background:#3ddc84}
+
+.footer{position:absolute;left:0;bottom:40px;width:1704px;display:flex;gap:32px}
+.hint{display:flex;align-items:center;gap:10px;cursor:pointer}
+.badge{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(20,34,58,.72);border:1px solid rgba(120,150,200,.22);font-size:15px;font-weight:700;color:#cfe0ff;transition:background .16s ease}
+.hint:hover .badge{background:rgba(30,48,78,.85)}
+.hint:active .badge{background:rgba(16,26,44,.9)}
+.hint-text{font-size:14px;font-weight:700;color:#8b99ad;letter-spacing:1.8px;transition:color .16s}
+.hint:hover .hint-text{color:#d5e2f5}
+
+.toast{position:absolute;left:50%;bottom:126px;transform:translate(-50%, 14px);z-index:200;display:flex;align-items:center;gap:10px;padding:12px 22px;border-radius:999px;background:rgba(12,20,34,.94);border:1px solid rgba(0,205,255,.28);opacity:0;pointer-events:none;transition:opacity .28s ease, transform .28s ease}
+.toast.show{opacity:1;transform:translate(-50%, 0)}
+.toast-dot{width:6px;height:6px;border-radius:50%;background:var(--cyan)}
+.toast-text{font-size:14px;font-weight:700;letter-spacing:1.8px;color:var(--ink);white-space:nowrap}
+
+/* overlays */
+.ov-overlay{position:absolute;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(2,4,10,.72);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);opacity:0;visibility:hidden;transition:opacity .26s ease, visibility 0s linear .26s}
+.ov-overlay.open{opacity:1;visibility:visible;transition:opacity .26s ease, visibility 0s linear 0s}
+.ov-console{position:relative;width:1616px;height:960px;display:flex;flex-direction:column;transform:translateY(14px);opacity:0;transition:transform .30s cubic-bezier(.2,.8,.25,1), opacity .30s ease}
+.ov-overlay.open .ov-console{transform:none;opacity:1}
+.ov-top{flex:0 0 auto;display:flex;align-items:center;gap:22px;padding:0 0 22px;border-bottom:1px solid var(--line)}
+.ov-badge{width:68px;height:68px;border-radius:18px;background:rgba(0,205,255,.10);border:1px solid rgba(0,205,255,.30);display:flex;align-items:center;justify-content:center}
+.ov-badge svg{width:32px;height:32px;color:var(--cyan)}
+.ov-head-text{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.ov-title{font-size:24px;font-weight:900;letter-spacing:3px;display:flex;align-items:center;gap:12px}
+.ov-live-dot{width:7px;height:7px;border-radius:50%;background:#3ddc84}
+.ov-subtitle{font-size:14px;font-weight:700;letter-spacing:2px;color:var(--mute)}
+.ov-chip{font-size:14px;font-weight:700;letter-spacing:2px;color:var(--dim);padding:8px 16px;border-radius:10px;background:rgba(20,32,54,.55);border:1px solid var(--line)}
+.ov-hints{flex:0 0 auto;margin-top:20px;display:flex;gap:34px;align-items:center}
+.ov-hint{display:flex;align-items:center;gap:10px}
+.ov-hint-badge{width:36px;height:36px;border-radius:50%;background:rgba(20,34,58,.72);border:1px solid rgba(120,150,200,.22);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#cfe0ff}
+.ov-hint-label{font-size:13px;font-weight:700;letter-spacing:2px;color:#8b99ad}
+
+/* ============================================================================
+   FILE MANAGER
+   ============================================================================ */
+.fm-body{flex:1 1 auto;display:flex;gap:22px;margin-top:24px;overflow:hidden;min-height:0}
+
+.fm-grid{
+  flex:1 1 auto;min-width:0;
+  overflow-y:auto;
+  display:grid;
+  grid-template-columns:repeat(4, 1fr);
+  gap:18px;
+  padding:4px 4px 16px;
+  align-content:start;
+  scrollbar-width:thin;scrollbar-color:rgba(90,125,180,.30) transparent;
+}
+.fm-grid::-webkit-scrollbar{width:9px}
+.fm-grid::-webkit-scrollbar-thumb{background:rgba(90,125,180,.30);border-radius:5px}
+.fm-grid::-webkit-scrollbar-track{background:transparent}
+
+.fm-tile{
+  position:relative;
+  height:180px;
+  border-radius:18px;
+  background:#101a2c;
+  border:1px solid var(--line);
+  overflow:hidden;
+  cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:18px 14px 14px;
+  transition:border-color .18s ease, background .18s ease;
+  outline:none;
+}
+.fm-tile:hover{border-color:rgba(140,180,240,.42);background:#15203a}
+.fm-tile.focused{border-color:var(--accent);background:#16223a}
+
+.fm-tile-icon{width:72px;height:72px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;border-radius:20px;background:rgba(0,205,255,.06);border:1px solid rgba(0,205,255,.16);transition:background .18s ease, border-color .18s ease;position:relative;overflow:hidden}
+.fm-tile-icon.thumb{padding:0;background:transparent;border-color:rgba(0,205,255,.20)}
+.fm-tile-icon.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.fm-tile:hover .fm-tile-icon{background:rgba(0,205,255,.12);border-color:rgba(0,205,255,.32)}
+.fm-tile:hover .fm-tile-icon.thumb{background:transparent}
+.fm-tile.focused .fm-tile-icon{background:rgba(255,205,0,.10);border-color:rgba(255,205,0,.45)}
+.fm-tile.focused .fm-tile-icon.thumb{background:transparent;border-color:rgba(255,205,0,.55)}
+.fm-tile-icon svg{width:40px;height:40px;color:#a3b6d0;transition:color .18s ease}
+.fm-tile:hover .fm-tile-icon svg{color:var(--cyan)}
+.fm-tile.focused .fm-tile-icon svg{color:var(--accent)}
+
+.fm-tile-name{font-size:14px;font-weight:900;letter-spacing:.3px;color:#eef4ff;text-align:center;line-height:1.3;max-width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.fm-tile-meta{margin-top:5px;font-size:11.5px;font-weight:700;letter-spacing:1.4px;color:var(--dim);transition:color .18s ease}
+.fm-tile.focused .fm-tile-meta{color:var(--accent)}
+.fm-tile-play{position:absolute;left:0;right:0;top:0;height:72px;margin:18px 14px 0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.fm-tile-play::before{content:"";position:absolute;width:34px;height:34px;border-radius:50%;background:rgba(6,12,22,.72);border:1px solid rgba(255,255,255,.22);backdrop-filter:blur(6px)}
+.fm-tile-play svg{position:relative;width:14px;height:14px;color:#fff;margin-left:2px}
+
+.fm-empty{grid-column:1 / -1;padding:120px 20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--dim)}
+.fm-empty svg{width:52px;height:52px;opacity:.4}
+.fm-empty-text{font-size:15px;font-weight:700;letter-spacing:2.4px}
+
+/* ---------- details panel ---------- */
+.fm-details{
+  flex:0 0 400px;width:400px;
+  display:flex;flex-direction:column;gap:18px;
+  padding:18px;
+  border-radius:18px;
+  background:rgba(20,31,52,.55);
+  border:1px solid var(--line);
+  overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:rgba(90,125,180,.30) transparent;
+}
+.fm-details::-webkit-scrollbar{width:9px}
+.fm-details::-webkit-scrollbar-thumb{background:rgba(90,125,180,.30);border-radius:5px}
+
+.fm-details-thumb{
+  position:relative;
+  width:100%;aspect-ratio:16/9;
+  border-radius:14px;
+  overflow:hidden;
+  background:rgba(10,16,28,.85);
+  border:1px solid rgba(0,205,255,.16);
+  display:flex;align-items:center;justify-content:center;
+  flex:0 0 auto;
+}
+.fm-details-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.fm-details-thumb.icon-only{border-color:rgba(0,205,255,.20);background:radial-gradient(120% 120% at 30% 20%, rgba(0,205,255,.10), rgba(10,16,28,.85) 70%)}
+.fm-details-thumb.icon-only svg{width:80px;height:80px;color:var(--cyan);opacity:.85}
+.fm-details-thumb .badge{
+  position:absolute;left:12px;top:12px;height:24px;padding:0 10px;border-radius:12px;
+  background:rgba(6,12,22,.82);border:1px solid rgba(120,150,200,.34);
+  display:flex;align-items:center;font-size:11px;font-weight:700;color:#cfe0ff;letter-spacing:1.6px;
+  backdrop-filter:blur(6px);
+}
+.fm-details-thumb .play-overlay{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at center, rgba(0,0,0,.10), rgba(0,0,0,.55));
+}
+.fm-details-thumb .play-overlay svg{width:40px;height:40px;color:#fff;filter:drop-shadow(0 4px 12px rgba(0,0,0,.7))}
+
+.fm-details-header{display:flex;flex-direction:column;gap:6px}
+.fm-details-name{font-size:18px;font-weight:900;letter-spacing:.3px;color:#fff;line-height:1.35;word-break:break-word}
+.fm-details-type{font-size:11.5px;font-weight:700;letter-spacing:2.2px;color:var(--cyan)}
+
+.fm-details-list{display:flex;flex-direction:column;gap:0;margin-top:2px}
+.fm-details-row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:11px 0;border-bottom:1px solid rgba(90,125,180,.10);font-size:13px}
+.fm-details-row:last-child{border-bottom:none}
+.fm-details-row .k{font-weight:700;letter-spacing:1.4px;color:var(--dim);flex:0 0 auto}
+.fm-details-row .v{font-weight:700;color:#eef4ff;text-align:right;word-break:break-word;min-width:0;line-height:1.4}
+
+.fm-details-empty{
+  flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:60px 20px;color:var(--dim);
+}
+.fm-details-empty svg{width:48px;height:48px;opacity:.35}
+.fm-details-empty-text{font-size:12px;font-weight:700;letter-spacing:2.4px;text-align:center}
+
+.fm-crumbs{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:700;letter-spacing:2px;color:var(--dim)}
+.fm-crumb{color:var(--mute);padding:3px 8px;border-radius:6px;cursor:pointer;transition:color .16s ease, background .16s ease}
+.fm-crumb:hover{color:#fff;background:rgba(120,150,200,.10)}
+.fm-crumb.active{color:var(--cyan);cursor:default}
+.fm-crumb.active:hover{background:transparent}
+.fm-crumb-sep{color:var(--dim);opacity:.7}
+
+/* ============================================================================
+   SETTINGS
+   ============================================================================ */
+.sm-body{flex:1 1 auto;display:flex;gap:32px;margin-top:26px;overflow:hidden;min-height:0}
+.sm-nav{width:260px;flex:0 0 260px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;padding-right:8px}
+.sm-nav-item{height:56px;padding:0 18px;border-radius:12px;display:flex;align-items:center;gap:14px;cursor:pointer;background:transparent;border:1px solid transparent;transition:background .16s ease, border-color .16s ease}
+.sm-nav-item:hover{background:rgba(120,150,200,.06)}
+.sm-nav-item.active{background:rgba(0,205,255,.08);border-color:rgba(0,205,255,.30)}
+.sm-nav-item.active .sm-nav-label{color:var(--cyan)}
+.sm-nav-item.active .sm-nav-icon svg{color:var(--cyan)}
+.sm-nav-item.focused{background:rgba(255,205,0,.06);border-color:var(--accent)}
+.sm-nav-item.focused .sm-nav-label{color:var(--accent)}
+.sm-nav-item.focused .sm-nav-icon svg{color:var(--accent)}
+.sm-nav-icon{width:24px;height:24px;flex:0 0 24px;display:flex;align-items:center;justify-content:center}
+.sm-nav-icon svg{width:22px;height:22px;color:#8b99ad;transition:color .16s ease}
+.sm-nav-label{font-size:15px;font-weight:700;letter-spacing:1.8px;color:#c2d2e8;transition:color .16s ease}
+
+.sm-content{flex:1 1 auto;min-width:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:8px;scrollbar-width:thin;scrollbar-color:rgba(90,125,180,.30) transparent}
+.sm-content::-webkit-scrollbar{width:9px}
+.sm-content::-webkit-scrollbar-thumb{background:rgba(90,125,180,.30);border-radius:5px}
+
+.sm-row{display:flex;align-items:center;gap:24px;padding:20px 24px;border-radius:14px;background:#101a2c;border:1px solid rgba(90,125,180,.14);transition:border-color .16s ease, background .16s ease;cursor:pointer}
+.sm-row:hover{border-color:rgba(140,180,240,.30)}
+.sm-row.focused{border-color:var(--accent);background:#16223a}
+.sm-label{flex:1;min-width:0}
+.sm-label-main{font-size:16px;font-weight:700;color:#eef4ff;letter-spacing:.4px}
+.sm-label-desc{font-size:13px;font-weight:700;color:#7c8ba3;letter-spacing:.6px;margin-top:6px;line-height:1.5}
+.sm-control{flex:0 0 auto;display:flex;align-items:center}
+
+.switch{width:52px;height:28px;border-radius:14px;background:rgba(60,80,110,.5);border:1px solid rgba(120,150,200,.24);position:relative;transition:background .2s ease, border-color .2s ease}
+.switch::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#7c8ba3;transition:transform .2s cubic-bezier(.2,.8,.25,1), background .2s ease}
+.switch.on{background:rgba(0,205,255,.28);border-color:rgba(0,205,255,.55)}
+.switch.on::after{transform:translateX(24px);background:var(--cyan)}
+
+.segmented{display:flex;gap:4px;padding:4px;border-radius:12px;background:rgba(10,16,28,.6);border:1px solid rgba(90,125,180,.18)}
+.segment{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:700;letter-spacing:1.4px;color:#7c8ba3;cursor:pointer;transition:background .16s ease, color .16s ease}
+.segment:hover{color:#eef4ff}
+.segment.active{background:rgba(0,205,255,.18);color:var(--cyan)}
+
+.checks{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:640px}
+.check{padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1.2px;color:#7c8ba3;border:1px solid rgba(120,150,200,.18);cursor:pointer;transition:background .16s ease, color .16s ease, border-color .16s ease;background:rgba(10,16,28,.5)}
+.check:hover{color:#eef4ff}
+.check.on{background:rgba(0,205,255,.12);color:var(--cyan);border-color:rgba(0,205,255,.45)}
+.check.focused{outline:2px solid var(--accent);outline-offset:2px}
+
+.caption{max-width:1920px;margin:14px auto 0;color:#6c7a8d;font-size:13px;line-height:1.6}
+.caption b{color:#9fb2cc;font-weight:700}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+</style>
+</head>
+<body>
+<div class="fit">
+  <div class="viewport" id="viewport">
+    <div class="stage" id="stage">
+
+      <div class="rail">
+        <div class="rail-logo">
+          <svg viewBox="0 0 38 38" fill="none" stroke="#00cdff" stroke-width="2.2"><circle cx="19" cy="19" r="15"/><path d="M15 12l12 7-12 7z" fill="#00cdff" stroke="none"/></svg>
+        </div>
+        <div class="rail-items" id="railItems"></div>
+      </div>
+
+      <div class="pane">
+        <div class="header">
+          <div class="brand">
+            <div class="brand-mark">
+              <svg viewBox="0 0 44 44" fill="none" stroke="#ffcd00" stroke-width="2.4"><circle cx="22" cy="22" r="17"/><path d="M18 14l14 8-14 8z" fill="#ffcd00" stroke="none"/></svg>
+            </div>
+            <div>
+              <div class="brand-name">EVO PLAYER</div>
+              <div class="brand-version">VERSION 0.7.0</div>
+            </div>
+          </div>
+          <div class="status">
+            <div class="clock" id="clock">21:48</div>
+            <div class="theme-name">MIDNIGHT</div>
+          </div>
+        </div>
+
+        <div class="hero" id="hero">
+          <div class="hero-art">
+            <img id="heroImg" src="https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1900&q=80&auto=format&fit=crop" alt="">
+          </div>
+          <div class="hero-fade-l"></div>
+          <div class="hero-fade-h"></div>
+          <div class="hero-fade-b"></div>
+          <div class="hero-copy" id="heroCopy">
+            <div class="hero-eyebrow" id="heroEyebrow">CONTINUE WATCHING</div>
+            <div class="hero-title" id="heroTitle">Blade Runner 2049</div>
+            <div class="hero-detail" id="heroDetail">38M LEFT &middot; HEVC MAIN 10 &middot; HDR10 &middot; DTS-HD MA 5.1</div>
+          </div>
+          <div class="hero-foot">
+            <div class="hero-track"><div class="hero-fill" id="heroFill"></div></div>
+            <div class="hero-chip" id="heroChip">
+              <span class="glyph">&#10005;</span>
+              <span class="hero-chip-label">RESUME</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="shelves">
+          <div class="shelf">
+            <div class="shelf-head">
+              <div class="shelf-label"><div class="shelf-tick"></div><span class="shelf-title">JUMP BACK IN</span></div>
+              <div class="shelf-count">6 ITEMS</div>
+            </div>
+            <div class="shelf-tiles" id="recentTiles"></div>
+          </div>
+          <div class="shelf">
+            <div class="shelf-head">
+              <div class="shelf-label"><div class="shelf-tick"></div><span class="shelf-title">LIBRARY</span></div>
+              <div class="shelf-count">6 DESTINATIONS</div>
+            </div>
+            <div class="shelf-tiles" id="libraryTiles"></div>
+          </div>
+        </div>
+
+        <div class="footer" id="footer"></div>
+      </div>
+
+      <!-- ============ CONSOLE FILE MANAGER ============ -->
+      <div class="ov-overlay" id="fmOverlay">
+        <div class="ov-console">
+          <div class="ov-top">
+            <div class="ov-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="8" y="7" width="8" height="14" rx="1.6"/>
+                <rect x="10" y="3" width="4" height="4" rx="0.8"/>
+                <circle cx="12" cy="17" r="1" fill="currentColor"/>
+              </svg>
+            </div>
+            <div class="ov-head-text">
+              <div class="ov-title"><span>USB DRIVE</span><span class="ov-live-dot"></span></div>
+              <div class="fm-crumbs" id="fmCrumbs"></div>
+            </div>
+            <div class="ov-chip" id="fmCount">0 ITEMS</div>
+          </div>
+
+          <div class="fm-body">
+            <div class="fm-grid" id="fmGrid"></div>
+
+            <aside class="fm-details" id="fmDetails">
+              <div class="fm-details-thumb icon-only" id="fmDetailsThumb"></div>
+              <div class="fm-details-header">
+                <div class="fm-details-name" id="fmDetailsName">—</div>
+                <div class="fm-details-type" id="fmDetailsType">NO SELECTION</div>
+              </div>
+              <div class="fm-details-list" id="fmDetailsList"></div>
+            </aside>
+          </div>
+
+          <div class="ov-hints">
+            <div class="ov-hint"><div class="ov-hint-badge">&#10005;</div><div class="ov-hint-label">OPEN</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9675;</div><div class="ov-hint-label">BACK</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9651;</div><div class="ov-hint-label">NAVIGATE</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9633;</div><div class="ov-hint-label">CLOSE</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ CONSOLE SETTINGS ============ -->
+      <div class="ov-overlay" id="smOverlay">
+        <div class="ov-console">
+          <div class="ov-top">
+            <div class="ov-badge">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 2.5v2.5M12 19v2.5M2.5 12h2.5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>
+              </svg>
+            </div>
+            <div class="ov-head-text">
+              <div class="ov-title"><span>SETTINGS</span><span class="ov-live-dot"></span></div>
+              <div class="ov-subtitle" id="smSubtitle">Picture</div>
+            </div>
+            <div class="ov-chip" id="smCount">6 ROWS</div>
+          </div>
+
+          <div class="sm-body">
+            <div class="sm-nav" id="smNav"></div>
+            <div class="sm-content" id="smContent"></div>
+          </div>
+
+          <div class="ov-hints">
+            <div class="ov-hint"><div class="ov-hint-badge">&#10005;</div><div class="ov-hint-label">TOGGLE</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9675;</div><div class="ov-hint-label">BACK</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9651;</div><div class="ov-hint-label">NAVIGATE</div></div>
+            <div class="ov-hint"><div class="ov-hint-badge">&#9633;</div><div class="ov-hint-label">CLOSE</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="toast" id="toast"><span class="toast-dot"></span><span class="toast-text" id="toastText">Ready</span></div>
+    </div>
+  </div>
+
+  <p class="caption">
+    EVO Player at <b>1920&times;1080</b>. Select a file in the USB browser to see its details and thumbnail.
+    Fully console-navigable: <b>arrows</b> move &middot; <b>Enter</b> opens &middot; <b>Esc</b> goes back.
+  </p>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+/* ================= DATA ================= */
+var RAIL = [
+  { name:"home", active:true, cursor:false, d:'<path d="M5 15L17 5l12 10v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M13 30V19h8v11"/>' },
+  { name:"browse", active:false, cursor:true, d:'<path d="M4 9a2 2 0 0 1 2-2h7l3 4h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>' },
+  { name:"recent", active:false, cursor:false, d:'<circle cx="17" cy="17" r="12"/><path d="M17 9v8l6 4"/>' },
+  { name:"favorites", active:false, cursor:false, d:'<path d="M17 5l3.7 7.6 8.3 1.2-6 5.9 1.4 8.3-7.4-4-7.4 4 1.4-8.3-6-5.9 8.3-1.2z"/>' },
+  { name:"emby", active:false, cursor:false, d:'<circle cx="17" cy="17" r="12"/><path d="M14 11l9 6-9 6z"/>' },
+  { name:"settings", active:false, cursor:false, d:'<circle cx="17" cy="17" r="4.5"/><path d="M17 3v4M17 27v4M3 17h4M27 17h4M7.2 7.2l2.8 2.8M24 24l2.8 2.8M26.8 7.2L24 10M10 24l-2.8 2.8"/>' },
+  { name:"about", active:false, cursor:false, d:'<circle cx="17" cy="17" r="12"/><path d="M17 15v8"/><circle cx="17" cy="11" r="1.4" fill="currentColor"/>' }
+];
+
+var RECENT = [
+  { t:"Blade Runner 2049", d:"38M LEFT", p:62, badge:null, eyebrow:"CONTINUE WATCHING", heroDetail:"38M LEFT \u00B7 HEVC MAIN 10 \u00B7 HDR10 \u00B7 DTS-HD MA 5.1",
+    img:"https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1900&q=80&auto=format&fit=crop" },
+  { t:"Dune Part Two", d:"58M LEFT", p:41, badge:null, eyebrow:"CONTINUE WATCHING", heroDetail:"58M LEFT \u00B7 HEVC MAIN 10 \u00B7 DOLBY VISION \u00B7 ATMOS 7.1",
+    img:"https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1547235001-d703406d3f17?w=1900&q=80&auto=format&fit=crop" },
+  { t:"The Grand Budapest ...", d:"MKV \u00B7 4.2 GB", p:0, badge:"NEW", eyebrow:"START WATCHING", heroDetail:"1H 39M \u00B7 H.264 HIGH \u00B7 AAC 5.1 \u00B7 1080P",
+    img:"https://images.unsplash.com/photo-1566073771259-6a8506099945?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=1900&q=80&auto=format&fit=crop" },
+  { t:"Arrival", d:"22M LEFT", p:78, badge:null, eyebrow:"CONTINUE WATCHING", heroDetail:"22M LEFT \u00B7 HEVC MAIN 10 \u00B7 HDR10 \u00B7 DTS-HD MA 5.1",
+    img:"https://images.unsplash.com/photo-1483664852095-d6cc6870702d?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1900&q=80&auto=format&fit=crop" },
+  { t:"Interstellar 2160p HD", d:"2H 04M LEFT", p:18, badge:null, eyebrow:"CONTINUE WATCHING", heroDetail:"2H 04M LEFT \u00B7 HEVC MAIN 10 \u00B7 IMAX \u00B7 DTS-HD MA 5.1",
+    img:"https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=1900&q=80&auto=format&fit=crop" },
+  { t:"Dolby Atmos Demo Di", d:"MKV \u00B7 12.8 GB", p:0, badge:"4K", eyebrow:"FEATURED", heroDetail:"MKV \u00B7 12.8 GB \u00B7 DOLBY VISION \u00B7 DOLBY ATMOS",
+    img:"https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=700&q=80&auto=format&fit=crop",
+    hero:"https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1900&q=80&auto=format&fit=crop" }
+];
+
+var LIBRARY = [
+  { t:"FIND FOLDER", d:"2 USB devices connected", online:true, d2:'<path d="M4 9a2 2 0 0 1 2-2h7l3 4h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>' },
+  { t:"RECENT", d:"38 items in history", online:false, d2:'<circle cx="17" cy="17" r="12"/><path d="M17 9v8l6 4"/>' },
+  { t:"FAVORITES", d:"12 items saved for later", online:false, d2:'<path d="M17 5l3.7 7.6 8.3 1.2-6 5.9 1.4 8.3-7.4-4-7.4 4 1.4-8.3-6-5.9 8.3-1.2z"/>' },
+  { t:"EMBY", d:"1 server \u00B7 library synced", online:true, d2:'<circle cx="17" cy="17" r="12"/><path d="M14 11l9 6-9 6z"/>' },
+  { t:"SETTINGS", d:"Playback and system preferences", online:false, d2:'<circle cx="17" cy="17" r="4.5"/><path d="M17 3v4M17 27v4M3 17h4M27 17h4M7.2 7.2l2.8 2.8M24 24l2.8 2.8M26.8 7.2L24 10M10 24l-2.8 2.8"/>' },
+  { t:"ABOUT", d:"Build 0.7.0 \u00B7 2024", online:false, d2:'<circle cx="17" cy="17" r="12"/><path d="M17 15v8"/><circle cx="17" cy="11" r="1.4" fill="#9fb2cc"/>' }
+];
+
+var HINTS = [ {g:"\u2715",t:"SELECT"}, {g:"\u25CB",t:"BACK"}, {g:"\u25B3",t:"MOVE"}, {g:"\u25A1",t:"SCREENSHOT"} ];
+
+/* ================= TOAST ================= */
+var toastEl = document.getElementById("toast");
+var toastTextEl = document.getElementById("toastText");
+var toastTimer;
+function showToast(msg) {
+  toastTextEl.textContent = msg;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 1700);
+}
+
+/* ================= RAIL ================= */
+var railActive = 0, railCursor = 1;
+var railItemsEl = document.getElementById("railItems");
+function renderRail() {
+  var html = "";
+  RAIL.forEach(function (it, i) {
+    var isActive = i === railActive, isCursor = i === railCursor;
+    var stroke = isCursor ? "#04121e" : (isActive ? "#ecf3ff" : "#7c8ba3");
+    var cls = "rail-item";
+    if (isCursor) cls += " cursor"; else if (isActive) cls += " active";
+    html += '<div class="rail-wrap" data-idx="'+i+'" title="'+it.name+'">' +
+      (isActive ? '<div class="rail-bar"></div>' : "") +
+      '<div class="'+cls+'"><svg viewBox="0 0 34 34" fill="none" stroke="'+stroke+'" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+it.d+'</svg></div></div>';
+  });
+  railItemsEl.innerHTML = html;
+  railItemsEl.querySelectorAll(".rail-wrap").forEach(function (wrap) {
+    wrap.addEventListener("click", function () {
+      var idx = parseInt(this.getAttribute("data-idx"), 10);
+      railActive = idx; railCursor = idx;
+      renderRail();
+      showToast("Navigation \u00B7 " + RAIL[idx].name.toUpperCase());
+    });
+  });
+}
+renderRail();
+
+/* ================= RECENT ================= */
+var recentTilesEl = document.getElementById("recentTiles");
+var recentHtml = "";
+RECENT.forEach(function (r, i) {
+  recentHtml += '<div class="tile'+(i===1?" focused":"")+'" data-idx="'+i+'">' +
+    '<div class="tile-art"><img src="'+r.img+'" alt="" loading="lazy"></div>' +
+    '<div class="tile-scrim"></div>' +
+    (r.badge ? '<div class="tile-badge">'+r.badge+'</div>' : "") +
+    '<div class="tile-caption"><div class="tile-title">'+r.t+'</div><div class="tile-detail">'+r.d+'</div></div>' +
+    (r.p > 0 ? '<div class="tile-track"><div class="tile-fill" style="width:'+r.p+'%"></div></div>' : "") +
+    '</div>';
+});
+recentTilesEl.innerHTML = recentHtml;
+
+/* ================= LIBRARY ================= */
+var libraryTilesEl = document.getElementById("libraryTiles");
+var libHtml = "";
+LIBRARY.forEach(function (l, i) {
+  var num = String(i + 1).padStart(2, "0");
+  libHtml += '<div class="tile lib" data-idx="'+i+'">' +
+    '<div class="tile-index">'+num+'</div>' +
+    '<div class="tile-iconbox"><svg viewBox="0 0 34 34" fill="none" stroke="#9fb2cc" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+l.d2+'</svg></div>' +
+    '<div class="tile-scrim"></div>' +
+    (l.online ? '<span class="tile-status"></span>' : "") +
+    '<div class="tile-caption"><div class="tile-title">'+l.t+'</div><div class="tile-detail">'+l.d+'</div></div>' +
+    '</div>';
+});
+libraryTilesEl.innerHTML = libHtml;
+
+/* ================= FOOTER ================= */
+document.getElementById("footer").innerHTML = HINTS.map(function (h) {
+  return '<div class="hint"><div class="badge">'+h.g+'</div><div class="hint-text">'+h.t+'</div></div>';
+}).join("");
+
+/* ================= HERO ================= */
+var heroImg = document.getElementById("heroImg");
+var heroTitle = document.getElementById("heroTitle");
+var heroDetail = document.getElementById("heroDetail");
+var heroEyebrow = document.getElementById("heroEyebrow");
+var heroFill = document.getElementById("heroFill");
+var heroChip = document.getElementById("heroChip");
+var heroChipLbl = heroChip.querySelector(".hero-chip-label");
+
+function swapHero(item) {
+  var newImg = new Image();
+  newImg.onload = function () {
+    heroImg.classList.add("swapping");
+    setTimeout(function () { heroImg.src = newImg.src; heroImg.classList.remove("swapping"); }, 180);
+  };
+  newImg.src = item.hero || item.img;
+  setTimeout(function () {
+    heroEyebrow.textContent = item.eyebrow || "CONTINUE WATCHING";
+    heroTitle.textContent = item.t;
+    heroDetail.textContent = item.heroDetail || item.d;
+    if (typeof item.p === "number") heroFill.style.width = Math.max(item.p, 4) + "%";
+    heroChipLbl.textContent = (item.p && item.p > 0) ? "RESUME" : "PLAY";
+  }, 180);
+}
+function showLibraryHint(item) {
+  setTimeout(function () {
+    heroEyebrow.textContent = "OPENING";
+    heroTitle.textContent = item.t;
+    heroDetail.textContent = item.d;
+    heroChipLbl.textContent = "OPEN";
+  }, 120);
+}
+function selectRecent(idx) {
+  recentTilesEl.querySelectorAll(".tile").forEach(function (t) { t.classList.remove("focused"); });
+  var tile = recentTilesEl.querySelector('.tile[data-idx="'+idx+'"]');
+  if (tile) tile.classList.add("focused");
+  swapHero(RECENT[idx]);
+}
+
+recentTilesEl.querySelectorAll(".tile").forEach(function (tile) {
+  tile.addEventListener("click", function () {
+    var idx = parseInt(this.getAttribute("data-idx"), 10);
+    selectRecent(idx);
+    var it = RECENT[idx];
+    showToast((it.p > 0 ? "Resuming \u00B7 " : "Starting \u00B7 ") + it.t);
+  });
+});
+
+libraryTilesEl.querySelectorAll(".tile").forEach(function (tile) {
+  tile.addEventListener("click", function () {
+    var idx = parseInt(this.getAttribute("data-idx"), 10);
+    var wasSelected = this.classList.contains("selected");
+    libraryTilesEl.querySelectorAll(".tile").forEach(function (t) { t.classList.remove("selected"); });
+    if (!wasSelected) this.classList.add("selected");
+    if (!wasSelected) {
+      showLibraryHint(LIBRARY[idx]);
+      showToast("Opened \u00B7 " + LIBRARY[idx].t);
+      if (idx === 0) setTimeout(openFM, 220);
+      if (idx === 4) setTimeout(openSM, 220);
+    } else {
+      var focused = recentTilesEl.querySelector(".tile.focused");
+      if (focused) swapHero(RECENT[parseInt(focused.getAttribute("data-idx"), 10)]);
+      showToast("Closed \u00B7 " + LIBRARY[idx].t);
+    }
+  });
+});
+
+heroChip.addEventListener("click", function () {
+  showToast(heroChipLbl.textContent + " \u00B7 " + heroTitle.textContent);
+});
+document.querySelectorAll(".hint").forEach(function (hint) {
+  hint.addEventListener("click", function () {
+    showToast(this.querySelector(".hint-text").textContent);
+  });
+});
+
+/* ================= KEYBOARD ================= */
+var kbRow = 0, kbCol = 1;
+function applyKbFocus() {
+  recentTilesEl.querySelectorAll(".tile").forEach(function (t, i) { t.classList.toggle("kb-focus", kbRow===0 && i===kbCol); });
+  libraryTilesEl.querySelectorAll(".tile").forEach(function (t, i) { t.classList.toggle("kb-focus", kbRow===1 && i===kbCol); });
+}
+var initialFocused = recentTilesEl.querySelector(".tile.focused");
+if (initialFocused) kbCol = parseInt(initialFocused.getAttribute("data-idx"), 10) || 1;
+applyKbFocus();
+
+document.addEventListener("keydown", function (e) {
+  if (smOverlay.classList.contains("open")) { smHandleKey(e); return; }
+  if (fmOverlay.classList.contains("open")) { fmHandleKey(e); return; }
+  var handled = true;
+  if (e.key === "ArrowRight") kbCol = Math.min(5, kbCol + 1);
+  else if (e.key === "ArrowLeft") kbCol = Math.max(0, kbCol - 1);
+  else if (e.key === "ArrowDown") kbRow = Math.min(1, kbRow + 1);
+  else if (e.key === "ArrowUp") kbRow = Math.max(0, kbRow - 1);
+  else if (e.key === "Enter" || e.key === " ") {
+    var shelf = kbRow === 0 ? recentTilesEl : libraryTilesEl;
+    var el = shelf.querySelector('.tile[data-idx="'+kbCol+'"]');
+    if (el) el.click();
+  } else handled = false;
+  if (handled) { e.preventDefault(); applyKbFocus(); }
+});
+
+/* ================= CLOCK ================= */
+var clockEl = document.getElementById("clock");
+function tick() {
+  var d = new Date();
+  clockEl.textContent = String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
+tick(); setInterval(tick, 30000);
+
+/* ============================================================================
+   FILE MANAGER — USB only, with details preview
+   ============================================================================ */
+var fmOverlay = document.getElementById("fmOverlay");
+var fmGrid = document.getElementById("fmGrid");
+var fmCrumbs = document.getElementById("fmCrumbs");
+var fmCount = document.getElementById("fmCount");
+var fmDetailsThumb = document.getElementById("fmDetailsThumb");
+var fmDetailsName = document.getElementById("fmDetailsName");
+var fmDetailsType = document.getElementById("fmDetailsType");
+var fmDetailsList = document.getElementById("fmDetailsList");
+
+/* Thumbnails and details metadata */
+var T = {
+  br:    "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&q=80&auto=format&fit=crop",
+  dune:  "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80&auto=format&fit=crop",
+  arr:   "https://images.unsplash.com/photo-1483664852095-d6cc6870702d?w=800&q=80&auto=format&fit=crop",
+  inter: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=800&q=80&auto=format&fit=crop",
+  sic:   "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&q=80&auto=format&fit=crop",
+  hp:    "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&q=80&auto=format&fit=crop",
+  aud:   "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&q=80&auto=format&fit=crop",
+  album: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800&q=80&auto=format&fit=crop"
+};
+
+var USB = {
+  usbRoot: { label:"USB DRIVE", parent:null, items:[
+    { n:"Media", t:"folder", to:"usbMedia", count:5,
+      d:{ "Items":"5", "Kind":"Folder", "Modified":"Sep 03, 2024" } },
+    { n:"Music", t:"folder", to:"usbMusic", count:3,
+      d:{ "Items":"3", "Kind":"Folder", "Modified":"Aug 21, 2024" } },
+    { n:"Documents", t:"folder", to:"usbDocs", count:2,
+      d:{ "Items":"2", "Kind":"Folder", "Modified":"Aug 12, 2024" } },
+    { n:"Firmware", t:"folder", to:"usbFw", count:2,
+      d:{ "Items":"2", "Kind":"Folder", "Modified":"Jul 29, 2024" } },
+    { n:"readme.txt", t:"doc", s:"2 KB",
+      d:{ "Format":"TXT", "Size":"2 KB", "Encoding":"UTF-8", "Modified":"Aug 12, 2024" } },
+    { n:"install.sh", t:"doc", s:"1 KB",
+      d:{ "Format":"Shell script", "Size":"1 KB", "Modified":"Aug 12, 2024" } }
+  ]},
+  usbMedia: { label:"Media", parent:"usbRoot", items:[
+    { n:"Blade Runner 2049.mkv", t:"video", s:"14.2 GB", meta:"HEVC \u00B7 HDR10",
+      thumb:T.br,
+      d:{ "Format":"Matroska (MKV)", "Size":"14.2 GB", "Duration":"2h 44m",
+          "Video":"HEVC Main 10", "HDR":"HDR10", "Audio":"DTS-HD MA 5.1",
+          "Resolution":"3840 \u00D7 2160", "Modified":"Aug 12, 2024" } },
+    { n:"Dune Part Two.mkv", t:"video", s:"18.7 GB", meta:"HEVC \u00B7 DV",
+      thumb:T.dune,
+      d:{ "Format":"Matroska (MKV)", "Size":"18.7 GB", "Duration":"2h 46m",
+          "Video":"HEVC Main 10", "HDR":"Dolby Vision", "Audio":"Atmos 7.1",
+          "Resolution":"3840 \u00D7 2160", "Modified":"Aug 02, 2024" } },
+    { n:"Arrival.mkv", t:"video", s:"8.4 GB", meta:"HEVC \u00B7 HDR10",
+      thumb:T.arr,
+      d:{ "Format":"Matroska (MKV)", "Size":"8.4 GB", "Duration":"1h 56m",
+          "Video":"HEVC Main 10", "HDR":"HDR10", "Audio":"DTS-HD MA 5.1",
+          "Resolution":"3840 \u00D7 2160", "Modified":"Jul 18, 2024" } },
+    { n:"Interstellar.mkv", t:"video", s:"22.1 GB", meta:"HEVC \u00B7 IMAX",
+      thumb:T.inter,
+      d:{ "Format":"Matroska (MKV)", "Size":"22.1 GB", "Duration":"2h 49m",
+          "Video":"HEVC Main 10", "HDR":"HDR10", "Audio":"DTS-HD MA 5.1",
+          "Resolution":"3840 \u00D7 2160 (IMAX)", "Modified":"Jul 04, 2024" } },
+    { n:"Sicario.mkv", t:"video", s:"6.8 GB", meta:"H.264 \u00B7 1080p",
+      thumb:T.sic,
+      d:{ "Format":"Matroska (MKV)", "Size":"6.8 GB", "Duration":"2h 01m",
+          "Video":"H.264 High", "HDR":"SDR", "Audio":"DTS-HD MA 5.1",
+          "Resolution":"1920 \u00D7 1080", "Modified":"Jun 22, 2024" } }
+  ]},
+  usbMusic: { label:"Music", parent:"usbRoot", items:[
+    { n:"Dune OST", t:"folder", to:"usbMusicDune", count:3,
+      d:{ "Items":"3", "Kind":"Album", "Modified":"Aug 21, 2024" } },
+    { n:"Ambient.flac", t:"audio", s:"45 MB",
+      thumb:T.hp,
+      d:{ "Format":"FLAC", "Size":"45 MB", "Duration":"3m 12s",
+          "Bitrate":"1411 kbps", "Sample rate":"44.1 kHz", "Channels":"Stereo",
+          "Modified":"Aug 21, 2024" } },
+    { n:"Test Tones 5.1.flac", t:"audio", s:"89 MB",
+      thumb:T.aud,
+      d:{ "Format":"FLAC", "Size":"89 MB", "Duration":"4m 05s",
+          "Bitrate":"2304 kbps", "Sample rate":"96 kHz", "Channels":"5.1",
+          "Modified":"Aug 19, 2024" } }
+  ]},
+  usbMusicDune: { label:"Dune OST", parent:"usbMusic", items:[
+    { n:"01_Dreams.flac", t:"audio", s:"34 MB",
+      thumb:T.album,
+      d:{ "Format":"FLAC", "Size":"34 MB", "Duration":"2m 41s",
+          "Bitrate":"1411 kbps", "Sample rate":"44.1 kHz", "Channels":"Stereo",
+          "Modified":"Aug 21, 2024" } },
+    { n:"02_Arrival.flac", t:"audio", s:"28 MB",
+      thumb:T.album,
+      d:{ "Format":"FLAC", "Size":"28 MB", "Duration":"2m 14s",
+          "Bitrate":"1411 kbps", "Sample rate":"44.1 kHz", "Channels":"Stereo",
+          "Modified":"Aug 21, 2024" } },
+    { n:"03_Leaving.flac", t:"audio", s:"41 MB",
+      thumb:T.album,
+      d:{ "Format":"FLAC", "Size":"41 MB", "Duration":"3m 28s",
+          "Bitrate":"1411 kbps", "Sample rate":"44.1 kHz", "Channels":"Stereo",
+          "Modified":"Aug 21, 2024" } }
+  ]},
+  usbDocs: { label:"Documents", parent:"usbRoot", items:[
+    { n:"notes.txt", t:"doc", s:"4 KB",
+      d:{ "Format":"TXT", "Size":"4 KB", "Encoding":"UTF-8", "Modified":"Aug 12, 2024" } },
+    { n:"changelog.txt", t:"doc", s:"6 KB",
+      d:{ "Format":"TXT", "Size":"6 KB", "Encoding":"UTF-8", "Modified":"Aug 10, 2024" } }
+  ]},
+  usbFw: { label:"Firmware", parent:"usbRoot", items:[
+    { n:"evo-v0.7.0.bin", t:"doc", s:"24 MB",
+      d:{ "Format":"Binary", "Size":"24 MB", "Version":"0.7.0", "Modified":"Jul 29, 2024" } },
+    { n:"boot.img", t:"doc", s:"8 MB",
+      d:{ "Format":"Disk image", "Size":"8 MB", "Modified":"Jul 29, 2024" } }
+  ]}
+};
+
+var fmFolderKey = "usbRoot";
+var fmFocus = 0;
+var fmItems = [];
+
+/* Icons */
+function fmTypeIcon(t) {
+  if (t === "folder") return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14a3 3 0 0 1 3-3h10l3.2 3.4H39a3 3 0 0 1 3 3V36a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3z"/><path d="M6 19h36"/></svg>';
+  if (t === "video")  return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="11" width="34" height="26" rx="3.4"/><path d="M21 19l10 6-10 6z" fill="currentColor" stroke="none"/></svg>';
+  if (t === "audio")  return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 34V15l14-3v19"/><circle cx="17" cy="34" r="3.4"/><circle cx="31" cy="31" r="3.4"/></svg>';
+  if (t === "image")  return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="10" width="34" height="28" rx="3.4"/><circle cx="17" cy="19" r="2.4"/><path d="M10 33l9-9 7 7 6-5 6 6"/></svg>';
+  return '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7h16l9 9v25a3 3 0 0 1-3 3H13a3 3 0 0 1-3-3V10a3 3 0 0 1 3-3z"/><path d="M29 7v9h9M16 22h16M16 28h16M16 34h10"/></svg>';
+}
+function playOverlayIcon() {
+  return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>';
+}
+function typeLabel(t) {
+  return { folder:"FOLDER", video:"VIDEO", audio:"AUDIO", image:"IMAGE", doc:"DOCUMENT" }[t] || "FILE";
+}
+function typeBadge(t) {
+  return { folder:"DIR", video:"MKV", audio:"FLAC", image:"IMG", doc:"TXT" }[t] || "FILE";
+}
+
+/* ---------- details panel ---------- */
+function updateFMDetails() {
+  var it = fmItems[fmFocus];
+
+  if (!it) {
+    fmDetailsThumb.className = "fm-details-thumb icon-only";
+    fmDetailsThumb.innerHTML = '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14a3 3 0 0 1 3-3h10l3.2 3.4H39a3 3 0 0 1 3 3V36a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3z"/></svg>';
+    fmDetailsName.textContent = "—";
+    fmDetailsType.textContent = "NO SELECTION";
+    fmDetailsList.innerHTML = '<div class="fm-details-empty"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="20" cy="20" r="12"/><path d="M30 30l10 10"/></svg><div class="fm-details-empty-text">SELECT A FILE<br>TO SEE DETAILS</div></div>';
+    return;
+  }
+
+  /* thumbnail or large icon */
+  if (it.thumb) {
+    fmDetailsThumb.className = "fm-details-thumb";
+    var overlay = (it.t === "video" || it.t === "audio")
+      ? '<div class="play-overlay">' + playOverlayIcon() + '</div>'
+      : "";
+    fmDetailsThumb.innerHTML =
+      '<img src="' + it.thumb + '" alt="">' +
+      '<div class="badge">' + typeBadge(it.t) + '</div>' +
+      overlay;
+  } else {
+    fmDetailsThumb.className = "fm-details-thumb icon-only";
+    fmDetailsThumb.innerHTML = fmTypeIcon(it.t) +
+      '<div class="badge">' + typeBadge(it.t) + '</div>';
+  }
+
+  /* name + type */
+  fmDetailsName.textContent = it.n;
+  var fmt = (it.d && it.d["Format"]) ? it.d["Format"] : "";
+  fmDetailsType.textContent = typeLabel(it.t) + (fmt ? " \u00B7 " + fmt.toUpperCase() : "");
+
+  /* metadata rows */
+  var rows = "";
+  if (it.d) {
+    Object.keys(it.d).forEach(function (k) {
+      rows += '<div class="fm-details-row">' +
+        '<span class="k">' + k + '</span>' +
+        '<span class="v">' + it.d[k] + '</span>' +
+      '</div>';
+    });
+  } else {
+    if (it.s) rows += '<div class="fm-details-row"><span class="k">Size</span><span class="v">' + it.s + '</span></div>';
+  }
+  fmDetailsList.innerHTML = rows;
+}
+
+/* ---------- grid render ---------- */
+function renderFM() {
+  var folder = USB[fmFolderKey];
+  fmItems = folder.items.slice();
+
+  /* breadcrumbs */
+  var chain = [];
+  var k = fmFolderKey;
+  while (k) { chain.unshift(k); k = USB[k] ? USB[k].parent : null; }
+  var crumbHtml = "";
+  chain.forEach(function (key, i) {
+    var isLast = i === chain.length - 1;
+    crumbHtml += '<span class="fm-crumb' + (isLast ? " active" : "") + '" data-key="' + key + '">' +
+      (USB[key] ? USB[key].label : key) + '</span>';
+    if (!isLast) crumbHtml += '<span class="fm-crumb-sep">\u203A</span>';
+  });
+  fmCrumbs.innerHTML = crumbHtml;
+
+  fmCount.textContent = fmItems.length + (fmItems.length === 1 ? " ITEM" : " ITEMS");
+
+  if (fmItems.length === 0) {
+    fmGrid.innerHTML = '<div class="fm-empty"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 14a3 3 0 0 1 3-3h10l3.2 3.4H39a3 3 0 0 1 3 3V36a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3z"/></svg><div class="fm-empty-text">THIS FOLDER IS EMPTY</div></div>';
+  } else {
+    var html = "";
+    fmItems.forEach(function (it, i) {
+      var meta = it.t === "folder" ? (it.count + " items") : (it.s || "");
+      var iconInner;
+      var iconClass = "fm-tile-icon";
+      if (it.thumb && (it.t === "video" || it.t === "image" || it.t === "audio")) {
+        iconClass += " thumb";
+        iconInner = '<img src="' + it.thumb + '" alt="">';
+      } else {
+        iconInner = fmTypeIcon(it.t);
+      }
+      var playBadge = it.t === "video" ? '<div class="fm-tile-play">' + playOverlayIcon() + '</div>' : "";
+      html += '<div class="fm-tile" data-idx="' + i + '">' +
+        '<div class="' + iconClass + '">' + iconInner + '</div>' +
+        playBadge +
+        '<div class="fm-tile-name">' + it.n + '</div>' +
+        '<div class="fm-tile-meta">' + meta + '</div>' +
+      '</div>';
+    });
+    fmGrid.innerHTML = html;
+
+    fmGrid.querySelectorAll(".fm-tile").forEach(function (el) {
+      el.addEventListener("mouseenter", function () {
+        var idx = parseInt(this.getAttribute("data-idx"), 10);
+        setFMFocus(idx);
+      });
+      el.addEventListener("click", function () {
+        var idx = parseInt(this.getAttribute("data-idx"), 10);
+        setFMFocus(idx);
+        activateFM();
+      });
+    });
+  }
+
+  if (fmFocus >= fmItems.length) fmFocus = Math.max(0, fmItems.length - 1);
+  applyFMFocus();
+  updateFMDetails();
+}
+
+function applyFMFocus() {
+  var tiles = fmGrid.querySelectorAll(".fm-tile");
+  tiles.forEach(function (t, i) { t.classList.toggle("focused", i === fmFocus); });
+  if (tiles[fmFocus]) tiles[fmFocus].scrollIntoView({ block: "nearest" });
+}
+function setFMFocus(idx) {
+  if (idx < 0 || idx >= fmItems.length) return;
+  if (idx === fmFocus) return;
+  fmFocus = idx;
+  applyFMFocus();
+  updateFMDetails();
+}
+
+function activateFM() {
+  var it = fmItems[fmFocus];
+  if (!it) return;
+  if (it.t === "folder" && it.to && USB[it.to]) {
+    fmFolderKey = it.to; fmFocus = 0;
+    renderFM();
+    showToast("Opened \u00B7 " + it.n);
+  } else if (it.t === "video") {
+    showToast("Playing \u00B7 " + it.n);
+    setTimeout(closeFM, 700);
+  } else if (it.t === "audio") {
+    showToast("Playing \u00B7 " + it.n);
+  } else {
+    showToast("Opened \u00B7 " + it.n);
+  }
+}
+function goBackFM() {
+  var f = USB[fmFolderKey];
+  if (f && f.parent) { fmFolderKey = f.parent; fmFocus = 0; renderFM(); }
+  else closeFM();
+}
+function openFM() {
+  smOverlay.classList.remove("open");
+  fmOverlay.classList.add("open");
+  fmFolderKey = "usbRoot";
+  fmFocus = 0;
+  renderFM();
+}
+function closeFM() { fmOverlay.classList.remove("open"); }
+
+function fmHandleKey(e) {
+  var cols = 4, count = fmItems.length, handled = true;
+  if (e.key === "ArrowRight") fmFocus = Math.min(count - 1, fmFocus + 1);
+  else if (e.key === "ArrowLeft") fmFocus = Math.max(0, fmFocus - 1);
+  else if (e.key === "ArrowDown") { var n = fmFocus + cols; if (n < count) fmFocus = n; }
+  else if (e.key === "ArrowUp") { var p = fmFocus - cols; if (p >= 0) fmFocus = p; }
+  else if (e.key === "Enter" || e.key === " ") activateFM();
+  else if (e.key === "Escape" || e.key === "Backspace") goBackFM();
+  else handled = false;
+  if (handled) { e.preventDefault(); e.stopPropagation(); applyFMFocus(); updateFMDetails(); }
+}
+
+fmCrumbs.addEventListener("click", function (e) {
+  var c = e.target.closest(".fm-crumb");
+  if (!c) return;
+  var key = c.getAttribute("data-key");
+  if (key && USB[key] && key !== fmFolderKey) { fmFolderKey = key; fmFocus = 0; renderFM(); }
+});
+fmOverlay.addEventListener("click", function (e) {
+  if (e.target === fmOverlay) closeFM();
+});
+
+/* ============================================================================
+   SETTINGS MENU
+   ============================================================================ */
+var smOverlay = document.getElementById("smOverlay");
+var smNavEl = document.getElementById("smNav");
+var smContentEl = document.getElementById("smContent");
+var smSubtitle = document.getElementById("smSubtitle");
+var smCount = document.getElementById("smCount");
+
+var SM_ICONS = {
+  picture:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 20h8"/></svg>',
+  audio:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6"/><path d="M17.5 6.5a7 7 0 0 1 0 11"/></svg>',
+  playback:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8l6 4-6 4z" fill="currentColor" stroke="none"/></svg>',
+  network:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.5a15 15 0 0 1 20 0"/><path d="M5 12a11 11 0 0 1 14 0"/><path d="M8 15.5a6 6 0 0 1 8 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/></svg>',
+  system:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12h2.5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>'
+};
+
+var SM_CATEGORIES = [
+  { key:"picture", label:"PICTURE", icon:SM_ICONS.picture, rows:[
+    { type:"toggle", label:"HDR output", desc:"Enable HDR10 and Dolby Vision passthrough to your display", value:true },
+    { type:"toggle", label:"Frame rate matching", desc:"Match the display refresh rate to the source framerate", value:true },
+    { type:"choice", label:"Output resolution", desc:"Resolution sent to the display", options:["Auto","1080p","1440p","4K"], value:0 },
+    { type:"choice", label:"Picture mode", desc:"Processing profile used during playback", options:["Filmmaker","Standard","Vivid","Custom"], value:0 },
+    { type:"toggle", label:"Motion smoothing", desc:"Interpolate frames for smoother motion", value:false },
+    { type:"multi", label:"Supported formats", desc:"Enable the video standards your display accepts", options:["HDR10","Dolby Vision","HLG","HDR10+"], value:[0,1,2] }
+  ]},
+  { key:"audio", label:"AUDIO", icon:SM_ICONS.audio, rows:[
+    { type:"choice", label:"Output channels", desc:"Number of channels sent to your receiver", options:["Stereo","5.1","7.1","Atmos"], value:3 },
+    { type:"toggle", label:"Passthrough", desc:"Send audio directly to the receiver without decoding", value:true },
+    { type:"toggle", label:"Night mode", desc:"Compress the dynamic range for quiet listening", value:false },
+    { type:"toggle", label:"Volume normalisation", desc:"Keep loud and quiet content at similar levels", value:true },
+    { type:"multi", label:"Supported formats", desc:"Enable the audio standards your receiver accepts", options:["Dolby Atmos","DTS:X","Dolby TrueHD","DTS-HD MA","PCM 7.1"], value:[0,1,2,3] }
+  ]},
+  { key:"playback", label:"PLAYBACK", icon:SM_ICONS.playback, rows:[
+    { type:"toggle", label:"Continue watching", desc:"Show resume prompts when reopening a title", value:true },
+    { type:"toggle", label:"Auto-play next", desc:"Start the next episode automatically", value:true },
+    { type:"toggle", label:"Skip intros", desc:"Automatically skip opening titles and recaps", value:true },
+    { type:"choice", label:"Subtitle language", desc:"Preferred subtitle language", options:["Off","English","Spanish","French","German"], value:1 },
+    { type:"choice", label:"Subtitle size", desc:"On-screen subtitle text size", options:["Small","Medium","Large","X-Large"], value:1 },
+    { type:"toggle", label:"Subtitles for foreign dialogue", desc:"Show subtitles during non-native dialogue", value:true }
+  ]},
+  { key:"network", label:"NETWORK", icon:SM_ICONS.network, rows:[
+    { type:"toggle", label:"Wi-Fi", desc:"Connect to wireless networks", value:true },
+    { type:"toggle", label:"Remote access", desc:"Allow control from the mobile app", value:false },
+    { type:"toggle", label:"DLNA server", desc:"Share this device's media on the local network", value:true },
+    { type:"choice", label:"Connection priority", desc:"Which interface to prefer for streaming", options:["Ethernet","Wi-Fi","Auto"], value:2 }
+  ]},
+  { key:"system", label:"SYSTEM", icon:SM_ICONS.system, rows:[
+    { type:"choice", label:"Theme", desc:"Colour scheme used by the interface", options:["Midnight","Graphite","Amber","Ocean"], value:0 },
+    { type:"toggle", label:"Screensaver", desc:"Dim the screen after 10 minutes of inactivity", value:true },
+    { type:"choice", label:"Language", desc:"Interface language", options:["English","Espa\u00F1ol","Fran\u00E7ais","Deutsch"], value:0 },
+    { type:"toggle", label:"Auto-updates", desc:"Install updates automatically when idle", value:true },
+    { type:"choice", label:"Startup screen", desc:"Where to start when the device boots", options:["Home","Library","Recent"], value:0 }
+  ]}
+];
+
+var smCategoryKey = "picture";
+var smZone = "nav";
+var smNavFocus = 0;
+var smRowFocus = 0;
+var smCheckFocus = 0;
+
+function smActiveCategory() {
+  for (var i = 0; i < SM_CATEGORIES.length; i++) {
+    if (SM_CATEGORIES[i].key === smCategoryKey) return SM_CATEGORIES[i];
+  }
+  return SM_CATEGORIES[0];
+}
+
+function renderSMNav() {
+  var html = "";
+  SM_CATEGORIES.forEach(function (cat, i) {
+    var isActive = cat.key === smCategoryKey;
+    var isFocused = smZone === "nav" && i === smNavFocus;
+    var cls = "sm-nav-item" + (isActive ? " active" : "") + (isFocused ? " focused" : "");
+    html += '<div class="' + cls + '" data-idx="' + i + '">' +
+      '<div class="sm-nav-icon">' + cat.icon + '</div>' +
+      '<div class="sm-nav-label">' + cat.label + '</div>' +
+    '</div>';
+  });
+  smNavEl.innerHTML = html;
+
+  smNavEl.querySelectorAll(".sm-nav-item").forEach(function (el) {
+    el.addEventListener("mouseenter", function () {
+      if (smZone !== "nav") return;
+      var idx = parseInt(this.getAttribute("data-idx"), 10);
+      if (idx === smNavFocus) return;
+      smNavFocus = idx;
+      smCategoryKey = SM_CATEGORIES[idx].key;
+      smRowFocus = 0; smCheckFocus = 0;
+      renderSM();
+    });
+    el.addEventListener("click", function () {
+      smNavFocus = parseInt(this.getAttribute("data-idx"), 10);
+      smCategoryKey = SM_CATEGORIES[smNavFocus].key;
+      smZone = "content";
+      smRowFocus = 0; smCheckFocus = 0;
+      renderSM();
+    });
+  });
+}
+
+function smRenderControl(row, rowIdx) {
+  if (row.type === "toggle") {
+    return '<div class="switch' + (row.value ? " on" : "") + '"></div>';
+  }
+  if (row.type === "choice") {
+    var html = '<div class="segmented">';
+    row.options.forEach(function (opt, i) {
+      html += '<div class="segment' + (i === row.value ? " active" : "") + '" data-opt="' + i + '">' + opt + '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+  if (row.type === "multi") {
+    var isRowFocused = (smZone === "content" && rowIdx === smRowFocus);
+    var html = '<div class="checks">';
+    row.options.forEach(function (opt, i) {
+      var isOn = row.value.indexOf(i) >= 0;
+      var isCheckFocused = isRowFocused && i === smCheckFocus;
+      html += '<div class="check' + (isOn ? " on" : "") + (isCheckFocused ? " focused" : "") + '" data-opt="' + i + '">' + opt + '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+  return "";
+}
+
+function renderSMContent() {
+  var cat = smActiveCategory();
+  var html = "";
+  cat.rows.forEach(function (row, i) {
+    var isFocused = smZone === "content" && i === smRowFocus;
+    html += '<div class="sm-row' + (isFocused ? " focused" : "") + '" data-idx="' + i + '" data-type="' + row.type + '">' +
+      '<div class="sm-label">' +
+        '<div class="sm-label-main">' + row.label + '</div>' +
+        '<div class="sm-label-desc">' + row.desc + '</div>' +
+      '</div>' +
+      '<div class="sm-control">' + smRenderControl(row, i) + '</div>' +
+    '</div>';
+  });
+  smContentEl.innerHTML = html;
+
+  smContentEl.querySelectorAll(".sm-row").forEach(function (el) {
+    el.addEventListener("mouseenter", function () {
+      if (smZone !== "content") return;
+      var idx = parseInt(this.getAttribute("data-idx"), 10);
+      if (idx === smRowFocus) return;
+      smRowFocus = idx;
+      smCheckFocus = 0;
+      renderSMContent();
+    });
+  });
+
+  smContentEl.querySelectorAll(".sm-row").forEach(function (el) {
+    el.addEventListener("click", function (e) {
+      var idx = parseInt(this.getAttribute("data-idx"), 10);
+      smZone = "content";
+      smRowFocus = idx;
+      var row = cat.rows[idx];
+
+      var seg = e.target.closest(".segment");
+      if (seg && row.type === "choice") {
+        row.value = parseInt(seg.getAttribute("data-opt"), 10);
+        renderSMContent();
+        showToast(row.label + " \u00B7 " + row.options[row.value]);
+        return;
+      }
+      var chk = e.target.closest(".check");
+      if (chk && row.type === "multi") {
+        var opt = parseInt(chk.getAttribute("data-opt"), 10);
+        smCheckFocus = opt;
+        var pos = row.value.indexOf(opt);
+        if (pos >= 0) row.value.splice(pos, 1);
+        else row.value.push(opt);
+        renderSMContent();
+        showToast(row.options[opt] + (pos >= 0 ? " off" : " on"));
+        return;
+      }
+      activateSMRow();
+    });
+  });
+}
+
+function renderSM() {
+  renderSMNav();
+  renderSMContent();
+  smSubtitle.textContent = smActiveCategory().label.charAt(0) + smActiveCategory().label.slice(1).toLowerCase();
+  smCount.textContent = smActiveCategory().rows.length + " ROWS";
+}
+
+function activateSMRow() {
+  var cat = smActiveCategory();
+  var row = cat.rows[smRowFocus];
+  if (!row) return;
+  if (row.type === "toggle") {
+    row.value = !row.value;
+    renderSMContent();
+    showToast(row.label + " \u00B7 " + (row.value ? "On" : "Off"));
+  } else if (row.type === "choice") {
+    row.value = (row.value + 1) % row.options.length;
+    renderSMContent();
+    showToast(row.label + " \u00B7 " + row.options[row.value]);
+  } else if (row.type === "multi") {
+    var opt = smCheckFocus;
+    var pos = row.value.indexOf(opt);
+    if (pos >= 0) row.value.splice(pos, 1);
+    else row.value.push(opt);
+    renderSMContent();
+    showToast(row.options[opt] + (pos >= 0 ? " off" : " on"));
+  }
+}
+
+function openSM() {
+  fmOverlay.classList.remove("open");
+  smOverlay.classList.add("open");
+  smCategoryKey = "picture";
+  smZone = "nav";
+  smNavFocus = 0; smRowFocus = 0; smCheckFocus = 0;
+  renderSM();
+}
+function closeSM() { smOverlay.classList.remove("open"); }
+
+function smHandleKey(e) {
+  var handled = true;
+  var cat = smActiveCategory();
+  var row = cat.rows[smRowFocus];
+
+  if (e.key === "Escape") {
+    if (smZone === "content") { smZone = "nav"; renderSM(); }
+    else closeSM();
+    e.preventDefault(); return;
+  }
+  if (smZone === "nav") {
+    if (e.key === "ArrowUp") {
+      smNavFocus = Math.max(0, smNavFocus - 1);
+      smCategoryKey = SM_CATEGORIES[smNavFocus].key;
+      smRowFocus = 0; smCheckFocus = 0;
+      renderSM();
+    } else if (e.key === "ArrowDown") {
+      smNavFocus = Math.min(SM_CATEGORIES.length - 1, smNavFocus + 1);
+      smCategoryKey = SM_CATEGORIES[smNavFocus].key;
+      smRowFocus = 0; smCheckFocus = 0;
+      renderSM();
+    } else if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
+      smZone = "content"; renderSM();
+    } else handled = false;
+    if (handled) { e.preventDefault(); e.stopPropagation(); }
+    return;
+  }
+  if (e.key === "ArrowUp") {
+    smRowFocus = Math.max(0, smRowFocus - 1); smCheckFocus = 0; renderSMContent();
+  } else if (e.key === "ArrowDown") {
+    smRowFocus = Math.min(cat.rows.length - 1, smRowFocus + 1); smCheckFocus = 0; renderSMContent();
+  } else if (e.key === "ArrowLeft") {
+    if (row && row.type === "choice" && row.value > 0) {
+      row.value--; renderSMContent();
+      showToast(row.label + " \u00B7 " + row.options[row.value]);
+    } else if (row && row.type === "multi" && smCheckFocus > 0) {
+      smCheckFocus--; renderSMContent();
+    } else { smZone = "nav"; renderSM(); }
+  } else if (e.key === "ArrowRight") {
+    if (row && row.type === "choice") {
+      row.value = (row.value + 1) % row.options.length;
+      renderSMContent();
+      showToast(row.label + " \u00B7 " + row.options[row.value]);
+    } else if (row && row.type === "multi" && smCheckFocus < row.options.length - 1) {
+      smCheckFocus++; renderSMContent();
+    }
+  } else if (e.key === "Enter" || e.key === " ") {
+    activateSMRow();
+  } else handled = false;
+  if (handled) { e.preventDefault(); e.stopPropagation(); }
+}
+
+smOverlay.addEventListener("click", function (e) {
+  if (e.target === smOverlay) closeSM();
+});
+
+/* ================= INIT ================= */
+function guardImages(root) {
+  (root || document).querySelectorAll("img").forEach(function (img) {
+    img.addEventListener("error", function () { img.remove(); });
+  });
+}
+guardImages(document);
+
+var stage = document.getElementById("stage");
+var viewport = document.getElementById("viewport");
+function fit() {
+  var s = viewport.clientWidth / 1920;
+  stage.style.transform = "scale(" + s + ")";
+  viewport.style.height = (1080 * s) + "px";
+}
+fit();
+window.addEventListener("resize", fit);
+
+})();
+</script>
+</body>
+</html>
