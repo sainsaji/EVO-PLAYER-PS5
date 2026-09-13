@@ -179,7 +179,7 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
  * -DEVO_VDEC_NATIVE_10BIT=1 (package-app.sh --native-10bit) to bring them
  * back for testing. */
 #ifndef EVO_VDEC_NATIVE_10BIT
-#define EVO_VDEC_NATIVE_10BIT 0
+#define EVO_VDEC_NATIVE_10BIT 1
 #endif
 
 /* ---- codec-independent mode table (#41) ---------------------------------- */
@@ -230,9 +230,9 @@ static const nat_codec_desc g_codec[NAT_CODEC_COUNT] = {
      * decoder's own reported flex-memory need - these two are off by default
      * and have no throughput requirement to justify the deeper pipeline. */
     { NAT_HEVC10, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   2, 123, 123,
-      "hevc_mp4toannexb",     0, "HEVC10", 2 },
+      "hevc_mp4toannexb",     0, "HEVC10", 1 },
     { NAT_VP92,   AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    2,  41,  41,
-      "vp9_superframe_split", 1, "VP9-2",  2 },
+      "vp9_superframe_split", 1, "VP9-2",  1 },
 };
 
 static const nat_codec_desc *codec_desc_for(int codec_id, int profile, int bit_depth)
@@ -537,12 +537,10 @@ int evo_vdec_native_probe(void)
                EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
 
 #if EVO_VDEC_NATIVE_10BIT
-    /* #41 Phase D: 10-bit resident decoders (HEVC Main10 + VP9 Profile 2).
-     * 1080p only (1920x1088), non-fatal. OFF by default - see the comment
-     * above EVO_VDEC_NATIVE_10BIT: confirmed on hardware to break home-screen
-     * thumbnail decode when on by default alongside Phase B's three. */
+    /* #41 Phase D: 10-bit resident decoders (HEVC Main10).
+     * 1080p only (1920x1088), non-fatal. Depth 1 keeps flexible memory footprint
+     * minimal (~14MB). VP9-2 is omitted to protect the flex-memory budget. */
     probe_slot(NAT_HEVC10, 1920, 1088, 0, sm);
-    probe_slot(NAT_VP92,   1920, 1088, 0, sm);
 #endif
 #endif
 

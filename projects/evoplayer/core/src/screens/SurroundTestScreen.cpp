@@ -91,7 +91,7 @@ bool SurroundTestScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     if (pressed & PadButtons::Circle) {
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
-            sm->navigateTo(ScreenId::Settings);
+            sm->navigateBack(ScreenId::SettingsPlayback);
         }
         return true;
     }

@@ -26,15 +26,42 @@ namespace evo {
 
 static void OnSearchSubmitted(const char* text, void* userdata) {
     auto* self = static_cast<BrowserScreen*>(userdata);
-    (void)self;
     auto browser = Application::getInstance().getFileSystemBrowser();
-    if (browser) {
-        if (text && text[0] != '\0') {
-            browser->search(text);
+    if (!browser) return;
+
+    std::string queryStr;
+    if (text) {
+        queryStr = text;
+        // Trim leading and trailing whitespace, CR, LF, tabs
+        size_t start = queryStr.find_first_not_of(" \t\r\n");
+        if (start != std::string::npos) {
+            size_t end = queryStr.find_last_not_of(" \t\r\n");
+            queryStr = queryStr.substr(start, end - start + 1);
         } else {
-            browser->clearSearch();
-            browser->refresh();
+            queryStr.clear();
         }
+    }
+
+    if (!queryStr.empty()) {
+        browser->search(queryStr);
+        if (self) {
+            self->resetSelection();
+        }
+        size_t count = browser->getEntryCount();
+        char msg[96];
+        if (count > 0) {
+            std::snprintf(msg, sizeof(msg), "\"%s\" (%zu found)", queryStr.c_str(), count);
+        } else {
+            std::snprintf(msg, sizeof(msg), "\"%s\" (no matches)", queryStr.c_str());
+        }
+        toast("SEARCH", msg);
+    } else {
+        browser->clearSearch();
+        browser->refresh();
+        if (self) {
+            self->resetSelection();
+        }
+        toast("SEARCH", "Cleared");
     }
 }
 
@@ -57,20 +84,26 @@ void BrowserScreen::initBrowserStateMachine() {
         .addTransition(BrowserScreenState::Browsing, BrowserScreenEvent::CursorMoved, BrowserScreenState::Browsing)
         .addTransition(BrowserScreenState::ProbingMedia, BrowserScreenEvent::CursorMoved, BrowserScreenState::Browsing)
         .addTransition(BrowserScreenState::ProbingMedia, BrowserScreenEvent::StartSearch, BrowserScreenState::Searching)
-        .addTransition(BrowserScreenState::Searching, BrowserScreenEvent::FinishSearch, BrowserScreenState::Browsing);
+        .addTransition(BrowserScreenState::Searching, BrowserScreenEvent::FinishSearch, BrowserScreenState::Browsing)
+        .addTransition(BrowserScreenState::Searching, BrowserScreenEvent::CursorMoved, BrowserScreenState::Browsing);
 }
 
-void BrowserScreen::onEnter() {
-    StatefulScreen::onEnter();
-    m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    if (browser) {
-        browser->refresh();
-    }
+void BrowserScreen::resetSelection() {
     m_selectedIndex = 0;
     m_scrollOffset = 0;
     m_settleMs = 0.0;
     m_cachedMetadata = MediaMetadataInfo();
+    m_browserFsm.postEvent(BrowserScreenEvent::FinishSearch);
+    m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
+}
+
+void BrowserScreen::onEnter() {
+    StatefulScreen::onEnter();
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    if (browser) {
+        browser->refresh();
+    }
+    resetSelection();
 }
 
 void BrowserScreen::onExit() {
@@ -217,6 +250,7 @@ void BrowserScreen::activateSelection() {
 }
 
 void BrowserScreen::openSearch() {
+    m_browserFsm.postEvent(BrowserScreenEvent::StartSearch);
     auto browser = Application::getInstance().getFileSystemBrowser();
     const char* query = browser ? browser->getSearchQuery().c_str() : "";
     evo_keyboard_open("SEARCH IN DIRECTORY", query, 48, OnSearchSubmitted, this);
@@ -262,11 +296,18 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     }
     if (pressed & PadButtons::Circle) {
         auto browser = Application::getInstance().getFileSystemBrowser();
+        if (browser && browser->isSearching()) {
+            evo_feedback(EVO_FB_CANCEL);
+            browser->clearSearch();
+            browser->refresh();
+            resetSelection();
+            toast("SEARCH", "Cleared");
+            return true;
+        }
         if (browser && !browser->getCurrentPath().empty()) {
             evo_feedback(EVO_FB_CANCEL);
             browser->navigateUp();
-            m_selectedIndex = 0;
-            m_scrollOffset = 0;
+            resetSelection();
         } else {
             evo_feedback(EVO_FB_CANCEL);
             if (auto sm = Application::getInstance().getScreenManager()) {
@@ -356,10 +397,28 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     evo_rmlui_browser_params_t params;
     std::memset(&params, 0, sizeof(params));
 
+    bool isSearching = browser->isSearching();
     std::string currentPath = browser->getCurrentPath();
-    params.path = currentPath.empty() ? "SELECT STORAGE" : currentPath.c_str();
-    params.title = "STORAGE BROWSER";
-    params.at_root = currentPath.empty() || currentPath == "/" ? 1 : 0;
+    std::string searchBreadcrumb;
+    if (isSearching) {
+        if (currentPath.empty()) {
+            searchBreadcrumb = "ALL STORAGE - [SEARCH: \"" + browser->getSearchQuery() + "\"]";
+        } else {
+            searchBreadcrumb = currentPath + " - [SEARCH: \"" + browser->getSearchQuery() + "\"]";
+        }
+        params.path = searchBreadcrumb.c_str();
+        params.title = "SEARCH RESULTS";
+        params.at_root = 0;
+        params.empty_title = "NO RESULTS FOUND";
+        params.empty_hint = "No files matched your search query";
+    } else {
+        params.path = currentPath.empty() ? "SELECT STORAGE" : currentPath.c_str();
+        params.title = "STORAGE BROWSER";
+        params.at_root = currentPath.empty() || currentPath == "/" ? 1 : 0;
+        params.empty_title = "THIS FOLDER IS EMPTY";
+        params.empty_hint = "No supported media files found";
+    }
+
     bool railFocused = false;
     if (auto sm = Application::getInstance().getScreenManager()) {
         railFocused = sm->isRailFocused();
@@ -368,12 +427,27 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
 
     int totalCount = static_cast<int>(browser->getEntryCount());
     params.total_count = totalCount;
-    params.cursor_index = m_selectedIndex;
     params.is_empty = (totalCount == 0);
-    params.empty_title = "THIS FOLDER IS EMPTY";
-    params.empty_hint = "No supported media files found";
+
+    if (totalCount == 0) {
+        m_selectedIndex = 0;
+        m_scrollOffset = 0;
+    } else if (m_selectedIndex >= totalCount) {
+        m_selectedIndex = totalCount - 1;
+    } else if (m_selectedIndex < 0) {
+        m_selectedIndex = 0;
+    }
+
+    params.cursor_index = totalCount > 0 ? m_selectedIndex : -1;
 
     constexpr int visibleRows = 8;
+    if (m_selectedIndex < m_scrollOffset) {
+        m_scrollOffset = m_selectedIndex;
+    } else if (m_selectedIndex >= m_scrollOffset + visibleRows) {
+        m_scrollOffset = m_selectedIndex - visibleRows + 1;
+    }
+    if (m_scrollOffset < 0) m_scrollOffset = 0;
+
     params.row_count = std::min(visibleRows, std::max(0, totalCount - m_scrollOffset));
 
     for (int i = 0; i < params.row_count; ++i) {
@@ -397,7 +471,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
             } else if (entry->category == FileCategory::Image) {
                 iconPath = "../icons/icon_palette.png";
             }
-            if (params.at_root) {
+            if (!isSearching && params.at_root) {
                 iconPath = "../icons/icon_browse_usb.png";
             }
             params.rows[i].icon_path = iconPath;

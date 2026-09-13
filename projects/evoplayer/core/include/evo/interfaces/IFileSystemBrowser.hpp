@@ -16,6 +16,7 @@ struct MediaSourceInfo {
 struct BrowserEntry {
     std::string name;
     std::string relativePath;
+    std::string fullPath;
     FileCategory category = FileCategory::Unknown;
     uint8_t directoryType = 0;
 };

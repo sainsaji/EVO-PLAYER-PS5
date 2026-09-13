@@ -122,6 +122,16 @@ typedef struct evo_vo_resolution_status {
     uint32_t reserved[4];
 } evo_vo_resolution_status;
 int32_t sceVideoOutGetResolutionStatus(int32_t handle, evo_vo_resolution_status *status);
+
+/* Display output status & dynamic range (SDR/HDR) readback. ABI verified in third_party/SharpProspero. */
+typedef struct evo_vo_output_status {
+    uint32_t resolution;
+    uint32_t dynamic_range; /* 0 unknown, 1 SDR, 2 HDR */
+    uint64_t refresh_rate;
+    uint64_t flags;        /* bit 0: HDR output active */
+    uint64_t reserved[3];
+} evo_vo_output_status;
+int32_t sceVideoOutGetOutputStatus(int32_t handle, evo_vo_output_status *status);
 void    sceVideoOutSetBufferAttribute2(void *attribute, uint64_t format, uint32_t tiling,
                                        uint32_t width, uint32_t height, uint64_t option,
                                        uint32_t reserved0, uint64_t reserved1);
@@ -152,6 +162,9 @@ typedef struct evo_agc_device {
     int                     width;
     int                     height;
     int                     is_hdr;
+    int                     display_is_hdr;
+    int                     display_dynamic_range;
+    uint32_t                display_resolution_token;
     int                     is_player_mode;
     /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
      * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
@@ -1070,6 +1083,22 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                 (void)evo_agc_apply_render_size(agc_defaults, width, height);
             }
         }
+
+        evo_vo_output_status vout;
+        memset(&vout, 0, sizeof(vout));
+        int32_t vorc = sceVideoOutGetOutputStatus(g_agc_dev.video_handle, &vout);
+        if (vorc == 0) {
+            g_agc_dev.display_dynamic_range = (int)vout.dynamic_range;
+            g_agc_dev.display_resolution_token = vout.resolution;
+            g_agc_dev.display_is_hdr = (vout.dynamic_range == 2 || (vout.flags & 1)) ? 1 : 0;
+            evo_boot_log("agc display output probe rc=%d res_token=%u dynamic_range=%u (%s) refresh=%llu flags=%#llx",
+                         vorc, vout.resolution, vout.dynamic_range,
+                         vout.dynamic_range == 2 ? "HDR" : (vout.dynamic_range == 1 ? "SDR" : "Unknown"),
+                         (unsigned long long)vout.refresh_rate,
+                         (unsigned long long)vout.flags);
+        } else {
+            evo_boot_log("agc display output probe failed rc=%d", vorc);
+        }
         evo_boot_log_flush();
     }
 
@@ -1750,6 +1779,16 @@ void evo_agc_runtime_get_size(int *width, int *height)
     if (height) *height = g_agc_dev.height;
 }
 
+int evo_agc_runtime_is_display_hdr(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.display_is_hdr : 0;
+}
+
+int evo_agc_runtime_get_display_dynamic_range(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.display_dynamic_range : 0;
+}
+
 static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
                        const uint8_t *src, int src_pitch,
                        uint32_t width, uint32_t height, uint32_t bpp,
@@ -1789,9 +1828,56 @@ static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
     for (uint32_t r = 0; r < height; ++r) {
         memcpy(dst + (size_t)r * pitch, src + (size_t)r * src_pitch, row_bytes);
     }
+    evo_agc_runtime_cache_flush(slice.cpu, total_bytes);
 
     *out_pitch = pitch;
     *out_gpu = slice.gpu_addr;
+    return 0;
+}
+
+static int stage_planar_uv_to_rg16(evo_agc_transient_ring_t *ring, uint32_t slot,
+                                   const uint8_t *u, int u_pitch,
+                                   const uint8_t *v, int v_pitch,
+                                   uint32_t cw2, uint32_t ch2,
+                                   uint32_t *out_pitch, uint64_t *out_gpu)
+{
+    if (!ring || !u || !v || u_pitch <= 0 || v_pitch <= 0 || cw2 == 0 || ch2 == 0) {
+        if (out_pitch) *out_pitch = 0;
+        if (out_gpu) *out_gpu = 0;
+        return -1;
+    }
+
+    /* cw2 chroma pixels per row. Each pixel has a 16-bit U and a 16-bit V (4 bytes total). */
+    uint32_t row_bytes = cw2 * 4u;
+    if ((uint32_t)u_pitch < cw2 * 2u || (uint32_t)v_pitch < cw2 * 2u) {
+        if (out_pitch) *out_pitch = 0;
+        if (out_gpu) *out_gpu = 0;
+        return -1;
+    }
+
+    uint32_t pitch = (row_bytes + 255u) & ~255u;
+    size_t total_bytes = (size_t)pitch * (size_t)ch2;
+
+    evo_agc_transient_slice_t slice;
+    if (evo_agc_transient_ring_alloc(ring, slot, total_bytes, 256, &slice) != EVO_AGC_TRANSIENT_OK) {
+        if (out_pitch) *out_pitch = pitch;
+        if (out_gpu) *out_gpu = 0;
+        return -1;
+    }
+
+    uint8_t *dst = (uint8_t *)slice.cpu;
+    for (uint32_t r = 0; r < ch2; ++r) {
+        const uint16_t * __restrict src_u = (const uint16_t *)(u + (size_t)r * (size_t)u_pitch);
+        const uint16_t * __restrict src_v = (const uint16_t *)(v + (size_t)r * (size_t)v_pitch);
+        uint32_t * __restrict dst_row = (uint32_t *)(dst + (size_t)r * (size_t)pitch);
+        for (uint32_t c = 0; c < cw2; ++c) {
+            dst_row[c] = (uint32_t)src_u[c] | ((uint32_t)src_v[c] << 16);
+        }
+    }
+    evo_agc_runtime_cache_flush(slice.cpu, total_bytes);
+
+    if (out_pitch) *out_pitch = pitch;
+    if (out_gpu) *out_gpu = slice.gpu_addr;
     return 0;
 }
 
@@ -2002,8 +2088,8 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     }
 
     evo_agc_transient_slice_t desc_slice;
-    if (planar) {
-        /* Planar 3-plane: 144 bytes descriptor table (3 * 48B) */
+    if (planar && !ten_bit) {
+        /* Planar 3-plane (SDR): 144 bytes descriptor table (3 * 48B) */
         if (evo_agc_transient_ring_alloc(ring, slot, 144, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
             evo_boot_log("agc_blit_yuv: desc_slice alloc failed");
             evo_boot_log_flush();
@@ -2016,30 +2102,27 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         uint64_t u_gpu = 0, v_gpu = 0;
         uint32_t cw2 = (uint32_t)(coded_w / 2);
         uint32_t ch2 = (uint32_t)(coded_h / 2);
-        if (stage_plane(ring, slot, u, u_pitch, cw2, ch2, bpp, is_direct, &u_pitch_gpu, &u_gpu) != 0) {
+        if (stage_plane(ring, slot, u, u_pitch, cw2, ch2, 1u, is_direct, &u_pitch_gpu, &u_gpu) != 0) {
             evo_boot_log("agc_blit_yuv: stage U plane failed");
             evo_boot_log_flush();
             return;
         }
-        if (stage_plane(ring, slot, v, v_pitch, cw2, ch2, bpp, is_direct, &v_pitch_gpu, &v_gpu) != 0) {
+        if (stage_plane(ring, slot, v, v_pitch, cw2, ch2, 1u, is_direct, &v_pitch_gpu, &v_gpu) != 0) {
             evo_boot_log("agc_blit_yuv: stage V plane failed");
             evo_boot_log_flush();
             return;
         }
 
         /* Binding 0: Y plane */
-        int r0 = ten_bit ? evo_agc_build_tsharp_r16(desc + 0, y_gpu, (uint32_t)coded_w, (uint32_t)coded_h, y_pitch_gpu)
-                         : evo_agc_build_tsharp_r8(desc + 0, y_gpu, (uint32_t)coded_w, (uint32_t)coded_h, y_pitch_gpu);
+        int r0 = evo_agc_build_tsharp_r8(desc + 0, y_gpu, (uint32_t)coded_w, (uint32_t)coded_h, y_pitch_gpu);
         evo_agc_build_ssharp(desc + 8, 1, 1);
 
         /* Binding 1: U plane (offset 48 = 12 dwords) */
-        int r1 = ten_bit ? evo_agc_build_tsharp_r16(desc + 12, u_gpu, cw2, ch2, u_pitch_gpu)
-                         : evo_agc_build_tsharp_r8(desc + 12, u_gpu, cw2, ch2, u_pitch_gpu);
+        int r1 = evo_agc_build_tsharp_r8(desc + 12, u_gpu, cw2, ch2, u_pitch_gpu);
         evo_agc_build_ssharp(desc + 20, 1, 1);
 
         /* Binding 2: V plane (offset 96 = 24 dwords) */
-        int r2 = ten_bit ? evo_agc_build_tsharp_r16(desc + 24, v_gpu, cw2, ch2, v_pitch_gpu)
-                         : evo_agc_build_tsharp_r8(desc + 24, v_gpu, cw2, ch2, v_pitch_gpu);
+        int r2 = evo_agc_build_tsharp_r8(desc + 24, v_gpu, cw2, ch2, v_pitch_gpu);
         evo_agc_build_ssharp(desc + 32, 1, 1);
 
         if (r0 != 0 || r1 != 0 || r2 != 0) {
@@ -2048,9 +2131,10 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
             return;
         }
     } else {
-        /* NV12 / P010 2-plane: 96 bytes descriptor table (2 * 48B) */
+        /* NV12 / P010 2-plane: 96 bytes descriptor table (2 * 48B).
+         * Used for NV12 (SDR 8-bit), NV12_10 (HDR 10-bit), and planar 10-bit (interleaved to RG16). */
         if (evo_agc_transient_ring_alloc(ring, slot, 96, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
-            evo_boot_log("agc_blit_yuv: nv12 desc_slice alloc failed");
+            evo_boot_log("agc_blit_yuv: 2-plane desc_slice alloc failed");
             evo_boot_log_flush();
             return;
         }
@@ -2061,10 +2145,20 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         uint64_t uv_gpu = 0;
         uint32_t cw2 = (uint32_t)(coded_w / 2);
         uint32_t ch2 = (uint32_t)(coded_h / 2);
-        if (stage_plane(ring, slot, uv, uv_pitch, cw2, ch2, bpp * 2u, is_direct, &uv_pitch_gpu, &uv_gpu) != 0) {
-            evo_boot_log("agc_blit_yuv: stage UV plane failed");
-            evo_boot_log_flush();
-            return;
+
+        if (ten_bit && planar) {
+            if (stage_planar_uv_to_rg16(ring, slot, u, u_pitch, v, v_pitch, cw2, ch2, &uv_pitch_gpu, &uv_gpu) != 0) {
+                evo_boot_log("agc_blit_yuv: stage planar UV to RG16 failed");
+                evo_boot_log_flush();
+                return;
+            }
+        } else {
+            uint32_t uv_bpp = bpp * 2u;
+            if (stage_plane(ring, slot, uv, uv_pitch, cw2, ch2, uv_bpp, is_direct, &uv_pitch_gpu, &uv_gpu) != 0) {
+                evo_boot_log("agc_blit_yuv: stage UV plane failed");
+                evo_boot_log_flush();
+                return;
+            }
         }
 
         /* Binding 0: Y plane */
@@ -2078,7 +2172,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         evo_agc_build_ssharp(desc + 20, 1, 1);
 
         if (r0 != 0 || r1 != 0) {
-            evo_boot_log("agc_blit_yuv: build nv12 tsharp failed rc=%d/%d", r0, r1);
+            evo_boot_log("agc_blit_yuv: build 2-plane tsharp failed rc=%d/%d", r0, r1);
             evo_boot_log_flush();
             return;
         }

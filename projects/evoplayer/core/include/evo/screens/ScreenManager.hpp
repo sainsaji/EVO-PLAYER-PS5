@@ -52,16 +52,34 @@ public:
     void registerScreen(std::unique_ptr<IScreen> screen);
     void navigateTo(ScreenId screenId);
     bool navigateBack();
+    bool navigateBack(ScreenId fallbackScreen);
+
+    /**
+     * @brief Determines whether a screen belongs to an active playback session.
+     */
+    bool isPlaybackScreen(ScreenId screenId) const;
+
+    /**
+     * @brief Returns the root screen ID corresponding to a given rail section index.
+     */
+    ScreenId getRootScreenForSection(int section) const;
 
     /**
      * @brief The screen the player was launched from.
      *
      * Walks the history back past the player and the screens that live on top
-     * of it (exit confirm, resume prompt, media info, subtitle picker) to
-     * whatever screen actually started playback, so stopping a video returns
-     * there instead of a hardcoded destination. Falls back to MainMenu.
+     * of it (exit confirm, resume prompt, media info, subtitle picker, audio
+     * track picker) to whatever screen actually started playback, so stopping
+     * a video returns there instead of a hardcoded destination. Falls back to
+     * MainMenu.
      */
     ScreenId getPlaybackReturnScreen() const;
+
+    /**
+     * @brief Cleanly finishes a playback session, popping all playback screens
+     * from the history stack and navigating back to the screen that started it.
+     */
+    void returnFromPlayback();
 
     ScreenId getCurrentScreenId() const { return m_currentScreenId; }
     IScreen* getCurrentScreen() const;

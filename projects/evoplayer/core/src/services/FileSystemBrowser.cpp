@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <sys/stat.h>
 
 namespace evo {
 
@@ -70,11 +71,24 @@ bool FileSystemBrowser::navigateToSource(size_t sourceIndex) {
 }
 
 bool FileSystemBrowser::navigateInto(const std::string& folderName) {
+    // If currently searching, navigate into the matching entry
+    if (!m_searchQuery.empty()) {
+        for (const auto& entry : m_entries) {
+            if ((entry.name == folderName || entry.relativePath == folderName || entry.fullPath == folderName) &&
+                entry.category == FileCategory::Folder) {
+                m_currentPath = entry.fullPath;
+                clearSearch();
+                return refresh();
+            }
+        }
+    }
+
     if (m_currentPath.empty()) {
         // Picker mode: navigate into chosen source
         for (const auto& src : m_sources) {
             if (src.label == folderName) {
                 m_currentPath = src.rootPath;
+                clearSearch();
                 return refresh();
             }
         }
@@ -119,21 +133,28 @@ bool FileSystemBrowser::refresh() {
 
     // Sentinel: at root picker above any source
     if (m_currentPath.empty()) {
-        for (const auto& src : m_sources) {
-            BrowserEntry entry;
-            entry.name = src.label;
-            entry.relativePath = src.label;
-            entry.category = FileCategory::Folder;
-            entry.directoryType = 4; // DT_DIR
-            m_entries.push_back(std::move(entry));
+        if (!m_searchQuery.empty()) {
+            for (const auto& src : m_sources) {
+                scanRecursive(src.rootPath, "", m_searchQuery, 0, src.label);
+            }
+        } else {
+            for (const auto& src : m_sources) {
+                BrowserEntry entry;
+                entry.name = src.label;
+                entry.relativePath = src.label;
+                entry.fullPath = src.rootPath;
+                entry.category = FileCategory::Folder;
+                entry.directoryType = 4; // DT_DIR
+                m_entries.push_back(std::move(entry));
+            }
+            return true;
         }
-        return true;
-    }
-
-    if (!m_searchQuery.empty()) {
-        scanRecursive(m_currentPath, "", m_searchQuery, 0);
     } else {
-        scanDirectory(m_currentPath);
+        if (!m_searchQuery.empty()) {
+            scanRecursive(m_currentPath, "", m_searchQuery, 0);
+        } else {
+            scanDirectory(m_currentPath);
+        }
     }
 
     // Sort entries
@@ -176,11 +197,31 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
         if (std::strcmp(entry->d_name, "$RECYCLE.BIN") == 0) continue;
         if (std::strcmp(entry->d_name, "System Volume Information") == 0) continue;
 
+        std::string fullPath = dirPath + "/" + entry->d_name;
+        uint8_t dType = entry->d_type;
+        if (dType == 0) { // DT_UNKNOWN
+            struct stat st;
+            if (stat(fullPath.c_str(), &st) == 0) {
+                if (S_ISDIR(st.st_mode)) {
+                    dType = 4; // DT_DIR
+                } else if (S_ISREG(st.st_mode)) {
+                    dType = 8; // DT_REG
+                }
+            } else {
+                evo_dir_t* testDir = evo_opendir(fullPath.c_str());
+                if (testDir) {
+                    dType = 4;
+                    evo_closedir(testDir);
+                }
+            }
+        }
+
         BrowserEntry bEntry;
         bEntry.name = entry->d_name;
         bEntry.relativePath = entry->d_name;
-        bEntry.directoryType = entry->d_type;
-        bEntry.category = classifyFile(entry->d_name, entry->d_type);
+        bEntry.fullPath = fullPath;
+        bEntry.directoryType = dType;
+        bEntry.category = classifyFile(entry->d_name, dType);
         m_entries.push_back(std::move(bEntry));
     }
 
@@ -188,7 +229,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
 }
 
 void FileSystemBrowser::scanRecursive(const std::string& basePath, const std::string& relPath,
-                                     const std::string& query, int depth) {
+                                     const std::string& query, int depth, const std::string& sourcePrefix) {
     if (depth > 5 || m_entries.size() >= 255) {
         return;
     }
@@ -204,18 +245,41 @@ void FileSystemBrowser::scanRecursive(const std::string& basePath, const std::st
         if (std::strcmp(entry->d_name, "System Volume Information") == 0) continue;
 
         std::string itemRel = relPath.empty() ? entry->d_name : (relPath + "/" + entry->d_name);
+        std::string childFullPath = basePath + "/" + itemRel;
 
-        if (CaseInsensitiveContains(entry->d_name, query) || CaseInsensitiveContains(itemRel, query)) {
+        uint8_t dType = entry->d_type;
+        if (dType == 0) { // DT_UNKNOWN
+            struct stat st;
+            if (stat(childFullPath.c_str(), &st) == 0) {
+                if (S_ISDIR(st.st_mode)) {
+                    dType = 4; // DT_DIR
+                } else if (S_ISREG(st.st_mode)) {
+                    dType = 8; // DT_REG
+                }
+            } else {
+                evo_dir_t* testDir = evo_opendir(childFullPath.c_str());
+                if (testDir) {
+                    dType = 4;
+                    evo_closedir(testDir);
+                }
+            }
+        }
+
+        std::string displayName = sourcePrefix.empty() ? itemRel : (sourcePrefix + "/" + itemRel);
+
+        if (CaseInsensitiveContains(entry->d_name, query) || CaseInsensitiveContains(itemRel, query) ||
+            (!sourcePrefix.empty() && CaseInsensitiveContains(displayName, query))) {
             BrowserEntry bEntry;
-            bEntry.name = itemRel;
+            bEntry.name = displayName;
             bEntry.relativePath = itemRel;
-            bEntry.directoryType = entry->d_type;
-            bEntry.category = classifyFile(entry->d_name, entry->d_type);
+            bEntry.fullPath = childFullPath;
+            bEntry.directoryType = dType;
+            bEntry.category = classifyFile(entry->d_name, dType);
             m_entries.push_back(std::move(bEntry));
         }
 
-        if (entry->d_type == 4) { // DT_DIR
-            scanRecursive(basePath, itemRel, query, depth + 1);
+        if (dType == 4) { // DT_DIR
+            scanRecursive(basePath, itemRel, query, depth + 1, sourcePrefix);
         }
     }
 
@@ -240,6 +304,9 @@ const BrowserEntry* FileSystemBrowser::getEntry(size_t index) const {
 
 std::string FileSystemBrowser::getFullPath(size_t index) const {
     if (index >= m_entries.size()) return "";
+    if (!m_entries[index].fullPath.empty()) {
+        return m_entries[index].fullPath;
+    }
     if (m_currentPath.empty()) {
         for (const auto& src : m_sources) {
             if (src.label == m_entries[index].name) {

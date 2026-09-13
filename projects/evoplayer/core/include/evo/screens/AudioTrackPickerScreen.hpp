@@ -41,6 +41,7 @@ private:
     std::vector<Entry> m_tracks;
     int m_selectedIndex = 0;
     int m_activeIndex = 0;
+    int m_scrollOffset = 0;
 };
 
 } // namespace evo

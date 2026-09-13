@@ -508,14 +508,16 @@ int Application::run() {
                 evo_boot_log_flush();
             }
             static int s_present_player_log = 10;
+            bool log_this_present = false;
             if (isPlayer && s_present_player_log > 0) {
                 s_present_player_log--;
+                log_this_present = true;
                 evo_boot_log("app present begin isPlayer=1");
                 evo_boot_log_flush();
             }
             evo_agc_runtime_present();
             evo_rmlui_end_frame();
-            if (isPlayer && s_present_player_log >= 0) {
+            if (log_this_present) {
                 evo_boot_log("app present done isPlayer=1");
                 evo_boot_log_flush();
             }

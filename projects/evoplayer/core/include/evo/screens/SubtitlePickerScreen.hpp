@@ -33,6 +33,8 @@ private:
 
     std::vector<SubtitleTrackEntry> m_tracks;
     int m_selectedIndex = 0;
+    int m_activeTrackIndex = 0;
+    int m_scrollOffset = 0;
 };
 
 } // namespace evo

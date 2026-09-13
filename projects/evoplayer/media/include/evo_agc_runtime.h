@@ -118,6 +118,8 @@ SceAgcCommandBuffer      *evo_agc_runtime_get_current_cb(void);
 evo_agc_transient_ring_t *evo_agc_runtime_get_transient_ring(void);
 uint32_t                  evo_agc_runtime_get_current_slot(void);
 void                      evo_agc_runtime_get_size(int *width, int *height);
+int                       evo_agc_runtime_is_display_hdr(void);
+int                       evo_agc_runtime_get_display_dynamic_range(void);
 
 /* Composite a premultiplied 0xAABBGGRR OSD buffer over the current frame.
  * `upload` = "the buffer changed since last call"; when 0 the previous upload is

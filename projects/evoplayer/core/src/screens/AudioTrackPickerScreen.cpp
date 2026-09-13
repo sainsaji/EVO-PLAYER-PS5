@@ -19,6 +19,10 @@ void AudioTrackPickerScreen::onEnter() {
     StatefulScreen::onEnter();
     refreshTracks();
     m_selectedIndex = m_activeIndex;
+    m_scrollOffset = 0;
+    if (m_selectedIndex >= EVO_RMLUI_LIST_ROWS) {
+        m_scrollOffset = m_selectedIndex - EVO_RMLUI_LIST_ROWS + 1;
+    }
 }
 
 void AudioTrackPickerScreen::onExit() {
@@ -67,6 +71,13 @@ void AudioTrackPickerScreen::navigate(int delta) {
     if (next < 0)      { m_selectedIndex = 0;     evo_feedback(EVO_FB_BOUNDARY); return; }
     if (next >= n)     { m_selectedIndex = n - 1; evo_feedback(EVO_FB_BOUNDARY); return; }
     m_selectedIndex = next;
+
+    if (m_selectedIndex >= m_scrollOffset + EVO_RMLUI_LIST_ROWS) {
+        m_scrollOffset = m_selectedIndex - EVO_RMLUI_LIST_ROWS + 1;
+    } else if (m_selectedIndex < m_scrollOffset) {
+        m_scrollOffset = m_selectedIndex;
+    }
+
     evo_feedback(EVO_FB_MOVE);
 }
 
@@ -90,7 +101,11 @@ void AudioTrackPickerScreen::activateSelection() {
         }
     }
 
-    if (sm) sm->navigateTo(ScreenId::Player);
+    if (sm) {
+        if (!sm->navigateBack()) {
+            sm->navigateTo(ScreenId::Player);
+        }
+    }
 }
 
 bool AudioTrackPickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
@@ -103,7 +118,9 @@ bool AudioTrackPickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32
     if (pressed & PadButtons::Circle) {
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
-            sm->navigateTo(ScreenId::Player);
+            if (!sm->navigateBack()) {
+                sm->navigateTo(ScreenId::Player);
+            }
         }
         return true;
     }
@@ -133,16 +150,17 @@ void AudioTrackPickerScreen::render(uint32_t* framebuffer, int width, int height
         params.empty_hint = "This file has no decodable audio stream.";
         params.empty_icon = "../icons/icon_folder.png";
     } else {
-        int visible = std::min(total, EVO_RMLUI_LIST_ROWS);
-        params.row_count = visible;
-        for (int i = 0; i < visible; ++i) {
-            params.rows[i].title = m_tracks[i].label.c_str();
-            params.rows[i].detail = m_tracks[i].detail.c_str();
-            params.rows[i].badge = m_tracks[i].badge.c_str();
+        int rowsToDisplay = std::min(EVO_RMLUI_LIST_ROWS, std::max(0, total - m_scrollOffset));
+        params.row_count = rowsToDisplay;
+        for (int i = 0; i < rowsToDisplay; ++i) {
+            int idx = m_scrollOffset + i;
+            params.rows[i].title = m_tracks[idx].label.c_str();
+            params.rows[i].detail = m_tracks[idx].detail.c_str();
+            params.rows[i].badge = m_tracks[idx].badge.c_str();
             params.rows[i].icon_path = "../icons/icon_aspect.png";
             params.rows[i].progress = -1;
             params.rows[i].has_chevron = 0;
-            params.rows[i].is_focused = (i == m_selectedIndex);
+            params.rows[i].is_focused = (idx == m_selectedIndex);
         }
     }
 

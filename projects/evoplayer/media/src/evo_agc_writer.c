@@ -111,12 +111,12 @@ static int build_tsharp_2d_internal(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_
     memset(out, 0, EVO_AGC_TSHARP_DWORDS * sizeof(uint32_t));
     out[0] = (uint32_t)(gpu_address >> 8);
     out[1] = (uint32_t)(gpu_address >> 40) | (format << 20) | ((width_minus_one & 3u) << 30);
-    out[2] = ((width_minus_one >> 2) & 0xfffu) | ((height - 1u) << 14) | (UINT32_C(1) << 31);
+    out[2] = ((width_minus_one >> 2) & 0xfffu) | ((height - 1u) << 14);
     out[3] = sel_x | (sel_y << 3) | (sel_z << 6) | (sel_w << 9) | ((uint32_t)SQ_RSRC_IMG_2D << 28);
     if ((pitch_bytes / bpp) != width) {
         out[4] = (pitch_minus_one & 0x1fffu) | (((pitch_minus_one >> 13) & 1u) << 13);
     }
-    out[5] = (4u << 20);
+    out[5] = (7u << 20);
     return 0;
 }
 
@@ -167,8 +167,10 @@ int evo_agc_build_ssharp(uint32_t out[EVO_AGC_SSHARP_DWORDS], int clamp_to_edge,
     memset(out, 0, EVO_AGC_SSHARP_DWORDS * sizeof(uint32_t));
     const uint32_t addr_mode = clamp_to_edge ? 2u : 0u; /* 2 = CLAMP_LAST_TEXEL, 0 = REPEAT */
     out[0] = addr_mode | (addr_mode << 3) | (addr_mode << 6);
+    out[1] = 0x00fff000u; /* maxLod = 4095 */
     if (bilinear) {
-        out[2] = (UINT32_C(1) << 20) | (UINT32_C(1) << 22); /* XY bilinear */
+        /* kNativeAgcBilinearSamplerWord = (1u<<27) | (1u<<24) | (1u<<22) | (1u<<20) = 0x09500000u */
+        out[2] = 0x09500000u;
     }
     return 0;
 }

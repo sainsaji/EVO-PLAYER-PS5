@@ -23,7 +23,11 @@ SubtitlePickerScreen::SubtitlePickerScreen()
 void SubtitlePickerScreen::onEnter() {
     StatefulScreen::onEnter();
     refreshTracks();
-    m_selectedIndex = 0;
+    m_selectedIndex = m_activeTrackIndex;
+    m_scrollOffset = 0;
+    if (m_selectedIndex >= 8) {
+        m_scrollOffset = m_selectedIndex - 8 + 1;
+    }
 }
 
 void SubtitlePickerScreen::onExit() {
@@ -32,6 +36,7 @@ void SubtitlePickerScreen::onExit() {
 
 void SubtitlePickerScreen::refreshTracks() {
     m_tracks.clear();
+    m_activeTrackIndex = 0;
 
     // 1. Subtitles OFF
     SubtitleTrackEntry offTrack;
@@ -48,6 +53,9 @@ void SubtitlePickerScreen::refreshTracks() {
         char cueBuf[32];
         std::snprintf(cueBuf, sizeof(cueBuf), "%d CUES", prospero_subtitle_count);
         extTrack.detail = cueBuf;
+        if (prospero_subtitle_enabled && prospero_subtitle_use_external) {
+            m_activeTrackIndex = static_cast<int>(m_tracks.size());
+        }
         m_tracks.push_back(std::move(extTrack));
     }
 
@@ -73,24 +81,43 @@ void SubtitlePickerScreen::refreshTracks() {
 
             streamTrack.label = label;
             streamTrack.detail = "Embedded Stream";
+
+            if (prospero_subtitle_enabled && !prospero_subtitle_use_external &&
+                prospero_embedded_subtitle_stream_index == static_cast<int>(i)) {
+                m_activeTrackIndex = static_cast<int>(m_tracks.size());
+            }
+
             m_tracks.push_back(std::move(streamTrack));
         }
+    }
+
+    if (!prospero_subtitle_enabled) {
+        m_activeTrackIndex = 0;
     }
 }
 
 void SubtitlePickerScreen::navigate(int delta) {
     if (m_tracks.empty()) return;
     int count = static_cast<int>(m_tracks.size());
-    m_selectedIndex += delta;
-    if (m_selectedIndex < 0) {
+    int next = m_selectedIndex + delta;
+    if (next < 0) {
         m_selectedIndex = 0;
         evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedIndex >= count) {
+        return;
+    } else if (next >= count) {
         m_selectedIndex = count - 1;
         evo_feedback(EVO_FB_BOUNDARY);
-    } else {
-        evo_feedback(EVO_FB_MOVE);
+        return;
     }
+    m_selectedIndex = next;
+
+    if (m_selectedIndex >= m_scrollOffset + 8) {
+        m_scrollOffset = m_selectedIndex - 8 + 1;
+    } else if (m_selectedIndex < m_scrollOffset) {
+        m_scrollOffset = m_selectedIndex;
+    }
+
+    evo_feedback(EVO_FB_MOVE);
 }
 
 void SubtitlePickerScreen::activateSelection() {
@@ -119,7 +146,9 @@ void SubtitlePickerScreen::activateSelection() {
     }
 
     if (auto sm = Application::getInstance().getScreenManager()) {
-        sm->navigateTo(ScreenId::Player);
+        if (!sm->navigateBack()) {
+            sm->navigateTo(ScreenId::Player);
+        }
     }
 }
 
@@ -152,7 +181,9 @@ bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t
     if (pressed & PadButtons::Circle) {
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
-            sm->navigateTo(ScreenId::Player);
+            if (!sm->navigateBack()) {
+                sm->navigateTo(ScreenId::Player);
+            }
         }
         return true;
     }
@@ -175,12 +206,15 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
     params.preview_text = "The quick brown fox jumps over the lazy dog";
     params.preview_face = prospero_subtitle_face % 3;
 
-    params.track_count = std::min(8, static_cast<int>(m_tracks.size()));
-    for (int i = 0; i < params.track_count; ++i) {
-        params.tracks[i].label = m_tracks[i].label.c_str();
-        params.tracks[i].detail = m_tracks[i].detail.c_str();
-        params.tracks[i].is_focused = (i == m_selectedIndex);
-        params.tracks[i].is_current = (i == m_selectedIndex);
+    int total = static_cast<int>(m_tracks.size());
+    int rowsToDisplay = std::min(8, std::max(0, total - m_scrollOffset));
+    params.track_count = rowsToDisplay;
+    for (int i = 0; i < rowsToDisplay; ++i) {
+        int idx = m_scrollOffset + i;
+        params.tracks[i].label = m_tracks[idx].label.c_str();
+        params.tracks[i].detail = m_tracks[idx].detail.c_str();
+        params.tracks[i].is_focused = (idx == m_selectedIndex);
+        params.tracks[i].is_current = (idx == m_activeTrackIndex);
     }
 
     evo_rmlui_update_subtitles(&params);

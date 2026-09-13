@@ -111,30 +111,47 @@ void ScreenManager::stepRail(int delta) {
     syncNavRail();
 }
 
-void ScreenManager::activateRail() {
-    int currentSection = getSectionForScreen(m_currentScreenId);
-    int targetSection = m_railIndex;
+ScreenId ScreenManager::getRootScreenForSection(int section) const {
+    switch (section) {
+        case 0: return ScreenId::MainMenu;
+        case 1: return ScreenId::UsbBrowser;
+        case 2: return ScreenId::RecentFiles;
+        case 3: return ScreenId::Favorites;
+        case 4: return ScreenId::EmbySetup;
+        case 5: return ScreenId::Settings;
+        case 6: return ScreenId::AboutSupport;
+        default: return ScreenId::MainMenu;
+    }
+}
 
+bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
+    switch (screenId) {
+        case ScreenId::Player:
+        case ScreenId::ExitConfirm:
+        case ScreenId::ResumePrompt:
+        case ScreenId::MediaInfo:
+        case ScreenId::SubtitlePicker:
+        case ScreenId::AudioTrackPicker:
+        case ScreenId::PlaybackFinished:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void ScreenManager::activateRail() {
+    int targetSection = m_railIndex;
     m_railFocused = false;
 
-    if (targetSection == currentSection) {
+    ScreenId targetRoot = getRootScreenForSection(targetSection);
+    if (m_currentScreenId == targetRoot) {
         evo_feedback(EVO_FB_CANCEL);
         syncNavRail();
         return;
     }
 
     evo_feedback(EVO_FB_OPEN);
-
-    switch (targetSection) {
-        case 0: navigateTo(ScreenId::MainMenu); break;
-        case 1: navigateTo(ScreenId::UsbBrowser); break;
-        case 2: navigateTo(ScreenId::RecentFiles); break;
-        case 3: navigateTo(ScreenId::Favorites); break;
-        case 4: navigateTo(ScreenId::EmbySetup); break;
-        case 5: navigateTo(ScreenId::Settings); break;
-        case 6: navigateTo(ScreenId::AboutSupport); break;
-        default: break;
-    }
+    navigateTo(targetRoot);
 }
 
 void ScreenManager::navigateTo(ScreenId screenId) {
@@ -189,20 +206,53 @@ bool ScreenManager::navigateBack() {
     return true;
 }
 
+bool ScreenManager::navigateBack(ScreenId fallbackScreen) {
+    if (navigateBack()) {
+        return true;
+    }
+    navigateTo(fallbackScreen);
+    return false;
+}
+
 ScreenId ScreenManager::getPlaybackReturnScreen() const {
     for (auto it = m_history.rbegin(); it != m_history.rend(); ++it) {
-        switch (*it) {
-            case ScreenId::Player:
-            case ScreenId::ExitConfirm:
-            case ScreenId::ResumePrompt:
-            case ScreenId::MediaInfo:
-            case ScreenId::SubtitlePicker:
-                continue;          /* part of the playback session, keep walking */
-            default:
-                return *it;
+        if (!isPlaybackScreen(*it)) {
+            return *it;
         }
     }
     return ScreenId::MainMenu;
+}
+
+void ScreenManager::returnFromPlayback() {
+    ScreenId target = getPlaybackReturnScreen();
+
+    if (auto current = getCurrentScreen()) {
+        current->onExit();
+    }
+
+    // Prune all playback session screens from the history stack
+    while (!m_history.empty() && isPlaybackScreen(m_history.back())) {
+        m_history.pop_back();
+    }
+
+    // Ensure the destination screen is at the top of history
+    if (m_history.empty() || m_history.back() != target) {
+        m_history.push_back(target);
+    }
+
+    m_currentScreenId = target;
+    m_navFsm.postEvent(NavigationEvent::NavigateScreen);
+    screen = static_cast<int>(target);
+
+    m_railFocused = false;
+    int sec = getSectionForScreen(target);
+    if (sec >= 0) m_railIndex = sec;
+
+    if (auto next = getCurrentScreen()) {
+        next->onEnter();
+    }
+
+    syncNavRail();
 }
 
 void ScreenManager::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {

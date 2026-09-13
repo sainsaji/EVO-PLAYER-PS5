@@ -785,7 +785,8 @@ bool PlaybackController::playNextVideo() {
     const auto& entries = browser->getEntries();
     int currentIndex = -1;
     for (size_t i = 0; i < entries.size(); ++i) {
-        if (entries[i].name == filename) {
+        if (entries[i].name == filename || entries[i].relativePath == filename ||
+            (!entries[i].fullPath.empty() && entries[i].fullPath == currentFile)) {
             currentIndex = static_cast<int>(i);
             break;
         }
@@ -858,11 +859,29 @@ bool PlaybackController::switchAudioTrack(int streamIndex) {
     double resumeAt = getPositionSeconds();
     bool wasPaused = isPaused();
 
+    // Preserve subtitle state across audio reopen
+    int savedSubEnabled = prospero_subtitle_enabled;
+    int savedSubUseExt = prospero_subtitle_use_external;
+    int savedSubStream = prospero_embedded_subtitle_stream_index;
+
     m_requestedAudioStream = streamIndex;
+    if (!savedSubUseExt && savedSubStream >= 0) {
+        prospero_subtitle_requested_stream = savedSubStream;
+    }
+
     if (!startPlayback(path, resumeAt)) {
         m_requestedAudioStream = -1;
+        prospero_subtitle_requested_stream = -2;
         return false;
     }
+
+    // Restore subtitle state
+    prospero_subtitle_enabled = savedSubEnabled;
+    prospero_subtitle_use_external = savedSubUseExt;
+    if (!savedSubUseExt && savedSubStream >= 0) {
+        prospero_embedded_subtitle_stream_index = savedSubStream;
+    }
+    prospero_subtitle_requested_stream = -2;
 
     if (wasPaused) setPaused(true);
     return true;

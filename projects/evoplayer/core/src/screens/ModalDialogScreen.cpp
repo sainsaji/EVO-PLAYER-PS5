@@ -56,14 +56,14 @@ void ModalDialogScreen::executeAction(int actionIndex) {
         if (actionIndex == 0) {
             // "KEEP WATCHING"
             evo_feedback(EVO_FB_CANCEL);
-            screenMgr->navigateTo(ScreenId::Player);
+            screenMgr->navigateBack(ScreenId::Player);
         } else {
             // "STOP"
             evo_feedback(EVO_FB_CONFIRM);
             if (playback) {
                 playback->stopPlayback();
             }
-            screenMgr->navigateTo(screenMgr->getPlaybackReturnScreen());
+            screenMgr->returnFromPlayback();
         }
     } else {
         // Resume prompt
@@ -104,9 +104,9 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
             if (m_type == ModalType::ExitConfirm) {
-                sm->navigateTo(ScreenId::Player);
+                sm->navigateBack(ScreenId::Player);
             } else {
-                sm->navigateTo(sm->getPlaybackReturnScreen());
+                sm->returnFromPlayback();
             }
         }
         return true;

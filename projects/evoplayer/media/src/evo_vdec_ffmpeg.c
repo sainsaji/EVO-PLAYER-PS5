@@ -33,11 +33,13 @@
  * backend == EVO_VDEC_BACKEND_NATIVE, and then the ctx/frame/pkt fields are
  * unused.
  */
+#define FFMPEG_FRAME_RING 4
 struct evo_vdec {
     evo_vdec_backend backend;
     int              codec_id;   /* AVCodecID — backend-independent, for the UI */
     AVCodecContext  *ctx;
-    AVFrame         *frame;   /* scratch for receive; planes borrowed until next call */
+    AVFrame         *frames[FFMPEG_FRAME_RING]; /* ring for receive; planes borrowed until slot recycled */
+    int              frame_idx;
     AVPacket        *pkt;     /* scratch for send */
     evo_vdec_native *nat;     /* sceVideodec2 sub-backend, or NULL */
 
@@ -283,9 +285,11 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
     v->codec_id = p->codec_id;
 
     v->ctx = avcodec_alloc_context3(dec);
-    v->frame = av_frame_alloc();
+    for (int i = 0; i < FFMPEG_FRAME_RING; i++) {
+        v->frames[i] = av_frame_alloc();
+    }
     v->pkt = av_packet_alloc();
-    if (!v->ctx || !v->frame || !v->pkt) {
+    if (!v->ctx || !v->pkt || !v->frames[0] || !v->frames[1] || !v->frames[2] || !v->frames[3]) {
         evo_vdec_close(v);
         return NULL;
     }
@@ -386,21 +390,25 @@ static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
     if (!v->ctx)
         return -1;
 
-    av_frame_unref(v->frame);
+    int next_idx = (v->frame_idx + 1) % FFMPEG_FRAME_RING;
+    av_frame_unref(v->frames[next_idx]);
 
-    int ret = avcodec_receive_frame(v->ctx, v->frame);
+    int ret = avcodec_receive_frame(v->ctx, v->frames[next_idx]);
     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
         return 0;   /* EOF: drained after a NULL send — not a decode failure */
     if (ret < 0)
         return -1;
 
-    int64_t pts_us = INT64_MIN;
-    if (v->frame->best_effort_timestamp != AV_NOPTS_VALUE)
-        pts_us = v->frame->best_effort_timestamp;
-    else if (v->frame->pts != AV_NOPTS_VALUE)
-        pts_us = v->frame->pts;
+    v->frame_idx = next_idx;
+    AVFrame *frame = v->frames[next_idx];
 
-    if (pp_map_avframe(v->frame, out, pts_us) == 0)
+    int64_t pts_us = INT64_MIN;
+    if (frame->best_effort_timestamp != AV_NOPTS_VALUE)
+        pts_us = frame->best_effort_timestamp;
+    else if (frame->pts != AV_NOPTS_VALUE)
+        pts_us = frame->pts;
+
+    if (pp_map_avframe(frame, out, pts_us) == 0)
         return 1;
 
     /* Decoded, but an exotic pixel format — caller runs the swscale path. */
@@ -418,8 +426,10 @@ void evo_vdec_flush(evo_vdec *v)
     }
     if (v->ctx)
         avcodec_flush_buffers(v->ctx);
-    if (v->frame)
-        av_frame_unref(v->frame);
+    for (int i = 0; i < FFMPEG_FRAME_RING; i++) {
+        if (v->frames[i])
+            av_frame_unref(v->frames[i]);
+    }
     if (v->pkt)
         av_packet_unref(v->pkt);
 }
@@ -435,8 +445,10 @@ void evo_vdec_close(evo_vdec *v)
     }
     if (v->pkt)
         av_packet_free(&v->pkt);
-    if (v->frame)
-        av_frame_free(&v->frame);
+    for (int i = 0; i < FFMPEG_FRAME_RING; i++) {
+        if (v->frames[i])
+            av_frame_free(&v->frames[i]);
+    }
     if (v->ctx)
         avcodec_free_context(&v->ctx);
     free(v);
@@ -477,5 +489,5 @@ const char *evo_vdec_ffmpeg_codec_name(const evo_vdec *v)
 }
 void *evo_vdec_ffmpeg_avframe(evo_vdec *v)
 {
-    return (v && v->backend == EVO_VDEC_BACKEND_FFMPEG) ? v->frame : NULL;
+    return (v && v->backend == EVO_VDEC_BACKEND_FFMPEG) ? v->frames[v->frame_idx] : NULL;
 }

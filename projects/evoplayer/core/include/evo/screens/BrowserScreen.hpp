@@ -46,6 +46,7 @@ public:
     bool handleInput(uint32_t pressed, uint32_t held, uint32_t released) override;
     void update(double deltaMs) override;
     void render(uint32_t* framebuffer, int width, int height) override;
+    void resetSelection();
 
 private:
     void initBrowserStateMachine();
