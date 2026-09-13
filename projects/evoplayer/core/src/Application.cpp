@@ -169,6 +169,15 @@ bool Application::initHardware() {
     evo_bt("AGC: bare-metal AGC device context");
     int agcOk = evo_agc_runtime_init(DisplayWidth, DisplayHeight, 0);
     if (agcOk == 0) {
+        /*
+         * The runtime resolves what the panel is actually running at while it
+         * brings VideoOut up, and may have settled on something other than the
+         * 1080p default. Everything built below - the RmlUi contexts, the
+         * video output rect, the UI scratch surface - has to use that size.
+         */
+        evo_agc_runtime_get_size(&DisplayWidth, &DisplayHeight);
+        evo_bt("display: rendering at %dx%d", DisplayWidth, DisplayHeight);
+        evo_boot_log_flush();
         evo_agc_runtime_frame_begin();
         evo_agc_runtime_present();
     }

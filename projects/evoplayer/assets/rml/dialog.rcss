@@ -6,13 +6,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -23,8 +23,8 @@ div, span, p {
 
 /* Fullscreen Dimmed Scrim */
 #dialog-scrim {
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     background-color: #000000b8;
     display: flex;
     align-items: center;
@@ -33,47 +33,47 @@ div, span, p {
 
 /* Dialog Container Card */
 #dialog-card {
-    width: 920px;
+    width: 920dp;
     background-color: #0c121ffc;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #1e2c44;
-    border-radius: 24px;
-    padding: 40px 48px;
+    border-radius: 24dp;
+    padding: 40dp 48dp;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
 
 #dialog-eyebrow {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #ffd700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.5dp;
 }
 
 #dialog-title {
-    font-size: 30px;
+    font-size: 30dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
-    margin-top: 8px;
+    letter-spacing: 0.5dp;
+    margin-top: 8dp;
 }
 
 #dialog-detail {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: normal;
     color: #94a3b8;
-    letter-spacing: 0.5px;
-    margin-top: 6px;
+    letter-spacing: 0.5dp;
+    margin-top: 6dp;
 }
 
 /* Progress Bar */
 #dialog-progress-track {
-    width: 824px;
-    height: 6px;
+    width: 824dp;
+    height: 6dp;
     background-color: #1d293d;
-    border-radius: 3px;
-    margin-top: 24px;
+    border-radius: 3dp;
+    margin-top: 24dp;
     position: relative;
 }
 
@@ -81,9 +81,9 @@ div, span, p {
     position: absolute;
     top: 0;
     left: 0;
-    height: 6px;
+    height: 6dp;
     background-color: #38bdf8;
-    border-radius: 3px;
+    border-radius: 3dp;
 }
 
 /* Actions Row */
@@ -94,59 +94,59 @@ div, span, p {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    gap: 16px;
-    margin-top: 36px;
-    width: 824px;
+    gap: 16dp;
+    margin-top: 36dp;
+    width: 824dp;
 }
 
 .action-btn {
-    padding: 12px 28px;
-    border-radius: 24px;
+    padding: 12dp 28dp;
+    border-radius: 24dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 10dp;
 }
 
 .btn-primary {
     background-color: #0070d1;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #38bdf8;
     color: #ffffff;
 }
 
 .btn-secondary {
     background-color: #141f33;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #273a5a;
     color: #e2e8f0;
 }
 
 .btn-glyph {
-    width: 22px;
-    height: 22px;
+    width: 22dp;
+    height: 22dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 30px;
-    height: 30px;
+    width: 30dp;
+    height: 30dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 15px;
+    border-radius: 15dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
 }
 
 .btn-text {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .action-hidden {

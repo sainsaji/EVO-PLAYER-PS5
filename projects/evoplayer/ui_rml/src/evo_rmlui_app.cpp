@@ -1,5 +1,6 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
+#include "evo_metrics.h"   /* EVO_UI_DESIGN_W/H - the dp authoring canvas */
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -349,12 +350,24 @@ bool EvoRmlApp::Initialize(int width, int height) {
         }
     }
 
+    m_dp_ratio = (width > 0) ? (float)width / (float)EVO_UI_DESIGN_W : 1.0f;
     m_context = Rml::CreateContext("main_context", Rml::Vector2i(width, height));
     if (!m_context) {
         fprintf(stderr, "[EVO RmlUi] Failed to create RmlUi context!\n");
         Rml::Shutdown();
         return false;
     }
+
+    /*
+     * Every stylesheet is authored against the EVO_UI_DESIGN_W x _H canvas
+     * (ui/include/evo_metrics.h) and expresses its geometry in dp, so one
+     * ratio scales the whole UI to whatever the panel is running at: layout,
+     * glyph rasterisation and corner tessellation all happen at the real
+     * pixel size instead of being upscaled from a 1080p image. At 1920 wide
+     * the ratio is exactly 1 and every dp resolves to the px it replaced,
+     * which is what keeps the host renderer shot.sh diff baselines valid.
+     */
+    m_context->SetDensityIndependentPixelRatio(m_dp_ratio);
 
     std::vector<std::string> rml_prefixes = {
         "/app0/assets/rml/",     /* #60: resolves through the embedded bundle */
@@ -448,6 +461,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
      * is a missing notification, never a missing screen - non-fatal. */
     m_toast_context = Rml::CreateContext("toast_context", Rml::Vector2i(width, height));
     if (m_toast_context) {
+        m_toast_context->SetDensityIndependentPixelRatio(m_dp_ratio);
         for (const auto& p : rml_prefixes) {
             if (m_toast_doc) break;
             m_toast_doc = m_toast_context->LoadDocument(p + "toast.rml");
@@ -466,6 +480,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
      * bug but not a crash - evo_keyboard.c still has the state. */
     m_keyboard_context = Rml::CreateContext("keyboard_context", Rml::Vector2i(width, height));
     if (m_keyboard_context) {
+        m_keyboard_context->SetDensityIndependentPixelRatio(m_dp_ratio);
         for (const auto& p : rml_prefixes) {
             if (m_keyboard_doc) break;
             m_keyboard_doc = m_keyboard_context->LoadDocument(p + "keyboard.rml");
@@ -480,6 +495,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
      * toast. A load failure just means no menu FPS readout - never a crash. */
     m_debug_context = Rml::CreateContext("debug_context", Rml::Vector2i(width, height));
     if (m_debug_context) {
+        m_debug_context->SetDensityIndependentPixelRatio(m_dp_ratio);
         for (const auto& p : rml_prefixes) {
             if (m_debug_doc) break;
             m_debug_doc = m_debug_context->LoadDocument(p + "debug.rml");

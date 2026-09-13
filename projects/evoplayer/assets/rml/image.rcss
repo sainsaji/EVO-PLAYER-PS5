@@ -7,8 +7,8 @@ body {
     font-weight: normal;
     color: #ffffff;
     background-color: #06090e;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     margin: 0;
     padding: 0;
 }
@@ -17,19 +17,19 @@ body {
     position: absolute;
     left: 0;
     top: 0;
-    width: 1920px;
-    height: 168px;
-    padding: 58px 82px 0 82px;
+    width: 1920dp;
+    height: 168dp;
+    padding: 58dp 82dp 0 82dp;
     display: flex;
     flex-direction: row;
     align-items: flex-start;
 }
 
 #img-accent {
-    width: 5px;
-    height: 76px;
+    width: 5dp;
+    height: 76dp;
     background-color: #00d7ffe1;
-    margin-right: 34px;
+    margin-right: 34dp;
 }
 
 #img-head-text {
@@ -38,19 +38,19 @@ body {
 }
 
 #img-eyebrow {
-    font-size: 30px;
+    font-size: 30dp;
     font-weight: bold;
     color: #e8f4fff0;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #img-title {
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: bold;
     color: #00cdfae1;
-    letter-spacing: 0.5px;
-    margin-top: 10px;
-    max-width: 1200px;
+    letter-spacing: 0.5dp;
+    margin-top: 10dp;
+    max-width: 1200dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -58,37 +58,37 @@ body {
 
 #img-dims {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #87c3e1d2;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #img-frame {
     position: absolute;
-    left: 150px;
-    top: 192px;
-    width: 1620px;
-    height: 690px;
+    left: 150dp;
+    top: 192dp;
+    width: 1620dp;
+    height: 690dp;
     background-color: #010814e6;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00bef5af;
-    border-radius: 30px;
-    padding: 38px;
+    border-radius: 30dp;
+    padding: 38dp;
 }
 
 #img-canvas {
     display: block;
-    width: 1544px;
-    height: 614px;
+    width: 1544dp;
+    height: 614dp;
     background-color: #00020899;
     decorator: image(none contain);
 }
 
 #img-error {
     display: none;
-    width: 1544px;
-    height: 614px;
+    width: 1544dp;
+    height: 614dp;
     background-color: #00020899;
     flex-direction: column;
     align-items: center;
@@ -96,29 +96,29 @@ body {
 }
 
 #img-error-title {
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #e8f4ffe6;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #img-error-sub {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #7dc6e4d7;
-    letter-spacing: 0.5px;
-    margin-top: 14px;
+    letter-spacing: 0.5dp;
+    margin-top: 14dp;
 }
 
 #img-footer {
     position: absolute;
     left: 0;
     bottom: 0;
-    width: 1920px;
-    height: 79px;
-    padding: 0 82px;
+    width: 1920dp;
+    height: 79dp;
+    padding: 0 82dp;
     background-color: #00071289;
-    border-top-width: 1px;
+    border-top-width: 1dp;
     border-top-color: #0096ff30;
     display: flex;
     flex-direction: row;
@@ -130,26 +130,26 @@ body {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    gap: 12dp;
 }
 
 .glyph-badge {
-    width: 30px;
-    height: 30px;
+    width: 30dp;
+    height: 30dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 15px;
+    border-radius: 15dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
-.glyph-badge-img { width: 20px; height: 20px; }
+.glyph-badge-img { width: 20dp; height: 20dp; }
 
 .img-hint-text {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #afd1dccd;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .img-muted { color: #87c3e1cd; }

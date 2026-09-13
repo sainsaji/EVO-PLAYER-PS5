@@ -29,6 +29,7 @@ g++ -O2 -std=c++17 \
     -DEVO_RML_GL_HOST \
     -Iprojects/evoplayer \
     -Iprojects/evoplayer/ui_rml/include \
+    -Iprojects/evoplayer/ui/include \
     -Iprojects/evoplayer/ui_rml/src \
     -Iprojects/evoplayer/pp/include \
     -Iprojects/evoplayer/include \

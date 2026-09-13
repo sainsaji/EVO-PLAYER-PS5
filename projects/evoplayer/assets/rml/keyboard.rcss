@@ -8,8 +8,8 @@ body {
     font-weight: normal;
     color: #ffffff;
     background-color: transparent;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     margin: 0;
     padding: 0;
 }
@@ -18,22 +18,22 @@ body {
     position: absolute;
     left: 0;
     top: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     background-color: #05070ce0;
 }
 
 #kb-panel {
     position: absolute;
-    left: 260px;
-    top: 140px;
-    width: 1400px;
-    height: 800px;
+    left: 260dp;
+    top: 140dp;
+    width: 1400dp;
+    height: 800dp;
     background-color: #0e131de6;
-    border-width: 2px;
+    border-width: 2dp;
     border-color: #2a3a52;
-    border-radius: 20px;
-    padding: 34px 44px;
+    border-radius: 20dp;
+    padding: 34dp 44dp;
     display: flex;
     flex-direction: column;
 }
@@ -46,41 +46,41 @@ body {
 }
 
 #kb-title {
-    font-size: 30px;
+    font-size: 30dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #kb-mode {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #00d2ff;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.5dp;
 }
 
 #kb-field {
-    margin-top: 22px;
-    height: 76px;
+    margin-top: 22dp;
+    height: 76dp;
     background-color: #060910f0;
-    border-width: 2px;
+    border-width: 2dp;
     border-color: #1f3350;
-    border-radius: 12px;
-    padding: 0 24px;
+    border-radius: 12dp;
+    padding: 0 24dp;
     display: flex;
     flex-direction: row;
     align-items: center;
 }
 
 #kb-text {
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #f4f7fb;
     white-space: nowrap;
 }
 
 #kb-caret {
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #00d2ff;
 }
@@ -88,66 +88,66 @@ body {
 #kb-caret.hidden { color: #00d2ff00; }
 
 #kb-count {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #6b7c93;
     margin-left: auto;
 }
 
 #kb-grid {
-    margin-top: 30px;
+    margin-top: 30dp;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 12dp;
 }
 
 .kb-row {
     display: flex;
     flex-direction: row;
-    gap: 12px;
+    gap: 12dp;
 }
 
 .kb-key {
-    width: 118px;
-    height: 68px;
+    width: 118dp;
+    height: 68dp;
     background-color: #16202e;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3a52;
-    border-radius: 10px;
-    font-size: 26px;
+    border-radius: 10dp;
+    font-size: 26dp;
     font-weight: bold;
     color: #e7edf4;
     text-align: center;
     /* vertical centre via line-height ~ height */
-    line-height: 68px;
+    line-height: 68dp;
 }
 
 .kb-key.focused {
     background-color: #0070d1;
-    border-width: 3px;
+    border-width: 3dp;
     border-color: #38bdf8;
     color: #ffffff;
 }
 
 #kb-actions {
-    margin-top: 18px;
+    margin-top: 18dp;
     display: flex;
     flex-direction: row;
-    gap: 12px;
+    gap: 12dp;
 }
 
 .kb-act {
-    height: 68px;
-    padding: 0 22px;
+    height: 68dp;
+    padding: 0 22dp;
     background-color: #16202e;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3a52;
-    border-radius: 10px;
-    font-size: 16px;
+    border-radius: 10dp;
+    font-size: 16dp;
     font-weight: bold;
     color: #e7edf4;
-    letter-spacing: 0.5px;
-    line-height: 68px;
+    letter-spacing: 0.5dp;
+    line-height: 68dp;
     text-align: center;
 }
 
@@ -155,7 +155,7 @@ body {
 
 .kb-act.focused {
     background-color: #0070d1;
-    border-width: 3px;
+    border-width: 3dp;
     border-color: #38bdf8;
     color: #ffffff;
 }
@@ -169,12 +169,12 @@ body {
     margin-top: auto;
     display: flex;
     flex-direction: row;
-    gap: 34px;
+    gap: 34dp;
 }
 
 #kb-hints span {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #6b7c93;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }

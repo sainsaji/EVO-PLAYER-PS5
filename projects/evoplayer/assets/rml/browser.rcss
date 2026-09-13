@@ -11,13 +11,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -28,10 +28,10 @@ div, span, p {
 
 #browser-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 /* =============================== Header =============================== */
@@ -41,16 +41,16 @@ div, span, p {
 #browser-header {
     position: absolute;
     left: 0;
-    top: 72px;
-    width: 1704px;
-    height: 88px;
+    top: 72dp;
+    width: 1704dp;
+    height: 88dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    border-bottom-width: 1px;
+    border-bottom-width: 1dp;
     border-bottom-color: #5a7db433;
-    padding-bottom: 18px;
+    padding-bottom: 18dp;
 }
 
 #browser-header-left {
@@ -60,21 +60,21 @@ div, span, p {
 }
 
 #browser-badge {
-    width: 68px;
-    height: 68px;
-    border-radius: 18px;
+    width: 68dp;
+    height: 68dp;
+    border-radius: 18dp;
     background-color: #00cdff1a;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00cdff4d;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 22px;
+    margin-right: 22dp;
 }
 
 #browser-badge-icon {
-    width: 34px;
-    height: 34px;
+    width: 34dp;
+    height: 34dp;
 }
 
 #browser-header-titles {
@@ -86,48 +86,48 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    gap: 12dp;
 }
 
 #browser-title {
     display: block;
-    font-size: 28px;
+    font-size: 28dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 3px;
+    letter-spacing: 3dp;
 }
 
 #browser-live-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 4px;
+    width: 7dp;
+    height: 7dp;
+    border-radius: 4dp;
     background-color: #3ddc84;
 }
 
 #browser-path {
     display: block;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #a3b6d0;
-    letter-spacing: 2px;
-    margin-top: 5px;
+    letter-spacing: 2dp;
+    margin-top: 5dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
-    width: 900px;
+    width: 900dp;
 }
 
 #browser-counter {
     display: block;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 2px;
+    letter-spacing: 2dp;
     background-color: #1420368c;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db433;
-    border-radius: 10px;
-    padding: 8px 18px;
+    border-radius: 10dp;
+    padding: 8dp 18dp;
 }
 
 /* ============================== File list ============================== */
@@ -135,9 +135,9 @@ div, span, p {
 #browser-list {
     position: absolute;
     left: 0;
-    top: 200px;
-    width: 1116px;
-    height: 750px;
+    top: 200dp;
+    width: 1116dp;
+    height: 750dp;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -145,16 +145,16 @@ div, span, p {
 
 .brow {
     position: relative;
-    width: 1116px;
-    height: 80px;
+    width: 1116dp;
+    height: 80dp;
     flex-shrink: 0;
     background-color: #101a2ceb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db433;
-    border-radius: 16px;
-    margin-bottom: 10px;
-    padding-left: 20px;
-    padding-right: 20px;
+    border-radius: 16dp;
+    margin-bottom: 10dp;
+    padding-left: 20dp;
+    padding-right: 20dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -164,7 +164,7 @@ div, span, p {
 
 .brow-focused {
     background-color: #16223af5;
-    border-width: 1.5px;
+    border-width: 1.5dp;
     border-color: #ffcd00;
     transform: scale(1.015);
 }
@@ -176,16 +176,16 @@ div, span, p {
 }
 
 .brow-icon-box {
-    width: 52px;
-    height: 52px;
+    width: 52dp;
+    height: 52dp;
     background-color: #00cdff14;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00cdff33;
-    border-radius: 14px;
+    border-radius: 14dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 16px;
+    margin-right: 16dp;
     transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
@@ -195,23 +195,23 @@ div, span, p {
 }
 
 .brow-icon {
-    width: 26px;
-    height: 26px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
 .brow-text {
     display: flex;
     flex-direction: column;
-    width: 806px;
+    width: 806dp;
 }
 
 .brow-name {
     display: block;
-    font-size: 22px;
+    font-size: 22dp;
     font-weight: bold;
     color: #eef4ff;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -219,11 +219,11 @@ div, span, p {
 
 .brow-detail {
     display: block;
-    font-size: 13.5px;
+    font-size: 13.5dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1.2px;
-    margin-top: 3px;
+    letter-spacing: 1.2dp;
+    margin-top: 3dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -237,25 +237,25 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    gap: 12dp;
 }
 
 .brow-fav {
-    width: 24px;
-    height: 24px;
+    width: 24dp;
+    height: 24dp;
     display: none;
 }
 
 .brow-badge {
     background-color: #060c16d2;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #7896c856;
-    border-radius: 10px;
-    padding: 5px 12px;
-    font-size: 11.5px;
+    border-radius: 10dp;
+    padding: 5dp 12dp;
+    font-size: 11.5dp;
     font-weight: bold;
     color: #cfe0ff;
-    letter-spacing: 1.4px;
+    letter-spacing: 1.4dp;
 }
 
 .brow-focused .brow-badge {
@@ -269,17 +269,17 @@ div, span, p {
     position: absolute;
     left: 0;
     bottom: 0;
-    width: 1116px;
-    height: 4px;
-    border-radius: 2px;
+    width: 1116dp;
+    height: 4dp;
+    border-radius: 2dp;
     background-color: #7896c838;
 }
 
 .brow-fill {
     display: block;
     width: 0%;
-    height: 4px;
-    border-radius: 2px;
+    height: 4dp;
+    border-radius: 2dp;
     background-color: #ffcd00;
 }
 
@@ -289,61 +289,61 @@ div, span, p {
     display: none;
     position: absolute;
     left: 0;
-    top: 320px;
-    width: 1116px;
+    top: 320dp;
+    width: 1116dp;
     flex-direction: column;
     align-items: center;
 }
 
 #browser-empty-icon-box {
-    width: 128px;
-    height: 128px;
-    border-radius: 64px;
+    width: 128dp;
+    height: 128dp;
+    border-radius: 64dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 26px;
+    margin-bottom: 26dp;
 }
 
 #browser-empty-icon {
-    width: 56px;
-    height: 56px;
+    width: 56dp;
+    height: 56dp;
     display: inline-block;
 }
 
 #browser-empty-title {
     display: block;
-    font-size: 33px;
+    font-size: 33dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #browser-empty-hint {
     display: block;
-    font-size: 18px;
+    font-size: 18dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 12px;
+    letter-spacing: 1dp;
+    margin-top: 12dp;
 }
 
 /* ============================== Inspector ============================== */
 
 #inspector {
     position: absolute;
-    left: 1140px;
-    top: 200px;
-    width: 564px;
-    height: 750px;
+    left: 1140dp;
+    top: 200dp;
+    width: 564dp;
+    height: 750dp;
     background-color: #141f348c;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db433;
-    border-radius: 18px;
-    padding: 20px;
+    border-radius: 18dp;
+    padding: 20dp;
     transition: transform 0.2s cubic-out, opacity 0.2s cubic-out;
 }
 
@@ -351,33 +351,33 @@ div, span, p {
  * shape it was shot in rather than letterboxed into a square. */
 #ins-preview {
     position: relative;
-    width: 524px;
-    height: 295px;
+    width: 524dp;
+    height: 295dp;
     background-color: #0a101cd9;
-    border-radius: 14px;
-    border-width: 1px;
+    border-radius: 14dp;
+    border-width: 1dp;
     border-color: #00cdff29;
     overflow: hidden;
 }
 
 #ins-preview-art {
     position: absolute;
-    left: 1px;
-    top: 1px;
-    width: 522px;
-    height: 293px;
-    border-radius: 12px;
+    left: 1dp;
+    top: 1dp;
+    width: 522dp;
+    height: 293dp;
+    border-radius: 12dp;
 }
 
 #ins-preview-play {
     position: absolute;
-    left: 236px;
-    top: 121px;
-    width: 52px;
-    height: 52px;
-    border-radius: 26px;
+    left: 236dp;
+    top: 121dp;
+    width: 52dp;
+    height: 52dp;
+    border-radius: 26dp;
     background-color: #060c16b8;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #ffffff38;
     display: none;
     align-items: center;
@@ -385,46 +385,46 @@ div, span, p {
 }
 
 #ins-preview-play-icon {
-    width: 24px;
-    height: 24px;
+    width: 24dp;
+    height: 24dp;
 }
 
 #ins-preview-empty {
     position: absolute;
     left: 0;
-    top: 136px;
-    width: 524px;
-    font-size: 13px;
+    top: 136dp;
+    width: 524dp;
+    font-size: 13dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 2px;
+    letter-spacing: 2dp;
     text-align: center;
 }
 
 #ins-preview-badge {
     display: none;
     position: absolute;
-    left: 14px;
-    top: 14px;
+    left: 14dp;
+    top: 14dp;
     background-color: #060c16d2;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #7896c856;
-    border-radius: 12px;
-    padding: 4px 10px;
-    font-size: 11px;
+    border-radius: 12dp;
+    padding: 4dp 10dp;
+    font-size: 11dp;
     font-weight: bold;
     color: #cfe0ff;
-    letter-spacing: 1.6px;
+    letter-spacing: 1.6dp;
 }
 
 #ins-name {
     display: block;
-    width: 524px;
-    font-size: 20px;
+    width: 524dp;
+    font-size: 20dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.3px;
-    margin-top: 16px;
+    letter-spacing: 0.3dp;
+    margin-top: 16dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -434,63 +434,63 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
-    margin-top: 8px;
-    margin-bottom: 6px;
+    gap: 10dp;
+    margin-top: 8dp;
+    margin-bottom: 6dp;
 }
 
 #ins-kind {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 2.2px;
+    letter-spacing: 2.2dp;
 }
 
 #ins-ext {
     background-color: #060c16d2;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #7896c856;
-    border-radius: 8px;
-    padding: 3px 8px;
-    font-size: 11px;
+    border-radius: 8dp;
+    padding: 3dp 8dp;
+    font-size: 11dp;
     font-weight: bold;
     color: #cfe0ff;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #ins-props {
     display: flex;
     flex-direction: column;
-    width: 524px;
-    margin-top: 8px;
+    width: 524dp;
+    margin-top: 8dp;
 }
 
 .ins-prop {
-    width: 524px;
-    height: 38px;
+    width: 524dp;
+    height: 38dp;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    border-bottom-width: 1px;
+    border-bottom-width: 1dp;
     border-bottom-color: #5a7db41a;
 }
 
 .ins-key {
-    font-size: 12.5px;
+    font-size: 12.5dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1.4px;
+    letter-spacing: 1.4dp;
     flex-shrink: 0;
-    margin-right: 16px;
+    margin-right: 16dp;
 }
 
 .ins-val {
-    width: 340px;
-    font-size: 13px;
+    width: 340dp;
+    font-size: 13dp;
     font-weight: bold;
     color: #eef4ff;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
     text-align: right;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -499,67 +499,67 @@ div, span, p {
 
 #ins-probing {
     display: none;
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 2px;
-    margin-top: 14px;
+    letter-spacing: 2dp;
+    margin-top: 14dp;
 }
 
 /* =============================== Footer =============================== */
 
 #browser-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 32dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 10dp;
 }
 
 .footer-glyph {
-    width: 26px;
-    height: 26px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 38px;
-    height: 38px;
+    width: 38dp;
+    height: 38dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 19px;
+    border-radius: 19dp;
     background-color: #14223ab8;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 24px;
-    height: 24px;
+    width: 24dp;
+    height: 24dp;
 }
 
 .footer-text {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1.8px;
+    letter-spacing: 1.8dp;
 }
 
 #browser-footer-version {
     margin-left: auto;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #4b586c;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

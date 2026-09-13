@@ -10,13 +10,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -27,10 +27,10 @@ div, span, p {
 
 #changelog-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 /* =============================== Header =============================== */
@@ -38,9 +38,9 @@ div, span, p {
 #changelog-header {
     position: absolute;
     left: 0;
-    top: 96px;
-    width: 1704px;
-    height: 52px;
+    top: 96dp;
+    width: 1704dp;
+    height: 52dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -54,11 +54,11 @@ div, span, p {
 }
 
 #changelog-indicator {
-    width: 5px;
-    height: 62px;
+    width: 5dp;
+    height: 62dp;
     background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
+    border-radius: 2dp;
+    margin-right: 18dp;
 }
 
 #changelog-header-titles {
@@ -68,28 +68,28 @@ div, span, p {
 
 #changelog-title {
     display: block;
-    font-size: 43px;
+    font-size: 43dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #changelog-subtitle {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    letter-spacing: 1dp;
+    margin-top: 3dp;
 }
 
 #changelog-counter {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    letter-spacing: 1dp;
+    margin-bottom: 6dp;
 }
 
 /* ============================ Master column ============================ */
@@ -98,22 +98,22 @@ div, span, p {
 #changelog-releases {
     position: absolute;
     left: 0;
-    top: 222px;
-    width: 600px;
+    top: 222dp;
+    width: 600dp;
     display: flex;
     flex-direction: column;
 }
 
 .clrel {
-    width: 600px;
-    height: 96px;
+    width: 600dp;
+    height: 96dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
-    border-radius: 18px;
-    margin-bottom: 10px;
-    padding-left: 22px;
-    padding-right: 22px;
+    border-radius: 18dp;
+    margin-bottom: 10dp;
+    padding-left: 22dp;
+    padding-right: 22dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -122,31 +122,31 @@ div, span, p {
 
 .clrel-focused {
     background-color: #1b2e4cf5;
-    border-width: 1.5px;
+    border-width: 1.5dp;
     border-color: #00cdff;
 }
 
 .clrel-text {
     display: flex;
     flex-direction: column;
-    width: 430px;
+    width: 430dp;
 }
 
 .clrel-ver {
     display: block;
-    font-size: 30px;
+    font-size: 30dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .clrel-tag {
     display: block;
-    font-size: 17px;
+    font-size: 17dp;
     font-weight: normal;
     color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
+    letter-spacing: 0.5dp;
+    margin-top: 4dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -154,53 +154,53 @@ div, span, p {
 
 .clrel-date {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 /* ============================ Detail column ============================ */
 
 #changelog-detail {
     position: absolute;
-    left: 624px;
-    top: 222px;
-    width: 1080px;
-    height: 714px;
+    left: 624dp;
+    top: 222dp;
+    width: 1080dp;
+    height: 714dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
-    border-radius: 20px;
-    padding: 26px;
+    border-radius: 20dp;
+    padding: 26dp;
 }
 
 #cldetail-head {
     display: flex;
     flex-direction: column;
-    width: 1028px;
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom-width: 1px;
+    width: 1028dp;
+    margin-bottom: 20dp;
+    padding-bottom: 16dp;
+    border-bottom-width: 1dp;
     border-bottom-color: #1b2740;
 }
 
 #cldetail-ver {
     display: block;
-    font-size: 36px;
+    font-size: 36dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #cldetail-tag {
     display: block;
-    width: 1028px;
-    font-size: 17px;
+    width: 1028dp;
+    font-size: 17dp;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 1.5px;
-    margin-top: 6px;
+    letter-spacing: 1.5dp;
+    margin-top: 6dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -209,15 +209,15 @@ div, span, p {
 #cldetail-items {
     display: flex;
     flex-direction: column;
-    width: 1028px;
+    width: 1028dp;
 }
 
 .clitem {
-    width: 1028px;
+    width: 1028dp;
     display: flex;
     flex-direction: row;
     align-items: flex-start;
-    margin-bottom: 14px;
+    margin-bottom: 14dp;
 }
 
 /*
@@ -226,94 +226,94 @@ div, span, p {
  * that far — nor does it survive a theme that recolours the accent.
  */
 .clitem-kind {
-    width: 128px;
-    height: 32px;
-    border-radius: 11px;
-    border-width: 1px;
+    width: 128dp;
+    height: 32dp;
+    border-radius: 11dp;
+    border-width: 1dp;
     border-color: #243550;
     background-color: #131d2e;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #9fb2cc;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
     text-align: center;
-    padding-top: 6px;
-    margin-right: 20px;
+    padding-top: 6dp;
+    margin-right: 20dp;
 }
 
 .clitem-text {
     display: block;
-    width: 860px;
-    font-size: 18px;
+    width: 860dp;
+    font-size: 18dp;
     font-weight: normal;
     color: #cfdcef;
-    letter-spacing: 0.3px;
-    padding-top: 3px;
+    letter-spacing: 0.3dp;
+    padding-top: 3dp;
 }
 
 /* Releases can carry more entries than the panel holds; say so rather than
  * silently truncating. */
 #cldetail-more {
     display: none;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 6px;
+    letter-spacing: 1dp;
+    margin-top: 6dp;
 }
 
 /* =============================== Footer =============================== */
 
 #changelog-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 32dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 30dp;
+    height: 30dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 42dp;
+    height: 42dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
+    border-radius: 21dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 28dp;
+    height: 28dp;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #changelog-footer-version {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #4b586c;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

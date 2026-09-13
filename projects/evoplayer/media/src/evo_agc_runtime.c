@@ -34,6 +34,23 @@
  */
 #define EVO_AGC_DIRECT_MEM_ALIGN UINT64_C(0x200000)
 
+/*
+ * The composite / stencil / depth budgets below are sized for the largest
+ * render size this runtime will drive, not for 1080p: the panel is rendered
+ * at its own resolution. Hardware reports full=3840x2160 on the dev console,
+ * so 4K is the cap and the budgets are cut for it:
+ *
+ *   composite BGRA  align(3840*4,256) * 2160 = 33.2 MB  -> 40 MB
+ *   depth D32F      3840*2160*4       = 33.2 MB          -> 40 MB
+ *   stencil S8      3840*2160         =  8.3 MB          -> 16 MB
+ *
+ * each with room for the 64KB tiled padding. The 64 MB scanout stride already
+ * had the headroom: 4K tiled needs ceil(3840/128)*ceil(2160/128)*0x10000 =
+ * 30*17*0x10000 = 0x1FE0000, just under 32 MB.
+ */
+#define EVO_AGC_MAX_RENDER_W 3840
+#define EVO_AGC_MAX_RENDER_H 2160
+
 #define EVO_AGC_SCANOUT_STRIDE      UINT64_C(0x04000000) /* 64 MB per scanout buffer */
 #define EVO_AGC_SCANOUT_TOTAL       UINT64_C(0x08000000) /* 128 MB for 2 buffers */
 #define EVO_AGC_TRANSIENT_RING_SIZE UINT64_C(0x04000000) /* 64 MB transient ring */
@@ -44,16 +61,16 @@
  * quad. main.c rasterises the OSD into gl_scratch and hands it to
  * evo_gl_composite_bgra(); in --agc builds that used to be a no-op stub, so the
  * OSD simply never reached the panel during playback. */
-#define EVO_AGC_COMPOSITE_SIZE      UINT64_C(0x01000000) /* 16 MB */
+#define EVO_AGC_COMPOSITE_SIZE      UINT64_C(0x02800000) /* 40 MB */
 /* Stencil buffer for RmlUi clip masks (border-radius clipping and masked
  * overlays). S8 at 1920x1080 is ~2 MB raw; 8 MB covers the 64KB_Z_X tiled
  * padding with room to spare. Depth is left disabled - nothing here needs a
  * Z test, only stencil. */
-#define EVO_AGC_STENCIL_SIZE        UINT64_C(0x00800000) /* 8 MB */
+#define EVO_AGC_STENCIL_SIZE        UINT64_C(0x01000000) /* 16 MB */
 /* D32F at 1920x1080 is ~8 MB raw; 16 MB covers the tiled padding. The depth
  * TEST is never enabled - the surface exists because configuring DB with an
  * invalid Z format stopped the stencil planes working. */
-#define EVO_AGC_DEPTH_SIZE          UINT64_C(0x01000000) /* 16 MB */
+#define EVO_AGC_DEPTH_SIZE          UINT64_C(0x02800000) /* 40 MB */
 
 #define EVO_AGC_TOTAL_DIRECT_MEM \
     (EVO_AGC_SCANOUT_TOTAL + EVO_AGC_TRANSIENT_RING_SIZE + \
@@ -732,6 +749,37 @@ void evo_agc_runtime_clip_mask_end(void)
  * Public AGC Runtime Lifecycle
  * ------------------------------------------------------------------------- */
 
+/*
+ * Bind a render size to the surfaces. Split out of evo_agc_runtime_init so it
+ * can run twice: once with the size the caller asked for, then again once the
+ * VideoOut handle exists and the panel has told us what it is actually
+ * running at. Only touches CPU-side register images and offsets into memory
+ * that is already carved, so the second call is free of any sce* ordering -
+ * in particular it never re-opens VideoOut or allocates a queue.
+ */
+static int evo_agc_apply_render_size(void *agc_defaults, int w, int h)
+{
+    g_agc_dev.width  = w;
+    g_agc_dev.height = h;
+
+    g_agc_dev.composite_pitch = ((uint32_t)w * 4u + 255u) & ~255u;
+    g_agc_dev.composite_quad  = g_agc_dev.composite_pixels +
+        ((((size_t)g_agc_dev.composite_pitch * (size_t)h) + 255u) & ~(size_t)255);
+
+    int ct0 = setup_color_target(g_agc_dev.gpu_regs->color_targets[0], agc_defaults,
+                                 g_agc_dev.scanout_buffers[0], w, h);
+    int ct1 = setup_color_target(g_agc_dev.gpu_regs->color_targets[1], agc_defaults,
+                                 g_agc_dev.scanout_buffers[1], w, h);
+    setup_depth_target(g_agc_dev.gpu_regs->depth_target, g_agc_dev.depth_base,
+                       g_agc_dev.stencil_base, (uint32_t)w, (uint32_t)h);
+
+    if (ct0 != 0 || ct1 != 0) {
+        printf(EVO_AGC_LOG_PREFIX "setup_color_target failed: %d/%d\n", ct0, ct1);
+        return -1;
+    }
+    return 0;
+}
+
 int evo_agc_runtime_init(int width, int height, int hdr)
 {
     if (g_agc_dev.initialized)
@@ -991,6 +1039,34 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                      (unsigned long long)vres.refresh_rate,
                      (int)vres.screen_inches,
                      g_agc_dev.width, g_agc_dev.height);
+
+        /*
+         * Drive the panel at its own resolution. The UI is resolution
+         * independent (dp against the EVO_UI_DESIGN canvas), so this is a
+         * render-size change, not a layout change. Clamped at
+         * EVO_AGC_MAX_RENDER: the composite/depth/stencil budgets above are
+         * cut for that size, and a 4K panel would need four times the 1080p
+         * footprint of each.
+         */
+        int panel_w = (vrc == 0) ? (int)vres.full_width  : 0;
+        int panel_h = (vrc == 0) ? (int)vres.full_height : 0;
+        if (panel_w > 0 && panel_h > 0 &&
+            (panel_w != g_agc_dev.width || panel_h != g_agc_dev.height)) {
+            if (panel_w > EVO_AGC_MAX_RENDER_W || panel_h > EVO_AGC_MAX_RENDER_H) {
+                evo_boot_log("agc display: panel %dx%d over the %dx%d render cap, "
+                             "staying at %dx%d", panel_w, panel_h,
+                             EVO_AGC_MAX_RENDER_W, EVO_AGC_MAX_RENDER_H,
+                             g_agc_dev.width, g_agc_dev.height);
+            } else if (evo_agc_apply_render_size(agc_defaults, panel_w, panel_h) == 0) {
+                evo_boot_log("agc display: render size -> %dx%d (composite pitch %u)",
+                             g_agc_dev.width, g_agc_dev.height,
+                             (unsigned)g_agc_dev.composite_pitch);
+            } else {
+                evo_boot_log("agc display: %dx%d target setup failed, reverting to %dx%d",
+                             panel_w, panel_h, width, height);
+                (void)evo_agc_apply_render_size(agc_defaults, width, height);
+            }
+        }
         evo_boot_log_flush();
     }
 
@@ -1027,6 +1103,24 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                  (void *)g_agc_dev.scanout_buffers[0],
                  (void *)g_agc_dev.scanout_buffers[1],
                  EVO_AGC_DIRECT_MEM_TYPE);
+    if (ret != 0 && (g_agc_dev.width != width || g_agc_dev.height != height)) {
+        /*
+         * VideoOut would not take the panel's own size. Nothing has been
+         * registered, so going back to the size the caller asked for is just
+         * a second attempt, not a re-registration.
+         */
+        evo_boot_log("agc vo register rc=%d at %dx%d -> falling back to %dx%d",
+                     ret, g_agc_dev.width, g_agc_dev.height, width, height);
+        if (evo_agc_apply_render_size(agc_defaults, width, height) == 0) {
+            sceVideoOutSetBufferAttribute2(&attr, vfmt, 0,
+                                           (uint32_t)g_agc_dev.width,
+                                           (uint32_t)g_agc_dev.height,
+                                           0, 0, 0);
+            ret = sceVideoOutRegisterBuffers2(g_agc_dev.video_handle, 0, 0,
+                                              video_buffers, 2, &attr, 0, NULL);
+        }
+    }
+
     if (ret != 0) {
         printf(EVO_AGC_LOG_PREFIX "sceVideoOutRegisterBuffers2 failed: %d\n", ret);
         goto cleanup_fail;

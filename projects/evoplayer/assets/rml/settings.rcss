@@ -6,13 +6,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -28,10 +28,10 @@ div, span, p {
  * layout puts between EVO_RAIL_W and the first card. */
 #content-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 
@@ -41,13 +41,13 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-top: 72px;
-    margin-bottom: 36px;
-    width: 1704px;
-    height: 88px;
-    border-bottom-width: 1px;
+    margin-top: 72dp;
+    margin-bottom: 36dp;
+    width: 1704dp;
+    height: 88dp;
+    border-bottom-width: 1dp;
     border-bottom-color: #5a7db433;
-    padding-bottom: 18px;
+    padding-bottom: 18dp;
 }
 
 #header-left {
@@ -57,21 +57,21 @@ div, span, p {
 }
 
 #settings-badge {
-    width: 68px;
-    height: 68px;
-    border-radius: 18px;
+    width: 68dp;
+    height: 68dp;
+    border-radius: 18dp;
     background-color: #00cdff1a;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00cdff4d;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 22px;
+    margin-right: 22dp;
 }
 
 #settings-badge-icon {
-    width: 34px;
-    height: 34px;
+    width: 34dp;
+    height: 34dp;
 }
 
 #header-titles {
@@ -83,59 +83,59 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    gap: 12dp;
 }
 
 #settings-title {
-    font-size: 28px;
+    font-size: 28dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 3px;
+    letter-spacing: 3dp;
 }
 
 #settings-live-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 4px;
+    width: 7dp;
+    height: 7dp;
+    border-radius: 4dp;
     background-color: #3ddc84;
 }
 
 #settings-subtitle {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #a3b6d0;
-    letter-spacing: 2px;
-    margin-top: 5px;
+    letter-spacing: 2dp;
+    margin-top: 5dp;
 }
 
 #settings-counter {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 2px;
+    letter-spacing: 2dp;
     background-color: #1420368c;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db433;
-    border-radius: 10px;
-    padding: 8px 18px;
+    border-radius: 10dp;
+    padding: 8dp 18dp;
 }
 
 /* Settings List */
 #settings-list {
     display: flex;
     flex-direction: column;
-    width: 1704px;
+    width: 1704dp;
 }
 
 .setting-row {
-    width: 1704px;
-    height: 84px;
+    width: 1704dp;
+    height: 84dp;
     background-color: #101a2ceb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db429;
-    border-radius: 16px;
-    margin-bottom: 12px;
-    padding: 0 24px;
+    border-radius: 16dp;
+    margin-bottom: 12dp;
+    padding: 0 24dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -145,7 +145,7 @@ div, span, p {
 
 .row-focused {
     background-color: #16223af5;
-    border-width: 1.5px;
+    border-width: 1.5dp;
     border-color: #ffcd00;
     transform: scale(1.012);
 }
@@ -157,16 +157,16 @@ div, span, p {
 }
 
 .row-icon-box {
-    width: 52px;
-    height: 52px;
+    width: 52dp;
+    height: 52dp;
     background-color: #00cdff14;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00cdff33;
-    border-radius: 14px;
+    border-radius: 14dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 18px;
+    margin-right: 18dp;
     transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
@@ -176,8 +176,8 @@ div, span, p {
 }
 
 .row-icon {
-    width: 26px;
-    height: 26px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
@@ -186,25 +186,25 @@ div, span, p {
 .row-text-box {
     display: flex;
     flex-direction: column;
-    max-width: 940px;
+    max-width: 940dp;
 }
 
 .row-title {
-    font-size: 22px;
+    font-size: 22dp;
     font-weight: bold;
     color: #eef4ff;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.4dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
 }
 
 .row-detail {
-    font-size: 13.5px;
+    font-size: 13.5dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 0.6px;
-    margin-top: 4px;
+    letter-spacing: 0.6dp;
+    margin-top: 4dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -219,20 +219,20 @@ div, span, p {
     flex-direction: row;
     align-items: center;
     flex-shrink: 0;
-    max-width: 600px;
+    max-width: 600dp;
 }
 
 .row-badge {
     background-color: #0a101c99;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db433;
-    border-radius: 10px;
-    padding: 7px 18px;
-    font-size: 13px;
+    border-radius: 10dp;
+    padding: 7dp 18dp;
+    font-size: 13dp;
     font-weight: bold;
     color: #7c8ba3;
-    letter-spacing: 1.4px;
-    margin-right: 16px;
+    letter-spacing: 1.4dp;
+    margin-right: 16dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -245,8 +245,8 @@ div, span, p {
 }
 
 .row-chevron {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
     display: inline-block;
 }
 
@@ -261,56 +261,56 @@ div, span, p {
 /* Footer Hints */
 #settings-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 32dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 10dp;
 }
 
 .footer-glyph {
-    width: 26px;
-    height: 26px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 38px;
-    height: 38px;
+    width: 38dp;
+    height: 38dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 19px;
+    border-radius: 19dp;
     background-color: #14223ab8;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 24px;
-    height: 24px;
+    width: 24dp;
+    height: 24dp;
 }
 
 .footer-text {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1.8px;
+    letter-spacing: 1.8dp;
 }
 
 #footer-version {
     margin-left: auto;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #4b586c;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

@@ -6,13 +6,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -26,9 +26,9 @@ div, span, p {
     position: absolute;
     top: 0;
     left: 0;
-    width: 1920px;
-    height: 150px;
-    padding: 36px 60px 0 60px;
+    width: 1920dp;
+    height: 150dp;
+    padding: 36dp 60dp 0 60dp;
     background-color: #06080de8;
     display: flex;
     flex-direction: row;
@@ -46,39 +46,39 @@ div, span, p {
  */
 #title-block {
     display: block;
-    width: 1180px;
-    height: 78px;
+    width: 1180dp;
+    height: 78dp;
     overflow: hidden;
     position: relative;
     flex-shrink: 0;
 }
 
 #media-title {
-    font-size: 34px;
+    font-size: 34dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
     white-space: nowrap;
 }
 
 #media-meta {
-    font-size: 15px;
+    font-size: 15dp;
     color: #a2b0c2;
     font-weight: bold;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
-    width: 1180px;
-    margin-top: 6px;
+    width: 1180dp;
+    margin-top: 6dp;
 }
 
 #badge-rack {
     display: flex;
     flex-direction: row;
-    gap: 12px;
+    gap: 12dp;
     align-items: center;
-    margin-top: 6px;
+    margin-top: 6dp;
     flex-shrink: 0;
 }
 
@@ -87,10 +87,10 @@ div, span, p {
     background-color: #00d2ff;
     color: #080a0f;
     font-weight: bold;
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 9px;
-    letter-spacing: 0.5px;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
+    letter-spacing: 0.5dp;
 }
 
 .badge-hdr {
@@ -98,47 +98,47 @@ div, span, p {
     background-color: #ffd700;
     color: #080a0f;
     font-weight: bold;
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 9px;
-    letter-spacing: 0.5px;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
+    letter-spacing: 0.5dp;
 }
 
 .badge-codec {
     display: none;
     background-color: #141c28;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a374a;
     color: #ffffff;
     font-weight: bold;
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 9px;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
 }
 
 .badge-fps {
     display: none;
     background-color: #1e293b;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #334155;
     color: #38bdf8;
     font-weight: bold;
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 9px;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
 }
 
 /* #59: decoder backend badge (colour set inline by decoder type) */
 .badge-decoder {
     display: none;
     background-color: #141c28;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a374a;
     color: #ffffff;
     font-weight: bold;
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 9px;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
 }
 
 /* On-video caption overlay (#81)
@@ -150,162 +150,162 @@ div, span, p {
 #subtitle-layer {
     position: absolute;
     left: 0;
-    width: 1920px;
-    bottom: 96px;
+    width: 1920dp;
+    bottom: 96dp;
     text-align: center;
     z-index: 5;
 }
 
 #subtitle-layer.raised {
-    bottom: 300px;
+    bottom: 300dp;
 }
 
 #subtitle-box {
     display: none;
-    max-width: 1560px;
+    max-width: 1560dp;
     background-color: #000000a0;
-    border-radius: 8px;
-    padding: 4px 20px;
+    border-radius: 8dp;
+    padding: 4dp 20dp;
     color: #fbfcff;
     font-weight: bold;
-    font-size: 40px;
+    font-size: 40dp;
     line-height: 1.28;
     text-align: center;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
 }
 
-#subtitle-box.sub-small  { font-size: 31px; }
-#subtitle-box.sub-medium { font-size: 40px; }
-#subtitle-box.sub-large  { font-size: 52px; }
+#subtitle-box.sub-small  { font-size: 31dp; }
+#subtitle-box.sub-medium { font-size: 40dp; }
+#subtitle-box.sub-large  { font-size: 52dp; }
 
 /* Music "NOW PLAYING" visualiser (#81) */
 #music-view {
     display: none;
     position: absolute;
-    left: 460px;
-    top: 220px;
-    width: 1000px;
-    height: 360px;
+    left: 460dp;
+    top: 220dp;
+    width: 1000dp;
+    height: 360dp;
     flex-direction: column;
 }
 
 #music-card {
-    width: 1000px;
-    height: 220px;
+    width: 1000dp;
+    height: 220dp;
     background-color: #0c1524e6;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00b6f5a0;
-    border-radius: 28px;
-    padding: 40px;
+    border-radius: 28dp;
+    padding: 40dp;
     display: flex;
     flex-direction: row;
     align-items: center;
 }
 
 #music-art {
-    width: 96px;
-    height: 96px;
+    width: 96dp;
+    height: 96dp;
     background-color: #00d2ffcc;
-    border-radius: 14px;
-    margin-right: 40px;
+    border-radius: 14dp;
+    margin-right: 40dp;
     flex-shrink: 0;
 }
 
 #music-lines { display: flex; flex-direction: column; }
 
 #music-title {
-    font-size: 30px;
+    font-size: 30dp;
     font-weight: bold;
     color: #eaf6ff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #music-state {
-    font-size: 22px;
+    font-size: 22dp;
     font-weight: bold;
     color: #00d2ff;
-    margin-top: 12px;
+    margin-top: 12dp;
 }
 
 #music-hint {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #86b7d0;
-    margin-top: 16px;
+    margin-top: 16dp;
 }
 
 #music-bars {
-    margin-top: 40px;
-    width: 1000px;
-    height: 100px;
+    margin-top: 40dp;
+    width: 1000dp;
+    height: 100dp;
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    gap: 14px;
+    gap: 14dp;
 }
 
 @keyframes mbar-pulse {
-    0%   { height: 22px; }
-    50%  { height: 96px; }
-    100% { height: 22px; }
+    0%   { height: 22dp; }
+    50%  { height: 96dp; }
+    100% { height: 22dp; }
 }
 
 .mbar {
-    width: 22px;
-    height: 40px;
+    width: 22dp;
+    height: 40dp;
     background-color: #12b6ea;
-    border-radius: 3px;
+    border-radius: 3dp;
     animation: 1.1s cubic-in-out -0.05s infinite alternate mbar-pulse;
 }
 
 /* Stagger the wave and vary the resting heights so it reads as an equaliser
  * even if the driver skips the animation. */
-.mbar:nth-child(2n) { height: 74px; background-color: #23c6f0;
+.mbar:nth-child(2n) { height: 74dp; background-color: #23c6f0;
     animation: 1.1s cubic-in-out -0.30s infinite alternate mbar-pulse; }
-.mbar:nth-child(3n) { height: 30px; background-color: #3ad0f5;
+.mbar:nth-child(3n) { height: 30dp; background-color: #3ad0f5;
     animation: 1.1s cubic-in-out -0.55s infinite alternate mbar-pulse; }
-.mbar:nth-child(4n) { height: 92px;
+.mbar:nth-child(4n) { height: 92dp;
     animation: 1.1s cubic-in-out -0.80s infinite alternate mbar-pulse; }
-.mbar:nth-child(5n) { height: 52px; background-color: #1aa8dd;
+.mbar:nth-child(5n) { height: 52dp; background-color: #1aa8dd;
     animation: 1.1s cubic-in-out -0.15s infinite alternate mbar-pulse; }
 
-#music-view.paused .mbar { animation: none; height: 24px; }
+#music-view.paused .mbar { animation: none; height: 24dp; }
 
 /* Center Scrubbing & Pause Overlay */
 #center-overlay {
     position: absolute;
-    top: 440px;
-    left: 710px;
-    width: 500px;
-    height: 140px;
+    top: 440dp;
+    left: 710dp;
+    width: 500dp;
+    height: 140dp;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 12dp;
 }
 
 #scrub-capsule {
     display: none;
     background-color: #0c1018f2;
-    border-width: 2px;
+    border-width: 2dp;
     border-color: #00d2ff;
-    border-radius: 28px;
-    padding: 10px 28px;
+    border-radius: 28dp;
+    padding: 10dp 28dp;
     flex-direction: row;
     align-items: center;
-    gap: 14px;
+    gap: 14dp;
 }
 
 #scrub-label {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #00d2ff;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.5dp;
 }
 
 #scrub-time {
-    font-size: 24px;
+    font-size: 24dp;
     font-weight: bold;
     color: #ffffff;
 }
@@ -313,69 +313,69 @@ div, span, p {
 #pause-badge {
     display: none;
     background-color: #0070d1e6;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #38bdf8;
-    border-radius: 12px;
-    padding: 10px 26px;
+    border-radius: 12dp;
+    padding: 10dp 26dp;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 10dp;
 }
 
 #pause-label {
-    font-size: 20px;
+    font-size: 20dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 2px;
+    letter-spacing: 2dp;
 }
 
 /* Dev FPS pill (#81) — top-right, independent of the OSD chrome */
 #fps-pill {
     display: none;
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 12dp;
+    right: 12dp;
     background-color: #000000aa;
-    border-radius: 6px;
-    padding: 4px 10px;
+    border-radius: 6dp;
+    padding: 4dp 10dp;
     z-index: 8;
 }
 
 #fps-value {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #f8fafc;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 /* Playback diagnostic HUD (#81 / #63) */
 #stats-hud {
     display: none;
     position: absolute;
-    top: 150px;
-    left: 60px;
-    width: 560px;
+    top: 150dp;
+    left: 60dp;
+    width: 560dp;
     background-color: #080c14f2;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #1e2838;
-    border-radius: 14px;
-    padding: 16px 20px;
+    border-radius: 14dp;
+    padding: 16dp 20dp;
     flex-direction: column;
-    gap: 6px;
+    gap: 6dp;
 }
 
 .stats-title {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #ffd700;
-    letter-spacing: 1px;
-    border-bottom-width: 1px;
+    letter-spacing: 1dp;
+    border-bottom-width: 1dp;
     border-bottom-color: #1a2332;
-    padding-bottom: 6px;
+    padding-bottom: 6dp;
 }
 
 .stats-line {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #d4dde8;
     white-space: nowrap;
@@ -384,24 +384,24 @@ div, span, p {
 }
 
 .stats-sep {
-    height: 1px;
+    height: 1dp;
     background-color: #1a2332;
-    margin-top: 4px;
-    margin-bottom: 2px;
+    margin-top: 4dp;
+    margin-bottom: 2dp;
 }
 
 .graph-row {
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    gap: 10px;
-    height: 40px;
+    gap: 10dp;
+    height: 40dp;
 }
 
 .graph-label {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
-    width: 38px;
+    width: 38dp;
     flex-shrink: 0;
 }
 
@@ -409,25 +409,25 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    height: 36px;
-    width: 400px;
+    height: 36dp;
+    width: 400dp;
     background-color: #0c121c;
-    border-radius: 4px;
-    padding: 2px;
+    border-radius: 4dp;
+    padding: 2dp;
     flex-shrink: 0;
 }
 
 .graph-bar {
-    width: 6px;
-    margin-right: 1px;
-    min-height: 1px;
+    width: 6dp;
+    margin-right: 1dp;
+    min-height: 1dp;
     background-color: #38506e;
 }
 
 .graph-val {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
-    width: 58px;
+    width: 58dp;
     flex-shrink: 0;
     text-align: right;
 }
@@ -441,9 +441,9 @@ div, span, p {
     position: absolute;
     bottom: 0;
     left: 0;
-    width: 1920px;
-    height: 190px;
-    padding: 24px 60px 28px 60px;
+    width: 1920dp;
+    height: 190dp;
+    padding: 24dp 60dp 28dp 60dp;
     background-color: #06080df5;
     display: flex;
     flex-direction: column;
@@ -452,18 +452,18 @@ div, span, p {
 
 /* Sapphire Timeline Progress Bar */
 #progress-container {
-    width: 1800px;
-    height: 24px;
+    width: 1800dp;
+    height: 24dp;
     display: flex;
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: 6dp;
 }
 
 #progress-track {
-    width: 1800px;
-    height: 8px;
+    width: 1800dp;
+    height: 8dp;
     background-color: #1d293d;
-    border-radius: 4px;
+    border-radius: 4dp;
     position: relative;
 }
 
@@ -471,97 +471,97 @@ div, span, p {
     position: absolute;
     top: 0;
     left: 0;
-    height: 8px;
+    height: 8dp;
     background-color: #0070d1;
-    border-radius: 4px;
+    border-radius: 4dp;
 }
 
 #progress-thumb {
     position: absolute;
-    right: -8px;
-    top: -5px;
-    width: 18px;
-    height: 18px;
-    border-radius: 9px;
+    right: -8dp;
+    top: -5dp;
+    width: 18dp;
+    height: 18dp;
+    border-radius: 9dp;
     background-color: #ffffff;
-    border-width: 3px;
+    border-width: 3dp;
     border-color: #0070d1;
 }
 
 /* Time Row */
 #time-row {
-    width: 1800px;
+    width: 1800dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 14px;
+    margin-bottom: 14dp;
 }
 
 #time-current {
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: bold;
     color: #ffffff;
 }
 
 #time-duration {
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: bold;
     color: #a2b0c2;
 }
 
 /* Bottom Action Ribbon & Hints */
 #controls-row {
-    width: 1800px;
+    width: 1800dp;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: flex-start;
-    gap: 28px;
+    gap: 28dp;
 }
 
 .control-item {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .btn-icon {
-    width: 22px;
-    height: 22px;
+    width: 22dp;
+    height: 22dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 30px;
-    height: 30px;
+    width: 30dp;
+    height: 30dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 15px;
+    border-radius: 15dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
 }
 
 .btn-tag {
     background-color: #1a2336;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2e3e5c;
-    padding: 2px 7px;
-    border-radius: 7px;
-    font-size: 11px;
+    padding: 2dp 7dp;
+    border-radius: 7dp;
+    font-size: 11dp;
     font-weight: bold;
     color: #00d2ff;
 }
 
 .control-label {
-    font-size: 14px;
+    font-size: 14dp;
     color: #e2e8f0;
     font-weight: bold;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }

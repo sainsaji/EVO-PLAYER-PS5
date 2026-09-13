@@ -12,9 +12,20 @@
 
 namespace evo {
 
-// Standard display dimensions
-constexpr int DisplayWidth = 1920;
-constexpr int DisplayHeight = 1080;
+/*
+ * The size EVO actually renders at. Resolved once at startup from
+ * sceVideoOutGetResolutionStatus (see evo_agc_runtime_init) and fixed for the
+ * session - not a constant, because a 1440p panel should be driven at 1440p
+ * rather than upscaled from 1080p.
+ *
+ * This is NOT the UI's unit system. Stylesheets stay authored against the
+ * EVO_UI_DESIGN_W x _H canvas in dp (ui/include/evo_metrics.h); the RmlUi
+ * contexts get a density-independent pixel ratio of DisplayWidth /
+ * EVO_UI_DESIGN_W, so layout and glyph rasterisation happen at the real
+ * pixel size while the source geometry never changes.
+ */
+extern int DisplayWidth;
+extern int DisplayHeight;
 
 // Screen Identifiers (compatible with legacy UI router)
 enum class ScreenId : int {

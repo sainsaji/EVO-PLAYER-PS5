@@ -6,13 +6,13 @@
 
 body {
     font-family: LatoLatin;
-    font-size: 15px;
+    font-size: 15dp;
     color: #ffffff;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -26,10 +26,10 @@ div, span {
     position: absolute;
     left: 0;
     top: 0;
-    width: 108px;
-    height: 1080px;
+    width: 108dp;
+    height: 1080dp;
     background-color: #060a14b8;
-    border-right-width: 1px;
+    border-right-width: 1dp;
     border-right-color: #5a7db433;
 }
 
@@ -37,17 +37,17 @@ div, span {
 #nav-logo {
     position: absolute;
     left: 0;
-    top: 22px;
-    width: 108px;
-    height: 52px;
+    top: 22dp;
+    width: 108dp;
+    height: 52dp;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 #nav-logo-img {
-    width: 38px;
-    height: 38px;
+    width: 38dp;
+    height: 38dp;
     display: inline-block;
 }
 
@@ -55,19 +55,19 @@ div, span {
 #nav-items {
     position: absolute;
     left: 0;
-    top: 88px;
-    width: 108px;
+    top: 88dp;
+    width: 108dp;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding-top: 2px;
+    gap: 6dp;
+    padding-top: 2dp;
 }
 
 .rail-item-wrap {
     position: relative;
-    width: 108px;
-    height: 54px;
+    width: 108dp;
+    height: 54dp;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -76,11 +76,11 @@ div, span {
 /* Accent bar on the left edge of active item */
 .rail-accent-bar {
     position: absolute;
-    left: 0px;
-    top: 14px;
-    width: 4px;
-    height: 26px;
-    border-radius: 2px;
+    left: 0dp;
+    top: 14dp;
+    width: 4dp;
+    height: 26dp;
+    border-radius: 2dp;
     background-color: #00cdff;
     display: none;
 }
@@ -90,34 +90,34 @@ div, span {
 }
 
 .rail-item {
-    width: 84px;
-    height: 50px;
-    border-radius: 14px;
+    width: 84dp;
+    height: 50dp;
+    border-radius: 14dp;
     display: flex;
     align-items: center;
     justify-content: center;
     background-color: transparent;
-    border-width: 0px;
+    border-width: 0dp;
     border-color: transparent;
     transition: transform 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .rail-item-active {
     background-color: #263e64b8;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #5a7db44d;
 }
 
 .rail-item-cursor {
     background-color: #00cdffd9;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #ffffff;
     transform: scale(1.06);
 }
 
 .rail-icon {
-    width: 34px;
-    height: 34px;
+    width: 34dp;
+    height: 34dp;
     display: inline-block;
 }
 
@@ -129,10 +129,10 @@ div, span {
 #nav-scrim {
     display: none;
     position: absolute;
-    left: 108px;
+    left: 108dp;
     top: 0;
-    width: 1812px;
-    height: 1080px;
+    width: 1812dp;
+    height: 1080dp;
     background-color: #020409a8;
 }
 
@@ -142,87 +142,87 @@ div, span {
     position: absolute;
     left: 0;
     top: 0;
-    width: 300px;
-    height: 1080px;
+    width: 300dp;
+    height: 1080dp;
     background-color: #060b16ff;
-    border-right-width: 1px;
+    border-right-width: 1dp;
     border-right-color: #1e2f47;
 }
 
 #nav-expanded-logo {
     position: absolute;
     left: 0;
-    top: 22px;
-    width: 108px;
-    height: 52px;
+    top: 22dp;
+    width: 108dp;
+    height: 52dp;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 #nav-expanded-logo-img {
-    width: 38px;
-    height: 38px;
+    width: 38dp;
+    height: 38dp;
     display: inline-block;
 }
 
 #nav-app-label {
     position: absolute;
-    left: 120px;
-    top: 30px;
-    font-size: 28px;
+    left: 120dp;
+    top: 30dp;
+    font-size: 28dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 3px;
+    letter-spacing: 3dp;
 }
 
 /* Expanded items list */
 #nav-expanded-items {
     position: absolute;
-    left: 12px;
-    top: 90px;
-    width: 276px;
+    left: 12dp;
+    top: 90dp;
+    width: 276dp;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 6dp;
 }
 
 .rail-exp-item {
-    width: 276px;
-    height: 52px;
-    border-radius: 16px;
+    width: 276dp;
+    height: 52dp;
+    border-radius: 16dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    padding-left: 12px;
-    padding-right: 12px;
-    gap: 14px;
+    padding-left: 12dp;
+    padding-right: 12dp;
+    gap: 14dp;
     background-color: transparent;
-    border-width: 0px;
+    border-width: 0dp;
     border-color: transparent;
 }
 
 .rail-exp-item-active {
     background-color: #1b2e4caa;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
 }
 
 .rail-exp-item-cursor {
     background-color: #00cdffe6;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #ffffff;
 }
 
 .rail-exp-icon {
-    width: 30px;
-    height: 30px;
+    width: 30dp;
+    height: 30dp;
     display: inline-block;
 }
 
 .rail-exp-label {
-    font-size: 19px;
+    font-size: 19dp;
     font-weight: bold;
     color: #9fb2cc;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

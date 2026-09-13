@@ -621,6 +621,8 @@ private:
      * which only stores the raw pointer Rml::SetFileInterface() is given. */
     std::unique_ptr<EvoRmlFileInterface> m_file_interface;
     Rml::Context* m_context = nullptr;
+    /* panel width / EVO_UI_DESIGN_W; 1.0 at 1080p. Applied to every context. */
+    float m_dp_ratio = 1.0f;
     Rml::ElementDocument* m_launch_doc = nullptr;
     Rml::ElementDocument* m_list_doc = nullptr;
     Rml::ElementDocument* m_browser_doc = nullptr;

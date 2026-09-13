@@ -8,20 +8,20 @@
  * it never disturbs the RenderCachedScreen surface cache. Visibility + the
  * number are pushed from C++ (EvoRmlApp::UpdateDebugOverlay), gated on the
  * Settings -> System -> "Debug Overlay" toggle (show_debug_overlay).
- * Matches the old draw_fps_overlay position (top-right, 12px inset) and the
+ * Matches the old draw_fps_overlay position (top-right, 12dp inset) and the
  * player #fps-pill style.
  * ============================================================================= */
 
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 15px;
+    font-size: 15dp;
     color: #f8fafc;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -32,17 +32,17 @@ div, span {
 
 #debug-pill {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 12dp;
+    right: 12dp;
     background-color: #000000aa;
-    border-radius: 6px;
-    padding: 4px 10px;
+    border-radius: 6dp;
+    padding: 4dp 10dp;
     z-index: 9;
 }
 
 #debug-fps {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #f8fafc;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }

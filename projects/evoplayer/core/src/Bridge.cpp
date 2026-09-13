@@ -12,6 +12,13 @@
 #include "evo_subtitle.h"
 #include "evo_rmlui_bridge.h"
 
+namespace evo {
+/* Startup default; evo::Application::initialize() replaces these with what
+ * the VideoOut layer reports the panel is running at. */
+int DisplayWidth  = 1920;
+int DisplayHeight = 1080;
+}  // namespace evo
+
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -21,6 +28,7 @@ extern "C" {
 pp_playback g_pp_pb;
 int g_ps5_user_id = 0;
 int screen = 0;
+
 int player_paused = 0;
 double media_duration_sec = 0.0;
 double resume_base_offset_seconds = 0.0;
