@@ -1,4 +1,5 @@
 #include "evo/screens/LaunchScreen.hpp"
+#include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_recent.h"
@@ -157,9 +158,27 @@ void LaunchScreen::activateSelection() {
     } else if (m_selectedRow == 2) {
         // Library shelf navigation
         switch (m_selectedCol) {
-            case 0: screenMgr->navigateTo(ScreenId::UsbBrowser); break;
-            case 1: screenMgr->navigateTo(ScreenId::RecentFiles); break;
-            case 2: screenMgr->navigateTo(ScreenId::Favorites); break;
+            case 0: {
+                if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
+                    bs->setSource(0);
+                }
+                screenMgr->navigateTo(ScreenId::UsbBrowser);
+                break;
+            }
+            case 1: {
+                if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
+                    bs->setSource(3); // Recent Media
+                }
+                screenMgr->navigateTo(ScreenId::UsbBrowser);
+                break;
+            }
+            case 2: {
+                if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
+                    bs->setSource(2); // Favorites
+                }
+                screenMgr->navigateTo(ScreenId::UsbBrowser);
+                break;
+            }
             case 3: screenMgr->navigateTo(ScreenId::EmbySetup); break;
             case 4: screenMgr->navigateTo(ScreenId::Settings); break;
             case 5: screenMgr->navigateTo(ScreenId::AboutSupport); break;
@@ -308,7 +327,7 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     }
 
     // Library shelf (System sections)
-    static const char* libIcons[EVO_SECTION_COUNT - 1] = {
+    static const char* libIcons[6] = {
         "../icons/icon_browse_usb.png",
         "../icons/icon_recent_files.png",
         "../icons/icon_favorites.png",
@@ -316,16 +335,23 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         "../icons/icon_settings.png",
         "../icons/icon_about_support.png"
     };
+    static const char* libTitles[6] = {
+        "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT"
+    };
+    static const char* libDetails[6] = {
+        "Videos and folders on USB storage",
+        "Pick up where you left off",
+        "Media you saved for later",
+        "Emby and media server streaming",
+        "Playback and display preferences",
+        "Credits and project info"
+    };
 
-    params.library_visible = EVO_SECTION_COUNT - 1;
-    if (params.library_visible > EVO_RMLUI_TILES) {
-        params.library_visible = EVO_RMLUI_TILES;
-    }
+    params.library_visible = 6;
 
     for (int i = 0; i < params.library_visible; ++i) {
-        const evo_section_info* info = evo_section_get(static_cast<evo_section>(i + 1));
-        params.library[i].title = info ? info->label : "";
-        params.library[i].detail = info ? info->blurb : "";
+        params.library[i].title = libTitles[i];
+        params.library[i].detail = libDetails[i];
         params.library[i].icon_path = libIcons[i];
         params.library[i].progress = -1;
         params.library[i].art = nullptr;

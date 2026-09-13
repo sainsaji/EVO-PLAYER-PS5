@@ -2713,7 +2713,7 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     m_last_nav = state;
 
     /* ---- collapsed icon rail ---- */
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 5; i++) {
         std::string item_id  = "nav-item-" + std::to_string(i);
         std::string bar_id   = "nav-bar-"  + std::to_string(i);
         std::string icon_id  = "nav-icon-" + std::to_string(i);
@@ -2747,10 +2747,10 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
 
         /* Icon glyph: the cursor pill fills solid accent, so the glyph has to
          * flip to the darkest theme colour there or it disappears into it -
-         * same trick as the settings/list focused badges. Section 4 (Emby) is
+         * same trick as the settings/list focused badges. Section 2 (Emby) is
          * a trademark, excluded from the icon swap, so it keeps its own baked
          * colour rather than being retinted. */
-        if (el_icon && i != 4) {
+        if (el_icon && i != 2) {
             if (is_cursor)
                 SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
             else if (is_active)
@@ -2773,7 +2773,7 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     if (scrim)    scrim->SetProperty("display",    state.rail_focused ? "block" : "none");
     if (expanded) expanded->SetProperty("display", state.rail_focused ? "block" : "none");
 
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 5; i++) {
         std::string exp_id  = "nav-exp-"       + std::to_string(i);
         std::string lbl_id  = "nav-exp-label-" + std::to_string(i);
         std::string icon_id = "nav-exp-icon-"  + std::to_string(i);
@@ -2795,19 +2795,19 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_exp->SetProperty("border-color", "#ffffff");
             el_exp->SetProperty("border-width", "1.5px");
             if (el_lbl) el_lbl->SetProperty("color", "#060b16");
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
         } else if (is_active) {
             el_exp->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
             el_exp->SetProperty("border-color", to_hex_rgba(m_theme.border));
             el_exp->SetProperty("border-width", "1px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_primary));
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
         } else {
             el_exp->SetProperty("background-color", "transparent");
             el_exp->SetProperty("border-color", "transparent");
             el_exp->SetProperty("border-width", "0px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_secondary));
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
         }
     }
 }

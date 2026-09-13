@@ -1,4 +1,5 @@
 #include "evo/screens/FavoritesScreen.hpp"
+#include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_favorites.h"
 #include "evo_rmlui_bridge.h"
@@ -17,9 +18,12 @@ FavoritesScreen::FavoritesScreen()
 
 void FavoritesScreen::onEnter() {
     StatefulScreen::onEnter();
-    favorites_load();
-    m_selectedIndex = 0;
-    m_scrollOffset = 0;
+    if (auto sm = Application::getInstance().getScreenManager()) {
+        if (auto bs = dynamic_cast<BrowserScreen*>(sm->getScreen(ScreenId::UsbBrowser))) {
+            bs->setSource(2);
+        }
+        sm->navigateTo(ScreenId::UsbBrowser);
+    }
 }
 
 void FavoritesScreen::onExit() {

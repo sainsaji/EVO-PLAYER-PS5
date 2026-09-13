@@ -67,17 +67,17 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
     switch (screenId) {
         case ScreenId::MainMenu:        return 0; // Home
         case ScreenId::UsbBrowser:      return 1; // Browse USB
-        case ScreenId::RecentFiles:     return 2; // Recent Files
-        case ScreenId::Favorites:       return 3; // Favorites
+        case ScreenId::RecentFiles:     return 1; // Recent Files (part of file browser)
+        case ScreenId::Favorites:       return 1; // Favorites (part of file browser)
         case ScreenId::EmbySetup:
-        case ScreenId::EmbyBrowse:      return 4; // Emby
+        case ScreenId::EmbyBrowse:      return 2; // Emby
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
-        case ScreenId::SettingsSystem:  return 5; // Settings
+        case ScreenId::SettingsSystem:  return 3; // Settings
         case ScreenId::AboutSupport:
-        case ScreenId::Changelog:       return 6; // About & Support
+        case ScreenId::Changelog:       return 4; // About & Support
         default:                        return -1; // Non-rail screens
     }
 }
@@ -104,7 +104,7 @@ void ScreenManager::setRailFocused(bool focused) {
 }
 
 void ScreenManager::stepRail(int delta) {
-    const int numSections = 7;
+    const int numSections = 5;
     m_railIndex = (m_railIndex + delta) % numSections;
     if (m_railIndex < 0) m_railIndex += numSections;
     evo_feedback(EVO_FB_MOVE);
@@ -115,11 +115,9 @@ ScreenId ScreenManager::getRootScreenForSection(int section) const {
     switch (section) {
         case 0: return ScreenId::MainMenu;
         case 1: return ScreenId::UsbBrowser;
-        case 2: return ScreenId::RecentFiles;
-        case 3: return ScreenId::Favorites;
-        case 4: return ScreenId::EmbySetup;
-        case 5: return ScreenId::Settings;
-        case 6: return ScreenId::AboutSupport;
+        case 2: return ScreenId::EmbySetup;
+        case 3: return ScreenId::Settings;
+        case 4: return ScreenId::AboutSupport;
         default: return ScreenId::MainMenu;
     }
 }

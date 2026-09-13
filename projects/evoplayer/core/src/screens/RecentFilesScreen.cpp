@@ -1,4 +1,5 @@
 #include "evo/screens/RecentFilesScreen.hpp"
+#include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_recent.h"
 #include "evo_rmlui_bridge.h"
@@ -17,9 +18,12 @@ RecentFilesScreen::RecentFilesScreen()
 
 void RecentFilesScreen::onEnter() {
     StatefulScreen::onEnter();
-    recent_load();
-    m_selectedIndex = 0;
-    m_scrollOffset = 0;
+    if (auto sm = Application::getInstance().getScreenManager()) {
+        if (auto bs = dynamic_cast<BrowserScreen*>(sm->getScreen(ScreenId::UsbBrowser))) {
+            bs->setSource(3);
+        }
+        sm->navigateTo(ScreenId::UsbBrowser);
+    }
 }
 
 void RecentFilesScreen::onExit() {

@@ -7,6 +7,7 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_keyboard.h"
 #include "evo_favorites.h"
+#include "evo_recent.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
 
@@ -20,19 +21,25 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
-
-
 namespace evo {
+
+static bool matchesQuery(const std::string& str, const std::string& q) {
+    if (q.empty()) return true;
+    auto it = std::search(
+        str.begin(), str.end(),
+        q.begin(), q.end(),
+        [](char ch1, char ch2) { return std::toupper(static_cast<unsigned char>(ch1)) == std::toupper(static_cast<unsigned char>(ch2)); }
+    );
+    return it != str.end();
+}
 
 static void OnSearchSubmitted(const char* text, void* userdata) {
     auto* self = static_cast<BrowserScreen*>(userdata);
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    if (!browser) return;
+    if (!self) return;
 
     std::string queryStr;
     if (text) {
         queryStr = text;
-        // Trim leading and trailing whitespace, CR, LF, tabs
         size_t start = queryStr.find_first_not_of(" \t\r\n");
         if (start != std::string::npos) {
             size_t end = queryStr.find_last_not_of(" \t\r\n");
@@ -42,27 +49,7 @@ static void OnSearchSubmitted(const char* text, void* userdata) {
         }
     }
 
-    if (!queryStr.empty()) {
-        browser->search(queryStr);
-        if (self) {
-            self->resetSelection();
-        }
-        size_t count = browser->getEntryCount();
-        char msg[96];
-        if (count > 0) {
-            std::snprintf(msg, sizeof(msg), "\"%s\" (%zu found)", queryStr.c_str(), count);
-        } else {
-            std::snprintf(msg, sizeof(msg), "\"%s\" (no matches)", queryStr.c_str());
-        }
-        toast("SEARCH", msg);
-    } else {
-        browser->clearSearch();
-        browser->refresh();
-        if (self) {
-            self->resetSelection();
-        }
-        toast("SEARCH", "Cleared");
-    }
+    self->setSearchQuery(queryStr);
 }
 
 BrowserScreen::BrowserScreen()
@@ -88,21 +75,181 @@ void BrowserScreen::initBrowserStateMachine() {
         .addTransition(BrowserScreenState::Searching, BrowserScreenEvent::CursorMoved, BrowserScreenState::Browsing);
 }
 
-void BrowserScreen::rebuildFilteredIndices() {
-    m_filteredIndices.clear();
+void BrowserScreen::rebuildItems() {
+    m_items.clear();
     auto browser = Application::getInstance().getFileSystemBrowser();
-    if (!browser) return;
-    size_t count = browser->getEntryCount();
-    for (size_t i = 0; i < count; ++i) {
-        const auto* entry = browser->getEntry(i);
-        if (!entry) continue;
-        if (m_categoryFilter == -1) {
-            m_filteredIndices.push_back(i);
-        } else {
-            if (entry->category == FileCategory::Folder ||
-                static_cast<int>(entry->category) == m_categoryFilter) {
-                m_filteredIndices.push_back(i);
+
+    if (m_activeSource == 0 || m_activeSource == 1) {
+        if (!browser) return;
+        size_t count = browser->getEntryCount();
+        for (size_t i = 0; i < count; ++i) {
+            const auto* entry = browser->getEntry(i);
+            if (!entry) continue;
+
+            if (m_categoryFilter != -1 && entry->category != FileCategory::Folder &&
+                static_cast<int>(entry->category) != m_categoryFilter) {
+                continue;
             }
+
+            if (m_isSearching && !matchesQuery(entry->name, m_searchQuery)) {
+                continue;
+            }
+
+            BrowserItem item;
+            item.name = entry->name;
+            item.fullPath = browser->getFullPath(i);
+            item.category = entry->category;
+            item.badge = browser->getFileCategoryLabel(entry->category);
+            item.isFavorite = favorites_is_favorite(item.fullPath.c_str());
+
+            double pos = recent_lookup(item.fullPath.c_str());
+            item.lastPos = pos;
+            if (pos > 0.0 && m_cachedMetadata.filePath == item.fullPath && m_cachedMetadata.durationSeconds > 0.0) {
+                item.duration = m_cachedMetadata.durationSeconds;
+                item.progress = static_cast<int>((pos / m_cachedMetadata.durationSeconds) * 100.0);
+                if (item.progress > 100) item.progress = 100;
+            }
+
+            if (entry->category == FileCategory::Folder) {
+                item.iconPath = (!m_isSearching && browser->getCurrentPath() == "/mnt/usb0")
+                    ? "../icons/icon_browse_usb.png"
+                    : "../icons/icon_folder.png";
+                item.detail = "Folder";
+            } else {
+                if (entry->category == FileCategory::Video) item.iconPath = "../icons/icon_resume.png";
+                else if (entry->category == FileCategory::Audio) item.iconPath = "../icons/icon_subtitles.png";
+                else if (entry->category == FileCategory::Image) item.iconPath = "../icons/icon_palette.png";
+                else item.iconPath = "../icons/icon_about_support.png";
+
+                struct stat st;
+                if (!item.fullPath.empty() && stat(item.fullPath.c_str(), &st) == 0) {
+                    double sz = static_cast<double>(st.st_size);
+                    const char* unit = "B";
+                    if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
+                    if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
+                    if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "%.2f %s", sz, unit);
+                    item.detail = buf;
+                } else {
+                    item.detail = "Media File";
+                }
+            }
+            m_items.push_back(std::move(item));
+        }
+    } else if (m_activeSource == 2) {
+        // Favorites
+        favorites_load();
+        for (int i = 0; i < favorite_count; ++i) {
+            const auto& fav = favorite_files[i];
+            if (fav.path[0] == '\0') continue;
+
+            FileCategory cat = browser ? browser->classifyFile(fav.path, 0) : FileCategory::Video;
+            if (m_categoryFilter != -1 && static_cast<int>(cat) != m_categoryFilter) {
+                continue;
+            }
+
+            std::string displayName = fav.title[0] ? fav.title : "";
+            if (displayName.empty()) {
+                std::string p(fav.path);
+                size_t slash = p.find_last_of('/');
+                displayName = (slash != std::string::npos) ? p.substr(slash + 1) : p;
+            }
+
+            if (m_isSearching && !matchesQuery(displayName, m_searchQuery) && !matchesQuery(fav.path, m_searchQuery)) {
+                continue;
+            }
+
+            BrowserItem item;
+            item.name = displayName;
+            item.fullPath = fav.path;
+            item.category = cat;
+            item.badge = browser ? browser->getFileCategoryLabel(cat) : "FAVORITE";
+            item.isFavorite = true;
+            item.duration = fav.duration;
+
+            double pos = recent_lookup(fav.path);
+            item.lastPos = pos;
+            if (pos > 0.0 && fav.duration > 0.0) {
+                item.progress = static_cast<int>((pos / fav.duration) * 100.0);
+                if (item.progress > 100) item.progress = 100;
+            }
+
+            if (cat == FileCategory::Video) item.iconPath = "../icons/icon_resume.png";
+            else if (cat == FileCategory::Audio) item.iconPath = "../icons/icon_subtitles.png";
+            else if (cat == FileCategory::Image) item.iconPath = "../icons/icon_palette.png";
+            else item.iconPath = "../icons/icon_favorites.png";
+
+            struct stat st;
+            if (stat(fav.path, &st) == 0) {
+                double sz = static_cast<double>(st.st_size);
+                const char* unit = "B";
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%.2f %s", sz, unit);
+                item.detail = buf;
+            } else {
+                item.detail = "Favorite";
+            }
+            m_items.push_back(std::move(item));
+        }
+    } else if (m_activeSource == 3) {
+        // Recent Media
+        recent_load();
+        for (int i = 0; i < recent_file_count; ++i) {
+            const auto& rec = recent_files[i];
+            if (rec.path[0] == '\0') continue;
+
+            FileCategory cat = browser ? browser->classifyFile(rec.path, 0) : FileCategory::Video;
+            if (m_categoryFilter != -1 && static_cast<int>(cat) != m_categoryFilter) {
+                continue;
+            }
+
+            std::string displayName = rec.title[0] ? rec.title : "";
+            if (displayName.empty()) {
+                std::string p(rec.path);
+                size_t slash = p.find_last_of('/');
+                displayName = (slash != std::string::npos) ? p.substr(slash + 1) : p;
+            }
+
+            if (m_isSearching && !matchesQuery(displayName, m_searchQuery) && !matchesQuery(rec.path, m_searchQuery)) {
+                continue;
+            }
+
+            BrowserItem item;
+            item.name = displayName;
+            item.fullPath = rec.path;
+            item.category = cat;
+            item.badge = browser ? browser->getFileCategoryLabel(cat) : "RECENT";
+            item.isFavorite = favorites_is_favorite(rec.path);
+            item.lastPos = rec.last_pos;
+            item.duration = rec.duration;
+            if (rec.last_pos > 0.0 && rec.duration > 0.0) {
+                item.progress = static_cast<int>((rec.last_pos / rec.duration) * 100.0);
+                if (item.progress > 100) item.progress = 100;
+            }
+
+            if (cat == FileCategory::Video) item.iconPath = "../icons/icon_resume.png";
+            else if (cat == FileCategory::Audio) item.iconPath = "../icons/icon_subtitles.png";
+            else if (cat == FileCategory::Image) item.iconPath = "../icons/icon_palette.png";
+            else item.iconPath = "../icons/icon_recent_files.png";
+
+            struct stat st;
+            if (stat(rec.path, &st) == 0) {
+                double sz = static_cast<double>(st.st_size);
+                const char* unit = "B";
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%.2f %s", sz, unit);
+                item.detail = buf;
+            } else {
+                item.detail = "Recent";
+            }
+            m_items.push_back(std::move(item));
         }
     }
 }
@@ -112,16 +259,62 @@ void BrowserScreen::resetSelection() {
     m_scrollOffset = 0;
     m_settleMs = 0.0;
     m_cachedMetadata = MediaMetadataInfo();
-    rebuildFilteredIndices();
+    rebuildItems();
     m_browserFsm.postEvent(BrowserScreenEvent::FinishSearch);
     m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
 }
 
+void BrowserScreen::setSource(int sourceIndex) {
+    if (sourceIndex < 0 || sourceIndex > 6) sourceIndex = 0;
+    m_sidebarIndex = sourceIndex;
+    m_activeSource = (sourceIndex <= 3) ? sourceIndex : m_activeSource;
+    m_categoryFilter = (sourceIndex >= 4) ? (sourceIndex - 3) : -1;
+    m_focusPane = BrowserFocusPane::Grid;
+    resetSelection();
+}
+
+void BrowserScreen::setSearchQuery(const std::string& query) {
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    if (!query.empty()) {
+        m_isSearching = true;
+        m_searchQuery = query;
+        if (browser && (m_activeSource == 0 || m_activeSource == 1)) {
+            browser->search(query);
+        }
+        resetSelection();
+        size_t count = m_items.size();
+        char msg[96];
+        if (count > 0) {
+            std::snprintf(msg, sizeof(msg), "\"%s\" (%zu found)", query.c_str(), count);
+        } else {
+            std::snprintf(msg, sizeof(msg), "\"%s\" (no matches)", query.c_str());
+        }
+        toast("SEARCH", msg);
+    } else {
+        m_isSearching = false;
+        m_searchQuery.clear();
+        if (browser) {
+            browser->clearSearch();
+            browser->refresh();
+        }
+        resetSelection();
+        toast("SEARCH", "Cleared");
+    }
+}
+
 void BrowserScreen::onEnter() {
     StatefulScreen::onEnter();
+    favorites_load();
+    recent_load();
+
     auto browser = Application::getInstance().getFileSystemBrowser();
-    if (browser) {
-        browser->refresh();
+    if (browser && (m_activeSource == 0 || m_activeSource == 1)) {
+        if (browser->getCurrentPath().empty()) {
+            browser->loadLastFolder();
+            if (browser->getCurrentPath().empty()) {
+                browser->setCurrentPath("/mnt/usb0");
+            }
+        }
     }
     resetSelection();
 }
@@ -132,79 +325,78 @@ void BrowserScreen::onExit() {
     if (browser) {
         browser->saveLastFolder();
     }
+    auto coverService = Application::getInstance().getCoverArtService();
+    if (coverService) {
+        coverService->clearCache();
+    }
+}
+
+void BrowserScreen::openSearch() {
+    m_browserFsm.postEvent(BrowserScreenEvent::StartSearch);
+    evo_keyboard_open("Search media...", "", 64, OnSearchSubmitted, this);
 }
 
 void BrowserScreen::navigate(int delta) {
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    if (!browser) return;
-    rebuildFilteredIndices();
-    int count = static_cast<int>(m_filteredIndices.size());
-    if (count == 0) return;
-
-    m_settleMs = 0.0;
-    m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
-    evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
-    m_selectedIndex += delta;
-
-    if (m_selectedIndex < 0) {
+    int totalCount = static_cast<int>(m_items.size());
+    if (totalCount == 0) {
         m_selectedIndex = 0;
+        m_scrollOffset = 0;
+        return;
+    }
+
+    int nextIndex = m_selectedIndex + delta;
+    if (nextIndex < 0) {
+        nextIndex = 0;
         evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedIndex >= count) {
-        m_selectedIndex = count - 1;
+    } else if (nextIndex >= totalCount) {
+        nextIndex = totalCount - 1;
         evo_feedback(EVO_FB_BOUNDARY);
     } else {
         evo_feedback(EVO_FB_MOVE);
     }
 
-    // 2x4 Grid view: 8 visible cards, scrolling row-by-row (multiples of 4)
-    constexpr int visibleCards = 8;
-    if (m_selectedIndex < m_scrollOffset) {
-        m_scrollOffset = (m_selectedIndex / 4) * 4;
-    } else if (m_selectedIndex >= m_scrollOffset + visibleCards) {
-        m_scrollOffset = ((m_selectedIndex - visibleCards + 4) / 4) * 4;
+    if (nextIndex != m_selectedIndex) {
+        m_selectedIndex = nextIndex;
+        m_settleMs = 0.0;
+        m_cachedMetadata = MediaMetadataInfo();
+        m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
     }
-    if (m_scrollOffset < 0) m_scrollOffset = 0;
 }
 
 void BrowserScreen::jumpPage(int direction) {
-    navigate(direction * 8);
+    constexpr int pageSize = 8;
+    navigate(direction * pageSize);
 }
 
 void BrowserScreen::jumpLetter(int direction) {
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    if (!browser) return;
-    rebuildFilteredIndices();
-    int count = static_cast<int>(m_filteredIndices.size());
-    if (count == 0 || m_selectedIndex < 0 || m_selectedIndex >= count) return;
+    if (m_items.empty() || m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_items.size())) {
+        return;
+    }
 
-    const auto* currentEntry = browser->getEntry(m_filteredIndices[m_selectedIndex]);
-    if (!currentEntry || currentEntry->name.empty()) return;
-
-    char currentInitial = std::toupper(static_cast<unsigned char>(currentEntry->name[0]));
+    const auto& currentItem = m_items[m_selectedIndex];
+    char currentInitial = currentItem.name.empty() ? ' ' : std::toupper(static_cast<unsigned char>(currentItem.name[0]));
     int targetIndex = m_selectedIndex;
 
     if (direction > 0) {
-        for (int i = m_selectedIndex + 1; i < count; ++i) {
-            const auto* entry = browser->getEntry(m_filteredIndices[i]);
-            if (entry && !entry->name.empty()) {
-                char init = std::toupper(static_cast<unsigned char>(entry->name[0]));
+        for (size_t i = m_selectedIndex + 1; i < m_items.size(); ++i) {
+            const auto& item = m_items[i];
+            if (!item.name.empty()) {
+                char init = std::toupper(static_cast<unsigned char>(item.name[0]));
                 if (init != currentInitial) {
-                    targetIndex = i;
+                    targetIndex = static_cast<int>(i);
                     break;
                 }
             }
         }
     } else {
         for (int i = m_selectedIndex - 1; i >= 0; --i) {
-            const auto* entry = browser->getEntry(m_filteredIndices[i]);
-            if (entry && !entry->name.empty()) {
-                char init = std::toupper(static_cast<unsigned char>(entry->name[0]));
+            const auto& item = m_items[i];
+            if (!item.name.empty()) {
+                char init = std::toupper(static_cast<unsigned char>(item.name[0]));
                 if (init != currentInitial) {
-                    // Find first of this previous letter
                     while (i > 0) {
-                        const auto* prev = browser->getEntry(m_filteredIndices[i - 1]);
-                        if (!prev || prev->name.empty() ||
-                            std::toupper(static_cast<unsigned char>(prev->name[0])) != init) {
+                        const auto& prev = m_items[i - 1];
+                        if (prev.name.empty() || std::toupper(static_cast<unsigned char>(prev.name[0])) != init) {
                             break;
                         }
                         i--;
@@ -223,8 +415,6 @@ void BrowserScreen::jumpLetter(int direction) {
 
 void BrowserScreen::activateSidebar() {
     auto browser = Application::getInstance().getFileSystemBrowser();
-    auto sm = Application::getInstance().getScreenManager();
-    if (!browser || !sm) return;
 
     evo_feedback(EVO_FB_CONFIRM);
 
@@ -232,8 +422,12 @@ void BrowserScreen::activateSidebar() {
         case 0: // USB Drive
             m_activeSource = 0;
             m_categoryFilter = -1;
-            browser->clearSearch();
-            browser->setCurrentPath("/mnt/usb0");
+            m_isSearching = false;
+            m_searchQuery.clear();
+            if (browser) {
+                browser->clearSearch();
+                browser->setCurrentPath("/mnt/usb0");
+            }
             m_focusPane = BrowserFocusPane::Grid;
             resetSelection();
             toast("STORAGE", "USB Drive");
@@ -241,17 +435,33 @@ void BrowserScreen::activateSidebar() {
         case 1: // Internal Storage
             m_activeSource = 1;
             m_categoryFilter = -1;
-            browser->clearSearch();
-            browser->setCurrentPath("/data");
+            m_isSearching = false;
+            m_searchQuery.clear();
+            if (browser) {
+                browser->clearSearch();
+                browser->setCurrentPath("/data");
+            }
             m_focusPane = BrowserFocusPane::Grid;
             resetSelection();
             toast("STORAGE", "Internal Storage");
             break;
         case 2: // Favorites
-            sm->navigateTo(ScreenId::Favorites);
+            m_activeSource = 2;
+            m_categoryFilter = -1;
+            m_isSearching = false;
+            m_searchQuery.clear();
+            m_focusPane = BrowserFocusPane::Grid;
+            resetSelection();
+            toast("SOURCES", "Favorites");
             break;
         case 3: // Recent Media
-            sm->navigateTo(ScreenId::RecentFiles);
+            m_activeSource = 3;
+            m_categoryFilter = -1;
+            m_isSearching = false;
+            m_searchQuery.clear();
+            m_focusPane = BrowserFocusPane::Grid;
+            resetSelection();
+            toast("SOURCES", "Recent Media");
             break;
         case 4: // All Videos
             m_categoryFilter = static_cast<int>(FileCategory::Video);
@@ -277,73 +487,58 @@ void BrowserScreen::activateSidebar() {
 }
 
 void BrowserScreen::activateSelection() {
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    auto playback = Application::getInstance().getPlaybackController();
-    auto screenMgr = Application::getInstance().getScreenManager();
-    if (!browser || !playback || !screenMgr) return;
-
-    rebuildFilteredIndices();
-    if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_filteredIndices.size())) {
+    if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_items.size())) {
         return;
     }
 
-    size_t realIdx = m_filteredIndices[m_selectedIndex];
-    const auto* entry = browser->getEntry(realIdx);
-    if (!entry) return;
+    const auto& item = m_items[m_selectedIndex];
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    auto playback = Application::getInstance().getPlaybackController();
+    auto screenMgr = Application::getInstance().getScreenManager();
+    if (!playback || !screenMgr) return;
 
-    if (entry->category == FileCategory::Folder) {
-        evo_feedback(EVO_FB_OPEN);
-        browser->navigateInto(entry->name);
-        m_selectedIndex = 0;
-        m_scrollOffset = 0;
-        rebuildFilteredIndices();
-    } else if (entry->category == FileCategory::Video || entry->category == FileCategory::Audio) {
-        std::string fullPath = browser->getFullPath(realIdx);
+    if (item.category == FileCategory::Folder) {
+        if (browser) {
+            evo_feedback(EVO_FB_OPEN);
+            browser->navigateInto(item.name);
+            resetSelection();
+        }
+    } else if (item.category == FileCategory::Video || item.category == FileCategory::Audio) {
         auto settings = Application::getInstance().getSettingsService();
         bool resumeEnabled = settings ? settings->isResumePlaybackEnabled() : true;
-        double resumePos = resumeEnabled ? playback->loadResumePosition(fullPath) : 0.0;
+        double resumePos = (item.lastPos > 0.0) ? item.lastPos :
+                           (resumeEnabled ? playback->loadResumePosition(item.fullPath) : 0.0);
         if (resumePos > 5.0) {
             evo_feedback(EVO_FB_OPEN);
             if (auto dialog = dynamic_cast<ModalDialogScreen*>(screenMgr->getScreen(ScreenId::ResumePrompt))) {
-                dialog->setResumeTarget(fullPath, resumePos, m_cachedMetadata.durationSeconds);
+                dialog->setResumeTarget(item.fullPath, resumePos, item.duration > 0.0 ? item.duration : m_cachedMetadata.durationSeconds);
             }
             screenMgr->navigateTo(ScreenId::ResumePrompt);
         } else {
             evo_feedback(EVO_FB_CONFIRM);
-            playback->startPlayback(fullPath, 0.0);
+            playback->startPlayback(item.fullPath, 0.0);
             screenMgr->navigateTo(ScreenId::Player);
         }
-    } else if (entry->category == FileCategory::Document) {
+    } else if (item.category == FileCategory::Document) {
         evo_feedback(EVO_FB_CONFIRM);
-        std::string fullPath = browser->getFullPath(realIdx);
         if (auto reader = dynamic_cast<TextReaderScreen*>(screenMgr->getScreen(ScreenId::TextReader))) {
-            reader->openFile(fullPath);
+            reader->openFile(item.fullPath);
         }
         screenMgr->navigateTo(ScreenId::TextReader);
-    } else if (entry->category == FileCategory::Image) {
+    } else if (item.category == FileCategory::Image) {
         evo_feedback(EVO_FB_CONFIRM);
-        std::string fullPath = browser->getFullPath(realIdx);
-        if (auto imgViewer = dynamic_cast<ImageViewerScreen*>(screenMgr->getScreen(ScreenId::ImageViewer))) {
-            imgViewer->openImage(fullPath);
+        if (auto viewer = dynamic_cast<ImageViewerScreen*>(screenMgr->getScreen(ScreenId::ImageViewer))) {
+            viewer->openImage(item.fullPath);
         }
         screenMgr->navigateTo(ScreenId::ImageViewer);
-    } else {
-        toast("UNSUPPORTED", entry->name.c_str());
     }
-}
-
-void BrowserScreen::openSearch() {
-    m_browserFsm.postEvent(BrowserScreenEvent::StartSearch);
-    auto browser = Application::getInstance().getFileSystemBrowser();
-    const char* query = browser ? browser->getSearchQuery().c_str() : "";
-    evo_keyboard_open("SEARCH IN DIRECTORY", query, 48, OnSearchSubmitted, this);
 }
 
 bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
     (void)held;
     (void)released;
 
-    // Sidebar navigation
+    // Sidebar navigation pane
     if (m_focusPane == BrowserFocusPane::Sidebar) {
         if (pressed & PadButtons::Up) {
             if (m_sidebarIndex > 0) {
@@ -379,8 +574,10 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             return true;
         }
         if (pressed & PadButtons::Circle) {
-            m_focusPane = BrowserFocusPane::Grid;
             evo_feedback(EVO_FB_CANCEL);
+            if (auto sm = Application::getInstance().getScreenManager()) {
+                sm->navigateTo(ScreenId::MainMenu);
+            }
             return true;
         }
         return false;
@@ -429,23 +626,35 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return true;
     }
     if (pressed & PadButtons::Circle) {
-        auto browser = Application::getInstance().getFileSystemBrowser();
-        if (browser && browser->isSearching()) {
+        if (m_isSearching) {
             evo_feedback(EVO_FB_CANCEL);
-            browser->clearSearch();
-            browser->refresh();
+            m_isSearching = false;
+            m_searchQuery.clear();
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser) {
+                browser->clearSearch();
+                browser->refresh();
+            }
             resetSelection();
             toast("SEARCH", "Cleared");
             return true;
         }
-        if (browser && !browser->getCurrentPath().empty()) {
-            evo_feedback(EVO_FB_CANCEL);
-            browser->navigateUp();
-            resetSelection();
-        } else {
-            m_focusPane = BrowserFocusPane::Sidebar;
-            evo_feedback(EVO_FB_CANCEL);
+
+        if (m_activeSource == 0 || m_activeSource == 1) {
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser && !browser->getCurrentPath().empty() &&
+                browser->getCurrentPath() != "/mnt/usb0" &&
+                browser->getCurrentPath() != "/data") {
+                evo_feedback(EVO_FB_CANCEL);
+                browser->navigateUp();
+                resetSelection();
+                return true;
+            }
         }
+
+        // At root or in Favorites / Recent Media: step back into Sidebar
+        m_focusPane = BrowserFocusPane::Sidebar;
+        evo_feedback(EVO_FB_CANCEL);
         return true;
     }
     if (pressed & PadButtons::Square) {
@@ -453,20 +662,26 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return true;
     }
     if (pressed & PadButtons::Triangle) {
-        auto browser = Application::getInstance().getFileSystemBrowser();
-        rebuildFilteredIndices();
-        if (browser && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_filteredIndices.size())) {
-            size_t realIdx = m_filteredIndices[m_selectedIndex];
-            std::string fullPath = browser->getFullPath(realIdx);
-            const auto* entry = browser->getEntry(realIdx);
-            if (favorites_is_favorite(fullPath.c_str())) {
-                favorites_remove(fullPath.c_str());
-                favorites_save();
-                toast("FAVORITES", "Removed");
-            } else if (entry && entry->category != FileCategory::Folder) {
-                favorites_add(fullPath.c_str(), entry->name.c_str(), 0.0);
-                favorites_save();
-                toast("FAVORITES", "Added");
+        if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
+            auto& item = m_items[m_selectedIndex];
+            if (item.category != FileCategory::Folder) {
+                if (favorites_is_favorite(item.fullPath.c_str())) {
+                    favorites_remove(item.fullPath.c_str());
+                    favorites_save();
+                    item.isFavorite = false;
+                    toast("FAVORITES", "Removed");
+                } else {
+                    favorites_add(item.fullPath.c_str(), item.name.c_str(), item.duration);
+                    favorites_save();
+                    item.isFavorite = true;
+                    toast("FAVORITES", "Added");
+                }
+                if (m_activeSource == 2) {
+                    rebuildItems();
+                    if (m_selectedIndex >= static_cast<int>(m_items.size()) && m_selectedIndex > 0) {
+                        m_selectedIndex = static_cast<int>(m_items.size()) - 1;
+                    }
+                }
             }
         }
         return true;
@@ -480,47 +695,22 @@ void BrowserScreen::update(double deltaMs) {
     m_browserFsm.update(deltaMs);
 
     m_settleMs += deltaMs;
-    auto browser = Application::getInstance().getFileSystemBrowser();
     auto coverService = Application::getInstance().getCoverArtService();
-    rebuildFilteredIndices();
 
-    if (browser && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_filteredIndices.size())) {
-        size_t realIdx = m_filteredIndices[m_selectedIndex];
-        std::string fullPath = browser->getFullPath(realIdx);
-        const auto* entry = browser->getEntry(realIdx);
-        bool isDir = (entry && entry->category == FileCategory::Folder);
-        // Settle gate: Extracting video thumbnail frames and probing media headers are
-        // expensive operations (avformat_open_input, demux, avcodec decode, sws_scale).
-        // Matches main.c.legacy EVO_PROBE_SETTLE_FRAMES (12 frames ~ 200ms).
-        // During fast scrolling, settle timer is continually reset, completely preventing
-        // background decode churn, UI latency spikes, and decoder crashes.
+    if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
+        const auto& item = m_items[m_selectedIndex];
+        bool isDir = (item.category == FileCategory::Folder);
         if (m_settleMs >= 200.0) {
             if (coverService) {
-                coverService->ensureBrowserPreview(fullPath, isDir);
+                coverService->ensureBrowserPreview(item.fullPath, isDir);
             }
-
-            // Probe media metadata when cursor has settled on a file for > 200ms
-            if (!isDir && (entry->category == FileCategory::Video || entry->category == FileCategory::Audio) &&
-                m_cachedMetadata.filePath != fullPath) {
+            if (m_browserFsm.getCurrentState() == BrowserScreenState::Browsing) {
                 m_browserFsm.postEvent(BrowserScreenEvent::SettleTriggered);
                 if (auto metaService = Application::getInstance().getMediaMetadataService()) {
-                    AVFormatContext* fmt = nullptr;
-                    if (avformat_open_input(&fmt, fullPath.c_str(), nullptr, nullptr) == 0) {
-                        if (avformat_find_stream_info(fmt, nullptr) >= 0) {
-                            m_cachedMetadata = metaService->extractMetadataFromFormat(fmt, fullPath);
-                        } else {
-                            m_cachedMetadata = metaService->extractBasicMetadata(fullPath);
-                        }
-                        avformat_close_input(&fmt);
-                    } else {
-                        m_cachedMetadata = metaService->extractBasicMetadata(fullPath);
+                    if (m_cachedMetadata.filePath != item.fullPath) {
+                        m_cachedMetadata = metaService->extractBasicMetadata(item.fullPath);
                     }
                 }
-            }
-        } else if (!isDir && entry->category != FileCategory::Video && entry->category != FileCategory::Audio &&
-                   m_cachedMetadata.filePath != fullPath) {
-            if (auto metaService = Application::getInstance().getMediaMetadataService()) {
-                m_cachedMetadata = metaService->extractBasicMetadata(fullPath);
             }
         }
     }
@@ -529,54 +719,70 @@ void BrowserScreen::update(double deltaMs) {
 void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     auto browser = Application::getInstance().getFileSystemBrowser();
     auto coverService = Application::getInstance().getCoverArtService();
-    if (!browser) return;
-
-    rebuildFilteredIndices();
 
     evo_rmlui_browser_params_t params;
     std::memset(&params, 0, sizeof(params));
 
-    bool isSearching = browser->isSearching();
-    std::string currentPath = browser->getCurrentPath();
-    if (isSearching) {
-        if (currentPath.empty()) {
-            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Other Locations  /  [Search: \"%s\"]", browser->getSearchQuery().c_str());
+    params.title = "STORAGE";
+
+    // Format top location breadcrumbs
+    if (m_activeSource == 0) {
+        if (browser && !browser->getCurrentPath().empty()) {
+            if (browser->getCurrentPath() == "/mnt/usb0") {
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive");
+            } else {
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive%s",
+                              browser->getCurrentPath().substr(browser->getCurrentPath().find("/mnt/usb0") == 0 ? 9 : 0).c_str());
+            }
         } else {
-            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s  /  [Search: \"%s\"]", currentPath.c_str(), browser->getSearchQuery().c_str());
+            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive");
         }
-        params.path = m_formattedPath;
-        params.title = "SEARCH";
-        params.at_root = 0;
-        params.empty_title = "NO RESULTS FOUND";
-        params.empty_hint = "No files matched your search query";
+    } else if (m_activeSource == 1) {
+        if (browser && !browser->getCurrentPath().empty()) {
+            if (browser->getCurrentPath() == "/data") {
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage");
+            } else {
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage%s",
+                              browser->getCurrentPath().substr(browser->getCurrentPath().find("/data") == 0 ? 5 : 0).c_str());
+            }
+        } else {
+            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage");
+        }
+    } else if (m_activeSource == 2) {
+        std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Favorites");
+    } else if (m_activeSource == 3) {
+        std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Recent Media");
+    }
+
+    if (m_categoryFilter == static_cast<int>(FileCategory::Video)) {
+        std::strncat(m_formattedPath, " / Videos", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
+    } else if (m_categoryFilter == static_cast<int>(FileCategory::Audio)) {
+        std::strncat(m_formattedPath, " / Music", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
+    } else if (m_categoryFilter == static_cast<int>(FileCategory::Image)) {
+        std::strncat(m_formattedPath, " / Photos", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
+    }
+
+    params.path = m_formattedPath;
+
+    // At root check
+    if (m_activeSource == 0) {
+        params.at_root = (!browser || browser->getCurrentPath().empty() || browser->getCurrentPath() == "/mnt/usb0") ? 1 : 0;
+    } else if (m_activeSource == 1) {
+        params.at_root = (!browser || browser->getCurrentPath().empty() || browser->getCurrentPath() == "/data") ? 1 : 0;
     } else {
-        if (currentPath.empty()) {
-            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Other Locations");
-        } else {
-            std::string p = currentPath;
-            if (p.rfind("/mnt/usb0", 0) == 0) {
-                p.replace(0, 9, "USB Drive");
-            } else if (p.rfind("/data", 0) == 0) {
-                p.replace(0, 5, "Internal Storage");
-            }
-            std::string formatted = "Other Locations";
-            size_t start = 0;
-            while (start < p.size()) {
-                while (start < p.size() && p[start] == '/') start++;
-                if (start >= p.size()) break;
-                size_t next = p.find('/', start);
-                if (next == std::string::npos) next = p.size();
-                std::string seg = p.substr(start, next - start);
-                if (!seg.empty()) {
-                    formatted += "  /  " + seg;
-                }
-                start = next;
-            }
-            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", formatted.c_str());
-        }
-        params.path = m_formattedPath;
-        params.title = "FILES";
-        params.at_root = currentPath.empty() || currentPath == "/" ? 1 : 0;
+        params.at_root = 1;
+    }
+
+    if (m_activeSource == 2) {
+        params.empty_title = "NO FAVORITES YET";
+        params.empty_hint = "Press [Triangle] on any file to add to Favorites";
+    } else if (m_activeSource == 3) {
+        params.empty_title = "NO RECENT MEDIA";
+        params.empty_hint = "Media you play will appear here";
+    } else if (m_isSearching) {
+        params.empty_title = "NO MATCHES FOUND";
+        params.empty_hint = "Try a different search keyword";
+    } else {
         params.empty_title = "FOLDER IS EMPTY";
         params.empty_hint = "No supported media files found";
     }
@@ -590,7 +796,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     params.sidebar_index = m_sidebarIndex;
     params.active_source = m_activeSource;
 
-    int totalCount = static_cast<int>(m_filteredIndices.size());
+    int totalCount = static_cast<int>(m_items.size());
     params.total_count = totalCount;
     params.is_empty = (totalCount == 0);
 
@@ -618,152 +824,110 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
 
     for (int i = 0; i < params.row_count; ++i) {
         int idx = m_scrollOffset + i;
-        size_t realIdx = m_filteredIndices[idx];
-        const auto* entry = browser->getEntry(realIdx);
-        if (entry) {
-            params.rows[i].name = entry->name.c_str();
-            params.rows[i].badge = browser->getFileCategoryLabel(entry->category);
-            params.rows[i].is_focused = (m_selectedIndex == idx);
-            params.rows[i].progress = -1;
-            std::string fullPath = browser->getFullPath(realIdx);
-            params.rows[i].is_favorite = favorites_is_favorite(fullPath.c_str());
+        const auto& item = m_items[idx];
+        params.rows[i].name = item.name.c_str();
+        params.rows[i].badge = item.badge.c_str();
+        params.rows[i].is_focused = (m_selectedIndex == idx);
+        params.rows[i].progress = item.progress;
+        params.rows[i].is_favorite = item.isFavorite;
+        params.rows[i].icon_path = item.iconPath.c_str();
+        params.rows[i].detail = item.detail.c_str();
 
-            const char* iconPath = "../icons/icon_about_support.png";
-            if (entry->category == FileCategory::Folder) {
-                iconPath = "../icons/icon_folder.png";
-            } else if (entry->category == FileCategory::Video) {
-                iconPath = "../icons/icon_resume.png";
-            } else if (entry->category == FileCategory::Audio) {
-                iconPath = "../icons/icon_subtitles.png";
-            } else if (entry->category == FileCategory::Image) {
-                iconPath = "../icons/icon_palette.png";
-            }
-            if (!isSearching && params.at_root) {
-                iconPath = "../icons/icon_browse_usb.png";
-            }
-            params.rows[i].icon_path = iconPath;
-
-            if (entry->category == FileCategory::Folder) {
-                std::snprintf(m_rowDetails[i], sizeof(m_rowDetails[i]), "Folder");
-            } else {
-                struct stat st;
-                if (!fullPath.empty() && stat(fullPath.c_str(), &st) == 0) {
-                    double sz = static_cast<double>(st.st_size);
-                    const char* unit = "B";
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
-                    std::snprintf(m_rowDetails[i], sizeof(m_rowDetails[i]), "%.2f %s", sz, unit);
-                } else {
-                    std::snprintf(m_rowDetails[i], sizeof(m_rowDetails[i]), "Media File");
-                }
-            }
-            params.rows[i].detail = m_rowDetails[i];
-
-            // Duration if cached metadata matches
-            if (m_cachedMetadata.filePath == fullPath && m_cachedMetadata.durationSeconds > 0.0) {
-                int dur = static_cast<int>(m_cachedMetadata.durationSeconds);
-                int h = dur / 3600;
-                int m = (dur % 3600) / 60;
-                int s = dur % 60;
-                if (h > 0) {
-                    std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%d:%02d:%02d", h, m, s);
-                } else {
-                    std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%02d:%02d", m, s);
-                }
-                params.rows[i].duration = m_rowDurations[i];
-            } else {
-                m_rowDurations[i][0] = '\0';
-                params.rows[i].duration = nullptr;
-            }
+        if (item.duration > 0.0) {
+            int dur = static_cast<int>(item.duration);
+            int h = dur / 3600;
+            int m = (dur % 3600) / 60;
+            int s = dur % 60;
+            if (h > 0) std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%d:%02d:%02d", h, m, s);
+            else std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%02d:%02d", m, s);
+            params.rows[i].duration = m_rowDurations[i];
+        } else if (m_cachedMetadata.filePath == item.fullPath && m_cachedMetadata.durationSeconds > 0.0) {
+            int dur = static_cast<int>(m_cachedMetadata.durationSeconds);
+            int h = dur / 3600;
+            int m = (dur % 3600) / 60;
+            int s = dur % 60;
+            if (h > 0) std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%d:%02d:%02d", h, m, s);
+            else std::snprintf(m_rowDurations[i], sizeof(m_rowDurations[i]), "%02d:%02d", m, s);
+            params.rows[i].duration = m_rowDurations[i];
+        } else {
+            m_rowDurations[i][0] = '\0';
+            params.rows[i].duration = nullptr;
         }
     }
 
     // Selected item metadata for preview and bottom status strip
     if (m_selectedIndex >= 0 && m_selectedIndex < totalCount) {
-        size_t realIdx = m_filteredIndices[m_selectedIndex];
-        const auto* curEntry = browser->getEntry(realIdx);
-        if (curEntry) {
-            std::string selectedPath = browser->getFullPath(realIdx);
-            std::snprintf(m_insName, sizeof(m_insName), "%s", curEntry->name.c_str());
-            std::snprintf(m_insKind, sizeof(m_insKind), "%s", browser->getFileCategoryLabel(curEntry->category));
+        const auto& curItem = m_items[m_selectedIndex];
+        std::snprintf(m_insName, sizeof(m_insName), "%s", curItem.name.c_str());
+        std::snprintf(m_insKind, sizeof(m_insKind), "%s", curItem.badge.c_str());
 
-            size_t lastDot = curEntry->name.find_last_of('.');
-            if (lastDot != std::string::npos && lastDot + 1 < curEntry->name.size()) {
-                std::string ext = curEntry->name.substr(lastDot + 1);
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::toupper);
-                std::snprintf(m_insExt, sizeof(m_insExt), "%s", ext.c_str());
-            } else {
-                std::snprintf(m_insExt, sizeof(m_insExt), "%s", curEntry->category == FileCategory::Folder ? "DIR" : "FILE");
-            }
-
-            params.ins_name = m_insName;
-            params.ins_kind = m_insKind;
-            params.ins_ext = m_insExt;
-
-            if (coverService) {
-                params.ins_preview = coverService->getBrowserPreviewPixels();
-                params.ins_preview_w = CoverArtService::PreviewWidth;
-                params.ins_preview_h = CoverArtService::PreviewHeight;
-            }
-
-            // Status specifications
-            m_statusRes[0] = '\0';
-            m_statusVCodec[0] = '\0';
-            m_statusACodec[0] = '\0';
-            m_statusDuration[0] = '\0';
-            m_statusSize[0] = '\0';
-
-            if (curEntry->category == FileCategory::Folder) {
-                std::snprintf(m_statusRes, sizeof(m_statusRes), "DIRECTORY");
-            } else {
-                struct stat st;
-                if (!selectedPath.empty() && stat(selectedPath.c_str(), &st) == 0) {
-                    double sz = static_cast<double>(st.st_size);
-                    const char* unit = "B";
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
-                    if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
-                    std::snprintf(m_statusSize, sizeof(m_statusSize), "%.2f %s", sz, unit);
-                }
-
-                if (m_cachedMetadata.filePath == selectedPath) {
-                    if (m_cachedMetadata.width > 0 && m_cachedMetadata.height > 0) {
-                        if (m_cachedMetadata.width >= 3840) {
-                            std::snprintf(m_statusRes, sizeof(m_statusRes), "4K UHD (%dx%d)", m_cachedMetadata.width, m_cachedMetadata.height);
-                        } else if (m_cachedMetadata.width >= 1920) {
-                            std::snprintf(m_statusRes, sizeof(m_statusRes), "1080p FHD (%dx%d)", m_cachedMetadata.width, m_cachedMetadata.height);
-                        } else {
-                            std::snprintf(m_statusRes, sizeof(m_statusRes), "%dx%d", m_cachedMetadata.width, m_cachedMetadata.height);
-                        }
-                    }
-                    if (!m_cachedMetadata.videoCodec.empty() && m_cachedMetadata.videoCodec != "Unknown") {
-                        std::snprintf(m_statusVCodec, sizeof(m_statusVCodec), "%s", m_cachedMetadata.videoCodec.c_str());
-                    }
-                    if (!m_cachedMetadata.audioCodec.empty() && m_cachedMetadata.audioCodec != "Unknown") {
-                        std::snprintf(m_statusACodec, sizeof(m_statusACodec), "%s", m_cachedMetadata.audioCodec.c_str());
-                    }
-                    if (m_cachedMetadata.durationSeconds > 0.0) {
-                        int dur = static_cast<int>(m_cachedMetadata.durationSeconds);
-                        int h = dur / 3600;
-                        int m = (dur % 3600) / 60;
-                        int s = dur % 60;
-                        if (h > 0) {
-                            std::snprintf(m_statusDuration, sizeof(m_statusDuration), "%d:%02d:%02d", h, m, s);
-                        } else {
-                            std::snprintf(m_statusDuration, sizeof(m_statusDuration), "%02d:%02d", m, s);
-                        }
-                    }
-                }
-            }
-
-            params.status_res = m_statusRes[0] ? m_statusRes : nullptr;
-            params.status_vcodec = m_statusVCodec[0] ? m_statusVCodec : nullptr;
-            params.status_acodec = m_statusACodec[0] ? m_statusACodec : nullptr;
-            params.status_duration = m_statusDuration[0] ? m_statusDuration : nullptr;
-            params.status_size = m_statusSize[0] ? m_statusSize : nullptr;
-            params.ins_probing = (m_browserFsm.getCurrentState() == BrowserScreenState::ProbingMedia) ? 1 : 0;
+        size_t lastDot = curItem.name.find_last_of('.');
+        if (lastDot != std::string::npos && lastDot + 1 < curItem.name.size()) {
+            std::string ext = curItem.name.substr(lastDot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::toupper);
+            std::snprintf(m_insExt, sizeof(m_insExt), "%s", ext.c_str());
+        } else {
+            std::snprintf(m_insExt, sizeof(m_insExt), "%s", curItem.category == FileCategory::Folder ? "DIR" : "FILE");
         }
+
+        params.ins_name = m_insName;
+        params.ins_kind = m_insKind;
+        params.ins_ext = m_insExt;
+
+        // Technical specs for bottom status strip
+        if (m_cachedMetadata.filePath == curItem.fullPath) {
+            if (m_cachedMetadata.width > 0 && m_cachedMetadata.height > 0) {
+                if (m_cachedMetadata.width >= 3840 || m_cachedMetadata.height >= 2160) {
+                    std::snprintf(m_statusRes, sizeof(m_statusRes), "4K UHD (%dx%d)", m_cachedMetadata.width, m_cachedMetadata.height);
+                } else if (m_cachedMetadata.width >= 1920 || m_cachedMetadata.height >= 1080) {
+                    std::snprintf(m_statusRes, sizeof(m_statusRes), "1080p (%dx%d)", m_cachedMetadata.width, m_cachedMetadata.height);
+                } else if (m_cachedMetadata.width >= 1280 || m_cachedMetadata.height >= 720) {
+                    std::snprintf(m_statusRes, sizeof(m_statusRes), "720p (%dx%d)", m_cachedMetadata.width, m_cachedMetadata.height);
+                } else {
+                    std::snprintf(m_statusRes, sizeof(m_statusRes), "%dx%d", m_cachedMetadata.width, m_cachedMetadata.height);
+                }
+                params.status_res = m_statusRes;
+            }
+
+            if (!m_cachedMetadata.videoCodec.empty()) {
+                std::snprintf(m_statusVCodec, sizeof(m_statusVCodec), "%s", m_cachedMetadata.videoCodec.c_str());
+                params.status_vcodec = m_statusVCodec;
+            }
+            if (!m_cachedMetadata.audioCodec.empty()) {
+                std::snprintf(m_statusACodec, sizeof(m_statusACodec), "%s", m_cachedMetadata.audioCodec.c_str());
+                params.status_acodec = m_statusACodec;
+            }
+
+            double totalDur = (m_cachedMetadata.durationSeconds > 0.0) ? m_cachedMetadata.durationSeconds : curItem.duration;
+            if (totalDur > 0.0) {
+                int dur = static_cast<int>(totalDur);
+                int h = dur / 3600;
+                int m = (dur % 3600) / 60;
+                int s = dur % 60;
+                if (h > 0) std::snprintf(m_statusDuration, sizeof(m_statusDuration), "%02d:%02d:%02d", h, m, s);
+                else std::snprintf(m_statusDuration, sizeof(m_statusDuration), "%02d:%02d", m, s);
+                params.status_duration = m_statusDuration;
+            }
+        }
+
+        struct stat st;
+        if (!curItem.fullPath.empty() && stat(curItem.fullPath.c_str(), &st) == 0 && curItem.category != FileCategory::Folder) {
+            double sz = static_cast<double>(st.st_size);
+            const char* unit = "B";
+            if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
+            if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
+            if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
+            std::snprintf(m_statusSize, sizeof(m_statusSize), "%.2f %s", sz, unit);
+            params.status_size = m_statusSize;
+        }
+
+        if (coverService) {
+            params.ins_preview = coverService->getBrowserPreviewPixels();
+            params.ins_preview_w = ICoverArtService::PreviewWidth;
+            params.ins_preview_h = ICoverArtService::PreviewHeight;
+        }
+
+        params.ins_probing = (m_settleMs >= 200.0 && m_cachedMetadata.filePath != curItem.fullPath && curItem.category != FileCategory::Folder) ? 1 : 0;
     }
 
     evo_rmlui_update_browser(&params);
