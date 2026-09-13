@@ -48,7 +48,11 @@ void evo_gl_read_default_fb(uint32_t *bgra, int w, int h)
 
 void evo_gl_blit_bgra(const uint32_t *fb, int w, int h)
 {
+#if defined(EVO_AGC_DEVICE)
+    evo_agc_composite_bgra(fb, w, h, 1);
+#else
     (void)fb; (void)w; (void)h;
+#endif
 }
 
 void evo_gl_blit_yuv(const uint8_t *y,  int y_pitch,

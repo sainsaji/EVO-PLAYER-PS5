@@ -383,6 +383,13 @@ int Application::run() {
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
+#if defined(EVO_AGC_DEVICE)
+        static bool s_was_player = false;
+        if (isPlayer != s_was_player) {
+            evo_agc_runtime_set_player_mode(isPlayer ? 1 : 0);
+            s_was_player = isPlayer;
+        }
+#endif
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
         int glActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_gl_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;
@@ -393,7 +400,7 @@ int Application::run() {
             evo_boot_log_flush();
         }
 
-        if (glActive) {
+        if (glActive && !isPlayer) {
             if (frame < 5) {
                 evo_bt("frame %d: frame_begin", frame);
                 evo_boot_log_flush();
@@ -407,17 +414,44 @@ int Application::run() {
                 evo_bt("frame %d: frame_begin done", frame);
                 evo_boot_log_flush();
             }
-            if (m_glScratch && !isPlayer) {
+            if (m_glScratch) {
                 std::memset(m_glScratch, 0, static_cast<size_t>(DisplayWidth) * DisplayHeight * 4u);
             }
         }
 
         // 4. Video Quad blit & Screen rendering
+        bool swap = false;
+        static int64_t s_last_pts = -1;
+        if (!isPlayer) {
+            s_last_pts = -1;
+        }
+
         if (isPlayer) {
             pp_gl_nv12_frame f;
             std::memset(&f, 0, sizeof(f));
             int have = (pp_playback_get_nv12(&g_pp_pb, &f) && f.ready);
-            if (have) {
+            int64_t current_pts = g_pp_pb.display_pts_us;
+            bool new_frame = (current_pts != s_last_pts);
+
+            auto playerScreen = dynamic_cast<PlayerScreen*>(m_screenManager->getCurrentScreen());
+            bool overlay_active = playerScreen && playerScreen->hasActiveOverlay();
+            bool is_paused = m_playbackController && m_playbackController->isPaused();
+            bool is_scrubbing = m_playbackController && m_playbackController->isScrubbing();
+            bool toast_visible = evo_toast_visible();
+
+            bool should_render = (have && new_frame) || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding;
+
+            static int s_player_render_log = 10;
+            if (s_player_render_log > 0 && new_frame && have) {
+                s_player_render_log--;
+                evo_boot_log("app video blit: have=%d ready=%d new_frame=%d pts=%lld y=%p uv=%p %ux%u (coded %ux%u)",
+                             have, f.ready, new_frame, (long long)current_pts,
+                             (void*)f.y, (void*)f.uv, f.disp_w, f.disp_h, f.coded_w, f.coded_h);
+                evo_boot_log_flush();
+            }
+
+            if (should_render && have) {
+                s_last_pts = current_pts;
                 int view_mode = 0;
                 if (m_playbackController) {
                     view_mode = static_cast<int>(m_playbackController->getViewMode());
@@ -437,33 +471,28 @@ int Application::run() {
                                 static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                 view_mode, f.ten_bit, f.color_trc);
 #endif
+                swap = true;
             }
-        }
 
-        if (m_glScratch) {
-            if (frame < 5) {
-                evo_bt("frame %d: screenManager render begin", frame);
-                evo_boot_log_flush();
+            if (m_glScratch && should_render) {
+                m_screenManager->render(m_glScratch, DisplayWidth, DisplayHeight);
+                swap = true;
             }
-            m_screenManager->render(m_glScratch, DisplayWidth, DisplayHeight);
-            if (frame < 5) {
-                evo_bt("frame %d: screenManager render done", frame);
-                evo_boot_log_flush();
-            }
-        }
-
-        // 5. Present if glActive
-        if (glActive && m_glScratch) {
-            bool swap = true;
-            if (isPlayer) {
-#if !defined(EVO_AGC_DEVICE)
-                if (evo_rmlui_gl_blit_mode()) {
-                    evo_gl_blit_bgra(m_glScratch, DisplayWidth, DisplayHeight);
-                } else {
-                    evo_gl_composite_bgra(m_glScratch, DisplayWidth, DisplayHeight, 1);
+        } else {
+            if (m_glScratch) {
+                if (frame < 5) {
+                    evo_bt("frame %d: screenManager render begin", frame);
+                    evo_boot_log_flush();
                 }
-#endif
-            } else {
+                m_screenManager->render(m_glScratch, DisplayWidth, DisplayHeight);
+                if (frame < 5) {
+                    evo_bt("frame %d: screenManager render done", frame);
+                    evo_boot_log_flush();
+                }
+            }
+
+            // 5. Present if glActive
+            if (glActive && m_glScratch) {
                 g_ps5_video_out_hdr = 0;
                 if (evo_rmlui_gl_blit_mode()) {
                     if (frame < 5) {
@@ -475,32 +504,46 @@ int Application::run() {
                         evo_bt("frame %d: evo_gl_blit_bgra done", frame);
                         evo_boot_log_flush();
                     }
+                    swap = true;
                 } else {
                     swap = evo_rmlui_gl_consume_drew();
                 }
             }
+        }
 
-            if (swap) {
-                if (frame < 5) {
-                    evo_bt("frame %d: present begin", frame);
-                    evo_boot_log_flush();
-                }
+        // 5. Present if swap requested
+        if (swap && glActive) {
+            if (frame < 5) {
+                evo_bt("frame %d: present begin", frame);
+                evo_boot_log_flush();
+            }
+            static int s_present_player_log = 10;
+            if (isPlayer && s_present_player_log > 0) {
+                s_present_player_log--;
+                evo_boot_log("app present begin isPlayer=1");
+                evo_boot_log_flush();
+            }
 #if defined(EVO_AGC_DEVICE)
-                evo_agc_runtime_present();
-                evo_rmlui_gl_end_frame();
+            evo_agc_runtime_present();
+            evo_rmlui_gl_end_frame();
 #else
-                evo_gl_context_present();
-                evo_rmlui_gl_end_frame();
+            evo_gl_context_present();
+            evo_rmlui_gl_end_frame();
 #endif
-                if (frame < 5) {
-                    evo_bt("frame %d: present done", frame);
-                    evo_boot_log_flush();
-                }
+            if (isPlayer && s_present_player_log >= 0) {
+                evo_boot_log("app present done isPlayer=1");
+                evo_boot_log_flush();
+            }
+            if (frame < 5) {
+                evo_bt("frame %d: present done", frame);
+                evo_boot_log_flush();
             }
         }
 
         evo_perf_monitor_tick(0.0);
-        usleep(isPlayer ? 3000 : 2000);
+        if (!swap) {
+            usleep(1000);
+        }
     }
 
     shutdown();

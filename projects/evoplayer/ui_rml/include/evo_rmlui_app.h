@@ -474,17 +474,17 @@ struct EvoThemeColors {
      * host uiview render, which never pushes one at all.
      */
     std::string name = "MIDNIGHT";
-    uint32_t bg_top = 0xFF160B06;
-    uint32_t bg_bottom = 0xFF090402;
-    uint32_t surface = 0xEB2E1B12;
-    uint32_t surface_sel = 0xF54C2E1B;
-    uint32_t border = 0xAA553B2A;
-    uint32_t border_sel = 0xDCFFCD00;
-    uint32_t accent = 0xFFFFCD00;
-    uint32_t accent_soft = 0x3CFFA800;
-    uint32_t accent_alt = 0xFFFF5C7A;
-    uint32_t text_primary = 0xFFFFF3EC;
-    uint32_t text_secondary = 0xFFCCB29F;
+    uint32_t bg_top = 0xFF160D08;
+    uint32_t bg_bottom = 0xFF0A0503;
+    uint32_t surface = 0xF02C1A10;
+    uint32_t surface_sel = 0xFA3A2216;
+    uint32_t border = 0x33B47D5A;
+    uint32_t border_sel = 0xFF00CDFF;
+    uint32_t accent = 0xFF00CDFF;
+    uint32_t accent_soft = 0x3200CDFF;
+    uint32_t accent_alt = 0xFFFFCD00;
+    uint32_t text_primary = 0xFFFFF4EE;
+    uint32_t text_secondary = 0xFFD0B6A3;
     uint32_t text_muted = 0xFF8C715E;
 };
 

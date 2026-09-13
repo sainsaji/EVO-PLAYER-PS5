@@ -36,16 +36,21 @@ div, span, p {
 
 /* =============================== Header =============================== */
 
+/* =============================== Header =============================== */
+
 #browser-header {
     position: absolute;
     left: 0;
-    top: 96px;
+    top: 72px;
     width: 1704px;
-    height: 52px;
+    height: 88px;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
+    border-bottom-width: 1px;
+    border-bottom-color: #5a7db433;
+    padding-bottom: 18px;
 }
 
 #browser-header-left {
@@ -54,12 +59,22 @@ div, span, p {
     align-items: center;
 }
 
-#browser-indicator {
-    width: 5px;
-    height: 62px;
-    background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
+#browser-badge {
+    width: 68px;
+    height: 68px;
+    border-radius: 18px;
+    background-color: #00cdff1a;
+    border-width: 1px;
+    border-color: #00cdff4d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 22px;
+}
+
+#browser-badge-icon {
+    width: 34px;
+    height: 34px;
 }
 
 #browser-header-titles {
@@ -67,23 +82,35 @@ div, span, p {
     flex-direction: column;
 }
 
-#browser-title {
-    display: block;
-    font-size: 43px;
-    font-weight: bold;
-    color: #ffffff;
-    letter-spacing: 0.5px;
+#browser-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
 }
 
-/* The atlas carries '/', so the path is shown as it really is rather than
- * transliterated into '>' the way it once was. */
+#browser-title {
+    display: block;
+    font-size: 28px;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 3px;
+}
+
+#browser-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 4px;
+    background-color: #3ddc84;
+}
+
 #browser-path {
     display: block;
-    font-size: 18px;
+    font-size: 14px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    color: #a3b6d0;
+    letter-spacing: 2px;
+    margin-top: 5px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -92,29 +119,25 @@ div, span, p {
 
 #browser-counter {
     display: block;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    color: #5e718c;
+    letter-spacing: 2px;
+    background-color: #1420368c;
+    border-width: 1px;
+    border-color: #5a7db433;
+    border-radius: 10px;
+    padding: 8px 18px;
 }
 
 /* ============================== File list ============================== */
 
-/* 1116 for the list, 24 of gutter, 564 for the inspector = 1704.
- *
- * Height is 8 rows at the 94px pitch (84 + 10px margin), minus the last
- * row's trailing margin. Unbounded, the 12-row DOM pool (kBrowserRows, for
- * folders with a long page) ran its ninth-and-later rows straight under the
- * footer hint row instead of stopping short of it; the C side already caps
- * how many rows it actually populates, but nothing here enforced the same
- * limit, so it only took a longer folder listing to show it. */
 #browser-list {
     position: absolute;
     left: 0;
-    top: 222px;
+    top: 200px;
     width: 1116px;
-    height: 742px;
+    height: 750px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -123,20 +146,20 @@ div, span, p {
 .brow {
     position: relative;
     width: 1116px;
-    height: 84px;
+    height: 80px;
     flex-shrink: 0;
-    background-color: #121b2eeb;
+    background-color: #101a2ceb;
     border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 18px;
+    border-color: #5a7db433;
+    border-radius: 16px;
     margin-bottom: 10px;
-    padding-left: 26px;
-    padding-right: 26px;
+    padding-left: 20px;
+    padding-right: 20px;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    transition: transform 0.16s cubic-out, border-color 0.16s cubic-out, background-color 0.16s cubic-out;
+    transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .brow-focused {
@@ -153,23 +176,27 @@ div, span, p {
 }
 
 .brow-icon-box {
-    width: 54px;
-    height: 54px;
-    background-color: #131c2e;
+    width: 52px;
+    height: 52px;
+    background-color: #00cdff14;
+    border-width: 1px;
+    border-color: #00cdff33;
     border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
     margin-right: 16px;
+    transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
 .brow-focused .brow-icon-box {
-    background-color: #1a2a47;
+    background-color: #ffcd001f;
+    border-color: #ffcd0073;
 }
 
 .brow-icon {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
@@ -181,9 +208,9 @@ div, span, p {
 
 .brow-name {
     display: block;
-    font-size: 28px;
+    font-size: 22px;
     font-weight: bold;
-    color: #ecf3ff;
+    color: #eef4ff;
     letter-spacing: 0.3px;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -192,14 +219,18 @@ div, span, p {
 
 .brow-detail {
     display: block;
-    font-size: 17px;
-    font-weight: normal;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
+    font-size: 13.5px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 1.2px;
+    margin-top: 3px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+.brow-focused .brow-detail {
+    color: #ffcd00;
 }
 
 .brow-right {
@@ -216,38 +247,40 @@ div, span, p {
 }
 
 .brow-badge {
-    background-color: #131d2e;
+    background-color: #060c16d2;
     border-width: 1px;
-    border-color: #243550;
+    border-color: #7896c856;
     border-radius: 10px;
-    padding: 7px 14px;
-    font-size: 15px;
+    padding: 5px 12px;
+    font-size: 11.5px;
     font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
+    color: #cfe0ff;
+    letter-spacing: 1.4px;
 }
 
-/*
- * Resume position, as an underline on the row's bottom edge rather than a
- * floating bar. Inset above the edge it ran straight through the detail
- * line — a 62 px row has no spare band between centred two-line text and
- * its own border. The row clips, so this follows the rounded corners.
- */
+.brow-focused .brow-badge {
+    background-color: #ffcd0029;
+    border-color: #ffcd00;
+    color: #ffcd00;
+}
+
 .brow-track {
     display: none;
     position: absolute;
     left: 0;
     bottom: 0;
     width: 1116px;
-    height: 3px;
-    background-color: #2a3b5599;
+    height: 4px;
+    border-radius: 2px;
+    background-color: #7896c838;
 }
 
 .brow-fill {
     display: block;
     width: 0%;
-    height: 3px;
-    background-color: #00cdff;
+    height: 4px;
+    border-radius: 2px;
+    background-color: #ffcd00;
 }
 
 /* ============================= Empty state ============================= */
@@ -303,12 +336,12 @@ div, span, p {
 #inspector {
     position: absolute;
     left: 1140px;
-    top: 222px;
+    top: 200px;
     width: 564px;
-    height: 714px;
-    background-color: #10192bf0;
+    height: 750px;
+    background-color: #141f348c;
     border-width: 1px;
-    border-color: #2a3b5588;
+    border-color: #5a7db433;
     border-radius: 18px;
     padding: 20px;
     transition: transform 0.2s cubic-out, opacity 0.2s cubic-out;
@@ -320,10 +353,10 @@ div, span, p {
     position: relative;
     width: 524px;
     height: 295px;
-    background-color: #0a1120;
+    background-color: #0a101cd9;
     border-radius: 14px;
     border-width: 1px;
-    border-color: #2a3b5566;
+    border-color: #00cdff29;
     overflow: hidden;
 }
 
@@ -336,14 +369,34 @@ div, span, p {
     border-radius: 12px;
 }
 
+#ins-preview-play {
+    position: absolute;
+    left: 236px;
+    top: 121px;
+    width: 52px;
+    height: 52px;
+    border-radius: 26px;
+    background-color: #060c16b8;
+    border-width: 1px;
+    border-color: #ffffff38;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+#ins-preview-play-icon {
+    width: 24px;
+    height: 24px;
+}
+
 #ins-preview-empty {
     position: absolute;
     left: 0;
     top: 136px;
     width: 524px;
-    font-size: 16px;
+    font-size: 13px;
     font-weight: bold;
-    color: #3d4c63;
+    color: #5e718c;
     letter-spacing: 2px;
     text-align: center;
 }
@@ -351,25 +404,27 @@ div, span, p {
 #ins-preview-badge {
     display: none;
     position: absolute;
-    right: 10px;
-    bottom: 10px;
-    background-color: #020409d7;
-    border-radius: 9px;
-    padding: 6px 12px;
-    font-size: 16px;
+    left: 14px;
+    top: 14px;
+    background-color: #060c16d2;
+    border-width: 1px;
+    border-color: #7896c856;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 11px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.5px;
+    color: #cfe0ff;
+    letter-spacing: 1.6px;
 }
 
 #ins-name {
     display: block;
     width: 524px;
-    font-size: 26px;
+    font-size: 20px;
     font-weight: bold;
-    color: #ecf3ff;
+    color: #ffffff;
     letter-spacing: 0.3px;
-    margin-top: 20px;
+    margin-top: 16px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -380,68 +435,61 @@ div, span, p {
     flex-direction: row;
     align-items: center;
     gap: 10px;
-    margin-top: 10px;
+    margin-top: 8px;
     margin-bottom: 6px;
 }
 
 #ins-kind {
-    font-size: 15px;
+    font-size: 12px;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 1.5px;
+    letter-spacing: 2.2px;
 }
 
 #ins-ext {
-    background-color: #131d2e;
+    background-color: #060c16d2;
     border-width: 1px;
-    border-color: #243550;
-    border-radius: 9px;
-    padding: 5px 11px;
-    font-size: 15px;
+    border-color: #7896c856;
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 11px;
     font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
+    color: #cfe0ff;
+    letter-spacing: 1px;
 }
 
 #ins-props {
     display: flex;
     flex-direction: column;
     width: 524px;
-    margin-top: 10px;
+    margin-top: 8px;
 }
 
-/*
- * 34, not 40. The inspector shows up to nine properties under a 302 px
- * preview, and at 40 the ninth row — AUDIO, on any file with both a video
- * and an audio stream — landed past the panel.
- */
 .ins-prop {
     width: 524px;
-    height: 42px;
+    height: 38px;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
     border-bottom-width: 1px;
-    border-bottom-color: #1b2740;
+    border-bottom-color: #5a7db41a;
 }
 
 .ins-key {
-    font-size: 15px;
+    font-size: 12.5px;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
+    letter-spacing: 1.4px;
     flex-shrink: 0;
     margin-right: 16px;
 }
 
-/* Bounded so a long value (codec strings, "Dolby Digital (E-AC-3)") truncates
- * instead of colliding with the key or wrapping past the row height. */
 .ins-val {
-    width: 320px;
-    font-size: 17px;
+    width: 340px;
+    font-size: 13px;
     font-weight: bold;
-    color: #ecf3ff;
+    color: #eef4ff;
     letter-spacing: 0.3px;
     text-align: right;
     white-space: nowrap;
@@ -449,14 +497,12 @@ div, span, p {
     overflow: hidden;
 }
 
-/* Codecs and duration need avformat, which takes long enough to be felt, so
- * the probe is debounced and this says so rather than showing a blank panel. */
 #ins-probing {
     display: none;
-    font-size: 15px;
+    font-size: 13px;
     font-weight: bold;
-    color: #5e718c;
-    letter-spacing: 1.5px;
+    color: #00cdff;
+    letter-spacing: 2px;
     margin-top: 14px;
 }
 
@@ -477,44 +523,42 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
-/* Wrapper badge for the four face-button glyphs (Kenney's flat cutout art
- * carries its own DualSense colour-coding but no backdrop) — reproduces the
- * disc that used to be baked into the PNG. D-pad/stick glyphs never had one,
- * so they keep using .footer-glyph directly. */
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 19px;
+    background-color: #14223ab8;
+    border-width: 1px;
+    border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1.8px;
 }
 
 #browser-footer-version {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #4b586c;
     letter-spacing: 1px;

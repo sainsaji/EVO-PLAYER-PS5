@@ -40,10 +40,14 @@ div, span, p {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-top: 96px;
-    margin-bottom: 42px;
+    align-items: center;
+    margin-top: 72px;
+    margin-bottom: 36px;
     width: 1704px;
+    height: 88px;
+    border-bottom-width: 1px;
+    border-bottom-color: #5a7db433;
+    padding-bottom: 18px;
 }
 
 #header-left {
@@ -52,12 +56,22 @@ div, span, p {
     align-items: center;
 }
 
-#header-indicator {
-    width: 5px;
-    height: 62px;
-    background-color: #0070d1;
-    border-radius: 2px;
-    margin-right: 18px;
+#settings-badge {
+    width: 68px;
+    height: 68px;
+    border-radius: 18px;
+    background-color: #00cdff1a;
+    border-width: 1px;
+    border-color: #00cdff4d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 22px;
+}
+
+#settings-badge-icon {
+    width: 34px;
+    height: 34px;
 }
 
 #header-titles {
@@ -65,27 +79,45 @@ div, span, p {
     flex-direction: column;
 }
 
+#settings-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+}
+
 #settings-title {
-    font-size: 43px;
+    font-size: 28px;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 3px;
+}
+
+#settings-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 4px;
+    background-color: #3ddc84;
 }
 
 #settings-subtitle {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    color: #a3b6d0;
+    letter-spacing: 2px;
+    margin-top: 5px;
 }
 
 #settings-counter {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    color: #5e718c;
+    letter-spacing: 2px;
+    background-color: #1420368c;
+    border-width: 1px;
+    border-color: #5a7db433;
+    border-radius: 10px;
+    padding: 8px 18px;
 }
 
 /* Settings List */
@@ -97,19 +129,18 @@ div, span, p {
 
 .setting-row {
     width: 1704px;
-    height: 92px;
-    background-color: #0c1322;
-
+    height: 84px;
+    background-color: #101a2ceb;
     border-width: 1px;
-    border-color: #172338;
-    border-radius: 20px;
+    border-color: #5a7db429;
+    border-radius: 16px;
     margin-bottom: 12px;
-    padding: 0 32px;
+    padding: 0 24px;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    transition: transform 0.16s cubic-out, border-color 0.16s cubic-out, background-color 0.16s cubic-out;
+    transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .row-focused {
@@ -126,23 +157,27 @@ div, span, p {
 }
 
 .row-icon-box {
-    width: 60px;
-    height: 60px;
-    background-color: #131c2e;
-    border-radius: 15px;
+    width: 52px;
+    height: 52px;
+    background-color: #00cdff14;
+    border-width: 1px;
+    border-color: #00cdff33;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 20px;
+    margin-right: 18px;
+    transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
 .row-focused .row-icon-box {
-    background-color: #1a2a47;
+    background-color: #ffcd001f;
+    border-color: #ffcd0073;
 }
 
 .row-icon {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
@@ -155,24 +190,28 @@ div, span, p {
 }
 
 .row-title {
-    font-size: 33px;
+    font-size: 22px;
     font-weight: bold;
-    color: #ffffff;
-    letter-spacing: 0.5px;
+    color: #eef4ff;
+    letter-spacing: 0.4px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
 }
 
 .row-detail {
-    font-size: 18px;
-    font-weight: normal;
-    color: #94a3b8;
-    letter-spacing: 0.5px;
+    font-size: 13.5px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6px;
     margin-top: 4px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+.row-focused .row-detail {
+    color: #ffcd00;
 }
 
 .row-right {
@@ -184,25 +223,25 @@ div, span, p {
 }
 
 .row-badge {
-    background-color: #131d2e;
+    background-color: #0a101c99;
     border-width: 1px;
-    border-color: #243550;
+    border-color: #5a7db433;
     border-radius: 10px;
-    padding: 8px 16px;
-    font-size: 15px;
+    padding: 7px 18px;
+    font-size: 13px;
     font-weight: bold;
-    color: #94a3b8;
-    letter-spacing: 0.5px;
-    margin-right: 18px;
+    color: #7c8ba3;
+    letter-spacing: 1.4px;
+    margin-right: 16px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
 }
 
 .row-focused .row-badge {
-    background-color: #0369a1;
-    border-color: #38bdf8;
-    color: #ffffff;
+    background-color: #ffcd0029;
+    border-color: #ffcd00;
+    color: #ffcd00;
 }
 
 .row-chevron {
@@ -231,45 +270,46 @@ div, span, p {
     gap: 32px;
 }
 
-
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 19px;
+    background-color: #14223ab8;
+    border-width: 1px;
+    border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1.8px;
 }
 
 #footer-version {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #4b586c;
     letter-spacing: 1px;

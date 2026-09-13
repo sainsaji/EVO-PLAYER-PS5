@@ -291,15 +291,20 @@ int evo_agc_writer_set_user_data_ps(SceAgcCommandBuffer *cb, const uint32_t *val
     return 0;
 }
 
-int evo_agc_writer_draw_index(SceAgcCommandBuffer *cb, uint32_t index_count, const uint16_t *gpu_indices)
+int evo_agc_writer_draw_index_modifier(SceAgcCommandBuffer *cb, uint32_t index_count, const uint16_t *gpu_indices, uint64_t modifier)
 {
     if (!cb || !gpu_indices || index_count == 0u)
         return -1;
     sceAgcDcbSetIndexSize(cb, 0, 0); /* 16-bit indices */
     sceAgcDcbSetIndexBuffer(cb, (void *)gpu_indices);
     sceAgcDcbSetIndexCount(cb, index_count);
-    sceAgcDcbDrawIndex(cb, index_count, (void *)gpu_indices, 0);
+    sceAgcDcbDrawIndex(cb, index_count, (void *)gpu_indices, modifier);
     return 0;
+}
+
+int evo_agc_writer_draw_index(SceAgcCommandBuffer *cb, uint32_t index_count, const uint16_t *gpu_indices)
+{
+    return evo_agc_writer_draw_index_modifier(cb, index_count, gpu_indices, 0);
 }
 
 int evo_agc_writer_draw_auto(SceAgcCommandBuffer *cb, uint32_t vertex_count)

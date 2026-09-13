@@ -72,7 +72,7 @@ for b in output/uiview/rml_*.bmp; do
     s="$(basename "${b%.bmp}")"
     python3 tools/shot.py png "$b" "output/uiview/$s.png"
     # shot.py diff reads BMP only - keep the CPU BMP for the parity pass.
-    if [[ "$GL_PARITY" == "1" ]]; then mv "$b" "output/uiview/${s}.cpu.bmp"; elif [[ "$KEEP_BMP" != "1" ]]; then rm -f "$b"; fi
+    if [[ "$GL_PARITY" == "1" ]]; then mv "$b" "output/uiview/${s}.cpu.bmp"; elif [[ "${KEEP_BMP:-0}" != "1" ]]; then rm -f "$b"; fi
     echo "  ok -> output/uiview/$s.png"
 done
 

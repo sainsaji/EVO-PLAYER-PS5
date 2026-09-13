@@ -247,6 +247,8 @@ bool EvoRmlApp::Initialize(int width, int height) {
     }
 #endif
 #ifdef EVO_AGC_DEVICE
+    evo_log("RmlUi AGC: EVO_AGC_DEVICE compiled in, is_active=%d", evo_agc_runtime_is_active());
+    evo_log_flush();
     if (evo_agc_runtime_is_active()) {
         int w = 0, h = 0;
         evo_agc_runtime_get_size(&w, &h);
@@ -770,7 +772,13 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
     }
 
     Rml::Element* el_mark = m_launch_doc->GetElementById("brand-mark");
-    if (el_mark) el_mark->SetProperty("background-color", accent_bg);
+    if (el_mark) {
+        el_mark->SetProperty("background-color", "#ffcd001a");
+        el_mark->SetProperty("border-color", "#ffcd0038");
+    }
+
+    Rml::Element* el_logo = m_launch_doc->GetElementById("brand-logo");
+    if (el_logo) SetImageColor(el_logo, accent);
 
     Rml::Element* el_name = m_launch_doc->GetElementById("brand-name");
     if (el_name) el_name->SetProperty("color", text_1);
@@ -860,19 +868,25 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
         } else {
             el_chip->SetProperty("display", "inline-flex");
             if (state.hero_focused) {
-                el_chip->SetProperty("background-color", accent);
-                el_chip->SetProperty("border-color", "#ffffff");
+                el_chip->SetProperty("background-color", "#1e2e4af5");
+                el_chip->SetProperty("border-color", to_hex_rgb(m_theme.accent_alt));
+                el_chip->SetProperty("border-width", "2px");
             } else {
-                el_chip->SetProperty("background-color", surface);
-                el_chip->SetProperty("border-color", border);
+                el_chip->SetProperty("background-color", "#16243af2");
+                el_chip->SetProperty("border-color", "#00cdff47");
+                el_chip->SetProperty("border-width", "1.5px");
             }
         }
     }
     if (el_clabel) {
         el_clabel->SetInnerRML(state.hero_action);
         el_clabel->SetProperty("color", state.hero_focused
-                                            ? to_hex_rgb(m_theme.bg_bottom)
+                                            ? "#ffffff"
                                             : text_1);
+    }
+    Rml::Element* el_cglyph = m_launch_doc->GetElementById("hero-chip-glyph");
+    if (el_cglyph) {
+        SetImageColor(el_cglyph, to_hex_rgb(m_theme.accent_alt));
     }
 
     /* ---- shelves ---- */
@@ -986,12 +1000,12 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
         el_tile->SetProperty("display", "block");
         el_tile->SetClass("tile-focused", t.is_focused);
         if (t.is_focused) {
-            el_tile->SetProperty("background-color", surf_sel);
-            el_tile->SetProperty("border-color", accent);
+            el_tile->SetProperty("background-color", "#16223a");
+            el_tile->SetProperty("border-color", to_hex_rgb(m_theme.accent_alt));
             el_tile->SetProperty("border-width", "2px");
         } else {
-            el_tile->SetProperty("background-color", surface);
-            el_tile->SetProperty("border-color", border);
+            el_tile->SetProperty("background-color", "#0f1828eb");
+            el_tile->SetProperty("border-color", "#5a7db433");
             el_tile->SetProperty("border-width", "1px");
         }
 
@@ -1004,7 +1018,7 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
             if (!t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
             /* Library slot 3 is the Emby destination - icon_emby.png is a
              * trademark excluded from the icon swap/tint, kept as baked. */
-            if (i != 3) SetImageColor(el_icon, t.is_focused ? accent : text_2);
+            if (i != 3) SetImageColor(el_icon, t.is_focused ? to_hex_rgb(m_theme.accent_alt) : "#9fb2cc");
         }
         if (el_title)  el_title->SetInnerRML(t.title);
         if (el_detail) {
@@ -1246,6 +1260,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     auto el = [&](const std::string& id) { return m_browser_doc->GetElementById(id); };
 
     if (Rml::Element* e = el("browser-indicator")) e->SetProperty("background-color", accent);
+    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, to_hex_rgb(m_theme.accent_alt));
     if (Rml::Element* e = el("browser-title")) e->SetInnerRML(state.title);
     if (Rml::Element* e = el("browser-path")) {
         e->SetInnerRML(state.path);
@@ -1318,7 +1333,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         if (detail) {
             detail->SetProperty("display", r.detail.empty() ? "none" : "block");
             detail->SetInnerRML(r.detail);
-            detail->SetProperty("color", text_2);
+            detail->SetProperty("color", focused ? accent : text_3);
         }
         if (fav) {
             fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
@@ -1331,13 +1346,13 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
                 badge->SetProperty("display", "inline-block");
                 badge->SetInnerRML(r.badge);
                 if (focused) {
-                    badge->SetProperty("background-color", accent);
-                    badge->SetProperty("border-color", "#ffffff");
-                    badge->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
-                } else {
-                    badge->SetProperty("background-color", surf_sel);
-                    badge->SetProperty("border-color", border);
+                    badge->SetProperty("background-color", "#ffcd0029");
+                    badge->SetProperty("border-color", accent);
                     badge->SetProperty("color", accent);
+                } else {
+                    badge->SetProperty("background-color", "#060c16d2");
+                    badge->SetProperty("border-color", "#7896c856");
+                    badge->SetProperty("color", "#cfe0ff");
                 }
             }
         }
@@ -1371,6 +1386,13 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (Rml::Element* e = el("ins-preview-empty"))
         e->SetProperty("display", prev.empty() ? "block" : "none");
 
+    if (Rml::Element* e = el("ins-preview-play")) {
+        e->SetProperty("display", prev.empty() ? "none" : "flex");
+    }
+    if (Rml::Element* e = el("ins-preview-play-icon")) {
+        SetImageColor(e, "#ffffff");
+    }
+
     if (Rml::Element* e = el("ins-preview-badge")) {
         if (state.ins_preview_badge.empty() || prev.empty()) {
             e->SetProperty("display", "none");
@@ -1386,14 +1408,14 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     }
     if (Rml::Element* e = el("ins-kind")) {
         e->SetInnerRML(state.ins_kind);
-        e->SetProperty("color", accent);
+        e->SetProperty("color", to_hex_rgb(m_theme.accent_alt));
     }
     if (Rml::Element* e = el("ins-ext")) {
         e->SetProperty("display", state.ins_ext.empty() ? "none" : "inline-block");
         e->SetInnerRML(state.ins_ext);
-        e->SetProperty("background-color", surf_sel);
-        e->SetProperty("border-color", border);
-        e->SetProperty("color", text_2);
+        e->SetProperty("background-color", "#060c16d2");
+        e->SetProperty("border-color", "#7896c856");
+        e->SetProperty("color", "#cfe0ff");
     }
     if (Rml::Element* e = el("ins-probing"))
         e->SetProperty("display", state.ins_probing ? "block" : "none");
@@ -2323,6 +2345,10 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
     if (el_ind) {
         el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
     }
+    Rml::Element* el_sicon = m_settings_doc->GetElementById("settings-badge-icon");
+    if (el_sicon) {
+        SetImageColor(el_sicon, to_hex_rgb(m_theme.accent_alt));
+    }
 
     for (int r = 0; r < 7; r++) {
         std::string rid = "rail-" + std::to_string(r);
@@ -2370,23 +2396,20 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 if (is_focused) {
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
                     el_row->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                    if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.accent));
                     if (el_badge) {
-                        /* The fill IS the accent, and every built-in accent
-                         * is a light colour, so white type on it is close to
-                         * invisible — this is what made a selected row harder
-                         * to read than an unselected one. Flip to the darkest
-                         * theme colour instead. */
-                        el_badge->SetProperty("background-color", to_hex_rgb(m_theme.accent));
-                        el_badge->SetProperty("border-color", "#ffffff");
-                        el_badge->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
+                        el_badge->SetProperty("background-color", "#ffcd0029");
+                        el_badge->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                        el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
                     }
                 } else {
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface));
                     el_row->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                    if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.text_muted));
                     if (el_badge) {
-                        el_badge->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
-                        el_badge->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
-                        el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
+                        el_badge->SetProperty("background-color", "#0a101c99");
+                        el_badge->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                        el_badge->SetProperty("color", to_hex_rgb(m_theme.text_secondary));
                     }
                 }
 

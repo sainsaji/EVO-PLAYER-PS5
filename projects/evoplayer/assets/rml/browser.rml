@@ -9,9 +9,14 @@
         <!-- Header: breadcrumb + counts -->
         <div id="browser-header">
             <div id="browser-header-left">
-                <div id="browser-indicator"></div>
+                <div id="browser-badge">
+                    <img id="browser-badge-icon" src="../icons/icon_browse_usb.png"/>
+                </div>
                 <div id="browser-header-titles">
-                    <div id="browser-title">SOURCES</div>
+                    <div id="browser-title-row">
+                        <span id="browser-title">SOURCES</span>
+                        <span id="browser-live-dot"></span>
+                    </div>
                     <div id="browser-path">SELECT A SOURCE</div>
                 </div>
             </div>
@@ -203,6 +208,7 @@
         <div id="inspector">
             <div id="ins-preview">
                 <div id="ins-preview-art"></div>
+                <div id="ins-preview-play"><img id="ins-preview-play-icon" src="../icons/btn_play.png"/></div>
                 <div id="ins-preview-empty">NO PREVIEW</div>
                 <div id="ins-preview-badge"></div>
             </div>

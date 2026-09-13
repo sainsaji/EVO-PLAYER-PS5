@@ -40,10 +40,11 @@ div, span, p {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-top: 96px;
-    margin-bottom: 42px;
+    align-items: center;
+    margin-top: 72px;
+    margin-bottom: 36px;
     width: 1704px;
+    height: 88px;
 }
 
 #list-header-left {
@@ -53,8 +54,8 @@ div, span, p {
 }
 
 #list-indicator {
-    width: 5px;
-    height: 62px;
+    width: 4px;
+    height: 52px;
     background-color: #00cdff;
     border-radius: 2px;
     margin-right: 18px;
@@ -66,26 +67,30 @@ div, span, p {
 }
 
 #list-title {
-    font-size: 43px;
+    font-size: 32px;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 2px;
 }
 
 #list-subtitle {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    color: #a3b6d0;
+    letter-spacing: 1.5px;
+    margin-top: 5px;
 }
 
 #list-counter {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    color: #5e718c;
+    letter-spacing: 2px;
+    background-color: #1420368c;
+    border-width: 1px;
+    border-color: #5a7db433;
+    border-radius: 10px;
+    padding: 8px 18px;
 }
 
 /* ================================ Rows ================================ */
@@ -96,29 +101,28 @@ div, span, p {
     width: 1704px;
 }
 
-/* EVO_ROW_H on EVO_ROW_PITCH, the same geometry the immediate-mode list
- * used. The focus model's capacity is derived from those constants, so a
- * shorter row here would scroll out of step with the cursor. */
 .list-row {
     width: 1704px;
-    height: 92px;
-    background-color: #121b2eeb;
+    height: 84px;
+    background-color: #101a2ceb;
     border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 20px;
+    border-color: #5a7db429;
+    border-radius: 16px;
     margin-bottom: 12px;
-    padding-left: 32px;
-    padding-right: 32px;
+    padding-left: 24px;
+    padding-right: 24px;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .list-row-focused {
-    background-color: #1b2e4cf5;
+    background-color: #16223af5;
     border-width: 1.5px;
-    border-color: #00cdff;
+    border-color: #ffcd00;
+    transform: scale(1.012);
 }
 
 .lrow-left {
@@ -128,23 +132,27 @@ div, span, p {
 }
 
 .lrow-icon-box {
-    width: 60px;
-    height: 60px;
-    background-color: #131c2e;
-    border-radius: 15px;
+    width: 52px;
+    height: 52px;
+    background-color: #00cdff14;
+    border-width: 1px;
+    border-color: #00cdff33;
+    border-radius: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 20px;
+    margin-right: 18px;
+    transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
 .list-row-focused .lrow-icon-box {
-    background-color: #1a2a47;
+    background-color: #ffcd001f;
+    border-color: #ffcd0073;
 }
 
 .lrow-icon {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
@@ -156,10 +164,10 @@ div, span, p {
 
 .lrow-title {
     display: block;
-    font-size: 33px;
+    font-size: 22px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.5px;
+    color: #eef4ff;
+    letter-spacing: 0.4px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -167,14 +175,18 @@ div, span, p {
 
 .lrow-detail {
     display: block;
-    font-size: 18px;
-    font-weight: normal;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-top: 3px;
+    font-size: 13.5px;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6px;
+    margin-top: 4px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+.list-row-focused .lrow-detail {
+    color: #ffcd00;
 }
 
 /* Resume position, for RECENT. Sits under the detail line rather than beside
@@ -182,18 +194,18 @@ div, span, p {
 .lrow-track {
     display: block;
     width: 460px;
-    height: 5px;
+    height: 4px;
     border-radius: 2px;
-    background-color: #2a3b5599;
-    margin-top: 7px;
+    background-color: #7896c838;
+    margin-top: 6px;
 }
 
 .lrow-fill {
     display: block;
     width: 0%;
-    height: 5px;
+    height: 4px;
     border-radius: 2px;
-    background-color: #00cdff;
+    background-color: #ffcd00;
 }
 
 .lrow-right {
@@ -203,16 +215,22 @@ div, span, p {
 }
 
 .lrow-badge {
-    background-color: #131d2e;
+    background-color: #0a101c99;
     border-width: 1px;
-    border-color: #243550;
+    border-color: #5a7db433;
     border-radius: 10px;
-    padding: 8px 16px;
-    font-size: 15px;
+    padding: 7px 18px;
+    font-size: 13px;
     font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
+    color: #7c8ba3;
+    letter-spacing: 1.4px;
     margin-right: 16px;
+}
+
+.list-row-focused .lrow-badge {
+    background-color: #ffcd0029;
+    border-color: #ffcd00;
+    color: #ffcd00;
 }
 
 .lrow-chevron {
@@ -286,40 +304,42 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 19px;
+    background-color: #14223ab8;
+    border-width: 1px;
+    border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1.8px;
 }
 
 #list-footer-version {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #4b586c;
     letter-spacing: 1px;

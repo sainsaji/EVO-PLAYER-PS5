@@ -85,6 +85,7 @@ int evo_agc_writer_set_user_data_gs(SceAgcCommandBuffer *cb, const uint32_t *val
 int evo_agc_writer_set_user_data_ps(SceAgcCommandBuffer *cb, const uint32_t *values, uint32_t count);
 
 int evo_agc_writer_draw_index(SceAgcCommandBuffer *cb, uint32_t index_count, const uint16_t *gpu_indices);
+int evo_agc_writer_draw_index_modifier(SceAgcCommandBuffer *cb, uint32_t index_count, const uint16_t *gpu_indices, uint64_t modifier);
 int evo_agc_writer_draw_auto(SceAgcCommandBuffer *cb, uint32_t vertex_count);
 
 int evo_agc_writer_set_flip(SceAgcCommandBuffer *cb, uint32_t video_handle, int32_t buffer_index,

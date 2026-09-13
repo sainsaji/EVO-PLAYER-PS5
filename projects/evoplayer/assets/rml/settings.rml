@@ -10,9 +10,14 @@
         <!-- Header -->
         <div id="settings-header">
             <div id="header-left">
-                <div id="header-indicator"></div>
+                <div id="settings-badge">
+                    <img id="settings-badge-icon" src="../icons/icon_settings.png"/>
+                </div>
                 <div id="header-titles">
-                    <div id="settings-title">SETTINGS</div>
+                    <div id="settings-title-row">
+                        <span id="settings-title">SETTINGS</span>
+                        <span id="settings-live-dot"></span>
+                    </div>
                     <div id="settings-subtitle">APPLICATION &amp; PLAYBACK PREFERENCES</div>
                 </div>
             </div>

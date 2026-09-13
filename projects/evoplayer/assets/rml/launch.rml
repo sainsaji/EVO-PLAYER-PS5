@@ -19,7 +19,10 @@
             </div>
             <div id="status">
                 <div id="status-clock">00:00</div>
-                <div id="status-theme">MIDNIGHT</div>
+                <div id="status-theme-wrap">
+                    <div id="status-theme-dot"></div>
+                    <div id="status-theme">MIDNIGHT</div>
+                </div>
             </div>
         </div>
 
@@ -30,7 +33,10 @@
             <div id="hero-fade-h"></div>
             <div id="hero-fade-b"></div>
             <div id="hero-copy">
-                <div id="hero-eyebrow">CONTINUE WATCHING</div>
+                <div id="hero-eyebrow-wrap">
+                    <div id="hero-eyebrow-dot"></div>
+                    <div id="hero-eyebrow">CONTINUE WATCHING</div>
+                </div>
                 <div id="hero-title">EVO PLAYER</div>
                 <div id="hero-detail">Play video and audio from USB storage</div>
             </div>
@@ -39,7 +45,9 @@
                     <div id="hero-progress-fill"></div>
                 </div>
                 <div id="hero-chip">
-                    <img id="hero-chip-glyph" src="../icons/btn_cross.png"/>
+                    <div id="hero-chip-glyph-box">
+                        <img id="hero-chip-glyph" src="../icons/btn_cross.png"/>
+                    </div>
                     <span id="hero-chip-label">RESUME</span>
                 </div>
             </div>
@@ -155,60 +163,72 @@
                 </div>
                 <div class="shelf-tiles">
                     <div class="tile tile-destination" id="lib-tile-0">
-                        <div class="tile-bloom" id="lib-bloom-0"></div>
+                        <div class="tile-index">01</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-0">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-0" src="../icons/icon_browse_usb.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-0"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-0">BROWSE</div>
                             <div class="tile-detail" id="lib-detail-0">Videos and folders on USB storage</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-1">
-                        <div class="tile-bloom" id="lib-bloom-1"></div>
+                        <div class="tile-index">02</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-1">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-1" src="../icons/icon_recent_files.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-1"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-1">RECENT</div>
                             <div class="tile-detail" id="lib-detail-1">Pick up where you left off</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-2">
-                        <div class="tile-bloom" id="lib-bloom-2"></div>
+                        <div class="tile-index">03</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-2">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-2" src="../icons/icon_favorites.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-2"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-2">FAVORITES</div>
                             <div class="tile-detail" id="lib-detail-2">Media you saved for later</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-3">
-                        <div class="tile-bloom" id="lib-bloom-3"></div>
+                        <div class="tile-index">04</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-3">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-3" src="../icons/icon_emby.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-3"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-3">EMBY</div>
                             <div class="tile-detail" id="lib-detail-3">Emby and media server streaming</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-4">
-                        <div class="tile-bloom" id="lib-bloom-4"></div>
+                        <div class="tile-index">05</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-4">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-4" src="../icons/icon_settings.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-4"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-4">SETTINGS</div>
                             <div class="tile-detail" id="lib-detail-4">Playback profiles and preferences</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-5">
-                        <div class="tile-bloom" id="lib-bloom-5"></div>
+                        <div class="tile-index">06</div>
                         <div class="tile-icon-box tile-icon-box-lg" id="lib-iconbox-5">
                             <img class="tile-icon tile-icon-lg" id="lib-icon-5" src="../icons/icon_about_support.png"/>
                         </div>
+                        <div class="tile-scrim"></div>
+                        <div class="tile-status" id="lib-status-5"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-5">ABOUT</div>
                             <div class="tile-detail" id="lib-detail-5">Credits and project info</div>
@@ -225,11 +245,15 @@
                 <span class="footer-text">SELECT</span>
             </div>
             <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">BACK</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">MOVE</span>
             </div>
             <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_lstick.png" class="glyph-badge-img"/></div>
+                <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">SCREENSHOT</span>
             </div>
         </div>

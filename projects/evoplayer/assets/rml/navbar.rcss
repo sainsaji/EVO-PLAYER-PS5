@@ -28,9 +28,9 @@ div, span {
     top: 0;
     width: 108px;
     height: 1080px;
-    background-color: #060b16f5;
+    background-color: #060a14b8;
     border-right-width: 1px;
-    border-right-color: #172236;
+    border-right-color: #5a7db433;
 }
 
 /* ---- EVO logo mark (collapsed) ---- */

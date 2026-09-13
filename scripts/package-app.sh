@@ -56,8 +56,10 @@ NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
 NO_NATIVE_SECONDARY_4K=0
 NATIVE_10BIT=0
+CLEAN=0
 while (( $# )); do
     case "$1" in
+        --clean)        CLEAN=1 ;;
         --probe)        MODE="probe" ;;
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
@@ -400,8 +402,8 @@ else
     # code. Force a clean object build whenever the flag set changed.
     STAMP="${BUILD}/app-cflags.stamp"
     WANT="${TFLAGS[*]} ${APP_DEFS} ${GL_PUBLIC_CFLAGS}"
-    if [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
-        begin "app-module flags changed - clean rebuild"
+    if (( CLEAN )) || [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
+        begin "app-module flags changed or --clean requested - clean rebuild"
         make -C "${EVO}" clean >/dev/null 2>&1 || true
         printf '%s' "${WANT}" > "${STAMP}"
     fi

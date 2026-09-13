@@ -58,10 +58,12 @@ div, span, p {
 
 /* The accent bloom behind the mark, standing in for evo_ui_circle(). */
 #brand-mark {
-    width: 80px;
-    height: 80px;
-    border-radius: 40px;
-    background-color: #ffcd0026;
+    width: 76px;
+    height: 76px;
+    border-radius: 38px;
+    background-color: #ffcd001a;
+    border-width: 1px;
+    border-color: #ffcd0038;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -69,8 +71,8 @@ div, span, p {
 }
 
 #brand-logo {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     display: inline-block;
 }
 
@@ -80,18 +82,18 @@ div, span, p {
 }
 
 #brand-name {
-    font-size: 33px;
+    font-size: 32px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 2px;
+    color: #eef4ff;
+    letter-spacing: 3px;
 }
 
 #brand-version {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 4px;
+    letter-spacing: 2.5px;
+    margin-top: 5px;
 }
 
 #status {
@@ -101,18 +103,32 @@ div, span, p {
 }
 
 #status-clock {
-    font-size: 33px;
+    font-size: 32px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 1px;
+    color: #eef4ff;
+    letter-spacing: 1.5px;
+}
+
+#status-theme-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-top: 5px;
+}
+
+#status-theme-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #00cdff;
+    margin-right: 8px;
 }
 
 #status-theme {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 4px;
+    letter-spacing: 2.5px;
 }
 
 /* ================================ Hero ================================ */
@@ -123,9 +139,9 @@ div, span, p {
     top: 200px;
     width: 1704px;
     height: 318px;
-    background-color: #121b2eeb;
+    background-color: #0f1829;
     border-width: 1px;
-    border-color: #2a3b55aa;
+    border-color: #5a7db433;
     border-radius: 22px;
     overflow: hidden;
 }
@@ -145,11 +161,11 @@ div, span, p {
 
 #hero-art {
     position: absolute;
-    left: 2px;
-    top: 2px;
-    width: 1700px;
-    height: 314px;
-    border-radius: 20px;
+    left: 1px;
+    top: 1px;
+    width: 1702px;
+    height: 316px;
+    border-radius: 21px;
     animation: 20s cubic-in-out infinite alternate heroKen;
 }
 
@@ -160,30 +176,30 @@ div, span, p {
  */
 #hero-fade-l {
     position: absolute;
-    left: 2px;
-    top: 2px;
-    width: 477px;
-    height: 314px;
-    background-color: #121b2eff;
+    left: 1px;
+    top: 1px;
+    width: 520px;
+    height: 316px;
+    background-color: #0f1829;
 }
 
 #hero-fade-h {
     position: absolute;
-    left: 479px;
-    top: 2px;
-    width: 545px;
-    height: 314px;
-    decorator: horizontal-gradient(#121b2eff #121b2e00);
+    left: 521px;
+    top: 1px;
+    width: 600px;
+    height: 316px;
+    decorator: horizontal-gradient(#0f1829ff #0f182900);
 }
 
 /* Bottom scrim, so the chip and the bar sit on a consistent ground. */
 #hero-fade-b {
     position: absolute;
-    left: 2px;
-    bottom: 2px;
-    width: 1700px;
-    height: 138px;
-    decorator: vertical-gradient(#00000000 #000000d7);
+    left: 1px;
+    bottom: 1px;
+    width: 1702px;
+    height: 170px;
+    decorator: vertical-gradient(#02040a00 #02040add);
 }
 
 #hero-copy {
@@ -195,28 +211,42 @@ div, span, p {
     flex-direction: column;
 }
 
+#hero-eyebrow-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#hero-eyebrow-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #ffcd00;
+    margin-right: 10px;
+}
+
 #hero-eyebrow {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: bold;
     color: #ffcd00;
-    letter-spacing: 2px;
+    letter-spacing: 2.6px;
 }
 
 #hero-title {
-    font-size: 46px;
+    font-size: 44px;
     font-weight: bold;
-    color: #ecf3ff;
+    color: #ffffff;
     letter-spacing: 0.5px;
-    margin-top: 14px;
+    margin-top: 12px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
 }
 
 #hero-detail {
-    font-size: 20px;
+    font-size: 19px;
     font-weight: normal;
-    color: #9fb2cc;
+    color: #a3b6d0;
     letter-spacing: 0.5px;
     margin-top: 14px;
     white-space: nowrap;
@@ -235,10 +265,10 @@ div, span, p {
 }
 
 #hero-progress-track {
-    width: 580px;
-    height: 6px;
+    width: 560px;
+    height: 5px;
     border-radius: 3px;
-    background-color: #2a3b5599;
+    background-color: #7896c833;
     margin-bottom: 18px;
 }
 
@@ -247,7 +277,7 @@ div, span, p {
 #hero-progress-fill {
     display: block;
     width: 0%;
-    height: 6px;
+    height: 5px;
     border-radius: 3px;
     background-color: #ffcd00;
     transition: width 0.35s cubic-out;
@@ -257,38 +287,50 @@ div, span, p {
  * Chip geometry with smooth transitions matching ui.html
  */
 #hero-chip {
-    height: 62px;
-    border-radius: 31px;
-    background-color: #121b2ef0;
+    height: 58px;
+    border-radius: 29px;
+    background-color: #162238eb;
     border-width: 1px;
-    border-color: #2a3b55aa;
+    border-color: #00cdff47;
     display: inline-flex;
     flex-direction: row;
     align-items: center;
     padding-left: 14px;
-    padding-right: 18px;
-    gap: 14px;
+    padding-right: 20px;
     transition: transform 0.2s cubic-out, background-color 0.2s cubic-out, border-color 0.2s cubic-out;
 }
 
 #hero.hero-focused #hero-chip,
 .hero-chip-focused {
-    transform: scale(1.05);
+    transform: scale(1.04);
     background-color: #1e2e4af5;
     border-color: #00cdff;
 }
 
+#hero-chip-glyph-box {
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background-color: #00cdff1f;
+    border-width: 1px;
+    border-color: #00cdff73;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12px;
+}
+
 #hero-chip-glyph {
-    width: 36px;
-    height: 36px;
+    width: 18px;
+    height: 18px;
     display: inline-block;
 }
 
 #hero-chip-label {
-    font-size: 22px;
+    font-size: 21px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 1px;
+    color: #eef4ff;
+    letter-spacing: 2px;
 }
 
 /* =============================== Shelves =============================== */
@@ -328,24 +370,24 @@ div, span, p {
 
 .shelf-tick {
     width: 3px;
-    height: 20px;
-    border-radius: 1px;
+    height: 18px;
+    border-radius: 2px;
     background-color: #ffcd00;
     margin-right: 14px;
 }
 
 .shelf-title {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 1.5px;
+    color: #c2d2e8;
+    letter-spacing: 2.2px;
 }
 
 .shelf-count {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
 }
 
 .shelf-tiles {
@@ -363,11 +405,11 @@ div, span, p {
     height: 166px;
     background-color: #101a2ceb;
     border-width: 1px;
-    border-color: #2a3b55aa;
+    border-color: #5a7db433;
     border-radius: 18px;
     position: relative;
     overflow: hidden;
-    transition: transform 0.2s cubic-out, border-color 0.2s cubic-out, background-color 0.2s cubic-out;
+    transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .tile-focused {
@@ -388,25 +430,27 @@ div, span, p {
     transform: scale(1.04);
 }
 
-/* #64: fill the whole card; .tile's overflow:hidden rounds it to the card
- * shape. No inset / radius juggling — the clip does it, and it stays correct
- * when the focus border grows from 1px to 2px.
- *
- * Stretched with left/top/right/bottom rather than a fixed 264x166, so the
- * poster is exactly the padding box at any border width. At the fixed size it
- * overhung the padding box by the border on the right and bottom and relied on
- * the clip to cut the overhang away, which put its outermost row on the clip
- * boundary — a bright-edged poster then read as a rim just inside the border. */
 .tile-art {
     position: absolute;
     left: 0;
     top: 0;
     right: 0;
     bottom: 0;
-    border-radius: 20px;
+    border-radius: 18px;
 }
 
-/* Destination tiles carry a large soft icon top-left instead of a poster. */
+.tile-index {
+    position: absolute;
+    right: 16px;
+    top: 18px;
+    z-index: 3;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: #a0bee659;
+}
+
+/* Destination tiles carry an icon box top-left. */
 .tile-icon-box {
     position: absolute;
     left: 18px;
@@ -423,41 +467,58 @@ div, span, p {
 }
 
 .tile-icon-box-lg {
-    left: 18px;
-    top: 18px;
-    width: 56px;
-    height: 56px;
+    position: absolute;
+    left: 20px;
+    top: 20px;
+    z-index: 3;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background-color: #00cdff14;
+    border-width: 1px;
+    border-color: #00cdff33;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
+}
+
+.tile.tile-focused .tile-icon-box-lg {
+    background-color: #00cdff26;
+    border-color: #00cdff;
 }
 
 .tile-icon-lg {
-    width: 52px;
-    height: 52px;
+    width: 30px;
+    height: 30px;
 }
 
-/* Accent bloom behind a focused destination icon. */
-.tile-bloom {
+.tile-status {
     position: absolute;
-    left: 4px;
-    top: 4px;
-    width: 84px;
-    height: 84px;
-    border-radius: 42px;
-    background-color: #ffcd0000;
+    right: 16px;
+    bottom: 20px;
+    z-index: 3;
+    width: 7px;
+    height: 7px;
+    border-radius: 4px;
+    background-color: #3ddc84;
+    display: none;
 }
 
-.tile-bloom-lit {
-    background-color: #ffcd0026;
+#lib-status-0,
+#lib-status-3 {
+    display: block;
 }
 
-/* Without this a bright frame makes the caption unreadable, which is the
- * failure mode of every poster grid. EVO_TILE_CAPTION_H + 16. */
+/* Without this a bright frame makes the caption unreadable. */
 .tile-scrim {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 92px;
-    decorator: vertical-gradient(#00000000 #000000f5);
+    height: 110px;
+    z-index: 2;
+    decorator: vertical-gradient(#00000000 #000000f0);
 }
 
 .tile-caption {
@@ -465,30 +526,26 @@ div, span, p {
     left: 18px;
     right: 18px;
     bottom: 16px;
+    z-index: 3;
     display: flex;
     flex-direction: column;
 }
 
-/*
- * A tile carries a smaller type ramp than a full-width row. At the row size
- * a 270 px tile cannot hold an ordinary filename — "Dolby TrueHD 7.1" became
- * "Dolby TrueH..", which is the part that identifies the file.
- */
 .tile-title {
-    font-size: 21px;
+    font-size: 20px;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.5px;
+    color: #ffffff;
+    letter-spacing: 0.4px;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
 }
 
 .tile-detail {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: normal;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
+    color: #c3d2e6;
+    letter-spacing: 0.6px;
     margin-top: 5px;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -500,17 +557,37 @@ div, span, p {
     left: 18px;
     right: 18px;
     bottom: 8px;
-    height: 6px;
+    height: 5px;
+    z-index: 4;
     border-radius: 3px;
-    background-color: #2a3b5599;
+    background-color: #7896c838;
 }
 
 .tile-progress-fill {
     display: block;
     width: 0%;
-    height: 6px;
+    height: 5px;
     border-radius: 3px;
     background-color: #ffcd00;
+}
+
+.tile-badge {
+    position: absolute;
+    right: 14px;
+    top: 14px;
+    z-index: 3;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 12px;
+    background-color: #060c16c7;
+    border-width: 1px;
+    border-color: #7896c847;
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: bold;
+    color: #a3b6d0;
+    letter-spacing: 1.4px;
 }
 
 /* =============================== Footer =============================== */
@@ -530,33 +607,35 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 19px;
+    background-color: #14223ab8;
+    border-width: 1px;
+    border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1.8px;
 }

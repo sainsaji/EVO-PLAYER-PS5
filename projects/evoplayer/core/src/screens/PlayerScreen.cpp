@@ -9,6 +9,7 @@
 #include "evo_perf_monitor.h"
 #include "evo_toast.h"
 #include "evo_feedback.h"
+#include "evo_boot_log.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -67,6 +68,28 @@ void PlayerScreen::initPlayerStateMachine() {
 void PlayerScreen::toggleStatsForNerds() {
     m_showStatsForNerds = !m_showStatsForNerds;
     m_playerFsm.postEvent(PlayerScreenEvent::ToggleStats);
+}
+
+bool PlayerScreen::hasActiveOverlay() const {
+    if (m_osdVisibilityAlpha > 0 || m_showStatsForNerds) {
+        return true;
+    }
+    if (prospero_subtitle_enabled) {
+        auto playback = Application::getInstance().getPlaybackController();
+        if (playback && !playback->isMusicMode()) {
+            double subPos = playback->getPositionSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
+            if (subPos < 0.0) subPos = 0.0;
+            if (prospero_subtitle_use_external) {
+                const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);
+                if (cue && cue->text[0]) return true;
+            } else {
+                char activeSubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
+                prospero_embedded_subtitle_text_at(subPos, activeSubText, sizeof(activeSubText));
+                if (activeSubText[0]) return true;
+            }
+        }
+    }
+    return false;
 }
 
 void PlayerScreen::onEnter() {
@@ -262,6 +285,15 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
     auto playback = Application::getInstance().getPlaybackController();
     auto metaService = Application::getInstance().getMediaMetadataService();
     if (!playback) return;
+
+    static int s_player_screen_log = 5;
+    if (s_player_screen_log > 0) {
+        s_player_screen_log--;
+        evo_boot_log("PlayerScreen::render fb=%p %dx%d alpha=%d rml_init=%d",
+                     (void*)framebuffer, width, height, m_osdVisibilityAlpha,
+                     evo_rmlui_is_initialized());
+        evo_boot_log_flush();
+    }
 
     if (!playback->isMusicMode()) {
         draw_video_frame_to_fb(framebuffer, 0, 0, width, height);

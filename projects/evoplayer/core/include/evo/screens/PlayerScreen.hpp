@@ -49,6 +49,7 @@ public:
 
     bool isStatsForNerdsVisible() const { return m_showStatsForNerds; }
     void toggleStatsForNerds();
+    bool hasActiveOverlay() const;
 
 private:
     void initPlayerStateMachine();
