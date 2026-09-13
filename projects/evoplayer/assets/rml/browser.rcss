@@ -1,11 +1,12 @@
 /* =============================================================================
- * EVO PLAYER PRO - Ubuntu Nautilus Media Browser (5-Region Architecture)
+ * EVO PLAYER PRO - Modern Media Storage Browser (5-Region Architecture)
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  *
  * Visual Architecture:
- * 1. Top Toolbar: Location, Breadcrumb Pills, Search, Counter
- * 2. Left Sidebar: Places (USB, Internal Storage, Favorites, Recent Media, Filters)
- * 3. Main File Area: 2x4 Media Card Grid (Visual Thumbnails / Previews)
- * 4. Bottom Status Strip: Detailed Selection Info & Console Action Hints
+ * 1. Top Toolbar: Location, Breadcrumb Pills, Search, Item Counter
+ * 2. Left Sidebar: Places & Filters (USB, Internal Storage, Favorites, Recent Media)
+ * 3. Main File Area: 2x4 Media Card Grid (16:9 Visual Previews & Metadata)
+ * 4. Bottom Status Strip: Detailed Selection Specifications & Console Hints
  * ============================================================================= */
 
 body {
@@ -13,7 +14,7 @@ body {
     font-weight: normal;
     font-size: 16dp;
     color: #ffffff;
-    background-color: #1a1a1a;
+    background-color: #06090e;
     margin: 0;
     padding: 0;
     width: 1920dp;
@@ -58,10 +59,10 @@ div, span, p {
 #browser-badge {
     width: 44dp;
     height: 44dp;
-    border-radius: 10dp;
-    background-color: #e954201c;
+    border-radius: 12dp;
+    background-color: #00cdff1a;
     border-width: 1dp;
-    border-color: #e9542066;
+    border-color: #00cdff4d;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -84,26 +85,26 @@ div, span, p {
     font-size: 22dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 2dp;
+    letter-spacing: 2.5dp;
 }
 
 #browser-live-dot {
     width: 7dp;
     height: 7dp;
     border-radius: 4dp;
-    background-color: #e95420;
+    background-color: #00cdff;
 }
 
 #browser-path {
     display: inline-block;
-    background-color: #282828;
+    background-color: #0e1828eb;
     border-width: 1dp;
-    border-color: #3e3e3e;
-    border-radius: 8dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
     padding: 6dp 16dp;
     font-size: 13.5dp;
     font-weight: bold;
-    color: #dfdbce;
+    color: #c2d2e8;
     letter-spacing: 1.2dp;
     max-width: 800dp;
     white-space: nowrap;
@@ -119,11 +120,11 @@ div, span, p {
 }
 
 #browser-search-pill {
-    background-color: #282828;
+    background-color: #0e1828eb;
     border-width: 1dp;
-    border-color: #3e3e3e;
-    border-radius: 8dp;
-    padding: 6dp 12dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -138,20 +139,20 @@ div, span, p {
 .search-pill-label {
     font-size: 12.5dp;
     font-weight: bold;
-    color: #9e9e9e;
+    color: #7e97b8;
     letter-spacing: 1.2dp;
 }
 
 #browser-counter {
     display: block;
-    background-color: #282828;
+    background-color: #00cdff1a;
     border-width: 1dp;
-    border-color: #3e3e3e;
-    border-radius: 8dp;
+    border-color: #00cdff4d;
+    border-radius: 10dp;
     padding: 6dp 14dp;
     font-size: 12.5dp;
     font-weight: bold;
-    color: #e95420;
+    color: #00cdff;
     letter-spacing: 1.2dp;
 }
 
@@ -163,10 +164,10 @@ div, span, p {
     top: 104dp;
     width: 270dp;
     height: 856dp;
-    background-color: #222222;
+    background-color: #0b1220eb;
     border-width: 1dp;
-    border-color: #333333;
-    border-radius: 12dp;
+    border-color: #5a7db433;
+    border-radius: 16dp;
     padding: 16dp 10dp;
     display: flex;
     flex-direction: column;
@@ -176,21 +177,21 @@ div, span, p {
 .sb-section-title {
     font-size: 11dp;
     font-weight: bold;
-    color: #777777;
-    letter-spacing: 1.6dp;
+    color: #5e718c;
+    letter-spacing: 2dp;
     padding: 6dp 12dp 2dp 12dp;
 }
 
 .sb-section-divider {
     height: 1dp;
-    background-color: #2c2c2c;
+    background-color: #5a7db426;
     margin: 8dp 8dp;
 }
 
 .sb-item {
     width: 250dp;
     height: 44dp;
-    border-radius: 8dp;
+    border-radius: 10dp;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -199,17 +200,18 @@ div, span, p {
     background-color: transparent;
     border-width: 1.5dp;
     border-color: transparent;
-    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out;
+    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out, transform 0.15s cubic-out;
 }
 
 .sb-item-active {
-    background-color: #2c2c2c;
-    border-color: #3a3a3a;
+    background-color: #162a4a;
+    border-color: #5a7db466;
 }
 
 .sb-item-focused {
-    background-color: #e9542029;
-    border-color: #e95420;
+    background-color: #00cdff26;
+    border-color: #00cdff;
+    transform: scale(1.02);
 }
 
 .sb-icon {
@@ -220,7 +222,7 @@ div, span, p {
 .sb-label {
     font-size: 13.5dp;
     font-weight: bold;
-    color: #9e9e9e;
+    color: #7e97b8;
     letter-spacing: 0.8dp;
 }
 
@@ -255,10 +257,10 @@ div, span, p {
 .grid-card {
     width: 341dp;
     height: 418dp;
-    background-color: #222222;
+    background-color: #101a2ceb;
     border-width: 1dp;
-    border-color: #333333;
-    border-radius: 12dp;
+    border-color: #5a7db433;
+    border-radius: 16dp;
     padding: 12dp;
     display: flex;
     flex-direction: column;
@@ -268,9 +270,9 @@ div, span, p {
 }
 
 .grid-card-focused {
-    background-color: #2a2a2a;
+    background-color: #16243cf8;
     border-width: 2.5dp;
-    border-color: #e95420;
+    border-color: #00cdff;
     transform: scale(1.02);
 }
 
@@ -281,10 +283,10 @@ div, span, p {
 .card-preview-box {
     width: 317dp;
     height: 184dp;
-    background-color: #171717;
-    border-radius: 8dp;
+    background-color: #070c16;
+    border-radius: 10dp;
     border-width: 1dp;
-    border-color: #333333;
+    border-color: #5a7db426;
     position: relative;
     overflow: hidden;
     display: flex;
@@ -298,7 +300,7 @@ div, span, p {
     top: 0;
     width: 317dp;
     height: 184dp;
-    border-radius: 7dp;
+    border-radius: 9dp;
     display: none;
 }
 
@@ -311,20 +313,20 @@ div, span, p {
     position: absolute;
     left: 8dp;
     top: 8dp;
-    background-color: #1a1a1acc;
+    background-color: #06090ed9;
     border-width: 1dp;
-    border-color: #444444;
-    border-radius: 5dp;
+    border-color: #5a7db44d;
+    border-radius: 6dp;
     padding: 3dp 8dp;
     font-size: 11dp;
     font-weight: bold;
-    color: #dfdbce;
+    color: #7ce4ff;
     letter-spacing: 1.2dp;
 }
 
 .grid-card-focused .card-badge {
-    background-color: #e9542033;
-    border-color: #e95420;
+    background-color: #00cdff33;
+    border-color: #00cdff;
     color: #ffffff;
 }
 
@@ -342,7 +344,7 @@ div, span, p {
     position: absolute;
     right: 8dp;
     bottom: 8dp;
-    background-color: #1a1a1ad9;
+    background-color: #06090ee6;
     border-radius: 4dp;
     padding: 2dp 6dp;
     font-size: 11dp;
@@ -357,14 +359,14 @@ div, span, p {
     bottom: 0;
     width: 317dp;
     height: 4dp;
-    background-color: #3a3a3a;
+    background-color: #142236;
 }
 
 .card-fill {
     display: block;
     width: 0%;
     height: 4dp;
-    background-color: #e95420;
+    background-color: #00cdff;
 }
 
 .card-meta {
@@ -389,7 +391,7 @@ div, span, p {
     display: block;
     font-size: 13dp;
     font-weight: normal;
-    color: #9e9e9e;
+    color: #7e97b8;
     margin-top: 2dp;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -397,7 +399,7 @@ div, span, p {
 }
 
 .grid-card-focused .card-sub {
-    color: #dfdbce;
+    color: #c2d2e8;
 }
 
 .card-action-bar {
@@ -408,25 +410,25 @@ div, span, p {
     margin-top: 10dp;
     padding-top: 8dp;
     border-top-width: 1dp;
-    border-top-color: #2b2b2b;
+    border-top-color: #5a7db426;
 }
 
 .card-kind {
     font-size: 11.5dp;
     font-weight: bold;
-    color: #e95420;
+    color: #00cdff;
     letter-spacing: 1.2dp;
 }
 
 .card-ext {
-    background-color: #380c2a80;
+    background-color: #00cdff1a;
     border-width: 1dp;
-    border-color: #77216f60;
-    border-radius: 4dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
     padding: 2dp 6dp;
     font-size: 10.5dp;
     font-weight: bold;
-    color: #dfdbce;
+    color: #7ce4ff;
 }
 
 /* ============================ Empty State ============================ */
@@ -445,9 +447,9 @@ div, span, p {
     width: 108dp;
     height: 108dp;
     border-radius: 54dp;
-    background-color: #242424;
+    background-color: #0e1828eb;
     border-width: 1dp;
-    border-color: #383838;
+    border-color: #5a7db433;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -471,7 +473,7 @@ div, span, p {
     display: block;
     font-size: 15dp;
     font-weight: normal;
-    color: #888888;
+    color: #7e97b8;
     margin-top: 8dp;
 }
 
@@ -483,10 +485,10 @@ div, span, p {
     bottom: 20dp;
     width: 1704dp;
     height: 60dp;
-    background-color: #222222;
+    background-color: #0b1220eb;
     border-width: 1dp;
-    border-color: #333333;
-    border-radius: 12dp;
+    border-color: #5a7db433;
+    border-radius: 16dp;
     padding: 0 18dp;
     display: flex;
     flex-direction: row;
@@ -521,21 +523,21 @@ div, span, p {
 
 .status-spec-pill {
     display: none;
-    background-color: #2b2b2b;
+    background-color: #101c30;
     border-width: 1dp;
-    border-color: #3c3c3c;
-    border-radius: 6dp;
+    border-color: #5a7db44d;
+    border-radius: 8dp;
     padding: 4dp 10dp;
     font-size: 11.5dp;
     font-weight: bold;
-    color: #dfdbce;
+    color: #c2d2e8;
 }
 
 .status-probing {
     display: none;
     font-size: 12dp;
     font-weight: bold;
-    color: #e95420;
+    color: #00cdff;
     letter-spacing: 1.2dp;
 }
 
@@ -560,9 +562,9 @@ div, span, p {
     align-items: center;
     justify-content: center;
     border-radius: 16dp;
-    background-color: #2b2b2b;
+    background-color: #101c30;
     border-width: 1dp;
-    border-color: #404040;
+    border-color: #5a7db44d;
 }
 
 .glyph-badge-img {
@@ -576,27 +578,27 @@ div, span, p {
     align-items: center;
     justify-content: center;
     border-radius: 10dp;
-    background-color: #2b2b2b;
+    background-color: #101c30;
     border-width: 1dp;
-    border-color: #404040;
+    border-color: #5a7db44d;
 }
 
 .glyph-pill-text {
     font-size: 11dp;
     font-weight: bold;
-    color: #e95420;
+    color: #00cdff;
 }
 
 .footer-text {
     font-size: 12.5dp;
     font-weight: bold;
-    color: #9e9e9e;
+    color: #8ea4c8;
     letter-spacing: 1.2dp;
 }
 
 #browser-footer-version {
     font-size: 12dp;
     font-weight: bold;
-    color: #555555;
+    color: #465a78;
     margin-left: 10dp;
 }

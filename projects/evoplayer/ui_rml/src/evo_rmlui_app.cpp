@@ -1210,17 +1210,18 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
 
     m_last_browser = state;
 
-    /* Ubuntu Yaru Dark theme for storage browser */
-    const std::string accent   = "#e95420"; // Signature Ubuntu Orange
-    const std::string text_1   = "#ffffff"; // Crisp white
-    const std::string text_2   = "#dfdbce"; // Ubuntu warm grey
-    const std::string text_3   = "#9e9e9e"; // Ubuntu muted grey
+    /* PlayStation Obsidian & Sapphire Blue theme for storage browser */
+    const std::string accent       = "#00cdff"; // Sapphire cyan/blue
+    const std::string accent_gold  = "#ffcd00"; // Amber gold for folders & favorites
+    const std::string text_1       = "#ffffff"; // Crisp white
+    const std::string text_2       = "#c2d2e8"; // Ice blue-white
+    const std::string text_3       = "#7e97b8"; // Slate blue-gray
 
     auto el = [&](const std::string& id) { return m_browser_doc->GetElementById(id); };
 
     /* 1. Header Toolbar */
     if (Rml::Element* e = el("browser-indicator")) e->SetProperty("background-color", accent);
-    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, "#e95420");
+    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, accent);
     if (Rml::Element* e = el("browser-title")) e->SetInnerRML(state.title);
     if (Rml::Element* e = el("browser-path")) {
         e->SetInnerRML(state.path);
@@ -1250,9 +1251,9 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
 
         if (icon) {
             if (focused) {
-                SetImageColor(icon, "#e95420");
+                SetImageColor(icon, accent);
             } else if (active) {
-                SetImageColor(icon, "#e95420");
+                SetImageColor(icon, accent);
             } else {
                 SetImageColor(icon, text_3);
             }
@@ -1313,7 +1314,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
                 if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
                 bool isFolder = (r.icon_path.find("folder") != std::string::npos ||
                                  r.icon_path.find("usb") != std::string::npos);
-                SetImageColor(icon, isFolder ? "#e95420" : text_3);
+                SetImageColor(icon, isFolder ? accent_gold : text_3);
             }
         }
 
@@ -1334,7 +1335,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         }
         if (fav) {
             fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
-            SetImageColor(fav, accent);
+            SetImageColor(fav, accent_gold);
         }
         if (duration) {
             duration->SetProperty("display", r.duration.empty() ? "none" : "block");
