@@ -30,6 +30,9 @@ public:
     virtual void ensureHeroArt(const std::string& mediaPath) = 0;
     virtual const uint32_t* getHeroArtPixels() const = 0;
     virtual bool isHeroArtValid() const = 0;
+    /* Which media the single hero buffer currently holds - callers that follow
+     * a moving cursor need to know whether the buffer is still theirs. */
+    virtual const std::string& getHeroArtPath() const = 0;
 
     virtual void ensureBrowserPreview(const std::string& mediaPath, bool isDirectory) = 0;
     virtual const uint32_t* getBrowserPreviewPixels() const = 0;

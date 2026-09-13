@@ -15,11 +15,13 @@
 #include "evo_toast.h"
 #include "evo_data_path.h"
 #include "evo_boot_log.h"
+#include "prospero_thumbnail.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/mathematics.h>
+#include <libswscale/swscale.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -41,12 +43,13 @@ extern AVCodecContext *audio_ctx;
 extern evo_vdec *g_vdec;
 extern int g_vdec_force_ffmpeg;
 extern AVPacket *video_pending_pkt;
+extern struct SwsContext *play_sws;
 extern int screen;
 extern int player_paused;
 extern double media_duration_sec;
 extern double resume_base_offset_seconds;
 extern double requested_resume_seek_pos;
-extern char current_media_path[512];
+extern char current_media_path[768];
 extern int evo_audio_channels;
 
 namespace evo {
@@ -222,6 +225,22 @@ void PlaybackController::stopPlayback() {
         video_pending_pkt = nullptr;
     }
 
+    /*
+     * The decode loop in evo_playback.c holds its half-consumed AU here. Left
+     * behind, it is the first thing fed to the *next* file's decoder - a
+     * mid-GOP packet from the previous stream.
+     */
+    if (video_video_pending_pkt) {
+        av_packet_free(&video_video_pending_pkt);
+        video_video_pending_pkt = nullptr;
+    }
+
+    /* Scaler is sized to the closed file's geometry; the next file may differ. */
+    if (play_sws) {
+        sws_freeContext(play_sws);
+        play_sws = nullptr;
+    }
+
     if (audio_handle >= 1) {
         sceAudioOutClose(audio_handle);
         audio_handle = -1;
@@ -255,7 +274,29 @@ void PlaybackController::stopPlayback() {
 
     video_decode_ready = 0;
     video_decode_done = 0;
+    video_frame_loaded = 0;
+
+    /*
+     * Reset the media clocks. These are session globals, not per-file state:
+     * carried over, the next file's frames are compared against the previous
+     * file's audio clock, so `audio_clock_seconds > video_rel + 0.50` holds
+     * forever in audio_output_thread() - the audio queue fills, the decode
+     * thread blocks on it, the demuxer blocks on the decode thread, and the
+     * second file never plays at all.
+     */
+    audio_samples_played = 0;
+    audio_samples_decoded = 0;
+    audio_clock_seconds = 0.0;
+    audio_pts_seconds = 0.0;
+    video_clock_seconds = 0.0;
+    first_audio_pts_seconds = -1.0;
+    first_video_pts_seconds = -1.0;
+
+    /* Don't let the next file's scrub previews reuse this file's demuxer. */
+    prospero_thumbnail_close_context();
+
     pp_playback_on_file_close(&g_pp_pb);
+    pp_playback_log_stats(&g_pp_pb);
 }
 
 bool PlaybackController::startPlayback(const std::string& filePath, double resumeOffset) {
@@ -314,19 +355,41 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
     // Initialize Video Decoder if video present
     if (video_stream_index >= 0) {
         AVStream* vStream = play_fmt->streams[video_stream_index];
+
+        AVRational fr = av_guess_frame_rate(play_fmt, vStream, nullptr);
+        if (fr.num && fr.den)
+            video_fps = (double)fr.num / (double)fr.den;
+        else
+            video_fps = 60.0;
+
         evo_vdec_open_params vp;
         std::memset(&vp, 0, sizeof(vp));
-        vp.backend = g_vdec_force_ffmpeg ? EVO_VDEC_BACKEND_FFMPEG : EVO_VDEC_BACKEND_FFMPEG;
+        vp.backend = g_vdec_force_ffmpeg
+                         ? EVO_VDEC_BACKEND_FFMPEG
+                         : evo_vdec_pref_resolve(EVO_VDEC_PREF_AUTO, vStream->codecpar->codec_id);
         vp.codec_id = vStream->codecpar->codec_id;
         vp.width = vStream->codecpar->width;
         vp.height = vStream->codecpar->height;
         vp.avctx_params = vStream->codecpar;
         vp.thread_count = 4;
-        vp.thread_type = FF_THREAD_FRAME;
+        /* Frame threading for HEVC; slice threading for H.264 to prevent frame worker stack exhaustion */
+        vp.thread_type = (vStream->codecpar->codec_id == AV_CODEC_ID_HEVC)
+                            ? FF_THREAD_FRAME
+                            : FF_THREAD_SLICE;
+        vp.flag2_fast = (vStream->codecpar->codec_id == AV_CODEC_ID_HEVC);
+        vp.skip_loop_filter = EVO_VDEC_KEEP;
+        vp.skip_frame = EVO_VDEC_KEEP;
+        vp.skip_idct = EVO_VDEC_KEEP;
+
         evo_vdec_backend chosen = EVO_VDEC_BACKEND_FFMPEG;
         g_vdec = evo_vdec_open(&vp, &chosen);
         if (!g_vdec) {
             evo_boot_log("PlaybackController: failed to open video decoder");
+        } else {
+            evo_boot_log("PlaybackController: video decoder opened (backend=%s, codec=%d, %dx%d @ %.2f fps)",
+                         (chosen == EVO_VDEC_BACKEND_NATIVE) ? "NATIVE (sceVideodec2)" : "FFmpeg",
+                         vStream->codecpar->codec_id,
+                         vp.width, vp.height, video_fps);
         }
     }
 
@@ -338,13 +401,57 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
             audio_ctx = avcodec_alloc_context3(aDec);
             if (audio_ctx && avcodec_parameters_to_context(audio_ctx, aStream->codecpar) >= 0) {
                 if (avcodec_open2(audio_ctx, aDec, nullptr) >= 0) {
-                    // AudioOut open
-                    int chCount = audio_ctx->ch_layout.nb_channels;
-                    int portType = (chCount > 2) ? 2 /* 8CH */ : 1 /* Stereo */;
-                    evo_audio_channels = (portType == 2) ? 8 : 2;
-
                     sceAudioOutInit();
-                    audio_handle = sceAudioOutOpen(0xFF, 0, 0, 1024, 48000, portType);
+
+                    /*
+                     * The grain passed to sceAudioOutOpen is how many frames
+                     * sceAudioOutOutput() consumes per call, and the output
+                     * thread hands it whole AUDIO_BLOCK_SAMPLES blocks. Open
+                     * the port with any other grain and the tail of every
+                     * block is silently discarded while audio_samples_played
+                     * still advances by a full block - the audio clock then
+                     * runs fast by exactly that ratio and drags the
+                     * audio-mastered video pacing along with it.
+                     */
+                    int chCount = audio_ctx->ch_layout.nb_channels;
+                    int handle = -1;
+
+                    if (chCount > 2) {
+                        handle = sceAudioOutOpen(0xFF, 0, 0,
+                                                 AUDIO_BLOCK_SAMPLES, 48000,
+                                                 2 /* S16_8CH */);
+                        if (handle >= 1) {
+                            evo_audio_channels = 8;
+                        } else {
+                            toast("AUDIO",
+                                  "surround port refused, falling back to stereo");
+                        }
+                    }
+
+                    /* Surround refused (or a genuinely stereo source): stereo. */
+                    if (handle < 1) {
+                        evo_audio_channels = 2;
+                        handle = sceAudioOutOpen(0xFF, 0, 0,
+                                                 AUDIO_BLOCK_SAMPLES, 48000,
+                                                 1 /* S16_STEREO */);
+                    }
+
+                    audio_handle = handle;
+
+                    if (audio_handle < 1) {
+                        toast("AUDIO OUTPUT ERROR",
+                              "PS5 audio output could not start");
+                    }
+
+                    detected_audio_rate = (audio_ctx->sample_rate > 0)
+                                              ? audio_ctx->sample_rate
+                                              : 48000;
+
+                    audio_queue_read = 0;
+                    audio_queue_write = 0;
+                    audio_queue_count = 0;
+                    audio_accum_pos = 0;
+
                     prospero_audio_resampler_reset();
                 }
             }
@@ -572,6 +679,23 @@ void PlaybackController::saveResumePosition() {
         std::fprintf(fp, "%s\n%.2f\n", m_currentFilePath.c_str(), pos);
         std::fclose(fp);
     }
+
+    /*
+     * The resume file above is only read by the browser. Home, Recent and
+     * Favorites all start playback from recent_files[i].last_pos instead, and
+     * the only writer of that field is startPlayback(), which stores the offset
+     * playback *began* at. Without this second half the stored position never
+     * advances past the point a file was last opened from, so every launch
+     * replays from the same frozen timestamp. (Pre-refactor this was
+     * recent_update_current_position(); it has no caller any more.)
+     */
+    std::string title, category;
+    if (auto metaService = Application::getInstance().getMediaMetadataService()) {
+        metaService->cleanMediaTitle(m_currentFilePath, title, category);
+    }
+    recent_add_or_update(m_currentFilePath.c_str(), title.c_str(),
+                         pos, m_durationSeconds);
+    recent_save();
 }
 
 double PlaybackController::loadResumePosition(const std::string& filePath) const {

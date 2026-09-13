@@ -53,6 +53,16 @@ public:
     void navigateTo(ScreenId screenId);
     bool navigateBack();
 
+    /**
+     * @brief The screen the player was launched from.
+     *
+     * Walks the history back past the player and the screens that live on top
+     * of it (exit confirm, resume prompt, media info, subtitle picker) to
+     * whatever screen actually started playback, so stopping a video returns
+     * there instead of a hardcoded destination. Falls back to MainMenu.
+     */
+    ScreenId getPlaybackReturnScreen() const;
+
     ScreenId getCurrentScreenId() const { return m_currentScreenId; }
     IScreen* getCurrentScreen() const;
     IScreen* getScreen(ScreenId screenId) const;

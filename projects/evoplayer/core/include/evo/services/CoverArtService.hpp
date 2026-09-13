@@ -20,6 +20,7 @@ public:
     void ensureHeroArt(const std::string& mediaPath) override;
     const uint32_t* getHeroArtPixels() const override { return m_heroArtValid ? m_heroArtPixels.data() : nullptr; }
     bool isHeroArtValid() const override { return m_heroArtValid; }
+    const std::string& getHeroArtPath() const override { return m_heroArtPath; }
 
     void ensureBrowserPreview(const std::string& mediaPath, bool isDirectory) override;
     const uint32_t* getBrowserPreviewPixels() const override;

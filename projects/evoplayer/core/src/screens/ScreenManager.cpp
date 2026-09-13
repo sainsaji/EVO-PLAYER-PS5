@@ -189,6 +189,22 @@ bool ScreenManager::navigateBack() {
     return true;
 }
 
+ScreenId ScreenManager::getPlaybackReturnScreen() const {
+    for (auto it = m_history.rbegin(); it != m_history.rend(); ++it) {
+        switch (*it) {
+            case ScreenId::Player:
+            case ScreenId::ExitConfirm:
+            case ScreenId::ResumePrompt:
+            case ScreenId::MediaInfo:
+            case ScreenId::SubtitlePicker:
+                continue;          /* part of the playback session, keep walking */
+            default:
+                return *it;
+        }
+    }
+    return ScreenId::MainMenu;
+}
+
 void ScreenManager::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
     if (m_railFocused) {
         if (pressed & PadButtons::Up) {

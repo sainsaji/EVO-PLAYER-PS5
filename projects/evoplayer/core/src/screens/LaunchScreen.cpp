@@ -45,6 +45,8 @@ void LaunchScreen::onEnter() {
     evo::animation::AnimationManager::getInstance().setContinuousAnimation(true);
     m_selectedRow = (recent_file_count > 0) ? 0 : 2;
     m_selectedCol = 0;
+    m_heroSettlePath.clear();
+    m_heroSettleMs = 0.0;
     if (m_selectedRow == 0) m_launchFsm.postEvent(LaunchScreenEvent::FocusHero);
     else if (m_selectedRow == 1) m_launchFsm.postEvent(LaunchScreenEvent::FocusRecent);
     else m_launchFsm.postEvent(LaunchScreenEvent::FocusLibrary);
@@ -55,9 +57,35 @@ void LaunchScreen::onExit() {
     StatefulScreen::onExit();
 }
 
+std::string LaunchScreen::heroPathForSelection() const {
+    if (recent_file_count <= 0) {
+        return std::string();
+    }
+
+    int heroIdx = 0;
+    bool railFocused = false;
+    if (auto sm = Application::getInstance().getScreenManager()) {
+        railFocused = sm->isRailFocused();
+    }
+    if (!railFocused && m_selectedRow == 1 &&
+        m_selectedCol >= 0 && m_selectedCol < recent_file_count) {
+        heroIdx = m_selectedCol;
+    }
+    return std::string(recent_files[heroIdx].path);
+}
+
 void LaunchScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
     m_launchFsm.update(deltaMs);
+
+    /* Restart the debounce whenever the cursor lands on a different file. */
+    std::string heroPath = heroPathForSelection();
+    if (heroPath != m_heroSettlePath) {
+        m_heroSettlePath = heroPath;
+        m_heroSettleMs = 0.0;
+    } else if (m_heroSettleMs < HeroSettleMs) {
+        m_heroSettleMs += deltaMs;
+    }
 }
 
 void LaunchScreen::navigate(int dx, int dy) {
@@ -226,11 +254,25 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
             params.hero_progress = static_cast<int>((r.last_pos / r.duration) * 1000.0);
         }
         if (coverService) {
-            coverService->ensureHeroArt(r.path);
-            if (coverService->isHeroArtValid()) {
+            /*
+             * Only pay for the 960x540 extraction once the cursor has settled
+             * (see HeroSettleMs). While it is moving, the shelf's own cached
+             * 320x180 poster is the backdrop - it is the same aspect and it is
+             * already decoded, so a D-pad press costs nothing.
+             */
+            if (m_heroSettleMs >= HeroSettleMs) {
+                coverService->ensureHeroArt(r.path);
+            }
+
+            if (coverService->isHeroArtValid() &&
+                coverService->getHeroArtPath() == r.path) {
                 params.hero_art = coverService->getHeroArtPixels();
                 params.hero_art_w = ICoverArtService::HeroWidth;
                 params.hero_art_h = ICoverArtService::HeroHeight;
+            } else if (const uint32_t* poster = coverService->peekCoverArt(r.path)) {
+                params.hero_art = poster;
+                params.hero_art_w = ICoverArtService::PosterWidth;
+                params.hero_art_h = ICoverArtService::PosterHeight;
             }
         }
     } else {

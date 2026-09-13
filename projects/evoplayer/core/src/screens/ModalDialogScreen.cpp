@@ -63,7 +63,7 @@ void ModalDialogScreen::executeAction(int actionIndex) {
             if (playback) {
                 playback->stopPlayback();
             }
-            screenMgr->navigateTo(ScreenId::UsbBrowser);
+            screenMgr->navigateTo(screenMgr->getPlaybackReturnScreen());
         }
     } else {
         // Resume prompt
@@ -106,7 +106,7 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
             if (m_type == ModalType::ExitConfirm) {
                 sm->navigateTo(ScreenId::Player);
             } else {
-                sm->navigateTo(ScreenId::UsbBrowser);
+                sm->navigateTo(sm->getPlaybackReturnScreen());
             }
         }
         return true;
@@ -141,6 +141,7 @@ void ModalDialogScreen::render(uint32_t* framebuffer, int width, int height) {
         dialog.actions[1].label = "STOP";
         dialog.actions[1].icon_path = "/assets/icons/btn_cross.png";
         dialog.actions[1].is_primary = 1;
+    } else {
         dialog.eyebrow = "RESUME";
         dialog.title = "Continue from previous position?";
 
