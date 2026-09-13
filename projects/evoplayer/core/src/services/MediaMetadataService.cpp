@@ -209,7 +209,6 @@ int MediaMetadataService::calculateProgressPermille(double currentPosition, doub
 bool MediaMetadataService::exportCompatibilityReport(const std::string& outputPath,
                                                     const MediaMetadataInfo& metadata,
                                                     double playbackPosition,
-                                                    PlaybackProfile profile,
                                                     int recentCount,
                                                     int favoriteCount,
                                                     bool isPlaying) {
@@ -223,18 +222,9 @@ bool MediaMetadataService::exportCompatibilityReport(const std::string& outputPa
     std::string durationStr = formatDuration(metadata.durationSeconds);
     std::string positionStr = formatDuration(playbackPosition);
 
-    const char* profileStr = "Balanced";
-    switch (profile) {
-        case PlaybackProfile::Balanced:      profileStr = "Balanced"; break;
-        case PlaybackProfile::Performance:   profileStr = "Performance"; break;
-        case PlaybackProfile::Compatibility: profileStr = "Compatibility"; break;
-        case PlaybackProfile::Debug:         profileStr = "Debug"; break;
-    }
-
     std::fprintf(file, "EVO Player Compatibility Report\n");
     std::fprintf(file, "====================================\n\n");
     std::fprintf(file, "Build\nVERSION %s\n\n", EVO_PLAYER_VERSION);
-    std::fprintf(file, "Playback Profile\n%s\n\n", profileStr);
     std::fprintf(file, "File\n%s\n\n", metadata.filePath.c_str());
     std::fprintf(file, "Title\n%s\n\n", metadata.title.c_str());
     std::fprintf(file, "Container\n%s\n\n", metadata.container.c_str());

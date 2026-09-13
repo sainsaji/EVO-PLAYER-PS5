@@ -306,13 +306,14 @@ struct EvoBrowserRow {
     std::string detail;
     std::string icon_path;
     std::string badge;
+    std::string duration;
     int progress = -1;
     bool is_favorite = false;
     bool is_focused = false;
 
     bool operator==(const EvoBrowserRow& o) const {
         return name == o.name && detail == o.detail && icon_path == o.icon_path &&
-               badge == o.badge && progress == o.progress &&
+               badge == o.badge && duration == o.duration && progress == o.progress &&
                is_favorite == o.is_favorite && is_focused == o.is_focused;
     }
     bool operator!=(const EvoBrowserRow& o) const { return !(*this == o); }
@@ -323,6 +324,10 @@ struct EvoBrowserState {
     std::string title;
     bool at_root = true;
     bool rail_focused = false;
+
+    bool sidebar_focused = false;
+    int sidebar_index = 0;
+    int active_source = 0;
 
     int total_count = 0;
     int cursor_index = -1;
@@ -342,15 +347,25 @@ struct EvoBrowserState {
     int ins_preview_h = 0;
     std::vector<std::pair<std::string, std::string>> ins_props;
 
+    std::string status_res;
+    std::string status_vcodec;
+    std::string status_acodec;
+    std::string status_duration;
+    std::string status_size;
+
     bool operator==(const EvoBrowserState& o) const {
         return path == o.path && title == o.title && at_root == o.at_root && rail_focused == o.rail_focused &&
+               sidebar_focused == o.sidebar_focused && sidebar_index == o.sidebar_index && active_source == o.active_source &&
                total_count == o.total_count && cursor_index == o.cursor_index &&
                rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
                empty_hint == o.empty_hint && ins_name == o.ins_name &&
                ins_kind == o.ins_kind && ins_ext == o.ins_ext &&
                ins_probing == o.ins_probing && ins_preview_badge == o.ins_preview_badge &&
                ins_preview == o.ins_preview && ins_preview_w == o.ins_preview_w &&
-               ins_preview_h == o.ins_preview_h && ins_props == o.ins_props;
+               ins_preview_h == o.ins_preview_h && ins_props == o.ins_props &&
+               status_res == o.status_res && status_vcodec == o.status_vcodec &&
+               status_acodec == o.status_acodec && status_duration == o.status_duration &&
+               status_size == o.status_size;
     }
     bool operator!=(const EvoBrowserState& o) const { return !(*this == o); }
 };

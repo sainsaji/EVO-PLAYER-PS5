@@ -47,6 +47,10 @@ extern volatile double    audio_clock_seconds;
 extern volatile double    audio_pts_seconds;
 extern double             first_audio_pts_seconds;
 extern int                detected_audio_rate;
+
+/* Native audio decoder for the open stream, or NULL when it is on FFmpeg. */
+struct evo_adec;
+extern struct evo_adec   *g_adec;
 extern volatile int       audio_thread_running;
 extern pthread_t          audio_thread;
 extern volatile int       audio_decode_thread_running;

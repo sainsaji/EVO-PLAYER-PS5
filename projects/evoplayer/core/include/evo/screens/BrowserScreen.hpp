@@ -27,6 +27,11 @@ enum class BrowserScreenEvent : int {
     FinishSearch = 3
 };
 
+enum class BrowserFocusPane : int {
+    Sidebar = 0,
+    Grid = 1
+};
+
 class BrowserScreen : public StatefulScreen {
 public:
     BrowserScreen();
@@ -54,15 +59,25 @@ private:
     void jumpPage(int direction);
     void jumpLetter(int direction);
     void activateSelection();
+    void activateSidebar();
     void openSearch();
+    void rebuildFilteredIndices();
 
     StateMachine<BrowserScreenState, BrowserScreenEvent> m_browserFsm;
+
+    BrowserFocusPane m_focusPane = BrowserFocusPane::Grid;
+    int m_sidebarIndex = 0;
+    int m_activeSource = 0;
+    int m_categoryFilter = -1;
+    std::vector<size_t> m_filteredIndices;
 
     int m_selectedIndex = 0;
     int m_scrollOffset = 0;
     double m_settleMs = 0.0;
     MediaMetadataInfo m_cachedMetadata;
+    char m_formattedPath[256];
     char m_rowDetails[16][64];
+    char m_rowDurations[16][32];
     char m_insName[128];
     char m_insKind[32];
     char m_insExt[16];
@@ -73,6 +88,11 @@ private:
     char m_insACodec[32];
     char m_insSubs[16];
     char m_insContainer[32];
+    char m_statusRes[64];
+    char m_statusVCodec[64];
+    char m_statusACodec[64];
+    char m_statusDuration[32];
+    char m_statusSize[32];
     struct InsProp {
         const char* key;
         const char* value;

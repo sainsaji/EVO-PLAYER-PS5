@@ -19,10 +19,6 @@ public:
     virtual bool loadSettings() = 0;
     virtual bool saveSettings() = 0;
 
-    virtual PlaybackProfile getProfile() const = 0;
-    virtual void setProfile(PlaybackProfile profile) = 0;
-    virtual const char* getProfileName(PlaybackProfile profile) const = 0;
-
     virtual bool isResumePlaybackEnabled() const = 0;
     virtual void setResumePlaybackEnabled(bool enabled) = 0;
 

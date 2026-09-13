@@ -219,7 +219,7 @@
                         <div class="tile-status" id="lib-status-4"></div>
                         <div class="tile-caption">
                             <div class="tile-title" id="lib-title-4">SETTINGS</div>
-                            <div class="tile-detail" id="lib-detail-4">Playback profiles and preferences</div>
+                            <div class="tile-detail" id="lib-detail-4">Playback and display preferences</div>
                         </div>
                     </div>
                     <div class="tile tile-destination" id="lib-tile-5">

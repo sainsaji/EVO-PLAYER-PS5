@@ -9,6 +9,7 @@
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
+#include "evo_adec.h"
 #include "evo_subtitle.h"
 #include "evo_stream_io.h"
 #include "evo_recent.h"
@@ -246,6 +247,11 @@ void PlaybackController::stopPlayback() {
         audio_handle = -1;
     }
 
+    if (g_adec) {
+        evo_adec_close(g_adec);
+        g_adec = nullptr;
+    }
+
     prospero_audio_resampler_destroy();
 
     if (audio_ctx) {
@@ -469,6 +475,27 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
                     audio_accum_pos = 0;
 
                     prospero_audio_resampler_reset();
+
+                    /*
+                     * Offload AAC/MP3 to libSceAudiodec when it will take the
+                     * stream. audio_ctx stays open either way: it is what the
+                     * OSD reads for codec metadata, and it is the fallback the
+                     * decode thread drops to if a native AU ever fails.
+                     */
+                    evo_adec_open_params ap;
+                    std::memset(&ap, 0, sizeof(ap));
+                    ap.codec_id = aStream->codecpar->codec_id;
+                    ap.sample_rate = aStream->codecpar->sample_rate;
+                    ap.channels = chCount;
+                    ap.extradata = aStream->codecpar->extradata;
+                    ap.extradata_size = aStream->codecpar->extradata_size;
+
+                    evo_adec_backend achosen = EVO_ADEC_BACKEND_FFMPEG;
+                    g_adec = evo_adec_open(&ap, &achosen);
+                    evo_boot_log("PlaybackController: audio %s (codec=%d, %dch, %d Hz)",
+                                 (achosen == EVO_ADEC_BACKEND_NATIVE)
+                                     ? "NATIVE (sceAudiodec)" : "FFmpeg",
+                                 (int)ap.codec_id, ap.channels, ap.sample_rate);
                 }
             }
         }
@@ -508,6 +535,8 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
 
         if (av_seek_frame(play_fmt, seekStream, seekTs, AVSEEK_FLAG_BACKWARD) >= 0) {
             evo_vdec_flush(g_vdec);
+            if (g_adec)
+                evo_adec_flush(g_adec);
             if (audio_ctx) {
                 avcodec_flush_buffers(audio_ctx);
                 prospero_audio_resampler_reset();

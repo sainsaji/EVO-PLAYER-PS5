@@ -1210,18 +1210,17 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
 
     m_last_browser = state;
 
-    const std::string accent   = to_hex_rgb(m_theme.accent);
-    const std::string surface  = to_hex_rgba(m_theme.surface);
-    const std::string surf_sel = to_hex_rgba(m_theme.surface_sel);
-    const std::string border   = to_hex_rgba(m_theme.border);
-    const std::string text_1   = to_hex_rgb(m_theme.text_primary);
-    const std::string text_2   = to_hex_rgb(m_theme.text_secondary);
-    const std::string text_3   = to_hex_rgb(m_theme.text_muted);
+    /* Ubuntu Yaru Dark theme for storage browser */
+    const std::string accent   = "#e95420"; // Signature Ubuntu Orange
+    const std::string text_1   = "#ffffff"; // Crisp white
+    const std::string text_2   = "#dfdbce"; // Ubuntu warm grey
+    const std::string text_3   = "#9e9e9e"; // Ubuntu muted grey
 
     auto el = [&](const std::string& id) { return m_browser_doc->GetElementById(id); };
 
+    /* 1. Header Toolbar */
     if (Rml::Element* e = el("browser-indicator")) e->SetProperty("background-color", accent);
-    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, to_hex_rgb(m_theme.accent_alt));
+    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, "#e95420");
     if (Rml::Element* e = el("browser-title")) e->SetInnerRML(state.title);
     if (Rml::Element* e = el("browser-path")) {
         e->SetInnerRML(state.path);
@@ -1230,17 +1229,38 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (Rml::Element* e = el("browser-counter")) {
         std::ostringstream ss;
         if (state.total_count > 0 && state.cursor_index >= 0)
-            ss << (state.cursor_index + 1) << " OF " << state.total_count;
+            ss << (state.cursor_index + 1) << " / " << state.total_count;
         else
-            ss << state.total_count << " ITEMS";
+            ss << state.total_count << (state.total_count == 1 ? " ITEM" : " ITEMS");
         e->SetInnerRML(ss.str());
-        e->SetProperty("color", text_3);
     }
-    /* At the root there is nowhere to go back to, so the hint would be a lie. */
-    if (Rml::Element* e = el("bhint-back"))
-        e->SetProperty("display", state.at_root ? "none" : "flex");
 
-    if (Rml::Element* e = el("browser-list"))
+    /* 2. Left Sidebar (Places & Filters) */
+    for (int i = 0; i < 7; i++) {
+        const std::string n = std::to_string(i);
+        Rml::Element* item = el("sb-item-" + n);
+        Rml::Element* icon = el("sb-icon-" + n);
+        if (!item) continue;
+
+        bool active = (i == state.active_source);
+        bool focused = (state.sidebar_focused && i == state.sidebar_index);
+
+        item->SetClass("sb-item-active", active);
+        item->SetClass("sb-item-focused", focused);
+
+        if (icon) {
+            if (focused) {
+                SetImageColor(icon, "#e95420");
+            } else if (active) {
+                SetImageColor(icon, "#e95420");
+            } else {
+                SetImageColor(icon, text_3);
+            }
+        }
+    }
+
+    /* 3. Empty State & Media Grid Cards */
+    if (Rml::Element* e = el("browser-grid"))
         e->SetProperty("display", state.is_empty ? "none" : "flex");
     if (Rml::Element* e = el("browser-empty"))
         e->SetProperty("display", state.is_empty ? "flex" : "none");
@@ -1250,55 +1270,59 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         if (Rml::Element* e = el("browser-empty-icon"))  SetImageColor(e, text_3);
     }
 
+    std::string prev = ArtSource(kBrowserArtSlot, state.ins_preview,
+                                 state.ins_preview_w, state.ins_preview_h,
+                                 state.ins_name);
+
     for (int i = 0; i < kBrowserRows; i++) {
         const std::string n = std::to_string(i);
-        Rml::Element* row    = el("brow-" + n);
-        Rml::Element* icon   = el("brow-icon-" + n);
-        Rml::Element* name   = el("brow-name-" + n);
-        Rml::Element* detail = el("brow-detail-" + n);
-        Rml::Element* fav    = el("brow-fav-" + n);
-        Rml::Element* badge  = el("brow-badge-" + n);
-        Rml::Element* track  = el("brow-track-" + n);
-        Rml::Element* fill   = el("brow-fill-" + n);
+        Rml::Element* card     = el("brow-" + n);
+        Rml::Element* art      = el("brow-art-" + n);
+        Rml::Element* icon     = el("brow-icon-" + n);
+        Rml::Element* name     = el("brow-name-" + n);
+        Rml::Element* detail   = el("brow-detail-" + n);
+        Rml::Element* badge    = el("brow-badge-" + n);
+        Rml::Element* fav      = el("brow-fav-" + n);
+        Rml::Element* duration = el("brow-duration-" + n);
+        Rml::Element* track    = el("brow-track-" + n);
+        Rml::Element* fill     = el("brow-fill-" + n);
+        Rml::Element* kind     = el("brow-kind-" + n);
+        Rml::Element* ext      = el("brow-ext-" + n);
 
-        if (!row) continue;
+        if (!card) continue;
 
         if (i >= (int)state.rows.size()) {
-            row->SetProperty("display", "none");
+            card->SetProperty("display", "none");
             continue;
         }
 
         const EvoBrowserRow& r = state.rows[i];
-        bool focused = r.is_focused && !state.rail_focused;
+        bool focused = r.is_focused && !state.rail_focused && !state.sidebar_focused;
 
-        row->SetProperty("display", "flex");
-        row->SetClass("brow-focused", focused);
-        if (focused) {
-            row->SetProperty("background-color", surf_sel);
-            row->SetProperty("border-color", accent);
-            row->SetProperty("border-width", "1.5px");
-        } else {
-            row->SetProperty("background-color", surface);
-            row->SetProperty("border-color", border);
-            row->SetProperty("border-width", "1px");
+        card->SetProperty("display", "flex");
+        card->SetClass("grid-card-focused", focused);
+
+        if (art && icon) {
+            if (focused && !prev.empty()) {
+                art->SetProperty("display", "block");
+                art->SetProperty("decorator", "image(" + prev + " cover)");
+                icon->SetProperty("display", "none");
+            } else {
+                art->SetProperty("display", "none");
+                icon->SetProperty("display", "inline-block");
+                if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+                bool isFolder = (r.icon_path.find("folder") != std::string::npos ||
+                                 r.icon_path.find("usb") != std::string::npos);
+                SetImageColor(icon, isFolder ? "#e95420" : text_3);
+            }
         }
 
-        if (icon) {
-            if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
-            SetImageColor(icon, focused ? accent : text_3);
-        }
         if (name) {
             name->SetInnerRML(r.name);
-            name->SetProperty("color", text_1);
         }
         if (detail) {
             detail->SetProperty("display", r.detail.empty() ? "none" : "block");
             detail->SetInnerRML(r.detail);
-            detail->SetProperty("color", focused ? accent : text_3);
-        }
-        if (fav) {
-            fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
-            SetImageColor(fav, accent);
         }
         if (badge) {
             if (r.badge.empty()) {
@@ -1306,102 +1330,78 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
             } else {
                 badge->SetProperty("display", "inline-block");
                 badge->SetInnerRML(r.badge);
-                if (focused) {
-                    badge->SetProperty("background-color", "#ffcd0029");
-                    badge->SetProperty("border-color", accent);
-                    badge->SetProperty("color", accent);
-                } else {
-                    badge->SetProperty("background-color", "#060c16d2");
-                    badge->SetProperty("border-color", "#7896c856");
-                    badge->SetProperty("color", "#cfe0ff");
-                }
             }
+        }
+        if (fav) {
+            fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
+            SetImageColor(fav, accent);
+        }
+        if (duration) {
+            duration->SetProperty("display", r.duration.empty() ? "none" : "block");
+            duration->SetInnerRML(r.duration);
         }
         if (track) {
             track->SetProperty("display", r.progress >= 0 ? "block" : "none");
-            track->SetProperty("background-color", border);
         }
         if (fill) {
             fill->SetProperty("width", pct_string(r.progress));
-            fill->SetProperty("background-color", accent);
+        }
+        if (kind) {
+            kind->SetInnerRML(r.badge.empty() ? "MEDIA" : r.badge);
+        }
+        if (ext) {
+            size_t dot = r.name.find_last_of('.');
+            if (dot != std::string::npos && dot + 1 < r.name.size()) {
+                std::string e = r.name.substr(dot + 1);
+                std::transform(e.begin(), e.end(), e.begin(), ::toupper);
+                ext->SetInnerRML(e);
+                ext->SetProperty("display", "inline-block");
+            } else {
+                ext->SetInnerRML(r.badge == "DIR" || r.badge == "FOLDER" ? "DIR" : "FILE");
+                ext->SetProperty("display", "inline-block");
+            }
         }
     }
 
-    /* ---- inspector ---- */
-    if (Rml::Element* e = el("inspector")) {
-        e->SetProperty("background-color", surface);
-        e->SetProperty("border-color", border);
-    }
-
-    std::string prev = ArtSource(kBrowserArtSlot, state.ins_preview,
-                                 state.ins_preview_w, state.ins_preview_h,
-                                 state.ins_name);
-    if (Rml::Element* e = el("ins-preview-art")) {
-        if (prev.empty()) {
-            e->SetProperty("display", "none");
-        } else {
-            e->SetProperty("display", "block");
-            e->SetProperty("decorator", "image(" + prev + " cover)");
-        }
-    }
-    if (Rml::Element* e = el("ins-preview-empty"))
-        e->SetProperty("display", prev.empty() ? "block" : "none");
-
-    if (Rml::Element* e = el("ins-preview-play")) {
-        e->SetProperty("display", prev.empty() ? "none" : "flex");
-    }
-    if (Rml::Element* e = el("ins-preview-play-icon")) {
-        SetImageColor(e, "#ffffff");
-    }
-
-    if (Rml::Element* e = el("ins-preview-badge")) {
-        if (state.ins_preview_badge.empty() || prev.empty()) {
-            e->SetProperty("display", "none");
-        } else {
-            e->SetProperty("display", "block");
-            e->SetInnerRML(state.ins_preview_badge);
-        }
-    }
-
+    /* 4. Bottom Status & Selection Strip */
     if (Rml::Element* e = el("ins-name")) {
-        e->SetInnerRML(state.ins_name);
-        e->SetProperty("color", text_1);
+        e->SetInnerRML(state.ins_name.empty() ? "No Selection" : state.ins_name);
     }
-    if (Rml::Element* e = el("ins-kind")) {
-        e->SetInnerRML(state.ins_kind);
-        e->SetProperty("color", to_hex_rgb(m_theme.accent_alt));
+    if (Rml::Element* e = el("status-pill-res")) {
+        e->SetProperty("display", state.status_res.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_res);
     }
-    if (Rml::Element* e = el("ins-ext")) {
-        e->SetProperty("display", state.ins_ext.empty() ? "none" : "inline-block");
-        e->SetInnerRML(state.ins_ext);
-        e->SetProperty("background-color", "#060c16d2");
-        e->SetProperty("border-color", "#7896c856");
-        e->SetProperty("color", "#cfe0ff");
+    if (Rml::Element* e = el("status-pill-vcodec")) {
+        e->SetProperty("display", state.status_vcodec.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_vcodec);
     }
-    if (Rml::Element* e = el("ins-probing"))
-        e->SetProperty("display", state.ins_probing ? "block" : "none");
+    if (Rml::Element* e = el("status-pill-acodec")) {
+        e->SetProperty("display", state.status_acodec.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_acodec);
+    }
+    if (Rml::Element* e = el("status-pill-duration")) {
+        e->SetProperty("display", state.status_duration.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_duration);
+    }
+    if (Rml::Element* e = el("status-pill-size")) {
+        e->SetProperty("display", state.status_size.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_size);
+    }
+    if (Rml::Element* e = el("ins-probing")) {
+        e->SetProperty("display", state.ins_probing ? "inline-block" : "none");
+    }
 
-    for (int i = 0; i < kBrowserProps; i++) {
-        const std::string n = std::to_string(i);
-        Rml::Element* prop = el("ins-prop-" + n);
-        Rml::Element* key  = el("ins-key-" + n);
-        Rml::Element* val  = el("ins-val-" + n);
-
-        if (!prop) continue;
-
-        if (i >= (int)state.ins_props.size()) {
-            prop->SetProperty("display", "none");
-            continue;
+    if (Rml::Element* e = el("footer-action-label")) {
+        if (state.sidebar_focused) {
+            e->SetInnerRML("SELECT");
+        } else if (state.ins_kind == "Folder" || state.ins_kind == "FOLDER" || state.ins_kind == "DIR") {
+            e->SetInnerRML("OPEN");
+        } else {
+            e->SetInnerRML("PLAY");
         }
-        prop->SetProperty("display", "flex");
-        if (key) {
-            key->SetInnerRML(state.ins_props[i].first);
-            key->SetProperty("color", text_3);
-        }
-        if (val) {
-            val->SetInnerRML(state.ins_props[i].second);
-            val->SetProperty("color", text_1);
-        }
+    }
+    if (Rml::Element* e = el("bhint-back")) {
+        e->SetProperty("display", (state.at_root && state.sidebar_focused) ? "none" : "flex");
     }
 }
 

@@ -262,6 +262,7 @@ typedef struct {
     const char* detail;
     const char* icon_path;
     const char* badge;       /* DIR / 4K / HD / AUDIO */
+    const char* duration;    /* e.g. 02:14:32 or empty */
     int         progress;    /* 0..1000 resume position, or -1 */
     int         is_favorite;
     int         is_focused;
@@ -273,6 +274,11 @@ typedef struct {
     int         at_root;       /* hides the "back" hint */
     int         rail_focused;
 
+    /* Ubuntu-style Places / Sources Sidebar */
+    int         sidebar_focused;
+    int         sidebar_index;   /* 0..6 */
+    int         active_source;   /* 0..6 */
+
     int         total_count;   /* items in the folder */
     int         cursor_index;  /* absolute index under the cursor, or -1 */
     int         row_count;     /* rows populated below */
@@ -282,7 +288,7 @@ typedef struct {
     const char* empty_title;
     const char* empty_hint;
 
-    /* Inspector */
+    /* Inspector & Bottom Status Strip */
     const char* ins_name;
     const char* ins_kind;
     const char* ins_ext;
@@ -296,6 +302,13 @@ typedef struct {
         const char* key;
         const char* value;
     } ins_props[EVO_RMLUI_BROWSER_PROPS];
+
+    /* Media status specifications */
+    const char* status_res;
+    const char* status_vcodec;
+    const char* status_acodec;
+    const char* status_duration;
+    const char* status_size;
 } evo_rmlui_browser_params_t;
 
 /*

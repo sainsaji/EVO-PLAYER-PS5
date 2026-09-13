@@ -16,16 +16,6 @@ SettingsService::SettingsService() {
     m_themeName = "EVO Dark";
 }
 
-const char* SettingsService::getProfileName(PlaybackProfile profile) const {
-    switch (profile) {
-        case PlaybackProfile::Balanced:      return "Balanced";
-        case PlaybackProfile::Performance:   return "Performance";
-        case PlaybackProfile::Compatibility: return "Compatibility";
-        case PlaybackProfile::Debug:         return "Debug";
-        default:                             return "Balanced";
-    }
-}
-
 const char* SettingsService::getViewModeName(ViewMode mode) const {
     switch (mode) {
         case ViewMode::Fit:     return "FIT";
@@ -81,7 +71,7 @@ bool SettingsService::saveSettings() {
 
     std::fprintf(file,
         "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n",
-        static_cast<int>(m_profile),
+        0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
         m_autoSubtitlesEnabled ? 1 : 0,
@@ -140,11 +130,7 @@ bool SettingsService::loadSettings() {
 
     std::fclose(file);
 
-    if (readCount >= 1) {
-        if (rawProfile >= 0 && rawProfile <= 3) {
-            m_profile = static_cast<PlaybackProfile>(rawProfile);
-        }
-    }
+    (void)rawProfile;
     if (readCount >= 2) m_resumePlaybackEnabled = (rawResume != 0);
     if (readCount >= 3) {
         if (rawViewMode >= 0 && rawViewMode <= 2) {

@@ -166,7 +166,7 @@ void SettingsPlaybackScreen::onExit() {
 }
 
 void SettingsPlaybackScreen::navigate(int delta) {
-    constexpr int totalRows = 5;
+    constexpr int totalRows = 4;
     m_selectedIndex += delta;
     if (m_selectedIndex < 0) {
         m_selectedIndex = 0;
@@ -184,30 +184,23 @@ void SettingsPlaybackScreen::adjustValue(int delta) {
     if (!settings) return;
 
     switch (m_selectedIndex) {
-        case 0: { // Playback Profile
-            int p = static_cast<int>(settings->getProfile());
-            p = (p + delta + 4) % 4;
-            settings->setProfile(static_cast<PlaybackProfile>(p));
-            evo_feedback(EVO_FB_TOGGLE);
-            break;
-        }
-        case 1: { // Aspect Ratio
+        case 0: { // Aspect Ratio
             int v = static_cast<int>(settings->getDefaultViewMode());
             v = (v + delta + 3) % 3;
             settings->setDefaultViewMode(static_cast<ViewMode>(v));
             evo_feedback(EVO_FB_TOGGLE);
             break;
         }
-        case 2: { // Resume Playback
+        case 1: { // Resume Playback
             settings->setResumePlaybackEnabled(!settings->isResumePlaybackEnabled());
             evo_feedback(EVO_FB_TOGGLE);
             break;
         }
-        case 3: { // Surround Sound Test
+        case 2: { // Surround Sound Test
             // Handled via activateSelection
             break;
         }
-        case 4: { // Video Decoder
+        case 3: { // Video Decoder
             int d = static_cast<int>(settings->getVideoDecoderPreference());
             d = (d + delta + 3) % 3;
             settings->setVideoDecoderPreference(static_cast<DecoderPreference>(d));
@@ -219,7 +212,7 @@ void SettingsPlaybackScreen::adjustValue(int delta) {
 }
 
 void SettingsPlaybackScreen::activateSelection() {
-    if (m_selectedIndex == 3) {
+    if (m_selectedIndex == 2) {
         if (auto screenMgr = Application::getInstance().getScreenManager()) {
             evo_feedback(EVO_FB_OPEN);
             screenMgr->navigateTo(ScreenId::SurroundTest);
@@ -276,46 +269,39 @@ void SettingsPlaybackScreen::render(uint32_t* framebuffer, int width, int height
     std::memset(&params, 0, sizeof(params));
 
     params.title = "PLAYBACK & VIDEO";
-    params.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
-    params.counter = "5 SETTINGS";
+    params.subtitle = "SETTINGS  -  ASPECT RATIO, RESUME & DECODER";
+    params.counter = "4 SETTINGS";
     params.rail_active_idx = 5;
     params.rail_focused = 0;
-    params.row_count = 5;
+    params.row_count = 4;
 
-    params.rows[0].title = "PLAYBACK PROFILE";
-    params.rows[0].detail = "HOW AGGRESSIVELY THE DECODER IS TUNED";
-    params.rows[0].icon_path = "../icons/icon_settings.png";
-    params.rows[0].badge = settings->getProfileName(settings->getProfile());
+    params.rows[0].title = "DEFAULT ASPECT RATIO";
+    params.rows[0].detail = "FIT, FILL OR STRETCH";
+    params.rows[0].icon_path = "../icons/icon_aspect.png";
+    params.rows[0].badge = settings->getViewModeName(settings->getDefaultViewMode());
     params.rows[0].has_chevron = 1;
     params.rows[0].is_focused = (m_selectedIndex == 0);
 
-    params.rows[1].title = "DEFAULT ASPECT RATIO";
-    params.rows[1].detail = "FIT, FILL OR STRETCH";
-    params.rows[1].icon_path = "../icons/icon_aspect.png";
-    params.rows[1].badge = settings->getViewModeName(settings->getDefaultViewMode());
+    params.rows[1].title = "RESUME PLAYBACK";
+    params.rows[1].detail = "REMEMBER PLAYBACK POSITION";
+    params.rows[1].icon_path = "../icons/icon_resume.png";
+    params.rows[1].badge = settings->isResumePlaybackEnabled() ? "ON" : "OFF";
     params.rows[1].has_chevron = 1;
     params.rows[1].is_focused = (m_selectedIndex == 1);
 
-    params.rows[2].title = "RESUME PLAYBACK";
-    params.rows[2].detail = "REMEMBER PLAYBACK POSITION";
+    params.rows[2].title = "SURROUND SOUND TEST";
+    params.rows[2].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
     params.rows[2].icon_path = "../icons/icon_resume.png";
-    params.rows[2].badge = settings->isResumePlaybackEnabled() ? "ON" : "OFF";
+    params.rows[2].badge = "OPEN";
     params.rows[2].has_chevron = 1;
     params.rows[2].is_focused = (m_selectedIndex == 2);
 
-    params.rows[3].title = "SURROUND SOUND TEST";
-    params.rows[3].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
-    params.rows[3].icon_path = "../icons/icon_resume.png";
-    params.rows[3].badge = "OPEN";
+    params.rows[3].title = "VIDEO DECODER";
+    params.rows[3].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
+    params.rows[3].icon_path = "../icons/icon_developer_tools.png";
+    params.rows[3].badge = settings->getDecoderPreferenceBadge(settings->getVideoDecoderPreference());
     params.rows[3].has_chevron = 1;
     params.rows[3].is_focused = (m_selectedIndex == 3);
-
-    params.rows[4].title = "VIDEO DECODER";
-    params.rows[4].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
-    params.rows[4].icon_path = "../icons/icon_developer_tools.png";
-    params.rows[4].badge = settings->getDecoderPreferenceBadge(settings->getVideoDecoderPreference());
-    params.rows[4].has_chevron = 1;
-    params.rows[4].is_focused = (m_selectedIndex == 4);
 
     evo_rmlui_update_settings(&params);
     evo_rmlui_render_settings(framebuffer, width, height);

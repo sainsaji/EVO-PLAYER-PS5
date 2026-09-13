@@ -54,7 +54,6 @@ public:
     virtual bool exportCompatibilityReport(const std::string& outputPath,
                                            const MediaMetadataInfo& metadata,
                                            double playbackPosition,
-                                           PlaybackProfile profile,
                                            int recentCount,
                                            int favoriteCount,
                                            bool isPlaying) = 0;

@@ -23,6 +23,7 @@
 
 #include "evo_packet_queue.h"
 #include "evo_audio_resample.h"
+#include "evo_adec.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -296,6 +297,13 @@ static void mix_audio_frame_to_queue(
 }
 
 
+/* The live native audio decoder, or NULL when this stream is on FFmpeg.
+ * Owned by the playback controller; read only on the decode thread. */
+evo_adec *g_adec = NULL;
+/* One AAC frame is at most 2048 samples per channel; 64 KB covers stereo S16
+ * with room to spare and matches the capacity the reference PoC uses. */
+static int16_t g_adec_pcm[32 * 1024];
+
 void *audio_decode_thread_func(void *arg) {
     AVFrame *af = av_frame_alloc();
     if (!af) return NULL;
@@ -325,7 +333,49 @@ void *audio_decode_thread_func(void *arg) {
             continue;
         }
 
-        if (avcodec_send_packet(audio_ctx, pkt) == 0) {
+        /*
+         * Native decode (libSceAudiodec, AAC/MP3) produces interleaved S16 at
+         * the stream rate. Wrap it in an AVFrame and hand it to the same
+         * mix_audio_frame_to_queue() the FFmpeg path uses, so resampling to the
+         * 48 kHz port, channel mapping and the accumulator are all unchanged.
+         * g_adec is NULL for every other codec and after a native fatal, which
+         * is what makes the fallback a one-line branch rather than a mode.
+         */
+        int handled_natively = 0;
+        if (g_adec && evo_adec_active(g_adec) == EVO_ADEC_BACKEND_NATIVE) {
+            int produced = evo_adec_decode(g_adec, pkt->data, pkt->size,
+                                           g_adec_pcm, (int)sizeof(g_adec_pcm));
+            if (produced < 0) {
+                /* Latched fatal: drop to FFmpeg for the rest of the session. */
+                evo_adec_close(g_adec);
+                g_adec = NULL;
+            } else {
+                handled_natively = 1;
+                int ch = evo_adec_channels(g_adec);
+                int rate = evo_adec_rate(g_adec);
+                if (produced > 0 && ch > 0 && rate > 0) {
+                    av_frame_unref(af);
+                    af->format = AV_SAMPLE_FMT_S16;
+                    af->sample_rate = rate;
+                    av_channel_layout_default(&af->ch_layout, ch);
+                    af->nb_samples = produced / (int)sizeof(int16_t) / ch;
+                    if (af->nb_samples > 0 &&
+                        av_frame_get_buffer(af, 0) == 0) {
+                        memcpy(af->data[0], g_adec_pcm, (size_t)produced);
+                        if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
+                            audio_pts_seconds = pkt->pts *
+                                av_q2d(play_fmt->streams[audio_stream_index]->time_base);
+                            if (first_audio_pts_seconds < 0.0)
+                                first_audio_pts_seconds = audio_pts_seconds;
+                        }
+                        mix_audio_frame_to_queue(af);
+                    }
+                    av_frame_unref(af);
+                }
+            }
+        }
+
+        if (!handled_natively && avcodec_send_packet(audio_ctx, pkt) == 0) {
             while (audio_decode_thread_running && avcodec_receive_frame(audio_ctx, af) == 0) {
                 if (af->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
                     audio_pts_seconds = af->pts * av_q2d(play_fmt->streams[audio_stream_index]->time_base);

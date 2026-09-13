@@ -14,10 +14,6 @@ public:
     bool loadSettings() override;
     bool saveSettings() override;
 
-    PlaybackProfile getProfile() const override { return m_profile; }
-    void setProfile(PlaybackProfile profile) override { m_profile = profile; }
-    const char* getProfileName(PlaybackProfile profile) const override;
-
     bool isResumePlaybackEnabled() const override { return m_resumePlaybackEnabled; }
     void setResumePlaybackEnabled(bool enabled) override { m_resumePlaybackEnabled = enabled; }
 
@@ -56,7 +52,6 @@ public:
     void syncThemeToRmlUi() override;
 
 private:
-    PlaybackProfile m_profile = PlaybackProfile::Balanced;
     bool m_resumePlaybackEnabled = true;
     ViewMode m_defaultViewMode = ViewMode::Fit;
     bool m_autoSubtitlesEnabled = true;

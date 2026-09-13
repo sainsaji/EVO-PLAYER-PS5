@@ -426,7 +426,7 @@ PRX_STUB_WANT=()
 # resolves through the link tail; libSceCommonDialog has none, and
 # sceCommonDialogInitialize() must run before any common dialog will start.
 if [[ "${MODE}" == "player" ]]; then
-    PRX_STUB_WANT+=(libSceVideodec2 libSceAgc libSceAgcDriver libSceCommonDialog)
+    PRX_STUB_WANT+=(libSceVideodec2 libSceAudiodec libSceAgc libSceAgcDriver libSceCommonDialog)
 fi
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"

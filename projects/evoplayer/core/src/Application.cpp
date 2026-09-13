@@ -36,6 +36,7 @@
 #include "addon_emby.h"
 #include "pp_playback.h"
 #include "evo_playback.h"
+#include "evo_adec.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_perf_monitor.h"
 #include "evo_vdec.h"
@@ -140,6 +141,9 @@ bool Application::initialize(int argc, char** argv) {
     evo_bt("Application::initialize entry");
     m_appFsm.postEvent(ApplicationEvent::Boot);
     evo_vdec_probe();
+    /* Same pre-unjail constraint as the video decoder: after
+     * evo_jailbreak_self() the credential swap breaks libSceAudiodec too. */
+    evo_adec_native_probe();
 
     if (!initHardware()) {
         return false;

@@ -152,6 +152,9 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     state.title = p->title ? p->title : "";
     state.at_root = (p->at_root != 0);
     state.rail_focused = (p->rail_focused != 0);
+    state.sidebar_focused = (p->sidebar_focused != 0);
+    state.sidebar_index = p->sidebar_index;
+    state.active_source = p->active_source;
     state.total_count = p->total_count;
     state.cursor_index = p->cursor_index;
 
@@ -161,6 +164,7 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
         r.detail = p->rows[i].detail ? p->rows[i].detail : "";
         r.icon_path = p->rows[i].icon_path ? p->rows[i].icon_path : "";
         r.badge = p->rows[i].badge ? p->rows[i].badge : "";
+        r.duration = p->rows[i].duration ? p->rows[i].duration : "";
         r.progress = p->rows[i].progress;
         r.is_favorite = (p->rows[i].is_favorite != 0);
         r.is_focused = (p->rows[i].is_focused != 0);
@@ -185,6 +189,12 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
             p->ins_props[i].key ? p->ins_props[i].key : "",
             p->ins_props[i].value ? p->ins_props[i].value : "");
     }
+
+    state.status_res = p->status_res ? p->status_res : "";
+    state.status_vcodec = p->status_vcodec ? p->status_vcodec : "";
+    state.status_acodec = p->status_acodec ? p->status_acodec : "";
+    state.status_duration = p->status_duration ? p->status_duration : "";
+    state.status_size = p->status_size ? p->status_size : "";
 
     EvoRmlApp::Instance().UpdateBrowserState(state);
 }

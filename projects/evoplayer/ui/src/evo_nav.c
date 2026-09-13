@@ -7,7 +7,7 @@ static const evo_section_info SECTIONS[EVO_SECTION_COUNT] = {
     { "RECENT",    "Pick up where you left off",         EVO_IC_RECENT,   EVO_SCREEN_RECENT     },
     { "FAVORITES", "Media you saved for later",          EVO_IC_FAVORITE, EVO_SCREEN_FAVORITES  },
     { "EMBY",      "Emby and media server streaming",    EVO_IC_EMBY,     EVO_SCREEN_EMBY_SETUP },
-    { "SETTINGS",  "Playback profiles and preferences",  EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS   },
+    { "SETTINGS",  "Playback and display preferences",   EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS   },
     { "ABOUT",     "Credits and project info",           EVO_IC_ABOUT,    EVO_SCREEN_ABOUT      }
 };
 

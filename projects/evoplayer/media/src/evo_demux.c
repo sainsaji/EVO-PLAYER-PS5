@@ -24,6 +24,7 @@
 #include "evo_audio_resample.h"
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
+#include "evo_adec.h"
 #include "pp_stage_breadcrumb.h"
 
 /* ---------------------------------------------------------------------------
@@ -267,6 +268,9 @@ packet_queue_clear(
         avformat_flush(play_fmt);
 
         evo_vdec_flush(g_vdec);   /* video codec + scratch frame/packet (A6) */
+        if (g_adec) {
+            evo_adec_flush(g_adec);
+        }
 
         if (audio_ctx) {
             avcodec_flush_buffers(

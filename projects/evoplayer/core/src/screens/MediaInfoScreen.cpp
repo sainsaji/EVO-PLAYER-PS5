@@ -51,7 +51,6 @@ bool MediaInfoScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t rele
             metaService->exportCompatibilityReport("/mnt/usb0/evo_compat_report.txt",
                                                    meta,
                                                    playback->getPositionSeconds(),
-                                                   settings->getProfile(),
                                                    recent_file_count,
                                                    favorite_count,
                                                    playback->isActive());
