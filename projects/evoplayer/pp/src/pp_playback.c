@@ -325,7 +325,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
      * Stash the borrowed decoder planes — no copy anywhere. push_frame is on
      * the decode thread and has just pace-slept to this frame's PTS, so the
      * decoder won't recycle the pool slot before the render loop's
-     * pp_playback_get_nv12() + upload runs (~1 frame; the pool is 12 slots).
+     * pp_playback_get_video_frame() + upload runs (~1 frame; the pool is 12 slots).
      * The one case that breaks is a seek's discard window, which has no pacing
      * — hold_snapshot() covers it.
      */
@@ -370,7 +370,7 @@ int pp_playback_has_display(const pp_playback *pb)
     return pb && pb->gl_ready;
 }
 
-int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f)
+int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f)
 {
     int got = 0;
     if (f)

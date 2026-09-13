@@ -65,8 +65,8 @@ void *audio_decode_thread_func(void *arg);
 void prospero_audio_build_label(AVFormatContext *format, int selected_stream,
                                 char *output, size_t output_size);
 
-/* Cycle to the next decodable audio track (input dispatch entry point). */
-void prospero_audio_cycle_track(void);
+/* Audio track selection lives in evo::PlaybackController::switchAudioTrack()
+ * and the AudioTrackPickerScreen; the old cycle entry point is gone. */
 
 #ifdef __cplusplus
 }

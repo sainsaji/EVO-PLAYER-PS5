@@ -55,7 +55,6 @@ extern int               prospero_embedded_subtitle_stream_index;
 extern int               prospero_subtitle_requested_stream;
 extern char              current_media_path[512];
 
-int      start_video_playback(const char *path);
 void     toast(const char *title, const char *msg);
 long long now_ms(void);
 
@@ -491,170 +490,11 @@ void prospero_audio_build_label(
 }
 
 
-void prospero_audio_cycle_track(void)
-{
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt
-    ) {
-        return;
-    }
-
-    int indexes[
-        PROSPERO_AUDIO_TRACK_LIMIT
-    ];
-
-    int count =
-        prospero_audio_collect_streams(
-            play_fmt,
-            indexes,
-            PROSPERO_AUDIO_TRACK_LIMIT
-        );
-
-    if (count <= 0) {
-        toast(
-            "AUDIO TRACK",
-            "NO SUPPORTED AUDIO"
-        );
-
-        return;
-    }
-
-    if (count == 1) {
-        prospero_audio_build_label(
-            play_fmt,
-            indexes[0],
-            prospero_audio_active_label,
-            sizeof(prospero_audio_active_label)
-        );
-
-        toast(
-            "AUDIO TRACK",
-            "ONLY ONE TRACK"
-        );
-
-        return;
-    }
-
-    int current_slot = 0;
-
-    for (int index = 0; index < count; index++) {
-        if (
-            indexes[index] ==
-            audio_stream_index
-        ) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        (current_slot + 1) % count;
-
-    int next_stream =
-        indexes[next_slot];
-
-    int restore_paused =
-        player_paused;
-
-    int restore_subtitles =
-        prospero_subtitle_enabled;
-
-    int subtitle_request = -2;
-
-    if (
-        prospero_subtitle_use_external &&
-        prospero_subtitle_count > 0
-    ) {
-        subtitle_request = -1;
-    } else if (
-        !prospero_subtitle_use_external &&
-        prospero_embedded_subtitle_stream_index >= 0
-    ) {
-        subtitle_request =
-            prospero_embedded_subtitle_stream_index;
-    }
-
-    double position =
-        resume_base_offset_seconds +
-        (
-            audio_stream_index >= 0
-                ? audio_clock_seconds
-                : video_clock_seconds
-        );
-
-    if (position < 0.0) {
-        position = 0.0;
-    }
-
-    if (
-        media_duration_sec > 0.0 &&
-        position > media_duration_sec
-    ) {
-        position = media_duration_sec;
-    }
-
-    char playback_path[1024];
-
-    snprintf(
-        playback_path,
-        sizeof(playback_path),
-        "%s",
-        current_media_path
-    );
-
-    prospero_audio_requested_stream =
-        next_stream;
-
-    prospero_subtitle_requested_stream =
-        subtitle_request;
-
-    /*
-     * Playback startup subtracts one second for keyframe preroll.
-     */
-    requested_resume_seek_pos =
-        position > 3.0
-            ? position + 1.0
-            : position;
-
-    resume_base_offset_seconds =
-        position;
-
-    if (
-        !start_video_playback(
-            playback_path
-        )
-    ) {
-        prospero_audio_requested_stream = -1;
-
-        toast(
-            "AUDIO TRACK",
-            "SWITCH FAILED"
-        );
-
-        return;
-    }
-
-    player_paused =
-        restore_paused;
-
-    prospero_subtitle_enabled =
-        restore_subtitles;
-
-    prospero_audio_build_label(
-        play_fmt,
-        audio_stream_index,
-        prospero_audio_active_label,
-        sizeof(prospero_audio_active_label)
-    );
-
-    controls_last_used_ms =
-        now_ms();
-
-    toast(
-        "AUDIO TRACK",
-        prospero_audio_active_label
-    );
-}
-
-/* PROSPERO_AUDIO_TRACK_SWITCH_END */
+/*
+ * prospero_audio_cycle_track() lived here. It cycled to the next audio stream
+ * by calling start_video_playback() to re-open the file - a main.c entry point
+ * that the C++ migration removed, so the function could not have worked.
+ * Audio track selection is now evo::PlaybackController::switchAudioTrack() and
+ * the AudioTrackPickerScreen: a picker rather than a cycle, because each step
+ * costs a reopen.
+ */

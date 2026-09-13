@@ -124,66 +124,12 @@ ADDON_SRCS := \
     addons/src/evo_net.c \
     addons/src/addon_emby.c
 
-# --gl-smoke (#77, render-overhaul GL-1): compile the ps5-opengl smoke probe
-# into the .ffpfsc. Off by default so build-evoplayer.sh and a normal
-# package-app.sh --ffpfsc are byte-unchanged. package-app.sh passes GL_SMOKE=1
-# plus the ps5-opengl-core33.mk cflags/archives; see docs/evo-pro/gl1-spike.md.
-GL_SMOKE ?= 0
-ifeq ($(GL_SMOKE),1)
-    PP_SRCS  += pp/src/pp_gl_smoke.c pp/src/pp_gl_fatal.c
-    CFLAGS   += -DEVO_GL_SMOKE=1
-    CXXFLAGS += -DEVO_GL_SMOKE=1
-    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
-        CFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
-    endif
-endif
-
-# --gl-hdr-probe (Task 1): compile the ps5-opengl HDR VideoOut probe
-GL_HDR_PROBE ?= 0
-ifeq ($(GL_HDR_PROBE),1)
-    PP_SRCS  += pp/src/pp_gl_fatal.c
-    CFLAGS   += -DEVO_GL_HDR_PROBE=1
-    CXXFLAGS += -DEVO_GL_HDR_PROBE=1
-    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
-        CFLAGS   += $(PS5_OPENGL_PUBLIC_CFLAGS)
-        CXXFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
-    endif
-endif
-
-# --gl (render-overhaul GL-3, #79): persistent device GL context through
-# ps5-opengl. Cuts the boot over to GL/EGL; --gl and --gl-smoke are mutually
-# exclusive (both replace pp_agc_init + the normal present path). Off by default;
-# package-app.sh --gl passes GL_DEVICE=1 plus the ps5-opengl-core33.mk archives.
-# (RMLUI_SRCS gets evo_gl_context_device.cpp appended below, after it is set.)
-GL_DEVICE ?= 0
-# GL-4 (#80) Stage 3: main.c's frame loop calls the evo_gl_* seam
-# unconditionally. GL_DEVICE=1 appends the real device context to RMLUI_SRCS
-# below; every other configuration links no-op stubs, so the ELF compile check
-# (scripts/build-evoplayer.sh) still builds without ps5-opengl.
-ifneq ($(GL_DEVICE),1)
-    PP_SRCS += ui_rml/src/evo_gl_context_stub.c
-endif
-ifeq ($(GL_DEVICE),1)
-    PP_SRCS  += pp/src/pp_gl_fatal.c
-    CFLAGS   += -DEVO_GL_DEVICE=1
-    CXXFLAGS += -DEVO_GL_DEVICE=1
-    # B2: RmlUi's upstream GL3 render interface. ps5-opengl links GL directly, so
-    # skip glad's dlopen loader - RMLUI_GL3_CUSTOM_LOADER points at a header that
-    # just pulls <GL/gl.h> + prototypes (evo_gl3_device_loader.h).
-    CXXFLAGS += -DRMLUI_GL3_CUSTOM_LOADER='"rmlui_gl3/evo_gl3_device_loader.h"'
-    CXXFLAGS += -Iui_rml/src
-    # B2 perf: ps5-opengl multisample-resolve is expensive. Menu AA can come back
-    # once the render path is fast (or via EGL_SAMPLES on the window surface).
-    CXXFLAGS += -DRMLUI_NUM_MSAA_SAMPLES=0
-    ifneq ($(PS5_OPENGL_PUBLIC_CFLAGS),)
-        CFLAGS   += $(PS5_OPENGL_PUBLIC_CFLAGS)
-        CXXFLAGS += $(PS5_OPENGL_PUBLIC_CFLAGS)
-    endif
-endif
-
-# --agc: bare-metal PS5 AGC device context and 100% GPU RmlUi render interface.
-# Mutually exclusive with --gl; package-app.sh --agc passes AGC_DEVICE=1.
-AGC_DEVICE ?= 0
+# The bare-metal AGC device context and its 100% GPU RmlUi render interface
+# are the only device render path - the AGC runtime owns sceAgc and
+# sceVideoOut outright. The OpenGL path, the ps5-opengl submodule and the
+# --gl / --gl-smoke / --gl-hdr-probe build modes were removed. This is off
+# only for the host compile check, which has no graphics at all.
+AGC_DEVICE ?= 1
 ifeq ($(AGC_DEVICE),1)
     MEDIA_SRCS += \
         media/src/evo_agc_transient_ring.c \
@@ -217,6 +163,7 @@ CORE_SRCS := \
     core/src/screens/PlayerScreen.cpp \
     core/src/screens/SettingsScreen.cpp \
     core/src/screens/SubtitlePickerScreen.cpp \
+    core/src/screens/AudioTrackPickerScreen.cpp \
     core/src/screens/TextReaderScreen.cpp \
     core/src/screens/MediaInfoScreen.cpp \
     core/src/screens/SurroundTestScreen.cpp \
@@ -240,14 +187,6 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_fileinterface.cpp \
     ui_rml/src/evo_rmlui_bundle.cpp \
     ui_rml/src/evo_rmlui_bundle_data.cpp
-
-# --gl (GL-3, #79): the device GL context + the RmlUi GL3 render interface,
-# once RMLUI_SRCS exists.
-ifeq ($(GL_DEVICE),1)
-    RMLUI_SRCS += ui_rml/src/evo_gl_context_device.cpp \
-                  ui_rml/src/evo_rmlui_render_gl.cpp \
-                  ui_rml/src/rmlui_gl3/RmlUi_Renderer_GL3.cpp
-endif
 
 ifeq ($(AGC_DEVICE),1)
     RMLUI_SRCS += ui_rml/src/evo_rmlui_render_agc.cpp

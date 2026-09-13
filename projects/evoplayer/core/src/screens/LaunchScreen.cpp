@@ -58,20 +58,16 @@ void LaunchScreen::onExit() {
 }
 
 std::string LaunchScreen::heroPathForSelection() const {
+    /*
+     * The hero is the most recently played file and nothing else. It used to
+     * follow the recent-shelf cursor and to be overwritten by whichever library
+     * tile was hovered, so moving around Home kept rewriting the one panel that
+     * is supposed to sit still and say "here is what you were watching".
+     */
     if (recent_file_count <= 0) {
         return std::string();
     }
-
-    int heroIdx = 0;
-    bool railFocused = false;
-    if (auto sm = Application::getInstance().getScreenManager()) {
-        railFocused = sm->isRailFocused();
-    }
-    if (!railFocused && m_selectedRow == 1 &&
-        m_selectedCol >= 0 && m_selectedCol < recent_file_count) {
-        heroIdx = m_selectedCol;
-    }
-    return std::string(recent_files[heroIdx].path);
+    return std::string(recent_files[0].path);
 }
 
 void LaunchScreen::update(double deltaMs) {
@@ -239,13 +235,9 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     }
     params.hero_focused = (!railFocused && m_selectedRow == 0);
 
-    // Hero
+    // Hero - always the most recent file; it does not track the cursor.
     if (recent_file_count > 0) {
-        int heroIdx = 0;
-        if (!railFocused && m_selectedRow == 1 && m_selectedCol >= 0 && m_selectedCol < recent_file_count) {
-            heroIdx = m_selectedCol;
-        }
-        const auto& r = recent_files[heroIdx];
+        const auto& r = recent_files[0];
         params.hero_eyebrow = (r.last_pos > 1.0) ? "CONTINUE WATCHING" : "START WATCHING";
         params.hero_title = r.title[0] ? r.title : r.path;
         params.hero_detail = r.path;
@@ -281,18 +273,6 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         params.hero_detail = "Browse storage to select and play media files";
         params.hero_action = "BROWSE USB";
         params.hero_progress = -1;
-    }
-
-    // If hovering library shelf, preview library destination in hero
-    if (!railFocused && m_selectedRow == 2 && m_selectedCol >= 0 && m_selectedCol < 6) {
-        const evo_section_info* info = evo_section_get(static_cast<evo_section>(m_selectedCol + 1));
-        if (info) {
-            params.hero_eyebrow = "LIBRARY";
-            params.hero_title = info->label;
-            params.hero_detail = info->blurb;
-            params.hero_action = "OPEN";
-            params.hero_progress = -1;
-        }
     }
 
     // Recent shelf

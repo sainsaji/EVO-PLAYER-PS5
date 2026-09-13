@@ -14,21 +14,13 @@
 #   ./scripts/package-app.sh --breadcrumbs    + boot-trace notification
 #                                             popups (#51, off by default —
 #                                             klog carries these otherwise)
-#   ./scripts/package-app.sh --gl-smoke       + link ps5-opengl + the #77 GL-1
-#                                             go/no-go probe. Needs
-#                                             ./scripts/build-ps5-opengl.sh
-#                                             first. Diagnostic build, like
-#                                             --breadcrumbs. Runs on the console
-#                                             only when /mnt/usb0/evo_gl_smoke
-#                                             exists; see docs/evo-pro/gl1-spike.md
-#   ./scripts/package-app.sh --agc            Bare-metal sceAgc GPU render interface (DEFAULT
-#                                             for player builds). RmlUi renders directly via
-#                                             hardware command buffers with vsync pacing.
-#   ./scripts/package-app.sh --gl             #79 GL-3 / #80 GL-4: the boot runs
-#                                             on a persistent ps5-opengl GL/EGL
-#                                             context. Needs ./scripts/build-ps5-opengl.sh
-#                                             first. Mutually exclusive with --agc. See
-#                                             docs/evo-pro/opengl-render-overhaul.md.
+#   ./scripts/package-app.sh --agc            Accepted and redundant: the
+#                                             bare-metal sceAgc GPU render
+#                                             interface is the only render path
+#                                             a player build has. RmlUi renders
+#                                             through hardware command buffers
+#                                             with vsync pacing. See
+#                                             docs/evo-pro/agc-bare-metal-ui.md.
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -47,10 +39,7 @@ REBUILD_LIBC=0
 FFPFSC=0
 USB_REMOTE=0
 BREADCRUMBS=0
-GL_SMOKE=0
-GL_HDR_PROBE=0
-GL_DEVICE=-1        # -1 = not specified; resolved below (default ON for the player build)
-AGC_DEVICE=0
+AGC_DEVICE=1        # bare-metal AGC is the only render path
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
@@ -66,13 +55,11 @@ while (( $# )); do
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
-        --gl-smoke)     GL_SMOKE=1 ;;     # #77 GL-1: link ps5-opengl + the /mnt/usb0/evo_gl_smoke probe
-        --gl-hdr-probe) GL_HDR_PROBE=1 ;; # Task 1: isolated HDR VideoOut probe
-        --gl)           GL_DEVICE=1 ;;    # #79 GL-3 / #80 GL-4: persistent device GL context
-        --agc)          AGC_DEVICE=1; GL_DEVICE=0 ;; # Bare-metal PS5 AGC: 100% GPU render interface
-        --no-gl)        die "--no-gl was retired by GL-4 (#80): the CPU converters,
-       tile_copy and the V8/V3/1080 backend dispatch it selected are deleted.
-       GL or AGC are the only present paths." ;;
+        --agc)          AGC_DEVICE=1 ;;   # accepted and redundant: AGC is the only render path
+        --gl|--no-gl|--gl-smoke|--gl-hdr-probe)
+            die "$1 is gone. The OpenGL device path, its ps5-opengl submodule and
+       the GL smoke/HDR probes were removed - the bare-metal AGC runtime owns
+       sceAgc and sceVideoOut outright. Just drop the flag." ;;
         --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (4K, since 2026-09-11) — this flag is now a no-op kept for back-compat
         --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
         --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
@@ -83,32 +70,9 @@ while (( $# )); do
     esac
     shift
 done
-# Present path resolution:
-#   --agc       bare-metal AGC; links libSceAgc without ps5-opengl (default for the player build).
-#   --gl        persistent device GL context via ps5-opengl.
-#   --gl-smoke  is its own boot cutover and mutually exclusive with --gl / --agc.
-#   --probe     is the sandbox probe, not the player; it never presents.
-if (( GL_DEVICE == -1 )); then
-    if (( GL_SMOKE || GL_HDR_PROBE )) || [[ "${MODE}" != "player" ]]; then
-        GL_DEVICE=0
-    elif (( AGC_DEVICE )); then
-        GL_DEVICE=0
-    else
-        # Default to --agc for player build so bare-metal AGC renders UI smoothly
-        AGC_DEVICE=1
-        GL_DEVICE=0
-    fi
-fi
-(( AGC_DEVICE && GL_DEVICE )) && die "--agc and --gl are mutually exclusive"
-(( AGC_DEVICE && GL_SMOKE )) && die "--agc and --gl-smoke are mutually exclusive"
-(( AGC_DEVICE && GL_HDR_PROBE )) && die "--agc and --gl-hdr-probe are mutually exclusive"
-(( AGC_DEVICE )) && [[ "${MODE}" != "player" ]] && die "--agc only applies to the player build (drop --agc with --${MODE})"
-(( GL_SMOKE && GL_DEVICE )) && die "--gl and --gl-smoke are mutually exclusive (both cut the boot over to ps5-opengl)"
-(( GL_HDR_PROBE && GL_DEVICE )) && die "--gl and --gl-hdr-probe are mutually exclusive (both cut the boot over to ps5-opengl)"
-(( GL_SMOKE && GL_HDR_PROBE )) && die "--gl-smoke and --gl-hdr-probe are mutually exclusive"
-(( GL_DEVICE )) && [[ "${MODE}" != "player" ]] && die "--gl only applies to the player build (drop --gl with --${MODE})"
-# Flags that link ps5-opengl + share the SDK-consumption / undef-harvest / _Exit-wrap machinery.
-GL_LINK=$(( GL_SMOKE || GL_DEVICE || GL_HDR_PROBE ))
+# AGC is the player build's render path and the only one. The sandbox probe
+# build never presents, so it does not want the AGC runtime linked in.
+if [[ "${MODE}" != "player" ]]; then AGC_DEVICE=0; fi
 
 if ! in_container; then
     FWD=(--"${MODE}")
@@ -116,69 +80,15 @@ if ! in_container; then
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
-    (( GL_SMOKE ))     && FWD+=(--gl-smoke)
-    (( GL_HDR_PROBE )) && FWD+=(--gl-hdr-probe)
     # Forward the RESOLVED choice, never the default, so the in-container build
     # cannot disagree with the host-side one.
     (( AGC_DEVICE ))   && FWD+=(--agc)
-    (( GL_DEVICE ))    && FWD+=(--gl)
     (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
     (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
     (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
     (( NO_NATIVE_SECONDARY_4K )) && FWD+=(--no-native-secondary-4k)
     (( NATIVE_10BIT ))        && FWD+=(--native-10bit)
     reexec_in_container "package-app.sh" "${FWD[@]}"
-fi
-
-# --gl-smoke (#77, GL-1) / --gl (#79, GL-3): consume the ps5-opengl-core33 SDK
-# that scripts/build-ps5-opengl.sh produced, compile the GL glue into the eboot,
-# and link the Mesa/Gallium/PSBC archives. Since GL-4 (#80) the player build has
-# no other present path, so a plain --ffpfsc needs the ps5-opengl SDK built.
-# See docs/evo-pro/gl1-spike.md / gl2-render-interface.md.
-GL_LINK_LIBS=()         # -L / -l args from the installed .mk, minus what EVO already links
-GL_PUBLIC_CFLAGS=""
-GL_FORCE_UNDEF=()
-if (( GL_LINK )); then
-    [[ "${MODE}" == "player" ]] || die "--gl / --gl-smoke only apply to the player build"
-    GL_SDK="${REPO_ROOT}/third_party/ps5-opengl/build/sdk/ps5-opengl-core33"
-    GL_MK="${GL_SDK}/share/ps5-opengl-core33/ps5-opengl-core33.mk"
-    need_file "${GL_MK}" "ps5-opengl SDK not built. Run:  ./scripts/build-ps5-opengl.sh"
-    [[ -d "${GL_SDK}/lib" ]] || die "ps5-opengl SDK has no lib/ — rebuild it"
-    # Evaluate the installed .mk with make so $(PS5_OPENGL_PREFIX) etc. resolve
-    # (parsing the file textually scrapes "GPL-3.0-or-later" as "-later").
-    gl_mk_val() {
-        printf 'gl_print:\n\t@printf "%%s" "$(%s)"\n' "$1" \
-            | make --no-print-directory -f "${GL_MK}" -f - gl_print 2>/dev/null
-    }
-    GL_PUBLIC_CFLAGS="$(gl_mk_val PS5_OPENGL_PUBLIC_CFLAGS)"
-    [[ -n "${GL_PUBLIC_CFLAGS}" ]] || GL_PUBLIC_CFLAGS="-DGL_GLEXT_PROTOTYPES=1 -I${GL_SDK}/include"
-    GL_LINK_LIBS+=("-L${GL_SDK}/lib")
-    # From PS5_OPENGL_LDLIBS keep -L/-l (order preserved), drop the system SCE
-    # modules EVO already resolves (PRX stubs + target/lib/*.so), and lift
-    # -Wl,-u,<sym> into GL_FORCE_UNDEF.
-    for tok in $(gl_mk_val PS5_OPENGL_LDLIBS); do
-        case "${tok}" in
-            -lSceAgc|-lSceAgcDriver|-lSceVideoOut|-lkernel_web|-lSceSystemService) ;;
-            -Wl,-u,*) GL_FORCE_UNDEF+=(-u "${tok#-Wl,-u,}") ;;
-            -Wl,--*group) ;;                         # lld groups the archives itself
-            -L*|-l*)  GL_LINK_LIBS+=("${tok}") ;;
-        esac
-    done
-    # ps5-opengl's Gallium driver links a handful of sceAgc* / sceAgcDriver*
-    # entry points directly (not via dlsym). Harvest the undefined sce* names
-    # from the SDK archives so the PRX stubs (section 6b) cover them and the
-    # dead-import guard recognises them as genuinely imported.
-    # (llvm-nm -u under-reports on archives; list all and filter to `U` lines.)
-    # (libPS5OpenGLCore33.a is a GNU ld GROUP script, not an object -> llvm-nm
-    #  errors on it; `|| true` so `set -e` doesn't abort the harvest subshell.)
-    GL_SCE_UNDEF=()
-    while IFS= read -r s; do [[ -n "${s}" ]] && GL_SCE_UNDEF+=("${s}"); done < <(
-        for a in "${GL_SDK}"/lib/*.a; do llvm-nm "${a}" 2>/dev/null || true; done \
-        | awk '$1=="U"{print $2}' | grep -E '^sce[A-Za-z0-9_]+$' | sort -u || true)
-    probe_name="--gl"
-    (( GL_SMOKE )) && probe_name="--gl-smoke"
-    (( GL_HDR_PROBE )) && probe_name="--gl-hdr-probe"
-    ok "${probe_name}: ps5-opengl SDK at ${GL_SDK#"${REPO_ROOT}/"} (${#GL_LINK_LIBS[@]} link args, ${#GL_FORCE_UNDEF[@]} forced undefs, ${#GL_SCE_UNDEF[@]} sce imports)"
 fi
 
 load_sdk
@@ -374,11 +284,6 @@ else
     # (tools/klog.sh) carries the same lines unconditionally in the app
     # module now, so the popups are only useful watching the TV without klog.
     (( BREADCRUMBS )) && APP_DEFS+=" -DEVO_BOOT_TRACE_POPUP=1"
-    # --gl-smoke (#77): EVO_GL_SMOKE gate in main.c + the pp_gl_smoke/pp_gl_fatal
-    # objects (the Makefile adds them to PP_SRCS when GL_SMOKE=1).
-    (( GL_SMOKE )) && APP_DEFS+=" -DEVO_GL_SMOKE=1"
-    # --gl-hdr-probe (Task 1): EVO_GL_HDR_PROBE gate in main.c + pp_gl_fatal.c.
-    (( GL_HDR_PROBE )) && APP_DEFS+=" -DEVO_GL_HDR_PROBE=1"
     # --native-secondary (#41): HEVC + VP9 resident sceVideodec2 decoders, at
     # 4K since 2026-09-11 — both hardware-verified (evo_vdec_native.c has the
     # full evidence). --no-native-secondary / --no-native-secondary-4k are the
@@ -388,10 +293,7 @@ else
     (( NO_NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
     (( NO_NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=0"
     (( NATIVE_10BIT ))        && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=1"
-    # --gl (#79 GL-3): EVO_GL_DEVICE gate in main.c + evo_gl_context_device.cpp +
-    # pp_gl_fatal.c (the Makefile adds them when GL_DEVICE=1).
-    (( GL_DEVICE )) && APP_DEFS+=" -DEVO_GL_DEVICE=1"
-    # --agc: EVO_AGC_DEVICE gate in main.c + evo_agc_* + evo_rmlui_render_agc.cpp
+    # EVO_AGC_DEVICE gates evo_agc_* + evo_rmlui_render_agc.cpp
     (( AGC_DEVICE )) && APP_DEFS+=" -DEVO_AGC_DEVICE=1"
     rm -f "${EVO}/include/evo_autoplay.h"
 
@@ -401,7 +303,7 @@ else
     # how three console sessions shipped an eboot with none of the app-module
     # code. Force a clean object build whenever the flag set changed.
     STAMP="${BUILD}/app-cflags.stamp"
-    WANT="${TFLAGS[*]} ${APP_DEFS} ${GL_PUBLIC_CFLAGS}"
+    WANT="${TFLAGS[*]} ${APP_DEFS}"
     if (( CLEAN )) || [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
         begin "app-module flags changed or --clean requested - clean rebuild"
         make -C "${EVO}" clean >/dev/null 2>&1 || true
@@ -418,7 +320,6 @@ else
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
         AGC_DEVICE="${AGC_DEVICE}" \
-        GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" \
         EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
@@ -427,7 +328,7 @@ else
         }
     while read -r rel; do
         OBJS+=("${EVO}/${rel}")
-    done < <(make -C "${EVO}" -s AGC_DEVICE="${AGC_DEVICE}" GL_SMOKE="${GL_SMOKE}" GL_DEVICE="${GL_DEVICE}" GL_HDR_PROBE="${GL_HDR_PROBE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
+    done < <(make -C "${EVO}" -s AGC_DEVICE="${AGC_DEVICE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
 
     # #68: RmlUi puts only `3 + R/6` points on a corner arc, so a 20 px radius is
@@ -466,10 +367,6 @@ else
         need_file "${f}" "expected port archive missing: ${a}.a (pacbrew sysroot incomplete)"
         ARCHIVE_GROUP+=("${f}")
     done
-    # --gl / --gl-smoke: ps5-opengl-core33 (Mesa + PS5 Gallium + PSBC). The .mk
-    # names them via -L/-l; add those as raw link args INSIDE the archive group
-    # so the circular Mesa<->driver refs resolve.
-    (( GL_LINK )) && ARCHIVE_GROUP+=("${GL_LINK_LIBS[@]}")
 fi
 
 # ---------------------------------------------------------------------------
@@ -518,11 +415,10 @@ PRX_STUB_WANT=()
 # libSceVideodec2's own startup load needs the GPU driver stack present
 # (sceVideodec2AllocateComputeQueue allocates a GPU compute queue). ProsperoLight
 # links libSceAgc + libSceAgcDriver, which pull in libSceGnmDriver and satisfy
-# that; EVO must do the same or libSceVideodec2 loads broken. ps5-opengl's
-# Gallium driver also imports sceAgc* / sceAgcDriver* directly, and --gl is the
-# only app-module build - the libSceAgc/libSceAgcDriver .syms are comment-only
-# now (GL-6 deleted pp_agc.c) and the actual symbol list is populated from the
-# ps5-opengl archives (GL_SCE_UNDEF) in the augmentation block below.
+# that; EVO must do the same or libSceVideodec2 loads broken. The
+# libSceAgc/libSceAgcDriver .syms are comment-only, and the actual symbol list
+# is harvested from the AGC runtime's own imports in the augmentation block
+# below.
 # The native decode backend (media/src/evo_vdec_native.c, #31) is compiled into
 # every MODE == player eboot, so libSceVideodec2 + its GPU-driver deps must be
 # positional DT_NEEDED.
@@ -550,8 +446,6 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         [[ -n "${o}" && -f "${o}" ]] && llvm-nm -u "${o}" 2>/dev/null \
             | grep -oE '\bsce[A-Za-z0-9_]+' >> "${OBJ_UNDEF}" || true
     done
-    # --gl / --gl-smoke: the ps5-opengl archives import these too (harvested above).
-    (( GL_LINK )) && printf '%s\n' "${GL_SCE_UNDEF[@]}" >> "${OBJ_UNDEF}"
     sort -u -o "${OBJ_UNDEF}" "${OBJ_UNDEF}"
 
     dead_total=0
@@ -563,17 +457,13 @@ if (( ${#PRX_STUB_WANT[@]} )); then
         # (a comment-only .syms - libSceAgc/libSceAgcDriver post-GL-6 - greps to
         #  nothing; `|| true` so the empty result isn't a pipeline failure.)
         { grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print "void " $1 "(void){}"}' > "${csrc}"
-        # --gl / --gl-smoke / --agc: add the sceAgc* / sceAgcDriver* names that
-        # this .syms doesn't already carry. Routed by prefix; sceVideoOut* etc.
-        # resolve from target/lib/*.so and are left alone.
-        if (( GL_LINK || AGC_DEVICE )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
+        # --agc: add the sceAgc* / sceAgcDriver* names that this .syms doesn't
+        # already carry. Routed by prefix; sceVideoOut* etc. resolve from
+        # target/lib/*.so and are left alone.
+        if (( AGC_DEVICE )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
             existing="$({ grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print $1}')"
             source_syms=()
-            if (( GL_LINK )); then
-                source_syms=("${GL_SCE_UNDEF[@]}")
-            else
-                while IFS= read -r s; do [[ -n "${s}" ]] && source_syms+=("${s}"); done < "${OBJ_UNDEF}"
-            fi
+            while IFS= read -r s; do [[ -n "${s}" ]] && source_syms+=("${s}"); done < "${OBJ_UNDEF}"
             for s in "${source_syms[@]}"; do
                 if [[ "${base}" == libSceAgcDriver ]]; then
                     [[ "${s}" == sceAgcDriver* ]] || continue
@@ -637,19 +527,11 @@ LINK_TAIL=(--as-needed "${STUBDIR}"/*.so)
 [[ "${MODE}" == "player" ]] && \
     LINK_TAIL+=(--start-group "${PS5_SYSROOT}/lib/libc.a" --end-group)
 
-# --gl / --gl-smoke: --wrap=_Exit routes any stray _Exit (past the 4 patched
-# sites) through pp_gl_fatal.c; -u ps5_agc_gate2_run keeps the ps5-opengl submit
-# entry against --gc-sections (mirrors toolchain/ps5-opengl-core33.mk).
-GL_LINK_EXTRA=()
-if (( GL_LINK )); then
-    GL_LINK_EXTRA+=(--wrap=_Exit "${GL_FORCE_UNDEF[@]}")
-fi
-
 LINK_RC=0
 if ! "${LLD}" -T "${NATIVE}/ps5-pie.ld" --eh-frame-hdr \
     --version-script "${NATIVE}/app-symbols.map" \
     --exclude-libs=ALL --error-limit=0 \
-    ${GL_LINK_EXTRA[@]+"${GL_LINK_EXTRA[@]}"} \
+\
     -L "${BUILD}/obj" \
     -e _start -o "${BUILD}/llvm-pie.elf" \
     "${LINK_INPUTS[@]}" \

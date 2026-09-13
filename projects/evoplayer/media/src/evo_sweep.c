@@ -8,7 +8,7 @@
 #include "evo_sweep.h"
 
 #include "evo_boot_log.h"
-#include "evo_gl_context.h"
+
 
 #include <stdio.h>
 #include <string.h>
@@ -178,7 +178,11 @@ void evo_sweep_probe_colour(void)
     if (g_rec.present_video_n < SWEEP_PROBE_AFTER)
         return;
 
-    n = evo_gl_probe_rgb(rgb, SWEEP_PROBE_PIXELS);
+    /* The plane-hash probe read back the GL default framebuffer. The GL path
+     * is gone and the AGC runtime exposes no scanout readback yet, so the
+     * probe reports unavailable and the sweep row simply omits the hash. */
+    n = 0;
+    (void)rgb;
     if (n <= 0) {
         g_rec.probe_done = 1;   /* no GL (host / payload): don't retry per frame */
         return;

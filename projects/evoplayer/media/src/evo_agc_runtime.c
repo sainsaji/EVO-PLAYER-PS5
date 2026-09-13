@@ -153,6 +153,9 @@ typedef struct evo_agc_device {
     int                     height;
     int                     is_hdr;
     int                     is_player_mode;
+    /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
+     * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
+    int                     ui_dirty[2];
 
     int32_t                 video_handle;
     int                     active_backbuffer;
@@ -1215,12 +1218,22 @@ void evo_agc_runtime_frame_begin(void)
     }
 
     /*
-     * Menu backdrop - dark neutral (0x0d,0x0d,0x10,0xff), matching the OpenGL
-     * clear. In player mode, the video quad is drawn by the GPU directly into
-     * the tiled backbuffer and covers the screen. Skipping the 8.3 MB CPU write
-     * and 130,000 clflush instructions saves 4-6ms of CPU time per frame during playback.
+     * Menu backdrop - dark neutral (0x0d,0x0d,0x10,0xff). In player mode the
+     * video quad is drawn straight into the tiled backbuffer, so the clear is
+     * normally skipped: it is an 8.3 MB CPU write plus ~130,000 clflushes,
+     * 4-6 ms per frame at 1080p and far worse at 4K.
+     *
+     * But the quad only covers the *image*. Anything the UI composited on top
+     * - OSD, scrub bar, subtitles - and everything outside a letterboxed image
+     * survives into the next use of this buffer. Skipping the clear there left
+     * each subtitle line stacked on the last and the OSD frozen on screen once
+     * it faded out, which is only obvious when the quad is not being redrawn
+     * every frame (software decode). So the clear is skipped only for a buffer
+     * that carried nothing but video.
      */
-    if (!g_agc_dev.is_player_mode) {
+    if (!g_agc_dev.is_player_mode ||
+        g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer]) {
+        g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer] = 0;
         uint32_t *backbuffer = (uint32_t *)g_agc_dev.scanout_buffers[g_agc_dev.active_backbuffer];
         if (backbuffer) {
             uint64_t val = (uint64_t)0xff100d0d | ((uint64_t)0xff100d0d << 32);
@@ -1637,6 +1650,18 @@ void evo_agc_runtime_frame_end(void)
 void evo_agc_runtime_present(void)
 {
     evo_agc_runtime_frame_end();
+}
+
+/*
+ * Mark the buffer being drawn now as carrying UI pixels, so the next frame that
+ * reuses it clears first. Called by the render loop after the UI pass on the
+ * player screen; harmless outside player mode, where every frame clears anyway.
+ */
+void evo_agc_runtime_note_ui_drawn(void)
+{
+    if (!g_agc_dev.initialized)
+        return;
+    g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer] = 1;
 }
 
 void evo_agc_runtime_set_player_mode(int is_player)

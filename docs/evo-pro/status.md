@@ -15,14 +15,18 @@
 > fast, so the `#27`/`#28` sceAgc material below is **live reference again**,
 > not history.
 >
-> **On the GPU:** the RmlUi UI (bare-metal AGC) and video *decode*
-> (`sceVideodec2`).
-> **Not on the GPU:** video *present* in `--agc` builds — the four video
-> pipelines are not yet converted to `.pipe` and are gated off behind
-> `EVO_AGC_HAVE_VIDEO_PIPES`. Video still presents through GL in `--gl` builds.
+> **The OpenGL path has since been removed outright.** `ps5-opengl`, its
+> submodule, `scripts/build-ps5-opengl.sh`, the overlay compose file and the
+> `--gl` / `--no-gl` / `--gl-smoke` / `--gl-hdr-probe` flags are all gone.
+> `media/src/evo_agc_runtime.c` owns `sceAgc` and `sceVideoOut` for the whole
+> session and renders at the panel's own resolution
+> (`sceVideoOutGetResolutionStatus`; hardware-verified at 3840x2160).
 >
-> The GL-1…GL-6 record below remains accurate for the GL path, which is still
-> the default build and still owns video.
+> **On the GPU:** the RmlUi UI, video present (the four video pipelines behind
+> `EVO_AGC_HAVE_VIDEO_PIPES`) and video *decode* (`sceVideodec2`).
+>
+> The GL-1…GL-6 record below is kept as the history of how the render path got
+> here; it no longer describes anything that ships.
 
 
 > **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.

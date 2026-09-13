@@ -50,6 +50,7 @@ public:
     bool isStatsForNerdsVisible() const { return m_showStatsForNerds; }
     void toggleStatsForNerds();
     bool hasActiveOverlay() const;
+    double subtitleClockSeconds() const;
 
 private:
     void initPlayerStateMachine();

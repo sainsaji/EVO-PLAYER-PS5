@@ -4,6 +4,7 @@
 #include "evo/Common.hpp"
 #include "evo/interfaces/IStatefulFeature.hpp"
 #include <string>
+#include <vector>
 
 namespace evo {
 
@@ -85,6 +86,26 @@ public:
 
     virtual bool playNextVideo() = 0;
     virtual bool replay() = 0;
+
+    /* --- audio tracks ------------------------------------------------- */
+    struct AudioTrackInfo {
+        int         streamIndex = -1;
+        std::string title;       /* stream metadata title, if any */
+        std::string language;    /* "eng", "jpn", ... or "UND" */
+        std::string codecName;
+        int         channels = 0;
+        int         sampleRate = 0;
+    };
+
+    /* Every audio stream in the open file that has a usable decoder. */
+    virtual std::vector<AudioTrackInfo> getAudioTracks() const = 0;
+    virtual int  getActiveAudioStream() const = 0;
+    /*
+     * Switch the live audio stream. Re-opens the file at the current position
+     * with that stream selected - there is no way to swap the decoder under a
+     * running session, which is also why this is a picker and not a cycle.
+     */
+    virtual bool switchAudioTrack(int streamIndex) = 0;
 };
 
 } // namespace evo

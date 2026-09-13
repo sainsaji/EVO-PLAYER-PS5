@@ -36,7 +36,7 @@ projects/evoplayer/core/
 ### Key Architectural Patterns
 
 1. **Application Lifecycle Orchestration (`Application.cpp`)**:
-   * Initializes hardware (`evo_agc_runtime` for bare-metal AGC, or `evo_gl_context` for GL-3).
+   * Initializes hardware (`evo_agc_runtime` — bare-metal AGC, the only render path).
    * Instantiates background services and registers all screens with `ScreenManager`.
    * Drives the master frame loop: network polling, remote USB commands, pad polling, auto-repeat, screen updates, and frame buffer presentation.
    * Handles late jailbreak rebinding (`evo_jailbreak_poll()`) so settings and history persist across launches.

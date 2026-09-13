@@ -15,11 +15,11 @@ Two rules that save time:
 
 ## The short version
 
-**Two build flavours, and they are not interchangeable.** `--agc` (the default)
-renders the UI on bare-metal `sceAgc`; `--gl` renders it with a CPU rasteriser
-blitted through ps5-opengl. Changing a shader means rebuilding it in a *second*
-Docker image. Read [Shader pipelines](#shader-pipelines---agc-builds) before
-touching anything under `projects/evoplayer/shaders/agc/`.
+**One render path: bare-metal `sceAgc`.** `media/src/evo_agc_runtime.c` owns
+`sceAgc` and `sceVideoOut` outright and there is no alternative backend.
+Changing a shader means rebuilding it in a *second* Docker image — read
+[Shader pipelines](#shader-pipelines---agc-builds) before touching anything
+under `projects/evoplayer/shaders/agc/`.
 
 ```bash
 # the ONLY hardware path — build + deploy the app module
@@ -196,7 +196,6 @@ Historical detail on why the payload context was a dead end:
 | `package-pkg.sh` | Produces a distributable PKG. |
 | `gen-compile-commands.sh` | Regenerates `compile_commands.json` for clangd. |
 | `shell.sh` | Drops you into a container shell. |
-| `build-ps5-opengl.sh` | Builds the ps5-opengl SDK. Required once for `--gl`; **not** needed for `--agc`. |
 
 ### Build switches
 
@@ -208,24 +207,23 @@ Passed through `EXTRA_CFLAGS`, empty in shipping builds:
 | `-DEVO_START_SCREEN=n` | Boot straight into a screen — `0` launch, `1` browser, `10` settings, `11` profile |
 | `-DEVO_PAD_DEBUG=1` | Print the raw pad mask on every press |
 
-#### `--agc` vs `--gl`
- 
+#### The render path
+
 ```bash
-./scripts/package-app.sh --ffpfsc          # default: --agc (UI on bare-metal sceAgc)
-./scripts/package-app.sh --ffpfsc --gl     # Mesa GL context fallback
+./scripts/package-app.sh --ffpfsc          # bare-metal sceAgc, always
 ```
 
-| | `--agc` (default) | `--gl` |
-|---|---|---|
-| UI rendering | `EvoRenderInterfaceAGC`, hand-built `sceAgc` DCBs | CPU coverage rasteriser + one GL blit |
-| Video present | AGC video pipelines | ps5-opengl |
-| Shaders | `.pipe` -> amdllpc (see below) | GLSL compiled by ps5-opengl's Mesa |
-| Needs `scripts/build-ps5-opengl.sh` | no | **yes**, once |
+| | how |
+|---|---|
+| UI rendering | `EvoRenderInterfaceAGC`, hand-built `sceAgc` DCBs |
+| Video present | AGC video pipelines |
+| Shaders | `.pipe` -> amdllpc (see below) |
+| Render size | the panel's own, from `sceVideoOutGetResolutionStatus` |
 
-Mutually exclusive - `package-app.sh` rejects both together. Deploy is identical
-either way; only the `.ffpfsc` contents differ. **`--agc` is the shipping
-default** so the UI renders smoothly on hardware; `--gl` remains available for
-fallback.
+`--agc` is still accepted so old muscle memory and scripts keep working, but it
+selects what you get anyway. `--gl`, `--no-gl`, `--gl-smoke` and
+`--gl-hdr-probe` were removed along with the `ps5-opengl` submodule and now
+fail with that explanation.
 
 ### Shader pipelines - `--agc` builds
 
@@ -571,27 +569,14 @@ so the same per-file line is in `evo.log` after any ordinary playback session.
 
 ---
 
-## `tools/gl_yuv_parity.py` — the video colour matrix, measured on the host
+## Video colour matrix
 
-GL-4 (#80) deleted the CPU converters, and with them `tools/bench.sh` — there is
-nothing left to benchmark, because the YUV→RGB now happens in a GLSL fragment
-shader on the video quad and costs no measurable CPU. What replaced the
-benchmark is a correctness check:
-
-```bash
-python3 tools/gl_yuv_parity.py            # summary
-python3 tools/gl_yuv_parity.py --verbose  # + the worst-disagreeing triples
-```
-
-It evaluates the shader's matrix and the deleted CPU converter's fixed-point
-matrix over all 2^24 `(Y,U,V)` triples and exits non-zero if any channel differs
-by more than 1/255. Run it after touching `YUV_MATRIX_GLSL` in
-`ui_rml/src/evo_gl_context_device.cpp`. Result and what it caught:
-[`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80).
-
-Historical converter timings, and why the CPU path was shaped the way it was:
-[`converter-perf.md`](converter-perf.md).
-
+The GPU present path deleted the CPU converters, and with them `tools/bench.sh`
+and `tools/gl_yuv_parity.py` — there is nothing left to benchmark or to compare
+against, because YUV→RGB happens in the AGC video pipelines and costs no
+measurable CPU. The BT.601 reference matrix both tools checked against is kept
+in [`converter-perf.md`](converter-perf.md); a change to the video colour path
+is now verified on hardware.
 ---
 
 ## Testing UI code on the host

@@ -44,12 +44,11 @@ docker compose run --rm ps5-dev bash -lc '
   `--rebuild-libc`. The self-unjail + `EVO_APP_MODULE` + boot trace are always
   on. (The `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` /
   `--geo-text` / `--shader-scan` probe flags were removed 2026-09-09.)
-- **GL is ON by default since 2026-09-10.** The boot cuts over to the
-  persistent ps5-opengl GL/EGL context instead of `pp_agc_init` +
-  `pp_videoout`, so `./scripts/build-ps5-opengl.sh` must have run once.
-  `--no-gl` selects the legacy path — it is UNMAINTAINED and known-broken at
-  boot since GL-3/GL-4 (no GL-era commit was ever verified on it), so use it
-  only as an escape hatch.
+- **Bare-metal sceAgc is the only render path.** `media/src/evo_agc_runtime.c`
+  owns `sceAgc` and `sceVideoOut` outright; `--agc` is accepted but redundant.
+  The OpenGL path, its `ps5-opengl` submodule and the `--gl` / `--no-gl` /
+  `--gl-smoke` / `--gl-hdr-probe` flags were removed — passing any of them now
+  fails with that explanation.
 - `deploy-app.sh --ffpfsc` DELETEs every `/mnt/usb0/evo_*` + `pp_4k_stage_*`
   file, so each launch starts with a fresh log set.
 - **Before deploying, check the console is up:** `nc -w4 -vz $PS5_HOST 2121`.

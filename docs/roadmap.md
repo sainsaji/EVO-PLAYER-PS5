@@ -17,9 +17,9 @@ Priority labels track this order: **critical** #32 · **high** #36, #72, #76, #7
 #52, the rest. `independent` = no cross-deps, work any time in parallel.
 
 **#27 CLOSED 2026-09-04** — sceAgc GPU present path delivered + hardware-verified
-(PR #61). 982 µs/frame. **Superseded by the render overhaul: GL-6 (#82) deleted
-`pp_agc*` — `ps5-opengl` is the present path now.** Historical leftovers: **#41**
-HEVC + VP9 native decode remains open; #62/#37/#28 folded into GL-4/GL-5.
+(PR #61). 982 µs/frame. `pp_agc*` was deleted by GL-6 (#82); the present path
+is now `media/src/evo_agc_runtime.c`, bare-metal `sceAgc`. Historical leftovers:
+**#41** HEVC + VP9 native decode remains open; #62/#37/#28 folded into GL-4/GL-5.
 
 **Closed 2026-09-03 (evening):** **#6** (video buffers → direct mem — landed as
 the swscale rotate-ring slab move + `--agc-probe` gate; PR #54, hw-verified) ·
@@ -41,18 +41,22 @@ dependency #44 is done); **#28 unblocked** (#27 closed 2026-09-04).
 **Grouping labels** (umbrellas retired 2026-09-03): `native-decode` = #30–#41 (#30 ✅ closed; #41 = codec-independent H.264/HEVC/VP9 backend, research base `third_party/ps5-hardware-video-decoding-research/`) ·
 `rmlui` = #45, #28, #49, #60, #68 (#44 + #16 ✅ closed) · `subtitles` = #35, #42, #43 ·
 `modularisation` = #49, #53 (`main.c` carve-up — [modularisation-plan.md](modularisation-plan.md)) ·
-`render-overhaul` = #77–#82 (collapse every present route / font system / converter into one
-OpenGL funnel — [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md)).
+`render-overhaul` = #77–#82 (collapsed every present route / font system /
+converter into one funnel; the OpenGL backing was later removed in favour of
+bare-metal `sceAgc` — [evo-pro/agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md)).
 (#26 closed 2026-09-02 — app-module playback works. #31 closed 2026-09-03 — native 4K
 H.264 plays. #44 PR1+PR2 landed 2026-09-03 — legacy screen renderer deleted,
 only a hardware pass left.)
 
 **Render overhaul — COMPLETE (2026-09-10):** the sceAgc rendering used to be
 spread across 5 present routes, 3 font systems and CPU+GPU converters. Chain
-**#77 → #78 → #79 → #80 → #81 → #82** (`GL-1`…`GL-6`) collapsed it into one
-`ps5-opengl` GL/EGL context. Plan:
-[evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
-**All six done.** GL-6 (#82) deleted `pp_agc*` / `pp_videoout` / `pp_platform.h`
+**#77 → #78 → #79 → #80 → #81 → #82** (`GL-1`…`GL-6`) collapsed it into a
+single funnel, initially backed by a `ps5-opengl` GL/EGL context. **All six
+done.** That OpenGL backing has since been **removed**: `media/src/evo_agc_runtime.c`
+drives `sceAgc` and `sceVideoOut` directly, at the panel's own resolution, and
+the submodule plus the `--gl*` build flags are gone. The rows below record the
+GL chain as it happened; see [evo-pro/agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md)
+for what runs now. GL-6 (#82) deleted `pp_agc*` / `pp_videoout` / `pp_platform.h`
 / the `#28` geo sink / the shader blobs and closed **#67, #69, #70, #5**.
 **Rescoped/open:** #68 (mechanism → GLSL/RCSS, absorbs #70). #4 is gone —
 P010 sampling shipped in #81 and its HDR-output-metadata + PQ/HLG tail was

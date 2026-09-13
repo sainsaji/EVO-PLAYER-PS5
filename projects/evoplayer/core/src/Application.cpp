@@ -4,6 +4,7 @@
 #include "evo/screens/PlayerScreen.hpp"
 #include "evo/screens/SettingsScreen.hpp"
 #include "evo/screens/SubtitlePickerScreen.hpp"
+#include "evo/screens/AudioTrackPickerScreen.hpp"
 #include "evo/screens/TextReaderScreen.hpp"
 #include "evo/screens/MediaInfoScreen.hpp"
 #include "evo/screens/SurroundTestScreen.hpp"
@@ -35,14 +36,11 @@
 #include "addon_emby.h"
 #include "pp_playback.h"
 #include "evo_playback.h"
-#include "evo_gl_context.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_perf_monitor.h"
 #include "evo_vdec.h"
 
-#if defined(EVO_AGC_DEVICE)
 #include "evo_agc_runtime.h"
-#endif
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -165,7 +163,6 @@ bool Application::initialize(int argc, char** argv) {
 
 bool Application::initHardware() {
 #if defined(EVO_APP_MODULE)
-#if defined(EVO_AGC_DEVICE)
     evo_bt("AGC: bare-metal AGC device context");
     int agcOk = evo_agc_runtime_init(DisplayWidth, DisplayHeight, 0);
     if (agcOk == 0) {
@@ -181,15 +178,6 @@ bool Application::initHardware() {
         evo_agc_runtime_frame_begin();
         evo_agc_runtime_present();
     }
-#else
-    evo_bt("GL-3: device GL context");
-    int glOk = evo_gl_context_create(DisplayWidth, DisplayHeight);
-    if (glOk) {
-        evo_gl_frame_begin();
-        evo_gl_context_present();
-        evo_gl_warm();
-    }
-#endif
     evo_keyboard_ime_probe();
     evo_boot_log_flush();
 #endif
@@ -228,7 +216,7 @@ bool Application::initHardware() {
     pp_playback_set_output(&g_pp_pb, DisplayWidth, DisplayHeight, PP_ASPECT_FIT);
     evo_vdec_prefer_nv12(1);
 
-    m_glScratch = static_cast<uint32_t*>(calloc(static_cast<size_t>(DisplayWidth) * DisplayHeight, 4));
+    m_uiScratch = static_cast<uint32_t*>(calloc(static_cast<size_t>(DisplayWidth) * DisplayHeight, 4));
     return true;
 }
 
@@ -262,6 +250,7 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<SettingsInterfaceScreen>());
     m_screenManager->registerScreen(std::make_unique<SettingsSystemScreen>());
     m_screenManager->registerScreen(std::make_unique<SubtitlePickerScreen>());
+    m_screenManager->registerScreen(std::make_unique<AudioTrackPickerScreen>());
     m_screenManager->registerScreen(std::make_unique<TextReaderScreen>());
     m_screenManager->registerScreen(std::make_unique<MediaInfoScreen>());
     m_screenManager->registerScreen(std::make_unique<SurroundTestScreen>());
@@ -294,15 +283,11 @@ void Application::shutdown() {
 
     pp_playback_shutdown(&g_pp_pb);
 
-#if defined(EVO_AGC_DEVICE)
     evo_agc_runtime_shutdown();
-#else
-    evo_gl_context_destroy();
-#endif
 
-    if (m_glScratch) {
-        free(m_glScratch);
-        m_glScratch = nullptr;
+    if (m_uiScratch) {
+        free(m_uiScratch);
+        m_uiScratch = nullptr;
     }
 
     m_appFsm.postEvent(ApplicationEvent::ShutdownComplete);
@@ -392,39 +377,33 @@ int Application::run() {
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
-#if defined(EVO_AGC_DEVICE)
         static bool s_was_player = false;
         if (isPlayer != s_was_player) {
             evo_agc_runtime_set_player_mode(isPlayer ? 1 : 0);
             s_was_player = isPlayer;
         }
-#endif
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
-        int glActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_gl_needs_frame() || (jb_repaint > 0);
+        int uiActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;
-        evo_rmlui_gl_set_active(glActive);
+        evo_rmlui_set_active(uiActive);
 
         if (frame < 5) {
-            evo_bt("frame %d: glActive=%d isPlayer=%d hasInput=%d", frame, glActive, isPlayer ? 1 : 0, hasInput ? 1 : 0);
+            evo_bt("frame %d: uiActive=%d isPlayer=%d hasInput=%d", frame, uiActive, isPlayer ? 1 : 0, hasInput ? 1 : 0);
             evo_boot_log_flush();
         }
 
-        if (glActive && !isPlayer) {
+        if (uiActive && !isPlayer) {
             if (frame < 5) {
                 evo_bt("frame %d: frame_begin", frame);
                 evo_boot_log_flush();
             }
-#if defined(EVO_AGC_DEVICE)
             evo_agc_runtime_frame_begin();
-#else
-            evo_gl_frame_begin();
-#endif
             if (frame < 5) {
                 evo_bt("frame %d: frame_begin done", frame);
                 evo_boot_log_flush();
             }
-            if (m_glScratch) {
-                std::memset(m_glScratch, 0, static_cast<size_t>(DisplayWidth) * DisplayHeight * 4u);
+            if (m_uiScratch) {
+                std::memset(m_uiScratch, 0, static_cast<size_t>(DisplayWidth) * DisplayHeight * 4u);
             }
         }
 
@@ -436,9 +415,9 @@ int Application::run() {
         }
 
         if (isPlayer) {
-            pp_gl_nv12_frame f;
+            pp_video_frame f;
             std::memset(&f, 0, sizeof(f));
-            int have = (pp_playback_get_nv12(&g_pp_pb, &f) && f.ready);
+            int have = (pp_playback_get_video_frame(&g_pp_pb, &f) && f.ready);
             int64_t current_pts = g_pp_pb.display_pts_us;
             bool new_frame = (current_pts != s_last_pts);
 
@@ -465,7 +444,6 @@ int Application::run() {
                 if (m_playbackController) {
                     view_mode = static_cast<int>(m_playbackController->getViewMode());
                 }
-#if defined(EVO_AGC_DEVICE)
                 int is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE && !f.held && f.uv != nullptr) ? 1 : 0;
                 evo_agc_blit_yuv(f.y, f.y_pitch, f.uv, f.uv_pitch,
                                  f.u, f.u_pitch, f.v, f.v_pitch,
@@ -473,55 +451,58 @@ int Application::run() {
                                  static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                  view_mode, f.ten_bit, f.color_trc,
                                  is_direct);
-#else
-                evo_gl_blit_yuv(f.y, f.y_pitch, f.uv, f.uv_pitch,
-                                f.u, f.u_pitch, f.v, f.v_pitch,
-                                static_cast<int>(f.coded_w), static_cast<int>(f.coded_h),
-                                static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
-                                view_mode, f.ten_bit, f.color_trc);
-#endif
                 swap = true;
             }
 
-            if (m_glScratch && should_render) {
-                m_screenManager->render(m_glScratch, DisplayWidth, DisplayHeight);
+            if (m_uiScratch && should_render) {
+                m_screenManager->render(m_uiScratch, DisplayWidth, DisplayHeight);
+                /*
+                 * The video quad only repaints the image. Any OSD, scrub bar or
+                 * subtitle drawn on top of it - or over a letterbox bar - has to
+                 * be erased before this buffer is used again, or the next frame
+                 * draws on top of it: subtitles stacked line on line and the OSD
+                 * stayed on screen after it faded out.
+                 */
+                if (overlay_active || is_paused || is_scrubbing || toast_visible) {
+                    evo_agc_runtime_note_ui_drawn();
+                }
                 swap = true;
             }
         } else {
-            if (m_glScratch) {
+            if (m_uiScratch) {
                 if (frame < 5) {
                     evo_bt("frame %d: screenManager render begin", frame);
                     evo_boot_log_flush();
                 }
-                m_screenManager->render(m_glScratch, DisplayWidth, DisplayHeight);
+                m_screenManager->render(m_uiScratch, DisplayWidth, DisplayHeight);
                 if (frame < 5) {
                     evo_bt("frame %d: screenManager render done", frame);
                     evo_boot_log_flush();
                 }
             }
 
-            // 5. Present if glActive
-            if (glActive && m_glScratch) {
+            // 5. Present if uiActive
+            if (uiActive && m_uiScratch) {
                 g_ps5_video_out_hdr = 0;
-                if (evo_rmlui_gl_blit_mode()) {
+                if (evo_rmlui_blit_mode()) {
                     if (frame < 5) {
-                        evo_bt("frame %d: evo_gl_blit_bgra begin", frame);
+                        evo_bt("frame %d: agc_composite_bgra begin", frame);
                         evo_boot_log_flush();
                     }
-                    evo_gl_blit_bgra(m_glScratch, DisplayWidth, DisplayHeight);
+                    evo_agc_composite_bgra(m_uiScratch, DisplayWidth, DisplayHeight, 1);
                     if (frame < 5) {
-                        evo_bt("frame %d: evo_gl_blit_bgra done", frame);
+                        evo_bt("frame %d: agc_composite_bgra done", frame);
                         evo_boot_log_flush();
                     }
                     swap = true;
                 } else {
-                    swap = evo_rmlui_gl_consume_drew();
+                    swap = evo_rmlui_consume_drew();
                 }
             }
         }
 
         // 5. Present if swap requested
-        if (swap && glActive) {
+        if (swap && uiActive) {
             if (frame < 5) {
                 evo_bt("frame %d: present begin", frame);
                 evo_boot_log_flush();
@@ -532,13 +513,8 @@ int Application::run() {
                 evo_boot_log("app present begin isPlayer=1");
                 evo_boot_log_flush();
             }
-#if defined(EVO_AGC_DEVICE)
             evo_agc_runtime_present();
-            evo_rmlui_gl_end_frame();
-#else
-            evo_gl_context_present();
-            evo_rmlui_gl_end_frame();
-#endif
+            evo_rmlui_end_frame();
             if (isPlayer && s_present_player_log >= 0) {
                 evo_boot_log("app present done isPlayer=1");
                 evo_boot_log_flush();

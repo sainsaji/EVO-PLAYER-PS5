@@ -43,7 +43,7 @@ extern long long        controls_last_used_ms;
 
 void      toast(const char *title, const char *msg);
 long long now_ms(void);
-int       start_video_playback(const char *path);
+int       start_video_playback_at(const char *path, double resume_seconds);
 
 /* Defined in the SRT section below; used by the embedded section above it. */
 static void prospero_subtitle_clean_line(const char *input, char *output,
@@ -1931,9 +1931,11 @@ void prospero_subtitle_apply_track(int track)
     requested_resume_seek_pos = position;
     resume_base_offset_seconds = position;
 
+    /* Re-open at the position the picture is at, not the start of the file:
+     * requested_resume_seek_pos is no longer read by the open path. */
     if (
-        !start_video_playback(
-            playback_path
+        !start_video_playback_at(
+            playback_path, position
         )
     ) {
         prospero_subtitle_requested_stream = -2;

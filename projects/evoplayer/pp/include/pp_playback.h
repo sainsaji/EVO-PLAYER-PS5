@@ -69,7 +69,7 @@ typedef struct pp_playback {
      * GL-4 (#80): the decoded frame's planes, borrowed from the decoder's frame
      * pool (or FFmpeg's AVFrame) — valid because push_frame pace-sleeps on this
      * frame's PTS before returning, so the decoder can't recycle the slot until
-     * the render thread has had its turn. pp_playback_get_nv12() hands these
+     * the render thread has had its turn. pp_playback_get_video_frame() hands these
      * straight out (under the lock, no pixel copy); the GL uploader reads them.
      * gl_src_uv != NULL => NV12 (RG8 chroma); else gl_src_u/_v are planar I420.
      */
@@ -137,7 +137,7 @@ int pp_playback_has_display(const pp_playback *pb);
  * snapshot of the last published frame instead, so the picture holds still.
  * For an FFmpeg planar source `uv` is NULL and `u`/`v` are the chroma planes.
  */
-typedef struct pp_gl_nv12_frame {
+typedef struct pp_video_frame {
     const uint8_t *y, *uv, *u, *v;
     int      y_pitch, uv_pitch, u_pitch, v_pitch;   /* bytes (2x samples when ten_bit) */
     uint32_t coded_w, coded_h;   /* padded luma plane = R8/R16 texture size */
@@ -146,13 +146,13 @@ typedef struct pp_gl_nv12_frame {
     int      held;               /* 1 = the frozen mid-seek snapshot    */
     int      ten_bit;            /* GL-5 (#81): planar 16-bit (yuv420p10le), sample as GL_R16 */
     int      color_trc;
-} pp_gl_nv12_frame;
+} pp_video_frame;
 
 /**
  * Fill *f with the ready frame's planes under the display lock (a pointer/int
  * copy, no pixels). Returns 1 if ready, 0 otherwise.
  */
-int pp_playback_get_nv12(pp_playback *pb, pp_gl_nv12_frame *f);
+int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f);
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us);
 void pp_playback_notify_seek_end(pp_playback *pb, int success,

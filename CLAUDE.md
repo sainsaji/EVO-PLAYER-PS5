@@ -69,10 +69,9 @@ docker compose run --rm ps5-dev bash -lc '
   ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
 # ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
-# --agc renders the UI on bare-metal sceAgc (docs/evo-pro/agc-bare-metal-ui.md);
-# --gl is the default and still owns video present. GL boot runs on
-# a persistent ps5-opengl GL/EGL context, so `scripts/build-ps5-opengl.sh` must
-# have run once. `--no-gl` is retired and now fails with that explanation.
+# Bare-metal sceAgc is the only render path (docs/evo-pro/agc-bare-metal-ui.md).
+# `--agc` is accepted but redundant; `--gl`/`--no-gl`/`--gl-smoke`/`--gl-hdr-probe`
+# and the ps5-opengl submodule are gone and now fail with that explanation.
 # Diagnostics = /mnt/usb0/evo.log (one file) + klog live; popups with --breadcrumbs.
 # Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
 
@@ -108,15 +107,15 @@ projects/evoplayer/
   media/        subsystems carved out of main.c (own state/threads, narrow interface)
   pp/           playback: pace + presentation clock + seek (pp_playback),
                 theme. The CPU converters, tile_copy, the V8/V3/1080 backend
-                dispatch (GL-4 #80) and pp_agc*/pp_videoout/pp_platform.h
-                (GL-6 #82) are all deleted — ps5-opengl owns present + VideoOut.
+                dispatch and pp_agc*/pp_videoout/pp_platform.h are all deleted —
+                media/src/evo_agc_runtime.c owns present + VideoOut.
   ui/           shared primitives: nav/focus/input/feedback/layout + evo_keyboard
-                (D-pad/buffer state; its immediate-mode renderer went in GL-5 #81,
+                (D-pad/buffer state; its immediate-mode renderer is gone,
                 evo_draw/evo_widgets with it). Screen renderers (evo_screens.c/
                 evo_chrome.c) deleted in #44 — every screen draws through ui_rml.
   ui_rml/       RmlUi integration: app.cpp, bridge.cpp, render.cpp — the UI —
-                plus evo_gl_context_device.cpp, the GL/EGL context and the
-                video quad (stubbed out by evo_gl_context_stub.c off-device).
+                plus evo_rmlui_render_agc.cpp, the sceAgc render interface.
+                Off-device the same sources build against the CPU rasteriser.
                 src/rmlui_patch/ is one upstream RmlUi TU with a finer corner
                 tessellation, swapped into librmlui.a at package time (#68)
   assets/rml/   .rml/.rcss documents for the RmlUi screens
@@ -163,11 +162,9 @@ mock data — everything in the DOM binds to live C structs
 | [theming.md](docs/theming.md) | Theme/color system |
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
 | [evo-pro/agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) | **The RmlUi UI on bare-metal `sceAgc`** (hw-verified 2026-09-12) — `.pipe` + amdllpc shader toolchain, the gfx1013 LLPC patch, the silent-failure bugs and the `agc health` lines that verify a build. `--agc` builds only; video present is still unported. |
-| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)** (top block = current front: the **OpenGL render overhaul** — **GL-1…GL-6 DONE**, GL-6/#82 deleted `pp_agc*`/`pp_videoout`). **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP — no popup screenshots). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (**historical** — the pre-`ps5-opengl` hand-rolled sceAgc path) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md) |
-| [evo-pro/opengl-render-overhaul.md](docs/evo-pro/opengl-render-overhaul.md) | **The one OpenGL funnel** (`third_party/ps5-opengl/` submodule) — every pixel is a GL draw or texture; ps5-opengl (Mesa + PS5 Gallium + patched PSSL) owns `sceAgc` / `sceVideoOut`. Full pixel-path inventory, `GL-1`…`GL-6` phase table (all done), the issues it superseded |
-| [evo-pro/gl1-spike.md](docs/evo-pro/gl1-spike.md) | **#77 GL-1 — GO (hw-verified 2026-09-09).** `ps5-opengl` submodule + `_Exit` patch + from-source SDK + `pp_gl_smoke` in the `.ffpfsc` (`package-app.sh --gl-smoke`, `scripts/build-ps5-opengl.sh`, overlay `docker-compose.ps5-opengl.yml`). Mesa 26.2 / GL 3.3 renders on 12.70. #78 unblocked. |
-| [gpu-notes.md](docs/gpu-notes.md) | The `ps5-opengl` funnel (what runs) + the reverse-engineering history that got there |
-| [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted by GL-4 (#80). Kept for the BT.601 reference matrix |
+| [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)**. **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (**historical** — the hand-rolled sceAgc path that preceded today's runtime) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md) |
+| [gpu-notes.md](docs/gpu-notes.md) | The GPU reverse-engineering history behind the bare-metal sceAgc runtime |
+| [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted when the GPU took over present. Kept for the BT.601 reference matrix |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/media-tile.md) | Media tile / metadata handling |
 | [addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby/Nuvio addon integration |

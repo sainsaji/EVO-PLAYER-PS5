@@ -19,12 +19,12 @@ inner layer compiles and runs without the one outside it.
     │               narrow interfaces. Depend on FFmpeg, not on the player.
     │
     ├── pp/         playback backend: pace, presentation clock, seek, theme.
-    │               No UI, no decoder ownership. (Present + VideoOut now belong
-    │               to the GL context in ui_rml/ - GL-6.)
+    │               No UI, no decoder ownership. (Present + VideoOut belong to
+    │               the AGC runtime in media/.)
     │
-    ├── ui_rml/     the UI: RmlUi integration + the one OpenGL context
-    │               (evo_gl_context_device.cpp -> ps5-opengl -> sceAgc /
-    │               sceVideoOut) that every pixel goes through.
+    ├── ui_rml/     the UI: RmlUi integration + EvoRenderInterfaceAGC, which
+    │               turns every draw into a sceAgc command buffer. Video and
+    │               UI both land on the surfaces media/evo_agc_runtime.c owns.
     │
     └── ui/         shared immediate-mode primitives (nav/focus/input/layout).
 ```
@@ -103,14 +103,12 @@ as much as possible is verifiable on the host:
 | | |
 |---|---|
 | `./tools/uiview.sh --all` | render every screen to PNG |
-| `python3 tools/gl_yuv_parity.py` | the video colour matrix, against the pre-GL-4 CPU reference |
 | `python3 tools/gen_icons.py` | icons and font punctuation, with contact sheets |
 | `python3 tools/measure_font.py` | re-derive the font metrics |
 
-`gl_yuv_parity.py` sweeps every `(Y,U,V)` triple through both the shader and the
-CPU matrix EVO shipped until GL-4, so a change to the video colour path is
-accepted or rejected before it ever reaches hardware. (It replaced `bench.sh`,
-which timed the CPU converters — deleted by GL-4 / #80.)
+(`gl_yuv_parity.py`, which swept every `(Y,U,V)` triple against the CPU
+reference matrix, went with the OpenGL path. The BT.601 reference matrix it
+checked against is kept in [`converter-perf.md`](converter-perf.md).)
 
 ---
 

@@ -418,7 +418,7 @@ BT.601 limited range, fixed point: `298/409/516/-100/-208`, `(… + 128) >> 8`,
 **Reproduce (host, no console):**
 
 ```bash
-python3 tools/gl_yuv_parity.py --verbose
+# tools/gl_yuv_parity.py has been deleted along with the OpenGL path
 ```
 
 It evaluates both arithmetics over all 2^24 `(Y,U,V)` triples — a stronger

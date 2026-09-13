@@ -11,8 +11,7 @@
 > this guide documents (`pp_agc.c`, `pp_agc_osd.c`, `evo_rmlui_render_agc.cpp`,
 > the vendored shader blobs) was **deleted in GL-6**. `ps5-opengl` (Mesa + PS5
 > Gallium + patched PSSL compiler) is the render path now — see
-> [opengl-render-overhaul.md](opengl-render-overhaul.md) and
-> [gl4-video-path-plan.md](gl4-video-path-plan.md). This page stays as the
+> the OpenGL detour (since removed). This page stays as the
 > line-by-line reverse-engineering of the ProsperoLight AGC path (DCB layout,
 > CX registers, shader-blob format) — reference, not current state.
 >

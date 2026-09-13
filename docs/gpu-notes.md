@@ -1,42 +1,42 @@
-# GPU on the PS5 — the `ps5-opengl` funnel
+# GPU on the PS5 — the bare-metal `sceAgc` runtime
 
-> **Superseded 2026-09-10 (GL-6 / #82).** This file used to conclude "there is
-> no open hardware GL/Vulkan path on this SDK". That is no longer true. EVO now
-> renders **everything** — menus, video, OSD, subtitles, keyboard, HUD — through
-> a single OpenGL context on `third_party/ps5-opengl/` (Mesa + a bespoke PS5
-> Gallium driver + a patched PSSL compiler → `sceAgc`). The hand-rolled `sceAgc`
-> present path (`pp_agc*`, `pp_videoout`) and the CPU YUV→BGRA converters that
-> this document weighed are all deleted. The reverse-engineering history below
-> is kept for context.
+> **Where this landed.** This file used to conclude "there is no open hardware
+> GL/Vulkan path on this SDK". EVO went on to try exactly that — a Mesa-based
+> OpenGL stack (`ps5-opengl`) driving `sceAgc` — and then removed it again:
+> RmlUi through that driver's GL3 path ran at ~1.2 s/frame. What ships is a
+> bare-metal runtime that builds `sceAgc` command buffers itself
+> (`media/src/evo_agc_runtime.c`), with shaders compiled by amdllpc from
+> `.pipe` sources. The CPU YUV→BGRA converters this document weighed are gone
+> either way. The reverse-engineering history below is kept for context.
 
 ## What runs today
 
 ```
 decode (CPU, sceVideodec2 / FFmpeg) ─ NV12/P010 ─┐
-                                                 ├─► GL: video quad (YUV→RGB fragment shader)
-RmlUi context (all screens + overlays) ───────────┤        + UI pass + HUD pass
-                                                 └─► eglSwapBuffers ─► ps5-opengl ─► sceAgc DCB + sceVideoOut flip
+                                                 ├─► AGC video pipelines (YUV→RGB on the GPU)
+RmlUi context (all screens + overlays) ───────────┤   + EvoRenderInterfaceAGC UI pass + HUD
+                                                 └─► sceAgc DCB submit ─► sceVideoOut flip
 ```
 
-- **One graphics context**, created in `main()`'s pre-unjail slot
-  (`ui_rml/src/evo_gl_context_device.cpp`) — `libSceAgc*` / `libSceVideoOut` go
-  API-dead after the self-unjail credential swap, so GL cannot be lazily
-  brought up on first draw. A second `sceVideoOut` open panics the console, so
-  `ps5-opengl` is the sole owner of `sceAgc` **and** the flip queue.
-- **Mesa 26.2 / GL 3.3 Core**, validated on FW 12.70 (GL-1, `--gl-smoke`
-  receipt — [evo-pro/gl1-spike.md](evo-pro/gl1-spike.md)).
+- **One graphics owner**, brought up in `main()`'s pre-unjail slot
+  (`media/src/evo_agc_runtime.c`) — `libSceAgc*` / `libSceVideoOut` go API-dead
+  after the self-unjail credential swap, so the device cannot be lazily brought
+  up on first draw. A second `sceVideoOut` open panics the console, so the AGC
+  runtime is the sole owner of `sceAgc` **and** the flip queue.
 - The video path uploads NV12 as R8 + RG8 textures (zero-copy from the decode
-  frame pool) and does YUV→RGB + scale + OSD composite in one GLSL pass — see
-  [evo-pro/gl4-video-path-plan.md](evo-pro/gl4-video-path-plan.md).
-- Full plan, phasing and the pixel-path inventory:
-  [evo-pro/opengl-render-overhaul.md](evo-pro/opengl-render-overhaul.md).
+  frame pool) and does YUV→RGB + scale + OSD composite in the AGC video
+  pipelines.
+- Render size comes from `sceVideoOutGetResolutionStatus` — the panel's own
+  resolution, not a fixed 1080p.
+- Shader toolchain, register model and hardware receipts:
+  [evo-pro/agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md).
 
 ## Build
 
-`ps5-opengl` is a git submodule built from source through the opt-in toolchain
-overlay — `scripts/build-ps5-opengl.sh` + `docker-compose.ps5-opengl.yml`. It
-must have been built once before `scripts/package-app.sh --ffpfsc`. `--gl` is
-the default (and only) app-module present path; `--no-gl` was retired by GL-4.
+Nothing extra to build: the AGC runtime talks to `libSceAgc` directly and
+`scripts/package-app.sh --ffpfsc` is self-contained. (An OpenGL route via a
+`ps5-opengl` submodule existed briefly and was removed; `--gl`, `--no-gl`,
+`--gl-smoke` and `--gl-hdr-probe` now fail with that explanation.)
 
 ## HDR / 10-bit
 
@@ -70,10 +70,12 @@ because Sony's compiler emits an `sl00` resource-metadata trailer that can't be
 hand-authored. Textured UI (text, icons, art) as GPU geometry was blocked at
 the toolchain level.
 
-### `ps5-opengl` (the render overhaul)
+### How that wall came down
 
-`ps5-opengl` resolves exactly that wall: Mesa's PSBC path compiles ordinary
-GLSL to working PS5 shaders. It is the *same* `sceAgc` route, so the hand-rolled
-present path had to be **removed, not run alongside** (dual `sceVideoOut`
-ownership panics). GL-1…GL-6 did that migration; GL-6 deleted `pp_agc*` /
-`pp_videoout` / the CPU converters.
+Two attempts. `ps5-opengl` (Mesa's PSBC path compiling ordinary GLSL to working
+PS5 shaders) proved the shaders were obtainable, but RmlUi through its GL3
+interface ran at ~1.2 s/frame. The answer was to keep the shader lesson and
+drop the driver: `.pipe` sources compiled by **amdllpc**, fed to hand-built
+`sceAgc` command buffers. Either way it is the *same* `sceAgc` route, so only
+one present path can exist at a time — dual `sceVideoOut` ownership panics the
+console.

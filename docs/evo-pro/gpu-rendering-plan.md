@@ -9,7 +9,7 @@
 > plan (#27 convert/present, #28 UI-on-GPU). It shipped and was
 > hardware-verified — GTA 4K through `sceAgc` at 982 µs/frame — but textured
 > shaders hit the `sl00`-trailer wall (`0x8a6c001f`), which is exactly what the
-> **OpenGL render overhaul** ([opengl-render-overhaul.md](opengl-render-overhaul.md))
+> **OpenGL render overhaul** (built, then removed — the console is bare-metal AGC)
 > resolves: Mesa's PSBC compiles ordinary GLSL to working PS5 shaders. GL-1…GL-6
 > replaced this path; **GL-6 deleted `pp_agc*.c`, `pp_agc_osd.c`,
 > `pp_videoout.c` and the CPU converters**. Keep this doc for the DCB / register

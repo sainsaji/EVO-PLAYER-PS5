@@ -28,6 +28,9 @@ extern "C" {
 pp_playback g_pp_pb;
 int g_ps5_user_id = 0;
 int screen = 0;
+/* Whether the VideoOut surface is registered in an HDR format. Set by main()
+ * before the AGC runtime comes up; lived in the deleted GL context stub. */
+int g_ps5_video_out_hdr = 0;
 
 int player_paused = 0;
 double media_duration_sec = 0.0;
@@ -132,11 +135,21 @@ double evo_player_position_s(void) {
     return prospero_player_position();
 }
 
-int start_video_playback(const char *path) {
+/*
+ * Non-zero on success. Every caller tests `if (!start_video_playback(...))` as
+ * "it failed", so returning 0 for success - as this shim did - made the
+ * subtitle track switch report TRACK CHANGE FAILED on every successful switch
+ * and skip re-enabling subtitles afterwards.
+ */
+int start_video_playback_at(const char *path, double resume_seconds) {
     if (auto pb = evo::Application::getInstance().getPlaybackController()) {
-        return pb->startPlayback(path ? path : "", 0.0) ? 0 : -1;
+        return pb->startPlayback(path ? path : "", resume_seconds) ? 1 : 0;
     }
-    return -1;
+    return 0;
+}
+
+int start_video_playback(const char *path) {
+    return start_video_playback_at(path, 0.0);
 }
 
 void stop_video_playback(void) {

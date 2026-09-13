@@ -350,6 +350,22 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
         }
     }
 
+    /*
+     * A track switch asks for a specific stream. Honour it only if it really is
+     * a decodable audio stream in this file, so a stale index from a previous
+     * file can never leave the session with no audio at all.
+     */
+    if (m_requestedAudioStream >= 0 &&
+        m_requestedAudioStream < static_cast<int>(play_fmt->nb_streams)) {
+        AVStream* want = play_fmt->streams[m_requestedAudioStream];
+        if (want && want->codecpar &&
+            want->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
+            avcodec_find_decoder(want->codecpar->codec_id)) {
+            audio_stream_index = m_requestedAudioStream;
+        }
+    }
+    m_requestedAudioStream = -1;
+
     m_musicMode = (video_stream_index < 0 && audio_stream_index >= 0);
 
     // Initialize Video Decoder if video present
@@ -463,15 +479,49 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
     prospero_subtitle_load_for_media(filePath.c_str());
     prospero_embedded_subtitle_open(play_fmt);
 
-    // Apply resume position if requested
-    if (resumeOffset > 0.0 && resumeOffset < m_durationSeconds) {
-        m_resumeBaseOffset = resumeOffset;
-        resume_base_offset_seconds = resumeOffset;
-        requested_resume_seek_pos = resumeOffset;
-    } else {
-        m_resumeBaseOffset = 0.0;
-        resume_base_offset_seconds = 0.0;
-        requested_resume_seek_pos = 0.0;
+    /*
+     * Apply the resume position. This has to be a real seek on play_fmt before
+     * the demux thread starts: m_resumeBaseOffset is added to the decode clock
+     * for every position readout (OSD, progress bar, subtitle timing), so
+     * setting it without moving the file makes the whole UI report a time the
+     * picture is not at - the OSD showed 5:15 while frame one was still 0:00,
+     * and every subtitle cue was out by the same amount. requested_resume_seek_pos
+     * used to drive this in start_video_playback(); after the C++ migration it
+     * had no reader at all.
+     */
+    m_resumeBaseOffset = 0.0;
+    resume_base_offset_seconds = 0.0;
+    requested_resume_seek_pos = 0.0;
+
+    if (resumeOffset > 0.0 && resumeOffset < m_durationSeconds &&
+        (video_stream_index >= 0 || audio_stream_index >= 0)) {
+        double seekPos = resumeOffset;
+        int seekStream = (video_stream_index >= 0) ? video_stream_index
+                                                   : audio_stream_index;
+        /* Land slightly early so the first decoded frame is at or before the
+         * resume point rather than just past it. */
+        if (video_stream_index >= 0 && seekPos > 3.0)
+            seekPos -= 1.0;
+
+        int64_t seekTs = static_cast<int64_t>(
+            seekPos / av_q2d(play_fmt->streams[seekStream]->time_base));
+
+        if (av_seek_frame(play_fmt, seekStream, seekTs, AVSEEK_FLAG_BACKWARD) >= 0) {
+            evo_vdec_flush(g_vdec);
+            if (audio_ctx) {
+                avcodec_flush_buffers(audio_ctx);
+                prospero_audio_resampler_reset();
+            }
+            prospero_embedded_subtitle_reset();
+            packet_queue_clear(&video_packet_queue);
+            packet_queue_clear(&audio_packet_queue);
+
+            m_resumeBaseOffset = resumeOffset;
+            resume_base_offset_seconds = resumeOffset;
+        } else {
+            evo_boot_log("PlaybackController: resume seek to %.2fs failed; starting at 0",
+                         resumeOffset);
+        }
     }
 
     // Load chapters
@@ -751,6 +801,71 @@ bool PlaybackController::playNextVideo() {
     }
 
     return false;
+}
+
+std::vector<PlaybackController::AudioTrackInfo>
+PlaybackController::getAudioTracks() const {
+    std::vector<AudioTrackInfo> out;
+    if (!play_fmt) return out;
+
+    for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+        AVStream* st = play_fmt->streams[i];
+        if (!st || !st->codecpar ||
+            st->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
+            continue;
+        }
+        /* Listing a track EVO cannot decode is an invitation to silence. */
+        if (!avcodec_find_decoder(st->codecpar->codec_id)) {
+            continue;
+        }
+
+        AudioTrackInfo t;
+        t.streamIndex = static_cast<int>(i);
+        t.channels    = st->codecpar->ch_layout.nb_channels;
+        t.sampleRate  = st->codecpar->sample_rate;
+        const char* cn = avcodec_get_name(st->codecpar->codec_id);
+        t.codecName = cn ? cn : "unknown";
+
+        const AVDictionaryEntry* lang =
+            av_dict_get(st->metadata, "language", nullptr, 0);
+        t.language = (lang && lang->value && lang->value[0]) ? lang->value : "UND";
+
+        const AVDictionaryEntry* title =
+            av_dict_get(st->metadata, "title", nullptr, 0);
+        if (title && title->value && title->value[0]) {
+            t.title = title->value;
+        }
+
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+int PlaybackController::getActiveAudioStream() const {
+    return audio_stream_index;
+}
+
+bool PlaybackController::switchAudioTrack(int streamIndex) {
+    if (m_currentFilePath.empty() || streamIndex < 0) return false;
+    if (streamIndex == audio_stream_index) return true;
+
+    /*
+     * Resume where the picture is, not where the file started: getPositionSeconds()
+     * already folds in the resume base, and startPlayback() seeks to whatever it
+     * is handed. Copy the path first - stopPlayback() clears m_currentFilePath.
+     */
+    std::string path = m_currentFilePath;
+    double resumeAt = getPositionSeconds();
+    bool wasPaused = isPaused();
+
+    m_requestedAudioStream = streamIndex;
+    if (!startPlayback(path, resumeAt)) {
+        m_requestedAudioStream = -1;
+        return false;
+    }
+
+    if (wasPaused) setPaused(true);
+    return true;
 }
 
 bool PlaybackController::replay() {

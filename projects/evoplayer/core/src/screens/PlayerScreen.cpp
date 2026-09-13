@@ -24,6 +24,7 @@ extern int perf_decode_fps;
 extern int detected_audio_rate;
 extern int evo_audio_channels;
 extern char current_media_path[768];
+extern double resume_base_offset_seconds;
 void draw_video_frame_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 }
 
@@ -70,6 +71,19 @@ void PlayerScreen::toggleStatsForNerds() {
     m_playerFsm.postEvent(PlayerScreenEvent::ToggleStats);
 }
 
+/*
+ * The clock subtitles are timed against: the raw audio clock when a real audio
+ * track is open, otherwise the video clock, plus the resume offset - never the
+ * OSD position, which reports the scrub target while the user is scrubbing and
+ * would drag every cue to the scrub head instead of the picture on screen.
+ */
+double PlayerScreen::subtitleClockSeconds() const {
+    double clock = (audio_ctx && audio_handle >= 1) ? (double)audio_clock_seconds
+                                                    : evo_pb_video_clock_s();
+    double pos = resume_base_offset_seconds + clock;
+    return (pos < 0.0) ? 0.0 : pos;
+}
+
 bool PlayerScreen::hasActiveOverlay() const {
     if (m_osdVisibilityAlpha > 0 || m_showStatsForNerds) {
         return true;
@@ -77,7 +91,7 @@ bool PlayerScreen::hasActiveOverlay() const {
     if (prospero_subtitle_enabled) {
         auto playback = Application::getInstance().getPlaybackController();
         if (playback && !playback->isMusicMode()) {
-            double subPos = playback->getPositionSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
+            double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
             if (subPos < 0.0) subPos = 0.0;
             if (prospero_subtitle_use_external) {
                 const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);
@@ -141,9 +155,10 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         return true;
     }
     if (pressed & PadButtons::Triangle) {
-        if (screenMgr) {
-            screenMgr->navigateTo(ScreenId::SubtitlePicker);
-        }
+        /* Aspect ratio, as it has always been on this screen. */
+        playback->cycleViewMode();
+        toast("VIEW MODE", playback->getViewMode() == ViewMode::Fit ? "FIT" :
+                           playback->getViewMode() == ViewMode::Fill ? "FILL" : "STRETCH");
         return true;
     }
     if (pressed & PadButtons::L1) {
@@ -162,10 +177,31 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         playback->moveScrub(10.0);
         return true;
     }
+    /*
+     * Up toggles subtitles, Down opens the picker - the legacy binding. The
+     * picker rather than a next-track cycle because cycling reopens the file
+     * on every step, which on a disc rip with thirty tracks means thirty
+     * reopens to reach the one you want.
+     */
     if (pressed & PadButtons::Up) {
-        playback->cycleViewMode();
-        toast("VIEW MODE", playback->getViewMode() == ViewMode::Fit ? "FIT" :
-                           playback->getViewMode() == ViewMode::Fill ? "FILL" : "STRETCH");
+        if (!playback->isScrubbing()) {
+            prospero_subtitle_toggle();
+            toast("SUBTITLES", prospero_subtitle_enabled ? "ON" : "OFF");
+        }
+        return true;
+    }
+    if (pressed & PadButtons::Down) {
+        if (!playback->isScrubbing() && screenMgr) {
+            screenMgr->navigateTo(ScreenId::SubtitlePicker);
+        }
+        return true;
+    }
+    if (pressed & PadButtons::R2) {
+        /* Audio track picker. R2 because L2/R3 are the legacy subtitle-delay
+         * nudge and R2 is otherwise unbound on this screen. */
+        if (!playback->isScrubbing() && screenMgr) {
+            screenMgr->navigateTo(ScreenId::AudioTrackPicker);
+        }
         return true;
     }
 
@@ -303,7 +339,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
 
     char activeSubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
     if (prospero_subtitle_enabled && !playback->isMusicMode()) {
-        double subPos = playback->getPositionSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
+        double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
         if (subPos < 0.0) subPos = 0.0;
 
         if (prospero_subtitle_use_external) {
@@ -326,10 +362,49 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         std::memset(&p, 0, sizeof(p));
         p.title = titleStr.empty() ? "Video Playback" : titleStr.c_str();
         p.metadata = metaStr.c_str();
-        p.res_badge = "1080p FHD";
-        p.hdr_badge = "";
-        p.codec_badge = "H.264 / AVC";
-        p.fps_badge = "60 FPS";
+        /*
+         * Derived from the open stream, not assumed. These were hardcoded to
+         * "1080p FHD" / "H.264 / AVC" / "60 FPS", so every file reported the
+         * same thing whatever it actually was.
+         */
+        static char resBuf[32], codecBuf[32], fpsBuf[16];
+        const char* hdrBadge = "";
+        resBuf[0] = codecBuf[0] = fpsBuf[0] = '\0';
+
+        if (play_fmt && video_stream_index >= 0 &&
+            video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+            AVCodecParameters* cp = play_fmt->streams[video_stream_index]->codecpar;
+            if (cp) {
+                int vh = cp->height, vw = cp->width;
+                if (vh >= 2000)      std::snprintf(resBuf, sizeof(resBuf), "4K UHD");
+                else if (vh >= 1400) std::snprintf(resBuf, sizeof(resBuf), "1440p QHD");
+                else if (vh >= 1000) std::snprintf(resBuf, sizeof(resBuf), "1080p FHD");
+                else if (vh >= 700)  std::snprintf(resBuf, sizeof(resBuf), "720p HD");
+                else if (vh > 0)     std::snprintf(resBuf, sizeof(resBuf), "%dx%d", vw, vh);
+
+                const char* cn = avcodec_get_name(cp->codec_id);
+                switch (cp->codec_id) {
+                    case AV_CODEC_ID_H264: cn = "H.264 / AVC";  break;
+                    case AV_CODEC_ID_HEVC: cn = "H.265 / HEVC"; break;
+                    case AV_CODEC_ID_VP9:  cn = "VP9";          break;
+                    case AV_CODEC_ID_AV1:  cn = "AV1";          break;
+                    default: break;
+                }
+                std::snprintf(codecBuf, sizeof(codecBuf), "%s", cn);
+
+                if (cp->color_trc == AVCOL_TRC_SMPTE2084)     hdrBadge = "HDR10";
+                else if (cp->color_trc == AVCOL_TRC_ARIB_STD_B67) hdrBadge = "HLG";
+            }
+        }
+
+        double fps = evo_pb_video_fps();
+        if (fps > 1.0)
+            std::snprintf(fpsBuf, sizeof(fpsBuf), "%d FPS", static_cast<int>(fps + 0.5));
+
+        p.res_badge   = resBuf[0]   ? resBuf   : "";
+        p.hdr_badge   = hdrBadge;
+        p.codec_badge = codecBuf[0] ? codecBuf : "";
+        p.fps_badge   = fpsBuf[0]   ? fpsBuf   : "";
         p.audio_badge = (evo_audio_channels == 8) ? "7.1 CH" : "STEREO";
         p.decoder_badge = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE) ? "Hardware" : "Software";
         p.position_sec = playback->getPositionSeconds();

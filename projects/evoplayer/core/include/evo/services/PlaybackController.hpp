@@ -4,6 +4,7 @@
 #include "evo/interfaces/IPlaybackController.hpp"
 #include "evo/fsm/StateMachine.hpp"
 #include <string>
+#include <vector>
 #include <cstdint>
 
 namespace evo {
@@ -57,6 +58,10 @@ public:
     bool playNextVideo() override;
     bool replay() override;
 
+    std::vector<AudioTrackInfo> getAudioTracks() const override;
+    int  getActiveAudioStream() const override;
+    bool switchAudioTrack(int streamIndex) override;
+
 private:
     void initStateMachine();
     void applyViewMode();
@@ -77,6 +82,10 @@ private:
     uint64_t m_scrubHoldStartMs = 0;
     uint64_t m_scrubHoldLastStepMs = 0;
     uint64_t m_scrubAutoCommitDeadlineMs = 0;
+
+    /* Stream the next open() should pick, or -1 for "first decodable". Set
+     * only across a switchAudioTrack() reopen and cleared by startPlayback. */
+    int m_requestedAudioStream = -1;
 };
 
 } // namespace evo

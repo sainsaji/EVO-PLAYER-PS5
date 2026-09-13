@@ -9,7 +9,7 @@
 > and because the BT.601 matrix here is the reference the GL shader is checked
 > against — see
 > [`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80)
-> and `tools/gl_yuv_parity.py`.
+> and `tools/gl_yuv_parity.py`, both since deleted.
 
 With no hardware GL or Vulkan driver in the sysroot (see
 [`gpu-notes.md`](gpu-notes.md) — what ships is OSMesa/llvmpipe, a *software*

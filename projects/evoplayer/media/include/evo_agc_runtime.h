@@ -59,6 +59,9 @@ void evo_agc_runtime_frame_begin(void);
 void evo_agc_runtime_frame_end(void);
 void evo_agc_runtime_present(void);
 void evo_agc_runtime_set_player_mode(int is_player);
+/* Mark the current backbuffer as carrying composited UI, so the next frame that
+ * reuses it clears first instead of stacking OSD/subtitle pixels. */
+void evo_agc_runtime_note_ui_drawn(void);
 
 void evo_agc_runtime_bind_pipeline(int pipeline_id);
 void evo_agc_runtime_set_scissor(int x, int y, int w, int h);

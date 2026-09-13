@@ -63,7 +63,7 @@ private:
     std::unique_ptr<ScreenManager> m_screenManager;
 
     int m_padHandle = -1;
-    uint32_t* m_glScratch = nullptr;
+    uint32_t* m_uiScratch = nullptr;
     bool m_running = false;
 };
 

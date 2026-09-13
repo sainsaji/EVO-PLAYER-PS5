@@ -15,23 +15,23 @@ bool evo_rmlui_is_initialized(void) {
     return EvoRmlApp::Instance().IsInitialized();
 }
 
-int evo_rmlui_gl_needs_frame(void) {
+int evo_rmlui_needs_frame(void) {
     return EvoRmlApp::Instance().GlNeedsFrame() ? 1 : 0;
 }
 
-int evo_rmlui_gl_consume_drew(void) {
+int evo_rmlui_consume_drew(void) {
     return EvoRmlApp::Instance().GlConsumeDrew() ? 1 : 0;
 }
 
-void evo_rmlui_gl_set_active(int active) {
+void evo_rmlui_set_active(int active) {
     EvoRmlApp::Instance().GlSetActive(active != 0);
 }
 
-void evo_rmlui_gl_end_frame(void) {
+void evo_rmlui_end_frame(void) {
     EvoRmlApp::Instance().GlEndFrame();
 }
 
-int evo_rmlui_gl_blit_mode(void) {
+int evo_rmlui_blit_mode(void) {
     return EvoRmlApp::Instance().GlBlitMode() ? 1 : 0;
 }
 

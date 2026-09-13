@@ -53,7 +53,8 @@ enum class ScreenId : int {
     SettingsSystem = 27,
     SurroundTest = 28,
     ThemeSelect = 29,
-    ImageViewer = 30
+    ImageViewer = 30,
+    AudioTrackPicker = 31
 };
 
 // Playback Quality Profile
