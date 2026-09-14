@@ -18,7 +18,7 @@ public:
     static constexpr int HeroHeight = 540;
     static constexpr int PreviewWidth = 560;
     static constexpr int PreviewHeight = 315;
-    static constexpr int CacheCapacity = 16;
+    static constexpr int CacheCapacity = 64;
 
     virtual ~ICoverArtService() = default;
 

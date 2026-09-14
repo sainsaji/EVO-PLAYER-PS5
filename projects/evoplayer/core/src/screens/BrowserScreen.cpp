@@ -267,10 +267,7 @@ void BrowserScreen::resetSelection() {
 void BrowserScreen::setSource(int sourceIndex) {
     if (sourceIndex < 0 || sourceIndex > 6) sourceIndex = 0;
     m_sidebarIndex = sourceIndex;
-    m_activeSource = (sourceIndex <= 3) ? sourceIndex : m_activeSource;
-    m_categoryFilter = (sourceIndex >= 4) ? (sourceIndex - 3) : -1;
-    m_focusPane = BrowserFocusPane::Grid;
-    resetSelection();
+    activateSidebar(true);
 }
 
 void BrowserScreen::setSearchQuery(const std::string& query) {
@@ -308,12 +305,24 @@ void BrowserScreen::onEnter() {
     recent_load();
 
     auto browser = Application::getInstance().getFileSystemBrowser();
-    if (browser && (m_activeSource == 0 || m_activeSource == 1)) {
+    if (browser) {
         if (browser->getCurrentPath().empty()) {
             browser->loadLastFolder();
             if (browser->getCurrentPath().empty()) {
                 browser->setCurrentPath("/mnt/usb0");
             }
+        }
+        if (m_activeSource != 2 && m_activeSource != 3) {
+            const std::string& path = browser->getCurrentPath();
+            if (path.rfind("/data", 0) == 0) {
+                m_activeSource = 1;
+                m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 1;
+            } else {
+                m_activeSource = 0;
+                m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 0;
+            }
+        } else {
+            m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : m_activeSource;
         }
     }
     resetSelection();
@@ -324,10 +333,6 @@ void BrowserScreen::onExit() {
     auto browser = Application::getInstance().getFileSystemBrowser();
     if (browser) {
         browser->saveLastFolder();
-    }
-    auto coverService = Application::getInstance().getCoverArtService();
-    if (coverService) {
-        coverService->clearCache();
     }
 }
 
@@ -413,73 +418,85 @@ void BrowserScreen::jumpLetter(int direction) {
     }
 }
 
-void BrowserScreen::activateSidebar() {
+void BrowserScreen::activateSidebar(bool focusGrid) {
     auto browser = Application::getInstance().getFileSystemBrowser();
 
-    evo_feedback(EVO_FB_CONFIRM);
+    if (focusGrid) {
+        evo_feedback(EVO_FB_CONFIRM);
+        m_focusPane = BrowserFocusPane::Grid;
+    } else {
+        evo_feedback(EVO_FB_MOVE);
+    }
 
     switch (m_sidebarIndex) {
         case 0: // USB Drive
-            m_activeSource = 0;
-            m_categoryFilter = -1;
-            m_isSearching = false;
-            m_searchQuery.clear();
-            if (browser) {
-                browser->clearSearch();
-                browser->setCurrentPath("/mnt/usb0");
+            if (m_activeSource != 0 || (browser && browser->getCurrentPath().rfind("/mnt/usb0", 0) != 0)) {
+                m_activeSource = 0;
+                m_categoryFilter = -1;
+                m_isSearching = false;
+                m_searchQuery.clear();
+                if (browser) {
+                    browser->clearSearch();
+                    browser->setCurrentPath("/mnt/usb0");
+                }
+                resetSelection();
+                if (focusGrid) toast("STORAGE", "USB Drive");
             }
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("STORAGE", "USB Drive");
             break;
         case 1: // Internal Storage
-            m_activeSource = 1;
-            m_categoryFilter = -1;
-            m_isSearching = false;
-            m_searchQuery.clear();
-            if (browser) {
-                browser->clearSearch();
-                browser->setCurrentPath("/data");
+            if (m_activeSource != 1 || (browser && browser->getCurrentPath().rfind("/data", 0) != 0)) {
+                m_activeSource = 1;
+                m_categoryFilter = -1;
+                m_isSearching = false;
+                m_searchQuery.clear();
+                if (browser) {
+                    browser->clearSearch();
+                    browser->setCurrentPath("/data");
+                }
+                resetSelection();
+                if (focusGrid) toast("STORAGE", "Internal Storage");
             }
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("STORAGE", "Internal Storage");
             break;
         case 2: // Favorites
-            m_activeSource = 2;
-            m_categoryFilter = -1;
-            m_isSearching = false;
-            m_searchQuery.clear();
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("SOURCES", "Favorites");
+            if (m_activeSource != 2) {
+                m_activeSource = 2;
+                m_categoryFilter = -1;
+                m_isSearching = false;
+                m_searchQuery.clear();
+                resetSelection();
+                if (focusGrid) toast("SOURCES", "Favorites");
+            }
             break;
         case 3: // Recent Media
-            m_activeSource = 3;
-            m_categoryFilter = -1;
-            m_isSearching = false;
-            m_searchQuery.clear();
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("SOURCES", "Recent Media");
+            if (m_activeSource != 3) {
+                m_activeSource = 3;
+                m_categoryFilter = -1;
+                m_isSearching = false;
+                m_searchQuery.clear();
+                resetSelection();
+                if (focusGrid) toast("SOURCES", "Recent Media");
+            }
             break;
         case 4: // All Videos
-            m_categoryFilter = static_cast<int>(FileCategory::Video);
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("FILTER", "Videos Only");
+            if (m_categoryFilter != static_cast<int>(FileCategory::Video)) {
+                m_categoryFilter = static_cast<int>(FileCategory::Video);
+                resetSelection();
+                if (focusGrid) toast("FILTER", "Videos Only");
+            }
             break;
         case 5: // All Music
-            m_categoryFilter = static_cast<int>(FileCategory::Audio);
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("FILTER", "Music Only");
+            if (m_categoryFilter != static_cast<int>(FileCategory::Audio)) {
+                m_categoryFilter = static_cast<int>(FileCategory::Audio);
+                resetSelection();
+                if (focusGrid) toast("FILTER", "Music Only");
+            }
             break;
         case 6: // All Photos
-            m_categoryFilter = static_cast<int>(FileCategory::Image);
-            m_focusPane = BrowserFocusPane::Grid;
-            resetSelection();
-            toast("FILTER", "Photos Only");
+            if (m_categoryFilter != static_cast<int>(FileCategory::Image)) {
+                m_categoryFilter = static_cast<int>(FileCategory::Image);
+                resetSelection();
+                if (focusGrid) toast("FILTER", "Photos Only");
+            }
             break;
         default:
             break;
@@ -543,7 +560,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         if (pressed & PadButtons::Up) {
             if (m_sidebarIndex > 0) {
                 m_sidebarIndex--;
-                evo_feedback(EVO_FB_MOVE);
+                activateSidebar(false);
             } else {
                 evo_feedback(EVO_FB_BOUNDARY);
             }
@@ -552,15 +569,14 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         if (pressed & PadButtons::Down) {
             if (m_sidebarIndex < 6) {
                 m_sidebarIndex++;
-                evo_feedback(EVO_FB_MOVE);
+                activateSidebar(false);
             } else {
                 evo_feedback(EVO_FB_BOUNDARY);
             }
             return true;
         }
         if (pressed & PadButtons::Right) {
-            m_focusPane = BrowserFocusPane::Grid;
-            evo_feedback(EVO_FB_MOVE);
+            activateSidebar(true);
             return true;
         }
         if (pressed & PadButtons::Left) {
@@ -570,7 +586,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             }
         }
         if (pressed & PadButtons::Cross) {
-            activateSidebar();
+            activateSidebar(true);
             return true;
         }
         if (pressed & PadButtons::Circle) {
@@ -587,6 +603,11 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     if (pressed & PadButtons::Left) {
         if (m_selectedIndex % 4 == 0) {
             m_focusPane = BrowserFocusPane::Sidebar;
+            if (m_categoryFilter != -1) {
+                m_sidebarIndex = m_categoryFilter + 3;
+            } else {
+                m_sidebarIndex = m_activeSource;
+            }
             evo_feedback(EVO_FB_MOVE);
             return true;
         }
@@ -726,13 +747,38 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     params.title = "STORAGE";
 
     // Format top location breadcrumbs
+    auto formatPathBreadcrumbs = [](const std::string& prefix, const std::string& fullPath, size_t prefixLen) -> std::string {
+        if (fullPath.length() <= prefixLen) {
+            return prefix;
+        }
+        std::string sub = fullPath.substr(prefixLen);
+        std::string result = prefix;
+        std::string currentPart;
+        for (char ch : sub) {
+            if (ch == '/') {
+                if (!currentPart.empty()) {
+                    result += " / " + currentPart;
+                    currentPart.clear();
+                }
+            } else {
+                currentPart += ch;
+            }
+        }
+        if (!currentPart.empty()) {
+            result += " / " + currentPart;
+        }
+        return result;
+    };
+
     if (m_activeSource == 0) {
         if (browser && !browser->getCurrentPath().empty()) {
             if (browser->getCurrentPath() == "/mnt/usb0") {
                 std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive");
+            } else if (browser->getCurrentPath().rfind("/mnt/usb0", 0) == 0) {
+                std::string bc = formatPathBreadcrumbs("USB Drive", browser->getCurrentPath(), 9);
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", bc.c_str());
             } else {
-                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive%s",
-                              browser->getCurrentPath().substr(browser->getCurrentPath().find("/mnt/usb0") == 0 ? 9 : 0).c_str());
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", browser->getCurrentPath().c_str());
             }
         } else {
             std::snprintf(m_formattedPath, sizeof(m_formattedPath), "USB Drive");
@@ -741,9 +787,11 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         if (browser && !browser->getCurrentPath().empty()) {
             if (browser->getCurrentPath() == "/data") {
                 std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage");
+            } else if (browser->getCurrentPath().rfind("/data", 0) == 0) {
+                std::string bc = formatPathBreadcrumbs("Internal Storage", browser->getCurrentPath(), 5);
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", bc.c_str());
             } else {
-                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage%s",
-                              browser->getCurrentPath().substr(browser->getCurrentPath().find("/data") == 0 ? 5 : 0).c_str());
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", browser->getCurrentPath().c_str());
             }
         } else {
             std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage");
@@ -822,6 +870,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
 
     params.row_count = std::min(visibleCards, std::max(0, totalCount - m_scrollOffset));
 
+    int coverBudget = 1;
     for (int i = 0; i < params.row_count; ++i) {
         int idx = m_scrollOffset + i;
         const auto& item = m_items[idx];
@@ -832,6 +881,19 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.rows[i].is_favorite = item.isFavorite;
         params.rows[i].icon_path = item.iconPath.c_str();
         params.rows[i].detail = item.detail.c_str();
+
+        const uint32_t* art = nullptr;
+        if (coverService) {
+            art = coverService->peekCoverArt(item.fullPath);
+            bool tried = coverService->hasTriedCoverArt(item.fullPath);
+            if (!art && !tried && coverBudget > 0) {
+                art = coverService->getCoverArt(item.fullPath, item.category == FileCategory::Folder);
+                coverBudget--;
+            }
+        }
+        params.rows[i].art = art;
+        params.rows[i].art_w = ICoverArtService::PosterWidth;
+        params.rows[i].art_h = ICoverArtService::PosterHeight;
 
         if (item.duration > 0.0) {
             int dur = static_cast<int>(item.duration);

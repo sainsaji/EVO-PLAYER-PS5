@@ -76,7 +76,7 @@ private:
     void jumpPage(int direction);
     void jumpLetter(int direction);
     void activateSelection();
-    void activateSidebar();
+    void activateSidebar(bool focusGrid = true);
     void openSearch();
 
     StateMachine<BrowserScreenState, BrowserScreenEvent> m_browserFsm;

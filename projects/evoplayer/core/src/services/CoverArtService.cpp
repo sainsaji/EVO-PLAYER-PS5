@@ -465,6 +465,25 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
         }
     }
 
+    if (!isDirectory) {
+        size_t dot = mediaPath.find_last_of('.');
+        if (dot != std::string::npos) {
+            std::string ext = mediaPath.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".webp") {
+                int w = 0, h = 0, ch = 0;
+                unsigned char* data = stbi_load(mediaPath.c_str(), &w, &h, &ch, 4);
+                if (data && w >= 2 && h >= 2) {
+                    boxFilterScaleRgba(data, w, h, slot->pixels.data(), PosterWidth, PosterHeight);
+                    stbi_image_free(data);
+                    slot->valid = true;
+                    return slot->pixels.data();
+                }
+                if (data) stbi_image_free(data);
+            }
+        }
+    }
+
     return nullptr;
 }
 

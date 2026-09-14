@@ -2,6 +2,7 @@
 #include "evo_readdir.h"
 #include "evo_jailbreak.h"
 #include "evo_data_path.h"
+#include "evo_boot_trace.h"
 
 #include <cstdio>
 #include <cstring>
@@ -175,7 +176,13 @@ bool FileSystemBrowser::refresh() {
 }
 
 void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
+    evo_bt("FS: scanDirectory '%s'", dirPath.c_str());
     evo_dir_t* dir = evo_opendir(dirPath.c_str());
+    if (!dir && dirPath.rfind("/data", 0) == 0) {
+        evo_bt("FS: evo_opendir('%s') null, ensuring unjail retry", dirPath.c_str());
+        evo_jailbreak_ensure();
+        dir = evo_opendir(dirPath.c_str());
+    }
     if (!dir) {
         // Fallback to source root if subfolder was deleted
         for (const auto& src : m_sources) {
@@ -188,6 +195,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
     }
 
     if (!dir) {
+        evo_bt("FS: scanDirectory '%s' failed (errno=%d)", dirPath.c_str(), errno);
         return;
     }
 
@@ -199,7 +207,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
 
         std::string fullPath = dirPath + "/" + entry->d_name;
         uint8_t dType = entry->d_type;
-        if (dType == 0) { // DT_UNKNOWN
+        if (dType == 0 || dType == 10 /* DT_LNK */) {
             struct stat st;
             if (stat(fullPath.c_str(), &st) == 0) {
                 if (S_ISDIR(st.st_mode)) {
@@ -225,6 +233,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
         m_entries.push_back(std::move(bEntry));
     }
 
+    evo_bt("FS: scanDirectory '%s' complete, found %zu entries", dirPath.c_str(), m_entries.size());
     evo_closedir(dir);
 }
 
@@ -248,7 +257,7 @@ void FileSystemBrowser::scanRecursive(const std::string& basePath, const std::st
         std::string childFullPath = basePath + "/" + itemRel;
 
         uint8_t dType = entry->d_type;
-        if (dType == 0) { // DT_UNKNOWN
+        if (dType == 0 || dType == 10 /* DT_LNK */) {
             struct stat st;
             if (stat(childFullPath.c_str(), &st) == 0) {
                 if (S_ISDIR(st.st_mode)) {

@@ -1294,6 +1294,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
 
         if (i >= (int)state.rows.size()) {
             card->SetProperty("display", "none");
+            ArtSource(kBrowserCardArtSlot + i, nullptr, 0, 0, std::string());
             continue;
         }
 
@@ -1303,8 +1304,14 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         card->SetProperty("display", "flex");
         card->SetClass("grid-card-focused", focused);
 
+        std::string card_art = ArtSource(kBrowserCardArtSlot + i, r.art, r.art_w, r.art_h, r.name);
+
         if (art && icon) {
-            if (focused && !prev.empty()) {
+            if (!card_art.empty()) {
+                art->SetProperty("display", "block");
+                art->SetProperty("decorator", "image(" + card_art + " cover)");
+                icon->SetProperty("display", "none");
+            } else if (focused && !prev.empty()) {
                 art->SetProperty("display", "block");
                 art->SetProperty("decorator", "image(" + prev + " cover)");
                 icon->SetProperty("display", "none");

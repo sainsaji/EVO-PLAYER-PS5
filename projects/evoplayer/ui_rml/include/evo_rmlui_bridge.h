@@ -266,6 +266,9 @@ typedef struct {
     int         progress;    /* 0..1000 resume position, or -1 */
     int         is_favorite;
     int         is_focused;
+    const uint32_t* art;     /* Thumbnail pixels BGRA or NULL */
+    int         art_w;
+    int         art_h;
 } evo_rmlui_browser_row_t;
 
 typedef struct {

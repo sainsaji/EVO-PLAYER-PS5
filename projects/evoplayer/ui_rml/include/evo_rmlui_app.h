@@ -310,11 +310,15 @@ struct EvoBrowserRow {
     int progress = -1;
     bool is_favorite = false;
     bool is_focused = false;
+    const uint32_t* art = nullptr;
+    int art_w = 0;
+    int art_h = 0;
 
     bool operator==(const EvoBrowserRow& o) const {
         return name == o.name && detail == o.detail && icon_path == o.icon_path &&
                badge == o.badge && duration == o.duration && progress == o.progress &&
-               is_favorite == o.is_favorite && is_focused == o.is_focused;
+               is_favorite == o.is_favorite && is_focused == o.is_focused &&
+               art == o.art && art_w == o.art_w && art_h == o.art_h;
     }
     bool operator!=(const EvoBrowserRow& o) const { return !(*this == o); }
 };
@@ -738,10 +742,13 @@ private:
     static const int kSurroundSpeakers = 8;
 
     /* 0 = hero, 1..6 = the recent shelf, 7 = the browser preview,
-     * 8 = the #81 full-screen image viewer. */
+     * 8 = the #81 full-screen image viewer,
+     * 9..20 = browser card thumbnails (12 slots). */
     static const int kBrowserArtSlot = 7;
     static const int kImageArtSlot = 8;
-    static const int kArtSlots = 1 + 6 + 1 + 1;
+    static const int kBrowserCardArtSlot = 9;
+    static const int kBrowserCardArtSlots = 12;
+    static const int kArtSlots = 1 + 6 + 1 + 1 + 12;
     int m_art_generation[kArtSlots] = {};
     const uint32_t* m_art_last_ptr[kArtSlots] = {};
     int m_art_last_dims[kArtSlots][2] = {};

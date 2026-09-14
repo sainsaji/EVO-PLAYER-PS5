@@ -168,6 +168,9 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
         r.progress = p->rows[i].progress;
         r.is_favorite = (p->rows[i].is_favorite != 0);
         r.is_focused = (p->rows[i].is_focused != 0);
+        r.art = p->rows[i].art;
+        r.art_w = p->rows[i].art_w;
+        r.art_h = p->rows[i].art_h;
         state.rows.push_back(r);
     }
 

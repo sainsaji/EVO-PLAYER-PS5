@@ -219,3 +219,7 @@ projects/evoplayer/include/evo_build_id.h
 # the model for tools/build_agc_pipes.py and evo_agc_shader_header.c.
 # See docs/evo-pro/agc-bare-metal-ui.md.
 third_party/ps5-xash3d-halflife/
+
+# Local OpenCode / IDE tooling configs
+opencode.json
+opnecode.json
