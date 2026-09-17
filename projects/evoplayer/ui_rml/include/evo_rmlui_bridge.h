@@ -94,6 +94,20 @@ typedef struct {
     int slide;
 } evo_rmlui_toast_params_t;
 
+/* How a settings row presents itself. macOS-style: booleans are switches you
+ * can read at a glance, not ON/OFF text you have to parse. */
+enum {
+    EVO_RMLUI_ROW_ACTION = 0,  /* chevron only - opens a page or runs something */
+    EVO_RMLUI_ROW_TOGGLE = 1,  /* switch, driven by toggle_on */
+    EVO_RMLUI_ROW_VALUE  = 2,  /* collapsed: badge + chevron; expands to OPTIONs */
+    EVO_RMLUI_ROW_OPTION = 3   /* one choice under an expanded VALUE row */
+};
+
+/* Display rows the settings document can show at once. A VALUE row expands
+ * in place to list every choice, so the pool has to cover the longest list
+ * (themes, EVO_THEME_MAX = 12) plus the section's own rows. */
+#define EVO_RMLUI_SETTINGS_ROWS 20
+
 typedef struct {
     const char* title;
     const char* detail;
@@ -101,6 +115,8 @@ typedef struct {
     const char* badge;
     int has_chevron;
     int is_focused;
+    int kind;       /* EVO_RMLUI_ROW_* */
+    int toggle_on;  /* TOGGLE: switch state. OPTION: is this the current choice. */
 } evo_rmlui_settings_row_t;
 
 typedef struct {
@@ -109,8 +125,13 @@ typedef struct {
     const char* counter;
     int rail_active_idx;
     int rail_focused;
+    /* macOS-style two-pane settings: which of the four sections the sidebar
+     * highlights (0-3, -1 = none), and whether the sidebar or the detail pane
+     * owns focus. The section labels are static, so they live in settings.rml. */
+    int section_active;
+    int sidebar_focused;
     int row_count;
-    evo_rmlui_settings_row_t rows[8];
+    evo_rmlui_settings_row_t rows[EVO_RMLUI_SETTINGS_ROWS];
 } evo_rmlui_settings_params_t;
 
 typedef struct {
@@ -556,6 +577,8 @@ typedef struct {
     int rail_focused;     /* 0=collapsed, 1=expanded */
     int cursor_index;     /* which item has cursor when rail is expanded */
     int visible;          /* 1=show rail, 0=hide (full-screen OSD, modals) */
+    int fps;              /* render FPS for the rail pill */
+    int show_fps;         /* 1 = DEBUG OVERLAY is on */
 } evo_rmlui_nav_params_t;
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* params);

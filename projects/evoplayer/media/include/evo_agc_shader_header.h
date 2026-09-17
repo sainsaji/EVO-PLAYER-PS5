@@ -70,6 +70,10 @@ typedef struct evo_agc_shader_metadata {
     uint32_t ps_user_sgpr_count;
     int32_t  vs_const_table_dword;
     int32_t  vs_vertex_table_dword;
+    /* The const-buffer and texture tables can both be fragment-stage
+     * (ui_backdrop_blur keeps its BlurConstants in the fragment shader), so
+     * keep a PS const-table slot alongside the PS texture-table slot. */
+    int32_t  ps_const_table_dword;
     int32_t  ps_texture_table_dword;
 } evo_agc_shader_metadata_t;
 

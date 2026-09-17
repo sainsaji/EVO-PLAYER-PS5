@@ -203,6 +203,16 @@ void evo_sfx_play(int kind) {
     }
 }
 
+/* The DEBUG OVERLAY setting drives both FPS readouts: the player pill during
+ * playback and the rail pill everywhere else. It used to drive neither -
+ * show_debug_overlay was never assigned and the debug document's update entry
+ * point was never called, so the setting was a dead end. */
+int evo_fps_counter_enabled(void) {
+    if (auto s = evo::Application::getInstance().getSettingsService())
+        return s->isDebugOverlayEnabled() ? 1 : 0;
+    return 0;
+}
+
 void evo_sync_rmlui_nav(int section, int rail_focused, int rail_index, int visible) {
     if (!evo_rmlui_is_initialized()) return;
     evo_rmlui_nav_params_t nav;
@@ -210,6 +220,8 @@ void evo_sync_rmlui_nav(int section, int rail_focused, int rail_index, int visib
     nav.rail_focused   = rail_focused;
     nav.cursor_index   = rail_focused ? rail_index : section;
     nav.visible        = visible;
+    nav.fps            = perf_render_fps;
+    nav.show_fps       = evo_fps_counter_enabled();
     evo_rmlui_update_nav(&nav);
 }
 

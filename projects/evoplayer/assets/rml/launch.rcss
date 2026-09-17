@@ -189,7 +189,10 @@ div, span, p {
     top: 1dp;
     width: 600dp;
     height: 316dp;
-    decorator: horizontal-gradient(#0f1829ff #0f182900);
+    decorator: horizontal-gradient(#0f182980 #0f182900);
+    /* TEST: backdrop-filter blur over hero-art. Revert to solid #0f1829ff /
+     * full-alpha gradient + remove backdrop-filter after the hardware check. */
+    backdrop-filter: blur(14dp);
 }
 
 /* Bottom scrim, so the chip and the bar sit on a consistent ground. */

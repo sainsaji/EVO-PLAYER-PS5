@@ -22,6 +22,28 @@ div, span {
 }
 
 /* ---- Collapsed rail background band ---- */
+/* Menu FPS pill - top-right, matching the player's #fps-pill placement.
+ * Hidden unless the DEBUG OVERLAY setting is on. */
+#nav-fps-pill {
+    display: none;
+    position: absolute;
+    top: 12dp;
+    right: 12dp;
+    padding: 5dp 12dp;
+    border-radius: 12dp;
+    border-width: 1dp;
+    border-color: #ffffff29;
+    background-color: #06090ecc;
+    z-index: 50;
+}
+
+#nav-fps-value {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #2ecc71;
+    letter-spacing: 1dp;
+}
+
 #nav-rail-bg {
     position: absolute;
     left: 0;

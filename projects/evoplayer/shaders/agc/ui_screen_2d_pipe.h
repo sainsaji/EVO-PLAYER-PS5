@@ -20,6 +20,7 @@
 #define UI_SCREEN_2D_PS_USER_SGPRS 2u
 #define UI_SCREEN_2D_VS_CONST_TABLE_DWORD 1
 #define UI_SCREEN_2D_VS_VERTEX_TABLE_DWORD 2
+#define UI_SCREEN_2D_PS_CONST_TABLE_DWORD -1
 #define UI_SCREEN_2D_PS_TEXTURE_TABLE_DWORD 1
 #define UI_SCREEN_2D_VS_WRITE_COUNT 3u
 #define UI_SCREEN_2D_PS_WRITE_COUNT 2u
@@ -149,6 +150,7 @@ static const evo_agc_shader_metadata_t ui_screen_2d_metadata = {
     .ps_user_sgpr_count = 2u,
     .vs_const_table_dword = 1,
     .vs_vertex_table_dword = 2,
+    .ps_const_table_dword = -1,
     .ps_texture_table_dword = 1,
 };
 

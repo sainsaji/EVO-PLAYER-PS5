@@ -19,6 +19,19 @@
 #include "evo/animation/AnimationManager.hpp"
 
 #include "evo_boot_log.h"
+
+#include <ctime>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+#include "evo_agc_runtime.h"
+#include "evo_toast.h"
+
+/* Defined in Bridge.cpp and read by every FPS readout in the app, but
+ * nothing ever assigned it - so the player pill and the rail pill both
+ * showed "0 FPS". The render loop is the only place that can measure it. */
+extern "C" int perf_render_fps;
 #include "evo_boot_trace.h"
 #include "evo_jailbreak.h"
 #include "evo_vdec.h"
@@ -297,6 +310,80 @@ void Application::shutdown() {
     m_appFsm.postEvent(ApplicationEvent::ShutdownComplete);
 }
 
+namespace {
+
+/*
+ * L3 screenshot.
+ *
+ * The feature survived only as a changelog line: nothing handled PadButtons::L3,
+ * there was no BMP writer, and evo_agc_runtime_read_scanout() - which exists
+ * precisely for this - had no callers. Captures the FRONT buffer (what is on
+ * the panel right now), so it works on menus as well as during playback.
+ *
+ * 24-bit bottom-up BMP: the simplest format every viewer reads, and the same
+ * one tools/shot.sh already expects.
+ */
+bool evo_capture_screenshot(std::string& outPath) {
+    int w = 0, h = 0;
+    evo_agc_runtime_get_size(&w, &h);
+    if (w <= 0 || h <= 0) return false;
+
+    std::vector<uint32_t> bgra(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
+    evo_agc_runtime_read_scanout(bgra.data(), w, h);
+
+    /* Pick the next free slot so captures accumulate instead of overwriting. */
+    char path[256];
+    int slot = 0;
+    for (; slot < 1000; ++slot) {
+        std::snprintf(path, sizeof(path), "/mnt/usb0/evo_shot_%03d.bmp", slot);
+        FILE* probe = std::fopen(path, "rb");
+        if (!probe) break;
+        std::fclose(probe);
+    }
+    if (slot >= 1000) return false;
+
+    FILE* fp = std::fopen(path, "wb");
+    if (!fp) return false;
+
+    const int rowBytes = w * 3;
+    const int pad = (4 - (rowBytes % 4)) % 4;
+    const uint32_t pixelBytes = static_cast<uint32_t>((rowBytes + pad) * h);
+    const uint32_t fileSize = 54u + pixelBytes;
+
+    unsigned char hdr[54] = {0};
+    hdr[0] = 'B'; hdr[1] = 'M';
+    hdr[2] = (unsigned char)(fileSize);       hdr[3] = (unsigned char)(fileSize >> 8);
+    hdr[4] = (unsigned char)(fileSize >> 16); hdr[5] = (unsigned char)(fileSize >> 24);
+    hdr[10] = 54;
+    hdr[14] = 40;
+    hdr[18] = (unsigned char)(w);        hdr[19] = (unsigned char)(w >> 8);
+    hdr[20] = (unsigned char)(w >> 16);  hdr[21] = (unsigned char)(w >> 24);
+    hdr[22] = (unsigned char)(h);        hdr[23] = (unsigned char)(h >> 8);
+    hdr[24] = (unsigned char)(h >> 16);  hdr[25] = (unsigned char)(h >> 24);
+    hdr[26] = 1;
+    hdr[28] = 24;
+    hdr[34] = (unsigned char)(pixelBytes);       hdr[35] = (unsigned char)(pixelBytes >> 8);
+    hdr[36] = (unsigned char)(pixelBytes >> 16); hdr[37] = (unsigned char)(pixelBytes >> 24);
+    std::fwrite(hdr, 1, sizeof(hdr), fp);
+
+    std::vector<unsigned char> row(static_cast<size_t>(rowBytes + pad), 0u);
+    for (int y = h - 1; y >= 0; --y) {           /* BMP rows run bottom-up */
+        const uint32_t* src = bgra.data() + static_cast<size_t>(y) * static_cast<size_t>(w);
+        for (int x = 0; x < w; ++x) {
+            const uint32_t px = src[x];          /* 0xAARRGGBB in memory order B,G,R,A */
+            row[x * 3 + 0] = (unsigned char)(px & 0xFF);
+            row[x * 3 + 1] = (unsigned char)((px >> 8) & 0xFF);
+            row[x * 3 + 2] = (unsigned char)((px >> 16) & 0xFF);
+        }
+        std::fwrite(row.data(), 1, row.size(), fp);
+    }
+    std::fclose(fp);
+    outPath = path;
+    return true;
+}
+
+} // namespace
+
 int Application::run() {
     PS5_PadData padData;
     uint32_t lastButtons = 0;
@@ -309,6 +396,30 @@ int Application::run() {
         if (frame < 5) {
             evo_bt("frame %d: start poll", frame);
             evo_boot_log_flush();
+        }
+
+        /* Render FPS over a ~500 ms window: long enough to be steady, short
+         * enough to react. Sampled here rather than per-screen so the menus and
+         * the player report the same number. */
+        {
+            static struct timespec s_fps_mark = {0, 0};
+            static int s_fps_frames = 0;
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            if (s_fps_mark.tv_sec == 0 && s_fps_mark.tv_nsec == 0) {
+                s_fps_mark = now;
+            } else {
+                ++s_fps_frames;
+                const double elapsed =
+                    static_cast<double>(now.tv_sec - s_fps_mark.tv_sec) +
+                    static_cast<double>(now.tv_nsec - s_fps_mark.tv_nsec) / 1e9;
+                if (elapsed >= 0.5) {
+                    perf_render_fps =
+                        static_cast<int>(static_cast<double>(s_fps_frames) / elapsed + 0.5);
+                    s_fps_frames = 0;
+                    s_fps_mark = now;
+                }
+            }
         }
 
         evo_net_poll();
@@ -359,6 +470,21 @@ int Application::run() {
             hasInput = (pressed != 0 || released != 0 || evo_input_any(&evo_pad_state));
             if (hasInput) {
                 evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
+            }
+
+            /* L3 captures the screen from anywhere, and is swallowed so no
+             * screen sees it as a normal press. */
+            if (pressed & PadButtons::L3) {
+                std::string shotPath;
+                if (evo_capture_screenshot(shotPath)) {
+                    const char* name = std::strrchr(shotPath.c_str(), '/');
+                    toast("SCREENSHOT", name ? name + 1 : shotPath.c_str());
+                    evo_feedback(EVO_FB_CONFIRM);
+                } else {
+                    toast("SCREENSHOT", "Capture failed");
+                    evo_feedback(EVO_FB_BOUNDARY);
+                }
+                pressed &= ~PadButtons::L3;
             }
 
             if (evo_keyboard_is_open()) {

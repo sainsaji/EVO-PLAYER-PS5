@@ -427,7 +427,11 @@ void FileSystemBrowser::loadLastFolder() {
         evo_dir_t* dir = evo_opendir(savedFolder);
         if (dir) {
             evo_closedir(dir);
-            m_currentPath = savedFolder;
+            /* setCurrentPath, not a bare assignment: assigning m_currentPath
+             * left m_entries empty, so the browser opened on the restored
+             * folder showing nothing until you switched source and back
+             * (navigateToSource is what actually refreshed). */
+            setCurrentPath(savedFolder);
         }
     }
 }

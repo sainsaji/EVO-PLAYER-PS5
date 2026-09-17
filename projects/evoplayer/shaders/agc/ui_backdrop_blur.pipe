@@ -1,0 +1,97 @@
+; ui_backdrop_blur - Separable Gaussian blur for RmlUi backdrop-filter.
+;
+; Fullscreen quad from gl_VertexIndex (no vertex buffer, no [VertexInputState]).
+; Used twice per backdrop composite: horizontal pass (source -> scratch) then
+; vertical pass (scratch -> destination). The CPU precomputes the per-tap UV
+; offsets and Gaussian weights, including direction, so the shader is
+; direction-agnostic.
+;
+; Fragment samplers at set 1 because the vertex stage owns set 0 binding 0
+; for its uniform block (same layout as video_yuv_planar.pipe).
+
+[Version]
+version = 65
+
+[VsGlsl]
+#version 450
+
+layout(location = 0) out vec2 vUV;
+
+void main() {
+    vec2 p = vec2(float(gl_VertexIndex & 1), float((gl_VertexIndex >> 1) & 1));
+    vUV = vec2(p.x, 1.0 - p.y);
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+[VsInfo]
+entryPoint = main
+
+[FsGlsl]
+#version 450
+
+layout(set = 0, binding = 0, std140) uniform BlurConstants {
+    vec4 uParams;       /* x = 1.0/width, y = 1.0/height, z = tap count (float), w = unused */
+    vec4 uOffsets[16];  /* xy = UV offset for this tap (already includes direction) */
+    vec4 uWeights[16];  /* x = weight for this tap (center = [0].x, pairs share weight) */
+} blur;
+
+layout(set = 1, binding = 0) uniform sampler2D uSource;
+
+layout(location = 0) in vec2 vUV;
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    /* Center tap (i=0) — always sample at vUV */
+    vec4 acc = texture(uSource, vUV) * blur.uWeights[0].x;
+
+    /* Symmetric taps: uOffsets[i] is the positive-direction offset, applied
+     * in both + and - directions with the same weight. */
+    int taps = int(blur.uParams.z + 0.5);
+    for (int i = 1; i <= taps && i < 16; ++i) {
+        vec2 o = blur.uOffsets[i].xy;
+        float w = blur.uWeights[i].x;
+        acc += texture(uSource, vUV + o) * w;
+        acc += texture(uSource, vUV - o) * w;
+    }
+
+    out_color = acc;
+}
+
+[FsInfo]
+entryPoint = main
+
+[ResourceMapping]
+; visibility 2 = vertex stage, 64 = fragment stage.
+; Both resources are consumed by the FRAGMENT shader here (the VS is a
+; vertex-index-driven fullscreen quad with no descriptors): the BlurConstants
+; uniform block and the backdrop source sampler. Marking node[0] with vertex
+; visibility makes LLPC fail to find a matching vertex-stage binding
+; ("Resource node not found" in lgc-lower-desc).
+userDataNode[0].visibility = 64
+userDataNode[0].type = DescriptorTableVaPtr
+userDataNode[0].offsetInDwords = 0
+userDataNode[0].sizeInDwords = 1
+userDataNode[0].next[0].type = DescriptorConstBuffer
+userDataNode[0].next[0].offsetInDwords = 0
+userDataNode[0].next[0].sizeInDwords = 4
+userDataNode[0].next[0].set = 0
+userDataNode[0].next[0].binding = 0
+userDataNode[1].visibility = 64
+userDataNode[1].type = DescriptorTableVaPtr
+userDataNode[1].offsetInDwords = 1
+userDataNode[1].sizeInDwords = 1
+userDataNode[1].next[0].type = DescriptorCombinedTexture
+userDataNode[1].next[0].offsetInDwords = 0
+userDataNode[1].next[0].sizeInDwords = 12
+userDataNode[1].next[0].set = 1
+userDataNode[1].next[0].binding = 0
+
+[GraphicsPipelineState]
+topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+nggState.enableNgg = 1
+nggState.enableGsUse = 0
+; Same format as the UI pipe: shader exports RGBA, the CB_COLOR0_INFO swap
+; (COMP_SWAP=ALT for scanout, STD for layer targets) handles byte ordering.
+colorBuffer[0].format = VK_FORMAT_R8G8B8A8_UNORM
+colorBuffer[0].channelWriteMask = 15
+colorBuffer[0].blendEnable = 0

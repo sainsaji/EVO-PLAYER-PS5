@@ -404,8 +404,10 @@ void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
     state.counter = p->counter ? p->counter : "";
     state.rail_active_idx = p->rail_active_idx;
     state.rail_focused = (p->rail_focused != 0);
+    state.section_active = p->section_active;
+    state.sidebar_focused = (p->sidebar_focused != 0);
 
-    for (int i = 0; i < p->row_count && i < 6; i++) {
+    for (int i = 0; i < p->row_count && i < EVO_RMLUI_SETTINGS_ROWS; i++) {
         EvoSettingsRow row;
         row.title = p->rows[i].title ? p->rows[i].title : "";
         row.detail = p->rows[i].detail ? p->rows[i].detail : "";
@@ -413,6 +415,8 @@ void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
         row.badge = p->rows[i].badge ? p->rows[i].badge : "";
         row.has_chevron = (p->rows[i].has_chevron != 0);
         row.is_focused = (p->rows[i].is_focused != 0);
+        row.kind = p->rows[i].kind;
+        row.toggle_on = (p->rows[i].toggle_on != 0);
         state.rows.push_back(row);
     }
 
@@ -521,6 +525,8 @@ void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
     state.rail_focused   = (p->rail_focused != 0);
     state.cursor_index   = p->cursor_index;
     state.visible        = (p->visible != 0);
+    state.fps            = p->fps;
+    state.show_fps       = p->show_fps;
     EvoRmlApp::Instance().UpdateNavState(state);
 }
 

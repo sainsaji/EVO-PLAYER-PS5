@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include <cstdio>
 #include <cstdlib>
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
@@ -821,7 +822,7 @@ static void render_surround_screen(std::vector<uint32_t>& fb, int width, int hei
     memset(&p, 0, sizeof(p));
     p.rail_focused = 0;
     p.is_51_layout = 0;      /* 7.1 */
-    p.selected_item = 6;     /* a speaker node */
+    p.selected_item = 2;     /* an action row - the pane that was unreachable */
     p.active_channel = 2;
     p.surround_mode = 1;
 
@@ -1250,7 +1251,8 @@ static void render_stress_screens(std::vector<uint32_t>& fb, int width, int heig
         s.rows[2].title = "RESUME PLAYBACK";
         s.rows[2].detail = "REMEMBER PLAYBACK POSITION PER FILE ACROSS APP RESTARTS AND CONSOLE REBOOTS";
         s.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        s.rows[2].badge = "ON";
+        s.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        s.rows[2].toggle_on = 1;
         s.rows[2].has_chevron = 1;
         evo_rmlui_update_settings(&s);
         evo_rmlui_render_settings(fb.data(), width, height);
@@ -1420,8 +1422,27 @@ static void render_regression_screens(std::vector<uint32_t>& fb, int width, int 
 }
 
 int main(int argc, char** argv) {
-    const int width = 1920;
-    const int height = 1080;
+    /*
+     * Render size is overridable so the host can reproduce the console's scale.
+     * The PS5 renders at 3840x2160, i.e. a dp ratio of 2.0, while this harness
+     * defaulted to 1080p at ratio 1.0 - so any layout that depends on scale
+     * looked correct here and wrong on hardware, with no way to see it without
+     * a console round trip.
+     *
+     *   EVO_UIVIEW_SIZE=3840x2160 ./tools/uiview_playback_rml.sh
+     */
+    int width = 1920;
+    int height = 1080;
+    if (const char* sz = std::getenv("EVO_UIVIEW_SIZE")) {
+        int w = 0, h = 0;
+        if (std::sscanf(sz, "%dx%d", &w, &h) == 2 && w >= 640 && h >= 360) {
+            width = w;
+            height = h;
+            std::cerr << "uiview: render size " << width << "x" << height << std::endl;
+        } else {
+            std::cerr << "uiview: bad EVO_UIVIEW_SIZE '" << sz << "', using 1920x1080" << std::endl;
+        }
+    }
     std::vector<uint32_t> fb(width * height, 0xFF06090E);
 
     if (!evo_rmlui_init(width, height)) {
@@ -1506,36 +1527,44 @@ int main(int argc, char** argv) {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        set.title = "SETTINGS";
-        set.subtitle = "APPLICATION & PLAYBACK PREFERENCES";
-        set.counter = "1 OF 4";
+        /* Sidebar owns the cursor, and the detail pane previews the
+         * highlighted section's real options - no row focused. Mirrors
+         * buildSectionRows(0, .., -1) in SettingsScreen.cpp. */
+        set.title = "PLAYBACK & VIDEO";
+        set.subtitle = "ASPECT RATIO, RESUME & DECODER";
+        set.counter = "4 SETTINGS";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 1;
         set.rail_focused = 0;
         set.row_count = 4;
 
-        set.rows[0].title = "PLAYBACK & VIDEO";
-        set.rows[0].detail = "PROFILE, ASPECT RATIO & RESUME";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[0].title = "DEFAULT ASPECT RATIO";
+        set.rows[0].detail = "FIT, FILL OR STRETCH";
+        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        set.rows[0].badge = "FIT";
+        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
         set.rows[0].has_chevron = 1;
-        set.rows[0].is_focused = 1;
 
-        set.rows[1].title = "SUBTITLES";
-        set.rows[1].detail = "AUTO-DETECT & DEFAULT SIZING";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
+        set.rows[1].title = "RESUME PLAYBACK";
+        set.rows[1].detail = "REMEMBER PLAYBACK POSITION";
+        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 1;
 
-        set.rows[2].title = "INTERFACE & CONTROLS";
-        set.rows[2].detail = "THEMES, SOUNDS, LIGHTBAR & SORTING";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[2].title = "SURROUND SOUND TEST";
+        set.rows[2].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
+        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[2].badge = "OPEN";
+        set.rows[2].kind = EVO_RMLUI_ROW_ACTION;
         set.rows[2].has_chevron = 1;
-        set.rows[2].is_focused = 0;
 
-        set.rows[3].title = "SYSTEM & DIAGNOSTICS";
-        set.rows[3].detail = "DEVELOPER TOOLS & MEDIA TILE";
+        set.rows[3].title = "VIDEO DECODER";
+        set.rows[3].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
         set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[3].badge = "Auto (FFmpeg)";
+        set.rows[3].kind = EVO_RMLUI_ROW_VALUE;
         set.rows[3].has_chevron = 1;
-        set.rows[3].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
@@ -1551,6 +1580,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
         set.counter = "1 OF 5";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 5;
 
@@ -1571,7 +1602,8 @@ int main(int argc, char** argv) {
         set.rows[2].title = "RESUME PLAYBACK";
         set.rows[2].detail = "REMEMBER PLAYBACK POSITION";
         set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[2].badge = "ON";
+        set.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[2].toggle_on = 1;
         set.rows[2].has_chevron = 1;
         set.rows[2].is_focused = 0;
 
@@ -1605,6 +1637,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  AUTO-DETECT & DEFAULT SIZING";
         set.counter = "1 OF 2";
         set.rail_active_idx = 5;
+        set.section_active = 1;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 2;
 
@@ -1636,6 +1670,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  THEMES, SOUNDS, LIGHTBAR & SORTING";
         set.counter = "1 OF 5";
         set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 5;
 
@@ -1649,7 +1685,8 @@ int main(int argc, char** argv) {
         set.rows[1].title = "NAVIGATION SOUNDS";
         set.rows[1].detail = "PLAY AUDIO CLICKS ON INPUT";
         set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[1].badge = "ON";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 1;
         set.rows[1].has_chevron = 1;
         set.rows[1].is_focused = 0;
 
@@ -1679,6 +1716,73 @@ int main(int argc, char** argv) {
         save_bmp_24("output/uiview/rml_settings_interface.bmp", fb.data(), width, height);
     }
 
+    // Interface with the THEME row expanded - every choice visible at once,
+    // which is the whole point of the options rework.
+    {
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "INTERFACE & CONTROLS";
+        set.subtitle = "THEMES, SOUNDS & CONTROLS";
+        set.counter = "5 SETTINGS";
+        set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
+        set.rail_focused = 0;
+        set.row_count = 10;
+
+        set.rows[0].title = "THEME";
+        set.rows[0].detail = "COLOR PALETTE & ACCENTS";
+        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[0].badge = "MIDNIGHT OBSIDIAN";
+        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
+        set.rows[0].has_chevron = 1;
+        set.rows[0].is_focused = 1;
+
+        set.rows[1].title = "MIDNIGHT OBSIDIAN";
+        set.rows[1].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[1].toggle_on = 1;
+
+        set.rows[2].title = "SAPPHIRE BLUE";
+        set.rows[2].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[2].toggle_on = 0;
+
+        set.rows[3].title = "AURORA";
+        set.rows[3].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[3].toggle_on = 0;
+
+        set.rows[4].title = "CARBON";
+        set.rows[4].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[4].toggle_on = 0;
+
+        set.rows[5].title = "EMBER";
+        set.rows[5].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[5].toggle_on = 0;
+
+        set.rows[6].title = "MONO SLATE";
+        set.rows[6].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[6].toggle_on = 0;
+
+        set.rows[7].title = "DEEP VIOLET";
+        set.rows[7].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[7].toggle_on = 0;
+
+        set.rows[8].title = "NAVIGATION SOUNDS";
+        set.rows[8].detail = "AUDIO FEEDBACK ON D-PAD & BUTTONS";
+        set.rows[8].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
+        set.rows[8].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[8].toggle_on = 1;
+
+        set.rows[9].title = "CONTROLLER LIGHTBAR";
+        set.rows[9].detail = "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT";
+        set.rows[9].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[9].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[9].toggle_on = 0;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_theme_expanded.bmp", fb.data(), width, height);
+    }
+
     // 5. System & Diagnostics Subsection
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
@@ -1688,6 +1792,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  DEVELOPER TOOLS & MEDIA TILE";
         set.counter = "1 OF 3";
         set.rail_active_idx = 5;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 3;
 
@@ -1726,6 +1832,8 @@ int main(int argc, char** argv) {
         set.subtitle = "HOW AGGRESSIVELY THE DECODER IS TUNED";
         set.counter = "2 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 
@@ -1771,6 +1879,8 @@ int main(int argc, char** argv) {
         set.subtitle = "DIAGNOSTICS & SYSTEM REPORTS";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 
@@ -1784,14 +1894,16 @@ int main(int argc, char** argv) {
         set.rows[1].title = "DEBUG OVERLAY";
         set.rows[1].detail = "ON-SCREEN REALTIME PERFORMANCE STATS";
         set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
-        set.rows[1].badge = "OFF";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 0;
         set.rows[1].has_chevron = 0;
         set.rows[1].is_focused = 0;
 
         set.rows[2].title = "NAVIGATION SOUNDS";
         set.rows[2].detail = "PLAY AUDIO CLICKS ON CONTROLLER INPUT";
         set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[2].badge = "ON";
+        set.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[2].toggle_on = 1;
         set.rows[2].has_chevron = 0;
         set.rows[2].is_focused = 0;
 
@@ -1816,6 +1928,8 @@ int main(int argc, char** argv) {
         set.subtitle = "CREDITS, ENGINE & PROJECT INFO";
         set.counter = "1 OF 6";
         set.rail_active_idx = 6;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 6;
 
@@ -1875,6 +1989,8 @@ int main(int argc, char** argv) {
         set.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 

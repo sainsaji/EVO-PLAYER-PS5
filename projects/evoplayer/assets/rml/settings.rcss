@@ -24,14 +24,169 @@ div, span, p {
 /* Left Navigation Rail styles removed — rail is now the standalone navbar.rml overlay */
 
 
-/* Content pane at EVO_CONTENT_X, leaving the 44 px channel the native
- * layout puts between EVO_RAIL_W and the first card. */
-#content-pane {
+/* -----------------------------------------------------------------------------
+ * Wallpaper + frosted two-pane shell (macOS System Settings shape)
+ *
+ * backdrop-filter only does anything when there is something behind the glass:
+ * over a flat fill a blur returns the same flat fill. So the page gets a real
+ * wallpaper, and the sidebar and the settings group card are translucent panels
+ * that blur it. The wallpaper carries deliberate fine grain - blur destroys
+ * detail finer than its radius, and that is what makes the frost legible.
+ * -------------------------------------------------------------------------- */
+#settings-wallpaper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    decorator: image(../wallpaper/settings_bg.png cover);
+}
+
+/* Knocks the wallpaper back so panel text keeps contrast. Kept light: dim it
+ * too hard and there is no longer enough behind the glass to read as frost. */
+#settings-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090e8c;
+}
+
+#settings-shell {
     position: absolute;
     left: 152dp;
     top: 0;
     width: 1768dp;
     height: 1080dp;
+}
+
+/* ---- Sidebar: the frosted section list ---- */
+#settings-sidebar {
+    position: absolute;
+    left: 24dp;
+    top: 56dp;
+    width: 392dp;
+    height: 968dp;
+    padding: 26dp 18dp;
+    border-radius: 24dp;
+    border-width: 1dp;
+    border-color: #ffffff1f;
+    background-color: #0f1829a8;
+    backdrop-filter: blur(26dp);
+    display: flex;
+    flex-direction: column;
+}
+
+#sidebar-brand {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+    padding: 0 8dp 4dp 8dp;
+}
+
+#sidebar-brand-text {
+    display: flex;
+    flex-direction: column;
+}
+
+#sidebar-brand-name {
+    font-size: 22dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 1.6dp;
+}
+
+#sidebar-brand-sub {
+    font-size: 12dp;
+    font-weight: bold;
+    margin-top: 5dp;
+    color: #5e718c;
+    letter-spacing: 1.8dp;
+}
+
+#sidebar-divider {
+    width: 340dp;
+    height: 1dp;
+    margin: 18dp 8dp;
+    background-color: #ffffff1a;
+}
+
+.sb-section {
+    width: 356dp;
+    height: 74dp;
+    padding: 0 14dp;
+    margin-bottom: 6dp;
+    border-radius: 14dp;
+    border-width: 1dp;
+    border-color: transparent;
+    background-color: transparent;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+    transition: background-color 0.16s cubic-out, border-color 0.16s cubic-out;
+}
+
+/* Current section - the page you are on, sidebar not focused. */
+.sb-section-active {
+    background-color: #ffffff14;
+    border-color: #ffffff24;
+}
+
+/* Cursor is in the sidebar (the index page). */
+.sb-section-focused {
+    background-color: #ffcd0026;
+    border-color: #ffcd00;
+}
+
+.sb-icon-box {
+    width: 40dp;
+    height: 40dp;
+    border-radius: 11dp;
+    background-color: #ffffff12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sb-icon {
+    width: 22dp;
+    height: 22dp;
+}
+
+.sb-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.sb-label {
+    font-size: 16dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.6dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.sb-sub {
+    font-size: 12dp;
+    font-weight: bold;
+    margin-top: 5dp;
+    color: #5e718c;
+    letter-spacing: 0.8dp;
+    white-space: nowrap;
+}
+
+/* ---- Detail pane ---- */
+#settings-detail {
+    position: absolute;
+    left: 444dp;
+    top: 56dp;
+    width: 1296dp;
+    height: 968dp;
 }
 
 
@@ -41,9 +196,9 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-top: 72dp;
-    margin-bottom: 36dp;
-    width: 1704dp;
+    margin-top: 0;
+    margin-bottom: 26dp;
+    width: 1296dp;
     height: 88dp;
     border-bottom-width: 1dp;
     border-bottom-color: #5a7db433;
@@ -121,21 +276,30 @@ div, span, p {
 }
 
 /* Settings List */
+/* The grouped card. Second frosted surface on the page: translucent over the
+ * wallpaper, rows inside it are flat with hairline separators. */
 #settings-list {
     display: flex;
     flex-direction: column;
-    width: 1704dp;
+    width: 1296dp;
+    padding: 10dp;
+    border-radius: 20dp;
+    border-width: 1dp;
+    border-color: #ffffff1c;
+    background-color: #0f1829a3;
+    backdrop-filter: blur(22dp);
+    overflow: hidden;
 }
 
 .setting-row {
-    width: 1704dp;
+    width: 1274dp;
     height: 84dp;
-    background-color: #101a2ceb;
-    border-width: 1dp;
-    border-color: #5a7db429;
-    border-radius: 16dp;
-    margin-bottom: 12dp;
-    padding: 0 24dp;
+    background-color: transparent;
+    border-width: 0;
+    border-bottom-width: 1dp;
+    border-bottom-color: #ffffff14;
+    border-radius: 0;
+    padding: 0 18dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -143,11 +307,17 @@ div, span, p {
     transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
+/* Selection is a filled rounded highlight, macOS-style, and swallows the
+ * separator beneath it so the pill reads as one shape. */
 .row-focused {
-    background-color: #16223af5;
-    border-width: 1.5dp;
-    border-color: #ffcd00;
-    transform: scale(1.012);
+    background-color: #ffcd0026;
+    border-bottom-color: transparent;
+    border-radius: 12dp;
+}
+
+/* First row has no separator above it; the card edge does that job. */
+#row-0 {
+    border-top-width: 0;
 }
 
 .row-left {
@@ -244,6 +414,75 @@ div, span, p {
     color: #ffcd00;
 }
 
+/* ---- Option rows -------------------------------------------------------------
+ * A VALUE row expands in place to list every choice, so the user can see what
+ * exists instead of cycling blind through a badge. Options are indented under
+ * their parent and the current one carries a check dot.
+ * -------------------------------------------------------------------------- */
+.row-option {
+    height: 62dp;
+    padding-left: 76dp;
+    background-color: #00000026;
+}
+
+.row-option .row-title {
+    font-size: 17dp;
+    font-weight: normal;
+    color: #cbd8ea;
+}
+
+.row-check {
+    display: none;
+    width: 20dp;
+    height: 20dp;
+    border-radius: 10dp;
+    margin-right: 6dp;
+    background-color: #2ecc71;
+}
+
+/* ---- Toggle switch ----------------------------------------------------------
+ * Boolean rows read as a switch instead of ON/OFF text. Hidden by default and
+ * shown by UpdateSettingsState only for EVO_RMLUI_ROW_TOGGLE rows, so value
+ * and action rows keep their badge/chevron.
+ * -------------------------------------------------------------------------- */
+.row-toggle {
+    display: none;
+    width: 58dp;
+    height: 32dp;
+    border-radius: 16dp;
+    border-width: 1dp;
+    border-color: #ffffff29;
+    background-color: #ffffff14;
+    position: relative;
+    transition: background-color 0.16s cubic-out, border-color 0.16s cubic-out;
+}
+
+.row-toggle-on {
+    background-color: #2ecc71;
+    border-color: #2ecc71;
+}
+
+/* Hide the icon box on option rows - the indent carries the hierarchy. */
+.row-option .row-icon-box {
+    display: none;
+}
+
+.row-knob {
+    position: absolute;
+    left: 3dp;
+    top: 3dp;
+    width: 24dp;
+    height: 24dp;
+    border-radius: 12dp;
+    background-color: #e8eef8;
+    transition: left 0.16s cubic-out;
+}
+
+.row-toggle-on .row-knob {
+    left: 29dp;
+    background-color: #ffffff;
+}
+
 .row-chevron {
     width: 20dp;
     height: 20dp;
@@ -261,9 +500,9 @@ div, span, p {
 /* Footer Hints */
 #settings-footer {
     position: absolute;
-    bottom: 40dp;
+    bottom: 0;
     left: 0;
-    width: 1704dp;
+    width: 1296dp;
     display: flex;
     flex-direction: row;
     align-items: center;

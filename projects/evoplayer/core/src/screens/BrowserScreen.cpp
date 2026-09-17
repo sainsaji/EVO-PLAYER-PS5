@@ -312,6 +312,12 @@ void BrowserScreen::onEnter() {
                 browser->setCurrentPath("/mnt/usb0");
             }
         }
+        /* Never open on an empty pane: a restored folder that has since been
+         * deleted or emptied still resolves, so fall back to the USB root
+         * rather than showing nothing. */
+        if (browser->getEntryCount() == 0 && !m_isSearching) {
+            browser->navigateToSource(0);
+        }
         if (m_activeSource != 2 && m_activeSource != 3) {
             const std::string& path = browser->getCurrentPath();
             if (path.rfind("/data", 0) == 0) {

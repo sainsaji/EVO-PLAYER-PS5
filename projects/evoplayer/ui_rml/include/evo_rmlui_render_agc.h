@@ -1,5 +1,6 @@
 #pragma once
 #include <RmlUi/Core/RenderInterface.h>
+#include <RmlUi/Core/Dictionary.h>
 #include "evo_rmlui_render_bridge.h"
 #include "evo_agc_runtime.h"
 
@@ -87,6 +88,20 @@ public:
                           Rml::CompiledGeometryHandle geometry,
                           Rml::Vector2f translation) override;
 
+    /* Rml::RenderInterface layer support: PushLayer/PopLayer/CompositeLayers,
+     * the seam RmlUi's backdrop-filter: blur() is built on. Layers are
+     * full-canvas RGBA8 surfaces from the runtime's pool (defined layer), the
+     * base layer (handle 0) is the scanout backbuffer. */
+    Rml::LayerHandle PushLayer() override;
+    void PopLayer() override;
+    void CompositeLayers(Rml::LayerHandle source,
+                         Rml::LayerHandle destination,
+                         Rml::BlendMode blend_mode,
+                         Rml::Span<const Rml::CompiledFilterHandle> filters) override;
+    Rml::CompiledFilterHandle CompileFilter(const Rml::String& name,
+                                            const Rml::Dictionary& parameters) override;
+    void ReleaseFilter(Rml::CompiledFilterHandle filter) override;
+
 private:
     int m_width;
     int m_height;
@@ -134,4 +149,35 @@ private:
     std::map<std::string, MemImage> m_mem_textures;
 
     Rml::TextureHandle CreateTextureInternal(const uint32_t* rgba, int width, int height);
+
+    /* ------------------------------------------------------------------
+     * backdrop-filter: blur state
+     *
+     * Layer handle == the evo_agc_layer_surface_t pointer minted by
+     * PushLayer, cast to uintptr_t; 0 is the base (scanout) layer. A failed
+     * push (pool exhausted) stores a nullptr marker - so PopLayer's stack
+     * discipline holds - and returns 0, degrading to "no blur, UI draws".
+     * ------------------------------------------------------------------ */
+    struct BlurFilter {
+        float sigma = 0.0f;
+    };
+
+    Rml::CompiledGeometryHandle m_fullscreen_quad = 0;
+    int m_fsquad_width = 0;
+    int m_fsquad_height = 0;
+
+    std::vector<evo_agc_layer_surface_t*> m_layer_stack;
+    std::vector<std::unique_ptr<BlurFilter>> m_filters;
+
+    evo_agc_layer_surface_t* ResolveLayer(Rml::LayerHandle handle) const;
+    void EnsureFullscreenQuad();
+    /* Draw one separable blur pass (source sampled -> currently-set target),
+     * writing BlurConstants + the combined T#/S# into the transient ring.
+     * Caller sets target, pipeline and blend first. */
+    bool DrawBlurPass(const evo_agc_layer_surface_t& src, bool src_is_base,
+                      float sigma, bool horizontal);
+    /* Source layer -> currently-set target as a fullscreen UI quad with the
+     * given RmlUi blend mode. */
+    void DrawCopyPass(const evo_agc_layer_surface_t& src, bool src_is_base,
+                      Rml::BlendMode blend_mode);
 };

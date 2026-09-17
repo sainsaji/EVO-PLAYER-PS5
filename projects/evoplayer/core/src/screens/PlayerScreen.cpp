@@ -20,6 +20,8 @@ extern evo_vdec *g_vdec;
 extern AVFormatContext *play_fmt;
 extern AVCodecContext *audio_ctx;
 extern int perf_render_fps;
+/* Bridge.cpp - reads the DEBUG OVERLAY setting for both FPS pills. */
+int evo_fps_counter_enabled(void);
 extern int perf_decode_fps;
 extern int detected_audio_rate;
 extern int evo_audio_channels;
@@ -421,6 +423,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_raised = 1;
         p.chrome_hidden = 0;
         p.fps = perf_render_fps;
+        p.debug_overlay = evo_fps_counter_enabled();
         p.music_mode = playback->isMusicMode() ? 1 : 0;
         p.music_codec = "AUDIO";
 
@@ -439,6 +442,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.chrome_hidden = 1;
         p.alpha = 255;
         p.fps = perf_render_fps;
+        p.debug_overlay = evo_fps_counter_enabled();
 
         evo_rmlui_update_playback_params(&p);
         evo_rmlui_render_playback_osd(framebuffer, width, height);

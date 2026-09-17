@@ -29,6 +29,16 @@ EvoRenderInterfaceAGC::EvoRenderInterfaceAGC(int width, int height)
 
 EvoRenderInterfaceAGC::~EvoRenderInterfaceAGC()
 {
+    if (m_fullscreen_quad) {
+        ReleaseGeometry(m_fullscreen_quad);
+        m_fullscreen_quad = 0;
+    }
+    for (auto *layer : m_layer_stack) {
+        if (layer)
+            evo_agc_layer_release(layer);
+    }
+    m_layer_stack.clear();
+    m_filters.clear();
     for (auto &pair : m_mem_textures) {
         if (pair.second.handle) {
             ReleaseTexture(pair.second.handle);
@@ -192,6 +202,10 @@ void EvoRenderInterfaceAGC::RenderGeometry(Rml::CompiledGeometryHandle geometry,
     SceAgcCommandBuffer *cb = evo_agc_runtime_get_current_cb();
     if (!cb)
         return;
+
+    /* A prior pass (backdrop blur, video) may have bound its own pipeline;
+     * geometry always renders through the UI pipe. No-op when already bound. */
+    evo_agc_runtime_bind_pipeline(EVO_AGC_PIPE_UI);
 
     evo_agc_transient_ring_t *ring = evo_agc_runtime_get_transient_ring();
     uint32_t slot = evo_agc_runtime_get_current_slot();
@@ -648,4 +662,435 @@ void EvoRenderInterfaceAGC::DropMemoryTexture(const std::string &key)
         }
         m_mem_textures.erase(it);
     }
+}
+
+/* -------------------------------------------------------------------------
+ * Layers & backdrop-filter: blur
+ *
+ * RmlUi's backdrop-filter: blur() is two CompositeLayers stages on top of a
+ * pushed temp layer (ElementEffects.cpp):
+ *
+ *   1. CompositeLayers(backdrop_source, temp_layer, Blend, { blur_handle })
+ *      - H and V separable Gaussian passes, source -> temp_layer.
+ *   2. CompositeLayers(temp_layer, destination, Blend, {})
+ *      - plain fullscreen copy, scissored + SDF-clipped to the element box.
+ *
+ * The blur passes run through the ui_backdrop_blur pipe, whose vertex shader
+ * builds the fullscreen quad from gl_VertexIndex (BLUR_DRAW_MODIFIER), reads
+ * BlurConstants from a PS-bound descriptor table and the backdrop source from
+ * a PS-bound combined T#/S#. The copy reuses the UI pipe and RenderGeometry.
+ * A floating source layer (scanout backbuffer = COMP_SWAP=ALT) is sampled
+ * with the bgra8 T# swizzle; layer surfaces use standard RGBA so the rgba8
+ * swizzle. Getting this backwards is a silent red/blue swap.
+ * ------------------------------------------------------------------------- */
+
+/* First-N entry breadcrumb. The frame-1 SIGSEGV landed somewhere in this
+ * section with nothing logged, because every existing log sits AFTER the work
+ * it describes - PushLayer's, in particular, is after a 33 MB surface clear. */
+#define EVO_BD_TRACE(n, ...) do { static int s_bd_left = (n); if (s_bd_left > 0) { s_bd_left--; evo_log(__VA_ARGS__); evo_log_flush(); } } while (0)
+
+Rml::LayerHandle EvoRenderInterfaceAGC::PushLayer()
+{
+    EVO_BD_TRACE(4, "backdrop: PushLayer enter has_layers=%d stack=%zu",
+                 evo_agc_has_layers(), m_layer_stack.size());
+
+    evo_agc_layer_surface_t *layer = nullptr;
+    EVO_BD_TRACE(4, "backdrop: PushLayer -> acquire");
+    const int acq = evo_agc_has_layers() ? evo_agc_layer_acquire(&layer) : -1;
+    EVO_BD_TRACE(4, "backdrop: PushLayer acquire rc=%d layer=%p", acq, (void *)layer);
+    if (acq == 0 && layer) {
+        m_layer_stack.push_back(layer);
+        EVO_BD_TRACE(4, "backdrop: PushLayer -> set_layer_target %ux%u pitch=%u base=%p",
+                     layer->width, layer->height, layer->pitch_bytes,
+                     (void *)layer->cpu_base);
+        evo_agc_set_layer_target(layer);
+        EVO_BD_TRACE(4, "backdrop: PushLayer set_layer_target done");
+        static bool logged_ok = false;
+        if (!logged_ok) {
+            logged_ok = true;
+            evo_log("backdrop: PushLayer acquired %p", (void *)layer);
+            evo_log_flush();
+        }
+        return (Rml::LayerHandle)(uintptr_t)layer;
+    }
+
+    /* Pool exhausted: keep the stack balanced with a null marker so PopLayer
+     * still restores the target, but hand RmlUi the base layer handle - the
+     * UI draws, the backdrop blur just does not appear. */
+    m_layer_stack.push_back(nullptr);
+    static bool logged_degrade = false;
+    if (!logged_degrade) {
+        logged_degrade = true;
+        evo_log("backdrop: PushLayer degraded (layer pool exhausted) -> base layer");
+        evo_log_flush();
+    }
+    return 0;
+}
+
+void EvoRenderInterfaceAGC::PopLayer()
+{
+    EVO_BD_TRACE(4, "backdrop: PopLayer enter stack=%zu", m_layer_stack.size());
+
+    if (m_layer_stack.empty())
+        return;
+    evo_agc_layer_surface_t *layer = m_layer_stack.back();
+    m_layer_stack.pop_back();
+    if (layer)
+        evo_agc_layer_release(layer);
+    /* Restore the render target to the new stack top (base layer when empty),
+     * exactly as RmlUi expects after popping its pushed layer. */
+    evo_agc_set_layer_target(m_layer_stack.empty() ? nullptr : m_layer_stack.back());
+}
+
+evo_agc_layer_surface_t *EvoRenderInterfaceAGC::ResolveLayer(Rml::LayerHandle handle) const
+{
+    if (!handle)
+        return nullptr;
+    for (auto *layer : m_layer_stack) {
+        if (layer && (Rml::LayerHandle)(uintptr_t)layer == handle)
+            return layer;
+    }
+    return nullptr;
+}
+
+Rml::CompiledFilterHandle EvoRenderInterfaceAGC::CompileFilter(const Rml::String &name,
+                                                               const Rml::Dictionary &parameters)
+{
+    EVO_BD_TRACE(4, "backdrop: CompileFilter enter name=%s", name.c_str());
+
+    if (name != "blur")
+        return 0;
+    const float sigma = Rml::Get(parameters, "sigma", 0.0f);
+    if (sigma <= 0.0f)
+        return 0;
+
+    auto filter = std::make_unique<BlurFilter>();
+    filter->sigma = sigma;
+    const Rml::CompiledFilterHandle handle =
+        (Rml::CompiledFilterHandle)(uintptr_t)filter.get();
+
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        evo_log("backdrop: CompileFilter blur sigma=%.2f -> handle=%p", sigma, (void *)handle);
+        evo_log_flush();
+    }
+
+    m_filters.push_back(std::move(filter));
+    return handle;
+}
+
+void EvoRenderInterfaceAGC::ReleaseFilter(Rml::CompiledFilterHandle filter)
+{
+    EVO_BD_TRACE(4, "backdrop: ReleaseFilter enter h=%p", (void *)filter);
+
+    if (!filter)
+        return;
+    for (auto it = m_filters.begin(); it != m_filters.end(); ++it) {
+        if ((Rml::CompiledFilterHandle)(uintptr_t)it->get() == filter) {
+            m_filters.erase(it);
+            return;
+        }
+    }
+}
+
+/* Fullscreen quad spanning 0..width x 0..height in document pixels, built
+ * once per render size. Its index stream {0,1,2,2,1,3} doubles as the blur
+ * draw's index buffer (the blur VS reads gl_VertexIndex from it). */
+void EvoRenderInterfaceAGC::EnsureFullscreenQuad()
+{
+    if (m_fullscreen_quad && m_fsquad_width == m_width && m_fsquad_height == m_height)
+        return;
+
+    if (m_fullscreen_quad) {
+        ReleaseGeometry(m_fullscreen_quad);
+        m_fullscreen_quad = 0;
+    }
+
+    const float w = (float)m_width;
+    const float h = (float)m_height;
+    const Rml::Vertex verts[4] = {
+        {Rml::Vector2f(0, 0), Rml::ColourbPremultiplied(255, 255, 255, 255), Rml::Vector2f(0, 0)},
+        {Rml::Vector2f(w, 0), Rml::ColourbPremultiplied(255, 255, 255, 255), Rml::Vector2f(1, 0)},
+        {Rml::Vector2f(0, h), Rml::ColourbPremultiplied(255, 255, 255, 255), Rml::Vector2f(0, 1)},
+        {Rml::Vector2f(w, h), Rml::ColourbPremultiplied(255, 255, 255, 255), Rml::Vector2f(1, 1)},
+    };
+    const int idx[6] = {0, 1, 2, 2, 1, 3};
+
+    m_fullscreen_quad = CompileGeometry(Rml::Span<const Rml::Vertex>(verts, 4),
+                                        Rml::Span<const int>(idx, 6));
+    if (m_fullscreen_quad) {
+        m_fsquad_width = m_width;
+        m_fsquad_height = m_height;
+    }
+}
+
+bool EvoRenderInterfaceAGC::DrawBlurPass(const evo_agc_layer_surface_t &src,
+                                         bool src_is_base,
+                                         float sigma, bool horizontal)
+{
+    SceAgcCommandBuffer *cb = evo_agc_runtime_get_current_cb();
+    evo_agc_transient_ring_t *ring = evo_agc_runtime_get_transient_ring();
+    uint32_t slot = evo_agc_runtime_get_current_slot();
+    if (!cb || !ring)
+        return false;
+
+    const evo_agc_user_data_layout_t ud =
+        evo_agc_runtime_get_user_data_layout(EVO_AGC_PIPE_UI_BLUR);
+    if (ud.vs_count == 0 || ud.ps_count == 0 || ud.ps_count > 16 ||
+        ud.ps_const_table_dword < 0 || ud.ps_texture_table_dword < 0)
+        return false;
+
+    const auto *quad = reinterpret_cast<const EvoAgcCompiledGeometry *>(m_fullscreen_quad);
+    if (!quad || !quad->index_data || quad->index_count == 0)
+        return false;
+
+    /*
+     * Taps and weights. RmlUi's FilterBlur extends the ink area by
+     * 3*max(sigma,1), so we cover the same extent; the outermost tap lands at
+     * 3*sigma. The weights are a truncated Gaussian (centre + symmetric
+     * pairs), normalised so the output has unit sum.
+     */
+    const int taps = std::max(1, std::min(15, (int)std::ceil(3.0f * std::max(sigma, 1.0f))));
+    const float radius = 3.0f * sigma;
+    const float sigma2 = 2.0f * sigma * sigma;
+    const float src_w = (float)src.width;
+    const float src_h = (float)src.height;
+
+    /* BlurConstants = uParams + uOffsets[16] + uWeights[16] = 33 vec4 = 528 B */
+    evo_agc_transient_slice_t const_slice;
+    if (evo_agc_transient_ring_alloc(ring, slot, 33u * 16u, 16, &const_slice) != EVO_AGC_TRANSIENT_OK) {
+        evo_agc_runtime_note_drop(0);
+        return false;
+    }
+    float *c = (float *)const_slice.cpu;
+    memset(c, 0, 33u * 16u);
+    c[0] = src_w > 0.0f ? 1.0f / src_w : 0.0f;   /* uParams.x */
+    c[1] = src_h > 0.0f ? 1.0f / src_h : 0.0f;   /* uParams.y */
+    c[2] = (float)taps;                           /* uParams.z */
+
+    float weight_total = 1.0f; /* centre tap */
+    float weights[16] = {0.0f};
+    for (int i = 1; i <= taps; ++i) {
+        const float d = radius * (float)i / (float)taps;
+        weights[i] = expf(-(d * d) / sigma2);
+        weight_total += 2.0f * weights[i];
+    }
+
+    c[68] = 1.0f / weight_total; /* uWeights[0].x (centre) */
+    for (int i = 1; i <= taps; ++i) {
+        const float d = radius * (float)i / (float)taps;
+        const float w = weights[i] / weight_total;
+        const float off = horizontal ? d / src_w : d / src_h;
+        /* uOffsets[i].xy - direction baked in per pass */
+        c[4 + 4 * i + 0] = horizontal ? off : 0.0f;
+        c[4 + 4 * i + 1] = horizontal ? 0.0f : off;
+        /* uWeights[i].x */
+        c[68 + 4 * i + 0] = w;
+    }
+
+    /* Constant V# for the BlurConstants block (PS user data table slot). */
+    evo_agc_transient_slice_t const_desc;
+    if (evo_agc_transient_ring_alloc(ring, slot, 16u, 16, &const_desc) != EVO_AGC_TRANSIENT_OK) {
+        evo_agc_runtime_note_drop(0);
+        return false;
+    }
+    evo_agc_build_constant_vsharp((uint32_t *)const_desc.cpu, const_slice.gpu_addr, 33u * 16u);
+
+    /* Combined T# + S# for the source texture (48 bytes). */
+    evo_agc_transient_slice_t tex_desc;
+    if (evo_agc_transient_ring_alloc(ring, slot, EVO_AGC_COMBINED_DESCRIPTOR_DWORDS * 4u, 16,
+                                     &tex_desc) != EVO_AGC_TRANSIENT_OK) {
+        evo_agc_runtime_note_drop(0);
+        return false;
+    }
+    uint32_t *tdesc = (uint32_t *)tex_desc.cpu;
+    memset(tdesc, 0, EVO_AGC_COMBINED_DESCRIPTOR_DWORDS * 4u);
+    if (src_is_base)
+        evo_agc_build_tsharp_bgra8(tdesc, src.gpu_addr, src.width, src.height, src.pitch_bytes);
+    else
+        evo_agc_build_tsharp_rgba8(tdesc, src.gpu_addr, src.width, src.height, src.pitch_bytes);
+    evo_agc_build_ssharp(tdesc + EVO_AGC_TSHARP_DWORDS, 1, 1);
+
+    /* User-SGPR blocks, from the compiled pipeline's PAL metadata. The blur VS
+     * reads only gl_VertexIndex (no const/vertex tables), so its block is the
+     * global-table dword alone; the PS block carries the constant V# and the
+     * combined descriptor. */
+    uint32_t vs_user[16] = {0};
+    evo_agc_writer_set_user_data_gs(cb, vs_user, ud.vs_count);
+
+    uint32_t ps_user[16] = {0};
+    ps_user[ud.ps_const_table_dword] = (uint32_t)const_desc.gpu_addr;
+    ps_user[ud.ps_texture_table_dword] = (uint32_t)tex_desc.gpu_addr;
+    evo_agc_writer_set_user_data_ps(cb, ps_user, ud.ps_count);
+
+    evo_agc_writer_draw_index_modifier(cb, quad->index_count,
+                                       reinterpret_cast<const uint16_t *>(quad->index_data),
+                                       evo_agc_runtime_get_pipe_draw_modifier(EVO_AGC_PIPE_UI_BLUR));
+    evo_agc_runtime_note_draw();
+    return true;
+}
+
+void EvoRenderInterfaceAGC::DrawCopyPass(const evo_agc_layer_surface_t &src,
+                                         bool src_is_base,
+                                         Rml::BlendMode blend_mode)
+{
+    EvoAgcTexture src_tex;
+    src_tex.width = (int)src.width;
+    src_tex.height = (int)src.height;
+    src_tex.pitch = (int)src.pitch_bytes;
+    if (src_is_base)
+        evo_agc_build_tsharp_bgra8(src_tex.descriptor, src.gpu_addr,
+                                   src.width, src.height, src.pitch_bytes);
+    else
+        evo_agc_build_tsharp_rgba8(src_tex.descriptor, src.gpu_addr,
+                                   src.width, src.height, src.pitch_bytes);
+    evo_agc_build_ssharp(src_tex.descriptor + EVO_AGC_TSHARP_DWORDS, 1, 1);
+
+    evo_agc_runtime_set_blend(blend_mode == Rml::BlendMode::Replace
+                                  ? EVO_AGC_BLEND_NONE
+                                  : EVO_AGC_BLEND_PREMULTIPLIED);
+    /* RenderGeometry binds the UI pipe itself and applies the active scissor
+     * and SDF clip, which is exactly the composite RmlUi wants here. */
+    RenderGeometry(m_fullscreen_quad, Rml::Vector2f(0, 0), (Rml::TextureHandle)&src_tex);
+}
+
+void EvoRenderInterfaceAGC::CompositeLayers(Rml::LayerHandle source_handle,
+                                            Rml::LayerHandle destination_handle,
+                                            Rml::BlendMode blend_mode,
+                                            Rml::Span<const Rml::CompiledFilterHandle> filters)
+{
+    EVO_BD_TRACE(4, "backdrop: CompositeLayers enter src=%p dst=%p nfilters=%zu",
+                 (void *)source_handle, (void *)destination_handle, filters.size());
+
+    if (!evo_agc_has_layers())
+        return;
+
+    /* Handle 0 is the base (scanout) layer; anything else is a surface we
+     * minted in PushLayer. A handle that no longer resolves means a degraded
+     * (pool-exhausted) push - skip the composite so the backdrop stays absent
+     * instead of faulting on a stale pointer. */
+    evo_agc_layer_surface_t src_storage;
+    bool src_is_base = false;
+    const evo_agc_layer_surface_t *src = nullptr;
+    if (source_handle == 0) {
+        evo_agc_get_scanout_layer(&src_storage);
+        src = &src_storage;
+        src_is_base = true;
+    } else if ((src = ResolveLayer(source_handle)) == nullptr) {
+        return;
+    }
+
+    const evo_agc_layer_surface_t *dst = nullptr;
+    if (destination_handle != 0) {
+        dst = ResolveLayer(destination_handle);
+        if (!dst)
+            return;
+    }
+
+    const evo_agc_layer_surface_t *target_before =
+        m_layer_stack.empty() ? nullptr : m_layer_stack.back();
+
+    /* Strongest sigma among the non-zero handles. Only blur filters are ever
+     * compiled here, so any non-zero handle is a blur. */
+    float sigma = 0.0f;
+    for (Rml::CompiledFilterHandle handle : filters) {
+        if (!handle)
+            continue;
+        for (const auto &filter : m_filters) {
+            if ((Rml::CompiledFilterHandle)(uintptr_t)filter.get() == handle) {
+                sigma = std::max(sigma, filter->sigma);
+                break;
+            }
+        }
+    }
+
+    static bool logged_call = false;
+    if (!logged_call) {
+        logged_call = true;
+        evo_log("backdrop: CompositeLayers src=%u dst=%u blend=%d filters=%zu",
+                (unsigned)(uintptr_t)source_handle, (unsigned)(uintptr_t)destination_handle,
+                (int)blend_mode, filters.size());
+        evo_log_flush();
+    }
+
+    EnsureFullscreenQuad();
+    if (!m_fullscreen_quad)
+        return;
+
+    if (sigma > 0.0f) {
+        /*
+         * Blurred source -> destination, scissored to the backdrop region.
+         *
+         * Two passes need two layer surfaces (H writes, V reads), then the
+         * result is composited onto destination with RmlUi's blend mode - the
+         * same shape as RmlUi's GL3 backend (filter into a temp, composite the
+         * temp). Pool exhaustion degrades to "no blur" rather than drawing
+         * from an unwritten surface.
+         */
+        static bool logged_blur_path = false;
+        if (!logged_blur_path) {
+            logged_blur_path = true;
+            evo_log("backdrop: taking blur H/V path sigma=%.2f", sigma);
+            evo_log_flush();
+        }
+        evo_agc_layer_surface_t *h_scratch = nullptr, *v_scratch = nullptr;
+        if (evo_agc_layer_acquire(&h_scratch) != 0 || !h_scratch) {
+            static bool logged_no_scratch = false;
+            if (!logged_no_scratch) {
+                logged_no_scratch = true;
+                evo_log("backdrop: blur path skipped - no layer surface (scratch H)");
+                evo_log_flush();
+            }
+            return;
+        }
+        if (evo_agc_layer_acquire(&v_scratch) != 0 || !v_scratch) {
+            static bool logged_no_vscratch = false;
+            if (!logged_no_vscratch) {
+                logged_no_vscratch = true;
+                evo_log("backdrop: blur path skipped - no layer surface (scratch V)");
+                evo_log_flush();
+            }
+            evo_agc_layer_release(h_scratch);
+            return;
+        }
+
+        evo_agc_runtime_bind_pipeline(EVO_AGC_PIPE_UI_BLUR);
+        evo_agc_runtime_set_blend(EVO_AGC_BLEND_NONE);
+
+        /* The source may hold this frame's base draws or an earlier layer
+         * composite - flush so the sampler sees them (event 45, all CBs). */
+        evo_agc_flush_color_target();
+
+        evo_agc_set_layer_target(h_scratch);
+        DrawBlurPass(*src, src_is_base, sigma, true /* horizontal */);
+        evo_agc_flush_color_target();
+
+        evo_agc_set_layer_target(v_scratch);
+        DrawBlurPass(*h_scratch, false, sigma, false /* vertical */);
+        evo_agc_flush_color_target();
+
+        evo_agc_layer_release(h_scratch);
+
+        evo_agc_set_layer_target(dst);
+        DrawCopyPass(*v_scratch, false, blend_mode);
+        evo_agc_flush_color_target();
+
+        evo_agc_layer_release(v_scratch);
+    } else {
+        /* No blur filter: plain composite source -> destination with RmlUi's
+         * blend mode. Skip the degenerate base-onto-base self copy. */
+        static bool logged_plain = false;
+        if (!logged_plain) {
+            logged_plain = true;
+            evo_log("backdrop: plain composite (no blur filter) sigma=0");
+            evo_log_flush();
+        }
+        if (!(src_is_base && dst == nullptr))
+            DrawCopyPass(*src, src_is_base, blend_mode);
+    }
+
+    /* RmlUi has already pushed any layer it needed, and expects the stack top
+     * - not the composite destination - to remain the render target. */
+    evo_agc_set_layer_target(target_before);
 }

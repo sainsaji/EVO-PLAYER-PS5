@@ -3,147 +3,482 @@
     <link type="text/rcss" href="settings.rcss"/>
 </head>
 <body id="settings-body">
-    <!-- Navigation rail is now rendered via the standalone navbar.rml overlay -->
+    <!-- Navigation rail is rendered via the standalone navbar.rml overlay -->
 
-    <!-- Main Content Area -->
-    <div id="content-pane">
-        <!-- Header -->
-        <div id="settings-header">
-            <div id="header-left">
+    <!--
+      Two-pane settings, macOS System Settings shape: a frosted sidebar listing
+      the four sections over a wallpaper, and a detail pane whose rows are
+      grouped into one frosted card.  The wallpaper exists so the glass has
+      something to refract - backdrop-filter over a flat fill is a no-op.
+    -->
+    <div id="settings-wallpaper"></div>
+    <div id="settings-scrim"></div>
+
+    <div id="settings-shell">
+        <!-- ================= Sidebar (frosted) ================= -->
+        <div id="settings-sidebar">
+            <div id="sidebar-brand">
                 <div id="settings-badge">
                     <img id="settings-badge-icon" src="../icons/icon_settings.png"/>
                 </div>
-                <div id="header-titles">
-                    <div id="settings-title-row">
-                        <span id="settings-title">SETTINGS</span>
-                        <span id="settings-live-dot"></span>
-                    </div>
-                    <div id="settings-subtitle">APPLICATION &amp; PLAYBACK PREFERENCES</div>
+                <div id="sidebar-brand-text">
+                    <div id="sidebar-brand-name">SETTINGS</div>
+                    <div id="sidebar-brand-sub">PREFERENCES</div>
                 </div>
             </div>
-            <div id="settings-counter">1 OF 4</div>
-        </div>
-
-        <!-- Settings Row List -->
-        <div id="settings-list">
-            <!-- Row 0 -->
-            <div id="row-0" class="setting-row row-focused">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-0" src="../icons/icon_resume.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-0" class="row-title">PLAYBACK &amp; VIDEO</div>
-                        <div id="row-detail-0" class="row-detail">PROFILE, ASPECT RATIO &amp; RESUME</div>
-                    </div>
+            <div id="sidebar-divider"></div>
+            <div id="sb-0" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-0" src="../icons/icon_resume.png" class="sb-icon"/>
                 </div>
-                <div class="row-right">
-                    <div id="row-badge-0" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-0" src="../icons/icon_chevron.png" class="row-chevron"/>
+                <div class="sb-text">
+                    <div id="sb-label-0" class="sb-label">PLAYBACK &amp; VIDEO</div>
+                    <div id="sb-sub-0" class="sb-sub">Aspect, resume &amp; decoder</div>
                 </div>
             </div>
-
-            <!-- Row 1 -->
-            <div id="row-1" class="setting-row">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-1" src="../icons/icon_subtitles.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-1" class="row-title">SUBTITLES</div>
-                        <div id="row-detail-1" class="row-detail">AUTO-DETECT &amp; DEFAULT SIZING</div>
-                    </div>
+            <div id="sb-1" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-1" src="../icons/icon_subtitles.png" class="sb-icon"/>
                 </div>
-                <div class="row-right">
-                    <div id="row-badge-1" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-1" src="../icons/icon_chevron.png" class="row-chevron"/>
+                <div class="sb-text">
+                    <div id="sb-label-1" class="sb-label">SUBTITLES</div>
+                    <div id="sb-sub-1" class="sb-sub">Auto-detect &amp; sizing</div>
                 </div>
             </div>
-
-            <!-- Row 2 -->
-            <div id="row-2" class="setting-row">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-2" src="../icons/icon_palette.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-2" class="row-title">INTERFACE &amp; CONTROLS</div>
-                        <div id="row-detail-2" class="row-detail">THEMES, SOUNDS, LIGHTBAR &amp; SORTING</div>
-                    </div>
+            <div id="sb-2" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-2" src="../icons/icon_palette.png" class="sb-icon"/>
                 </div>
-                <div class="row-right">
-                    <div id="row-badge-2" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-2" src="../icons/icon_chevron.png" class="row-chevron"/>
+                <div class="sb-text">
+                    <div id="sb-label-2" class="sb-label">INTERFACE &amp; CONTROLS</div>
+                    <div id="sb-sub-2" class="sb-sub">Themes, sounds &amp; sorting</div>
                 </div>
             </div>
-
-            <!-- Row 3 -->
-            <div id="row-3" class="setting-row">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-3" src="../icons/icon_developer_tools.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-3" class="row-title">SYSTEM &amp; DIAGNOSTICS</div>
-                        <div id="row-detail-3" class="row-detail">DEVELOPER TOOLS &amp; MEDIA TILE</div>
-                    </div>
+            <div id="sb-3" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-3" src="../icons/icon_developer_tools.png" class="sb-icon"/>
                 </div>
-                <div class="row-right">
-                    <div id="row-badge-3" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-3" src="../icons/icon_chevron.png" class="row-chevron"/>
-                </div>
-            </div>
-
-            <!-- Row 4 -->
-            <div id="row-4" class="setting-row row-hidden">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-4" src="../icons/icon_settings.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-4" class="row-title"></div>
-                        <div id="row-detail-4" class="row-detail"></div>
-                    </div>
-                </div>
-                <div class="row-right">
-                    <div id="row-badge-4" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-4" src="../icons/icon_chevron.png" class="row-chevron"/>
-                </div>
-            </div>
-
-            <!-- Row 5 -->
-            <div id="row-5" class="setting-row row-hidden">
-                <div class="row-left">
-                    <div class="row-icon-box">
-                        <img id="row-icon-5" src="../icons/icon_settings.png" class="row-icon"/>
-                    </div>
-                    <div class="row-text-box">
-                        <div id="row-title-5" class="row-title"></div>
-                        <div id="row-detail-5" class="row-detail"></div>
-                    </div>
-                </div>
-                <div class="row-right">
-                    <div id="row-badge-5" class="row-badge badge-hidden"></div>
-                    <img id="row-chevron-5" src="../icons/icon_chevron.png" class="row-chevron"/>
+                <div class="sb-text">
+                    <div id="sb-label-3" class="sb-label">SYSTEM &amp; DIAGNOSTICS</div>
+                    <div id="sb-sub-3" class="sb-sub">Developer tools &amp; tile</div>
                 </div>
             </div>
         </div>
 
-        <!-- Footer Hints -->
-        <div id="settings-footer">
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">SELECT</span>
+        <!-- ================= Detail pane ================= -->
+        <div id="settings-detail">
+            <div id="settings-header">
+                <div id="header-left">
+                    <div id="header-titles">
+                        <div id="settings-title-row">
+                            <span id="settings-title">SETTINGS</span>
+                            <span id="settings-live-dot"></span>
+                        </div>
+                        <div id="settings-subtitle">APPLICATION &amp; PLAYBACK PREFERENCES</div>
+                    </div>
+                </div>
+                <div id="settings-counter">1 OF 4</div>
             </div>
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">BACK</span>
+
+            <!-- One frosted group card; rows are separated by hairlines -->
+            <div id="settings-list">
+                <div id="row-0" class="setting-row row-focused">
+                    <div class="row-left">
+                        <div id="row-iconbox-0" class="row-icon-box">
+                            <img id="row-icon-0" src="../icons/icon_resume.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-0" class="row-title"></div>
+                            <div id="row-detail-0" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-0" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-0" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-0" class="row-check"></div>
+                        <img id="row-chevron-0" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-1" class="setting-row">
+                    <div class="row-left">
+                        <div id="row-iconbox-1" class="row-icon-box">
+                            <img id="row-icon-1" src="../icons/icon_subtitles.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-1" class="row-title"></div>
+                            <div id="row-detail-1" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-1" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-1" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-1" class="row-check"></div>
+                        <img id="row-chevron-1" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-2" class="setting-row">
+                    <div class="row-left">
+                        <div id="row-iconbox-2" class="row-icon-box">
+                            <img id="row-icon-2" src="../icons/icon_palette.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-2" class="row-title"></div>
+                            <div id="row-detail-2" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-2" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-2" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-2" class="row-check"></div>
+                        <img id="row-chevron-2" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-3" class="setting-row">
+                    <div class="row-left">
+                        <div id="row-iconbox-3" class="row-icon-box">
+                            <img id="row-icon-3" src="../icons/icon_developer_tools.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-3" class="row-title"></div>
+                            <div id="row-detail-3" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-3" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-3" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-3" class="row-check"></div>
+                        <img id="row-chevron-3" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-4" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-4" class="row-icon-box">
+                            <img id="row-icon-4" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-4" class="row-title"></div>
+                            <div id="row-detail-4" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-4" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-4" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-4" class="row-check"></div>
+                        <img id="row-chevron-4" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-5" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-5" class="row-icon-box">
+                            <img id="row-icon-5" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-5" class="row-title"></div>
+                            <div id="row-detail-5" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-5" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-5" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-5" class="row-check"></div>
+                        <img id="row-chevron-5" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-6" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-6" class="row-icon-box">
+                            <img id="row-icon-6" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-6" class="row-title"></div>
+                            <div id="row-detail-6" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-6" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-6" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-6" class="row-check"></div>
+                        <img id="row-chevron-6" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-7" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-7" class="row-icon-box">
+                            <img id="row-icon-7" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-7" class="row-title"></div>
+                            <div id="row-detail-7" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-7" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-7" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-7" class="row-check"></div>
+                        <img id="row-chevron-7" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-8" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-8" class="row-icon-box">
+                            <img id="row-icon-8" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-8" class="row-title"></div>
+                            <div id="row-detail-8" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-8" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-8" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-8" class="row-check"></div>
+                        <img id="row-chevron-8" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-9" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-9" class="row-icon-box">
+                            <img id="row-icon-9" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-9" class="row-title"></div>
+                            <div id="row-detail-9" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-9" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-9" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-9" class="row-check"></div>
+                        <img id="row-chevron-9" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-10" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-10" class="row-icon-box">
+                            <img id="row-icon-10" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-10" class="row-title"></div>
+                            <div id="row-detail-10" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-10" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-10" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-10" class="row-check"></div>
+                        <img id="row-chevron-10" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-11" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-11" class="row-icon-box">
+                            <img id="row-icon-11" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-11" class="row-title"></div>
+                            <div id="row-detail-11" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-11" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-11" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-11" class="row-check"></div>
+                        <img id="row-chevron-11" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-12" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-12" class="row-icon-box">
+                            <img id="row-icon-12" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-12" class="row-title"></div>
+                            <div id="row-detail-12" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-12" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-12" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-12" class="row-check"></div>
+                        <img id="row-chevron-12" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-13" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-13" class="row-icon-box">
+                            <img id="row-icon-13" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-13" class="row-title"></div>
+                            <div id="row-detail-13" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-13" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-13" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-13" class="row-check"></div>
+                        <img id="row-chevron-13" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-14" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-14" class="row-icon-box">
+                            <img id="row-icon-14" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-14" class="row-title"></div>
+                            <div id="row-detail-14" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-14" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-14" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-14" class="row-check"></div>
+                        <img id="row-chevron-14" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-15" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-15" class="row-icon-box">
+                            <img id="row-icon-15" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-15" class="row-title"></div>
+                            <div id="row-detail-15" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-15" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-15" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-15" class="row-check"></div>
+                        <img id="row-chevron-15" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-16" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-16" class="row-icon-box">
+                            <img id="row-icon-16" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-16" class="row-title"></div>
+                            <div id="row-detail-16" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-16" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-16" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-16" class="row-check"></div>
+                        <img id="row-chevron-16" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-17" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-17" class="row-icon-box">
+                            <img id="row-icon-17" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-17" class="row-title"></div>
+                            <div id="row-detail-17" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-17" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-17" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-17" class="row-check"></div>
+                        <img id="row-chevron-17" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-18" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-18" class="row-icon-box">
+                            <img id="row-icon-18" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-18" class="row-title"></div>
+                            <div id="row-detail-18" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-18" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-18" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-18" class="row-check"></div>
+                        <img id="row-chevron-18" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
+                <div id="row-19" class="setting-row row-hidden">
+                    <div class="row-left">
+                        <div id="row-iconbox-19" class="row-icon-box">
+                            <img id="row-icon-19" src="../icons/icon_settings.png" class="row-icon"/>
+                        </div>
+                        <div class="row-text-box">
+                            <div id="row-title-19" class="row-title"></div>
+                            <div id="row-detail-19" class="row-detail"></div>
+                        </div>
+                    </div>
+                    <div class="row-right">
+                        <div id="row-badge-19" class="row-badge badge-hidden"></div>
+                        <div id="row-toggle-19" class="row-toggle">
+                            <div class="row-knob"></div>
+                        </div>
+                        <div id="row-check-19" class="row-check"></div>
+                        <img id="row-chevron-19" src="../icons/icon_chevron.png" class="row-chevron"/>
+                    </div>
+                </div>
             </div>
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">NAVIGATE</span>
+
+            <div id="settings-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SELECT</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">BACK</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">NAVIGATE</span>
+                </div>
+                <div id="footer-version"></div>
             </div>
-            <div id="footer-version">v0.7.0</div>
         </div>
     </div>
 </body>

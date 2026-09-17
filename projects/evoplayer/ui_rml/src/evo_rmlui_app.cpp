@@ -1848,8 +1848,15 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         int top  = 357 + (int)(spk.dy * kScale) - 41;
 
         node->SetProperty("display", "flex");
-        node->SetProperty("left", std::to_string(left) + "px");
-        node->SetProperty("top", std::to_string(top) + "px");
+        /* dp, not px. These constants are in the document's design space (the
+         * 1080x714 stage, 150x82 nodes), and every other rule in surround.rcss
+         * is dp - but emitting px pinned the nodes to raw pixels. At the PS5's
+         * 3840x2160 the dp ratio is 2.0, so the stage and the nodes doubled
+         * while their positions did not: the speakers bunched into the
+         * top-left and overlapped each other and the LFE. Invisible at 1080p,
+         * where px and dp coincide. */
+        node->SetProperty("left", std::to_string(left) + "dp");
+        node->SetProperty("top", std::to_string(top) + "dp");
         node->SetClass("srd-spk-active", is_active);
         node->SetClass("srd-spk-selected", is_sel);
         node->SetProperty("background-color", is_active ? surf_sel : surface);
@@ -2319,6 +2326,40 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         SetImageColor(el_sicon, to_hex_rgb(m_theme.accent_alt));
     }
 
+    /* Two-pane sidebar. The four section labels are static markup; only the
+     * highlight moves. `sidebar_focused` is set by the index page, where the
+     * sidebar IS the page; the section pages light the current row instead. */
+    for (int sct = 0; sct < 4; sct++) {
+        Rml::Element* el_s = m_settings_doc->GetElementById("sb-" + std::to_string(sct));
+        if (!el_s) continue;
+        const bool s_active = (sct == state.section_active);
+        const bool s_focused = s_active && state.sidebar_focused;
+        el_s->SetClass("sb-section-active", s_active && !s_focused);
+        el_s->SetClass("sb-section-focused", s_focused);
+        /* Paint inline as well as by class. A class change needs a style pass
+         * to reach computed values, so on its own the highlight lands one
+         * render late - measurable in uiview, where each fixture renders once.
+         * The rail block below has always set its colours inline for the same
+         * reason; this keeps the two consistent. */
+        if (s_focused) {
+            el_s->SetProperty("background-color", "#ffcd0026");
+            el_s->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+        } else if (s_active) {
+            el_s->SetProperty("background-color", "#ffffff14");
+            el_s->SetProperty("border-color", "#ffffff24");
+        } else {
+            el_s->SetProperty("background-color", "transparent");
+            el_s->SetProperty("border-color", "transparent");
+        }
+        if (Rml::Element* el_si = m_settings_doc->GetElementById("sb-icon-" + std::to_string(sct))) {
+            SetImageColor(el_si, s_focused ? to_hex_rgb(m_theme.accent)
+                                           : (s_active ? to_hex_rgb(m_theme.accent_alt)
+                                                       : to_hex_rgb(m_theme.text_secondary)));
+        }
+        if (Rml::Element* el_sl = m_settings_doc->GetElementById("sb-label-" + std::to_string(sct)))
+            el_sl->SetProperty("color", s_focused ? to_hex_rgb(m_theme.accent) : "#ffffff");
+    }
+
     for (int r = 0; r < 7; r++) {
         std::string rid = "rail-" + std::to_string(r);
         Rml::Element* el_r = m_settings_doc->GetElementById(rid);
@@ -2341,13 +2382,16 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         }
     }
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < EVO_RMLUI_SETTINGS_ROWS; i++) {
         std::string row_id = "row-" + std::to_string(i);
         std::string icon_id = "row-icon-" + std::to_string(i);
         std::string title_id = "row-title-" + std::to_string(i);
         std::string detail_id = "row-detail-" + std::to_string(i);
         std::string badge_id = "row-badge-" + std::to_string(i);
         std::string chev_id = "row-chevron-" + std::to_string(i);
+        std::string tog_id = "row-toggle-" + std::to_string(i);
+        std::string chk_id = "row-check-" + std::to_string(i);
+        std::string ibox_id = "row-iconbox-" + std::to_string(i);
 
         Rml::Element* el_row = m_settings_doc->GetElementById(row_id);
         Rml::Element* el_icon = m_settings_doc->GetElementById(icon_id);
@@ -2355,6 +2399,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         Rml::Element* el_detail = m_settings_doc->GetElementById(detail_id);
         Rml::Element* el_badge = m_settings_doc->GetElementById(badge_id);
         Rml::Element* el_chev = m_settings_doc->GetElementById(chev_id);
+        Rml::Element* el_tog = m_settings_doc->GetElementById(tog_id);
+        Rml::Element* el_chk = m_settings_doc->GetElementById(chk_id);
+        Rml::Element* el_ibox = m_settings_doc->GetElementById(ibox_id);
 
         if (el_row) {
             if (i < (int)state.rows.size()) {
@@ -2363,8 +2410,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 el_row->SetClass("row-focused", is_focused);
 
                 if (is_focused) {
+                    /* Fill only: the separator hairlines are RCSS-owned so that
+                     * .row-focused can swallow the one beneath the highlight. */
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
-                    el_row->SetProperty("border-color", to_hex_rgb(m_theme.accent));
                     if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.accent));
                     if (el_badge) {
                         el_badge->SetProperty("background-color", "#ffcd0029");
@@ -2372,8 +2420,8 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                         el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
                     }
                 } else {
-                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface));
-                    el_row->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                    /* Transparent so the frosted card shows through the row. */
+                    el_row->SetProperty("background-color", "transparent");
                     if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.text_muted));
                     if (el_badge) {
                         el_badge->SetProperty("background-color", "#0a101c99");
@@ -2390,8 +2438,35 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 }
                 if (el_title) el_title->SetInnerRML(state.rows[i].title);
                 if (el_detail) el_detail->SetInnerRML(state.rows[i].detail);
+                /* A toggle row owns the right-hand slot outright: no badge and
+                 * no chevron, so the switch is the only affordance there. */
+                const bool is_toggle = (state.rows[i].kind == EVO_RMLUI_ROW_TOGGLE);
+                const bool is_option = (state.rows[i].kind == EVO_RMLUI_ROW_OPTION);
+                el_row->SetClass("row-option", is_option);
+                /* Indent and strip the icon inline too - same one-render lag as
+                 * the sidebar highlight if this were left to the class alone. */
+                el_row->SetProperty("padding-left", is_option ? "76dp" : "18dp");
+                if (el_ibox) el_ibox->SetProperty("display", is_option ? "none" : "flex");
+                if (el_chk) {
+                    const bool checked = is_option && state.rows[i].toggle_on;
+                    el_chk->SetProperty("display", checked ? "block" : "none");
+                    if (checked) el_chk->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                }
+                if (el_tog) {
+                    el_tog->SetProperty("display", is_toggle ? "block" : "none");
+                    el_tog->SetClass("row-toggle-on", is_toggle && state.rows[i].toggle_on);
+                    /* One colour for every switch. This used to paint the
+                     * theme accent inline while RCSS painted green, so a switch
+                     * was green or purple depending on which won - set both
+                     * ends to the same value and always set it inline, since a
+                     * class-only change lands a render late. */
+                    el_tog->SetProperty("background-color",
+                                        state.rows[i].toggle_on ? "#2ecc71" : "#ffffff14");
+                    el_tog->SetProperty("border-color",
+                                        state.rows[i].toggle_on ? "#2ecc71" : "#ffffff29");
+                }
                 if (el_badge) {
-                    if (state.rows[i].badge.empty()) {
+                    if (is_toggle || is_option || state.rows[i].badge.empty()) {
                         el_badge->SetProperty("display", "none");
                     } else {
                         el_badge->SetProperty("display", "inline-block");
@@ -2399,7 +2474,8 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                     }
                 }
                 if (el_chev) {
-                    el_chev->SetProperty("display", state.rows[i].has_chevron ? "inline-block" : "none");
+                    const bool show_chev = state.rows[i].has_chevron && !is_toggle && !is_option;
+                    el_chev->SetProperty("display", show_chev ? "inline-block" : "none");
                     SetImageColor(el_chev, is_focused
                         ? to_hex_rgb(m_theme.accent)
                         : to_hex_rgb(m_theme.text_secondary));
@@ -2718,6 +2794,16 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     m_theme_gen_nav = m_theme_generation;
     m_frame_dirty = true;
     m_last_nav = state;
+
+    /* FPS pill. Set inline, like every other state in this file that has to be
+     * correct on the frame it changes. */
+    if (Rml::Element* el_pill = m_nav_doc->GetElementById("nav-fps-pill")) {
+        el_pill->SetProperty("display", state.show_fps ? "block" : "none");
+        if (state.show_fps) {
+            if (Rml::Element* el_v = m_nav_doc->GetElementById("nav-fps-value"))
+                el_v->SetInnerRML(std::to_string(state.fps) + " FPS");
+        }
+    }
 
     /* ---- collapsed icon rail ---- */
     for (int i = 0; i < 5; i++) {

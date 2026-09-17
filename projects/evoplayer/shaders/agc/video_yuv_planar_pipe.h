@@ -20,6 +20,7 @@
 #define VIDEO_YUV_PLANAR_PS_USER_SGPRS 2u
 #define VIDEO_YUV_PLANAR_VS_CONST_TABLE_DWORD 1
 #define VIDEO_YUV_PLANAR_VS_VERTEX_TABLE_DWORD -1
+#define VIDEO_YUV_PLANAR_PS_CONST_TABLE_DWORD -1
 #define VIDEO_YUV_PLANAR_PS_TEXTURE_TABLE_DWORD 1
 #define VIDEO_YUV_PLANAR_VS_WRITE_COUNT 2u
 #define VIDEO_YUV_PLANAR_PS_WRITE_COUNT 2u
@@ -124,6 +125,7 @@ static const evo_agc_shader_metadata_t video_yuv_planar_metadata = {
     .ps_user_sgpr_count = 2u,
     .vs_const_table_dword = 1,
     .vs_vertex_table_dword = -1,
+    .ps_const_table_dword = -1,
     .ps_texture_table_dword = 1,
 };
 

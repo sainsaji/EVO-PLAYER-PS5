@@ -91,10 +91,13 @@ struct EvoSettingsRow {
     std::string badge;
     bool has_chevron = true;
     bool is_focused = false;
+    int  kind = 0;             /* EVO_RMLUI_ROW_* */
+    bool toggle_on = false;
 
     bool operator==(const EvoSettingsRow& o) const {
         return title == o.title && detail == o.detail && icon_path == o.icon_path &&
-               badge == o.badge && has_chevron == o.has_chevron && is_focused == o.is_focused;
+               badge == o.badge && has_chevron == o.has_chevron && is_focused == o.is_focused &&
+               kind == o.kind && toggle_on == o.toggle_on;
     }
     bool operator!=(const EvoSettingsRow& o) const { return !(*this == o); }
 };
@@ -105,11 +108,14 @@ struct EvoSettingsState {
     std::string counter;
     int rail_active_idx = 5;
     bool rail_focused = false;
+    int section_active = -1;
+    bool sidebar_focused = false;
     std::vector<EvoSettingsRow> rows;
 
     bool operator==(const EvoSettingsState& o) const {
         return title == o.title && subtitle == o.subtitle && counter == o.counter &&
                rail_active_idx == o.rail_active_idx && rail_focused == o.rail_focused &&
+               section_active == o.section_active && sidebar_focused == o.sidebar_focused &&
                rows == o.rows;
     }
     bool operator!=(const EvoSettingsState& o) const { return !(*this == o); }
@@ -512,10 +518,13 @@ struct EvoNavState {
     int rail_focused = 0;   /* 0=collapsed icon strip, 1=expanded labelled panel */
     int cursor_index = 5;   /* which item has cursor when expanded */
     int visible = 1;        /* 1=show the nav rail, 0=hide (full-screen OSD etc.) */
+    int fps = 0;            /* render FPS shown in the rail pill */
+    int show_fps = 0;       /* DEBUG OVERLAY setting */
 
     bool operator==(const EvoNavState& o) const {
         return active_section == o.active_section && rail_focused == o.rail_focused &&
-               cursor_index == o.cursor_index && visible == o.visible;
+               cursor_index == o.cursor_index && visible == o.visible &&
+               fps == o.fps && show_fps == o.show_fps;
     }
     bool operator!=(const EvoNavState& o) const { return !(*this == o); }
 };

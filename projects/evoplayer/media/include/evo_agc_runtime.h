@@ -17,10 +17,29 @@ enum {
     EVO_AGC_PIPE_VIDEO_HDR = 2,
     EVO_AGC_PIPE_VIDEO_HLG = 3,
     EVO_AGC_PIPE_VIDEO_PLANAR = 4,
-    EVO_AGC_PIPE_COUNT = 5,
+    EVO_AGC_PIPE_UI_BLUR = 5,
+    EVO_AGC_PIPE_COUNT = 6,
 
     EVO_AGC_FRAME_SLOTS = 3,
 };
+
+/* Full-canvas RGBA8 layer surfaces for RmlUi PushLayer / CompositeLayers
+ * (backdrop blur, drop-shadow, filter composition). Sized for the maximum
+ * render size (4K): pitch-aligned 256, standard pitch = 4K*4 = 15360 bytes.
+ * The GPU writes RGBA (no COMP_SWAP) so the C++ side can read them back via
+ * the rgba8 T# swizzle; the scanout backbuffer uses COMP_SWAP=ALT for BGRA,
+ * so its T# must use the bgra8 swizzle. */
+#define EVO_AGC_MAX_LAYERS 4
+typedef struct evo_agc_layer_surface {
+    uint32_t width;          /* render-size canvas width */
+    uint32_t height;         /* render-size canvas height */
+    uint32_t pitch_bytes;    /* aligned to 256 */
+    uint64_t gpu_addr;       /* GPU-mapped direct-mem base of the surface pixels */
+    uint8_t *cpu_base;       /* CPU VA for one-time cache flush / clear */
+    SceAgcRegister *mrt;     /* colour-target registers, GPU-mapped (inside gpu_regs) */
+    int      in_use;         /* 1 = acquired by CompositeLayers, 0 = free */
+    int      pool_index;     /* 0..EVO_AGC_MAX_LAYERS-1, for debug tracking */
+} evo_agc_layer_surface_t;
 
 /* Where each [ResourceMapping] pointer goes in the user-SGPR block, copied
  * from the compiled pipeline's PAL metadata. Callers writing user data must
@@ -30,6 +49,9 @@ typedef struct evo_agc_user_data_layout {
     uint32_t ps_count;
     int32_t  vs_const_table_dword;
     int32_t  vs_vertex_table_dword;
+    /* The blur pipe's BlurConstants live in the fragment stage, so its const
+     * table has a PS slot; ui/video pipes leave this at -1. */
+    int32_t  ps_const_table_dword;
     int32_t  ps_texture_table_dword;
 } evo_agc_user_data_layout_t;
 
@@ -114,12 +136,51 @@ void evo_agc_runtime_note_drop(int kind);
 /* User-SGPR layout of a compiled pipeline; zeroed counts mean "not valid". */
 evo_agc_user_data_layout_t evo_agc_runtime_get_user_data_layout(int pipeline_id);
 
+/* Compiled draw modifier of a pipeline. The blur pass draws the backdrop quad
+ * with sceAgcDcbDrawIndex + the pipeline's modifier so the VS reads
+ * gl_VertexIndex from the index buffer; 0 when the pipeline is not valid. */
+uint64_t evo_agc_runtime_get_pipe_draw_modifier(int pipeline_id);
+
 SceAgcCommandBuffer      *evo_agc_runtime_get_current_cb(void);
 evo_agc_transient_ring_t *evo_agc_runtime_get_transient_ring(void);
 uint32_t                  evo_agc_runtime_get_current_slot(void);
 void                      evo_agc_runtime_get_size(int *width, int *height);
 int                       evo_agc_runtime_is_display_hdr(void);
 int                       evo_agc_runtime_get_display_dynamic_range(void);
+
+/* Layer surfaces for RmlUi PushLayer / CompositeLayers (backdrop-filter: blur).
+ *
+ * Each layer is a full-canvas RGBA8 render target, allocated from the direct
+ * memory carve and built with standard COMP_SWAP (memory = R,G,B,A bytes)
+ * so the C++ render interface can sample it back with the rgba8 T# swizzle.
+ * The scanout backbuffer uses COMP_SWAP=ALT (memory = B,G,R,A bytes) and
+ * therefore requires the bgra8 T# swizzle for sampling.  This distinction
+ * is critical and silent-on-failure: getting it wrong produces visually
+ * identical textures with swapped red and blue, not a crash.
+ *
+ * The render target is switched by evo_agc_set_layer_target(); the blur pipe
+ * and the copy pass draw through it.  Layers are cleaned to transparent black
+ * on acquire (memset the scissor region + clflush, not the full surface) and
+ * released when CompositeLayers finishes.  Pool exhaustion returns NULL and
+ * the C++ side degrades gracefully: the UI draws, but the backdrop blur
+ * simply does not appear. */
+int                       evo_agc_has_layers(void);
+int                       evo_agc_layer_acquire(evo_agc_layer_surface_t **out);
+void                      evo_agc_layer_release(evo_agc_layer_surface_t *layer);
+/* NULL = switch to the scanout backbuffer (the default render target for UI
+ * drawing).  Builds SceAgcRegister colour-target registers internally;
+ * the caller must emit the write through the DCB.  Flushes the new MRT
+ * register block so the GPU sees it even when the flush in frame_begin
+ * already happened. */
+int                       evo_agc_set_layer_target(const evo_agc_layer_surface_t *layer);
+/* Fill a surface descriptor for the active scanout backbuffer, for use by
+ * the blur pipeline's source texture (the base layer is always the scanout
+ * in non-layer drawing, and must be sampled with the bgra8 T# swizzle). */
+void                      evo_agc_get_scanout_layer(evo_agc_layer_surface_t *out);
+/* CB colour-buffer flush (event 45).  Mandatory between H and V passes of
+ * the blur and between any two same-frame passes that read-then-write the
+ * same surface. */
+void                      evo_agc_flush_color_target(void);
 
 /* Composite a premultiplied 0xAABBGGRR OSD buffer over the current frame.
  * `upload` = "the buffer changed since last call"; when 0 the previous upload is

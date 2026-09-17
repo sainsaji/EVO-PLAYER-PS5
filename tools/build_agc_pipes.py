@@ -126,7 +126,81 @@ def pack(values: list[int], width: int) -> int:
     return sum((value & mask) << (index * width) for index, value in enumerate(values))
 
 
-def derive(manifest: dict) -> dict:
+# Which [ResourceMapping] descriptor a userDataNode is. LLPC numbers the plain
+# (non-special) nodes per stage, in declaration order, so "const" and "texture"
+# are separate indices per stage rather than the node's global index.
+_VIS_VERTEX = 2
+_VIS_FRAGMENT = 64
+
+
+def resource_mapping_plan(pipe_text: str) -> dict:
+    """Parse a .pipe's [ResourceMapping] section.
+
+    Returns per-stage ordered lists of plain userDataNode indices and the node
+    each descriptor kind maps to, so derive() can turn "which [ResourceMapping]
+    entry holds the const buffer / texture" into "which user SGPR slot" via
+    slot_of(stage_map, plain_index).
+
+    LLPC only promotes DescriptorTableVaPtr nodes to plain user-data entries;
+    IndirectUserDataVaPtr (the vertex-buffer table) gets a PAL special instead
+    and is skipped here. Nodes are renumbered per stage in declaration order
+    (visibility 2 = vertex stage, 64 = fragment stage), which is why the blur
+    shader - with only fragment descriptors - ends up with its const buffer at
+    plain 0 and its texture at plain 1 within the fragment group.
+    """
+    lines = pipe_text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "[ResourceMapping]":
+            section = "\n".join(lines[i + 1:])
+            break
+    else:
+        return {"vs_const_plain": -1, "ps_const_plain": -1, "ps_texture_plain": -1}
+    section = section.split("\n[", 1)[0]
+    nodes: dict[int, dict[str, object]] = {}
+    order: list[int] = []
+    for line in section.splitlines():
+        line = line.strip()
+        if not line.startswith("userDataNode["):
+            continue
+        head, _, value = line.partition(" = ")
+        match = re.match(r"userDataNode\[(\d+)\]\.(.+)", head)
+        if match is None:
+            raise SystemExit(f"unparseable [ResourceMapping] line: {line}")
+        idx = int(match.group(1))
+        key = match.group(2)
+        if idx not in nodes:
+            nodes[idx] = {}
+            order.append(idx)
+        nodes[idx][key] = value
+
+    def plain_by_stage(visibility: int) -> list[tuple[int, str]]:
+        plain = []
+        for idx in order:
+            node = nodes[idx]
+            vis = int(node.get("visibility", "0"))
+            typ = str(node.get("type", ""))
+            if vis & visibility and typ == "DescriptorTableVaPtr":
+                plain.append((idx, str(node.get("next[0].type", ""))))
+        return plain
+
+    def first_matching(plain: list[tuple[int, str]], kinds: tuple[str, ...]) -> int:
+        for plain_index, (node_idx, kind) in enumerate(plain):
+            if kind in kinds:
+                return plain_index
+        return -1
+
+    vertex = plain_by_stage(_VIS_VERTEX)
+    fragment = plain_by_stage(_VIS_FRAGMENT)
+    return {
+        # plain index [0..n] of the const-buffer table in each stage, or -1.
+        "vs_const_plain": first_matching(vertex, ("DescriptorConstBuffer",)),
+        "ps_const_plain": first_matching(fragment, ("DescriptorConstBuffer",)),
+        # plain index of the first fragment texture table, or -1.
+        "ps_texture_plain": first_matching(fragment, ("DescriptorCombinedTexture",)),
+    }
+
+
+def derive(manifest: dict, plan: dict) -> dict:
     if (manifest.get("target"), manifest.get("pipeline_type"),
             manifest.get("no_relocations")) != (TARGET, "Ngg", True):
         raise SystemExit(
@@ -304,19 +378,29 @@ def derive(manifest: dict) -> dict:
         "ps_user_sgprs": ps["user_sgprs"],
         "gs_user_data_reg_map": list(gs_map),
         "ps_user_data_reg_map": list(ps_map),
-        # [ResourceMapping] node index -> user SGPR slot. node 0 is the vertex
-        # stage's constant-buffer table, node 1 its vertex-buffer table, and the
-        # fragment stage's texture table is node 0 of its own visibility group.
+        # [ResourceMapping] plain node -> user SGPR slot, per stage. "const" and
+        # "texture" can live in either stage; don't assume the vertex stage owns
+        # the const-buffer table (ui_backdrop_blur keeps it in the fragment
+        # stage alongside the texture).
         "vs_global_table_dword": slot_of(gs_map, PAL_GLOBAL_TABLE),
-        "vs_const_table_dword": slot_of(gs_map, 0),
+        "vs_const_table_dword": slot_of(gs_map, plan["vs_const_plain"])
+        if plan["vs_const_plain"] >= 0 else -1,
         "vs_vertex_table_dword": slot_of(gs_map, PAL_VERTEX_BUFFER_TABLE),
-        "ps_texture_table_dword": slot_of(ps_map, 0),
+        "ps_const_table_dword": slot_of(ps_map, plan["ps_const_plain"])
+        if plan["ps_const_plain"] >= 0 else -1,
+        "ps_texture_table_dword": slot_of(ps_map, plan["ps_texture_plain"])
+        if plan["ps_texture_plain"] >= 0 else -1,
         # How many user-data dwords the runtime actually writes: everything up
         # to the last slot it owns. BaseVertex/BaseInstance sit above that and
         # are filled by the draw packet (see draw_modifier), never by us.
-        "vs_write_count": max(slot_of(gs_map, 0),
+        "vs_write_count": max(slot_of(gs_map, plan["vs_const_plain"])
+                              if plan["vs_const_plain"] >= 0 else -1,
                               slot_of(gs_map, PAL_VERTEX_BUFFER_TABLE), 0) + 1,
-        "ps_write_count": slot_of(ps_map, 0) + 1,
+        "ps_write_count": max(slot_of(ps_map, plan["ps_const_plain"])
+                              if plan["ps_const_plain"] >= 0 else -1,
+                              slot_of(ps_map, plan["ps_texture_plain"])
+                              if plan["ps_texture_plain"] >= 0 else -1,
+                              0) + 1,
         "pre_raster_cx": pre_cx,
         "pixel_cx": pixel_cx,
         "ps_input_cntl": ps_input_cntl,
@@ -359,6 +443,7 @@ def emit_header(name: str, gs: bytes, ps: bytes, values: dict) -> str:
 #define {upper}_PS_USER_SGPRS {values['ps_user_sgprs']}u
 #define {upper}_VS_CONST_TABLE_DWORD {values['vs_const_table_dword']}
 #define {upper}_VS_VERTEX_TABLE_DWORD {values['vs_vertex_table_dword']}
+#define {upper}_PS_CONST_TABLE_DWORD {values['ps_const_table_dword']}
 #define {upper}_PS_TEXTURE_TABLE_DWORD {values['ps_texture_table_dword']}
 #define {upper}_VS_WRITE_COUNT {values['vs_write_count']}u
 #define {upper}_PS_WRITE_COUNT {values['ps_write_count']}u
@@ -407,6 +492,7 @@ static const evo_agc_shader_metadata_t {name}_metadata = {{
     .ps_user_sgpr_count = {values['ps_write_count']}u,
     .vs_const_table_dword = {values['vs_const_table_dword']},
     .vs_vertex_table_dword = {values['vs_vertex_table_dword']},
+    .ps_const_table_dword = {values['ps_const_table_dword']},
     .ps_texture_table_dword = {values['ps_texture_table_dword']},
 }};
 
@@ -441,6 +527,7 @@ def build_pipe(pipe: Path, out_dir: Path, amdllpc: str, readelf: str,
             raise SystemExit(f"[{name}] PAL symbol extent exceeds .text: {symbol}")
         blobs[key] = text[offset:offset + size]
 
+    plan = resource_mapping_plan(pipe.read_text())
     manifest = {
         "name": name,
         "target": TARGET,
@@ -452,7 +539,7 @@ def build_pipe(pipe: Path, out_dir: Path, amdllpc: str, readelf: str,
     (out_dir / f"{name}.manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
-    values = derive(manifest)
+    values = derive(manifest, plan)
     (SHADER_DIR / f"{name}_pipe.h").write_text(
         emit_header(name, blobs["gs"], blobs["ps"], values)
     )
@@ -460,18 +547,25 @@ def build_pipe(pipe: Path, out_dir: Path, amdllpc: str, readelf: str,
     # from gl_VertexIndex and declare no IndirectUserDataVaPtr, so -1 there is
     # correct rather than a missing binding. The constant-buffer and texture
     # tables are always required - a -1 for either means the shader would read
-    # that resource through an unset pointer and silently draw nothing.
-    if min(values["vs_const_table_dword"], values["ps_texture_table_dword"]) < 0:
+    # that resource through an unset pointer and silently draw nothing. The
+    # const-buffer table may live in either stage (ui_screen_2d/video: vertex,
+    # ui_backdrop_blur: fragment), so require a non-negative slot in at least
+    # one of them.
+    if (values["vs_const_table_dword"] < 0 and
+            values["ps_const_table_dword"] < 0) or \
+            values["ps_texture_table_dword"] < 0:
         raise SystemExit(
             f"[{name}] a required [ResourceMapping] node has no user SGPR slot: "
-            f"const={values['vs_const_table_dword']} "
+            f"const(vs)={values['vs_const_table_dword']} "
+            f"const(ps)={values['ps_const_table_dword']} "
             f"texture={values['ps_texture_table_dword']}. The shader would read "
             f"that resource from an unset pointer."
         )
     print(f"  {name}: gs={len(blobs['gs'])}B ps={len(blobs['ps'])}B "
           f"esgs_itemsize={dict(values['pre_raster_cx'])[0x2AB]} "
           f"draw_modifier={values['draw_modifier']:#x} "
-          f"user_dwords(const={values['vs_const_table_dword']},"
+          f"user_dwords(const_vs={values['vs_const_table_dword']},"
+          f"const_ps={values['ps_const_table_dword']},"
           f"vtx={values['vs_vertex_table_dword']},"
           f"tex={values['ps_texture_table_dword']}) "
           f"write(vs={values['vs_write_count']},ps={values['ps_write_count']})")

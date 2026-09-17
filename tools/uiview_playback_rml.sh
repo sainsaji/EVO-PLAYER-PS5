@@ -5,7 +5,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "${REPO_ROOT}/output/uiview"
 
 if [[ ! -f /.dockerenv ]]; then
-    docker compose run --rm ps5-dev bash ./tools/uiview_playback_rml.sh
+    # Forward the render-size override so 4K reproduction works from the host.
+    docker compose run --rm -e EVO_UIVIEW_SIZE="${EVO_UIVIEW_SIZE:-}" ps5-dev bash ./tools/uiview_playback_rml.sh
     exit $?
 fi
 

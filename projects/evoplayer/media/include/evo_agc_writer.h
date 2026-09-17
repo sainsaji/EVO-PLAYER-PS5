@@ -43,7 +43,16 @@ int evo_agc_build_tsharp_r16(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_a
                              uint32_t width, uint32_t height, uint32_t pitch_bytes);
 
 int evo_agc_build_tsharp_rg16(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
-                              uint32_t width, uint32_t height, uint32_t pitch_bytes);
+                               uint32_t width, uint32_t height, uint32_t pitch_bytes);
+
+/* BGRA8: FORMAT_8_8_8_8 but with swizzle (Z,Y,X,W), so a texture stored in
+ * memory as B,G,R,A bytes (the scanout backbuffer, written BGRA via
+ * COMP_SWAP=ALT, and the 0xAABBGGRR OSD buffer) is sampled as correct R,G,B,A.
+ * Sampling those surfaces with the plain rgba8 builder silently swaps red and
+ * blue - visible the moment the UI composites from a BGRA source (backdrop
+ * blur sampling the scanout). */
+int evo_agc_build_tsharp_bgra8(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
+                               uint32_t width, uint32_t height, uint32_t pitch_bytes);
 
 int evo_agc_build_ssharp(uint32_t out[EVO_AGC_SSHARP_DWORDS], int clamp_to_edge, int bilinear);
 

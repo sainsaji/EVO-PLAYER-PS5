@@ -320,7 +320,9 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
                 coverBudget--;
             }
         }
-        params.recent[i].art = art;
+        if (art) {
+            params.recent[i].art = art;
+        }
         params.recent[i].art_w = ICoverArtService::PosterWidth;
         params.recent[i].art_h = ICoverArtService::PosterHeight;
         params.recent[i].is_focused = (!railFocused && m_selectedRow == 1 && m_selectedCol == i);

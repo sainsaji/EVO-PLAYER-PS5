@@ -13,11 +13,6 @@ SurroundTestScreen::SurroundTestScreen()
     : StatefulScreen("SurroundTestScreen") {
 }
 
-void SurroundTestScreen::onEnter() {
-    StatefulScreen::onEnter();
-    m_selectedSpeaker = 0;
-}
-
 void SurroundTestScreen::onExit() {
     StatefulScreen::onExit();
     if (auto surround = Application::getInstance().getSurroundTestService()) {
@@ -25,20 +20,107 @@ void SurroundTestScreen::onExit() {
     }
 }
 
-void SurroundTestScreen::navigate(int dir) {
+int SurroundTestScreen::speakerCount() const {
     auto surround = Application::getInstance().getSurroundTestService();
-    bool is51 = surround ? surround->is51Layout() : false;
-    int maxChannels = is51 ? 6 : 8;
+    return (surround && surround->is51Layout()) ? 6 : 8;
+}
 
-    m_selectedSpeaker += dir;
-    if (m_selectedSpeaker < 0) {
-        m_selectedSpeaker = 0;
+void SurroundTestScreen::onEnter() {
+    StatefulScreen::onEnter();
+    m_focusPane = PaneActions;
+    m_selectedAction = 0;
+    m_selectedSpeaker = 0;
+    stopSweep();
+}
+
+void SurroundTestScreen::navigate(int dir) {
+    const int total = (m_focusPane == PaneActions) ? actionCount() : speakerCount();
+    int& cursor = (m_focusPane == PaneActions) ? m_selectedAction : m_selectedSpeaker;
+
+    cursor += dir;
+    if (cursor < 0) {
+        cursor = 0;
         evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedSpeaker >= maxChannels) {
-        m_selectedSpeaker = maxChannels - 1;
+    } else if (cursor >= total) {
+        cursor = total - 1;
         evo_feedback(EVO_FB_BOUNDARY);
     } else {
         evo_feedback(EVO_FB_MOVE);
+    }
+}
+
+void SurroundTestScreen::switchPane(int dir) {
+    const int next = (dir > 0) ? PaneSpeakers : PaneActions;
+    if (next == m_focusPane) {
+        evo_feedback(EVO_FB_BOUNDARY);
+        return;
+    }
+    m_focusPane = next;
+    if (m_focusPane == PaneSpeakers && m_selectedSpeaker >= speakerCount()) {
+        m_selectedSpeaker = speakerCount() - 1;
+    }
+    evo_feedback(EVO_FB_MOVE);
+}
+
+void SurroundTestScreen::startSweep(int mode) {
+    auto surround = Application::getInstance().getSurroundTestService();
+    if (!surround) return;
+
+    if (mode == 0) surround->set51Layout(true);
+    else if (mode == 1) surround->set51Layout(false);
+
+    if (!surround->start()) {
+        toast("SURROUND TEST", "Audio port unavailable");
+        evo_feedback(EVO_FB_BOUNDARY);
+        return;
+    }
+
+    m_sweepMode = mode;
+    m_sweepStep = 0;
+    m_sweepMs = 0.0;
+    evo_feedback(EVO_FB_CONFIRM);
+
+    if (mode == 0)      toast("AUTO TEST", "5.1 - 6 channel calibration");
+    else if (mode == 1) toast("AUTO TEST", "7.1 - 8 channel calibration");
+    else                toast("360 SWEEP", "Circular perimeter pan");
+}
+
+void SurroundTestScreen::stopSweep() {
+    m_sweepMode = -1;
+    m_sweepStep = 0;
+    m_sweepMs = 0.0;
+}
+
+void SurroundTestScreen::activateSelection() {
+    auto surround = Application::getInstance().getSurroundTestService();
+
+    if (m_focusPane == PaneSpeakers) {
+        stopSweep();
+        playSelectedChannel();
+        return;
+    }
+
+    switch (m_selectedAction) {
+    case 0: startSweep(0); break;              /* AUTO TEST 5.1 */
+    case 1: startSweep(1); break;              /* AUTO TEST 7.1 */
+    case 2: startSweep(2); break;              /* 360 ROTATION SWEEP */
+    case 3:                                    /* SPEAKER LAYOUT */
+        if (surround) {
+            const bool next51 = !surround->is51Layout();
+            surround->set51Layout(next51);
+            if (m_selectedSpeaker >= speakerCount()) m_selectedSpeaker = speakerCount() - 1;
+            evo_feedback(EVO_FB_TOGGLE);
+            toast("SPEAKER LAYOUT", next51 ? "5.1 Surround (6 Channels)"
+                                           : "7.1 Surround (8 Channels)");
+        }
+        break;
+    case 4:                                    /* SILENCE / STOP */
+    default:
+        stopSweep();
+        if (surround) surround->stop();
+        evo_feedback(EVO_FB_CANCEL);
+        toast("SURROUND TEST", "Silenced");
+        break;
     }
 }
 
@@ -50,37 +132,83 @@ void SurroundTestScreen::playSelectedChannel() {
     }
 }
 
+void SurroundTestScreen::update(double deltaMs) {
+    StatefulScreen::update(deltaMs);
+    if (m_sweepMode < 0) return;
+
+    auto surround = Application::getInstance().getSurroundTestService();
+    if (!surround) { stopSweep(); return; }
+
+    /* Perimeter order for the 360 sweep so the tone visibly travels around the
+     * listener rather than following channel index. Indices match the render's
+     * speaker table: FL FR FC LFE BL BR SL SR. */
+    static const int kRotation[] = {0, 2, 1, 7, 5, 4, 6};
+    const int count = (m_sweepMode == 2)
+                        ? static_cast<int>(sizeof(kRotation) / sizeof(kRotation[0]))
+                        : speakerCount();
+
+    const double kDwellMs = 900.0;
+    if (m_sweepMs <= 0.0) {
+        const int ch = (m_sweepMode == 2) ? kRotation[m_sweepStep % count] : m_sweepStep;
+        surround->triggerTone(surround->is51Layout(), ch);
+        m_selectedSpeaker = (ch < speakerCount()) ? ch : 0;
+        m_sweepMs = kDwellMs;
+    }
+
+    m_sweepMs -= deltaMs;
+    if (m_sweepMs <= 0.0) {
+        ++m_sweepStep;
+        if (m_sweepStep >= count) {
+            stopSweep();
+            toast("SURROUND TEST", "Sweep complete");
+        }
+    }
+}
+
 bool SurroundTestScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
     (void)held;
     (void)released;
 
     auto surround = Application::getInstance().getSurroundTestService();
 
-    if (pressed & (PadButtons::Up | PadButtons::Left)) {
+    /* Up/Down move within the focused pane; Left/Right move between panes.
+     * They used to be conflated - Up and Left both stepped the same linear
+     * cursor - so the two-column layout could not be navigated. */
+    if (pressed & PadButtons::Up) {
         navigate(-1);
         return true;
     }
-    if (pressed & (PadButtons::Down | PadButtons::Right)) {
+    if (pressed & PadButtons::Down) {
         navigate(1);
         return true;
     }
+    if (pressed & PadButtons::Left) {
+        switchPane(-1);
+        return true;
+    }
+    if (pressed & PadButtons::Right) {
+        switchPane(1);
+        return true;
+    }
     if (pressed & PadButtons::Cross) {
-        playSelectedChannel();
+        activateSelection();
         return true;
     }
     if (pressed & PadButtons::Square) {
         if (surround) {
-            bool next51 = !surround->is51Layout();
+            const bool next51 = !surround->is51Layout();
             surround->set51Layout(next51);
             evo_feedback(EVO_FB_TOGGLE);
-            toast("SPEAKER LAYOUT", next51 ? "5.1 Surround (6 Channels)" : "7.1 Surround (8 Channels)");
-            if (m_selectedSpeaker >= 6 && next51) {
-                m_selectedSpeaker = 5;
+            toast("SPEAKER LAYOUT", next51 ? "5.1 Surround (6 Channels)"
+                                           : "7.1 Surround (8 Channels)");
+            if (m_selectedSpeaker >= speakerCount()) {
+                m_selectedSpeaker = speakerCount() - 1;
             }
         }
         return true;
     }
     if (pressed & PadButtons::Triangle) {
+        stopSweep();
         if (surround) {
             surround->stop();
             evo_feedback(EVO_FB_CANCEL);
@@ -89,6 +217,7 @@ bool SurroundTestScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         return true;
     }
     if (pressed & PadButtons::Circle) {
+        stopSweep();
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
             sm->navigateBack(ScreenId::SettingsPlayback);
@@ -97,10 +226,6 @@ bool SurroundTestScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     }
 
     return false;
-}
-
-void SurroundTestScreen::update(double deltaMs) {
-    StatefulScreen::update(deltaMs);
 }
 
 void SurroundTestScreen::render(uint32_t* framebuffer, int width, int height) {
@@ -112,7 +237,9 @@ void SurroundTestScreen::render(uint32_t* framebuffer, int width, int height) {
 
     params.rail_focused = 0;
     params.is_51_layout = is51 ? 1 : 0;
-    params.selected_item = 5 + m_selectedSpeaker;
+    params.selected_item = (m_focusPane == PaneActions)
+                             ? m_selectedAction
+                             : (5 + m_selectedSpeaker);
     params.active_channel = surround ? surround->getCurrentChannel() : -1;
     params.speaker_count = 8;
 

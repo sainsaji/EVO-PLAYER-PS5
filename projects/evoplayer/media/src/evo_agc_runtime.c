@@ -71,12 +71,20 @@
  * TEST is never enabled - the surface exists because configuring DB with an
  * invalid Z format stopped the stencil planes working. */
 #define EVO_AGC_DEPTH_SIZE          UINT64_C(0x02800000) /* 40 MB */
+/* Full-canvas RGBA8 layer surfaces for backdrop-filter / filter composition.
+ * Sized for the maximum render size (4K): pitch-aligned 256, standard pitch =
+ * 4K*4 = 15360 bytes. Each layer is 32 MB, covering 4K RGBA8 (31.64 MB) with
+ * margin. Layers use COMP_SWAP=STD (memory = R,G,B,A) so they can be sampled
+ * back via the rgba8 T#; only the scanout uses COMP_SWAP=ALT for BGRA. */
+#define EVO_AGC_LAYER_BYTES         UINT64_C(0x02000000) /* 32 MB per layer */
+#define EVO_AGC_LAYER_TOTAL         (EVO_AGC_MAX_LAYERS * EVO_AGC_LAYER_BYTES)
 
 #define EVO_AGC_TOTAL_DIRECT_MEM \
     (EVO_AGC_SCANOUT_TOTAL + EVO_AGC_TRANSIENT_RING_SIZE + \
      EVO_AGC_COMMAND_BUFFER_SIZE + EVO_AGC_SHADER_STORAGE_SIZE + \
      EVO_AGC_FENCE_STORAGE_SIZE + EVO_AGC_COMPOSITE_SIZE + \
-     EVO_AGC_STENCIL_SIZE + EVO_AGC_DEPTH_SIZE)
+     EVO_AGC_STENCIL_SIZE + EVO_AGC_DEPTH_SIZE + \
+     EVO_AGC_LAYER_TOTAL)
 
 /*
  * VideoOut buffer attribute. 0x...22000000 is the TILED BGRA attribute and
@@ -209,6 +217,16 @@ typedef struct evo_agc_device {
     void                   *composite_quad;     /* 4 verts, Rml::Vertex layout */
     uint8_t                *stencil_base;
     uint8_t                *depth_base;
+    /* RmlUi layer surfaces (backdrop-filter / filter composition). Each is an
+     * independent full-canvas RGBA8 target; `current_target` records which one
+     * the DCB's MRT0 currently points at (NULL = scanout backbuffer), so
+     * switching can skip redundant *RegistersIndirect packets. */
+    evo_agc_layer_surface_t layers[EVO_AGC_MAX_LAYERS];
+    const evo_agc_layer_surface_t *current_layer_target;
+    /* Active scissor, mirrored from evo_agc_runtime_set_scissor. A pushed
+     * layer is only required to be transparent-black inside it, so the
+     * acquire clear uses this instead of wiping the whole canvas. */
+    int scissor_x, scissor_y, scissor_w, scissor_h;
     /* RmlUi clip-mask state. Rather than clearing the stencil buffer before
      * every Set (a multi-MB fill per mask), each Set claims the next unused
      * value and the test compares against it. The buffer is zeroed once per
@@ -239,6 +257,7 @@ typedef struct evo_agc_device {
 
 typedef struct evo_agc_gpu_regs {
     SceAgcRegister color_targets[2][16];
+    SceAgcRegister layer_targets[EVO_AGC_MAX_LAYERS][16];
     SceAgcRegister depth_target[16];
     struct {
         SceAgcRegister cx_regs[128];
@@ -483,6 +502,7 @@ static int compile_agc_pipeline(evo_agc_pipeline_t *pipe, uint8_t *storage_base,
         .ps_count = meta->ps_user_sgpr_count,
         .vs_const_table_dword = meta->vs_const_table_dword,
         .vs_vertex_table_dword = meta->vs_vertex_table_dword,
+        .ps_const_table_dword = meta->ps_const_table_dword,
         .ps_texture_table_dword = meta->ps_texture_table_dword,
     };
     pipe->valid = 1;
@@ -496,10 +516,10 @@ static int compile_agc_pipeline(evo_agc_pipeline_t *pipe, uint8_t *storage_base,
                  pipe->uc_reg_count, (unsigned long long)pipe->draw_modifier,
                  gs_arena->sh[4].value, gs_arena->sh[5].value,
                  ps_arena->sh[2].value, ps_arena->sh[3].value);
-    evo_boot_log("agc pipe %s user_data vs_n=%u ps_n=%u const=%d vtx=%d tex=%d",
+    evo_boot_log("agc pipe %s user_data vs_n=%u ps_n=%u const=%d vtx=%d ps_const=%d tex=%d",
                  name, meta->vs_user_sgpr_count, meta->ps_user_sgpr_count,
                  meta->vs_const_table_dword, meta->vs_vertex_table_dword,
-                 meta->ps_texture_table_dword);
+                 meta->ps_const_table_dword, meta->ps_texture_table_dword);
     return 0;
 }
 
@@ -508,7 +528,7 @@ static int compile_agc_pipeline(evo_agc_pipeline_t *pipe, uint8_t *storage_base,
  * ------------------------------------------------------------------------- */
 
 static int setup_color_target(SceAgcRegister out[16], void *defaults, void *target_addr,
-                              uint32_t width, uint32_t height)
+                              uint32_t width, uint32_t height, int comp_swap_alt)
 {
     static const uint16_t target_offsets[16] = {
         0x318, 0x31b, 0x31c, 0x31d, 0x31e, 0x31f, 0x321, 0x323,
@@ -539,7 +559,8 @@ static int setup_color_target(SceAgcRegister out[16], void *defaults, void *targ
     out[1].value &= 0xfc001fffu;
     /*
      * CB_COLOR0_INFO. FORMAT=COLOR_8_8_8_8 (0x28), plus COMP_SWAP=ALT in bits
-     * [12:11] so the colour block stores B,G,R,A instead of R,G,B,A.
+     * [12:11] when comp_swap_alt is set, so the colour block stores B,G,R,A
+     * instead of R,G,B,A.
      *
      * The scanout really is BGRA-ordered. Measured, not assumed: with COMP_SWAP
      * left at STD the framebuffer held ff160a05 and ffedbe00 - correct RGBA for
@@ -551,11 +572,16 @@ static int setup_color_target(SceAgcRegister out[16], void *defaults, void *targ
      * into the shader for a BGRA pipe format; doing it here keeps the shader
      * exporting plain RGBA, which is what the .pipe and the texture descriptors
      * already agree on.
+     *
+     * Layer surfaces pass comp_swap_alt=0 and keep COMP_SWAP=STD: their memory
+     * order (R,G,B,A) must match the rgba8 T# swizzle the blur/composite
+     * shaders sample them with. Only the scanout backbuffer is BGRA (and is
+     * sampled with the bgra8 swizzle instead).
      */
     out[2].value = (out[2].value &
                     ~(0x7cu | 0x700u | 0x1800u | 0x10000000u |
                       0x10000u | 0x8000u | 0x40000u | 0x4000u)) |
-                   0x28u | 0x8000u | 0x800u /* COMP_SWAP = ALT (BGRA) */;
+                   0x28u | 0x8000u | (comp_swap_alt ? 0x800u /* COMP_SWAP = ALT (BGRA) */ : 0u);
     out[3].value &= ~(0x7000u | 0x18000u);
     out[4].value = (out[4].value &
                     ~(0x60u | 0x0cu | 0x00100200u | 0x80000u)) |
@@ -783,11 +809,25 @@ static int evo_agc_apply_render_size(void *agc_defaults, int w, int h)
         ((((size_t)g_agc_dev.composite_pitch * (size_t)h) + 255u) & ~(size_t)255);
 
     int ct0 = setup_color_target(g_agc_dev.gpu_regs->color_targets[0], agc_defaults,
-                                 g_agc_dev.scanout_buffers[0], w, h);
+                                 g_agc_dev.scanout_buffers[0], w, h, 1);
     int ct1 = setup_color_target(g_agc_dev.gpu_regs->color_targets[1], agc_defaults,
-                                 g_agc_dev.scanout_buffers[1], w, h);
+                                 g_agc_dev.scanout_buffers[1], w, h, 1);
     setup_depth_target(g_agc_dev.gpu_regs->depth_target, g_agc_dev.depth_base,
                        g_agc_dev.stencil_base, (uint32_t)w, (uint32_t)h);
+
+    for (int i = 0; i < EVO_AGC_MAX_LAYERS; ++i) {
+        evo_agc_layer_surface_t *layer = &g_agc_dev.layers[i];
+        /* COMP_SWAP stays STD for layers: their R,G,B,A memory order must match
+         * the rgba8 T# they are sampled back through. */
+        if (setup_color_target(layer->mrt, agc_defaults, layer->cpu_base, w, h, 0) != 0) {
+            printf(EVO_AGC_LOG_PREFIX "setup layer target %d failed\n", i);
+            return -1;
+        }
+        layer->width = (uint32_t)w;
+        layer->height = (uint32_t)h;
+        layer->pitch_bytes = ((uint32_t)w * 4u + 255u) & ~255u;
+    }
+    evo_agc_runtime_cache_flush(g_agc_dev.gpu_regs, sizeof(evo_agc_gpu_regs_t));
 
     if (ct0 != 0 || ct1 != 0) {
         printf(EVO_AGC_LOG_PREFIX "setup_color_target failed: %d/%d\n", ct0, ct1);
@@ -907,6 +947,22 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         cur_offset += EVO_AGC_DEPTH_SIZE;
     }
 
+    /* Layer surfaces for RmlUi backdrop-filter: full-canvas RGBA8 targets,
+     * COMP_SWAP=STD so the rgba8 T# can sample them back. 256-byte aligned for
+     * the image descriptors (base stored as >>8), and each is 32 MB - 4K RGBA8
+     * needs 31.64 MB, so 4K straddles a 32 MB slot exactly. */
+    for (int i = 0; i < EVO_AGC_MAX_LAYERS; ++i) {
+        evo_agc_layer_surface_t *layer = &g_agc_dev.layers[i];
+        uint8_t *lg = g_agc_dev.direct_mem_base + cur_offset;
+        layer->cpu_base = (uint8_t *)(((uintptr_t)lg + 255u) & ~(uintptr_t)255);
+        layer->gpu_addr = (uint64_t)(uintptr_t)layer->cpu_base;
+        layer->pool_index = i;
+        layer->in_use = 0;
+        layer->pitch_bytes = 0; /* set with width/height below */
+        layer->mrt = g_agc_dev.gpu_regs->layer_targets[i];
+        cur_offset += EVO_AGC_LAYER_BYTES;
+    }
+
     /* Shader storage */
     uint8_t *shader_storage = g_agc_dev.direct_mem_base + cur_offset;
     size_t shader_storage_used = 0;
@@ -930,12 +986,23 @@ int evo_agc_runtime_init(int width, int height, int hdr)
      * path spent a session chasing. It was being called for its side effect
      * with the result dropped; fail the init instead. */
     int ct0 = setup_color_target(g_agc_dev.gpu_regs->color_targets[0], agc_defaults,
-                                 g_agc_dev.scanout_buffers[0], g_agc_dev.width, g_agc_dev.height);
+                                 g_agc_dev.scanout_buffers[0], g_agc_dev.width, g_agc_dev.height, 1);
     int ct1 = setup_color_target(g_agc_dev.gpu_regs->color_targets[1], agc_defaults,
-                                 g_agc_dev.scanout_buffers[1], g_agc_dev.width, g_agc_dev.height);
+                                 g_agc_dev.scanout_buffers[1], g_agc_dev.width, g_agc_dev.height, 1);
     setup_depth_target(g_agc_dev.gpu_regs->depth_target, g_agc_dev.depth_base,
                        g_agc_dev.stencil_base,
                        (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+    for (int i = 0; i < EVO_AGC_MAX_LAYERS; ++i) {
+        evo_agc_layer_surface_t *layer = &g_agc_dev.layers[i];
+        if (setup_color_target(layer->mrt, agc_defaults, layer->cpu_base,
+                               (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height, 0) != 0) {
+            printf(EVO_AGC_LOG_PREFIX "setup layer target %d failed\n", i);
+            goto cleanup_fail;
+        }
+        layer->width = (uint32_t)g_agc_dev.width;
+        layer->height = (uint32_t)g_agc_dev.height;
+        layer->pitch_bytes = ((uint32_t)g_agc_dev.width * 4u + 255u) & ~255u;
+    }
     evo_boot_log("agc stencil base=%p z_info=%#x s_info=%#x size_xy=%#x",
                  (void *)g_agc_dev.stencil_base,
                  (unsigned)g_agc_dev.gpu_regs->depth_target[0].value,
@@ -988,6 +1055,19 @@ int evo_agc_runtime_init(int width, int height, int hdr)
 #else
     evo_boot_log("agc video pipelines not built yet (.pipe conversion pending)");
 #endif
+
+    /* The backdrop-blur pipe (backdrop-filter for RmlUi): the fragment shader
+     * owns both its BlurConstants buffer AND its source texture, so its user
+     * data has a PS const table in addition to the PS texture table. Optional
+     * like the video pipes - a failure just disables backdrop blur. */
+    {
+        int brc = compile_agc_pipeline(&g_agc_dev.pipelines[EVO_AGC_PIPE_UI_BLUR],
+                                       shader_storage, &shader_storage_used,
+                                       &ui_backdrop_blur_metadata, "ui_backdrop_blur");
+        if (brc != 0)
+            evo_boot_log("agc pipe ui_backdrop_blur unavailable (rc=%d); "
+                         "backdrop-filter is off", brc);
+    }
 
     /* Quad index buffer for fullscreen video drawing */
     size_t qat = (shader_storage_used + 255u) & ~255u;
@@ -1319,6 +1399,7 @@ void evo_agc_runtime_frame_begin(void)
     /* Set MRT0 Color Target to the current scanout backbuffer */
     evo_agc_writer_set_target(&g_agc_dev.current_cb,
                               g_agc_dev.gpu_regs->color_targets[g_agc_dev.active_backbuffer], 16);
+    g_agc_dev.current_layer_target = NULL;
 
     /* Bind the stencil target, then zero the stencil planes for this frame.
      * Clearing once here is what lets each RmlUi clip mask claim its own value
@@ -1346,6 +1427,10 @@ void evo_agc_runtime_frame_begin(void)
                                 (float)g_agc_dev.width, (float)g_agc_dev.height);
     evo_agc_writer_set_scissor(&g_agc_dev.current_cb, alloc_transient_cx(2), 0, 0,
                                (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+    g_agc_dev.scissor_x = 0;
+    g_agc_dev.scissor_y = 0;
+    g_agc_dev.scissor_w = g_agc_dev.width;
+    g_agc_dev.scissor_h = g_agc_dev.height;
 
     /* Default blend: premultiplied alpha */
     evo_agc_writer_set_blend(&g_agc_dev.current_cb, alloc_transient_cx(2), EVO_AGC_BLEND_PREMULTIPLIED);
@@ -1422,11 +1507,15 @@ void evo_agc_runtime_set_scissor(int x, int y, int w, int h)
     if (y < 0) { h += y; y = 0; }
     if (w <= 0 || h <= 0) {
         evo_agc_writer_set_scissor(&g_agc_dev.current_cb, sc, 0, 0, 0, 0);
+        g_agc_dev.scissor_x = g_agc_dev.scissor_y = 0;
+        g_agc_dev.scissor_w = g_agc_dev.scissor_h = 0;
         return;
     }
     evo_agc_writer_set_scissor(&g_agc_dev.current_cb, sc,
                                (uint32_t)x, (uint32_t)y,
                                (uint32_t)(x + w), (uint32_t)(y + h));
+    g_agc_dev.scissor_x = x; g_agc_dev.scissor_y = y;
+    g_agc_dev.scissor_w = w; g_agc_dev.scissor_h = h;
 }
 
 void evo_agc_runtime_set_blend(int blend_mode)
@@ -1437,6 +1526,119 @@ void evo_agc_runtime_set_blend(int blend_mode)
     if (!bl)
         return;
     evo_agc_writer_set_blend(&g_agc_dev.current_cb, bl, blend_mode);
+}
+
+int evo_agc_has_layers(void)
+{
+    return g_agc_dev.initialized;
+}
+
+/* Clear a freshly-acquired layer surface. RmlUi only requires a pushed layer to
+ * be transparent black within the ACTIVE SCISSOR REGION - which is what
+ * evo_agc_runtime.h has always documented ("memset the scissor region + clflush,
+ * not the full surface"). Wiping the whole canvas instead cost ~33 MB of stores
+ * plus a 33 MB cache flush per acquire, and a blurred element takes three
+ * acquires per frame; for a card-sized region this is roughly 70x less work.
+ * RmlUi sets the backdrop scissor before PushLayer, so the rect is current. */
+static void layer_surface_clear(evo_agc_layer_surface_t *layer)
+{
+    if (!layer || !layer->cpu_base || !layer->pitch_bytes)
+        return;
+
+    int x = g_agc_dev.scissor_x, y = g_agc_dev.scissor_y;
+    int w = g_agc_dev.scissor_w, h = g_agc_dev.scissor_h;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (w > (int)layer->width  - x) w = (int)layer->width  - x;
+    if (h > (int)layer->height - y) h = (int)layer->height - y;
+    if (w <= 0 || h <= 0)
+        return;
+
+    const size_t pitch = (size_t)layer->pitch_bytes;
+    const size_t span  = (size_t)w * 4u;
+    uint8_t *row = layer->cpu_base + (size_t)y * pitch + (size_t)x * 4u;
+    for (int i = 0; i < h; ++i, row += pitch) {
+        memset(row, 0, span);
+        /* Flush only the span just written. Flushing whole rows instead walked
+         * pitch/span times the cache lines - 2.8x for a sidebar-width element,
+         * and this runs three times per blurred element per frame. */
+        evo_agc_runtime_cache_flush(row, span);
+    }
+}
+
+int evo_agc_layer_acquire(evo_agc_layer_surface_t **out)
+{
+    if (!g_agc_dev.initialized || !out)
+        return -1;
+    for (int i = 0; i < EVO_AGC_MAX_LAYERS; ++i) {
+        evo_agc_layer_surface_t *layer = &g_agc_dev.layers[i];
+        if (!layer->in_use) {
+            layer->in_use = 1;
+            /* No logging here: this runs three times per blurred element
+             * per frame, and evo_log_flush() fsyncs to USB (~3-4 ms a
+             * line), which cost ~42 ms/frame and pinned the UI at ~20fps. */
+            layer_surface_clear(layer);
+            *out = layer;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void evo_agc_layer_release(evo_agc_layer_surface_t *layer)
+{
+    if (!layer)
+        return;
+    layer->in_use = 0;
+}
+
+int evo_agc_set_layer_target(const evo_agc_layer_surface_t *layer)
+{
+    if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
+        return -1;
+
+    if (layer != g_agc_dev.current_layer_target) {
+        if (layer) {
+            /* The layer MRT register block lives inside GPU-mapped gpu_regs
+             * (carved at init, rebuilt+flushed by apply_render_size), so SetTarget
+             * can DMA-read it at submit time. */
+            evo_agc_writer_set_target(&g_agc_dev.current_cb, layer->mrt, 16);
+        } else {
+            evo_agc_writer_set_target(&g_agc_dev.current_cb,
+                                      g_agc_dev.gpu_regs->color_targets[g_agc_dev.active_backbuffer],
+                                      16);
+        }
+        g_agc_dev.current_layer_target = layer;
+        /* A target switch returns the CP to the frame's default full-canvas
+         * viewport: the caller (CompositeLayers) diverges via scissor alone.
+         * Re-emit the viewport here so a stale 12-register viewport block from
+         * an earlier frame cannot survive into the new target. */
+        SceAgcRegister *vp = alloc_transient_cx(12);
+        if (vp)
+            evo_agc_writer_set_viewport(&g_agc_dev.current_cb, vp, 0.0f, 0.0f,
+                                        (float)g_agc_dev.width, (float)g_agc_dev.height);
+    }
+    return 0;
+}
+
+void evo_agc_get_scanout_layer(evo_agc_layer_surface_t *out)
+{
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    out->width       = (uint32_t)g_agc_dev.width;
+    out->height      = (uint32_t)g_agc_dev.height;
+    out->pitch_bytes = ((uint32_t)g_agc_dev.width * 4u + 255u) & ~255u;
+    out->gpu_addr    = (uint64_t)(uintptr_t)g_agc_dev.scanout_buffers[g_agc_dev.active_backbuffer];
+    out->cpu_base    = g_agc_dev.scanout_buffers[g_agc_dev.active_backbuffer];
+    out->pool_index  = -1;
+}
+
+void evo_agc_flush_color_target(void)
+{
+    if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
+        return;
+    evo_agc_writer_flush_color_target(&g_agc_dev.current_cb);
 }
 
 void evo_agc_runtime_frame_end(void)
@@ -1751,11 +1953,19 @@ void evo_agc_runtime_note_drop(int kind)
 
 evo_agc_user_data_layout_t evo_agc_runtime_get_user_data_layout(int pipeline_id)
 {
-    evo_agc_user_data_layout_t empty = {0, 0, -1, -1, -1};
+    evo_agc_user_data_layout_t empty = {0, 0, -1, -1, -1, -1};
     if (pipeline_id < 0 || pipeline_id >= EVO_AGC_PIPE_COUNT ||
         !g_agc_dev.pipelines[pipeline_id].valid)
         return empty;
     return g_agc_dev.pipelines[pipeline_id].user_data;
+}
+
+uint64_t evo_agc_runtime_get_pipe_draw_modifier(int pipeline_id)
+{
+    if (pipeline_id < 0 || pipeline_id >= EVO_AGC_PIPE_COUNT ||
+        !g_agc_dev.pipelines[pipeline_id].valid)
+        return 0;
+    return g_agc_dev.pipelines[pipeline_id].draw_modifier;
 }
 
 SceAgcCommandBuffer *evo_agc_runtime_get_current_cb(void)
@@ -1961,6 +2171,10 @@ void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
     evo_agc_runtime_set_blend(EVO_AGC_BLEND_PREMULTIPLIED);
     evo_agc_writer_set_scissor(&g_agc_dev.current_cb, alloc_transient_cx(2), 0, 0,
                                (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+    g_agc_dev.scissor_x = 0;
+    g_agc_dev.scissor_y = 0;
+    g_agc_dev.scissor_w = g_agc_dev.width;
+    g_agc_dev.scissor_h = g_agc_dev.height;
 
     const evo_agc_user_data_layout_t ud =
         evo_agc_runtime_get_user_data_layout(EVO_AGC_PIPE_UI);
@@ -2022,6 +2236,10 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                                 (float)g_agc_dev.width, (float)g_agc_dev.height);
     evo_agc_writer_set_scissor(&g_agc_dev.current_cb, alloc_transient_cx(2), 0, 0,
                                (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height);
+    g_agc_dev.scissor_x = 0;
+    g_agc_dev.scissor_y = 0;
+    g_agc_dev.scissor_w = g_agc_dev.width;
+    g_agc_dev.scissor_h = g_agc_dev.height;
 
     /* 3. Compute VideoConstants (Crop & Aspect Scale) */
     struct {

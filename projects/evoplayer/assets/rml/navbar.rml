@@ -8,6 +8,14 @@
          ================================================================ -->
     <div id="nav-rail-bg"></div>
 
+    <!--
+      Menu FPS pill. Deliberately in the MAIN context alongside the rail rather
+      than in debug.rml: that document lives in a second Rml::Context, which is
+      what crashed the plain .ffpfsc build in #75. Mirrors #fps-pill in
+      playback.rml, which covers the player.
+    -->
+    <div id="nav-fps-pill"><span id="nav-fps-value">0 FPS</span></div>
+
     <!-- EVO logo mark -->
     <div id="nav-logo">
         <img id="nav-logo-img" src="../icons/icon_logo.png"/>

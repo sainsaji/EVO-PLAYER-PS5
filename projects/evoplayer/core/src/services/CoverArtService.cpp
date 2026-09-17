@@ -431,11 +431,15 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
     evo_bt("getCoverArt: %s (isDir=%d)", mediaPath.c_str(), isDirectory ? 1 : 0);
     evo_boot_log_flush();
 
-    if (mediaPath.empty()) return nullptr;
-    if (access(mediaPath.c_str(), R_OK) != 0) return nullptr;
+    if (mediaPath.empty()) { evo_bt("getCoverArt: empty path"); evo_boot_log_flush(); return nullptr; }
+    if (access(mediaPath.c_str(), R_OK) != 0) { evo_bt("getCoverArt: access fail len=%zu", mediaPath.length()); evo_boot_log_flush(); evo_bt("getCoverArt: returning nullptr"); evo_boot_log_flush(); return nullptr; }
+    evo_bt("getCoverArt: access ok, calling findOrAllocateSlot");
+    evo_boot_log_flush();
 
     CacheEntry* slot = findOrAllocateSlot(mediaPath);
-    if (!slot) return nullptr;
+    if (!slot) { evo_bt("getCoverArt: no slot"); evo_boot_log_flush(); return nullptr; }
+    evo_bt("getCoverArt: slot=%p tried=%d", (void*)slot, slot->tried);
+    evo_boot_log_flush();
 
     if (slot->tried && slot->pathKey == mediaPath) {
         return slot->valid ? slot->pixels.data() : nullptr;
@@ -446,6 +450,8 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
     slot->valid = false;
 
     std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
+    evo_bt("getCoverArt: sidecar='%s'", sidecar.c_str());
+    evo_boot_log_flush();
     if (!sidecar.empty() && access(sidecar.c_str(), R_OK) == 0) {
         int w = 0, h = 0, ch = 0;
         unsigned char* data = stbi_load(sidecar.c_str(), &w, &h, &ch, 4);
@@ -459,6 +465,8 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
     }
 
     if (!isDirectory && isVideoFile(mediaPath)) {
+        evo_bt("getCoverArt: isVideo, calling extractVideoFrame");
+        evo_boot_log_flush();
         if (extractVideoFrame(mediaPath, slot->pixels.data(), PosterWidth, PosterHeight)) {
             slot->valid = true;
             return slot->pixels.data();

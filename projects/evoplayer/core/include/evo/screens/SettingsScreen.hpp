@@ -39,10 +39,11 @@ public:
 
 private:
     void navigate(int delta);
-    void adjustValue(int delta);
     void activateSelection();
 
     int m_selectedIndex = 0;
+    /* Which VALUE setting is expanded to show its choices, -1 = none. */
+    int m_expandedIndex = -1;
 };
 
 class SettingsSubtitlesScreen : public StatefulScreen {
@@ -59,10 +60,11 @@ public:
 
 private:
     void navigate(int delta);
-    void adjustValue(int delta);
     void activateSelection();
 
     int m_selectedIndex = 0;
+    /* Which VALUE setting is expanded to show its choices, -1 = none. */
+    int m_expandedIndex = -1;
 };
 
 class SettingsInterfaceScreen : public StatefulScreen {
@@ -79,10 +81,11 @@ public:
 
 private:
     void navigate(int delta);
-    void adjustValue(int delta);
     void activateSelection();
 
     int m_selectedIndex = 0;
+    /* Which VALUE setting is expanded to show its choices, -1 = none. */
+    int m_expandedIndex = -1;
 };
 
 class SettingsSystemScreen : public StatefulScreen {
@@ -99,10 +102,11 @@ public:
 
 private:
     void navigate(int delta);
-    void adjustValue(int delta);
     void activateSelection();
 
     int m_selectedIndex = 0;
+    /* Which VALUE setting is expanded to show its choices, -1 = none. */
+    int m_expandedIndex = -1;
 };
 
 } // namespace evo

@@ -128,6 +128,16 @@ int evo_agc_build_tsharp_rgba8(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu
                                     SQ_SEL_X, SQ_SEL_Y, SQ_SEL_Z, SQ_SEL_W);
 }
 
+int evo_agc_build_tsharp_bgra8(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
+                               uint32_t width, uint32_t height, uint32_t pitch_bytes)
+{
+    /* Same 8_8_8_8 format, swizzle swap (Z,Y,X,W): memory order B,G,R,A -> the
+     * shader's R,G,B,A. See the header's comment for when this is needed. */
+    return build_tsharp_2d_internal(out, gpu_address, width, height, pitch_bytes,
+                                    GFX10_FORMAT_8_8_8_8_UNORM, 4u,
+                                    SQ_SEL_Z, SQ_SEL_Y, SQ_SEL_X, SQ_SEL_W);
+}
+
 int evo_agc_build_tsharp_r8(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
                             uint32_t width, uint32_t height, uint32_t pitch_bytes)
 {
