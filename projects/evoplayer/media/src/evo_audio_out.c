@@ -75,6 +75,7 @@ volatile long long audio_samples_decoded = 0;
 volatile double audio_clock_seconds = 0.0;
 volatile double audio_pts_seconds = 0.0;
 double first_audio_pts_seconds = -1.0;
+volatile double audio_seek_discard_until = -1.0;
 
 int detected_audio_rate = 48000;
 volatile int audio_thread_running = 0;
@@ -110,7 +111,13 @@ void *audio_output_thread(void *arg) {
              * video must be relative to first video PTS (not absolute PTS).
              * Absolute compare freezes easy 720p/YouTube when clocks diverge.
              */
-            double video_rel = video_clock_seconds;
+            /*
+             * No anchor yet means nothing has been presented since the last
+             * open or seek, so there is no video position to hold audio back
+             * against. Treating it as 0 disables the throttle below instead of
+             * comparing the audio clock with a stale absolute PTS.
+             */
+            double video_rel = 0.0;
             if (first_video_pts_seconds >= 0.0)
                 video_rel = video_clock_seconds - first_video_pts_seconds;
             if (video_rel < 0.0)
@@ -319,6 +326,40 @@ void *audio_decode_thread_func(void *arg) {
         }
 
         AVPacket *pkt = packet_queue_pop(&audio_packet_queue);
+        if (pkt && audio_seek_discard_until >= 0.0) {
+            /*
+             * Seek discard window. av_seek_frame lands on the keyframe at or
+             * before the target, so everything up to the target is run-up the
+             * viewer has already heard. The video side drops those frames in
+             * pp_playback_push_frame; drop the matching audio here so both
+             * clocks restart from the target together. Audio packets are
+             * independently decodable and the decoder was just flushed, so the
+             * first kept packet primes it exactly as a fresh open would.
+             * A packet with no PTS clears the gate rather than being dropped.
+             */
+            double pkt_seconds = -1.0;
+            if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0)
+                pkt_seconds = (double)pkt->pts *
+                    av_q2d(play_fmt->streams[audio_stream_index]->time_base);
+
+            /*
+             * 25 ms of slack keeps the packet that straddles the target.
+             * The cap is the safety net for a container whose audio PTS does
+             * not share an origin with the seek target (a non-zero
+             * start_time): rather than mute the track, give up on the gate
+             * after a GOP's worth of packets and let everything through.
+             */
+            static int s_dropped;
+            if (pkt_seconds >= 0.0 &&
+                pkt_seconds < audio_seek_discard_until - 0.025 &&
+                s_dropped < 2000) {
+                s_dropped++;
+                av_packet_free(&pkt);
+                continue;
+            }
+            s_dropped = 0;
+            audio_seek_discard_until = -1.0;
+        }
         if (!pkt) {
             /*
              * Do not terminate at EOF. The demux thread stays alive

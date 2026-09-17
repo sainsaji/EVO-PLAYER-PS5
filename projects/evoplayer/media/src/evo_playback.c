@@ -343,30 +343,44 @@ int decode_next_video_frame(void)
             dbg_last_pts = pf.pts_us;   /* now microseconds (was raw stream PTS) */
             perf_decode_frames++;
 
-            /* job 2 — media clock from the frame PTS (already microseconds) */
-            if (pf.pts_us != INT64_MIN) {
-                video_clock_seconds = (double)pf.pts_us / 1000000.0;
-                if (first_video_pts_seconds < 0.0)
-                    first_video_pts_seconds = video_clock_seconds;
-            }
-
-            video_rel = video_clock_seconds - first_video_pts_seconds;
-            if (video_rel < 0.0)
-                video_rel = 0.0;
-            audio_rel = audio_clock_seconds;
-            behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
-
             /*
              * #32: in the seek-discard window every frame between the keyframe
              * and the seek target is dropped by pp_playback_push_frame(). Pacing
              * them to the frame rate (the branches below) makes a seek across a
              * long 4K GOP take ~GOP-length wall time - the slow GTA-trailer
              * seek. Decode + discard as fast as the decoder returns instead;
-             * sceVideodec2Decode is synchronous so this can't outrun it, and
-             * the #32 overlay pump keeps the VO reconfigure off the decode
-             * thread's back.
+             * sceVideodec2Decode is synchronous so this can't outrun it.
              */
-            int seek_discarding = g_pp_pb.active && g_pp_pb.seek_discarding;
+            int seek_discarding = g_pp_pb.active && g_pp_pb.seek_discarding &&
+                                  pf.pts_us < g_pp_pb.seek_target_us;
+
+            /*
+             * job 2 — media clock from the frame PTS (already microseconds).
+             *
+             * Frames inside the discard window are decoded only to reach the
+             * target; none of them is shown. Latching first_video_pts_seconds
+             * on one of them anchors the relative video clock at the keyframe
+             * while the audio clock restarts at the target, so the instant the
+             * picture resumes video_rel reads a whole run-up ahead of
+             * audio_rel and the audio-master wait below freezes the picture
+             * until audio covers the difference - the post-seek hitch. Anchor
+             * on the first frame that is actually presented instead. The seek
+             * path zeroes video_clock_seconds, so the UI position falls back
+             * to the seek target while the window is open.
+             */
+            if (pf.pts_us != INT64_MIN && !seek_discarding) {
+                video_clock_seconds = (double)pf.pts_us / 1000000.0;
+                if (first_video_pts_seconds < 0.0)
+                    first_video_pts_seconds = video_clock_seconds;
+            }
+
+            video_rel = 0.0;
+            if (first_video_pts_seconds >= 0.0)
+                video_rel = video_clock_seconds - first_video_pts_seconds;
+            if (video_rel < 0.0)
+                video_rel = 0.0;
+            audio_rel = audio_clock_seconds;
+            behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
 
             if (seek_discarding) {
                 /* no pacing - the frame is about to be thrown away */
@@ -448,6 +462,31 @@ int decode_next_video_frame(void)
                 present_pp_frame(&pf);
             else
                 convert_frame_via_sws((AVFrame *)evo_vdec_ffmpeg_avframe(g_vdec));
+
+            /*
+             * One line per seek, the moment the discard window closes: what
+             * the settle cost and how far apart the two clocks are when the
+             * picture comes back. A healthy seek reads vrel ~= arel; a large
+             * arel - vrel gap is audio replaying the run-up to the target.
+             */
+            {
+                static int s_was_discarding = 0;
+                int now_discarding = g_pp_pb.active && g_pp_pb.seek_discarding;
+                if (s_was_discarding && !now_discarding) {
+                    pp_playback_stats st;
+                    char d[128];
+                    pp_playback_get_stats(&g_pp_pb, &st);
+                    snprintf(d, sizeof d,
+                             "ms=%llu disc=%llu pts=%.3f vrel=%.3f arel=%.3f aq=%d",
+                             (unsigned long long)st.seek_to_first_frame_ms,
+                             (unsigned long long)st.frames_discarded_seek,
+                             (double)pf.pts_us / 1000000.0,
+                             video_rel, (double)audio_clock_seconds,
+                             audio_queue_count);
+                    pp_stage_bc("SEEK_SETTLE", d);
+                }
+                s_was_discarding = now_discarding;
+            }
             /* evo_vdec_receive() unrefs its scratch frame on the next call. */
             return 1;
         }

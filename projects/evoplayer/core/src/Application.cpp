@@ -557,7 +557,18 @@ int Application::run() {
             bool is_scrubbing = m_playbackController && m_playbackController->isScrubbing();
             bool toast_visible = evo_toast_visible();
 
-            bool should_render = (have && new_frame) || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding;
+            /*
+             * Redraw the quad whenever the buffer we are about to draw into
+             * does not already hold this frame. Two scanout buffers and a
+             * player-mode frame_begin that skips the clear mean a present that
+             * skipped the blit shows the picture from two presents ago, so any
+             * source slower than the panel - 24/25/30 fps, a paused picture,
+             * the settle after a seek - flicked between the current frame and
+             * the previous one. See evo_agc_runtime_video_slot_stale.
+             */
+            bool buffer_stale = have && evo_agc_runtime_video_slot_stale(current_pts);
+
+            bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding;
 
             static int s_player_render_log = 10;
             if (s_player_render_log > 0 && new_frame && have) {
@@ -581,6 +592,7 @@ int Application::run() {
                                  static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                  view_mode, f.ten_bit, f.color_trc,
                                  is_direct);
+                evo_agc_runtime_note_video_pts(current_pts);
                 swap = true;
             }
 

@@ -4,6 +4,7 @@
 #include "evo_boot_log.h"
 #include "evo_direct_mem.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,6 +178,9 @@ typedef struct evo_agc_device {
     /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
      * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
     int                     ui_dirty[2];
+    /* Per-scanout-buffer: the video PTS its quad currently holds, or
+     * INT64_MIN if it holds no video. See evo_agc_runtime_video_slot_stale. */
+    int64_t                 video_pts[2];
 
     int32_t                 video_handle;
     int                     active_backbuffer;
@@ -1240,6 +1244,8 @@ int evo_agc_runtime_init(int width, int height, int hdr)
 
     g_agc_dev.active_backbuffer = 0;
     g_agc_dev.current_slot = 0;
+    g_agc_dev.video_pts[0] = INT64_MIN;
+    g_agc_dev.video_pts[1] = INT64_MIN;
     g_agc_dev.frame_counter = 0;
     g_agc_dev.flip_arg = 1;
     g_agc_dev.bound_pipeline = -1;
@@ -1343,6 +1349,7 @@ void evo_agc_runtime_frame_begin(void)
     if (!g_agc_dev.is_player_mode ||
         g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer]) {
         g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer] = 0;
+        g_agc_dev.video_pts[g_agc_dev.active_backbuffer] = INT64_MIN;
         uint32_t *backbuffer = (uint32_t *)g_agc_dev.scanout_buffers[g_agc_dev.active_backbuffer];
         if (backbuffer) {
             uint64_t val = (uint64_t)0xff100d0d | ((uint64_t)0xff100d0d << 32);
@@ -1895,6 +1902,34 @@ void evo_agc_runtime_note_ui_drawn(void)
     g_agc_dev.ui_dirty[g_agc_dev.active_backbuffer] = 1;
 }
 
+/*
+ * There are two scanout buffers, and in player mode frame_begin deliberately
+ * skips the clear for a buffer that carried nothing but video. A present whose
+ * frame did not redraw the video quad therefore puts the picture from two
+ * presents ago back on the panel - the image flicks between the current frame
+ * and the previous one instead of simply holding, which is what a paused
+ * picture, a decoder hiccup and the settle after a seek all looked like.
+ *
+ * The render loop asks whether the buffer it is about to draw into already
+ * holds this PTS and redraws the quad when it does not, so a frame slower than
+ * the panel is blitted into both buffers before it stops being redrawn.
+ * Queried before the blit and stamped after it, both while active_backbuffer
+ * still names the buffer being drawn - frame_end flips it afterwards.
+ */
+int evo_agc_runtime_video_slot_stale(int64_t pts_us)
+{
+    if (!g_agc_dev.initialized)
+        return 0;
+    return g_agc_dev.video_pts[g_agc_dev.active_backbuffer] != pts_us;
+}
+
+void evo_agc_runtime_note_video_pts(int64_t pts_us)
+{
+    if (!g_agc_dev.initialized)
+        return;
+    g_agc_dev.video_pts[g_agc_dev.active_backbuffer] = pts_us;
+}
+
 void evo_agc_runtime_set_player_mode(int is_player)
 {
     if (g_agc_dev.is_player_mode == is_player)
@@ -1911,6 +1946,7 @@ void evo_agc_runtime_set_player_mode(int is_player)
                 for (size_t i = 0; i < count; ++i) p64[i] = val;
                 evo_agc_runtime_cache_flush(buf, count * sizeof(uint64_t));
             }
+            g_agc_dev.video_pts[b] = INT64_MIN;
         }
     }
 }

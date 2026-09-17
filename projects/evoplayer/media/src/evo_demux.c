@@ -219,13 +219,14 @@ packet_queue_clear(
         target_seconds;
 
     /*
-     * Move slightly backward so inter-frame codecs can begin from
-     * a nearby keyframe.
+     * No extra backstep. AVSEEK_FLAG_BACKWARD already lands on the keyframe at
+     * or before this timestamp, which is exactly what an inter-frame codec
+     * needs to restart. The 0.5 s that used to be subtracted here only widened
+     * the run-up the decoder then has to chew through and throw away - and
+     * when the target sat just after a keyframe it pushed the seek back a
+     * whole extra GOP, which is what made a longer seek hitch harder than a
+     * short one.
      */
-    /* Video: back up slightly for keyframe. Audio-only: seek near target. */
-    if (video_stream_index >= 0 && decoder_seek_seconds > 0.50) {
-        decoder_seek_seconds -= 0.50;
-    }
 
     int seek_stream =
         video_stream_index >= 0
@@ -258,9 +259,9 @@ packet_queue_clear(
                                AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
     }
     {
-        char d[80];
-        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d",
-                 result, (long long)seek_timestamp, seek_stream);
+        char d[112];
+        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d target=%.3f",
+                 result, (long long)seek_timestamp, seek_stream, target_seconds);
         pp_stage_bc("SEEK_AVFRAME", d);   /* #32 diagnostics -> /mnt/usb0/evo.log */
     }
 
@@ -296,6 +297,14 @@ packet_queue_clear(
         resume_base_offset_seconds =
             target_seconds;
 
+        /*
+         * Arm the audio discard window before the decode threads are let go,
+         * so the run-up between the keyframe this seek landed on and the
+         * target is dropped on the audio side too. Both clocks then restart
+         * from the target and the picture resumes without waiting for audio.
+         */
+        audio_seek_discard_until = target_seconds;
+
         audio_samples_played = 0;
         audio_samples_decoded = 0;
 
@@ -328,6 +337,7 @@ packet_queue_clear(
         }
 
     } else {
+        audio_seek_discard_until = -1.0;
         toast(
             "SEEK",
             "Decoder seek failed"

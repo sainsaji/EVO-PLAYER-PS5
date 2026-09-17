@@ -85,6 +85,14 @@ void evo_agc_runtime_set_player_mode(int is_player);
  * reuses it clears first instead of stacking OSD/subtitle pixels. */
 void evo_agc_runtime_note_ui_drawn(void);
 
+/* Whether the backbuffer about to be drawn already holds this video PTS. With
+ * two scanout buffers, presenting without redrawing the quad shows the picture
+ * from two presents ago; the render loop uses this to redraw a frame that is
+ * slower than the panel into both buffers. Stamp with note_video_pts after the
+ * blit, before the present. */
+int  evo_agc_runtime_video_slot_stale(int64_t pts_us);
+void evo_agc_runtime_note_video_pts(int64_t pts_us);
+
 void evo_agc_runtime_bind_pipeline(int pipeline_id);
 void evo_agc_runtime_set_scissor(int x, int y, int w, int h);
 void evo_agc_runtime_set_blend(int blend_mode);

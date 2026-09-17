@@ -427,6 +427,15 @@ void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
 {
     if (!pb)
         return;
+    /*
+     * One seek announces itself twice: PlaybackController::seekTo arms it on
+     * the UI thread, then the demux thread arms it again when it picks the
+     * request up. Arming twice double-counts the request, restarts the
+     * seek_to_first_frame timer, and re-snapshots the held frame from decoder
+     * planes the second caller has no pacing guarantee on. Arm once.
+     */
+    if (pb->seek_discarding && pb->seek_target_us == target_pts_us)
+        return;
     pb->stats.seek_requests++;
     pb->seek_discarding = 1;
     pb->seek_target_us = target_pts_us;

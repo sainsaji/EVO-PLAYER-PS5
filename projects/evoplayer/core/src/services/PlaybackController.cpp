@@ -297,6 +297,7 @@ void PlaybackController::stopPlayback() {
     video_clock_seconds = 0.0;
     first_audio_pts_seconds = -1.0;
     first_video_pts_seconds = -1.0;
+    audio_seek_discard_until = -1.0;
 
     /* Don't let the next file's scrub previews reuse this file's demuxer. */
     prospero_thumbnail_close_context();
