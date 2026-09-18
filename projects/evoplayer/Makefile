@@ -117,6 +117,7 @@ MEDIA_SRCS := \
     src/evo_data_path.c \
     src/evo_readdir.c \
     src/evo_boot_log.c \
+    src/evo_crash_note.c \
     src/evo_usb_remote.c \
     src/evo_jailbreak.c
 

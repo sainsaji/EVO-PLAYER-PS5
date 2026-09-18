@@ -45,6 +45,7 @@ NATIVE_SECONDARY_4K=0
 NO_NATIVE_SECONDARY=0
 NO_NATIVE_SECONDARY_4K=0
 NATIVE_10BIT=1
+NO_NATIVE_10BIT=0
 CLEAN=0
 while (( $# )); do
     case "$1" in
@@ -64,7 +65,8 @@ while (( $# )); do
         --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
         --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
         --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
-        --native-10bit)         NATIVE_10BIT=1 ;;                           # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — OFF by default, confirmed to break home-screen thumbnail decode alongside Phase B's three (2026-09-11)
+        --native-10bit)         NATIVE_10BIT=1; NO_NATIVE_10BIT=0 ;;        # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — ON BY DEFAULT, so this flag is a no-op kept for back-compat and for scripts that state it explicitly
+        --no-native-10bit)      NO_NATIVE_10BIT=1; NATIVE_10BIT=0 ;;        # #41 Phase D escape hatch — 10-bit stays on the FFmpeg CPU path. Try this first if thumbnail/poster decode fails to allocate: Phase D's two slots left ~3 MB of flex memory free AT BOOT on 2026-09-11
         -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -88,6 +90,7 @@ if ! in_container; then
     (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
     (( NO_NATIVE_SECONDARY_4K )) && FWD+=(--no-native-secondary-4k)
     (( NATIVE_10BIT ))        && FWD+=(--native-10bit)
+    (( NO_NATIVE_10BIT ))     && FWD+=(--no-native-10bit)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -292,7 +295,11 @@ else
     (( NATIVE_SECONDARY_4K ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
     (( NO_NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
     (( NO_NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=0"
+    # --native-10bit / --no-native-10bit (#41 Phase D): the HEVC Main10 + VP9
+    # Profile 2 resident decoders. ON by default; the escape hatch drops 10-bit
+    # to the FFmpeg CPU path and gives its flex memory back.
     (( NATIVE_10BIT ))        && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=1"
+    (( NO_NATIVE_10BIT ))     && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=0"
     # EVO_AGC_DEVICE gates evo_agc_* + evo_rmlui_render_agc.cpp
     (( AGC_DEVICE )) && APP_DEFS+=" -DEVO_AGC_DEVICE=1"
     rm -f "${EVO}/include/evo_autoplay.h"

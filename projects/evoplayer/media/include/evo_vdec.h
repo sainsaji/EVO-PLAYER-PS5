@@ -20,11 +20,15 @@
  * path always downgrades to FFMPEG. Guard evo_vdec_native.c behind the SDK
  * macro so the host build keeps linking only evo_vdec_ffmpeg.c.
  *
- * Scope note: only the play-stream decoder goes through this seam. The
- * one-shot cover/poster extractor (main.c) and the scrub-preview worker
- * (media/src/prospero_thumbnail.c) keep their own avcodec paths on purpose —
- * they demux and scale, which this interface deliberately does not do, and
- * native decode has no bearing on them.
+ * Scope note: the play stream and, since the EVO_TEST_hevc8_4k.mp4 crash, the
+ * cover/poster extractor (core/src/services/CoverArtService.cpp) go through
+ * this seam. FFmpeg's software HEVC decoder faults rather than fails when a
+ * picture buffer cannot be allocated, and it does so on a file the hardware
+ * decoder plays without complaint - so the poster path asks for the hardware
+ * decoder first and keeps its own avcodec path as the fallback. It still
+ * demuxes and scales itself; this interface deliberately does neither.
+ * The scrub-preview worker (media/src/prospero_thumbnail.c) stays purely on
+ * avcodec: it runs during playback, when the resident decoder is claimed.
  */
 #ifndef EVO_VDEC_H
 #define EVO_VDEC_H
@@ -95,6 +99,15 @@ typedef enum {
  * it just silently opens FFmpeg one call later. Never probes twice; reuses
  * the cached evo_vdec_probe() result. */
 evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id);
+
+/* Would evo_vdec_open() honour a NATIVE request for this stream? Answers the
+ * same profile / bit-depth / dimension gate evo_vdec_open() applies, without
+ * opening anything, so a caller that only wants the hardware path can decide
+ * before paying for a decoder it would immediately throw away. Advisory: a
+ * slot already claimed by playback still turns into an FFmpeg open. Returns 0
+ * on host / payload builds. */
+int evo_vdec_native_can_open(int codec_id, int profile, int bit_depth,
+                             int w, int h);
 
 /* Open a decoder. Returns NULL on failure. `*chosen` (may be NULL) reports the
  * backend actually created. A EVO_VDEC_BACKEND_NATIVE request that cannot be

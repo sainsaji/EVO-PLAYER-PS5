@@ -98,9 +98,21 @@ extern int      sceKernelReleaseDirectMemory(int64_t, size_t);
 extern int      sceKernelMunmap(void *, size_t);
 extern int      sceKernelMapNamedFlexibleMemory(void **, size_t, int, int, const char *);
 extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
+extern int      sceKernelAvailableFlexibleMemorySize(size_t *);
+extern int      sceKernelConfiguredFlexibleMemorySize(size_t *);
 
 #define SCE_SYSMODULE_VIDEODEC2_NUM 207
-#define INPUT_SLOT_BYTES            0x1000000u  /* 16 MiB — 4K high-bitrate IDR headroom */
+/*
+ * Input AU ring slot. Four of these per decoder, and every resident decoder
+ * pays for its own ring whether or not it is the one playing.
+ *
+ * 16 MiB a slot was 64 MiB a decoder, 256 MiB across the four - for access
+ * units that measure in the hundreds of kilobytes (the 4K GTA trailer's
+ * keyframes log at ~165 KB). 8 MiB still leaves roughly fifty times the
+ * largest AU actually observed, and gives 128 MB back to the flexible-memory
+ * pool that FFmpeg, the poster extractor and everything else share.
+ */
+#define INPUT_SLOT_BYTES            0x800000u   /* 8 MiB — ~50x the largest observed 4K IDR */
 
 /* Match SharpProspero's production config: DPB auto-sized by the decoder
  * (MaxDpbFrameCount = -1), DecodeInputQueueDepth = 4. The frame buffers we
@@ -110,7 +122,15 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define SCE_VIDEODEC2_AUTO_FRAMES   (-1)
 #define DECODE_INPUT_QUEUE_DEPTH    4u
 #define PIPELINE_BUFFER_COUNT       4u          /* input-AU ring */
-#define FRAME_POOL_SLOTS            12
+/*
+ * Output/detile frame ring. These are targets handed to sceVideodec2Decode and
+ * consumed immediately - ro_harvest copies out of them - while the decoder
+ * keeps its real DPB internally in GpuMemory. The ring only has to stay ahead
+ * of the input queue (4) and the reorder window (RO_SLOTS = 5), so 12 slots of
+ * a full 4K frame each (~12 MiB) was ~50 MB per decoder of margin nobody was
+ * using. 8 keeps three spare slots beyond the deepest consumer.
+ */
+#define FRAME_POOL_SLOTS            8
 
 #ifndef EVO_VDEC_REORDER_DEPTH
 #define EVO_VDEC_REORDER_DEPTH      4
@@ -167,17 +187,44 @@ extern int      sceKernelReleaseFlexibleMemory(void *, size_t);
 #define EVO_VDEC_NATIVE_SECONDARY_MAX_H  1088
 #endif
 
-/* #41 Phase D: the two 10-bit resident decoders (HEVC Main10, VP9 Profile 2) -
- * OFF by default (2026-09-11). DEFAULT-ON was wrong: with the three from
- * Phase B already resident, adding these two left only ~3 MB of flex memory
- * free AT BOOT - not during playback, at boot, before any file is opened -
- * breaking the home screen's own thumbnail decode for the Recent/Jump Back In
- * shelf (get_buffer() failed, avail=3M, fail climbing). Decode + the pitch
- * math are still hardware-verified (see the comment above
- * EVO_VDEC_NATIVE_SECONDARY); what's reverted is only "on by default" until
- * #38's flex-memory budget is actually fixed. Build
- * -DEVO_VDEC_NATIVE_10BIT=1 (package-app.sh --native-10bit) to bring them
- * back for testing. */
+/*
+ * VP9 gets its own cap, because it is by far the most expensive slot and by
+ * far the least used: at 4K it reserved 748 MB - more than AVC and more than
+ * HEVC - for a codec that on a USB media player turns up mostly as 1080p
+ * WebM. Capping it at 1080p keeps VP9 on the hardware decoder where it is
+ * actually encountered and hands ~500 MB back; a 4K VP9 file falls through to
+ * FFmpeg, which is the same deal every other unsupported stream gets.
+ * Raise it to EVO_VDEC_NATIVE_SECONDARY_MAX_W/H if 4K VP9 matters more than
+ * the memory does.
+ */
+#ifndef EVO_VDEC_NATIVE_VP9_MAX_W
+#define EVO_VDEC_NATIVE_VP9_MAX_W  1920
+#endif
+#ifndef EVO_VDEC_NATIVE_VP9_MAX_H
+#define EVO_VDEC_NATIVE_VP9_MAX_H  1088
+#endif
+
+/* #41 Phase D: the two 10-bit resident decoders (HEVC Main10, VP9 Profile 2).
+ *
+ * WARNING - this default contradicts the finding recorded against it. On
+ * 2026-09-11 default-on was judged wrong: with the three from Phase B already
+ * resident, adding these two left only ~3 MB of flex memory free AT BOOT -
+ * not during playback, at boot, before any file is opened - breaking the home
+ * screen's own thumbnail decode for the Recent/Jump Back In shelf
+ * (get_buffer() failed, avail=3M, fail climbing). The revert to off was
+ * written down here and in package-app.sh but never actually applied: both
+ * still default it on.
+ *
+ * That is very likely what the 2026-09-17 poster crashes are - the same
+ * get_buffer() ENOMEM, in the same thumbnail decode, from the same cause.
+ * Build -DEVO_VDEC_NATIVE_10BIT=0 (package-app.sh --no-native-10bit) to give
+ * the flex memory back; 10-bit then decodes on the FFmpeg CPU path as it did
+ * before Phase D.
+ *
+ * Decode + the pitch math are hardware-verified either way (see the comment
+ * above EVO_VDEC_NATIVE_SECONDARY); what is in question is only whether the
+ * console can afford both these slots and everything else, which is #38's
+ * flex-memory budget. */
 #ifndef EVO_VDEC_NATIVE_10BIT
 #define EVO_VDEC_NATIVE_10BIT 1
 #endif
@@ -321,6 +368,16 @@ static void free_direct(void *addr, int64_t start, size_t size)
 
 struct dec_slot {
     int      ready;
+    /*
+     * One resident decoder per codec, handed out by evo_vdec_native_open() and
+     * sceVideodec2Reset() on the way in - so a second opener would wipe the
+     * first one's state mid-stream. Harmless while playback was the only
+     * caller; the poster extractor is a second one. Claim the slot on open,
+     * release it on close, and refuse an open that would collide: the
+     * dispatcher then falls back to FFmpeg, which is exactly right for a
+     * poster while a file is playing.
+     */
+    volatile int owned;
     void    *compute_queue;
     void    *compute_mem;   int64_t compute_start; size_t compute_size;
     void    *decoder;
@@ -525,6 +582,23 @@ int evo_vdec_native_probe(void)
 
     unsigned sm = (unsigned)sceSysmoduleLoadModule(SCE_SYSMODULE_VIDEODEC2_NUM);
 
+    /*
+     * Book-end the bring-up with the flexible-memory figure. Everything the
+     * app does afterwards - FFmpeg, poster extraction, swscale - comes out of
+     * what is left, and until now the budget was inferred from the decoders'
+     * own totals rather than measured against the pool they come from.
+     */
+    size_t flex_before = 0, flex_total = 0;
+    if (sceKernelAvailableFlexibleMemorySize(&flex_before) != 0)
+        flex_before = 0;
+    /* The ceiling, not just what is left of it. Every "budget" judgement in
+     * this file has so far been made against the decoders' own self-reported
+     * totals with no idea what they were a fraction OF. */
+    if (sceKernelConfiguredFlexibleMemorySize(&flex_total) != 0)
+        flex_total = 0;
+    note("EVO vdec native: flex pool configured=%zuMB available=%zuMB before bring-up",
+         flex_total >> 20, flex_before >> 20);
+
     /* AVC — the compatibility baseline, 4K (with the #31 1080p retry). */
     probe_slot(NAT_H264, EVO_VDEC_NATIVE_MAX_W, EVO_VDEC_NATIVE_MAX_H, 1, sm);
 
@@ -533,8 +607,8 @@ int evo_vdec_native_probe(void)
      * Gated: see the EVO_VDEC_NATIVE_SECONDARY note above (2026-09-10 crash). */
     probe_slot(NAT_HEVC, EVO_VDEC_NATIVE_SECONDARY_MAX_W,
                EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
-    probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_SECONDARY_MAX_W,
-               EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
+    probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_VP9_MAX_W,
+               EVO_VDEC_NATIVE_VP9_MAX_H, 0, sm);
 
 #if EVO_VDEC_NATIVE_10BIT
     /* #41 Phase D: 10-bit resident decoders (HEVC Main10).
@@ -543,6 +617,15 @@ int evo_vdec_native_probe(void)
     probe_slot(NAT_HEVC10, 1920, 1088, 0, sm);
 #endif
 #endif
+
+    {
+        size_t flex_after = 0;
+        if (sceKernelAvailableFlexibleMemorySize(&flex_after) != 0)
+            flex_after = 0;
+        note("EVO vdec native: flex after bring-up = %zuMB (resident decoders took %zuMB)",
+             flex_after >> 20,
+             flex_before > flex_after ? (flex_before - flex_after) >> 20 : (size_t)0);
+    }
 
     if (!g_boot_any)
         note("EVO vdec native: no resident decoder -> FFmpeg only (sysmod=0x%08x)", sm);
@@ -634,6 +717,7 @@ struct nat_slot {
 
 struct evo_vdec_native {
     const nat_codec_desc *desc;  /* selected codec mode                */
+    struct dec_slot *slot;  /* the claimed resident slot, released on close */
     void    *dec;           /* == g_dec[desc->idx].decoder (borrowed)  */
     uint8_t *input_mem;     /* == g_dec[desc->idx].input_mem           */
     uint8_t *frame_mem;     /* == g_dec[desc->idx].frame_mem           */
@@ -975,6 +1059,10 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     }
 
     struct dec_slot *slot = &g_dec[d->idx];
+    if (slot->owned) {
+        note("EVO vdec native: %s slot already in use -> FFmpeg", d->tag);
+        return NULL;
+    }
     w = roundup16(w);
     h = roundup16(h);
 
@@ -982,6 +1070,7 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     if (!n)
         return NULL;
     n->desc       = d;
+    n->slot       = slot;
     n->dec        = slot->decoder;
     n->input_mem  = (uint8_t *)slot->input_mem;
     n->frame_mem  = (uint8_t *)slot->frame_mem;
@@ -1018,6 +1107,7 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         return NULL;
     }
 
+    slot->owned = 1;             /* released by evo_vdec_native_close() */
     sceVideodec2Reset(n->dec);   /* fresh state for this stream */
 
     note("EVO vdec native: OPEN ok  resident %s decoder  %dx%d (disp %ux%u) bsf=%s depth=%d",
@@ -1166,6 +1256,8 @@ void evo_vdec_native_close(evo_vdec_native *v)
          v->dec_calls, v->frames_out, v->fatal);
     if (v->dec)
         sceVideodec2Reset(v->dec);   /* leave the resident decoder alive */
+    if (v->slot)
+        v->slot->owned = 0;          /* the next opener may have it */
     if (v->bsf)
         av_bsf_free(&v->bsf);
     if (v->bsf_par)

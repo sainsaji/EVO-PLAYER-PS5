@@ -175,6 +175,14 @@ evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id)
     return EVO_VDEC_BACKEND_NATIVE;
 }
 
+int evo_vdec_native_can_open(int codec_id, int profile, int bit_depth,
+                             int w, int h)
+{
+    if (!evo_vdec_probe())
+        return 0;
+    return evo_vdec_native_supports(codec_id, profile, bit_depth, w, h);
+}
+
 static int pp_map_avframe(const AVFrame *frame, pp_frame *out, int64_t pts_us)
 {
     if (!frame || !out) return -1;

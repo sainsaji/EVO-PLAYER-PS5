@@ -1,6 +1,7 @@
 #include "evo/Application.hpp"
 #include "evo_boot_log.h"
 #include "evo_boot_trace.h"
+#include "evo_crash_note.h"
 
 #ifdef EVO_HAVE_BUILD_ID
 #include "evo_build_id.h"
@@ -42,6 +43,10 @@ static void evo_crash_handler(int sig, siginfo_t *si, void *ctx)
         (void)write(fd, buf, (size_t)len);
         (void)close(fd);
     }
+    /* If we died inside work that is known to be able to kill us - today only
+     * software thumbnail decoding - quarantine the file so the next launch
+     * does not walk straight back into it. See evo_crash_note.h. */
+    evo_crash_note_commit();
     _exit(128 + sig);
 }
 
