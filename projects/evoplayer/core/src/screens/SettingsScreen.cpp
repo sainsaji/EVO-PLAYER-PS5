@@ -268,10 +268,20 @@ void applyOption(int section, int def, int opt) {
     else if (section == 0 && def == 3) st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt));
     else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
     else if (section == 2 && def == 0) {
-        if (evo_theme_set(opt) == 0) {
-            const char* nm = evo_theme_name(opt);
-            if (nm) st->setThemeName(nm);
-        }
+        /*
+         * evo_theme_set() returns the index it applied, not a status - see the
+         * contract in evo_theme.h. Testing it for 0 meant the body only ran for
+         * the first theme in the list, so every other one changed the C-side
+         * active index and stopped there: setThemeName() never ran, so
+         * syncThemeToRmlUi() never pushed the colours into RmlUi and the choice
+         * was never persisted. Picking any theme but the first one appeared to
+         * do nothing at all.
+         *
+         * Use the returned index rather than opt, because the setter wraps.
+         */
+        const int applied = evo_theme_set(opt);
+        if (const char* nm = evo_theme_name(applied))
+            st->setThemeName(nm);
     }
     else if (section == 2 && def == 4) st->setKeyboardType(opt);
     else return;

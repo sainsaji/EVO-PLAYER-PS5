@@ -1182,6 +1182,45 @@ static void render_stress_screens(std::vector<uint32_t>& fb, int width, int heig
                     fb.data(), width, height);
     }
 
+    /*
+     * Scrub -> commit, the transition itself.
+     *
+     * Reported on hardware 2026-09-18: after a seek the picture is right but
+     * the bar restarts from the left. The C state cannot explain it - the time
+     * text and the bar both derive from getPositionSeconds() - so this renders
+     * the two frames either side of the commit with an identical position and
+     * compares the fill. Same position, same percentage, only scrub_active
+     * differs; the bar must not move.
+     */
+    {
+        const double dur = 15787.0, at = 8000.0;
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Scrub commit";
+        p.metadata = "";
+        p.duration_sec = dur;
+        p.position_sec = at;
+        p.percentage = at / dur;
+        p.alpha = 255;
+        p.audio_track = "";
+        p.sub_track = "";
+
+        p.scrub_active = 1;
+        p.scrub_target = at;
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_playback_params(&p);
+        for (int f = 0; f < 3; f++) evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_before.bmp", fb.data(), width, height);
+
+        p.scrub_active = 0;
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_playback_params(&p);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_after1.bmp", fb.data(), width, height);
+        for (int f = 0; f < 3; f++) evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_after4.bmp", fb.data(), width, height);
+    }
+
     /* Browser inspector: long filename + long codec value. */
     {
         std::vector<uint32_t> preview = make_demo_art(560, 315, 17);

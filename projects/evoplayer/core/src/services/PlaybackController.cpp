@@ -626,8 +626,20 @@ double PlaybackController::clampScrubTarget(double target) const {
 void PlaybackController::beginScrub() {
     if (!isActive()) return;
 
-    m_playbackFsm.postEvent(PlaybackEvent::StartScrub);
+    /*
+     * Capture the live position BEFORE entering Scrubbing.
+     *
+     * getPositionSeconds() opens with `if (isScrubbing()) return
+     * m_scrubTargetSeconds;`, so once the FSM has taken the StartScrub
+     * transition this line assigns the field to itself and the scrub head
+     * never learns where playback actually is. It kept whatever the previous
+     * scrub left behind - and 0.0 on the first scrub of a session, which is
+     * why the bar and the clock jumped to the start of the file the moment the
+     * D-pad was touched, then seeked to wherever the user nudged it from
+     * there.
+     */
     m_scrubTargetSeconds = getPositionSeconds();
+    m_playbackFsm.postEvent(PlaybackEvent::StartScrub);
     pp_playback_pause(&g_pp_pb);
     resetScrubHold();
 }
