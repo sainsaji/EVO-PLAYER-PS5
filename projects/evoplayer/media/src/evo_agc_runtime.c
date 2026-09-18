@@ -75,7 +75,8 @@
  * showed is not the constrained pool: flexible memory is (448 MB configured),
  * and scanout does not come out of it.
  */
-#define EVO_AGC_SCANOUT_COUNT       3u
+/* EVO_AGC_SCANOUT_COUNT lives in evo_agc_runtime.h - the render loop needs it
+ * too, to know how many frames a change has to be redrawn for. */
 #define EVO_AGC_SCANOUT_TOTAL       (EVO_AGC_SCANOUT_STRIDE * EVO_AGC_SCANOUT_COUNT)
 #define EVO_AGC_TRANSIENT_RING_SIZE UINT64_C(0x04000000) /* 64 MB transient ring */
 #define EVO_AGC_COMMAND_BUFFER_SIZE UINT64_C(0x00600000) /* 6 MB (2 MB per slot * 3) */

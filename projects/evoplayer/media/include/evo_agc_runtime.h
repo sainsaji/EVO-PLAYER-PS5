@@ -90,6 +90,11 @@ void evo_agc_runtime_note_ui_drawn(void);
  * from two presents ago; the render loop uses this to redraw a frame that is
  * slower than the panel into both buffers. Stamp with note_video_pts after the
  * blit, before the present. */
+/* How many scanout buffers the runtime rotates through. The render loop needs
+ * it: content has to be drawn into every one of them before it can stop
+ * redrawing, or the buffers it skipped present stale frames. */
+#define EVO_AGC_SCANOUT_COUNT 3u
+
 int  evo_agc_runtime_video_slot_stale(int64_t pts_us);
 void evo_agc_runtime_note_video_pts(int64_t pts_us);
 
