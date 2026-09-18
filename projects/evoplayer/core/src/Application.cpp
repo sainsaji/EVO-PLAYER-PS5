@@ -389,16 +389,21 @@ bool evo_capture_screenshot(std::string& outPath) {
         const uint32_t* src = bgra.data() + static_cast<size_t>(y) * static_cast<size_t>(w);
         for (int x = 0; x < w; ++x) {
             /*
-             * The scanout is 0xAABBGGRR - the format MakeColorBgra() packs and
-             * the one frame_begin clears with (0xff100d0d for r,g,b = 0d,0d,10).
-             * So the low byte is RED, and a 24-bit BMP wants B,G,R. Reading the
-             * low byte as blue, as this did, swapped red and blue in every
-             * capture.
+             * Low byte is BLUE here, so it goes straight into the BMP's blue
+             * slot.
+             *
+             * The UI composes colours as 0xAABBGGRR (MakeColorBgra), but the
+             * scanout is registered COMP_SWAP=ALT - see the note on
+             * EVO_AGC_LAYER_BYTES: "only the scanout uses COMP_SWAP=ALT for
+             * BGRA" - so what lands in scanout memory is byte order B,G,R,A,
+             * which read as a little-endian word is 0xAARRGGBB. I "corrected"
+             * this to swap R and B and it was already right: every capture
+             * after that came back with navy UI rendered brown.
              */
             const uint32_t px = src[x];
-            row[x * 3 + 0] = (unsigned char)((px >> 16) & 0xFF);   /* B */
+            row[x * 3 + 0] = (unsigned char)(px & 0xFF);           /* B */
             row[x * 3 + 1] = (unsigned char)((px >> 8) & 0xFF);    /* G */
-            row[x * 3 + 2] = (unsigned char)(px & 0xFF);           /* R */
+            row[x * 3 + 2] = (unsigned char)((px >> 16) & 0xFF);   /* R */
         }
         std::fwrite(row.data(), 1, row.size(), fp);
     }
