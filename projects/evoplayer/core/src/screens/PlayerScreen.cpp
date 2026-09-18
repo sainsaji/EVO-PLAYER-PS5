@@ -333,10 +333,19 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         evo_boot_log_flush();
     }
 
-    if (!playback->isMusicMode()) {
-        draw_video_frame_to_fb(framebuffer, 0, 0, width, height);
-    } else {
-        std::fill_n(framebuffer, width * height, 0xFF000000);
+    /*
+     * Both branches only matter to the CPU rasteriser. In AGC mode RmlUi draws
+     * through the GPU and never reads this buffer back, so the music-mode fill
+     * was 8.3 MB of stores a frame that nothing looked at -
+     * draw_video_frame_to_fb has already been an empty function since the GL
+     * quad took over.
+     */
+    if (evo_rmlui_blit_mode()) {
+        if (!playback->isMusicMode()) {
+            draw_video_frame_to_fb(framebuffer, 0, 0, width, height);
+        } else {
+            std::fill_n(framebuffer, width * height, 0xFF000000);
+        }
     }
 
     char activeSubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};

@@ -93,6 +93,11 @@ void evo_agc_runtime_note_ui_drawn(void);
 int  evo_agc_runtime_video_slot_stale(int64_t pts_us);
 void evo_agc_runtime_note_video_pts(int64_t pts_us);
 
+/* Fill a GPU-visible range with a 32-bit pattern using non-temporal stores, so
+ * it needs no cache flush. Falls back to stores + clflush when the range is
+ * not 16-byte aligned/sized. */
+void evo_agc_runtime_stream_fill(void *dst, uint32_t value32, size_t bytes);
+
 void evo_agc_runtime_bind_pipeline(int pipeline_id);
 void evo_agc_runtime_set_scissor(int x, int y, int w, int h);
 void evo_agc_runtime_set_blend(int blend_mode);
@@ -195,14 +200,16 @@ void                      evo_agc_flush_color_target(void);
  * redrawn. Called via evo_gl_composite_bgra() so main.c stays backend-agnostic. */
 void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload);
 
-void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
+/* Draw the video quad. Returns 0 when the quad was emitted (and the current
+ * backbuffer stamped with pts_us), -1 when the frame was rejected. */
+int  evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,
                       const uint8_t *u,  int u_pitch,
                       const uint8_t *v,  int v_pitch,
                       int coded_w, int coded_h,
                       int disp_w, int disp_h,
                       int view_mode, int ten_bit, int color_trc,
-                      int is_direct);
+                      int is_direct, int64_t pts_us);
 
 #ifdef __cplusplus
 }

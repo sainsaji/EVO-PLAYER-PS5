@@ -17,6 +17,7 @@
 
 #include <libavutil/channel_layout.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
@@ -227,20 +228,24 @@ static void mix_audio_frame_to_queue(
         return;
     }
 
-    uint8_t *output_buffer = NULL;
-    int output_linesize = 0;
+    /*
+     * Grow-only scratch instead of av_samples_alloc/av_freep per packet. This
+     * runs on every audio packet - about 43 a second for AAC - and the
+     * capacity only ever changes when the stream layout does, so the malloc
+     * and free were pure churn on the decode thread.
+     */
+    static uint8_t *output_buffer;
+    static size_t   output_buffer_cap;
 
-    if (
-        av_samples_alloc(
-            &output_buffer,
-            &output_linesize,
-            evo_audio_channels,   /* EVO: was hardcoded 2 */
-            output_capacity,
-            AV_SAMPLE_FMT_S16,
-            0
-        ) < 0
-    ) {
-        return;
+    size_t need = (size_t)output_capacity * (size_t)evo_audio_channels *
+                  sizeof(int16_t);
+    if (need > output_buffer_cap) {
+        uint8_t *grown = (uint8_t *)av_realloc(output_buffer, need);
+        if (!grown) {
+            return;
+        }
+        output_buffer = grown;
+        output_buffer_cap = need;
     }
 
     uint8_t *output_planes[1] = {
@@ -258,30 +263,33 @@ static void mix_audio_frame_to_queue(
         );
 
     if (converted > 0) {
-        int16_t *samples =
-            (int16_t *)output_buffer;
+        const int16_t *samples = (const int16_t *)output_buffer;
+        const int ch = evo_audio_channels;
+        int index = 0;
 
-        for (
-            int index = 0;
-            index < converted &&
-            audio_decode_thread_running;
-            index++
-        ) {
-            /* EVO: copy every channel, not just L/R. Both buffers are
-             * interleaved with the same channel count, so this is a straight
-             * per-frame copy of evo_audio_channels samples. */
-            for (int c = 0; c < evo_audio_channels; c++) {
-                audio_accum[audio_accum_pos * evo_audio_channels + c] =
-                    samples[index * evo_audio_channels + c];
-            }
+        /*
+         * Both buffers are interleaved with the same channel count, so this is
+         * a straight copy - it just has to stop at each accumulator block
+         * boundary to hand the block off. It used to run sample by sample and
+         * channel by channel, re-reading the volatile thread flag on every
+         * iteration, which also stopped the compiler vectorising it. Copy in
+         * runs instead and check the flag once per run.
+         */
+        while (index < converted && audio_decode_thread_running) {
+            int run = converted - index;
+            const int space = AUDIO_BLOCK_SAMPLES - audio_accum_pos;
+            if (run > space)
+                run = space;
 
-            audio_accum_pos++;
-            audio_samples_decoded++;
+            memcpy(&audio_accum[(size_t)audio_accum_pos * ch],
+                   &samples[(size_t)index * ch],
+                   (size_t)run * (size_t)ch * sizeof(int16_t));
 
-            if (
-                audio_accum_pos >=
-                AUDIO_BLOCK_SAMPLES
-            ) {
+            audio_accum_pos += run;
+            audio_samples_decoded += run;
+            index += run;
+
+            if (audio_accum_pos >= AUDIO_BLOCK_SAMPLES) {
                 while (
                     audio_decode_thread_running &&
                     audio_queue_count >=
@@ -300,7 +308,6 @@ static void mix_audio_frame_to_queue(
         }
     }
 
-    av_freep(&output_buffer);
 }
 
 
@@ -317,7 +324,8 @@ void *audio_decode_thread_func(void *arg) {
 
     while (audio_decode_thread_running) {
         if (player_paused || screen != 2) {
-            usleep(1000);
+            /* Parked - see the note on the video decode thread. */
+            usleep(5000);
             continue;
         }
 

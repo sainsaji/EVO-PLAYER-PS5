@@ -9,8 +9,9 @@
  * evo_boot_log() timestamps the line and, before /mnt/usb0 is reachable,
  * buffers it in memory; evo_boot_log_flush() opens the file once the sandbox
  * is unjailed, drains the buffer, and thereafter every line is written
- * straight through. Call flush right after evo_jailbreak_self() and again
- * periodically (the render loop does, every 64 frames). With
+ * straight through - which is what makes the last line before a crash
+ * survive, so keep anything emitted per-frame rare rather than deferring it.
+ * Call flush right after evo_jailbreak_self(). With
  * EVO_BOOT_TRACE_POPUP (--breadcrumbs) each line also pops a notification.
  * No-op on host / payload builds.
  *

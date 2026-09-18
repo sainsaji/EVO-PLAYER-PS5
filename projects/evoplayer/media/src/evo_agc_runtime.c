@@ -4,6 +4,7 @@
 #include "evo_boot_log.h"
 #include "evo_direct_mem.h"
 
+#include <emmintrin.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -181,6 +182,18 @@ typedef struct evo_agc_device {
     /* Per-scanout-buffer: the video PTS its quad currently holds, or
      * INT64_MIN if it holds no video. See evo_agc_runtime_video_slot_stale. */
     int64_t                 video_pts[2];
+    /* Last staged copy of each video plane, so redrawing the same frame into
+     * the other scanout buffer does not re-copy it. See stage_plane. */
+    struct {
+        const uint8_t *src;
+        int            src_pitch;
+        uint32_t       width, height, bpp;
+        int64_t        pts_us;
+        uint64_t       frame_staged;
+        uint32_t       gpu_pitch;
+        uint64_t       gpu_addr;
+        int            valid;
+    }                       stage_cache[3];
 
     int32_t                 video_handle;
     int                     active_backbuffer;
@@ -366,6 +379,102 @@ void evo_agc_runtime_cache_flush(const void *address, size_t bytes)
     for (; at < end; at += 64)
         __asm__ volatile("clflush (%0)" : : "r"(at) : "memory");
     __asm__ volatile("mfence" ::: "memory");
+}
+
+/*
+ * Non-temporal fill/copy for the GPU-visible direct-memory buffers.
+ *
+ * Everything the CPU writes for the GPU - the backdrop clear, the staged video
+ * planes, the OSD composite texture - lands in write-back memory that the
+ * display controller and the command processor read straight from DRAM, so
+ * every write used to be chased by evo_agc_runtime_cache_flush() walking the
+ * range one 64-byte clflush at a time. At 1080p the backdrop clear alone is
+ * 8.3 MB of stores plus ~130,000 clflushes, every frame the menu is up.
+ *
+ * movntdq writes through the write-combining buffers without allocating a
+ * cache line, so the range needs no flush at all and one sfence orders the
+ * whole batch. Every buffer these run on comes out of the 256-byte-aligned
+ * direct-memory arena; the fallback covers a range that is not 16-byte
+ * aligned or sized and keeps the old memcpy + clflush behaviour.
+ *
+ * Touch /mnt/usb0/evo_agc_no_nt to put every caller back on memcpy + clflush
+ * without a rebuild, should a future firmware disagree about non-temporal
+ * stores into the scanout pool.
+ */
+static int nt_stores_enabled(void)
+{
+    static int s_state = -1;
+    if (s_state < 0)
+        s_state = (access("/mnt/usb0/evo_agc_no_nt", F_OK) == 0) ? 0 : 1;
+    return s_state;
+}
+
+void evo_agc_runtime_stream_fill(void *dst, uint32_t value32, size_t bytes)
+{
+    uint8_t *d = (uint8_t *)dst;
+    if (!d || !bytes)
+        return;
+    if (!nt_stores_enabled() || ((uintptr_t)d & 15u) || (bytes & 15u)) {
+        uint32_t *p = (uint32_t *)dst;
+        size_t words = bytes / 4u;
+        for (size_t i = 0; i < words; ++i)
+            p[i] = value32;
+        if (bytes & 3u)
+            memset(d + words * 4u, (int)(value32 & 0xffu), bytes & 3u);
+        evo_agc_runtime_cache_flush(dst, bytes);
+        return;
+    }
+    const __m128i v = _mm_set1_epi32((int)value32);
+    const size_t n = bytes / 16u;
+    for (size_t i = 0; i < n; ++i)
+        _mm_stream_si128(((__m128i *)d) + i, v);
+    _mm_sfence();
+}
+
+/*
+ * Copy `height` rows of `row_bytes` from a src pitch to a dst pitch. The dst
+ * rows start 16-byte aligned (every staging pitch here is 256-byte aligned),
+ * so only the ragged tail of a row whose width is not a multiple of 16 falls
+ * back - and only that tail is flushed.
+ */
+static void stream_copy_rows(uint8_t *dst, size_t dst_pitch,
+                             const uint8_t *src, size_t src_pitch,
+                             size_t row_bytes, uint32_t height)
+{
+    if (!dst || !src || !row_bytes || !height)
+        return;
+
+    if (!nt_stores_enabled() || ((uintptr_t)dst & 15u) || (dst_pitch & 15u)) {
+        for (uint32_t r = 0; r < height; ++r)
+            memcpy(dst + (size_t)r * dst_pitch, src + (size_t)r * src_pitch,
+                   row_bytes);
+        evo_agc_runtime_cache_flush(dst,
+                                    dst_pitch * (size_t)(height - 1u) + row_bytes);
+        return;
+    }
+
+    const size_t bulk = row_bytes & ~(size_t)15;
+    const size_t tail = row_bytes - bulk;
+    const size_t n = bulk / 16u;
+
+    for (uint32_t r = 0; r < height; ++r) {
+        uint8_t *d = dst + (size_t)r * dst_pitch;
+        const uint8_t *sp = src + (size_t)r * src_pitch;
+        if (((uintptr_t)sp & 15u) == 0u) {
+            for (size_t i = 0; i < n; ++i)
+                _mm_stream_si128(((__m128i *)d) + i,
+                                 _mm_load_si128(((const __m128i *)sp) + i));
+        } else {
+            for (size_t i = 0; i < n; ++i)
+                _mm_stream_si128(((__m128i *)d) + i,
+                                 _mm_loadu_si128(((const __m128i *)sp) + i));
+        }
+        if (tail) {
+            memcpy(d + bulk, sp + bulk, tail);
+            evo_agc_runtime_cache_flush(d + bulk, tail);
+        }
+    }
+    _mm_sfence();
 }
 
 static SceAgcRegister *alloc_transient_cx(uint32_t count)
@@ -1246,6 +1355,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     g_agc_dev.current_slot = 0;
     g_agc_dev.video_pts[0] = INT64_MIN;
     g_agc_dev.video_pts[1] = INT64_MIN;
+    memset(g_agc_dev.stage_cache, 0, sizeof(g_agc_dev.stage_cache));
     g_agc_dev.frame_counter = 0;
     g_agc_dev.flip_arg = 1;
     g_agc_dev.bound_pipeline = -1;
@@ -1352,18 +1462,12 @@ void evo_agc_runtime_frame_begin(void)
         g_agc_dev.video_pts[g_agc_dev.active_backbuffer] = INT64_MIN;
         uint32_t *backbuffer = (uint32_t *)g_agc_dev.scanout_buffers[g_agc_dev.active_backbuffer];
         if (backbuffer) {
-            uint64_t val = (uint64_t)0xff100d0d | ((uint64_t)0xff100d0d << 32);
-            uint64_t *p64 = (uint64_t *)backbuffer;
-            size_t count = ((size_t)g_agc_dev.width * (size_t)g_agc_dev.height) / 2;
-            for (size_t i = 0; i < count; ++i) {
-                p64[i] = val;
-            }
-            /* Write-back cached pool (memory type 12): a CPU write sits in L1/L2
-             * until something evicts it while the display controller reads DRAM
-             * directly. Costs a full-screen clflush walk per frame; a
-             * write-combined GARLIC pool (memory type 3, as pp_videoout.c used)
-             * would need none, worth revisiting once the picture is correct. */
-            evo_agc_runtime_cache_flush(backbuffer, count * sizeof(uint64_t));
+            /* Streamed, not stored-then-flushed: this is the single biggest
+             * CPU cost in the menus - 8.3 MB a frame at 1080p, 33 MB at 4K.
+             * See evo_agc_runtime_stream_fill. */
+            evo_agc_runtime_stream_fill(backbuffer, 0xff100d0du,
+                                        (size_t)g_agc_dev.width *
+                                        (size_t)g_agc_dev.height * 4u);
         }
     }
 
@@ -1565,11 +1669,11 @@ static void layer_surface_clear(evo_agc_layer_surface_t *layer)
     const size_t span  = (size_t)w * 4u;
     uint8_t *row = layer->cpu_base + (size_t)y * pitch + (size_t)x * 4u;
     for (int i = 0; i < h; ++i, row += pitch) {
-        memset(row, 0, span);
-        /* Flush only the span just written. Flushing whole rows instead walked
-         * pitch/span times the cache lines - 2.8x for a sidebar-width element,
-         * and this runs three times per blurred element per frame. */
-        evo_agc_runtime_cache_flush(row, span);
+        /* Only the span just written, never the whole row: flushing whole rows
+         * walked pitch/span times the cache lines - 2.8x for a sidebar-width
+         * element, and this runs three times per blurred element per frame.
+         * stream_fill drops the flush entirely when the span is aligned. */
+        evo_agc_runtime_stream_fill(row, 0u, span);
     }
 }
 
@@ -1748,25 +1852,34 @@ void evo_agc_runtime_frame_end(void)
                          dwords, g_agc_dev.dcb_peak_dwords);
         }
     }
-    if ((g_agc_dev.frame_counter % 120u) == 0u) {
+    /*
+     * Periodic telemetry, emitted from inside the render loop - so one line
+     * rather than three, and every 600 frames rather than 120. It was three
+     * USB writes every two seconds, each a visible hitch in the very frame
+     * times it is meant to be measuring; it is now one write every ten.
+     * Still written through: a line that does not survive a crash is no use
+     * for the crashes this is here to explain.
+     */
+    if ((g_agc_dev.frame_counter % 600u) == 0u) {
         evo_direct_mem_stats_t dm;
         evo_direct_mem_get_stats(&dm);
-        evo_boot_log("agc health frame=%llu dcb=%u/%u peak=%u ring_fail=%u tex_fail=%u "
-                     "direct_mem=%zu/%zu peak=%zu allocs=%zu",
-                     (unsigned long long)g_agc_dev.frame_counter,
-                     dwords, g_agc_dev.dcb_slot_capacity_dwords,
-                     g_agc_dev.dcb_peak_dwords,
-                     g_agc_dev.ring_alloc_fail, g_agc_dev.tex_alloc_fail,
-                     dm.allocated_bytes, dm.total_bytes, dm.peak_bytes,
-                     dm.num_allocations);
-        evo_boot_log("agc health clip_masks=%u clip_enables=%u (feature=%d)",
-                     g_agc_dev.clip_mask_calls, g_agc_dev.clip_enable_calls,
-                     EVO_AGC_CLIP_MASK);
+        evo_boot_log(
+            "agc health frame=%llu dcb=%u/%u peak=%u ring_fail=%u tex_fail=%u "
+            "direct_mem=%zu/%zu peak=%zu allocs=%zu | "
+            "clip_masks=%u clip_enables=%u (feature=%d) | "
+            "presents=%u dcb_min_presented=%u flip_waits=%u timeouts=%u",
+            (unsigned long long)g_agc_dev.frame_counter,
+            dwords, g_agc_dev.dcb_slot_capacity_dwords,
+            g_agc_dev.dcb_peak_dwords,
+            g_agc_dev.ring_alloc_fail, g_agc_dev.tex_alloc_fail,
+            dm.allocated_bytes, dm.total_bytes, dm.peak_bytes,
+            dm.num_allocations,
+            g_agc_dev.clip_mask_calls, g_agc_dev.clip_enable_calls,
+            EVO_AGC_CLIP_MASK,
+            g_agc_dev.presents, g_agc_dev.dcb_min_presented,
+            g_agc_dev.flip_waits, g_agc_dev.flip_timeouts);
         g_agc_dev.clip_mask_calls = 0;
         g_agc_dev.clip_enable_calls = 0;
-        evo_boot_log("agc health presents=%u dcb_min_presented=%u flip_waits=%u timeouts=%u",
-                     g_agc_dev.presents, g_agc_dev.dcb_min_presented,
-                     g_agc_dev.flip_waits, g_agc_dev.flip_timeouts);
         g_agc_dev.dcb_min_presented = 0;
         g_agc_dev.presents = 0;
         g_agc_dev.flip_waits = 0;
@@ -1940,14 +2053,13 @@ void evo_agc_runtime_set_player_mode(int is_player)
         for (int b = 0; b < 2; ++b) {
             uint32_t *buf = (uint32_t *)g_agc_dev.scanout_buffers[b];
             if (buf) {
-                uint64_t val = (uint64_t)0xff100d0d | ((uint64_t)0xff100d0d << 32);
-                uint64_t *p64 = (uint64_t *)buf;
-                size_t count = ((size_t)g_agc_dev.width * (size_t)g_agc_dev.height) / 2;
-                for (size_t i = 0; i < count; ++i) p64[i] = val;
-                evo_agc_runtime_cache_flush(buf, count * sizeof(uint64_t));
+                evo_agc_runtime_stream_fill(buf, 0xff100d0du,
+                                            (size_t)g_agc_dev.width *
+                                            (size_t)g_agc_dev.height * 4u);
             }
             g_agc_dev.video_pts[b] = INT64_MIN;
         }
+        memset(g_agc_dev.stage_cache, 0, sizeof(g_agc_dev.stage_cache));
     }
 }
 
@@ -2035,10 +2147,21 @@ int evo_agc_runtime_get_display_dynamic_range(void)
     return g_agc_dev.initialized ? g_agc_dev.display_dynamic_range : 0;
 }
 
+/*
+ * Stage one plane where the GPU can read it.
+ *
+ * `cache_slot` (0 = Y, 1 = U/UV, 2 = V) keys a one-entry memo of the last
+ * staged copy. A frame slower than the panel is now blitted into both scanout
+ * buffers (see evo_agc_runtime_video_slot_stale), and without the memo the
+ * second blit re-copied the whole plane - 3.1 MB at 1080p, 12.4 MB at 4K.
+ * A transient-ring slice stays intact until its slot is reopened, which is
+ * EVO_AGC_FRAME_SLOTS frames later, so a copy is safe to reuse for one more
+ * frame. The native decoder's own buffers skip all of this via `is_direct`.
+ */
 static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
                        const uint8_t *src, int src_pitch,
                        uint32_t width, uint32_t height, uint32_t bpp,
-                       int is_direct,
+                       int is_direct, int cache_slot, int64_t pts_us,
                        uint32_t *out_pitch, uint64_t *out_gpu)
 {
     if (!ring || !src || src_pitch <= 0 || width == 0 || height == 0 || bpp == 0) {
@@ -2062,6 +2185,19 @@ static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
         return 0;
     }
 
+    const int cacheable = (cache_slot >= 0 && cache_slot < 3 && pts_us != INT64_MIN);
+    if (cacheable) {
+        const typeof(g_agc_dev.stage_cache[0]) *c = &g_agc_dev.stage_cache[cache_slot];
+        if (c->valid && c->src == src && c->src_pitch == src_pitch &&
+            c->width == width && c->height == height && c->bpp == bpp &&
+            c->pts_us == pts_us &&
+            (g_agc_dev.frame_counter - c->frame_staged) < 2u) {
+            *out_pitch = c->gpu_pitch;
+            *out_gpu = c->gpu_addr;
+            return 0;
+        }
+    }
+
     size_t total_bytes = (size_t)pitch * (size_t)height;
     evo_agc_transient_slice_t slice;
     if (evo_agc_transient_ring_alloc(ring, slot, total_bytes, 256, &slice) != EVO_AGC_TRANSIENT_OK) {
@@ -2070,11 +2206,22 @@ static int stage_plane(evo_agc_transient_ring_t *ring, uint32_t slot,
         return -1;
     }
 
-    uint8_t *dst = (uint8_t *)slice.cpu;
-    for (uint32_t r = 0; r < height; ++r) {
-        memcpy(dst + (size_t)r * pitch, src + (size_t)r * src_pitch, row_bytes);
+    stream_copy_rows((uint8_t *)slice.cpu, pitch, src, (size_t)src_pitch,
+                     row_bytes, height);
+
+    if (cacheable) {
+        typeof(g_agc_dev.stage_cache[0]) *c = &g_agc_dev.stage_cache[cache_slot];
+        c->src = src;
+        c->src_pitch = src_pitch;
+        c->width = width;
+        c->height = height;
+        c->bpp = bpp;
+        c->pts_us = pts_us;
+        c->frame_staged = g_agc_dev.frame_counter;
+        c->gpu_pitch = pitch;
+        c->gpu_addr = slice.gpu_addr;
+        c->valid = 1;
     }
-    evo_agc_runtime_cache_flush(slice.cpu, total_bytes);
 
     *out_pitch = pitch;
     *out_gpu = slice.gpu_addr;
@@ -2111,16 +2258,34 @@ static int stage_planar_uv_to_rg16(evo_agc_transient_ring_t *ring, uint32_t slot
         return -1;
     }
 
+    /* Interleave straight into the GPU buffer with non-temporal stores - at
+     * 4K HDR this plane is 8.3 MB a frame, and the clflush walk it used to
+     * need afterwards cost about as much again. */
     uint8_t *dst = (uint8_t *)slice.cpu;
+    const int nt = nt_stores_enabled() && ((uintptr_t)dst & 15u) == 0u &&
+                   (pitch & 15u) == 0u;
+    const uint32_t vec = nt ? (cw2 & ~3u) : 0u;
     for (uint32_t r = 0; r < ch2; ++r) {
         const uint16_t * __restrict src_u = (const uint16_t *)(u + (size_t)r * (size_t)u_pitch);
         const uint16_t * __restrict src_v = (const uint16_t *)(v + (size_t)r * (size_t)v_pitch);
         uint32_t * __restrict dst_row = (uint32_t *)(dst + (size_t)r * (size_t)pitch);
-        for (uint32_t c = 0; c < cw2; ++c) {
-            dst_row[c] = (uint32_t)src_u[c] | ((uint32_t)src_v[c] << 16);
+        for (uint32_t c = 0; c < vec; c += 4u) {
+            const __m128i q = _mm_set_epi32(
+                (int)((uint32_t)src_u[c + 3] | ((uint32_t)src_v[c + 3] << 16)),
+                (int)((uint32_t)src_u[c + 2] | ((uint32_t)src_v[c + 2] << 16)),
+                (int)((uint32_t)src_u[c + 1] | ((uint32_t)src_v[c + 1] << 16)),
+                (int)((uint32_t)src_u[c + 0] | ((uint32_t)src_v[c + 0] << 16)));
+            _mm_stream_si128((__m128i *)(dst_row + c), q);
         }
+        for (uint32_t c = vec; c < cw2; ++c)
+            dst_row[c] = (uint32_t)src_u[c] | ((uint32_t)src_v[c] << 16);
+        if (vec < cw2)
+            evo_agc_runtime_cache_flush(dst_row + vec, (size_t)(cw2 - vec) * 4u);
     }
-    evo_agc_runtime_cache_flush(slice.cpu, total_bytes);
+    if (nt)
+        _mm_sfence();
+    else
+        evo_agc_runtime_cache_flush(slice.cpu, total_bytes);
 
     if (out_pitch) *out_pitch = pitch;
     if (out_gpu) *out_gpu = slice.gpu_addr;
@@ -2153,11 +2318,9 @@ void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
 
     const uint32_t pitch = g_agc_dev.composite_pitch;
     if (upload) {
-        for (int row = 0; row < h; ++row)
-            memcpy(g_agc_dev.composite_pixels + (size_t)row * pitch,
-                   fb + (size_t)row * w, (size_t)w * 4u);
-        evo_agc_runtime_cache_flush(g_agc_dev.composite_pixels,
-                                    (size_t)pitch * (size_t)h);
+        stream_copy_rows(g_agc_dev.composite_pixels, pitch,
+                         (const uint8_t *)fb, (size_t)w * 4u,
+                         (size_t)w * 4u, (uint32_t)h);
     }
 
     evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
@@ -2232,20 +2395,20 @@ void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
     evo_agc_runtime_note_draw();
 }
 
-void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
+int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,
                       const uint8_t *u,  int u_pitch,
                       const uint8_t *v,  int v_pitch,
                       int coded_w, int coded_h,
                       int disp_w, int disp_h,
                       int view_mode, int ten_bit, int color_trc,
-                      int is_direct)
+                      int is_direct, int64_t pts_us)
 {
     if (!g_agc_dev.initialized || !y || y_pitch <= 0 || coded_w <= 0 || coded_h <= 0)
-        return;
+        return -1;
     const int planar = (uv == NULL);
     if (planar ? (!u || !v) : (uv == NULL))
-        return;
+        return -1;
 
     evo_agc_runtime_frame_begin();
 
@@ -2304,13 +2467,13 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     /* Allocate VideoConstants in transient ring (64 bytes) */
     evo_agc_transient_slice_t const_slice;
     if (evo_agc_transient_ring_alloc(ring, slot, 64, 16, &const_slice) != EVO_AGC_TRANSIENT_OK)
-        return;
+        return -1;
     memcpy(const_slice.cpu, &constants, sizeof(constants));
 
     /* Build uniform buffer V# descriptor in transient ring (16 bytes) */
     evo_agc_transient_slice_t vsharp_slice;
     if (evo_agc_transient_ring_alloc(ring, slot, 16, 16, &vsharp_slice) != EVO_AGC_TRANSIENT_OK)
-        return;
+        return -1;
     evo_agc_build_constant_vsharp((uint32_t *)vsharp_slice.cpu, const_slice.gpu_addr, sizeof(constants));
 
     /* VS user SGPR (GS stage: compact register 0x8c).
@@ -2325,7 +2488,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         evo_agc_runtime_get_user_data_layout(pipe_id);
     if (!vud.vs_count || vud.vs_const_table_dword < 0 ||
         vud.ps_texture_table_dword < 0 || vud.vs_count > 16 || vud.ps_count > 16)
-        return;
+        return -1;
 
     uint32_t vs_user[16] = {0};
     vs_user[vud.vs_const_table_dword] = (uint32_t)vsharp_slice.gpu_addr;
@@ -2335,10 +2498,11 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const uint32_t bpp = ten_bit ? 2u : 1u;
     uint32_t y_pitch_gpu = 0;
     uint64_t y_gpu = 0;
-    if (stage_plane(ring, slot, y, y_pitch, coded_w, coded_h, bpp, is_direct, &y_pitch_gpu, &y_gpu) != 0) {
+    if (stage_plane(ring, slot, y, y_pitch, coded_w, coded_h, bpp, is_direct, 0, pts_us,
+                    &y_pitch_gpu, &y_gpu) != 0) {
         evo_boot_log("agc_blit_yuv: stage Y plane failed");
         evo_boot_log_flush();
-        return;
+        return -1;
     }
 
     evo_agc_transient_slice_t desc_slice;
@@ -2347,7 +2511,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         if (evo_agc_transient_ring_alloc(ring, slot, 144, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
             evo_boot_log("agc_blit_yuv: desc_slice alloc failed");
             evo_boot_log_flush();
-            return;
+            return -1;
         }
         uint32_t *desc = (uint32_t *)desc_slice.cpu;
         memset(desc, 0, 144);
@@ -2356,15 +2520,17 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         uint64_t u_gpu = 0, v_gpu = 0;
         uint32_t cw2 = (uint32_t)(coded_w / 2);
         uint32_t ch2 = (uint32_t)(coded_h / 2);
-        if (stage_plane(ring, slot, u, u_pitch, cw2, ch2, 1u, is_direct, &u_pitch_gpu, &u_gpu) != 0) {
+        if (stage_plane(ring, slot, u, u_pitch, cw2, ch2, 1u, is_direct, 1, pts_us,
+                        &u_pitch_gpu, &u_gpu) != 0) {
             evo_boot_log("agc_blit_yuv: stage U plane failed");
             evo_boot_log_flush();
-            return;
+            return -1;
         }
-        if (stage_plane(ring, slot, v, v_pitch, cw2, ch2, 1u, is_direct, &v_pitch_gpu, &v_gpu) != 0) {
+        if (stage_plane(ring, slot, v, v_pitch, cw2, ch2, 1u, is_direct, 2, pts_us,
+                        &v_pitch_gpu, &v_gpu) != 0) {
             evo_boot_log("agc_blit_yuv: stage V plane failed");
             evo_boot_log_flush();
-            return;
+            return -1;
         }
 
         /* Binding 0: Y plane */
@@ -2382,7 +2548,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         if (r0 != 0 || r1 != 0 || r2 != 0) {
             evo_boot_log("agc_blit_yuv: build tsharp failed rc=%d/%d/%d", r0, r1, r2);
             evo_boot_log_flush();
-            return;
+            return -1;
         }
     } else {
         /* NV12 / P010 2-plane: 96 bytes descriptor table (2 * 48B).
@@ -2390,7 +2556,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         if (evo_agc_transient_ring_alloc(ring, slot, 96, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
             evo_boot_log("agc_blit_yuv: 2-plane desc_slice alloc failed");
             evo_boot_log_flush();
-            return;
+            return -1;
         }
         uint32_t *desc = (uint32_t *)desc_slice.cpu;
         memset(desc, 0, 96);
@@ -2404,14 +2570,15 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
             if (stage_planar_uv_to_rg16(ring, slot, u, u_pitch, v, v_pitch, cw2, ch2, &uv_pitch_gpu, &uv_gpu) != 0) {
                 evo_boot_log("agc_blit_yuv: stage planar UV to RG16 failed");
                 evo_boot_log_flush();
-                return;
+                return -1;
             }
         } else {
             uint32_t uv_bpp = bpp * 2u;
-            if (stage_plane(ring, slot, uv, uv_pitch, cw2, ch2, uv_bpp, is_direct, &uv_pitch_gpu, &uv_gpu) != 0) {
+            if (stage_plane(ring, slot, uv, uv_pitch, cw2, ch2, uv_bpp, is_direct, 1, pts_us,
+                            &uv_pitch_gpu, &uv_gpu) != 0) {
                 evo_boot_log("agc_blit_yuv: stage UV plane failed");
                 evo_boot_log_flush();
-                return;
+                return -1;
             }
         }
 
@@ -2428,7 +2595,7 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         if (r0 != 0 || r1 != 0) {
             evo_boot_log("agc_blit_yuv: build 2-plane tsharp failed rc=%d/%d", r0, r1);
             evo_boot_log_flush();
-            return;
+            return -1;
         }
     }
 
@@ -2443,4 +2610,9 @@ void evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     /* Without this the frame carries no recorded draw and frame_end discards it
      * instead of presenting - video would decode and never reach the panel. */
     evo_agc_runtime_note_draw();
+
+    /* This buffer now holds this frame; the render loop stops redrawing the
+     * quad until the buffer it is about to draw into holds something else. */
+    evo_agc_runtime_note_video_pts(pts_us);
+    return 0;
 }

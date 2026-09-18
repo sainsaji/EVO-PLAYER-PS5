@@ -560,7 +560,10 @@ void *video_decode_thread_func(void *arg) {
             !video_decode_ready
         ) {
             video_decode_parked = 1;
-            usleep(1000);
+            /* Parked: paused, off the player screen, or not ready. 1 ms was
+             * 1000 pointless wakeups a second; 5 ms is still well inside a
+             * frame, so nothing notices on resume. */
+            usleep(5000);
             next_ms = 0;
             continue;
         }
