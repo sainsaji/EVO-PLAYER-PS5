@@ -87,7 +87,7 @@ long long now_ms(void);
 }
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "0.7.6"
+#define EVO_PLAYER_VERSION "0.10.0"
 #endif
 
 #ifndef EVO_DIRECT_MEM_POOL_BYTES
@@ -258,6 +258,15 @@ bool Application::initHardware() {
     }
 
     evo_rmlui_init(DisplayWidth, DisplayHeight);
+    /*
+     * The three screen footers (list, browser, changelog) render m_version,
+     * but only behind `if (!m_version.empty())` - and nothing in the app ever
+     * called this, so m_version was always empty and all three fell through to
+     * the literal baked into the .rml. They had been showing v0.7.1 ever since
+     * that string was last hand-edited. Only the host tools set it, which is
+     * why uiview looked right while the console did not.
+     */
+    evo_rmlui_set_version("v" EVO_PLAYER_VERSION);
 
     evo_input_reset(&evo_pad_state);
     evo_feedback_init(m_padHandle, SoundEffectCallback);

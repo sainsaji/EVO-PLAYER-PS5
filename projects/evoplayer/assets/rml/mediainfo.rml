@@ -120,7 +120,7 @@
                     <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">RETURN TO FILM</span>
                 </div>
-                <div id="footer-engine-ver">EVO PRO DECODER v0.7.0</div>
+                <div id="footer-engine-ver">EVO PRO DECODER v0.10.0</div>
             </div>
         </div>
     </div>

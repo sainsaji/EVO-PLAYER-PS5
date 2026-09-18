@@ -10,7 +10,7 @@
 #include <cstring>
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "0.7.6"
+#define EVO_PLAYER_VERSION "0.10.0"
 #endif
 
 namespace evo {

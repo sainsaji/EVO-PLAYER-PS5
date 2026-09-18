@@ -153,7 +153,7 @@
                 <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">MOVE</span>
             </div>
-            <div id="changelog-footer-version">v0.7.1</div>
+            <div id="changelog-footer-version">v0.10.0</div>
         </div>
     </div>
 </body>

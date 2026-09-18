@@ -277,7 +277,7 @@
                     <div class="glyph-badge-pill"><span class="glyph-pill-text">L2 / R2</span></div>
                     <span class="footer-text">A-Z</span>
                 </div>
-                <div id="browser-footer-version">v0.7.1</div>
+                <div id="browser-footer-version">v0.10.0</div>
             </div>
         </div>
     </div>

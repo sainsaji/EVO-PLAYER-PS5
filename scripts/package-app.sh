@@ -277,6 +277,15 @@ else
     # this generated header - drop main.o so the id on screen is always current.
     rm -f "${EVO}/main.o"
     APP_DEFS="-DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
+    # Version, from projects/evoplayer/VERSION - the file release.yml checks
+    # the tag against. Nothing defined this before, so the three duplicated
+    # #ifndef fallbacks in the C++ were what actually shipped, and they had
+    # already drifted apart from the file and from launch.rml (0.7.6 in code,
+    # 0.7.0 on the launch screen). Define it here and the fallbacks stay
+    # fallbacks.
+    EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
+    [[ -n "${EVO_VER}" ]] || die "projects/evoplayer/VERSION is empty"
+    APP_DEFS+=" -DEVO_PLAYER_VERSION=\\"${EVO_VER}\\""
     # --usb-remote: the scriptable dev remote (evo_usb_remote.c) — the
     # /mnt/usb0/evo_status snapshot + the evo_cmd command channel. Off by
     # default so a release eboot never touches the user's USB stick per frame.

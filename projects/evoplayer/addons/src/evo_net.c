@@ -1,6 +1,13 @@
 /*
  * evo_net.c — Non-blocking HTTP/REST client implementation using BSD sockets.
  */
+/* Matches the other translation units that report a version: the app build
+ * passes -DEVO_PLAYER_VERSION from projects/evoplayer/VERSION; this is the
+ * fallback for builds that do not. */
+#ifndef EVO_PLAYER_VERSION
+#define EVO_PLAYER_VERSION "0.10.0"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -207,7 +214,7 @@ static int execute_http(const char *method,
     int req_len = snprintf(req_buf, sizeof(req_buf),
                            "%s %s HTTP/1.1\r\n"
                            "Host: %s:%d\r\n"
-                           "User-Agent: EVOPlayer-PS5/0.7.0\r\n"
+                           "User-Agent: EVOPlayer-PS5/" EVO_PLAYER_VERSION "\r\n"
                            "Accept: application/json, text/plain, */*\r\n"
                            "Connection: close\r\n",
                            method, path, host, port);
