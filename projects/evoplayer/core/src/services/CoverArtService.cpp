@@ -783,27 +783,57 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     return success;
 }
 
+/*
+ * Cache first, then touch the filesystem.
+ *
+ * The existence check used to run before the cache was consulted, and returned
+ * without recording anything anywhere. A path that does not resolve - a recents
+ * entry whose file has since been deleted, which is the ordinary way to end up
+ * here - therefore missed the cache on every single call and was retried for
+ * the life of the process. From the hardware log of 2026-09-18: 848 identical
+ * "access fail len=141" triples in 14.5 s, one per frame, for one dead entry on
+ * the launch shelf, and 87% of the entire log.
+ *
+ * The tracing was the more expensive half, and it was not confined to the
+ * failing path. Every call - including the cache hits, which is nearly all of
+ * them once the shelf is warm - wrote three evo_bt lines and flushed three
+ * times, and a flush here lands on /mnt/usb0, i.e. USB storage, as well as
+ * klog. Those traces are there to explain the first attempt at a path, so that
+ * is now the only time they run.
+ *
+ * Consulting the cache first also lets a failed lookup be recorded as
+ * tried+invalid like any other miss, so it short-circuits from then on. One
+ * deliberate consequence: a cover whose file disappears mid-session keeps
+ * showing its cached poster rather than blanking, because the filesystem is no
+ * longer re-checked on a hit. That is consistent with how this cache already
+ * treats every other kind of staleness - nothing invalidates a slot once tried.
+ */
 const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool isDirectory) {
-    evo_bt("getCoverArt: %s (isDir=%d)", mediaPath.c_str(), isDirectory ? 1 : 0);
-    evo_boot_log_flush();
-
-    if (mediaPath.empty()) { evo_bt("getCoverArt: empty path"); evo_boot_log_flush(); return nullptr; }
-    if (access(mediaPath.c_str(), R_OK) != 0) { evo_bt("getCoverArt: access fail len=%zu", mediaPath.length()); evo_boot_log_flush(); evo_bt("getCoverArt: returning nullptr"); evo_boot_log_flush(); return nullptr; }
-    evo_bt("getCoverArt: access ok, calling findOrAllocateSlot");
-    evo_boot_log_flush();
+    if (mediaPath.empty())
+        return nullptr;
 
     CacheEntry* slot = findOrAllocateSlot(mediaPath);
-    if (!slot) { evo_bt("getCoverArt: no slot"); evo_boot_log_flush(); return nullptr; }
-    evo_bt("getCoverArt: slot=%p tried=%d", (void*)slot, slot->tried);
-    evo_boot_log_flush();
+    if (!slot)
+        return nullptr;
 
     if (slot->tried && slot->pathKey == mediaPath) {
         return slot->valid ? slot->pixels.data() : nullptr;
     }
 
+    /* First attempt for this path: from here down the tracing is once per path,
+     * not once per frame. */
+    evo_bt("getCoverArt: %s (isDir=%d)", mediaPath.c_str(), isDirectory ? 1 : 0);
+    evo_boot_log_flush();
+
     slot->pathKey = mediaPath;
     slot->tried = true;
     slot->valid = false;
+
+    if (access(mediaPath.c_str(), R_OK) != 0) {
+        evo_bt("getCoverArt: access fail len=%zu -> cached as missing", mediaPath.length());
+        evo_boot_log_flush();
+        return nullptr;
+    }
 
     std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
     evo_bt("getCoverArt: sidecar='%s'", sidecar.c_str());
