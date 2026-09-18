@@ -148,7 +148,7 @@ docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml \
 
 At application startup or renderer initialization:
 
-1. **[`evo_agc_shader_header.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/src/evo_agc_shader_header.c)**:
+1. **[`evo_agc_shader_header.c`](../projects/evoplayer/media/src/evo_agc_shader_header.c)**:
    - Allocates GPU memory for the shader ISA storage (via `sceKernelAllocateDirectMemory` or transient ring).
    - Writes register arrays into memory.
    - Flushes CPU write caches to ensure the GPU Command Processor reads coherent data.

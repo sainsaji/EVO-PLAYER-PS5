@@ -60,7 +60,7 @@ flowchart TD
 ## 3. Completed Implementations & Performance Verification
 
 ### 3.1 GPU Compute & Vectorized Workgroup Pipeline
-- **Files:** [`pp_compute_pipeline.h`](file:///D:/Projects/EVO%20Player/projects/evoplayer/pp/include/pp_compute_pipeline.h), [`pp_compute_pipeline.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/pp/src/pp_compute_pipeline.c)
+- **Files:** `pp_compute_pipeline.h`, `pp_compute_pipeline.c`
 - **Architecture:**
   - 8-wide vectorized SIMD compute kernel with `vpmovzxbd` (`_mm256_cvtepu8_epi32`) and vector Chroma caching (`vperm32`).
   - Persistent worker pool with dynamic workgroup partitioning (1 to 16 workers).
@@ -72,7 +72,7 @@ flowchart TD
 ---
 
 ### 3.2 Native PlayStation IME & Media Directory Search
-- **Files:** [`evo_keyboard.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/ui/src/evo_keyboard.c), [`main.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/main.c), [`evo_chrome.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/ui/src/evo_chrome.c)
+- **Files:** [`evo_keyboard.c`](../projects/evoplayer/ui/src/evo_keyboard.c), [`main.c`](../projects/evoplayer/main.c.legacy), `evo_chrome.c`
 - **Architecture:**
   - Integrated native `SceImeDialog` with automatic fallback to high-resolution virtual keyboard.
   - Multi-language, CJK, word prediction, and physical USB/Bluetooth keyboard support.
@@ -81,7 +81,7 @@ flowchart TD
 ---
 
 ### 3.3 Direct Memory Architecture & Zero-Fragmentation Slab Manager
-- **Files:** [`evo_direct_mem.h`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/include/evo_direct_mem.h), [`evo_direct_mem.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/src/evo_direct_mem.c)
+- **Files:** [`evo_direct_mem.h`](../projects/evoplayer/media/include/evo_direct_mem.h), [`evo_direct_mem.c`](../projects/evoplayer/media/src/evo_direct_mem.c)
 - **Architecture:**
   - Pre-allocates a 64 MiB 2MB-aligned direct memory pool at startup.
   - Slabs provide 64-byte aligned SIMD buffers for frame packets, subtitle textures, and streaming I/O buffers.
@@ -93,7 +93,7 @@ flowchart TD
 ---
 
 ### 3.4 High-Throughput Streaming I/O Engine
-- **Files:** [`evo_stream_io.h`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/include/evo_stream_io.h), [`evo_stream_io.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/src/evo_stream_io.c)
+- **Files:** [`evo_stream_io.h`](../projects/evoplayer/media/include/evo_stream_io.h), [`evo_stream_io.c`](../projects/evoplayer/media/src/evo_stream_io.c)
 - **Architecture:**
   - Asynchronous 8 MiB streaming read-ahead buffer for local USB media and network streams (Emby / HTTP).
   - Issues kernel sequential hints via `posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL)` and `POSIX_FADV_WILLNEED`.
@@ -105,11 +105,11 @@ flowchart TD
 
 | Domain | Feature | Completion Status | Phase / Target | Target Impact | Implementation Reference / Files | Verified Performance / Metric |
 |---|---|:---:|---|---|---|---|
-| **GPU / Video** | GPU Compute YUV$\to$RGB Pipeline | **100% Completed** | Phase 1 | Free 8ms per 4K frame; 2.81× speedup | [`pp_compute_pipeline.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/pp/src/pp_compute_pipeline.c) | **0.75ms** (1080p, 4% budget), **7.43ms** (4K, 45% budget) |
-| **System** | Native IME Keyboard (`SceImeDialog`) | **100% Completed** | Phase 1 | Multi-language, CJK, USB keyboard | [`evo_keyboard.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/ui/src/evo_keyboard.c), [`main.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/main.c) | Native PS5 keyboard overlay with virtual fallback |
-| **System** | Media Directory Recursive Search | **100% Completed** | Phase 1 | Instant folder-wide media search | [`main.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/main.c), [`evo_chrome.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/ui/src/evo_chrome.c) | Recursive scanner triggered via `SQUARE` button |
-| **I/O & Mem** | 2MB Direct Memory Slab Pool | **100% Completed** | Phase 1 | Zero-fragmentation 64MB memory region | [`evo_direct_mem.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/src/evo_direct_mem.c) | **1.50× faster alloc**, **33M ops/sec**, 0 heap bloat |
-| **I/O & Mem** | High-Throughput Streaming I/O Engine | **100% Completed** | Phase 1 | 8MB read-ahead + sequential kernel caching | [`evo_stream_io.c`](file:///D:/Projects/EVO%20Player/projects/evoplayer/media/src/evo_stream_io.c) | `posix_fadvise(SEQUENTIAL)` + 8MB buffer for 4K REMUX |
+| **GPU / Video** | GPU Compute YUV$\to$RGB Pipeline | **100% Completed** | Phase 1 | Free 8ms per 4K frame; 2.81× speedup | `pp_compute_pipeline.c` | **0.75ms** (1080p, 4% budget), **7.43ms** (4K, 45% budget) |
+| **System** | Native IME Keyboard (`SceImeDialog`) | **100% Completed** | Phase 1 | Multi-language, CJK, USB keyboard | [`evo_keyboard.c`](../projects/evoplayer/ui/src/evo_keyboard.c), [`main.c`](../projects/evoplayer/main.c.legacy) | Native PS5 keyboard overlay with virtual fallback |
+| **System** | Media Directory Recursive Search | **100% Completed** | Phase 1 | Instant folder-wide media search | [`main.c`](../projects/evoplayer/main.c.legacy), `evo_chrome.c` | Recursive scanner triggered via `SQUARE` button |
+| **I/O & Mem** | 2MB Direct Memory Slab Pool | **100% Completed** | Phase 1 | Zero-fragmentation 64MB memory region | [`evo_direct_mem.c`](../projects/evoplayer/media/src/evo_direct_mem.c) | **1.50× faster alloc**, **33M ops/sec**, 0 heap bloat |
+| **I/O & Mem** | High-Throughput Streaming I/O Engine | **100% Completed** | Phase 1 | 8MB read-ahead + sequential kernel caching | [`evo_stream_io.c`](../projects/evoplayer/media/src/evo_stream_io.c) | `posix_fadvise(SEQUENTIAL)` + 8MB buffer for 4K REMUX |
 | **Audio** | Dynamic Port Re-routing (`RerouteCounter`) | **0% (Planned)** | Phase 2 | Seamless headphone/AVR channel switch | `pp_audio_clock.c` (Target) | Auto-detect DualSense 3.5mm jack / HDMI switch |
 | **Input** | DualSense Touchpad Scrubbing | **0% (Planned)** | Phase 2 | Precision timeline scrubbing with gestures | `evo_input.c` (Target) | Direct `ScePadData.touchData` X/Y coordinate scrub |
 | **System** | Native Notifications & PS Button Banners | **0% (Planned)** | Phase 2 | Background sync/indexing notifications | `evo_net.c` / `main.c` (Target) | `libSceNotification` background toast / banners |

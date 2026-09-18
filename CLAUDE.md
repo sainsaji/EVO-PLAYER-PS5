@@ -27,7 +27,12 @@ the dependency-ordered plan; each issue body also carries its own
   them, not even for a UI check. `build-evoplayer.sh` is a compile check only.
 - **Never deploy over a running EVO** (panic risk) and **never stack launches**
   — the app slot stays resident; stacking has kernel-panicked the console
-  (~50 min lost). Only the PS button (close app on console) frees the slot.
+  (~50 min lost). **Close with Settings → System & Diagnostics → QUIT EVO**,
+  not the PS button: PS-close kills the process, so `Application::shutdown()`
+  never runs and the kernel reclaims VideoOut + the 64 MB direct-memory pool
+  under a possibly-still-submitting GPU — that panicked the console on
+  2026-09-18. QUIT + the `agc_wait_gpu_idle()` drain are **hw-verify-pending**;
+  the PS button remains the fallback. → [docs/tooling.md](docs/tooling.md)
 - **Never sweep kernel `.text`** (`kernel_copyout` over a range). Panics the
   console every time; this is why the `kdump` project no longer exists.
 - **Never call `sceVideoOutOpen` from a payload.** Returns a handle that
@@ -103,8 +108,16 @@ Full command reference, all scripts, screenshot measurement tools
 
 ```
 projects/evoplayer/
-  main.c        the player: FFmpeg, threads, input, screens, state
-  media/        subsystems carved out of main.c (own state/threads, narrow interface)
+  main.cpp      entry point only (~96 lines): crash/SIGTERM handlers, then
+                evo::Application::run(). NOT where the player lives.
+  main.c.legacy the old 11.5k-line monolith. NOT COMPILED, not in any build —
+                kept for reference while the carve-up finishes. Do not edit it
+                expecting a behaviour change, and do not read it to learn
+                current behaviour; grep core/ instead.
+  core/         the player: Application.cpp (frame loop, shutdown), screens/,
+                services/ (CoverArtService, settings, metadata), fsm/
+  media/        subsystems carved out of the legacy main.c (own state/threads,
+                narrow interface)
   pp/           playback: pace + presentation clock + seek (pp_playback),
                 theme. The CPU converters, tile_copy, the V8/V3/1080 backend
                 dispatch and pp_agc*/pp_videoout/pp_platform.h are all deleted —
@@ -124,8 +137,8 @@ tools/          uiview, klog, shot, evo-remote, gen_icons — see docs/tooling.m
 docs/           everything below
 ```
 
-Full rationale for the layer boundaries, and why `main.c` is still large:
-[docs/architecture.md](docs/architecture.md).
+Full rationale for the layer boundaries, and how much of the legacy `main.c`
+is still to be absorbed: [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -153,7 +166,7 @@ mock data — everything in the DOM binds to live C structs
 |---|---|
 | [roadmap.md](docs/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
 | [project-tracking.md](docs/project-tracking.md) | The "EVO Player Roadmap" GitHub Project board — setup script, field↔label map, views, auto-add workflows |
-| [architecture.md](docs/architecture.md) | Layer boundaries, why `main.c` is still large |
+| [architecture.md](docs/architecture.md) | Layer boundaries; what still remains in the un-compiled `main.c.legacy` |
 | [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
 | [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
 | [rmlui-integration-guide.md](docs/rmlui-integration-guide.md) | RmlUi migration spec (active work) |
@@ -163,6 +176,7 @@ mock data — everything in the DOM binds to live C structs
 | [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
 | [evo-pro/agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) | **The RmlUi UI on bare-metal `sceAgc`** (hw-verified 2026-09-12) — `.pipe` + amdllpc shader toolchain, the gfx1013 LLPC patch, the silent-failure bugs and the `agc health` lines that verify a build. `--agc` builds only; video present is still unported. |
 | [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)**. **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (**historical** — the hand-rolled sceAgc path that preceded today's runtime) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md) |
+| [shader-compilation.md](docs/shader-compilation.md) | The `.pipe` → amdllpc → PAL-metadata shader toolchain (gfx1013), and how a compiled pipeline is fed to `sceAgc` |
 | [gpu-notes.md](docs/gpu-notes.md) | The GPU reverse-engineering history behind the bare-metal sceAgc runtime |
 | [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted when the GPU took over present. Kept for the BT.601 reference matrix |
 | [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
@@ -181,7 +195,7 @@ mock data — everything in the DOM binds to live C structs
 ## Working efficiently in this repo
 
 - **Read narrow.** `evo_rmlui_app.cpp`, `uiview_playback_rml.cpp` and
-  `main.c` are all 1000+ lines. Grep for the symbol/screen first, then read
+  `core/Application.cpp` are all 1000+ lines. Grep for the symbol/screen first, then read
   just that range, instead of reading the whole file.
 - **Don't Read a file right after Edit-ing it** — a successful Edit already
   confirmed the change; re-reading just to check burns tokens for nothing.

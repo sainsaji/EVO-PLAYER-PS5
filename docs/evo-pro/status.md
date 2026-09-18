@@ -645,7 +645,7 @@ already on the console), launch, read `EVO avplayer:` popups.
     (verified: symbol + strings present).
   - `projects/avplayer_test/` (payload) kept as a compile-checked callback-port
     reference only — it cannot decode.
-  - Write-up + verdict table + memory-typing diff: [avplayer-abi.md](avplayer-abi.md).
+  - Write-up + verdict table + memory-typing diff: avplayer-abi.md *(not written)*.
   - **Staged build:** `output/app/PPSA99039.ffpfsc` includes `--avplayer-probe`
     `--agc-probe`. **Next console session:** deploy, drop a small H.264 `.mp4`
     at `/data/probe.mp4` (FTP) or `/mnt/usb0/probe.mp4`, launch from Games row,

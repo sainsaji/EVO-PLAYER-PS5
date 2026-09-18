@@ -243,9 +243,9 @@ sandbox is `/app0` (RO) + `/download0` (writable **iff `downloadDataSize > 0`**)
 logs"*. ProsperoLight never browses USB or `/data`, so **the reference gives us
 nothing here.**
 
-EVO touches sandboxed paths everywhere: [main.c:1636](../../projects/evoplayer/main.c#L1636)
-(`/mnt/usb0` browse root), [main.c:12074](../../projects/evoplayer/main.c#L12074)
-(`mkdir /data/evoplayer`), [main.c:6852](../../projects/evoplayer/main.c#L6852)
+EVO touches sandboxed paths everywhere: [main.c:1636](../../projects/evoplayer/main.c.legacy#L1636)
+(`/mnt/usb0` browse root), [main.c:12074](../../projects/evoplayer/main.c.legacy#L12074)
+(`mkdir /data/evoplayer`), [main.c:6852](../../projects/evoplayer/main.c.legacy#L6852)
 (settings), themes ([evo_theme.c:26](../../projects/evoplayer/pp/src/evo_theme.c#L26)),
 `emby.conf`, favorites/recent DBs, RmlUi asset fallback paths.
 

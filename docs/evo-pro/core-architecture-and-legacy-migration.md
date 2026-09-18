@@ -150,7 +150,7 @@ To eliminate implicit state bugs, race conditions during rapid user input, and u
 
 The framework is designed specifically for PlayStation 5 native execution (C++17, zero `<iostream>`, zero heap allocation on the transition path):
 
-* **[`IStateMachine`](file:///D:/Projects/EVO%20Player/projects/evoplayer/core/include/evo/fsm/IStateMachine.hpp)**:
+* **[`IStateMachine`](../../projects/evoplayer/core/include/evo/fsm/IStateMachine.hpp)**:
   Abstract, type-erased interface providing polymorphic access to any state machine:
   - `update(double deltaMs)`: Tick time-dependent state logic.
   - `getStateName()`: Human-readable name of the current active state for diagnostics and logging.
@@ -158,7 +158,7 @@ The framework is designed specifically for PlayStation 5 native execution (C++17
   - `canDispatch(int eventId)`: Query if an event transition is valid from the current state.
   - `dispatchEvent(int eventId)`: Trigger an event transition.
 
-* **[`StateMachine<TState, TEvent>`](file:///D:/Projects/EVO%20Player/projects/evoplayer/core/include/evo/fsm/StateMachine.hpp)**:
+* **[`StateMachine<TState, TEvent>`](../../projects/evoplayer/core/include/evo/fsm/StateMachine.hpp)**:
   Strongly-typed, header-only template implementation supporting:
   - Guard conditions (`std::function<bool()>`) evaluated before transitions.
   - Transition actions (`std::function<void()>`) executed atomically during state change.
@@ -166,7 +166,7 @@ The framework is designed specifically for PlayStation 5 native execution (C++17
   - State change observer callbacks.
   - No `<iostream>` dependencies: uses `<cstdio>` for snprintf-safe logging.
 
-* **[`IStatefulFeature`](file:///D:/Projects/EVO%20Player/projects/evoplayer/core/include/evo/interfaces/IStatefulFeature.hpp)**:
+* **[`IStatefulFeature`](../../projects/evoplayer/core/include/evo/interfaces/IStatefulFeature.hpp)**:
   The architectural contract interface:
   ```cpp
   class IStatefulFeature {
@@ -185,7 +185,7 @@ The requirement that future features implement state machines is enforced at **c
    `IScreen` derives directly from `IStatefulFeature`. If a developer creates a new screen class without implementing `getStateMachine()`, the compiler will reject it as an abstract type instantiation error.
 
 2. **`StatefulScreen` Base Class**:
-   [`StatefulScreen`](file:///D:/Projects/EVO%20Player/projects/evoplayer/core/include/evo/screens/StatefulScreen.hpp) provides a turn-key implementation of `IStatefulFeature` for screens. It manages a `StateMachine<ScreenLifecycleState, ScreenLifecycleEvent>`:
+   [`StatefulScreen`](../../projects/evoplayer/core/include/evo/screens/StatefulScreen.hpp) provides a turn-key implementation of `IStatefulFeature` for screens. It manages a `StateMachine<ScreenLifecycleState, ScreenLifecycleEvent>`:
    - States: `Uninitialized` $\to$ `Entering` $\to$ `Active` $\rightleftharpoons$ `Suspended` $\to$ `Exiting`.
    - Automatically handles lifecycle hook transitions when `onEnter()`, `onExit()`, and `update()` are called.
    - Any screen with custom domain states (e.g. `PlayerScreen`, `BrowserScreen`, `LaunchScreen`, `ModalDialogScreen`) can either override `getStateMachine()` to expose its domain FSM or nest multiple state machines.

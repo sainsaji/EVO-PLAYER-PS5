@@ -215,47 +215,45 @@ PS5_HOST=192.168.1.50 make -C projects/hello_world test
 
 ## 8. Deploying to the console
 
-```bash
-./scripts/deploy.sh output/elf/hello_world.elf
-PS5_HOST=192.168.1.50 ./scripts/deploy.sh output/elf/hello_world.elf
-```
-
-`deploy.sh` refuses to run without `PS5_HOST`, validates that the file is a PS5
-ELF, probes `PS5_HOST:9021` before transferring, and logs every deployment to
-`output/logs/`. Port **9021** is the `ps5-payload-elfldr` default, and matches
-the SDK's own `prospero-deploy`.
-
-### If it draws or plays sound, deploy.sh is the wrong tool
-
-`ps5-payload-elfldr` runs payloads inside **SceSpZeroConf**
-(`websrv/src/ps5/elfldr.c:74`) — a background network service with **no display
-plane and no audio**. VideoOut and AudioOut calls all *succeed* there; the
-output simply goes nowhere. This cost a debugging session: 960 flips reported
-against a completely black screen.
-
-Anything graphical must be installed as homebrew and launched through websrv's
-`hbldr_launch`, which borrows the PS Now app slot (`hbldr.c:45`):
+**There is one deploy path: the `.ffpfsc` app module.**
 
 ```bash
-# once per jailbreak - deploys websrv + ftpsrv to the console
-./scripts/install-homebrew.sh --setup
-
-# build -> install -> launch -> stream stdout back, in one command
-./scripts/install-homebrew.sh --run output/elf/videoout_test.elf
-./scripts/install-homebrew.sh --run --args "pattern" output/elf/videoout_test.elf
+docker compose run --rm ps5-dev bash -lc '
+  ./scripts/package-app.sh --ffpfsc
+  ./scripts/deploy-app.sh --ffpfsc'
 ```
 
-| Use | For |
-|---|---|
-| `deploy.sh` | headless payloads — `hello_world`, `system_info`, `decoder_test`, daemons |
-| `install-homebrew.sh --run` | anything with picture or sound |
+ShadowMountPlus re-mounts and auto-launches `PPSA99039` on the file change;
+otherwise launch it from the Games row. Close it again with
+**Settings → System & Diagnostics → QUIT EVO** rather than the PS button, and
+close it **before** the next deploy. See
+[tooling.md](tooling.md) for the launch-safety rules and why the close matters.
 
-Note that POSTing to websrv's `/elfldr` endpoint does **not** help — that path
-calls `elfldr_spawn` and lands back in SceSpZeroConf. Only the homebrew
-launcher goes through `hbldr_launch`.
+### The ELF-payload route is gone — do not recreate it
 
-Payload output goes to on-screen notifications (every sample calls
-`evo_notify()`), or to klog via `ps5-payload-klogsrv` on port 3232.
+`scripts/deploy.sh`, `scripts/install-homebrew.sh`, `tools/launch.sh`,
+`scripts/update-console.sh`, `scripts/app-loop.sh` and `tools/push_ps5.py` were
+**deleted in `6db199d`**. This section used to document them. They are not
+coming back, and nothing should be rebuilt around them — including for a quick
+UI check.
+
+The reason is not tidiness. `ps5-payload-elfldr` runs payloads inside
+`SceSpZeroConf`, a background network service with **no display plane and no
+audio**. VideoOut and AudioOut calls all *succeed* there and the output goes
+nowhere — that cost a debugging session, 960 flips against a black screen — and
+the borrowed-process route also hit an errno-5200 wall on hardware decode. The
+app module has real graphics, `sceVideodec2` decode, audio, a user session and
+the self-unjail for `/data`. It is strictly the better target, so it is the
+only one.
+
+For a layout or rendering question, use the host renderer
+(`tools/uiview.sh`, `tools/uiplay.sh`) — no console, no launch cooldown.
+`scripts/build-evoplayer.sh` remains useful as a **host compile check only**;
+it errors if asked to run anything.
+
+Diagnostics come from `/mnt/usb0/evo.log` (one file, pulled with
+`tools/evo-remote.sh log`) and live klog via `tools/klog.sh`.
+
 
 ## 9. PS5 12.70 requirements
 

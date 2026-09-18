@@ -67,9 +67,44 @@ for a fake-signed title.
 **The app slot stays resident.** Launching again does not replace the running
 instance — it adds one, and each opens videoout, an audio port, the pad and
 decoder threads. Stacking them kernel-panicked the console on 2026-08-09
-(~50 min lost). **Only the PS button → close the application** frees the slot,
-and you must do that **before** the next deploy — deploying over a live EVO can
-panic.
+(~50 min lost). Closing frees the slot, and you must do that **before** the
+next deploy — deploying over a live EVO can panic.
+
+### Closing: prefer QUIT EVO over the PS button
+
+**Settings → System & Diagnostics → QUIT EVO** (added 2026-09-18,
+`ACT_QUIT` in `SettingsScreen.cpp`) calls `Application::requestExit()`, which
+clears `m_running` so the frame loop finishes its frame and leaves through
+`Application::shutdown()` — the only path that drains the GPU and hands back
+the scanout registration and the direct-memory pool.
+
+The PS button does not do that. It kills the process, so `run()` never returns
+and `shutdown()` never executes; the kernel reclaims a VideoOut registration
+and a 64 MB direct-memory mapping underneath a GPU that may still be executing
+a submitted command buffer. That is a panic vector, and being a race it does
+not fire every time — the console panicked on a PS-button close on 2026-09-18.
+
+Two mitigations landed with the button, both in that same commit:
+
+- `agc_wait_gpu_idle(500)` runs first in `evo_agc_runtime_shutdown()`. It waits
+  on every frame slot's fence (the protocol `frame_begin` already uses for
+  pacing) before anything is unregistered or released. Bounded at 500 ms: a
+  wedged GPU never retires its fence, and hanging there would turn a panic on
+  exit into a hang on exit. It logs `agc shutdown: slot=N idle` or
+  `STILL BUSY - releasing anyway`.
+- A `SIGTERM`/`SIGINT`/`SIGHUP` handler sets `g_evo_term_requested`, which the
+  frame loop polls, so a signalled kill also leaves through `shutdown()`. The
+  handler only stores to a `sig_atomic_t`.
+
+> **Status: hardware-verify-pending.** Whether the PS5 sends an app module a
+> `SIGTERM` before `SIGKILL` is unverified — if it does not, only the drain and
+> the QUIT button help. `requestExit()` also had no caller before QUIT EVO, so
+> the clean-exit path (including returning from `main()` and running static
+> destructors) has never executed on hardware. If QUIT hangs rather than exits,
+> that is the suspect, and the PS button still recovers it.
+>
+> To check: quit via the button, pull `evo.log`, look for the
+> `agc shutdown: slot=N` lines. Present = the orderly path ran.
 
 Two habits:
 
@@ -423,6 +458,47 @@ They are monochrome by design: the UI tints them with the theme accent at draw
 time. The controller prompts were originally two-tone bitmaps (103 distinct
 RGB values), which is why they stayed cyan under every theme until they were
 regenerated as single-hue glyphs.
+
+---
+
+## `tools/prof_rmlui.sh` — where a UI frame's time goes, on the host
+
+Builds `tools/prof_rmlui.cpp` against the real RmlUi sources with
+`-DEVO_RML_PROFILE` and runs three representative screens (LAUNCH, SETTINGS,
+BROWSER) in two regimes — IDLE (identical state pushed every frame) and NAV
+(cursor moves every frame) — then a composite/copy microbench.
+
+```bash
+./tools/prof_rmlui.sh     # container-aware, like the rest of tools/
+```
+
+**Read the IDLE number with care — it is mostly harness.** On the host,
+`RenderCachedScreen()` finishes with an unconditional ~8.3 MB memcpy of the
+cached surface into the caller's framebuffer, and the composite bench in the
+same run clocks a 1080p memcpy at ~0.8 ms. So IDLE reads ~1.2 ms whatever the
+rest of the frame costs. The console never pays it: under `EVO_AGC_DEVICE`,
+`RenderCachedScreen()` returns early on an inactive frame and does
+`(void)framebuffer`.
+
+A printed `accounted 0.00 ms / wall 1.19 ms (0%)` therefore means "none of this
+is inside `Rml::Context`", **not** "1.19 ms is unexplained work you can go and
+delete". Reading it the second way cost a session in 2026-09-18: it led to a
+bridge rewrite that measured as no improvement at all, because the thing being
+optimised was never what the number was showing.
+
+The NAV figures (250–315 ms/frame) are the CPU rasteriser, which the shipping
+`.ffpfsc` does not use — it renders through `evo_rmlui_render_agc.cpp`. Treat
+them as a relative signal between screens, never as device frame times.
+
+**`bridge_bench()` is the part that transfers to hardware.** It times the
+`evo_rmlui_update_*()` calls alone, with unchanging params, and no render —
+which is exactly what the console does on an idle frame to decide whether
+anything changed. Measured 2026-09-18: 0.0006–0.0032 ms/frame. That is the
+budget for any change to the bridge's state structs, and it is small enough
+that the answer is almost always "leave it alone".
+
+The `xNN` columns are geometry calls per frame, not multipliers — useful for
+sizing anything that runs per draw (LAUNCH ~172, BROWSER ~156).
 
 ---
 

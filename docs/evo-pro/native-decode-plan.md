@@ -214,7 +214,7 @@ Turn the reference implementation's decode code into C headers under
       `EventReplacement` 16B), `SceAvPlayerFrameInfoEx` (104 B, pitch @ 0x3C +
       four crop insets @ 0x2C..0x38), stream-info structs. Sizes/offsets
       `_Static_assert`ed; compiles as C11 and C++17. Full write-up:
-      [avplayer-abi.md](avplayer-abi.md).
+      avplayer-abi.md *(not written)*.
 - [x] NID handling — the header pins the six hw-verified core NIDs in a
       comment for cross-check, but calling code **computes** every NID
       (`nid_encode` in a payload, inline SHA1 in the app module) rather than
@@ -225,13 +225,13 @@ Turn the reference implementation's decode code into C headers under
       deallocator unmaps *and* releases). Memory-typing diff vs.
       `hardware-decode.md` (old try used `WC_GARLIC` 3; SharpProspero uses
       `MemoryTypeCachedShared` 12 / prot 0x33) written up in
-      [avplayer-abi.md](avplayer-abi.md) §4, including the **payload caveat**:
+      avplayer-abi.md *(not written)* §4, including the **payload caveat**:
       `sceKernelGetDirectMemorySize()` is 0 in a payload so the spike uses the
       main pool; if the decoder rejects it, Route A needs the app-module
       context.
 
 **Deliverable:** headers compile (done); memory-typing diff written
-([avplayer-abi.md](avplayer-abi.md) §4).
+(avplayer-abi.md *(not written)* §4).
 
 ### Phase 1 — run EVO Player from an app slot
 
@@ -274,7 +274,7 @@ Run A first — it's the untried route.
 `-DEVO_AVPLAYER_PROBE` — `projects/evoplayer/src/evo_avplayer_probe.c` (boot-time,
 like `evo_agc_probe.c`). It does all four steps below; Phase 2 is now just
 *launching EVO on the console with a test file present* and reading the
-`EVO avplayer:` popups against [avplayer-abi.md](avplayer-abi.md) §5.
+`EVO avplayer:` popups against avplayer-abi.md *(not written)* §5.
 - [x] `sceAvPlayerInit` with the Phase 0 struct; general heap + texture
       allocator (`AllocateMainDirectMemory` type 12→3, prot 0x33); log+serve
       file callbacks; debug `All`; watchdog thread `_exit()`s EVO on a hang.

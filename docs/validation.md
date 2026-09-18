@@ -132,9 +132,14 @@ code, with the reasoning recorded at the top of each `main.c`:
    there and 960 flips were reported against a blank screen. Anything that
    draws or plays sound must be installed as homebrew and launched through
    websrv's `hbldr_launch`, which borrows the PS Now app slot
-   (`hbldr.c:45`). `scripts/install-homebrew.sh` automates this.
+   (`hbldr.c:45`).
    Note POSTing to websrv's `/elfldr` does *not* help - that path calls
    `elfldr_spawn` and lands back in `SceSpZeroConf`.
+
+   **Historical.** This is why the ELF route was abandoned, not instructions:
+   `scripts/install-homebrew.sh` and the rest of the ELF-push scripts were
+   deleted in `6db199d`. The `.ffpfsc` app module is the only deploy path -
+   see [building.md](building.md#8-deploying-to-the-console).
 
 6. **The scanout surface is tiled, and linear is not available on retail.**
    Requesting tiling mode 1 gives:

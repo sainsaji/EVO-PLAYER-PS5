@@ -1,5 +1,14 @@
 # Hardware decode — CLOSED
 
+> **Route deleted — read the ELF/payload parts as history.** The ELF-push
+> scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
+> `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
+> The `.ffpfsc` app module is the only deploy path — see
+> [building.md](building.md#8-deploying-to-the-console) and
+> [tooling.md](tooling.md). Commands below that name those scripts will not
+> run; the findings around them still stand.
+
+
 > # ⛔ This effort is closed. 2026-08-14.
 >
 > **Native hardware video decode does not work from a payload on 12.70, and

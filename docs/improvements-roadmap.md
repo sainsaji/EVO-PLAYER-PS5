@@ -253,7 +253,7 @@ Nothing calls this function. It describes an 80×80 world that no longer exists 
 
 ### Problem
 
-`pp_map_avframe()` ([`main.c:5245`](../projects/evoplayer/main.c)) accepts
+`pp_map_avframe()` ([`main.c:5245`](../projects/evoplayer/main.c.legacy)) accepts
 exactly **three** pixel formats:
 
 ```c
@@ -281,7 +281,7 @@ the content people bring to a 4K player.
 ### Fix
 
 Add a 10-bit input variant to the existing kernel in
-[`pp_compute_pipeline.c`](../projects/evoplayer/pp/src/pp_compute_pipeline.c).
+`pp_compute_pipeline.c`.
 The workgroup pool, band splitting and threading are all reusable unchanged —
 what changes is the load and a `>> 2` on each component (`yuv420p10le` is
 16-bit little-endian samples with 10 significant bits), plus a `p010le` variant
@@ -446,7 +446,7 @@ problems with different fixes.
 ## Correction — The "GPU Compute" Pipeline Is CPU SIMD
 
 **Found:** 2026-08-14, reading
-[`pp_compute_pipeline.c`](../projects/evoplayer/pp/src/pp_compute_pipeline.c).
+`pp_compute_pipeline.c`.
 
 **The performance is real. The attribution is not.** That file contains no
 `sceGnm*` call, no shader, no dispatch and no compute queue. It is a
