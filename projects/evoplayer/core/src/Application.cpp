@@ -581,26 +581,8 @@ int Application::run() {
             s_was_player = isPlayer;
         }
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
-        /*
-         * Draw for one full rotation of scanout buffers after anything
-         * changes, not just for the frame it changed on.
-         *
-         * With two buffers, alternating meant both ended up holding the new
-         * content almost immediately. With three, a UI that renders once and
-         * then goes idle leaves the third buffer holding the previous frame -
-         * and the display cycles through it, which reads as flicker. Holding
-         * the redraw for SCANOUT_COUNT frames guarantees every buffer carries
-         * the current picture before we stop; once idle, all three are
-         * identical and presenting them in turn is invisible.
-         */
-        int uiWants = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_needs_frame() || (jb_repaint > 0);
+        int uiActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;
-        static int s_repaintHold = 0;
-        if (uiWants)
-            s_repaintHold = (int)EVO_AGC_SCANOUT_COUNT;
-        else if (s_repaintHold > 0)
-            s_repaintHold--;
-        int uiActive = uiWants || (s_repaintHold > 0);
         evo_rmlui_set_active(uiActive);
 
         if (frame < 5) {
