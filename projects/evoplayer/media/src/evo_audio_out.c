@@ -25,6 +25,7 @@
 #include "evo_packet_queue.h"
 #include "evo_audio_resample.h"
 #include "evo_adec.h"
+#include "pp_playback.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -37,6 +38,7 @@ int sceAudioOutOutput(int handle, const void *ptr);
  * main.c. Replaced by evo_pb_*() / evo_subtitle_*() accessors at A8 / A4.
  * ------------------------------------------------------------------------ */
 extern int               screen;
+extern pp_playback       g_pp_pb;
 extern int               player_paused;
 extern double            video_clock_seconds;
 extern double            first_video_pts_seconds;
@@ -106,6 +108,24 @@ static void audio_queue_push(int16_t *buf) {
 void *audio_output_thread(void *arg) {
     static int16_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
     while (audio_thread_running) {
+        /*
+         * Hold output while a seek is still discarding video.
+         *
+         * The audio side is gated to the seek target, so it is ready to play
+         * the instant the seek lands - but video still has to decode from the
+         * keyframe to that target, which on a long-GOP 4K stream is nearly two
+         * seconds. Letting audio run through that put it 0.9 s ahead by the
+         * time the picture came back, which read as "video is late", tripped
+         * the badly-late branch in decode_next_video_frame, and set it draining
+         * queued packets every frame - so video could never catch up and
+         * playback crawled at a few frames a second. Starting both at the
+         * target together is the whole point of the gate; this is the other
+         * half of it.
+         */
+        if (g_pp_pb.active && g_pp_pb.seek_discarding) {
+            usleep(2000);
+            continue;
+        }
         if (screen == 2 && !player_paused && audio_handle >= 1) {
             /*
              * Compare like-for-like: audio_clock is from t=0 of this session,

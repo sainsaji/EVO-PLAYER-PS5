@@ -253,7 +253,7 @@
                 <span class="footer-text">MOVE</span>
             </div>
             <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
+                <div class="glyph-badge"><img src="../icons/btn_lstick.png" class="glyph-badge-img"/></div>
                 <span class="footer-text">SCREENSHOT</span>
             </div>
         </div>

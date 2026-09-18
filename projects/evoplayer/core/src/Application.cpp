@@ -515,10 +515,17 @@ int Application::run() {
                 }
             }
 
-            /* L3 captures the screen from anywhere, and is swallowed so no
-             * screen sees it as a normal press. */
-            if (pressed & PadButtons::L3) {
-                evo_bt("screenshot: L3 pressed");
+            /*
+             * Either stick click captures the screen, and is swallowed so no
+             * screen sees it as a normal press.
+             *
+             * It was bound to L3 alone and never once fired: across a logged
+             * session the pad reported 0x0004 (R3) for the stick click and
+             * 0x0002 (L3) not at all. Accepting both means it works whichever
+             * bit this pad and firmware decide to send.
+             */
+            if (pressed & (PadButtons::L3 | PadButtons::R3)) {
+                evo_bt("screenshot: stick click pressed=%#010x", pressed);
                 evo_boot_log_flush();
                 std::string shotPath;
                 if (evo_capture_screenshot(shotPath)) {
@@ -531,7 +538,7 @@ int Application::run() {
                     toast("SCREENSHOT", "Capture failed");
                     evo_feedback(EVO_FB_BOUNDARY);
                 }
-                pressed &= ~PadButtons::L3;
+                pressed &= ~(PadButtons::L3 | PadButtons::R3);
             }
 
             if (evo_keyboard_is_open()) {
