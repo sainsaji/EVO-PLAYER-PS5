@@ -253,11 +253,39 @@ void SurroundTestScreen::render(uint32_t* framebuffer, int width, int height) {
         "FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"
     };
 
+    /*
+     * Where each speaker sits in the room, as an offset in room units from the
+     * listener at the origin; the RmlUi side scales these and places each node
+     * absolutely (evo_rmlui_app.cpp, "Speaker nodes, absolutely positioned
+     * from each speaker's own dx/dy").
+     *
+     * These were never assigned. params is zeroed, so every speaker had
+     * dx = dy = 0 and all eight stacked on the exact same coordinate - the
+     * screen showed one box, the last one drawn (SR), floating in an empty
+     * room. The geometry matches the uiview fixture, remapped onto this
+     * screen's channel order: it uses the standard 7.1 WAV order
+     * FL FR FC LFE BL BR SL SR, where 4/5 are the BACK pair and 6/7 the SIDE
+     * pair - the fixture numbers those the other way round.
+     */
+    static const struct { int dx, dy; } speakerPos8[] = {
+        { -260, -170 },   /* 0 FL  front left   */
+        {  260, -170 },   /* 1 FR  front right  */
+        {    0, -210 },   /* 2 FC  centre       */
+        {    0,  200 },   /* 3 LFE subwoofer    */
+        { -180,  180 },   /* 4 BL  back left    */
+        {  180,  180 },   /* 5 BR  back right   */
+        { -320,   40 },   /* 6 SL  side left    */
+        {  320,   40 },   /* 7 SR  side right   */
+    };
+
     for (int i = 0; i < 8; ++i) {
         params.speakers[i].name = speakerNames8[i];
         params.speakers[i].label = speakerLabels8[i];
         params.speakers[i].ch = i;
         params.speakers[i].item_idx = 5 + i;
+        params.speakers[i].dx = speakerPos8[i].dx;
+        params.speakers[i].dy = speakerPos8[i].dy;
+        /* 5.1 drops the side pair, not the back pair. */
         params.speakers[i].hidden = (is51 && i >= 6) ? 1 : 0;
         params.speakers[i].hz = (i == 3) ? 80.0 : 440.0;
     }
