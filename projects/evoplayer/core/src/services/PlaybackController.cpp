@@ -517,12 +517,28 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
      * used to drive this in start_video_playback(); after the C++ migration it
      * had no reader at all.
      */
-    m_resumeBaseOffset = 0.0;
-    resume_base_offset_seconds = 0.0;
+    /*
+     * Seeded with the position we are about to seek to, not 0.
+     *
+     * Zeroing it here and only correcting it after the seek left a window -
+     * an avformat open, probe and av_seek_frame on a 4K file, easily hundreds
+     * of milliseconds - during which every position readout said 0:00. So
+     * resuming a part-watched file visibly started at the beginning and then
+     * snapped to the resume point.
+     *
+     * This does not break the invariant above. That rule is that the base must
+     * agree with where the picture is; during the open there is no picture
+     * yet, only the position it is about to arrive at. If the seek fails the
+     * base goes back to 0 with it, which is where playback really will start.
+     */
+    const bool wantResume = (resumeOffset > 0.0 && resumeOffset < m_durationSeconds &&
+                             (video_stream_index >= 0 || audio_stream_index >= 0));
+
+    m_resumeBaseOffset = wantResume ? resumeOffset : 0.0;
+    resume_base_offset_seconds = m_resumeBaseOffset;
     requested_resume_seek_pos = 0.0;
 
-    if (resumeOffset > 0.0 && resumeOffset < m_durationSeconds &&
-        (video_stream_index >= 0 || audio_stream_index >= 0)) {
+    if (wantResume) {
         double seekPos = resumeOffset;
         int seekStream = (video_stream_index >= 0) ? video_stream_index
                                                    : audio_stream_index;
@@ -549,6 +565,9 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
             m_resumeBaseOffset = resumeOffset;
             resume_base_offset_seconds = resumeOffset;
         } else {
+            /* Playback will start at 0, so the base has to follow it back. */
+            m_resumeBaseOffset = 0.0;
+            resume_base_offset_seconds = 0.0;
             evo_boot_log("PlaybackController: resume seek to %.2fs failed; starting at 0",
                          resumeOffset);
         }
