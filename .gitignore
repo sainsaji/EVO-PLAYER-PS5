@@ -43,6 +43,11 @@ output/logs/*
 # Curated PNGs for the docs live in docs/images/ instead.
 output/screenshots/
 
+# Scratch renders from inspecting the UI: uiview crops, zoomed regions,
+# de-tiled console captures. All reproducible from a capture plus ffmpeg.
+output/uicheck/
+output/blur-check/
+
 # Host benchmark binary (tools/bench.sh)
 output/bench/
 output/tests/
