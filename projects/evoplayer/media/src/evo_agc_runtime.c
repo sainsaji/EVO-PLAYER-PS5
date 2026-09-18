@@ -54,7 +54,29 @@
 #define EVO_AGC_MAX_RENDER_H 2160
 
 #define EVO_AGC_SCANOUT_STRIDE      UINT64_C(0x04000000) /* 64 MB per scanout buffer */
-#define EVO_AGC_SCANOUT_TOTAL       UINT64_C(0x08000000) /* 128 MB for 2 buffers */
+/*
+ * Three scanout buffers, not two.
+ *
+ * With two, the presenter had to block on its own flip retiring before the
+ * frame could end - otherwise the next frame cleared a buffer the display was
+ * still scanning out, which showed as a black band sweeping down the picture.
+ * That wait cost a full display interval on every frame, so any frame that
+ * overran its budget lost the whole next interval too; at 4K that is the
+ * stutter, and it is the same pathology blackbearreloaded's research measured
+ * when a redundant flip halved their frame rate (docs/architecture.md,
+ * "Submit exactly one flip for each presented frame").
+ *
+ * With three, the CPU draws into C while B is queued and A is on screen. The
+ * black-band hazard is handled properly instead - by fencing each buffer
+ * against its OWN completed flip before it is reused - so the blocking wait
+ * goes away and a late frame costs only itself.
+ *
+ * Costs one more 64 MB buffer of DIRECT memory, which the boot measurement
+ * showed is not the constrained pool: flexible memory is (448 MB configured),
+ * and scanout does not come out of it.
+ */
+#define EVO_AGC_SCANOUT_COUNT       3u
+#define EVO_AGC_SCANOUT_TOTAL       (EVO_AGC_SCANOUT_STRIDE * EVO_AGC_SCANOUT_COUNT)
 #define EVO_AGC_TRANSIENT_RING_SIZE UINT64_C(0x04000000) /* 64 MB transient ring */
 #define EVO_AGC_COMMAND_BUFFER_SIZE UINT64_C(0x00600000) /* 6 MB (2 MB per slot * 3) */
 #define EVO_AGC_SHADER_STORAGE_SIZE UINT64_C(0x00400000) /* 4 MB shader storage */
@@ -178,10 +200,17 @@ typedef struct evo_agc_device {
     int                     is_player_mode;
     /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
      * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
-    int                     ui_dirty[2];
+    int                     ui_dirty[EVO_AGC_SCANOUT_COUNT];
     /* Per-scanout-buffer: the video PTS its quad currently holds, or
      * INT64_MIN if it holds no video. See evo_agc_runtime_video_slot_stale. */
-    int64_t                 video_pts[2];
+    int64_t                 video_pts[EVO_AGC_SCANOUT_COUNT];
+    /* The flip_arg of the last flip submitted for each buffer, so it can be
+     * fenced against its own completion before being drawn into again. 0 =
+     * never presented. See evo_agc_runtime_frame_begin. */
+    int64_t                 buffer_flip_arg[EVO_AGC_SCANOUT_COUNT];
+    /* The buffer handed to the display most recently - what a screenshot or a
+     * scanout dump has to read, since active_backbuffer has already rotated. */
+    int                     last_presented;
     /* Last staged copy of each video plane, so redrawing the same frame into
      * the other scanout buffer does not re-copy it. See stage_plane. */
     struct {
@@ -205,7 +234,7 @@ typedef struct evo_agc_device {
     uint8_t                *direct_mem_base;
     size_t                  direct_mem_bytes;
 
-    uint8_t                *scanout_buffers[2];
+    uint8_t                *scanout_buffers[EVO_AGC_SCANOUT_COUNT];
     evo_agc_transient_ring_t transient_ring;
 
     uint32_t               *dcb_slots[EVO_AGC_FRAME_SLOTS];
@@ -968,7 +997,16 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         0, (off_t)16 * 1024 * 1024 * 1024ULL, EVO_AGC_TOTAL_DIRECT_MEM,
         EVO_AGC_DIRECT_MEM_ALIGN, EVO_AGC_DIRECT_MEM_TYPE, &g_agc_dev.direct_mem_offset);
     if (ret != 0 || g_agc_dev.direct_mem_offset < 0) {
-        printf(EVO_AGC_LOG_PREFIX "Failed to allocate direct memory: %d\n", ret);
+        /* evo_boot_log, not printf: this file's printf output reaches neither
+         * evo.log nor klog, so a failure here - which means no renderer at
+         * all, a black screen with no explanation - was previously invisible.
+         * The size is worth having because the scanout count sets most of it. */
+        evo_boot_log("agc FATAL: direct memory alloc failed rc=%d for %lluMB "
+                     "(%u scanout buffers)",
+                     ret,
+                     (unsigned long long)(EVO_AGC_TOTAL_DIRECT_MEM >> 20),
+                     EVO_AGC_SCANOUT_COUNT);
+        evo_boot_log_flush();
         return -1;
     }
 
@@ -990,10 +1028,10 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     size_t cur_offset = 0;
 
     /* Scanout buffer 0 & 1 */
-    g_agc_dev.scanout_buffers[0] = g_agc_dev.direct_mem_base + cur_offset;
-    cur_offset += EVO_AGC_SCANOUT_STRIDE;
-    g_agc_dev.scanout_buffers[1] = g_agc_dev.direct_mem_base + cur_offset;
-    cur_offset += EVO_AGC_SCANOUT_STRIDE;
+    for (unsigned b = 0; b < EVO_AGC_SCANOUT_COUNT; ++b) {
+        g_agc_dev.scanout_buffers[b] = g_agc_dev.direct_mem_base + cur_offset;
+        cur_offset += EVO_AGC_SCANOUT_STRIDE;
+    }
 
     /* Transient ring buffer (16 MB) */
     uint8_t *transient_base = g_agc_dev.direct_mem_base + cur_offset;
@@ -1295,10 +1333,10 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         evo_boot_log_flush();
     }
 
-    evo_video_buffer_t video_buffers[2] = {
-        {g_agc_dev.scanout_buffers[0], NULL, NULL, NULL},
-        {g_agc_dev.scanout_buffers[1], NULL, NULL, NULL},
-    };
+    evo_video_buffer_t video_buffers[EVO_AGC_SCANOUT_COUNT];
+    memset(video_buffers, 0, sizeof(video_buffers));
+    for (unsigned b = 0; b < EVO_AGC_SCANOUT_COUNT; ++b)
+        video_buffers[b].data = g_agc_dev.scanout_buffers[b];
     evo_video_attribute_t attr;
     memset(&attr, 0, sizeof(attr));
 
@@ -1308,25 +1346,29 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                                    0, 0, 0);
 
     ret = sceVideoOutRegisterBuffers2(g_agc_dev.video_handle, 0, 0,
-                                      video_buffers, 2, &attr, 0, NULL);
+                                      video_buffers, EVO_AGC_SCANOUT_COUNT, &attr, 0, NULL);
     /* evo_boot_log, not printf: this file's printf output never reaches
      * evo.log or klog, so every one of these diagnostics was invisible. */
     /* Both scanout bases must be 2MB aligned or the tiled display surface is
      * shuffled; mis0/mis1 are the offsets past that boundary and must read 0. */
-    evo_boot_log("agc scanout align mis0=%#llx mis1=%#llx tiled_need=%#x stride=%#llx",
+    evo_boot_log("agc scanout align mis0=%#llx mis1=%#llx mis2=%#llx tiled_need=%#x stride=%#llx",
                  (unsigned long long)((uintptr_t)g_agc_dev.scanout_buffers[0] &
                                       (EVO_AGC_DIRECT_MEM_ALIGN - 1u)),
                  (unsigned long long)((uintptr_t)g_agc_dev.scanout_buffers[1] &
+                                      (EVO_AGC_DIRECT_MEM_ALIGN - 1u)),
+                 (unsigned long long)((uintptr_t)g_agc_dev.scanout_buffers[2] &
                                       (EVO_AGC_DIRECT_MEM_ALIGN - 1u)),
                  (unsigned)((((uint32_t)g_agc_dev.width + 127u) / 128u) *
                             (((uint32_t)g_agc_dev.height + 127u) / 128u) * 0x10000u),
                  (unsigned long long)EVO_AGC_SCANOUT_STRIDE);
     evo_boot_log("agc vo handle=%d register_rc=%d (0x%08x) fmt=%#llx %dx%d "
-                 "buf0=%p buf1=%p memtype=%d",
+                 "bufs=%u buf0=%p buf1=%p buf2=%p memtype=%d",
                  g_agc_dev.video_handle, ret, (unsigned)ret,
                  (unsigned long long)vfmt, g_agc_dev.width, g_agc_dev.height,
+                 EVO_AGC_SCANOUT_COUNT,
                  (void *)g_agc_dev.scanout_buffers[0],
                  (void *)g_agc_dev.scanout_buffers[1],
+                 (void *)g_agc_dev.scanout_buffers[2],
                  EVO_AGC_DIRECT_MEM_TYPE);
     if (ret != 0 && (g_agc_dev.width != width || g_agc_dev.height != height)) {
         /*
@@ -1342,7 +1384,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                                            (uint32_t)g_agc_dev.height,
                                            0, 0, 0);
             ret = sceVideoOutRegisterBuffers2(g_agc_dev.video_handle, 0, 0,
-                                              video_buffers, 2, &attr, 0, NULL);
+                                              video_buffers, EVO_AGC_SCANOUT_COUNT, &attr, 0, NULL);
         }
     }
 
@@ -1352,6 +1394,9 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     }
 
     g_agc_dev.active_backbuffer = 0;
+    g_agc_dev.last_presented = 0;
+    for (unsigned b = 0; b < EVO_AGC_SCANOUT_COUNT; ++b)
+        g_agc_dev.buffer_flip_arg[b] = 0;
     g_agc_dev.current_slot = 0;
     g_agc_dev.video_pts[0] = INT64_MIN;
     g_agc_dev.video_pts[1] = INT64_MIN;
@@ -1440,6 +1485,37 @@ void evo_agc_runtime_frame_begin(void)
         } else if (tracing) {
             evo_boot_log("agc frame_begin slot=%u retired after %u waits", slot, waits);
         }
+    }
+
+    /*
+     * Fence this buffer against its own last flip before touching it.
+     *
+     * Everything below writes into scanout_buffers[active_backbuffer] - the
+     * clear, the video quad, the UI - so the display must be finished with it.
+     * With three buffers this has normally retired long ago and the loop exits
+     * on its first check; it only actually waits when the app is running ahead
+     * of the display, which is exactly when waiting is correct. Bounded, so a
+     * stalled display degrades to tearing rather than a hang.
+     */
+    if (g_agc_dev.buffer_flip_arg[g_agc_dev.active_backbuffer] != 0) {
+        const int64_t want = g_agc_dev.buffer_flip_arg[g_agc_dev.active_backbuffer];
+        uint64_t status[16];
+        unsigned fwaits = 0;
+        for (; fwaits < 120u; ++fwaits) {
+            memset(status, 0, sizeof(status));
+            /* status[3] carries the flip_arg of the last completed flip, and
+             * the args increase monotonically, so >= means "this one is
+             * done". Equality would miss it whenever the display has already
+             * moved past this buffer's flip. */
+            if (sceVideoOutGetFlipStatus(g_agc_dev.video_handle, status) == 0 &&
+                (int64_t)status[3] >= want)
+                break;
+            sceVideoOutWaitVblank(g_agc_dev.video_handle);
+        }
+        g_agc_dev.flip_waits += fwaits;
+        if (fwaits >= 120u)
+            g_agc_dev.flip_timeouts++;
+        g_agc_dev.buffer_flip_arg[g_agc_dev.active_backbuffer] = 0;
     }
 
     /*
@@ -1938,37 +2014,23 @@ void evo_agc_runtime_frame_end(void)
             g_agc_dev.fence_expect[slot] = 0; /* already waited; don't re-wait */
 
             /*
-             * Wait for the flip to actually retire before this frame ends.
+             * Record the flip, do not wait on it.
              *
-             * sceVideoOutSubmitFlip is asynchronous, and there are only two
-             * scanout buffers. Without this wait the sequence is: flip A, then
-             * clear/draw/flip B, then clear A again - while A may still be the
-             * buffer the display is scanning out. The CPU memset then wipes the
-             * live framebuffer top to bottom, which on screen is a black band
-             * sweeping down the picture, worst while something slow is loading
-             * and frames are queueing. The counters showed nothing because no
-             * draw was ever dropped: the content was correct, it was being
-             * erased after the fact.
+             * This used to block until the flip retired, because with two
+             * buffers the next frame would otherwise clear a buffer the
+             * display was still scanning out - a black band sweeping down the
+             * picture. The cost was a full display interval on every frame,
+             * so a frame that overran its budget lost the next interval too.
              *
-             * ps5-opengl's native runtime does exactly this poll
-             * (wait_for_flip_marker: get_flip_status until status[3] == marker).
-             * status[3] carries the flip_arg of the last completed flip.
-             * Bounded so a stalled display degrades to tearing, not a hang.
+             * With three buffers the hazard is fenced precisely instead: each
+             * buffer is checked against its OWN completed flip in
+             * frame_begin, just before it is drawn into again. By then it has
+             * had two further frames to retire, so in the steady state the
+             * check costs nothing and the presenter never stalls.
              */
-            if (fliprc == 0) {
-                uint64_t status[16];
-                unsigned fwaits = 0;
-                for (; fwaits < 120u; ++fwaits) {
-                    memset(status, 0, sizeof(status));
-                    if (sceVideoOutGetFlipStatus(g_agc_dev.video_handle, status) == 0 &&
-                        status[3] == (uint64_t)g_agc_dev.flip_arg)
-                        break;
-                    sceVideoOutWaitVblank(g_agc_dev.video_handle);
-                }
-                g_agc_dev.flip_waits += fwaits;
-                if (fwaits >= 120u)
-                    g_agc_dev.flip_timeouts++;
-            }
+            if (fliprc == 0)
+                g_agc_dev.buffer_flip_arg[g_agc_dev.active_backbuffer] =
+                    (int64_t)g_agc_dev.flip_arg;
 
             /* Frame 40: late enough that RmlUi has drawn a real screen, and the
              * fence above guarantees the GPU is done with this buffer. */
@@ -1992,7 +2054,9 @@ void evo_agc_runtime_frame_end(void)
     }
 
     /* 5. Flip buffers and advance slot */
-    g_agc_dev.active_backbuffer = 1 - g_agc_dev.active_backbuffer;
+    g_agc_dev.last_presented = g_agc_dev.active_backbuffer;
+    g_agc_dev.active_backbuffer =
+        (g_agc_dev.active_backbuffer + 1) % (int)EVO_AGC_SCANOUT_COUNT;
     g_agc_dev.current_slot = (g_agc_dev.current_slot + 1) % EVO_AGC_FRAME_SLOTS;
     g_agc_dev.frame_counter++;
     g_agc_dev.frame_active = 0;
@@ -2067,9 +2131,10 @@ void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
 {
     if (!g_agc_dev.initialized || !bgra || width <= 0 || height <= 0)
         return;
-    /* frame_end flips active_backbuffer AFTER handing the just-rendered one to
-     * VideoOut, so the buffer actually on screen is the other one. */
-    const int front = 1 - g_agc_dev.active_backbuffer;
+    /* frame_end rotates active_backbuffer AFTER handing the just-rendered one
+     * to VideoOut, so the buffer actually on screen is the one it recorded -
+     * with three buffers "the other one" is no longer well defined. */
+    const int front = g_agc_dev.last_presented;
     const uint32_t *src = (const uint32_t *)g_agc_dev.scanout_buffers[front];
     if (!src)
         return;
