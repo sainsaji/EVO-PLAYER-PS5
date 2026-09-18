@@ -21,10 +21,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 ACTION="deploy"
 FFPFSC=0
+FORCE=0
 while (( $# )); do
     case "$1" in
         --undeploy) ACTION="undeploy" ;;
         --ffpfsc)   FFPFSC=1 ;;
+        --force)    FORCE=1 ;;
         -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -37,6 +39,7 @@ if ! in_container; then
     FWD=()
     [[ "${ACTION}" == undeploy ]] && FWD+=(--undeploy)
     (( FFPFSC )) && FWD+=(--ffpfsc)
+    (( FORCE )) && FWD+=(--force)
     reexec_in_container "deploy-app.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
 
@@ -53,9 +56,69 @@ APPDIR="${OUTPUT_DIR}/app/${TITLE_ID}"
 FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
 
 # --- .ffpfsc image path: one file to /data/homebrew/<TITLE_ID>.ffpfsc --------
+#
+# Refuse to deploy on top of an EVO that has been launched.
+#
+# Deploying replaces the .ffpfsc that ShadowMountPlus has MOUNTED and that a
+# live process has its code pages mapped from, and the file change then makes
+# ShadowMountPlus auto-launch - stacking a second instance on the resident one.
+# Either of those can panic the console; both have. Closing from the switcher
+# is the only thing that frees the slot, and there is no remote equivalent.
+#
+# A soft close (Settings -> QUIT EVO) is NOT sufficient here and must not be
+# treated as if it were: it parks the app and drains the GPU, which makes the
+# subsequent switcher-close safe, but the process stays resident with the image
+# still mounted.
+#
+# The signal: a deploy clears /mnt/usb0, so evo.log is absent until EVO next
+# runs. Its presence means EVO has been launched since the last deploy and may
+# still hold the slot. Deliberately conservative - it cannot distinguish
+# "running now" from "ran and was closed", and guessing wrong in that direction
+# is cheap while guessing wrong in the other has cost hours.
+#
+check_evo_not_resident() {
+    local out
+    out="$(python3 - "${PS5_HOST}" "${FTP_PORT}" <<'PY' 2>/dev/null || true
+import sys
+from ftplib import FTP
+host, port = sys.argv[1], int(sys.argv[2])
+try:
+    f = FTP(); f.connect(host, port, timeout=10); f.login()
+    lines = []
+    f.cwd("/mnt/usb0"); f.retrlines("LIST", lines.append)
+    try: f.quit()
+    except Exception: pass
+    print("PRESENT" if any(" evo.log" in l or l.endswith("evo.log") for l in lines) else "ABSENT")
+except Exception:
+    print("UNKNOWN")
+PY
+)"
+    case "${out}" in
+        ABSENT)  ok "EVO has not run since the last deploy - slot is free" ;;
+        PRESENT)
+            if (( FORCE )); then
+                warn "EVO has been launched since the last deploy - --force given, continuing"
+            else
+                die "EVO has been launched since the last deploy (/mnt/usb0/evo.log exists).
+
+   It may still hold the app slot. Deploying over a resident EVO replaces the
+   mounted image under a live process and stacks an auto-launch on top of it -
+   both have kernel-panicked this console.
+
+   Close EVO from the switcher (PS button -> close the application), then
+   deploy again. Settings -> QUIT EVO parks it and makes that close safe, but
+   does NOT free the slot on its own.
+
+   Override with --force if you know the slot is free."
+            fi ;;
+        *) warn "could not reach ${PS5_HOST}:${FTP_PORT} to check for a resident EVO - continuing" ;;
+    esac
+}
+
 if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
     need_file "${FFPFSC_IMG}" "run ./scripts/package-app.sh --ffpfsc first"
     require_ps5_host
+    check_evo_not_resident
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
 import sys
