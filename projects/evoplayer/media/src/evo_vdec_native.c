@@ -188,20 +188,21 @@ extern int      sceKernelConfiguredFlexibleMemorySize(size_t *);
 #endif
 
 /*
- * VP9 gets its own cap, because it is by far the most expensive slot and by
- * far the least used: at 4K it reserved 748 MB - more than AVC and more than
- * HEVC - for a codec that on a USB media player turns up mostly as 1080p
- * WebM. Capping it at 1080p keeps VP9 on the hardware decoder where it is
- * actually encountered and hands ~500 MB back; a 4K VP9 file falls through to
- * FFmpeg, which is the same deal every other unsupported stream gets.
- * Raise it to EVO_VDEC_NATIVE_SECONDARY_MAX_W/H if 4K VP9 matters more than
- * the memory does.
+ * VP9 runs at the same size as the other secondary decoders.
+ *
+ * It was capped at 1080p to reclaim the 748 MB its 4K slot reserves, on the
+ * belief that the resident decoders were exhausting a ~2 GB budget. That
+ * belief was wrong: the figure summed the decoders' DIRECT memory, and the
+ * pool that actually runs out is flexible memory, measured at boot as 448 MB
+ * configured with the decoders taking 179 MB of it. Direct memory was never
+ * the constraint, so the cap cost 4K VP9 hardware decode and bought nothing.
+ * Override these if a real measurement ever says otherwise.
  */
 #ifndef EVO_VDEC_NATIVE_VP9_MAX_W
-#define EVO_VDEC_NATIVE_VP9_MAX_W  1920
+#define EVO_VDEC_NATIVE_VP9_MAX_W  EVO_VDEC_NATIVE_SECONDARY_MAX_W
 #endif
 #ifndef EVO_VDEC_NATIVE_VP9_MAX_H
-#define EVO_VDEC_NATIVE_VP9_MAX_H  1088
+#define EVO_VDEC_NATIVE_VP9_MAX_H  EVO_VDEC_NATIVE_SECONDARY_MAX_H
 #endif
 
 /* #41 Phase D: the two 10-bit resident decoders (HEVC Main10, VP9 Profile 2).

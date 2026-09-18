@@ -529,21 +529,6 @@ int Application::run() {
             }
 
             /*
-             * L3 never reached the handler below on hardware - not one
-             * `screenshot: L3 pressed` line in a whole session - so print the
-             * raw mask for the first presses of a run and find out what the
-             * stick click actually reports as, rather than assuming 0x0002.
-             */
-            if (pressed) {
-                static int s_padlog = 24;
-                if (s_padlog > 0) {
-                    s_padlog--;
-                    evo_bt("pad: pressed=%#010x held=%#010x", pressed, held);
-                    evo_boot_log_flush();
-                }
-            }
-
-            /*
              * Either stick click captures the screen, and is swallowed so no
              * screen sees it as a normal press.
              *
@@ -759,6 +744,25 @@ int Application::run() {
                     swap = evo_rmlui_consume_drew();
                 }
             }
+        }
+
+        /*
+         * Draw the toast, over whatever the screen just drew.
+         *
+         * evo_toast.h says this is "called every frame by the main render
+         * loop" and nothing called it at all - the only reference anywhere was
+         * evo_toast_visible() being used as a render gate. So toast() set its
+         * state, the state expired on schedule, and not one pixel was ever
+         * drawn. That is why a screenshot appeared to do nothing, and why
+         * "Decoder seek failed" and the rest have been silent too.
+         *
+         * It forces a present of its own: a toast is often the only thing that
+         * changed, and without this it would wait for something else to
+         * trigger a frame.
+         */
+        if (uiActive && evo_toast_visible()) {
+            draw_prospero_toast(m_uiScratch);
+            swap = true;
         }
 
         // 5. Present if swap requested
