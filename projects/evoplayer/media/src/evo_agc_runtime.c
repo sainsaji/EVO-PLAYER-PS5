@@ -1503,12 +1503,23 @@ void evo_agc_runtime_frame_begin(void)
         unsigned fwaits = 0;
         for (; fwaits < 120u; ++fwaits) {
             memset(status, 0, sizeof(status));
-            /* status[3] carries the flip_arg of the last completed flip, and
-             * the args increase monotonically, so >= means "this one is
-             * done". Equality would miss it whenever the display has already
-             * moved past this buffer's flip. */
+            /*
+             * Strictly greater, not >=, and the difference is the whole bug.
+             *
+             * status[3] carries the flip_arg of the last COMPLETED flip. When
+             * this buffer's own flip completes, status[3] == want - and at
+             * that exact moment the buffer is not free, it is the one the
+             * display has just started scanning out. It stays live until a
+             * LATER flip replaces it. So the buffer is safe only once some
+             * subsequent flip has completed, which is status[3] > want.
+             *
+             * With >= the wait passed the instant the buffer went live and we
+             * drew straight into it: black creeping across the picture, and
+             * flip_waits=0 in every health line because the check never once
+             * had anything to wait for.
+             */
             if (sceVideoOutGetFlipStatus(g_agc_dev.video_handle, status) == 0 &&
-                (int64_t)status[3] >= want)
+                (int64_t)status[3] > want)
                 break;
             sceVideoOutWaitVblank(g_agc_dev.video_handle);
         }
