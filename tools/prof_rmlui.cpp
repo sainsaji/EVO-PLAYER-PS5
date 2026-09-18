@@ -260,6 +260,55 @@ static void composite_bench() {
     }
 }
 
+
+/* -------- bridge-only microbench --------
+ *
+ * run_screen() above cannot see this. On the host, RenderCachedScreen ends with
+ * an unconditional 8.3 MB memcpy of the cached surface into the caller's
+ * framebuffer, which the composite bench below clocks at ~0.8 ms - so an IDLE
+ * frame there reads ~1.2 ms no matter what the bridge costs, and a bridge
+ * change looks like nothing. The console never pays that copy: under
+ * EVO_AGC_DEVICE, RenderCachedScreen returns early when the frame is inactive
+ * and does `(void)framebuffer`.
+ *
+ * What the console DOES pay on every idle frame is exactly this: the
+ * evo_rmlui_update_*() call that rebuilds the screen's state struct so
+ * UpdateXState() can compare it and decide whether to set m_frame_dirty. This
+ * times that call alone, with unchanging params - the idle case.
+ */
+static void bridge_bench(int W, int H) {
+    printf("\n=== bridge update cost, no render (the console's idle frame) ===\n");
+    std::vector<uint32_t> hero = make_art(560, 315, 3);
+    std::vector<std::vector<uint32_t>> covers;
+    for (int i = 0; i < 6; i++) covers.push_back(make_art(320, 180, 5 + i * 7));
+    std::vector<uint32_t> preview = make_art(560, 315, 11);
+    (void)W; (void)H;
+
+    const int N = 20000;
+
+    {
+        evo_rmlui_launch_params_t p; build_launch(p, hero, covers, 1);
+        evo_rmlui_update_launch(&p);                       /* warm */
+        double t0 = now_ms();
+        for (int i = 0; i < N; i++) evo_rmlui_update_launch(&p);
+        printf("  LAUNCH    %7.4f ms/frame\n", (now_ms() - t0) / N);
+    }
+    {
+        evo_rmlui_settings_params_t p; build_settings(p, 1);
+        evo_rmlui_update_settings(&p);
+        double t0 = now_ms();
+        for (int i = 0; i < N; i++) evo_rmlui_update_settings(&p);
+        printf("  SETTINGS  %7.4f ms/frame\n", (now_ms() - t0) / N);
+    }
+    {
+        evo_rmlui_browser_params_t p; build_browser(p, preview, 1);
+        evo_rmlui_update_browser(&p);
+        double t0 = now_ms();
+        for (int i = 0; i < N; i++) evo_rmlui_update_browser(&p);
+        printf("  BROWSER   %7.4f ms/frame\n", (now_ms() - t0) / N);
+    }
+}
+
 int main() {
     const int W = 1920, H = 1080;
     std::vector<uint32_t> fb((size_t)W * H, 0xFF0E0906);
@@ -281,6 +330,7 @@ int main() {
     run_screen("SETTINGS  (4-row list)", S_SETTINGS, fb, W, H, N);
     run_screen("BROWSER  (12-row list + inspector)", S_BROWSER, fb, W, H, N);
 
+    bridge_bench(W, H);
     composite_bench();
 
     evo_rmlui_shutdown();
