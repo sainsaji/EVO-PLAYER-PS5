@@ -27,6 +27,35 @@ div, span, p {
     box-sizing: border-box;
 }
 
+/* -----------------------------------------------------------------------------
+ * Wallpaper + frosted chrome
+ *
+ * The toolbar pills, the sources sidebar and the status strip are translucent
+ * panels that blur the wallpaper; the media cards stay opaque so thumbnails
+ * and filenames keep their contrast, and so the page does not pay for a
+ * backdrop pass per card. Same split as Nautilus and macOS: the chrome is
+ * glass, the content is not.
+ * -------------------------------------------------------------------------- */
+#browser-wallpaper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    decorator: image(../wallpaper/settings_bg.png cover);
+}
+
+/* Knocks the wallpaper back so panel text keeps contrast. Kept light: dim it
+ * too hard and there is no longer enough behind the glass to read as frost. */
+#browser-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090e8c;
+}
+
 #browser-pane {
     position: absolute;
     left: 152dp;
@@ -97,9 +126,10 @@ div, span, p {
 
 #browser-path {
     display: inline-block;
-    background-color: #0e1828eb;
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
     border-width: 1dp;
-    border-color: #5a7db433;
+    border-color: #5a7db44d;
     border-radius: 10dp;
     padding: 6dp 16dp;
     font-size: 13.5dp;
@@ -120,9 +150,10 @@ div, span, p {
 }
 
 #browser-search-pill {
-    background-color: #0e1828eb;
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
     border-width: 1dp;
-    border-color: #5a7db433;
+    border-color: #5a7db44d;
     border-radius: 10dp;
     padding: 6dp 14dp;
     display: flex;
@@ -146,6 +177,7 @@ div, span, p {
 #browser-counter {
     display: block;
     background-color: #00cdff1a;
+    backdrop-filter: blur(16dp);
     border-width: 1dp;
     border-color: #00cdff4d;
     border-radius: 10dp;
@@ -164,9 +196,10 @@ div, span, p {
     top: 104dp;
     width: 270dp;
     height: 856dp;
-    background-color: #0b1220eb;
+    background-color: #0b1220a8;
+    backdrop-filter: blur(26dp);
     border-width: 1dp;
-    border-color: #5a7db433;
+    border-color: #5a7db44d;
     border-radius: 16dp;
     padding: 16dp 10dp;
     display: flex;
@@ -254,12 +287,17 @@ div, span, p {
     gap: 16dp;
 }
 
+/* Translucent, but no backdrop-filter: the cards cover most of the page, and
+ * eight backdrop passes a frame would cost more than the difference is worth
+ * when what sits behind a card is smooth wallpaper and the card's own opaque
+ * thumbnail box covers the top half of it anyway. The tint alone is what
+ * carries the glass through the content area. */
 .grid-card {
     width: 341dp;
     height: 418dp;
-    background-color: #101a2ceb;
+    background-color: #101a2cbf;
     border-width: 1dp;
-    border-color: #5a7db433;
+    border-color: #5a7db44d;
     border-radius: 16dp;
     padding: 12dp;
     display: flex;
@@ -270,7 +308,7 @@ div, span, p {
 }
 
 .grid-card-focused {
-    background-color: #16243cf8;
+    background-color: #16243cf0;
     border-width: 2.5dp;
     border-color: #00cdff;
     transform: scale(1.02);
@@ -485,9 +523,10 @@ div, span, p {
     bottom: 20dp;
     width: 1704dp;
     height: 60dp;
-    background-color: #0b1220eb;
+    background-color: #0b1220a3;
+    backdrop-filter: blur(22dp);
     border-width: 1dp;
-    border-color: #5a7db433;
+    border-color: #5a7db44d;
     border-radius: 16dp;
     padding: 0 18dp;
     display: flex;

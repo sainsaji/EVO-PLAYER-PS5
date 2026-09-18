@@ -323,10 +323,16 @@ div, span, p {
     width: 1704dp;
 }
 
-/* Non-interactive spec cards */
+/*
+ * Non-interactive spec cards.
+ *
+ * These used to stop at 228dp, which left the bottom third of the page empty
+ * above the footer while the rows inside were crowded together. Taller cards
+ * and roomier rows use the space the page already had.
+ */
 .spec-card {
     width: 552dp;
-    height: 228dp;
+    height: 404dp;
     background-color: #090f1b;
     border-width: 1dp;
     border-color: #152033;
@@ -352,7 +358,15 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10dp;
+    height: 76dp;
+    margin-bottom: 0;
+    border-bottom-width: 1dp;
+    border-bottom-color: #121c2c;
+}
+
+/* The last row in a card has nothing under it to separate from. */
+.spec-item-last {
+    border-bottom-width: 0;
 }
 
 .spec-label {
@@ -416,4 +430,86 @@ div, span, p {
     font-weight: bold;
     color: #475569;
     letter-spacing: 0.8dp;
+}
+
+/* =============================== Facts + links ===============================
+ * Four facts across, then three quiet link rows. Generous space between them
+ * is the point: the page it replaced fitted thirty rows into the same area and
+ * was unreadable for it.
+ * ========================================================================== */
+
+#about-facts {
+    position: absolute;
+    left: 0;
+    top: 232dp;
+    width: 1704dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.fact {
+    width: 400dp;
+    height: 252dp;
+    padding: 34dp 30dp;
+    border-radius: 20dp;
+    background-color: #0b111d;
+    border-width: 1dp;
+    border-color: #172338;
+    display: flex;
+    flex-direction: column;
+}
+
+.fact-key {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1.6dp;
+}
+
+.fact-value {
+    font-size: 30dp;
+    font-weight: bold;
+    color: #f2f7ff;
+    margin-top: 16dp;
+}
+
+.fact-note {
+    font-size: 14dp;
+    font-weight: normal;
+    color: #7c8da3;
+    margin-top: 18dp;
+}
+
+#about-links {
+    position: absolute;
+    left: 0;
+    top: 548dp;
+    width: 1704dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.link-row {
+    width: 1704dp;
+    height: 116dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #131d2e;
+}
+
+.link-key {
+    width: 220dp;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #5a6b82;
+    letter-spacing: 1.4dp;
+}
+
+.link-value {
+    font-size: 17dp;
+    font-weight: normal;
+    color: #cfdcef;
 }

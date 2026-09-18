@@ -21,6 +21,7 @@
 #include "evo_boot_log.h"
 
 #include <ctime>
+#include <sys/time.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -33,6 +34,7 @@
  * showed "0 FPS". The render loop is the only place that can measure it. */
 extern "C" int perf_render_fps;
 #include "evo_boot_trace.h"
+#include "evo_crash_note.h"
 #include "evo_jailbreak.h"
 #include "evo_vdec.h"
 #include "evo_direct_mem.h"
@@ -205,6 +207,7 @@ bool Application::initHardware() {
     av_force_cpu_flags(0);
     evo_direct_mem_init(EVO_DIRECT_MEM_POOL_BYTES);
     EnsureDataDirectories();
+    evo_crash_note_init();
 
     sceUserServiceInitialize(nullptr);
     scePadInit();
@@ -326,7 +329,11 @@ namespace {
 bool evo_capture_screenshot(std::string& outPath) {
     int w = 0, h = 0;
     evo_agc_runtime_get_size(&w, &h);
-    if (w <= 0 || h <= 0) return false;
+    if (w <= 0 || h <= 0) {
+        evo_bt("screenshot: no render size (%dx%d)", w, h);
+        evo_boot_log_flush();
+        return false;
+    }
 
     std::vector<uint32_t> bgra(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
     evo_agc_runtime_read_scanout(bgra.data(), w, h);
@@ -343,7 +350,18 @@ bool evo_capture_screenshot(std::string& outPath) {
     if (slot >= 1000) return false;
 
     FILE* fp = std::fopen(path, "wb");
-    if (!fp) return false;
+    if (!fp) {
+        /* USB is the nice place for these (the user can pull them off without
+         * FTP), but it is not always writable. Fall back to the data root
+         * rather than just failing. */
+        std::snprintf(path, sizeof(path), "%s/evo_shot_%03d.bmp", evo_data_dir(), slot);
+        fp = std::fopen(path, "wb");
+    }
+    if (!fp) {
+        evo_bt("screenshot: cannot open %s for writing", path);
+        evo_boot_log_flush();
+        return false;
+    }
 
     const int rowBytes = w * 3;
     const int pad = (4 - (rowBytes % 4)) % 4;
@@ -370,10 +388,17 @@ bool evo_capture_screenshot(std::string& outPath) {
     for (int y = h - 1; y >= 0; --y) {           /* BMP rows run bottom-up */
         const uint32_t* src = bgra.data() + static_cast<size_t>(y) * static_cast<size_t>(w);
         for (int x = 0; x < w; ++x) {
-            const uint32_t px = src[x];          /* 0xAARRGGBB in memory order B,G,R,A */
-            row[x * 3 + 0] = (unsigned char)(px & 0xFF);
-            row[x * 3 + 1] = (unsigned char)((px >> 8) & 0xFF);
-            row[x * 3 + 2] = (unsigned char)((px >> 16) & 0xFF);
+            /*
+             * The scanout is 0xAABBGGRR - the format MakeColorBgra() packs and
+             * the one frame_begin clears with (0xff100d0d for r,g,b = 0d,0d,10).
+             * So the low byte is RED, and a 24-bit BMP wants B,G,R. Reading the
+             * low byte as blue, as this did, swapped red and blue in every
+             * capture.
+             */
+            const uint32_t px = src[x];
+            row[x * 3 + 0] = (unsigned char)((px >> 16) & 0xFF);   /* B */
+            row[x * 3 + 1] = (unsigned char)((px >> 8) & 0xFF);    /* G */
+            row[x * 3 + 2] = (unsigned char)(px & 0xFF);           /* R */
         }
         std::fwrite(row.data(), 1, row.size(), fp);
     }
@@ -434,6 +459,9 @@ int Application::run() {
 #ifdef EVO_APP_MODULE
             evo_data_path_rebind();
             EnsureDataDirectories();
+            /* The quarantine only counts once it lives on /data - see
+             * evo_crash_note_init(). */
+            evo_crash_note_init();
             recent_load();
             favorites_load();
             if (m_settingsService) {
@@ -472,13 +500,32 @@ int Application::run() {
                 evo::animation::AnimationManager::getInstance().triggerTransition(350.0);
             }
 
+            /*
+             * L3 never reached the handler below on hardware - not one
+             * `screenshot: L3 pressed` line in a whole session - so print the
+             * raw mask for the first presses of a run and find out what the
+             * stick click actually reports as, rather than assuming 0x0002.
+             */
+            if (pressed) {
+                static int s_padlog = 24;
+                if (s_padlog > 0) {
+                    s_padlog--;
+                    evo_bt("pad: pressed=%#010x held=%#010x", pressed, held);
+                    evo_boot_log_flush();
+                }
+            }
+
             /* L3 captures the screen from anywhere, and is swallowed so no
              * screen sees it as a normal press. */
             if (pressed & PadButtons::L3) {
+                evo_bt("screenshot: L3 pressed");
+                evo_boot_log_flush();
                 std::string shotPath;
                 if (evo_capture_screenshot(shotPath)) {
                     const char* name = std::strrchr(shotPath.c_str(), '/');
                     toast("SCREENSHOT", name ? name + 1 : shotPath.c_str());
+                    evo_bt("screenshot: wrote %s", shotPath.c_str());
+                    evo_boot_log_flush();
                     evo_feedback(EVO_FB_CONFIRM);
                 } else {
                     toast("SCREENSHOT", "Capture failed");
@@ -501,9 +548,30 @@ int Application::run() {
             lastButtons = padData.buttons;
         }
 
-        // 2. Update animation engine and screen logic
-        evo::animation::AnimationManager::getInstance().update(16.667);
-        m_screenManager->update(16.667);
+        /*
+         * 2. Update animation engine and screen logic.
+         *
+         * Measured, not assumed: a hardcoded 16.667 ran every animation in
+         * slow motion whenever the loop dropped below 60 (a seek settle sits
+         * nearer 27). Clamped so a long stall - a file open, a thumbnail
+         * decode - cannot teleport an animation to its end.
+         */
+        double frameDeltaMs = 16.667;
+        {
+            static uint64_t s_lastTickUs = 0;
+            struct timeval tvNow;
+            gettimeofday(&tvNow, nullptr);
+            uint64_t nowUs = static_cast<uint64_t>(tvNow.tv_sec) * 1000000ULL +
+                             static_cast<uint64_t>(tvNow.tv_usec);
+            if (s_lastTickUs != 0) {
+                frameDeltaMs = static_cast<double>(nowUs - s_lastTickUs) / 1000.0;
+                if (frameDeltaMs < 1.0)   frameDeltaMs = 1.0;
+                if (frameDeltaMs > 100.0) frameDeltaMs = 100.0;
+            }
+            s_lastTickUs = nowUs;
+        }
+        evo::animation::AnimationManager::getInstance().update(frameDeltaMs);
+        m_screenManager->update(frameDeltaMs);
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
@@ -532,7 +600,14 @@ int Application::run() {
                 evo_bt("frame %d: frame_begin done", frame);
                 evo_boot_log_flush();
             }
-            if (m_uiScratch) {
+            /*
+             * Only the CPU rasteriser reads this buffer back. On the console
+             * RmlUi renders through the AGC interface and RenderCachedScreen
+             * does `(void)framebuffer`, so the 8.3 MB clear was pure cost on
+             * every menu frame. The allocation stays - the render entry points
+             * still reject a null pointer.
+             */
+            if (m_uiScratch && evo_rmlui_blit_mode()) {
                 std::memset(m_uiScratch, 0, static_cast<size_t>(DisplayWidth) * DisplayHeight * 4u);
             }
         }
@@ -551,7 +626,9 @@ int Application::run() {
             int64_t current_pts = g_pp_pb.display_pts_us;
             bool new_frame = (current_pts != s_last_pts);
 
-            auto playerScreen = dynamic_cast<PlayerScreen*>(m_screenManager->getCurrentScreen());
+            /* isPlayer came from getCurrentScreenId(), so the type is already
+             * proved - no need to pay for RTTI once a frame. */
+            auto playerScreen = static_cast<PlayerScreen*>(m_screenManager->getCurrentScreen());
             bool overlay_active = playerScreen && playerScreen->hasActiveOverlay();
             bool is_paused = m_playbackController && m_playbackController->isPaused();
             bool is_scrubbing = m_playbackController && m_playbackController->isScrubbing();
@@ -591,8 +668,7 @@ int Application::run() {
                                  static_cast<int>(f.coded_w), static_cast<int>(f.coded_h),
                                  static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                  view_mode, f.ten_bit, f.color_trc,
-                                 is_direct);
-                evo_agc_runtime_note_video_pts(current_pts);
+                                 is_direct, current_pts);
                 swap = true;
             }
 
@@ -671,7 +747,15 @@ int Application::run() {
 
         evo_perf_monitor_tick(0.0);
         if (!swap) {
-            usleep(1000);
+            /*
+             * Nothing was presented. A 1 ms spin here meant an idle menu ran
+             * this loop ~1000 times a second, and every pass rebuilt each
+             * screen's RmlUi parameter block - strings and all - for a frame
+             * RenderCachedScreen then discarded because the UI was inactive.
+             * Idle backs off to display cadence; an active frame that simply
+             * had nothing to draw still retries promptly.
+             */
+            usleep(uiActive ? 1000 : 8000);
         }
     }
 

@@ -5,6 +5,14 @@
 <body id="browser-body">
     <!-- Navigation rail comes from the standalone navbar.rml overlay -->
 
+    <!-- Wallpaper + scrim. The frosted chrome below has to have something to
+         refract: backdrop-filter over a flat fill returns the same flat fill,
+         so a blurred panel on a solid page looks identical to a plain one.
+         Same plate the settings shell uses, so the two screens read as one
+         surface. -->
+    <div id="browser-wallpaper"></div>
+    <div id="browser-scrim"></div>
+
     <div id="browser-pane">
         <!-- 1. Top Toolbar: Location, Breadcrumbs, Search, Counter -->
         <div id="browser-header">

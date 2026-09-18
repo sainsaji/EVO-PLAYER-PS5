@@ -32,149 +32,51 @@
             </div>
         </div>
 
-        <!-- Section 1: Codec & Engine Capabilities Matrix -->
-        <div id="matrix-section">
-            <div class="section-header">
-                <div class="section-title">PLAYBACK PIPELINE &amp; CODEC MATRIX</div>
-                <div class="section-subtitle">HARDWARE ACCELERATION VS. MULTI-THREADED SOFTWARE FALLBACK</div>
+        <!--
+             Deliberately sparse. This page previously carried thirty-odd rows
+             across five cards - a capability matrix, a spec grid and a links
+             block - which read as a wall of marketing copy rather than an
+             about page. What a person wants here is what it is, what it is
+             running on, and where to find it.
+        -->
+        <div id="about-facts">
+            <div class="fact">
+                <div class="fact-key">DECODE</div>
+                <div class="fact-value">Hardware</div>
+                <div class="fact-note">H.264 &#183; HEVC &#183; VP9 on sceVideodec2, FFmpeg where the silicon cannot</div>
             </div>
-
-            <div id="matrix-grid">
-                <!-- Card 1: Native Hardware Decode -->
-                <div class="matrix-card card-hw">
-                    <div class="card-header">
-                        <div class="card-header-left">
-                            <div class="card-status-dot dot-hw"></div>
-                            <div class="card-title">NATIVE HARDWARE DECODE</div>
-                        </div>
-                        <div class="card-badge badge-hw">PRIMARY VPU</div>
-                    </div>
-                    <div class="card-engine-tag">ENGINE: sceVideodec2 + sceAgc DIRECT GPU PIPELINE</div>
-                    
-                    <div class="matrix-list">
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">H.264 / AVC (4K SDR)</div>
-                            <div class="matrix-row-desc">Up to 3840×2160 @ 60 FPS • Baseline / Main / High Profiles (8-bit)</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">ZERO-COPY GPU PRESENTATION</div>
-                            <div class="matrix-row-desc">Direct NV12 hardware buffer flip via sceAgc • Zero CPU copy overhead</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">ULTRA-LOW LATENCY &amp; POWER</div>
-                            <div class="matrix-row-desc">Dedicated fixed-function silicon decoder • Minimal CPU utilization</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">STREAM RESILIENCE GUARD</div>
-                            <div class="matrix-row-desc">Auto-reinjects in-band SPS/PPS sets on seeks for seamless playback (#57)</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Card 2: Multi-Threaded Software Fallback -->
-                <div class="matrix-card card-sw">
-                    <div class="card-header">
-                        <div class="card-header-left">
-                            <div class="card-status-dot dot-sw"></div>
-                            <div class="card-title">SOFTWARE FALLBACK ENGINE</div>
-                        </div>
-                        <div class="card-badge badge-sw">FFMPEG 6.x CPU</div>
-                    </div>
-                    <div class="card-engine-tag">ENGINE: MULTI-THREADED AVX2 SIMD DECODE &amp; PACKING</div>
-                    
-                    <div class="matrix-list">
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">HEVC / H.265 (4K / 1080p)</div>
-                            <div class="matrix-row-desc">Full multi-core software decode (Native HW VPU decode tracked in #41)</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">10-BIT COLOR &amp; HDR PIPELINE</div>
-                            <div class="matrix-row-desc">Hi10P, HDR10, HLG color profiles packed via SIMD assembly fast path</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">BROAD FORMAT COMPATIBILITY</div>
-                            <div class="matrix-row-desc">VP9, AV1, MPEG-2, VC-1, WMV, FLV containers and video codecs</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">HIGH-FIDELITY SURROUND AUDIO</div>
-                            <div class="matrix-row-desc">Multi-channel AAC, AC3, DTS, FLAC, Opus, TrueHD mixing and downmix</div>
-                        </div>
-                        <div class="matrix-row">
-                            <div class="matrix-row-title">LIVE DYNAMIC RECOVERY</div>
-                            <div class="matrix-row-desc">Instant transparent fallback to FFmpeg on non-standard stream variations</div>
-                        </div>
-                    </div>
-                </div>
+            <div class="fact">
+                <div class="fact-key">RENDER</div>
+                <div class="fact-value">Bare-metal GPU</div>
+                <div class="fact-note">RmlUi drawn directly through sceAgc, zero-copy video present</div>
+            </div>
+            <div class="fact">
+                <div class="fact-key">MEDIA CORE</div>
+                <div class="fact-value">FFmpeg 7.0.1</div>
+                <div class="fact-note">Demux, software fallback, subtitles and surround downmix</div>
+            </div>
+            <div class="fact">
+                <div class="fact-key">TARGET</div>
+                <div class="fact-value">Firmware 12.70</div>
+                <div class="fact-note">PPSA99039 app module on the PS5 Payload SDK</div>
             </div>
         </div>
 
-        <!-- Section 2: Technical Specifications & Environment Grid -->
-        <div id="specs-section">
-            <!-- Spec Card 1: Core Engine -->
-            <div class="spec-card">
-                <div class="spec-card-title">ENGINE &amp; ARCHITECTURE</div>
-                <div class="spec-item">
-                    <div class="spec-label">MULTIMEDIA CORE</div>
-                    <div class="spec-value">FFmpeg 6.x Multi-Threaded</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">UI FRAMEWORK</div>
-                    <div class="spec-value">RmlUi 5.x Retained-Mode (GPU)</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">GRAPHICS PIPELINE</div>
-                    <div class="spec-value">PS5 sceAgc Native Renderer</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">SYSTEM TARGET</div>
-                    <div class="spec-value">PlayStation 5 Firmware 12.70</div>
-                </div>
+        <div id="about-links">
+            <div class="link-row">
+                <span class="link-key">PROJECT</span>
+                <span class="link-value">github.com/sainsaji/EVO-PLAYER-PS5</span>
             </div>
-
-            <!-- Spec Card 2: Customization & Controls -->
-            <div class="spec-card">
-                <div class="spec-card-title">CUSTOMIZATION &amp; ASSETS</div>
-                <div class="spec-item">
-                    <div class="spec-label">THEMES SYSTEM</div>
-                    <div id="about-themes-detail" class="spec-value">DROP .THEME FILES ON USB0</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">SCREENSHOT CAPTURE</div>
-                    <div class="spec-value">Press L3 or R3 In Any Menu</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">AUDIO DIAGNOSTICS</div>
-                    <div class="spec-value">5.1 / 7.1 Surround Spatial Test</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">STANDALONE BUNDLE</div>
-                    <div class="spec-value">Self-Contained In-Memory Package (#60)</div>
-                </div>
+            <div class="link-row">
+                <span class="link-key">THEMES</span>
+                <span id="about-themes-detail" class="link-value">Drop .theme files on USB0</span>
             </div>
-
-            <!-- Spec Card 3: Project & Credits -->
-            <div class="spec-card">
-                <div class="spec-card-title">PROJECT &amp; OPEN SOURCE</div>
-                <div class="spec-item">
-                    <div class="spec-label">REPOSITORY</div>
-                    <div class="spec-value">github.com/sainsaji/EVO-PLAYER-PS5</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">SDK PLATFORM</div>
-                    <div class="spec-value">PS5 Open Source Payload SDK</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">LICENSE</div>
-                    <div class="spec-value">Open-Source Community Software</div>
-                </div>
-                <div class="spec-item">
-                    <div class="spec-label">COMMUNITY</div>
-                    <div class="spec-value">EVO Player Team &amp; Homebrew Scene</div>
-                </div>
+            <div class="link-row">
+                <span class="link-key">LICENSE</span>
+                <span class="link-value">Open-source, community software</span>
             </div>
         </div>
 
-        <!-- Footer Hints -->
         <div id="about-footer">
             <div class="footer-hint">
                 <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
