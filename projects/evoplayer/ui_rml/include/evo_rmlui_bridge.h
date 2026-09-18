@@ -340,7 +340,17 @@ typedef struct {
  * belong to whichever release the cursor is on.
  */
 #define EVO_RMLUI_CL_RELEASES 8
-#define EVO_RMLUI_CL_ITEMS    14
+/*
+ * 12, not 14: #changelog-detail is a fixed 714dp with overflow:hidden, and a
+ * .clitem costs 46dp (32dp chip + 14dp margin). Against the ~586dp the pane
+ * has left under its header that is 12 rows; at 13 the last chip already
+ * renders 2px past the bottom of the card, and at 14 the whole row lands
+ * outside it on the page background. Measured off the rendered 0.10.0 entry,
+ * which is the first release long enough to reach the limit at all - every
+ * earlier one has nine items or fewer, which is why 14 was never caught.
+ * Raising this needs the pane to scroll first.
+ */
+#define EVO_RMLUI_CL_ITEMS    12
 
 typedef struct {
     const char* version;

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include "../projects/evoplayer/include/evo_changelog.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -722,41 +723,35 @@ static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int he
     p.release_total = 5;
     p.cursor_index = 0;
 
-    struct Rel { const char* v; const char* t; const char* d; };
-    static const Rel rel[5] = {
-        { "0.7.1", "RMLUI LAUNCH, BROWSER & LIST SCREENS", "AUGUST 2026" },
-        { "0.7.0", "EMBY PASSWORD AUTH & REFINED UI",      "AUGUST 2026" },
-        { "0.6.0", "NATIVE RMLUI PLAYBACK OSD",            "AUGUST 2026" },
-        { "0.5.0", "MEDIA HOME TILE & THEMING",            "JULY 2026"   },
-        { "0.4.0", "HARDWARE DECODE PIPELINE",             "JULY 2026"   },
-    };
-    for (int i = 0; i < 5; i++) {
-        p.releases[i].version = rel[i].v;
-        p.releases[i].tagline = rel[i].t;
-        p.releases[i].date = rel[i].d;
+    /*
+     * The real changelog, not a mock of it.
+     *
+     * This fixture used to carry its own hand-written releases and items, so
+     * the host preview showed something the console never displays - and it
+     * could not catch the thing this screen is most likely to get wrong, which
+     * is a release with more items than EVO_RMLUI_CL_ITEMS and a detail pane
+     * that clips rather than scrolls. Drive it from evo_changelog.h so the
+     * preview is the shipping content.
+     */
+    const int nrel = EVO_CHANGELOG_RELEASE_COUNT;
+    p.release_total = nrel;
+    for (int i = 0; i < nrel && i < EVO_RMLUI_CL_RELEASES; i++) {
+        p.releases[i].version = EVO_CHANGELOG_RELEASES[i].version;
+        p.releases[i].tagline = EVO_CHANGELOG_RELEASES[i].tagline;
+        p.releases[i].date    = EVO_CHANGELOG_RELEASES[i].date;
         p.releases[i].is_focused = (i == 0);
         p.release_count++;
     }
 
-    p.detail_version = "0.7.1";
-    p.detail_tagline = "RMLUI LAUNCH, BROWSER & LIST SCREENS";
-    p.item_total = 9;
+    const evo_changelog_release& cur = EVO_CHANGELOG_RELEASES[0];
+    p.detail_version = cur.version;
+    p.detail_tagline = cur.tagline;
+    p.item_total = cur.item_count;
 
-    struct It { const char* k; const char* t; };
-    static const It items[9] = {
-        { "NEW",      "RETAINED-MODE LAUNCH SCREEN WITH HERO, RECENT SHELF AND LIBRARY TILES" },
-        { "NEW",      "USB BROWSER REBUILT AS A VIRTUALISED TWELVE-ROW LIST WITH LIVE INSPECTOR" },
-        { "NEW",      "SHARED LIST DOCUMENT SERVING RECENT, FAVORITES AND BOTH EMBY SCREENS" },
-        { "NEW",      "MASTER-DETAIL CHANGELOG VIEWER" },
-        { "FIXED",    "BROWSER OPENED IN THE LAST PLAYED FOLDER INSTEAD OF THE USB ROOT" },
-        { "FIXED",    "NAVIGATION RAIL WAS UNREACHABLE FROM THE HOME SCREEN" },
-        { "FIXED",    "THEME COLOURS WERE BYTE-SWAPPED BEFORE THE FIRST THEME SYNC" },
-        { "FIXED",    "GRADIENT DECORATORS FLATTENED TO THEIR START COLOUR" },
-        { "IMPROVED", "RUNTIME ARTWORK NOW REACHES THE DOM WITHOUT A FILE ON DISK" },
-    };
-    for (int i = 0; i < 9; i++) {
-        p.items[i].kind = items[i].k;
-        p.items[i].text = items[i].t;
+    static const char* kKind[] = { "NEW", "FIXED", "IMPROVED", "REMOVED", "VERSION" };
+    for (int i = 0; i < cur.item_count && i < EVO_RMLUI_CL_ITEMS; i++) {
+        p.items[i].kind = kKind[(int)cur.items[i].kind];
+        p.items[i].text = cur.items[i].text;
         p.item_count++;
     }
 
