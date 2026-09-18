@@ -50,8 +50,12 @@
     } while (0)
 #endif
 
+/* Never destroyed - same reason as Application::getInstance(); its teardown
+ * is done explicitly by evo_rmlui_shutdown() from Application::shutdown(),
+ * and letting it also unwind at exit crashed QUIT EVO. */
 EvoRmlApp& EvoRmlApp::Instance() {
-    static EvoRmlApp instance;
+    static EvoRmlApp* p_instance = new EvoRmlApp();
+    EvoRmlApp& instance = *p_instance;
     return instance;
 }
 

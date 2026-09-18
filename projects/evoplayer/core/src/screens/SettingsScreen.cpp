@@ -4,6 +4,7 @@
 #include "evo_feedback.h"
 #include "evo_toast.h"
 #include "evo_theme.h"
+#include "evo_boot_log.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,7 +21,7 @@ constexpr int kSectionCount = 4;
 constexpr int kMaxDefs      = 6;
 constexpr int kMaxOptions   = EVO_THEME_MAX;   /* themes are the longest list */
 
-enum SettingAction { ACT_NONE = 0, ACT_SURROUND, ACT_COMPAT_REPORT, ACT_DEVTOOLS };
+enum SettingAction { ACT_NONE = 0, ACT_SURROUND, ACT_COMPAT_REPORT, ACT_DEVTOOLS, ACT_QUIT };
 
 /*
  * One description of a setting, independent of how it is drawn.
@@ -142,7 +143,11 @@ int buildSectionDefs(int section, SettingDef* d) {
         d[2] = {"DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS",
                 "../icons/icon_settings.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
                 ACT_DEVTOOLS, 0, 0, {}};
-        n = 3;
+
+        d[3] = {"QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER",
+                "../icons/icon_settings.png", EVO_RMLUI_ROW_ACTION, false, "QUIT",
+                ACT_QUIT, 0, 0, {}};
+        n = 4;
         break;
 
     default:
@@ -293,6 +298,31 @@ bool runAction(int section, int def) {
             return true;
         }
         return false;
+    /*
+     * Soft close, not exit.
+     *
+     * Closing from the PS button kills the process outright, so the frame loop
+     * never returns and Application::shutdown() never runs - meaning the GPU is
+     * never drained and the scanout registration and direct-memory pool are
+     * left for the kernel to reclaim underneath a GPU that may still be
+     * mid-submit. requestExit() just clears m_running, so the loop finishes the
+     * frame it is on and exits through the ordinary shutdown path like any
+     * other return from run().
+     *
+     * This used to call requestExit(), which left through shutdown() and
+     * returned from main(). The teardown itself worked - the breadcrumbs ran
+     * all the way to "shutdown: complete" - but the libc exit path after it
+     * crashed every time, and a PS5 app is not really expected to terminate
+     * itself anyway: no retail game ships a quit menu. So it now releases
+     * everything and parks instead, and the user closes it from the switcher.
+     * See Application::requestSoftClose().
+     */
+    case ACT_QUIT:
+        evo_feedback(EVO_FB_OPEN);
+        evo_boot_log("settings: QUIT EVO selected - soft close");
+        evo_boot_log_flush();
+        Application::getInstance().requestSoftClose();
+        return true;
     case ACT_COMPAT_REPORT: {
         FILE* fp = std::fopen("/mnt/usb0/evo_compatibility_report.txt", "w");
         if (!fp) fp = std::fopen("evo_compatibility_report.txt", "w");

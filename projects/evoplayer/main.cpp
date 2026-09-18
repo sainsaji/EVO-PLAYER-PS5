@@ -50,6 +50,15 @@ static void evo_crash_handler(int sig, siginfo_t *si, void *ctx)
     _exit(128 + sig);
 }
 
+/* Async-signal-safe by construction: one store to a sig_atomic_t and nothing
+ * else. The frame loop polls it and exits through Application::shutdown().
+ * See the note on g_evo_term_requested in Application.hpp. */
+static void evo_term_handler(int sig)
+{
+    (void)sig;
+    g_evo_term_requested = 1;
+}
+
 static void evo_install_crash_catcher(void)
 {
     struct sigaction sa;
@@ -59,6 +68,14 @@ static void evo_install_crash_catcher(void)
     sigaction(SIGSEGV, &sa, 0);
     sigaction(SIGBUS, &sa, 0);
     sigaction(SIGABRT, &sa, 0);
+
+    struct sigaction term;
+    term.sa_handler = evo_term_handler;
+    sigemptyset(&term.sa_mask);
+    term.sa_flags = 0;
+    sigaction(SIGTERM, &term, 0);
+    sigaction(SIGINT, &term, 0);
+    sigaction(SIGHUP, &term, 0);
 }
 #endif
 
@@ -75,5 +92,14 @@ int main(int argc, char* argv[]) {
     if (!app.initialize(argc, argv)) {
         return 1;
     }
-    return app.run();
+    const int rc = app.run();
+
+    /* Last breadcrumb before the C runtime takes over. Anything that faults
+     * after this line is in exit handling - static destructors, atexit, libc
+     * teardown - not in EVO's own shutdown, which logs "shutdown: complete"
+     * of its own accord. Worth keeping: distinguishing those two was the whole
+     * difficulty in tracking down the QUIT EVO crash. */
+    evo_bt("main: run() returned rc=%d - entering exit", rc);
+    evo_boot_log_flush();
+    return rc;
 }

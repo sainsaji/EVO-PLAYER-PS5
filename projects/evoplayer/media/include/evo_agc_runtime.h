@@ -75,6 +75,11 @@ typedef struct evo_agc_pipeline {
 
 int  evo_agc_runtime_init(int width, int height, int hdr);
 void evo_agc_runtime_shutdown(void);
+
+/* Block until every submitted command buffer has retired, or timeout_ms passes.
+ * Used by shutdown, and by the soft close, which parks the app with the GPU
+ * quiescent so the switcher can reap it without work in flight. */
+void evo_agc_runtime_wait_idle(unsigned timeout_ms);
 int  evo_agc_runtime_is_active(void);
 
 void evo_agc_runtime_frame_begin(void);

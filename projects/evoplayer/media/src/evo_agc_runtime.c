@@ -1369,18 +1369,93 @@ cleanup_fail:
     return -1;
 }
 
+/*
+ * Wait for every submitted command buffer to retire before anything it points
+ * at is handed back.
+ *
+ * Teardown released the scanout registration and then the direct-memory pool
+ * without ever asking whether the GPU was finished with them. Everything the
+ * GPU reads while drawing a frame - command buffers, vertex and index data,
+ * textures, the transient ring, the scanout target itself - lives in that one
+ * mapping, so unregistering and releasing it while a submit is still in flight
+ * leaves the GPU writing into physical pages the kernel has already reclaimed.
+ * That is a kernel panic, and it is a race, which is why it does not fire every
+ * time.
+ *
+ * The per-slot fence protocol needed to avoid it already exists for frame
+ * pacing (see frame_begin): the GPU writes fence_marker into fences[slot] when
+ * that slot's submit retires, fence_expect[slot] holds the value to wait for,
+ * and 0 means nothing is outstanding. This waits on all of them rather than
+ * just the slot about to be reused. The fence line must be invalidated before
+ * every read - it sits in the same write-back pool the CPU wrote, so without
+ * evicting it the CPU spins on its own stale copy forever.
+ *
+ * Bounded, and deliberately so: if the GPU is already wedged then no amount of
+ * waiting will retire the fence, and hanging here would turn a panic on exit
+ * into a hang on exit. Past the deadline we give up and release anyway, which
+ * is no worse than the behaviour this replaces.
+ */
+static void agc_wait_gpu_idle(unsigned timeout_ms)
+{
+    if (!g_agc_dev.initialized)
+        return;
+
+    int waited_any = 0;
+    for (int slot = 0; slot < EVO_AGC_FRAME_SLOTS; ++slot) {
+        if (!g_agc_dev.fence_expect[slot] || !g_agc_dev.fences[slot])
+            continue;
+        waited_any = 1;
+
+        unsigned waited = 0;
+        for (; waited < timeout_ms; ++waited) {
+            evo_agc_runtime_cache_flush((const void *)g_agc_dev.fences[slot], 4);
+            if (*g_agc_dev.fences[slot] == g_agc_dev.fence_expect[slot])
+                break;
+            sceKernelUsleep(1000);
+        }
+
+        evo_boot_log("agc shutdown: slot=%d %s after %ums (fence=%u expect=%u)",
+                     slot, waited >= timeout_ms ? "STILL BUSY - releasing anyway"
+                                                : "idle",
+                     waited,
+                     (unsigned)*g_agc_dev.fences[slot],
+                     (unsigned)g_agc_dev.fence_expect[slot]);
+        g_agc_dev.fence_expect[slot] = 0;
+    }
+    if (!waited_any)
+        evo_boot_log("agc drain: no submits outstanding");
+    evo_boot_log_flush();
+}
+
+void evo_agc_runtime_wait_idle(unsigned timeout_ms)
+{
+    agc_wait_gpu_idle(timeout_ms);
+}
+
 void evo_agc_runtime_shutdown(void)
 {
+    /* Order matters: drain first, then drop the scanout registration, then
+     * unmap, then hand the physical pages back. */
+    agc_wait_gpu_idle(500);
+
+    evo_boot_log("agc shutdown: drained, video_handle=%d base=%p",
+                 g_agc_dev.video_handle, (void *)g_agc_dev.direct_mem_base);
+    evo_boot_log_flush();
+
     if (g_agc_dev.video_handle >= 0) {
         sceVideoOutUnregisterBuffers(g_agc_dev.video_handle, 0);
         sceVideoOutClose(g_agc_dev.video_handle);
         g_agc_dev.video_handle = -1;
     }
+    evo_boot_log("agc shutdown: videoout closed");
+    evo_boot_log_flush();
 
     if (g_agc_dev.direct_mem_base) {
         sceKernelMunmap(g_agc_dev.direct_mem_base, g_agc_dev.direct_mem_bytes);
         g_agc_dev.direct_mem_base = NULL;
     }
+    evo_boot_log("agc shutdown: unmapped");
+    evo_boot_log_flush();
 
     if (g_agc_dev.direct_mem_offset >= 0) {
         sceKernelReleaseDirectMemory(g_agc_dev.direct_mem_offset, g_agc_dev.direct_mem_bytes);
@@ -1388,6 +1463,8 @@ void evo_agc_runtime_shutdown(void)
     }
 
     g_agc_dev.initialized = 0;
+    evo_boot_log("agc shutdown: released, done");
+    evo_boot_log_flush();
 }
 
 int evo_agc_runtime_is_active(void)

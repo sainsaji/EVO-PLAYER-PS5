@@ -94,6 +94,8 @@ long long now_ms(void);
 #define EVO_DIRECT_MEM_POOL_BYTES (128 * 1024 * 1024)
 #endif
 
+extern "C" { volatile sig_atomic_t g_evo_term_requested = 0; }
+
 namespace evo {
 
 static evo_input evo_pad_state;
@@ -109,9 +111,31 @@ static void EnsureDataDirectories() {
     mkdir(evo_data_dir(), 0777);
 }
 
+/*
+ * Deliberately never destroyed.
+ *
+ * A function-local static is destroyed at exit, and that is where QUIT EVO was
+ * dying on 2026-09-18 - the breadcrumbs showed Application::shutdown() running
+ * to "shutdown: complete", main() returning, and the process then faulting
+ * while the static destructor chain unwound. ~Application() re-entered a
+ * teardown that had already happened (its own shutdown() is guarded, but the
+ * member unique_ptrs are not: ~PlaybackController ran stopPlayback() a second
+ * time, which is the stats block that appears after "shutdown: complete"), and
+ * the destruction order across these singletons is not something this process
+ * needs to get right.
+ *
+ * By the time main() returns, shutdown() has already released everything that
+ * actually matters - GPU, VideoOut, the direct-memory pool, decoders, audio -
+ * in a verified order. What remains is C++ object destruction in a process
+ * that is about to stop existing, so it buys nothing and costs a crash. The
+ * heap "leak" is reclaimed with the process.
+ *
+ * This is the leaky-singleton form, not _exit(): main() still returns
+ * normally, which the app module requires.
+ */
 Application& Application::getInstance() {
-    static Application s_instance;
-    return s_instance;
+    static Application* s_instance = new Application();
+    return *s_instance;
 }
 
 Application::Application()
@@ -147,6 +171,16 @@ void Application::initStateMachine() {
 void Application::requestExit() {
     m_running = false;
     m_appFsm.postEvent(ApplicationEvent::RequestExit);
+}
+
+/* See the note on the declaration in Application.hpp. */
+void Application::requestSoftClose() {
+    if (m_softClose)
+        return;
+    m_softClose = true;
+    m_softCloseFrames = 0;
+    evo_boot_log("soft close: requested");
+    evo_boot_log_flush();
 }
 
 bool Application::initialize(int argc, char** argv) {
@@ -288,8 +322,40 @@ bool Application::initScreens() {
     return true;
 }
 
+/*
+ * Runs at most once, and tears down in dependency order.
+ *
+ * Two things were wrong here, both found by the first QUIT EVO on hardware
+ * (2026-09-18) crashing after the pp_playback stats and before any AGC line:
+ *
+ * 1. It ran more than once. ~Application() calls it too, and Application is a
+ *    singleton, so the destructor fires during static destruction after main()
+ *    has returned - by which point run() had already torn everything down. The
+ *    log showed the pp_playback stats block three times over. Nothing here was
+ *    written to be re-entrant, so it is now guarded rather than every step
+ *    being made individually idempotent.
+ *
+ * 2. It released the GPU before the UI that was using it. evo_rmlui_shutdown()
+ *    existed but had no caller anywhere in the tree, so RmlUi kept its render
+ *    interface, its compiled geometry and its textures while
+ *    evo_agc_runtime_shutdown() closed VideoOut and unmapped the pool - and
+ *    then unwound at static-destruction time against a runtime that was gone.
+ *    The UI now goes first, while the runtime that owns its allocator is still
+ *    alive to service the frees.
+ *
+ * Breadcrumbs at every step and flushed as they go: this path had no
+ * instrumentation, so its first failure could only be located by what was
+ * missing from the log.
+ */
 void Application::shutdown() {
+    if (m_shutdownDone)
+        return;
+    m_shutdownDone = true;
+
     m_running = false;
+
+    evo_boot_log("shutdown: begin");
+    evo_boot_log_flush();
 
     if (m_playbackController) {
         m_playbackController->stopPlayback();
@@ -300,10 +366,21 @@ void Application::shutdown() {
     if (m_soundEffectEngine) {
         m_soundEffectEngine->shutdown();
     }
+    evo_boot_log("shutdown: media stopped");
+    evo_boot_log_flush();
 
     pp_playback_shutdown(&g_pp_pb);
+    evo_boot_log("shutdown: pp_playback down");
+    evo_boot_log_flush();
+
+    /* Before the AGC runtime - see (2) above. */
+    evo_rmlui_shutdown();
+    evo_boot_log("shutdown: rmlui down");
+    evo_boot_log_flush();
 
     evo_agc_runtime_shutdown();
+    evo_boot_log("shutdown: agc runtime down");
+    evo_boot_log_flush();
 
     if (m_uiScratch) {
         free(m_uiScratch);
@@ -311,6 +388,8 @@ void Application::shutdown() {
     }
 
     m_appFsm.postEvent(ApplicationEvent::ShutdownComplete);
+    evo_boot_log("shutdown: complete");
+    evo_boot_log_flush();
 }
 
 namespace {
@@ -445,7 +524,39 @@ int Application::run() {
     evo_bt("Application: entering frame loop");
     evo_boot_log_flush();
 
-    for (int frame = 0; m_running; ++frame) {
+    for (int frame = 0; m_running && !g_evo_term_requested; ++frame) {
+        /*
+         * Soft close, in three stages across successive iterations.
+         *
+         * The wait matters: the message has to be composited and presented
+         * before submission stops, because what freezes on screen is whatever
+         * the scanout last latched. Stop too early and the user is left
+         * staring at a blank panel wondering whether it crashed.
+         */
+        if (m_softClosed) {
+            usleep(200000);        /* parked: no input, no render, no present */
+            continue;
+        }
+        if (m_softClose) {
+            if (m_softCloseFrames == 0) {
+                if (m_playbackController) m_playbackController->stopPlayback();
+                if (m_surroundTestService) m_surroundTestService->stop();
+                if (m_soundEffectEngine)   m_soundEffectEngine->shutdown();
+                pp_playback_shutdown(&g_pp_pb);
+                evo_boot_log("soft close: media released");
+                evo_boot_log_flush();
+                toast("SAFE TO CLOSE", "Press the PS button, then close EVO");
+            }
+            if (++m_softCloseFrames > 150) {     /* ~2.5 s of presented frames */
+                evo_agc_runtime_wait_idle(500);
+                m_softClosed = true;
+                evo_boot_log("soft close: parked - GPU idle, display latched, "
+                             "safe to close from the switcher");
+                evo_boot_log_flush();
+                continue;
+            }
+        }
+
         if (frame < 5) {
             evo_bt("frame %d: start poll", frame);
             evo_boot_log_flush();
