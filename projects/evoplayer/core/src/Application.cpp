@@ -315,6 +315,29 @@ void Application::shutdown() {
 
 namespace {
 
+#ifdef EVO_APP_MODULE
+/*
+ * A system notification, which is the only on-screen feedback available here.
+ *
+ * The app's own toast goes through a second Rml::Context and is disabled
+ * (#75: it SIGSEGVs the plain .ffpfsc build on frame 1), so toast() draws
+ * nothing and a screenshot gave no sign it had worked. This is the same
+ * notification path --breadcrumbs uses for the boot trace; it is the
+ * platform's, not RmlUi's, so it is unaffected.
+ */
+struct evo_sys_note { char pad[45]; char msg[3075]; };
+extern "C" int sceKernelSendNotificationRequest(int, void *, unsigned long, int);
+
+static void notifyOnScreen(const char* text) {
+    evo_sys_note n;
+    std::memset(&n, 0, sizeof n);
+    std::snprintf(n.msg, sizeof n.msg, "%s", text);
+    sceKernelSendNotificationRequest(0, &n, sizeof n, 0);
+}
+#else
+static void notifyOnScreen(const char*) {}
+#endif
+
 /*
  * L3 screenshot.
  *
@@ -536,11 +559,18 @@ int Application::run() {
                 if (evo_capture_screenshot(shotPath)) {
                     const char* name = std::strrchr(shotPath.c_str(), '/');
                     toast("SCREENSHOT", name ? name + 1 : shotPath.c_str());
+                    {
+                        char note[160];
+                        std::snprintf(note, sizeof note, "EVO: screenshot saved - %s",
+                                      name ? name + 1 : shotPath.c_str());
+                        notifyOnScreen(note);
+                    }
                     evo_bt("screenshot: wrote %s", shotPath.c_str());
                     evo_boot_log_flush();
                     evo_feedback(EVO_FB_CONFIRM);
                 } else {
                     toast("SCREENSHOT", "Capture failed");
+                    notifyOnScreen("EVO: screenshot failed");
                     evo_feedback(EVO_FB_BOUNDARY);
                 }
                 pressed &= ~(PadButtons::L3 | PadButtons::R3);
