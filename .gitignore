@@ -235,3 +235,11 @@ opnecode.json
 output/*.png
 output/*.bmp
 output/*.jpg
+# ...and in any subdirectory of output/. The rules above only covered its
+# root, so a second debugging session committed another 300 KB of previews
+# from output/icons/.
+output/**/*.png
+output/**/*.bmp
+output/**/*.jpg
+output/icons/
+output/shots/
