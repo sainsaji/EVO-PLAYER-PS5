@@ -1,4 +1,5 @@
 #include "evo/screens/BrowserScreen.hpp"
+#include "evo_jailbreak.h"
 #include "evo/screens/TextReaderScreen.hpp"
 #include "evo/screens/ImageViewerScreen.hpp"
 #include "evo/screens/ModalDialogScreen.hpp"
@@ -828,7 +829,25 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.at_root = 1;
     }
 
-    if (m_activeSource == 2) {
+    /*
+     * A shut sandbox looks exactly like an empty folder from in here.
+     *
+     * The app module launches into a per-title sandbox where /mnt/usb0 and
+     * /data are both ENOENT, and it cannot lift that itself - it asks the
+     * jailbreak daemon to. When no daemon is running the request is never
+     * answered, every listing comes back with nothing in it, and the browser
+     * used to report "FOLDER IS EMPTY - No supported media files found",
+     * which is true of what it can see and useless to the person reading it.
+     * Say what is actually wrong, on the two sources that need the promotion.
+     */
+    const bool storage_locked = !evo_jailbreak_is_open() &&
+                                (m_activeSource == 0 || m_activeSource == 1);
+
+    if (storage_locked) {
+        params.empty_title = "ELEVATED PRIVILEGES NEEDED";
+        params.empty_hint = "Start the jailbreak payload (Lapy JB or etaHEN), "
+                            "then relaunch EVO";
+    } else if (m_activeSource == 2) {
         params.empty_title = "NO FAVORITES YET";
         params.empty_hint = "Press [Triangle] on any file to add to Favorites";
     } else if (m_activeSource == 3) {
