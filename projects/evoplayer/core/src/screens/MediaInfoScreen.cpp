@@ -85,9 +85,13 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
 
     params.title = meta.title.c_str();
     params.path = meta.filePath.c_str();
-    params.container = meta.container.c_str();
-    params.video_codec = meta.videoCodec.c_str();
-    params.audio_codec = meta.audioCodec.c_str();
+    /* These land in labelled spec rows, so an absent value needs a visible
+     * placeholder - a blank after "VIDEO CODEC" reads as a broken screen,
+     * where the browser's status strip simply hides the pill instead. */
+    static const char* kNone = "—";   /* em dash */
+    params.container   = meta.container.empty()  ? kNone : meta.container.c_str();
+    params.video_codec = meta.videoCodec.empty() ? kNone : meta.videoCodec.c_str();
+    params.audio_codec = meta.audioCodec.empty() ? kNone : meta.audioCodec.c_str();
 
     char resBuf[32];
     std::snprintf(resBuf, sizeof(resBuf), "%d x %d", meta.width, meta.height);

@@ -26,9 +26,22 @@ static const char* ResolveCodecName(enum AVCodecID id) {
 MediaMetadataInfo MediaMetadataService::extractBasicMetadata(const std::string& filePath) {
     MediaMetadataInfo info;
     info.filePath = filePath;
-    info.container = "Unknown";
-    info.videoCodec = "Unknown";
-    info.audioCodec = "Unknown";
+    /*
+     * Empty, not "Unknown".
+     *
+     * Every consumer decides whether to show these by testing .empty(), so a
+     * literal "Unknown" defeats the test: the browser's status strip showed
+     * an "Unknown" resolution pill and an "Unknown" codec pill next to a .log
+     * file, which has neither and never will. "No value" has to be
+     * representable for the guards to mean anything.
+     *
+     * ResolveCodecName() still returns "Unknown" - it only runs when a stream
+     * genuinely exists and merely cannot be named, which is a different fact
+     * from having no stream at all.
+     */
+    info.container.clear();
+    info.videoCodec.clear();
+    info.audioCodec.clear();
 
     cleanMediaTitle(filePath, info.title, info.container);
 
