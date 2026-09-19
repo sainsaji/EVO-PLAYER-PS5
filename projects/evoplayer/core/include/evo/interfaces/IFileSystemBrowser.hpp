@@ -52,6 +52,11 @@ public:
     virtual std::string getFullPath(size_t index) const = 0;
     virtual FileCategory classifyFile(const std::string& fileName, int entryType) const = 0;
     virtual const char* getFileCategoryLabel(FileCategory category) const = 0;
+
+    /* Library view across the whole source - see FileSystemBrowser. Unknown
+     * turns it off and returns to ordinary directory listing. */
+    virtual void setCategoryScan(FileCategory cat) = 0;
+    virtual FileCategory getCategoryScan() const = 0;
 };
 
 } // namespace evo

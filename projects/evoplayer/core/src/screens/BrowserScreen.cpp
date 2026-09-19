@@ -88,7 +88,14 @@ void BrowserScreen::rebuildItems() {
             const auto* entry = browser->getEntry(i);
             if (!entry) continue;
 
-            if (m_categoryFilter != -1 && entry->category != FileCategory::Folder &&
+            /* With a library view active the service has already restricted
+             * the listing to one category across the whole source, so there is
+             * nothing left to narrow here. Favourites and Recent still filter
+             * locally below, because those are lists rather than trees. */
+            const bool library_view =
+                browser && browser->getCategoryScan() != FileCategory::Unknown;
+            if (!library_view && m_categoryFilter != -1 &&
+                entry->category != FileCategory::Folder &&
                 static_cast<int>(entry->category) != m_categoryFilter) {
                 continue;
             }
@@ -441,6 +448,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             if (m_activeSource != 0 || (browser && browser->getCurrentPath().rfind("/mnt/usb0", 0) != 0)) {
                 m_activeSource = 0;
                 m_categoryFilter = -1;
+                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 if (browser) {
@@ -455,6 +463,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             if (m_activeSource != 1 || (browser && browser->getCurrentPath().rfind("/data", 0) != 0)) {
                 m_activeSource = 1;
                 m_categoryFilter = -1;
+                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 if (browser) {
@@ -469,6 +478,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             if (m_activeSource != 2) {
                 m_activeSource = 2;
                 m_categoryFilter = -1;
+                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
@@ -479,6 +489,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             if (m_activeSource != 3) {
                 m_activeSource = 3;
                 m_categoryFilter = -1;
+                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
@@ -488,6 +499,10 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 4: // All Videos
             if (m_categoryFilter != static_cast<int>(FileCategory::Video)) {
                 m_categoryFilter = static_cast<int>(FileCategory::Video);
+                if (browser) {
+                    browser->setCategoryScan(FileCategory::Video);
+                    browser->refresh();
+                }
                 resetSelection();
                 if (focusGrid) toast("FILTER", "Videos Only");
             }
@@ -495,6 +510,10 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 5: // All Music
             if (m_categoryFilter != static_cast<int>(FileCategory::Audio)) {
                 m_categoryFilter = static_cast<int>(FileCategory::Audio);
+                if (browser) {
+                    browser->setCategoryScan(FileCategory::Audio);
+                    browser->refresh();
+                }
                 resetSelection();
                 if (focusGrid) toast("FILTER", "Music Only");
             }
@@ -502,6 +521,10 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 6: // All Photos
             if (m_categoryFilter != static_cast<int>(FileCategory::Image)) {
                 m_categoryFilter = static_cast<int>(FileCategory::Image);
+                if (browser) {
+                    browser->setCategoryScan(FileCategory::Image);
+                    browser->refresh();
+                }
                 resetSelection();
                 if (focusGrid) toast("FILTER", "Photos Only");
             }
@@ -856,6 +879,15 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     } else if (m_isSearching) {
         params.empty_title = "NO MATCHES FOUND";
         params.empty_hint = "Try a different search keyword";
+    } else if (m_categoryFilter == static_cast<int>(FileCategory::Video)) {
+        params.empty_title = "NO VIDEOS FOUND";
+        params.empty_hint = "Nothing playable in this source";
+    } else if (m_categoryFilter == static_cast<int>(FileCategory::Audio)) {
+        params.empty_title = "NO MUSIC FOUND";
+        params.empty_hint = "Nothing playable in this source";
+    } else if (m_categoryFilter == static_cast<int>(FileCategory::Image)) {
+        params.empty_title = "NO PHOTOS FOUND";
+        params.empty_hint = "Nothing viewable in this source";
     } else {
         params.empty_title = "FOLDER IS EMPTY";
         params.empty_hint = "No supported media files found";
