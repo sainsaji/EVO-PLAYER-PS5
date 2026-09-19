@@ -96,6 +96,13 @@ long long now_ms(void);
 
 extern "C" { volatile sig_atomic_t g_evo_term_requested = 0; }
 
+#ifdef EVO_APP_MODULE
+/* libSceSystemService, linked from the SDK stub - the link line already passes
+ * --as-needed over the whole stub directory, so no PRX .syms entry is needed
+ * (and a .syms line nothing imports would brick the module load). */
+extern "C" int sceSystemServiceHideSplashScreen(void);
+#endif
+
 namespace evo {
 
 static evo_input evo_pad_state;
@@ -901,6 +908,32 @@ int Application::run() {
             }
             evo_agc_runtime_present();
             evo_rmlui_end_frame();
+
+#ifdef EVO_APP_MODULE
+            /*
+             * Dismiss the system splash, once EVO has something real on
+             * screen behind it.
+             *
+             * The shell shows sce_sys/pic1.png while a title starts and leaves
+             * it up until the app says it is ready. Nothing here ever did,
+             * which went unnoticed for as long as the project shipped no
+             * pic0/pic1 at all - with no artwork there was no splash, so there
+             * was nothing to dismiss. Adding the background art in 1584ddd
+             * gave the shell something to show, and the player then rendered
+             * happily underneath it forever: the frame loop presents at 60 fps
+             * with zero flip failures while the panel shows the splash.
+             *
+             * Held until a few frames have presented so the splash gives way
+             * to a drawn UI rather than to one black frame.
+             */
+            static bool s_splash_hidden = false;
+            if (!s_splash_hidden && frame >= 3) {
+                s_splash_hidden = true;
+                const int rc = sceSystemServiceHideSplashScreen();
+                evo_boot_log("splash: hide rc=%d (0 = dismissed)", rc);
+                evo_boot_log_flush();
+            }
+#endif
             if (log_this_present) {
                 evo_boot_log("app present done isPlayer=1");
                 evo_boot_log_flush();
