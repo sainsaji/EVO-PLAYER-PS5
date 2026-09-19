@@ -235,7 +235,21 @@ jobs:
           EOF
           cat dist/NOTES.md
 
+      # Publish only on a real tag push. A workflow_dispatch run therefore
+      # does everything else - build, PFS-pack, verify the image, collect
+      # artifacts, extract the notes - and stops short of creating a release,
+      # which makes it a dry run of the whole pipeline.
+      #
+      # That matters because this workflow last ran for v0.7.0 in August, 315
+      # commits and an entire architecture ago (payload -> app module, CPU ->
+      # GPU, software -> hardware decode). Being able to prove it still works
+      # without publishing anything is the difference between finding out now
+      # and finding out from a broken release.
+      #
+      # The .ffpfsc is still uploaded as a run artifact either way, so a dry
+      # run is inspectable.
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: EVO Player ${{ steps.ver.outputs.tag }}

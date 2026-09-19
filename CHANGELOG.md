@@ -5,6 +5,61 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.10.0
+
+![](https://img.shields.io/badge/Release-v0.10.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
+
+**EVO is a real PS5 app now.** It runs as a game-category app module, decodes video on the console's own hardware decoder at 4K, renders its entire interface on the GPU, and the UI has been rebuilt from scratch. 315 commits since 0.7.0.
+
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, then launch EVO from the Games row. The ELF payload downloads from previous releases no longer apply — that route has been removed.
+
+### ![](https://img.shields.io/badge/APP%20MODULE-e91e63?style=flat-square) A Real Application
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Game-category app module (`PPSA99039`).** EVO launches from the Games row like any other title, with a real user session, its own graphics and audio, instead of borrowing a background service with no display plane.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Self-unjail for `/data`.** The app opens its own sandbox at boot, so settings, resume points and Emby credentials persist to internal storage rather than depending on a USB stick.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Quit EVO.** A soft close in Settings → System & Diagnostics that stops playback, releases the decoders and drains the GPU before you close the app from the switcher.
+
+### ![](https://img.shields.io/badge/DECODE-ff8c00?style=flat-square) Hardware Video Decode
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **`sceVideodec2` hardware decode at 4K.** H.264, HEVC and VP9 all decode on the console's own decoder, with resident per-codec decoders created once at boot.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **10-bit HDR.** HDR10 (PQ) and HLG tone mapping with a BT.2020 matrix, and a per-frame HDR VideoOut switch.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native audio decode** through the console's audio decoder.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Every video container opens**, with an automatic FFmpeg fallback when a clip falls outside what the hardware decoder accepts.
+
+### ![](https://img.shields.io/badge/GRAPHICS-0070d1?style=flat-square) The Interface on the GPU
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Bare-metal `sceAgc` rendering.** The whole UI is submitted to the GPU as real draw calls, replacing the CPU rasteriser.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Renders at the panel's own resolution** instead of a fixed 1080p surface.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Three scanout buffers**, each fenced against the flip that replaces it.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Menus hold 60 fps** and only redraw when something actually changes, so an idle screen costs nothing.
+
+### ![](https://img.shields.io/badge/INTERFACE-007acc?style=flat-square) Rebuilt From Scratch
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Every screen redrawn in RmlUi**, bound to live player state rather than mock data.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Colour themes** — Midnight, Carbon, Ember, Aurora and a USB-supplied theme — applied consistently across every document.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Storage browser rebuilt** with a thumbnail on every card, and Recent and Favourites folded into it.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Media Info, subtitle picker and dialogs** redesigned, with the navigation rail streamlined to five sections.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Screenshot capture** straight to USB, and a developer tools screen with a live performance overlay.
+
+### ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) Fixes
+
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The scrub head starts where the picture is.** Beginning a scrub reset the bar and clock to the previous seek point, or to the start of the file on the first scrub of a session.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Choosing a theme changes the colours.** Only the first theme in the list ever applied; every other one silently did nothing and was never saved.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Resuming no longer flashes 0:00** before jumping to the saved position.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Seeking keeps audio in step** with the picture, and stops presenting stale frames during the discard window.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Posters decode on the hardware decoder** and survive a software fallback.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Cover art is cached instead of re-read every frame** — a deleted file in Recent caused continuous filesystem access and log writes for the life of the process.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Closing no longer leaves the GPU mid-flight.** Teardown drains submitted work before releasing the scanout registration and the memory it points at.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Text no longer clips** in the OSD, changelog and dialogs, and Emby streams show a real title instead of a URL.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The version shown in the app is the version you ran** — it is now defined once and read by the build, the tests and the release workflow.
+
+### ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) Removed
+
+- ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) **The ELF payload launch path.** The app module replaces it entirely; the old push scripts are gone and should not be recreated.
+- ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) **The software picture pipeline** — the CPU YUV converters and tile copy — now that the GPU does the work.
+
+---
+
 ## 0.7.0
 
 ![](https://img.shields.io/badge/Release-v0.7.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
