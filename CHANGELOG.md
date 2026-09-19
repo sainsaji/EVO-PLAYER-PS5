@@ -56,6 +56,7 @@ Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, then launch 
 ### ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) Removed
 
 - ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) **The ELF payload launch path.** The app module replaces it entirely; the old push scripts are gone and should not be recreated.
+- ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) **Emby, for now.** The media-server integration is turned off while it is reworked. Nothing is deleted - it still builds, it is just unreachable from the UI - and it returns in a later release.
 - ![](https://img.shields.io/badge/REMOVED-6e7681?style=flat-square) **The software picture pipeline** — the CPU YUV converters and tile copy — now that the GPU does the work.
 
 ---

@@ -1,8 +1,8 @@
 # EVO Player
 
-**A media player for jailbroken PS5 on firmware 12.70.**
+**A media player for jailbroken PS5.**
 
-Plays video from a USB drive or streams from your local **Emby** server. Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR, the interface renders on the GPU, and everything is built for the DualSense and a television across the room.
+Plays video from a USB drive or internal storage. Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR, the interface renders on the GPU, and everything is built for the DualSense and a television across the room.
 
 ![EVO Player launch screen](docs/images/launch.png)
 
@@ -14,11 +14,12 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 
 ### Prerequisites
 
-- A PS5 on firmware **12.70**, jailbroken.
+- A jailbroken PS5. Developed and verified on firmware **12.70** — other
+  firmwares are not known to fail, they are simply untested, so treat
+  anything else as unverified rather than unsupported.
 - **ShadowMountPlus** on the console, to mount the app image.
 - An FTP server on the console (the usual jailbreak payloads provide one on port `2121`).
 - *(For USB playback)* a USB stick formatted **exFAT** or **FAT32**, plugged in at `/mnt/usb0`.
-- *(For Emby)* an Emby server reachable on your LAN.
 
 ### Install
 
@@ -48,9 +49,14 @@ Video decodes on the console's own `sceVideodec2` decoder — **H.264, HEVC and 
 
 The whole UI is submitted to the GPU as real draw calls through bare-metal `sceAgc`, at the panel's own resolution rather than a fixed 1080p surface. Menus hold 60 fps and only redraw when something actually changes, so an idle screen costs nothing.
 
-### Browse USB & stream from Emby
+### Browse USB & internal storage
 
-Browse `/mnt/usb0` with a live metadata inspector — codec, resolution, size, duration — and a thumbnail on every card. Or connect to **Emby**: libraries, seasons and episodes with server cover art, streamed over LAN with watch progress kept in sync.
+Browse `/mnt/usb0` and `/data` with a live metadata inspector — codec, resolution, size, duration — and a thumbnail on every card.
+
+> [!NOTE]
+> **Emby is turned off in 0.10.0** while it is reworked. The integration is
+> still in the tree and still builds; it is only unreachable from the UI, and
+> comes back on in a later release.
 
 ![Browsing a folder](docs/images/browse.png)
 
