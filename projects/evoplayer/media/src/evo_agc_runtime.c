@@ -11,6 +11,19 @@
 #include <string.h>
 #include <unistd.h>   /* access() for the diagnostic flag files */
 
+/* PS5_tilemap, for de-swizzling the scanout in evo_agc_runtime_read_scanout().
+ * Included here rather than linked: its only previous includer was main.c,
+ * which is now main.c.legacy and is not compiled by anything. */
+#include "../../SDL_ps5tilemap.inc"
+
+#define PS5_TILE_W_SHIFT 9    /* 1 << 9 == PS5_TILE_WIDTH  (512) */
+#define PS5_TILE_H_SHIFT 7    /* 1 << 7 == PS5_TILE_HEIGHT (128) */
+#define PS5_TILE_W_MASK  (PS5_TILE_WIDTH  - 1)
+#define PS5_TILE_H_MASK  (PS5_TILE_HEIGHT - 1)
+typedef char evo_tile_dims_must_be_pow2[
+    ((1 << PS5_TILE_W_SHIFT) == PS5_TILE_WIDTH &&
+     (1 << PS5_TILE_H_SHIFT) == PS5_TILE_HEIGHT) ? 1 : -1];
+
 #define EVO_AGC_LOG_PREFIX "[evo_agc] "
 
 #define EVO_AGC_DIRECT_MEM_TYPE 12  /* SCE_KERNEL_WB_ONION */
@@ -2140,6 +2153,38 @@ void evo_agc_runtime_set_player_mode(int is_player)
     }
 }
 
+/*
+ * Capture the front buffer as linear BGRA.
+ *
+ * The scanout is TILED. It is registered with tiling mode 0 (tile, not
+ * linear) in both sceVideoOutSetBufferAttribute2 call sites, which is why the
+ * bases have to be 2 MB aligned and why the diagnostic above sizes the
+ * surface in 64 KB tiles. This function used to walk it as if it were linear:
+ *
+ *     memcpy(bgra + y * width, src + y * g_agc_dev.width, w * 4);
+ *
+ * which reads a swizzled surface in raster order and produces horizontal
+ * streak garbage. Every screenshot EVO has ever written looked like that; the
+ * earlier screenshot fixes corrected the button binding, the toast and the
+ * byte order, but nothing ever corrected the layout.
+ *
+ * The de-swizzle is the inverse of the old CPU present path (pp/src/tile_copy.c,
+ * deleted with the software presenter in GL-4) and uses the same table, which
+ * is still in the tree:
+ *
+ *     tiled_index = TILE_HEIGHT * (y / TILE_HEIGHT) * surface_w      [tile row]
+ *                 + TILE_SIZE   * (x / TILE_WIDTH)                   [tile in row]
+ *                 + PS5_tilemap[y % TILE_HEIGHT][x % TILE_WIDTH]     [within tile]
+ *
+ * tile_copy wrote linear -> tiled with exactly this address; reading it back
+ * the other way is the same expression with source and destination swapped.
+ * Verified before it was written: the formula was applied offline to a 4K
+ * capture pulled off the console, and turned that streaked image into a
+ * pixel-correct Settings screen.
+ *
+ * Single-threaded and only called for a screenshot, so the per-pixel table
+ * lookup does not need the worker pool tile_copy had for per-frame present.
+ */
 void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
 {
     if (!g_agc_dev.initialized || !bgra || width <= 0 || height <= 0)
@@ -2150,17 +2195,48 @@ void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
     const uint32_t *src = (const uint32_t *)g_agc_dev.scanout_buffers[front];
     if (!src)
         return;
-    /* The GPU wrote this buffer; the CPU's copy of those lines is stale. Evict
+
+    const int sw = g_agc_dev.width;
+    const int w  = width  < sw ? width  : sw;
+    const int h  = height < g_agc_dev.height ? height : g_agc_dev.height;
+    if (w <= 0 || h <= 0)
+        return;
+
+    /*
+     * The GPU wrote this buffer; the CPU's copy of those lines is stale. Evict
      * before reading or every capture returns whatever the CPU last put there
      * (i.e. the backdrop clear), which would make a working GPU frame look
-     * black in a screenshot. */
-    evo_agc_runtime_cache_flush(src,
-                                (size_t)g_agc_dev.width * (size_t)g_agc_dev.height * 4u);
-    int w = width  < g_agc_dev.width  ? width  : g_agc_dev.width;
-    int h = height < g_agc_dev.height ? height : g_agc_dev.height;
-    for (int y = 0; y < h; ++y)
-        memcpy(bgra + (size_t)y * width, src + (size_t)y * g_agc_dev.width,
-               (size_t)w * sizeof(uint32_t));
+     * black in a screenshot.
+     *
+     * Flush the tiled extent, not w*h: the last tile row reaches past the
+     * visible pixel count, and a partly-stale tail shows up as torn blocks.
+     */
+    {
+        size_t last = (size_t)((h - 1) >> PS5_TILE_H_SHIFT) * PS5_TILE_HEIGHT * (size_t)sw
+                    + (size_t)((w - 1) >> PS5_TILE_W_SHIFT) * PS5_TILE_SIZE
+                    + (PS5_TILE_SIZE - 1);
+        size_t bytes = (last + 1u) * sizeof(uint32_t);
+        if (bytes > (size_t)EVO_AGC_SCANOUT_STRIDE)
+            bytes = (size_t)EVO_AGC_SCANOUT_STRIDE;
+        evo_agc_runtime_cache_flush(src, bytes);
+    }
+
+    for (int y = 0; y < h; ++y) {
+        const unsigned short *lut = PS5_tilemap[y & PS5_TILE_H_MASK];
+        const size_t row_base =
+            (size_t)(y >> PS5_TILE_H_SHIFT) * PS5_TILE_HEIGHT * (size_t)sw;
+        uint32_t *dst = bgra + (size_t)y * (size_t)width;
+
+        for (int x0 = 0; x0 < w; x0 += PS5_TILE_WIDTH) {
+            const uint32_t *tile = src + row_base +
+                ((size_t)(x0 >> PS5_TILE_W_SHIFT) * (size_t)PS5_TILE_SIZE);
+            int n = w - x0;
+            if (n > PS5_TILE_WIDTH)
+                n = PS5_TILE_WIDTH;
+            for (int k = 0; k < n; ++k)
+                dst[x0 + k] = tile[lut[k]];
+        }
+    }
 }
 
 void evo_agc_runtime_note_draw(void)

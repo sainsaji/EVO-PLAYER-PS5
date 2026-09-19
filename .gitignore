@@ -228,3 +228,10 @@ third_party/ps5-xash3d-halflife/
 # Local OpenCode / IDE tooling configs
 opencode.json
 opnecode.json
+
+# Loose capture/debug artifacts at the output root. The subdirectories below
+# are already ignored, but files dropped straight into output/ were not, so a
+# `git add -A` during a debugging session committed 1.3 MB of screenshots.
+output/*.png
+output/*.bmp
+output/*.jpg
