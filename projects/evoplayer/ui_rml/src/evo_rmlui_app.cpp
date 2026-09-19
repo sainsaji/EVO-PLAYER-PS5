@@ -2892,10 +2892,26 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     if (scrim)    scrim->SetProperty("display",    state.rail_focused ? "block" : "none");
     if (expanded) expanded->SetProperty("display", state.rail_focused ? "block" : "none");
 
-    for (int i = 0; i < 5; i++) {
-        std::string exp_id  = "nav-exp-"       + std::to_string(i);
-        std::string lbl_id  = "nav-exp-label-" + std::to_string(i);
-        std::string icon_id = "nav-exp-icon-"  + std::to_string(i);
+    /*
+     * Same slot mapping as the collapsed rail above: navbar.rml has five fixed
+     * expanded rows with Emby at slot 2, and with Emby compiled out the four
+     * live sections are numbered 0..3.
+     *
+     * This panel was missed when the collapsed rail was fixed, and the host
+     * preview did not catch it because uiview only renders the rail collapsed
+     * - so Emby disappeared from the icon strip and stayed in the side nav the
+     * moment anyone opened it.
+     */
+    if (!EVO_ENABLE_EMBY) {
+        if (Rml::Element* el_gap = m_nav_doc->GetElementById("nav-exp-2"))
+            el_gap->SetProperty("display", "none");
+    }
+
+    for (int i = 0; i < rail_sections; i++) {
+        const int eslot = (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
+        std::string exp_id  = "nav-exp-"       + std::to_string(eslot);
+        std::string lbl_id  = "nav-exp-label-" + std::to_string(eslot);
+        std::string icon_id = "nav-exp-icon-"  + std::to_string(eslot);
 
         Rml::Element* el_exp  = m_nav_doc->GetElementById(exp_id);
         Rml::Element* el_lbl  = m_nav_doc->GetElementById(lbl_id);
