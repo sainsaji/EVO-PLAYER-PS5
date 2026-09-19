@@ -9,6 +9,17 @@
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
+
+/*
+ * malloc_shim.c (tools/native-app/stubs). Weak so the non-app-module compile
+ * check, which never links the shim, still builds - there the calls no-op.
+ */
+extern "C" {
+__attribute__((weak)) void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n);
+__attribute__((weak)) void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
+                                              uint64_t *served_anon, uint64_t *flex_avail);
+}
+
 #include "evo_adec.h"
 #include "evo_subtitle.h"
 #include "evo_stream_io.h"
@@ -394,6 +405,52 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
         vp.width = vStream->codecpar->width;
         vp.height = vStream->codecpar->height;
         vp.avctx_params = vStream->codecpar;
+        /*
+         * Software decode above 1080p does not fit in this title's memory
+         * budget, so it is refused rather than attempted.
+         *
+         * MEASURED, not assumed. malloc_shim's telemetry at decoder open:
+         *   AV1 1080p  live=53MB peak=108MB map_fail=0 flex_avail=124MB -> plays 1.0x
+         *   AV1 4K     live=52MB peak=135MB map_fail=0 flex_avail=125MB -> dies
+         * Every allocation succeeded (map_fail=0, anon=0, all served from
+         * flexible memory) - the shim works; the pool is simply ~180MB total.
+         * A 4K frame is ~12.4MB and a decoder needs a reference queue plus
+         * frame delay, which does not fit in 125MB.
+         *
+         * Two things this is NOT, both tried on hardware first:
+         *  - not thread count: dropping to 2 threads + slice threading only
+         *    changed dav1d's complaint from "Failed to read unit 2 (type 6)"
+         *    to "Failed to parse temporal unit".
+         *  - not the GPU pool: direct_mem sat at 8MB of 64MB throughout.
+         * malloc_shim's header claims flexible memory draws on "the full
+         * title budget (GBs)"; that is not true here, and the numbers above
+         * are why.
+         *
+         * Native sceVideodec2 is unaffected - it has its own memory and
+         * handles 4K H.264/HEVC fine. This only refuses the software path,
+         * which is reached by codecs the hardware cannot do (AV1) or formats
+         * it declines (HEVC 10-bit at 4K).
+         */
+        const bool sw_backend = (vp.backend != EVO_VDEC_BACKEND_NATIVE);
+        const bool above_1080p = ((long)vp.width * (long)vp.height) > (1920L * 1080L);
+        /*
+         * This catches only codecs with no hardware path at all (AV1), where
+         * pref_resolve already says FFmpeg. HEVC asks for NATIVE and is
+         * handed back FFmpeg by evo_vdec_open() when the native decoder
+         * declines the format - 4K 10-bit does exactly that - so the same
+         * check has to run again on the chosen backend after the open. Testing only
+         * this one let hevc10_pq_4k straight through to the crash.
+         */
+        if (sw_backend && above_1080p) {
+            evo_boot_log("PlaybackController: refusing %dx%d on the software "
+                         "decoder - will not fit the title memory budget",
+                         vp.width, vp.height);
+            avformat_close_input(&play_fmt);
+            play_fmt = nullptr;
+            m_playbackFsm.postEvent(PlaybackEvent::Fail);
+            toast("UNSUPPORTED", "4K needs hardware decode, which this codec has none of");
+            return false;
+        }
         vp.thread_count = 4;
         /* Frame threading for HEVC; slice threading for H.264 to prevent frame worker stack exhaustion */
         vp.thread_type = (vStream->codecpar->codec_id == AV_CODEC_ID_HEVC)
@@ -406,6 +463,21 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
 
         evo_vdec_backend chosen = EVO_VDEC_BACKEND_FFMPEG;
         g_vdec = evo_vdec_open(&vp, &chosen);
+        /* The native decoder can decline a format it was asked for and hand
+         * back FFmpeg; above 1080p that does not fit the memory budget. */
+        if (g_vdec && above_1080p && chosen != EVO_VDEC_BACKEND_NATIVE) {
+            evo_boot_log("PlaybackController: native declined %dx%d (codec=%d); "
+                         "refusing the FFmpeg fallback - will not fit the title "
+                         "memory budget", vp.width, vp.height,
+                         vStream->codecpar->codec_id);
+            evo_vdec_close(g_vdec);
+            g_vdec = nullptr;
+            avformat_close_input(&play_fmt);
+            play_fmt = nullptr;
+            m_playbackFsm.postEvent(PlaybackEvent::Fail);
+            toast("UNSUPPORTED", "4K in this format needs hardware decode");
+            return false;
+        }
         if (!g_vdec) {
             evo_boot_log("PlaybackController: failed to open video decoder");
         } else {
@@ -413,6 +485,31 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
                          (chosen == EVO_VDEC_BACKEND_NATIVE) ? "NATIVE (sceVideodec2)" : "FFmpeg",
                          vStream->codecpar->codec_id,
                          vp.width, vp.height, video_fps);
+            /*
+             * Allocator state at the moment decode starts. malloc_shim.c has
+             * tracked this all along, but its only reader was main.c, so the
+             * numbers went dark at the carve-up and three separate 4K crashes
+             * were diagnosed by guesswork instead. Logged here because every
+             * one of those crashes happened within ~100ms of this line:
+             *   hevc10_pq_4k -> "get_buffer() failed"
+             *   av1_4k       -> dav1d "Failed to read unit" / "parse temporal unit"
+             * If fails>0 or flex_avail is small, it is the heap, not the codec.
+             */
+            {
+                uint64_t live = 0, peak = 0, large_n = 0;
+                uint64_t fails = 0, flex = 0, anon = 0, avail = 0;
+                if (evo_alloc_stats)    evo_alloc_stats(&live, &peak, &large_n);
+                if (evo_alloc_map_info) evo_alloc_map_info(&fails, &flex, &anon, &avail);
+                evo_boot_log("  alloc live=%lluMB peak=%lluMB large=%llu "
+                             "map_fail=%llu flex=%llu anon=%llu flex_avail=%lluMB",
+                             (unsigned long long)(live >> 20),
+                             (unsigned long long)(peak >> 20),
+                             (unsigned long long)large_n,
+                             (unsigned long long)fails,
+                             (unsigned long long)flex,
+                             (unsigned long long)anon,
+                             (unsigned long long)(avail >> 20));
+            }
         }
     }
 
