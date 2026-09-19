@@ -2810,6 +2810,12 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
         }
     }
 
+    /* ---- elevated-privileges banner ----
+     * A condition, not an event: it stays up until the sandbox opens, which is
+     * why this is a banner rather than the toast it started as. */
+    if (Rml::Element* el_warn = m_nav_doc->GetElementById("nav-privilege-banner"))
+        el_warn->SetProperty("display", state.storage_locked ? "flex" : "none");
+
     /* ---- collapsed icon rail ----
      *
      * navbar.rml carries a fixed five slots, Emby at slot 2. With Emby

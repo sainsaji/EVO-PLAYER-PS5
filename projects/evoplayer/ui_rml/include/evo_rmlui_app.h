@@ -520,11 +520,13 @@ struct EvoNavState {
     int visible = 1;        /* 1=show the nav rail, 0=hide (full-screen OSD etc.) */
     int fps = 0;            /* render FPS shown in the rail pill */
     int show_fps = 0;       /* DEBUG OVERLAY setting */
+    int storage_locked = 0; /* 1 = sandbox never lifted; show the banner */
 
     bool operator==(const EvoNavState& o) const {
         return active_section == o.active_section && rail_focused == o.rail_focused &&
                cursor_index == o.cursor_index && visible == o.visible &&
-               fps == o.fps && show_fps == o.show_fps;
+               fps == o.fps && show_fps == o.show_fps &&
+               storage_locked == o.storage_locked;
     }
     bool operator!=(const EvoNavState& o) const { return !(*this == o); }
 };

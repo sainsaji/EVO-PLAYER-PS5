@@ -631,25 +631,22 @@ int Application::run() {
         }
 
         /*
-         * Tell the user why the app looks empty, once it is clear the
-         * promotion is not coming.
+         * Log once when it is clear the promotion is not coming.
          *
-         * evo_jailbreak_self() only gets one short attempt at boot - the
-         * daemon may not be polling yet - and evo_jailbreak_poll() keeps
-         * re-dropping the request, so a promotion that lands a second or two
-         * in is normal and announces itself with the STORAGE READY toast
-         * above. Warning immediately would cry wolf on every healthy launch.
+         * The user-facing half of this is #nav-privilege-banner, driven from
+         * evo_jailbreak_is_open() in Bridge.cpp, because a shut sandbox is a
+         * condition that persists rather than an event - a toast that fades
+         * after a few seconds leaves the app looking simply empty for as long
+         * as it stays unusable.
          *
-         * After five seconds of asking, though, nothing is listening: either
-         * no jailbreak daemon is running or the payload was never launched.
-         * Without that, /mnt/usb0 and /data are both ENOENT and EVO can see
-         * no media at all, which otherwise just looks like an empty player.
+         * Still logged, and still late: evo_jailbreak_self() gets one short
+         * attempt at boot because the daemon may not be polling yet, and
+         * evo_jailbreak_poll() keeps re-dropping the request, so a promotion
+         * landing a second or two in is the healthy case.
          */
         static bool s_jb_warned = false;
         if (!s_jb_warned && frame > 300 && !evo_jailbreak_is_open()) {
             s_jb_warned = true;
-            toast("ELEVATED PRIVILEGES NEEDED",
-                  "Start the jailbreak payload, then relaunch EVO");
             evo_boot_log("jailbreak: sandbox still shut after %d frames - "
                          "no daemon answered the promotion request", frame);
             evo_boot_log_flush();

@@ -527,6 +527,7 @@ void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
     state.visible        = (p->visible != 0);
     state.fps            = p->fps;
     state.show_fps       = p->show_fps;
+    state.storage_locked = p->storage_locked;
     EvoRmlApp::Instance().UpdateNavState(state);
 }
 

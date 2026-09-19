@@ -589,6 +589,8 @@ typedef struct {
     int visible;          /* 1=show rail, 0=hide (full-screen OSD, modals) */
     int fps;              /* render FPS for the rail pill */
     int show_fps;         /* 1 = DEBUG OVERLAY is on */
+    int storage_locked;   /* 1 = per-title sandbox never lifted; show the
+                           * elevated-privileges banner on every screen */
 } evo_rmlui_nav_params_t;
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* params);

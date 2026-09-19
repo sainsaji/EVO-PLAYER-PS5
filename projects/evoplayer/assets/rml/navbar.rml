@@ -16,6 +16,17 @@
     -->
     <div id="nav-fps-pill"><span id="nav-fps-value">0 FPS</span></div>
 
+    <!--
+      Elevated-privileges banner. Lives here rather than on each screen because
+      the nav overlay is the one document present across all of them, and this
+      is a condition rather than an event - it stays until the sandbox opens,
+      so it must not be a toast that fades while the app is still unusable.
+    -->
+    <div id="nav-privilege-banner">
+        <span id="nav-privilege-title">ELEVATED PRIVILEGES NEEDED</span>
+        <span id="nav-privilege-hint">Start the jailbreak payload (Lapy JB or etaHEN), then relaunch EVO</span>
+    </div>
+
     <!-- EVO logo mark -->
     <div id="nav-logo">
         <img id="nav-logo-img" src="../icons/icon_logo.png"/>

@@ -1,3 +1,4 @@
+#include "evo_jailbreak.h"
 #include "evo/Application.hpp"
 #include "evo/Common.hpp"
 #include "pp_playback.h"
@@ -222,6 +223,10 @@ void evo_sync_rmlui_nav(int section, int rail_focused, int rail_index, int visib
     nav.visible        = visible;
     nav.fps            = perf_render_fps;
     nav.show_fps       = evo_fps_counter_enabled();
+    /* Read here rather than threaded through evo_sync_rmlui_nav's signature and
+     * every caller: the banner is a property of the process, not of whichever
+     * screen happens to be syncing the rail. Stubs to "open" off-device. */
+    nav.storage_locked = evo_jailbreak_is_open() ? 0 : 1;
     evo_rmlui_update_nav(&nav);
 }
 

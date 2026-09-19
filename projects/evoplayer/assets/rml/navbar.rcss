@@ -248,3 +248,44 @@ div, span {
     color: #9fb2cc;
     letter-spacing: 1dp;
 }
+
+/*
+ * Elevated-privileges banner - shown whenever the per-title sandbox has not
+ * been lifted, which means /mnt/usb0 and /data are both invisible and the
+ * player can see no media at all.
+ *
+ * Amber rather than the theme accent: this is not a themed piece of chrome, it
+ * is a fault, and it should not recolour into something that reads as
+ * decoration when the user picks Ember. Top-centre keeps it clear of the FPS
+ * pill (top-right), the clock (also right) and the button hints along the
+ * bottom of every screen.
+ */
+#nav-privilege-banner {
+    display: none;
+    position: absolute;
+    top: 14dp;
+    left: 430dp;
+    width: 1060dp;
+    padding: 9dp 18dp;
+    border-radius: 10dp;
+    border-width: 1dp;
+    border-color: #ffb02499;
+    background-color: #2a1c05f2;
+    flex-direction: row;
+    align-items: center;
+    z-index: 60;
+}
+
+#nav-privilege-title {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #ffb024;
+    letter-spacing: 1dp;
+    margin-right: 14dp;
+}
+
+#nav-privilege-hint {
+    font-size: 14dp;
+    font-weight: normal;
+    color: #d8c6a4;
+}
