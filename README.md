@@ -42,6 +42,8 @@ Video decodes on the console's own `sceVideodec2` decoder — **H.264, HEVC and 
 
 **10-bit HDR** is supported with HDR10 (PQ) and HLG tone mapping over a BT.2020 matrix, and the VideoOut mode switches per frame to match the source.
 
+![Playback OSD over 4K hardware-decoded video](docs/images/player.png)
+
 ### GPU-rendered interface
 
 The whole UI is submitted to the GPU as real draw calls through bare-metal `sceAgc`, at the panel's own resolution rather than a fixed 1080p surface. Menus hold 60 fps and only redraw when something actually changes, so an idle screen costs nothing.
@@ -51,7 +53,6 @@ The whole UI is submitted to the GPU as real draw calls through bare-metal `sceA
 Browse `/mnt/usb0` with a live metadata inspector — codec, resolution, size, duration — and a thumbnail on every card. Or connect to **Emby**: libraries, seasons and episodes with server cover art, streamed over LAN with watch progress kept in sync.
 
 ![Browsing a folder](docs/images/browse.png)
-![Emby media library](docs/images/emby.png)
 
 ### Surround Sound Studio (5.1 & 7.1)
 
@@ -75,13 +76,11 @@ Tracks are ranked by real cue counts rather than claimed metadata. Default size 
 
 A controller-friendly keyboard for server addresses, ports, usernames and passwords, with lower/upper case, digits and symbols. **□** backspace, **△** done, **○** cancel.
 
-![On-screen virtual keyboard](docs/images/keyboard.png)
 
 ### Text reader
 
 Opens `.txt`, `.log`, `.md`, `.nfo`, `.json` and subtitle files directly, with adjustable text size.
 
-![Text reader](docs/images/reader.png)
 
 ### Settings & themes
 
