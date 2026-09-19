@@ -1,6 +1,7 @@
 #include "evo_jailbreak.h"
 #include "evo/Application.hpp"
 #include "evo/Common.hpp"
+#include "evo/screens/ScreenManager.hpp"
 #include "pp_playback.h"
 #include "evo_playback.h"
 #include "evo_demux.h"
@@ -159,12 +160,34 @@ void stop_video_playback(void) {
     }
 }
 
+/*
+ * The dev remote's two entry points (evo_usb_remote.c). Both mirror what a
+ * controller does, NOT just the playback call underneath it - the legacy
+ * main.c versions pushed the player screen on open and returned to the browser
+ * on stop, and the C++ shims that replaced them kept only the
+ * start/stop_video_playback() half.
+ *
+ * The consequence was invisible off-console and total on it: `evo-remote.sh
+ * play` opened and demuxed the file (evo_status showed a real dur=) while EVO
+ * sat on whatever screen it was already on, so nothing ever appeared, pos
+ * never advanced and every clip in a sweep recorded as stalled.
+ */
 void evo_stop_media_playback(void) {
     stop_video_playback();
+    if (auto sm = evo::Application::getInstance().getScreenManager()) {
+        const evo::ScreenId cur = sm->getCurrentScreenId();
+        if (cur == evo::ScreenId::Player || cur == evo::ScreenId::PlaybackFinished)
+            sm->navigateTo(evo::ScreenId::UsbBrowser);
+    }
 }
 
 void evo_open_media_path(const char *path) {
+    if (!path || !path[0])
+        return;
+    /* Same order as BrowserScreen::activate() - start, then show. */
     start_video_playback(path);
+    if (auto sm = evo::Application::getInstance().getScreenManager())
+        sm->navigateTo(evo::ScreenId::Player);
 }
 
 void save_resume_position(void) {

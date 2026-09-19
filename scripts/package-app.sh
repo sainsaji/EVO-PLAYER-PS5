@@ -284,7 +284,12 @@ else
     # fallbacks.
     EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
     [[ -n "${EVO_VER}" ]] || die "projects/evoplayer/VERSION is empty"
-    APP_DEFS+=" -DEVO_PLAYER_VERSION=\\"${EVO_VER}\\""
+    # The quotes must survive two hops - this shell, then the make recipe's
+    # shell. Written as \\" the backslash escaped the space that followed and
+    # glued the NEXT -D flag into this one's value, so --usb-remote silently
+    # did nothing for every build that used it. \\\" is the form the Makefile
+    # already uses and the only one that round-trips.
+    APP_DEFS+=" -DEVO_PLAYER_VERSION=\\\"${EVO_VER}\\\""
     # --usb-remote: the scriptable dev remote (evo_usb_remote.c) — the
     # /mnt/usb0/evo_status snapshot + the evo_cmd command channel. Off by
     # default so a release eboot never touches the user's USB stick per frame.
@@ -374,7 +379,7 @@ else
     # Static archives EVO links (Makefile LIBS + build-evoplayer.sh transitive
     # set). Order-independent inside the group.
     for a in libSDL2 \
-             libavformat libavcodec libswresample libavutil libswscale \
+             libavformat libavcodec libswresample libavutil libswscale libdav1d \
              libass libfreetype libharfbuzz libharfbuzz-subset libfribidi \
              libpng16 libsamplerate libssl libcrypto libiconv \
              libz libbz2 liblzma libzstd libm; do
