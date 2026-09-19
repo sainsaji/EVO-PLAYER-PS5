@@ -103,6 +103,10 @@
                         <span class="spec-key">RENDERER</span>
                         <span id="spec-renderer" class="spec-val">Prospero Native 60Hz</span>
                     </div>
+                    <div class="spec-row">
+                        <span class="spec-key">DECODER</span>
+                        <span id="spec-decoder" class="spec-val">Software (FFmpeg)</span>
+                    </div>
                 </div>
             </div>
 
@@ -116,7 +120,7 @@
                     <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">RETURN TO FILM</span>
                 </div>
-                <div id="footer-engine-ver">EVO PRO DECODER v0.7.0</div>
+                <div id="footer-engine-ver">EVO PRO DECODER v0.10.0</div>
             </div>
         </div>
     </div>

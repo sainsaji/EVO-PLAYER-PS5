@@ -10,13 +10,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -28,10 +28,10 @@ div, span, p {
 /* Content pane at EVO_CONTENT_X, clear of the rail by the native 44 px. */
 #list-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 /* =============================== Header =============================== */
@@ -40,10 +40,11 @@ div, span, p {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-top: 96px;
-    margin-bottom: 42px;
-    width: 1704px;
+    align-items: center;
+    margin-top: 72dp;
+    margin-bottom: 36dp;
+    width: 1704dp;
+    height: 88dp;
 }
 
 #list-header-left {
@@ -53,11 +54,11 @@ div, span, p {
 }
 
 #list-indicator {
-    width: 5px;
-    height: 62px;
+    width: 4dp;
+    height: 52dp;
     background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
+    border-radius: 2dp;
+    margin-right: 18dp;
 }
 
 #list-header-titles {
@@ -66,26 +67,30 @@ div, span, p {
 }
 
 #list-title {
-    font-size: 43px;
+    font-size: 32dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 2dp;
 }
 
 #list-subtitle {
-    font-size: 15px;
+    font-size: 14dp;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    color: #a3b6d0;
+    letter-spacing: 1.5dp;
+    margin-top: 5dp;
 }
 
 #list-counter {
-    font-size: 15px;
+    font-size: 13dp;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    color: #5e718c;
+    letter-spacing: 2dp;
+    background-color: #1420368c;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 8dp 18dp;
 }
 
 /* ================================ Rows ================================ */
@@ -93,32 +98,31 @@ div, span, p {
 #list-rows {
     display: flex;
     flex-direction: column;
-    width: 1704px;
+    width: 1704dp;
 }
 
-/* EVO_ROW_H on EVO_ROW_PITCH, the same geometry the immediate-mode list
- * used. The focus model's capacity is derived from those constants, so a
- * shorter row here would scroll out of step with the cursor. */
 .list-row {
-    width: 1704px;
-    height: 92px;
-    background-color: #121b2eeb;
-    border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 14px;
-    margin-bottom: 12px;
-    padding-left: 32px;
-    padding-right: 32px;
+    width: 1704dp;
+    height: 84dp;
+    background-color: #101a2ceb;
+    border-width: 1dp;
+    border-color: #5a7db429;
+    border-radius: 16dp;
+    margin-bottom: 12dp;
+    padding-left: 24dp;
+    padding-right: 24dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    transition: transform 0.18s cubic-out, border-color 0.18s cubic-out, background-color 0.18s cubic-out;
 }
 
 .list-row-focused {
-    background-color: #1b2e4cf5;
-    border-width: 1.5px;
-    border-color: #00cdff;
+    background-color: #16223af5;
+    border-width: 1.5dp;
+    border-color: #ffcd00;
+    transform: scale(1.012);
 }
 
 .lrow-left {
@@ -128,38 +132,42 @@ div, span, p {
 }
 
 .lrow-icon-box {
-    width: 60px;
-    height: 60px;
-    background-color: #131c2e;
-    border-radius: 10px;
+    width: 52dp;
+    height: 52dp;
+    background-color: #00cdff14;
+    border-width: 1dp;
+    border-color: #00cdff33;
+    border-radius: 14dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 20px;
+    margin-right: 18dp;
+    transition: background-color 0.18s cubic-out, border-color 0.18s cubic-out;
 }
 
 .list-row-focused .lrow-icon-box {
-    background-color: #1a2a47;
+    background-color: #ffcd001f;
+    border-color: #ffcd0073;
 }
 
 .lrow-icon {
-    width: 30px;
-    height: 30px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
 .lrow-text {
     display: flex;
     flex-direction: column;
-    width: 1384px;
+    width: 1384dp;
 }
 
 .lrow-title {
     display: block;
-    font-size: 33px;
+    font-size: 22dp;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.5px;
+    color: #eef4ff;
+    letter-spacing: 0.4dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -167,33 +175,37 @@ div, span, p {
 
 .lrow-detail {
     display: block;
-    font-size: 18px;
-    font-weight: normal;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-top: 3px;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6dp;
+    margin-top: 4dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+.list-row-focused .lrow-detail {
+    color: #ffcd00;
 }
 
 /* Resume position, for RECENT. Sits under the detail line rather than beside
  * it, so a long filename never has to share the row with it. */
 .lrow-track {
     display: block;
-    width: 460px;
-    height: 5px;
-    border-radius: 2px;
-    background-color: #2a3b5599;
-    margin-top: 7px;
+    width: 460dp;
+    height: 4dp;
+    border-radius: 2dp;
+    background-color: #7896c838;
+    margin-top: 6dp;
 }
 
 .lrow-fill {
     display: block;
     width: 0%;
-    height: 5px;
-    border-radius: 2px;
-    background-color: #00cdff;
+    height: 4dp;
+    border-radius: 2dp;
+    background-color: #ffcd00;
 }
 
 .lrow-right {
@@ -203,21 +215,27 @@ div, span, p {
 }
 
 .lrow-badge {
-    background-color: #131d2e;
-    border-width: 1px;
-    border-color: #243550;
-    border-radius: 7px;
-    padding: 8px 16px;
-    font-size: 15px;
+    background-color: #0a101c99;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 7dp 18dp;
+    font-size: 13dp;
     font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-right: 16px;
+    color: #7c8ba3;
+    letter-spacing: 1.4dp;
+    margin-right: 16dp;
+}
+
+.list-row-focused .lrow-badge {
+    background-color: #ffcd0029;
+    border-color: #ffcd00;
+    color: #ffcd00;
 }
 
 .lrow-chevron {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
     display: inline-block;
 }
 
@@ -227,100 +245,102 @@ div, span, p {
     display: none;
     position: absolute;
     left: 0;
-    top: 300px;
-    width: 1704px;
+    top: 300dp;
+    width: 1704dp;
     flex-direction: column;
     align-items: center;
 }
 
 #list-empty-icon-box {
-    width: 128px;
-    height: 128px;
-    border-radius: 64px;
+    width: 128dp;
+    height: 128dp;
+    border-radius: 64dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 26px;
+    margin-bottom: 26dp;
 }
 
 #list-empty-icon {
-    width: 56px;
-    height: 56px;
+    width: 56dp;
+    height: 56dp;
     display: inline-block;
 }
 
 #list-empty-title {
     display: block;
-    font-size: 33px;
+    font-size: 33dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #list-empty-hint {
     display: block;
-    font-size: 18px;
+    font-size: 18dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 12px;
+    letter-spacing: 1dp;
+    margin-top: 12dp;
 }
 
 /* =============================== Footer =============================== */
 
 #list-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 32dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 10dp;
 }
 
 .footer-glyph {
-    width: 30px;
-    height: 30px;
+    width: 26dp;
+    height: 26dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 38dp;
+    height: 38dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 19dp;
+    background-color: #14223ab8;
+    border-width: 1dp;
+    border-color: #7896c838;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 24dp;
+    height: 24dp;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 14dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1.8dp;
 }
 
 #list-footer-version {
     margin-left: auto;
-    font-size: 15px;
+    font-size: 14dp;
     font-weight: bold;
     color: #4b586c;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

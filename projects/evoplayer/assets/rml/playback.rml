@@ -14,6 +14,33 @@
             <span id="badge-hdr" class="badge-hdr"></span>
             <span id="badge-codec" class="badge-codec"></span>
             <span id="badge-fps" class="badge-fps"></span>
+            <span id="badge-decoder" class="badge-decoder"></span>
+        </div>
+    </div>
+
+    <!-- On-video caption overlay (#81) — RmlUi/Unicode, replaces the ASCII bitmap path -->
+    <div id="subtitle-layer">
+        <div id="subtitle-box" class="sub-medium"></div>
+    </div>
+
+    <!-- Music "NOW PLAYING" visualiser (#81) — shown for audio-only playback,
+         replaces draw_player_screen's rr_text/rr_fill branch -->
+    <div id="music-view">
+        <div id="music-card">
+            <div id="music-art"></div>
+            <div id="music-lines">
+                <div id="music-title">EVO MUSIC</div>
+                <div id="music-state">PLAYING</div>
+                <div id="music-hint">AUDIO · CROSS PAUSE · L/R SEEK</div>
+            </div>
+        </div>
+        <div id="music-bars">
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
+            <div class="mbar"></div><div class="mbar"></div><div class="mbar"></div><div class="mbar"></div>
         </div>
     </div>
 
@@ -28,14 +55,34 @@
         </div>
     </div>
 
-    <!-- Stats for Nerds HUD (Diagnostic Overlay) -->
+    <!-- Dev FPS pill (#81) -->
+    <div id="fps-pill"><span id="fps-value">0 FPS</span></div>
+
+    <!-- Playback diagnostic HUD (#81 / #63): live stream lines + telemetry graphs -->
     <div id="stats-hud">
-        <div class="stats-title">STREAM &amp; HARDWARE DIAGNOSTICS</div>
-        <div class="stats-row"><span class="stats-k">VIDEO ENGINE</span><span id="stats-v-engine" class="stats-v">Stage 4 Hardware ASIC</span></div>
-        <div class="stats-row"><span class="stats-k">DECODER CORE</span><span id="stats-v-decoder" class="stats-v">libSceAvPlayer HW</span></div>
-        <div class="stats-row"><span class="stats-k">AUDIO BITSTREAM</span><span id="stats-v-audio" class="stats-v">SceAudioOut Direct PCM</span></div>
-        <div class="stats-row"><span class="stats-k">DROPPED FRAMES</span><span id="stats-v-drops" class="stats-v text-green">0 (0.00%)</span></div>
-        <div class="stats-row"><span class="stats-k">DISPLAY CADENCE</span><span id="stats-v-fps" class="stats-v text-cyan">60.0 FPS Stable</span></div>
+        <div class="stats-title">PLAYBACK DIAGNOSTICS</div>
+        <div id="stats-video" class="stats-line">--</div>
+        <div id="stats-audio" class="stats-line">--</div>
+        <div id="stats-subs" class="stats-line">--</div>
+        <div id="stats-perf" class="stats-line">--</div>
+        <div id="stats-queues" class="stats-line">--</div>
+        <div id="stats-clocks" class="stats-line">--</div>
+        <div class="stats-sep"></div>
+        <div class="graph-row">
+            <span class="graph-label text-cyan">GPU</span>
+            <div id="graph-gpu" class="graph"></div>
+            <span id="graph-gpu-val" class="graph-val text-cyan">--</span>
+        </div>
+        <div class="graph-row">
+            <span class="graph-label text-amber">RAM</span>
+            <div id="graph-ram" class="graph"></div>
+            <span id="graph-ram-val" class="graph-val text-amber">--</span>
+        </div>
+        <div class="graph-row">
+            <span class="graph-label text-green">CPU</span>
+            <div id="graph-cpu" class="graph"></div>
+            <span id="graph-cpu-val" class="graph-val text-green">--</span>
+        </div>
     </div>
 
     <!-- Bottom Netflix Controller Bar -->

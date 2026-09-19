@@ -25,21 +25,16 @@
 
 #include "pp_playback.h"
 #include "pp_frame.h"
-#include "pp_output_policy.h"
 #include "pp_stage_breadcrumb.h"
 
 #include "evo_vdec.h"
 #include "evo_packet_queue.h"
 #include "evo_demux.h"
 #include "evo_audio_out.h"
+#include "evo_direct_mem.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
-#endif
-
-/* Matches main.c: the product video backend is always compiled in. */
-#ifndef PP_BACKEND_ENABLED
-#define PP_BACKEND_ENABLED 1
 #endif
 
 #define WIDTH  1920
@@ -57,8 +52,6 @@ extern AVFormatContext    *play_fmt;
 
 extern evo_vdec           *g_vdec;   /* the live video decoder (A6, owned by main.c) */
 extern pp_playback         g_pp_pb;
-extern pp_video_backend    g_pp_backend;
-extern volatile int        g_vo_decode_gate;
 extern int                 g_first_frame_bc_done;
 
 extern int       dbg_video_frames;
@@ -80,16 +73,29 @@ double video_fps = 60.0;
 int    video_decode_ready = 0;
 int    video_decode_done = 0;
 
-/* Sustained decoder failure (e.g. a 4K frame pool the app-module sandbox can't
- * satisfy - see issue #26/#29). The decode loop keeps feeding packets to a
+/* Sustained decoder failure. The decode loop keeps feeding packets to a
  * decoder that returns fatal on every receive; the state corrupts (POC errors)
  * and it eventually faults. Instead: count the streak, and once it is clearly
  * not recoverable, raise this flag so main.c ends playback with a toast rather
- * than crashing. Reset per open in start_video_playback. */
+ * than crashing. Reset per open in start_video_playback.
+ *
+ * NOTE: this fires for the hardware (sceVideodec2) backend too, so the toast
+ * must not say "software". A stream whose SPS/PPS the HW decoder rejects after
+ * a seek is the common trigger (#57). */
 int    g_pb_decode_fatal = 0;
 static int s_vdec_fatal_streak = 0;
 #define EVO_VDEC_FATAL_STREAK_LIMIT 16
 int evo_pb_decode_fatal(void) { return g_pb_decode_fatal; }
+
+/* Clear the fatal state AND the streak counter. start_video_playback() calls
+ * this on every (re)open — clearing only g_pb_decode_fatal leaves the streak
+ * latched at the limit, so the first transient fatal after a reopen (e.g. the
+ * FFmpeg-fallback reopen for #57) would re-trip it immediately. */
+void evo_pb_reset_decode_fatal(void)
+{
+    g_pb_decode_fatal   = 0;
+    s_vdec_fatal_streak = 0;
+}
 
 #ifdef EVO_APP_MODULE
 extern void pp_stage_bc(const char *stage_id, const char *detail);
@@ -108,11 +114,19 @@ static void note_vdec_result(int fatal)
 #ifdef EVO_APP_MODULE
     pp_stage_bc("P8_VDEC_FATAL", "decode failed repeatedly - ending playback");
 #endif
-    toast("PLAYBACK", "This file is too demanding for software decode");
+    toast("PLAYBACK", "Video decode failed - can't play this file");
 }
 
 volatile int video_thread_running = 0;
 pthread_t    video_thread;
+
+/*
+ * 1 while the decode thread is idling (paused / off-screen / not ready) and is
+ * therefore NOT inside pp_playback_push_frame. Kept as a debug/diagnostic
+ * signal; the VO reconfigure it used to guard (#32) went with the CPU present
+ * path in GL-4.
+ */
+volatile int video_decode_parked = 1;
 
 AVPacket *video_video_pending_pkt = NULL;
 pthread_mutex_t video_frame_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -122,8 +136,20 @@ int video_frame_w = 0;
 int video_frame_h = 0;
 int video_frame_loaded = 0;
 
-/* Internal to convert_frame_via_sws — nothing outside touches the ring. */
+/*
+ * Internal to convert_frame_via_sws — nothing outside touches the ring.
+ *
+ * #6: this is the exotic-pixel-format swscale fallback (evo_vdec_receive() == 2
+ * or the product backend inactive) — the product path presents through
+ * pp_playback's display model, not this ring. Backed by the evo_direct_mem
+ * slab and grow-only: the buffers are (re)allocated only when a frame arrives
+ * larger than the current slot size, so a seek or a same-resolution re-open
+ * reuses them and playback never churns the heap. Count trimmed 8 -> 3
+ * (VIDEO_ROTATE_BUFFERS) — enough for one presented + one just-written + one
+ * in-flight without the legacy renderer tearing.
+ */
 static uint32_t *video_rotate_pixels[VIDEO_ROTATE_BUFFERS] = {0};
+static size_t    video_rotate_slot_bytes = 0;
 static int video_rotate_index = 0;
 
 static int present_pp_frame(const pp_frame *pf);
@@ -161,33 +187,17 @@ double prospero_media_clock_seconds(void)
  */
 static int present_pp_frame(const pp_frame *pf)
 {
-#if PP_BACKEND_ENABLED
-    /* Wait briefly for deferred 4K VO — do not convert into dying buffers */
-    if (!g_vo_decode_gate) {
-        int spins = 0;
-        while (!g_vo_decode_gate && spins < 200) {
-            usleep(1000);
-            spins++;
-        }
-        if (!g_vo_decode_gate)
-            return 0; /* drop frame; VO not ready */
-    }
-    if (!g_first_frame_bc_done && g_vo_decode_gate) {
+    if (!g_first_frame_bc_done) {
         char d[80];
-        snprintf(d, sizeof(d), "fmt=%d %ux%u be=%d",
-                 (int)pf->format, pf->width, pf->height, (int)g_pp_backend);
+        snprintf(d, sizeof(d), "fmt=%d %ux%u", (int)pf->format, pf->width, pf->height);
         pp_stage_bc_checkpoint("009_FIRST_FRAME_ENTER", d);
         g_first_frame_bc_done = 1;
     }
-    g_pp_pb.cfg.aspect = prospero_view_mode_to_aspect();
-    g_pp_pb.stats.aspect = (int)g_pp_pb.cfg.aspect;
+    g_pp_pb.aspect = prospero_view_mode_to_aspect();
+    g_pp_pb.stats.aspect = (int)g_pp_pb.aspect;
     (void)pp_playback_push_frame(&g_pp_pb, (pp_frame *)pf);
     video_frame_loaded = pp_playback_has_display(&g_pp_pb);
     return 1;
-#else
-    (void)pf;
-    return 0;
-#endif
 }
 
 /*
@@ -212,27 +222,38 @@ static int convert_frame_via_sws(AVFrame *frame)
     }
 
     if (video_frame_w != frame->width || video_frame_h != frame->height || video_rotate_pixels[0] == NULL) {
+        size_t need = (size_t)frame->width * (size_t)frame->height * 4u;
+
         pthread_mutex_lock(&video_frame_mutex);
 
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            if (video_rotate_pixels[i]) {
-                free(video_rotate_pixels[i]);
+        /* Grow-only: keep the existing slots when the new frame fits. */
+        if (need > video_rotate_slot_bytes || video_rotate_pixels[0] == NULL) {
+            for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
+                evo_direct_mem_free(video_rotate_pixels[i]);
                 video_rotate_pixels[i] = NULL;
             }
+            video_rotate_slot_bytes = 0;
+
+            for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
+                video_rotate_pixels[i] = (uint32_t *)evo_direct_mem_alloc(need);
+                if (!video_rotate_pixels[i]) {
+                    for (int j = 0; j < i; j++) {
+                        evo_direct_mem_free(video_rotate_pixels[j]);
+                        video_rotate_pixels[j] = NULL;
+                    }
+                    video_frame_pixels = NULL;
+                    video_frame_loaded = 0;
+                    pthread_mutex_unlock(&video_frame_mutex);
+                    return 0;
+                }
+            }
+            video_rotate_slot_bytes = need;
         }
 
         video_frame_w = frame->width;
         video_frame_h = frame->height;
         video_rotate_index = 0;
         video_frame_loaded = 0;
-
-        for (int i = 0; i < VIDEO_ROTATE_BUFFERS; i++) {
-            video_rotate_pixels[i] = malloc(video_frame_w * video_frame_h * 4);
-            if (!video_rotate_pixels[i]) {
-                pthread_mutex_unlock(&video_frame_mutex);
-                return 0;
-            }
-        }
 
         video_frame_pixels = video_rotate_pixels[0];
         pthread_mutex_unlock(&video_frame_mutex);
@@ -322,20 +343,48 @@ int decode_next_video_frame(void)
             dbg_last_pts = pf.pts_us;   /* now microseconds (was raw stream PTS) */
             perf_decode_frames++;
 
-            /* job 2 — media clock from the frame PTS (already microseconds) */
-            if (pf.pts_us != INT64_MIN) {
+            /*
+             * #32: in the seek-discard window every frame between the keyframe
+             * and the seek target is dropped by pp_playback_push_frame(). Pacing
+             * them to the frame rate (the branches below) makes a seek across a
+             * long 4K GOP take ~GOP-length wall time - the slow GTA-trailer
+             * seek. Decode + discard as fast as the decoder returns instead;
+             * sceVideodec2Decode is synchronous so this can't outrun it.
+             */
+            int seek_discarding = g_pp_pb.active && g_pp_pb.seek_discarding &&
+                                  pf.pts_us < g_pp_pb.seek_target_us;
+
+            /*
+             * job 2 — media clock from the frame PTS (already microseconds).
+             *
+             * Frames inside the discard window are decoded only to reach the
+             * target; none of them is shown. Latching first_video_pts_seconds
+             * on one of them anchors the relative video clock at the keyframe
+             * while the audio clock restarts at the target, so the instant the
+             * picture resumes video_rel reads a whole run-up ahead of
+             * audio_rel and the audio-master wait below freezes the picture
+             * until audio covers the difference - the post-seek hitch. Anchor
+             * on the first frame that is actually presented instead. The seek
+             * path zeroes video_clock_seconds, so the UI position falls back
+             * to the seek target while the window is open.
+             */
+            if (pf.pts_us != INT64_MIN && !seek_discarding) {
                 video_clock_seconds = (double)pf.pts_us / 1000000.0;
                 if (first_video_pts_seconds < 0.0)
                     first_video_pts_seconds = video_clock_seconds;
             }
 
-            video_rel = video_clock_seconds - first_video_pts_seconds;
+            video_rel = 0.0;
+            if (first_video_pts_seconds >= 0.0)
+                video_rel = video_clock_seconds - first_video_pts_seconds;
             if (video_rel < 0.0)
                 video_rel = 0.0;
             audio_rel = audio_clock_seconds;
             behind = audio_rel - video_rel; /* >0 => video late; <0 => video early */
 
-            if (audio_rel > 0.05) {
+            if (seek_discarding) {
+                /* no pacing - the frame is about to be thrown away */
+            } else if (audio_rel > 0.05) {
                 /*
                  * Video ahead of audio: wait for audio, but NEVER freeze the
                  * picture if audio clock stops (underrun / 44.1k stall).
@@ -407,25 +456,37 @@ int decode_next_video_frame(void)
                     (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
             }
 
-#if !PP_BACKEND_ENABLED
-            {
-                double avdiff = audio_pts_seconds - video_clock_seconds;
-                if (audio_pts_seconds > 0.1 && avdiff < -0.04) {
-                    int sleep_us = (int)((-avdiff - 0.04) * 1000000.0);
-                    if (sleep_us > 60000)
-                        sleep_us = 60000;
-                    if (sleep_us < 1000)
-                        sleep_us = 1000;
-                    usleep(sleep_us);
-                }
-            }
-#endif
 
             /* jobs 3+4 — present. Always show something (skip = frozen). */
             if (recv_ret == 1 && g_pp_pb.active)
                 present_pp_frame(&pf);
             else
                 convert_frame_via_sws((AVFrame *)evo_vdec_ffmpeg_avframe(g_vdec));
+
+            /*
+             * One line per seek, the moment the discard window closes: what
+             * the settle cost and how far apart the two clocks are when the
+             * picture comes back. A healthy seek reads vrel ~= arel; a large
+             * arel - vrel gap is audio replaying the run-up to the target.
+             */
+            {
+                static int s_was_discarding = 0;
+                int now_discarding = g_pp_pb.active && g_pp_pb.seek_discarding;
+                if (s_was_discarding && !now_discarding) {
+                    pp_playback_stats st;
+                    char d[128];
+                    pp_playback_get_stats(&g_pp_pb, &st);
+                    snprintf(d, sizeof d,
+                             "ms=%llu disc=%llu pts=%.3f vrel=%.3f arel=%.3f aq=%d",
+                             (unsigned long long)st.seek_to_first_frame_ms,
+                             (unsigned long long)st.frames_discarded_seek,
+                             (double)pf.pts_us / 1000000.0,
+                             video_rel, (double)audio_clock_seconds,
+                             audio_queue_count);
+                    pp_stage_bc("SEEK_SETTLE", d);
+                }
+                s_was_discarding = now_discarding;
+            }
             /* evo_vdec_receive() unrefs its scratch frame on the next call. */
             return 1;
         }
@@ -435,10 +496,25 @@ int decode_next_video_frame(void)
         }
 
         if (!video_video_pending_pkt) {
-            if (video_decode_done)
-                return 0;
-            usleep(100);
-            return 1;
+            /*
+             * End of stream: flush the decoder once so buffered pictures still
+             * come out (the native backend holds a small PTS-reorder window;
+             * FFmpeg buffers frame-threaded latency). Send a NULL AU, loop back
+             * so evo_vdec_receive() drains the tail, then stop. s_eof_drained
+             * re-arms as soon as the stream is no longer at EOF (seek/replay).
+             */
+            static int s_eof_drained = 0;
+            if (!video_decode_done) {
+                s_eof_drained = 0;
+                usleep(100);
+                return 1;
+            }
+            if (!s_eof_drained) {
+                s_eof_drained = 1;
+                evo_vdec_send(g_vdec, NULL, 0, INT64_MIN);
+                continue;
+            }
+            return 0;
         }
 
         int64_t send_pts_us = INT64_MIN;
@@ -483,40 +559,21 @@ void *video_decode_thread_func(void *arg) {
             screen != SCREEN_PLAYER ||
             !video_decode_ready
         ) {
-            usleep(1000);
+            video_decode_parked = 1;
+            /* Parked: paused, off the player screen, or not ready. 1 ms was
+             * 1000 pointless wakeups a second; 5 ms is still well inside a
+             * frame, so nothing notices on resume. */
+            usleep(5000);
             next_ms = 0;
             continue;
         }
 
+        video_decode_parked = 0;
         dbg_video_thread_alive++;
 
-#if PP_BACKEND_ENABLED
         /* Audio-master wait is inside decode_next_video_frame. */
         decode_next_video_frame();
         usleep(playback_profile >= 2 ? 100 : 200);
-#else
-        if (video_fps > 1.0) frame_ms = 1000.0 / video_fps;
-
-        long long now = now_ms();
-
-        if (next_ms == 0) {
-            next_ms = now;
-        }
-
-        if (now >= next_ms) {
-            decode_next_video_frame();
-            next_ms += (long long)(frame_ms);
-
-            static double frac = 0.0;
-            frac += frame_ms - (long long)frame_ms;
-            if (frac >= 1.0) {
-                next_ms += 1;
-                frac -= 1.0;
-            }
-        } else {
-            usleep(500);
-        }
-#endif
     }
 
     return NULL;

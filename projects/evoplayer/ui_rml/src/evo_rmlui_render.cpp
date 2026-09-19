@@ -1,5 +1,6 @@
 #include "evo_rmlui_render.h"
 #include "evo_rmlui_prof.h"
+#include "evo_rmlui_bundle.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -324,43 +325,57 @@ Rml::TextureHandle EvoRenderInterface::LoadTexture(Rml::Vector2i& texture_dimens
         filename = source.substr(last_slash + 1);
     }
 
-    std::vector<std::string> candidates = {
-        source,
-        "assets/icons/" + filename,
-        "assets/rml/icons/" + filename,
-        "assets/rml/" + source,
-        "assets/" + source,
-        "/data/evoplayer/app/assets/icons/" + filename,
-        "/data/evoplayer/app/assets/rml/icons/" + filename,
-        "/data/evoplayer/app/assets/rml/" + source,
-        "/data/evoplayer/app/assets/" + source,
-        "/data/homebrew/EVOPlayer/assets/icons/" + filename,
-        "/data/homebrew/EVOPlayer/assets/rml/icons/" + filename,
-        "/data/homebrew/EVOPlayer/assets/rml/" + source,
-        "/data/homebrew/EVOPlayer/assets/" + source,
-        "/app0/assets/icons/" + filename,
-        "/app0/assets/rml/icons/" + filename,
-        "/app0/assets/rml/" + source,
-        "/app0/assets/" + source,
-        "projects/evoplayer/assets/icons/" + filename,
-        "projects/evoplayer/assets/rml/icons/" + filename,
-        "projects/evoplayer/assets/rml/" + source,
-        "projects/evoplayer/assets/" + source,
-        "/workspace/projects/evoplayer/assets/icons/" + filename,
-        "/workspace/projects/evoplayer/assets/rml/icons/" + filename,
-        "/workspace/projects/evoplayer/assets/rml/" + source,
-        "/workspace/projects/evoplayer/assets/" + source,
-        "/mnt/usb0/assets/icons/" + filename,
-        "/mnt/usb0/assets/rml/icons/" + filename
-    };
-
     int width = 0, height = 0, channels = 0;
     unsigned char* data = nullptr;
 
-    for (const auto& path : candidates) {
-        data = stbi_load(path.c_str(), &width, &height, &channels, 4);
-        if (data) {
-            break;
+    /*
+     * #60: embedded icons first - see evo_rmlui_bundle.h. RmlUi's render
+     * interface loads textures itself (stbi_load) rather than through
+     * Rml::FileInterface, so the bundle lookup is duplicated here rather than
+     * reused from EvoRmlFileInterface. `source` is usually already a bare
+     * filename or "icons/<file>"-shaped path from the RCSS; try both that and
+     * the explicit icons/ form the .rcss files actually use.
+     */
+    const EvoRmlBundleFile* bundled = evo_rmlui_bundle_find(source);
+    if (!bundled) bundled = evo_rmlui_bundle_find("icons/" + filename);
+    if (bundled) {
+        data = stbi_load_from_memory(bundled->data, (int)bundled->size,
+                                     &width, &height, &channels, 4);
+    }
+
+    if (!data) {
+        /* Not bundled (or the bundle is stale/missing) - fall back to disk,
+         * same prefixes evo_rmlui_app.cpp tries for .rml/.rcss/fonts. The
+         * #44 out-of-band /data/evoplayer/app/assets/ sync target and the
+         * defunct ELF-payload /data/homebrew/EVOPlayer/ path are gone - #60
+         * makes the package self-contained instead of leaning on either. */
+        std::vector<std::string> candidates = {
+            source,
+            "assets/icons/" + filename,
+            "assets/rml/icons/" + filename,
+            "assets/rml/" + source,
+            "assets/" + source,
+            "/app0/assets/icons/" + filename,
+            "/app0/assets/rml/icons/" + filename,
+            "/app0/assets/rml/" + source,
+            "/app0/assets/" + source,
+            "projects/evoplayer/assets/icons/" + filename,
+            "projects/evoplayer/assets/rml/icons/" + filename,
+            "projects/evoplayer/assets/rml/" + source,
+            "projects/evoplayer/assets/" + source,
+            "/workspace/projects/evoplayer/assets/icons/" + filename,
+            "/workspace/projects/evoplayer/assets/rml/icons/" + filename,
+            "/workspace/projects/evoplayer/assets/rml/" + source,
+            "/workspace/projects/evoplayer/assets/" + source,
+            "/mnt/usb0/assets/icons/" + filename,
+            "/mnt/usb0/assets/rml/icons/" + filename
+        };
+
+        for (const auto& path : candidates) {
+            data = stbi_load(path.c_str(), &width, &height, &channels, 4);
+            if (data) {
+                break;
+            }
         }
     }
 
@@ -842,27 +857,41 @@ static void emit_coverage(CovTarget target, uint32_t* fb, uint8_t* mask, int scr
         return;
     }
 
+    /*
+     * Mask targets sweep the WHOLE accumulator rect, not just the touched span
+     * of each row.
+     *
+     * A pixel the geometry misses still has a defined value in the new mask -
+     * zero for Set/Intersect, opaque for SetInverse - and it is precisely the
+     * missed pixels that make a rounded corner round. Draining only the touched
+     * span leaves those pixels holding whatever the PREVIOUS mask wrote there,
+     * so a corner sitting where an earlier screen's clip region was opaque came
+     * out square: the poster inside a .tile lost its rounded corners as soon as
+     * anything else (the player OSD, a dialog) had drawn a clip mask over that
+     * part of the screen. Correct on a fresh boot, wrong after playing a video
+     * and coming back - which is exactly how it presented.
+     *
+     * Untouched accumulator cells are zero by the invariant this file relies on
+     * everywhere (grown zeroed, always cleared as they are consumed), so cov
+     * reads 0 for them with no extra bookkeeping.
+     */
     for (int j = 0; j < acc_h; j++) {
-        int lo = g_cov_lo[j];
-        int hi = g_cov_hi[j];
-        if (lo > hi) continue;
-
         CovPixel* arow = &g_cov[(size_t)j * acc_w];
         uint8_t* mrow = &mask[(size_t)(acc_y0 + j) * screen_w + acc_x0];
 
-        for (int x = lo; x <= hi; x++) {
-            int i = x - acc_x0;
+        for (int i = 0; i < acc_w; i++) {
             CovPixel& p = arow[i];
+            uint32_t cov = 0;
             if (p.w > 0.0f) {
-                uint32_t cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
+                cov = (uint32_t)std::clamp((int)(std::min(p.w, 1.0f) * 255.0f + 0.5f), 0, 255);
                 p = CovPixel{};
+            }
 
-                switch (target) {
-                case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
-                case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
-                case CovTarget::MaskIntersect: mrow[i] = (uint8_t)(((uint32_t)mrow[i] * cov + 127) / 255); break;
-                default: break;
-                }
+            switch (target) {
+            case CovTarget::MaskSet:       mrow[i] = (uint8_t)cov; break;
+            case CovTarget::MaskInverse:   mrow[i] = (uint8_t)(255 - cov); break;
+            case CovTarget::MaskIntersect: mrow[i] = (uint8_t)(((uint32_t)mrow[i] * cov + 127) / 255); break;
+            default: break;
             }
         }
     }
@@ -986,11 +1015,13 @@ void EvoRenderInterface::RenderToClipMask(Rml::ClipMaskOperation operation,
     }
 
     /*
-     * Where the mask ends up meaning anything. Set and Intersect both write
-     * every pixel of that region, so nothing has to be cleared first: outside
-     * it the mask reads as zero by definition. SetInverse is the exception -
-     * its shape is the whole screen with a hole in it - and pays for a
-     * full-screen pass, which is why it is worth not being the common case.
+     * Where the mask ends up meaning anything. emit_coverage writes EVERY pixel
+     * of that region for a mask target - covered or not - so nothing has to be
+     * cleared first, and outside it the mask reads as zero by definition
+     * (ClipMask::at). SetInverse is the exception - its shape is the whole
+     * screen with a hole in it - and pays for a full-screen pass, which is why
+     * it is worth not being the common case (RmlUi only asks for it under a
+     * box-shadow).
      */
     int nx0, ny0, nx1, ny1;
     CovTarget target;

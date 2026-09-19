@@ -56,25 +56,25 @@ static int       g_inited;
 static const evo_theme k_builtin[] = {
     {
         .name = "MIDNIGHT",
-        .bg_top          = EVO_RGBA(0x06, 0x0B, 0x16, 255),
-        .bg_bottom       = EVO_RGBA(0x02, 0x04, 0x09, 255),
-        .scrim           = EVO_RGBA(0x00, 0x00, 0x00, 150),
-        .surface         = EVO_RGBA(0x12, 0x1B, 0x2E, 235),
-        .surface_alt     = EVO_RGBA(0x0C, 0x13, 0x22, 235),
-        .surface_sel     = EVO_RGBA(0x1B, 0x2E, 0x4C, 245),
-        .surface_sel_alt = EVO_RGBA(0x11, 0x1E, 0x36, 245),
-        .border          = EVO_RGBA(0x2A, 0x3B, 0x55, 170),
-        .border_sel      = EVO_RGBA(0x00, 0xCD, 0xFF, 220),
-        .shadow          = EVO_RGBA(0x00, 0x00, 0x00, 130),
-        .accent          = EVO_RGBA(0x00, 0xCD, 0xFF, 255),
-        .accent_soft     = EVO_RGBA(0x00, 0xA8, 0xFF, 60),
-        .accent_alt      = EVO_RGBA(0x7A, 0x5C, 0xFF, 255),
+        .bg_top          = EVO_RGBA(0x08, 0x0D, 0x16, 255),
+        .bg_bottom       = EVO_RGBA(0x03, 0x05, 0x0A, 255),
+        .scrim           = EVO_RGBA(0x00, 0x00, 0x00, 180),
+        .surface         = EVO_RGBA(0x10, 0x1A, 0x2C, 240),
+        .surface_alt     = EVO_RGBA(0x0C, 0x14, 0x22, 240),
+        .surface_sel     = EVO_RGBA(0x16, 0x22, 0x3A, 250),
+        .surface_sel_alt = EVO_RGBA(0x12, 0x1C, 0x30, 250),
+        .border          = EVO_RGBA(0x5A, 0x7D, 0xB4, 51),
+        .border_sel      = EVO_RGBA(0xFF, 0xCD, 0x00, 255),
+        .shadow          = EVO_RGBA(0x00, 0x00, 0x00, 150),
+        .accent          = EVO_RGBA(0xFF, 0xCD, 0x00, 255),
+        .accent_soft     = EVO_RGBA(0xFF, 0xCD, 0x00, 50),
+        .accent_alt      = EVO_RGBA(0x00, 0xCD, 0xFF, 255),
         .danger          = EVO_RGBA(0xFF, 0x5C, 0x5C, 255),
-        .text_primary    = EVO_RGBA(0xEC, 0xF3, 0xFF, 255),
-        .text_secondary  = EVO_RGBA(0x9F, 0xB2, 0xCC, 255),
+        .text_primary    = EVO_RGBA(0xEE, 0xF4, 0xFF, 255),
+        .text_secondary  = EVO_RGBA(0xA3, 0xB6, 0xD0, 255),
         .text_muted      = EVO_RGBA(0x5E, 0x71, 0x8C, 255),
-        .radius = 14, .border_px = 1, .shadow_px = 12, .rail_px = 4,
-        .row_h = 96, .row_gap = 14, .pad_x = 28,
+        .radius = 16, .border_px = 1, .shadow_px = 12, .rail_px = 4,
+        .row_h = 84, .row_gap = 10, .pad_x = 24,
     },
     {
         .name = "CARBON",
@@ -311,6 +311,13 @@ void evo_theme_init(void)
             g_count++;
     }
     evo_closedir(d);
+}
+
+void evo_theme_reset(void)
+{
+    g_count  = 0;
+    g_active = 0;
+    g_inited = 0;
 }
 
 const evo_theme *evo_theme_current(void)

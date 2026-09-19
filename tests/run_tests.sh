@@ -27,15 +27,13 @@ fi
 
 SRCS=(
     "${REPO_ROOT}/tests/test_runner.c"
-    "${PP}/src/pp_compute_pipeline.c"
     "${MEDIA}/src/evo_direct_mem.c"
     "${MEDIA}/src/evo_textreader.c"
-    "${UI}/src/evo_draw.c"
     "${UI}/src/evo_nav.c"
     "${UI}/src/evo_focus.c"
-    "${UI}/src/evo_chrome.c"
-    "${UI}/src/evo_widgets.c"
-    "${UI}/src/evo_screens.c"
+    "${UI}/src/evo_layout.c"
+    "${EVO}/src/evo_data_path.c"
+    "${EVO}/src/evo_readdir.c"
     "${PP}/src/evo_theme.c"
     "${PP}/src/evo_ui.c"
     "${ADDONS}/src/addon_emby.c"
@@ -43,17 +41,22 @@ SRCS=(
     "${ADDONS}/src/cJSON.c"
 )
 
+# Version from the same file package-app.sh and release.yml use, rather than a
+# fourth hardcoded copy - this said 0.8.0-dev while the app itself said 0.7.6.
+EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
+
 OBJS=()
 for src in "${SRCS[@]}"; do
     obj="${OUT}/$(basename "${src}" .c).o"
     $CC -O0 -g -coverage -Wall -Wextra -std=gnu11 -Wno-format-truncation \
         -DNO_OPENSSL=1 \
-        -DEVO_PLAYER_VERSION="\"0.8.0-dev\"" \
+        -DEVO_PLAYER_VERSION="\"${EVO_VER}\"" \
         -DEVO_THEME_DIR='"/tmp/evo_themes"' \
         -I"${PP}/include" \
         -I"${UI}/include" \
         -I"${MEDIA}/include" \
         -I"${ADDONS}/include" \
+        -I"${EVO}/include" \
         -I"${EVO}" \
         -c "${src}" -o "${obj}"
     OBJS+=("${obj}")

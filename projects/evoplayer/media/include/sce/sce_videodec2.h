@@ -41,7 +41,12 @@ extern "C" {
 /* Not sequential — these are the service's own tag values. */
 #define SCE_VIDEODEC2_CODEC_AVC   1u          /* H.264                       */
 #define SCE_VIDEODEC2_CODEC_HEVC  974921u     /* 0x000EE049                  */
-#define SCE_VIDEODEC2_CODEC_VP9   2382845u    /* 0x0024603D (unverified)     */
+/* 2382845 == 0x00245BFD. The comment here used to read 0x0024603D, which is a
+ * different number (2384061) - a transcription slip, not a second candidate.
+ * The decimal is what the code has always passed and it matches SharpProspero's
+ * Videodec2Codec.Vp9; hardware confirms it: sceVideodec2CreateDecoder accepts it
+ * (klog 2026-09-10, VP9 1920x1088 resident slot up, every stage rc=0). */
+#define SCE_VIDEODEC2_CODEC_VP9   2382845u    /* 0x00245BFD                  */
 
 /* profile: the ITU/ISO profile_idc for the codec.
  *   AVC : 66 Baseline, 77 Main, 100 High         (ProsperoLight uses 100)

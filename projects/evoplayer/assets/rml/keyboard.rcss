@@ -1,0 +1,180 @@
+/* GL-5 (#81): virtual keyboard modal — replaces evo_keyboard.c's immediate-mode
+ * renderer. State (buffer, layer, focus) is pushed from evo_keyboard.c's g_kb
+ * via evo_rmlui_update_keyboard(). Own Rml::Context, composited over the screen
+ * like the toast. */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    color: #ffffff;
+    background-color: transparent;
+    width: 1920dp;
+    height: 1080dp;
+    margin: 0;
+    padding: 0;
+}
+
+#kb-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #05070ce0;
+}
+
+#kb-panel {
+    position: absolute;
+    left: 260dp;
+    top: 140dp;
+    width: 1400dp;
+    height: 800dp;
+    background-color: #0e131de6;
+    border-width: 2dp;
+    border-color: #2a3a52;
+    border-radius: 20dp;
+    padding: 34dp 44dp;
+    display: flex;
+    flex-direction: column;
+}
+
+#kb-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+#kb-title {
+    font-size: 30dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+#kb-mode {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #00d2ff;
+    letter-spacing: 1.5dp;
+}
+
+#kb-field {
+    margin-top: 22dp;
+    height: 76dp;
+    background-color: #060910f0;
+    border-width: 2dp;
+    border-color: #1f3350;
+    border-radius: 12dp;
+    padding: 0 24dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#kb-text {
+    font-size: 26dp;
+    font-weight: bold;
+    color: #f4f7fb;
+    white-space: nowrap;
+}
+
+#kb-caret {
+    font-size: 26dp;
+    font-weight: bold;
+    color: #00d2ff;
+}
+
+#kb-caret.hidden { color: #00d2ff00; }
+
+#kb-count {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #6b7c93;
+    margin-left: auto;
+}
+
+#kb-grid {
+    margin-top: 30dp;
+    display: flex;
+    flex-direction: column;
+    gap: 12dp;
+}
+
+.kb-row {
+    display: flex;
+    flex-direction: row;
+    gap: 12dp;
+}
+
+.kb-key {
+    width: 118dp;
+    height: 68dp;
+    background-color: #16202e;
+    border-width: 1dp;
+    border-color: #2a3a52;
+    border-radius: 10dp;
+    font-size: 26dp;
+    font-weight: bold;
+    color: #e7edf4;
+    text-align: center;
+    /* vertical centre via line-height ~ height */
+    line-height: 68dp;
+}
+
+.kb-key.focused {
+    background-color: #0070d1;
+    border-width: 3dp;
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+
+#kb-actions {
+    margin-top: 18dp;
+    display: flex;
+    flex-direction: row;
+    gap: 12dp;
+}
+
+.kb-act {
+    height: 68dp;
+    padding: 0 22dp;
+    background-color: #16202e;
+    border-width: 1dp;
+    border-color: #2a3a52;
+    border-radius: 10dp;
+    font-size: 16dp;
+    font-weight: bold;
+    color: #e7edf4;
+    letter-spacing: 0.5dp;
+    line-height: 68dp;
+    text-align: center;
+}
+
+.kb-act-wide { flex: 1; }
+
+.kb-act.focused {
+    background-color: #0070d1;
+    border-width: 3dp;
+    border-color: #38bdf8;
+    color: #ffffff;
+}
+
+.kb-act-done.focused {
+    background-color: #24a024;
+    border-color: #57e357;
+}
+
+#kb-hints {
+    margin-top: auto;
+    display: flex;
+    flex-direction: row;
+    gap: 34dp;
+}
+
+#kb-hints span {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #6b7c93;
+    letter-spacing: 0.5dp;
+}

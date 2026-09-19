@@ -43,10 +43,22 @@ output/logs/*
 # Curated PNGs for the docs live in docs/images/ instead.
 output/screenshots/
 
+# Scratch renders from inspecting the UI: uiview crops, zoomed regions,
+# de-tiled console captures. All reproducible from a capture plus ffmpeg.
+output/uicheck/
+output/blur-check/
+
 # Host benchmark binary (tools/bench.sh)
 output/bench/
 output/tests/
 output/coverage/
+
+# #8 codec-sweep corpus: ~160 MB of generated video. Reproduce it with
+# tools/make_sweep_clips.sh rather than carrying it in the repo.
+output/sweep_clips/
+
+# Subtitle-sync test SRT (tools/subsync_run.py) - regenerable, not source.
+output/subsync/
 
 # Records the last launch time so tools/launch.sh can refuse to stack
 # instances. Machine-local state, not project state.
@@ -69,6 +81,8 @@ __pycache__/
 compile_commands.json
 .cache/
 .ccache/
+.env
+.env.local
 
 # -----------------------------------------------------------------------------
 # Vendored / fetched sources (pulled by scripts, not committed)
@@ -87,6 +101,20 @@ third_party/ProsperoLight/
 # Local reference clone: SvenGDK/SharpProspero (C# app-module SDK). Studied for
 # its sceAgc GPU draw path re: docs/evo-pro/gpu-rendering-plan.md. Never committed.
 third_party/SharpProspero/
+
+# Local reference clones: blackbearreloaded PS5 research repos (audio decoding +
+# AJM offload, GPU/sceAgc internals, hardware video decoding — H.264/HEVC/VP9/HDR
+# on libSceVideodec2, FW 6.02 + 12.70). Studied for native decode (#41) and audio.
+# Kept on disk, never committed.
+third_party/ps5-audio-decoding-research/
+third_party/ps5-gpu-research/
+third_party/ps5-hardware-video-decoding-research/
+
+# third_party/ps5-opengl/ is a git SUBMODULE (#77, render overhaul GL-1..GL-6),
+# pinned in .gitmodules — its tree is a gitlink, not committed content. Only the
+# local SDK build tree under it is ignored. The `third_party/**/src/` rule below
+# does not reach a submodule's gitlink.
+third_party/ps5-opengl/build/
 
 # -----------------------------------------------------------------------------
 # CMake / Ninja / Meson
@@ -122,9 +150,10 @@ desktop.ini
 .env.local
 
 # -----------------------------------------------------------------------------
-# Assembled GPU shader blobs (regenerate: tools/build-shader.sh pp/shaders/*.s)
+# Assembled GPU shader blobs. Checked in (guarded by pp/shaders/SHA256SUMS):
+# agc_ui_blobs.S .incbin's them into the eboot, same as pp/blobs/. Regenerate
+# with tools/build-shader.sh --all.
 # -----------------------------------------------------------------------------
-pp/shaders/*.bin
 
 # Loose media / scratch dropped at the repo root during hardware testing.
 /*.mp4
@@ -183,6 +212,19 @@ tools/native-app/runtime/libc.prx
 # Packaged app-module output (scripts/package-app.sh).
 output/app/
 
+# Shader blobs ripped from game dumps (tools/shader-rip.py). Derived + 3rd-party
+# code - keep them local. Vet + copy a chosen blob into pp/blobs/ deliberately.
+output/shaderrip/
+
 # ad-hoc klog capture (tools/klog.sh writes the real ones to output/logs/klog/)
 /klog.txt
 projects/evoplayer/include/evo_build_id.h
+
+# Reference clone, studied but never vendored: its .pipe/LLPC shader chain is
+# the model for tools/build_agc_pipes.py and evo_agc_shader_header.c.
+# See docs/evo-pro/agc-bare-metal-ui.md.
+third_party/ps5-xash3d-halflife/
+
+# Local OpenCode / IDE tooling configs
+opencode.json
+opnecode.json

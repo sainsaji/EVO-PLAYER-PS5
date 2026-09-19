@@ -11,19 +11,30 @@ fi
 
 cd "${REPO_ROOT}"
 
+# #60: keep the embedded asset bundle in step with assets/{rml,fonts,icons} -
+# evo_rmlui_app.cpp now links against it unconditionally.
+python3 tools/bundle_rml_assets.py
+
 echo "--- building prof_rmlui (-DEVO_RML_PROFILE, -O2)"
 g++ -O2 -std=c++17 -DEVO_RML_PROFILE \
     -Iprojects/evoplayer \
     -Iprojects/evoplayer/ui_rml/include \
+    -Iprojects/evoplayer/ui/include \
+    -Iprojects/evoplayer/ui_rml/src \
+    -Iprojects/evoplayer/pp/include \
     -Iprojects/evoplayer/include \
     -Ibuild/rmlui-host/RmlUi/Include \
     -Ibuild/rmlui-host-dist/include/freetype2 \
     -o output/uiview/prof_rmlui \
     tools/prof_rmlui.cpp \
+    projects/evoplayer/ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_system.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_app.cpp \
     projects/evoplayer/ui_rml/src/evo_rmlui_bridge.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_fileinterface.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle.cpp \
+    projects/evoplayer/ui_rml/src/evo_rmlui_bundle_data.cpp \
     -Lbuild/rmlui-host-dist/lib \
     -Lbuild/rmlui-host/RmlUi/build \
     -lrmlui -lfreetype -lpng16 -lz -lpthread \

@@ -1,0 +1,20 @@
+# =============================================================================
+# docker-compose.amdllpc.yml - OPT-IN overlay that swaps the ps5-dev image build
+# for the amdllpc toolchain layer (Dockerfile.amdllpc).
+#
+# Use with an explicit -f chain so it never affects a plain `docker compose`:
+#   docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml build ps5-dev
+#   docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml \
+#     run --rm ps5-dev python3 tools/build_agc_pipes.py
+#
+# See Dockerfile.amdllpc for why the AGC shaders moved off the hand-rolled
+# opengnm-psbc wrapper and onto AMD's LLPC .pipe toolchain.
+# =============================================================================
+services:
+  ps5-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.amdllpc
+      args:
+        BASE_IMAGE: "evo-player/ps5-dev:llvm18-sdk-v0.42"
+    image: evo-player/ps5-dev:llvm18-sdk-v0.42-amdllpc

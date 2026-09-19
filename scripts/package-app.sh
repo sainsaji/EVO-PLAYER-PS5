@@ -6,10 +6,21 @@
 #                                             player (Phase 1b task 4+)
 #   ./scripts/package-app.sh --probe          build the sandbox probe instead
 #   ./scripts/package-app.sh --rebuild-libc   force-regenerate the runtime shim
-#   ./scripts/package-app.sh --agc-probe      + boot-time sceAgc reachability
-#                                             recon (GPU rendering Step 2 gate)
 #   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
 #                                             ProsperoLight (needs MkPFS)
+#   ./scripts/package-app.sh --usb-remote     + the scriptable FTP dev remote
+#                                             (/mnt/usb0/evo_cmd + evo_status +
+#                                             verbose vdec log) — off in release
+#   ./scripts/package-app.sh --breadcrumbs    + boot-trace notification
+#                                             popups (#51, off by default —
+#                                             klog carries these otherwise)
+#   ./scripts/package-app.sh --agc            Accepted and redundant: the
+#                                             bare-metal sceAgc GPU render
+#                                             interface is the only render path
+#                                             a player build has. RmlUi renders
+#                                             through hardware command buffers
+#                                             with vsync pacing. See
+#                                             docs/evo-pro/agc-bare-metal-ui.md.
 #
 # Compilation uses the native-app toolchain (tools/native-app/prospero-clang18:
 # -femulated-tls -fno-plt -fno-stack-protector); the LINK + PS5-module
@@ -25,26 +36,61 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 MODE="player"
 REBUILD_LIBC=0
-AGC_PROBE=0
 FFPFSC=0
+USB_REMOTE=0
+BREADCRUMBS=0
+AGC_DEVICE=1        # bare-metal AGC is the only render path
+NATIVE_SECONDARY=0
+NATIVE_SECONDARY_4K=0
+NO_NATIVE_SECONDARY=0
+NO_NATIVE_SECONDARY_4K=0
+NATIVE_10BIT=1
+NO_NATIVE_10BIT=0
+CLEAN=0
 while (( $# )); do
     case "$1" in
+        --clean)        CLEAN=1 ;;
         --probe)        MODE="probe" ;;
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
-        --agc-probe)    AGC_PROBE=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
-        -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
+        --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
+        --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
+        --agc)          AGC_DEVICE=1 ;;   # accepted and redundant: AGC is the only render path
+        --gl|--no-gl|--gl-smoke|--gl-hdr-probe)
+            die "$1 is gone. The OpenGL device path, its ps5-opengl submodule and
+       the GL smoke/HDR probes were removed - the bare-metal AGC runtime owns
+       sceAgc and sceVideoOut outright. Just drop the flag." ;;
+        --native-secondary)     NATIVE_SECONDARY=1 ;;                       # #41: HEVC + VP9 resident decoders are ON BY DEFAULT (4K, since 2026-09-11) — this flag is now a no-op kept for back-compat
+        --native-secondary-4k)  NATIVE_SECONDARY=1; NATIVE_SECONDARY_4K=1 ;; # #41: HEVC/VP9 4K slots are ON BY DEFAULT since 2026-09-11 — this flag is now a no-op kept for back-compat
+        --no-native-secondary)  NO_NATIVE_SECONDARY=1 ;;                    # #41: escape hatch — AVC-only, rollback to pre-2026-09-11 behaviour
+        --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
+        --native-10bit)         NATIVE_10BIT=1; NO_NATIVE_10BIT=0 ;;        # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — ON BY DEFAULT, so this flag is a no-op kept for back-compat and for scripts that state it explicitly
+        --no-native-10bit)      NO_NATIVE_10BIT=1; NATIVE_10BIT=0 ;;        # #41 Phase D escape hatch — 10-bit stays on the FFmpeg CPU path. Try this first if thumbnail/poster decode fails to allocate: Phase D's two slots left ~3 MB of flex memory free AT BOOT on 2026-09-11
+        -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
 done
+# AGC is the player build's render path and the only one. The sandbox probe
+# build never presents, so it does not want the AGC runtime linked in.
+if [[ "${MODE}" != "player" ]]; then AGC_DEVICE=0; fi
 
 if ! in_container; then
     FWD=(--"${MODE}")
     (( REBUILD_LIBC )) && FWD+=(--rebuild-libc)
-    (( AGC_PROBE ))    && FWD+=(--agc-probe)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
+    (( USB_REMOTE ))   && FWD+=(--usb-remote)
+    (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
+    # Forward the RESOLVED choice, never the default, so the in-container build
+    # cannot disagree with the host-side one.
+    (( AGC_DEVICE ))   && FWD+=(--agc)
+    (( NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary-4k)
+    (( NATIVE_SECONDARY && ! NATIVE_SECONDARY_4K )) && FWD+=(--native-secondary)
+    (( NO_NATIVE_SECONDARY ))  && FWD+=(--no-native-secondary)
+    (( NO_NATIVE_SECONDARY_4K )) && FWD+=(--no-native-secondary-4k)
+    (( NATIVE_10BIT ))        && FWD+=(--native-10bit)
+    (( NO_NATIVE_10BIT ))     && FWD+=(--no-native-10bit)
     reexec_in_container "package-app.sh" "${FWD[@]}"
 fi
 
@@ -73,7 +119,6 @@ SCE_SYS="${EVO}/sce_sys"
 PARAM="${SCE_SYS}/param.json"
 APP_OUT="${OUTPUT_DIR}/app"
 BUILD="${APP_OUT}/.build"
-CLANG18="${NATIVE}/prospero-clang18"
 
 LLD="$(command -v prospero-lld || echo "${PS5_PAYLOAD_SDK}/bin/prospero-lld")"
 AR="$(command -v prospero-ar   || echo "${PS5_PAYLOAD_SDK}/bin/prospero-ar")"
@@ -198,12 +243,17 @@ CXX_RUNTIME=("${PS5_SYSROOT}/lib/libc++.a" "${PS5_SYSROOT}/lib/libc++abi.a" \
 if [[ "${MODE}" == "probe" ]]; then
     APP_NAME="sandbox_probe"
     begin "compiling ${APP_NAME}"
-    for src in "${REPO_ROOT}/projects/sandbox_probe/main.c" \
-               "${REPO_ROOT}/projects/common/src/evo_notify.c"; do
+    PROBE_SRCS=("${REPO_ROOT}/projects/sandbox_probe/main.c"
+               "${REPO_ROOT}/projects/common/src/evo_notify.c")
+    PROBE_DEFS=()
+    for src in "${PROBE_SRCS[@]}"; do
         obj="${BUILD}/obj/$(echo "${src#"${REPO_ROOT}/"}" | tr '/.' '__').o"
         "${TCC}" -std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter \
-            "${TFLAGS[@]}" \
-            -I"${REPO_ROOT}/projects/common/include" -c "${src}" -o "${obj}"
+            "${TFLAGS[@]}" ${PROBE_DEFS[@]+"${PROBE_DEFS[@]}"} \
+            -I"${REPO_ROOT}/projects/common/include" \
+            -I"${REPO_ROOT}/projects/evoplayer/include" \
+            -I"${REPO_ROOT}/projects/evoplayer/media/include" \
+            -c "${src}" -o "${obj}"
         OBJS+=("${obj}")
     done
 else
@@ -211,8 +261,6 @@ else
     begin "compiling ${APP_NAME} objects (${TCC} ${TFLAGS[*]})"
     # EVO's Makefile owns the source list, include paths and -D flags; we only
     # add the native-app link-tail flags via EXTRA_CFLAGS.
-    # EVO_BOOT_TRACE: system-notification breadcrumbs through main()'s init
-    # (only channel visible before VideoOut). Drop once milestone 1 is signed.
     # EVO_APP_MODULE: routes data paths to /download0/evoplayer and directory
     # enumeration through getdents (opendir fails EPERM in the sandbox).
     # Build fingerprint — main()'s FIRST notification, so a stale ShadowMount /
@@ -224,24 +272,69 @@ else
     printf '#pragma once\n#define EVO_BUILD_ID "%s_%s"\n' \
         "${BUILD_SHA}" "$(date -u +%m%d-%H%M)" > "${EVO}/include/evo_build_id.h"
     ok "build id $(sed -n 's/.*"\(.*\)".*/\1/p' "${EVO}/include/evo_build_id.h")"
-    APP_DEFS="-DEVO_BOOT_TRACE=1 -DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
-    (( AGC_PROBE )) && APP_DEFS+=" -DEVO_AGC_PROBE=1"
+    # main.c bakes EVO_BUILD_ID in but the Makefile tracks source mtimes, not
+    # this generated header - drop main.o so the id on screen is always current.
+    rm -f "${EVO}/main.o"
+    APP_DEFS="-DEVO_APP_MODULE=1 -DEVO_HAVE_BUILD_ID=1"
+    # Version, from projects/evoplayer/VERSION - the file release.yml checks
+    # the tag against. Nothing defined this before, so the three duplicated
+    # #ifndef fallbacks in the C++ were what actually shipped, and they had
+    # already drifted apart from the file and from launch.rml (0.7.6 in code,
+    # 0.7.0 on the launch screen). Define it here and the fallbacks stay
+    # fallbacks.
+    EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
+    [[ -n "${EVO_VER}" ]] || die "projects/evoplayer/VERSION is empty"
+    APP_DEFS+=" -DEVO_PLAYER_VERSION=\\"${EVO_VER}\\""
+    # --usb-remote: the scriptable dev remote (evo_usb_remote.c) — the
+    # /mnt/usb0/evo_status snapshot + the evo_cmd command channel. Off by
+    # default so a release eboot never touches the user's USB stick per frame.
+    # The diagnostic log (/mnt/usb0/evo.log) is written by every build.
+    (( USB_REMOTE )) && APP_DEFS+=" -DEVO_USB_REMOTE=1"
+    # --breadcrumbs (#51): bring back the on-screen boot-trace notification
+    # popups (evo_bt / evo_boot_log). Off by default - klog
+    # (tools/klog.sh) carries the same lines unconditionally in the app
+    # module now, so the popups are only useful watching the TV without klog.
+    (( BREADCRUMBS )) && APP_DEFS+=" -DEVO_BOOT_TRACE_POPUP=1"
+    # --native-secondary (#41): HEVC + VP9 resident sceVideodec2 decoders, at
+    # 4K since 2026-09-11 — both hardware-verified (evo_vdec_native.c has the
+    # full evidence). --no-native-secondary / --no-native-secondary-4k are the
+    # rollback escape hatches.
+    (( NATIVE_SECONDARY ))       && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=1"
+    (( NATIVE_SECONDARY_4K ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=1"
+    (( NO_NATIVE_SECONDARY ))    && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY=0"
+    (( NO_NATIVE_SECONDARY_4K )) && APP_DEFS+=" -DEVO_VDEC_NATIVE_SECONDARY_4K=0"
+    # --native-10bit / --no-native-10bit (#41 Phase D): the HEVC Main10 + VP9
+    # Profile 2 resident decoders. ON by default; the escape hatch drops 10-bit
+    # to the FFmpeg CPU path and gives its flex memory back.
+    (( NATIVE_10BIT ))        && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=1"
+    (( NO_NATIVE_10BIT ))     && APP_DEFS+=" -DEVO_VDEC_NATIVE_10BIT=0"
+    # EVO_AGC_DEVICE gates evo_agc_* + evo_rmlui_render_agc.cpp
+    (( AGC_DEVICE )) && APP_DEFS+=" -DEVO_AGC_DEVICE=1"
+    rm -f "${EVO}/include/evo_autoplay.h"
 
     # The Makefile tracks sources, NOT the -D flag set. The app-module defines
-    # (EVO_APP_MODULE, EVO_BOOT_TRACE, ...) differ from build-evoplayer.sh's, so
+    # (EVO_APP_MODULE, EVO_BOOT_TRACE_POPUP, ...) differ from build-evoplayer.sh's, so
     # `make objects` would silently reuse payload .o files - which is exactly
     # how three console sessions shipped an eboot with none of the app-module
     # code. Force a clean object build whenever the flag set changed.
     STAMP="${BUILD}/app-cflags.stamp"
     WANT="${TFLAGS[*]} ${APP_DEFS}"
-    if [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
-        begin "app-module flags changed - clean rebuild"
+    if (( CLEAN )) || [[ ! -f "${STAMP}" || "$(cat "${STAMP}" 2>/dev/null)" != "${WANT}" ]]; then
+        begin "app-module flags changed or --clean requested - clean rebuild"
         make -C "${EVO}" clean >/dev/null 2>&1 || true
         printf '%s' "${WANT}" > "${STAMP}"
     fi
 
+    # #60: regenerate the embedded RmlUi asset bundle (rml/rcss/fonts/icons)
+    # so the .ffpfsc is always built from whatever assets/ currently holds -
+    # never from a stale evo_rmlui_bundle_data.cpp left over from a previous
+    # commit. See tools/bundle_rml_assets.py and evo_rmlui_fileinterface.cpp.
+    begin "bundling RmlUi assets into evo_rmlui_bundle_data.cpp"
+    python3 "${REPO_ROOT}/tools/bundle_rml_assets.py"
+
     make -C "${EVO}" objects -j"$(nproc)" \
         CC="${TCC}" CXX="${TCXX}" \
+        AGC_DEVICE="${AGC_DEVICE}" \
         EXTRA_CFLAGS="${WANT}" \
         > "${BUILD}/compile.log" 2>&1 || {
             echo "--- last 40 lines of compile.log ---"
@@ -250,12 +343,37 @@ else
         }
     while read -r rel; do
         OBJS+=("${EVO}/${rel}")
-    done < <(make -C "${EVO}" -s print-objects | tr ' ' '\n' | grep -E '\.o$')
+    done < <(make -C "${EVO}" -s AGC_DEVICE="${AGC_DEVICE}" print-objects | tr ' ' '\n' | grep -E '\.o$')
     ok "compiled ${#OBJS[@]} objects"
+
+    # #68: RmlUi puts only `3 + R/6` points on a corner arc, so a 20 px radius is
+    # a 5-segment polygon that sags a quarter-pixel inside the true circle -
+    # visible faceting on every rounded card, and a geometry error no rasteriser
+    # or MSAA can undo. ui_rml/src/rmlui_patch/ carries that one RmlUi TU with a
+    # finer GetNumPoints(); compile it here and swap it over the matching member
+    # of a build-local COPY of the pacbrew archive (same RmlUi 6.2 release - the
+    # public headers are byte-identical - so this is a like-for-like member
+    # replacement, and the sysroot archive is never touched).
+    # See ui_rml/src/rmlui_patch/VENDORED.md.
+    begin "patching librmlui.a corner tessellation (#68)"
+    RML_PATCH_O="${BUILD}/obj/GeometryBackgroundBorder.cpp.o"
+    "${TCXX}" -std=c++17 -O2 "${TFLAGS[@]}" \
+        -I"${HB}/include" \
+        -c "${EVO}/ui_rml/src/rmlui_patch/GeometryBackgroundBorder.cpp" \
+        -o "${RML_PATCH_O}"
+    RML_A="${BUILD}/librmlui.a"
+    cp -f "${HB}/lib/librmlui.a" "${RML_A}"
+    llvm-ar r "${RML_A}" "${RML_PATCH_O}"
+    # The swap is only a swap if the member name matched - a typo would silently
+    # ADD a member and leave upstream's tessellation linked ahead of it.
+    [[ "$(llvm-ar t "${RML_A}" | grep -c '^GeometryBackgroundBorder\.cpp\.o$')" == "1" ]] \
+        || die "librmlui.a member swap failed - GeometryBackgroundBorder.cpp.o not unique"
+    ok "librmlui.a patched"
+    ARCHIVE_GROUP+=("${RML_A}")
 
     # Static archives EVO links (Makefile LIBS + build-evoplayer.sh transitive
     # set). Order-independent inside the group.
-    for a in librmlui libSDL2 \
+    for a in libSDL2 \
              libavformat libavcodec libswresample libavutil libswscale \
              libass libfreetype libharfbuzz libharfbuzz-subset libfribidi \
              libpng16 libsamplerate libssl libcrypto libiconv \
@@ -295,6 +413,105 @@ if [[ "${MODE}" == "player" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. PRX import stubs for system modules the SDK ships no .so for.
+#     Each tools/native-app/stubs/prx/<name>.syms -> a tiny ELF .so with
+#     SONAME <name>.sprx and one empty FUNC per symbol, linked POSITIONALLY
+#     (unconditional DT_NEEDED, like ProsperoLight) and passed to
+#     native_app_builder as --stub. The converter computes the Sony NID from
+#     the plain name and the loader auto-loads the .sprx at process start.
+#     Only built for modules a probe actually uses - an unconditional NEEDED on
+#     a module the loader refuses would brick the boot.
+#     Fixes the hardware-proven wall: a fake-signed module cannot
+#     sceKernelLoadStartModule an undeclared system PRX. See the prx/README.
+# ---------------------------------------------------------------------------
+PRX_STUB_SOS=()
+PRX_STUB_SRC="${NATIVE}/stubs/prx"
+PRX_STUB_WANT=()
+# libSceVideodec2's own startup load needs the GPU driver stack present
+# (sceVideodec2AllocateComputeQueue allocates a GPU compute queue). ProsperoLight
+# links libSceAgc + libSceAgcDriver, which pull in libSceGnmDriver and satisfy
+# that; EVO must do the same or libSceVideodec2 loads broken. The
+# libSceAgc/libSceAgcDriver .syms are comment-only, and the actual symbol list
+# is harvested from the AGC runtime's own imports in the augmentation block
+# below.
+# The native decode backend (media/src/evo_vdec_native.c, #31) is compiled into
+# every MODE == player eboot, so libSceVideodec2 + its GPU-driver deps must be
+# positional DT_NEEDED.
+# #34: the native IME keyboard. libSceImeDialog has a real SDK stub .so and
+# resolves through the link tail; libSceCommonDialog has none, and
+# sceCommonDialogInitialize() must run before any common dialog will start.
+if [[ "${MODE}" == "player" ]]; then
+    PRX_STUB_WANT+=(libSceVideodec2 libSceAudiodec libSceAgc libSceAgcDriver libSceCommonDialog)
+fi
+if (( ${#PRX_STUB_WANT[@]} )); then
+    begin "building PRX import stubs"
+    mkdir -p "${BUILD}/stubs"
+
+    # Every name in a .syms becomes a POSITIONAL (unconditional DT_NEEDED) import
+    # from <module>.prx. If nothing in the objects actually references it, it is a
+    # dead import: the loader still has to bind its NID on the console, and if that
+    # NID is absent from the firmware's .sprx it REJECTS THE WHOLE MODULE -> the
+    # app "crashes" before main() with CE-108255-1 and no log. This cost a full
+    # session once (sceAgcDcbDrawIndexOffset, #28). Refuse to build a stub that
+    # carries a symbol no object imports; annotate a deliberate one with
+    # `# keep: <reason>` on its line.
+    OBJ_UNDEF="${BUILD}/obj-undef.txt"
+    : > "${OBJ_UNDEF}"
+    for o in "${OBJS[@]}" "${LIBC_EXT_O}" "${MALLOC_SHIM_O}"; do
+        [[ -n "${o}" && -f "${o}" ]] && llvm-nm -u "${o}" 2>/dev/null \
+            | grep -oE '\bsce[A-Za-z0-9_]+' >> "${OBJ_UNDEF}" || true
+    done
+    sort -u -o "${OBJ_UNDEF}" "${OBJ_UNDEF}"
+
+    dead_total=0
+    for base in "${PRX_STUB_WANT[@]}"; do
+        syms="${PRX_STUB_SRC}/${base}.syms"
+        need_file "${syms}" "missing PRX stub symbol list: ${base}.syms"
+        so="${BUILD}/stubs/${base}.so"
+        csrc="${BUILD}/stubs/${base}.c"
+        # (a comment-only .syms - libSceAgc/libSceAgcDriver post-GL-6 - greps to
+        #  nothing; `|| true` so the empty result isn't a pipeline failure.)
+        { grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print "void " $1 "(void){}"}' > "${csrc}"
+        # --agc: add the sceAgc* / sceAgcDriver* names that this .syms doesn't
+        # already carry. Routed by prefix; sceVideoOut* etc. resolve from
+        # target/lib/*.so and are left alone.
+        if (( AGC_DEVICE )) && [[ "${base}" == libSceAgc || "${base}" == libSceAgcDriver ]]; then
+            existing="$({ grep -vE '^\s*(#|$)' "${syms}" || true; } | awk '{print $1}')"
+            source_syms=()
+            while IFS= read -r s; do [[ -n "${s}" ]] && source_syms+=("${s}"); done < "${OBJ_UNDEF}"
+            for s in "${source_syms[@]}"; do
+                if [[ "${base}" == libSceAgcDriver ]]; then
+                    [[ "${s}" == sceAgcDriver* ]] || continue
+                else
+                    [[ "${s}" == sceAgc* && "${s}" != sceAgcDriver* ]] || continue
+                fi
+                grep -qxF "${s}" <<<"${existing}" && continue
+                echo "void ${s}(void){}" >> "${csrc}"
+                echo "     + ${base}: ${s}"
+            done
+        fi
+
+        # dead-import guard (skip lines annotated `# keep:`)
+        while read -r sym rest; do
+            [[ "${rest}" == *"# keep:"* ]] && continue
+            grep -qxF "${sym}" "${OBJ_UNDEF}" && continue
+            warn "PRX stub ${base}.syms: '${sym}' is not imported by any object"
+            echo "       -> a dead positional import; if its NID is absent on"
+            echo "          firmware the loader rejects the module at load."
+            echo "          Remove it, or annotate the line with '# keep: <why>'."
+            dead_total=$((dead_total + 1))
+        done < <(grep -vE '^\s*(#|$)' "${syms}" || true)
+
+        "${TCC}" -shared -nostdlib -nodefaultlibs -fPIC \
+            -Wl,-soname,"${base}.sprx" -o "${so}" "${csrc}"
+        PRX_STUB_SOS+=("${so}")
+        printf '     %-22s %s syms\n' "${base}.sprx" "$(wc -l < "${csrc}")"
+    done
+    (( dead_total )) && die "${dead_total} dead PRX import(s) - see above (would brick the app at load)"
+    ok "built ${#PRX_STUB_SOS[@]} PRX import stubs"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Link the intermediate PS5 PIE.
 # ---------------------------------------------------------------------------
 begin "linking intermediate PIE"
@@ -304,6 +521,11 @@ LINK_INPUTS=()
 LINK_INPUTS+=("${BUILD}/obj/app_crt.o" "${BUILD}/obj/app_cpp_runtime.o")
 [[ -n "${LIBC_EXT_O}" ]] && LINK_INPUTS+=("${LIBC_EXT_O}")
 LINK_INPUTS+=("${OBJS[@]}")
+# PRX import stubs: POSITIONAL (not --as-needed), matching ProsperoLight's
+# tools/build.sh exactly. An --as-needed-derived DT_NEEDED for a system PRX
+# would not bind correctly for a fake-signed module (the sceAvPlayerInit /
+# sceVideodec2* first-call crashes traced to this).
+(( ${#PRX_STUB_SOS[@]} )) && LINK_INPUTS+=("${PRX_STUB_SOS[@]}")
 (( ${#ARCHIVE_GROUP[@]} )) && LINK_INPUTS+=(--start-group "${ARCHIVE_GROUP[@]}" --end-group)
 (( ${#ARCHIVE_GROUP[@]} )) && LINK_INPUTS+=("${CXX_RUNTIME[@]}")
 
@@ -316,6 +538,7 @@ STUBDIR="${PS5_SYSROOT}/lib"
 # members resolve each other; archive semantics keep malloc/stdio/etc. bound to
 # the .so stubs (and, on device, the runtime shim's heap table).
 LINK_TAIL=(--as-needed "${STUBDIR}"/*.so)
+(( ${#PRX_STUB_SOS[@]} )) && LINK_TAIL+=("${PRX_STUB_SOS[@]}")
 [[ "${MODE}" == "player" ]] && \
     LINK_TAIL+=(--start-group "${PS5_SYSROOT}/lib/libc.a" --end-group)
 
@@ -323,6 +546,7 @@ LINK_RC=0
 if ! "${LLD}" -T "${NATIVE}/ps5-pie.ld" --eh-frame-hdr \
     --version-script "${NATIVE}/app-symbols.map" \
     --exclude-libs=ALL --error-limit=0 \
+\
     -L "${BUILD}/obj" \
     -e _start -o "${BUILD}/llvm-pie.elf" \
     "${LINK_INPUTS[@]}" \
@@ -364,8 +588,10 @@ llvm-nm -u "${BUILD}/llvm-pie.elf" 2>/dev/null | awk '{print $NF}' | sort -u \
 # 8. Convert LLVM PIE -> PS5 module, then sign to FSELF.
 # ---------------------------------------------------------------------------
 begin "converting to PS5 module + signing"
+CONV_STUB_ARGS=()
+for so in ${PRX_STUB_SOS[@]+"${PRX_STUB_SOS[@]}"}; do CONV_STUB_ARGS+=(--stub "${so}"); done
 "${TOOL}" link --in "${BUILD}/llvm-pie.elf" --out "${BUILD}/eboot.elf" \
-    --stub-dir "${STUBDIR}" \
+    --stub-dir "${STUBDIR}" ${CONV_STUB_ARGS[@]+"${CONV_STUB_ARGS[@]}"} \
     --module-sdk "${MODULE_SDK}" --companion-sdk "${COMPANION_SDK}" \
     --file-name eboot.elf
 

@@ -1,5 +1,16 @@
 # The CPU converter — measurement and findings
 
+> **History, not current state.** GL-4 (#80) deleted every CPU converter
+> (`pp_converter.c`, `_parallel`, `_fused`, `pp_compute_pipeline`, `tile_copy`)
+> and the `tools/bench.sh` harness that measured them: the frame now goes to the
+> GPU as R8/RG8 planes and a GLSL shader does YUV→RGB on the quad, for no
+> measurable CPU. Recover the sources with `git show b8c42b7:<path>`. Kept
+> because the findings below explain why the CPU path was shaped the way it was,
+> and because the BT.601 matrix here is the reference the GL shader is checked
+> against — see
+> [`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80)
+> and `tools/gl_yuv_parity.py`, both since deleted.
+
 With no hardware GL or Vulkan driver in the sysroot (see
 [`gpu-notes.md`](gpu-notes.md) — what ships is OSMesa/llvmpipe, a *software*
 rasteriser), the CPU YUV→BGRA+swizzle path is the only remaining lever on 4K
@@ -233,6 +244,15 @@ Standard dynamic heap allocation (`malloc`/`free`) incurs metadata locking, page
 - **Standard Heap (`malloc`/`free`)**: `1.55 ms`
 - **Direct Memory Slab Manager**: **`0.94 ms`** (**1.65× faster**, **0 heap fragmentation**)
 - **Clean Slabs Recycled**: 100% memory recycled to direct pool upon stream close.
+
+### #6 (2026-09-03) — the swscale rotate ring moved to the slab
+
+`convert_frame_via_sws`'s ring is now **3 slots not 8** and allocates from
+`evo_direct_mem`, grow-only (265 MB → ~100 MB at 4K, off the heap). Everything
+else stayed on `malloc`: routing `pp_playback` `display` / `nv12_fb` and
+`pp_videoout` `cpu_bufs` through the slab, plus a 64 → 192 MiB pool, **wedged
+the 4K GPU present on hardware** and was backed out. See
+[`improvements-roadmap.md`](improvements-roadmap.md) §P2.
 
 ---
 

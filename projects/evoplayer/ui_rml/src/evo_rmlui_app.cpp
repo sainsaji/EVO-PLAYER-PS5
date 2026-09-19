@@ -1,27 +1,61 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
-#include <iostream>
+#include "evo_metrics.h"   /* EVO_UI_DESIGN_W/H - the dp authoring canvas */
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
 #include <chrono>
 
+/* EVO_AGC_DEVICE is the console build. The host preview harness
+ * (tools/uiview_playback_rml.sh) compiles this same file without it and gets
+ * the CPU rasteriser - that is the only other configuration there is. */
+#if defined(EVO_AGC_DEVICE)
+#include "evo_rmlui_render_agc.h"
+#include "evo_agc_runtime.h"
+#include "evo_boot_log.h"
+#endif
+
+/* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
+ * crashes at load in the app module's custom CRT _init() pass, layout-
+ * sensitively - #71. These diagnostics go to stderr (klog) via C stdio. */
+
+/* FrameBegin/FrameEnd bracket every Context::Render(): no-ops on the CPU
+ * rasteriser, real work on the AGC interface. Mark that a Context::Render()
+ * actually reached the scanout this frame, so the device loop knows to flip. */
+#if defined(EVO_AGC_DEVICE)
+#define EVO_MARK_DREW() (m_drew = true)
+#else
+#define EVO_MARK_DREW() ((void)0)
+#endif
+
 #ifdef EVO_RML_PROFILE
 #define EVO_PROF_CTX_RENDER() do {                                      \
         double _c0 = evo_prof_now_ms(); m_context->Update();            \
-        double _c1 = evo_prof_now_ms(); m_context->Render();            \
-        double _c2 = evo_prof_now_ms();                                 \
+        double _c1 = evo_prof_now_ms();                                 \
+        m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
+        double _c2 = evo_prof_now_ms(); EVO_MARK_DREW();             \
         g_evo_rml_prof.update_ms += _c1 - _c0; g_evo_rml_prof.update_n++;\
         g_evo_rml_prof.render_ms += _c2 - _c1; g_evo_rml_prof.render_n++;\
     } while (0)
 #else
-#define EVO_PROF_CTX_RENDER() do { m_context->Update(); m_context->Render(); } while (0)
+#define EVO_PROF_CTX_RENDER() do {                                      \
+        m_context->Update();                                           \
+        m_render->FrameBegin(); m_context->Render(); m_render->FrameEnd();\
+        EVO_MARK_DREW();                                            \
+    } while (0)
 #endif
 
+/* Never destroyed - same reason as Application::getInstance(); its teardown
+ * is done explicitly by evo_rmlui_shutdown() from Application::shutdown(),
+ * and letting it also unwind at exit crashed QUIT EVO. */
 EvoRmlApp& EvoRmlApp::Instance() {
-    static EvoRmlApp instance;
+    static EvoRmlApp* p_instance = new EvoRmlApp();
+    EvoRmlApp& instance = *p_instance;
     return instance;
 }
 
@@ -91,6 +125,27 @@ void EvoRmlApp::SetImageColor(Rml::Element* el, const std::string& color) {
 void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
                                    int width, int height)
 {
+#if defined(EVO_AGC_DEVICE)
+    /* GL-3 (#79) / AGC. Both modes: only touch anything on an "active" frame - the
+     * device loop decided this iteration is a redraw (GlNeedsFrame); otherwise
+     * the front buffer holds. */
+    if (!m_gl_active)
+        return;
+    if (!m_blit_mode) {
+        /* Mode B / AGC: RmlUi renders itself straight to the hardware default framebuffer;
+         * main.c presents. No m_surface. */
+        (void)framebuffer;
+        m_render->SetFramebuffer(nullptr);
+        m_render->SetDimensions(width, height);
+        EVO_PROF_CTX_RENDER();   /* also sets m_drew */
+        m_cached_screen = screen_id;
+        return;
+    }
+    /* Mode A (default GL): CPU coverage rasteriser into m_surface -> `framebuffer`
+     * (the loop's scratch); main.c uploads it as one GL quad. Falls through to
+     * the shared cached-raster path below. */
+#endif
+    {
     const size_t px = (size_t)width * (size_t)height;
 
     bool resized = (width != m_surface_w || height != m_surface_h);
@@ -113,6 +168,46 @@ void EvoRmlApp::RenderCachedScreen(int screen_id, uint32_t* framebuffer,
 
     if (framebuffer != m_surface.data())
         std::memcpy(framebuffer, m_surface.data(), px * sizeof(uint32_t));
+    }
+#if defined(EVO_AGC_DEVICE)
+    m_drew = true;   /* Mode A rasterised into `framebuffer` this frame */
+#endif
+}
+
+/* See the declaration in evo_rmlui_app.h for why this exists. */
+void EvoRmlApp::ShowOnlyScreen(Rml::ElementDocument* keep)
+{
+    Rml::ElementDocument* const screens[] = {
+        m_launch_doc, m_list_doc, m_browser_doc, m_changelog_doc, m_reader_doc,
+        m_image_doc, m_surround_doc, m_playback_doc, m_dialog_doc,
+        m_settings_doc, m_about_doc, m_subtitles_doc, m_mediainfo_doc,
+    };
+    for (Rml::ElementDocument* doc : screens) {
+        if (!doc || doc == keep) continue;
+        doc->Hide();
+    }
+    if (keep) keep->Show();
+}
+
+bool EvoRmlApp::GlNeedsFrame()
+{
+    /* Retained-mode + ps5-opengl can't re-raster + MSAA-resolve + swap at 60 Hz,
+     * so the device loop only redraws on change. Marquee / RCSS animation is
+     * deferred to GL-5; the overlay docs that animate (toast slide, dialog) are
+     * caught by the IsVisible checks. Called exactly once per frame by main.c. */
+    if (m_gl_warmup > 0) { m_gl_warmup--; return true; }
+    if (m_frame_dirty) return true;
+    if (m_toast_doc && m_toast_doc->IsVisible()) return true;
+    if (m_dialog_doc && m_dialog_doc->IsVisible()) return true;
+    if (m_launch_doc && m_launch_doc->IsVisible()) return true;
+    /* Dev debug overlay: keep the menu FPS number counting on an idle screen -
+     * force a redraw ~2 Hz while it is up. */
+    if (m_debug_visible) {
+        long long now = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (now - m_debug_tick_ms >= 500) { m_debug_tick_ms = now; return true; }
+    }
+    return false;
 }
 
 bool EvoRmlApp::Initialize(int width, int height) {
@@ -127,19 +222,55 @@ bool EvoRmlApp::Initialize(int width, int height) {
     m_frame_dirty = true;
 
     m_system = std::make_unique<EvoSystemInterface>();
-    m_render = std::make_unique<EvoRenderInterface>(width, height);
+
+#ifdef EVO_AGC_DEVICE
+    evo_log("RmlUi AGC: EVO_AGC_DEVICE compiled in, is_active=%d", evo_agc_runtime_is_active());
+    evo_log_flush();
+    if (evo_agc_runtime_is_active()) {
+        int w = 0, h = 0;
+        evo_agc_runtime_get_size(&w, &h);
+        if (w <= 0 || h <= 0) {
+            w = width;
+            h = height;
+        }
+        auto agc = std::make_unique<EvoRenderInterfaceAGC>(w, h);
+        if (agc->Ok()) {
+            m_render = std::move(agc);
+            m_blit_mode = false;
+            evo_log("RmlUi AGC: bare-metal GPU render interface active (%dx%d)", w, h);
+            evo_log_flush();
+        } else {
+            evo_log("RmlUi AGC: failed to construct EvoRenderInterfaceAGC");
+            evo_log_flush();
+        }
+    }
+#endif
+    if (!m_render)
+        m_render = std::make_unique<EvoRenderInterface>(width, height);
+    /* #60: must be registered before Rml::Initialise() so every subsequent
+     * LoadFontFace/LoadDocument call resolves through the embedded bundle
+     * first, never touching the /app0 sandbox's broken directory traversal. */
+    m_file_interface = std::make_unique<EvoRmlFileInterface>();
 
     Rml::SetSystemInterface(m_system.get());
-    Rml::SetRenderInterface(m_render.get());
+    Rml::SetRenderInterface(m_render->AsRml());
+    Rml::SetFileInterface(m_file_interface.get());
 
     if (!Rml::Initialise()) {
-        std::cerr << "[EVO RmlUi] Failed to initialise RmlUi core!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to initialise RmlUi core!\n");
         return false;
     }
 
+    /* #60: "/app0/assets/fonts/" resolves through the embedded bundle
+     * (evo_rmlui_fileinterface.h) before any real filesystem call happens, so
+     * the /app0 sandbox's broken directory traversal never comes into play.
+     * The remaining entries are host/dev fallbacks (fopen against loose
+     * files) for when the bundle hasn't been (re)generated. The old
+     * /data/evoplayer/app/ and /data/homebrew/EVOPlayer/ search paths - the
+     * #44 out-of-band FTP sync target - are gone: that sync is removed
+     * (deploy-app.sh), and shipping a self-contained .ffpfsc means those
+     * loose console-side copies must have zero effect on rendering. */
     std::vector<std::string> font_prefixes = {
-        "/data/evoplayer/app/assets/fonts/",
-        "/data/homebrew/EVOPlayer/assets/fonts/",
         "/app0/assets/fonts/",
         "assets/fonts/",
         "projects/evoplayer/assets/fonts/",
@@ -152,22 +283,43 @@ bool EvoRmlApp::Initialize(int width, int height) {
             Rml::LoadFontFace(p + "Roboto-Regular.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Bold.ttf", true);
             Rml::LoadFontFace(p + "Roboto-Medium.ttf", true);
-            std::cout << "[EVO RmlUi] Loaded font face from " << p << std::endl;
+            /* GL-5 (#81): Unicode fallback faces for subtitles (and any other
+             * non-Latin text). NotoSans covers Latin-ext / Cyrillic / Greek /
+             * Vietnamese; DejaVuSans adds Hebrew / Arabic / Armenian / Georgian
+             * and more. RmlUi's default FreeType engine has no complex shaping
+             * or BiDi, so Arabic renders unjoined and Hebrew LTR, and there is
+             * still no CJK face - those are subtitle follow-ups (#42/#43). What
+             * this does fix outright: the #35 "every non-ASCII char -> ?" fold. */
+            Rml::LoadFontFace(p + "NotoSans-Regular.ttf", true);
+            Rml::LoadFontFace(p + "NotoSans-Bold.ttf", true);
+            Rml::LoadFontFace(p + "DejaVuSans.ttf", true);
+            Rml::LoadFontFace(p + "DejaVuSans-Bold.ttf", true);
+            fprintf(stderr, "[EVO RmlUi] Loaded font face from %s\n", p.c_str());
             break;
         }
     }
 
+    m_dp_ratio = (width > 0) ? (float)width / (float)EVO_UI_DESIGN_W : 1.0f;
     m_context = Rml::CreateContext("main_context", Rml::Vector2i(width, height));
     if (!m_context) {
-        std::cerr << "[EVO RmlUi] Failed to create RmlUi context!" << std::endl;
+        fprintf(stderr, "[EVO RmlUi] Failed to create RmlUi context!\n");
         Rml::Shutdown();
         return false;
     }
 
+    /*
+     * Every stylesheet is authored against the EVO_UI_DESIGN_W x _H canvas
+     * (ui/include/evo_metrics.h) and expresses its geometry in dp, so one
+     * ratio scales the whole UI to whatever the panel is running at: layout,
+     * glyph rasterisation and corner tessellation all happen at the real
+     * pixel size instead of being upscaled from a 1080p image. At 1920 wide
+     * the ratio is exactly 1 and every dp resolves to the px it replaced,
+     * which is what keeps the host renderer shot.sh diff baselines valid.
+     */
+    m_context->SetDensityIndependentPixelRatio(m_dp_ratio);
+
     std::vector<std::string> rml_prefixes = {
-        "/data/evoplayer/app/assets/rml/",
-        "/data/homebrew/EVOPlayer/assets/rml/",
-        "/app0/assets/rml/",
+        "/app0/assets/rml/",     /* #60: resolves through the embedded bundle */
         "assets/rml/",
         "projects/evoplayer/assets/rml/",
         "/workspace/projects/evoplayer/assets/rml/"
@@ -200,6 +352,10 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_reader_doc = m_context->LoadDocument(p + "reader.rml");
             if (m_reader_doc) m_reader_doc->Hide();
         }
+        if (!m_image_doc) {
+            m_image_doc = m_context->LoadDocument(p + "image.rml");
+            if (m_image_doc) m_image_doc->Hide();
+        }
         if (!m_surround_doc) {
             m_surround_doc = m_context->LoadDocument(p + "surround.rml");
             if (m_surround_doc) m_surround_doc->Hide();
@@ -216,6 +372,10 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_settings_doc = m_context->LoadDocument(p + "settings.rml");
             if (m_settings_doc) m_settings_doc->Hide();
         }
+        if (!m_about_doc) {
+            m_about_doc = m_context->LoadDocument(p + "about.rml");
+            if (m_about_doc) m_about_doc->Hide();
+        }
         if (!m_subtitles_doc) {
             m_subtitles_doc = m_context->LoadDocument(p + "subtitles.rml");
             if (m_subtitles_doc) m_subtitles_doc->Hide();
@@ -230,27 +390,84 @@ bool EvoRmlApp::Initialize(int width, int height) {
         }
     }
 
-    if (!m_launch_doc) std::cerr << "[EVO RmlUi] Failed to load launch.rml!" << std::endl;
-    if (!m_list_doc) std::cerr << "[EVO RmlUi] Failed to load list.rml!" << std::endl;
-    if (!m_browser_doc) std::cerr << "[EVO RmlUi] Failed to load browser.rml!" << std::endl;
-    if (!m_changelog_doc) std::cerr << "[EVO RmlUi] Failed to load changelog.rml!" << std::endl;
-    if (!m_reader_doc) std::cerr << "[EVO RmlUi] Failed to load reader.rml!" << std::endl;
-    if (!m_surround_doc) std::cerr << "[EVO RmlUi] Failed to load surround.rml!" << std::endl;
-    if (!m_playback_doc) std::cerr << "[EVO RmlUi] Failed to load playback.rml!" << std::endl;
-    if (!m_dialog_doc) std::cerr << "[EVO RmlUi] Failed to load dialog.rml!" << std::endl;
-    if (!m_settings_doc) std::cerr << "[EVO RmlUi] Failed to load settings.rml!" << std::endl;
-    if (!m_subtitles_doc) std::cerr << "[EVO RmlUi] Failed to load subtitles.rml!" << std::endl;
-    if (!m_mediainfo_doc) std::cerr << "[EVO RmlUi] Failed to load mediainfo.rml!" << std::endl;
-    if (!m_nav_doc) std::cerr << "[EVO RmlUi] Failed to load navbar.rml!" << std::endl;
+    if (!m_launch_doc) fprintf(stderr, "[EVO RmlUi] Failed to load launch.rml!\n");
+    if (!m_list_doc) fprintf(stderr, "[EVO RmlUi] Failed to load list.rml!\n");
+    if (!m_browser_doc) fprintf(stderr, "[EVO RmlUi] Failed to load browser.rml!\n");
+    if (!m_changelog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load changelog.rml!\n");
+    if (!m_reader_doc) fprintf(stderr, "[EVO RmlUi] Failed to load reader.rml!\n");
+    if (!m_surround_doc) fprintf(stderr, "[EVO RmlUi] Failed to load surround.rml!\n");
+    if (!m_playback_doc) fprintf(stderr, "[EVO RmlUi] Failed to load playback.rml!\n");
+    if (!m_dialog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load dialog.rml!\n");
+    if (!m_settings_doc) fprintf(stderr, "[EVO RmlUi] Failed to load settings.rml!\n");
+    if (!m_about_doc) fprintf(stderr, "[EVO RmlUi] Failed to load about.rml!\n");
+    if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
+    if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
+    if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
+    if (!m_image_doc) fprintf(stderr, "[EVO RmlUi] Failed to load image.rml!\n");
+
+    /* #75: toast lives in its own context - see the comment on
+     * EvoToastState for why. Its own tiny context, so a load failure here
+     * is a missing notification, never a missing screen - non-fatal. */
+    m_toast_context = Rml::CreateContext("toast_context", Rml::Vector2i(width, height));
+    if (m_toast_context) {
+        m_toast_context->SetDensityIndependentPixelRatio(m_dp_ratio);
+        for (const auto& p : rml_prefixes) {
+            if (m_toast_doc) break;
+            m_toast_doc = m_toast_context->LoadDocument(p + "toast.rml");
+        }
+        if (m_toast_doc) {
+            m_toast_doc->Hide();
+        } else {
+            fprintf(stderr, "[EVO RmlUi] Failed to load toast.rml!\n");
+        }
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create toast context!\n");
+    }
+
+    /* #81: virtual keyboard - own context (same rationale as the toast). A load
+     * failure just means text entry falls back to nothing on screen, which is a
+     * bug but not a crash - evo_keyboard.c still has the state. */
+    m_keyboard_context = Rml::CreateContext("keyboard_context", Rml::Vector2i(width, height));
+    if (m_keyboard_context) {
+        m_keyboard_context->SetDensityIndependentPixelRatio(m_dp_ratio);
+        for (const auto& p : rml_prefixes) {
+            if (m_keyboard_doc) break;
+            m_keyboard_doc = m_keyboard_context->LoadDocument(p + "keyboard.rml");
+        }
+        if (m_keyboard_doc) m_keyboard_doc->Hide();
+        else fprintf(stderr, "[EVO RmlUi] Failed to load keyboard.rml!\n");
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create keyboard context!\n");
+    }
+
+    /* Dev debug overlay (menu FPS pill) - own context, same rationale as the
+     * toast. A load failure just means no menu FPS readout - never a crash. */
+    m_debug_context = Rml::CreateContext("debug_context", Rml::Vector2i(width, height));
+    if (m_debug_context) {
+        m_debug_context->SetDensityIndependentPixelRatio(m_dp_ratio);
+        for (const auto& p : rml_prefixes) {
+            if (m_debug_doc) break;
+            m_debug_doc = m_debug_context->LoadDocument(p + "debug.rml");
+        }
+        if (m_debug_doc) m_debug_doc->Hide();
+        else fprintf(stderr, "[EVO RmlUi] Failed to load debug.rml!\n");
+    } else {
+        fprintf(stderr, "[EVO RmlUi] Failed to create debug context!\n");
+    }
 
     m_initialized = true;
-    std::cout << "[EVO RmlUi] Retained-mode Full Engine initialized successfully ("
-              << width << "x" << height << ")." << std::endl;
+    fprintf(stderr, "[EVO RmlUi] Retained-mode Full Engine initialized successfully (%dx%d).\n",
+            width, height);
     return true;
 }
 
 void EvoRmlApp::Shutdown() {
     if (!m_initialized) return;
+
+    if (m_about_doc) {
+        m_about_doc->Close();
+        m_about_doc = nullptr;
+    }
 
     if (m_mediainfo_doc) {
         m_mediainfo_doc->Close();
@@ -307,6 +524,11 @@ void EvoRmlApp::Shutdown() {
         m_reader_doc = nullptr;
     }
 
+    if (m_image_doc) {
+        m_image_doc->Close();
+        m_image_doc = nullptr;
+    }
+
     if (m_surround_doc) {
         m_surround_doc->Close();
         m_surround_doc = nullptr;
@@ -315,6 +537,34 @@ void EvoRmlApp::Shutdown() {
     if (m_context) {
         Rml::RemoveContext(m_context->GetName());
         m_context = nullptr;
+    }
+
+    if (m_toast_doc) {
+        m_toast_doc->Close();
+        m_toast_doc = nullptr;
+    }
+
+    if (m_toast_context) {
+        Rml::RemoveContext(m_toast_context->GetName());
+        m_toast_context = nullptr;
+    }
+
+    if (m_keyboard_doc) {
+        m_keyboard_doc->Close();
+        m_keyboard_doc = nullptr;
+    }
+    if (m_keyboard_context) {
+        Rml::RemoveContext(m_keyboard_context->GetName());
+        m_keyboard_context = nullptr;
+    }
+
+    if (m_debug_doc) {
+        m_debug_doc->Close();
+        m_debug_doc = nullptr;
+    }
+    if (m_debug_context) {
+        Rml::RemoveContext(m_debug_context->GetName());
+        m_debug_context = nullptr;
     }
 
     Rml::Shutdown();
@@ -351,7 +601,7 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
 
     if (!pixels || w <= 0 || h <= 0) {
         if (!m_art_source[slot].empty()) {
-            Rml::ReleaseTexture(m_art_source[slot], m_render.get());
+            Rml::ReleaseTexture(m_art_source[slot], m_render->AsRml());
             m_render->DropMemoryTexture(m_art_source[slot]);
             m_art_source[slot].clear();
         }
@@ -368,7 +618,7 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
     if (unchanged) return m_art_source[slot];
 
     if (!m_art_source[slot].empty()) {
-        Rml::ReleaseTexture(m_art_source[slot], m_render.get());
+        Rml::ReleaseTexture(m_art_source[slot], m_render->AsRml());
         m_render->DropMemoryTexture(m_art_source[slot]);
     }
 
@@ -384,6 +634,59 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
 
     m_render->SetMemoryTexture(m_art_source[slot], pixels, w, h);
     return m_art_source[slot];
+}
+
+/*
+ * Ping-pong scroll for a single-line (white-space: nowrap) text element whose
+ * content overflows its parent's fixed-width overflow:hidden clip box,
+ * matching the legacy evo_text_marquee: dwell at each end, constant px/sec
+ * travel. Slides the element with a negative margin-left inside the parent
+ * clip. Reads the post-layout width from the previous frame (one-frame lag,
+ * invisible in motion). Call every frame the owning document is rendered.
+ */
+void EvoRmlApp::MarqueeTick(Rml::Element* text_el, bool active) {
+    if (!text_el) return;
+    Rml::Element* box_el = text_el->GetParentNode();
+    if (!box_el) return;
+
+    const float content = text_el->GetScrollWidth();   /* nowrap block = text width */
+    const float box     = box_el->GetClientWidth();     /* the fixed clip window */
+    const float travel  = content - box;
+
+    MarqueeState& m = m_marquee[text_el];
+
+    if (!active || travel <= 4.0f) {
+        if (m.active) {
+            text_el->SetProperty("margin-left", "0px");
+            m.active = false;
+        }
+        return;
+    }
+
+    const double now = m_system ? m_system->GetElapsedTime() : 0.0;
+
+    if (!m.active || std::fabs(m.travel - travel) > 1.0f) {
+        m.active = true;
+        m.start  = now;
+        m.travel = travel;
+    }
+
+    const double PAUSE = 1.4;   /* seconds held at each end */
+    const double SPEED = 85.0;  /* px per second */
+    const double leg    = m.travel / SPEED;
+    const double period = 2.0 * (leg + PAUSE);
+    const double p      = std::fmod(now - m.start, period);
+
+    double off;
+    if (p < PAUSE)                    off = 0.0;
+    else if (p < PAUSE + leg)         off = (p - PAUSE) * SPEED;
+    else if (p < 2.0 * PAUSE + leg)   off = m.travel;
+    else                             off = m.travel - (p - 2.0 * PAUSE - leg) * SPEED;
+
+    if (off < 0.0)          off = 0.0;
+    if (off > m.travel)     off = m.travel;
+
+    text_el->SetProperty("margin-left", std::to_string(-(int)(off + 0.5)) + "px");
 }
 
 void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
@@ -434,7 +737,13 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
     }
 
     Rml::Element* el_mark = m_launch_doc->GetElementById("brand-mark");
-    if (el_mark) el_mark->SetProperty("background-color", accent_bg);
+    if (el_mark) {
+        el_mark->SetProperty("background-color", "#ffcd001a");
+        el_mark->SetProperty("border-color", "#ffcd0038");
+    }
+
+    Rml::Element* el_logo = m_launch_doc->GetElementById("brand-logo");
+    if (el_logo) SetImageColor(el_logo, accent);
 
     Rml::Element* el_name = m_launch_doc->GetElementById("brand-name");
     if (el_name) el_name->SetProperty("color", text_1);
@@ -524,19 +833,25 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
         } else {
             el_chip->SetProperty("display", "inline-flex");
             if (state.hero_focused) {
-                el_chip->SetProperty("background-color", accent);
-                el_chip->SetProperty("border-color", "#ffffff");
+                el_chip->SetProperty("background-color", "#1e2e4af5");
+                el_chip->SetProperty("border-color", to_hex_rgb(m_theme.accent_alt));
+                el_chip->SetProperty("border-width", "2px");
             } else {
-                el_chip->SetProperty("background-color", surface);
-                el_chip->SetProperty("border-color", border);
+                el_chip->SetProperty("background-color", "#16243af2");
+                el_chip->SetProperty("border-color", "#00cdff47");
+                el_chip->SetProperty("border-width", "1.5px");
             }
         }
     }
     if (el_clabel) {
         el_clabel->SetInnerRML(state.hero_action);
         el_clabel->SetProperty("color", state.hero_focused
-                                            ? to_hex_rgb(m_theme.bg_bottom)
+                                            ? "#ffffff"
                                             : text_1);
+    }
+    Rml::Element* el_cglyph = m_launch_doc->GetElementById("hero-chip-glyph");
+    if (el_cglyph) {
+        SetImageColor(el_cglyph, to_hex_rgb(m_theme.accent_alt));
     }
 
     /* ---- shelves ---- */
@@ -650,12 +965,12 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
         el_tile->SetProperty("display", "block");
         el_tile->SetClass("tile-focused", t.is_focused);
         if (t.is_focused) {
-            el_tile->SetProperty("background-color", surf_sel);
-            el_tile->SetProperty("border-color", accent);
+            el_tile->SetProperty("background-color", "#16223a");
+            el_tile->SetProperty("border-color", to_hex_rgb(m_theme.accent_alt));
             el_tile->SetProperty("border-width", "2px");
         } else {
-            el_tile->SetProperty("background-color", surface);
-            el_tile->SetProperty("border-color", border);
+            el_tile->SetProperty("background-color", "#0f1828eb");
+            el_tile->SetProperty("border-color", "#5a7db433");
             el_tile->SetProperty("border-width", "1px");
         }
 
@@ -668,7 +983,7 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
             if (!t.icon_path.empty()) el_icon->SetAttribute("src", t.icon_path);
             /* Library slot 3 is the Emby destination - icon_emby.png is a
              * trademark excluded from the icon swap/tint, kept as baked. */
-            if (i != 3) SetImageColor(el_icon, t.is_focused ? accent : text_2);
+            if (i != 3) SetImageColor(el_icon, t.is_focused ? to_hex_rgb(m_theme.accent_alt) : "#9fb2cc");
         }
         if (el_title)  el_title->SetInnerRML(t.title);
         if (el_detail) {
@@ -681,17 +996,7 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
 void EvoRmlApp::RenderLaunch(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_launch_doc || !framebuffer) return;
 
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_list_doc)      m_list_doc->Hide();
-    if (m_browser_doc)   m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_launch_doc->Show();
+    ShowOnlyScreen(m_launch_doc);
 
     /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
     if (m_nav_doc) {
@@ -882,17 +1187,7 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
 void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_list_doc || !framebuffer) return;
 
-    if (m_launch_doc)    m_launch_doc->Hide();
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_browser_doc)   m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_list_doc->Show();
+    ShowOnlyScreen(m_list_doc);
 
     if (m_nav_doc) {
         if (m_last_nav.visible) m_nav_doc->Show();
@@ -919,17 +1214,18 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
 
     m_last_browser = state;
 
-    const std::string accent   = to_hex_rgb(m_theme.accent);
-    const std::string surface  = to_hex_rgba(m_theme.surface);
-    const std::string surf_sel = to_hex_rgba(m_theme.surface_sel);
-    const std::string border   = to_hex_rgba(m_theme.border);
-    const std::string text_1   = to_hex_rgb(m_theme.text_primary);
-    const std::string text_2   = to_hex_rgb(m_theme.text_secondary);
-    const std::string text_3   = to_hex_rgb(m_theme.text_muted);
+    /* PlayStation Obsidian & Sapphire Blue theme for storage browser */
+    const std::string accent       = "#00cdff"; // Sapphire cyan/blue
+    const std::string accent_gold  = "#ffcd00"; // Amber gold for folders & favorites
+    const std::string text_1       = "#ffffff"; // Crisp white
+    const std::string text_2       = "#c2d2e8"; // Ice blue-white
+    const std::string text_3       = "#7e97b8"; // Slate blue-gray
 
     auto el = [&](const std::string& id) { return m_browser_doc->GetElementById(id); };
 
+    /* 1. Header Toolbar */
     if (Rml::Element* e = el("browser-indicator")) e->SetProperty("background-color", accent);
+    if (Rml::Element* e = el("browser-badge-icon")) SetImageColor(e, accent);
     if (Rml::Element* e = el("browser-title")) e->SetInnerRML(state.title);
     if (Rml::Element* e = el("browser-path")) {
         e->SetInnerRML(state.path);
@@ -938,17 +1234,38 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (Rml::Element* e = el("browser-counter")) {
         std::ostringstream ss;
         if (state.total_count > 0 && state.cursor_index >= 0)
-            ss << (state.cursor_index + 1) << " OF " << state.total_count;
+            ss << (state.cursor_index + 1) << " / " << state.total_count;
         else
-            ss << state.total_count << " ITEMS";
+            ss << state.total_count << (state.total_count == 1 ? " ITEM" : " ITEMS");
         e->SetInnerRML(ss.str());
-        e->SetProperty("color", text_3);
     }
-    /* At the root there is nowhere to go back to, so the hint would be a lie. */
-    if (Rml::Element* e = el("bhint-back"))
-        e->SetProperty("display", state.at_root ? "none" : "flex");
 
-    if (Rml::Element* e = el("browser-list"))
+    /* 2. Left Sidebar (Places & Filters) */
+    for (int i = 0; i < 7; i++) {
+        const std::string n = std::to_string(i);
+        Rml::Element* item = el("sb-item-" + n);
+        Rml::Element* icon = el("sb-icon-" + n);
+        if (!item) continue;
+
+        bool active = (i == state.active_source);
+        bool focused = (state.sidebar_focused && i == state.sidebar_index);
+
+        item->SetClass("sb-item-active", active);
+        item->SetClass("sb-item-focused", focused);
+
+        if (icon) {
+            if (focused) {
+                SetImageColor(icon, accent);
+            } else if (active) {
+                SetImageColor(icon, accent);
+            } else {
+                SetImageColor(icon, text_3);
+            }
+        }
+    }
+
+    /* 3. Empty State & Media Grid Cards */
+    if (Rml::Element* e = el("browser-grid"))
         e->SetProperty("display", state.is_empty ? "none" : "flex");
     if (Rml::Element* e = el("browser-empty"))
         e->SetProperty("display", state.is_empty ? "flex" : "none");
@@ -958,55 +1275,66 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         if (Rml::Element* e = el("browser-empty-icon"))  SetImageColor(e, text_3);
     }
 
+    std::string prev = ArtSource(kBrowserArtSlot, state.ins_preview,
+                                 state.ins_preview_w, state.ins_preview_h,
+                                 state.ins_name);
+
     for (int i = 0; i < kBrowserRows; i++) {
         const std::string n = std::to_string(i);
-        Rml::Element* row    = el("brow-" + n);
-        Rml::Element* icon   = el("brow-icon-" + n);
-        Rml::Element* name   = el("brow-name-" + n);
-        Rml::Element* detail = el("brow-detail-" + n);
-        Rml::Element* fav    = el("brow-fav-" + n);
-        Rml::Element* badge  = el("brow-badge-" + n);
-        Rml::Element* track  = el("brow-track-" + n);
-        Rml::Element* fill   = el("brow-fill-" + n);
+        Rml::Element* card     = el("brow-" + n);
+        Rml::Element* art      = el("brow-art-" + n);
+        Rml::Element* icon     = el("brow-icon-" + n);
+        Rml::Element* name     = el("brow-name-" + n);
+        Rml::Element* detail   = el("brow-detail-" + n);
+        Rml::Element* badge    = el("brow-badge-" + n);
+        Rml::Element* fav      = el("brow-fav-" + n);
+        Rml::Element* duration = el("brow-duration-" + n);
+        Rml::Element* track    = el("brow-track-" + n);
+        Rml::Element* fill     = el("brow-fill-" + n);
+        Rml::Element* kind     = el("brow-kind-" + n);
+        Rml::Element* ext      = el("brow-ext-" + n);
 
-        if (!row) continue;
+        if (!card) continue;
 
         if (i >= (int)state.rows.size()) {
-            row->SetProperty("display", "none");
+            card->SetProperty("display", "none");
+            ArtSource(kBrowserCardArtSlot + i, nullptr, 0, 0, std::string());
             continue;
         }
 
         const EvoBrowserRow& r = state.rows[i];
-        bool focused = r.is_focused && !state.rail_focused;
+        bool focused = r.is_focused && !state.rail_focused && !state.sidebar_focused;
 
-        row->SetProperty("display", "flex");
-        row->SetClass("brow-focused", focused);
-        if (focused) {
-            row->SetProperty("background-color", surf_sel);
-            row->SetProperty("border-color", accent);
-            row->SetProperty("border-width", "1.5px");
-        } else {
-            row->SetProperty("background-color", surface);
-            row->SetProperty("border-color", border);
-            row->SetProperty("border-width", "1px");
+        card->SetProperty("display", "flex");
+        card->SetClass("grid-card-focused", focused);
+
+        std::string card_art = ArtSource(kBrowserCardArtSlot + i, r.art, r.art_w, r.art_h, r.name);
+
+        if (art && icon) {
+            if (!card_art.empty()) {
+                art->SetProperty("display", "block");
+                art->SetProperty("decorator", "image(" + card_art + " cover)");
+                icon->SetProperty("display", "none");
+            } else if (focused && !prev.empty()) {
+                art->SetProperty("display", "block");
+                art->SetProperty("decorator", "image(" + prev + " cover)");
+                icon->SetProperty("display", "none");
+            } else {
+                art->SetProperty("display", "none");
+                icon->SetProperty("display", "inline-block");
+                if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
+                bool isFolder = (r.icon_path.find("folder") != std::string::npos ||
+                                 r.icon_path.find("usb") != std::string::npos);
+                SetImageColor(icon, isFolder ? accent_gold : text_3);
+            }
         }
 
-        if (icon) {
-            if (!r.icon_path.empty()) icon->SetAttribute("src", r.icon_path);
-            SetImageColor(icon, focused ? accent : text_3);
-        }
         if (name) {
             name->SetInnerRML(r.name);
-            name->SetProperty("color", text_1);
         }
         if (detail) {
             detail->SetProperty("display", r.detail.empty() ? "none" : "block");
             detail->SetInnerRML(r.detail);
-            detail->SetProperty("color", text_2);
-        }
-        if (fav) {
-            fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
-            SetImageColor(fav, accent);
         }
         if (badge) {
             if (r.badge.empty()) {
@@ -1014,112 +1342,85 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
             } else {
                 badge->SetProperty("display", "inline-block");
                 badge->SetInnerRML(r.badge);
-                if (focused) {
-                    badge->SetProperty("background-color", accent);
-                    badge->SetProperty("border-color", "#ffffff");
-                    badge->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
-                } else {
-                    badge->SetProperty("background-color", surf_sel);
-                    badge->SetProperty("border-color", border);
-                    badge->SetProperty("color", accent);
-                }
             }
+        }
+        if (fav) {
+            fav->SetProperty("display", r.is_favorite ? "inline-block" : "none");
+            SetImageColor(fav, accent_gold);
+        }
+        if (duration) {
+            duration->SetProperty("display", r.duration.empty() ? "none" : "block");
+            duration->SetInnerRML(r.duration);
         }
         if (track) {
             track->SetProperty("display", r.progress >= 0 ? "block" : "none");
-            track->SetProperty("background-color", border);
         }
         if (fill) {
             fill->SetProperty("width", pct_string(r.progress));
-            fill->SetProperty("background-color", accent);
+        }
+        if (kind) {
+            kind->SetInnerRML(r.badge.empty() ? "MEDIA" : r.badge);
+        }
+        if (ext) {
+            size_t dot = r.name.find_last_of('.');
+            if (dot != std::string::npos && dot + 1 < r.name.size()) {
+                std::string e = r.name.substr(dot + 1);
+                std::transform(e.begin(), e.end(), e.begin(), ::toupper);
+                ext->SetInnerRML(e);
+                ext->SetProperty("display", "inline-block");
+            } else {
+                ext->SetInnerRML(r.badge == "DIR" || r.badge == "FOLDER" ? "DIR" : "FILE");
+                ext->SetProperty("display", "inline-block");
+            }
         }
     }
 
-    /* ---- inspector ---- */
-    if (Rml::Element* e = el("inspector")) {
-        e->SetProperty("background-color", surface);
-        e->SetProperty("border-color", border);
-    }
-
-    std::string prev = ArtSource(kBrowserArtSlot, state.ins_preview,
-                                 state.ins_preview_w, state.ins_preview_h,
-                                 state.ins_name);
-    if (Rml::Element* e = el("ins-preview-art")) {
-        if (prev.empty()) {
-            e->SetProperty("display", "none");
-        } else {
-            e->SetProperty("display", "block");
-            e->SetProperty("decorator", "image(" + prev + " cover)");
-        }
-    }
-    if (Rml::Element* e = el("ins-preview-empty"))
-        e->SetProperty("display", prev.empty() ? "block" : "none");
-
-    if (Rml::Element* e = el("ins-preview-badge")) {
-        if (state.ins_preview_badge.empty() || prev.empty()) {
-            e->SetProperty("display", "none");
-        } else {
-            e->SetProperty("display", "block");
-            e->SetInnerRML(state.ins_preview_badge);
-        }
-    }
-
+    /* 4. Bottom Status & Selection Strip */
     if (Rml::Element* e = el("ins-name")) {
-        e->SetInnerRML(state.ins_name);
-        e->SetProperty("color", text_1);
+        e->SetInnerRML(state.ins_name.empty() ? "No Selection" : state.ins_name);
     }
-    if (Rml::Element* e = el("ins-kind")) {
-        e->SetInnerRML(state.ins_kind);
-        e->SetProperty("color", accent);
+    if (Rml::Element* e = el("status-pill-res")) {
+        e->SetProperty("display", state.status_res.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_res);
     }
-    if (Rml::Element* e = el("ins-ext")) {
-        e->SetProperty("display", state.ins_ext.empty() ? "none" : "inline-block");
-        e->SetInnerRML(state.ins_ext);
-        e->SetProperty("background-color", surf_sel);
-        e->SetProperty("border-color", border);
-        e->SetProperty("color", text_2);
+    if (Rml::Element* e = el("status-pill-vcodec")) {
+        e->SetProperty("display", state.status_vcodec.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_vcodec);
     }
-    if (Rml::Element* e = el("ins-probing"))
-        e->SetProperty("display", state.ins_probing ? "block" : "none");
+    if (Rml::Element* e = el("status-pill-acodec")) {
+        e->SetProperty("display", state.status_acodec.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_acodec);
+    }
+    if (Rml::Element* e = el("status-pill-duration")) {
+        e->SetProperty("display", state.status_duration.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_duration);
+    }
+    if (Rml::Element* e = el("status-pill-size")) {
+        e->SetProperty("display", state.status_size.empty() ? "none" : "inline-block");
+        e->SetInnerRML(state.status_size);
+    }
+    if (Rml::Element* e = el("ins-probing")) {
+        e->SetProperty("display", state.ins_probing ? "inline-block" : "none");
+    }
 
-    for (int i = 0; i < kBrowserProps; i++) {
-        const std::string n = std::to_string(i);
-        Rml::Element* prop = el("ins-prop-" + n);
-        Rml::Element* key  = el("ins-key-" + n);
-        Rml::Element* val  = el("ins-val-" + n);
-
-        if (!prop) continue;
-
-        if (i >= (int)state.ins_props.size()) {
-            prop->SetProperty("display", "none");
-            continue;
+    if (Rml::Element* e = el("footer-action-label")) {
+        if (state.sidebar_focused) {
+            e->SetInnerRML("SELECT");
+        } else if (state.ins_kind == "Folder" || state.ins_kind == "FOLDER" || state.ins_kind == "DIR") {
+            e->SetInnerRML("OPEN");
+        } else {
+            e->SetInnerRML("PLAY");
         }
-        prop->SetProperty("display", "flex");
-        if (key) {
-            key->SetInnerRML(state.ins_props[i].first);
-            key->SetProperty("color", text_3);
-        }
-        if (val) {
-            val->SetInnerRML(state.ins_props[i].second);
-            val->SetProperty("color", text_1);
-        }
+    }
+    if (Rml::Element* e = el("bhint-back")) {
+        e->SetProperty("display", (state.at_root && state.sidebar_focused) ? "none" : "flex");
     }
 }
 
 void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_browser_doc || !framebuffer) return;
 
-    if (m_launch_doc)    m_launch_doc->Hide();
-    if (m_list_doc)      m_list_doc->Hide();
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_browser_doc->Show();
+    ShowOnlyScreen(m_browser_doc);
 
     if (m_nav_doc) {
         if (m_last_nav.visible) m_nav_doc->Show();
@@ -1264,17 +1565,7 @@ void EvoRmlApp::UpdateChangelogState(const EvoChangelogState& state) {
 void EvoRmlApp::RenderChangelog(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_changelog_doc || !framebuffer) return;
 
-    if (m_launch_doc)    m_launch_doc->Hide();
-    if (m_list_doc)      m_list_doc->Hide();
-    if (m_browser_doc)   m_browser_doc->Hide();
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_changelog_doc->Show();
+    ShowOnlyScreen(m_changelog_doc);
 
     if (m_nav_doc) {
         if (m_last_nav.visible) m_nav_doc->Show();
@@ -1376,20 +1667,47 @@ void EvoRmlApp::UpdateReaderState(const EvoReaderState& state) {
     }
 }
 
+/* #81: full-screen image viewer. */
+void EvoRmlApp::UpdateImageState(const EvoImageState& state) {
+    if (!m_initialized || !m_image_doc) return;
+    if (state == m_last_image && m_theme_generation == m_theme_gen_image) return;
+    m_theme_gen_image = m_theme_generation;
+    m_frame_dirty = true;
+    m_last_image = state;
+
+    auto el = [&](const char* id) { return m_image_doc->GetElementById(id); };
+    if (Rml::Element* e = el("img-accent"))
+        e->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+    if (Rml::Element* e = el("img-title"))
+        e->SetInnerRML(state.title.empty() ? "IMAGE" : state.title);
+    if (Rml::Element* e = el("img-dims"))
+        e->SetInnerRML(state.dims.empty() ? "IMAGE FILE" : state.dims);
+
+    std::string src = ArtSource(kImageArtSlot,
+                                state.loaded ? state.pixels : nullptr,
+                                state.w, state.h, state.title);
+    if (Rml::Element* e = el("img-canvas")) {
+        e->SetProperty("display", state.loaded ? "block" : "none");
+        if (state.loaded && !src.empty())
+            e->SetProperty("decorator", "image(" + src + " contain)");
+    }
+    if (Rml::Element* e = el("img-error"))
+        e->SetProperty("display", state.loaded ? "none" : "flex");
+}
+
+void EvoRmlApp::RenderImage(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_image_doc || !framebuffer) return;
+
+    ShowOnlyScreen(m_image_doc);
+    if (m_nav_doc) m_nav_doc->Hide();   /* full-bleed viewer: no rail */
+
+    RenderCachedScreen(11, framebuffer, width, height);
+}
+
 void EvoRmlApp::RenderReader(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_reader_doc || !framebuffer) return;
 
-    if (m_launch_doc)    m_launch_doc->Hide();
-    if (m_list_doc)      m_list_doc->Hide();
-    if (m_browser_doc)   m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_reader_doc->Show();
+    ShowOnlyScreen(m_reader_doc);
 
     if (m_nav_doc) {
         if (m_last_nav.visible) m_nav_doc->Show();
@@ -1534,8 +1852,15 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         int top  = 357 + (int)(spk.dy * kScale) - 41;
 
         node->SetProperty("display", "flex");
-        node->SetProperty("left", std::to_string(left) + "px");
-        node->SetProperty("top", std::to_string(top) + "px");
+        /* dp, not px. These constants are in the document's design space (the
+         * 1080x714 stage, 150x82 nodes), and every other rule in surround.rcss
+         * is dp - but emitting px pinned the nodes to raw pixels. At the PS5's
+         * 3840x2160 the dp ratio is 2.0, so the stage and the nodes doubled
+         * while their positions did not: the speakers bunched into the
+         * top-left and overlapped each other and the LFE. Invisible at 1080p,
+         * where px and dp coincide. */
+        node->SetProperty("left", std::to_string(left) + "dp");
+        node->SetProperty("top", std::to_string(top) + "dp");
         node->SetClass("srd-spk-active", is_active);
         node->SetClass("srd-spk-selected", is_sel);
         node->SetProperty("background-color", is_active ? surf_sel : surface);
@@ -1558,17 +1883,7 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
 void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_surround_doc || !framebuffer) return;
 
-    if (m_launch_doc)    m_launch_doc->Hide();
-    if (m_list_doc)      m_list_doc->Hide();
-    if (m_browser_doc)   m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc)  m_playback_doc->Hide();
-    if (m_dialog_doc)    m_dialog_doc->Hide();
-    if (m_settings_doc)  m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    m_surround_doc->Show();
+    ShowOnlyScreen(m_surround_doc);
 
     if (m_nav_doc) {
         if (m_last_nav.visible) m_nav_doc->Show();
@@ -1588,6 +1903,65 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     m_frame_dirty = true;
 
     m_last_state = state;
+
+    /* GL-5 (#81): caption-only mode — a subtitle cue is up but the playback
+     * controls have faded. Suppress the scrims/capsule as a group so only
+     * #subtitle-layer shows over the video. */
+    {
+        const char* scrim = state.chrome_hidden ? "none" : "flex";
+        if (auto* e = m_playback_doc->GetElementById("top-scrim"))      e->SetProperty("display", scrim);
+        if (auto* e = m_playback_doc->GetElementById("bottom-scrim"))   e->SetProperty("display", scrim);
+        if (auto* e = m_playback_doc->GetElementById("center-overlay"))
+            e->SetProperty("display", (state.chrome_hidden || state.music_mode) ? "none" : "flex");
+    }
+
+    /* #81: NOW PLAYING visualiser for audio-only playback. */
+    {
+        Rml::Element* mv = m_playback_doc->GetElementById("music-view");
+        if (mv) {
+            mv->SetProperty("display", state.music_mode ? "flex" : "none");
+            if (state.music_mode) {
+                mv->SetClass("paused", state.paused);
+                if (auto* e = m_playback_doc->GetElementById("music-state"))
+                    e->SetInnerRML(state.paused ? "PAUSED" : "PLAYING");
+                if (auto* e = m_playback_doc->GetElementById("music-hint")) {
+                    std::string h = (state.music_codec.empty() ? std::string("AUDIO")
+                                                              : state.music_codec);
+                    e->SetInnerRML(h + " \xC2\xB7 CROSS PAUSE \xC2\xB7 L/R SEEK");
+                }
+            }
+        }
+    }
+
+    // 0. Subtitle caption overlay (#81)
+    {
+        Rml::Element* el_sub_box   = m_playback_doc->GetElementById("subtitle-box");
+        Rml::Element* el_sub_layer = m_playback_doc->GetElementById("subtitle-layer");
+        if (el_sub_box && el_sub_layer) {
+            if (state.subtitle_text.empty()) {
+                el_sub_box->SetProperty("display", "none");
+            } else {
+                std::string rml;
+                rml.reserve(state.subtitle_text.size() + 16);
+                for (char c : state.subtitle_text) {
+                    switch (c) {
+                        case '&':  rml += "&amp;";  break;
+                        case '<':  rml += "&lt;";   break;
+                        case '>':  rml += "&gt;";   break;
+                        case '\n': rml += "<br/>";  break;
+                        case '\r': break;
+                        default:   rml += c;        break;
+                    }
+                }
+                el_sub_box->SetProperty("display", "inline-block");
+                el_sub_box->SetInnerRML(rml);
+                el_sub_box->SetClass("sub-small",  state.subtitle_face == 1);
+                el_sub_box->SetClass("sub-medium", state.subtitle_face == 2);
+                el_sub_box->SetClass("sub-large",  state.subtitle_face == 3);
+            }
+            el_sub_layer->SetClass("raised", state.subtitle_raised);
+        }
+    }
 
     // 1. Title & Meta
     Rml::Element* el_title = m_playback_doc->GetElementById("media-title");
@@ -1644,6 +2018,26 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             el_fps->SetProperty("display", "inline-block");
             el_fps->SetInnerRML(state.fps_badge);
         }
+    }
+
+    // #59: decoder backend badge (Hardware / Software)
+    if (Rml::Element* el_dec = m_playback_doc->GetElementById("badge-decoder")) {
+        if (state.decoder_badge.empty()) {
+            el_dec->SetProperty("display", "none");
+        } else {
+            el_dec->SetProperty("display", "inline-block");
+            el_dec->SetInnerRML(state.decoder_badge);
+            bool hw = state.decoder_badge.find("Hardware") != std::string::npos;
+            el_dec->SetProperty("background-color", hw ? to_hex_rgb(m_theme.accent)
+                                                       : to_hex_rgba(m_theme.surface));
+            el_dec->SetProperty("color", hw ? to_hex_rgb(m_theme.bg_bottom) : "#e2e8f0");
+        }
+    }
+    /* #81: dev FPS pill — independent of the OSD chrome (shows with controls faded). */
+    if (Rml::Element* el_fps_pill = m_playback_doc->GetElementById("fps-pill")) {
+        el_fps_pill->SetProperty("display", state.debug_overlay ? "block" : "none");
+        if (Rml::Element* el_fps_val = m_playback_doc->GetElementById("fps-value"))
+            el_fps_val->SetInnerRML(std::to_string(state.fps) + " FPS");
     }
 
     // 3. Times & Progress
@@ -1735,25 +2129,77 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     // 7. Stats for Nerds HUD
     Rml::Element* el_stats = m_playback_doc->GetElementById("stats-hud");
     if (el_stats) {
-        el_stats->SetProperty("display", state.show_stats ? "flex" : "none");
+        el_stats->SetProperty("display",
+            (state.show_stats && !state.chrome_hidden) ? "flex" : "none");
+    }
+}
+
+/* #81 / #63: the playback diagnostic HUD. Only called while the HUD is visible
+ * (OPTIONS on the player), at ~2 Hz, so it writes the elements directly rather
+ * than going through the state-diff dance. */
+void EvoRmlApp::UpdatePerfHud(const evo_perf_hud_t* h) {
+    if (!m_initialized || !m_playback_doc || !h) return;
+    m_frame_dirty = true;
+
+    auto set_line = [&](const char* id, const char* text) {
+        if (Rml::Element* e = m_playback_doc->GetElementById(id))
+            e->SetInnerRML(text && text[0] ? text : "--");
+    };
+    set_line("stats-video",  h->line_video);
+    set_line("stats-audio",  h->line_audio);
+    set_line("stats-subs",   h->line_subs);
+    set_line("stats-perf",   h->line_perf);
+    set_line("stats-queues", h->line_queues);
+    set_line("stats-clocks", h->line_clocks);
+
+    struct GraphSpec { const char* graph_id; const char* val_id; const char* colour;
+                       const float* hist; float cur; float peak; const char* unit; };
+    char gpu_v[48], ram_v[48], cpu_v[48];
+    std::snprintf(gpu_v, sizeof gpu_v, "%.0f%% / %.0f", h->gpu_pct, h->gpu_peak_pct);
+    std::snprintf(ram_v, sizeof ram_v, "%.0f / %.0fM", h->ram_mb, h->ram_total_mb);
+    std::snprintf(cpu_v, sizeof cpu_v, "%.0f%% / %.0f", h->cpu_pct, h->cpu_peak_pct);
+    const GraphSpec specs[3] = {
+        { "graph-gpu", "graph-gpu-val", "#00d2ff", h->gpu_hist, h->gpu_pct, h->gpu_peak_pct, gpu_v },
+        { "graph-ram", "graph-ram-val", "#ffb020", h->ram_hist, h->ram_mb,  h->ram_peak_mb,  ram_v },
+        { "graph-cpu", "graph-cpu-val", "#00ffaa", h->cpu_hist, h->cpu_pct, h->cpu_peak_pct, cpu_v },
+    };
+
+    int n = h->hist_len;
+    if (n < 0) n = 0;
+    for (const GraphSpec& s : specs) {
+        Rml::Element* g = m_playback_doc->GetElementById(s.graph_id);
+        if (!g) continue;
+        /* Lazily create the bar elements once, then only move their heights. */
+        while ((int)g->GetNumChildren() < n) {
+            Rml::ElementPtr bar = g->GetOwnerDocument()->CreateElement("div");
+            bar->SetClass("graph-bar", true);
+            bar->SetProperty("background-color", s.colour);
+            g->AppendChild(std::move(bar));
+        }
+        for (int i = 0; i < (int)g->GetNumChildren(); i++) {
+            Rml::Element* bar = g->GetChild(i);
+            if (i >= n || !s.hist) { bar->SetProperty("height", "0px"); continue; }
+            float v = s.hist[i];
+            if (v < 0.0f) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            char hbuf[16];
+            std::snprintf(hbuf, sizeof hbuf, "%.0fpx", 2.0f + v * 30.0f);
+            bar->SetProperty("height", hbuf);
+        }
+        if (Rml::Element* v = m_playback_doc->GetElementById(s.val_id))
+            v->SetInnerRML(s.unit);
     }
 }
 
 void EvoRmlApp::RenderPlaybackOSD(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_playback_doc || !framebuffer) return;
 
-    if (m_launch_doc) m_launch_doc->Hide();
-    if (m_list_doc) m_list_doc->Hide();
-    if (m_browser_doc) m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_dialog_doc) m_dialog_doc->Hide();
-    if (m_settings_doc) m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_nav_doc) m_nav_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_playback_doc->Show();
+    ShowOnlyScreen(m_playback_doc);
+    if (m_nav_doc) m_nav_doc->Hide();   /* nothing over the film but the OSD */
+
+    /* Scroll a long movie title. This document is not surface-cached, so the
+     * per-frame re-render this relies on is already happening. */
+    MarqueeTick(m_playback_doc->GetElementById("media-title"), true);
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
@@ -1811,6 +2257,9 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                 el_btn->SetClass("btn-primary", state.actions[i].is_primary);
                 el_btn->SetClass("btn-secondary", !state.actions[i].is_primary);
 
+                bool focused = (i == state.focused_action);
+                el_btn->SetClass("btn-focused", focused);
+
                 if (state.actions[i].is_primary) {
                     el_btn->SetProperty("background-color", to_hex_rgb(m_theme.accent));
                     el_btn->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
@@ -1819,6 +2268,14 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                     el_btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
                     el_btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
                     el_btn->SetProperty("color", "#e2e8f0");
+                }
+                // #65: D-pad focus ring — a bright accent border over whatever
+                // the primary/secondary style set.
+                if (focused) {
+                    el_btn->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                    el_btn->SetProperty("border-width", "3px");
+                } else {
+                    el_btn->SetProperty("border-width", "2px");
                 }
 
                 if (el_icon) el_icon->SetAttribute("src", state.actions[i].icon_path);
@@ -1833,17 +2290,7 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
 void EvoRmlApp::RenderDialog(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_dialog_doc || !framebuffer) return;
 
-    if (m_launch_doc) m_launch_doc->Hide();
-    if (m_list_doc) m_list_doc->Hide();
-    if (m_browser_doc) m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc) m_playback_doc->Hide();
-    if (m_settings_doc) m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_dialog_doc->Show();
+    ShowOnlyScreen(m_dialog_doc);
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
@@ -1878,6 +2325,44 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
     if (el_ind) {
         el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
     }
+    Rml::Element* el_sicon = m_settings_doc->GetElementById("settings-badge-icon");
+    if (el_sicon) {
+        SetImageColor(el_sicon, to_hex_rgb(m_theme.accent_alt));
+    }
+
+    /* Two-pane sidebar. The four section labels are static markup; only the
+     * highlight moves. `sidebar_focused` is set by the index page, where the
+     * sidebar IS the page; the section pages light the current row instead. */
+    for (int sct = 0; sct < 4; sct++) {
+        Rml::Element* el_s = m_settings_doc->GetElementById("sb-" + std::to_string(sct));
+        if (!el_s) continue;
+        const bool s_active = (sct == state.section_active);
+        const bool s_focused = s_active && state.sidebar_focused;
+        el_s->SetClass("sb-section-active", s_active && !s_focused);
+        el_s->SetClass("sb-section-focused", s_focused);
+        /* Paint inline as well as by class. A class change needs a style pass
+         * to reach computed values, so on its own the highlight lands one
+         * render late - measurable in uiview, where each fixture renders once.
+         * The rail block below has always set its colours inline for the same
+         * reason; this keeps the two consistent. */
+        if (s_focused) {
+            el_s->SetProperty("background-color", "#ffcd0026");
+            el_s->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+        } else if (s_active) {
+            el_s->SetProperty("background-color", "#ffffff14");
+            el_s->SetProperty("border-color", "#ffffff24");
+        } else {
+            el_s->SetProperty("background-color", "transparent");
+            el_s->SetProperty("border-color", "transparent");
+        }
+        if (Rml::Element* el_si = m_settings_doc->GetElementById("sb-icon-" + std::to_string(sct))) {
+            SetImageColor(el_si, s_focused ? to_hex_rgb(m_theme.accent)
+                                           : (s_active ? to_hex_rgb(m_theme.accent_alt)
+                                                       : to_hex_rgb(m_theme.text_secondary)));
+        }
+        if (Rml::Element* el_sl = m_settings_doc->GetElementById("sb-label-" + std::to_string(sct)))
+            el_sl->SetProperty("color", s_focused ? to_hex_rgb(m_theme.accent) : "#ffffff");
+    }
 
     for (int r = 0; r < 7; r++) {
         std::string rid = "rail-" + std::to_string(r);
@@ -1901,13 +2386,16 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         }
     }
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < EVO_RMLUI_SETTINGS_ROWS; i++) {
         std::string row_id = "row-" + std::to_string(i);
         std::string icon_id = "row-icon-" + std::to_string(i);
         std::string title_id = "row-title-" + std::to_string(i);
         std::string detail_id = "row-detail-" + std::to_string(i);
         std::string badge_id = "row-badge-" + std::to_string(i);
         std::string chev_id = "row-chevron-" + std::to_string(i);
+        std::string tog_id = "row-toggle-" + std::to_string(i);
+        std::string chk_id = "row-check-" + std::to_string(i);
+        std::string ibox_id = "row-iconbox-" + std::to_string(i);
 
         Rml::Element* el_row = m_settings_doc->GetElementById(row_id);
         Rml::Element* el_icon = m_settings_doc->GetElementById(icon_id);
@@ -1915,6 +2403,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         Rml::Element* el_detail = m_settings_doc->GetElementById(detail_id);
         Rml::Element* el_badge = m_settings_doc->GetElementById(badge_id);
         Rml::Element* el_chev = m_settings_doc->GetElementById(chev_id);
+        Rml::Element* el_tog = m_settings_doc->GetElementById(tog_id);
+        Rml::Element* el_chk = m_settings_doc->GetElementById(chk_id);
+        Rml::Element* el_ibox = m_settings_doc->GetElementById(ibox_id);
 
         if (el_row) {
             if (i < (int)state.rows.size()) {
@@ -1923,25 +2414,23 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 el_row->SetClass("row-focused", is_focused);
 
                 if (is_focused) {
+                    /* Fill only: the separator hairlines are RCSS-owned so that
+                     * .row-focused can swallow the one beneath the highlight. */
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
-                    el_row->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                    if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.accent));
                     if (el_badge) {
-                        /* The fill IS the accent, and every built-in accent
-                         * is a light colour, so white type on it is close to
-                         * invisible — this is what made a selected row harder
-                         * to read than an unselected one. Flip to the darkest
-                         * theme colour instead. */
-                        el_badge->SetProperty("background-color", to_hex_rgb(m_theme.accent));
-                        el_badge->SetProperty("border-color", "#ffffff");
-                        el_badge->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
+                        el_badge->SetProperty("background-color", "#ffcd0029");
+                        el_badge->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+                        el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
                     }
                 } else {
-                    el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface));
-                    el_row->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                    /* Transparent so the frosted card shows through the row. */
+                    el_row->SetProperty("background-color", "transparent");
+                    if (el_detail) el_detail->SetProperty("color", to_hex_rgb(m_theme.text_muted));
                     if (el_badge) {
-                        el_badge->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
-                        el_badge->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
-                        el_badge->SetProperty("color", to_hex_rgb(m_theme.accent));
+                        el_badge->SetProperty("background-color", "#0a101c99");
+                        el_badge->SetProperty("border-color", to_hex_rgba(m_theme.border));
+                        el_badge->SetProperty("color", to_hex_rgb(m_theme.text_secondary));
                     }
                 }
 
@@ -1953,8 +2442,35 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 }
                 if (el_title) el_title->SetInnerRML(state.rows[i].title);
                 if (el_detail) el_detail->SetInnerRML(state.rows[i].detail);
+                /* A toggle row owns the right-hand slot outright: no badge and
+                 * no chevron, so the switch is the only affordance there. */
+                const bool is_toggle = (state.rows[i].kind == EVO_RMLUI_ROW_TOGGLE);
+                const bool is_option = (state.rows[i].kind == EVO_RMLUI_ROW_OPTION);
+                el_row->SetClass("row-option", is_option);
+                /* Indent and strip the icon inline too - same one-render lag as
+                 * the sidebar highlight if this were left to the class alone. */
+                el_row->SetProperty("padding-left", is_option ? "76dp" : "18dp");
+                if (el_ibox) el_ibox->SetProperty("display", is_option ? "none" : "flex");
+                if (el_chk) {
+                    const bool checked = is_option && state.rows[i].toggle_on;
+                    el_chk->SetProperty("display", checked ? "block" : "none");
+                    if (checked) el_chk->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                }
+                if (el_tog) {
+                    el_tog->SetProperty("display", is_toggle ? "block" : "none");
+                    el_tog->SetClass("row-toggle-on", is_toggle && state.rows[i].toggle_on);
+                    /* One colour for every switch. This used to paint the
+                     * theme accent inline while RCSS painted green, so a switch
+                     * was green or purple depending on which won - set both
+                     * ends to the same value and always set it inline, since a
+                     * class-only change lands a render late. */
+                    el_tog->SetProperty("background-color",
+                                        state.rows[i].toggle_on ? "#2ecc71" : "#ffffff14");
+                    el_tog->SetProperty("border-color",
+                                        state.rows[i].toggle_on ? "#2ecc71" : "#ffffff29");
+                }
                 if (el_badge) {
-                    if (state.rows[i].badge.empty()) {
+                    if (is_toggle || is_option || state.rows[i].badge.empty()) {
                         el_badge->SetProperty("display", "none");
                     } else {
                         el_badge->SetProperty("display", "inline-block");
@@ -1962,7 +2478,8 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                     }
                 }
                 if (el_chev) {
-                    el_chev->SetProperty("display", state.rows[i].has_chevron ? "inline-block" : "none");
+                    const bool show_chev = state.rows[i].has_chevron && !is_toggle && !is_option;
+                    el_chev->SetProperty("display", show_chev ? "inline-block" : "none");
                     SetImageColor(el_chev, is_focused
                         ? to_hex_rgb(m_theme.accent)
                         : to_hex_rgb(m_theme.text_secondary));
@@ -1977,17 +2494,7 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
 void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_settings_doc || !framebuffer) return;
 
-    if (m_launch_doc) m_launch_doc->Hide();
-    if (m_list_doc) m_list_doc->Hide();
-    if (m_browser_doc) m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc) m_playback_doc->Hide();
-    if (m_dialog_doc) m_dialog_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_settings_doc->Show();
+    ShowOnlyScreen(m_settings_doc);
 
     /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
     if (m_nav_doc) {
@@ -1998,6 +2505,65 @@ void EvoRmlApp::RenderSettings(uint32_t* framebuffer, int width, int height) {
     }
 
     RenderCachedScreen(6, framebuffer, width, height);
+}
+
+void EvoRmlApp::UpdateAboutState(const EvoAboutState& state) {
+    if (!m_initialized || !m_about_doc) return;
+    if (state == m_last_about && m_theme_generation == m_theme_gen_about) return;
+    m_theme_gen_about = m_theme_generation;
+    m_frame_dirty = true;
+
+    m_last_about = state;
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-title"))
+        el->SetInnerRML(state.app_name);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-version-pill")) {
+        std::string v = state.version.empty() ? ("v" + m_version) : state.version;
+        el->SetInnerRML(v);
+        el->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+        el->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+    }
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-build-tag"))
+        el->SetInnerRML(state.build_tag);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-tagline"))
+        el->SetInnerRML(state.tagline);
+
+    if (Rml::Element* el = m_about_doc->GetElementById("about-themes-detail"))
+        el->SetInnerRML(state.themes_info);
+
+    if (Rml::Element* el_ind = m_about_doc->GetElementById("header-indicator"))
+        el_ind->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+
+    if (Rml::Element* btn = m_about_doc->GetElementById("action-changelog")) {
+        bool focused = state.action_focused;
+        btn->SetClass("btn-focused", focused);
+        if (focused) {
+            btn->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+            btn->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+        } else {
+            btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
+            btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
+        }
+    }
+}
+
+void EvoRmlApp::RenderAbout(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_about_doc || !framebuffer) return;
+
+    ShowOnlyScreen(m_about_doc);
+
+    /* Nav rail rendered in the same pass — shown/hidden by UpdateNavState */
+    if (m_nav_doc) {
+        if (m_last_nav.visible)
+            m_nav_doc->Show();
+        else
+            m_nav_doc->Hide();
+    }
+
+    RenderCachedScreen(7, framebuffer, width, height);
 }
 
 void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
@@ -2094,17 +2660,7 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
 void EvoRmlApp::RenderSubtitles(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_subtitles_doc || !framebuffer) return;
 
-    if (m_launch_doc) m_launch_doc->Hide();
-    if (m_list_doc) m_list_doc->Hide();
-    if (m_browser_doc) m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc) m_playback_doc->Hide();
-    if (m_dialog_doc) m_dialog_doc->Hide();
-    if (m_settings_doc) m_settings_doc->Hide();
-    if (m_mediainfo_doc) m_mediainfo_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_subtitles_doc->Show();
+    ShowOnlyScreen(m_subtitles_doc);
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
@@ -2218,23 +2774,16 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
 
     Rml::Element* el_rn = m_mediainfo_doc->GetElementById("spec-renderer");
     if (el_rn) el_rn->SetInnerRML(state.renderer);
+
+    Rml::Element* el_dc = m_mediainfo_doc->GetElementById("spec-decoder");
+    if (el_dc) el_dc->SetInnerRML(state.decoder);
 }
 
 void EvoRmlApp::RenderMediaInfo(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_context || !m_mediainfo_doc || !framebuffer) return;
 
-    if (m_launch_doc) m_launch_doc->Hide();
-    if (m_list_doc) m_list_doc->Hide();
-    if (m_browser_doc) m_browser_doc->Hide();
-    if (m_changelog_doc) m_changelog_doc->Hide();
-    if (m_playback_doc) m_playback_doc->Hide();
-    if (m_dialog_doc) m_dialog_doc->Hide();
-    if (m_settings_doc) m_settings_doc->Hide();
-    if (m_subtitles_doc) m_subtitles_doc->Hide();
-    if (m_nav_doc) m_nav_doc->Hide();
-    if (m_reader_doc)    m_reader_doc->Hide();
-    if (m_surround_doc)  m_surround_doc->Hide();
-    m_mediainfo_doc->Show();
+    ShowOnlyScreen(m_mediainfo_doc);
+    if (m_nav_doc) m_nav_doc->Hide();   /* sits over the film */
 
     m_render->SetFramebuffer(framebuffer);
     m_render->SetDimensions(width, height);
@@ -2250,8 +2799,18 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     m_frame_dirty = true;
     m_last_nav = state;
 
+    /* FPS pill. Set inline, like every other state in this file that has to be
+     * correct on the frame it changes. */
+    if (Rml::Element* el_pill = m_nav_doc->GetElementById("nav-fps-pill")) {
+        el_pill->SetProperty("display", state.show_fps ? "block" : "none");
+        if (state.show_fps) {
+            if (Rml::Element* el_v = m_nav_doc->GetElementById("nav-fps-value"))
+                el_v->SetInnerRML(std::to_string(state.fps) + " FPS");
+        }
+    }
+
     /* ---- collapsed icon rail ---- */
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 5; i++) {
         std::string item_id  = "nav-item-" + std::to_string(i);
         std::string bar_id   = "nav-bar-"  + std::to_string(i);
         std::string icon_id  = "nav-icon-" + std::to_string(i);
@@ -2285,10 +2844,10 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
 
         /* Icon glyph: the cursor pill fills solid accent, so the glyph has to
          * flip to the darkest theme colour there or it disappears into it -
-         * same trick as the settings/list focused badges. Section 4 (Emby) is
+         * same trick as the settings/list focused badges. Section 2 (Emby) is
          * a trademark, excluded from the icon swap, so it keeps its own baked
          * colour rather than being retinted. */
-        if (el_icon && i != 4) {
+        if (el_icon && i != 2) {
             if (is_cursor)
                 SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
             else if (is_active)
@@ -2311,7 +2870,7 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
     if (scrim)    scrim->SetProperty("display",    state.rail_focused ? "block" : "none");
     if (expanded) expanded->SetProperty("display", state.rail_focused ? "block" : "none");
 
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 5; i++) {
         std::string exp_id  = "nav-exp-"       + std::to_string(i);
         std::string lbl_id  = "nav-exp-label-" + std::to_string(i);
         std::string icon_id = "nav-exp-icon-"  + std::to_string(i);
@@ -2333,20 +2892,256 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_exp->SetProperty("border-color", "#ffffff");
             el_exp->SetProperty("border-width", "1.5px");
             if (el_lbl) el_lbl->SetProperty("color", "#060b16");
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.bg_bottom));
         } else if (is_active) {
             el_exp->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
             el_exp->SetProperty("border-color", to_hex_rgba(m_theme.border));
             el_exp->SetProperty("border-width", "1px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_primary));
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.accent));
         } else {
             el_exp->SetProperty("background-color", "transparent");
             el_exp->SetProperty("border-color", "transparent");
             el_exp->SetProperty("border-width", "0px");
             if (el_lbl) el_lbl->SetProperty("color", to_hex_rgb(m_theme.text_secondary));
-            if (el_icon && i != 4) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
+            if (el_icon && i != 2) SetImageColor(el_icon, to_hex_rgb(m_theme.text_secondary));
         }
     }
+}
+
+/* ==========================================================================
+ * Toast notifications (#75)
+ * ========================================================================== */
+
+void EvoRmlApp::UpdateToastState(const EvoToastState& state) {
+    if (!m_initialized || !m_toast_doc) return;
+
+    if (!state.visible) {
+        m_toast_doc->Hide();
+        return;
+    }
+
+    /* Content only actually changes at the start of a toast (evo_toast.c
+     * fires a fresh title/message/kind); alpha/slide tick every frame while
+     * it's up. Diffing content separately from the per-frame animation
+     * values avoids the SetInnerRML/SetAttribute calls (a real relayout)
+     * firing every frame for no reason - the animation values below are
+     * cheap inline-style pushes, fine to always re-apply. */
+    bool content_changed = (state.title != m_toast_last_title ||
+                            state.message != m_toast_last_message ||
+                            state.kind != m_toast_last_kind);
+
+    if (content_changed) {
+        m_toast_last_title = state.title;
+        m_toast_last_message = state.message;
+        m_toast_last_kind = state.kind;
+
+        Rml::Element* el_card = m_toast_doc->GetElementById("toast-card");
+        Rml::Element* el_rail = m_toast_doc->GetElementById("toast-rail");
+        Rml::Element* el_icon = m_toast_doc->GetElementById("toast-icon");
+        Rml::Element* el_title = m_toast_doc->GetElementById("toast-title");
+        Rml::Element* el_msg = m_toast_doc->GetElementById("toast-message");
+
+        if (el_title) el_title->SetInnerRML(state.title.empty() ? "EVO PLAYER" : state.title);
+        if (el_msg) {
+            el_msg->SetInnerRML(state.message);
+            el_msg->SetProperty("display", state.message.empty() ? "none" : "block");
+        }
+
+        /* Same icon/colour pairing evo_widget_toast used: info and error
+         * share the "about" glyph and differ only by colour, ok borrows the
+         * resume glyph, tech gets its own (previously tech rendered
+         * identically to info - #75 gives it the muted styling the issue
+         * asked for). EvoThemeColors carries no "danger" channel (nothing
+         * else in the RmlUi bridge needed one yet), so error uses a fixed
+         * red matching the four legacy themes' near-identical danger colours
+         * rather than threading a new field through SetTheme for this alone. */
+        static const char* kDangerRed = "#ff5c5c";
+        std::string accent;
+        std::string icon_path;
+        switch (state.kind) {
+            case 1: /* tech */
+                accent = to_hex_rgb(m_theme.text_muted);
+                icon_path = "../icons/icon_developer_tools.png";
+                break;
+            case 2: /* error */
+                accent = kDangerRed;
+                icon_path = "../icons/icon_about_support.png";
+                break;
+            case 3: /* ok */
+                accent = to_hex_rgb(m_theme.accent_alt);
+                icon_path = "../icons/icon_resume.png";
+                break;
+            default: /* info */
+                accent = to_hex_rgb(m_theme.accent);
+                icon_path = "../icons/icon_about_support.png";
+                break;
+        }
+
+        if (el_card) el_card->SetClass("toast-tech", state.kind == 1);
+        if (el_rail) el_rail->SetProperty("background-color", accent);
+        if (el_icon) {
+            el_icon->SetAttribute("src", icon_path);
+            SetImageColor(el_icon, accent);
+        }
+    }
+
+    Rml::Element* el_card = m_toast_doc->GetElementById("toast-card");
+    if (el_card) {
+        double opacity = state.alpha / 255.0;
+        if (opacity < 0.0) opacity = 0.0;
+        if (opacity > 1.0) opacity = 1.0;
+        el_card->SetProperty("opacity", std::to_string(opacity));
+        el_card->SetProperty("transform",
+            "translateX(" + std::to_string(state.slide) + "px)");
+    }
+
+    m_toast_doc->Show();
+}
+
+void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_toast_context || !m_toast_doc || !framebuffer) return;
+    if (!m_toast_doc->IsVisible()) return;
+
+    /* Own context: no other document to hide, and nothing here touches
+     * m_frame_dirty / the RenderCachedScreen surface cache for whichever
+     * menu screen is underneath - see the comment on EvoToastState. */
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_toast_context->Update();
+    m_render->FrameBegin();
+    m_toast_context->Render();
+    m_render->FrameEnd();
+#if defined(EVO_AGC_DEVICE)
+    m_drew = true;
+#endif
+}
+
+/* ---- #81: virtual keyboard modal ------------------------------------- */
+
+static std::string kb_esc(const char* s) {
+    std::string o;
+    if (!s) return o;
+    for (const char* p = s; *p; ++p) {
+        switch (*p) {
+            case '&': o += "&amp;"; break;
+            case '<': o += "&lt;";  break;
+            case '>': o += "&gt;";  break;
+            default:  o += *p;      break;
+        }
+    }
+    return o;
+}
+
+void EvoRmlApp::UpdateKeyboard(const evo_keyboard_params_t* p) {
+    if (!m_initialized || !m_keyboard_doc || !p) return;
+
+    if (!p->visible) {
+        if (m_keyboard_doc->IsVisible()) {
+            m_keyboard_doc->Hide();
+            m_frame_dirty = true;   /* force the screen underneath to redraw clean */
+        }
+        m_kb_sig.clear();
+        return;
+    }
+
+    /* cheap change gate */
+    std::string sig;
+    sig.reserve(160);
+    sig += p->native_only ? "N" : "V";
+    sig += p->title ? p->title : "";     sig += '\x1f';
+    sig += p->text ? p->text : "";       sig += '\x1f';
+    sig += p->mode_label ? p->mode_label : "";
+    for (int i = 0; i < 4; i++) { sig += '\x1f'; sig += (p->rows[i] ? p->rows[i] : ""); }
+    sig += char('0' + (p->focus_row & 7));
+    sig += char('0' + (p->focus_col & 15));
+    sig += p->show_caret ? '1' : '0';
+    { char b[24]; std::snprintf(b, sizeof b, "|%d/%d", p->len, p->max_len); sig += b; }
+
+    if (!m_keyboard_doc->IsVisible()) m_keyboard_doc->Show();
+    if (sig == m_kb_sig) return;
+    m_kb_sig = sig;
+    m_frame_dirty = true;   /* a keystroke / focus move -> redraw the screen + modal */
+
+    Rml::Element* panel = m_keyboard_doc->GetElementById("kb-panel");
+    if (panel) panel->SetProperty("display", p->native_only ? "none" : "flex");
+    if (p->native_only) return;
+
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-title"))
+        e->SetInnerRML(kb_esc(p->title && p->title[0] ? p->title : "ENTER TEXT"));
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-mode"))
+        e->SetInnerRML(p->mode_label ? p->mode_label : "");
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-text"))
+        e->SetInnerRML(kb_esc(p->text));
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-caret"))
+        e->SetClass("hidden", !p->show_caret);
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-count")) {
+        char b[24]; std::snprintf(b, sizeof b, "%d / %d", p->len, p->max_len);
+        e->SetInnerRML(b);
+    }
+
+    for (int r = 0; r < 4; r++) {
+        const char* row = p->rows[r] ? p->rows[r] : "";
+        int rl = (int)std::strlen(row);
+        for (int c = 0; c < 10; c++) {
+            char id[8]; std::snprintf(id, sizeof id, "k%d", r * 10 + c);
+            Rml::Element* key = m_keyboard_doc->GetElementById(id);
+            if (!key) continue;
+            char ch[2] = { c < rl ? row[c] : ' ', 0 };
+            key->SetInnerRML(kb_esc(ch));
+            key->SetClass("focused", p->focus_row == r && p->focus_col == c);
+        }
+    }
+    for (int a = 0; a < 6; a++) {
+        char id[8]; std::snprintf(id, sizeof id, "a%d", a);
+        Rml::Element* act = m_keyboard_doc->GetElementById(id);
+        if (!act) continue;
+        if (p->action_labels[a]) act->SetInnerRML(p->action_labels[a]);
+        act->SetClass("focused", p->focus_row == 4 && p->focus_col == a);
+    }
+}
+
+void EvoRmlApp::RenderKeyboard(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_keyboard_context || !m_keyboard_doc || !framebuffer) return;
+    if (!m_keyboard_doc->IsVisible()) return;
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_keyboard_context->Update();
+    m_render->FrameBegin();
+    m_keyboard_context->Render();
+    m_render->FrameEnd();
+#if defined(EVO_AGC_DEVICE)
+    m_drew = true;
+#endif
+}
+
+void EvoRmlApp::UpdateDebugOverlay(int fps, bool visible) {
+    if (!m_initialized || !m_debug_doc) return;
+    m_debug_visible = visible;
+    if (!visible) {
+        if (m_debug_doc->IsVisible()) m_debug_doc->Hide();
+        m_debug_last_fps = -1;
+        return;
+    }
+    if (!m_debug_doc->IsVisible()) m_debug_doc->Show();
+    if (fps != m_debug_last_fps) {
+        m_debug_last_fps = fps;
+        if (Rml::Element* e = m_debug_doc->GetElementById("debug-fps"))
+            e->SetInnerRML(std::to_string(fps) + " FPS");
+    }
+}
+
+void EvoRmlApp::RenderDebugOverlay(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_debug_context || !m_debug_doc || !framebuffer) return;
+    if (!m_debug_doc->IsVisible()) return;
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_debug_context->Update();
+    m_render->FrameBegin();
+    m_debug_context->Render();
+    m_render->FrameEnd();
+#if defined(EVO_AGC_DEVICE)
+    m_drew = true;
+#endif
 }
 

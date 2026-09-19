@@ -1,0 +1,179 @@
+; EVO Player - RmlUi 2D screen pipeline, AMD LLPC .pipe form.
+;
+; Replaces the GLSL + opengnm-psbc command-line build. The point of this format
+; is [ResourceMapping]: the user-data layout lives here, next to the shaders it
+; describes, instead of in argv of a Python driver. The two hardware-only bugs
+; that motivated the move were both omissions in that argv - a vertex stage
+; compiled with no descriptor binding for its own uniform block, and an ESGS
+; ring itemsize the wrapper never overrode - and neither is expressible here.
+;
+; Vertex layout is Rml::Vertex: vec2 position, 4-byte BGRA colour, vec2 uv,
+; stride 20. Keep [VertexInputState] and evo_rmlui_render_agc.cpp's V# in step.
+
+[Version]
+version = 65
+
+[VsGlsl]
+#version 450
+
+layout(location = 0) in vec2 in_position;
+layout(location = 1) in vec4 in_color;
+layout(location = 2) in vec2 in_uv;
+
+layout(set = 0, binding = 0, std140) uniform ScreenConstants {
+    mat4 projection;
+    vec4 translation;
+    /* Rounded-box clip in document pixels: xy = top-left, zw = bottom-right. */
+    vec4 clip_rect;
+    /* y != 0 enables the clip. */
+    vec4 clip_params;
+    /* Corner radii: top-left, top-right, bottom-right, bottom-left. */
+    vec4 clip_radii;
+} screen;
+
+layout(location = 0) out vec2 out_uv;
+layout(location = 1) out vec4 out_color;
+layout(location = 2) flat out vec4 out_clip_rect;
+layout(location = 3) flat out vec4 out_clip_params;
+layout(location = 4) flat out vec4 out_clip_radii;
+
+void main() {
+    vec2 pos = in_position + screen.translation.xy;
+    gl_Position = screen.projection * vec4(pos, 0.0, 1.0);
+    out_uv = in_uv;
+    out_color = in_color;
+    out_clip_rect = screen.clip_rect;
+    out_clip_params = screen.clip_params;
+    out_clip_radii = screen.clip_radii;
+}
+
+[VsInfo]
+entryPoint = main
+
+[FsGlsl]
+#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D image;
+
+layout(location = 0) in vec2 in_uv;
+layout(location = 1) in vec4 in_color;
+layout(location = 2) flat in vec4 in_clip_rect;
+layout(location = 3) flat in vec4 in_clip_params;
+layout(location = 4) flat in vec4 in_clip_radii;
+
+layout(location = 0) out vec4 out_color;
+
+/*
+ * Rounded-box clipping, done here rather than with the stencil buffer or the
+ * scissor register.
+ *
+ * RmlUi asks for a clip mask whenever a container has a border-radius, and it
+ * is the ONLY clipping it asks for on an absolutely-positioned child - it does
+ * not shrink the scissor, because such a child adds nothing to the scroll
+ * extent (ElementUtilities::GetClippingRegion). So the mask has to work, and
+ * neither the stencil path nor the scissor register is proven on this
+ * hardware. The fragment shader is: it is drawing the whole UI already.
+ *
+ * Signed distance to a rounded box, negative inside. gl_FragCoord is in the
+ * same document-pixel space as clip_rect: the projection maps 0..width to
+ * -1..1 with y flipped, and Vulkan's fragment origin is top-left.
+ */
+void main() {
+    vec4 texel = texture(image, in_uv) * in_color;
+
+    if (in_clip_params.y != 0.0) {
+        vec2 half_size = (in_clip_rect.zw - in_clip_rect.xy) * 0.5;
+        vec2 centre = in_clip_rect.xy + half_size;
+        vec2 q = gl_FragCoord.xy - centre;
+
+        /* Pick this fragment's corner: x=TL, y=TR, z=BR, w=BL. */
+        float r = (q.x < 0.0) ? ((q.y < 0.0) ? in_clip_radii.x : in_clip_radii.w)
+                              : ((q.y < 0.0) ? in_clip_radii.y : in_clip_radii.z);
+        r = min(r, min(half_size.x, half_size.y));
+
+        vec2 d = abs(q) - (half_size - vec2(r));
+        float dist = length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0) - r;
+
+        /* One pixel of feathering, so the corners are not stair-stepped.
+         * Rml::Vertex carries ColourbPremultiplied, so coverage scales all
+         * four channels - scaling alpha alone would leave the colour too
+         * bright along every clipped edge. */
+        float coverage = 1.0 - smoothstep(-0.5, 0.5, dist);
+        if (coverage <= 0.0)
+            discard;
+        texel *= coverage;
+    }
+
+    out_color = texel;
+}
+
+[FsInfo]
+entryPoint = main
+
+[ResourceMapping]
+; visibility 2 = vertex stage, 64 = fragment stage.
+; node[0]: VS user dword 0 -> table holding the ScreenConstants buffer (V#, 4 dwords)
+; node[1]: VS user dword 1 -> the vertex buffer table (IndirectUserDataVaPtr)
+; node[2]: FS user dword 0 -> table holding the combined image+sampler (12 dwords)
+userDataNode[0].visibility = 2
+userDataNode[0].type = DescriptorTableVaPtr
+userDataNode[0].offsetInDwords = 0
+userDataNode[0].sizeInDwords = 1
+userDataNode[0].next[0].type = DescriptorConstBuffer
+userDataNode[0].next[0].offsetInDwords = 0
+userDataNode[0].next[0].sizeInDwords = 4
+userDataNode[0].next[0].set = 0
+userDataNode[0].next[0].binding = 0
+userDataNode[1].visibility = 2
+userDataNode[1].type = IndirectUserDataVaPtr
+userDataNode[1].offsetInDwords = 1
+userDataNode[1].sizeInDwords = 1
+userDataNode[1].indirectUserDataCount = 1
+userDataNode[2].visibility = 64
+userDataNode[2].type = DescriptorTableVaPtr
+userDataNode[2].offsetInDwords = 0
+userDataNode[2].sizeInDwords = 1
+userDataNode[2].next[0].type = DescriptorCombinedTexture
+userDataNode[2].next[0].offsetInDwords = 0
+userDataNode[2].next[0].sizeInDwords = 12
+userDataNode[2].next[0].set = 1
+userDataNode[2].next[0].binding = 0
+
+[GraphicsPipelineState]
+topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+nggState.enableNgg = 1
+nggState.enableGsUse = 0
+; The scanout word is 0xAABBGGRR, which on little-endian is the byte sequence
+; R,G,B,A - i.e. R8G8B8A8, despite "BGRA" being the usual shorthand for it.
+; Declaring B8G8R8A8 here made LLPC swizzle red and blue on export: the theme's
+; cyan-blue (0,150,255) came out amber (255,150,0). With the vertex attribute
+; also declared BGRA those two swaps cancelled for vertex colours and only
+; textures looked wrong, which is why fixing the attribute alone made ALL the
+; colours wrong instead of fixing them. Export, attribute and the texture T#
+; (FORMAT_8_8_8_8 with XYZW selects) now all agree on R,G,B,A.
+colorBuffer[0].format = VK_FORMAT_R8G8B8A8_UNORM
+colorBuffer[0].channelWriteMask = 15
+colorBuffer[0].blendEnable = 0
+
+[VertexInputState]
+binding[0].binding = 0
+binding[0].stride = 20
+binding[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+attribute[0].location = 0
+attribute[0].binding = 0
+attribute[0].format = VK_FORMAT_R32G32_SFLOAT
+attribute[0].offset = 0
+; Rml::Vertex::colour is Rml::Colourb, declared "ColourType red, green, blue,
+; alpha" - so the four bytes at offset 8 are R,G,B,A in memory. Declaring this
+; B8G8R8A8 (as the old psbc command line did) makes the GPU read them as B,G,R,A
+; and swaps red with blue on every vertex colour. The colour TARGET below stays
+; B8G8R8A8 because the PS5 scanout really is 0xAABBGGRR; that swizzle belongs on
+; the export, not on the input.
+attribute[1].location = 1
+attribute[1].binding = 0
+attribute[1].format = VK_FORMAT_R8G8B8A8_UNORM
+attribute[1].offset = 8
+attribute[2].location = 2
+attribute[2].binding = 0
+attribute[2].format = VK_FORMAT_R32G32_SFLOAT
+attribute[2].offset = 12

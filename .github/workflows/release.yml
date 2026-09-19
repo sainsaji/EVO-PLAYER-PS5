@@ -1,11 +1,16 @@
 # =============================================================================
 # EVO Player release
 #
-# Builds the player in the same pinned Docker environment developers use, then
-# publishes the payload and an installable homebrew bundle.
+# Builds the app module in the same pinned Docker environment developers use
+# locally, PFS-packs it into a single PPSA99039.ffpfsc image
+# (scripts/package-app.sh --ffpfsc), and publishes that as a GitHub release.
+# This is the ONLY hardware path (see CLAUDE.md / docs/tooling.md) — the old
+# ELF/Media-tile/hbldr release route reached none of EVO's headline features
+# (no sceVideodec2 hardware decode, no sceAgc GPU present, no real user
+# session) and was replaced here (#36).
 #
 # Triggered by pushing a tag:
-#     git tag v0.0.1 && git push origin v0.0.1
+#     git tag v0.8.0 && git push origin v0.8.0
 # or manually from the Actions tab.
 #
 # The PS5 is obviously not present on a runner, so nothing here is
@@ -20,11 +25,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.0.1)"
+        description: "Tag to release (e.g. v0.8.0)"
         required: true
 
 permissions:
   contents: write
+
+env:
+  TITLE_ID: PPSA99039
 
 jobs:
   release:
@@ -46,8 +54,14 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Releasing ${TAG}"
 
-      # The VERSION file and the tag must agree, otherwise the player reports a
-      # different version than the release it came from.
+      # The VERSION file and the tag must agree, otherwise the player reports
+      # a different version than the release it came from. param.json's own
+      # contentVersion/masterVersion format is validated independently by
+      # package-app.sh (step 1) on every build below; a formal VERSION-tag ->
+      # contentVersion mapping is still an open decision (#36 §3) and
+      # deliberately not invented here, since the current contentVersion
+      # (01.000.001) predates this pipeline and forcing a new mapping now
+      # would fail every past-tagged release retroactively for no benefit.
       - name: Check VERSION matches the tag
         run: |
           FILE_VER="$(tr -d '[:space:]' < projects/evoplayer/VERSION)"
@@ -57,6 +71,15 @@ jobs:
             exit 1
           fi
           echo "VERSION $FILE_VER matches tag"
+
+      # Pinned to the same revision setup-pfs-tool.sh checks out - not
+      # essential (the script re-fetches on a cache miss), just saves the
+      # clone + pip-install on every release run.
+      - name: Cache MkPFS toolchain
+        uses: actions/cache@v4
+        with:
+          path: .deps/MkPFS
+          key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -69,81 +92,80 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Builds the player AND the tile payloads - build-media-tile.sh calls
-      # build-evoplayer.sh itself, so the player it embeds is always the one
-      # just built. There is deliberately no separate player step: two steps
-      # meant two chances to embed a stale build, and the tile carries the
-      # player inside it where nothing downstream can see the version.
-      #
-      # The tile installer is the file most people actually run. EVOPlayer.elf
-      # is the bare player and needs hbldr for a display plane, so sending it
-      # straight to elfldr - which is what every payload manager does - starts
-      # it headless and nothing appears. That was reported as "the release does
-      # not work", and it was: we shipped the wrong ELF.
-      - name: Build the player and the Media tile payloads
+      # --ffpfsc also runs the plain (no-flag) app-module build first - see
+      # scripts/package-app.sh - so this is the only build step needed. No
+      # --usb-remote / --agc-probe / --breadcrumbs: a release ships the same
+      # defaults docs/tooling.md documents as the normal deploy.
+      - name: Build and PFS-pack the app module
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release \
-            bash -lc 'bash ./scripts/build-media-tile.sh'
+            evo-player/ps5-dev:release bash -lc './scripts/package-app.sh --ffpfsc'
 
-      - name: Build the sample suite
+      # Independent checks on top of what package-app.sh already asserts
+      # while building (titleId/version format, MkPFS "Errors: 0") - a
+      # regression in package-app.sh's own checks should not be able to hide
+      # behind a green build. Checks the FOLDER copy of eboot.bin, which
+      # tooling.md documents as byte-identical to the one inside the
+      # .ffpfsc - the same container, just packed differently.
+      - name: Verify the release image
         run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release \
-            bash -lc 'bash ./scripts/build.sh'
-
-      - name: Package installable homebrew bundle
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release \
-            bash -lc 'bash ./scripts/package-pkg.sh --format homebrew \
-                        --title "EVO Player" output/elf/EVOPlayer.elf'
-
-      - name: Verify the payload is a PS5 ELF
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
+          cat > /tmp/verify_param.py <<'PY'
+          import json, os, sys
+          appdir = sys.argv[1]
+          title_id = sys.argv[2]
+          p = json.load(open(os.path.join(appdir, "sce_sys/param.json")))
+          assert p["titleId"] == title_id, f'titleId is {p["titleId"]!r}, expected {title_id!r}'
+          print(f'param.json ok: titleId={p["titleId"]!r} '
+                f'contentVersion={p["contentVersion"]!r} masterVersion={p["masterVersion"]!r}')
+          PY
+          docker run --rm -v "$PWD:/workspace" -v /tmp/verify_param.py:/tmp/verify_param.py \
+            -w /workspace -e TITLE_ID="${{ env.TITLE_ID }}" \
             evo-player/ps5-dev:release bash -lc '
               set -e
-              for f in output/elf/EVOPlayer.elf \
-                       output/elf/EVOPlayer_MediaLauncher.elf \
-                       output/elf/EVOPlayer_UninstallTile.elf; do
-                [ -f "$f" ] || { echo "missing $f"; exit 1; }
-                file "$f" | grep -q "ELF 64-bit LSB.*x86-64" \
-                  || { echo "$f is not a PS5 ELF"; exit 1; }
-                llvm-readelf -l "$f" | grep -q "/lib64/ld-linux" \
-                  && { echo "$f links the host loader - wrong compiler"; exit 1; }
-                echo "ok: $f  $(stat -c %s "$f") bytes"
-              done
+              IMG="output/app/${TITLE_ID}.ffpfsc"
+              APPDIR="output/app/${TITLE_ID}"
 
-              # The launcher embeds the player, so it must be larger. A
-              # launcher that is suddenly small means the .incbin picked up
-              # nothing - which ships a tile that opens to a black screen.
-              p=$(stat -c %s output/elf/EVOPlayer.elf)
-              l=$(stat -c %s output/elf/EVOPlayer_MediaLauncher.elf)
-              [ "$l" -gt "$p" ] || {
-                echo "launcher ($l) not larger than player ($p) - embed failed"
-                exit 1
-              }
-              echo "ok: launcher embeds the player ($l > $p)"
+              [ -f "$IMG" ] || { echo "missing $IMG - MkPFS pack failed"; exit 1; }
+              SZ="$(stat -c %s "$IMG")"
+              [ "$SZ" -gt 1000000 ] || { echo "$IMG is suspiciously small ($SZ bytes)"; exit 1; }
+
+              # eboot.bin is FSELF-wrapped (fake-signed) - `file`/readelf see
+              # its custom container header, not an ELF header, and report
+              # "data". Check the pre-sign ELF that package-app.sh keeps
+              # around for the actual "is this a real, non-host PS5 binary"
+              # question; check the signed eboot.bin itself only for
+              # container integrity.
+              PRESIGN="output/app/.build/eboot.elf"
+              file "$PRESIGN" | grep -q "ELF 64-bit LSB.*x86-64" \
+                || { echo "$PRESIGN is not a PS5 ELF"; exit 1; }
+              llvm-readelf -l "$PRESIGN" | grep -q "/lib64/ld-linux" \
+                && { echo "$PRESIGN links the HOST loader - wrong compiler"; exit 1; }
+
+              F="$APPDIR/eboot.bin"
+              output/app/.build/host/ps5-native-tool self --inspect --file "$F" \
+                | tee /dev/stderr | grep -q "integrity: valid" \
+                || { echo "$F did not report a valid signed container"; exit 1; }
+
+              python3 /tmp/verify_param.py "$APPDIR" "$TITLE_ID"
+
+              [ -f "$APPDIR/sce_module/libc.prx" ] || { echo "missing sce_module/libc.prx"; exit 1; }
+              [ "$(stat -c %s "$APPDIR/sce_module/libc.prx")" -gt 0 ] || { echo "libc.prx is empty"; exit 1; }
+
+              # Guards against an empty asset bundle - both the loose folder
+              # copy AND #60s embedded evo_rmlui_bundle_data.cpp landing empty
+              # would otherwise ship a UI-less player with everything else
+              # green.
+              ASSET_BYTES="$(du -sb "$APPDIR/assets" | cut -f1)"
+              [ "$ASSET_BYTES" -gt 1000000 ] || { echo "assets/ is suspiciously small ($ASSET_BYTES bytes)"; exit 1; }
+
+              echo "ok: $IMG  ${SZ} bytes, integrity valid, assets ${ASSET_BYTES} bytes"
             '
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
           T="${{ steps.ver.outputs.tag }}"
-
-          # Named so the right file is obvious in the releases list. The tile
-          # installer is what a payload manager should be pointed at; the bare
-          # player is kept for the homebrew/websrv route, suffixed so nobody
-          # reaches for it by mistake.
-          cp output/elf/EVOPlayer_MediaLauncher.elf "dist/EVOPlayer-${T}-InstallTile.elf"
-          cp output/elf/EVOPlayer_UninstallTile.elf "dist/EVOPlayer-${T}-UninstallTile.elf"
-          cp output/elf/EVOPlayer.elf               "dist/EVOPlayer-${T}-player-only.elf"
-
-          if [ -f output/pkg/EVOPlayer-homebrew.zip ]; then
-            cp output/pkg/EVOPlayer-homebrew.zip \
-               "dist/EVOPlayer-${T}-homebrew.zip"
-          fi
+          cp "output/app/${TITLE_ID}.ffpfsc" "dist/EVOPlayer-${T}-${TITLE_ID}.ffpfsc"
           ( cd dist && sha256sum * > SHA256SUMS.txt )
           ls -la dist
 
@@ -176,45 +198,38 @@ jobs:
           cat >> dist/NOTES.md <<'EOF'
           ## Install — start here
 
-          **Download `EVOPlayer-*-InstallTile.elf`.** That is the one to run.
+          **Download `EVOPlayer-*-PPSA99039.ffpfsc`.** That is the whole app
+          module, PFS-packed and ready to mount — no loose files, no second
+          download.
 
-          1. Jailbreak the console (12.70) and start `ps5-payload-elfldr`.
-          2. Copy `EVOPlayer-*-InstallTile.elf` to a USB stick.
-          3. Start it from your **payload manager** — the on-console one,
-             typically at `http://<ps5>:8084`. Anything that sends an ELF to
-             elfldr works.
-          4. It says **"EVO Player ready in Media"**. Open EVO Player from the
-             console's **Media** row.
+          1. Jailbreak the console (firmware 12.70) and run a jailbreak
+             daemon (PS5-Lapy-JB-Daemon or etaHEN) — re-run it after every
+             reboot.
+          2. Copy the `.ffpfsc` to `/data/homebrew/PPSA99039.ffpfsc` on the
+             console (FTP, or `PS5_HOST=<ip> ./scripts/deploy-app.sh --ffpfsc`
+             from a checkout).
+          3. **ShadowMountPlus** auto-mounts + registers it on the `.ffpfsc`
+             change and can auto-launch it; otherwise mount it and launch
+             **EVO Player from the Games row**.
 
-          That is the whole install. **No websrv, no FTP, nothing to extract**,
-          and no second device beyond whatever runs your payload manager — the
-          tile installer carries the player inside it.
-
-          > **Keep the payload running.** It is resident by design — it is what
-             starts the player when you open the tile. Your payload manager may
-             show it as still running; that is correct.
-          >
-          > **Re-run it after every reboot**, along with the jailbreak.
-
-          ### Which file is which
-
-          | File | Use it for |
-          |---|---|
-          | `EVOPlayer-*-InstallTile.elf` | **Normal install.** Payload manager → tile in Media |
-          | `EVOPlayer-*-UninstallTile.elf` | Removes the tile completely |
-          | `EVOPlayer-*-homebrew.zip` | The websrv route: extract to a USB stick as `/homebrew/EVOPlayer/`, launch from `http://<ps5>:8080` |
-          | `EVOPlayer-*-player-only.elf` | The bare player. **Do not send this to a payload manager** — with `elfldr` alone it runs headless with no display plane and nothing appears. It needs `hbldr`, which the tile installer and websrv provide |
+          Never stack launches — PS button to close a running EVO before
+          relaunching (deploying/launching over a live instance risks a
+          console kernel panic).
 
           ## Requirements
 
           * PS5 on firmware **12.70**, jailbroken (re-run after every reboot)
+          * ShadowMountPlus (or another PFS-mount tool that understands
+            `.ffpfsc`)
           * A USB stick for media
 
           ## Verification
 
-          Built reproducibly in CI from the pinned toolchain (clang 18.1.3,
-          PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so these
-          binaries are not hardware-tested.** Checksums in `SHA256SUMS.txt`.
+          Built reproducibly in CI from the pinned toolchain (clang 18,
+          PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so this
+          image is not hardware-tested** — it is exactly what
+          `scripts/package-app.sh --ffpfsc` produces locally. Checksum in
+          `SHA256SUMS.txt`.
 
           Licensed GPL-3.0-or-later. Derived from ProsperoPlayer; see NOTICE.
           EOF
@@ -229,6 +244,5 @@ jobs:
           prerelease: false
           make_latest: true
           files: |
-            dist/EVOPlayer-*.elf
-            dist/EVOPlayer-*-homebrew.zip
+            dist/EVOPlayer-*.ffpfsc
             dist/SHA256SUMS.txt

@@ -1,0 +1,91 @@
+ ### 1. High-Value / Immediately Usable in EVO Player
+
+  #### A. PS5 Pro ("Trinity") Hardware Detection
+
+  • NIDs:
+      • yu17wG8L5FI → sceKernelHasTrinityMode
+      • X0HkB92+NRE → sceKernelIsAuthenticTrinity
+  • Use Case:
+      • "Trinity" is Sony's official hardware code-name for PS5 Pro.
+      • We can call this in Application::initialize() or evo_perf_monitor to accurately detect whether EVO Player is running on a standard PS5 vs PS5 Pro.
+      • Can display "PS5 Pro" in the UI / Debug HUD / Media Info and allow increased memory buffers, higher render scalers, or enhanced compute queues specifically when running on Trinity.
+
+
+  #### B. System Background Music Auto-Ducking / Muting
+
+  • NIDs:
+      • f5NHqUziG+4 → DisableSystemMusic
+      • +ucrAt9fI7c → EnableSystemMusic
+      • mI-ltMuVN+Q → EnableSystemMedia
+  • Use Case:
+      • If a user has background music playing (Spotify, Apple Music, USB Music Player) when launching a movie in EVO Player, it currently plays on top of the movie's audio.
+      • Commercial PS5 media apps call DisableSystemMusic() when playback starts and EnableSystemMusic() when playback pauses/stops. This would give EVO Player native platform polish.
+
+
+  #### C. Display Mode, Refresh Rate & HDR Status
+
+  • NIDs:
+      • HqiYk8A4mZ0 → sceVideoOutGetOutputStatusEx
+      • 5vYEm0vWPxA → sceVideoOutGetFlipStatusNative
+      • NaV6CitH+6w → IsSupportedVideoOutputMode
+      • JQHnPL1OnMM → SetVideoOutputMode
+  • Use Case:
+      • Allows EVO Player to query active HDMI display status: whether the display is operating in HDR10, RGB, or YUV422, and what refresh rates are supported (e.g., 24Hz, 60Hz, 120Hz).
+      • Can enable 24p frame-rate matching (switching output mode to match 23.976/24.000 fps video streams to eliminate 3:2 pulldown judder).
+
+  ──────
+  ### 2. High-Potential Architectural Enhancements
+
+  #### A. Hardware Machine Learning Super Resolution (PSSR / PSML)
+
+  • NIDs:
+      • Opts9LtjSfo → scePsmlBcSisrGetInternalBufferRequirement
+      • O4-EydkeC3M → scePsmlBcSisrInit / A0kDyeWNSvs → scePsmlBcSisrTerm
+      • m9JLPc3wOQw → scePsmlMfsr2CreateContext
+      • CN7uea0UQso → scePsmlMfsrGetDispatchMfsrPacket
+  • What it is: PlayStation Machine Learning (PSML) and Single Image Super Resolution (SISR) — the low-level API powering Sony's PSSR / neural upscaling.
+  • Use Case:
+      • Could be integrated into EVO's AGC rendering queue to perform AI upscaling of 720p / 1080p anime and movies to 4K on PS5 / PS5 Pro GPU hardware without CPU overhead.
+
+
+  #### B. Native Brotli Stream Decompression
+  • NIDs:
+      • Q7Tz0p+6jAY → BrotliDecoderCreateInstance
+      • w0WaEksF1a4 → BrotliDecoderDecompress
+      • Jfla7KKdAQY → BrotliDecoderDecompressStream
+      • eNyH9W0nbL8 → BrotliDecoderDestroyInstance
+  • Use Case:
+      • Built-in OS Brotli decompression. Useful for Emby / Jellyfin HTTP requests (Accept-Encoding: br) and compressed subtitle streams without compiling external libbrotli into the app.
+
+
+  #### C. Slice-Based Multi-Slice Video Decoding
+
+  • NIDs:
+      • 4auo78aivlc → sceVideodec2DecodeFirstSlice
+      • bGyBk6V09oM → sceVideodec2DecodeNextSlice
+      • JjvhoNUnZT8 → sceVideodec2SyncAllSlice
+  • Use Case:
+      • In libSceVideodec2, EVO currently uses whole-frame decoding (sceVideodec2Decode).
+      • Slice-based decoding allows decoding slice N while slice N+1 is still in transit over the network. If EVO Player adds Moonlight / ProsperoLight game streaming or low-latency network play, this drops decode latency down to slice level.
+
+
+  #### D. PS VR2 Cinematic Screen & Audio Control
+
+  • NIDs:
+      • EtSDifOn6ZQ → sceUserServiceSetHmd2ScreenSize
+      • 0MmRNgeT8xs → sceUserServiceSetHmd2Brightness
+      • 1NGArQcf8aA → sceUserServiceSetHmd2CinematicAudioRotation
+  • Use Case:
+      • When playing video while wearing PS VR2, allows the app to adjust the virtual theater screen size, brightness, and head-tracking spatial audio rotation.
+
+  ──────
+  ### 3. Categories to Ignore (Not Relevant to EVO)
+
+   Category                                                                                                      | Symbols in new_nid.txt                                                                                       | Reason to Skip
+  ---------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------
+   Mono AOT / VSH UI                                                                                             | mono_aot_* (~4,000 NIDs)                                                                                     | Internal Ahead-of-Time bindings for Sony's C# system shell. EVO is pure native C/C++.
+   BD-J / Java VM                                                                                                | Java_*, JDK_*, _aot_jvmci_*                                                                                  | Blu-ray Disc Java player internals (SceVshDiscPlayer). Not applicable.
+   React Native                                                                                                  | ReactNative*, SceVshShellUI*                                                                                 | Sony's React Native dashboard components.
+   EME / DRM                                                                                                     | sceEsvm*, sceMediaFw*                                                                                        | Encrypted Media Extensions / Widevine DRM pipelines inside WebKit.
+  ──────
+  ### Recommended Next Step

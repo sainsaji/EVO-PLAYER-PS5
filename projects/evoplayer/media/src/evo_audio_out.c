@@ -17,12 +17,15 @@
 
 #include <libavutil/channel_layout.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 
 #include "evo_packet_queue.h"
 #include "evo_audio_resample.h"
+#include "evo_adec.h"
+#include "pp_playback.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -35,6 +38,7 @@ int sceAudioOutOutput(int handle, const void *ptr);
  * main.c. Replaced by evo_pb_*() / evo_subtitle_*() accessors at A8 / A4.
  * ------------------------------------------------------------------------ */
 extern int               screen;
+extern pp_playback       g_pp_pb;
 extern int               player_paused;
 extern double            video_clock_seconds;
 extern double            first_video_pts_seconds;
@@ -55,7 +59,6 @@ extern int               prospero_embedded_subtitle_stream_index;
 extern int               prospero_subtitle_requested_stream;
 extern char              current_media_path[512];
 
-int      start_video_playback(const char *path);
 void     toast(const char *title, const char *msg);
 long long now_ms(void);
 
@@ -75,6 +78,7 @@ volatile long long audio_samples_decoded = 0;
 volatile double audio_clock_seconds = 0.0;
 volatile double audio_pts_seconds = 0.0;
 double first_audio_pts_seconds = -1.0;
+volatile double audio_seek_discard_until = -1.0;
 
 int detected_audio_rate = 48000;
 volatile int audio_thread_running = 0;
@@ -104,13 +108,37 @@ static void audio_queue_push(int16_t *buf) {
 void *audio_output_thread(void *arg) {
     static int16_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
     while (audio_thread_running) {
+        /*
+         * Hold output while a seek is still discarding video.
+         *
+         * The audio side is gated to the seek target, so it is ready to play
+         * the instant the seek lands - but video still has to decode from the
+         * keyframe to that target, which on a long-GOP 4K stream is nearly two
+         * seconds. Letting audio run through that put it 0.9 s ahead by the
+         * time the picture came back, which read as "video is late", tripped
+         * the badly-late branch in decode_next_video_frame, and set it draining
+         * queued packets every frame - so video could never catch up and
+         * playback crawled at a few frames a second. Starting both at the
+         * target together is the whole point of the gate; this is the other
+         * half of it.
+         */
+        if (g_pp_pb.active && g_pp_pb.seek_discarding) {
+            usleep(2000);
+            continue;
+        }
         if (screen == 2 && !player_paused && audio_handle >= 1) {
             /*
              * Compare like-for-like: audio_clock is from t=0 of this session,
              * video must be relative to first video PTS (not absolute PTS).
              * Absolute compare freezes easy 720p/YouTube when clocks diverge.
              */
-            double video_rel = video_clock_seconds;
+            /*
+             * No anchor yet means nothing has been presented since the last
+             * open or seek, so there is no video position to hold audio back
+             * against. Treating it as 0 disables the throttle below instead of
+             * comparing the audio clock with a stale absolute PTS.
+             */
+            double video_rel = 0.0;
             if (first_video_pts_seconds >= 0.0)
                 video_rel = video_clock_seconds - first_video_pts_seconds;
             if (video_rel < 0.0)
@@ -220,20 +248,24 @@ static void mix_audio_frame_to_queue(
         return;
     }
 
-    uint8_t *output_buffer = NULL;
-    int output_linesize = 0;
+    /*
+     * Grow-only scratch instead of av_samples_alloc/av_freep per packet. This
+     * runs on every audio packet - about 43 a second for AAC - and the
+     * capacity only ever changes when the stream layout does, so the malloc
+     * and free were pure churn on the decode thread.
+     */
+    static uint8_t *output_buffer;
+    static size_t   output_buffer_cap;
 
-    if (
-        av_samples_alloc(
-            &output_buffer,
-            &output_linesize,
-            evo_audio_channels,   /* EVO: was hardcoded 2 */
-            output_capacity,
-            AV_SAMPLE_FMT_S16,
-            0
-        ) < 0
-    ) {
-        return;
+    size_t need = (size_t)output_capacity * (size_t)evo_audio_channels *
+                  sizeof(int16_t);
+    if (need > output_buffer_cap) {
+        uint8_t *grown = (uint8_t *)av_realloc(output_buffer, need);
+        if (!grown) {
+            return;
+        }
+        output_buffer = grown;
+        output_buffer_cap = need;
     }
 
     uint8_t *output_planes[1] = {
@@ -251,30 +283,33 @@ static void mix_audio_frame_to_queue(
         );
 
     if (converted > 0) {
-        int16_t *samples =
-            (int16_t *)output_buffer;
+        const int16_t *samples = (const int16_t *)output_buffer;
+        const int ch = evo_audio_channels;
+        int index = 0;
 
-        for (
-            int index = 0;
-            index < converted &&
-            audio_decode_thread_running;
-            index++
-        ) {
-            /* EVO: copy every channel, not just L/R. Both buffers are
-             * interleaved with the same channel count, so this is a straight
-             * per-frame copy of evo_audio_channels samples. */
-            for (int c = 0; c < evo_audio_channels; c++) {
-                audio_accum[audio_accum_pos * evo_audio_channels + c] =
-                    samples[index * evo_audio_channels + c];
-            }
+        /*
+         * Both buffers are interleaved with the same channel count, so this is
+         * a straight copy - it just has to stop at each accumulator block
+         * boundary to hand the block off. It used to run sample by sample and
+         * channel by channel, re-reading the volatile thread flag on every
+         * iteration, which also stopped the compiler vectorising it. Copy in
+         * runs instead and check the flag once per run.
+         */
+        while (index < converted && audio_decode_thread_running) {
+            int run = converted - index;
+            const int space = AUDIO_BLOCK_SAMPLES - audio_accum_pos;
+            if (run > space)
+                run = space;
 
-            audio_accum_pos++;
-            audio_samples_decoded++;
+            memcpy(&audio_accum[(size_t)audio_accum_pos * ch],
+                   &samples[(size_t)index * ch],
+                   (size_t)run * (size_t)ch * sizeof(int16_t));
 
-            if (
-                audio_accum_pos >=
-                AUDIO_BLOCK_SAMPLES
-            ) {
+            audio_accum_pos += run;
+            audio_samples_decoded += run;
+            index += run;
+
+            if (audio_accum_pos >= AUDIO_BLOCK_SAMPLES) {
                 while (
                     audio_decode_thread_running &&
                     audio_queue_count >=
@@ -293,9 +328,15 @@ static void mix_audio_frame_to_queue(
         }
     }
 
-    av_freep(&output_buffer);
 }
 
+
+/* The live native audio decoder, or NULL when this stream is on FFmpeg.
+ * Owned by the playback controller; read only on the decode thread. */
+evo_adec *g_adec = NULL;
+/* One AAC frame is at most 2048 samples per channel; 64 KB covers stereo S16
+ * with room to spare and matches the capacity the reference PoC uses. */
+static int16_t g_adec_pcm[32 * 1024];
 
 void *audio_decode_thread_func(void *arg) {
     AVFrame *af = av_frame_alloc();
@@ -303,7 +344,8 @@ void *audio_decode_thread_func(void *arg) {
 
     while (audio_decode_thread_running) {
         if (player_paused || screen != 2) {
-            usleep(1000);
+            /* Parked - see the note on the video decode thread. */
+            usleep(5000);
             continue;
         }
 
@@ -312,6 +354,40 @@ void *audio_decode_thread_func(void *arg) {
         }
 
         AVPacket *pkt = packet_queue_pop(&audio_packet_queue);
+        if (pkt && audio_seek_discard_until >= 0.0) {
+            /*
+             * Seek discard window. av_seek_frame lands on the keyframe at or
+             * before the target, so everything up to the target is run-up the
+             * viewer has already heard. The video side drops those frames in
+             * pp_playback_push_frame; drop the matching audio here so both
+             * clocks restart from the target together. Audio packets are
+             * independently decodable and the decoder was just flushed, so the
+             * first kept packet primes it exactly as a fresh open would.
+             * A packet with no PTS clears the gate rather than being dropped.
+             */
+            double pkt_seconds = -1.0;
+            if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0)
+                pkt_seconds = (double)pkt->pts *
+                    av_q2d(play_fmt->streams[audio_stream_index]->time_base);
+
+            /*
+             * 25 ms of slack keeps the packet that straddles the target.
+             * The cap is the safety net for a container whose audio PTS does
+             * not share an origin with the seek target (a non-zero
+             * start_time): rather than mute the track, give up on the gate
+             * after a GOP's worth of packets and let everything through.
+             */
+            static int s_dropped;
+            if (pkt_seconds >= 0.0 &&
+                pkt_seconds < audio_seek_discard_until - 0.025 &&
+                s_dropped < 2000) {
+                s_dropped++;
+                av_packet_free(&pkt);
+                continue;
+            }
+            s_dropped = 0;
+            audio_seek_discard_until = -1.0;
+        }
         if (!pkt) {
             /*
              * Do not terminate at EOF. The demux thread stays alive
@@ -326,7 +402,49 @@ void *audio_decode_thread_func(void *arg) {
             continue;
         }
 
-        if (avcodec_send_packet(audio_ctx, pkt) == 0) {
+        /*
+         * Native decode (libSceAudiodec, AAC/MP3) produces interleaved S16 at
+         * the stream rate. Wrap it in an AVFrame and hand it to the same
+         * mix_audio_frame_to_queue() the FFmpeg path uses, so resampling to the
+         * 48 kHz port, channel mapping and the accumulator are all unchanged.
+         * g_adec is NULL for every other codec and after a native fatal, which
+         * is what makes the fallback a one-line branch rather than a mode.
+         */
+        int handled_natively = 0;
+        if (g_adec && evo_adec_active(g_adec) == EVO_ADEC_BACKEND_NATIVE) {
+            int produced = evo_adec_decode(g_adec, pkt->data, pkt->size,
+                                           g_adec_pcm, (int)sizeof(g_adec_pcm));
+            if (produced < 0) {
+                /* Latched fatal: drop to FFmpeg for the rest of the session. */
+                evo_adec_close(g_adec);
+                g_adec = NULL;
+            } else {
+                handled_natively = 1;
+                int ch = evo_adec_channels(g_adec);
+                int rate = evo_adec_rate(g_adec);
+                if (produced > 0 && ch > 0 && rate > 0) {
+                    av_frame_unref(af);
+                    af->format = AV_SAMPLE_FMT_S16;
+                    af->sample_rate = rate;
+                    av_channel_layout_default(&af->ch_layout, ch);
+                    af->nb_samples = produced / (int)sizeof(int16_t) / ch;
+                    if (af->nb_samples > 0 &&
+                        av_frame_get_buffer(af, 0) == 0) {
+                        memcpy(af->data[0], g_adec_pcm, (size_t)produced);
+                        if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
+                            audio_pts_seconds = pkt->pts *
+                                av_q2d(play_fmt->streams[audio_stream_index]->time_base);
+                            if (first_audio_pts_seconds < 0.0)
+                                first_audio_pts_seconds = audio_pts_seconds;
+                        }
+                        mix_audio_frame_to_queue(af);
+                    }
+                    av_frame_unref(af);
+                }
+            }
+        }
+
+        if (!handled_natively && avcodec_send_packet(audio_ctx, pkt) == 0) {
             while (audio_decode_thread_running && avcodec_receive_frame(audio_ctx, af) == 0) {
                 if (af->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
                     audio_pts_seconds = af->pts * av_q2d(play_fmt->streams[audio_stream_index]->time_base);
@@ -491,170 +609,11 @@ void prospero_audio_build_label(
 }
 
 
-void prospero_audio_cycle_track(void)
-{
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt
-    ) {
-        return;
-    }
-
-    int indexes[
-        PROSPERO_AUDIO_TRACK_LIMIT
-    ];
-
-    int count =
-        prospero_audio_collect_streams(
-            play_fmt,
-            indexes,
-            PROSPERO_AUDIO_TRACK_LIMIT
-        );
-
-    if (count <= 0) {
-        toast(
-            "AUDIO TRACK",
-            "NO SUPPORTED AUDIO"
-        );
-
-        return;
-    }
-
-    if (count == 1) {
-        prospero_audio_build_label(
-            play_fmt,
-            indexes[0],
-            prospero_audio_active_label,
-            sizeof(prospero_audio_active_label)
-        );
-
-        toast(
-            "AUDIO TRACK",
-            "ONLY ONE TRACK"
-        );
-
-        return;
-    }
-
-    int current_slot = 0;
-
-    for (int index = 0; index < count; index++) {
-        if (
-            indexes[index] ==
-            audio_stream_index
-        ) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        (current_slot + 1) % count;
-
-    int next_stream =
-        indexes[next_slot];
-
-    int restore_paused =
-        player_paused;
-
-    int restore_subtitles =
-        prospero_subtitle_enabled;
-
-    int subtitle_request = -2;
-
-    if (
-        prospero_subtitle_use_external &&
-        prospero_subtitle_count > 0
-    ) {
-        subtitle_request = -1;
-    } else if (
-        !prospero_subtitle_use_external &&
-        prospero_embedded_subtitle_stream_index >= 0
-    ) {
-        subtitle_request =
-            prospero_embedded_subtitle_stream_index;
-    }
-
-    double position =
-        resume_base_offset_seconds +
-        (
-            audio_stream_index >= 0
-                ? audio_clock_seconds
-                : video_clock_seconds
-        );
-
-    if (position < 0.0) {
-        position = 0.0;
-    }
-
-    if (
-        media_duration_sec > 0.0 &&
-        position > media_duration_sec
-    ) {
-        position = media_duration_sec;
-    }
-
-    char playback_path[1024];
-
-    snprintf(
-        playback_path,
-        sizeof(playback_path),
-        "%s",
-        current_media_path
-    );
-
-    prospero_audio_requested_stream =
-        next_stream;
-
-    prospero_subtitle_requested_stream =
-        subtitle_request;
-
-    /*
-     * Playback startup subtracts one second for keyframe preroll.
-     */
-    requested_resume_seek_pos =
-        position > 3.0
-            ? position + 1.0
-            : position;
-
-    resume_base_offset_seconds =
-        position;
-
-    if (
-        !start_video_playback(
-            playback_path
-        )
-    ) {
-        prospero_audio_requested_stream = -1;
-
-        toast(
-            "AUDIO TRACK",
-            "SWITCH FAILED"
-        );
-
-        return;
-    }
-
-    player_paused =
-        restore_paused;
-
-    prospero_subtitle_enabled =
-        restore_subtitles;
-
-    prospero_audio_build_label(
-        play_fmt,
-        audio_stream_index,
-        prospero_audio_active_label,
-        sizeof(prospero_audio_active_label)
-    );
-
-    controls_last_used_ms =
-        now_ms();
-
-    toast(
-        "AUDIO TRACK",
-        prospero_audio_active_label
-    );
-}
-
-/* PROSPERO_AUDIO_TRACK_SWITCH_END */
+/*
+ * prospero_audio_cycle_track() lived here. It cycled to the next audio stream
+ * by calling start_video_playback() to re-open the file - a main.c entry point
+ * that the C++ migration removed, so the function could not have worked.
+ * Audio track selection is now evo::PlaybackController::switchAudioTrack() and
+ * the AudioTrackPickerScreen: a picker rather than a cycle, because each step
+ * costs a reopen.
+ */

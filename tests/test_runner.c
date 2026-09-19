@@ -11,12 +11,10 @@
 #include <assert.h>
 #include <math.h>
 
-#include "pp_compute_pipeline.h"
 #include "evo_direct_mem.h"
 #include "evo_draw.h"
 #include "evo_focus.h"
 #include "evo_theme.h"
-#include "evo_widgets.h"
 #include "evo_screens.h"
 #include "evo_addon.h"
 #include "addon_emby.h"
@@ -166,76 +164,6 @@ void clean_media_title(const char *path, char *line1, size_t line1_sz, char *lin
  * 1. CPU SIMD / Color Converter Tests
  * ========================================================================== */
 
-static void test_compute_pipeline_init(void)
-{
-    TEST_START("Compute Pipeline: Initialization & Backend Info");
-    pp_compute_config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.backend = PP_COMPUTE_BACKEND_CPU_SIMD;
-    cfg.num_workers = 4;
-    int rc = pp_compute_pipeline_init(&cfg);
-    TEST_ASSERT(rc == 0, "pp_compute_pipeline_init failed");
-    
-    const char *bname = pp_compute_pipeline_get_backend_name();
-    TEST_ASSERT(bname != NULL, "Backend name was NULL");
-    TEST_ASSERT(strstr(bname, "CPU SIMD") != NULL || strstr(bname, "AVX2") != NULL || strstr(bname, "Workgroups") != NULL,
-                "Backend name does not match expected SIMD pipeline string");
-    
-    TEST_PASS();
-}
-
-static void test_compute_pipeline_conversion_accuracy(void)
-{
-    TEST_START("Compute Pipeline: YUV420P to RGB Conversion Accuracy");
-    const int w = 64;
-    const int h = 64;
-    
-    uint8_t *y_plane = (uint8_t *)malloc(w * h);
-    uint8_t *u_plane = (uint8_t *)malloc((w / 2) * (h / 2));
-    uint8_t *v_plane = (uint8_t *)malloc((w / 2) * (h / 2));
-    uint32_t *dst_rgb = (uint32_t *)malloc(w * h * sizeof(uint32_t));
-    
-    TEST_ASSERT(y_plane && u_plane && v_plane && dst_rgb, "Buffer allocation failed");
-    
-    /* Standard HD Neutral Gray: Y=128, U=128, V=128 */
-    memset(y_plane, 128, w * h);
-    memset(u_plane, 128, (w / 2) * (h / 2));
-    memset(v_plane, 128, (w / 2) * (h / 2));
-    memset(dst_rgb, 0, w * h * sizeof(uint32_t));
-    
-    pp_frame src;
-    memset(&src, 0, sizeof(src));
-    src.width = w;
-    src.height = h;
-    src.format = PP_FRAME_YUV420P;
-    src.planes[0] = y_plane;
-    src.planes[1] = u_plane;
-    src.planes[2] = v_plane;
-    src.strides[0] = w;
-    src.strides[1] = w / 2;
-    src.strides[2] = w / 2;
-    
-    int rc = pp_compute_pipeline_convert(&src, dst_rgb, w, h, 1);
-    TEST_ASSERT(rc == 0, "Conversion returned error");
-    
-    /* Check middle pixel RGB values (BT.709/601 neutral gray ~128 +/- 5) */
-    uint32_t sample = dst_rgb[(h / 2) * w + (w / 2)];
-    uint8_t r = (sample >> 16) & 0xFF;
-    uint8_t g = (sample >> 8) & 0xFF;
-    uint8_t b = sample & 0xFF;
-    
-    TEST_ASSERT(abs((int)r - 128) <= 6, "Red channel deviation out of bounds");
-    TEST_ASSERT(abs((int)g - 128) <= 6, "Green channel deviation out of bounds");
-    TEST_ASSERT(abs((int)b - 128) <= 6, "Blue channel deviation out of bounds");
-    
-    free(y_plane);
-    free(u_plane);
-    free(v_plane);
-    free(dst_rgb);
-    
-    TEST_PASS();
-}
-
 /* ==========================================================================
  * 2. Direct Memory Slab Allocator Tests
  * ========================================================================== */
@@ -264,7 +192,19 @@ static void test_direct_mem_lifecycle(void)
     evo_direct_mem_free(p2);
     evo_direct_mem_get_stats(&stats);
     TEST_ASSERT(stats.allocated_bytes == 0, "Free did not clear allocated bytes");
-    
+
+    /*
+     * #6: a request larger than the whole pool must still succeed (graceful
+     * malloc fallback) and free() must route it back correctly — the 4K video
+     * buffers depend on this when the console can't give the full slab.
+     */
+    void *big = evo_direct_mem_alloc(8 * 1024 * 1024);
+    TEST_ASSERT(big != NULL, "oversize alloc did not fall back");
+    memset(big, 0xAB, 8 * 1024 * 1024); /* must be writable for its full extent */
+    evo_direct_mem_free(big);
+    evo_direct_mem_get_stats(&stats);
+    TEST_ASSERT(stats.allocated_bytes == 0, "fallback free leaked into pool stats");
+
     evo_direct_mem_shutdown();
     TEST_PASS();
 }
@@ -272,34 +212,6 @@ static void test_direct_mem_lifecycle(void)
 /* ==========================================================================
  * 3. UI Typography, Text Fitting & Title Cleaning Tests
  * ========================================================================== */
-
-static void test_ui_text_measurement_and_fitting(void)
-{
-    TEST_START("UI Typography: Text Width & Ellipsis Fitting");
-    
-    const char *test_str = "The Quick Brown Fox Jumps Over The Lazy Dog";
-    int w_small = evo_text_w(test_str, EVO_FACE_SMALL);
-    int w_sub   = evo_text_w(test_str, EVO_FACE_SUB);
-    int w_menu  = evo_text_w(test_str, EVO_FACE_MENU);
-    int w_title = evo_text_w(test_str, EVO_FACE_TITLE);
-    
-    TEST_ASSERT(w_small > 0 && w_sub > w_small && w_menu > w_sub && w_title > w_menu,
-                "Font face widths do not scale hierarchically");
-    
-    /* Test evo_text_fit */
-    uint32_t *fake_fb = (uint32_t *)calloc(1920 * 100, sizeof(uint32_t));
-    TEST_ASSERT(fake_fb != NULL, "Allocation failed");
-    
-    int fitted_w = evo_text_fit(fake_fb, 0, 0, 200, test_str, 0xFFFFFFFF, EVO_FACE_SUB);
-    TEST_ASSERT(fitted_w <= 200, "Fitted text width exceeds max_w");
-    
-    /* Short string should fit completely without ellipsis */
-    int short_w = evo_text_fit(fake_fb, 0, 0, 200, "EVO", 0xFFFFFFFF, EVO_FACE_SUB);
-    TEST_ASSERT(short_w > 0 && short_w <= 200, "Short string width is invalid");
-    
-    free(fake_fb);
-    TEST_PASS();
-}
 
 static void test_clean_media_title_resolution(void)
 {
@@ -420,100 +332,11 @@ static void test_changelog_model_integrity(void)
  * 7. Common UI Widgets & Surround Studio Rendering Tests
  * ========================================================================== */
 
-static void test_common_ui_widgets_and_surround_screen(void)
-{
-    TEST_START("Common UI: Badges, Stat Cards & Surround Studio Screen");
-
-    uint32_t *mock_fb = (uint32_t *)calloc(1920 * 1080, sizeof(uint32_t));
-    TEST_ASSERT(mock_fb != NULL, "Failed to allocate mock framebuffer");
-
-    /* 1. Test Categorical Badges */
-    evo_widget_category_badge(mock_fb, 100, 100, 90, 26, EVO_BADGE_ACCENT, "NEW");
-    evo_widget_category_badge(mock_fb, 200, 100, 90, 26, EVO_BADGE_SUCCESS, "FIXED");
-    evo_widget_category_badge(mock_fb, 300, 100, 90, 26, EVO_BADGE_WARNING, "IMPROVED");
-    evo_widget_category_badge(mock_fb, 400, 100, 90, 26, EVO_BADGE_DANGER, "REMOVED");
-
-    /* 2. Test Stat / Monitor Card */
-    evo_stat_card card;
-    memset(&card, 0, sizeof(card));
-    card.header_label = "SPEAKER CALIBRATION MONITOR";
-    card.title = "FRONT LEFT (FL)";
-    card.line1 = "TONE FREQ: 330.0 HZ";
-    card.line2 = "PS5 AUDIO OUT: S16_8CH (CH 0)";
-    card.status_text = "STATUS: [ ACTIVE NOW ]";
-    card.is_active = 1;
-    evo_widget_stat_card(mock_fb, 130, 160, 460, 220, &card);
-
-    /* 3. Test Speaker Stage Node */
-    evo_speaker_node node;
-    memset(&node, 0, sizeof(node));
-    node.label = "FL";
-    node.sub = "330 Hz [ON]";
-    node.is_active = 1;
-    node.is_selected = 1;
-    evo_widget_speaker_node(mock_fb, 600, 300, 150, 82, &node);
-
-    /* 4. Test Full Surround Sound Studio Screen Rendering (5.1 & 7.1) */
-    static const evo_surround_speaker_info test_spk[8] = {
-        { "CENTER",       "FC",   554.0,  -75, -260, 150, 82, 2, 6 },
-        { "SUBWOOFER",   "LFE",   55.0,   85, -260, 150, 82, 3, 8 },
-        { "FRONT LEFT",   "FL",  330.0, -460, -180, 150, 82, 0, 5 },
-        { "FRONT RIGHT",  "FR",  440.0,  310, -180, 150, 82, 1, 7 },
-        { "SIDE LEFT",    "SL", 1109.0, -510,   10, 150, 82, 6, 9 },
-        { "SIDE RIGHT",   "SR", 1319.0,  360,   10, 150, 82, 7, 10 },
-        { "BACK LEFT",    "BL",  659.0, -380,  200, 150, 82, 4, 11 },
-        { "BACK RIGHT",   "BR",  880.0,  230,  200, 150, 82, 5, 12 }
-    };
-
-    evo_surround_test_model m;
-    memset(&m, 0, sizeof(m));
-    m.is_51_layout   = 1;
-    m.selected_item  = 0;
-    m.active_channel = 0;
-    m.surround_mode  = 1;
-    m.speakers       = test_spk;
-    m.speaker_count  = 8;
-
-    static const evo_hint hints[] = {
-        { EVO_GLYPH_CROSS, "TEST" },
-        { EVO_GLYPH_CIRCLE, "BACK" }
-    };
-
-    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
-
-    /* Switch to 7.1 layout and render */
-    m.is_51_layout = 0;
-    m.active_channel = 6;
-    evo_screen_surround_test(mock_fb, &m, 0, 0, hints, 2);
-
-    free(mock_fb);
-    TEST_PASS();
-}
-
 /* ==========================================================================
  * Mock Drawing Vtable for Host UI Tests
  * ========================================================================== */
 
-static int test_text_w(const char *s, int face)
-{
-    if (!s) return 0;
-    int char_w = (face == 0) ? 8 : (face == 1) ? 11 : (face == 2) ? 14 : 18;
-    return (int)strlen(s) * char_w;
-}
-
-static void test_text_draw(uint32_t *fb, int x, int y, const char *s, uint32_t c, int face)
-{
-    (void)fb; (void)x; (void)y; (void)s; (void)c; (void)face;
-}
-
-static const evo_draw_vtable g_test_vtable = {
-    .text = test_text_draw,
-    .text_w = test_text_w,
-    .icon = NULL,
-    .icon_tinted = NULL,
-    .glyph = NULL,
-    .glyph_tinted = NULL
-};
+;
 
 /* ==========================================================================
  * Main Test Runner Entrypoint
@@ -521,21 +344,15 @@ static const evo_draw_vtable g_test_vtable = {
 
 int main(void)
 {
-    evo_draw_bind(&g_test_vtable);
-
     printf("\n======================================================================\n");
     printf("  EVO Player — Automated Test Suite & Coverage Verification\n");
     printf("======================================================================\n\n");
     
-    test_compute_pipeline_init();
-    test_compute_pipeline_conversion_accuracy();
     test_direct_mem_lifecycle();
-    test_ui_text_measurement_and_fitting();
     test_clean_media_title_resolution();
     test_emby_url_and_config();
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
-    test_common_ui_widgets_and_surround_screen();
     
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

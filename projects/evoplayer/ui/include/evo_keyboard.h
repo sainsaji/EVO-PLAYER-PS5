@@ -29,6 +29,21 @@ void evo_keyboard_set_type(int type);
 int  evo_keyboard_get_type(void);
 
 /*
+ * #34: bring the native IME's subsystem up.
+ *
+ * MUST be called from main()'s PRE-UNJAIL slot, next to evo_vdec_probe() — the
+ * credential swap in evo_jailbreak_self() poisons sceSysmoduleLoadModule the
+ * same way it poisons it for libSceVideodec2 (#31) and libSceAgc. Loading the
+ * IME dialog's system module lazily on first keyboard-open therefore fails, and
+ * calling into libSceImeDialog with its module unloaded SIGSEGVs — which is
+ * exactly how #34 presented.
+ *
+ * A failure here is not fatal: it latches the virtual keyboard for the session.
+ * No-op on payload / host builds, which load the module on demand instead.
+ */
+void evo_keyboard_ime_probe(void);
+
+/*
  * Open the global keyboard modal.
  *
  * `title`: Prompt / description shown above the text field.

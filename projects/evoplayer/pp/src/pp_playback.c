@@ -1,13 +1,16 @@
+/*
+ * pp_playback — decode + pace + clock + seek.
+ *
+ * GL-4 (#80) Stage 3 removed everything else: the CPU YUV->BGRA converters, the
+ * tiled VideoOut present, the sceAgc GPU present, the V8/V3/1080 backend enum
+ * and the `display` double buffer. push_frame now paces the decoded frame on
+ * the presentation clock and publishes its planes; ui_rml/evo_gl_context_device
+ * uploads them as R8/RG8 textures and converts on the quad.
+ */
 #include "pp_playback.h"
-#include "pp_compute_pipeline.h"
-#include "pp_converter_fused.h"
-#include "pp_converter_parallel.h"
-#include "pp_output_policy.h"
 
-#include "pp_4k_sdr_policy.h"
-#include "pp_product_path.h"
-#include "pp_v8_gate.h"
 #include "pp_stage_breadcrumb.h"
+#include "evo_boot_log.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -49,49 +52,12 @@ void pp_playback_init(pp_playback *pb)
      * Early sleep capped short so convert+decode can stay realtime.
      */
     pp_clock_init(&pb->clock, 800000, 25000);
-    pb->cfg.aspect = PP_ASPECT_FIT;
-    pb->cfg.clear_color_bgra = 0xFF000000u;
+    pb->aspect = PP_ASPECT_FIT;
     pb->out_w = 1920;
     pb->out_h = 1080;
-    pb->display = NULL;
-    pb->display_back = NULL;
-    pb->backend = PP_BACKEND_1080_STANDARD;
-    pb->force_v3_fallback = 0;
-    pb->pending_present = 0;
-    pb->pending_vo_idx = 0;
-    pb->pending_frame_id = 0;
-    pb->present_seq = 0;
     pb->stats.output_w = 1920;
     pb->stats.output_h = 1080;
     pb->stats.aspect = (int)PP_ASPECT_FIT;
-    pb->stats.backend = (int)PP_BACKEND_1080_STANDARD;
-}
-
-void pp_playback_set_backend(pp_playback *pb, pp_video_backend backend)
-{
-    if (!pb)
-        return;
-    if (pb->lock)
-        pthread_mutex_lock(mtx(pb));
-    pb->backend = backend;
-    pb->stats.backend = (int)backend;
-    pb->pending_present = 0;
-    if (pb->lock)
-        pthread_mutex_unlock(mtx(pb));
-}
-
-void pp_playback_force_v3_fallback(pp_playback *pb, int enable)
-{
-    if (!pb)
-        return;
-    if (pb->lock)
-        pthread_mutex_lock(mtx(pb));
-    pb->force_v3_fallback = enable ? 1 : 0;
-    if (enable && pb->backend == PP_BACKEND_4K_V8_FUSED)
-        pb->backend = PP_BACKEND_4K_V3_FALLBACK;
-    pb->stats.backend = (int)pb->backend;
-    if (pb->lock)
-        pthread_mutex_unlock(mtx(pb));
 }
 
 void pp_playback_shutdown(pp_playback *pb)
@@ -99,10 +65,11 @@ void pp_playback_shutdown(pp_playback *pb)
     if (!pb)
         return;
     pp_playback_on_file_close(pb);
-    free(pb->display);
-    pb->display = NULL;
-    free(pb->display_back);
-    pb->display_back = NULL;
+    free(pb->hold_buf);
+    pb->hold_buf = NULL;
+    pb->hold_cap = 0;
+    pb->gl_ready = 0;
+    pb->gl_src_y = pb->gl_src_uv = pb->gl_src_u = pb->gl_src_v = NULL;
     if (pb->lock) {
         pthread_mutex_destroy(mtx(pb));
         free(pb->lock);
@@ -111,38 +78,16 @@ void pp_playback_shutdown(pp_playback *pb)
     memset(pb, 0, sizeof(*pb));
 }
 
-void pp_playback_attach_videoout(pp_playback *pb, pp_videoout *vo)
-{
-    if (!pb)
-        return;
-    pb->vo = vo;
-}
-
 int pp_playback_set_output(pp_playback *pb, uint32_t w, uint32_t h,
                            pp_aspect_mode aspect)
 {
-    uint32_t *front, *back;
-    size_t bytes;
     if (!pb || w < 64 || h < 64)
         return -1;
-    bytes = (size_t)w * (size_t)h * 4u;
-    front = (uint32_t *)malloc(bytes);
-    back = (uint32_t *)malloc(bytes);
-    if (!front || !back) {
-        free(front);
-        free(back);
-        return -2;
-    }
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));
-    free(pb->display);
-    free(pb->display_back);
-    pb->display = front;
-    pb->display_back = back;
     pb->out_w = w;
     pb->out_h = h;
-    pb->cfg.aspect = aspect;
-    pb->display_ready = 0;
+    pb->aspect = aspect;
     pb->stats.output_w = (int)w;
     pb->stats.output_h = (int)h;
     pb->stats.aspect = (int)aspect;
@@ -155,18 +100,14 @@ void pp_playback_on_file_open(pp_playback *pb)
 {
     if (!pb)
         return;
-    if (!pb->display && pb->backend != PP_BACKEND_4K_V8_FUSED)
-        (void)pp_playback_set_output(pb, pb->out_w ? pb->out_w : 1920,
-                                     pb->out_h ? pb->out_h : 1080, pb->cfg.aspect);
     pp_clock_reset(&pb->clock);
     pb->stats.clock_resets++;
     pb->active = 1;
     pb->seek_discarding = 0;
-    pb->display_ready = 0;
     pb->display_pts_us = 0;
-    if (pb->pending_present && pb->vo)
-        pp_videoout_release(pb->vo, pb->pending_vo_idx);
-    pb->pending_present = 0;
+    /* Don't show the previous file's last frame, or hold it through its seek. */
+    pb->gl_ready = 0;
+    pb->hold_valid = 0;
     pb->stats.frames_in = 0;
     pb->stats.frames_converted = 0;
     pb->stats.frames_published = 0;
@@ -175,7 +116,7 @@ void pp_playback_on_file_open(pp_playback *pb)
     pb->stats.convert_us_total = 0;
     pb->stats.convert_us_max = 0;
     pb->stats.convert_ring_count = 0;
-    pb->stats.sample_bgra = 0;
+    pb->stats.sample_luma = 0;
 }
 
 void pp_playback_on_file_close(pp_playback *pb)
@@ -188,10 +129,9 @@ void pp_playback_on_file_close(pp_playback *pb)
     pb->stats.clock_resets++;
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));
-    if (pb->pending_present && pb->vo)
-        pp_videoout_release(pb->vo, pb->pending_vo_idx);
-    pb->pending_present = 0;
-    pb->display_ready = 0;
+    pb->gl_ready = 0;
+    pb->hold_valid = 0;
+    pb->gl_src_y = pb->gl_src_uv = pb->gl_src_u = pb->gl_src_v = NULL;
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
 }
@@ -216,7 +156,7 @@ static void note_convert(pp_playback *pb, uint64_t us)
     pb->stats.convert_us_total += us;
     if (us > pb->stats.convert_us_max)
         pb->stats.convert_us_max = us;
-    /* Rolling ring of last 256 convert times for p95. */
+    /* Rolling ring of last 256 publish times for p95. */
     if (pb->stats.convert_ring_count < 256u) {
         i = pb->stats.convert_ring_count;
         pb->stats.convert_ring[i] = us;
@@ -234,12 +174,87 @@ static void note_convert(pp_playback *pb, uint64_t us)
  */
 #define PP_LATE_DROP_RESYNC 20
 
+/*
+ * Stage 2d: freeze the currently published frame into pp_playback's own memory.
+ *
+ * Taken the instant the seek is submitted, before the decode thread has been
+ * let loose on the discard window: the native decoder's 12-slot pool and
+ * FFmpeg's receive AVFrame both still hold the last published frame at that
+ * point, and a slot is only recycled once decoding has moved that far on.
+ * Caller holds the lock.
+ *
+ * Returns 1 if a snapshot is now being served.
+ */
+static int hold_snapshot(pp_playback *pb)
+{
+    size_t y_rows, c_rows, y_sz, need;
+    const uint8_t *sy, *suv, *su, *sv;
+    int planar;
+
+    if (!pb->gl_ready || !pb->gl_src_y || pb->gl_src_ypitch <= 0)
+        return 0;
+
+    planar = (pb->gl_src_uv == NULL);
+    if (planar && (!pb->gl_src_u || !pb->gl_src_v))
+        return 0;
+
+    y_rows = pb->gl_ch;
+    c_rows = (pb->gl_ch + 1u) / 2u;
+    y_sz   = (size_t)pb->gl_src_ypitch * y_rows;
+
+    if (planar)
+        need = y_sz + (size_t)pb->gl_src_upitch * c_rows
+                    + (size_t)pb->gl_src_vpitch * c_rows;
+    else
+        need = y_sz + (size_t)pb->gl_src_uvpitch * c_rows;
+
+    if (pb->hold_cap < need) {
+        uint8_t *nb = (uint8_t *)realloc(pb->hold_buf, need);
+        if (!nb)
+            return 0;      /* out of memory: fall back to the borrowed planes */
+        pb->hold_buf = nb;
+        pb->hold_cap = need;
+    }
+
+    sy  = pb->gl_src_y;
+    suv = pb->gl_src_uv;
+    su  = pb->gl_src_u;
+    sv  = pb->gl_src_v;
+
+    memcpy(pb->hold_buf, sy, y_sz);
+    pb->hold_uv_off = pb->hold_u_off = pb->hold_v_off = 0;
+    if (planar) {
+        pb->hold_u_off = y_sz;
+        pb->hold_v_off = y_sz + (size_t)pb->gl_src_upitch * c_rows;
+        memcpy(pb->hold_buf + pb->hold_u_off, su,
+               (size_t)pb->gl_src_upitch * c_rows);
+        memcpy(pb->hold_buf + pb->hold_v_off, sv,
+               (size_t)pb->gl_src_vpitch * c_rows);
+    } else {
+        pb->hold_uv_off = y_sz;
+        memcpy(pb->hold_buf + pb->hold_uv_off, suv,
+               (size_t)pb->gl_src_uvpitch * c_rows);
+    }
+
+    pb->hold_planar  = planar;
+    pb->hold_ten_bit = pb->gl_ten_bit;
+    pb->hold_color_trc = pb->gl_color_trc;
+    pb->hold_ypitch  = pb->gl_src_ypitch;
+    pb->hold_uvpitch = pb->gl_src_uvpitch;
+    pb->hold_upitch  = pb->gl_src_upitch;
+    pb->hold_vpitch  = pb->gl_src_vpitch;
+    pb->hold_cw = pb->gl_cw;
+    pb->hold_ch = pb->gl_ch;
+    pb->hold_dw = pb->gl_dw;
+    pb->hold_dh = pb->gl_dh;
+    return 1;
+}
+
 int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
 {
-    uint64_t t0, t1, cus;
-    int rc;
-    size_t need;
-    int use_v8;
+    uint32_t cw, ch, dw, dh;
+    uint64_t t0;
+    int syp;
 
     if (!pb || !src || !pb->active)
         return -1;
@@ -264,289 +279,162 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pp_clock_is_paused(&pb->clock))
         return 1;
 
-    need = (size_t)pb->out_w * (size_t)pb->out_h;
-    if (need == 0 || need > (size_t)3840u * 2160u)
-        return -2;
-
-    /*
-     * V8 fused: 1:1 yuv420p → tiled BGRA at live VO size.
-     * Supports full 3840x2160 and cinema UHD (e.g. 3840x1920).
-     */
-    use_v8 = (pb->backend == PP_BACKEND_4K_V8_FUSED && !pb->force_v3_fallback &&
-              pb->vo && pb->vo->inited &&
-              pb->out_w == pb->vo->width && pb->out_h == pb->vo->height &&
-              src->width == pb->out_w && src->height == pb->out_h &&
-              pp_v8_frame_gate(src, 30.0) == PP_V8_GATE_OK);
-
-    /*
-     * V8 is strict 1:1 tile (no FIT/FILL/STRETCH). If the user forced V3 via
-     * view-mode apply (force_v3_fallback), use_v8 stays 0 and aspect convert runs.
-     */
-
-#if !PP_4K_V8_PRODUCT_ENABLE
-    use_v8 = 0; /* crash isolation: product never uses V8 path */
-#endif
-
-    /* ---- V8 fused: write tiled GPU plane; main present_pre_tiled ---- */
-    if (use_v8) {
-        uint32_t idx = 0, pitch = 0;
-        uint32_t *lin;
-        uint32_t *gpu;
-        int v8_workers = 8;
-
-        /* VO must match output — drop if mid-reconfig */
-        if (!pb->vo->inited ||
-            pb->vo->width != pb->out_w || pb->vo->height != pb->out_h)
-            return 1;
-
-        if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) == PP_CLOCK_DROP) {
-            pb->stats.frames_late_dropped++;
-            return 1;
-        }
-
-        lin = (uint32_t *)pp_videoout_acquire(pb->vo, &idx, &pitch);
-        gpu = (uint32_t *)pp_videoout_gpu_plane(pb->vo, idx);
-        if (!lin || !gpu)
-            return -5;
-
-        if (pb->stats.frames_converted == 0)
-            pp_stage_bc_checkpoint("010_FIRST_FRAME_DECODED", "entering V8 convert");
-
-        /* More workers on wide UHD frames (was 4 — under-used CPU) */
-        if (pb->out_w * pb->out_h >= 3840u * 1600u)
-            v8_workers = 8;
-
-
-        t0 = now_us();
-        rc = pp_compute_pipeline_convert(
-            src, gpu, pb->out_w, pb->out_h, v8_workers);
-        if (rc != 0) {
-            rc = pp_converter_yuv420p_to_tiled_bgra_parallel(
-                src, gpu, pb->out_w, pb->out_h, v8_workers);
-        }
-        t1 = now_us();
-
-        if (rc != 0) {
-            pp_videoout_release(pb->vo, idx);
-            pp_stage_bc_checkpoint("011_FIRST_FRAME_CONVERT_FAIL", "fused rc");
-            return -4;
-        }
-        cus = t1 - t0;
-        pb->stats.frames_converted++;
-        note_convert(pb, cus);
-        if (pb->stats.frames_converted == 1)
-            pp_stage_bc_checkpoint("011_FIRST_FRAME_CONVERTED", "fused ok");
-
-        if (pb->lock)
-            pthread_mutex_lock(mtx(pb));
-        /* Drop previous unpresented V8 frame if any */
-        if (pb->pending_present)
-            pp_videoout_release(pb->vo, pb->pending_vo_idx);
-        pb->present_seq++;
-        pb->pending_vo_idx = idx;
-        pb->pending_frame_id = pb->present_seq;
-        pb->pending_present = 1;
-        pb->display_ready = 1;
-        pb->display_pts_us = src->pts_us;
-        pb->stats.frames_published++;
-        if (pb->lock)
-            pthread_mutex_unlock(mtx(pb));
-        return 0;
-    }
-
-    /* ---- 1080 / V3 fallback: linear display then main tiles ---- */
-    if (!pb->display || !pb->display_back) {
-        if (pp_playback_set_output(pb, pb->out_w, pb->out_h, pb->cfg.aspect) != 0)
-            return -3;
-    }
-
-    {
+    if (!pb->clock.started) {
+        pp_clock_start(&pb->clock, src->pts_us);
+    } else if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) == PP_CLOCK_DROP) {
+        pb->stats.frames_late_dropped++;
         /*
-         * Soft UHD: audio-master pacing lives in decode_next_video_frame.
-         * Do not host-clock sleep or late-drop here (double-pace / freezes).
-         * Non-soft paths still use the normal PTS clock.
+         * Dropping late frames is how the clock catches up, and normally it
+         * does so within a handful of frames. A long unbroken run means the
+         * clock is not behind the video - it is wrong: its wall-time base
+         * advanced during a period when nothing was being pushed, so every
+         * frame now looks late and the picture freezes for good while audio
+         * carries on. Re-base on the frame in hand and let it through.
          */
-        int soft_uhd = (src->width >= 2560u && pb->out_w <= 1920u);
-        if (soft_uhd) {
-            if (!pb->clock.started)
-                pp_clock_start(&pb->clock, src->pts_us);
-        } else if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) ==
-                   PP_CLOCK_DROP) {
-            pb->stats.frames_late_dropped++;
-
-            /*
-             * Dropping late frames is how the clock catches up, and normally
-             * it does so within a handful of frames. A long unbroken run
-             * means the clock is not behind the video - it is wrong: its
-             * wall-time base advanced during a period when nothing was being
-             * pushed, so every frame now looks late and the picture freezes
-             * for good while audio carries on.
-             *
-             * Re-base on the frame in hand and let it through. Recovering one
-             * frame late is invisible; not recovering is a dead picture.
-             */
-            if (++pb->late_drop_streak < PP_LATE_DROP_RESYNC)
-                return 1;
-
-            pp_clock_reset(&pb->clock);
-            pp_clock_start(&pb->clock, src->pts_us);
-            pb->stats.clock_resets++;
-            pb->late_drop_streak = 0;
-        } else {
-            pb->late_drop_streak = 0;
-        }
+        if (++pb->late_drop_streak < PP_LATE_DROP_RESYNC)
+            return 1;
+        pp_clock_reset(&pb->clock);
+        pp_clock_start(&pb->clock, src->pts_us);
+        pb->stats.clock_resets++;
+        pb->late_drop_streak = 0;
+    } else {
+        pb->late_drop_streak = 0;
     }
 
-    /* Convert into back buffer WITHOUT holding display lock (UI can blit). */
-    t0 = now_us();
-    rc = pp_converter_to_display(src, pb->display_back, pb->out_w, pb->out_h,
-                                 pb->out_w * 4u, pb->cfg.aspect);
-    t1 = now_us();
-    if (rc != 0)
+    if (!src->planes[0])
         return -4;
-    cus = t1 - t0;
-    pb->stats.frames_converted++;
-    note_convert(pb, cus);
+    if (src->format != PP_FRAME_NV12 && src->format != PP_FRAME_YUV420P &&
+        src->format != PP_FRAME_YUV420P10 && src->format != PP_FRAME_NV12_10)
+        return -4;
 
-    /* Swap back → front under lock (pointer swap, no memcpy). */
-    if (pb->lock)
-        pthread_mutex_lock(mtx(pb));
     {
-        uint32_t *tmp = pb->display;
-        pb->display = pb->display_back;
-        pb->display_back = tmp;
+        int ten = (src->format == PP_FRAME_YUV420P10 || src->format == PP_FRAME_NV12_10);
+        int bpp = ten ? 2 : 1;
+        dw = src->width;
+        dh = src->height;
+        cw = (dw + 1u) & ~1u;             /* even luma width -> texture width  */
+        ch = src->coded_height ? src->coded_height : src->height;
+        if (ch < dh) ch = dh;
+        ch = (ch + 1u) & ~1u;             /* even -> UV plane is ch/2 rows     */
+        syp = src->strides[0] > 0 ? src->strides[0] : (int)src->width * bpp;
     }
+
+    t0 = now_us();
 
     /*
-     * Only re-anchor on large host lag (not every soft-UHD frame).
-     * Re-anchoring every frame made residual early-sleep tiny → free-run.
+     * Stash the borrowed decoder planes — no copy anywhere. push_frame is on
+     * the decode thread and has just pace-slept to this frame's PTS, so the
+     * decoder won't recycle the pool slot before the render loop's
+     * pp_playback_get_video_frame() + upload runs (~1 frame; the pool is 12 slots).
+     * The one case that breaks is a seek's discard window, which has no pacing
+     * — hold_snapshot() covers it.
      */
-    {
-        int soft_uhd = (src->width >= 2560u && pb->out_w <= 1920u);
-        if (!soft_uhd) {
-            int64_t media = pp_clock_media_us(&pb->clock);
-            int64_t lag = media - src->pts_us;
-            if (lag > 120000 || lag < -120000)
-                pp_clock_reanchor(&pb->clock, src->pts_us);
-        }
+    if (pb->lock) pthread_mutex_lock(mtx(pb));
+    pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10 || src->format == PP_FRAME_NV12_10);
+    pb->gl_color_trc = src->color_trc;
+    pb->gl_src_y  = src->planes[0];
+    pb->gl_src_ypitch = syp;
+    if (src->format == PP_FRAME_NV12 || src->format == PP_FRAME_NV12_10) {
+        pb->gl_src_uv = src->planes[1];
+        pb->gl_src_uvpitch = src->strides[1] > 0 ? src->strides[1] : syp;
+        pb->gl_src_u = pb->gl_src_v = NULL;
+    } else {
+        int cbpp = pb->gl_ten_bit ? 2 : 1;
+        pb->gl_src_uv = NULL;
+        pb->gl_src_u = src->planes[1];
+        pb->gl_src_v = src->planes[2];
+        pb->gl_src_upitch = src->strides[1] > 0 ? src->strides[1] : (int)((src->width + 1u) / 2u) * cbpp;
+        pb->gl_src_vpitch = src->strides[2] > 0 ? src->strides[2] : pb->gl_src_upitch;
     }
-
-    pb->display_ready = 1;
+    pb->gl_cw = cw;
+    pb->gl_ch = ch;
+    pb->gl_dw = dw;
+    pb->gl_dh = dh;
+    pb->gl_ready = 1;
+    pb->hold_valid = 0;          /* live frames again */
     pb->display_pts_us = src->pts_us;
+    pb->stats.frames_converted++;
     pb->stats.frames_published++;
-    if (pb->stats.sample_bgra == 0 && need > 0)
-        pb->stats.sample_bgra = pb->display[need / 2u];
-    if (pb->lock)
-        pthread_mutex_unlock(mtx(pb));
+    if (pb->stats.sample_luma == 0)
+        pb->stats.sample_luma = src->planes[0][0];
+    if (pb->lock) pthread_mutex_unlock(mtx(pb));
+
+    if (pb->stats.frames_converted == 1)
+        pp_stage_bc_checkpoint("010_FIRST_FRAME_DECODED", "gl video path");
+    note_convert(pb, now_us() - t0);
     return 0;
-}
-
-int pp_playback_take_pending_present(pp_playback *pb, uint32_t *idx, uint64_t *frame_id)
-{
-    int ok = 0;
-    if (!pb || !idx || !frame_id)
-        return 0;
-    if (pb->lock)
-        pthread_mutex_lock(mtx(pb));
-    if (pb->pending_present) {
-        *idx = pb->pending_vo_idx;
-        *frame_id = pb->pending_frame_id;
-        pb->pending_present = 0;
-        ok = 1;
-    }
-    if (pb->lock)
-        pthread_mutex_unlock(mtx(pb));
-    return ok;
-}
-
-/**
- * Apply V3 product output policy for a newly opened source.
- * Does not reconfigure VideoOut — caller must pp_videoout_reconfigure + set_output.
- * Returns selected pp_output_mode.
- */
-int pp_playback_choose_output_mode(const pp_source_caps *src,
-                                   uint32_t display_max_w,
-                                   uint32_t display_max_h)
-{
-    return (int)pp_select_output_mode(src, display_max_w, display_max_h);
-}
-
-/* Opaque black, the same value every clear path in the converters uses. */
-#define PP_DISPLAY_CLEAR_BGRA 0xFF000000u
-
-static void fill_rect_bgra(uint32_t *dst, uint32_t pitch_px, uint32_t x,
-                           uint32_t y, uint32_t w, uint32_t h, uint32_t v)
-{
-    uint32_t r, c;
-
-    for (r = 0; r < h; r++) {
-        uint32_t *row = dst + (size_t)(y + r) * (size_t)pitch_px + x;
-        for (c = 0; c < w; c++)
-            row[c] = v;
-    }
-}
-
-int pp_playback_copy_display(pp_playback *pb, uint32_t *dst, uint32_t pitch_bytes,
-                             uint32_t dst_w, uint32_t dst_h)
-{
-    uint32_t copy_w = 0, copy_h = 0, p;
-    int copied = 0;
-
-    if (!dst || !dst_w || !dst_h || pitch_bytes < dst_w * 4u)
-        return 0;
-
-    p = pitch_bytes / 4u;
-
-    if (pb && pb->display) {
-        if (pb->lock)
-            pthread_mutex_lock(mtx(pb));
-        if (pb->display_ready) {
-            copy_w = pb->out_w < dst_w ? pb->out_w : dst_w;
-            copy_h = pb->out_h < dst_h ? pb->out_h : dst_h;
-
-            /*
-             * The full-width case is the one that runs every frame at 1080p.
-             * Row-at-a-time there is 1080 calls to memcpy for what is one
-             * contiguous 8 MB run in both buffers.
-             */
-            if (copy_w == p && copy_w == pb->out_w) {
-                memcpy(dst, pb->display, (size_t)copy_w * copy_h * 4u);
-            } else {
-                uint32_t y;
-                for (y = 0; y < copy_h; y++)
-                    memcpy(dst + (size_t)y * p, pb->display + (size_t)y * pb->out_w,
-                           copy_w * 4u);
-            }
-            copied = 1;
-        }
-        if (pb->lock)
-            pthread_mutex_unlock(mtx(pb));
-    }
-
-    /*
-     * Everything the frame did not cover. Deliberately outside the lock: this
-     * is only reached before the first frame, during a seek, or when the
-     * display is smaller than the target, and holding the display mutex across
-     * a multi-megabyte fill would stall the decode thread's buffer swap.
-     */
-    if (copy_h < dst_h)
-        fill_rect_bgra(dst, p, 0, copy_h, dst_w, dst_h - copy_h,
-                       PP_DISPLAY_CLEAR_BGRA);
-    if (copy_w < dst_w)
-        fill_rect_bgra(dst, p, copy_w, 0, dst_w - copy_w, copy_h,
-                       PP_DISPLAY_CLEAR_BGRA);
-
-    return copied;
 }
 
 int pp_playback_has_display(const pp_playback *pb)
 {
-    return pb && pb->display_ready;
+    return pb && pb->gl_ready;
+}
+
+int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f)
+{
+    int got = 0;
+    if (f)
+        memset(f, 0, sizeof(*f));
+    if (!pb || !f)
+        return 0;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    if (pb->hold_valid && pb->hold_buf) {
+        f->y        = pb->hold_buf;
+        f->y_pitch  = pb->hold_ypitch;
+        if (pb->hold_planar) {
+            f->u        = pb->hold_buf + pb->hold_u_off;
+            f->v        = pb->hold_buf + pb->hold_v_off;
+            f->u_pitch  = pb->hold_upitch;
+            f->v_pitch  = pb->hold_vpitch;
+        } else {
+            f->uv       = pb->hold_buf + pb->hold_uv_off;
+            f->uv_pitch = pb->hold_uvpitch;
+        }
+        f->coded_w  = pb->hold_cw;
+        f->coded_h  = pb->hold_ch;
+        f->disp_w   = pb->hold_dw;
+        f->disp_h   = pb->hold_dh;
+        f->ten_bit  = pb->hold_ten_bit;
+        f->color_trc = pb->hold_color_trc;
+        f->ready    = 1;
+        f->held     = 1;
+        got = 1;
+    } else if (pb->gl_ready && pb->gl_src_y) {
+        f->y        = pb->gl_src_y;
+        f->uv       = pb->gl_src_uv;
+        f->u        = pb->gl_src_u;
+        f->v        = pb->gl_src_v;
+        f->y_pitch  = pb->gl_src_ypitch;
+        f->uv_pitch = pb->gl_src_uvpitch;
+        f->u_pitch  = pb->gl_src_upitch;
+        f->v_pitch  = pb->gl_src_vpitch;
+        f->coded_w  = pb->gl_cw;
+        f->coded_h  = pb->gl_ch;
+        f->disp_w   = pb->gl_dw;
+        f->disp_h   = pb->gl_dh;
+        f->ten_bit  = pb->gl_ten_bit;
+        f->color_trc = pb->gl_color_trc;
+        f->ready    = 1;
+        got = 1;
+    }
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+    return got;
 }
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
 {
     if (!pb)
+        return;
+    /*
+     * One seek announces itself twice: PlaybackController::seekTo arms it on
+     * the UI thread, then the demux thread arms it again when it picks the
+     * request up. Arming twice double-counts the request, restarts the
+     * seek_to_first_frame timer, and re-snapshots the held frame from decoder
+     * planes the second caller has no pacing guarantee on. Arm once.
+     */
+    if (pb->seek_discarding && pb->seek_target_us == target_pts_us)
         return;
     pb->stats.seek_requests++;
     pb->seek_discarding = 1;
@@ -555,7 +443,7 @@ void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
     pp_clock_pause(&pb->clock);
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));
-    pb->display_ready = 0;
+    pb->hold_valid = hold_snapshot(pb);
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
 }
@@ -572,6 +460,12 @@ void pp_playback_notify_seek_end(pp_playback *pb, int success,
     else {
         pb->stats.seek_failures++;
         pb->seek_discarding = 0;
+        /* No frames are coming to clear the hold; go back to the live planes. */
+        if (pb->lock)
+            pthread_mutex_lock(mtx(pb));
+        pb->hold_valid = 0;
+        if (pb->lock)
+            pthread_mutex_unlock(mtx(pb));
     }
     /* clock re-start happens on first post-seek push_frame */
 }
@@ -611,42 +505,36 @@ uint64_t pp_playback_convert_p95_us(const pp_playback *pb)
     return tmp[idx];
 }
 
-void pp_playback_write_stats_file(const pp_playback *pb, const char *path)
+void pp_playback_log_stats(const pp_playback *pb)
 {
-    FILE *f;
     pp_clock_stats cs;
     uint64_t avg = 0;
-    if (!pb || !path)
-        return;
-    f = fopen(path, "w");
-    if (!f)
+    if (!pb)
         return;
     pp_clock_get_stats(&pb->clock, &cs);
     if (pb->stats.frames_converted)
         avg = pb->stats.convert_us_total / pb->stats.frames_converted;
-    fprintf(f, "pp_playback_stats\n");
-    fprintf(f, "output=%ux%u aspect=%d\n", pb->out_w, pb->out_h, (int)pb->cfg.aspect);
-    fprintf(f, "frames_in=%llu converted=%llu published=%llu late_drop=%llu seek_disc=%llu\n",
+    evo_boot_log("stats output=%ux%u aspect=%d", pb->out_w, pb->out_h, (int)pb->aspect);
+    evo_boot_log("stats frames_in=%llu converted=%llu published=%llu late_drop=%llu seek_disc=%llu",
             (unsigned long long)pb->stats.frames_in,
             (unsigned long long)pb->stats.frames_converted,
             (unsigned long long)pb->stats.frames_published,
             (unsigned long long)pb->stats.frames_late_dropped,
             (unsigned long long)pb->stats.frames_discarded_seek);
-    fprintf(f, "convert_us_avg=%llu convert_us_p95=%llu convert_us_max=%llu\n",
+    evo_boot_log("stats publish_us_avg=%llu p95=%llu max=%llu",
             (unsigned long long)avg,
             (unsigned long long)pp_playback_convert_p95_us(pb),
             (unsigned long long)pb->stats.convert_us_max);
-    fprintf(f, "seek_requests=%llu seek_ok=%llu seek_fail=%llu clock_resets=%llu seek_to_first_ms=%llu\n",
+    evo_boot_log("stats seek_req=%llu ok=%llu fail=%llu clock_resets=%llu seek_to_first_ms=%llu",
             (unsigned long long)pb->stats.seek_requests,
             (unsigned long long)pb->stats.seek_successes,
             (unsigned long long)pb->stats.seek_failures,
             (unsigned long long)pb->stats.clock_resets,
             (unsigned long long)pb->stats.seek_to_first_frame_ms);
-    fprintf(f, "clock_late_drops=%llu early_sleeps=%llu pause=%llu resume=%llu\n",
+    evo_boot_log("stats clock_late_drops=%llu early_sleeps=%llu pause=%llu resume=%llu sample_luma=%u",
             (unsigned long long)cs.late_drops,
             (unsigned long long)cs.early_sleeps,
             (unsigned long long)cs.pause_count,
-            (unsigned long long)cs.resume_count);
-    fprintf(f, "sample_bgra=0x%08X\n", (unsigned)pb->stats.sample_bgra);
-    fclose(f);
+            (unsigned long long)cs.resume_count,
+            (unsigned)pb->stats.sample_luma);
 }

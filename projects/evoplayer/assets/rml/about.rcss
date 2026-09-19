@@ -1,0 +1,515 @@
+/* =============================================================================
+ * EVO PLAYER PRO - Dedicated About & Capabilities RCSS Stylesheet
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #ffffff;
+    background-color: #06090e;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, p {
+    box-sizing: border-box;
+}
+
+/* Content pane leaving the channel for the standalone navbar rail */
+#content-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* =============================== Hero Header =============================== */
+
+#about-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-top: 56dp;
+    margin-bottom: 22dp;
+    width: 1704dp;
+}
+
+#header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#header-indicator {
+    width: 5dp;
+    height: 64dp;
+    background-color: #0070d1;
+    border-radius: 2dp;
+    margin-right: 18dp;
+}
+
+#header-icon-box {
+    width: 60dp;
+    height: 60dp;
+    background-color: #131c2e;
+    border-width: 1dp;
+    border-color: #1e2c44;
+    border-radius: 16dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 20dp;
+}
+
+#header-icon {
+    width: 32dp;
+    height: 32dp;
+    display: inline-block;
+}
+
+#header-titles {
+    display: flex;
+    flex-direction: column;
+}
+
+#header-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#about-title {
+    font-size: 38dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+#about-version-pill {
+    background-color: #0070d1;
+    border-width: 1dp;
+    border-color: #38bdf8;
+    border-radius: 8dp;
+    padding: 4dp 12dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+#about-build-tag {
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5dp;
+}
+
+#about-tagline {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #8fa0b5;
+    letter-spacing: 1dp;
+    margin-top: 4dp;
+}
+
+/* ============================ Action Buttons Bar ============================ */
+
+#header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 6dp;
+}
+
+.action-btn {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+    padding: 12dp 26dp;
+    border-radius: 18dp;
+    background-color: #0c1322;
+    border-width: 1dp;
+    border-color: #172338;
+}
+
+.action-btn.btn-focused {
+    background-color: #142036;
+    border-width: 1.5dp;
+    border-color: #38bdf8;
+}
+
+.btn-cross-icon {
+    width: 22dp;
+    height: 22dp;
+    display: inline-block;
+}
+
+.btn-icon {
+    width: 24dp;
+    height: 24dp;
+    display: inline-block;
+}
+
+.btn-label {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.8dp;
+}
+
+/* =================== Codec & Capabilities Matrix =================== */
+
+#matrix-section {
+    width: 1704dp;
+    margin-bottom: 22dp;
+}
+
+.section-header {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12dp;
+}
+
+.section-title {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1.5dp;
+    margin-bottom: 4dp;
+}
+
+.section-subtitle {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 0.5dp;
+}
+
+#matrix-grid {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 1704dp;
+}
+
+/* Non-interactive static cards: no hover outlines or selection halos */
+.matrix-card {
+    width: 840dp;
+    height: 340dp;
+    background-color: #0c1322;
+    border-width: 1dp;
+    border-color: #172338;
+    border-radius: 20dp;
+    padding: 22dp 28dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.card-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4dp;
+}
+
+.card-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+}
+
+.card-status-dot {
+    width: 10dp;
+    height: 10dp;
+    border-radius: 5dp;
+}
+
+.dot-hw {
+    background-color: #10b981;
+}
+
+.dot-sw {
+    background-color: #38bdf8;
+}
+
+.card-title {
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.5dp;
+}
+
+.card-badge {
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 12dp;
+    font-weight: bold;
+    letter-spacing: 0.5dp;
+}
+
+.badge-hw {
+    background-color: #064e3b;
+    border-width: 1dp;
+    border-color: #059669;
+    color: #34d399;
+}
+
+.badge-sw {
+    background-color: #172554;
+    border-width: 1dp;
+    border-color: #1d4ed8;
+    color: #60a5fa;
+}
+
+.card-engine-tag {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #7e92ab;
+    letter-spacing: 0.5dp;
+    margin-bottom: 12dp;
+}
+
+.matrix-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9dp;
+}
+
+.matrix-row {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 6dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #141d2e;
+}
+
+.matrix-row-title {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.3dp;
+}
+
+.matrix-row-desc {
+    font-size: 13dp;
+    font-weight: normal;
+    color: #94a3b8;
+    margin-top: 2dp;
+}
+
+/* =================== Technical Specs & Environment Grid =================== */
+
+#specs-section {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 1704dp;
+}
+
+/*
+ * Non-interactive spec cards.
+ *
+ * These used to stop at 228dp, which left the bottom third of the page empty
+ * above the footer while the rows inside were crowded together. Taller cards
+ * and roomier rows use the space the page already had.
+ */
+.spec-card {
+    width: 552dp;
+    height: 404dp;
+    background-color: #090f1b;
+    border-width: 1dp;
+    border-color: #152033;
+    border-radius: 18dp;
+    padding: 18dp 24dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.spec-card-title {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1dp;
+    margin-bottom: 12dp;
+    padding-bottom: 8dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #152033;
+}
+
+.spec-item {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    height: 76dp;
+    margin-bottom: 0;
+    border-bottom-width: 1dp;
+    border-bottom-color: #121c2c;
+}
+
+/* The last row in a card has nothing under it to separate from. */
+.spec-item-last {
+    border-bottom-width: 0;
+}
+
+.spec-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #64748b;
+    letter-spacing: 0.5dp;
+}
+
+.spec-value {
+    font-size: 14dp;
+    font-weight: normal;
+    color: #e2e8f0;
+}
+
+/* =============================== Footer Hints =============================== */
+
+#about-footer {
+    position: absolute;
+    bottom: 36dp;
+    left: 0;
+    width: 1704dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 32dp;
+}
+
+.footer-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.glyph-badge {
+    width: 36dp;
+    height: 36dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 18dp;
+    background-color: rgba(20, 40, 80, 0.9);
+}
+
+.glyph-badge-img {
+    width: 24dp;
+    height: 24dp;
+}
+
+.footer-text {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1dp;
+}
+
+#footer-build-meta {
+    margin-left: auto;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #475569;
+    letter-spacing: 0.8dp;
+}
+
+/* =============================== Facts + links ===============================
+ * Four facts across, then three quiet link rows. Generous space between them
+ * is the point: the page it replaced fitted thirty rows into the same area and
+ * was unreadable for it.
+ * ========================================================================== */
+
+#about-facts {
+    position: absolute;
+    left: 0;
+    top: 232dp;
+    width: 1704dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.fact {
+    width: 400dp;
+    height: 252dp;
+    padding: 34dp 30dp;
+    border-radius: 20dp;
+    background-color: #0b111d;
+    border-width: 1dp;
+    border-color: #172338;
+    display: flex;
+    flex-direction: column;
+}
+
+.fact-key {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 1.6dp;
+}
+
+.fact-value {
+    font-size: 30dp;
+    font-weight: bold;
+    color: #f2f7ff;
+    margin-top: 16dp;
+}
+
+.fact-note {
+    font-size: 14dp;
+    font-weight: normal;
+    color: #7c8da3;
+    margin-top: 18dp;
+}
+
+#about-links {
+    position: absolute;
+    left: 0;
+    top: 548dp;
+    width: 1704dp;
+    display: flex;
+    flex-direction: column;
+}
+
+.link-row {
+    width: 1704dp;
+    height: 116dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #131d2e;
+}
+
+.link-key {
+    width: 220dp;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #5a6b82;
+    letter-spacing: 1.4dp;
+}
+
+.link-value {
+    font-size: 17dp;
+    font-weight: normal;
+    color: #cfdcef;
+}

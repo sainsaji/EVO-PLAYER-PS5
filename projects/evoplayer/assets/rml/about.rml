@@ -1,0 +1,97 @@
+<rml>
+<head>
+    <link type="text/rcss" href="about.rcss"/>
+</head>
+<body id="about-body">
+    <!-- Navigation rail is rendered via standalone navbar.rml overlay -->
+
+    <div id="content-pane">
+        <!-- Hero Header -->
+        <div id="about-header">
+            <div id="header-left">
+                <div id="header-indicator"></div>
+                <div id="header-icon-box">
+                    <img id="header-icon" src="../icons/icon_about_support.png"/>
+                </div>
+                <div id="header-titles">
+                    <div id="header-title-row">
+                        <span id="about-title">EVO PLAYER PRO</span>
+                        <span id="about-version-pill" class="badge-pill">v0.9.0</span>
+                        <span id="about-build-tag" class="badge-tag">PS5 HOMEBREW</span>
+                    </div>
+                    <div id="about-tagline">CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW</div>
+                </div>
+            </div>
+            <div id="header-right">
+                <!-- Action Button: Primary Interactive Element -->
+                <div id="action-changelog" class="action-btn btn-focused">
+                    <img class="btn-cross-icon" src="../icons/btn_cross.png"/>
+                    <img class="btn-icon" src="../icons/icon_recent_files.png"/>
+                    <span class="btn-label">VIEW CHANGELOG</span>
+                </div>
+            </div>
+        </div>
+
+        <!--
+             Deliberately sparse. This page previously carried thirty-odd rows
+             across five cards - a capability matrix, a spec grid and a links
+             block - which read as a wall of marketing copy rather than an
+             about page. What a person wants here is what it is, what it is
+             running on, and where to find it.
+        -->
+        <div id="about-facts">
+            <div class="fact">
+                <div class="fact-key">DECODE</div>
+                <div class="fact-value">Hardware</div>
+                <div class="fact-note">H.264 &#183; HEVC &#183; VP9 on sceVideodec2, FFmpeg where the silicon cannot</div>
+            </div>
+            <div class="fact">
+                <div class="fact-key">RENDER</div>
+                <div class="fact-value">Bare-metal GPU</div>
+                <div class="fact-note">RmlUi drawn directly through sceAgc, zero-copy video present</div>
+            </div>
+            <div class="fact">
+                <div class="fact-key">MEDIA CORE</div>
+                <div class="fact-value">FFmpeg 7.0.1</div>
+                <div class="fact-note">Demux, software fallback, subtitles and surround downmix</div>
+            </div>
+            <div class="fact">
+                <div class="fact-key">TARGET</div>
+                <div class="fact-value">Firmware 12.70</div>
+                <div class="fact-note">PPSA99039 app module on the PS5 Payload SDK</div>
+            </div>
+        </div>
+
+        <div id="about-links">
+            <div class="link-row">
+                <span class="link-key">PROJECT</span>
+                <span class="link-value">github.com/sainsaji/EVO-PLAYER-PS5</span>
+            </div>
+            <div class="link-row">
+                <span class="link-key">THEMES</span>
+                <span id="about-themes-detail" class="link-value">Drop .theme files on USB0</span>
+            </div>
+            <div class="link-row">
+                <span class="link-key">LICENSE</span>
+                <span class="link-value">Open-source, community software</span>
+            </div>
+        </div>
+
+        <div id="about-footer">
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">SELECT ACTION</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">BACK TO HOME</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">SIDEBAR MENU (LEFT)</span>
+            </div>
+            <div id="footer-build-meta">EVO PLAYER PRO • PLAYSTATION 5 HOMEBREW</div>
+        </div>
+    </div>
+</body>
+</rml>

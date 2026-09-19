@@ -1,6 +1,27 @@
 # Native hardware decode — integration plan
 
-> **Status:** Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
+> **2026-09-09 cleanup:** the `--agc-probe` / `--videodec2-probe` / `--avplayer-probe` / `--geo-text` / `--shader-scan` build flags and their `projects/evoplayer/src/evo_*_probe.c` + `evo_shader_scan.c` (and `projects/{agc_probe,avplayer_test}/`) were **removed**. `sceAgc` present + native `sceVideodec2` decode are unconditional in the app module now. Passages below that name those flags/files are historical — see git history. Native-decode research base is now `third_party/ps5-hardware-video-decoding-research/`.
+>
+
+> **Status (2026-09-03):** **Phase 4 DONE — #31 closed.** GTA VI 4K H.264 plays
+> real-time on `sceVideodec2` inside `PPSA99039` (`be=1` NATIVE, `pos` climbs
+> 1.0×, `fatal=0`, colours correct). `media/src/evo_vdec_native.c` is the
+> backend behind `evo_vdec.h`.
+>
+> **Phase 5 done — #37 closed 2026-09-05** (code-complete, hw-verify-pending):
+> the `Auto / FFmpeg / Native` settings row, `evo_vdec_pref_resolve()`, config
+> migration and the Media Info decoder badge all landed — see the Phase 5
+> section below for what shipped.
+>
+> **The #29 umbrella is retired** — the remaining work is discrete GitHub
+> stories under the **`native-decode`** label: **#38** (Phase 6 —
+> validation sweep + FFmpeg-vs-native A/B benchmark + docs), **#39**
+> (decode-thread watchdog), **#40** (route direct memory via `evo_direct_mem` +
+> soak), **#41** (HEVC — 2nd resident decoder), plus **#32** (scrub shows no
+> player UI on the V8 4K path — not a freeze). The phase sections below are the
+> design detail each story points back to. History of the gate follows.
+>
+> Phase 1 go/no-go gate **PASSED on hardware (2026-09-01)**. The
 > "registered app slot" hypothesis is confirmed: from a fake-signed
 > game-category app module the full `sceVideodec2` sequence —
 > `CreateDecoder` **and `Decode`** — returns `0` and produces a valid
@@ -186,27 +207,31 @@ Turn the reference implementation's decode code into C headers under
       (`Avc=1`, `Hevc=974921`, `Vp9=2382845`), memory-typing crib, and the full
       call sequence are in [videodec2-abi.md](videodec2-abi.md). Header
       compiles as C11 and C++20.
-- [ ] `sce_avplayer.h` — from `AvPlayer.cs`: `AvPlayerInitData` (120 bytes,
-      every field offset is in the C# doc-comments), the three callback blocks
-      (`MemAllocator` 40B, `FileReplacement` 40B, `EventReplacement` 16B),
-      `AvPlayerFrameInfoEx` (104 bytes — offsets 0/16/24/28/44/48/52/56/60),
-      stream-info structs.
-- [ ] NID list for both modules — resolve names → NIDs with
-      `$PS5_PAYLOAD_SDK/bin/prospero-nid` (or `SharpProspero`'s `nid` command)
-      and cross-check against the prior `decoder_test` findings for
-      `libSceAvPlayer` (six known-good addresses in
-      [native-media-research.md](../native-media-research.md#results-log)).
-- [ ] Port `MediaPlayer`'s allocator + texture-slot callbacks
-      (`AllocateTexture` / `DeallocateTexture` in `MediaPlayer.cs`) to C. These
-      show exactly which memory type the decoder's output buffers need
-      (`sceKernelAllocateDirectMemory` + `MemoryTypeCachedShared` +
-      `ProtCpuReadWrite | ProtGpuAll`) — the detail EVO's `sceVideodec2` try
-      may have got wrong. `VideoDecoder.CreateAvc` uses
-      `MemoryTypeCachedShared` for CPU-GPU regions, `MemoryTypeCached` for the
-      GPU region, `MapNoCoalesce`, compute pipe 0 / queue 0.
+- [x] `sce_avplayer.h` — done 2026-09-02, transcribed from SharpProspero
+      (`AvPlayer.cs` + `MediaPlayer.cs`). `SceAvPlayerInitData` (120 B), the
+      three callback blocks (`MemAllocator` 40B, `FileReplacement` 40B —
+      **object-ptr first, `readOffset` only**, not the PS4 shape —
+      `EventReplacement` 16B), `SceAvPlayerFrameInfoEx` (104 B, pitch @ 0x3C +
+      four crop insets @ 0x2C..0x38), stream-info structs. Sizes/offsets
+      `_Static_assert`ed; compiles as C11 and C++17. Full write-up:
+      avplayer-abi.md *(not written)*.
+- [x] NID handling — the header pins the six hw-verified core NIDs in a
+      comment for cross-check, but calling code **computes** every NID
+      (`nid_encode` in a payload, inline SHA1 in the app module) rather than
+      hardcoding — an earlier draft's pasted NID table was scrambled.
+- [x] Port `MediaPlayer`'s allocator + texture-slot callbacks to C — done in
+      `projects/avplayer_test/main.c` (general = aligned heap; texture =
+      GPU-visible direct memory + `(addr→offset,size)` slot table; the
+      deallocator unmaps *and* releases). Memory-typing diff vs.
+      `hardware-decode.md` (old try used `WC_GARLIC` 3; SharpProspero uses
+      `MemoryTypeCachedShared` 12 / prot 0x33) written up in
+      avplayer-abi.md *(not written)* §4, including the **payload caveat**:
+      `sceKernelGetDirectMemorySize()` is 0 in a payload so the spike uses the
+      main pool; if the decoder rejects it, Route A needs the app-module
+      context.
 
-**Deliverable:** headers compile; a written diff of SharpProspero's memory
-typing vs. what `research/hardware-decode` recorded.
+**Deliverable:** headers compile (done); memory-typing diff written
+(avplayer-abi.md *(not written)* §4).
 
 ### Phase 1 — run EVO Player from an app slot
 
@@ -239,31 +264,70 @@ and establish whether that context differs from the payload.
 **This is the go/no-go gate.** If `sceVideodec2Decode` still returns errno
 5200 here *and* the `sceAvPlayer` spike in Phase 2 also fails, stop — §8.
 
-### Phase 2 — native decode spike (`projects/avplayer_test`, in the app context)
+### Phase 2 — native decode spike (in the app module — payloads can't decode)
 
-Run inside the Phase 1 app slot. Timeboxed. Two independent probes; run A
-first (cheaper payoff is larger, and it is the untried one).
+Both probes run **inside `PPSA99039`** (the errno-5200 wall is a payload/hbldr
+sandbox limit; only the registered app module has hardware decode). Timeboxed.
+Run A first — it's the untried route.
 
-**Route A — `sceAvPlayer`:**
-- [ ] `sceAvPlayerInit` with the Phase 0 struct, allocators wired to
-      `NativeMemory`-style aligned alloc, **file-replacement callbacks that
-      only log** (per hardware-decode-review §8 — instrument before the first
-      call), debug level `All`.
-- [ ] `sceAvPlayerAddSource` on a small H.264 MP4 on USB.
-- [ ] `sceAvPlayerStart` → poll `sceAvPlayerGetVideoDataEx` → dump the first
-      frame's NV12 planes + `AvPlayerFrameInfoEx` fields to USB.
-- [ ] Characterise the frame (hardware-decode-review §5): NV12? tiled or
-      linear? `pitch` vs `width`? CPU-readable without a fault? cacheable?
+**Route A — `sceAvPlayer`:** the probe is **built into the app module** behind
+`-DEVO_AVPLAYER_PROBE` — `projects/evoplayer/src/evo_avplayer_probe.c` (boot-time,
+like `evo_agc_probe.c`). It does all four steps below; Phase 2 is now just
+*launching EVO on the console with a test file present* and reading the
+`EVO avplayer:` popups against avplayer-abi.md *(not written)* §5.
+- [x] `sceAvPlayerInit` with the Phase 0 struct; general heap + texture
+      allocator (`AllocateMainDirectMemory` type 12→3, prot 0x33); log+serve
+      file callbacks; debug `All`; watchdog thread `_exit()`s EVO on a hang.
+- [x] `sceAvPlayerAddSource` (auto-finds `/data/probe.mp4` /
+      `/mnt/usb0/probe.mp4` / `/download0/evoplayer/probe.mp4`), then
+      `StreamCount` / `GetStreamInfo` / `EnableStream`.
+- [x] `sceAvPlayerStart` → poll `sceAvPlayerGetVideoDataEx` → dump the first
+      frame + metadata to `/download0/evoplayer/avpx_frame0.*`.
+- [x] Characterise: `pitch` vs `width`, the four crop insets, CPU-readable
+      (SIGSEGV-guarded), rough NV12 sanity, which texture memory type worked.
+- [x] **RAN on hardware 2026-09-03** →
+      `EVO avplayer: libSceAvPlayer.sprx load FAILED - Route A blocked`.
+      Same wall as `libSceAgc` (#27): a fake-signed app module can't
+      `sceKernelLoadStartModule` a system PRX it didn't declare NEEDED.
+- [ ] **BLOCKER: `libSceAvPlayer` import stub** — must be added to the
+      app-module link (`tools/native-app/` + `package-app.sh`), same
+      prerequisite as #27's `libSceAgc` stub and Route B's `libSceVideodec2`.
+      SharpProspero's `tools/SharpProspero.Prx/` (StubEmitter / StubCatalog) is
+      the reference; `prospero-nid` + `evo_avplayer_probe.c`'s symbol list give
+      the NID table. Then re-run the gate — symbols resolve directly, no probe
+      dlsym.
+- payload build `projects/avplayer_test/` kept as a compile-checked
+      callback-port reference only.
 
-**Route B — `sceVideodec2`:**
-- [ ] Repeat EVO's phase-9/10 `CreateDecoder` → `Decode`, but with
-      SharpProspero's *exact* memory typing and config values from Phase 0.
-      One deploy. If it still returns 5200, Route B is confirmed dead in this
-      context too.
+**Route B — `sceVideodec2`: ✅ WORKS ON HARDWARE (2026-09-03, PPSA99039).**
+`EVO vdec2: HARDWARE DECODE OK` — every call `0`, `out valid=1 err=0 pics=1
+1920x1088 pitch=2048 codec=1` — from inside the full 43 MB EVO Player, which
+then booted on to the menu. Probe: `projects/evoplayer/src/evo_videodec2_probe.c`
+(`--videodec2-probe`), a C port of ProsperoLight's VDEC self-test.
 
-**Deliverable:** a `pp_frame` filled by a Sony module, dumped and eyeballed;
-or a precise error taxonomy (hardware-decode-review §8) saying which call
-fails and how.
+Two things had to be true, both hard-won:
+- [x] **`libSceVideodec2` (+ `libSceAgc` + `libSceAgcDriver`) linked as a
+      POSITIONAL PRX import stub** (`tools/native-app/stubs/prx/*.syms`,
+      `package-app.sh` step 6b), so the loader auto-loads the `.sprx`. `--as-needed`
+      is not enough — the DT_NEEDED must be unconditional (ProsperoLight does the
+      same). AGC/AgcDriver must be present too or `libSceVideodec2`'s own GPU
+      imports don't resolve.
+- [x] **The decode init must run BEFORE `evo_jailbreak_self()`.** The Lapy /
+      etaHEN self-unjail swaps the process credentials mid-run (uid→0, caps,
+      `fd_rdir`/`fd_jdir`=rootvnode); after that swap `sceSysmoduleLoadModule(207)`
+      returns `0x80020063` (`ESDKVERSION`) and `libSceVideodec2` never finishes
+      loading, so the first `sceVideodec2*` call faults. Run pre-unjail: `sysmod207
+      → 0`, everything works. This is the whole reason ~14 hardware launches were
+      needed — `evo_agc_probe`'s failed `sceKernelLoadStartModule` calls are a
+      red herring; the unjail is the poison. → [[native-decode-app-slot-plan]]
+- Note: `sceSysmoduleLoadModule(207)` (public) works pre-unjail; the *Internal*
+      variant (`0x800000B2`) returns `0x80020008` — use the public one.
+
+**Route A** (`sceAvPlayer`, module `0xA5`) stays dead: `sceSysmoduleLoadModule(0xA5)`
+is refused (`0x80020063`) even pre-unjail, so `sceAvPlayerInit` faults.
+
+**Deliverable met:** a decoded NV12 H.264 frame from `sceVideodec2` inside EVO's
+own signed package. → Phase 4.
 
 ### Phase 3 — decoder abstraction refactor (ships regardless)
 
@@ -273,75 +337,140 @@ fails and how.
 > `evo_vdec.h`. Once Track A lands, Phase 3 is "add `evo_vdec_native.c` beside
 > `evo_vdec_ffmpeg.c`" and the rest of this section is already done.
 
-- [ ] Add `evo_vdec.h` (§3) + `evo_vdec_ffmpeg.c` — move `play_ctx`,
+- [x] Add `evo_vdec.h` (§3) + `evo_vdec_ffmpeg.c` — move `play_ctx`,
       `avcodec_open2`, the send/receive loop, and `pp_map_avframe` /
-      `pp_map_yuv420p10_to_8` out of `main.c` behind the interface.
-- [ ] `main.c` play loop calls `evo_vdec_send` / `evo_vdec_receive` and keeps
+      `pp_map_yuv420p10_to_8` out of `main.c` behind the interface. *(Track A A6.)*
+- [x] `main.c` play loop calls `evo_vdec_send` / `evo_vdec_receive` and keeps
       pushing `pp_frame` into `pp_playback` exactly as now.
-- [ ] Seek path (`main.c:5559`+) calls `evo_vdec_flush`.
-- [ ] Verify bit-exact parity: the codec sweep in
-      [validation.md](../validation.md) plus `tools/bench.sh` plane hashes
-      unchanged.
-- [ ] Host preview (`tools/uiview_playback_rml`) links `evo_vdec_ffmpeg` and
-      is unaffected.
+- [x] Seek path calls `evo_vdec_flush` — all three video seek entry points
+      (`main.c` resume-seek, `evo_demux.c` scrub/seek-request, and the play
+      loop's flush) route through it. The one-shot cover/poster extractor
+      (`main.c`) and the scrub-preview worker (`media/src/prospero_thumbnail.c`)
+      keep their own isolated `av_seek_frame` + `avcodec_flush_buffers` on
+      purpose — separate AVFormatContext, not the play stream.
+- [x] `#30` sign-off: dead `ffmpeg_mkv_test()` inline decoder removed; the
+      cover/poster extractor documented as staying out of the seam (its home is
+      `evo_cover`, modularisation-plan Track B / B6). `evo_vdec_ffmpeg.c` is now
+      the only file with play-stream `avcodec_*` / `sws_*`.
+- [ ] Verify bit-exact parity on hardware: codec sweep +
+      [validation.md](../validation.md), `tools/bench.sh` plane hashes. Expected
+      identical — the play loop has routed through `evo_vdec` since A6 and `#30`
+      made no decode-path behaviour change — this is the empirical sign-off.
+- [x] Host preview (`tools/uiview_playback_rml.sh`) builds + renders. *(It no
+      longer links `evo_vdec_ffmpeg` directly — it exercises only the RmlUi
+      screens — so it is structurally unaffected.)*
 
-### Phase 4 — native backend
+### Phase 4 — native backend — **#31**
 
-- [ ] `evo_vdec_native.c` implementing whichever of Route A / B survived
-      Phase 2, producing `pp_frame` (NV12; crop applied from
-      `AvPlayerFrameInfoEx` insets, which are measured from the pitch — see
-      `MediaPlayer.cs` `VideoFrame` remarks).
-- [ ] Frame-buffer lifetime: the native buffer is valid only until the next
-      `GetVideoDataEx` / `Decode` — either the converter consumes it in the
-      same tick (it does today) or `evo_vdec_native` copies into a ring. Prefer
-      the former; `pp_playback` already converts synchronously on push.
-- [ ] Wire the direct-memory allocations through the existing
-      `evo_direct_mem` slab pool
-      ([evo_direct_mem.c](../../projects/evoplayer/media/src/evo_direct_mem.c))
-      rather than raw `sceKernelAllocateDirectMemory`, so multi-hour playback
-      doesn't fragment.
-- [ ] Watchdog in the decode thread (hardware-decode-review §7): if no frame
-      in N seconds, log every thread's state and fall back to FFmpeg — never
-      hang holding VideoOut.
+Route B (`sceVideodec2`) survived Phase 2. Port the proven sequence from
+`projects/evoplayer/src/evo_videodec2_probe.c` — do not re-derive.
 
-### Phase 5 — settings toggle + runtime probe
+**DONE on hardware (#31, 2026-09-03).** GTA VI 4K H.264 plays real-time on
+`sceVideodec2` in EVO — colours correct, no judder, `fatal=0`. Frame order is
+display-order. Remaining: **#32 — scrub blanks player UI on the V8 4K path**
+(not a freeze; the `pp_product_k4_live` present path never composites the OSD
+and `v8_hold` skips the flip during the seek-discard window) — **fix landed
+(`a0cc708`+`5d305ab`):** the interactive scrub drops to the 1080 overlay VO via
+a render-loop state machine gated on `video_decode_parked` (the naive version
+raced `pp_playback`'s unlocked converter against the VO teardown and crashed),
+hw-verify pending — and Phase 5 (settings row).
 
-- [ ] `evo_vdec_probe()` at startup (or first playback): load the module,
+- [x] `evo_vdec_native.c` implementing `evo_vdec.h` against `sceVideodec2`.
+      Crop applied (`disp_w/h` from the demuxer vs the coded
+      `OutputInfo.width/height`); chroma offset uses the **coded** luma height,
+      `pitch_bytes` for stride. mp4/mkv AUs run through the `*_mp4toannexb` bsf.
+      **Output format depends on the renderer (#27):** by default `ro_harvest`
+      de-interleaves NV12 → planar **`PP_FRAME_YUV420P`** (EVO's fast / parallel
+      / 4K CPU converters only accept YUV420P — NV12 at 4K silently draws
+      black). When `pp_agc_available()` it emits **straight `PP_FRAME_NV12`**
+      (one flat copy, no CPU touch) for the sceAgc GPU present path, and
+      `pp_frame.coded_height` carries the MB-padded luma height so
+      `pp_agc_present_nv12` can find the UV plane. `pp_playback.c` has an
+      NV12→YUV420P fallback for any path that isn't the AGC one.
+- [x] **Module load before the first `evo_jailbreak_self()`** —
+      `evo_vdec_probe()` at `main.c` ~12146, right after `evo_videodec2_probe()`.
+      Open HW question (does `CreateDecoder` after `evo_jailbreak_ensure()`
+      still work) is called out in `status.md` for the first run.
+- [x] `libSceVideodec2` + `libSceAgc` + `libSceAgcDriver` positional PRX stubs
+      unconditional for `MODE == player` in `package-app.sh` step 6b.
+- [x] Frame-buffer lifetime: `evo_vdec_native` **copies** each picture out of
+      the frame pool into a small reorder window (needed anyway — the reorder
+      window is also the B-frame display-order safety net, and there is no
+      output-PTS/picture-detail call bound). One extra full-frame read+write
+      per frame; the converter reads every byte immediately after regardless.
+- [ ] Wire the direct-memory allocations through `evo_direct_mem` + multi-hour
+      soak — **#40** (deferred; the probe's raw path is hardware-verified).
+- [ ] Watchdog in the decode thread (hardware-decode-review §7) — **#39**
+      (deferred). A native call that *returns* an error falls back cleanly
+      (`evo_playback`'s fatal-streak → finished screen); a native call that
+      *hangs* still wedges the app slot.
+- [ ] HEVC — a 2nd resident `sceVideodec2` decoder — **#41** (H.264 8-bit ≤4K
+      only today; HEVC / >4K / 10-bit fall back to FFmpeg).
+
+### Phase 5 — settings toggle + runtime probe — **#37** ✅ done 2026-09-05
+
+- [x] `evo_vdec_probe()` at startup (or first playback): load the module,
       resolve NIDs, run the cheapest non-destructive check
       (`QueryComputeMemoryInfo`, or `sceAvPlayerInit`+`Close`). Cache the
-      result. Never probe on the render thread.
-- [ ] Settings model — a new tri-state in the flat config:
-      `EVO_VDEC_PREF_AUTO` / `_FFMPEG` / `_NATIVE`.
-  - `AUTO` → native if the probe passed and the codec is supported (H.264,
-    later HEVC), else FFmpeg.
+      result. Never probe on the render thread. *(Already existed from Phase
+      4 — `evo_vdec_native_probe()` is called once pre-unjail and cached; this
+      phase just added the user-facing preference on top of it.)*
+- [x] Settings model — a new tri-state in `evo_vdec.h`:
+      `EVO_VDEC_PREF_AUTO` / `_FFMPEG` / `_NATIVE`, resolved by
+      `evo_vdec_pref_resolve(pref, codec_id)` (`media/src/evo_vdec_ffmpeg.c`).
+  - `AUTO` → native if the probe passed and the codec is H.264 (the only one
+    `evo_vdec_native.c` supports today), else FFmpeg.
   - `FFMPEG` → always FFmpeg.
-  - `NATIVE` → native; if the probe failed, show it greyed with "unavailable"
-    and behave as FFmpeg.
-- [ ] Config migration in `prospero_settings_save` / `_load`
-      ([main.c:12428](../../projects/evoplayer/main.c#L12428) /
-      [:12511](../../projects/evoplayer/main.c#L12511)): append **one `%d`** after
-      `evo_keyboard_get_type()` in the `fprintf`, add one field to the
-      `fscanf` format and one default (`loaded_vdec_pref = 0`). This is the
-      exact pattern the file's own comments describe for the theme-name /
-      feedback / subtitle-face / keyboard-type appends — an older file still
-      parses and keeps the default.
-- [ ] Settings screen — add a **"Video decoder"** row to
-      `SCREEN_SETTINGS_PLAYBACK`:
-  - bump `EVO_SETTINGS_PLAYBACK_COUNT` 4 → 5
-      ([main.c:232](../../projects/evoplayer/main.c#L232));
-  - add the `settings_playback_selected == 4` branch in
-    `settings_playback_activate()`
-    ([main.c:12901](../../projects/evoplayer/main.c#L12901)) cycling
-    AUTO→FFMPEG→NATIVE with a `toast()` and `prospero_settings_save()`;
-  - render the row + current value in the playback-settings draw code (same
-    place the other four rows draw);
-  - mirror it into the RmlUi settings document
-    (`assets/rml/`, `evo_rmlui_bridge.cpp`) if that screen has been migrated —
-    check `docs/rmlui-integration-guide.md` for current parity.
-- [ ] Changing the toggle mid-playback: apply on next `open_file`, toast
-      "applies to next video". Don't hot-swap a live decoder.
+  - `NATIVE` → **hard**, refuses FFmpeg outright — this is what makes the
+    switch meaningful rather than a slower-to-type `AUTO`. `evo_vdec_open()`'s
+    "never NULL when FFmpeg could open" fallback still exists underneath (it's
+    what `AUTO`/`FFMPEG` and the §2 always-available-default constraint rely
+    on), but `start_video_playback()` compares the resolved preference against
+    `evo_vdec_open()`'s actual `*chosen` backend, and under `NATIVE` a
+    disagreement is treated as a hard failure: closes the FFmpeg decoder
+    `evo_vdec_open()` had already opened for it, shows "NATIVE DECODE
+    UNSUPPORTED" (via `prospero_codec_error`) instead of playing, and returns
+    to the browser — same "toast + stop_video_playback + return" shape as a
+    genuine decoder-init failure. The user reads the message, opens Settings,
+    and switches to `AUTO` or `FFMPEG` themselves; nothing plays silently on
+    software in the meantime. Applies whether the reason is an unsupported
+    codec, a failed probe, or a native bring-up error. The settings row badge
+    also reads `evo_vdec_probe()` directly to show "Native (unavailable)"
+    up front, before a file is even opened.
+  - The **only** exception is `g_vdec_force_ffmpeg` (#57's per-file
+    fatal-streak flag) once it's already latched — see below, it can't latch
+    at all under `NATIVE` any more.
+- [x] Mid-stream native fatal (#57's post-seek `sceVideodec2Reset` reject) is
+      gated the same way: `prospero_playback_finished_update()`'s
+      retry-once-on-FFmpeg only fires when the preference **isn't** `NATIVE`.
+      Under `NATIVE` a mid-file fatal falls straight to the ordinary
+      `SCREEN_PLAYBACK_FINISHED` path (evo_playback's own fatal toast, no
+      FFmpeg reopen) instead of quietly finishing the file on software —
+      consistent with `NATIVE` never falling back, and the reason
+      `g_vdec_force_ffmpeg` can't latch while `NATIVE` is selected.
+- [x] Config migration in `prospero_settings_save` / `_load`: appended one
+      `%d` after `evo_keyboard_get_type()` in the `fprintf`, one field + one
+      default (`EVO_VDEC_PREF_AUTO`) in the `fscanf` — the same
+      older-file-still-parses pattern the function's own comments describe
+      for the theme-name / feedback / subtitle-face / keyboard-type appends.
+- [x] Settings screen — added a **"Video decoder"** row to
+      `SCREEN_SETTINGS_PLAYBACK` (`EVO_SETTINGS_PLAYBACK_COUNT` 4 → 5): cycles
+      AUTO→FFMPEG→NATIVE in `settings_playback_activate()`, toasts "Applies to
+      next video" when changed during a loaded file (never hot-swaps the live
+      decoder) or the resolved badge text otherwise, persists via
+      `prospero_settings_save()`. The row is entirely data-driven through
+      `evo_rmlui_settings_params_t` (generic 8-row array, RmlUi template has 6
+      pre-built row slots) — no `.rml`/`.rcss` change needed.
+- [x] Surfaced the active backend: Media Info's "Subtitles & Engine" card
+      gained a **DECODER** row (`spec-decoder` / `evo_rmlui_mediainfo_params_t
+      ::decoder`) showing "Hardware (sceVideodec2)" / "Software (FFmpeg)" from
+      `evo_pb_active_backend()`.
+- [x] Host preview: `tools/uiview_playback_rml.cpp`'s playback-settings and
+      media-info fixtures cover the new row/field — `evo_vdec_probe()` is
+      already a no-op on host, so the badge naturally reads "Auto (FFmpeg)" /
+      "Native (unavailable)" there with no host-only branch.
 
-### Phase 6 — host preview, validation, docs
+### Phase 6 — host preview, validation, docs — **#38**
 
 - [ ] `tools/uiview_playback_rml` / `uiplay`: the native path can't run on the
       host. Guard `evo_vdec_native` behind `__PROSPERO__` (or the SDK macro
@@ -389,8 +518,10 @@ UI string per state, shown on the row and in the toast:
 | NATIVE | `Native` | `Native — unavailable` (acts as FFmpeg) |
 
 A one-line status under the row when native is active:
-`H.264 · Sony decoder · 3.1 ms/frame` (from the pipeline metrics EVO already
-collects — `pp_pipeline_metrics.h`).
+`H.264 · Sony decoder · 3.1 ms/frame` (from the decode timers in the `evo_vdec`
+seam — `evo_vdec_get_stats()` / `evo_vdec_decode_p95_us()`, #8. The
+`pp_pipeline_metrics.h` this used to point at was never written to by anything
+and was deleted with #8.)
 
 ---
 

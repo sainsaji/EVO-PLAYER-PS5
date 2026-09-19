@@ -6,13 +6,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -23,8 +23,8 @@ div, span, p {
 
 /* Fullscreen Dimmed Scrim */
 #subtitles-scrim {
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     background-color: #000000b8;
     display: flex;
     flex-direction: column;
@@ -35,15 +35,15 @@ div, span, p {
 
 /* Subtitle Modal Card */
 #subtitles-card {
-    width: 960px;
+    width: 960dp;
     background-color: #0c121ffc;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #1e2c44;
-    border-radius: 16px;
-    padding: 34px 44px;
+    border-radius: 24dp;
+    padding: 34dp 44dp;
     display: flex;
     flex-direction: column;
-    margin-bottom: 60px;
+    margin-bottom: 60dp;
 }
 
 /* Header */
@@ -52,8 +52,8 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 24px;
-    width: 872px;
+    margin-bottom: 24dp;
+    width: 872dp;
 }
 
 #header-titles {
@@ -62,61 +62,61 @@ div, span, p {
 }
 
 #subtitles-eyebrow {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
     color: #ffd700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.5dp;
 }
 
 #subtitles-title {
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
+    letter-spacing: 0.5dp;
+    margin-top: 4dp;
 }
 
 #subtitles-size-pill {
     background-color: #131d2e;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #243550;
-    border-radius: 20px;
-    padding: 8px 16px;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .size-glyph {
-    width: 18px;
-    height: 18px;
+    width: 18dp;
+    height: 18dp;
     display: inline-block;
 }
 
 #subtitles-size-label {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #38bdf8;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 /* Track List */
 #subtitles-list {
     display: flex;
     flex-direction: column;
-    width: 872px;
+    width: 872dp;
 }
 
 .sub-row {
-    width: 872px;
-    height: 58px;
+    width: 872dp;
+    height: 58dp;
     background-color: #0d1422;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #172338;
-    border-radius: 10px;
-    margin-bottom: 10px;
-    padding: 0 20px;
+    border-radius: 15dp;
+    margin-bottom: 10dp;
+    padding: 0 20dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
@@ -125,7 +125,7 @@ div, span, p {
 
 .row-focused {
     background-color: #142036;
-    border-width: 1.5px;
+    border-width: 1.5dp;
     border-color: #38bdf8;
 }
 
@@ -136,15 +136,15 @@ div, span, p {
 }
 
 .sub-check-box {
-    width: 22px;
-    height: 22px;
-    border-radius: 11px;
-    border-width: 1.5px;
+    width: 22dp;
+    height: 22dp;
+    border-radius: 11dp;
+    border-width: 1.5dp;
     border-color: #2b3e5c;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 16px;
+    margin-right: 16dp;
 }
 
 .sub-check-box.checked {
@@ -152,9 +152,9 @@ div, span, p {
 }
 
 .sub-check-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 5px;
+    width: 10dp;
+    height: 10dp;
+    border-radius: 5dp;
     background-color: transparent;
 }
 
@@ -163,10 +163,10 @@ div, span, p {
 }
 
 .sub-title {
-    font-size: 17px;
+    font-size: 17dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .sub-right {
@@ -177,14 +177,14 @@ div, span, p {
 
 .sub-badge {
     background-color: #131d2e;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #243550;
-    border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 12px;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 12dp;
     font-weight: bold;
     color: #94a3b8;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .row-focused .sub-badge {
@@ -206,51 +206,51 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 28px;
-    margin-top: 20px;
+    gap: 28dp;
+    margin-top: 20dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .footer-glyph {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 28px;
-    height: 28px;
+    width: 28dp;
+    height: 28dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 14px;
+    border-radius: 14dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 18px;
-    height: 18px;
+    width: 18dp;
+    height: 18dp;
 }
 
 .footer-text {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 /* Live Subtitle Preview Box */
 #subtitles-preview-box {
     position: absolute;
-    bottom: 50px;
+    bottom: 50dp;
     left: 0;
-    width: 1920px;
+    width: 1920dp;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -258,11 +258,11 @@ div, span, p {
 }
 
 #subtitles-preview-label {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
     color: #64748b;
-    letter-spacing: 1.5px;
-    margin-bottom: 8px;
+    letter-spacing: 1.5dp;
+    margin-bottom: 8dp;
 }
 
 #subtitles-preview-text {
@@ -271,13 +271,13 @@ div, span, p {
 }
 
 .preview-small {
-    font-size: 22px;
+    font-size: 22dp;
 }
 
 .preview-medium {
-    font-size: 28px;
+    font-size: 28dp;
 }
 
 .preview-large {
-    font-size: 36px;
+    font-size: 36dp;
 }

@@ -5,272 +5,280 @@
 <body id="browser-body">
     <!-- Navigation rail comes from the standalone navbar.rml overlay -->
 
+    <!-- Wallpaper + scrim. The frosted chrome below has to have something to
+         refract: backdrop-filter over a flat fill returns the same flat fill,
+         so a blurred panel on a solid page looks identical to a plain one.
+         Same plate the settings shell uses, so the two screens read as one
+         surface. -->
+    <div id="browser-wallpaper"></div>
+    <div id="browser-scrim"></div>
+
     <div id="browser-pane">
-        <!-- Header: breadcrumb + counts -->
+        <!-- 1. Top Toolbar: Location, Breadcrumbs, Search, Counter -->
         <div id="browser-header">
             <div id="browser-header-left">
-                <div id="browser-indicator"></div>
-                <div id="browser-header-titles">
-                    <div id="browser-title">SOURCES</div>
-                    <div id="browser-path">SELECT A SOURCE</div>
+                <div id="browser-badge">
+                    <img id="browser-badge-icon" src="../icons/icon_browse_usb.png"/>
                 </div>
+                <div id="browser-title-row">
+                    <span id="browser-title">FILES</span>
+                    <span id="browser-live-dot"></span>
+                </div>
+                <div id="browser-path">Other Locations</div>
             </div>
-            <div id="browser-counter"></div>
-        </div>
-
-        <!-- Left: virtualised file list -->
-        <div id="browser-list">
-            <div id="brow-0" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-0" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-0" class="brow-name"></div>
-                        <div id="brow-detail-0" class="brow-detail"></div>
-                    </div>
+            <div id="browser-header-right">
+                <div id="browser-search-pill">
+                    <img src="../icons/btn_square.png" class="btn-glyph-sm"/>
+                    <span class="search-pill-label">SEARCH</span>
                 </div>
-                <div class="brow-right">
-                    <img id="brow-fav-0" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-0" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-0" class="brow-track"><div id="brow-fill-0" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-1" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-1" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-1" class="brow-name"></div>
-                        <div id="brow-detail-1" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-1" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-1" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-1" class="brow-track"><div id="brow-fill-1" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-2" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-2" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-2" class="brow-name"></div>
-                        <div id="brow-detail-2" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-2" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-2" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-2" class="brow-track"><div id="brow-fill-2" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-3" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-3" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-3" class="brow-name"></div>
-                        <div id="brow-detail-3" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-3" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-3" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-3" class="brow-track"><div id="brow-fill-3" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-4" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-4" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-4" class="brow-name"></div>
-                        <div id="brow-detail-4" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-4" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-4" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-4" class="brow-track"><div id="brow-fill-4" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-5" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-5" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-5" class="brow-name"></div>
-                        <div id="brow-detail-5" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-5" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-5" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-5" class="brow-track"><div id="brow-fill-5" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-6" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-6" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-6" class="brow-name"></div>
-                        <div id="brow-detail-6" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-6" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-6" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-6" class="brow-track"><div id="brow-fill-6" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-7" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-7" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-7" class="brow-name"></div>
-                        <div id="brow-detail-7" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-7" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-7" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-7" class="brow-track"><div id="brow-fill-7" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-8" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-8" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-8" class="brow-name"></div>
-                        <div id="brow-detail-8" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-8" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-8" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-8" class="brow-track"><div id="brow-fill-8" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-9" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-9" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-9" class="brow-name"></div>
-                        <div id="brow-detail-9" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-9" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-9" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-9" class="brow-track"><div id="brow-fill-9" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-10" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-10" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-10" class="brow-name"></div>
-                        <div id="brow-detail-10" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-10" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-10" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-10" class="brow-track"><div id="brow-fill-10" class="brow-fill"></div></div>
-            </div>
-            <div id="brow-11" class="brow">
-                <div class="brow-left">
-                    <div class="brow-icon-box"><img id="brow-icon-11" class="brow-icon" src="../icons/icon_folder.png"/></div>
-                    <div class="brow-text">
-                        <div id="brow-name-11" class="brow-name"></div>
-                        <div id="brow-detail-11" class="brow-detail"></div>
-                    </div>
-                </div>
-                <div class="brow-right">
-                    <img id="brow-fav-11" class="brow-fav" src="../icons/icon_favorites.png"/>
-                    <div id="brow-badge-11" class="brow-badge"></div>
-                </div>
-                <div id="brow-track-11" class="brow-track"><div id="brow-fill-11" class="brow-fill"></div></div>
+                <div id="browser-counter">0 ITEMS</div>
             </div>
         </div>
 
-        <!-- Left: empty state, when the folder has nothing in it -->
-        <div id="browser-empty">
-            <div id="browser-empty-icon-box">
-                <img id="browser-empty-icon" src="../icons/icon_browse_usb.png"/>
+        <!-- 2. Left Sidebar: Places / Sources / Filters -->
+        <div id="browser-sidebar">
+            <div class="sb-section-title">SOURCES</div>
+            <div id="sb-item-0" class="sb-item sb-item-active">
+                <img id="sb-icon-0" class="sb-icon" src="../icons/icon_browse_usb.png"/>
+                <span id="sb-label-0" class="sb-label">USB Drive</span>
             </div>
-            <div id="browser-empty-title">NOTHING HERE</div>
-            <div id="browser-empty-hint">CONNECT A USB DRIVE WITH MEDIA ON IT</div>
+            <div id="sb-item-1" class="sb-item">
+                <img id="sb-icon-1" class="sb-icon" src="../icons/icon_folder.png"/>
+                <span id="sb-label-1" class="sb-label">Internal Storage</span>
+            </div>
+            <div id="sb-item-2" class="sb-item">
+                <img id="sb-icon-2" class="sb-icon" src="../icons/icon_favorites.png"/>
+                <span id="sb-label-2" class="sb-label">Favorites</span>
+            </div>
+            <div id="sb-item-3" class="sb-item">
+                <img id="sb-icon-3" class="sb-icon" src="../icons/icon_recent_files.png"/>
+                <span id="sb-label-3" class="sb-label">Recent Media</span>
+            </div>
+
+            <div class="sb-section-divider"></div>
+            <div class="sb-section-title">FILTERS</div>
+            <div id="sb-item-4" class="sb-item">
+                <img id="sb-icon-4" class="sb-icon" src="../icons/icon_resume.png"/>
+                <span id="sb-label-4" class="sb-label">All Videos</span>
+            </div>
+            <div id="sb-item-5" class="sb-item">
+                <img id="sb-icon-5" class="sb-icon" src="../icons/icon_subtitles.png"/>
+                <span id="sb-label-5" class="sb-label">All Music</span>
+            </div>
+            <div id="sb-item-6" class="sb-item">
+                <img id="sb-icon-6" class="sb-icon" src="../icons/icon_palette.png"/>
+                <span id="sb-label-6" class="sb-label">All Photos</span>
+            </div>
         </div>
 
-        <!-- Right: inspector -->
-        <div id="inspector">
-            <div id="ins-preview">
-                <div id="ins-preview-art"></div>
-                <div id="ins-preview-empty">NO PREVIEW</div>
-                <div id="ins-preview-badge"></div>
+        <!-- 3. Main File Area: Media Grid -->
+        <div id="browser-grid-pane">
+            <!-- Empty state when no items in directory -->
+            <div id="browser-empty">
+                <div id="browser-empty-icon-box">
+                    <img id="browser-empty-icon" src="../icons/icon_browse_usb.png"/>
+                </div>
+                <div id="browser-empty-title">FOLDER IS EMPTY</div>
+                <div id="browser-empty-hint">No supported media files found</div>
             </div>
-            <div id="ins-name"></div>
-            <div id="ins-kindrow">
-                <div id="ins-kind"></div>
-                <div id="ins-ext"></div>
+
+            <!-- 2x4 Media Card Grid (8 items visible per page) -->
+            <div id="browser-grid">
+                <div id="brow-0" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-0" class="card-preview-art"></div>
+                        <img id="brow-icon-0" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-0" class="card-badge"></div>
+                        <img id="brow-fav-0" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-0" class="card-duration"></div>
+                        <div id="brow-track-0" class="card-track"><div id="brow-fill-0" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-0" class="card-title"></div>
+                        <div id="brow-detail-0" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-0" class="card-kind"></div>
+                        <div id="brow-ext-0" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-1" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-1" class="card-preview-art"></div>
+                        <img id="brow-icon-1" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-1" class="card-badge"></div>
+                        <img id="brow-fav-1" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-1" class="card-duration"></div>
+                        <div id="brow-track-1" class="card-track"><div id="brow-fill-1" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-1" class="card-title"></div>
+                        <div id="brow-detail-1" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-1" class="card-kind"></div>
+                        <div id="brow-ext-1" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-2" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-2" class="card-preview-art"></div>
+                        <img id="brow-icon-2" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-2" class="card-badge"></div>
+                        <img id="brow-fav-2" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-2" class="card-duration"></div>
+                        <div id="brow-track-2" class="card-track"><div id="brow-fill-2" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-2" class="card-title"></div>
+                        <div id="brow-detail-2" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-2" class="card-kind"></div>
+                        <div id="brow-ext-2" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-3" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-3" class="card-preview-art"></div>
+                        <img id="brow-icon-3" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-3" class="card-badge"></div>
+                        <img id="brow-fav-3" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-3" class="card-duration"></div>
+                        <div id="brow-track-3" class="card-track"><div id="brow-fill-3" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-3" class="card-title"></div>
+                        <div id="brow-detail-3" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-3" class="card-kind"></div>
+                        <div id="brow-ext-3" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-4" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-4" class="card-preview-art"></div>
+                        <img id="brow-icon-4" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-4" class="card-badge"></div>
+                        <img id="brow-fav-4" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-4" class="card-duration"></div>
+                        <div id="brow-track-4" class="card-track"><div id="brow-fill-4" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-4" class="card-title"></div>
+                        <div id="brow-detail-4" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-4" class="card-kind"></div>
+                        <div id="brow-ext-4" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-5" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-5" class="card-preview-art"></div>
+                        <img id="brow-icon-5" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-5" class="card-badge"></div>
+                        <img id="brow-fav-5" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-5" class="card-duration"></div>
+                        <div id="brow-track-5" class="card-track"><div id="brow-fill-5" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-5" class="card-title"></div>
+                        <div id="brow-detail-5" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-5" class="card-kind"></div>
+                        <div id="brow-ext-5" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-6" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-6" class="card-preview-art"></div>
+                        <img id="brow-icon-6" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-6" class="card-badge"></div>
+                        <img id="brow-fav-6" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-6" class="card-duration"></div>
+                        <div id="brow-track-6" class="card-track"><div id="brow-fill-6" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-6" class="card-title"></div>
+                        <div id="brow-detail-6" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-6" class="card-kind"></div>
+                        <div id="brow-ext-6" class="card-ext"></div>
+                    </div>
+                </div>
+                <div id="brow-7" class="grid-card">
+                    <div class="card-preview-box">
+                        <div id="brow-art-7" class="card-preview-art"></div>
+                        <img id="brow-icon-7" class="card-preview-icon" src="../icons/icon_folder.png"/>
+                        <div id="brow-badge-7" class="card-badge"></div>
+                        <img id="brow-fav-7" class="card-fav" src="../icons/icon_favorites.png"/>
+                        <div id="brow-duration-7" class="card-duration"></div>
+                        <div id="brow-track-7" class="card-track"><div id="brow-fill-7" class="card-fill"></div></div>
+                    </div>
+                    <div class="card-meta">
+                        <div id="brow-name-7" class="card-title"></div>
+                        <div id="brow-detail-7" class="card-sub"></div>
+                    </div>
+                    <div class="card-action-bar">
+                        <div id="brow-kind-7" class="card-kind"></div>
+                        <div id="brow-ext-7" class="card-ext"></div>
+                    </div>
+                </div>
+
+                <!-- Hidden cards 8..11 to maintain 12-item buffer compatibility -->
+                <div id="brow-8" class="grid-card-hidden"></div>
+                <div id="brow-9" class="grid-card-hidden"></div>
+                <div id="brow-10" class="grid-card-hidden"></div>
+                <div id="brow-11" class="grid-card-hidden"></div>
             </div>
-            <div id="ins-props">
-                <div id="ins-prop-0" class="ins-prop">
-                    <span id="ins-key-0" class="ins-key"></span>
-                    <span id="ins-val-0" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-1" class="ins-prop">
-                    <span id="ins-key-1" class="ins-key"></span>
-                    <span id="ins-val-1" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-2" class="ins-prop">
-                    <span id="ins-key-2" class="ins-key"></span>
-                    <span id="ins-val-2" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-3" class="ins-prop">
-                    <span id="ins-key-3" class="ins-key"></span>
-                    <span id="ins-val-3" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-4" class="ins-prop">
-                    <span id="ins-key-4" class="ins-key"></span>
-                    <span id="ins-val-4" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-5" class="ins-prop">
-                    <span id="ins-key-5" class="ins-key"></span>
-                    <span id="ins-val-5" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-6" class="ins-prop">
-                    <span id="ins-key-6" class="ins-key"></span>
-                    <span id="ins-val-6" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-7" class="ins-prop">
-                    <span id="ins-key-7" class="ins-key"></span>
-                    <span id="ins-val-7" class="ins-val"></span>
-                </div>
-                <div id="ins-prop-8" class="ins-prop">
-                    <span id="ins-key-8" class="ins-key"></span>
-                    <span id="ins-val-8" class="ins-val"></span>
-                </div>
-            </div>
-            <div id="ins-probing">READING FILE...</div>
         </div>
 
-        <!-- Footer hints -->
-        <div id="browser-footer">
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">OPEN</span>
+        <!-- 4. Bottom Status & Selection Strip -->
+        <div id="browser-status-strip">
+            <div id="status-details">
+                <span id="ins-name" class="status-name">No Selection</span>
+                <div id="status-specs">
+                    <span id="status-pill-res" class="status-spec-pill"></span>
+                    <span id="status-pill-vcodec" class="status-spec-pill"></span>
+                    <span id="status-pill-acodec" class="status-spec-pill"></span>
+                    <span id="status-pill-duration" class="status-spec-pill"></span>
+                    <span id="status-pill-size" class="status-spec-pill"></span>
+                    <span id="ins-probing" class="status-probing">PROBING...</span>
+                </div>
             </div>
-            <div class="footer-hint" id="bhint-back">
-                <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">BACK</span>
+
+            <!-- Controller action hints -->
+            <div id="browser-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span id="footer-action-label" class="footer-text">OPEN</span>
+                </div>
+                <div class="footer-hint" id="bhint-back">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">BACK</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SEARCH</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">FAVORITE</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">L1 / R1</span></div>
+                    <span class="footer-text">PAGE</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">L2 / R2</span></div>
+                    <span class="footer-text">A-Z</span>
+                </div>
+                <div id="browser-footer-version">v0.10.0</div>
             </div>
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">FAVORITE</span>
-            </div>
-            <div class="footer-hint">
-                <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">SEARCH</span>
-            </div>
-            <div id="browser-footer-version">v0.7.1</div>
         </div>
     </div>
 </body>

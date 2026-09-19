@@ -9,13 +9,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -26,10 +26,10 @@ div, span, p {
 
 #reader-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 /* =============================== Header =============================== */
@@ -39,9 +39,9 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: flex-end;
-    margin-top: 96px;
-    margin-bottom: 42px;
-    width: 1704px;
+    margin-top: 96dp;
+    margin-bottom: 42dp;
+    width: 1704dp;
 }
 
 #reader-header-left {
@@ -51,11 +51,11 @@ div, span, p {
 }
 
 #reader-indicator {
-    width: 5px;
-    height: 62px;
+    width: 5dp;
+    height: 62dp;
     background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
+    border-radius: 2dp;
+    margin-right: 18dp;
 }
 
 #reader-header-titles {
@@ -65,28 +65,28 @@ div, span, p {
 
 #reader-title {
     display: block;
-    font-size: 34px;
+    font-size: 34dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
 }
 
 #reader-subtitle {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    letter-spacing: 1dp;
+    margin-top: 3dp;
 }
 
 #reader-badge {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    letter-spacing: 1dp;
+    margin-bottom: 6dp;
 }
 
 /* ================================ Notice ================================ */
@@ -98,9 +98,9 @@ div, span, p {
     display: none;
     position: absolute;
     left: 0;
-    top: 550px;
-    width: 1704px;
-    font-size: 22px;
+    top: 550dp;
+    width: 1704dp;
+    font-size: 22dp;
     font-weight: normal;
     text-align: center;
 }
@@ -110,9 +110,9 @@ div, span, p {
 #reader-lines {
     position: absolute;
     left: 0;
-    top: 222px;
-    width: 1670px;
-    height: 700px;
+    top: 222dp;
+    width: 1670dp;
+    height: 700dp;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -120,9 +120,9 @@ div, span, p {
 
 .rline {
     display: block;
-    width: 1670px;
+    width: 1670dp;
     font-weight: normal;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.2dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -131,18 +131,18 @@ div, span, p {
 /* Three reading sizes, cycled with TRIANGLE - matches EVO_FACE_SMALL /
  * EVO_FACE_SUB / EVO_FACE_MENU in the legacy renderer (reader_face_h). */
 .rline-face-0 {
-    height: 24px;
-    font-size: 16px;
+    height: 24dp;
+    font-size: 16dp;
 }
 
 .rline-face-1 {
-    height: 30px;
-    font-size: 20px;
+    height: 30dp;
+    font-size: 20dp;
 }
 
 .rline-face-2 {
-    height: 36px;
-    font-size: 26px;
+    height: 36dp;
+    font-size: 26dp;
 }
 
 /* =============================== Scrollbar =============================== */
@@ -150,12 +150,12 @@ div, span, p {
 #reader-scrollbar {
     display: flex;
     position: absolute;
-    left: 1684px;
-    top: 222px;
-    width: 6px;
-    height: 700px;
-    border-radius: 3px;
-    border-width: 1px;
+    left: 1684dp;
+    top: 222dp;
+    width: 6dp;
+    height: 700dp;
+    border-radius: 3dp;
+    border-width: 1dp;
 }
 
 #reader-scrollbar-thumb {
@@ -163,9 +163,9 @@ div, span, p {
     position: absolute;
     left: 0;
     top: 0;
-    width: 6px;
+    width: 6dp;
     height: 100%;
-    border-radius: 3px;
+    border-radius: 3dp;
 }
 
 /* ================================ Footnote ================================ */
@@ -174,51 +174,51 @@ div, span, p {
     display: none;
     position: absolute;
     left: 0;
-    top: 934px;
-    width: 1704px;
-    font-size: 14px;
+    top: 934dp;
+    width: 1704dp;
+    font-size: 14dp;
     font-weight: bold;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 /* =============================== Footer =============================== */
 
 #reader-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 32dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 42dp;
+    height: 42dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
+    border-radius: 21dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 28dp;
+    height: 28dp;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

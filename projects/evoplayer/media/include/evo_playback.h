@@ -18,19 +18,26 @@
 #include <pthread.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define VIDEO_ROTATE_BUFFERS 8
+#include <libavcodec/avcodec.h>
+
+/*
+ * Slots in the swscale-fallback present ring (convert_frame_via_sws). #6:
+ * trimmed 8 -> 3 — one presented + one just-written + one in-flight is enough
+ * for the legacy renderer not to tear, and at 4K each slot is 33 MB. The
+ * product present path does not use this ring (see evo_playback.c).
+ */
+#define VIDEO_ROTATE_BUFFERS 3
 
 /* ---- §4 playback façade — the stable interface ---- */
 int    evo_pb_is_active(void);        /* a video decode session is running   */
 int    evo_pb_is_paused(void);        /* was: player_paused                  */
 int    evo_pb_is_eof(void);           /* was: video_decode_done              */
 int    evo_pb_decode_fatal(void);     /* sustained decoder failure — abort   */
+void   evo_pb_reset_decode_fatal(void); /* clear fatal flag + streak (re-open) */
 double evo_pb_position_s(void);       /* audio-preferred media clock         */
 double evo_pb_duration_s(void);
 double evo_pb_audio_clock_s(void);
@@ -50,6 +57,10 @@ int   decode_next_video_frame(void);   /* one pump iteration; return unused   */
 
 extern volatile int video_thread_running;
 extern pthread_t    video_thread;
+
+/* 1 while the decode thread is idle (not inside push_frame's unlocked convert).
+ * main.c waits on this before a #32 scrub-overlay VO reconfigure. */
+extern volatile int video_decode_parked;
 
 /* ---- TRANSITIONAL raw state.
  * A8 migrated main.c's OSD / debug / completion *reads* to evo_pb_*(); what

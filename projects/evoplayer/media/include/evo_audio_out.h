@@ -20,13 +20,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/frame.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/frame.h>
 
 #define EVO_AUDIO_MAX_CH    8
 #define AUDIO_QUEUE_BLOCKS  64
@@ -47,6 +47,23 @@ extern volatile double    audio_clock_seconds;
 extern volatile double    audio_pts_seconds;
 extern double             first_audio_pts_seconds;
 extern int                detected_audio_rate;
+
+/*
+ * Seek discard gate, in stream seconds, or -1.0 when no seek is settling.
+ *
+ * The video path throws away every decoded frame before the seek target
+ * (pp_playback_push_frame) because the demuxer has to restart from the
+ * keyframe at or before it. Without the same gate here the audio replays that
+ * whole run-up, so the moment the picture resumes at the target the audio
+ * clock is a GOP behind the video clock and the audio-master pacer in
+ * decode_next_video_frame stalls the picture until audio covers the gap.
+ * Set by the demux thread's seek; cleared by the first packet that reaches it.
+ */
+extern volatile double    audio_seek_discard_until;
+
+/* Native audio decoder for the open stream, or NULL when it is on FFmpeg. */
+struct evo_adec;
+extern struct evo_adec   *g_adec;
 extern volatile int       audio_thread_running;
 extern pthread_t          audio_thread;
 extern volatile int       audio_decode_thread_running;
@@ -65,8 +82,8 @@ void *audio_decode_thread_func(void *arg);
 void prospero_audio_build_label(AVFormatContext *format, int selected_stream,
                                 char *output, size_t output_size);
 
-/* Cycle to the next decodable audio track (input dispatch entry point). */
-void prospero_audio_cycle_track(void);
+/* Audio track selection lives in evo::PlaybackController::switchAudioTrack()
+ * and the AudioTrackPickerScreen; the old cycle entry point is gone. */
 
 #ifdef __cplusplus
 }

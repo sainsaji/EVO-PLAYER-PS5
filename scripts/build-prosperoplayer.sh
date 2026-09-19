@@ -242,7 +242,4 @@ else
 fi
 
 echo ""
-ok "baseline established"
-echo "   Next: deploy it and confirm the EXISTING functionality works"
-echo "     PS5_HOST=192.168.1.50 ./scripts/deploy.sh output/elf/PS5MediaPlayerPRO.elf"
-echo "   Only then start EVO Player changes in projects/evoplayer/."
+ok "baseline established (compile reference only — not a deploy target)"

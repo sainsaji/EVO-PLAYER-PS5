@@ -1,13 +1,43 @@
 # AGC implementation guide — GPU rendering Step 2/3
 
+> **LIVE REFERENCE AGAIN (2026-09-12).** GL-6 marked this historical on the
+> grounds that ps5-opengl owned `sceAgc`. The UI now renders on bare-metal
+> `sceAgc` again — see [agc-bare-metal-ui.md](agc-bare-metal-ui.md) for what
+> actually ships. The register layouts, descriptor formats and ABI notes below
+> were used to build it and remain accurate; the *file names* it cites
+> (`pp_agc.c`, `pp_agc_osd.c`) are still gone.
+>
+> **HISTORICAL (2026-09-10, GL-6 / #82).** The `sceAgc` present/geo/OSD path
+> this guide documents (`pp_agc.c`, `pp_agc_osd.c`, `evo_rmlui_render_agc.cpp`,
+> the vendored shader blobs) was **deleted in GL-6**. `ps5-opengl` (Mesa + PS5
+> Gallium + patched PSSL compiler) is the render path now — see
+> the OpenGL detour (since removed). This page stays as the
+> line-by-line reverse-engineering of the ProsperoLight AGC path (DCB layout,
+> CX registers, shader-blob format) — reference, not current state.
+>
+
 > Companion to [gpu-rendering-plan.md](gpu-rendering-plan.md). That doc is the
 > *why* and the ladder; this is the *how* — the ProsperoLight AGC path read
 > line by line, the shader blobs disassembled, and the concrete EVO port.
 >
-> **Status: host analysis, 2026-09-02.** No AGC call has run from EVO yet. The
-> reachability gate (`package-app.sh --agc-probe`) is pending a console session.
-> Everything here is written so the port can be built now and tested the moment
-> the gate passes.
+> **Status: 2026-09-04 — the whole Step 2 present path is HARDWARE-VERIFIED**
+> (`--agc-probe`, branch `feat/27-agc-submit-watchdog`). GTA 4K H.264 plays
+> through sceAgc: decode → NV12 → `agc_render_frame` (GPU YUV→RGB) → GPU flip,
+> **correct colour, no crash, `fatal=0`**, CPU `pp_converter_*` + swizzle +
+> `sceVideoOutSubmitFlip` off the 4K path. `render_frame rc=0x0`,
+> `012_AGC_FIRST_PRESENT`. Three fixes past the first (hung) run:
+> **(B)** `render_frame` on a dedicated worker thread + 250 ms watchdog
+> (`pp_agc.c`); **(reachability)** `pp_playback` lets NV12 UHD through the V8
+> gate — `agc_path` was dead code otherwise; **(A)** the UHD VO is registered
+> linear (`0x8000000000000000`) when AGC is armed, matching render_frame's
+> coefficients + MRT0 order.
+> **Timing:** 982 µs/frame convert+flip = 3% of the 30 fps budget.
+> **AGC-death recovery:** a plain linear CPU write into the AGC plane *also*
+> garbles (that attr is a GPU tile layout, not CPU-linear), so on fault/wedge the
+> VO **re-registers tiled** and the CPU converter resumes — verified with the
+> `evo_agc_no_present` wedge hook. **#55** (V3 reconfig overflow) fixed alongside.
+> Remaining: plane-hash A/B parity, settings row (after #37), P010.
+> See `status.md` 2026-09-04 for the run-by-run iteration log.
 
 ---
 
@@ -232,52 +262,79 @@ allocate+map `shader_memory` → `copy_asset` the 5 blobs into place →
 | **Playback OSD over video** | Draw the RmlUi OSD to a small **BGRA** surface (already how `RenderPlaybackOSD` works after nothing — it renders to the fb). Composite it as `render_frame`'s "overlay" draw — but that path samples NV12. **Needs the RGBA-passthrough PS** (§1). Until that exists: composite the OSD on the CPU into the RGB frame *before* the AGC present (one 1080p-region alpha blend, ~1 ms — the OSD is small and only redraws on state change thanks to Step 1's dirty flag). | Ship CPU-composite first, GPU-composite when the RGBA shader lands. |
 | **Menus (launch/settings/browser/…)** | **Keep Step 1's CPU path.** `RenderCachedScreen` already hits 60 fps with a 0.5 ms memcpy. No AGC. | Zero benefit, real risk. |
 
-### New files
+### 4a. As-built (2026-09-03) — deltas from the plan above
+
+| Planned | As built |
+|---|---|
+| `pp/src/shaders/` new dir | not needed for Step 2 — the 6 vendored blobs in `pp/blobs/` + `pp/src/agc_blobs.S` cover NV12. Hand-written shaders wait for Step 3 / the OSD composite. |
+| runtime-resolved NIDs | **none** — positional PRX stubs (see below). `pp_agc.c` just `extern`s. |
+| `pp_agc_present_nv12(y_uv, pitch, vis_w, vis_h, marker)` | `pp_agc_present_nv12(int vout_handle, uint32_t buf_idx, void *gpu_target, const void *nv12, uint32_t pitch, uint32_t coded_h, uint32_t vis_w, uint32_t vis_h, uint32_t out_w, uint32_t out_h, int64_t marker)` — takes EVO's VO handle + acquired plane. |
+| `source` = decoder NV12 straight in | the decoder's NV12 copy is **flexible memory** (`malloc` → `sceKernelMapNamedFlexibleMemory`, `PROT_RW`) — **not GPU-samplable**. `pp_agc_present_nv12` stages each frame into a **per-VO-buffer direct-memory scratch** (`prot 0x33`, `PP_VO_MAX_BUFFERS` slots keyed by `buf_idx`; `pp_videoout_acquire`'s retire guarantee covers reuse). ~12 MB × 3 at 4K, lazy, every rc checked. |
+| `pp_videoout.c` calls `pp_agc_present_nv12` | the call is in **`pp_playback.c`'s V8 branch** (it already holds the acquired buffer). `pp_videoout.c` gained `pp_videoout_adopt_flip(vo, idx, marker)` — records the DCB-queued flip as in-flight with **no** `SubmitFlip`, so `retire_old_inflight` frees the buffer when `flipArg` reaches `marker`. `main.c`'s V8 `present_pre_tiled` is skipped for AGC frames (they set no `pending_present`). |
+| FFmpeg planar → cheap interleave | `evo_vdec_native.c` `ro_harvest` emits **straight NV12** (skips its NV12→I420 de-interleave) when `pp_agc_available()`; `pp_frame` gained `coded_height`. `pp_playback.c` de-interleaves NV12→YUV420P as a fallback for every other path (host, disabled AGC, 1080/V3). |
+| guard `__PROSPERO__` | guard is `EVO_APP_MODULE` (matches the rest of the app-module code). |
+| watchdog the submit thread | **done (#27 plan B, `feat/27-agc-submit-watchdog`).** The whole `agc_render_frame` (incl. `WaitUntilSafeForRendering` + `SubmitDcb` + `SuspendPoint`) runs on a dedicated `agc_submit_worker` thread; `pp_agc_present_nv12` `pthread_cond_timedwait`s 250 ms. On timeout the worker is abandoned (it's stuck in the GPU syscall — never joined), `g_agc.submit_wedged` latches, `pp_agc_available()` goes false, and `pp_agc_present_nv12` returns **`-2`** → the V8 branch `adopt_flip`s the buffer (the abandoned worker may still queue its flip) and drops to the CPU path for the rest of the session. The first-frame `sigsetjmp` guard moved onto the worker (the thread that faults). |
+| Settings row `Renderer: Auto/CPU/GPU` | **not done** — separate task, coordinate with **#37**'s `Video decoder` row (same settings screen, same fscanf-append; land decoder-append first). `pp_agc_init` is currently called unconditionally from `main()` (app module) so the bare build arms the path; `pp_agc_available()` is the de-facto Auto. |
+
+**Open hardware unknowns — RESOLVED 2026-09-04.** RT format/tiling: confirmed —
+`render_frame` against EVO's tiled `0x8000000022000000` buffer came out R↔B
+swapped + range-shifted (recognisable picture, "blue avatars", **not** a crash);
+registering the UHD VO linear `0x8000000000000000` when `pp_agc_available()`
+(plan A) fixed it — render_frame's coefficients + MRT0 export are a matched set
+for the linear buffer. `sceAgcDcbSetFlip` against EVO's own `pp_videoout` handle:
+works (`012_AGC_FIRST_PRESENT`, retire via `pp_videoout_adopt_flip`). Type-12
+direct-memory headroom for 0xD0000 + 3×12 MB NV12 staging alongside the resident
+decoder: fine (`staging 12160KB x3`, `flex_avail=214M`). Historical note:
+`0xAABBGGRR` order vs the
+shader's MRT0 export; type-12 direct-memory headroom (0xD0000 + ~36 MB staging
+alongside #31's resident decoder).
+
+### New files (as built)
 
 ```
-pp/src/pp_agc.h            public: pp_agc_available(), pp_agc_init(w,h,hdr),
-                           pp_agc_present_nv12(y_uv, pitch, vis_w, vis_h, marker),
-                           pp_agc_shutdown()
-pp/src/pp_agc.c            the port: AGC ABI (runtime-resolved NIDs), the
-                           shader_memory layout, initialize + render_frame,
-                           stripped of HUD/keyboard/telemetry
-pp/src/agc_blobs.S         .incbin the 5 ProsperoLight .bin assets
-pp/src/shaders/rgba_ps.s   hand-written RGBA-passthrough PS (later)
-pp/src/shaders/*.sb        assembled output (build step)
+pp/include/pp_agc.h   pp_agc_available(), pp_agc_init(w,h,hdr),
+                      pp_agc_present_nv12(...11 args...), pp_agc_shutdown()
+pp/src/pp_agc.c       the port: extern sceAgc*, agc_register_t /
+                      agc_command_buffer_t / agc_submit_description_t,
+                      bind_pixel_source, shader_resource_offset, flush_gpu_data,
+                      agc_render_frame (verbatim strip, no overlay),
+                      pp_agc_present_nv12 (staging + fault guard)
+pp/src/agc_blobs.S    .incbin the 6 pp/blobs/*.bin (vendored ProsperoLight)
+pp/blobs/*.bin        geometry.header/.text, pixel.header/.text.linear-buffer,
+                      pixel.text.p010-passthrough, netflix-video-resources
 ```
 
-### Wiring
+### AGC symbol resolution — SOLVED (#31)
 
-- `pp/src/pp_videoout.c` — on `__PROSPERO__` + `pp_agc_available()`, the present
-  path calls `pp_agc_present_nv12()` instead of the swizzle + `SubmitFlip`.
-- `pp/src/pp_playback.c` — the converter stage (`pp_converter_fused` etc.) is
-  skipped; the decoder's NV12 frame goes straight to `pp_agc_present_nv12`.
-  (FFmpeg `sws` may still be needed if the decoder emits YUV420P planar, not
-  NV12 — a cheap plane interleave, or request NV12 from the decoder.)
-- **Settings toggle** — `Playback → Renderer: Auto / CPU / GPU`. `Auto` =
-  `pp_agc_available()`. Persist in `evo_settings_t`.
-- Host preview (`tools/uiview*`, `uiplay`) — `pp_agc.c` is `#ifdef __PROSPERO__`
-  compiled to a stub returning "unavailable"; the SDL/CPU path is untouched.
-
-### AGC symbol resolution
-
-The app-module SDK has **no `libSceAgc` stub** (like the payload SDK). Resolve
-at runtime the same way `evo_agc_probe.c` does: `sceKernelLoadStartModule(
-"/system/common/lib/libSceAgc.sprx")` + `kernel_dynlib_resolve` over
-`nid_encode()` of each name. Cache the ~15 function pointers in a struct. If any
-fail to resolve → `pp_agc_available()` returns 0, player falls back to CPU.
-The full list is in `native_agc_present.cpp:191–209`.
+**No runtime resolution.** As of #31 `libSceAgc` + `libSceAgcDriver` are
+**positional PRX import stubs** (`tools/native-app/stubs/prx/libSceAgc*.syms`
+→ `package-app.sh` step 6b, **unconditional for `MODE == player`** — they're
+already `DT_NEEDED` because `libSceVideodec2`'s own GPU imports pull them in).
+The loader auto-loads the `.sprx` at process start and `sceAgc*` resolve as
+ordinary imports. So `pp_agc.c` just `extern`s and calls them, like
+`evo_vdec_native.c` / the rewritten `evo_agc_probe.c` — the
+`sceKernelLoadStartModule` + `nid_encode` + `sceKernelDlsym` machinery is
+gone. To add a symbol `pp_agc.c` needs: append it to `libSceAgc.syms` (a link
+error names the missing one). `pp_agc_available()` = "did `sceAgcInit`
+succeed", checked once at init; on failure the player falls back to the Step 1
+CPU path. The old "`libSceAgc.sprx` load FAILED" gate is dead.
 
 ### Panic discipline
 
 - Bring AGC up **after** VideoOut is otherwise idle; tear it down **before**
   reconfiguring VO (carried from [videodec2-abi.md](videodec2-abi.md) §6).
-- The AGC submit runs on the render thread; watchdog it like the decode thread
-  ([hardware-decode-review.md](../hardware-decode-review.md) §7) — a hung
-  `sceAgcDriverSubmitDcb` must not wedge the app slot (see the `agc_probe`
-  watchdog for the pattern).
+- The AGC submit runs on a **dedicated `agc_submit_worker` thread** (#27 plan B),
+  not the playback push thread. `pp_agc_present_nv12` dispatches one
+  `agc_render_frame` at a time via a single-slot mailbox and
+  `pthread_cond_timedwait`s 250 ms; a hung `sceAgcDriverSubmitDcb` is abandoned
+  (`g_agc.submit_wedged`, worker never joined), `pp_agc` goes permanently
+  unavailable, and playback returns to the CPU converter — the app slot is
+  never wedged. First-frame `sigsetjmp` guard lives on the worker now.
 - `flush_gpu_data` before every submit is **mandatory** — the scratch is CPU
-  WB memory the GPU reads.
+  WB memory the GPU reads. Ditto the NV12 staging copy (`flush_gpu_data(stage,
+  need)` after the memcpy).
+- Check **every** AGC alloc rc — a silent alloc fail leaving stale state is
+  what black-screened #31. `pp_agc.c` logs each to `evo_boot.log`.
 
 ---
 
@@ -298,6 +355,39 @@ discipline) on the simplest case.
 clean-room C# register model to transcribe to C (the managed code itself isn't
 liftable). `llvm-mc-18` assembles the shaders; `geometry.text.bin`'s VS is
 already the right shape. Remaining shaders are small.
+
+### 5a. What Step 2 (#27) landed — the foundation to reuse (2026-09-04)
+
+#27 is **closed + merged** (PR #61, `refactor/main-c-media-modules`). Concrete
+pieces in `pp/src/pp_agc.c` a Step 3 session reuses verbatim or by pattern:
+
+| Piece | Reuse for Step 3 |
+|---|---|
+| `pp_agc_init(w, h, hdr)` — `sceAgcInit`, 0xD0000 shader scratch alloc/map, `copy_asset` the blobs, `prepare_resources`, `sceAgcCreateShader` ×2, `sceAgcLinkShaders(…, 6 /*TriStrip*/)` | Keep for the video PS; **add** a `CreateShader`/`LinkShaders(…, 4 /*TriList*/)` per new UI shader. Scratch layout offsets are fixed constants at the top of `pp_agc.c`. |
+| `agc_render_frame()` — the CX register block build (`sceAgcGetRegisterDefaults` → patch the 16 `target_offsets` for RT base/dims/blend → `ADD_REG` viewport/scissor/guardband), link-register concat from the shader objects (`*(agc_register_t**)((u8*)shader+24)` cx, `+32` sh, `shader[91]`/`[92]` counts), `sceAgcDcbSetCxRegistersIndirect` / `SetUcRegistersIndirect` / `SetShRegistersIndirect`, `sceAgcCbSetShRegisterRangeDirect` for the resource descriptors, `sceAgcDcbDrawIndexAuto`, `sceAgcDcbSetFlip`, `flush_gpu_data` (clflush/64 + mfence over `SHADER_STATIC_BYTES`), `sceAgcDriverSubmitDcb` + `sceAgcSuspendPoint` | This IS the per-frame DCB skeleton. Step 3's `render_frame` extends it: video quad → **UI pass(es)** (bind UI shader + vtx/idx/tex descriptors + scissor → `DrawIndex`) → flip, one DCB. |
+| `agc_submit_worker` thread + 250 ms `pthread_cond_timedwait` watchdog + `-2` "abandon" return + TLS `sigsetjmp` fault guard (`t_agc_jmp`/`t_agc_armed`, handlers installed once) + `agc_dbg` first-frame breadcrumbs to `evo_boot.log` + the present heartbeat | Run the UI+composite DCB submit through the **same worker + watchdog** — a wedged UI submit must not freeze the app slot either. |
+| `bind_pixel_source()` — the 30-word NV12 image descriptor at SH `0x0c`, `shader_resource_offset()` | Template for the UI texture descriptors (glyph atlas / icons — 8-bit RGBA, different format word; see SharpProspero `AgcBufferDescriptor`). |
+| VO: `pp_videoout_init` registers the UHD plane **linear** (`0x8000000000000000`) when `pp_agc_available()`; `pp_videoout_is_linear()`; `pp_videoout_adopt_flip()` mirrors a DCB-queued flip into the retire bookkeeping | The UI pass writes the **same plane** as the video quad. Non-UHD (menu) VO stays tiled — Step 3's UI-on-GPU only applies on the UHD present path unless the menu VO is also moved to linear. |
+| `.syms`: `tools/native-app/stubs/prx/libSceAgc*.syms` (11 + 3 symbols) | Add `sceAgcDcbSetIndexBuffer`, `sceAgcDcbDrawIndex`, a scissor register setter, texture-upload helpers as link errors name them (the file says so). |
+| Shader blobs: 6 vendored ProsperoLight `.bin` in `pp/blobs/` (`.incbin` via `pp/src/agc_blobs.S`) cover NV12 + P010 | Step 3's hand-written `.s` → `tools/build-shader.sh` → raw `.text` blob, `.incbin`'d the same way. `pp/shaders/rgba_ps.s` exists, unrun. |
+
+**AGC-death recovery** (`#27`): on a fault/wedge the VO re-registers **tiled**
+and the CPU path resumes. Step 3 must handle the same — when `pp_agc` dies the
+UI has to fall back to the Step 1 CPU `EvoRenderInterface` for the rest of the
+session (the `evo_rmlui_app.cpp` runtime switch already picks by
+`pp_agc_available()`; make sure it re-checks, not just at startup).
+
+**Playback OSD over 4K video is UNSHIPPED** and is a Step 3 deliverable. Today
+an AGC 4K frame presents with **no overlay**; #32's stopgap drops the whole
+player to a **1080 overlay VO** for scrub/seek (`main.c`
+`prospero_scrub_overlay_pump`, `prospero_scrub_ovl_state` NONE/ENTERING/ACTIVE/
+LEAVING, gated on `video_decode_parked`). Step 3's proper fix: composite the OSD
+as a second draw in `render_frame` before the flip (RGBA passthrough PS). When
+that lands, **#32's 1080-overlay machinery can be deleted** — note it on #32.
+
+**Video↔UI plane-hash parity** for the *video* pixels is tracked as **#62**
+(AGC present vs the CPU converter); Step 3's per-screen *UI* A/B is separate but
+shares the capture approach.
 
 **Work:**
 
@@ -356,6 +446,43 @@ resource layout. Plan: reuse ProsperoLight's `pixel.header.bin` with our
 reference (doc 70648) + the `.sb` parsers in KytyPS5 / shadPS5 / SharpProspero's
 `ShaderInfo.cs`.
 
+**HARDWARE RESULT (2026-09-04, `pp_agc_probe_ui_shaders`, `--agc-probe`):** the
+reused-`pixel.header.bin` trick works for `solid_ps` (`CreateShader 0x0`,
+`LinkShaders(ui_vs+solid, TriList) 0x0`) but **fails `0x8a6c001f` for every
+textured PS** — `image_sample`, typed `buffer_load_format`, hand-written, and
+our ALU spliced onto the reference NV12 body's *exact* size + `"barefoot"`/`sl00`
+trailer. `sceAgcCreateShader` validates the code body against the header's
+`sl00` resource-metadata whenever a memory resource is touched, and ProsperoLight
+ships that block only for its NV12/P010 shaders.
+
+**Mechanism (confirmed by disassembly + the SharpProspero `ShaderBinary` /
+`AgcShader` parsers):** `sceAgcCreateShader(header, code)` takes only those two
+pointers — there is no separate `sl00` argument. The header (magic `"1234"` /
+`0x34333231` at +0, header size at `[0x40]`, **expected code size at `[0x44]`**,
+program type `[90]`, ctx-reg count `[91]`, sh-reg count `[92]`, `m_userData`
+resource-layout pointer relocated at `+8`) is prepared *in place* and becomes
+the runtime shader object. `pixel.header.bin` `[0x44]` = `0x900` = 2304 = the
+size of `pixel.text.linear-buffer.bin` **including** its post-`s_endpgm`
+`"barefoot"`/`sl00` trailer (`~0x750..0x900`), which carries the per-instruction
+resource-slot / GPR / scoreboard reflection. For a resource-using PS,
+`sceAgcCreateShader` walks that trailer at a header-driven offset — our 92-byte
+hand-written code has nothing there, and our splice (reference trailer, exact
+2304 B) has a trailer that no longer matches the replaced instructions → both
+`0x8a6c001f`. (`ui_vs` passes against `geometry.header.bin` despite being
+184 B < the declared 736 — the VS path is lenient / its resource info is
+self-contained in the header.)
+
+**The GLSL toolchain does NOT fix this.** `glslang` + `SPIRV-LLVM-Translator` /
+RGA emit AMD's standard code-object metadata, not Sony's `sl00`/`barefoot`
+block. A textured hand-authored PS needs one of: (a) RE + synthesise the `sl00`
+trailer format (KytyPS5 / shadPS5 / mattias800/prosper parsers *read* it —
+invert one); (b) extract a plain "sample texture × vertex colour"
+`(header, .text-with-trailer)` pair from a real PS5 app (how ProsperoLight got
+its NV12 blobs — they're from Netflix); (c) `orbis-wave-psslc` (Sony SDK, not
+available). Until then, textured UI (text/icons/art) stays on the CPU-raster →
+NV12 → overlay-quad path (§0, ProsperoLight's HUD model); the GPU geometry path
+is solid-colour only.
+
 **The nicer path (needs a Dockerfile change, not blocking):**
 GLSL → SPIR-V → RDNA2 ISA with open tooling, so Step 3's shader set can be
 written in GLSL (port RmlUi's own GL3/Vulkan backend shaders) instead of
@@ -375,15 +502,27 @@ easier. Verify on host before committing to it.
 
 ## 8. Sequencing
 
-1. **Console:** `package-app.sh --agc-probe` → deploy → launch. Read the
-   `EVO agc:` notification. **Gate.**
-2. If viable: write `pp_agc.c` (§4) — most of it is a mechanical strip of
-   `native_agc_present.cpp`. Build with `package-app.sh`.
-3. First device test: `pp_agc_init` + one `render_frame` of a test-pattern
-   NV12 buffer → a picture on the TV via the GPU. Attribute each stage from
-   the `report_agc_receipt`-style notifications.
-4. Feed real decoded frames; A/B the plane hash.
-5. `rgba_ps` + reused header → `sceAgcCreateShader` accepts it? → GPU OSD
-   composite.
-6. Step 3 — the shader set + `evo_rmlui_render_agc.cpp` + delete the CPU
+1. ~~**Console:** `--agc-probe` → gate.~~ ✅ PASSED (2026-09-03).
+2. ~~Write `pp_agc.c` (§4).~~ ✅ `pp_agc_init` hw-verified; `agc_render_frame`
+   + `pp_agc_present_nv12` + `pp_playback` wiring done, builds green (§4a).
+3. ~~**Plan A+B** — submit watchdog thread + linear VO attr.~~ ✅ landed
+   (`feat/27-agc-submit-watchdog`), builds green, not run on hardware.
+4. **◀ NEXT — first device run (plan C).** `tools/evo-remote.sh build --agc-probe`
+   → launch `PPSA99039` from the Games row → `evo-remote.sh boot` →
+   `evo-remote.sh play <4K H.264>`. Watch `evo_boot.log` for
+   `pp_agc: render_frame rc=…`. The watchdog means a wrong guess now costs a
+   dropped frame + a log line (`011_AGC_SUBMIT_WEDGED` / `pp_agc: SUBMIT WEDGED`),
+   not a console cycle. Expect one of: a correct picture; a garbled/channel-
+   swapped picture (RT format/tiling — adjust the `cx` bits, plan A's attr is
+   already applied); a first-frame fault or a wedge (logged, AGC disabled, CPU
+   fallback). No test-pattern harness yet — the native 4K decoder's NV12 output
+   is the first real input.
+5. A/B the composited plane hash vs the CPU converter (`tools/bench.sh`,
+   [validation.md](../validation.md)); then remove `pp_converter_fused` / the
+   CPU swizzle from the 4K hot path.
+6. Settings row `Playback → Renderer: Auto/CPU/GPU`;
+   P010/HDR present (`bind_main10_source` + `pixel.text.p010-passthrough`).
+7. `rgba_ps` + reused header → `sceAgcCreateShader` accepts it? → GPU OSD
+   composite over 4K video (deferred; AGC frames present with no overlay today).
+8. Step 3 (#28) — the shader set + `evo_rmlui_render_agc.cpp` + delete the CPU
    rasteriser.

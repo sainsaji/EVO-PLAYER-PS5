@@ -19,6 +19,17 @@
 #define EVO_SCREEN_H        1080
 
 /*
+ * The canvas the stylesheets are authored against. Every length in
+ * assets/rml/*.rcss is expressed in dp, and the RmlUi contexts are given a
+ * density-independent pixel ratio of (panel width / EVO_UI_DESIGN_W), so the
+ * same source lays out natively at 1080p, 1440p or anything else 16:9 - text
+ * and vector edges are rasterised at the panel's own pixel size rather than
+ * upscaled. These stay 1920x1080: they are a unit system, not a resolution.
+ */
+#define EVO_UI_DESIGN_W     EVO_SCREEN_W
+#define EVO_UI_DESIGN_H     EVO_SCREEN_H
+
+/*
  * Title-safe inset. TV overscan can eat ~3% per edge; nothing that must be
  * readable is placed outside this.
  */
@@ -146,15 +157,6 @@
  * it was and the artwork or icon above it gets the difference back.
  */
 #define EVO_TILE_CAPTION_H  62
-
-/* ---- toast ------------------------------------------------------------- */
-
-#define EVO_TOAST_W         540
-#define EVO_TOAST_H         128
-#define EVO_TOAST_MARGIN    58
-#define EVO_TOAST_Y         (EVO_FOOTER_RULE_Y - EVO_TOAST_H - 28)
-#define EVO_TOAST_PAD       30
-#define EVO_TOAST_RAIL_W    5
 
 /* ---- motion ------------------------------------------------------------ */
 

@@ -8,15 +8,32 @@
 
 #include "evo_keyboard.h"
 #include "evo_ime_dialog.h"
-#include "evo_theme.h"
-#include "evo_ui.h"
 #include "evo_feedback.h"
-#include "evo_draw.h"
-#include "evo_widgets.h"
+#include "evo_boot_log.h"       /* #34: every native-IME step lands in evo.log */
+#include "evo_boot_trace.h"     /* evo_bt: the pre-unjail probe also goes to klog */
+#include "evo_rmlui_bridge.h"   /* #81: the modal is an RmlUi document now */
 
 #define KB_MAX_BUF 256
 
+/*
+ * #34: the native PS5 IME is back on the app module.
+ *
+ * It used to be pinned off there: libSceImeDialog's symbols were reachable only
+ * through the SDK stub, libSceCommonDialog was not linked at all, and the code
+ * tried to sceKernelLoadStartModule it at open time - which a fake-signed module
+ * cannot do. Now libSceCommonDialog is a positional PRX import
+ * (tools/native-app/stubs/prx, scripts/package-app.sh step 6b) exactly like
+ * libSceVideodec2, and sceCommonDialogInitialize is called directly.
+ *
+ * The dialog is still Sony code reached from a fake-signed process, so nothing
+ * here assumes it works: every native open is checked, and the FIRST failure
+ * latches g_native_ime_broken for the rest of the session so the virtual
+ * keyboard takes over silently instead of failing once per keystroke-prompt.
+ * Settings -> Interface -> Keyboard Input still chooses, and the choice
+ * persists.
+ */
 static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
+static int g_native_ime_broken = 0;   /* latched after a failed native open */
 
 void evo_keyboard_set_type(int type)
 {
@@ -35,30 +52,84 @@ static uint16_t g_ime_placeholder[256];
 
 void toast(const char *title, const char *msg);
 
-static void init_native_ime_subsystem(void)
-{
-    static int s_common_dlg_inited = 0;
-    if (s_common_dlg_inited) return;
+/* 0 once the IME subsystem is up and a dialog may be opened. */
+static int s_ime_attempted = 0;
+static int s_ime_result = -1;
 
+/*
+ * Bring the CommonDialog family up once per process.
+ *
+ * Returns 0 when the IME can be opened, negative when it cannot. A second
+ * initialise returns SCE_COMMON_DIALOG_ERROR_ALREADY_INITIALIZED (0x80B80002),
+ * which is a success as far as we are concerned - hence the cached result.
+ */
+static int init_native_ime_subsystem(void)
+{
+    if (s_ime_attempted) return s_ime_result;
+    s_ime_attempted = 1;
+
+#if defined(EVO_APP_MODULE)
+    /*
+     * App module: this only ever runs from evo_keyboard_ime_probe(), in main()'s
+     * pre-unjail slot. Both halves have to happen there.
+     *
+     * sceSysmoduleLoadModule is the half that #34 was missing. libSceImeDialog
+     * links, its .sprx is NEEDED, and sceCommonDialogInitialize() returns 0 -
+     * and then the first sceImeDialog* call faults, because the dialog's own
+     * loadable module was never brought in. Same pre-unjail rule as
+     * libSceVideodec2 (#31): after evo_jailbreak_self() swaps credentials
+     * sceSysmoduleLoadModule stops working, so loading it lazily on the first
+     * keyboard-open - which is what the old code did - cannot work either.
+     */
+    int sm = sceSysmoduleLoadModule(SCE_SYSMODULE_IME_DIALOG);
+    evo_bt("ime: sceSysmoduleLoadModule(0x96) -> 0x%08x", (unsigned)sm);
+    if (sm < 0) {
+        s_ime_result = sm;
+        return s_ime_result;
+    }
+
+    /* Direct import - libSceCommonDialog.sprx is a positional DT_NEEDED here. */
+    int rc = sceCommonDialogInitialize();
+    evo_bt("ime: sceCommonDialogInitialize() -> 0x%08x", (unsigned)rc);
+#else
+    /* Payload / host builds: no such import, so go the long way round. */
+    int rc = -1;
     int res = 0;
     int mod = sceKernelLoadStartModule("libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
-    if (mod <= 0) {
+    if (mod <= 0)
         mod = sceKernelLoadStartModule("/system/common/lib/libSceCommonDialog.sprx", 0, NULL, 0, NULL, &res);
-    }
     printf("[evo-ime] libSceCommonDialog handle=%d res=%d\n", mod, res);
-
     if (mod > 0) {
         int (*p_cmn_init)(void) = NULL;
-        if (sceKernelDlsym(mod, "sceCommonDialogInitialize", (void**)&p_cmn_init) == 0 && p_cmn_init) {
-            int rc = p_cmn_init();
-            printf("[evo-ime] sceCommonDialogInitialize() => 0x%08x (%d)\n", (unsigned)rc, rc);
-        } else if (sceKernelDlsym(mod, "uoUpLGNkygk", (void**)&p_cmn_init) == 0 && p_cmn_init) {
-            int rc = p_cmn_init();
-            printf("[evo-ime] sceCommonDialogInitialize(NID) => 0x%08x (%d)\n", (unsigned)rc, rc);
-        }
+        if (sceKernelDlsym(mod, "sceCommonDialogInitialize", (void**)&p_cmn_init) == 0 && p_cmn_init)
+            rc = p_cmn_init();
+        else if (sceKernelDlsym(mod, "uoUpLGNkygk", (void**)&p_cmn_init) == 0 && p_cmn_init)
+            rc = p_cmn_init();
+        printf("[evo-ime] sceCommonDialogInitialize() => 0x%08x (%d)\n", (unsigned)rc, rc);
     }
-    s_common_dlg_inited = 1;
+#endif
+
+    /* 0x80B80002 = ALREADY_INITIALIZED: someone (or a previous open) got there
+     * first, which is exactly the state we want to be in. */
+    s_ime_result = (rc == 0 || (unsigned)rc == 0x80B80002u) ? 0 : (rc ? rc : -1);
+    return s_ime_result;
 }
+#endif /* EVO_TARGET_PS5 || __FreeBSD__ */
+
+/* See evo_keyboard.h — must run in main()'s pre-unjail slot. */
+void evo_keyboard_ime_probe(void)
+{
+#if defined(EVO_APP_MODULE) && (defined(EVO_TARGET_PS5) || defined(__FreeBSD__))
+    if (init_native_ime_subsystem() != 0) {
+        g_native_ime_broken = 1;
+        evo_bt("ime: native IME unavailable - virtual keyboard for this session");
+    } else {
+        evo_bt("ime: native IME ready");
+    }
+#endif
+}
+
+#if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
 
 static void utf8_to_utf16(const char *src, uint16_t *dst, size_t max_dst)
 {
@@ -235,8 +306,17 @@ void evo_keyboard_open(const char *title,
     g_kb.userdata = userdata;
 
 #if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
-    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE) {
-        init_native_ime_subsystem();
+    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken) {
+        int cd_rc = init_native_ime_subsystem();
+        if (cd_rc != 0) {
+            /* No CommonDialog, no IME. Don't try again this session. */
+            g_native_ime_broken = 1;
+            evo_log("ime: CommonDialog unavailable (0x%08x) - virtual keyboard",
+                    (unsigned)cd_rc);
+            evo_log_flush();
+            toast("KEYBOARD", "USING VIRTUAL KEYBOARD");
+            goto virtual_keyboard;
+        }
 
         utf8_to_utf16(g_kb.title, g_ime_title, 256);
         utf8_to_utf16(initial_value ? initial_value : "", g_ime_buf, 1024);
@@ -269,7 +349,12 @@ int prospero_get_initial_user_id(void);
         param.title = g_ime_title;
         param.placeholder = g_ime_placeholder;
 
+        /* One breadcrumb per system call: a fault inside libSceImeDialog kills
+         * the process outright, so the last line in evo.log is the only way to
+         * know which call did it. This is how #34's second failure was found. */
         uint32_t width = 0, height = 0;
+        evo_log("ime: -> sceImeDialogGetPanelSizeExtended");
+        evo_log_flush();
         if (sceImeDialogGetPanelSizeExtended(&param, NULL, &width, &height) >= 0 && width > 0 && height > 0) {
             param.posx = (1920.0f - (float)width) / 2.0f;
             param.posy = (1080.0f - (float)height) / 2.0f;
@@ -277,7 +362,14 @@ int prospero_get_initial_user_id(void);
             param.verticalAlignment = SCE_IME_VALIGN_TOP;
         }
 
+        evo_log("ime: -> sceImeDialogInit (panel %ux%u)",
+                (unsigned)width, (unsigned)height);
+        evo_log_flush();
         int rc = sceImeDialogInit(&param, NULL);
+        evo_log("ime: sceImeDialogInit userId=0x%08x len=%u panel=%ux%u -> 0x%08x",
+                (unsigned)userId, (unsigned)param.maxTextLength,
+                (unsigned)width, (unsigned)height, (unsigned)rc);
+        evo_log_flush();
         printf("[evo-ime] sceImeDialogInit userId=0x%08x len=%u rc=0x%08x (%d)\n",
                (unsigned)userId, (unsigned)param.maxTextLength, (unsigned)rc, rc);
         fflush(stdout);
@@ -288,11 +380,14 @@ int prospero_get_initial_user_id(void);
             return;
         }
 
-        /* Diagnostic feedback if native IME failed */
+        /* Latch: if the system dialog won't start once it won't start later
+         * either, and a failed toast per prompt is worse than just typing. */
+        g_native_ime_broken = 1;
         char err_msg[64];
         snprintf(err_msg, sizeof(err_msg), "ERR 0x%08X", (unsigned)rc);
         toast("NATIVE IME FALLBACK", err_msg);
     }
+virtual_keyboard:   /* both native bail-outs land here */
 #endif
 
 
@@ -514,179 +609,45 @@ int evo_keyboard_handle_input(uint32_t pressed)
     return 0;
 }
 
-static uint32_t with_alpha(uint32_t bgra, uint8_t a)
-{
-    return (bgra & 0x00FFFFFFu) | ((uint32_t)a << 24);
-}
-
+/*
+ * #81: the keyboard modal is an RmlUi document (assets/rml/keyboard.rml) in its
+ * own Rml::Context now — this pushes g_kb's state (buffer / layer / D-pad focus)
+ * to the bridge and composites it over the framebuffer, exactly where the old
+ * immediate-mode renderer used to draw. All the state + input handling above is
+ * unchanged. Closes #34 (the native IME path stays only as an opt-in for
+ * non-app builds; the app module defaults to virtual).
+ */
 void evo_screen_keyboard(uint32_t *fb)
 {
-    if (!g_kb.is_open) return;
+    evo_keyboard_params_t p;
+    memset(&p, 0, sizeof(p));
 
-    const evo_theme *th = evo_theme_current();
-
-    if (g_kb.is_native_active) {
-        /* Soft scrim dim behind native PlayStation OS keyboard */
-        evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
-                          with_alpha(th->bg_bottom, 160),
-                          with_alpha(th->bg_top, 180));
+    if (!g_kb.is_open) {
+        evo_rmlui_update_keyboard(&p);   /* visible = 0 -> hide the doc */
         return;
     }
 
-    /* 1. Scrim background (smooth dark dim over current screen) */
-    evo_ui_vgrad_over(fb, 0, 0, EVO_UI_W, EVO_UI_H,
-                      with_alpha(th->bg_bottom, 220),
-                      with_alpha(th->bg_top, 240));
-
-    /* 2. Main modal card panel */
-    int panel_x = 260;
-    int panel_y = 140;
-    int panel_w = 1400;
-    int panel_h = 800;
-    int radius  = 20;
-
-    evo_ui_round_rect(fb, panel_x, panel_y, panel_w, panel_h, radius,
-                      with_alpha(th->surface, 250),
-                      with_alpha(th->surface_sel, 250),
-                      with_alpha(th->border, 180), 2,
-                      with_alpha(th->shadow, 140), 24);
-
-    /* 3. Title & Header Hints */
-    int title_y = panel_y + 36;
-    evo_text(fb, panel_x + 50, title_y, g_kb.title, th->text_primary, EVO_FACE_TITLE);
-
-    /* Mode indicator tag */
-    const char *mode_str = (g_kb.mode == 0) ? "LOWERCASE" :
-                           (g_kb.mode == 1) ? "UPPERCASE" : "SYMBOLS";
-    evo_text(fb, panel_x + panel_w - 200, title_y + 4, mode_str, th->accent, EVO_FACE_SUB);
-
-    /* 4. Text Input Field Box */
-    int input_x = panel_x + 50;
-    int input_y = panel_y + 96;
-    int input_w = panel_w - 100;
-    int input_h = 76;
-
-    evo_ui_round_rect(fb, input_x, input_y, input_w, input_h, 12,
-                      with_alpha(th->bg_top, 240),
-                      with_alpha(th->bg_bottom, 240),
-                      with_alpha(th->accent, 160), 2,
-                      with_alpha(th->shadow, 80), 8);
-
-    /* Text display */
-    char disp_buf[KB_MAX_BUF + 2];
-    snprintf(disp_buf, sizeof(disp_buf), "%s", g_kb.buffer);
+    p.visible     = 1;
+    p.native_only = g_kb.is_native_active;
+    p.title       = g_kb.title;
+    p.text        = g_kb.buffer;
+    p.mode_label  = (g_kb.mode == 0) ? "LOWERCASE"
+                  : (g_kb.mode == 1) ? "UPPERCASE" : "SYMBOLS";
+    {
+        const char *const *grid = (g_kb.mode == 0) ? GRID_LOWER
+                                : (g_kb.mode == 1) ? GRID_UPPER : GRID_SYMBOLS;
+        for (int i = 0; i < 4; i++) p.rows[i] = grid[i];
+    }
+    for (int i = 0; i < KB_ACT_COUNT; i++) p.action_labels[i] = ACTION_LABELS[i];
+    p.len       = (int)strlen(g_kb.buffer);
+    p.max_len   = g_kb.max_len;
+    p.focus_row = g_kb.row;
+    p.focus_col = g_kb.col;
 
     g_kb.blink_timer = (g_kb.blink_timer + 1) % 60;
-    int show_cursor = (g_kb.blink_timer < 36);
+    p.show_caret = (g_kb.blink_timer < 36);
 
-    int text_x = input_x + 24;
-    int text_y = input_y + 20;
-
-    if (g_kb.buffer[0]) {
-        evo_text(fb, text_x, text_y, disp_buf, th->text_primary, EVO_FACE_MENU);
-        int tw = evo_text_w(disp_buf, EVO_FACE_MENU);
-        if (show_cursor) {
-            evo_ui_round_rect(fb, text_x + tw + 4, text_y - 2, 4, 34, 2,
-                              th->accent, th->accent, 0, 0, 0, 0);
-        }
-    } else {
-        evo_text(fb, text_x, text_y, "Type here using controller or connected keyboard...",
-                 with_alpha(th->text_muted, 120), EVO_FACE_MENU);
-        if (show_cursor) {
-            evo_ui_round_rect(fb, text_x, text_y - 2, 4, 34, 2,
-                              th->accent, th->accent, 0, 0, 0, 0);
-        }
-    }
-
-    /* Counter indicator */
-    char count_str[32];
-    snprintf(count_str, sizeof(count_str), "%d / %d", (int)strlen(g_kb.buffer), g_kb.max_len);
-    evo_text(fb, input_x + input_w - 120, text_y + 4, count_str, th->text_muted, EVO_FACE_SUB);
-
-    /* 5. Key Grid Rows 0..3 */
-    int grid_start_y = input_y + input_h + 30;
-    int key_w = 118;
-    int key_h = 68;
-    int gap_x = 12;
-    int gap_y = 12;
-    int grid_start_x = panel_x + 55;
-
-    for (int r = 0; r < 4; r++) {
-        const char *chars = (g_kb.mode == 0) ? GRID_LOWER[r] :
-                            (g_kb.mode == 1) ? GRID_UPPER[r] : GRID_SYMBOLS[r];
-        int ky = grid_start_y + r * (key_h + gap_y);
-
-        for (int c = 0; c < 10; c++) {
-            int kx = grid_start_x + c * (key_w + gap_x);
-            int is_focused = (g_kb.row == r && g_kb.col == c);
-
-            uint32_t fill_top = is_focused ? th->surface_sel : th->surface;
-            uint32_t fill_bot = is_focused ? th->accent : th->bg_top;
-            uint32_t border   = is_focused ? th->accent : with_alpha(th->border, 100);
-            int border_px     = is_focused ? 3 : 1;
-
-            evo_ui_round_rect(fb, kx, ky, key_w, key_h, 10,
-                              fill_top, fill_bot, border, border_px,
-                              is_focused ? with_alpha(th->accent, 100) : 0, is_focused ? 10 : 0);
-
-            char key_str[2] = { chars[c], '\0' };
-            int kw = evo_text_w(key_str, EVO_FACE_MENU);
-            int tx = kx + (key_w - kw) / 2;
-            int ty = ky + (key_h - 28) / 2;
-
-            uint32_t text_col = is_focused ? 0xFFFFFFFFu : th->text_primary;
-            evo_text(fb, tx, ty, key_str, text_col, EVO_FACE_MENU);
-        }
-    }
-
-    /* 6. Action Bar Row 4 */
-    int action_y = grid_start_y + 4 * (key_h + gap_y);
-    int act_widths[KB_ACT_COUNT] = { 180, 360, 200, 160, 160, 180 };
-    int cur_act_x = grid_start_x;
-
-    for (int a = 0; a < KB_ACT_COUNT; a++) {
-        int aw = act_widths[a];
-        int is_focused = (g_kb.row == 4 && g_kb.col == a);
-
-        uint32_t fill_top = is_focused ? th->surface_sel : th->surface;
-        uint32_t fill_bot = is_focused ? th->accent : th->bg_top;
-        uint32_t border   = is_focused ? th->accent : with_alpha(th->border, 100);
-        int border_px     = is_focused ? 3 : 1;
-
-        if (a == KB_ACT_DONE && is_focused) {
-            fill_bot = 0xFF24A024u; /* Vibrant green hint for Done */
-        }
-
-        evo_ui_round_rect(fb, cur_act_x, action_y, aw, key_h, 10,
-                          fill_top, fill_bot, border, border_px,
-                          is_focused ? with_alpha(th->accent, 100) : 0, is_focused ? 10 : 0);
-
-        int tw = evo_text_w(ACTION_LABELS[a], EVO_FACE_SUB);
-        int tx = cur_act_x + (aw - tw) / 2;
-        int ty = action_y + (key_h - 20) / 2;
-
-        uint32_t text_col = is_focused ? 0xFFFFFFFFu : th->text_primary;
-        evo_text(fb, tx, ty, ACTION_LABELS[a], text_col, EVO_FACE_SUB);
-
-        cur_act_x += aw + gap_x;
-    }
-
-    /* 7. Bottom Controller Shortcut Hints */
-    int hint_x = panel_x + 60;
-    int hint_y = panel_y + panel_h - 38;
-
-    struct { int glyph; const char *lbl; } hints[] = {
-        { EVO_GLYPH_CROSS,    "SELECT" },
-        { EVO_GLYPH_SQUARE,   "BACKSPACE" },
-        { EVO_GLYPH_TRIANGLE, "DONE" },
-        { EVO_GLYPH_CIRCLE,   "CANCEL" },
-        { EVO_GLYPH_LSTICK,   "SHIFT (L1/R1)" }
-    };
-    int hint_count = 5;
-    int hx = hint_x;
-    for (int i = 0; i < hint_count; i++) {
-        evo_glyph_tinted(fb, hx, hint_y - 20, hints[i].glyph, th->accent);
-        evo_text(fb, hx + 52, hint_y - 8, hints[i].lbl, th->text_muted, EVO_FACE_SMALL);
-        hx += 52 + evo_text_w(hints[i].lbl, EVO_FACE_SMALL) + 44;
-    }
+    evo_rmlui_update_keyboard(&p);
+    evo_rmlui_render_keyboard(fb, 1920, 1080);
 }
+

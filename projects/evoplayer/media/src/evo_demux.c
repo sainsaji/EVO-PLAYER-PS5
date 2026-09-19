@@ -24,11 +24,8 @@
 #include "evo_audio_resample.h"
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
-
-/* Matches main.c: the product video backend is always on in this build. */
-#ifndef PP_BACKEND_ENABLED
-#define PP_BACKEND_ENABLED 1
-#endif
+#include "evo_adec.h"
+#include "pp_stage_breadcrumb.h"
 
 /* ---------------------------------------------------------------------------
  * TRANSITIONAL: playback-core decode context + flags + the app playback
@@ -170,12 +167,10 @@ static int prospero_process_seek_request(void) {
         &prospero_seek_mutex
     );
 
-#if PP_BACKEND_ENABLED
     pp_playback_notify_seek_begin(
         &g_pp_pb,
         (int64_t)(target_seconds * 1000000.0)
     );
-#endif
 
     /*
      * Let decoder/output threads observe player_paused.
@@ -224,13 +219,14 @@ packet_queue_clear(
         target_seconds;
 
     /*
-     * Move slightly backward so inter-frame codecs can begin from
-     * a nearby keyframe.
+     * No extra backstep. AVSEEK_FLAG_BACKWARD already lands on the keyframe at
+     * or before this timestamp, which is exactly what an inter-frame codec
+     * needs to restart. The 0.5 s that used to be subtracted here only widened
+     * the run-up the decoder then has to chew through and throw away - and
+     * when the target sat just after a keyframe it pushed the seek back a
+     * whole extra GOP, which is what made a longer seek hitch harder than a
+     * short one.
      */
-    /* Video: back up slightly for keyframe. Audio-only: seek near target. */
-    if (video_stream_index >= 0 && decoder_seek_seconds > 0.50) {
-        decoder_seek_seconds -= 0.50;
-    }
 
     int seek_stream =
         video_stream_index >= 0
@@ -256,10 +252,26 @@ packet_queue_clear(
             AVSEEK_FLAG_BACKWARD
         );
 
+    /* Big files (14 GB GTA trailer) whose stream index doesn't cover the byte
+     * range can fail the timestamp seek; fall back to a byte seek. */
+    if (result < 0) {
+        result = av_seek_frame(play_fmt, seek_stream, seek_timestamp,
+                               AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+    }
+    {
+        char d[112];
+        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d target=%.3f",
+                 result, (long long)seek_timestamp, seek_stream, target_seconds);
+        pp_stage_bc("SEEK_AVFRAME", d);   /* #32 diagnostics -> /mnt/usb0/evo.log */
+    }
+
     if (result >= 0) {
         avformat_flush(play_fmt);
 
         evo_vdec_flush(g_vdec);   /* video codec + scratch frame/packet (A6) */
+        if (g_adec) {
+            evo_adec_flush(g_adec);
+        }
 
         if (audio_ctx) {
             avcodec_flush_buffers(
@@ -284,6 +296,14 @@ packet_queue_clear(
          */
         resume_base_offset_seconds =
             target_seconds;
+
+        /*
+         * Arm the audio discard window before the decode threads are let go,
+         * so the run-up between the keyframe this seek landed on and the
+         * target is dropped on the audio side too. Both clocks then restart
+         * from the target and the picture resumes without waiting for audio.
+         */
+        audio_seek_discard_until = target_seconds;
 
         audio_samples_played = 0;
         audio_samples_decoded = 0;
@@ -317,6 +337,7 @@ packet_queue_clear(
         }
 
     } else {
+        audio_seek_discard_until = -1.0;
         toast(
             "SEEK",
             "Decoder seek failed"
@@ -325,16 +346,17 @@ packet_queue_clear(
 
     prospero_seek_in_progress = 0;
 
-#if PP_BACKEND_ENABLED
     pp_playback_notify_seek_end(
         &g_pp_pb,
         result >= 0,
         0,
         0
     );
-    if (result >= 0 && !restore_paused)
+    /* notify_seek_begin() paused the clock. Always lift that if we were
+     * playing — on a FAILED seek notify_seek_end() only clears seek_discarding
+     * and leaves the clock paused, which drops every frame -> frozen picture. */
+    if (!restore_paused)
         pp_playback_resume(&g_pp_pb);
-#endif
 
     player_paused =
         restore_paused ? 1 : 0;

@@ -1,5 +1,14 @@
 # Docker → PS5 networking (Windows host)
 
+> **Route deleted — read the ELF/payload parts as history.** The ELF-push
+> scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
+> `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
+> The `.ffpfsc` app module is the only deploy path — see
+> [building.md](building.md#8-deploying-to-the-console) and
+> [tooling.md](tooling.md). Commands below that name those scripts will not
+> run; the findings around them still stand.
+
+
 The container must open a TCP connection to the console. That is the only
 network requirement of the ELF workflow, and it works on Docker Desktop's
 **default bridge network** with no special configuration.

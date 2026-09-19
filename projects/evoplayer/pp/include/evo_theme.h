@@ -102,6 +102,14 @@ int evo_theme_set_by_name(const char *name);
  */
 void evo_theme_init(void);
 
+/*
+ * Forget the loaded set so the next evo_theme_init() re-scans the theme
+ * directory. Used when the data root is rebound to a different filesystem
+ * mid-run (issue #46) - otherwise the one-shot guard would keep the themes
+ * discovered from the pre-unjail fallback path.
+ */
+void evo_theme_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

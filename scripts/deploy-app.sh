@@ -11,6 +11,9 @@
 # sce_sys/param.json are uploaded LAST so a half-finished folder is never
 # mountable. After this, mount + launch from the Games row with ShadowMountPlus.
 #
+# The --ffpfsc deploy also DELETEs /mnt/usb0/{evo.log, evo_status,
+# evo_compat_report.txt}, so each launch starts with a fresh log.
+#
 # This does NOT launch anything - launch safety (never stack launches) is on
 # you and ShadowMountPlus. See docs/evo-pro/phase-1b-app-module.md.
 # =============================================================================
@@ -18,10 +21,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 ACTION="deploy"
 FFPFSC=0
+FORCE=0
 while (( $# )); do
     case "$1" in
         --undeploy) ACTION="undeploy" ;;
         --ffpfsc)   FFPFSC=1 ;;
+        --force)    FORCE=1 ;;
         -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -34,6 +39,7 @@ if ! in_container; then
     FWD=()
     [[ "${ACTION}" == undeploy ]] && FWD+=(--undeploy)
     (( FFPFSC )) && FWD+=(--ffpfsc)
+    (( FORCE )) && FWD+=(--force)
     reexec_in_container "deploy-app.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
 
@@ -50,9 +56,69 @@ APPDIR="${OUTPUT_DIR}/app/${TITLE_ID}"
 FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
 
 # --- .ffpfsc image path: one file to /data/homebrew/<TITLE_ID>.ffpfsc --------
+#
+# Refuse to deploy on top of an EVO that has been launched.
+#
+# Deploying replaces the .ffpfsc that ShadowMountPlus has MOUNTED and that a
+# live process has its code pages mapped from, and the file change then makes
+# ShadowMountPlus auto-launch - stacking a second instance on the resident one.
+# Either of those can panic the console; both have. Closing from the switcher
+# is the only thing that frees the slot, and there is no remote equivalent.
+#
+# A soft close (Settings -> QUIT EVO) is NOT sufficient here and must not be
+# treated as if it were: it parks the app and drains the GPU, which makes the
+# subsequent switcher-close safe, but the process stays resident with the image
+# still mounted.
+#
+# The signal: a deploy clears /mnt/usb0, so evo.log is absent until EVO next
+# runs. Its presence means EVO has been launched since the last deploy and may
+# still hold the slot. Deliberately conservative - it cannot distinguish
+# "running now" from "ran and was closed", and guessing wrong in that direction
+# is cheap while guessing wrong in the other has cost hours.
+#
+check_evo_not_resident() {
+    local out
+    out="$(python3 - "${PS5_HOST}" "${FTP_PORT}" <<'PY' 2>/dev/null || true
+import sys
+from ftplib import FTP
+host, port = sys.argv[1], int(sys.argv[2])
+try:
+    f = FTP(); f.connect(host, port, timeout=10); f.login()
+    lines = []
+    f.cwd("/mnt/usb0"); f.retrlines("LIST", lines.append)
+    try: f.quit()
+    except Exception: pass
+    print("PRESENT" if any(" evo.log" in l or l.endswith("evo.log") for l in lines) else "ABSENT")
+except Exception:
+    print("UNKNOWN")
+PY
+)"
+    case "${out}" in
+        ABSENT)  ok "EVO has not run since the last deploy - slot is free" ;;
+        PRESENT)
+            if (( FORCE )); then
+                warn "EVO has been launched since the last deploy - --force given, continuing"
+            else
+                die "EVO has been launched since the last deploy (/mnt/usb0/evo.log exists).
+
+   It may still hold the app slot. Deploying over a resident EVO replaces the
+   mounted image under a live process and stacks an auto-launch on top of it -
+   both have kernel-panicked this console.
+
+   Close EVO from the switcher (PS button -> close the application), then
+   deploy again. Settings -> QUIT EVO parks it and makes that close safe, but
+   does NOT free the slot on its own.
+
+   Override with --force if you know the slot is free."
+            fi ;;
+        *) warn "could not reach ${PS5_HOST}:${FTP_PORT} to check for a resident EVO - continuing" ;;
+    esac
+}
+
 if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
     need_file "${FFPFSC_IMG}" "run ./scripts/package-app.sh --ffpfsc first"
     require_ps5_host
+    check_evo_not_resident
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
 import sys
@@ -87,6 +153,10 @@ def rmtree(ftp, path):
         pass
 
 
+# The runtime files the app module writes - cleared on each deploy so a launch
+# always starts fresh (evo-remote.sh / evo-panel read these back).
+USB_LOGS = ["evo.log", "evo_status", "evo_compat_report.txt"]
+
 with FTP() as ftp:
     ftp.connect(host, int(port), timeout=15)
     ftp.login()
@@ -94,6 +164,11 @@ with FTP() as ftp:
     except Exception: pass
     rmtree(ftp, folder)               # kill any stale loose folder for this TID
     print(f"cleared {folder} (if present)")
+    cleared = 0
+    for name in USB_LOGS:
+        try: ftp.sendcmd(f"DELE /mnt/usb0/{name}"); cleared += 1
+        except error_perm: pass
+    print(f"cleared {cleared} stale /mnt/usb0 log file(s)")
     for path in (tmp, remote):
         try: ftp.sendcmd(f"DELE {path}")
         except error_perm: pass
@@ -102,6 +177,13 @@ with FTP() as ftp:
     ftp.rename(tmp, remote)
     print(f"done: ftp://{host}:{port}{remote}")
 PY
+
+    # #60: the .ffpfsc is self-contained now - RmlUi's .rml/.rcss/.ttf/.png
+    # assets are embedded in the binary (evo_rmlui_bundle_data.cpp) instead of
+    # being read from disk at runtime, so the #44 out-of-band FTP push to
+    # /data/evoplayer/app/assets/ is no longer needed. This block used to wipe
+    # and re-upload that loose tree on every deploy; deleting
+    # /data/evoplayer/app/assets/ on the console now has zero effect on the UI.
     ok "deploy complete"
     echo "   Mount + launch from the Games row (ShadowMountPlus). Never stack launches."
     exit 0

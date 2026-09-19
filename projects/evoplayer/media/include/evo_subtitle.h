@@ -16,19 +16,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 
 /* Below this a subtitle track is signage or a watermark, not dialogue.
  * Used by the embedded-track scorer and the media-info track picker. */
 #define PROSPERO_SUBTITLE_MIN_USEFUL_CUES 10
 
-/* External-SRT cue geometry — prospero_subtitle_draw() (still in main.c)
- * consumes cues and wraps them with these bounds. */
+/* External-SRT cue text buffer. The RmlUi caption overlay (#81) wraps and
+ * shapes the text itself; MAX_LINES/LINE_SIZE are legacy and unused. */
 #define PROSPERO_SUBTITLE_TEXT_SIZE  512
 #define PROSPERO_SUBTITLE_MAX_LINES  3
 #define PROSPERO_SUBTITLE_LINE_SIZE  160

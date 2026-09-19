@@ -1,8 +1,29 @@
 # EVO Player UI — state of play
 
+> **Route deleted — read the ELF/payload parts as history.** The ELF-push
+> scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
+> `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
+> The `.ffpfsc` app module is the only deploy path — see
+> [building.md](building.md#8-deploying-to-the-console) and
+> [tooling.md](tooling.md). Commands below that name those scripts will not
+> run; the findings around them still stand.
+
+
 Written so the next session can start without re-deriving anything. Read this
 first, then [`theming.md`](theming.md) for the theme format and
 [`tooling.md`](tooling.md) for how to build, capture and measure.
+
+> **Superseded for screen rendering (#44, v0.8.0).** Every screen now draws
+> through RmlUi (`projects/evoplayer/ui_rml/`, see
+> [`rmlui-integration-guide.md`](rmlui-integration-guide.md) and
+> [`rmlui-parity.md`](rmlui-parity.md)). The immediate-mode screen renderers
+> `ui/src/evo_screens.c` and `ui/src/evo_chrome.c` were **deleted**. What
+> remains in `ui/src/` and is described below is the shared primitive layer —
+> `evo_draw` (text/measure/marquee), `evo_nav`, `evo_focus`, `evo_input`,
+> `evo_feedback`, `evo_keyboard` (the IME modal), `evo_widgets` (toasts), and
+> `evo_layout` (the grid-sync / row-capacity geometry that outlived the
+> renderer). Sections below about `evo_chrome` / `evo_screens` / per-screen
+> drawing are historical.
 
 ---
 

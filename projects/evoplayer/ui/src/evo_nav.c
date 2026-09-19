@@ -4,10 +4,8 @@
 static const evo_section_info SECTIONS[EVO_SECTION_COUNT] = {
     { "HOME",      "Back to the launch screen",          EVO_IC_HOME,     EVO_SCREEN_LAUNCH     },
     { "BROWSE",    "Videos and folders on USB storage",  EVO_IC_USB,      EVO_SCREEN_BROWSER    },
-    { "RECENT",    "Pick up where you left off",         EVO_IC_RECENT,   EVO_SCREEN_RECENT     },
-    { "FAVORITES", "Media you saved for later",          EVO_IC_FAVORITE, EVO_SCREEN_FAVORITES  },
     { "EMBY",      "Emby and media server streaming",    EVO_IC_EMBY,     EVO_SCREEN_EMBY_SETUP },
-    { "SETTINGS",  "Playback profiles and preferences",  EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS   },
+    { "SETTINGS",  "Playback and display preferences",   EVO_IC_SETTINGS, EVO_SCREEN_SETTINGS   },
     { "ABOUT",     "Credits and project info",           EVO_IC_ABOUT,    EVO_SCREEN_ABOUT      }
 };
 
@@ -22,8 +20,8 @@ evo_section evo_screen_section(evo_screen_id id)
     switch (id) {
         case EVO_SCREEN_LAUNCH:      return EVO_SECTION_HOME;
         case EVO_SCREEN_BROWSER:     return EVO_SECTION_BROWSER;
-        case EVO_SCREEN_RECENT:      return EVO_SECTION_RECENT;
-        case EVO_SCREEN_FAVORITES:   return EVO_SECTION_FAVORITES;
+        case EVO_SCREEN_RECENT:      return EVO_SECTION_BROWSER;
+        case EVO_SCREEN_FAVORITES:   return EVO_SECTION_BROWSER;
 
         case EVO_SCREEN_EMBY_SETUP:
         case EVO_SCREEN_EMBY_BROWSE: return EVO_SECTION_EMBY;

@@ -1,6 +1,6 @@
 /*
- * Durable stage breadcrumbs for 4K crash isolation.
- * Written immediately to USB — not only on clean exit.
+ * Playback-stage breadcrumbs for 4K crash isolation — written straight to
+ * /mnt/usb0/evo.log (the one diagnostic log), not only on clean exit.
  */
 #ifndef PP_STAGE_BREADCRUMB_H
 #define PP_STAGE_BREADCRUMB_H
@@ -9,14 +9,10 @@
 extern "C" {
 #endif
 
-#ifndef PP_STAGE_BC_PATH
-#define PP_STAGE_BC_PATH "/mnt/usb0/pp_4k_stage_breadcrumb.txt"
-#endif
-
-/** Append one stage line + flush. Safe to call frequently. */
+/** Append one stage line to the log. Safe to call frequently. */
 void pp_stage_bc(const char *stage_id, const char *detail);
 
-/** Overwrite with a single "last alive" marker (also appends history). */
+/** Alias of pp_stage_bc (the separate "last alive" file is gone). */
 void pp_stage_bc_checkpoint(const char *stage_id, const char *detail);
 
 #ifdef __cplusplus

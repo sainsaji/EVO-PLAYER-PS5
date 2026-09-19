@@ -2,17 +2,19 @@
 
 > **Status:** in progress. `src/evo_toast.c`, `src/evo_recent.c`,
 > `src/evo_favorites.c` and four `media/src/*.c` modules are already carved
-> out; `main.c` is **~18,800 lines / ~225 top-level functions**. The Makefile
-> now compiles per-object (`%.o: %.c`), so each extraction genuinely buys
-> rebuild time — the note in [architecture.md](architecture.md) that it does
-> not is out of date.
+> out; `main.c` is **~11,000 lines** (2026-09-10, down from ~12,900 on
+> 2026-09-03 — the render overhaul GL-4/GL-5/GL-6 removed the present
+> dispatch, the bitmap fonts, the subtitle rasteriser, the image blitter and
+> the `#32` overlay machine). The line-number spans in the region map below
+> pre-date that and are stale; re-run the marker scan before an extraction.
+> The Makefile compiles per-object (`%.o: %.c`), so each extraction genuinely
+> buys rebuild time.
 >
-> **This revision re-scopes the plan** around one goal: get a clean decoder
-> seam out of `main.c` so the native hardware-decode work
-> ([evo-pro/native-decode-plan.md](evo-pro/native-decode-plan.md)
-> Phase 3) has somewhere to land. That is **Track A** below and it is the
-> priority. **Track B** is the rest of the carve and can proceed in any order
-> around it.
+> **Track A** — the decoder seam (`evo_vdec.h`) — is **done** (issue #30,
+> closed; native decode landed in #31). **Track B** — the rest of the carve —
+> is issue **#53** (label `modularisation`, with #49 for the RmlUi/UI slice).
+> Track B also unblocks test coverage: `main.c` links the whole runtime so its
+> logic is currently at 0% (see #50).
 
 ---
 

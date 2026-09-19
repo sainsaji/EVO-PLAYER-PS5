@@ -76,7 +76,7 @@ fi
 
 # -----------------------------------------------------------------------------
 # Record exactly what was installed. docs/ and the README reference this file,
-# and scripts/build.sh prints it so build logs are self-describing.
+# and the build scripts print it so build logs are self-describing.
 # -----------------------------------------------------------------------------
 cat > "${PS5_PAYLOAD_SDK}/EVO_SDK_VERSION" <<EOF
 ps5_payload_sdk_version=${PS5_SDK_VERSION}

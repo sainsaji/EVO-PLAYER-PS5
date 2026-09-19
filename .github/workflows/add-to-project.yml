@@ -1,0 +1,31 @@
+# Adds new / reopened / transferred issues to the "EVO Player Roadmap" project.
+#
+# OPTIONAL. The project's own built-in "Auto-add to project" workflow already
+# does this for issues opened in THIS repo and needs no token — enable it in
+# Project ▸ ••• ▸ Workflows (see docs/project-tracking.md).
+#
+# Keep this file if you also want to catch issues TRANSFERRED in from another
+# repo, or want the add to run under your control / with field defaults later.
+#
+# To activate:
+#   1. repo variable  ROADMAP_PROJECT_URL = https://github.com/users/<you>/projects/<n>
+#        gh variable set ROADMAP_PROJECT_URL -b "https://github.com/users/sainsaji/projects/<n>"
+#   2. repo secret    ADD_TO_PROJECT_PAT   = a PAT with  project  + repo:read
+#        (classic PAT with `project`, or fine-grained with Projects: Read and write)
+#        gh secret set ADD_TO_PROJECT_PAT
+# Until both are set the job is skipped, so merging this file changes nothing.
+name: Add issues to the roadmap project
+
+on:
+  issues:
+    types: [opened, reopened, transferred]
+
+jobs:
+  add-to-project:
+    if: ${{ vars.ROADMAP_PROJECT_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v1
+        with:
+          project-url: ${{ vars.ROADMAP_PROJECT_URL }}
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

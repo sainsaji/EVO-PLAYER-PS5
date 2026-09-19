@@ -20,7 +20,11 @@
 
 #include "evo_data_path.h"
 
-#define FAVORITES_FILE_DB EVO_DATA_DIR "/evo_favorites.txt"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define FAVORITES_FILE_DB evo_data_path("evo_favorites.txt")
 #define MAX_FAVORITES     100
 
 typedef struct {
@@ -41,5 +45,9 @@ void favorites_remove(const char *path);
 void favorites_save(void);
 void favorites_load(void);
 void favorites_toggle_current_media(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* EVO_FAVORITES_H */

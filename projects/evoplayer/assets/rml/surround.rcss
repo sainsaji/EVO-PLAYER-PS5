@@ -10,13 +10,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -27,10 +27,10 @@ div, span, p {
 
 #surround-pane {
     position: absolute;
-    left: 152px;
+    left: 152dp;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1768dp;
+    height: 1080dp;
 }
 
 /* =============================== Header =============================== */
@@ -38,9 +38,9 @@ div, span, p {
 #surround-header {
     position: absolute;
     left: 0;
-    top: 96px;
-    width: 1704px;
-    height: 52px;
+    top: 96dp;
+    width: 1704dp;
+    height: 52dp;
     display: flex;
     flex-direction: row;
     align-items: flex-end;
@@ -53,11 +53,11 @@ div, span, p {
 }
 
 #surround-indicator {
-    width: 5px;
-    height: 62px;
+    width: 5dp;
+    height: 62dp;
     background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
+    border-radius: 2dp;
+    margin-right: 18dp;
 }
 
 #surround-header-titles {
@@ -67,19 +67,19 @@ div, span, p {
 
 #surround-title {
     display: block;
-    font-size: 38px;
+    font-size: 38dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 #surround-subtitle {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    letter-spacing: 1dp;
+    margin-top: 3dp;
 }
 
 /* ============================= Left column ============================= */
@@ -87,79 +87,79 @@ div, span, p {
 #surround-left {
     position: absolute;
     left: 0;
-    top: 222px;
-    width: 600px;
+    top: 222dp;
+    width: 600dp;
 }
 
 #surround-monitor {
-    width: 600px;
-    height: 220px;
+    width: 600dp;
+    height: 220dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
-    border-radius: 14px;
-    padding: 22px 26px;
+    border-radius: 20dp;
+    padding: 22dp 26dp;
     display: flex;
     flex-direction: column;
 }
 
 #surround-monitor-header {
     display: block;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1.5px;
-    margin-bottom: 16px;
+    letter-spacing: 1.5dp;
+    margin-bottom: 16dp;
 }
 
 #surround-monitor-title {
     display: block;
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #ecf3ff;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
 }
 
 #surround-monitor-line1 {
     display: block;
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: normal;
     color: #9fb2cc;
-    margin-top: 10px;
+    margin-top: 10dp;
 }
 
 #surround-monitor-line2 {
     display: block;
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: normal;
     color: #9fb2cc;
-    margin-top: 4px;
+    margin-top: 4dp;
 }
 
 #surround-monitor-status {
     display: block;
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
-    letter-spacing: 0.5px;
-    margin-top: 16px;
+    letter-spacing: 0.5dp;
+    margin-top: 16dp;
 }
 
 #surround-actions {
-    margin-top: 20px;
+    margin-top: 20dp;
     display: flex;
     flex-direction: column;
 }
 
 .srd-action {
-    width: 600px;
-    height: 72px;
+    width: 600dp;
+    height: 72dp;
     background-color: #121b2eeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
-    border-radius: 14px;
-    margin-bottom: 8px;
-    padding-left: 24px;
-    padding-top: 12px;
+    border-radius: 20dp;
+    margin-bottom: 8dp;
+    padding-left: 24dp;
+    padding-top: 12dp;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -167,110 +167,110 @@ div, span, p {
 
 .srd-action-focused {
     background-color: #1b2e4cf5;
-    border-width: 1.5px;
+    border-width: 1.5dp;
     border-color: #00cdff;
 }
 
 .srd-action-label {
     display: block;
-    font-size: 18px;
+    font-size: 18dp;
     font-weight: bold;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
 }
 
 .srd-action-sub {
     display: block;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: normal;
-    letter-spacing: 0.3px;
-    margin-top: 4px;
+    letter-spacing: 0.3dp;
+    margin-top: 4dp;
 }
 
 /* =============================== Stage =============================== */
 
 #surround-stage {
     position: absolute;
-    left: 624px;
-    top: 222px;
-    width: 1080px;
-    height: 714px;
+    left: 624dp;
+    top: 222dp;
+    width: 1080dp;
+    height: 714dp;
     background-color: #0c1526;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
-    border-radius: 24px;
+    border-radius: 28dp;
     padding: 0;
     overflow: hidden;
 }
 
 #surround-stage-display {
     position: absolute;
-    left: 330px;
-    top: 24px;
-    width: 420px;
+    left: 330dp;
+    top: 24dp;
+    width: 420dp;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 
 #surround-stage-display-bar {
-    width: 420px;
-    height: 14px;
-    border-radius: 7px;
+    width: 420dp;
+    height: 14dp;
+    border-radius: 7dp;
     background-color: #00cdff;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #00cdff;
 }
 
 #surround-stage-display-label {
     display: block;
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 12px;
+    letter-spacing: 1dp;
+    margin-top: 12dp;
 }
 
 /* Ambience rings - static, purely decorative, so a fixed low-alpha white
  * reads fine under every theme without needing to be pushed from C++. */
 #surround-ring-1 {
     position: absolute;
-    left: 440px;
-    top: 257px;
-    width: 200px;
-    height: 200px;
-    border-radius: 100px;
+    left: 440dp;
+    top: 257dp;
+    width: 200dp;
+    height: 200dp;
+    border-radius: 100dp;
     background-color: rgba(255, 255, 255, 0.08);
 }
 
 #surround-ring-2 {
     position: absolute;
-    left: 350px;
-    top: 167px;
-    width: 380px;
-    height: 380px;
-    border-radius: 190px;
+    left: 350dp;
+    top: 167dp;
+    width: 380dp;
+    height: 380dp;
+    border-radius: 190dp;
     background-color: rgba(255, 255, 255, 0.045);
 }
 
 #surround-ring-3 {
     position: absolute;
-    left: 255px;
-    top: 72px;
-    width: 570px;
-    height: 570px;
-    border-radius: 285px;
+    left: 255dp;
+    top: 72dp;
+    width: 570dp;
+    height: 570dp;
+    border-radius: 285dp;
     background-color: rgba(255, 255, 255, 0.024);
 }
 
 #surround-listener {
     position: absolute;
-    left: 475px;
-    top: 324px;
-    width: 130px;
-    height: 66px;
-    border-radius: 14px;
+    left: 475dp;
+    top: 324dp;
+    width: 130dp;
+    height: 66dp;
+    border-radius: 18dp;
     background-color: #16233aeb;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #2a3b55aa;
     display: flex;
     flex-direction: column;
@@ -280,28 +280,28 @@ div, span, p {
 
 #surround-listener-label {
     display: block;
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: bold;
     color: #ecf3ff;
 }
 
 #surround-listener-sub {
     display: block;
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
+    letter-spacing: 0.5dp;
+    margin-top: 2dp;
 }
 
 /* ============================= Speaker nodes ============================= */
 
 .srd-spk {
     position: absolute;
-    width: 150px;
-    height: 82px;
-    border-radius: 12px;
-    border-width: 1px;
+    width: 150dp;
+    height: 82dp;
+    border-radius: 16dp;
+    border-width: 1dp;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -309,65 +309,65 @@ div, span, p {
 }
 
 .srd-spk-active {
-    border-width: 2px;
+    border-width: 2dp;
 }
 
 .srd-spk-selected {
-    border-width: 1.5px;
+    border-width: 1.5dp;
 }
 
 .srd-spk-label {
     display: block;
-    font-size: 16px;
+    font-size: 16dp;
     font-weight: bold;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.3dp;
 }
 
 .srd-spk-sub {
     display: block;
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: normal;
-    margin-top: 4px;
+    margin-top: 4dp;
 }
 
 /* =============================== Footer =============================== */
 
 #surround-footer {
     position: absolute;
-    bottom: 40px;
+    bottom: 40dp;
     left: 0;
-    width: 1704px;
+    width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 26px;
+    gap: 26dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 42dp;
+    height: 42dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
+    border-radius: 21dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 28dp;
+    height: 28dp;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 15dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

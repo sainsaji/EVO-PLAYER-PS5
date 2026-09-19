@@ -18,11 +18,15 @@ inner layer compiles and runs without the one outside it.
     ├── media/      subsystems carved out of main.c. Own state and threads,
     │               narrow interfaces. Depend on FFmpeg, not on the player.
     │
-    ├── pp/         playback backend: VideoOut, converters, clocks, theme.
-    │               No UI, no decoder ownership.
+    ├── pp/         playback backend: pace, presentation clock, seek, theme.
+    │               No UI, no decoder ownership. (Present + VideoOut belong to
+    │               the AGC runtime in media/.)
     │
-    └── ui/         screens, widgets, chrome, layout. No FFmpeg, no VideoOut,
-                    no assets - draws through a vtable of function pointers.
+    ├── ui_rml/     the UI: RmlUi integration + EvoRenderInterfaceAGC, which
+    │               turns every draw into a sceAgc command buffer. Video and
+    │               UI both land on the surfaces media/evo_agc_runtime.c owns.
+    │
+    └── ui/         shared immediate-mode primitives (nav/focus/input/layout).
 ```
 
 The `ui/` boundary is what makes `tools/uiview.sh` possible: because screens
@@ -99,14 +103,12 @@ as much as possible is verifiable on the host:
 | | |
 |---|---|
 | `./tools/uiview.sh --all` | render every screen to PNG |
-| `./tools/bench.sh` | the video converter, with output hashes |
-| `./tools/bench.sh --asan` / `--tsan` | overruns and data races |
 | `python3 tools/gen_icons.py` | icons and font punctuation, with contact sheets |
 | `python3 tools/measure_font.py` | re-derive the font metrics |
 
-`bench.sh` hashes the output plane and **refuses to print timings if the pixels
-moved**, so a converter change is accepted or rejected before it ever reaches
-hardware.
+(`gl_yuv_parity.py`, which swept every `(Y,U,V)` triple against the CPU
+reference matrix, went with the OpenGL path. The BT.601 reference matrix it
+checked against is kept in [`converter-perf.md`](converter-perf.md).)
 
 ---
 
@@ -132,8 +134,9 @@ EVO Player/
 │   └── evoplayer/              the fork
 │       ├── main.c              the player (see "why main.c is still large")
 │       ├── assets/             font atlas, generated icons, punctuation
-│       ├── ui/{include,src}/   screens, widgets, chrome - no FFmpeg, no assets
-│       ├── pp/{include,src}/   VideoOut, converters, clocks, theme
+│       ├── ui/{include,src}/   shared immediate-mode primitives (nav/focus/input)
+│       ├── ui_rml/{include,src} RmlUi integration + the one GL/EGL context
+│       ├── pp/{include,src}/   pace, presentation clock, seek, theme
 │       └── media/{include,src} subsystems carved out of main.c
 ├── third_party/ffmpeg/         sources (git-ignored)
 ├── output/{elf,pkg,logs}/      artifacts

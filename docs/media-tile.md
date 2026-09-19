@@ -1,10 +1,19 @@
 # Installing EVO Player as a home-screen Media app
 
+> **Route deleted — read the ELF/payload parts as history.** The ELF-push
+> scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
+> `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
+> The `.ffpfsc` app module is the only deploy path — see
+> [building.md](building.md#8-deploying-to-the-console) and
+> [tooling.md](tooling.md). Commands below that name those scripts will not
+> run; the findings around them still stand.
+
+
 **Status: built, not yet installed on hardware.** `scripts/build-media-tile.sh`
 produces both payloads. Nothing has been registered on a console yet — §5
 records what was done, §6 the risks that still apply on first install.
 
-Today EVO Player is launched the way [install-homebrew.sh](../scripts/install-homebrew.sh)
+Today EVO Player is launched the way install-homebrew.sh
 does it: upload the ELF to `/data/homebrew/EVOPlayer/`, then hit
 `http://<ps5>:8080/hbldr` on ps5-payload-websrv, or click the entry on websrv's
 index page from a browser. The console never shows the player anywhere; you

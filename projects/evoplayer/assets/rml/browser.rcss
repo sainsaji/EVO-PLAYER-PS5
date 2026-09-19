@@ -1,23 +1,24 @@
 /* =============================================================================
- * EVO PLAYER PRO - USB Storage Browser
+ * EVO PLAYER PRO - Modern Media Storage Browser (5-Region Architecture)
+ * Premium PlayStation Obsidian & Sapphire Blue Theme
  *
- * Three columns, as in the immediate-mode original: the navigation rail
- * (navbar.rml), the file list, and an inspector showing what the selected
- * file actually is. The list is virtualised — the DOM holds twelve rows and
- * the C side swaps their text as the window moves, so a folder of five
- * thousand files costs exactly what one of five costs.
+ * Visual Architecture:
+ * 1. Top Toolbar: Location, Breadcrumb Pills, Search, Item Counter
+ * 2. Left Sidebar: Places & Filters (USB, Internal Storage, Favorites, Recent Media)
+ * 3. Main File Area: 2x4 Media Card Grid (16:9 Visual Previews & Metadata)
+ * 4. Bottom Status Strip: Detailed Selection Specifications & Console Hints
  * ============================================================================= */
 
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: #06090e;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -26,480 +27,617 @@ div, span, p {
     box-sizing: border-box;
 }
 
-#browser-pane {
+/* -----------------------------------------------------------------------------
+ * Wallpaper + frosted chrome
+ *
+ * The toolbar pills, the sources sidebar and the status strip are translucent
+ * panels that blur the wallpaper; the media cards stay opaque so thumbnails
+ * and filenames keep their contrast, and so the page does not pay for a
+ * backdrop pass per card. Same split as Nautilus and macOS: the chrome is
+ * glass, the content is not.
+ * -------------------------------------------------------------------------- */
+#browser-wallpaper {
     position: absolute;
-    left: 152px;
+    left: 0;
     top: 0;
-    width: 1768px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
+    decorator: image(../wallpaper/settings_bg.png cover);
 }
 
-/* =============================== Header =============================== */
+/* Knocks the wallpaper back so panel text keeps contrast. Kept light: dim it
+ * too hard and there is no longer enough behind the glass to read as frost. */
+#browser-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090e8c;
+}
+
+#browser-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* =========================== 1. Top Toolbar =========================== */
 
 #browser-header {
     position: absolute;
     left: 0;
-    top: 96px;
-    width: 1704px;
-    height: 52px;
+    top: 32dp;
+    width: 1704dp;
+    height: 56dp;
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
 }
 
 #browser-header-left {
     display: flex;
     flex-direction: row;
     align-items: center;
+    gap: 14dp;
 }
 
-#browser-indicator {
-    width: 5px;
-    height: 62px;
-    background-color: #00cdff;
-    border-radius: 2px;
-    margin-right: 18px;
-}
-
-#browser-header-titles {
+#browser-badge {
+    width: 44dp;
+    height: 44dp;
+    border-radius: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+#browser-badge-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+#browser-title-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
 }
 
 #browser-title {
     display: block;
-    font-size: 43px;
+    font-size: 22dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
+    letter-spacing: 2.5dp;
 }
 
-/* The atlas carries '/', so the path is shown as it really is rather than
- * transliterated into '>' the way it once was. */
+#browser-live-dot {
+    width: 7dp;
+    height: 7dp;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
 #browser-path {
-    display: block;
-    font-size: 18px;
+    display: inline-block;
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 10dp;
+    padding: 6dp 16dp;
+    font-size: 13.5dp;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-top: 3px;
+    color: #c2d2e8;
+    letter-spacing: 1.2dp;
+    max-width: 800dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
-    width: 900px;
+}
+
+#browser-header-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#browser-search-pill {
+    background-color: #0e18289e;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.btn-glyph-sm {
+    width: 18dp;
+    height: 18dp;
+}
+
+.search-pill-label {
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 1.2dp;
 }
 
 #browser-counter {
     display: block;
-    font-size: 15px;
+    background-color: #00cdff1a;
+    backdrop-filter: blur(16dp);
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    font-size: 12.5dp;
     font-weight: bold;
-    color: #8fa0b5;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
 }
 
-/* ============================== File list ============================== */
+/* ============================ 2. Left Sidebar ============================ */
 
-/* 1116 for the list, 24 of gutter, 564 for the inspector = 1704.
- *
- * Height is 8 rows at the 94px pitch (84 + 10px margin), minus the last
- * row's trailing margin. Unbounded, the 12-row DOM pool (kBrowserRows, for
- * folders with a long page) ran its ninth-and-later rows straight under the
- * footer hint row instead of stopping short of it; the C side already caps
- * how many rows it actually populates, but nothing here enforced the same
- * limit, so it only took a longer folder listing to show it. */
-#browser-list {
+#browser-sidebar {
     position: absolute;
     left: 0;
-    top: 222px;
-    width: 1116px;
-    height: 742px;
-    overflow: hidden;
+    top: 104dp;
+    width: 270dp;
+    height: 856dp;
+    background-color: #0b1220a8;
+    backdrop-filter: blur(26dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 16dp 10dp;
     display: flex;
     flex-direction: column;
+    gap: 6dp;
 }
 
-.brow {
-    position: relative;
-    width: 1116px;
-    height: 84px;
-    flex-shrink: 0;
-    background-color: #121b2eeb;
-    border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 12px;
-    margin-bottom: 10px;
-    padding-left: 26px;
-    padding-right: 26px;
-    display: flex;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.brow-focused {
-    background-color: #1b2e4cf5;
-    border-width: 1.5px;
-    border-color: #00cdff;
-}
-
-.brow-left {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-}
-
-.brow-icon-box {
-    width: 54px;
-    height: 54px;
-    background-color: #131c2e;
-    border-radius: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 16px;
-}
-
-.brow-focused .brow-icon-box {
-    background-color: #1a2a47;
-}
-
-.brow-icon {
-    width: 28px;
-    height: 28px;
-    display: inline-block;
-}
-
-.brow-text {
-    display: flex;
-    flex-direction: column;
-    width: 806px;
-}
-
-.brow-name {
-    display: block;
-    font-size: 28px;
+.sb-section-title {
+    font-size: 11dp;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
+    color: #5e718c;
+    letter-spacing: 2dp;
+    padding: 6dp 12dp 2dp 12dp;
 }
 
-.brow-detail {
-    display: block;
-    font-size: 17px;
-    font-weight: normal;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
+.sb-section-divider {
+    height: 1dp;
+    background-color: #5a7db426;
+    margin: 8dp 8dp;
 }
 
-.brow-right {
+.sb-item {
+    width: 250dp;
+    height: 44dp;
+    border-radius: 10dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    padding: 0 12dp;
+    gap: 12dp;
+    background-color: transparent;
+    border-width: 1.5dp;
+    border-color: transparent;
+    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out, transform 0.15s cubic-out;
 }
 
-.brow-fav {
-    width: 24px;
-    height: 24px;
+.sb-item-active {
+    background-color: #162a4a;
+    border-color: #5a7db466;
+}
+
+.sb-item-focused {
+    background-color: #00cdff26;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.sb-icon {
+    width: 22dp;
+    height: 22dp;
+}
+
+.sb-label {
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 0.8dp;
+}
+
+.sb-item-active .sb-label {
+    color: #ffffff;
+}
+
+.sb-item-focused .sb-label {
+    color: #ffffff;
+}
+
+/* ========================= 3. Main Media Grid ========================= */
+
+#browser-grid-pane {
+    position: absolute;
+    left: 290dp;
+    top: 104dp;
+    width: 1414dp;
+    height: 856dp;
+    overflow: hidden;
+}
+
+#browser-grid {
+    width: 1414dp;
+    height: 856dp;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 16dp;
+}
+
+/* Translucent, but no backdrop-filter: the cards cover most of the page, and
+ * eight backdrop passes a frame would cost more than the difference is worth
+ * when what sits behind a card is smooth wallpaper and the card's own opaque
+ * thumbnail box covers the top half of it anyway. The tint alone is what
+ * carries the glass through the content area. */
+.grid-card {
+    width: 341dp;
+    height: 418dp;
+    background-color: #101a2cbf;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 12dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    transition: transform 0.15s cubic-out, border-color 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.grid-card-focused {
+    background-color: #16243cf0;
+    border-width: 2.5dp;
+    border-color: #00cdff;
+    transform: scale(1.02);
+}
+
+.grid-card-hidden {
     display: none;
 }
 
-.brow-badge {
-    background-color: #131d2e;
-    border-width: 1px;
-    border-color: #243550;
-    border-radius: 7px;
-    padding: 7px 14px;
-    font-size: 15px;
-    font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
+.card-preview-box {
+    width: 317dp;
+    height: 184dp;
+    background-color: #070c16;
+    border-radius: 10dp;
+    border-width: 1dp;
+    border-color: #5a7db426;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/*
- * Resume position, as an underline on the row's bottom edge rather than a
- * floating bar. Inset above the edge it ran straight through the detail
- * line — a 62 px row has no spare band between centred two-line text and
- * its own border. The row clips, so this follows the rounded corners.
- */
-.brow-track {
+.card-preview-art {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 317dp;
+    height: 184dp;
+    border-radius: 9dp;
+    display: none;
+}
+
+.card-preview-icon {
+    width: 52dp;
+    height: 52dp;
+}
+
+.card-badge {
+    position: absolute;
+    left: 8dp;
+    top: 8dp;
+    background-color: #06090ed9;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 6dp;
+    padding: 3dp 8dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.2dp;
+}
+
+.grid-card-focused .card-badge {
+    background-color: #00cdff33;
+    border-color: #00cdff;
+    color: #ffffff;
+}
+
+.card-fav {
+    display: none;
+    position: absolute;
+    right: 8dp;
+    top: 8dp;
+    width: 22dp;
+    height: 22dp;
+}
+
+.card-duration {
+    display: none;
+    position: absolute;
+    right: 8dp;
+    bottom: 8dp;
+    background-color: #06090ee6;
+    border-radius: 4dp;
+    padding: 2dp 6dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.card-track {
     display: none;
     position: absolute;
     left: 0;
     bottom: 0;
-    width: 1116px;
-    height: 3px;
-    background-color: #2a3b5599;
+    width: 317dp;
+    height: 4dp;
+    background-color: #142236;
 }
 
-.brow-fill {
+.card-fill {
     display: block;
     width: 0%;
-    height: 3px;
+    height: 4dp;
     background-color: #00cdff;
 }
 
-/* ============================= Empty state ============================= */
+.card-meta {
+    display: flex;
+    flex-direction: column;
+    margin-top: 10dp;
+    gap: 4dp;
+}
+
+.card-title {
+    display: block;
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 0.2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.card-sub {
+    display: block;
+    font-size: 13dp;
+    font-weight: normal;
+    color: #7e97b8;
+    margin-top: 2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.grid-card-focused .card-sub {
+    color: #c2d2e8;
+}
+
+.card-action-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10dp;
+    padding-top: 8dp;
+    border-top-width: 1dp;
+    border-top-color: #5a7db426;
+}
+
+.card-kind {
+    font-size: 11.5dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.card-ext {
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
+    padding: 2dp 6dp;
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #7ce4ff;
+}
+
+/* ============================ Empty State ============================ */
 
 #browser-empty {
-    display: none;
     position: absolute;
     left: 0;
-    top: 320px;
-    width: 1116px;
+    top: 220dp;
+    width: 1414dp;
+    display: none;
     flex-direction: column;
     align-items: center;
 }
 
 #browser-empty-icon-box {
-    width: 128px;
-    height: 128px;
-    border-radius: 64px;
-    background-color: #121b2eeb;
-    border-width: 1px;
-    border-color: #2a3b55aa;
+    width: 108dp;
+    height: 108dp;
+    border-radius: 54dp;
+    background-color: #0e1828eb;
+    border-width: 1dp;
+    border-color: #5a7db433;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 26px;
+    margin-bottom: 20dp;
 }
 
 #browser-empty-icon {
-    width: 56px;
-    height: 56px;
-    display: inline-block;
+    width: 48dp;
+    height: 48dp;
 }
 
 #browser-empty-title {
     display: block;
-    font-size: 33px;
+    font-size: 26dp;
     font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 1px;
+    color: #ffffff;
+    letter-spacing: 1dp;
 }
 
 #browser-empty-hint {
     display: block;
-    font-size: 18px;
-    font-weight: bold;
-    color: #5e718c;
-    letter-spacing: 1px;
-    margin-top: 12px;
+    font-size: 15dp;
+    font-weight: normal;
+    color: #7e97b8;
+    margin-top: 8dp;
 }
 
-/* ============================== Inspector ============================== */
+/* ==================== 4. Bottom Status & Selection Strip ==================== */
 
-#inspector {
-    position: absolute;
-    left: 1140px;
-    top: 222px;
-    width: 564px;
-    height: 714px;
-    background-color: #121b2eeb;
-    border-width: 1px;
-    border-color: #2a3b55aa;
-    border-radius: 14px;
-    padding: 20px;
-}
-
-/* 16:9 at the panel's inner width, so a frame from the file is shown at the
- * shape it was shot in rather than letterboxed into a square. */
-#ins-preview {
-    position: relative;
-    width: 524px;
-    height: 295px;
-    background-color: #0a1120;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: #2a3b5566;
-    overflow: hidden;
-}
-
-#ins-preview-art {
-    position: absolute;
-    left: 1px;
-    top: 1px;
-    width: 522px;
-    height: 293px;
-    border-radius: 9px;
-}
-
-#ins-preview-empty {
+#browser-status-strip {
     position: absolute;
     left: 0;
-    top: 136px;
-    width: 524px;
-    font-size: 16px;
-    font-weight: bold;
-    color: #3d4c63;
-    letter-spacing: 2px;
-    text-align: center;
-}
-
-#ins-preview-badge {
-    display: none;
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    background-color: #020409d7;
-    border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 16px;
-    font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.5px;
-}
-
-#ins-name {
-    display: block;
-    font-size: 26px;
-    font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.3px;
-    margin-top: 20px;
-}
-
-#ins-kindrow {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    margin-top: 10px;
-    margin-bottom: 6px;
-}
-
-#ins-kind {
-    font-size: 15px;
-    font-weight: bold;
-    color: #00cdff;
-    letter-spacing: 1.5px;
-}
-
-#ins-ext {
-    background-color: #131d2e;
-    border-width: 1px;
-    border-color: #243550;
-    border-radius: 6px;
-    padding: 5px 11px;
-    font-size: 15px;
-    font-weight: bold;
-    color: #9fb2cc;
-    letter-spacing: 0.5px;
-}
-
-#ins-props {
-    display: flex;
-    flex-direction: column;
-    width: 524px;
-    margin-top: 10px;
-}
-
-/*
- * 34, not 40. The inspector shows up to nine properties under a 302 px
- * preview, and at 40 the ninth row — AUDIO, on any file with both a video
- * and an audio stream — landed past the panel.
- */
-.ins-prop {
-    width: 524px;
-    height: 42px;
+    bottom: 20dp;
+    width: 1704dp;
+    height: 60dp;
+    background-color: #0b1220a3;
+    backdrop-filter: blur(22dp);
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 16dp;
+    padding: 0 18dp;
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    border-bottom-width: 1px;
-    border-bottom-color: #1b2740;
 }
 
-.ins-key {
-    font-size: 15px;
-    font-weight: bold;
-    color: #5e718c;
-    letter-spacing: 1px;
-}
-
-.ins-val {
-    font-size: 17px;
-    font-weight: bold;
-    color: #ecf3ff;
-    letter-spacing: 0.3px;
-}
-
-/* Codecs and duration need avformat, which takes long enough to be felt, so
- * the probe is debounced and this says so rather than showing a blank panel. */
-#ins-probing {
-    display: none;
-    font-size: 15px;
-    font-weight: bold;
-    color: #5e718c;
-    letter-spacing: 1.5px;
-    margin-top: 14px;
-}
-
-/* =============================== Footer =============================== */
-
-#browser-footer {
-    position: absolute;
-    bottom: 40px;
-    left: 0;
-    width: 1704px;
+#status-details {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 32px;
+    gap: 14dp;
+    max-width: 860dp;
+}
+
+.status-name {
+    font-size: 17dp;
+    font-weight: bold;
+    color: #ffffff;
+    max-width: 280dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#status-specs {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.status-spec-pill {
+    display: none;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    border-radius: 8dp;
+    padding: 4dp 10dp;
+    font-size: 11.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+}
+
+.status-probing {
+    display: none;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+#browser-footer {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 20dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
-.footer-glyph {
-    width: 30px;
-    height: 30px;
-    display: inline-block;
-}
-
-/* Wrapper badge for the four face-button glyphs (Kenney's flat cutout art
- * carries its own DualSense colour-coding but no backdrop) — reproduces the
- * disc that used to be baked into the PNG. D-pad/stick glyphs never had one,
- * so they keep using .footer-glyph directly. */
 .glyph-badge {
-    width: 42px;
-    height: 42px;
+    width: 32dp;
+    height: 32dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21px;
-    background-color: rgba(20, 40, 80, 0.9);
+    border-radius: 16dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
 }
 
 .glyph-badge-img {
-    width: 28px;
-    height: 28px;
+    width: 20dp;
+    height: 20dp;
+}
+
+.glyph-badge-pill {
+    padding: 4dp 9dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+}
+
+.glyph-pill-text {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
 }
 
 .footer-text {
-    font-size: 15px;
+    font-size: 12.5dp;
     font-weight: bold;
-    color: #8b99ad;
-    letter-spacing: 1px;
+    color: #8ea4c8;
+    letter-spacing: 1.2dp;
 }
 
 #browser-footer-version {
-    margin-left: auto;
-    font-size: 15px;
+    font-size: 12dp;
     font-weight: bold;
-    color: #4b586c;
-    letter-spacing: 1px;
+    color: #465a78;
+    margin-left: 10dp;
 }

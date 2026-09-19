@@ -1,0 +1,154 @@
+# =============================================================================
+# Dockerfile.amdllpc - OPT-IN toolchain overlay that builds AMD's open-source
+# LLPC pipeline compiler (amdllpc) for the gfx1013 target the PS5 GPU uses.
+#
+# WHY: the AGC shaders were being produced by tools/build_agc_shaders.py, a
+# hand-written wrapper around opengnm-psbc that reimplemented ps5-opengl's
+# Gallium caller. It reimplemented the caller but not its overrides, and shipped
+# two silent, hardware-only bugs:
+#   * VGT_ESGS_RING_ITEMSIZE packaged as 4 instead of 1, which multiplied every
+#     vertex index by four and wedged the GPU on the first real draw;
+#   * no --descriptor-binding for the VERTEX stage, so shaders declaring
+#     "layout(set=0, binding=0) uniform ScreenConstants" read their projection
+#     matrix from a descriptor slot nobody had described - draws executed,
+#     retired and faulted nothing while producing exactly zero fragments.
+# Neither produced a diagnostic. amdllpc consumes .pipe files whose
+# [ResourceMapping] block declares the user-data layout next to the shader
+# source, so that entire class of omission stops being expressible.
+#
+# ps5-xash3d-halflife drives a full 3D game on this firmware through exactly
+# this toolchain (tools/build_shader.py: `amdllpc -gfxip=10.1.3 -o=<elf>
+# <pipe>`), and every stage of its chain is published, so this is a port rather
+# than a reverse-engineering effort.
+#
+# Build + use (explicit -f chain, so a plain `docker compose` never picks it up):
+#   docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml build ps5-dev
+#   docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml \
+#     run --rm ps5-dev python3 tools/build_agc_pipes.py
+#
+# This is a large build (LLVM-scale, tens of minutes and several GB) but it is
+# one-time and cached in the image.
+# =============================================================================
+ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.42
+FROM ${BASE_IMAGE}
+
+# The base image drops to a non-root user; apt and /opt need root.
+USER root
+
+# python3-distutils is deliberately absent: Ubuntu 24.04 ships Python 3.12,
+# which removed distutils from the stdlib and dropped the package. python3-yaml
+# comes from apt rather than pip because this image's Python is
+# externally-managed (PEP 668) and pip refuses to touch it without
+# --break-system-packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git cmake ninja-build build-essential python3 python3-yaml \
+      pkg-config curl ca-certificates libssl-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# AMDVLK ships a `repo` manifest that pins llvm-project, llpc, spvgen, glslang
+# and SPIRV-Tools at compatible revisions. build_with_tools.xml is the variant
+# that includes the standalone tools (amdllpc) and spvgen - without spvgen,
+# amdllpc cannot compile the [VsGlsl]/[FsGlsl] blocks inside a .pipe and fails
+# with "spvgen.h: No such file or directory".
+# Must be a fully-qualified tag ref: AMDVLK publishes releases as tags, and
+# `repo init -b v-2025.Q2.1` resolves against refs/heads/ and fails with
+# "couldn't find remote ref".
+ARG AMDVLK_TAG=refs/tags/v-2025.Q2.1
+ENV AMDLLPC_SRC=/opt/amdllpc
+RUN curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo \
+      -o /usr/local/bin/repo \
+    && chmod +x /usr/local/bin/repo
+
+WORKDIR ${AMDLLPC_SRC}
+RUN git config --global user.email "build@evoplayer.local" \
+    && git config --global user.name "EVO build" \
+    && git config --global color.ui false \
+    && repo init -u https://github.com/GPUOpen-Drivers/AMDVLK.git \
+         -b ${AMDVLK_TAG} -m build_with_tools.xml --depth=1 \
+    && repo sync -j$(nproc) -c --no-tags --no-clone-bundle
+
+# Driver-build dependencies go AFTER the repo sync on purpose: amdllpc is
+# reached through xgl's VKI_BUILD_TOOLS target, and xgl is the full Vulkan
+# driver, so its CMake configure hard-requires the WSI dev packages even when
+# only the compiler target is built. Discovering them one per failed configure
+# re-ran the ~60s repo sync every round; keeping this layer below the sync means
+# adding a package only re-runs the build. This is AMDVLK's own documented
+# dependency list rather than a minimal guess.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      g++-multilib gcc-multilib python3-jinja2 python3-ruamel.yaml \
+      libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev libxext-dev \
+      libxcb-dri3-dev libxcb-dri2-0-dev libxcb-present-dev \
+      libxcb-randr0-dev libxcb-sync-dev libxcb-shm0-dev libxcb-glx0-dev \
+      libxcb-xfixes0-dev libxshmfence-dev libxrandr-dev libdrm-dev \
+      x11proto-dri2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# amdllpc rejects -gfxip=10.1.3 ("Invalid gfxip: gfx1013") because LGC's
+# supported-GPU table in lgc/state/TargetInfo.cpp lists gfx1010/1011/1012 and
+# 1030+ but not 1013 - AMD does not ship the PS5's semi-custom part in public
+# AMDVLK. LLVM's own AMDGPU backend does know gfx1013, so this adds the one
+# table entry that stands between us and the target we actually need.
+#
+# Kept as a separate layer ABOVE the cmake build and BELOW the repo sync, so
+# editing the patch re-runs the compile but never the sync.
+COPY tools/patches/llpc-add-gfx1013.py /tmp/llpc-add-gfx1013.py
+RUN python3 /tmp/llpc-add-gfx1013.py       ${AMDLLPC_SRC}/drivers/llpc/lgc/state/TargetInfo.cpp     && grep -q 'gfx1013' ${AMDLLPC_SRC}/drivers/llpc/lgc/state/TargetInfo.cpp
+
+# LLPC's gfxruntime compiles an "advanced blend" HLSL library with Microsoft's
+# DirectX shader compiler and hard-fails the configure without it
+# (gfxruntime/CMakeLists.txt: FATAL_ERROR "Could not find shader compiler tool
+# dxc" - there is no option to skip it, unlike gpurt). Ubuntu packages no dxc,
+# so take the upstream Linux release. Nothing EVO compiles goes through it; it
+# only has to exist for the configure to complete.
+ARG DXC_RELEASE=v1.9.2607
+ARG DXC_TARBALL=linux_dxc_2026_07_29.x86_x64.tar.gz
+RUN curl -fsSL -o /tmp/dxc.tar.gz \
+      "https://github.com/microsoft/DirectXShaderCompiler/releases/download/${DXC_RELEASE}/${DXC_TARBALL}" \
+    && mkdir -p /opt/dxc \
+    && tar -xzf /tmp/dxc.tar.gz -C /opt/dxc \
+    && rm /tmp/dxc.tar.gz \
+    && find /opt/dxc -name dxc -type f -exec chmod +x {} \; \
+    && find /opt/dxc -name "libdxcompiler.so*" -exec install -m 0755 {} /usr/local/lib/ \; \
+    && ldconfig \
+    && ln -sf "$(find /opt/dxc -name dxc -type f -perm -u+x | head -1)" /usr/local/bin/dxc \
+    && test -x /usr/local/bin/dxc
+
+# AMDVLK's repo manifest checks every project out under drivers/, so the xgl
+# CMake root is drivers/xgl - NOT the workspace root. VKI_BUILD_TOOLS=ON is what
+# actually produces the amdllpc binary.
+#
+# gpurt (the raytracing shader library) needs DirectX's dxc for its HLSL and
+# nothing here is raytraced, so it is switched off rather than built.
+#
+# -j4 rather than -j$(nproc), and link jobs pinned to 1: the AMDGPU CodeGen
+# translation units (SIISelLowering, AMDGPUInstructionSelector, ...) peak at
+# 2-4 GB of GCC each. One per core exhausted the Docker VM at object ~2080 of
+# 2383 twice - stalling the build once and taking the whole Docker engine down
+# with it the other time. Linking the LLVM archives is memory-hungry too.
+#
+# No `|| true` in this chain: an earlier revision ended it with
+# `amdllpc --version || true`, which swallowed a hard CMake failure and produced
+# an image that looked built with no compiler in it. The explicit test makes a
+# missing amdllpc a build failure, not a runtime surprise.
+RUN cmake -G Ninja -S ${AMDLLPC_SRC}/drivers/xgl -B ${AMDLLPC_SRC}/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DVKI_BUILD_TOOLS=ON \
+      -DVKI_RAY_TRACING=OFF \
+      -DLLPC_RAY_TRACING=OFF \
+      -DLLVM_PARALLEL_COMPILE_JOBS=4 \
+      -DLLVM_PARALLEL_LINK_JOBS=1 \
+    && cmake --build ${AMDLLPC_SRC}/build --target amdllpc -j4 \
+    && find ${AMDLLPC_SRC}/build -name amdllpc -type f -perm -u+x \
+         -exec install -m 0755 {} /usr/local/bin/amdllpc \; \
+    && find ${AMDLLPC_SRC} -name "libspvgen*.so" \
+         -exec install -m 0755 {} /usr/local/lib/ \; \
+    && ldconfig \
+    && test -x /usr/local/bin/amdllpc \
+    && amdllpc --version
+
+# Keep only the built tool; the source tree is several GB and is not needed to
+# compile pipelines.
+RUN rm -rf ${AMDLLPC_SRC}
+
+USER dev
+WORKDIR /workspace

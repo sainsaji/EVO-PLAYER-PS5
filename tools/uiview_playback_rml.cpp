@@ -5,7 +5,13 @@
 #include <cstring>
 #include <string>
 #include <algorithm>
+#include <thread>
+#include <chrono>
+#include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include "../projects/evoplayer/include/evo_changelog.h"
+#include <cstdio>
+#include <cstdlib>
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
     std::ofstream file(filename, std::ios::binary);
@@ -66,27 +72,45 @@ static uint32_t evo_demo_bgra(int r, int g, int b) {
 
 static std::vector<uint32_t> make_demo_art(int w, int h, int seed) {
     std::vector<uint32_t> px((size_t)w * (size_t)h);
+
+    /*
+     * A deliberately hard-edged test pattern, not a soft wash.
+     *
+     * The point of these stand-ins is to show whether the card's rounded clip
+     * is doing its job. A gradient cannot: it fades to near the card colour at
+     * the edges, so a poster bleeding a pixel or two past the corner looks
+     * identical to one clipped correctly. Saturated bars with a WHITE frame
+     * hard against all four edges make any escape obvious - white outside the
+     * curve is a bleed, full stop.
+     */
+    static const uint8_t bars[8][3] = {
+        {255, 255, 255}, {255, 255,   0}, {  0, 255, 255}, {  0, 255,   0},
+        {255,   0, 255}, {255,   0,   0}, {  0,   0, 255}, { 20,  20,  20},
+    };
+    const int shift = seed % 8;
+
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            float fx = (float)x / (float)w;
-            float fy = (float)y / (float)h;
-            /* A soft diagonal wash plus a vignette — enough structure to see
-             * the cover-crop and the scrims doing their job. */
-            float d = 0.55f * fx + 0.45f * (1.0f - fy);
-            float vig = 1.0f - 0.45f * ((fx - 0.5f) * (fx - 0.5f) +
-                                        (fy - 0.5f) * (fy - 0.5f)) * 4.0f;
-            if (vig < 0.0f) vig = 0.0f;
+            const int bar = ((x * 8) / (w > 0 ? w : 1) + shift) % 8;
+            int r = bars[bar][0], g = bars[bar][1], b = bars[bar][2];
 
-            int base_r = (seed * 53) % 90 + 20;
-            int base_g = (seed * 97) % 70 + 25;
-            int base_b = (seed * 31) % 110 + 60;
+            /* Lower third: a black/white ramp, so the bottom edge - where a
+             * bleed shows up first against the card - is high contrast too. */
+            if (y > (h * 2) / 3) {
+                const int v = (x * 255) / (w > 1 ? w - 1 : 1);
+                r = g = b = v;
+            }
 
-            int r = (int)((base_r + d * 150.0f) * vig);
-            int g = (int)((base_g + d * 120.0f) * vig);
-            int b = (int)((base_b + d * 170.0f) * vig);
-            if (r > 255) r = 255;
-            if (g > 255) g = 255;
-            if (b > 255) b = 255;
+            /*
+             * No synthetic border here. An earlier version drew a white 2px
+             * frame as a bleed detector, but a full-bleed poster legitimately
+             * touches the card edge, so that frame rendered as a white rim
+             * just inside the border and read as a clipping fault when the
+             * clip was in fact correct. The saturated bars already run to the
+             * edge, so anything escaping the corner shows up as colour outside
+             * the curve - without inventing an artefact.
+             */
+
             px[(size_t)y * w + x] = evo_demo_bgra(r, g, b);
         }
     }
@@ -99,11 +123,24 @@ struct DemoRecent {
     int progress;
 };
 
-static void render_launch_screens(std::vector<uint32_t>& fb, int width, int height) {
+/*
+ * Fill in the home screen's parameters.
+ *
+ * row: 0 = hero, 1 = the recent shelf, 2 = the library shelf.
+ * col: which tile in that shelf carries the cursor.
+ *
+ * File scope (and static artwork) so the regression pass at the bottom can
+ * re-render the exact same home screen after every other screen has been
+ * through the renderer - see render_regression_screens().
+ */
+static void launch_build(evo_rmlui_launch_params_t& p, int row, int col, bool with_recent) {
     /* Cover cache is 320x180; the hero still is 560 wide. */
-    std::vector<uint32_t> hero_art = make_demo_art(560, 315, 3);
-    std::vector<std::vector<uint32_t>> covers;
-    for (int i = 0; i < 6; i++) covers.push_back(make_demo_art(320, 180, 5 + i * 7));
+    static std::vector<uint32_t> hero_art = make_demo_art(560, 315, 3);
+    static std::vector<std::vector<uint32_t>> covers = [] {
+        std::vector<std::vector<uint32_t>> c;
+        for (int i = 0; i < 6; i++) c.push_back(make_demo_art(320, 180, 5 + i * 7));
+        return c;
+    }();
 
     static const DemoRecent recents[6] = {
         { "Blade Runner 2049",            "1H 42M LEFT",      412 },
@@ -134,12 +171,7 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
         "projects/evoplayer/assets/icons/icon_about_support.png"
     };
 
-    /*
-     * row: 0 = hero, 1 = the recent shelf, 2 = the library shelf.
-     * col: which tile in that shelf carries the cursor.
-     */
-    auto build = [&](evo_rmlui_launch_params_t& p, int row, int col,
-                     bool with_recent) {
+    {
         memset(&p, 0, sizeof(p));
         p.app_name = "EVO PLAYER";
         p.version = "VERSION 0.7.0";
@@ -189,8 +221,10 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
             p.library[i].progress = -1;
             p.library[i].is_focused = (row == 2 && i == col) ? 1 : 0;
         }
-    };
+    }
+}
 
+static void render_launch_screens(std::vector<uint32_t>& fb, int width, int height) {
     evo_rmlui_nav_params_t nav;
     memset(&nav, 0, sizeof(nav));
     nav.active_section = 0;   /* HOME */
@@ -214,7 +248,7 @@ static void render_launch_screens(std::vector<uint32_t>& fb, int width, int heig
         evo_rmlui_update_nav(&nav);
 
         evo_rmlui_launch_params_t p;
-        build(p, s.row, s.col, s.recent);
+        launch_build(p, s.row, s.col, s.recent);
         evo_rmlui_update_launch(&p);
         evo_rmlui_render_launch(fb.data(), width, height);
 
@@ -242,6 +276,15 @@ static void set_nav(int section, int rail_focused) {
     nav.cursor_index = rail_focused ? section : section;
     nav.rail_focused = rail_focused;
     nav.visible = 1;
+    evo_rmlui_update_nav(&nav);
+}
+
+/* Full-screen OSD and modals draw over the player, where the rail is already
+ * hidden. Match that so a sticky rail from a previous render does not bleed in. */
+static void hide_nav() {
+    evo_rmlui_nav_params_t nav;
+    memset(&nav, 0, sizeof(nav));
+    nav.visible = 0;
     evo_rmlui_update_nav(&nav);
 }
 
@@ -492,6 +535,21 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_render_browser(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_browser.bmp", fb.data(), width, height);
 
+    /* #16/#44: a long unbroken filename must ellipsise in the row AND the
+     * inspector title, not overrun the panel. */
+    {
+        static const char* kLong =
+            "Clarksons.Farm.S01E01.720p.AMZN.WEBRip.x264-GalaxyTV[rarbg].mkv";
+        p.rows[3].name = kLong;
+        p.ins_name = kLong;
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        evo_rmlui_update_browser(&p);
+        evo_rmlui_render_browser(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_browser_longname.bmp", fb.data(), width, height);
+        p.rows[3].name = "Blade Runner 2049.mkv";
+        p.ins_name = "Blade Runner 2049.mkv";
+    }
+
     /* Empty folder, at the root — no BACK hint, no inspector content. */
     std::fill(fb.begin(), fb.end(), 0xFF0E0906);
     evo_rmlui_browser_params_t e;
@@ -567,14 +625,91 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     p.scrub_active = 0;
     p.scrub_target = 0.0;
     p.audio_track = "DTS-HD MA 5.1";
-    p.sub_track = "English";
+    p.sub_track = "Ελληνικά";
     p.view_mode = 0;
     p.show_stats = 0;
     p.alpha = 255;
+    /* #81: Unicode caption over the OSD - Cyrillic / Greek / accented Latin
+     * should all render via the Noto/DejaVu fallback faces, not as '?'. */
+    p.subtitle_text = "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xE2\x80\x94 "
+                      "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1 \xE2\x80\x94 "
+                      "\xC3\xA7" "a va?";
+    p.subtitle_face = 2;
+    p.subtitle_raised = 1;
 
     evo_rmlui_update_playback_params(&p);
     evo_rmlui_render_playback_osd(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_playback_paused.bmp", fb.data(), width, height);
+
+    /* #81 / #63: diagnostic HUD with live-ish telemetry graphs. */
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    evo_playback_osd_params_t ps = p;
+    ps.paused = 1;
+    ps.show_stats = 1;
+    ps.debug_overlay = 1;
+    ps.fps = 60;
+    ps.subtitle_text = nullptr;
+    evo_rmlui_update_playback_params(&ps);
+    {
+        static float gpu[48], ram[48], cpu[48];
+        for (int i = 0; i < 48; i++) {
+            gpu[i] = 0.18f + 0.10f * std::sin(i * 0.4f);
+            ram[i] = 0.30f + 0.004f * i;
+            cpu[i] = 0.42f + 0.16f * std::sin(i * 0.9f + 1.0f);
+        }
+        evo_perf_hud_t h;
+        memset(&h, 0, sizeof(h));
+        h.line_video  = "VIDEO  hevc  3840x2160  23.976 fps  (Hardware sceVideodec2)";
+        h.line_audio  = "AUDIO  truehd  eng  8ch  48000 Hz";
+        h.line_subs   = "SUBS  ON  /  EMBEDDED";
+        h.line_perf   = "RENDER 60 fps  /  DECODE 24 fps";
+        h.line_queues = "QUEUES  video 12/48  audio 40/128  pcm 3";
+        h.line_clocks = "CLOCKS  video 1234.50  audio 1234.48  delta 0.020";
+        h.hist_len = 48;
+        h.gpu_hist = gpu; h.ram_hist = ram; h.cpu_hist = cpu;
+        h.gpu_pct = 22; h.gpu_peak_pct = 34;
+        h.ram_mb = 41; h.ram_peak_mb = 44; h.ram_total_mb = 64;
+        h.cpu_pct = 47; h.cpu_peak_pct = 63;
+        evo_rmlui_update_perf_hud(&h);
+    }
+    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback_stats_hud.bmp", fb.data(), width, height);
+
+    /* #81: NOW PLAYING music visualiser */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF000000);
+        evo_playback_osd_params_t m;
+        memset(&m, 0, sizeof(m));
+        m.title = "Kavinsky - Nightcall";
+        m.metadata = "FLAC 24-BIT / 96 KHZ";
+        m.audio_track = "FLAC 2.0";
+        m.sub_track = "None";
+        m.position_sec = 74.0;
+        m.duration_sec = 258.0;
+        m.percentage = m.position_sec / m.duration_sec;
+        m.paused = 0;
+        m.view_mode = 0;
+        m.alpha = 255;
+        m.music_mode = 1;
+        m.music_codec = "FLAC";
+        evo_rmlui_update_playback_params(&m);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_music.bmp", fb.data(), width, height);
+    }
+
+    /* #81: caption-only mode - controls faded, one non-Latin line over video. */
+    std::fill(fb.begin(), fb.end(), 0xFF10161F);
+    evo_playback_osd_params_t q;
+    memset(&q, 0, sizeof(q));
+    q.title = "Blade Runner 2049";
+    q.view_mode = 0;
+    q.subtitle_text = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D \xD7\xA2\xD7\x95\xD7\x9C\xD7\x9D\n"
+                      "\xC3\x89v\xC3\xA9nement \xC3\xA0 pr\xC3\xA9voir";
+    q.subtitle_face = 3;
+    q.chrome_hidden = 1;
+    evo_rmlui_update_playback_params(&q);
+    evo_rmlui_render_playback_osd(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_playback_subtitle_only.bmp", fb.data(), width, height);
 }
 
 static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int height) {
@@ -588,41 +723,35 @@ static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int he
     p.release_total = 5;
     p.cursor_index = 0;
 
-    struct Rel { const char* v; const char* t; const char* d; };
-    static const Rel rel[5] = {
-        { "0.7.1", "RMLUI LAUNCH, BROWSER & LIST SCREENS", "AUGUST 2026" },
-        { "0.7.0", "EMBY PASSWORD AUTH & REFINED UI",      "AUGUST 2026" },
-        { "0.6.0", "NATIVE RMLUI PLAYBACK OSD",            "AUGUST 2026" },
-        { "0.5.0", "MEDIA HOME TILE & THEMING",            "JULY 2026"   },
-        { "0.4.0", "HARDWARE DECODE PIPELINE",             "JULY 2026"   },
-    };
-    for (int i = 0; i < 5; i++) {
-        p.releases[i].version = rel[i].v;
-        p.releases[i].tagline = rel[i].t;
-        p.releases[i].date = rel[i].d;
+    /*
+     * The real changelog, not a mock of it.
+     *
+     * This fixture used to carry its own hand-written releases and items, so
+     * the host preview showed something the console never displays - and it
+     * could not catch the thing this screen is most likely to get wrong, which
+     * is a release with more items than EVO_RMLUI_CL_ITEMS and a detail pane
+     * that clips rather than scrolls. Drive it from evo_changelog.h so the
+     * preview is the shipping content.
+     */
+    const int nrel = EVO_CHANGELOG_RELEASE_COUNT;
+    p.release_total = nrel;
+    for (int i = 0; i < nrel && i < EVO_RMLUI_CL_RELEASES; i++) {
+        p.releases[i].version = EVO_CHANGELOG_RELEASES[i].version;
+        p.releases[i].tagline = EVO_CHANGELOG_RELEASES[i].tagline;
+        p.releases[i].date    = EVO_CHANGELOG_RELEASES[i].date;
         p.releases[i].is_focused = (i == 0);
         p.release_count++;
     }
 
-    p.detail_version = "0.7.1";
-    p.detail_tagline = "RMLUI LAUNCH, BROWSER & LIST SCREENS";
-    p.item_total = 9;
+    const evo_changelog_release& cur = EVO_CHANGELOG_RELEASES[0];
+    p.detail_version = cur.version;
+    p.detail_tagline = cur.tagline;
+    p.item_total = cur.item_count;
 
-    struct It { const char* k; const char* t; };
-    static const It items[9] = {
-        { "NEW",      "RETAINED-MODE LAUNCH SCREEN WITH HERO, RECENT SHELF AND LIBRARY TILES" },
-        { "NEW",      "USB BROWSER REBUILT AS A VIRTUALISED TWELVE-ROW LIST WITH LIVE INSPECTOR" },
-        { "NEW",      "SHARED LIST DOCUMENT SERVING RECENT, FAVORITES AND BOTH EMBY SCREENS" },
-        { "NEW",      "MASTER-DETAIL CHANGELOG VIEWER" },
-        { "FIXED",    "BROWSER OPENED IN THE LAST PLAYED FOLDER INSTEAD OF THE USB ROOT" },
-        { "FIXED",    "NAVIGATION RAIL WAS UNREACHABLE FROM THE HOME SCREEN" },
-        { "FIXED",    "THEME COLOURS WERE BYTE-SWAPPED BEFORE THE FIRST THEME SYNC" },
-        { "FIXED",    "GRADIENT DECORATORS FLATTENED TO THEIR START COLOUR" },
-        { "IMPROVED", "RUNTIME ARTWORK NOW REACHES THE DOM WITHOUT A FILE ON DISK" },
-    };
-    for (int i = 0; i < 9; i++) {
-        p.items[i].kind = items[i].k;
-        p.items[i].text = items[i].t;
+    static const char* kKind[] = { "NEW", "FIXED", "IMPROVED", "REMOVED", "VERSION" };
+    for (int i = 0; i < cur.item_count && i < EVO_RMLUI_CL_ITEMS; i++) {
+        p.items[i].kind = kKind[(int)cur.items[i].kind];
+        p.items[i].text = cur.items[i].text;
         p.item_count++;
     }
 
@@ -631,9 +760,723 @@ static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int he
     save_bmp_24("output/uiview/rml_changelog.bmp", fb.data(), width, height);
 }
 
+/* ------------------------------------------------------------------
+ * Text reader
+ * ------------------------------------------------------------------ */
+static void render_reader_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(1, 0);
+
+    evo_rmlui_reader_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.title = "release-notes-0.7.1.txt";
+    p.subtitle = "/usb0/Documents  -  TEXT  -  12 KB";
+    p.badge = "TXT";
+    p.face = 0;
+    p.progress = 0.18;
+    p.visible_frac = 0.42;
+    p.footnote = "FIRST 2 MB OF 12 KB";
+
+    static const char* lines[] = {
+        "EVO PLAYER 0.7.1 - RELEASE NOTES",
+        "",
+        "This build brings the RmlUi retained-mode interface to the launch,",
+        "browser and list screens. The immediate-mode renderer is still the",
+        "fallback while each screen is signed off for parity.",
+        "",
+        "NEW",
+        "  - Retained-mode launch screen with hero, recent shelf and library.",
+        "  - USB browser rebuilt as a virtualised twelve-row list.",
+        "  - Shared list document serving recent, favorites and both Emby views.",
+        "",
+        "FIXED",
+        "  - Browser opened in the last played folder instead of the USB root.",
+        "  - Navigation rail was unreachable from the home screen.",
+        "  - Theme colours were byte-swapped before the first theme sync.",
+        "",
+        "A very long unbroken line follows to exercise the reader wrap path: ",
+        "abcdefghijklmnopqrstuvwxyz0123456789-abcdefghijklmnopqrstuvwxyz0123456789",
+    };
+    int n = (int)(sizeof(lines) / sizeof(lines[0]));
+    for (int i = 0; i < n; i++) p.lines[i] = lines[i];
+    p.line_count = n;
+
+    evo_rmlui_update_reader(&p);
+    evo_rmlui_render_reader(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_reader.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * Surround sound test
+ * ------------------------------------------------------------------ */
+static void render_surround_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    set_nav(5, 0);
+
+    evo_rmlui_surround_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.rail_focused = 0;
+    p.is_51_layout = 0;      /* 7.1 */
+    p.selected_item = 2;     /* an action row - the pane that was unreachable */
+    p.active_channel = 2;
+    p.surround_mode = 1;
+
+    struct Spk { const char* name; const char* label; double hz; int dx; int dy; int ch; int item; int hidden; };
+    static const Spk spk[8] = {
+        { "FRONT LEFT",       "FL",  440.0, -260, -170, 0, 5, 0 },
+        { "FRONT RIGHT",      "FR",  440.0,  260, -170, 1, 6, 0 },
+        { "CENTER",           "C",   330.0,    0, -210, 2, 7, 0 },
+        { "SUBWOOFER",        "LFE",  60.0,    0,  200, 3, 8, 0 },
+        { "SURROUND LEFT",    "SL",  520.0, -320,   40, 4, 9, 0 },
+        { "SURROUND RIGHT",   "SR",  520.0,  320,   40, 5, 10, 0 },
+        { "SURROUND BACK L",  "SBL", 600.0, -180,  180, 6, 11, 0 },
+        { "SURROUND BACK R",  "SBR", 600.0,  180,  180, 7, 12, 0 },
+    };
+    for (int i = 0; i < 8; i++) {
+        p.speakers[i].name = spk[i].name;
+        p.speakers[i].label = spk[i].label;
+        p.speakers[i].hz = spk[i].hz;
+        p.speakers[i].dx = spk[i].dx;
+        p.speakers[i].dy = spk[i].dy;
+        p.speakers[i].ch = spk[i].ch;
+        p.speakers[i].item_idx = spk[i].item;
+        p.speakers[i].hidden = spk[i].hidden;
+    }
+    p.speaker_count = 8;
+
+    evo_rmlui_update_surround(&p);
+    evo_rmlui_render_surround(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_surround.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * Modal dialogs — resume / playback finished / exit confirm,
+ * plus a three-action stress case (#16).
+ * ------------------------------------------------------------------ */
+static void render_dialog_screens(std::vector<uint32_t>& fb, int width, int height) {
+    const char* ic_x = "projects/evoplayer/assets/icons/btn_cross.png";
+    const char* ic_o = "projects/evoplayer/assets/icons/btn_circle.png";
+    const char* ic_t = "projects/evoplayer/assets/icons/btn_triangle.png";
+
+    auto shoot = [&](const char* name, const evo_rmlui_dialog_params_t& p) {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_update_dialog(&p);
+        evo_rmlui_render_dialog(fb.data(), width, height);
+        save_bmp_24((std::string("output/uiview/") + name + ".bmp").c_str(),
+                    fb.data(), width, height);
+    };
+
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "RESUME PLAYBACK";
+        p.title = "Blade Runner 2049 (2017)";
+        p.detail = "STOPPED AT 02:22:15 OF 09:56:00";
+        p.progress_pct = 0.35;
+        p.action_count = 2;
+        p.actions[0] = { ic_x, "RESUME", 1 };
+        p.actions[1] = { ic_o, "START OVER", 0 };
+        shoot("rml_dialog_resume", p);
+    }
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "PLAYBACK FINISHED";
+        p.title = "The Grand Budapest Hotel";
+        p.detail = "WHAT WOULD YOU LIKE TO DO NEXT?";
+        p.progress_pct = -1.0;
+        p.action_count = 3;
+        p.actions[0] = { ic_x, "PLAY AGAIN", 1 };
+        p.actions[1] = { ic_t, "NEXT EPISODE", 0 };
+        p.actions[2] = { ic_o, "BACK TO BROWSER", 0 };
+        shoot("rml_dialog_finished", p);
+    }
+    {
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "STOP PLAYBACK";
+        p.title = "Stop watching?";
+        p.detail = "YOUR POSITION WILL BE SAVED FOR NEXT TIME.";
+        p.progress_pct = -1.0;
+        p.action_count = 2;
+        p.actions[0] = { ic_x, "STOP", 1 };
+        p.actions[1] = { ic_o, "KEEP WATCHING", 0 };
+        shoot("rml_dialog_exit", p);
+    }
+    {
+        /* #16 stress: three long action labels must wrap, not overflow. */
+        evo_rmlui_dialog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.eyebrow = "RESUME PLAYBACK";
+        p.title = "A Very Long Feature Title That Also Needs To Be Clamped 2024";
+        p.detail = "STOPPED AT 02:22:15 OF 09:56:00  -  CHAPTER 14 OF 32";
+        p.progress_pct = 0.42;
+        p.action_count = 3;
+        p.actions[0] = { ic_x, "RESUME AT 02:22:15", 1 };
+        p.actions[1] = { ic_o, "START FROM THE BEGINNING", 0 };
+        p.actions[2] = { ic_t, "PLAY THE NEXT EPISODE INSTEAD", 0 };
+        shoot("rml_dialog_stress", p);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Media Info — technical specs deck, over video. Includes a #16
+ * long-string stress pass.
+ * ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+ * Toast notifications (#75) — one composite per kind, at rest (alpha 255,
+ * slide 0), over a plain background. RenderToast() only draws the card
+ * itself (transparent body), so unlike the dialog/modal shots this is a
+ * genuine "on top of whatever's already there" composite, same as the real
+ * draw_prospero_toast() call site in main.c.
+ * ------------------------------------------------------------------ */
+static void render_toast_screens(std::vector<uint32_t>& fb, int width, int height) {
+    hide_nav();
+
+    auto shoot = [&](const char* name, const char* title, const char* message, int kind) {
+        std::fill(fb.begin(), fb.end(), 0xFF0E1420);
+
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = title;
+        p.message = message;
+        p.kind = kind;
+        p.visible = 1;
+        p.alpha = 255;
+        p.slide = 0;
+
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24((std::string("output/uiview/") + name + ".bmp").c_str(),
+                    fb.data(), width, height);
+    };
+
+    shoot("rml_toast_info",  "SUBTITLES", "English (SRT)", 0);
+    shoot("rml_toast_tech",  "DECODER", "sceVideodec2 native, 3840x2160", 1);
+    shoot("rml_toast_error", "SEEK", "Unable to submit seek", 2);
+    shoot("rml_toast_ok",    "SCREENSHOT", "Saved to /mnt/usb0/evo_shots", 3);
+
+    /* #16-style stress: a long title/message must ellipsise, not overflow
+     * the fixed-width card. */
+    shoot("rml_toast_stress", "A VERY LONG TOAST TITLE THAT MUST ELLIPSISE",
+          "And an equally long message that also has to stay inside the card", 0);
+
+    {
+        /* Title-only: #toast-text centres it vertically via flexbox instead
+         * of the old CPU renderer's measured-baseline math. */
+        std::fill(fb.begin(), fb.end(), 0xFF0E1420);
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "BOOKMARK SAVED";
+        p.message = "";
+        p.kind = 0;
+        p.visible = 1;
+        p.alpha = 255;
+        p.slide = 0;
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_toast_title_only.bmp", fb.data(), width, height);
+    }
+
+    {
+        /* Mid slide-in, over the launch hero rather than a flat fill - the
+         * real integration point (composited over whatever screen is
+         * already drawn into the same framebuffer). */
+        evo_rmlui_launch_params_t lp;
+        memset(&lp, 0, sizeof(lp));
+        lp.app_name = "EVO PLAYER";
+        lp.version = "VERSION 0.7.0";
+        lp.clock = "21:48";
+        lp.theme_name = "MIDNIGHT";
+        lp.hero_eyebrow = "WELCOME";
+        lp.hero_title = "EVO PLAYER";
+        lp.hero_detail = "Play video and audio from USB storage";
+        lp.hero_action = "BROWSE USB";
+        lp.hero_progress = -1;
+        lp.hero_focused = 1;
+        evo_rmlui_update_launch(&lp);
+        evo_rmlui_render_launch(fb.data(), width, height);
+
+        evo_rmlui_toast_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "FAVORITES";
+        p.message = "Added to your list";
+        p.kind = 3;
+        p.visible = 1;
+        p.alpha = 180;
+        p.slide = 45;
+        evo_rmlui_update_toast(&p);
+        evo_rmlui_render_toast(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_toast_over_launch.bmp", fb.data(), width, height);
+    }
+}
+
+/* The dev menu FPS pill (own context, composited over any non-player screen
+ * when Settings -> System -> Debug Overlay is on). */
+static void render_debug_overlay_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    hide_nav();
+    evo_rmlui_launch_params_t lp;
+    memset(&lp, 0, sizeof(lp));
+    lp.app_name = "EVO PLAYER";
+    lp.version = "VERSION 0.7.0";
+    lp.clock = "21:48";
+    lp.theme_name = "MIDNIGHT";
+    lp.hero_eyebrow = "WELCOME";
+    lp.hero_title = "EVO PLAYER";
+    lp.hero_detail = "Play video and audio from USB storage";
+    lp.hero_action = "BROWSE USB";
+    lp.hero_progress = -1;
+    lp.hero_focused = 1;
+    evo_rmlui_update_launch(&lp);
+    evo_rmlui_render_launch(fb.data(), width, height);
+
+    evo_rmlui_update_debug_overlay(58, 1);
+    evo_rmlui_render_debug_overlay(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_debug_overlay.bmp", fb.data(), width, height);
+}
+
+static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int height) {
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_mediainfo_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Blade Runner 2049.mkv";
+        p.path = "/usb0/Movies/Blade Runner 2049.mkv";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "HDR10";
+        p.codec_badge = "HEVC";
+        p.fps_badge = "24 FPS";
+        p.container = "Matroska";
+        p.file_size = "24.8 GB";
+        p.duration = "02:44:31";
+        p.video_codec = "HEVC (H.265 Main 10)";
+        p.resolution = "3840 x 2160";
+        p.color_hdr = "HDR10  -  BT.2020  -  10-bit";
+        p.audio_codec = "DTS-HD MA 5.1";
+        p.channels = "5.1 (6 channels)";
+        p.sample_rate = "48 kHz";
+        p.subtitles = "3 tracks  -  English, French, Spanish";
+        p.output = "Direct  -  3840 x 2160";
+        p.renderer = "FFmpeg software decode";
+        p.decoder = "Software (FFmpeg)";
+        evo_rmlui_update_mediainfo(&p);
+        evo_rmlui_render_mediainfo(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_mediainfo.bmp", fb.data(), width, height);
+    }
+    {
+        /* #16 stress: a long filename + path + long codec strings. */
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        hide_nav();
+        evo_rmlui_mediainfo_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.mkv";
+        p.path = "/usb0/Movies/Peter Jackson/The Lord of the Rings Extended Editions/Return of the King.mkv";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "DOLBY VISION";
+        p.codec_badge = "HEVC";
+        p.fps_badge = "23.976 FPS";
+        p.container = "Matroska (WebM-compatible)";
+        p.file_size = "63.2 GB";
+        p.duration = "04:23:07";
+        p.video_codec = "HEVC (H.265 Main 10, Level 5.1, High tier)";
+        p.resolution = "3840 x 2160 (progressive)";
+        p.color_hdr = "Dolby Vision Profile 8.1  -  BT.2020 nc  -  12-bit";
+        p.audio_codec = "TrueHD 7.1 with Dolby Atmos (48 kHz, 24-bit)";
+        p.channels = "7.1 (8 channels) + objects";
+        p.sample_rate = "48 kHz";
+        p.subtitles = "7 tracks  -  English SDH, French, German, Spanish, Italian";
+        p.output = "Direct  -  3840 x 2160";
+        p.renderer = "FFmpeg software decode (slice-threaded, 12 threads)";
+        p.decoder = "Hardware (sceVideodec2)";
+        evo_rmlui_update_mediainfo(&p);
+        evo_rmlui_render_mediainfo(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_mediainfo_stress.bmp", fb.data(), width, height);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Subtitle track picker, over video.
+ * ------------------------------------------------------------------ */
+static void render_subtitles_screen(std::vector<uint32_t>& fb, int width, int height) {
+    std::fill(fb.begin(), fb.end(), 0xFF06090E);
+    hide_nav();
+
+    evo_rmlui_subtitles_params_t p;
+    memset(&p, 0, sizeof(p));
+    p.eyebrow = "SUBTITLES";
+    p.title = "SELECT A SUBTITLE TRACK";
+    p.size_str = "MEDIUM";
+    p.preview_text = "The quick brown fox jumps over the lazy dog";
+    p.preview_face = 1;
+
+    struct Tr { const char* label; const char* detail; int cur; };
+    static const Tr tr[6] = {
+        { "OFF",                     "NO SUBTITLES",                 0 },
+        { "English",                 "SRT  -  EMBEDDED  -  1,204 CUES", 1 },
+        { "English (SDH)",           "PGS  -  EMBEDDED  -  1,410 CUES", 0 },
+        { "French",                  "SRT  -  EXTERNAL  -  1,198 CUES", 0 },
+        { "Spanish (Latin America)", "SRT  -  EXTERNAL  -  1,201 CUES", 0 },
+        { "Director's commentary track transcript (English)", "ASS  -  EXTERNAL", 0 },
+    };
+    for (int i = 0; i < 6; i++) {
+        p.tracks[i].label = tr[i].label;
+        p.tracks[i].detail = tr[i].detail;
+        p.tracks[i].is_current = tr[i].cur;
+        p.tracks[i].is_focused = (i == 1);
+        p.track_count++;
+    }
+
+    evo_rmlui_update_subtitles(&p);
+    evo_rmlui_render_subtitles(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_subtitles.bmp", fb.data(), width, height);
+}
+
+/* ------------------------------------------------------------------
+ * #16 stress: long strings on the screens the issue calls out.
+ * ------------------------------------------------------------------ */
+static void render_stress_screens(std::vector<uint32_t>& fb, int width, int height) {
+    /* Player OSD: 55-char title + 76-char metadata must ellipsise, never
+     * collide with the badge rack. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "The Lord of the Rings: The Return of the King (Extended Edition) - Special Extended DVD Edition, Disc One";
+        p.metadata = "4H 23M LEFT  -  HEVC MAIN 10  -  DOLBY VISION P8  -  TRUEHD 7.1 ATMOS  -  48KHZ 24-BIT  -  BT.2020";
+        p.res_badge = "4K UHD";
+        p.hdr_badge = "DOLBY VISION";
+        p.codec_badge = "HEVC 10-BIT";
+        p.fps_badge = "23.976 FPS";
+        p.audio_badge = "";
+        p.position_sec = 1234.0;
+        p.duration_sec = 15787.0;
+        p.percentage = p.position_sec / p.duration_sec;
+        p.paused = 0;
+        p.scrub_active = 1;
+        p.scrub_target = 0.62;
+        p.audio_track = "TrueHD 7.1 Atmos";
+        p.sub_track = "English (SDH)";
+        p.view_mode = 0;
+        p.show_stats = 1;
+        p.alpha = 255;
+        evo_rmlui_update_playback_params(&p);
+        /* Render a couple of seconds of frames so the title marquee has laid
+         * out (one-frame lag) and scrolled past its start dwell; grab a frame
+         * mid-scroll and one near the far end. */
+        for (int f = 0; f < 200; f++) {
+            evo_rmlui_render_playback_osd(fb.data(), width, height);
+            if (f == 110)
+                save_bmp_24("output/uiview/rml_playback_stress.bmp",
+                            fb.data(), width, height);
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+        save_bmp_24("output/uiview/rml_playback_stress_end.bmp",
+                    fb.data(), width, height);
+    }
+
+    /*
+     * Scrub -> commit, the transition itself.
+     *
+     * Reported on hardware 2026-09-18: after a seek the picture is right but
+     * the bar restarts from the left. The C state cannot explain it - the time
+     * text and the bar both derive from getPositionSeconds() - so this renders
+     * the two frames either side of the commit with an identical position and
+     * compares the fill. Same position, same percentage, only scrub_active
+     * differs; the bar must not move.
+     */
+    {
+        const double dur = 15787.0, at = 8000.0;
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Scrub commit";
+        p.metadata = "";
+        p.duration_sec = dur;
+        p.position_sec = at;
+        p.percentage = at / dur;
+        p.alpha = 255;
+        p.audio_track = "";
+        p.sub_track = "";
+
+        p.scrub_active = 1;
+        p.scrub_target = at;
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_playback_params(&p);
+        for (int f = 0; f < 3; f++) evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_before.bmp", fb.data(), width, height);
+
+        p.scrub_active = 0;
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_playback_params(&p);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_after1.bmp", fb.data(), width, height);
+        for (int f = 0; f < 3; f++) evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_commit_after4.bmp", fb.data(), width, height);
+    }
+
+    /* Browser inspector: long filename + long codec value. */
+    {
+        std::vector<uint32_t> preview = make_demo_art(560, 315, 17);
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(1, 0);
+        evo_rmlui_browser_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.path = "/usb0/Movies/Peter Jackson/The Lord of the Rings Extended Editions";
+        p.title = "USB DRIVE";
+        p.total_count = 3;
+        p.cursor_index = 0;
+        p.rows[0].name = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.DV.mkv";
+        p.rows[0].detail = "MKV - 63.2 GB - 4H 23M - HEVC - TrueHD 7.1 Atmos";
+        p.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        p.rows[0].progress = 240;
+        p.rows[0].is_focused = 1;
+        p.row_count = 1;
+        p.ins_name = "The.Lord.of.the.Rings.The.Return.of.the.King.2003.Extended.2160p.DV.mkv";
+        p.ins_kind = "VIDEO";
+        p.ins_ext = "MKV";
+        p.ins_preview_badge = "4H 23M";
+        p.ins_preview = preview.data();
+        p.ins_preview_w = 560;
+        p.ins_preview_h = 315;
+        struct KV { const char* k; const char* v; };
+        static const KV props[7] = {
+            { "SIZE",       "63.2 GB" },
+            { "CONTAINER",  "MATROSKA (WEBM-COMPATIBLE)" },
+            { "DURATION",   "04:23:07" },
+            { "RESOLUTION", "3840 x 2160 progressive" },
+            { "VIDEO",      "HEVC (H.265 Main 10, Level 5.1)" },
+            { "AUDIO",      "TrueHD 7.1 + Dolby Atmos objects" },
+            { "SUBTITLES",  "7 (English SDH, French, German...)" },
+        };
+        for (int i = 0; i < 7; i++) {
+            p.ins_props[i].key = props[i].k;
+            p.ins_props[i].value = props[i].v;
+            p.ins_prop_count++;
+        }
+        evo_rmlui_update_browser(&p);
+        evo_rmlui_render_browser(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_browser_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Settings row: long title + long value badge. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        set_nav(5, 0);
+        evo_rmlui_settings_params_t s;
+        memset(&s, 0, sizeof(s));
+        s.title = "PLAYBACK & VIDEO";
+        s.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
+        s.counter = "1 OF 4";
+        s.rail_active_idx = 5;
+        s.row_count = 3;
+        s.rows[0].title = "PLAYBACK PROFILE FOR HIGH BITRATE 4K HDR CONTENT";
+        s.rows[0].detail = "TUNES THE DECODER, CONVERTER AND PRESENT PATH TOGETHER";
+        s.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+        s.rows[0].badge = "Cinephile - HDR passthrough, 24fps judder-free, max threads";
+        s.rows[0].has_chevron = 1;
+        s.rows[0].is_focused = 1;
+        s.rows[1].title = "DEFAULT ASPECT RATIO";
+        s.rows[1].detail = "FIT, FILL OR STRETCH";
+        s.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        s.rows[1].badge = "FIT TO SCREEN (PRESERVE ASPECT RATIO)";
+        s.rows[1].has_chevron = 1;
+        s.rows[2].title = "RESUME PLAYBACK";
+        s.rows[2].detail = "REMEMBER PLAYBACK POSITION PER FILE ACROSS APP RESTARTS AND CONSOLE REBOOTS";
+        s.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        s.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        s.rows[2].toggle_on = 1;
+        s.rows[2].has_chevron = 1;
+        evo_rmlui_update_settings(&s);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Changelog detail tagline: long. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(6, 0);
+        evo_rmlui_changelog_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "CHANGELOG";
+        p.subtitle = "WHAT CHANGED IN EACH RELEASE";
+        p.release_total = 1;
+        p.cursor_index = 0;
+        p.releases[0].version = "0.8.0";
+        p.releases[0].tagline = "RMLUI PARITY SIGN-OFF, TEXT CLAMPING, AND THE LEGACY IMMEDIATE-MODE RENDERER RETIRED";
+        p.releases[0].date = "SEPTEMBER 2026";
+        p.releases[0].is_focused = 1;
+        p.release_count = 1;
+        p.detail_version = "0.8.0";
+        p.detail_tagline = "RMLUI PARITY SIGN-OFF, TEXT CLAMPING, AND THE LEGACY IMMEDIATE-MODE RENDERER RETIRED";
+        p.item_total = 2;
+        p.items[0].kind = "IMPROVED";
+        p.items[0].text = "EVERY DYNAMIC STRING NOW ELLIPSISES OR MARQUEES INSTEAD OF COLLIDING WITH ADJACENT WIDGETS";
+        p.items[1].kind = "REMOVED";
+        p.items[1].text = "ui/src/evo_screens.c AND ui/src/evo_chrome.c - THE LEGACY SDF SCREEN RENDERER";
+        p.item_count = 2;
+        evo_rmlui_update_changelog(&p);
+        evo_rmlui_render_changelog(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_changelog_stress.bmp", fb.data(), width, height);
+    }
+
+    /* Launch hero: long title. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(0, 0);
+        evo_rmlui_launch_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.app_name = "EVO PLAYER";
+        p.version = "VERSION 0.8.0";
+        p.clock = "21:48";
+        p.theme_name = "MIDNIGHT";
+        p.hero_eyebrow = "CONTINUE WATCHING";
+        p.hero_title = "The Lord of the Rings: The Return of the King (Extended Edition)";
+        p.hero_detail = "4H 23M LEFT  -  HEVC MAIN 10  -  DOLBY VISION  -  TRUEHD 7.1 ATMOS  -  48 KHZ 24-BIT";
+        p.hero_action = "RESUME";
+        p.hero_progress = 240;
+        p.hero_focused = 1;
+        p.library_visible = 6;
+        static const char* lt[6] = { "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT" };
+        for (int i = 0; i < 6; i++) {
+            p.library[i].title = lt[i];
+            p.library[i].detail = "";
+            p.library[i].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
+            p.library[i].progress = -1;
+        }
+        evo_rmlui_update_launch(&p);
+        evo_rmlui_render_launch(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_launch_stress.bmp", fb.data(), width, height);
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Regression pass — screens whose bug only shows up in SEQUENCE.
+ *
+ * Everything above renders each screen roughly once, which is exactly why two
+ * state-leak bugs survived the harness:
+ *
+ *   rml_launch_recent_first /  The same home screen either side of a detour
+ *   rml_launch_recent_return   through the image viewer and the player. The
+ *                              clip mask that rounds a poster to its card only
+ *                              wrote the pixels the geometry covered, so the
+ *                              corners kept whatever an earlier screen's mask
+ *                              had left there and the posters came back square.
+ *                              The two must be pixel-identical:
+ *                                tools/shot.py diff rml_launch_recent_first.bmp \
+ *                                                   rml_launch_recent_return.bmp
+ *
+ *   rml_playback_after_image   Playback OSD entered straight from the image
+ *                              viewer. image.rml was in no other screen's hide
+ *                              list, so it stayed visible underneath and painted
+ *                              the whole frame through the OSD's transparent
+ *                              background - on the console, the last photo you
+ *                              opened instead of the film. The film here is the
+ *                              green fill; any of the photo's magenta/orange
+ *                              gradient showing through is the bug.
+ * ------------------------------------------------------------------ */
+static void render_regression_screens(std::vector<uint32_t>& fb, int width, int height) {
+    /* --- home screen, before and after a detour through other screens --- */
+    auto draw_home = [&](const char* out) {
+        evo_rmlui_nav_params_t nav;
+        memset(&nav, 0, sizeof(nav));
+        nav.active_section = 0;   /* HOME */
+        nav.cursor_index = 0;
+        nav.visible = 1;
+        nav.rail_focused = 0;
+        evo_rmlui_update_nav(&nav);
+
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        evo_rmlui_launch_params_t p;
+        launch_build(p, 1, 2, true);          /* same shot as rml_launch_recent */
+        evo_rmlui_update_launch(&p);
+        evo_rmlui_render_launch(fb.data(), width, height);
+        save_bmp_24(out, fb.data(), width, height);
+    };
+
+    /* The pair is rendered here rather than diffed against rml_launch_recent
+     * from the top of the run, because the theme fixtures in between change the
+     * palette - the whole screen would differ for a reason that is not a bug. */
+    draw_home("output/uiview/rml_launch_recent_first.bmp");
+
+    /* The resume dialog is the mask writer that matters here: its panel is
+     * rounded + overflow:hidden and it lands right on top of the shelves, which
+     * is why "play something, come back" was the repro. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_dialog_params_t d;
+        memset(&d, 0, sizeof(d));
+        d.eyebrow = "RESUME PLAYBACK";
+        d.title = "Blade Runner 2049 (2017)";
+        d.detail = "STOPPED AT 02:22:15 OF 09:56:00";
+        d.progress_pct = 0.35;
+        d.action_count = 2;
+        d.actions[0] = { "projects/evoplayer/assets/icons/btn_cross.png", "RESUME", 1 };
+        d.actions[1] = { "projects/evoplayer/assets/icons/btn_circle.png", "START OVER", 0 };
+        evo_rmlui_update_dialog(&d);
+        evo_rmlui_render_dialog(fb.data(), width, height);
+    }
+
+    /* --- image viewer, back out, play a video --- */
+    {
+        static std::vector<uint32_t> img(640 * 400);
+        for (int y = 0; y < 400; y++)
+            for (int x = 0; x < 640; x++)
+                img[y * 640 + x] = 0xFF000000u | 0x00FF00FFu;   /* flat magenta */
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_image_params_t ip;
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "sunset-over-the-bay.jpg";
+        ip.pixels = img.data();
+        ip.w = 640; ip.h = 400; ip.loaded = 1;
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+
+        /* Now the player. The scratch the OSD rasterises into starts transparent
+         * over the video quad; here a flat green stands in for the film. */
+        std::fill(fb.begin(), fb.end(), 0xFF1E7A32);
+        evo_playback_osd_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "Blade Runner 2049";
+        p.metadata = "1H 42M LEFT";
+        p.position_sec = 1234.0;
+        p.duration_sec = 9780.0;
+        p.percentage = p.position_sec / p.duration_sec;
+        p.paused = 1;
+        p.alpha = 255;
+        evo_rmlui_update_playback_params(&p);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_after_image.bmp", fb.data(), width, height);
+    }
+
+    /* Home again, after the image viewer + the player have both drawn clip
+     * masks over it. Must be byte-identical to rml_launch_recent_first. */
+    draw_home("output/uiview/rml_launch_recent_return.bmp");
+}
+
 int main(int argc, char** argv) {
-    const int width = 1920;
-    const int height = 1080;
+    /*
+     * Render size is overridable so the host can reproduce the console's scale.
+     * The PS5 renders at 3840x2160, i.e. a dp ratio of 2.0, while this harness
+     * defaulted to 1080p at ratio 1.0 - so any layout that depends on scale
+     * looked correct here and wrong on hardware, with no way to see it without
+     * a console round trip.
+     *
+     *   EVO_UIVIEW_SIZE=3840x2160 ./tools/uiview_playback_rml.sh
+     */
+    int width = 1920;
+    int height = 1080;
+    if (const char* sz = std::getenv("EVO_UIVIEW_SIZE")) {
+        int w = 0, h = 0;
+        if (std::sscanf(sz, "%dx%d", &w, &h) == 2 && w >= 640 && h >= 360) {
+            width = w;
+            height = h;
+            std::cerr << "uiview: render size " << width << "x" << height << std::endl;
+        } else {
+            std::cerr << "uiview: bad EVO_UIVIEW_SIZE '" << sz << "', using 1920x1080" << std::endl;
+        }
+    }
     std::vector<uint32_t> fb(width * height, 0xFF06090E);
 
     if (!evo_rmlui_init(width, height)) {
@@ -646,6 +1489,71 @@ int main(int argc, char** argv) {
     render_browser_screen(fb, width, height);
     render_playback_screen(fb, width, height);
     render_changelog_screen(fb, width, height);
+    render_reader_screen(fb, width, height);
+    render_surround_screen(fb, width, height);
+    render_dialog_screens(fb, width, height);
+    render_toast_screens(fb, width, height);
+    render_debug_overlay_screen(fb, width, height);
+    render_mediainfo_screen(fb, width, height);
+    render_subtitles_screen(fb, width, height);
+    render_stress_screens(fb, width, height);
+
+    /* #81: virtual keyboard modal over a screen */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0A0E16);
+        evo_keyboard_params_t k;
+        memset(&k, 0, sizeof(k));
+        k.visible = 1;
+        k.title = "SEARCH IN DIRECTORY";
+        k.text = "blade runner";
+        k.mode_label = "LOWERCASE";
+        static const char* rows[4] = { "1234567890", "qwertyuiop", "asdfghjkl.", "zxcvbnm_-:" };
+        static const char* acts[6] = { "123 / ABC", "SPACE", "BACKSPACE", "CLEAR", "CANCEL", "DONE" };
+        for (int i = 0; i < 4; i++) k.rows[i] = rows[i];
+        for (int i = 0; i < 6; i++) k.action_labels[i] = acts[i];
+        k.len = 12; k.max_len = 48;
+        k.focus_row = 2; k.focus_col = 3;   /* 'f' */
+        k.show_caret = 1;
+        evo_rmlui_update_keyboard(&k);
+        evo_rmlui_render_keyboard(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_keyboard.bmp", fb.data(), width, height);
+
+        k.focus_row = 4; k.focus_col = 5;   /* DONE */
+        evo_rmlui_update_keyboard(&k);
+        std::fill(fb.begin(), fb.end(), 0xFF0A0E16);
+        evo_rmlui_render_keyboard(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_keyboard_done.bmp", fb.data(), width, height);
+
+        k.visible = 0;
+        evo_rmlui_update_keyboard(&k);
+    }
+
+    /* #81: image viewer */
+    {
+        static std::vector<uint32_t> img(640 * 400);
+        for (int y = 0; y < 400; y++)
+            for (int x = 0; x < 640; x++)
+                img[y * 640 + x] = 0xFF000000u | (uint32_t)(x * 255 / 640)
+                                 | ((uint32_t)(y * 255 / 400) << 8)
+                                 | ((uint32_t)(160) << 16);
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_image_params_t ip;
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "sunset-over-the-bay.jpg";
+        ip.pixels = img.data();
+        ip.w = 640; ip.h = 400; ip.loaded = 1;
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_image_viewer.bmp", fb.data(), width, height);
+
+        memset(&ip, 0, sizeof(ip));
+        ip.title = "broken-file.bmp";
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_image(&ip);
+        evo_rmlui_render_image(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_image_error.bmp", fb.data(), width, height);
+    }
+
     set_nav(5, 0);
 
     // 1. Settings Main Hub
@@ -653,36 +1561,44 @@ int main(int argc, char** argv) {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        set.title = "SETTINGS";
-        set.subtitle = "APPLICATION & PLAYBACK PREFERENCES";
-        set.counter = "1 OF 4";
+        /* Sidebar owns the cursor, and the detail pane previews the
+         * highlighted section's real options - no row focused. Mirrors
+         * buildSectionRows(0, .., -1) in SettingsScreen.cpp. */
+        set.title = "PLAYBACK & VIDEO";
+        set.subtitle = "ASPECT RATIO, RESUME & DECODER";
+        set.counter = "4 SETTINGS";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 1;
         set.rail_focused = 0;
         set.row_count = 4;
 
-        set.rows[0].title = "PLAYBACK & VIDEO";
-        set.rows[0].detail = "PROFILE, ASPECT RATIO & RESUME";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[0].title = "DEFAULT ASPECT RATIO";
+        set.rows[0].detail = "FIT, FILL OR STRETCH";
+        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        set.rows[0].badge = "FIT";
+        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
         set.rows[0].has_chevron = 1;
-        set.rows[0].is_focused = 1;
 
-        set.rows[1].title = "SUBTITLES";
-        set.rows[1].detail = "AUTO-DETECT & DEFAULT SIZING";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
+        set.rows[1].title = "RESUME PLAYBACK";
+        set.rows[1].detail = "REMEMBER PLAYBACK POSITION";
+        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 1;
 
-        set.rows[2].title = "INTERFACE & CONTROLS";
-        set.rows[2].detail = "THEMES, SOUNDS, LIGHTBAR & SORTING";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[2].title = "SURROUND SOUND TEST";
+        set.rows[2].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
+        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
+        set.rows[2].badge = "OPEN";
+        set.rows[2].kind = EVO_RMLUI_ROW_ACTION;
         set.rows[2].has_chevron = 1;
-        set.rows[2].is_focused = 0;
 
-        set.rows[3].title = "SYSTEM & DIAGNOSTICS";
-        set.rows[3].detail = "DEVELOPER TOOLS & MEDIA TILE";
+        set.rows[3].title = "VIDEO DECODER";
+        set.rows[3].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
         set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[3].badge = "Auto (FFmpeg)";
+        set.rows[3].kind = EVO_RMLUI_ROW_VALUE;
         set.rows[3].has_chevron = 1;
-        set.rows[3].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
@@ -696,10 +1612,12 @@ int main(int argc, char** argv) {
         memset(&set, 0, sizeof(set));
         set.title = "PLAYBACK & VIDEO";
         set.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
-        set.counter = "1 OF 4";
+        set.counter = "1 OF 5";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
-        set.row_count = 4;
+        set.row_count = 5;
 
         set.rows[0].title = "PLAYBACK PROFILE";
         set.rows[0].detail = "SELECT ENGINE PROFILE";
@@ -718,7 +1636,8 @@ int main(int argc, char** argv) {
         set.rows[2].title = "RESUME PLAYBACK";
         set.rows[2].detail = "REMEMBER PLAYBACK POSITION";
         set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[2].badge = "ON";
+        set.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[2].toggle_on = 1;
         set.rows[2].has_chevron = 1;
         set.rows[2].is_focused = 0;
 
@@ -728,6 +1647,15 @@ int main(int argc, char** argv) {
         set.rows[3].badge = "";
         set.rows[3].has_chevron = 1;
         set.rows[3].is_focused = 0;
+
+        /* #37: native decode never runs on host — evo_vdec_probe() is a
+         * no-op there, so this is what a real build shows too. */
+        set.rows[4].title = "VIDEO DECODER";
+        set.rows[4].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
+        set.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[4].badge = "Auto (FFmpeg)";
+        set.rows[4].has_chevron = 1;
+        set.rows[4].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
@@ -743,6 +1671,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  AUTO-DETECT & DEFAULT SIZING";
         set.counter = "1 OF 2";
         set.rail_active_idx = 5;
+        set.section_active = 1;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 2;
 
@@ -774,6 +1704,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  THEMES, SOUNDS, LIGHTBAR & SORTING";
         set.counter = "1 OF 5";
         set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 5;
 
@@ -787,7 +1719,8 @@ int main(int argc, char** argv) {
         set.rows[1].title = "NAVIGATION SOUNDS";
         set.rows[1].detail = "PLAY AUDIO CLICKS ON INPUT";
         set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[1].badge = "ON";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 1;
         set.rows[1].has_chevron = 1;
         set.rows[1].is_focused = 0;
 
@@ -817,6 +1750,73 @@ int main(int argc, char** argv) {
         save_bmp_24("output/uiview/rml_settings_interface.bmp", fb.data(), width, height);
     }
 
+    // Interface with the THEME row expanded - every choice visible at once,
+    // which is the whole point of the options rework.
+    {
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "INTERFACE & CONTROLS";
+        set.subtitle = "THEMES, SOUNDS & CONTROLS";
+        set.counter = "5 SETTINGS";
+        set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
+        set.rail_focused = 0;
+        set.row_count = 10;
+
+        set.rows[0].title = "THEME";
+        set.rows[0].detail = "COLOR PALETTE & ACCENTS";
+        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[0].badge = "MIDNIGHT OBSIDIAN";
+        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
+        set.rows[0].has_chevron = 1;
+        set.rows[0].is_focused = 1;
+
+        set.rows[1].title = "MIDNIGHT OBSIDIAN";
+        set.rows[1].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[1].toggle_on = 1;
+
+        set.rows[2].title = "SAPPHIRE BLUE";
+        set.rows[2].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[2].toggle_on = 0;
+
+        set.rows[3].title = "AURORA";
+        set.rows[3].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[3].toggle_on = 0;
+
+        set.rows[4].title = "CARBON";
+        set.rows[4].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[4].toggle_on = 0;
+
+        set.rows[5].title = "EMBER";
+        set.rows[5].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[5].toggle_on = 0;
+
+        set.rows[6].title = "MONO SLATE";
+        set.rows[6].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[6].toggle_on = 0;
+
+        set.rows[7].title = "DEEP VIOLET";
+        set.rows[7].kind = EVO_RMLUI_ROW_OPTION;
+        set.rows[7].toggle_on = 0;
+
+        set.rows[8].title = "NAVIGATION SOUNDS";
+        set.rows[8].detail = "AUDIO FEEDBACK ON D-PAD & BUTTONS";
+        set.rows[8].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
+        set.rows[8].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[8].toggle_on = 1;
+
+        set.rows[9].title = "CONTROLLER LIGHTBAR";
+        set.rows[9].detail = "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT";
+        set.rows[9].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
+        set.rows[9].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[9].toggle_on = 0;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_theme_expanded.bmp", fb.data(), width, height);
+    }
+
     // 5. System & Diagnostics Subsection
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
@@ -826,6 +1826,8 @@ int main(int argc, char** argv) {
         set.subtitle = "SETTINGS  -  DEVELOPER TOOLS & MEDIA TILE";
         set.counter = "1 OF 3";
         set.rail_active_idx = 5;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 3;
 
@@ -864,6 +1866,8 @@ int main(int argc, char** argv) {
         set.subtitle = "HOW AGGRESSIVELY THE DECODER IS TUNED";
         set.counter = "2 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 0;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 
@@ -909,6 +1913,8 @@ int main(int argc, char** argv) {
         set.subtitle = "DIAGNOSTICS & SYSTEM REPORTS";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 
@@ -922,14 +1928,16 @@ int main(int argc, char** argv) {
         set.rows[1].title = "DEBUG OVERLAY";
         set.rows[1].detail = "ON-SCREEN REALTIME PERFORMANCE STATS";
         set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
-        set.rows[1].badge = "OFF";
+        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[1].toggle_on = 0;
         set.rows[1].has_chevron = 0;
         set.rows[1].is_focused = 0;
 
         set.rows[2].title = "NAVIGATION SOUNDS";
         set.rows[2].detail = "PLAY AUDIO CLICKS ON CONTROLLER INPUT";
         set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[2].badge = "ON";
+        set.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
+        set.rows[2].toggle_on = 1;
         set.rows[2].has_chevron = 0;
         set.rows[2].is_focused = 0;
 
@@ -954,6 +1962,8 @@ int main(int argc, char** argv) {
         set.subtitle = "CREDITS, ENGINE & PROJECT INFO";
         set.counter = "1 OF 6";
         set.rail_active_idx = 6;
+        set.section_active = 3;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 6;
 
@@ -1013,6 +2023,8 @@ int main(int argc, char** argv) {
         set.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
+        set.section_active = 2;
+        set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
 
@@ -1141,6 +2153,35 @@ int main(int argc, char** argv) {
         midnight_th.border = 0xAA3B2A18;
         evo_rmlui_set_theme(&midnight_th);
     }
+
+    // -------------------------------------------------------------
+    // About & Support Screen (#74)
+    // -------------------------------------------------------------
+    {
+        evo_rmlui_nav_params_t nav;
+        memset(&nav, 0, sizeof(nav));
+        nav.active_section = 6;
+        nav.rail_focused = 0;
+        nav.cursor_index = 6;
+        nav.visible = 1;
+        evo_rmlui_update_nav(&nav);
+
+        evo_rmlui_about_params_t ab;
+        memset(&ab, 0, sizeof(ab));
+        ab.app_name = "EVO PLAYER PRO";
+        ab.version = "v0.9.0";
+        ab.build_tag = "PS5 HOMEBREW";
+        ab.tagline = "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
+        ab.themes_info = "4 AVAILABLE - DROP .THEME FILES ON USB0";
+        ab.action_focused = 1;
+
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_update_about(&ab);
+        evo_rmlui_render_about(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_about_support.bmp", fb.data(), width, height);
+    }
+
+    render_regression_screens(fb, width, height);
 
     std::cout << "Rendered all settings screens successfully" << std::endl;
     return 0;

@@ -6,13 +6,13 @@
 body {
     font-family: LatoLatin;
     font-weight: normal;
-    font-size: 16px;
+    font-size: 16dp;
     color: #ffffff;
     background-color: transparent;
     margin: 0;
     padding: 0;
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     overflow: hidden;
     position: relative;
 }
@@ -23,8 +23,8 @@ div, span, p {
 
 /* Fullscreen Dimmed Scrim */
 #mediainfo-scrim {
-    width: 1920px;
-    height: 1080px;
+    width: 1920dp;
+    height: 1080dp;
     background-color: #000000ba;
     display: flex;
     align-items: center;
@@ -33,12 +33,12 @@ div, span, p {
 
 /* Media Info Main Card */
 #mediainfo-card {
-    width: 1400px;
+    width: 1400dp;
     background-color: #0b101afc;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #1e293b;
-    border-radius: 16px;
-    padding: 38px 48px;
+    border-radius: 24dp;
+    padding: 38dp 48dp;
     display: flex;
     flex-direction: column;
 }
@@ -49,7 +49,7 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    width: 1304px;
+    width: 1304dp;
 }
 
 #header-left {
@@ -59,57 +59,65 @@ div, span, p {
 }
 
 #mediainfo-indicator {
-    width: 4px;
-    height: 52px;
+    width: 4dp;
+    height: 52dp;
     background-color: #0070d1;
-    border-radius: 2px;
-    margin-right: 18px;
+    border-radius: 2dp;
+    margin-right: 18dp;
 }
 
 #header-text-block {
     display: flex;
     flex-direction: column;
+    max-width: 980dp;
 }
 
 #mediainfo-eyebrow {
-    font-size: 12px;
+    font-size: 12dp;
     font-weight: bold;
     color: #ffd700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.5dp;
 }
 
 #mediainfo-title {
-    font-size: 26px;
+    font-size: 26dp;
     font-weight: bold;
     color: #ffffff;
-    letter-spacing: 0.5px;
-    margin-top: 3px;
+    letter-spacing: 0.5dp;
+    margin-top: 3dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #mediainfo-path {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: normal;
     color: #64748b;
-    margin-top: 2px;
+    margin-top: 2dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 #header-badges {
     display: flex;
     flex-direction: row;
-    gap: 10px;
+    gap: 10dp;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .info-badge {
     background-color: #152033;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #293d5c;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-size: 12px;
+    border-radius: 10dp;
+    padding: 6dp 14dp;
+    font-size: 12dp;
     font-weight: bold;
     color: #38bdf8;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
 }
 
 .badge-hdr {
@@ -127,18 +135,18 @@ div, span, p {
     flex-direction: row;
     flex-wrap: wrap;
     justify-content: space-between;
-    margin-top: 30px;
-    gap: 20px;
-    width: 1304px;
+    margin-top: 30dp;
+    gap: 20dp;
+    width: 1304dp;
 }
 
 .spec-card {
-    width: 640px;
+    width: 640dp;
     background-color: #0f1726d8;
-    border-width: 1px;
+    border-width: 1dp;
     border-color: #1c283d;
-    border-radius: 12px;
-    padding: 20px 24px;
+    border-radius: 16dp;
+    padding: 20dp 24dp;
     display: flex;
     flex-direction: column;
 }
@@ -147,24 +155,24 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    margin-bottom: 16px;
-    border-bottom-width: 1px;
+    margin-bottom: 16dp;
+    border-bottom-width: 1dp;
     border-bottom-color: #1b2638;
-    padding-bottom: 10px;
+    padding-bottom: 10dp;
 }
 
 .card-icon {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
     display: inline-block;
-    margin-right: 10px;
+    margin-right: 10dp;
 }
 
 .card-title {
-    font-size: 14px;
+    font-size: 14dp;
     font-weight: bold;
     color: #e2e8f0;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 .spec-row {
@@ -172,21 +180,31 @@ div, span, p {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 10dp;
 }
 
 .spec-key {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #64748b;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
+    flex-shrink: 0;
+    margin-right: 16dp;
 }
 
+/* Bounded (card is 592 px inside its padding) so long codec strings such as
+ * "HEVC (H.265 Main 10)" / "Dolby Digital (E-AC-3)" truncate rather than
+ * colliding with the key label (#16). */
 .spec-val {
-    font-size: 14px;
+    width: 380dp;
+    font-size: 14dp;
     font-weight: bold;
     color: #f1f5f9;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5dp;
+    text-align: right;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 /* Footer Hints */
@@ -194,50 +212,50 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 28px;
-    margin-top: 30px;
-    width: 1304px;
+    gap: 28dp;
+    margin-top: 30dp;
+    width: 1304dp;
 }
 
 .footer-hint {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 8dp;
 }
 
 .footer-glyph {
-    width: 20px;
-    height: 20px;
+    width: 20dp;
+    height: 20dp;
     display: inline-block;
 }
 
 .glyph-badge {
-    width: 28px;
-    height: 28px;
+    width: 28dp;
+    height: 28dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 14px;
+    border-radius: 14dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 18px;
-    height: 18px;
+    width: 18dp;
+    height: 18dp;
 }
 
 .footer-text {
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #8b99ad;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }
 
 #footer-engine-ver {
     margin-left: auto;
-    font-size: 13px;
+    font-size: 13dp;
     font-weight: bold;
     color: #475569;
-    letter-spacing: 1px;
+    letter-spacing: 1dp;
 }

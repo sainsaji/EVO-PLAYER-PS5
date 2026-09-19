@@ -15,11 +15,23 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Fire a toast notification. title and msg may be NULL (safe defaults apply).
  * Technical messages are suppressed unless debug mode is active. */
 void toast(const char *title, const char *msg);
 
 /* Draw the current toast into the framebuffer. Call every frame. */
 void draw_prospero_toast(uint32_t *fb);
+
+/* 1 while a toast is on screen (including its fade-out). The GL video path uses
+ * this to know the OSD scratch has content worth compositing over the frame. */
+int evo_toast_visible(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* EVO_TOAST_MODULE_H */

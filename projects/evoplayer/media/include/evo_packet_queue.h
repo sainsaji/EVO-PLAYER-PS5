@@ -11,11 +11,11 @@
 
 #include <pthread.h>
 
-#include <libavcodec/packet.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <libavcodec/packet.h>
 
 #define PACKET_QUEUE_SIZE 512
 
