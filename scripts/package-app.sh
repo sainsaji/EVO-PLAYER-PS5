@@ -119,7 +119,6 @@ SCE_SYS="${EVO}/sce_sys"
 PARAM="${SCE_SYS}/param.json"
 APP_OUT="${OUTPUT_DIR}/app"
 BUILD="${APP_OUT}/.build"
-CLANG18="${NATIVE}/prospero-clang18"
 
 LLD="$(command -v prospero-lld || echo "${PS5_PAYLOAD_SDK}/bin/prospero-lld")"
 AR="$(command -v prospero-ar   || echo "${PS5_PAYLOAD_SDK}/bin/prospero-ar")"
