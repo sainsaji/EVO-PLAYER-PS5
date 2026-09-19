@@ -153,9 +153,24 @@ void SubtitlePickerScreen::activateSelection() {
 }
 
 void SubtitlePickerScreen::cycleSize() {
-    prospero_subtitle_face = (prospero_subtitle_face + 1) % 3;
+    /*
+     * prospero_subtitle_face is 1=SMALL, 2=MEDIUM, 3=LARGE - see its
+     * declaration in evo_subtitle.c, and the classes the player applies:
+     * subtitle_face == 1/2/3 -> sub-small/sub-medium/sub-large.
+     *
+     * This cycled with (face + 1) % 3, which produces 0, 1 and 2. So LARGE was
+     * unreachable, and face 0 matched no class at all and fell through to
+     * #subtitle-box's own font-size - which is 40dp, exactly what sub-medium
+     * sets. Two of the three stops therefore rendered identically and the
+     * third was the only one that did anything, which is why the size looked
+     * like it never changed.
+     */
+    if (prospero_subtitle_face < 1 || prospero_subtitle_face > 3)
+        prospero_subtitle_face = 2;              /* MEDIUM, the documented default */
+    prospero_subtitle_face = (prospero_subtitle_face % 3) + 1;   /* 1 -> 2 -> 3 -> 1 */
+
     const char* names[] = { "SMALL", "MEDIUM", "LARGE" };
-    toast("SUBTITLE SIZE", names[prospero_subtitle_face % 3]);
+    toast("SUBTITLE SIZE", names[prospero_subtitle_face - 1]);
 }
 
 bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
@@ -201,10 +216,16 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
 
     params.eyebrow = "SUBTITLE CONFIGURATION";
     params.title = "SUBTITLE TRACKS";
+    /* The picker's own preview classes are 0/1/2 (preview-small/medium/large)
+     * while prospero_subtitle_face is 1/2/3, so this is the one place the two
+     * conventions meet and the conversion has to be explicit. Both used to be
+     * "% 3", which made the label disagree with the size actually applied. */
+    const int size_idx = (prospero_subtitle_face >= 1 && prospero_subtitle_face <= 3)
+                       ? (prospero_subtitle_face - 1) : 1;
     const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE" };
-    params.size_str = sizeNames[prospero_subtitle_face % 3];
+    params.size_str = sizeNames[size_idx];
     params.preview_text = "The quick brown fox jumps over the lazy dog";
-    params.preview_face = prospero_subtitle_face % 3;
+    params.preview_face = size_idx;
 
     int total = static_cast<int>(m_tracks.size());
     int rowsToDisplay = std::min(8, std::max(0, total - m_scrollOffset));
