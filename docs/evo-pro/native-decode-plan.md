@@ -26,7 +26,7 @@
 > game-category app module the full `sceVideodec2` sequence —
 > `CreateDecoder` **and `Decode`** — returns `0` and produces a valid
 > 1920×1088 NV12 H.264 frame. The errno 5200 wall recorded in
-> [hardware-decode.md](../hardware-decode.md) was a **process-context** limit
+> [hardware-decode.md](../hardware/hardware-decode.md) was a **process-context** limit
 > (elfldr payload / hbldr borrowed slot), not a hardware, driver, or signing
 > limit. That doc's two "never retry" rules (`sceVideoOutOpen` from a payload,
 > kernel `.text` sweeps) still stand — they are unrelated to this result.
@@ -107,7 +107,7 @@ costs a few console trips, not a rewrite.**
 - **Scope:** full integration — decoder-backend abstraction, runtime probe,
   settings toggle with config migration, host-preview story, validation, docs.
 - **Non-negotiable constraint (unchanged from
-  [native-media-research.md](../native-media-research.md)):** the FFmpeg software
+  [native-media-research.md](../research/native-media-research.md)):** the FFmpeg software
   path stays the always-available default. Native decode is selected at **run
   time** after a probe succeeds, never a build-time dependency, and any native
   failure falls back to FFmpeg without ending playback.
@@ -251,7 +251,7 @@ and establish whether that context differs from the payload.
       does the `make_fself.py` + `param.json` + FTP-install half; it currently
       `die`s because our ELF is PIE, so this phase makes the stub it expects.
 - [ ] Install via the FTP + `sceAppInstUtil` sequence in
-      [packaging.md](../packaging.md); launch from the home screen.
+      [packaging.md](../build/packaging.md); launch from the home screen.
 - [ ] **Probe the context from inside the running app** (extend the existing
       `decoder_test` logic, run it *as the app payload*): does
       `sceUserServiceGetInitialUser` now return a real user (not `0x80940004`)?
@@ -331,7 +331,7 @@ own signed package. → Phase 4.
 
 ### Phase 3 — decoder abstraction refactor (ships regardless)
 
-> **Prerequisite: Track A of [modularisation-plan.md](../modularisation-plan.md).**
+> **Prerequisite: Track A of [modularisation-plan.md](../architecture/modularisation-plan.md).**
 > Steps A1–A7 there *are* this phase's groundwork — they pull the demux
 > thread, audio path, and the pure decode loop out of `main.c` and define
 > `evo_vdec.h`. Once Track A lands, Phase 3 is "add `evo_vdec_native.c` beside
@@ -353,7 +353,7 @@ own signed package. → Phase 4.
       `evo_cover`, modularisation-plan Track B / B6). `evo_vdec_ffmpeg.c` is now
       the only file with play-stream `avcodec_*` / `sws_*`.
 - [ ] Verify bit-exact parity on hardware: codec sweep +
-      [validation.md](../validation.md), `tools/bench.sh` plane hashes. Expected
+      [validation.md](../build/validation.md), `tools/bench.sh` plane hashes. Expected
       identical — the play loop has routed through `evo_vdec` since A6 and `#30`
       made no decode-path behaviour change — this is the empirical sign-off.
 - [x] Host preview (`tools/uiview_playback_rml.sh`) builds + renders. *(It no
@@ -476,19 +476,19 @@ hw-verify pending — and Phase 5 (settings row).
       host. Guard `evo_vdec_native` behind `__PROSPERO__` (or the SDK macro
       already used) so the host build always gets `evo_vdec_ffmpeg` and the
       toggle shows "native unavailable on host". No host regression.
-- [ ] Extend [validation.md](../validation.md) codec sweep with a
+- [ ] Extend [validation.md](../build/validation.md) codec sweep with a
       **backend column** and per-file decode ms/frame + dropped-frame count
       for both backends (this also feeds
-      [improvements-roadmap.md](../improvements-roadmap.md) P2).
+      [improvements-roadmap.md](../planning/improvements-roadmap.md) P2).
 - [ ] Paired A/B benchmark (hardware-decode-review §6): identical clip, same
       session, FFmpeg vs native — decode time and *copy* time measured
       separately. A native path that isn't decisively faster on a clip the CPU
       path already struggles with does not ship as the `AUTO` default.
-- [ ] Rewrite the top of [hardware-decode.md](../hardware-decode.md): it stays
+- [ ] Rewrite the top of [hardware-decode.md](../hardware/hardware-decode.md): it stays
       the record of the payload-context closure, with a pointer here for the
       app-context outcome.
-- [ ] Update [backlog.md](../backlog.md) item 10 and
-      [improvements-roadmap.md](../improvements-roadmap.md) (the
+- [ ] Update [backlog.md](../planning/backlog.md) item 10 and
+      [improvements-roadmap.md](../planning/improvements-roadmap.md) (the
       "decode is permanently on the CPU" framing).
 
 ---

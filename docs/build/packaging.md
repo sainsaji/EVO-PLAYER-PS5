@@ -109,7 +109,7 @@ they do not replace it.
 
 `package-pkg.sh --format pkg` **refuses with an explanation** rather than
 producing something that is not a PKG. If you hold a licensed copy, see
-[proprietary.md](proprietary.md).
+[proprietary.md](../proprietary.md).
 
 For homebrew you do not need this. Use `--format homebrew`.
 

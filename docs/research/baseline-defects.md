@@ -20,7 +20,7 @@
 >
 > Mistaking this file for open work has already cost one session's planning
 > time. If you are looking for what is actually outstanding, see
-> [`ui-handoff.md`](ui-handoff.md) and [`gpu-notes.md`](gpu-notes.md).
+> [`ui-handoff.md`](../ui/ui-handoff.md) and [`gpu-notes.md`](../hardware/gpu-notes.md).
 
 Established 2026-08-09 by running the unmodified upstream build
 (`PS5MediaPlayerPRO.elf`, 43 MB) on a real console against a 29-file

@@ -29,7 +29,7 @@ console is available, and what each result means. Point an AI at it to resume.
 | [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md) | Study of `SvenGDK/SharpProspero`'s `sceAgc` GPU path — full `libSceAgc` ABI, DCB layout, render-target register model, swizzle library. | 📖 reference |
 | [core-architecture-and-legacy-migration.md](core-architecture-and-legacy-migration.md) | **Core Architecture & Legacy Migration Guide** — modern `core/` C++ architecture, screen and service taxonomy, how to use `main.c.legacy` as golden truth, and case studies (hover crash, browser scrolling, text reader, image viewer). | 📖 reference & architecture |
 
-Prerequisite (not EVO-Pro-specific, lives in [../modularisation-plan.md](../modularisation-plan.md)):
+Prerequisite (not EVO-Pro-specific, lives in [../modularisation-plan.md](../architecture/modularisation-plan.md)):
 **Track A** — the decoder seam (`evo_vdec.h`, `evo_vdec_ffmpeg.c`). Mostly
 landed; it is what lets `evo_vdec_native.c` slot in beside the FFmpeg backend.
 

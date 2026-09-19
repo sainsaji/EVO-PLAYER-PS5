@@ -2,8 +2,8 @@
 
 How EVO Player's code is laid out, and why the seams are where they are.
 
-For building and deploying see [building.md](building.md); for the UI layer in
-particular see [ui-handoff.md](ui-handoff.md).
+For building and deploying see [building.md](../build/building.md); for the UI layer in
+particular see [ui-handoff.md](../ui/ui-handoff.md).
 
 ---
 
@@ -108,7 +108,7 @@ as much as possible is verifiable on the host:
 
 (`gl_yuv_parity.py`, which swept every `(Y,U,V)` triple against the CPU
 reference matrix, went with the OpenGL path. The BT.601 reference matrix it
-checked against is kept in [`converter-perf.md`](converter-perf.md).)
+checked against is kept in [`converter-perf.md`](../research/converter-perf.md).)
 
 ---
 
@@ -161,13 +161,13 @@ EVO Player/
 
 | If you want to… | Read |
 |---|---|
-| set up and build | [building.md](building.md) |
-| build, deploy, capture, read logs | [tooling.md](tooling.md) |
-| work on the UI | [ui-handoff.md](ui-handoff.md), then [theming.md](theming.md) |
-| work on playback performance | [converter-perf.md](converter-perf.md), then [gpu-notes.md](gpu-notes.md) |
-| get decode off the CPU | [hardware-decode.md](hardware-decode.md), then its [review](hardware-decode-review.md) |
-| connect to streaming servers / addons | [addons-emby-nuvio.md](addons-emby-nuvio.md) |
-| know what is actually proven | [validation.md](validation.md) |
+| set up and build | [building.md](../build/building.md) |
+| build, deploy, capture, read logs | [tooling.md](../build/tooling.md) |
+| work on the UI | [ui-handoff.md](../ui/ui-handoff.md), then [theming.md](../ui/theming.md) |
+| work on playback performance | [converter-perf.md](../research/converter-perf.md), then [gpu-notes.md](../hardware/gpu-notes.md) |
+| get decode off the CPU | [hardware-decode.md](../hardware/hardware-decode.md), then its [review](../hardware/hardware-decode-review.md) |
+| connect to streaming servers / addons | [addons-emby-nuvio.md](../addons/addons-emby-nuvio.md) |
+| know what is actually proven | [validation.md](../build/validation.md) |
 
 Source lives on Windows via a bind mount; heavy build trees and ccache live on
 Linux named volumes.

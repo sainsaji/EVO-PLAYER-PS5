@@ -120,7 +120,7 @@ Each row is one commit, build-clean before the next.
 when to call `evo_playback_open()` / `_close()` / `_seek()`, and the
 `pp_playback` (`g_pp_pb`) + `pp_videoout` objects — those belong to the app,
 not the decode session (VideoOut ownership is a hard rule,
-[hardware-decode.md](hardware-decode.md)). `evo_playback.c` gets a pointer to
+[hardware-decode.md](../hardware/hardware-decode.md)). `evo_playback.c` gets a pointer to
 `g_pp_pb`, it does not own it.
 
 ---
@@ -193,7 +193,7 @@ static void pump_one_video_frame(void) {
 `video_video_pending_pkt` logic, moved as-is. The pacing block (jobs 2–3)
 moves verbatim into `pace_against_audio_clock()` — no logic change, just a
 new function boundary. This is the highest-risk single step (A6+A7); do it
-with the codec sweep from [validation.md](validation.md) run before and after.
+with the codec sweep from [validation.md](../build/validation.md) run before and after.
 
 ---
 
@@ -239,5 +239,5 @@ console verification.
       remaining demux-open glue (ideally zero).
 - [ ] `main.c` under ~9,000 lines after Track A, under ~1,500 after Track B.
 - [ ] Every checkpoint: build clean, `bench.sh` hashes stable, `uiview --all`
-      pixel-identical, codec sweep ([validation.md](validation.md)) unchanged.
+      pixel-identical, codec sweep ([validation.md](../build/validation.md)) unchanged.
 - [ ] `scripts/gen-compile-commands.sh` re-run; clangd resolves every symbol.

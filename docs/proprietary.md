@@ -31,7 +31,7 @@ proprietary/
 
 This is the supported route to calling a Sony module the SDK has no stub for —
 `libSceVdecCore`, `libSceAvPlayer` and friends (see
-[native-media-research.md](native-media-research.md)).
+[native-media-research.md](research/native-media-research.md)).
 
 The SDK implements it natively. `sce_stubs/Makefile`:
 
@@ -99,7 +99,7 @@ proprietary/tools/prospero-pub-cmd
 
 `scripts/package-pkg.sh` checks for it and **refuses with a clear message** when
 it is absent, rather than emitting something that is not a PKG. See
-[packaging.md](packaging.md) — and note that homebrew distribution does not
+[packaging.md](build/packaging.md) — and note that homebrew distribution does not
 need this at all.
 
 ## Fail loudly, never substitute

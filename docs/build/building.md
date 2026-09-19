@@ -3,7 +3,7 @@
 The full developer setup: Windows host, Docker, the PS5 Payload SDK, FFmpeg,
 deployment, and the reasoning behind each pin.
 
-This was the bulk of [README.md](../README.md), which had grown into a
+This was the bulk of [README.md](../../README.md), which had grown into a
 twenty-section setup manual with the player itself described in the first
 forty lines. Someone who wants to *use* EVO Player needs none of this; someone
 who wants to build it needs all of it, so it lives here intact.
@@ -142,7 +142,7 @@ FFmpeg 7.0.1, SDL2, mesa, libass and friends. Only `target/user/homebrew` is
 taken from it, so the pinned SDK is never overwritten. Skip it with
 `--build-arg INSTALL_PACBREW=0` (ProsperoPlayer will then not link).
 
-Full audit: **[docs/sdk-audit.md](sdk-audit.md)**.
+Full audit: **[docs/sdk-audit.md](../research/sdk-audit.md)**.
 
 ## 6. LLVM version, and why
 
@@ -377,12 +377,12 @@ So raw GNM means hand-assembling PM4 packets. The productive route is
 custom shader if that proves insufficient (likely for 10-bit P010).
 
 `gpu_test` probes what actually resolves at run time. Details:
-**[docs/gpu-notes.md](gpu-notes.md)**.
+**[docs/gpu-notes.md](../hardware/gpu-notes.md)**.
 
 EVO now drives the GPU itself: `media/src/evo_agc_runtime.c` builds `sceAgc`
 command buffers directly and owns `sceVideoOut`. The OpenGL route that briefly
 sat in between (a `ps5-opengl` submodule wrapping Mesa + a PS5 Gallium driver)
-was removed — see **[docs/evo-pro/agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md)**
+was removed — see **[docs/evo-pro/agc-bare-metal-ui.md](../evo-pro/agc-bare-metal-ui.md)**
 for the shader toolchain and the hardware receipts.
 
 ## 14. Video decoder research
@@ -395,9 +395,9 @@ related module, so `-lSceVdecCore` is not possible. Two routes:
    proprietary files at all. `decoder_test` does exactly this.
 2. **Generated stubs** from a decrypted `.sprx` you supply locally —
    `make -C sce_stubs stubs` runs `genstub.py` over it. See
-   [docs/proprietary.md](proprietary.md).
+   [docs/proprietary.md](../proprietary.md).
 
-Details: **[docs/native-media-research.md](native-media-research.md)**.
+Details: **[docs/native-media-research.md](../research/native-media-research.md)**.
 
 ## 15. VS Code
 
@@ -504,7 +504,7 @@ nc -vz $PS5_HOST 9021
 ```
 
 Full guide, including router AP-isolation and firewall cases:
-**[docs/networking.md](networking.md)**.
+**[docs/networking.md](../hardware/networking.md)**.
 
 ## 20. Final validation checklist
 

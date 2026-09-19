@@ -8,11 +8,11 @@
 > because the findings below explain why the CPU path was shaped the way it was,
 > and because the BT.601 matrix here is the reference the GL shader is checked
 > against — see
-> [`validation.md`](validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80)
+> [`validation.md`](../build/validation.md#gl-video-path-colour-parity-62-delivered-by-gl-4--80)
 > and `tools/gl_yuv_parity.py`, both since deleted.
 
 With no hardware GL or Vulkan driver in the sysroot (see
-[`gpu-notes.md`](gpu-notes.md) — what ships is OSMesa/llvmpipe, a *software*
+[`gpu-notes.md`](../hardware/gpu-notes.md) — what ships is OSMesa/llvmpipe, a *software*
 rasteriser), the CPU YUV→BGRA+swizzle path is the only remaining lever on 4K
 playback performance.
 
@@ -252,7 +252,7 @@ Standard dynamic heap allocation (`malloc`/`free`) incurs metadata locking, page
 else stayed on `malloc`: routing `pp_playback` `display` / `nv12_fb` and
 `pp_videoout` `cpu_bufs` through the slab, plus a 64 → 192 MiB pool, **wedged
 the 4K GPU present on hardware** and was backed out. See
-[`improvements-roadmap.md`](improvements-roadmap.md) §P2.
+[`improvements-roadmap.md`](../planning/improvements-roadmap.md) §P2.
 
 ---
 

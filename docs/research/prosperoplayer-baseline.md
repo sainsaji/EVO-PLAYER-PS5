@@ -12,7 +12,7 @@ which clones <https://github.com/KINGDKAK/ProsperoPlayer> and builds it
 directory is excluded by `.gitignore`, so upstream code is never committed into
 this repository.
 
-Make your changes in [`projects/evoplayer/`](../projects/evoplayer/), not there.
+Make your changes in [`projects/evoplayer/`](../../projects/evoplayer), not there.
 
 ## Baseline result
 

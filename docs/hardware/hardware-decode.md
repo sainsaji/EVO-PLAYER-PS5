@@ -4,8 +4,8 @@
 > scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
 > `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
 > The `.ffpfsc` app module is the only deploy path — see
-> [building.md](building.md#8-deploying-to-the-console) and
-> [tooling.md](tooling.md). Commands below that name those scripts will not
+> [building.md](../build/building.md#8-deploying-to-the-console) and
+> [tooling.md](../build/tooling.md). Commands below that name those scripts will not
 > run; the findings around them still stand.
 
 
@@ -21,7 +21,7 @@
 > now: the **GPU compute YUV→RGB pipeline shipped** and does 4K in ~7.4 ms,
 > a 2.81× speedup, in `pp/src/pp_compute_pipeline.c`. The problem hardware
 > decode existed to solve was solved another way. See
-> [reng-analysis-integration.md](reng-analysis-integration.md).
+> [reng-analysis-integration.md](../research/reng-analysis-integration.md).
 >
 > ### Where it actually stopped
 >
@@ -84,7 +84,7 @@ decoder.**
 This document was written to be picked up cold. It carries everything needed to
 resume the work without re-deriving anything, and it is deliberately a *plan of
 attack* rather than a status page — the raw findings live in
-[native-media-research.md](native-media-research.md), which this links to
+[native-media-research.md](../research/native-media-research.md), which this links to
 rather than repeats.
 
 ---
@@ -143,7 +143,7 @@ So: the door is open and nobody has walked through it.
 ## What is already proven — do not re-derive this
 
 From `decoder_test` on firmware 12.70 (`0x12700001`), 2026-08-09. Full log in
-[native-media-research.md § Results log](native-media-research.md#results-log).
+[native-media-research.md § Results log](../research/native-media-research.md#results-log).
 
 **All three media modules load:**
 
@@ -282,7 +282,7 @@ from Route A applies unchanged.
 
 If run-time resolution cannot reach something, the SDK supports generating
 linkable stubs from a decrypted `.sprx`
-([proprietary.md](proprietary.md)). It needs modules **from your own console**,
+([proprietary.md](../proprietary.md)). It needs modules **from your own console**,
 and they must never enter this repository — `proprietary/` and `*.sprx` are
 gitignored precisely so a mistake is hard to make.
 
@@ -391,7 +391,7 @@ fails cleanly costs a deploy; one that hangs costs an afternoon.
 ## Recording results
 
 Append to the results log in
-[native-media-research.md](native-media-research.md#results-log), newest first,
+[native-media-research.md](../research/native-media-research.md#results-log), newest first,
 with the firmware version and the method used. A negative result is worth as
 much as a positive one here and costs the same console trip to obtain — the
 "three things this established" section of the last entry saved more time than

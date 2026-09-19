@@ -3,7 +3,7 @@
 > **Document Version:** 1.0.0  
 > **Last Updated:** 2026-08-14  
 > **Scope:** All actionable improvements across playback, UI, audio, input, memory, and codec coverage.  
-> **Sources:** [`backlog.md`](backlog.md), [`reng-analysis-integration.md`](reng-analysis-integration.md), [`baseline-defects.md`](baseline-defects.md), [`ui-handoff.md`](ui-handoff.md)
+> **Sources:** [`backlog.md`](backlog.md), [`reng-analysis-integration.md`](../research/reng-analysis-integration.md), [`baseline-defects.md`](../research/baseline-defects.md), [`ui-handoff.md`](../ui/ui-handoff.md)
 
 ---
 
@@ -79,7 +79,7 @@ The 29-file test set at `/mnt/usb0/test_files_aud_vid/` has not had a complete c
 | AV1 | Various | Pass / measure CPU load |
 
 ### Done When
-A pass/fail table per file exists in [`validation.md`](validation.md), and every failure has a cause, not just a symptom.
+A pass/fail table per file exists in [`validation.md`](../build/validation.md), and every failure has a cause, not just a symptom.
 
 ---
 
@@ -102,7 +102,7 @@ A non-mkvmerge container ranks tracks as well as an mkvmerge one, and switching 
 
 ## P2 — DualSense Touchpad Timeline Scrubbing
 
-**Source:** [`reng-analysis-integration.md`](reng-analysis-integration.md) §Phase 2  
+**Source:** [`reng-analysis-integration.md`](../research/reng-analysis-integration.md) §Phase 2  
 **Size:** M  
 **Risk:** Low  
 
@@ -129,7 +129,7 @@ Horizontal swipe scrubs the timeline smoothly during playback without triggering
 
 ## P2 — Dynamic Audio Re-routing Detection
 
-**Source:** [`reng-analysis-integration.md`](reng-analysis-integration.md) §Phase 2  
+**Source:** [`reng-analysis-integration.md`](../research/reng-analysis-integration.md) §Phase 2  
 **Size:** S  
 **Risk:** Low  
 
@@ -146,7 +146,7 @@ Plugging headphones into the DualSense 3.5mm jack during 7.1 playback automatica
 
 ## P2 — Native PS Notifications & PS Button Banners
 
-**Source:** [`reng-analysis-integration.md`](reng-analysis-integration.md) §Phase 2  
+**Source:** [`reng-analysis-integration.md`](../research/reng-analysis-integration.md) §Phase 2  
 **Size:** S  
 **Risk:** Low  
 
@@ -206,7 +206,7 @@ The `full` FFmpeg decoder profile has never been built. The current profile link
 
 ## P3 — AJM DSP — Dialogue Booster & DRC
 
-**Source:** [`reng-analysis-integration.md`](reng-analysis-integration.md) §Phase 3  
+**Source:** [`reng-analysis-integration.md`](../research/reng-analysis-integration.md) §Phase 3  
 **Size:** M  
 **Risk:** Medium (`libSceAjm` job memory alignment requirements)  
 
@@ -242,7 +242,7 @@ The old main-menu `selected` integer in `main.c` is dead weight. The launch grid
 **Source:** [`backlog.md` §13](backlog.md#13-chore-retire-prospero_cover_blit)  
 **Size:** XS (~45 lines)  
 
-Nothing calls this function. It describes an 80×80 world that no longer exists and hardcodes a cyan frame, which [`theming.md`](theming.md) forbids outright. Delete it.
+Nothing calls this function. It describes an 80×80 world that no longer exists and hardcodes a cyan frame, which [`theming.md`](../ui/theming.md) forbids outright. Delete it.
 
 ---
 
@@ -253,7 +253,7 @@ Nothing calls this function. It describes an 80×80 world that no longer exists 
 
 ### Problem
 
-`pp_map_avframe()` ([`main.c:5245`](../projects/evoplayer/main.c.legacy)) accepts
+`pp_map_avframe()` ([`main.c:5245`](../../projects/evoplayer/main.c.legacy)) accepts
 exactly **three** pixel formats:
 
 ```c
@@ -357,7 +357,7 @@ Original analysis below.
 `3840 × 2160 × 4 = 33.2 MB` each — **265 MB from the heap**, in the one code
 path that also runs the slow converter.
 
-Meanwhile [`evo_direct_mem.c`](../projects/evoplayer/media/src/evo_direct_mem.c)
+Meanwhile [`evo_direct_mem.c`](../../projects/evoplayer/media/src/evo_direct_mem.c)
 exists precisely to avoid this, is initialised at startup with a 64 MB region,
 and measured 1.50× faster allocation with zero fragmentation. The rotate
 buffers do not use it, and at 4K they could not fit in it as currently sized.
@@ -376,7 +376,7 @@ lower-resolution era, and each one costs 33 MB.
 
 ### Problem
 
-[`evo_net.c`](../projects/evoplayer/addons/src/evo_net.c) accepts an
+[`evo_net.c`](../../projects/evoplayer/addons/src/evo_net.c) accepts an
 `https://` URL, strips the scheme and sets the port to 443 — and then opens a
 **plain BSD socket** and calls `send()`/`recv()` on it. There is no TLS
 anywhere in the tree: no mbedTLS, no OpenSSL, no wolfSSL, and no `-lssl`,
@@ -434,7 +434,7 @@ play"; it does not answer "does it play *at rate*", which is the question that
 now has no other way of being answered.
 
 Add per-file **decode ms/frame and dropped-frame count** to the
-[`validation.md`](validation.md) table. The GPU compute pipeline took colour
+[`validation.md`](../build/validation.md) table. The GPU compute pipeline took colour
 conversion down to ~7.4 ms at 4K, so conversion is no longer the suspect when a
 high-bitrate file stutters — decode is, and this is the measurement that says
 so. It also tells the [FFmpeg `full` profile](#p3--ffmpeg-full-decoder-profile)
@@ -462,7 +462,7 @@ string:
 
 On the PS5 build it reports RDNA2 and GNM while executing AVX2 on the CPU.
 That label has propagated into
-[`reng-analysis-integration.md`](reng-analysis-integration.md), where "GPU
+[`reng-analysis-integration.md`](../research/reng-analysis-integration.md), where "GPU
 Compute YUV→RGB Pipeline" is recorded as 100% complete.
 
 **Why this is worth correcting rather than shrugging at.** The measured numbers
@@ -474,7 +474,7 @@ wrong:
    completed one, and the current docs say the opposite.
 2. Anyone optimising later will reason from "the conversion is already on the
    GPU, so the CPU is free" — and both halves of that are false.
-3. It sits directly next to [`gpu-notes.md`](gpu-notes.md), which correctly
+3. It sits directly next to [`gpu-notes.md`](../hardware/gpu-notes.md), which correctly
    documents that there is no hardware GL/Vulkan and that raw GNM would be a
    large reverse-engineering project. The two documents currently contradict
    each other.
@@ -487,9 +487,9 @@ wrong:
 
 | Item | Why Closed |
 |---|---|
-| GPU YUV via SDL2 + Mesa | Sysroot ships OSMesa (llvmpipe, software rasteriser). No `radeonsi`. See [`gpu-notes.md`](gpu-notes.md). The README roadmap still lists this — it is stale. |
-| Controller haptics | Built, tested on hardware, removed. Every vibration entry point either returns success and does nothing or rejects the call. Full probe table in [`ui-handoff.md`](ui-handoff.md). |
-| `package-pkg.sh --format app` | `make_fself.py` requires static `ET_EXEC`; all payloads here are PIE. Structural, not a missing flag. See [`packaging.md`](packaging.md). |
-| Signed fPKG | Requires Sony's proprietary `prospero-pub-cmd`. See [`packaging.md`](packaging.md) §3. |
-| Hardware video decode (`libSceVideodec2` / `libSceAvPlayer`) | **CLOSED 2026-08-14 — a definitive no, after ten phases.** The old reason given here (init-struct layout, no user session) was wrong on both counts: the struct is fully recovered, the app slot *does* have a user session, decoders are created for H.264 and HEVC, and `sceVideodec2Decode` builds a correct command buffer. **The driver refuses the job with ioctl errno 5200**, and every cheap route past it is now closed — alternate ioctl command unreachable (34 live readings), driver handshake succeeds so nothing was skipped, and `Reset` can never recover the decoder. The goal it existed for was met by the GPU compute pipeline instead. See [`hardware-decode.md`](hardware-decode.md), which opens with the closure and the two calls that **panic the console** and must never be retried. |
+| GPU YUV via SDL2 + Mesa | Sysroot ships OSMesa (llvmpipe, software rasteriser). No `radeonsi`. See [`gpu-notes.md`](../hardware/gpu-notes.md). The README roadmap still lists this — it is stale. |
+| Controller haptics | Built, tested on hardware, removed. Every vibration entry point either returns success and does nothing or rejects the call. Full probe table in [`ui-handoff.md`](../ui/ui-handoff.md). |
+| `package-pkg.sh --format app` | `make_fself.py` requires static `ET_EXEC`; all payloads here are PIE. Structural, not a missing flag. See [`packaging.md`](../build/packaging.md). |
+| Signed fPKG | Requires Sony's proprietary `prospero-pub-cmd`. See [`packaging.md`](../build/packaging.md) §3. |
+| Hardware video decode (`libSceVideodec2` / `libSceAvPlayer`) | **CLOSED 2026-08-14 — a definitive no, after ten phases.** The old reason given here (init-struct layout, no user session) was wrong on both counts: the struct is fully recovered, the app slot *does* have a user session, decoders are created for H.264 and HEVC, and `sceVideodec2Decode` builds a correct command buffer. **The driver refuses the job with ioctl errno 5200**, and every cheap route past it is now closed — alternate ioctl command unreachable (34 live readings), driver handshake succeeds so nothing was skipped, and `Reset` can never recover the decoder. The goal it existed for was met by the GPU compute pipeline instead. See [`hardware-decode.md`](../hardware/hardware-decode.md), which opens with the closure and the two calls that **panic the console** and must never be retried. |
 | Hardware JPEG / PNG decode for cover art | Looked for on 2026-08-14 and not found: no `libSceJpeg*`, `libScePng*` or image-codec module appears in the `reng` corpus for 12.70, while `libSceHttp`, `libSceIme`, `libSceNotification` and `libSceFont` all do. Cover art stays on `stb_image`. *Caveat: that corpus is dominated by firmware file paths and the vsh prefetch list, so this is strong absence-of-evidence, not proof.* |

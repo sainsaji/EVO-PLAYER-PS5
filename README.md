@@ -150,14 +150,14 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 
 | Document | Purpose |
 |---|---|
-| [docs/building.md](docs/building.md) | Build environment, SDK, FFmpeg, packaging |
-| [docs/tooling.md](docs/tooling.md) | Every script, launch safety, screenshots, klog |
-| [docs/architecture.md](docs/architecture.md) | Layer boundaries and module structure |
-| [docs/rmlui-integration-guide.md](docs/rmlui-integration-guide.md) | The RmlUi interface layer |
+| [docs/building.md](docs/build/building.md) | Build environment, SDK, FFmpeg, packaging |
+| [docs/tooling.md](docs/build/tooling.md) | Every script, launch safety, screenshots, klog |
+| [docs/architecture.md](docs/architecture/architecture.md) | Layer boundaries and module structure |
+| [docs/rmlui-integration-guide.md](docs/ui/rmlui-integration-guide.md) | The RmlUi interface layer |
 | [docs/evo-pro/agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) | GPU rendering on bare-metal `sceAgc` |
 | [docs/evo-pro/native-decode-plan.md](docs/evo-pro/native-decode-plan.md) | Hardware decode via `sceVideodec2` |
-| [docs/addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby and streaming add-ons |
-| [docs/theming.md](docs/theming.md) | Theme format and tokens |
+| [docs/addons-emby-nuvio.md](docs/addons/addons-emby-nuvio.md) | Emby and streaming add-ons |
+| [docs/theming.md](docs/ui/theming.md) | Theme format and tokens |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ---

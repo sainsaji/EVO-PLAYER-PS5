@@ -4,8 +4,8 @@
 > scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
 > `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
 > The `.ffpfsc` app module is the only deploy path — see
-> [building.md](building.md#8-deploying-to-the-console) and
-> [tooling.md](tooling.md). Commands below that name those scripts will not
+> [building.md](../build/building.md#8-deploying-to-the-console) and
+> [tooling.md](../build/tooling.md). Commands below that name those scripts will not
 > run; the findings around them still stand.
 
 
@@ -13,7 +13,7 @@ Research area for hardware-accelerated decoding. **Nothing here is implemented**
 — this documents what was found and what to try, so experiments start from
 facts rather than assumptions.
 
-> **Working on this?** Read [hardware-decode.md](hardware-decode.md) first —
+> **Working on this?** Read [hardware-decode.md](../hardware/hardware-decode.md) first —
 > it carries the plan, the ordered experiments and the console-safety rules.
 > This document is the raw findings and the results log that plan draws on.
 
@@ -86,7 +86,7 @@ Only needed if route 1 cannot reach something. Route 1 already works for
 Supported natively by the SDK: drop a `.sprx` into `sce_stubs/`, run
 `make -C sce_stubs stubs`, and `genstub.py` emits a linkable `.c` by mapping
 NIDs through `aerolib.csv`. Full procedure in
-[proprietary.md](proprietary.md).
+[proprietary.md](../proprietary.md).
 
 Requires modules from **your own console**, and they never enter this
 repository.

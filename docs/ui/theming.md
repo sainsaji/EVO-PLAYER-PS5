@@ -1,7 +1,7 @@
 # Theming EVO Player
 
 Every colour and spacing value the UI draws with lives in one struct
-(`evo_theme`, in [`pp/include/evo_theme.h`](../projects/evoplayer/pp/include/evo_theme.h)).
+(`evo_theme`, in [`pp/include/evo_theme.h`](../../projects/evoplayer/pp/include/evo_theme.h)).
 Screens ask for tokens by meaning — `surface`, `accent`, `text_secondary` —
 never for a literal colour, so swapping the theme restyles the whole player
 without touching drawing code.
@@ -108,7 +108,7 @@ name falls back to the default.
 - Colours are `0xAABBGGRR` to match the framebuffer. A raw `0xFF00D7FF` is
   **yellow** here, not cyan — build colours with `EVO_RGBA(r,g,b,a)` or
   `RR_BGRA(r,g,b,a)`.
-- Draw through [`evo_ui.h`](../projects/evoplayer/pp/include/evo_ui.h)
+- Draw through [`evo_ui.h`](../../projects/evoplayer/pp/include/evo_ui.h)
   (`evo_ui_card`, `evo_ui_round_rect`, `evo_ui_circle`, `evo_ui_hline`) rather
   than filling rectangles by hand. Those primitives rasterise from signed
   distance fields, so edges carry true analytic coverage and corners stay

@@ -287,7 +287,7 @@ Things that will otherwise cost a debugging session:
   not its output - they share one vertex stage and it rewrites all four.
 
 Why this toolchain exists and what the generated values mean:
-[agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md).
+[agc-bare-metal-ui.md](../evo-pro/agc-bare-metal-ui.md).
 
 ### Seeing payload `printf`
 
@@ -580,7 +580,7 @@ menus and the walkthrough needs its own way in.
 
 **Every screen the UI layer draws is covered.** The one exception is the
 player OSD, which overlays live video and has not been migrated — see
-[ui-handoff.md](ui-handoff.md).
+[ui-handoff.md](../ui/ui-handoff.md).
 
 There is no emscripten, no mingw and no host SDL2 in the container, so a
 windowed binary is not buildable from here. It does not need to be: this repo
@@ -651,7 +651,7 @@ The GPU present path deleted the CPU converters, and with them `tools/bench.sh`
 and `tools/gl_yuv_parity.py` — there is nothing left to benchmark or to compare
 against, because YUV→RGB happens in the AGC video pipelines and costs no
 measurable CPU. The BT.601 reference matrix both tools checked against is kept
-in [`converter-perf.md`](converter-perf.md); a change to the video colour path
+in [`converter-perf.md`](../research/converter-perf.md); a change to the video colour path
 is now verified on hardware.
 ---
 
@@ -695,4 +695,4 @@ Which services need to be running on the console:
 All of them need the jailbreak re-run after every console reboot. A port that
 pings but refuses connections almost always means the exploit has lapsed
 rather than anything being wrong with the tooling — see
-[`networking.md`](networking.md).
+[`networking.md`](../hardware/networking.md).

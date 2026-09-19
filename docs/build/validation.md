@@ -23,7 +23,7 @@ Last run 2026-08-09, image `evo-player/ps5-dev:llvm18-sdk-v0.42`.
 | Container starts | pass | `docker compose run --rm ps5-dev bash` |
 | PS5 SDK installed | pass | `/opt/ps5-payload-sdk`, release zip |
 | SDK version documented | pass | `EVO_SDK_VERSION` → v0.42 |
-| 12.70 support verified | pass (by source audit) | `crt/kernel.c` `case 0x12700000:` — see [sdk-audit.md](sdk-audit.md#2-firmware-support-and-1270-specifically) |
+| 12.70 support verified | pass (by source audit) | `crt/kernel.c` `case 0x12700000:` — see [sdk-audit.md](../research/sdk-audit.md#2-firmware-support-and-1270-specifically) |
 | Clang works | pass | 18.1.3 |
 | LLD works | pass | 18.1.3 |
 | CMake works | pass | 3.31.6 |
@@ -37,7 +37,7 @@ Last run 2026-08-09, image `evo-player/ps5-dev:llvm18-sdk-v0.42`.
 | AudioOut test builds | pass | 116 KB, links `-lSceAudioOut` |
 | `gpu_test` builds | pass | 116 KB, links `-lSceGnmDriver` |
 | `decoder_test` builds | pass | 116 KB |
-| GPU environment understood | pass | [gpu-notes.md](gpu-notes.md) — stubs yes, headers/Gnmx/shader compiler no |
+| GPU environment understood | pass | [gpu-notes.md](../hardware/gpu-notes.md) — stubs yes, headers/Gnmx/shader compiler no |
 | FFmpeg version identified | pass | 7.0.1, from pacbrew `ffmpeg/PKGBUILD` |
 | Custom FFmpeg builds | pass | minimal profile; all 14 target codecs present |
 | ProsperoPlayer deps identified | pass | `build-prosperoplayer.sh --audit` |
@@ -46,7 +46,7 @@ Last run 2026-08-09, image `evo-player/ps5-dev:llvm18-sdk-v0.42`.
 | Source stays outside container | pass | bind mount, `.:/workspace` |
 | Build artifacts persist | pass | `output/` on the bind mount; ccache + FFmpeg tree on named volumes |
 | Proprietary files excluded | pass | `.gitignore`; nothing required to reach this point |
-| README has full setup | pass | [../README.md](../README.md) |
+| README has full setup | pass | [../README.md](../../README.md) |
 
 ### FFmpeg minimal profile codec inventory
 
@@ -94,8 +94,8 @@ Run 2026-08-09 against a jailbroken console with `ps5-payload-elfldr` on 9021.
 | 6 | VideoOut colour bands | **pass, visually confirmed** | 9 tile-tall bands; **red directly above blue -> ABGR8888 channel order is correct** |
 | 7 | AudioOut sine wave | **pass, audibly confirmed** | clean 440 Hz, both channels, no clicks or stutter |
 | 8 | GNM submits allowed | **pass** | `sceGnmAreSubmitsAllowed() → 1`; GnmDriver mapped at `0x8002a0000` |
-| 9 | Native decoder modules reachable | **pass** | `libSceAvPlayer` loaded, all 6 entry points resolved by NID — see [native-media-research.md](native-media-research.md) |
-| 10 | ProsperoPlayer baseline plays media | **pass** | installed as homebrew (`ProsperoPlayer_baseline`); video and audio play from USB. Two defects found, both traced to upstream source — see [baseline-defects.md](baseline-defects.md) |
+| 9 | Native decoder modules reachable | **pass** | `libSceAvPlayer` loaded, all 6 entry points resolved by NID — see [native-media-research.md](../research/native-media-research.md) |
+| 10 | ProsperoPlayer baseline plays media | **pass** | installed as homebrew (`ProsperoPlayer_baseline`); video and audio play from USB. Two defects found, both traced to upstream source — see [baseline-defects.md](../research/baseline-defects.md) |
 
 All output confirmed on the panel and through the speakers, not merely
 reported as successful by the API.
@@ -171,7 +171,7 @@ description for the VideoOut tests.
 ## UI parity (#44)
 
 Per-screen RmlUi-vs-`main` sign-off lives in
-[rmlui-parity.md](rmlui-parity.md). Every screen is **OK / OK\*** on the host
+[rmlui-parity.md](../ui/rmlui-parity.md). Every screen is **OK / OK\*** on the host
 render pairs (`tools/uiview_playback_rml.sh` vs `tools/uiview.sh --all`), with
 #16 folded in. The following still need a hardware pass on a jailbroken PS5
 (app module, `PPSA99039`) before the legacy screen code is deleted:
@@ -192,7 +192,7 @@ Record results here (date, `.ffpfsc` sha, screen, pass/fail, photo).
 
 Code-complete, hw-verify-pending (2026-09-05): the Auto/FFmpeg/Native settings
 row, config migration and the Media Info decoder badge — see
-[evo-pro/native-decode-plan.md](evo-pro/native-decode-plan.md) § Phase 5.
+[evo-pro/native-decode-plan.md](../evo-pro/native-decode-plan.md) § Phase 5.
 Host preview (`tools/uiview_playback_rml.sh`) confirms the row/badge render.
 
 **First hardware pass (2026-09-05) caught a real behavior bug:** `NATIVE`
@@ -230,7 +230,7 @@ A pass/fail sweep has now called a broken build green twice, and both are the
 reason this table has the columns it does:
 
 - The app blamed E-AC3 for failures in files with **no audio track at all**
-  ([baseline-defects.md](baseline-defects.md)). A binary result cannot
+  ([baseline-defects.md](../research/baseline-defects.md)). A binary result cannot
   distinguish a missing decoder from a slow one, so `verdict` does.
 - Every 10-bit file played, held A/V sync, and was **the wrong colour** — the
   PQ inverse-EOTF was applied off the decoder's *profile* when the shader

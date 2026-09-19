@@ -156,14 +156,14 @@ libSceVdecwrap      libSceVideoDecoderArbitration
 
 You therefore **cannot** `-lSceVdecCore`. Two routes exist; see
 [native-media-research.md](native-media-research.md) and
-[proprietary.md](proprietary.md).
+[proprietary.md](../proprietary.md).
 
 ### Headers
 
 `include/ps5/` ships only `kernel.h`, `klog.h`, `mdbg.h`, `nid.h`, `payload.h`.
 **There are no VideoOut/AudioOut/GNM headers at all.** Every SCE prototype used
 by this repo is hand-declared in
-[`projects/common/include/evo_ps5.h`](../projects/common/include/evo_ps5.h),
+[`projects/common/include/evo_ps5.h`](../../projects/common/include/evo_ps5.h),
 and each one was checked against the stub symbol lists so it links.
 
 `ps5/kernel.h` is valuable beyond firmware detection — it exposes

@@ -18,7 +18,7 @@ stable RmlUi target) and for deleting the legacy screen code (`ui/src/evo_screen
   only be confirmed on a console (theme switch repaint on device, OSD/dialog
   compositing over live decoded video, marquee smoothness at real frame
   cadence, D-pad nav timing) are marked **HW** and listed in
-  [validation.md](validation.md) under "UI parity (#44)".
+  [validation.md](../build/validation.md) under "UI parity (#44)".
 
 Status legend: **OK** = at parity on the host renders · **OK\*** = at parity,
 with a deliberate deviation noted · **HW** = needs a hardware pass.
@@ -101,5 +101,5 @@ the deletion.
 A hardware pass of the **HW**-marked rows — theme switch repaint on device,
 OSD + dialog + media-info + subtitle-picker compositing over live decoded
 video, marquee smoothness at real cadence, D-pad focus/nav order and timing.
-Log results in [validation.md](validation.md). This is the last thing before
+Log results in [validation.md](../build/validation.md). This is the last thing before
 #28 can build on a fully-signed-off RmlUi target.

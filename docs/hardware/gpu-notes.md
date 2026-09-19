@@ -29,7 +29,7 @@ RmlUi context (all screens + overlays) ───────────┤   + 
 - Render size comes from `sceVideoOutGetResolutionStatus` — the panel's own
   resolution, not a fixed 1080p.
 - Shader toolchain, register model and hardware receipts:
-  [evo-pro/agc-bare-metal-ui.md](evo-pro/agc-bare-metal-ui.md).
+  [evo-pro/agc-bare-metal-ui.md](../evo-pro/agc-bare-metal-ui.md).
 
 ## Build
 

@@ -423,9 +423,9 @@ The Step 1 CPU path is kept as the fallback (AGC probe fails, or host preview).
 ## 6. Validation
 
 - Composited-output plane-hash parity vs. the CPU path (`tools/bench.sh`,
-  [validation.md](../validation.md)). The AGC output and the CPU output must
+  [validation.md](../build/validation.md)). The AGC output and the CPU output must
   match within the YUV→RGB rounding tolerance.
-- 4K60 HEVC Main10 holds VSync cadence (the [rmlui-integration-guide.md](../rmlui-integration-guide.md) §7 target).
+- 4K60 HEVC Main10 holds VSync cadence (the [rmlui-integration-guide.md](../ui/rmlui-integration-guide.md) §7 target).
 - No new panic vector — probe → watchdog → fallback, all three.
 - Host preview byte-identical (`__PROSPERO__` guard).
 
@@ -518,7 +518,7 @@ easier. Verify on host before committing to it.
    fallback). No test-pattern harness yet — the native 4K decoder's NV12 output
    is the first real input.
 5. A/B the composited plane hash vs the CPU converter (`tools/bench.sh`,
-   [validation.md](../validation.md)); then remove `pp_converter_fused` / the
+   [validation.md](../build/validation.md)); then remove `pp_converter_fused` / the
    CPU swizzle from the 4K hot path.
 6. Settings row `Playback → Renderer: Auto/CPU/GPU`;
    P010/HDR present (`bind_main10_source` + `pixel.text.p010-passthrough`).

@@ -8,7 +8,7 @@ Full docs live in `docs/`. This file is the index plus the rules that are
 expensive to relearn by trial and error on real hardware. Read the linked doc
 before doing deep work in its area instead of exploring the tree cold.
 
-**Implementing a GitHub issue?** Start at [docs/roadmap.md](docs/roadmap.md) —
+**Implementing a GitHub issue?** Start at [docs/roadmap.md](docs/planning/roadmap.md) —
 the dependency-ordered plan; each issue body also carries its own
 "References & sequencing" block (docs + files to read).
 
@@ -18,7 +18,7 @@ the dependency-ordered plan; each issue body also carries its own
 
 - **Never call `make` directly.** The Makefile is missing FFmpeg's transitive
   dependency list. Use `scripts/build-evoplayer.sh` (host compile check) or
-  `scripts/package-app.sh` (the real build). → [docs/tooling.md](docs/tooling.md)
+  `scripts/package-app.sh` (the real build). → [docs/tooling.md](docs/build/tooling.md)
 - **One hardware path: the `.ffpfsc` app module.** `scripts/package-app.sh
   --ffpfsc` + `scripts/deploy-app.sh --ffpfsc`, launched from the Games row
   (ShadowMountPlus auto-launches on the `.ffpfsc` change). The ELF-payload
@@ -32,12 +32,12 @@ the dependency-ordered plan; each issue body also carries its own
   never runs and the kernel reclaims VideoOut + the 64 MB direct-memory pool
   under a possibly-still-submitting GPU — that panicked the console on
   2026-09-18. QUIT + the `agc_wait_gpu_idle()` drain are **hw-verify-pending**;
-  the PS button remains the fallback. → [docs/tooling.md](docs/tooling.md)
+  the PS button remains the fallback. → [docs/tooling.md](docs/build/tooling.md)
 - **Never sweep kernel `.text`** (`kernel_copyout` over a range). Panics the
   console every time; this is why the `kdump` project no longer exists.
 - **Never call `sceVideoOutOpen` from a payload.** Returns a handle that
   passes a `< 0` check but is bogus, and panics the console once a compute
-  queue is allocated afterward. → [docs/hardware-decode.md](docs/hardware-decode.md)
+  queue is allocated afterward. → [docs/hardware-decode.md](docs/hardware/hardware-decode.md)
 - **Do not kill `kstuff`.** Destabilizes the console into a panic. Kernel R/W
   works fine with it left running.
 - **The console's `/fs` web route is read-only**, no `DELETE`. Don't attempt
@@ -61,7 +61,7 @@ the dependency-ordered plan; each issue body also carries its own
   `/data`. The old ELF-payload route (borrowed `/hbldr` process, no graphics,
   errno-5200 decode wall) is gone; its scripts were deleted. For a UI/layout
   question use the **host renderer** (`uiview.sh` / `uiplay.sh`), not a
-  console. → [docs/tooling.md](docs/tooling.md#packaging-two-routes)
+  console. → [docs/tooling.md](docs/build/tooling.md#packaging-two-routes)
 
 ---
 
@@ -100,7 +100,7 @@ is genuinely about console behavior (theme repaint, overlay-over-video, input
 timing).
 
 Full command reference, all scripts, screenshot measurement tools
-(`shot.sh probe/scan/crop/diff`), env vars: [docs/tooling.md](docs/tooling.md).
+(`shot.sh probe/scan/crop/diff`), env vars: [docs/tooling.md](docs/build/tooling.md).
 
 ---
 
@@ -138,7 +138,7 @@ docs/           everything below
 ```
 
 Full rationale for the layer boundaries, and how much of the legacy `main.c`
-is still to be absorbed: [docs/architecture.md](docs/architecture.md).
+is still to be absorbed: [docs/architecture.md](docs/architecture/architecture.md).
 
 ---
 
@@ -150,7 +150,7 @@ mock data — everything in the DOM binds to live C structs
 (`EVOPlayerState`, `evo_file_entry_t`, `evo_settings_t`, ...) through
 `evo_rmlui_bridge.cpp`.
 
-- Spec and architecture diagram: [docs/rmlui-integration-guide.md](docs/rmlui-integration-guide.md)
+- Spec and architecture diagram: [docs/rmlui-integration-guide.md](docs/ui/rmlui-integration-guide.md)
 - C++ sources: `projects/evoplayer/ui_rml/src/{evo_rmlui_app,evo_rmlui_bridge,evo_rmlui_render}.cpp`
   (`evo_rmlui_app.cpp` is ~1900 lines — grep for the screen/function you need
   rather than reading it whole)
@@ -162,32 +162,36 @@ mock data — everything in the DOM binds to live C structs
 
 ## docs/ index
 
+Grouped into `build/`, `architecture/`, `ui/`, `hardware/`, `planning/`,
+`research/` and `addons/` — [docs/README.md](docs/README.md) is the navigable
+version of this table.
+
 | Doc | What's in it |
 |---|---|
-| [roadmap.md](docs/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
-| [project-tracking.md](docs/project-tracking.md) | The "EVO Player Roadmap" GitHub Project board — setup script, field↔label map, views, auto-add workflows |
-| [architecture.md](docs/architecture.md) | Layer boundaries; what still remains in the un-compiled `main.c.legacy` |
-| [tooling.md](docs/tooling.md) | Every script, launch safety, screenshot measurement, klog |
-| [building.md](docs/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
-| [rmlui-integration-guide.md](docs/rmlui-integration-guide.md) | RmlUi migration spec (active work) |
-| [rmlui-parity.md](docs/rmlui-parity.md) | **#44 per-screen RmlUi-vs-`main` parity checklist** + #16 text-clamp status + marquee scope |
-| [ui-handoff.md](docs/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
-| [theming.md](docs/theming.md) | Theme/color system |
-| [hardware-decode.md](docs/hardware-decode.md) / [-review.md](docs/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
+| [roadmap.md](docs/planning/roadmap.md) | **Issue implementation order + per-story doc/file references.** Start here for any GitHub issue. |
+| [project-tracking.md](docs/planning/project-tracking.md) | The "EVO Player Roadmap" GitHub Project board — setup script, field↔label map, views, auto-add workflows |
+| [architecture.md](docs/architecture/architecture.md) | Layer boundaries; what still remains in the un-compiled `main.c.legacy` |
+| [tooling.md](docs/build/tooling.md) | Every script, launch safety, screenshot measurement, klog |
+| [building.md](docs/build/building.md) | Full dev environment setup, SDK, FFmpeg, packaging |
+| [rmlui-integration-guide.md](docs/ui/rmlui-integration-guide.md) | RmlUi migration spec (active work) |
+| [rmlui-parity.md](docs/ui/rmlui-parity.md) | **#44 per-screen RmlUi-vs-`main` parity checklist** + #16 text-clamp status + marquee scope |
+| [ui-handoff.md](docs/ui/ui-handoff.md) | Legacy UI layer, what's covered by `uiplay.sh` |
+| [theming.md](docs/ui/theming.md) | Theme/color system |
+| [hardware-decode.md](docs/hardware/hardware-decode.md) / [-review.md](docs/hardware/hardware-decode-review.md) | Hardware decoder investigation, panic vectors |
 | [evo-pro/agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) | **The RmlUi UI on bare-metal `sceAgc`** (hw-verified 2026-09-12) — `.pipe` + amdllpc shader toolchain, the gfx1013 LLPC patch, the silent-failure bugs and the `agc health` lines that verify a build. `--agc` builds only; video present is still unported. |
 | [evo-pro/](docs/evo-pro/README.md) | **EVO Pro program** — app-module repackage + hardware decode + GPU rendering. **Resume-here: [evo-pro/status.md](docs/evo-pro/status.md)**. **#31 native 4K decode DONE + closed** (GTA plays on `sceVideodec2` — `media/src/evo_vdec_native.c`). Test loop: `tools/evo-remote.sh` (scriptable `play`/`seek`/`boot` over FTP). Also: [native-decode-plan.md](docs/evo-pro/native-decode-plan.md) (master plan), [videodec2-abi.md](docs/evo-pro/videodec2-abi.md) (Route B ABI), [gpu-rendering-plan.md](docs/evo-pro/gpu-rendering-plan.md) + [agc-implementation.md](docs/evo-pro/agc-implementation.md) (**historical** — the hand-rolled sceAgc path that preceded today's runtime) + [sharpprospero-agc-reference.md](docs/evo-pro/sharpprospero-agc-reference.md) (AGC ABI), [phase-1b-app-module.md](docs/evo-pro/phase-1b-app-module.md) |
-| [shader-compilation.md](docs/shader-compilation.md) | The `.pipe` → amdllpc → PAL-metadata shader toolchain (gfx1013), and how a compiled pipeline is fed to `sceAgc` |
-| [gpu-notes.md](docs/gpu-notes.md) | The GPU reverse-engineering history behind the bare-metal sceAgc runtime |
-| [converter-perf.md](docs/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted when the GPU took over present. Kept for the BT.601 reference matrix |
-| [networking.md](docs/networking.md) | Console services, jailbreak-lapsed symptoms |
-| [media-tile.md](docs/media-tile.md) | Media tile / metadata handling |
-| [addons-emby-nuvio.md](docs/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
-| [packaging.md](docs/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/tooling.md#packaging-two-routes)) |
-| [validation.md](docs/validation.md) | Validation checklist |
-| [modularisation-plan.md](docs/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |
-| [backlog.md](docs/backlog.md) / [improvements-roadmap.md](docs/improvements-roadmap.md) | Planning docs, not current state |
-| [icon-swap-handoff.md](docs/icon-swap-handoff.md) | RmlUi icon swap to Lucide/Kenney — candidates approved, not yet implemented |
-| [prosperoplayer-baseline.md](docs/prosperoplayer-baseline.md) / [reng-analysis-integration.md](docs/reng-analysis-integration.md) / [native-media-research.md](docs/native-media-research.md) / [sdk-audit.md](docs/sdk-audit.md) / [baseline-defects.md](docs/baseline-defects.md) | Upstream baseline research |
+| [shader-compilation.md](docs/hardware/shader-compilation.md) | The `.pipe` → amdllpc → PAL-metadata shader toolchain (gfx1013), and how a compiled pipeline is fed to `sceAgc` |
+| [gpu-notes.md](docs/hardware/gpu-notes.md) | The GPU reverse-engineering history behind the bare-metal sceAgc runtime |
+| [converter-perf.md](docs/research/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted when the GPU took over present. Kept for the BT.601 reference matrix |
+| [networking.md](docs/hardware/networking.md) | Console services, jailbreak-lapsed symptoms |
+| [media-tile.md](docs/ui/media-tile.md) | Media tile / metadata handling |
+| [addons-emby-nuvio.md](docs/addons/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
+| [packaging.md](docs/build/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/build/tooling.md#packaging-two-routes)) |
+| [validation.md](docs/build/validation.md) | Validation checklist |
+| [modularisation-plan.md](docs/architecture/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |
+| [backlog.md](docs/planning/backlog.md) / [improvements-roadmap.md](docs/planning/improvements-roadmap.md) | Planning docs, not current state |
+| [icon-swap-handoff.md](docs/ui/icon-swap-handoff.md) | RmlUi icon swap to Lucide/Kenney — candidates approved, not yet implemented |
+| [prosperoplayer-baseline.md](docs/research/prosperoplayer-baseline.md) / [reng-analysis-integration.md](docs/research/reng-analysis-integration.md) / [native-media-research.md](docs/research/native-media-research.md) / [sdk-audit.md](docs/research/sdk-audit.md) / [baseline-defects.md](docs/research/baseline-defects.md) | Upstream baseline research |
 | [proprietary.md](docs/proprietary.md) | Licensing notes |
 
 ---

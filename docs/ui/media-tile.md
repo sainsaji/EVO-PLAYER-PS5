@@ -4,8 +4,8 @@
 > scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
 > `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
 > The `.ffpfsc` app module is the only deploy path — see
-> [building.md](building.md#8-deploying-to-the-console) and
-> [tooling.md](tooling.md). Commands below that name those scripts will not
+> [building.md](../build/building.md#8-deploying-to-the-console) and
+> [tooling.md](../build/tooling.md). Commands below that name those scripts will not
 > run; the findings around them still stand.
 
 
@@ -33,7 +33,7 @@ its own title ID, and any integration with the repo's scripts.
 ## 1. The route that cannot work: `package-pkg.sh --format app`
 
 Worth restating because it is the obvious first thing to try.
-[packaging.md](packaging.md) already records the refusal, and it still holds:
+[packaging.md](../build/packaging.md) already records the refusal, and it still holds:
 
 ```
 $ llvm-readelf -h output/elf/EVOPlayer.elf
@@ -139,7 +139,7 @@ Every SCE symbol the launcher needs is present in the SDK v0.42 stubs —
 `sceSystemServiceGetAppIdOfRunningBigApp`, `sceUserServiceGetForegroundUser`,
 `sceUserServiceTerminate`, `sceKernelGetAppState`,
 `sceKernelSendNotificationRequest`. Note that
-[sdk-audit.md](sdk-audit.md) lists `libSceUserService` as having "no
+[sdk-audit.md](../research/sdk-audit.md) lists `libSceUserService` as having "no
 `Terminate`" — that is stale for v0.42; the stub exports it.
 
 The launcher ELF is player-size plus ~400 KB, because the player is embedded
@@ -240,6 +240,6 @@ uninstaller in hand.
 
 - `projects/evoplayer/prospero_media_standalone/` — the launcher, uninstaller, and loader core
 - `projects/evoplayer/docs/PROSPERO_MEDIA_LAUNCHER.md` — upstream's own write-up of the technique
-- [packaging.md](packaging.md) — the three distribution routes and why fake-SELF rejects our ELF
-- [sdk-audit.md](sdk-audit.md) — SCE stub inventory
+- [packaging.md](../build/packaging.md) — the three distribution routes and why fake-SELF rejects our ELF
+- [sdk-audit.md](../research/sdk-audit.md) — SCE stub inventory
 - `scripts/install-homebrew.sh` — the current launch path, and why hbldr rather than elfldr

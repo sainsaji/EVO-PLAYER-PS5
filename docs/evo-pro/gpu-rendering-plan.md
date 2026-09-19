@@ -27,8 +27,8 @@
 >
 > **Trigger:** the RmlUi UI ran at **~11 fps (~90 ms/frame)** against a design
 > that targets 60 (16.6 ms); 4K playback is CPU-bound on the YUV→BGRA convert +
-> tile swizzle. See [ui-handoff.md](../ui-handoff.md) and
-> [rmlui-integration-guide.md](../rmlui-integration-guide.md) (§4 virtualisation,
+> tile swizzle. See [ui-handoff.md](../ui/ui-handoff.md) and
+> [rmlui-integration-guide.md](../ui/rmlui-integration-guide.md) (§4 virtualisation,
 > §5 rasteriser).
 
 ## 1. Why it's slow — and why packaging alone won't fix it
@@ -37,7 +37,7 @@ EVO has **no GPU path today**. `pp/src/pp_compute_pipeline.c` is misnamed — it
 own header says *"AVX2 / SSE2 **CPU** SIMD Compute Kernel"*. Every frame:
 
 - YUV→BGRA + swizzle convert runs on the CPU (`pp_converter_fused.c` is the
-  current lever — see [converter-perf.md](../converter-perf.md))
+  current lever — see [converter-perf.md](../research/converter-perf.md))
 - the full RmlUi tree is re-rasterised on the CPU, even when nothing changed
 - the composite (UI over video) and the copy into the 4K `sceVideoOut`
   framebuffer are CPU byte-moves
@@ -60,8 +60,8 @@ genuinely more viable post-packaging.
 
 | Route | Status |
 |---|---|
-| OpenGL / Vulkan / mesa (SDL accelerated renderer) | No hardware GL/Vulkan driver on this SDK ([gpu-notes.md](../gpu-notes.md)). SDL2's presence "says nothing about acceleration" — its renderer is software. Not an option. |
-| Raw GNM (hand-assembled PM4) | `sceGnmAreSubmitsAllowed() → 1` on hardware, but no headers, no Gnmx, no PSSL compiler. "Large, speculative" ([gpu-notes.md](../gpu-notes.md)). |
+| OpenGL / Vulkan / mesa (SDL accelerated renderer) | No hardware GL/Vulkan driver on this SDK ([gpu-notes.md](../hardware/gpu-notes.md)). SDL2's presence "says nothing about acceleration" — its renderer is software. Not an option. |
+| Raw GNM (hand-assembled PM4) | `sceGnmAreSubmitsAllowed() → 1` on hardware, but no headers, no Gnmx, no PSSL compiler. "Large, speculative" ([gpu-notes.md](../hardware/gpu-notes.md)). |
 | **AGC (`sceAgc` + `sceAgcDriver`)** | **ProsperoLight demonstrates the full pipeline** — `sceAgcCreateShader` / `sceAgcLinkShaders` / register setup / `sceAgcDcbDrawIndexAuto` / `sceAgcDriverSubmitDcb` / `sceAgcDcbSetFlip` — from a game-category app module. This is the route. The ABI, the DCB struct, the render-target register model and a clean-room swizzle library are documented call-by-call in [sharpprospero-agc-reference.md](sharpprospero-agc-reference.md). |
 
 ## 3. How ProsperoLight splits the work
@@ -242,10 +242,10 @@ continuous scroll and for the 4K playback convert/composite/flip.
 - Frame-time budget: UI-only screens ≤ 16.6 ms; playback screens hold 60 fps
   VSync cadence (the `rmlui-integration-guide.md` §7 target).
 - Composited-output plane-hash parity vs. the current CPU path
-  ([validation.md](../validation.md) / `tools/bench.sh`).
+  ([validation.md](../build/validation.md) / `tools/bench.sh`).
 - Host preview unchanged (`__PROSPERO__` guard).
 - No new panic vectors — AGC submit path is watchdogged like the decode thread
-  ([hardware-decode-review.md](../hardware-decode-review.md) §7).
+  ([hardware-decode-review.md](../hardware/hardware-decode-review.md) §7).
 
 ## 8. File-by-file (Steps 1–2)
 
@@ -258,4 +258,4 @@ continuous scroll and for the 4K playback convert/composite/flip.
 | `pp/src/pp_videoout.c` | Step 2: submit AGC DCB instead of CPU-buffer flip on target |
 | `pp/src/pp_converter*.c` | Step 2: bypassed on `__PROSPERO__`; kept for host |
 | `scripts/build-evoplayer.sh` / Makefile | link `-lSceAgc -lSceAgcDriver`; package shader blobs |
-| [converter-perf.md](../converter-perf.md), [gpu-notes.md](../gpu-notes.md) | update the "no GPU path" framing once Step 2 lands |
+| [converter-perf.md](../research/converter-perf.md), [gpu-notes.md](../hardware/gpu-notes.md) | update the "no GPU path" framing once Step 2 lands |

@@ -13,7 +13,7 @@ approval pass): https://claude.ai/code/artifact/aef382de-1181-4754-a382-94eba466
 
 - **RmlUi icons only** — `projects/evoplayer/assets/icons/*.png`, loaded by
   `EvoRenderInterface::LoadTexture` in
-  [evo_rmlui_render.cpp:182-284](../projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp).
+  [evo_rmlui_render.cpp:182-284](../../projects/evoplayer/ui_rml/src/evo_rmlui_render.cpp).
   It's a generic `stbi_load()` against a search path list — any real PNG with
   the right filename drops in with no code change.
 - **Not in scope**: the legacy SDF icon set (`evo_icons.h` /

@@ -4,14 +4,14 @@
 > scripts (`deploy.sh`, `install-homebrew.sh`, `launch.sh`,
 > `update-console.sh`, `app-loop.sh`, `push_ps5.py`) were removed in `6db199d`.
 > The `.ffpfsc` app module is the only deploy path — see
-> [building.md](building.md#8-deploying-to-the-console) and
-> [tooling.md](tooling.md). Commands below that name those scripts will not
+> [building.md](../build/building.md#8-deploying-to-the-console) and
+> [tooling.md](../build/tooling.md). Commands below that name those scripts will not
 > run; the findings around them still stand.
 
 
 Written so the next session can start without re-deriving anything. Read this
 first, then [`theming.md`](theming.md) for the theme format and
-[`tooling.md`](tooling.md) for how to build, capture and measure.
+[`tooling.md`](../build/tooling.md) for how to build, capture and measure.
 
 > **Superseded for screen rendering (#44, v0.8.0).** Every screen now draws
 > through RmlUi (`projects/evoplayer/ui_rml/`, see
@@ -189,7 +189,7 @@ caller could rely on. `evo_feedback` is sound and lightbar only.
 
 ## 2. How to work on this
 
-See [`tooling.md`](tooling.md) for the full set. The short version:
+See [`tooling.md`](../build/tooling.md) for the full set. The short version:
 
 ```bash
 # build, install, launch, capture
@@ -204,7 +204,7 @@ docker compose run --rm ps5-dev bash -lc '
 resident, so a second launch adds an instance rather than replacing one, and
 stacking them has kernel-panicked the console. `tools/launch.sh` guards
 against it but cannot close the previous instance for you — see
-[`tooling.md`](tooling.md).
+[`tooling.md`](../build/tooling.md).
 
 **Do not call `make` directly** — the build script supplies transitive link
 dependencies the project Makefile does not list.
@@ -324,7 +324,7 @@ everything to an append-only log and survives payload restarts.
 
 ## 4. Suggested next steps
 
-[`backlog.md`](backlog.md) is the ranked list across the whole project and
+[`backlog.md`](../planning/backlog.md) is the ranked list across the whole project and
 decides order. What follows is the UI-local detail behind its entries — keep
 them in step.
 

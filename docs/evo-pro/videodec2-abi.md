@@ -15,7 +15,7 @@ that runs this sequence and feeds one bundled AU through `sceVideodec2Decode`).
 
 ## 1. The one thing that mattered
 
-The prior EVO effort ([hardware-decode.md](../hardware-decode.md)) got
+The prior EVO effort ([hardware-decode.md](../hardware/hardware-decode.md)) got
 `sceVideodec2CreateDecoder` to succeed and then hit **errno 5200** at the
 decode ioctl, from every payload context it tried, with and without credential
 elevation.

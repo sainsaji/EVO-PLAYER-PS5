@@ -10,7 +10,7 @@ Ranking is by payoff per console round trip. Hardware time is the scarce
 resource: every launch needs a jailbreak session, and instances must be closed
 between runs (stacking them has kernel-panicked a console).
 
-Two things this file is **not**: [`baseline-defects.md`](baseline-defects.md) is
+Two things this file is **not**: [`baseline-defects.md`](../research/baseline-defects.md) is
 history, not work — both defects it describes are fixed. And the dead ends in
 §11 are closed on evidence; do not reopen them without reading why.
 
@@ -44,7 +44,7 @@ LPCM 7.1.
 
 This is first because it is the only item that turns opinion into data, and
 because the project has already been burned by believing a message over the
-build: [`baseline-defects.md`](baseline-defects.md) records that the app blamed
+build: [`baseline-defects.md`](../research/baseline-defects.md) records that the app blamed
 E-AC3 for failures in files with no audio track at all, while the build
 actually links `aac ac3 eac3 dca mp3 mp2 flac opus vorbis alac pcm_*` and
 `h264 hevc vp9 vp8 mpeg2video mpeg4 av1 mjpeg` plus `truehd`/`mlp`.
@@ -55,7 +55,7 @@ path. Use `Atmos test tones 1000Hz V4.mp4` to confirm channel order is still
 `FL FR FC LFE BL BR SL SR` and nothing has swapped centre into a surround.
 
 **Done when** there is a pass/fail table per file in
-[`validation.md`](validation.md), and any failure has a cause, not just a
+[`validation.md`](../build/validation.md), and any failure has a cause, not just a
 symptom.
 
 ## 2. Persist the feedback settings — DONE (unreleased)
@@ -193,7 +193,7 @@ styled subtitles can go regardless.
 
 ## 8. Console-native launch (Media tile)
 
-**Full analysis:** [`media-tile.md`](media-tile.md).
+**Full analysis:** [`media-tile.md`](../ui/media-tile.md).
 
 Today the player needs a browser on a second device to start. The Media-tile
 launcher already in `projects/evoplayer/prospero_media_standalone/` puts a tile
@@ -238,7 +238,7 @@ it costs in ELF size (the player is already 33.9 MB).
 > the alternate ioctl command is unreachable (34 live readings), the driver
 > handshake succeeds so nothing was skipped, and `Reset` cannot recover the
 > decoder because it waits forever on a completion the refused job will never
-> produce. See [hardware-decode.md](hardware-decode.md), which now opens with
+> produce. See [hardware-decode.md](../hardware/hardware-decode.md), which now opens with
 > the closure and the list of things that must never be retried.
 >
 > **And the goal was met anyway.** The reason this item was rated "high" value
@@ -254,7 +254,7 @@ it costs in ELF size (the player is already 33.9 MB).
 > - Never call `sceVideoOutOpen` from a payload — it panics the console, and it
 >   returns a bogus handle that passes a `< 0` check.
 
-**Full research:** [`native-media-research.md`](native-media-research.md), and
+**Full research:** [`native-media-research.md`](../research/native-media-research.md), and
 the `research/hardware-decode` branch for the phase-by-phase findings.
 
 <details>
@@ -315,7 +315,7 @@ playback with no dropped-frame burst.
 Dead — nothing calls it, and nothing has since the launch shelf stopped
 drawing inset thumbnails. It describes an 80×80 world that no longer exists
 and paints a hardcoded cyan frame, which is the one thing
-[`theming.md`](theming.md) forbids outright. About 45 lines.
+[`theming.md`](../ui/theming.md) forbids outright. About 45 lines.
 
 ---
 
@@ -323,8 +323,8 @@ and paints a hardcoded cyan frame, which is the one thing
 
 | Idea | Why it is closed |
 |---|---|
-| GPU YUV conversion via SDL2 + mesa | The sysroot ships OSMesa (llvmpipe), a **software** rasteriser, with no `radeonsi`. Measurements in [`gpu-notes.md`](gpu-notes.md). The README roadmap still lists this — it is stale. |
-| Controller haptics | Built, tested on hardware, removed. Every vibration entry point either returns success and does nothing or rejects the call, while `scePadSetLightBar` succeeds on the same handle. Full probe table in [`ui-handoff.md`](ui-handoff.md). |
-| `package-pkg.sh --format app` for the player | `make_fself.py` requires a static `ET_EXEC`; every payload here is PIE. Structural, not a missing flag — see [`packaging.md`](packaging.md) and [`media-tile.md`](media-tile.md) §1. |
-| Signed fPKG | Requires Sony's proprietary `prospero-pub-cmd`. [`packaging.md`](packaging.md) §3. |
-| The two baseline defects | Surround and flip sync are **fixed**. [`baseline-defects.md`](baseline-defects.md) is kept as root-cause history; mistaking it for a backlog has already cost one session's planning time. |
+| GPU YUV conversion via SDL2 + mesa | The sysroot ships OSMesa (llvmpipe), a **software** rasteriser, with no `radeonsi`. Measurements in [`gpu-notes.md`](../hardware/gpu-notes.md). The README roadmap still lists this — it is stale. |
+| Controller haptics | Built, tested on hardware, removed. Every vibration entry point either returns success and does nothing or rejects the call, while `scePadSetLightBar` succeeds on the same handle. Full probe table in [`ui-handoff.md`](../ui/ui-handoff.md). |
+| `package-pkg.sh --format app` for the player | `make_fself.py` requires a static `ET_EXEC`; every payload here is PIE. Structural, not a missing flag — see [`packaging.md`](../build/packaging.md) and [`media-tile.md`](../ui/media-tile.md) §1. |
+| Signed fPKG | Requires Sony's proprietary `prospero-pub-cmd`. [`packaging.md`](../build/packaging.md) §3. |
+| The two baseline defects | Surround and flip sync are **fixed**. [`baseline-defects.md`](../research/baseline-defects.md) is kept as root-cause history; mistaking it for a backlog has already cost one session's planning time. |
