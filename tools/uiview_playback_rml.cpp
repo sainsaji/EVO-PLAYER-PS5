@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include "../projects/evoplayer/include/evo_features.h"
 #include "../projects/evoplayer/include/evo_changelog.h"
 #include <cstdio>
 #include <cstdlib>
@@ -151,22 +152,38 @@ static void launch_build(evo_rmlui_launch_params_t& p, int row, int col, bool wi
         { "Dolby Atmos Demo Disc 2024",   "MKV - 12.8 GB",     -1 },
     };
 
-    static const char* lib_titles[6] = {
-        "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT"
+    /* Mirrors libraryTiles() in LaunchScreen.cpp, Emby included or not - a
+     * preview that still advertises a tile the player no longer shows is worse
+     * than no preview. Guarded by the same switch. */
+#if EVO_ENABLE_EMBY
+#define EVO_UIVIEW_LIB_N 6
+#else
+#define EVO_UIVIEW_LIB_N 5
+#endif
+    static const char* lib_titles[EVO_UIVIEW_LIB_N] = {
+        "BROWSE", "RECENT", "FAVORITES",
+#if EVO_ENABLE_EMBY
+        "EMBY",
+#endif
+        "SETTINGS", "ABOUT"
     };
-    static const char* lib_details[6] = {
+    static const char* lib_details[EVO_UIVIEW_LIB_N] = {
         "Videos and folders on USB storage",
         "Pick up where you left off",
         "Media you saved for later",
+#if EVO_ENABLE_EMBY
         "Emby and media server streaming",
+#endif
         "Playback profiles and preferences",
         "Credits and project info"
     };
-    static const char* lib_icons[6] = {
+    static const char* lib_icons[EVO_UIVIEW_LIB_N] = {
         "projects/evoplayer/assets/icons/icon_browse_usb.png",
         "projects/evoplayer/assets/icons/icon_recent_files.png",
         "projects/evoplayer/assets/icons/icon_favorites.png",
+#if EVO_ENABLE_EMBY
         "projects/evoplayer/assets/icons/icon_emby.png",
+#endif
         "projects/evoplayer/assets/icons/icon_settings.png",
         "projects/evoplayer/assets/icons/icon_about_support.png"
     };
@@ -213,7 +230,7 @@ static void launch_build(evo_rmlui_launch_params_t& p, int row, int col, bool wi
             }
         }
 
-        p.library_visible = 6;
+        p.library_visible = EVO_UIVIEW_LIB_N;
         for (int i = 0; i < 6; i++) {
             p.library[i].title = lib_titles[i];
             p.library[i].detail = lib_details[i];
@@ -1337,7 +1354,7 @@ static void render_stress_screens(std::vector<uint32_t>& fb, int width, int heig
         p.hero_action = "RESUME";
         p.hero_progress = 240;
         p.hero_focused = 1;
-        p.library_visible = 6;
+        p.library_visible = EVO_UIVIEW_LIB_N;
         static const char* lt[6] = { "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT" };
         for (int i = 0; i < 6; i++) {
             p.library[i].title = lt[i];

@@ -1,3 +1,4 @@
+#include "evo_features.h"
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
 #include "evo_metrics.h"   /* EVO_UI_DESIGN_W/H - the dp authoring canvas */
@@ -2809,11 +2810,26 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
         }
     }
 
-    /* ---- collapsed icon rail ---- */
-    for (int i = 0; i < 5; i++) {
-        std::string item_id  = "nav-item-" + std::to_string(i);
-        std::string bar_id   = "nav-bar-"  + std::to_string(i);
-        std::string icon_id  = "nav-icon-" + std::to_string(i);
+    /* ---- collapsed icon rail ----
+     *
+     * navbar.rml carries a fixed five slots, Emby at slot 2. With Emby
+     * compiled out (EVO_ENABLE_EMBY) ScreenManager numbers the remaining
+     * sections 0..3, so the logical section has to be mapped onto the markup
+     * slot that still holds its icon - otherwise Settings would drive the Emby
+     * row. The unused slot is hidden so the rail closes up rather than leaving
+     * a gap where Emby used to be.
+     */
+    const int rail_sections = EVO_ENABLE_EMBY ? 5 : 4;
+    if (!EVO_ENABLE_EMBY) {
+        if (Rml::Element* el_gap = m_nav_doc->GetElementById("nav-wrap-2"))
+            el_gap->SetProperty("display", "none");
+    }
+
+    for (int i = 0; i < rail_sections; i++) {
+        const int slot = (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
+        std::string item_id  = "nav-item-" + std::to_string(slot);
+        std::string bar_id   = "nav-bar-"  + std::to_string(slot);
+        std::string icon_id  = "nav-icon-" + std::to_string(slot);
 
         Rml::Element* el_item = m_nav_doc->GetElementById(item_id);
         Rml::Element* el_bar  = m_nav_doc->GetElementById(bar_id);

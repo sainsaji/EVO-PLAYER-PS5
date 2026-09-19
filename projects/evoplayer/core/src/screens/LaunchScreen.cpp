@@ -1,4 +1,5 @@
 #include "evo/screens/LaunchScreen.hpp"
+#include "evo_features.h"
 #include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_rmlui_bridge.h"
@@ -18,6 +19,43 @@
 #include <algorithm>
 
 namespace evo {
+
+namespace {
+
+enum LibAction { LIB_BROWSE, LIB_RECENT, LIB_FAVORITES, LIB_EMBY, LIB_SETTINGS, LIB_ABOUT };
+
+struct LibTile {
+    const char* title;
+    const char* detail;
+    const char* icon;
+    LibAction   action;
+};
+
+/*
+ * The library shelf, with disabled features filtered out once. Emby is off by
+ * default (EVO_ENABLE_EMBY in evo_features.h) while it is being reworked; the
+ * screens behind it still build and still work, they are just not reachable.
+ */
+const LibTile* libraryTiles() {
+    static const LibTile tiles[] = {
+        {"BROWSE",    "Videos and folders on USB storage", "../icons/icon_browse_usb.png",    LIB_BROWSE},
+        {"RECENT",    "Pick up where you left off",        "../icons/icon_recent_files.png",  LIB_RECENT},
+        {"FAVORITES", "Media you saved for later",         "../icons/icon_favorites.png",     LIB_FAVORITES},
+#if EVO_ENABLE_EMBY
+        {"EMBY",      "Emby and media server streaming",   "../icons/icon_emby.png",          LIB_EMBY},
+#endif
+        {"SETTINGS",  "Playback and display preferences",  "../icons/icon_settings.png",      LIB_SETTINGS},
+        {"ABOUT",     "Credits and project info",          "../icons/icon_about_support.png", LIB_ABOUT},
+    };
+    return tiles;
+}
+
+int libraryTileCount() {
+    return EVO_ENABLE_EMBY ? 6 : 5;
+}
+
+} // namespace
+
 
 LaunchScreen::LaunchScreen()
     : StatefulScreen("LaunchScreen")
@@ -156,32 +194,27 @@ void LaunchScreen::activateSelection() {
             screenMgr->navigateTo(ScreenId::Player);
         }
     } else if (m_selectedRow == 2) {
-        // Library shelf navigation
-        switch (m_selectedCol) {
-            case 0: {
+        // Library shelf navigation. Dispatch on the tile's action rather than
+        // its column, so hiding a tile cannot silently shift what the ones
+        // after it do.
+        if (m_selectedCol < 0 || m_selectedCol >= libraryTileCount())
+            return;
+        switch (libraryTiles()[m_selectedCol].action) {
+            case LIB_BROWSE:
+            case LIB_RECENT:
+            case LIB_FAVORITES: {
+                const int src = (libraryTiles()[m_selectedCol].action == LIB_BROWSE) ? 0
+                              : (libraryTiles()[m_selectedCol].action == LIB_RECENT) ? 3
+                              : 2;
                 if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
-                    bs->setSource(0);
+                    bs->setSource(src);
                 }
                 screenMgr->navigateTo(ScreenId::UsbBrowser);
                 break;
             }
-            case 1: {
-                if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
-                    bs->setSource(3); // Recent Media
-                }
-                screenMgr->navigateTo(ScreenId::UsbBrowser);
-                break;
-            }
-            case 2: {
-                if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
-                    bs->setSource(2); // Favorites
-                }
-                screenMgr->navigateTo(ScreenId::UsbBrowser);
-                break;
-            }
-            case 3: screenMgr->navigateTo(ScreenId::EmbySetup); break;
-            case 4: screenMgr->navigateTo(ScreenId::Settings); break;
-            case 5: screenMgr->navigateTo(ScreenId::AboutSupport); break;
+            case LIB_EMBY:     screenMgr->navigateTo(ScreenId::EmbySetup); break;
+            case LIB_SETTINGS: screenMgr->navigateTo(ScreenId::Settings); break;
+            case LIB_ABOUT:    screenMgr->navigateTo(ScreenId::AboutSupport); break;
             default: break;
         }
     }
@@ -328,33 +361,16 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         params.recent[i].is_focused = (!railFocused && m_selectedRow == 1 && m_selectedCol == i);
     }
 
-    // Library shelf (System sections)
-    static const char* libIcons[6] = {
-        "../icons/icon_browse_usb.png",
-        "../icons/icon_recent_files.png",
-        "../icons/icon_favorites.png",
-        "../icons/icon_emby.png",
-        "../icons/icon_settings.png",
-        "../icons/icon_about_support.png"
-    };
-    static const char* libTitles[6] = {
-        "BROWSE", "RECENT", "FAVORITES", "EMBY", "SETTINGS", "ABOUT"
-    };
-    static const char* libDetails[6] = {
-        "Videos and folders on USB storage",
-        "Pick up where you left off",
-        "Media you saved for later",
-        "Emby and media server streaming",
-        "Playback and display preferences",
-        "Credits and project info"
-    };
-
-    params.library_visible = 6;
+    // Library shelf (System sections). One table rather than parallel arrays,
+    // so a disabled feature drops out of the shelf and out of its activation
+    // switch together - see libraryTiles() and EVO_ENABLE_EMBY.
+    const LibTile* lib = libraryTiles();
+    params.library_visible = libraryTileCount();
 
     for (int i = 0; i < params.library_visible; ++i) {
-        params.library[i].title = libTitles[i];
-        params.library[i].detail = libDetails[i];
-        params.library[i].icon_path = libIcons[i];
+        params.library[i].title = lib[i].title;
+        params.library[i].detail = lib[i].detail;
+        params.library[i].icon_path = lib[i].icon;
         params.library[i].progress = -1;
         params.library[i].art = nullptr;
         params.library[i].is_focused = (!railFocused && m_selectedRow == 2 && m_selectedCol == i);

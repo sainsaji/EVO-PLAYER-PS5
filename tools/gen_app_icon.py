@@ -14,6 +14,7 @@ WHY THIS EXISTS
     file and re-rendering at any size.
 
 OUTPUT
+    projects/evoplayer/sce_sys/icon0.png                        the app icon
     output/screenshots/app_icon_preview.png                         same image
 
 USAGE
@@ -91,6 +92,47 @@ def wordmark_evo(px, py, cx, cy, cap, half):
     return min(d, d_o)
 
 
+def wordmark_pro(px, py, cx, cy, cap, half):
+    """
+    Signed distance to the letters P R O.
+
+    EVO got away with straight strokes and one circle. P and R need a bowl, so
+    each is a stem plus the right half of a ring - intersected with max(), the
+    signed-distance equivalent of clipping - and R adds a diagonal leg. Same
+    stroke weight and cap height convention as wordmark_evo().
+    """
+    h = cap / 2.0
+    w = cap * 0.58
+    gap = cap * 0.30
+    advance = w + gap
+    ox = cx - advance
+
+    bowl_r = h * 0.52
+
+    def bowl(sx):
+        """Right half of a ring, sitting on the upper half of the stem."""
+        d = abs(sd_circle(px, py, sx + bowl_r * 0.55, cy - h + bowl_r,
+                          bowl_r)) - half
+        return max(d, sx - px)          # keep only x >= stem
+
+    # P - stem, then the bowl.
+    pxs = ox - w / 2.0
+    d = sd_segment(px, py, pxs, cy - h, pxs, cy + h) - half
+    d = min(d, bowl(pxs))
+
+    # R - the same, plus a leg from the bowl's foot to the baseline.
+    rxs = cx - w / 2.0
+    d_r = sd_segment(px, py, rxs, cy - h, rxs, cy + h) - half
+    d_r = min(d_r, bowl(rxs))
+    d_r = min(d_r, sd_segment(px, py, rxs + w * 0.12, cy,
+                              rxs + w * 0.92, cy + h) - half)
+    d = min(d, d_r)
+
+    # O - a ring, as in the EVO wordmark.
+    d_o = abs(sd_circle(px, py, cx + advance, cy, h * 0.92)) - half
+    return min(d, d_o)
+
+
 def render_icon(size):
     s = float(size)
     c = s / 2.0
@@ -106,9 +148,20 @@ def render_icon(size):
     ring_r = s * 0.215
     ring_w = s * 0.048
 
-    word_cy = c + s * 0.295
-    word_cap = s * 0.145
-    word_half = s * 0.021
+    word_cy = c + s * 0.250
+    word_cap = s * 0.135
+    word_half = s * 0.020
+
+    # PRO badge. A filled accent pill with the letters knocked out in the tile
+    # colour, so at shell size it reads as one solid shape rather than three
+    # thin glyphs - 0.10.0 is a rebuild rather than a point release, and the
+    # tile should say so before the app is even opened.
+    pro_cy = c + s * 0.396
+    pro_cap = s * 0.070
+    pro_half = s * 0.0125
+    pill_hw = s * 0.150
+    pill_hh = s * 0.058
+    pill_r = pill_hh
 
     # Play triangle, nudged right so its optical centre sits on the ring's
     # centre - a geometrically centred triangle always looks left-heavy.
@@ -157,6 +210,15 @@ def render_icon(size):
                                            word_cap, word_half))
             col = mix(col, (255, 255, 255), a_word)
 
+            # --- PRO badge -------------------------------------------------
+            a_pill = coverage(sd_round_rect(px, py, c, pro_cy,
+                                            pill_hw, pill_hh, pill_r))
+            col = mix(col, ACCENT, a_pill)
+            # Knock the letters back out of the pill in the tile's own colour.
+            a_pro = coverage(wordmark_pro(px, py, c, pro_cy,
+                                          pro_cap, pro_half)) * a_pill
+            col = mix(col, mix(grad, ACCENT_DEEP, sheen), a_pro)
+
             # Everything outside the rounded rect is transparent-as-black; the
             # PNG has no alpha channel, and the shell composites tiles on its
             # own background, so black is the safe ground.
@@ -174,6 +236,9 @@ def main():
 
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
+    # dest was referenced by write_png() below but never assigned, so this
+    # script raised NameError and the icon in the tree could not be regenerated.
+    dest = os.path.join(root, "projects", "evoplayer", "sce_sys", "icon0.png")
     prev = os.path.join(root, "output", "screenshots", "app_icon_preview.png")
     os.makedirs(os.path.dirname(prev), exist_ok=True)
 

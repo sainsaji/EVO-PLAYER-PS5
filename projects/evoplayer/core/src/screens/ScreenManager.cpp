@@ -1,3 +1,4 @@
+#include "evo_features.h"
 #include "evo/screens/ScreenManager.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
@@ -69,15 +70,17 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
         case ScreenId::UsbBrowser:      return 1; // Browse USB
         case ScreenId::RecentFiles:     return 1; // Recent Files (part of file browser)
         case ScreenId::Favorites:       return 1; // Favorites (part of file browser)
+#if EVO_ENABLE_EMBY
         case ScreenId::EmbySetup:
         case ScreenId::EmbyBrowse:      return 2; // Emby
+#endif
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
-        case ScreenId::SettingsSystem:  return 3; // Settings
+        case ScreenId::SettingsSystem:  return EVO_ENABLE_EMBY ? 3 : 2; // Settings
         case ScreenId::AboutSupport:
-        case ScreenId::Changelog:       return 4; // About & Support
+        case ScreenId::Changelog:       return EVO_ENABLE_EMBY ? 4 : 3; // About & Support
         default:                        return -1; // Non-rail screens
     }
 }
@@ -104,7 +107,9 @@ void ScreenManager::setRailFocused(bool focused) {
 }
 
 void ScreenManager::stepRail(int delta) {
-    const int numSections = 5;
+    /* One fewer section while Emby is disabled, so the rail does not step onto
+     * an entry with nothing behind it. See EVO_ENABLE_EMBY in evo_features.h. */
+    const int numSections = EVO_ENABLE_EMBY ? 5 : 4;
     m_railIndex = (m_railIndex + delta) % numSections;
     if (m_railIndex < 0) m_railIndex += numSections;
     evo_feedback(EVO_FB_MOVE);
@@ -112,6 +117,9 @@ void ScreenManager::stepRail(int delta) {
 }
 
 ScreenId ScreenManager::getRootScreenForSection(int section) const {
+    /* Must stay the inverse of getSectionForScreen() above, including the
+     * shift when Emby is compiled out. */
+#if EVO_ENABLE_EMBY
     switch (section) {
         case 0: return ScreenId::MainMenu;
         case 1: return ScreenId::UsbBrowser;
@@ -120,6 +128,15 @@ ScreenId ScreenManager::getRootScreenForSection(int section) const {
         case 4: return ScreenId::AboutSupport;
         default: return ScreenId::MainMenu;
     }
+#else
+    switch (section) {
+        case 0: return ScreenId::MainMenu;
+        case 1: return ScreenId::UsbBrowser;
+        case 2: return ScreenId::Settings;
+        case 3: return ScreenId::AboutSupport;
+        default: return ScreenId::MainMenu;
+    }
+#endif
 }
 
 bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
