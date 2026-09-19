@@ -211,6 +211,8 @@ tools/native-app/runtime/libc.prx
 
 # Packaged app-module output (scripts/package-app.sh).
 output/app/
+# build-dav1d.sh / build-ffmpeg.sh unpack third-party source here (24MB+)
+output/third_party/
 
 # Shader blobs ripped from game dumps (tools/shader-rip.py). Derived + 3rd-party
 # code - keep them local. Vet + copy a chosen blob into pp/blobs/ deliberately.

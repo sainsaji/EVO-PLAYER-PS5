@@ -211,7 +211,16 @@ minimal)
         --enable-decoder=vp8
         --enable-decoder=mpeg2video
         --enable-decoder=mpeg4
-        --enable-decoder=av1            # native decoder; slow, but present
+        # AV1 = libdav1d ONLY. FFmpeg's own `av1` decoder (av1dec.c) is a
+        # hwaccel-only wrapper with no software path: on a machine with no
+        # AV1 hardware - every PS5 - it logs "Your platform doesn't
+        # suppport hardware accelerated AV1 decoding" at the first frame and
+        # then dereferences null inside libavcodec, taking the app with it.
+        # It was enabled here for months behind the comment "native decoder;
+        # slow, but present", which it is not. Deliberately NOT re-enabled:
+        # leaving it out means AV1 can only ever resolve to libdav1d.
+        --enable-libdav1d
+        --enable-decoder=libdav1d
 
         # -- subtitles ------------------------------------------------------
         --enable-decoder=subrip
@@ -420,7 +429,9 @@ else
     # A quick, readable confirmation that the codecs the brief cares about are
     # actually in this build.
     echo "  key codecs:"
-    for c in aac ac3 eac3 dca mp3 flac opus vorbis alac h264 hevc vp9 mpeg2video av1; do
+    # libdav1d, not av1: a decoder named `av1` exists even when it is the
+    # useless hwaccel-only stub, so checking that name proved nothing.
+    for c in aac ac3 eac3 dca mp3 flac opus vorbis alac h264 hevc vp9 mpeg2video libdav1d; do
         if grep -qx "${c}" "${INVENTORY}"; then
             printf '    [x] %s\n' "${c}"
         else

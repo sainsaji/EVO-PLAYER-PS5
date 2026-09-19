@@ -61,6 +61,7 @@ LIBS := \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libswresample.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libavutil.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libswscale.a \
+    $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libdav1d.a \
     -lssl \
     -lcrypto \
     -lSceNotification \
