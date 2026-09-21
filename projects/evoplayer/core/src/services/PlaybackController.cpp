@@ -520,6 +520,16 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
         if (aDec) {
             audio_ctx = avcodec_alloc_context3(aDec);
             if (audio_ctx && avcodec_parameters_to_context(audio_ctx, aStream->codecpar) >= 0) {
+                /*
+                 * Without pkt_timebase, libavcodec cannot rebase timestamps
+                 * when it discards a codec's priming samples, and logs
+                 * "Could not update timestamps for skipped samples". Opus
+                 * always has pre-skip, so that path runs on its very first
+                 * frame and essentially never for AAC/AC-3/E-AC-3 - which is
+                 * exactly the pattern the codec sweep measured. The video and
+                 * subtitle decoders have always set this; audio never did.
+                 */
+                audio_ctx->pkt_timebase = aStream->time_base;
                 if (avcodec_open2(audio_ctx, aDec, nullptr) >= 0) {
                     sceAudioOutInit();
 
@@ -696,6 +706,9 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
     audio_decode_thread_running = (audio_ctx != nullptr) ? 1 : 0;
     audio_thread_running = (audio_handle >= 1) ? 1 : 0;
 
+    evo_boot_log("  pb: threads demux=1 video=%d adec=%d aout=%d",
+                 video_thread_running, audio_decode_thread_running,
+                 audio_thread_running);
     pthread_create(&demux_thread, nullptr, demux_thread_func, nullptr);
 
     if (video_thread_running) {

@@ -45,6 +45,34 @@ Video decodes on the console's own `sceVideodec2` decoder — **H.264, HEVC and 
 
 ![Playback OSD over 4K hardware-decoded video](docs/images/player.png)
 
+#### Verified formats
+
+Every codec below was played on a real console and checked frame by frame.
+"Hardware" means the console's `sceVideodec2` decoder; "software" means the
+FFmpeg fallback, which runs comfortably at 1080p.
+
+| Codec | Up to | Decoder |
+|---|---|---|
+| H.264 / AVC | 4K 60fps | hardware |
+| H.264 High 10 | 1080p | software |
+| HEVC / H.265 8-bit | 4K 60fps | hardware |
+| HEVC 10-bit (HDR10 / PQ and HLG) | 1080p 60fps | hardware |
+| VP9 | 4K | hardware |
+| VP9 Profile 2 (10-bit) | 1080p | software |
+| AV1 | 1080p | software (dav1d) |
+| VP8 | 1080p | software |
+| MPEG-2 | 1080p | software |
+
+Audio: AAC, AC-3, E-AC-3, Dolby TrueHD, DTS, Opus, Vorbis, FLAC and LPCM.
+Surround sources open a full 7.1 output port rather than being folded
+down; stereo sources play as stereo.
+
+**4K is hardware-only.** Codecs the console cannot decode in hardware — AV1, and
+HEVC 10-bit above 1080p — are limited to 1080p, and a 4K file in one of those
+formats reports that it is unsupported rather than trying and failing. The PS5
+gives a homebrew title roughly 180 MB of working memory, and a single 4K frame
+plus a decoder's reference queue does not fit.
+
 ### GPU-rendered interface
 
 The whole UI is submitted to the GPU as real draw calls through bare-metal `sceAgc`, at the panel's own resolution rather than a fixed 1080p surface. Menus hold 60 fps and only redraw when something actually changes, so an idle screen costs nothing.

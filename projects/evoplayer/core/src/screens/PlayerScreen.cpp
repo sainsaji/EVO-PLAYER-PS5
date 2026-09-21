@@ -220,7 +220,19 @@ void PlayerScreen::update(double deltaMs) {
     playback->tickScrubAutoCommit();
 
     uint64_t now = NowMs();
-    bool wantsControls = playback->isMusicMode() ||
+    /*
+     * Hold the OSD up once the clip has finished.
+     *
+     * Nothing in the list below is true at EOF - the clock simply stops, it is
+     * not "paused", and the 3.5s input timer has long expired - so the OSD
+     * faded out and the screen was left showing a held last frame with no
+     * indication of what had happened or what the controls were. evo_pb_is_eof()
+     * stays set for as long as the finished file is open, so the OSD stays up
+     * until something actually changes (a seek back clears it).
+     */
+    const bool ended = (evo_pb_is_eof() != 0);
+
+    bool wantsControls = playback->isMusicMode() || ended ||
                          ((now - m_controlsLastUsedMs < 3500) || playback->isPaused() || m_showStatsForNerds) ||
                          playback->isScrubbing();
 
