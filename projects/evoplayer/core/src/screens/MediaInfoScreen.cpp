@@ -13,6 +13,7 @@ extern "C" {
 #include "evo_playback.h"
 #include "evo_agc_runtime.h"
 extern AVFormatContext *play_fmt;
+extern int video_stream_index;
 extern evo_vdec *g_vdec;
 extern int evo_audio_channels;
 extern int prospero_subtitle_enabled;
@@ -128,7 +129,26 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
 
     // Video stream details from live decoder if active
     if (g_vdec) {
+        /*
+         * Take the transfer characteristics from the stream, not the FFmpeg
+         * decoder context.
+         *
+         * On the hardware path FFmpeg never decodes anything, so its context
+         * keeps color_trc unset and every file - including HDR10 - reported
+         * "BT.709 (SDR)" here, while the player's own HDR badge (which reads
+         * the stream) correctly said HDR10 a keypress earlier. The stream is
+         * the source the badge already trusts; fall back to the context only
+         * when there is no stream to ask.
+         */
         int vc_trc = evo_vdec_ffmpeg_color_trc(g_vdec);
+        if (play_fmt && video_stream_index >= 0 &&
+            video_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+            if (AVCodecParameters* vcp =
+                    play_fmt->streams[video_stream_index]->codecpar) {
+                if (vcp->color_trc != AVCOL_TRC_UNSPECIFIED)
+                    vc_trc = (int)vcp->color_trc;
+            }
+        }
         int vc_pf = evo_vdec_ffmpeg_pix_fmt(g_vdec);
         bool is_10bit = (vc_pf == AV_PIX_FMT_YUV420P10LE ||
                          vc_pf == AV_PIX_FMT_YUV420P10BE ||
@@ -202,7 +222,18 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     params.sample_rate = rateStr;
     params.subtitles = prospero_subtitle_enabled ? "Active" : (meta.hasSubtitles ? "Available (Off)" : "None");
     params.output = outputStr;
-    params.renderer = "Bare-Metal AGC (RDNA2 Direct)";
+    /*
+     * Ask the runtime, do not assert it.
+     *
+     * This line is the one the panel exists to make - it is the claim that the
+     * interface really is on the GPU - and it was a string literal, true only
+     * because the AGC path happens to be the only one that ships. It would
+     * have gone on saying "Bare-Metal AGC" after an AGC fault dropped the app
+     * back to the CPU present path, which is exactly when someone would be
+     * reading it.
+     */
+    params.renderer = evo_agc_runtime_is_active() ? "Bare-Metal AGC (RDNA2 Direct)"
+                                                  : "Software (CPU raster)";
     params.decoder = decoderBadge;
 
     evo_rmlui_update_mediainfo(&params);

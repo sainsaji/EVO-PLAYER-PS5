@@ -155,6 +155,11 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     state.sidebar_focused = (p->sidebar_focused != 0);
     state.sidebar_index = p->sidebar_index;
     state.active_source = p->active_source;
+    state.filter_focused = (p->filter_focused != 0);
+    state.filter_selected = p->filter_selected;
+    state.filter_labels.clear();
+    for (int i = 0; i < p->filter_count && i < 4; i++)
+        state.filter_labels.push_back(p->filter_labels[i] ? p->filter_labels[i] : "");
     state.total_count = p->total_count;
     state.cursor_index = p->cursor_index;
 

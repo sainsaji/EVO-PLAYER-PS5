@@ -298,10 +298,18 @@ typedef struct {
     int         at_root;       /* hides the "back" hint */
     int         rail_focused;
 
-    /* Ubuntu-style Places / Sources Sidebar */
+    /* Places / Sources sidebar */
     int         sidebar_focused;
-    int         sidebar_index;   /* 0..6 */
-    int         active_source;   /* 0..6 */
+    int         sidebar_index;   /* 0..3 */
+    int         active_source;   /* 0..3 */
+
+    /* Folder filter chips. Only the chips this folder earned are sent:
+     * "All" plus one per category actually present, so an empty list means
+     * there is nothing worth choosing between and the row is hidden. */
+    int         filter_focused;
+    int         filter_count;    /* 0, or 2..4 */
+    int         filter_selected; /* index into filter_labels */
+    const char* filter_labels[4];
 
     int         total_count;   /* items in the folder */
     int         cursor_index;  /* absolute index under the cursor, or -1 */

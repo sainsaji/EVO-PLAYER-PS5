@@ -94,6 +94,23 @@ static std::string to_hex_rgb(uint32_t col) {
     return std::string(buf);
 }
 
+/*
+ * A label colour that stays readable on `bg`.
+ *
+ * Every theme accent is a light colour - Midnight #FFCD00, Carbon #F2F2F5,
+ * Ember #FFA528, Aurora #3DF5C0 - so a pill that fills itself with the accent
+ * and leaves its label white is low-contrast in all four themes, and in Carbon
+ * it is white on near-white: the About version and the PAUSED badge were both
+ * effectively invisible. Derive the ink from the fill instead of assuming it.
+ */
+static std::string ink_on(uint32_t bg) {
+    const double r = (bg & 0xFF) / 255.0;
+    const double g = ((bg >> 8) & 0xFF) / 255.0;
+    const double b = ((bg >> 16) & 0xFF) / 255.0;
+    const double lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;   // Rec. 709
+    return lum > 0.45 ? "#0b1017" : "#ffffff";
+}
+
 static std::string to_hex_rgba(uint32_t col) {
     uint8_t r = col & 0xFF;
     uint8_t g = (col >> 8) & 0xFF;
@@ -1241,8 +1258,42 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         e->SetInnerRML(ss.str());
     }
 
-    /* 2. Left Sidebar (Places & Filters) */
-    for (int i = 0; i < 7; i++) {
+    /* 2a. Folder filter chips.
+     *
+     * Only the chips this folder earned are shown, so the row is empty - and
+     * hidden with it - whenever there is nothing to choose between. The fill
+     * marks the active filter and the ring marks the cursor; they are separate
+     * because the cursor can sit on a chip without it being applied yet. */
+    {
+        const bool any = !state.filter_labels.empty();
+        if (Rml::Element* row = el("browser-filter-row"))
+            row->SetProperty("display", any ? "flex" : "none");
+        if (Rml::Element* hint = el("browser-filter-hint"))
+            hint->SetProperty("display", state.filter_focused ? "none" : "block");
+        for (int i = 0; i < 4; i++) {
+            Rml::Element* chip = el("browser-chip-" + std::to_string(i));
+            if (!chip) continue;
+            const bool shown = i < static_cast<int>(state.filter_labels.size());
+            chip->SetProperty("display", shown ? "inline-block" : "none");
+            if (!shown) continue;
+            chip->SetInnerRML(state.filter_labels[i]);
+            const bool on = (i == state.filter_selected);
+            chip->SetClass("browser-chip-on", on);
+            chip->SetClass("browser-chip-focused", state.filter_focused && on);
+            if (on) {
+                chip->SetProperty("background-color", to_hex_rgb(m_theme.accent));
+                chip->SetProperty("color", ink_on(m_theme.accent));
+            } else {
+                chip->SetProperty("background-color", "#101a2a");
+                chip->SetProperty("color", "#b2c3dc");
+            }
+            /* The ring comes from .browser-chip-focused; setting it here as
+             * well just made the two disagree. */
+        }
+    }
+
+    /* 2b. Left Sidebar (Sources) */
+    for (int i = 0; i < 4; i++) {
         const std::string n = std::to_string(i);
         Rml::Element* item = el("sb-item-" + n);
         Rml::Element* icon = el("sb-icon-" + n);
@@ -2031,7 +2082,7 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             bool hw = state.decoder_badge.find("Hardware") != std::string::npos;
             el_dec->SetProperty("background-color", hw ? to_hex_rgb(m_theme.accent)
                                                        : to_hex_rgba(m_theme.surface));
-            el_dec->SetProperty("color", hw ? to_hex_rgb(m_theme.bg_bottom) : "#e2e8f0");
+            el_dec->SetProperty("color", hw ? ink_on(m_theme.accent) : "#e2e8f0");
         }
     }
     /* #81: dev FPS pill — independent of the OSD chrome (shows with controls faded). */
@@ -2096,6 +2147,10 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     if (el_pause) {
         el_pause->SetProperty("background-color", to_hex_rgb(m_theme.accent));
         el_pause->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+        /* The label carries its own colour in the stylesheet, so inheriting
+         * from the badge is not enough - set it on the span itself. */
+        if (Rml::Element* el_pause_lbl = m_playback_doc->GetElementById("pause-label"))
+            el_pause_lbl->SetProperty("color", ink_on(m_theme.accent));
         if (state.paused && !state.scrub_active) {
             el_pause->SetProperty("display", "flex");
         } else {
@@ -2264,7 +2319,7 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
                 if (state.actions[i].is_primary) {
                     el_btn->SetProperty("background-color", to_hex_rgb(m_theme.accent));
                     el_btn->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
-                    el_btn->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
+                    el_btn->SetProperty("color", ink_on(m_theme.accent));
                 } else {
                     el_btn->SetProperty("background-color", to_hex_rgba(m_theme.surface));
                     el_btn->SetProperty("border-color", to_hex_rgba(m_theme.border));
@@ -2524,6 +2579,7 @@ void EvoRmlApp::UpdateAboutState(const EvoAboutState& state) {
         el->SetInnerRML(v);
         el->SetProperty("background-color", to_hex_rgb(m_theme.accent));
         el->SetProperty("border-color", to_hex_rgb(m_theme.accent));
+        el->SetProperty("color", ink_on(m_theme.accent));
     }
 
     if (Rml::Element* el = m_about_doc->GetElementById("about-build-tag"))
@@ -2643,7 +2699,7 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
                         if (state.tracks[i].is_focused) {
                             el_detail->SetProperty("background-color", to_hex_rgb(m_theme.accent));
                             el_detail->SetProperty("border-color", "#ffffff");
-                            el_detail->SetProperty("color", to_hex_rgb(m_theme.bg_bottom));
+                            el_detail->SetProperty("color", ink_on(m_theme.accent));
                         } else {
                             el_detail->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
                             el_detail->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));

@@ -3,6 +3,7 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
+#include "evo_boot_log.h"
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -40,29 +41,67 @@ void ImageViewerScreen::openImage(const std::string& path) {
     size_t slash = path.find_last_of('/');
     m_imageTitle = (slash != std::string::npos) ? path.substr(slash + 1) : path;
 
+    /*
+     * Load at the file's own channel count, and thin large images down while
+     * converting.
+     *
+     * Asking stb_image for 4 channels makes it decode into a 3-channel buffer
+     * and then convert into a second, larger one; adding our own uint32 buffer
+     * on top meant a 4K screenshot needed roughly 90 MB at once. The title has
+     * about 125 MB free, so EVO's own 3840x2160 captures - the ones L3 writes -
+     * failed to open in EVO's own viewer, reporting "unsupported or invalid
+     * file" when the file was perfectly valid.
+     *
+     * Native channels avoids the conversion buffer, and since the viewer only
+     * ever presents at panel resolution, anything past 1080p is sampled down
+     * rather than held at full size.
+     */
     int w = 0, h = 0, ch = 0;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, 4);
-    if (data && w > 0 && h > 0) {
-        m_width = w;
-        m_height = h;
-        size_t pixelCount = static_cast<size_t>(w) * static_cast<size_t>(h);
-        m_pixels = static_cast<uint32_t*>(std::malloc(pixelCount * sizeof(uint32_t)));
-        if (m_pixels) {
-            for (size_t i = 0; i < pixelCount; ++i) {
-                uint8_t r = data[i * 4 + 0];
-                uint8_t g = data[i * 4 + 1];
-                uint8_t b = data[i * 4 + 2];
-                uint8_t a = data[i * 4 + 3];
-                // RGBA in memory: byte 0=R, 1=G, 2=B, 3=A
-                m_pixels[i] = (static_cast<uint32_t>(a) << 24) |
-                              (static_cast<uint32_t>(b) << 16) |
-                              (static_cast<uint32_t>(g) << 8)  |
-                              static_cast<uint32_t>(r);
-            }
-            m_loaded = true;
-        }
-        stbi_image_free(data);
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, 0);
+    if (!data || w <= 0 || h <= 0 || ch < 3) {
+        const char* why = stbi_failure_reason();
+        evo_boot_log("ImageViewer: %s failed (%dx%d ch=%d): %s",
+                     m_imageTitle.c_str(), w, h, ch, why ? why : "unknown");
+        if (data) stbi_image_free(data);
+        return;
     }
+
+    int step = 1;
+    while ((w / step) > 1920 || (h / step) > 1080)
+        ++step;
+
+    const int outW = w / step;
+    const int outH = h / step;
+    const size_t pixelCount = static_cast<size_t>(outW) * static_cast<size_t>(outH);
+    m_pixels = static_cast<uint32_t*>(std::malloc(pixelCount * sizeof(uint32_t)));
+    if (!m_pixels) {
+        evo_boot_log("ImageViewer: %s decoded %dx%d but %zu KB for pixels failed",
+                     m_imageTitle.c_str(), w, h, (pixelCount * 4) / 1024);
+        stbi_image_free(data);
+        return;
+    }
+
+    m_width = outW;
+    m_height = outH;
+    for (int y = 0; y < outH; ++y) {
+        const unsigned char* row = data + static_cast<size_t>(y) * step
+                                        * static_cast<size_t>(w) * ch;
+        uint32_t* dst = m_pixels + static_cast<size_t>(y) * outW;
+        for (int x = 0; x < outW; ++x) {
+            const unsigned char* px = row + static_cast<size_t>(x) * step * ch;
+            const uint8_t a = (ch == 4) ? px[3] : 255;
+            // RGBA in memory: byte 0=R, 1=G, 2=B, 3=A
+            dst[x] = (static_cast<uint32_t>(a) << 24) |
+                     (static_cast<uint32_t>(px[2]) << 16) |
+                     (static_cast<uint32_t>(px[1]) << 8) |
+                     static_cast<uint32_t>(px[0]);
+        }
+    }
+    m_loaded = true;
+    if (step > 1)
+        evo_boot_log("ImageViewer: %s %dx%d shown at %dx%d (1/%d)",
+                     m_imageTitle.c_str(), w, h, outW, outH, step);
+    stbi_image_free(data);
 }
 
 void ImageViewerScreen::onEnter() {

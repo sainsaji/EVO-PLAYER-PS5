@@ -232,8 +232,23 @@ void PlayerScreen::update(double deltaMs) {
      */
     const bool ended = (evo_pb_is_eof() != 0);
 
+    /*
+     * Ask the playback engine whether it is paused, not the state machine.
+     *
+     * Those two disagree. A D-pad seek sets `player_paused` directly
+     * (evo_demux.c) and so does restoring a subtitle track, neither of which
+     * goes through the FSM - so isPaused() reported false while the picture
+     * was genuinely stopped, the 3.5s input timer ran out, and the OSD faded
+     * away over a paused frame with nothing on screen to say why.
+     *
+     * The PAUSED badge below deliberately keeps using isPaused(): the engine
+     * flag is also raised for the moment a seek is in flight, and a badge that
+     * blinked on every seek would be worse than one that is occasionally late.
+     */
+    const bool reallyPaused = (evo_pb_is_paused() != 0) || playback->isPaused();
+
     bool wantsControls = playback->isMusicMode() || ended ||
-                         ((now - m_controlsLastUsedMs < 3500) || playback->isPaused() || m_showStatsForNerds) ||
+                         ((now - m_controlsLastUsedMs < 3500) || reallyPaused || m_showStatsForNerds) ||
                          playback->isScrubbing();
 
     if (playback->isScrubbing()) {
@@ -428,7 +443,55 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.hdr_badge   = hdrBadge;
         p.codec_badge = codecBuf[0] ? codecBuf : "";
         p.fps_badge   = fpsBuf[0]   ? fpsBuf   : "";
-        p.audio_badge = (evo_audio_channels == 8) ? "7.1 CH" : "STEREO";
+        /*
+         * The two footer labels and the audio badge all told the same lie on
+         * every file.
+         *
+         * `audio_track` and `sub_track` were never assigned at all - the
+         * params are memset, so the bridge saw empty strings and printed its
+         * fallbacks: "AUDIO: Stereo" over a DD+5.1 ATMOS track, and
+         * "SUBS: None" on a file whose Media Info panel said subtitles were
+         * Active. The badge had its own version of the same bug, treating
+         * anything that was not 8 channels as stereo, so 5.1 read as STEREO.
+         */
+        static char audioTrackBuf[80], subTrackBuf[80];
+        audioTrackBuf[0] = subTrackBuf[0] = '\0';
+        const char* chLabel = "";
+
+        if (play_fmt && audio_stream_index >= 0 &&
+            audio_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+            AVStream* ast = play_fmt->streams[audio_stream_index];
+            if (ast && ast->codecpar) {
+                const int ch = ast->codecpar->ch_layout.nb_channels;
+                chLabel = (ch >= 8) ? "7.1" : (ch >= 6) ? "5.1"
+                        : (ch == 2) ? "Stereo" : (ch == 1) ? "Mono" : "";
+                const char* an = avcodec_get_name(ast->codecpar->codec_id);
+                if (chLabel[0] && an && an[0])
+                    std::snprintf(audioTrackBuf, sizeof(audioTrackBuf), "%s %s", an, chLabel);
+                else if (an && an[0])
+                    std::snprintf(audioTrackBuf, sizeof(audioTrackBuf), "%s", an);
+            }
+        }
+
+        if (prospero_subtitle_enabled) {
+            if (prospero_subtitle_use_external) {
+                std::snprintf(subTrackBuf, sizeof(subTrackBuf), "External SRT");
+            } else if (play_fmt && prospero_embedded_subtitle_stream_index >= 0 &&
+                       prospero_embedded_subtitle_stream_index <
+                           static_cast<int>(play_fmt->nb_streams)) {
+                AVStream* sst = play_fmt->streams[prospero_embedded_subtitle_stream_index];
+                const AVDictionaryEntry* lang =
+                    sst ? av_dict_get(sst->metadata, "language", nullptr, 0) : nullptr;
+                std::snprintf(subTrackBuf, sizeof(subTrackBuf), "%s",
+                              (lang && lang->value && lang->value[0]) ? lang->value : "On");
+            } else {
+                std::snprintf(subTrackBuf, sizeof(subTrackBuf), "On");
+            }
+        }
+
+        p.audio_track = audioTrackBuf[0] ? audioTrackBuf : "";
+        p.sub_track   = subTrackBuf[0]   ? subTrackBuf   : "";
+        p.audio_badge = chLabel[0] ? chLabel : ((evo_audio_channels == 8) ? "7.1" : "STEREO");
         p.decoder_badge = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE) ? "Hardware" : "Software";
         p.position_sec = playback->getPositionSeconds();
         p.duration_sec = playback->getDurationSeconds();

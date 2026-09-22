@@ -93,7 +93,7 @@ div, span, p {
 #mediainfo-path {
     font-size: 13dp;
     font-weight: normal;
-    color: #64748b;
+    color: #8b99ad;
     margin-top: 2dp;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -186,7 +186,7 @@ div, span, p {
 .spec-key {
     font-size: 13dp;
     font-weight: bold;
-    color: #64748b;
+    color: #8b99ad;
     letter-spacing: 0.5dp;
     flex-shrink: 0;
     margin-right: 16dp;
@@ -256,6 +256,6 @@ div, span, p {
     margin-left: auto;
     font-size: 13dp;
     font-weight: bold;
-    color: #475569;
+    color: #8b99ad;
     letter-spacing: 1dp;
 }

@@ -339,6 +339,13 @@ struct EvoBrowserState {
     int sidebar_index = 0;
     int active_source = 0;
 
+    /* Folder filter chips. `filter_labels` holds only the chips this folder
+     * earned - "All" plus one per category actually present - so the row is
+     * empty when there is nothing to choose between. */
+    std::vector<std::string> filter_labels;
+    int filter_selected = 0;
+    bool filter_focused = false;
+
     int total_count = 0;
     int cursor_index = -1;
     std::vector<EvoBrowserRow> rows;
@@ -366,6 +373,8 @@ struct EvoBrowserState {
     bool operator==(const EvoBrowserState& o) const {
         return path == o.path && title == o.title && at_root == o.at_root && rail_focused == o.rail_focused &&
                sidebar_focused == o.sidebar_focused && sidebar_index == o.sidebar_index && active_source == o.active_source &&
+               filter_labels == o.filter_labels && filter_selected == o.filter_selected &&
+               filter_focused == o.filter_focused &&
                total_count == o.total_count && cursor_index == o.cursor_index &&
                rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
                empty_hint == o.empty_hint && ins_name == o.ins_name &&

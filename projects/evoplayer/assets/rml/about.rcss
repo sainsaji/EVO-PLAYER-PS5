@@ -196,7 +196,7 @@ div, span, p {
 .section-subtitle {
     font-size: 13dp;
     font-weight: bold;
-    color: #64748b;
+    color: #8b99ad;
     letter-spacing: 0.5dp;
 }
 
@@ -372,7 +372,7 @@ div, span, p {
 .spec-label {
     font-size: 13dp;
     font-weight: bold;
-    color: #64748b;
+    color: #8b99ad;
     letter-spacing: 0.5dp;
 }
 
@@ -428,7 +428,7 @@ div, span, p {
     margin-left: auto;
     font-size: 14dp;
     font-weight: bold;
-    color: #475569;
+    color: #8b99ad;
     letter-spacing: 0.8dp;
 }
 
@@ -504,7 +504,7 @@ div, span, p {
     width: 220dp;
     font-size: 13dp;
     font-weight: bold;
-    color: #5a6b82;
+    color: #8b99ad;
     letter-spacing: 1.4dp;
 }
 

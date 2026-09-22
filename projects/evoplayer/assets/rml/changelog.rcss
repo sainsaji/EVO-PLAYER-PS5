@@ -314,6 +314,6 @@ div, span, p {
     margin-left: auto;
     font-size: 15dp;
     font-weight: bold;
-    color: #4b586c;
+    color: #8b99ad;
     letter-spacing: 1dp;
 }

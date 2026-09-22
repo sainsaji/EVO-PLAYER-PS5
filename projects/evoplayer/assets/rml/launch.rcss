@@ -91,7 +91,7 @@ div, span, p {
 #brand-version {
     font-size: 14dp;
     font-weight: bold;
-    color: #5e718c;
+    color: #9fb2cc;
     letter-spacing: 2.5dp;
     margin-top: 5dp;
 }
