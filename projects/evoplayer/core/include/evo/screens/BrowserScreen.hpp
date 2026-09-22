@@ -30,7 +30,8 @@ enum class BrowserScreenEvent : int {
 
 enum class BrowserFocusPane : int {
     Sidebar = 0,
-    Grid = 1
+    Grid = 1,
+    Filter = 2
 };
 
 struct BrowserItem {
@@ -77,6 +78,9 @@ private:
     void jumpLetter(int direction);
     void activateSelection();
     void activateSidebar(bool focusGrid = true);
+    void applyFolderFilter();
+    void applyFilterChange();
+    std::string filterScopeKey() const;
     void openSearch();
 
     StateMachine<BrowserScreenState, BrowserScreenEvent> m_browserFsm;
@@ -84,7 +88,18 @@ private:
     BrowserFocusPane m_focusPane = BrowserFocusPane::Grid;
     int m_sidebarIndex = 0;
     int m_activeSource = 0; // 0: USB Drive, 1: Internal, 2: Favorites, 3: Recent Media
-    int m_categoryFilter = -1; // -1: All, 1: Video, 2: Audio, 3: Image
+    /*
+     * Folder filter. m_folderCats holds the categories that actually have
+     * files in the folder in view, so a chip can never produce an empty grid,
+     * and it is left empty when there is nothing to choose between - one kind
+     * of file, or none - which hides the row entirely. m_filterIndex is 0 for
+     * "All" and otherwise indexes m_folderCats; m_filterScope records which
+     * folder that choice belongs to, so walking into another one resets it.
+     */
+    std::vector<int> m_folderCats;
+    int m_filterIndex = 0;
+    std::string m_filterScope;
+    int m_categoryFilter = -1; // derived from m_filterIndex; -1 = All
     std::vector<BrowserItem> m_items;
     std::string m_searchQuery;
     bool m_isSearching = false;

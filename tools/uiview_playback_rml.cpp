@@ -497,6 +497,16 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     p.total_count = 37;
     p.cursor_index = 3;
 
+    /* Folder filter chips. This folder holds video and audio, so it earns
+     * "All / Videos / Music" and no Photos chip - a category with nothing in
+     * the folder never gets one. */
+    p.filter_count = 3;
+    p.filter_labels[0] = "All";
+    p.filter_labels[1] = "Videos";
+    p.filter_labels[2] = "Music";
+    p.filter_selected = 1;
+    p.filter_focused = 0;
+
     struct Row { const char* n; const char* d; const char* icon; const char* badge; int prog; int fav; };
     static const Row rows[12] = {
         { "..",                          "PARENT FOLDER",        "projects/evoplayer/assets/icons/icon_folder.png",   "DIR",   -1, 0 },
@@ -551,6 +561,27 @@ static void render_browser_screen(std::vector<uint32_t>& fb, int width, int heig
     evo_rmlui_update_browser(&p);
     evo_rmlui_render_browser(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_browser.bmp", fb.data(), width, height);
+
+    /* The same folder with the cursor up on the chips, and with no chips at
+     * all - the second is the layout that can break, because the header has to
+     * close up cleanly when the row is absent. */
+    p.filter_focused = 1;
+    p.filter_selected = 2;
+    evo_rmlui_update_browser(&p);
+    evo_rmlui_render_browser(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_browser_filter_focus.bmp", fb.data(), width, height);
+
+    p.filter_focused = 0;
+    p.filter_selected = 0;
+    p.filter_count = 0;
+    evo_rmlui_update_browser(&p);
+    evo_rmlui_render_browser(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_browser_no_filter.bmp", fb.data(), width, height);
+
+    p.filter_count = 3;
+    p.filter_selected = 1;
+    evo_rmlui_update_browser(&p);
+    evo_rmlui_render_browser(fb.data(), width, height);
 
     /* #16/#44: a long unbroken filename must ellipsise in the row AND the
      * inspector title, not overrun the panel. */

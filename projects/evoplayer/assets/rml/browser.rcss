@@ -638,6 +638,67 @@ div, span, p {
 #browser-footer-version {
     font-size: 12dp;
     font-weight: bold;
-    color: #465a78;
+    color: #8ea4c8;
     margin-left: 10dp;
+}
+
+/* ===================== Folder filter chips (header row) =====================
+ * These used to be three rows in the sources panel labelled FILTERS, where
+ * they read as places rather than as a view of the folder in front of you -
+ * and they narrowed the whole drive rather than the folder. They now sit
+ * beside the path, because that is what they apply to.
+ *
+ * The row is only shown when the folder holds more than one kind of file, so
+ * the layout has to tolerate it being absent; everything here is inside the
+ * header's own flex row and collapses cleanly when hidden.
+ */
+#browser-filter-row {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+    margin-left: 26dp;
+}
+
+#browser-filter-caption {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #8b99ad;
+    letter-spacing: 1.6dp;
+    margin-right: 4dp;
+}
+
+.browser-chip {
+    display: none;
+    padding: 6dp 18dp;
+    border-radius: 16dp;
+    border-width: 2dp;
+    border-color: #22314f;
+    background-color: #101a2a;
+    font-size: 15dp;
+    font-weight: bold;
+    color: #b2c3dc;
+    letter-spacing: 0.4dp;
+    transition: background-color 0.15s cubic-out, border-color 0.15s cubic-out;
+}
+
+/* Marker only. The fill and the label are set inline from the theme accent
+ * (and ink_on() picks the label for contrast); giving them values here too
+ * left the chip with a stylesheet fill under an inline label colour chosen
+ * for a different fill - dark on dark, unreadable. */
+.browser-chip-on {
+}
+
+/* The focus ring is a separate class from the selected fill: the cursor can
+ * sit on a chip that is not the active one. */
+.browser-chip-focused {
+    border-color: #00cdff;
+    border-width: 3dp;
+}
+
+#browser-filter-hint {
+    font-size: 13dp;
+    font-weight: normal;
+    color: #6b7d96;
+    margin-left: 8dp;
 }

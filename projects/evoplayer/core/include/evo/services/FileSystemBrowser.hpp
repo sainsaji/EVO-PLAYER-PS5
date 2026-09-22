@@ -48,20 +48,16 @@ public:
      * so at a source root they showed the same folders as before and none of
      * the media underneath. FileCategory::Unknown turns the mode off.
      */
-    void setCategoryScan(FileCategory cat) override;
-    FileCategory getCategoryScan() const override { return m_categoryScan; }
 
 private:
     void scanDirectory(const std::string& dirPath);
     void scanRecursive(const std::string& basePath, const std::string& relPath,
-                       const std::string& query, int depth, const std::string& sourcePrefix = "",
-                       FileCategory only = FileCategory::Unknown);
+                       const std::string& query, int depth, const std::string& sourcePrefix = "");
     bool isSafePath(const std::string& path) const;
 
     std::vector<MediaSourceInfo> m_sources;
     std::string m_currentPath;
     std::string m_searchQuery;
-    FileCategory m_categoryScan = FileCategory::Unknown;
     std::vector<BrowserEntry> m_entries;
     bool m_sortFoldersFirst = true;
 };

@@ -88,18 +88,6 @@ void BrowserScreen::rebuildItems() {
             const auto* entry = browser->getEntry(i);
             if (!entry) continue;
 
-            /* With a library view active the service has already restricted
-             * the listing to one category across the whole source, so there is
-             * nothing left to narrow here. Favourites and Recent still filter
-             * locally below, because those are lists rather than trees. */
-            const bool library_view =
-                browser && browser->getCategoryScan() != FileCategory::Unknown;
-            if (!library_view && m_categoryFilter != -1 &&
-                entry->category != FileCategory::Folder &&
-                static_cast<int>(entry->category) != m_categoryFilter) {
-                continue;
-            }
-
             if (m_isSearching && !matchesQuery(entry->name, m_searchQuery)) {
                 continue;
             }
@@ -154,9 +142,6 @@ void BrowserScreen::rebuildItems() {
             if (fav.path[0] == '\0') continue;
 
             FileCategory cat = browser ? browser->classifyFile(fav.path, 0) : FileCategory::Video;
-            if (m_categoryFilter != -1 && static_cast<int>(cat) != m_categoryFilter) {
-                continue;
-            }
 
             std::string displayName = fav.title[0] ? fav.title : "";
             if (displayName.empty()) {
@@ -212,9 +197,6 @@ void BrowserScreen::rebuildItems() {
             if (rec.path[0] == '\0') continue;
 
             FileCategory cat = browser ? browser->classifyFile(rec.path, 0) : FileCategory::Video;
-            if (m_categoryFilter != -1 && static_cast<int>(cat) != m_categoryFilter) {
-                continue;
-            }
 
             std::string displayName = rec.title[0] ? rec.title : "";
             if (displayName.empty()) {
@@ -261,6 +243,84 @@ void BrowserScreen::rebuildItems() {
             m_items.push_back(std::move(item));
         }
     }
+
+    applyFolderFilter();
+}
+
+std::string BrowserScreen::filterScopeKey() const {
+    /* Real scopes are absolute paths, so a leading ':' cannot collide. */
+    if (m_activeSource == 2) return ":favorites";
+    if (m_activeSource == 3) return ":recent";
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    return browser ? browser->getCurrentPath() : std::string();
+}
+
+/*
+ * Work out which chips this folder gets, and narrow the listing to the chosen
+ * one.
+ *
+ * The chips are built from what is actually here, so choosing one can never
+ * produce an empty grid, and the row is dropped entirely when there is nothing
+ * to choose between. The choice belongs to the folder: walk into another one
+ * and it resets. That is what keeps it from becoming a mode - the old
+ * sidebar filter could not be cleared by re-picking a source, so it followed
+ * you around until you switched to a different drive.
+ *
+ * Folders are never filtered out. Hiding them would make a filtered folder a
+ * dead end you could not walk out of.
+ */
+void BrowserScreen::applyFolderFilter() {
+    const std::string scope = filterScopeKey();
+    if (scope != m_filterScope) {
+        m_filterScope = scope;
+        m_filterIndex = 0;
+        if (m_focusPane == BrowserFocusPane::Filter)
+            m_focusPane = BrowserFocusPane::Grid;
+    }
+
+    m_folderCats.clear();
+    for (const auto& it : m_items) {
+        if (it.category != FileCategory::Video &&
+            it.category != FileCategory::Audio &&
+            it.category != FileCategory::Image)
+            continue;
+        const int c = static_cast<int>(it.category);
+        if (std::find(m_folderCats.begin(), m_folderCats.end(), c) == m_folderCats.end())
+            m_folderCats.push_back(c);
+    }
+    std::sort(m_folderCats.begin(), m_folderCats.end());
+
+    if (m_folderCats.size() < 2) {
+        m_folderCats.clear();          // one kind of file, or none: no row
+        m_filterIndex = 0;
+        if (m_focusPane == BrowserFocusPane::Filter)
+            m_focusPane = BrowserFocusPane::Grid;
+    }
+    if (m_filterIndex > static_cast<int>(m_folderCats.size()))
+        m_filterIndex = 0;
+
+    m_categoryFilter = (m_filterIndex > 0) ? m_folderCats[m_filterIndex - 1] : -1;
+    if (m_categoryFilter < 0)
+        return;
+
+    std::vector<BrowserItem> kept;
+    kept.reserve(m_items.size());
+    for (auto& it : m_items) {
+        if (it.category == FileCategory::Folder ||
+            static_cast<int>(it.category) == m_categoryFilter)
+            kept.push_back(std::move(it));
+    }
+    m_items.swap(kept);
+}
+
+void BrowserScreen::applyFilterChange() {
+    evo_feedback(EVO_FB_MOVE);
+    m_selectedIndex = 0;
+    m_scrollOffset = 0;
+    m_settleMs = 0.0;
+    m_cachedMetadata = MediaMetadataInfo();
+    rebuildItems();
+    m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
 }
 
 void BrowserScreen::resetSelection() {
@@ -274,7 +334,9 @@ void BrowserScreen::resetSelection() {
 }
 
 void BrowserScreen::setSource(int sourceIndex) {
-    if (sourceIndex < 0 || sourceIndex > 6) sourceIndex = 0;
+    /* Sources only now - the category filters moved out of this panel and
+     * into the folder header, where they are chosen per folder. */
+    if (sourceIndex < 0 || sourceIndex > 3) sourceIndex = 0;
     m_sidebarIndex = sourceIndex;
     activateSidebar(true);
 }
@@ -447,8 +509,6 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 0: // USB Drive
             if (m_activeSource != 0 || (browser && browser->getCurrentPath().rfind("/mnt/usb0", 0) != 0)) {
                 m_activeSource = 0;
-                m_categoryFilter = -1;
-                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 if (browser) {
@@ -462,8 +522,6 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 1: // Internal Storage
             if (m_activeSource != 1 || (browser && browser->getCurrentPath().rfind("/data", 0) != 0)) {
                 m_activeSource = 1;
-                m_categoryFilter = -1;
-                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 if (browser) {
@@ -477,8 +535,6 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 2: // Favorites
             if (m_activeSource != 2) {
                 m_activeSource = 2;
-                m_categoryFilter = -1;
-                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
@@ -488,45 +544,10 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
         case 3: // Recent Media
             if (m_activeSource != 3) {
                 m_activeSource = 3;
-                m_categoryFilter = -1;
-                if (browser) browser->setCategoryScan(FileCategory::Unknown);
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
                 if (focusGrid) toast("SOURCES", "Recent Media");
-            }
-            break;
-        case 4: // All Videos
-            if (m_categoryFilter != static_cast<int>(FileCategory::Video)) {
-                m_categoryFilter = static_cast<int>(FileCategory::Video);
-                if (browser) {
-                    browser->setCategoryScan(FileCategory::Video);
-                    browser->refresh();
-                }
-                resetSelection();
-                if (focusGrid) toast("FILTER", "Videos Only");
-            }
-            break;
-        case 5: // All Music
-            if (m_categoryFilter != static_cast<int>(FileCategory::Audio)) {
-                m_categoryFilter = static_cast<int>(FileCategory::Audio);
-                if (browser) {
-                    browser->setCategoryScan(FileCategory::Audio);
-                    browser->refresh();
-                }
-                resetSelection();
-                if (focusGrid) toast("FILTER", "Music Only");
-            }
-            break;
-        case 6: // All Photos
-            if (m_categoryFilter != static_cast<int>(FileCategory::Image)) {
-                m_categoryFilter = static_cast<int>(FileCategory::Image);
-                if (browser) {
-                    browser->setCategoryScan(FileCategory::Image);
-                    browser->refresh();
-                }
-                resetSelection();
-                if (focusGrid) toast("FILTER", "Photos Only");
             }
             break;
         default:
@@ -598,7 +619,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             return true;
         }
         if (pressed & PadButtons::Down) {
-            if (m_sidebarIndex < 6) {
+            if (m_sidebarIndex < 3) {
                 m_sidebarIndex++;
                 activateSidebar(false);
             } else {
@@ -630,15 +651,41 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return false;
     }
 
+    // Folder filter chips, reached with Up from the top row of the grid
+    if (m_focusPane == BrowserFocusPane::Filter) {
+        const int last = static_cast<int>(m_folderCats.size());
+        if (pressed & PadButtons::Left) {
+            if (m_filterIndex > 0) { m_filterIndex--; applyFilterChange(); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & PadButtons::Right) {
+            if (m_filterIndex < last) { m_filterIndex++; applyFilterChange(); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & (PadButtons::Down | PadButtons::Cross)) {
+            evo_feedback(EVO_FB_CONFIRM);
+            m_focusPane = BrowserFocusPane::Grid;
+            return true;
+        }
+        if (pressed & PadButtons::Circle) {
+            evo_feedback(EVO_FB_CANCEL);
+            m_focusPane = BrowserFocusPane::Grid;
+            return true;
+        }
+        if (pressed & PadButtons::Up) {
+            evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        return false;
+    }
+
     // Media Grid navigation (4 columns)
     if (pressed & PadButtons::Left) {
         if (m_selectedIndex % 4 == 0) {
             m_focusPane = BrowserFocusPane::Sidebar;
-            if (m_categoryFilter != -1) {
-                m_sidebarIndex = m_categoryFilter + 3;
-            } else {
-                m_sidebarIndex = m_activeSource;
-            }
+            m_sidebarIndex = m_activeSource;
             evo_feedback(EVO_FB_MOVE);
             return true;
         }
@@ -650,6 +697,13 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return true;
     }
     if (pressed & PadButtons::Up) {
+        /* From the top row, Up reaches the folder's filter chips. Everywhere
+         * else it is an ordinary row move. */
+        if (m_selectedIndex < 4 && !m_folderCats.empty()) {
+            m_focusPane = BrowserFocusPane::Filter;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
         navigate(-4);
         return true;
     }
@@ -833,14 +887,6 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Recent Media");
     }
 
-    if (m_categoryFilter == static_cast<int>(FileCategory::Video)) {
-        std::strncat(m_formattedPath, " / Videos", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
-    } else if (m_categoryFilter == static_cast<int>(FileCategory::Audio)) {
-        std::strncat(m_formattedPath, " / Music", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
-    } else if (m_categoryFilter == static_cast<int>(FileCategory::Image)) {
-        std::strncat(m_formattedPath, " / Photos", sizeof(m_formattedPath) - std::strlen(m_formattedPath) - 1);
-    }
-
     params.path = m_formattedPath;
 
     // At root check
@@ -901,6 +947,23 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     params.sidebar_focused = (m_focusPane == BrowserFocusPane::Sidebar) ? 1 : 0;
     params.sidebar_index = m_sidebarIndex;
     params.active_source = m_activeSource;
+
+    /* Chips: "All", then one per category the folder actually holds. Sending
+     * none is how the row is hidden. */
+    params.filter_focused = (m_focusPane == BrowserFocusPane::Filter) ? 1 : 0;
+    params.filter_selected = m_filterIndex;
+    params.filter_count = 0;
+    if (!m_folderCats.empty()) {
+        params.filter_labels[params.filter_count++] = "All";
+        for (size_t i = 0; i < m_folderCats.size() && params.filter_count < 4; ++i) {
+            switch (static_cast<FileCategory>(m_folderCats[i])) {
+                case FileCategory::Video: params.filter_labels[params.filter_count++] = "Videos"; break;
+                case FileCategory::Audio: params.filter_labels[params.filter_count++] = "Music";  break;
+                case FileCategory::Image: params.filter_labels[params.filter_count++] = "Photos"; break;
+                default: break;
+            }
+        }
+    }
 
     int totalCount = static_cast<int>(m_items.size());
     params.total_count = totalCount;

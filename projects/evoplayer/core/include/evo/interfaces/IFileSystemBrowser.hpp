@@ -55,8 +55,6 @@ public:
 
     /* Library view across the whole source - see FileSystemBrowser. Unknown
      * turns it off and returns to ordinary directory listing. */
-    virtual void setCategoryScan(FileCategory cat) = 0;
-    virtual FileCategory getCategoryScan() const = 0;
 };
 
 } // namespace evo

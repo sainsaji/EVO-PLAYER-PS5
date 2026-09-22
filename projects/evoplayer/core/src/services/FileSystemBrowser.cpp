@@ -153,15 +153,6 @@ bool FileSystemBrowser::refresh() {
     } else {
         if (!m_searchQuery.empty()) {
             scanRecursive(m_currentPath, "", m_searchQuery, 0);
-        } else if (m_categoryScan != FileCategory::Unknown) {
-            /* Walk from the SOURCE root, not the folder in view: "All Videos"
-             * means the whole drive, and it should give the same answer
-             * wherever the user happened to be standing when they chose it. */
-            std::string root = m_currentPath;
-            for (const auto& src : m_sources) {
-                if (m_currentPath.rfind(src.rootPath, 0) == 0) { root = src.rootPath; break; }
-            }
-            scanRecursive(root, "", "", 0, "", m_categoryScan);
         } else {
             scanDirectory(m_currentPath);
         }
@@ -246,13 +237,8 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
     evo_closedir(dir);
 }
 
-void FileSystemBrowser::setCategoryScan(FileCategory cat) {
-    m_categoryScan = cat;
-}
-
 void FileSystemBrowser::scanRecursive(const std::string& basePath, const std::string& relPath,
-                                     const std::string& query, int depth, const std::string& sourcePrefix,
-                                     FileCategory only) {
+                                     const std::string& query, int depth, const std::string& sourcePrefix) {
     if (depth > 5 || m_entries.size() >= 255) {
         return;
     }
@@ -290,15 +276,8 @@ void FileSystemBrowser::scanRecursive(const std::string& basePath, const std::st
 
         std::string displayName = sourcePrefix.empty() ? itemRel : (sourcePrefix + "/" + itemRel);
 
-        /* A library view wants the files, not the folders it had to walk
-         * through to reach them - and only the one category asked for. */
-        const bool category_ok =
-            (only == FileCategory::Unknown) ||
-            (dType != 4 && classifyFile(entry->d_name, dType) == only);
-
-        if (category_ok &&
-            (CaseInsensitiveContains(entry->d_name, query) || CaseInsensitiveContains(itemRel, query) ||
-            (!sourcePrefix.empty() && CaseInsensitiveContains(displayName, query)))) {
+        if (CaseInsensitiveContains(entry->d_name, query) || CaseInsensitiveContains(itemRel, query) ||
+            (!sourcePrefix.empty() && CaseInsensitiveContains(displayName, query))) {
             BrowserEntry bEntry;
             bEntry.name = displayName;
             bEntry.relativePath = itemRel;

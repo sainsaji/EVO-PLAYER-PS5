@@ -26,6 +26,14 @@
                 </div>
                 <div id="browser-path">Other Locations</div>
             </div>
+            <div id="browser-filter-row">
+                <span id="browser-filter-caption">SHOW</span>
+                <span id="browser-chip-0" class="browser-chip">All</span>
+                <span id="browser-chip-1" class="browser-chip">Videos</span>
+                <span id="browser-chip-2" class="browser-chip">Music</span>
+                <span id="browser-chip-3" class="browser-chip">Photos</span>
+                <span id="browser-filter-hint">&#8593; from the grid</span>
+            </div>
             <div id="browser-header-right">
                 <div id="browser-search-pill">
                     <img src="../icons/btn_square.png" class="btn-glyph-sm"/>
@@ -55,20 +63,6 @@
                 <span id="sb-label-3" class="sb-label">Recent Media</span>
             </div>
 
-            <div class="sb-section-divider"></div>
-            <div class="sb-section-title">FILTERS</div>
-            <div id="sb-item-4" class="sb-item">
-                <img id="sb-icon-4" class="sb-icon" src="../icons/icon_resume.png"/>
-                <span id="sb-label-4" class="sb-label">All Videos</span>
-            </div>
-            <div id="sb-item-5" class="sb-item">
-                <img id="sb-icon-5" class="sb-icon" src="../icons/icon_subtitles.png"/>
-                <span id="sb-label-5" class="sb-label">All Music</span>
-            </div>
-            <div id="sb-item-6" class="sb-item">
-                <img id="sb-icon-6" class="sb-icon" src="../icons/icon_palette.png"/>
-                <span id="sb-label-6" class="sb-label">All Photos</span>
-            </div>
         </div>
 
         <!-- 3. Main File Area: Media Grid -->
