@@ -70,38 +70,91 @@ FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
 # subsequent switcher-close safe, but the process stays resident with the image
 # still mounted.
 #
-# The signal: a deploy clears /mnt/usb0, so evo.log is absent until EVO next
-# runs. Its presence means EVO has been launched since the last deploy and may
-# still hold the slot. Deliberately conservative - it cannot distinguish
-# "running now" from "ran and was closed", and guessing wrong in that direction
-# is cheap while guessing wrong in the other has cost hours.
+# Two signals, because one was not enough.
+#
+# A deploy clears /mnt/usb0, so evo.log is absent until EVO next runs: its
+# presence means EVO has been launched since, and may still hold the slot.
+# That alone cannot tell "running now" from "ran and was closed", so it blocked
+# every deploy after the first and --force became reflex - which is exactly the
+# habit you do not want when the dangerous case comes along.
+#
+# evo_status carries a monotonic `t=`, rewritten every frame by a --usb-remote
+# build. Sampling it twice says whether EVO is alive right now:
+#
+#   t advancing        RUNNING  - the panic case. Refused, and --force does not
+#                                 override it; there is no reading of "deploy
+#                                 over a live process" that ends well.
+#   t frozen / absent  IDLE     - closed, or parked by QUIT with the slot still
+#                                 held. Indistinguishable from here, so this is
+#                                 where --force still applies.
+#   evo.log absent     FREE     - nothing has run since the last deploy.
 #
 check_evo_not_resident() {
     local out
-    out="$(python3 - "${PS5_HOST}" "${FTP_PORT}" <<'PY' 2>/dev/null || true
-import sys
+    out="$(python3 - "${PS5_HOST}" "${FTP_PORT}" <<'PY' 2>/dev/null || echo BROKEN
+import sys, time
 from ftplib import FTP
-host, port = sys.argv[1], int(sys.argv[2])
+
+
+def verdict(host, port):
+    f = FTP()
+    f.connect(host, port, timeout=10)
+    f.login()
+    try:
+        lines = []
+        f.cwd("/mnt/usb0")
+        f.retrlines("LIST", lines.append)
+        if not any(" evo.log" in l or l.endswith("evo.log") for l in lines):
+            return "ABSENT"
+
+        def stamp():
+            buf = []
+            try:
+                f.retrbinary("RETR /mnt/usb0/evo_status", buf.append)
+            except Exception:
+                return None
+            for tok in b"".join(buf).decode("utf-8", "replace").split():
+                if tok.startswith("t="):
+                    return tok
+            return None
+
+        first = stamp()
+        if first is not None:
+            time.sleep(4)
+            later = stamp()
+            if later is not None and later != first:
+                return "RUNNING"
+        return "PRESENT"
+    finally:
+        try:
+            f.quit()
+        except Exception:
+            pass
+
+
 try:
-    f = FTP(); f.connect(host, port, timeout=10); f.login()
-    lines = []
-    f.cwd("/mnt/usb0"); f.retrlines("LIST", lines.append)
-    try: f.quit()
-    except Exception: pass
-    print("PRESENT" if any(" evo.log" in l or l.endswith("evo.log") for l in lines) else "ABSENT")
+    print(verdict(sys.argv[1], int(sys.argv[2])))
 except Exception:
-    print("UNKNOWN")
+    print("UNREACHABLE")
 PY
 )"
     case "${out}" in
         ABSENT)  ok "EVO has not run since the last deploy - slot is free" ;;
+        RUNNING)
+            die "EVO is RUNNING on ${PS5_HOST} right now - its status heartbeat is advancing.
+
+   Deploying now replaces the mounted image under a live process, which has
+   kernel-panicked this console. --force does not override this.
+
+   Close it from the switcher (PS button -> close the application) first." ;;
         PRESENT)
             if (( FORCE )); then
                 warn "EVO has been launched since the last deploy - --force given, continuing"
             else
-                die "EVO has been launched since the last deploy (/mnt/usb0/evo.log exists).
+                die "EVO has run since the last deploy, and is not running now.
 
-   It may still hold the app slot. Deploying over a resident EVO replaces the
+   One case this cannot see: Settings -> QUIT parks the app but does NOT free
+   the slot, and a parked EVO looks exactly like a closed one from here. Deploying over a resident EVO replaces the
    mounted image under a live process and stacks an auto-launch on top of it -
    both have kernel-panicked this console.
 
@@ -111,7 +164,16 @@ PY
 
    Override with --force if you know the slot is free."
             fi ;;
-        *) warn "could not reach ${PS5_HOST}:${FTP_PORT} to check for a resident EVO - continuing" ;;
+        *)
+            if (( FORCE )); then
+                warn "could not check ${PS5_HOST}:${FTP_PORT} for a resident EVO - --force given, continuing"
+            else
+                die "could not check ${PS5_HOST}:${FTP_PORT} for a resident EVO.
+
+   Not reaching the console is not evidence that the app slot is free, and
+   this check failing open is how a deploy once landed on top of a running
+   EVO. Fix the connection, or pass --force if you know the slot is free."
+            fi ;;
     esac
 }
 
@@ -121,7 +183,7 @@ if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
     check_evo_not_resident
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
-import sys
+import sys, time
 from ftplib import FTP, error_perm
 from posixpath import join
 
@@ -196,7 +258,7 @@ fi
 
 begin "${ACTION} ${TITLE_ID}  ->  ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/${TITLE_ID}/"
 python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${APPDIR}" "${ACTION}" <<'PY'
-import sys
+import sys, time
 from ftplib import FTP, error_perm
 from pathlib import Path
 from posixpath import join, dirname
