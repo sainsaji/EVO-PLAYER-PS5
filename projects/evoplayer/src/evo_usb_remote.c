@@ -41,6 +41,46 @@ static void trim(char *s)
         s[--n] = 0;
 }
 
+/*
+ * Synthetic pad input. Button values mirror PadButtons in core/include/evo/
+ * Common.hpp - kept as literals because this is C and that header is C++.
+ */
+static volatile unsigned int g_inject_buttons;
+
+static const struct { const char *name; unsigned int mask; } k_keys[] = {
+    { "up",       0x0010 }, { "right",    0x0020 },
+    { "down",     0x0040 }, { "left",     0x0080 },
+    { "l2",       0x0100 }, { "r2",       0x0200 },
+    { "l1",       0x0400 }, { "r1",       0x0800 },
+    { "triangle", 0x1000 }, { "circle",   0x2000 },
+    { "cross",    0x4000 }, { "square",   0x8000 },
+    { "options",  0x0008 }, { "l3",       0x0002 },
+    { "r3",       0x0004 },
+    /* aliases for whoever is typing them by hand */
+    { "x",        0x4000 }, { "o",        0x2000 },
+    { "t",        0x1000 }, { "sq",       0x8000 },
+    { "shot",     0x0002 },   /* l3 - the frame loop's screenshot handler */
+};
+
+unsigned int evo_usb_remote_take_buttons(void)
+{
+    unsigned int m = g_inject_buttons;
+    g_inject_buttons = 0;
+    return m;
+}
+
+static int inject_key(const char *name)
+{
+    size_t i;
+    for (i = 0; i < sizeof k_keys / sizeof k_keys[0]; ++i) {
+        if (strcmp(name, k_keys[i].name) == 0) {
+            g_inject_buttons |= k_keys[i].mask;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void run_command(const char *line)
 {
     char buf[600];
@@ -51,6 +91,27 @@ static void run_command(const char *line)
 
     pp_stage_bc("REMOTE_CMD", buf);
 
+    if (strncmp(buf, "image ", 6) == 0) {
+        evo_remote_open_image(buf + 6);
+        return;
+    }
+    if (strncmp(buf, "text ", 5) == 0) {
+        evo_remote_open_text(buf + 5);
+        return;
+    }
+    if (strncmp(buf, "screen ", 7) == 0) {
+        evo_remote_goto_screen(atoi(buf + 7));
+        return;
+    }
+    if (strncmp(buf, "source ", 7) == 0) {
+        evo_remote_browser_source(atoi(buf + 7));
+        return;
+    }
+    if (strncmp(buf, "key ", 4) == 0) {
+        if (!inject_key(buf + 4))
+            pp_stage_bc("REMOTE_KEY?", buf + 4);
+        return;
+    }
     if (strncmp(buf, "play ", 5) == 0) {
         evo_open_media_path(buf + 5);
         return;

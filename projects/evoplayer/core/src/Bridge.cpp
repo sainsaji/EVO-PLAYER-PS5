@@ -2,6 +2,9 @@
 #include "evo/Application.hpp"
 #include "evo/Common.hpp"
 #include "evo/screens/ScreenManager.hpp"
+#include "evo/screens/BrowserScreen.hpp"
+#include "evo/screens/TextReaderScreen.hpp"
+#include "evo/screens/ImageViewerScreen.hpp"
 #include "pp_playback.h"
 #include "evo_playback.h"
 #include "evo_demux.h"
@@ -179,6 +182,48 @@ void evo_stop_media_playback(void) {
         if (cur == evo::ScreenId::Player || cur == evo::ScreenId::PlaybackFinished)
             sm->navigateTo(evo::ScreenId::UsbBrowser);
     }
+}
+
+/*
+ * Direct navigation for the dev remote. Driving the UI with synthetic button
+ * presses works for anything with a fixed path, but the storage browser's
+ * focus model is not observable from outside the app - so "go to Internal
+ * Storage" is expressed here as what it means, not as a guess at which keys
+ * would achieve it.
+ */
+void evo_remote_goto_screen(int screen_id) {
+    if (auto sm = evo::Application::getInstance().getScreenManager())
+        sm->navigateTo(static_cast<evo::ScreenId>(screen_id));
+}
+
+void evo_remote_browser_source(int sidebar_index) {
+    auto sm = evo::Application::getInstance().getScreenManager();
+    if (!sm)
+        return;
+    sm->navigateTo(evo::ScreenId::UsbBrowser);
+    if (auto *bs = dynamic_cast<evo::BrowserScreen *>(
+            sm->getScreen(evo::ScreenId::UsbBrowser)))
+        bs->setSource(sidebar_index);
+}
+
+void evo_remote_open_image(const char *path) {
+    auto sm = evo::Application::getInstance().getScreenManager();
+    if (!sm || !path || !path[0])
+        return;
+    if (auto *v = dynamic_cast<evo::ImageViewerScreen *>(
+            sm->getScreen(evo::ScreenId::ImageViewer)))
+        v->openImage(path);
+    sm->navigateTo(evo::ScreenId::ImageViewer);
+}
+
+void evo_remote_open_text(const char *path) {
+    auto sm = evo::Application::getInstance().getScreenManager();
+    if (!sm || !path || !path[0])
+        return;
+    if (auto *r = dynamic_cast<evo::TextReaderScreen *>(
+            sm->getScreen(evo::ScreenId::TextReader)))
+        r->openFile(path);
+    sm->navigateTo(evo::ScreenId::TextReader);
 }
 
 void evo_open_media_path(const char *path) {

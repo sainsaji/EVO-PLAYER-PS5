@@ -29,8 +29,55 @@ extern "C" {
 /* Call once per frame from main()'s loop. Cheap: a stat() on the cmd file and,
  * at most once a second, a status write. */
 void evo_usb_remote_poll(void);
+
+/*
+ * One frame's worth of synthetic button presses, OR'd into the real pad mask
+ * by the frame loop. Returns the pending mask and clears it, so a `key`
+ * command produces exactly one press edge and one release - the same shape
+ * the UI sees from a real controller tap.
+ *
+ * This exists so the whole interface can be driven without a human holding a
+ * pad: screen tours for documentation and video capture, and reproducing a
+ * navigation bug in the same order every time. `key l3` reaches the existing
+ * screenshot handler, so captures come for free.
+ *
+ * Returns 0 in builds without the dev remote, so the frame loop's OR is a
+ * no-op there.
+ */
+unsigned int evo_usb_remote_take_buttons(void);
+
+/*
+ * Go straight to a screen, or straight to a browser source, instead of
+ * simulating the button presses that would get there.
+ *
+ * Synthetic input alone turned out not to be enough to drive the storage
+ * browser: whether `left` reaches the Sources panel or carries on to the
+ * navigation rail depends on state the remote cannot see, so "switch to
+ * Internal Storage" was a guess that silently landed on the wrong source.
+ * These call the same entry points the UI itself uses.
+ *
+ * screen: an evo::ScreenId value (2 Player, 21 TextReader, 28 SurroundTest,
+ * 30 ImageViewer, ...).
+ * source: the browser's sidebar index - 0 USB, 1 Internal, 2 Favorites,
+ * 3 Recent. The category filters are no longer sources: they are per-folder
+ * chips in the header, chosen with Up from the grid.
+ */
+void evo_remote_goto_screen(int screen_id);
+void evo_remote_browser_source(int sidebar_index);
+
+/*
+ * Open a file in the image viewer / text reader.
+ *
+ * Navigating to those screens is not enough on its own - they render
+ * "IMAGE COULD NOT BE DISPLAYED" / "NO DOCUMENT LOADED" until something
+ * hands them a path, which is what BrowserScreen does before it navigates.
+ * These mirror that: load, then show.
+ */
+void evo_remote_open_image(const char *path);
+void evo_remote_open_text(const char *path);
 #else
 #define evo_usb_remote_poll() ((void)0)
+#define evo_usb_remote_take_buttons() (0u)
 #endif
 
 /* Provided by the host (main.c): open <path> from the beginning, mirroring the

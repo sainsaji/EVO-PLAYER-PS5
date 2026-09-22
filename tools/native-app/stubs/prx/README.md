@@ -25,3 +25,25 @@ missing name — add it.
 
 Symbol names verified against `third_party/SharpProspero` (`[LibraryImport(...)]`
 attributes) and the EVO headers in `projects/evoplayer/media/include/sce/`.
+
+## /system/priv/lib is out of reach (tested 2026-09-21)
+
+Every module listed here is from `/system/common/lib`. A privileged one is
+**not** loadable by a fake-signed app module, and the failure is total:
+
+- Tried: `libSceVcodec.sprx` (`/system/priv/lib`, module 0x80000091) for
+  `sceVcodecGetHwBudgetSize` (NID `Ipf4PM5PIHE`, from
+  `third_party/new_nid.txt`). The builder derived that exact NID from the
+  plain name, so the symbol name was right.
+- Result: the app did not start. No `evo.log`, no `evo_status`, nothing on
+  screen - the loader rejected the module over the unbindable `NEEDED`
+  import, i.e. the CE-108255-1 case described above.
+
+This forecloses the whole directory, not just that one symbol. `/system/priv/lib`
+also holds `libSceAudiodecCpuOpus`, `libSceAudiodecCpuDtsHdMa`,
+`libSceAudiodecCpuTrhd` and `libSceAudiodecCpuLpcm` - hardware decoders for
+audio EVO currently handles in FFmpeg. They are unreachable by this route too.
+
+Anything needed from a privileged module has to come from somewhere else
+(a different exporting module in `common/lib`, or the daemon-side jailbreak),
+not from adding a `.syms` here.

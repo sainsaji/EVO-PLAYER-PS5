@@ -660,6 +660,15 @@ int Application::run() {
         bool hasInput = false;
 
         if (m_padHandle >= 0 && scePadReadState(m_padHandle, &padData) == 0) {
+            /*
+             * Synthetic presses from the dev remote (`key <button>`), OR'd in
+             * before anything reads the mask so they are indistinguishable
+             * from a real tap: one frame set, cleared the next, which gives
+             * the press edge here and the release on the following frame.
+             * Compiles to nothing without --usb-remote.
+             */
+            padData.buttons |= evo_usb_remote_take_buttons();
+
             pressed = padData.buttons & ~lastButtons;
             released = ~padData.buttons & lastButtons;
             held = padData.buttons;
