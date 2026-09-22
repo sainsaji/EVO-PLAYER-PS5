@@ -61,7 +61,14 @@ TRANSITIVE_LIBS=(
     -lsamplerate -lssl -lcrypto -liconv
     -lz -lbz2 -llzma -lzstd -lm
 )
+AGC_STUBS_DIR="${REPO_ROOT}/build/agc_stubs"
+mkdir -p "${AGC_STUBS_DIR}"
+prospero-clang -O2 -c "${REPO_ROOT}/tools/native-app/stubs/agc_link_stub.c" -o "${AGC_STUBS_DIR}/agc_link_stub.o"
+prospero-clang -O2 -c "${REPO_ROOT}/tools/native-app/stubs/agc_driver_link_stub.c" -o "${AGC_STUBS_DIR}/agc_driver_link_stub.o"
+prospero-ar rcs "${AGC_STUBS_DIR}/libSceAgc_stub.a" "${AGC_STUBS_DIR}/agc_link_stub.o" "${AGC_STUBS_DIR}/agc_driver_link_stub.o"
+
 SCE_LIBS=(
+    "${AGC_STUBS_DIR}/libSceAgc_stub.a"
     -lSceNotification -lSceSystemService -lSceUserService -lScePad
     -lSceAudioOut -lSceVideoOut -lSceKeyboard -lSceImeDialog
     -lc++ -lc++abi -lpthread

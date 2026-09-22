@@ -295,6 +295,18 @@ RUN chmod +x /usr/local/libexec/install-pacbrew-image.sh \
  && /usr/local/libexec/install-pacbrew-image.sh
 
 # -----------------------------------------------------------------------------
+# libdav1d software AV1 decoder.
+# -----------------------------------------------------------------------------
+COPY scripts/build-dav1d.sh /usr/local/libexec/build-dav1d.sh
+COPY scripts/common.sh /usr/local/libexec/common.sh
+RUN if [ "${INSTALL_PACBREW}" = "1" ]; then \
+      chmod +x /usr/local/libexec/build-dav1d.sh \
+   && /usr/local/libexec/build-dav1d.sh --install \
+   && rm -rf /usr/local/output; \
+    fi \
+ && rm -f /usr/local/libexec/build-dav1d.sh /usr/local/libexec/common.sh
+
+# -----------------------------------------------------------------------------
 # Non-root developer user.
 # Bind-mounted sources on Docker Desktop for Windows appear owned by the
 # container user, so a plain `dev` user avoids root-owned build output leaking

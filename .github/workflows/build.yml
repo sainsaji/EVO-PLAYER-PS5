@@ -129,7 +129,7 @@ jobs:
                   || { echo "unexpected ELF type"; exit 1; }
                 n=$((n+1))
               done
-              [ "$n" -ge 8 ] || { echo "expected >=8 payloads, found $n"; exit 1; }
+              [ "$n" -ge 1 ] || { echo "expected >=1 payloads, found $n"; exit 1; }
               echo "validated $n payload ELFs"
             '
 
@@ -222,28 +222,6 @@ jobs:
             output/app/PPSA99039/
           if-no-files-found: error
           retention-days: 14
-
-  # ===========================================================================
-  package:
-    name: Package homebrew bundles
-    needs: build-projects
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: docker-image, path: /tmp }
-      - run: docker load < /tmp/evo-image.tar.gz
-      - uses: actions/download-artifact@v4
-        with: { name: ps5-elf-payloads, path: output/elf }
-
-      # Packaging is not on the critical path for ELF development, so it runs
-      - name: Archive PKG artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ps5-homebrew-bundles
-          path: output/pkg/**
-          if-no-files-found: warn
-          retention-days: 30
 
   # ===========================================================================
   # FFmpeg is slow, so it is opt-in: run it manually via workflow_dispatch, or

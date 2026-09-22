@@ -90,20 +90,7 @@ function(evo_payload name)
         COMMENT "Deploying ${name}.elf to $ENV{PS5_HOST}")
 endfunction()
 
-# -----------------------------------------------------------------------------
-# The project suite. Library names match the SDK's SCE stubs in
-# $PS5_PAYLOAD_SDK/target/lib (built from sce_stubs/*.c).
-# -----------------------------------------------------------------------------
-evo_payload(hello_world)
-evo_payload(system_info)
-# SceSystemService is for sceSystemServiceHideSplashScreen(), without which
-# the splash stays composited over the test pattern.
-evo_payload(videoout_test  LIBS SceVideoOut SceUserService SceSystemService)
-evo_payload(audioout_test  LIBS SceAudioOut SceUserService m)
-evo_payload(gpu_test       LIBS SceGnmDriver)
-evo_payload(decoder_test   LIBS SceSysmodule)
-evo_payload(avplayer_test  LIBS SceSysmodule)
-evo_payload(yuv_gpu_test)
+evo_payload(sandbox_probe LIBS SceUserService kernel)
 
 message(STATUS "EVO Player: PS5 SDK  = $ENV{PS5_PAYLOAD_SDK}")
 message(STATUS "EVO Player: sysroot  = ${CMAKE_SYSROOT}")

@@ -161,6 +161,8 @@ desktop.ini
 /*.264
 /*.265
 /*.h264
+/*.pptx
+/EVO-Player-Video-Script.md
 /bbb_au.bin
 /test_au.bin
 /moonlight_stream.cpp
@@ -245,3 +247,5 @@ output/**/*.bmp
 output/**/*.jpg
 output/icons/
 output/shots/
+output/hdr-clip/
+

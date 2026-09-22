@@ -376,6 +376,12 @@ else
     ok "librmlui.a patched"
     ARCHIVE_GROUP+=("${RML_A}")
 
+    # Auto-install libdav1d into sysroot if missing
+    if [[ ! -f "${HB}/lib/libdav1d.a" && -x "${REPO_ROOT}/scripts/build-dav1d.sh" ]]; then
+        begin "installing libdav1d into sysroot"
+        "${REPO_ROOT}/scripts/build-dav1d.sh" --install
+    fi
+
     # Static archives EVO links (Makefile LIBS + build-evoplayer.sh transitive
     # set). Order-independent inside the group.
     for a in libSDL2 \
