@@ -29,6 +29,12 @@ def main():
         "-Iprojects/evoplayer/storage",
     ]
     
+    ver_file = os.path.join(repo_root, "projects/evoplayer/VERSION")
+    evo_version = "0.10.0"
+    if os.path.isfile(ver_file):
+        with open(ver_file) as vf:
+            evo_version = vf.read().strip()
+
     entries = []
     for file_path in c_files:
         rel_path = os.path.relpath(file_path, repo_root).replace("\\", "/")
@@ -36,7 +42,7 @@ def main():
             "clang",
             "-std=c11",
             "-DNO_OPENSSL=1",
-            "-DEVO_PLAYER_VERSION=\"0.8.0-dev\""
+            f"-DEVO_PLAYER_VERSION=\"{evo_version}\""
         ] + includes + ["-c", rel_path]
         
         entries.append({

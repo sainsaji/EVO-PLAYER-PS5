@@ -70,6 +70,7 @@ echo "==> Running Test Suite..."
 echo "==> Generating Code Coverage Summary..."
 cd "${OUT}"
 gcov -b *.o > "${COV_OUT}/gcov_summary.txt" 2>&1 || true
+cp -f *.gcov "${COV_OUT}/" 2>/dev/null || true
 cd "${REPO_ROOT}"
 
 if [ -f "${COV_OUT}/gcov_summary.txt" ]; then
