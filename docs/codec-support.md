@@ -3,139 +3,89 @@
 State of **v0.10.0** (released). Changes made after the release are not
 included here.
 
-Verified = played on a real PS5 and confirmed decoding, not inferred from the
-build configuration.
+**Verified** = played on a real PS5 and confirmed decoding, not inferred from
+the build configuration.
 
 ---
 
-## Video — hardware (sceVideodec2)
+## Video
 
-| Codec | Profile | Max | Verified |
+| Codec | Decoder | Max | Verified |
 |---|---|---|---|
-| H.264 / AVC | High (100) | 4K, level 5.1–5.2 | yes |
-| HEVC | Main (1) | 4K, level 5.1 | yes |
-| VP9 | Profile 0 | 4K, level 5.1 | yes |
-| HEVC | Main10 (2) | 1080p only | yes |
-| VP9 | Profile 2 (10-bit) | 1080p only | no |
+| H.264 / AVC High | hardware | 4K30 real time; 4K60 ~14 fps | yes |
+| HEVC Main (8-bit) | hardware | 4K, real time | yes |
+| HEVC Main10 (10-bit) | hardware | 1080p | yes |
+| VP9 Profile 0 | hardware | 4K | yes |
+| VP9 Profile 2 (10-bit) | hardware | 1080p | no |
+| AV1 | software (libdav1d) | 1080p, real time | yes |
+| MPEG-2 | software | 1080p | yes |
+| MPEG-4 Part 2 | software | 1080p | no |
+| VP8 | software | 1080p | no |
+| HEVC 10-bit above 1080p | none | — | — |
+| AV1 above 1080p | none | — | — |
+| VC-1 | none | — | — |
+| WMV | none | — | — |
+| Theora | none | — | — |
+| ProRes / DNxHD | none | — | — |
 
-Five resident decoders, one per row, created once at start-up.
-
-## Video — software (FFmpeg)
-
-| Codec | Max | Verified |
-|---|---|---|
-| AV1 (libdav1d) | 1080p | yes |
-| MPEG-2 | 1080p | yes |
-| MPEG-4 Part 2 | 1080p | no |
-| VP8 | 1080p | no |
-| H.264 / HEVC / VP9 | 1080p | yes |
-
-Software decode above 1080p is refused; it does not fit the title's memory
-budget.
-
-## Video — not supported
-
-| Codec |
-|---|
-| AV1 above 1080p |
-| HEVC 10-bit above 1080p |
-| VC-1 |
-| WMV |
-| Theora |
-| ProRes / DNxHD |
+Five resident hardware decoders, one per hardware row, created once at
+start-up. Software decode above 1080p is refused — a 4K frame plus its
+reference queue needs ~135 MB against the ~125 MB the title has.
 
 ---
 
 ## Audio
 
-| Codec | Channels tested | Verified |
-|---|---|---|
-| AAC / AAC-LATM | 2, 5.1, 7.1 | yes |
-| AC-3 | 5.1 | yes |
-| E-AC-3 | 5.1, 7.1, Atmos bed | yes |
-| DTS (core) | 5.1 | yes |
-| DTS-HD High Resolution | 7.1 | yes |
-| DTS-HD Master Audio | 5.1 | yes |
-| DTS-X | 7.1.4 bed | yes |
-| FLAC | 5.0, 7.1 | yes |
-| ALAC | — | no |
-| Opus | 2 | yes |
-| Vorbis | 2 | yes |
-| MP3 / MP2 | 2 | yes |
-| PCM (s16le/s16be/s24le/f32le) | — | no |
+| Codec | Decoder | Channels tested | Verified |
+|---|---|---|---|
+| AAC / AAC-LATM | software | 2, 5.1, 7.1 | yes |
+| AC-3 | software | 5.1 | yes |
+| E-AC-3 | software | 5.1, 7.1, Atmos bed | yes |
+| DTS (core) | software | 5.1 | yes |
+| DTS-HD High Resolution | software | 7.1 | yes |
+| DTS-HD Master Audio | software | 5.1 | yes |
+| DTS-X | software | 7.1.4 bed | yes |
+| FLAC | software | 5.0, 7.1 | yes |
+| ALAC | software | — | no |
+| Opus | software | 2 | yes |
+| Vorbis | software | 2 | yes |
+| MP3 / MP2 | software | 2 | yes |
+| PCM s16le/s16be/s24le/f32le | software | — | no |
+| Dolby TrueHD | none | — | file does not play |
+| Dolby Atmos in TrueHD | none | — | file does not play |
+| WMA | none | — | — |
+| WavPack | none | — | — |
+| Monkey's Audio (APE) | none | — | — |
+| TTA | none | — | — |
 
-## Audio — not supported
-
-| Codec | Note |
-|---|---|
-| Dolby TrueHD | no decoder in the build; file does not play |
-| Dolby Atmos in TrueHD | same |
-| WMA | no decoder |
-| WavPack | no decoder |
-| Monkey's Audio (APE) | no decoder |
-| TTA | no decoder |
-
-## Audio output
-
-| Property | Value |
-|---|---|
-| Port | 8 channel (7.1) when source > 2ch, else stereo |
-| Format | S16, 48 kHz |
-| Bitstream passthrough | none — all sources are decoded to PCM |
-| Object audio | bed only; Atmos/DTS-X objects are not rendered |
+Output is an 8-channel (7.1) port whenever the source has more than two
+channels, otherwise stereo; S16 at 48 kHz. Everything is decoded to PCM —
+there is no bitstream passthrough to a receiver, and object audio is not
+rendered, so Atmos and DTS-X play their bed only.
 
 ---
 
 ## Subtitles
 
-| Format | Verified |
-|---|---|
-| SRT / SubRip | yes |
-| ASS / SSA | yes |
-| MOV text (mp4) | no |
-| PGS (Blu-ray bitmap) | no |
-| DVB subtitles | no |
-| DVD subtitles | no |
+| Format | Decoder | Verified |
+|---|---|---|
+| SRT / SubRip | software | yes |
+| ASS / SSA | software | yes |
+| MOV text (mp4) | software | no |
+| PGS (Blu-ray bitmap) | software | no |
+| DVB subtitles | software | no |
+| DVD subtitles | software | no |
 
 Non-ASCII characters render as `?` (issue #35).
 
 ---
 
-## Containers
+Containers: MP4/MOV, Matroska, AVI, MPEG-TS, MPEG-PS, Ogg, WAV, FLAC, and raw
+MP3/AAC/AC-3/E-AC-3/DTS streams. MP4, MKV, WAV and FLAC are verified; the rest
+are enabled but untested.
 
-| Container | Verified |
-|---|---|
-| MP4 / MOV | yes |
-| Matroska (MKV) | yes |
-| AVI | no |
-| MPEG-TS | no |
-| MPEG-PS | no |
-| Ogg | no |
-| WAV | yes |
-| FLAC | yes |
-| MP3 / AAC / AC-3 / E-AC-3 / DTS (raw) | partial |
-| Image (image2) | yes |
-
----
-
-## Practical limits
-
-| Case | Result |
-|---|---|
-| 4K30 H.264 | real time |
-| 4K60 H.264 | ~14 fps, breaks up |
-| 4K HEVC 8-bit | real time |
-| 4K HEVC 10-bit | not played — hardware declines, software refuses above 1080p |
-| 4K AV1 | not played — needs ~135 MB against ~125 MB available |
-| 1080p AV1 | real time |
-
----
-
-## Sources
-
-| Claim | Where it comes from |
-|---|---|
-| Hardware decoder table | `g_codec[]`, `media/src/evo_vdec_native.c` |
-| FFmpeg decoder lists | `--enable-decoder=` in `scripts/build-ffmpeg.sh` |
-| 1080p software cap | `PlaybackController.cpp`, measured allocator telemetry |
-| Audio verification | hardware sweep, 2026-09-23, `test_files_aud_vid` |
+Sources: hardware decoder rows from `g_codec[]` in
+`media/src/evo_vdec_native.c`; software rows from `--enable-decoder=` in
+`scripts/build-ffmpeg.sh`; the 1080p cap from allocator telemetry in
+`PlaybackController.cpp`; audio verification from a hardware sweep on
+2026-09-23 against `test_files_aud_vid`.

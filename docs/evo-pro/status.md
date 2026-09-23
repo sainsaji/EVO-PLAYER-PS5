@@ -947,4 +947,4 @@ Toward Step 2/3:
 - [phase-1b-app-module.md](phase-1b-app-module.md) — app-module bring-up, §8 =
   task 8 risk table + procedure
 - [videodec2-abi.md](videodec2-abi.md) — native decode ABI (Phase 3, later)
-- [../tooling.md](../build/tooling.md#packaging-two-routes) — the two packaging routes
+- [../tooling.md](../build/tooling.md#ffpfsc--the-only-route) — the deploy path

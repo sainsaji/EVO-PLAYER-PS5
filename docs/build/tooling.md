@@ -44,7 +44,6 @@ python tools/evo-panel.py    # package (all flags) / deploy / evo-remote /
                              # log pull / uiview / klog / shot — streamed output
 ```
 
-**There is no ELF-payload deploy loop any more.** `install-homebrew.sh`,
 `tools/launch.sh` and `scripts/deploy.sh` were deleted 2026-09-03 — reaching
 for them (even for a UI check) kept costing console sessions.
 `scripts/build-evoplayer.sh` still exists but is a **host compile check only**;
@@ -173,9 +172,8 @@ between the folder and the `.ffpfsc` — the image is just a different container
 runs `package-app.sh --ffpfsc` on every PR (job `package-app`) and verifies
 the signed container + `assets/` bundle aren't empty — a broken PFS pack or
 link tail is caught before a tag. `.github/workflows/release.yml` publishes
-`EVOPlayer-<tag>-PPSA99039.ffpfsc` as the release artifact (replacing the old
-Media-tile ELF / homebrew-zip release, which reached none of the app module's
-hardware features). Neither runner has a console, so nothing there is
+`EVOPlayer-<tag>-PPSA99039.ffpfsc` as the release artifact. Neither runner
+has a console, so nothing there is
 hardware-tested — CI's job is proving the image builds and packs cleanly.
 `eboot.bin` inside `output/app/.build/eboot.elf` is the pre-sign ELF; the
 signed `eboot.bin` itself is FSELF-wrapped and reads as opaque `data` to
@@ -194,25 +192,8 @@ are **off by default since #51** (just TV noise) — `package-app.sh
 --breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) brings them back. USB media browse
 still needs the self-unjail (`evo_jailbreak_self`, or `tools/sandbox-unjail.sh`).
 
-### The removed ELF-payload route
-
-Historically EVO also ran as an elfldr/`/hbldr` ELF payload
-(`build-evoplayer.sh` → `install-homebrew.sh` → `tools/launch.sh`). That
-context has **no graphics path** (`libSceGnmDriver` init crashes,
-`sceKernelLoadStartModule("libSceAgc.sprx")` hangs) and hit the errno-5200
-decode wall — it could never do the headline features. Deploying it as a
-stand-in for the app module kept costing console sessions, so the push scripts
-were **deleted 2026-09-03**. `scripts/build-evoplayer.sh` remains as a host
-compile check (keeps the non-app-module `#else` paths green for #31/#36/the
-modularisation plan) and cannot deploy.
-
-For anything that used to be a "quick UI check on the real framebuffer", use
-the host renderer (`tools/uiview.sh` / `uiplay.sh`) — same RmlUi code and
-assets, no console. Kernel-R/W / dynlib recon probes, if ever needed again,
-are in git history.
-
-Historical detail on why the payload context was a dead end:
-`docs/hardware-decode.md`, `docs/evo-pro/phase-1b-app-module.md`.
+For a quick UI check on the real framebuffer, use the host renderer
+(`tools/uiview.sh` / `uiplay.sh`) — same RmlUi code and assets, no console.
 
 ---
 
@@ -678,7 +659,6 @@ docker compose run --rm ps5-dev bash -lc '
 | Variable | Meaning |
 |---|---|
 | `PS5_HOST` | Console IP. Never committed — put it in `.env` at the repo root. |
-| `PS5_PORT` | ELF loader port, default 9021. |
 | `PS5_WEB_PORT` | `ps5-payload-websrv` port, default 8080. Used for file transfer. |
 | `KLOG_PORT` | klogsrv port, default 3232. |
 | `EXTRA_CFLAGS` | Development build switches, see above. |

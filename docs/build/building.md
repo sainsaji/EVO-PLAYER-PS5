@@ -14,7 +14,7 @@ who wants to build it needs all of it, so it lives here intact.
 ```
 Windows  ->  VS Code  ->  Docker container  ->  Linux toolchain (clang-18)
                                              ->  PS5 Payload SDK v0.42
-                                             ->  ELF  ->  PS5 12.70
+                                             ->  app module  ->  PS5 12.70
 ```
 
 ---
@@ -188,23 +188,14 @@ reproducibility.
 ./scripts/build.sh --cmake         # also regenerate compile_commands.json
 ```
 
-Payloads land in `output/elf/`. Each is validated as a real PS5 ELF — if a
-project is accidentally built with the host compiler, the build fails rather
-than producing a Linux binary that could never run.
-
-Per-project, matching the SDK sample conventions:
-
-```bash
-make -C projects/hello_world
-make -C projects/hello_world install-elf
-PS5_HOST=192.168.1.50 make -C projects/hello_world test
-```
+Build output lands in `output/`. Each binary is validated as a real PS5 target
+— if a project is accidentally built with the host compiler, the build fails
+rather than producing a Linux binary that could never run.
 
 ### The project suite
 
 | Project | Milestone | What it proves |
 |---|---|---|
-| `hello_world` | 1 | Docker → clang → SDK → ELF → console |
 | `system_info` | 2 | libkernel; **prints the firmware version** |
 | `videoout_test` | 3 | VideoOut init, framebuffer, registration, flip; solid colour and RGB pattern |
 | `audioout_test` | 4 | AudioOut 48 kHz stereo S16; 440 Hz sine |
@@ -228,23 +219,6 @@ otherwise launch it from the Games row. Close it again with
 **Settings → System & Diagnostics → QUIT EVO** rather than the PS button, and
 close it **before** the next deploy. See
 [tooling.md](tooling.md) for the launch-safety rules and why the close matters.
-
-### The ELF-payload route is gone — do not recreate it
-
-`scripts/deploy.sh`, `scripts/install-homebrew.sh`, `tools/launch.sh`,
-`scripts/update-console.sh`, `scripts/app-loop.sh` and `tools/push_ps5.py` were
-**deleted in `6db199d`**. This section used to document them. They are not
-coming back, and nothing should be rebuilt around them — including for a quick
-UI check.
-
-The reason is not tidiness. `ps5-payload-elfldr` runs payloads inside
-`SceSpZeroConf`, a background network service with **no display plane and no
-audio**. VideoOut and AudioOut calls all *succeed* there and the output goes
-nowhere — that cost a debugging session, 960 flips against a black screen — and
-the borrowed-process route also hit an errno-5200 wall on hardware decode. The
-app module has real graphics, `sceVideodec2` decode, audio, a user session and
-the self-unjail for `/data`. It is strictly the better target, so it is the
-only one.
 
 For a layout or rendering question, use the host renderer
 (`tools/uiview.sh`, `tools/uiplay.sh`) — no console, no launch cooldown.
@@ -535,7 +509,6 @@ Container-verified (reproducible, gated by CI):
 
 Hardware-verified on firmware 12.70:
 
-- [x] Hello World ELF loads and runs on PS5
 - [x] Deployment works from container
 - [x] Firmware confirmed `0x12700001`
 - [x] VideoOut presents (1920x1080, 960 frames)

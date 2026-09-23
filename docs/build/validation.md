@@ -127,19 +127,8 @@ code, with the reasoning recorded at the top of each `main.c`:
 
 5. **A payload under elfldr is headless.** `ps5-payload-elfldr` spawns payloads
    inside `SceSpZeroConf` (`websrv/src/ps5/elfldr.c:74`,
-   `/system/vsh/app/NPXS40112/eboot.bin`) - a background network service with
-   no display plane and no audio. VideoOut and AudioOut calls all *succeed*
-   there and 960 flips were reported against a blank screen. Anything that
-   draws or plays sound must be installed as homebrew and launched through
-   websrv's `hbldr_launch`, which borrows the PS Now app slot
-   (`hbldr.c:45`).
-   Note POSTing to websrv's `/elfldr` does *not* help - that path calls
-   `elfldr_spawn` and lands back in `SceSpZeroConf`.
-
-   **Historical.** This is why the ELF route was abandoned, not instructions:
-   `scripts/install-homebrew.sh` and the rest of the ELF-push scripts were
-   deleted in `6db199d`. The `.ffpfsc` app module is the only deploy path -
-   see [building.md](building.md#8-deploying-to-the-console).
+   The `.ffpfsc` app module is the only deploy path - see
+   [building.md](building.md#8-deploying-to-the-console).
 
 6. **The scanout surface is tiled, and linear is not available on retail.**
    Requesting tiling mode 1 gives:

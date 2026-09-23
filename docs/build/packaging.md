@@ -95,7 +95,6 @@ curl -T eboot.bin            "$FTP/system_ex/app/$TITLE_ID/"
 curl -T sce_sys/param.json   "$FTP/user/app/$TITLE_ID/sce_sys/"
 curl -T sce_sys/icon0.png    "$FTP/user/app/$TITLE_ID/sce_sys/"
 
-prospero-deploy -h $PS5_HOST -p 9021 payload.elf       # sceAppInstUtil register
 ```
 
 > `--title-id` must be 4 uppercase letters + 5 digits, e.g. `FAKE00001`. Use a

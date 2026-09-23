@@ -21,10 +21,8 @@ the dependency-ordered plan; each issue body also carries its own
   `scripts/package-app.sh` (the real build). → [docs/tooling.md](docs/build/tooling.md)
 - **One hardware path: the `.ffpfsc` app module.** `scripts/package-app.sh
   --ffpfsc` + `scripts/deploy-app.sh --ffpfsc`, launched from the Games row
-  (ShadowMountPlus auto-launches on the `.ffpfsc` change). The ELF-payload
-  push scripts (`install-homebrew.sh`, `tools/launch.sh`, `scripts/deploy.sh`)
-  were **deleted 2026-09-03** — do not recreate them or a deploy path around
-  them, not even for a UI check. `build-evoplayer.sh` is a compile check only.
+  (ShadowMountPlus auto-launches on the `.ffpfsc` change). There is no other
+  deploy path; `build-evoplayer.sh` is a compile check only.
 - **Never deploy over a running EVO** (panic risk) and **never stack launches**
   — the app slot stays resident; stacking has kernel-panicked the console
   (~50 min lost). **Close with Settings → System & Diagnostics → QUIT EVO**,
@@ -58,10 +56,9 @@ the dependency-ordered plan; each issue body also carries its own
   → `scripts/deploy-app.sh` → ShadowMountPlus, TITLE_ID `PPSA99039`) is the
   release path *and* the only thing you ever deploy — it has `sceVideodec2`
   decode, `sceAgc` GPU, audio, a real user session, the self-unjail for
-  `/data`. The old ELF-payload route (borrowed `/hbldr` process, no graphics,
-  errno-5200 decode wall) is gone; its scripts were deleted. For a UI/layout
-  question use the **host renderer** (`uiview.sh` / `uiplay.sh`), not a
-  console. → [docs/tooling.md](docs/build/tooling.md#packaging-two-routes)
+  `/data`. For a UI/layout question use the **host renderer** (`uiview.sh` /
+  `uiplay.sh`), not a console.
+  → [docs/tooling.md](docs/build/tooling.md#ffpfsc--the-only-route)
 
 ---
 
@@ -186,7 +183,7 @@ version of this table.
 | [networking.md](docs/hardware/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/ui/media-tile.md) | Media tile / metadata handling |
 | [addons-emby-nuvio.md](docs/addons/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
-| [packaging.md](docs/build/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/build/tooling.md#packaging-two-routes)) |
+| [packaging.md](docs/build/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/build/tooling.md#ffpfsc--the-only-route)) |
 | [validation.md](docs/build/validation.md) | Validation checklist |
 | [modularisation-plan.md](docs/architecture/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |
 | [backlog.md](docs/planning/backlog.md) / [improvements-roadmap.md](docs/planning/improvements-roadmap.md) | Planning docs, not current state |

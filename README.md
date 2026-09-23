@@ -30,9 +30,6 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 > [!IMPORTANT]
 > **Close EVO before installing a new version.** The app slot stays resident, and replacing the image underneath a running instance — or stacking a second launch on top of one — can panic the console. Use **Settings → System & Diagnostics → QUIT EVO** to release the decoders and GPU, then close it from the switcher.
 
-> [!NOTE]
-> The old ELF payload route (`InstallTile.elf`, `homebrew.zip`, `player-only.elf`) is gone as of 0.10.0. Those payloads ran inside a background service with no display plane and no audio, and could not reach the hardware decoder. The app module replaces all of them.
-
 ---
 
 ## Features
