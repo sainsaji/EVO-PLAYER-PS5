@@ -42,33 +42,65 @@ Video decodes on the console's own `sceVideodec2` decoder — **H.264, HEVC and 
 
 ![Playback OSD over 4K hardware-decoded video](docs/images/player.png)
 
-#### Verified formats
+#### Video
 
-Every codec below was played on a real console and checked frame by frame.
-"Hardware" means the console's `sceVideodec2` decoder; "software" means the
-FFmpeg fallback, which runs comfortably at 1080p.
+"Hardware" is the console's `sceVideodec2` decoder; "software" is the FFmpeg
+fallback, which is capped at 1080p. **Verified** means played on a real console,
+not merely enabled in the build.
 
-| Codec | Up to | Decoder |
+| Codec | Decoder | Up to | Verified |
+|---|---|---|---|
+| H.264 / AVC High | hardware | 4K30 real time; 4K60 runs ~14fps | yes |
+| HEVC / H.265 Main (8-bit) | hardware | 4K, real time | yes |
+| HEVC Main10 (HDR10 / PQ and HLG) | hardware | 1080p | yes |
+| VP9 Profile 0 | hardware | 4K | yes |
+| VP9 Profile 2 (10-bit) | hardware | 1080p | no |
+| AV1 | software (dav1d) | 1080p, real time | yes |
+| MPEG-2 | software | 1080p | yes |
+| MPEG-4 Part 2 | software | 1080p | no |
+| VP8 | software | 1080p | no |
+| HEVC 10-bit above 1080p | — | not played | — |
+| AV1 above 1080p | — | not played | — |
+| VC-1, WMV, Theora, ProRes | — | not supported | — |
+
+#### Audio
+
+| Codec | Decoder | Verified |
 |---|---|---|
-| H.264 / AVC | 4K 60fps | hardware |
-| H.264 High 10 | 1080p | software |
-| HEVC / H.265 8-bit | 4K 60fps | hardware |
-| HEVC 10-bit (HDR10 / PQ and HLG) | 1080p 60fps | hardware |
-| VP9 | 4K | hardware |
-| VP9 Profile 2 (10-bit) | 1080p | software |
-| AV1 | 1080p | software (dav1d) |
-| VP8 | 1080p | software |
-| MPEG-2 | 1080p | software |
+| AAC / AAC-LATM | software | yes — 2.0, 5.1, 7.1 |
+| AC-3 | software | yes — 5.1 |
+| E-AC-3 (incl. Atmos bed) | software | yes — 5.1, 7.1 |
+| DTS core | software | yes — 5.1 |
+| DTS-HD High Resolution | software | yes — 7.1 |
+| DTS-HD Master Audio | software | yes — 5.1 |
+| DTS-X (bed) | software | yes — 7.1.4 |
+| FLAC | software | yes — 5.0, 7.1 |
+| Opus / Vorbis / MP3 / MP2 | software | yes — stereo |
+| ALAC, LPCM | software | no |
+| **Dolby TrueHD** | — | **not supported** |
+| WMA, WavPack, APE, TTA | — | not supported |
 
-Audio: AAC, AC-3, E-AC-3, Dolby TrueHD, DTS, Opus, Vorbis, FLAC and LPCM.
-Surround sources open a full 7.1 output port rather than being folded
-down; stereo sources play as stereo.
+Surround sources open a full 7.1 output port rather than being folded down;
+stereo sources play as stereo. Output is S16 at 48 kHz — everything is decoded
+to PCM, so there is no bitstream passthrough to a receiver, and object audio is
+not rendered (Atmos and DTS-X play their bed).
 
-**4K is hardware-only.** Codecs the console cannot decode in hardware — AV1, and
-HEVC 10-bit above 1080p — are limited to 1080p, and a 4K file in one of those
-formats reports that it is unsupported rather than trying and failing. The PS5
-gives a homebrew title roughly 180 MB of working memory, and a single 4K frame
-plus a decoder's reference queue does not fit.
+#### Subtitles
+
+| Format | Verified |
+|---|---|
+| SRT / SubRip, ASS / SSA | yes |
+| MOV text, PGS, DVB, DVD | no |
+
+Non-ASCII characters currently render as `?`.
+
+**4K is hardware-only.** Anything the console cannot decode in hardware — AV1,
+and HEVC 10-bit above 1080p — is limited to 1080p, and a 4K file in one of those
+formats reports that it is unsupported rather than trying and failing. Software
+decode draws on roughly 180 MB of flexible memory, and a single 4K frame plus a
+decoder's reference queue does not fit.
+
+Full detail, including containers: [docs/codec-support.md](docs/codec-support.md).
 
 ### GPU-rendered interface
 
