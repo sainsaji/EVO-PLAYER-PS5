@@ -168,6 +168,17 @@ desktop.ini
 /moonlight_stream.cpp
 /native_agc_present.cpp
 
+# Promo material for the showcase video - thumbnails, listing copy, the Reddit
+# post, the deck and its script. None of it is part of the app, it is large and
+# binary, and it churns every time the video is re-cut. The .pptx and the
+# script are already covered above.
+/youtube_assets/
+/docs/video/
+
+# Release artifacts. `scripts/package-app.sh` writes output/, and the release
+# workflow collects a copy here; both are built, not sources.
+/dist/
+
 # Third-party UI reference screenshots (Samsung Tizen, Xbox dashboard, etc).
 # Local design reference only - not ours to redistribute.
 samples/*.jpg
