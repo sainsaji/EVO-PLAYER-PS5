@@ -7,8 +7,35 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include <sstream>
-#include <iomanip>
+#include <cstdarg>
+
+/*
+ * #71 REDUX - NO libc++ STREAMS IN THE APP MODULE.
+ *
+ * std::ostringstream constructs the global std::locale on first use, and in
+ * the native-app CRT that reads [null + 0x48] and takes the process down with
+ * signal 11. That is the exact fault df7cbf2 recorded for <iostream>'s static
+ * initialiser:
+ *
+ *   std::ios_base::Init::Init() -> std::locale::locale() -> read [null+0x48]
+ *
+ * Dropping <iostream> in #71 only moved it from load time to first use - every
+ * ostringstream in here was still a live landmine. And it is LAYOUT-SENSITIVE,
+ * so a build that happens to survive proves nothing: #90's extra .text shifted
+ * the addresses and EVO began crashing on the first poster it registered,
+ * inside ArtSource()'s stream. Two hardware runs, "CRASH signal=11 addr=48".
+ *
+ * So: snprintf everywhere, and <sstream>/<iomanip> stay out of this file.
+ */
+static std::string evo_fmt(const char* fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    return std::string(buf);
+}
 #include <cmath>
 #include <chrono>
 
@@ -73,16 +100,8 @@ static std::string format_time(double seconds) {
     int h = s / 3600;
     int m = (s % 3600) / 60;
     int sec = s % 60;
-    std::ostringstream oss;
-    if (h > 0) {
-        oss << std::setfill('0') << std::setw(2) << h << ":"
-            << std::setfill('0') << std::setw(2) << m << ":"
-            << std::setfill('0') << std::setw(2) << sec;
-    } else {
-        oss << std::setfill('0') << std::setw(2) << m << ":"
-            << std::setfill('0') << std::setw(2) << sec;
-    }
-    return oss.str();
+    if (h > 0) return evo_fmt("%02d:%02d:%02d", h, m, sec);
+    return evo_fmt("%02d:%02d", m, sec);
 }
 
 static std::string to_hex_rgb(uint32_t col) {
@@ -600,9 +619,7 @@ static std::string pct_string(int permille) {
     double pct = permille / 10.0;
     if (pct < 0.0)   pct = 0.0;
     if (pct > 100.0) pct = 100.0;
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(1) << pct << "%";
-    return ss.str();
+    return evo_fmt("%.1f%%", pct);
 }
 
 /*
@@ -641,10 +658,7 @@ std::string EvoRmlApp::ArtSource(int slot, const uint32_t* pixels, int w, int h,
     }
 
     m_art_generation[slot]++;
-    std::ostringstream ss;
-    ss << "evo:mem/art" << slot << "-" << m_art_generation[slot];
-
-    m_art_source[slot] = ss.str();
+    m_art_source[slot] = evo_fmt("evo:mem/art%d-%d", slot, m_art_generation[slot]);
     m_art_last_ptr[slot] = pixels;
     m_art_last_dims[slot][0] = w;
     m_art_last_dims[slot][1] = h;
@@ -888,9 +902,8 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
     Rml::Element* el_count = m_launch_doc->GetElementById("shelf-recent-count");
     if (el_count) {
         if (state.recent_total > (int)state.recent.size() && state.recent_cursor >= 0) {
-            std::ostringstream ss;
-            ss << (state.recent_cursor + 1) << " OF " << state.recent_total;
-            el_count->SetInnerRML(ss.str());
+            el_count->SetInnerRML(
+                evo_fmt("%d OF %d", state.recent_cursor + 1, state.recent_total));
             el_count->SetProperty("display", "block");
             el_count->SetProperty("color", text_3);
         } else {
@@ -1062,15 +1075,13 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
      * count is already on screen and the marker is noise. */
     if (Rml::Element* e = el("list-counter")) {
         if (state.total_count > (int)state.rows.size() && state.cursor_index >= 0) {
-            std::ostringstream ss;
-            ss << (state.cursor_index + 1) << " OF " << state.total_count;
-            e->SetInnerRML(ss.str());
+            e->SetInnerRML(
+                evo_fmt("%d OF %d", state.cursor_index + 1, state.total_count));
             e->SetProperty("display", "block");
             e->SetProperty("color", text_3);
         } else if (state.total_count > 0) {
-            std::ostringstream ss;
-            ss << state.total_count << (state.total_count == 1 ? " ITEM" : " ITEMS");
-            e->SetInnerRML(ss.str());
+            e->SetInnerRML(evo_fmt("%d%s", state.total_count,
+                                   state.total_count == 1 ? " ITEM" : " ITEMS"));
             e->SetProperty("display", "block");
             e->SetProperty("color", text_3);
         } else {
@@ -1250,12 +1261,12 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         e->SetProperty("color", text_2);
     }
     if (Rml::Element* e = el("browser-counter")) {
-        std::ostringstream ss;
-        if (state.total_count > 0 && state.cursor_index >= 0)
-            ss << (state.cursor_index + 1) << " / " << state.total_count;
-        else
-            ss << state.total_count << (state.total_count == 1 ? " ITEM" : " ITEMS");
-        e->SetInnerRML(ss.str());
+        std::string counter =
+            (state.total_count > 0 && state.cursor_index >= 0)
+                ? evo_fmt("%d / %d", state.cursor_index + 1, state.total_count)
+                : evo_fmt("%d%s", state.total_count,
+                          state.total_count == 1 ? " ITEM" : " ITEMS");
+        e->SetInnerRML(counter);
     }
 
     /* 2a. Folder filter chips.
@@ -1513,9 +1524,8 @@ void EvoRmlApp::UpdateChangelogState(const EvoChangelogState& state) {
     if (Rml::Element* e = el("changelog-subtitle"))  e->SetInnerRML(state.subtitle);
     if (Rml::Element* e = el("changelog-indicator")) e->SetProperty("background-color", accent);
     if (Rml::Element* e = el("changelog-counter")) {
-        std::ostringstream ss;
-        ss << (state.cursor_index + 1) << " OF " << state.release_total;
-        e->SetInnerRML(ss.str());
+        e->SetInnerRML(
+            evo_fmt("%d OF %d", state.cursor_index + 1, state.release_total));
         e->SetProperty("color", text_3);
     }
 
@@ -1603,9 +1613,7 @@ void EvoRmlApp::UpdateChangelogState(const EvoChangelogState& state) {
     if (Rml::Element* e = el("cldetail-more")) {
         int hidden = state.item_total - (int)state.items.size();
         if (hidden > 0) {
-            std::ostringstream ss;
-            ss << "+ " << hidden << " MORE IN THIS RELEASE";
-            e->SetInnerRML(ss.str());
+            e->SetInnerRML(evo_fmt("+ %d MORE IN THIS RELEASE", hidden));
             e->SetProperty("display", "block");
             e->SetProperty("color", text_3);
         } else {
@@ -1698,12 +1706,9 @@ void EvoRmlApp::UpdateReaderState(const EvoReaderState& state) {
                 thumb->SetProperty("display", "none");
             } else {
                 double top_pct = state.progress * (1.0 - visible_frac) * 100.0;
-                std::ostringstream h, t;
-                h << (visible_frac * 100.0) << "%";
-                t << top_pct << "%";
                 thumb->SetProperty("display", "block");
-                thumb->SetProperty("height", h.str());
-                thumb->SetProperty("top", t.str());
+                thumb->SetProperty("height", evo_fmt("%g%%", visible_frac * 100.0));
+                thumb->SetProperty("top", evo_fmt("%g%%", top_pct));
                 thumb->SetProperty("background-color", accent);
             }
         }
@@ -1819,13 +1824,9 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
 
     if (display_spk >= 0 && display_spk < (int)state.speakers.size()) {
         const EvoSurroundSpeaker& spk = state.speakers[display_spk];
-        std::ostringstream t, hz, ch;
-        t << spk.name << " (" << spk.label << ")";
-        hz << "TONE FREQ: " << std::fixed << std::setprecision(1) << spk.hz << " HZ";
-        ch << "PS5 AUDIO OUT: S16_8CH (CH " << display_spk << ")";
-        mon_title = t.str();
-        mon_line1 = hz.str();
-        mon_line2 = ch.str();
+        mon_title = evo_fmt("%s (%s)", spk.name.c_str(), spk.label.c_str());
+        mon_line1 = evo_fmt("TONE FREQ: %.1f HZ", spk.hz);
+        mon_line2 = evo_fmt("PS5 AUDIO OUT: S16_8CH (CH %d)", display_spk);
         mon_active = (state.active_channel >= 0);
         mon_status = mon_active ? "STATUS: [ ACTIVE NOW ]" : "STATUS: [ READY / STANDBY ]";
     } else {
@@ -1918,15 +1919,14 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         node->SetProperty("background-color", is_active ? surf_sel : surface);
         node->SetProperty("border-color", is_active ? accent : (is_sel ? border_sel : border));
 
-        std::ostringstream hz;
-        hz << std::fixed << std::setprecision(0) << spk.hz << " Hz" << (is_active ? " [ON]" : "");
+        std::string hz = evo_fmt("%.0f Hz%s", spk.hz, is_active ? " [ON]" : "");
 
         if (Rml::Element* lbl = el("srd-spk-label-" + n)) {
             lbl->SetInnerRML(spk.label);
             lbl->SetProperty("color", is_active ? accent : text_1);
         }
         if (Rml::Element* sub = el("srd-spk-sub-" + n)) {
-            sub->SetInnerRML(hz.str());
+            sub->SetInnerRML(hz);
             sub->SetProperty("color", is_active ? accent : text_3);
         }
     }
@@ -2113,9 +2113,7 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
 
     Rml::Element* el_fill = m_playback_doc->GetElementById("progress-fill");
     if (el_fill) {
-        std::ostringstream ss;
-        ss << std::fixed << std::setprecision(1) << pct << "%";
-        el_fill->SetProperty("width", ss.str());
+        el_fill->SetProperty("width", evo_fmt("%.1f%%", pct));
         el_fill->SetProperty("background-color", to_hex_rgb(m_theme.accent));
     }
 
@@ -2289,9 +2287,7 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
             double pct = state.progress_pct * 100.0;
             if (pct < 0.0) pct = 0.0;
             if (pct > 100.0) pct = 100.0;
-            std::ostringstream ss;
-            ss << std::fixed << std::setprecision(1) << pct << "%";
-            el_fill->SetProperty("width", ss.str());
+            el_fill->SetProperty("width", evo_fmt("%.1f%%", pct));
             el_fill->SetProperty("background-color", to_hex_rgb(m_theme.accent));
         } else {
             el_track->SetProperty("display", "none");
