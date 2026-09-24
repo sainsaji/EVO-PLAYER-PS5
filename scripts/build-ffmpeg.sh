@@ -139,6 +139,138 @@ COMMON_FLAGS=(
     --disable-doc
 )
 
+# -----------------------------------------------------------------------------
+# Audio: every codec FFmpeg 7.0.1 decodes natively.
+#
+# The old list was assembled from whatever the test corpus happened to hold,
+# and every gap in it reached a user the same way - a file that plays with no
+# sound, or does not play at all, and no reason offered anywhere. Dolby TrueHD
+# was the third time. Curating this list is not a feature; it is a standing
+# promise to rediscover the same bug once per format somebody owns.
+#
+# So: all of them. A decoder is a few KB of .text that allocates nothing until
+# a stream uses it, none of these need an external library, and none carry a
+# gpl/version3/nonfree dependency - checked against configure, not assumed.
+# The one name in allcodecs.c's audio block that is NOT here is `hdr`: the
+# Radiance RGBE *image* decoder, sitting alphabetically between hcom and iac.
+#
+# Video is deliberately left alone. It is gated by hardware decode and by the
+# flexible-memory ceiling that makes a 4K software decode fault rather than
+# fail, so it is a different decision with different risks. Audio has neither
+# constraint: frames are kilobytes.
+#
+# Regenerate with:
+#   sed -n '/audio codecs/,/subtitles/p' libavcodec/allcodecs.c | grep -oE 'ff_[a-z0-9_]+_decoder'
+# then drop any whose .p.type is not AVMEDIA_TYPE_AUDIO (the pcm/adpcm/dpcm
+# families define theirs through a macro, and are all audio).
+# -----------------------------------------------------------------------------
+AUDIO_DECODERS=(
+    # -- named codecs: lossy, lossless, speech, game and console formats --
+    aac_fixed ac3_fixed acelp_kelvin als amrnb amrwb apac ape aptx
+    aptx_hd atrac1 atrac3 atrac3al atrac3p atrac3pal atrac9
+    binkaudio_dct binkaudio_rdft bmv_audio bonk cook dfpwm dolby_e
+    dsd_lsbf dsd_lsbf_planar dsd_msbf dsd_msbf_planar dsicinaudio dss_sp
+    dst evrc fastaudio ffwavesynth ftr g723_1 g729 gsm gsm_ms hca hcom
+    iac ilbc imc interplay_acm mace3 mace6 metasound misc4 mp1 mp1float
+    mp2float mp3adu mp3adufloat mp3float mp3on4 mp3on4float mpc7 mpc8
+    msnsiren nellymoser on2avc osq paf_audio qcelp qdm2 qdmc qoa ra_144
+    ra_288 ralf sbc shorten sipr siren smackaud sonic tak truespeech tta
+    twinvq vmdaudio wavarc wavpack wmalossless wmapro wmav1 wmav2
+    wmavoice ws_snd1 xma1 xma2
+
+    # -- raw PCM: every width, sign, endianness and planar layout ---------
+    pcm_alaw pcm_bluray pcm_dvd pcm_f16le pcm_f24le pcm_f32be pcm_f64be
+    pcm_f64le pcm_lxf pcm_mulaw pcm_s16be_planar pcm_s16le_planar
+    pcm_s24be pcm_s24daud pcm_s24le_planar pcm_s32be pcm_s32le
+    pcm_s32le_planar pcm_s64be pcm_s64le pcm_s8 pcm_s8_planar pcm_sga
+    pcm_u16be pcm_u16le pcm_u24be pcm_u24le pcm_u32be pcm_u32le pcm_u8
+    pcm_vidc
+
+    # -- ADPCM: the container-specific variants AVI/WAV/MOV use, plus the
+    #    game formats -----------------------------------------------------
+    adpcm_4xm adpcm_adx adpcm_afc adpcm_agm adpcm_aica adpcm_argo
+    adpcm_ct adpcm_dtk adpcm_ea adpcm_ea_maxis_xa adpcm_ea_r1
+    adpcm_ea_r2 adpcm_ea_r3 adpcm_ea_xas adpcm_g722 adpcm_g726
+    adpcm_g726le adpcm_ima_acorn adpcm_ima_alp adpcm_ima_amv
+    adpcm_ima_apc adpcm_ima_apm adpcm_ima_cunning adpcm_ima_dat4
+    adpcm_ima_dk3 adpcm_ima_dk4 adpcm_ima_ea_eacs adpcm_ima_ea_sead
+    adpcm_ima_iss adpcm_ima_moflex adpcm_ima_mtf adpcm_ima_oki
+    adpcm_ima_qt adpcm_ima_rad adpcm_ima_smjpeg adpcm_ima_ssi
+    adpcm_ima_wav adpcm_ima_ws adpcm_ms adpcm_mtaf adpcm_psx
+    adpcm_sbpro_2 adpcm_sbpro_3 adpcm_sbpro_4 adpcm_swf adpcm_thp
+    adpcm_thp_le adpcm_vima adpcm_xa adpcm_xmd adpcm_yamaha adpcm_zork
+
+    # -- DPCM --------------------------------------------------------------
+    cbd2_dpcm derf_dpcm gremlin_dpcm interplay_dpcm roq_dpcm sdx2_dpcm
+    sol_dpcm wady_dpcm xan_dpcm
+)
+
+# Containers and raw streams for the above. Without these an .ape or .wv is
+# not "unsupported codec" - it does not open at all. asf is here for .wma;
+# .wmv still needs the video half, which this pass does not add.
+AUDIO_DEMUXERS=(
+    adx aiff amr amrnb amrwb apac ape aptx aptx_hd argo_asf asf ast au
+    bfstm bonk brstm caf codec2 dfpwm dsf dtshd g723_1 g729 gsm hca hcom
+    iff ilbc ircam mlp mpc mpc8 nistsphere oma osq pcm_alaw pcm_f32be
+    pcm_f32le pcm_f64be pcm_f64le pcm_mulaw pcm_s16be pcm_s16le
+    pcm_s24be pcm_s24le pcm_s32be pcm_s32le pcm_s8 pcm_u16be pcm_u16le
+    pcm_u24be pcm_u24le pcm_u32be pcm_u32le pcm_u8 pcm_vidc pvf qoa rso
+    rm sbc shorten sln sox spdif tak tta voc vqf w64 wavarc wv wve xa
+    xwma
+)
+
+# Framing. Without a parser, a stream in a container that does not carry frame
+# boundaries decodes to noise, or to nothing.
+AUDIO_PARSERS=(
+    adx amr cook dolby_e dvaudio ftr g723_1 g729 gsm misc4 sbc sipr tak
+    xma
+)
+
+# -----------------------------------------------------------------------------
+# Video and subtitle components, approved 2026-09-24.
+#
+# Same reasoning as AUDIO_DECODERS: the old list was what the test corpus
+# happened to hold. Two of these were worse than missing - the file browser
+# already advertises .wmv and .flv as playable (FileSystemBrowser.cpp), so those
+# files listed, got a poster attempt, and could not even be demuxed because
+# neither ASF nor FLV was built. evo_subtitle.c likewise already handles
+# AV_CODEC_ID_WEBVTT while no webvtt decoder existed.
+#
+# All native, no external libraries, no gpl/version3 dependency - each name
+# checked against allcodecs.c / allformats.c / parsers.c rather than assumed.
+#
+# NOT here, deliberately: FFmpeg's own `av1` decoder. It is a hwaccel-only
+# wrapper with no software path and dereferences null on a machine with no AV1
+# hardware, which is every PS5. AV1 resolves to libdav1d only - see the note by
+# --enable-libdav1d above.
+# -----------------------------------------------------------------------------
+VIDEO_DECODERS=(
+    # WMV / VC-1 family (.wmv, .asf), MS-MPEG4 (old DivX in .avi)
+    vc1 wmv1 wmv2 wmv3 msmpeg4v1 msmpeg4v2 msmpeg4v3 mpeg1video
+    # FLV / Sorenson / VP6, H.263, and the old AVI + QuickTime codecs
+    flv vp6 vp6a vp6f h263 h263i h263p msvideo1 cinepak indeo3 indeo4
+    indeo5 huffyuv ffv1 utvideo qtrle rpza smc svq1 svq3 mjpegb theora
+    # Theora, pro/intermediate formats, Chinese AVS, RealVideo, WebP stills
+    prores dnxhd dvvideo cavs rv10 rv20 rv30 rv40 webp
+)
+
+# Text and bitmap subtitle formats. The container side is in VIDEO_DEMUXERS -
+# an external .sub or .smi needs a demuxer as well as a decoder.
+SUBTITLE_DECODERS=(
+    webvtt text microdvd sami subviewer subviewer1 mpl2 vplayer pjs
+    jacosub realtext stl xsub ccaption
+)
+
+VIDEO_DEMUXERS=(
+    asf asf_o flv live_flv rm dv mxf webvtt microdvd sami subviewer
+    subviewer1 mpl2 vplayer pjs jacosub realtext stl vc1 vc1t m4v ivf
+    mpegvideo
+)
+
+VIDEO_PARSERS=(
+    vc1 h263 webp
+)
+
 case "${PROFILE}" in
 # -----------------------------------------------------------------------------
 baseline)
@@ -187,12 +319,16 @@ minimal)
         --enable-swresample
         --enable-swscale
 
-        # -- audio decoders (brief section 13) -----------------------------
+        # -- audio decoders -------------------------------------------------
+        # The mainstream set stays spelled out: these are what the player is
+        # tuned around, and what a silent build break would cost the most.
         --enable-decoder=aac
         --enable-decoder=aac_latm       # AAC inside MPEG-TS
         --enable-decoder=ac3
         --enable-decoder=eac3           # the "silent E-AC3" bug's home
-        --enable-decoder=dca            # DTS
+        --enable-decoder=dca            # DTS, incl. DTS-HD MA lossless
+        --enable-decoder=truehd         # Dolby TrueHD, and the MLP under it
+        --enable-decoder=mlp
         --enable-decoder=mp3
         --enable-decoder=mp2
         --enable-decoder=flac
@@ -203,6 +339,12 @@ minimal)
         --enable-decoder=pcm_s16be
         --enable-decoder=pcm_s24le
         --enable-decoder=pcm_f32le
+
+        # ...and then everything else FFmpeg decodes natively. See
+        # AUDIO_DECODERS at the top for why this is not a curated list.
+        "${AUDIO_DECODERS[@]/#/--enable-decoder=}"
+        "${VIDEO_DECODERS[@]/#/--enable-decoder=}"
+        "${SUBTITLE_DECODERS[@]/#/--enable-decoder=}"
 
         # -- video decoders -------------------------------------------------
         --enable-decoder=h264
@@ -252,11 +394,14 @@ minimal)
         --enable-demuxer=ac3
         --enable-demuxer=eac3
         --enable-demuxer=dts
+        --enable-demuxer=truehd         # raw .thd/.ac3 streams
         --enable-demuxer=h264
         --enable-demuxer=hevc
         --enable-demuxer=srt
         --enable-demuxer=ass
         --enable-demuxer=image2         # the thumbnail/cover-art path
+        "${AUDIO_DEMUXERS[@]/#/--enable-demuxer=}"
+        "${VIDEO_DEMUXERS[@]/#/--enable-demuxer=}"
 
         # -- parsers ----------------------------------------------------------
         # Without these, raw and MPEG-TS streams will not frame correctly -
@@ -269,12 +414,15 @@ minimal)
         --enable-parser=aac_latm
         --enable-parser=ac3
         --enable-parser=dca
+        --enable-parser=mlp             # TrueHD/MLP framing in MKV and .thd
         --enable-parser=flac
         --enable-parser=opus
         --enable-parser=vorbis
         --enable-parser=mpegaudio
         --enable-parser=mpegvideo
         --enable-parser=mpeg4video
+        "${AUDIO_PARSERS[@]/#/--enable-parser=}"
+        "${VIDEO_PARSERS[@]/#/--enable-parser=}"
 
         # -- bitstream filters -------------------------------------------------
         # Required to feed MP4/MKV-contained H.264/HEVC to a decoder that

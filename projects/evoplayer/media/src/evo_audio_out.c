@@ -42,6 +42,8 @@ extern pp_playback       g_pp_pb;
 extern int               player_paused;
 extern double            video_clock_seconds;
 extern double            first_video_pts_seconds;
+extern int               video_stream_index;
+extern int               video_decode_ready;
 extern int               video_decode_done;
 extern int               audio_stream_index;
 extern int               evo_audio_channels;
@@ -143,6 +145,12 @@ void *audio_output_thread(void *arg) {
                 video_rel = video_clock_seconds - first_video_pts_seconds;
             if (video_rel < 0.0)
                 video_rel = 0.0;
+
+            if (video_stream_index >= 0 && first_video_pts_seconds < 0.0 &&
+                video_decode_ready && !video_decode_done) {
+                usleep(2000);
+                continue;
+            }
 
             if (video_rel > 0.1 &&
                 audio_clock_seconds > video_rel + 0.50) {
@@ -372,21 +380,41 @@ void *audio_decode_thread_func(void *arg) {
 
             /*
              * 25 ms of slack keeps the packet that straddles the target.
+             * In MPEG-TS, PES packets carry PTS only every few packets; intermediate
+             * packets have AV_NOPTS_VALUE. Discard them while the seek gate is active
+             * rather than prematurely clearing the gate.
              * The cap is the safety net for a container whose audio PTS does
              * not share an origin with the seek target (a non-zero
              * start_time): rather than mute the track, give up on the gate
              * after a GOP's worth of packets and let everything through.
              */
-            static int s_dropped;
-            if (pkt_seconds >= 0.0 &&
-                pkt_seconds < audio_seek_discard_until - 0.025 &&
-                s_dropped < 2000) {
-                s_dropped++;
-                av_packet_free(&pkt);
-                continue;
+            static double s_last_discard_target = -1.0;
+            static int s_dropped = 0;
+            if (audio_seek_discard_until != s_last_discard_target) {
+                s_last_discard_target = audio_seek_discard_until;
+                s_dropped = 0;
             }
-            s_dropped = 0;
-            audio_seek_discard_until = -1.0;
+
+            if (pkt_seconds >= 0.0) {
+                if (pkt_seconds < audio_seek_discard_until - 0.025 &&
+                    s_dropped < 2000) {
+                    s_dropped++;
+                    av_packet_free(&pkt);
+                    continue;
+                }
+                s_dropped = 0;
+                s_last_discard_target = -1.0;
+                audio_seek_discard_until = -1.0;
+            } else {
+                if (s_dropped < 2000) {
+                    s_dropped++;
+                    av_packet_free(&pkt);
+                    continue;
+                }
+                s_dropped = 0;
+                s_last_discard_target = -1.0;
+                audio_seek_discard_until = -1.0;
+            }
         }
         if (!pkt) {
             /*

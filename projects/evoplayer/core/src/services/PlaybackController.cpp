@@ -27,6 +27,7 @@ __attribute__((weak)) void evo_alloc_map_info(uint64_t *fails, uint64_t *served_
 #include "evo_toast.h"
 #include "evo_data_path.h"
 #include "evo_boot_log.h"
+#include "evo_boot_trace.h"
 #include "prospero_thumbnail.h"
 
 extern "C" {
@@ -364,7 +365,42 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
         if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && video_stream_index < 0) {
             video_stream_index = static_cast<int>(i);
         } else if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_stream_index < 0) {
-            audio_stream_index = static_cast<int>(i);
+            /*
+             * Take the first audio stream we can actually decode, not simply
+             * the first one.
+             *
+             * A Dolby Atmos title normally carries TrueHD first and an E-AC-3
+             * track beside it for players that cannot manage TrueHD. Taking
+             * stream order on trust meant picking the TrueHD, finding no
+             * decoder, and playing nothing at all - not even the video, since
+             * the clock waits on an audio stream that never opens - while a
+             * decodable track sat one index away. Verified on hardware with
+             * "Dolby Atmos TrueHD, E-AC-3 7.1.4.mkv": pos stayed at 0.00.
+             *
+             * The track-switch path below already checks this; the default
+             * did not.
+             */
+            if (avcodec_find_decoder(st->codecpar->codec_id))
+                audio_stream_index = static_cast<int>(i);
+        }
+    }
+
+    /*
+     * Nothing decodable: fall back to the first audio stream anyway, so the
+     * file still opens and the track picker can show what is in it. Better a
+     * silent file the user can inspect than a refusal with no explanation.
+     */
+    if (audio_stream_index < 0) {
+        for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+            AVStream* st = play_fmt->streams[i];
+            if (st && st->codecpar &&
+                st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                audio_stream_index = static_cast<int>(i);
+                evo_bt("PlaybackController: no decodable audio stream (codec=%d) - "
+                       "playing without sound",
+                       (int)st->codecpar->codec_id);
+                break;
+            }
         }
     }
 

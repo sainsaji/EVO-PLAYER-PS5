@@ -55,6 +55,11 @@ UPSTREAM_LIBS=(
     "${HB}/lib/libswresample.a"
     "${HB}/lib/libavutil.a"
     "${HB}/lib/libswscale.a"
+    # AV1 is libdav1d-only (see build-ffmpeg.sh), so libavcodec has unresolved
+    # dav1d_* references without this. The Makefile and package-app.sh both
+    # carry it; this list overrides the Makefile's, and lacking it turned the
+    # compile check into a link failure that had nothing to do with the code.
+    "${HB}/lib/libdav1d.a"
 )
 TRANSITIVE_LIBS=(
     -lass -lharfbuzz -lharfbuzz-subset -lfreetype -lfribidi -lpng16

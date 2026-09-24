@@ -341,15 +341,38 @@ FileCategory FileSystemBrowser::classifyFile(const std::string& fileName, int en
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
     // Video
-    if (ext == "mkv" || ext == "mp4" || ext == "mov" || ext == "m4v" ||
-        ext == "avi" || ext == "webm" || ext == "ts" || ext == "m2ts" ||
-        ext == "mpg" || ext == "mpeg" || ext == "wmv" || ext == "flv") {
+    if (ext == "mkv"  || ext == "mp4"  || ext == "mov"  || ext == "m4v"  ||
+        ext == "avi"  || ext == "webm" || ext == "ts"   || ext == "m2ts" ||
+        ext == "mpg"  || ext == "mpeg" || ext == "wmv"  || ext == "flv"  ||
+        /* playable since the 2026-09-24 video codec pass */
+        ext == "asf"  || ext == "wm"   || ext == "rm"   || ext == "rmvb" ||
+        ext == "ogv"  || ext == "dv"   || ext == "mxf"  || ext == "mts"  ||
+        ext == "vob"  || ext == "m2v"  || ext == "3gp"  || ext == "3g2"  ||
+        ext == "mp2"  || ext == "f4v"  || ext == "ivf") {
         return FileCategory::Video;
     }
 
-    // Audio
-    if (ext == "mp3" || ext == "flac" || ext == "wav" || ext == "aac" ||
-        ext == "m4a" || ext == "ogg") {
+    /*
+     * Audio.
+     *
+     * A file that does not land in a category the browser knows is not shown
+     * as playable, so this list is the other half of what the build can
+     * decode - six extensions here meant an .opus or .wma sat in the folder
+     * looking like a stray file while FFmpeg was perfectly able to play it.
+     * Kept in step with AUDIO_DECODERS/AUDIO_DEMUXERS in build-ffmpeg.sh,
+     * which is now every audio codec FFmpeg decodes natively.
+     */
+    if (ext == "mp3"  || ext == "flac" || ext == "wav"  || ext == "aac"  ||
+        ext == "m4a"  || ext == "ogg"  || ext == "opus" || ext == "oga"  ||
+        ext == "mka"  || ext == "m4b"  || ext == "wma"  || ext == "ac3"  ||
+        ext == "eac3" || ext == "dts"  || ext == "dtshd"|| ext == "thd"  ||
+        ext == "mlp"  || ext == "mp2"  || ext == "mpa"  || ext == "ape"  ||
+        ext == "wv"   || ext == "tta"  || ext == "tak"  || ext == "shn"  ||
+        ext == "aif"  || ext == "aiff" || ext == "au"   || ext == "caf"  ||
+        ext == "w64"  || ext == "dsf"  || ext == "dff"  || ext == "amr"  ||
+        ext == "awb"  || ext == "mpc"  || ext == "voc"  || ext == "ra"   ||
+        ext == "oma"  || ext == "aa3"  ||
+        ext == "at9"  || ext == "gsm"  || ext == "qoa") {
         return FileCategory::Audio;
     }
 
@@ -360,6 +383,9 @@ FileCategory FileSystemBrowser::classifyFile(const std::string& fileName, int en
 
     // Document
     if (ext == "srt" || ext == "ass" || ext == "ssa" || ext == "vtt" ||
+        /* external subtitle formats the build now decodes */
+        ext == "sub" || ext == "smi" || ext == "sami" || ext == "mpl" ||
+        ext == "jss" || ext == "rt"  || ext == "stl"  ||
         ext == "txt" || ext == "log" || ext == "md"  || ext == "nfo" ||
         ext == "ini" || ext == "cfg" || ext == "json" || ext == "csv") {
         return FileCategory::Document;
