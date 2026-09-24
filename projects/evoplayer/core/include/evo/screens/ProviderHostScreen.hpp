@@ -58,8 +58,16 @@ private:
      * that provider's own screen; this is the one-line case, which is what an
      * M3U link is.
      *
-     * It must be the VIRTUAL keyboard: the native PS5 IME crashes the app
-     * module (#34).
+     * Goes through evo_keyboard_open(), which picks the native PS5 IME when it
+     * is available and falls back to the virtual keyboard when it is not. The
+     * native path works on FW 12.70 - #34 is fixed, and the boot log says so
+     * ("ime: native IME ready"). An earlier version of this comment claimed
+     * the virtual keyboard was mandatory; that was stale.
+     *
+     * Worth knowing: the virtual fallback currently cannot DRAW on this
+     * screen. evo_screen_keyboard() is the only thing that renders it and
+     * nothing calls it any more, so if the native IME ever fails here the
+     * prompt would be invisible while still swallowing input.
      */
     void openSourceEditor();
     static void OnSourceSubmitted(const char* text, void* userdata);
