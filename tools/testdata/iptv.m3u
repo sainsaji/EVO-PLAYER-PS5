@@ -1,0 +1,49 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="bloomberg.us" tvg-name="Bloomberg TV+" tvg-logo="https://i.imgur.com/0G6wN7H.png" group-title="News",Bloomberg TV+
+https://bloomberg.com/media-manifest/streams/us.m3u8
+#EXTINF:-1 tvg-id="abcnews.us" tvg-name="ABC News Live" tvg-logo="https://i.imgur.com/0iKj4N1.png" group-title="News",ABC News Live
+https://abcnews-streams.akamaized.net/hls/live/2023560/abcnews1/master.m3u8
+#EXTINF:-1 tvg-id="48hours.us" tvg-name="48 Hours" tvg-logo="https://images.pluto.tv/channels/6176f39e709f160007ec61c3/colorLogoPNG.png" group-title="News",48 Hours
+https://dai.google.com/linear/hls/event/JUr94WL2QAiVpGNHY5n5dA/master.m3u8
+#EXTINF:-1 tvg-id="redbull.tv" tvg-name="Red Bull TV" tvg-logo="https://i.imgur.com/r0lFq61.png" group-title="Sports",Red Bull TV
+https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8
+#EXTINF:-1 tvg-id="accdigital.us" tvg-name="ACC Digital Network" tvg-logo="https://i.imgur.com/V6Kaqha.png" group-title="Sports",ACC Digital Network
+https://raycom-accdn-firetv.amagi.tv/playlist.m3u8
+#EXTINF:-1 tvg-id="accnetwork.us" tvg-name="ACC Network" tvg-logo="https://i.imgur.com/V6Kaqha.png" group-title="Sports",ACC Network
+http://23.239.31.26:8989/accnetwork/index.m3u8
+#EXTINF:-1 tvg-id="golfkingdom.us" tvg-name="30A Golf Kingdom" tvg-logo="https://i.imgur.com/6C9jJ27.png" group-title="Sports",30A Golf Kingdom
+https://30a-tv.com/feeds/vidaa/golf.m3u8
+#EXTINF:-1 tvg-id="darcizzle.us" tvg-name="30A Darcizzle Offshore" tvg-logo="https://i.imgur.com/r0lFq61.png" group-title="Sports",30A Darcizzle Offshore
+https://30a-tv.com/darcizzle.m3u8
+#EXTINF:-1 tvg-id="50centaction.us" tvg-name="50 Cent Action" tvg-logo="https://provider-static.plex.tv/epg/cms/production/bcfb9977-809f-49ae-acc7-430f2c6ffb26/50CentAction_Logo_1500x1000_DarkBG_-_Chris_Connors.png" group-title="Movies",50 Cent Action
+https://jmp2.uk/plu-68487fb3f212bedacf5a53e3.m3u8
+#EXTINF:-1 tvg-id="70scinema.us" tvg-name="70s Cinema" tvg-logo="https://i.imgur.com/X49d8iL.png" group-title="Movies",70s Cinema
+https://jmp2.uk/plu-5f4d878d3d19b30007d2e782.m3u8
+#EXTINF:-1 tvg-id="80srewind.us" tvg-name="80s Rewind" tvg-logo="https://i.imgur.com/a4fQ1vO.png" group-title="Movies",80s Rewind
+https://jmp2.uk/plu-5ca525b650be2571e3943c63.m3u8
+#EXTINF:-1 tvg-id="90sthrowback.us" tvg-name="90s Throwback" tvg-logo="https://i.imgur.com/pZ2j3hP.png" group-title="Movies",90s Throwback
+https://jmp2.uk/plu-5f4d86f519358a00072b978e.m3u8
+#EXTINF:-1 tvg-id="24hrfreemovies.us" tvg-name="24 Hour Free Movies" tvg-logo="https://i.imgur.com/1vJ150Y.png" group-title="Movies",24 Hour Free Movies
+https://d1j2u714xk898n.cloudfront.net/scheduler/scheduleMaster.m3u8
+#EXTINF:-1 tvg-id="classicmovies.us" tvg-name="30A TV Classic Movies" tvg-logo="https://i.imgur.com/1vJ150Y.png" group-title="Movies",30A TV Classic Movies
+https://30a-tv.com/feeds/pzaz/30atvmovies.m3u8
+#EXTINF:-1 tvg-id="00sreplay.us" tvg-name="00s Replay" tvg-logo="https://i.imgur.com/k9m7x6L.png" group-title="Entertainment",00s Replay
+https://jmp2.uk/plu-62ba60f059624e000781c436.m3u8
+#EXTINF:-1 tvg-id="afv.us" tvg-name="America's Funniest Videos" tvg-logo="https://i.imgur.com/o1C3vN7.png" group-title="Entertainment",America's Funniest Videos
+https://linear-12.frequency.stream/dist/plex/12/hls/master/playlist.m3u8
+#EXTINF:-1 tvg-id="aande.us" tvg-name="A&E Network" tvg-logo="https://i.imgur.com/z0J6H0H.png" group-title="Entertainment",A&E Network
+http://23.239.31.26:8989/aande/index.m3u8
+#EXTINF:-1 tvg-id="sidewalks.us" tvg-name="30A Sidewalks Entertainment" tvg-logo="https://i.imgur.com/o1C3vN7.png" group-title="Entertainment",30A Sidewalks Entertainment
+https://30a-tv.com/sidewalks.m3u8
+#EXTINF:-1 tvg-id="3abnkids.us" tvg-name="3ABN Kids Network" tvg-logo="https://i.imgur.com/c6F30vV.png" group-title="Animation & Kids",3ABN Kids Network
+https://3abn.bozztv.com/3abn2/Kids_live/smil:Kids_live.smil/playlist.m3u8
+#EXTINF:-1 tvg-id="30amusic.us" tvg-name="30A Music TV" tvg-logo="https://i.imgur.com/wV2e5q2.png" group-title="Music",30A Music TV
+https://30a-tv.com/music.m3u8
+#EXTINF:-1 tvg-id="praisehim.us" tvg-name="3ABN Praise Him Music" tvg-logo="https://i.imgur.com/Yh3pB6L.png" group-title="Music",3ABN Praise Him Music
+https://3abn.bozztv.com/3abn1/PraiseHim/smil:PraiseHim.smil/playlist.m3u8
+#EXTINF:-1 tvg-id="bbb.hls" tvg-name="Big Buck Bunny (HLS)" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg" group-title="Demo & Reference",Big Buck Bunny (HLS)
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="tears.hls" tvg-name="Tears of Steel (HLS)" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/0/01/Tears_of_Steel_poster.jpg" group-title="Demo & Reference",Tears of Steel (HLS)
+https://test-streams.mux.dev/pts_shift/master.m3u8
+#EXTINF:-1 tvg-id="apple.bip" tvg-name="Apple BipBop 16x9" tvg-logo="https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8" group-title="Demo & Reference",Apple BipBop 16x9
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8

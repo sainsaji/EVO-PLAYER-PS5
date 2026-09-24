@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="bloomberg.us"><display-name>Bloomberg TV+</display-name></channel>
+  <channel id="abcnews.us"><display-name>ABC News Live</display-name></channel>
+  <channel id="48hours.us"><display-name>48 Hours</display-name></channel>
+  <channel id="redbull.tv"><display-name>Red Bull TV</display-name></channel>
+  <channel id="accdigital.us"><display-name>ACC Digital Network</display-name></channel>
+  <channel id="accnetwork.us"><display-name>ACC Network</display-name></channel>
+  <channel id="golfkingdom.us"><display-name>30A Golf Kingdom</display-name></channel>
+  <channel id="darcizzle.us"><display-name>30A Darcizzle Offshore</display-name></channel>
+  <channel id="50centaction.us"><display-name>50 Cent Action</display-name></channel>
+  <channel id="70scinema.us"><display-name>70s Cinema</display-name></channel>
+  <channel id="80srewind.us"><display-name>80s Rewind</display-name></channel>
+  <channel id="90sthrowback.us"><display-name>90s Throwback</display-name></channel>
+  <channel id="24hrfreemovies.us"><display-name>24 Hour Free Movies</display-name></channel>
+  <channel id="classicmovies.us"><display-name>30A TV Classic Movies</display-name></channel>
+  <channel id="00sreplay.us"><display-name>00s Replay</display-name></channel>
+  <channel id="afv.us"><display-name>America's Funniest Videos</display-name></channel>
+  <channel id="aande.us"><display-name>A&E Network</display-name></channel>
+  <channel id="sidewalks.us"><display-name>30A Sidewalks Entertainment</display-name></channel>
+  <channel id="3abnkids.us"><display-name>3ABN Kids Network</display-name></channel>
+  <channel id="30amusic.us"><display-name>30A Music TV</display-name></channel>
+  <channel id="praisehim.us"><display-name>3ABN Praise Him Music</display-name></channel>
+  <channel id="bbb.hls"><display-name>Big Buck Bunny (HLS)</display-name></channel>
+  <channel id="tears.hls"><display-name>Tears of Steel (HLS)</display-name></channel>
+  <channel id="apple.bip"><display-name>Apple BipBop 16x9</display-name></channel>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="bloomberg.us">
+    <title>Bloomberg Markets: The Close</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="bloomberg.us">
+    <title>Bloomberg Technology</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="abcnews.us">
+    <title>ABC News Live Prime</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="abcnews.us">
+    <title>World News Tonight</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="48hours.us">
+    <title>Mystery on the Mountain</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="48hours.us">
+    <title>The Night Before</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="redbull.tv">
+    <title>UCI Mountain Bike World Cup</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="redbull.tv">
+    <title>Red Bull Rampage Classics</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="accdigital.us">
+    <title>ACC Football Weekly</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="accdigital.us">
+    <title>ACC Basketball Highlights</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="accnetwork.us">
+    <title>College GameDay Live</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="accnetwork.us">
+    <title>All-Access ACC</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="golfkingdom.us">
+    <title>Championship Golf Highlights</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="golfkingdom.us">
+    <title>PGA Pro Tips & Highlights</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="darcizzle.us">
+    <title>Deep Sea Offshore Action</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="darcizzle.us">
+    <title>Gulf Coast Big Game Hunt</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="50centaction.us">
+    <title>Maximum Velocity</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="50centaction.us">
+    <title>End of Watch</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="70scinema.us">
+    <title>The French Connection</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="70scinema.us">
+    <title>Serpico</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="80srewind.us">
+    <title>Back to the Eighties</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="80srewind.us">
+    <title>Midnight Run</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="90sthrowback.us">
+    <title>Point Break</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="90sthrowback.us">
+    <title>Speed Classics</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="24hrfreemovies.us">
+    <title>Hollywood Blockbuster Hour</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="24hrfreemovies.us">
+    <title>Midnight Thriller Feature</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="classicmovies.us">
+    <title>Night of the Living Dead</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="classicmovies.us">
+    <title>His Girl Friday</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="00sreplay.us">
+    <title>Top 2000s Hits & Moments</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="00sreplay.us">
+    <title>Millennium Flashback</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="afv.us">
+    <title>Best of Pets & Kids</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="afv.us">
+    <title>Grand Prize Spectacular</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="aande.us">
+    <title>Storage Wars Marathon</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="aande.us">
+    <title>Cold Case Files</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="sidewalks.us">
+    <title>Celebrity Spotlight Hour</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="sidewalks.us">
+    <title>Hollywood Behind the Scenes</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="3abnkids.us">
+    <title>Nature Wonders</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="3abnkids.us">
+    <title>Storytime Adventures</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="30amusic.us">
+    <title>Acoustic Sunset Live</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="30amusic.us">
+    <title>Gulf Coast Soundstage</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="praisehim.us">
+    <title>Sacred Melodies</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="praisehim.us">
+    <title>Orchestral Praise Showcase</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="bbb.hls">
+    <title>Rabbit of Unusual Size</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="bbb.hls">
+    <title>Three Rodents</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="tears.hls">
+    <title>Amsterdam 2075</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="tears.hls">
+    <title>Behind the Scenes</title>
+  </programme>
+  <programme start="20260924140004 +0000" stop="20260924150004 +0000" channel="apple.bip">
+    <title>Reference Loop 1080p</title>
+  </programme>
+  <programme start="20260924150004 +0000" stop="20260924160004 +0000" channel="apple.bip">
+    <title>Reference Loop II</title>
+  </programme>
+</tv>

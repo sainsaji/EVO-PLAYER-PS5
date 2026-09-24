@@ -35,21 +35,26 @@ div, span, img {
 }
 
 #tv-shell {
-    width: 100%;
-    height: 100%;
-    padding: 36dp 64dp 24dp 64dp;
+    display: block;
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+    padding: 36dp 48dp 24dp 0;
 }
 
 /* ---- guide bar --------------------------------------------------------- */
 
 #tv-bar {
+    display: block;
     height: 62dp;
     padding-bottom: 14dp;
 }
 
 #tv-brand {
     display: inline-block;
-    width: 280dp;
+    width: 240dp;
     vertical-align: top;
 }
 
@@ -73,7 +78,7 @@ div, span, img {
 
 #tv-path {
     display: inline-block;
-    width: 1050dp;
+    width: 1220dp;
     font-size: 17dp;
     color: #7f93b5ff;
     padding-top: 10dp;
@@ -84,7 +89,7 @@ div, span, img {
 
 #tv-count {
     display: inline-block;
-    width: 250dp;
+    width: 240dp;
     text-align: right;
     font-size: 16dp;
     color: #7f93b5ff;
@@ -95,6 +100,7 @@ div, span, img {
 /* ---- notices ----------------------------------------------------------- */
 
 #tv-notice {
+    display: block;
     padding: 10dp 16dp;
     margin-bottom: 14dp;
     border-radius: 6dp;
@@ -109,9 +115,13 @@ div, span, img {
 }
 
 #tv-spinner {
-    padding: 10dp 0 14dp 0;
-    font-size: 18dp;
-    color: #7f93b5ff;
+    display: block;
+    padding: 10dp 18dp;
+    margin-bottom: 14dp;
+    border-radius: 6dp;
+    font-size: 16dp;
+    background-color: #10203aff;
+    color: #4d9fffff;
 }
 
 /* ---- the grid ---------------------------------------------------------- */
@@ -128,6 +138,8 @@ div, span, img {
  * and logs "Could not compile filter". See docs/addons/provider-architecture.md.
  */
 #tv-grid {
+    display: block;
+    width: 1720dp;
     height: 830dp;
     overflow-y: auto;
 }
@@ -139,9 +151,9 @@ div, span, img {
     tab-index: auto;
     nav: auto;
     display: inline-block;
-    width: 282dp;
+    width: 264dp;
     height: 268dp;
-    margin: 0 12dp 16dp 0;
+    margin: 0 20dp 20dp 0;
     padding: 12dp;
     border-radius: 10dp;
     background-color: #0e1728ff;
@@ -162,7 +174,7 @@ div, span, img {
 }
 
 .tv-folder {
-    width: 258dp;
+    width: 240dp;
     height: 104dp;
     padding-top: 26dp;
 }
@@ -183,7 +195,7 @@ div, span, img {
 }
 
 .tv-thumb {
-    width: 258dp;
+    width: 240dp;
     height: 132dp;
     border-radius: 8dp;
     background-color: #060b15ff;
@@ -192,7 +204,7 @@ div, span, img {
 }
 
 .tv-logo {
-    width: 258dp;
+    width: 240dp;
     height: 132dp;
     border-radius: 8dp;
 }
@@ -263,6 +275,7 @@ div, span, img {
 /* ---- footer hint ------------------------------------------------------- */
 
 #tv-hint {
+    display: block;
     padding-top: 12dp;
     font-size: 15dp;
     color: #5d7091ff;

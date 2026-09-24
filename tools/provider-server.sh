@@ -119,9 +119,13 @@ EOF
     echo "--- playlist: generated (6 channels, 3 groups, 1 deliberately dead)"
 fi
 
-# XMLTV now-and-next for the generated playlist. Programme windows are relative
-# to now, so "NOW" and "NEXT" are always populated whenever the server starts.
-python3 - "${SERVE_ROOT}/media/epg.xml" <<'PYEOF'
+if [[ -f "${REPO_ROOT}/tools/testdata/epg.xml" ]]; then
+    cp "${REPO_ROOT}/tools/testdata/epg.xml" "${SERVE_ROOT}/media/epg.xml"
+    echo "--- epg: tools/testdata/epg.xml"
+else
+    # XMLTV now-and-next for the generated playlist. Programme windows are relative
+    # to now, so "NOW" and "NEXT" are always populated whenever the server starts.
+    python3 - "${SERVE_ROOT}/media/epg.xml" <<'PYEOF'
 import sys, time
 out = sys.argv[1]
 now = time.time()
@@ -148,6 +152,7 @@ lines.append('</tv>')
 open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 print("--- epg: generated (now + next for 5 channels)")
 PYEOF
+fi
 
 # ---------------------------------------------------------------------------
 # Work out the LAN address to print. The console needs a routable address, and

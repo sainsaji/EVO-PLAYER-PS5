@@ -271,3 +271,17 @@ output/release/
 # the uiview harness drops the provider seam's C objects here.
 output/provider-serve/
 output/uiview/obj/
+
+# Debris from the #90 / #91 hardware-debugging sessions. Kept on disk (some of
+# it is pulled-off-console evidence worth re-reading), just not tracked.
+/crash_note
+/temp.raw
+/crop_left.png
+/evo*.log
+/evo_shot_*
+/test_audio_decode.c
+tools/check_crash.py
+tools/dump_offsets.py
+# Test clips pulled off the console; whole movies, several MB to several GB.
+/*.ts
+/output/*.ts

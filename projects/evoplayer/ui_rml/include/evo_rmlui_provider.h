@@ -135,6 +135,8 @@ public:
     bool NeedsFrame() const { return m_dirty; }
     void ClearFrameFlag() { m_dirty = false; }
 
+    void SetLoading(bool loading, const std::string& status = "");
+
 private:
     EvoRmlProviderHost() = default;
     ~EvoRmlProviderHost() = default;
@@ -260,5 +262,6 @@ typedef struct evo_provider_selection {
 } evo_provider_selection_t;
 
 int  evo_rmlui_provider_take_selection(evo_provider_selection_t *out);
+void evo_rmlui_provider_set_loading(int loading, const char *status);
 
 } /* extern "C" */

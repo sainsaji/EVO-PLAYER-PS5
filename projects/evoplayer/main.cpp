@@ -25,7 +25,7 @@ static void evo_crash_handler(int sig, siginfo_t *si, void *ctx)
      * a known text address, so (word - anchor) symbolizes any code pointer
      * against output/app/.build/eboot.elf. */
     const unsigned long *raw = (const unsigned long *)ctx;
-    char buf[2048];
+    char buf[4096];
     int len = snprintf(buf, sizeof buf,
                        "CRASH signal=%d addr=%p anchor=%p",
                        sig, si ? si->si_addr : (void *)0,
@@ -38,6 +38,22 @@ static void evo_crash_handler(int sig, siginfo_t *si, void *ctx)
     }
     if (len > 0 && len < (int)sizeof buf - 2)
         len += snprintf(buf + len, sizeof buf - (size_t)len, "\n");
+
+    /* Dump stack from RSP (word 31 on PS5 AMD64) */
+    unsigned long rsp = raw[31];
+    if (rsp >= 0x10000 && rsp < 0x00007ffffffff000ULL && (rsp & 7) == 0) {
+        const unsigned long *stk = (const unsigned long *)rsp;
+        len += snprintf(buf + len, sizeof buf - (size_t)len, "STACK rsp=%lx:", rsp);
+        for (int i = 0; i < 20 && len < (int)sizeof buf - 32; ++i) {
+            int n = snprintf(buf + len, sizeof buf - (size_t)len, "%s%02d:%lx",
+                             (i % 5) ? " " : "\n", i, stk[i]);
+            if (n < 0) break;
+            len += n;
+        }
+        if (len > 0 && len < (int)sizeof buf - 2)
+            len += snprintf(buf + len, sizeof buf - (size_t)len, "\n");
+    }
+
     int fd = open("/mnt/usb0/evo.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0) {
         (void)write(fd, buf, (size_t)len);

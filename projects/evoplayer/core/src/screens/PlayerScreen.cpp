@@ -247,9 +247,15 @@ void PlayerScreen::update(double deltaMs) {
      */
     const bool reallyPaused = (evo_pb_is_paused() != 0) || playback->isPaused();
 
+    /* Hold the OSD active while video frames are still buffering into the decoder. */
+    const bool isBuffering = !playback->isMusicMode() && !video_frame_loaded;
+    if (isBuffering) {
+        m_controlsLastUsedMs = now;
+    }
+
     bool wantsControls = playback->isMusicMode() || ended ||
                          ((now - m_controlsLastUsedMs < 3500) || reallyPaused || m_showStatsForNerds) ||
-                         playback->isScrubbing();
+                         playback->isScrubbing() || isBuffering;
 
     if (playback->isScrubbing()) {
         m_playerFsm.postEvent(PlayerScreenEvent::StartScrub);
@@ -403,7 +409,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         if (titleStr.empty() && metaService) {
             metaService->cleanMediaTitle(playback->getCurrentFilePath(), titleStr, metaStr);
         } else if (playback->isLiveSource()) {
-            metaStr = "LIVE";
+            metaStr = (!video_frame_loaded) ? "BUFFERING..." : "LIVE";
         }
 
         evo_playback_osd_params_t p;
