@@ -18,6 +18,8 @@
 #include "evo_screens.h"
 #include "evo_addon.h"
 #include "addon_emby.h"
+#include "evo_provider.h"
+#include "evo_provider_bundle.h"
 #include "evo_changelog.h"
 #include "SDL_ps5tilemap.inc"
 
@@ -273,6 +275,116 @@ static void test_emby_url_and_config(void)
  * 5. Navigation & Focus Engine Tests
  * ========================================================================== */
 
+/*
+ * #90: the provider bundle path check.
+ *
+ * This is a trust boundary, not a tidiness check. A bundle's manifest names
+ * where each of its files is written and, later, what LoadDocument opens, and
+ * RmlUi's file interface reaches disk with a plain fopen() that validates
+ * nothing. An entry of "../../../data/evoplayer/emby.conf" getting past
+ * evo_bundle_path_safe() means a downloaded file written over stored
+ * credentials.
+ *
+ * The docs claim every one of these is "enforced, not assumed". This is what
+ * makes that sentence checkable.
+ */
+static void test_provider_bundle_path_safety(void)
+{
+    TEST_START("Providers: bundle path escape rejection");
+
+    /* Legitimate shapes a real bundle uses. */
+    static const char *ok[] = {
+        "main.rml", "main.rcss", "fonts/Inter.ttf", "img/logo.png",
+        "a/b/c/deep.rcss", "with-dash_and_underscore.rml",
+        "dotted.name.rcss",            /* dots are fine inside a component */
+        NULL
+    };
+    for (int i = 0; ok[i]; ++i)
+        TEST_ASSERT(evo_bundle_path_safe(ok[i]) == 1, ok[i]);
+
+    /* Every rejection the header promises. */
+    static const char *bad[] = {
+        NULL,                          /* placeholder, replaced below */
+        "",                            /* empty */
+        "/etc/passwd",                 /* absolute */
+        "C:/windows/win.ini",          /* drive letter */
+        "..",                          /* bare parent */
+        "../secret",                   /* escape up */
+        "a/../../b",                   /* escape mid-path */
+        "a/..",                        /* escape at the end */
+        "...",                         /* a longer run of dots is still dots */
+        "a/.../b",
+        "a//b",                        /* empty component */
+        "a/./b",                       /* single-dot component */
+        "dir\\file.rml",              /* backslash separator */
+        "file://main.rml",             /* URI scheme */
+        "evo:mem/art0-1",              /* would collide with the texture registry */
+        "http://host/x.rml",
+        "tab\there.rml",               /* control character */
+        NULL
+    };
+    /* index 0 is the NULL pointer case, which the loop below cannot express */
+    TEST_ASSERT(evo_bundle_path_safe(NULL) == 0, "NULL accepted");
+    for (int i = 1; bad[i]; ++i)
+        TEST_ASSERT(evo_bundle_path_safe(bad[i]) == 0, bad[i]);
+
+    /* Over the length cap. */
+    char too_long[EVO_BUNDLE_MAX_PATH + 16];
+    memset(too_long, 'a', sizeof too_long - 1);
+    too_long[sizeof too_long - 1] = 0;
+    TEST_ASSERT(evo_bundle_path_safe(too_long) == 0, "over-length path accepted");
+
+    /* A provider id is a directory name, so it is checked the same way. */
+    TEST_ASSERT(evo_provider_id_valid("iptv") == 1, "valid id rejected");
+    TEST_ASSERT(evo_provider_id_valid("real-debrid") == 1, "valid id rejected");
+    TEST_ASSERT(evo_provider_id_valid("") == 0, "empty id accepted");
+    TEST_ASSERT(evo_provider_id_valid("../x") == 0, "escaping id accepted");
+    TEST_ASSERT(evo_provider_id_valid("IPTV") == 0, "uppercase id accepted");
+    TEST_ASSERT(evo_provider_id_valid("a b") == 0, "id with space accepted");
+    TEST_ASSERT(evo_provider_id_valid("-lead") == 0, "leading dash accepted");
+    TEST_ASSERT(evo_provider_id_valid("trail_") == 0, "trailing underscore accepted");
+
+    /* evo_bundle_path() must refuse what path_safe refuses, and must not
+     * produce a path outside the provider's own directory. */
+    char out[512];
+    TEST_ASSERT(evo_bundle_path("iptv", "../escape.rml", out, sizeof out) != 0,
+                "evo_bundle_path allowed an escape");
+    TEST_ASSERT(evo_bundle_path("iptv", "main.rml", out, sizeof out) == 0,
+                "evo_bundle_path rejected a legitimate name");
+    TEST_ASSERT(strstr(out, "/providers/iptv/main.rml") != NULL,
+                "evo_bundle_path built the wrong path");
+
+    TEST_PASS();
+}
+
+/*
+ * #90: query-value escaping. Providers build query strings by hand, so a raw
+ * '&' or '=' in a search term changes the request rather than the term.
+ */
+static void test_provider_url_escape(void)
+{
+    TEST_START("Providers: URL query-value escaping");
+
+    char out[256];
+    TEST_ASSERT(evo_provider_url_escape("plain", out, sizeof out) == 5, "len");
+    TEST_ASSERT(strcmp(out, "plain") == 0, "unreserved text was altered");
+
+    TEST_ASSERT(evo_provider_url_escape("a b&c=d", out, sizeof out) > 0, "escape failed");
+    TEST_ASSERT(strcmp(out, "a%20b%26c%3Dd") == 0, "separators not escaped");
+
+    /* RFC 3986 unreserved set passes through untouched. */
+    TEST_ASSERT(evo_provider_url_escape("-_.~", out, sizeof out) == 4, "unreserved len");
+    TEST_ASSERT(strcmp(out, "-_.~") == 0, "unreserved set escaped");
+
+    /* Overflow is an error, never a truncated - and therefore different -
+     * query value. */
+    char tiny[4];
+    TEST_ASSERT(evo_provider_url_escape("abcdef", tiny, sizeof tiny) < 0,
+                "overflow silently truncated");
+
+    TEST_PASS();
+}
+
 static void test_navigation_grid_and_focus(void)
 {
     TEST_START("Navigation Engine: Grid & Focus Bounds Clamping");
@@ -351,6 +463,8 @@ int main(void)
     test_direct_mem_lifecycle();
     test_clean_media_title_resolution();
     test_emby_url_and_config();
+    test_provider_bundle_path_safety();
+    test_provider_url_escape();
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
     

@@ -266,3 +266,8 @@ output/hdr-clip/
 output/ffprobe-minimal
 output/probe/
 output/release/
+
+# #90: the provider bundle server stages a copy of assets/providers/ here, and
+# the uiview harness drops the provider seam's C objects here.
+output/provider-serve/
+output/uiview/obj/

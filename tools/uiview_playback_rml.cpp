@@ -11,6 +11,11 @@
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
 #include "../projects/evoplayer/include/evo_features.h"
 #include "../projects/evoplayer/include/evo_changelog.h"
+/* #90: the provider host, driven for real - see render_provider_screens(). */
+#include "../projects/evoplayer/ui_rml/include/evo_rmlui_provider.h"
+extern "C" {
+#include "../projects/evoplayer/addons/include/evo_net.h"
+}
 #include <cstdio>
 #include <cstdlib>
 
@@ -1185,6 +1190,142 @@ static void render_subtitles_screen(std::vector<uint32_t>& fb, int width, int he
 /* ------------------------------------------------------------------
  * #16 stress: long strings on the screens the issue calls out.
  * ------------------------------------------------------------------ */
+/* =========================================================================
+ * #90: the provider host screen.
+ *
+ * This fixture is the whole reason provider-UI iteration can stay off
+ * hardware, and it is deliberately NOT a mock. It drives the real thing:
+ *
+ *   - the real evo_provider_iptv vtable, reading a real iptv.conf
+ *   - the real evo_net HTTP client, against a real HTTP server
+ *     (tools/uiview_playback_rml.sh starts one on 127.0.0.1)
+ *   - the real M3U parser, so the rows are parsed from a real playlist
+ *   - the real bundle fetch, hash verification and cache write
+ *   - the real Rml data model, the real provider document and the
+ *     provider's own RCSS
+ *
+ * The only host substitutions are the two the dev image forces, both
+ * documented where they are made: NO_OPENSSL (no https) and
+ * EVO_PROVIDER_ART_NO_DECODE (no host FFmpeg, so posters render as the
+ * no-artwork branch).
+ *
+ * Two shots: the provider's own bundle, and the embedded fallback skin with
+ * a visible failure reason - because "a corrupt bundle falls back with a
+ * message, never a blank screen" is a #90 acceptance criterion and a
+ * criterion nobody can see is a criterion nobody checks.
+ * ========================================================================= */
+static void pump_provider(std::vector<uint32_t>& fb, int width, int height,
+                          int frames) {
+    for (int i = 0; i < frames; ++i) {
+        evo_net_poll();
+        evo_rmlui_provider_tick();
+        std::fill(fb.begin(), fb.end(), 0xFF000000);
+        evo_rmlui_provider_render(fb.data(), width, height);
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+}
+
+static void render_provider_screens(std::vector<uint32_t>& fb, int width, int height) {
+    const char* root = std::getenv("EVO_DATA_DIR_OVERRIDE");
+    if (!root || !*root) {
+        std::cerr << "uiview: EVO_DATA_DIR_OVERRIDE unset - skipping provider "
+                     "screens (run through tools/uiview_playback_rml.sh)"
+                  << std::endl;
+        return;
+    }
+
+    if (evo_provider_mgr_init() <= 0) {
+        std::cerr << "uiview: no providers registered" << std::endl;
+        return;
+    }
+    /* iptv.conf was staged by the shell script; is_configured() is true, but
+     * the persisted enable flag defaults from it only on first load. */
+    evo_provider_mgr_rebind();
+    evo_provider_set_enabled("iptv", 1);
+
+    /* --- the provider's own bundle ------------------------------------- */
+    if (evo_rmlui_provider_open("iptv", width, height)) {
+        /* Enough frames for: the manifest GET, each asset GET, the cache
+         * write, the reopen onto the real document, and the playlist GET. */
+        pump_provider(fb, width, height, 90);
+        /* And a few more, so the initial focus has definitely been seeded
+         * before the first shot - it is taken on the render after the rows
+         * arrive, and racing it produces a ring-less baseline. */
+        pump_provider(fb, width, height, 4);
+        evo_rmlui_provider_render(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_provider_iptv.bmp", fb.data(), width, height);
+        std::cerr << "uiview: ok -> rml_provider_iptv" << std::endl;
+
+        /*
+         * Two presses to the right. This is RmlUi's own spatial navigation
+         * moving its own focus through the provider's own grid - the fixture
+         * does not know how many cards there are per line and could not say
+         * which one ends up focused.
+         */
+        evo_rmlui_provider_key(3 /* KeyRight */);
+        pump_provider(fb, width, height, 2);
+        evo_rmlui_provider_key(3 /* KeyRight */);
+        pump_provider(fb, width, height, 2);
+        evo_rmlui_provider_render(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_provider_iptv_focus.bmp", fb.data(), width, height);
+        std::cerr << "uiview: ok -> rml_provider_iptv_focus" << std::endl;
+
+        /*
+         * Activate the focused group. Exercises the whole chain: the bundle's
+         * data-event-click, the host's activate() callback, the folder push,
+         * a second list_catalog against the parsed playlist, and the channel
+         * treatment the bundle draws for a non-folder row.
+         */
+        evo_rmlui_provider_key(4 /* KeyAccept */);
+        pump_provider(fb, width, height, 20);
+        evo_rmlui_provider_render(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_provider_iptv_channels.bmp", fb.data(), width, height);
+        std::cerr << "uiview: ok -> rml_provider_iptv_channels" << std::endl;
+
+        evo_rmlui_provider_close();
+    } else {
+        std::cerr << "uiview: provider host would not open for 'iptv'" << std::endl;
+    }
+
+    /* --- the embedded fallback skin, with a reason on it ---------------- */
+    {
+        /* Point the provider at a bundle URL that is not there. The cache was
+         * just populated, so it is cleared first - otherwise the cached copy
+         * would (correctly) render and there would be nothing to see. */
+        evo_bundle_clear("iptv");
+        char conf[768];
+        std::snprintf(conf, sizeof conf, "%s/iptv.conf", root);
+        FILE* f = std::fopen(conf, "r");
+        std::string keep;
+        if (f) {
+            char line[1024];
+            while (std::fgets(line, sizeof line, f)) {
+                if (std::strncmp(line, "bundle=", 7) == 0) continue;
+                keep += line;
+            }
+            std::fclose(f);
+        }
+        f = std::fopen(conf, "w");
+        if (f) {
+            std::fputs(keep.c_str(), f);
+            std::fputs("bundle=http://127.0.0.1:1/nothing/here\n", f);
+            std::fclose(f);
+        }
+        evo_provider_mgr_rebind();
+
+        if (evo_rmlui_provider_open("iptv", width, height)) {
+            pump_provider(fb, width, height, 60);
+            evo_rmlui_provider_render(fb.data(), width, height);
+            save_bmp_24("output/uiview/rml_provider_fallback.bmp", fb.data(), width, height);
+            std::cerr << "uiview: ok -> rml_provider_fallback" << std::endl;
+            evo_rmlui_provider_close();
+        }
+    }
+
+    evo_provider_art_clear();
+    evo_provider_mgr_shutdown();
+}
+
 static void render_stress_screens(std::vector<uint32_t>& fb, int width, int height) {
     /* Player OSD: 55-char title + 76-char metadata must ellipsise, never
      * collide with the badge rack. */
@@ -1545,6 +1686,7 @@ int main(int argc, char** argv) {
     render_mediainfo_screen(fb, width, height);
     render_subtitles_screen(fb, width, height);
     render_stress_screens(fb, width, height);
+    render_provider_screens(fb, width, height);
 
     /* #81: virtual keyboard modal over a screen */
     {

@@ -39,6 +39,14 @@ SRCS=(
     "${ADDONS}/src/addon_emby.c"
     "${ADDONS}/src/evo_net.c"
     "${ADDONS}/src/cJSON.c"
+    # #90: the provider seam. Here so that -DNO_OPENSSL=1 stays a build that
+    # works rather than a build nobody tries - evo_net's TLS is the only part
+    # of this layer that needs OpenSSL, and everything else has to compile and
+    # link without it.
+    "${ADDONS}/src/evo_provider_mgr.c"
+    "${ADDONS}/src/evo_provider_bundle.c"
+    "${ADDONS}/src/provider_iptv.c"
+    "${ADDONS}/src/provider_emby.c"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a
