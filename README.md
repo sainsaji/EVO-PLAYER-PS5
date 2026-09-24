@@ -219,7 +219,7 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 | [docs/rmlui-integration-guide.md](docs/ui/rmlui-integration-guide.md) | The RmlUi interface layer |
 | [docs/evo-pro/agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) | GPU rendering on bare-metal `sceAgc` |
 | [docs/evo-pro/native-decode-plan.md](docs/evo-pro/native-decode-plan.md) | Hardware decode via `sceVideodec2` |
-| [docs/addons-emby-nuvio.md](docs/addons/addons-emby-nuvio.md) | Emby and streaming add-ons |
+| [docs/addons/provider-architecture.md](docs/addons/provider-architecture.md) | Network providers: the plugin seam and its runtime UI bundles |
 | [docs/theming.md](docs/ui/theming.md) | Theme format and tokens |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 

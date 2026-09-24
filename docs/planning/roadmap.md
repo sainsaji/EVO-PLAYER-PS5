@@ -177,7 +177,7 @@ Tagged `independent`. No cross-dependencies; each touches an isolated subsystem.
 | **#52** | Stand up the "EVO Player Roadmap" GitHub Project board — tooling landed (`f7a340e`); needs `gh auth refresh -s project`, one script run, and the views + built-in workflows set up in the UI | `scripts/setup-github-project.sh`, `.github/workflows/add-to-project.yml`, `docs/project-tracking.md` |
 | **#53** | `main.c` carve-up, **Track B** — extract `evo_settings` / `evo_osd` / `evo_media_meta` / `evo_browser` / per-screen draw etc. as leaf modules (pure moves, no behaviour change). `main.c` is ~12.9k lines and links the whole runtime, so its logic is at **0% coverage**; this is the lever on that. Blocks #50's `main.c` portion. `modularisation` label with #49 | `docs/modularisation-plan.md` (§ Track B, § Rules), `projects/evoplayer/main.c` (`/* PROSPERO_*_START/END */` markers), `projects/evoplayer/Makefile` (`_SRCS`), `tools/{bench,uiview}.sh` (parity checks) |
 | **#33** | Clean up the unattended hw-test harness — **partly done**: `tools/evo-remote.sh` (scriptable `play`/`seek`/`watch` over FTP) + `src/evo_usb_remote.c` (`-DEVO_USB_REMOTE`) replaced the compile-time autoplay; `note()` USB log gated to `-DEVO_VDEC_LOG`; payload build now invalidates the app cflags stamp. Remaining: fully hands-off launch (shsrv), `app_ctl` launch fix | `tools/evo-remote.sh`, `src/evo_usb_remote.c`, `scripts/package-app.sh` (`--usb-remote`) |
-| **#9** | Emby shows raw stream URL, not the title | `docs/addons-emby-nuvio.md`; `projects/evoplayer/addons/src/addon_emby.c`, `ui_rml` list rendering (`evo_rmlui_bridge.cpp` / `evo_rmlui_app.cpp` list path) |
+| **#9** | Emby shows raw stream URL, not the title | `docs/addons/provider-architecture.md` §8; fixed by #90 scope 15 - the OSD reads `PlaybackController::getDisplayTitle()` and no URL is persisted |
 | **#8** | Codec-sweep decode latency / drop / colour metrics — **instrumentation + runner landed, hw-run pending**. Note the references below are post-GL-4: `tools/bench.sh` and the CPU converters are gone, so the "convert ms" column is now the GL present cost, and the decode timers live in the `evo_vdec` seam (both backends, = #38's A/B) | `docs/validation.md` § *Codec sweep*, `docs/tooling.md`; `media/src/evo_sweep.c`, `media/src/evo_vdec_ffmpeg.c` (seam timers), `tools/sweep_run.py`, `tools/sweep_report.py`, `tools/evo-remote.sh sweep` |
 | **#42** | Universal subtitle cue counts — demux-probe count for non-mkvmerge containers so decoy tracks lose the ranking (`prospero_subtitle_declared_cues` / `_score_stream`) | `docs/backlog.md` §6; `media/src/evo_subtitle.c`, `media/src/prospero_thumbnail.c` (probe pattern), `main.c` picker path |
 | **#5** | Multi-thread the swscale fallback | `docs/converter-perf.md`; `media/src/evo_playback.c` (swscale fallback), `pp/src/pp_converter_parallel.c` (persistent-pool pattern) |
@@ -309,6 +309,56 @@ work as discrete stories:
 - Reads: `docs/rmlui-integration-guide.md` (§7 per-screen parity specs),
   `docs/ui-handoff.md`, `docs/theming.md`, `docs/icon-swap-handoff.md`
 - Files: `projects/evoplayer/{ui_rml,assets/rml,ui/src}/`, `main.c`, `Makefile` (`UI_SRCS`)
+
+---
+
+### Network providers — label **`addons`** *(#90 is the seam; no umbrella)*
+
+EVO is a local-USB player. The plan is five sources — **Emby, Jellyfin, Torbox,
+Real-Debrid and IPTV** — behind one plugin-like seam.
+
+The defining constraint: **the 0.6/0.7 Emby integration was wrong because EVO
+drew a custom UI for it.** A provider brings its *own* UI, fetched at runtime,
+and EVO supplies playback rather than presentation.
+
+| Story | What | State |
+|---|---|---|
+| **#90** | The seam itself. FFmpeg network on; `evo_net` hardened; `evo_provider_t` + registry + resolver chain; IPTV provider; runtime UI bundle format, fetch, cache and limits; a per-provider Rml context with **RmlUi data binding and native focus** (both first uses in this codebase); remote artwork through the `evo:mem/` registry; `evo_stream_io_open()` revived as the single open path; playback source identity (fixes #9); `EVO_ENABLE_PROVIDERS`; the shared rail slot wired to `ProviderHostScreen` | code complete, **host-verified**, hw-verify-pending |
+| ~~#9~~ | Fixed by #90 scope 15 — the OSD reads the provider's title, and no token-bearing URL is persisted to Recent or Favorites | closed by #90 |
+| Emby screens | Emby setup + browse as an Emby-authored bundle, and the `EVO_ENABLE_PROVIDERS` flip. The logic seam is already proven against Emby with its UI off | open, follows #90 |
+| Jellyfin | `provider_emby.c` with a different auth header and id | open |
+| Torbox | resolver only — `CAP_RESOLVE`, no catalog | open |
+| Real-Debrid | resolver only | open |
+| Stremio / Nuvio v3 | `/manifest.json` + `/stream/…`; an `infoHash` is the `needs_resolver` case the chain exists for | open |
+| Full XMLTV EPG grid | #90 ships now-and-next only | open |
+
+**#90's remaining work is hardware.** The host renderer proves the bundle
+fetch, the data binding, D-pad focus, activation and the fallback skin
+(`rml_provider_{iptv,iptv_focus,iptv_channels,fallback}`), but network playback
+and the sceAgc RCSS render cannot be proven without a console:
+
+1. boot with network FFmpeg, play a local USB file — no regression
+2. fetch + cache the bundle; confirm the tree under
+   `/data/evoplayer/providers/iptv/` and the load lines in `evo.log`
+3. the provider document under sceAgc with its own RCSS — watch for the
+   silent-mis-render class the AGC backend is prone to
+4. D-pad inside the document; Back returns to the rail
+5. an HTTP M3U8 channel, then an HTTPS one — TLS handshake on-console
+6. pull the network mid-stream — reconnect or a clean error, no hang, no panic
+7. a 500+ channel playlist — frame rate holds with a data-bound list
+
+Test rig: `./tools/provider-server.sh` on the Windows **host** (not the
+container — the PS5 cannot reach a container listener on Windows bridge
+networking).
+
+- Reads: [provider-architecture.md](../addons/provider-architecture.md) (the
+  seam, the bundle format, and the measured RCSS/binding rules a bundle must
+  follow), [../hardware/networking.md](../hardware/networking.md),
+  [../evo-pro/agc-bare-metal-ui.md](../evo-pro/agc-bare-metal-ui.md)
+- Files: `projects/evoplayer/addons/`, `ui_rml/src/evo_rmlui_provider*.cpp`,
+  `core/src/screens/ProviderHostScreen.cpp`, `media/src/evo_stream_io.c`,
+  `core/src/services/PlaybackController.cpp`, `scripts/build-ffmpeg.sh`,
+  `assets/providers/iptv/`, `tools/provider-server.sh`
 
 ---
 

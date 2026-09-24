@@ -82,6 +82,14 @@ docker compose run --rm ps5-dev ./scripts/build-evoplayer.sh   # never deploys
 
 # render the UI on the host, no console needed (use this for any layout question)
 ./tools/uiview.sh --all    # every RmlUi screen -> output/uiview/rml_*.png
+# ...including the provider screens: the harness starts a loopback HTTP server
+# and drives the REAL provider (evo_net, M3U parse, bundle fetch, data binding,
+# D-pad focus) - rml_provider_{iptv,iptv_focus,iptv_channels,fallback}.
+
+# serve provider UI bundles + a test playlist TO THE CONSOLE (#90).
+# Runs on the HOST, never in the container: the PS5 cannot reach a container
+# listener on Windows bridge networking (docs/hardware/networking.md).
+./tools/provider-server.sh
 ./tools/uiplay.sh          # contact sheet of them all -> output/uiplay/index.html
 
 # watch the console log
@@ -128,9 +136,22 @@ projects/evoplayer/
                 Off-device the same sources build against the CPU rasteriser.
                 src/rmlui_patch/ is one upstream RmlUi TU with a finer corner
                 tessellation, swapped into librmlui.a at package time (#68)
+                evo_rmlui_provider*.cpp is the provider seam's render half:
+                its own Rml context, RmlUi data binding + native focus, and
+                remote artwork into the evo:mem/ registry (#90)
+  addons/       the network half: evo_net (HTTP/TLS), cJSON, and the provider
+                seam — evo_provider_t, the registry + resolver chain, the UI
+                bundle fetch/verify/cache, provider_iptv, provider_emby.
+                A provider's LOOK is not here: it is fetched at runtime.
+                → docs/addons/provider-architecture.md
   assets/rml/   .rml/.rcss documents for the RmlUi screens
 scripts/        build/deploy — see docs/tooling.md
-tools/          uiview, klog, shot, evo-remote, gen_icons — see docs/tooling.md
+tools/          uiview, klog, shot, evo-remote, gen_icons, provider-server
+                — see docs/tooling.md
+assets/providers/
+                provider UI bundles, SERVED not embedded. Checked in only
+                because IPTV is the provider #90 proves the seam against; a
+                third-party bundle lives on that provider's server (#90)
 docs/           everything below
 ```
 
@@ -182,7 +203,7 @@ version of this table.
 | [converter-perf.md](docs/research/converter-perf.md) | **History** — the CPU YUV→BGRA converters and `bench.sh`, both deleted when the GPU took over present. Kept for the BT.601 reference matrix |
 | [networking.md](docs/hardware/networking.md) | Console services, jailbreak-lapsed symptoms |
 | [media-tile.md](docs/ui/media-tile.md) | Media tile / metadata handling |
-| [addons-emby-nuvio.md](docs/addons/addons-emby-nuvio.md) | Emby/Nuvio addon integration |
+| [provider-architecture.md](docs/addons/provider-architecture.md) | **The provider seam (#90)** - the vtable, the runtime UI bundle format, the RCSS/binding rules a bundle must follow, and the playback identity |
 | [packaging.md](docs/build/packaging.md) | PKG packaging (app-module `.ffpfsc` is in [tooling.md](docs/build/tooling.md#ffpfsc--the-only-route)) |
 | [validation.md](docs/build/validation.md) | Validation checklist |
 | [modularisation-plan.md](docs/architecture/modularisation-plan.md) | `main.c` carve-up — in progress; Track A is the decoder seam that unblocks native decode |

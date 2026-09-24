@@ -586,6 +586,71 @@ hardware screenshot had happened to capture.
 
 ---
 
+## `tools/provider-server.sh` — serving a provider UI bundle (#90)
+
+A provider brings its own UI: `.rml`/`.rcss`/fonts/images fetched over HTTP at
+runtime and cached under `/data/evoplayer/providers/<id>/`. This serves those
+bundles, plus a test M3U playlist and an XMLTV file, to the console.
+
+```bash
+./tools/provider-server.sh [--port 8099] [--host <ip>]
+```
+
+**It runs on the host, not in the dev container, and refuses to start if it
+detects `/.dockerenv`.** Every other script here re-execs itself through
+`docker compose`; this one cannot, because the thing that has to be reachable is
+the listening socket, and per
+[../hardware/networking.md](../hardware/networking.md) the PS5 cannot reach into
+the container on Windows bridge networking. A server started inside would be
+invisible to the console even though `curl` from inside works — which looks
+exactly like a broken bundle.
+
+What it does:
+
+- regenerates each bundle's `manifest.json` (`tools/gen_provider_manifest.py`)
+  and stages `assets/providers/*` under `/ui/<id>/`
+- serves a test playlist at `/media/iptv.m3u` — six channels, three
+  `group-title` groups, and one deliberately dead entry, because "pull the
+  network mid-stream → a clean error, not a hang" needs something to fail
+  against. Drop a real playlist at `tools/testdata/iptv.m3u` and it wins.
+- generates `/media/epg.xml` with now/next windows relative to start time, so
+  the EPG chips are always populated
+- prints the LAN URL and the `iptv.conf` to paste over FTP into
+  `/data/evoplayer/`
+
+Regenerating the manifest on every start is the point: it carries a sha256 per
+file and a `version` EVO compares against its cache, so serving a stale manifest
+means an edited `.rcss` is either rejected for a hash mismatch or silently not
+picked up — and both look like the edit not working.
+
+A Windows Firewall prompt on the first run is normal and has to be allowed for
+Private networks. Check reachability from another machine before blaming the
+console:
+
+```bash
+curl -s http://<host>:8099/ui/iptv/manifest.json | head -5
+```
+
+### `tools/gen_provider_manifest.py`
+
+```bash
+python3 tools/gen_provider_manifest.py assets/providers/iptv
+```
+
+Rebuilds a bundle's `manifest.json` from whatever is in the directory: every
+file's byte count and sha256, a fresh UTC `version`, and the non-derivable
+fields (`id`, `name`, `entry`, `data_model`, `api_version`) carried over from
+the existing manifest. It also enforces EVO's own limits at authoring time — 64
+files, 2 MiB per file, 8 MiB total, and an allow-list of extensions — so an
+oversized or code-carrying bundle is a message here rather than a fallback skin
+on the console.
+
+The full format, the binding contract and the measured RCSS rules a bundle has
+to follow are in
+[../addons/provider-architecture.md](../addons/provider-architecture.md).
+
+---
+
 ## `tools/evo-remote.sh sweep` — the codec sweep, measured (#8)
 
 The 29-file test set, played end to end with numbers attached instead of

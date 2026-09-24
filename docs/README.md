@@ -72,7 +72,7 @@ the reasoning survives, not to be acted on.
 
 | | |
 |---|---|
-| [addons-emby-nuvio.md](addons/addons-emby-nuvio.md) | Emby and Nuvio. **Emby is disabled in the UI as of 0.10.0** |
+| [provider-architecture.md](addons/provider-architecture.md) | **The provider seam (#90).** The `evo_provider_t` vtable, the runtime-fetched UI bundle format, the binding and RCSS rules a bundle must follow, and how a provider item reaches the player. Replaces the payload-era `addons-emby-nuvio.md` |
 
 ## Top level
 

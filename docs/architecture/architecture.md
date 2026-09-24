@@ -151,7 +151,7 @@ EVO Player/
     ├── converter-perf.md       host benchmarking, and what it found
     ├── sdk-audit.md            the full SDK audit
     ├── networking.md  packaging.md  gpu-notes.md
-    ├── addons-emby-nuvio.md    streaming & addon research (Emby, Nuvio, Stremio)
+    ├── provider-architecture.md the provider seam: vtable + runtime UI bundles
     ├── native-media-research.md  proprietary.md  prosperoplayer-baseline.md
     ├── baseline-defects.md     upstream's two defects (both fixed - history)
     └── validation.md           what is proven vs. what is not
@@ -166,7 +166,7 @@ EVO Player/
 | work on the UI | [ui-handoff.md](../ui/ui-handoff.md), then [theming.md](../ui/theming.md) |
 | work on playback performance | [converter-perf.md](../research/converter-perf.md), then [gpu-notes.md](../hardware/gpu-notes.md) |
 | get decode off the CPU | [hardware-decode.md](../hardware/hardware-decode.md), then its [review](../hardware/hardware-decode-review.md) |
-| connect to streaming servers / addons | [addons-emby-nuvio.md](../addons/addons-emby-nuvio.md) |
+| connect to streaming servers / addons | [provider-architecture.md](../addons/provider-architecture.md) |
 | know what is actually proven | [validation.md](../build/validation.md) |
 
 Source lives on Windows via a bind mount; heavy build trees and ccache live on
