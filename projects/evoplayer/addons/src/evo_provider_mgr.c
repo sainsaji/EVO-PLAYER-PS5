@@ -109,6 +109,8 @@ static int vtable_ok(const evo_provider_t *p, const char **why)
                                      *why = "CAP_PROGRESS no report_progress"; return 0; }
     if ((p->caps & EVO_PROVIDER_CAP_UI)       && !p->ui_bundle_url) {
                                      *why = "CAP_UI no ui_bundle_url"; return 0; }
+    if ((p->caps & EVO_PROVIDER_CAP_CONFIG)  && (!p->get_source || !p->set_source)) {
+                                     *why = "CAP_CONFIG no get/set_source"; return 0; }
 
     /* A provider that can do nothing at all is a table mistake. */
     if (p->caps == 0)              { *why = "no capabilities";    return 0; }

@@ -48,6 +48,22 @@ public:
 private:
     void startSelected();
 
+    /*
+     * Open the virtual keyboard on the hosted provider's source string - an
+     * M3U URL for IPTV - and hand whatever comes back to set_source().
+     *
+     * Deliberately generic: it goes through EVO_PROVIDER_CAP_CONFIG, so this
+     * screen still does not know which provider it is hosting. A richer setup
+     * flow (an Xtream host/user/password triple, Emby credentials) belongs in
+     * that provider's own screen; this is the one-line case, which is what an
+     * M3U link is.
+     *
+     * It must be the VIRTUAL keyboard: the native PS5 IME crashes the app
+     * module (#34).
+     */
+    void openSourceEditor();
+    static void OnSourceSubmitted(const char* text, void* userdata);
+
     /* The provider this screen is currently hosting. Held so onExit can close
      * the right host even if the pending id has since changed. */
     std::string m_providerId;
@@ -55,6 +71,10 @@ private:
     /* A resolve is in flight for the activated item; another activation is
      * ignored until it lands, so a double press cannot start two playbacks. */
     bool m_resolving = false;
+    /* Two-frame deferral so the "Tuning..." spinner and toast render to the
+     * display before startPlaybackSource() blocks the thread on network I/O. */
+    bool m_tunePending = false;
+    int  m_tuneFrames = 0;
 };
 
 } // namespace evo

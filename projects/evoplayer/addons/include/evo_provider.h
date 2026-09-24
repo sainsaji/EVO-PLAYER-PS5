@@ -106,7 +106,10 @@ typedef enum {
     /* The catalog contains live streams: no duration, not seekable. The OSD,
      * the resume store and the seek path all assume a seekable file, so this
      * has to be visible to the player and not inferred from a failed seek. */
-    EVO_PROVIDER_CAP_LIVE     = 1u << 6
+    EVO_PROVIDER_CAP_LIVE     = 1u << 6,
+    /* get_source / set_source: the provider can be pointed at a different
+     * source at runtime, from a UI, and persists it itself. */
+    EVO_PROVIDER_CAP_CONFIG   = 1u << 7
 } evo_provider_caps_t;
 
 /* ------------------------------------------------------------------------- */
@@ -265,6 +268,24 @@ typedef struct evo_provider {
      * provider's own config buffer - read immediately, do not stash.
      */
     const char *(*ui_bundle_url)(void);
+
+    /*
+     * CAP_CONFIG. The provider's PRIMARY source string, as one line of text a
+     * user can type: an M3U URL for IPTV, a server host for Emby.
+     *
+     * This exists so the generic provider screen can offer "point this at your
+     * service" without knowing which provider it is hosting - the host must not
+     * include a provider-specific header, or the seam is gone. It is
+     * deliberately one string and not a config schema: anything richer (an
+     * Xtream host/user/password triple, Emby credentials) belongs in that
+     * provider's own setup screen, which is a separate story.
+     *
+     * set_source persists the value itself and invalidates whatever it had
+     * cached, so the next list_catalog re-reads from the new source. Returns 0
+     * on success.
+     */
+    const char *(*get_source)(void);
+    int         (*set_source)(const char *value);
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */

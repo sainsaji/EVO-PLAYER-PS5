@@ -6,6 +6,7 @@
 #include "evo_rmlui_provider.h"
 #include "evo_rmlui_bridge.h"   /* evo_rmlui_render_nav_overlay */
 #include "evo_feedback.h"
+#include "evo_keyboard.h"
 #include "evo_toast.h"
 
 extern "C" {
@@ -57,6 +58,7 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
     if (!ok || count <= 0 || !choices) {
         evo_bt("provider: resolve failed for %s/%s", pp->provider, pp->item_id);
         toast("STREAM", "That item could not be played");
+        evo_rmlui_provider_set_loading(0, "");
         return;
     }
 
@@ -77,16 +79,21 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
     src.is_live  = (pp->is_live || c.is_live) ? true : false;
 
     auto pb = Application::getInstance().getPlaybackController();
-    if (!pb) return;
+    if (!pb) {
+        evo_rmlui_provider_set_loading(0, "");
+        return;
+    }
 
     if (!pb->startPlaybackSource(src, 0.0)) {
         /* startPlaybackSource has already toasted the reason. Stay on the
          * provider screen rather than navigating to a player with nothing in
          * it - a black Player screen with working transport controls is the
          * most confusing possible outcome. */
+        evo_rmlui_provider_set_loading(0, "");
         return;
     }
 
+    evo_rmlui_provider_set_loading(0, "");
     if (auto sm = Application::getInstance().getScreenManager())
         sm->navigateTo(ScreenId::Player);
 }
@@ -106,6 +113,8 @@ void ProviderHostScreen::onEnter()
 {
     StatefulScreen::onEnter();
     m_resolving = false;
+    m_tunePending = false;
+    m_tuneFrames = 0;
 
     std::string want = g_pendingProvider;
     if (want.empty()) {
@@ -121,9 +130,22 @@ void ProviderHostScreen::onEnter()
     }
 
     if (want.empty()) {
-        /* Nothing configured. Not an error - it is the state a fresh install
-         * is in - so say so and send the user back rather than opening an
-         * empty host. */
+        /*
+         * Nothing enabled. Rather than bounce the user to Settings - which has
+         * no provider setup in it - open the first provider that CAN be
+         * configured from here. Its screen shows the "not set up yet" status
+         * and Triangle opens the keyboard, so the dead end becomes the setup
+         * entry point.
+         */
+        for (int i = 0; i < evo_provider_count(); ++i) {
+            const evo_provider_t* p = evo_provider_at(i);
+            if (p && (p->caps & EVO_PROVIDER_CAP_CONFIG)) { want = p->id; break; }
+        }
+    }
+
+    if (want.empty()) {
+        /* No provider can even be configured. Not an error - it is the state a
+         * build with every provider compiled out is in. */
         toast("PROVIDERS", "No provider is set up yet");
         if (auto sm = Application::getInstance().getScreenManager())
             sm->navigateTo(ScreenId::Settings);
@@ -131,8 +153,10 @@ void ProviderHostScreen::onEnter()
     }
 
     m_providerId = want;
+    evo_bt("prov_screen: onEnter calling evo_rmlui_provider_open('%s')", m_providerId.c_str());
     m_opened = evo_rmlui_provider_open(m_providerId.c_str(),
                                         DisplayWidth, DisplayHeight) != 0;
+    evo_bt("prov_screen: onEnter evo_rmlui_provider_open returned opened=%d", m_opened ? 1 : 0);
     if (!m_opened) {
         evo_bt("provider: could not open host for '%s'", m_providerId.c_str());
         toast("PROVIDERS", "That provider is not available");
@@ -143,6 +167,9 @@ void ProviderHostScreen::onEnter()
 
 void ProviderHostScreen::onExit()
 {
+    m_tunePending = false;
+    m_tuneFrames = 0;
+    evo_rmlui_provider_set_loading(0, "");
     if (m_opened) {
         evo_rmlui_provider_close();
         m_opened = false;
@@ -188,7 +215,7 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     }
 
     if (pressed & PadButtons::Cross) {
-        if (m_resolving) return true;      /* one activation at a time */
+        if (m_resolving || m_tunePending) return true;      /* one activation at a time */
         evo_feedback(EVO_FB_OPEN);
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeyAccept) != 0;
     }
@@ -211,11 +238,93 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     if (pressed & PadButtons::Square)
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeySearch) != 0;
 
+    if (pressed & PadButtons::Triangle) {
+        openSourceEditor();
+        return true;
+    }
+
     return false;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Source editing - the typed M3U URL                                        */
+/* ------------------------------------------------------------------------- */
+
+void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
+{
+    auto* self = static_cast<ProviderHostScreen*>(userdata);
+    if (!self) return;
+
+    const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
+    if (!p || !(p->caps & EVO_PROVIDER_CAP_CONFIG) || !p->set_source) return;
+
+    /* Trim - a keyboard picks up trailing spaces very easily, and a URL with
+     * one on the end fails in a way that looks like the URL being wrong. */
+    std::string value = text ? text : "";
+    size_t b = value.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) {
+        value.clear();
+    } else {
+        size_t e = value.find_last_not_of(" \t\r\n");
+        value = value.substr(b, e - b + 1);
+    }
+
+    if (p->set_source(value.c_str()) != 0) {
+        toast("PROVIDERS", "That does not look like an M3U URL");
+        return;
+    }
+
+    /* Persisted by the provider. Enable it now that it has a source, then
+     * reopen the host so the catalog is re-fetched from the new one. */
+    evo_provider_set_enabled(p->id, p->is_configured() ? 1 : 0);
+    toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
+
+    std::string id = self->m_providerId;
+    if (self->m_opened) {
+        evo_rmlui_provider_close();
+        self->m_opened = false;
+    }
+    self->m_opened = evo_rmlui_provider_open(id.c_str(),
+                                             DisplayWidth, DisplayHeight) != 0;
+}
+
+void ProviderHostScreen::openSourceEditor()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p || !(p->caps & EVO_PROVIDER_CAP_CONFIG) || !p->get_source) {
+        toast("PROVIDERS", "This provider has no playlist to set");
+        return;
+    }
+
+    const char* current = p->get_source();
+    char title[96];
+    std::snprintf(title, sizeof title, "%s playlist URL", p->name);
+
+    evo_feedback(EVO_FB_OPEN);
+    /* EVO_PROVIDER_MAX_URL is 2048, but a keyboard field that long is not
+     * usable and no real M3U link needs it; 512 covers an Xtream get.php URL
+     * with credentials and leaves the field navigable. */
+    evo_keyboard_open(title, current ? current : "", 512,
+                      &ProviderHostScreen::OnSourceSubmitted, this);
 }
 
 void ProviderHostScreen::startSelected()
 {
+    if (m_tunePending) {
+        m_tuneFrames++;
+        if (m_tuneFrames >= 2) {
+            m_tunePending = false;
+            m_resolving = true;
+            if (evo_provider_resolve_chain(g_pending.provider, g_pending.item_id,
+                                            on_resolved, &g_pending) != 0) {
+                m_resolving = false;
+                toast("STREAM", "That item could not be played");
+                evo_rmlui_provider_set_loading(0, "");
+            }
+        }
+        return;
+    }
+
     evo_provider_selection_t sel;
     if (!evo_rmlui_provider_take_selection(&sel)) return;
     if (m_resolving) return;
@@ -227,19 +336,13 @@ void ProviderHostScreen::startSelected()
     g_pending.is_live = sel.is_live;
     g_resolve_finished = false;
 
-    /*
-     * The resolver chain, not the provider's resolve() directly. That is what
-     * lets a catalog item whose "URL" is a magnet be handed to a debrid
-     * provider for the playable one, without either provider knowing the other
-     * exists - and it costs nothing when, as with IPTV, the first answer is
-     * already playable.
-     */
-    m_resolving = true;
-    if (evo_provider_resolve_chain(sel.provider_id, sel.item_id,
-                                    on_resolved, &g_pending) != 0) {
-        m_resolving = false;
-        toast("STREAM", "That item could not be played");
-    }
+    m_tunePending = true;
+    m_tuneFrames = 0;
+
+    char msg[128];
+    std::snprintf(msg, sizeof(msg), "Tuning %s...", sel.title);
+    toast("LIVE TV", msg);
+    evo_rmlui_provider_set_loading(1, "");
 }
 
 void ProviderHostScreen::update(double deltaMs)
@@ -270,10 +373,13 @@ void ProviderHostScreen::update(double deltaMs)
 void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
 {
     if (!m_opened) return;
+    evo_bt("prov_screen: render enter fb=%p %dx%d", framebuffer, width, height);
     evo_rmlui_provider_render(framebuffer, width, height);
+    evo_bt("prov_screen: render provider_render done");
     /* The rail is a document in the MAIN context, so it does not come with the
      * provider's own context - it is composited on top afterwards. */
     evo_rmlui_render_nav_overlay(framebuffer, width, height);
+    evo_bt("prov_screen: render nav_overlay done");
     evo_rmlui_provider_clear_frame();
 }
 

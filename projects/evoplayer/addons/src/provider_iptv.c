@@ -46,6 +46,7 @@
 #include "evo_provider.h"
 #include "evo_net.h"
 #include "evo_data_path.h"
+#include "evo_provider_log.h"
 
 #define IPTV_CONF "iptv.conf"
 
@@ -95,6 +96,13 @@ static struct {
     group_t   *gr;
     int        gr_count;
     int        gr_cap;
+
+    /*
+     * A playlist file found on the USB stick, if any. Zero-config entry point:
+     * drop iptv.m3u on the stick and EVO finds it, no URL to type on a D-pad
+     * keyboard and no conf file to hand-write. Empty when there is none.
+     */
+    char  playlist_file[512];
 
     int   loaded;          /* a playlist has been parsed                  */
     int   loading;         /* a fetch is in flight                        */
@@ -180,6 +188,78 @@ static char *extinf_attr(const char *line, const char *attr)
 /* Config                                                                    */
 /* ------------------------------------------------------------------------- */
 
+/* Defined further down, next to the rest of the parse and fetch machinery. */
+static int  parse_m3u(const char *body, size_t len);
+static void kick_epg(void);
+
+/*
+ * Names we accept for a playlist dropped on the USB stick, in priority order.
+ *
+ * The stick is how this audience already moves files around - they are copying
+ * media onto it anyway - so a playlist file is the one configuration route
+ * that needs no UI, no keyboard and no server. It loses to an explicit
+ * playlist= in the conf, so a configured URL is never overridden by a stale
+ * file someone forgot about.
+ */
+static const char *const kUsbPlaylistNames[] = {
+    "/mnt/usb0/iptv.m3u",
+    "/mnt/usb0/iptv.m3u8",
+    "/mnt/usb0/playlist.m3u",
+    "/mnt/usb0/playlist.m3u8",
+    "/mnt/usb0/channels.m3u",
+    "/mnt/usb0/channels.m3u8",
+    NULL
+};
+
+/* First readable candidate, or NULL. */
+static const char *find_usb_playlist(void)
+{
+    for (int i = 0; kUsbPlaylistNames[i]; ++i) {
+        FILE *f = fopen(kUsbPlaylistNames[i], "rb");
+        if (f) { fclose(f); return kUsbPlaylistNames[i]; }
+    }
+    return NULL;
+}
+
+/*
+ * Read a local playlist and parse it. No network, so this is synchronous and
+ * the catalog is ready on return - which is why iptv_list_catalog can emit the
+ * first page in the same call rather than waiting for a callback.
+ *
+ * Capped at EVO_BUNDLE-ish size for the same reason evo_net caps a body: a
+ * playlist is text, and a 64 MiB file on the stick is a mistake, not a
+ * playlist. 16 MiB is roughly 200k channels.
+ */
+#define IPTV_MAX_LOCAL_PLAYLIST (16u << 20)
+
+static int load_playlist_file(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
+    long n = ftell(f);
+    if (n <= 0 || (unsigned long)n > IPTV_MAX_LOCAL_PLAYLIST) {
+        PROV_LOG("iptv: '%s' is %ld bytes - refused", path, n);
+        fclose(f);
+        return -1;
+    }
+    rewind(f);
+
+    char *buf = (char *)malloc((size_t)n + 1);
+    if (!buf) { fclose(f); return -1; }
+    size_t got = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[got] = 0;
+
+    int rc = parse_m3u(buf, got);
+    free(buf);
+
+    PROV_LOG("iptv: local playlist '%s' -> %d channels, %d groups",
+             path, G.ch_count, G.gr_count);
+    return rc;
+}
+
 static void load_conf(void)
 {
     FILE *f = fopen(evo_data_path(IPTV_CONF), "r");
@@ -198,6 +278,26 @@ static void load_conf(void)
         else if (strcmp(k, "bundle")   == 0) snprintf(G.bundle_url,   sizeof G.bundle_url,   "%s", v);
     }
     fclose(f);
+}
+
+/*
+ * Pick the playlist source. Called from init() and from every rebind, so a
+ * stick inserted after boot is picked up on the next data-root rebind.
+ *
+ * An explicit playlist= URL always wins; the USB file is the fallback that
+ * makes the provider work with no configuration at all.
+ */
+static void resolve_playlist_source(void)
+{
+    G.playlist_file[0] = 0;
+    if (G.playlist_url[0])
+        return;
+
+    const char *found = find_usb_playlist();
+    if (found) {
+        snprintf(G.playlist_file, sizeof G.playlist_file, "%s", found);
+        PROV_LOG("iptv: using USB playlist '%s' (no playlist= configured)", found);
+    }
 }
 
 int provider_iptv_save_conf(void)
@@ -754,11 +854,14 @@ static void on_playlist(int success, int status, const char *body, size_t len,
 
 static int fetch_playlist(pending_t *pd)
 {
+    PROV_LOG("iptv: fetch_playlist url='%s' loading=%d", G.playlist_url, G.loading);
     if (!G.playlist_url[0]) { free(pd); return -1; }
     if (G.loading)          { free(pd); return -2; }
     G.loading = 1;
+    PROV_LOG("iptv: calling evo_net_request_async for playlist");
     int rc = evo_net_request_async("GET", G.playlist_url, NULL, NULL, 0,
                                    on_playlist, pd);
+    PROV_LOG("iptv: evo_net_request_async returned %d", rc);
     if (rc != 0) { G.loading = 0; free(pd); return -3; }
     return 0;
 }
@@ -806,7 +909,9 @@ static int iptv_init(void)
 {
     memset(&G, 0, sizeof G);
     load_conf();
-    return 0;   /* no network here - this runs during boot */
+    /* Only stats a handful of paths - no network, so it is safe during boot. */
+    resolve_playlist_source();
+    return 0;
 }
 
 static void iptv_shutdown(void)
@@ -816,16 +921,30 @@ static void iptv_shutdown(void)
 
 static int iptv_is_configured(void)
 {
-    return G.playlist_url[0] ? 1 : 0;
+    /* Either a URL to fetch or a file on the stick. The file is what makes the
+     * provider usable before any setup screen exists. */
+    return (G.playlist_url[0] || G.playlist_file[0]) ? 1 : 0;
 }
 
 static int iptv_list_catalog(const char *parent_id, int page,
                              evo_provider_items_cb cb, void *ud)
 {
-    if (!G.playlist_url[0]) return -1;
+    PROV_LOG("iptv: iptv_list_catalog parent='%s' page=%d loaded=%d url='%s'",
+             parent_id ? parent_id : "", page, G.loaded, G.playlist_url);
+    if (!G.playlist_url[0] && !G.playlist_file[0]) return -1;
 
     if (G.loaded)
         return emit_page(parent_id, page, cb, ud);
+
+    /*
+     * A local playlist parses synchronously, so the first page is emitted in
+     * this call - no fetch, no callback, no spinner.
+     */
+    if (!G.playlist_url[0] && G.playlist_file[0]) {
+        if (load_playlist_file(G.playlist_file) < 0) return -1;
+        kick_epg();
+        return emit_page(parent_id, page, cb, ud);
+    }
 
     pending_t *pd = (pending_t *)calloc(1, sizeof *pd);
     if (!pd) return -2;
@@ -839,7 +958,12 @@ static int iptv_list_catalog(const char *parent_id, int page,
 static int iptv_search(const char *query, int page,
                        evo_provider_items_cb cb, void *ud)
 {
-    if (!G.playlist_url[0]) return -1;
+    if (!G.playlist_url[0] && !G.playlist_file[0]) return -1;
+
+    if (!G.loaded && !G.playlist_url[0] && G.playlist_file[0]) {
+        if (load_playlist_file(G.playlist_file) < 0) return -1;
+        kick_epg();
+    }
 
     if (G.loaded) { emit_search(query, page, cb, ud); return 0; }
 
@@ -891,13 +1015,74 @@ static const char *iptv_ui_bundle_url(void)
     return G.bundle_url[0] ? G.bundle_url : NULL;
 }
 
+/* ------------------------------------------------------------------------- */
+/* CAP_CONFIG - the typed playlist URL                                       */
+/* ------------------------------------------------------------------------- */
+
+static const char *iptv_get_source(void)
+{
+    /* Show the URL if one is set; otherwise the USB file that is standing in
+     * for it, so the setup field tells the user what is actually in use. */
+    if (G.playlist_url[0]) return G.playlist_url;
+    if (G.playlist_file[0]) return G.playlist_file;
+    return "";
+}
+
+static int iptv_set_source(const char *value)
+{
+    if (!value) return -1;
+
+    /* Empty clears the URL and falls back to a USB playlist if there is one -
+     * which is how a user undoes a typo without having to retype anything. */
+    if (!*value) {
+        G.playlist_url[0] = 0;
+        G.loaded = 0;
+        free_channels();
+        resolve_playlist_source();
+        provider_iptv_save_conf();
+        PROV_LOG("iptv: source cleared; usb fallback='%s'", G.playlist_file);
+        return 0;
+    }
+
+    /* A local path is legitimate - someone may point this at a file on the
+     * stick by hand - so accept either, and reject anything that is neither. */
+    int is_url  = (strncmp(value, "http://", 7) == 0 ||
+                   strncmp(value, "https://", 8) == 0);
+    int is_path = (value[0] == '/');
+    if (!is_url && !is_path) {
+        PROV_LOG("iptv: refused source '%s' (not http(s):// or an absolute path)",
+                 value);
+        return -1;
+    }
+    if (strlen(value) >= sizeof G.playlist_url) {
+        PROV_LOG("iptv: refused source - %zu chars, max %zu",
+                 strlen(value), sizeof G.playlist_url - 1);
+        return -1;
+    }
+
+    free_channels();          /* also clears G.loaded / G.epg_loaded */
+    G.loading = 0;
+
+    if (is_url) {
+        snprintf(G.playlist_url, sizeof G.playlist_url, "%s", value);
+        G.playlist_file[0] = 0;
+    } else {
+        G.playlist_url[0] = 0;
+        snprintf(G.playlist_file, sizeof G.playlist_file, "%s", value);
+    }
+
+    provider_iptv_save_conf();
+    PROV_LOG("iptv: source set to '%s'", value);
+    return 0;
+}
+
 const evo_provider_t evo_provider_iptv = {
     .id            = "iptv",
     .name          = "IPTV",
     .icon          = "icon_emby.png",   /* the shared provider rail slot (#90) */
     .caps          = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                      EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_UI |
-                     EVO_PROVIDER_CAP_LIVE,
+                     EVO_PROVIDER_CAP_LIVE    | EVO_PROVIDER_CAP_CONFIG,
     .api_version   = EVO_PROVIDER_API_VERSION,
     .init          = iptv_init,
     .shutdown      = iptv_shutdown,
@@ -908,4 +1093,6 @@ const evo_provider_t evo_provider_iptv = {
     .resolve       = iptv_resolve,
     .report_progress = NULL,
     .ui_bundle_url = iptv_ui_bundle_url,
+    .get_source    = iptv_get_source,
+    .set_source    = iptv_set_source,
 };
