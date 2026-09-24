@@ -50,6 +50,18 @@
 #define IPTV_CONF "iptv.conf"
 
 /*
+ * USB fallback, same as addon_emby.c's EMBY_CONF_USB and for the same reason:
+ * the console's FTP server serves /mnt/usb0, and /data is behind the
+ * self-unjail. Dropping a config file on the USB stick is the only way to
+ * configure a provider on hardware without a settings screen, and the settings
+ * screens are per-provider stories that come after this one.
+ *
+ * /data wins when it exists, so once a setup screen writes there this is
+ * ignored.
+ */
+#define IPTV_CONF_USB "/mnt/usb0/.evo_iptv.conf"
+
+/*
  * A playlist row. Kept narrow on purpose: this is multiplied by the channel
  * count, and a 10000-channel playlist at evo_provider_item_t's ~1.5 KB would
  * be 15 MB of catalog for a screen that shows twelve rows at a time. The
@@ -171,6 +183,7 @@ static char *extinf_attr(const char *line, const char *attr)
 static void load_conf(void)
 {
     FILE *f = fopen(evo_data_path(IPTV_CONF), "r");
+    if (!f) f = fopen(IPTV_CONF_USB, "r");
     if (!f) return;
     char line[EVO_PROVIDER_MAX_URL + 64];
     while (fgets(line, sizeof line, f)) {

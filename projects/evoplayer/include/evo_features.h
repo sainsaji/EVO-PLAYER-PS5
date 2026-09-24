@@ -27,8 +27,20 @@
  * rail section table, and the RmlUi nav rail, which hides the icon so the
  * remaining sections do not sit next to a gap.
  */
+/*
+ * ON as of the #90 hardware-verification build.
+ *
+ * The rail slot now lands on ProviderHostScreen, not the old Emby setup stub,
+ * and that screen is safe with nothing configured: it toasts "No provider is
+ * set up yet" and sends the user to Settings. So turning it on does not depend
+ * on the per-provider setup screens, which are separate stories - and leaving
+ * it off made the provider screen unreachable, which meant it could not be
+ * tested on a console at all.
+ *
+ * Back to 0 hides the launch tile, the rail section and the rail icon again.
+ */
 #ifndef EVO_ENABLE_PROVIDERS
-#define EVO_ENABLE_PROVIDERS 0
+#define EVO_ENABLE_PROVIDERS 1
 #endif
 
 /*
