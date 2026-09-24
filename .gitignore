@@ -260,3 +260,9 @@ output/icons/
 output/shots/
 output/hdr-clip/
 
+
+# Host FFmpeg reproduction (tools/host-ffmpeg-probe.sh) and its test media.
+# The binary is ~12 MB and the clips are whole movies pulled off the console.
+output/ffprobe-minimal
+output/probe/
+output/release/
