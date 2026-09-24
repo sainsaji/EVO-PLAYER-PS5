@@ -21,6 +21,13 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" {
+/* PROV_LOG: evo_bt on the device (so provider lines actually reach
+ * /mnt/usb0/evo.log), plain stderr on the host. See evo_provider_log.h for why
+ * this is not fprintf(stderr, ...). */
+#include "evo_provider_log.h"
+}
+
 /* ------------------------------------------------------------------------- */
 /* Pending selection                                                         */
 /* ------------------------------------------------------------------------- */
@@ -94,8 +101,7 @@ bool EvoRmlProviderHost::RegisterDataModel()
 {
     Rml::DataModelConstructor c = m_context->CreateDataModel(m_model_name);
     if (!c) {
-        fprintf(stderr, "[EVO provider] CreateDataModel('%s') failed\n",
-                m_model_name.c_str());
+        PROV_LOG("CreateDataModel('%s') FAILED", m_model_name.c_str());
         return false;
     }
 
@@ -129,13 +135,6 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("count",         &m_model.count);
     c.Bind("rows",          &m_model.rows);
 
-    /*
-     * The one event a bundle can raise. It takes the row index rather than an
-     * item id because a data-event attribute's arguments come through as
-     * variants from the markup, and an index cannot be forged into a path -
-     * whatever the bundle passes is looked up in `rows` and anything out of
-     * range is ignored.
-     */
     /*
      * The one event a bundle raises to start something.
      *
@@ -197,7 +196,7 @@ bool EvoRmlProviderHost::BuildContext(int width, int height)
     std::string ctx_name = "provider_" + m_provider_id + "_context";
     m_context = Rml::CreateContext(ctx_name, Rml::Vector2i(width, height));
     if (!m_context) {
-        fprintf(stderr, "[EVO provider] CreateContext failed\n");
+        PROV_LOG("CreateContext FAILED");
         return false;
     }
     m_context->SetDensityIndependentPixelRatio(EvoRmlApp::Instance().DpRatio());
@@ -217,8 +216,7 @@ bool EvoRmlProviderHost::LoadEntryDocument(const std::string& rml_path)
      */
     m_doc = m_context->LoadDocument(rml_path);
     if (!m_doc) {
-        fprintf(stderr, "[EVO provider] LoadDocument('%s') failed\n",
-                rml_path.c_str());
+        PROV_LOG("LoadDocument('%s') FAILED", rml_path.c_str());
         return false;
     }
     if (!EnforceDomCap()) {
@@ -247,7 +245,7 @@ bool EvoRmlProviderHost::LoadFallbackSkin()
         if (m_doc) break;
     }
     if (!m_doc) {
-        fprintf(stderr, "[EVO provider] fallback skin failed to load\n");
+        PROV_LOG("fallback skin FAILED to load");
         return false;
     }
     m_using_fallback = true;
@@ -272,8 +270,8 @@ bool EvoRmlProviderHost::EnforceDomCap()
         Rml::Element* e = stack.back();
         stack.pop_back();
         if (++counted > EVO_BUNDLE_MAX_DOM_NODES) {
-            fprintf(stderr, "[EVO provider] document exceeds %d DOM nodes\n",
-                    EVO_BUNDLE_MAX_DOM_NODES);
+            PROV_LOG("document exceeds %d DOM nodes - refused",
+                     EVO_BUNDLE_MAX_DOM_NODES);
             return false;
         }
         for (int i = 0; i < e->GetNumChildren(); ++i)
@@ -292,12 +290,11 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
 
     m_provider = evo_provider_find(provider_id);
     if (!m_provider) {
-        fprintf(stderr, "[EVO provider] unknown provider '%s'\n",
-                provider_id ? provider_id : "(null)");
+        PROV_LOG("unknown provider '%s'", provider_id ? provider_id : "(null)");
         return false;
     }
     if (!evo_provider_is_enabled(provider_id)) {
-        fprintf(stderr, "[EVO provider] '%s' is disabled\n", provider_id);
+        PROV_LOG("'%s' is disabled", provider_id);
         return false;
     }
 
@@ -339,6 +336,9 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
         if (!loaded) st = EVO_BUNDLE_ERR_INCOMPLETE;
     }
 
+    PROV_LOG("'%s' cached bundle: %s", m_provider_id.c_str(),
+             evo_bundle_status_str(st));
+
     if (!loaded) {
         /*
          * The fallback skin binds to the model called "provider".
@@ -374,6 +374,12 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
             evo_bundle_refresh_async(m_provider_id.c_str(), url,
                                       &EvoRmlProviderHost::BundleCallback, this);
     }
+
+    PROV_LOG("'%s' host open: %s  model='%s' version='%s'",
+             m_provider_id.c_str(),
+             m_using_fallback ? "FALLBACK SKIN" : "provider bundle",
+             m_model_name.c_str(),
+             m_bundle_version.empty() ? "-" : m_bundle_version.c_str());
 
     /* And the first page of the catalog. */
     RequestPage("", 0);
@@ -468,6 +474,8 @@ void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
         delete ctx;
         m_model.loading = false;
         if (m_model_handle) m_model_handle.DirtyVariable("loading");
+        PROV_LOG("'%s' list_catalog REFUSED rc=%d configured=%d",
+                 m_provider_id.c_str(), rc, m_provider->is_configured());
         SetStatus(m_provider->is_configured()
                       ? "Could not reach the provider"
                       : std::string(m_provider->name) + " is not set up yet",
@@ -496,6 +504,12 @@ void EvoRmlProviderHost::ItemsCallback(int ok, const evo_provider_item_t* items,
 
     self->m_has_more = has_more != 0;
     self->ApplyItems(items, count, has_more);
+
+    PROV_LOG("'%s' catalog parent='%s' -> %d rows (folder_level=%d has_more=%d total=%d)",
+             self->m_provider_id.c_str(),
+             self->m_stack.empty() ? "" : self->m_stack.back().c_str(),
+             count, self->m_model.is_folder_level ? 1 : 0, has_more,
+             self->m_model.count);
 }
 
 void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
@@ -712,6 +726,12 @@ void EvoRmlProviderHost::BundleCallback(evo_bundle_status_t st,
     EvoRmlProviderHost* self = (EvoRmlProviderHost*)ud;
     if (!self->IsOpen()) return;
 
+    PROV_LOG("'%s' bundle refresh: %s  version='%s' files=%d bytes=%llu",
+             self->m_provider_id.c_str(), evo_bundle_status_str(st),
+             (m && m->version[0]) ? m->version : "-",
+             m ? m->entry_count : 0,
+             m ? (unsigned long long)m->total_bytes : 0ULL);
+
     if (st != EVO_BUNDLE_OK) {
         /*
          * A refresh failure is only worth surfacing when there is nothing else
@@ -761,6 +781,10 @@ void EvoRmlProviderHost::ApplyPendingActivation()
      * the same frame. Dropping it is right: acting on a stale id would open
      * something the user is no longer looking at. */
     if (!hit) return;
+
+    PROV_LOG("'%s' activate '%s' (%s) title='%s'", m_provider_id.c_str(),
+             hit->id.c_str(), hit->is_folder ? "folder" : "playable",
+             hit->title.c_str());
 
     if (hit->is_folder) {
         m_stack.push_back(std::string(hit->id.c_str()));
