@@ -1031,6 +1031,26 @@ int Application::run() {
             swap = true;
         }
 
+        /*
+         * The virtual keyboard, for the same reason and in the same place.
+         *
+         * evo_rmlui_render_keyboard() had exactly one caller -
+         * evo_screen_keyboard() - and nothing called that, so the virtual
+         * keyboard could not draw on ANY screen. It still opened and still
+         * swallowed every button (the input dispatch routes everything to it
+         * while it is up), so the symptom was a frozen-looking screen with no
+         * prompt on it. That is what #90's provider screen hit; the browser's
+         * search had the same latent bug and was only saved by the native IME
+         * being the default.
+         *
+         * Skipped when the native IME is active: the system draws that dialog
+         * itself, and drawing over it would be wrong.
+         */
+        if (uiActive && evo_keyboard_is_open() && !evo_keyboard_is_native_active()) {
+            evo_screen_keyboard(m_uiScratch);
+            swap = true;
+        }
+
         // 5. Present if swap requested
         if (swap && uiActive) {
             if (frame < 5) {

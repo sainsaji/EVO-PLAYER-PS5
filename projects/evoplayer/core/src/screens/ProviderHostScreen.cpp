@@ -238,7 +238,17 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     if (pressed & PadButtons::Square)
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeySearch) != 0;
 
-    if (pressed & PadButtons::Triangle) {
+    /*
+     * OPTIONS, not Triangle.
+     *
+     * Triangle is the virtual keyboard's own "Quick Done" (evo_keyboard.c),
+     * so opening the editor with it submitted the prompt on the spot: the
+     * hardware log showed seven "source set to <unchanged url>" lines from
+     * seven presses, each one closing and reopening the host - which is what
+     * the flashing was. Options is free on this screen and is where a console
+     * user looks for settings anyway.
+     */
+    if (pressed & PadButtons::Options) {
         openSourceEditor();
         return true;
     }
