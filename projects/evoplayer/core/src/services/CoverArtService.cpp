@@ -82,6 +82,82 @@ static int thumbGetBuffer(AVCodecContext* avctx, AVFrame* frame, int flags) {
 }
 
 /*
+ * Bit depth from an hvcC configuration record, or 0 if this is not one.
+ *
+ * Needed because the gates below run BEFORE avformat_find_stream_info(), and
+ * that is where `format` and `bits_per_raw_sample` get filled in: until then
+ * both MP4 and MKV report a 10-bit HEVC stream as depth-unknown, every gate
+ * reads it as 8-bit, and a 4K HDR file walks straight into the software
+ * decoder. Measured, not assumed - EVO_TEST_hevc10_pq_4k.mp4 sailed past the
+ * capability gate for exactly this reason and was caught two gates later by
+ * the flexible-memory floor.
+ *
+ * The record is the same in both containers (MKV keeps it in CodecPrivate),
+ * and the field is at a fixed offset - ISO/IEC 14496-15 8.3.3.1.2:
+ *
+ *   [0]      configurationVersion (1)
+ *   [1]      profile_space(2) tier_flag(1) profile_idc(5)
+ *   [2..5]   profile_compatibility_flags
+ *   [6..11]  constraint_indicator_flags
+ *   [12]     level_idc
+ *   [13..14] min_spatial_segmentation_idc
+ *   [15]     parallelismType
+ *   [16]     chromaFormat
+ *   [17]     bitDepthLumaMinus8      <- this
+ *   [18]     bitDepthChromaMinus8
+ */
+static int hvccBitDepth(const AVCodecParameters* par) {
+    if (!par || par->codec_id != AV_CODEC_ID_HEVC)
+        return 0;
+    const uint8_t* e = par->extradata;
+    if (!e || par->extradata_size < 23)
+        return 0;
+    if (e[0] != 1)                     /* not a configuration record (an
+                                        * Annex-B start code fails this too) */
+        return 0;
+    return 8 + (e[17] & 0x07);
+}
+
+/*
+ * 10-bit reaches codecpar as a pixel format from some containers and as a
+ * raw-sample depth from others; both spellings mean the same thing to the
+ * decoder gates, and a stream that says neither is 8-bit - unless the
+ * container's configuration record can be read directly, which is the only
+ * way to know before find_stream_info has run.
+ */
+static int codecparBitDepth(const AVCodecParameters* par) {
+    if (!par)
+        return 8;
+    if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE)
+        return 10;
+    if (par->bits_per_raw_sample > 8)
+        return par->bits_per_raw_sample;
+    const int hvcc = hvccBitDepth(par);
+    return hvcc > 0 ? hvcc : 8;
+}
+
+/*
+ * Arms the crash note for as long as it is in scope.
+ *
+ * The note has to be cleared on every way out of the extractor, and the
+ * extractor has a dozen of them - an early return that forgets leaves a file
+ * marked as in flight, and the next crash anywhere quarantines the wrong one.
+ * A scope guard cannot forget. `disarm()` is for handing the file on to a path
+ * that wants a different stage, or none.
+ */
+class CrashNoteScope {
+public:
+    CrashNoteScope(const char* path, evo_crash_stage_t stage) {
+        evo_crash_note_set(path, stage);
+    }
+    ~CrashNoteScope() { evo_crash_note_set(nullptr, EVO_CRASH_STAGE_PROBE); }
+    void disarm() { evo_crash_note_set(nullptr, EVO_CRASH_STAGE_PROBE); }
+
+    CrashNoteScope(const CrashNoteScope&) = delete;
+    CrashNoteScope& operator=(const CrashNoteScope&) = delete;
+};
+
+/*
  * Decode one poster frame on the hardware decoder.
  *
  * This exists because FFmpeg's software HEVC decoder faults rather than fails
@@ -108,11 +184,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
     if (!fmt || !st || !st->codecpar || !outPixels)
         return false;
 
-    int bitDepth = st->codecpar->bits_per_raw_sample > 8
-                 ? st->codecpar->bits_per_raw_sample : 8;
-    if (st->codecpar->format == AV_PIX_FMT_YUV420P10LE ||
-        st->codecpar->format == AV_PIX_FMT_YUV420P10BE)
-        bitDepth = 10;
+    const int bitDepth = codecparBitDepth(st->codecpar);
 
     if (!evo_vdec_native_can_open(st->codecpar->codec_id, st->codecpar->profile,
                                   bitDepth, st->codecpar->width,
@@ -203,11 +275,62 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
 
     bool success = false;
     if (gotFrame && pf.planes[0] && pf.width > 0 && pf.height > 0) {
+        /*
+         * 10-bit two-plane needs shifting before swscale can read it.
+         *
+         * sceVideodec2's 10-bit surface is NOT P010. It carries one 16-bit word
+         * per component with the ten sample bits in 9:0 - low-aligned - which
+         * the research notes measured directly ("not conventional MSB-aligned
+         * P010 ... essentially no image samples in bits 15:10", hdr.md) and
+         * which the present path already compensates for: the shader multiplies
+         * every sample by 64.0615844 (= 65535/1023), see
+         * shaders/agc/video_yuv_p010_hdr.pipe.
+         *
+         * Handing that straight to swscale as AV_PIX_FMT_P010LE - which IS
+         * MSB-aligned - reads every sample 64x too small. Luma goes to black
+         * and chroma collapses to zero instead of its midpoint, which renders
+         * as flat green. That is the green HDR thumbnails, and it only became
+         * visible on every HDR file once the HEVC10 slot started succeeding at
+         * 4K, because until then these files fell back to the software path,
+         * whose YUV420P10LE really is low-aligned and so looked correct.
+         *
+         * Shift into P010's alignment rather than inventing a pixel format:
+         * one pass, and swscale then does the scale and the matrix as usual.
+         */
+        pp_frame shifted = pf;
+        uint16_t* shiftBuf = nullptr;
+        if (pf.format == PP_FRAME_NV12_10 && pf.planes[1]) {
+            const size_t yWords  = (size_t)(pf.strides[0] / 2) * pf.height;
+            const size_t uvWords = (size_t)(pf.strides[1] / 2) * ((pf.height + 1) / 2);
+            shiftBuf = (uint16_t*)av_malloc((yWords + uvWords) * sizeof(uint16_t));
+            if (shiftBuf) {
+                const uint16_t* srcY = (const uint16_t*)pf.planes[0];
+                uint16_t* dstY = shiftBuf;
+                for (size_t i = 0; i < yWords; ++i)
+                    dstY[i] = (uint16_t)((srcY[i] & 0x03FF) << 6);
+                const uint16_t* srcUV = (const uint16_t*)pf.planes[1];
+                uint16_t* dstUV = shiftBuf + yWords;
+                for (size_t i = 0; i < uvWords; ++i)
+                    dstUV[i] = (uint16_t)((srcUV[i] & 0x03FF) << 6);
+                shifted.planes[0] = (uint8_t*)dstY;
+                shifted.planes[1] = (uint8_t*)dstUV;
+            } else {
+                evo_bt("extractVideoFrame: 10-bit shift buffer alloc failed "
+                       "(%zu words) - skipping the hardware poster",
+                       yWords + uvWords);
+                evo_boot_log_flush();
+            }
+        }
+        const pp_frame& src = shiftBuf ? shifted : pf;
+
         enum AVPixelFormat srcFormat;
         switch (pf.format) {
             case PP_FRAME_NV12:     srcFormat = AV_PIX_FMT_NV12;       break;
             case PP_FRAME_YUV420P:  srcFormat = AV_PIX_FMT_YUV420P;    break;
-            case PP_FRAME_NV12_10:  srcFormat = AV_PIX_FMT_P010LE;     break;
+            /* Only correct because of the shift above; without shiftBuf the
+             * data is still low-aligned, so refuse rather than draw green. */
+            case PP_FRAME_NV12_10:  srcFormat = shiftBuf ? AV_PIX_FMT_P010LE
+                                                         : AV_PIX_FMT_NONE;  break;
             case PP_FRAME_YUV420P10:srcFormat = AV_PIX_FMT_YUV420P10LE;break;
             default:                srcFormat = AV_PIX_FMT_NONE;       break;
         }
@@ -218,19 +341,22 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
             SWS_BILINEAR, nullptr, nullptr, nullptr);
 
         if (sws) {
-            const uint8_t* srcData[4] = { pf.planes[0], pf.planes[1],
-                                          pf.planes[2], pf.planes[3] };
-            int srcLines[4] = { pf.strides[0], pf.strides[1],
-                                pf.strides[2], pf.strides[3] };
+            const uint8_t* srcData[4] = { src.planes[0], src.planes[1],
+                                          src.planes[2], src.planes[3] };
+            int srcLines[4] = { src.strides[0], src.strides[1],
+                                src.strides[2], src.strides[3] };
             uint8_t* dst[4] = { reinterpret_cast<uint8_t*>(outPixels), nullptr, nullptr, nullptr };
             int dstLines[4] = { targetWidth * 4, 0, 0, 0 };
             sws_scale(sws, srcData, srcLines, 0, static_cast<int>(pf.height), dst, dstLines);
             sws_freeContext(sws);
             success = true;
-            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d",
-                   pf.width, pf.height, (int)pf.format);
+            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d%s",
+                   pf.width, pf.height, (int)pf.format,
+                   shiftBuf ? " (10-bit shifted)" : "");
             evo_boot_log_flush();
         }
+        if (shiftBuf)
+            av_freep(&shiftBuf);
     }
 
     av_packet_free(&pkt);
@@ -438,6 +564,22 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     }
 
     /*
+     * A file that died in the container probe is refused before it is opened
+     * at all.
+     *
+     * The quarantine check further down deliberately sits *after* the hardware
+     * attempt, because a stream that only killed the software decoder is
+     * exactly what the hardware path is for. This one cannot wait that long:
+     * the fault happened inside libavformat, before EVO had a decoder to
+     * choose, so there is no second path to offer it.
+     */
+    if (evo_crash_note_stage(videoPath.c_str()) == EVO_CRASH_STAGE_PROBE) {
+        evo_bt("extractVideoFrame: quarantined - crashed in the container probe, skipping");
+        evo_boot_log_flush();
+        return false;
+    }
+
+    /*
      * Floor check, before the demuxer is even opened.
      *
      * avformat_find_stream_info() opens decoders of its own to work out the
@@ -465,10 +607,40 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "probesize", "1048576", 0);
     av_dict_set(&opts, "analyzeduration", "1000000", 0);
+    /*
+     * Do not estimate the duration by reading the end of the file.
+     *
+     * This is what actually killed the process on "LG 4K HDR Demo - Art.ts",
+     * twice, on two different builds: the register dump both times held
+     * libavformat's own "start time for stream 1 is not set in
+     * estimate_timings_from_pts" - so the fault is in that function, not in a
+     * probe decoder running out of flexible memory as the gates above assume.
+     * Byte-identical register dumps across builds also make it deterministic
+     * rather than a memory-pressure race.
+     *
+     * A container that states its duration in a header (MP4, MKV) never enters
+     * that code. One that does not (MPEG-TS, raw streams) makes libavformat
+     * seek to the end of the file and read packets back, which for a 491 MB
+     * file over USB is also the slowest thing the poster path does.
+     *
+     * A poster does not need it. The duration is used for one thing here -
+     * picking a frame 10% in - and without it seekSec stays 0 and the poster
+     * comes from the first frame, which for a thumbnail is no loss at all.
+     */
+    av_dict_set(&opts, "skip_estimate_duration_from_pts", "1", 0);
     /* A poster needs the stream's geometry, not a confident frame-rate
      * estimate. Fewer probe packets means fewer buffers find_stream_info
      * allocates before it is satisfied. */
     av_dict_set(&opts, "max_probe_packets", "16", 0);
+
+    /*
+     * Everything from here to the end of find_stream_info runs inside
+     * libavformat, which opens probe decoders of its own and faults rather
+     * than fails when one of them cannot allocate. Nothing in this process can
+     * catch that, so leave a note for the crash handler instead: the next
+     * launch reads it and skips the file, and the folder stays browsable.
+     */
+    CrashNoteScope probeNote(videoPath.c_str(), EVO_CRASH_STAGE_PROBE);
 
     AVFormatContext* fmt = nullptr;
     evo_bt("extractVideoFrame: calling avformat_open_input");
@@ -491,11 +663,47 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         }
     }
     if (vstream >= 0 && fmt->streams[vstream]->codecpar) {
-        if (fmt->streams[vstream]->codecpar->codec_id == AV_CODEC_ID_AV1) {
+        const AVCodecParameters* par = fmt->streams[vstream]->codecpar;
+
+        if (par->codec_id == AV_CODEC_ID_AV1) {
             evo_bt("extractVideoFrame: skipping AV1 codec before find_stream_info (unsupported on PS5)");
             evo_boot_log_flush();
             avformat_close_input(&fmt);
             return false;
+        }
+
+        /*
+         * Above 1080p with no hardware decoder to take it, do not probe at all.
+         *
+         * find_stream_info() opens decoders of its own to fill in what the
+         * container left out, and a 4K picture buffer plus a reference queue
+         * does not fit in the flexible pool the resident decoders have already
+         * drawn from - at which point libavcodec faults instead of returning
+         * the error, taking the process with it. Those gates further down
+         * never get to run. The file could not have been played either way:
+         * "4K is hardware-only" is the documented limit, and HEVC Main 10
+         * above 1080p has no hardware path (the resident 10-bit decoder is
+         * 1920x1088), which is exactly what a 4K HDR title is.
+         *
+         * MPEG-TS usually has no geometry this early, so its 4K files fall
+         * through here and are caught by the crash note instead - one fault,
+         * then never again.
+         *
+         * Off the app module availableFlexBytes() is 0 and none of this
+         * applies: the host renderer has no such pool and posters every file.
+         */
+        if (par->width > 1920 || par->height > 1088) {
+            const int depth = codecparBitDepth(par);
+            if (availableFlexBytes() > 0 &&
+                !evo_vdec_native_can_open(par->codec_id, par->profile, depth,
+                                          par->width, par->height)) {
+                evo_bt("extractVideoFrame: skipping %dx%d %d-bit codec=%d before "
+                       "find_stream_info - no hardware decoder, too large for software",
+                       par->width, par->height, depth, (int)par->codec_id);
+                evo_boot_log_flush();
+                avformat_close_input(&fmt);
+                return false;
+            }
         }
     }
 
@@ -509,6 +717,10 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     }
     evo_bt("extractVideoFrame: avformat_find_stream_info ok, nb_streams=%u", fmt->nb_streams);
     evo_boot_log_flush();
+
+    /* Survived. Out of libavformat's own decoders now - what follows is a
+     * decoder EVO chose, and it gets its own stage further down. */
+    probeNote.disarm();
 
     vstream = -1;
     for (unsigned int i = 0; i < fmt->nb_streams; ++i) {
@@ -573,8 +785,38 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
      * fails, so there is nothing to catch. Delete <data>/thumb_quarantine to
      * retry.
      */
-    if (evo_crash_note_is_quarantined(videoPath.c_str())) {
+    if (evo_crash_note_stage(videoPath.c_str()) >= 0) {
         evo_bt("extractVideoFrame: quarantined after an earlier crash, skipping");
+        evo_boot_log_flush();
+        avformat_close_input(&fmt);
+        return false;
+    }
+
+    /*
+     * No software poster above 1080p - conservative, and deliberately so.
+     *
+     * Be careful with the reasoning here, because the obvious version of it is
+     * wrong. EVO_TEST_hevc8_4k.mp4 passed the working-set pre-flight below with
+     * 123 MB free and still took the process down, which looked like proof that
+     * the six-frame estimate is too small. It was not: that crash was av_log
+     * writing to a null stderr (see EvoAvLogCallback in Application.cpp), and
+     * the "Error parsing NAL unit #0." in its register dump was the message
+     * being logged, not evidence of a failed allocation. No `get_buffer2
+     * FAILED` line has ever actually appeared in a log.
+     *
+     * So this ceiling is not a measured memory limit. It is a bet that a 4K
+     * software poster is not worth any risk at all: the hardware decoder has
+     * already had its turn immediately above, it handles 4K 8-bit HEVC and AVC
+     * natively, and across the sessions examined on 2026-09-23 the software
+     * path produced a poster at 1920x1080 and at no other size. Revisit it once
+     * the stderr fix has been on hardware long enough to trust - the honest
+     * test is whether 4K software decode works when nothing is logging.
+     */
+    if (availableFlexBytes() > 0 &&
+        (st->codecpar->width > 1920 || st->codecpar->height > 1088)) {
+        evo_bt("extractVideoFrame: no software poster for %dx%d - above the "
+               "1080p software ceiling",
+               st->codecpar->width, st->codecpar->height);
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
@@ -697,7 +939,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
 
     /* From here until the decoder is released we are inside code that can
      * fault instead of failing. Leave a note for the crash handler. */
-    evo_crash_note_set(videoPath.c_str());
+    evo_crash_note_set(videoPath.c_str(), EVO_CRASH_STAGE_DECODE);
 
     while (packetCount < 48 && av_read_frame(fmt, pkt) >= 0) {
         packetCount++;
@@ -741,7 +983,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     avformat_close_input(&fmt);
 
     /* Out of the decoder; swscale has never been the thing that faults. */
-    evo_crash_note_set(nullptr);
+    evo_crash_note_set(nullptr, EVO_CRASH_STAGE_DECODE);
 
     bool success = false;
     if (gotFrame && frame->width > 0 && frame->height > 0 && frame->format >= 0 && frame->data[0]) {

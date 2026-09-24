@@ -20,16 +20,20 @@
  * Profile 2 are 10-bit two-plane and stay on FFmpeg until the P010 present
  * lands (#41 section 4); AV1 has no sceVideodec2 route at all.
  *
- * RESIDENT DECODERS — the sequencing constraint, learned on hardware 2026-09-03.
- * The self-unjail (evo_jailbreak_self / _ensure) swaps process credentials
- * mid-run, after which EVERY libSceVideodec2 call fails
- * (sceVideodec2QueryComputeMemoryInfo -> 0x811D0111), not just
- * sceSysmoduleLoadModule. So each decoder is brought up ONCE at boot in
- * evo_vdec_native_probe() — before the first evo_jailbreak_self() — as a
- * session-resident slot (g_dec[]). Lazy per-playback creation is impossible:
- * by open() time the unjail has already happened. Each evo_vdec_native_open()
- * just sceVideodec2Reset()s the matching slot and feeds it; nothing is created
- * or destroyed at playback time.
+ * RESIDENT DECODERS — historical context and on-demand lifecycle.
+ * The original claim (2026-09-03) that the mid-run credential swap breaks
+ * libSceVideodec2 (0x811D0111) and prevents lazy per-playback creation was
+ * disproven on 2026-09-24. Hardware measurements with AUTHZ and LATE CREATE
+ * probes confirmed that complete decoder bring-up (AllocateComputeQueue,
+ * direct allocations, flex memory map, CreateDecoder, Reset) succeeds
+ * post-unjail (uid 1 -> 0).
+ *
+ * Resident decoders for AVC, HEVC 8-bit, and VP9 are brought up at boot in
+ * g_dec[] sized to 4K. To conserve flexible memory at boot (~14MB flex vs ~150MB),
+ * HEVC Main10 (10-bit HDR) is initially brought up at 1080p. When a 4K Main10
+ * stream is opened, evo_vdec_native_open() resizes the slot on demand to 4K
+ * (level_4k = 153, HEVC Level 5.1). When playback ends, evo_vdec_native_close()
+ * restores the slot to its boot dimensions so idle playback releases the flex memory.
  *
  * MEMORY. Three resident 4K decoders is a lot of direct memory against the
  * fake-signed budget - measured at ~1.76 GB total on hardware 2026-09-11
@@ -122,6 +126,10 @@ extern int      sceKernelConfiguredFlexibleMemorySize(size_t *);
 #define SCE_VIDEODEC2_AUTO_FRAMES   (-1)
 #define DECODE_INPUT_QUEUE_DEPTH    4u
 #define PIPELINE_BUFFER_COUNT       4u          /* input-AU ring */
+/* Decode errors tolerated between a flush and the first picture out of it -
+ * roughly one open-GOP leading run, and far below the playback layer's own
+ * 16-failure streak so a stream that cannot be decoded at all still ends. */
+#define POST_FLUSH_ERR_TOLERANCE    32
 /*
  * Output/detile frame ring. These are targets handed to sceVideodec2Decode and
  * consumed immediately - ro_harvest copies out of them - while the decoder
@@ -198,6 +206,39 @@ extern int      sceKernelConfiguredFlexibleMemorySize(size_t *);
  * the constraint, so the cap cost 4K VP9 hardware decode and bought nothing.
  * Override these if a real measurement ever says otherwise.
  */
+/*
+ * Phase 2 (2026-09-24): slots are brought up SMALL at boot and grown on demand.
+ *
+ * Every slot used to be created at the largest size its codec might ever need,
+ * because a decoder could supposedly not be created after the credential
+ * promotion. That was measured and found false (see the RESIDENT DECODERS note
+ * above), and Phase 1 proved the grow/shrink path on hardware for the 10-bit
+ * slot: open() resizes up to fit the stream, close() puts it back.
+ *
+ * So boot no longer pays for four maximum-size decoders that a given session
+ * will mostly not use. It pays for four 1080p ones - enough that `ready` and
+ * g_boot_any still mean what they meant, and enough that the common case (a
+ * 1080p file) needs no resize at all - and a 4K file grows its own slot for as
+ * long as it is playing.
+ *
+ * What this buys is flexible memory, which is the pool that actually runs out:
+ * the resident set held ~180MB of it permanently, against ~199MB free. That
+ * headroom is what software decode, swscale and poster extraction compete for.
+ *
+ * Override to the old behaviour with -DEVO_VDEC_NATIVE_BOOT_4K=1 if a
+ * measurement ever argues for it.
+ */
+#ifndef EVO_VDEC_NATIVE_BOOT_4K
+#define EVO_VDEC_NATIVE_BOOT_4K 0
+#endif
+#if EVO_VDEC_NATIVE_BOOT_4K
+#define EVO_VDEC_NATIVE_BOOT_W  EVO_VDEC_NATIVE_MAX_W
+#define EVO_VDEC_NATIVE_BOOT_H  EVO_VDEC_NATIVE_MAX_H
+#else
+#define EVO_VDEC_NATIVE_BOOT_W  1920
+#define EVO_VDEC_NATIVE_BOOT_H  1088
+#endif
+
 #ifndef EVO_VDEC_NATIVE_VP9_MAX_W
 #define EVO_VDEC_NATIVE_VP9_MAX_W  EVO_VDEC_NATIVE_SECONDARY_MAX_W
 #endif
@@ -277,7 +318,13 @@ static const nat_codec_desc g_codec[NAT_CODEC_COUNT] = {
     /* #38: shallower pipeline (2, not the proven codecs' 4) to shrink the
      * decoder's own reported flex-memory need - these two are off by default
      * and have no throughput requirement to justify the deeper pipeline. */
-    { NAT_HEVC10, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   2, 123, 123,
+    /* level_4k was 123 (HEVC Level 4.1) purely because this slot had only ever
+     * been asked for 1080p - nobody gave it a 4K level. Level 4.1 cannot
+     * describe a 3840x2176 surface, so a 4K Main10 bring-up was refused at
+     * QueryDecoderMemoryInfo (rc=0x811d0200) before any allocation, with
+     * 197MB free: an invalid config, not a capability or memory limit. 153 is
+     * Level 5.1, the same level the 8-bit HEVC slot uses for 4K. */
+    { NAT_HEVC10, AV_CODEC_ID_HEVC, SCE_VIDEODEC2_CODEC_HEVC,   2, 123, 153,
       "hevc_mp4toannexb",     0, "HEVC10", 1 },
     { NAT_VP92,   AV_CODEC_ID_VP9,  SCE_VIDEODEC2_CODEC_VP9,    2,  41,  41,
       "vp9_superframe_split", 1, "VP9-2",  1 },
@@ -389,6 +436,7 @@ struct dec_slot {
     void    *frame_mem;     int64_t frame_start;   size_t frame_pool;
     size_t   frame_size;
     uint32_t max_w, max_h;
+    uint32_t boot_w, boot_h;
 };
 
 static int             g_boot_tried;
@@ -397,6 +445,8 @@ static struct dec_slot g_dec[NAT_CODEC_COUNT];
 
 static void slot_teardown(struct dec_slot *s)
 {
+    uint32_t boot_w = s->boot_w;
+    uint32_t boot_h = s->boot_h;
     if (s->decoder) { sceVideodec2DeleteDecoder(s->decoder); s->decoder = NULL; }
     free_direct(s->frame_mem,   s->frame_start,   s->frame_pool);
     free_direct(s->input_mem,   s->input_start,   s->input_pool);
@@ -409,6 +459,8 @@ static void slot_teardown(struct dec_slot *s)
     if (s->compute_queue) { sceVideodec2ReleaseComputeQueue(s->compute_queue); s->compute_queue = NULL; }
     free_direct(s->compute_mem, s->compute_start, s->compute_size);
     memset(s, 0, sizeof *s);
+    s->boot_w = boot_w;
+    s->boot_h = boot_h;
 }
 
 /*
@@ -428,7 +480,7 @@ static void slot_teardown(struct dec_slot *s)
 
 /* Full bring-up for `d`'s decoder at (w x h). Returns 0 on success with
  * everything stored in `*s`; non-zero rc (and `*s` left torn down) on any
- * failure. MUST be called before the first evo_jailbreak_self(). */
+ * failure. Safe before or after evo_jailbreak_self(). */
 static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
                         int w, int h, const char **stage)
 {
@@ -551,6 +603,8 @@ static void probe_slot(nat_codec c, int w, int h, int required, unsigned sm)
     }
     if (rc == 0) {
         s->ready   = 1;
+        s->boot_w  = s->max_w;
+        s->boot_h  = s->max_h;
         g_boot_any = 1;
         /* flex=cpu_map: the ONE flexible-memory allocation per slot
          * (sceKernelMapNamedFlexibleMemory, sized from the decoder's own
@@ -600,16 +654,15 @@ int evo_vdec_native_probe(void)
     note("EVO vdec native: flex pool configured=%zuMB available=%zuMB before bring-up",
          flex_total >> 20, flex_before >> 20);
 
-    /* AVC — the compatibility baseline, 4K (with the #31 1080p retry). */
-    probe_slot(NAT_H264, EVO_VDEC_NATIVE_MAX_W, EVO_VDEC_NATIVE_MAX_H, 1, sm);
+    /* AVC — the compatibility baseline. Brought up small; a 4K file grows
+     * it in evo_vdec_native_open() and close() shrinks it back. */
+    probe_slot(NAT_H264, EVO_VDEC_NATIVE_BOOT_W, EVO_VDEC_NATIVE_BOOT_H, 1, sm);
 
 #if EVO_VDEC_NATIVE_SECONDARY
     /* HEVC + VP9 — secondary, non-fatal, independent of the AVC result.
      * Gated: see the EVO_VDEC_NATIVE_SECONDARY note above (2026-09-10 crash). */
-    probe_slot(NAT_HEVC, EVO_VDEC_NATIVE_SECONDARY_MAX_W,
-               EVO_VDEC_NATIVE_SECONDARY_MAX_H, 0, sm);
-    probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_VP9_MAX_W,
-               EVO_VDEC_NATIVE_VP9_MAX_H, 0, sm);
+    probe_slot(NAT_HEVC, EVO_VDEC_NATIVE_BOOT_W, EVO_VDEC_NATIVE_BOOT_H, 0, sm);
+    probe_slot(NAT_VP9,  EVO_VDEC_NATIVE_BOOT_W, EVO_VDEC_NATIVE_BOOT_H, 0, sm);
 
 #if EVO_VDEC_NATIVE_10BIT
     /* #41 Phase D: 10-bit resident decoders (HEVC Main10).
@@ -631,6 +684,40 @@ int evo_vdec_native_probe(void)
     if (!g_boot_any)
         note("EVO vdec native: no resident decoder -> FFmpeg only (sysmod=0x%08x)", sm);
     return g_boot_any;
+}
+
+/*
+ * The largest this codec's slot may ever be grown to.
+ *
+ * Phase 2 moved the size decision from boot to open(), so the per-codec build
+ * caps (--no-native-secondary-4k, EVO_VDEC_NATIVE_VP9_MAX_W) stopped being
+ * expressed by the boot bring-up and have to be enforced here instead -
+ * otherwise a build that asked for 1080p secondaries would silently grow them
+ * to 4K anyway.
+ *
+ * This is also what evo_vdec_native_supports() must answer against. Comparing
+ * to the slot's CURRENT size would refuse everything the grow path exists to
+ * allow; comparing to a single global ceiling would claim 4K for a codec the
+ * build capped at 1080p, and the stream would then reach a decoder configured
+ * smaller than the picture.
+ */
+static void slot_ceiling(const nat_codec_desc *d, uint32_t *mw, uint32_t *mh)
+{
+    switch (d->idx) {
+    case NAT_HEVC:
+        *mw = EVO_VDEC_NATIVE_SECONDARY_MAX_W;
+        *mh = EVO_VDEC_NATIVE_SECONDARY_MAX_H;
+        break;
+    case NAT_VP9:
+    case NAT_VP92:
+        *mw = EVO_VDEC_NATIVE_VP9_MAX_W;
+        *mh = EVO_VDEC_NATIVE_VP9_MAX_H;
+        break;
+    default:                      /* AVC, HEVC10 */
+        *mw = EVO_VDEC_NATIVE_MAX_W;
+        *mh = EVO_VDEC_NATIVE_MAX_H;
+        break;
+    }
 }
 
 int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
@@ -684,7 +771,9 @@ int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
         int rw = roundup16(w), rh = roundup16(h);
         if (rw < 16 || rh < 16)
             return 0;
-        if ((uint32_t)rw > s->max_w || (uint32_t)rh > s->max_h)
+        uint32_t cap_w, cap_h;
+        slot_ceiling(d, &cap_w, &cap_h);
+        if ((uint32_t)rw > cap_w || (uint32_t)rh > cap_h)
             return 0;
     }
     return 1;
@@ -733,11 +822,47 @@ struct evo_vdec_native {
     int      nv12_out;      /* emit NV12 straight through (GL samples it), not I420 */
     int      first_valid_logged;
     int      first_err_logged;
+    int      first_pic_err_logged;
     int      color_trc;     /* AVColorTransferCharacteristic from demuxer */
+
+    /*
+     * Random-access state, for HEVC open-GOP streams.
+     *
+     * x265 defaults to an open GOP, so a keyframe found by seeking is a CRA
+     * rather than an IDR, and the pictures that follow it in decode order are
+     * RASL - "random access skipped leading" - whose references sit BEFORE the
+     * CRA and were therefore never decoded. A decoder handed those reports an
+     * error on every one of them. sceVideodec2 does: rc=0 with
+     * out.error=1, over and over, until the playback layer's 16-failure streak
+     * ends the file. The software decoder is no better - it walks into its own
+     * error path and dereferences null ("Error parsing NAL unit #0.").
+     *
+     * A conforming decoder discards RASL pictures when the IRAP that precedes
+     * them has NoRaslOutputFlag set, which is exactly the case after a seek
+     * and at the start of a stream. So do that here: drop them before they
+     * reach the decoder.
+     *
+     * `drop_leading` is armed on open and on every flush, and clears at the
+     * first trailing picture - past which RASL cannot legally appear until the
+     * next IRAP.
+     */
+    int      drop_leading;
+    int      leading_dropped;   /* count, for the log line */
+
+    /*
+     * Errors between a flush and the first picture out of it are not evidence
+     * that the stream cannot be decoded - they are evidence that we started in
+     * the middle of something. Tolerate them rather than going fatal, bounded
+     * so a genuinely undecodable stream still fails instead of spinning.
+     */
+    int      post_flush_errs;
+    int      since_flush_out;   /* pictures produced since the last flush */
 
     AVBSFContext        *bsf;
     const char          *bsf_name;   /* for rebuild on seek */
     AVCodecParameters   *bsf_par;    /* owned copy, for rebuild on seek */
+    uint8_t             *annexb_extradata;
+    int                  annexb_extradata_size;
     AVPacket            *in_pkt;
     AVPacket            *filt_pkt;
 
@@ -870,6 +995,81 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     n->ro_count++;
 }
 
+/*
+ * HEVC NAL unit types this cares about (ITU-T H.265 Table 7-1).
+ *
+ * 0..5   trailing pictures      - past these, no RASL until the next IRAP
+ * 6,7    RADL leading           - decodable, keep
+ * 8,9    RASL leading           - references precede the IRAP: undecodable
+ *                                 after a random access, must be dropped
+ * 16..23 IRAP (BLA / IDR / CRA)
+ */
+#define HEVC_NAL_TRAIL_HI 5    /* 0..5 are trailing pictures */
+#define HEVC_NAL_RASL_N   8
+#define HEVC_NAL_RASL_R   9
+#define HEVC_NAL_IRAP_LO  16
+#define HEVC_NAL_IRAP_HI  23
+
+/*
+ * First VCL NAL type in an Annex-B access unit, or -1 if there is none.
+ *
+ * Everything reaching decode_one for HEVC has been through
+ * hevc_mp4toannexb, so start codes are what separates NAL units. Only the
+ * first slice NAL matters: every slice of one picture carries the same type.
+ */
+static int hevc_au_nal_type(const uint8_t *au, int size)
+{
+    for (int i = 0; i + 4 < size; i++) {
+        if (au[i] != 0 || au[i + 1] != 0)
+            continue;
+        int payload;
+        if (au[i + 2] == 1)
+            payload = i + 3;
+        else if (au[i + 2] == 0 && au[i + 3] == 1)
+            payload = i + 4;
+        else
+            continue;
+        if (payload >= size)
+            break;
+        int type = (au[payload] >> 1) & 0x3f;
+        if (type <= HEVC_NAL_IRAP_HI)      /* a VCL NAL, not VPS/SPS/PPS/SEI */
+            return type;
+        i = payload;                        /* non-VCL: keep looking */
+    }
+    return -1;
+}
+
+/*
+ * Returns 1 when this access unit must not reach the decoder.
+ *
+ * Also maintains the random-access state, so it has to be called exactly once
+ * per AU, in decode order.
+ */
+static int drop_undecodable_leading(evo_vdec_native *n, const uint8_t *au, int size)
+{
+    if (n->desc->codec_type != SCE_VIDEODEC2_CODEC_HEVC || !n->drop_leading)
+        return 0;
+
+    int type = hevc_au_nal_type(au, size);
+    if (type < 0)
+        return 0;
+
+    if (type == HEVC_NAL_RASL_N || type == HEVC_NAL_RASL_R) {
+        n->leading_dropped++;
+        if (n->leading_dropped == 1)
+            note("EVO vdec native: dropping RASL leading pictures after the "
+                 "random-access point (open GOP)");
+        return 1;
+    }
+    if (type <= HEVC_NAL_TRAIL_HI) {
+        n->drop_leading = 0;
+        if (n->leading_dropped)
+            note("EVO vdec native: dropped %d RASL picture(s) after the seek",
+                 n->leading_dropped);
+    }
+    return 0;
+}
+
 /* `present` == 0 for a VP9 hidden (alt-ref / show_frame=0) coded frame: the
  * decoder still needs it for reference, but its output must not be paired to a
  * PTS or handed to the presenter (research repo, packetization.cpp). Always 1
@@ -879,6 +1079,11 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
 {
     if (size <= 0 || (size_t)size > INPUT_SLOT_BYTES)
         return -1;
+
+    /* Undecodable leading picture after a random access: never submitted, and
+     * no PTS consumed for it - it is not a frame anyone can be shown. */
+    if (drop_undecodable_leading(n, au, size))
+        return 0;
 
     unsigned islot = n->au_ring % PIPELINE_BUFFER_COUNT;
     unsigned fslot = n->au_ring % FRAME_POOL_SLOTS;
@@ -918,7 +1123,7 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
              (unsigned)out.valid, (unsigned)out.error,
              out.width, out.height, out.pitch_bytes ? out.pitch_bytes : out.pitch);
     }
-    if (rc != 0 || out.error) {
+    if (rc != 0) {
         if (!n->first_err_logged) {
             n->first_err_logged = 1;
             note("EVO vdec native: Decode FAIL #%u rc=0x%08x err=%u acc=%u au=%dB "
@@ -926,12 +1131,36 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
                  (unsigned)fb.accepted, size, (unsigned)out.valid,
                  out.width, out.height);
         }
+        /*
+         * Not yet fatal if nothing has come out since the flush. Starting
+         * mid-stream means the first AUs can legitimately be undecodable, and
+         * treating that as "this file cannot be played" is what ended playback
+         * on files that play perfectly from the beginning. Bounded, so a
+         * stream that really is broken still fails instead of spinning.
+         */
+        if (n->since_flush_out == 0 &&
+            ++n->post_flush_errs <= POST_FLUSH_ERR_TOLERANCE) {
+            if (n->post_flush_errs == 1)
+                note("EVO vdec native: decode error before the first picture "
+                     "after a seek - tolerating up to %d",
+                     POST_FLUSH_ERR_TOLERANCE);
+            return 0;
+        }
         return -1;
+    }
+
+    if (out.error && !n->first_pic_err_logged) {
+        n->first_pic_err_logged = 1;
+        note("EVO vdec native: picture error flag #%u rc=0x%08x err=%u acc=%u au=%dB "
+             "valid=%u %ux%u (tolerating)", n->dec_calls, (unsigned)rc, (unsigned)out.error,
+             (unsigned)fb.accepted, size, (unsigned)out.valid,
+             out.width, out.height);
     }
 
     if (present)
         pts_push(n, pts);
-    if (out.valid && !out.error && out.picture_count) {
+    if (out.valid && out.picture_count) {
+        n->since_flush_out++;
         if (present) {
             n->frames_out++;
             ro_harvest(n, &out);
@@ -961,7 +1190,7 @@ static void drain_decoder(evo_vdec_native *n)
 
         if (sceVideodec2Flush(n->dec, &fb, &out) != 0)
             break;
-        if (!(out.valid && !out.error && out.picture_count))
+        if (!(out.valid && out.picture_count))
             break;
         ro_harvest(n, &out);
         if (n->ro_count >= RO_SLOTS - 1)
@@ -1067,6 +1296,41 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     w = roundup16(w);
     h = roundup16(h);
 
+    /*
+     * On-demand grow, every codec (Phase 2). The slot was brought up at
+     * EVO_VDEC_NATIVE_BOOT_W/H; anything larger is built here for as long as
+     * this stream plays, and evo_vdec_native_close() puts it back.
+     *
+     * A failure here is not fatal: the old size is restored and NULL returned,
+     * so the caller still gets its FFmpeg fallback (which PlaybackController
+     * then refuses above 1080p, as before). The likeliest cause is flexible
+     * memory fragmented by earlier grow/shrink cycles rather than exhausted.
+     */
+    uint32_t cap_w, cap_h;
+    slot_ceiling(d, &cap_w, &cap_h);
+    if (((uint32_t)w > slot->max_w || (uint32_t)h > slot->max_h) &&
+        (uint32_t)w <= cap_w && (uint32_t)h <= cap_h) {
+        uint32_t old_w = slot->max_w;
+        uint32_t old_h = slot->max_h;
+        note("EVO vdec native: resizing %s slot %ux%u -> %dx%d on demand",
+             d->tag, old_w, old_h, w, h);
+        slot_teardown(slot);
+        const char *stage = "?";
+        int rc = slot_bringup(slot, d, w, h, &stage);
+        if (rc == 0) {
+            slot->ready = 1;
+            note("EVO vdec native: on-demand resize %s to %dx%d OK", d->tag, w, h);
+        } else {
+            note("EVO vdec native: on-demand resize %s to %dx%d FAILED at [%s] rc=0x%08x - restoring %ux%u",
+                 d->tag, w, h, stage, (unsigned)rc, old_w, old_h);
+            slot_teardown(slot);
+            stage = "?";
+            if (slot_bringup(slot, d, (int)old_w, (int)old_h, &stage) == 0)
+                slot->ready = 1;
+            return NULL;
+        }
+    }
+
     evo_vdec_native *n = (evo_vdec_native *)calloc(1, sizeof *n);
     if (!n)
         return NULL;
@@ -1101,6 +1365,13 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
             return NULL;
         }
     }
+    if (!need_bsf && par->extradata && par->extradata_size > 0) {
+        n->annexb_extradata = (uint8_t *)malloc((size_t)par->extradata_size);
+        if (n->annexb_extradata) {
+            memcpy(n->annexb_extradata, par->extradata, (size_t)par->extradata_size);
+            n->annexb_extradata_size = par->extradata_size;
+        }
+    }
     n->in_pkt   = av_packet_alloc();
     n->filt_pkt = av_packet_alloc();
     if (!n->in_pkt || !n->filt_pkt) {
@@ -1110,6 +1381,11 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 
     slot->owned = 1;             /* released by evo_vdec_native_close() */
     sceVideodec2Reset(n->dec);   /* fresh state for this stream */
+    if (!n->bsf && n->annexb_extradata && n->annexb_extradata_size > 0)
+        decode_one(n, n->annexb_extradata, n->annexb_extradata_size, INT64_MIN, 0);
+    /* The first picture of a stream is a random-access point too: its leading
+     * pictures reference what came before the file started. Same rule. */
+    n->drop_leading = 1;
 
     note("EVO vdec native: OPEN ok  resident %s decoder  %dx%d (disp %ux%u) bsf=%s depth=%d",
          d->tag, w, h, n->disp_w, n->disp_h,
@@ -1158,13 +1434,12 @@ int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *data, int size,
             int dr = decode_one(v, v->filt_pkt->data, v->filt_pkt->size, fp,
                                 pkt_present(v, v->filt_pkt));
             av_packet_unref(v->filt_pkt);
-            if (dr < 0) { v->fatal = 1; return -1; }
+            if (dr < 0) return -1;
         }
         return 0;
     }
 
     if (decode_one(v, data, size, pts_us, 1) < 0) {
-        v->fatal = 1;
         return -1;
     }
     return 0;
@@ -1224,6 +1499,13 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
     v->flushing       = 0;
     v->fatal          = 0;
     v->first_err_logged = 0;
+    v->first_pic_err_logged = 0;
+    /* Whatever we land on is a random-access point: its leading pictures are
+     * not decodable and nothing has come out of the decoder yet. */
+    v->drop_leading     = 1;
+    v->leading_dropped  = 0;
+    v->post_flush_errs  = 0;
+    v->since_flush_out  = 0;
     /*
      * #57: a plain av_bsf_flush() drops h264_mp4toannexb's buffered state but
      * does NOT re-arm its one-shot SPS/PPS injection, so the first IDR after a
@@ -1243,8 +1525,11 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
     } else if (v->bsf) {
         av_bsf_flush(v->bsf);
     }
-    if (v->dec)
+    if (v->dec) {
         sceVideodec2Reset(v->dec);
+        if (!v->bsf && v->annexb_extradata && v->annexb_extradata_size > 0)
+            decode_one(v, v->annexb_extradata, v->annexb_extradata_size, INT64_MIN, 0);
+    }
     note("EVO vdec native: FLUSH (seek)  decodes=%u framesout=%u",
          v->dec_calls, v->frames_out);
 }
@@ -1255,10 +1540,41 @@ void evo_vdec_native_close(evo_vdec_native *v)
         return;
     note("EVO vdec native: CLOSE  decodes=%u framesout=%u fatal=%d",
          v->dec_calls, v->frames_out, v->fatal);
-    if (v->dec)
-        sceVideodec2Reset(v->dec);   /* leave the resident decoder alive */
-    if (v->slot)
-        v->slot->owned = 0;          /* the next opener may have it */
+
+    if (v->annexb_extradata) {
+        free(v->annexb_extradata);
+        v->annexb_extradata = NULL;
+        v->annexb_extradata_size = 0;
+    }
+
+    if (v->slot) {
+        struct dec_slot *slot = v->slot;
+        if (slot->boot_w > 0 && slot->boot_h > 0 &&
+            (slot->max_w > slot->boot_w || slot->max_h > slot->boot_h)) {
+            size_t flex_before = 0, flex_after = 0;
+            (void)sceKernelAvailableFlexibleMemorySize(&flex_before);
+            note("EVO vdec native: restoring %s slot to boot size %ux%u (from %ux%u)  flex_before=%zuMB",
+                 v->desc->tag, slot->boot_w, slot->boot_h, slot->max_w, slot->max_h,
+                 flex_before >> 20);
+            slot_teardown(slot);
+            const char *stage = "?";
+            int rc = slot_bringup(slot, v->desc, (int)slot->boot_w, (int)slot->boot_h, &stage);
+            if (rc == 0) {
+                slot->ready = 1;
+            } else {
+                note("EVO vdec native: %s restore to boot size FAILED at [%s] rc=0x%08x",
+                     v->desc->tag, stage, (unsigned)rc);
+            }
+            (void)sceKernelAvailableFlexibleMemorySize(&flex_after);
+            note("EVO vdec native: flex after %s returned to boot size = %zuMB",
+                 v->desc->tag, flex_after >> 20);
+        } else {
+            if (v->dec)
+                sceVideodec2Reset(v->dec);   /* leave the resident decoder alive */
+        }
+        slot->owned = 0;          /* the next opener may have it */
+    }
+
     if (v->bsf)
         av_bsf_free(&v->bsf);
     if (v->bsf_par)

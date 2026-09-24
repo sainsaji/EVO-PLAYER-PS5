@@ -417,10 +417,12 @@ int decode_next_video_frame(void)
                         break;
                 }
 
-                /* Badly late vs audio: drop queued non-keys, still show frame */
-                if (behind > 0.45)
+                /* Badly late vs audio: drop queued non-keys, still show frame.
+                 * When g_pp_pb is active, pp_clock handles late frame dropping
+                 * at presentation time; dropping demux packets breaks decoder GOP integrity. */
+                if (behind > 0.45 && !g_pp_pb.active)
                     prospero_video_queue_drain_nonkey(24);
-            } else if (video_fps > 1.0) {
+            } else if (video_fps > 1.0 && !g_pp_pb.active) {
                 /*
                  * Audio not running yet: pace by nominal frame interval so
                  * we don't race through the open before audio primes.

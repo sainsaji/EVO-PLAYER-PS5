@@ -20,6 +20,17 @@
  * reads the quarantine and refuses those paths, so the browser comes back and
  * the only thing lost is one poster.
  *
+ * The note also records how far the work had got, because the two stages want
+ * different answers. A file that faulted inside the *software decoder* still
+ * deserves its hardware attempt next time - that is the whole point of the
+ * hardware poster path, and EVO_TEST_hevc8_4k.mp4 is the file that proves it.
+ * A file that faulted inside libavformat's own *container probe* never
+ * reached a decoder EVO chose, so there is nothing to retry differently and
+ * it is refused outright. That case is not hypothetical: a 4K HEVC Main 10
+ * MPEG-TS took the process down inside avformat_find_stream_info() on 0.10.0,
+ * before any gate could see its geometry, and with nothing recorded it did it
+ * again on every single launch.
+ *
  * Everything the handler touches has to be async-signal-safe, hence the raw
  * open/write/close and the path resolved up front rather than inside it.
  */
@@ -30,6 +41,13 @@
 extern "C" {
 #endif
 
+/* How far the in-flight work had got when the process died. Ordered: a lower
+ * stage is the stricter verdict, because it rules out more of the pipeline. */
+typedef enum {
+    EVO_CRASH_STAGE_PROBE  = 0,  /* avformat_open_input / find_stream_info */
+    EVO_CRASH_STAGE_DECODE = 1   /* a software decoder EVO opened itself   */
+} evo_crash_stage_t;
+
 /* Resolve and cache the quarantine file's path. Call once, after the data root
  * is known and before any extraction. Safe to call again; later calls are
  * ignored so the signal handler always sees a stable buffer. */
@@ -38,16 +56,19 @@ void evo_crash_note_init(void);
 /* The quarantine file, or NULL before init. */
 const char *evo_crash_note_path(void);
 
-/* Mark work as in flight. `path` NULL or empty clears the mark. Copies at most
- * 511 bytes. No allocation, no I/O. */
-void evo_crash_note_set(const char *path);
+/* Mark work as in flight at `stage`. `path` NULL or empty clears the mark.
+ * Truncates to the buffer. No allocation, no I/O. */
+void evo_crash_note_set(const char *path, evo_crash_stage_t stage);
 
 /* Append the in-flight mark, if any, to the quarantine file. Called only from
  * the crash handler: raw syscalls, no stdio, no allocation. */
 void evo_crash_note_commit(void);
 
-/* Whether `path` is quarantined. Reads the file on first call and caches it. */
-int evo_crash_note_is_quarantined(const char *path);
+
+/* The stage `path` died in, or -1 if it is not quarantined. When a path was
+ * recorded more than once the strictest (lowest) stage wins. Reads the file on
+ * first call and caches it. */
+int evo_crash_note_stage(const char *path);
 
 /* Forget every quarantined path (deletes the file and drops the cache), so a
  * file can be retried after the underlying bug is fixed. */

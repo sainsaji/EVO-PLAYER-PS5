@@ -303,7 +303,10 @@ packet_queue_clear(
          * target is dropped on the audio side too. Both clocks then restart
          * from the target and the picture resumes without waiting for audio.
          */
-        audio_seek_discard_until = target_seconds;
+        if (target_seconds > 0.05)
+            audio_seek_discard_until = target_seconds;
+        else
+            audio_seek_discard_until = -1.0;
 
         audio_samples_played = 0;
         audio_samples_decoded = 0;
