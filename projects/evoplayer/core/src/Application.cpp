@@ -61,6 +61,7 @@ extern "C" int perf_render_fps;
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/cpu.h>
+#include <libavutil/log.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -106,6 +107,55 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 namespace evo {
 
 static evo_input evo_pad_state;
+
+/*
+ * Route FFmpeg's logging into evo.log, and away from stderr.
+ *
+ * THIS IS A CRASH FIX, not a diagnostic nicety.
+ *
+ * av_log's default callback ends in fputs(str, stderr) - libavutil/log.c,
+ * colored_fputs(). Nothing in this binary has ever written to stderr: the boot
+ * log opens /mnt/usb0/evo.log itself and klog goes through
+ * sceKernelDebugOutText, so on the native-app CRT stderr had never once been
+ * touched, and touching it dereferences null. SIGSEGV, addr=0, no diagnostic.
+ *
+ * That is why crashes only ever happened on files that make FFmpeg *log*
+ * something. A clean MP4 or MKV probes silently and hundreds of them worked
+ * fine; an MPEG-TS reliably logs "start time for stream N is not set in
+ * estimate_timings_from_pts" and died every single time, on three builds, with
+ * that string still sitting in the register dump. The same dumps from
+ * EVO_TEST_hevc8_4k.mp4 held "Error parsing NAL unit #0." - also an av_log
+ * message. Each of those was read as a clue to where the code had got to; they
+ * were the fault itself.
+ *
+ * Second prize: FFmpeg's own diagnostics finally land somewhere readable.
+ * Several comments in this tree complain that libavcodec "writes to its own
+ * av_log, which goes nowhere here" - it went to a null stderr.
+ *
+ * WARNING and above only, so a stream with per-frame complaints cannot flood
+ * the log or slow the decode thread down.
+ */
+static void EvoAvLogCallback(void* avcl, int level, const char* fmt, va_list vl) {
+    (void)avcl;
+    if (level > AV_LOG_WARNING)
+        return;
+    char line[512];
+    int n = vsnprintf(line, sizeof line, fmt, vl);
+    if (n <= 0)
+        return;
+    if (n >= (int)sizeof line)
+        n = (int)sizeof line - 1;
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+        line[--n] = '\0';
+    if (n == 0)
+        return;
+    evo_bt("ffmpeg[%d]: %s", level, line);
+}
+
+static void evo_av_log_init() {
+    av_log_set_callback(EvoAvLogCallback);
+    av_log_set_level(AV_LOG_WARNING);
+}
 
 static void SoundEffectCallback(int sfxKind) {
     if (auto sfx = Application::getInstance().getSoundEffectEngine()) {
@@ -245,6 +295,7 @@ bool Application::initHardware() {
     evo_jailbreak_self();
     evo_boot_log_flush();
 
+    evo_av_log_init();
     av_force_cpu_flags(0);
     evo_direct_mem_init(EVO_DIRECT_MEM_POOL_BYTES);
     EnsureDataDirectories();
