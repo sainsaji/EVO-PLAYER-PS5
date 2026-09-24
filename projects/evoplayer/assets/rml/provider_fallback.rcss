@@ -1,0 +1,232 @@
+/* =============================================================================
+ * EVO PLAYER - embedded fallback provider skin (#90 scope 14)
+ *
+ * The stylesheet for provider_fallback.rml. Also the worked example of the
+ * RCSS subset the sceAgc backend actually implements - every property used
+ * here is one docs/addons/provider-architecture.md lists as supported, and
+ * nothing here relies on anything outside it. A bundle that stays inside this
+ * vocabulary renders the same on the console as it does under uiview.sh.
+ *
+ * Provider contexts do NOT receive the theme push. evo_rmlui_set_theme stamps
+ * colours onto every element as inline properties, which would silently
+ * overwrite a provider's own palette, so the colours here are literal - and a
+ * bundle's colours are literally its own.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 18dp;
+    color: #e8e8ecff;
+    background-color: #101014ff;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+}
+
+div, span, p, img {
+    box-sizing: border-box;
+}
+
+#pf-root {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding-top: 48dp;
+    padding-bottom: 48dp;
+    padding-left: 96dp;
+    padding-right: 96dp;
+}
+
+/* ---- header ------------------------------------------------------------ */
+
+/*
+ * display: block is spelled out on every element that needs it.
+ *
+ * RmlUi's `display` property DEFAULTS TO INLINE, for a div as much as for a
+ * span - it has no HTML default stylesheet behind it. Leaving it out laid the
+ * title, the breadcrumb and the error chip on one line and dropped #pf-root's
+ * padding entirely, so the whole document sat flush against the screen edge.
+ * This is the single most common way a bundle written like HTML goes wrong.
+ */
+#pf-header {
+    display: block;
+    height: 100dp;
+}
+
+#pf-title {
+    display: block;
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 40dp;
+    color: #ffffffff;
+}
+
+#pf-crumb {
+    display: block;
+    font-size: 17dp;
+    color: #8a8a96ff;
+    margin-top: 6dp;
+}
+
+/* ---- status ------------------------------------------------------------ */
+/*
+ * A bundle that fails to load must say so. The error state is a visible red
+ * bar, not a log line: on a console the log is not reachable while the screen
+ * is up, so an unexplained fallback skin is indistinguishable from a bug in
+ * the provider itself.
+ */
+#pf-status {
+    display: block;
+    padding: 12dp 18dp;
+    margin-bottom: 20dp;
+    border-radius: 6dp;
+    font-size: 17dp;
+    background-color: #1c2a1cff;
+    color: #9fd89fff;
+}
+
+#pf-status.pf-err {
+    background-color: #341a1aff;
+    color: #ff9e9eff;
+}
+
+#pf-loading,
+#pf-empty {
+    display: block;
+    padding: 24dp 0;
+    font-size: 19dp;
+    color: #8a8a96ff;
+}
+
+/* ---- rows -------------------------------------------------------------- */
+
+#pf-list {
+    display: block;
+    height: 700dp;
+    overflow-y: auto;
+}
+
+.pf-row {
+    /*
+     * nav: auto is what makes the D-pad work. RmlUi's spatial navigation reads
+     * these properties to decide where focus goes next; with the default
+     * `none` the context receives the key press and does nothing, which looks
+     * exactly like a hung screen.
+     */
+    /* Focusable. RmlUi has no `tabindex` attribute - focusability is this
+     * RCSS property, and without it the row is skipped by both Tab and the
+     * D-pad. */
+    tab-index: auto;
+    nav: auto;
+    display: block;
+    height: 92dp;
+    padding: 10dp 16dp;
+    margin-bottom: 8dp;
+    border-radius: 8dp;
+    background-color: #17171dff;
+}
+
+/* The focus ring is the provider's to draw. EVO pushes no is_focused bool and
+ * has no idea which row this is. */
+.pf-row:focus {
+    background-color: #24242eff;
+    border: 2dp #6ea8feff;
+}
+
+.pf-art {
+    display: inline-block;
+    width: 72dp;
+    height: 72dp;
+    border-radius: 6dp;
+    /* Something behind the gap while the poster is still downloading. A
+     * provider's art arrives over several frames, so a row with no background
+     * flashes empty on every navigation. */
+    background-color: #202028ff;
+    vertical-align: top;
+}
+
+.pf-art img {
+    width: 72dp;
+    height: 72dp;
+    border-radius: 6dp;
+}
+
+/* The title's first letter, when a row has no artwork. `row.initial` is
+ * published by the host because RmlUi has no substring transform. */
+.pf-initial {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 32dp;
+    color: #4a4a58ff;
+    text-align: center;
+    padding-top: 16dp;
+}
+
+.pf-text {
+    display: inline-block;
+    width: 1200dp;
+    padding-left: 20dp;
+    vertical-align: top;
+}
+
+.pf-row-title {
+    display: block;
+    font-weight: bold;
+    font-size: 21dp;
+    color: #ffffffff;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.pf-row-sub,
+.pf-row-now {
+    display: block;
+    font-size: 16dp;
+    color: #8a8a96ff;
+    margin-top: 4dp;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.pf-row-now {
+    color: #9fb8d8ff;
+}
+
+.pf-meta {
+    display: inline-block;
+    width: 200dp;
+    text-align: right;
+    vertical-align: top;
+    padding-top: 22dp;
+}
+
+.pf-badge {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #ffffffff;
+    background-color: #b03434ff;
+    padding: 3dp 8dp;
+    border-radius: 4dp;
+}
+
+.pf-dur {
+    font-size: 16dp;
+    color: #8a8a96ff;
+}
+
+.pf-chev {
+    font-size: 22dp;
+    color: #6a6a76ff;
+}
+
+/* ---- footer ------------------------------------------------------------ */
+
+#pf-footer {
+    display: block;
+    padding-top: 16dp;
+    font-size: 15dp;
+    color: #6a6a76ff;
+}

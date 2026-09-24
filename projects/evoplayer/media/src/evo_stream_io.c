@@ -81,9 +81,18 @@ int evo_stream_io_open(const char *path,
 
     AVDictionary *opts = NULL;
 
-    /* Fast probe & high-throughput streaming buffer options */
+    /*
+     * Fast probe & high-throughput streaming buffer options.
+     *
+     * analyzeduration is 4 s, not the 2 s this file used while it had no
+     * callers: PlaybackController's own open (the one that actually shipped)
+     * used 4 s, and #90 routes that open through here. Halving it would change
+     * stream detection on awkward MPEG-TS - the files where a second audio
+     * track appears late - as a side effect of a refactor, which is the kind of
+     * regression that gets blamed on the codec pass rather than on this line.
+     */
     av_dict_set(&opts, "probesize", "4194304", 0);
-    av_dict_set(&opts, "analyzeduration", "2000000", 0);
+    av_dict_set(&opts, "analyzeduration", "4000000", 0);
     av_dict_set(&opts, "buffer_size", buf_size_str, 0);
 
     if (ctx->is_network) {

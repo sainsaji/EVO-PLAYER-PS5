@@ -7,6 +7,11 @@
 #include <vector>
 #include <cstdint>
 
+/* Opaque, at global scope: evo_stream_io.h is a C header this one does not
+ * pull in, and declaring the struct inside namespace evo would make a
+ * different type with the same spelling. */
+struct evo_stream_io_ctx;
+
 namespace evo {
 
 class PlaybackController : public IPlaybackController {
@@ -23,6 +28,10 @@ public:
     }
 
     bool startPlayback(const std::string& filePath, double resumeOffset = 0.0) override;
+    bool startPlaybackSource(const PlaybackSource& source,
+                             double resumeOffset = 0.0) override;
+    const std::string& getDisplayTitle() const override { return m_source.title; }
+    bool isLiveSource() const override { return m_source.is_live; }
     void stopPlayback() override;
 
     void togglePause() override;
@@ -71,6 +80,15 @@ private:
     StateMachine<PlaybackState, PlaybackEvent> m_playbackFsm;
 
     std::string m_currentFilePath;
+    /* #90: who this came from and what to call it. For a local file only
+     * `url` is set and it equals m_currentFilePath. */
+    PlaybackSource m_source;
+    /* The stream-io context for the open format, so reconnect/timeout live in
+     * one place for local and network alike (evo_stream_io.c). */
+    ::evo_stream_io_ctx *m_streamIo = nullptr;
+    /* Wall-clock of the last report_progress, so a provider gets an update
+     * roughly every ten seconds rather than on every resume save. */
+    double m_lastProgressReport = 0.0;
     double m_durationSeconds = 0.0;
     double m_resumeBaseOffset = 0.0;
     bool m_musicMode = false;

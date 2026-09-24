@@ -393,6 +393,11 @@ void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderToast(framebuffer, width, height);
 }
 
+/* #90: the rail over a provider screen - see EvoRmlApp::RenderNavOverlay. */
+void evo_rmlui_render_nav_overlay(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderNavOverlay(framebuffer, width, height);
+}
+
 void evo_rmlui_update_debug_overlay(int fps, int visible) {
     EvoRmlApp::Instance().UpdateDebugOverlay(fps, visible != 0);
 }

@@ -476,6 +476,11 @@ void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height);
 void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* params);
 void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height);
 
+/* #90: composite the navigation rail over a provider screen, whose document
+ * lives in its own Rml context and therefore does not bring the rail with it.
+ * Call AFTER evo_rmlui_provider_render(). */
+void evo_rmlui_render_nav_overlay(uint32_t* framebuffer, int width, int height);
+
 /* Dev debug overlay - the menu-screen FPS pill (GL-5 kept the FPS readout
  * player-only; this restores it for every non-player screen). Own RmlUi
  * context, composited like the toast: call update then render AFTER the

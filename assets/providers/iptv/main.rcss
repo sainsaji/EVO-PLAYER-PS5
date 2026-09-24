@@ -1,0 +1,277 @@
+/* =============================================================================
+ * IPTV provider bundle — stylesheet (#90)
+ *
+ * NOT an EVO Player stylesheet. Fetched at runtime with main.rml and cached
+ * under /data/evoplayer/providers/iptv/. Its palette is its own: EVO's theme
+ * push is opt-out for provider contexts precisely so this file is what ends up
+ * on screen.
+ *
+ * It stays inside the RCSS subset the sceAgc backend implements - see
+ * docs/addons/provider-architecture.md. That list is not a style guide, it is
+ * the set of properties that actually rasterise on the console; the backend's
+ * failure mode for anything outside it is a silent mis-render, which is why a
+ * bundle is validated against it at load rather than trusted.
+ *
+ * Deliberately NOT a nine-row list. A channel guide is a grid, and being able
+ * to say so without changing EVO is the entire point of the seam.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 17dp;
+    color: #dfe7f5ff;
+    /* The service's own colour, not EVO's near-black. */
+    background-color: #070d1aff;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+}
+
+div, span, img {
+    box-sizing: border-box;
+}
+
+#tv-shell {
+    width: 100%;
+    height: 100%;
+    padding: 36dp 64dp 24dp 64dp;
+}
+
+/* ---- guide bar --------------------------------------------------------- */
+
+#tv-bar {
+    height: 62dp;
+    padding-bottom: 14dp;
+}
+
+#tv-brand {
+    display: inline-block;
+    width: 280dp;
+    vertical-align: top;
+}
+
+#tv-dot {
+    display: inline-block;
+    width: 13dp;
+    height: 13dp;
+    border-radius: 7dp;
+    background-color: #ff4d4dff;
+    vertical-align: top;
+    margin-top: 10dp;
+}
+
+#tv-brandtext {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 27dp;
+    color: #ffffffff;
+    padding-left: 10dp;
+}
+
+#tv-path {
+    display: inline-block;
+    width: 1050dp;
+    font-size: 17dp;
+    color: #7f93b5ff;
+    padding-top: 10dp;
+    vertical-align: top;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+#tv-count {
+    display: inline-block;
+    width: 250dp;
+    text-align: right;
+    font-size: 16dp;
+    color: #7f93b5ff;
+    padding-top: 10dp;
+    vertical-align: top;
+}
+
+/* ---- notices ----------------------------------------------------------- */
+
+#tv-notice {
+    padding: 10dp 16dp;
+    margin-bottom: 14dp;
+    border-radius: 6dp;
+    font-size: 16dp;
+    background-color: #10203aff;
+    color: #9fc0f0ff;
+}
+
+#tv-notice.tv-bad {
+    background-color: #35141aff;
+    color: #ff9aa6ff;
+}
+
+#tv-spinner {
+    padding: 10dp 0 14dp 0;
+    font-size: 18dp;
+    color: #7f93b5ff;
+}
+
+/* ---- the grid ---------------------------------------------------------- */
+/*
+ * Six across, with inline-block and fixed widths.
+ *
+ * Flexbox would also work - RmlUi supports `display: flex`, and layout is
+ * RmlUi's job, never the render backend's, so a layout that works in the host
+ * preview works on the console too. inline-block is used here only because a
+ * fixed-size card grid is what it is good at.
+ *
+ * What DOES differ between the two backends is filters: the console's sceAgc
+ * interface implements blur, the host preview's CPU rasteriser implements none
+ * and logs "Could not compile filter". See docs/addons/provider-architecture.md.
+ */
+#tv-grid {
+    height: 830dp;
+    overflow-y: auto;
+}
+
+.tv-card {
+    /* Both of these are RCSS properties, not attributes: RmlUi has no
+     * `tabindex`. Without tab-index the card is not focusable at all, and
+     * without nav the D-pad has nowhere to move it to. */
+    tab-index: auto;
+    nav: auto;
+    display: inline-block;
+    width: 282dp;
+    height: 268dp;
+    margin: 0 12dp 16dp 0;
+    padding: 12dp;
+    border-radius: 10dp;
+    background-color: #0e1728ff;
+    vertical-align: top;
+}
+
+/* The focus treatment is the provider's. EVO pushes no selection index. */
+.tv-card:focus {
+    background-color: #17253fff;
+    border: 2dp #4d9fffff;
+}
+
+/* A group folder is a label card, not a thumbnail card: shorter, and it fills
+ * itself with the group name instead of leaving a picture-shaped hole. */
+.tv-card.tv-group {
+    background-color: #12203aff;
+    height: 128dp;
+}
+
+.tv-folder {
+    width: 258dp;
+    height: 104dp;
+    padding-top: 26dp;
+}
+
+.tv-foldername {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 25dp;
+    color: #ffffffff;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tv-foldercount {
+    font-size: 15dp;
+    color: #7f93b5ff;
+    margin-top: 8dp;
+}
+
+.tv-thumb {
+    width: 258dp;
+    height: 132dp;
+    border-radius: 8dp;
+    background-color: #060b15ff;
+    text-align: center;
+    position: relative;
+}
+
+.tv-logo {
+    width: 258dp;
+    height: 132dp;
+    border-radius: 8dp;
+}
+
+/* Placeholder while the logo downloads, or when the playlist has no tvg-logo.
+ * The grid must never show holes: a gap reads as a broken channel. */
+.tv-initial {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 54dp;
+    color: #35507aff;
+    padding-top: 34dp;
+}
+
+.tv-onair {
+    position: absolute;
+    top: 8dp;
+    right: 8dp;
+    width: 10dp;
+    height: 10dp;
+    border-radius: 5dp;
+    background-color: #ff4d4dff;
+}
+
+.tv-name {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 18dp;
+    color: #ffffffff;
+    margin-top: 10dp;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tv-now,
+.tv-next {
+    margin-top: 6dp;
+    font-size: 14dp;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.tv-nowlabel,
+.tv-nextlabel {
+    font-weight: bold;
+    font-size: 12dp;
+    padding: 2dp 5dp;
+    border-radius: 3dp;
+    background-color: #1d3355ff;
+    color: #9fc0f0ff;
+}
+
+.tv-nextlabel {
+    background-color: #17223aff;
+    color: #6b80a5ff;
+}
+
+.tv-nowtitle {
+    color: #cfdcf0ff;
+    padding-left: 6dp;
+}
+
+.tv-nexttitle {
+    color: #7f93b5ff;
+    padding-left: 6dp;
+}
+
+/* ---- footer hint ------------------------------------------------------- */
+
+#tv-hint {
+    padding-top: 12dp;
+    font-size: 15dp;
+    color: #5d7091ff;
+}
+
+.tv-key {
+    font-weight: bold;
+    color: #9fc0f0ff;
+    background-color: #12203aff;
+    padding: 2dp 7dp;
+    border-radius: 4dp;
+}

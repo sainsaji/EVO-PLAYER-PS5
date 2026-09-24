@@ -19,17 +19,49 @@
 #define EMBY_CONF_USB  "/mnt/usb0/.evo_emby.conf"
 #endif
 
+/*
+ * No default host, no default username.
+ *
+ * This used to ship with "192.168.0.11" and "bin" in it - one developer's LAN,
+ * compiled into every copy. It made the provider look configured when it was
+ * not, so the first thing a user saw was a six-second timeout against a
+ * machine that is not theirs, with nothing to say why. is_configured() now
+ * answers honestly and the setup screen is reachable instead.
+ */
 static emby_config_t g_emby_config = {
-    .host = "192.168.0.11",
+    .host = "",
     .port = 8096,
-    .username = "bin",
+    .username = "",
     .password = "",
     .token = "",
     .user_id = "",
     .server_name = "Emby Server",
     .server_version = "",
+    .use_https = false,
     .is_connected = false
 };
+
+/*
+ * "http://host:port" or "https://host:port".
+ *
+ * Every request in this file used to spell out "http://%s:%d" at its own call
+ * site - nine of them - which meant an HTTPS Emby server was not
+ * misconfigured, it was unreachable, and adding TLS support meant finding all
+ * nine. It also meant emby_build_stream_url handed FFmpeg an http:// URL for a
+ * server that only speaks https.
+ *
+ * Returns a static buffer. Single-threaded by construction: every caller is
+ * either the main thread or evo_net's worker building a request before it is
+ * queued, never both at once.
+ */
+static const char *emby_base(void)
+{
+    static char base[160];
+    snprintf(base, sizeof base, "%s://%s:%d",
+             g_emby_config.use_https ? "https" : "http",
+             g_emby_config.host, g_emby_config.port);
+    return base;
+}
 
 int emby_init(void)
 {
@@ -57,6 +89,8 @@ int emby_init(void)
                 strncpy(g_emby_config.user_id, line + 8, sizeof(g_emby_config.user_id) - 1);
             } else if (strncmp(line, "server_name=", 12) == 0) {
                 strncpy(g_emby_config.server_name, line + 12, sizeof(g_emby_config.server_name) - 1);
+            } else if (strncmp(line, "https=", 6) == 0) {
+                g_emby_config.use_https = atoi(line + 6) ? true : false;
             } else {
                 /* Positional fallback */
                 if (line_idx == 0 && line[0]) {
@@ -95,14 +129,15 @@ int emby_save_config(void)
     if (!f) f = fopen(EMBY_CONF_USB, "w");
     if (!f) return -1;
 
-    fprintf(f, "host=%s\nport=%d\nusername=%s\npassword=%s\ntoken=%s\nuser_id=%s\nserver_name=%s\n",
+    fprintf(f, "host=%s\nport=%d\nusername=%s\npassword=%s\ntoken=%s\nuser_id=%s\nserver_name=%s\nhttps=%d\n",
             g_emby_config.host,
             g_emby_config.port,
             g_emby_config.username,
             g_emby_config.password,
             g_emby_config.token,
             g_emby_config.user_id,
-            g_emby_config.server_name);
+            g_emby_config.server_name,
+            g_emby_config.use_https ? 1 : 0);
 
     fclose(f);
     return 0;
@@ -156,8 +191,8 @@ static void on_public_users_response(int success, int status_code, const char *b
 
                     /* Retry auth with discovered username */
                     char url[256];
-                    snprintf(url, sizeof(url), "http://%s:%d/emby/Users/AuthenticateByName",
-                             g_emby_config.host, g_emby_config.port);
+                    snprintf(url, sizeof(url), "%s/emby/Users/AuthenticateByName",
+                             emby_base());
 
                     cJSON *auth_req = cJSON_CreateObject();
                     cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
@@ -194,8 +229,8 @@ static void on_auth_response(int success, int status_code, const char *body, siz
         if (ctx && !ctx->retried) {
             /* Try auto-discovering public users on the server */
             char url[256];
-            snprintf(url, sizeof(url), "http://%s:%d/emby/Users/Public",
-                     g_emby_config.host, g_emby_config.port);
+            snprintf(url, sizeof(url), "%s/emby/Users/Public",
+                     emby_base());
             evo_net_request_async("GET", url, NULL, NULL, 0, on_public_users_response, ctx);
             return;
         }
@@ -246,8 +281,8 @@ static void on_auth_response(int success, int status_code, const char *body, siz
 int emby_connect_async(emby_auth_cb callback, void *userdata)
 {
     char url[256];
-    snprintf(url, sizeof(url), "http://%s:%d/emby/Users/AuthenticateByName",
-             g_emby_config.host, g_emby_config.port);
+    snprintf(url, sizeof(url), "%s/emby/Users/AuthenticateByName",
+             emby_base());
 
     cJSON *auth_req = cJSON_CreateObject();
     cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
@@ -341,8 +376,8 @@ int emby_fetch_libraries_async(emby_items_cb callback, void *userdata)
         return -1;
 
     char url[256];
-    snprintf(url, sizeof(url), "http://%s:%d/emby/Users/%s/Views",
-             g_emby_config.host, g_emby_config.port, g_emby_config.user_id);
+    snprintf(url, sizeof(url), "%s/emby/Users/%s/Views",
+             emby_base(), g_emby_config.user_id);
 
     char auth_hdr[256];
     snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
@@ -449,12 +484,12 @@ int emby_fetch_items_async(const char *parent_id, emby_items_cb callback, void *
     char url[512];
     if (parent_id && *parent_id) {
         snprintf(url, sizeof(url),
-                 "http://%s:%d/emby/Users/%s/Items?ParentId=%s&Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
-                 g_emby_config.host, g_emby_config.port, g_emby_config.user_id, parent_id);
+                 "%s/emby/Users/%s/Items?ParentId=%s&Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
+                 emby_base(), g_emby_config.user_id, parent_id);
     } else {
         snprintf(url, sizeof(url),
-                 "http://%s:%d/emby/Users/%s/Items?Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
-                 g_emby_config.host, g_emby_config.port, g_emby_config.user_id);
+                 "%s/emby/Users/%s/Items?Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
+                 emby_base(), g_emby_config.user_id);
     }
 
     char auth_hdr[256];
@@ -476,8 +511,8 @@ int emby_build_stream_url(const char *item_id, char *out_url, size_t max_len)
     if (!item_id || !out_url || max_len == 0) return -1;
 
     snprintf(out_url, max_len,
-             "http://%s:%d/emby/Videos/%s/stream?Static=true&api_key=%s",
-             g_emby_config.host, g_emby_config.port, item_id, g_emby_config.token);
+             "%s/emby/Videos/%s/stream?Static=true&api_key=%s",
+             emby_base(), item_id, g_emby_config.token);
 
     return 0;
 }
@@ -487,8 +522,8 @@ void emby_report_playback_start(const char *item_id)
     if (!g_emby_config.is_connected || !item_id) return;
 
     char url[256];
-    snprintf(url, sizeof(url), "http://%s:%d/emby/Sessions/Playing",
-             g_emby_config.host, g_emby_config.port);
+    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing",
+             emby_base());
 
     char auth_hdr[256];
     snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
@@ -505,8 +540,8 @@ void emby_report_playback_progress(const char *item_id, int64_t pos_sec, int64_t
     if (!g_emby_config.is_connected || !item_id) return;
 
     char url[256];
-    snprintf(url, sizeof(url), "http://%s:%d/emby/Sessions/Playing/Progress",
-             g_emby_config.host, g_emby_config.port);
+    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing/Progress",
+             emby_base());
 
     char auth_hdr[256];
     snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
@@ -528,8 +563,8 @@ void emby_report_playback_stop(const char *item_id, int64_t pos_sec)
     if (!g_emby_config.is_connected || !item_id) return;
 
     char url[256];
-    snprintf(url, sizeof(url), "http://%s:%d/emby/Sessions/Playing/Stopped",
-             g_emby_config.host, g_emby_config.port);
+    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing/Stopped",
+             emby_base());
 
     char auth_hdr[256];
     snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);

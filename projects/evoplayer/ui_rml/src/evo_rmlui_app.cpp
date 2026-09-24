@@ -3111,6 +3111,47 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
 #endif
 }
 
+/* ---- #90: nav rail over a provider screen ---------------------------- */
+
+void EvoRmlApp::RenderNavOverlay(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_nav_doc || !framebuffer) return;
+    if (!m_last_nav.visible) return;
+
+    /*
+     * Hide every EVO screen document and render the main context, so the only
+     * thing that draws is the rail. navbar.rcss keeps its body transparent, so
+     * this composites over whatever the provider's context already painted.
+     *
+     * m_cached_screen is invalidated because the next EVO screen to come up
+     * must re-rasterise: the cached surface no longer holds what it thinks it
+     * holds, and a stale surface blitted over a provider screen is a
+     * wrong-looking frame with no error anywhere.
+     */
+    ShowOnlyScreen(nullptr);
+    m_nav_doc->Show();
+
+    m_render->SetFramebuffer(framebuffer);
+    m_render->SetDimensions(width, height);
+    m_context->Update();
+    m_render->FrameBegin();
+    m_context->Render();
+    m_render->FrameEnd();
+
+    /*
+     * The cached menu surface no longer holds what it thinks it holds, so the
+     * next EVO screen has to re-rasterise. Invalidating the id is enough -
+     * RenderCachedScreen re-rasters on a screen change - and is deliberately
+     * NOT m_frame_dirty: setting that here would make GlNeedsFrame() true on
+     * every frame for as long as a provider screen is up, which is a redraw
+     * per frame forever. The provider host reports its own liveness through
+     * evo_rmlui_provider_needs_frame() instead.
+     */
+    m_cached_screen = -1;
+#if defined(EVO_AGC_DEVICE)
+    m_drew = true;
+#endif
+}
+
 /* ---- #81: virtual keyboard modal ------------------------------------- */
 
 static std::string kb_esc(const char* s) {

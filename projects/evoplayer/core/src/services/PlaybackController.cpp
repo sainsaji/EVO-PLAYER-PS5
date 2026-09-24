@@ -23,6 +23,10 @@ __attribute__((weak)) void evo_alloc_map_info(uint64_t *fails, uint64_t *served_
 #include "evo_adec.h"
 #include "evo_subtitle.h"
 #include "evo_stream_io.h"
+/* #90: the provider seam. Needed for report_progress from saveResumePosition
+ * and for the resolver chain's stream choices; no provider-specific header is
+ * included here, which is the point of the vtable. */
+#include "evo_provider.h"
 #include "evo_recent.h"
 #include "evo_toast.h"
 #include "evo_data_path.h"
@@ -197,6 +201,20 @@ void PlaybackController::stopPlayback() {
         saveResumePosition();
     }
 
+    /*
+     * #90: close the provider's playback session. After saveResumePosition so
+     * the final position has already gone out as an UPDATE, and before the
+     * source identity is cleared further down.
+     */
+    if (m_source.isProvider()) {
+        const evo_provider_t* prov = evo_provider_find(m_source.provider.c_str());
+        if (prov && (prov->caps & EVO_PROVIDER_CAP_PROGRESS) && prov->report_progress)
+            prov->report_progress(m_source.item_id.c_str(),
+                                  static_cast<int64_t>(getPositionSeconds()),
+                                  static_cast<int64_t>(m_durationSeconds),
+                                  EVO_PROVIDER_PLAY_STOP);
+    }
+
     m_playbackFsm.postEvent(PlaybackEvent::Stop);
     player_paused = 0;
     resetScrubHold();
@@ -281,6 +299,13 @@ void PlaybackController::stopPlayback() {
         play_fmt = nullptr;
     }
 
+    /* Paired with evo_stream_io_open() in startPlaybackSource(). After
+     * avformat_close_input, so nothing is still reading through it. */
+    if (m_streamIo) {
+        evo_stream_io_close(m_streamIo);
+        m_streamIo = nullptr;
+    }
+
     video_stream_index = -1;
     audio_stream_index = -1;
     m_durationSeconds = 0.0;
@@ -289,6 +314,8 @@ void PlaybackController::stopPlayback() {
     resume_base_offset_seconds = 0.0;
     m_musicMode = false;
     m_currentFilePath.clear();
+    m_source = PlaybackSource{};
+    m_lastProgressReport = 0.0;
 
     video_decode_ready = 0;
     video_decode_done = 0;
@@ -318,7 +345,20 @@ void PlaybackController::stopPlayback() {
     pp_playback_log_stats(&g_pp_pb);
 }
 
+/*
+ * #90: the local-file form. Everything a path can tell us is the path, so the
+ * source carries only that and the title is derived from the filename
+ * downstream, exactly as before.
+ */
 bool PlaybackController::startPlayback(const std::string& filePath, double resumeOffset) {
+    PlaybackSource src;
+    src.url = filePath;
+    return startPlaybackSource(src, resumeOffset);
+}
+
+bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
+                                             double resumeOffset) {
+    const std::string& filePath = source.url;
     if (filePath.empty()) {
         return false;
     }
@@ -326,28 +366,65 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
     stopPlayback();
 
     m_playbackFsm.postEvent(PlaybackEvent::Open);
+    m_source = source;
     m_currentFilePath = filePath;
-    std::snprintf(current_media_path, sizeof(current_media_path), "%s", filePath.c_str());
+    m_lastProgressReport = 0.0;
 
-    AVDictionary* opts = nullptr;
-    av_dict_set(&opts, "probesize", "4194304", 0);
-    av_dict_set(&opts, "analyzeduration", "4000000", 0);
+    /*
+     * current_media_path is read by the subtitle sidecar scan, the demuxer and
+     * the favourites toggle, all of which expect a filesystem path. A provider
+     * URL is not one - the sidecar scan would stat() nonsense and the
+     * favourites toggle would persist a token - so it stays empty for a
+     * provider source, which is the "no external subtitles, no favouriting"
+     * behaviour those call sites already handle for an empty path.
+     */
+    if (source.isProvider())
+        current_media_path[0] = 0;
+    else
+        std::snprintf(current_media_path, sizeof(current_media_path), "%s", filePath.c_str());
 
-    if (avformat_open_input(&play_fmt, filePath.c_str(), nullptr, &opts) < 0) {
-        av_dict_free(&opts);
+    /*
+     * #90 scope 15: evo_stream_io_open() is the single open path for local and
+     * network alike. It had no callers at all - every open went straight to
+     * avformat_open_input - which meant the reconnect, reconnect_streamed and
+     * timeout options it sets for a network URL existed and were never
+     * applied. The timeout is the one that matters most: without it a stalled
+     * HTTP open wedges the thread that called it, and on the app slot that is
+     * the same class of hang as #39's decode call.
+     *
+     * For a local file it is the same avformat_open_input with the same
+     * probesize plus the sequential read-ahead hint, so local playback is
+     * unchanged.
+     */
+    evo_stream_io_config_t io_cfg;
+    std::memset(&io_cfg, 0, sizeof io_cfg);
+    io_cfg.ring_buffer_size = 8u * 1024u * 1024u;
+
+    int open_rc = evo_stream_io_open(filePath.c_str(), &play_fmt, &io_cfg, &m_streamIo);
+    if (open_rc < 0) {
         m_playbackFsm.postEvent(PlaybackEvent::Fail);
-        toast("OPEN FAIL", "Could not open media");
+        toast("OPEN FAIL", source.isProvider() ? "Could not open the stream"
+                                              : "Could not open media");
         return false;
     }
-    av_dict_free(&opts);
 
     if (avformat_find_stream_info(play_fmt, nullptr) < 0) {
         avformat_close_input(&play_fmt);
         play_fmt = nullptr;
+        evo_stream_io_close(m_streamIo);
+        m_streamIo = nullptr;
         m_playbackFsm.postEvent(PlaybackEvent::Fail);
         toast("STREAM FAIL", "Could not find streams");
         return false;
     }
+
+    /*
+     * A live stream has no duration and cannot be seeked. Announce it rather
+     * than leaving the OSD, the resume store and the #32-era seek/overlay path
+     * to work it out from a seek that fails - none of them can.
+     */
+    if (m_source.isProvider() && !m_source.is_live && play_fmt->duration <= 0)
+        m_source.is_live = true;
 
     if (play_fmt->duration > 0) {
         m_durationSeconds = static_cast<double>(play_fmt->duration) / static_cast<double>(AV_TIME_BASE);
@@ -721,13 +798,36 @@ bool PlaybackController::startPlayback(const std::string& filePath, double resum
         metaService->loadChapters(play_fmt);
     }
 
-    // Add to recent files database
-    std::string mediaTitle, mediaCat;
-    if (auto metaService = Application::getInstance().getMediaMetadataService()) {
-        metaService->cleanMediaTitle(filePath.c_str(), mediaTitle, mediaCat);
+    /*
+     * Add to recent files database.
+     *
+     * #90: a provider source is keyed and titled by its identity, never by its
+     * URL - see saveResumePosition() for why. A live stream is not recorded at
+     * all: there is no position to come back to, and a channel that happens to
+     * be on right now is not a thing the user asked to resume.
+     */
+    if (!m_source.is_live) {
+        std::string recentKey = filePath;
+        std::string mediaTitle = m_source.title, mediaCat;
+        if (m_source.isProvider())
+            recentKey = "evo://" + m_source.provider + "/" + m_source.item_id;
+        if (mediaTitle.empty()) {
+            if (auto metaService = Application::getInstance().getMediaMetadataService())
+                metaService->cleanMediaTitle(filePath.c_str(), mediaTitle, mediaCat);
+        }
+        recent_add_or_update(recentKey.c_str(), mediaTitle.c_str(),
+                             m_resumeBaseOffset, m_durationSeconds);
+        recent_save();
     }
-    recent_add_or_update(filePath.c_str(), mediaTitle.c_str(), m_resumeBaseOffset, m_durationSeconds);
-    recent_save();
+
+    /* Let the provider know a session started, if it tracks them. */
+    if (m_source.isProvider()) {
+        const evo_provider_t* prov = evo_provider_find(m_source.provider.c_str());
+        if (prov && (prov->caps & EVO_PROVIDER_CAP_PROGRESS) && prov->report_progress)
+            prov->report_progress(m_source.item_id.c_str(), 0,
+                                  static_cast<int64_t>(m_durationSeconds),
+                                  EVO_PROVIDER_PLAY_START);
+    }
     player_paused = 0;
     video_decode_ready = (video_stream_index >= 0) ? 1 : 0;
     video_decode_done = 0;
@@ -926,14 +1026,56 @@ void PlaybackController::saveResumePosition() {
     if (m_currentFilePath.empty()) return;
 
     double pos = getPositionSeconds();
+
+    /*
+     * #90 scope 15: tell the provider where we are, before the local
+     * bookkeeping. Rate-limited to roughly every ten seconds: this function is
+     * the periodic tick (Bridge.cpp's save_resume_position), and Emby's
+     * /Sessions/Playing/Progress on every call would be one request per tick
+     * for a value that has moved by a second.
+     */
+    if (m_source.isProvider()) {
+        const evo_provider_t* p = evo_provider_find(m_source.provider.c_str());
+        if (p && (p->caps & EVO_PROVIDER_CAP_PROGRESS) && p->report_progress) {
+            double now = static_cast<double>(GetCurrentTimeMs()) / 1000.0;
+            if (m_lastProgressReport <= 0.0 || now - m_lastProgressReport >= 10.0) {
+                m_lastProgressReport = now;
+                p->report_progress(m_source.item_id.c_str(),
+                                   static_cast<int64_t>(pos),
+                                   static_cast<int64_t>(m_durationSeconds),
+                                   EVO_PROVIDER_PLAY_UPDATE);
+            }
+        }
+    }
+
+    /*
+     * A live stream has no position worth keeping. Writing one would make the
+     * next launch of that channel seek to a point the stream does not have,
+     * which on an HLS endpoint is a failed open rather than a wrong position.
+     */
+    if (m_source.is_live) return;
+
     if (pos < 5.0 || (m_durationSeconds > 0.0 && pos >= m_durationSeconds - 10.0)) {
         pos = 0.0; // Clear near start or finish
     }
 
+    /*
+     * What gets PERSISTED is never the URL.
+     *
+     * A provider URL carries an auth token and an expiry. Storing it in Recent
+     * or Favorites leaks the token into a plaintext file and stores something
+     * that will not work later anyway. The durable key is the provider id plus
+     * the opaque item id - which is exactly what resolve() takes, so a future
+     * "resume from Recent" has everything it needs and nothing it should not.
+     */
+    std::string persistKey = m_currentFilePath;
+    if (m_source.isProvider())
+        persistKey = "evo://" + m_source.provider + "/" + m_source.item_id;
+
     const char* resumeFile = evo_data_path("ps5_media_resume.txt");
     FILE* fp = std::fopen(resumeFile, "w");
     if (fp) {
-        std::fprintf(fp, "%s\n%.2f\n", m_currentFilePath.c_str(), pos);
+        std::fprintf(fp, "%s\n%.2f\n", persistKey.c_str(), pos);
         std::fclose(fp);
     }
 
@@ -947,10 +1089,14 @@ void PlaybackController::saveResumePosition() {
      * recent_update_current_position(); it has no caller any more.)
      */
     std::string title, category;
-    if (auto metaService = Application::getInstance().getMediaMetadataService()) {
+    if (!m_source.title.empty()) {
+        /* The provider's own title. Deriving one from the URL is what put a
+         * query string on the OSD - the root cause of #9. */
+        title = m_source.title;
+    } else if (auto metaService = Application::getInstance().getMediaMetadataService()) {
         metaService->cleanMediaTitle(m_currentFilePath, title, category);
     }
-    recent_add_or_update(m_currentFilePath.c_str(), title.c_str(),
+    recent_add_or_update(persistKey.c_str(), title.c_str(),
                          pos, m_durationSeconds);
     recent_save();
 }

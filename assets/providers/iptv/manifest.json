@@ -1,0 +1,20 @@
+{
+  "id": "iptv",
+  "name": "IPTV",
+  "version": "20260924.111132",
+  "api_version": 1,
+  "entry": "main.rml",
+  "data_model": "iptv",
+  "assets": [
+    {
+      "path": "main.rcss",
+      "bytes": 6241,
+      "sha256": "d7aef823c105b2ef8b0327c96a4774add2a3a2c3fe76982c3b24a21d21f08499"
+    },
+    {
+      "path": "main.rml",
+      "bytes": 4504,
+      "sha256": "7853d12ea9dcf8f222da5d8b6cd870d534ad0a1557cbdc4fa0f1d8d728217736"
+    }
+  ]
+}

@@ -123,7 +123,11 @@ ScreenId ScreenManager::getRootScreenForSection(int section) const {
     switch (section) {
         case 0: return ScreenId::MainMenu;
         case 1: return ScreenId::UsbBrowser;
-        case 2: return ScreenId::EmbySetup;
+        /* #90: the one shared provider slot lands on the generic provider host
+         * (ProviderHostScreen), not on the Emby setup stub. The host picks the
+         * first enabled provider and sends the user to Settings if none is
+         * configured, so the slot is useful before anything is set up. */
+        case 2: return ScreenId::EmbyBrowse;
         case 3: return ScreenId::Settings;
         case 4: return ScreenId::AboutSupport;
         default: return ScreenId::MainMenu;

@@ -624,6 +624,21 @@ public:
     void UpdateToastState(const EvoToastState& state);
     void RenderToast(uint32_t* framebuffer, int width, int height);
 
+    /*
+     * #90: composite the navigation rail over a provider screen.
+     *
+     * A provider document lives in its own Rml context, so the rail - which is
+     * a document in the MAIN context alongside every EVO screen - does not
+     * come with it. Rendering the main context with every screen document
+     * hidden leaves just the rail, and navbar.rcss keeps its body transparent,
+     * so it composites over whatever the provider already drew.
+     *
+     * Not routed through RenderCachedScreen: that owns the cached menu surface
+     * for whichever EVO screen was last up, and a provider screen must not
+     * invalidate it.
+     */
+    void RenderNavOverlay(uint32_t* framebuffer, int width, int height);
+
     /* #81: virtual keyboard modal - own context, composited over the screen. */
     void UpdateKeyboard(const evo_keyboard_params_t* p);
     void RenderKeyboard(uint32_t* framebuffer, int width, int height);
@@ -640,6 +655,19 @@ public:
     void RenderDebugOverlay(uint32_t* framebuffer, int width, int height);
 
     bool IsInitialized() const { return m_initialized; }
+
+    /*
+     * #90: the provider host owns its own Rml context but renders through the
+     * one active render interface, and scales itself with the same dp ratio as
+     * every other context. Exposed rather than duplicated because there is
+     * exactly one render interface per process and the provider host must not
+     * be the thing that decides which.
+     */
+    EvoRenderBridge* RenderBridge() const { return m_render.get(); }
+    float DpRatio() const { return m_dp_ratio; }
+    /* Mark the cached menu surface stale, so a provider screen that changed
+     * gets re-rasterised by the device loop's next active frame. */
+    void MarkFrameDirty() { m_frame_dirty = true; }
 
 private:
     EvoRmlApp();

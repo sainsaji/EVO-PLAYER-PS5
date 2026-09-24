@@ -1,0 +1,101 @@
+<rml>
+<head>
+    <link type="text/rcss" href="provider_fallback.rcss"/>
+</head>
+<!--
+    The embedded fallback provider skin (#90 scope 14).
+
+    This document exists so that a provider screen ALWAYS renders something.
+    It is compiled into the binary through the asset bundle (#60), so it works
+    on first run before any bundle has been fetched, offline, when a bundle is
+    corrupt, oversized or written against a newer seam, and under uiview.sh
+    with no server anywhere.
+
+    It is also the reference implementation of the binding contract a provider
+    bundle has to satisfy, and the only one in this repo guaranteed to stay in
+    step with EvoProviderModel - so read it as the spec:
+
+      data-model="provider"   the model name. A bundle declares its own in
+                              manifest.json ("data_model") and must match it.
+      {{ expression }}        TEXT binding. This is the one that is easy to get
+                              wrong: `data-value` is RmlUi's two-way binding
+                              for a form control's value attribute, NOT for
+                              text content, and using it on a div renders
+                              nothing at all with no error anywhere.
+      data-for="row : rows"   one element per catalog row
+      data-if / data-class-*  conditional render and conditional class
+      data-attr-src           bind an attribute (the poster's evo:mem key)
+      data-attr-rowid         REQUIRED on the element that raises activate().
+                              The host reads the row back off this attribute.
+                              It cannot be passed as an argument instead: a
+                              data-event expression is parsed and address-
+                              resolved ONCE, so inside a data-for the alias is
+                              baked to the first iteration and every row
+                              reports row[0]'s id. Views (data-attr, data-if,
+                              {{ }}) re-resolve per clone, which is why an
+                              attribute carries it and an argument cannot.
+      data-event-click        "activate()" is the ONE event that starts
+                              something; "go_back()" and "load_more()" are the
+                              other two bindings
+      :focus                  the focus ring comes from RCSS. EVO feeds D-pad
+                              presses into RmlUi and does not know or care
+                              which row is selected.
+      tab-index: auto         RCSS, not an attribute. RmlUi has NO `tabindex`
+                              attribute - a row without this property is not
+                              focusable, so Tab and the D-pad both skip it and
+                              the screen looks hung.
+      nav: auto               RmlUi's own spatial navigation, also RCSS.
+                              Without it the D-pad does nothing at all.
+
+    Deliberately plain. It is a fallback, not a design - a provider's own
+    bundle is what is supposed to be on screen, and a fallback that looked
+    finished would hide the fact that the bundle did not load.
+-->
+<body data-model="provider">
+    <div id="pf-root">
+
+        <div id="pf-header">
+            <div id="pf-title">{{ provider_name }}</div>
+            <div id="pf-crumb">{{ breadcrumb }}</div>
+        </div>
+
+        <!-- The status line. `has_error` picks the colour; the text is
+             whatever the host set, which for a bundle failure is the
+             evo_bundle_status_str() reason. Never blank on a failure - that
+             is the whole point of this document existing. -->
+        <div id="pf-status" data-if="status != ''"
+             data-class-pf-err="has_error">{{ status }}</div>
+
+        <div id="pf-loading" data-if="loading">Loading...</div>
+
+        <div id="pf-empty" data-if="empty && !loading">Nothing here.</div>
+
+        <div id="pf-list">
+            <div class="pf-row" data-for="row : rows"
+                 data-attr-rowid="row.id" data-event-click="activate()"
+                 data-class-pf-folder="row.is_folder"
+                 data-class-pf-live="row.is_live">
+
+                <div class="pf-art">
+                    <img data-if="row.art != ''" data-attr-src="row.art"/>
+                    <div class="pf-initial" data-if="row.art == ''">{{ row.initial }}</div>
+                </div>
+
+                <div class="pf-text">
+                    <div class="pf-row-title">{{ row.title }}</div>
+                    <div class="pf-row-sub" data-if="row.subtitle != ''">{{ row.subtitle }}</div>
+                    <div class="pf-row-now" data-if="row.now != ''">{{ row.now }}</div>
+                </div>
+
+                <div class="pf-meta">
+                    <span class="pf-badge" data-if="row.is_live">LIVE</span>
+                    <span class="pf-dur" data-if="row.duration != ''">{{ row.duration }}</span>
+                    <span class="pf-chev" data-if="row.is_folder">&gt;</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="pf-footer">{{ count }} items</div>
+    </div>
+</body>
+</rml>

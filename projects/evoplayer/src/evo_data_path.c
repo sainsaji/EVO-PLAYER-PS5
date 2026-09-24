@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -31,6 +32,22 @@ static const char *resolve_root(void)
         return EVO_DATA_DIR;              /* "/download0/evoplayer" - transient */
     g_root = "/data/evoplayer";
 #else
+    /*
+     * #90: the host renderer needs a writable data root somewhere other than
+     * /data, so a provider bundle and its config can be staged in a temp
+     * directory and the provider screen exercised with no console
+     * (tools/uiview_playback_rml.sh).
+     *
+     * Host builds only - inside the #else, so the app module cannot be talked
+     * into writing somewhere else by an environment it does not control.
+     */
+    const char *over = getenv("EVO_DATA_DIR_OVERRIDE");
+    if (over && *over) {
+        static char buf[512];
+        snprintf(buf, sizeof buf, "%s", over);
+        g_root = buf;
+        return g_root;
+    }
     g_root = EVO_DATA_DIR;                /* "/data/evoplayer" - always */
 #endif
     return g_root;

@@ -1,0 +1,100 @@
+<rml>
+<head>
+    <link type="text/rcss" href="main.rcss"/>
+</head>
+<!--
+    The IPTV provider's own UI (#90).
+
+    THIS FILE IS NOT PART OF EVO PLAYER'S UI. It is fetched over HTTP at
+    runtime, cached under /data/evoplayer/providers/iptv/, and rendered in its
+    own Rml context. It is checked into this repo only because the IPTV
+    provider is the one #90 proves the seam against and somebody has to author
+    the first bundle; a third-party provider's bundle would live on that
+    provider's server and EVO would never have seen it.
+
+    Which is the point: everything about how this looks - a grid instead of a
+    list, the channel logos, the NOW/NEXT chips, the colours - is decided here,
+    by the provider, not by EVO. EVO supplies `rows` and takes
+    `activate(index)`.
+
+    It binds to the model named in manifest.json ("data_model": "iptv") and
+    uses only what EvoProviderModel publishes at api_version 1. It references
+    no EVO element id, because it cannot know any.
+
+    Text is bound with {{ }} interpolation. `data-value` is RmlUi's two-way
+    binding for a form control's value attribute and renders nothing on a div.
+-->
+<body data-model="iptv">
+    <div id="tv-shell">
+
+        <!-- Channel-guide chrome: a service's own header, not EVO's. -->
+        <div id="tv-bar">
+            <div id="tv-brand">
+                <span id="tv-dot"></span>
+                <span id="tv-brandtext">LIVE TV</span>
+            </div>
+            <div id="tv-path">{{ breadcrumb }}</div>
+            <!-- `is_folder_level` is why this reads correctly at both levels.
+                 A data expression cannot aggregate over `rows`, so the host
+                 publishes the flag rather than leaving the bundle to say
+                 "4 channels" over a list of four groups. -->
+            <div id="tv-count" data-if="is_folder_level">{{ count }} groups</div>
+            <div id="tv-count" data-if="!is_folder_level">{{ count }} channels</div>
+        </div>
+
+        <div id="tv-notice" data-if="status != ''"
+             data-class-tv-bad="has_error">{{ status }}</div>
+
+        <div id="tv-spinner" data-if="loading">Tuning...</div>
+
+        <!--
+            The grid. One card per row. A `group-title` folder from the M3U and
+            an actual channel get different treatments, which is the sort of
+            decision that belongs to the provider and was impossible while EVO
+            drew a nine-row list for everything.
+        -->
+        <div id="tv-grid">
+            <div class="tv-card" data-for="row : rows"
+                 data-attr-rowid="row.id" data-event-click="activate()"
+                 data-class-tv-group="row.is_folder">
+
+                <!-- A folder has no logo and no programme, so it gets a
+                     label-and-count card rather than an empty thumbnail. -->
+                <div class="tv-folder" data-if="row.is_folder">
+                    <div class="tv-foldername">{{ row.title }}</div>
+                    <div class="tv-foldercount">{{ row.subtitle }}</div>
+                </div>
+
+                <div class="tv-chan" data-if="!row.is_folder">
+                    <div class="tv-thumb">
+                        <img class="tv-logo" data-if="row.art != ''"
+                             data-attr-src="row.art"/>
+                        <!-- No logo yet, or none in the playlist: the
+                             channel's initial, so the grid never has holes in
+                             it. A provider picks its own placeholder. -->
+                        <div class="tv-initial" data-if="row.art == ''">{{ row.initial }}</div>
+                        <div class="tv-onair" data-if="row.is_live"></div>
+                    </div>
+
+                    <div class="tv-name">{{ row.title }}</div>
+
+                    <div class="tv-now" data-if="row.now != ''">
+                        <span class="tv-nowlabel">NOW</span>
+                        <span class="tv-nowtitle">{{ row.now }}</span>
+                    </div>
+                    <div class="tv-next" data-if="row.next != ''">
+                        <span class="tv-nextlabel">NEXT</span>
+                        <span class="tv-nexttitle">{{ row.next }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tv-hint">
+            <span class="tv-key">D-pad</span> browse
+            <span class="tv-key">X</span> watch
+            <span class="tv-key">O</span> back
+        </div>
+    </div>
+</body>
+</rml>

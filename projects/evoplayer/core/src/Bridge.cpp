@@ -399,12 +399,15 @@ void draw_theme_select_screen(uint32_t *fb) {
     draw_settings_screen(fb);
 }
 
-void draw_emby_setup_screen(uint32_t *fb) {
-    draw_developer_tools_screen(fb);
-}
-
-void draw_emby_browse_screen(uint32_t *fb) {
-    draw_developer_tools_screen(fb);
-}
+/*
+ * #90: draw_emby_setup_screen / draw_emby_browse_screen are gone.
+ *
+ * Both were legacy C draw hooks that pointed at the developer-tools screen -
+ * no declaration in any header, no caller anywhere in the compiled tree, and
+ * drawing the wrong screen if anything had ever found them. The provider
+ * screen is ProviderHostScreen, which renders the provider's own document; it
+ * is reached through the screen manager like every other screen and needs no
+ * C draw hook.
+ */
 
 } // extern "C"

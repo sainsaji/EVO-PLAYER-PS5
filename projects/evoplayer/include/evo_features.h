@@ -8,20 +8,39 @@
 #define EVO_FEATURES_H
 
 /*
- * Emby / media-server streaming.
+ * Providers - the network media sources behind the evo_provider_t seam (#90):
+ * IPTV today, Emby/Jellyfin/Torbox/Real-Debrid as their own stories follow.
  *
- * OFF since 0.10.0. The integration is not deleted - EmbyScreen,
- * EmbySetupScreen, the addon and addons/addon_emby.c are all still built and
- * still work - it is only unreachable from the UI while it is being worked on.
- * Turning this back to 1 restores the launch tile, the navigation rail section
- * and the rail icon; nothing else needs touching.
+ * This is the generalisation of what EVO_ENABLE_EMBY used to be. That flag was
+ * named for one service but had always been about ONE rail slot and ONE screen,
+ * which is what the whole seam now shares - the slot, the icon and the
+ * navbar.rml elements all already exist, so nothing else has to change when it
+ * flips.
+ *
+ * What the flag does NOT gate is the provider logic. evo_provider_mgr, the
+ * providers themselves and addons/addon_emby.c are compiled and registered
+ * regardless: a provider with no credentials reports is_configured() false and
+ * stays invisible, which is a better gate than a compile-time switch because
+ * it is also the correct behaviour for a shipped build.
  *
  * Three places read it: the launch screen's library tiles, ScreenManager's
  * rail section table, and the RmlUi nav rail, which hides the icon so the
  * remaining sections do not sit next to a gap.
  */
+#ifndef EVO_ENABLE_PROVIDERS
+#define EVO_ENABLE_PROVIDERS 0
+#endif
+
+/*
+ * The old name, kept as an alias.
+ *
+ * Every existing reader spells it EVO_ENABLE_EMBY, and those readers are the
+ * rail-geometry arithmetic in ScreenManager - the places where a mechanical
+ * rename buys nothing and risks getting the section indices wrong. New code
+ * uses EVO_ENABLE_PROVIDERS.
+ */
 #ifndef EVO_ENABLE_EMBY
-#define EVO_ENABLE_EMBY 0
+#define EVO_ENABLE_EMBY EVO_ENABLE_PROVIDERS
 #endif
 
 #endif /* EVO_FEATURES_H */

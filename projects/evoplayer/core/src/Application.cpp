@@ -10,6 +10,7 @@
 #include "evo/screens/SurroundTestScreen.hpp"
 #include "evo/screens/DeveloperToolsScreen.hpp"
 #include "evo/screens/EmbyScreen.hpp"
+#include "evo/screens/ProviderHostScreen.hpp"
 #include "evo/screens/ModalDialogScreen.hpp"
 #include "evo/screens/RecentFilesScreen.hpp"
 #include "evo/screens/FavoritesScreen.hpp"
@@ -48,7 +49,14 @@ extern "C" int perf_render_fps;
 #include "evo_input.h"
 #include "evo_net.h"
 #include "evo_usb_remote.h"
-#include "addon_emby.h"
+/* #90: providers are reached through the vtable registry, never by name.
+ * addon_emby.h is gone from here - provider_emby.c is the only thing that
+ * includes it now. */
+#include "evo_provider.h"
+#include "evo_provider_bundle.h"
+/* For the provider host's teardown ordering in shutdown(); the C entry points
+ * live beside the class that implements them. */
+#include "evo_rmlui_provider.h"
 #include "pp_playback.h"
 #include "evo_playback.h"
 #include "evo_adec.h"
@@ -330,7 +338,22 @@ bool Application::initHardware() {
     evo_feedback_init(m_padHandle, SoundEffectCallback);
 
     evo_net_init();
-    emby_init();
+    /*
+     * #90: bring up the provider registry. It calls each provider's init(),
+     * which loads persisted credentials and touches no network - this runs
+     * during boot, before the self-unjail has necessarily opened /data, and a
+     * DNS lookup here would stall the splash.
+     *
+     * emby_init() is now reached through the registry (provider_emby.c), so it
+     * is no longer called by name. Nothing else in the tree knows the word
+     * "emby" any more, which is the whole point of the seam.
+     */
+    evo_provider_mgr_init();
+    /*
+     * avformat_network_init() was already here and was a no-op for the whole
+     * 0.6-0.10 era, because the production FFmpeg profile was built
+     * --disable-network. It does something now (#90 scope 1).
+     */
     avformat_network_init();
 
     pp_playback_init(&g_pp_pb);
@@ -377,6 +400,9 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<SurroundTestScreen>());
     m_screenManager->registerScreen(std::make_unique<DeveloperToolsScreen>());
     m_screenManager->registerScreen(std::make_unique<EmbyScreen>());
+    /* #90: the generic provider host. Fills ScreenId::EmbyBrowse, which had an
+     * id and a rail path but no class registered at all. */
+    m_screenManager->registerScreen(std::make_unique<ProviderHostScreen>());
     m_screenManager->registerScreen(std::make_unique<RecentFilesScreen>());
     m_screenManager->registerScreen(std::make_unique<FavoritesScreen>());
     m_screenManager->registerScreen(std::make_unique<AboutSupportScreen>());
@@ -434,6 +460,22 @@ void Application::shutdown() {
         m_soundEffectEngine->shutdown();
     }
     evo_boot_log("shutdown: media stopped");
+    evo_boot_log_flush();
+
+    /*
+     * #90: providers down before RmlUi.
+     *
+     * The provider host holds an Rml context and textures in the render
+     * interface's registry, so it has to let go of them while Rml is still
+     * alive - evo_rmlui_shutdown() below runs Rml::Shutdown(), after which
+     * closing a context is a use-after-free. Same ordering constraint the
+     * comment above evo_rmlui_shutdown() describes for the AGC runtime.
+     */
+    if (evo_rmlui_provider_is_open())
+        evo_rmlui_provider_close();
+    evo_provider_art_clear();
+    evo_provider_mgr_shutdown();
+    evo_boot_log("shutdown: providers down");
     evo_boot_log_flush();
 
     pp_playback_shutdown(&g_pp_pb);
@@ -654,6 +696,10 @@ int Application::run() {
         }
 
         evo_net_poll();
+        /* #90: completed provider UI bundle refreshes. Next to evo_net_poll
+         * because a refresh finishes inside one of its callbacks and this is
+         * what turns that into a main-thread callback for the screen. */
+        evo_bundle_poll();
         evo_usb_remote_poll();
 
         if ((frame & 63) == 0) {
@@ -673,7 +719,10 @@ int Application::run() {
             if (m_settingsService) {
                 m_settingsService->loadSettings();
             }
-            emby_init();
+            /* #90: every provider re-reads its config from the real data
+             * root - same reason recent_load() and the settings service are
+             * re-run here. */
+            evo_provider_mgr_rebind();
             evo_bt("persistence: rebound to %s after late unjail", evo_data_dir());
             evo_boot_log_flush();
 #endif
@@ -817,7 +866,15 @@ int Application::run() {
             s_was_player = isPlayer;
         }
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
-        int uiActive = (frame < 10) || isPlayer || hasInput || hasAnim || evo_rmlui_needs_frame() || (jb_repaint > 0);
+        /*
+         * #90: a provider screen lives in its own Rml context, so its changes
+         * are invisible to evo_rmlui_needs_frame(). Without this a catalog
+         * page or a bundle refresh landing between two button presses would
+         * not be drawn until the next press.
+         */
+        int uiActive = (frame < 10) || isPlayer || hasInput || hasAnim ||
+                       evo_rmlui_needs_frame() ||
+                       evo_rmlui_provider_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;
         evo_rmlui_set_active(uiActive);
 

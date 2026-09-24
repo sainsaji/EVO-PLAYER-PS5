@@ -25,6 +25,10 @@ typedef struct emby_config {
     char user_id[64];
     char server_name[64];
     char server_version[32];
+    /* https rather than http for every request, including the stream URL that
+     * FFmpeg opens. A reverse-proxied Emby is the common deployment and was
+     * simply unreachable before this existed (#90). */
+    bool use_https;
     bool is_connected;
 } emby_config_t;
 

@@ -392,8 +392,18 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
 
     if (m_osdVisibilityAlpha > 0 && evo_rmlui_is_initialized()) {
         std::string titleStr, metaStr;
-        if (metaService) {
+        /*
+         * #90 / #9: a provider supplies its own title, and deriving one from
+         * the source string is what put a URL with a query string on the OSD.
+         * cleanMediaTitle takes the last path component and tidies it, which is
+         * exactly right for /mnt/usb0/Movie.2019.mkv and exactly wrong for
+         * http://host/emby/Videos/abc/stream?api_key=...
+         */
+        titleStr = playback->getDisplayTitle();
+        if (titleStr.empty() && metaService) {
             metaService->cleanMediaTitle(playback->getCurrentFilePath(), titleStr, metaStr);
+        } else if (playback->isLiveSource()) {
+            metaStr = "LIVE";
         }
 
         evo_playback_osd_params_t p;
