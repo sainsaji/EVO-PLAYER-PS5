@@ -387,7 +387,7 @@ else
     for a in libSDL2 \
              libavformat libavcodec libswresample libavutil libswscale libdav1d \
              libass libfreetype libharfbuzz libharfbuzz-subset libfribidi \
-             libpng16 libsamplerate libssl libcrypto libiconv \
+             libpng16 libsamplerate libssl libcrypto libiconv libxml2 \
              libz libbz2 liblzma libzstd libm; do
         f="${HB}/lib/${a}.a"
         need_file "${f}" "expected port archive missing: ${a}.a (pacbrew sysroot incomplete)"

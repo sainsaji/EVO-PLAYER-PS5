@@ -64,6 +64,8 @@ UPSTREAM_LIBS=(
 TRANSITIVE_LIBS=(
     -lass -lharfbuzz -lharfbuzz-subset -lfreetype -lfribidi -lpng16
     -lsamplerate -lssl -lcrypto -liconv
+    # libxml2 is libavformat's dash demuxer (#90); it needs iconv, above.
+    -lxml2
     -lz -lbz2 -llzma -lzstd -lm
 )
 AGC_STUBS_DIR="${REPO_ROOT}/build/agc_stubs"

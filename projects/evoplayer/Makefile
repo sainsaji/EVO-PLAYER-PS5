@@ -64,6 +64,8 @@ LIBS := \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libdav1d.a \
     -lssl \
     -lcrypto \
+    $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libxml2.a \
+    $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libiconv.a \
     -lSceNotification \
     -lSceSystemService \
     -lSceUserService \
@@ -125,7 +127,11 @@ MEDIA_SRCS := \
 ADDON_SRCS := \
     addons/src/cJSON.c \
     addons/src/evo_net.c \
-    addons/src/addon_emby.c
+    addons/src/addon_emby.c \
+    addons/src/evo_provider_mgr.c \
+    addons/src/evo_provider_bundle.c \
+    addons/src/provider_iptv.c \
+    addons/src/provider_emby.c
 
 # The bare-metal AGC device context and its 100% GPU RmlUi render interface
 # are the only device render path - the AGC runtime owns sceAgc and
@@ -172,6 +178,7 @@ CORE_SRCS := \
     core/src/screens/SurroundTestScreen.cpp \
     core/src/screens/DeveloperToolsScreen.cpp \
     core/src/screens/EmbyScreen.cpp \
+    core/src/screens/ProviderHostScreen.cpp \
     core/src/screens/RecentFilesScreen.cpp \
     core/src/screens/FavoritesScreen.cpp \
     core/src/screens/AboutSupportScreen.cpp \
@@ -189,7 +196,9 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_bridge.cpp \
     ui_rml/src/evo_rmlui_fileinterface.cpp \
     ui_rml/src/evo_rmlui_bundle.cpp \
-    ui_rml/src/evo_rmlui_bundle_data.cpp
+    ui_rml/src/evo_rmlui_bundle_data.cpp \
+    ui_rml/src/evo_rmlui_provider.cpp \
+    ui_rml/src/evo_rmlui_provider_art.cpp
 
 ifeq ($(AGC_DEVICE),1)
     RMLUI_SRCS += ui_rml/src/evo_rmlui_render_agc.cpp

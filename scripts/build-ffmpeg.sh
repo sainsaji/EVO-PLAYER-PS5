@@ -304,10 +304,19 @@ minimal)
         --disable-bsfs              # re-enabled selectively below
         --disable-devices
         --disable-filters           # re-enabled selectively below
-        # Network protocols off: EVO Player plays local files from USB.
-        # Turn this back on (and add --enable-protocol=http,tcp) if and when
-        # streaming or DLNA playback is actually implemented.
-        --disable-network
+        # -- network ------------------------------------------------------
+        # On since #90. Provider playback (IPTV, Emby, debrid) resolves to an
+        # http(s) URL and hands it to avformat_open_input, so without this the
+        # open returns AVERROR_PROTOCOL_NOT_FOUND and avformat_network_init()
+        # is a no-op - which it was, every boot, for the whole 0.6-0.10 era.
+        #
+        # openssl rather than the native TLS: the sysroot's libssl/libcrypto
+        # are already linked into the app module (projects/evoplayer/Makefile
+        # -lssl -lcrypto, for addons/src/evo_net.c), the `baseline` profile has
+        # proven --enable-openssl against this exact sysroot, and gnutls is not
+        # in the pacbrew tarball at all.
+        --enable-network
+        --enable-openssl
         --disable-iconv
         --disable-xlib
         --disable-sdl2              # the player owns SDL, FFmpeg must not
@@ -400,6 +409,18 @@ minimal)
         --enable-demuxer=srt
         --enable-demuxer=ass
         --enable-demuxer=image2         # the thumbnail/cover-art path
+
+        # -- streaming containers (#90) -------------------------------------
+        # hls is what an IPTV .m3u8 actually is. It has no external dependency
+        # and demuxes its segments through mpegts and mov, both already on.
+        #
+        # dash needs libxml2, which in turn has unresolved iconv_* symbols;
+        # both libxml2.a and libiconv.a are in the pacbrew prefix and link,
+        # so -lxml2 joins the transitive list in build-evoplayer.sh,
+        # package-app.sh and the Makefile alongside the -liconv already there.
+        --enable-demuxer=hls
+        --enable-demuxer=dash
+        --enable-libxml2
         "${AUDIO_DEMUXERS[@]/#/--enable-demuxer=}"
         "${VIDEO_DEMUXERS[@]/#/--enable-demuxer=}"
 
@@ -443,8 +464,18 @@ minimal)
         --enable-filter=null
 
         # -- protocols ------------------------------------------------------------
+        # tcp and tls are not optional extras: http is built on tcp, and https
+        # is http over tls. Enabling only http,https silently produces a build
+        # where every network open fails at the transport layer.
         --enable-protocol=file
         --enable-protocol=pipe
+        --enable-protocol=http
+        --enable-protocol=https
+        --enable-protocol=tcp
+        --enable-protocol=tls
+        # AES-128 segment encryption is routine on IPTV playlists; without
+        # the crypto protocol those channels open and then decode to noise.
+        --enable-protocol=crypto
     )
     # NOTE: there is no '--enable-image2' option. image2 is a DEMUXER and is
     # enabled above via --enable-demuxer=image2; passing it as a bare option
@@ -465,7 +496,8 @@ full)
         --disable-encoders
         --disable-muxers
         --disable-devices
-        --disable-network
+        --enable-network
+        --enable-openssl
         --disable-sdl2
         --enable-swresample
         --enable-swscale
@@ -474,8 +506,7 @@ full)
         --enable-parsers
         --enable-bsfs
         --enable-filters
-        --enable-protocol=file
-        --enable-protocol=pipe
+        --enable-protocols
         # Extra external decoders that ARE in the pacbrew sysroot. These give
         # better quality/speed than the native decoders and are worth having
         # in the research build to compare against.
