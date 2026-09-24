@@ -373,13 +373,10 @@ void ProviderHostScreen::update(double deltaMs)
 void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
 {
     if (!m_opened) return;
-    evo_bt("prov_screen: render enter fb=%p %dx%d", framebuffer, width, height);
     evo_rmlui_provider_render(framebuffer, width, height);
-    evo_bt("prov_screen: render provider_render done");
     /* The rail is a document in the MAIN context, so it does not come with the
      * provider's own context - it is composited on top afterwards. */
     evo_rmlui_render_nav_overlay(framebuffer, width, height);
-    evo_bt("prov_screen: render nav_overlay done");
     evo_rmlui_provider_clear_frame();
 }
 

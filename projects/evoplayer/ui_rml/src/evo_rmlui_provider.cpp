@@ -93,6 +93,28 @@ void EvoRmlProviderHost::SetStatus(const std::string& msg, bool error)
     m_dirty = true;
 }
 
+void EvoRmlProviderHost::SetLoading(bool loading, const std::string& status)
+{
+    m_model.loading = loading;
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("loading");
+    }
+    if (!status.empty()) {
+        m_model.status = Rml::String(status.c_str());
+        m_model.has_error = false;
+        if (m_model_handle) {
+            m_model_handle.DirtyVariable("status");
+            m_model_handle.DirtyVariable("has_error");
+        }
+    } else if (!loading && !m_model.has_error) {
+        m_model.status = "";
+        if (m_model_handle) {
+            m_model_handle.DirtyVariable("status");
+        }
+    }
+    m_dirty = true;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Data model                                                                */
 /* ------------------------------------------------------------------------- */
@@ -382,7 +404,9 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
              m_bundle_version.empty() ? "-" : m_bundle_version.c_str());
 
     /* And the first page of the catalog. */
+    PROV_LOG("open: calling RequestPage");
     RequestPage("", 0);
+    PROV_LOG("open: RequestPage finished, returning true");
 
     m_dirty = true;
     return true;
@@ -466,9 +490,12 @@ void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
 
     m_dirty = true;
 
+    PROV_LOG("RequestPage parent='%s' page=%d", parent_id ? parent_id : "", page);
     ItemsCtx* ctx = new ItemsCtx{this, ++m_request_generation};
+    PROV_LOG("RequestPage calling list_catalog (provider=%p)", (void*)m_provider);
     int rc = m_provider->list_catalog(parent_id, page,
                                       &EvoRmlProviderHost::ItemsCallback, ctx);
+    PROV_LOG("RequestPage list_catalog returned rc=%d", rc);
     if (rc != 0) {
         /* Not accepted, so the callback will never fire and this owns ctx. */
         delete ctx;
@@ -816,6 +843,18 @@ void EvoRmlProviderHost::Tick()
     ApplyPendingActivation();
 }
 
+/*
+ * NOTHING in here may log.
+ *
+ * This runs every frame, and PROV_LOG -> evo_bt writes to /mnt/usb0/evo.log
+ * AND sceKernelDebugOutText on every call, with a 3 KB struct on the stack.
+ * Nine such calls per frame produced 265,846 of 266,884 lines in one hardware
+ * run - a 16.9 MB log, ~480 USB writes a second, in the render path. It buried
+ * every other diagnostic and cost frame rate.
+ *
+ * Trace the once-per-open events (Open, RequestPage, the bundle refresh)
+ * instead; those tell the same story and cost nothing.
+ */
 void EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
 {
     if (!IsOpen() || !m_context) return;
@@ -898,6 +937,11 @@ int evo_rmlui_provider_key(int key)
         return 0;
     return EvoRmlProviderHost::Instance().HandleKey(
                (EvoRmlProviderHost::Key)key) ? 1 : 0;
+}
+
+void evo_rmlui_provider_set_loading(int loading, const char *status)
+{
+    EvoRmlProviderHost::Instance().SetLoading(loading != 0, status ? status : "");
 }
 
 } /* extern "C" */
