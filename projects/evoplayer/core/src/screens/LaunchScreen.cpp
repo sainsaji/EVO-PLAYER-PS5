@@ -42,7 +42,7 @@ const LibTile* libraryTiles() {
         {"RECENT",    "Pick up where you left off",        "../icons/icon_recent_files.png",  LIB_RECENT},
         {"FAVORITES", "Media you saved for later",         "../icons/icon_favorites.png",     LIB_FAVORITES},
 #if EVO_ENABLE_EMBY
-        {"EMBY",      "Emby and media server streaming",   "../icons/icon_emby.png",          LIB_EMBY},
+        {"PROVIDERS", "Network sources: IPTV, Emby, Jellyfin", "../icons/icon_emby.png",       LIB_EMBY},
 #endif
         {"SETTINGS",  "Playback and display preferences",  "../icons/icon_settings.png",      LIB_SETTINGS},
         {"ABOUT",     "Credits and project info",          "../icons/icon_about_support.png", LIB_ABOUT},
@@ -212,7 +212,12 @@ void LaunchScreen::activateSelection() {
                 screenMgr->navigateTo(ScreenId::UsbBrowser);
                 break;
             }
-            case LIB_EMBY:     screenMgr->navigateTo(ScreenId::EmbySetup); break;
+            /* #90: the provider host, not the old Emby setup stub. The rail
+             * slot already went here; this tile still pointed at
+             * ScreenId::EmbySetup, whose screen is a dead 78-line placeholder
+             * that renders one row and calls no emby_* function. Two entry
+             * points to one slot, landing on different screens. */
+            case LIB_EMBY:     screenMgr->navigateTo(ScreenId::EmbyBrowse); break;
             case LIB_SETTINGS: screenMgr->navigateTo(ScreenId::Settings); break;
             case LIB_ABOUT:    screenMgr->navigateTo(ScreenId::AboutSupport); break;
             default: break;

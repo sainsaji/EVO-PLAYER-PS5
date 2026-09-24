@@ -94,7 +94,7 @@
             </div>
             <div class="rail-exp-item" id="nav-exp-2">
                 <img id="nav-exp-icon-2" src="../icons/icon_emby.png" class="rail-exp-icon"/>
-                <span class="rail-exp-label" id="nav-exp-label-2">EMBY</span>
+                <span class="rail-exp-label" id="nav-exp-label-2">PROVIDERS</span>
             </div>
             <div class="rail-exp-item" id="nav-exp-3">
                 <img id="nav-exp-icon-3" src="../icons/icon_settings.png" class="rail-exp-icon"/>
