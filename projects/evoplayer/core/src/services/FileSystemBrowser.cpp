@@ -348,6 +348,11 @@ FileCategory FileSystemBrowser::classifyFile(const std::string& fileName, int en
         ext == "asf"  || ext == "wm"   || ext == "rm"   || ext == "rmvb" ||
         ext == "ogv"  || ext == "dv"   || ext == "mxf"  || ext == "mts"  ||
         ext == "vob"  || ext == "m2v"  || ext == "3gp"  || ext == "3g2"  ||
+        /* .ivf carries raw AV1 in a container that frames it. NOT .obu: the
+         * raw-OBU demuxers require av1_parser, and that parser breaks AV1
+         * playback outright (scripts/build-ffmpeg.sh explains it), so it is not
+         * built. Listing .obu here would offer a file that cannot open. Remux
+         * a raw stream first: ffmpeg -i in.obu -c copy out.mkv */
         ext == "mp2"  || ext == "f4v"  || ext == "ivf") {
         return FileCategory::Video;
     }

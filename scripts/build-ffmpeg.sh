@@ -9,7 +9,23 @@
 #   ./scripts/build-ffmpeg.sh --version 7.1.1      build a different release
 #
 # ---------------------------------------------------------------------------
-# WHY 7.0.1 IS THE DEFAULT
+# WHY 7.1.1 IS THE DEFAULT (was 7.0.1 until 2026-09-25)
+#   7.0.1's AV1 parser cannot play a stream whose temporal delimiters the
+#   container has stripped - which is every AV1 track in Matroska, where the
+#   spec says to strip them. cbs_av1 never clears `seen_frame_header` without a
+#   temporal delimiter, so the next frame header is rejected as a repeat:
+#       Invalid repeated frame header OBU / Failed to parse temporal unit
+#   Measured on hardware against 4K 10-bit AV1: 7.0.1 decoded 352 frames of a
+#   1592-frame clip and then died, while the same file decodes clean end to end
+#   on a current FFmpeg. The raw .obu path failed the same way after 1 frame,
+#   through av1_frame_merge rather than the parser.
+#
+#   The pacbrew-matching rationale below is kept because it is still the reason
+#   the FIRST pin existed, and it explains the profile - but EVO has long since
+#   diverged from ProsperoPlayer's codec set, and matching a baseline is worth
+#   less than playing the files.
+#
+# WHY 7.0.1 WAS THE DEFAULT
 #   ProsperoPlayer's Makefile does not pin an FFmpeg version - it links
 #   prebuilt static libraries out of the SDK sysroot:
 #       $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libav*.a
@@ -35,9 +51,12 @@
 # ---------------------------------------------------------------------------
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-FFMPEG_VERSION="7.0.1"
-# Published by pacbrew-repo/ffmpeg/PKGBUILD for ffmpeg-7.0.1.tar.xz.
-FFMPEG_SHA256="bce9eeb0f17ef8982390b1f37711a61b4290dc8c2a0c1a37b5857e85bfb0e4ff"
+FFMPEG_VERSION="7.1.1"
+# sha256 of ffmpeg-7.1.1.tar.xz, from two independent downloads off
+# ffmpeg.org (no .sha256 sidecar is published for this release).
+FFMPEG_SHA256="733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"
+# 7.0.1, the previous default, for reference:
+#   bce9eeb0f17ef8982390b1f37711a61b4290dc8c2a0c1a37b5857e85bfb0e4ff
 PROFILE="minimal"
 DO_INSTALL=0
 JOBS="$(nproc)"
@@ -410,6 +429,15 @@ minimal)
         --enable-demuxer=ass
         --enable-demuxer=image2         # the thumbnail/cover-art path
 
+        # -- AV1 containers, and why raw .obu is NOT here -------------------
+        # ivf only. The `obu` and `av1` raw demuxers are deliberately absent:
+        # configure has `obu_demuxer_select="av1_frame_merge_bsf av1_parser"`,
+        # so enabling either drags in av1_parser - and av1_parser is what breaks
+        # AV1 playback altogether (see the parser block below). ivf has no such
+        # dependency, and the browser has offered .ivf as playable all along
+        # while nothing could open it.
+        --enable-demuxer=ivf
+
         # -- streaming containers (#90) -------------------------------------
         # hls is what an IPTV .m3u8 actually is. It has no external dependency
         # and demuxes its segments through mpegts and mov, both already on.
@@ -430,7 +458,24 @@ minimal)
         --enable-parser=h264
         --enable-parser=hevc
         --enable-parser=vp9
-        --enable-parser=av1
+        # av1 parser: DELIBERATELY NOT ENABLED.
+        #
+        # matroskadec sets need_parsing = AVSTREAM_PARSE_HEADERS for every
+        # codec except AAC, so whenever this parser exists it runs on every AV1
+        # track - and on 7.0.1 AND 7.1.1 it fails on streams whose temporal
+        # delimiters the container stripped, which is every AV1-in-Matroska by
+        # spec. cbs_av1 never clears `seen_frame_header` without a temporal
+        # delimiter, so the next frame header is rejected as a repeat.
+        # Measured on hardware, 4K 10-bit AV1 in .mkv: 1106 parser errors in
+        # 3.5 s, ~3 per published frame - the frames still reach dav1d, which is
+        # why it reads as a corrupt, flashing picture rather than a clean
+        # failure. The same file decodes end to end on a current FFmpeg, so the
+        # fix landed after 7.1.1.
+        #
+        # Without the parser, av_parser_init() returns NULL and whole packets go
+        # straight to dav1d - which is exactly what a container already frames.
+        # Re-enabling it also silently re-enables the broken path, so it is not
+        # a free switch: check an AV1 .mkv before turning it back on.
         --enable-parser=aac
         --enable-parser=aac_latm
         --enable-parser=ac3
