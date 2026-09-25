@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve version
         id: ver
@@ -76,15 +76,15 @@ jobs:
       # essential (the script re-fetches on a cache miss), just saves the
       # clone + pip-install on every release run.
       - name: Cache MkPFS toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .deps/MkPFS
           key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build dev image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -248,7 +248,7 @@ jobs:
       #
       # The .ffpfsc is still uploaded as a run artifact either way, so a dry
       # run is inspectable.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
