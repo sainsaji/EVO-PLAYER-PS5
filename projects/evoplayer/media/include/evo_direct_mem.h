@@ -67,6 +67,25 @@ void evo_direct_mem_free(void *ptr);
  */
 void evo_direct_mem_get_stats(evo_direct_mem_stats_t *out_stats);
 
+/*
+ * Log the title's ACTUAL memory budget - all four numbers, in one line, tagged
+ * with `when`.
+ *
+ * This exists because the budget was argued about from inferred figures for
+ * months, and both of them were wrong. Answers, measured 2026-09-25:
+ * direct memory is 12288 MB with an 11 GB contiguous free run, flexible is
+ * 448 MB. EVO reserves 64 MiB of the former - 0.5% - because that size was
+ * proven not to wedge the GPU, not because anything asked the kernel.
+ * docs/hardware/memory-budget.md is the write-up; keep this call, because a
+ * figure nobody prints is a figure that gets guessed at again.
+ *
+ * Reports: direct total and largest free run, flexible configured and free,
+ * and EVO's own pool. Safe to call before the unjail - a call that fails is
+ * reported as -1 rather than skipped, because "the call failed here" is itself
+ * the answer to whether this can be measured at that point.
+ */
+void evo_mem_budget_log(const char *when);
+
 #ifdef __cplusplus
 }
 #endif

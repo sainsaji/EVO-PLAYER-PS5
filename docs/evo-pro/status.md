@@ -674,6 +674,12 @@ already on the console), launch, read `EVO avplayer:` popups.
     desyncs (POC errors) and faults.
   - **This ceiling is structural** — can't meaningfully raise it for this title
     category. Software 4K in the sandbox is permanently fragile.
+  - **Amended 2026-09-25.** The ~450 MB figure here was right (measured:
+    **448 MB**), and later docs that quoted "~180 MB" were wrong. But
+    "permanently fragile" overstates it: with the guard lifted, 4K 10-bit AV1
+    decodes faster than real time with 192 MB still free. Deep-ref 4K H.264 may
+    well still fail as recorded above; 4K software decode as a category does
+    not. See [../hardware/memory-budget.md](../hardware/memory-budget.md).
   - **Landed (`bb80de1`):** `malloc_shim` → `sceKernelMapNamedFlexibleMemory`
     (+ split flex/anon map counters); UHD in the app module → slice threading
     (~6× smaller pool); `evo_playback` aborts cleanly to the finished screen

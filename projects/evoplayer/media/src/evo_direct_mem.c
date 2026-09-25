@@ -21,7 +21,23 @@ extern int sceKernelAllocateDirectMemory(off_t searchStart, off_t searchEnd,
 extern int sceKernelMapDirectMemory(void **addr, size_t length, int protection,
                                     int flags, off_t physAddr, size_t alignment);
 extern int sceKernelReleaseDirectMemory(off_t physAddr, size_t length);
+
+/* The budget queries. Signatures cross-checked against the SharpProspero ABI
+ * reference (third_party/SharpProspero, Interop/Kernel/KernelMemory.cs) rather
+ * than guessed - getting the out-parameter widths wrong here would corrupt the
+ * stack and read as a boot crash, not as a bad number. */
+extern int64_t sceKernelGetDirectMemorySize(void);
+extern int     sceKernelAvailableDirectMemorySize(int64_t searchStart,
+                                                  int64_t searchEnd,
+                                                  size_t alignment,
+                                                  int64_t *physAddrOut,
+                                                  size_t *sizeOut);
+extern int     sceKernelAvailableFlexibleMemorySize(size_t *outSize);
+extern int     sceKernelConfiguredFlexibleMemorySize(size_t *outSize);
 #endif
+
+/* evo_boot_log(): the one sink that reaches /mnt/usb0/evo.log AND klog. */
+extern void evo_boot_log(const char *fmt, ...);
 
 /* Lazy-init size when a caller allocates before evo_direct_mem_init() runs.
  * The real pool is sized by main.c (EVO_DIRECT_MEM_POOL_BYTES, #6). */
@@ -278,4 +294,56 @@ void evo_direct_mem_get_stats(evo_direct_mem_stats_t *out_stats)
     out_stats->num_allocations = g_direct_pool.num_allocs;
     out_stats->is_direct_hardware_mem = g_direct_pool.is_direct_hw;
     pthread_mutex_unlock(&g_direct_pool.lock);
+}
+
+void evo_mem_budget_log(const char *when)
+{
+    evo_direct_mem_stats_t st;
+    evo_direct_mem_get_stats(&st);
+
+#if defined(EVO_TARGET_PS5)
+    /* -1 for a call that failed, so a failure is distinguishable from a zero.
+     * Megabytes, because the decisions these numbers feed are made in tens of
+     * megabytes and the raw byte counts are unreadable in a log line. */
+    long long dm_total = -1, dm_free = -1, flex_total = -1, flex_free = -1;
+
+    int64_t total = sceKernelGetDirectMemorySize();
+    if (total > 0) dm_total = (long long)(total / (1024 * 1024));
+
+    /* Largest free RUN, not the sum of free space: a fragmented pool with a lot
+     * free and no contiguous stretch cannot back a frame buffer, and that
+     * distinction is the whole question for a 4K plane. */
+    if (total > 0) {
+        int64_t phys = 0;
+        size_t  avail = 0;
+        if (sceKernelAvailableDirectMemorySize(0, total, 2u * 1024u * 1024u,
+                                               &phys, &avail) == 0)
+            dm_free = (long long)(avail / (1024 * 1024));
+    }
+
+    size_t fsz = 0;
+    if (sceKernelConfiguredFlexibleMemorySize(&fsz) == 0)
+        flex_total = (long long)(fsz / (1024 * 1024));
+    if (sceKernelAvailableFlexibleMemorySize(&fsz) == 0)
+        flex_free = (long long)(fsz / (1024 * 1024));
+
+    evo_boot_log("mem budget [%s] direct_total=%lldMB direct_largest_free=%lldMB "
+                 "flex_total=%lldMB flex_free=%lldMB "
+                 "evo_pool=%zu/%zuMB peak=%zuMB hw=%d",
+                 when ? when : "?",
+                 dm_total, dm_free, flex_total, flex_free,
+                 st.allocated_bytes / (1024 * 1024),
+                 st.total_bytes / (1024 * 1024),
+                 st.peak_bytes / (1024 * 1024),
+                 st.is_direct_hardware_mem);
+#else
+    /* stderr, not evo_boot_log: the host test binary links this file without
+     * evo_boot_log.c, and there is no kernel budget to report off-device
+     * anyway - only EVO's own pool, which is ordinary malloc there. */
+    fprintf(stderr, "mem budget [%s] host build - evo_pool=%zu/%zuMB peak=%zuMB\n",
+            when ? when : "?",
+            st.allocated_bytes / (1024 * 1024),
+            st.total_bytes / (1024 * 1024),
+            st.peak_bytes / (1024 * 1024));
+#endif
 }

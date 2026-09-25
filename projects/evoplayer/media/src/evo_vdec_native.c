@@ -221,9 +221,11 @@ extern int      sceKernelConfiguredFlexibleMemorySize(size_t *);
  * 1080p file) needs no resize at all - and a 4K file grows its own slot for as
  * long as it is playing.
  *
- * What this buys is flexible memory, which is the pool that actually runs out:
+ * What this buys is flexible memory, which is the tighter of the two pools:
  * the resident set held ~180MB of it permanently, against ~199MB free. That
  * headroom is what software decode, swscale and poster extraction compete for.
+ * For the denominator those figures sit against - 448MB flexible, and 12GB of
+ * direct memory that malloc cannot reach - see docs/hardware/memory-budget.md.
  *
  * Override to the old behaviour with -DEVO_VDEC_NATIVE_BOOT_4K=1 if a
  * measurement ever argues for it.

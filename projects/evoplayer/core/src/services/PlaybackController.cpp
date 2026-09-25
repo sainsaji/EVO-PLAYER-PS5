@@ -9,6 +9,7 @@
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
+#include "evo_direct_mem.h"   /* evo_mem_budget_log - the numbers behind the 1080p rule */
 
 /*
  * malloc_shim.c (tools/native-app/stubs). Weak so the non-app-module compile
@@ -519,25 +520,36 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         vp.height = vStream->codecpar->height;
         vp.avctx_params = vStream->codecpar;
         /*
-         * Software decode above 1080p does not fit in this title's memory
-         * budget, so it is refused rather than attempted.
+         * Software decode above 1080p is refused by default.
          *
-         * MEASURED, not assumed. malloc_shim's telemetry at decoder open:
-         *   AV1 1080p  live=53MB peak=108MB map_fail=0 flex_avail=124MB -> plays 1.0x
-         *   AV1 4K     live=52MB peak=135MB map_fail=0 flex_avail=125MB -> dies
-         * Every allocation succeeded (map_fail=0, anon=0, all served from
-         * flexible memory) - the shim works; the pool is simply ~180MB total.
-         * A 4K frame is ~12.4MB and a decoder needs a reference queue plus
-         * frame delay, which does not fit in 125MB.
+         * THE ORIGINAL REASON WAS WRONG. It was: "the flexible pool is ~180MB
+         * total, AV1 4K peaks at 135MB against 125MB free, so it cannot fit."
+         * The ~180MB came from adding the malloc shim's `live` to the kernel's
+         * `flex_avail` and treating the sum as a total. It is not one - those
+         * sums vary by 44MB across a single run. Asking the kernel directly
+         * (evo_mem_budget_log, 2026-09-25) gives **448MB configured** with
+         * 144-192MB free at this exact point, and 12GB of direct memory
+         * alongside it. docs/hardware/memory-budget.md has the figures.
+         *
+         * With the guard lifted, 4K 10-bit AV1 decoded FASTER than real time
+         * (late_drop=0, early_sleeps climbing, flex_free=192MB). So this guard
+         * refuses things that work, and the honest reason it is still here is
+         * that the failure mode it was built for - running out mid-playback -
+         * is a crash rather than a stutter, and it has not yet been proven
+         * against a full-length file. It is opt-out, not load-bearing.
+         *
+         * What IS still true from the original investigation:
          *
          * Two things this is NOT, both tried on hardware first:
          *  - not thread count: dropping to 2 threads + slice threading only
          *    changed dav1d's complaint from "Failed to read unit 2 (type 6)"
          *    to "Failed to parse temporal unit".
          *  - not the GPU pool: direct_mem sat at 8MB of 64MB throughout.
-         * malloc_shim's header claims flexible memory draws on "the full
-         * title budget (GBs)"; that is not true here, and the numbers above
-         * are why.
+         *
+         * Those dav1d complaints were read as memory symptoms at the time.
+         * They were not: both are cbs_av1 errors from FFmpeg's AV1 parser,
+         * which corrupts any AV1 whose container stripped temporal delimiters.
+         * That parser is no longer built (scripts/build-ffmpeg.sh says why).
          *
          * Native sceVideodec2 is unaffected - it has its own memory and
          * handles 4K H.264/HEVC fine. This only refuses the software path,
@@ -554,10 +566,42 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
          * check has to run again on the chosen backend after the open. Testing only
          * this one let hevc10_pq_4k straight through to the crash.
          */
-        if (sw_backend && above_1080p) {
+        /*
+         * The 1080p software-decode block, and the switch that lifts it.
+         *
+         * The block was set against a believed ~125 MB of free flexible memory
+         * versus AV1 4K's 135 MB peak. Measured on hardware 2026-09-25, the
+         * real figures are 448 MB configured with 144-188 MB free at this exact
+         * point - so the premise may simply be wrong and 4K software decode may
+         * fit as-is. Nobody knows, because the block means it has never been
+         * allowed to try.
+         *
+         * Touch /mnt/usb0/evo_sw_4k to let it try, without a rebuild. It is
+         * opt-in and stays that way until a run proves it: the failure this
+         * guards against is an out-of-memory mid-playback, which on this
+         * platform is a crash rather than a stutter. Read once - the answer
+         * cannot change within a session, and this sits in the open path.
+         */
+        static int sw_4k_allowed = -1;
+        if (sw_4k_allowed < 0)
+            sw_4k_allowed = (access("/mnt/usb0/evo_sw_4k", F_OK) == 0) ? 1 : 0;
+
+        if (sw_backend && above_1080p && sw_4k_allowed) {
+            evo_boot_log("PlaybackController: /mnt/usb0/evo_sw_4k set - ALLOWING "
+                         "%dx%d on the software decoder (the 1080p block is off)",
+                         vp.width, vp.height);
+            evo_mem_budget_log("sw-4k-allowed");
+        }
+
+        if (sw_backend && above_1080p && !sw_4k_allowed) {
             evo_boot_log("PlaybackController: refusing %dx%d on the software "
                          "decoder - will not fit the title memory budget",
                          vp.width, vp.height);
+            /* What the refusal was actually based on. The 1080p line is a
+             * fixed rule standing in for a budget nobody had measured; this
+             * prints the budget next to the refusal so the rule can be judged
+             * against the numbers instead of against its own comment. */
+            evo_mem_budget_log("sw-refuse");
             avformat_close_input(&play_fmt);
             play_fmt = nullptr;
             m_playbackFsm.postEvent(PlaybackEvent::Fail);
@@ -578,11 +622,12 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         g_vdec = evo_vdec_open(&vp, &chosen);
         /* The native decoder can decline a format it was asked for and hand
          * back FFmpeg; above 1080p that does not fit the memory budget. */
-        if (g_vdec && above_1080p && chosen != EVO_VDEC_BACKEND_NATIVE) {
+        if (g_vdec && above_1080p && chosen != EVO_VDEC_BACKEND_NATIVE && !sw_4k_allowed) {
             evo_boot_log("PlaybackController: native declined %dx%d (codec=%d); "
                          "refusing the FFmpeg fallback - will not fit the title "
                          "memory budget", vp.width, vp.height,
                          vStream->codecpar->codec_id);
+            evo_mem_budget_log("native-declined");
             evo_vdec_close(g_vdec);
             g_vdec = nullptr;
             avformat_close_input(&play_fmt);
@@ -623,6 +668,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                              (unsigned long long)anon,
                              (unsigned long long)(avail >> 20));
             }
+            /* The line above is the heap side only, which is why the direct
+             * pool never entered the argument: nothing printed it. This is the
+             * other half, at the same instant, so an accepted decode can be
+             * compared against a refused one. */
+            evo_mem_budget_log("decode-open");
         }
     }
 

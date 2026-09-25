@@ -29,8 +29,14 @@ the build configuration.
 | ProRes / DNxHD | none | — | — |
 
 Five resident hardware decoders, one per hardware row, created once at
-start-up. Software decode above 1080p is refused — a 4K frame plus its
-reference queue needs ~135 MB against the ~125 MB the title has.
+start-up.
+
+Software decode above 1080p is refused by default — but the reason originally
+given for it (a 4K frame needing ~135 MB against ~125 MB available) was based
+on a flexible-memory ceiling that was never measured and turned out to be
+wrong. The title has **448 MB** of flexible memory, 144–192 MB free at decoder
+open, and 4K 10-bit AV1 decodes faster than real time once the guard is lifted
+(`/mnt/usb0/evo_sw_4k`). See [hardware/memory-budget.md](hardware/memory-budget.md).
 
 ---
 

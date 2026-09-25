@@ -47,8 +47,10 @@ void ImageViewerScreen::openImage(const std::string& path) {
      *
      * Asking stb_image for 4 channels makes it decode into a 3-channel buffer
      * and then convert into a second, larger one; adding our own uint32 buffer
-     * on top meant a 4K screenshot needed roughly 90 MB at once. The title has
-     * about 125 MB free, so EVO's own 3840x2160 captures - the ones L3 writes -
+     * on top meant a 4K screenshot needed roughly 90 MB at once. Free flexible
+     * memory runs 144-192 MB with a file open (448 MB total - see
+     * docs/hardware/memory-budget.md), so EVO's own 3840x2160 captures -
+     * the ones L3 writes -
      * failed to open in EVO's own viewer, reporting "unsupported or invalid
      * file" when the file was perfectly valid.
      *

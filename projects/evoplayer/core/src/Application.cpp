@@ -306,6 +306,9 @@ bool Application::initHardware() {
     evo_av_log_init();
     av_force_cpu_flags(0);
     evo_direct_mem_init(EVO_DIRECT_MEM_POOL_BYTES);
+    /* The baseline, before anything has been decoded or drawn. Every later
+     * figure is only meaningful against this one. */
+    evo_mem_budget_log("boot");
     EnsureDataDirectories();
     evo_crash_note_init();
 

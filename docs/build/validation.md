@@ -116,11 +116,16 @@ code, with the reasoning recorded at the top of each `main.c`:
    array of buffer descriptors. Pitch is implicit. Cross-checked against
    `ps5-payload-dev/SDL`'s backend, which is known-good on this platform.
 
-3. **No direct-memory budget.** `sceKernelGetDirectMemorySize()` returns 0 and
-   klog shows the payload spawned with `dmem#0`. Use
-   `sceKernelAllocateMainDirectMemory`, and note **64 MiB fails with EAGAIN
-   (`0x80020023`) while 32 MiB succeeds** — SDL's 64 MiB value is too large
-   for an elfldr payload.
+3. **No direct-memory budget — IN AN ELFLDR PAYLOAD ONLY.**
+   `sceKernelGetDirectMemorySize()` returns 0 and klog shows the payload
+   spawned with `dmem#0`. Use `sceKernelAllocateMainDirectMemory`, and note
+   **64 MiB fails with EAGAIN (`0x80020023`) while 32 MiB succeeds** — SDL's
+   64 MiB value is too large for an elfldr payload.
+
+   **This does not apply to EVO.** The ELF-payload route is gone; EVO is the
+   `PPSA99039` app module, where the same call returns **12288 MB** with an
+   11 GB contiguous free run, measured 2026-09-25. Do not carry this finding
+   across — see [hardware/memory-budget.md](../hardware/memory-budget.md).
 
 4. **Sony modules export NIDs, not names.** `sceKernelDlsym` by name returns
    `0x80020003` for every symbol. Use `nid_encode()` + `kernel_dynlib_resolve()`.
