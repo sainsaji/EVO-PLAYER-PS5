@@ -49,9 +49,17 @@ void pp_playback_init(pp_playback *pb)
     }
     /*
      * Soft UHD: very wide late window (never freeze on late-drop).
-     * Early sleep capped short so convert+decode can stay realtime.
+     *
+     * Early sleep is capped at 100 ms - enough to wait out one whole frame
+     * interval of anything down to 10 fps. It was 25 ms, shorter than a
+     * 24 fps frame (41.7 ms): a frame that arrived early slept 25 ms and was
+     * shown anyway, so whenever the decoder ran ahead of real time the picture
+     * ran at decoder speed. Files with audio never showed it - the audio clock
+     * paces them in evo_playback.c - but a video-only file did: Chimera's 4K
+     * AV1 played 1.37x fast (#94, hardware 2026-09-26). Waiting out an early
+     * frame costs nothing: the decoder is by definition ahead.
      */
-    pp_clock_init(&pb->clock, 800000, 25000);
+    pp_clock_init(&pb->clock, 800000, 100000);
     pb->aspect = PP_ASPECT_FIT;
     pb->out_w = 1920;
     pb->out_h = 1080;

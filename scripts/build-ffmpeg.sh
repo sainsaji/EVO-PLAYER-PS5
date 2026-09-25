@@ -20,6 +20,19 @@
 #   on a current FFmpeg. The raw .obu path failed the same way after 1 frame,
 #   through av1_frame_merge rather than the parser.
 #
+#   #94 SHOWED THAT DIAGNOSIS WAS WRONG (2026-09-25/26). FFmpeg was never the
+#   cause. A host build of this exact 7.1.1 - and of 7.0.1 - with the AV1
+#   parser, the obu demuxer, av1_frame_merge and libdav1d plays the console's
+#   own files with ZERO cbs_av1 errors (EVO-style probe and seeks, gcc and
+#   clang -O3, MALLOC_PERTURB_, valgrind). On the console the errors were the
+#   symptom of two EVO faults, both fixed in #94:
+#     - flexible memory ran out under 4K 10-bit dav1d (malloc shim map_fail);
+#       the first refused allocation broke av1_frame_merge / the parser for
+#       the rest of the file. The shim now falls back to direct memory.
+#     - every 4K 10-bit software frame overflowed the AGC transient-ring slot,
+#       so none reached the screen - the "corrupt, flashing picture".
+#   The parser and the raw demuxers are back ON, unpatched.
+#
 #   The pacbrew-matching rationale below is kept because it is still the reason
 #   the FIRST pin existed, and it explains the profile - but EVO has long since
 #   diverged from ProsperoPlayer's codec set, and matching a baseline is worth
@@ -429,14 +442,19 @@ minimal)
         --enable-demuxer=ass
         --enable-demuxer=image2         # the thumbnail/cover-art path
 
-        # -- AV1 containers, and why raw .obu is NOT here -------------------
-        # ivf only. The `obu` and `av1` raw demuxers are deliberately absent:
-        # configure has `obu_demuxer_select="av1_frame_merge_bsf av1_parser"`,
-        # so enabling either drags in av1_parser - and av1_parser is what breaks
-        # AV1 playback altogether (see the parser block below). ivf has no such
-        # dependency, and the browser has offered .ivf as playable all along
-        # while nothing could open it.
+        # -- AV1 raw streams ------------------------------------------------
+        # ivf, plus the `obu` (low-overhead .obu) and `av1` (Annex B) raw
+        # demuxers. configure has
+        #   obu_demuxer_select="av1_frame_merge_bsf av1_parser"
+        # so the raw demuxers need av1_parser and av1_frame_merge. They were
+        # left out from 2ddd018 until #94 because the parser was blamed for
+        # corrupting AV1 in containers - see the parser block below for why
+        # that no longer stands. av1_frame_merge is named explicitly because
+        # --disable-bsfs is in force; select would pull it in anyway.
         --enable-demuxer=ivf
+        --enable-demuxer=obu
+        --enable-demuxer=av1
+        --enable-bsf=av1_frame_merge
 
         # -- streaming containers (#90) -------------------------------------
         # hls is what an IPTV .m3u8 actually is. It has no external dependency
@@ -458,7 +476,9 @@ minimal)
         --enable-parser=h264
         --enable-parser=hevc
         --enable-parser=vp9
-        # av1 parser: DELIBERATELY NOT ENABLED.
+        # av1 parser: ON again since #94, unpatched. The note below is why it
+        # was off from 2ddd018 - kept because the measurement in it is real,
+        # but its explanation was not (see the correction after it).
         #
         # matroskadec sets need_parsing = AVSTREAM_PARSE_HEADERS for every
         # codec except AAC, so whenever this parser exists it runs on every AV1
@@ -474,8 +494,19 @@ minimal)
         #
         # Without the parser, av_parser_init() returns NULL and whole packets go
         # straight to dav1d - which is exactly what a container already frames.
-        # Re-enabling it also silently re-enables the broken path, so it is not
-        # a free switch: check an AV1 .mkv before turning it back on.
+        #
+        # Correction (#94): the parser was a victim, not the cause. The exact
+        # 7.1.1 here runs EVO_TEST_av1_4k.mkv - the very file measured above,
+        # pulled off the stick - through the parser and libdav1d with zero
+        # cbs_av1 errors on the host, and 7.1.1 already clears
+        # `seen_frame_header` after a frame's last tile group
+        # (cbs_av1_syntax_template.c, tile_group_obu), so the "never cleared
+        # without a temporal delimiter" reading was wrong. On the console the
+        # errors followed out-of-memory (map_fail in evo.log's alloc lines) and
+        # stopped once the malloc shim gained its direct-memory fallback;
+        # 4K AV1 in .mkv and raw .obu both play clean on hardware (2026-09-26).
+        # If cbs_av1 errors come back, check map_fail before blaming FFmpeg.
+        --enable-parser=av1
         --enable-parser=aac
         --enable-parser=aac_latm
         --enable-parser=ac3

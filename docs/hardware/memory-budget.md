@@ -26,10 +26,11 @@ believed for months:
 - **Direct memory is not scarce.** 12 GB, of which EVO reserves 64 MiB. The
   pool size was chosen because it was proven not to wedge the GPU, never
   because anything asked the kernel what was available.
-- **`malloc` cannot reach any of it.** Flexible and direct are separate. Code
-  has to allocate and map direct memory explicitly, so 11 GB of headroom does
-  nothing for a component that allocates with `malloc` — which is every
-  software decoder in the tree.
+- **`malloc` could not reach any of it** — until #94. Flexible and direct are
+  separate, so 11 GB of headroom did nothing for a component that allocates
+  with `malloc`, which is every software decoder in the tree. The malloc shim
+  now spills to direct memory once flexible memory refuses; see
+  [Correction: 4K software decode does run flexible memory dry](#correction-4k-software-decode-does-run-flexible-memory-dry-94).
 
 ## How to re-measure
 
@@ -74,17 +75,62 @@ and was believed anyway.
   144–192 MB. Lifted behind `/mnt/usb0/evo_sw_4k`, 4K 10-bit AV1 decoded
   **faster than real time** (`late_drop=0`, `early_sleeps` climbing,
   `flex_free=192MB`). The guard was refusing something that works.
-- **The "route software decode through direct memory" project is cancelled.**
-  It existed to solve a flexible-memory shortage. There is no shortage.
-  `evo_vdec_ffmpeg.c` sets no custom allocator and does not need one.
+- **The "route software decode through direct memory" project was cancelled
+  here, and then turned out to be needed** (#94, below): 4K 10-bit software
+  decode does run flexible memory dry. It landed as a fallback in the malloc
+  shim rather than a custom allocator in `evo_vdec_ffmpeg.c`.
 - **Hardware 4K decode was never in question** and still isn't.
+
+## Correction: 4K software decode does run flexible memory dry (#94)
+
+**Measured on hardware 2026-09-25/26**, 4K 10-bit AV1 (Netflix Chimera, raw
+`.obu` and `.mkv`) on dav1d with `/mnt/usb0/evo_sw_4k` set.
+
+"There is no shortage" above was measured at decode-open. Two seconds into
+4K 10-bit AV1, the same pool is **empty**:
+
+```
+alloc [decode-open] live=55MB  ... map_fail=0 flex_avail=188MB direct=0    direct_live=0MB
+alloc [play]        live=488MB ... map_fail=0 flex_avail=0MB   direct=1460 direct_live=246MB
+```
+
+Before the fix the shim counted `map_fail=60` in one such run. The first
+refused allocation broke FFmpeg's `av1_frame_merge` (and, in a container,
+the AV1 parser) for the rest of the file — which is what 2ddd018 misread as
+an FFmpeg bug.
+
+`tools/native-app/stubs/malloc_shim.c` now tries flexible memory, then anon
+`mmap`, then **direct memory** (`sceKernelAllocateDirectMemory` +
+`sceKernelMapDirectMemory`, 64 KiB granularity, a table so `free()` can
+release by physical offset). With it, dav1d holds a steady ~245–280 MB of
+direct memory through full-length 4K playback with `map_fail=0`, and all of
+it is released at stop. `evo.log`'s `alloc [...]` lines carry
+`direct= direct_live= direct_peak=` at decode-open, every 2 s of playback,
+and at stop.
+
+**The memory type matters.** The fallback first shipped with type **3** —
+what `evo_direct_mem.c`'s pool uses — and dav1d's pictures, once they spilled
+into it, decoded and staged at ~2 fps: reads from it are uncached. It uses
+type **11** (general-purpose cached, SharpProspero `KernelMemory.cs`; 12 is
+cached-shared-with-GPU), mapped CPU read/write only, and runs at full speed.
+
+Still open: once flexible memory is at 0 MB, anything that needs it outside
+the shim (system services, thread stacks) gets nothing. Keeping a reserve —
+sending large blocks to direct memory *before* flexible runs out — is the
+next hardening step.
 
 ## Open, and not explained by capacity
 
 `evo_direct_mem.h` records that raising EVO's pool to 192 MiB "wedged the first
 4K V8 present" (#6, backed out → #55). There were gigabytes free then too, so
 **capacity is not the explanation** — something else about a larger WB_ONION
-reservation is wrong, and it has to be found rather than assumed away. Do not
+reservation is wrong, and it has to be found rather than assumed away.
+
+**Probable answer (#94):** that pool is type 3, which `evo_direct_mem.c`
+labels WB_ONION but which behaves as uncached for CPU reads — the same type
+made dav1d crawl at ~2 fps when the malloc shim first used it. Routing video
+buffers into a larger type-3 pool would look exactly like a wedge. Not yet
+re-tested with type 11/12. Do not
 take "11 GB is free" to mean "we can take a gigabyte of it" until that is
 understood.
 

@@ -68,7 +68,12 @@ typedef char evo_tile_dims_must_be_pow2[
 
 #define EVO_AGC_SCANOUT_STRIDE      UINT64_C(0x04000000) /* 64 MB per scanout buffer */
 #define EVO_AGC_SCANOUT_TOTAL       UINT64_C(0x08000000) /* 128 MB for 2 buffers */
-#define EVO_AGC_TRANSIENT_RING_SIZE UINT64_C(0x04000000) /* 64 MB transient ring */
+/* 128 MB = ~42.7 MB per frame slot (EVO_AGC_FRAME_SLOTS = 3). At 64 MB a slot
+ * was 21.3 MB, and a software-decoded 4K 10-bit planar frame stages 16.6 MB of
+ * Y plus 8.3 MB of interleaved RG16 chroma = 24.9 MB - so every such frame
+ * failed "stage planar UV to RG16" and never reached the screen (#94, 4K AV1;
+ * hardware 2026-09-25). 1080p frames and native NV12 never came near it. */
+#define EVO_AGC_TRANSIENT_RING_SIZE UINT64_C(0x08000000) /* 128 MB transient ring */
 #define EVO_AGC_COMMAND_BUFFER_SIZE UINT64_C(0x00600000) /* 6 MB (2 MB per slot * 3) */
 #define EVO_AGC_SHADER_STORAGE_SIZE UINT64_C(0x00400000) /* 4 MB shader storage */
 #define EVO_AGC_FENCE_STORAGE_SIZE  UINT64_C(0x00010000) /* 64 KB fence storage */
@@ -1008,7 +1013,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     g_agc_dev.scanout_buffers[1] = g_agc_dev.direct_mem_base + cur_offset;
     cur_offset += EVO_AGC_SCANOUT_STRIDE;
 
-    /* Transient ring buffer (16 MB) */
+    /* Transient ring buffer (EVO_AGC_TRANSIENT_RING_SIZE) */
     uint8_t *transient_base = g_agc_dev.direct_mem_base + cur_offset;
     evo_agc_transient_ring_init(&g_agc_dev.transient_ring, transient_base,
                                 (uint64_t)(uintptr_t)transient_base,

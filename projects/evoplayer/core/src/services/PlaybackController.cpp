@@ -19,6 +19,41 @@ extern "C" {
 __attribute__((weak)) void evo_alloc_stats(uint64_t *live, uint64_t *peak, uint64_t *large_n);
 __attribute__((weak)) void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
                                               uint64_t *served_anon, uint64_t *flex_avail);
+__attribute__((weak)) void evo_alloc_direct_info(uint64_t *served, uint64_t *live,
+                                                 uint64_t *peak);
+}
+
+/*
+ * The heap as the malloc shim sees it. map_fail > 0 means an allocation was
+ * refused outright - on 2026-09-25 that was the whole 4K AV1 failure, not
+ * FFmpeg. direct_* is the shim's last-resort fallback (#94): nonzero means
+ * flexible memory ran dry and direct memory carried the rest.
+ */
+#include "evo_boot_log.h"
+/* Not static: Application's render loop also samples it during playback, so a
+ * run that crashes still leaves the heap's last state in evo.log. */
+extern "C" void evo_log_alloc_state(const char *when)
+{
+    uint64_t live = 0, peak = 0, large_n = 0;
+    uint64_t fails = 0, flex = 0, anon = 0, avail = 0;
+    uint64_t dserved = 0, dlive = 0, dpeak = 0;
+    if (evo_alloc_stats)       evo_alloc_stats(&live, &peak, &large_n);
+    if (evo_alloc_map_info)    evo_alloc_map_info(&fails, &flex, &anon, &avail);
+    if (evo_alloc_direct_info) evo_alloc_direct_info(&dserved, &dlive, &dpeak);
+    evo_boot_log("  alloc [%s] live=%lluMB peak=%lluMB large=%llu "
+                 "map_fail=%llu flex=%llu anon=%llu flex_avail=%lluMB "
+                 "direct=%llu direct_live=%lluMB direct_peak=%lluMB",
+                 when,
+                 (unsigned long long)(live >> 20),
+                 (unsigned long long)(peak >> 20),
+                 (unsigned long long)large_n,
+                 (unsigned long long)fails,
+                 (unsigned long long)flex,
+                 (unsigned long long)anon,
+                 (unsigned long long)(avail >> 20),
+                 (unsigned long long)dserved,
+                 (unsigned long long)(dlive >> 20),
+                 (unsigned long long)(dpeak >> 20));
 }
 
 #include "evo_adec.h"
@@ -344,6 +379,7 @@ void PlaybackController::stopPlayback() {
 
     pp_playback_on_file_close(&g_pp_pb);
     pp_playback_log_stats(&g_pp_pb);
+    evo_log_alloc_state("stop");
 }
 
 /*
@@ -546,10 +582,12 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
          *    to "Failed to parse temporal unit".
          *  - not the GPU pool: direct_mem sat at 8MB of 64MB throughout.
          *
-         * Those dav1d complaints were read as memory symptoms at the time.
-         * They were not: both are cbs_av1 errors from FFmpeg's AV1 parser,
-         * which corrupts any AV1 whose container stripped temporal delimiters.
-         * That parser is no longer built (scripts/build-ffmpeg.sh says why).
+         * Those are cbs_av1 errors (FFmpeg's AV1 parser / av1_frame_merge),
+         * and they WERE memory symptoms after all (#94, 2026-09-26): with the
+         * guard lifted, 4K 10-bit dav1d drives flexible memory to 0 and the
+         * first refused allocation breaks cbs_av1 for the rest of the file.
+         * The malloc shim now spills to direct memory instead, and the
+         * errors are gone - see the alloc [...] lines in evo.log.
          *
          * Native sceVideodec2 is unaffected - it has its own memory and
          * handles 4K H.264/HEVC fine. This only refuses the software path,
@@ -653,21 +691,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
              *   av1_4k       -> dav1d "Failed to read unit" / "parse temporal unit"
              * If fails>0 or flex_avail is small, it is the heap, not the codec.
              */
-            {
-                uint64_t live = 0, peak = 0, large_n = 0;
-                uint64_t fails = 0, flex = 0, anon = 0, avail = 0;
-                if (evo_alloc_stats)    evo_alloc_stats(&live, &peak, &large_n);
-                if (evo_alloc_map_info) evo_alloc_map_info(&fails, &flex, &anon, &avail);
-                evo_boot_log("  alloc live=%lluMB peak=%lluMB large=%llu "
-                             "map_fail=%llu flex=%llu anon=%llu flex_avail=%lluMB",
-                             (unsigned long long)(live >> 20),
-                             (unsigned long long)(peak >> 20),
-                             (unsigned long long)large_n,
-                             (unsigned long long)fails,
-                             (unsigned long long)flex,
-                             (unsigned long long)anon,
-                             (unsigned long long)(avail >> 20));
-            }
+            evo_log_alloc_state("decode-open");
             /* The line above is the heap side only, which is why the direct
              * pool never entered the argument: nothing printed it. This is the
              * other half, at the same instant, so an accepted decode can be

@@ -10,6 +10,7 @@
 #include "evo_demux.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <unistd.h>
 
 #include <libavformat/avformat.h>
@@ -17,6 +18,7 @@
 #include <libavutil/frame.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/rational.h>
+#include <libavutil/time.h>
 
 #include "pp_playback.h"
 #include "evo_packet_queue.h"
@@ -51,6 +53,9 @@ extern double   video_clock_seconds;
 
 extern AVPacket *video_pending_pkt;
 extern AVPacket *video_video_pending_pkt;
+extern volatile int video_thread_running;  /* evo_playback.c */
+extern volatile int video_decode_parked;
+extern volatile int video_decode_hold;
 
 extern int      playback_profile;
 extern int      video_packet_cap;
@@ -173,9 +178,35 @@ static int prospero_process_seek_request(void) {
     );
 
     /*
-     * Let decoder/output threads observe player_paused.
+     * Wait for the video decode thread to be out of the decoder before
+     * anything below touches it: evo_vdec_flush() and the pending-packet free
+     * both race a decode call still in flight. The old fixed 5 ms was enough
+     * while a decode call was short; a 4K AV1 frame in dav1d is not, and a
+     * .mkv seek (av_seek_frame ~0 ms) flushed dav1d under a live
+     * dav1d_send_data - SIGSEGV in dav1d_parse_obus (#94, hardware
+     * 2026-09-26). Bounded, so a wedged decode (#39) cannot hang the seek.
+     *
+     * video_decode_hold, not player_paused: a committed scrub requests the
+     * seek and then moves the FSM straight to Playing, whose entry clears
+     * player_paused before this thread even gets here - so the decode thread
+     * never parked and every seek sat out the full 2 s timeout, then flushed
+     * unsynchronized anyway. The hold belongs to the seek alone.
      */
+    video_decode_hold = 1;
     usleep(5000);
+    if (video_thread_running) {
+        int waited_ms = 0;
+        while (!video_decode_parked && waited_ms < 2000) {
+            usleep(1000);
+            waited_ms++;
+        }
+        if (!video_decode_parked || waited_ms > 50) {
+            char d[64];
+            snprintf(d, sizeof d, "parked=%d waited_ms=%d",
+                     (int)video_decode_parked, waited_ms);
+            pp_stage_bc("SEEK_PARK", d);
+        }
+    }
 
     
     /*
@@ -244,6 +275,18 @@ packet_queue_clear(
             av_q2d(time_base)
         );
 
+    /* #94: a seek in a raw .obu (no index - the demuxer scans forward from
+     * the last keyframe it has seen) took EVO down with nothing after it in
+     * evo.log. This line and the ms= on SEEK_AVFRAME bracket the call. */
+    {
+        char d[112];
+        snprintf(d, sizeof d, "fmt=%s ts=%lld target=%.3f",
+                 play_fmt->iformat ? play_fmt->iformat->name : "?",
+                 (long long)seek_timestamp, target_seconds);
+        pp_stage_bc("SEEK_BEGIN", d);
+    }
+    const int64_t seek_t0 = av_gettime_relative();
+
     int result =
         av_seek_frame(
             play_fmt,
@@ -260,13 +303,25 @@ packet_queue_clear(
     }
     {
         char d[112];
-        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d target=%.3f",
-                 result, (long long)seek_timestamp, seek_stream, target_seconds);
+        snprintf(d, sizeof d, "rc=%d ts=%lld strm=%d target=%.3f ms=%lld",
+                 result, (long long)seek_timestamp, seek_stream, target_seconds,
+                 (long long)((av_gettime_relative() - seek_t0) / 1000));
         pp_stage_bc("SEEK_AVFRAME", d);   /* #32 diagnostics -> /mnt/usb0/evo.log */
     }
 
     if (result >= 0) {
-        avformat_flush(play_fmt);
+        /*
+         * av_seek_frame() already flushes the demuxer before it repositions,
+         * then sets the stream's running dts to the timestamp it landed on.
+         * Flushing again here resets that dts. A container stamps its own
+         * packets so it never mattered - but a stream with no timestamps (raw
+         * .obu, AVFMT_NOTIMESTAMPS) has only that dts, and after the extra
+         * flush restarted at 0: every frame then read as before the target
+         * and the whole seek was decoded and thrown away in the dark (#94,
+         * Chimera: a jump to 118 s discarded 1005 frames and never played).
+         */
+        if (!(play_fmt->iformat->flags & AVFMT_NOTIMESTAMPS))
+            avformat_flush(play_fmt);
 
         evo_vdec_flush(g_vdec);   /* video codec + scratch frame/packet (A6) */
         if (g_adec) {
@@ -348,6 +403,7 @@ packet_queue_clear(
     }
 
     prospero_seek_in_progress = 0;
+    video_decode_hold = 0;
 
     pp_playback_notify_seek_end(
         &g_pp_pb,

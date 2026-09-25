@@ -39,6 +39,26 @@ extern int sceKernelMapNamedFlexibleMemory(void **addr, size_t len, int prot,
 extern int sceKernelMunmap(void *addr, size_t len);
 extern int sceKernelAvailableFlexibleMemorySize(size_t *out);
 
+/* Direct memory, as the LAST resort for a backing map (#94). The title has
+ * 448 MB of flexible memory and ~11 GB of direct; 4K 10-bit software decode
+ * (dav1d) was measured running flexible dry on hardware 2026-09-25 -
+ * map_fail=60 in one 4K AV1 run, and the first failed allocation broke
+ * av1_frame_merge for the rest of the file. Only reached when BOTH flexible
+ * and anon mmap refused, so a run that fits in flexible memory never touches
+ * it - and g_map_direct in evo.log says whether any run did.
+ *
+ * Type 11 = general-purpose CACHED memory (SharpProspero KernelMemory.cs:
+ * 11 cached, 12 cached-shared-with-GPU), mapped CPU read/write only. NOT
+ * type 3, which evo_direct_mem.c's pool uses: on 2026-09-25 this fallback
+ * first shipped with 3 and dav1d's pictures, once they spilled into it,
+ * decoded and staged at ~2 fps (450 ms/frame) - reads from it are uncached. */
+extern int sceKernelAllocateDirectMemory(long searchStart, long searchEnd,
+                                         size_t len, size_t align, int type,
+                                         long *physOut);
+extern int sceKernelMapDirectMemory(void **addr, size_t len, int prot,
+                                    int flags, long phys, size_t align);
+extern int sceKernelReleaseDirectMemory(long phys, size_t len);
+
 #define PROT_RW        0x03
 #define MAP_ANON_PRIV  0x1002          /* MAP_PRIVATE | MAP_ANONYMOUS (FreeBSD) */
 #define PAGE           0x4000ULL       /* 16 KiB */
@@ -86,6 +106,84 @@ static _Atomic uint64_t g_map_fail;      /* # of backing-map failures */
 static _Atomic uint64_t g_map_fail_bytes;/* last failed request size   */
 static _Atomic uint64_t g_map_flex;      /* # served by flexible memory */
 static _Atomic uint64_t g_map_anon;      /* # served by the mmap fallback */
+static _Atomic uint64_t g_map_direct;    /* # served by direct memory */
+static _Atomic uint64_t g_direct_live;   /* bytes of direct memory held */
+static _Atomic uint64_t g_direct_peak;
+
+/* Direct mappings have to be released by physical offset, which free() does
+ * not have - so they are remembered here. Only consulted once one exists. */
+#define DIRECT_GRAN   0x10000ULL        /* 64 KiB */
+#define DIRECT_SLOTS  4096
+static struct { void *addr; long phys; size_t len; } g_dm[DIRECT_SLOTS];
+static _Atomic uint32_t g_dm_used;       /* slots ever handed out (high water) */
+static atomic_flag g_dm_lock = ATOMIC_FLAG_INIT;
+static void dm_lock(void)   { while (atomic_flag_test_and_set_explicit(&g_dm_lock, memory_order_acquire)) { } }
+static void dm_unlock(void) { atomic_flag_clear_explicit(&g_dm_lock, memory_order_release); }
+
+static void *dm_map(size_t len)
+{
+    size_t want = (len + DIRECT_GRAN - 1) & ~(DIRECT_GRAN - 1);
+    long phys = 0;
+    void *p = 0;
+    if (sceKernelAllocateDirectMemory(0, 16L * 1024 * 1024 * 1024, want,
+                                      DIRECT_GRAN, 11, &phys) != 0)
+        return 0;
+    if (sceKernelMapDirectMemory(&p, want, 0x03, 0, phys, DIRECT_GRAN) != 0 || !p) {
+        sceKernelReleaseDirectMemory(phys, want);
+        return 0;
+    }
+    int slot = -1;
+    dm_lock();
+    for (int i = 0; i < DIRECT_SLOTS; i++)
+        if (!g_dm[i].addr) { slot = i; break; }
+    if (slot >= 0) {
+        g_dm[slot].addr = p;
+        g_dm[slot].phys = phys;
+        g_dm[slot].len  = want;
+        if ((uint32_t)slot + 1 > atomic_load_explicit(&g_dm_used, memory_order_relaxed))
+            atomic_store_explicit(&g_dm_used, (uint32_t)slot + 1, memory_order_relaxed);
+    }
+    dm_unlock();
+    if (slot < 0) {                     /* table full: give it back */
+        sceKernelMunmap(p, want);
+        sceKernelReleaseDirectMemory(phys, want);
+        return 0;
+    }
+    uint64_t live = atomic_fetch_add_explicit(&g_direct_live, want,
+                                              memory_order_relaxed) + want;
+    uint64_t peak = atomic_load_explicit(&g_direct_peak, memory_order_relaxed);
+    while (live > peak &&
+           !atomic_compare_exchange_weak_explicit(&g_direct_peak, &peak, live,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) { }
+    return p;
+}
+
+/* 1 if p was a direct mapping (now unmapped and released), 0 otherwise. */
+static int dm_unmap(void *p)
+{
+    uint32_t used = atomic_load_explicit(&g_dm_used, memory_order_relaxed);
+    if (!used)
+        return 0;
+    long phys = 0;
+    size_t len = 0;
+    dm_lock();
+    for (uint32_t i = 0; i < used; i++) {
+        if (g_dm[i].addr == p) {
+            phys = g_dm[i].phys;
+            len  = g_dm[i].len;
+            g_dm[i].addr = 0;
+            break;
+        }
+    }
+    dm_unlock();
+    if (!len)
+        return 0;
+    sceKernelMunmap(p, len);
+    sceKernelReleaseDirectMemory(phys, len);
+    atomic_fetch_sub_explicit(&g_direct_live, len, memory_order_relaxed);
+    return 1;
+}
 
 /* Back a mapping with PS5 flexible memory; fall back to plain anon mmap. */
 static void *sh_map(size_t len)
@@ -100,6 +198,11 @@ static void *sh_map(size_t len)
         atomic_fetch_add_explicit(&g_map_anon, 1, memory_order_relaxed);
         return p;
     }
+    p = dm_map(len);
+    if (p) {
+        atomic_fetch_add_explicit(&g_map_direct, 1, memory_order_relaxed);
+        return p;
+    }
     atomic_fetch_add_explicit(&g_map_fail, 1, memory_order_relaxed);
     atomic_store_explicit(&g_map_fail_bytes, (uint64_t)len, memory_order_relaxed);
     return 0;
@@ -107,6 +210,8 @@ static void *sh_map(size_t len)
 
 static void sh_unmap(void *p, size_t len)
 {
+    if (dm_unmap(p))
+        return;
     if (sceKernelMunmap(p, len) != 0)
         munmap(p, len);
 }
@@ -147,6 +252,16 @@ void evo_alloc_map_info(uint64_t *fails, uint64_t *served_flex,
         *flex_avail = (sceKernelAvailableFlexibleMemorySize(&a) == 0)
                           ? (uint64_t)a : 0;
     }
+}
+
+/* The direct-memory fallback's side of the same picture: how many backing maps
+ * it served, and how much it holds now / held at most. All zero means every
+ * allocation fitted in flexible memory. */
+void evo_alloc_direct_info(uint64_t *served, uint64_t *live, uint64_t *peak)
+{
+    if (served) *served = atomic_load_explicit(&g_map_direct, memory_order_relaxed);
+    if (live)   *live   = atomic_load_explicit(&g_direct_live, memory_order_relaxed);
+    if (peak)   *peak   = atomic_load_explicit(&g_direct_peak, memory_order_relaxed);
 }
 
 #define SLAB_MAX (kClassSize[NCLASS - 1])   /* 12288 - above this -> large path */

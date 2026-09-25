@@ -18,6 +18,7 @@ extern void pp_stage_bc(const char *stage_id, const char *detail);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -57,6 +58,51 @@ static void prefetch_file_sequential(const char *path)
         close(fd);
     }
 #endif
+}
+
+/*
+ * The frame rate a raw .obu's file name states, as an AVRational string, or 0.
+ * Takes the digits before "fps" ("2397fps", "23.976fps", "24fps"). Four
+ * undotted digits are hundredths (Netflix's 2397 / 2997 / 5994), and anything
+ * within 0.02 of an NTSC rate snaps to its exact n*1000/1001 form.
+ */
+static int raw_av1_rate_from_name(const char *path, char *out, size_t out_len)
+{
+    const char *dot = strrchr(path, '.');
+    if (!dot || strcasecmp(dot, ".obu") != 0)
+        return 0;
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+
+    for (const char *p = strstr(base, "fps"); p; p = strstr(p + 1, "fps")) {
+        const char *q = p;
+        while (q > base && ((q[-1] >= '0' && q[-1] <= '9') || q[-1] == '.'))
+            q--;
+        if (q == p)
+            continue;
+        char num[16];
+        size_t n = (size_t)(p - q);
+        if (n >= sizeof num)
+            continue;
+        memcpy(num, q, n);
+        num[n] = 0;
+        double v = atof(num);
+        if (!strchr(num, '.') && n == 4)
+            v /= 100.0;
+        if (v < 1.0 || v > 240.0)
+            continue;
+        static const int ntsc[] = { 24, 30, 48, 60, 120 };
+        for (size_t i = 0; i < sizeof ntsc / sizeof ntsc[0]; i++) {
+            double r = ntsc[i] * 1000.0 / 1001.0;
+            if (v > r - 0.02 && v < r + 0.02) {
+                snprintf(out, out_len, "%d/1001", ntsc[i] * 1000);
+                return 1;
+            }
+        }
+        snprintf(out, out_len, "%d/1000", (int)(v * 1000.0 + 0.5));
+        return 1;
+    }
+    return 0;
 }
 
 int evo_stream_io_open(const char *path,
@@ -104,6 +150,19 @@ int evo_stream_io_open(const char *path,
         /* Prime the kernel storage controller for sequential read-ahead */
         SIO_BC("P8_01c_PREFETCH", "open+fadvise");
         prefetch_file_sequential(path);
+    }
+
+    /* A raw AV1 .obu carries no timestamps, and the obu demuxer invents them
+     * from its `framerate` option - 25 by default. 23.976 fps film then plays
+     * 4% fast (#94, Chimera on hardware 2026-09-25). The sequence header's
+     * timing_info is optional and Netflix's Open Content streams omit it; the
+     * name is the one place the rate is written down ("...-2397fps-..."). */
+    if (!ctx->is_network) {
+        char rate[16];
+        if (raw_av1_rate_from_name(path, rate, sizeof rate)) {
+            av_dict_set(&opts, "framerate", rate, 0);
+            SIO_BC("P8_01c2_OBU_RATE", rate);
+        }
     }
 
     SIO_BC("P8_01d_PRE_OPEN", "-> avformat_open_input");

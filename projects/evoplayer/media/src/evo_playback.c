@@ -127,6 +127,9 @@ pthread_t    video_thread;
  * path in GL-4.
  */
 volatile int video_decode_parked = 1;
+/* Set by a seek (evo_demux.c) for as long as it needs the decoder to itself:
+ * the decode thread parks and stays out of evo_vdec_* until it clears. */
+volatile int video_decode_hold = 0;
 
 AVPacket *video_video_pending_pkt = NULL;
 pthread_mutex_t video_frame_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -328,6 +331,11 @@ int decode_next_video_frame(void)
      *  - Never avcodec_flush mid-stream.
      */
     for (int attempts = 0; attempts < 48; attempts++) {
+        /* A seek (or pause) set player_paused and is waiting for this thread
+         * to park before it flushes the decoder - get out between calls
+         * rather than after up to 47 more of them. */
+        if (player_paused || video_decode_hold)
+            return 1;
         pp_frame pf;
         int recv_ret = evo_vdec_receive(g_vdec, &pf);   /* job 1 — pure decode */
         note_vdec_result(recv_ret < 0);
@@ -558,6 +566,7 @@ void *video_decode_thread_func(void *arg) {
     while (video_thread_running) {
         if (
             player_paused ||
+            video_decode_hold ||
             screen != SCREEN_PLAYER ||
             !video_decode_ready
         ) {

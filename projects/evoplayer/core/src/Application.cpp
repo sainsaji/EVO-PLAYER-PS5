@@ -29,6 +29,8 @@
 #include <vector>
 #include "evo_agc_runtime.h"
 #include "evo_toast.h"
+#include <chrono>
+extern "C" void evo_log_alloc_state(const char *when);  /* PlaybackController.cpp */
 
 /* Defined in Bridge.cpp and read by every FPS readout in the app, but
  * nothing ever assigned it - so the player pill and the rail pill both
@@ -916,6 +918,17 @@ int Application::run() {
         }
 
         if (isPlayer) {
+            /* Heap snapshot every 2 s of playback (PlaybackController.cpp,
+             * evo_log_alloc_state). The open/stop lines bracket a file; this is
+             * what survives when the file never reaches stop. */
+            {
+                static auto s_alloc_next = std::chrono::steady_clock::time_point{};
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= s_alloc_next) {
+                    s_alloc_next = now + std::chrono::seconds(2);
+                    evo_log_alloc_state("play");
+                }
+            }
             pp_video_frame f;
             std::memset(&f, 0, sizeof(f));
             int have = (pp_playback_get_video_frame(&g_pp_pb, &f) && f.ready);
