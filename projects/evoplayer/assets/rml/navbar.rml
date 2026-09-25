@@ -71,6 +71,22 @@
         </div>
     </div>
 
+    <!--
+      QUIT EVO. An action, not a section: it releases everything and parks the
+      app on the safe-to-close screen (Application::requestSoftClose), so it is
+      pinned to the foot of the rail, apart from the places you can go. Slot 5
+      in both panels; ScreenManager treats the index after the last section
+      as this entry.
+    -->
+    <div id="nav-quit">
+        <div class="rail-item-wrap" id="nav-wrap-5">
+            <div class="rail-accent-bar" id="nav-bar-5"></div>
+            <div class="rail-item" id="nav-item-5">
+                <img src="../icons/icon_power.png" class="rail-icon" id="nav-icon-5"/>
+            </div>
+        </div>
+    </div>
+
     <!-- ================================================================
          Expanded overlay (shown when rail_focused = true)
          ================================================================ -->
@@ -103,6 +119,14 @@
             <div class="rail-exp-item" id="nav-exp-4">
                 <img id="nav-exp-icon-4" src="../icons/icon_about_support.png" class="rail-exp-icon"/>
                 <span class="rail-exp-label" id="nav-exp-label-4">ABOUT</span>
+            </div>
+        </div>
+
+        <!-- QUIT EVO, pinned to the foot of the panel like the rail entry -->
+        <div id="nav-expanded-quit">
+            <div class="rail-exp-item" id="nav-exp-5">
+                <img id="nav-exp-icon-5" src="../icons/icon_power.png" class="rail-exp-icon"/>
+                <span class="rail-exp-label" id="nav-exp-label-5">QUIT EVO</span>
             </div>
         </div>
     </div>

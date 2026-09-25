@@ -604,6 +604,8 @@ public:
 
     void UpdateAboutState(const EvoAboutState& state);
     void RenderAbout(uint32_t* framebuffer, int width, int height);
+    /* Safe-to-close screen (closed.rml): stateless, themed on every render. */
+    void RenderClosed(uint32_t* framebuffer, int width, int height);
 
     void UpdateSubtitlesState(const EvoSubtitlesState& state);
     void RenderSubtitles(uint32_t* framebuffer, int width, int height);
@@ -701,6 +703,7 @@ private:
     Rml::ElementDocument* m_dialog_doc = nullptr;
     Rml::ElementDocument* m_settings_doc = nullptr;
     Rml::ElementDocument* m_about_doc = nullptr;
+    Rml::ElementDocument* m_closed_doc = nullptr;
     Rml::ElementDocument* m_subtitles_doc = nullptr;
     Rml::ElementDocument* m_mediainfo_doc = nullptr;
     Rml::ElementDocument* m_nav_doc = nullptr;

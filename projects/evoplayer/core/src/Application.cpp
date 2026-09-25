@@ -15,6 +15,7 @@
 #include "evo/screens/RecentFilesScreen.hpp"
 #include "evo/screens/FavoritesScreen.hpp"
 #include "evo/screens/AboutSupportScreen.hpp"
+#include "evo/screens/SafeToCloseScreen.hpp"
 #include "evo/screens/ImageViewerScreen.hpp"
 #include "evo/screens/ChangelogScreen.hpp"
 #include "evo/animation/AnimationManager.hpp"
@@ -426,6 +427,7 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<RecentFilesScreen>());
     m_screenManager->registerScreen(std::make_unique<FavoritesScreen>());
     m_screenManager->registerScreen(std::make_unique<AboutSupportScreen>());
+    m_screenManager->registerScreen(std::make_unique<SafeToCloseScreen>());
     m_screenManager->registerScreen(std::make_unique<ChangelogScreen>());
     m_screenManager->registerScreen(std::make_unique<ImageViewerScreen>());
     m_screenManager->registerScreen(std::make_unique<ModalDialogScreen>(ModalType::ExitConfirm));
@@ -674,7 +676,11 @@ int Application::run() {
                 pp_playback_shutdown(&g_pp_pb);
                 evo_boot_log("soft close: media released");
                 evo_boot_log_flush();
-                toast("SAFE TO CLOSE", "Press the PS button, then close EVO");
+                /* The safe-to-close screen, not a toast: it is what the
+                 * parked loop leaves latched on the panel, so it has to say
+                 * everything on its own. */
+                if (m_screenManager)
+                    m_screenManager->navigateTo(ScreenId::SafeToClose);
             }
             if (++m_softCloseFrames > 150) {     /* ~2.5 s of presented frames */
                 evo_agc_runtime_wait_idle(500);

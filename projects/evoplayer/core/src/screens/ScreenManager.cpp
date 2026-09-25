@@ -1,5 +1,6 @@
 #include "evo_features.h"
 #include "evo/screens/ScreenManager.hpp"
+#include "evo/Application.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 
@@ -108,10 +109,11 @@ void ScreenManager::setRailFocused(bool focused) {
 
 void ScreenManager::stepRail(int delta) {
     /* One fewer section while Emby is disabled, so the rail does not step onto
-     * an entry with nothing behind it. See EVO_ENABLE_EMBY in evo_features.h. */
-    const int numSections = EVO_ENABLE_EMBY ? 5 : 4;
-    m_railIndex = (m_railIndex + delta) % numSections;
-    if (m_railIndex < 0) m_railIndex += numSections;
+     * an entry with nothing behind it. See EVO_ENABLE_EMBY in evo_features.h.
+     * Plus one entry after the sections: QUIT EVO (see activateRail). */
+    const int numEntries = railSectionCount() + 1;
+    m_railIndex = (m_railIndex + delta) % numEntries;
+    if (m_railIndex < 0) m_railIndex += numEntries;
     evo_feedback(EVO_FB_MOVE);
     syncNavRail();
 }
@@ -158,9 +160,24 @@ bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
     }
 }
 
+int ScreenManager::railSectionCount() const {
+    return EVO_ENABLE_EMBY ? 5 : 4;
+}
+
 void ScreenManager::activateRail() {
     int targetSection = m_railIndex;
     m_railFocused = false;
+
+    /* The entry after the last section is QUIT EVO: not a place to go but
+     * the soft close - release everything, show the safe-to-close screen,
+     * park. navbar.rml pins it to the foot of the rail. */
+    if (targetSection == railSectionCount()) {
+        evo_feedback(EVO_FB_OPEN);
+        m_railIndex = 0;
+        syncNavRail();
+        Application::getInstance().requestSoftClose();
+        return;
+    }
 
     ScreenId targetRoot = getRootScreenForSection(targetSection);
     if (m_currentScreenId == targetRoot) {

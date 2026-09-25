@@ -1,0 +1,45 @@
+<rml>
+<head>
+    <link type="text/rcss" href="closed.rcss"/>
+</head>
+<body id="closed-body">
+    <!--
+      Safe-to-close. The last frame EVO presents before it parks (see
+      Application::requestSoftClose): everything is released, input is gone,
+      and this stays on the panel until EVO is closed from the switcher.
+      Colours are the active theme's, applied in EvoRmlApp::RenderClosed.
+    -->
+    <div id="closed-glow"></div>
+
+    <div id="closed-card">
+        <div id="closed-mark">
+            <img id="closed-logo" src="../icons/icon_logo.png"/>
+            <div id="closed-power-badge">
+                <img id="closed-power" src="../icons/icon_power.png"/>
+            </div>
+        </div>
+
+        <div id="closed-eyebrow">EVO PLAYER</div>
+        <div id="closed-title">Safe to close</div>
+        <div id="closed-accent"></div>
+        <div id="closed-message">Playback, decoders and the GPU have all been released. EVO is idle now and no longer responds to the controller.</div>
+
+        <div id="closed-steps">
+            <div class="closed-step">
+                <div class="closed-step-num" id="closed-num-1">1</div>
+                <div class="closed-step-text">Press the <span class="closed-key">PS</span> button</div>
+            </div>
+            <div class="closed-step">
+                <div class="closed-step-num" id="closed-num-2">2</div>
+                <div class="closed-step-text">Highlight <span class="closed-strong">EVO</span> and press <span class="closed-key">OPTIONS</span></div>
+            </div>
+            <div class="closed-step">
+                <div class="closed-step-num" id="closed-num-3">3</div>
+                <div class="closed-step-text">Choose <span class="closed-strong">Close</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="closed-footer">EVO PLAYER</div>
+</body>
+</rml>

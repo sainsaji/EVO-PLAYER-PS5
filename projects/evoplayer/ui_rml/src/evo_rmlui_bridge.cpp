@@ -454,6 +454,10 @@ void evo_rmlui_render_about(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderAbout(framebuffer, width, height);
 }
 
+void evo_rmlui_render_closed(uint32_t* framebuffer, int width, int height) {
+    EvoRmlApp::Instance().RenderClosed(framebuffer, width, height);
+}
+
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     if (!p) return;
     EvoSubtitlesState state;

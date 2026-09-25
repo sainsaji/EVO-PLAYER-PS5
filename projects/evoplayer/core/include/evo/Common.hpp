@@ -54,7 +54,8 @@ enum class ScreenId : int {
     SurroundTest = 28,
     ThemeSelect = 29,
     ImageViewer = 30,
-    AudioTrackPicker = 31
+    AudioTrackPicker = 31,
+    SafeToClose = 32     /* the frame EVO parks on after QUIT (SafeToCloseScreen) */
 };
 
 // Playback Quality Profile

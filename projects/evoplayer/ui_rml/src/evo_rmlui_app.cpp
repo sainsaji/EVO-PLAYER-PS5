@@ -218,6 +218,7 @@ void EvoRmlApp::ShowOnlyScreen(Rml::ElementDocument* keep)
         m_launch_doc, m_list_doc, m_browser_doc, m_changelog_doc, m_reader_doc,
         m_image_doc, m_surround_doc, m_playback_doc, m_dialog_doc,
         m_settings_doc, m_about_doc, m_subtitles_doc, m_mediainfo_doc,
+        m_closed_doc,
     };
     for (Rml::ElementDocument* doc : screens) {
         if (!doc || doc == keep) continue;
@@ -413,6 +414,10 @@ bool EvoRmlApp::Initialize(int width, int height) {
             m_about_doc = m_context->LoadDocument(p + "about.rml");
             if (m_about_doc) m_about_doc->Hide();
         }
+        if (!m_closed_doc) {
+            m_closed_doc = m_context->LoadDocument(p + "closed.rml");
+            if (m_closed_doc) m_closed_doc->Hide();
+        }
         if (!m_subtitles_doc) {
             m_subtitles_doc = m_context->LoadDocument(p + "subtitles.rml");
             if (m_subtitles_doc) m_subtitles_doc->Hide();
@@ -437,6 +442,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
     if (!m_dialog_doc) fprintf(stderr, "[EVO RmlUi] Failed to load dialog.rml!\n");
     if (!m_settings_doc) fprintf(stderr, "[EVO RmlUi] Failed to load settings.rml!\n");
     if (!m_about_doc) fprintf(stderr, "[EVO RmlUi] Failed to load about.rml!\n");
+    if (!m_closed_doc) fprintf(stderr, "[EVO RmlUi] Failed to load closed.rml!\n");
     if (!m_subtitles_doc) fprintf(stderr, "[EVO RmlUi] Failed to load subtitles.rml!\n");
     if (!m_mediainfo_doc) fprintf(stderr, "[EVO RmlUi] Failed to load mediainfo.rml!\n");
     if (!m_nav_doc) fprintf(stderr, "[EVO RmlUi] Failed to load navbar.rml!\n");
@@ -504,6 +510,11 @@ void EvoRmlApp::Shutdown() {
     if (m_about_doc) {
         m_about_doc->Close();
         m_about_doc = nullptr;
+    }
+
+    if (m_closed_doc) {
+        m_closed_doc->Close();
+        m_closed_doc = nullptr;
     }
 
     if (m_mediainfo_doc) {
@@ -2619,6 +2630,70 @@ void EvoRmlApp::RenderAbout(uint32_t* framebuffer, int width, int height) {
     RenderCachedScreen(7, framebuffer, width, height);
 }
 
+/*
+ * Safe-to-close (closed.rml). No state to diff: it is drawn for a couple of
+ * seconds and then latched by the parked frame loop, so it is simply themed
+ * and rendered each time. Nav rail hidden - there is nowhere left to go.
+ */
+void EvoRmlApp::RenderClosed(uint32_t* framebuffer, int width, int height) {
+    if (!m_initialized || !m_context || !m_closed_doc || !framebuffer) return;
+
+    Rml::ElementDocument* d = m_closed_doc;
+    const std::string accent = to_hex_rgb(m_theme.accent);
+    auto set = [d](const char* id, const char* prop, const std::string& v) {
+        if (Rml::Element* el = d->GetElementById(id)) el->SetProperty(prop, v);
+    };
+
+    if (Rml::Element* body = d->GetElementById("closed-body")) {
+        body->SetProperty("background-color", to_hex_rgb(m_theme.bg_bottom));
+        body->SetProperty("decorator", "vertical-gradient(" + to_hex_rgb(m_theme.bg_top) +
+                                       " " + to_hex_rgb(m_theme.bg_bottom) + ")");
+        body->SetProperty("color", to_hex_rgb(m_theme.text_primary));
+    }
+    /* A faint wash, not accent_soft: at accent_soft's alpha the ellipse
+     * read as a hard-edged shape behind the card rather than a glow. */
+    set("closed-glow", "background-color", accent + "0d");
+    set("closed-card", "background-color", to_hex_rgba(m_theme.surface));
+    set("closed-card", "border-color", to_hex_rgba(m_theme.border));
+    set("closed-power-badge", "background-color", accent);
+    set("closed-power-badge", "border-color", to_hex_rgb(m_theme.bg_bottom));
+    set("closed-eyebrow", "color", accent);
+    set("closed-title", "color", to_hex_rgb(m_theme.text_primary));
+    set("closed-accent", "background-color", accent);
+    set("closed-message", "color", to_hex_rgb(m_theme.text_secondary));
+    set("closed-footer", "color", to_hex_rgb(m_theme.text_muted));
+    if (Rml::Element* el = d->GetElementById("closed-power"))
+        SetImageColor(el, ink_on(m_theme.accent));
+    if (Rml::Element* el = d->GetElementById("closed-footer"))
+        el->SetInnerRML("EVO PLAYER" + (m_version.empty() ? std::string() : "  v" + m_version));
+
+    Rml::ElementList steps, nums, keys, strongs;
+    d->GetElementsByClassName(steps, "closed-step");
+    for (Rml::Element* el : steps) {
+        el->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
+        el->SetProperty("border-color", to_hex_rgba(m_theme.border));
+    }
+    d->GetElementsByClassName(nums, "closed-step-num");
+    for (Rml::Element* el : nums) {
+        el->SetProperty("background-color", accent);
+        el->SetProperty("color", ink_on(m_theme.accent));
+    }
+    d->GetElementsByClassName(keys, "closed-key");
+    for (Rml::Element* el : keys) {
+        el->SetProperty("border-color", to_hex_rgba(m_theme.border));
+        el->SetProperty("color", to_hex_rgb(m_theme.text_primary));
+    }
+    d->GetElementsByClassName(strongs, "closed-strong");
+    for (Rml::Element* el : strongs)
+        el->SetProperty("color", accent);
+
+    m_frame_dirty = true;
+    ShowOnlyScreen(m_closed_doc);
+    if (m_nav_doc) m_nav_doc->Hide();
+
+    RenderCachedScreen(21, framebuffer, width, height);
+}
+
 void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
     if (!m_initialized || !m_subtitles_doc) return;
     if (state == m_last_subtitles && m_theme_generation == m_theme_gen_subtitles) return;
@@ -2883,8 +2958,11 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_gap->SetProperty("display", "none");
     }
 
-    for (int i = 0; i < rail_sections; i++) {
-        const int slot = (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
+    /* One entry past the sections: QUIT EVO, markup slot 5 at the foot of
+     * the rail. It is never the active section, only ever the cursor. */
+    for (int i = 0; i <= rail_sections; i++) {
+        const int slot = (i == rail_sections) ? 5
+                       : (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
         std::string item_id  = "nav-item-" + std::to_string(slot);
         std::string bar_id   = "nav-bar-"  + std::to_string(slot);
         std::string icon_id  = "nav-icon-" + std::to_string(slot);
@@ -2959,8 +3037,9 @@ void EvoRmlApp::UpdateNavState(const EvoNavState& state) {
             el_gap->SetProperty("display", "none");
     }
 
-    for (int i = 0; i < rail_sections; i++) {
-        const int eslot = (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
+    for (int i = 0; i <= rail_sections; i++) {   /* + QUIT EVO, slot 5 */
+        const int eslot = (i == rail_sections) ? 5
+                        : (!EVO_ENABLE_EMBY && i >= 2) ? i + 1 : i;
         std::string exp_id  = "nav-exp-"       + std::to_string(eslot);
         std::string lbl_id  = "nav-exp-label-" + std::to_string(eslot);
         std::string icon_id = "nav-exp-icon-"  + std::to_string(eslot);

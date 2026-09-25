@@ -563,6 +563,9 @@ typedef struct {
 void evo_rmlui_update_about(const evo_rmlui_about_params_t* params);
 void evo_rmlui_render_about(uint32_t* framebuffer, int width, int height);
 
+/* Safe-to-close screen: the frame EVO parks on after QUIT (closed.rml). */
+void evo_rmlui_render_closed(uint32_t* framebuffer, int width, int height);
+
 /* Subtitles Track Selection Modal API */
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* params);
 void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height);

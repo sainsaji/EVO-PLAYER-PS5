@@ -2494,6 +2494,46 @@ int main(int argc, char** argv) {
         evo_rmlui_update_about(&ab);
         evo_rmlui_render_about(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_about_support.bmp", fb.data(), width, height);
+
+        /* Same screen with the rail expanded and the cursor on QUIT EVO, the
+         * entry after the last section, pinned to the foot of the rail. */
+        nav.rail_focused = 1;
+        nav.cursor_index = EVO_ENABLE_EMBY ? 5 : 4;
+        evo_rmlui_update_nav(&nav);
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_render_about(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_nav_quit_focused.bmp", fb.data(), width, height);
+        nav.rail_focused = 0;
+        evo_rmlui_update_nav(&nav);
+    }
+
+    // -------------------------------------------------------------
+    // Safe-to-close: the frame EVO parks on after QUIT EVO
+    // -------------------------------------------------------------
+    {
+        /* A complete theme: the harness's midnight_th above sets only the
+         * accent and surfaces, which leaves every text colour black. These
+         * are EvoThemeColors' MIDNIGHT defaults, the palette on hardware. */
+        evo_rmlui_theme_t full;
+        memset(&full, 0, sizeof(full));
+        full.name = "MIDNIGHT";
+        full.bg_top = 0xFF160D08;
+        full.bg_bottom = 0xFF0A0503;
+        full.surface = 0xF02C1A10;
+        full.surface_sel = 0xFA3A2216;
+        full.border = 0x33B47D5A;
+        full.border_sel = 0xFF00CDFF;
+        full.accent = 0xFF00CDFF;
+        full.accent_soft = 0x3200CDFF;
+        full.accent_alt = 0xFFFFCD00;
+        full.text_primary = 0xFFFFF4EE;
+        full.text_secondary = 0xFFD0B6A3;
+        full.text_muted = 0xFF8C715E;
+        evo_rmlui_set_theme(&full);
+
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_render_closed(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_safe_to_close.bmp", fb.data(), width, height);
     }
 
     render_regression_screens(fb, width, height);

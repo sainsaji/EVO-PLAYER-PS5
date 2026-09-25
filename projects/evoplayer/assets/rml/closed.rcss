@@ -1,0 +1,188 @@
+/* =============================================================================
+ * EVO PLAYER - Safe-to-close screen (closed.rml)
+ *
+ * Structure and spacing only. Every colour below is a fallback for the host
+ * preview: EvoRmlApp::RenderClosed() repaints them from the active theme
+ * (background gradient, accent, surfaces, text), so the screen matches
+ * whichever of the themes is selected.
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-size: 16dp;
+    color: #eef4ff;
+    background-color: #03050a;
+    decorator: vertical-gradient(#080d16 #03050a);
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span {
+    box-sizing: border-box;
+}
+
+/* A wide, faint accent wash behind the card, so the screen is not a flat void */
+#closed-glow {
+    position: absolute;
+    left: 560dp;
+    top: 170dp;
+    width: 800dp;
+    height: 740dp;
+    border-radius: 400dp;
+    background-color: #00cdff14;
+}
+
+#closed-card {
+    position: absolute;
+    left: 610dp;
+    top: 180dp;
+    width: 700dp;
+    padding: 56dp 64dp 52dp 64dp;
+    border-radius: 28dp;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    background-color: #0c1322f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* ---- Logo with a power badge on its corner ---- */
+#closed-mark {
+    position: relative;
+    width: 112dp;
+    height: 112dp;
+    margin-bottom: 28dp;
+}
+
+#closed-logo {
+    width: 112dp;
+    height: 112dp;
+}
+
+#closed-power-badge {
+    position: absolute;
+    left: 76dp;
+    top: 76dp;
+    width: 46dp;
+    height: 46dp;
+    border-radius: 23dp;
+    border-width: 3dp;
+    border-color: #0c1322;
+    background-color: #00cdff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#closed-power {
+    width: 26dp;
+    height: 26dp;
+}
+
+/* ---- Heading ---- */
+#closed-eyebrow {
+    font-size: 17dp;
+    font-weight: bold;
+    letter-spacing: 4dp;
+    color: #00cdff;
+    margin-bottom: 10dp;
+}
+
+#closed-title {
+    font-size: 58dp;
+    font-weight: bold;
+    color: #eef4ff;
+    margin-bottom: 18dp;
+}
+
+#closed-accent {
+    width: 72dp;
+    height: 4dp;
+    border-radius: 2dp;
+    background-color: #00cdff;
+    margin-bottom: 26dp;
+}
+
+#closed-message {
+    width: 560dp;
+    font-size: 21dp;
+    line-height: 32dp;
+    text-align: center;
+    color: #a3b6d0;
+    margin-bottom: 40dp;
+}
+
+/* ---- The three steps ---- */
+#closed-steps {
+    width: 572dp;
+    display: flex;
+    flex-direction: column;
+    gap: 14dp;
+}
+
+.closed-step {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    height: 64dp;
+    padding-left: 18dp;
+    padding-right: 18dp;
+    border-radius: 16dp;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    background-color: #101a2c;
+    gap: 18dp;
+}
+
+.closed-step-num {
+    width: 36dp;
+    height: 36dp;
+    border-radius: 18dp;
+    background-color: #00cdff;
+    color: #03050a;
+    font-size: 19dp;
+    font-weight: bold;
+    /* block + line-height, not flex: a flex box around bare text drew the
+     * circle but no digit in the host preview */
+    display: block;
+    text-align: center;
+    line-height: 36dp;
+}
+
+.closed-step-text {
+    font-size: 21dp;
+    color: #eef4ff;
+}
+
+.closed-key {
+    font-size: 16dp;
+    font-weight: bold;
+    letter-spacing: 1dp;
+    padding: 3dp 10dp 3dp 10dp;
+    border-radius: 7dp;
+    border-width: 1dp;
+    border-color: #5a7db466;
+    background-color: #1a2740;
+    color: #eef4ff;
+}
+
+.closed-strong {
+    font-weight: bold;
+    color: #00cdff;
+}
+
+#closed-footer {
+    position: absolute;
+    left: 0;
+    top: 996dp;
+    width: 1920dp;
+    text-align: center;
+    font-size: 17dp;
+    color: #5e718c;
+}

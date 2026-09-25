@@ -96,6 +96,8 @@ public:
     bool isRailFocused() const { return m_railFocused; }
     void setRailFocused(bool focused);
     int getRailIndex() const { return m_railIndex; }
+    /* Sections on the rail (4 or 5, Emby); the entry at this index is QUIT. */
+    int railSectionCount() const;
     void setRailIndex(int index) { m_railIndex = index; }
     void stepRail(int delta);
     void activateRail();

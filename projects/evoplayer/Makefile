@@ -182,6 +182,7 @@ CORE_SRCS := \
     core/src/screens/RecentFilesScreen.cpp \
     core/src/screens/FavoritesScreen.cpp \
     core/src/screens/AboutSupportScreen.cpp \
+    core/src/screens/SafeToCloseScreen.cpp \
     core/src/screens/ChangelogScreen.cpp \
     core/src/screens/ImageViewerScreen.cpp \
     core/src/screens/ModalDialogScreen.cpp \
