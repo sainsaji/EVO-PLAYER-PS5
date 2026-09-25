@@ -8,6 +8,8 @@
 #include "evo_feedback.h"
 #include "evo_keyboard.h"
 #include "evo_toast.h"
+#include "evo_webui.h"      /* #101: web-UI providers open in the system browser */
+#include "evo_nav.h"        /* EVO_SECTION_EMBY - the rail slot the chooser lights */
 
 extern "C" {
 #include "evo_provider.h"
@@ -31,6 +33,28 @@ namespace {
 /* Set by the launch tile / rail before navigating here. Empty means "whichever
  * provider is enabled", which is what the single shared rail slot does. */
 std::string g_pendingProvider;
+
+/* #101: what the chooser lists - every provider that is set up, plus every one
+ * that can be set up from it. With one entry the rail slot goes straight in;
+ * with more it shows the chooser, which is also the only place a second
+ * provider can get its source (hardware, 2026-09-26: with just IPTV set up the
+ * slot went straight to IPTV and Emby could never be reached). */
+bool is_pickable(const evo_provider_t* p)
+{
+    return p && (evo_provider_is_enabled(p->id) || (p->caps & EVO_PROVIDER_CAP_CONFIG));
+}
+
+int pickable_count(std::string* only)
+{
+    int n = 0;
+    for (int i = 0; i < evo_provider_count(); ++i) {
+        const evo_provider_t* p = evo_provider_at(i);
+        if (!is_pickable(p)) continue;
+        ++n;
+        if (only) *only = p->id;
+    }
+    return n;
+}
 
 /*
  * The resolve callback's state.
@@ -151,44 +175,52 @@ void ProviderHostScreen::onEnter()
     evo_rmlui_provider_set_tuning(0);
     evo_rmlui_provider_set_loading(0, "");
 
-    std::string want = g_pendingProvider;
-    if (want.empty()) {
-        /*
-         * No explicit choice: the first enabled provider. With one rail slot
-         * shared by all of them this is what the slot means, and a provider
-         * picker is a separate screen for when there is more than one set up.
-         */
-        for (int i = 0; i < evo_provider_count(); ++i) {
-            const evo_provider_t* p = evo_provider_at(i);
-            if (p && evo_provider_is_enabled(p->id)) { want = p->id; break; }
-        }
-    }
-
-    if (want.empty()) {
-        /*
-         * Nothing enabled. Rather than bounce the user to Settings - which has
-         * no provider setup in it - open the first provider that CAN be
-         * configured from here. Its screen shows the "not set up yet" status
-         * and Triangle opens the keyboard, so the dead end becomes the setup
-         * entry point.
-         */
-        for (int i = 0; i < evo_provider_count(); ++i) {
-            const evo_provider_t* p = evo_provider_at(i);
-            if (p && (p->caps & EVO_PROVIDER_CAP_CONFIG)) { want = p->id; break; }
-        }
-    }
-
-    if (want.empty()) {
-        /* No provider can even be configured. Not an error - it is the state a
-         * build with every provider compiled out is in. */
-        toast("PROVIDERS", "No provider is set up yet");
-        if (auto sm = Application::getInstance().getScreenManager())
-            sm->navigateTo(ScreenId::Settings);
+    /* #101: back from a stream a web page handed over. The page reopens by
+     * itself (evo_webui.c); this screen just keeps hosting it. */
+    if (m_web && evo_webui_session_active()) {
+        m_navigatingToPlayer = false;
         return;
     }
 
-    /* Returning from Player playback: keep the active session intact so the user
-     * lands back in the exact folder and on the exact channel card they left. */
+    std::string want = g_pendingProvider;
+    if (want.empty()) {
+        /* Returning from Player playback: keep the active session intact so
+         * the user lands back in the exact folder and on the exact channel
+         * card they left. */
+        if (m_opened && m_navigatingToPlayer) {
+            m_navigatingToPlayer = false;
+            evo_bt("prov_screen: returning from playback, keeping provider '%s' open",
+                   m_providerId.c_str());
+            return;
+        }
+        /* One provider to offer: the rail slot means that provider, as it
+         * always has. Several: the chooser. */
+        std::string only;
+        if (pickable_count(&only) != 1) {
+            enterPicker();
+            return;
+        }
+        want = only;
+    }
+    openProvider(want);
+}
+
+void ProviderHostScreen::openProvider(const std::string& want)
+{
+    m_picking = false;
+    const evo_provider_t* wp = evo_provider_find(want.c_str());
+    if (wp && (wp->caps & EVO_PROVIDER_CAP_WEBUI)) {
+        if (m_opened) {
+            evo_rmlui_provider_close();
+            m_opened = false;
+        }
+        m_providerId = want;
+        openWebProvider();
+        return;
+    }
+    m_web = false;
+
+    /* Returning from Player playback into the same provider: keep it. */
     if (m_opened && m_providerId == want) {
         m_navigatingToPlayer = false;
         evo_bt("prov_screen: returning from playback, keeping provider '%s' open", m_providerId.c_str());
@@ -224,6 +256,183 @@ void ProviderHostScreen::onEnter()
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* #101: web-UI providers                                                    */
+/* ------------------------------------------------------------------------- */
+
+void ProviderHostScreen::openWebProvider()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p || !p->web_ui_url) return;
+    const char* url = p->web_ui_url();
+    if (!url || !url[0]) {
+        /* Not set up yet: ask for the address, and open once it is in. The
+         * chooser sits behind the prompt, so cancelling it is not a blank
+         * screen with no way out. */
+        std::string id = m_providerId;
+        enterPicker();
+        m_providerId = id;
+        openSourceEditor();
+        return;
+    }
+    int rc = evo_webui_open(url, "/web/index.html");
+    evo_bt("prov_screen: web UI '%s' -> %s rc=%d", p->id, url, rc);
+    if (rc < 0) {
+        toast(p->name, "Set the server as http(s)://<host>:<port>");
+        enterPicker();
+        return;
+    }
+    m_web = true;
+    m_webSeen = false;
+}
+
+/* ------------------------------------------------------------------------- */
+/* #101: the chooser                                                         */
+/* ------------------------------------------------------------------------- */
+
+void ProviderHostScreen::enterPicker()
+{
+    if (m_opened) {
+        evo_rmlui_provider_close();
+        m_opened = false;
+    }
+    m_web = false;
+    m_webSeen = false;
+    m_pickIds.clear();
+    m_pickDetail.clear();
+
+    /* Every provider that is set up, plus every one that can be set up from
+     * here - so the chooser is also where a new provider gets its source. */
+    for (int i = 0; i < evo_provider_count(); ++i) {
+        const evo_provider_t* p = evo_provider_at(i);
+        if (!is_pickable(p)) continue;
+
+        std::string detail;
+        if (!p->is_configured()) {
+            detail = (p->caps & EVO_PROVIDER_CAP_WEBUI)
+                   ? "Not set up - press X to enter the server address"
+                   : "Not set up - press X to add a playlist";
+        } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+            /* An address carries no secret; a playlist URL can (Xtream user and
+             * password), so only the web kind shows its source. */
+            const char* src = p->get_source ? p->get_source() : "";
+            detail = std::string("Web UI - ") + (src ? src : "");
+        } else {
+            detail = "Ready";
+        }
+        m_pickIds.push_back(p->id);
+        m_pickDetail.push_back(detail);
+    }
+
+    if (m_pickIds.empty()) {
+        /* No provider can even be configured. Not an error - it is the state a
+         * build with every provider compiled out is in. */
+        toast("PROVIDERS", "No provider is set up yet");
+        if (auto sm = Application::getInstance().getScreenManager())
+            sm->navigateTo(ScreenId::Settings);
+        return;
+    }
+    if (m_pickIndex < 0 || m_pickIndex >= (int)m_pickIds.size())
+        m_pickIndex = 0;
+    m_picking = true;
+}
+
+void ProviderHostScreen::choosePicked(bool editSource)
+{
+    if (m_pickIndex < 0 || m_pickIndex >= (int)m_pickIds.size()) return;
+    const std::string id = m_pickIds[m_pickIndex];
+    const evo_provider_t* p = evo_provider_find(id.c_str());
+    if (!p) return;
+
+    m_providerId = id;
+    bool configured = p->is_configured() != 0;
+    if (editSource || !configured) {
+        if (!(p->caps & EVO_PROVIDER_CAP_CONFIG)) {
+            toast(p->name, "Nothing to set up here");
+            return;
+        }
+        evo_feedback(EVO_FB_OPEN);
+        if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+            openSourceEditor();     /* the address; opens the web UI once set */
+            return;
+        }
+        /* A bundle provider has its own setup page (IPTV: type a URL, or pick
+         * an .m3u from USB) - open the provider and go straight to it rather
+         * than to a bare keyboard. */
+        openProvider(id);
+        if (m_opened)
+            evo_rmlui_provider_show_setup();
+        return;
+    }
+    /* Configured but switched off (a flag saved before it had a source):
+     * choosing it is the user asking for it. */
+    if (!evo_provider_is_enabled(p->id))
+        evo_provider_set_enabled(p->id, 1);
+    evo_feedback(EVO_FB_CONFIRM);
+    openProvider(id);
+}
+
+void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int height)
+{
+    evo_rmlui_list_params_t params;
+    std::memset(&params, 0, sizeof(params));
+
+    bool railFocused = false;
+    if (auto sm = Application::getInstance().getScreenManager())
+        railFocused = sm->isRailFocused();
+
+    params.section = EVO_SECTION_EMBY;
+    params.rail_focused = railFocused ? 1 : 0;
+
+    if (m_web) {
+        /* Behind the browser, which covers everything right of the rail. */
+        const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+        params.title = p ? p->name : "PROVIDER";
+        params.subtitle = "Opening the web UI";
+        params.is_empty = 1;
+        params.empty_title = "Opening...";
+        params.empty_hint = "The page opens beside the menu. Close it to come back here.";
+        params.empty_icon = "../icons/icon_emby.png";
+        evo_rmlui_update_list(&params);
+        evo_rmlui_render_list(framebuffer, width, height);
+        return;
+    }
+
+    params.title = "PROVIDERS";
+    params.subtitle = "Choose where to watch from";
+    int total = (int)m_pickIds.size();
+    params.total_count = total;
+    params.cursor_index = total ? m_pickIndex : -1;
+    int rows = std::min(EVO_RMLUI_LIST_ROWS, total);
+    params.row_count = rows;
+    for (int i = 0; i < rows; ++i) {
+        const evo_provider_t* p = evo_provider_find(m_pickIds[i].c_str());
+        bool web = p && (p->caps & EVO_PROVIDER_CAP_WEBUI);
+        params.rows[i].title = p ? p->name : m_pickIds[i].c_str();
+        params.rows[i].detail = m_pickDetail[i].c_str();
+        params.rows[i].icon_path = web ? "../icons/icon_emby.png" : "../icons/icon_folder.png";
+        params.rows[i].badge = web ? "WEB"
+                             : (p && (p->caps & EVO_PROVIDER_CAP_LIVE)) ? "LIVE" : "";
+        params.rows[i].progress = -1;
+        params.rows[i].has_chevron = 1;
+        params.rows[i].is_focused = (!railFocused && i == m_pickIndex);
+    }
+
+    const evo_provider_t* fp = (m_pickIndex >= 0 && m_pickIndex < total)
+                             ? evo_provider_find(m_pickIds[m_pickIndex].c_str()) : nullptr;
+    params.hint_count = 3;
+    params.hints[0].glyph_path = "../icons/btn_cross.png";
+    params.hints[0].label = "OPEN";
+    params.hints[1].glyph_path = "../icons/btn_square.png";
+    params.hints[1].label = (fp && (fp->caps & EVO_PROVIDER_CAP_WEBUI)) ? "EDIT ADDRESS"
+                                                                         : "EDIT PLAYLIST";
+    params.hints[2].glyph_path = "../icons/btn_circle.png";
+    params.hints[2].label = "BACK";
+
+    evo_rmlui_update_list(&params);
+    evo_rmlui_render_list(framebuffer, width, height);
+}
+
 void ProviderHostScreen::onExit()
 {
     if (g_start_running) {
@@ -239,6 +448,11 @@ void ProviderHostScreen::onExit()
         m_opened = false;
     }
     m_resolving = false;
+    m_picking = false;
+    if (m_web && !evo_webui_session_active()) {
+        m_web = false;
+        m_webSeen = false;
+    }
     StatefulScreen::onExit();
 }
 
@@ -246,6 +460,34 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
 {
     (void)held;
     (void)released;
+
+    if (m_picking) {
+        auto psm = Application::getInstance().getScreenManager();
+        if (psm && psm->isRailFocused()) return false;
+        int n = (int)m_pickIds.size();
+        if (pressed & PadButtons::Up) {
+            if (m_pickIndex > 0) { --m_pickIndex; evo_feedback(EVO_FB_MOVE); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            if (m_pickIndex + 1 < n) { ++m_pickIndex; evo_feedback(EVO_FB_MOVE); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & PadButtons::Left) {
+            if (psm) { psm->setRailFocused(true); return true; }
+            return false;
+        }
+        if (pressed & PadButtons::Cross)   { choosePicked(false); return true; }
+        if (pressed & PadButtons::Square)  { choosePicked(true);  return true; }
+        if (pressed & PadButtons::Circle) {
+            evo_feedback(EVO_FB_CANCEL);
+            if (psm) psm->navigateTo(ScreenId::MainMenu);
+            return true;
+        }
+        return false;
+    }
     if (!m_opened) return false;
 
     auto sm = Application::getInstance().getScreenManager();
@@ -382,8 +624,20 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
         value = value.substr(b, e - b + 1);
     }
 
+    bool web = (p->caps & EVO_PROVIDER_CAP_WEBUI) != 0;
     if (p->set_source(value.c_str()) != 0) {
-        toast("PROVIDERS", "That does not look like an M3U URL");
+        toast(p->name, web ? "Use http(s)://<host>:<port>"
+                           : "That does not look like an M3U URL");
+        return;
+    }
+
+    /* Persisted by the provider. Enable it now that it has a source. */
+    evo_provider_set_enabled(p->id, p->is_configured() ? 1 : 0);
+    self->m_picking = false;
+    if (web) {
+        /* #101: a web-UI provider opens straight away on its new address. */
+        toast(p->name, "Server saved");
+        self->openWebProvider();
         return;
     }
 
@@ -391,9 +645,7 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
         self->m_lastTypedUrl = value;
     }
 
-    /* Persisted by the provider. Enable it now that it has a source, then
-     * reopen the host so the catalog is re-fetched from the new one. */
-    evo_provider_set_enabled(p->id, p->is_configured() ? 1 : 0);
+    /* Reopen the host so the catalog is re-fetched from the new source. */
     toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
 
     std::string id = self->m_providerId;
@@ -417,12 +669,17 @@ void ProviderHostScreen::openSourceEditor()
     std::string initial;
     if (current && (std::strncmp(current, "http://", 7) == 0 || std::strncmp(current, "https://", 8) == 0)) {
         initial = current;
+    } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+        initial = "http://";
     } else if (!m_lastTypedUrl.empty()) {
         initial = m_lastTypedUrl;
     }
 
     char title[96];
-    std::snprintf(title, sizeof title, "%s playlist URL (clear to reset)", p->name);
+    if (p->caps & EVO_PROVIDER_CAP_WEBUI)
+        std::snprintf(title, sizeof title, "%s server (http(s)://host:port)", p->name);
+    else
+        std::snprintf(title, sizeof title, "%s playlist URL (clear to reset)", p->name);
 
     evo_feedback(EVO_FB_OPEN);
     /* EVO_PROVIDER_MAX_URL is 2048, but a keyboard field that long is not
@@ -590,6 +847,24 @@ void ProviderHostScreen::startSelected()
 void ProviderHostScreen::update(double deltaMs)
 {
     StatefulScreen::update(deltaMs);
+
+    /* #101: the web UI's session ended when the user closed the browser (a
+     * handed-over stream keeps it alive). Back to the chooser, or out when
+     * this is the only provider. */
+    if (m_web) {
+        if (evo_webui_session_active()) {
+            m_webSeen = true;
+        } else if (m_webSeen) {
+            m_web = false;
+            m_webSeen = false;
+            if (pickable_count(nullptr) > 1) {
+                enterPicker();
+            } else if (auto sm = Application::getInstance().getScreenManager()) {
+                sm->navigateTo(ScreenId::MainMenu);
+            }
+        }
+        return;
+    }
     if (!m_opened) return;
 
     /* Bundle refresh, artwork decode, and any catalog reply that landed. */
@@ -641,6 +916,10 @@ void ProviderHostScreen::update(double deltaMs)
 
 void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
 {
+    if (m_picking || m_web) {
+        renderPicker(framebuffer, width, height);
+        return;
+    }
     if (!m_opened) return;
     evo_rmlui_provider_render(framebuffer, width, height);
     /* The rail is a document in the MAIN context, so it does not come with the

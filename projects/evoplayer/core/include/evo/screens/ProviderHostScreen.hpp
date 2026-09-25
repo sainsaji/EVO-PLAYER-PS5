@@ -52,6 +52,22 @@ private:
     void startSelected();
 
     /*
+     * #101: the rail slot is shared by every provider. With exactly one set
+     * up it goes straight in, as before; otherwise onEnter() shows this
+     * chooser first (drawn with the generic list document). X opens a
+     * provider - or its source editor, when it has no source yet - and
+     * SQUARE edits the source of the highlighted one.
+     */
+    void enterPicker();
+    void choosePicked(bool editSource);
+    void renderPicker(uint32_t* framebuffer, int width, int height);
+
+    /* Open `id`: an RmlUi bundle for most providers, the system browser for
+     * one with EVO_PROVIDER_CAP_WEBUI (openWebProvider). */
+    void openProvider(const std::string& id);
+    void openWebProvider();
+
+    /*
      * Open the virtual keyboard on the hosted provider's source string - an
      * M3U URL for IPTV - and hand whatever comes back to set_source().
      *
@@ -97,6 +113,18 @@ private:
      * display before startPlaybackSource() blocks the thread on network I/O. */
     bool m_tunePending = false;
     int  m_tuneFrames = 0;
+
+    /* #101: the chooser (see enterPicker). */
+    bool m_picking = false;
+    int  m_pickIndex = 0;
+    std::vector<std::string> m_pickIds;
+    std::vector<std::string> m_pickDetail;
+
+    /* #101: hosting a web-UI provider. The browser is a system overlay, so
+     * m_opened (the RmlUi host) stays false; m_webSeen notes that the session
+     * really started, so its end can be told from "not open yet". */
+    bool m_web = false;
+    bool m_webSeen = false;
 };
 
 } // namespace evo

@@ -31,6 +31,8 @@
 #include "evo_agc_runtime.h"
 #include "evo_toast.h"
 #include <chrono>
+#include <atomic>
+#include <pthread.h>
 extern "C" void evo_log_alloc_state(const char *when);  /* PlaybackController.cpp */
 
 /* Defined in Bridge.cpp and read by every FPS readout in the app, but
@@ -52,6 +54,7 @@ extern "C" int perf_render_fps;
 #include "evo_input.h"
 #include "evo_net.h"
 #include "evo_usb_remote.h"
+#include "evo_webui.h"
 /* #90: providers are reached through the vtable registry, never by name.
  * addon_emby.h is gone from here - provider_emby.c is the only thing that
  * includes it now. */
@@ -300,6 +303,9 @@ bool Application::initHardware() {
         evo_agc_runtime_present();
     }
     evo_keyboard_ime_probe();
+    /* #101: the system browser (evo_webui.c). Same pre-unjail rule as the
+     * IME - the dialog's sysmodule load fails after the credential swap. */
+    evo_webui_preload();
     evo_boot_log_flush();
 #endif
 
@@ -484,6 +490,9 @@ void Application::shutdown() {
     evo_boot_log("shutdown: media stopped");
     evo_boot_log_flush();
 
+    /* #101: the web UI's proxy threads and the browser subsystem. */
+    evo_webui_shutdown();
+
     /*
      * #90: providers down before RmlUi.
      *
@@ -524,6 +533,85 @@ void Application::shutdown() {
 }
 
 namespace {
+
+#if defined(EVO_APP_MODULE)
+/*
+ * #101: a page in the system browser handed a stream over (evo_webui.c).
+ * Play it the way ProviderHostScreen does - startPlaybackSource() blocks on
+ * network I/O, so it runs on a worker and the Player screen follows once it
+ * has started - then tell the probe when playback is over so it can reopen
+ * the page.
+ */
+PlaybackSource g_web_src;
+pthread_t g_web_thread;
+std::atomic<bool> g_web_done{false};
+std::atomic<bool> g_web_ok{false};
+
+void* web_start_worker(void*) {
+    IPlaybackController* pb = Application::getInstance().getPlaybackController();
+    g_web_ok = pb && pb->startPlaybackSource(g_web_src, 0.0);
+    g_web_done = true;
+    return nullptr;
+}
+
+void webui_playback_pump() {
+    static int phase = 0;           /* 0 idle, 1 starting, 2 playing */
+    static int frames = 0;
+    static bool seen_active = false;
+    Application& app = Application::getInstance();
+
+    if (phase == 0) {
+        char url[2048], title[256];
+        if (!evo_webui_take_play(url, sizeof url, title, sizeof title))
+            return;
+        g_web_src = PlaybackSource();
+        g_web_src.url = url;
+        g_web_src.title = title[0] ? title : "Web";
+        g_web_src.provider = "web";
+        g_web_done = false;
+        g_web_ok = false;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+        int rc = pthread_create(&g_web_thread, &attr, web_start_worker, nullptr);
+        pthread_attr_destroy(&attr);
+        if (rc != 0) {
+            evo_bt("web: playback worker pthread_create rc=%d", rc);
+            evo_webui_playback_ended(0);
+            return;
+        }
+        phase = 1;
+    } else if (phase == 1) {
+        if (!g_web_done)
+            return;
+        pthread_join(g_web_thread, nullptr);
+        evo_bt("web: startPlaybackSource -> %s", g_web_ok ? "ok" : "failed");
+        evo_boot_log_flush();
+        if (!g_web_ok) {
+            toast("STREAM", "The web page's stream would not open");
+            evo_webui_playback_ended(0);
+            phase = 0;
+            return;
+        }
+        if (auto sm = app.getScreenManager())
+            sm->navigateTo(ScreenId::Player);
+        phase = 2;
+        frames = 0;
+        seen_active = false;
+    } else {
+        IPlaybackController* pb = app.getPlaybackController();
+        bool active = pb && pb->isActive();
+        if (active)
+            seen_active = true;
+        if ((seen_active && !active) || (!seen_active && ++frames > 600)) {
+            evo_webui_playback_ended(seen_active ? 1 : 0);
+            phase = 0;
+        }
+    }
+}
+#else
+void webui_playback_pump() {}
+#endif
 
 #ifdef EVO_APP_MODULE
 /*
@@ -727,6 +815,8 @@ int Application::run() {
          * what turns that into a main-thread callback for the screen. */
         evo_bundle_poll();
         evo_usb_remote_poll();
+        evo_webui_pump();   /* #101: the system browser, when a web UI is open */
+        webui_playback_pump();
 
         if ((frame & 63) == 0) {
             evo_boot_log_flush();
@@ -845,7 +935,9 @@ int Application::run() {
                 pressed &= ~(PadButtons::L3 | PadButtons::R3);
             }
 
-            if (evo_keyboard_is_open()) {
+            if (evo_webui_active()) {
+                /* #101: the system browser is up and owns the controller. */
+            } else if (evo_keyboard_is_open()) {
                 evo_keyboard_update();
                 if (pressed) {
                     evo_keyboard_handle_input(pressed);

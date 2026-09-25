@@ -267,10 +267,9 @@ static void emby_provider_shutdown(void) { /* addon_emby holds no resources */ }
 static int emby_provider_is_configured(void)
 {
     emby_config_t *c = emby_get_config();
-    /* A host plus either a live token or a username to authenticate with.
-     * Host alone is not configured - that is the state the removed LAN-literal
-     * default used to fake. */
-    return c->host[0] && (c->token[0] || c->username[0]) ? 1 : 0;
+    /* A host is enough since #101: the UI is Emby's own web client, which
+     * signs the user in itself, so EVO needs no credentials to open it. */
+    return c->host[0] ? 1 : 0;
 }
 
 typedef struct {
@@ -316,13 +315,52 @@ static void emby_provider_progress(const char *item_id, int64_t pos_sec,
  */
 static const char *emby_provider_ui_bundle_url(void) { return NULL; }
 
+/* ------------------------------------------------------------------------- */
+/* Source + web UI (#101)                                                    */
+/* ------------------------------------------------------------------------- */
+/*
+ * The source string is the server's address, http[s]://<host>:<port>. It is
+ * also exactly what the web UI needs: the provider screen opens Emby's own web
+ * client from it in the system browser, which evo_webui.c reverse-proxies on
+ * loopback so a Play in Emby lands in EVO's player. use_https is the scheme,
+ * and it already applies to the REST client and the stream URLs too.
+ */
+static char g_source[160];
+
+static const char *emby_provider_get_source(void)
+{
+    emby_config_t *c = emby_get_config();
+    if (!c->host[0]) return "";
+    snprintf(g_source, sizeof g_source, "%s://%s:%d", c->use_https ? "https" : "http",
+             c->host, c->port > 0 ? c->port : 8096);
+    return g_source;
+}
+
+static int emby_provider_set_source(const char *value)
+{
+    char host[128];
+    int port = 8096, tls = 0;
+    if (evo_provider_parse_web_source(value, host, sizeof host, &port, &tls, 8096) != 0)
+        return -1;
+    emby_config_t *c = emby_get_config();
+    emby_set_server(host, port, NULL, NULL);
+    c->use_https = tls ? true : false;
+    return emby_save_config();
+}
+
+static const char *emby_provider_web_ui_url(void)
+{
+    return emby_provider_get_source();
+}
+
 const evo_provider_t evo_provider_emby = {
     .id            = "emby",
     .name          = "Emby",
     .icon          = "icon_emby.png",
     .caps          = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                      EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_PROGRESS |
-                     EVO_PROVIDER_CAP_AUTH    | EVO_PROVIDER_CAP_UI,
+                     EVO_PROVIDER_CAP_AUTH    | EVO_PROVIDER_CAP_UI |
+                     EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_WEBUI,
     .api_version   = EVO_PROVIDER_API_VERSION,
     .init          = emby_provider_init,
     .shutdown      = emby_provider_shutdown,
@@ -333,4 +371,7 @@ const evo_provider_t evo_provider_emby = {
     .resolve       = emby_provider_resolve,
     .report_progress = emby_provider_progress,
     .ui_bundle_url = emby_provider_ui_bundle_url,
+    .get_source    = emby_provider_get_source,
+    .set_source    = emby_provider_set_source,
+    .web_ui_url    = emby_provider_web_ui_url,
 };

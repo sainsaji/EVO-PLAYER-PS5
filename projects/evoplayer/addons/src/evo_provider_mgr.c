@@ -28,6 +28,7 @@
  */
 extern const evo_provider_t evo_provider_iptv;
 extern const evo_provider_t evo_provider_emby;
+extern const evo_provider_t evo_provider_jellyfin;
 
 /*
  * Emby is in the table unconditionally, even while EVO_ENABLE_EMBY is 0.
@@ -41,6 +42,7 @@ extern const evo_provider_t evo_provider_emby;
 static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_iptv,
     &evo_provider_emby,
+    &evo_provider_jellyfin,     /* #101: web UI only */
 };
 
 #define PROVIDER_COUNT ((int)(sizeof(PROVIDERS) / sizeof(PROVIDERS[0])))
@@ -109,6 +111,8 @@ static int vtable_ok(const evo_provider_t *p, const char **why)
                                      *why = "CAP_PROGRESS no report_progress"; return 0; }
     if ((p->caps & EVO_PROVIDER_CAP_UI)       && !p->ui_bundle_url) {
                                      *why = "CAP_UI no ui_bundle_url"; return 0; }
+    if ((p->caps & EVO_PROVIDER_CAP_WEBUI)    && !p->web_ui_url) {
+                                     *why = "CAP_WEBUI no web_ui_url"; return 0; }
     if ((p->caps & EVO_PROVIDER_CAP_CONFIG)  && (!p->get_source || !p->set_source)) {
                                      *why = "CAP_CONFIG no get/set_source"; return 0; }
 
@@ -287,6 +291,36 @@ void evo_provider_set_enabled(const char *id, int enabled)
 /* ------------------------------------------------------------------------- */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------- */
+
+int evo_provider_parse_web_source(const char *value, char *host, size_t host_cap,
+                                  int *port, int *tls, int default_port)
+{
+    if (!value || !host || host_cap == 0 || !port || !tls) return -1;
+    while (*value == ' ') value++;
+    int https = 0;
+    if (!strncmp(value, "https://", 8))     { https = 1; value += 8; }
+    else if (!strncmp(value, "http://", 7)) { value += 7; }
+    size_t n = strcspn(value, ":/?# ");
+    if (n == 0 || n >= host_cap) return -1;
+    for (size_t i = 0; i < n; ++i) {                    /* a hostname or an IPv4 */
+        char c = value[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '-'))
+            return -1;
+    }
+    int p = https ? 443 : default_port;
+    if (value[n] == ':') {
+        p = 0;
+        for (const char *c = value + n + 1; *c >= '0' && *c <= '9'; ++c)
+            p = p * 10 + (*c - '0');
+        if (p <= 0 || p > 65535) return -1;
+    }
+    memcpy(host, value, n);
+    host[n] = 0;
+    *port = p;
+    *tls = https;
+    return 0;
+}
 
 void evo_provider_item_clear(evo_provider_item_t *it)
 {
