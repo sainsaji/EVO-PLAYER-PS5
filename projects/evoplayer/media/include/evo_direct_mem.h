@@ -86,6 +86,13 @@ void evo_direct_mem_get_stats(evo_direct_mem_stats_t *out_stats);
  */
 void evo_mem_budget_log(const char *when);
 
+/*
+ * Boot probe: allocate direct memory (type 11) step_bytes at a time up to
+ * max_bytes or the first refusal, touch and verify every page, log each step,
+ * release it all. Behind /mnt/usb0/evo_dm_probe - see Application.cpp.
+ */
+void evo_direct_mem_probe(size_t step_bytes, size_t max_bytes);
+
 #ifdef __cplusplus
 }
 #endif

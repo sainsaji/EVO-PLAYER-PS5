@@ -311,6 +311,21 @@ bool Application::initHardware() {
     /* The baseline, before anything has been decoded or drawn. Every later
      * figure is only meaningful against this one. */
     evo_mem_budget_log("boot");
+    /* Follow-up to #94: how much of the ~11 GB of direct memory EVO can really
+     * take, measured after the GPU runtime and resident decoders hold theirs.
+     * The trigger file's content is the ceiling in MB (default 8192). */
+    {
+        FILE *pf = std::fopen("/mnt/usb0/evo_dm_probe", "r");
+        if (pf) {
+            long max_mb = 0;
+            if (std::fscanf(pf, "%ld", &max_mb) != 1 || max_mb <= 0)
+                max_mb = 8192;
+            std::fclose(pf);
+            evo_direct_mem_probe(static_cast<size_t>(256) << 20,
+                                 static_cast<size_t>(max_mb) << 20);
+            evo_boot_log_flush();
+        }
+    }
     EnsureDataDirectories();
     evo_crash_note_init();
 

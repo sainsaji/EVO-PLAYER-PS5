@@ -34,6 +34,9 @@ extern int     sceKernelAvailableDirectMemorySize(int64_t searchStart,
                                                   size_t *sizeOut);
 extern int     sceKernelAvailableFlexibleMemorySize(size_t *outSize);
 extern int     sceKernelConfiguredFlexibleMemorySize(size_t *outSize);
+extern int     sceKernelMunmap(void *addr, size_t len);
+#include <stdint.h>
+#include <time.h>
 #endif
 
 /* evo_boot_log(): the one sink that reaches /mnt/usb0/evo.log AND klog. */
@@ -345,5 +348,109 @@ void evo_mem_budget_log(const char *when)
             st.allocated_bytes / (1024 * 1024),
             st.total_bytes / (1024 * 1024),
             st.peak_bytes / (1024 * 1024));
+#endif
+}
+
+/*
+ * How much direct memory can EVO actually take? (follow-up to #94)
+ *
+ * The kernel reports ~11 GB free, but a number reported is not a number
+ * usable: the GPU runtime, VideoOut and the resident hardware decoders already
+ * hold their share, and a larger type-3 pool once "wedged" 4K present. So this
+ * takes it for real - step_bytes at a time, type 11 (cached, CPU read/write,
+ * the type the malloc shim's fallback uses), writing one byte per 16 KiB page
+ * and reading it back - until max_bytes or the first refusal, logging every
+ * step, then gives all of it back. Nothing else runs meanwhile; it is a boot
+ * probe behind a trigger file, never a normal-boot path.
+ */
+void evo_direct_mem_probe(size_t step_bytes, size_t max_bytes)
+{
+#if defined(EVO_TARGET_PS5)
+    enum { MAX_CHUNKS = 128 };
+    const size_t align = 64u * 1024u;
+    off_t  phys[MAX_CHUNKS];
+    void  *va[MAX_CHUNKS];
+    int    n = 0;
+    size_t total = 0;
+    int64_t dm_size = sceKernelGetDirectMemorySize();
+
+    if (step_bytes < align || dm_size <= 0) {
+        evo_boot_log("dm probe: not run (step=%zu dm_size=%lld)",
+                     step_bytes, (long long)dm_size);
+        return;
+    }
+    step_bytes &= ~(align - 1u);
+    evo_boot_log("dm probe: begin step=%zuMB max=%zuMB",
+                 step_bytes >> 20, max_bytes >> 20);
+
+    while (n < MAX_CHUNKS && total + step_bytes <= max_bytes) {
+        struct timespec t0, t1, t2, t3;
+        off_t pa = 0;
+        void *p = NULL;
+
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        int r = sceKernelAllocateDirectMemory(0, (off_t)dm_size, step_bytes,
+                                              align, 11, &pa);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        if (r != 0) {
+            evo_boot_log("dm probe: STOP at %zuMB - allocate refused rc=0x%x",
+                         total >> 20, (unsigned)r);
+            break;
+        }
+        r = sceKernelMapDirectMemory(&p, step_bytes, 0x03, 0, pa, align);
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        if (r != 0 || !p) {
+            sceKernelReleaseDirectMemory(pa, step_bytes);
+            evo_boot_log("dm probe: STOP at %zuMB - map refused rc=0x%x",
+                         total >> 20, (unsigned)r);
+            break;
+        }
+
+        volatile uint8_t *b = (volatile uint8_t *)p;
+        const uint8_t tag = (uint8_t)(0x5a ^ n);
+        for (size_t off = 0; off < step_bytes; off += 16384u)
+            b[off] = tag;
+        b[step_bytes - 1u] = tag;
+        int bad = 0;
+        for (size_t off = 0; off < step_bytes; off += 16384u)
+            if (b[off] != tag) { bad = 1; break; }
+        if (b[step_bytes - 1u] != tag) bad = 1;
+        clock_gettime(CLOCK_MONOTONIC, &t3);
+
+        phys[n] = pa;
+        va[n] = p;
+        n++;
+        total += step_bytes;
+
+        int64_t fphys = 0;
+        size_t  favail = 0, flex = 0;
+        long long largest = -1, flex_mb = -1;
+        if (sceKernelAvailableDirectMemorySize(0, dm_size, 2u * 1024u * 1024u,
+                                               &fphys, &favail) == 0)
+            largest = (long long)(favail >> 20);
+        if (sceKernelAvailableFlexibleMemorySize(&flex) == 0)
+            flex_mb = (long long)(flex >> 20);
+
+#define PROBE_US(a, b) ((long long)(((b).tv_sec - (a).tv_sec) * 1000000LL + \
+                        ((b).tv_nsec - (a).tv_nsec) / 1000))
+        evo_boot_log("dm probe: +%d total=%zuMB alloc_us=%lld map_us=%lld "
+                     "touch_us=%lld verify=%s largest_free=%lldMB flex_free=%lldMB",
+                     n, total >> 20, PROBE_US(t0, t1), PROBE_US(t1, t2),
+                     PROBE_US(t2, t3), bad ? "BAD" : "ok", largest, flex_mb);
+#undef PROBE_US
+        if (bad)
+            break;
+    }
+
+    size_t held = total;
+    for (int i = n - 1; i >= 0; --i) {
+        sceKernelMunmap(va[i], step_bytes);
+        sceKernelReleaseDirectMemory(phys[i], step_bytes);
+    }
+    evo_boot_log("dm probe: held %zuMB in %d chunks, all released", held >> 20, n);
+    evo_mem_budget_log("dm-probe-after");
+#else
+    (void)step_bytes;
+    (void)max_bytes;
 #endif
 }

@@ -39,13 +39,12 @@ extern int sceKernelMapNamedFlexibleMemory(void **addr, size_t len, int prot,
 extern int sceKernelMunmap(void *addr, size_t len);
 extern int sceKernelAvailableFlexibleMemorySize(size_t *out);
 
-/* Direct memory, as the LAST resort for a backing map (#94). The title has
- * 448 MB of flexible memory and ~11 GB of direct; 4K 10-bit software decode
- * (dav1d) was measured running flexible dry on hardware 2026-09-25 -
- * map_fail=60 in one 4K AV1 run, and the first failed allocation broke
- * av1_frame_merge for the rest of the file. Only reached when BOTH flexible
- * and anon mmap refused, so a run that fits in flexible memory never touches
- * it - and g_map_direct in evo.log says whether any run did.
+/* Direct memory as heap backing (#94). The title has 448 MB of flexible
+ * memory and ~11 GB of direct; 4K 10-bit software decode (dav1d) was measured
+ * running flexible dry on hardware 2026-09-25 - map_fail=60 in one 4K AV1 run,
+ * and the first failed allocation broke av1_frame_merge for the rest of the
+ * file. Large blocks come from here first and small ones only as a last resort
+ * - see sh_map() - and g_map_direct in evo.log says how often.
  *
  * Type 11 = general-purpose CACHED memory (SharpProspero KernelMemory.cs:
  * 11 cached, 12 cached-shared-with-GPU), mapped CPU read/write only. NOT
@@ -67,6 +66,7 @@ extern int sceKernelReleaseDirectMemory(long phys, size_t len);
 #define HDR            32
 #define MAGIC_LARGE    UINT64_C(0x4F56454752414C45)   /* large block */
 #define MAGIC_SLAB     UINT64_C(0x4F56534C41425F5F)   /* slab block  */
+#define MAGIC_DIRECT   UINT64_C(0x4F56444952454354)   /* large block's pad[0]: backed by direct memory */
 
 typedef struct {
     uint64_t magic;
@@ -185,10 +185,37 @@ static int dm_unmap(void *p)
     return 1;
 }
 
-/* Back a mapping with PS5 flexible memory; fall back to plain anon mmap. */
-static void *sh_map(size_t len)
+/*
+ * Where a backing map comes from.
+ *
+ * DIRECT FIRST at DIRECT_FIRST_MIN and above: 4K software decode drove
+ * flexible memory to 0 MB even with the direct fallback carrying ~250 MB
+ * (#94), and at 0 MB anything that needs flexible memory OUTSIDE this shim -
+ * system libraries, thread stacks - gets nothing. Big blocks (decoded pictures,
+ * packet and I/O buffers) are the ones that drain it, and direct memory is
+ * cached type 11 and fast, so they go there from the start and flexible memory
+ * keeps its headroom for everything else. Below the threshold: flexible, anon
+ * mmap, then direct as the last resort, as before.
+ *
+ * *is_direct tells the caller to release through dm_unmap(); a slab arena
+ * (never freed) passes NULL.
+ */
+#define DIRECT_FIRST_MIN ((size_t)1 << 20)
+
+static void *sh_map(size_t len, int *is_direct)
 {
     void *p = 0;
+    if (is_direct)
+        *is_direct = 0;
+    if (len >= DIRECT_FIRST_MIN) {
+        p = dm_map(len);
+        if (p) {
+            atomic_fetch_add_explicit(&g_map_direct, 1, memory_order_relaxed);
+            if (is_direct)
+                *is_direct = 1;
+            return p;
+        }
+    }
     if (sceKernelMapNamedFlexibleMemory(&p, len, PROT_RW, 0, "EVOheap") == 0 && p) {
         atomic_fetch_add_explicit(&g_map_flex, 1, memory_order_relaxed);
         return p;
@@ -198,19 +225,23 @@ static void *sh_map(size_t len)
         atomic_fetch_add_explicit(&g_map_anon, 1, memory_order_relaxed);
         return p;
     }
-    p = dm_map(len);
-    if (p) {
-        atomic_fetch_add_explicit(&g_map_direct, 1, memory_order_relaxed);
-        return p;
+    if (len < DIRECT_FIRST_MIN) {
+        p = dm_map(len);
+        if (p) {
+            atomic_fetch_add_explicit(&g_map_direct, 1, memory_order_relaxed);
+            if (is_direct)
+                *is_direct = 1;
+            return p;
+        }
     }
     atomic_fetch_add_explicit(&g_map_fail, 1, memory_order_relaxed);
     atomic_store_explicit(&g_map_fail_bytes, (uint64_t)len, memory_order_relaxed);
     return 0;
 }
 
-static void sh_unmap(void *p, size_t len)
+static void sh_unmap(void *p, size_t len, int is_direct)
 {
-    if (dm_unmap(p))
+    if (is_direct && dm_unmap(p))
         return;
     if (sceKernelMunmap(p, len) != 0)
         munmap(p, len);
@@ -278,7 +309,7 @@ static int class_for(size_t n)
 static void *arena_carve(size_t need)
 {
     if ((size_t)(g.end - g.cur) < need) {
-        uint8_t *a = (uint8_t *)sh_map(ARENA);
+        uint8_t *a = (uint8_t *)sh_map(ARENA, 0);
         if (!a)
             return 0;
         acct_add(ARENA);
@@ -297,7 +328,8 @@ static void *arena_carve(size_t need)
 static void *large_alloc(size_t user)
 {
     size_t total = (PAGE + user + (PAGE - 1)) & ~(PAGE - 1);
-    uint8_t *base = (uint8_t *)sh_map(total);
+    int direct = 0;
+    uint8_t *base = (uint8_t *)sh_map(total, &direct);
     if (!base)
         return 0;
     acct_add(total);
@@ -305,6 +337,7 @@ static void *large_alloc(size_t user)
     hdr_t *tag = (hdr_t *)(base + PAGE - HDR);
     tag->magic = MAGIC_LARGE;
     tag->info  = total;
+    tag->pad[0] = direct ? MAGIC_DIRECT : 0;   /* free() releases by kind */
     return base + PAGE;
 }
 
@@ -341,7 +374,7 @@ void free(void *p)
     if (h->magic == MAGIC_LARGE) {
         atomic_fetch_sub_explicit(&g_mmap_live, (uint64_t)h->info,
                                   memory_order_relaxed);
-        sh_unmap((uint8_t *)p - PAGE, (size_t)h->info);
+        sh_unmap((uint8_t *)p - PAGE, (size_t)h->info, h->pad[0] == MAGIC_DIRECT);
     } else if (h->magic == MAGIC_SLAB) {
         int c = (int)h->info;
         lock();
