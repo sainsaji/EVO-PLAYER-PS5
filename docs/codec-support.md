@@ -14,14 +14,13 @@ the build configuration.
 |---|---|---|---|
 | H.264 / AVC High | hardware | 4K30 real time; 4K60 ~14 fps | yes |
 | HEVC Main (8-bit) | hardware | 4K, real time | yes |
-| HEVC Main10 (10-bit) | hardware | 1080p | yes |
+| HEVC Main10 (10-bit) | hardware; software if the hardware declines a stream | 4K (`ae4df99`) | yes |
 | VP9 Profile 0 | hardware | 4K | yes |
 | VP9 Profile 2 (10-bit) | hardware | 1080p | no |
-| AV1 | software (libdav1d) | 1080p real time; 4K 10-bit real time behind `evo_sw_4k` (#94) | yes |
+| AV1 | software (libdav1d) | 4K 10-bit, real time (#94/#95) | yes |
 | MPEG-2 | software | 1080p | yes |
 | MPEG-4 Part 2 | software | 1080p | no |
 | VP8 | software | 1080p | no |
-| HEVC 10-bit above 1080p | none | — | — |
 | VC-1 | none | — | — |
 | WMV | none | — | — |
 | Theora | none | — | — |
@@ -30,12 +29,13 @@ the build configuration.
 Five resident hardware decoders, one per hardware row, created once at
 start-up.
 
-Software decode above 1080p is still refused by default; touch
-`/mnt/usb0/evo_sw_4k` to allow it. Memory was the only reason for the guard,
-and #94 answered it: 4K 10-bit AV1 does run the 448 MB flexible pool dry, but
-the malloc shim now takes large blocks from direct memory (at least 8 GB of it
-usable), and with that 4K 10-bit AV1 plays in real time and seeks with
-flexible memory at 200+ MB free. Lifting the guard for good is the next step.
+Software decode above 1080p is **allowed by default since #95** (it used to
+need `/mnt/usb0/evo_sw_4k`). Memory was the only reason it was refused, and #94
+answered it: 4K 10-bit AV1 does run the 448 MB flexible pool dry, but the
+malloc shim now takes large blocks from direct memory (at least 8 GB of it
+usable), and 4K 10-bit AV1 plays in real time and seeks with flexible memory at
+200+ MB free. What remains is speed: a codec the CPU cannot decode in real time
+at 4K plays slowly. `/mnt/usb0/evo_no_sw_4k` switches software 4K back off.
 Before #94, 4K AV1 read as a "corrupt, flashing picture": out-of-memory broke
 FFmpeg's AV1 handling, and every 4K 10-bit software frame overflowed the GPU
 staging ring. See [hardware/memory-budget.md](hardware/memory-budget.md).
