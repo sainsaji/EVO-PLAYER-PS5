@@ -192,6 +192,22 @@ are **off by default since #51** (just TV noise) — `package-app.sh
 --breadcrumbs` (`-DEVO_BOOT_TRACE_POPUP=1`) brings them back. USB media browse
 still needs the self-unjail (`evo_jailbreak_self`, or `tools/sandbox-unjail.sh`).
 
+**Memory lines in `evo.log`** (#94). `mem budget [<when>]` is the kernel's
+view (direct total / largest free run, flexible configured / free, EVO's own
+pool) at boot and at each software decoder open. `alloc [<when>]` is the
+malloc shim's: `live`/`peak`, `map_fail` (backing maps refused - nonzero means
+a real out-of-memory, so check it before blaming a codec), `flex_avail`, and
+`direct=`/`direct_live=`/`direct_peak=` for heap blocks served from direct
+memory. It is logged at `decode-open`, every 2 s of playback (`play` - the
+line that survives a crash) and at `stop`.
+
+**Direct-memory probe.** Put a file `/mnt/usb0/evo_dm_probe` on the stick
+whose content is a ceiling in MB (default 8192). At boot, after the GPU
+runtime and hardware decoders are up, EVO allocates direct memory 256 MB at a
+time up to that ceiling, writes and verifies every page, logs one
+`dm probe:` line per step, and releases it all (~70 ms for 8 GB). Delete the
+file to skip it.
+
 For a quick UI check on the real framebuffer, use the host renderer
 (`tools/uiview.sh` / `uiplay.sh`) — same RmlUi code and assets, no console.
 

@@ -99,12 +99,12 @@ refused allocation broke FFmpeg's `av1_frame_merge` (and, in a container,
 the AV1 parser) for the rest of the file — which is what 2ddd018 misread as
 an FFmpeg bug.
 
-`tools/native-app/stubs/malloc_shim.c` now tries flexible memory, then anon
-`mmap`, then **direct memory** (`sceKernelAllocateDirectMemory` +
-`sceKernelMapDirectMemory`, 64 KiB granularity, a table so `free()` can
-release by physical offset). With it, dav1d holds a steady ~245–280 MB of
-direct memory through full-length 4K playback with `map_fail=0`, and all of
-it is released at stop. `evo.log`'s `alloc [...]` lines carry
+`tools/native-app/stubs/malloc_shim.c` backs the heap with **direct memory**
+(`sceKernelAllocateDirectMemory` + `sceKernelMapDirectMemory`, 64 KiB
+granularity, a table so `free()` can release by physical offset). #94 first
+added it as a last resort after flexible memory and anon `mmap`; dav1d then
+held a steady ~245–280 MB of direct memory through full-length 4K playback
+with `map_fail=0`, all of it released at stop. `evo.log`'s `alloc [...]` lines carry
 `direct= direct_live= direct_peak=` at decode-open, every 2 s of playback,
 and at stop.
 
@@ -114,10 +114,39 @@ into it, decoded and staged at ~2 fps: reads from it are uncached. It uses
 type **11** (general-purpose cached, SharpProspero `KernelMemory.cs`; 12 is
 cached-shared-with-GPU), mapped CPU read/write only, and runs at full speed.
 
-Still open: once flexible memory is at 0 MB, anything that needs it outside
-the shim (system services, thread stacks) gets nothing. Keeping a reserve —
-sending large blocks to direct memory *before* flexible runs out — is the
-next hardening step.
+As a last resort it still left flexible memory at **0 MB**, and whatever
+needs flexible memory outside the shim (system libraries, thread stacks) got
+nothing: EVO twice died silently a few seconds after a far seek, with
+`flex_avail=0`, `map_fail=0` and no crash-handler line. So blocks of **1 MB
+and up now come from direct memory first** (commit `115d9ff`); smaller ones
+still use flexible memory, then anon `mmap`, then direct. The large-block
+header records which kind it is, so `free()` never scans the table for a
+flexible block.
+
+Hardware, 2026-09-26, the same 4K AV1 `.mkv` and Chimera `.obu` with 11 seeks
+including a far one: `flex_avail` **200–235 MB** throughout, `map_fail=0`,
+`direct_peak` 478 MB, no crash.
+
+## How much direct memory EVO can actually take
+
+**Measured 2026-09-26** with the boot probe (`/mnt/usb0/evo_dm_probe`, see
+[tooling.md](../build/tooling.md)), after the GPU runtime and resident
+hardware decoders already held their share:
+
+```
+dm probe: +1  total=256MB  alloc_us=3 map_us=6 touch_us=561 verify=ok largest_free=10678MB
+...
+dm probe: +32 total=8192MB alloc_us=3 map_us=4 touch_us=607 verify=ok largest_free=2742MB
+dm probe: held 8192MB in 32 chunks, all released
+```
+
+- **At least 8 GB**, type 11, every 16 KiB page written and read back. The
+  probe stopped at its ceiling, not at a refusal - 2.7 GB was still free.
+- **Cheap:** ~5 µs to allocate and map 256 MB; 73 ms for the whole 8 GB.
+- **Clean:** `direct_largest_free` was back to 10934 MB afterwards.
+
+A 4K software decode needs about 0.5 GB of it. Memory is no longer a reason
+to refuse anything the CPU can decode in time.
 
 ## Open, and not explained by capacity
 

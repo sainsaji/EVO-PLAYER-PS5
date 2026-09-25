@@ -1,7 +1,7 @@
 # Codec support
 
-State of **v0.10.0** (released). Changes made after the release are not
-included here.
+State of **v0.10.0** (released), plus the unreleased AV1 / memory work from
+#94 (branch `feat/direct-mem-heap`), marked below.
 
 **Verified** = played on a real PS5 and confirmed decoding, not inferred from
 the build configuration.
@@ -17,12 +17,11 @@ the build configuration.
 | HEVC Main10 (10-bit) | hardware | 1080p | yes |
 | VP9 Profile 0 | hardware | 4K | yes |
 | VP9 Profile 2 (10-bit) | hardware | 1080p | no |
-| AV1 | software (libdav1d) | 1080p, real time | yes |
+| AV1 | software (libdav1d) | 1080p real time; 4K 10-bit real time behind `evo_sw_4k` (#94) | yes |
 | MPEG-2 | software | 1080p | yes |
 | MPEG-4 Part 2 | software | 1080p | no |
 | VP8 | software | 1080p | no |
 | HEVC 10-bit above 1080p | none | — | — |
-| AV1 above 1080p | none | — | — |
 | VC-1 | none | — | — |
 | WMV | none | — | — |
 | Theora | none | — | — |
@@ -31,12 +30,23 @@ the build configuration.
 Five resident hardware decoders, one per hardware row, created once at
 start-up.
 
-Software decode above 1080p is refused by default — but the reason originally
-given for it (a 4K frame needing ~135 MB against ~125 MB available) was based
-on a flexible-memory ceiling that was never measured and turned out to be
-wrong. The title has **448 MB** of flexible memory, 144–192 MB free at decoder
-open, and 4K 10-bit AV1 decodes faster than real time once the guard is lifted
-(`/mnt/usb0/evo_sw_4k`). See [hardware/memory-budget.md](hardware/memory-budget.md).
+Software decode above 1080p is still refused by default; touch
+`/mnt/usb0/evo_sw_4k` to allow it. Memory was the only reason for the guard,
+and #94 answered it: 4K 10-bit AV1 does run the 448 MB flexible pool dry, but
+the malloc shim now takes large blocks from direct memory (at least 8 GB of it
+usable), and with that 4K 10-bit AV1 plays in real time and seeks with
+flexible memory at 200+ MB free. Lifting the guard for good is the next step.
+Before #94, 4K AV1 read as a "corrupt, flashing picture": out-of-memory broke
+FFmpeg's AV1 handling, and every 4K 10-bit software frame overflowed the GPU
+staging ring. See [hardware/memory-budget.md](hardware/memory-budget.md).
+
+**Raw AV1 streams (#94):** `.obu` (low-overhead OBU) is playable and listed in
+the browser; the Annex B `av1` demuxer and `.ivf` are built too. A raw stream
+carries no timestamps, so the frame rate comes from a `<n>fps` hint in the
+file name (`...-2397fps-...` becomes 24000/1001), otherwise FFmpeg's default of
+25. Seeking works, but the first seek into a part of the file not yet read has
+to scan up to it (a raw stream has no index) - remux to `.mkv` for instant
+seeks.
 
 ---
 
@@ -86,9 +96,9 @@ Non-ASCII characters render as `?` (issue #35).
 
 ---
 
-Containers: MP4/MOV, Matroska, AVI, MPEG-TS, MPEG-PS, Ogg, WAV, FLAC, and raw
-MP3/AAC/AC-3/E-AC-3/DTS streams. MP4, MKV, WAV and FLAC are verified; the rest
-are enabled but untested.
+Containers: MP4/MOV, Matroska, AVI, MPEG-TS, MPEG-PS, Ogg, WAV, FLAC, raw
+AV1 (`.obu`, Annex B, IVF) and raw MP3/AAC/AC-3/E-AC-3/DTS streams. MP4, MKV,
+WAV, FLAC and `.obu` are verified; the rest are enabled but untested.
 
 Sources: hardware decoder rows from `g_codec[]` in
 `media/src/evo_vdec_native.c`; software rows from `--enable-decoder=` in
