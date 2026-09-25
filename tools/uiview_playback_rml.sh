@@ -147,11 +147,76 @@ http://127.0.0.1:1/c2.m3u8
 http://127.0.0.1:1/k1.m3u8
 M3UEOF
 
+    # A second, deliberately LARGE playlist: one channel in each of 120 groups,
+    # so the root level is 120 folder rows.
+    #
+    # It exists to exercise the row window past EVO_PROVIDER_ROW_WINDOW_MAX,
+    # where the window stops growing and starts SLIDING. That path moves focus
+    # itself to compensate for the slide, and nothing in the fixed playlist
+    # above comes anywhere near it - four groups never leave the first window,
+    # so the whole slide path would otherwise be first executed on hardware.
+    # Generated rather than spelled out only because 120 stanzas is noise.
+    #
+    # Every row also carries a tvg-logo pointing back at this server, so the
+    # fixture exercises the ARTWORK path: request -> fetch -> sniff the magic
+    # bytes -> mkdir -p -> write the cache file. The host cannot decode it
+    # (EVO_PROVIDER_ART_NO_DECODE), so the run ends at "art DECODE fail" - but
+    # that line prints the full cache path, which is the thing worth asserting.
+    # A build that gets the path wrong says `path=.png` there instead, which is
+    # exactly the bug that shipped to hardware twice because nothing off-device
+    # ever asked a provider for a poster.
+    cp -f "${REPO_ROOT}/projects/evoplayer/assets/icons/icon_folder.png" \
+          "${PROVIDER_SERVE}/media/logo.png"
+    {
+        echo "#EXTM3U"
+        i=1
+        while [ "${i}" -le 120 ]; do
+            printf '#EXTINF:-1 tvg-id="g%03d" tvg-name="Group %03d" tvg-logo="http://127.0.0.1:%s/media/logo.png" group-title="Group %03d",Channel %03d\n' \
+                   "${i}" "${i}" "${PROVIDER_PORT}" "${i}" "${i}"
+            printf 'http://127.0.0.1:1/g%03d.m3u8\n' "${i}"
+            i=$((i + 1))
+        done
+    } > "${PROVIDER_SERVE}/media/iptv_big.m3u"
+
+    # XMLTV to go with it. Without an EPG the bundle's NOW/NEXT rows never
+    # render, so the most distinctive part of a channel card was the one part
+    # the preview could not show.
+    #
+    # The programme windows are relative to now, which keeps the shots
+    # diffable: the times move every run but the titles do not, and the titles
+    # are all that reaches a pixel. Only two channels are covered, on purpose -
+    # a grid where every card has an EPG would not show what a card without one
+    # falls back to.
+    python3 - "${PROVIDER_SERVE}/media/epg.xml" <<'EPGEOF'
+import sys, time
+out = sys.argv[1]
+now = time.time()
+def stamp(t):
+    return time.strftime("%Y%m%d%H%M%S +0000", time.gmtime(t))
+chans = [
+    ("n1", "News One",     "World News At One", "Markets Tonight"),
+    ("n2", "World Report", "The Long Read",     "Correspondents"),
+]
+lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv>']
+for cid, name, _, _ in chans:
+    lines.append(f'  <channel id="{cid}"><display-name>{name}</display-name></channel>')
+for cid, _, now_t, next_t in chans:
+    lines.append(f'  <programme start="{stamp(now - 900)}" stop="{stamp(now + 1800)}" channel="{cid}">')
+    lines.append(f'    <title>{now_t}</title>')
+    lines.append('  </programme>')
+    lines.append(f'  <programme start="{stamp(now + 1800)}" stop="{stamp(now + 5400)}" channel="{cid}">')
+    lines.append(f'    <title>{next_t}</title>')
+    lines.append('  </programme>')
+lines.append('</tv>')
+open(out, "w", encoding="utf-8").write(chr(10).join(lines) + chr(10))
+EPGEOF
+
     ( cd "${PROVIDER_SERVE}" && exec python3 -m http.server "${PROVIDER_PORT}" --bind 127.0.0.1 >/dev/null 2>&1 ) &
     PROVIDER_PID=$!
 
     cat > "${EVO_DATA_DIR_OVERRIDE}/iptv.conf" <<CONFEOF
 playlist=http://127.0.0.1:${PROVIDER_PORT}/media/iptv.m3u
+xmltv=http://127.0.0.1:${PROVIDER_PORT}/media/epg.xml
 bundle=http://127.0.0.1:${PROVIDER_PORT}/ui/iptv
 CONFEOF
 

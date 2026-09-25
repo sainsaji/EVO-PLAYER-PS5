@@ -28,12 +28,28 @@ static uint32_t float_bits(float value)
     return bits;
 }
 
+static uint32_t g_out_of_space_calls;
+
 static uint8_t cb_out_of_space(SceAgcCommandBuffer *writer, uint32_t requested, void *user_data)
 {
     (void)writer;
     (void)requested;
     (void)user_data;
+    /* There is nowhere to get more room from, so 0 it stays and sceAgc drops
+     * the packet. Counting it is the only thing that makes a truncated frame
+     * visible from a log - see evo_agc_writer_out_of_space_count(). */
+    g_out_of_space_calls++;
     return 0;
+}
+
+uint32_t evo_agc_writer_out_of_space_count(void)
+{
+    return g_out_of_space_calls;
+}
+
+void evo_agc_writer_reset_out_of_space_count(void)
+{
+    g_out_of_space_calls = 0;
 }
 
 void evo_agc_writer_init(SceAgcCommandBuffer *cb, uint32_t *buffer, uint32_t capacity_dwords)

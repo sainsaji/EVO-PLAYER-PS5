@@ -3,6 +3,7 @@
 
 #include "evo/screens/StatefulScreen.hpp"
 #include <string>
+#include <vector>
 
 namespace evo {
 
@@ -45,6 +46,8 @@ public:
      *  enabled one, which is the behaviour when the rail slot is used. */
     static void setPendingProvider(const std::string& id);
 
+    void setNavigatingToPlayer(bool b) { m_navigatingToPlayer = b; }
+
 private:
     void startSelected();
 
@@ -72,10 +75,21 @@ private:
     void openSourceEditor();
     static void OnSourceSubmitted(const char* text, void* userdata);
 
+    void browseUsb();
+    static std::vector<std::string> scanUsbPlaylists();
+
+    void openSearch();
+    static void OnSearchSubmitted(const char* text, void* userdata);
+
     /* The provider this screen is currently hosting. Held so onExit can close
      * the right host even if the pending id has since changed. */
     std::string m_providerId;
+    std::string m_searchQuery;
+    std::string m_lastTypedUrl;
     bool m_opened = false;
+    /* When navigating to Player, preserve the provider UI context, folder stack,
+     * and channel selection so returning from playback lands back on the channel. */
+    bool m_navigatingToPlayer = false;
     /* A resolve is in flight for the activated item; another activation is
      * ignored until it lands, so a double press cannot start two playbacks. */
     bool m_resolving = false;

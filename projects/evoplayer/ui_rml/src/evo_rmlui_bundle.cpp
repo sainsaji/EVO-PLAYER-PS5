@@ -20,6 +20,7 @@ const char* const kPrefixes[] = {
     "projects/evoplayer/assets/",
     "/mnt/usb0/assets/",
     "/app0/assets/",
+    "/assets/",
     "assets/",
 };
 

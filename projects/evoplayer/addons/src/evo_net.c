@@ -537,13 +537,20 @@ static int execute_http(const char *method,
         }
 
         int build_err = 0;
+        char host_hdr[512];
+        if ((is_https && port == 443) || (!is_https && port == 80)) {
+            snprintf(host_hdr, sizeof host_hdr, "Host: %s\r\n", host);
+        } else {
+            snprintf(host_hdr, sizeof host_hdr, "Host: %s:%d\r\n", host, port);
+        }
+
         if (dynbuf_append_fmt(&req_buf,
                               "%s %s HTTP/1.1\r\n"
-                              "Host: %s:%d\r\n"
+                              "%s"
                               "User-Agent: EVOPlayer-PS5/" EVO_PLAYER_VERSION "\r\n"
-                              "Accept: application/json, text/plain, */*\r\n"
+                              "Accept: */*\r\n"
                               "Connection: close\r\n",
-                              current_method, path, host, port) != 0) {
+                              current_method, path, host_hdr) != 0) {
             build_err = 1;
         }
 

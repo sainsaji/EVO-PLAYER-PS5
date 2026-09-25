@@ -158,6 +158,16 @@ int evo_bundle_path(const char *provider_id, const char *rel,
 /* 1 when `rel` passes the same rules, without building a path. */
 int evo_bundle_path_safe(const char *rel);
 
+/*
+ * mkdir -p over the directory part of a path from evo_bundle_path(). Returns 0
+ * when the directory exists afterwards.
+ *
+ * Anything writing into a provider's cache has to call this first: nothing else
+ * creates the intermediate levels, so the data root, "providers", the provider's
+ * own directory and any subdirectory below it may all be absent.
+ */
+int evo_bundle_ensure_parent_dirs(const char *path);
+
 /* ------------------------------------------------------------------------- */
 /* Fetch and cache                                                           */
 /* ------------------------------------------------------------------------- */
@@ -237,10 +247,12 @@ int evo_bundle_clear(const char *provider_id);
  *
  *   1  the texture is registered and drawable now
  *   0  queued; the key becomes drawable after a later evo_provider_art_poll()
- *  -1  the URL is unusable, or the queue is full and this one was dropped
+ *  -1  the URL is unusable - do not ask for it again
+ *  -2  the in-flight queue is full; nothing was started. Keep the URL and ask
+ *      again on a later tick, and stop asking for other rows this tick.
  *
- * A dropped request is not an error worth surfacing: the element draws empty,
- * which is what it was already doing.
+ * Neither negative case is worth surfacing: the element draws empty, which is
+ * what it was already doing.
  */
 int  evo_provider_art_request(const char *provider_id, const char *url,
                               char *out_key, size_t out_sz);

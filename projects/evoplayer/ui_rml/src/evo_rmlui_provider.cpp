@@ -9,12 +9,14 @@
 #include "evo_rmlui_provider.h"
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_render_bridge.h"
+#include "evo_rmlui_bundle.h"
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/Event.h>
+#include <RmlUi/Core/Factory.h>
 #include <RmlUi/Core/Input.h>
 #include <RmlUi/Core/Types.h>
 
@@ -96,8 +98,12 @@ void EvoRmlProviderHost::SetStatus(const std::string& msg, bool error)
 void EvoRmlProviderHost::SetLoading(bool loading, const std::string& status)
 {
     m_model.loading = loading;
+    if (!loading) {
+        m_model.tuning = false;
+    }
     if (m_model_handle) {
         m_model_handle.DirtyVariable("loading");
+        m_model_handle.DirtyVariable("tuning");
     }
     if (!status.empty()) {
         m_model.status = Rml::String(status.c_str());
@@ -111,6 +117,19 @@ void EvoRmlProviderHost::SetLoading(bool loading, const std::string& status)
         if (m_model_handle) {
             m_model_handle.DirtyVariable("status");
         }
+    }
+    m_dirty = true;
+}
+
+void EvoRmlProviderHost::SetTuning(bool tuning)
+{
+    m_model.tuning = tuning;
+    if (tuning) {
+        m_model.loading = true;
+    }
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("tuning");
+        m_model_handle.DirtyVariable("loading");
     }
     m_dirty = true;
 }
@@ -151,6 +170,7 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("status",        &m_model.status);
     c.Bind("query",         &m_model.query);
     c.Bind("loading",       &m_model.loading);
+    c.Bind("tuning",        &m_model.tuning);
     c.Bind("has_error",     &m_model.has_error);
     c.Bind("empty",         &m_model.empty);
     c.Bind("is_folder_level", &m_model.is_folder_level);
@@ -194,6 +214,15 @@ bool EvoRmlProviderHost::RegisterDataModel()
      * than relying on the host to append. */
     c.BindEventCallback("load_more",
         [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            /* Rows already fetched but held back by the render budget come
+             * first - asking the provider for another page while this level
+             * still has unshown rows would fetch what is already in hand. */
+            if (m_row_window < m_all_rows.size()) {
+                m_row_window += EVO_PROVIDER_ROW_WINDOW;
+                PublishRowWindow();
+                PushArtRequests();
+                return;
+            }
             if (!m_has_more || m_model.loading) return;
             RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), ++m_page);
         });
@@ -201,6 +230,16 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.BindEventCallback("go_back",
         [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
             HandleKey(KeyBack);
+        });
+
+    c.BindEventCallback("setup_url",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            m_pending_action = EVO_PROVIDER_ACTION_SETUP_URL;
+        });
+
+    c.BindEventCallback("setup_usb",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            m_pending_action = EVO_PROVIDER_ACTION_SETUP_USB;
         });
 
     m_model_handle = c.GetModelHandle();
@@ -332,33 +371,50 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
 
     if (!BuildContext(width, height)) return false;
 
-    /*
-     * Try the cached bundle before the network. A provider screen must open on
-     * the frame the user pressed the button, not after a round trip - so the
-     * cache renders immediately and the refresh lands behind it.
-     */
-    evo_bundle_manifest_t man;
-    evo_bundle_status_t st = evo_bundle_load_cached(m_provider_id.c_str(), &man);
-
     std::string model_name = m_provider_id;
     bool loaded = false;
+    evo_bundle_status_t st = EVO_BUNDLE_ERR_NO_URL;
 
-    if (st == EVO_BUNDLE_OK) {
-        char path[512];
-        if (evo_bundle_path(m_provider_id.c_str(), man.entry, path, sizeof path) == 0) {
-            model_name = man.data_model[0] ? man.data_model : m_provider_id;
-            m_bundle_version = man.version;
-            m_model_name = model_name;
-            /* The model has to exist before the document is parsed: RmlUi
-             * resolves a document's data-model attribute at load time and a
-             * document naming a model that is not there binds nothing, silently. */
-            if (RegisterDataModel())
-                loaded = LoadEntryDocument(path);
+    /*
+     * Check if this provider has an embedded UI document in the application bundle
+     * (e.g. "rml/iptv.rml"). If present, it loads instantly from memory with zero
+     * network or disk dependency, completely self-contained.
+     */
+    std::string embedded_path = "rml/" + m_provider_id + ".rml";
+    if (evo_rmlui_bundle_find(embedded_path)) {
+        model_name = m_provider_id;
+        m_bundle_version = "embedded";
+        m_model_name = model_name;
+        if (RegisterDataModel()) {
+            loaded = LoadEntryDocument(embedded_path);
         }
-        if (!loaded) st = EVO_BUNDLE_ERR_INCOMPLETE;
+        if (loaded) st = EVO_BUNDLE_OK;
     }
 
-    PROV_LOG("'%s' cached bundle: %s", m_provider_id.c_str(),
+    /*
+     * If not embedded, try the cached bundle before the network.
+     */
+    if (!loaded) {
+        evo_bundle_manifest_t man;
+        st = evo_bundle_load_cached(m_provider_id.c_str(), &man);
+
+        if (st == EVO_BUNDLE_OK) {
+            char path[512];
+            if (evo_bundle_path(m_provider_id.c_str(), man.entry, path, sizeof path) == 0) {
+                model_name = man.data_model[0] ? man.data_model : m_provider_id;
+                m_bundle_version = man.version;
+                m_model_name = model_name;
+                /* The model has to exist before the document is parsed: RmlUi
+                 * resolves a document's data-model attribute at load time and a
+                 * document naming a model that is not there binds nothing, silently. */
+                if (RegisterDataModel())
+                    loaded = LoadEntryDocument(path);
+            }
+            if (!loaded) st = EVO_BUNDLE_ERR_INCOMPLETE;
+        }
+    }
+
+    PROV_LOG("'%s' cached/embedded bundle: %s", m_provider_id.c_str(),
              evo_bundle_status_str(st));
 
     if (!loaded) {
@@ -433,12 +489,43 @@ void EvoRmlProviderHost::Close()
     m_crumbs.clear();
     m_art_urls.clear();
     m_art_keys.clear();
+    m_all_rows.clear();
+    m_row_window = 0;
+    m_row_offset = 0;
     m_needs_initial_focus = false;
     m_pending_activation.clear();
+    m_pending_action = 0;
+    m_is_usb_picker = false;
+    m_saved_usb_playlists.clear();
     m_bundle_version.clear();
     m_using_fallback = false;
     g_selection_pending = false;
     m_dirty = true;
+
+    /*
+     * Drop RmlUi's parsed-stylesheet cache.
+     *
+     * It is keyed by FILE PATH, and a refreshed bundle writes its new .rcss
+     * over the same cache path it had before. Without this, a reopen onto an
+     * updated bundle re-used the stylesheet parsed from the PREVIOUS version's
+     * bytes: the new .rml loaded, the old rules styled it, and the result was
+     * a screen that rendered rather than failed - new markup with no rules
+     * matching it, laid out by whatever old selectors happened to still hit.
+     * Measured on hardware: the cache on disk hashed correctly against the new
+     * manifest while the focus ring on screen was still the previous version's
+     * colour.
+     *
+     * Clearing on Close() rather than at the reopen covers the other order too
+     * - leave the screen, the bundle updates, come back - and costs nothing:
+     * EVO's own documents are loaded once at init and hold their stylesheets
+     * by shared pointer, so this only forces the NEXT load to reparse.
+     *
+     * Textures are deliberately NOT released here. `Rml::ReleaseTextures()` is
+     * process-wide, so it would drop EVO's own icon atlas and force a re-upload
+     * through the sceAgc interface mid-session. A bundle that ships its own
+     * images and changes them is the case that would need it; none does yet.
+     */
+    Rml::Factory::ClearStyleSheetCache();
 }
 
 /* ------------------------------------------------------------------------- */
@@ -464,8 +551,12 @@ void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
         return;
     }
 
+    m_is_usb_picker = false;
     if (page == 0) {
         m_model.rows.clear();
+        m_all_rows.clear();
+        m_row_window = 0;
+        m_row_offset = 0;
         m_art_urls.clear();
         m_art_keys.clear();
         m_model.count = 0;
@@ -500,13 +591,19 @@ void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
         /* Not accepted, so the callback will never fire and this owns ctx. */
         delete ctx;
         m_model.loading = false;
-        if (m_model_handle) m_model_handle.DirtyVariable("loading");
+        m_model.empty = m_all_rows.empty();
+        if (m_model_handle) {
+            m_model_handle.DirtyVariable("loading");
+            m_model_handle.DirtyVariable("empty");
+        }
+        if (m_doc) m_needs_initial_focus = true;
         PROV_LOG("'%s' list_catalog REFUSED rc=%d configured=%d",
                  m_provider_id.c_str(), rc, m_provider->is_configured());
-        SetStatus(m_provider->is_configured()
-                      ? "Could not reach the provider"
-                      : std::string(m_provider->name) + " is not set up yet",
-                  true);
+        if (m_provider->is_configured()) {
+            SetStatus("Could not reach the provider", true);
+        } else {
+            SetStatus("", false);
+        }
     }
 }
 
@@ -525,6 +622,9 @@ void EvoRmlProviderHost::ItemsCallback(int ok, const evo_provider_item_t* items,
     if (self->m_model_handle) self->m_model_handle.DirtyVariable("loading");
 
     if (!ok) {
+        self->m_model.empty = self->m_all_rows.empty();
+        if (self->m_model_handle) self->m_model_handle.DirtyVariable("empty");
+        if (self->m_doc) self->m_needs_initial_focus = true;
         self->SetStatus("Could not load the catalog", true);
         return;
     }
@@ -564,43 +664,254 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
         }
         r.is_folder = s.is_folder != 0;
         r.is_live   = s.is_live != 0;
-        r.index     = (int)m_model.rows.size();
+        r.index     = (int)m_all_rows.size();
         /* Art starts empty and is filled in by the art queue as posters
          * arrive. A bundle that wants something behind the gap paints a
          * background colour on the element, which is why this is "" and not a
          * placeholder image the provider did not choose. */
-        m_model.rows.push_back(std::move(r));
+        m_all_rows.push_back(std::move(r));
         m_art_urls.emplace_back(s.art_url);
         m_art_keys.emplace_back();
     }
 
-    m_model.count = (int)m_model.rows.size();
-    m_model.empty = m_model.rows.empty();
+    m_model.count = (int)m_all_rows.size();
+    m_model.empty = m_all_rows.empty();
     /* A level is a folder level when its first row is a folder. Providers do
      * not mix the two at one level - a group list is groups, a group's contents
      * are channels - and taking the first row rather than requiring every row
      * to agree keeps a provider that does mix them from flipping the header. */
-    m_model.is_folder_level = !m_model.rows.empty() && m_model.rows[0].is_folder;
+    m_model.is_folder_level = !m_all_rows.empty() && m_all_rows[0].is_folder;
+
+    PublishRowWindow();
 
     if (m_model_handle) {
-        m_model_handle.DirtyVariable("rows");
         m_model_handle.DirtyVariable("count");
         m_model_handle.DirtyVariable("empty");
         m_model_handle.DirtyVariable("is_folder_level");
     }
 
-    if (m_model.rows.empty())
-        SetStatus("Nothing here", false);
+    if (m_all_rows.empty())
+        SetStatus("", false);
     else
         SetStatus("", false);
 
     /* Deferred to Render(), which is where Context::Update() creates the
      * elements data-for is going to produce. See m_needs_initial_focus. */
-    if (m_doc && !m_model.rows.empty())
+    if (m_doc)
         m_needs_initial_focus = true;
 
     PushArtRequests();
     m_dirty = true;
+}
+
+void EvoRmlProviderHost::Search(const char* query)
+{
+    if (!m_provider) return;
+
+    std::string q = query ? query : "";
+    size_t b = q.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) {
+        q.clear();
+    } else {
+        size_t e = q.find_last_not_of(" \t\r\n");
+        q = q.substr(b, e - b + 1);
+    }
+
+    if (q.empty()) {
+        m_model.query = "";
+        if (m_model_handle) m_model_handle.DirtyVariable("query");
+        /* Restore current level */
+        m_page = 0;
+        RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), 0);
+        return;
+    }
+
+    if (!(m_provider->caps & EVO_PROVIDER_CAP_SEARCH) || !m_provider->search) {
+        SetStatus("Provider does not support search", true);
+        return;
+    }
+
+    m_model.query = Rml::String(q.c_str());
+    m_model.rows.clear();
+    m_all_rows.clear();
+    m_row_window = 0;
+    m_row_offset = 0;
+    m_art_urls.clear();
+    m_art_keys.clear();
+    m_model.count = 0;
+    m_model.loading = true;
+    m_model.empty = false;
+    m_model.is_folder_level = false;
+
+    std::string crumb = std::string(m_provider->name) + " / Search: " + q;
+    m_model.breadcrumb = Rml::String(crumb.c_str());
+
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("query");
+        m_model_handle.DirtyVariable("rows");
+        m_model_handle.DirtyVariable("count");
+        m_model_handle.DirtyVariable("loading");
+        m_model_handle.DirtyVariable("empty");
+        m_model_handle.DirtyVariable("is_folder_level");
+        m_model_handle.DirtyVariable("breadcrumb");
+    }
+
+    m_dirty = true;
+    PROV_LOG("Search query='%s'", q.c_str());
+    ItemsCtx* ctx = new ItemsCtx{this, ++m_request_generation};
+    int rc = m_provider->search(q.c_str(), 0, &EvoRmlProviderHost::ItemsCallback, ctx);
+    if (rc != 0) {
+        delete ctx;
+        m_model.loading = false;
+        if (m_model_handle) m_model_handle.DirtyVariable("loading");
+        SetStatus("Search failed", true);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* The row window - see EVO_PROVIDER_ROW_WINDOW                              */
+/* ------------------------------------------------------------------------- */
+
+void EvoRmlProviderHost::PublishRowWindow()
+{
+    size_t want = m_row_window ? m_row_window : EVO_PROVIDER_ROW_WINDOW;
+    if (want > EVO_PROVIDER_ROW_WINDOW_MAX) want = EVO_PROVIDER_ROW_WINDOW_MAX;
+    if (want > m_all_rows.size()) want = m_all_rows.size();
+    m_row_window = want;
+
+    /* Keep the window inside the level. */
+    if (m_row_offset + want > m_all_rows.size())
+        m_row_offset = m_all_rows.size() - want;
+
+    /*
+     * Copied wholesale rather than appended because the art keys PushArtRequests
+     * wrote live in BOTH vectors - it updates m_all_rows and the published copy
+     * together, so a re-publish from m_all_rows never loses a poster that has
+     * already arrived.
+     *
+     * Unconditional, with no early-out on an unchanged size: a slide keeps the
+     * size identical and changes only the contents, which is exactly the case
+     * the old `rows.size() == want` guard would have skipped.
+     */
+    const long first = (long)m_row_offset;
+    m_model.rows.assign(m_all_rows.begin() + first,
+                        m_all_rows.begin() + first + (long)want);
+    if (m_model_handle) m_model_handle.DirtyVariable("rows");
+    m_dirty = true;
+}
+
+int EvoRmlProviderHost::FocusedRowIndex() const
+{
+    if (!m_context) return -1;
+    Rml::Element* e = m_context->GetFocusElement();
+    while (e) {
+        const Rml::String id = e->GetAttribute<Rml::String>("rowid", Rml::String());
+        if (!id.empty()) {
+            for (size_t i = 0; i < m_model.rows.size(); ++i)
+                if (m_model.rows[i].id == id) return (int)i;
+            return -1;
+        }
+        e = e->GetParentNode();
+    }
+    return -1;
+}
+
+void EvoRmlProviderHost::ExtendRowWindow()
+{
+    const int idx = FocusedRowIndex();
+    if (idx < 0) return;
+
+    /* Room left below the focused card inside the published window. */
+    const bool near_end =
+        (size_t)idx + EVO_PROVIDER_ROW_WINDOW_MARGIN >= m_row_window;
+    const bool near_start =
+        m_row_offset > 0 && (size_t)idx < EVO_PROVIDER_ROW_WINDOW_MARGIN;
+
+    /* Still below the cap: grow. Cheap, and it does not disturb focus. */
+    if (near_end &&
+        m_row_window < EVO_PROVIDER_ROW_WINDOW_MAX &&
+        m_row_offset + m_row_window < m_all_rows.size()) {
+        m_row_window += EVO_PROVIDER_ROW_WINDOW_STEP;
+        PublishRowWindow();
+        PushArtRequests();
+        PROV_LOG("row window -> %zu of %zu (focus row %d)",
+                 m_row_window, m_all_rows.size(), idx);
+        return;
+    }
+
+    /* At the cap. Slide to keep a margin of runway on the side focus is
+     * heading for, and stop at either end of the level. */
+    if (near_end && m_row_offset + m_row_window < m_all_rows.size()) {
+        size_t room = m_all_rows.size() - (m_row_offset + m_row_window);
+        size_t step = room < EVO_PROVIDER_ROW_WINDOW_STEP
+                          ? room : EVO_PROVIDER_ROW_WINDOW_STEP;
+        SlideRowWindow(m_row_offset + step, idx);
+    } else if (near_start) {
+        size_t step = m_row_offset < EVO_PROVIDER_ROW_WINDOW_STEP
+                          ? m_row_offset : EVO_PROVIDER_ROW_WINDOW_STEP;
+        SlideRowWindow(m_row_offset - step, idx);
+    }
+}
+
+void EvoRmlProviderHost::SlideRowWindow(size_t new_offset, int focused_local)
+{
+    if (new_offset == m_row_offset) return;
+
+    const bool forward = new_offset > m_row_offset;
+    const size_t distance = forward ? (new_offset - m_row_offset)
+                                    : (m_row_offset - new_offset);
+    m_row_offset = new_offset;
+
+    PublishRowWindow();
+    PushArtRequests();
+
+    /*
+     * The element that had focus is still the same element - nothing was
+     * re-instanced - but it now renders a row `distance` further along, so
+     * focus has effectively jumped. Move it back by the same distance to leave
+     * the user on the row they were actually on.
+     */
+    const int target = forward ? focused_local - (int)distance
+                               : focused_local + (int)distance;
+    FocusPublishedRow(target);
+
+    PROV_LOG("row window slide -> [%zu,%zu) of %zu (focus %d -> %d)",
+             m_row_offset, m_row_offset + m_row_window, m_all_rows.size(),
+             focused_local, target);
+}
+
+bool EvoRmlProviderHost::FocusPublishedRow(int local_idx)
+{
+    if (!m_context || local_idx < 0) return false;
+
+    /* The cards are the siblings data-for instanced, so walk up from whatever
+     * has focus to the card, then index its parent's children. Only those
+     * carrying `rowid` count - the parent also holds data-for's own template
+     * element and whatever else the bundle put beside the list. */
+    Rml::Element* focused = m_context->GetFocusElement();
+    Rml::Element* card = nullptr;
+    for (Rml::Element* e = focused; e; e = e->GetParentNode()) {
+        if (!e->GetAttribute<Rml::String>("rowid", Rml::String()).empty()) {
+            card = e;
+            break;
+        }
+    }
+    if (!card) return false;
+
+    Rml::Element* parent = card->GetParentNode();
+    if (!parent) return false;
+
+    int seen = 0;
+    for (int i = 0; i < parent->GetNumChildren(); ++i) {
+        Rml::Element* child = parent->GetChild(i);
+        if (child->GetAttribute<Rml::String>("rowid", Rml::String()).empty())
+            continue;
+        if (seen++ != local_idx) continue;
+        child->Focus();
+        m_dirty = true;
+        return true;
+    }
+    return false;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -613,43 +924,72 @@ void EvoRmlProviderHost::PushArtRequests()
      * Ask for the posters that are not drawable yet, and adopt the ones that
      * have become drawable since the last pass.
      *
-     * Called from ApplyItems and again every Tick(), which is what fills a
-     * poster wall in over a few frames rather than blocking the rows on it.
-     * The art layer bounds itself - a fixed in-flight limit and an LRU under a
-     * byte cap - so this can afford to be naive about how many rows there are.
+     * Prioritize a window around current focus so visible cards populate first.
+     * When the queue fills (-2), preserve the URLs and stop asking this tick.
      */
     bool changed = false;
     const size_t n = m_model.rows.size();
+    if (n == 0) return;
 
-    for (size_t i = 0; i < n && i < m_art_urls.size(); ++i) {
-        if (!m_model.rows[i].art.empty()) continue;      /* already showing */
-        if (m_art_urls[i].empty()) continue;             /* row has no art   */
+    int focus_idx = FocusedRowIndex();
+    if (focus_idx < 0) focus_idx = 0;
 
-        if (!m_art_keys[i].empty()) {
+    size_t start = (focus_idx > 4) ? (size_t)(focus_idx - 4) : 0;
+    size_t end = (start + 16 < n) ? (start + 16) : n;
+
+    bool queue_full = false;
+
+    /* `i` is a PUBLISHED index; the art vectors are parallel to m_all_rows, so
+     * every one of them is read at m_row_offset + i. */
+    auto try_row = [&](size_t i) {
+        if (queue_full || i >= n) return;
+        const size_t a = m_row_offset + i;
+        if (a >= m_art_urls.size()) return;
+        if (!m_model.rows[i].art.empty()) return;      /* already showing */
+        if (m_art_urls[a].empty()) return;             /* row has no art   */
+
+        if (!m_art_keys[a].empty()) {
             /* Promised a key earlier - has it arrived? */
-            if (evo_provider_art_ready(m_art_keys[i].c_str())) {
-                m_model.rows[i].art = Rml::String(m_art_keys[i].c_str());
+            if (evo_provider_art_ready(m_art_keys[a].c_str())) {
+                m_model.rows[i].art = Rml::String(m_art_keys[a].c_str());
+                m_all_rows[a].art   = m_model.rows[i].art;
                 changed = true;
             }
-            continue;
+            return;
         }
 
         char key[128];
         int rc = evo_provider_art_request(m_provider_id.c_str(),
-                                          m_art_urls[i].c_str(),
+                                          m_art_urls[a].c_str(),
                                           key, sizeof key);
-        if (rc < 0) {
-            /* Unusable URL, or the queue is full. Clear the URL so this row
-             * stops asking; a later navigation rebuilds the rows and tries
-             * again with a queue that has drained. */
-            m_art_urls[i].clear();
-            continue;
+        if (rc == -2) {
+            /* In-flight queue is full. Keep URL to retry next tick, stop asking this tick. */
+            queue_full = true;
+            return;
         }
-        m_art_keys[i] = key;
+        if (rc < 0) {
+            /* Unusable URL. Clear it so this row stops asking. */
+            m_art_urls[a].clear();
+            return;
+        }
+        m_art_keys[a] = key;
         if (rc == 1) {
             m_model.rows[i].art = Rml::String(key);
+            m_all_rows[a].art   = m_model.rows[i].art;
             changed = true;
         }
+    };
+
+    /* Pass 1: prioritize window around current focus */
+    for (size_t i = start; i < end; ++i) {
+        try_row(i);
+    }
+    /* Pass 2: remaining rows if queue didn't fill */
+    for (size_t i = 0; i < start && !queue_full; ++i) {
+        try_row(i);
+    }
+    for (size_t i = end; i < n && !queue_full; ++i) {
+        try_row(i);
     }
 
     if (changed && m_model_handle) {
@@ -696,9 +1036,29 @@ bool EvoRmlProviderHost::HandleKey(Key k)
             m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
         }
 
+        /*
+         * Who ends up with focus is RmlUi's business, but whether the key was
+         * USED is EVO's, and the rail depends on the answer.
+         *
+         * ProviderHostScreen hands Left to the document first and focuses the
+         * navigation rail if the document declines it - the leftmost column is
+         * the only place that can know it is the leftmost column, and the rail
+         * is a document in EVO's MAIN context that this one cannot reach. That
+         * contract was written on the screen side but never honoured here: this
+         * returned true for every direction, so Left was always consumed and
+         * the rail was unreachable from a provider screen by d-pad at all.
+         *
+         * Focus not moving is the signal. Nothing else distinguishes "moved to
+         * the card on the left" from "there was nothing to move to".
+         */
+        Rml::Element* before = m_context->GetFocusElement();
+
         m_context->ProcessKeyDown(id, 0);
         m_context->ProcessKeyUp(id, 0);
         m_dirty = true;
+
+        if (k == KeyLeft && m_context->GetFocusElement() == before)
+            return false;   /* -> the rail takes it */
         return true;
     }
 
@@ -719,19 +1079,41 @@ bool EvoRmlProviderHost::HandleKey(Key k)
     }
 
     case KeyBack: {
-        /*
-         * The exit contract. Deeper than the root: pop a level, consume the
-         * press. At the root: do NOT consume, and the caller returns to the
-         * rail. A provider screen that swallowed Back at its root would be a
-         * screen the user cannot leave, on a device whose only other option is
-         * the PS button - which is the close path that panicked the console.
-         */
-        if (m_stack.empty()) return false;
-        m_stack.pop_back();
-        if (!m_crumbs.empty()) m_crumbs.pop_back();
-        m_page = 0;
-        RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), 0);
-        return true;
+        /* If USB playlist picker is active, Back returns to initial setup screen */
+        if (m_is_usb_picker) {
+            ShowSetupScreen();
+            return true;
+        }
+
+        /* If search is active, Back clears search and restores current folder */
+        if (!m_model.query.empty()) {
+            Search("");
+            return true;
+        }
+
+        /* Deeper than root: pop a folder level */
+        if (!m_stack.empty()) {
+            m_stack.pop_back();
+            if (!m_crumbs.empty()) m_crumbs.pop_back();
+            m_page = 0;
+            RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), 0);
+            return true;
+        }
+
+        /* At root: if we arrived via USB playlist picker with multiple playlists, return to USB list */
+        if (!m_saved_usb_playlists.empty()) {
+            ShowUsbPlaylists(m_saved_usb_playlists);
+            return true;
+        }
+
+        /* At root: if a playlist is loaded, Back returns to the Select Playlist Source screen */
+        if (!m_model.empty) {
+            ShowSetupScreen();
+            return true;
+        }
+
+        /* Already on the setup screen: do not consume, allow caller to exit to Main Menu */
+        return false;
     }
 
     case KeySearch:
@@ -809,6 +1191,20 @@ void EvoRmlProviderHost::ApplyPendingActivation()
      * something the user is no longer looking at. */
     if (!hit) return;
 
+    /* If USB playlist picker is active, activating a row selects that playlist */
+    if (m_is_usb_picker) {
+        m_is_usb_picker = false;
+        if (m_provider && m_provider->set_source) {
+            m_provider->set_source(hit->id.c_str());
+            evo_provider_set_enabled(m_provider_id.c_str(), 1);
+            m_stack.clear();
+            m_crumbs.clear();
+            m_page = 0;
+            RequestPage("", 0);
+        }
+        return;
+    }
+
     PROV_LOG("'%s' activate '%s' (%s) title='%s'", m_provider_id.c_str(),
              hit->id.c_str(), hit->is_folder ? "folder" : "playable",
              hit->title.c_str());
@@ -840,6 +1236,10 @@ void EvoRmlProviderHost::Tick()
     evo_provider_art_poll();
     /* Adopt whatever finished decoding, and ask for the next batch. */
     PushArtRequests();
+    /* Grow the render window if focus has walked to the end of it. Cheap: it
+     * returns immediately unless the window is both partial and nearly used
+     * up, and it logs only on the rare frame where it actually grows. */
+    ExtendRowWindow();
     ApplyPendingActivation();
 }
 
@@ -890,11 +1290,124 @@ void EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
     r->FrameEnd();
 }
 
+int EvoRmlProviderHost::TakeAction()
+{
+    int act = m_pending_action;
+    m_pending_action = EVO_PROVIDER_ACTION_NONE;
+    return act;
+}
+
+void EvoRmlProviderHost::ShowUsbPlaylists(const std::vector<std::string>& paths)
+{
+    m_saved_usb_playlists = paths;
+    m_all_rows.clear();
+    m_model.rows.clear();
+    m_stack.clear();
+    m_crumbs.clear();
+    m_art_urls.clear();
+    m_art_keys.clear();
+    m_is_usb_picker = true;
+
+    for (const auto& path : paths) {
+        size_t last_slash = path.find_last_of("/\\");
+        std::string fname = (last_slash != std::string::npos) ? path.substr(last_slash + 1) : path;
+        std::string fdir = (last_slash != std::string::npos) ? path.substr(0, last_slash) : "";
+
+        EvoProviderRow r;
+        r.id = Rml::String(path.c_str());
+        r.title = Rml::String(fname.c_str());
+        r.subtitle = Rml::String(fdir.c_str());
+        r.is_folder = true;
+        r.art = "";
+        r.initial = "M3U";
+        r.is_live = false;
+        m_all_rows.push_back(r);
+        m_art_urls.emplace_back("");
+        m_art_keys.emplace_back();
+    }
+
+    m_model.is_folder_level = false;
+    m_model.count = (int)paths.size();
+    std::string crumb = std::string(m_provider ? m_provider->name : "IPTV") + " / USB Playlists";
+    m_model.breadcrumb = Rml::String(crumb.c_str());
+    m_model.loading = false;
+    m_model.empty = false;
+    m_model.query = "";
+    m_row_window = paths.size();
+    m_row_offset = 0;
+
+    PublishRowWindow();
+    SetStatus("Select an M3U playlist from USB to load channels", false);
+
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("empty");
+        m_model_handle.DirtyVariable("rows");
+        m_model_handle.DirtyVariable("count");
+        m_model_handle.DirtyVariable("breadcrumb");
+        m_model_handle.DirtyVariable("is_folder_level");
+        m_model_handle.DirtyVariable("loading");
+        m_model_handle.DirtyVariable("query");
+    }
+
+    m_needs_initial_focus = true;
+    m_dirty = true;
+}
+
+void EvoRmlProviderHost::ShowSetupScreen()
+{
+    m_saved_usb_playlists.clear();
+    m_stack.clear();
+    m_crumbs.clear();
+    m_all_rows.clear();
+    m_model.rows.clear();
+    m_art_urls.clear();
+    m_art_keys.clear();
+    m_row_window = 0;
+    m_row_offset = 0;
+    m_is_usb_picker = false;
+    m_model.query = "";
+    m_model.loading = false;
+    m_model.tuning = false;
+    m_model.empty = true;
+    m_model.count = 0;
+    m_model.is_folder_level = false;
+    m_model.breadcrumb = Rml::String(m_provider ? m_provider->name : "IPTV");
+    SetStatus("", false);
+
+    if (m_provider && m_provider->set_source) {
+        m_provider->set_source("");
+    }
+
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("rows");
+        m_model_handle.DirtyVariable("query");
+        m_model_handle.DirtyVariable("loading");
+        m_model_handle.DirtyVariable("tuning");
+        m_model_handle.DirtyVariable("empty");
+        m_model_handle.DirtyVariable("count");
+        m_model_handle.DirtyVariable("is_folder_level");
+        m_model_handle.DirtyVariable("breadcrumb");
+    }
+
+    m_needs_initial_focus = true;
+    m_dirty = true;
+}
+
 /* ------------------------------------------------------------------------- */
 /* C entry points                                                            */
 /* ------------------------------------------------------------------------- */
 
 extern "C" {
+
+void evo_rmlui_provider_show_setup(void)
+{
+    EvoRmlProviderHost::Instance().ShowSetupScreen();
+}
+
+int evo_rmlui_provider_take_action(void)
+{
+    return EvoRmlProviderHost::Instance().TakeAction();
+}
 
 int evo_rmlui_provider_open(const char *provider_id, int width, int height)
 {
@@ -942,6 +1455,26 @@ int evo_rmlui_provider_key(int key)
 void evo_rmlui_provider_set_loading(int loading, const char *status)
 {
     EvoRmlProviderHost::Instance().SetLoading(loading != 0, status ? status : "");
+}
+
+void evo_rmlui_provider_set_tuning(int tuning)
+{
+    EvoRmlProviderHost::Instance().SetTuning(tuning != 0);
+}
+
+void evo_rmlui_provider_set_status(const char *status, int error)
+{
+    EvoRmlProviderHost::Instance().SetStatus(status ? status : "", error != 0);
+}
+
+void evo_rmlui_provider_search(const char *query)
+{
+    EvoRmlProviderHost::Instance().Search(query);
+}
+
+const char* evo_rmlui_provider_get_query(void)
+{
+    return EvoRmlProviderHost::Instance().CurrentQuery();
 }
 
 } /* extern "C" */

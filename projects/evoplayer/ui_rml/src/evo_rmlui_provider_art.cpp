@@ -21,6 +21,11 @@
  * to a library paints immediately; and a malformed image is contained by
  * FFmpeg's own probing rather than by code written here.
  *
+ * The cost of going through image2 is that the decoder is chosen from the
+ * FILENAME, so the cache file has to be named for its sniffed type - see
+ * sniff_ext(). A poster whose format has no decoder in this build (WebP, GIF)
+ * is refused on arrival rather than written and failed later.
+ *
  * The decoded texture lives in the render interface's "evo:mem/" registry,
  * which both backends already resolve before touching the filesystem
  * (evo_rmlui_render.cpp LoadTexture, evo_rmlui_render_agc.cpp). Nothing in the
@@ -53,6 +58,7 @@ extern "C" {
 #include "evo_provider_bundle.h"
 #include "evo_net.h"
 #include "evo_data_path.h"
+#include "evo_provider_log.h"
 
 /*
  * EVO_PROVIDER_ART_NO_DECODE: host renderer only.
@@ -130,6 +136,46 @@ std::string url_hash(const char* url)
     snprintf(buf, sizeof buf, "%016llx", (unsigned long long)h);
     return std::string(buf);
 }
+
+/*
+ * The cache file's extension is load-bearing, not cosmetic. FFmpeg's image2
+ * demuxer picks the decoder from the FILENAME (ff_guess_image2_codec), never
+ * from the content. This cache used to name every download "<hash>.img", and
+ * ".img" is in that table - it maps to AV_CODEC_ID_GEM, a format the FFmpeg
+ * profile does not build a decoder for. So every logo opened fine and then
+ * died at avcodec_find_decoder, which reads as "no logos" with nothing in the
+ * log. Naming the file for what the bytes actually are keeps the decode on the
+ * png/mjpeg decoders scripts/build-ffmpeg.sh does enable.
+ */
+const char* sniff_ext(const char* bytes, size_t len)
+{
+    if (len >= 8 && memcmp(bytes, "\x89PNG\r\n\x1a\n", 8) == 0) return ".png";
+    if (len >= 3 && memcmp(bytes, "\xff\xd8\xff", 3) == 0)      return ".jpg";
+    return nullptr;   /* WebP and GIF land here: no decoder in this build. */
+}
+
+/* Every extension sniff_ext() can produce, for locating a file a previous
+ * session cached when the bytes are not in hand to sniff again. */
+const char* const kArtExts[] = { ".png", ".jpg" };
+
+/*
+ * Why this module logs at all, and why it is capped.
+ *
+ * It used to log nothing whatsoever, so "no logos" was indistinguishable from
+ * "no logos in the playlist", a 403, a write that failed, and a decode that
+ * failed - none of which leave any other trace. But art is driven from Tick(),
+ * i.e. every frame, and a per-frame PROV_LOG in this path is what produced a
+ * 16.9 MB log and cost frame rate once already.
+ *
+ * So: every line below is on a ONE-SHOT path (a per-key state transition that
+ * happens at most once, because `failed`/`ready` latch), and the total is capped
+ * anyway in case a level has hundreds of broken posters.
+ */
+int art_log_budget = 24;
+#define ART_LOG(...)                                                          \
+    do {                                                                      \
+        if (art_log_budget > 0) { art_log_budget--; PROV_LOG(__VA_ARGS__); }  \
+    } while (0)
 
 void touch(const std::string& key)
 {
@@ -290,6 +336,9 @@ done:
 
 struct FetchCtx {
     std::string key;
+    /* The cache path without an extension. on_art() appends the one it sniffs
+     * from the bytes, because the type is not known before they arrive. */
+    std::string base;
 };
 
 void on_art(int success, int status, const char* body, size_t len, void* ud)
@@ -305,13 +354,43 @@ void on_art(int success, int status, const char* body, size_t len, void* ud)
         /* Remember the failure so the same broken URL is not retried on every
          * page turn - a poster wall of 404s would otherwise be 500 requests
          * per navigation. */
+        ART_LOG("art FETCH fail status=%d ok=%d len=%zu key=%s",
+                status, success, len, ctx->key.c_str());
+        it->second.failed = true;
+        delete ctx;
+        return;
+    }
+
+    /* Name the file for what the bytes actually are (see sniff_ext), then make
+     * sure the directory exists: the provider's "art/" level - and, when the UI
+     * is embedded rather than fetched, the provider directory above it - is not
+     * created by anything else, so this fopen used to fail every time. */
+    const char* ext = sniff_ext(body, len);
+    if (!ext) {
+        ART_LOG("art FORMAT unsupported magic=%02x%02x%02x%02x len=%zu key=%s",
+                (unsigned char)body[0], (unsigned char)(len > 1 ? body[1] : 0),
+                (unsigned char)(len > 2 ? body[2] : 0),
+                (unsigned char)(len > 3 ? body[3] : 0), len, ctx->key.c_str());
+        it->second.failed = true;
+        delete ctx;
+        return;
+    }
+    it->second.file = ctx->base + ext;
+
+    if (evo_bundle_ensure_parent_dirs(it->second.file.c_str()) != 0) {
+        ART_LOG("art MKDIR fail path=%s", it->second.file.c_str());
         it->second.failed = true;
         delete ctx;
         return;
     }
 
     FILE* f = fopen(it->second.file.c_str(), "wb");
-    if (!f) { it->second.failed = true; delete ctx; return; }
+    if (!f) {
+        ART_LOG("art OPEN fail path=%s", it->second.file.c_str());
+        it->second.failed = true;
+        delete ctx;
+        return;
+    }
     size_t put = fwrite(body, 1, len, f);
     bool wrote = (put == len) && (fclose(f) == 0);
     if (!wrote) {
@@ -351,38 +430,49 @@ extern "C" int evo_provider_art_request(const char* provider_id, const char* url
         if (it->second.failed) return -1;
         if (it->second.ready) { touch(key); return 1; }
         /* Bytes are on disk from a previous session or an earlier eviction:
-         * queue a decode rather than a download. */
-        FILE* f = fopen(it->second.file.c_str(), "rb");
-        if (f) { fclose(f); s.arrived.push_back(key); }
+         * queue a decode rather than a download. An entry still in flight has
+         * no filename yet, so there is nothing to look for. */
+        if (!it->second.file.empty()) {
+            FILE* f = fopen(it->second.file.c_str(), "rb");
+            if (f) { fclose(f); s.arrived.push_back(key); }
+        }
         return 0;
     }
 
     /* Where the raw bytes go. Through evo_bundle_path() because that is the
      * only sanctioned way to build a path inside a provider's directory, even
-     * for a name this file generated itself. */
-    char path[512];
-    std::string rel = "art/" + h + ".img";
-    if (evo_bundle_path(provider_id, rel.c_str(), path, sizeof path) != 0)
+     * for a name this file generated itself. The extension is deliberately
+     * absent here - it is whatever on_art() sniffs from the bytes. */
+    char base[512];
+    std::string rel = "art/" + h;
+    if (evo_bundle_path(provider_id, rel.c_str(), base, sizeof base) != 0)
         return -1;
 
     Entry e;
     e.key = key;
-    e.file = path;
     s.by_key.emplace(key, e);
 
-    /* Already cached on disk from a previous run: no network at all. */
-    FILE* f = fopen(path, "rb");
-    if (f) { fclose(f); s.arrived.push_back(key); return 0; }
-
-    if (s.in_flight >= kMaxInFlight) {
-        /* Dropped, not queued. The element draws empty and the next navigation
-         * asks again - better than growing an unbounded backlog behind a
-         * catalog request the user is actually waiting for. */
-        s.by_key.erase(key);
-        return -1;
+    /* Already cached on disk from a previous run: no network at all. Which
+     * extension it was written under is not recorded anywhere, so try each. */
+    for (const char* ext : kArtExts) {
+        std::string cached = std::string(base) + ext;
+        FILE* f = fopen(cached.c_str(), "rb");
+        if (f) {
+            fclose(f);
+            s.by_key[key].file = cached;
+            s.arrived.push_back(key);
+            return 0;
+        }
     }
 
-    FetchCtx* ctx = new FetchCtx{key};
+    if (s.in_flight >= kMaxInFlight) {
+        /* Queue full. Do not erase or drop permanently - return -2 so the host
+         * keeps the URL and tries again on a future tick when in-flight slots drain. */
+        s.by_key.erase(key);
+        return -2;
+    }
+
+    FetchCtx* ctx = new FetchCtx{key, base};
     if (evo_net_request_async("GET", url, nullptr, nullptr, 0, on_art, ctx) != 0) {
         delete ctx;
         s.by_key.erase(key);
@@ -427,11 +517,20 @@ extern "C" void evo_provider_art_poll(void)
         std::vector<uint32_t> px;
         int w = 0, h = 0;
         if (!decode_image(it->second.file.c_str(), px, w, h)) {
+            ART_LOG("art DECODE fail path=%s", it->second.file.c_str());
             it->second.failed = true;
             /* A file that will not decode is not going to start; drop it so
              * the disk cache does not keep handing it back. */
             remove(it->second.file.c_str());
             continue;
+        }
+
+        /* One line for the first poster that works, so a log can distinguish
+         * "the path is broken" from "this level simply has no art". */
+        static bool s_logged_first_ok = false;
+        if (!s_logged_first_ok) {
+            s_logged_first_ok = true;
+            ART_LOG("art OK first poster %dx%d key=%s", w, h, it->second.key.c_str());
         }
 
         r->SetMemoryTexture(it->second.key, px.data(), w, h);

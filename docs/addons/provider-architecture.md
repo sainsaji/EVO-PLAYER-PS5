@@ -279,6 +279,44 @@ Supported and worth knowing:
 - **dp units.** Every EVO stylesheet is authored against a 1920×1080 canvas in
   `dp`; the context's density-independent ratio scales it to the panel. Use
   `dp`, not `px`.
+- **Leave 152dp of gutter on the left.** EVO's navigation rail is a document in
+  EVO's *main* context, composited over the provider context after it has
+  drawn (`ProviderHostScreen::render`). It is not in the bundle's layout and
+  nothing reserves room for it, so a bundle that starts at x=0 has its first
+  column drawn underneath the rail. `assets/providers/iptv/main.rcss` puts the
+  whole page in a `#tv-pane` at `left: 152dp`.
+
+### 6.3.1 EVO's shared assets
+
+EVO's embedded asset bundle (#60) is reachable from a provider document under
+the path `/assets/...`:
+
+```
+/assets/icons/btn_cross.png      the PlayStation glyphs
+/assets/icons/icon_folder.png    and the rest of the icon set
+/assets/wallpaper/settings_bg.png
+/assets/fonts/LatoLatin-Regular.ttf
+```
+
+The mechanism is the leading slash. RmlUi's `SystemInterface::JoinPath` treats
+a path starting with `/` as absolute and **strips that one character** instead
+of resolving it against the document, which hands `EvoRmlFileInterface::Open`
+the string `assets/icons/btn_cross.png` — one of the prefixes
+`evo_rmlui_bundle_find()` normalises away, so the lookup hits the embedded
+bundle. The same string works in the host preview and on the console, and it
+never touches the filesystem. `/app0/assets/...` does **not** work: the leading
+slash is gone by the time the bundle is searched.
+
+Two rules come with it:
+
+- **It is optional, and a bundle must survive without it.** A missing texture
+  renders as nothing, not as an error, so every one of these belongs in a box
+  that still reads correctly when the image does not arrive — a glyph badge
+  with a border, a preview plate with a background.
+- **It is EVO's asset set, not a stable API for third parties.** A bundle on a
+  provider's own server should ship its own images in its manifest. The IPTV
+  bundle uses the shared ones because it is EVO's own first-party bundle and
+  the alternative was checking a copy of EVO's glyphs into this repo twice.
 
 ### 6.4 The one real backend difference
 
@@ -300,6 +338,15 @@ Provider contexts do **not** receive EVO's theme push. `evo_rmlui_set_theme`
 stamps colours onto every element as inline properties, which would silently
 overwrite exactly what a bundle exists to supply. A bundle's colours are its
 own, and it must set every colour it wants.
+
+The consequence, for a bundle that wants to look like the rest of EVO: it has
+to write EVO's palette out as literals and it will not follow a theme change.
+The IPTV bundle does exactly that — its stylesheet opens with the MIDNIGHT
+tokens spelled out, and the header of `main.rml` says why a first-party
+provider chooses to match. That choice is the bundle's; nothing about the seam
+pushes it either way, and what the seam proves is still on screen, because the
+IPTV bundle draws a channel grid that drills into groups where EVO draws a
+nine-row list.
 
 ---
 

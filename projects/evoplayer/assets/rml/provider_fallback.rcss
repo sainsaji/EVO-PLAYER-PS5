@@ -36,8 +36,23 @@ div, span, p, img {
     height: 100%;
     padding-top: 48dp;
     padding-bottom: 48dp;
-    padding-left: 96dp;
-    padding-right: 96dp;
+    /*
+     * 152dp of that left inset is EVO's navigation rail.
+     *
+     * The rail is a document in EVO's MAIN context and is composited over a
+     * provider context afterwards (ProviderHostScreen::render), so it is not
+     * in this document's layout and nothing here reserves room for it
+     * automatically. At the old 96dp this skin drew its title, its error bar
+     * and its first column of initials underneath the rail - invisible in the
+     * host preview until the preview started compositing the rail too, and
+     * never noticed on hardware because the screen it happens on is the one
+     * nobody wants to be looking at.
+     *
+     * Every bundle owes the same gutter; it is in the vocabulary section of
+     * docs/addons/provider-architecture.md for that reason.
+     */
+    padding-left: 200dp;
+    padding-right: 64dp;
 }
 
 /* ---- header ------------------------------------------------------------ */
@@ -167,7 +182,9 @@ div, span, p, img {
 
 .pf-text {
     display: inline-block;
-    width: 1200dp;
+    /* 1656dp of content width, less the art column (72 + 20 of padding) and
+     * the right-hand meta column (200). */
+    width: 1330dp;
     padding-left: 20dp;
     vertical-align: top;
 }

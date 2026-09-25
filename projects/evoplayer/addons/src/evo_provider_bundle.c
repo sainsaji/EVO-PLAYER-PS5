@@ -258,7 +258,7 @@ int evo_bundle_path(const char *provider_id, const char *rel,
 }
 
 /* mkdir -p over the directory part of `path`, inside the bundle dir only. */
-static int ensure_parent_dirs(const char *path)
+int evo_bundle_ensure_parent_dirs(const char *path)
 {
     char tmp[512];
     snprintf(tmp, sizeof tmp, "%s", path);
@@ -511,7 +511,7 @@ static evo_bundle_status_t write_entry(const char *provider_id,
     char path[512];
     if (evo_bundle_path(provider_id, e->path, path, sizeof path) != 0)
         return EVO_BUNDLE_ERR_PATH;
-    if (ensure_parent_dirs(path) != 0) return EVO_BUNDLE_ERR_WRITE;
+    if (evo_bundle_ensure_parent_dirs(path) != 0) return EVO_BUNDLE_ERR_WRITE;
 
     FILE *f = fopen(path, "wb");
     if (!f) return EVO_BUNDLE_ERR_WRITE;

@@ -88,6 +88,7 @@ static struct {
     char  playlist_url[EVO_PROVIDER_MAX_URL];
     char  xmltv_url[EVO_PROVIDER_MAX_URL];
     char  bundle_url[EVO_PROVIDER_MAX_URL];
+    char  last_url[EVO_PROVIDER_MAX_URL];
 
     channel_t *ch;
     int        ch_count;
@@ -175,11 +176,17 @@ static char *extinf_attr(const char *line, const char *attr)
         if (*q != '=') continue;
         q++;
         while (*q == ' ') q++;
-        if (*q != '"') continue;
-        q++;
-        const char *end = strchr(q, '"');
-        if (!end) return NULL;
-        return dup_range(q, end);
+        if (*q == '"' || *q == '\'') {
+            char quote = *q++;
+            const char *end = strchr(q, quote);
+            if (!end) return NULL;
+            return dup_range(q, end);
+        } else if (*q && *q != ' ' && *q != ',') {
+            /* Unquoted value up to space, comma, or end of line */
+            const char *end = q;
+            while (*end && *end != ' ' && *end != '\t' && *end != ',' && *end != '\r' && *end != '\n') end++;
+            if (end > q) return dup_range(q, end);
+        }
     }
     return NULL;
 }
@@ -273,30 +280,37 @@ static void load_conf(void)
         if (!eq) continue;
         *eq = '\0';
         const char *k = line, *v = eq + 1;
-        if      (strcmp(k, "playlist") == 0) snprintf(G.playlist_url, sizeof G.playlist_url, "%s", v);
-        else if (strcmp(k, "xmltv")    == 0) snprintf(G.xmltv_url,    sizeof G.xmltv_url,    "%s", v);
-        else if (strcmp(k, "bundle")   == 0) snprintf(G.bundle_url,   sizeof G.bundle_url,   "%s", v);
+        if (strcmp(k, "playlist") == 0) {
+            /* Ignore stale local dev server URLs from previous testing (e.g. :8099) */
+            if (!strstr(v, ":8099")) {
+                if (v[0] == '/') snprintf(G.playlist_file, sizeof G.playlist_file, "%s", v);
+                else {
+                    snprintf(G.playlist_url,  sizeof G.playlist_url,  "%s", v);
+                    if (!G.last_url[0]) {
+                        snprintf(G.last_url,  sizeof G.last_url,      "%s", v);
+                    }
+                }
+            }
+        }
+        else if (strcmp(k, "last_url") == 0) {
+            if (!strstr(v, ":8099")) {
+                snprintf(G.last_url, sizeof G.last_url, "%s", v);
+            }
+        }
+        else if (strcmp(k, "xmltv") == 0) snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", v);
     }
     fclose(f);
 }
 
 /*
- * Pick the playlist source. Called from init() and from every rebind, so a
- * stick inserted after boot is picked up on the next data-root rebind.
- *
- * An explicit playlist= URL always wins; the USB file is the fallback that
- * makes the provider work with no configuration at all.
+ * Pick the playlist source. Called from init() and from every rebind.
  */
 static void resolve_playlist_source(void)
 {
-    G.playlist_file[0] = 0;
-    if (G.playlist_url[0])
-        return;
-
-    const char *found = find_usb_playlist();
-    if (found) {
-        snprintf(G.playlist_file, sizeof G.playlist_file, "%s", found);
-        PROV_LOG("iptv: using USB playlist '%s' (no playlist= configured)", found);
+    /* If a local path is set in playlist_url, move to playlist_file */
+    if (G.playlist_url[0] == '/') {
+        snprintf(G.playlist_file, sizeof G.playlist_file, "%s", G.playlist_url);
+        G.playlist_url[0] = 0;
     }
 }
 
@@ -304,9 +318,18 @@ int provider_iptv_save_conf(void)
 {
     FILE *f = fopen(evo_data_path(IPTV_CONF), "w");
     if (!f) return -1;
-    fprintf(f, "playlist=%s\n", G.playlist_url);
-    fprintf(f, "xmltv=%s\n",    G.xmltv_url);
-    fprintf(f, "bundle=%s\n",   G.bundle_url);
+    if (G.playlist_url[0])
+        fprintf(f, "playlist=%s\n", G.playlist_url);
+    else if (G.playlist_file[0])
+        fprintf(f, "playlist=%s\n", G.playlist_file);
+    else
+        fprintf(f, "playlist=\n");
+
+    if (G.last_url[0])
+        fprintf(f, "last_url=%s\n", G.last_url);
+
+    if (G.xmltv_url[0])
+        fprintf(f, "xmltv=%s\n", G.xmltv_url);
     fclose(f);
     return 0;
 }
@@ -442,6 +465,7 @@ static int parse_m3u(const char *body, size_t len)
             free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg);
             pend_group = extinf_attr(line, "group-title");
             pend_logo  = extinf_attr(line, "tvg-logo");
+            if (!pend_logo) pend_logo = extinf_attr(line, "logo");
             pend_tvg   = extinf_attr(line, "tvg-id");
 
             /* The display name is everything after the LAST comma on the line,
@@ -449,7 +473,10 @@ static int parse_m3u(const char *body, size_t len)
              * own. Falls back to tvg-name, then to the URL's basename later. */
             const char *comma = strrchr(line, ',');
             pend_name = comma ? dup_str(comma + 1) : extinf_attr(line, "tvg-name");
-            if (pend_name) trim(pend_name);
+            if (pend_name)  trim(pend_name);
+            if (pend_logo)  trim(pend_logo);
+            if (pend_group) trim(pend_group);
+            if (pend_tvg)   trim(pend_tvg);
             armed = 1;
 
         } else if (strncmp(line, "#EXTGRP", 7) == 0) {
@@ -667,6 +694,47 @@ static void parse_xmltv(const char *body, size_t len)
     }
 
     free(next_start);
+
+    /*
+     * Scan <channel> elements in XMLTV for logos (<icon src="...">)
+     * if the channel didn't already have a logo from the playlist.
+     */
+    const char *cp = body;
+    while (cp < end) {
+        const char *oc = strstr(cp, "<channel");
+        if (!oc || oc >= end) break;
+        const char *close = strstr(oc, "</channel>");
+        const char *ce = close ? close : end;
+
+        char chan_id[96] = {0};
+        const char *hdr_end = memchr(oc, '>', (size_t)(ce - oc));
+        if (hdr_end) {
+            tag_attr(oc, hdr_end, "id", chan_id, sizeof chan_id);
+            if (chan_id[0]) {
+                const char *ic = strstr(hdr_end, "<icon");
+                if (ic && ic < ce) {
+                    const char *ic_end = memchr(ic, '>', (size_t)(ce - ic));
+                    if (ic_end) {
+                        char icon_src[256] = {0};
+                        tag_attr(ic, ic_end, "src", icon_src, sizeof icon_src);
+                        if (icon_src[0]) {
+                            for (int i = 0; i < G.ch_count; ++i) {
+                                if (G.ch[i].tvg_id[0] && strcmp(G.ch[i].tvg_id, chan_id) == 0) {
+                                    if (!G.ch[i].logo || !G.ch[i].logo[0]) {
+                                        free(G.ch[i].logo);
+                                        G.ch[i].logo = dup_str(icon_src);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cp = close ? close + 10 : (hdr_end ? hdr_end + 1 : end);
+    }
+
     G.epg_loaded = 1;
 }
 
@@ -752,7 +820,7 @@ static int emit_page(const char *parent_id, int page,
         int real_groups = 0;
         for (int i = 0; i < G.gr_count; ++i)
             if (strcmp(G.gr[i].name, "Ungrouped") != 0) real_groups++;
-        if (real_groups > 0 && G.gr_count > 1) {
+        if (real_groups > 0) {
             total = G.gr_count;
             is_group_page = 1;
         } else {
@@ -1021,9 +1089,10 @@ static const char *iptv_ui_bundle_url(void)
 
 static const char *iptv_get_source(void)
 {
-    /* Show the URL if one is set; otherwise the USB file that is standing in
-     * for it, so the setup field tells the user what is actually in use. */
+    /* Show the URL if one is set; otherwise the last URL typed if any;
+     * otherwise the USB file that is standing in for it. */
     if (G.playlist_url[0]) return G.playlist_url;
+    if (G.last_url[0])     return G.last_url;
     if (G.playlist_file[0]) return G.playlist_file;
     return "";
 }
@@ -1065,6 +1134,7 @@ static int iptv_set_source(const char *value)
 
     if (is_url) {
         snprintf(G.playlist_url, sizeof G.playlist_url, "%s", value);
+        snprintf(G.last_url,     sizeof G.last_url,     "%s", value);
         G.playlist_file[0] = 0;
     } else {
         G.playlist_url[0] = 0;
@@ -1081,7 +1151,7 @@ const evo_provider_t evo_provider_iptv = {
     .name          = "IPTV",
     .icon          = "icon_emby.png",   /* the shared provider rail slot (#90) */
     .caps          = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
-                     EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_UI |
+                     EVO_PROVIDER_CAP_RESOLVE |
                      EVO_PROVIDER_CAP_LIVE    | EVO_PROVIDER_CAP_CONFIG,
     .api_version   = EVO_PROVIDER_API_VERSION,
     .init          = iptv_init,
@@ -1092,7 +1162,7 @@ const evo_provider_t evo_provider_iptv = {
     .search        = iptv_search,
     .resolve       = iptv_resolve,
     .report_progress = NULL,
-    .ui_bundle_url = iptv_ui_bundle_url,
+    .ui_bundle_url = NULL,
     .get_source    = iptv_get_source,
     .set_source    = iptv_set_source,
 };

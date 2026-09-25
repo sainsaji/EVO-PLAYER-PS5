@@ -75,6 +75,18 @@ void evo_agc_writer_init(SceAgcCommandBuffer *cb, uint32_t *buffer, uint32_t cap
 
 uint32_t evo_agc_writer_dwords_written(const SceAgcCommandBuffer *cb);
 
+/*
+ * How many times the command buffer ran out of room since the last reset.
+ *
+ * Non-zero means a frame was TRUNCATED: the out-of-space callback has no way to
+ * hand sceAgc more room, so whatever it was about to write is dropped and the
+ * frame goes to the panel with a piece of the UI missing. That used to be
+ * completely silent, which is what made a 184-row provider level so hard to
+ * diagnose - it is reported in the `agc health` line as dcb_full.
+ */
+uint32_t evo_agc_writer_out_of_space_count(void);
+void     evo_agc_writer_reset_out_of_space_count(void);
+
 int evo_agc_writer_set_target(SceAgcCommandBuffer *cb, const SceAgcRegister *mrt, uint32_t count);
 
 int evo_agc_writer_set_viewport(SceAgcCommandBuffer *cb, SceAgcRegister *gpu_regs,

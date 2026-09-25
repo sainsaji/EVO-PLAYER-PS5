@@ -1225,6 +1225,26 @@ static void pump_provider(std::vector<uint32_t>& fb, int width, int height,
     }
 }
 
+/*
+ * One provider shot, composited the way the console composites it.
+ *
+ * The navigation rail is a document in EVO's MAIN context, so it does not come
+ * with the provider's own - ProviderHostScreen::render draws the provider and
+ * then lays the rail over it. The preview has to do the same, or every
+ * provider bundle is judged against a frame the console never shows: the 152dp
+ * gutter EVO's screens leave for the rail reads as a stray left margin, and
+ * "is this consistent with the rest of the app" cannot be answered from the
+ * picture at all.
+ */
+static void provider_shot(std::vector<uint32_t>& fb, int width, int height,
+                          const char* name) {
+    evo_rmlui_provider_render(fb.data(), width, height);
+    evo_rmlui_render_nav_overlay(fb.data(), width, height);
+    std::string out = std::string("output/uiview/") + name + ".bmp";
+    save_bmp_24(out.c_str(), fb.data(), width, height);
+    std::cerr << "uiview: ok -> " << name << std::endl;
+}
+
 static void render_provider_screens(std::vector<uint32_t>& fb, int width, int height) {
     const char* root = std::getenv("EVO_DATA_DIR_OVERRIDE");
     if (!root || !*root) {
@@ -1243,6 +1263,36 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
     evo_provider_mgr_rebind();
     evo_provider_set_enabled("iptv", 1);
 
+    /* Section 2 is the rail slot ProviderHostScreen occupies - it reports
+     * ScreenId::EmbyBrowse, which ScreenManager::getSectionForScreen maps
+     * there. Set before the first shot so provider_shot() has a rail to
+     * composite. */
+    set_nav(2, 0);
+
+    /* --- IPTV unconfigured (Setup screen: URL & USB cards) -------------- */
+    char conf_real[768];
+    char conf_temp[768];
+    std::snprintf(conf_real, sizeof conf_real, "%s/iptv.conf", root);
+    std::snprintf(conf_temp, sizeof conf_temp, "%s/iptv.conf.tmp", root);
+    std::rename(conf_real, conf_temp);
+    evo_provider_mgr_rebind();
+    evo_provider_set_enabled("iptv", 1);
+
+    if (evo_rmlui_provider_open("iptv", width, height)) {
+        pump_provider(fb, width, height, 10);
+        provider_shot(fb, width, height, "rml_provider_iptv_setup");
+
+        /* Press right to move focus to the USB card */
+        evo_rmlui_provider_key(3 /* KeyRight */);
+        pump_provider(fb, width, height, 2);
+        provider_shot(fb, width, height, "rml_provider_iptv_setup_usb");
+
+        evo_rmlui_provider_close();
+    }
+    std::rename(conf_temp, conf_real);
+    evo_provider_mgr_rebind();
+    evo_provider_set_enabled("iptv", 1);
+
     /* --- the provider's own bundle ------------------------------------- */
     if (evo_rmlui_provider_open("iptv", width, height)) {
         /* Enough frames for: the manifest GET, each asset GET, the cache
@@ -1252,9 +1302,7 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
          * before the first shot - it is taken on the render after the rows
          * arrive, and racing it produces a ring-less baseline. */
         pump_provider(fb, width, height, 4);
-        evo_rmlui_provider_render(fb.data(), width, height);
-        save_bmp_24("output/uiview/rml_provider_iptv.bmp", fb.data(), width, height);
-        std::cerr << "uiview: ok -> rml_provider_iptv" << std::endl;
+        provider_shot(fb, width, height, "rml_provider_iptv");
 
         /*
          * Two presses to the right. This is RmlUi's own spatial navigation
@@ -1266,9 +1314,7 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
         pump_provider(fb, width, height, 2);
         evo_rmlui_provider_key(3 /* KeyRight */);
         pump_provider(fb, width, height, 2);
-        evo_rmlui_provider_render(fb.data(), width, height);
-        save_bmp_24("output/uiview/rml_provider_iptv_focus.bmp", fb.data(), width, height);
-        std::cerr << "uiview: ok -> rml_provider_iptv_focus" << std::endl;
+        provider_shot(fb, width, height, "rml_provider_iptv_focus");
 
         /*
          * Activate the focused group. Exercises the whole chain: the bundle's
@@ -1278,13 +1324,90 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
          */
         evo_rmlui_provider_key(4 /* KeyAccept */);
         pump_provider(fb, width, height, 20);
-        evo_rmlui_provider_render(fb.data(), width, height);
-        save_bmp_24("output/uiview/rml_provider_iptv_channels.bmp", fb.data(), width, height);
-        std::cerr << "uiview: ok -> rml_provider_iptv_channels" << std::endl;
+        provider_shot(fb, width, height, "rml_provider_iptv_channels");
+
+        /*
+         * Walk Left off the left edge. The document must CONSUME each press
+         * that moves focus and DECLINE the one that cannot, because
+         * ProviderHostScreen reads that refusal as "give the navigation rail
+         * focus" - the rail lives in EVO's main context and no provider
+         * document can reach it. A build that consumes every Left strands the
+         * user in the grid with no way back to the rail by d-pad, which is not
+         * visible in any screenshot.
+         */
+        /* Two to the right first, so the walk back has to CONSUME presses
+         * before it declines one - otherwise focus starts on the leftmost card
+         * and a build that declines every Left would pass just as happily. */
+        evo_rmlui_provider_key(3 /* KeyRight */);
+        pump_provider(fb, width, height, 1);
+        evo_rmlui_provider_key(3 /* KeyRight */);
+        pump_provider(fb, width, height, 1);
+
+        int left_presses = 0;
+        bool declined = false;
+        for (; left_presses < 8; ++left_presses) {
+            if (evo_rmlui_provider_key(2 /* KeyLeft */) == 0) { declined = true; break; }
+            pump_provider(fb, width, height, 1);
+        }
+        std::cerr << "uiview: provider Left declined after " << left_presses
+                  << " press(es): " << (declined ? "yes (rail reachable)"
+                                                 : "NO - rail unreachable")
+                  << std::endl;
 
         evo_rmlui_provider_close();
     } else {
         std::cerr << "uiview: provider host would not open for 'iptv'" << std::endl;
+    }
+
+    /* --- the row window, past the point where it starts sliding -------- */
+    /*
+     * 120 groups against a 48-row cap, walked with the d-pad until the window
+     * has had to slide several times.
+     *
+     * The shot is worth little on its own - one more grid of folder cards. The
+     * value is in the "row window slide" lines the run prints and in the fact
+     * that it gets there at all: the slide moves RmlUi's focus itself to
+     * compensate for the rows shifting underneath it, and if that arithmetic is
+     * wrong the focus either sticks at the window edge (no further slides are
+     * logged) or runs away (the logged focus index jumps). Both are visible in
+     * the output of a host run, and neither is visible in a screenshot.
+     */
+    {
+        char big_conf[1024];
+        std::snprintf(big_conf, sizeof big_conf,
+                      "playlist=http://127.0.0.1:%s/media/iptv_big.m3u\n",
+                      std::getenv("EVO_UIVIEW_PROVIDER_PORT")
+                          ? std::getenv("EVO_UIVIEW_PROVIDER_PORT") : "18099");
+        FILE* f = std::fopen(conf_real, "w");
+        if (f) { std::fputs(big_conf, f); std::fclose(f); }
+        evo_bundle_clear("iptv");
+        evo_provider_mgr_rebind();
+        evo_provider_set_enabled("iptv", 1);
+
+        if (evo_rmlui_provider_open("iptv", width, height)) {
+            pump_provider(fb, width, height, 60);
+            /* Well past EVO_PROVIDER_ROW_WINDOW_MAX (48) so the window has to
+             * grow to the cap and then slide repeatedly. */
+            for (int i = 0; i < 80; ++i) {
+                evo_rmlui_provider_key(1 /* KeyDown */);
+                pump_provider(fb, width, height, 1);
+            }
+            provider_shot(fb, width, height, "rml_provider_iptv_scroll");
+
+            /*
+             * Into a group, so the level below is CHANNEL rows - the only rows
+             * that carry art. Folder rows have no poster by design, so the
+             * artwork path is not reachable from the level above no matter how
+             * far it is scrolled.
+             */
+            evo_rmlui_provider_key(4 /* KeyAccept */);
+            pump_provider(fb, width, height, 40);
+
+            evo_rmlui_provider_close();
+        } else {
+            std::cerr << "uiview: provider host would not open for the big playlist"
+                      << std::endl;
+        }
     }
 
     /* --- the embedded fallback skin, with a reason on it ---------------- */
@@ -1315,15 +1438,17 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
 
         if (evo_rmlui_provider_open("iptv", width, height)) {
             pump_provider(fb, width, height, 60);
-            evo_rmlui_provider_render(fb.data(), width, height);
-            save_bmp_24("output/uiview/rml_provider_fallback.bmp", fb.data(), width, height);
-            std::cerr << "uiview: ok -> rml_provider_fallback" << std::endl;
+            provider_shot(fb, width, height, "rml_provider_fallback");
             evo_rmlui_provider_close();
         }
     }
 
     evo_provider_art_clear();
     evo_provider_mgr_shutdown();
+
+    /* Nav state is sticky across renders; hand it back hidden so it does not
+     * bleed into the modal shots that follow. */
+    hide_nav();
 }
 
 static void render_stress_screens(std::vector<uint32_t>& fb, int width, int height) {

@@ -81,6 +81,7 @@ struct EvoProviderModel {
     Rml::String status;         /* "" when idle, else a message to show */
     Rml::String query;          /* current search term, "" when browsing */
     bool loading = false;
+    bool tuning = false;
     bool has_error = false;
     bool empty = false;         /* loaded, and there is genuinely nothing */
     /* True when `rows` is a level of FOLDERS rather than playable items - an
@@ -91,6 +92,65 @@ struct EvoProviderModel {
     int  count = 0;
     std::vector<EvoProviderRow> rows;
 };
+
+/* ------------------------------------------------------------------------- */
+/* The render budget                                                         */
+/* ------------------------------------------------------------------------- */
+/*
+ * How many rows EVO will materialise into a provider document at once.
+ *
+ * This is EVO's limit, not the provider's, and it belongs here rather than in
+ * a bundle because only EVO knows what its renderer costs. Measured on
+ * hardware with a 184-group IPTV playlist: every row became a card, every card
+ * contributed several clipped elements, and the sceAgc backend logged ~2465
+ * scissor changes a frame until the 2MB command buffer filled. Commands past
+ * that point are simply not submitted, so the tail of the document - the
+ * bundle's status strip, and then EVO's own navigation rail composited after
+ * it - vanished, differently on each frame. It read as flashing.
+ *
+ * A bundle cannot defend against this: it does not know the command buffer
+ * exists, and `data-for` has no limit clause. So the host hands the document a
+ * window onto the catalog and grows it as focus approaches the end. RmlUi's
+ * for-view only instances the elements that are NEW when an array grows
+ * (DataViewFor::Update), so extending is cheap and does not disturb focus.
+ *
+ * `count` stays the size of the whole level, because that is what a header
+ * saying "184 GROUPS" means.
+ */
+constexpr size_t EVO_PROVIDER_ROW_WINDOW = 24;
+/* Grow once focus is within this many rows of the end of the window. */
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MARGIN = 8;
+/* Step size when expanding window. */
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_STEP = 16;
+/*
+ * The hard cap on LIVE rows, and the reason the window slides instead of
+ * growing without bound.
+ *
+ * Growing is cheap, as above. What is not cheap is the steady state: the
+ * per-frame layout and the command buffer both scale with the number of live
+ * elements, and at 19 elements per card a 184-group level reached 524288 DCB
+ * dwords - exactly the slot capacity. Everything past that point was dropped
+ * by a write callback that returns 0 and says nothing, which is the "flashing"
+ * described above, now arriving through a different door. Measured on that
+ * level: ~58 fps at 24 rows, and the whole screen thrashing between 1868 and
+ * 524288 dwords a frame by row 104.
+ *
+ * So the window grows to this cap and then slides to follow focus. Sliding is
+ * as cheap as growing, because DataViewFor binds element i to rows[i] by INDEX
+ * and does not re-instance an element when the value at its index changes - it
+ * only instances new tail elements and destroys surplus ones. The cost is that
+ * focus stays on the ELEMENT rather than the row it was showing, so a slide has
+ * to move focus back by the distance it slid. See SlideRowWindow.
+ *
+ * 32 and not 48, from hardware: with the cap at 48 the `agc health` line read
+ * `peak=524288 dcb_full=205652` - the buffer completely full and a six-figure
+ * count of rejected writes - while the same run at a window of 24-40 rows
+ * reported `peak=86732 dcb_full=0`. So 48 is over the line and 40 was under it.
+ * The relationship is not linear in rows, so this is the measured safe side
+ * rather than a computed one; dcb_full in the log is what says whether it is
+ * still safe, and it is there precisely because this was invisible before.
+ */
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MAX = 32;
 
 /* ------------------------------------------------------------------------- */
 /* Host                                                                      */
@@ -131,11 +191,21 @@ public:
     bool HandleKey(Key k);
 
     /* True when something changed and the screen needs re-rasterising. The
-     * device loop only redraws on change (GlNeedsFrame). */
-    bool NeedsFrame() const { return m_dirty; }
+     * device loop only redraws on change (GlNeedsFrame). While tuning or
+     * loading, keep frames pumping so the CSS spinner animation rotates. */
+    bool NeedsFrame() const { return m_dirty || m_model.tuning || m_model.loading; }
     void ClearFrameFlag() { m_dirty = false; }
 
     void SetLoading(bool loading, const std::string& status = "");
+    void SetTuning(bool tuning);
+    void SetStatus(const std::string& msg, bool error);
+    void Search(const char* query);
+    const char* CurrentQuery() const { return m_model.query.c_str(); }
+
+    int  TakeAction();
+    void ShowUsbPlaylists(const std::vector<std::string>& paths);
+    bool IsUsbPickerActive() const { return m_is_usb_picker; }
+    void ShowSetupScreen();
 
 private:
     EvoRmlProviderHost() = default;
@@ -149,9 +219,25 @@ private:
     bool RegisterDataModel();
     void RequestPage(const char* parent_id, int page);
     void ApplyItems(const evo_provider_item_t* items, int count, int has_more);
+    /* Copy the first m_row_window rows of m_all_rows into the bound model. */
+    void PublishRowWindow();
+    /* Grow the window when focus nears its end, then slide it once it is at
+     * EVO_PROVIDER_ROW_WINDOW_MAX. Called once per Tick(). */
+    void ExtendRowWindow();
+    /* Move the window to `new_offset` and put focus back on the row it was on.
+     * `focused_local` is that row's index in the OUTGOING window. */
+    void SlideRowWindow(size_t new_offset, int focused_local);
+    /* Focus the published card at `local_idx`, found by position among the
+     * siblings data-for produced. Position, not `rowid`: the attribute still
+     * holds the pre-slide value until the next Context::Update(), while the
+     * element order is already correct because nothing was re-instanced. */
+    bool FocusPublishedRow(int local_idx);
+    /* Index into m_model.rows of the focused card, via the `rowid` attribute
+     * the seam already requires - so this stays bundle-agnostic. -1 if focus
+     * is not on a row. */
+    int  FocusedRowIndex() const;
     void PushArtRequests();
     void ApplyPendingActivation();
-    void SetStatus(const std::string& msg, bool error);
     bool EnforceDomCap();
 
     static void ItemsCallback(int ok, const evo_provider_item_t* items,
@@ -182,6 +268,20 @@ private:
      */
     std::vector<std::string> m_art_urls;
     std::vector<std::string> m_art_keys;
+
+    /*
+     * The whole level. m_model.rows is the m_row_window rows starting at
+     * m_row_offset.
+     *
+     * m_art_urls / m_art_keys are parallel to THIS, not to m_model.rows, and
+     * are indexed ABSOLUTELY: published row i is m_all_rows[m_row_offset + i].
+     * They used to agree by accident because the window always started at 0;
+     * once it slides they do not, and reading them at the published index hands
+     * one row's poster to another.
+     */
+    std::vector<EvoProviderRow> m_all_rows;
+    size_t m_row_window = 0;
+    size_t m_row_offset = 0;
 
     int  m_page = 0;
     bool m_has_more = false;
@@ -223,10 +323,15 @@ private:
      * Tick() could act on it. Both looked like input bugs.
      */
     std::string m_bundle_version;
+
     /* Counts the in-flight catalog request generation, so a reply that arrives
      * after the user has already navigated away is dropped instead of
      * repopulating the screen they left. */
     unsigned m_request_generation = 0;
+
+    int  m_pending_action = 0;
+    bool m_is_usb_picker = false;
+    std::vector<std::string> m_saved_usb_playlists;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -238,6 +343,12 @@ private:
  * header everywhere.
  */
 extern "C" {
+
+enum {
+    EVO_PROVIDER_ACTION_NONE = 0,
+    EVO_PROVIDER_ACTION_SETUP_URL = 1,
+    EVO_PROVIDER_ACTION_SETUP_USB = 2,
+};
 
 int  evo_rmlui_provider_open(const char *provider_id, int width, int height);
 void evo_rmlui_provider_close(void);
@@ -262,6 +373,12 @@ typedef struct evo_provider_selection {
 } evo_provider_selection_t;
 
 int  evo_rmlui_provider_take_selection(evo_provider_selection_t *out);
+int  evo_rmlui_provider_take_action(void);
 void evo_rmlui_provider_set_loading(int loading, const char *status);
+void evo_rmlui_provider_set_tuning(int tuning);
+void evo_rmlui_provider_set_status(const char *status, int error);
+void evo_rmlui_provider_search(const char *query);
+const char* evo_rmlui_provider_get_query(void);
+void evo_rmlui_provider_show_setup(void);
 
 } /* extern "C" */

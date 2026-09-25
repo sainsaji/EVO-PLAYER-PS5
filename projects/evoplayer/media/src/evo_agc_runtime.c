@@ -1954,13 +1954,14 @@ void evo_agc_runtime_frame_end(void)
         evo_direct_mem_stats_t dm;
         evo_direct_mem_get_stats(&dm);
         evo_boot_log(
-            "agc health frame=%llu dcb=%u/%u peak=%u ring_fail=%u tex_fail=%u "
+            "agc health frame=%llu dcb=%u/%u peak=%u dcb_full=%u ring_fail=%u tex_fail=%u "
             "direct_mem=%zu/%zu peak=%zu allocs=%zu | "
             "clip_masks=%u clip_enables=%u (feature=%d) | "
             "presents=%u dcb_min_presented=%u flip_waits=%u timeouts=%u",
             (unsigned long long)g_agc_dev.frame_counter,
             dwords, g_agc_dev.dcb_slot_capacity_dwords,
             g_agc_dev.dcb_peak_dwords,
+            evo_agc_writer_out_of_space_count(),
             g_agc_dev.ring_alloc_fail, g_agc_dev.tex_alloc_fail,
             dm.allocated_bytes, dm.total_bytes, dm.peak_bytes,
             dm.num_allocations,
@@ -1968,6 +1969,7 @@ void evo_agc_runtime_frame_end(void)
             EVO_AGC_CLIP_MASK,
             g_agc_dev.presents, g_agc_dev.dcb_min_presented,
             g_agc_dev.flip_waits, g_agc_dev.flip_timeouts);
+        evo_agc_writer_reset_out_of_space_count();
         g_agc_dev.clip_mask_calls = 0;
         g_agc_dev.clip_enable_calls = 0;
         g_agc_dev.dcb_min_presented = 0;

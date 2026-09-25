@@ -1,61 +1,19 @@
 <rml>
 <head>
-    <link type="text/rcss" href="main.rcss"/>
+    <link type="text/rcss" href="iptv.rcss"/>
 </head>
 <!--
-    The IPTV provider's own UI (#90).
-
-    THIS FILE IS NOT PART OF EVO PLAYER'S UI. It is fetched over HTTP at
-    runtime, cached under /data/evoplayer/providers/iptv/, and rendered in its
-    own Rml context. It is checked into this repo only because the IPTV
-    provider is the one #90 proves the seam against and somebody has to author
-    the first bundle; a third-party provider's bundle would live on that
-    provider's server and EVO would never have seen it.
-
-    It binds to the model named in manifest.json ("data_model": "iptv") and
-    uses only what EvoProviderModel publishes at api_version 1. It references
-    no EVO element id, because it cannot know any.
-
-    ---------------------------------------------------------------------------
-    On looking like EVO
-
-    This bundle deliberately wears EVO's chrome: the same wallpaper and scrim,
-    the same 152dp rail gutter, the same frosted header and status strip, the
-    same card anatomy (preview box, two-line meta, action bar), the same
-    MIDNIGHT palette and the same PlayStation glyph badges. It is EVO's own
-    first-party provider, and a first-party provider that looked like a
-    different application was the wrong kind of proof.
-
-    None of that weakens what the seam demonstrates, because none of it comes
-    from EVO. EVO pushes no theme into a provider context and knows nothing
-    about this document; every colour and every measurement below is the
-    bundle's own choice, and a third-party bundle is free to make the opposite
-    one. What the seam proves is still visible in the layout: this is a channel
-    grid that drills into groups, not the nine-row list EVO draws elsewhere,
-    and the focus ring is drawn here rather than pushed from a selection index.
-
-    Shared assets: EVO publishes its embedded icons, fonts and wallpaper under
-    the "/assets/..." path, which RmlUi's JoinPath resolves to a bundle key. A
-    bundle may use them and must survive without them - every one below sits in
-    a box that still reads correctly when the image does not load. See
-    docs/addons/provider-architecture.md.
-    ---------------------------------------------------------------------------
-
-    Text is bound with {{ }} interpolation. `data-value` is RmlUi's two-way
-    binding for a form control's value attribute and renders nothing on a div.
+    The IPTV provider UI (#90).
+    Embedded directly in the application asset bundle for 100% self-contained,
+    offline, and server-independent operation.
 -->
 <body data-model="iptv">
 
-    <!-- Wallpaper + scrim, the same plate every EVO screen sits on. The
-         frosted panels below have to have something to refract: a
-         backdrop-filter over a flat fill returns the same flat fill. -->
+    <!-- Wallpaper + scrim matching EVO Player's MIDNIGHT aesthetic -->
     <div id="tv-wallpaper"></div>
     <div id="tv-scrim"></div>
 
-    <!-- 152dp of gutter for EVO's navigation rail, which is a document in
-         EVO's own context and is composited over this one afterwards
-         (ProviderHostScreen::render). A bundle that started at x=0 would be
-         drawn under it. -->
+    <!-- 152dp gutter for EVO's navigation rail -->
     <div id="tv-pane">
 
         <!-- 1. Header: badge, title, breadcrumb pill, counter -->
@@ -71,10 +29,6 @@
                 <div id="tv-path">{{ breadcrumb }}</div>
             </div>
             <div id="tv-header-right" data-if="!empty">
-                <!-- `is_folder_level` is why this reads correctly at both
-                     levels. A data expression cannot aggregate over `rows`, so
-                     the host publishes the flag rather than leaving the bundle
-                     to say "4 CHANNELS" over a list of four groups. -->
                 <div class="tv-counter" data-if="is_folder_level">{{ count }} GROUPS</div>
                 <div class="tv-counter" data-if="!is_folder_level">{{ count }} CHANNELS</div>
             </div>
@@ -83,11 +37,11 @@
         <!-- 2. The guide itself -->
         <div id="tv-grid-pane">
 
-            <!-- A bundle that cannot reach its playlist must say so on screen:
-                 on a console the log is not reachable while the UI is up. -->
+            <!-- Status / Notice strip -->
             <div id="tv-notice" data-if="status != ''"
                  data-class-tv-notice-bad="has_error">{{ status }}</div>
 
+            <!-- Start / Empty State -->
             <div id="tv-empty" data-if="empty && !loading">
                 <!-- Two clear options from start when no query is active -->
                 <div id="tv-setup" data-if="query == ''">
@@ -157,16 +111,7 @@
                 </div>
             </div>
 
-            <!--
-                One card per row, and the same card for a `group-title` folder
-                and for a channel - the preview box, the two-line meta and the
-                action bar are EVO's card anatomy, filled with a channel
-                guide's content instead of a file's.
-
-                `tv-grid-notice` gives back the height the status bar above
-                took, so a visible error does not push the last row out of the
-                pane.
-            -->
+            <!-- Channel grid (hidden when empty so setup screen and channel grid never overlap) -->
             <div id="tv-grid" data-if="!empty" data-class-tv-grid-notice="status != ''">
                 <div class="tv-card" data-for="row : rows"
                      data-attr-rowid="row.id" data-event-click="activate()"
@@ -177,9 +122,6 @@
                              data-attr-src="row.art"/>
                         <img class="tv-folder-icon" data-if="row.is_folder"
                              src="/assets/icons/icon_folder.png"/>
-                        <!-- No logo yet, or none in the playlist: the
-                             channel's initial, so the grid never has holes in
-                             it. A provider picks its own placeholder. -->
                         <div class="tv-initial"
                              data-if="!row.is_folder && row.art == ''">{{ row.initial }}</div>
 
@@ -190,11 +132,6 @@
 
                     <div class="tv-meta">
                         <div class="tv-name">{{ row.title }}</div>
-
-                        <!-- A folder's subtitle is its channel count. A
-                             channel's is its group at the root and its current
-                             programme inside one, so it is only drawn where
-                             the NOW line is not already saying it. -->
                         <div class="tv-sub"
                              data-if="row.is_folder || row.now == ''">{{ row.subtitle }}</div>
 
@@ -218,14 +155,10 @@
             </div>
         </div>
 
-        <!-- 3. Status strip: the source on the left, controller hints on the
-             right, exactly where every other EVO screen puts them. -->
+        <!-- 3. Status strip: source details and controller hints -->
         <div id="tv-status-strip">
             <div id="tv-status-details">
                 <span id="tv-source-name">{{ provider_name }}</span>
-                <!-- Not the breadcrumb: that is already in the header pill,
-                     and printing it twice made the two panels look like a
-                     mistake rather than a pair. -->
                 <span class="tv-spec-pill" data-if="is_folder_level">CHANNEL GUIDE</span>
                 <span class="tv-spec-pill" data-if="!is_folder_level">LIVE CHANNELS</span>
                 <div id="tv-tuning-indicator" data-if="loading || tuning">
@@ -253,11 +186,6 @@
                     <div class="tv-glyph"><img src="/assets/icons/btn_dpad.png" class="tv-glyph-img"/></div>
                     <span class="tv-hint-text">NAVIGATE</span>
                 </div>
-                <!-- OPTIONS, not Triangle: Triangle is the virtual keyboard's
-                     own Quick Done, so opening the source editor with it
-                     submitted the prompt on the spot. There is no OPTIONS
-                     glyph in the icon set, so it takes the pill treatment EVO
-                     uses for L1/R1. -->
                 <div class="tv-hint" data-if="!empty">
                     <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">OPTIONS</span></div>
                     <span class="tv-hint-text">SOURCE</span>
