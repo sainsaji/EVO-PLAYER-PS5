@@ -2772,6 +2772,8 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
             if (i < (int)state.tracks.size()) {
                 el_row->SetProperty("display", "flex");
                 el_row->SetClass("row-focused", state.tracks[i].is_focused);
+                el_row->SetClass("row-action", state.tracks[i].is_action);
+                el_row->SetClass("row-disabled", state.tracks[i].is_disabled);
 
                 if (state.tracks[i].is_focused) {
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));
@@ -2930,6 +2932,9 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
 
     Rml::Element* el_rn = m_mediainfo_doc->GetElementById("spec-renderer");
     if (el_rn) el_rn->SetInnerRML(state.renderer);
+
+    Rml::Element* el_up = m_mediainfo_doc->GetElementById("spec-upscaler");
+    if (el_up) el_up->SetInnerRML(state.upscaler);
 
     Rml::Element* el_dc = m_mediainfo_doc->GetElementById("spec-decoder");
     if (el_dc) el_dc->SetInnerRML(state.decoder);

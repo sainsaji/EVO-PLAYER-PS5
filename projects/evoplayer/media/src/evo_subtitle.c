@@ -21,6 +21,7 @@
 #include <libavutil/mathematics.h>
 
 #include "evo_audio_out.h"   /* audio_handle, audio_clock_seconds */
+#include "evo_subsync.h"     /* #102 auto-sync worker */
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -40,6 +41,7 @@ extern char             current_media_path[512];
 extern double           resume_base_offset_seconds;
 extern double           requested_resume_seek_pos;
 extern long long        controls_last_used_ms;
+extern int              audio_stream_index;
 
 void      toast(const char *title, const char *msg);
 long long now_ms(void);
@@ -54,6 +56,10 @@ static void prospero_subtitle_append_text(char *destination,
 
 /* Was a standalone static in main.c (near the browser-preview globals). */
 int prospero_subtitle_delay_ms = 0;
+
+/* #102: subtitle seconds per media second for the external SRT. Auto-sync sets
+ * it when the SRT was timed for another framerate (25 vs 23.976 fps). */
+double prospero_subtitle_time_scale = 1.0;
 
 /* PROSPERO_EMBEDDED_SUBTITLE_MODULE_START */
 
@@ -1028,8 +1034,13 @@ static char prospero_subtitle_path[512] = {0};
 
 
 void prospero_subtitle_clear(void) {
+    /* Media change or stop: an analysis of the old file must not land on the
+     * new one, and its offset/ratio belong to the old SRT too. */
+    evo_subsync_cancel();
     prospero_subtitle_count = 0;
     prospero_subtitle_path[0] = 0;
+    prospero_subtitle_delay_ms = 0;
+    prospero_subtitle_time_scale = 1.0;
 }
 
 
@@ -2044,10 +2055,10 @@ void prospero_subtitle_nudge_delay(int delta_ms)
 {
     char msg[64];
     prospero_subtitle_delay_ms += delta_ms;
-    if (prospero_subtitle_delay_ms < -5000)
-        prospero_subtitle_delay_ms = -5000;
-    if (prospero_subtitle_delay_ms > 5000)
-        prospero_subtitle_delay_ms = 5000;
+    if (prospero_subtitle_delay_ms < -PROSPERO_SUBTITLE_MAX_DELAY_MS)
+        prospero_subtitle_delay_ms = -PROSPERO_SUBTITLE_MAX_DELAY_MS;
+    if (prospero_subtitle_delay_ms > PROSPERO_SUBTITLE_MAX_DELAY_MS)
+        prospero_subtitle_delay_ms = PROSPERO_SUBTITLE_MAX_DELAY_MS;
 
     if (prospero_subtitle_delay_ms == 0)
         snprintf(msg, sizeof(msg), "0 ms (sync)");
@@ -2060,3 +2071,132 @@ void prospero_subtitle_nudge_delay(int delta_ms)
     toast("SUB DELAY", msg);
     controls_last_used_ms = now_ms();
 }
+
+double prospero_subtitle_position(double clock_seconds)
+{
+    /* The ratio is measured against the external SRT only; embedded tracks are
+     * muxed with the video and never drift. */
+    double scale = prospero_subtitle_use_external
+                 ? prospero_subtitle_time_scale : 1.0;
+    double pos = clock_seconds * scale -
+                 (double)prospero_subtitle_delay_ms / 1000.0;
+    return pos < 0.0 ? 0.0 : pos;
+}
+
+/* PROSPERO_SUBTITLE_AUTOSYNC_START (#102) */
+
+/* What the running/last run analysed: -1 the external SRT, >= 0 that
+ * embedded stream. A result is only applied to the track it measured. */
+static int prospero_subtitle_autosync_track = -1;
+
+int prospero_subtitle_autosync_available(void)
+{
+    if (!prospero_subtitle_enabled ||
+        !evo_subsync_path_supported(current_media_path))
+        return 0;
+    if (prospero_subtitle_use_external)
+        return prospero_subtitle_count > 0;
+
+    int index = prospero_embedded_subtitle_stream_index;
+    return play_fmt && index >= 0 && index < (int)play_fmt->nb_streams &&
+           prospero_embedded_subtitle_supported(
+               play_fmt->streams[index]->codecpar->codec_id);
+}
+
+int prospero_subtitle_autosync_running(void)
+{
+    return evo_subsync_running();
+}
+
+void prospero_subtitle_autosync_toggle(void)
+{
+    if (evo_subsync_running()) {
+        evo_subsync_cancel();
+        toast("AUTO-SYNC", "Cancelled");
+        return;
+    }
+    if (!prospero_subtitle_autosync_available())
+        return;
+
+    if (!prospero_subtitle_use_external) {
+        /* Embedded: the worker reads the track's cues from the file itself;
+         * the ring the player keeps only holds what has streamed past. */
+        prospero_subtitle_autosync_track = prospero_embedded_subtitle_stream_index;
+        if (!evo_subsync_start(current_media_path, audio_stream_index,
+                               prospero_subtitle_autosync_track, NULL, NULL, 0))
+            toast("AUTO-SYNC", "Couldn't auto-sync - adjust manually");
+        return;
+    }
+
+    prospero_subtitle_autosync_track = -1;
+    int n = prospero_subtitle_count;
+    double *starts = (double *)malloc(sizeof(double) * (size_t)n);
+    double *ends = (double *)malloc(sizeof(double) * (size_t)n);
+    int started = 0;
+    if (starts && ends) {
+        for (int i = 0; i < n; i++) {
+            starts[i] = prospero_subtitle_cues[i].start_seconds;
+            ends[i] = prospero_subtitle_cues[i].end_seconds;
+        }
+        started = evo_subsync_start(current_media_path, audio_stream_index,
+                                    -1, starts, ends, n);
+    }
+    free(starts);
+    free(ends);
+    if (!started)
+        toast("AUTO-SYNC", "Couldn't auto-sync - adjust manually");
+}
+
+void prospero_subtitle_autosync_pump(void)
+{
+    evo_subsync_result_t r;
+    if (!evo_subsync_take_result(&r))
+        return;
+    if (r.status == EVO_SUBSYNC_CANCELLED)
+        return;
+    int current_track = prospero_subtitle_use_external
+                      ? -1 : prospero_embedded_subtitle_stream_index;
+    if (current_track != prospero_subtitle_autosync_track)
+        return;                    /* the track changed under the run */
+    if (r.status != EVO_SUBSYNC_OK ||
+        (current_track < 0 && !prospero_subtitle_count)) {
+        toast("AUTO-SYNC", "Couldn't auto-sync - adjust manually");
+        return;
+    }
+
+    double ms = r.delay_s * 1000.0;
+    int delay = (int)(ms + (ms >= 0.0 ? 0.5 : -0.5));
+    if (delay < -PROSPERO_SUBTITLE_MAX_DELAY_MS) delay = -PROSPERO_SUBTITLE_MAX_DELAY_MS;
+    if (delay > PROSPERO_SUBTITLE_MAX_DELAY_MS) delay = PROSPERO_SUBTITLE_MAX_DELAY_MS;
+    prospero_subtitle_delay_ms = delay;
+    if (current_track < 0)         /* ratios are measured for the SRT only */
+        prospero_subtitle_time_scale = r.scale;
+
+    char msg[96];
+    const char *ratio = evo_subsync_ratio_label(r.scale);
+    if (ratio)
+        snprintf(msg, sizeof(msg), "%+.1f s, %s", delay / 1000.0, ratio);
+    else
+        snprintf(msg, sizeof(msg), "Subtitles shifted %+.1f s", delay / 1000.0);
+    toast("AUTO-SYNC", msg);
+    controls_last_used_ms = now_ms();
+}
+
+const char *prospero_subtitle_autosync_detail(char *buf, size_t size)
+{
+    if (evo_subsync_running()) {
+        snprintf(buf, size, "ANALYSING... %d%%", evo_subsync_progress());
+    } else if (!evo_subsync_path_supported(current_media_path)) {
+        snprintf(buf, size, "LOCAL FILES ONLY");
+    } else if (!prospero_subtitle_autosync_available()) {
+        snprintf(buf, size, "SELECT A TRACK");
+    } else if (prospero_subtitle_use_external && prospero_subtitle_time_scale != 1.0 &&
+               evo_subsync_ratio_label(prospero_subtitle_time_scale)) {
+        snprintf(buf, size, "%s", evo_subsync_ratio_label(prospero_subtitle_time_scale));
+    } else {
+        snprintf(buf, size, "MATCH TO AUDIO");
+    }
+    return buf;
+}
+
+/* PROSPERO_SUBTITLE_AUTOSYNC_END */

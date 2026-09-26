@@ -45,6 +45,14 @@ int evo_agc_build_tsharp_r16(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_a
 int evo_agc_build_tsharp_rg16(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
                                uint32_t width, uint32_t height, uint32_t pitch_bytes);
 
+/* Sample something the GPU RENDERED through setup_color_target(): those
+ * colour targets are 64KB_R_X tiled (CB_COLOR0_ATTRIB3.COLOR_SW_MODE = 27), so
+ * a linear T# reads them as scrambled blocks - which is what #103's first
+ * hardware run showed. `width`/`height` must be the colour target's own, and
+ * the base 64 KB aligned. RGBA8 (standard swap) or RGBA16F. */
+int evo_agc_build_tsharp_render_target(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
+                                       uint32_t width, uint32_t height, int fp16);
+
 /* BGRA8: FORMAT_8_8_8_8 but with swizzle (Z,Y,X,W), so a texture stored in
  * memory as B,G,R,A bytes (the scanout backbuffer, written BGRA via
  * COMP_SWAP=ALT, and the 0xAABBGGRR OSD buffer) is sampled as correct R,G,B,A.

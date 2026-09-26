@@ -684,8 +684,8 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     p.alpha = 255;
     /* #81: Unicode caption over the OSD - Cyrillic / Greek / accented Latin
      * should all render via the Noto/DejaVu fallback faces, not as '?'. */
-    p.subtitle_text = "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xE2\x80\x94 "
-                      "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1 \xE2\x80\x94 "
+    p.subtitle_text = "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 - "
+                      "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xB7\xCE\xBC\xCE\xAD\xCF\x81\xCE\xB1 - "
                       "\xC3\xA7" "a va?";
     p.subtitle_face = 2;
     p.subtitle_raised = 1;
@@ -1115,6 +1115,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode";
         p.decoder = "Software (FFmpeg)";
+        p.upscaler = "Off (source >= output)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo.bmp", fb.data(), width, height);
@@ -1144,6 +1145,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode (slice-threaded, 12 threads)";
         p.decoder = "Hardware (sceVideodec2)";
+        p.upscaler = "AI (shader)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo_stress.bmp", fb.data(), width, height);
@@ -1185,6 +1187,40 @@ static void render_subtitles_screen(std::vector<uint32_t>& fb, int width, int he
     evo_rmlui_update_subtitles(&p);
     evo_rmlui_render_subtitles(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_subtitles.bmp", fb.data(), width, height);
+
+    /* #102 AUTO-SYNC row, in the order a run goes through: disabled (no
+     * track selected), idle, analysing, done (framerate fix + offset). */
+    struct SyncState {
+        const char* file; const char* sync; const char* detail;
+        int ext_current; int disabled;
+    };
+    static const SyncState st[4] = {
+        { "rml_subtitles_autosync_disabled",  "SYNC: 0 ms",     "SELECT A TRACK",      0, 1 },
+        { "rml_subtitles_autosync_idle",      "SYNC: 0 ms",     "MATCH TO AUDIO",      1, 0 },
+        { "rml_subtitles_autosync_analysing", "SYNC: 0 ms",     "ANALYSING... 42%", 1, 0 },
+        { "rml_subtitles_autosync_done",      "SYNC: +1800 ms  25->23.976 fps",
+                                              "25->23.976 fps", 1, 0 },
+    };
+    for (const SyncState& s : st) {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_subtitles_params_t q;
+        memset(&q, 0, sizeof(q));
+        q.eyebrow = "SUBTITLE CONFIGURATION";
+        q.title = "SUBTITLE TRACKS";
+        q.size_str = "MEDIUM";
+        q.sync_str = s.sync;
+        q.preview_text = "The quick brown fox jumps over the lazy dog";
+        q.preview_face = 1;
+        q.track_count = 4;
+        q.tracks[0] = { "SUBTITLES OFF", "Disable subtitles", !s.ext_current, 0, 0, 0 };
+        q.tracks[1] = { "AUTO-SYNC",     s.detail,             0, 1, 1, s.disabled };
+        q.tracks[2] = { "EXTERNAL SRT",  "1204 CUES",          s.ext_current, 0, 0, 0 };
+        q.tracks[3] = { "eng - English", "Embedded Stream",    0, 0, 0, 0 };
+        evo_rmlui_update_subtitles(&q);
+        evo_rmlui_render_subtitles(fb.data(), width, height);
+        save_bmp_24((std::string("output/uiview/") + s.file + ".bmp").c_str(),
+                    fb.data(), width, height);
+    }
 }
 
 /* ------------------------------------------------------------------
@@ -1971,6 +2007,20 @@ int main(int argc, char** argv) {
         set.rows[4].badge = "Auto (FFmpeg)";
         set.rows[4].has_chevron = 1;
         set.rows[4].is_focused = 0;
+
+        /* #103 */
+        set.rows[5].title = "UPSCALING";
+        set.rows[5].detail = "SHARPEN VIDEO SMALLER THAN THE SCREEN";
+        set.rows[5].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        set.rows[5].badge = "SHARP";
+        set.rows[5].has_chevron = 1;
+
+        set.rows[6].title = "AI NETWORK";
+        set.rows[6].detail = "LARGE IS SHARPER - AUTO USES IT ON A DETECTED PS5 PRO";
+        set.rows[6].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[6].badge = "LARGE (PRO)";
+        set.rows[6].has_chevron = 1;
+        set.row_count = 7;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);

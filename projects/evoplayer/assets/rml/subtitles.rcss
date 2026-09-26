@@ -233,6 +233,16 @@ div, span, p {
     display: none;
 }
 
+/* AUTO-SYNC (#102) is an action, not a track: keep the check's space so the
+ * titles still line up, but draw nothing in it. */
+.row-action .sub-check-box {
+    visibility: hidden;
+}
+
+.row-disabled {
+    opacity: 0.45;
+}
+
 .badge-hidden {
     display: none;
 }

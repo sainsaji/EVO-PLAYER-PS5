@@ -14,6 +14,12 @@
  *   seek -<sec>        seek back
  *   stop               end playback, back to the browser (#8: flushes the
  *                      per-file `sweep` line, which the decoder close writes)
+ *   upcompare          #103: pause, then capture the SAME frame with the
+ *                      upscaler Off / Sharp / AI Standard / Large / Maximum
+ *                      and no OSD, to
+ *                      /mnt/usb0/evo_up_{off,sharp,ai,ai_large,ai_max}.bmp;
+ *                      restores the
+ *                      Settings mode and the pause state afterwards
  *
  * Status line: build=<id> t=<s> scr=<n> be=<0|1> pos=<s> dur=<s> fps=<n>
  *              fatal=<0|1> eof=<0|1> active=<0|1>
@@ -83,6 +89,10 @@ void evo_remote_open_text(const char *path);
 /* Provided by the host (main.c): open <path> from the beginning, mirroring the
  * browse->select path (nav push, return screen, start_video_playback). */
 void evo_open_media_path(const char *path);
+
+/* Provided by the host (Application.cpp): start the #103 upscaler A/B/C
+ * capture described above. No-op unless a video is playing. */
+void evo_remote_upscale_compare(void);
 
 /* Provided by the host (main.c): end playback and return to the browser. */
 void evo_stop_media_playback(void);

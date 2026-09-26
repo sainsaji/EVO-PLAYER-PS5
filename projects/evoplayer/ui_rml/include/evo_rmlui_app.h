@@ -144,10 +144,13 @@ struct EvoSubtitlesTrack {
     std::string detail;
     bool is_current = false;
     bool is_focused = false;
+    bool is_action = false;
+    bool is_disabled = false;
 
     bool operator==(const EvoSubtitlesTrack& o) const {
         return label == o.label && detail == o.detail &&
-               is_current == o.is_current && is_focused == o.is_focused;
+               is_current == o.is_current && is_focused == o.is_focused &&
+               is_action == o.is_action && is_disabled == o.is_disabled;
     }
     bool operator!=(const EvoSubtitlesTrack& o) const { return !(*this == o); }
 };
@@ -189,6 +192,7 @@ struct EvoMediaInfoState {
     std::string subtitles;
     std::string output;
     std::string renderer;
+    std::string upscaler;
     std::string decoder;
 
     bool operator==(const EvoMediaInfoState& o) const {
@@ -199,7 +203,7 @@ struct EvoMediaInfoState {
                video_codec == o.video_codec && resolution == o.resolution &&
                color_hdr == o.color_hdr && audio_codec == o.audio_codec &&
                channels == o.channels && sample_rate == o.sample_rate &&
-               subtitles == o.subtitles && output == o.output && renderer == o.renderer &&
+               subtitles == o.subtitles && output == o.output && renderer == o.renderer && upscaler == o.upscaler &&
                decoder == o.decoder;
     }
     bool operator!=(const EvoMediaInfoState& o) const { return !(*this == o); }

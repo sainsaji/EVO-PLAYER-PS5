@@ -5,6 +5,7 @@
 #include "evo_toast.h"
 #include "evo_theme.h"
 #include "evo_boot_log.h"
+#include "evo_hw.h"
 
 #include <cstdio>
 #include <cstring>
@@ -79,7 +80,19 @@ int buildSectionDefs(int section, SettingDef* d) {
         for (int i = 0; i < 3; ++i)
             d[3].opt_label[i] = settings->getDecoderPreferenceBadge(
                                     static_cast<DecoderPreference>(i));
-        n = 4;
+
+        d[4] = {"UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN",
+                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 3, static_cast<int>(settings->getUpscaler()), {}};
+        for (int i = 0; i < 3; ++i)
+            d[4].opt_label[i] = settings->getUpscalerName(static_cast<Upscaler>(i));
+
+        d[5] = {"AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO",
+                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 4, static_cast<int>(settings->getAiNetwork()), {}};
+        for (int i = 0; i < 4; ++i)
+            d[5].opt_label[i] = settings->getAiNetworkName(static_cast<AiNetwork>(i));
+        n = 6;
         break;
 
     case 1: {
@@ -147,7 +160,14 @@ int buildSectionDefs(int section, SettingDef* d) {
         d[3] = {"QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER",
                 "../icons/icon_settings.png", EVO_RMLUI_ROW_ACTION, false, "QUIT",
                 ACT_QUIT, 0, 0, {}};
-        n = 4;
+
+        /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
+        d[4] = {"CONSOLE", "DETECTED HARDWARE MODEL",
+                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, false,
+                evo_hw_is_ps5_pro() ? "PS5 PRO"
+                    : evo_hw_model_known() ? "PS5" : "NOT DETECTED",
+                ACT_NONE, 0, 0, {}};
+        n = 5;
         break;
 
     default:
@@ -266,6 +286,8 @@ void applyOption(int section, int def, int opt) {
     if (!st || opt < 0) return;
     if (section == 0 && def == 0) st->setDefaultViewMode(static_cast<ViewMode>(opt));
     else if (section == 0 && def == 3) st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt));
+    else if (section == 0 && def == 4) st->setUpscaler(static_cast<Upscaler>(opt));
+    else if (section == 0 && def == 5) st->setAiNetwork(static_cast<AiNetwork>(opt));
     else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
     else if (section == 2 && def == 0) {
         /*
@@ -339,7 +361,7 @@ bool runAction(int section, int def) {
         if (fp) {
             std::fprintf(fp, "=== EVO Player Compatibility Report ===\n");
             std::fprintf(fp, "Version: %s\n", EVO_PLAYER_VERSION);
-            std::fprintf(fp, "Hardware: PlayStation 5\n");
+            std::fprintf(fp, "Hardware: %s\n", evo_hw_model_name());
             std::fprintf(fp, "Hardware Acceleration: sceAgc Bare-Metal Driver\n");
             std::fprintf(fp, "Report generated successfully.\n");
             std::fclose(fp);

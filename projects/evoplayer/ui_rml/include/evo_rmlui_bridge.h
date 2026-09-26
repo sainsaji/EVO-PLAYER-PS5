@@ -140,6 +140,8 @@ typedef struct {
     const char* detail;
     int is_current;
     int is_focused;
+    int is_action;    /* not a track (AUTO-SYNC, #102): no radio check */
+    int is_disabled;  /* dimmed, activation does nothing */
 } evo_rmlui_subtitles_track_t;
 
 typedef struct {
@@ -173,6 +175,7 @@ typedef struct {
     const char* output;
     const char* renderer;
     const char* decoder;   /* #37: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
+    const char* upscaler;  /* #103: "Off" / "Sharp" / "AI (shader)" (+ bypass reason) */
 } evo_rmlui_mediainfo_params_t;
 
 /*

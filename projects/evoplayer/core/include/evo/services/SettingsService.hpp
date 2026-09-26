@@ -46,6 +46,14 @@ public:
     void setVideoDecoderPreference(DecoderPreference preference) override { m_decoderPreference = preference; }
     const char* getDecoderPreferenceBadge(DecoderPreference preference) const override;
 
+    Upscaler getUpscaler() const override { return m_upscaler; }
+    void setUpscaler(Upscaler upscaler) override { m_upscaler = upscaler; }
+    const char* getUpscalerName(Upscaler upscaler) const override;
+
+    AiNetwork getAiNetwork() const override { return m_aiNetwork; }
+    void setAiNetwork(AiNetwork network) override { m_aiNetwork = network; }
+    const char* getAiNetworkName(AiNetwork network) const override;
+
     bool isDebugOverlayEnabled() const override { return m_debugOverlayEnabled; }
     void setDebugOverlayEnabled(bool enabled) override { m_debugOverlayEnabled = enabled; }
 
@@ -62,6 +70,9 @@ private:
     int m_subtitleFontFace = 1; // Medium
     int m_keyboardType = 0;     // Native IME
     DecoderPreference m_decoderPreference = DecoderPreference::Auto;
+    // Off until the upscaler is hardware-verified (#103), then Sharp.
+    Upscaler m_upscaler = Upscaler::Off;
+    AiNetwork m_aiNetwork = AiNetwork::Auto;
     bool m_debugOverlayEnabled = false;
 };
 

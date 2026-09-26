@@ -707,6 +707,53 @@ so the same per-file line is in `evo.log` after any ordinary playback session.
 
 ---
 
+## `tools/subsync_host.sh` — subtitle auto-sync on the host (#102)
+
+```bash
+./tools/subsync_host.sh                                  # synthetic self-test
+./tools/subsync_host.sh <media> <srt> [shift_s [scale]]  # a real clip
+./tools/subsync_host.sh <media> --stream <n>             # its embedded text track n
+```
+
+Compiles `media/src/evo_subsync.c`, the same file the app module builds, into
+`tools/subsync_host.c` and links it against a host FFmpeg. The dev image has no
+FFmpeg development libraries, so the first run builds a small static one from
+the same 7.1.1 source (audio decoders and the common demuxers only) into
+`output/host-ffmpeg/`. Later runs reuse it.
+
+With no arguments the harness writes a 30-minute synthetic film to
+`output/subsync-host/` and runs these cases against it: in sync, shifted
++3.7 s and −42.25 s, 25->23.976 fps with and without an offset, and
+24->23.976 fps. It also runs one SRT taken from a different "film", which has
+to come back low-confidence. Then it muxes the same film into MKVs with the
+cues as an embedded SubRip track (in sync, shifted +3.7 s and -12.3 s, and
+another film's track) to test the embedded path, which corrects the offset only. It prints PASS/FAIL per case and exits non-zero on
+any failure. With a real clip and a known-good SRT, it rewrites the cues to
+`t*scale + shift` and checks that the fix it reports is `delay = -shift` at
+that scale. Media paths are relative to the repo root.
+
+The acceptance thresholds in `evo_subsync.c` (`SS_MIN_Z` 4.0, `SS_MIN_SHARP`
+0.35, two windows agreeing) are calibrated on real audio, not only on the
+synthetic film. Tears of Steel (`Demos/TearsOfSteel.mkv`) was tested with its
+own English and Russian tracks, with the English track shifted, rescaled and
+embedded-and-shifted, and with two wrong SRTs. Right answers scored z 5.1–6.1
+and sharpness 0.40–1.6. Wrong ones scored z ≤ 2.5 and sharpness ≤ 0.20, and
+never had two windows agreeing. The synthetic audio alone was misleading. It let
+per-window XNOR scoring pass, but that scoring picked a false 24→23.976 ratio on
+the real film. That is why scoring is now covariance summed across windows, and
+why a ratio is only tried when it moves the cues ≥ 1 s over the analysed span.
+
+The console test set is in `/mnt/usb0/media/Test/Subsync/`: `ToS_srt_shift3.7`,
+`ToS_srt_25fps` (plus 1.8 s), `ToS_srt_wrong` (time-reversed) and
+`ToS_emb_shift5.2` (embedded track). `Demos/tearsofsteel_4k.srt` is there for
+the 4K dropped-frames check.
+
+On the console, the same analysis writes `subsync:` lines to `evo.log`: the
+stream, each window's speech %, the offset and confidence for each scale, and
+the final offset, ratio, confidence and elapsed time.
+
+---
+
 ## Video colour matrix
 
 The GPU present path deleted the CPU converters, and with them `tools/bench.sh`

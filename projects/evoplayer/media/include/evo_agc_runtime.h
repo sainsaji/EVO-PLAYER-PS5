@@ -18,7 +18,31 @@ enum {
     EVO_AGC_PIPE_VIDEO_HLG = 3,
     EVO_AGC_PIPE_VIDEO_PLANAR = 4,
     EVO_AGC_PIPE_UI_BLUR = 5,
-    EVO_AGC_PIPE_COUNT = 6,
+    /* #103 upscaler. Sharp = FSR1 EASU + RCAS; AI = Anime4K CNN x2, network S
+     * (4 convs) on a base PS5 and M (7 convs + a 1x1 conv split into
+     * per-layer accumulate passes) on a PS5 Pro. See agc_upscale_* in
+     * evo_agc_runtime.c and tools/gen_upscale_pipes.py. */
+    EVO_AGC_PIPE_UP_EASU = 6,
+    EVO_AGC_PIPE_UP_RCAS = 7,
+    EVO_AGC_PIPE_UP_A4K_FINAL = 8,
+    EVO_AGC_PIPE_UP_S_CONV0 = 9,     /* ..12 */
+    EVO_AGC_PIPE_UP_M_CONV0 = 13,    /* ..19 */
+    EVO_AGC_PIPE_UP_M_ACC0 = 20,     /* ..26 */
+    /* Anime4K UL ("Maximum"): 7 layers x 3 RGBA16F textures, and a 1x1 conv
+     * over layers 2..6 split into 5 layers x 3 outputs of accumulate passes.
+     * Rows come from the generated upscale_wide_pipes.inc. */
+    EVO_AGC_PIPE_UP_UL_CONV0 = 27,   /* ..47 */
+    EVO_AGC_PIPE_UP_UL_ACC0 = 48,    /* ..62 */
+    EVO_AGC_PIPE_UP_RGB_FINAL = 63,  /* depth-to-space with an RGB residual */
+    EVO_AGC_PIPE_COUNT = 64,
+
+    EVO_AGC_UP_S_CONVS = 4,
+    EVO_AGC_UP_M_CONVS = 7,
+    EVO_AGC_UP_UL_WIDTH = 3,
+    EVO_AGC_UP_UL_LAYERS = 7,
+    EVO_AGC_UP_UL_FED_FIRST = 2,     /* first layer the 1x1 conv reads */
+    EVO_AGC_UP_UL_CONVS = 21,
+    EVO_AGC_UP_UL_ACCS = 15,
 
     EVO_AGC_FRAME_SLOTS = 3,
 };
@@ -204,6 +228,46 @@ void                      evo_agc_flush_color_target(void);
  * `upload` = "the buffer changed since last call"; when 0 the previous upload is
  * redrawn. Called via evo_gl_composite_bgra() so main.c stays backend-agnostic. */
 void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload);
+
+/* #103 video upscaler.
+ *
+ * Settings -> Playback & Video -> UPSCALING picks the requested mode; the
+ * render loop pushes it here every frame (a plain store). What a frame
+ * actually got can be less:
+ *   - bypass: the source is not smaller than the image on the panel, it is
+ *     10-bit/HDR (v1 is SDR 8-bit only), a pipeline is missing, or the scratch
+ *     surfaces could not be allocated. Logged once per change of source/plan.
+ *   - cap: the GPU went over budget while upscaling, so the runtime stepped
+ *     AI -> Sharp -> Off for the rest of the session (toast once). Picking a
+ *     mode again in Settings clears the cap.
+ * Off is byte-for-byte the pre-#103 single pass. */
+enum {
+    EVO_AGC_UPSCALE_OFF = 0,
+    EVO_AGC_UPSCALE_SHARP = 1,
+    EVO_AGC_UPSCALE_AI = 2,
+};
+void        evo_agc_upscale_set_mode(int mode);
+/* Which Anime4K network AI mode runs. AUTO = Large on a detected PS5 Pro,
+ * Standard otherwise; STANDARD / LARGE / MAXIMUM are the Settings override
+ * (the Pro probe cannot identify every Pro). Each steps down one network
+ * (Maximum -> Large -> Standard) when its pipelines or scratch memory are
+ * missing or it goes over the GPU budget. */
+enum {
+    EVO_AGC_UPNET_AUTO = 0,
+    EVO_AGC_UPNET_STANDARD = 1,
+    EVO_AGC_UPNET_LARGE = 2,
+    EVO_AGC_UPNET_MAXIMUM = 3,       /* Anime4K UL - meant for a PS5 Pro */
+};
+void        evo_agc_upscale_set_network(int pref);
+/* What the last video frame actually used: "Off", "Sharp", "AI (Standard)",
+ * "AI (Large)",
+ * with the bypass reason appended when the requested mode was not Off. */
+const char *evo_agc_upscale_label(void);
+/* -1, or the mode the runtime just downgraded to because of GPU time
+ * (EVO_AGC_UPSCALE_AI means one AI network down: Maximum -> Large ->
+ * Standard; evo_agc_upscale_label() names the new one). Reading it clears it, so the
+ * caller toasts exactly once. */
+int         evo_agc_upscale_take_downgrade(void);
 
 /* Draw the video quad. Returns 0 when the quad was emitted (and the current
  * backbuffer stamped with pts_us), -1 when the frame was rejected. */

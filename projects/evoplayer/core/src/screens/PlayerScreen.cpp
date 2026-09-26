@@ -10,6 +10,8 @@
 #include "evo_toast.h"
 #include "evo_feedback.h"
 #include "evo_boot_log.h"
+#include "evo_agc_runtime.h"
+#include "evo_hw.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -93,8 +95,7 @@ bool PlayerScreen::hasActiveOverlay() const {
     if (prospero_subtitle_enabled) {
         auto playback = Application::getInstance().getPlaybackController();
         if (playback && !playback->isMusicMode()) {
-            double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
-            if (subPos < 0.0) subPos = 0.0;
+            double subPos = prospero_subtitle_position(subtitleClockSeconds());
             if (prospero_subtitle_use_external) {
                 const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);
                 if (cue && cue->text[0]) return true;
@@ -336,8 +337,9 @@ void PlayerScreen::feedPerformanceHud() {
                   prospero_subtitle_enabled ? "ON" : "OFF",
                   prospero_subtitle_use_external ? "EXTERNAL"
                       : (prospero_embedded_subtitle_stream_index >= 0 ? "EMBEDDED" : "NONE"));
-    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps",
-                  perf_render_fps, perf_decode_fps);
+    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps  /  UPSCALER %s  /  %s",
+                  perf_render_fps, perf_decode_fps, evo_agc_upscale_label(),
+                  evo_hw_model_name());
     std::snprintf(l_queues, sizeof(l_queues), "QUEUES  video %d/96  audio %d/96  pcm %d",
                   packet_queue_count(&video_packet_queue),
                   packet_queue_count(&audio_packet_queue),
@@ -403,8 +405,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
 
     char activeSubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
     if (prospero_subtitle_enabled && !playback->isMusicMode()) {
-        double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
-        if (subPos < 0.0) subPos = 0.0;
+        double subPos = prospero_subtitle_position(subtitleClockSeconds());
 
         if (prospero_subtitle_use_external) {
             const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);

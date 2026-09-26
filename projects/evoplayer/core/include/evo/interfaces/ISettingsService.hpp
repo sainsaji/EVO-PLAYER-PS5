@@ -51,6 +51,14 @@ public:
     virtual void setVideoDecoderPreference(DecoderPreference preference) = 0;
     virtual const char* getDecoderPreferenceBadge(DecoderPreference preference) const = 0;
 
+    virtual Upscaler getUpscaler() const = 0;
+    virtual void setUpscaler(Upscaler upscaler) = 0;
+    virtual const char* getUpscalerName(Upscaler upscaler) const = 0;
+
+    virtual AiNetwork getAiNetwork() const = 0;
+    virtual void setAiNetwork(AiNetwork network) = 0;
+    virtual const char* getAiNetworkName(AiNetwork network) const = 0;
+
     virtual bool isDebugOverlayEnabled() const = 0;
     virtual void setDebugOverlayEnabled(bool enabled) = 0;
 

@@ -1,6 +1,7 @@
 #include "evo/screens/SubtitlePickerScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_subtitle.h"
+#include "evo_subsync.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
@@ -25,8 +26,8 @@ void SubtitlePickerScreen::onEnter() {
     refreshTracks();
     m_selectedIndex = m_activeTrackIndex;
     m_scrollOffset = 0;
-    if (m_selectedIndex >= 8) {
-        m_scrollOffset = m_selectedIndex - 8 + 1;
+    if (m_selectedIndex >= kVisibleRows) {
+        m_scrollOffset = m_selectedIndex - kVisibleRows + 1;
     }
 }
 
@@ -91,6 +92,19 @@ void SubtitlePickerScreen::refreshTracks() {
         }
     }
 
+    // AUTO-SYNC (#102): matches the active track - external SRT or an
+    // embedded text track - to the audio. Second row, so a long track list
+    // never scrolls it away. Its detail is live (progress); render() fills it.
+    if (m_tracks.size() > 1) {
+        SubtitleTrackEntry syncRow;
+        syncRow.trackId = kAutoSyncTrack;
+        syncRow.label = "AUTO-SYNC";
+        m_tracks.insert(m_tracks.begin() + 1, std::move(syncRow));
+        if (m_activeTrackIndex >= 1) {
+            ++m_activeTrackIndex;
+        }
+    }
+
     if (!prospero_subtitle_enabled) {
         m_activeTrackIndex = 0;
     }
@@ -111,8 +125,8 @@ void SubtitlePickerScreen::navigate(int delta) {
     }
     m_selectedIndex = next;
 
-    if (m_selectedIndex >= m_scrollOffset + 8) {
-        m_scrollOffset = m_selectedIndex - 8 + 1;
+    if (m_selectedIndex >= m_scrollOffset + kVisibleRows) {
+        m_scrollOffset = m_selectedIndex - kVisibleRows + 1;
     } else if (m_selectedIndex < m_scrollOffset) {
         m_scrollOffset = m_selectedIndex;
     }
@@ -125,8 +139,25 @@ void SubtitlePickerScreen::activateSelection() {
         return;
     }
 
-    evo_feedback(EVO_FB_CONFIRM);
     int trackId = m_tracks[m_selectedIndex].trackId;
+
+    if (trackId == kAutoSyncTrack) {
+        // Start, or cancel a run. Stay on the picker so the progress shows;
+        // the result is applied by prospero_subtitle_autosync_pump().
+        if (!prospero_subtitle_autosync_running() && !prospero_subtitle_autosync_available()) {
+            evo_feedback(EVO_FB_ERROR);
+            return;
+        }
+        evo_feedback(EVO_FB_CONFIRM);
+        prospero_subtitle_autosync_toggle();
+        return;
+    }
+
+    evo_feedback(EVO_FB_CONFIRM);
+    if (m_selectedIndex != m_activeTrackIndex) {
+        // A run measures the active track; switching away ends it.
+        evo_subsync_cancel();
+    }
 
     if (trackId == -2) {
         // Off
@@ -235,11 +266,18 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
     const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE" };
     params.size_str = sizeNames[size_idx];
 
-    static char s_syncBuf[32];
+    static char s_syncBuf[64];
     if (prospero_subtitle_delay_ms == 0) {
         std::snprintf(s_syncBuf, sizeof(s_syncBuf), "SYNC: 0 ms");
     } else {
         std::snprintf(s_syncBuf, sizeof(s_syncBuf), "SYNC: %+d ms", prospero_subtitle_delay_ms);
+    }
+    if (prospero_subtitle_time_scale != 1.0) {
+        // A framerate fix from AUTO-SYNC; the nudge still fine-tunes the offset.
+        if (const char* ratio = evo_subsync_ratio_label(prospero_subtitle_time_scale)) {
+            size_t len = std::strlen(s_syncBuf);
+            std::snprintf(s_syncBuf + len, sizeof(s_syncBuf) - len, "  %s", ratio);
+        }
     }
     params.sync_str = s_syncBuf;
 
@@ -247,7 +285,8 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
     params.preview_face = size_idx;
 
     int total = static_cast<int>(m_tracks.size());
-    int rowsToDisplay = std::min(8, std::max(0, total - m_scrollOffset));
+    int rowsToDisplay = std::min(kVisibleRows, std::max(0, total - m_scrollOffset));
+    static char s_autoSyncDetail[48];
     params.track_count = rowsToDisplay;
     for (int i = 0; i < rowsToDisplay; ++i) {
         int idx = m_scrollOffset + i;
@@ -255,6 +294,13 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
         params.tracks[i].detail = m_tracks[idx].detail.c_str();
         params.tracks[i].is_focused = (idx == m_selectedIndex);
         params.tracks[i].is_current = (idx == m_activeTrackIndex);
+        if (m_tracks[idx].trackId == kAutoSyncTrack) {
+            params.tracks[i].detail = prospero_subtitle_autosync_detail(s_autoSyncDetail, sizeof(s_autoSyncDetail));
+            params.tracks[i].is_current = 0;
+            params.tracks[i].is_action = 1;
+            params.tracks[i].is_disabled = !prospero_subtitle_autosync_running() &&
+                                           !prospero_subtitle_autosync_available();
+        }
     }
 
     evo_rmlui_update_subtitles(&params);

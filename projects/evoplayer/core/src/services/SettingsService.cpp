@@ -34,6 +34,25 @@ const char* SettingsService::getDecoderPreferenceBadge(DecoderPreference prefere
     }
 }
 
+const char* SettingsService::getUpscalerName(Upscaler upscaler) const {
+    switch (upscaler) {
+        case Upscaler::Sharp: return "SHARP";
+        case Upscaler::AI:    return "AI";
+        case Upscaler::Off:
+        default:              return "OFF";
+    }
+}
+
+const char* SettingsService::getAiNetworkName(AiNetwork network) const {
+    switch (network) {
+        case AiNetwork::Standard: return "STANDARD";
+        case AiNetwork::Large:    return "LARGE";
+        case AiNetwork::Maximum:  return "MAXIMUM (PRO)";
+        case AiNetwork::Auto:
+        default:                  return "AUTO";
+    }
+}
+
 void SettingsService::setThemeName(const std::string& themeName) {
     m_themeName = themeName;
     evo_theme_set_by_name(m_themeName.c_str());
@@ -70,7 +89,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -83,7 +102,9 @@ bool SettingsService::saveSettings() {
         m_subtitleFontFace,
         m_keyboardType,
         static_cast<int>(m_decoderPreference),
-        1 // marker that keyboard preference was explicitly saved
+        1, // marker that keyboard preference was explicitly saved
+        static_cast<int>(m_upscaler), // line 14 (#103)
+        static_cast<int>(m_aiNetwork) // line 15 (#103)
     );
 
     std::fclose(file);
@@ -110,9 +131,11 @@ bool SettingsService::loadSettings() {
     int rawKeyboardType = 0;
     int rawDecoderPref = EVO_VDEC_PREF_AUTO;
     int explicitKeyboardMarker = 0;
+    int rawUpscaler = 0;
+    int rawAiNetwork = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -125,7 +148,9 @@ bool SettingsService::loadSettings() {
         &rawSubtitleFace,
         &rawKeyboardType,
         &rawDecoderPref,
-        &explicitKeyboardMarker
+        &explicitKeyboardMarker,
+        &rawUpscaler,
+        &rawAiNetwork
     );
 
     std::fclose(file);
@@ -165,6 +190,12 @@ bool SettingsService::loadSettings() {
     }
     if (readCount >= 12) {
         m_decoderPreference = static_cast<DecoderPreference>(rawDecoderPref);
+    }
+    if (readCount >= 14 && rawUpscaler >= 0 && rawUpscaler <= 2) {
+        m_upscaler = static_cast<Upscaler>(rawUpscaler);
+    }
+    if (readCount >= 15 && rawAiNetwork >= 0 && rawAiNetwork <= 3) {
+        m_aiNetwork = static_cast<AiNetwork>(rawAiNetwork);
     }
 
     syncThemeToRmlUi();

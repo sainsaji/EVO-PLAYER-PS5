@@ -59,6 +59,11 @@ output/sweep_clips/
 
 # Subtitle-sync test SRT (tools/subsync_run.py) - regenerable, not source.
 output/subsync/
+# #102 auto-sync: host FFmpeg + harness (tools/subsync_host.sh), and the
+# Tears of Steel calibration/test set - all regenerable.
+output/host-ffmpeg/
+output/subsync-host/
+output/subsync-test/
 
 # Records the last launch time so tools/launch.sh can refuse to stack
 # instances. Machine-local state, not project state.
