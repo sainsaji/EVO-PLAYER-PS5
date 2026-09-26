@@ -212,6 +212,8 @@ emby_config/
 emby_media/
 jellyfin_config/
 jellyfin_cache/
+nuvio_web/
+output/test-addon/
 scratch/
 
 

@@ -62,6 +62,7 @@
 #include "evo_webui.h"
 #include "evo_boot_trace.h"
 #include "evo_provider.h"     /* evo_provider_parse_web_source */
+#include "evo_data_path.h"    /* evo_data_path, evo_mkdir - the saved page storage */
 
 /* ---- libSceWebBrowserDialog, laid out after SharpProspero
  *      Interop/Dialog/WebBrowserDialog.cs (sizes 48 / 328 / 256). ---- */
@@ -172,6 +173,7 @@ static int  s_cycle      = 0;        /* run 3: cycle k_layouts */
 static int  s_hold_frames = 25 * 60;
 
 static char s_url[1024];
+static char s_hook_profile[16];      /* "" = media server, "nuvio" */
 static char s_open_url[2048];        /* what the dialog opens first */
 static char s_reopen_url[2048];      /* where it reopens after playback */
 
@@ -206,6 +208,19 @@ static int  s_close_req = 0;         /* the page's "Back to EVO" button */
 static char s_h_url[2048];
 static char s_h_title[256];
 static char s_h_return[2048];
+
+/*
+ * The page's localStorage, kept by EVO. The PS5's browser dialog starts every
+ * opening with empty storage (hardware, 2026-09-26: an addon saved in Nuvio
+ * was gone the next time it opened), so a site would forget its sign-in and
+ * settings each time. The hook restores this copy before the site's own code
+ * runs and posts it back as it changes. One file per upstream site: every web
+ * provider shares the browser origin 127.0.0.1:<port>, and Emby's and
+ * Jellyfin's web clients even use the same keys.
+ */
+#define STORE_MAX (8u << 20)
+static char            s_store_path[512];   /* set on the main thread at open */
+static pthread_mutex_t s_store_mx = PTHREAD_MUTEX_INITIALIZER;
 
 /* evo_boot_log is not thread-safe: server threads queue lines here and the
  * main thread writes them out in evo_webui_pump(). */
@@ -368,6 +383,69 @@ static int ensure_initialized(void)
 static const char k_hook_js[] =
 "(function(){"
 "if(window.__evoHook)return;window.__evoHook=1;var sent=0;"
+/* Profile from our own <script src>: "" = media server (Emby/Jellyfin),
+ * "nuvio" = Nuvio. Nuvio plays addon/debrid links from any host, so every
+ * source counts - but only on its player element (<video id=videoPlayer>
+ * inside #player): the home screen's trailers set a src too. It also asks
+ * canPlayType before it will try a source, and the PS5's WebKit says no to
+ * MKV/HEVC/DTS - EVO's player decides that, so the answer is always yes. */
+"var NUVIO=String((document.currentScript&&document.currentScript.src)||'').indexOf('p=nuvio')>=0;"
+/* Storage: restore EVO's saved copy once per dialog session (sessionStorage
+ * survives reloads within one opening, and a reload must not roll back what
+ * the page changed since the last save), before the site reads anything. Then
+ * save whenever it changes: every 5 s, synchronously before a handoff or Back
+ * to EVO, and by beacon when the page goes away. Values over 512 KB are
+ * caches, not settings, and are left out. */
+"var lastSnap='';"
+"function snap(){var o={};try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i),v=localStorage.getItem(k);"
+" if(v!==null&&v.length<=524288)o[k]=v;}}catch(e){}return JSON.stringify(o);}"
+"try{if(!sessionStorage.getItem('__evoRestored')){var sx=new XMLHttpRequest();sx.open('GET','/evo/storage',false);sx.send(null);"
+" if(sx.status===200){var so=JSON.parse(sx.responseText||'{}');localStorage.clear();"
+"  for(var sk in so){if(Object.prototype.hasOwnProperty.call(so,sk))localStorage.setItem(sk,so[sk]);}"
+"  sessionStorage.setItem('__evoRestored','1');}}}catch(e){}"
+"lastSnap=snap();"
+"function saveNow(kind){try{var sv=snap();if(sv===lastSnap)return;lastSnap=sv;"
+" if(kind===2&&navigator.sendBeacon){navigator.sendBeacon('/evo/storage',sv);return;}"
+" var x=new XMLHttpRequest();x.open('POST','/evo/storage',kind!==1);x.setRequestHeader('Content-Type','application/json');x.send(sv);}catch(e){}}"
+"setInterval(function(){saveNow(0);},5000);"
+"window.addEventListener('pagehide',function(){saveNow(2);});"
+"document.addEventListener('visibilitychange',function(){if(document.hidden)saveNow(2);});"
+"var lastState=null;"
+/* Diagnostics into evo.log ("web: page: ..."): the keys the controller really
+ * sends, the site's route changes, clicks and script errors - the only view of
+ * a page running in the console's browser. Capped per page. */
+"var logN=0;function evoLog(m){if(logN++>300)return;try{var x=new XMLHttpRequest();"
+" x.open('GET','/evo/log?m='+encodeURIComponent(String(m).substring(0,200)),true);x.send(null);}catch(e){}}"
+"window.addEventListener('error',function(e){evoLog('js error: '+e.message+' @'+String(e.filename||'').split('/').pop()+':'+e.lineno);});"
+"window.addEventListener('unhandledrejection',function(e){var r=e.reason;evoLog('rejection: '+(r&&(r.message||r)));});"
+"document.addEventListener('keydown',function(e){evoLog('key '+e.key+' code='+e.keyCode);},true);"
+"function descEl(t){if(!t||!t.tagName)return '?';var c=String(t.className&&t.className.baseVal!==undefined?t.className.baseVal:t.className||'');"
+" return t.tagName.toLowerCase()+(t.id?'#'+t.id:'')+(c?'.'+c.split(' ').slice(0,2).join('.'):'');}"
+"document.addEventListener('click',function(e){evoLog('click '+descEl(e.target));},true);"
+"function playerShown(){var p=document.getElementById('player');return !!(p&&p.style.display==='block');}"
+"function okEl(el){if(!NUVIO)return 1;return !!(el&&(el.id==='videoPlayer'||(el.closest&&el.closest('#player'))));}"
+"if(NUVIO){HTMLMediaElement.prototype.canPlayType=function(){return 'probably';};}"
+/* Nuvio's hold-able buttons (Play, add-to-library, episode / season / more-
+ * like cards) start a press-and-hold timer on activation and only act on the
+ * key-up. A click - which is what the PS5 browser's X is - never sends one,
+ * so Play did nothing (reproduced in desktop Chromium too; Enter works). On
+ * those, turn the click into Enter down + up on the focused element. */
+"var nvTitle='';function nvNoteTitle(){var tt=document.querySelector('#stream .stream-route-title'),"
+" lg=document.querySelector('#stream .stream-route-logo'),ep=document.querySelector('#stream .stream-route-episode-code');"
+" var t=String((tt&&tt.textContent)||(lg&&lg.getAttribute('alt'))||'').trim();"
+" if(t){if(ep&&ep.textContent)t=t+' - '+String(ep.textContent).trim();nvTitle=t;}}"
+/* Picking a stream (click or Enter) is the last moment the stream screen,
+ * and so the title, is on the page: Nuvio clears it while the player mounts. */
+"if(NUVIO){document.addEventListener('keydown',function(e){if(e.keyCode===13)nvNoteTitle();},true);}"
+"if(NUVIO){document.addEventListener('click',function(e){nvNoteTitle();"
+" var t=e.target&&e.target.closest?e.target.closest('[data-action=playDefault],[data-action=toggleLibrary],"
+".series-episode-card,.series-season-btn,.detail-morelike-card,.stream-route-card'):null;"
+" if(!t)return;e.preventDefault();e.stopImmediatePropagation();"
+" function k(ty){var ev=new KeyboardEvent(ty,{key:'Enter',code:'Enter',bubbles:true,cancelable:true});"
+"  try{Object.defineProperty(ev,'keyCode',{get:function(){return 13;}});"
+"   Object.defineProperty(ev,'which',{get:function(){return 13;}});}catch(x){}"
+"  (document.activeElement||document.body).dispatchEvent(ev);}"
+" k('keydown');setTimeout(function(){k('keyup');},60);},true);}"
 /* Where to come back to: the last page that is not the site's own player.
  * By the time the hook fires, the site has already routed to its player
  * (Emby: #!/videoosd/...), and reopening THAT leaves an empty player with no
@@ -384,20 +462,26 @@ static const char k_hook_js[] =
 "function note(){if(!isPlayerUrl(location.href))good=location.href;}"
 "window.addEventListener('hashchange',note);window.addEventListener('popstate',note);"
 "['pushState','replaceState'].forEach(function(k){var o=history[k];"
-" history[k]=function(){var r=o.apply(this,arguments);note();return r;};});"
+" history[k]=function(s){if(s&&typeof s==='object'){lastState=s;if(s.route)evoLog('route '+s.route);}var r=o.apply(this,arguments);note();return r;};});"
 "function isStream(u){var l=String(u||'').toLowerCase();"
 " if(l.indexOf('blob:')==0||l.indexOf('data:')==0)return 0;"
+" if(NUVIO)return l.indexOf('http')==0||l.indexOf('/')==0;"
 " if(l.indexOf('/subtitles/')>=0||l.indexOf('/images/')>=0||l.indexOf('/attachments/')>=0)return 0;"
 " if(l.indexOf('/videos/')<0&&l.indexOf('/audio/')<0)return 0;"
 " return l.indexOf('/stream')>=0||l.indexOf('master.m3u8')>=0||l.indexOf('main.m3u8')>=0||"
 "  l.indexOf('/universal')>=0||l.indexOf('live.m3u8')>=0;}"
 "function itemId(u){var l=String(u).toLowerCase();var i=l.indexOf('/videos/');"
 " if(i<0)i=l.indexOf('/audio/');if(i<0)return '';var p=String(u).substring(i+1).split('/');return p[1]||'';}"
-"function handoff(u){if(sent)return 1;sent=1;setTimeout(function(){sent=0;},8000);"
+"function handoff(u){evoLog('handoff '+String(u).substring(0,150));if(sent)return 1;sent=1;setTimeout(function(){sent=0;},30000);"
 " var abs=new URL(u,location.href).href,id=itemId(abs),done=0;"
-" function go(t){if(done)return;done=1;"
+" function go(t){if(done)return;done=1;saveNow(1);"
 "  fetch('/evo/play?url='+encodeURIComponent(abs)+'&title='+encodeURIComponent(t||'')+"
 "   '&return='+encodeURIComponent(good));}"
+" if(NUVIO){var pr=(lastState&&lastState.params)||{},ks=['title','name','metaTitle','itemTitle','showTitle'],t='';"
+"  for(var q=0;q<ks.length&&!t;q++){if(typeof pr[ks[q]]==='string')t=pr[ks[q]];}"
+/* The stream screen, still in the DOM under the player, has it in text. */
+"  nvNoteTitle();if(nvTitle)t=nvTitle;"
+"  go(t||document.title);return 1;}"
 " setTimeout(function(){go(document.title);},1500);"
 " try{var ac=window.ApiClient;if(ac&&id){ac.getItem(ac.getCurrentUserId(),id).then(function(it){"
 "  var n=(it&&it.Name)||'';if(it&&it.SeriesName)n=it.SeriesName+' - '+n;go(n);},"
@@ -405,21 +489,26 @@ static const char k_hook_js[] =
 " return 1;}"
 "var d=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'src');"
 "if(d&&d.set)Object.defineProperty(HTMLMediaElement.prototype,'src',{configurable:true,get:d.get,"
-" set:function(v){if(isStream(v)&&handoff(v))return;d.set.call(this,v);}});"
+" set:function(v){if(okEl(this)&&isStream(v)&&handoff(v))return;d.set.call(this,v);}});"
 "var sd=Object.getOwnPropertyDescriptor(HTMLSourceElement.prototype,'src');"
 "if(sd&&sd.set)Object.defineProperty(HTMLSourceElement.prototype,'src',{configurable:true,get:sd.get,"
-" set:function(v){if(isStream(v)&&handoff(v))return;sd.set.call(this,v);}});"
+" set:function(v){if(okEl(this.parentNode)&&isStream(v)&&handoff(v))return;sd.set.call(this,v);}});"
 "var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){"
 " if(String(n).toLowerCase()=='src'&&(this instanceof HTMLMediaElement||this instanceof HTMLSourceElement)"
-"  &&isStream(v)&&handoff(v))return;return sa.apply(this,arguments);};"
+"  &&okEl(this instanceof HTMLSourceElement?this.parentNode:this)&&isStream(v)&&handoff(v))return;return sa.apply(this,arguments);};"
+"function isManifest(u){var l=String(u||'').toLowerCase();"
+" if(NUVIO)return playerShown()&&(l.indexOf('.m3u8')>=0||l.indexOf('.mpd')>=0);"
+" return isStream(u)&&l.indexOf('.m3u8')>=0;}"
 "var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){"
-" if(isStream(u)&&String(u).toLowerCase().indexOf('.m3u8')>=0)handoff(u);return xo.apply(this,arguments);};"
+" if(isManifest(u))handoff(u);return xo.apply(this,arguments);};"
 "if(window.fetch){var fo=window.fetch;window.fetch=function(i){var u=(typeof i==='string')?i:(i&&i.url);"
-" if(isStream(u)&&String(u).toLowerCase().indexOf('.m3u8')>=0)handoff(u);return fo.apply(this,arguments);};}"
+" if(isManifest(u))handoff(u);return fo.apply(this,arguments);};}"
 /* Catch-all: whatever path set the source (innerHTML, a <source> child, a
  * cloned element...), every media element fires loadstart and play. Media
  * events do not bubble, but they do go through the capture phase. */
 "function grab(e){var el=e.target;if(!(el instanceof HTMLMediaElement))return;"
+" evoLog(e.type+' on '+descEl(el)+' src='+String(el.currentSrc||el.getAttribute('src')||'').substring(0,120)+' ok='+okEl(el));"
+" if(!okEl(el))return;"
 " var u=el.currentSrc||el.getAttribute('src')||'';"
 " if(!u){var s=el.querySelector('source');u=s?s.getAttribute('src')||'':'';}"
 " if(isStream(u)&&handoff(u)){try{el.pause();el.removeAttribute('src');el.load();}catch(x){}}}"
@@ -433,12 +522,19 @@ static const char k_hook_js[] =
 " b.setAttribute('style','position:fixed;right:28px;bottom:28px;z-index:2147483647;padding:14px 30px;"
 "border-radius:30px;background:rgba(0,0,0,.75);color:#fff;font:24px sans-serif;cursor:pointer;"
 "border:2px solid rgba(255,255,255,.55)');"
-" b.onclick=function(){fetch('/evo/close');};document.body.appendChild(b);}"
+" b.onclick=function(){saveNow(1);fetch('/evo/close');};document.body.appendChild(b);}"
 "setInterval(addClose,2000);"
 "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addClose);else addClose();"
 "})();";
 
-static const char k_hook_tag[] = "<script src=\"/evo/hook.js\"></script>";
+/* The tag injected after <head>; the profile rides in the query string, where
+ * the hook reads it back from document.currentScript. */
+static size_t hook_tag(char *out, size_t cap)
+{
+    int n = snprintf(out, cap, "<script src=\"/evo/hook.js%s%s\"></script>",
+                     s_hook_profile[0] ? "?p=" : "", s_hook_profile);
+    return n > 0 ? (size_t)n : 0;
+}
 
 /* ---- HTTP plumbing ---- */
 
@@ -671,6 +767,11 @@ static void serve_evo(int fd, const char *path)
         s_close_req = 1;
         pthread_mutex_unlock(&s_mx);
         respond(fd, "204 No Content", "text/plain", "", 0);
+    } else if (!strncmp(path, "/evo/log", 8)) {
+        char m[240];
+        query_param(path, "m", m, sizeof m);
+        tlog("page: %s", m);
+        respond(fd, "204 No Content", "text/plain", "", 0);
     } else if (!strncmp(path, "/evo/ping", 9) || !strncmp(path, "/ping", 5)) {
         respond(fd, "200 OK", "application/json", "{\"evo\":\"pong\"}", 14);
     } else if (!strncmp(path, "/evo/play", 9) || !strncmp(path, "/play", 5)) {
@@ -695,6 +796,85 @@ static void serve_evo(int fd, const char *path)
     } else {
         respond(fd, "404 Not Found", "text/plain", "not found", 9);
     }
+}
+
+/* GET /evo/storage: the saved copy ("{}" when there is none). POST: replace
+ * it with the request body. Written in place - the app module has no rename()
+ * guarantee - under s_store_mx; a torn file only costs a JSON parse failure,
+ * which the hook ignores. */
+static void serve_storage(int fd, const char *method, char *req, size_t got, size_t hl)
+{
+    char path[512];
+    pthread_mutex_lock(&s_store_mx);
+    snprintf(path, sizeof path, "%s", s_store_path);
+    pthread_mutex_unlock(&s_store_mx);
+    if (!path[0]) {
+        respond(fd, "200 OK", "application/json", "{}", 2);
+        return;
+    }
+
+    if (!strcmp(method, "POST")) {
+        char cl[32];
+        long n = header_value(req, hl, "Content-Length", cl, sizeof cl) ? parse_long(cl) : -1;
+        if (n < 0 || n > (long)STORE_MAX) {
+            respond(fd, "413 Payload Too Large", "text/plain", "too large", 9);
+            return;
+        }
+        char *b = malloc((size_t)n + 1);
+        if (!b) { respond(fd, "500 Internal Server Error", "text/plain", "oom", 3); return; }
+        size_t have = got - hl;
+        if (have > (size_t)n) have = (size_t)n;
+        memcpy(b, req + hl, have);
+        while (have < (size_t)n) {
+            ssize_t r = recv(fd, b + have, (size_t)n - have, 0);
+            if (r <= 0) break;
+            have += (size_t)r;
+        }
+        int ok = 0;
+        if (have == (size_t)n) {
+            pthread_mutex_lock(&s_store_mx);
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                ok = fwrite(b, 1, have, f) == have;
+                fclose(f);
+            }
+            pthread_mutex_unlock(&s_store_mx);
+        }
+        free(b);
+        tlog("storage: saved %ld bytes -> %s", n, ok ? "ok" : "FAILED");
+        respond(fd, ok ? "204 No Content" : "500 Internal Server Error", "text/plain", "", 0);
+        return;
+    }
+
+    pthread_mutex_lock(&s_store_mx);
+    FILE *f = fopen(path, "rb");
+    char *b = NULL;
+    size_t n = 0;
+    if (f) {
+        size_t cap = 65536;
+        b = malloc(cap);
+        while (b) {
+            if (n == cap) {
+                if (cap >= STORE_MAX) break;
+                char *nb = realloc(b, cap * 2);
+                if (!nb) break;
+                b = nb;
+                cap *= 2;
+            }
+            size_t r = fread(b + n, 1, cap - n, f);
+            if (r == 0) break;
+            n += r;
+        }
+        fclose(f);
+    }
+    pthread_mutex_unlock(&s_store_mx);
+    if (b && n) {
+        respond(fd, "200 OK", "application/json", b, n);
+        tlog("storage: restored %zu bytes", n);
+    } else {
+        respond(fd, "200 OK", "application/json", "{}", 2);
+    }
+    free(b);
 }
 
 static int is_html_entry(const char *path)
@@ -862,11 +1042,12 @@ static void proxy_request(int cfd, char *req, size_t got, size_t hl,
             char *ins = ci_strstr(b, "<head");
             ins = ins ? memchr(ins, '>', blen - (size_t)(ins - b)) : NULL;
             size_t at = ins ? (size_t)(ins - b) + 1 : 0;
-            size_t tl = sizeof k_hook_tag - 1;
+            char tag[96];
+            size_t tl = hook_tag(tag, sizeof tag);
             nho += (size_t)snprintf(nh + nho, 96, "Content-Length: %zu\r\nConnection: close\r\n\r\n",
                                     blen + tl);
             if (send_all(cfd, nh, nho) == 0 && send_all(cfd, b, at) == 0 &&
-                send_all(cfd, k_hook_tag, tl) == 0)
+                send_all(cfd, tag, tl) == 0)
                 send_all(cfd, b + at, blen - at);
             tlog("proxy: injected hook into %.100s (%zu bytes%s)", path, blen,
                  chunked ? ", was chunked" : "");
@@ -887,7 +1068,9 @@ static void *conn_thread(void *arg)
     if (req && read_head(fd, req, cap, &got, &hl) == 0) {
         char method[16] = "", path[4096] = "";
         sscanf(req, "%15s %4095s", method, path);
-        if (!strncmp(path, "/evo/", 5) || !s_up.enabled)
+        if (!strncmp(path, "/evo/storage", 12))
+            serve_storage(fd, method, req, got, hl);
+        else if (!strncmp(path, "/evo/", 5) || !s_up.enabled)
             serve_evo(fd, path);
         else
             proxy_request(fd, req, got, hl, method, path);
@@ -982,6 +1165,13 @@ static void open_dialog(const char *url)
         return;
     }
     server_start();
+    evo_mkdir(evo_data_path("webui"));
+    char leaf[200];
+    snprintf(leaf, sizeof leaf, "webui/%s_%d.json", s_up.enabled ? s_up.host : "local",
+             s_up.enabled ? s_up.port : s_port);
+    pthread_mutex_lock(&s_store_mx);
+    snprintf(s_store_path, sizeof s_store_path, "%s", evo_data_path(leaf));
+    pthread_mutex_unlock(&s_store_mx);
     pthread_mutex_lock(&s_mx);
     s_close_req = 0;                     /* nothing stale from a previous page */
     s_handoff_ready = 0;
@@ -1091,8 +1281,14 @@ int evo_webui_session_active(void)
 
 int evo_webui_open(const char *upstream, const char *path)
 {
+    return evo_webui_open_ex(upstream, path, NULL);
+}
+
+int evo_webui_open_ex(const char *upstream, const char *path, const char *hook_profile)
+{
     if (s_state != P_OFF)
         return 1;
+    snprintf(s_hook_profile, sizeof s_hook_profile, "%s", hook_profile ? hook_profile : "");
     if (s_preload_rc < 0) {
         LOG("open refused: the dialog module never loaded (0x%08x)", (unsigned)s_preload_rc);
         return -2;
@@ -1108,7 +1304,8 @@ int evo_webui_open(const char *upstream, const char *path)
     s_layout = 0;                        /* beside the rail, no browser chrome */
     s_cycle = 0;
     s_checked = 1;                       /* a provider open wins over the trigger */
-    LOG("open: %s via %s", s_open_url, s_up.base);
+    LOG("open: %s via %s hook=%s", s_open_url, s_up.base,
+        s_hook_profile[0] ? s_hook_profile : "media-server");
     s_state = P_WAIT;
     s_frames = OPEN_DELAY_FRAMES - 6;    /* a few frames: let the screen draw first */
     return 0;

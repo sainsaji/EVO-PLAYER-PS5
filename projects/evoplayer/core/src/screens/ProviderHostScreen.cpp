@@ -275,7 +275,7 @@ void ProviderHostScreen::openWebProvider()
         openSourceEditor();
         return;
     }
-    int rc = evo_webui_open(url, "/web/index.html");
+    int rc = evo_webui_open_ex(url, p->web_ui_path ? p->web_ui_path : "/", p->web_ui_hook);
     evo_bt("prov_screen: web UI '%s' -> %s rc=%d", p->id, url, rc);
     if (rc < 0) {
         toast(p->name, "Set the server as http(s)://<host>:<port>");

@@ -292,10 +292,17 @@ typedef struct evo_provider {
     int         (*set_source)(const char *value);
 
     /*
-     * CAP_WEBUI. The site to open, as http://<ipv4>:<port> with no path, or
+     * CAP_WEBUI. The site to open, as http[s]://<host>:<port> with no path, or
      * NULL / "" while it is not set up. Read immediately, do not stash.
      */
     const char *(*web_ui_url)(void);
+    /* CAP_WEBUI. The page to open on that site ("/web/index.html" for a media
+     * server, "/" for a single-page app); NULL means "/". */
+    const char *web_ui_path;
+    /* CAP_WEBUI. Which evo_webui.c hook profile catches this site's player:
+     * NULL for the media-server one (Emby/Jellyfin stream URLs), "nuvio" for
+     * Nuvio's #player / #videoPlayer. */
+    const char *web_ui_hook;
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */

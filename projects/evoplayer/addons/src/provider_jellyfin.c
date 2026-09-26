@@ -93,4 +93,5 @@ const evo_provider_t evo_provider_jellyfin = {
     .get_source    = jf_get_source,
     .set_source    = jf_set_source,
     .web_ui_url    = jf_web_ui_url,
+    .web_ui_path   = "/web/index.html",
 };

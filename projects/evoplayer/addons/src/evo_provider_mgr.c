@@ -29,6 +29,7 @@
 extern const evo_provider_t evo_provider_iptv;
 extern const evo_provider_t evo_provider_emby;
 extern const evo_provider_t evo_provider_jellyfin;
+extern const evo_provider_t evo_provider_nuvio;
 
 /*
  * Emby is in the table unconditionally, even while EVO_ENABLE_EMBY is 0.
@@ -43,6 +44,7 @@ static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_iptv,
     &evo_provider_emby,
     &evo_provider_jellyfin,     /* #101: web UI only */
+    &evo_provider_nuvio,        /* web UI only - Stremio addons, debrid */
 };
 
 #define PROVIDER_COUNT ((int)(sizeof(PROVIDERS) / sizeof(PROVIDERS[0])))

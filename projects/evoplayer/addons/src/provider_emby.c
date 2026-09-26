@@ -374,4 +374,5 @@ const evo_provider_t evo_provider_emby = {
     .get_source    = emby_provider_get_source,
     .set_source    = emby_provider_set_source,
     .web_ui_url    = emby_provider_web_ui_url,
+    .web_ui_path   = "/web/index.html",
 };

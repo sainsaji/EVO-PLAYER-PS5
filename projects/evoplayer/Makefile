@@ -133,7 +133,8 @@ ADDON_SRCS := \
     addons/src/evo_provider_bundle.c \
     addons/src/provider_iptv.c \
     addons/src/provider_emby.c \
-    addons/src/provider_jellyfin.c
+    addons/src/provider_jellyfin.c \
+    addons/src/provider_nuvio.c
 
 # The bare-metal AGC device context and its 100% GPU RmlUi render interface
 # are the only device render path - the AGC runtime owns sceAgc and

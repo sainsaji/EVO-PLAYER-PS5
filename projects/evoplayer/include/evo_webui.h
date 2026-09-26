@@ -40,6 +40,10 @@ void evo_webui_pump(void);
  */
 int  evo_webui_open(const char *upstream, const char *path);
 
+/* evo_webui_open() with a hook profile: NULL for the media-server hook
+ * (Emby/Jellyfin), "nuvio" for Nuvio's player. */
+int  evo_webui_open_ex(const char *upstream, const char *path, const char *hook_profile);
+
 /* 1 while the system browser is up: EVO must not act on pad input. */
 int  evo_webui_active(void);
 
@@ -63,6 +67,8 @@ void evo_webui_playback_ended(int played);
 static inline void evo_webui_preload(void) {}
 static inline void evo_webui_pump(void) {}
 static inline int  evo_webui_open(const char *u, const char *p) { (void)u; (void)p; return -1; }
+static inline int  evo_webui_open_ex(const char *u, const char *p, const char *h)
+{ (void)u; (void)p; (void)h; return -1; }
 static inline int  evo_webui_active(void) { return 0; }
 static inline void evo_webui_shutdown(void) {}
 static inline int  evo_webui_session_active(void) { return 0; }

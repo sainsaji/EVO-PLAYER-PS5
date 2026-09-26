@@ -84,6 +84,59 @@ per-row Square action), HTTPS upstreams, and the `loadstart`/`play`
 catch-all. Some Emby files still played in Emby's own player before the
 catch-all went in.
 
+## Nuvio, and the page storage (2026-09-26, hardware-verified)
+
+**Nuvio** (`addons/src/provider_nuvio.c`) is the third web-UI provider: the
+open-source Nuvio TV web app (NuvioTVSmart), a Stremio-addon client, so
+catalogs and debrid streams (TorBox, Real-Debrid via addons) arrive with no
+debrid code in EVO. The hosted app (`web.nuvioapp.space`) was returning
+Cloudflare 522, so the test setup self-hosts the unmodified build (`nuvio-test`
+container, port 8098). A self-built copy has no Nuvio account backend or TMDB
+key: accounts, QR sign-in and cloud sync don't work; addons and playback do.
+Played on hardware: Nuvio → EVO Test Library → Play → stream → EVO's player.
+
+The hook has a **`nuvio` profile** (`web_ui_hook` in the provider vtable,
+passed as `/evo/hook.js?p=nuvio`):
+- a stream is any `http(s)` source, but only on Nuvio's player element
+  (`<video id="videoPlayer">` inside `#player`): the home screen's autoplaying
+  trailers set a `src` too;
+- `.m3u8`/`.mpd` fetches count only while `#player` is shown (hls.js / dash.js);
+- `canPlayType` always answers `"probably"`: Nuvio will not try a source the
+  browser says it can't play, and the PS5's WebKit refuses MKV/HEVC/DTS;
+- **clicks on Nuvio's hold-able buttons become Enter down + up.** Play, stream
+  cards, add-to-library and episode/season/more-like cards start a
+  press-and-hold timer and act only on key-up; a click never sends one, so Play
+  did nothing. The PS5 browser's X is a click. Reproduced in desktop Chromium
+  (Playwright) too, so it's Nuvio, not the console;
+- the title comes from the stream screen (`.stream-route-title`), noted at the
+  moment a stream is picked, because Nuvio clears that screen as the player
+  mounts.
+
+**The page storage.** The browser dialog starts every opening with empty
+storage: an addon saved in Nuvio was gone the next time it opened, and Emby
+and Jellyfin sign-ins were being lost the same way. The hook restores EVO's
+copy of the site's `localStorage` (`GET /evo/storage`) before the site's own
+code runs, once per dialog session (a `sessionStorage` flag, so a reload
+doesn't roll back newer changes), and posts it back (`POST /evo/storage`)
+every 5 s when it changed, synchronously before a handoff or Back to EVO, and
+by beacon on page-hide. EVO keeps one file per upstream site in
+`/data/evoplayer/webui/<host>_<port>.json`: every web provider shares the
+origin `127.0.0.1:8686`, and Emby's and Jellyfin's clients use the same keys.
+Values over 512 KB (caches) are left out. The file can be edited over FTP
+while the site is closed; EVO restores the edit the next time it opens.
+
+**Diagnostics.** The hook reports to `evo.log` as `web: page: ...`: key
+presses, route changes (Nuvio's router state), clicks, script errors,
+media-element events and every handoff attempt. That was what located the Play
+failure.
+
+**Test library:** `tools/test-addon/serve.sh` builds a static Stremio addon
+over a media folder (plus one public HLS stream) and serves it with nginx at
+`http://<host>:8100/manifest.json` (CORS open, range requests for seeking).
+Nuvio's TV app has no field for an addon URL; its phone page (`/?addonsRemote=1`)
+saves into the same browser storage, and the dev trigger file can open that
+page inside the dialog.
+
 ## Known limits
 
 - Emby/Jellyfin are not told what EVO played: watched state and resume points
