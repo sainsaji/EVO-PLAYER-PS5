@@ -109,7 +109,11 @@ typedef enum {
     EVO_PROVIDER_CAP_LIVE     = 1u << 6,
     /* get_source / set_source: the provider can be pointed at a different
      * source at runtime, from a UI, and persists it itself. */
-    EVO_PROVIDER_CAP_CONFIG   = 1u << 7
+    EVO_PROVIDER_CAP_CONFIG   = 1u << 7,
+    /* web_ui_url: the provider's UI is its own website, opened in the
+     * system browser beside the rail (evo_webui.c, #101) instead of an RmlUi
+     * bundle. The site's player is rerouted to EVO's. */
+    EVO_PROVIDER_CAP_WEBUI    = 1u << 8
 } evo_provider_caps_t;
 
 /* ------------------------------------------------------------------------- */
@@ -286,6 +290,19 @@ typedef struct evo_provider {
      */
     const char *(*get_source)(void);
     int         (*set_source)(const char *value);
+
+    /*
+     * CAP_WEBUI. The site to open, as http[s]://<host>:<port> with no path, or
+     * NULL / "" while it is not set up. Read immediately, do not stash.
+     */
+    const char *(*web_ui_url)(void);
+    /* CAP_WEBUI. The page to open on that site ("/web/index.html" for a media
+     * server, "/" for a single-page app); NULL means "/". */
+    const char *web_ui_path;
+    /* CAP_WEBUI. Which evo_webui.c hook profile catches this site's player:
+     * NULL for the media-server one (Emby/Jellyfin stream URLs), "nuvio" for
+     * Nuvio's #player / #videoPlayer. */
+    const char *web_ui_hook;
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */
@@ -332,6 +349,15 @@ int  evo_provider_id_valid(const char *id);
  * vtable is never called.
  */
 int  evo_provider_is_enabled(const char *id);
+
+/*
+ * #101: parse a web-UI provider's source - "[http[s]://]<host>[:<port>][/]" -
+ * into a host (a name or an IPv4 address), a port and *tls (1 for https).
+ * With no port: default_port for http (a media server's own port), 443 for
+ * https (the usual reverse-proxied deployment). Returns 0 on success.
+ */
+int  evo_provider_parse_web_source(const char *value, char *host, size_t host_cap,
+                                   int *port, int *tls, int default_port);
 void evo_provider_set_enabled(const char *id, int enabled);
 int  evo_provider_save_state(void);
 

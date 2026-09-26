@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  #101 stage 2 test page for the libSceWebBrowserDialog probe
+  (projects/evoplayer/src/evo_web_probe.c). Served by tools/provider-server.sh
+  at /web/probe.html.
+
+  EVO opens it with ?evo=http://127.0.0.1:<port>, where it listens for the
+  handoff while the browser is up. The buttons test, in order:
+    1. fetch() to EVO's loopback listener (cross-origin, CORS-open)
+    2. a top-level navigation to EVO's /play - the real handoff; EVO should
+       answer, then close the browser itself
+    3. window.close() - does the page have a way out of its own
+    4. a plain navigation - the browser must stay open
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>EVO web probe</title>
+<style>
+  body { background: #101418; color: #e8eef4; font: 28px/1.4 sans-serif; margin: 48px; }
+  h1 { font-size: 44px; margin: 0 0 24px; }
+  .ok { color: #6fdc8c; } .bad { color: #ff8a80; } .nav { color: #ffd479; }
+  a.btn, button { display: inline-block; margin: 16px 16px 0 0; padding: 18px 32px; border-radius: 12px;
+          background: #2a6df4; color: #fff; text-decoration: none; border: 0; font: inherit; }
+  a.btn:focus, a.btn:hover, button:focus, button:hover { outline: 4px solid #fff; }
+  code { color: #ffd479; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>EVO Player: system browser probe (#101)</h1>
+<p id="navd" class="nav" hidden>You followed the plain navigation - the browser stayed open.</p>
+<p>JavaScript: <span id="js" class="bad">not running</span></p>
+<p>EVO listener: <code id="evoshow">?</code></p>
+<p>Ping result: <span id="ping">not tried</span></p>
+<p>User agent: <code id="ua">?</code></p>
+<button id="pingbtn">1. Ping EVO (fetch)</button>
+<a class="btn" id="send" href="#">2. Send stream to EVO</a>
+<button id="closebtn">3. window.close()</button>
+<a class="btn" id="plain" href="#">4. Plain navigation</a>
+<script>
+  var q = new URLSearchParams(location.search);
+  var evo = q.get('evo') || 'http://127.0.0.1:8686';
+  document.getElementById('js').textContent = 'running';
+  document.getElementById('js').className = 'ok';
+  document.getElementById('ua').textContent = navigator.userAgent;
+  document.getElementById('evoshow').textContent = evo;
+  if (q.get('nav')) document.getElementById('navd').hidden = false;
+  document.getElementById('send').href = evo + '/play?url=' +
+      encodeURIComponent('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8') +
+      '&title=' + encodeURIComponent('Big Buck Bunny');
+  document.getElementById('plain').href = 'probe.html?nav=1&evo=' + encodeURIComponent(evo);
+  document.getElementById('pingbtn').onclick = function () {
+    var el = document.getElementById('ping');
+    el.textContent = 'trying...';
+    el.className = '';
+    fetch(evo + '/ping').then(function (r) { return r.text(); })
+      .then(function (t) { el.textContent = 'OK ' + t; el.className = 'ok'; })
+      .catch(function (e) { el.textContent = 'FAILED ' + e; el.className = 'bad'; });
+  };
+  document.getElementById('closebtn').onclick = function () {
+    window.close();
+    setTimeout(function () { alert('window.close() did nothing'); }, 800);
+  };
+</script>
+</body>
+</html>

@@ -210,6 +210,10 @@ tools/re/aerolib.csv
 # Local test environment, media fixtures & scratch
 emby_config/
 emby_media/
+jellyfin_config/
+jellyfin_cache/
+nuvio_web/
+output/test-addon/
 scratch/
 
 

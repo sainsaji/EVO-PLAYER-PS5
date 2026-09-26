@@ -67,7 +67,7 @@ while (( $# )); do
         --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
         --native-10bit)         NATIVE_10BIT=1; NO_NATIVE_10BIT=0 ;;        # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — ON BY DEFAULT, so this flag is a no-op kept for back-compat and for scripts that state it explicitly
         --no-native-10bit)      NO_NATIVE_10BIT=1; NATIVE_10BIT=0 ;;        # #41 Phase D escape hatch — 10-bit stays on the FFmpeg CPU path. Try this first if thumbnail/poster decode fails to allocate: Phase D's two slots left ~3 MB of flex memory free AT BOOT on 2026-09-11
-        -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
+        -h|--help)      sed -n '2,34p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -453,6 +453,9 @@ PRX_STUB_WANT=()
 # sceCommonDialogInitialize() must run before any common dialog will start.
 if [[ "${MODE}" == "player" ]]; then
     PRX_STUB_WANT+=(libSceVideodec2 libSceAudiodec libSceAgc libSceAgcDriver libSceCommonDialog)
+    # #101: the system web browser (src/evo_webui.c) - a provider's own web UI
+    # opens in it. No SDK stub exists for it either.
+    PRX_STUB_WANT+=(libSceWebBrowserDialog)
 fi
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"

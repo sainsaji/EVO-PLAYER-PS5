@@ -118,7 +118,7 @@ sweep)
     # the docs/validation.md table. Each `play` implicitly closes the previous
     # file (start_video_playback stops first), which is what flushes its row; the
     # trailing `stop` flushes the last one.
-    SWEEP_DIR="/mnt/usb0/test_files_aud_vid"
+    SWEEP_DIR="/mnt/usb0/media/Test/Audio"
     SWEEP_SECS=30
     SWEEP_MAX=0
     SWEEP_SKIP=""

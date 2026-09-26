@@ -17,6 +17,7 @@
 #   /ui/<provider>/...             the bundle's .rml / .rcss / fonts / images
 #   /media/iptv.m3u                a small test playlist (generated if absent)
 #   /media/epg.xml                 XMLTV now-and-next for that playlist
+#   /web/probe.html                #101 system-browser probe test page
 #
 # USAGE
 #
@@ -63,7 +64,8 @@ command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found on PATH" 
 
 SERVE_ROOT="${REPO_ROOT}/output/provider-serve"
 rm -rf "${SERVE_ROOT}"
-mkdir -p "${SERVE_ROOT}/ui" "${SERVE_ROOT}/media"
+mkdir -p "${SERVE_ROOT}/ui" "${SERVE_ROOT}/media" "${SERVE_ROOT}/web"
+cp "${REPO_ROOT}/tools/web-probe/"*.html "${SERVE_ROOT}/web/"
 
 # ---------------------------------------------------------------------------
 # Bundles: regenerate each manifest, then stage the directory.
@@ -193,6 +195,11 @@ cat <<EOF
  on the first run is normal and must be allowed for Private networks:
 
    curl -s ${BASE}/ui/iptv/manifest.json | head -5
+
+ #101 web probe (a --web-probe build only): write /mnt/usb0/evo_web_probe as
+
+   url=${BASE}/web/probe.html
+   port=8686
 
  Ctrl-C to stop.
 
