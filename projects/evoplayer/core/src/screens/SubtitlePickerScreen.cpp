@@ -234,6 +234,15 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
                        ? (prospero_subtitle_face - 1) : 1;
     const char* sizeNames[] = { "SMALL", "MEDIUM", "LARGE" };
     params.size_str = sizeNames[size_idx];
+
+    static char s_syncBuf[32];
+    if (prospero_subtitle_delay_ms == 0) {
+        std::snprintf(s_syncBuf, sizeof(s_syncBuf), "SYNC: 0 ms");
+    } else {
+        std::snprintf(s_syncBuf, sizeof(s_syncBuf), "SYNC: %+d ms", prospero_subtitle_delay_ms);
+    }
+    params.sync_str = s_syncBuf;
+
     params.preview_text = "The quick brown fox jumps over the lazy dog";
     params.preview_face = size_idx;
 

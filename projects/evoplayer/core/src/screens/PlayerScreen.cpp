@@ -214,6 +214,7 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         if (!playback->isScrubbing()) {
             prospero_subtitle_nudge_delay(-100);
             evo_feedback(EVO_FB_MOVE);
+            m_controlsLastUsedMs = NowMs();
         }
         return true;
     }
@@ -221,6 +222,7 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         if (!playback->isScrubbing()) {
             prospero_subtitle_nudge_delay(+100);
             evo_feedback(EVO_FB_MOVE);
+            m_controlsLastUsedMs = NowMs();
         }
         return true;
     }
@@ -525,6 +527,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
 
         p.audio_track = audioTrackBuf[0] ? audioTrackBuf : "";
         p.sub_track   = subTrackBuf[0]   ? subTrackBuf   : "";
+        p.sub_delay_ms = prospero_subtitle_enabled ? prospero_subtitle_delay_ms : 0;
         p.audio_badge = chLabel[0] ? chLabel : ((evo_audio_channels == 8) ? "7.1" : "STEREO");
         p.decoder_badge = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE) ? "Hardware" : "Software";
         p.position_sec = playback->getPositionSeconds();

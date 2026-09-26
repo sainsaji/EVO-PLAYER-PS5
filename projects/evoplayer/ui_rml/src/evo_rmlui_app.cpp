@@ -2185,6 +2185,23 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         el_subs->SetInnerRML(s_txt);
     }
 
+    Rml::Element* el_subsync_item = m_playback_doc->GetElementById("item-subsync");
+    Rml::Element* el_subsync = m_playback_doc->GetElementById("label-subsync");
+    if (el_subsync_item && el_subsync) {
+        if (state.sub_track.empty() || state.sub_track == "None") {
+            el_subsync_item->SetProperty("display", "none");
+        } else {
+            el_subsync_item->SetProperty("display", "flex");
+            char sync_buf[32];
+            if (state.sub_delay_ms == 0) {
+                std::snprintf(sync_buf, sizeof(sync_buf), "SYNC: 0 ms");
+            } else {
+                std::snprintf(sync_buf, sizeof(sync_buf), "SYNC: %+d ms", state.sub_delay_ms);
+            }
+            el_subsync->SetInnerRML(sync_buf);
+        }
+    }
+
     Rml::Element* el_aspect = m_playback_doc->GetElementById("label-aspect");
     if (el_aspect) {
         const char* vm = (state.view_mode == 0) ? "FIT" : ((state.view_mode == 1) ? "FILL" : "STRETCH");
@@ -2707,6 +2724,17 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
 
     Rml::Element* el_ti = m_subtitles_doc->GetElementById("subtitles-title");
     if (el_ti) el_ti->SetInnerRML(state.title);
+
+    Rml::Element* el_sync_pill = m_subtitles_doc->GetElementById("subtitles-sync-pill");
+    if (el_sync_pill) {
+        el_sync_pill->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+    }
+
+    Rml::Element* el_sync_lbl = m_subtitles_doc->GetElementById("subtitles-sync-label");
+    if (el_sync_lbl) {
+        el_sync_lbl->SetInnerRML(state.sync_str.empty() ? "SYNC: 0 ms" : state.sync_str);
+        el_sync_lbl->SetProperty("color", to_hex_rgb(m_theme.accent));
+    }
 
     Rml::Element* el_pill = m_subtitles_doc->GetElementById("subtitles-size-pill");
     if (el_pill) {

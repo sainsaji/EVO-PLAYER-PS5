@@ -321,6 +321,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.scrub_target = p->scrub_target;
     state.audio_track = p->audio_track ? p->audio_track : "";
     state.sub_track = p->sub_track ? p->sub_track : "";
+    state.sub_delay_ms = p->sub_delay_ms;
     state.view_mode = p->view_mode;
     state.show_stats = (p->show_stats != 0);
     state.alpha = p->alpha;
@@ -464,6 +465,7 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     state.eyebrow = p->eyebrow ? p->eyebrow : "SUBTITLES & CLOSED CAPTIONS";
     state.title = p->title ? p->title : "SELECT SUBTITLE TRACK";
     state.size_str = p->size_str ? p->size_str : "MEDIUM";
+    state.sync_str = p->sync_str ? p->sync_str : "";
     state.preview_text = p->preview_text ? p->preview_text : "";
     state.preview_face = p->preview_face;
 

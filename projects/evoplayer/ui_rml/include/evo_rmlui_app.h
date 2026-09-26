@@ -27,6 +27,7 @@ struct EvoPlaybackState {
     double scrub_target = 0.0;
     std::string audio_track;
     std::string sub_track;
+    int sub_delay_ms = 0;
     int view_mode = 0; // 0=FIT, 1=FILL, 2=STRETCH
     bool show_stats = false;
     int alpha = 255;
@@ -48,6 +49,7 @@ struct EvoPlaybackState {
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
                audio_track == o.audio_track && sub_track == o.sub_track &&
+               sub_delay_ms == o.sub_delay_ms &&
                view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha &&
                subtitle_text == o.subtitle_text && subtitle_face == o.subtitle_face &&
                subtitle_raised == o.subtitle_raised && chrome_hidden == o.chrome_hidden &&
@@ -154,12 +156,14 @@ struct EvoSubtitlesState {
     std::string eyebrow;
     std::string title;
     std::string size_str;
+    std::string sync_str;
     std::string preview_text;
     int preview_face = 1; // 0=small, 1=medium, 2=large
     std::vector<EvoSubtitlesTrack> tracks;
 
     bool operator==(const EvoSubtitlesState& o) const {
         return eyebrow == o.eyebrow && title == o.title && size_str == o.size_str &&
+               sync_str == o.sync_str &&
                preview_text == o.preview_text && preview_face == o.preview_face &&
                tracks == o.tracks;
     }

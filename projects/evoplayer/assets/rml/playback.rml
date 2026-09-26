@@ -124,6 +124,10 @@
                 <span class="btn-tag">UP / DN</span>
                 <span id="label-subs" class="control-label">SUBS: None</span>
             </div>
+            <div class="control-item" id="item-subsync">
+                <span class="btn-tag">TRACKPAD &lt; &gt;</span>
+                <span id="label-subsync" class="control-label">SYNC: 0 ms</span>
+            </div>
             <div class="control-item">
                 <div class="glyph-badge"><img src="icons/btn_square.png" class="glyph-badge-img"/></div>
                 <span class="control-label">INFO</span>

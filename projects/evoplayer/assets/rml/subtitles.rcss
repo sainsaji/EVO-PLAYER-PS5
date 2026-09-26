@@ -76,6 +76,31 @@ div, span, p {
     margin-top: 4dp;
 }
 
+#subtitles-header-pills {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+}
+
+#subtitles-sync-pill {
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#subtitles-sync-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #38bdf8;
+    letter-spacing: 0.5dp;
+}
+
 #subtitles-size-pill {
     background-color: #131d2e;
     border-width: 1dp;
@@ -99,6 +124,17 @@ div, span, p {
     font-weight: bold;
     color: #38bdf8;
     letter-spacing: 0.5dp;
+}
+
+.btn-tag {
+    background-color: #1a2336;
+    border-width: 1dp;
+    border-color: #2e3e5c;
+    padding: 2dp 7dp;
+    border-radius: 7dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00d2ff;
 }
 
 /* Track List */

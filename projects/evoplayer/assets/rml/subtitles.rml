@@ -11,9 +11,14 @@
                     <div id="subtitles-eyebrow">SUBTITLES &amp; CLOSED CAPTIONS</div>
                     <div id="subtitles-title">SELECT SUBTITLE TRACK</div>
                 </div>
-                <div id="subtitles-size-pill">
-                    <img src="../icons/btn_triangle.png" class="size-glyph"/>
-                    <span id="subtitles-size-label">SIZE: MEDIUM</span>
+                <div id="subtitles-header-pills">
+                    <div id="subtitles-sync-pill">
+                        <span id="subtitles-sync-label">SYNC: 0 ms</span>
+                    </div>
+                    <div id="subtitles-size-pill">
+                        <img src="../icons/btn_triangle.png" class="size-glyph"/>
+                        <span id="subtitles-size-label">SIZE: MEDIUM</span>
+                    </div>
                 </div>
             </div>
 
@@ -119,6 +124,10 @@
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">CYCLE SIZE</span>
+                </div>
+                <div class="footer-hint">
+                    <span class="btn-tag">TRACKPAD / &lt; &gt;</span>
+                    <span class="footer-text">SYNC DELAY</span>
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>

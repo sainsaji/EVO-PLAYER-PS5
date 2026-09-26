@@ -25,6 +25,7 @@ typedef struct {
     double scrub_target;
     const char* audio_track;
     const char* sub_track;
+    int sub_delay_ms;
     int view_mode;
     int show_stats;
     int alpha;
@@ -145,6 +146,7 @@ typedef struct {
     const char* eyebrow;
     const char* title;
     const char* size_str;
+    const char* sync_str;
     const char* preview_text;
     int preview_face; // 0=small, 1=medium, 2=large
     int track_count;
