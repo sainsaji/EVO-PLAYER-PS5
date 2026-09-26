@@ -20,7 +20,7 @@ from ftplib import FTP, error_perm
 
 HOST = os.environ["PS5_HOST"]
 PORT = int(os.environ.get("FTP_PORT", "2121"))
-SWEEP_DIR = os.environ.get("SWEEP_DIR", "/mnt/usb0/test_files_aud_vid")
+SWEEP_DIR = os.environ.get("SWEEP_DIR", "/mnt/usb0/media/Test/Audio")
 WINDOW_S = float(os.environ.get("SWEEP_SECS", "30"))
 MAX_FILES = int(os.environ.get("SWEEP_MAX", "0"))
 
