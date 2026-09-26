@@ -56,9 +56,13 @@ static const struct { const char *name; unsigned int mask; } k_keys[] = {
     { "cross",    0x4000 }, { "square",   0x8000 },
     { "options",  0x0008 }, { "l3",       0x0002 },
     { "r3",       0x0004 },
+    { "touchpad",       0x00100000 },
+    { "touchpad_left",  0x00200000 },
+    { "touchpad_right", 0x00400000 },
     /* aliases for whoever is typing them by hand */
     { "x",        0x4000 }, { "o",        0x2000 },
     { "t",        0x1000 }, { "sq",       0x8000 },
+    { "pad_left", 0x00200000 }, { "pad_right", 0x00400000 },
     { "shot",     0x0002 },   /* l3 - the frame loop's screenshot handler */
 };
 

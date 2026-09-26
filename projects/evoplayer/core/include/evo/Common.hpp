@@ -116,8 +116,11 @@ namespace PadButtons {
     constexpr uint32_t Circle   = 0x2000;
     constexpr uint32_t Cross    = 0x4000;
     constexpr uint32_t Square   = 0x8000;
-    constexpr uint32_t L3       = 0x0002;
-    constexpr uint32_t R3       = 0x0004;
+    constexpr uint32_t L3            = 0x0002;
+    constexpr uint32_t R3            = 0x0004;
+    constexpr uint32_t TouchPad      = 0x00100000; // Physical touchpad click
+    constexpr uint32_t TouchPadLeft  = 0x00200000; // Touchpad click/swipe on left half
+    constexpr uint32_t TouchPadRight = 0x00400000; // Touchpad click/swipe on right half
 }
 
 // Color packing helper for 0xAABBGGRR (BGRA in little-endian uint32_t)

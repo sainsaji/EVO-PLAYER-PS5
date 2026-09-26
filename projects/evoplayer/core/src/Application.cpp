@@ -84,13 +84,35 @@ int sceUserServiceGetLoginUserIdList(int userId[4]);
 int scePadInit(void);
 int scePadOpen(int, int, int, void *);
 
+typedef struct PS5_PadTouch {
+    uint16_t x;
+    uint16_t y;
+    uint8_t id;
+    uint8_t reserve[3];
+} PS5_PadTouch;
+
+typedef struct PS5_PadTouchData {
+    uint8_t touchNum;
+    uint8_t reserve[3];
+    uint32_t time_since_touch_held_down;
+    PS5_PadTouch touch[2];
+} PS5_PadTouchData;
+
 typedef struct PS5_PadData {
     uint32_t buttons;
     struct { uint8_t x; uint8_t y; } leftStick;
     struct { uint8_t x; uint8_t y; } rightStick;
-    struct { uint8_t l2; uint8_t r2; } analogButtons;
-    uint8_t rest[128];
+    struct { uint8_t l2; uint8_t r2; uint8_t padding[2]; } analogButtons;
+    float orientation[4];
+    float acceleration[3];
+    float angularVelocity[3];
+    PS5_PadTouchData touchData;
+    uint8_t rest[72];
 } PS5_PadData;
+
+static_assert(offsetof(PS5_PadData, touchData) == 52, "touchData offset mismatch");
+static_assert(offsetof(PS5_PadData, touchData.touch[0].x) == 60, "touch[0].x offset mismatch");
+static_assert(offsetof(PS5_PadData, touchData.touch[1].x) == 68, "touch[1].x offset mismatch");
 
 int scePadReadState(int, PS5_PadData *);
 
@@ -896,6 +918,66 @@ int Application::run() {
             if (evo_input_fired(&evo_pad_state, EVO_ACT_DOWN))  pressed |= PadButtons::Down;
             if (evo_input_fired(&evo_pad_state, EVO_ACT_LEFT))  pressed |= PadButtons::Left;
             if (evo_input_fired(&evo_pad_state, EVO_ACT_RIGHT)) pressed |= PadButtons::Right;
+
+            // Touchpad gesture and left/right click synthesis
+            static uint16_t s_lastTouchX = 960;
+            static bool s_touchActive = false;
+            static uint16_t s_swipeStartX = 0;
+            static uint16_t s_swipeStartY = 0;
+            static uint64_t s_swipeStartTime = 0;
+            static bool s_swipeTriggered = false;
+
+            const uint64_t curPadTime = static_cast<uint64_t>(now_ms());
+
+            if (padData.touchData.touchNum > 0) {
+                uint16_t tx = padData.touchData.touch[0].x;
+                uint16_t ty = padData.touchData.touch[0].y;
+                s_lastTouchX = tx;
+
+                if (!s_touchActive) {
+                    s_touchActive = true;
+                    s_swipeStartX = tx;
+                    s_swipeStartY = ty;
+                    s_swipeStartTime = curPadTime;
+                    s_swipeTriggered = false;
+                } else if (!s_swipeTriggered && !(pressed & PadButtons::TouchPad)) {
+                    int dx = static_cast<int>(tx) - static_cast<int>(s_swipeStartX);
+                    int dy = static_cast<int>(ty) - static_cast<int>(s_swipeStartY);
+                    uint64_t dt = curPadTime - s_swipeStartTime;
+
+                    // Swipe: >= 250 px horizontally within 500 ms, with horizontal travel > 1.5 * vertical
+                    if (dt <= 500 && std::abs(dx) >= 250 && std::abs(dx) > (std::abs(dy) * 3 / 2)) {
+                        if (dx < 0) {
+                            pressed |= PadButtons::TouchPadLeft;
+                            evo_bt("touchpad: swipe left (dx=%d)", dx);
+                        } else {
+                            pressed |= PadButtons::TouchPadRight;
+                            evo_bt("touchpad: swipe right (dx=%d)", dx);
+                        }
+                        s_swipeTriggered = true;
+                    }
+                }
+            } else {
+                s_touchActive = false;
+                s_swipeTriggered = false;
+            }
+
+            // Touchpad physical click handling:
+            if (pressed & PadButtons::TouchPad) {
+                if (s_lastTouchX < 960) {
+                    pressed |= PadButtons::TouchPadLeft;
+                    evo_bt("touchpad: click left (x=%u)", s_lastTouchX);
+                } else {
+                    pressed |= PadButtons::TouchPadRight;
+                    evo_bt("touchpad: click right (x=%u)", s_lastTouchX);
+                }
+            }
+            if (held & PadButtons::TouchPad) {
+                held |= (s_lastTouchX < 960 ? PadButtons::TouchPadLeft : PadButtons::TouchPadRight);
+            }
+            if (released & PadButtons::TouchPad) {
+                released |= (PadButtons::TouchPadLeft | PadButtons::TouchPadRight);
+            }
 
             hasInput = (pressed != 0 || released != 0 || evo_input_any(&evo_pad_state));
             if (hasInput) {

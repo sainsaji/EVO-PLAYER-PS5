@@ -193,6 +193,16 @@ bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t
         cycleSize();
         return true;
     }
+    if (pressed & (PadButtons::Left | PadButtons::TouchPadLeft | PadButtons::L2)) {
+        prospero_subtitle_nudge_delay(-100);
+        evo_feedback(EVO_FB_MOVE);
+        return true;
+    }
+    if (pressed & (PadButtons::Right | PadButtons::TouchPadRight)) {
+        prospero_subtitle_nudge_delay(+100);
+        evo_feedback(EVO_FB_MOVE);
+        return true;
+    }
     if (pressed & PadButtons::Circle) {
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {

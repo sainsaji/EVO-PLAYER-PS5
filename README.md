@@ -131,7 +131,7 @@ A 360° top-down sound stage for checking a multichannel setup.
 
 ### Subtitles
 
-Tracks are ranked by real cue counts rather than claimed metadata. Default size (`SMALL` / `MEDIUM` / `LARGE`) persists in Settings, and sync can be nudged live with **L2 / R2**.
+Tracks are ranked by real cue counts rather than claimed metadata. Default size (`SMALL` / `MEDIUM` / `LARGE`) persists in Settings, and sync can be nudged live in ±100 ms increments with the **DualSense Trackpad (Left / Right click or horizontal swipe)** during playback, or via **D-pad Left / Right** inside the Subtitle Picker.
 
 ![Subtitle track picker](docs/images/picker.png)
 

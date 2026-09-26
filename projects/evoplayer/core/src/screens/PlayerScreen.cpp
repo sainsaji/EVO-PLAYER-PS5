@@ -199,10 +199,28 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         return true;
     }
     if (pressed & PadButtons::R2) {
-        /* Audio track picker. R2 because L2/R3 are the legacy subtitle-delay
-         * nudge and R2 is otherwise unbound on this screen. */
+        /* Audio track picker. */
         if (!playback->isScrubbing() && screenMgr) {
             screenMgr->navigateTo(ScreenId::AudioTrackPicker);
+        }
+        return true;
+    }
+    /*
+     * Subtitle delay sync:
+     * - Trackpad Left (click left half or swipe left) / L2: nudge -100 ms (earlier)
+     * - Trackpad Right (click right half or swipe right): nudge +100 ms (later)
+     */
+    if (pressed & (PadButtons::TouchPadLeft | PadButtons::L2)) {
+        if (!playback->isScrubbing()) {
+            prospero_subtitle_nudge_delay(-100);
+            evo_feedback(EVO_FB_MOVE);
+        }
+        return true;
+    }
+    if (pressed & PadButtons::TouchPadRight) {
+        if (!playback->isScrubbing()) {
+            prospero_subtitle_nudge_delay(+100);
+            evo_feedback(EVO_FB_MOVE);
         }
         return true;
     }
