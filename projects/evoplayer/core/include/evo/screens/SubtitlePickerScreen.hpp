@@ -21,10 +21,15 @@ public:
 
 private:
     struct SubtitleTrackEntry {
-        int trackId = -2; // -2 = Off, -1 = External SRT, >= 0 = Stream index
+        int trackId = -2; // -2 = Off, -1 = External SRT, -3 = AUTO-SYNC, >= 0 = Stream index
         std::string label;
         std::string detail;
     };
+
+    /* subtitles.rml has six rows; scrolling by any other count lets the focus
+     * walk onto rows that are never drawn. */
+    static constexpr int kVisibleRows = 6;
+    static constexpr int kAutoSyncTrack = -3;
 
     void refreshTracks();
     void navigate(int delta);

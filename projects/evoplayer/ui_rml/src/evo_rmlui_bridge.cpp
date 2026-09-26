@@ -475,6 +475,8 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
         trk.detail = p->tracks[i].detail ? p->tracks[i].detail : "";
         trk.is_current = (p->tracks[i].is_current != 0);
         trk.is_focused = (p->tracks[i].is_focused != 0);
+        trk.is_action = (p->tracks[i].is_action != 0);
+        trk.is_disabled = (p->tracks[i].is_disabled != 0);
         state.tracks.push_back(trk);
     }
 

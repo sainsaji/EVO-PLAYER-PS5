@@ -2772,6 +2772,8 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
             if (i < (int)state.tracks.size()) {
                 el_row->SetProperty("display", "flex");
                 el_row->SetClass("row-focused", state.tracks[i].is_focused);
+                el_row->SetClass("row-action", state.tracks[i].is_action);
+                el_row->SetClass("row-disabled", state.tracks[i].is_disabled);
 
                 if (state.tracks[i].is_focused) {
                     el_row->SetProperty("background-color", to_hex_rgba(m_theme.surface_sel));

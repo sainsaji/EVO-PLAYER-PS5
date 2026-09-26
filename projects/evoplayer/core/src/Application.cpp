@@ -53,6 +53,7 @@ extern "C" int perf_render_fps;
 #include "evo_feedback.h"
 #include "evo_input.h"
 #include "evo_net.h"
+#include "evo_subtitle.h"
 #include "evo_usb_remote.h"
 #include "evo_webui.h"
 /* #90: providers are reached through the vtable registry, never by name.
@@ -1056,6 +1057,8 @@ int Application::run() {
             s_lastTickUs = nowUs;
         }
         evo::animation::AnimationManager::getInstance().update(frameDeltaMs);
+        /* #102: a finished subtitle auto-sync is applied on this thread. */
+        prospero_subtitle_autosync_pump();
         m_screenManager->update(frameDeltaMs);
 
         // 3. Determine if graphics needs to render/present

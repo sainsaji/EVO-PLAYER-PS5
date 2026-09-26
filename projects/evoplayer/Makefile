@@ -107,6 +107,7 @@ MEDIA_SRCS := \
     media/src/evo_audio_resample.c \
     media/src/evo_audio_out.c \
     media/src/evo_subtitle.c \
+    media/src/evo_subsync.c \
     media/src/evo_perf_monitor.c \
     media/src/evo_demux.c \
     media/src/evo_vdec_ffmpeg.c \

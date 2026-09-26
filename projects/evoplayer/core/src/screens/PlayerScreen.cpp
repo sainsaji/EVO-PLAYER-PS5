@@ -93,8 +93,7 @@ bool PlayerScreen::hasActiveOverlay() const {
     if (prospero_subtitle_enabled) {
         auto playback = Application::getInstance().getPlaybackController();
         if (playback && !playback->isMusicMode()) {
-            double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
-            if (subPos < 0.0) subPos = 0.0;
+            double subPos = prospero_subtitle_position(subtitleClockSeconds());
             if (prospero_subtitle_use_external) {
                 const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);
                 if (cue && cue->text[0]) return true;
@@ -403,8 +402,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
 
     char activeSubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
     if (prospero_subtitle_enabled && !playback->isMusicMode()) {
-        double subPos = subtitleClockSeconds() - (static_cast<double>(prospero_subtitle_delay_ms) / 1000.0);
-        if (subPos < 0.0) subPos = 0.0;
+        double subPos = prospero_subtitle_position(subtitleClockSeconds());
 
         if (prospero_subtitle_use_external) {
             const ProsperoSubtitleCue* cue = prospero_subtitle_active_cue(subPos);

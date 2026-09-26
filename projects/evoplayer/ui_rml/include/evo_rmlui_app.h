@@ -144,10 +144,13 @@ struct EvoSubtitlesTrack {
     std::string detail;
     bool is_current = false;
     bool is_focused = false;
+    bool is_action = false;
+    bool is_disabled = false;
 
     bool operator==(const EvoSubtitlesTrack& o) const {
         return label == o.label && detail == o.detail &&
-               is_current == o.is_current && is_focused == o.is_focused;
+               is_current == o.is_current && is_focused == o.is_focused &&
+               is_action == o.is_action && is_disabled == o.is_disabled;
     }
     bool operator!=(const EvoSubtitlesTrack& o) const { return !(*this == o); }
 };

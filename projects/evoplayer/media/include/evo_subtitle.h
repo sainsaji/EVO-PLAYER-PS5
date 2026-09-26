@@ -49,6 +49,10 @@ extern int prospero_subtitle_count;              /* external-SRT cue count   */
 extern int prospero_subtitle_enabled;
 extern int prospero_subtitle_face;               /* EVO_FACE_SUB/MENU/TITLE  */
 extern int prospero_subtitle_delay_ms;
+extern double prospero_subtitle_time_scale;      /* external SRT only, #102 */
+
+/* Manual nudge and auto-sync share one range (#102). */
+#define PROSPERO_SUBTITLE_MAX_DELAY_MS 60000
 extern int prospero_subtitle_requested_stream;   /* -2 auto, -1 SRT, >=0 emb */
 extern int prospero_subtitle_use_external;
 extern int prospero_embedded_subtitle_stream_index;
@@ -87,6 +91,16 @@ void prospero_subtitle_trim(char *text);   /* also used by wrap_text in main.c *
 void prospero_subtitle_toggle(void);
 void prospero_subtitle_apply_track(int track);
 void prospero_subtitle_nudge_delay(int delta_ms);
+
+/* Media clock -> subtitle timeline: clock * scale - delay, floored at 0. */
+double prospero_subtitle_position(double clock_seconds);
+
+/* ---- auto-sync (#102, worker in evo_subsync.c) ---- */
+int  prospero_subtitle_autosync_available(void);  /* SRT or text track active, local file */
+int  prospero_subtitle_autosync_running(void);
+void prospero_subtitle_autosync_toggle(void);     /* start, or cancel a run  */
+void prospero_subtitle_autosync_pump(void);       /* UI thread, every frame  */
+const char *prospero_subtitle_autosync_detail(char *buf, size_t size);
 
 #ifdef __cplusplus
 }
