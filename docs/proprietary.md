@@ -113,6 +113,19 @@ error, not a silent fallback. Current behaviour:
 | SPRX for stub generation | not consulted at all unless you run the stub flow above; `decoder_test` instead reports which modules are reachable at run time |
 | `proprietary/` missing entirely | everything in the checklist still passes |
 
+## Third-party open-source code in the build
+
+Not proprietary, but recorded here so the licences are in one place.
+
+| Component | Where | Licence | Notes |
+|---|---|---|---|
+| AMD FidelityFX Super Resolution 1.0 (EASU + RCAS) | ported to GLSL in `tools/gen_upscale_pipes.py` → `projects/evoplayer/shaders/agc/upscale_{easu,rcas}.pipe` | MIT, © Advanced Micro Devices | #103 Sharp upscaler. A port of `ffx_fsr1.h`'s float path, not a copy of the header |
+| Anime4K `Upscale_CNN_x2` S and M | `third_party/anime4k/` (vendored unchanged, with its `LICENSE`) → `upscale_a4k_*.pipe` | MIT, © bloc97 | #103 AI upscaler. The network weights are the literal constants in those mpv hooks |
+
+A live-action super-resolution network (FSRCNN-class) was considered for AI
+mode. None is shipped: add one here only once its **weights'** licence is
+checked, which is separate from the licence of the code that trained them.
+
 ## If you commit something by accident
 
 A `git rm` is not enough — the blob stays in history.

@@ -67,6 +67,7 @@ extern "C" int perf_render_fps;
 #include "pp_playback.h"
 #include "evo_playback.h"
 #include "evo_adec.h"
+#include "evo_hw.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_perf_monitor.h"
 #include "evo_vdec.h"
@@ -287,6 +288,9 @@ bool Application::initialize(int argc, char** argv) {
     /* Same pre-unjail constraint as the video decoder: after
      * evo_jailbreak_self() the credential swap breaks libSceAudiodec too. */
     evo_adec_native_probe();
+    /* #103: PS5 Pro detection. Cached; the upscaler's default network size,
+     * the PSML gate and the diagnostics screens all read it later. */
+    evo_hw_probe();
 
     if (!initHardware()) {
         return false;
@@ -670,18 +674,56 @@ static void notifyOnScreen(const char*) {}
  * 24-bit bottom-up BMP: the simplest format every viewer reads, and the same
  * one tools/shot.sh already expects.
  */
+static bool write_scanout_bmp(FILE* fp);
+
+/*
+ * #103 upscaler comparison (dev remote `upcompare`).
+ *
+ * Hand-taken screenshots can never land on the same frame, so this pauses and
+ * redraws ONE held frame three times - upscaler Off, Sharp, AI - with the OSD
+ * suppressed, capturing the scanout after each. The redraw is forced every
+ * frame while it runs (the normal loop only redraws a buffer that does not
+ * already hold this PTS, and a mode change does not change the PTS).
+ *
+ * Runs on the render thread: the remote only raises the request.
+ */
+namespace {
+struct UpscaleCompare {
+    int  state = 0;        /* 0 idle, -1 requested, 1 running */
+    int  step = 0;         /* index into kModes */
+    int  frames = 0;       /* presents since this step's mode was set */
+    bool wasPaused = false;
+};
+UpscaleCompare s_upcmp;
+struct UpcmpMode { int mode; int net; };
+constexpr UpcmpMode kUpcmpModes[] = {
+    { EVO_AGC_UPSCALE_OFF,   EVO_AGC_UPNET_AUTO },
+    { EVO_AGC_UPSCALE_SHARP, EVO_AGC_UPNET_AUTO },
+    { EVO_AGC_UPSCALE_AI,    EVO_AGC_UPNET_STANDARD },
+    { EVO_AGC_UPSCALE_AI,    EVO_AGC_UPNET_LARGE },
+    { EVO_AGC_UPSCALE_AI,    EVO_AGC_UPNET_MAXIMUM },
+};
+constexpr const char* kUpcmpNames[] = { "off", "sharp", "ai", "ai_large", "ai_max" };
+/* The first step also waits out the pause settling; later ones only need both
+ * scanout buffers redrawn in the new mode and flipped. */
+constexpr int kUpcmpSettleFirst = 30;
+constexpr int kUpcmpSettle = 8;
+} // namespace
+
+/* Leaves the file's anonymous namespace and evo for C linkage, then reopens
+ * both. */
+} // namespace
+} // namespace evo
+
+extern "C" void evo_remote_upscale_compare(void) {
+    if (evo::s_upcmp.state == 0)
+        evo::s_upcmp.state = -1;
+}
+
+namespace evo {
+namespace {
+
 bool evo_capture_screenshot(std::string& outPath) {
-    int w = 0, h = 0;
-    evo_agc_runtime_get_size(&w, &h);
-    if (w <= 0 || h <= 0) {
-        evo_bt("screenshot: no render size (%dx%d)", w, h);
-        evo_boot_log_flush();
-        return false;
-    }
-
-    std::vector<uint32_t> bgra(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
-    evo_agc_runtime_read_scanout(bgra.data(), w, h);
-
     /* Pick the next free slot so captures accumulate instead of overwriting. */
     char path[256];
     int slot = 0;
@@ -706,6 +748,25 @@ bool evo_capture_screenshot(std::string& outPath) {
         evo_boot_log_flush();
         return false;
     }
+    if (!write_scanout_bmp(fp))
+        return false;
+    outPath = path;
+    return true;
+}
+
+/* The front buffer as a 24-bit bottom-up BMP. Closes fp. */
+static bool write_scanout_bmp(FILE* fp) {
+    int w = 0, h = 0;
+    evo_agc_runtime_get_size(&w, &h);
+    if (w <= 0 || h <= 0) {
+        evo_bt("screenshot: no render size (%dx%d)", w, h);
+        evo_boot_log_flush();
+        std::fclose(fp);
+        return false;
+    }
+
+    std::vector<uint32_t> bgra(static_cast<size_t>(w) * static_cast<size_t>(h), 0u);
+    evo_agc_runtime_read_scanout(bgra.data(), w, h);
 
     const int rowBytes = w * 3;
     const int pad = (4 - (rowBytes % 4)) % 4;
@@ -752,7 +813,6 @@ bool evo_capture_screenshot(std::string& outPath) {
         std::fwrite(row.data(), 1, row.size(), fp);
     }
     std::fclose(fp);
-    outPath = path;
     return true;
 }
 
@@ -1154,6 +1214,45 @@ int Application::run() {
 
             bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding;
 
+            /* #103 `upcompare`: capture what the previous iteration presented,
+             * then move to the next mode. */
+            bool upcmp_frame = false;
+            if (s_upcmp.state != 0 && have) {
+                if (s_upcmp.state < 0) {
+                    s_upcmp.state = 1;
+                    s_upcmp.step = 0;
+                    s_upcmp.frames = 0;
+                    s_upcmp.wasPaused = is_paused;
+                    if (!is_paused && m_playbackController)
+                        m_playbackController->setPaused(true);
+                    evo_boot_log("upcompare: start pos=%.2f was_paused=%d",
+                           evo_player_position_s(), (int)s_upcmp.wasPaused);
+                } else if (s_upcmp.frames >= (s_upcmp.step == 0 ? kUpcmpSettleFirst
+                                                                : kUpcmpSettle)) {
+                    char path[96];
+                    std::snprintf(path, sizeof path, "/mnt/usb0/evo_up_%s.bmp",
+                                  kUpcmpNames[s_upcmp.step]);
+                    FILE* fp = std::fopen(path, "wb");
+                    const bool ok = fp != nullptr && write_scanout_bmp(fp);
+                    evo_boot_log("upcompare: %s -> %s (active=\"%s\" pts=%lld)",
+                           kUpcmpNames[s_upcmp.step], ok ? path : "WRITE FAILED",
+                           evo_agc_upscale_label(), (long long)current_pts);
+                    evo_boot_log_flush();
+                    s_upcmp.frames = 0;
+                    if (++s_upcmp.step >= static_cast<int>(sizeof kUpcmpModes / sizeof kUpcmpModes[0])) {
+                        s_upcmp.state = 0;
+                        if (!s_upcmp.wasPaused && m_playbackController)
+                            m_playbackController->setPaused(false);
+                        notifyOnScreen("EVO: upscaler comparison saved to USB");
+                    }
+                }
+                if (s_upcmp.state != 0) {
+                    upcmp_frame = true;
+                    should_render = true;
+                    s_upcmp.frames++;
+                }
+            }
+
             static int s_player_render_log = 10;
             if (s_player_render_log > 0 && new_frame && have) {
                 s_player_render_log--;
@@ -1169,6 +1268,22 @@ int Application::run() {
                 if (m_playbackController) {
                     view_mode = static_cast<int>(m_playbackController->getViewMode());
                 }
+                /* #103: a plain store; the runtime decides per frame whether
+                 * the source actually gets upscaled. */
+                if (upcmp_frame) {
+                    evo_agc_upscale_set_mode(kUpcmpModes[s_upcmp.step].mode);
+                    evo_agc_upscale_set_network(kUpcmpModes[s_upcmp.step].net);
+                } else if (m_settingsService) {
+                    evo_agc_upscale_set_mode(static_cast<int>(m_settingsService->getUpscaler()));
+                    evo_agc_upscale_set_network(static_cast<int>(m_settingsService->getAiNetwork()));
+                }
+                const int up_capped = evo_agc_upscale_take_downgrade();
+                if (up_capped >= 0)
+                    toast("UPSCALING", up_capped == static_cast<int>(Upscaler::AI)
+                                           ? "GPU over budget - using a smaller AI network"
+                                           : up_capped == static_cast<int>(Upscaler::Sharp)
+                                           ? "GPU over budget - using Sharp"
+                                           : "GPU over budget - turned off");
                 int is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE && !f.held && f.uv != nullptr) ? 1 : 0;
                 evo_agc_blit_yuv(f.y, f.y_pitch, f.uv, f.uv_pitch,
                                  f.u, f.u_pitch, f.v, f.v_pitch,
@@ -1179,7 +1294,7 @@ int Application::run() {
                 swap = true;
             }
 
-            if (m_uiScratch && should_render) {
+            if (m_uiScratch && should_render && !upcmp_frame) {
                 m_screenManager->render(m_uiScratch, DisplayWidth, DisplayHeight);
                 /*
                  * The video quad only repaints the image. Any OSD, scrub bar or

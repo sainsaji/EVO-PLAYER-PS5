@@ -12,6 +12,7 @@ extern "C" {
 #include "evo_vdec.h"
 #include "evo_playback.h"
 #include "evo_agc_runtime.h"
+#include "evo_hw.h"
 extern AVFormatContext *play_fmt;
 extern int video_stream_index;
 extern evo_vdec *g_vdec;
@@ -232,8 +233,13 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
      * back to the CPU present path, which is exactly when someone would be
      * reading it.
      */
-    params.renderer = evo_agc_runtime_is_active() ? "Bare-Metal AGC (RDNA2 Direct)"
-                                                  : "Software (CPU raster)";
+    static char rendererStr[64];
+    std::snprintf(rendererStr, sizeof(rendererStr), "%s (%s)",
+                  evo_agc_runtime_is_active() ? "Bare-Metal AGC" : "Software (CPU raster)",
+                  evo_hw_model_name());
+    params.renderer = rendererStr;
+    /* #103: what the last frame actually got, bypass reason included. */
+    params.upscaler = evo_agc_upscale_label();
     params.decoder = decoderBadge;
 
     evo_rmlui_update_mediainfo(&params);

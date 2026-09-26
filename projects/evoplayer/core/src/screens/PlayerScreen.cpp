@@ -10,6 +10,8 @@
 #include "evo_toast.h"
 #include "evo_feedback.h"
 #include "evo_boot_log.h"
+#include "evo_agc_runtime.h"
+#include "evo_hw.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -335,8 +337,9 @@ void PlayerScreen::feedPerformanceHud() {
                   prospero_subtitle_enabled ? "ON" : "OFF",
                   prospero_subtitle_use_external ? "EXTERNAL"
                       : (prospero_embedded_subtitle_stream_index >= 0 ? "EMBEDDED" : "NONE"));
-    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps",
-                  perf_render_fps, perf_decode_fps);
+    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps  /  UPSCALER %s  /  %s",
+                  perf_render_fps, perf_decode_fps, evo_agc_upscale_label(),
+                  evo_hw_model_name());
     std::snprintf(l_queues, sizeof(l_queues), "QUEUES  video %d/96  audio %d/96  pcm %d",
                   packet_queue_count(&video_packet_queue),
                   packet_queue_count(&audio_packet_queue),

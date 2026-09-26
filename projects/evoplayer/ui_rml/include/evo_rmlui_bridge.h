@@ -175,6 +175,7 @@ typedef struct {
     const char* output;
     const char* renderer;
     const char* decoder;   /* #37: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
+    const char* upscaler;  /* #103: "Off" / "Sharp" / "AI (shader)" (+ bypass reason) */
 } evo_rmlui_mediainfo_params_t;
 
 /*

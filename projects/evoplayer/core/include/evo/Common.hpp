@@ -80,6 +80,24 @@ enum class DecoderPreference : int {
     FFmpegSoftware = 2
 };
 
+// Video upscaler for sources smaller than the panel (#103). Values match
+// EVO_AGC_UPSCALE_* in evo_agc_runtime.h.
+enum class Upscaler : int {
+    Off = 0,
+    Sharp = 1,   // FSR1 EASU + RCAS
+    AI = 2       // Anime4K CNN x2 in shaders (larger network on PS5 Pro)
+};
+
+// Which network AI upscaling runs (#103). Values match EVO_AGC_UPNET_*.
+// Auto follows PS5 Pro detection; the others override it, because the probe
+// cannot identify every Pro. Large falls back to Standard on its own.
+enum class AiNetwork : int {
+    Auto = 0,
+    Standard = 1,   // Anime4K S
+    Large = 2,      // Anime4K M
+    Maximum = 3     // Anime4K UL - sized for a PS5 Pro
+};
+
 // File Classification for Storage Browser
 enum class FileCategory : int {
     Unknown = 0,

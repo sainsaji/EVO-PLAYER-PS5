@@ -20,6 +20,14 @@ mem budget [boot] direct_total=12288MB direct_largest_free=11000MB
 | **Flexible memory** | **448 MB** | 268 MB at boot, 144–192 MB during playback | `malloc`, and therefore FFmpeg, dav1d, RmlUi, everything ordinary | ~50 MB live, 93–102 MB peak |
 | **Hardware decoder** | internal to `sceVideodec2` | — | native AVC / HEVC / VP9 | 4K real time, no constraint found |
 
+The AGC runtime's own carve (scanouts, transient ring, layers, ...) is a
+separate ~490 MB direct allocation made at boot. The #103 upscaler adds a
+**180 MB** direct block (5 x 36 MB scratch surfaces) on the first frame it
+actually upscales, plus **288 MB** more only if AI NETWORK = Maximum is used,
+never at boot - `agc upscale: 180 MB scratch at ...` in
+`evo.log`, or `scratch alloc ... FAILED` if the kernel refused it (the
+upscaler then stays off). See [upscaler.md](upscaler.md).
+
 Two things worth stating plainly, because both contradict what this repo
 believed for months:
 

@@ -10,6 +10,7 @@ enum {
     GFX10_FORMAT_8_8_UNORM = 14,
     GFX10_FORMAT_16_16_UNORM = 23,
     GFX10_FORMAT_8_8_8_8_UNORM = 56,
+    GFX10_FORMAT_16_16_16_16_FLOAT = 71,
 
     SQ_SEL_0 = 0,
     SQ_SEL_1 = 1,
@@ -19,6 +20,10 @@ enum {
     SQ_SEL_W = 7,
 
     SQ_RSRC_IMG_2D = 9,
+
+    /* The swizzle mode every colour target here is rendered with
+     * (CB_COLOR0_ATTRIB3.COLOR_SW_MODE = 27, attrib=0x4dc6c000 in evo.log). */
+    SQ_SW_64KB_R_X = 27,
 };
 
 static uint32_t float_bits(float value)
@@ -184,6 +189,23 @@ int evo_agc_build_tsharp_rg16(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_
     return build_tsharp_2d_internal(out, gpu_address, width, height, pitch_bytes,
                                     GFX10_FORMAT_16_16_UNORM, 4u,
                                     SQ_SEL_X, SQ_SEL_Y, SQ_SEL_0, SQ_SEL_1);
+}
+
+int evo_agc_build_tsharp_render_target(uint32_t out[EVO_AGC_TSHARP_DWORDS], uint64_t gpu_address,
+                                       uint32_t width, uint32_t height, int fp16)
+{
+    /* Row pitch is implied by the tiling, so pass the unpadded row size and
+     * leave the linear pitch field empty. */
+    const uint32_t bpp = fp16 ? 8u : 4u;
+    if ((gpu_address & 0xffffu) != 0u)
+        return -1;
+    int rc = build_tsharp_2d_internal(out, gpu_address, width, height, width * bpp,
+                                      fp16 ? GFX10_FORMAT_16_16_16_16_FLOAT
+                                           : GFX10_FORMAT_8_8_8_8_UNORM, bpp,
+                                      SQ_SEL_X, SQ_SEL_Y, SQ_SEL_Z, SQ_SEL_W);
+    if (rc == 0)
+        out[3] |= (uint32_t)SQ_SW_64KB_R_X << 20;   /* SQ_IMG_RSRC_WORD3.SW_MODE */
+    return rc;
 }
 
 int evo_agc_build_ssharp(uint32_t out[EVO_AGC_SSHARP_DWORDS], int clamp_to_edge, int bilinear)

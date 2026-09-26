@@ -120,6 +120,10 @@ static void run_command(const char *line)
         evo_open_media_path(buf + 5);
         return;
     }
+    if (strcmp(buf, "upcompare") == 0) {
+        evo_remote_upscale_compare();
+        return;
+    }
     if (strcmp(buf, "stop") == 0) {
         evo_stop_media_playback();
         return;

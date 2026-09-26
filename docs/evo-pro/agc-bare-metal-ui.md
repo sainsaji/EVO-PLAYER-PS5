@@ -306,10 +306,10 @@ content vanishes entirely, the compare function or the `ref` bookkeeping is wron
 - **The CPU coverage rasteriser** is still compiled in and remains the UI
   renderer for non-`--agc` (GL) builds, which are still the shipping default. It
   cannot be deleted until `--agc` is the only build.
-- **Scanout resolution is hardcoded 1920x1080** (`WIDTH`/`HEIGHT` in `main.c`);
-  nothing calls `sceVideoOutGetResolutionStatus`, so VideoOut upscales to the
-  panel's actual mode. Rendering natively needs the RmlUi context sized to match
-  as well, and the RCSS is authored entirely in `px` (1388 uses, zero `dp`), so
-  the layout would shrink unless it moves to density-independent units first.
+- ~~Scanout resolution is hardcoded 1920x1080~~ - no longer true: the runtime
+  reads `sceVideoOutGetResolutionStatus` while bringing VideoOut up and renders
+  at the panel's mode (`evo_agc_runtime_get_size`, "display: rendering at WxH"
+  in `evo.log`). A sub-4K video on a 4K panel is therefore scaled by the video
+  pass itself - bilinear, or the #103 upscaler ([upscaler.md](../hardware/upscaler.md)).
 - The GPU-side `SetFlip` packet in the DCB is unused; the CPU flip is the proven
   path. Revisiting it would save a CPU round trip per frame.

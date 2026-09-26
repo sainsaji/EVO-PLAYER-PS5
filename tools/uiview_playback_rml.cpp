@@ -1115,6 +1115,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode";
         p.decoder = "Software (FFmpeg)";
+        p.upscaler = "Off (source >= output)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo.bmp", fb.data(), width, height);
@@ -1144,6 +1145,7 @@ static void render_mediainfo_screen(std::vector<uint32_t>& fb, int width, int he
         p.output = "Direct  -  3840 x 2160";
         p.renderer = "FFmpeg software decode (slice-threaded, 12 threads)";
         p.decoder = "Hardware (sceVideodec2)";
+        p.upscaler = "AI (shader)";
         evo_rmlui_update_mediainfo(&p);
         evo_rmlui_render_mediainfo(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_mediainfo_stress.bmp", fb.data(), width, height);
@@ -2005,6 +2007,20 @@ int main(int argc, char** argv) {
         set.rows[4].badge = "Auto (FFmpeg)";
         set.rows[4].has_chevron = 1;
         set.rows[4].is_focused = 0;
+
+        /* #103 */
+        set.rows[5].title = "UPSCALING";
+        set.rows[5].detail = "SHARPEN VIDEO SMALLER THAN THE SCREEN";
+        set.rows[5].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
+        set.rows[5].badge = "SHARP";
+        set.rows[5].has_chevron = 1;
+
+        set.rows[6].title = "AI NETWORK";
+        set.rows[6].detail = "LARGE IS SHARPER - AUTO USES IT ON A DETECTED PS5 PRO";
+        set.rows[6].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
+        set.rows[6].badge = "LARGE (PRO)";
+        set.rows[6].has_chevron = 1;
+        set.row_count = 7;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);

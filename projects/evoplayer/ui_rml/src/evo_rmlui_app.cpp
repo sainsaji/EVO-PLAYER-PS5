@@ -2933,6 +2933,9 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
     Rml::Element* el_rn = m_mediainfo_doc->GetElementById("spec-renderer");
     if (el_rn) el_rn->SetInnerRML(state.renderer);
 
+    Rml::Element* el_up = m_mediainfo_doc->GetElementById("spec-upscaler");
+    if (el_up) el_up->SetInnerRML(state.upscaler);
+
     Rml::Element* el_dc = m_mediainfo_doc->GetElementById("spec-decoder");
     if (el_dc) el_dc->SetInnerRML(state.decoder);
 }
