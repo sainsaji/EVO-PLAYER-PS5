@@ -143,6 +143,11 @@ int     sceKernelUsleep(unsigned int microseconds);
 int32_t sceVideoOutOpen(int32_t user_id, int32_t bus_type, int32_t index, const void *param);
 int32_t sceVideoOutClose(int32_t handle);
 int32_t sceVideoOutSetFlipRate(int32_t handle, int32_t rate);
+int32_t sceVideoOutConfigureOutput(int32_t handle, uint64_t mode,
+                                   const void *options, const void *reserved0, uint64_t reserved1);
+int32_t sceVideoOutIsOutputSupported(int32_t handle, uint64_t mode,
+                                     const void *options, const void *reserved0, uint64_t reserved1);
+
 /* Output-mode readback. ABI verified in third_party/ps5-opengl
  * (ps5_agc_native_runtime.c: runtime_resolution_status_t). */
 typedef struct evo_vo_resolution_status {
@@ -195,7 +200,11 @@ typedef struct evo_agc_device {
     int                     display_is_hdr;
     int                     display_dynamic_range;
     uint32_t                display_resolution_token;
+    int                     supports_120hz;
+    int                     is_120hz;
+    int                     current_refresh_rate;
     int                     is_player_mode;
+
     /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
      * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
     int                     ui_dirty[2];
@@ -1336,6 +1345,11 @@ int evo_agc_runtime_init(int width, int height, int hdr)
 
     sceVideoOutSetFlipRate(g_agc_dev.video_handle, 0);
 
+    int32_t sup120 = sceVideoOutIsOutputSupported(g_agc_dev.video_handle, 0x000000000000000FUL, NULL, NULL, 0);
+    g_agc_dev.supports_120hz = (sup120 >= 0) ? 1 : 0;
+    evo_boot_log("agc display 120hz support probe rc=%d (%s)",
+                 sup120, g_agc_dev.supports_120hz ? "YES" : "NO");
+
     /*
      * What the panel is actually running at. The render size below is still
      * whatever evo_agc_runtime_init() was handed - the UI is authored at a
@@ -1347,13 +1361,20 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         evo_vo_resolution_status vres;
         memset(&vres, 0, sizeof(vres));
         int32_t vrc = sceVideoOutGetResolutionStatus(g_agc_dev.video_handle, &vres);
-        evo_boot_log("agc display probe rc=%d full=%ux%u pane=%ux%u refresh_id=%llu "
+        g_agc_dev.current_refresh_rate = (int)vres.refresh_rate;
+        if (vres.refresh_rate == 13) {
+            g_agc_dev.is_120hz = 1;
+            g_agc_dev.supports_120hz = 1;
+        }
+        evo_boot_log("agc display probe rc=%d full=%ux%u pane=%ux%u refresh_id=%llu (120hz=%d) "
                      "inches=%d render=%dx%d",
                      vrc, vres.full_width, vres.full_height,
                      vres.pane_width, vres.pane_height,
                      (unsigned long long)vres.refresh_rate,
+                     g_agc_dev.is_120hz,
                      (int)vres.screen_inches,
                      g_agc_dev.width, g_agc_dev.height);
+
 
         /*
          * Drive the panel at its own resolution. The UI is resolution
@@ -1551,10 +1572,16 @@ void evo_agc_runtime_shutdown(void)
     agc_upscale_release();
 
     if (g_agc_dev.video_handle >= 0) {
+        if (g_agc_dev.is_120hz) {
+            evo_boot_log("agc shutdown: restoring default 60hz output mode");
+            sceVideoOutConfigureOutput(g_agc_dev.video_handle, 0x0000000000000001UL, NULL, NULL, 0);
+            g_agc_dev.is_120hz = 0;
+        }
         sceVideoOutUnregisterBuffers(g_agc_dev.video_handle, 0);
         sceVideoOutClose(g_agc_dev.video_handle);
         g_agc_dev.video_handle = -1;
     }
+
     evo_boot_log("agc shutdown: videoout closed");
     evo_boot_log_flush();
 
@@ -2410,6 +2437,93 @@ int evo_agc_runtime_get_display_dynamic_range(void)
 {
     return g_agc_dev.initialized ? g_agc_dev.display_dynamic_range : 0;
 }
+
+int evo_agc_runtime_supports_120hz(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.supports_120hz : 0;
+}
+
+int evo_agc_runtime_is_120hz(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.is_120hz : 0;
+}
+
+int evo_agc_runtime_get_refresh_rate(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.current_refresh_rate : 0;
+}
+
+int evo_agc_runtime_set_120hz(int enable)
+{
+    if (!g_agc_dev.initialized || g_agc_dev.video_handle < 0)
+        return -1;
+
+    if (enable && !g_agc_dev.supports_120hz) {
+        evo_boot_log("agc: 120hz requested but not supported by display");
+        return -1;
+    }
+
+    if ((enable && g_agc_dev.is_120hz) || (!enable && !g_agc_dev.is_120hz)) {
+        return 0;
+    }
+
+    uint64_t mode = enable ? UINT64_C(0x000000000000000F) /* Mode119_88Hz */
+                           : UINT64_C(0x0000000000000001); /* Default */;
+
+    evo_boot_log("agc: switching output mode to %#llx (120hz=%d)",
+                 (unsigned long long)mode, enable);
+
+    agc_wait_gpu_idle(200);
+
+    int32_t rc = sceVideoOutConfigureOutput(g_agc_dev.video_handle, mode, NULL, NULL, 0);
+    evo_boot_log("agc: sceVideoOutConfigureOutput rc=%d (0x%08x)", rc, (unsigned)rc);
+
+    evo_vo_resolution_status vres;
+    memset(&vres, 0, sizeof(vres));
+    int32_t vrc = sceVideoOutGetResolutionStatus(g_agc_dev.video_handle, &vres);
+
+    evo_vo_output_status vout;
+    memset(&vout, 0, sizeof(vout));
+    int32_t vorc = sceVideoOutGetOutputStatus(g_agc_dev.video_handle, &vout);
+
+    evo_boot_log("agc post-config: res_rc=%d full=%ux%u pane=%ux%u refresh_id=%llu | out_rc=%d dynamic_range=%u refresh=%llu",
+                 vrc, vres.full_width, vres.full_height, vres.pane_width, vres.pane_height,
+                 (unsigned long long)vres.refresh_rate,
+                 vorc, vout.dynamic_range, (unsigned long long)vout.refresh_rate);
+
+    if (rc == 0) {
+        g_agc_dev.is_120hz = enable ? 1 : 0;
+        g_agc_dev.current_refresh_rate = (int)(vres.refresh_rate != 0 ? vres.refresh_rate : vout.refresh_rate);
+    }
+
+    int new_w = (vrc == 0 && vres.full_width > 0) ? (int)vres.full_width : g_agc_dev.width;
+    int new_h = (vrc == 0 && vres.full_height > 0) ? (int)vres.full_height : g_agc_dev.height;
+    if (new_w > 0 && new_h > 0 && (new_w != g_agc_dev.width || new_h != g_agc_dev.height)) {
+        if (new_w <= EVO_AGC_MAX_RENDER_W && new_h <= EVO_AGC_MAX_RENDER_H) {
+            evo_boot_log("agc: display resolution changed to %dx%d, updating scanout", new_w, new_h);
+            sceVideoOutUnregisterBuffers(g_agc_dev.video_handle, 0);
+            (void)evo_agc_apply_render_size(g_agc_dev.agc_defaults, new_w, new_h);
+
+            evo_video_buffer_t video_buffers[2] = {
+                {g_agc_dev.scanout_buffers[0], NULL, NULL, NULL},
+                {g_agc_dev.scanout_buffers[1], NULL, NULL, NULL},
+            };
+            evo_video_attribute_t attr;
+            memset(&attr, 0, sizeof(attr));
+            uint64_t vfmt = g_agc_dev.is_hdr ? EVO_AGC_VIDEO_FORMAT_HDR : EVO_AGC_VIDEO_FORMAT_SDR;
+            sceVideoOutSetBufferAttribute2(&attr, vfmt, 0,
+                                           (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height,
+                                           0, 0, 0);
+            int reg_rc = sceVideoOutRegisterBuffers2(g_agc_dev.video_handle, 0, 0,
+                                                    video_buffers, 2, &attr, 0, NULL);
+            evo_boot_log("agc: re-register buffers rc=%d", reg_rc);
+        }
+    }
+
+    evo_boot_log_flush();
+    return rc;
+}
+
 
 /*
  * Stage one plane where the GPU can read it.

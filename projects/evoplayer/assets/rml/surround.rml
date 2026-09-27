@@ -62,10 +62,15 @@
                 <div id="surround-ring-2"></div>
                 <div id="surround-ring-1"></div>
 
+                <div id="surround-sound-trail-2"></div>
+                <div id="surround-sound-trail-1"></div>
+                <div id="surround-sound-orb"></div>
+
                 <div id="surround-listener">
                     <div id="surround-listener-label">LISTENER</div>
                     <div id="surround-listener-sub">SWEET SPOT</div>
                 </div>
+
 
                 <div id="srd-spk-0" class="srd-spk">
                     <div id="srd-spk-label-0" class="srd-spk-label"></div>

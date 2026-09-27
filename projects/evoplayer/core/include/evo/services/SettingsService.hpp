@@ -57,6 +57,10 @@ public:
     bool isDebugOverlayEnabled() const override { return m_debugOverlayEnabled; }
     void setDebugOverlayEnabled(bool enabled) override { m_debugOverlayEnabled = enabled; }
 
+    RefreshRateMode getRefreshRateMode() const override { return m_refreshRateMode; }
+    void setRefreshRateMode(RefreshRateMode mode) override { m_refreshRateMode = mode; }
+    const char* getRefreshRateModeName(RefreshRateMode mode) const override;
+
     void syncThemeToRmlUi() override;
 
 private:
@@ -73,8 +77,10 @@ private:
     // Off until the upscaler is hardware-verified (#103), then Sharp.
     Upscaler m_upscaler = Upscaler::Off;
     AiNetwork m_aiNetwork = AiNetwork::Auto;
+    RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
     bool m_debugOverlayEnabled = false;
 };
+
 
 } // namespace evo
 

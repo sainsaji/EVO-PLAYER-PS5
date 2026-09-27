@@ -42,6 +42,7 @@ private:
     int    m_sweepMode = -1;      /* -1 idle, 0 = 5.1, 1 = 7.1, 2 = rotation */
     int    m_sweepStep = 0;
     double m_sweepMs = 0.0;
+    double m_animTimeSec = 0.0;
 };
 
 } // namespace evo

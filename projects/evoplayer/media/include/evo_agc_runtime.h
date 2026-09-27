@@ -190,7 +190,14 @@ void                      evo_agc_runtime_get_size(int *width, int *height);
 int                       evo_agc_runtime_is_display_hdr(void);
 int                       evo_agc_runtime_get_display_dynamic_range(void);
 
+/* Refresh rate control & 120 Hz output */
+int                       evo_agc_runtime_supports_120hz(void);
+int                       evo_agc_runtime_is_120hz(void);
+int                       evo_agc_runtime_get_refresh_rate(void);
+int                       evo_agc_runtime_set_120hz(int enable);
+
 /* Layer surfaces for RmlUi PushLayer / CompositeLayers (backdrop-filter: blur).
+
  *
  * Each layer is a full-canvas RGBA8 render target, allocated from the direct
  * memory carve and built with standard COMP_SWAP (memory = R,G,B,A bytes)

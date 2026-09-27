@@ -230,8 +230,7 @@ div, span, p {
     margin-top: 12dp;
 }
 
-/* Ambience rings - static, purely decorative, so a fixed low-alpha white
- * reads fine under every theme without needing to be pushed from C++. */
+/* Ambience rings - acoustic waves expanding from listener */
 #surround-ring-1 {
     position: absolute;
     left: 440dp;
@@ -240,6 +239,8 @@ div, span, p {
     height: 200dp;
     border-radius: 100dp;
     background-color: rgba(255, 255, 255, 0.08);
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.20);
 }
 
 #surround-ring-2 {
@@ -250,6 +251,8 @@ div, span, p {
     height: 380dp;
     border-radius: 190dp;
     background-color: rgba(255, 255, 255, 0.045);
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.15);
 }
 
 #surround-ring-3 {
@@ -260,7 +263,43 @@ div, span, p {
     height: 570dp;
     border-radius: 285dp;
     background-color: rgba(255, 255, 255, 0.024);
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.10);
 }
+
+/* 120Hz test animation: high-speed orbital sound particle */
+#surround-sound-orb {
+    position: absolute;
+    left: 526dp;
+    top: 343dp;
+    width: 28dp;
+    height: 28dp;
+    border-radius: 14dp;
+    background-color: #00cdff;
+    border-width: 2dp;
+    border-color: #ffffff;
+}
+
+#surround-sound-trail-1 {
+    position: absolute;
+    left: 530dp;
+    top: 347dp;
+    width: 20dp;
+    height: 20dp;
+    border-radius: 10dp;
+    background-color: rgba(0, 205, 255, 0.55);
+}
+
+#surround-sound-trail-2 {
+    position: absolute;
+    left: 533dp;
+    top: 350dp;
+    width: 14dp;
+    height: 14dp;
+    border-radius: 7dp;
+    background-color: rgba(0, 205, 255, 0.25);
+}
+
 
 #surround-listener {
     position: absolute;

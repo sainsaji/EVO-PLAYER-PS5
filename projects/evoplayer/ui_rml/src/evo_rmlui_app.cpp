@@ -1811,11 +1811,20 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
     auto el = [&](const std::string& id) { return m_surround_doc->GetElementById(id); };
 
     if (Rml::Element* e = el("surround-indicator")) e->SetProperty("background-color", accent);
+    extern int evo_agc_runtime_is_120hz(void);
+    bool is120 = (evo_agc_runtime_is_120hz() != 0);
+
     if (Rml::Element* e = el("surround-subtitle")) {
-        e->SetInnerRML(state.is_51_layout
-            ? "CALIBRATION - 5.1 SPEAKER SYSTEM (6 CHANNELS)"
-            : "CALIBRATION - 7.1 SPEAKER SYSTEM (8 CHANNELS)");
-        e->SetProperty("color", text_2);
+        std::string mode_str = state.is_51_layout
+            ? "5.1 SYSTEM (6 CHANNELS)"
+            : "7.1 SYSTEM (8 CHANNELS)";
+        if (is120) {
+            e->SetInnerRML(mode_str + " \xC2\xB7 120 HZ ULTRA FLUID MOTION \xC2\xB7 8.33ms");
+            e->SetProperty("color", accent);
+        } else {
+            e->SetInnerRML(mode_str + " \xC2\xB7 60 HZ STANDARD OUTPUT \xC2\xB7 16.67ms");
+            e->SetProperty("color", text_2);
+        }
     }
 
     /* Monitor panel: which speaker (or which action) is under the cursor,
@@ -1837,7 +1846,8 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         const EvoSurroundSpeaker& spk = state.speakers[display_spk];
         mon_title = evo_fmt("%s (%s)", spk.name.c_str(), spk.label.c_str());
         mon_line1 = evo_fmt("TONE FREQ: %.1f HZ", spk.hz);
-        mon_line2 = evo_fmt("PS5 AUDIO OUT: S16_8CH (CH %d)", display_spk);
+        mon_line2 = is120 ? evo_fmt("OUTPUT: 120 HZ (119.88 HZ) \xC2\xB7 S16_8CH (CH %d)", display_spk)
+                          : evo_fmt("OUTPUT: 60 HZ (59.94 HZ) \xC2\xB7 S16_8CH (CH %d)", display_spk);
         mon_active = (state.active_channel >= 0);
         mon_status = mon_active ? "STATUS: [ ACTIVE NOW ]" : "STATUS: [ READY / STANDBY ]";
     } else {
@@ -1849,9 +1859,11 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
                     mon_line1 = "MODE: TOGGLE SPEAKER COUNT"; break;
             default: mon_title = "SILENCE / STOP"; mon_line1 = "MODE: STOP AUDIO STREAM"; break;
         }
-        mon_line2 = "PS5 AUDIO OUT: 48 kHz / 16-BIT";
+        mon_line2 = is120 ? "OUTPUT: 120 HZ (119.88 HZ) \xC2\xB7 AUDIO: 48 kHz / 16-BIT"
+                          : "OUTPUT: 60 HZ (59.94 HZ) \xC2\xB7 AUDIO: 48 kHz / 16-BIT";
         mon_status = (state.surround_mode != 0) ? "STATUS: [ RUNNING TEST ]" : "STATUS: [ IDLE ]";
     }
+
 
     if (Rml::Element* e = el("surround-monitor")) {
         e->SetProperty("background-color", mon_active ? surf_sel : surface);
@@ -1941,6 +1953,62 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
             sub->SetProperty("color", is_active ? accent : text_3);
         }
     }
+
+    /* High-refresh 120Hz orbital sound orb and acoustic wave animations */
+    const double cx = 540.0;
+    const double cy = 357.0;
+    const double rx = 240.0;
+    const double ry = 175.0;
+
+    /* Speed: 1 revolution every 2.0 seconds -> 0.5 rev/sec -> angle = anim_time * PI */
+    const double kAngle = static_cast<double>(state.anim_time) * 3.14159265358979323846;
+
+    if (Rml::Element* orb = el("surround-sound-orb")) {
+        double ox = cx + rx * std::cos(kAngle) - 14.0;
+        double oy = cy + ry * std::sin(kAngle) - 14.0;
+        orb->SetProperty("left", evo_fmt("%.1fdp", ox));
+        orb->SetProperty("top", evo_fmt("%.1fdp", oy));
+        orb->SetProperty("background-color", accent);
+    }
+
+    if (Rml::Element* t1 = el("surround-sound-trail-1")) {
+        double t1_ang = kAngle - 0.08;
+        double ox = cx + rx * std::cos(t1_ang) - 10.0;
+        double oy = cy + ry * std::sin(t1_ang) - 10.0;
+        t1->SetProperty("left", evo_fmt("%.1fdp", ox));
+        t1->SetProperty("top", evo_fmt("%.1fdp", oy));
+    }
+
+    if (Rml::Element* t2 = el("surround-sound-trail-2")) {
+        double t2_ang = kAngle - 0.16;
+        double ox = cx + rx * std::cos(t2_ang) - 7.0;
+        double oy = cy + ry * std::sin(t2_ang) - 7.0;
+        t2->SetProperty("left", evo_fmt("%.1fdp", ox));
+        t2->SetProperty("top", evo_fmt("%.1fdp", oy));
+    }
+
+    /* Acoustic wave rings expanding outward smoothly */
+    double wave1 = std::fmod(static_cast<double>(state.anim_time) * 0.45, 1.0);
+    double wave2 = std::fmod(static_cast<double>(state.anim_time) * 0.45 + 0.333, 1.0);
+    double wave3 = std::fmod(static_cast<double>(state.anim_time) * 0.45 + 0.666, 1.0);
+
+    auto updateRing = [&](const char* id, double phase) {
+        if (Rml::Element* r = el(id)) {
+            double sz = 160.0 + 440.0 * phase;
+            double l = cx - sz * 0.5;
+            double t = cy - sz * 0.5;
+            double alpha = 0.25 * (1.0 - phase);
+            r->SetProperty("left", evo_fmt("%.1fdp", l));
+            r->SetProperty("top", evo_fmt("%.1fdp", t));
+            r->SetProperty("width", evo_fmt("%.1fdp", sz));
+            r->SetProperty("height", evo_fmt("%.1fdp", sz));
+            r->SetProperty("border-radius", evo_fmt("%.1fdp", sz * 0.5));
+            r->SetProperty("border-color", evo_fmt("rgba(0, 205, 255, %.3f)", alpha));
+        }
+    };
+    updateRing("surround-ring-1", wave1);
+    updateRing("surround-ring-2", wave2);
+    updateRing("surround-ring-3", wave3);
 }
 
 void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {

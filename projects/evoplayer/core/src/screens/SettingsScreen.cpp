@@ -6,6 +6,7 @@
 #include "evo_theme.h"
 #include "evo_boot_log.h"
 #include "evo_hw.h"
+#include "evo_agc_runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -19,8 +20,9 @@ namespace evo {
 namespace {
 
 constexpr int kSectionCount = 4;
-constexpr int kMaxDefs      = 6;
+constexpr int kMaxDefs      = 8;
 constexpr int kMaxOptions   = EVO_THEME_MAX;   /* themes are the longest list */
+
 
 enum SettingAction { ACT_NONE = 0, ACT_SURROUND, ACT_COMPAT_REPORT, ACT_DEVTOOLS, ACT_QUIT };
 
@@ -98,8 +100,19 @@ int buildSectionDefs(int section, SettingDef* d) {
             d[5].disabled = true;
             d[5].detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
         }
-        n = 6;
+
+        d[6] = {"120 HZ OUTPUT", "5:5 PULLDOWN FOR 24 FPS & 120 FPS UI",
+                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 3, static_cast<int>(settings->getRefreshRateMode()), {}};
+        for (int i = 0; i < 3; ++i)
+            d[6].opt_label[i] = settings->getRefreshRateModeName(static_cast<RefreshRateMode>(i));
+        if (!evo_agc_runtime_supports_120hz()) {
+            d[6].disabled = true;
+            d[6].detail = "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
+        }
+        n = 7;
         break;
+
 
     case 1: {
         static const char* kFaces[] = {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"};
@@ -298,7 +311,21 @@ void applyOption(int section, int def, int opt) {
     else if (section == 0 && def == 3) st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt));
     else if (section == 0 && def == 4) st->setUpscaler(static_cast<Upscaler>(opt));
     else if (section == 0 && def == 5) st->setAiNetwork(static_cast<AiNetwork>(opt));
+    else if (section == 0 && def == 6) {
+        st->setRefreshRateMode(static_cast<RefreshRateMode>(opt));
+        if (opt == static_cast<int>(RefreshRateMode::Always)) {
+            if (evo_agc_runtime_supports_120hz()) {
+                evo_agc_runtime_set_120hz(1);
+            }
+        } else {
+            /* Off or PlaybackOnly (SettingsScreen is not player mode, so run 60 Hz) */
+            if (evo_agc_runtime_supports_120hz()) {
+                evo_agc_runtime_set_120hz(0);
+            }
+        }
+    }
     else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
+
     else if (section == 2 && def == 0) {
         /*
          * evo_theme_set() returns the index it applied, not a status - see the

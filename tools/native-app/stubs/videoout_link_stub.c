@@ -33,27 +33,28 @@ int32_t sceVideoOutSetFlipRate(int32_t handle, int32_t rate)
     return -1;
 }
 
-int32_t sceVideoOutConfigureOutput(int32_t handle, uint32_t request_type, const void *param3,
-                                   const void *param4, const void *param5)
+int32_t sceVideoOutConfigureOutput(int32_t handle, uint64_t mode, const void *param3,
+                                   const void *param4, uint64_t param5)
 {
     (void)handle;
-    (void)request_type;
+    (void)mode;
     (void)param3;
     (void)param4;
     (void)param5;
     return -1;
 }
 
-int32_t sceVideoOutIsOutputSupported(int32_t handle, uint32_t request_type, const void *param3,
-                                     const void *param4, const void *param5)
+int32_t sceVideoOutIsOutputSupported(int32_t handle, uint64_t mode, const void *param3,
+                                     const void *param4, uint64_t param5)
 {
     (void)handle;
-    (void)request_type;
+    (void)mode;
     (void)param3;
     (void)param4;
     (void)param5;
     return -1;
 }
+
 
 int32_t sceVideoOutConfigureOutputMode_(int32_t handle, uint32_t option, const void *mode,
                                         const void *color, uint32_t mode_size, uint32_t color_size)

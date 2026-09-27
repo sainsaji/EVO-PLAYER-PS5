@@ -134,6 +134,7 @@ void SurroundTestScreen::playSelectedChannel() {
 
 void SurroundTestScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
+    m_animTimeSec += deltaMs / 1000.0;
     if (m_sweepMode < 0) return;
 
     auto surround = Application::getInstance().getSurroundTestService();
@@ -242,6 +243,7 @@ void SurroundTestScreen::render(uint32_t* framebuffer, int width, int height) {
                              : (5 + m_selectedSpeaker);
     params.active_channel = surround ? surround->getCurrentChannel() : -1;
     params.speaker_count = 8;
+    params.anim_time = static_cast<float>(m_animTimeSec);
 
     static const char* speakerNames8[] = {
         "FRONT LEFT", "FRONT RIGHT", "CENTER",

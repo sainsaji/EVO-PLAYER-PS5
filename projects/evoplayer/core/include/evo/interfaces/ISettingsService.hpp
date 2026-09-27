@@ -62,7 +62,12 @@ public:
     virtual bool isDebugOverlayEnabled() const = 0;
     virtual void setDebugOverlayEnabled(bool enabled) = 0;
 
+    virtual RefreshRateMode getRefreshRateMode() const = 0;
+    virtual void setRefreshRateMode(RefreshRateMode mode) = 0;
+    virtual const char* getRefreshRateModeName(RefreshRateMode mode) const = 0;
+
     virtual void syncThemeToRmlUi() = 0;
+
 };
 
 } // namespace evo

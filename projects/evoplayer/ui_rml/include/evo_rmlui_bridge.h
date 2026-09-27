@@ -450,7 +450,9 @@ typedef struct {
 
     evo_rmlui_surround_speaker_t speakers[EVO_RMLUI_SURROUND_SPEAKERS];
     int         speaker_count;
+    float       anim_time;       /* animation time in seconds for 120Hz test */
 } evo_rmlui_surround_params_t;
+
 
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);

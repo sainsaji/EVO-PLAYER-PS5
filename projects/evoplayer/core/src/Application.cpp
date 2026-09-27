@@ -302,6 +302,14 @@ bool Application::initialize(int argc, char** argv) {
     }
     m_appFsm.postEvent(ApplicationEvent::ServicesReady);
 
+    if (m_settingsService && m_settingsService->getRefreshRateMode() == RefreshRateMode::Always) {
+        if (evo_agc_runtime_supports_120hz()) {
+            evo_bt("120Hz: enabling Always mode at boot");
+            evo_agc_runtime_set_120hz(1);
+        }
+    }
+
+
     if (!initScreens()) {
         return false;
     }
@@ -845,7 +853,11 @@ int Application::run() {
                 if (m_surroundTestService) m_surroundTestService->stop();
                 if (m_soundEffectEngine)   m_soundEffectEngine->shutdown();
                 pp_playback_shutdown(&g_pp_pb);
+                if (evo_agc_runtime_is_120hz()) {
+                    evo_agc_runtime_set_120hz(0);
+                }
                 evo_boot_log("soft close: media released");
+
                 evo_boot_log_flush();
                 /* The safe-to-close screen, not a toast: it is what the
                  * parked loop leaves latched on the panel, so it has to say
@@ -1123,11 +1135,27 @@ int Application::run() {
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
+        bool isSurround = (m_screenManager->getCurrentScreenId() == ScreenId::SurroundTest);
+        bool isHighRefresh = isPlayer || isSurround;
+
         static bool s_was_player = false;
         if (isPlayer != s_was_player) {
             evo_agc_runtime_set_player_mode(isPlayer ? 1 : 0);
             s_was_player = isPlayer;
         }
+
+        static bool s_was_high_refresh = false;
+        if (isHighRefresh != s_was_high_refresh) {
+            if (m_settingsService && m_settingsService->getRefreshRateMode() == RefreshRateMode::PlaybackOnly) {
+                if (evo_agc_runtime_supports_120hz()) {
+                    evo_bt("120Hz: playback-only transition isHighRefresh=%d (player=%d, surround=%d)",
+                           isHighRefresh ? 1 : 0, isPlayer ? 1 : 0, isSurround ? 1 : 0);
+                    evo_agc_runtime_set_120hz(isHighRefresh ? 1 : 0);
+                }
+            }
+            s_was_high_refresh = isHighRefresh;
+        }
+
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();
         /*
          * #90: a provider screen lives in its own Rml context, so its changes
@@ -1135,7 +1163,7 @@ int Application::run() {
          * page or a bundle refresh landing between two button presses would
          * not be drawn until the next press.
          */
-        int uiActive = (frame < 10) || isPlayer || hasInput || hasAnim ||
+        int uiActive = (frame < 10) || isPlayer || isSurround || hasInput || hasAnim ||
                        evo_rmlui_needs_frame() ||
                        evo_rmlui_provider_needs_frame() || (jb_repaint > 0);
         if (jb_repaint > 0) jb_repaint--;

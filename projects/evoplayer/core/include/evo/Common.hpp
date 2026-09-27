@@ -98,6 +98,14 @@ enum class AiNetwork : int {
     Maximum = 3     // Anime4K UL - sized for a PS5 Pro
 };
 
+// Refresh rate output mode (60 Hz vs 120 Hz)
+enum class RefreshRateMode : int {
+    Off = 0,
+    Always = 1,
+    PlaybackOnly = 2
+};
+
+
 // File Classification for Storage Browser
 enum class FileCategory : int {
     Unknown = 0,

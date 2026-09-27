@@ -53,7 +53,17 @@ const char* SettingsService::getAiNetworkName(AiNetwork network) const {
     }
 }
 
+const char* SettingsService::getRefreshRateModeName(RefreshRateMode mode) const {
+    switch (mode) {
+        case RefreshRateMode::Off:          return "OFF";
+        case RefreshRateMode::Always:       return "AUTO (ALWAYS 120 HZ)";
+        case RefreshRateMode::PlaybackOnly: return "PLAYBACK ONLY";
+        default:                            return "OFF";
+    }
+}
+
 void SettingsService::setThemeName(const std::string& themeName) {
+
     m_themeName = themeName;
     evo_theme_set_by_name(m_themeName.c_str());
     syncThemeToRmlUi();
@@ -89,7 +99,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -104,7 +114,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_decoderPreference),
         1, // marker that keyboard preference was explicitly saved
         static_cast<int>(m_upscaler), // line 14 (#103)
-        static_cast<int>(m_aiNetwork) // line 15 (#103)
+        static_cast<int>(m_aiNetwork), // line 15 (#103)
+        static_cast<int>(m_refreshRateMode) // line 16 (120 Hz output mode)
     );
 
     std::fclose(file);
@@ -133,9 +144,10 @@ bool SettingsService::loadSettings() {
     int explicitKeyboardMarker = 0;
     int rawUpscaler = 0;
     int rawAiNetwork = 0;
+    int rawRefreshRateMode = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -150,7 +162,8 @@ bool SettingsService::loadSettings() {
         &rawDecoderPref,
         &explicitKeyboardMarker,
         &rawUpscaler,
-        &rawAiNetwork
+        &rawAiNetwork,
+        &rawRefreshRateMode
     );
 
     std::fclose(file);
@@ -196,6 +209,9 @@ bool SettingsService::loadSettings() {
     }
     if (readCount >= 15 && rawAiNetwork >= 0 && rawAiNetwork <= 3) {
         m_aiNetwork = static_cast<AiNetwork>(rawAiNetwork);
+    }
+    if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 2) {
+        m_refreshRateMode = static_cast<RefreshRateMode>(rawRefreshRateMode);
     }
 
     syncThemeToRmlUi();
