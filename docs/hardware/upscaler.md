@@ -1,10 +1,13 @@
 # Video upscaler (#103)
 
-**Status (2026-09-26): code-complete and host-verified, hw-verify-pending.**
-Every pipeline compiles with amdllpc, the host compile check is clean, and
-`tools/upscale_ref.py --selftest` passes. Nothing here has run on a console
-yet, which is why the setting still defaults to **Off**. Change the default to
-Sharp once the hardware checklist below passes.
+**Status (2026-09-26): hardware-verified on a PS5 Pro, merged to main.**
+- **Hardware:** Off, Sharp and AI Standard / Large / Maximum all render
+  correctly. AI Large costs ~1.75 ms per frame (1080p → 4K). AI Maximum's GPU
+  cost is not measured yet.
+- **Default:** UPSCALING still defaults to **Off**. Issue #103 planned Sharp
+  once verified; that switch hasn't been made.
+- **Published:** lossless same-frame comparisons and the write-up are at
+  https://github.com/sainsaji/ps5-upscalar-research.
 
 A 720p or 1080p file on a 4K panel used to get one bilinear fetch inside the
 YUV→RGB shader. **Settings → Playback & Video → UPSCALING** now offers:
@@ -154,66 +157,64 @@ The active upscaler, including the bypass reason, shows in:
 ## PS5 Pro detection
 
 `evo_hw_probe()` runs in `Application::initialize()`, before the unjail. It
-resolves two libkernel queries with `sceKernelDlsym`:
+asks two libkernel queries through `sceKernelDlsym`:
+- `sceKernelHasTrinityMode` (`yu17wG8L5FI`)
+- `sceKernelIsAuthenticTrinity` (`X0HkB92+NRE`)
 
-- `sceKernelHasTrinityMode` (NID `yu17wG8L5FI`)
-- `sceKernelIsAuthenticTrinity` (NID `X0HkB92+NRE`)
-
-It tries handle `0x2001`, then `0x2`, then asks the loader for
-`libkernel_sys.sprx` / `libkernel.sprx`, trying each symbol by name and then by
-NID. Neither symbol is in the SDK's libkernel stubs, which is why this is not
-an import: a missing import is a null import and crashes the app module at
-load.
-
-The result is logged once:
+It logs:
 
 ```
 hw: ps5 pro=<0|1|?> trinity_mode=<0|1|?> authentic=<0|1|?>
 ```
 
-An unresolved symbol reports `?` and the console is treated as a base PS5.
+**On the dev PS5 Pro (FW 12.70) this always reports `?`, and there is no
+known way from an app module to do better.** What was tried (2026-09-26/27,
+details in [psml-research.md](psml-research.md#experiment-log)):
 
-The model shows in three places:
-- Settings → System & Diagnostics → **CONSOLE**
-- the Media Info renderer line
-- the stats overlay
+- **`sceKernelDlsym` resolves nothing from the app module.** Even
+  `sceKernelUsleep` returns `0x80020003`, so every dlsym miss is meaningless.
+- **Direct import is fatal.** Importing `sceKernelIsTrinityMode` (the query
+  Sony's PSSR library uses) through a `libkernel.sprx` link stub makes the
+  loader reject EVO at launch, before any log is written. Don't retry it.
+- **Pro-mode `param.json` flags change nothing observable.** Declaring Pro
+  mode (`attribute3 |= 0x400000` plus a `psml` block, as Pro-enhanced games
+  have) still launches, but EVO has no way to observe whether it took effect.
+  The build flag was removed with the experiment.
 
-It also picks the AI network (M on a Pro, S otherwise).
+So "unknown" is the normal state:
+- **Auto** treats unknown as a base PS5 (Standard network).
+- The UI says **NOT DETECTED** / "PS5 model unknown".
+- **AI NETWORK** is the way to get Large or Maximum on a Pro.
 
-## PSML SISR on PS5 Pro — spike not run
+The model shows in Settings → System & Diagnostics → **CONSOLE**, the Media
+Info renderer line and the stats overlay.
 
-The go/no-go needs two things this session did not have:
-- **A PS5 Pro**, to list `/system/common/lib` over FTP (read-only) for the PRX
-  exporting `scePsml*`.
-- **A decrypted Pro-enhanced game dump** that calls SISR, to recover the
-  argument structs offline. This is the same method as the shader ripper.
+## PSML (Sony's upscaler)
 
-**Never scan console or kernel memory for it.**
-
-The rules the spike must follow:
-- **No-go if the module is only in `/system/priv/lib`.** A fake-signed app
-  module cannot import from there, and the attempt bricks the load
-  (`tools/native-app/stubs/prx/README.md`).
-- **If it is a go:** add `libScePsml.syms` containing only the SISR functions
-  EVO actually imports, or `package-app.sh`'s dead-import guard fails the
-  build. Add an `AI (PSML)` label, and fall back to the shader CNN on any
-  error.
-
-Until then, the Pro runs AI mode as Anime4K M in shaders, and the build has
-no PSML imports.
+Researched in [psml-research.md](psml-research.md). EVO does **not** use PSML;
+its AI mode is Anime4K in EVO's own shaders. In short:
+- **`scePsmlBcSisr*` (single-image SR).** Only in `/system/priv/lib` (not
+  importable), built on the system shell's AGC.
+- **`scePsmlMfsr*` (PSSR).** Importable, but temporal: it needs game motion
+  vectors.
+- **Both are gated on Trinity mode**, which EVO can neither detect nor, as
+  far as it can observe, enable (above).
 
 ## Hardware checklist
 
 1. **Build and deploy.** `package-app.sh --ffpfsc --usb-remote`, then
    `deploy-app.sh --ffpfsc`.
 2. **Boot log.** `evo.log` must show:
-   - an `agc pipe upscale_* ...` line for all 21 pipes, none `unavailable`
-   - `hw: ps5 pro=0 ...` on a base PS5
+   - an `agc pipe upscale_* ...` line for all 58 upscale pipes, none
+     `unavailable`
+   - the `hw:` lines (see [PS5 Pro detection](#ps5-pro-detection))
 3. **Play and compare.** `evo-remote.sh play Demos/bbb_1080p_h264.mp4` on a
    4K panel, then a 720p clip. With the video playing, run
    `./tools/evo-remote.sh upcompare`. EVO pauses and redraws the **same** frame
-   with the upscaler Off, Sharp, AI Standard and AI Large, with no OSD. The four
-   scanouts land in `output/upcompare/{off,sharp,ai,ai_large}.bmp`. On the host,
+   with the upscaler Off, Sharp, AI Standard, Large and Maximum, with no OSD.
+   The five scanouts land in
+   `output/upcompare/{off,sharp,ai,ai_large,ai_max}.bmp`. From Git Bash, pass
+   console paths as `//mnt/usb0/...`, or MSYS rewrites them. On the host,
    `python tools/upcompare_run.py --montage [--crop x,y,w,h]` writes a
    side-by-side 1:1 crop (`compare.png`) and difference stats against Off.
 4. **Check the log.** For each mode, look for:

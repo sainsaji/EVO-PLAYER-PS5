@@ -38,7 +38,8 @@ Grouped by what you are trying to do. Start at
 | [hardware-decode-review.md](hardware/hardware-decode-review.md) | Review of the above |
 | [gpu-notes.md](hardware/gpu-notes.md) | GPU reverse-engineering history |
 | [shader-compilation.md](hardware/shader-compilation.md) | `.pipe` → amdllpc → PAL metadata, for gfx1013 |
-| [upscaler.md](hardware/upscaler.md) | #103 video upscaler: Sharp (FSR1) / AI (Anime4K CNN), PS5 Pro detection, PSML spike |
+| [upscaler.md](hardware/upscaler.md) | #103 video upscaler: Sharp (FSR1) / AI (Anime4K S/M/UL), PS5 Pro detection, `upcompare` |
+| [psml-research.md](hardware/psml-research.md) | Sony's PSML / PSSR on the PS5 Pro: modules, Trinity mode, what EVO can and cannot reach |
 | [networking.md](hardware/networking.md) | Console services, jailbreak-lapsed symptoms |
 
 ## [evo-pro/](evo-pro/README.md) — the app-module program
