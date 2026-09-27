@@ -892,20 +892,26 @@ static void render_surround_screen(std::vector<uint32_t>& fb, int width, int hei
     memset(&p, 0, sizeof(p));
     p.rail_focused = 0;
     p.is_51_layout = 0;      /* 7.1 */
-    p.selected_item = 2;     /* an action row - the pane that was unreachable */
-    p.active_channel = 2;
-    p.surround_mode = 1;
+    p.selected_item = 8;     /* Center speaker focused (channel 2, item 6 + 2 = 8) */
+    p.active_channel = 2;    /* Center speaker playing tone */
+    p.surround_mode = 1;     /* Test active */
+    p.anim_time = 1.35f;
+    p.orb_x = 0.0f;
+    p.orb_y = -140.0f;       /* Orb hovering in front of Center speaker cone */
+    p.proximity[2] = 1.0f;
+    p.proximity[0] = 0.35f;
+    p.proximity[1] = 0.35f;
 
     struct Spk { const char* name; const char* label; double hz; int dx; int dy; int ch; int item; int hidden; };
     static const Spk spk[8] = {
-        { "FRONT LEFT",       "FL",  440.0, -260, -170, 0, 5, 0 },
-        { "FRONT RIGHT",      "FR",  440.0,  260, -170, 1, 6, 0 },
-        { "CENTER",           "C",   330.0,    0, -210, 2, 7, 0 },
-        { "SUBWOOFER",        "LFE",  60.0,    0,  200, 3, 8, 0 },
-        { "SURROUND LEFT",    "SL",  520.0, -320,   40, 4, 9, 0 },
-        { "SURROUND RIGHT",   "SR",  520.0,  320,   40, 5, 10, 0 },
-        { "SURROUND BACK L",  "SBL", 600.0, -180,  180, 6, 11, 0 },
-        { "SURROUND BACK R",  "SBR", 600.0,  180,  180, 7, 12, 0 },
+        { "FRONT LEFT",       "FL",  440.0, -280, -175, 0, 6, 0 },
+        { "FRONT RIGHT",      "FR",  440.0,  280, -175, 1, 7, 0 },
+        { "CENTER",           "C",   330.0,    0, -225, 2, 8, 0 },
+        { "SUBWOOFER",        "LFE",  60.0,    0,  215, 3, 9, 0 },
+        { "SURROUND BACK L",  "SBL", 600.0, -220,  195, 4, 10, 0 },
+        { "SURROUND BACK R",  "SBR", 600.0,  220,  195, 5, 11, 0 },
+        { "SURROUND LEFT",    "SL",  520.0, -350,   30, 6, 12, 0 },
+        { "SURROUND RIGHT",   "SR",  520.0,  350,   30, 7, 13, 0 },
     };
     for (int i = 0; i < 8; i++) {
         p.speakers[i].name = spk[i].name;
@@ -922,6 +928,20 @@ static void render_surround_screen(std::vector<uint32_t>& fb, int width, int hei
     evo_rmlui_update_surround(&p);
     evo_rmlui_render_surround(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_surround.bmp", fb.data(), width, height);
+
+    /* Second shot: Interactive Free-Roam Orb mode */
+    p.selected_item = 0;
+    p.active_channel = -1;
+    p.surround_mode = 2;
+    p.orb_active = 1;
+    p.orb_x = 180.0f;
+    p.orb_y = -90.0f;
+    p.proximity[1] = 0.88f; // Near Front Right
+    p.proximity[2] = 0.40f; // Near Center
+    p.proximity[7] = 0.45f; // Near Side Right
+    evo_rmlui_update_surround(&p);
+    evo_rmlui_render_surround(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_surround_orb.bmp", fb.data(), width, height);
 }
 
 /* ------------------------------------------------------------------
@@ -1854,6 +1874,14 @@ int main(int argc, char** argv) {
     if (!evo_rmlui_init(width, height)) {
         std::cerr << "Failed to initialize RmlUi playback engine!" << std::endl;
         return 1;
+    }
+
+    if (const char* only = std::getenv("EVO_UIVIEW_ONLY")) {
+        if (std::strcmp(only, "surround") == 0) {
+            render_surround_screen(fb, width, height);
+            evo_rmlui_shutdown();
+            return 0;
+        }
     }
 
     render_launch_screens(fb, width, height);

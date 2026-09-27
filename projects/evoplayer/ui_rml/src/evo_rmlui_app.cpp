@@ -46,6 +46,8 @@ static std::string evo_fmt(const char* fmt, ...)
 #include "evo_rmlui_render_agc.h"
 #include "evo_agc_runtime.h"
 #include "evo_boot_log.h"
+#else
+static inline int evo_agc_runtime_is_120hz(void) { return 0; }
 #endif
 
 /* No <iostream>: its static init (ios_base::Init -> std::locale::locale())
@@ -1810,8 +1812,6 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
 
     auto el = [&](const std::string& id) { return m_surround_doc->GetElementById(id); };
 
-    if (Rml::Element* e = el("surround-indicator")) e->SetProperty("background-color", accent);
-    extern int evo_agc_runtime_is_120hz(void);
     bool is120 = (evo_agc_runtime_is_120hz() != 0);
 
     if (Rml::Element* e = el("surround-subtitle")) {
@@ -1831,39 +1831,91 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
      * mirroring evo_screen_surround_test's display_spk derivation exactly -
      * item_idx 5-12 map to speaker channels in the fixed order the legacy
      * table lists them. */
+    /* Monitor panel: which speaker, action, or orb state is active */
     int display_spk = -1;
-    if (state.active_channel >= 0) {
+    if (state.active_channel >= 0 && state.active_channel < (int)state.speakers.size()) {
         display_spk = state.active_channel;
-    } else if (state.selected_item >= 5 && state.selected_item <= 12) {
-        static const int kItemToChannel[8] = {0, 2, 1, 3, 6, 7, 4, 5};
-        display_spk = kItemToChannel[state.selected_item - 5];
+    } else {
+        for (int i = 0; i < (int)state.speakers.size(); ++i) {
+            if (state.speakers[i].item_idx == state.selected_item && !state.speakers[i].hidden) {
+                display_spk = i;
+                break;
+            }
+        }
     }
 
     std::string mon_title, mon_line1, mon_line2, mon_status;
     bool mon_active = false;
 
-    if (display_spk >= 0 && display_spk < (int)state.speakers.size()) {
+    if (state.orb_active) {
+        mon_title = "SPATIAL ORB · FREE-ROAM";
+        float mX = state.orb_x / 180.0f;
+        float mY = state.orb_y / 180.0f;
+        float deg = std::atan2(state.orb_x, -state.orb_y) * 180.0f / 3.14159265f;
+        if (deg < 0.0f) deg += 360.0f;
+
+        // Find nearest speaker
+        int nearest_idx = -1;
+        float max_p = 0.0f;
+        for (int i = 0; i < (int)state.speakers.size(); ++i) {
+            if (state.speakers[i].hidden) continue;
+            float p = (i < (int)state.proximity.size()) ? state.proximity[i] : 0.0f;
+            if (p > max_p) {
+                max_p = p;
+                nearest_idx = i;
+            }
+        }
+
+        mon_line1 = evo_fmt("COORDS: X:%+.2fm  Y:%+.2fm  ·  AZIMUTH: %03.0f DEG", mX, mY, deg);
+        if (nearest_idx >= 0 && nearest_idx < (int)state.speakers.size()) {
+            mon_line2 = evo_fmt("NEAREST EMITTER: %s (%s) · %d%% PROXIMITY",
+                                state.speakers[nearest_idx].name.c_str(),
+                                state.speakers[nearest_idx].label.c_str(),
+                                static_cast<int>(max_p * 100.0f));
+        } else {
+            mon_line2 = "ACOUSTIC FIELD: SWEET SPOT CENTER (BALANCED)";
+        }
+        mon_active = true;
+        mon_status = "STATUS: [ FREE-ROAM ACTIVE · D-PAD / L-STICK ]";
+    } else if (display_spk >= 0 && display_spk < (int)state.speakers.size()) {
         const EvoSurroundSpeaker& spk = state.speakers[display_spk];
         mon_title = evo_fmt("%s (%s)", spk.name.c_str(), spk.label.c_str());
-        mon_line1 = evo_fmt("TONE FREQ: %.1f HZ", spk.hz);
-        mon_line2 = is120 ? evo_fmt("OUTPUT: 120 HZ (119.88 HZ) \xC2\xB7 S16_8CH (CH %d)", display_spk)
-                          : evo_fmt("OUTPUT: 60 HZ (59.94 HZ) \xC2\xB7 S16_8CH (CH %d)", display_spk);
+        mon_line1 = evo_fmt("TONE FREQ: %.1f HZ · S16_8CH (CH %d)", spk.hz, spk.ch);
+        mon_line2 = is120 ? evo_fmt("OUTPUT: 120 HZ (119.88 HZ) · S16_8CH (CH %d)", display_spk)
+                          : evo_fmt("OUTPUT: 60 HZ (59.94 HZ) · S16_8CH (CH %d)", display_spk);
         mon_active = (state.active_channel >= 0);
-        mon_status = mon_active ? "STATUS: [ ACTIVE NOW ]" : "STATUS: [ READY / STANDBY ]";
+        mon_status = mon_active ? "STATUS: [ ACTIVE NOW · EMITTING TONE ]" : "STATUS: [ STANDBY · PRESS CROSS TO TEST ]";
     } else {
         switch (state.selected_item) {
-            case 0: mon_title = "5.1 AUTO SEQUENCE";  mon_line1 = "MODE: CALIBRATION SWEEP 5.1"; break;
-            case 1: mon_title = "7.1 AUTO SEQUENCE";  mon_line1 = "MODE: CALIBRATION SWEEP 7.1"; break;
-            case 2: mon_title = "360 ROTATION SWEEP"; mon_line1 = "MODE: PERIMETER CIRCLE"; break;
-            case 3: mon_title = state.is_51_layout ? "LAYOUT: 5.1 CHANNELS" : "LAYOUT: 7.1 CHANNELS";
-                    mon_line1 = "MODE: TOGGLE SPEAKER COUNT"; break;
-            default: mon_title = "SILENCE / STOP"; mon_line1 = "MODE: STOP AUDIO STREAM"; break;
+            case 0:
+                mon_title = "FREE-ROAM SOUND ORB";
+                mon_line1 = "MODE: INTERACTIVE SPATIAL POSITIONING";
+                break;
+            case 1:
+                mon_title = "360 ROTATION SWEEP";
+                mon_line1 = "MODE: CONTINUOUS ORBITAL PERIMETER PAN";
+                break;
+            case 2:
+                mon_title = "5.1 AUTO SEQUENCE";
+                mon_line1 = "MODE: 6-CHANNEL CALIBRATION SWEEP";
+                break;
+            case 3:
+                mon_title = "7.1 AUTO SEQUENCE";
+                mon_line1 = "MODE: 8-CHANNEL CALIBRATION SWEEP";
+                break;
+            case 4:
+                mon_title = state.is_51_layout ? "LAYOUT: 5.1 CHANNELS" : "LAYOUT: 7.1 CHANNELS";
+                mon_line1 = "MODE: TOGGLE SPEAKER COUNT (5.1 / 7.1)";
+                break;
+            default:
+                mon_title = "SILENCE / STOP";
+                mon_line1 = "MODE: STOP ALL AUDIO OUTPUT";
+                break;
         }
-        mon_line2 = is120 ? "OUTPUT: 120 HZ (119.88 HZ) \xC2\xB7 AUDIO: 48 kHz / 16-BIT"
-                          : "OUTPUT: 60 HZ (59.94 HZ) \xC2\xB7 AUDIO: 48 kHz / 16-BIT";
+        mon_line2 = is120 ? "OUTPUT: 120 HZ (119.88 HZ) · AUDIO: 48 kHz / 16-BIT"
+                          : "OUTPUT: 60 HZ (59.94 HZ) · AUDIO: 48 kHz / 16-BIT";
         mon_status = (state.surround_mode != 0) ? "STATUS: [ RUNNING TEST ]" : "STATUS: [ IDLE ]";
     }
-
 
     if (Rml::Element* e = el("surround-monitor")) {
         e->SetProperty("background-color", mon_active ? surf_sel : surface);
@@ -1877,13 +1929,14 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         e->SetProperty("color", mon_active ? accent : text_3);
     }
 
-    static const char* kActionLabel[5] = {
-        "AUTO TEST 5.1", "AUTO TEST 7.1", "360 ROTATION SWEEP", "SPEAKER LAYOUT", "SILENCE / STOP"
+    /* Actions list: 6 actions */
+    static const char* kActionLabel[6] = {
+        "FREE-ROAM SOUND ORB", "360 ROTATION SWEEP", "AUTO TEST 5.1", "AUTO TEST 7.1", "SPEAKER LAYOUT", "SILENCE / STOP"
     };
-    static const char* kActionSub[5] = {
-        "6-CHANNEL CALIBRATION", "8-CHANNEL CALIBRATION", "CIRCULAR PERIMETER PAN", "SWITCH 5.1 / 7.1", "STOP ALL OUTPUT"
+    static const char* kActionSub[6] = {
+        "INTERACTIVE POSITIONING", "CIRCULAR PERIMETER PAN", "6-CHANNEL CALIBRATION", "8-CHANNEL CALIBRATION", "SWITCH 5.1 / 7.1", "STOP ALL OUTPUT"
     };
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
         const std::string n = std::to_string(i);
         Rml::Element* row = el("srd-action-" + n);
         Rml::Element* lbl = el("srd-action-label-" + n);
@@ -1897,7 +1950,7 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
 
         if (lbl) { lbl->SetInnerRML(kActionLabel[i]); lbl->SetProperty("color", is_sel ? text_1 : text_2); }
         if (sub) {
-            std::string sub_text = (i == 3)
+            std::string sub_text = (i == 4)
                 ? (state.is_51_layout ? "CURRENT: 5.1 SURROUND" : "CURRENT: 7.1 SURROUND")
                 : kActionSub[i];
             sub->SetInnerRML(sub_text);
@@ -1905,7 +1958,10 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
         }
     }
 
-    /* Speaker nodes, absolutely positioned from each speaker's own dx/dy. */
+    const double cx = 540.0;
+    const double cy = 385.0;
+
+    /* Next-Gen Studio Monitor Speaker nodes */
     for (int i = 0; i < kSurroundSpeakers; i++) {
         const std::string n = std::to_string(i);
         Rml::Element* node = el("srd-spk-" + n);
@@ -1913,36 +1969,28 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
 
         if (i >= (int)state.speakers.size() || state.speakers[i].hidden) {
             node->SetProperty("display", "none");
+            if (Rml::Element* wa = el("srd-wave-" + n + "-a")) wa->SetProperty("display", "none");
+            if (Rml::Element* wb = el("srd-wave-" + n + "-b")) wb->SetProperty("display", "none");
             continue;
         }
 
         const EvoSurroundSpeaker& spk = state.speakers[i];
         bool is_active = (state.active_channel == spk.ch);
         bool is_sel = (!state.rail_focused && state.selected_item == spk.item_idx);
+        float prox = (i < (int)state.proximity.size()) ? state.proximity[i] : 0.0f;
+        if (state.orb_active && prox > 0.45f) is_active = true;
 
-        /* dx/dy are couch-relative design coordinates tuned for the legacy
-         * screen's 1180x760 stage; 0.85 brings them in from this document's
-         * 1080x714 stage panel edges with room for the node's own footprint. */
-        const double kScale = 0.85;
-        int left = 540 + (int)(spk.dx * kScale) - 75;
-        int top  = 357 + (int)(spk.dy * kScale) - 41;
+        const double kScale = 0.88;
+        int left = static_cast<int>(cx + spk.dx * kScale) - 82;
+        int top  = static_cast<int>(cy + spk.dy * kScale) - 45;
 
         node->SetProperty("display", "flex");
-        /* dp, not px. These constants are in the document's design space (the
-         * 1080x714 stage, 150x82 nodes), and every other rule in surround.rcss
-         * is dp - but emitting px pinned the nodes to raw pixels. At the PS5's
-         * 3840x2160 the dp ratio is 2.0, so the stage and the nodes doubled
-         * while their positions did not: the speakers bunched into the
-         * top-left and overlapped each other and the LFE. Invisible at 1080p,
-         * where px and dp coincide. */
         node->SetProperty("left", std::to_string(left) + "dp");
         node->SetProperty("top", std::to_string(top) + "dp");
         node->SetClass("srd-spk-active", is_active);
         node->SetClass("srd-spk-selected", is_sel);
-        node->SetProperty("background-color", is_active ? surf_sel : surface);
-        node->SetProperty("border-color", is_active ? accent : (is_sel ? border_sel : border));
 
-        std::string hz = evo_fmt("%.0f Hz%s", spk.hz, is_active ? " [ON]" : "");
+        std::string hz = evo_fmt("%.0f Hz", spk.hz);
 
         if (Rml::Element* lbl = el("srd-spk-label-" + n)) {
             lbl->SetInnerRML(spk.label);
@@ -1952,52 +2000,129 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
             sub->SetInnerRML(hz);
             sub->SetProperty("color", is_active ? accent : text_3);
         }
+
+        /* Woofer cone glow */
+        if (Rml::Element* woofer = el("srd-spk-woofer-" + n)) {
+            if (is_active) {
+                woofer->SetProperty("border-color", accent);
+                woofer->SetProperty("background-color", "#1c355c");
+            } else {
+                woofer->SetProperty("border-color", "#2e4769");
+                woofer->SetProperty("background-color", "#132135");
+            }
+        }
+
+        /* VU Level Meter (4 bars) */
+        int active_bars = is_active ? 4 : (prox > 0.1f ? static_cast<int>(prox * 4.0f) : 0);
+        for (int b = 1; b <= 4; b++) {
+            if (Rml::Element* bar = el("vu-" + n + "-" + std::to_string(b))) {
+                if (b <= active_bars) {
+                    if (b == 4) bar->SetProperty("background-color", "#ff6b4a");
+                    else if (b == 3) bar->SetProperty("background-color", "#ffcd00");
+                    else bar->SetProperty("background-color", "#00cdff");
+                } else {
+                    bar->SetProperty("background-color", "#18263a");
+                }
+            }
+        }
+
+        /* Acoustic Sound Wave Pulse Arc (dual phased wavefronts emitting into room) */
+        auto updateSpeakerWave = [&](const std::string& wave_id, double phase_offset) {
+            Rml::Element* wave = el(wave_id);
+            if (!wave) return;
+            if (is_active || prox > 0.45f) {
+                double phase = std::fmod(static_cast<double>(state.anim_time) * 1.5 + phase_offset, 1.0);
+                double spk_cx = cx + spk.dx * kScale;
+                double spk_cy = cy + spk.dy * kScale;
+                double dir_x = cx - spk_cx;
+                double dir_y = cy - spk_cy;
+                double dist = std::sqrt(dir_x * dir_x + dir_y * dir_y);
+                if (dist < 1.0) dist = 1.0;
+                double nx = dir_x / dist;
+                double ny = dir_y / dist;
+
+                double travel = 48.0 + (dist * 0.70 - 48.0) * phase;
+                double sz = 48.0 + 88.0 * phase;
+                double wave_cx = spk_cx + nx * travel;
+                double wave_cy = spk_cy + ny * travel;
+                double alpha = 0.90 * (1.0 - phase);
+
+                wave->SetProperty("display", "block");
+                wave->SetProperty("left", evo_fmt("%.1fdp", wave_cx - sz * 0.5));
+                wave->SetProperty("top", evo_fmt("%.1fdp", wave_cy - sz * 0.5));
+                wave->SetProperty("width", evo_fmt("%.1fdp", sz));
+                wave->SetProperty("height", evo_fmt("%.1fdp", sz));
+                wave->SetProperty("border-radius", evo_fmt("%.1fdp", sz * 0.5));
+                wave->SetProperty("border-color", evo_fmt("rgba(0, 205, 255, %.3f)", alpha));
+                wave->SetProperty("background-color", evo_fmt("rgba(0, 205, 255, %.3f)", alpha * 0.12));
+            } else {
+                wave->SetProperty("display", "none");
+            }
+        };
+
+        updateSpeakerWave("srd-wave-" + n + "-a", i * 0.15);
+        updateSpeakerWave("srd-wave-" + n + "-b", i * 0.15 + 0.5);
     }
 
-    /* High-refresh 120Hz orbital sound orb and acoustic wave animations */
-    const double cx = 540.0;
-    const double cy = 357.0;
-    const double rx = 240.0;
-    const double ry = 175.0;
-
-    /* Speed: 1 revolution every 2.0 seconds -> 0.5 rev/sec -> angle = anim_time * PI */
-    const double kAngle = static_cast<double>(state.anim_time) * 3.14159265358979323846;
+    /* Kinetic Sound Orb & Trails */
+    double orb_center_x = cx + static_cast<double>(state.orb_x);
+    double orb_center_y = cy + static_cast<double>(state.orb_y);
 
     if (Rml::Element* orb = el("surround-sound-orb")) {
-        double ox = cx + rx * std::cos(kAngle) - 14.0;
-        double oy = cy + ry * std::sin(kAngle) - 14.0;
-        orb->SetProperty("left", evo_fmt("%.1fdp", ox));
-        orb->SetProperty("top", evo_fmt("%.1fdp", oy));
+        orb->SetProperty("left", evo_fmt("%.1fdp", orb_center_x - 16.0));
+        orb->SetProperty("top", evo_fmt("%.1fdp", orb_center_y - 16.0));
         orb->SetProperty("background-color", accent);
     }
 
+    if (Rml::Element* ret = el("surround-orb-reticle")) {
+        ret->SetProperty("display", state.orb_active ? "block" : "none");
+    }
+
+    /* Motion Trails */
+    double t_angle = static_cast<double>(state.anim_time) * 3.14159265;
     if (Rml::Element* t1 = el("surround-sound-trail-1")) {
-        double t1_ang = kAngle - 0.08;
-        double ox = cx + rx * std::cos(t1_ang) - 10.0;
-        double oy = cy + ry * std::sin(t1_ang) - 10.0;
-        t1->SetProperty("left", evo_fmt("%.1fdp", ox));
-        t1->SetProperty("top", evo_fmt("%.1fdp", oy));
+        double off_x = orb_center_x - 7.0 * std::cos(t_angle) - 12.0;
+        double off_y = orb_center_y - 7.0 * std::sin(t_angle) - 12.0;
+        t1->SetProperty("left", evo_fmt("%.1fdp", off_x));
+        t1->SetProperty("top", evo_fmt("%.1fdp", off_y));
     }
-
     if (Rml::Element* t2 = el("surround-sound-trail-2")) {
-        double t2_ang = kAngle - 0.16;
-        double ox = cx + rx * std::cos(t2_ang) - 7.0;
-        double oy = cy + ry * std::sin(t2_ang) - 7.0;
-        t2->SetProperty("left", evo_fmt("%.1fdp", ox));
-        t2->SetProperty("top", evo_fmt("%.1fdp", oy));
+        double off_x = orb_center_x - 14.0 * std::cos(t_angle) - 9.0;
+        double off_y = orb_center_y - 14.0 * std::sin(t_angle) - 9.0;
+        t2->SetProperty("left", evo_fmt("%.1fdp", off_x));
+        t2->SetProperty("top", evo_fmt("%.1fdp", off_y));
+    }
+    if (Rml::Element* t3 = el("surround-sound-trail-3")) {
+        double off_x = orb_center_x - 20.0 * std::cos(t_angle) - 6.0;
+        double off_y = orb_center_y - 20.0 * std::sin(t_angle) - 6.0;
+        t3->SetProperty("left", evo_fmt("%.1fdp", off_x));
+        t3->SetProperty("top", evo_fmt("%.1fdp", off_y));
     }
 
-    /* Acoustic wave rings expanding outward smoothly */
-    double wave1 = std::fmod(static_cast<double>(state.anim_time) * 0.45, 1.0);
-    double wave2 = std::fmod(static_cast<double>(state.anim_time) * 0.45 + 0.333, 1.0);
-    double wave3 = std::fmod(static_cast<double>(state.anim_time) * 0.45 + 0.666, 1.0);
+    /* Expanding acoustic ripple from the sound orb */
+    if (Rml::Element* ow = el("surround-sound-orb-wave")) {
+        double orb_phase = std::fmod(static_cast<double>(state.anim_time) * 1.5, 1.0);
+        double orb_w_sz = 32.0 + 64.0 * orb_phase;
+        double orb_w_alpha = 0.5 * (1.0 - orb_phase);
+        ow->SetProperty("left", evo_fmt("%.1fdp", orb_center_x - orb_w_sz * 0.5));
+        ow->SetProperty("top", evo_fmt("%.1fdp", orb_center_y - orb_w_sz * 0.5));
+        ow->SetProperty("width", evo_fmt("%.1fdp", orb_w_sz));
+        ow->SetProperty("height", evo_fmt("%.1fdp", orb_w_sz));
+        ow->SetProperty("border-radius", evo_fmt("%.1fdp", orb_w_sz * 0.5));
+        ow->SetProperty("border-color", evo_fmt("rgba(0, 205, 255, %.3f)", orb_w_alpha));
+    }
 
-    auto updateRing = [&](const char* id, double phase) {
+    /* Calibrated sweet spot rings expanding gently */
+    double wave1 = std::fmod(static_cast<double>(state.anim_time) * 0.35, 1.0);
+    double wave2 = std::fmod(static_cast<double>(state.anim_time) * 0.35 + 0.333, 1.0);
+    double wave3 = std::fmod(static_cast<double>(state.anim_time) * 0.35 + 0.666, 1.0);
+
+    auto updateRing = [&](const char* id, double base_sz, double max_sz, double phase) {
         if (Rml::Element* r = el(id)) {
-            double sz = 160.0 + 440.0 * phase;
+            double sz = base_sz + (max_sz - base_sz) * phase;
             double l = cx - sz * 0.5;
             double t = cy - sz * 0.5;
-            double alpha = 0.25 * (1.0 - phase);
+            double alpha = 0.38 * (1.0 - phase);
             r->SetProperty("left", evo_fmt("%.1fdp", l));
             r->SetProperty("top", evo_fmt("%.1fdp", t));
             r->SetProperty("width", evo_fmt("%.1fdp", sz));
@@ -2006,9 +2131,9 @@ void EvoRmlApp::UpdateSurroundState(const EvoSurroundState& state) {
             r->SetProperty("border-color", evo_fmt("rgba(0, 205, 255, %.3f)", alpha));
         }
     };
-    updateRing("surround-ring-1", wave1);
-    updateRing("surround-ring-2", wave2);
-    updateRing("surround-ring-3", wave3);
+    updateRing("surround-ring-1", 180.0, 260.0, wave1);
+    updateRing("surround-ring-2", 360.0, 480.0, wave2);
+    updateRing("surround-ring-3", 560.0, 700.0, wave3);
 }
 
 void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {

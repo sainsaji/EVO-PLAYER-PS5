@@ -18,27 +18,33 @@ public:
     void render(uint32_t* framebuffer, int width, int height) override;
 
 private:
-    void navigate(int dir);
+    void navigateActions(int dir);
+    void navigateSpeakers2D(int dirX, int dirY);
+    void moveOrb(float dx, float dy);
+    void updateProximities();
     void switchPane(int dir);
     void activateSelection();
     void playSelectedChannel();
     void startSweep(int mode);
     void stopSweep();
-    int  actionCount() const { return 5; }
+    int  actionCount() const { return 6; }
     int  speakerCount() const;
 
-    /* Two panes, like Settings: the action list on the left and the speaker
-     * grid on the right. Previously only the grid was reachable - selected_item
-     * was hardcoded to 5 + m_selectedSpeaker, and items 0-4 (the actions) had
-     * no input path at all despite rendering with focus styling. */
-    enum Pane { PaneActions = 0, PaneSpeakers = 1 };
+    enum Pane { PaneActions = 0, PaneSpeakers = 1, PaneOrb = 2 };
 
     int    m_focusPane = PaneActions;
     int    m_selectedAction = 0;
     int    m_selectedSpeaker = 0;
 
-    /* Auto-test / rotation sweep, driven from update(): the service only opens
-     * the port and plays one tone, so stepping through channels is ours. */
+    /* Interactive 2.5D sound orb and spatial audio coordinates */
+    float  m_orbX = 0.0f;
+    float  m_orbY = 0.0f;
+    float  m_targetOrbX = 0.0f;
+    float  m_targetOrbY = 0.0f;
+    bool   m_isOrbMode = false;
+    float  m_speakerProximity[8] = {0.0f};
+
+    /* Auto-test / rotation sweep, driven from update() */
     int    m_sweepMode = -1;      /* -1 idle, 0 = 5.1, 1 = 7.1, 2 = rotation */
     int    m_sweepStep = 0;
     double m_sweepMs = 0.0;

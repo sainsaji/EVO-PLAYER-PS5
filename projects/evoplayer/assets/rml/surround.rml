@@ -20,7 +20,7 @@
             <!-- Left: telemetry monitor + action list -->
             <div id="surround-left">
                 <div id="surround-monitor">
-                    <div id="surround-monitor-header">SPEAKER CALIBRATION MONITOR</div>
+                    <div id="surround-monitor-header">SPATIAL RADAR & TELEMETRY</div>
                     <div id="surround-monitor-title"></div>
                     <div id="surround-monitor-line1"></div>
                     <div id="surround-monitor-line2"></div>
@@ -48,61 +48,252 @@
                         <div id="srd-action-label-4" class="srd-action-label"></div>
                         <div id="srd-action-sub-4" class="srd-action-sub"></div>
                     </div>
+                    <div id="srd-action-5" class="srd-action">
+                        <div id="srd-action-label-5" class="srd-action-label"></div>
+                        <div id="srd-action-sub-5" class="srd-action-sub"></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Right: the room diagram -->
+            <!-- Right: Next-Gen 2.5D Acoustic Sound Stage -->
             <div id="surround-stage">
+                <!-- 2.5D Perspective Grid & Floor Lines -->
+                <div id="surround-floor-backdrop"></div>
+                <div id="surround-grid-diag-1"></div>
+                <div id="surround-grid-diag-2"></div>
+                <div id="surround-axis-cross-h"></div>
+                <div id="surround-axis-cross-v"></div>
+
+                <!-- Acoustic Sector Beams from Sweet Spot -->
+                <div id="srd-beam-0" class="srd-beam"></div>
+                <div id="srd-beam-1" class="srd-beam"></div>
+                <div id="srd-beam-2" class="srd-beam"></div>
+                <div id="srd-beam-3" class="srd-beam"></div>
+                <div id="srd-beam-4" class="srd-beam"></div>
+                <div id="srd-beam-5" class="srd-beam"></div>
+                <div id="srd-beam-6" class="srd-beam"></div>
+                <div id="srd-beam-7" class="srd-beam"></div>
+
+                <!-- Curved Cinema Front Display -->
                 <div id="surround-stage-display">
+                    <div id="surround-stage-display-glow"></div>
                     <div id="surround-stage-display-bar"></div>
-                    <div id="surround-stage-display-label">FRONT DISPLAY / TV SCREEN</div>
+                    <div id="surround-stage-display-label">FRONT DISPLAY · CINEMA STAGE</div>
                 </div>
 
+                <!-- Calibrated Distance Zones (1.0m, 2.0m, 3.0m) -->
                 <div id="surround-ring-3"></div>
                 <div id="surround-ring-2"></div>
                 <div id="surround-ring-1"></div>
 
+                <!-- Central Sweet Spot / Holographic Listener Pedestal -->
+                <div id="surround-listener-pod">
+                    <div id="surround-listener-glow"></div>
+                    <div id="surround-listener">
+                        <div id="surround-listener-aim"></div>
+                        <div id="surround-listener-label">SWEET SPOT</div>
+                        <div id="surround-listener-sub">0-DEG REFERENCE</div>
+                    </div>
+                </div>
+
+                <!-- Next-Gen 2.5D Studio Monitor Speakers -->
+                <div id="srd-spk-0" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-0" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-0" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-0" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-0" class="srd-spk-vu">
+                            <div id="vu-0-4" class="vu-bar bar-red"></div>
+                            <div id="vu-0-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-0-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-0-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-1" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-1" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-1" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-1" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-1" class="srd-spk-vu">
+                            <div id="vu-1-4" class="vu-bar bar-red"></div>
+                            <div id="vu-1-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-1-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-1-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-2" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-2" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-2" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-2" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-2" class="srd-spk-vu">
+                            <div id="vu-2-4" class="vu-bar bar-red"></div>
+                            <div id="vu-2-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-2-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-2-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-3" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-3" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-3" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-3" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-3" class="srd-spk-vu">
+                            <div id="vu-3-4" class="vu-bar bar-red"></div>
+                            <div id="vu-3-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-3-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-3-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-4" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-4" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-4" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-4" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-4" class="srd-spk-vu">
+                            <div id="vu-4-4" class="vu-bar bar-red"></div>
+                            <div id="vu-4-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-4-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-4-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-5" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-5" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-5" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-5" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-5" class="srd-spk-vu">
+                            <div id="vu-5-4" class="vu-bar bar-red"></div>
+                            <div id="vu-5-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-5-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-5-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-6" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-6" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-6" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-6" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-6" class="srd-spk-vu">
+                            <div id="vu-6-4" class="vu-bar bar-red"></div>
+                            <div id="vu-6-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-6-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-6-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="srd-spk-7" class="srd-spk">
+                    <div class="srd-spk-cab">
+                        <div class="srd-spk-drivers">
+                            <div class="srd-spk-tweeter"></div>
+                            <div id="srd-spk-woofer-7" class="srd-spk-woofer">
+                                <div class="srd-spk-cap"></div>
+                            </div>
+                        </div>
+                        <div class="srd-spk-meta">
+                            <div id="srd-spk-label-7" class="srd-spk-label"></div>
+                            <div id="srd-spk-sub-7" class="srd-spk-sub"></div>
+                        </div>
+                        <div id="srd-spk-vu-7" class="srd-spk-vu">
+                            <div id="vu-7-4" class="vu-bar bar-red"></div>
+                            <div id="vu-7-3" class="vu-bar bar-amber"></div>
+                            <div id="vu-7-2" class="vu-bar bar-cyan"></div>
+                            <div id="vu-7-1" class="vu-bar bar-green"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Acoustic sound wave pulses emitting from active speakers into room -->
+                <div id="srd-wave-0-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-0-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-1-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-1-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-2-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-2-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-3-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-3-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-4-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-4-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-5-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-5-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-6-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-6-b" class="srd-spk-wave"></div>
+                <div id="srd-wave-7-a" class="srd-spk-wave"></div>
+                <div id="srd-wave-7-b" class="srd-spk-wave"></div>
+
+                <!-- Next-Gen Sound Orb & Kinetic Plasma Trails -->
+                <div id="surround-sound-trail-3"></div>
                 <div id="surround-sound-trail-2"></div>
                 <div id="surround-sound-trail-1"></div>
-                <div id="surround-sound-orb"></div>
-
-                <div id="surround-listener">
-                    <div id="surround-listener-label">LISTENER</div>
-                    <div id="surround-listener-sub">SWEET SPOT</div>
-                </div>
-
-
-                <div id="srd-spk-0" class="srd-spk">
-                    <div id="srd-spk-label-0" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-0" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-1" class="srd-spk">
-                    <div id="srd-spk-label-1" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-1" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-2" class="srd-spk">
-                    <div id="srd-spk-label-2" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-2" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-3" class="srd-spk">
-                    <div id="srd-spk-label-3" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-3" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-4" class="srd-spk">
-                    <div id="srd-spk-label-4" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-4" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-5" class="srd-spk">
-                    <div id="srd-spk-label-5" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-5" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-6" class="srd-spk">
-                    <div id="srd-spk-label-6" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-6" class="srd-spk-sub"></div>
-                </div>
-                <div id="srd-spk-7" class="srd-spk">
-                    <div id="srd-spk-label-7" class="srd-spk-label"></div>
-                    <div id="srd-spk-sub-7" class="srd-spk-sub"></div>
+                <div id="surround-sound-orb-wave"></div>
+                <div id="surround-sound-orb">
+                    <div id="surround-orb-inner"></div>
+                    <div id="surround-orb-reticle">
+                        <div class="reticle-cross-h"></div>
+                        <div class="reticle-cross-v"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -110,7 +301,11 @@
         <div id="surround-footer">
             <div class="footer-hint">
                 <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">TEST / ACTIVATE</span>
+                <span class="footer-text">TEST TONE</span>
+            </div>
+            <div class="footer-hint">
+                <div class="glyph-badge"><img src="../icons/btn_lstick.png" class="glyph-badge-img"/></div>
+                <span class="footer-text">MOVE ORB</span>
             </div>
             <div class="footer-hint">
                 <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
@@ -122,7 +317,7 @@
             </div>
             <div class="footer-hint">
                 <div class="glyph-badge"><img src="../icons/btn_dpad.png" class="glyph-badge-img"/></div>
-                <span class="footer-text">NAVIGATE</span>
+                <span class="footer-text">2D NAVIGATE</span>
             </div>
             <div class="footer-hint">
                 <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>

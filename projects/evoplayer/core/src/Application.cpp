@@ -984,6 +984,35 @@ int Application::run() {
             released = ~padData.buttons & lastButtons;
             held = padData.buttons;
 
+            // DualSense Left Analog Stick: normalize and apply deadzone
+            float rawLx = (static_cast<float>(padData.leftStick.x) - 128.0f) / 128.0f;
+            float rawLy = (static_cast<float>(padData.leftStick.y) - 128.0f) / 128.0f;
+            const float kStickDeadzone = 0.18f;
+            m_leftStickX = (std::abs(rawLx) > kStickDeadzone) ? rawLx : 0.0f;
+            m_leftStickY = (std::abs(rawLy) > kStickDeadzone) ? rawLy : 0.0f;
+
+            // Synthesize stick tilt events into directional pad masks
+            static bool s_stickLeft = false, s_stickRight = false, s_stickUp = false, s_stickDown = false;
+            bool curStickLeft  = (rawLx < -0.55f);
+            bool curStickRight = (rawLx >  0.55f);
+            bool curStickUp    = (rawLy < -0.55f);
+            bool curStickDown  = (rawLy >  0.55f);
+
+            if (curStickLeft && !s_stickLeft)   pressed |= PadButtons::Left;
+            if (curStickRight && !s_stickRight) pressed |= PadButtons::Right;
+            if (curStickUp && !s_stickUp)       pressed |= PadButtons::Up;
+            if (curStickDown && !s_stickDown)   pressed |= PadButtons::Down;
+
+            if (curStickLeft)  held |= PadButtons::Left;
+            if (curStickRight) held |= PadButtons::Right;
+            if (curStickUp)    held |= PadButtons::Up;
+            if (curStickDown)  held |= PadButtons::Down;
+
+            s_stickLeft = curStickLeft;
+            s_stickRight = curStickRight;
+            s_stickUp = curStickUp;
+            s_stickDown = curStickDown;
+
             evo_input_update(&evo_pad_state, padData.buttons, static_cast<uint64_t>(now_ms()));
 
             // Synthesize directional repeat events into pressed mask

@@ -125,7 +125,13 @@ void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
     state.active_channel = p->active_channel;
     state.surround_mode = p->surround_mode;
     state.anim_time = p->anim_time;
+    state.orb_x = p->orb_x;
+    state.orb_y = p->orb_y;
+    state.orb_active = (p->orb_active != 0);
 
+    for (int i = 0; i < EVO_RMLUI_SURROUND_SPEAKERS; i++) {
+        state.proximity.push_back(p->proximity[i]);
+    }
 
     for (int i = 0; i < p->speaker_count && i < EVO_RMLUI_SURROUND_SPEAKERS; i++) {
         EvoSurroundSpeaker s;

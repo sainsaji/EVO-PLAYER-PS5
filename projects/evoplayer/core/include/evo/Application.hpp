@@ -64,6 +64,11 @@ public:
     IPlaybackController* getPlaybackController() const override { return m_playbackController.get(); }
     ScreenManager* getScreenManager() const override { return m_screenManager.get(); }
 
+    void getLeftStick(float* x, float* y) const {
+        if (x) *x = m_leftStickX;
+        if (y) *y = m_leftStickY;
+    }
+
 private:
     Application();
     ~Application() override;
@@ -85,6 +90,8 @@ private:
     std::unique_ptr<ScreenManager> m_screenManager;
 
     int m_padHandle = -1;
+    float m_leftStickX = 0.0f;
+    float m_leftStickY = 0.0f;
     uint32_t* m_uiScratch = nullptr;
     bool m_running = false;
     /* shutdown() is reached from both run() and ~Application(); see the note

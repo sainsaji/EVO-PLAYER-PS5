@@ -451,6 +451,10 @@ typedef struct {
     evo_rmlui_surround_speaker_t speakers[EVO_RMLUI_SURROUND_SPEAKERS];
     int         speaker_count;
     float       anim_time;       /* animation time in seconds for 120Hz test */
+    float       orb_x;           /* orb room coordinate X (-350 to +350) */
+    float       orb_y;           /* orb room coordinate Y (-250 to +250) */
+    int         orb_active;      /* 1 = user interactive free-roam orb control */
+    float       proximity[EVO_RMLUI_SURROUND_SPEAKERS]; /* 0.0 .. 1.0 proximity to orb */
 } evo_rmlui_surround_params_t;
 
 

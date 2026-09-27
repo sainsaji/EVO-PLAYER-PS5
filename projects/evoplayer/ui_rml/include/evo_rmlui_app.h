@@ -502,13 +502,18 @@ struct EvoSurroundState {
     int active_channel = -1;
     int surround_mode = 0;
     float anim_time = 0.0f;
+    float orb_x = 0.0f;
+    float orb_y = 0.0f;
+    bool  orb_active = false;
+    std::vector<float> proximity;
     std::vector<EvoSurroundSpeaker> speakers;
 
     bool operator==(const EvoSurroundState& o) const {
         return rail_focused == o.rail_focused && is_51_layout == o.is_51_layout &&
                selected_item == o.selected_item && active_channel == o.active_channel &&
                surround_mode == o.surround_mode && anim_time == o.anim_time &&
-               speakers == o.speakers;
+               orb_x == o.orb_x && orb_y == o.orb_y && orb_active == o.orb_active &&
+               proximity == o.proximity && speakers == o.speakers;
     }
     bool operator!=(const EvoSurroundState& o) const { return !(*this == o); }
 };

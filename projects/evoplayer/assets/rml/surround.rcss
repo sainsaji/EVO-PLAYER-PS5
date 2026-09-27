@@ -1,10 +1,5 @@
 /* =============================================================================
- * EVO PLAYER PRO - Surround Sound Studio
- *
- * A spatial room diagram rather than a list: a telemetry monitor + action
- * rows on the left, a stage panel with the listener and up to 8 positioned
- * speaker nodes on the right. Geometry follows changelog.rcss's two-column
- * split (600 / 24 gutter / 1080) so this reads as the same app.
+ * EVO PLAYER PRO - Surround Sound Studio (Next-Gen 2.5D Audio Stage)
  * ============================================================================= */
 
 body {
@@ -38,9 +33,9 @@ div, span, p {
 #surround-header {
     position: absolute;
     left: 0;
-    top: 96dp;
+    top: 72dp;
     width: 1704dp;
-    height: 52dp;
+    height: 58dp;
     display: flex;
     flex-direction: row;
     align-items: flex-end;
@@ -75,10 +70,10 @@ div, span, p {
 
 #surround-subtitle {
     display: block;
-    font-size: 15dp;
+    font-size: 14dp;
     font-weight: bold;
     color: #8fa0b5;
-    letter-spacing: 1dp;
+    letter-spacing: 1.2dp;
     margin-top: 3dp;
 }
 
@@ -87,34 +82,34 @@ div, span, p {
 #surround-left {
     position: absolute;
     left: 0;
-    top: 222dp;
+    top: 152dp;
     width: 600dp;
 }
 
 #surround-monitor {
     width: 600dp;
-    height: 220dp;
-    background-color: #121b2eeb;
+    height: 204dp;
+    background-color: #0f182beb;
     border-width: 1dp;
-    border-color: #2a3b55aa;
+    border-color: #273b57aa;
     border-radius: 20dp;
-    padding: 22dp 26dp;
+    padding: 20dp 24dp;
     display: flex;
     flex-direction: column;
 }
 
 #surround-monitor-header {
     display: block;
-    font-size: 14dp;
+    font-size: 13dp;
     font-weight: bold;
-    color: #5e718c;
+    color: #5e7392;
     letter-spacing: 1.5dp;
-    margin-bottom: 16dp;
+    margin-bottom: 12dp;
 }
 
 #surround-monitor-title {
     display: block;
-    font-size: 26dp;
+    font-size: 24dp;
     font-weight: bold;
     color: #ecf3ff;
     letter-spacing: 0.3dp;
@@ -122,68 +117,68 @@ div, span, p {
 
 #surround-monitor-line1 {
     display: block;
-    font-size: 16dp;
+    font-size: 15dp;
     font-weight: normal;
-    color: #9fb2cc;
-    margin-top: 10dp;
+    color: #9eb2cc;
+    margin-top: 8dp;
 }
 
 #surround-monitor-line2 {
     display: block;
-    font-size: 16dp;
+    font-size: 15dp;
     font-weight: normal;
-    color: #9fb2cc;
+    color: #9eb2cc;
     margin-top: 4dp;
 }
 
 #surround-monitor-status {
     display: block;
-    font-size: 15dp;
+    font-size: 14dp;
     font-weight: bold;
     letter-spacing: 0.5dp;
-    margin-top: 16dp;
+    margin-top: 14dp;
 }
 
 #surround-actions {
-    margin-top: 20dp;
+    margin-top: 12dp;
     display: flex;
     flex-direction: column;
 }
 
 .srd-action {
     width: 600dp;
-    height: 72dp;
-    background-color: #121b2eeb;
+    height: 64dp;
+    background-color: #0f182beb;
     border-width: 1dp;
-    border-color: #2a3b55aa;
-    border-radius: 20dp;
-    margin-bottom: 8dp;
-    padding-left: 24dp;
-    padding-top: 12dp;
+    border-color: #273b57aa;
+    border-radius: 18dp;
+    margin-bottom: 6dp;
+    padding-left: 22dp;
+    padding-top: 10dp;
     display: flex;
     flex-direction: column;
     justify-content: center;
 }
 
 .srd-action-focused {
-    background-color: #1b2e4cf5;
+    background-color: #172c4ef5;
     border-width: 1.5dp;
     border-color: #00cdff;
 }
 
 .srd-action-label {
     display: block;
-    font-size: 18dp;
+    font-size: 17dp;
     font-weight: bold;
     letter-spacing: 0.3dp;
 }
 
 .srd-action-sub {
     display: block;
-    font-size: 14dp;
+    font-size: 13dp;
     font-weight: normal;
     letter-spacing: 0.3dp;
-    margin-top: 4dp;
+    margin-top: 3dp;
 }
 
 /* =============================== Stage =============================== */
@@ -191,195 +186,479 @@ div, span, p {
 #surround-stage {
     position: absolute;
     left: 624dp;
-    top: 222dp;
+    top: 152dp;
     width: 1080dp;
-    height: 714dp;
-    background-color: #0c1526;
-    border-width: 1dp;
-    border-color: #2a3b55aa;
+    height: 778dp;
+    background-color: #070d18;
+    border-width: 1.5dp;
+    border-color: #1e3352cc;
     border-radius: 28dp;
     padding: 0;
     overflow: hidden;
 }
 
+/* Acoustic 2.5D floor perspective & crosshairs */
+#surround-floor-backdrop {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1080dp;
+    height: 778dp;
+    background-color: rgba(4, 9, 18, 0.4);
+}
+
+#surround-grid-diag-1 {
+    position: absolute;
+    left: 140dp;
+    top: 70dp;
+    width: 800dp;
+    height: 640dp;
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.05);
+}
+
+#surround-grid-diag-2 {
+    position: absolute;
+    left: 240dp;
+    top: 140dp;
+    width: 600dp;
+    height: 500dp;
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.05);
+}
+
+#surround-axis-cross-h {
+    position: absolute;
+    left: 60dp;
+    top: 389dp;
+    width: 960dp;
+    height: 1dp;
+    background-color: rgba(0, 205, 255, 0.12);
+}
+
+#surround-axis-cross-v {
+    position: absolute;
+    left: 540dp;
+    top: 50dp;
+    width: 1dp;
+    height: 680dp;
+    background-color: rgba(0, 205, 255, 0.12);
+}
+
+/* Acoustic Sector Beams connecting sweet spot to speakers */
+.srd-beam {
+    position: absolute;
+    background-color: rgba(0, 205, 255, 0.12);
+}
+
+#srd-beam-2 {
+    left: 539dp;
+    top: 232dp;
+    width: 2dp;
+    height: 112dp;
+    background-color: rgba(0, 205, 255, 0.28);
+}
+
+#srd-beam-3 {
+    left: 539dp;
+    top: 428dp;
+    width: 2dp;
+    height: 140dp;
+    background-color: rgba(0, 205, 255, 0.28);
+}
+
+#srd-beam-6 {
+    left: 235dp;
+    top: 388dp;
+    width: 225dp;
+    height: 2dp;
+    background-color: rgba(0, 205, 255, 0.28);
+}
+
+#srd-beam-7 {
+    left: 620dp;
+    top: 388dp;
+    width: 225dp;
+    height: 2dp;
+    background-color: rgba(0, 205, 255, 0.28);
+}
+
+/* Curved Cinema Front Display */
 #surround-stage-display {
     position: absolute;
-    left: 330dp;
-    top: 24dp;
-    width: 420dp;
+    left: 320dp;
+    top: 20dp;
+    width: 440dp;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
 
-#surround-stage-display-bar {
+#surround-stage-display-glow {
+    position: absolute;
+    left: 10dp;
+    top: -4dp;
     width: 420dp;
+    height: 22dp;
+    background-color: rgba(0, 205, 255, 0.15);
+    border-radius: 11dp;
+}
+
+#surround-stage-display-bar {
+    width: 440dp;
     height: 14dp;
     border-radius: 7dp;
     background-color: #00cdff;
     border-width: 1dp;
-    border-color: #00cdff;
+    border-color: #ffffff;
 }
 
 #surround-stage-display-label {
     display: block;
-    font-size: 14dp;
+    font-size: 13dp;
     font-weight: bold;
-    color: #5e718c;
-    letter-spacing: 1dp;
-    margin-top: 12dp;
+    color: #637a9a;
+    letter-spacing: 1.2dp;
+    margin-top: 10dp;
 }
 
-/* Ambience rings - acoustic waves expanding from listener */
+/* Concentric calibration rings */
 #surround-ring-1 {
     position: absolute;
-    left: 440dp;
-    top: 257dp;
-    width: 200dp;
-    height: 200dp;
-    border-radius: 100dp;
-    background-color: rgba(255, 255, 255, 0.08);
+    left: 425dp;
+    top: 274dp;
+    width: 230dp;
+    height: 230dp;
+    border-radius: 115dp;
+    background-color: rgba(0, 205, 255, 0.025);
     border-width: 1dp;
-    border-color: rgba(0, 205, 255, 0.20);
+    border-color: rgba(0, 205, 255, 0.22);
 }
 
 #surround-ring-2 {
     position: absolute;
-    left: 350dp;
-    top: 167dp;
-    width: 380dp;
-    height: 380dp;
-    border-radius: 190dp;
-    background-color: rgba(255, 255, 255, 0.045);
+    left: 310dp;
+    top: 159dp;
+    width: 460dp;
+    height: 460dp;
+    border-radius: 230dp;
+    background-color: rgba(0, 205, 255, 0.015);
     border-width: 1dp;
-    border-color: rgba(0, 205, 255, 0.15);
+    border-color: rgba(0, 205, 255, 0.14);
 }
 
 #surround-ring-3 {
     position: absolute;
-    left: 255dp;
-    top: 72dp;
-    width: 570dp;
-    height: 570dp;
-    border-radius: 285dp;
-    background-color: rgba(255, 255, 255, 0.024);
+    left: 195dp;
+    top: 44dp;
+    width: 690dp;
+    height: 690dp;
+    border-radius: 345dp;
+    background-color: rgba(0, 205, 255, 0.008);
     border-width: 1dp;
-    border-color: rgba(0, 205, 255, 0.10);
+    border-color: rgba(0, 205, 255, 0.08);
 }
 
-/* 120Hz test animation: high-speed orbital sound particle */
-#surround-sound-orb {
+/* Sweet spot listener pod */
+#surround-listener-pod {
     position: absolute;
-    left: 526dp;
-    top: 343dp;
-    width: 28dp;
-    height: 28dp;
-    border-radius: 14dp;
-    background-color: #00cdff;
-    border-width: 2dp;
-    border-color: #ffffff;
+    left: 460dp;
+    top: 344dp;
+    width: 160dp;
+    height: 90dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-#surround-sound-trail-1 {
+#surround-listener-glow {
     position: absolute;
-    left: 530dp;
-    top: 347dp;
-    width: 20dp;
-    height: 20dp;
-    border-radius: 10dp;
-    background-color: rgba(0, 205, 255, 0.55);
+    left: 5dp;
+    top: 5dp;
+    width: 150dp;
+    height: 80dp;
+    border-radius: 40dp;
+    background-color: rgba(0, 205, 255, 0.06);
 }
-
-#surround-sound-trail-2 {
-    position: absolute;
-    left: 533dp;
-    top: 350dp;
-    width: 14dp;
-    height: 14dp;
-    border-radius: 7dp;
-    background-color: rgba(0, 205, 255, 0.25);
-}
-
 
 #surround-listener {
-    position: absolute;
-    left: 475dp;
-    top: 324dp;
-    width: 130dp;
-    height: 66dp;
-    border-radius: 18dp;
-    background-color: #16233aeb;
-    border-width: 1dp;
-    border-color: #2a3b55aa;
+    width: 156dp;
+    height: 84dp;
+    border-radius: 22dp;
+    background-color: #111b2deb;
+    border-width: 1.5dp;
+    border-color: #2c4467;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
 }
 
+#surround-listener-aim {
+    width: 12dp;
+    height: 4dp;
+    background-color: #00cdff;
+    border-radius: 2dp;
+    margin-bottom: 5dp;
+}
+
 #surround-listener-label {
     display: block;
-    font-size: 16dp;
+    font-size: 15dp;
     font-weight: bold;
     color: #ecf3ff;
 }
 
 #surround-listener-sub {
     display: block;
-    font-size: 12dp;
+    font-size: 11dp;
     font-weight: bold;
     color: #00cdff;
-    letter-spacing: 0.5dp;
-    margin-top: 2dp;
+    letter-spacing: 0.6dp;
+    margin-top: 3dp;
 }
 
-/* ============================= Speaker nodes ============================= */
-
-.srd-spk {
+/* Dynamic acoustic shockwave pulses emitting from speakers */
+.srd-spk-wave {
     position: absolute;
-    width: 150dp;
-    height: 82dp;
-    border-radius: 16dp;
-    border-width: 1dp;
+    width: 90dp;
+    height: 90dp;
+    border-radius: 45dp;
+    border-width: 2dp;
+    border-color: rgba(0, 205, 255, 0.7);
+    background-color: rgba(0, 205, 255, 0.08);
+    display: none;
+}
+
+/* Sound Orb: glowing plasma sphere and kinetic trails */
+#surround-sound-orb {
+    position: absolute;
+    left: 522dp;
+    top: 371dp;
+    width: 36dp;
+    height: 36dp;
+    border-radius: 18dp;
+    background-color: #00cdff;
+    border-width: 2dp;
+    border-color: #ffffff;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
 }
 
-.srd-spk-active {
-    border-width: 2dp;
+#surround-orb-inner {
+    width: 14dp;
+    height: 14dp;
+    border-radius: 7dp;
+    background-color: #ffffff;
 }
 
-.srd-spk-selected {
+#surround-orb-reticle {
+    position: absolute;
+    left: -16dp;
+    top: -16dp;
+    width: 64dp;
+    height: 64dp;
+    border-radius: 32dp;
     border-width: 1.5dp;
+    border-color: rgba(0, 205, 255, 0.85);
+    display: none;
+}
+
+.reticle-cross-h {
+    position: absolute;
+    left: -8dp;
+    top: 31dp;
+    width: 80dp;
+    height: 1dp;
+    background-color: rgba(0, 205, 255, 0.6);
+}
+
+.reticle-cross-v {
+    position: absolute;
+    left: 31dp;
+    top: -8dp;
+    width: 1dp;
+    height: 80dp;
+    background-color: rgba(0, 205, 255, 0.6);
+}
+
+#surround-sound-orb-wave {
+    position: absolute;
+    left: 506dp;
+    top: 355dp;
+    width: 68dp;
+    height: 68dp;
+    border-radius: 34dp;
+    background-color: rgba(0, 205, 255, 0.06);
+    border-width: 1dp;
+    border-color: rgba(0, 205, 255, 0.4);
+}
+
+#surround-sound-trail-1 {
+    position: absolute;
+    left: 526dp;
+    top: 375dp;
+    width: 26dp;
+    height: 26dp;
+    border-radius: 13dp;
+    background-color: rgba(0, 205, 255, 0.55);
+}
+
+#surround-sound-trail-2 {
+    position: absolute;
+    left: 530dp;
+    top: 379dp;
+    width: 18dp;
+    height: 18dp;
+    border-radius: 9dp;
+    background-color: rgba(0, 205, 255, 0.35);
+}
+
+#surround-sound-trail-3 {
+    position: absolute;
+    left: 533dp;
+    top: 382dp;
+    width: 12dp;
+    height: 12dp;
+    border-radius: 6dp;
+    background-color: rgba(0, 205, 255, 0.18);
+}
+
+/* ===================== Next-Gen Studio Speakers ===================== */
+
+.srd-spk {
+    position: absolute;
+    width: 172dp;
+    height: 92dp;
+    display: flex;
+}
+
+.srd-spk-cab {
+    width: 172dp;
+    height: 92dp;
+    background-color: #0d1626;
+    border-radius: 16dp;
+    border-width: 1dp;
+    border-color: #223751;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding-left: 12dp;
+    padding-right: 12dp;
+}
+
+.srd-spk-active .srd-spk-cab {
+    background-color: #162846;
+    border-width: 2dp;
+    border-color: #00cdff;
+}
+
+.srd-spk-selected .srd-spk-cab {
+    border-width: 1.5dp;
+    border-color: #00cdff;
+}
+
+.srd-spk-drivers {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin-right: 12dp;
+}
+
+.srd-spk-tweeter {
+    width: 12dp;
+    height: 12dp;
+    border-radius: 6dp;
+    background-color: #17273d;
+    border-width: 1dp;
+    border-color: #364f72;
+    margin-bottom: 5dp;
+}
+
+.srd-spk-woofer {
+    width: 40dp;
+    height: 40dp;
+    border-radius: 20dp;
+    background-color: #121f33;
+    border-width: 1.5dp;
+    border-color: #2c4465;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.srd-spk-active .srd-spk-woofer {
+    background-color: #1c365e;
+    border-color: #00cdff;
+}
+
+.srd-spk-cap {
+    width: 13dp;
+    height: 13dp;
+    border-radius: 6.5dp;
+    background-color: #1e334e;
+}
+
+.srd-spk-active .srd-spk-cap {
+    background-color: #ffffff;
+}
+
+.srd-spk-meta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-grow: 1;
+    margin-left: 4dp;
 }
 
 .srd-spk-label {
     display: block;
     font-size: 16dp;
     font-weight: bold;
-    letter-spacing: 0.3dp;
+    letter-spacing: 0.8dp;
+    color: #ecf3ff;
 }
 
 .srd-spk-sub {
     display: block;
-    font-size: 13dp;
-    font-weight: normal;
-    margin-top: 4dp;
+    font-size: 11dp;
+    font-weight: bold;
+    letter-spacing: 0.2dp;
+    color: #728aa7;
+    margin-top: 3dp;
+}
+
+.srd-spk-vu {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    height: 52dp;
+    width: 6dp;
+    margin-left: 8dp;
+}
+
+.vu-bar {
+    width: 5dp;
+    height: 8dp;
+    border-radius: 2dp;
+    background-color: #162438;
+    margin-bottom: 3dp;
 }
 
 /* =============================== Footer =============================== */
 
 #surround-footer {
     position: absolute;
-    bottom: 40dp;
+    bottom: 24dp;
     left: 0;
     width: 1704dp;
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 26dp;
+    gap: 22dp;
 }
 
 .footer-hint {
@@ -390,22 +669,22 @@ div, span, p {
 }
 
 .glyph-badge {
-    width: 42dp;
-    height: 42dp;
+    width: 38dp;
+    height: 38dp;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 21dp;
+    border-radius: 19dp;
     background-color: rgba(20, 40, 80, 0.9);
 }
 
 .glyph-badge-img {
-    width: 28dp;
-    height: 28dp;
+    width: 26dp;
+    height: 26dp;
 }
 
 .footer-text {
-    font-size: 15dp;
+    font-size: 14dp;
     font-weight: bold;
     color: #8b99ad;
     letter-spacing: 1dp;
