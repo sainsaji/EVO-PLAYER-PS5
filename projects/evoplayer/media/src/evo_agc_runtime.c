@@ -483,6 +483,29 @@ void evo_agc_runtime_stream_fill(void *dst, uint32_t value32, size_t bytes)
 }
 
 /*
+ * Bytes a scanout buffer actually occupies. The scanout is TILED in
+ * PS5_TILE_WIDTH x PS5_TILE_HEIGHT (512x128) blocks, so a height that is not a
+ * multiple of 128 - 2160 and 1080 both - is padded to a whole tile row, and the
+ * surface is ceil(h/128)*128 rows of `width` long, not width*height.
+ *
+ * The backdrop clears used width*height*4, which stops 245,760 bytes short at
+ * 4K. In the tile layout that tail is the bottom-right corner (the right end
+ * of the last, partial tile row), so it was never cleared: the menu's
+ * background stayed there as a dark rectangle in the letterbox bar through
+ * every film, because the video quad does not cover the bars. The allocation
+ * is EVO_AGC_SCANOUT_STRIDE (64 MB), far above the 33.4 MB this returns.
+ */
+static size_t scanout_tiled_bytes(void)
+{
+    const size_t rows = ((size_t)g_agc_dev.height + PS5_TILE_HEIGHT - 1) &
+                        ~(size_t)(PS5_TILE_HEIGHT - 1);
+    size_t bytes = rows * (size_t)g_agc_dev.width * 4u;
+    if (bytes > (size_t)EVO_AGC_SCANOUT_STRIDE)
+        bytes = (size_t)EVO_AGC_SCANOUT_STRIDE;
+    return bytes;
+}
+
+/*
  * Copy `height` rows of `row_bytes` from a src pitch to a dst pitch. The dst
  * rows start 16-byte aligned (every staging pitch here is 256-byte aligned),
  * so only the ragged tail of a row whose width is not a multiple of 16 falls
@@ -1628,8 +1651,7 @@ void evo_agc_runtime_frame_begin(void)
              * CPU cost in the menus - 8.3 MB a frame at 1080p, 33 MB at 4K.
              * See evo_agc_runtime_stream_fill. */
             evo_agc_runtime_stream_fill(backbuffer, 0xff100d0du,
-                                        (size_t)g_agc_dev.width *
-                                        (size_t)g_agc_dev.height * 4u);
+                                        scanout_tiled_bytes());
         }
     }
 
@@ -2234,8 +2256,7 @@ void evo_agc_runtime_set_player_mode(int is_player)
             uint32_t *buf = (uint32_t *)g_agc_dev.scanout_buffers[b];
             if (buf) {
                 evo_agc_runtime_stream_fill(buf, 0xff100d0du,
-                                            (size_t)g_agc_dev.width *
-                                            (size_t)g_agc_dev.height * 4u);
+                                            scanout_tiled_bytes());
             }
             g_agc_dev.video_pts[b] = INT64_MIN;
         }

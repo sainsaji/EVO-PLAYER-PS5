@@ -2176,6 +2176,8 @@ void prospero_subtitle_autosync_pump(void)
     const char *ratio = evo_subsync_ratio_label(r.scale);
     if (ratio)
         snprintf(msg, sizeof(msg), "%+.1f s, %s", delay / 1000.0, ratio);
+    else if (delay > -100 && delay < 100)
+        snprintf(msg, sizeof(msg), "Already in sync");
     else
         snprintf(msg, sizeof(msg), "Subtitles shifted %+.1f s", delay / 1000.0);
     toast("AUTO-SYNC", msg);

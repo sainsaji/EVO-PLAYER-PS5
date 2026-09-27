@@ -2096,6 +2096,16 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             el_dec->SetProperty("color", hw ? ink_on(m_theme.accent) : "#e2e8f0");
         }
     }
+    // #103: upscaler badge - hidden when upscaling is Off in Settings
+    if (Rml::Element* el_up = m_playback_doc->GetElementById("badge-upscale")) {
+        if (state.upscale_badge.empty()) {
+            el_up->SetProperty("display", "none");
+        } else {
+            el_up->SetProperty("display", "inline-block");
+            el_up->SetInnerRML(state.upscale_badge);
+            el_up->SetClass("active", state.upscale_active);
+        }
+    }
     /* #81: dev FPS pill — independent of the OSD chrome (shows with controls faded). */
     if (Rml::Element* el_fps_pill = m_playback_doc->GetElementById("fps-pill")) {
         el_fps_pill->SetProperty("display", state.debug_overlay ? "block" : "none");
@@ -2527,6 +2537,9 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                 const bool is_toggle = (state.rows[i].kind == EVO_RMLUI_ROW_TOGGLE);
                 const bool is_option = (state.rows[i].kind == EVO_RMLUI_ROW_OPTION);
                 el_row->SetClass("row-option", is_option);
+                /* Inline, like the rest of this block: a class-only change lands a
+                 * render late. */
+                el_row->SetProperty("opacity", state.rows[i].is_disabled ? "0.4" : "1");
                 /* Indent and strip the icon inline too - same one-render lag as
                  * the sidebar highlight if this were left to the class alone. */
                 el_row->SetProperty("padding-left", is_option ? "76dp" : "18dp");
@@ -2558,7 +2571,8 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
                     }
                 }
                 if (el_chev) {
-                    const bool show_chev = state.rows[i].has_chevron && !is_toggle && !is_option;
+                    const bool show_chev = state.rows[i].has_chevron && !is_toggle && !is_option &&
+                                           !state.rows[i].is_disabled;
                     el_chev->SetProperty("display", show_chev ? "inline-block" : "none");
                     SetImageColor(el_chev, is_focused
                         ? to_hex_rgb(m_theme.accent)
@@ -3201,6 +3215,26 @@ void EvoRmlApp::UpdateToastState(const EvoToastState& state) {
     m_toast_doc->Show();
 }
 
+/*
+ * The overlay contexts (toast, keyboard, debug) are created at the display
+ * size - 3840x2160 with a 2x dp ratio on a 4K output - but their C callers
+ * still pass the 1080p design size (EVO_SCREEN_W/H, a literal 1920x1080).
+ * SetDimensions builds the projection from what it is given, so on 4K every
+ * overlay was drawn at twice its coordinates: the top-right toast card landed
+ * off-screen (no toast was ever visible at 4K), and whatever did fall inside
+ * the panel showed up in the wrong place - the dark rectangle in the
+ * bottom-right corner. Project with the context's own size; the argument is
+ * only a fallback for a context with none.
+ */
+void EvoRmlApp::SetOverlayDimensions(Rml::Context* ctx, int width, int height) {
+    const Rml::Vector2i d = ctx ? ctx->GetDimensions() : Rml::Vector2i(0, 0);
+    if (d.x > 0 && d.y > 0) {
+        width = d.x;
+        height = d.y;
+    }
+    m_render->SetDimensions(width, height);
+}
+
 void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_toast_context || !m_toast_doc || !framebuffer) return;
     if (!m_toast_doc->IsVisible()) return;
@@ -3209,7 +3243,7 @@ void EvoRmlApp::RenderToast(uint32_t* framebuffer, int width, int height) {
      * m_frame_dirty / the RenderCachedScreen surface cache for whichever
      * menu screen is underneath - see the comment on EvoToastState. */
     m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
+    SetOverlayDimensions(m_toast_context, width, height);
     m_toast_context->Update();
     m_render->FrameBegin();
     m_toast_context->Render();
@@ -3348,7 +3382,7 @@ void EvoRmlApp::RenderKeyboard(uint32_t* framebuffer, int width, int height) {
     if (!m_initialized || !m_keyboard_context || !m_keyboard_doc || !framebuffer) return;
     if (!m_keyboard_doc->IsVisible()) return;
     m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
+    SetOverlayDimensions(m_keyboard_context, width, height);
     m_keyboard_context->Update();
     m_render->FrameBegin();
     m_keyboard_context->Render();
@@ -3378,7 +3412,7 @@ void EvoRmlApp::RenderDebugOverlay(uint32_t* framebuffer, int width, int height)
     if (!m_initialized || !m_debug_context || !m_debug_doc || !framebuffer) return;
     if (!m_debug_doc->IsVisible()) return;
     m_render->SetFramebuffer(framebuffer);
-    m_render->SetDimensions(width, height);
+    SetOverlayDimensions(m_debug_context, width, height);
     m_debug_context->Update();
     m_render->FrameBegin();
     m_debug_context->Render();

@@ -19,6 +19,8 @@ struct EvoPlaybackState {
     std::string fps_badge;
     std::string audio_badge;
     std::string decoder_badge;   // #59
+    std::string upscale_badge;   // #103
+    bool upscale_active = false;
     double position_sec = 0.0;
     double duration_sec = 0.0;
     double percentage = 0.0;
@@ -45,6 +47,7 @@ struct EvoPlaybackState {
                hdr_badge == o.hdr_badge && codec_badge == o.codec_badge &&
                fps_badge == o.fps_badge && audio_badge == o.audio_badge &&
                decoder_badge == o.decoder_badge &&
+               upscale_badge == o.upscale_badge && upscale_active == o.upscale_active &&
                position_sec == o.position_sec && duration_sec == o.duration_sec &&
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
@@ -95,11 +98,12 @@ struct EvoSettingsRow {
     bool is_focused = false;
     int  kind = 0;             /* EVO_RMLUI_ROW_* */
     bool toggle_on = false;
+    bool is_disabled = false;
 
     bool operator==(const EvoSettingsRow& o) const {
         return title == o.title && detail == o.detail && icon_path == o.icon_path &&
                badge == o.badge && has_chevron == o.has_chevron && is_focused == o.is_focused &&
-               kind == o.kind && toggle_on == o.toggle_on;
+               kind == o.kind && toggle_on == o.toggle_on && is_disabled == o.is_disabled;
     }
     bool operator!=(const EvoSettingsRow& o) const { return !(*this == o); }
 };
@@ -632,6 +636,7 @@ public:
      * draw_prospero_toast(fb) call site in main.c exactly).
      */
     void UpdateToastState(const EvoToastState& state);
+    void SetOverlayDimensions(Rml::Context* ctx, int width, int height);
     void RenderToast(uint32_t* framebuffer, int width, int height);
 
     /*

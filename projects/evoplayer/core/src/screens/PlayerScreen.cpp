@@ -531,6 +531,28 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.sub_delay_ms = prospero_subtitle_enabled ? prospero_subtitle_delay_ms : 0;
         p.audio_badge = chLabel[0] ? chLabel : ((evo_audio_channels == 8) ? "7.1" : "STEREO");
         p.decoder_badge = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE) ? "Hardware" : "Software";
+        /* #103: what the upscaler did to the last frame, so it is visible on the
+         * OSD rather than only in Media Info. Plain "Off" = switched off in
+         * Settings -> no badge. */
+        if (!playback->isMusicMode()) {
+            static const struct { const char* label; const char* badge; int active; } k_up[] = {
+                { "Sharp",                  "SHARP UPSCALE",        1 },
+                { "AI (Standard)",          "AI UPSCALE",           1 },
+                { "AI (Large)",             "AI UPSCALE · LARGE",   1 },
+                { "AI (Maximum)",           "AI UPSCALE · MAX",     1 },
+                { "Off (HDR source)",       "UPSCALE OFF · 10-BIT", 0 },
+                { "Off (source >= output)", "UPSCALE OFF · NATIVE", 0 },
+                { "Off (unavailable)",      "UPSCALE OFF",          0 },
+            };
+            const char* up = evo_agc_upscale_label();
+            for (const auto& e : k_up) {
+                if (std::strcmp(up, e.label) == 0) {
+                    p.upscale_badge = e.badge;
+                    p.upscale_active = e.active;
+                    break;
+                }
+            }
+        }
         p.position_sec = playback->getPositionSeconds();
         p.duration_sec = playback->getDurationSeconds();
         p.percentage = playback->getPercentage();

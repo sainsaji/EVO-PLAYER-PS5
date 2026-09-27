@@ -42,6 +42,7 @@ extern int      player_paused;
 extern char     current_media_path[512];
 extern double   media_duration_sec;
 extern double   resume_base_offset_seconds;
+extern volatile double resume_base_anchor_pending;
 extern long long controls_last_used_ms;
 
 extern int      video_decode_done;
@@ -351,6 +352,7 @@ packet_queue_clear(
          */
         resume_base_offset_seconds =
             target_seconds;
+        resume_base_anchor_pending = -1.0;
 
         /*
          * Arm the audio discard window before the decode threads are let go,
