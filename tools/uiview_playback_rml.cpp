@@ -671,6 +671,10 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     p.codec_badge = "HEVC 10-BIT";
     p.fps_badge = "24 FPS";
     p.audio_badge = "";
+    p.decoder_badge = "Hardware";
+    /* #103: 10-bit source -> upscaler bypassed, dimmed badge */
+    p.upscale_badge = "UPSCALE OFF · 10-BIT";
+    p.upscale_active = 0;
     p.position_sec = 1234.0;
     p.duration_sec = 9780.0;
     p.percentage = p.position_sec / p.duration_sec;
@@ -727,6 +731,24 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     }
     evo_rmlui_render_playback_osd(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_playback_stats_hud.bmp", fb.data(), width, height);
+
+    /* #103: sub-4K SDR source with the AI upscaler running - active badge */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_playback_osd_params_t u = p;
+        u.title = "Big Buck Bunny";
+        u.res_badge = "720P";
+        u.hdr_badge = "";
+        u.codec_badge = "H.264";
+        u.fps_badge = "30 FPS";
+        u.decoder_badge = "Software";
+        u.upscale_badge = "AI UPSCALE · LARGE";
+        u.upscale_active = 1;
+        u.subtitle_text = nullptr;
+        evo_rmlui_update_playback_params(&u);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_upscale.bmp", fb.data(), width, height);
+    }
 
     /* #81: NOW PLAYING music visualiser */
     {
@@ -2015,11 +2037,13 @@ int main(int argc, char** argv) {
         set.rows[5].badge = "SHARP";
         set.rows[5].has_chevron = 1;
 
+        /* UPSCALING is SHARP above, so AI NETWORK is disabled (SettingsScreen) */
         set.rows[6].title = "AI NETWORK";
-        set.rows[6].detail = "LARGE IS SHARPER - AUTO USES IT ON A DETECTED PS5 PRO";
+        set.rows[6].detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
         set.rows[6].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
         set.rows[6].badge = "LARGE (PRO)";
         set.rows[6].has_chevron = 1;
+        set.rows[6].is_disabled = 1;
         set.row_count = 7;
 
         evo_rmlui_update_settings(&set);

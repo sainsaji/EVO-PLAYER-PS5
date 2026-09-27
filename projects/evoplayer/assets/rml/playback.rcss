@@ -141,6 +141,27 @@ div, span, p {
     border-radius: 9dp;
 }
 
+/* #103: upscaler badge. Violet while the upscaler is running on this frame;
+ * dimmed when it is on in Settings but bypassed (10-bit / native / unavailable). */
+.badge-upscale {
+    display: none;
+    background-color: #141c28;
+    border-width: 1dp;
+    border-color: #2a374a;
+    color: #8b99ad;
+    font-weight: bold;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
+    letter-spacing: 0.5dp;
+}
+
+.badge-upscale.active {
+    background-color: #7c5cff;
+    border-color: #9b83ff;
+    color: #ffffff;
+}
+
 /* On-video caption overlay (#81)
  *
  * Full-width layer, text centred; the box shrink-wraps the caption and carries a

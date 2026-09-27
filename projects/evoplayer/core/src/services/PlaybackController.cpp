@@ -101,6 +101,7 @@ extern int screen;
 extern int player_paused;
 extern double media_duration_sec;
 extern double resume_base_offset_seconds;
+extern volatile double resume_base_anchor_pending;   /* evo_audio_out.c */
 extern double requested_resume_seek_pos;
 extern char current_media_path[768];
 extern int evo_audio_channels;
@@ -207,7 +208,9 @@ double PlaybackController::getPositionSeconds() const {
     if (isScrubbing()) {
         return m_scrubTargetSeconds;
     }
-    double pos = m_resumeBaseOffset + evo_pb_position_s();
+    /* The global base, not m_resumeBaseOffset: the resume re-anchor and the
+     * demux's in-place seek move it without going through this class. */
+    double pos = resume_base_offset_seconds + evo_pb_position_s();
     return (pos < 0.0) ? 0.0 : pos;
 }
 
@@ -348,6 +351,7 @@ void PlaybackController::stopPlayback() {
     media_duration_sec = 0.0;
     m_resumeBaseOffset = 0.0;
     resume_base_offset_seconds = 0.0;
+    resume_base_anchor_pending = -1.0;
     m_musicMode = false;
     m_currentFilePath.clear();
     m_source = PlaybackSource{};
@@ -835,6 +839,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
 
             m_resumeBaseOffset = resumeOffset;
             resume_base_offset_seconds = resumeOffset;
+            /* The seek landed on a keyframe before resumeOffset; the first
+             * decoded audio frame says where exactly, and re-anchors the base
+             * (subtitle cues were early by the keyframe gap otherwise). */
+            if (audio_stream_index >= 0)
+                resume_base_anchor_pending = resumeOffset;
         } else {
             /* Playback will start at 0, so the base has to follow it back. */
             m_resumeBaseOffset = 0.0;

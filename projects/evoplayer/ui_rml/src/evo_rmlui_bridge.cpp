@@ -313,6 +313,8 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.fps_badge = p->fps_badge ? p->fps_badge : "";
     state.audio_badge = p->audio_badge ? p->audio_badge : "";
     state.decoder_badge = p->decoder_badge ? p->decoder_badge : "";
+    state.upscale_badge = p->upscale_badge ? p->upscale_badge : "";
+    state.upscale_active = (p->upscale_active != 0);
     state.position_sec = p->position_sec;
     state.duration_sec = p->duration_sec;
     state.percentage = p->percentage;
@@ -428,6 +430,7 @@ void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
         row.is_focused = (p->rows[i].is_focused != 0);
         row.kind = p->rows[i].kind;
         row.toggle_on = (p->rows[i].toggle_on != 0);
+        row.is_disabled = (p->rows[i].is_disabled != 0);
         state.rows.push_back(row);
     }
 

@@ -294,3 +294,12 @@ tools/dump_offsets.py
 # Test clips pulled off the console; whole movies, several MB to several GB.
 /*.ts
 /output/*.ts
+
+# Local media/marketing work - not source: personal IPTV playlist, the v0.11
+# teaser edit (clips, VO, renders), the Discord logo, local test videos and the
+# #103 upscaler comparison captures (tools/upcompare_run.py).
+/channels.m3u
+output/teaser/
+output/discord/
+output/testclips/
+output/upcompare/

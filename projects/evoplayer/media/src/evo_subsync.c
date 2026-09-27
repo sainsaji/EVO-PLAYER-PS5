@@ -49,6 +49,12 @@
 #define SS_FPS          100                 /* bit-vector frames / second  */
 #define SS_WINDOWS      3
 #define SS_WINDOW_S     300.0
+/* Embedded tracks are offset-only (no ratio search), and every window also
+ * reads SS_SEARCH_S of interleaved file on each side to gather its cues -
+ * on a big remux that read, not the decode, is the cost (a 1080p HEVC 5.1
+ * MKV took ~45 s a window at 300 s). Half the window is plenty for one
+ * offset and cuts the read by about a third. */
+#define SS_WINDOW_EMB_S 150.0
 #define SS_SEARCH_S     60
 #define SS_SEARCH_F     (SS_SEARCH_S * SS_FPS) /* +-60 s                   */
 #define SS_EXCL_F       (SS_FPS / 2)        /* runner-up must be > 0.5 s off */
@@ -622,7 +628,7 @@ int evo_subsync_analyse(const char *media_path, int audio_stream,
 
     /* Windows at 20/50/80%: far apart for drift, clear of opening/closing
      * credits where there is music but no dialogue. */
-    double wlen = SS_WINDOW_S;
+    double wlen = c.sub_stream >= 0 ? SS_WINDOW_EMB_S : SS_WINDOW_S;
     if (wlen > c.duration_s / 4.0) wlen = c.duration_s / 4.0;
     static const double centres[SS_WINDOWS] = { 0.2, 0.5, 0.8 };
     for (int i = 0; i < SS_WINDOWS; i++) {

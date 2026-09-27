@@ -17,6 +17,11 @@ typedef struct {
     const char* fps_badge;
     const char* audio_badge;
     const char* decoder_badge;   /* #59: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
+    /* #103: what the upscaler did to the current frame - "AI UPSCALE",
+     * "SHARP UPSCALE", "UPSCALE OFF · 10-BIT"... NULL/"" hides the badge
+     * (upscaling switched off in Settings). upscale_active picks the style. */
+    const char* upscale_badge;
+    int upscale_active;
     double position_sec;
     double duration_sec;
     double percentage;
@@ -118,6 +123,7 @@ typedef struct {
     int is_focused;
     int kind;       /* EVO_RMLUI_ROW_* */
     int toggle_on;  /* TOGGLE: switch state. OPTION: is this the current choice. */
+    int is_disabled; /* dimmed, no chevron; it depends on another setting */
 } evo_rmlui_settings_row_t;
 
 typedef struct {

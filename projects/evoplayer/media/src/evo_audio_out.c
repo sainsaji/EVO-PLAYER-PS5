@@ -26,6 +26,7 @@
 #include "evo_audio_resample.h"
 #include "evo_adec.h"
 #include "pp_playback.h"
+#include "evo_boot_log.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -80,6 +81,32 @@ volatile long long audio_samples_decoded = 0;
 volatile double audio_clock_seconds = 0.0;
 volatile double audio_pts_seconds = 0.0;
 double first_audio_pts_seconds = -1.0;
+/* Set by the resume path (PlaybackController::open): that seek lands on the
+ * keyframe before the saved position, not on it, and nothing drops the run-up
+ * the way the in-place seek's gates do. The audio clock counts from the first
+ * decoded frame, so that frame's PTS is where playback really restarted -
+ * re-anchor the base to it, or every readout (OSD, subtitle cues) runs ahead
+ * by the keyframe gap. Holds the resume position the base was seeded with. */
+volatile double resume_base_anchor_pending = -1.0;
+
+static void anchor_resume_base(void)
+{
+    const double want = resume_base_anchor_pending;
+    if (want < 0.0)
+        return;
+    resume_base_anchor_pending = -1.0;
+    const double landed = first_audio_pts_seconds;
+    /* A keyframe lands at or a few seconds before the resume point; anything
+     * else is a timestamp origin we don't understand - keep the seeded base. */
+    if (landed > want + 0.5 || landed < want - 30.0) {
+        evo_boot_log("resume: first audio at %.3fs, resume point %.3fs - keeping base",
+                     landed, want);
+        return;
+    }
+    resume_base_offset_seconds = landed;
+    evo_boot_log("resume: re-anchored base %.3fs -> %.3fs (keyframe run-up %.2fs)",
+                 want, landed, want - landed);
+}
 volatile double audio_seek_discard_until = -1.0;
 
 int detected_audio_rate = 48000;
@@ -462,8 +489,10 @@ void *audio_decode_thread_func(void *arg) {
                         if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
                             audio_pts_seconds = pkt->pts *
                                 av_q2d(play_fmt->streams[audio_stream_index]->time_base);
-                            if (first_audio_pts_seconds < 0.0)
+                            if (first_audio_pts_seconds < 0.0) {
                                 first_audio_pts_seconds = audio_pts_seconds;
+                                anchor_resume_base();
+                            }
                         }
                         mix_audio_frame_to_queue(af);
                     }
@@ -476,8 +505,10 @@ void *audio_decode_thread_func(void *arg) {
             while (audio_decode_thread_running && avcodec_receive_frame(audio_ctx, af) == 0) {
                 if (af->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
                     audio_pts_seconds = af->pts * av_q2d(play_fmt->streams[audio_stream_index]->time_base);
-                    if (first_audio_pts_seconds < 0.0)
+                    if (first_audio_pts_seconds < 0.0) {
                         first_audio_pts_seconds = audio_pts_seconds;
+                        anchor_resume_base();
+                    }
                 }
 
                 mix_audio_frame_to_queue(af);

@@ -42,6 +42,7 @@ struct SettingDef {
     int         opt_count;
     int         opt_current;
     const char* opt_label[kMaxOptions];
+    bool        disabled;   /* depends on another setting: dimmed, Cross does nothing */
 };
 
 struct SectionHeader { const char* title; const char* subtitle; };
@@ -92,6 +93,11 @@ int buildSectionDefs(int section, SettingDef* d) {
                 ACT_NONE, 4, static_cast<int>(settings->getAiNetwork()), {}};
         for (int i = 0; i < 4; ++i)
             d[5].opt_label[i] = settings->getAiNetworkName(static_cast<AiNetwork>(i));
+        /* Only AI runs a network; Sharp (FSR 1) and Off have nothing to pick. */
+        if (settings->getUpscaler() != Upscaler::AI) {
+            d[5].disabled = true;
+            d[5].detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
+        }
         n = 6;
         break;
 
@@ -192,7 +198,7 @@ int buildSlots(const SettingDef* d, int n, int expanded, DisplaySlot* out) {
     int m = 0;
     for (int i = 0; i < n && m < EVO_RMLUI_SETTINGS_ROWS; ++i) {
         out[m].def = i; out[m].opt = -1; ++m;
-        if (i == expanded && d[i].kind == EVO_RMLUI_ROW_VALUE) {
+        if (i == expanded && d[i].kind == EVO_RMLUI_ROW_VALUE && !d[i].disabled) {
             for (int o = 0; o < d[i].opt_count && m < EVO_RMLUI_SETTINGS_ROWS; ++o) {
                 out[m].def = i; out[m].opt = o; ++m;
             }
@@ -219,10 +225,13 @@ bool slotAt(int section, int expanded, int cursor, int& defOut, int& optOut) {
     return true;
 }
 
+/* A disabled row reports ACTION with no action behind it, so every section's
+ * Cross/Right handling leaves it alone (runAction gives the boundary buzz). */
 int settingKind(int section, int def) {
     SettingDef d[kMaxDefs];
     const int n = buildSectionDefs(section, d);
-    return (def >= 0 && def < n) ? d[def].kind : EVO_RMLUI_ROW_ACTION;
+    if (def < 0 || def >= n || d[def].disabled) return EVO_RMLUI_ROW_ACTION;
+    return d[def].kind;
 }
 
 /* Fills the params for one section. cursor < 0 = the sidebar owns the cursor,
@@ -249,6 +258,7 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
             p.rows[i].kind = def.kind;
             p.rows[i].toggle_on = def.toggle_on ? 1 : 0;
             p.rows[i].has_chevron = (def.kind != EVO_RMLUI_ROW_TOGGLE) ? 1 : 0;
+            p.rows[i].is_disabled = def.disabled ? 1 : 0;
         } else {
             p.rows[i].title = def.opt_label[opt];
             p.rows[i].detail = "";
@@ -314,6 +324,10 @@ bool runAction(int section, int def) {
     SettingDef d[kMaxDefs];
     const int n = buildSectionDefs(section, d);
     if (def < 0 || def >= n) return false;
+    if (d[def].disabled) {
+        evo_feedback(EVO_FB_BOUNDARY);
+        return false;
+    }
 
     switch (d[def].action) {
     case ACT_SURROUND:
