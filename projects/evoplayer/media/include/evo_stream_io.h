@@ -27,6 +27,34 @@ typedef struct {
 typedef struct evo_stream_io_ctx evo_stream_io_ctx_t;
 
 /**
+ * Arm a wall-clock deadline on every blocking libavformat read made through
+ * this context, via AVFormatContext.interrupt_callback.
+ *
+ * libavformat has no internal bound on how long a demuxer may spend inside a
+ * single call. A Matroska file whose first block desyncs sends the demuxer
+ * into matroska_resync(), which scans forward for the next Cluster ID; on a
+ * multi-gigabyte REMUX that scan reads the whole file without ever returning a
+ * packet, so avformat_find_stream_info() never returns and the calling thread
+ * is gone for good (hardware, 2026-09-28: a DV P7 UHD REMUX, 85 streams, still
+ * scanning 32 s and 1.2 GB in when the log was pulled).
+ *
+ * The callback is polled on each avio buffer refill, so the deadline bounds
+ * the scan rather than the individual read.
+ *
+ * @param io_ctx   context from evo_stream_io_open(); NULL is a no-op
+ * @param seconds  budget from now, or <= 0 to disarm (the playback reads that
+ *                 follow the probe must never be interrupted)
+ */
+void evo_stream_io_set_deadline(evo_stream_io_ctx_t *io_ctx, double seconds);
+
+/**
+ * Non-zero once an armed deadline has passed - i.e. the last libavformat call
+ * returned because it was interrupted rather than because it finished.
+ * Distinguishes "this file is malformed" from "this file needs longer".
+ */
+int evo_stream_io_deadline_expired(const evo_stream_io_ctx_t *io_ctx);
+
+/**
  * Open a media stream with High-Throughput I/O ring buffering and direct memory.
  * Sets up custom AVIOContext with sequential kernel readahead and enlarged buffer.
  *

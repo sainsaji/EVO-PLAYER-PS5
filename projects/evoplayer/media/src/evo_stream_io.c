@@ -21,14 +21,72 @@ extern void pp_stage_bc(const char *stage_id, const char *detail);
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define EVO_STREAM_DEFAULT_RING_SIZE (8 * 1024 * 1024) /* 8 MiB */
 
+/*
+ * How long avformat_open_input() may spend before the interrupt callback
+ * unwinds it. Generous: a 4 MB probe over USB is well inside a second, and a
+ * network open has its own 5 s "timeout" option, so anything approaching this
+ * is a demuxer that has stopped making progress rather than slow storage.
+ */
+#define EVO_STREAM_IO_OPEN_DEADLINE_SEC 20.0
+
 struct evo_stream_io_ctx {
     int     is_network;
     char    media_path[512];
+    /* Wall-clock deadline for blocking libavformat reads, or 0 when disarmed.
+     * See evo_stream_io_set_deadline() in the header for why this exists. */
+    double  deadline_at;
+    int     deadline_hit;
 };
+
+static double sio_now_seconds(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0.0;
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/*
+ * avio polls this on every buffer refill. Returning non-zero makes the read
+ * fail with AVERROR_EXIT, which unwinds the demuxer out of whatever loop it is
+ * in - including matroska_resync()'s byte-at-a-time forward scan.
+ */
+static int sio_interrupt_cb(void *opaque)
+{
+    evo_stream_io_ctx_t *ctx = (evo_stream_io_ctx_t *)opaque;
+    if (!ctx || ctx->deadline_at <= 0.0)
+        return 0;
+    if (ctx->deadline_hit)
+        return 1;
+    if (sio_now_seconds() >= ctx->deadline_at) {
+        ctx->deadline_hit = 1;
+        return 1;
+    }
+    return 0;
+}
+
+void evo_stream_io_set_deadline(evo_stream_io_ctx_t *ctx, double seconds)
+{
+    if (!ctx) return;
+    if (seconds <= 0.0) {
+        /* Disarm only. deadline_hit survives, because the caller reads it
+         * after disarming to find out why the call it just made returned. */
+        ctx->deadline_at = 0.0;
+        return;
+    }
+    ctx->deadline_at  = sio_now_seconds() + seconds;
+    ctx->deadline_hit = 0;
+}
+
+int evo_stream_io_deadline_expired(const evo_stream_io_ctx_t *ctx)
+{
+    return ctx ? ctx->deadline_hit : 0;
+}
 
 void evo_stream_io_hint_sequential(int fd)
 {
@@ -166,8 +224,27 @@ int evo_stream_io_open(const char *path,
     }
 
     SIO_BC("P8_01d_PRE_OPEN", "-> avformat_open_input");
-    AVFormatContext *fmt = NULL;
+
+    /*
+     * Allocate the context here rather than letting avformat_open_input do it,
+     * so interrupt_callback is in place before the first byte is read. The
+     * open itself gets the same deadline as the probe: a header parse that
+     * desyncs scans just as far as a probe that does.
+     */
+    AVFormatContext *fmt = avformat_alloc_context();
+    if (!fmt) {
+        av_dict_free(&opts);
+        evo_direct_mem_free(ctx);
+        return -1;
+    }
+    fmt->interrupt_callback.callback = sio_interrupt_cb;
+    fmt->interrupt_callback.opaque   = ctx;
+    evo_stream_io_set_deadline(ctx, EVO_STREAM_IO_OPEN_DEADLINE_SEC);
+
     int rc = avformat_open_input(&fmt, path, NULL, &opts);
+    /* avformat_open_input frees and NULLs *fmt on failure, including on an
+     * interrupted open, so there is nothing left to clean up here. */
+    evo_stream_io_set_deadline(ctx, 0.0);
     {
         char d[32]; snprintf(d, sizeof d, "rc=%d", rc);
         SIO_BC("P8_01e_OPEN_RC", d);

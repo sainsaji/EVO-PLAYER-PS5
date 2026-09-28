@@ -472,6 +472,41 @@ void prospero_thumbnail_close_context(void)
     prospero_thumb_open_path[0] = 0;
 }
 
+/*
+ * Scrub previews open the very file that is playing, so they inherit its
+ * demuxer problems. A Matroska file that sends the demuxer into
+ * matroska_resync() makes both avformat_open_input() and
+ * avformat_find_stream_info() scan the container looking for a Cluster, which
+ * on a multi-gigabyte REMUX does not finish - and here that happens on the
+ * thread the scrub UI is waiting on, so the player appears dead the first time
+ * the user touches the seek bar. PlaybackController bounds the same two calls
+ * through evo_stream_io; this is that guard for the thumbnail context, which
+ * opens the file itself and cannot borrow it.
+ *
+ * Disarmed as soon as the context is up: the per-frame reads that follow are
+ * ordinary seeks into a file already known to be well-formed enough to open,
+ * and must not be cut short.
+ */
+#define PROSPERO_THUMB_OPEN_DEADLINE_SEC 8.0
+
+static double prospero_thumb_deadline_at = 0.0;
+
+static double prospero_thumb_now(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0.0;
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+static int prospero_thumb_interrupt(void *opaque)
+{
+    (void)opaque;
+    if (prospero_thumb_deadline_at <= 0.0)
+        return 0;
+    return prospero_thumb_now() >= prospero_thumb_deadline_at;
+}
+
 static int prospero_thumbnail_ensure_context(const char *path)
 {
     unsigned int i;
@@ -486,12 +521,25 @@ static int prospero_thumbnail_ensure_context(const char *path)
     if (!path || !path[0])
         return 0;
 
-    if (avformat_open_input(&prospero_thumb_fmt, path, NULL, NULL) < 0)
+    prospero_thumb_fmt = avformat_alloc_context();
+    if (!prospero_thumb_fmt)
         return 0;
+    prospero_thumb_fmt->interrupt_callback.callback = prospero_thumb_interrupt;
+    prospero_thumb_fmt->interrupt_callback.opaque   = NULL;
+    prospero_thumb_deadline_at = prospero_thumb_now() + PROSPERO_THUMB_OPEN_DEADLINE_SEC;
+
+    if (avformat_open_input(&prospero_thumb_fmt, path, NULL, NULL) < 0) {
+        /* Freed and NULLed by avformat_open_input on failure. */
+        prospero_thumb_deadline_at = 0.0;
+        prospero_thumb_fmt = NULL;
+        return 0;
+    }
     if (avformat_find_stream_info(prospero_thumb_fmt, NULL) < 0) {
+        prospero_thumb_deadline_at = 0.0;
         prospero_thumbnail_close_context();
         return 0;
     }
+    prospero_thumb_deadline_at = 0.0;
 
     for (i = 0; i < prospero_thumb_fmt->nb_streams; i++) {
         if (prospero_thumb_fmt->streams[i]->codecpar->codec_type ==

@@ -60,6 +60,7 @@ extern "C" void evo_log_alloc_state(const char *when)
 #include "evo_adec.h"
 #include "evo_subtitle.h"
 #include "evo_stream_io.h"
+#include "pp_stage_breadcrumb.h"
 /* #90: the provider seam. Needed for report_progress from saveResumePosition
  * and for the resolver chain's stream choices; no provider-specific header is
  * included here, which is the point of the vtable. */
@@ -108,6 +109,21 @@ extern char current_media_path[768];
 extern int evo_audio_channels;
 
 namespace evo {
+
+/*
+ * Ceiling on avformat_find_stream_info(). It has to clear the slowest probe we
+ * expect to be worth waiting for - a long-GOP MPEG-TS over USB, where the 4 s
+ * analyzeduration plus read time is the honest cost of finding a late audio
+ * track - while still being short enough that a demuxer scanning a REMUX for a
+ * Cluster it will not find gives up before the user does.
+ */
+static constexpr double kProbeDeadlineSeconds = 12.0;
+
+#ifdef EVO_APP_MODULE
+#  define SIO_STAGE(id, d) pp_stage_bc((id), (d))
+#else
+#  define SIO_STAGE(id, d) ((void)0)
+#endif
 
 static uint64_t GetCurrentTimeMs() {
     struct timeval tv;
@@ -457,14 +473,103 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         return false;
     }
 
-    if (avformat_find_stream_info(play_fmt, nullptr) < 0) {
-        avformat_close_input(&play_fmt);
-        play_fmt = nullptr;
-        evo_stream_io_close(m_streamIo);
-        m_streamIo = nullptr;
-        m_playbackFsm.postEvent(PlaybackEvent::Fail);
-        toast("STREAM FAIL", "Could not find streams");
-        return false;
+    /*
+     * avformat_find_stream_info() under a deadline, and not fatal if it runs
+     * out.
+     *
+     * Two separate things were wrong here. The call had no bound, so a file
+     * that sends the Matroska demuxer into matroska_resync() took the playback
+     * thread with it - the 2026-09-28 log ends mid-scan, 32 s and 1.2 GB into
+     * a DV P7 UHD REMUX, with no breadcrumb after P8_01e because there was
+     * none to write. And the result was treated as pass/fail, when for MKV and
+     * MP4 it is neither: the container header already carries codec id,
+     * geometry and extradata, and find_stream_info only refines what is
+     * mostly there. The poster path proves it on this exact file - it opened
+     * the same REMUX, and decoded a 3840x2160 frame from it, seconds earlier.
+     *
+     * So: bound it, then judge the streams we actually ended up with rather
+     * than the return code. A probe that timed out having already identified a
+     * decodable video stream costs a frame-rate estimate, not the file.
+     */
+    SIO_STAGE("P8_02a_PRE_FIND_INFO", filePath.c_str());
+    evo_stream_io_set_deadline(m_streamIo, kProbeDeadlineSeconds);
+    const int find_rc = avformat_find_stream_info(play_fmt, nullptr);
+    evo_stream_io_set_deadline(m_streamIo, 0.0);
+    const bool probe_timed_out = evo_stream_io_deadline_expired(m_streamIo) != 0;
+    {
+        char d[64];
+        std::snprintf(d, sizeof d, "rc=%d timeout=%d nb_streams=%u",
+                      find_rc, probe_timed_out ? 1 : 0,
+                      play_fmt ? play_fmt->nb_streams : 0u);
+        SIO_STAGE("P8_02b_FIND_INFO_RC", d);
+    }
+
+    /*
+     * The deadline is checked as well as the return code, not instead of it:
+     * find_stream_info() swallows the AVERROR_EXIT from an interrupted read
+     * and still returns the stream count it had managed to gather, so a probe
+     * can time out and report success. Both cases leave the demuxer parked
+     * wherever the scan stopped, and both need the rewind below.
+     */
+    if (find_rc < 0 || probe_timed_out) {
+        /*
+         * Usable means: a stream we can hand to a decoder as-is. Geometry and
+         * codec id come from the header, so this is satisfied for MKV/MP4 even
+         * when the probe never ran to completion. An audio-only file counts -
+         * music mode is a supported outcome below.
+         */
+        bool have_video = false;
+        bool have_audio = false;
+        for (unsigned int i = 0; play_fmt && i < play_fmt->nb_streams; ++i) {
+            const AVStream* st = play_fmt->streams[i];
+            if (!st || !st->codecpar) continue;
+            const AVCodecParameters* cp = st->codecpar;
+            if (cp->codec_type == AVMEDIA_TYPE_VIDEO &&
+                cp->codec_id != AV_CODEC_ID_NONE &&
+                cp->width > 0 && cp->height > 0) {
+                have_video = true;
+            } else if (cp->codec_type == AVMEDIA_TYPE_AUDIO &&
+                       cp->codec_id != AV_CODEC_ID_NONE) {
+                have_audio = true;
+            }
+        }
+
+        if (!have_video && !have_audio) {
+            evo_bt("PlaybackController: find_stream_info failed (rc=%d, timeout=%d) "
+                   "and the header named no usable stream - giving up",
+                   find_rc, probe_timed_out ? 1 : 0);
+            avformat_close_input(&play_fmt);
+            play_fmt = nullptr;
+            evo_stream_io_close(m_streamIo);
+            m_streamIo = nullptr;
+            m_playbackFsm.postEvent(PlaybackEvent::Fail);
+            toast("STREAM FAIL", probe_timed_out ? "Timed out reading this file"
+                                                 : "Could not find streams");
+            return false;
+        }
+
+        evo_bt("PlaybackController: find_stream_info incomplete (rc=%d, timeout=%d) - "
+               "continuing on the container header (video=%d audio=%d)",
+               find_rc, probe_timed_out ? 1 : 0, (int)have_video, (int)have_audio);
+
+        /*
+         * A probe that completes leaves its packets queued for av_read_frame to
+         * replay, so the demuxer being parked past them does not matter. One
+         * that is interrupted has no such guarantee: it was abandoned wherever
+         * the scan had reached - 1.2 GB in, on the file this was written for -
+         * and playback would start from there. Put it back on the first frame.
+         * A resume offset seeks again below; this is the floor under it.
+         */
+        const int64_t rewind_to = (play_fmt->start_time != AV_NOPTS_VALUE)
+                                      ? play_fmt->start_time : 0;
+        const int seek_rc = av_seek_frame(play_fmt, -1, rewind_to, AVSEEK_FLAG_BACKWARD);
+        if (seek_rc < 0) {
+            evo_bt("PlaybackController: rewind after an incomplete probe failed (rc=%d)",
+                   seek_rc);
+        }
+
+        if (probe_timed_out)
+            toast("SLOW FILE", "Starting without a full scan");
     }
 
     /*
