@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 #include "evo_agc_runtime.h"
+#include "evo_sweep.h"
 #include "evo_toast.h"
 #include <chrono>
 #include <atomic>
@@ -995,6 +996,7 @@ int Application::run() {
             }
         }
 
+        static uint64_t s_sw_p0 = 0, s_sw_p1 = 0;
         g_pace.iter_begin();
         if (frame < 5) {
             evo_bt("frame %d: start poll", frame);
@@ -1511,6 +1513,7 @@ int Application::run() {
                                            : "GPU over budget - turned off");
                 int is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE && !f.held && f.uv != nullptr) ? 1 : 0;
                 if (new_frame) g_pace.new_frame();
+                if (isPlayer && evo_sweep_active()) s_sw_p0 = evo_sweep_now_us();
                 const auto blit_t0 = PaceTrace::clk::now();
                 evo_agc_blit_yuv(f.y, f.y_pitch, f.uv, f.uv_pitch,
                                  f.u, f.u_pitch, f.v, f.v_pitch,
@@ -1519,6 +1522,7 @@ int Application::run() {
                                  view_mode, f.ten_bit, f.color_trc,
                                  is_direct, current_pts);
                 g_pace.blit(PaceTrace::ms(blit_t0, PaceTrace::clk::now()));
+                if (isPlayer && evo_sweep_active()) s_sw_p1 = evo_sweep_now_us();
                 swap = true;
             }
 
@@ -1629,6 +1633,12 @@ int Application::run() {
             evo_agc_runtime_present();
             g_pace.mark(6);   /* present, incl. the flip wait */
             if (isPlayer) g_pace.present(present_t0, PaceTrace::clk::now());
+            if (isPlayer && evo_sweep_active()) {
+                uint64_t sw_p2 = evo_sweep_now_us();
+                if (s_sw_p0 == 0) s_sw_p0 = s_sw_p1 = sw_p2;
+                evo_sweep_note_present(s_sw_p0, s_sw_p1, sw_p2, swap ? 1 : 0);
+                s_sw_p0 = s_sw_p1 = 0;
+            }
             evo_rmlui_end_frame();
 
 #ifdef EVO_APP_MODULE

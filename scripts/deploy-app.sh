@@ -233,7 +233,7 @@ def rmtree(ftp, path):
 USB_LOGS = ["evo.log", "evo_status", "evo_compat_report.txt"]
 
 with FTP() as ftp:
-    ftp.connect(host, int(port), timeout=15)
+    ftp.connect(host, int(port), timeout=60)
     ftp.login()
     try: ftp.set_pasv(True)
     except Exception: pass

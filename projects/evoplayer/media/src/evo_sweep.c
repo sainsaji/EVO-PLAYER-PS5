@@ -215,12 +215,14 @@ void evo_sweep_file_end(const evo_vdec *v, const pp_playback_stats *ps)
         return;
     g_rec.active = 0;
 
-    evo_vdec_get_stats(v, &vs);
+    memset(&vs, 0, sizeof(vs));
+    if (v)
+        evo_vdec_get_stats(v, &vs);
 
     play_s = (double)(evo_sweep_now_us() - g_rec.t_begin_us) / 1e6;
 
     dec_avg_ms = vs.frames_out ? (double)vs.decode_us_total / (double)vs.frames_out / 1000.0 : 0.0;
-    dec_p95_ms = (double)evo_vdec_decode_p95_us(v) / 1000.0;
+    dec_p95_ms = v ? ((double)evo_vdec_decode_p95_us(v) / 1000.0) : 0.0;
     dec_max_ms = (double)vs.decode_us_max / 1000.0;
 
     gpu_avg_ms  = g_rec.present_n
@@ -250,7 +252,9 @@ void evo_sweep_file_end(const evo_vdec *v, const pp_playback_stats *ps)
      */
     if (g_rec.open_result == EVO_VDEC_OPEN_NO_DECODER)
         verdict = "no_decoder";
-    else if (vs.frames_out == 0)
+    else if (!v && play_s >= 0.5)
+        verdict = "realtime";
+    else if (vs.frames_out == 0 && v)
         verdict = "no_frames";
     else if (vs.fatal_errors > 0)
         verdict = "decode_error";

@@ -9,6 +9,7 @@
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
+#include "evo_sweep.h"
 #include "evo_direct_mem.h"   /* evo_mem_budget_log - the numbers behind the 1080p rule */
 
 /*
@@ -326,6 +327,13 @@ void PlaybackController::stopPlayback() {
     if (audio_ctx) {
         avcodec_free_context(&audio_ctx);
         audio_ctx = nullptr;
+    }
+
+    if (g_vdec || evo_sweep_active()) {
+        pp_playback_stats ps;
+        std::memset(&ps, 0, sizeof(ps));
+        pp_playback_get_stats(&g_pp_pb, &ps);
+        evo_sweep_file_end(g_vdec, &ps);
     }
 
     if (g_vdec) {
@@ -647,6 +655,11 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                          "is set", vp.width, vp.height,
                          vStream->codecpar->codec_id);
             evo_mem_budget_log("native-declined");
+            evo_sweep_file_failed(filePath.c_str(),
+                                  avcodec_get_name(vStream->codecpar->codec_id),
+                                  vp.width, vp.height,
+                                  static_cast<int>(EVO_VDEC_OPEN_DOWNGRADED),
+                                  "native_pref_refused");
             evo_vdec_close(g_vdec);
             g_vdec = nullptr;
             avformat_close_input(&play_fmt);
@@ -657,11 +670,24 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         }
         if (!g_vdec) {
             evo_boot_log("PlaybackController: failed to open video decoder");
+            evo_sweep_file_failed(filePath.c_str(),
+                                  avcodec_get_name(vStream->codecpar->codec_id),
+                                  vp.width, vp.height,
+                                  static_cast<int>(evo_vdec_last_open_result()),
+                                  "vdec_open_null");
         } else {
             evo_boot_log("PlaybackController: video decoder opened (backend=%s, codec=%d, %dx%d @ %.2f fps)",
                          (chosen == EVO_VDEC_BACKEND_NATIVE) ? "NATIVE (sceVideodec2)" : "FFmpeg",
                          vStream->codecpar->codec_id,
                          vp.width, vp.height, video_fps);
+            evo_sweep_file_begin(filePath.c_str(),
+                                 avcodec_get_name(vStream->codecpar->codec_id),
+                                 vp.width, vp.height, video_fps,
+                                 (play_fmt && play_fmt->duration > 0)
+                                     ? static_cast<double>(play_fmt->duration) / static_cast<double>(AV_TIME_BASE)
+                                     : 0.0,
+                                 static_cast<int>(chosen),
+                                 static_cast<int>(evo_vdec_last_open_result()));
             /*
              * Allocator state at the moment decode starts. malloc_shim.c has
              * tracked this all along, but its only reader was main.c, so the
@@ -775,6 +801,17 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 }
             }
         }
+    }
+
+    if (video_stream_index < 0 && audio_stream_index >= 0) {
+        AVStream* aStream = play_fmt->streams[audio_stream_index];
+        evo_sweep_file_begin(filePath.c_str(),
+                             avcodec_get_name(aStream->codecpar->codec_id),
+                             0, 0, 0.0,
+                             (play_fmt && play_fmt->duration > 0)
+                                 ? static_cast<double>(play_fmt->duration) / static_cast<double>(AV_TIME_BASE)
+                                 : 0.0,
+                             0, 0);
     }
 
     // Subtitle setup
