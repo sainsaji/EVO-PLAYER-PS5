@@ -489,6 +489,94 @@ static void prebuffer_check(long long deadline_ms, int ended)
     }
 }
 
+/*
+ * Low-water mark on the OTHER stream's queue. Below this, that decoder is
+ * within a fraction of a second of running dry and the demux thread must not
+ * stay parked on a full queue - see demux_wait_for_room().
+ */
+#define DEMUX_STARVE_LOW_PACKETS 12
+
+/*
+ * Hard ceiling on how far a queue may overshoot its cap while the other stream
+ * is starving. The cap is a memory guard, not a correctness invariant, and
+ * PACKET_QUEUE_SIZE (512) is the real limit - packet_queue_push() simply
+ * returns 0 there, so overshooting can never corrupt the ring.
+ */
+#define DEMUX_OVERSHOOT_FACTOR 2
+
+/*
+ * Wait for room in `q`, but never at the cost of starving the other stream.
+ *
+ * av_read_frame() hands packets back in interleave order, so parking here on a
+ * full queue also stops the OTHER stream's packets arriving. That is one leg of
+ * a four-way deadlock hit on hardware after seeking into 4K HEVC + E-AC-3
+ * (2026-09-28, Avatar UHD remux):
+ *
+ *   audio output parks because the audio clock is >0.5 s ahead of video
+ *     -> the decoded-PCM ring stays above its high-water mark
+ *     -> the audio decode thread stops popping packets
+ *     -> the audio packet queue caps out
+ *     -> the demux thread parks HERE
+ *     -> the video packet queue drains to empty
+ *     -> video stops decoding, so video_clock_seconds stops advancing
+ *     -> audio output's "ahead of video" test is now permanently true.
+ *
+ * Nothing moves again. evo.log showed video_frames=0 for two minutes with
+ * byte-identical allocator counters (no av_read_frame at all) while the UI
+ * carried on at 59.9 fps.
+ *
+ * Releasing as soon as the other queue runs dry cuts that cycle: the queue in
+ * hand overshoots its cap by a bounded amount instead, which costs a few MB
+ * and keeps both decoders fed.
+ */
+static void demux_wait_for_room(PacketQueue *q, int cap,
+                                PacketQueue *other, int other_cap,
+                                long long prebuffer_deadline_ms, int sleep_us)
+{
+    int limit = cap * DEMUX_OVERSHOOT_FACTOR;
+    if (limit > PACKET_QUEUE_SIZE - 1)
+        limit = PACKET_QUEUE_SIZE - 1;
+
+    /* An other-stream low-water above its own cap would release immediately
+     * and turn the cap off altogether; keep it strictly below. */
+    int starve_low = DEMUX_STARVE_LOW_PACKETS;
+    if (other_cap > 0 && starve_low > other_cap / 2)
+        starve_low = other_cap / 2;
+
+    while (demux_thread_running &&
+           !player_paused &&
+           packet_queue_count(q) >= cap) {
+        /* Still re-check the pre-buffer here: this loop does not return to the
+         * top of the demux loop, so it is the only place the deadline can fire
+         * once a queue is full. It is also what keeps the pre-buffer itself
+         * from deadlocking when audio caps out before video reaches its
+         * target (audio is ~43 pkt/s against 30 fps). */
+        prebuffer_check(prebuffer_deadline_ms, 0);
+
+        /* The other decoder is about to run dry and only this thread can feed
+         * it. Overshoot rather than deadlock. */
+        if (other && packet_queue_count(other) < starve_low &&
+            packet_queue_count(q) < limit) {
+            /* Rate-limited: this fires per packet once it starts, and one
+             * line per 2 s is enough to tell a starved interleave apart from
+             * a healthy one in evo.log without flooding it. */
+            static long long s_last_bc_ms = 0;
+            long long now = now_ms();
+            if (now - s_last_bc_ms >= 2000) {
+                char d[80];
+                snprintf(d, sizeof d, "q=%d cap=%d limit=%d other=%d low=%d",
+                         packet_queue_count(q), cap, limit,
+                         packet_queue_count(other), starve_low);
+                pp_stage_bc("DEMUX_OVERSHOOT", d);
+                s_last_bc_ms = now;
+            }
+            return;
+        }
+
+        usleep(sleep_us);
+    }
+}
+
 void *demux_thread_func(void *arg) {
     (void)arg;
 
@@ -544,24 +632,14 @@ void *demux_thread_func(void *arg) {
             pkt->stream_index ==
             video_stream_index
         ) {
-            int vq = packet_queue_count(&video_packet_queue);
             /*
              * Do not drop non-keyframes in demux — that freezes for a full GOP
              * (often every 1–2s). Cap queue by waiting only.
              */
-            while (
-                demux_thread_running &&
-                !player_paused &&
-                packet_queue_count(
-                    &video_packet_queue
-                ) >= video_packet_cap
-            ) {
-                /* Still re-check the pre-buffer here: this loop does not
-                 * return to the top of the demux loop, so it is the only
-                 * place the deadline can fire once a queue is full. */
-                prebuffer_check(prebuffer_deadline_ms, 0);
-                usleep(playback_profile >= 3 ? 300 : 500);
-            }
+            demux_wait_for_room(&video_packet_queue, video_packet_cap,
+                                &audio_packet_queue, audio_packet_cap,
+                                prebuffer_deadline_ms,
+                                playback_profile >= 3 ? 300 : 500);
 
             if (
                 demux_thread_running &&
@@ -578,25 +656,9 @@ void *demux_thread_func(void *arg) {
             pkt->stream_index ==
             audio_stream_index
         ) {
-            while (
-                demux_thread_running &&
-                !player_paused &&
-                packet_queue_count(
-                    &audio_packet_queue
-                ) >= audio_packet_cap
-            ) {
-                /*
-                 * This one is not just for the deadline - it is what keeps the
-                 * pre-buffer from deadlocking. Audio packets outnumber video
-                 * (AAC is ~43/s against 30 fps), and with both decoders parked
-                 * neither queue drains, so on a low-frame-rate stream the
-                 * audio queue can hit its cap while video is still short of
-                 * its target. The demux thread would then spin here forever,
-                 * never reaching the check at the top of the loop.
-                 */
-                prebuffer_check(prebuffer_deadline_ms, 0);
-                usleep(1000);
-            }
+            demux_wait_for_room(&audio_packet_queue, audio_packet_cap,
+                                &video_packet_queue, video_packet_cap,
+                                prebuffer_deadline_ms, 1000);
 
             if (
                 demux_thread_running &&

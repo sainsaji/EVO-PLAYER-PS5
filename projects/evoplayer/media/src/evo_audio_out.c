@@ -143,6 +143,14 @@ static void audio_queue_push(int16_t *buf) {
 
 void *audio_output_thread(void *arg) {
     static int16_t silence[AUDIO_BLOCK_SAMPLES * EVO_AUDIO_MAX_CH];
+    /*
+     * State for the "video is not advancing" escape on the throttle below.
+     * Video's own audio-master wait has the mirror of this (stuck_iters in
+     * decode_next_video_frame); without it here, the two waits can hold each
+     * other forever.
+     */
+    double video_rel_at_wait = -1.0;
+    int    video_stuck_iters = 0;
     while (audio_thread_running) {
         /*
          * Hold output while a seek is still discarding video.
@@ -159,6 +167,10 @@ void *audio_output_thread(void *arg) {
          * half of it.
          */
         if (g_pp_pb.active && g_pp_pb.seek_discarding) {
+            /* The clocks restart at the seek target; so does the stall
+             * detector, so a pre-seek reading cannot leak past the seek. */
+            video_rel_at_wait = -1.0;
+            video_stuck_iters = 0;
             usleep(2000);
             continue;
         }
@@ -186,8 +198,38 @@ void *audio_output_thread(void *arg) {
                 continue;
             }
 
+            /*
+             * Hold audio back when it gets more than half a second ahead of
+             * the picture - but only while the picture is actually moving.
+             *
+             * This throttle waits on video, and video's audio-master wait in
+             * decode_next_video_frame() waits on audio. On hardware, after a
+             * seek into 4K HEVC + E-AC-3, that pair latched (2026-09-28):
+             * audio parked here, its decoded-PCM ring stayed full, the audio
+             * decode thread stopped popping, the audio packet queue capped
+             * out, the demux thread parked on it, the video packet queue
+             * drained, video stopped decoding - so video_rel froze and this
+             * test stayed true forever. video_frames=0 for two minutes.
+             *
+             * demux_wait_for_room() in evo_demux.c cuts that cycle at the
+             * demux end; this cuts it here too. ~250 ms with no video progress
+             * and audio plays regardless, exactly as video presents regardless
+             * after ~120 ms with no audio progress.
+             *
+             * Any movement counts, in either direction: a seek re-anchors
+             * first_video_pts_seconds, so video_rel drops back to ~0 and a
+             * forward-only test would never see it move again - leaving the
+             * throttle switched off for the rest of the file.
+             */
+            if (video_rel < video_rel_at_wait - 0.0005 ||
+                video_rel > video_rel_at_wait + 0.0005) {
+                video_rel_at_wait = video_rel;
+                video_stuck_iters = 0;
+            }
             if (video_rel > 0.1 &&
-                audio_clock_seconds > video_rel + 0.50) {
+                audio_clock_seconds > video_rel + 0.50 &&
+                video_stuck_iters < 125) {
+                video_stuck_iters++;
                 usleep(2000);
                 continue;
             }

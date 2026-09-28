@@ -36,6 +36,9 @@ static pthread_mutex_t *mtx(pp_playback *pb)
     return (pthread_mutex_t *)pb->lock;
 }
 
+/* Defined below; pp_playback_pause() needs it. Call with the lock held. */
+static int hold_snapshot(pp_playback *pb);
+
 void pp_playback_init(pp_playback *pb)
 {
     pthread_mutex_t *m;
@@ -149,6 +152,27 @@ void pp_playback_pause(pp_playback *pb)
     if (!pb)
         return;
     pp_clock_pause(&pb->clock);
+    /*
+     * Take the same snapshot a seek takes.
+     *
+     * A scrub pauses this clock but NOT the decode threads: the FSM's
+     * Scrubbing state leaves player_paused at 0, so the demux and decode
+     * threads keep running forward from the old position while push_frame
+     * stops publishing (the pp_clock_is_paused early-out below). The renderer
+     * is still holding borrowed pointers into the decoder's 8-slot frame pool
+     * (FRAME_POOL_SLOTS, evo_vdec_native.c), so the picture that is supposed
+     * to be frozen behind the scrub OSD is overwritten every 8th decoded frame
+     * and the scene visibly crawls forward instead - the "I seek 10 minutes
+     * ahead and watch the current shot advance frame by frame" report.
+     *
+     * One copy per pause, not per frame; the steady state stays zero-copy.
+     */
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    if (!pb->hold_valid)
+        pb->hold_valid = hold_snapshot(pb);
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
 }
 
 void pp_playback_resume(pp_playback *pb)
