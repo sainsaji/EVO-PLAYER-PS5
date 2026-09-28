@@ -456,6 +456,9 @@ if [[ "${MODE}" == "player" ]]; then
     # #101: the system web browser (src/evo_webui.c) - a provider's own web UI
     # opens in it. No SDK stub exists for it either.
     PRX_STUB_WANT+=(libSceWebBrowserDialog)
+    # #106: the DualSense microphone for the Surround Studio's speaker
+    # calibration (core/src/services/SpeakerCalibrationService.cpp).
+    PRX_STUB_WANT+=(libSceAudioIn)
 fi
 if (( ${#PRX_STUB_WANT[@]} )); then
     begin "building PRX import stubs"

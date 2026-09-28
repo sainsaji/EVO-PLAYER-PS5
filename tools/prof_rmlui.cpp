@@ -29,6 +29,8 @@
 
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_prof.h"
+#include "../projects/evoplayer/core/include/evo/audio/SpatialField.hpp"
+#include <cmath>
 
 static double now_ms() {
     return std::chrono::duration<double, std::milli>(
@@ -69,6 +71,8 @@ static void print_breakdown(const char* label, const EvoRmlProf& p, int n, doubl
     printf("              glyph raster    %6.2f ms  x%-6.1f  (%ld px)\n",
            gtex, (double)p.gentex_n / n, p.gentex_px / n);
     printf("              texture load    %6.2f ms  x%-6.1f\n", ltex, (double)p.loadtex_n / n);
+    printf("            geometry rebuilt  x%-6.1f  (CompileGeometry - a GPU upload each on the console)\n",
+           (double)p.compile_n / n);
     double acct = upd + ren;
     printf("            accounted %.2f ms / wall %.2f ms  (%.0f%%)\n",
            acct, wall_per_frame, wall_per_frame > 0 ? 100.0 * acct / wall_per_frame : 0);
@@ -309,6 +313,52 @@ static void bridge_bench(int W, int H) {
     }
 }
 
+/* -------- Surround Sound Studio (#106): the orb orbiting --------
+ * Every frame moves the source, the gain matrix and the ripples - the
+ * screen's steady state. What matters is Context::Update: layout the page
+ * pays when a size / display / text changes. */
+static void run_surround(std::vector<uint32_t>& fb, int W, int H, int N) {
+    namespace sp = evo::spatial;
+    evo_rmlui_surround_params_t p;
+    auto push = [&](int f) {
+        memset(&p, 0, sizeof(p));
+        const double a = f * 0.55 / 120.0;
+        sp::Vec3 s;
+        s.x = (float)(2.2 * std::sin(a));
+        s.y = (float)(-2.2 * std::cos(a));
+        p.view_mode = EVO_SURROUND_VIEW_ORB;
+        p.orb_active = 1; p.tone_follow = 1; p.field_playing = 1; p.flight_mode = 1;
+        p.px_per_m = sp::kDpPerMeter;
+        p.speaker_count = sp::kChannels;
+        for (int ch = 0; ch < sp::kChannels; ch++) {
+            const sp::Vec3 q = sp::speakerPosition(false, ch);
+            p.speakers[ch].name = sp::speakerName(false, ch);
+            p.speakers[ch].label = sp::speakerLabel(false, ch);
+            p.speakers[ch].hz = 440.0;
+            p.speakers[ch].dx = (int)lroundf(q.x * sp::kDpPerMeter);
+            p.speakers[ch].dy = (int)lroundf(q.y * sp::kDpPerMeter);
+            p.speakers[ch].ch = ch;
+            p.speakers[ch].item_idx = EVO_RMLUI_SURROUND_ACTIONS + ch;
+        }
+        p.nearest_channel = sp::panGains(s, false, p.proximity);
+        p.orb_x = s.x * sp::kDpPerMeter; p.orb_y = s.y * sp::kDpPerMeter;
+        p.azimuth_deg = sp::azimuthDeg(s); p.distance_m = sp::rangeM(s);
+        p.x_m = s.x; p.y_m = -s.y; p.source_dbfs = sp::kToneDbfs;
+        p.order_count = sp::physicalOrder(false, p.order);
+        p.anim_time = f / 120.0f;
+        evo_rmlui_update_surround(&p);
+        evo_rmlui_render_surround(fb.data(), W, H);
+    };
+    for (int i = 0; i < 5; i++) push(i);
+    printf("\n=== SURROUND  (orb orbiting, 3D SOUND FIELD) ===\n");
+    evo_prof_reset();
+    double t0 = now_ms();
+    for (int f = 0; f < N; f++) push(5 + f);
+    double wall = (now_ms() - t0) / N;
+    EvoRmlProf pr = g_evo_rml_prof;
+    print_breakdown("ORBIT", pr, N, wall);
+}
+
 int main() {
     const int W = 1920, H = 1080;
     std::vector<uint32_t> fb((size_t)W * H, 0xFF0E0906);
@@ -329,6 +379,7 @@ int main() {
     run_screen("LAUNCH  (hero + recent shelf + library)", S_LAUNCH, fb, W, H, N);
     run_screen("SETTINGS  (4-row list)", S_SETTINGS, fb, W, H, N);
     run_screen("BROWSER  (12-row list + inspector)", S_BROWSER, fb, W, H, N);
+    run_surround(fb, W, H, N);
 
     bridge_bench(W, H);
     composite_bench();

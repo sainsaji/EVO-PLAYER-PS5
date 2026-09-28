@@ -69,6 +69,19 @@ public:
         if (y) *y = m_leftStickY;
     }
 
+    /* The physical button state this frame, before the left stick's
+     * synthesized D-pad presses and the auto-repeat are OR'd in - for screens
+     * that read the stick themselves and must not see it twice. */
+    uint32_t getPadButtons() const { return m_padButtons; }
+
+    /* First touchpad contact, normalised 0..1 across the pad. false = no
+     * finger down. */
+    bool getTouchpad(float* x, float* y) const {
+        if (x) *x = m_touchX;
+        if (y) *y = m_touchY;
+        return m_touchActive;
+    }
+
 private:
     Application();
     ~Application() override;
@@ -92,6 +105,10 @@ private:
     int m_padHandle = -1;
     float m_leftStickX = 0.0f;
     float m_leftStickY = 0.0f;
+    uint32_t m_padButtons = 0;
+    bool  m_touchActive = false;
+    float m_touchX = 0.0f;
+    float m_touchY = 0.0f;
     uint32_t* m_uiScratch = nullptr;
     bool m_running = false;
     /* shutdown() is reached from both run() and ~Application(); see the note

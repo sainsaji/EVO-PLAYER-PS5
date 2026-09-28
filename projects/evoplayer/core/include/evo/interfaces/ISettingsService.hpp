@@ -66,6 +66,10 @@ public:
     virtual void setRefreshRateMode(RefreshRateMode mode) = 0;
     virtual const char* getRefreshRateModeName(RefreshRateMode mode) const = 0;
 
+    virtual HdrOutputMode getHdrOutputMode() const = 0;
+    virtual void setHdrOutputMode(HdrOutputMode mode) = 0;
+    virtual const char* getHdrOutputModeName(HdrOutputMode mode) const = 0;
+
     virtual void syncThemeToRmlUi() = 0;
 
 };

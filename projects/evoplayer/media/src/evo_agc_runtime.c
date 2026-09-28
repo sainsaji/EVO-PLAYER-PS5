@@ -126,9 +126,16 @@ typedef char evo_tile_dims_must_be_pow2[
  * R<->B swapped / garbled (hw 2026-09-04).
  */
 #define EVO_AGC_VIDEO_FORMAT_SDR UINT64_C(0x8000000000000000)
-/* Untested: the HDR attribute still carries the 0x22000000 tiled bits, so it
- * will need the same treatment before --agc HDR is used (hdr is 0 today). */
-#define EVO_AGC_VIDEO_FORMAT_HDR UINT64_C(0x8100070422000000)
+/*
+ * HDR10: Bgr10A2Bt2100Pq - 10:10:10:2, BT.2020 primaries, ST.2084 PQ
+ * (third_party/SharpProspero VideoOutTypes.cs). Note the 0x22000000 bits are
+ * the RGB-vs-BGR channel order, not tiling: Rgba8Srgb is 0x8000000022000000
+ * and Bgra8Srgb 0x8000000000000000. EVO's scanout is BGR ordered (the GPU
+ * writes it with COMP_SWAP=ALT), so HDR must be the BGR variant too - the
+ * RGB one this used to hold would swap red and blue. Used by
+ * evo_agc_runtime_set_hdr_output().
+ */
+#define EVO_AGC_VIDEO_FORMAT_HDR UINT64_C(0x8100070400000000)
 
 /* Platform declarations */
 int32_t sceKernelAllocateDirectMemory(int64_t search_start, int64_t search_end,
@@ -196,8 +203,9 @@ typedef struct evo_agc_device {
     int                     initialized;
     int                     width;
     int                     height;
-    int                     is_hdr;
+    int                     is_hdr;          /* scanout registered HDR10 right now */
     int                     display_is_hdr;
+    int                     last_video_trc;  /* -1 none yet, else the frame's color_trc */
     int                     display_dynamic_range;
     uint32_t                display_resolution_token;
     int                     supports_120hz;
@@ -1044,6 +1052,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     g_agc_dev.width = width ? width : 1920;
     g_agc_dev.height = height ? height : 1080;
     g_agc_dev.is_hdr = hdr;
+    g_agc_dev.last_video_trc = -1;
     g_agc_dev.video_handle = -1;
     g_agc_dev.up.cap = EVO_AGC_UPSCALE_AI;
     g_agc_dev.up.downgrade_notice = -1;
@@ -1245,6 +1254,10 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_VIDEO_NV12,   &video_yuv_nv12_metadata,     "video_yuv_nv12"},
         {EVO_AGC_PIPE_VIDEO_HDR,    &video_yuv_p010_hdr_metadata, "video_yuv_p010_hdr"},
         {EVO_AGC_PIPE_VIDEO_HLG,    &video_yuv_p010_hlg_metadata, "video_yuv_p010_hlg"},
+        /* real HDR10 output; missing ones just keep playback tone-mapped SDR */
+        {EVO_AGC_PIPE_VIDEO_HDR_PQ, &video_yuv_p010_pq_out_metadata,     "video_yuv_p010_pq_out"},
+        {EVO_AGC_PIPE_VIDEO_HLG_PQ, &video_yuv_p010_hlg_pq_out_metadata, "video_yuv_p010_hlg_pq_out"},
+        {EVO_AGC_PIPE_UI_PQ,        &ui_screen_2d_pq_out_metadata,       "ui_screen_2d_pq_out"},
         {EVO_AGC_PIPE_VIDEO_PLANAR, &video_yuv_planar_metadata,   "video_yuv_planar"},
         /* #103 upscaler. Each is optional: a missing one makes the upscaler
          * fall back a mode (AI -> Sharp -> Off), never fail the runtime. */
@@ -1677,7 +1690,11 @@ void evo_agc_runtime_frame_begin(void)
             /* Streamed, not stored-then-flushed: this is the single biggest
              * CPU cost in the menus - 8.3 MB a frame at 1080p, 33 MB at 4K.
              * See evo_agc_runtime_stream_fill. */
-            evo_agc_runtime_stream_fill(backbuffer, 0xff100d0du,
+            /* 0xff100d0d is dark grey only as 8-bit BGRA. On a 10:10:10:2
+             * HDR scanout those bits would light one channel near full, so
+             * HDR clears to black with opaque alpha. */
+            evo_agc_runtime_stream_fill(backbuffer,
+                                        g_agc_dev.is_hdr ? 0xc0000000u : 0xff100d0du,
                                         scanout_tiled_bytes());
         }
     }
@@ -1762,12 +1779,34 @@ void evo_agc_runtime_frame_begin(void)
     g_agc_dev.frame_active = 1;
 }
 
+/* HDR10 output: drawing to the scanout swaps the SDR pipelines for their PQ
+ * twins. Offscreen targets (RmlUi layers, upscaler scratch) stay SDR - a
+ * layer composited onto the scanout goes through EVO_AGC_PIPE_UI, which is
+ * swapped then. */
+static int agc_hdr_remap(int pipeline_id)
+{
+    if (!g_agc_dev.is_hdr || g_agc_dev.current_layer_target != NULL)
+        return pipeline_id;
+    int to = pipeline_id;
+    switch (pipeline_id) {
+    case EVO_AGC_PIPE_UI:         to = EVO_AGC_PIPE_UI_PQ; break;
+    case EVO_AGC_PIPE_VIDEO_HDR:  to = EVO_AGC_PIPE_VIDEO_HDR_PQ; break;
+    case EVO_AGC_PIPE_VIDEO_HLG:  to = EVO_AGC_PIPE_VIDEO_HLG_PQ; break;
+    default: break;
+    }
+    return g_agc_dev.pipelines[to].valid ? to : pipeline_id;
+}
+
+static int s_bound_logical = -1;   /* what the caller asked for, pre-remap */
+
 void evo_agc_runtime_bind_pipeline(int pipeline_id)
 {
     if (!g_agc_dev.initialized || !g_agc_dev.frame_active)
         return;
     if (pipeline_id < 0 || pipeline_id >= EVO_AGC_PIPE_COUNT)
         return;
+    s_bound_logical = pipeline_id;
+    pipeline_id = agc_hdr_remap(pipeline_id);
     if (g_agc_dev.bound_pipeline == pipeline_id)
         return;
 
@@ -1931,6 +1970,13 @@ int evo_agc_set_layer_target(const evo_agc_layer_surface_t *layer)
                                       16);
         }
         g_agc_dev.current_layer_target = layer;
+        /* HDR10: the same logical pipeline maps to a different variant on
+         * the scanout than in a layer, so re-resolve it for the new target. */
+        if (g_agc_dev.is_hdr && s_bound_logical >= 0 &&
+            agc_hdr_remap(s_bound_logical) != g_agc_dev.bound_pipeline) {
+            g_agc_dev.bound_pipeline = -1;
+            evo_agc_runtime_bind_pipeline(s_bound_logical);
+        }
         /* A target switch returns the CP to the frame's default full-canvas
          * viewport: the caller (CompositeLayers) diverges via scissor alone.
          * Re-emit the viewport here so a stale 12-register viewport block from
@@ -2277,12 +2323,14 @@ void evo_agc_runtime_set_player_mode(int is_player)
     if (g_agc_dev.is_player_mode == is_player)
         return;
     g_agc_dev.is_player_mode = is_player;
+    /* a new file decides HDR10 by its own first frame, not the last file's */
+    g_agc_dev.last_video_trc = -1;
     if (is_player) {
         /* Clear both scanout buffers once upon entering player mode so letterbox borders are dark */
         for (int b = 0; b < 2; ++b) {
             uint32_t *buf = (uint32_t *)g_agc_dev.scanout_buffers[b];
             if (buf) {
-                evo_agc_runtime_stream_fill(buf, 0xff100d0du,
+                evo_agc_runtime_stream_fill(buf, g_agc_dev.is_hdr ? 0xc0000000u : 0xff100d0du,
                                             scanout_tiled_bytes());
             }
             g_agc_dev.video_pts[b] = INT64_MIN;
@@ -2451,6 +2499,100 @@ int evo_agc_runtime_is_120hz(void)
 int evo_agc_runtime_get_refresh_rate(void)
 {
     return g_agc_dev.initialized ? g_agc_dev.current_refresh_rate : 0;
+}
+
+/* CB_COLOR0_INFO is word 2 of every block setup_color_target() builds (the
+ * upscaler patches the same word for its FP16 targets). FORMAT is bits 2..6:
+ * COLOR_8_8_8_8 = 10, COLOR_2_10_10_10 = 9. NUMBER_TYPE stays UNORM and
+ * COMP_SWAP stays ALT, so the 10:10:10:2 word is BGR ordered like the
+ * 8-bit one - matching Bgr10A2Bt2100Pq. */
+static void agc_scanout_set_10bit(int ten_bit)
+{
+    for (int i = 0; i < 2; ++i) {
+        SceAgcRegister *ct = g_agc_dev.gpu_regs->color_targets[i];
+        ct[2].value = (ct[2].value & ~0x7cu) | ((ten_bit ? 9u : 10u) << 2);
+    }
+    evo_agc_runtime_cache_flush(g_agc_dev.gpu_regs, sizeof(evo_agc_gpu_regs_t));
+}
+
+int32_t sceVideoOutSubmitChangeBufferAttribute2(int32_t handle, int32_t set_index,
+                                                const void *attribute, const void *option);
+
+int evo_agc_runtime_set_hdr_output(int enable)
+{
+    enable = enable ? 1 : 0;
+    if (!g_agc_dev.initialized || g_agc_dev.video_handle < 0)
+        return -1;
+    if (g_agc_dev.frame_active) {
+        evo_boot_log("agc hdr: switch requested mid-frame - refused");
+        return -1;
+    }
+    if (enable == g_agc_dev.is_hdr)
+        return 0;
+    if (enable && !g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_HDR_PQ].valid) {
+        evo_boot_log("agc hdr: PQ video pipeline missing - staying SDR");
+        return -1;
+    }
+
+    const uint64_t vfmt = enable ? EVO_AGC_VIDEO_FORMAT_HDR : EVO_AGC_VIDEO_FORMAT_SDR;
+    evo_boot_log("agc hdr: switching scanout to %s (fmt=%#llx)",
+                 enable ? "HDR10 Bgr10A2Bt2100Pq" : "SDR Bgra8",
+                 (unsigned long long)vfmt);
+    evo_boot_log_flush();
+
+    /* No GPU write in the old format may land after the retype. */
+    agc_wait_gpu_idle(200);
+
+    /*
+     * Retype the registered set in place, applied by VideoOut at the next
+     * flip - the call games use to toggle HDR. NOT unregister + register:
+     * the set on screen can't be unregistered (0x80290009 RESOURCE_BUSY,
+     * hardware 2026-09-28), the re-register then hits 0x80290010
+     * SLOT_OCCUPIED, and that failed sequence once left the next present
+     * hanging - the "display went blank" run. A refusal here changes
+     * nothing, so playback just carries on in SDR.
+     */
+    evo_video_attribute_t attr;
+    memset(&attr, 0, sizeof(attr));
+    sceVideoOutSetBufferAttribute2(&attr, vfmt, 0,
+                                   (uint32_t)g_agc_dev.width, (uint32_t)g_agc_dev.height,
+                                   0, 0, 0);
+    int32_t rc = sceVideoOutSubmitChangeBufferAttribute2(g_agc_dev.video_handle, 0, &attr, NULL);
+    evo_boot_log("agc hdr: SubmitChangeBufferAttribute2 rc=%d (0x%08x)", rc, (unsigned)rc);
+    if (rc != 0) {
+        evo_boot_log("agc hdr: display refused the %s attribute - unchanged",
+                     enable ? "HDR10" : "SDR");
+        evo_boot_log_flush();
+        return -1;
+    }
+
+    agc_scanout_set_10bit(enable);
+    g_agc_dev.is_hdr = enable;
+    /* Both buffers still hold pixels in the old format: clear them on their
+     * next use, and redraw the video into each. */
+    g_agc_dev.ui_dirty[0] = g_agc_dev.ui_dirty[1] = 1;
+    g_agc_dev.video_pts[0] = g_agc_dev.video_pts[1] = INT64_MIN;
+    g_agc_dev.bound_pipeline = -1;
+
+    evo_vo_output_status vout;
+    memset(&vout, 0, sizeof(vout));
+    int32_t vorc = sceVideoOutGetOutputStatus(g_agc_dev.video_handle, &vout);
+    evo_boot_log("agc hdr: now %s - output status rc=%d dynamic_range=%u (%s) flags=%#llx",
+                 enable ? "HDR10" : "SDR", vorc, vout.dynamic_range,
+                 vout.dynamic_range == 2 ? "HDR" : (vout.dynamic_range == 1 ? "SDR" : "unknown"),
+                 (unsigned long long)vout.flags);
+    evo_boot_log_flush();
+    return 0;
+}
+
+int evo_agc_runtime_hdr_output_active(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.is_hdr : 0;
+}
+
+int evo_agc_runtime_last_video_trc(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.last_video_trc : -1;
 }
 
 int evo_agc_runtime_set_120hz(int enable)
@@ -3415,6 +3557,8 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
 
     const uint32_t slot = g_agc_dev.current_slot;
     evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
+
+    g_agc_dev.last_video_trc = ten_bit ? color_trc : 1;
 
     /* 1. Select Pipeline */
     int pipe_id;

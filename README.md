@@ -38,7 +38,7 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 
 Video decodes on the console's own `sceVideodec2` decoder — **H.264, HEVC and VP9 at up to 4K** — with resident per-codec decoders created once at boot. Clips outside what the hardware accepts fall back to FFmpeg automatically.
 
-**10-bit HDR** is supported with HDR10 (PQ) and HLG tone mapping over a BT.2020 matrix, and the VideoOut mode switches per frame to match the source.
+**10-bit HDR** (HDR10 / PQ and HLG) decodes on the hardware decoder. **Settings → Playback → HDR OUTPUT** chooses how it is shown: **Auto** matches the display to the content, **Off** tone-maps to SDR (BT.2390 curve, BT.2020 → BT.709).
 
 ![Playback OSD over 4K hardware-decoded video](docs/images/player.png)
 

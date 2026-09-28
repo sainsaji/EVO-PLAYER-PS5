@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_bridge.h"
+#include "../projects/evoplayer/core/include/evo/audio/SpatialField.hpp"
 #include "../projects/evoplayer/include/evo_features.h"
 #include "../projects/evoplayer/include/evo_changelog.h"
 /* #90: the provider host, driven for real - see render_provider_screens(). */
@@ -882,66 +883,138 @@ static void render_reader_screen(std::vector<uint32_t>& fb, int width, int heigh
 }
 
 /* ------------------------------------------------------------------
- * Surround sound test
+ * Surround Sound Studio (#106). Speaker layout, gain matrix and telemetry
+ * come from the same SpatialField the screen uses, so these shots show
+ * what the console computes for that source position.
  * ------------------------------------------------------------------ */
+static void surround_fill(evo_rmlui_surround_params_t& p, bool is51,
+                          const evo::spatial::Vec3& src) {
+    namespace sp = evo::spatial;
+    const float ppm = sp::kDpPerMeter;
+    p.is_51_layout = is51 ? 1 : 0;
+    p.px_per_m = ppm;
+    p.speaker_count = sp::kChannels;
+    for (int ch = 0; ch < sp::kChannels; ch++) {
+        const sp::Vec3 s = sp::speakerPosition(is51, ch);
+        p.speakers[ch].name = sp::speakerName(is51, ch);
+        p.speakers[ch].label = sp::speakerLabel(is51, ch);
+        p.speakers[ch].hz = (ch == 3) ? 60.0 : 440.0;
+        p.speakers[ch].dx = (int)lroundf(s.x * ppm);
+        p.speakers[ch].dy = (int)lroundf(s.y * ppm);
+        p.speakers[ch].ch = ch;
+        p.speakers[ch].item_idx = EVO_RMLUI_SURROUND_ACTIONS + ch;
+        p.speakers[ch].hidden = sp::present(is51, ch) ? 0 : 1;
+    }
+    p.nearest_channel = sp::panGains(src, is51, p.proximity);
+    p.orb_x = src.x * ppm;
+    p.orb_y = src.y * ppm;
+    p.orb_z_m = src.z;
+    p.azimuth_deg = sp::azimuthDeg(src);
+    p.elevation_deg = sp::elevationDeg(src);
+    p.distance_m = sp::rangeM(src);
+    p.x_m = src.x;
+    p.y_m = -src.y;
+    p.source_dbfs = sp::kToneDbfs;
+    p.order_count = sp::physicalOrder(is51, p.order);
+    p.cal_total = p.order_count;
+    p.cal_channel = -1;
+    p.cal_noise_db = -120.0f;
+}
+
 static void render_surround_screen(std::vector<uint32_t>& fb, int width, int height) {
-    std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+    namespace sp = evo::spatial;
+    std::fill(fb.begin(), fb.end(), 0xFF160E0A);
     set_nav(5, 0);
 
+    /* 1. rml_surround - 7.1, speaker cursor on CENTER, its test tone playing */
     evo_rmlui_surround_params_t p;
     memset(&p, 0, sizeof(p));
-    p.rail_focused = 0;
-    p.is_51_layout = 0;      /* 7.1 */
-    p.selected_item = 8;     /* Center speaker focused (channel 2, item 6 + 2 = 8) */
-    p.active_channel = 2;    /* Center speaker playing tone */
-    p.surround_mode = 1;     /* Test active */
+    sp::Vec3 src;
+    const sp::Vec3 c = sp::speakerPosition(false, 2);
+    src.x = c.x * 0.7f;
+    src.y = c.y * 0.7f;
+    surround_fill(p, false, src);
+    p.view_mode = EVO_SURROUND_VIEW_STAGE;
+    p.selected_item = EVO_RMLUI_SURROUND_ACTIONS + 2;
+    p.active_channel = 2;
+    p.surround_mode = 0;
     p.anim_time = 1.35f;
-    p.orb_x = 0.0f;
-    p.orb_y = -140.0f;       /* Orb hovering in front of Center speaker cone */
-    p.proximity[2] = 1.0f;
-    p.proximity[0] = 0.35f;
-    p.proximity[1] = 0.35f;
-
-    struct Spk { const char* name; const char* label; double hz; int dx; int dy; int ch; int item; int hidden; };
-    static const Spk spk[8] = {
-        { "FRONT LEFT",       "FL",  440.0, -280, -175, 0, 6, 0 },
-        { "FRONT RIGHT",      "FR",  440.0,  280, -175, 1, 7, 0 },
-        { "CENTER",           "C",   330.0,    0, -225, 2, 8, 0 },
-        { "SUBWOOFER",        "LFE",  60.0,    0,  215, 3, 9, 0 },
-        { "SURROUND BACK L",  "SBL", 600.0, -220,  195, 4, 10, 0 },
-        { "SURROUND BACK R",  "SBR", 600.0,  220,  195, 5, 11, 0 },
-        { "SURROUND LEFT",    "SL",  520.0, -350,   30, 6, 12, 0 },
-        { "SURROUND RIGHT",   "SR",  520.0,  350,   30, 7, 13, 0 },
-    };
-    for (int i = 0; i < 8; i++) {
-        p.speakers[i].name = spk[i].name;
-        p.speakers[i].label = spk[i].label;
-        p.speakers[i].hz = spk[i].hz;
-        p.speakers[i].dx = spk[i].dx;
-        p.speakers[i].dy = spk[i].dy;
-        p.speakers[i].ch = spk[i].ch;
-        p.speakers[i].item_idx = spk[i].item;
-        p.speakers[i].hidden = spk[i].hidden;
-    }
-    p.speaker_count = 8;
-
     evo_rmlui_update_surround(&p);
     evo_rmlui_render_surround(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_surround.bmp", fb.data(), width, height);
 
-    /* Second shot: Interactive Free-Roam Orb mode */
-    p.selected_item = 0;
-    p.active_channel = -1;
-    p.surround_mode = 2;
+    /* 2. rml_surround_orb - FREE ROAM, source front-right and 0.75 m up,
+     *    a short trail behind it, MANUAL flight */
+    memset(&p, 0, sizeof(p));
+    src.x = 1.45f; src.y = -1.25f; src.z = 0.75f;
+    surround_fill(p, false, src);
+    p.view_mode = EVO_SURROUND_VIEW_ORB;
     p.orb_active = 1;
-    p.orb_x = 180.0f;
-    p.orb_y = -90.0f;
-    p.proximity[1] = 0.88f; // Near Front Right
-    p.proximity[2] = 0.40f; // Near Center
-    p.proximity[7] = 0.45f; // Near Side Right
+    p.surround_mode = 2;
+    p.selected_item = 2;
+    p.flight_mode = 0;
+    p.active_channel = p.nearest_channel;
+    p.anim_time = 2.1f;
+    p.trail_count = 5;
+    for (int i = 0; i < 5; i++) {
+        p.trail_x[i] = (src.x - 0.16f * (i + 1)) * sp::kDpPerMeter;
+        p.trail_y[i] = (src.y + 0.11f * (i + 1)) * sp::kDpPerMeter;
+    }
     evo_rmlui_update_surround(&p);
     evo_rmlui_render_surround(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_surround_orb.bmp", fb.data(), width, height);
+
+    /* 3. rml_surround_calibration - a finished 7.1 run, one speaker unheard,
+     *    the orb parked on the seat as the DualSense mic */
+    memset(&p, 0, sizeof(p));
+    src = sp::Vec3();
+    surround_fill(p, false, src);
+    p.view_mode = EVO_SURROUND_VIEW_CALIBRATION;
+    p.selected_item = 1;
+    p.active_channel = -1;
+    p.anim_time = 0.8f;
+    p.cal_phase = EVO_SURROUND_CAL_COMPLETE;
+    p.cal_step = p.cal_total;
+    p.cal_noise_db = -58.0f;
+    p.cal_message = "CALIBRATION COMPLETE (DUALSENSE MIC @ SWEET SPOT)";
+    static const float trim[8]  = { +0.5f, +0.5f, 0.0f, -1.0f, +1.5f, +1.5f, +1.0f, +1.0f };
+    static const float path[8]  = { 0.60f, 0.60f, 0.30f, 0.80f, 0.20f, 0.20f, 0.00f, 0.00f };
+    for (int ch = 0; ch < 8; ch++) {
+        p.cal_measured[ch] = 1;
+        p.cal_detected[ch] = (ch != 5);
+        p.cal_trim_db[ch] = trim[ch];
+        p.cal_path_m[ch] = path[ch];
+        p.cal_delay_ms[ch] = (0.80f - path[ch]) / 343.0f * 1000.0f;
+    }
+    evo_rmlui_update_surround(&p);
+    evo_rmlui_render_surround(fb.data(), width, height);
+    save_bmp_24("output/uiview/rml_surround_calibration.bmp", fb.data(), width, height);
+
+    /* Frame cost of the orb view while the source orbits: every frame
+     * changes the orb position, the gain matrix and the ripples - the
+     * console's steady state on this screen. Host CPU raster included, so
+     * compare runs against each other, not against the console. */
+    memset(&p, 0, sizeof(p));
+    p.view_mode = EVO_SURROUND_VIEW_ORB;
+    p.orb_active = 1;
+    p.tone_follow = 1;
+    p.field_playing = 1;
+    p.flight_mode = 1;
+    const int kFrames = 120;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int f = 0; f < kFrames; f++) {
+        const double a = f * 0.55 / 120.0;
+        sp::Vec3 s;
+        s.x = (float)(2.2 * std::sin(a));
+        s.y = (float)(-2.2 * std::cos(a));
+        surround_fill(p, false, s);
+        p.anim_time = f / 120.0f;
+        evo_rmlui_update_surround(&p);
+        evo_rmlui_render_surround(fb.data(), width, height);
+    }
+    const double ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0).count();
+    printf("[surround perf] orb orbit: %.2f ms/frame over %d frames\n", ms / kFrames, kFrames);
 }
 
 /* ------------------------------------------------------------------

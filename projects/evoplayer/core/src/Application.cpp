@@ -22,6 +22,7 @@
 
 #include "evo_boot_log.h"
 
+#include <algorithm>
 #include <ctime>
 #include <sys/time.h>
 #include <cstdio>
@@ -45,6 +46,7 @@ extern "C" int perf_render_fps;
 #include "evo_vdec.h"
 #include "evo_direct_mem.h"
 #include "evo_data_path.h"
+#include "evo_speaker_cal.h"
 #include "evo_toast.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
@@ -438,6 +440,7 @@ bool Application::initServices() {
 
     m_soundEffectEngine->initialize();
     m_settingsService->loadSettings();
+    evo_speaker_cal_load();
     recent_load();
     favorites_load();
     m_fileSystemBrowser->loadLastFolder();
@@ -930,6 +933,7 @@ int Application::run() {
             if (m_settingsService) {
                 m_settingsService->loadSettings();
             }
+            evo_speaker_cal_load();
             /* #90: every provider re-reads its config from the real data
              * root - same reason recent_load() and the settings service are
              * re-run here. */
@@ -983,6 +987,16 @@ int Application::run() {
             pressed = padData.buttons & ~lastButtons;
             released = ~padData.buttons & lastButtons;
             held = padData.buttons;
+            m_padButtons = padData.buttons;
+
+            /* Absolute first-contact position for screens that drag with the
+             * touchpad (the Surround Studio orb, #106). The pad reports
+             * 1920 x 1080 - the click handler below splits it at x = 960. */
+            m_touchActive = (padData.touchData.touchNum > 0);
+            if (m_touchActive) {
+                m_touchX = std::min(1.0f, padData.touchData.touch[0].x / 1919.0f);
+                m_touchY = std::min(1.0f, padData.touchData.touch[0].y / 1079.0f);
+            }
 
             // DualSense Left Analog Stick: normalize and apply deadzone
             float rawLx = (static_cast<float>(padData.leftStick.x) - 128.0f) / 128.0f;
@@ -1183,6 +1197,33 @@ int Application::run() {
                 }
             }
             s_was_high_refresh = isHighRefresh;
+        }
+
+        /*
+         * Real HDR10: while an HDR10 (PQ) or HLG video is on screen, register
+         * the display HDR10 so the TV switches into HDR; back to SDR for
+         * everything else. Decided here, between frames, from the transfer of
+         * the last frame presented. A refused switch is not retried until the
+         * next playback session.
+         */
+        {
+            static int  s_hdr_want = 0;
+            static bool s_hdr_refused = false;
+            const int trc = evo_agc_runtime_last_video_trc();
+            const bool setting_on = !m_settingsService ||
+                m_settingsService->getHdrOutputMode() == HdrOutputMode::Auto;
+            const int want = (isPlayer && setting_on && (trc == 16 || trc == 18)) ? 1 : 0;
+            if (!isPlayer) s_hdr_refused = false;
+            if (want != s_hdr_want && !(want && s_hdr_refused)) {
+                evo_bt("hdr10: %s (player=%d trc=%d setting=%s)",
+                       want ? "ENTER" : "LEAVE", isPlayer ? 1 : 0, trc, setting_on ? "auto" : "off");
+                if (evo_agc_runtime_set_hdr_output(want) == 0) {
+                    s_hdr_want = want;
+                } else if (want) {
+                    s_hdr_refused = true;
+                    toast("HDR", "The display did not accept HDR10 - playing tone-mapped");
+                }
+            }
         }
 
         bool hasAnim = evo::animation::AnimationManager::getInstance().hasActiveAnimations();

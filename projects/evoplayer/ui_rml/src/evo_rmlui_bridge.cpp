@@ -119,33 +119,16 @@ void evo_rmlui_render_image(uint32_t* framebuffer, int width, int height) {
 void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
     if (!p) return;
     EvoSurroundState state;
-    state.rail_focused = (p->rail_focused != 0);
-    state.is_51_layout = (p->is_51_layout != 0);
-    state.selected_item = p->selected_item;
-    state.active_channel = p->active_channel;
-    state.surround_mode = p->surround_mode;
-    state.anim_time = p->anim_time;
-    state.orb_x = p->orb_x;
-    state.orb_y = p->orb_y;
-    state.orb_active = (p->orb_active != 0);
-
+    std::memcpy(&state.p, p, sizeof(state.p));
+    state.p.cal_message = nullptr;
+    state.cal_message = p->cal_message ? p->cal_message : "";
     for (int i = 0; i < EVO_RMLUI_SURROUND_SPEAKERS; i++) {
-        state.proximity.push_back(p->proximity[i]);
+        state.p.speakers[i].name = nullptr;
+        state.p.speakers[i].label = nullptr;
+        if (i >= p->speaker_count) continue;
+        state.names[i] = p->speakers[i].name ? p->speakers[i].name : "";
+        state.labels[i] = p->speakers[i].label ? p->speakers[i].label : "";
     }
-
-    for (int i = 0; i < p->speaker_count && i < EVO_RMLUI_SURROUND_SPEAKERS; i++) {
-        EvoSurroundSpeaker s;
-        s.name = p->speakers[i].name ? p->speakers[i].name : "";
-        s.label = p->speakers[i].label ? p->speakers[i].label : "";
-        s.hz = p->speakers[i].hz;
-        s.dx = p->speakers[i].dx;
-        s.dy = p->speakers[i].dy;
-        s.ch = p->speakers[i].ch;
-        s.item_idx = p->speakers[i].item_idx;
-        s.hidden = (p->speakers[i].hidden != 0);
-        state.speakers.push_back(s);
-    }
-
     EvoRmlApp::Instance().UpdateSurroundState(state);
 }
 

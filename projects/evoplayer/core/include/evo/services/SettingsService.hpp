@@ -61,6 +61,10 @@ public:
     void setRefreshRateMode(RefreshRateMode mode) override { m_refreshRateMode = mode; }
     const char* getRefreshRateModeName(RefreshRateMode mode) const override;
 
+    HdrOutputMode getHdrOutputMode() const override { return m_hdrOutputMode; }
+    void setHdrOutputMode(HdrOutputMode mode) override { m_hdrOutputMode = mode; }
+    const char* getHdrOutputModeName(HdrOutputMode mode) const override;
+
     void syncThemeToRmlUi() override;
 
 private:
@@ -72,12 +76,16 @@ private:
     bool m_soundFeedbackEnabled = true;
     bool m_lightbarFeedbackEnabled = true;
     int m_subtitleFontFace = 1; // Medium
-    int m_keyboardType = 0;     // Native IME
+    /* EVO_KEYBOARD_TYPE_NATIVE (1) - the enum has VIRTUAL = 0, and this
+     * used to be 0 under a "Native IME" comment, so a fresh install saved
+     * (and kept) the virtual keyboard nobody picked. */
+    int m_keyboardType = 1;
     DecoderPreference m_decoderPreference = DecoderPreference::Auto;
     // Off until the upscaler is hardware-verified (#103), then Sharp.
     Upscaler m_upscaler = Upscaler::Off;
     AiNetwork m_aiNetwork = AiNetwork::Auto;
     RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
+    HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
     bool m_debugOverlayEnabled = false;
 };
 

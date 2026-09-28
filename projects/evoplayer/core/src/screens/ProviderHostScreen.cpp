@@ -248,6 +248,13 @@ void ProviderHostScreen::openProvider(const std::string& want)
     m_opened = evo_rmlui_provider_open(m_providerId.c_str(),
                                         DisplayWidth, DisplayHeight) != 0;
     evo_bt("prov_screen: onEnter evo_rmlui_provider_open returned opened=%d", m_opened ? 1 : 0);
+    if (m_opened) {
+        /* First run: nothing to browse yet, so land on the provider's setup
+         * page (IPTV: type an M3U URL or pick one from USB). */
+        const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+        if (p && p->is_configured && !p->is_configured() && (p->caps & EVO_PROVIDER_CAP_CONFIG))
+            evo_rmlui_provider_show_setup();
+    }
     if (!m_opened) {
         evo_bt("provider: could not open host for '%s'", m_providerId.c_str());
         toast("PROVIDERS", "That provider is not available");

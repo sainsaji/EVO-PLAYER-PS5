@@ -29,6 +29,7 @@ Grouped by what you are trying to do. Start at
 | [theming.md](ui/theming.md) | Theme format and tokens |
 | [icon-swap-handoff.md](ui/icon-swap-handoff.md) | Icon set migration |
 | [media-tile.md](ui/media-tile.md) | Media tile and metadata handling |
+| [surround-studio.md](ui/surround-studio.md) | Surround Sound Studio (#106): room model, orb, DualSense-mic calibration |
 
 ## [hardware/](hardware/) — talking to the console
 

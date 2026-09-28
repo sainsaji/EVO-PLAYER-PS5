@@ -34,7 +34,12 @@ enum {
     EVO_AGC_PIPE_UP_UL_CONV0 = 27,   /* ..47 */
     EVO_AGC_PIPE_UP_UL_ACC0 = 48,    /* ..62 */
     EVO_AGC_PIPE_UP_RGB_FINAL = 63,  /* depth-to-space with an RGB residual */
-    EVO_AGC_PIPE_COUNT = 64,
+    /* Real HDR10 output (evo_agc_runtime_set_hdr_output): the scanout is
+     * Bgr10A2Bt2100Pq and these replace their SDR twins when drawing to it. */
+    EVO_AGC_PIPE_VIDEO_HDR_PQ = 64,  /* HDR10 source -> PQ passthrough */
+    EVO_AGC_PIPE_VIDEO_HLG_PQ = 65,  /* HLG source -> PQ */
+    EVO_AGC_PIPE_UI_PQ = 66,         /* OSD / subtitles at 203-nit graphics white */
+    EVO_AGC_PIPE_COUNT = 67,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -195,6 +200,20 @@ int                       evo_agc_runtime_supports_120hz(void);
 int                       evo_agc_runtime_is_120hz(void);
 int                       evo_agc_runtime_get_refresh_rate(void);
 int                       evo_agc_runtime_set_120hz(int enable);
+
+/*
+ * Real HDR10 output. enable=1 re-registers the display buffers as
+ * Bgr10A2Bt2100Pq (10:10:10:2, BT.2020, SMPTE ST.2084 PQ) - the TV switches
+ * into HDR - and draws the video / UI with the *_PQ pipelines; enable=0 goes
+ * back to 8-bit SDR. Call between frames (the loop does it before
+ * frame_begin). Returns 0 on success, <0 if the display refused (it is then
+ * left in SDR).
+ */
+int                       evo_agc_runtime_set_hdr_output(int enable);
+int                       evo_agc_runtime_hdr_output_active(void);
+/* color_trc of the last video frame presented (16 = PQ, 18 = HLG, else SDR),
+ * -1 before any. What the loop uses to decide whether HDR10 is wanted. */
+int                       evo_agc_runtime_last_video_trc(void);
 
 /* Layer surfaces for RmlUi PushLayer / CompositeLayers (backdrop-filter: blur).
 

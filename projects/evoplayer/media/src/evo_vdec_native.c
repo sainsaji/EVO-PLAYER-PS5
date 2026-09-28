@@ -483,6 +483,10 @@ static void slot_teardown(struct dec_slot *s)
 /* Full bring-up for `d`'s decoder at (w x h). Returns 0 on success with
  * everything stored in `*s`; non-zero rc (and `*s` left torn down) on any
  * failure. Safe before or after evo_jailbreak_self(). */
+/* Set around an on-demand 4K bring-up of a shallow-pipeline (10-bit) slot;
+ * 0 = use the descriptor's own depth. See the resize path. */
+static int s_depth_override = 0;
+
 static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
                         int w, int h, const char **stage)
 {
@@ -522,7 +526,8 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     config.max_width            = w;
     config.max_height           = h;
     config.max_dpb_frames       = SCE_VIDEODEC2_AUTO_FRAMES;   /* decoder self-sizes */
-    config.pipeline_depth       = (uint32_t)d->pipeline_depth;
+    config.pipeline_depth       = (uint32_t)(s_depth_override > 0 ? s_depth_override
+                                                                : d->pipeline_depth);
     config.compute_queue        = (uint64_t)s->compute_queue;
     config.cpu_affinity         = 0x3f;
     config.cpu_priority         = 700;
@@ -1295,8 +1300,16 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         note("EVO vdec native: %s slot already in use -> FFmpeg", d->tag);
         return NULL;
     }
+    uint32_t cap_w, cap_h;
+    slot_ceiling(d, &cap_w, &cap_h);
+    /* Size for the CODED picture, not display rounded to 16: an HEVC encoder
+     * may pad to its CTB size (up to 64) - NVENC codes a 3840x1610 scope
+     * stream as 3840x1632, and a 1616-high slot rejects every AU with
+     * 0x811d0302. Pad to 64, clamped to the ceiling supports() checked. */
     w = roundup16(w);
     h = roundup16(h);
+    if ((uint32_t)((w + 63) & ~63) <= cap_w) w = (w + 63) & ~63;
+    if ((uint32_t)((h + 63) & ~63) <= cap_h) h = (h + 63) & ~63;
 
     /*
      * On-demand grow, every codec (Phase 2). The slot was brought up at
@@ -1308,8 +1321,6 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
      * then refuses above 1080p, as before). The likeliest cause is flexible
      * memory fragmented by earlier grow/shrink cycles rather than exhausted.
      */
-    uint32_t cap_w, cap_h;
-    slot_ceiling(d, &cap_w, &cap_h);
     if (((uint32_t)w > slot->max_w || (uint32_t)h > slot->max_h) &&
         (uint32_t)w <= cap_w && (uint32_t)h <= cap_h) {
         uint32_t old_w = slot->max_w;
@@ -1318,7 +1329,28 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
              d->tag, old_w, old_h, w, h);
         slot_teardown(slot);
         const char *stage = "?";
+        /*
+         * A 10-bit slot keeps its shallow boot pipeline (depth 1, #38) for
+         * memory, but at 4K that means every frame must fully decode before
+         * the next can start, and a heavy stretch of 4K60 HDR - big
+         * keyframes at ~50 Mbit/s - overruns the 16.7 ms budget: frames
+         * arrive late and are dropped (hardware 2026-09-28, LG "Art" demo:
+         * 53 late drops, decode dipping to ~52 fps). At 4K take the proven
+         * codecs' depth; if that can't get its memory, fall back to depth 1.
+         */
+        const int deepen = d->pipeline_depth < DECODE_INPUT_QUEUE_DEPTH &&
+                           (w > 1920 || h > 1088);
+        s_depth_override = deepen ? DECODE_INPUT_QUEUE_DEPTH : 0;
         int rc = slot_bringup(slot, d, w, h, &stage);
+        if (rc != 0 && deepen) {
+            note("EVO vdec native: %s %dx%d at depth %d failed at [%s] rc=0x%08x - retrying at depth %d",
+                 d->tag, w, h, (int)DECODE_INPUT_QUEUE_DEPTH, stage, (unsigned)rc, d->pipeline_depth);
+            slot_teardown(slot);
+            s_depth_override = 0;
+            stage = "?";
+            rc = slot_bringup(slot, d, w, h, &stage);
+        }
+        s_depth_override = 0;
         if (rc == 0) {
             slot->ready = 1;
             note("EVO vdec native: on-demand resize %s to %dx%d OK", d->tag, w, h);
