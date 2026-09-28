@@ -31,7 +31,7 @@ system_dump/
 # -----------------------------------------------------------------------------
 # Build output
 # -----------------------------------------------------------------------------
-build/
+/build/
 output/elf/*
 output/pkg/*
 output/logs/*
@@ -275,6 +275,10 @@ output/hdr-clip/
 output/ffprobe-minimal
 output/probe/
 output/release/
+output/share/
+output/sample-4k-scope/
+output/testmedia/
+output/ts-probe/
 
 # #90: the provider bundle server stages a copy of assets/providers/ here, and
 # the uiview harness drops the provider seam's C objects here.

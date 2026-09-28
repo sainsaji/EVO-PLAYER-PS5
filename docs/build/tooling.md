@@ -143,7 +143,8 @@ docker compose run --rm ps5-dev bash -lc '
 | Script | What it does |
 |---|---|
 | `package-app.sh` | Compiles EVO with the native-app link tail, converts + FSELF-signs `eboot.bin`, assembles `output/app/PPSA99039/`. `--ffpfsc` also PFS-packs it to `PPSA99039.ffpfsc` (MkPFS — same format ProsperoLight ships). `--usb-remote` adds the scriptable FTP dev remote (`evo_status` + `evo_cmd`). `--probe` builds the sandbox probe instead of the player. `--breadcrumbs` (#51) also pops each diagnostic line as an on-screen notification — off by default since `/mnt/usb0/evo.log` + klog carry them all. |
-| `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
+| `deploy-app.sh` | FTP-uploads the folder (or, with `--ffpfsc`, the single image) to `/data/homebrew/`. `--undeploy` removes it. `--ffpfsc --fresh` is a **fresh install**: after the running-EVO check it wipes every EVO file (`tools/wipe-evo.py` — the app, `/data/evoplayer` settings/logins/playlists/calibration, and `/mnt/usb0/evo*`), then deploys. Does **not** launch — ShadowMountPlus + the launch-safety rule are on you. |
+| `../tools/wipe-evo.py` | The EVO-only console wipe behind `--fresh`. `python3 tools/wipe-evo.py <host>` is a dry run that lists what would go; `--do` deletes. Never touches other homebrew, games or non-EVO USB files. |
 | `setup-pfs-tool.sh` | Fetches MkPFS into `.deps/` (pinned, isolated venv). Called by `--ffpfsc`; needs network on first run. |
 | `setup-native-app-deps.sh` | Bootstraps the static zlib the host converter needs. Called by `package-app.sh`. |
 

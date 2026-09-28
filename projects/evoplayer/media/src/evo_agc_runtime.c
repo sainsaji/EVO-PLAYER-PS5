@@ -1258,6 +1258,10 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_VIDEO_HDR_PQ, &video_yuv_p010_pq_out_metadata,     "video_yuv_p010_pq_out"},
         {EVO_AGC_PIPE_VIDEO_HLG_PQ, &video_yuv_p010_hlg_pq_out_metadata, "video_yuv_p010_hlg_pq_out"},
         {EVO_AGC_PIPE_UI_PQ,        &ui_screen_2d_pq_out_metadata,       "ui_screen_2d_pq_out"},
+        {EVO_AGC_PIPE_NV12_HDR,     &video_yuv_nv12_hdr_metadata,        "video_yuv_nv12_hdr"},
+        {EVO_AGC_PIPE_NV12_HLG,     &video_yuv_nv12_hlg_metadata,        "video_yuv_nv12_hlg"},
+        {EVO_AGC_PIPE_NV12_HDR_PQ,  &video_yuv_nv12_pq_out_metadata,     "video_yuv_nv12_pq_out"},
+        {EVO_AGC_PIPE_NV12_HLG_PQ,  &video_yuv_nv12_hlg_pq_out_metadata, "video_yuv_nv12_hlg_pq_out"},
         {EVO_AGC_PIPE_VIDEO_PLANAR, &video_yuv_planar_metadata,   "video_yuv_planar"},
         /* #103 upscaler. Each is optional: a missing one makes the upscaler
          * fall back a mode (AI -> Sharp -> Off), never fail the runtime. */
@@ -1792,6 +1796,8 @@ static int agc_hdr_remap(int pipeline_id)
     case EVO_AGC_PIPE_UI:         to = EVO_AGC_PIPE_UI_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HDR:  to = EVO_AGC_PIPE_VIDEO_HDR_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HLG:  to = EVO_AGC_PIPE_VIDEO_HLG_PQ; break;
+    case EVO_AGC_PIPE_NV12_HDR:   to = EVO_AGC_PIPE_NV12_HDR_PQ; break;
+    case EVO_AGC_PIPE_NV12_HLG:   to = EVO_AGC_PIPE_NV12_HLG_PQ; break;
     default: break;
     }
     return g_agc_dev.pipelines[to].valid ? to : pipeline_id;
@@ -3558,7 +3564,10 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const uint32_t slot = g_agc_dev.current_slot;
     evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
 
-    g_agc_dev.last_video_trc = ten_bit ? color_trc : 1;
+    /* HDR is the transfer, not the bit depth: 8-bit HEVC does carry HLG
+     * (a broadcast 4K HLG channel, hardware 2026-09-28). */
+    const int hdr_src = (color_trc == 16 || color_trc == 18);
+    g_agc_dev.last_video_trc = hdr_src ? color_trc : 1;
 
     /* 1. Select Pipeline */
     int pipe_id;
@@ -3569,6 +3578,10 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
             pipe_id = EVO_AGC_PIPE_VIDEO_HLG;
         else
             pipe_id = EVO_AGC_PIPE_VIDEO_HDR;
+    } else if (!planar && hdr_src &&
+               g_agc_dev.pipelines[color_trc == 18 ? EVO_AGC_PIPE_NV12_HLG
+                                                   : EVO_AGC_PIPE_NV12_HDR].valid) {
+        pipe_id = (color_trc == 18) ? EVO_AGC_PIPE_NV12_HLG : EVO_AGC_PIPE_NV12_HDR;
     } else {
         pipe_id = planar ? EVO_AGC_PIPE_VIDEO_PLANAR : EVO_AGC_PIPE_VIDEO_NV12;
     }
@@ -3584,7 +3597,8 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const uint32_t src_w = (disp_w > 0 && disp_w <= coded_w) ? (uint32_t)disp_w : (uint32_t)coded_w;
     const uint32_t src_h = (disp_h > 0 && disp_h <= coded_h) ? (uint32_t)disp_h : (uint32_t)coded_h;
     agc_up_plan_t up_plan;
-    const int upscale = agc_upscale_plan(src_w, src_h, ten_bit, sx, sy, &up_plan);
+    /* the upscalers are SDR-only: off for any HDR source, 8-bit ones too */
+    const int upscale = agc_upscale_plan(src_w, src_h, ten_bit || hdr_src, sx, sy, &up_plan);
 
     /* 2. Fullscreen viewport and scissor */
     if (!upscale) {

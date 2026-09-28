@@ -5,6 +5,8 @@
 #   PS5_HOST=192.168.1.50 ./scripts/deploy-app.sh
 #   ./scripts/deploy-app.sh --ffpfsc          # upload the PFS image instead
 #   ./scripts/deploy-app.sh --undeploy        # remove the staged title (+ image)
+#   ./scripts/deploy-app.sh --ffpfsc --fresh  # FRESH INSTALL: wipe every EVO
+#                                             # file first (tools/wipe-evo.py)
 #
 # Uploads output/app/<TITLE_ID>/ to ftp://<host>:2121/data/homebrew/<TITLE_ID>/.
 # Files go up under a temporary name and are renamed into place; eboot.bin and
@@ -22,11 +24,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 ACTION="deploy"
 FFPFSC=0
 FORCE=0
+FRESH=0
 while (( $# )); do
     case "$1" in
         --undeploy) ACTION="undeploy" ;;
         --ffpfsc)   FFPFSC=1 ;;
         --force)    FORCE=1 ;;
+        --fresh)    FRESH=1 ;;
         -h|--help)  sed -n '2,16p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -40,6 +44,7 @@ if ! in_container; then
     [[ "${ACTION}" == undeploy ]] && FWD+=(--undeploy)
     (( FFPFSC )) && FWD+=(--ffpfsc)
     (( FORCE )) && FWD+=(--force)
+    (( FRESH )) && FWD+=(--fresh)
     reexec_in_container "deploy-app.sh" "${FWD[@]+"${FWD[@]}"}"
 fi
 
@@ -181,6 +186,14 @@ if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
     need_file "${FFPFSC_IMG}" "run ./scripts/package-app.sh --ffpfsc first"
     require_ps5_host
     check_evo_not_resident
+    if (( FRESH )); then
+        # A fresh install: every EVO file goes - the app, /data/evoplayer
+        # (settings, logins, playlists, calibration) and EVO's USB files -
+        # AFTER the resident check above, never over a running EVO.
+        begin "fresh install: wiping every EVO file on ${PS5_HOST}"
+        python3 "${REPO_ROOT}/tools/wipe-evo.py" "${PS5_HOST}" --do ||
+            die "wipe failed - nothing was deployed"
+    fi
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
 import sys, time

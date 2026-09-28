@@ -414,6 +414,19 @@ def main() -> int:
     build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) -> SDR: BT.2100 OOTF + BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_pq_out", PQ_OUT_FS, 2, "P010 HDR10 -> HDR10 output (PQ passthrough)")
     build("video_yuv_p010_hlg_pq_out", HLG_PQ_FS, 2, "P010 HLG -> HDR10 output (BT.2100 OOTF, PQ)")
+
+    # 8-bit HDR: HEVC Main (8-bit) carrying HLG / PQ over BT.2020 exists -
+    # broadcast 4K HLG channels do it. Same maths; the NV12 planes are R8/RG8
+    # and already sample as 0..1, so drop the 10-bit-in-16 rescale.
+    def eight_bit(fs):
+        out = fs.replace(" * 64.0615844", "")
+        assert "64.0615844" not in out
+        return out
+
+    build("video_yuv_nv12_hdr", eight_bit(HDR_FS), 2, "NV12 8-bit PQ -> SDR (BT.2390 EETF + BT.2020->709)")
+    build("video_yuv_nv12_hlg", eight_bit(HLG_FS), 2, "NV12 8-bit HLG -> SDR (BT.2100 OOTF + BT.2390 EETF + BT.2020->709)")
+    build("video_yuv_nv12_pq_out", eight_bit(PQ_OUT_FS), 2, "NV12 8-bit PQ -> HDR10 output (PQ passthrough)")
+    build("video_yuv_nv12_hlg_pq_out", eight_bit(HLG_PQ_FS), 2, "NV12 8-bit HLG -> HDR10 output (BT.2100 OOTF, PQ)")
     print("OK")
     return 0
 

@@ -30,7 +30,14 @@ void evo_boot_log(const char *fmt, ...)
     __attribute__((format(printf, 1, 2)))
 #endif
     ;
+/* Put everything logged so far on the USB stick and fsync it - a breadcrumb.
+ * Blocks until the stick has it; the first call also opens the file. */
 void evo_boot_log_flush(void);
+/* The periodic flush from the render loop: wakes the writer thread and
+ * returns at once. Never stalls a frame on a busy USB stick. */
+void evo_boot_log_kick(void);
+/* Crash-handler use only: write still-queued lines to `fd` (no locks). */
+void evo_boot_log_crash_drain(int fd);
 
 /* Preferred names for new code — the file carries far more than the boot. */
 #define evo_log        evo_boot_log

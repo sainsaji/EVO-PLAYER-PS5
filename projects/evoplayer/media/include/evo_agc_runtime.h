@@ -39,7 +39,13 @@ enum {
     EVO_AGC_PIPE_VIDEO_HDR_PQ = 64,  /* HDR10 source -> PQ passthrough */
     EVO_AGC_PIPE_VIDEO_HLG_PQ = 65,  /* HLG source -> PQ */
     EVO_AGC_PIPE_UI_PQ = 66,         /* OSD / subtitles at 203-nit graphics white */
-    EVO_AGC_PIPE_COUNT = 67,
+    /* 8-bit HEVC carrying HLG / PQ (broadcast 4K HLG channels): the NV12
+     * twins of the four P010 HDR pipelines. */
+    EVO_AGC_PIPE_NV12_HDR = 67,       /* PQ  -> SDR */
+    EVO_AGC_PIPE_NV12_HLG = 68,       /* HLG -> SDR */
+    EVO_AGC_PIPE_NV12_HDR_PQ = 69,    /* PQ  -> HDR10 */
+    EVO_AGC_PIPE_NV12_HLG_PQ = 70,    /* HLG -> HDR10 */
+    EVO_AGC_PIPE_COUNT = 71,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -212,7 +218,8 @@ int                       evo_agc_runtime_set_120hz(int enable);
 int                       evo_agc_runtime_set_hdr_output(int enable);
 int                       evo_agc_runtime_hdr_output_active(void);
 /* color_trc of the last video frame presented (16 = PQ, 18 = HLG, else SDR),
- * -1 before any. What the loop uses to decide whether HDR10 is wanted. */
+ * -1 before any - whatever its bit depth. What the loop uses to decide
+ * whether HDR10 is wanted. */
 int                       evo_agc_runtime_last_video_trc(void);
 
 /* Layer surfaces for RmlUi PushLayer / CompositeLayers (backdrop-filter: blur).

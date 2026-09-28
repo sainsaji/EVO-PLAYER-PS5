@@ -56,6 +56,9 @@ static void evo_crash_handler(int sig, siginfo_t *si, void *ctx)
 
     int fd = open("/mnt/usb0/evo.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0) {
+        /* lines still queued for the log writer thread come first, so the
+         * log reads in order up to the crash */
+        evo_boot_log_crash_drain(fd);
         (void)write(fd, buf, (size_t)len);
         (void)close(fd);
     }

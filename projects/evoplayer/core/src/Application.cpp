@@ -827,6 +827,123 @@ static bool write_scanout_bmp(FILE* fp) {
     return true;
 }
 
+/*
+ * Playback frame-pacing trace - diagnostics only, no effect on playback.
+ *
+ * Every 5 s of playback it logs one "pace:" line: how many presents and new
+ * video frames there were, how evenly the presents were spaced, what each
+ * step of a player frame cost (video blit, UI, present incl. the flip wait),
+ * and - the one that shows judder - for how many presents each video frame
+ * stayed on screen. 59.94 fps on a 119.88 Hz output should be all "2"; a
+ * "3" is a frame held one refresh longer than its neighbours.
+ */
+struct PaceTrace {
+    using clk = std::chrono::steady_clock;
+    clk::time_point window{}, last_present{};
+    int presents = 0, frames = 0, since_frame = -1;
+    int held[5] = {0};                     /* 1, 2, 3, 4, 5+ presents */
+    int gap[4] = {0};                      /* <=12, 12-20, 20-30, >30 ms */
+    double gap_sum = 0, gap_max = 0;
+    double blit_sum = 0, blit_max = 0, ui_sum = 0, ui_max = 0, pres_sum = 0, pres_max = 0;
+    int blits = 0, uis = 0;
+
+    /* Where a whole loop iteration goes, phase by phase - so a stall outside
+     * blit / ui / present can be pinned on its phase. */
+    static constexpr int kPh = 8;
+    clk::time_point ph_t{};
+    double ph_cur[kPh] = {0}, ph_max[kPh] = {0};
+    int slow_by[kPh] = {0};
+    int iters = 0;
+
+    void mark(int i) {
+        const clk::time_point n = clk::now();
+        if (ph_t != clk::time_point{}) ph_cur[i] += ms(ph_t, n);
+        ph_t = n;
+    }
+    /* Loop top: close the previous iteration (the tail since present is
+     * phase 7) and charge it to its slowest phase if it overran 30 ms. */
+    void iter_begin() {
+        mark(7);
+        if (window == clk::time_point{}) {
+            for (double& v : ph_cur) v = 0;
+            return;
+        }
+        double total = 0;
+        int worst = 0;
+        for (int i = 0; i < kPh; ++i) {
+            total += ph_cur[i];
+            if (ph_cur[i] > ph_max[i]) ph_max[i] = ph_cur[i];
+            if (ph_cur[i] > ph_cur[worst]) worst = i;
+            ph_cur[i] = 0;
+        }
+        iters++;
+        if (total > 30.0) slow_by[worst]++;
+    }
+
+    static double ms(clk::time_point a, clk::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    }
+    static void add(double& sum, double& mx, double v) { sum += v; if (v > mx) mx = v; }
+
+    void clear(clk::time_point now) {
+        const clk::time_point lp = last_present, pt = ph_t;
+        const int sf = since_frame;
+        double cur[kPh];
+        for (int i = 0; i < kPh; ++i) cur[i] = ph_cur[i];
+        *this = PaceTrace();
+        window = now;
+        last_present = lp;
+        since_frame = sf;
+        ph_t = pt;
+        for (int i = 0; i < kPh; ++i) ph_cur[i] = cur[i];
+    }
+    void stop() { *this = PaceTrace(); }
+    void new_frame() {
+        if (since_frame > 0) held[since_frame >= 5 ? 4 : since_frame - 1]++;
+        since_frame = 0;
+        frames++;
+    }
+    void blit(double d) { add(blit_sum, blit_max, d); blits++; }
+    void ui(double d)   { add(ui_sum, ui_max, d); uis++; }
+    void present(clk::time_point t0, clk::time_point t1) {
+        if (window == clk::time_point{}) window = t0;
+        presents++;
+        if (since_frame >= 0) since_frame++;
+        add(pres_sum, pres_max, ms(t0, t1));
+        if (last_present != clk::time_point{}) {
+            const double g = ms(last_present, t1);
+            add(gap_sum, gap_max, g);
+            gap[g <= 12.0 ? 0 : g <= 20.0 ? 1 : g <= 30.0 ? 2 : 3]++;
+        }
+        last_present = t1;
+        const double span = ms(window, t1);
+        if (span >= 5000.0 && presents > 1) {
+            evo_boot_log("pace: %.1fs presents=%d (%.1f/s) video_frames=%d (%.2f/s) | gap avg %.2f max %.2f ms"
+                         " [<=12:%d 12-20:%d 20-30:%d >30:%d] | blit avg %.2f max %.2f | ui avg %.2f max %.2f"
+                         " | present avg %.2f max %.2f | held 1:%d 2:%d 3:%d 4:%d 5+:%d",
+                         span / 1000.0, presents, presents * 1000.0 / span,
+                         frames, frames * 1000.0 / span,
+                         gap_sum / (presents - 1 > 0 ? presents - 1 : 1), gap_max,
+                         gap[0], gap[1], gap[2], gap[3],
+                         blits ? blit_sum / blits : 0.0, blit_max,
+                         uis ? ui_sum / uis : 0.0, ui_max,
+                         pres_sum / presents, pres_max,
+                         held[0], held[1], held[2], held[3], held[4]);
+            evo_boot_log("pace:   loop max ms pumps %.1f input %.1f update %.1f decide %.1f fetch %.1f"
+                         " draw %.1f present %.1f tail %.1f | slow(>30ms) iters=%d by phase:"
+                         " pumps %d input %d update %d decide %d fetch %d draw %d present %d tail %d",
+                         ph_max[0], ph_max[1], ph_max[2], ph_max[3], ph_max[4], ph_max[5],
+                         ph_max[6], ph_max[7],
+                         slow_by[0] + slow_by[1] + slow_by[2] + slow_by[3] + slow_by[4] +
+                         slow_by[5] + slow_by[6] + slow_by[7],
+                         slow_by[0], slow_by[1], slow_by[2], slow_by[3], slow_by[4],
+                         slow_by[5], slow_by[6], slow_by[7]);
+            clear(t1);
+        }
+    }
+};
+PaceTrace g_pace;
+
 } // namespace
 
 int Application::run() {
@@ -878,6 +995,7 @@ int Application::run() {
             }
         }
 
+        g_pace.iter_begin();
         if (frame < 5) {
             evo_bt("frame %d: start poll", frame);
             evo_boot_log_flush();
@@ -916,8 +1034,11 @@ int Application::run() {
         evo_webui_pump();   /* #101: the system browser, when a web UI is open */
         webui_playback_pump();
 
+        /* Non-blocking: wakes the log writer thread. This was a blocking
+         * fflush+fsync to the USB stick the movie streams from, once a
+         * second, and it stalled 4K playback 33-83 ms at a time. */
         if ((frame & 63) == 0) {
-            evo_boot_log_flush();
+            evo_boot_log_kick();
         }
 
         static int jb_repaint = 0;
@@ -967,6 +1088,7 @@ int Application::run() {
             evo_boot_log_flush();
         }
 
+        g_pace.mark(0);   /* pumps: net, bundles, usb remote, web UI, jailbreak */
         // 1. Controller input & auto-repeat
         std::memset(&padData, 0, sizeof(padData));
         uint32_t pressed = 0;
@@ -1171,10 +1293,12 @@ int Application::run() {
             }
             s_lastTickUs = nowUs;
         }
+        g_pace.mark(1);   /* input */
         evo::animation::AnimationManager::getInstance().update(frameDeltaMs);
         /* #102: a finished subtitle auto-sync is applied on this thread. */
         prospero_subtitle_autosync_pump();
         m_screenManager->update(frameDeltaMs);
+        g_pace.mark(2);   /* update */
 
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
@@ -1266,11 +1390,13 @@ int Application::run() {
             }
         }
 
+        g_pace.mark(3);   /* decide: player mode, 120 Hz, HDR10, uiActive */
         // 4. Video Quad blit & Screen rendering
         bool swap = false;
         static int64_t s_last_pts = -1;
         if (!isPlayer) {
             s_last_pts = -1;
+            g_pace.stop();
         }
 
         if (isPlayer) {
@@ -1288,6 +1414,7 @@ int Application::run() {
             pp_video_frame f;
             std::memset(&f, 0, sizeof(f));
             int have = (pp_playback_get_video_frame(&g_pp_pb, &f) && f.ready);
+            g_pace.mark(4);   /* fetch: alloc snapshot + get the video frame */
             int64_t current_pts = g_pp_pb.display_pts_us;
             bool new_frame = (current_pts != s_last_pts);
 
@@ -1383,17 +1510,22 @@ int Application::run() {
                                            ? "GPU over budget - using Sharp"
                                            : "GPU over budget - turned off");
                 int is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE && !f.held && f.uv != nullptr) ? 1 : 0;
+                if (new_frame) g_pace.new_frame();
+                const auto blit_t0 = PaceTrace::clk::now();
                 evo_agc_blit_yuv(f.y, f.y_pitch, f.uv, f.uv_pitch,
                                  f.u, f.u_pitch, f.v, f.v_pitch,
                                  static_cast<int>(f.coded_w), static_cast<int>(f.coded_h),
                                  static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                  view_mode, f.ten_bit, f.color_trc,
                                  is_direct, current_pts);
+                g_pace.blit(PaceTrace::ms(blit_t0, PaceTrace::clk::now()));
                 swap = true;
             }
 
             if (m_uiScratch && should_render && !upcmp_frame) {
+                const auto ui_t0 = PaceTrace::clk::now();
                 m_screenManager->render(m_uiScratch, DisplayWidth, DisplayHeight);
+                g_pace.ui(PaceTrace::ms(ui_t0, PaceTrace::clk::now()));
                 /*
                  * The video quad only repaints the image. Any OSD, scrub bar or
                  * subtitle drawn on top of it - or over a letterbox bar - has to
@@ -1492,7 +1624,11 @@ int Application::run() {
                 evo_boot_log("app present begin isPlayer=1");
                 evo_boot_log_flush();
             }
+            g_pace.mark(5);   /* draw: blit, UI, toast, keyboard */
+            const auto present_t0 = PaceTrace::clk::now();
             evo_agc_runtime_present();
+            g_pace.mark(6);   /* present, incl. the flip wait */
+            if (isPlayer) g_pace.present(present_t0, PaceTrace::clk::now());
             evo_rmlui_end_frame();
 
 #ifdef EVO_APP_MODULE
