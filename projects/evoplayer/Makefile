@@ -115,6 +115,7 @@ MEDIA_SRCS := \
     media/src/evo_adec_native.c \
     media/src/evo_vdec_native.c \
     media/src/evo_sweep.c \
+    media/src/evo_speaker_cal.c \
     media/src/evo_playback.c \
     src/evo_toast.c \
     src/evo_recent.c \
@@ -169,6 +170,7 @@ CORE_SRCS := \
     core/src/services/CoverArtService.cpp \
     core/src/services/SoundEffectEngine.cpp \
     core/src/services/SurroundTestService.cpp \
+    core/src/services/SpeakerCalibrationService.cpp \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/PlaybackController.cpp \
     core/src/screens/ScreenManager.cpp \

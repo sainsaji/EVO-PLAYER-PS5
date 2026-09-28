@@ -105,11 +105,61 @@ vec3 yuv2020(float y, float U, float V) {
                 Yp + 1.8814 * U);
 }
 
-/* SMPTE ST.2084 (PQ) electro-optical transfer function. */
-float pq_eotf(float N) {
+
+/*
+ * HDR -> SDR, the way broadcast does it (#hdr-brightness):
+ *   linear BT.2020 light in nits
+ *   -> BT.2020 to BT.709 primaries (without it every HDR colour reads washed out)
+ *   -> ITU-R BT.2390 EETF on max(R,G,B), in the PQ domain: shadows and mids keep
+ *      their mastered level, only highlights roll off towards the target peak
+ *   -> divide by the SDR target (100 nits = SDR reference white) and encode.
+ * The old curve was Reinhard at 100 nits, which put reference white at 50 %
+ * and dimmed everything under it too - "HDR looks dark".
+ */
+const float SRC_PEAK = 1000.0;   /* assumed mastering peak - the common case */
+const float SDR_PEAK = 100.0;    /* the SDR display the image is fitted to */
+
+float pq_oetf(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+float pq_to_nits(float N) {
     float Np = pow(max(N, 0.0), 1.0 / 78.84375);
-    return pow(max(Np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * Np),
-               1.0 / 0.1593017578125);
+    return 10000.0 * pow(max(Np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * Np),
+                         1.0 / 0.1593017578125);
+}
+
+/* BT.2390 EETF: source [0, SRC_PEAK] -> [0, SDR_PEAK], Hermite knee in PQ. */
+float eetf(float nits) {
+    float maxLum = pq_oetf(SRC_PEAK);
+    float e1 = min(pq_oetf(nits) / maxLum, 1.0);
+    float maxT = pq_oetf(SDR_PEAK) / maxLum;
+    float ks = 1.5 * maxT - 0.5;
+    float e2 = e1;
+    if (e1 > ks) {
+        float t = (e1 - ks) / (1.0 - ks);
+        float t2 = t * t, t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks
+           + (t3 - 2.0 * t2 + t) * (1.0 - ks)
+           + (-2.0 * t3 + 3.0 * t2) * maxT;
+    }
+    return pq_to_nits(e2 * maxLum);
+}
+
+vec3 hdr_nits_to_sdr(vec3 nits2020) {
+    /* BT.2020 -> BT.709 primaries (linear light, ITU-R BT.2087) */
+    vec3 c = vec3(dot(nits2020, vec3( 1.6605, -0.5876, -0.0728)),
+                  dot(nits2020, vec3(-0.1246,  1.1329, -0.0083)),
+                  dot(nits2020, vec3(-0.0182, -0.1006,  1.1187)));
+    c = max(c, vec3(0.0));
+    /* tone-map the brightest channel and scale all three by the same
+     * factor, so hues don't shift the way per-channel mapping does */
+    float m = max(max(c.r, c.g), c.b);
+    if (m > 0.0)
+        c *= eetf(m) / m;
+    vec3 sdr = clamp(c / SDR_PEAK, 0.0, 1.0);
+    return pow(sdr, vec3(1.0 / 2.2));
 }
 
 void main() {
@@ -117,10 +167,8 @@ void main() {
     vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
 
     vec3 pq_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
-    vec3 linear_10k = vec3(pq_eotf(pq_rgb.r), pq_eotf(pq_rgb.g), pq_eotf(pq_rgb.b));
-    vec3 nits = linear_10k * 100.0;
-    vec3 sdr_linear = nits / (1.0 + nits);       /* Reinhard tone map to SDR */
-    out_color = vec4(pow(sdr_linear, vec3(1.0 / 2.2)), 1.0);
+    vec3 nits = vec3(pq_to_nits(pq_rgb.r), pq_to_nits(pq_rgb.g), pq_to_nits(pq_rgb.b));
+    out_color = vec4(hdr_nits_to_sdr(nits), 1.0);
 }
 """
 
@@ -146,18 +194,146 @@ float hlg_eotf(float e) {
     return (exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0;
 }
 
+
+/*
+ * HDR -> SDR, the way broadcast does it (#hdr-brightness):
+ *   linear BT.2020 light in nits
+ *   -> BT.2020 to BT.709 primaries (without it every HDR colour reads washed out)
+ *   -> ITU-R BT.2390 EETF on max(R,G,B), in the PQ domain: shadows and mids keep
+ *      their mastered level, only highlights roll off towards the target peak
+ *   -> divide by the SDR target (100 nits = SDR reference white) and encode.
+ * The old curve was Reinhard at 100 nits, which put reference white at 50 %
+ * and dimmed everything under it too - "HDR looks dark".
+ */
+const float SRC_PEAK = 1000.0;   /* assumed mastering peak - the common case */
+const float SDR_PEAK = 100.0;    /* the SDR display the image is fitted to */
+
+float pq_oetf(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+float pq_to_nits(float N) {
+    float Np = pow(max(N, 0.0), 1.0 / 78.84375);
+    return 10000.0 * pow(max(Np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * Np),
+                         1.0 / 0.1593017578125);
+}
+
+/* BT.2390 EETF: source [0, SRC_PEAK] -> [0, SDR_PEAK], Hermite knee in PQ. */
+float eetf(float nits) {
+    float maxLum = pq_oetf(SRC_PEAK);
+    float e1 = min(pq_oetf(nits) / maxLum, 1.0);
+    float maxT = pq_oetf(SDR_PEAK) / maxLum;
+    float ks = 1.5 * maxT - 0.5;
+    float e2 = e1;
+    if (e1 > ks) {
+        float t = (e1 - ks) / (1.0 - ks);
+        float t2 = t * t, t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks
+           + (t3 - 2.0 * t2 + t) * (1.0 - ks)
+           + (-2.0 * t3 + 3.0 * t2) * maxT;
+    }
+    return pq_to_nits(e2 * maxLum);
+}
+
+vec3 hdr_nits_to_sdr(vec3 nits2020) {
+    /* BT.2020 -> BT.709 primaries (linear light, ITU-R BT.2087) */
+    vec3 c = vec3(dot(nits2020, vec3( 1.6605, -0.5876, -0.0728)),
+                  dot(nits2020, vec3(-0.1246,  1.1329, -0.0083)),
+                  dot(nits2020, vec3(-0.0182, -0.1006,  1.1187)));
+    c = max(c, vec3(0.0));
+    /* tone-map the brightest channel and scale all three by the same
+     * factor, so hues don't shift the way per-channel mapping does */
+    float m = max(max(c.r, c.g), c.b);
+    if (m > 0.0)
+        c *= eetf(m) / m;
+    vec3 sdr = clamp(c / SDR_PEAK, 0.0, 1.0);
+    return pow(sdr, vec3(1.0 / 2.2));
+}
+
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
     vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
 
     vec3 hlg_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
     vec3 scene = vec3(hlg_eotf(hlg_rgb.r), hlg_eotf(hlg_rgb.g), hlg_eotf(hlg_rgb.b));
-    vec3 nits = pow(max(scene, 0.0), vec3(1.2)) * 100.0;   /* OOTF, gamma 1.2 */
-    vec3 sdr_linear = nits / (1.0 + nits);
-    out_color = vec4(pow(sdr_linear, vec3(1.0 / 2.2)), 1.0);
+    /* BT.2100 HLG OOTF for a 1000-nit display: system gamma 1.2, on luminance */
+    float ys = max(dot(scene, vec3(0.2627, 0.6780, 0.0593)), 1e-6);
+    vec3 nits = 1000.0 * pow(ys, 0.2) * scene;
+    out_color = vec4(hdr_nits_to_sdr(nits), 1.0);
 }
 """
 
+
+# ---------------------------------------------------------------------------
+# Real HDR10 output (the display is registered Bgr10A2Bt2100Pq): these write
+# BT.2020 PQ code values straight to a 10:10:10:2 scanout. Nothing is tone
+# mapped - the TV does that for its own panel, which is the point of HDR10.
+# ---------------------------------------------------------------------------
+
+PQ_OUT_FS = """#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D uY;
+layout(set = 1, binding = 1) uniform sampler2D uUV;
+
+layout(location = 0) in vec2 vUV;
+layout(location = 0) out vec4 out_color;
+
+vec3 yuv2020(float y, float U, float V) {
+    float Yp = (y - 0.0627451) * 1.1640625;
+    return vec3(Yp + 1.4746 * V,
+                Yp - 0.16455 * U - 0.57135 * V,
+                Yp + 1.8814 * U);
+}
+
+/* HDR10 source -> HDR10 output: the decoded R'G'B' already IS BT.2020 PQ, so
+ * the only work is YCbCr -> RGB. */
+void main() {
+    float y = texture(uY, vUV).r * 64.0615844;
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    out_color = vec4(clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0), 1.0);
+}
+"""
+
+HLG_PQ_FS = """#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D uY;
+layout(set = 1, binding = 1) uniform sampler2D uUV;
+
+layout(location = 0) in vec2 vUV;
+layout(location = 0) out vec4 out_color;
+
+vec3 yuv2020(float y, float U, float V) {
+    float Yp = (y - 0.0627451) * 1.1640625;
+    return vec3(Yp + 1.4746 * V,
+                Yp - 0.16455 * U - 0.57135 * V,
+                Yp + 1.8814 * U);
+}
+
+float hlg_eotf(float e) {
+    if (e <= 0.5)
+        return (e * e) / 3.0;
+    return (exp((e - 0.55991073) / 0.17883277) + 0.28466892) / 12.0;
+}
+
+float pq_oetf(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+/* HLG -> HDR10: scene light, the BT.2100 OOTF for a 1000-nit reference
+ * display (system gamma 1.2, on luminance), then PQ-encode. BT.2020 both
+ * sides, so no primaries conversion. */
+void main() {
+    float y = texture(uY, vUV).r * 64.0615844;
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    vec3 hlg_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
+    vec3 scene = vec3(hlg_eotf(hlg_rgb.r), hlg_eotf(hlg_rgb.g), hlg_eotf(hlg_rgb.b));
+    float ys = max(dot(scene, vec3(0.2627, 0.6780, 0.0593)), 1e-6);
+    vec3 nits = 1000.0 * pow(ys, 0.2) * scene;
+    out_color = vec4(pq_oetf(nits.r), pq_oetf(nits.g), pq_oetf(nits.b), 1.0);
+}
+"""
 
 def resource_mapping(sampler_count: int) -> str:
     """Vertex uniform block at set 0, fragment samplers at set 1.
@@ -234,8 +410,10 @@ def main() -> int:
     print("Generating video .pipe files...")
     build("video_yuv_nv12", NV12_FS, 2, "NV12 8-bit SDR, BT.601 limited range")
     build("video_yuv_planar", PLANAR_FS, 3, "planar I420 8-bit SDR, BT.601 limited")
-    build("video_yuv_p010_hdr", HDR_FS, 2, "P010 10-bit PQ (ST.2084) tone-mapped to SDR")
-    build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) tone-mapped to SDR")
+    build("video_yuv_p010_hdr", HDR_FS, 2, "P010 10-bit PQ (ST.2084) -> SDR: BT.2390 EETF + BT.2020->709")
+    build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) -> SDR: BT.2100 OOTF + BT.2390 EETF + BT.2020->709")
+    build("video_yuv_p010_pq_out", PQ_OUT_FS, 2, "P010 HDR10 -> HDR10 output (PQ passthrough)")
+    build("video_yuv_p010_hlg_pq_out", HLG_PQ_FS, 2, "P010 HLG -> HDR10 output (BT.2100 OOTF, PQ)")
     print("OK")
     return 0
 

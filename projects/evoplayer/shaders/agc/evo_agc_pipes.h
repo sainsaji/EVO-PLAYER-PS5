@@ -4,6 +4,7 @@
 
 #include "ui_backdrop_blur_pipe.h"
 #include "ui_screen_2d_pipe.h"
+#include "ui_screen_2d_pq_out_pipe.h"
 #include "upscale_a4k_final_pipe.h"
 #include "upscale_a4k_m_acc0_pipe.h"
 #include "upscale_a4k_m_acc1_pipe.h"
@@ -65,6 +66,8 @@
 #include "video_yuv_nv12_pipe.h"
 #include "video_yuv_p010_hdr_pipe.h"
 #include "video_yuv_p010_hlg_pipe.h"
+#include "video_yuv_p010_hlg_pq_out_pipe.h"
+#include "video_yuv_p010_pq_out_pipe.h"
 #include "video_yuv_planar_pipe.h"
 
 #endif /* EVO_AGC_PIPES_H */

@@ -28,6 +28,7 @@ struct EvoRmlProf {
     long   geo_quad_n,  geo_tri_n,  clip_n,  gentex_n,  loadtex_n;
     long   update_n,    render_n;
     long   gentex_px;
+    long   compile_n;   /* CompileGeometry calls - geometry RmlUi had to rebuild */
 };
 
 extern EvoRmlProf g_evo_rml_prof;

@@ -1,5 +1,6 @@
 #pragma once
 #include <RmlUi/Core.h>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <memory>
@@ -478,42 +479,22 @@ struct EvoImageState {
     bool operator!=(const EvoImageState& o) const { return !(*this == o); }
 };
 
-struct EvoSurroundSpeaker {
-    std::string name;
-    std::string label;
-    double hz = 0.0;
-    int dx = 0;
-    int dy = 0;
-    int ch = -1;
-    int item_idx = -1;
-    bool hidden = false;
-
-    bool operator==(const EvoSurroundSpeaker& o) const {
-        return name == o.name && label == o.label && hz == o.hz && dx == o.dx &&
-               dy == o.dy && ch == o.ch && item_idx == o.item_idx && hidden == o.hidden;
-    }
-    bool operator!=(const EvoSurroundSpeaker& o) const { return !(*this == o); }
-};
-
+/* The surround params by value, with their strings owned here. Pointer fields
+ * in `p` are nulled so the byte compare below sees only real state; the bridge
+ * zero-fills `p` first, so padding compares equal too. */
 struct EvoSurroundState {
-    bool rail_focused = false;
-    bool is_51_layout = false;
-    int selected_item = 0;
-    int active_channel = -1;
-    int surround_mode = 0;
-    float anim_time = 0.0f;
-    float orb_x = 0.0f;
-    float orb_y = 0.0f;
-    bool  orb_active = false;
-    std::vector<float> proximity;
-    std::vector<EvoSurroundSpeaker> speakers;
+    evo_rmlui_surround_params_t p;
+    std::string names[EVO_RMLUI_SURROUND_SPEAKERS];
+    std::string labels[EVO_RMLUI_SURROUND_SPEAKERS];
+    std::string cal_message;
+
+    EvoSurroundState() { std::memset(&p, 0, sizeof(p)); }
 
     bool operator==(const EvoSurroundState& o) const {
-        return rail_focused == o.rail_focused && is_51_layout == o.is_51_layout &&
-               selected_item == o.selected_item && active_channel == o.active_channel &&
-               surround_mode == o.surround_mode && anim_time == o.anim_time &&
-               orb_x == o.orb_x && orb_y == o.orb_y && orb_active == o.orb_active &&
-               proximity == o.proximity && speakers == o.speakers;
+        if (std::memcmp(&p, &o.p, sizeof(p)) != 0 || cal_message != o.cal_message) return false;
+        for (int i = 0; i < EVO_RMLUI_SURROUND_SPEAKERS; i++)
+            if (names[i] != o.names[i] || labels[i] != o.labels[i]) return false;
+        return true;
     }
     bool operator!=(const EvoSurroundState& o) const { return !(*this == o); }
 };

@@ -110,7 +110,13 @@ int buildSectionDefs(int section, SettingDef* d) {
             d[6].disabled = true;
             d[6].detail = "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
         }
-        n = 7;
+
+        d[7] = {"HDR OUTPUT", "HDR10 TO THE TV WHILE HDR VIDEO PLAYS",
+                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 2, static_cast<int>(settings->getHdrOutputMode()), {}};
+        for (int i = 0; i < 2; ++i)
+            d[7].opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
+        n = 8;
         break;
 
 
@@ -324,6 +330,7 @@ void applyOption(int section, int def, int opt) {
             }
         }
     }
+    else if (section == 0 && def == 7) st->setHdrOutputMode(static_cast<HdrOutputMode>(opt));
     else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
 
     else if (section == 2 && def == 0) {

@@ -27,6 +27,7 @@
 #include "evo_adec.h"
 #include "pp_playback.h"
 #include "evo_boot_log.h"
+#include "evo_speaker_cal.h"
 
 #ifndef SCREEN_PLAYER
 #define SCREEN_PLAYER 2
@@ -127,6 +128,10 @@ static void audio_queue_push(int16_t *buf) {
     }
     if (audio_queue_count >= AUDIO_QUEUE_BLOCKS)
         return;
+
+    /* #106: the Surround Studio's measured per-speaker level + delay trims.
+     * A no-op unless the port is 8-channel and a profile was applied. */
+    evo_speaker_cal_process(buf, AUDIO_BLOCK_SAMPLES, evo_audio_channels);
 
     memcpy(audio_queue[audio_queue_write], buf,
            (size_t)AUDIO_BLOCK_SAMPLES * evo_audio_channels * sizeof(int16_t));

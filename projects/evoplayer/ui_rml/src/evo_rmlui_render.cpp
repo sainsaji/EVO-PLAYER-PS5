@@ -429,6 +429,9 @@ void EvoRenderInterface::ReleaseTexture(Rml::TextureHandle texture) {
 Rml::CompiledGeometryHandle EvoRenderInterface::CompileGeometry(Rml::Span<const Rml::Vertex> vertices,
                                                                Rml::Span<const int> indices)
 {
+#ifdef EVO_RML_PROFILE
+    g_evo_rml_prof.compile_n++;
+#endif
     RmlCompiledGeo* geo = new RmlCompiledGeo();
     geo->vertices.assign(vertices.begin(), vertices.end());
     geo->indices.assign(indices.begin(), indices.end());

@@ -354,10 +354,17 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
         PROV_LOG("unknown provider '%s'", provider_id ? provider_id : "(null)");
         return false;
     }
-    if (!evo_provider_is_enabled(provider_id)) {
+    /* A provider with no source yet is disabled by default, but its own setup
+     * page is the only way to give it one - so it may open to be set up. Only
+     * a configured provider the user switched off stays shut. (Refusing both
+     * made IPTV unreachable on every fresh install.) */
+    const bool configured = m_provider->is_configured && m_provider->is_configured();
+    if (!evo_provider_is_enabled(provider_id) && configured) {
         PROV_LOG("'%s' is disabled", provider_id);
         return false;
     }
+    if (!configured)
+        PROV_LOG("'%s' is not set up yet - opening for setup", provider_id);
 
     m_provider_id = provider_id;
     m_using_fallback = false;

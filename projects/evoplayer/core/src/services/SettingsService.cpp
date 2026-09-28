@@ -53,6 +53,14 @@ const char* SettingsService::getAiNetworkName(AiNetwork network) const {
     }
 }
 
+const char* SettingsService::getHdrOutputModeName(HdrOutputMode mode) const {
+    switch (mode) {
+        case HdrOutputMode::Off:  return "OFF (TONE-MAP TO SDR)";
+        case HdrOutputMode::Auto:
+        default:                  return "AUTO (MATCH CONTENT)";
+    }
+}
+
 const char* SettingsService::getRefreshRateModeName(RefreshRateMode mode) const {
     switch (mode) {
         case RefreshRateMode::Off:          return "OFF";
@@ -99,7 +107,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -112,10 +120,11 @@ bool SettingsService::saveSettings() {
         m_subtitleFontFace,
         m_keyboardType,
         static_cast<int>(m_decoderPreference),
-        1, // marker that keyboard preference was explicitly saved
+        2, // keyboard preference saved with the native-IME default (see loadSettings)
         static_cast<int>(m_upscaler), // line 14 (#103)
         static_cast<int>(m_aiNetwork), // line 15 (#103)
-        static_cast<int>(m_refreshRateMode) // line 16 (120 Hz output mode)
+        static_cast<int>(m_refreshRateMode), // line 16 (120 Hz output mode)
+        static_cast<int>(m_hdrOutputMode)    // line 17 (HDR10 output)
     );
 
     std::fclose(file);
@@ -145,9 +154,10 @@ bool SettingsService::loadSettings() {
     int rawUpscaler = 0;
     int rawAiNetwork = 0;
     int rawRefreshRateMode = 0;
+    int rawHdrOutputMode = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -163,7 +173,8 @@ bool SettingsService::loadSettings() {
         &explicitKeyboardMarker,
         &rawUpscaler,
         &rawAiNetwork,
-        &rawRefreshRateMode
+        &rawRefreshRateMode,
+        &rawHdrOutputMode
     );
 
     std::fclose(file);
@@ -194,7 +205,11 @@ bool SettingsService::loadSettings() {
         m_subtitleFontFace = rawSubtitleFace;
     }
     if (readCount >= 11) {
-        if (readCount >= 13 && explicitKeyboardMarker == 1) {
+        /* Marker 2 = saved with the corrected default. Files carrying
+         * marker 1 were written by builds whose default was secretly the
+         * virtual keyboard, so their value is not a real choice: they get
+         * the native IME back, once, and are re-saved with marker 2. */
+        if (readCount >= 13 && explicitKeyboardMarker == 2) {
             m_keyboardType = rawKeyboardType;
         } else {
             m_keyboardType = EVO_KEYBOARD_TYPE_NATIVE;
@@ -212,6 +227,9 @@ bool SettingsService::loadSettings() {
     }
     if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 2) {
         m_refreshRateMode = static_cast<RefreshRateMode>(rawRefreshRateMode);
+    }
+    if (readCount >= 17 && rawHdrOutputMode >= 0 && rawHdrOutputMode <= 1) {
+        m_hdrOutputMode = static_cast<HdrOutputMode>(rawHdrOutputMode);
     }
 
     syncThemeToRmlUi();

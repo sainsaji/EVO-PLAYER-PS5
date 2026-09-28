@@ -105,6 +105,13 @@ enum class RefreshRateMode : int {
     PlaybackOnly = 2
 };
 
+// HDR10 output: Auto switches the TV into HDR10 while an HDR10 / HLG video is
+// on screen (and back to SDR otherwise); Off keeps SDR and tone-maps HDR.
+enum class HdrOutputMode : int {
+    Auto = 0,
+    Off = 1
+};
+
 
 // File Classification for Storage Browser
 enum class FileCategory : int {
