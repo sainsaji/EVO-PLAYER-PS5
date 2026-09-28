@@ -47,6 +47,8 @@ extern int                 player_paused;
 extern int                 screen;
 extern double              media_duration_sec;
 extern int                 playback_profile;
+/* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
+extern volatile int        pb_prebuffer_hold;
 extern struct SwsContext  *play_sws;
 extern AVFormatContext    *play_fmt;
 
@@ -567,6 +569,7 @@ void *video_decode_thread_func(void *arg) {
         if (
             player_paused ||
             video_decode_hold ||
+            pb_prebuffer_hold ||
             screen != SCREEN_PLAYER ||
             !video_decode_ready
         ) {

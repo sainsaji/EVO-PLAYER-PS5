@@ -42,6 +42,8 @@ int sceAudioOutOutput(int handle, const void *ptr);
 extern int               screen;
 extern pp_playback       g_pp_pb;
 extern int               player_paused;
+/* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
+extern volatile int      pb_prebuffer_hold;
 extern double            video_clock_seconds;
 extern double            first_video_pts_seconds;
 extern int               video_stream_index;
@@ -383,7 +385,13 @@ void *audio_decode_thread_func(void *arg) {
     if (!af) return NULL;
 
     while (audio_decode_thread_running) {
-        if (player_paused || screen != 2) {
+        /*
+         * pb_prebuffer_hold parks audio alongside video at open. It has to be
+         * both or neither: audio is the master clock, so letting it run while
+         * video is held would advance the clock against frames that have not
+         * been decoded yet, and every one of them would arrive late.
+         */
+        if (player_paused || pb_prebuffer_hold || screen != 2) {
             /* Parked - see the note on the video decode thread. */
             usleep(5000);
             continue;

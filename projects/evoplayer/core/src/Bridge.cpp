@@ -61,6 +61,31 @@ int current_profile = 0;
 int playback_profile = 1;
 int video_packet_cap = 96;
 int audio_packet_cap = 96;
+
+/*
+ * Start-of-stream pre-buffer (live/network sources only).
+ *
+ * The packet caps above are a ceiling, not a target: the demux thread reads as
+ * fast as the source allows and only throttles once the queue is full. A
+ * source delivering at roughly real time therefore leaves the queue hovering
+ * near empty, and every network hiccup lands straight on the decoder - on
+ * hardware, IPTV channels stuttering at 11-20 fps with frame gaps up to 967 ms
+ * while decode used 0.19 ms of a 33 ms budget and the render loop logged zero
+ * slow iterations. Nothing was slow; the frames simply were not there.
+ *
+ * So hold the decode threads at open until the queue has a cushion. They park
+ * themselves on pb_prebuffer_hold exactly as they do for a seek; the demux
+ * thread clears it once the queue is deep enough, the deadline passes, or the
+ * stream ends. The frame loop keeps running throughout, which is what puts
+ * PlayerScreen's existing "BUFFERING..." on screen instead of a frozen picture.
+ *
+ * 48 packets is ~1.6 s at 30 fps, comfortably inside the 96-packet cap. The
+ * deadline is the backstop for a source too slow to ever reach that: start
+ * anyway and let it stutter rather than never starting at all.
+ */
+volatile int pb_prebuffer_hold = 0;
+int pb_prebuffer_packets = 48;
+int pb_prebuffer_max_ms = 4000;
 int decoder_thread_count = 4;
 int video_view_mode = 1;
 long long controls_last_used_ms = 0;

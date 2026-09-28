@@ -107,6 +107,8 @@ extern volatile double resume_base_anchor_pending;   /* evo_audio_out.c */
 extern double requested_resume_seek_pos;
 extern char current_media_path[768];
 extern int evo_audio_channels;
+/* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
+extern volatile int pb_prebuffer_hold;
 
 namespace evo {
 
@@ -384,6 +386,12 @@ void PlaybackController::stopPlayback() {
     video_decode_ready = 0;
     video_decode_done = 0;
     video_frame_loaded = 0;
+
+    /* Clear the pre-buffer hold on the way out. A file stopped mid-buffer
+     * would otherwise leave it armed, and the next file's decode threads would
+     * park on a hold that this file's demux thread is no longer running to
+     * clear - a permanent freeze on a source that needs no buffering at all. */
+    pb_prebuffer_hold = 0;
 
     /*
      * Reset the media clocks. These are session globals, not per-file state:
@@ -1037,6 +1045,26 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     pp_playback_on_file_open(&g_pp_pb);
 
     applyViewMode();
+
+    /*
+     * Pre-buffer a network source before letting the decoders run.
+     *
+     * Local files read far faster than real time, so their queue is full
+     * before the first frame is wanted and holding would only add latency for
+     * nothing. A network source is the one that arrives at roughly real time
+     * with jitter on top, which is where the cushion earns its keep.
+     *
+     * Armed here and cleared by the demux thread; the decode threads created
+     * below park on it themselves, so this call does not block - the frame
+     * loop keeps running and PlayerScreen shows "BUFFERING..." meanwhile.
+     */
+    {
+        const bool network_source =
+            filePath.rfind("http://", 0) == 0 || filePath.rfind("https://", 0) == 0;
+        pb_prebuffer_hold = network_source ? 1 : 0;
+        if (network_source)
+            SIO_STAGE("P8_03_PREBUFFER_ARM", filePath.c_str());
+    }
 
     // Start background worker threads
     demux_thread_running = 1;

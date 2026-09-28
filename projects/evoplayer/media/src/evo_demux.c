@@ -62,6 +62,12 @@ extern int      playback_profile;
 extern int      video_packet_cap;
 extern int      audio_packet_cap;
 
+/* Start-of-stream pre-buffer. Armed by PlaybackController for a network
+ * source, cleared here - see the note in Bridge.cpp. */
+extern volatile int pb_prebuffer_hold;
+extern int          pb_prebuffer_packets;
+extern int          pb_prebuffer_max_ms;
+
 extern pp_playback g_pp_pb;
 
 long long now_ms(void);
@@ -429,6 +435,60 @@ packet_queue_clear(
 }
 
 
+/*
+ * Release the pre-buffer hold once the queue has a cushion, the deadline has
+ * passed, or the stream ended. Called from the demux loop after each packet.
+ * `ended` is set on a read failure, where waiting for depth that will never
+ * arrive would park the decode threads for the whole deadline.
+ */
+static void prebuffer_check(long long deadline_ms, int ended)
+{
+    if (!pb_prebuffer_hold)
+        return;
+
+    /* An audio-only stream never fills the video queue, so measure whichever
+     * queue this stream actually feeds. */
+    const int have_video = (video_stream_index >= 0);
+    const int depth      = have_video ? packet_queue_count(&video_packet_queue)
+                                      : packet_queue_count(&audio_packet_queue);
+
+    /*
+     * Never ask for more than the queue can hold. At or above the cap the
+     * demux thread parks in the queue-full wait below and never gets back
+     * here to clear the hold - the decode threads would stay parked forever.
+     */
+    const int cap    = have_video ? video_packet_cap : audio_packet_cap;
+    int       target = pb_prebuffer_packets;
+    if (target > cap - 1) target = cap - 1;
+    if (target < 1)       target = 1;
+
+    /*
+     * A queue at its cap is as much cushion as this stream will ever get, so
+     * release on that too rather than sitting out the deadline. Without it, a
+     * stream whose audio caps out before video reaches its target would buffer
+     * for the full deadline every time it is opened.
+     */
+    const int any_full =
+        packet_queue_count(&video_packet_queue) >= video_packet_cap ||
+        packet_queue_count(&audio_packet_queue) >= audio_packet_cap;
+
+    const int timed_out = (now_ms() >= deadline_ms);
+    if (!ended && !timed_out && !any_full && depth < target)
+        return;
+
+    pb_prebuffer_hold = 0;
+    {
+        char d[64];
+        snprintf(d, sizeof d, "%s packets=%d target=%d",
+                 ended     ? "ended"
+                 : timed_out ? "deadline"
+                 : any_full  ? "queue-full"
+                             : "filled",
+                 depth, target);
+        pp_stage_bc("P8_03_PREBUFFER_DONE", d);
+    }
+}
+
 void *demux_thread_func(void *arg) {
     (void)arg;
 
@@ -436,8 +496,15 @@ void *demux_thread_func(void *arg) {
         av_packet_alloc();
 
     if (!pkt) {
+        /* Nothing will ever fill the queue, so do not leave the decode
+         * threads parked on a hold that can no longer be cleared. */
+        pb_prebuffer_hold = 0;
         return NULL;
     }
+
+    /* Deadline for the pre-buffer, measured from when this thread actually
+     * starts reading rather than from when it was created. */
+    const long long prebuffer_deadline_ms = now_ms() + (long long)pb_prebuffer_max_ms;
 
     while (demux_thread_running) {
         /*
@@ -465,11 +532,13 @@ void *demux_thread_func(void *arg) {
              * does not require reopening the file.
              */
             video_decode_done = 1;
+            prebuffer_check(prebuffer_deadline_ms, 1);
             usleep(5000);
             continue;
         }
 
         video_decode_done = 0;
+        prebuffer_check(prebuffer_deadline_ms, 0);
 
         if (
             pkt->stream_index ==
@@ -487,6 +556,10 @@ void *demux_thread_func(void *arg) {
                     &video_packet_queue
                 ) >= video_packet_cap
             ) {
+                /* Still re-check the pre-buffer here: this loop does not
+                 * return to the top of the demux loop, so it is the only
+                 * place the deadline can fire once a queue is full. */
+                prebuffer_check(prebuffer_deadline_ms, 0);
                 usleep(playback_profile >= 3 ? 300 : 500);
             }
 
@@ -512,6 +585,16 @@ void *demux_thread_func(void *arg) {
                     &audio_packet_queue
                 ) >= audio_packet_cap
             ) {
+                /*
+                 * This one is not just for the deadline - it is what keeps the
+                 * pre-buffer from deadlocking. Audio packets outnumber video
+                 * (AAC is ~43/s against 30 fps), and with both decoders parked
+                 * neither queue drains, so on a low-frame-rate stream the
+                 * audio queue can hit its cap while video is still short of
+                 * its target. The demux thread would then spin here forever,
+                 * never reaching the check at the top of the loop.
+                 */
+                prebuffer_check(prebuffer_deadline_ms, 0);
                 usleep(1000);
             }
 
