@@ -127,6 +127,58 @@ static constexpr double kProbeDeadlineSeconds = 12.0;
 #  define SIO_STAGE(id, d) ((void)0)
 #endif
 
+/*
+ * Pixel count of a video stream, or 0 if it is not one we could play.
+ *
+ * A stream whose codec parameters never resolved scores 0 rather than being
+ * treated as a tiny one: an HLS master playlist can carry a variant that
+ * find_stream_info could not pin down, and opening a decoder on it gives
+ * width=height=0, which makes av_guess_frame_rate fall back to the 90 kHz
+ * time base and leaves the pacer with a 0.01 ms frame budget.
+ */
+static long long videoStreamPixels(const AVStream* st) {
+    if (!st || !st->codecpar) return 0;
+    const AVCodecParameters* cp = st->codecpar;
+    if (cp->codec_type != AVMEDIA_TYPE_VIDEO) return 0;
+    if (cp->codec_id == AV_CODEC_ID_NONE)     return 0;
+    if (cp->width <= 0 || cp->height <= 0)    return 0;
+    /*
+     * Cover art is a video stream with a width and a height, and album art is
+     * routinely larger than the picture in a low-bitrate file. Scoring on
+     * pixels would hand it the win and play a still image over the movie -
+     * which "first video stream wins" happened not to do, since the art is
+     * usually last. Attached pictures are never the thing to play.
+     */
+    if (st->disposition & AV_DISPOSITION_ATTACHED_PIC) return 0;
+    return static_cast<long long>(cp->width) * cp->height;
+}
+
+/* Index into fmt->programs of the program carrying `stream_index`, or -1. */
+static int programOfStream(const AVFormatContext* fmt, int stream_index) {
+    if (!fmt || stream_index < 0) return -1;
+    for (unsigned p = 0; p < fmt->nb_programs; ++p) {
+        const AVProgram* prog = fmt->programs[p];
+        if (!prog) continue;
+        for (unsigned k = 0; k < prog->nb_stream_indexes; ++k) {
+            if (prog->stream_index[k] == static_cast<unsigned>(stream_index))
+                return static_cast<int>(p);
+        }
+    }
+    return -1;
+}
+
+static bool streamInProgram(const AVFormatContext* fmt, int prog_idx, int stream_index) {
+    if (!fmt || prog_idx < 0 || prog_idx >= static_cast<int>(fmt->nb_programs))
+        return false;
+    const AVProgram* prog = fmt->programs[prog_idx];
+    if (!prog) return false;
+    for (unsigned k = 0; k < prog->nb_stream_indexes; ++k) {
+        if (prog->stream_index[k] == static_cast<unsigned>(stream_index))
+            return true;
+    }
+    return false;
+}
+
 static uint64_t GetCurrentTimeMs() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
@@ -597,13 +649,79 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     video_stream_index = -1;
     audio_stream_index = -1;
 
+    /*
+     * Pick the BEST video stream, not the first one.
+     *
+     * An HLS master playlist exposes every bitrate variant as its own streams,
+     * and by convention lists the lowest first - so "first video stream wins"
+     * played the worst rendition of every live channel. Hardware, 2026-09-28:
+     * a 1080p channel opened at 320x180, a 720p one at 640x360, and a
+     * 24-stream master whose first variant had no codec parameters at all
+     * opened a decoder at 0x0 @ 90000 fps.
+     *
+     * Score on pixel count, tie-break on bitrate.
+     */
+    int chosen_program = -1;
+    {
+        long long best_pixels  = 0;
+        int64_t   best_bitrate = -1;
+
+        for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+            const AVStream* st = play_fmt->streams[i];
+            const long long pixels = videoStreamPixels(st);
+            if (pixels <= 0) continue;
+
+            const int64_t br = st->codecpar->bit_rate;
+            if (pixels > best_pixels || (pixels == best_pixels && br > best_bitrate)) {
+                best_pixels        = pixels;
+                best_bitrate       = br;
+                video_stream_index = static_cast<int>(i);
+            }
+        }
+
+        /*
+         * No video stream resolved its geometry. Fall back to the first one so
+         * an awkward container still plays rather than being refused, and say
+         * so - this is the shape that produced the 0x0 decoder.
+         */
+        if (video_stream_index < 0) {
+            for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+                const AVStream* st = play_fmt->streams[i];
+                if (st && st->codecpar &&
+                    st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                    video_stream_index = static_cast<int>(i);
+                    evo_bt("PlaybackController: no video stream resolved its size - "
+                           "falling back to stream %d", video_stream_index);
+                    break;
+                }
+            }
+        }
+
+        chosen_program = programOfStream(play_fmt, video_stream_index);
+    }
+
+    /*
+     * Audio from the SAME variant as the video where the demuxer groups them
+     * into programs. Taking the best video from one rendition and audio from
+     * another gives two different encodes of the same channel, which the
+     * shared clock cannot reconcile. Decodable-first, exactly as below.
+     */
+    for (unsigned int i = 0; chosen_program >= 0 && i < play_fmt->nb_streams; ++i) {
+        AVStream* st = play_fmt->streams[i];
+        if (!st || !st->codecpar) continue;
+        if (st->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) continue;
+        if (!streamInProgram(play_fmt, chosen_program, static_cast<int>(i))) continue;
+        if (avcodec_find_decoder(st->codecpar->codec_id)) {
+            audio_stream_index = static_cast<int>(i);
+            break;
+        }
+    }
+
     for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
         AVStream* st = play_fmt->streams[i];
         if (!st || !st->codecpar) continue;
 
-        if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && video_stream_index < 0) {
-            video_stream_index = static_cast<int>(i);
-        } else if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_stream_index < 0) {
+        if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_stream_index < 0) {
             /*
              * Take the first audio stream we can actually decode, not simply
              * the first one.
@@ -658,6 +776,45 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         }
     }
     m_requestedAudioStream = -1;
+
+    /*
+     * Stop the demuxer fetching the variants we did not choose.
+     *
+     * libavformat's hls demuxer downloads a variant's playlist whenever ANY of
+     * its streams is still wanted, so leaving the others enabled pulls every
+     * rendition of the channel at once - eight copies, on the 24-stream master
+     * that prompted this. Whole programs go, not individual streams: one live
+     * stream left in a variant keeps that whole variant downloading.
+     *
+     * Done last, so nothing we actually selected can be discarded - a track
+     * switch may legitimately have picked audio from another program.
+     */
+    if (chosen_program >= 0 && play_fmt->nb_programs > 1) {
+        unsigned dropped = 0;
+        for (unsigned p = 0; p < play_fmt->nb_programs; ++p) {
+            if (static_cast<int>(p) == chosen_program) continue;
+            AVProgram* prog = play_fmt->programs[p];
+            if (!prog) continue;
+            for (unsigned k = 0; k < prog->nb_stream_indexes; ++k) {
+                const unsigned si = prog->stream_index[k];
+                if (si >= play_fmt->nb_streams) continue;
+                if (static_cast<int>(si) == video_stream_index ||
+                    static_cast<int>(si) == audio_stream_index) continue;
+                play_fmt->streams[si]->discard = AVDISCARD_ALL;
+                ++dropped;
+            }
+        }
+        evo_bt("PlaybackController: %u programs, using #%d - discarded %u streams "
+               "from the other variants",
+               play_fmt->nb_programs, chosen_program, dropped);
+    }
+
+    if (video_stream_index >= 0) {
+        const AVCodecParameters* vcp = play_fmt->streams[video_stream_index]->codecpar;
+        evo_bt("PlaybackController: video stream %d of %u (%dx%d, program %d)",
+               video_stream_index, play_fmt->nb_streams,
+               vcp ? vcp->width : 0, vcp ? vcp->height : 0, chosen_program);
+    }
 
     m_musicMode = (video_stream_index < 0 && audio_stream_index >= 0);
 

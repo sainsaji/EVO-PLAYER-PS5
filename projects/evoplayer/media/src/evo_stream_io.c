@@ -204,6 +204,27 @@ int evo_stream_io_open(const char *path,
         av_dict_set(&opts, "reconnect_streamed", "1", 0);
         av_dict_set(&opts, "reconnect_delay_max", "5", 0);
         av_dict_set(&opts, "timeout", "5000000", 0);
+
+        /*
+         * HLS: accept every segment URL the playlist names.
+         *
+         * libavformat's hls demuxer refuses a segment whose URL does not end
+         * in an extension on its allowlist, and the default list is short.
+         * Plenty of live CDNs serve segments from extensionless, signed or
+         * query-string URLs, and the refusal is not survivable: the segment
+         * fetch fails, the media playlist behind it fails to parse, and the
+         * open completes with nb_streams=0 - a channel that sits on a black
+         * screen with no error. Hardware, 2026-09-28:
+         *
+         *   URL .../v1/segment/<token>/0/186944902 is not in allowed_extensions
+         *   parse_playlist error Invalid data found when processing input
+         *   P8_02b_FIND_INFO_RC rc=0 timeout=0 nb_streams=0
+         *
+         * The allowlist is a guard against a playlist naming a local path; a
+         * media player asked to open a URL the user chose has already made
+         * that decision, and every other player ships with this widened.
+         */
+        av_dict_set(&opts, "allowed_extensions", "ALL", 0);
     } else {
         /* Prime the kernel storage controller for sequential read-ahead */
         SIO_BC("P8_01c_PREFETCH", "open+fadvise");
