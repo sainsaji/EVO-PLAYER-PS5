@@ -1254,6 +1254,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_VIDEO_NV12,   &video_yuv_nv12_metadata,     "video_yuv_nv12"},
         {EVO_AGC_PIPE_VIDEO_HDR,    &video_yuv_p010_hdr_metadata, "video_yuv_p010_hdr"},
         {EVO_AGC_PIPE_VIDEO_HLG,    &video_yuv_p010_hlg_metadata, "video_yuv_p010_hlg"},
+        {EVO_AGC_PIPE_VIDEO_P010_SDR, &video_yuv_p010_sdr_metadata, "video_yuv_p010_sdr"},
         /* real HDR10 output; missing ones just keep playback tone-mapped SDR */
         {EVO_AGC_PIPE_VIDEO_HDR_PQ, &video_yuv_p010_pq_out_metadata,     "video_yuv_p010_pq_out"},
         {EVO_AGC_PIPE_VIDEO_HLG_PQ, &video_yuv_p010_hlg_pq_out_metadata, "video_yuv_p010_hlg_pq_out"},
@@ -3577,7 +3578,7 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         else if (color_trc == 18)
             pipe_id = EVO_AGC_PIPE_VIDEO_HLG;
         else
-            pipe_id = EVO_AGC_PIPE_VIDEO_HDR;
+            pipe_id = EVO_AGC_PIPE_VIDEO_P010_SDR;
     } else if (!planar && hdr_src &&
                g_agc_dev.pipelines[color_trc == 18 ? EVO_AGC_PIPE_NV12_HLG
                                                    : EVO_AGC_PIPE_NV12_HDR].valid) {

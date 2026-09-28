@@ -45,7 +45,8 @@ enum {
     EVO_AGC_PIPE_NV12_HLG = 68,       /* HLG -> SDR */
     EVO_AGC_PIPE_NV12_HDR_PQ = 69,    /* PQ  -> HDR10 */
     EVO_AGC_PIPE_NV12_HLG_PQ = 70,    /* HLG -> HDR10 */
-    EVO_AGC_PIPE_COUNT = 71,
+    EVO_AGC_PIPE_VIDEO_P010_SDR = 71, /* 10-bit P010 SDR (BT.709) */
+    EVO_AGC_PIPE_COUNT = 72,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,

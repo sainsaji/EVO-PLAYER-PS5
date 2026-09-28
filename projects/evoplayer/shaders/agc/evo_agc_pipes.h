@@ -72,6 +72,7 @@
 #include "video_yuv_p010_hlg_pipe.h"
 #include "video_yuv_p010_hlg_pq_out_pipe.h"
 #include "video_yuv_p010_pq_out_pipe.h"
+#include "video_yuv_p010_sdr_pipe.h"
 #include "video_yuv_planar_pipe.h"
 
 #endif /* EVO_AGC_PIPES_H */

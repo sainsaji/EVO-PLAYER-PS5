@@ -88,6 +88,31 @@ void main() {
 }
 """
 
+# P010 10-bit SDR (BT.709 limited range, standard for HD 10-bit SDR)
+P010_SDR_FS = """#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D uY;
+layout(set = 1, binding = 1) uniform sampler2D uUV;
+
+layout(location = 0) in vec2 vUV;
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    float y = texture(uY, vUV).r * 64.0615844;
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
+    float U = uv.x - 0.5;
+    float V = uv.y - 0.5;
+
+    float Y = (y - 0.0627451) * 1.1640625;
+    vec3 rgb = vec3(
+        Y + 1.79274107 * V,
+        Y - 0.21324861 * U - 0.53290933 * V,
+        Y + 2.11240179 * U
+    );
+    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+}
+"""
+
 # 10-bit paths: P010 stores 10 bits in the high bits of a 16-bit sample, so the
 # R16/RG16 UNORM fetch comes back scaled by 65535/1023 = 64.0616 too small.
 HDR_FS = """#version 450
@@ -410,6 +435,7 @@ def main() -> int:
     print("Generating video .pipe files...")
     build("video_yuv_nv12", NV12_FS, 2, "NV12 8-bit SDR, BT.601 limited range")
     build("video_yuv_planar", PLANAR_FS, 3, "planar I420 8-bit SDR, BT.601 limited")
+    build("video_yuv_p010_sdr", P010_SDR_FS, 2, "P010 10-bit SDR, BT.709 limited range")
     build("video_yuv_p010_hdr", HDR_FS, 2, "P010 10-bit PQ (ST.2084) -> SDR: BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) -> SDR: BT.2100 OOTF + BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_pq_out", PQ_OUT_FS, 2, "P010 HDR10 -> HDR10 output (PQ passthrough)")
