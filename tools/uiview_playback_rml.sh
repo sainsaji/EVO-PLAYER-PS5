@@ -73,6 +73,7 @@ g++ -O2 -std=c++17 \
     -Ibuild/rmlui-host-dist/include/freetype2 \
     -Iprojects/evoplayer/addons/include \
     -Iprojects/evoplayer/core/include \
+    -Iprojects/evoplayer/media/include \
     -DNO_OPENSSL=1 -DEVO_PROVIDER_ART_NO_DECODE=1 \
     -o output/uiview/uiview_playback_rml \
     tools/uiview_playback_rml.cpp \

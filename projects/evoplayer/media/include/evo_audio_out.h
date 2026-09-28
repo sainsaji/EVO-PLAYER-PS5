@@ -32,6 +32,26 @@ extern "C" {
 #define AUDIO_QUEUE_BLOCKS  64
 #define AUDIO_BLOCK_SAMPLES 2048
 
+/*
+ * Cold-start window after an open or a seek, in seconds of media.
+ *
+ * Video waits on the audio clock (decode_next_video_frame) and audio waits on
+ * the video clock (audio_output_thread). Both comparisons are meaningful only
+ * once the two clocks have been running long enough to mean something. A seek
+ * resets BOTH to zero, so for the first fraction of a second afterwards each
+ * side is throttling itself against a number that has barely moved - which is
+ * what made the seconds after every seek run at half rate on hardware
+ * (2026-09-28: 9.19/s and 12.79/s in the windows containing a seek, against
+ * 23.98/s once settled).
+ *
+ * Inside this window neither side throttles the other. Nothing is unpaced:
+ * video is still paced frame-by-frame by the presentation clock in
+ * pp_playback_push_frame(), and audio is still paced by the output port
+ * accepting blocks. The cross-throttles only exist to correct long-term
+ * drift, and there is no long-term drift to correct yet.
+ */
+#define EVO_AV_SYNC_SETTLE_SEC 0.75
+
 /* ---------------------------------------------------------------------------
  * Audio-out session state. Owned by evo_audio_out.c; still written directly by
  * main.c's start_video_playback / stop_video_playback / seek path until A8.

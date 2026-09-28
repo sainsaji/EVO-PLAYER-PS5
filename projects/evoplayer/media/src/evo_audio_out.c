@@ -44,6 +44,7 @@ extern pp_playback       g_pp_pb;
 extern int               player_paused;
 /* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
 extern volatile int      pb_prebuffer_hold;
+extern volatile int      pb_scrub_hold;
 extern double            video_clock_seconds;
 extern double            first_video_pts_seconds;
 extern int               video_stream_index;
@@ -166,9 +167,13 @@ void *audio_output_thread(void *arg) {
          * target together is the whole point of the gate; this is the other
          * half of it.
          */
-        if (g_pp_pb.active && g_pp_pb.seek_discarding) {
+        if ((g_pp_pb.active && g_pp_pb.seek_discarding) || pb_scrub_hold) {
             /* The clocks restart at the seek target; so does the stall
-             * detector, so a pre-seek reading cannot leak past the seek. */
+             * detector, so a pre-seek reading cannot leak past the seek.
+             * pb_scrub_hold parks output for the same reason it parks the two
+             * decode threads: while the seek bar is being dragged the picture
+             * is frozen, so audio running on would only build a lead it has to
+             * give back the moment the scrub commits. */
             video_rel_at_wait = -1.0;
             video_stuck_iters = 0;
             usleep(2000);
@@ -226,7 +231,7 @@ void *audio_output_thread(void *arg) {
                 video_rel_at_wait = video_rel;
                 video_stuck_iters = 0;
             }
-            if (video_rel > 0.1 &&
+            if (video_rel >= EVO_AV_SYNC_SETTLE_SEC &&
                 audio_clock_seconds > video_rel + 0.50 &&
                 video_stuck_iters < 125) {
                 video_stuck_iters++;
@@ -433,7 +438,7 @@ void *audio_decode_thread_func(void *arg) {
          * video is held would advance the clock against frames that have not
          * been decoded yet, and every one of them would arrive late.
          */
-        if (player_paused || pb_prebuffer_hold || screen != 2) {
+        if (player_paused || pb_prebuffer_hold || pb_scrub_hold || screen != 2) {
             /* Parked - see the note on the video decode thread. */
             usleep(5000);
             continue;

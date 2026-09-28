@@ -801,7 +801,10 @@ private:
     static const int kImageArtSlot = 8;
     static const int kBrowserCardArtSlot = 9;
     static const int kBrowserCardArtSlots = 12;
-    static const int kArtSlots = 1 + 6 + 1 + 1 + 12;
+    /* 21 = the scrub preview (#32): the frame prospero_thumbnail decoded for
+     * the position under the play head while the seek bar is being dragged. */
+    static const int kScrubArtSlot = 21;
+    static const int kArtSlots = 1 + 6 + 1 + 1 + 12 + 1;
     int m_art_generation[kArtSlots] = {};
     const uint32_t* m_art_last_ptr[kArtSlots] = {};
     int m_art_last_dims[kArtSlots][2] = {};
@@ -811,6 +814,18 @@ private:
     std::string m_art_source[kArtSlots];
     std::string ArtSource(int slot, const uint32_t* pixels, int w, int h,
                           const std::string& tag);
+
+    /* Scrub preview state: the decoded frame staged for upload, and the
+     * worker's serial for the frame already uploaded. See UpdateScrubPreview()
+     * in evo_rmlui_app.cpp. */
+    std::vector<uint32_t> m_scrub_thumb_pixels;
+    unsigned long long    m_scrub_thumb_serial = 0;
+    /* The worker's serial as the drag began. Anything at or below it was
+     * decoded for a previous scrub, so showing it would put a frame from the
+     * wrong position under the timecode for the first frame or two. */
+    unsigned long long    m_scrub_thumb_baseline = 0;
+    bool                  m_scrub_thumb_shown = false;
+    void UpdateScrubPreview(const EvoPlaybackState& state);
     EvoDialogState m_last_dialog;
     EvoSettingsState m_last_settings;
     EvoAboutState m_last_about;

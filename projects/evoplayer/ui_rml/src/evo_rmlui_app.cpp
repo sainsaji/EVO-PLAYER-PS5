@@ -2,6 +2,7 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_prof.h"
 #include "evo_metrics.h"   /* EVO_UI_DESIGN_W/H - the dp authoring canvas */
+#include "prospero_thumbnail.h"   /* #32 scrub preview: request/serial/snapshot */
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -27,6 +28,11 @@
  *
  * So: snprintf everywhere, and <sstream>/<iomanip> stay out of this file.
  */
+/* The path of the file playing, owned by Bridge.cpp. The scrub preview worker
+ * takes a path rather than a handle, so it needs this rather than anything out
+ * of EvoPlaybackState. */
+extern "C" char current_media_path[768];
+
 static std::string evo_fmt(const char* fmt, ...)
 {
     char buf[256];
@@ -2463,8 +2469,97 @@ void EvoRmlApp::RenderSurround(uint32_t* framebuffer, int width, int height) {
     RenderCachedScreen(10, framebuffer, width, height);
 }
 
+/*
+ * Scrub preview (#32): the frame at the position under the play head.
+ *
+ * prospero_thumbnail owns the decode - its own thread, its own format context
+ * held open between requests, its own 32-entry cache - and coalesces repeated
+ * requests, so asking on every rendered frame while the user drags is the
+ * intended usage rather than an abuse of it. All this does is ask, and upload
+ * whatever has landed.
+ *
+ * The worker decodes into one static buffer, so the pointer never changes and
+ * ArtSource()'s pointer/dimension comparison would call every new preview
+ * "unchanged". The serial it hands back rides along as the content tag, which
+ * is what makes each new preview a new texture name.
+ */
+void EvoRmlApp::UpdateScrubPreview(const EvoPlaybackState& state)
+{
+    Rml::Element* el = m_playback_doc ? m_playback_doc->GetElementById("scrub-thumb")
+                                      : nullptr;
+    if (!el)
+        return;
+
+    if (!state.scrub_active) {
+        if (m_scrub_thumb_shown) {
+            el->SetProperty("display", "none");
+            m_scrub_thumb_shown = false;
+            MarkFrameDirty();
+        }
+        /* Drop the texture so the next scrub cannot flash the previous one
+         * before its own first frame has decoded. */
+        if (m_scrub_thumb_serial) {
+            ArtSource(kScrubArtSlot, nullptr, 0, 0, std::string());
+            m_scrub_thumb_serial = 0;
+        }
+        m_scrub_thumb_baseline = prospero_thumbnail_serial();
+        return;
+    }
+
+    if (current_media_path[0])
+        prospero_thumbnail_request(current_media_path, state.scrub_target, 1);
+
+    const int words = PROSPERO_THUMB_W * PROSPERO_THUMB_H;
+    if ((int)m_scrub_thumb_pixels.size() < words)
+        m_scrub_thumb_pixels.resize((size_t)words);
+
+    /* Cheap poll first: the worker is decoding in the background and most
+     * rendered frames land on the same preview, so skip the 230 KB copy and
+     * the texture upload unless it has actually published a new one. */
+    const unsigned long long serial = prospero_thumbnail_serial();
+    if (serial && serial != m_scrub_thumb_serial &&
+        serial != m_scrub_thumb_baseline) {
+        const unsigned long long got =
+            prospero_thumbnail_snapshot(m_scrub_thumb_pixels.data(), words);
+        if (got) {
+            m_scrub_thumb_serial = got;
+            const std::string src = ArtSource(kScrubArtSlot,
+                                              m_scrub_thumb_pixels.data(),
+                                              PROSPERO_THUMB_W, PROSPERO_THUMB_H,
+                                              evo_fmt("%llu", got));
+            if (!src.empty()) {
+                el->SetAttribute("src", src);
+                MarkFrameDirty();
+            }
+        }
+    }
+
+    /* Only show the box once there is something in it - an empty 320x180 hole
+     * under the timecode looks like a bug, a capsule that grows when the
+     * preview arrives does not. Set on change only: this runs every rendered
+     * frame of a drag, and an unconditional SetProperty would re-dirty layout
+     * on all of them. */
+    const bool show = m_scrub_thumb_serial != 0;
+    if (show != m_scrub_thumb_shown) {
+        el->SetProperty("display", show ? "block" : "none");
+        m_scrub_thumb_shown = show;
+        MarkFrameDirty();
+    }
+}
+
 void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
     if (!m_initialized || !m_playback_doc) return;
+
+    /*
+     * Ahead of the unchanged-state early return below, because the preview is
+     * decoded asynchronously: hold the stick still and scrub_target stops
+     * moving, so the state compares equal and this function returns - while
+     * the frame the user is waiting for is still being decoded and lands a
+     * couple of hundred milliseconds later. Gating the upload on the state
+     * having changed would drop exactly the frame they asked for.
+     */
+    UpdateScrubPreview(state);
+
     /* position_sec ticks every playing frame, so this only actually skips
      * while genuinely paused and idle - the theme-generation gate still
      * catches a theme switch during that pause. */

@@ -109,6 +109,7 @@ extern char current_media_path[768];
 extern int evo_audio_channels;
 /* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
 extern volatile int pb_prebuffer_hold;
+extern volatile int pb_scrub_hold;
 
 namespace evo {
 
@@ -444,6 +445,7 @@ void PlaybackController::stopPlayback() {
      * park on a hold that this file's demux thread is no longer running to
      * clear - a permanent freeze on a source that needs no buffering at all. */
     pb_prebuffer_hold = 0;
+    pb_scrub_hold = 0;
 
     /*
      * Reset the media clocks. These are session globals, not per-file state:
@@ -1274,6 +1276,10 @@ void PlaybackController::beginScrub() {
     m_scrubTargetSeconds = getPositionSeconds();
     m_playbackFsm.postEvent(PlaybackEvent::StartScrub);
     pp_playback_pause(&g_pp_pb);
+    /* Park demux's two consumers for the drag. Everything decoded from here
+     * until the commit would be thrown away by the clock pp_playback_pause()
+     * just stopped; see pb_scrub_hold in Bridge.cpp. */
+    pb_scrub_hold = 1;
     resetScrubHold();
 }
 
@@ -1292,6 +1298,14 @@ bool PlaybackController::confirmScrub() {
     m_playbackFsm.postEvent(PlaybackEvent::ConfirmScrub);
     resetScrubHold();
 
+    /* Nothing else clears this: the commit is the end of the drag, so the hold
+     * has to come down here or the decode threads never restart. Released
+     * before the seek rather than after, so the pipeline is already live when
+     * the demux thread picks the request up - the couple of frames the decoder
+     * may take from the old position in between are ones the seek discards
+     * anyway. (Either order is safe for the demux handler's park wait: a
+     * thread parked on any hold still sets video_decode_parked.) */
+    pb_scrub_hold = 0;
     seekTo(target);
 
     m_playbackFsm.postEvent(PlaybackEvent::Play);
@@ -1303,6 +1317,7 @@ void PlaybackController::cancelScrub() {
 
     m_playbackFsm.postEvent(PlaybackEvent::CancelScrub);
     resetScrubHold();
+    pb_scrub_hold = 0;
     pp_playback_resume(&g_pp_pb);
 }
 

@@ -16,7 +16,71 @@
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_provider.h"
 extern "C" {
 #include "../projects/evoplayer/addons/include/evo_net.h"
+#include "../projects/evoplayer/media/include/prospero_thumbnail.h"
 }
+
+/*
+ * Host stubs for the #32 scrub preview.
+ *
+ * The real worker (media/src/prospero_thumbnail.c) is a decode thread over
+ * FFmpeg and the direct-memory allocator - neither of which this harness
+ * links, and neither of which a layout question needs. What a layout question
+ * DOES need is a preview of the right size in the capsule, so the stub answers
+ * with a synthetic frame instead of an empty box: colour bars with a crosshair,
+ * obviously not a real still, and unmistakable if it ever leaks into a device
+ * build.
+ */
+extern "C" {
+
+char current_media_path[768] = "/mnt/usb0/media/Movies/uiview-fixture.mkv";
+
+static double s_stub_thumb_time = -1.0;
+static unsigned long long s_stub_thumb_serial = 0;
+
+void prospero_thumbnail_request(const char* path, double target_seconds,
+                                int scrub_active)
+{
+    (void)path;
+    if (!scrub_active) return;
+    /* Coalesce exactly as the real worker does, so the serial only moves when
+     * the requested position does. */
+    if (s_stub_thumb_time == target_seconds) return;
+    s_stub_thumb_time = target_seconds;
+    s_stub_thumb_serial++;
+}
+
+unsigned long long prospero_thumbnail_serial(void)
+{
+    return s_stub_thumb_serial;
+}
+
+unsigned long long prospero_thumbnail_snapshot(uint32_t* dst, int dst_words)
+{
+    const int words = PROSPERO_THUMB_W * PROSPERO_THUMB_H;
+    if (!dst || dst_words < words || !s_stub_thumb_serial) return 0;
+
+    static const uint32_t bars[8] = {
+        0xffffffffu, 0xff00ffffu, 0xffffff00u, 0xff00ff00u,
+        0xffff00ffu, 0xff0000ffu, 0xffff0000u, 0xff000000u,
+    };
+    for (int y = 0; y < PROSPERO_THUMB_H; y++) {
+        for (int x = 0; x < PROSPERO_THUMB_W; x++) {
+            uint32_t px = bars[(x * 8) / PROSPERO_THUMB_W];
+            /* Crosshair, so a stretched or mis-cropped blit is obvious. */
+            if (x == PROSPERO_THUMB_W / 2 || y == PROSPERO_THUMB_H / 2)
+                px = 0xff202020u;
+            dst[y * PROSPERO_THUMB_W + x] = px;
+        }
+    }
+    return s_stub_thumb_serial;
+}
+
+int prospero_thumbnail_is_valid(void)   { return s_stub_thumb_serial != 0; }
+int prospero_thumbnail_is_loading(void) { return 0; }
+void prospero_thumbnail_close_context(void) {}
+void prospero_thumbnail_blit(uint32_t*, int, int, int, int, int) {}
+
+} /* extern "C" */
 #include <cstdio>
 #include <cstdlib>
 

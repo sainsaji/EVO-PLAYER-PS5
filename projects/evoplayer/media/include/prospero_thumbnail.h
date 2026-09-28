@@ -76,6 +76,26 @@ void prospero_thumbnail_blit(uint32_t *fb,
                              int opacity);
 
 /**
+ * Copy the current preview frame out as BGRA (0xAABBGGRR, the framebuffer
+ * order), for callers that upload it as a texture rather than blitting it.
+ *
+ * `dst` must have room for PROSPERO_THUMB_W * PROSPERO_THUMB_H words; pass
+ * that count as `dst_words`. Returns a serial that changes every time a newly
+ * decoded frame is published, so a caller can skip the copy and the upload
+ * when nothing has moved, or 0 when there is nothing to show yet.
+ *
+ * Unlike prospero_thumbnail_blit() this hands back the current frame only -
+ * no crossfade. The fade is a property of the blit, and a texture consumer
+ * gets its transition from the UI layer instead.
+ */
+unsigned long long prospero_thumbnail_snapshot(uint32_t *dst, int dst_words);
+
+/**
+ * The serial alone, without copying anything. Cheap enough to poll per frame.
+ */
+unsigned long long prospero_thumbnail_serial(void);
+
+/**
  * Release the decoder held open for the current file.
  *
  * The worker keeps the format context open between requests because reopening

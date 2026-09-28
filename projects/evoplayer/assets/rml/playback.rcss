@@ -311,11 +311,34 @@ div, span, p {
     background-color: #0c1018f2;
     border-width: 2dp;
     border-color: #00d2ff;
-    border-radius: 28dp;
-    padding: 10dp 28dp;
+    border-radius: 20dp;
+    padding: 12dp 16dp;
+    flex-direction: column;
+    align-items: center;
+    gap: 10dp;
+}
+
+/*
+ * Scrub preview. Hidden until prospero_thumbnail has decoded a frame for the
+ * position under the play head, so the capsule keeps its old pill shape while
+ * the first preview is still being fetched and grows into it once it lands
+ * rather than reserving an empty box up front.
+ *
+ * 320x180 is PROSPERO_THUMB_W/H exactly - the cache decodes at that size, so
+ * drawing it 1:1 is a straight blit with no resample.
+ */
+#scrub-thumb {
+    display: none;
+    width: 320dp;
+    height: 180dp;
+    border-radius: 12dp;
+}
+
+#scrub-readout {
     flex-direction: row;
     align-items: center;
     gap: 14dp;
+    padding: 0dp 12dp;
 }
 
 #scrub-label {

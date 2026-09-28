@@ -48,8 +48,11 @@
     <!-- Center Play/Pause & Scrubbing Overlay -->
     <div id="center-overlay">
         <div id="scrub-capsule">
-            <span id="scrub-label">SEEK TO</span>
-            <span id="scrub-time">00:00:00</span>
+            <img id="scrub-thumb" src=""/>
+            <div id="scrub-readout">
+                <span id="scrub-label">SEEK TO</span>
+                <span id="scrub-time">00:00:00</span>
+            </div>
         </div>
         <div id="pause-badge">
             <span id="pause-label">PAUSED</span>

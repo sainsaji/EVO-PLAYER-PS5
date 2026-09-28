@@ -49,6 +49,7 @@ extern double              media_duration_sec;
 extern int                 playback_profile;
 /* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
 extern volatile int        pb_prebuffer_hold;
+extern volatile int        pb_scrub_hold;
 extern struct SwsContext  *play_sws;
 extern AVFormatContext    *play_fmt;
 
@@ -394,8 +395,13 @@ int decode_next_video_frame(void)
 
             if (seek_discarding) {
                 /* no pacing - the frame is about to be thrown away */
-            } else if (audio_rel > 0.05) {
+            } else if (audio_rel > 0.05 &&
+                       video_rel >= EVO_AV_SYNC_SETTLE_SEC) {
                 /*
+                 * Outside the cold-start window (EVO_AV_SYNC_SETTLE_SEC - see
+                 * evo_audio_out.h for why a freshly reset clock pair must not
+                 * throttle each other):
+                 *
                  * Video ahead of audio: wait for audio, but NEVER freeze the
                  * picture if audio clock stops (underrun / 44.1k stall).
                  * Y2JB-class clips froze ~2s in when wait never broke out.
@@ -570,6 +576,7 @@ void *video_decode_thread_func(void *arg) {
             player_paused ||
             video_decode_hold ||
             pb_prebuffer_hold ||
+            pb_scrub_hold ||
             screen != SCREEN_PLAYER ||
             !video_decode_ready
         ) {

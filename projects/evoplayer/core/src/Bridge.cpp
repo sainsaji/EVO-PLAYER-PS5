@@ -86,6 +86,31 @@ int audio_packet_cap = 96;
 volatile int pb_prebuffer_hold = 0;
 int pb_prebuffer_packets = 48;
 int pb_prebuffer_max_ms = 4000;
+
+/*
+ * Scrub hold: the media pipeline is parked for as long as the seek bar is
+ * being dragged, and released by the commit (or the cancel) at the end.
+ *
+ * Scrubbing used to pause only the presentation clock. The decode threads
+ * carried on running forward from the OLD position, which bought nothing -
+ * every frame they produced was thrown away by the paused clock - and cost
+ * three things: the decoder chewed through the file in the background, the
+ * audio clock kept advancing against a picture that was standing still (so
+ * the two cross-throttles in evo_playback.c and evo_audio_out.c spent the
+ * whole scrub fighting each other), and the renderer's borrowed pointers into
+ * the decoder's frame pool were overwritten under it.
+ *
+ * Parking the whole pipeline instead makes a scrub what it looks like: the
+ * picture is frozen on the snapshot pp_playback_pause() took, nothing decodes,
+ * and both clocks restart cleanly from the seek target on commit.
+ *
+ * The demux thread is deliberately NOT gated on this. It keeps reading until
+ * both packet queues are full and then parks on its own queue-full wait, so a
+ * short scrub is covered by packets already in hand; a committed seek clears
+ * the queues anyway. demux_wait_for_room() only releases when the OTHER queue
+ * is starving, and with both decoders parked neither is, so it simply waits.
+ */
+volatile int pb_scrub_hold = 0;
 int decoder_thread_count = 4;
 int video_view_mode = 1;
 long long controls_last_used_ms = 0;

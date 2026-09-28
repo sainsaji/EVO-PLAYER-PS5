@@ -108,6 +108,7 @@ static void prospero_thumbnail_begin_transition_locked(
     prospero_thumbnail_valid = 1;
     prospero_thumbnail_loading = 0;
     prospero_thumbnail_display_time = timestamp;
+    prospero_thumbnail_frame_serial++;
 
     prospero_thumbnail_transition_started_ms =
         now_ms();
@@ -172,6 +173,11 @@ static uint32_t prospero_thumbnail_pixels[
 static int prospero_thumbnail_valid = 0;
 static int prospero_thumbnail_loading = 0;
 static double prospero_thumbnail_display_time = 0.0;
+
+/* Bumped on every publish so a texture consumer can tell "same picture" from
+ * "new picture" without comparing 320x180 pixels. See
+ * prospero_thumbnail_snapshot(). */
+static unsigned long long prospero_thumbnail_frame_serial = 0;
 
 
 
@@ -1028,6 +1034,55 @@ void prospero_thumbnail_request(
 
     prospero_thumbnail_last_requested_time =
         target_seconds;
+}
+
+
+unsigned long long prospero_thumbnail_snapshot(uint32_t *dst, int dst_words) {
+    const int words = PROSPERO_THUMB_W * PROSPERO_THUMB_H;
+
+    if (!dst || dst_words < words) {
+        return 0;
+    }
+
+    pthread_mutex_lock(
+        &prospero_thumbnail_mutex
+    );
+
+    unsigned long long serial = 0;
+
+    if (prospero_thumbnail_valid) {
+        memcpy(
+            dst,
+            prospero_thumbnail_pixels,
+            (size_t)words * sizeof(uint32_t)
+        );
+
+        serial = prospero_thumbnail_frame_serial;
+    }
+
+    pthread_mutex_unlock(
+        &prospero_thumbnail_mutex
+    );
+
+    return serial;
+}
+
+
+unsigned long long prospero_thumbnail_serial(void) {
+    pthread_mutex_lock(
+        &prospero_thumbnail_mutex
+    );
+
+    unsigned long long serial =
+        prospero_thumbnail_valid
+            ? prospero_thumbnail_frame_serial
+            : 0;
+
+    pthread_mutex_unlock(
+        &prospero_thumbnail_mutex
+    );
+
+    return serial;
 }
 
 
