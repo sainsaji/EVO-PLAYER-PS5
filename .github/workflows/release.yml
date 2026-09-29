@@ -226,7 +226,7 @@ jobs:
           ## Verification
 
           Built reproducibly in CI from the pinned toolchain (clang 18,
-          PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so this
+          PS5 Payload SDK v0.43, FFmpeg 7.0.1). **CI has no console, so this
           image is not hardware-tested** — it is exactly what
           `scripts/package-app.sh --ffpfsc` produces locally. Checksum in
           `SHA256SUMS.txt`.

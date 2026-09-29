@@ -52,6 +52,13 @@ for c in projects/evoplayer/addons/src/cJSON.c \
          projects/evoplayer/addons/src/provider_emby.c \
          projects/evoplayer/addons/src/provider_jellyfin.c \
          projects/evoplayer/addons/src/provider_nuvio.c \
+         projects/evoplayer/addons/src/nuvio_stremio.c \
+         projects/evoplayer/addons/src/nuvio_progress.c \
+         projects/evoplayer/addons/src/nuvio_json.c \
+         projects/evoplayer/addons/src/nuvio_debrid.c \
+         projects/evoplayer/addons/src/nuvio_account.c \
+         projects/evoplayer/addons/src/provider_nuvio_native.c \
+         projects/evoplayer/addons/src/provider_debrid.c \
          projects/evoplayer/src/evo_data_path.c; do
     o="output/uiview/obj/$(basename "${c%.c}").o"
     gcc -O2 -std=c11 -Wall -DNO_OPENSSL=1 \

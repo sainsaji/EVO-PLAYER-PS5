@@ -145,6 +145,59 @@ static cJSON_bool parse_string(cJSON * const item, parse_buffer * const buffer)
                     case '\"': output[j++] = '\"'; break;
                     case '\\': output[j++] = '\\'; break;
                     case '/': output[j++] = '/'; break;
+                    case 'u': {
+                        /* \uXXXX, with a surrogate pair joined, as UTF-8. Was
+                         * copied through as the literal "uXXXX", which turned
+                         * every accented title from an escaping server into
+                         * text. UTF-8 is never longer than the 6-byte escape
+                         * (or 12-byte pair) it replaces, so `output` fits. */
+                        unsigned long cp = 0;
+                        size_t k;
+                        int ok = (i + 4 < len);
+                        for (k = 1; ok && k <= 4; k++) {
+                            unsigned char h = input[i + k];
+                            cp <<= 4;
+                            if (h >= '0' && h <= '9') cp |= (unsigned long)(h - '0');
+                            else if (h >= 'a' && h <= 'f') cp |= (unsigned long)(h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') cp |= (unsigned long)(h - 'A' + 10);
+                            else ok = 0;
+                        }
+                        if (!ok) { output[j++] = 'u'; break; }
+                        i += 4;
+                        if (cp >= 0xD800 && cp <= 0xDBFF && i + 6 < len &&
+                            input[i + 1] == '\\' && input[i + 2] == 'u') {
+                            unsigned long lo = 0;
+                            int ok2 = 1;
+                            for (k = 3; ok2 && k <= 6; k++) {
+                                unsigned char h = input[i + k];
+                                lo <<= 4;
+                                if (h >= '0' && h <= '9') lo |= (unsigned long)(h - '0');
+                                else if (h >= 'a' && h <= 'f') lo |= (unsigned long)(h - 'a' + 10);
+                                else if (h >= 'A' && h <= 'F') lo |= (unsigned long)(h - 'A' + 10);
+                                else ok2 = 0;
+                            }
+                            if (ok2 && lo >= 0xDC00 && lo <= 0xDFFF) {
+                                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                                i += 6;
+                            }
+                        }
+                        if (cp < 0x80) {
+                            output[j++] = (unsigned char)cp;
+                        } else if (cp < 0x800) {
+                            output[j++] = (unsigned char)(0xC0 | (cp >> 6));
+                            output[j++] = (unsigned char)(0x80 | (cp & 0x3F));
+                        } else if (cp < 0x10000) {
+                            output[j++] = (unsigned char)(0xE0 | (cp >> 12));
+                            output[j++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+                            output[j++] = (unsigned char)(0x80 | (cp & 0x3F));
+                        } else {
+                            output[j++] = (unsigned char)(0xF0 | (cp >> 18));
+                            output[j++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+                            output[j++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+                            output[j++] = (unsigned char)(0x80 | (cp & 0x3F));
+                        }
+                        break;
+                    }
                     default: output[j++] = input[i]; break;
                 }
             } else {

@@ -12,7 +12,7 @@
 # =============================================================================
 set -euo pipefail
 
-PS5_SDK_VERSION="${PS5_SDK_VERSION:-v0.42}"
+PS5_SDK_VERSION="${PS5_SDK_VERSION:-v0.43}"
 BUILD_SDK_FROM_SOURCE="${BUILD_SDK_FROM_SOURCE:-0}"
 PS5_PAYLOAD_SDK="${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}"
 

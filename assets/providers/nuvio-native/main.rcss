@@ -1,0 +1,505 @@
+/* =============================================================================
+ * Nuvio provider bundle - stylesheet
+ *
+ * Fetched at runtime with main.rml. Stays inside the RCSS subset the sceAgc
+ * backend implements (docs/addons/provider-architecture.md 6.3/6.4): layout,
+ * borders, radii, transforms, images. No filters - they are blur-only on the
+ * console and absent from the host preview.
+ *
+ * Palette: NuvioTV's primitive tokens (ui/theme/PrimitiveTokens.kt), written
+ * out as literals because a provider context receives no theme push.
+ *
+ *   page     #0d0d0d (neutral950)     surface   #1a1a1a (neutral900)
+ *   raised   #2d2d2d (neutral800)     hairline  #333333 (neutral750)
+ *   text     #f5f5f5 (neutral100)     muted     #9e9e9e (neutral500)
+ *   focus    #ffffff                  warning   #ff5252 (red300)
+ * ============================================================================= */
+
+body {
+    font-family: LatoLatin;
+    font-size: 16dp;
+    color: #f5f5f5;
+    background-color: #0d0d0d;
+    margin: 0;
+    padding: 0;
+    width: 1920dp;
+    height: 1080dp;
+    overflow: hidden;
+    position: relative;
+}
+
+div, span, img {
+    box-sizing: border-box;
+}
+
+/* EVO's navigation rail is composited over the left 152dp. */
+#nv-pane {
+    position: absolute;
+    left: 152dp;
+    top: 0;
+    width: 1768dp;
+    height: 1080dp;
+}
+
+/* ------------------------------------------------------------------ header */
+
+#nv-header {
+    position: absolute;
+    left: 0;
+    top: 30dp;
+    width: 1704dp;
+    height: 52dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#nv-header-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 18dp;
+}
+
+#nv-logo {
+    display: block;
+    font-size: 26dp;
+    font-weight: bold;
+    letter-spacing: 6dp;
+    color: #ffffff;
+}
+
+#nv-path {
+    display: block;
+    font-size: 15dp;
+    color: #9e9e9e;
+    max-width: 1100dp;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#nv-count {
+    display: block;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #9e9e9e;
+    background-color: #1a1a1a;
+    border-radius: 14dp;
+    padding: 5dp 14dp;
+}
+
+/* -------------------------------------------------------------------- body */
+
+#nv-body {
+    position: absolute;
+    left: 0;
+    top: 100dp;
+    width: 1704dp;
+    height: 876dp;
+    display: block;
+    overflow: hidden;
+}
+
+#nv-notice {
+    display: block;
+    background-color: #1a1a1a;
+    border-radius: 10dp;
+    padding: 12dp 18dp;
+    margin-bottom: 12dp;
+    font-size: 14dp;
+    color: #e0e0e0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#nv-notice.nv-notice-bad {
+    background-color: #2a1212;
+    color: #ff8a80;
+}
+
+#nv-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 260dp;
+    gap: 18dp;
+}
+
+#nv-loading-text {
+    font-size: 16dp;
+    color: #9e9e9e;
+}
+
+#nv-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 200dp;
+    gap: 14dp;
+}
+
+#nv-empty-title {
+    display: block;
+    font-size: 28dp;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#nv-empty-hint {
+    display: block;
+    font-size: 15dp;
+    color: #9e9e9e;
+    max-width: 640dp;
+    text-align: center;
+    line-height: 22dp;
+}
+
+.nv-action {
+    tab-index: auto;
+    nav: auto;
+    display: block;
+    margin-top: 18dp;
+    padding: 12dp 28dp;
+    border-radius: 24dp;
+    background-color: #2d2d2d;
+    border-width: 2dp;
+    border-color: #2d2d2d;
+    font-size: 14dp;
+    font-weight: bold;
+    letter-spacing: 1.5dp;
+    color: #f5f5f5;
+}
+
+.nv-action:focus {
+    background-color: #ffffff;
+    border-color: #ffffff;
+    color: #0d0d0d;
+}
+
+/* -------------------------------------------------------------------- wall *
+ *
+ * One flex-wrap container for all three row kinds: a level is one kind in
+ * practice, and when it is not (never, today) the wall still lays out.
+ *
+ *   posters   7 x 212dp + 6 x 24dp gap + 2 x 14dp padding + scrollbar = 1704dp
+ *   tiles     4 x 396dp
+ *   streams   full width
+ * ------------------------------------------------------------------------ */
+
+#nv-wall {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 24dp;
+    width: 1704dp;
+    height: 876dp;
+    padding: 14dp;
+    overflow-y: auto;
+}
+
+#nv-wall.nv-wall-notice {
+    height: 810dp;
+}
+
+#nv-wall scrollbarvertical {
+    width: 6dp;
+}
+
+#nv-wall scrollbarvertical sliderbar {
+    background-color: #4d4d4d;
+    border-radius: 3dp;
+    min-height: 40dp;
+}
+
+#nv-wall scrollbarvertical sliderarrowdec,
+#nv-wall scrollbarvertical sliderarrowinc {
+    height: 0;
+}
+
+.nv-item {
+    tab-index: auto;
+    nav: auto;
+    display: block;
+    position: relative;
+    transition: transform 0.12s cubic-out, border-color 0.12s cubic-out;
+}
+
+/* ---- poster ---- */
+
+.nv-poster {
+    width: 212dp;
+    height: 386dp;
+}
+
+.nv-poster-art {
+    display: block;
+    width: 212dp;
+    height: 318dp;
+    border-radius: 12dp;
+    background-color: #1a1a1a;        /* shows while the poster downloads */
+    border-width: 3dp;
+    border-color: #0d0d0d;
+    overflow: hidden;
+}
+
+.nv-poster-img {
+    width: 206dp;
+    height: 312dp;
+    border-radius: 9dp;
+}
+
+.nv-poster:focus {
+    transform: scale(1.05);
+}
+
+.nv-poster:focus .nv-poster-art {
+    border-color: #ffffff;
+}
+
+.nv-poster-meta {
+    display: block;
+    margin-top: 10dp;
+    width: 212dp;
+}
+
+.nv-poster-title {
+    display: block;
+    font-size: 15dp;
+    font-weight: bold;
+    color: #e0e0e0;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.nv-poster-sub {
+    display: block;
+    margin-top: 3dp;
+    font-size: 12.5dp;
+    color: #808080;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.nv-poster:focus .nv-poster-title {
+    color: #ffffff;
+}
+
+/* ---- tile ---- */
+
+.nv-tile {
+    width: 396dp;
+    height: 120dp;
+    border-radius: 14dp;
+    background-color: #1a1a1a;
+    border-width: 3dp;
+    border-color: #1a1a1a;
+}
+
+.nv-tile:focus {
+    background-color: #2d2d2d;
+    border-color: #ffffff;
+    transform: scale(1.03);
+}
+
+.nv-tile-body {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 16dp;
+    padding: 18dp;
+    height: 114dp;
+}
+
+.nv-tile-initial {
+    display: block;
+    width: 64dp;
+    height: 64dp;
+    border-radius: 32dp;
+    background-color: #2d2d2d;
+    font-size: 28dp;
+    font-weight: bold;
+    color: #b3b3b3;
+    text-align: center;
+    line-height: 64dp;
+}
+
+.nv-tile:focus .nv-tile-initial {
+    background-color: #ffffff;
+    color: #0d0d0d;
+}
+
+.nv-tile-text {
+    display: block;
+    width: 270dp;
+}
+
+.nv-tile-title {
+    display: block;
+    font-size: 17dp;
+    font-weight: bold;
+    color: #f5f5f5;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.nv-tile-sub {
+    display: block;
+    margin-top: 5dp;
+    font-size: 13dp;
+    color: #9e9e9e;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* ---- stream ---- */
+
+.nv-stream {
+    width: 1650dp;
+    border-radius: 12dp;
+    background-color: #1a1a1a;
+    border-width: 3dp;
+    border-color: #1a1a1a;
+}
+
+.nv-stream:focus {
+    background-color: #2d2d2d;
+    border-color: #ffffff;
+}
+
+.nv-stream-body {
+    display: block;
+    padding: 14dp 20dp;
+}
+
+.nv-stream-title {
+    display: block;
+    font-size: 18dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.nv-stream-sub {
+    display: block;
+    margin-top: 4dp;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #b3b3b3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.nv-stream-desc {
+    display: block;
+    margin-top: 6dp;
+    font-size: 13dp;
+    color: #808080;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+#nv-footer {
+    position: absolute;
+    left: 0;
+    bottom: 22dp;
+    width: 1704dp;
+    height: 52dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-top-width: 1dp;
+    border-top-color: #333333;
+    padding-top: 10dp;
+}
+
+#nv-source {
+    display: block;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #9e9e9e;
+}
+
+#nv-busy {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #e0e0e0;
+    letter-spacing: 1.2dp;
+}
+
+#nv-hints {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 22dp;
+}
+
+.nv-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    font-size: 12.5dp;
+    font-weight: bold;
+    color: #9e9e9e;
+    letter-spacing: 1.2dp;
+}
+
+.nv-glyph {
+    width: 22dp;
+    height: 22dp;
+}
+
+.nv-pill {
+    display: block;
+    padding: 3dp 8dp;
+    border-radius: 9dp;
+    background-color: #2d2d2d;
+    font-size: 10.5dp;
+    color: #f5f5f5;
+}
+
+@keyframes nv-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+.nv-spinner {
+    display: block;
+    width: 44dp;
+    height: 44dp;
+    border-radius: 22dp;
+    border-width: 4dp;
+    border-color: #333333;
+    border-top-color: #ffffff;
+    animation: 0.8s linear infinite nv-spin;
+}
+
+.nv-spinner-sm {
+    display: block;
+    width: 14dp;
+    height: 14dp;
+    border-radius: 7dp;
+    border-width: 2dp;
+    border-color: #333333;
+    border-top-color: #ffffff;
+    animation: 0.8s linear infinite nv-spin;
+}

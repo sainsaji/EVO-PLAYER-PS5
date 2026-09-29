@@ -303,6 +303,29 @@ typedef struct evo_provider {
      * NULL for the media-server one (Emby/Jellyfin stream URLs), "nuvio" for
      * Nuvio's #player / #videoPlayer. */
     const char *web_ui_hook;
+
+    /*
+     * Optional, any provider. None of these need a capability bit: NULL means
+     * "behave as before", so adding them changed nothing for existing
+     * providers and needed no API_VERSION bump.
+     */
+
+    /* CAP_CONFIG. The keyboard prompt for set_source ("Torbox API key"), and
+     * the chooser's "not set up" hint. NULL: the playlist/server wording. */
+    const char *source_prompt;
+
+    /*
+     * The title the player's OSD should show for a playable item. The host
+     * otherwise uses the activated row's title, which for a provider whose
+     * playable rows are STREAMS ("Torrentio 1080p") is not the thing being
+     * watched. Read immediately, do not stash. NULL or "" = the row title.
+     */
+    const char *(*play_title)(const char *item_id);
+
+    /* Where to resume a playable item, in seconds; 0 = from the start. Asked
+     * of the item's own provider before resolving, so it survives a resolver
+     * chain handing back someone else's URL. */
+    int64_t (*resume_sec)(const char *item_id);
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */

@@ -120,6 +120,25 @@ else
     warn "which prints the console's actual firmware word."
 fi
 
+# 13.60 (0x13600000), added to crt/kernel.c in SDK v0.43. Same heuristic: the
+# case label plus that arm's ROOTVNODE offset (0x314B510 -> 10 b5 14 03).
+FW13_OK=0
+if [[ -f "${CRT1}" ]] && command -v xxd >/dev/null 2>&1; then
+    CRT1_HEX="$(xxd -p "${CRT1}" | tr -d '\n')"
+    if [[ "${CRT1_HEX}" == *00006013* ]] && [[ "${CRT1_HEX}" == *10b51403* ]]; then
+        FW13_OK=1
+    fi
+    unset CRT1_HEX
+elif [[ -f "${PS5_PAYLOAD_SDK}/crt/kernel.c" ]]; then
+    grep -q "case 0x13600000:" "${PS5_PAYLOAD_SDK}/crt/kernel.c" && FW13_OK=1
+fi
+if (( FW13_OK )); then
+    ok "SDK carries the 13.60 (0x13600000) kernel offset table"
+else
+    warn "could not confirm 0x13600000 in the installed binaries - a 13.60"
+    warn "console needs PS5_SDK_VERSION v0.43 or later."
+fi
+
 begin "building samples/hello_world (SDK smoke test)"
 load_sdk
 # Build out-of-tree so the SDK volume stays clean.

@@ -134,6 +134,22 @@ int  evo_net_request_async(const char *method,
                            void *user_data);
 
 /*
+ * As evo_net_request_async, with a socket timeout for this request in seconds
+ * (0 = the default, EVO_NET_TIMEOUT_SEC). The timeout is idle time on the
+ * socket, not a deadline for the whole exchange: it is how long a server may
+ * go without sending anything. Stremio stream addons that scrape on demand
+ * routinely think for longer than the default before their first byte.
+ */
+int  evo_net_request_async_timeout(const char *method,
+                                   const char *url,
+                                   const char *post_data,
+                                   const char **headers,
+                                   int header_count,
+                                   int timeout_sec,
+                                   evo_net_cb callback,
+                                   void *user_data);
+
+/*
  * Synchronous HTTP GET request. Blocks calling thread.
  * Caller must free(*out_body) if allocated.
  */

@@ -44,6 +44,15 @@ bool is_pickable(const evo_provider_t* p)
     return p && (evo_provider_is_enabled(p->id) || (p->caps & EVO_PROVIDER_CAP_CONFIG));
 }
 
+/* A resolver (Torbox, Real-Debrid): something to configure, nothing to browse.
+ * Opening one would land on an empty host saying it has no catalog, so the
+ * chooser takes it straight to its source prompt instead. */
+bool is_key_only(const evo_provider_t* p)
+{
+    return p && (p->caps & EVO_PROVIDER_CAP_CONFIG) &&
+           !(p->caps & (EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_WEBUI));
+}
+
 int pickable_count(std::string* only)
 {
     int n = 0;
@@ -70,6 +79,7 @@ struct PendingPlay {
     char item_id[EVO_PROVIDER_MAX_ITEM_ID];
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
+    double resume_sec;      /* evo_provider_t::resume_sec, 0 = from the start */
 };
 PendingPlay g_pending;
 
@@ -81,6 +91,7 @@ PendingPlay g_pending;
 bool g_resolve_finished = false;
 
 static PlaybackSource g_start_src;
+static double g_start_resume = 0.0;
 static pthread_t g_start_thread;
 static std::atomic<bool> g_start_running{false};
 static std::atomic<bool> g_start_done{false};
@@ -96,7 +107,7 @@ static void* start_playback_worker(void* arg)
         return nullptr;
     }
 
-    bool ok = pb->startPlaybackSource(g_start_src, 0.0);
+    bool ok = pb->startPlaybackSource(g_start_src, g_start_resume);
     g_start_success = ok;
     g_start_done = true;
     return nullptr;
@@ -133,6 +144,8 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
     src.is_live  = (pp->is_live || c.is_live) ? true : false;
 
     g_start_src = src;
+    /* A live stream has nothing to resume into. */
+    g_start_resume = src.is_live ? 0.0 : pp->resume_sec;
     g_start_done = false;
     g_start_success = false;
     g_start_running = true;
@@ -316,9 +329,14 @@ void ProviderHostScreen::enterPicker()
 
         std::string detail;
         if (!p->is_configured()) {
-            detail = (p->caps & EVO_PROVIDER_CAP_WEBUI)
-                   ? "Not set up - press X to enter the server address"
-                   : "Not set up - press X to add a playlist";
+            if (p->source_prompt)
+                detail = std::string("Not set up - press X: ") + p->source_prompt;
+            else
+                detail = (p->caps & EVO_PROVIDER_CAP_WEBUI)
+                       ? "Not set up - press X to enter the server address"
+                       : "Not set up - press X to add a playlist";
+        } else if (is_key_only(p)) {
+            detail = "Ready - plays torrent links from other providers";
         } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
             /* An address carries no secret; a playlist URL can (Xtream user and
              * password), so only the web kind shows its source. */
@@ -353,13 +371,22 @@ void ProviderHostScreen::choosePicked(bool editSource)
 
     m_providerId = id;
     bool configured = p->is_configured() != 0;
+    if (is_key_only(p)) {
+        if (configured && !editSource) {
+            if (!evo_provider_is_enabled(p->id)) evo_provider_set_enabled(p->id, 1);
+            toast(p->name, "Ready. Press Square to change the key");
+            return;
+        }
+        openSourceEditor();
+        return;
+    }
     if (editSource || !configured) {
         if (!(p->caps & EVO_PROVIDER_CAP_CONFIG)) {
             toast(p->name, "Nothing to set up here");
             return;
         }
         evo_feedback(EVO_FB_OPEN);
-        if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+        if ((p->caps & EVO_PROVIDER_CAP_WEBUI) || p->source_prompt) {
             openSourceEditor();     /* the address; opens the web UI once set */
             return;
         }
@@ -432,7 +459,8 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     params.hints[0].label = "OPEN";
     params.hints[1].glyph_path = "../icons/btn_square.png";
     params.hints[1].label = (fp && (fp->caps & EVO_PROVIDER_CAP_WEBUI)) ? "EDIT ADDRESS"
-                                                                         : "EDIT PLAYLIST";
+                          : (fp && fp->source_prompt)                 ? "SET UP"
+                                                                       : "EDIT PLAYLIST";
     params.hints[2].glyph_path = "../icons/btn_circle.png";
     params.hints[2].label = "BACK";
 
@@ -565,6 +593,14 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
      * user looks for settings anyway.
      */
     if (pressed & PadButtons::Options) {
+        /* A provider with its own prompt gets the keyboard straight away: the
+         * setup page is IPTV's (URL or USB), the fallback skin has no button
+         * on it, and opening it calls set_source("") along the way. */
+        const evo_provider_t* op = evo_provider_find(m_providerId.c_str());
+        if (op && op->source_prompt) {
+            openSourceEditor();
+            return true;
+        }
         evo_feedback(EVO_FB_OPEN);
         evo_rmlui_provider_show_setup();
         return true;
@@ -586,7 +622,10 @@ void ProviderHostScreen::openSearch()
     }
 
     evo_feedback(EVO_FB_OPEN);
-    evo_keyboard_open("Search channels...", m_searchQuery.c_str(), 64,
+    char title[96];
+    std::snprintf(title, sizeof title, "Search %s...",
+                  (p->caps & EVO_PROVIDER_CAP_LIVE) ? "channels" : p->name);
+    evo_keyboard_open(title, m_searchQuery.c_str(), 64,
                       &ProviderHostScreen::OnSearchSubmitted, this);
 }
 
@@ -634,12 +673,19 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     bool web = (p->caps & EVO_PROVIDER_CAP_WEBUI) != 0;
     if (p->set_source(value.c_str()) != 0) {
         toast(p->name, web ? "Use http(s)://<host>:<port>"
-                           : "That does not look like an M3U URL");
+                     : p->source_prompt ? "That was not accepted"
+                                        : "That does not look like an M3U URL");
         return;
     }
 
     /* Persisted by the provider. Enable it now that it has a source. */
     evo_provider_set_enabled(p->id, p->is_configured() ? 1 : 0);
+    if (is_key_only(p)) {
+        /* Nothing to open: back to the chooser, which now says Ready. */
+        toast(p->name, p->is_configured() ? "Saved" : "Cleared");
+        self->enterPicker();
+        return;
+    }
     self->m_picking = false;
     if (web) {
         /* #101: a web-UI provider opens straight away on its new address. */
@@ -653,7 +699,10 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     }
 
     /* Reopen the host so the catalog is re-fetched from the new source. */
-    toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
+    if (p->source_prompt)
+        toast(p->name, "Saved");
+    else
+        toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
 
     std::string id = self->m_providerId;
     if (self->m_opened) {
@@ -674,7 +723,11 @@ void ProviderHostScreen::openSourceEditor()
 
     const char* current = p->get_source();
     std::string initial;
-    if (current && (std::strncmp(current, "http://", 7) == 0 || std::strncmp(current, "https://", 8) == 0)) {
+    if (p->source_prompt) {
+        /* The provider decides what, if anything, is safe to pre-fill - an API
+         * key is not (it would sit on screen), a server address is. */
+        if (current) initial = current;
+    } else if (current && (std::strncmp(current, "http://", 7) == 0 || std::strncmp(current, "https://", 8) == 0)) {
         initial = current;
     } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
         initial = "http://";
@@ -683,7 +736,9 @@ void ProviderHostScreen::openSourceEditor()
     }
 
     char title[96];
-    if (p->caps & EVO_PROVIDER_CAP_WEBUI)
+    if (p->source_prompt)
+        std::snprintf(title, sizeof title, "%s", p->source_prompt);
+    else if (p->caps & EVO_PROVIDER_CAP_WEBUI)
         std::snprintf(title, sizeof title, "%s server (http(s)://host:port)", p->name);
     else
         std::snprintf(title, sizeof title, "%s playlist URL (clear to reset)", p->name);
@@ -839,14 +894,29 @@ void ProviderHostScreen::startSelected()
     std::snprintf(g_pending.item_id,  sizeof g_pending.item_id,  "%s", sel.item_id);
     std::snprintf(g_pending.title,    sizeof g_pending.title,    "%s", sel.title);
     g_pending.is_live = sel.is_live;
+
+    /* The provider may know better than the row what is being watched, and
+     * where the user left off. Both are asked of the item's own provider,
+     * before any resolver in the chain gets involved. */
+    const evo_provider_t* sp = evo_provider_find(sel.provider_id);
+    if (sp && sp->play_title) {
+        const char* t = sp->play_title(sel.item_id);
+        if (t && t[0])
+            std::snprintf(g_pending.title, sizeof g_pending.title, "%s", t);
+    }
+    if (sp && sp->resume_sec && !sel.is_live) {
+        int64_t r = sp->resume_sec(sel.item_id);
+        g_pending.resume_sec = r > 0 ? (double)r : 0.0;
+    }
     g_resolve_finished = false;
 
     m_tunePending = true;
     m_tuneFrames = 0;
 
     char msg[128];
-    std::snprintf(msg, sizeof(msg), "Tuning %s...", sel.title);
-    toast("LIVE TV", msg);
+    std::snprintf(msg, sizeof(msg), "%s %s...", sel.is_live ? "Tuning" : "Opening",
+                  g_pending.title);
+    toast(sel.is_live ? "LIVE TV" : (sp ? sp->name : "PROVIDER"), msg);
     evo_rmlui_provider_set_tuning(1);
     evo_rmlui_provider_set_loading(1, msg);
 }

@@ -30,6 +30,9 @@ extern const evo_provider_t evo_provider_iptv;
 extern const evo_provider_t evo_provider_emby;
 extern const evo_provider_t evo_provider_jellyfin;
 extern const evo_provider_t evo_provider_nuvio;
+extern const evo_provider_t evo_provider_nuvio_native;
+extern const evo_provider_t evo_provider_torbox;
+extern const evo_provider_t evo_provider_realdebrid;
 
 /*
  * Emby is in the table unconditionally, even while EVO_ENABLE_EMBY is 0.
@@ -44,7 +47,11 @@ static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_iptv,
     &evo_provider_emby,
     &evo_provider_jellyfin,     /* #101: web UI only */
+    &evo_provider_nuvio_native, /* Stremio addons natively (nuvio-native-provider.md) */
     &evo_provider_nuvio,        /* web UI only - Stremio addons, debrid */
+    /* Resolvers last: the chain offers a magnet to them in table order. */
+    &evo_provider_torbox,
+    &evo_provider_realdebrid,
 };
 
 #define PROVIDER_COUNT ((int)(sizeof(PROVIDERS) / sizeof(PROVIDERS[0])))
@@ -458,6 +465,15 @@ static void chain_step(chain_t *st)
         if (!g_enabled[i]) continue;
         if (!(p->caps & EVO_PROVIDER_CAP_RESOLVE)) continue;
         if (strcmp(p->id, st->origin) == 0) continue;
+        /*
+         * Only link resolvers (Torbox, Real-Debrid) take someone else's link.
+         * A catalog provider's resolve() understands its OWN item ids, and at
+         * least one accepts anything: a connected Emby wraps whatever string
+         * it is given in /Videos/<id>/stream and reports success, so a Nuvio
+         * magnet offered to it came back "playable" and never reached the
+         * debrid service behind it.
+         */
+        if (p->caps & (EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_WEBUI)) continue;
 
         if (p->resolve(st->pending_url, on_resolved, st) == 0)
             return;                /* its callback drives the next step */

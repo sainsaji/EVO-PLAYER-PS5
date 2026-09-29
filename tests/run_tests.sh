@@ -47,6 +47,15 @@ SRCS=(
     "${ADDONS}/src/evo_provider_bundle.c"
     "${ADDONS}/src/provider_iptv.c"
     "${ADDONS}/src/provider_emby.c"
+    "${ADDONS}/src/provider_jellyfin.c"
+    "${ADDONS}/src/provider_nuvio.c"
+    "${ADDONS}/src/nuvio_stremio.c"
+    "${ADDONS}/src/nuvio_progress.c"
+    "${ADDONS}/src/nuvio_json.c"
+    "${ADDONS}/src/nuvio_debrid.c"
+    "${ADDONS}/src/nuvio_account.c"
+    "${ADDONS}/src/provider_nuvio_native.c"
+    "${ADDONS}/src/provider_debrid.c"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

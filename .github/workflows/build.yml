@@ -33,7 +33,7 @@ on:
 env:
   # Keep in sync with Dockerfile / docker-compose.yml.
   LLVM_VERSION: "18"
-  PS5_SDK_VERSION: "v0.42"
+  PS5_SDK_VERSION: "v0.43"
   PACBREW_VERSION: "v0.39"
 
 jobs:

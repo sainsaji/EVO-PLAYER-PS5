@@ -1,0 +1,20 @@
+{
+  "id": "nuvio-native",
+  "name": "Nuvio",
+  "version": "20260929.151517",
+  "api_version": 1,
+  "entry": "main.rml",
+  "data_model": "nuvio",
+  "assets": [
+    {
+      "path": "main.rcss",
+      "bytes": 9690,
+      "sha256": "3752d841386b7b5198a911f69345c817f0f7e2e0821d855f9dd74ebcfce5f0d0"
+    },
+    {
+      "path": "main.rml",
+      "bytes": 5046,
+      "sha256": "7f6fee0e9da1e4d8d58968914615634bdf43525a6564bd88fc33ac62b52e9c95"
+    }
+  ]
+}

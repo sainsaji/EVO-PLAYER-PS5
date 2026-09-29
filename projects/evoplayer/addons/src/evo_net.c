@@ -42,6 +42,17 @@
 #define EVO_NET_TIMEOUT_SEC  6
 #endif
 
+/*
+ * Worker threads. One was enough while a provider made one request at a time;
+ * a Stremio-style stream lookup fans out to every installed addon at once, and
+ * torrent addons routinely take several seconds each. Serially, eight of them
+ * is the better part of a minute before the last one's timeout. Four keeps the
+ * sockets and TLS sessions in flight modest on a console.
+ */
+#ifndef EVO_NET_WORKERS
+#define EVO_NET_WORKERS      4
+#endif
+
 #define EVO_NET_BUFFER_SIZE  8192
 
 typedef struct evo_net_req {
@@ -59,9 +70,19 @@ typedef struct evo_net_req {
     int         status_code;
     char       *response_body;
     size_t      response_len;
+
+    int         timeout_sec;    /* 0 = EVO_NET_TIMEOUT_SEC */
+
+    struct evo_net_req *next;   /* completed list */
 } evo_net_req_t;
 
-static pthread_t       g_worker_thread;
+/* The timeout for the request this worker thread is executing. A thread-local
+ * rather than a parameter so the synchronous API and execute_http()'s callers
+ * stay as they were; the worker sets it around each request. */
+static _Thread_local int t_timeout_sec;
+
+static pthread_t       g_worker_threads[EVO_NET_WORKERS];
+static int             g_worker_count = 0;
 static pthread_mutex_t g_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_queue_cond  = PTHREAD_COND_INITIALIZER;
 static int             g_running     = 0;
@@ -69,8 +90,14 @@ static int             g_running     = 0;
 static evo_net_req_t  *g_pending_queue[EVO_NET_MAX_QUEUE];
 static int             g_pending_count = 0;
 
-static evo_net_req_t  *g_completed_queue[EVO_NET_MAX_QUEUE];
-static int             g_completed_count = 0;
+/*
+ * Completed requests, oldest first. A list rather than a fixed array: every
+ * accepted request must reach its callback exactly once (evo_provider.h's
+ * contract), and a bounded completed queue had to drop a finished request
+ * when the main thread fell behind - a UI then waited on it forever.
+ */
+static evo_net_req_t  *g_completed_head = NULL;
+static evo_net_req_t  *g_completed_tail = NULL;
 
 #ifndef NO_OPENSSL
 static SSL_CTX        *g_ssl_ctx = NULL;
@@ -478,7 +505,7 @@ static int execute_http(const char *method,
             if (sock < 0) continue;
 
             struct timeval tv;
-            tv.tv_sec = EVO_NET_TIMEOUT_SEC;
+            tv.tv_sec = t_timeout_sec > 0 ? t_timeout_sec : EVO_NET_TIMEOUT_SEC;
             tv.tv_usec = 0;
             setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -556,12 +583,19 @@ static int execute_http(const char *method,
 
         if (!build_err && current_post_data) {
             size_t post_len = strlen(current_post_data);
-            if (dynbuf_append_fmt(&req_buf,
-                                  "Content-Type: application/json\r\n"
-                                  "Content-Length: %zu\r\n",
-                                  post_len) != 0) {
+            /* JSON unless the caller says otherwise: a debrid API takes a form
+             * or multipart body, and two Content-Type headers is a request a
+             * server may read either way. */
+            int caller_ct = 0;
+            for (int i = 0; headers && i < header_count; i++)
+                if (headers[i] && strncasecmp(headers[i], "Content-Type:", 13) == 0)
+                    caller_ct = 1;
+            if (!caller_ct &&
+                dynbuf_append(&req_buf, "Content-Type: application/json\r\n", 32) != 0)
                 build_err = 1;
-            }
+            if (!build_err &&
+                dynbuf_append_fmt(&req_buf, "Content-Length: %zu\r\n", post_len) != 0)
+                build_err = 1;
         }
 
         if (!build_err && headers && header_count > 0) {
@@ -1027,22 +1061,22 @@ static void *evo_net_worker(void *arg)
 
         if (req) {
             /* Execute HTTP */
+            t_timeout_sec = req->timeout_sec;
             int res = execute_http(req->method, req->url, req->post_data,
                                    (const char **)req->headers, req->header_count,
                                    &req->response_body, &req->response_len,
                                    &req->status_code);
+            t_timeout_sec = 0;
 
             req->success   = (res == 0);
             req->completed = 1;
 
-            /* Push to completed queue */
+            /* Push to completed list */
             pthread_mutex_lock(&g_queue_mutex);
-            if (g_completed_count < EVO_NET_MAX_QUEUE) {
-                g_completed_queue[g_completed_count++] = req;
-            } else {
-                /* Overflow drop */
-                free_req(req);
-            }
+            req->next = NULL;
+            if (g_completed_tail) g_completed_tail->next = req;
+            else                  g_completed_head = req;
+            g_completed_tail = req;
             pthread_mutex_unlock(&g_queue_mutex);
         }
     }
@@ -1056,9 +1090,17 @@ int evo_net_init(void)
 
     g_running = 1;
     g_pending_count = 0;
-    g_completed_count = 0;
+    g_completed_head = g_completed_tail = NULL;
+    g_worker_count = 0;
 
-    if (pthread_create(&g_worker_thread, NULL, evo_net_worker, NULL) != 0) {
+    for (int i = 0; i < EVO_NET_WORKERS; i++) {
+        if (pthread_create(&g_worker_threads[i], NULL, evo_net_worker, NULL) != 0)
+            break;
+        g_worker_count++;
+    }
+
+    /* Fewer workers than asked for is slower, not broken. None is broken. */
+    if (g_worker_count == 0) {
         g_running = 0;
         return -1;
     }
@@ -1075,7 +1117,9 @@ void evo_net_shutdown(void)
     pthread_cond_broadcast(&g_queue_cond);
     pthread_mutex_unlock(&g_queue_mutex);
 
-    pthread_join(g_worker_thread, NULL);
+    for (int i = 0; i < g_worker_count; i++)
+        pthread_join(g_worker_threads[i], NULL);
+    g_worker_count = 0;
 
     /* Free pending */
     for (int i = 0; i < g_pending_count; i++) {
@@ -1084,10 +1128,12 @@ void evo_net_shutdown(void)
     g_pending_count = 0;
 
     /* Free completed */
-    for (int i = 0; i < g_completed_count; i++) {
-        free_req(g_completed_queue[i]);
+    while (g_completed_head) {
+        evo_net_req_t *next = g_completed_head->next;
+        free_req(g_completed_head);
+        g_completed_head = next;
     }
-    g_completed_count = 0;
+    g_completed_tail = NULL;
 
 #ifndef NO_OPENSSL
     pthread_mutex_lock(&g_ssl_init_mutex);
@@ -1106,6 +1152,19 @@ int evo_net_request_async(const char *method,
                           int header_count,
                           evo_net_cb callback,
                           void *user_data)
+{
+    return evo_net_request_async_timeout(method, url, post_data, headers, header_count,
+                                         0, callback, user_data);
+}
+
+int evo_net_request_async_timeout(const char *method,
+                                  const char *url,
+                                  const char *post_data,
+                                  const char **headers,
+                                  int header_count,
+                                  int timeout_sec,
+                                  evo_net_cb callback,
+                                  void *user_data)
 {
     if (!method || !url || strlen(url) >= EVO_NET_MAX_URL || strlen(method) >= 16) {
         return EVO_NET_ASYNC_ERR_ARG;
@@ -1130,6 +1189,7 @@ int evo_net_request_async(const char *method,
     }
     req->callback  = callback;
     req->user_data = user_data;
+    req->timeout_sec = timeout_sec > 0 ? timeout_sec : 0;
 
     if (header_count > 0 && headers) {
         req->headers = (char **)calloc((size_t)header_count, sizeof(char *));
@@ -1165,24 +1225,19 @@ int evo_net_request_async(const char *method,
 
 void evo_net_poll(void)
 {
-    evo_net_req_t *ready[EVO_NET_MAX_QUEUE];
-    int count = 0;
-
     pthread_mutex_lock(&g_queue_mutex);
-    count = g_completed_count;
-    for (int i = 0; i < count; i++) {
-        ready[i] = g_completed_queue[i];
-    }
-    g_completed_count = 0;
+    evo_net_req_t *req = g_completed_head;
+    g_completed_head = g_completed_tail = NULL;
     pthread_mutex_unlock(&g_queue_mutex);
 
-    for (int i = 0; i < count; i++) {
-        evo_net_req_t *req = ready[i];
+    while (req) {
+        evo_net_req_t *next = req->next;
         if (req->callback) {
             req->callback(req->success, req->status_code,
                           req->response_body, req->response_len,
                           req->user_data);
         }
         free_req(req);
+        req = next;
     }
 }

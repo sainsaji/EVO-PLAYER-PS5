@@ -39,10 +39,13 @@ FROM ubuntu:${UBUNTU_VERSION}
 # Each pin is an immutable, permanently-fetchable artifact so that rebuilding
 # this image months from now produces the same toolchain.
 ARG LLVM_VERSION=18
-# ps5-payload-dev/sdk release. v0.42 published 2026-08-02.
+# ps5-payload-dev/sdk release. v0.43 published 2026-08-29.
 # 12.70 support lives in crt/kernel.c: `case 0x12700000:` (added well before
 # this tag; v0.38/v0.39 notes read "kernel: add 11.xx and 12.xx offsets").
-ARG PS5_SDK_VERSION=v0.42
+# v0.43 is the first tag whose crt/kernel.c also has `case 0x13600000:`; at
+# v0.42 a 13.60 console fell through to `default: return -ENOSYS` and the
+# kernel offset table was never set up.
+ARG PS5_SDK_VERSION=v0.43
 # ps5-payload-dev/pacbrew-repo release. v0.39 published 2026-08-02.
 # Ships a prebuilt /opt/ps5-payload-sdk sysroot containing FFmpeg 7.0.1,
 # SDL2, mesa, libass ... i.e. exactly what ProsperoPlayer links against.

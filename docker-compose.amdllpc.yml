@@ -16,5 +16,5 @@ services:
       context: .
       dockerfile: Dockerfile.amdllpc
       args:
-        BASE_IMAGE: "evo-player/ps5-dev:llvm18-sdk-v0.42"
-    image: evo-player/ps5-dev:llvm18-sdk-v0.42-amdllpc
+        BASE_IMAGE: "evo-player/ps5-dev:llvm18-sdk-v0.43"
+    image: evo-player/ps5-dev:llvm18-sdk-v0.43-amdllpc

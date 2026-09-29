@@ -36,7 +36,7 @@ services:
         # Keep these in sync with the pins documented in the Dockerfile header.
         UBUNTU_VERSION: "24.04"
         LLVM_VERSION: "18"
-        PS5_SDK_VERSION: "v0.42"
+        PS5_SDK_VERSION: "v0.43"
         PACBREW_VERSION: "v0.39"
         CMAKE_VERSION: "3.31.6"
         NINJA_VERSION: "1.12.1"
@@ -46,7 +46,7 @@ services:
         BUILD_SDK_FROM_SOURCE: "0"
         # 0 = bare SDK, no prebuilt FFmpeg/SDL2 (ProsperoPlayer will not link).
         INSTALL_PACBREW: "1"
-    image: evo-player/ps5-dev:llvm18-sdk-v0.42
+    image: evo-player/ps5-dev:llvm18-sdk-v0.43
 
     # A login shell so /etc/profile.d/ps5-sdk.sh runs and exports CC/CXX/...
     command: ["/bin/bash", "-l"]

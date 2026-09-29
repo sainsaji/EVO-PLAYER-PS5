@@ -3,7 +3,7 @@
 # (Mesa + PS5 Gallium + patched PSBC) SDK. #77 / render-overhaul GL-1.
 #
 # NOT part of the default image. The base dev image (Dockerfile ->
-# evo-player/ps5-dev:llvm18-sdk-v0.42) is LLVM 18 + meson-from-apt, which is
+# evo-player/ps5-dev:llvm18-sdk-v0.43) is LLVM 18 + meson-from-apt, which is
 # everything EVO itself needs. ps5-opengl's Mesa/PSBC build wants a heavier
 # toolchain; this layer adds it without disturbing the pinned base.
 #
@@ -15,7 +15,7 @@
 # See docs/evo-pro/gl1-spike.md for the toolchain gap analysis and the pins in
 # third_party/ps5-opengl/dependencies.json.
 # =============================================================================
-ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.42
+ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.43
 FROM ${BASE_IMAGE}
 
 # The base image drops to a non-root user; apt needs root.

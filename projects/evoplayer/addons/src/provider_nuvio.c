@@ -86,7 +86,7 @@ static const char *nv_web_ui_url(void) { return nv_get_source(); }
 
 const evo_provider_t evo_provider_nuvio = {
     .id            = "nuvio",
-    .name          = "Nuvio",
+    .name          = "Nuvio (Web)",     /* "Nuvio" is the native provider now */
     .icon          = "icon_emby.png",
     .caps          = EVO_PROVIDER_CAP_CONFIG | EVO_PROVIDER_CAP_WEBUI,
     .api_version   = EVO_PROVIDER_API_VERSION,

@@ -28,7 +28,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # Warn (don't fail) when the image has not been built yet - compose will build.
-if ! docker image inspect evo-player/ps5-dev:llvm18-sdk-v0.42 >/dev/null 2>&1; then
+if ! docker image inspect evo-player/ps5-dev:llvm18-sdk-v0.43 >/dev/null 2>&1; then
     warn "dev image not found; 'docker compose run' will build it now."
     warn "this takes a while on first run (SDK + prebuilt FFmpeg/SDL2 sysroot)."
 fi

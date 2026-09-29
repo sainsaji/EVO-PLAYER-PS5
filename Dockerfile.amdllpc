@@ -29,7 +29,7 @@
 # This is a large build (LLVM-scale, tens of minutes and several GB) but it is
 # one-time and cached in the image.
 # =============================================================================
-ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.42
+ARG BASE_IMAGE=evo-player/ps5-dev:llvm18-sdk-v0.43
 FROM ${BASE_IMAGE}
 
 # The base image drops to a non-root user; apt and /opt need root.

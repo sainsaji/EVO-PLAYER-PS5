@@ -1,0 +1,109 @@
+<rml>
+<head>
+    <link type="text/rcss" href="main.rcss"/>
+</head>
+<!--
+    The Nuvio provider's own UI (docs/addons/nuvio-native-provider.md, phase 2).
+
+    Fetched at runtime like any provider bundle and cached under
+    /data/evoplayer/providers/nuvio-native/. Point the provider at it by putting
+    its URL in that directory's bundle.txt; without one EVO draws the embedded
+    fallback skin, which is fully usable, just plainer.
+
+    It wears NuvioTV's look rather than EVO's: NuvioTV's near-black neutrals
+    (PrimitiveTokens neutral950/900/800), white focus, posters on a wall. One
+    list, three kinds of row, told apart by what the provider publishes:
+
+      folder with art     a poster card     titles, seasons, episodes
+      folder without art  a text tile       catalogs at the root
+      not a folder        a stream row      the streams for one title
+
+    Binds only api_version 1 of EvoProviderModel, and no EVO element id.
+-->
+<body data-model="nuvio">
+
+    <div id="nv-pane">
+
+        <div id="nv-header">
+            <div id="nv-header-left">
+                <span id="nv-logo">NUVIO</span>
+                <div id="nv-path">{{ breadcrumb }}</div>
+            </div>
+            <div id="nv-count" data-if="!empty">{{ count }}</div>
+        </div>
+
+        <div id="nv-body">
+
+            <div id="nv-notice" data-if="status != ''"
+                 data-class-nv-notice-bad="has_error">{{ status }}</div>
+
+            <div id="nv-loading" data-if="loading && empty">
+                <div class="nv-spinner"></div>
+                <span id="nv-loading-text">Asking your addons...</span>
+            </div>
+
+            <!-- Empty: the setup page (OPTIONS), or a level with nothing in it. -->
+            <div id="nv-empty" data-if="empty && !loading">
+                <div id="nv-empty-title" data-if="query == ''">Nothing here yet</div>
+                <div id="nv-empty-title" data-if="query != ''">No results</div>
+                <div id="nv-empty-hint">
+                    A title with no streams needs a stream addon. Add one with the
+                    button below, or list manifest URLs in addons.txt over FTP.
+                </div>
+                <div id="nv-add" class="nv-action" data-event-click="setup_url()">ADD AN ADDON</div>
+            </div>
+
+            <div id="nv-wall" data-if="!empty" data-class-nv-wall-notice="status != ''">
+
+                <div class="nv-item" data-for="row : rows"
+                     data-attr-rowid="row.id" data-event-click="activate()"
+                     data-class-nv-poster="row.is_folder && row.art != ''"
+                     data-class-nv-tile="row.is_folder && row.art == ''"
+                     data-class-nv-stream="!row.is_folder">
+
+                    <!-- poster card -->
+                    <div class="nv-poster-art" data-if="row.is_folder && row.art != ''">
+                        <img class="nv-poster-img" data-attr-src="row.art"/>
+                    </div>
+                    <div class="nv-poster-meta" data-if="row.is_folder && row.art != ''">
+                        <div class="nv-poster-title">{{ row.title }}</div>
+                        <div class="nv-poster-sub">{{ row.subtitle }}</div>
+                    </div>
+
+                    <!-- text tile -->
+                    <div class="nv-tile-body" data-if="row.is_folder && row.art == ''">
+                        <div class="nv-tile-initial">{{ row.initial }}</div>
+                        <div class="nv-tile-text">
+                            <div class="nv-tile-title">{{ row.title }}</div>
+                            <div class="nv-tile-sub">{{ row.subtitle }}</div>
+                        </div>
+                    </div>
+
+                    <!-- stream row -->
+                    <div class="nv-stream-body" data-if="!row.is_folder">
+                        <div class="nv-stream-title">{{ row.title }}</div>
+                        <div class="nv-stream-sub">{{ row.subtitle }}</div>
+                        <div class="nv-stream-desc" data-if="row.overview != ''">{{ row.overview }}</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div id="nv-footer">
+            <span id="nv-source">{{ provider_name }}</span>
+            <div id="nv-busy" data-if="loading || tuning">
+                <div class="nv-spinner-sm"></div>
+                <span data-if="tuning">OPENING...</span>
+                <span data-if="loading && !tuning">LOADING...</span>
+            </div>
+            <div id="nv-hints">
+                <div class="nv-hint"><img class="nv-glyph" src="/assets/icons/btn_cross.png"/><span>OPEN</span></div>
+                <div class="nv-hint"><img class="nv-glyph" src="/assets/icons/btn_circle.png"/><span>BACK</span></div>
+                <div class="nv-hint"><img class="nv-glyph" src="/assets/icons/btn_square.png"/><span>SEARCH</span></div>
+                <div class="nv-hint"><span class="nv-pill">OPTIONS</span><span>ADD ADDON</span></div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>
