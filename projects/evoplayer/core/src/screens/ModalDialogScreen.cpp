@@ -101,15 +101,27 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
     }
 
     if (pressed & PadButtons::Circle) {
-        evo_feedback(EVO_FB_CANCEL);
-        if (auto sm = Application::getInstance().getScreenManager()) {
-            if (m_type == ModalType::ExitConfirm) {
+        if (m_type == ModalType::ResumePrompt) {
+            // Circle directly triggers "START OVER"
+            executeAction(1);
+        } else {
+            evo_feedback(EVO_FB_CANCEL);
+            if (auto sm = Application::getInstance().getScreenManager()) {
                 sm->navigateBack(ScreenId::Player);
-            } else {
-                sm->returnFromPlayback();
             }
         }
         return true;
+    }
+
+    if (pressed & PadButtons::Triangle) {
+        // Back out to file manager / browser if cancelled from resume prompt
+        if (m_type == ModalType::ResumePrompt) {
+            evo_feedback(EVO_FB_CANCEL);
+            if (auto sm = Application::getInstance().getScreenManager()) {
+                sm->returnFromPlayback();
+            }
+            return true;
+        }
     }
 
     return false;
@@ -136,11 +148,11 @@ void ModalDialogScreen::render(uint32_t* framebuffer, int width, int height) {
 
         dialog.actions[0].label = "KEEP WATCHING";
         dialog.actions[0].icon_path = "/assets/icons/btn_circle.png";
-        dialog.actions[0].is_primary = 0;
+        dialog.actions[0].is_primary = (m_focusedButton == 0) ? 1 : 0;
 
         dialog.actions[1].label = "STOP";
         dialog.actions[1].icon_path = "/assets/icons/btn_cross.png";
-        dialog.actions[1].is_primary = 1;
+        dialog.actions[1].is_primary = (m_focusedButton == 1) ? 1 : 0;
     } else {
         dialog.eyebrow = "RESUME";
         dialog.title = "Continue from previous position?";
@@ -172,11 +184,11 @@ void ModalDialogScreen::render(uint32_t* framebuffer, int width, int height) {
 
         dialog.actions[0].label = "RESUME";
         dialog.actions[0].icon_path = "/assets/icons/btn_cross.png";
-        dialog.actions[0].is_primary = 1;
+        dialog.actions[0].is_primary = (m_focusedButton == 0) ? 1 : 0;
 
         dialog.actions[1].label = "START OVER";
         dialog.actions[1].icon_path = "/assets/icons/btn_circle.png";
-        dialog.actions[1].is_primary = 0;
+        dialog.actions[1].is_primary = (m_focusedButton == 1) ? 1 : 0;
     }
 
     evo_rmlui_update_dialog(&dialog);

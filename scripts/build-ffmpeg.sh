@@ -549,6 +549,7 @@ minimal)
         --enable-protocol=https
         --enable-protocol=tcp
         --enable-protocol=tls
+        --enable-protocol=ftp
         # AES-128 segment encryption is routine on IPTV playlists; without
         # the crypto protocol those channels open and then decode to noise.
         --enable-protocol=crypto

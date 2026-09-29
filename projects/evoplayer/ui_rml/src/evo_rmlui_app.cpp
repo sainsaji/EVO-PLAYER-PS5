@@ -1323,7 +1323,7 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     }
 
     /* 2b. Left Sidebar (Sources) */
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         const std::string n = std::to_string(i);
         Rml::Element* item = el("sb-item-" + n);
         Rml::Element* icon = el("sb-icon-" + n);

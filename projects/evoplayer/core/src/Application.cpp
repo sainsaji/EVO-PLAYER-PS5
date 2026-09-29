@@ -1638,6 +1638,7 @@ int Application::run() {
                 if (s_sw_p0 == 0) s_sw_p0 = s_sw_p1 = sw_p2;
                 evo_sweep_note_present(s_sw_p0, s_sw_p1, sw_p2, swap ? 1 : 0);
                 s_sw_p0 = s_sw_p1 = 0;
+                evo_sweep_probe_colour();
             }
             evo_rmlui_end_frame();
 

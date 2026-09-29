@@ -69,6 +69,7 @@ public:
     void resetSelection();
     void setSource(int sourceIndex);
     void setSearchQuery(const std::string& query);
+    void handleAddFtpHost(const std::string& hostStr);
 
 private:
     void initBrowserStateMachine();
@@ -118,6 +119,11 @@ private:
     char m_statusACodec[64];
     char m_statusDuration[32];
     char m_statusSize[32];
+
+    std::string m_networkShareId;
+    std::string m_networkRemotePath = "/";
+    std::string m_networkEmptyTitle;
+    std::string m_networkEmptyHint;
 };
 
 } // namespace evo

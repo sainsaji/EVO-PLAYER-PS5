@@ -2432,6 +2432,58 @@ void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
     }
 }
 
+int evo_agc_probe_rgb(uint8_t *rgb, int n)
+{
+    if (!g_agc_dev.initialized || !rgb || n <= 0)
+        return 0;
+    const int front = 1 - g_agc_dev.active_backbuffer;
+    const uint32_t *src = (const uint32_t *)g_agc_dev.scanout_buffers[front];
+    if (!src)
+        return 0;
+
+    const int sw = g_agc_dev.width;
+    const int sh = g_agc_dev.height;
+    if (sw <= 0 || sh <= 0)
+        return 0;
+
+    const int is_hdr = g_agc_dev.is_hdr;
+
+    static const float kGolden = 0.61803398875f;
+    float fx = 0.5f, fy = 0.5f;
+    for (int i = 0; i < n; i++) {
+        /* Low-discrepancy additive recurrence sequence, inset from edges */
+        fx += kGolden;        if (fx >= 1.0f) fx -= 1.0f;
+        fy += kGolden * 0.5f; if (fy >= 1.0f) fy -= 1.0f;
+        int x = (int)((0.1f + 0.8f * fx) * (float)sw);
+        int y = (int)((0.1f + 0.8f * fy) * (float)sh);
+        if (x < 0) x = 0; if (x >= sw) x = sw - 1;
+        if (y < 0) y = 0; if (y >= sh) y = sh - 1;
+
+        const unsigned short *lut = PS5_tilemap[y & PS5_TILE_H_MASK];
+        const size_t row_base =
+            (size_t)(y >> PS5_TILE_H_SHIFT) * PS5_TILE_HEIGHT * (size_t)sw;
+        const uint32_t *tile = src + row_base +
+            ((size_t)(x >> PS5_TILE_W_SHIFT) * (size_t)PS5_TILE_SIZE);
+        const uint32_t *pixel_addr = &tile[lut[x & PS5_TILE_W_MASK]];
+
+        evo_agc_runtime_cache_flush(pixel_addr, sizeof(uint32_t));
+        uint32_t px = *pixel_addr;
+
+        if (is_hdr) {
+            /* 10:10:10:2 Bgr10A2 -> scale 10-bit to 8-bit */
+            rgb[i * 3 + 0] = (uint8_t)(((px >> 20) & 0x3FF) >> 2); /* R */
+            rgb[i * 3 + 1] = (uint8_t)(((px >> 10) & 0x3FF) >> 2); /* G */
+            rgb[i * 3 + 2] = (uint8_t)((px         & 0x3FF) >> 2); /* B */
+        } else {
+            /* 8:8:8:8 Bgra8 */
+            rgb[i * 3 + 0] = (uint8_t)((px >> 16) & 0xFF);         /* R */
+            rgb[i * 3 + 1] = (uint8_t)((px >> 8)  & 0xFF);         /* G */
+            rgb[i * 3 + 2] = (uint8_t)(px         & 0xFF);         /* B */
+        }
+    }
+    return n;
+}
+
 void evo_agc_runtime_note_draw(void)
 {
     g_agc_dev.frame_has_draws = 1;

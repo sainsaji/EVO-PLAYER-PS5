@@ -8,7 +8,7 @@
 #include "evo_sweep.h"
 
 #include "evo_boot_log.h"
-
+#include "evo_agc_runtime.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -19,8 +19,8 @@
 
 /* Presents to let go by before the colour probe fires: enough for the first
  * real frames to have reached the panel and for any open-time flash / fade to
- * be over, few enough that a short clip still gets probed. */
-#define SWEEP_PROBE_AFTER  90
+ * be over (OSD auto-hides after 3.5s), few enough that a short clip still gets probed. */
+#define SWEEP_PROBE_AFTER  120
 
 /*
  * evo_boot_log() formats into a 600-byte line buffer. The sweep line's fixed
@@ -178,13 +178,9 @@ void evo_sweep_probe_colour(void)
     if (g_rec.present_video_n < SWEEP_PROBE_AFTER)
         return;
 
-    /* The plane-hash probe read back the GL default framebuffer. The GL path
-     * is gone and the AGC runtime exposes no scanout readback yet, so the
-     * probe reports unavailable and the sweep row simply omits the hash. */
-    n = 0;
-    (void)rgb;
+    n = evo_agc_probe_rgb(rgb, SWEEP_PROBE_PIXELS);
     if (n <= 0) {
-        g_rec.probe_done = 1;   /* no GL (host / payload): don't retry per frame */
+        g_rec.probe_done = 1;   /* probe not supported or empty: don't retry per frame */
         return;
     }
     for (i = 0; i < n * 3; i++) {

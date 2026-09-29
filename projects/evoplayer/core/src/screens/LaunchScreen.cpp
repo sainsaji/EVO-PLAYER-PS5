@@ -204,8 +204,8 @@ void LaunchScreen::activateSelection() {
             case LIB_RECENT:
             case LIB_FAVORITES: {
                 const int src = (libraryTiles()[m_selectedCol].action == LIB_BROWSE) ? 0
-                              : (libraryTiles()[m_selectedCol].action == LIB_RECENT) ? 3
-                              : 2;
+                              : (libraryTiles()[m_selectedCol].action == LIB_RECENT) ? 4
+                              : 3;
                 if (auto bs = dynamic_cast<BrowserScreen*>(screenMgr->getScreen(ScreenId::UsbBrowser))) {
                     bs->setSource(src);
                 }

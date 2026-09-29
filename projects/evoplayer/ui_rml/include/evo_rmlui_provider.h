@@ -117,11 +117,11 @@ struct EvoProviderModel {
  * `count` stays the size of the whole level, because that is what a header
  * saying "184 GROUPS" means.
  */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW = 24;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW = 16;
 /* Grow once focus is within this many rows of the end of the window. */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW_MARGIN = 8;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MARGIN = 6;
 /* Step size when expanding window. */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW_STEP = 16;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_STEP = 8;
 /*
  * The hard cap on LIVE rows, and the reason the window slides instead of
  * growing without bound.
@@ -131,26 +131,14 @@ constexpr size_t EVO_PROVIDER_ROW_WINDOW_STEP = 16;
  * elements, and at 19 elements per card a 184-group level reached 524288 DCB
  * dwords - exactly the slot capacity. Everything past that point was dropped
  * by a write callback that returns 0 and says nothing, which is the "flashing"
- * described above, now arriving through a different door. Measured on that
- * level: ~58 fps at 24 rows, and the whole screen thrashing between 1868 and
- * 524288 dwords a frame by row 104.
+ * described above, now arriving through a different door.
  *
- * So the window grows to this cap and then slides to follow focus. Sliding is
- * as cheap as growing, because DataViewFor binds element i to rows[i] by INDEX
- * and does not re-instance an element when the value at its index changes - it
- * only instances new tail elements and destroys surplus ones. The cost is that
- * focus stays on the ELEMENT rather than the row it was showing, so a slide has
- * to move focus back by the distance it slid. See SlideRowWindow.
- *
- * 32 and not 48, from hardware: with the cap at 48 the `agc health` line read
- * `peak=524288 dcb_full=205652` - the buffer completely full and a six-figure
- * count of rejected writes - while the same run at a window of 24-40 rows
- * reported `peak=86732 dcb_full=0`. So 48 is over the line and 40 was under it.
- * The relationship is not linear in rows, so this is the measured safe side
- * rather than a computed one; dcb_full in the log is what says whether it is
- * still safe, and it is there precisely because this was invisible before.
+ * 20 (and not 32/48): on IPTV screens with cards containing badges, epg previews,
+ * and backdrop blurs, 32 rows pushed DCB to 524288 with dcb_full=204774. A cap of
+ * 20 rows (5 full grid rows, with only 2 rows visible at once) keeps peak DCB well
+ * under the 524k slot limit with dcb_full=0.
  */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW_MAX = 32;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MAX = 20;
 
 /* ------------------------------------------------------------------------- */
 /* Host                                                                      */

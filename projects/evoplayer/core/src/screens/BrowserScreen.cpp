@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
+#include "evo/services/NetworkStorageService.hpp"
+
 extern "C" {
 #include <libavformat/avformat.h>
 }
@@ -52,6 +54,49 @@ static void OnSearchSubmitted(const char* text, void* userdata) {
     }
 
     self->setSearchQuery(queryStr);
+}
+
+static void OnAddFtpSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleAddFtpHost(text);
+}
+
+void BrowserScreen::handleAddFtpHost(const std::string& hostStr) {
+    std::string trimmed = hostStr;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty()) return;
+
+    std::string host = trimmed;
+    int port = 21;
+    size_t colon = trimmed.find(':');
+    if (colon != std::string::npos) {
+        host = trimmed.substr(0, colon);
+        port = std::atoi(trimmed.substr(colon + 1).c_str());
+        if (port <= 0 || port > 65535) port = 21;
+    }
+
+    NetworkShare share;
+    share.id = "ftp_" + std::to_string(time(nullptr));
+    share.name = host + (port != 21 ? (":" + std::to_string(port)) : "");
+    share.protocol = NetworkProtocol::FTP;
+    share.host = host;
+    share.port = port;
+    share.user = "anonymous";
+    share.password = "anonymous";
+    share.startPath = "/";
+
+    NetworkStorageService::getInstance().addShare(share);
+    m_networkShareId = share.id;
+    m_networkRemotePath = "/";
+    resetSelection();
+    toast("FTP ADDED", share.name.c_str());
 }
 
 BrowserScreen::BrowserScreen()
@@ -135,6 +180,83 @@ void BrowserScreen::rebuildItems() {
             m_items.push_back(std::move(item));
         }
     } else if (m_activeSource == 2) {
+        // Network Storage (FTP / SMB)
+        m_networkEmptyTitle.clear();
+        m_networkEmptyHint.clear();
+
+        if (m_networkShareId.empty()) {
+            // Show list of configured Network Shares + "+ Add FTP Server"
+            const auto& shares = NetworkStorageService::getInstance().getShares();
+            for (const auto& share : shares) {
+                if (m_isSearching && !matchesQuery(share.name, m_searchQuery) && !matchesQuery(share.host, m_searchQuery)) {
+                    continue;
+                }
+
+                BrowserItem item;
+                item.name = share.name;
+                item.fullPath = "netshare://" + share.id;
+                item.category = FileCategory::Folder;
+                item.badge = (share.protocol == NetworkProtocol::SMB) ? "SMB" : "FTP";
+                item.iconPath = "../icons/icon_folder.png";
+                item.detail = share.host + ":" + std::to_string(share.port);
+                m_items.push_back(std::move(item));
+            }
+
+            if (!m_isSearching) {
+                BrowserItem addItem;
+                addItem.name = "+ Add FTP Server";
+                addItem.fullPath = "netshare://add";
+                addItem.category = FileCategory::Folder;
+                addItem.badge = "SETUP";
+                addItem.iconPath = "../icons/icon_settings.png";
+                addItem.detail = "Connect to Network FTP";
+                m_items.push_back(std::move(addItem));
+            }
+        } else {
+            // Browse within the selected share
+            std::vector<BrowserEntry> entries;
+            std::string error;
+            bool ok = NetworkStorageService::getInstance().listEntries(m_networkShareId, m_networkRemotePath, entries, error);
+            if (!ok) {
+                m_networkEmptyTitle = "COULD NOT CONNECT";
+                m_networkEmptyHint = error.empty() ? "FTP server not responding" : error;
+            } else {
+                for (const auto& entry : entries) {
+                    if (m_isSearching && !matchesQuery(entry.name, m_searchQuery)) {
+                        continue;
+                    }
+
+                    BrowserItem item;
+                    item.name = entry.name;
+                    item.fullPath = entry.fullPath;
+                    item.category = entry.category;
+                    item.badge = (browser && entry.category != FileCategory::Folder)
+                        ? browser->getFileCategoryLabel(entry.category) : "DIR";
+                    item.isFavorite = favorites_is_favorite(item.fullPath.c_str());
+
+                    double pos = recent_lookup(item.fullPath.c_str());
+                    item.lastPos = pos;
+                    if (pos > 0.0 && m_cachedMetadata.filePath == item.fullPath && m_cachedMetadata.durationSeconds > 0.0) {
+                        item.duration = m_cachedMetadata.durationSeconds;
+                        item.progress = static_cast<int>((pos / m_cachedMetadata.durationSeconds) * 100.0);
+                        if (item.progress > 100) item.progress = 100;
+                    }
+
+                    if (entry.category == FileCategory::Folder) {
+                        item.iconPath = "../icons/icon_folder.png";
+                        item.detail = "Folder";
+                    } else {
+                        if (entry.category == FileCategory::Video) item.iconPath = "../icons/icon_resume.png";
+                        else if (entry.category == FileCategory::Audio) item.iconPath = "../icons/icon_subtitles.png";
+                        else if (entry.category == FileCategory::Image) item.iconPath = "../icons/icon_palette.png";
+                        else item.iconPath = "../icons/icon_about_support.png";
+                        item.detail = "Network Media";
+                    }
+                    m_items.push_back(std::move(item));
+                }
+            }
+        }
+    } else if (m_activeSource == 3) {
         // Favorites
         favorites_load();
         for (int i = 0; i < favorite_count; ++i) {
@@ -189,7 +311,7 @@ void BrowserScreen::rebuildItems() {
             }
             m_items.push_back(std::move(item));
         }
-    } else if (m_activeSource == 3) {
+    } else if (m_activeSource == 4) {
         // Recent Media
         recent_load();
         for (int i = 0; i < recent_file_count; ++i) {
@@ -249,8 +371,9 @@ void BrowserScreen::rebuildItems() {
 
 std::string BrowserScreen::filterScopeKey() const {
     /* Real scopes are absolute paths, so a leading ':' cannot collide. */
-    if (m_activeSource == 2) return ":favorites";
-    if (m_activeSource == 3) return ":recent";
+    if (m_activeSource == 3) return ":favorites";
+    if (m_activeSource == 4) return ":recent";
+    if (m_activeSource == 2) return ":network:" + m_networkShareId + ":" + m_networkRemotePath;
     auto browser = Application::getInstance().getFileSystemBrowser();
     return browser ? browser->getCurrentPath() : std::string();
 }
@@ -336,7 +459,7 @@ void BrowserScreen::resetSelection() {
 void BrowserScreen::setSource(int sourceIndex) {
     /* Sources only now - the category filters moved out of this panel and
      * into the folder header, where they are chosen per folder. */
-    if (sourceIndex < 0 || sourceIndex > 3) sourceIndex = 0;
+    if (sourceIndex < 0 || sourceIndex > 4) sourceIndex = 0;
     m_sidebarIndex = sourceIndex;
     activateSidebar(true);
 }
@@ -389,7 +512,7 @@ void BrowserScreen::onEnter() {
         if (browser->getEntryCount() == 0 && !m_isSearching) {
             browser->navigateToSource(0);
         }
-        if (m_activeSource != 2 && m_activeSource != 3) {
+        if (m_activeSource != 2 && m_activeSource != 3 && m_activeSource != 4) {
             const std::string& path = browser->getCurrentPath();
             if (path.rfind("/data", 0) == 0) {
                 m_activeSource = 1;
@@ -532,18 +655,29 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
                 if (focusGrid) toast("STORAGE", "Internal Storage");
             }
             break;
-        case 2: // Favorites
+        case 2: // Network Storage (FTP)
             if (m_activeSource != 2) {
                 m_activeSource = 2;
+                m_networkShareId.clear();
+                m_networkRemotePath = "/";
+                m_isSearching = false;
+                m_searchQuery.clear();
+                resetSelection();
+                if (focusGrid) toast("STORAGE", "Network (FTP)");
+            }
+            break;
+        case 3: // Favorites
+            if (m_activeSource != 3) {
+                m_activeSource = 3;
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
                 if (focusGrid) toast("SOURCES", "Favorites");
             }
             break;
-        case 3: // Recent Media
-            if (m_activeSource != 3) {
-                m_activeSource = 3;
+        case 4: // Recent Media
+            if (m_activeSource != 4) {
+                m_activeSource = 4;
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
@@ -567,6 +701,31 @@ void BrowserScreen::activateSelection() {
     if (!playback || !screenMgr) return;
 
     if (item.category == FileCategory::Folder) {
+        if (m_activeSource == 2) {
+            if (m_networkShareId.empty()) {
+                if (item.fullPath == "netshare://add") {
+                    evo_feedback(EVO_FB_OPEN);
+                    evo_keyboard_open("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 64, OnAddFtpSubmitted, this);
+                    return;
+                }
+                if (item.fullPath.rfind("netshare://", 0) == 0) {
+                    evo_feedback(EVO_FB_OPEN);
+                    m_networkShareId = item.fullPath.substr(11);
+                    m_networkRemotePath = "/";
+                    resetSelection();
+                    return;
+                }
+            } else {
+                evo_feedback(EVO_FB_OPEN);
+                if (m_networkRemotePath == "/" || m_networkRemotePath.empty()) {
+                    m_networkRemotePath = "/" + item.name;
+                } else {
+                    m_networkRemotePath = m_networkRemotePath + "/" + item.name;
+                }
+                resetSelection();
+                return;
+            }
+        }
         if (browser) {
             evo_feedback(EVO_FB_OPEN);
             browser->navigateInto(item.name);
@@ -619,7 +778,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             return true;
         }
         if (pressed & PadButtons::Down) {
-            if (m_sidebarIndex < 3) {
+            if (m_sidebarIndex < 4) {
                 m_sidebarIndex++;
                 activateSidebar(false);
             } else {
@@ -746,6 +905,32 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             return true;
         }
 
+        if (m_activeSource == 2) {
+            if (!m_networkShareId.empty()) {
+                if (m_networkRemotePath != "/" && !m_networkRemotePath.empty()) {
+                    size_t slash = m_networkRemotePath.find_last_of('/');
+                    if (slash != std::string::npos && slash > 0) {
+                        m_networkRemotePath = m_networkRemotePath.substr(0, slash);
+                    } else {
+                        m_networkRemotePath = "/";
+                    }
+                    resetSelection();
+                    evo_feedback(EVO_FB_CANCEL);
+                    return true;
+                } else {
+                    m_networkShareId.clear();
+                    m_networkRemotePath = "/";
+                    resetSelection();
+                    evo_feedback(EVO_FB_CANCEL);
+                    return true;
+                }
+            } else {
+                m_focusPane = BrowserFocusPane::Sidebar;
+                evo_feedback(EVO_FB_CANCEL);
+                return true;
+            }
+        }
+
         if (m_activeSource == 0 || m_activeSource == 1) {
             auto browser = Application::getInstance().getFileSystemBrowser();
             if (browser && !browser->getCurrentPath().empty() &&
@@ -758,7 +943,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             }
         }
 
-        // At root or in Favorites / Recent Media: step back into Sidebar
+        // At root or in Favorites / Recent Media / Network: step back into Sidebar
         m_focusPane = BrowserFocusPane::Sidebar;
         evo_feedback(EVO_FB_CANCEL);
         return true;
@@ -882,8 +1067,21 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
             std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Internal Storage");
         }
     } else if (m_activeSource == 2) {
-        std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Favorites");
+        if (m_networkShareId.empty()) {
+            std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Network Storage");
+        } else {
+            const auto* share = NetworkStorageService::getInstance().getShare(m_networkShareId);
+            std::string shareName = share ? share->name : "FTP";
+            if (m_networkRemotePath == "/" || m_networkRemotePath.empty()) {
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Network / %s", shareName.c_str());
+            } else {
+                std::string bc = formatPathBreadcrumbs("Network / " + shareName, m_networkRemotePath, 0);
+                std::snprintf(m_formattedPath, sizeof(m_formattedPath), "%s", bc.c_str());
+            }
+        }
     } else if (m_activeSource == 3) {
+        std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Favorites");
+    } else if (m_activeSource == 4) {
         std::snprintf(m_formattedPath, sizeof(m_formattedPath), "Recent Media");
     }
 
@@ -894,6 +1092,8 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.at_root = (!browser || browser->getCurrentPath().empty() || browser->getCurrentPath() == "/mnt/usb0") ? 1 : 0;
     } else if (m_activeSource == 1) {
         params.at_root = (!browser || browser->getCurrentPath().empty() || browser->getCurrentPath() == "/data") ? 1 : 0;
+    } else if (m_activeSource == 2) {
+        params.at_root = m_networkShareId.empty() ? 1 : 0;
     } else {
         params.at_root = 1;
     }
@@ -917,9 +1117,12 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.empty_hint = "Start the jailbreak payload (Lapy JB or etaHEN), "
                             "then relaunch EVO";
     } else if (m_activeSource == 2) {
+        params.empty_title = m_networkEmptyTitle.empty() ? "NO SHARES CONFIGURED" : m_networkEmptyTitle.c_str();
+        params.empty_hint = m_networkEmptyHint.empty() ? "Press Cross on [+ Add FTP Server] to configure" : m_networkEmptyHint.c_str();
+    } else if (m_activeSource == 3) {
         params.empty_title = "NO FAVORITES YET";
         params.empty_hint = "Press [Triangle] on any file to add to Favorites";
-    } else if (m_activeSource == 3) {
+    } else if (m_activeSource == 4) {
         params.empty_title = "NO RECENT MEDIA";
         params.empty_hint = "Media you play will appear here";
     } else if (m_isSearching) {
@@ -1026,7 +1229,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.rows[i].detail = item.detail.c_str();
 
         const uint32_t* art = nullptr;
-        if (coverService) {
+        if (coverService && item.fullPath.find("://") == std::string::npos) {
             art = coverService->peekCoverArt(item.fullPath);
             bool tried = coverService->hasTriedCoverArt(item.fullPath);
             if (!art && !tried && coverBudget > 0) {
@@ -1123,7 +1326,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         }
 
         struct stat st;
-        if (!curItem.fullPath.empty() && stat(curItem.fullPath.c_str(), &st) == 0 && curItem.category != FileCategory::Folder) {
+        if (!curItem.fullPath.empty() && curItem.fullPath.find("://") == std::string::npos && stat(curItem.fullPath.c_str(), &st) == 0 && curItem.category != FileCategory::Folder) {
             double sz = static_cast<double>(st.st_size);
             const char* unit = "B";
             if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
@@ -1133,13 +1336,13 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
             params.status_size = m_statusSize;
         }
 
-        if (coverService) {
+        if (coverService && curItem.fullPath.find("://") == std::string::npos) {
             params.ins_preview = coverService->getBrowserPreviewPixels();
             params.ins_preview_w = ICoverArtService::PreviewWidth;
             params.ins_preview_h = ICoverArtService::PreviewHeight;
         }
 
-        params.ins_probing = (m_settleMs >= 200.0 && m_cachedMetadata.filePath != curItem.fullPath && curItem.category != FileCategory::Folder) ? 1 : 0;
+        params.ins_probing = (m_settleMs >= 200.0 && curItem.fullPath.find("://") == std::string::npos && m_cachedMetadata.filePath != curItem.fullPath && curItem.category != FileCategory::Folder) ? 1 : 0;
     }
 
     evo_rmlui_update_browser(&params);

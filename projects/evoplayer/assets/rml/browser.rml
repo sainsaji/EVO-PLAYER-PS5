@@ -55,14 +55,17 @@
                 <span id="sb-label-1" class="sb-label">Internal Storage</span>
             </div>
             <div id="sb-item-2" class="sb-item">
-                <img id="sb-icon-2" class="sb-icon" src="../icons/icon_favorites.png"/>
-                <span id="sb-label-2" class="sb-label">Favorites</span>
+                <img id="sb-icon-2" class="sb-icon" src="../icons/icon_browse_usb.png"/>
+                <span id="sb-label-2" class="sb-label">Network (FTP)</span>
             </div>
             <div id="sb-item-3" class="sb-item">
-                <img id="sb-icon-3" class="sb-icon" src="../icons/icon_recent_files.png"/>
-                <span id="sb-label-3" class="sb-label">Recent Media</span>
+                <img id="sb-icon-3" class="sb-icon" src="../icons/icon_favorites.png"/>
+                <span id="sb-label-3" class="sb-label">Favorites</span>
             </div>
-
+            <div id="sb-item-4" class="sb-item">
+                <img id="sb-icon-4" class="sb-icon" src="../icons/icon_recent_files.png"/>
+                <span id="sb-label-4" class="sb-label">Recent Media</span>
+            </div>
         </div>
 
         <!-- 3. Main File Area: Media Grid -->

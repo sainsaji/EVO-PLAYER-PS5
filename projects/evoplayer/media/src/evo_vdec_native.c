@@ -753,8 +753,10 @@ int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
             return 0;
         break;
     case AV_CODEC_ID_HEVC:
-        if (bit_depth == 10) {
-            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN_10)
+        if (d->idx == NAT_HEVC10) {
+            if (profile != FF_PROFILE_UNKNOWN &&
+                profile != FF_PROFILE_HEVC_MAIN_10 &&
+                profile != FF_PROFILE_HEVC_MAIN)
                 return 0;
         } else {
             if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_HEVC_MAIN)
@@ -762,8 +764,10 @@ int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
         }
         break;
     case AV_CODEC_ID_VP9:
-        if (bit_depth == 10) {
-            if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_2)
+        if (d->idx == NAT_VP92) {
+            if (profile != FF_PROFILE_UNKNOWN &&
+                profile != FF_PROFILE_VP9_2 &&
+                profile != FF_PROFILE_VP9_0)
                 return 0;
         } else {
             if (profile != FF_PROFILE_UNKNOWN && profile != FF_PROFILE_VP9_0)
@@ -805,6 +809,7 @@ struct nat_slot {
                                /*     pool (NV12 path), not owned - do not    */
                                /*     realloc or free it                     */
     int      nv12;              /* 1 = data is straight NV12 (GL video path)  */
+    int      is_10bit;          /* 1 = P010 format (10-bit NV12)              */
     int64_t  pts;
     uint32_t w, h;              /* display size                             */
     uint32_t coded_h;           /* MB-padded luma rows (UV starts here)      */
@@ -929,7 +934,13 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     if (!out->buffer)
         return;
 
-    int is_10bit = (n->desc->idx == NAT_HEVC10 || n->desc->idx == NAT_VP92);
+    int is_10bit = 0;
+    if (out->pitch_bytes)
+        is_10bit = (out->pitch_bytes >= out->pitch * 2u);
+    else
+        is_10bit = (n->desc->idx == NAT_HEVC10 || n->desc->idx == NAT_VP92);
+    s->is_10bit = is_10bit;
+
     uint32_t cw = out->pitch_bytes ? out->pitch_bytes : out->pitch;
     if (is_10bit && cw < out->pitch * 2u)
         cw = out->pitch * 2u;
@@ -1279,7 +1290,8 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 
     const AVCodecParameters *par = (const AVCodecParameters *)p->avctx_params;
     int bit_depth = par->bits_per_raw_sample > 8 ? par->bits_per_raw_sample : 8;
-    if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE)
+    if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE ||
+        par->profile == FF_PROFILE_HEVC_MAIN_10 || par->profile == FF_PROFILE_VP9_2)
         bit_depth = 10;
 
     const nat_codec_desc *d = codec_desc_for(par->codec_id, par->profile, bit_depth);
@@ -1500,9 +1512,8 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
     if (!best)
         return 0;
 
-    int is_10bit = (v->desc->idx == NAT_HEVC10 || v->desc->idx == NAT_VP92);
     memset(out, 0, sizeof(*out));
-    if (is_10bit)
+    if (best->is_10bit)
         out->format   = PP_FRAME_NV12_10;
     else
         out->format   = best->nv12 ? PP_FRAME_NV12 : PP_FRAME_YUV420P;

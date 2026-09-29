@@ -176,7 +176,10 @@ int evo_stream_io_open(const char *path,
     if (!ctx) return -1;
     SIO_BC("P8_01b_SIO_CTX", "ctx alloc ok");
 
-    ctx->is_network = (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0);
+    ctx->is_network = (strncmp(path, "http://", 7) == 0 ||
+                       strncmp(path, "https://", 8) == 0 ||
+                       strncmp(path, "ftp://", 6) == 0 ||
+                       strncmp(path, "smb://", 6) == 0);
     snprintf(ctx->media_path, sizeof(ctx->media_path), "%s", path);
 
     size_t ring_size = (cfg && cfg->ring_buffer_size > 0) ? cfg->ring_buffer_size : EVO_STREAM_DEFAULT_RING_SIZE;
@@ -202,7 +205,10 @@ int evo_stream_io_open(const char *path,
     if (ctx->is_network) {
         av_dict_set(&opts, "reconnect", "1", 0);
         av_dict_set(&opts, "reconnect_streamed", "1", 0);
-        av_dict_set(&opts, "reconnect_delay_max", "5", 0);
+        av_dict_set(&opts, "reconnect_at_eof", "1", 0);
+        av_dict_set(&opts, "reconnect_on_network_error", "1", 0);
+        av_dict_set(&opts, "reconnect_delay_max", "2", 0);
+        av_dict_set(&opts, "rw_timeout", "5000000", 0);
         av_dict_set(&opts, "timeout", "5000000", 0);
 
         /*

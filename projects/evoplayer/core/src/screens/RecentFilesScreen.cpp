@@ -20,7 +20,7 @@ void RecentFilesScreen::onEnter() {
     StatefulScreen::onEnter();
     if (auto sm = Application::getInstance().getScreenManager()) {
         if (auto bs = dynamic_cast<BrowserScreen*>(sm->getScreen(ScreenId::UsbBrowser))) {
-            bs->setSource(3);
+            bs->setSource(4);
         }
         sm->navigateTo(ScreenId::UsbBrowser);
     }

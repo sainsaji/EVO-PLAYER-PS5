@@ -2,7 +2,7 @@
 import re
 import os
 
-with open('output/logs/evo.log') as f:
+with open('output/logs/evo.log', 'r', encoding='utf-8', errors='replace') as f:
     lines = f.readlines()
 
 sweep_re = re.compile(r'sweep v=1 (.*?)\bfile=(.*)$')
@@ -67,8 +67,8 @@ out.append('---')
 out.append('')
 out.append('## 1. Video Codec Suite (25 Clips)')
 out.append('')
-out.append('| Clip | Video Codec | Resolution | FPS | Video Decoder | Decode ms (avg / p95) | Frame Budget | GPU ms (avg / p95) | Audio Stream | Audio Decoder | Verdict |')
-out.append('|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|')
+out.append('| Clip | Video Codec | Resolution | FPS | Video Decoder | Decode ms (avg / p95) | Frame Budget | GPU ms (avg / p95) | Audio Stream | Audio Decoder | Colour | Verdict |')
+out.append('|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|')
 
 for s in last_42[:25]:
     fld = s.get('fields', {})
@@ -94,8 +94,13 @@ for s in last_42[:25]:
     a_be = 'Hardware (sceAudiodec)' if s.get('a_be') == 'NATIVE (sceAudiodec)' else ('Software (FFmpeg)' if s.get('a_be') else '—')
     a_ch = s.get('a_ch', '—')
     a_info = f'{a_name} ({a_ch}ch)' if a_ch != '—' else 'None'
+    
+    sig = fld.get('sig', '00000000')
+    rgb = fld.get('rgb', '000000')
+    colour_str = 'not probed' if sig in (None, '00000000') else f'`{sig[:8]}` #{rgb}'
+    
     verdict = '✅ real-time' if fld.get('verdict') == 'realtime' else fld.get('verdict')
-    out.append(f'| `{fname}` | {v_c} | {res} | {fps_str} | {v_be} | {dec_avg} / {dec_p95} | {budget} | {gpu_avg} / {gpu_p95} | {a_info} | {a_be} | {verdict} |')
+    out.append(f'| `{fname}` | {v_c} | {res} | {fps_str} | {v_be} | {dec_avg} / {dec_p95} | {budget} | {gpu_avg} / {gpu_p95} | {a_info} | {a_be} | {colour_str} | {verdict} |')
 
 out.append('')
 out.append('---')
@@ -147,8 +152,43 @@ for s in last_42[25:]:
     verdict = '✅ real-time' if fld.get('verdict') == 'realtime' else fld.get('verdict')
     out.append(f'| `{fname}` | {a_name} ({ch_str}) | {hz_str} | {a_be} | {port} | {v_fmt} | {drops} | {verdict} |')
 
+def rgb_triple(r):
+    try:
+        v = int(r.get("rgb", "0"), 16)
+    except ValueError:
+        return None
+    if not r.get("sig") or r.get("sig") == "00000000":
+        return None
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+
+colour_group = [s for s in last_42 if "colour_" in s.get("file", "") and rgb_triple(s.get("fields", {}))]
+if len(colour_group) >= 2:
+    tol = 6
+    chans = list(zip(*(rgb_triple(s["fields"]) for s in colour_group)))
+    median = tuple(sorted(c)[len(c) // 2] for c in chans)
+    out.append('')
+    out.append('---')
+    out.append('')
+    out.append('## 3. Colour Accuracy Cross-Check')
+    out.append('')
+    out.append(f'Same source pattern across {len(colour_group)} codecs. '
+               f'Reference is per-channel median `#%02x%02x%02x`. '
+               f'Paths within {tol}/255 pass with no matrix or range error.' % median)
+    out.append('')
+    out.append('| Clip | Codec | Probe Mean RGB | Delta from Median | Result |')
+    out.append('|---|---|:---:|:---:|:---:|')
+    worst = 0
+    for s in sorted(colour_group, key=lambda x: x.get("file", "")):
+        fld = s["fields"]
+        t = rgb_triple(fld)
+        d = max(abs(a - b) for a, b in zip(t, median))
+        worst = max(worst, d)
+        out.append(f'| `{s.get("file", "?")}` | {fld.get("codec", "?").upper()} | `#{t[0]:02x}{t[1]:02x}{t[2]:02x}` | {d}/255 | {"✅ PASS" if d <= tol else "🔴 FAIL"} |')
+    out.append('')
+    out.append(f'**Worst Disagreement**: **{worst}/255** — {"✅ ALL CODECS COLOR-ACCURATE" if worst <= tol else "🔴 COLOR ERROR DETECTED"}')
+
 content = '\n'.join(out)
 os.makedirs('output/logs', exist_ok=True)
-with open('output/logs/combined_sweep.md', 'w') as f:
+with open('output/logs/combined_sweep.md', 'w', encoding='utf-8') as f:
     f.write(content)
 print('Wrote output/logs/combined_sweep.md successfully')

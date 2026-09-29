@@ -177,6 +177,12 @@ void evo_agc_runtime_cache_flush(const void *address, size_t bytes);
  * itself the diagnosis. No-op when the runtime is not up. */
 void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height);
 
+/* Probe `n` pixels from a fixed low-discrepancy spread across the front buffer
+ * scanout into `rgb` (3 bytes each, R,G,B). Used by the codec sweep's colour
+ * probe (evo_sweep_probe_colour) to test colour accuracy and detect matrix /
+ * range / transfer mismatches. Returns the number of pixels probed. */
+int evo_agc_probe_rgb(uint8_t *rgb, int n);
+
 /* Mark the current frame as having real draw content. A frame that never calls
  * this is closed without being submitted or flipped, so it cannot blank the
  * screen between the UI's infrequent redraws. */

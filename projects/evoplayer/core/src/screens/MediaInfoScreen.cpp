@@ -43,24 +43,7 @@ bool MediaInfoScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t rele
     (void)held;
     (void)released;
 
-    if (pressed & PadButtons::Square) {
-        // Export compatibility report to USB
-        auto metaService = Application::getInstance().getMediaMetadataService();
-        auto playback = Application::getInstance().getPlaybackController();
-        auto settings = Application::getInstance().getSettingsService();
-        if (metaService && playback && settings) {
-            auto meta = metaService->extractMetadataFromFormat(play_fmt, playback->getCurrentFilePath());
-            metaService->exportCompatibilityReport("/mnt/usb0/evo_compat_report.txt",
-                                                   meta,
-                                                   playback->getPositionSeconds(),
-                                                   recent_file_count,
-                                                   favorite_count,
-                                                   playback->isActive());
-        }
-        return true;
-    }
-
-    if (pressed & (PadButtons::Circle | PadButtons::Cross)) {
+    if (pressed & (PadButtons::Circle | PadButtons::Cross | PadButtons::Square)) {
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
             sm->navigateBack(ScreenId::Player);

@@ -20,7 +20,7 @@ void FavoritesScreen::onEnter() {
     StatefulScreen::onEnter();
     if (auto sm = Application::getInstance().getScreenManager()) {
         if (auto bs = dynamic_cast<BrowserScreen*>(sm->getScreen(ScreenId::UsbBrowser))) {
-            bs->setSource(2);
+            bs->setSource(3);
         }
         sm->navigateTo(ScreenId::UsbBrowser);
     }

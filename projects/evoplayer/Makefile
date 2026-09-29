@@ -171,6 +171,8 @@ CORE_SRCS := \
     core/src/services/SoundEffectEngine.cpp \
     core/src/services/SurroundTestService.cpp \
     core/src/services/SpeakerCalibrationService.cpp \
+    core/src/services/FtpClient.cpp \
+    core/src/services/NetworkStorageService.cpp \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/PlaybackController.cpp \
     core/src/screens/ScreenManager.cpp \
