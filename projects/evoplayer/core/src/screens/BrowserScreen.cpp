@@ -461,7 +461,8 @@ void BrowserScreen::setSource(int sourceIndex) {
      * into the folder header, where they are chosen per folder. */
     if (sourceIndex < 0 || sourceIndex > 4) sourceIndex = 0;
     m_sidebarIndex = sourceIndex;
-    activateSidebar(true);
+    const bool focusGrid = evo_jailbreak_is_open() || (sourceIndex == 2 || sourceIndex == 3 || sourceIndex == 4);
+    activateSidebar(focusGrid);
 }
 
 void BrowserScreen::setSearchQuery(const std::string& query) {
@@ -509,7 +510,7 @@ void BrowserScreen::onEnter() {
         /* Never open on an empty pane: a restored folder that has since been
          * deleted or emptied still resolves, so fall back to the USB root
          * rather than showing nothing. */
-        if (browser->getEntryCount() == 0 && !m_isSearching) {
+        if (evo_jailbreak_is_open() && browser->getEntryCount() == 0 && !m_isSearching) {
             browser->navigateToSource(0);
         }
         if (m_activeSource != 2 && m_activeSource != 3 && m_activeSource != 4) {
@@ -526,6 +527,9 @@ void BrowserScreen::onEnter() {
         }
     }
     resetSelection();
+    if (!evo_jailbreak_is_open() && (m_activeSource == 0 || m_activeSource == 1)) {
+        m_focusPane = BrowserFocusPane::Sidebar;
+    }
 }
 
 void BrowserScreen::onExit() {

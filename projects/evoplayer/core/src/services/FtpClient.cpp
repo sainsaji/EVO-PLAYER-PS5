@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -50,17 +51,45 @@ static int createConnectedSocket(const std::string& host, int port, int timeoutS
     }
 
     int sock = -1;
+    int limitSec = (timeoutSec > 0) ? timeoutSec : 3;
+
     for (rp = res; rp != nullptr; rp = rp->ai_next) {
         sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sock < 0) continue;
 
-        struct timeval tv;
-        tv.tv_sec = timeoutSec;
-        tv.tv_usec = 0;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        // Set non-blocking so connect() does not hang for 75s if host drops packets
+        int flags = fcntl(sock, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+        }
 
-        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
+        int connRes = connect(sock, rp->ai_addr, rp->ai_addrlen);
+        if (connRes == 0) {
+            // Connected immediately
+        } else if (connRes < 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
+            struct pollfd pfd;
+            pfd.fd = sock;
+            pfd.events = POLLOUT;
+            int pr = poll(&pfd, 1, limitSec * 1000);
+            if (pr > 0 && (pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
+                int err = 0;
+                socklen_t len = sizeof(err);
+                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
+                    connRes = 0; // Connection succeeded
+                }
+            }
+        }
+
+        if (connRes == 0) {
+            // Restore blocking mode and apply socket timeouts
+            if (flags >= 0) {
+                fcntl(sock, F_SETFL, flags);
+            }
+            struct timeval tv;
+            tv.tv_sec = limitSec;
+            tv.tv_usec = 0;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
             break;
         }
 

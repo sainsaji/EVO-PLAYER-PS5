@@ -52,6 +52,8 @@ static int drop_request(void)
     return 1;
 }
 
+static int s_daemon_absent = 0;
+
 /* One promote attempt: drop the file, wait for the daemon to unlink it and
  * the sandbox to open. Returns 1 if opened. */
 static int attempt(int tenths)
@@ -64,10 +66,19 @@ static int attempt(int tenths)
         usleep(100 * 1000);
         if (!consumed && access(JB_FILE, F_OK) != 0) consumed = 1;
         if (evo_jailbreak_is_open()) { opened = 1; break; }
+        /* A running daemon polls every 250 ms. If after 400 ms (4 tenths)
+         * the request has not been unlinked, no daemon is running. Stop
+         * sleeping to prevent UI hangs. */
+        if (!consumed && i >= 4) {
+            break;
+        }
     }
     evo_bt("jailbreak: pid=%d file=%s daemon_saw=%s sandbox=%s (/data errno=%d)",
            (int)getpid(), JB_FILE, consumed ? "yes" : "NO",
            opened ? "OPEN" : "closed", opened ? 0 : errno);
+    if (!consumed) {
+        s_daemon_absent = 1;
+    }
     return opened;
 }
 
@@ -79,17 +90,24 @@ int evo_jailbreak_self(void)
     }
     /* At boot the daemon may not be polling yet; a shorter first try, the
      * real one happens on browser entry (evo_jailbreak_ensure). */
-    return attempt(12);
+    int ok = attempt(6);
+    if (!ok && access(JB_FILE, F_OK) == 0) {
+        s_daemon_absent = 1;
+    }
+    return ok;
 }
 
 int evo_jailbreak_ensure(void)
 {
     if (evo_jailbreak_is_open())
         return 1;
-    /* Two harder tries - Lapy's own note is that a first attempt can lose a
-     * timing race. */
-    if (attempt(25)) return 1;
-    return attempt(25);
+    /* Do not block the UI thread if we already know no daemon is answering.
+     * The background render loop (evo_jailbreak_poll) continues polling. */
+    if (s_daemon_absent)
+        return 0;
+    if (attempt(6)) return 1;
+    s_daemon_absent = 1;
+    return 0;
 }
 
 static uint64_t jb_now_ms(void)
@@ -139,6 +157,7 @@ int evo_jailbreak_poll(void)
 
     if (evo_jailbreak_is_open()) {
         settled = 1;
+        s_daemon_absent = 0;
         /* Only a real closed->open TRANSITION is worth reporting. When the boot
          * attempt already succeeded, the first poll would otherwise announce a
          * "retry" that never happened and make the caller redo persistence and
