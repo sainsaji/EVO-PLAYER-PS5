@@ -59,6 +59,7 @@ static uint32_t prospero_thumbnail_pixels[
 static int prospero_thumbnail_valid;
 static int prospero_thumbnail_loading;
 static double prospero_thumbnail_display_time;
+static unsigned long long prospero_thumbnail_frame_serial;
 
 /* THUMBNAIL_STATE_FORWARD_END */
 
@@ -176,7 +177,8 @@ static double prospero_thumbnail_display_time = 0.0;
 
 /* Bumped on every publish so a texture consumer can tell "same picture" from
  * "new picture" without comparing 320x180 pixels. See
- * prospero_thumbnail_snapshot(). */
+ * prospero_thumbnail_snapshot(). Forward-declared with the rest of the state
+ * the crossfade publisher touches - it runs above this point. */
 static unsigned long long prospero_thumbnail_frame_serial = 0;
 
 
