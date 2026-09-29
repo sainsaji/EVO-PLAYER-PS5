@@ -458,6 +458,19 @@ static AVPacket *prospero_thumb_packet = NULL;
 static int prospero_thumb_stream = -1;
 static char prospero_thumb_open_path[512] = {0};
 
+/*
+ * The 4K->320x180 scaler, kept between previews.
+ *
+ * It was built and torn down inside the receive loop, so every scrub step paid
+ * for an sws_getContext over the source geometry. The source cannot change
+ * without the context being reopened, so one scaler serves the whole file;
+ * the dimension check is what makes a reopen with different geometry safe.
+ */
+static struct SwsContext *prospero_thumb_sws = NULL;
+static int prospero_thumb_sws_w   = 0;
+static int prospero_thumb_sws_h   = 0;
+static int prospero_thumb_sws_fmt = -1;
+
 void prospero_thumbnail_close_context(void)
 {
     if (prospero_thumb_packet) {
@@ -476,6 +489,13 @@ void prospero_thumbnail_close_context(void)
         avformat_close_input(&prospero_thumb_fmt);
         prospero_thumb_fmt = NULL;
     }
+    if (prospero_thumb_sws) {
+        sws_freeContext(prospero_thumb_sws);
+        prospero_thumb_sws = NULL;
+    }
+    prospero_thumb_sws_w   = 0;
+    prospero_thumb_sws_h   = 0;
+    prospero_thumb_sws_fmt = -1;
     prospero_thumb_stream = -1;
     prospero_thumb_open_path[0] = 0;
 }
@@ -577,8 +597,14 @@ static int prospero_thumbnail_ensure_context(const char *path)
             prospero_thumbnail_close_context();
             return 0;
         }
-        /* Light threads — previews must not starve main playback */
-        prospero_thumb_codec->thread_count = 2;
+        /*
+         * Light threads - previews must not starve main playback. Since
+         * pb_scrub_hold (Bridge.cpp) parks the playback decoders for the
+         * duration of a drag there is nothing to starve while a preview is
+         * being decoded, so a source big enough to need the help gets it.
+         */
+        prospero_thumb_codec->thread_count =
+            stream->codecpar->width >= 2560 ? 4 : 2;
         prospero_thumb_codec->thread_type = FF_THREAD_FRAME;
 #ifdef AV_CODEC_FLAG2_FAST
         prospero_thumb_codec->flags2 |= AV_CODEC_FLAG2_FAST;
@@ -627,10 +653,30 @@ static int prospero_thumbnail_decode(
     if (time_base_seconds <= 0.0)
         return 0;
 
-    /* Short pre-roll only — long -2s seeks made every scrub step crawl */
+    /*
+     * How much work one preview may do, by source size.
+     *
+     * The accurate path seeks 0.6 s short of the target and decodes forward
+     * until a frame lands within 0.35 s of it, giving up after 6 frames. On
+     * 1080p that is cheap. On 4K HEVC in software it is six full-resolution
+     * decodes per scrub step, and it is why the preview could not keep up with
+     * a moving seek bar on hardware (2026-09-29) - it only ever caught up once
+     * the user stopped and the queue drained.
+     *
+     * A big source therefore takes the keyframe AVSEEK_FLAG_BACKWARD landed on
+     * and nothing more: one decode instead of six. The frame can be up to a
+     * GOP before the target, which for a scrub preview is the right trade -
+     * the timecode beside it is exact, and a preview that is a couple of
+     * seconds out but keeps up beats an exact one that arrives after you have
+     * stopped looking.
+     */
+    const int    big_source = stream->codecpar->width >= 2560;
+    const double pre_roll   = big_source ? 0.0 : 0.6;
+    const int    max_frames = big_source ? 1   : 6;
+
     seek_seconds = target_seconds;
-    if (seek_seconds > 0.6)
-        seek_seconds -= 0.6;
+    if (seek_seconds > pre_roll)
+        seek_seconds -= pre_roll;
     else
         seek_seconds = 0.0;
 
@@ -677,8 +723,9 @@ static int prospero_thumbnail_decode(
                         ? frame_timestamp * time_base_seconds
                         : seek_seconds;
                 int near_target =
+                    big_source ||
                     frame_seconds >= target_seconds - 0.35;
-                int timestamp_fallback = decoded_frames >= 6;
+                int timestamp_fallback = decoded_frames >= max_frames;
 
                 if (!near_target && !timestamp_fallback) {
                     av_frame_unref(prospero_thumb_frame);
@@ -686,16 +733,28 @@ static int prospero_thumbnail_decode(
                 }
             }
 
-            sws = sws_getContext(
-                prospero_thumb_frame->width,
-                prospero_thumb_frame->height,
-                (enum AVPixelFormat)prospero_thumb_frame->format,
-                PROSPERO_THUMB_W,
-                PROSPERO_THUMB_H,
-                AV_PIX_FMT_RGBA,
-                SWS_FAST_BILINEAR,
-                NULL, NULL, NULL);
+            if (!prospero_thumb_sws ||
+                prospero_thumb_sws_w   != prospero_thumb_frame->width ||
+                prospero_thumb_sws_h   != prospero_thumb_frame->height ||
+                prospero_thumb_sws_fmt != prospero_thumb_frame->format) {
+                sws_freeContext(prospero_thumb_sws);
+                prospero_thumb_sws = sws_getContext(
+                    prospero_thumb_frame->width,
+                    prospero_thumb_frame->height,
+                    (enum AVPixelFormat)prospero_thumb_frame->format,
+                    PROSPERO_THUMB_W,
+                    PROSPERO_THUMB_H,
+                    AV_PIX_FMT_RGBA,
+                    SWS_FAST_BILINEAR,
+                    NULL, NULL, NULL);
+                prospero_thumb_sws_w   = prospero_thumb_frame->width;
+                prospero_thumb_sws_h   = prospero_thumb_frame->height;
+                prospero_thumb_sws_fmt = prospero_thumb_frame->format;
+            }
+            sws = prospero_thumb_sws;
             if (!sws) {
+                prospero_thumb_sws_w = prospero_thumb_sws_h = 0;
+                prospero_thumb_sws_fmt = -1;
                 av_frame_unref(prospero_thumb_frame);
                 return 0;
             }
@@ -716,7 +775,6 @@ static int prospero_thumbnail_decode(
                     destination_data,
                     destination_linesize);
             }
-            sws_freeContext(sws);
             av_frame_unref(prospero_thumb_frame);
             success = 1;
             return success;
