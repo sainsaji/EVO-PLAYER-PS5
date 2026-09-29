@@ -74,24 +74,24 @@ int buildSectionDefs(int section, SettingDef* d) {
                 settings->isResumePlaybackEnabled(), "", ACT_NONE, 0, 0, {}};
 
         d[2] = {"SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION",
-                "../icons/icon_resume.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
+                "../icons/icon_speaker.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
                 ACT_SURROUND, 0, 0, {}};
 
         d[3] = {"VIDEO DECODER", "WHICH BACKEND DECODES VIDEO",
-                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_cpu.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 3, static_cast<int>(settings->getVideoDecoderPreference()), {}};
         for (int i = 0; i < 3; ++i)
             d[3].opt_label[i] = settings->getDecoderPreferenceBadge(
                                     static_cast<DecoderPreference>(i));
 
         d[4] = {"UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN",
-                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_sparkles.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 3, static_cast<int>(settings->getUpscaler()), {}};
         for (int i = 0; i < 3; ++i)
             d[4].opt_label[i] = settings->getUpscalerName(static_cast<Upscaler>(i));
 
         d[5] = {"AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO",
-                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_brain.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 4, static_cast<int>(settings->getAiNetwork()), {}};
         for (int i = 0; i < 4; ++i)
             d[5].opt_label[i] = settings->getAiNetworkName(static_cast<AiNetwork>(i));
@@ -102,7 +102,7 @@ int buildSectionDefs(int section, SettingDef* d) {
         }
 
         d[6] = {"120 HZ OUTPUT", "5:5 PULLDOWN FOR 24 FPS & 120 FPS UI",
-                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_gauge.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 3, static_cast<int>(settings->getRefreshRateMode()), {}};
         for (int i = 0; i < 3; ++i)
             d[6].opt_label[i] = settings->getRefreshRateModeName(static_cast<RefreshRateMode>(i));
@@ -112,7 +112,7 @@ int buildSectionDefs(int section, SettingDef* d) {
         }
 
         d[7] = {"HDR OUTPUT", "HDR10 TO THE TV WHILE HDR VIDEO PLAYS",
-                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_sun.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 2, static_cast<int>(settings->getHdrOutputMode()), {}};
         for (int i = 0; i < 2; ++i)
             d[7].opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
@@ -129,7 +129,7 @@ int buildSectionDefs(int section, SettingDef* d) {
         int face = settings->getSubtitleFontFace();
         if (face < 0 || face >= 4) face = 0;
         d[1] = {"DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE",
-                "../icons/icon_subtitles.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_type.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 4, face, {}};
         for (int i = 0; i < 4; ++i) d[1].opt_label[i] = kFaces[i];
         n = 2;
@@ -148,11 +148,11 @@ int buildSectionDefs(int section, SettingDef* d) {
         }
 
         d[1] = {"NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS",
-                "../icons/icon_subtitles.png", EVO_RMLUI_ROW_TOGGLE,
+                "../icons/icon_volume.png", EVO_RMLUI_ROW_TOGGLE,
                 settings->isSoundFeedbackEnabled(), "", ACT_NONE, 0, 0, {}};
 
         d[2] = {"CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT",
-                "../icons/icon_palette.png", EVO_RMLUI_ROW_TOGGLE,
+                "../icons/icon_gamepad.png", EVO_RMLUI_ROW_TOGGLE,
                 settings->isLightbarFeedbackEnabled(), "", ACT_NONE, 0, 0, {}};
 
         d[3] = {"FOLDERS FIRST", "USB FILE BROWSER SORTING",
@@ -162,7 +162,7 @@ int buildSectionDefs(int section, SettingDef* d) {
         static const char* kKeyboards[] = {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"};
         int kb = (settings->getKeyboardType() == 1) ? 1 : 0;
         d[4] = {"KEYBOARD INPUT", "TEXT ENTRY METHOD",
-                "../icons/icon_settings.png", EVO_RMLUI_ROW_VALUE, false, "",
+                "../icons/icon_keyboard.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 2, kb, {}};
         for (int i = 0; i < 2; ++i) d[4].opt_label[i] = kKeyboards[i];
         n = 5;
@@ -171,24 +171,24 @@ int buildSectionDefs(int section, SettingDef* d) {
 
     case 3:
         d[0] = {"COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0",
-                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, false, "RUN",
+                "../icons/icon_report.png", EVO_RMLUI_ROW_ACTION, false, "RUN",
                 ACT_COMPAT_REPORT, 0, 0, {}};
 
         d[1] = {"DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS",
-                "../icons/icon_aspect.png", EVO_RMLUI_ROW_TOGGLE,
+                "../icons/icon_activity.png", EVO_RMLUI_ROW_TOGGLE,
                 settings->isDebugOverlayEnabled(), "", ACT_NONE, 0, 0, {}};
 
         d[2] = {"DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS",
-                "../icons/icon_settings.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
+                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
                 ACT_DEVTOOLS, 0, 0, {}};
 
         d[3] = {"QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER",
-                "../icons/icon_settings.png", EVO_RMLUI_ROW_ACTION, false, "QUIT",
+                "../icons/icon_power.png", EVO_RMLUI_ROW_ACTION, false, "QUIT",
                 ACT_QUIT, 0, 0, {}};
 
         /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
         d[4] = {"CONSOLE", "DETECTED HARDWARE MODEL",
-                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, false,
+                "../icons/icon_tv.png", EVO_RMLUI_ROW_ACTION, false,
                 evo_hw_is_ps5_pro() ? "PS5 PRO"
                     : evo_hw_model_known() ? "PS5" : "NOT DETECTED",
                 ACT_NONE, 0, 0, {}};

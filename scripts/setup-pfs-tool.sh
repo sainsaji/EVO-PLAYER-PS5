@@ -15,6 +15,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REVISION="6cb8313dfe0c988ac52617794553f343243d3a56"
 CHECKOUT="${ROOT}/.deps/MkPFS"
 
+git config --global --add safe.directory "${CHECKOUT}" 2>/dev/null || true
+
 for cmd in git python3; do
     command -v "$cmd" >/dev/null || { echo "missing required command: $cmd" >&2; exit 2; }
 done

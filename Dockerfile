@@ -146,6 +146,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     bzip2 \
     \
+    # -- icon / SVG tooling (#107): rsvg-convert for Lucide SVG to PNG pipeline
+    librsvg2-bin \
+    \
     # -- FFmpeg / autotools port build dependencies.
     #    yasm+nasm: FFmpeg's x86 SIMD (without them configure silently drops
     #    optimised DSP paths, which matters a lot for 4K software decode).
