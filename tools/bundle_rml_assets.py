@@ -133,8 +133,34 @@ def main():
                 print(f"{out_path} already up to date ({len(idents)} files, {total_bytes} bytes)")
                 return
 
-    with open(out_path, "w", newline="\n") as f:
-        f.write(new_content)
+    # Write a sibling and rename over the target rather than truncating it in
+    # place. Two reasons, both seen for real:
+    #
+    #  - On a Docker Desktop for Windows bind mount, opening this file (~22 MB)
+    #    with "w" can fail with OSError errno 22, EINVAL, while creating a new
+    #    file in the same directory succeeds. Anything on the Windows side
+    #    holding a handle - an editor indexing a large generated .cpp, a
+    #    virus scanner, a sync client - is enough to provoke it, and the build
+    #    then dies here with no useful message (2026-09-29).
+    #
+    #  - A build interrupted mid-write used to leave a truncated .cpp behind,
+    #    which fails to compile on the NEXT run with an error pointing at the
+    #    generated file rather than at the interruption. A rename is atomic, so
+    #    the target is either the old content or the new one.
+    tmp_path = out_path + ".tmp"
+    try:
+        with open(tmp_path, "w", newline="\n") as f:
+            f.write(new_content)
+        os.replace(tmp_path, out_path)
+    except OSError:
+        # Some mounts refuse the rename instead. Fall back to the direct write
+        # so this never makes a working setup worse, and let its error stand.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        with open(out_path, "w", newline="\n") as f:
+            f.write(new_content)
 
     print(f"wrote {out_path}  ({len(idents)} files, {total_bytes} bytes)")
 
