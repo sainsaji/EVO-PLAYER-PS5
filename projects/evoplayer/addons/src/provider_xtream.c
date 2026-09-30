@@ -1225,7 +1225,7 @@ const evo_provider_t evo_provider_xtream = {
     .name            = "Xtream Codes",
     .icon            = "icon_tv.png",
     .caps            = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
-                       EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_PROGRESS |
+                       EVO_PROVIDER_CAP_RESOLVE |
                        EVO_PROVIDER_CAP_AUTH    | EVO_PROVIDER_CAP_UI |
                        EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_LIVE,
     .api_version     = EVO_PROVIDER_API_VERSION,

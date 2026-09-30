@@ -138,7 +138,7 @@ long long now_ms(void);
 
 extern "C" { volatile sig_atomic_t g_evo_term_requested = 0; }
 
-#ifdef EVO_APP_MODULE
+#if defined(EVO_APP_MODULE) || defined(EVO_TARGET_PS5)
 /* libSceSystemService, linked from the SDK stub - the link line already passes
  * --as-needed over the whole stub directory, so no PRX .syms entry is needed
  * (and a .syms line nothing imports would brick the module load). */
@@ -1642,7 +1642,7 @@ int Application::run() {
             }
             evo_rmlui_end_frame();
 
-#ifdef EVO_APP_MODULE
+#if defined(EVO_APP_MODULE) || defined(EVO_TARGET_PS5)
             /*
              * Dismiss the system splash, once EVO has something real on
              * screen behind it.
@@ -1656,11 +1656,11 @@ int Application::run() {
              * happily underneath it forever: the frame loop presents at 60 fps
              * with zero flip failures while the panel shows the splash.
              *
-             * Held until a few frames have presented so the splash gives way
+             * Held until a frame has presented so the splash gives way
              * to a drawn UI rather than to one black frame.
              */
             static bool s_splash_hidden = false;
-            if (!s_splash_hidden && frame >= 3) {
+            if (!s_splash_hidden && frame >= 1) {
                 s_splash_hidden = true;
                 const int rc = sceSystemServiceHideSplashScreen();
                 evo_boot_log("splash: hide rc=%d (0 = dismissed)", rc);
@@ -1676,6 +1676,17 @@ int Application::run() {
                 evo_boot_log_flush();
             }
         }
+
+#if defined(EVO_APP_MODULE) || defined(EVO_TARGET_PS5)
+        /* Fallback: if present didn't dismiss it by frame 20, force-dismiss splash */
+        static bool s_splash_fallback_hidden = false;
+        if (!s_splash_fallback_hidden && frame >= 20) {
+            s_splash_fallback_hidden = true;
+            const int rc = sceSystemServiceHideSplashScreen();
+            evo_boot_log("splash: fallback hide rc=%d", rc);
+            evo_boot_log_flush();
+        }
+#endif
 
         evo_perf_monitor_tick(0.0);
         if (!swap) {
