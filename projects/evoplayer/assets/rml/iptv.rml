@@ -182,6 +182,10 @@
                     <div class="tv-glyph"><img src="/assets/icons/btn_square.png" class="tv-glyph-img"/></div>
                     <span class="tv-hint-text">SEARCH</span>
                 </div>
+                <div class="tv-hint" data-if="!empty && !is_folder_level">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_triangle.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">FAVORITE</span>
+                </div>
                 <div class="tv-hint">
                     <div class="tv-glyph"><img src="/assets/icons/btn_dpad.png" class="tv-glyph-img"/></div>
                     <span class="tv-hint-text">NAVIGATE</span>

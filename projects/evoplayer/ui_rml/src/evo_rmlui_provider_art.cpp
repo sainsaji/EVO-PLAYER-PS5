@@ -291,7 +291,7 @@ bool decode_image(const char* path, std::vector<uint32_t>& out, int& ow, int& oh
 
         sws = sws_getContext(frame->width, frame->height,
                              (AVPixelFormat)frame->format,
-                             tw, th, AV_PIX_FMT_BGRA,
+                             tw, th, AV_PIX_FMT_RGBA,
                              SWS_BILINEAR, nullptr, nullptr, nullptr);
         if (!sws) goto done;
 
@@ -301,17 +301,18 @@ bool decode_image(const char* path, std::vector<uint32_t>& out, int& ow, int& oh
         sws_scale(sws, frame->data, frame->linesize, 0, frame->height, dst, dst_ls);
 
         /*
-         * Premultiply. swscale gives straight alpha; the framebuffer format is
-         * 0xAABBGGRR with premultiplied colour, and getting this wrong shows up
-         * as haloed poster edges rather than as anything that looks like a bug.
+         * Premultiply. swscale with AV_PIX_FMT_RGBA produces RGBA byte order
+         * (byte 0=R, 1=G, 2=B, 3=A). On little-endian uint32_t, byte 0 is
+         * bits 0..7 (R) and byte 2 is bits 16..23 (B), matching 0xAABBGGRR
+         * expected by SetMemoryTexture on both CPU and AGC GPU backends.
          */
         for (uint32_t& px : out) {
             uint32_t a = (px >> 24) & 0xFF;
             if (a == 255) continue;
-            uint32_t b = ((px >> 16) & 0xFF) * a / 255;
+            uint32_t r = (px & 0xFF) * a / 255;
             uint32_t g = ((px >> 8) & 0xFF) * a / 255;
-            uint32_t rr = (px & 0xFF) * a / 255;
-            px = (a << 24) | (b << 16) | (g << 8) | rr;
+            uint32_t b = ((px >> 16) & 0xFF) * a / 255;
+            px = (a << 24) | (b << 16) | (g << 8) | r;
         }
 
         ow = tw;

@@ -135,6 +135,7 @@ ADDON_SRCS := \
     addons/src/evo_provider_mgr.c \
     addons/src/evo_provider_bundle.c \
     addons/src/provider_iptv.c \
+    addons/src/provider_xtream.c \
     addons/src/provider_emby.c \
     addons/src/provider_jellyfin.c \
     addons/src/provider_nuvio.c

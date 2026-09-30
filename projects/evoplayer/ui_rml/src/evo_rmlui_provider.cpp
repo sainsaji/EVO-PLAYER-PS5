@@ -823,6 +823,15 @@ int EvoRmlProviderHost::FocusedRowIndex() const
     return -1;
 }
 
+const EvoProviderRow* EvoRmlProviderHost::GetFocusedRow() const
+{
+    const int idx = FocusedRowIndex();
+    if (idx >= 0 && idx < (int)m_model.rows.size()) {
+        return &m_model.rows[idx];
+    }
+    return nullptr;
+}
+
 void EvoRmlProviderHost::ExtendRowWindow()
 {
     const int idx = FocusedRowIndex();
@@ -1400,6 +1409,12 @@ void EvoRmlProviderHost::ShowSetupScreen()
     m_dirty = true;
 }
 
+void EvoRmlProviderHost::ReloadCurrentLevel()
+{
+    const char* cur = m_stack.empty() ? "" : m_stack.back().c_str();
+    RequestPage(cur, 0);
+}
+
 /* ------------------------------------------------------------------------- */
 /* C entry points                                                            */
 /* ------------------------------------------------------------------------- */
@@ -1482,6 +1497,29 @@ void evo_rmlui_provider_search(const char *query)
 const char* evo_rmlui_provider_get_query(void)
 {
     return EvoRmlProviderHost::Instance().CurrentQuery();
+}
+
+const char* evo_rmlui_provider_get_focused_title(void)
+{
+    const auto* r = EvoRmlProviderHost::Instance().GetFocusedRow();
+    return r ? r->title.c_str() : "";
+}
+
+const char* evo_rmlui_provider_get_focused_id(void)
+{
+    const auto* r = EvoRmlProviderHost::Instance().GetFocusedRow();
+    return r ? r->id.c_str() : "";
+}
+
+int evo_rmlui_provider_get_focused_is_folder(void)
+{
+    const auto* r = EvoRmlProviderHost::Instance().GetFocusedRow();
+    return r ? (r->is_folder ? 1 : 0) : 0;
+}
+
+void evo_rmlui_provider_reload(void)
+{
+    EvoRmlProviderHost::Instance().ReloadCurrentLevel();
 }
 
 } /* extern "C" */

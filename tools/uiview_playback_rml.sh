@@ -49,6 +49,7 @@ for c in projects/evoplayer/addons/src/cJSON.c \
          projects/evoplayer/addons/src/evo_provider_mgr.c \
          projects/evoplayer/addons/src/evo_provider_bundle.c \
          projects/evoplayer/addons/src/provider_iptv.c \
+         projects/evoplayer/addons/src/provider_xtream.c \
          projects/evoplayer/addons/src/provider_emby.c \
          projects/evoplayer/addons/src/provider_jellyfin.c \
          projects/evoplayer/addons/src/provider_nuvio.c \

@@ -194,6 +194,8 @@ public:
     void ShowUsbPlaylists(const std::vector<std::string>& paths);
     bool IsUsbPickerActive() const { return m_is_usb_picker; }
     void ShowSetupScreen();
+    const EvoProviderRow* GetFocusedRow() const;
+    void ReloadCurrentLevel();
 
 private:
     EvoRmlProviderHost() = default;
@@ -368,5 +370,9 @@ void evo_rmlui_provider_set_status(const char *status, int error);
 void evo_rmlui_provider_search(const char *query);
 const char* evo_rmlui_provider_get_query(void);
 void evo_rmlui_provider_show_setup(void);
+const char* evo_rmlui_provider_get_focused_title(void);
+const char* evo_rmlui_provider_get_focused_id(void);
+int         evo_rmlui_provider_get_focused_is_folder(void);
+void        evo_rmlui_provider_reload(void);
 
 } /* extern "C" */

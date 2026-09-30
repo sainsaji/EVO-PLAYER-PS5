@@ -1,0 +1,203 @@
+<rml>
+<head>
+    <link type="text/rcss" href="iptv.rcss"/>
+</head>
+<!--
+    The Xtream Codes provider UI (#93).
+    Embedded directly in the application asset bundle for 100% self-contained,
+    offline, and server-independent operation.
+-->
+<body data-model="xtream">
+
+    <!-- Wallpaper + scrim matching EVO Player's MIDNIGHT aesthetic -->
+    <div id="tv-wallpaper"></div>
+    <div id="tv-scrim"></div>
+
+    <!-- 152dp gutter for EVO's navigation rail -->
+    <div id="tv-pane">
+
+        <!-- 1. Header: badge, title, breadcrumb pill, counter -->
+        <div id="tv-header">
+            <div id="tv-header-left">
+                <div id="tv-badge">
+                    <img id="tv-badge-icon" src="/assets/icons/icon_tv.png"/>
+                </div>
+                <div id="tv-title-row">
+                    <span id="tv-title">XTREAM CODES</span>
+                    <span id="tv-live-dot"></span>
+                </div>
+                <div id="tv-path">{{ breadcrumb }}</div>
+            </div>
+            <div id="tv-header-right" data-if="!empty">
+                <div class="tv-counter" data-if="is_folder_level">{{ count }} CATEGORIES</div>
+                <div class="tv-counter" data-if="!is_folder_level">{{ count }} ITEMS</div>
+            </div>
+        </div>
+
+        <!-- 2. The guide itself -->
+        <div id="tv-grid-pane">
+
+            <!-- Status / Notice strip -->
+            <div id="tv-notice" data-if="status != ''"
+                 data-class-tv-notice-bad="has_error">{{ status }}</div>
+
+            <!-- Start / Empty State -->
+            <div id="tv-empty" data-if="empty && !loading">
+                <!-- Clear options from start when no query is active -->
+                <div id="tv-setup" data-if="query == ''">
+                    <div id="tv-setup-header">
+                        <div id="tv-setup-badge">
+                            <img id="tv-setup-badge-icon" src="/assets/icons/icon_tv.png"/>
+                        </div>
+                        <div id="tv-setup-title">SETUP XTREAM CODES ACCOUNT</div>
+                        <div id="tv-setup-desc">Connect to your Xtream Codes subscription for Live TV, Movies &amp; Series</div>
+                    </div>
+                    <div id="tv-setup-cards">
+                        <div id="tv-card-setup-url" class="tv-setup-card" data-event-click="setup_url()">
+                            <div class="tv-setup-card-preview">
+                                <div class="tv-setup-icon-circle">
+                                    <img class="tv-setup-icon" src="/assets/icons/icon_settings.png"/>
+                                </div>
+                            </div>
+                            <div class="tv-setup-card-meta">
+                                <div class="tv-setup-card-title">ENTER SERVER &amp; CREDENTIALS</div>
+                                <div class="tv-setup-card-desc">Type http://user:pass@host:port or get.php URL</div>
+                            </div>
+                            <div class="tv-setup-card-action">
+                                <div class="tv-setup-glyph-box">
+                                    <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
+                                </div>
+                                <span class="tv-setup-action-text">SETUP ACCOUNT</span>
+                            </div>
+                        </div>
+
+                        <div id="tv-card-setup-usb" class="tv-setup-card" data-event-click="setup_usb()">
+                            <div class="tv-setup-card-preview">
+                                <div class="tv-setup-icon-circle">
+                                    <img class="tv-setup-icon" src="/assets/icons/icon_browse_usb.png"/>
+                                </div>
+                            </div>
+                            <div class="tv-setup-card-meta">
+                                <div class="tv-setup-card-title">LOAD FROM USB</div>
+                                <div class="tv-setup-card-desc">Read credentials from /mnt/usb0/.evo_xtream.conf</div>
+                            </div>
+                            <div class="tv-setup-card-action">
+                                <div class="tv-setup-glyph-box">
+                                    <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
+                                </div>
+                                <span class="tv-setup-action-text">READ USB</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty state when search query yielded no results -->
+                <div id="tv-search-empty" data-if="query != ''">
+                    <div id="tv-empty-icon-box">
+                        <img id="tv-empty-icon" src="/assets/icons/icon_tv.png"/>
+                    </div>
+                    <div id="tv-empty-title">NO ITEMS FOUND</div>
+                    <div id="tv-empty-hint">No items match '{{ query }}'</div>
+                    <div id="tv-empty-subhint">Press Square to search again, or Circle to clear</div>
+                </div>
+            </div>
+
+            <!-- Centered tuning overlay when connecting to a stream -->
+            <div id="tv-tuning-overlay" data-if="tuning">
+                <div id="tv-tuning-card">
+                    <div class="tv-spinner"></div>
+                    <div id="tv-tuning-title">OPENING STREAM</div>
+                    <div id="tv-tuning-subtitle">Connecting to Xtream server...</div>
+                </div>
+            </div>
+
+            <!-- Channel/Item grid -->
+            <div id="tv-grid" data-if="!empty" data-class-tv-grid-notice="status != ''">
+                <div class="tv-card" data-for="row : rows"
+                     data-attr-rowid="row.id" data-event-click="activate()"
+                     data-class-tv-card-group="row.is_folder">
+
+                    <div class="tv-preview">
+                        <img class="tv-logo" data-if="row.art != ''"
+                             data-attr-src="row.art"/>
+                        <img class="tv-folder-icon" data-if="row.is_folder"
+                             src="/assets/icons/icon_folder.png"/>
+                        <div class="tv-initial"
+                             data-if="!row.is_folder && row.art == ''">{{ row.initial }}</div>
+
+                        <div class="tv-badge-group" data-if="row.is_folder">FOLDER</div>
+                        <div class="tv-badge-live"
+                             data-if="row.is_live && !row.is_folder">LIVE</div>
+                    </div>
+
+                    <div class="tv-meta">
+                        <div class="tv-name">{{ row.title }}</div>
+                        <div class="tv-sub"
+                             data-if="row.is_folder || row.now == ''">{{ row.subtitle }}</div>
+
+                        <div class="tv-epg" data-if="row.now != ''">
+                            <span class="tv-epg-label">NOW</span>
+                            <span class="tv-epg-title">{{ row.now }}</span>
+                        </div>
+                        <div class="tv-epg tv-epg-next" data-if="row.next != ''">
+                            <span class="tv-epg-label">NEXT</span>
+                            <span class="tv-epg-title">{{ row.next }}</span>
+                        </div>
+                    </div>
+
+                    <div class="tv-action-bar">
+                        <div class="tv-kind" data-if="row.is_folder">CATEGORY</div>
+                        <div class="tv-kind" data-if="!row.is_folder && row.is_live">CHANNEL</div>
+                        <div class="tv-kind" data-if="!row.is_folder && !row.is_live">VIDEO</div>
+                        <div class="tv-tag" data-if="row.is_folder">OPEN</div>
+                        <div class="tv-tag" data-if="!row.is_folder && row.is_live">LIVE</div>
+                        <div class="tv-tag" data-if="!row.is_folder && !row.is_live">PLAY</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Status strip: source details and controller hints -->
+        <div id="tv-status-strip">
+            <div id="tv-status-details">
+                <span id="tv-source-name">{{ provider_name }}</span>
+                <span class="tv-spec-pill" data-if="is_folder_level">CATALOG</span>
+                <span class="tv-spec-pill" data-if="!is_folder_level">ITEMS</span>
+                <div id="tv-tuning-indicator" data-if="loading || tuning">
+                    <div class="tv-spinner-sm"></div>
+                    <span id="tv-tuning" data-if="tuning">TUNING...</span>
+                    <span id="tv-tuning" data-if="loading && !tuning">LOADING...</span>
+                </div>
+            </div>
+
+            <div id="tv-footer">
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_cross.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text" data-if="empty && !loading">SELECT</span>
+                    <span class="tv-hint-text" data-if="!empty || loading">WATCH</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_circle.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">BACK</span>
+                </div>
+                <div class="tv-hint" data-if="!empty">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_square.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">SEARCH</span>
+                </div>
+                <div class="tv-hint" data-if="!empty && !is_folder_level">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_triangle.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">FAVORITE</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_dpad.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">NAVIGATE</span>
+                </div>
+                <div class="tv-hint" data-if="!empty">
+                    <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">OPTIONS</span></div>
+                    <span class="tv-hint-text">ACCOUNT</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

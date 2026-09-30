@@ -46,7 +46,11 @@ SRCS=(
     "${ADDONS}/src/evo_provider_mgr.c"
     "${ADDONS}/src/evo_provider_bundle.c"
     "${ADDONS}/src/provider_iptv.c"
+    "${ADDONS}/src/provider_xtream.c"
     "${ADDONS}/src/provider_emby.c"
+    "${ADDONS}/src/provider_jellyfin.c"
+    "${ADDONS}/src/provider_nuvio.c"
+    "${EVO}/src/evo_favorites.c"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

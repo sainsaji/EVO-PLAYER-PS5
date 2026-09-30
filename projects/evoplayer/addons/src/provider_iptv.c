@@ -47,6 +47,7 @@
 #include "evo_net.h"
 #include "evo_data_path.h"
 #include "evo_provider_log.h"
+#include "evo_favorites.h"
 
 #define IPTV_CONF "iptv.conf"
 
@@ -76,6 +77,7 @@ typedef struct channel {
     char  *tvg_id;     /* heap, "" when it had no tvg-id; the EPG key */
     char  *now;        /* heap or NULL - filled by the XMLTV pass */
     char  *next;       /* heap or NULL */
+    char  *lang;       /* heap or NULL - detected language code e.g. "EN" */
 } channel_t;
 
 typedef struct group {
@@ -83,6 +85,12 @@ typedef struct group {
     int  first;        /* index of the first channel in this group */
     int  count;
 } group_t;
+
+typedef struct lang_entry {
+    char code[8];
+    char name[32];
+    int  count;
+} lang_entry_t;
 
 static struct {
     char  playlist_url[EVO_PROVIDER_MAX_URL];
@@ -97,6 +105,9 @@ static struct {
     group_t   *gr;
     int        gr_count;
     int        gr_cap;
+
+    lang_entry_t langs[32];
+    int          lang_count;
 
     /*
      * A playlist file found on the USB stick, if any. Zero-config entry point:
@@ -364,9 +375,11 @@ static void free_channels(void)
         free(G.ch[i].name); free(G.ch[i].url); free(G.ch[i].group);
         free(G.ch[i].logo); free(G.ch[i].tvg_id);
         free(G.ch[i].now);  free(G.ch[i].next);
+        free(G.ch[i].lang);
     }
     free(G.ch); G.ch = NULL; G.ch_count = G.ch_cap = 0;
     free(G.gr); G.gr = NULL; G.gr_count = G.gr_cap = 0;
+    G.lang_count = 0;
     G.loaded = 0;
     G.epg_loaded = 0;
 }
@@ -381,6 +394,87 @@ static int push_channel(channel_t c)
     }
     G.ch[G.ch_count++] = c;
     return 0;
+}
+
+static const char *kLangCodes[] = {
+    "EN", "English",
+    "ES", "Spanish",
+    "FR", "French",
+    "DE", "German",
+    "IT", "Italian",
+    "PT", "Portuguese",
+    "AR", "Arabic",
+    "TR", "Turkish",
+    "RU", "Russian",
+    "HI", "Hindi",
+    "NL", "Dutch",
+    "PL", "Polish",
+    "GR", "Greek",
+    "RO", "Romanian",
+    "SV", "Swedish",
+    "NO", "Norwegian",
+    "DA", "Danish",
+    "FI", "Finnish",
+    NULL, NULL
+};
+
+static const char *get_lang_name(const char *code)
+{
+    if (!code || !*code) return "Unknown";
+    for (int i = 0; kLangCodes[i]; i += 2) {
+        if (strcasecmp(code, kLangCodes[i]) == 0)
+            return kLangCodes[i + 1];
+    }
+    return code;
+}
+
+static char *detect_channel_language(const char *name, const char *group, const char *attr_lang)
+{
+    if (attr_lang && *attr_lang) {
+        char buf[8] = {0};
+        size_t n = strlen(attr_lang);
+        if (n >= 2) {
+            buf[0] = (char)toupper((unsigned char)attr_lang[0]);
+            buf[1] = (char)toupper((unsigned char)attr_lang[1]);
+            return dup_str(buf);
+        }
+    }
+    static const char *prefixes[] = {
+        "[EN]", "EN:", "UK:", "US:", "EN|", "ENG|",
+        "[ES]", "ES:", "SPA|", "SPAIN|",
+        "[FR]", "FR:", "FRA|", "FRANCE|",
+        "[DE]", "DE:", "GER|", "GERMANY|",
+        "[IT]", "IT:", "ITA|", "ITALY|",
+        "[PT]", "PT:", "POR|",
+        "[AR]", "AR:", "ARABIC|",
+        "[TR]", "TR:", "TURK|",
+        "[RU]", "RU:", "RUS|",
+        "[HI]", "HI:", "HINDI|", "IN:",
+        NULL
+    };
+    static const char *mapped_code[] = {
+        "EN", "EN", "EN", "EN", "EN", "EN",
+        "ES", "ES", "ES", "ES",
+        "FR", "FR", "FR", "FR",
+        "DE", "DE", "DE", "DE",
+        "IT", "IT", "IT", "IT",
+        "PT", "PT", "PT",
+        "AR", "AR", "AR",
+        "TR", "TR", "TR",
+        "RU", "RU", "RU",
+        "HI", "HI", "HI", "HI",
+        NULL
+    };
+
+    const char *targets[2] = { name, group };
+    for (int t = 0; t < 2; ++t) {
+        if (!targets[t]) continue;
+        for (int i = 0; prefixes[i]; ++i) {
+            if (strstr(targets[t], prefixes[i]))
+                return dup_str(mapped_code[i]);
+        }
+    }
+    return dup_str("");
 }
 
 /*
@@ -400,6 +494,7 @@ static int cmp_by_group(const void *a, const void *b)
 static int build_groups(void)
 {
     G.gr_count = 0;
+    G.lang_count = 0;
     if (G.ch_count == 0) return 0;
 
     qsort(G.ch, (size_t)G.ch_count, sizeof *G.ch, cmp_by_group);
@@ -421,6 +516,27 @@ static int build_groups(void)
         gp->count = j - i;
         i = j;
     }
+
+    /* Index available languages across all channels */
+    for (int i = 0; i < G.ch_count; ++i) {
+        if (!G.ch[i].lang || !G.ch[i].lang[0]) continue;
+        int found = -1;
+        for (int l = 0; l < G.lang_count; ++l) {
+            if (strcasecmp(G.langs[l].code, G.ch[i].lang) == 0) {
+                found = l;
+                break;
+            }
+        }
+        if (found >= 0) {
+            G.langs[found].count++;
+        } else if (G.lang_count < 32) {
+            int l = G.lang_count++;
+            snprintf(G.langs[l].code, sizeof G.langs[l].code, "%s", G.ch[i].lang);
+            snprintf(G.langs[l].name, sizeof G.langs[l].name, "%s", get_lang_name(G.ch[i].lang));
+            G.langs[l].count = 1;
+        }
+    }
+
     return 0;
 }
 
@@ -442,7 +558,7 @@ static int parse_m3u(const char *body, size_t len)
     const char *p   = body;
     const char *end = body + len;
 
-    char *pend_name = NULL, *pend_group = NULL, *pend_logo = NULL, *pend_tvg = NULL;
+    char *pend_name = NULL, *pend_group = NULL, *pend_logo = NULL, *pend_tvg = NULL, *pend_lang = NULL;
     char *extgrp = NULL;    /* #EXTGRP applies until the next one */
     int   armed = 0;
 
@@ -462,11 +578,14 @@ static int parse_m3u(const char *body, size_t len)
         trim(line);
 
         if (strncmp(line, "#EXTINF", 7) == 0) {
-            free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg);
+            free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg); free(pend_lang);
             pend_group = extinf_attr(line, "group-title");
             pend_logo  = extinf_attr(line, "tvg-logo");
             if (!pend_logo) pend_logo = extinf_attr(line, "logo");
             pend_tvg   = extinf_attr(line, "tvg-id");
+            pend_lang  = extinf_attr(line, "tvg-language");
+            if (!pend_lang) pend_lang = extinf_attr(line, "tvg-country");
+            if (!pend_lang) pend_lang = extinf_attr(line, "language");
 
             /* The display name is everything after the LAST comma on the line,
              * because the attributes before it may contain commas of their
@@ -477,6 +596,7 @@ static int parse_m3u(const char *body, size_t len)
             if (pend_logo)  trim(pend_logo);
             if (pend_group) trim(pend_group);
             if (pend_tvg)   trim(pend_tvg);
+            if (pend_lang)  trim(pend_lang);
             armed = 1;
 
         } else if (strncmp(line, "#EXTGRP", 7) == 0) {
@@ -486,7 +606,16 @@ static int parse_m3u(const char *body, size_t len)
             if (extgrp) trim(extgrp);
 
         } else if (line[0] == '#') {
-            /* #EXTM3U, #PLAYLIST, vendor comments - nothing to do. */
+            /* #EXTM3U: check if header provides XMLTV EPG URL */
+            if (strncmp(line, "#EXTM3U", 7) == 0 && !G.xmltv_url[0]) {
+                char *tvg = extinf_attr(line, "x-tvg-url");
+                if (!tvg) tvg = extinf_attr(line, "url-tvg");
+                if (tvg) {
+                    snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", tvg);
+                    PROV_LOG("iptv: auto-discovered EPG URL from M3U: %s", G.xmltv_url);
+                    free(tvg);
+                }
+            }
 
         } else if (armed) {
             channel_t c;
@@ -496,12 +625,14 @@ static int parse_m3u(const char *body, size_t len)
             c.group  = pend_group ? pend_group : dup_str(extgrp ? extgrp : "");
             c.logo   = pend_logo  ? pend_logo  : dup_str("");
             c.tvg_id = pend_tvg   ? pend_tvg   : dup_str("");
-            pend_name = pend_group = pend_logo = pend_tvg = NULL;
+            c.lang   = detect_channel_language(c.name, c.group, pend_lang);
+            free(pend_lang);
+            pend_name = pend_group = pend_logo = pend_tvg = pend_lang = NULL;
             armed = 0;
 
             if (!c.url || !c.name || !c.group || !c.logo || !c.tvg_id) {
                 free(c.url); free(c.name); free(c.group);
-                free(c.logo); free(c.tvg_id);
+                free(c.logo); free(c.tvg_id); free(c.lang);
                 free(line);
                 goto oom;
             }
@@ -523,10 +654,11 @@ static int parse_m3u(const char *body, size_t len)
             c.group  = dup_str(extgrp ? extgrp : "");
             c.logo   = dup_str("");
             c.tvg_id = dup_str("");
+            c.lang   = detect_channel_language(c.name, c.group, NULL);
             if (!c.url || !c.name || !c.group || !c.logo || !c.tvg_id ||
                 push_channel(c) != 0) {
                 free(c.url); free(c.name); free(c.group);
-                free(c.logo); free(c.tvg_id);
+                free(c.logo); free(c.tvg_id); free(c.lang);
                 free(line);
                 goto oom;
             }
@@ -536,7 +668,7 @@ static int parse_m3u(const char *body, size_t len)
         p = nl ? nl + 1 : end;
     }
 
-    free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg);
+    free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg); free(pend_lang);
     free(extgrp);
 
     if (build_groups() != 0) { free_channels(); return -1; }
@@ -674,8 +806,11 @@ static void parse_xmltv(const char *body, size_t len)
 
             if (title[0] && ts > 0) {
                 for (int i = 0; i < G.ch_count; ++i) {
-                    if (!G.ch[i].tvg_id[0] || strcmp(G.ch[i].tvg_id, chan) != 0)
-                        continue;
+                    int match = (G.ch[i].tvg_id[0] && strcmp(G.ch[i].tvg_id, chan) == 0);
+                    if (!match && G.ch[i].name[0]) {
+                        match = (strcasecmp(G.ch[i].name, chan) == 0);
+                    }
+                    if (!match) continue;
                     if (ts <= now && now < te) {
                         free(G.ch[i].now);
                         G.ch[i].now = dup_str(title);
@@ -767,18 +902,33 @@ static void fill_channel_item(evo_provider_item_t *it, int i, const char *parent
     evo_provider_item_clear(it);
     snprintf(it->id, sizeof it->id, "c:%d", i);
     if (parent) snprintf(it->parent_id, sizeof it->parent_id, "%s", parent);
-    snprintf(it->title, sizeof it->title, "%s", G.ch[i].name);
+
+    int is_fav = (favorites_is_favorite(G.ch[i].url) || favorites_is_favorite(G.ch[i].name));
+    if (is_fav)
+        snprintf(it->title, sizeof it->title, "★ %s", G.ch[i].name);
+    else
+        snprintf(it->title, sizeof it->title, "%s", G.ch[i].name);
+
     snprintf(it->art_url, sizeof it->art_url, "%s", G.ch[i].logo);
-    if (G.ch[i].now)
+    if (G.ch[i].now && G.ch[i].now[0])
         snprintf(it->now_title, sizeof it->now_title, "%s", G.ch[i].now);
-    if (G.ch[i].next)
+    if (G.ch[i].next && G.ch[i].next[0])
         snprintf(it->next_title, sizeof it->next_title, "%s", G.ch[i].next);
-    /* The group is the useful subtitle at the root, where rows from different
-     * groups are mixed; inside a group it would repeat the folder name. */
-    if (!parent || parent[0] != 'g')
-        snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].group);
-    else if (G.ch[i].now)
-        snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].now);
+
+    /* Current program display: if now/next are available, show on subtitle */
+    if (G.ch[i].now && G.ch[i].now[0]) {
+        if (G.ch[i].next && G.ch[i].next[0])
+            snprintf(it->subtitle, sizeof it->subtitle, "%s | Next: %s", G.ch[i].now, G.ch[i].next);
+        else
+            snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].now);
+    } else if (G.ch[i].group && G.ch[i].group[0]) {
+        if (G.ch[i].lang && G.ch[i].lang[0])
+            snprintf(it->subtitle, sizeof it->subtitle, "[%s] %s", G.ch[i].lang, G.ch[i].group);
+        else
+            snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].group);
+    } else if (G.ch[i].lang && G.ch[i].lang[0]) {
+        snprintf(it->subtitle, sizeof it->subtitle, "[%s]", G.ch[i].lang);
+    }
 
     it->kind = EVO_MEDIA_STREAM;
     it->is_live = 1;
@@ -809,22 +959,42 @@ static int emit_page(const char *parent_id, int page,
                      evo_provider_items_cb cb, void *ud)
 {
     int total = 0, base = 0, is_group_page = 0, gidx = -1;
+    int is_special_root = 0;
+    int is_fav_page = 0;
+    int is_langs_page = 0;
+    char filter_lang[8] = {0};
 
     if (!parent_id || !*parent_id) {
         /*
-         * At the root: groups if there are any real ones, otherwise the
-         * channels themselves. A playlist with no group-title anywhere would
-         * otherwise show a single "Ungrouped" folder the user has to open for
-         * no reason.
+         * At the root: special folders (★ FAVORITES and LANGUAGES if present),
+         * followed by groups (or channels if playlist has no groups).
          */
         int real_groups = 0;
         for (int i = 0; i < G.gr_count; ++i)
             if (strcmp(G.gr[i].name, "Ungrouped") != 0) real_groups++;
+
+        int num_special = 1 + (G.lang_count > 0 ? 1 : 0);
         if (real_groups > 0) {
-            total = G.gr_count;
+            total = num_special + G.gr_count;
             is_group_page = 1;
         } else {
-            total = G.ch_count;
+            total = num_special + G.ch_count;
+        }
+        is_special_root = num_special;
+    } else if (strcmp(parent_id, "fav") == 0) {
+        is_fav_page = 1;
+        for (int i = 0; i < G.ch_count; ++i) {
+            if (favorites_is_favorite(G.ch[i].url) || favorites_is_favorite(G.ch[i].name))
+                total++;
+        }
+    } else if (strcmp(parent_id, "langs") == 0) {
+        is_langs_page = 1;
+        total = G.lang_count;
+    } else if (strncmp(parent_id, "lang:", 5) == 0) {
+        snprintf(filter_lang, sizeof filter_lang, "%s", parent_id + 5);
+        for (int i = 0; i < G.ch_count; ++i) {
+            if (G.ch[i].lang && strcasecmp(G.ch[i].lang, filter_lang) == 0)
+                total++;
         }
     } else if (parent_id[0] == 'g' && parent_id[1] == ':') {
         for (int i = 0; i < G.gr_count; ++i) {
@@ -841,7 +1011,7 @@ static int emit_page(const char *parent_id, int page,
 
     if (page < 0) page = 0;
     int off = page * EVO_PROVIDER_PAGE_MAX;
-    if (off >= total) { if (cb) cb(1, NULL, 0, 0, ud); return 0; }
+    if (off >= total || total == 0) { if (cb) cb(1, NULL, 0, 0, ud); return 0; }
     int n = total - off;
     if (n > EVO_PROVIDER_PAGE_MAX) n = EVO_PROVIDER_PAGE_MAX;
 
@@ -849,9 +1019,63 @@ static int emit_page(const char *parent_id, int page,
         (evo_provider_item_t *)calloc((size_t)n, sizeof *items);
     if (!items) { if (cb) cb(0, NULL, 0, 0, ud); return -1; }
 
-    for (int k = 0; k < n; ++k) {
-        if (is_group_page) fill_group_item(&items[k], off + k);
-        else               fill_channel_item(&items[k], base + off + k, parent_id);
+    if (is_special_root > 0) {
+        for (int k = 0; k < n; ++k) {
+            int idx = off + k;
+            if (idx == 0) {
+                evo_provider_item_clear(&items[k]);
+                snprintf(items[k].id, sizeof items[k].id, "fav");
+                snprintf(items[k].title, sizeof items[k].title, "★ FAVORITES");
+                snprintf(items[k].subtitle, sizeof items[k].subtitle, "Starred channels");
+                items[k].kind = EVO_MEDIA_FOLDER;
+                items[k].is_folder = 1;
+            } else if (G.lang_count > 0 && idx == 1) {
+                evo_provider_item_clear(&items[k]);
+                snprintf(items[k].id, sizeof items[k].id, "langs");
+                snprintf(items[k].title, sizeof items[k].title, "LANGUAGES");
+                snprintf(items[k].subtitle, sizeof items[k].subtitle, "%d detected languages", G.lang_count);
+                items[k].kind = EVO_MEDIA_FOLDER;
+                items[k].is_folder = 1;
+            } else {
+                int item_idx = idx - is_special_root;
+                if (is_group_page) fill_group_item(&items[k], item_idx);
+                else               fill_channel_item(&items[k], item_idx, parent_id);
+            }
+        }
+    } else if (is_fav_page) {
+        int seen = 0, k = 0;
+        for (int i = 0; i < G.ch_count && k < n; ++i) {
+            if (favorites_is_favorite(G.ch[i].url) || favorites_is_favorite(G.ch[i].name)) {
+                if (seen++ >= off) {
+                    fill_channel_item(&items[k++], i, parent_id);
+                }
+            }
+        }
+    } else if (is_langs_page) {
+        for (int k = 0; k < n; ++k) {
+            int l = off + k;
+            evo_provider_item_clear(&items[k]);
+            snprintf(items[k].id, sizeof items[k].id, "lang:%s", G.langs[l].code);
+            snprintf(items[k].title, sizeof items[k].title, "%s", G.langs[l].name);
+            snprintf(items[k].subtitle, sizeof items[k].subtitle, "%d channel%s",
+                     G.langs[l].count, G.langs[l].count == 1 ? "" : "s");
+            items[k].kind = EVO_MEDIA_FOLDER;
+            items[k].is_folder = 1;
+        }
+    } else if (filter_lang[0]) {
+        int seen = 0, k = 0;
+        for (int i = 0; i < G.ch_count && k < n; ++i) {
+            if (G.ch[i].lang && strcasecmp(G.ch[i].lang, filter_lang) == 0) {
+                if (seen++ >= off) {
+                    fill_channel_item(&items[k++], i, parent_id);
+                }
+            }
+        }
+    } else {
+        for (int k = 0; k < n; ++k) {
+            if (is_group_page) fill_group_item(&items[k], off + k);
+            else               fill_channel_item(&items[k], base + off + k, parent_id);
+        }
     }
 
     if (cb) cb(1, items, n, (off + n) < total, ud);
@@ -1050,31 +1274,72 @@ static int iptv_resolve(const char *item_id, evo_provider_resolve_cb cb, void *u
     int i = channel_index(item_id);
     if (i < 0) return -1;
 
-    evo_stream_choice_t c;
-    evo_provider_stream_choice_clear(&c);
-    snprintf(c.url, sizeof c.url, "%s", G.ch[i].url);
-    snprintf(c.label, sizeof c.label, "Live");
-    c.is_live = 1;
+    evo_stream_choice_t choices[2];
+    memset(choices, 0, sizeof choices);
+    int count = 1;
 
-    /*
-     * The container hint is taken from the URL's extension because that is all
-     * there is before the open - and it is only a hint: an IPTV endpoint that
-     * ends in .m3u8 routinely serves a plain TS, and one with no extension at
-     * all is the common case. FFmpeg probes for real; this is for the OSD.
-     */
-    const char *q = strchr(G.ch[i].url, '?');
-    const char *dot = NULL;
-    for (const char *p = G.ch[i].url; *p && (!q || p < q); ++p)
-        if (*p == '.') dot = p;
-    if (dot) {
-        size_t n = q ? (size_t)(q - dot - 1) : strlen(dot + 1);
-        if (n > 0 && n < sizeof c.container)
-            snprintf(c.container, sizeof c.container, "%.*s", (int)n, dot + 1);
+    evo_provider_stream_choice_clear(&choices[0]);
+    snprintf(choices[0].url, sizeof choices[0].url, "%s", G.ch[i].url);
+    choices[0].is_live = 1;
+
+    const char *url = G.ch[i].url;
+    int is_hls = (strstr(url, ".m3u8") != NULL || strstr(url, "m3u8") != NULL);
+    int is_ts = (strstr(url, ".ts") != NULL);
+
+    if (is_hls) {
+        snprintf(choices[0].label, sizeof choices[0].label, "HLS (Adaptive)");
+        snprintf(choices[0].container, sizeof choices[0].container, "hls");
+    } else if (is_ts) {
+        snprintf(choices[0].label, sizeof choices[0].label, "MPEG-TS (Live)");
+        snprintf(choices[0].container, sizeof choices[0].container, "mpegts");
+    } else {
+        snprintf(choices[0].label, sizeof choices[0].label, "Live Stream");
     }
 
-    /* Synchronous, but still delivered through the callback so callers have
-     * exactly one code path. */
-    if (cb) cb(1, &c, 1, ud);
+    /* Container hint from URL if not already set */
+    if (!choices[0].container[0]) {
+        const char *q = strchr(url, '?');
+        const char *dot = NULL;
+        for (const char *p = url; *p && (!q || p < q); ++p)
+            if (*p == '.') dot = p;
+        if (dot) {
+            size_t n = q ? (size_t)(q - dot - 1) : strlen(dot + 1);
+            if (n > 0 && n < sizeof choices[0].container)
+                snprintf(choices[0].container, sizeof choices[0].container, "%.*s", (int)n, dot + 1);
+        }
+    }
+
+    /* If URL has standard .m3u8 or .ts extension, offer the alternative format as fallback choice */
+    if (is_hls && strstr(url, ".m3u8")) {
+        evo_provider_stream_choice_clear(&choices[1]);
+        snprintf(choices[1].url, sizeof choices[1].url, "%s", url);
+        char *ext = strstr(choices[1].url, ".m3u8");
+        if (ext) {
+            ext[1] = 't';
+            ext[2] = 's';
+            memmove(ext + 3, ext + 5, strlen(ext + 5) + 1);
+            snprintf(choices[1].label, sizeof choices[1].label, "MPEG-TS Fallback");
+            snprintf(choices[1].container, sizeof choices[1].container, "mpegts");
+            choices[1].is_live = 1;
+            count = 2;
+        }
+    } else if (is_ts && strstr(url, ".ts")) {
+        evo_provider_stream_choice_clear(&choices[1]);
+        snprintf(choices[1].url, sizeof choices[1].url, "%s", url);
+        char *ext = strstr(choices[1].url, ".ts");
+        if (ext && (strlen(choices[1].url) + 3 < sizeof choices[1].url)) {
+            char rest[256] = {0};
+            snprintf(rest, sizeof rest, "%s", ext + 3);
+            snprintf(ext, sizeof choices[1].url - (ext - choices[1].url), ".m3u8%s", rest);
+            snprintf(choices[1].label, sizeof choices[1].label, "HLS Fallback");
+            snprintf(choices[1].container, sizeof choices[1].container, "hls");
+            choices[1].is_live = 1;
+            count = 2;
+        }
+    }
+
+    /* Synchronous, but delivered through callback per contract */
+    if (cb) cb(1, choices, count, ud);
     return 0;
 }
 

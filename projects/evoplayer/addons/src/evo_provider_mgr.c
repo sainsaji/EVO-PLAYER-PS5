@@ -27,6 +27,7 @@
  * fails to compile fails the build instead of silently not appearing.
  */
 extern const evo_provider_t evo_provider_iptv;
+extern const evo_provider_t evo_provider_xtream;
 extern const evo_provider_t evo_provider_emby;
 extern const evo_provider_t evo_provider_jellyfin;
 extern const evo_provider_t evo_provider_nuvio;
@@ -42,6 +43,7 @@ extern const evo_provider_t evo_provider_nuvio;
  */
 static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_iptv,
+    &evo_provider_xtream,
     &evo_provider_emby,
     &evo_provider_jellyfin,     /* #101: web UI only */
     &evo_provider_nuvio,        /* web UI only - Stremio addons, debrid */

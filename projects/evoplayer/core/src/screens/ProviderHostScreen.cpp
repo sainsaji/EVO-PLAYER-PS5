@@ -15,6 +15,7 @@ extern "C" {
 #include "evo_provider.h"
 #include "evo_boot_trace.h"
 #include "evo_readdir.h"
+#include "evo_favorites.h"
 }
 
 #include <cstdio>
@@ -70,6 +71,9 @@ struct PendingPlay {
     char item_id[EVO_PROVIDER_MAX_ITEM_ID];
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
+    evo_stream_choice_t choices[4];
+    int  choice_count;
+    int  active_choice;
 };
 PendingPlay g_pending;
 
@@ -117,11 +121,16 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
     }
 
     /*
-     * Best first, by contract. A quality picker over `choices` is a
-     * per-provider story - the seam's job is to have produced more than one
-     * and said which is preferred.
+     * Best first, by contract. Store alternative choices for automatic fallback
+     * if primary stream fails to open or times out.
      */
-    const evo_stream_choice_t& c = choices[0];
+    pp->choice_count = std::min(count, 4);
+    for (int i = 0; i < pp->choice_count; ++i) {
+        pp->choices[i] = choices[i];
+    }
+    pp->active_choice = 0;
+
+    const evo_stream_choice_t& c = pp->choices[0];
 
     PlaybackSource src;
     src.url      = c.url;
@@ -554,6 +563,62 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         return true;
     }
 
+    if (pressed & PadButtons::Triangle) {
+        if (!evo_rmlui_provider_get_focused_is_folder()) {
+            const char* title = evo_rmlui_provider_get_focused_title();
+            const char* id = evo_rmlui_provider_get_focused_id();
+            if (title && title[0]) {
+                struct FavCtx {
+                    char title[128];
+                    char id[128];
+                    bool handled;
+                } ctx;
+                std::memset(&ctx, 0, sizeof(ctx));
+                std::snprintf(ctx.title, sizeof(ctx.title), "%s", title);
+                std::snprintf(ctx.id, sizeof(ctx.id), "%s", id ? id : "");
+
+                /* Resolve stream URL so favorite path points to direct stream */
+                evo_provider_resolve_chain(m_providerId.c_str(), id, [](int ok, const evo_stream_choice_t* choices, int count, void* ud) {
+                    auto* c = static_cast<FavCtx*>(ud);
+                    if (ok && count > 0 && choices && choices[0].url[0]) {
+                        int idx = favorites_find(choices[0].url);
+                        if (idx < 0) idx = favorites_find(c->title);
+                        if (idx >= 0) {
+                            favorites_remove(favorite_files[idx].path);
+                            favorites_save();
+                            toast("FAVORITES", "Removed from favorites");
+                            evo_feedback(EVO_FB_CANCEL);
+                        } else {
+                            favorites_add(choices[0].url, c->title, 0.0);
+                            favorites_save();
+                            toast("FAVORITES", "Added to favorites");
+                            evo_feedback(EVO_FB_CONFIRM);
+                        }
+                        c->handled = true;
+                    }
+                }, &ctx);
+
+                if (!ctx.handled) {
+                    int idx = favorites_find(title);
+                    if (idx < 0 && id && id[0]) idx = favorites_find(id);
+                    if (idx >= 0) {
+                        favorites_remove(favorite_files[idx].path);
+                        favorites_save();
+                        toast("FAVORITES", "Removed from favorites");
+                        evo_feedback(EVO_FB_CANCEL);
+                    } else {
+                        favorites_add(title, title, 0.0);
+                        favorites_save();
+                        toast("FAVORITES", "Added to favorites");
+                        evo_feedback(EVO_FB_CONFIRM);
+                    }
+                }
+                evo_rmlui_provider_reload();
+                return true;
+            }
+        }
+    }
+
     /*
      * OPTIONS, not Triangle.
      *
@@ -898,6 +963,37 @@ void ProviderHostScreen::update(double deltaMs)
                 sm->navigateTo(ScreenId::Player);
             }
         } else {
+            if (g_pending.active_choice + 1 < g_pending.choice_count) {
+                g_pending.active_choice++;
+                evo_bt("prov_screen: stream choice %d failed, falling back to choice %d: %s",
+                       g_pending.active_choice - 1, g_pending.active_choice,
+                       g_pending.choices[g_pending.active_choice].url);
+                char retry_msg[128];
+                std::snprintf(retry_msg, sizeof(retry_msg), "Connecting to backup (%s)...",
+                              g_pending.choices[g_pending.active_choice].label);
+                toast("STREAM", retry_msg);
+                evo_rmlui_provider_set_status(retry_msg, 0);
+
+                PlaybackSource src;
+                src.url      = g_pending.choices[g_pending.active_choice].url;
+                src.title    = g_pending.title;
+                src.provider = g_pending.provider;
+                src.item_id  = g_pending.item_id;
+                src.is_live  = (g_pending.is_live || g_pending.choices[g_pending.active_choice].is_live) ? true : false;
+
+                g_start_src = src;
+                g_start_done = false;
+                g_start_success = false;
+                g_start_running = true;
+
+                pthread_attr_t attr;
+                pthread_attr_init(&attr);
+                pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
+                pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+                pthread_create(&g_start_thread, &attr, start_playback_worker, nullptr);
+                pthread_attr_destroy(&attr);
+                return;
+            }
             evo_rmlui_provider_set_tuning(0);
             evo_rmlui_provider_set_loading(0, "");
             evo_rmlui_provider_set_status("Stream unavailable or connection timed out", 1);

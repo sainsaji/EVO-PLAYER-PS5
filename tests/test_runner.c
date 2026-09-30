@@ -52,6 +52,12 @@ static int g_tests_failed = 0;
 } while(0)
 
 char g_current_media_title[256] = {0};
+char current_media_path[768] = {0};
+double media_duration_sec = 0.0;
+void toast(const char *category, const char *msg) {
+    (void)category;
+    (void)msg;
+}
 
 static bool str_contains_ci(const char *haystack, const char *needle) {
     if (!haystack || !needle) return false;
