@@ -5,6 +5,7 @@
 #include "evo_feedback.h"
 #include "evo_keyboard.h"
 #include "evo_rmlui_bridge.h"
+#include "evo_subtitle.h"
 #include "evo_vdec.h"
 
 #include <cstdio>
@@ -93,6 +94,24 @@ void SettingsService::setKeyboardType(int type) {
     evo_keyboard_set_type(type);
 }
 
+/*
+ * The secondary caption's look is read by the player through the subtitle
+ * engine's globals, next to prospero_subtitle_face, so a change is pushed
+ * there as well as remembered here. Out-of-range values are refused rather than
+ * clamped: they can only come from a hand-edited or newer settings file.
+ */
+void SettingsService::setSecondarySubtitlePosition(int position) {
+    if (position < PROSPERO_SECONDARY_POS_STACKED || position > PROSPERO_SECONDARY_POS_TOP) return;
+    m_secondarySubtitlePosition = position;
+    prospero_secondary_position = position;
+}
+
+void SettingsService::setSecondarySubtitleColor(int color) {
+    if (color < 0 || color >= PROSPERO_SECONDARY_COLORS) return;
+    m_secondarySubtitleColor = color;
+    prospero_secondary_color = color;
+}
+
 bool SettingsService::saveSettings() {
     const char* filePath = evo_data_path("evo_player_settings.cfg");
     FILE* file = std::fopen(filePath, "w");
@@ -107,7 +126,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -124,7 +143,10 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_upscaler), // line 14 (#103)
         static_cast<int>(m_aiNetwork), // line 15 (#103)
         static_cast<int>(m_refreshRateMode), // line 16 (120 Hz output mode)
-        static_cast<int>(m_hdrOutputMode)    // line 17 (HDR10 output)
+        static_cast<int>(m_hdrOutputMode),   // line 17 (HDR10 output)
+        m_secondarySubtitlePosition,         // line 18 (#110)
+        m_secondarySubtitleColor,            // line 19 (#110)
+        m_askStream ? 1 : 0                  // line 20 (live TV stream picker)
     );
 
     std::fclose(file);
@@ -155,9 +177,12 @@ bool SettingsService::loadSettings() {
     int rawAiNetwork = 0;
     int rawRefreshRateMode = 0;
     int rawHdrOutputMode = 0;
+    int rawSecondaryPosition = 0;
+    int rawSecondaryColor = 0;
+    int rawAskStream = 1;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -174,7 +199,10 @@ bool SettingsService::loadSettings() {
         &rawUpscaler,
         &rawAiNetwork,
         &rawRefreshRateMode,
-        &rawHdrOutputMode
+        &rawHdrOutputMode,
+        &rawSecondaryPosition,
+        &rawSecondaryColor,
+        &rawAskStream
     );
 
     std::fclose(file);
@@ -231,6 +259,9 @@ bool SettingsService::loadSettings() {
     if (readCount >= 17 && rawHdrOutputMode >= 0 && rawHdrOutputMode <= 1) {
         m_hdrOutputMode = static_cast<HdrOutputMode>(rawHdrOutputMode);
     }
+    if (readCount >= 18) setSecondarySubtitlePosition(rawSecondaryPosition);
+    if (readCount >= 19) setSecondarySubtitleColor(rawSecondaryColor);
+    if (readCount >= 20) m_askStream = (rawAskStream != 0);
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

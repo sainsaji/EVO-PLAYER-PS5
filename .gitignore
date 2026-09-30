@@ -63,6 +63,11 @@ output/subsync/
 # Tears of Steel calibration/test set - all regenerable.
 output/host-ffmpeg/
 output/subsync-host/
+output/dualsub-host/
+output/dns-host/
+output/streamopts-host/
+output/hls-host/
+output/netconnect-host/
 output/subsync-test/
 
 # Records the last launch time so tools/launch.sh can refuse to stack

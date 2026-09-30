@@ -199,6 +199,56 @@ div, span, p {
 #subtitle-box.sub-medium { font-size: 40dp; }
 #subtitle-box.sub-large  { font-size: 52dp; }
 
+/* Secondary caption (#110). Same plate as the primary, one size step smaller
+ * and in its own colour so the two lines of dialogue never read as one. Each
+ * .sub-line is a block of its own, so the secondary box sits on a line above
+ * the primary instead of beside it. A box with nothing to show is display:none,
+ * which also collapses its line. */
+.sub-line {
+    display: block;
+    text-align: center;
+}
+
+.sub2 {
+    display: none;
+    max-width: 1560dp;
+    background-color: #000000a0;
+    border-radius: 8dp;
+    padding: 3dp 18dp;
+    font-weight: bold;
+    line-height: 1.28;
+    text-align: center;
+    letter-spacing: 0.3dp;
+    margin-bottom: 6dp;
+}
+
+.sub2-small  { font-size: 26dp; }
+.sub2-medium { font-size: 32dp; }
+.sub2-large  { font-size: 42dp; }
+
+.sub2-yellow { color: #ffe27a; }
+.sub2-cyan   { color: #7ee7ff; }
+.sub2-white  { color: #fbfcff; }
+
+/* At the top the box has no primary line to sit above, so it drops the gap.
+ * The OSD's top bar is 150dp tall: `raised` keeps the caption clear of it. */
+#subtitle-layer-top {
+    position: absolute;
+    left: 0;
+    width: 1920dp;
+    top: 48dp;
+    text-align: center;
+    z-index: 5;
+}
+
+#subtitle-layer-top.raised {
+    top: 172dp;
+}
+
+#subtitle-layer-top .sub2 {
+    margin-bottom: 0;
+}
+
 /* Music "NOW PLAYING" visualiser (#81) */
 #music-view {
     display: none;

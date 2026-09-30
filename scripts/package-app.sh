@@ -411,11 +411,18 @@ begin "compiling app CRT + allocation runtime + libc gap fillers"
 # as local defs so libc++'s iostream/codecvt static init cannot call a NULL
 # import (that was the first-launch SIGSEGV at rip=0 in DoIOSInit).
 LIBC_EXT_O=""
+EVO_DNS_O=""
 MALLOC_SHIM_O=""
 if [[ "${MODE}" == "player" ]]; then
     LIBC_EXT_O="${BUILD}/obj/libc_ext.o"
     "${TCC}" -std=gnu11 -O2 -w "${TFLAGS[@]}" \
         -c "${NATIVE}/stubs/libc_ext.c" -o "${LIBC_EXT_O}"
+    # stubs/evo_dns.c (#91): getaddrinfo & co. on the console's own resolver
+    # (libSceNet's sceNetResolver*), so a lookup uses the DNS the user set in the
+    # PS5's network settings. The libSceNet import resolves from the SDK link stub.
+    EVO_DNS_O="${BUILD}/obj/evo_dns.o"
+    "${TCC}" -std=gnu11 -O2 -Wall -Wextra "${TFLAGS[@]}" \
+        -c "${NATIVE}/stubs/evo_dns.c" -o "${EVO_DNS_O}"
     # malloc interposer: the clean-room libc.prx heap is bounded and fills up
     # (hardware 2026-09-02); route every allocation to an mmap-backed allocator.
     MALLOC_SHIM_O="${BUILD}/obj/malloc_shim.o"
@@ -474,7 +481,7 @@ if (( ${#PRX_STUB_WANT[@]} )); then
     # `# keep: <reason>` on its line.
     OBJ_UNDEF="${BUILD}/obj-undef.txt"
     : > "${OBJ_UNDEF}"
-    for o in "${OBJS[@]}" "${LIBC_EXT_O}" "${MALLOC_SHIM_O}"; do
+    for o in "${OBJS[@]}" "${LIBC_EXT_O}" "${EVO_DNS_O}" "${MALLOC_SHIM_O}"; do
         [[ -n "${o}" && -f "${o}" ]] && llvm-nm -u "${o}" 2>/dev/null \
             | grep -oE '\bsce[A-Za-z0-9_]+' >> "${OBJ_UNDEF}" || true
     done
@@ -537,6 +544,7 @@ LINK_INPUTS=()
 [[ -n "${MALLOC_SHIM_O}" ]] && LINK_INPUTS+=("${MALLOC_SHIM_O}")
 LINK_INPUTS+=("${BUILD}/obj/app_crt.o" "${BUILD}/obj/app_cpp_runtime.o")
 [[ -n "${LIBC_EXT_O}" ]] && LINK_INPUTS+=("${LIBC_EXT_O}")
+[[ -n "${EVO_DNS_O}" ]] && LINK_INPUTS+=("${EVO_DNS_O}")
 LINK_INPUTS+=("${OBJS[@]}")
 # PRX import stubs: POSITIONAL (not --as-needed), matching ProsperoLight's
 # tools/build.sh exactly. An --as-needed-derived DT_NEEDED for a system PRX

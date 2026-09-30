@@ -755,6 +755,205 @@ the final offset, ratio, confidence and elapsed time.
 
 ---
 
+## `tools/dualsub_host.sh` — dual-subtitle engine on the host (#110)
+
+```bash
+./tools/dualsub_host.sh              # address + undefined-behaviour sanitizers
+SAN=thread ./tools/dualsub_host.sh   # the race detector (see the caveat below)
+./tools/dualsub_host.sh -v           # print the engine's toasts and log
+```
+
+Compiles `media/src/evo_subtitle.c`, the file the app module builds, into
+`tools/dualsub_host.c` and links it against the host FFmpeg that
+`tools/subsync_host.sh` builds (run that once first). It muxes an MKV with three
+embedded SubRip tracks (`eng`, `spa`, `fra`, cues at different times) plus a
+sidecar `.srt`, then drives the engine the way the app does: `feed_all()` does
+the demux thread's job of handing each packet to `prospero_embedded_subtitle_
+decode_packet`, and the test calls the same selection functions the picker
+calls.
+
+It checks that:
+- the secondary track decodes into its own ring, reads independently of the
+  primary, and has its own delay (the primary's is untouched)
+- one source is never both tracks, in either direction, and a refused select
+  leaves the current secondary alone
+- what was chosen survives a reopen of the same file and is forgotten for a
+  different one
+- a seek empties both rings but keeps the tracks
+- the external SRT works as either track, never both
+- one thread feeding packets while another switches, clears and reads the
+  tracks does not crash (4000 iterations)
+
+**Thread sanitizer.** `SAN=thread` needs the kernel's `vm.mmap_rnd_bits` at 28
+or lower. A stock Docker Desktop VM has 32, so the binary dies with a SEGV
+before `main()`, and the container cannot change it (`setarch -R` is refused).
+Lower it on the VM (`sysctl -w vm.mmap_rnd_bits=28`) or run the script on a
+Linux host. The default sanitizers still catch a decoder freed under a decode
+in flight, which is what the two-lock design (state, then ring) exists to
+prevent, but they cannot report a data race that does not corrupt memory.
+
+---
+
+## `tools/dns_host.sh` — name resolution on the host (#91)
+
+```bash
+./tools/dns_host.sh
+```
+
+Compiles `tools/native-app/stubs/evo_dns.c`, the file the app module links, into
+`tools/dns_host.c` against a **mock `libSceNet`**, under the address and
+undefined-behaviour sanitizers. The mock can answer, refuse, or fail to create a
+pool or a resolver, and counts every call. It checks that:
+
+- a real lookup goes to the console resolver, and an IPv4 literal, `localhost`
+  or a cached name (any case) does not
+- every address comes back as a chain in the resolver's order (a duplicate is
+  dropped, an IPv6 record is skipped, ten is the most), and the cache holds all
+  of them
+- the pool and the resolver are released on every path, including failure
+- `sceNetInit` runs once, and only after the first pool fails to create
+- "no answer" (`EAI_NONAME`) and "no resolver to ask" (`EAI_AGAIN`) are told
+  apart, a failure is not cached, and the resolver recovers when it comes back
+- a name the network's DNS blocks is not found. DNS filtering answers a blocked
+  name with `0.0.0.0` *as a success*; that is skipped (a blocked record beside a
+  real one is dropped, the real one kept), an IPv6-only name has no IPv4
+  address, and neither is cached nor switches the multi-record call off. The log
+  says why (`no usable IPv4 address (blocked by the network's DNS, or IPv6
+  only)`). This came from the console: `play-lh.googleusercontent.com` answered
+  `0.0.0.0`, which the first version read as a broken layout
+- bad arguments (empty, bracket-only, over-long, `AI_NUMERICHOST`, IPv6) are
+  refused without reaching the resolver
+- the log line names the host and the address, and says the console DNS answered
+- eight threads looking names up at once do not leak or miscount
+
+Before it builds, the script also scans the shipped sources and fails if
+`evo_dns.c` contains an IP literal, if any trace of the old hand-rolled client
+(`kDnsServers`, `dns_query_server`, `s_dns_txid`, `/etc/resolv.conf`, the fixed
+transaction id) is left in `tools/native-app/stubs/` or `addons/src/`, or if
+`getaddrinfo` is defined in more than one file.
+
+The multi-record call is also run badly, each way in its own process because the
+module remembers for the rest of a run that it is unusable: it errors where the
+single lookup works (`multifail`), it returns a layout that is not the
+documented one (`garbage`), it writes past the struct (`overrun`), and the
+`/mnt/usb0/evo_dns_single` kill switch (`killswitch`, which is not sticky). Each
+must fall back to the single address, log why, and stop trying the call.
+
+**On the console** (hw-verify pending) a passing run looks like this in
+`/mnt/usb0/evo.log`, one line per name that was not already cached:
+
+```
+dns: raw.githubusercontent.com -> 185.199.109.133, 185.199.111.133, 185.199.108.133, 185.199.110.133  (console DNS, 4 addresses, 41 ms)
+```
+
+`1 address` instead of several means the multi-record call fell back; look for
+`multi-record lookup ... single address from here on` just above it.
+
+Check that with the console's DNS set to something non-default (the lookup must
+follow it), and that an unresolvable name fails quickly with
+`dns: <name>: no answer  (rc 0x..., N ms)`. A line reading `console resolver
+unavailable` means `sceNetPoolCreate` failed even after `sceNetInit` - the
+`rc` is the raw error.
+
+---
+
+## `tools/streamopts_host.sh` — network open options on the host
+
+```bash
+./tools/streamopts_host.sh
+```
+
+Links `media/src/evo_stream_io.c`, the file the app module compiles, against the
+host FFmpeg that `tools/subsync_host.sh` builds, and checks the policy instead
+of the network: which URLs count as an HLS/DASH playlist (`.m3u8`, `.mpd`,
+`.ism/`, any case, query string included), and which FFmpeg options a network
+open gets.
+
+The case behind it (hardware, 2026-09-30, from `evo.log`): `reconnect_at_eof`
+was set for every network URL. For a raw live stream that is right, an EOF is a
+dropped connection. For an HLS playlist it is the end of a small file, and the
+http layer "reconnects" - a full request and TLS handshake - again and again
+with a growing delay, on every playlist the hls demuxer reads (it passes these
+options to all of them). A channel took 10.8 s and 21.4 s to open. The test
+pins that a playlist URL gets no `reconnect_at_eof`, a raw stream keeps it, and
+both get the bounded retries (`reconnect_max_retries` 3,
+`reconnect_delay_total_max` 6). A raw network stream is also bounded by its own
+12 s open deadline (a playlist and a local file keep 20 s, since a playlist open
+loads the master, a variant and the first segment), which catches what the retry
+limits cannot: a server that answers every reconnect with the same few bytes.
+
+It also pins `extension_picky=0`. `allowed_extensions=ALL` clears only the first of
+two gates in `hls.c`'s `test_segment()`; the second compares the URL's extension
+with the detected format, and an extensionless segment URL (Akamai's
+`/v1/segment/<token>/3/186971110`) has none, so a plainly MPEG-TS segment was
+refused with `detected format mpegts extension none mismatches allowed extensions`
+and the open failed with `AVERROR_INVALIDDATA`.
+
+---
+
+## `tools/hls_host.sh` — the HLS master-playlist parser on the host
+
+```bash
+./tools/hls_host.sh
+```
+
+Compiles `addons/src/evo_hls_variants.c`, the file the app module builds, against
+`tools/hls_host.c` under the address and undefined-behaviour sanitizers. It needs
+no FFmpeg: the parser and the relative-URL join are pure and the fetch runs
+against a stub of `evo_net`. It feeds the parser playlists shaped like the ones
+IPTV channels serve and checks that:
+
+- relative variant URLs resolve against the master (`../`, `./`, `/abs`,
+  `//host`, a query, a base with its own query and fragment) and an absolute one
+  is kept
+- variants come back best first, with resolution, bitrate and the codecs read
+  from a `CODECS` list that has a comma inside its quotes; `AVERAGE-BANDWIDTH`
+  never overrides `BANDWIDTH`
+- `#EXT-X-MEDIA`, `#EXT-X-I-FRAME-STREAM-INF`, comments and blank lines are not
+  variants, CRLF files parse, a last URI with no newline is read, and a
+  `#EXT-X-STREAM-INF` with no URI after it (a truncated download) is dropped
+- a media playlist, an empty body and an HTML error page have nothing to choose
+- duplicates collapse, and eight variants are cut to the six best
+- the fetch delivers exactly once for a good master, an HTTP 403, a network
+  failure and a media playlist, and never fires for a request that could not be
+  queued
+
+---
+
+## `tools/netconnect_host.sh` — evo_net's bounded connect on the host
+
+```bash
+./tools/netconnect_host.sh
+```
+
+Compiles `addons/src/evo_net.c`, the file the app module builds (with
+`-DNO_OPENSSL=1`, since nothing here speaks TLS), against
+`tools/netconnect_host.c` under the address and undefined-behaviour sanitizers.
+It reproduces a host with one dead address: a listening socket whose accept queue
+is full, so the kernel drops further SYNs and `connect()` stays in `SYN_SENT`,
+which is the same thing on the wire as a black-holed CDN address. Each listener
+has its own loopback address (`127.0.0.2` …) because the module remembers a dead
+address by IP.
+
+The failure behind it (hardware, 2026-09-30): `evo_net` did a plain blocking
+`connect()` to each address in turn, and on this console a blocking `connect()`
+does not honour `SO_SNDTIMEO`, so a dead first address held the thread for the
+kernel's SYN retry of about 75 s. `evo_net` has one worker thread, so every
+request queued behind it (posters, EPG, the stream picker's quality read) stalled
+too. `FtpClient` had already met the same thing and works around it with a
+non-blocking connect and `poll`; `evo_net_connect_list` now does the same. It
+checks that:
+
+- a live address connects, and the socket comes back in blocking mode
+- a refused address falls through to the next at once (not after a timeout)
+- a dead first address costs the per-address timeout - not a minute - and the
+  live one behind it connects
+- the dead address is remembered, so the next request does not wait for it again
+- a host whose only address is dead still fails after one timeout, not never
+- an address that recovers is forgiven and goes first again
+
+---
+
 ## Video colour matrix
 
 The GPU present path deleted the CPU converters, and with them `tools/bench.sh`

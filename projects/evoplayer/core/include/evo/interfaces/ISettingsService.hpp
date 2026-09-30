@@ -44,6 +44,19 @@ public:
     virtual int getSubtitleFontFace() const = 0;
     virtual void setSubtitleFontFace(int face) = 0;
 
+    /* Live TV: open a channel on a picker of the streams behind it (the URL as
+     * listed, each HLS quality variant, the extension guess) instead of letting
+     * EVO choose and fall back on its own. */
+    virtual bool isAskStreamEnabled() const = 0;
+    virtual void setAskStreamEnabled(bool enabled) = 0;
+
+    /* #110: where the second line of dialogue goes (0 stacked above the
+     * primary, 1 top of the screen) and its colour (0 yellow, 1 cyan, 2 white). */
+    virtual int getSecondarySubtitlePosition() const = 0;
+    virtual void setSecondarySubtitlePosition(int position) = 0;
+    virtual int getSecondarySubtitleColor() const = 0;
+    virtual void setSecondarySubtitleColor(int color) = 0;
+
     virtual int getKeyboardType() const = 0;
     virtual void setKeyboardType(int type) = 0;
 

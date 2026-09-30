@@ -20,7 +20,7 @@ namespace evo {
 namespace {
 
 constexpr int kSectionCount = 4;
-constexpr int kMaxDefs      = 8;
+constexpr int kMaxDefs      = 9;
 constexpr int kMaxOptions   = EVO_THEME_MAX;   /* themes are the longest list */
 
 
@@ -116,7 +116,11 @@ int buildSectionDefs(int section, SettingDef* d) {
                 ACT_NONE, 2, static_cast<int>(settings->getHdrOutputMode()), {}};
         for (int i = 0; i < 2; ++i)
             d[7].opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
-        n = 8;
+
+        d[8] = {"ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
+                "../icons/icon_tv.png", EVO_RMLUI_ROW_TOGGLE,
+                settings->isAskStreamEnabled(), "", ACT_NONE, 0, 0, {}};
+        n = 9;
         break;
 
 
@@ -132,7 +136,25 @@ int buildSectionDefs(int section, SettingDef* d) {
                 "../icons/icon_type.png", EVO_RMLUI_ROW_VALUE, false, "",
                 ACT_NONE, 4, face, {}};
         for (int i = 0; i < 4; ++i) d[1].opt_label[i] = kFaces[i];
-        n = 2;
+
+        /* #110: the second line of dialogue, drawn with the first when a
+         * secondary track is chosen in the subtitle picker. */
+        static const char* kSecondaryPos[] = {"STACKED ABOVE", "TOP OF SCREEN"};
+        static const char* kSecondaryColor[] = {"YELLOW", "CYAN", "WHITE"};
+        int secPos = settings->getSecondarySubtitlePosition();
+        if (secPos < 0 || secPos >= 2) secPos = 0;
+        d[2] = {"SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
+                "../icons/icon_subtitles.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 2, secPos, {}};
+        for (int i = 0; i < 2; ++i) d[2].opt_label[i] = kSecondaryPos[i];
+
+        int secColor = settings->getSecondarySubtitleColor();
+        if (secColor < 0 || secColor >= 3) secColor = 0;
+        d[3] = {"SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART",
+                "../icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, false, "",
+                ACT_NONE, 3, secColor, {}};
+        for (int i = 0; i < 3; ++i) d[3].opt_label[i] = kSecondaryColor[i];
+        n = 4;
         break;
     }
 
@@ -301,6 +323,7 @@ void toggleSetting(int section, int def) {
     auto st = Application::getInstance().getSettingsService();
     if (!st) return;
     if (section == 0 && def == 1) st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled());
+    else if (section == 0 && def == 8) st->setAskStreamEnabled(!st->isAskStreamEnabled());
     else if (section == 1 && def == 0) st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled());
     else if (section == 2 && def == 1) st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled());
     else if (section == 2 && def == 2) st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled());
@@ -332,6 +355,8 @@ void applyOption(int section, int def, int opt) {
     }
     else if (section == 0 && def == 7) st->setHdrOutputMode(static_cast<HdrOutputMode>(opt));
     else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
+    else if (section == 1 && def == 2) st->setSecondarySubtitlePosition(opt);
+    else if (section == 1 && def == 3) st->setSecondarySubtitleColor(opt);
 
     else if (section == 2 && def == 0) {
         /*

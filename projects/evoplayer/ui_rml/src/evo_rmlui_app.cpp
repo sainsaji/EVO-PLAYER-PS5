@@ -2598,34 +2598,63 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         }
     }
 
-    // 0. Subtitle caption overlay (#81)
+    // 0. Subtitle caption overlay (#81), and the secondary line above it (#110)
     {
+        // Caption text becomes RML: escape it, and turn line breaks into <br/>.
+        auto set_caption = [](Rml::Element* box, const std::string& text) {
+            if (!box) return;
+            if (text.empty()) {
+                box->SetProperty("display", "none");
+                return;
+            }
+            std::string rml;
+            rml.reserve(text.size() + 16);
+            for (char c : text) {
+                switch (c) {
+                    case '&':  rml += "&amp;";  break;
+                    case '<':  rml += "&lt;";   break;
+                    case '>':  rml += "&gt;";   break;
+                    case '\n': rml += "<br/>";  break;
+                    case '\r': break;
+                    default:   rml += c;        break;
+                }
+            }
+            box->SetProperty("display", "inline-block");
+            box->SetInnerRML(rml);
+        };
+
         Rml::Element* el_sub_box   = m_playback_doc->GetElementById("subtitle-box");
         Rml::Element* el_sub_layer = m_playback_doc->GetElementById("subtitle-layer");
         if (el_sub_box && el_sub_layer) {
-            if (state.subtitle_text.empty()) {
-                el_sub_box->SetProperty("display", "none");
-            } else {
-                std::string rml;
-                rml.reserve(state.subtitle_text.size() + 16);
-                for (char c : state.subtitle_text) {
-                    switch (c) {
-                        case '&':  rml += "&amp;";  break;
-                        case '<':  rml += "&lt;";   break;
-                        case '>':  rml += "&gt;";   break;
-                        case '\n': rml += "<br/>";  break;
-                        case '\r': break;
-                        default:   rml += c;        break;
-                    }
-                }
-                el_sub_box->SetProperty("display", "inline-block");
-                el_sub_box->SetInnerRML(rml);
+            set_caption(el_sub_box, state.subtitle_text);
+            if (!state.subtitle_text.empty()) {
                 el_sub_box->SetClass("sub-small",  state.subtitle_face == 1);
                 el_sub_box->SetClass("sub-medium", state.subtitle_face == 2);
                 el_sub_box->SetClass("sub-large",  state.subtitle_face == 3);
             }
             el_sub_layer->SetClass("raised", state.subtitle_raised);
         }
+
+        // The secondary caption is stacked directly above the primary, or sits
+        // alone at the top of the screen. Only the box for the chosen position
+        // ever shows; it is one step smaller than the primary and has its own
+        // colour, so the two lines never read as one.
+        Rml::Element* el_sub2_box = m_playback_doc->GetElementById("subtitle-box-secondary");
+        Rml::Element* el_sub2_top = m_playback_doc->GetElementById("subtitle-box-top");
+        Rml::Element* el_top_layer = m_playback_doc->GetElementById("subtitle-layer-top");
+        const bool on_top = state.subtitle2_position == 1;
+        set_caption(el_sub2_box, on_top ? std::string() : state.subtitle2_text);
+        set_caption(el_sub2_top, on_top ? state.subtitle2_text : std::string());
+        for (Rml::Element* box : {el_sub2_box, el_sub2_top}) {
+            if (!box) continue;
+            box->SetClass("sub2-small",  state.subtitle_face == 1);
+            box->SetClass("sub2-medium", state.subtitle_face == 2);
+            box->SetClass("sub2-large",  state.subtitle_face == 3);
+            box->SetClass("sub2-yellow", state.subtitle2_color == 0);
+            box->SetClass("sub2-cyan",   state.subtitle2_color == 1);
+            box->SetClass("sub2-white",  state.subtitle2_color == 2);
+        }
+        if (el_top_layer) el_top_layer->SetClass("raised", state.subtitle_raised);
     }
 
     // 1. Title & Meta
@@ -3352,6 +3381,17 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
         el_sync_lbl->SetProperty("color", to_hex_rgb(m_theme.accent));
     }
 
+    Rml::Element* el_sync2_pill = m_subtitles_doc->GetElementById("subtitles-sync2-pill");
+    if (el_sync2_pill) {
+        el_sync2_pill->SetProperty("display", state.sync2_str.empty() ? "none" : "flex");
+        el_sync2_pill->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+    }
+
+    Rml::Element* el_sync2_lbl = m_subtitles_doc->GetElementById("subtitles-sync2-label");
+    if (el_sync2_lbl) {
+        el_sync2_lbl->SetInnerRML(state.sync2_str);
+    }
+
     Rml::Element* el_pill = m_subtitles_doc->GetElementById("subtitles-size-pill");
     if (el_pill) {
         el_pill->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
@@ -3377,7 +3417,9 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
         std::string dot_id = "sub-dot-" + std::to_string(i);
         std::string title_id = "sub-title-" + std::to_string(i);
         std::string detail_id = "sub-detail-" + std::to_string(i);
+        std::string tag_id = "sub-tag-" + std::to_string(i);
 
+        Rml::Element* el_tag = m_subtitles_doc->GetElementById(tag_id);
         Rml::Element* el_row = m_subtitles_doc->GetElementById(row_id);
         Rml::Element* el_chk = m_subtitles_doc->GetElementById(chk_id);
         Rml::Element* el_dot = m_subtitles_doc->GetElementById(dot_id);
@@ -3407,6 +3449,14 @@ void EvoRmlApp::UpdateSubtitlesState(const EvoSubtitlesState& state) {
                     el_dot->SetProperty("background-color", state.tracks[i].is_current ? to_hex_rgb(m_theme.accent) : "transparent");
                 }
                 if (el_title) el_title->SetInnerRML(state.tracks[i].label);
+                if (el_tag) {
+                    // #110: which line of dialogue this track is.
+                    const std::string& tag = state.tracks[i].tag;
+                    el_tag->SetProperty("display", tag.empty() ? "none" : "inline-block");
+                    el_tag->SetClass("tag-primary", tag == "PRIMARY");
+                    el_tag->SetClass("tag-secondary", tag == "SECONDARY");
+                    if (!tag.empty()) el_tag->SetInnerRML(tag);
+                }
                 if (el_detail) {
                     if (state.tracks[i].detail.empty()) {
                         el_detail->SetProperty("display", "none");

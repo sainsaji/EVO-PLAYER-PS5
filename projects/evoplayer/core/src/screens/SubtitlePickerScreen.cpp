@@ -57,6 +57,7 @@ void SubtitlePickerScreen::refreshTracks() {
         if (prospero_subtitle_enabled && prospero_subtitle_use_external) {
             m_activeTrackIndex = static_cast<int>(m_tracks.size());
         }
+        extTrack.isSecondary = prospero_secondary_use_external && prospero_secondary_subtitle_active();
         m_tracks.push_back(std::move(extTrack));
     }
 
@@ -82,6 +83,8 @@ void SubtitlePickerScreen::refreshTracks() {
 
             streamTrack.label = label;
             streamTrack.detail = "Embedded Stream";
+            streamTrack.isSecondary =
+                prospero_secondary_subtitle_stream_index == static_cast<int>(i);
 
             if (prospero_subtitle_enabled && !prospero_subtitle_use_external &&
                 prospero_embedded_subtitle_stream_index == static_cast<int>(i)) {
@@ -163,24 +166,50 @@ void SubtitlePickerScreen::activateSelection() {
         // Off
         prospero_subtitle_enabled = 0;
         toast("SUBTITLES", "OFF");
+    } else if (!prospero_subtitle_select_primary(trackId)) {
+        evo_feedback(EVO_FB_ERROR);
+        return;
     } else if (trackId == -1) {
-        // External
-        prospero_subtitle_enabled = 1;
-        prospero_subtitle_use_external = 1;
         toast("SUBTITLES", "EXTERNAL SRT");
-    } else {
-        // Embedded
-        prospero_subtitle_enabled = 1;
-        prospero_subtitle_use_external = 0;
-        prospero_embedded_subtitle_stream_index = trackId;
-        toast("SUBTITLES", m_tracks[m_selectedIndex].label.c_str());
     }
+    // An embedded track toasts its own language and codec as it opens.
 
     if (auto sm = Application::getInstance().getScreenManager()) {
         if (!sm->navigateBack()) {
             sm->navigateTo(ScreenId::Player);
         }
     }
+}
+
+// #110: Square makes the focused track the secondary (the second line of
+// dialogue), or clears it when the track already is. Unlike Cross this stays
+// on the picker, so the [SECONDARY] tag is seen moving.
+void SubtitlePickerScreen::activateSecondary() {
+    if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_tracks.size())) {
+        return;
+    }
+
+    const SubtitleTrackEntry& entry = m_tracks[m_selectedIndex];
+
+    if (entry.trackId == kAutoSyncTrack) {
+        evo_feedback(EVO_FB_ERROR);
+        return;
+    }
+
+    if (entry.trackId == -2 || entry.isSecondary) {
+        // The OFF row, or the secondary itself: clear the second line.
+        if (!prospero_secondary_subtitle_active()) {
+            evo_feedback(EVO_FB_ERROR);
+            return;
+        }
+        prospero_secondary_subtitle_select(PROSPERO_SECONDARY_NONE);
+    } else if (!prospero_secondary_subtitle_select(entry.trackId)) {
+        evo_feedback(EVO_FB_ERROR);     // it toasted why
+        return;
+    }
+
+    evo_feedback(EVO_FB_CONFIRM);
+    refreshTracks();
 }
 
 void SubtitlePickerScreen::cycleSize() {
@@ -220,8 +249,22 @@ bool SubtitlePickerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t
         activateSelection();
         return true;
     }
-    if (pressed & (PadButtons::Triangle | PadButtons::Square)) {
+    if (pressed & PadButtons::Triangle) {
         cycleSize();
+        return true;
+    }
+    if (pressed & PadButtons::Square) {
+        activateSecondary();
+        return true;
+    }
+    if (pressed & (PadButtons::L1 | PadButtons::R1)) {
+        // The secondary track keeps its own sync (#110).
+        if (!prospero_secondary_subtitle_active()) {
+            evo_feedback(EVO_FB_ERROR);
+            return true;
+        }
+        prospero_secondary_nudge_delay((pressed & PadButtons::R1) ? +100 : -100);
+        evo_feedback(EVO_FB_MOVE);
         return true;
     }
     if (pressed & (PadButtons::Left | PadButtons::TouchPadLeft | PadButtons::L2)) {
@@ -281,6 +324,18 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
     }
     params.sync_str = s_syncBuf;
 
+    // The secondary track's own sync pill, only while there is one (#110).
+    static char s_sync2Buf[32];
+    if (prospero_subtitle_enabled && prospero_secondary_subtitle_active()) {
+        if (prospero_secondary_delay_ms == 0)
+            std::snprintf(s_sync2Buf, sizeof(s_sync2Buf), "2ND: 0 ms");
+        else
+            std::snprintf(s_sync2Buf, sizeof(s_sync2Buf), "2ND: %+d ms", prospero_secondary_delay_ms);
+        params.sync2_str = s_sync2Buf;
+    } else {
+        params.sync2_str = "";
+    }
+
     params.preview_text = "The quick brown fox jumps over the lazy dog";
     params.preview_face = size_idx;
 
@@ -294,6 +349,10 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
         params.tracks[i].detail = m_tracks[idx].detail.c_str();
         params.tracks[i].is_focused = (idx == m_selectedIndex);
         params.tracks[i].is_current = (idx == m_activeTrackIndex);
+        // [PRIMARY] / [SECONDARY]: which line of dialogue each track is (#110).
+        params.tracks[i].tag = m_tracks[idx].isSecondary ? "SECONDARY"
+                             : (idx == m_activeTrackIndex && idx != 0 &&
+                                m_tracks[idx].trackId != kAutoSyncTrack) ? "PRIMARY" : "";
         if (m_tracks[idx].trackId == kAutoSyncTrack) {
             params.tracks[i].detail = prospero_subtitle_autosync_detail(s_autoSyncDetail, sizeof(s_autoSyncDetail));
             params.tracks[i].is_current = 0;

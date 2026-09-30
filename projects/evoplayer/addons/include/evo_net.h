@@ -69,6 +69,7 @@
 #define EVO_NET_H
 
 #include <stddef.h>
+#include <netdb.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -108,6 +109,22 @@ extern "C" {
 #define EVO_NET_ERR_BODY_LIMIT -17
 
 typedef void (*evo_net_cb)(int success, int status_code, const char *body, size_t body_len, void *user_data);
+
+/*
+ * Connects to the first address in `list` that answers, and returns the socket
+ * (blocking, with EVO_NET_TIMEOUT_SEC read/write timeouts) or -1.
+ *
+ * Each address gets at most `per_addr_timeout_ms` (a non-blocking connect
+ * bounded by poll). A plain blocking connect() to an address that silently drops
+ * packets does not honour SO_SNDTIMEO here: it sits in the kernel's SYN retry
+ * for about 75 s. That stalled evo_net's single worker thread - and every
+ * request queued behind it - whenever a host had one dead address, which
+ * raw.githubusercontent.com does from some networks (hardware, 2026-09-30).
+ *
+ * An address that timed out is remembered for five minutes and tried after the
+ * ones that have not, so only the first request to a host pays for it.
+ */
+int evo_net_connect_list(const struct addrinfo *list, int per_addr_timeout_ms);
 
 /* Initialize background network worker and request queue. */
 int  evo_net_init(void);

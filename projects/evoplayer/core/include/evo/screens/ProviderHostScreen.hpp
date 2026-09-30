@@ -62,6 +62,24 @@ private:
     void choosePicked(bool editSource);
     void renderPicker(uint32_t* framebuffer, int width, int height);
 
+    /*
+     * The stream picker (Settings -> ASK WHICH LIVE STREAM).
+     *
+     * After a channel resolves, its streams are listed here - the URL as the
+     * playlist gave it, each quality variant read from its HLS master, and the
+     * .ts/.m3u8 swap EVO would otherwise try on its own (marked as a guess) -
+     * and EVO plays the one chosen. Nothing is substituted: if the chosen
+     * stream does not open, the list comes back rather than another stream
+     * being tried behind the user's back. With the setting off none of this
+     * runs and a channel plays exactly as it always did.
+     */
+    void enterStreamPicker();
+    void chooseStream(int index);
+    void cancelStreamPicker();
+    void renderStreamPicker(uint32_t* framebuffer, int width, int height);
+    bool m_streamPick = false;
+    int  m_streamIndex = 0;
+
     /* Open `id`: an RmlUi bundle for most providers, the system browser for
      * one with EVO_PROVIDER_CAP_WEBUI (openWebProvider). */
     void openProvider(const std::string& id);

@@ -96,9 +96,7 @@ prospero_embedded_subtitle_stream_index = -1;
 
 /* PROSPERO_DIRECT_SUBRIP_START */
 
-static enum AVCodecID
-prospero_embedded_subtitle_codec_id =
-    AV_CODEC_ID_NONE;
+/* The codec id a track decodes lives in its slot (#110), below. */
 
 /* PROSPERO_DIRECT_SUBRIP_END */
 
@@ -124,20 +122,63 @@ int prospero_subtitle_use_external = 0;
 
 
 
-static ProsperoEmbeddedSubtitleCue
-prospero_embedded_subtitle_cues[
-    PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
-];
+/*
+ * #110 - dual subtitles.
+ *
+ * An embedded text track is a "slot": the decoder its codec needs, a ring of
+ * the cues decoded so far, and the stream it follows. Slot 0 is the primary
+ * track and keeps the globals the rest of the app already reads
+ * (prospero_embedded_subtitle_ctx / _stream_index / _count). Slot 1 is the
+ * secondary track and is only ever driven from this file.
+ *
+ * Two locks per slot, always taken state -> ring:
+ *   state_mutex  the decoder context, stream index and codec id. The demux
+ *                thread holds it for one packet decode; the UI thread takes it
+ *                to switch or close the track, so a decoder is never freed
+ *                under a decode in flight.
+ *   ring_mutex   the cue ring. The render thread only ever takes this one.
+ */
+typedef struct {
+    int             *stream_index;
+    AVCodecContext **ctx;
+    int             *count;
+    enum AVCodecID   codec_id;
+    int              head;
+    ProsperoEmbeddedSubtitleCue cues[
+        PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
+    ];
+    pthread_mutex_t  ring_mutex;
+    pthread_mutex_t  state_mutex;
+} ProsperoSubSlot;
 
-static int
-prospero_embedded_subtitle_head = 0;
+int prospero_embedded_subtitle_count = 0;
 
-int
-prospero_embedded_subtitle_count = 0;
+/* -1 = no embedded track in the secondary slot. */
+int prospero_secondary_subtitle_stream_index = -1;
+static int             prospero_secondary_cue_count = 0;
+static AVCodecContext *prospero_secondary_ctx = NULL;
 
-static pthread_mutex_t
-prospero_embedded_subtitle_mutex =
-    PTHREAD_MUTEX_INITIALIZER;
+static ProsperoSubSlot prospero_sub_slot[2] = {
+    {
+        .stream_index = &prospero_embedded_subtitle_stream_index,
+        .ctx          = &prospero_embedded_subtitle_ctx,
+        .count        = &prospero_embedded_subtitle_count,
+        .codec_id     = AV_CODEC_ID_NONE,
+        .ring_mutex   = PTHREAD_MUTEX_INITIALIZER,
+        .state_mutex  = PTHREAD_MUTEX_INITIALIZER,
+    },
+    {
+        .stream_index = &prospero_secondary_subtitle_stream_index,
+        .ctx          = &prospero_secondary_ctx,
+        .count        = &prospero_secondary_cue_count,
+        .codec_id     = AV_CODEC_ID_NONE,
+        .ring_mutex   = PTHREAD_MUTEX_INITIALIZER,
+        .state_mutex  = PTHREAD_MUTEX_INITIALIZER,
+    },
+};
+
+#define SUB_PRIMARY   (&prospero_sub_slot[0])
+#define SUB_SECONDARY (&prospero_sub_slot[1])
 
 
 int prospero_embedded_subtitle_supported(
@@ -152,34 +193,73 @@ int prospero_embedded_subtitle_supported(
 }
 
 
-void prospero_embedded_subtitle_reset(void) {
+static void prospero_sub_slot_reset(
+    ProsperoSubSlot *slot
+) {
     pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
     );
 
-    prospero_embedded_subtitle_head = 0;
-    prospero_embedded_subtitle_count = 0;
+    slot->head = 0;
+    *slot->count = 0;
 
     pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
+    );
+}
+
+
+/* A seek: every cue in the rings is from the wrong place. The primary decoder
+ * is flushed by the seek path; the secondary decoder is ours to flush. */
+void prospero_embedded_subtitle_reset(void) {
+    prospero_sub_slot_reset(SUB_PRIMARY);
+    prospero_sub_slot_reset(SUB_SECONDARY);
+
+    pthread_mutex_lock(
+        &SUB_SECONDARY->state_mutex
+    );
+
+    if (*SUB_SECONDARY->ctx) {
+        avcodec_flush_buffers(
+            *SUB_SECONDARY->ctx
+        );
+    }
+
+    pthread_mutex_unlock(
+        &SUB_SECONDARY->state_mutex
+    );
+}
+
+
+static void prospero_sub_slot_close(
+    ProsperoSubSlot *slot
+) {
+    prospero_sub_slot_reset(slot);
+
+    pthread_mutex_lock(
+        &slot->state_mutex
+    );
+
+    if (*slot->ctx) {
+        avcodec_free_context(
+            slot->ctx
+        );
+    }
+
+    *slot->stream_index = -1;
+    slot->codec_id = AV_CODEC_ID_NONE;
+
+    pthread_mutex_unlock(
+        &slot->state_mutex
     );
 }
 
 
 void prospero_embedded_subtitle_close(void) {
-    prospero_embedded_subtitle_reset();
+    prospero_sub_slot_close(SUB_PRIMARY);
+    prospero_sub_slot_close(SUB_SECONDARY);
 
-    if (prospero_embedded_subtitle_ctx) {
-        avcodec_free_context(
-            &prospero_embedded_subtitle_ctx
-        );
-    }
-
-    prospero_embedded_subtitle_stream_index =
-        -1;
-
-    prospero_embedded_subtitle_codec_id =
-        AV_CODEC_ID_NONE;
+    prospero_secondary_use_external = 0;
 }
 
 
@@ -320,6 +400,153 @@ static int prospero_embedded_subtitle_score_stream(
 }
 
 
+/*
+ * Point `slot` at embedded text stream `stream_index` of `format`: open the
+ * decoder its codec needs and start following the stream. Returns 1, or 0 with
+ * the slot left closed. `title` heads the toast.
+ */
+static int prospero_sub_slot_start(
+    ProsperoSubSlot *slot,
+    AVFormatContext *format,
+    int stream_index,
+    const char *title
+) {
+    AVStream *stream =
+        format->streams[stream_index];
+
+    enum AVCodecID codec_id =
+        stream->codecpar->codec_id;
+
+    prospero_sub_slot_close(slot);
+
+    pthread_mutex_lock(
+        &slot->state_mutex
+    );
+
+    *slot->stream_index = stream_index;
+    slot->codec_id = codec_id;
+
+    if (slot == SUB_PRIMARY) {
+        dbg_sub_cid = (int)codec_id;
+    }
+
+    /*
+     * Matroska SubRip packets already contain plain subtitle text.
+     * Decode them directly when the PS5 FFmpeg build does not include
+     * a registered SubRip decoder.
+     */
+    if (codec_id != AV_CODEC_ID_SUBRIP) {
+        const AVCodec *decoder =
+            avcodec_find_decoder(
+                codec_id
+            );
+
+        AVCodecContext *context = NULL;
+        const char *failure = NULL;
+
+        if (!decoder) {
+            failure = "TEXT DECODER NOT FOUND";
+        } else if (
+            !(context = avcodec_alloc_context3(decoder))
+        ) {
+            failure = "TEXT DECODER FAILED";
+        } else if (
+            avcodec_parameters_to_context(
+                context,
+                stream->codecpar
+            ) < 0
+        ) {
+            failure = "TEXT DECODER FAILED";
+        } else {
+            context->pkt_timebase =
+                stream->time_base;
+
+            if (
+                avcodec_open2(
+                    context,
+                    decoder,
+                    NULL
+                ) < 0
+            ) {
+                failure = "TEXT DECODER FAILED";
+            }
+        }
+
+        if (failure) {
+            if (context) {
+                avcodec_free_context(
+                    &context
+                );
+            }
+
+            *slot->stream_index = -1;
+            slot->codec_id = AV_CODEC_ID_NONE;
+
+            pthread_mutex_unlock(
+                &slot->state_mutex
+            );
+
+            toast(
+                "SUBTITLES",
+                failure
+            );
+
+            return 0;
+        }
+
+        *slot->ctx = context;
+    }
+
+    pthread_mutex_unlock(
+        &slot->state_mutex
+    );
+
+    const char *codec_name =
+        avcodec_get_name(
+            codec_id
+        );
+
+    const char *language_name =
+        "UNSPECIFIED";
+
+    AVDictionaryEntry *language =
+        av_dict_get(
+            stream->metadata,
+            "language",
+            NULL,
+            0
+        );
+
+    if (
+        language &&
+        language->value &&
+        language->value[0]
+    ) {
+        language_name =
+            language->value;
+    }
+
+    char message[128];
+
+    snprintf(
+        message,
+        sizeof(message),
+        "%s / %s",
+        language_name,
+        codec_name
+            ? codec_name
+            : "TEXT"
+    );
+
+    toast(
+        title,
+        message
+    );
+
+    return 1;
+}
+
+
 int prospero_embedded_subtitle_open(
     AVFormatContext *format
 ) {
@@ -414,157 +641,12 @@ if (best_stream < 0) {
         return 0;
     }
 
-    AVStream *stream =
-        format->streams[best_stream];
-
-    enum AVCodecID codec_id =
-        stream->codecpar->codec_id;
-
-    prospero_embedded_subtitle_stream_index =
-        best_stream;
-
-    prospero_embedded_subtitle_codec_id =
-        codec_id;
-
-    dbg_sub_cid = (int)codec_id;
-
-    prospero_embedded_subtitle_reset();
-
-    /*
-     * Matroska SubRip packets already contain plain subtitle text.
-     * Decode them directly when the PS5 FFmpeg build does not include
-     * a registered SubRip decoder.
-     */
-    if (codec_id != AV_CODEC_ID_SUBRIP) {
-        const AVCodec *decoder =
-            avcodec_find_decoder(
-                codec_id
-            );
-
-        if (!decoder) {
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            toast(
-                "SUBTITLES",
-                "TEXT DECODER NOT FOUND"
-            );
-
-            return 0;
-        }
-
-        AVCodecContext *context =
-            avcodec_alloc_context3(
-                decoder
-            );
-
-        if (!context) {
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            return 0;
-        }
-
-        if (
-            avcodec_parameters_to_context(
-                context,
-                stream->codecpar
-            ) < 0
-        ) {
-            avcodec_free_context(
-                &context
-            );
-
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            return 0;
-        }
-
-        context->pkt_timebase =
-            stream->time_base;
-
-        if (
-            avcodec_open2(
-                context,
-                decoder,
-                NULL
-            ) < 0
-        ) {
-            avcodec_free_context(
-                &context
-            );
-
-            prospero_embedded_subtitle_stream_index =
-                -1;
-
-            prospero_embedded_subtitle_codec_id =
-                AV_CODEC_ID_NONE;
-
-            toast(
-                "SUBTITLES",
-                "TEXT DECODER FAILED"
-            );
-
-            return 0;
-        }
-
-        prospero_embedded_subtitle_ctx =
-            context;
-    }
-
-    const char *codec_name =
-        avcodec_get_name(
-            codec_id
-        );
-
-    const char *language_name =
-        "UNSPECIFIED";
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (
-        language &&
-        language->value &&
-        language->value[0]
-    ) {
-        language_name =
-            language->value;
-    }
-
-    char message[128];
-
-    snprintf(
-        message,
-        sizeof(message),
-        "%s / %s",
-        language_name,
-        codec_name
-            ? codec_name
-            : "TEXT"
+    return prospero_sub_slot_start(
+        SUB_PRIMARY,
+        format,
+        best_stream,
+        "EMBEDDED SUBTITLES"
     );
-
-    toast(
-        "EMBEDDED SUBTITLES",
-        message
-    );
-
-    return 1;
 }
 
 
@@ -678,6 +760,7 @@ static void prospero_embedded_subtitle_extract_text(
 
 
 static void prospero_embedded_subtitle_add_cue(
+    ProsperoSubSlot *slot,
     double start_seconds,
     double end_seconds,
     const char *text
@@ -691,32 +774,32 @@ static void prospero_embedded_subtitle_add_cue(
     }
 
     pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
     );
 
     if (
-        prospero_embedded_subtitle_count >=
+        *slot->count >=
         PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
     ) {
-        prospero_embedded_subtitle_head =
+        slot->head =
             (
-                prospero_embedded_subtitle_head +
+                slot->head +
                 1
             ) %
             PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
 
-        prospero_embedded_subtitle_count--;
+        (*slot->count)--;
     }
 
     int write_index =
         (
-            prospero_embedded_subtitle_head +
-            prospero_embedded_subtitle_count
+            slot->head +
+            *slot->count
         ) %
         PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
 
     ProsperoEmbeddedSubtitleCue *cue =
-        &prospero_embedded_subtitle_cues[
+        &slot->cues[
             write_index
         ];
 
@@ -733,32 +816,39 @@ static void prospero_embedded_subtitle_add_cue(
         text
     );
 
-    prospero_embedded_subtitle_count++;
+    (*slot->count)++;
 
     pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
     );
 }
 
 
-void prospero_embedded_subtitle_decode_packet(
+/* Caller holds slot->state_mutex. */
+static void prospero_sub_slot_decode_locked(
+    ProsperoSubSlot *slot,
     AVPacket *packet
 ) {
+    const int primary =
+        slot == SUB_PRIMARY;
+
+    const int stream_index =
+        *slot->stream_index;
+
     if (
-        !packet ||
-        packet->stream_index !=
-            prospero_embedded_subtitle_stream_index ||
         !play_fmt ||
-        prospero_embedded_subtitle_stream_index < 0
+        stream_index < 0
     ) {
         return;
     }
 
-    dbg_sub_entered++;
+    if (primary) {
+        dbg_sub_entered++;
+    }
 
     AVStream *stream =
         play_fmt->streams[
-            prospero_embedded_subtitle_stream_index
+            stream_index
         ];
 
     int64_t timestamp =
@@ -794,7 +884,7 @@ void prospero_embedded_subtitle_decode_packet(
      * Direct Matroska SubRip path.
      */
     if (
-        prospero_embedded_subtitle_codec_id ==
+        slot->codec_id ==
         AV_CODEC_ID_SUBRIP
     ) {
         if (
@@ -838,21 +928,24 @@ void prospero_embedded_subtitle_decode_packet(
         );
 
         if (cleaned[0]) {
-            dbg_sub_added++;
+            if (primary) {
+                dbg_sub_added++;
+            }
 
             prospero_embedded_subtitle_add_cue(
+                slot,
                 base_seconds,
                 base_seconds + packet_duration,
                 cleaned
             );
-        } else {
+        } else if (primary) {
             dbg_sub_blank++;
         }
 
         return;
     }
 
-    if (!prospero_embedded_subtitle_ctx) {
+    if (!*slot->ctx) {
         return;
     }
 
@@ -871,7 +964,7 @@ void prospero_embedded_subtitle_decode_packet(
 
     int result =
         avcodec_decode_subtitle2(
-            prospero_embedded_subtitle_ctx,
+            *slot->ctx,
             &subtitle,
             &got_subtitle,
             packet
@@ -934,6 +1027,7 @@ void prospero_embedded_subtitle_decode_packet(
 
     if (text[0]) {
         prospero_embedded_subtitle_add_cue(
+            slot,
             start_seconds,
             end_seconds,
             text
@@ -946,7 +1040,45 @@ void prospero_embedded_subtitle_decode_packet(
 }
 
 
-int prospero_embedded_subtitle_text_at(
+static void prospero_sub_slot_decode(
+    ProsperoSubSlot *slot,
+    AVPacket *packet
+) {
+    /* Read unlocked on purpose: a stale value only costs one needless lock,
+     * or one packet left for the next demux pass after a switch. */
+    if (packet->stream_index != *slot->stream_index) {
+        return;
+    }
+
+    pthread_mutex_lock(
+        &slot->state_mutex
+    );
+
+    prospero_sub_slot_decode_locked(
+        slot,
+        packet
+    );
+
+    pthread_mutex_unlock(
+        &slot->state_mutex
+    );
+}
+
+
+void prospero_embedded_subtitle_decode_packet(
+    AVPacket *packet
+) {
+    if (!packet) {
+        return;
+    }
+
+    prospero_sub_slot_decode(SUB_PRIMARY, packet);
+    prospero_sub_slot_decode(SUB_SECONDARY, packet);
+}
+
+
+static int prospero_sub_slot_text_at(
+    ProsperoSubSlot *slot,
     double position,
     char *output,
     size_t output_size
@@ -961,7 +1093,7 @@ int prospero_embedded_subtitle_text_at(
     output[0] = 0;
 
     pthread_mutex_lock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
     );
 
     const ProsperoEmbeddedSubtitleCue *
@@ -970,18 +1102,18 @@ int prospero_embedded_subtitle_text_at(
     for (
         int offset = 0;
         offset <
-            prospero_embedded_subtitle_count;
+            *slot->count;
         offset++
     ) {
         int index =
             (
-                prospero_embedded_subtitle_head +
+                slot->head +
                 offset
             ) %
             PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES;
 
         const ProsperoEmbeddedSubtitleCue *cue =
-            &prospero_embedded_subtitle_cues[
+            &slot->cues[
                 index
             ];
 
@@ -1009,10 +1141,24 @@ int prospero_embedded_subtitle_text_at(
     }
 
     pthread_mutex_unlock(
-        &prospero_embedded_subtitle_mutex
+        &slot->ring_mutex
     );
 
     return output[0] != 0;
+}
+
+
+int prospero_embedded_subtitle_text_at(
+    double position,
+    char *output,
+    size_t output_size
+) {
+    return prospero_sub_slot_text_at(
+        SUB_PRIMARY,
+        position,
+        output,
+        output_size
+    );
 }
 
 /* PROSPERO_EMBEDDED_SUBTITLE_MODULE_END */
@@ -1041,6 +1187,7 @@ void prospero_subtitle_clear(void) {
     prospero_subtitle_path[0] = 0;
     prospero_subtitle_delay_ms = 0;
     prospero_subtitle_time_scale = 1.0;
+    prospero_secondary_delay_ms = 0;
 }
 
 
@@ -1939,6 +2086,14 @@ void prospero_subtitle_apply_track(int track)
 
     prospero_subtitle_requested_stream = track;
 
+    /* The track about to become the primary cannot also be the secondary. */
+    if (
+        prospero_secondary_subtitle_requested == track
+    ) {
+        prospero_secondary_subtitle_requested =
+            PROSPERO_SECONDARY_NONE;
+    }
+
     requested_resume_seek_pos = position;
     resume_base_offset_seconds = position;
 
@@ -2082,6 +2237,362 @@ double prospero_subtitle_position(double clock_seconds)
                  (double)prospero_subtitle_delay_ms / 1000.0;
     return pos < 0.0 ? 0.0 : pos;
 }
+
+/* PROSPERO_SECONDARY_SUBTITLE_START (#110) */
+
+/*
+ * The secondary track: a second line of dialogue drawn with the first, for
+ * bilingual viewing. It is the external SRT or one embedded text track, never
+ * the same source as the primary. What was chosen is kept per file, so a
+ * reopen of the same file (audio change, primary change) keeps it and a
+ * different file starts without one.
+ */
+int prospero_secondary_subtitle_requested = PROSPERO_SECONDARY_NONE;
+int prospero_secondary_use_external = 0;
+int prospero_secondary_delay_ms = 0;
+int prospero_secondary_position = PROSPERO_SECONDARY_POS_STACKED;
+int prospero_secondary_color = 0;
+
+static char prospero_secondary_media[768] = {0};
+
+
+int prospero_secondary_subtitle_active(void) {
+    if (prospero_secondary_use_external) {
+        /* One SRT cannot be both tracks. */
+        return !prospero_subtitle_use_external &&
+               prospero_subtitle_count > 0;
+    }
+
+    return prospero_secondary_subtitle_stream_index >= 0;
+}
+
+
+int prospero_subtitle_wants_stream(int stream_index) {
+    return stream_index >= 0 &&
+           (
+               stream_index == prospero_embedded_subtitle_stream_index ||
+               stream_index == prospero_secondary_subtitle_stream_index
+           );
+}
+
+
+static int prospero_secondary_stream_usable(int stream_index) {
+    if (
+        !play_fmt ||
+        stream_index < 0 ||
+        stream_index >= (int)play_fmt->nb_streams
+    ) {
+        return 0;
+    }
+
+    AVStream *stream =
+        play_fmt->streams[stream_index];
+
+    return stream &&
+           stream->codecpar &&
+           stream->codecpar->codec_type ==
+               AVMEDIA_TYPE_SUBTITLE &&
+           prospero_embedded_subtitle_supported(
+               stream->codecpar->codec_id
+           );
+}
+
+
+/* The secondary gives up its track without a word: the primary is taking it. */
+static void prospero_secondary_drop(void) {
+    prospero_secondary_subtitle_requested =
+        PROSPERO_SECONDARY_NONE;
+    prospero_secondary_use_external = 0;
+    prospero_secondary_delay_ms = 0;
+    prospero_sub_slot_close(SUB_SECONDARY);
+}
+
+
+int prospero_secondary_subtitle_open(
+    AVFormatContext *format
+) {
+    prospero_secondary_use_external = 0;
+
+    if (
+        strcmp(
+            prospero_secondary_media,
+            current_media_path
+        ) != 0
+    ) {
+        /* A different file: the choice was made for the last one. */
+        prospero_secondary_subtitle_requested =
+            PROSPERO_SECONDARY_NONE;
+        prospero_secondary_media[0] = 0;
+    }
+
+    int wanted =
+        prospero_secondary_subtitle_requested;
+
+    if (
+        !format ||
+        wanted == PROSPERO_SECONDARY_NONE
+    ) {
+        return 0;
+    }
+
+    if (wanted < 0) {
+        if (
+            prospero_subtitle_count > 0 &&
+            !prospero_subtitle_use_external
+        ) {
+            prospero_secondary_use_external = 1;
+            return 1;
+        }
+
+        return 0;
+    }
+
+    if (
+        !prospero_secondary_stream_usable(wanted) ||
+        (
+            !prospero_subtitle_use_external &&
+            wanted == prospero_embedded_subtitle_stream_index
+        )
+    ) {
+        return 0;
+    }
+
+    return prospero_sub_slot_start(
+        SUB_SECONDARY,
+        format,
+        wanted,
+        "SECONDARY SUBTITLES"
+    );
+}
+
+
+int prospero_secondary_subtitle_select(int track) {
+    if (track == PROSPERO_SECONDARY_NONE) {
+        prospero_secondary_drop();
+
+        toast(
+            "SECONDARY SUBTITLES",
+            "OFF"
+        );
+
+        return 1;
+    }
+
+    if (
+        !play_fmt ||
+        !current_media_path[0]
+    ) {
+        return 0;
+    }
+
+    if (track == -1) {
+        if (prospero_subtitle_count <= 0) {
+            toast(
+                "SECONDARY SUBTITLES",
+                "NO EXTERNAL SRT"
+            );
+
+            return 0;
+        }
+
+        if (prospero_subtitle_use_external) {
+            toast(
+                "SECONDARY SUBTITLES",
+                "THE SRT IS THE PRIMARY TRACK"
+            );
+
+            return 0;
+        }
+
+        prospero_sub_slot_close(SUB_SECONDARY);
+        prospero_secondary_use_external = 1;
+
+        toast(
+            "SECONDARY SUBTITLES",
+            "EXTERNAL SRT"
+        );
+    } else {
+        if (!prospero_secondary_stream_usable(track)) {
+            toast(
+                "SECONDARY SUBTITLES",
+                "NOT A TEXT TRACK"
+            );
+
+            return 0;
+        }
+
+        if (
+            !prospero_subtitle_use_external &&
+            track == prospero_embedded_subtitle_stream_index
+        ) {
+            toast(
+                "SECONDARY SUBTITLES",
+                "THAT IS THE PRIMARY TRACK"
+            );
+
+            return 0;
+        }
+
+        prospero_secondary_use_external = 0;
+
+        if (
+            !prospero_sub_slot_start(
+                SUB_SECONDARY,
+                play_fmt,
+                track,
+                "SECONDARY SUBTITLES"
+            )
+        ) {
+            return 0;
+        }
+    }
+
+    prospero_secondary_subtitle_requested = track;
+
+    snprintf(
+        prospero_secondary_media,
+        sizeof(prospero_secondary_media),
+        "%s",
+        current_media_path
+    );
+
+    /* A different track has its own timing. */
+    prospero_secondary_delay_ms = 0;
+    prospero_subtitle_enabled = 1;
+    controls_last_used_ms = now_ms();
+
+    return 1;
+}
+
+
+void prospero_secondary_nudge_delay(int delta_ms) {
+    char msg[64];
+
+    prospero_secondary_delay_ms += delta_ms;
+
+    if (prospero_secondary_delay_ms < -PROSPERO_SUBTITLE_MAX_DELAY_MS)
+        prospero_secondary_delay_ms = -PROSPERO_SUBTITLE_MAX_DELAY_MS;
+    if (prospero_secondary_delay_ms > PROSPERO_SUBTITLE_MAX_DELAY_MS)
+        prospero_secondary_delay_ms = PROSPERO_SUBTITLE_MAX_DELAY_MS;
+
+    if (prospero_secondary_delay_ms == 0)
+        snprintf(msg, sizeof(msg), "0 ms (sync)");
+    else
+        snprintf(
+            msg,
+            sizeof(msg),
+            "%+d ms",
+            prospero_secondary_delay_ms);
+
+    toast("2ND SUB DELAY", msg);
+    controls_last_used_ms = now_ms();
+}
+
+
+int prospero_secondary_subtitle_text_at(
+    double clock_seconds,
+    char *output,
+    size_t output_size
+) {
+    if (
+        !output ||
+        output_size == 0
+    ) {
+        return 0;
+    }
+
+    output[0] = 0;
+
+    if (!prospero_secondary_subtitle_active()) {
+        return 0;
+    }
+
+    /* The SRT's framerate ratio applies to whichever track is the SRT. */
+    double scale = prospero_secondary_use_external
+                 ? prospero_subtitle_time_scale : 1.0;
+    double position = clock_seconds * scale -
+                      (double)prospero_secondary_delay_ms / 1000.0;
+
+    if (position < 0.0) {
+        position = 0.0;
+    }
+
+    if (prospero_secondary_use_external) {
+        const ProsperoSubtitleCue *cue =
+            prospero_subtitle_active_cue(position);
+
+        if (cue && cue->text[0]) {
+            snprintf(
+                output,
+                output_size,
+                "%s",
+                cue->text
+            );
+        }
+    } else {
+        prospero_sub_slot_text_at(
+            SUB_SECONDARY,
+            position,
+            output,
+            output_size
+        );
+    }
+
+    return output[0] != 0;
+}
+
+/*
+ * Make `track` the primary: -1 for the external SRT, or an embedded stream
+ * index. In place, exactly as the secondary switches: the demuxer already
+ * delivers every subtitle stream, and the decoder for the new track's codec
+ * is opened under the slot's lock. (The picker used to only write the stream
+ * index, which left the old track's decoder and cues behind - harmless for two
+ * SubRip tracks, wrong the moment a file mixes ASS and SubRip.) The same
+ * source cannot be both tracks, so a secondary that held it is dropped.
+ */
+int prospero_subtitle_select_primary(int track) {
+    if (track == -1) {
+        if (prospero_subtitle_count <= 0) {
+            return 0;
+        }
+
+        if (prospero_secondary_use_external) {
+            prospero_secondary_drop();
+        }
+
+        prospero_subtitle_use_external = 1;
+        prospero_subtitle_enabled = 1;
+
+        return 1;
+    }
+
+    if (
+        !play_fmt ||
+        !prospero_secondary_stream_usable(track)
+    ) {
+        return 0;
+    }
+
+    if (track == prospero_secondary_subtitle_stream_index) {
+        prospero_secondary_drop();
+    }
+
+    prospero_subtitle_use_external = 0;
+    prospero_subtitle_enabled = 1;
+
+    if (track == prospero_embedded_subtitle_stream_index) {
+        return 1;
+    }
+
+    return prospero_sub_slot_start(
+        SUB_PRIMARY,
+        play_fmt,
+        track,
+        "EMBEDDED SUBTITLES"
+    );
+}
+
+/* PROSPERO_SECONDARY_SUBTITLE_END */
 
 /* PROSPERO_SUBTITLE_AUTOSYNC_START (#102) */
 

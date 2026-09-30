@@ -37,6 +37,9 @@ struct EvoPlaybackState {
     std::string subtitle_text;   // #81: active caption, UTF-8, "\n"-separated
     int subtitle_face = 2;       // EVO_FACE_SUB/MENU/TITLE
     bool subtitle_raised = false;
+    std::string subtitle2_text;  // #110: secondary caption, same shape as subtitle_text
+    int subtitle2_position = 0;  // 0 stacked above the primary, 1 top of screen
+    int subtitle2_color = 0;     // 0 yellow, 1 cyan, 2 white
     bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
     int fps = 0;                 // #81: dev FPS pill
     bool debug_overlay = false;
@@ -57,6 +60,9 @@ struct EvoPlaybackState {
                view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha &&
                subtitle_text == o.subtitle_text && subtitle_face == o.subtitle_face &&
                subtitle_raised == o.subtitle_raised && chrome_hidden == o.chrome_hidden &&
+               subtitle2_text == o.subtitle2_text &&
+               subtitle2_position == o.subtitle2_position &&
+               subtitle2_color == o.subtitle2_color &&
                fps == o.fps && debug_overlay == o.debug_overlay &&
                music_mode == o.music_mode && music_codec == o.music_codec;
     }
@@ -151,11 +157,13 @@ struct EvoSubtitlesTrack {
     bool is_focused = false;
     bool is_action = false;
     bool is_disabled = false;
+    std::string tag;             // #110: "PRIMARY" / "SECONDARY", empty for none
 
     bool operator==(const EvoSubtitlesTrack& o) const {
         return label == o.label && detail == o.detail &&
                is_current == o.is_current && is_focused == o.is_focused &&
-               is_action == o.is_action && is_disabled == o.is_disabled;
+               is_action == o.is_action && is_disabled == o.is_disabled &&
+               tag == o.tag;
     }
     bool operator!=(const EvoSubtitlesTrack& o) const { return !(*this == o); }
 };
@@ -165,13 +173,14 @@ struct EvoSubtitlesState {
     std::string title;
     std::string size_str;
     std::string sync_str;
+    std::string sync2_str;       // #110: empty hides the secondary sync pill
     std::string preview_text;
     int preview_face = 1; // 0=small, 1=medium, 2=large
     std::vector<EvoSubtitlesTrack> tracks;
 
     bool operator==(const EvoSubtitlesState& o) const {
         return eyebrow == o.eyebrow && title == o.title && size_str == o.size_str &&
-               sync_str == o.sync_str &&
+               sync_str == o.sync_str && sync2_str == o.sync2_str &&
                preview_text == o.preview_text && preview_face == o.preview_face &&
                tracks == o.tracks;
     }

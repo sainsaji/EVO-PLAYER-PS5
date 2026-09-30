@@ -15,6 +15,9 @@
                     <div id="subtitles-sync-pill">
                         <span id="subtitles-sync-label">SYNC: 0 ms</span>
                     </div>
+                    <div id="subtitles-sync2-pill">
+                        <span id="subtitles-sync2-label"></span>
+                    </div>
                     <div id="subtitles-size-pill">
                         <img src="../icons/btn_triangle.png" class="size-glyph"/>
                         <span id="subtitles-size-label">SIZE: MEDIUM</span>
@@ -35,6 +38,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-0" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-0" class="sub-badge badge-hidden"></div>
                     </div>
                 </div>
@@ -50,6 +54,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-1" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-1" class="sub-badge">1001 CUES</div>
                     </div>
                 </div>
@@ -65,6 +70,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-2" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-2" class="sub-badge">EXTERNAL SRT</div>
                     </div>
                 </div>
@@ -80,6 +86,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-3" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-3" class="sub-badge">EMBEDDED</div>
                     </div>
                 </div>
@@ -95,6 +102,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-4" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-4" class="sub-badge badge-hidden"></div>
                     </div>
                 </div>
@@ -110,6 +118,7 @@
                         </div>
                     </div>
                     <div class="sub-right">
+                        <div id="sub-tag-5" class="sub-tag tag-hidden"></div>
                         <div id="sub-detail-5" class="sub-badge badge-hidden"></div>
                     </div>
                 </div>
@@ -119,15 +128,23 @@
             <div id="subtitles-footer">
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
-                    <span class="footer-text">SELECT</span>
+                    <span class="footer-text">PRIMARY</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_square.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">2ND TRACK</span>
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
                     <span class="footer-text">CYCLE SIZE</span>
                 </div>
                 <div class="footer-hint">
-                    <span class="btn-tag">TRACKPAD / &lt; &gt;</span>
-                    <span class="footer-text">SYNC DELAY</span>
+                    <span class="btn-tag">&lt; &gt;</span>
+                    <span class="footer-text">SYNC</span>
+                </div>
+                <div class="footer-hint">
+                    <span class="btn-tag">L1 R1</span>
+                    <span class="footer-text">2ND SYNC</span>
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>

@@ -672,10 +672,16 @@ void *demux_thread_func(void *arg) {
         }
 
         if (
-            pkt->stream_index ==
-            prospero_embedded_subtitle_stream_index
+            prospero_subtitle_wants_stream(
+                pkt->stream_index
+            )
         ) {
-            dbg_sub_demuxed++;
+            if (
+                pkt->stream_index ==
+                prospero_embedded_subtitle_stream_index
+            ) {
+                dbg_sub_demuxed++;
+            }
 
             prospero_embedded_subtitle_decode_packet(
                 pkt

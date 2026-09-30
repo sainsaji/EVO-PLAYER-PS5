@@ -16,6 +16,8 @@ extern "C" {
 #include "evo_boot_trace.h"
 #include "evo_readdir.h"
 #include "evo_favorites.h"
+#include "evo_hls_variants.h"                      /* the stream picker's quality list */
+#include "evo/interfaces/ISettingsService.hpp"
 }
 
 #include <cstdio>
@@ -25,6 +27,8 @@ extern "C" {
 #include <cctype>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <pthread.h>
 
 namespace evo {
@@ -66,16 +70,54 @@ int pickable_count(std::string* only)
  * only the title and identity to build a PlaybackSource, all of which is copied
  * here at activation time.
  */
+/* The stream picker shows its rows in the generic list document, which holds
+ * nine. */
+constexpr int kMaxChoices = EVO_RMLUI_LIST_ROWS;
+
+/* Where a row of the picker came from. */
+enum ChoiceKind {
+    KindListed = 0,     /* the URL the playlist gave                        */
+    KindVariant,        /* a quality variant read from its HLS master       */
+    KindGuess           /* an alternative the provider derived (.ts <-> .m3u8) */
+};
+
 struct PendingPlay {
     char provider[EVO_PROVIDER_MAX_ID];
     char item_id[EVO_PROVIDER_MAX_ITEM_ID];
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
-    evo_stream_choice_t choices[4];
+    evo_stream_choice_t choices[kMaxChoices];
+    int  kind[kMaxChoices];
     int  choice_count;
     int  active_choice;
+    int  ask;           /* the picker is on for this activation              */
+    int  picked;        /* the user chose this stream: no automatic fallback */
 };
 PendingPlay g_pending;
+
+/*
+ * Where the picker is in its life. All of it runs on the main thread - the
+ * resolver and the variants fetch both deliver from evo_net_poll() - so plain
+ * globals are enough; the generation only exists so a reply that lands after the
+ * user has backed out is recognised as stale and dropped.
+ */
+enum class PickStage { Idle, Ready };
+PickStage g_pick_stage = PickStage::Idle;
+unsigned  g_pick_gen = 0;
+
+/*
+ * The quality variants are read while the picker is already on screen: it opens at
+ * once with the rows it knows (the URL as listed, and any guess) and the variants
+ * are inserted when the read lands. Waiting for the read before showing anything
+ * cost the user 8 s of nothing on a host whose first address was dead, and then
+ * showed no qualities at all.
+ */
+enum class VariantsState { None, Reading, Done, Failed };
+VariantsState g_variants = VariantsState::None;
+int       g_variants_added = 0;         /* rows inserted, waiting to be reflected in the cursor */
+bool      g_variants_merged = false;
+std::chrono::steady_clock::time_point g_variants_started;
+constexpr int kVariantsGiveUpMs = 15000; /* stop saying "reading" after this */
 
 /*
  * Set by on_resolved, cleared by update(). The callback must not reach back
@@ -106,40 +148,20 @@ static void* start_playback_worker(void* arg)
     return nullptr;
 }
 
-void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud)
+/* Starts `idx` of the pending list on the playback worker. 0 or a pthread error. */
+int launch_choice(int idx)
 {
-    PendingPlay* pp = (PendingPlay*)ud;
-
-    if (!ok || count <= 0 || !choices) {
-        g_resolve_finished = true;
-        evo_bt("provider: resolve failed for %s/%s", pp->provider, pp->item_id);
-        toast("STREAM", "Failed to resolve channel stream");
-        evo_rmlui_provider_set_tuning(0);
-        evo_rmlui_provider_set_loading(0, "");
-        evo_rmlui_provider_set_status("Failed to resolve stream for channel", 1);
-        return;
-    }
-
-    /*
-     * Best first, by contract. Store alternative choices for automatic fallback
-     * if primary stream fails to open or times out.
-     */
-    pp->choice_count = std::min(count, 4);
-    for (int i = 0; i < pp->choice_count; ++i) {
-        pp->choices[i] = choices[i];
-    }
-    pp->active_choice = 0;
-
-    const evo_stream_choice_t& c = pp->choices[0];
+    g_pending.active_choice = idx;
+    const evo_stream_choice_t& c = g_pending.choices[idx];
 
     PlaybackSource src;
     src.url      = c.url;
-    src.title    = pp->title;
-    src.provider = pp->provider;
-    src.item_id  = pp->item_id;
+    src.title    = g_pending.title;
+    src.provider = g_pending.provider;
+    src.item_id  = g_pending.item_id;
     /* Either side may know it is live: the provider's catalog said so, or the
      * resolved choice did (an HLS playlist with no EXT-X-ENDLIST). */
-    src.is_live  = (pp->is_live || c.is_live) ? true : false;
+    src.is_live  = (g_pending.is_live || c.is_live) ? true : false;
 
     g_start_src = src;
     g_start_done = false;
@@ -160,8 +182,102 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
         evo_rmlui_provider_set_tuning(0);
         evo_rmlui_provider_set_loading(0, "");
         evo_rmlui_provider_set_status("Failed to start playback worker thread", 1);
+    }
+    return rc;
+}
+
+bool choice_is_hls(const evo_stream_choice_t& c)
+{
+    if (!std::strcmp(c.container, "hls")) return true;
+    std::string u(c.url);
+    std::transform(u.begin(), u.end(), u.begin(), [](unsigned char ch) { return std::tolower(ch); });
+    return u.find(".m3u8") != std::string::npos;
+}
+
+/*
+ * The master playlist's variants have come back (or the read failed: count 0).
+ * The list becomes: the URL as listed, then the variants best first, then the
+ * provider's own alternatives, which are guesses.
+ */
+void on_variants(int count, const evo_stream_choice_t* variants, void* ud)
+{
+    if ((unsigned)(uintptr_t)ud != g_pick_gen || g_variants != VariantsState::Reading)
+        return;                                       /* the user has moved on */
+
+    PendingPlay& pp = g_pending;
+    const int before = pp.choice_count;
+    evo_stream_choice_t listed = pp.choices[0];
+    evo_stream_choice_t guesses[kMaxChoices];
+    int ng = 0;
+    for (int i = 1; i < pp.choice_count && ng < kMaxChoices; ++i)
+        guesses[ng++] = pp.choices[i];
+
+    int n = 0;
+    pp.choices[n] = listed;  pp.kind[n++] = KindListed;
+    for (int i = 0; i < count && n < kMaxChoices; ++i) {
+        pp.choices[n] = variants[i];
+        pp.kind[n++] = KindVariant;
+    }
+    for (int i = 0; i < ng && n < kMaxChoices; ++i) {
+        pp.choices[n] = guesses[i];
+        pp.kind[n++] = KindGuess;
+    }
+    pp.choice_count = n;
+    evo_bt("provider: stream picker: %d variant(s) read for %s, %d choice(s) in all",
+           count, pp.title, n);
+
+    /* update() reflects it on screen: the picker is already open, and the rows
+     * after the listed one have just moved down. */
+    g_variants = (count > 0) ? VariantsState::Done : VariantsState::Failed;
+    g_variants_added = n - before;
+    g_variants_merged = true;
+}
+
+void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud)
+{
+    PendingPlay* pp = (PendingPlay*)ud;
+
+    if (!ok || count <= 0 || !choices) {
+        g_resolve_finished = true;
+        evo_bt("provider: resolve failed for %s/%s", pp->provider, pp->item_id);
+        toast("STREAM", "Failed to resolve channel stream");
+        evo_rmlui_provider_set_tuning(0);
+        evo_rmlui_provider_set_loading(0, "");
+        evo_rmlui_provider_set_status("Failed to resolve stream for channel", 1);
         return;
     }
+
+    /*
+     * Best first, by contract. Anything after the first is an alternative the
+     * provider derived: with the picker off it is only ever tried automatically
+     * if the first fails to open; with it on it is listed, and marked a guess.
+     */
+    pp->choice_count = std::min(count, kMaxChoices);
+    for (int i = 0; i < pp->choice_count; ++i) {
+        pp->choices[i] = choices[i];
+        pp->kind[i] = (i == 0) ? KindListed : KindGuess;
+    }
+    pp->active_choice = 0;
+
+    if (pp->ask) {
+        /* An HLS master lists the same channel at several qualities. The list
+         * opens now with what is known and the qualities are added when the read
+         * lands; if the read cannot even be queued the list has fewer rows. */
+        g_variants = VariantsState::None;
+        if (choice_is_hls(pp->choices[0])) {
+            g_variants_started = std::chrono::steady_clock::now();
+            g_variants = (evo_hls_variants_fetch(pp->choices[0].url, on_variants,
+                                                 (void*)(uintptr_t)g_pick_gen) == 0)
+                       ? VariantsState::Reading : VariantsState::Failed;
+        }
+        if (pp->choice_count > 1 || g_variants == VariantsState::Reading) {
+            g_pick_stage = PickStage::Ready;              /* update() opens the picker */
+            return;
+        }
+        /* One stream, nothing behind it, nothing being read: nothing to choose. */
+    }
+
+    launch_choice(0);
 }
 
 } // namespace
@@ -449,6 +565,141 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     evo_rmlui_render_list(framebuffer, width, height);
 }
 
+void ProviderHostScreen::enterStreamPicker()
+{
+    g_pick_stage = PickStage::Idle;
+    m_streamPick = true;
+    m_streamIndex = 0;
+    m_resolving = false;
+    m_tunePending = false;
+    evo_rmlui_provider_set_tuning(0);
+    evo_rmlui_provider_set_loading(0, "");
+    evo_feedback(EVO_FB_OPEN);
+}
+
+void ProviderHostScreen::cancelStreamPicker()
+{
+    m_streamPick = false;
+    g_pick_stage = PickStage::Idle;
+    ++g_pick_gen;
+    g_variants = VariantsState::None;
+    g_variants_merged = false;
+    m_resolving = false;
+}
+
+void ProviderHostScreen::chooseStream(int index)
+{
+    if (index < 0 || index >= g_pending.choice_count) return;
+    if (g_start_running) return;
+
+    evo_feedback(EVO_FB_CONFIRM);
+    g_pending.picked = 1;
+    m_streamPick = false;
+    m_resolving = true;
+
+    /* A quality read still in flight is no longer wanted: drop its reply. */
+    ++g_pick_gen;
+    if (g_variants == VariantsState::Reading) g_variants = VariantsState::None;
+
+    char msg[128];
+    std::snprintf(msg, sizeof(msg), "Opening %s...", g_pending.choices[index].label);
+    toast("LIVE TV", msg);
+    evo_rmlui_provider_set_tuning(1);
+    evo_rmlui_provider_set_loading(1, msg);
+    evo_bt("prov_screen: stream %d chosen for %s: %s", index, g_pending.title,
+           g_pending.choices[index].url);
+
+    if (launch_choice(index) != 0) {
+        m_resolving = false;
+        m_streamPick = true;                 /* it would not start: keep the list */
+    }
+}
+
+void ProviderHostScreen::renderStreamPicker(uint32_t* framebuffer, int width, int height)
+{
+    evo_rmlui_list_params_t params;
+    std::memset(&params, 0, sizeof(params));
+
+    params.section = EVO_SECTION_EMBY;
+    params.rail_focused = 0;
+    params.title = "CHOOSE A STREAM";
+
+    /* Say what the list is waiting for, or why it has no qualities: silence here
+     * looks like the feature does not exist. */
+    static char subtitle[EVO_PROVIDER_MAX_TITLE + 64];
+    const char* note = (g_variants == VariantsState::Reading) ? "reading the available qualities..."
+                     : (g_variants == VariantsState::Failed)  ? "qualities unavailable - the server did not answer"
+                     : nullptr;
+    if (note)
+        std::snprintf(subtitle, sizeof subtitle, "%s  -  %s", g_pending.title, note);
+    else
+        std::snprintf(subtitle, sizeof subtitle, "%s", g_pending.title);
+    params.subtitle = subtitle;
+
+    static char detail[kMaxChoices][192];
+    const int total = g_pending.choice_count;
+    params.total_count = total;
+    params.cursor_index = total ? m_streamIndex : -1;
+    const int rows = std::min(EVO_RMLUI_LIST_ROWS, total);
+    params.row_count = rows;
+
+    for (int i = 0; i < rows; ++i) {
+        const evo_stream_choice_t& c = g_pending.choices[i];
+        const int kind = g_pending.kind[i];
+
+        if (kind == KindListed) {
+            std::snprintf(detail[i], sizeof detail[i], "%s",
+                          choice_is_hls(c) ? "As the playlist lists it - EVO picks the quality"
+                                           : "As the playlist lists it");
+        } else if (kind == KindGuess) {
+            std::snprintf(detail[i], sizeof detail[i], "%s",
+                          "The same address with a different extension - a guess");
+        } else {
+            /* a quality variant: what the master says about it */
+            std::string d;
+            auto add = [&d](const std::string& s) {
+                if (s.empty()) return;
+                if (!d.empty()) d += "  -  ";
+                d += s;
+            };
+            char buf[48];
+            if (c.width > 0 && c.height > 0) {
+                std::snprintf(buf, sizeof buf, "%dx%d", c.width, c.height);
+                add(buf);
+            }
+            auto upper = [](const char* s) {
+                std::string u(s);
+                std::transform(u.begin(), u.end(), u.begin(), [](unsigned char ch) { return std::toupper(ch); });
+                return u;
+            };
+            add(upper(c.video_codec));
+            add(upper(c.audio_codec));
+            if (c.bitrate_bps > 0) {
+                std::snprintf(buf, sizeof buf, "%.1f Mbps", (double)c.bitrate_bps / 1e6);
+                add(buf);
+            }
+            std::snprintf(detail[i], sizeof detail[i], "%s", d.empty() ? "Quality variant" : d.c_str());
+        }
+
+        params.rows[i].title = c.label[0] ? c.label : "Stream";
+        params.rows[i].detail = detail[i];
+        params.rows[i].icon_path = "../icons/icon_tv.png";
+        params.rows[i].badge = kind == KindListed ? "LISTED" : kind == KindGuess ? "GUESS" : "HLS";
+        params.rows[i].progress = -1;
+        params.rows[i].has_chevron = 1;
+        params.rows[i].is_focused = (i == m_streamIndex);
+    }
+
+    params.hint_count = 2;
+    params.hints[0].glyph_path = "../icons/btn_cross.png";
+    params.hints[0].label = "PLAY";
+    params.hints[1].glyph_path = "../icons/btn_circle.png";
+    params.hints[1].label = "BACK";
+
+    evo_rmlui_update_list(&params);
+    evo_rmlui_render_list(framebuffer, width, height);
+}
+
 void ProviderHostScreen::onExit()
 {
     if (g_start_running) {
@@ -465,6 +716,11 @@ void ProviderHostScreen::onExit()
     }
     m_resolving = false;
     m_picking = false;
+    m_streamPick = false;
+    g_pick_stage = PickStage::Idle;
+    ++g_pick_gen;
+    g_variants = VariantsState::None;
+    g_variants_merged = false;
     if (m_web && !evo_webui_session_active()) {
         m_web = false;
         m_webSeen = false;
@@ -477,6 +733,29 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     (void)held;
     (void)released;
 
+    if (m_streamPick) {
+        const int n = g_pending.choice_count;
+        if (pressed & PadButtons::Up) {
+            if (m_streamIndex > 0) { --m_streamIndex; evo_feedback(EVO_FB_MOVE); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            if (m_streamIndex + 1 < n) { ++m_streamIndex; evo_feedback(EVO_FB_MOVE); }
+            else evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            chooseStream(m_streamIndex);
+            return true;
+        }
+        if (pressed & PadButtons::Circle) {
+            evo_feedback(EVO_FB_CANCEL);
+            cancelStreamPicker();
+            return true;
+        }
+        return true;        /* the list has the pad while it is open */
+    }
     if (m_picking) {
         auto psm = Application::getInstance().getScreenManager();
         if (psm && psm->isRailFocused()) return false;
@@ -906,6 +1185,16 @@ void ProviderHostScreen::startSelected()
     g_pending.is_live = sel.is_live;
     g_resolve_finished = false;
 
+    /* Read the setting now, not when the reply lands: what was on when the
+     * channel was opened is what applies to it. */
+    if (auto st = Application::getInstance().getSettingsService())
+        g_pending.ask = st->isAskStreamEnabled() ? 1 : 0;
+    g_pending.picked = 0;
+    g_pick_stage = PickStage::Idle;
+    ++g_pick_gen;
+    g_variants = VariantsState::None;
+    g_variants_merged = false;
+
     m_tunePending = true;
     m_tuneFrames = 0;
 
@@ -963,6 +1252,22 @@ void ProviderHostScreen::update(double deltaMs)
                 sm->navigateTo(ScreenId::Player);
             }
         } else {
+            if (g_pending.picked) {
+                /* The user chose this stream. Nothing else is tried for them:
+                 * say what happened and give the list back. */
+                const evo_stream_choice_t& bad = g_pending.choices[g_pending.active_choice];
+                char msg[128];
+                std::snprintf(msg, sizeof(msg), "%s did not open - pick another", bad.label);
+                toast("STREAM", msg);
+                evo_bt("prov_screen: chosen stream %d failed (%s) - back to the list",
+                       g_pending.active_choice, bad.url);
+                evo_rmlui_provider_set_tuning(0);
+                evo_rmlui_provider_set_loading(0, "");
+                m_resolving = false;
+                m_streamPick = true;
+                m_streamIndex = g_pending.active_choice;
+                return;
+            }
             if (g_pending.active_choice + 1 < g_pending.choice_count) {
                 g_pending.active_choice++;
                 evo_bt("prov_screen: stream choice %d failed, falling back to choice %d: %s",
@@ -974,24 +1279,7 @@ void ProviderHostScreen::update(double deltaMs)
                 toast("STREAM", retry_msg);
                 evo_rmlui_provider_set_status(retry_msg, 0);
 
-                PlaybackSource src;
-                src.url      = g_pending.choices[g_pending.active_choice].url;
-                src.title    = g_pending.title;
-                src.provider = g_pending.provider;
-                src.item_id  = g_pending.item_id;
-                src.is_live  = (g_pending.is_live || g_pending.choices[g_pending.active_choice].is_live) ? true : false;
-
-                g_start_src = src;
-                g_start_done = false;
-                g_start_success = false;
-                g_start_running = true;
-
-                pthread_attr_t attr;
-                pthread_attr_init(&attr);
-                pthread_attr_setstacksize(&attr, 2 * 1024 * 1024);
-                pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-                pthread_create(&g_start_thread, &attr, start_playback_worker, nullptr);
-                pthread_attr_destroy(&attr);
+                launch_choice(g_pending.active_choice);
                 return;
             }
             evo_rmlui_provider_set_tuning(0);
@@ -999,6 +1287,37 @@ void ProviderHostScreen::update(double deltaMs)
             evo_rmlui_provider_set_status("Stream unavailable or connection timed out", 1);
         }
     }
+
+    /* The qualities have landed while the picker is open: the rows after the listed
+     * one just moved down, so the cursor moves with them. */
+    if (g_variants_merged) {
+        g_variants_merged = false;
+        if (m_streamPick && m_streamIndex > 0)
+            m_streamIndex += g_variants_added;
+        g_variants_added = 0;
+    }
+
+    /* The read is bounded in what it claims: after a while the list stops saying
+     * "reading" and a late reply is dropped. */
+    if (g_variants == VariantsState::Reading) {
+        const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - g_variants_started).count();
+        if (waited > kVariantsGiveUpMs) {
+            ++g_pick_gen;
+            g_variants = VariantsState::Failed;
+            evo_bt("provider: stream picker: the master did not answer in %d ms", kVariantsGiveUpMs);
+        }
+    }
+
+    /* One row and no qualities coming is not a choice: play it. (Once - if the
+     * user's own pick fails the list returns and stays.) */
+    if (m_streamPick && g_variants == VariantsState::Failed && g_pending.choice_count == 1 &&
+        !g_pending.picked && !g_start_running) {
+        chooseStream(0);
+    }
+
+    if (g_pick_stage == PickStage::Ready && !m_streamPick)
+        enterStreamPicker();
 
     /*
      * Take the activated item here rather than inside the Rml event handler
@@ -1019,6 +1338,10 @@ void ProviderHostScreen::update(double deltaMs)
 
 void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
 {
+    if (m_streamPick) {
+        renderStreamPicker(framebuffer, width, height);
+        return;
+    }
     if (m_picking || m_web) {
         renderPicker(framebuffer, width, height);
         return;

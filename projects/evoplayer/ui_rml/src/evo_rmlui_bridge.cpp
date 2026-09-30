@@ -321,6 +321,9 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.subtitle_text = p->subtitle_text ? p->subtitle_text : "";
     state.subtitle_face = p->subtitle_face;
     state.subtitle_raised = (p->subtitle_raised != 0);
+    state.subtitle2_text = p->subtitle_text2 ? p->subtitle_text2 : "";
+    state.subtitle2_position = p->subtitle2_position;
+    state.subtitle2_color = p->subtitle2_color;
     state.chrome_hidden = (p->chrome_hidden != 0);
     state.fps = p->fps;
     state.debug_overlay = (p->debug_overlay != 0);
@@ -460,6 +463,7 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     state.title = p->title ? p->title : "SELECT SUBTITLE TRACK";
     state.size_str = p->size_str ? p->size_str : "MEDIUM";
     state.sync_str = p->sync_str ? p->sync_str : "";
+    state.sync2_str = p->sync2_str ? p->sync2_str : "";
     state.preview_text = p->preview_text ? p->preview_text : "";
     state.preview_face = p->preview_face;
 
@@ -471,6 +475,7 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
         trk.is_focused = (p->tracks[i].is_focused != 0);
         trk.is_action = (p->tracks[i].is_action != 0);
         trk.is_disabled = (p->tracks[i].is_disabled != 0);
+        trk.tag = p->tracks[i].tag ? p->tracks[i].tag : "";
         state.tracks.push_back(trk);
     }
 

@@ -147,6 +147,34 @@ public:
      * running session, which is also why this is a picker and not a cycle.
      */
     virtual bool switchAudioTrack(int streamIndex) = 0;
+
+    /* --- video quality ------------------------------------------------ */
+    /*
+     * An HLS master exposes every quality variant as its own video stream, and
+     * EVO opens the best by default. These list the ones the open stream has and
+     * let the user pin another. A file with a single video stream has one entry
+     * and nothing to choose.
+     */
+    struct VideoVariantInfo {
+        int         streamIndex = -1;
+        int         width = 0;
+        int         height = 0;
+        int64_t     bitrate = 0;      /* bits/s, 0 if the stream does not say */
+        double      fps = 0.0;        /* 0 if unknown */
+        std::string codecName;
+    };
+
+    /* Every video stream with a usable size, best first. */
+    virtual std::vector<VideoVariantInfo> getVideoVariants() const = 0;
+    virtual int  getActiveVideoStream() const = 0;
+    /* True when the user has pinned a variant (false: EVO picks the best). */
+    virtual bool isVideoQualityPinned() const = 0;
+    /*
+     * Pin variant `streamIndex`, or pass -1 to go back to EVO's own choice (the
+     * best). Re-opens the stream at the current position, as switchAudioTrack
+     * does, and keeps the title, provider identity and live flag.
+     */
+    virtual bool switchVideoVariant(int streamIndex) = 0;
 };
 
 } // namespace evo

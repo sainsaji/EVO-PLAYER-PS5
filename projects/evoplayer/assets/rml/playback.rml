@@ -21,7 +21,13 @@
 
     <!-- On-video caption overlay (#81) — RmlUi/Unicode, replaces the ASCII bitmap path -->
     <div id="subtitle-layer">
-        <div id="subtitle-box" class="sub-medium"></div>
+        <!-- #110: the secondary caption stacks directly above the primary -->
+        <div class="sub-line"><div id="subtitle-box-secondary" class="sub2 sub2-medium sub2-yellow"></div></div>
+        <div class="sub-line"><div id="subtitle-box" class="sub-medium"></div></div>
+    </div>
+    <!-- #110: or, by setting, the secondary sits alone at the top of the screen -->
+    <div id="subtitle-layer-top">
+        <div id="subtitle-box-top" class="sub2 sub2-medium sub2-yellow"></div>
     </div>
 
     <!-- Music "NOW PLAYING" visualiser (#81) — shown for audio-only playback,

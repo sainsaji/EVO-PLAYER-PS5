@@ -55,6 +55,21 @@ void evo_stream_io_set_deadline(evo_stream_io_ctx_t *io_ctx, double seconds);
 int evo_stream_io_deadline_expired(const evo_stream_io_ctx_t *io_ctx);
 
 /**
+ * Does this URL name an HLS or DASH playlist / manifest (".m3u8", ".mpd",
+ * ".ism/")? Judged from the text, case-insensitively, query string included -
+ * the format is not known until the open has happened.
+ */
+int evo_stream_io_url_is_playlist(const char *url);
+
+/**
+ * The FFmpeg options a network open gets: bounded reconnects, 5 s timeouts, the
+ * HLS segment allowlist widened - and reconnect_at_eof for a raw stream but NOT
+ * for a playlist, where it turns every small playlist into a reconnect loop
+ * (see the .c). Public so the policy can be tested without a network.
+ */
+void evo_stream_io_apply_network_options(AVDictionary **opts, const char *url);
+
+/**
  * Open a media stream with High-Throughput I/O ring buffering and direct memory.
  * Sets up custom AVIOContext with sequential kernel readahead and enlarged buffer.
  *

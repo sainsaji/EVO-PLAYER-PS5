@@ -34,6 +34,18 @@ extern void pp_stage_bc(const char *stage_id, const char *detail);
  */
 #define EVO_STREAM_IO_OPEN_DEADLINE_SEC 20.0
 
+/*
+ * ...but a raw network stream (not a playlist) gets less. Hardware, 2026-09-30: a live channel whose
+ * server answered every request with the same 1665 bytes and then closed the
+ * connection sat in FFmpeg's reconnect loop until this deadline - 20 s of a
+ * spinner for a channel that was never going to play. Each reconnect there
+ * succeeded (it got its 1665 bytes), so no retry limit inside FFmpeg ever trips;
+ * only a wall clock bounds it. A healthy IPTV open (DNS, TLS, two playlists) is
+ * about three seconds, so twelve is generous and still ends a dead channel in
+ * a fraction of the time.
+ */
+#define EVO_STREAM_IO_NET_OPEN_DEADLINE_SEC 12.0
+
 struct evo_stream_io_ctx {
     int     is_network;
     char    media_path[512];
@@ -163,6 +175,105 @@ static int raw_av1_rate_from_name(const char *path, char *out, size_t out_len)
     return 0;
 }
 
+/* Case-insensitive substring search. (libc's strcasestr is one of the calls the
+ * native-app libc leaves as a NULL import, so it is not used.) */
+static int sio_contains_ci(const char *hay, const char *needle)
+{
+    const size_t n = strlen(needle);
+    if (n == 0) return 1;
+    for (; *hay; hay++) {
+        if (strncasecmp(hay, needle, n) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int evo_stream_io_url_is_playlist(const char *url)
+{
+    if (!url) return 0;
+    return sio_contains_ci(url, ".m3u8") || sio_contains_ci(url, ".mpd") ||
+           sio_contains_ci(url, ".ism/");
+}
+
+void evo_stream_io_apply_network_options(AVDictionary **opts, const char *url)
+{
+    av_dict_set(opts, "reconnect", "1", 0);
+    av_dict_set(opts, "reconnect_streamed", "1", 0);
+    av_dict_set(opts, "reconnect_on_network_error", "1", 0);
+    av_dict_set(opts, "reconnect_delay_max", "2", 0);
+    av_dict_set(opts, "rw_timeout", "5000000", 0);
+    av_dict_set(opts, "timeout", "5000000", 0);
+
+    /*
+     * Bounded retries. FFmpeg's default is to keep going for 256 s. These cap
+     * one failing read at three reconnects and six seconds of waiting; the
+     * network open deadline above caps the case they cannot (every reconnect
+     * succeeds, and gets the same data again).
+     */
+    av_dict_set(opts, "reconnect_max_retries", "3", 0);
+    av_dict_set(opts, "reconnect_delay_total_max", "6", 0);
+
+    /*
+     * Reconnect at EOF only for a raw stream.
+     *
+     * For a live MPEG-TS over HTTP an EOF is a dropped connection, and
+     * reconnecting is right. For an HLS or DASH playlist it is the end of a
+     * small file that the server never said the length of: the http layer
+     * "reconnects", fetches the same bytes again, hits EOF again, and repeats
+     * with a growing delay - a full request and TLS handshake each time, on
+     * every playlist the demuxer reads. libavformat's hls demuxer hands these
+     * options to every playlist and segment it opens. Hardware, 2026-09-30, from
+     * the log:
+     *
+     *   Will reconnect at 182 in 0 second(s), error=End of file.   (x6, 2 s)
+     *   ... open took 10.8 s   (a 182-byte master playlist)
+     *   Will reconnect at 1023 in 0 second(s), error=End of file.  (x18, 18 s)
+     *   ... open took 21.4 s and delivered no packets
+     *
+     * The hls demuxer already reloads a playlist and retries a segment itself.
+     */
+    if (!evo_stream_io_url_is_playlist(url))
+        av_dict_set(opts, "reconnect_at_eof", "1", 0);
+
+    /*
+     * HLS: accept every segment URL the playlist names.
+     *
+     * libavformat's hls demuxer refuses a segment whose URL does not end
+     * in an extension on its allowlist, and the default list is short.
+     * Plenty of live CDNs serve segments from extensionless, signed or
+     * query-string URLs, and the refusal is not survivable: the segment
+     * fetch fails, the media playlist behind it fails to parse, and the
+     * open completes with nb_streams=0 - a channel that sits on a black
+     * screen with no error. Hardware, 2026-09-28:
+     *
+     *   URL .../v1/segment/<token>/0/186944902 is not in allowed_extensions
+     *   parse_playlist error Invalid data found when processing input
+     *   P8_02b_FIND_INFO_RC rc=0 timeout=0 nb_streams=0
+     *
+     * The allowlist is a guard against a playlist naming a local path; a
+     * media player asked to open a URL the user chose has already made
+     * that decision, and every other player ships with this widened.
+     */
+    av_dict_set(opts, "allowed_extensions", "ALL", 0);
+
+    /*
+     * ...and stop checking the segment's extension against its detected format.
+     *
+     * "ALL" clears only the first of two gates in hls.c's test_segment(). The
+     * second - `extension_picky`, on by default - compares the URL's extension
+     * with what the segment turned out to be, and an extensionless URL has none
+     * to compare, so a segment that is plainly MPEG-TS is refused anyway:
+     *
+     *   detected format mpegts extension none mismatches allowed extensions in
+     *   url https://.../v1/segment/<token>/3/186971110
+     *   Error when loading first segment ...
+     *
+     * Hardware, 2026-09-30: an Akamai channel whose variant playlist opened with
+     * AVERROR_INVALIDDATA after 8 s. Same class of channel as the one above.
+     */
+    av_dict_set(opts, "extension_picky", "0", 0);
+}
+
 int evo_stream_io_open(const char *path,
                        AVFormatContext **out_fmt_ctx,
                        const evo_stream_io_config_t *cfg,
@@ -203,34 +314,7 @@ int evo_stream_io_open(const char *path,
     av_dict_set(&opts, "buffer_size", buf_size_str, 0);
 
     if (ctx->is_network) {
-        av_dict_set(&opts, "reconnect", "1", 0);
-        av_dict_set(&opts, "reconnect_streamed", "1", 0);
-        av_dict_set(&opts, "reconnect_at_eof", "1", 0);
-        av_dict_set(&opts, "reconnect_on_network_error", "1", 0);
-        av_dict_set(&opts, "reconnect_delay_max", "2", 0);
-        av_dict_set(&opts, "rw_timeout", "5000000", 0);
-        av_dict_set(&opts, "timeout", "5000000", 0);
-
-        /*
-         * HLS: accept every segment URL the playlist names.
-         *
-         * libavformat's hls demuxer refuses a segment whose URL does not end
-         * in an extension on its allowlist, and the default list is short.
-         * Plenty of live CDNs serve segments from extensionless, signed or
-         * query-string URLs, and the refusal is not survivable: the segment
-         * fetch fails, the media playlist behind it fails to parse, and the
-         * open completes with nb_streams=0 - a channel that sits on a black
-         * screen with no error. Hardware, 2026-09-28:
-         *
-         *   URL .../v1/segment/<token>/0/186944902 is not in allowed_extensions
-         *   parse_playlist error Invalid data found when processing input
-         *   P8_02b_FIND_INFO_RC rc=0 timeout=0 nb_streams=0
-         *
-         * The allowlist is a guard against a playlist naming a local path; a
-         * media player asked to open a URL the user chose has already made
-         * that decision, and every other player ships with this widened.
-         */
-        av_dict_set(&opts, "allowed_extensions", "ALL", 0);
+        evo_stream_io_apply_network_options(&opts, path);
     } else {
         /* Prime the kernel storage controller for sequential read-ahead */
         SIO_BC("P8_01c_PREFETCH", "open+fadvise");
@@ -266,7 +350,14 @@ int evo_stream_io_open(const char *path,
     }
     fmt->interrupt_callback.callback = sio_interrupt_cb;
     fmt->interrupt_callback.opaque   = ctx;
-    evo_stream_io_set_deadline(ctx, EVO_STREAM_IO_OPEN_DEADLINE_SEC);
+    /* A playlist open is genuinely longer - the master, a variant, and the first
+     * segment all load before it returns - and a slow origin can spend ten seconds
+     * on them. It keeps the full budget; the reconnect loop that used to burn it
+     * is gone (see evo_stream_io_apply_network_options). Only a raw stream, whose
+     * failure mode is looping on the same few bytes, gets the short one. */
+    evo_stream_io_set_deadline(ctx, (ctx->is_network && !evo_stream_io_url_is_playlist(path))
+                                        ? EVO_STREAM_IO_NET_OPEN_DEADLINE_SEC
+                                        : EVO_STREAM_IO_OPEN_DEADLINE_SEC);
 
     int rc = avformat_open_input(&fmt, path, NULL, &opts);
     /* avformat_open_input frees and NULLs *fmt on failure, including on an

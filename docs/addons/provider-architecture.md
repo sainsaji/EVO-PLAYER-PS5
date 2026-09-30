@@ -441,6 +441,64 @@ evo_stream_io.c`), which is where `reconnect`, `reconnect_streamed` and
 `timeout` live. It had no callers at all before #90 — every open went straight
 to `avformat_open_input`, so none of those options had ever been applied.
 
+### The stream picker
+
+A channel resolves to a list of `evo_stream_choice_t`: the URL the playlist gave,
+and, for a `.m3u8` or `.ts` address, the same address with the other extension
+(a guess, derived in `provider_iptv.c`). Left to itself EVO plays the first and,
+if it does not open, tries the next.
+
+With **Settings → Playback & Video → ASK WHICH LIVE STREAM** on (the default),
+`ProviderHostScreen` does not decide. After the channel resolves it reads the
+HLS master playlist behind the listed URL (`evo_hls_variants_fetch`, an async GET
+through `evo_net`, bounded to 8 s) and opens a list:
+
+| Row | Where it comes from | Badge |
+|---|---|---|
+| the URL as listed | the provider's first choice | `LISTED` |
+| each quality variant, best first, up to six | `#EXT-X-STREAM-INF`: resolution, bitrate, codecs | `HLS` |
+| the `.ts` / `.m3u8` swap | the provider's other choices | `GUESS` |
+
+EVO plays only the row chosen. If it does not open, the toast says so and the
+list comes back with the cursor on it; nothing else is tried behind the user's
+back. A channel with one stream and nothing behind it (no HLS master, no
+alternative) has nothing to choose, so it plays directly. With the setting off
+none of this runs and a channel behaves as it always did, automatic fallback
+included.
+
+The choice is read when the channel is opened, not when the reply lands. The
+list is the generic list document, so it needs no markup of its own; the rows
+are filled by `ProviderHostScreen::renderStreamPicker`. The parser and the
+relative-URL join in `evo_hls_variants.c` are pure and are tested on the host by
+`tools/hls_host.sh`.
+
+The list opens **at once** with the rows it already knows (the listed URL and any
+guess), and says "reading the available qualities…" in its subtitle; the variants
+are inserted when the read lands, and the cursor moves with the rows. If the read
+fails (an HTTP 403 on a signed channel, a timeout) the subtitle says "qualities
+unavailable" and the list keeps the listed URL and the guess. `evo_net` does not
+send per-stream headers (#92), so a server that refuses an unknown User-Agent
+refuses this read too.
+
+### Quality inside the player
+
+The picker above depends on one fetch succeeding, so the player has a second,
+independent way to choose: **R2 → QUALITY & AUDIO**. When the open stream has more
+than one video variant (an HLS master exposes each as its own video stream) the
+list starts with an AUTO row and one row per variant, best first, with resolution,
+codec, bitrate and frame rate, then the audio tracks. The variants come from the
+stream itself once it is open, so nothing has to be fetched. Choosing one
+re-opens the stream at the current position (`switchVideoVariant`, as
+`switchAudioTrack` does for audio) with that video stream pinned; the audio comes
+from the same variant's program, so the two stay one encode. AUTO drops the pin.
+The pin belongs to the URL it was made on and outlives an audio switch, but not a
+different channel. The control hint beside R2 shows the playing quality
+(`720p`, or `720p AUTO`).
+
+A reopen keeps the provider's title, identity and live flag. It used to rebuild a
+bare-URL source, so an audio switch (and `replay()`) on a provider stream dropped
+the title back to the URL - the #9 defect again.
+
 ---
 
 ## 9. Service protocol notes

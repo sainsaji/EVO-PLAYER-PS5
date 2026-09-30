@@ -71,6 +71,11 @@ public:
     int  getActiveAudioStream() const override;
     bool switchAudioTrack(int streamIndex) override;
 
+    std::vector<VideoVariantInfo> getVideoVariants() const override;
+    int  getActiveVideoStream() const override;
+    bool isVideoQualityPinned() const override;
+    bool switchVideoVariant(int streamIndex) override;
+
 private:
     void initStateMachine();
     void applyViewMode();
@@ -104,6 +109,14 @@ private:
     /* Stream the next open() should pick, or -1 for "first decodable". Set
      * only across a switchAudioTrack() reopen and cleared by startPlayback. */
     int m_requestedAudioStream = -1;
+
+    /* The video quality the user pinned in the Quality & Audio picker, and the
+     * URL it was pinned for. Unlike m_requestedAudioStream this outlives one
+     * open: a reopen for an audio switch keeps the quality. It is dropped when a
+     * different source starts, because stream numbers mean nothing across
+     * sources. -1 means EVO picks the best. */
+    int m_pinnedVideoStream = -1;
+    std::string m_pinnedVideoFor;
 };
 
 } // namespace evo

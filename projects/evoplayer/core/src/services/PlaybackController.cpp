@@ -90,6 +90,7 @@ int sceAudioOutClose(int handle);
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <cstdlib>
 
 // Global playback instance
 extern pp_playback g_pp_pb;
@@ -492,6 +493,12 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
 
     stopPlayback();
 
+    /* A pinned quality belongs to the source it was pinned on. */
+    if (m_pinnedVideoFor != filePath) {
+        m_pinnedVideoStream = -1;
+        m_pinnedVideoFor.clear();
+    }
+
     m_playbackFsm.postEvent(PlaybackEvent::Open);
     m_source = source;
     m_currentFilePath = filePath;
@@ -573,7 +580,19 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
      * can time out and report success. Both cases leave the demuxer parked
      * wherever the scan stopped, and both need the rewind below.
      */
-    if (find_rc < 0 || probe_timed_out) {
+    /*
+     * An open can succeed and still hold nothing. An HLS playlist whose variant
+     * playlists the CDN refuses (HTTP 403, a signed link that is not ours, a
+     * geo-block) opens with rc=0 - the master playlist itself was fine - and
+     * nb_streams=0. Nothing then decodes, no frame ever arrives, and the player
+     * sat on its buffering screen until the user backed out: hardware,
+     * 2026-09-30, 110 s of video_frames=0 on a channel that could never play.
+     * It is a failure like any other, so it takes the failure path below, which
+     * also lets the provider try the stream's next choice.
+     */
+    const bool no_streams = play_fmt && play_fmt->nb_streams == 0;
+
+    if (find_rc < 0 || probe_timed_out || no_streams) {
         /*
          * Usable means: a stream we can hand to a decoder as-is. Geometry and
          * codec id come from the header, so this is satisfied for MKV/MP4 even
@@ -606,6 +625,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
             m_streamIo = nullptr;
             m_playbackFsm.postEvent(PlaybackEvent::Fail);
             toast("STREAM FAIL", probe_timed_out ? "Timed out reading this file"
+                                 : no_streams    ? "The server sent no playable stream"
                                                  : "Could not find streams");
             return false;
         }
@@ -668,7 +688,29 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         long long best_pixels  = 0;
         int64_t   best_bitrate = -1;
 
+        /*
+         * A quality the user pinned wins over the automatic choice, provided it
+         * is still a video stream with a size in this open. The audio below
+         * follows the program of whatever video is chosen here, so pinning 720p
+         * gets the 720p variant's own audio.
+         */
+        bool pinned = false;
+        if (m_pinnedVideoStream >= 0 && m_pinnedVideoFor == filePath &&
+            m_pinnedVideoStream < static_cast<int>(play_fmt->nb_streams)) {
+            const AVStream* ps = play_fmt->streams[m_pinnedVideoStream];
+            if (ps && ps->codecpar && ps->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
+                videoStreamPixels(ps) > 0) {
+                video_stream_index = m_pinnedVideoStream;
+                pinned = true;
+                evo_bt("PlaybackController: quality pinned to video stream %d", video_stream_index);
+            } else {
+                evo_bt("PlaybackController: pinned video stream %d is not usable here - "
+                       "choosing the best", m_pinnedVideoStream);
+            }
+        }
+
         for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+            if (pinned) break;
             const AVStream* st = play_fmt->streams[i];
             const long long pixels = videoStreamPixels(st);
             if (pixels <= 0) continue;
@@ -1090,6 +1132,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     prospero_subtitle_clear();
     prospero_subtitle_load_for_media(filePath.c_str());
     prospero_embedded_subtitle_open(play_fmt);
+    prospero_secondary_subtitle_open(play_fmt);   // #110: only if one was chosen for this file
 
     /*
      * Apply the resume position. This has to be a real seek on play_fmt before
@@ -1614,6 +1657,13 @@ bool PlaybackController::switchAudioTrack(int streamIndex) {
     double resumeAt = getPositionSeconds();
     bool wasPaused = isPaused();
 
+    /* The whole source, not just its URL: reopening through startPlayback(path)
+     * builds a bare-URL source, so a provider stream lost its title, identity and
+     * live flag on every audio switch (the OSD fell back to the URL - the #9
+     * defect again). */
+    PlaybackSource savedSource = m_source;
+    if (savedSource.url.empty()) savedSource.url = path;
+
     // Preserve subtitle state across audio reopen
     int savedSubEnabled = prospero_subtitle_enabled;
     int savedSubUseExt = prospero_subtitle_use_external;
@@ -1624,7 +1674,7 @@ bool PlaybackController::switchAudioTrack(int streamIndex) {
         prospero_subtitle_requested_stream = savedSubStream;
     }
 
-    if (!startPlayback(path, resumeAt)) {
+    if (!startPlaybackSource(savedSource, resumeAt)) {
         m_requestedAudioStream = -1;
         prospero_subtitle_requested_stream = -2;
         return false;
@@ -1642,9 +1692,111 @@ bool PlaybackController::switchAudioTrack(int streamIndex) {
     return true;
 }
 
+std::vector<PlaybackController::VideoVariantInfo>
+PlaybackController::getVideoVariants() const {
+    std::vector<VideoVariantInfo> out;
+    if (!play_fmt) return out;
+
+    for (unsigned int i = 0; i < play_fmt->nb_streams; ++i) {
+        const AVStream* st = play_fmt->streams[i];
+        if (!st || !st->codecpar || st->codecpar->codec_type != AVMEDIA_TYPE_VIDEO)
+            continue;
+        if (videoStreamPixels(st) <= 0) continue;      /* no size: not selectable */
+
+        VideoVariantInfo v;
+        v.streamIndex = static_cast<int>(i);
+        v.width  = st->codecpar->width;
+        v.height = st->codecpar->height;
+        v.bitrate = st->codecpar->bit_rate;
+        if (v.bitrate <= 0) {
+            /* An HLS variant states its bandwidth on its program, not its stream. */
+            const int prog = programOfStream(play_fmt, static_cast<int>(i));
+            if (prog >= 0) {
+                const AVDictionaryEntry* e =
+                    av_dict_get(play_fmt->programs[prog]->metadata, "variant_bitrate", nullptr, 0);
+                if (e && e->value) v.bitrate = std::strtoll(e->value, nullptr, 10);
+            }
+        }
+        const AVRational fr = av_guess_frame_rate(play_fmt, const_cast<AVStream*>(st), nullptr);
+        if (fr.num > 0 && fr.den > 0)
+            v.fps = static_cast<double>(fr.num) / static_cast<double>(fr.den);
+        const char* cn = avcodec_get_name(st->codecpar->codec_id);
+        v.codecName = cn ? cn : "unknown";
+        out.push_back(std::move(v));
+    }
+
+    /* Best first: taller, then faster. */
+    std::stable_sort(out.begin(), out.end(), [](const VideoVariantInfo& a, const VideoVariantInfo& b) {
+        if (a.height != b.height) return a.height > b.height;
+        return a.bitrate > b.bitrate;
+    });
+    return out;
+}
+
+int PlaybackController::getActiveVideoStream() const {
+    return video_stream_index;
+}
+
+bool PlaybackController::isVideoQualityPinned() const {
+    return m_pinnedVideoStream >= 0 && !m_currentFilePath.empty() &&
+           m_pinnedVideoFor == m_currentFilePath;
+}
+
+bool PlaybackController::switchVideoVariant(int streamIndex) {
+    if (m_currentFilePath.empty()) return false;
+
+    /* Nothing to do: already on it, or already automatic. */
+    if (streamIndex >= 0 && isVideoQualityPinned() && streamIndex == m_pinnedVideoStream)
+        return true;
+    if (streamIndex < 0 && !isVideoQualityPinned())
+        return true;
+
+    /* The whole source, so the title, provider identity and live flag survive. */
+    PlaybackSource src = m_source;
+    if (src.url.empty()) src.url = m_currentFilePath;
+
+    const double resumeAt = getPositionSeconds();
+    const bool wasPaused = isPaused();
+
+    /* The subtitle choice rides across the reopen exactly as it does for an
+     * audio switch. */
+    const int savedSubEnabled = prospero_subtitle_enabled;
+    const int savedSubUseExt = prospero_subtitle_use_external;
+    const int savedSubStream = prospero_embedded_subtitle_stream_index;
+    if (!savedSubUseExt && savedSubStream >= 0)
+        prospero_subtitle_requested_stream = savedSubStream;
+
+    const int oldPin = m_pinnedVideoStream;
+    const std::string oldPinFor = m_pinnedVideoFor;
+    m_pinnedVideoStream = streamIndex;
+    m_pinnedVideoFor = streamIndex >= 0 ? src.url : std::string();
+
+    evo_bt("PlaybackController: switching video quality -> %s%d (at %.1f s)",
+           streamIndex >= 0 ? "stream " : "auto ", streamIndex, resumeAt);
+
+    if (!startPlaybackSource(src, resumeAt)) {
+        m_pinnedVideoStream = oldPin;
+        m_pinnedVideoFor = oldPinFor;
+        prospero_subtitle_requested_stream = -2;
+        return false;
+    }
+
+    prospero_subtitle_enabled = savedSubEnabled;
+    prospero_subtitle_use_external = savedSubUseExt;
+    if (!savedSubUseExt && savedSubStream >= 0)
+        prospero_embedded_subtitle_stream_index = savedSubStream;
+    prospero_subtitle_requested_stream = -2;
+
+    if (wasPaused) setPaused(true);
+    return true;
+}
+
 bool PlaybackController::replay() {
     if (m_currentFilePath.empty()) return false;
-    return startPlayback(m_currentFilePath, 0.0);
+    /* The whole source (see switchAudioTrack), not a bare URL. */
+    PlaybackSource src = m_source;
+    if (src.url.empty()) src.url = m_currentFilePath;
+    return startPlaybackSource(src, 0.0);
 }
 
 } // namespace evo

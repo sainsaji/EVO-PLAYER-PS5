@@ -134,6 +134,7 @@ ADDON_SRCS := \
     addons/src/addon_emby.c \
     addons/src/evo_provider_mgr.c \
     addons/src/evo_provider_bundle.c \
+    addons/src/evo_hls_variants.c \
     addons/src/provider_iptv.c \
     addons/src/provider_xtream.c \
     addons/src/provider_emby.c \

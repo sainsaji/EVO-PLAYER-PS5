@@ -101,6 +101,25 @@ div, span, p {
     letter-spacing: 0.5dp;
 }
 
+/* #110: the secondary track's own sync, shown only while one is active. */
+#subtitles-sync2-pill {
+    display: none;
+    background-color: #131d2e;
+    border-width: 1dp;
+    border-color: #243550;
+    border-radius: 20dp;
+    padding: 8dp 16dp;
+    flex-direction: row;
+    align-items: center;
+}
+
+#subtitles-sync2-label {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #ffe27a;
+    letter-spacing: 0.5dp;
+}
+
 #subtitles-size-pill {
     background-color: #131d2e;
     border-width: 1dp;
@@ -233,6 +252,34 @@ div, span, p {
     display: none;
 }
 
+/* Which line of dialogue a track is (#110). Amber for the secondary matches
+ * the caption's default colour; the primary keeps the theme's cyan. */
+.sub-tag {
+    border-width: 1dp;
+    border-radius: 8dp;
+    padding: 3dp 9dp;
+    margin-right: 8dp;
+    font-size: 11dp;
+    font-weight: bold;
+    letter-spacing: 0.8dp;
+}
+
+.sub-tag.tag-primary {
+    color: #38bdf8;
+    border-color: #38bdf8;
+    background-color: #0b2a44;
+}
+
+.sub-tag.tag-secondary {
+    color: #ffe27a;
+    border-color: #ffe27a;
+    background-color: #3a3208;
+}
+
+.tag-hidden {
+    display: none;
+}
+
 /* AUTO-SYNC (#102) is an action, not a track: keep the check's space so the
  * titles still line up, but draw nothing in it. */
 .row-action .sub-check-box {
@@ -252,7 +299,7 @@ div, span, p {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 28dp;
+    gap: 22dp;
     margin-top: 20dp;
 }
 

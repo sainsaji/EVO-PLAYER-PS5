@@ -104,6 +104,12 @@ bool PlayerScreen::hasActiveOverlay() const {
                 prospero_embedded_subtitle_text_at(subPos, activeSubText, sizeof(activeSubText));
                 if (activeSubText[0]) return true;
             }
+
+            // #110: a caption in the secondary line is an overlay too.
+            char secondarySubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
+            prospero_secondary_subtitle_text_at(subtitleClockSeconds(), secondarySubText,
+                                                sizeof(secondarySubText));
+            if (secondarySubText[0]) return true;
         }
     }
     return false;
@@ -333,10 +339,12 @@ void PlayerScreen::feedPerformanceHud() {
                   vcodec, vw, vh, evo_pb_video_fps(), backend);
     std::snprintf(l_audio, sizeof(l_audio), "AUDIO  %s  %s  %dch  %d Hz",
                   acodec, alang, ach, arate);
-    std::snprintf(l_subs, sizeof(l_subs), "SUBS  %s  /  %s",
+    std::snprintf(l_subs, sizeof(l_subs), "SUBS  %s  /  %s%s",
                   prospero_subtitle_enabled ? "ON" : "OFF",
                   prospero_subtitle_use_external ? "EXTERNAL"
-                      : (prospero_embedded_subtitle_stream_index >= 0 ? "EMBEDDED" : "NONE"));
+                      : (prospero_embedded_subtitle_stream_index >= 0 ? "EMBEDDED" : "NONE"),
+                  (prospero_subtitle_enabled && prospero_secondary_subtitle_active())
+                      ? "  +  2ND TRACK" : "");
     std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps  /  UPSCALER %s  /  %s",
                   perf_render_fps, perf_decode_fps, evo_agc_upscale_label(),
                   evo_hw_model_name());
@@ -415,6 +423,13 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         } else {
             prospero_embedded_subtitle_text_at(subPos, activeSubText, sizeof(activeSubText));
         }
+    }
+
+    // #110: the secondary line of dialogue, with its own delay applied.
+    char secondarySubText[PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE] = {0};
+    if (prospero_subtitle_enabled && !playback->isMusicMode()) {
+        prospero_secondary_subtitle_text_at(subtitleClockSeconds(), secondarySubText,
+                                            sizeof(secondarySubText));
     }
 
     if (m_osdVisibilityAlpha > 0 && evo_rmlui_is_initialized()) {
@@ -526,6 +541,39 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
             }
         }
 
+        // #110: name the secondary track next to the primary's.
+        if (prospero_subtitle_enabled && prospero_secondary_subtitle_active()) {
+            const char* second = "SRT";
+            if (!prospero_secondary_use_external && play_fmt &&
+                prospero_secondary_subtitle_stream_index >= 0 &&
+                prospero_secondary_subtitle_stream_index < static_cast<int>(play_fmt->nb_streams)) {
+                AVStream* s2 = play_fmt->streams[prospero_secondary_subtitle_stream_index];
+                const AVDictionaryEntry* l2 =
+                    s2 ? av_dict_get(s2->metadata, "language", nullptr, 0) : nullptr;
+                second = (l2 && l2->value && l2->value[0]) ? l2->value : "2nd";
+            }
+            const size_t used = std::strlen(subTrackBuf);
+            std::snprintf(subTrackBuf + used, sizeof(subTrackBuf) - used,
+                          used ? " + %s" : "+ %s", second);
+        }
+
+        // A stream with several video qualities (an HLS master): show the one
+        // playing beside the audio, so R2 (Quality & Audio) is discoverable.
+        {
+            const auto variants = playback->getVideoVariants();
+            if (variants.size() > 1) {
+                const int activeVideo = playback->getActiveVideoStream();
+                for (const auto& v : variants) {
+                    if (v.streamIndex != activeVideo) continue;
+                    const size_t used = std::strlen(audioTrackBuf);
+                    std::snprintf(audioTrackBuf + used, sizeof(audioTrackBuf) - used,
+                                  used ? "  -  %dp%s" : "%dp%s", v.height,
+                                  playback->isVideoQualityPinned() ? "" : " AUTO");
+                    break;
+                }
+            }
+        }
+
         p.audio_track = audioTrackBuf[0] ? audioTrackBuf : "";
         p.sub_track   = subTrackBuf[0]   ? subTrackBuf   : "";
         p.sub_delay_ms = prospero_subtitle_enabled ? prospero_subtitle_delay_ms : 0;
@@ -565,6 +613,9 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_text = activeSubText[0] ? activeSubText : nullptr;
         p.subtitle_face = prospero_subtitle_face;
         p.subtitle_raised = 1;
+        p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
+        p.subtitle2_position = prospero_secondary_position;
+        p.subtitle2_color = prospero_secondary_color;
         p.chrome_hidden = 0;
         p.fps = perf_render_fps;
         p.debug_overlay = evo_fps_counter_enabled();
@@ -576,13 +627,17 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
             feedPerformanceHud();
         }
         evo_rmlui_render_playback_osd(framebuffer, width, height);
-    } else if (activeSubText[0] && !playback->isMusicMode() && evo_rmlui_is_initialized()) {
+    } else if ((activeSubText[0] || secondarySubText[0]) && !playback->isMusicMode() &&
+               evo_rmlui_is_initialized()) {
         evo_playback_osd_params_t p;
         std::memset(&p, 0, sizeof(p));
         p.title = "Video Playback";
         p.subtitle_text = activeSubText;
         p.subtitle_face = prospero_subtitle_face;
         p.subtitle_raised = 0;
+        p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
+        p.subtitle2_position = prospero_secondary_position;
+        p.subtitle2_color = prospero_secondary_color;
         p.chrome_hidden = 1;
         p.alpha = 255;
         p.fps = perf_render_fps;

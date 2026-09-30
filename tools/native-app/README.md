@@ -56,6 +56,32 @@ verbatim (LF-normalised via `dos2unix`) **except**:
   `libSceLibcInternal` doesn't export the xlocale family and the stub bodies
   are discarded, so the imports bound to NULL.
 
+- **`stubs/evo_dns.c`** — NEW, EVO-authored (#91). `getaddrinfo` /
+  `freeaddrinfo` / `getnameinfo` / `gai_strerror`, compiled INTO `eboot.bin`
+  because on retail FW 12.70 the console exports them only from
+  `libScePosixForWebKit.sprx` as NULL stubs (a call faults at `rip=0`). A
+  lookup goes to **the console's own resolver** - `libSceNet`'s
+  `sceNetPoolCreate` / `sceNetResolverCreate` / `sceNetResolverStartNtoa` - so it
+  uses whatever DNS the user set in the PS5's network settings. That is the call
+  sequence the SDK's own `libc.a` (`netdb.o`) uses on payloads; the difference is
+  a one-time `sceNetInit()` if the first pool will not create (an app module may
+  not have `libSceNet` up the way a payload's process does), and one
+  `dns: <host> -> <ip>, <ip>  (console DNS, N addresses, M ms)` line in
+  `evo.log` per real lookup. It returns **every** address the resolver finds
+  (`sceNetResolverStartNtoaMultipleRecordsEx`, up to ten), chained through
+  `ai_next`, so FFmpeg's connect can race past an address that is unreachable
+  from the user's network - one of raw.githubusercontent.com's four was, and the
+  single-record call returned only that one. That call's result layout is not
+  documented in this repo, so it is trusted only as far as it checks out (a
+  canary past the buffer, counts in range, plausible addresses); anything else
+  falls back to the single-address lookup, which is then used for the rest of
+  the run. `/mnt/usb0/evo_dns_single` turns the multi-record call off without a
+  rebuild. IPv4 literals, `localhost` and a 64-entry, 5-minute cache never reach
+  the resolver. It replaced two hand-rolled UDP DNS clients that hardcoded eight
+  servers, the first a developer's laptop. The `libSceNet` import resolves from
+  the SDK's link stub like `libSceImeDialog`'s does; no `.syms` file is needed.
+  `tools/dns_host.sh` tests it on the host against a mock `libSceNet`.
+
 - **`stubs/malloc_shim.c`** — NEW, EVO-authored. Interposes the whole
   `malloc`/`free`/`calloc`/`realloc`/`posix_memalign`/`aligned_alloc`/…
   family onto an **mmap-backed allocator**: requests > 12 KiB get one

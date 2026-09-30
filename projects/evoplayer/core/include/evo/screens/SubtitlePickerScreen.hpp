@@ -24,6 +24,7 @@ private:
         int trackId = -2; // -2 = Off, -1 = External SRT, -3 = AUTO-SYNC, >= 0 = Stream index
         std::string label;
         std::string detail;
+        bool isSecondary = false; // #110: this track is the second line of dialogue
     };
 
     /* subtitles.rml has six rows; scrolling by any other count lets the focus
@@ -34,6 +35,7 @@ private:
     void refreshTracks();
     void navigate(int delta);
     void activateSelection();
+    void activateSecondary();
     void cycleSize();
 
     std::vector<SubtitleTrackEntry> m_tracks;

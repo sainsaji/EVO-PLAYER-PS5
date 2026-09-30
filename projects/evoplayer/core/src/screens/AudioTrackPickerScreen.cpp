@@ -5,9 +5,11 @@
 #include "evo_toast.h"
 #include "evo_nav.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <utility>
 
 namespace evo {
 
@@ -32,13 +34,73 @@ void AudioTrackPickerScreen::onExit() {
 void AudioTrackPickerScreen::refreshTracks() {
     m_tracks.clear();
     m_activeIndex = 0;
+    m_hasQuality = false;
 
     auto playback = Application::getInstance().getPlaybackController();
     if (!playback) return;
 
+    /*
+     * Quality first: an AUTO row and one row per video variant, best first. Only
+     * offered when there is a choice - a file with one video stream has nothing
+     * to pick and keeps the audio-only list it always had.
+     */
+    const auto variants = playback->getVideoVariants();
+    if (variants.size() > 1) {
+        m_hasQuality = true;
+        const bool pinned = playback->isVideoQualityPinned();
+        const int activeVideo = playback->getActiveVideoStream();
+
+        Entry a;
+        a.kind = KindAuto;
+        a.streamIndex = -1;
+        a.label = "AUTO";
+        a.detail = "EVO picks the best quality available";
+        a.badge = pinned ? "" : "PLAYING";
+        if (!pinned) m_activeIndex = static_cast<int>(m_tracks.size());
+        m_tracks.push_back(std::move(a));
+
+        for (const auto& v : variants) {
+            Entry e;
+            e.kind = KindVideo;
+            e.streamIndex = v.streamIndex;
+
+            char label[32];
+            std::snprintf(label, sizeof(label), "%dp", v.height);
+            e.label = label;
+
+            std::string d;
+            char part[48];
+            std::snprintf(part, sizeof(part), "%dx%d", v.width, v.height);
+            d = part;
+            if (!v.codecName.empty()) {
+                std::string c = v.codecName;
+                std::transform(c.begin(), c.end(), c.begin(),
+                               [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+                d += "  -  " + c;
+            }
+            if (v.bitrate > 0) {
+                std::snprintf(part, sizeof(part), "%.1f Mbps", static_cast<double>(v.bitrate) / 1e6);
+                d += "  -  ";
+                d += part;
+            }
+            if (v.fps > 0.5) {
+                std::snprintf(part, sizeof(part), "%.0f fps", v.fps);
+                d += "  -  ";
+                d += part;
+            }
+            e.detail = d;
+            e.badge = (v.streamIndex == activeVideo) ? "PLAYING" : "";
+
+            if (pinned && v.streamIndex == activeVideo)
+                m_activeIndex = static_cast<int>(m_tracks.size());
+            m_tracks.push_back(std::move(e));
+        }
+    }
+
     int active = playback->getActiveAudioStream();
     for (const auto& t : playback->getAudioTracks()) {
         Entry e;
+        e.kind = KindAudio;
         e.streamIndex = t.streamIndex;
         e.label = t.language.empty() ? "UNKNOWN" : t.language;
         if (!t.title.empty()) {
@@ -58,7 +120,10 @@ void AudioTrackPickerScreen::refreshTracks() {
         e.badge = badge;
 
         if (t.streamIndex == active) {
-            m_activeIndex = static_cast<int>(m_tracks.size());
+            e.detail += "  -  PLAYING";
+            /* With a quality section the cursor starts on the playing quality;
+             * without one it starts on the playing audio track, as before. */
+            if (!m_hasQuality) m_activeIndex = static_cast<int>(m_tracks.size());
         }
         m_tracks.push_back(std::move(e));
     }
@@ -89,11 +154,25 @@ void AudioTrackPickerScreen::activateSelection() {
         return;
     }
 
-    const Entry& e = m_tracks[m_selectedIndex];
+    const Entry e = m_tracks[m_selectedIndex];       /* a copy: the reopen rebuilds the list */
     evo_feedback(EVO_FB_CONFIRM);
 
-    /* Already the live track: nothing to reopen for. */
-    if (e.streamIndex != playback->getActiveAudioStream()) {
+    if (e.kind == KindAuto) {
+        /* Back to EVO's own choice. A no-op when it already is. */
+        if (playback->switchVideoVariant(-1)) {
+            toast("QUALITY", "AUTO");
+        } else {
+            toast("QUALITY", "SWITCH FAILED");
+        }
+    } else if (e.kind == KindVideo) {
+        /* Already pinned to this one: nothing to reopen for. */
+        if (playback->switchVideoVariant(e.streamIndex)) {
+            toast("QUALITY", e.label.c_str());
+        } else {
+            toast("QUALITY", "SWITCH FAILED");
+        }
+    } else if (e.streamIndex != playback->getActiveAudioStream()) {
+        /* Already the live track: nothing to reopen for. */
         if (playback->switchAudioTrack(e.streamIndex)) {
             toast("AUDIO TRACK", e.label.c_str());
         } else {
@@ -135,8 +214,9 @@ void AudioTrackPickerScreen::render(uint32_t* framebuffer, int width, int height
     evo_rmlui_list_params_t params;
     std::memset(&params, 0, sizeof(params));
 
-    params.title = "AUDIO TRACKS";
-    params.subtitle = "Select the audio stream for this file";
+    params.title = m_hasQuality ? "QUALITY & AUDIO" : "AUDIO TRACKS";
+    params.subtitle = m_hasQuality ? "Pick the video quality and the audio track"
+                                   : "Select the audio stream for this file";
     params.section = -1;          /* not a rail destination */
     params.rail_focused = 0;
 
@@ -157,7 +237,8 @@ void AudioTrackPickerScreen::render(uint32_t* framebuffer, int width, int height
             params.rows[i].title = m_tracks[idx].label.c_str();
             params.rows[i].detail = m_tracks[idx].detail.c_str();
             params.rows[i].badge = m_tracks[idx].badge.c_str();
-            params.rows[i].icon_path = "../icons/icon_aspect.png";
+            params.rows[i].icon_path = (m_tracks[idx].kind == KindAudio)
+                                     ? "../icons/icon_aspect.png" : "../icons/icon_tv.png";
             params.rows[i].progress = -1;
             params.rows[i].has_chevron = 0;
             params.rows[i].is_focused = (idx == m_selectedIndex);

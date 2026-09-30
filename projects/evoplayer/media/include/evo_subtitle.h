@@ -58,6 +58,21 @@ extern int prospero_subtitle_use_external;
 extern int prospero_embedded_subtitle_stream_index;
 extern int prospero_embedded_subtitle_count;
 
+/* ---- secondary track (#110) ---------------------------------------------
+ * A second line of dialogue drawn with the first: the external SRT or one
+ * embedded text track, never the same source as the primary. */
+#define PROSPERO_SECONDARY_NONE        (-2)   /* requested: no secondary track */
+#define PROSPERO_SECONDARY_POS_STACKED 0      /* directly above the primary    */
+#define PROSPERO_SECONDARY_POS_TOP     1      /* top of the screen             */
+#define PROSPERO_SECONDARY_COLORS      3      /* yellow, cyan, white           */
+
+extern int prospero_secondary_subtitle_requested; /* -2 none, -1 SRT, >=0 stream */
+extern int prospero_secondary_subtitle_stream_index; /* embedded stream, or -1  */
+extern int prospero_secondary_use_external;       /* the secondary is the SRT   */
+extern int prospero_secondary_delay_ms;           /* its own sync, like the primary's */
+extern int prospero_secondary_position;           /* PROSPERO_SECONDARY_POS_*   */
+extern int prospero_secondary_color;              /* 0 yellow, 1 cyan, 2 white  */
+
 /* Written by main.c's seek / start_video_playback flush path (A5 cleans up). */
 extern AVCodecContext *prospero_embedded_subtitle_ctx;
 
@@ -77,6 +92,13 @@ void prospero_embedded_subtitle_reset(void);
 void prospero_embedded_subtitle_close(void);
 void prospero_embedded_subtitle_decode_packet(AVPacket *packet);
 
+/* Open the secondary track after the primary's open, from what was chosen for
+ * this file. Returns 1 when a secondary track is active. */
+int  prospero_secondary_subtitle_open(AVFormatContext *format);
+
+/* Demux: does either slot want a packet from this stream? */
+int  prospero_subtitle_wants_stream(int stream_index);
+
 /* ---- query used by the media-info track picker ---- */
 int  prospero_embedded_subtitle_supported(enum AVCodecID codec_id);
 int  prospero_subtitle_declared_cues(AVStream *stream);
@@ -91,6 +113,22 @@ void prospero_subtitle_trim(char *text);   /* also used by wrap_text in main.c *
 void prospero_subtitle_toggle(void);
 void prospero_subtitle_apply_track(int track);
 void prospero_subtitle_nudge_delay(int delta_ms);
+
+/* Secondary track (#110). `track` is PROSPERO_SECONDARY_NONE to clear it, -1
+ * for the external SRT, or an embedded stream index. Switches in place: the
+ * demuxer already delivers every subtitle stream. Returns 1 on success. */
+int  prospero_secondary_subtitle_select(int track);
+
+/* Make `track` (-1 the external SRT, or an embedded stream index) the primary.
+ * A secondary that held the same source is dropped. Returns 1 on success. */
+int  prospero_subtitle_select_primary(int track);
+int  prospero_secondary_subtitle_active(void);
+void prospero_secondary_nudge_delay(int delta_ms);
+
+/* The secondary caption at media-clock time `clock_seconds`, with its own
+ * delay applied. Copies "" and returns 0 when nothing shows. */
+int  prospero_secondary_subtitle_text_at(double clock_seconds, char *output,
+                                         size_t output_size);
 
 /* Media clock -> subtitle timeline: clock * scale - delay, floored at 0. */
 double prospero_subtitle_position(double clock_seconds);

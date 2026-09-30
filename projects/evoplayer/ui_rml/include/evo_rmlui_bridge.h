@@ -42,6 +42,13 @@ typedef struct {
     const char* subtitle_text;
     int subtitle_face;
     int subtitle_raised;
+    /* #110: the secondary caption. subtitle_text2 is drawn directly above the
+     * primary (subtitle2_position 0) or alone at the top of the screen (1);
+     * subtitle2_color is 0 yellow, 1 cyan, 2 white. Its size follows
+     * subtitle_face, one step smaller. NULL/"" when nothing is showing. */
+    const char* subtitle_text2;
+    int subtitle2_position;
+    int subtitle2_color;
     int chrome_hidden;
     /* GL-5 (#81): dev FPS pill (#fps-pill), independent of the OSD chrome. */
     int fps;
@@ -148,6 +155,7 @@ typedef struct {
     int is_focused;
     int is_action;    /* not a track (AUTO-SYNC, #102): no radio check */
     int is_disabled;  /* dimmed, activation does nothing */
+    const char* tag;  /* #110: "PRIMARY" / "SECONDARY" badge, NULL/"" for none */
 } evo_rmlui_subtitles_track_t;
 
 typedef struct {
@@ -155,6 +163,7 @@ typedef struct {
     const char* title;
     const char* size_str;
     const char* sync_str;
+    const char* sync2_str;   /* #110: the secondary track's sync pill, NULL/"" hides it */
     const char* preview_text;
     int preview_face; // 0=small, 1=medium, 2=large
     int track_count;

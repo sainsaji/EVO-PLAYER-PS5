@@ -20,6 +20,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
+#include <time.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -43,6 +46,133 @@
 #endif
 
 #define EVO_NET_BUFFER_SIZE  8192
+
+/* How long one address may take to accept a connection before the next is tried.
+ * Generous for a live CDN (a handshake is tens of milliseconds); short enough
+ * that one dead address in a host's list costs a few seconds, not the kernel's
+ * SYN retry of about 75. */
+#ifndef EVO_NET_CONNECT_TIMEOUT_MS
+#define EVO_NET_CONNECT_TIMEOUT_MS 3000
+#endif
+
+#define EVO_NET_BAD_ADDR_MAX     16
+#define EVO_NET_BAD_ADDR_TTL_SEC 300
+
+/* IPv4 addresses that timed out recently, tried after the ones that have not. */
+static struct { uint32_t addr; time_t until; } s_bad_addr[EVO_NET_BAD_ADDR_MAX];
+static pthread_mutex_t s_bad_addr_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int rp_ipv4(const struct addrinfo *rp, uint32_t *out)
+{
+    if (rp->ai_family != AF_INET || !rp->ai_addr) return 0;
+    *out = ((const struct sockaddr_in *)rp->ai_addr)->sin_addr.s_addr;
+    return 1;
+}
+
+static int addr_is_bad(uint32_t a)
+{
+    const time_t now = time(NULL);
+    int bad = 0;
+    pthread_mutex_lock(&s_bad_addr_lock);
+    for (int i = 0; i < EVO_NET_BAD_ADDR_MAX; i++) {
+        if (s_bad_addr[i].addr == a && s_bad_addr[i].until > now) { bad = 1; break; }
+    }
+    pthread_mutex_unlock(&s_bad_addr_lock);
+    return bad;
+}
+
+/* bad != 0: remember `a` as timed out. bad == 0: it answered, forget it. */
+static void addr_note(uint32_t a, int bad)
+{
+    const time_t now = time(NULL);
+    pthread_mutex_lock(&s_bad_addr_lock);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < EVO_NET_BAD_ADDR_MAX; i++) {
+        if (s_bad_addr[i].addr == a) { slot = i; break; }
+        if (slot < 0 && (s_bad_addr[i].addr == 0 || s_bad_addr[i].until <= now)) slot = i;
+        if (s_bad_addr[i].until < s_bad_addr[oldest].until) oldest = i;
+    }
+    if (bad) {
+        if (slot < 0) slot = oldest;
+        s_bad_addr[slot].addr = a;
+        s_bad_addr[slot].until = now + EVO_NET_BAD_ADDR_TTL_SEC;
+    } else if (slot >= 0 && s_bad_addr[slot].addr == a) {
+        s_bad_addr[slot].addr = 0;
+        s_bad_addr[slot].until = 0;
+    }
+    pthread_mutex_unlock(&s_bad_addr_lock);
+}
+
+/* One address, bounded. Returns a connected blocking socket, or -1 (and sets
+ * *timed_out when it ran out of time rather than being refused). */
+static int connect_bounded(const struct addrinfo *rp, int timeout_ms, int *timed_out)
+{
+    *timed_out = 0;
+    int sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (sock < 0) return -1;
+
+    /* Non-blocking, so connect() cannot sit in the kernel's ~75 s SYN retry. */
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags >= 0) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+    int rc = connect(sock, rp->ai_addr, rp->ai_addrlen);
+    if (rc != 0 && flags >= 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
+        struct pollfd pfd;
+        pfd.fd = sock;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        int pr;
+        do {
+            pr = poll(&pfd, 1, timeout_ms);
+        } while (pr < 0 && errno == EINTR);
+
+        if (pr > 0) {
+            int err = 0;
+            socklen_t len = sizeof(err);
+            rc = (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) ? 0 : -1;
+        } else {
+            rc = -1;
+            if (pr == 0) *timed_out = 1;
+        }
+    }
+    if (rc != 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (flags >= 0) fcntl(sock, F_SETFL, flags);
+    struct timeval tv;
+    tv.tv_sec = EVO_NET_TIMEOUT_SEC;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    return sock;
+}
+
+int evo_net_connect_list(const struct addrinfo *list, int per_addr_timeout_ms)
+{
+    if (per_addr_timeout_ms <= 0) per_addr_timeout_ms = EVO_NET_CONNECT_TIMEOUT_MS;
+
+    /* Pass 0: addresses that have not timed out lately. Pass 1: the ones that
+     * have - last, not never, so a host whose only address is slow still works. */
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const struct addrinfo *rp = list; rp; rp = rp->ai_next) {
+            uint32_t a = 0;
+            const int v4 = rp_ipv4(rp, &a);
+            const int bad = v4 && addr_is_bad(a);
+            if ((pass == 0) == bad) continue;
+
+            int timed_out = 0;
+            const int sock = connect_bounded(rp, per_addr_timeout_ms, &timed_out);
+            if (sock >= 0) {
+                if (v4) addr_note(a, 0);
+                return sock;
+            }
+            if (v4 && timed_out) addr_note(a, 1);
+        }
+    }
+    return -1;
+}
 
 typedef struct evo_net_req {
     char        method[16];
@@ -472,24 +602,8 @@ static int execute_http(const char *method,
             return EVO_NET_ERR_DNS;
         }
 
-        int sock = -1;
-        for (rp = res; rp != NULL; rp = rp->ai_next) {
-            sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-            if (sock < 0) continue;
-
-            struct timeval tv;
-            tv.tv_sec = EVO_NET_TIMEOUT_SEC;
-            tv.tv_usec = 0;
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-            if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
-                break;
-            }
-
-            close(sock);
-            sock = -1;
-        }
+        (void)rp;
+        int sock = evo_net_connect_list(res, EVO_NET_CONNECT_TIMEOUT_MS);
 
         freeaddrinfo(res);
 

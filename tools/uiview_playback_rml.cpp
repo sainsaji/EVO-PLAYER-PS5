@@ -34,6 +34,15 @@ extern "C" {
 
 char current_media_path[768] = "/mnt/usb0/media/Movies/uiview-fixture.mkv";
 
+/* provider_iptv.c marks favourited channels (#92 / #93). The favourites store
+ * is file persistence, which no fixture here needs, so nothing is a favourite.
+ * Without this the harness stopped linking when those calls landed. */
+int favorites_is_favorite(const char* path)
+{
+    (void)path;
+    return 0;
+}
+
 static double s_stub_thumb_time = -1.0;
 static unsigned long long s_stub_thumb_serial = 0;
 
@@ -479,6 +488,48 @@ static void render_list_screens(std::vector<uint32_t>& fb, int width, int height
         save_bmp_24("output/uiview/rml_favorites.bmp", fb.data(), width, height);
     }
 
+    /* --- the live TV stream picker (Settings -> ASK WHICH LIVE STREAM): the URL
+     *     as listed, the quality variants read from its HLS master, and the
+     *     extension guess, marked as one. Same list document as every other
+     *     picker; ProviderHostScreen::renderStreamPicker fills it. --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(2, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "CHOOSE A STREAM";
+        p.subtitle = "Asianet HD (720p)";
+        p.section = 2;
+        p.total_count = 6;
+        p.cursor_index = 2;
+        static const struct { const char* t; const char* d; const char* b; } r[6] = {
+            { "HLS (Adaptive)", "As the playlist lists it - EVO picks the quality", "LISTED" },
+            { "1080p",  "1920x1080  -  H264  -  AAC  -  4.5 Mbps", "HLS" },
+            { "720p",   "1280x720  -  H264  -  AAC  -  2.8 Mbps",  "HLS" },
+            { "360p",   "640x360  -  H264  -  AAC  -  0.8 Mbps",   "HLS" },
+            { "Audio only", "AAC  -  0.1 Mbps", "HLS" },
+            { "MPEG-TS Fallback", "The same address with a different extension - a guess", "GUESS" },
+        };
+        for (int i = 0; i < 6; i++) {
+            p.rows[i].title = r[i].t;
+            p.rows[i].detail = r[i].d;
+            p.rows[i].icon_path = ico_fav;
+            p.rows[i].badge = r[i].b;
+            p.rows[i].progress = -1;
+            p.rows[i].has_chevron = 1;
+            p.rows[i].is_focused = (i == 2);
+            p.row_count++;
+        }
+        p.hint_count = 2;
+        p.hints[0].glyph_path = "../icons/btn_cross.png";
+        p.hints[0].label = "PLAY";
+        p.hints[1].glyph_path = "../icons/btn_circle.png";
+        p.hints[1].label = "BACK";
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_stream_picker.bmp", fb.data(), width, height);
+    }
+
     /* --- EMBY SETUP --- */
     {
         std::fill(fb.begin(), fb.end(), 0xFF0E0906);
@@ -850,6 +901,52 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     evo_rmlui_update_playback_params(&q);
     evo_rmlui_render_playback_osd(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_playback_subtitle_only.bmp", fb.data(), width, height);
+
+    /* #110: dual subtitles. The secondary line stacked above the primary with
+     * the OSD up (both lifted clear of the controls), then alone at the top of
+     * the screen in cyan, then caption-only at the large and small sizes. The
+     * secondary is one size step smaller than the primary in every case. */
+    {
+        struct Dual {
+            const char* file; int position, color, face, raised, chrome_hidden;
+        };
+        static const Dual cases[] = {
+            { "rml_playback_dual_stacked",        0, 0, 2, 1, 0 },
+            { "rml_playback_dual_top",            1, 1, 2, 1, 0 },
+            { "rml_playback_dual_only_large",     0, 2, 3, 0, 1 },
+            { "rml_playback_dual_only_small_top", 1, 0, 1, 0, 1 },
+        };
+        for (const Dual& d : cases) {
+            std::fill(fb.begin(), fb.end(), 0xFF10161F);
+            evo_playback_osd_params_t s = d.chrome_hidden ? q : p;
+            s.paused = 0;
+            s.subtitle_text = "\xC2\xBF" "Qu\xC3\xA9 est\xC3\xA1s haciendo aqu\xC3\xAD?\n"
+                              "No deb\xC3\xAD" "as haber venido.";
+            s.subtitle_text2 = "What are you doing here?\nYou should not have come.";
+            s.subtitle_face = d.face;
+            s.subtitle_raised = d.raised;
+            s.subtitle2_position = d.position;
+            s.subtitle2_color = d.color;
+            s.chrome_hidden = d.chrome_hidden;
+            evo_rmlui_update_playback_params(&s);
+            evo_rmlui_render_playback_osd(fb.data(), width, height);
+            save_bmp_24((std::string("output/uiview/") + d.file + ".bmp").c_str(),
+                        fb.data(), width, height);
+        }
+
+        /* The secondary alone (the primary track has no line at this moment). */
+        std::fill(fb.begin(), fb.end(), 0xFF10161F);
+        evo_playback_osd_params_t s = q;
+        s.subtitle_text = nullptr;
+        s.subtitle_text2 = "Only the second track speaks here.";
+        s.subtitle_face = 2;
+        s.subtitle2_position = 0;
+        s.subtitle2_color = 0;
+        evo_rmlui_update_playback_params(&s);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_dual_secondary_only.bmp",
+                    fb.data(), width, height);
+    }
 }
 
 static void render_changelog_screen(std::vector<uint32_t>& fb, int width, int height) {
@@ -1399,6 +1496,32 @@ static void render_subtitles_screen(std::vector<uint32_t>& fb, int width, int he
         evo_rmlui_render_subtitles(fb.data(), width, height);
         save_bmp_24((std::string("output/uiview/") + s.file + ".bmp").c_str(),
                     fb.data(), width, height);
+    }
+
+    /* #110: a primary and a secondary track chosen. Each row says which line
+     * of dialogue it is, and the secondary's own sync pill sits beside the
+     * primary's. Focus is on the row that would become the secondary. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_subtitles_params_t q;
+        memset(&q, 0, sizeof(q));
+        q.eyebrow = "SUBTITLE CONFIGURATION";
+        q.title = "SUBTITLE TRACKS";
+        q.size_str = "MEDIUM";
+        q.sync_str = "SYNC: 0 ms";
+        q.sync2_str = "2ND: +300 ms";
+        q.preview_text = "The quick brown fox jumps over the lazy dog";
+        q.preview_face = 1;
+        q.track_count = 6;
+        q.tracks[0] = { "SUBTITLES OFF", "Disable subtitles", 0, 0, 0, 0, "" };
+        q.tracks[1] = { "AUTO-SYNC",     "MATCH TO AUDIO",    0, 0, 1, 0, "" };
+        q.tracks[2] = { "EXTERNAL SRT",  "1204 CUES",         0, 0, 0, 0, "" };
+        q.tracks[3] = { "jpn - Japanese", "Embedded Stream",  1, 0, 0, 0, "PRIMARY" };
+        q.tracks[4] = { "eng - English",  "Embedded Stream",  0, 1, 0, 0, "SECONDARY" };
+        q.tracks[5] = { "spa - Spanish",  "Embedded Stream",  0, 0, 0, 0, "" };
+        evo_rmlui_update_subtitles(&q);
+        evo_rmlui_render_subtitles(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_subtitles_dual.bmp", fb.data(), width, height);
     }
 }
 
