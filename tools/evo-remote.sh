@@ -15,6 +15,22 @@
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   stop                                    end playback, back to the browser
+#   key <button>                            one synthetic pad press (up down left
+#                                           right cross circle square triangle
+#                                           l1 r1 l2 r2 l3 r3 options touchpad
+#                                           touchpad_left touchpad_right; `l3`/
+#                                           `shot` takes a screenshot). One press
+#                                           per call: the device reads the file
+#                                           about once a second, so pause between
+#                                           calls when chaining them
+#   screen <id>                             go straight to a screen (an evo::
+#                                           ScreenId number: 2 Player, 21 Text
+#                                           Reader, 28 SurroundTest, 30 Image
+#                                           Viewer, ...)
+#   source <n>                              storage browser source: 0 USB,
+#                                           1 Internal, 2 Favorites, 3 Recent
+#   image <path>                            open <path> in the image viewer
+#   text <path>                             open <path> in the text reader
 #   upcompare [--crop x,y,w,h]              #103: pause, capture the same frame
 #                                           with the upscaler Off/Sharp/AI (no
 #                                           OSD) -> output/upcompare/
@@ -115,6 +131,11 @@ kill)
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
 stop)   put_cmd "stop" ;;
+key)    [[ -n "${1:-}" ]] || die "usage: evo-remote.sh key <button>  (e.g. cross, up, l1, l3)"; put_cmd "key $1" ;;
+screen) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh screen <id>  (an evo::ScreenId number)"; put_cmd "screen $1" ;;
+source) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh source <n>  (0 USB, 1 Internal, 2 Favorites, 3 Recent)"; put_cmd "source $1" ;;
+image)  [[ -n "${1:-}" ]] || die "usage: evo-remote.sh image <path>"; put_cmd "image $1" ;;
+text)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh text <path>"; put_cmd "text $1" ;;
 upcompare)
     # #103: same paused frame with the upscaler Off / Sharp / AI, no OSD ->
     # output/upcompare/{off,sharp,ai}.bmp (+ compare.png where Pillow exists).
@@ -196,6 +217,6 @@ while time.time() < dl:
 PY
     ;;
 *)
-    sed -n '2,30p' "$0"
+    sed -n '2,/^# ====/p' "$0"
     ;;
 esac
