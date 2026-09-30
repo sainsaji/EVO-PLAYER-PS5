@@ -187,8 +187,12 @@
                         <div class="tv-detail-sub" data-if="selected_subtitle != ''">{{ selected_subtitle }}</div>
                     </div>
 
-                    <!-- Live EPG guide -->
-                    <div class="tv-detail-epg-box" data-if="!selected_is_folder && (selected_now != '' || selected_next != '')">
+                    <!-- Dedicated Channel Program Guide (EPG) -->
+                    <div class="tv-detail-epg-box" data-if="!selected_is_folder">
+                        <div class="tv-detail-epg-header">
+                            <span class="tv-detail-epg-heading">CHANNEL GUIDE</span>
+                            <span class="tv-detail-epg-badge-onair" data-if="selected_now != ''">● ON AIR</span>
+                        </div>
                         <div class="tv-detail-epg-row" data-if="selected_now != ''">
                             <span class="tv-detail-epg-badge">NOW</span>
                             <span class="tv-detail-epg-text">{{ selected_now }}</span>
@@ -196,6 +200,10 @@
                         <div class="tv-detail-epg-row tv-detail-epg-next" data-if="selected_next != ''">
                             <span class="tv-detail-epg-badge tv-detail-badge-next">NEXT</span>
                             <span class="tv-detail-epg-text">{{ selected_next }}</span>
+                        </div>
+                        <div class="tv-detail-epg-standby" data-if="selected_now == '' && selected_next == ''">
+                            <span class="tv-detail-epg-standby-badge">GUIDE</span>
+                            <span class="tv-detail-epg-standby-text">Live Broadcast — Electronic Guide Loading / Standby</span>
                         </div>
                     </div>
 
@@ -221,7 +229,7 @@
             <div id="tv-status-details">
                 <span id="tv-source-name">{{ provider_name }}</span>
                 <span class="tv-spec-pill" data-if="is_folder_level">CATEGORIES</span>
-                <span class="tv-spec-pill" data-if="!is_folder_level">ITEMS</span>
+                <span class="tv-spec-pill" data-if="!is_folder_level">CHANNEL GUIDE</span>
                 <span class="tv-spec-pill" data-if="has_multiple_pages">{{ page_info }}</span>
                 <div id="tv-tuning-indicator" data-if="loading || tuning">
                     <div class="tv-spinner-sm"></div>

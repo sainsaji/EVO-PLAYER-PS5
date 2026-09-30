@@ -862,6 +862,59 @@ div, span, img {
     margin-bottom: 12dp;
 }
 
+.tv-detail-epg-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #5a7db426;
+    padding-bottom: 4dp;
+    margin-bottom: 2dp;
+}
+
+.tv-detail-epg-heading {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    letter-spacing: 1.5dp;
+}
+
+.tv-detail-epg-badge-onair {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #4ade80;
+    letter-spacing: 1dp;
+}
+
+.tv-detail-epg-standby {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    padding: 2dp 0;
+}
+
+.tv-detail-epg-standby-badge {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #8ea4c8;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 4dp;
+    padding: 1dp 5dp;
+}
+
+.tv-detail-epg-standby-text {
+    font-size: 12dp;
+    color: #8ea4c8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320dp;
+}
+
 .tv-detail-epg-row {
     display: flex;
     flex-direction: row;

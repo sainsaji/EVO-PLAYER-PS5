@@ -138,6 +138,8 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                         "stream_id": 101,
                         "stream_icon": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Deutsche_Welle_symbol_2012.svg/320px-Deutsche_Welle_symbol_2012.svg.png",
                         "epg_channel_id": "dw.de",
+                        "now_title": "DW News — Global World Report",
+                        "next_title": "The Day — In-Depth Analysis & Features",
                         "added": "1600000000",
                         "category_id": "1",
                         "custom_sid": "",
@@ -150,7 +152,9 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                         "stream_type": "live",
                         "stream_id": 102,
                         "stream_icon": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/320px-Big_buck_bunny_poster_big.jpg",
-                        "epg_channel_id": "",
+                        "epg_channel_id": "bbb.anim",
+                        "now_title": "Big Buck Bunny (2008 Open Movie)",
+                        "next_title": "Sintel (Open-Source Fantasy Animation)",
                         "added": "1600000000",
                         "category_id": "2",
                         "custom_sid": "",
@@ -163,7 +167,9 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                         "stream_type": "live",
                         "stream_id": 103,
                         "stream_icon": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Tears_of_Steel_poster.jpg/320px-Tears_of_Steel_poster.jpg",
-                        "epg_channel_id": "",
+                        "epg_channel_id": "tos.scifi",
+                        "now_title": "Tears of Steel (VFX & Sci-Fi Showcase)",
+                        "next_title": "Cosmos Laundromat — First Cycle",
                         "added": "1600000000",
                         "category_id": "2",
                         "custom_sid": "",
@@ -176,7 +182,9 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                         "stream_type": "live",
                         "stream_id": 104,
                         "stream_icon": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/Akamai_logo.svg/320px-Akamai_logo.svg.png",
-                        "epg_channel_id": "",
+                        "epg_channel_id": "akamai.test",
+                        "now_title": "CPH HLS Multi-Bitrate Calibration",
+                        "next_title": "Akamai Edge Test Loop (24/7)",
                         "added": "1600000000",
                         "category_id": "3",
                         "custom_sid": "",
@@ -187,6 +195,31 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                 if cat_id:
                     streams = [s for s in streams if s["category_id"] == cat_id]
                 self.wfile.write(json.dumps(streams).encode('utf-8'))
+                return
+
+            # Short EPG Guide
+            if action in ('get_short_epg', 'get_simple_data_table'):
+                sid = qs.get('stream_id', ['101'])[0]
+                epg_map = {
+                    "101": [
+                        {"id": "1", "title": "DW News — Global World Report", "lang": "en", "start": "2026-09-30 20:00:00", "end": "2026-09-30 21:00:00", "description": "Global news and live report from Deutsche Welle.", "now_playing": 1},
+                        {"id": "2", "title": "The Day — In-Depth Analysis & Features", "lang": "en", "start": "2026-09-30 21:00:00", "end": "2026-09-30 22:00:00", "description": "Deep-dive analysis into international current affairs.", "now_playing": 0}
+                    ],
+                    "102": [
+                        {"id": "3", "title": "Big Buck Bunny (2008 Open Movie)", "lang": "en", "start": "2026-09-30 20:00:00", "end": "2026-09-30 20:30:00", "description": "Blender Foundation open-source comedy animated short.", "now_playing": 1},
+                        {"id": "4", "title": "Sintel (Open-Source Fantasy Animation)", "lang": "en", "start": "2026-09-30 20:30:00", "end": "2026-09-30 21:00:00", "description": "The third Blender open movie project.", "now_playing": 0}
+                    ],
+                    "103": [
+                        {"id": "5", "title": "Tears of Steel (VFX & Sci-Fi Showcase)", "lang": "en", "start": "2026-09-30 20:00:00", "end": "2026-09-30 20:45:00", "description": "Live action VFX sci-fi short film set in dystopian Amsterdam.", "now_playing": 1},
+                        {"id": "6", "title": "Cosmos Laundromat — First Cycle", "lang": "en", "start": "2026-09-30 20:45:00", "end": "2026-09-30 21:45:00", "description": "Experimental animated project about sheep on a desolate island.", "now_playing": 0}
+                    ],
+                    "104": [
+                        {"id": "7", "title": "CPH HLS Multi-Bitrate Calibration", "lang": "en", "start": "2026-09-30 20:00:00", "end": "2026-09-30 21:00:00", "description": "Test patterns, frame pacing, and adaptive bitrate stream.", "now_playing": 1},
+                        {"id": "8", "title": "Akamai Edge Test Loop (24/7)", "lang": "en", "start": "2026-09-30 21:00:00", "end": "2026-09-30 22:00:00", "description": "Continuous CDN verification test stream.", "now_playing": 0}
+                    ]
+                }
+                listings = epg_map.get(str(sid), [])
+                self.wfile.write(json.dumps({"epg_listings": listings}).encode('utf-8'))
                 return
 
             # VOD Categories
@@ -317,6 +350,7 @@ def main():
 
     local_ip = get_local_ip()
     server_address = ('0.0.0.0', PORT)
+    socketserver.TCPServer.allow_reuse_address = True
     httpd = socketserver.TCPServer(server_address, XtreamHandler)
 
     print("=" * 65)

@@ -434,6 +434,36 @@ static void on_live_streams_resp(int success, int status, const char *body, size
         if (icon && icon->valuestring && icon->valuestring[0]) {
             snprintf(items[i].art_url, sizeof items[i].art_url, "%s", icon->valuestring);
         }
+        cJSON *now_obj = cJSON_GetObjectItem(obj, "now_title");
+        if (!now_obj) now_obj = cJSON_GetObjectItem(obj, "now");
+        if (!now_obj) now_obj = cJSON_GetObjectItem(obj, "current_show");
+        if (!now_obj) now_obj = cJSON_GetObjectItem(obj, "prog");
+
+        cJSON *next_obj = cJSON_GetObjectItem(obj, "next_title");
+        if (!next_obj) next_obj = cJSON_GetObjectItem(obj, "next");
+        if (!next_obj) next_obj = cJSON_GetObjectItem(obj, "next_show");
+
+        cJSON *epg_id = cJSON_GetObjectItem(obj, "epg_channel_id");
+
+        if (now_obj && now_obj->valuestring && now_obj->valuestring[0]) {
+            snprintf(items[i].now_title, sizeof items[i].now_title, "%s", now_obj->valuestring);
+        }
+        if (next_obj && next_obj->valuestring && next_obj->valuestring[0]) {
+            snprintf(items[i].next_title, sizeof items[i].next_title, "%s", next_obj->valuestring);
+        }
+
+        if (items[i].now_title[0]) {
+            if (items[i].next_title[0])
+                snprintf(items[i].subtitle, sizeof items[i].subtitle, "%s | Next: %s",
+                         items[i].now_title, items[i].next_title);
+            else
+                snprintf(items[i].subtitle, sizeof items[i].subtitle, "%s", items[i].now_title);
+        } else if (epg_id && epg_id->valuestring && epg_id->valuestring[0]) {
+            snprintf(items[i].subtitle, sizeof items[i].subtitle, "EPG: %s", epg_id->valuestring);
+        } else {
+            snprintf(items[i].subtitle, sizeof items[i].subtitle, "Live Broadcast");
+        }
+
         items[i].kind = EVO_MEDIA_STREAM;
         items[i].is_live = 1;
         items[i].is_folder = 0;
