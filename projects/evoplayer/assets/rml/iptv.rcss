@@ -183,7 +183,8 @@ div, span, img {
     gap: 14dp;
 }
 
-.tv-counter {
+.tv-counter,
+.tv-page-pill {
     display: block;
     background-color: #00cdff1a;
     backdrop-filter: blur(16dp);
@@ -486,69 +487,54 @@ div, span, img {
  * place the bundle is free to differ and does.
  * ------------------------------------------------------------------------ */
 
+/* ======================== 2.1 Browser View ======================== */
+
+#tv-browser-view {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1704dp;
+    height: 760dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+/* ---- Fixed 2x4 Channel Grid (ProsperoTV design) ----------------------- *
+ *
+ * 8 cards per page (2 rows x 4 columns). Deterministic paging with L1/R1
+ * and D-pad. Overflow is strictly hidden: no dynamic scrolling, no scrollbar
+ * jumping, zero command buffer bloat.
+ * ------------------------------------------------------------------------ */
+
 #tv-grid {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    gap: 24dp;
-    width: 1704dp;
-    height: 856dp;
-    /*
-     * 14dp padding ensures that when a card scales by 1.02 about its centre on focus,
-     * the outwards growth (~4dp + 1.5dp border) has ~8.5dp of clear breathing room
-     * from the clip edges of this scrolling container.
-     */
-    padding: 14dp;
-    overflow-y: auto;
+    gap: 16dp;
+    width: 1180dp;
+    height: 760dp;
+    padding: 6dp;
+    overflow: hidden;
 }
 
 #tv-grid.tv-grid-notice {
-    height: 786dp;
+    height: 690dp;
 }
 
-#tv-grid scrollbarvertical {
-    width: 6dp;
-    margin-left: 14dp;
-}
-
-#tv-grid scrollbarvertical slidertrack {
-    background-color: #0e18288c;
-    border-radius: 3dp;
-}
-
-#tv-grid scrollbarvertical sliderbar {
-    background-color: #5a7db4a6;
-    border-radius: 3dp;
-    min-height: 40dp;
-}
-
-#tv-grid scrollbarvertical sliderarrowdec,
-#tv-grid scrollbarvertical sliderarrowinc {
-    height: 0;
-}
-
-/* ---- the card ---------------------------------------------------------- *
- *
- * EVO's media card, holding a channel. Translucent but with no
- * backdrop-filter: the cards cover most of the page, and ten backdrop passes
- * a frame would cost more than the difference is worth when what sits behind
- * a card is smooth wallpaper and the card's own opaque preview box covers the
- * top half of it anyway.
- * ------------------------------------------------------------------------ */
+/* ---- the channel card -------------------------------------------------- */
 
 .tv-card {
-    /* Both of these are RCSS properties, not attributes: RmlUi has no
-     * `tabindex`. Without tab-index the card is not focusable at all, and
-     * without nav the D-pad has nowhere to move it to. */
     tab-index: auto;
     nav: auto;
-    width: 396dp;
-    height: 396dp;
+    width: 278dp;
+    height: 360dp;
     background-color: #101a2cbf;
-    border-width: 1dp;
+    border-width: 1.5dp;
     border-color: #5a7db44d;
     border-radius: 16dp;
-    padding: 16dp;
+    padding: 12dp;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -556,8 +542,6 @@ div, span, img {
     transition: transform 0.15s cubic-out, border-color 0.15s cubic-out, background-color 0.15s cubic-out;
 }
 
-/* The focus treatment is the provider's. EVO pushes no selection index - it
- * feeds the D-pad into RmlUi and this is what comes back out. */
 .tv-card:focus {
     background-color: #16243cf0;
     border-width: 2.5dp;
@@ -566,8 +550,8 @@ div, span, img {
 }
 
 .tv-preview {
-    width: 364dp;
-    height: 206dp;
+    width: 250dp;
+    height: 140dp;
     background-color: #070c16;
     border-radius: 10dp;
     border-width: 1dp;
@@ -579,25 +563,21 @@ div, span, img {
     justify-content: center;
 }
 
-/* Inset rather than full-bleed: a channel logo is rarely 16:9, and stretching
- * one to the box is worse than letting the plate show around it. */
 .tv-logo {
-    width: 296dp;
-    height: 166dp;
+    max-width: 210dp;
+    max-height: 110dp;
     border-radius: 6dp;
 }
 
 .tv-folder-icon {
-    width: 60dp;
-    height: 60dp;
+    width: 54dp;
+    height: 54dp;
 }
 
-/* Placeholder while the logo downloads, or when the playlist has no tvg-logo.
- * The grid must never show holes: a gap reads as a broken channel. */
 .tv-initial {
     font-family: LatoLatin;
     font-weight: bold;
-    font-size: 54dp;
+    font-size: 48dp;
     color: #35507a;
 }
 
@@ -610,8 +590,8 @@ div, span, img {
     border-width: 1dp;
     border-color: #5a7db44d;
     border-radius: 6dp;
-    padding: 3dp 8dp;
-    font-size: 11dp;
+    padding: 2dp 7dp;
+    font-size: 10.5dp;
     font-weight: bold;
     color: #7ce4ff;
     letter-spacing: 1.2dp;
@@ -631,13 +611,13 @@ div, span, img {
 .tv-meta {
     display: flex;
     flex-direction: column;
-    margin-top: 14dp;
-    gap: 6dp;
+    margin-top: 8dp;
+    gap: 4dp;
 }
 
 .tv-name {
     display: block;
-    font-size: 18dp;
+    font-size: 16.5dp;
     font-weight: bold;
     color: #ffffff;
     letter-spacing: 0.2dp;
@@ -648,53 +628,42 @@ div, span, img {
 
 .tv-sub {
     display: block;
-    font-size: 13dp;
+    font-size: 12.5dp;
     font-weight: normal;
     color: #7e97b8;
-    margin-top: 2dp;
     white-space: nowrap;
     text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 .tv-card:focus .tv-sub {
     color: #c2d2e8;
 }
 
-/* ---- now / next -------------------------------------------------------- */
-
-/*
- * No `overflow: hidden` on the row itself - only on the title inside it.
- *
- * Every clipped element is a scissor change in the sceAgc command buffer, and
- * with a card per catalog row that multiplies fast: the 184-group playlist that
- * blew the buffer was issuing ~2465 of them a frame. Clipping the one element
- * whose text can actually be too long, rather than its wrapper as well, takes
- * two of them off every channel card.
- */
 .tv-epg {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8dp;
-    margin-top: 6dp;
+    gap: 6dp;
+    margin-top: 4dp;
 }
 
 .tv-epg-label {
-    font-size: 10.5dp;
+    font-size: 10dp;
     font-weight: bold;
     color: #7ce4ff;
     background-color: #00cdff1a;
     border-width: 1dp;
     border-color: #00cdff4d;
     border-radius: 5dp;
-    padding: 2dp 6dp;
+    padding: 1dp 5dp;
     letter-spacing: 1.2dp;
 }
 
 .tv-epg-title {
-    font-size: 13dp;
+    font-size: 12dp;
     color: #c2d2e8;
-    max-width: 280dp;
+    max-width: 180dp;
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
@@ -710,21 +679,19 @@ div, span, img {
     color: #7e97b8;
 }
 
-/* ---- action bar -------------------------------------------------------- */
-
-.tv-action-bar {
+.tv-card-footer {
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    margin-top: 14dp;
-    padding-top: 12dp;
+    margin-top: 8dp;
+    padding-top: 8dp;
     border-top-width: 1dp;
     border-top-color: #5a7db426;
 }
 
 .tv-kind {
-    font-size: 11.5dp;
+    font-size: 11dp;
     font-weight: bold;
     color: #00cdff;
     letter-spacing: 1.2dp;
@@ -736,10 +703,250 @@ div, span, img {
     border-color: #00cdff4d;
     border-radius: 6dp;
     padding: 2dp 6dp;
-    font-size: 10.5dp;
+    font-size: 10dp;
     font-weight: bold;
     color: #7ce4ff;
     letter-spacing: 1.2dp;
+}
+
+/* ==================== 2.2 Selected Detail Preview ==================== */
+
+#tv-detail-pane {
+    width: 496dp;
+    height: 742dp;
+    background-color: #101a2ce6;
+    backdrop-filter: blur(20dp);
+    border-width: 1.5dp;
+    border-color: #5a7db44d;
+    border-radius: 20dp;
+    padding: 22dp;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+.tv-detail-kicker {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5dp;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-preview {
+    width: 450dp;
+    height: 210dp;
+    background-color: #070c16;
+    border-radius: 14dp;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12dp;
+}
+
+.tv-detail-logo {
+    max-width: 380dp;
+    max-height: 170dp;
+    border-radius: 8dp;
+}
+
+.tv-detail-folder-icon {
+    width: 72dp;
+    height: 72dp;
+}
+
+.tv-detail-initial {
+    font-family: LatoLatin;
+    font-weight: bold;
+    font-size: 72dp;
+    color: #35507a;
+}
+
+.tv-detail-badge-live {
+    position: absolute;
+    left: 12dp;
+    top: 12dp;
+    background-color: #2a1015;
+    border-width: 1dp;
+    border-color: #ff5c5c;
+    border-radius: 6dp;
+    padding: 3dp 10dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #ff9aa6;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-badge-group {
+    position: absolute;
+    left: 12dp;
+    top: 12dp;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff;
+    border-radius: 6dp;
+    padding: 3dp 10dp;
+    font-size: 11dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-meta {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-tag-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+    margin-bottom: 6dp;
+}
+
+.tv-detail-num {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #00cdff;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 6dp;
+    padding: 2dp 8dp;
+    letter-spacing: 1dp;
+}
+
+.tv-detail-tech {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #7e97b8;
+    letter-spacing: 0.8dp;
+}
+
+.tv-detail-title {
+    font-size: 22dp;
+    font-weight: bold;
+    color: #ffffff;
+    line-height: 28dp;
+    max-height: 56dp;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4dp;
+}
+
+.tv-detail-sub {
+    font-size: 13.5dp;
+    color: #7e97b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 8dp;
+}
+
+.tv-detail-epg-box {
+    background-color: #080e1a;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 12dp;
+    padding: 10dp 14dp;
+    display: flex;
+    flex-direction: column;
+    gap: 8dp;
+    margin-bottom: 12dp;
+}
+
+.tv-detail-epg-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+}
+
+.tv-detail-epg-badge {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #7ce4ff;
+    background-color: #00cdff1a;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 5dp;
+    padding: 2dp 6dp;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-badge-next {
+    color: #c2d2e8;
+    background-color: #5a7db426;
+    border-color: #5a7db44d;
+}
+
+.tv-detail-epg-text {
+    font-size: 13dp;
+    color: #c2d2e8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 340dp;
+}
+
+.tv-detail-action {
+    tab-index: auto;
+    nav: auto;
+    width: 100%;
+    height: 48dp;
+    background-color: #00cdff;
+    border-radius: 12dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 10dp;
+    transition: transform 0.15s cubic-out, background-color 0.15s cubic-out;
+}
+
+.tv-detail-action:focus {
+    background-color: #38dcff;
+    border-width: 2dp;
+    border-color: #ffffff;
+    transform: scale(1.02);
+}
+
+.tv-detail-glyph-box {
+    width: 22dp;
+    height: 22dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tv-detail-glyph {
+    width: 16dp;
+    height: 16dp;
+}
+
+.tv-detail-action-text {
+    font-size: 15dp;
+    font-weight: bold;
+    color: #06090e;
+    letter-spacing: 1.2dp;
+}
+
+.tv-detail-paging {
+    text-align: center;
+    margin-top: 6dp;
+}
+
+.tv-detail-page-hint {
+    font-size: 11.5dp;
+    color: #5a7db4;
+    letter-spacing: 0.5dp;
 }
 
 /* ========================== 3. Status strip ========================== */

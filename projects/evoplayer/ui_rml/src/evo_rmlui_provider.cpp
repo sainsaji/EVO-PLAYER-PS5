@@ -177,6 +177,23 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("count",         &m_model.count);
     c.Bind("rows",          &m_model.rows);
 
+    c.Bind("page_info",          &m_model.page_info);
+    c.Bind("page_current",       &m_model.page_current);
+    c.Bind("page_count",         &m_model.page_count);
+    c.Bind("has_multiple_pages", &m_model.has_multiple_pages);
+
+    c.Bind("selected_id",        &m_model.selected_id);
+    c.Bind("selected_title",     &m_model.selected_title);
+    c.Bind("selected_subtitle",  &m_model.selected_subtitle);
+    c.Bind("selected_art",       &m_model.selected_art);
+    c.Bind("selected_initial",   &m_model.selected_initial);
+    c.Bind("selected_now",       &m_model.selected_now);
+    c.Bind("selected_next",      &m_model.selected_next);
+    c.Bind("selected_num",       &m_model.selected_num);
+    c.Bind("selected_tech",      &m_model.selected_tech);
+    c.Bind("has_selected",       &m_model.has_selected);
+    c.Bind("selected_is_folder", &m_model.selected_is_folder);
+
     /*
      * The one event a bundle raises to start something.
      *
@@ -208,6 +225,23 @@ bool EvoRmlProviderHost::RegisterDataModel()
                 id = args[0].Get<Rml::String>();
             if (id.empty()) return;
             m_pending_activation = std::string(id.c_str());
+        });
+
+    c.BindEventCallback("activate_selected",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            if (!m_model.selected_id.empty()) {
+                m_pending_activation = std::string(m_model.selected_id.c_str());
+            }
+        });
+
+    c.BindEventCallback("page_up",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            HandleKey(KeyPageUp);
+        });
+
+    c.BindEventCallback("page_down",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            HandleKey(KeyPageDown);
         });
 
     /* Paging, for a bundle that wants an explicit "more" affordance rather
@@ -781,30 +815,41 @@ void EvoRmlProviderHost::Search(const char* query)
 
 void EvoRmlProviderHost::PublishRowWindow()
 {
-    size_t want = m_row_window ? m_row_window : EVO_PROVIDER_ROW_WINDOW;
-    if (want > EVO_PROVIDER_ROW_WINDOW_MAX) want = EVO_PROVIDER_ROW_WINDOW_MAX;
-    if (want > m_all_rows.size()) want = m_all_rows.size();
+    const size_t total = m_all_rows.size();
+    size_t want = EVO_PROVIDER_PAGE_SIZE;
+    if (m_row_offset >= total && total > 0) {
+        m_row_offset = ((total - 1) / EVO_PROVIDER_PAGE_SIZE) * EVO_PROVIDER_PAGE_SIZE;
+    }
+    if (m_row_offset + want > total) {
+        want = (total > m_row_offset) ? (total - m_row_offset) : 0;
+    }
     m_row_window = want;
 
-    /* Keep the window inside the level. */
-    if (m_row_offset + want > m_all_rows.size())
-        m_row_offset = m_all_rows.size() - want;
-
-    /*
-     * Copied wholesale rather than appended because the art keys PushArtRequests
-     * wrote live in BOTH vectors - it updates m_all_rows and the published copy
-     * together, so a re-publish from m_all_rows never loses a poster that has
-     * already arrived.
-     *
-     * Unconditional, with no early-out on an unchanged size: a slide keeps the
-     * size identical and changes only the contents, which is exactly the case
-     * the old `rows.size() == want` guard would have skipped.
-     */
     const long first = (long)m_row_offset;
     m_model.rows.assign(m_all_rows.begin() + first,
                         m_all_rows.begin() + first + (long)want);
-    if (m_model_handle) m_model_handle.DirtyVariable("rows");
+
+    for (size_t i = 0; i < m_model.rows.size(); ++i) {
+        m_model.rows[i].index = (int)i;
+    }
+
+    m_model.page_count = total ? (int)((total + EVO_PROVIDER_PAGE_SIZE - 1) / EVO_PROVIDER_PAGE_SIZE) : 1;
+    m_model.page_current = total ? (int)(m_row_offset / EVO_PROVIDER_PAGE_SIZE + 1) : 1;
+    m_model.has_multiple_pages = (m_model.page_count > 1);
+
+    char pbuf[64];
+    std::snprintf(pbuf, sizeof(pbuf), "PAGE %d OF %d", m_model.page_current, m_model.page_count);
+    m_model.page_info = Rml::String(pbuf);
+
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("rows");
+        m_model_handle.DirtyVariable("page_info");
+        m_model_handle.DirtyVariable("page_current");
+        m_model_handle.DirtyVariable("page_count");
+        m_model_handle.DirtyVariable("has_multiple_pages");
+    }
     m_dirty = true;
+    UpdateSelectedPreview();
 }
 
 int EvoRmlProviderHost::FocusedRowIndex() const
@@ -832,68 +877,86 @@ const EvoProviderRow* EvoRmlProviderHost::GetFocusedRow() const
     return nullptr;
 }
 
-void EvoRmlProviderHost::ExtendRowWindow()
+void EvoRmlProviderHost::SetPageOffset(size_t new_offset, int target_slot)
 {
-    const int idx = FocusedRowIndex();
-    if (idx < 0) return;
-
-    /* Room left below the focused card inside the published window. */
-    const bool near_end =
-        (size_t)idx + EVO_PROVIDER_ROW_WINDOW_MARGIN >= m_row_window;
-    const bool near_start =
-        m_row_offset > 0 && (size_t)idx < EVO_PROVIDER_ROW_WINDOW_MARGIN;
-
-    /* Still below the cap: grow. Cheap, and it does not disturb focus. */
-    if (near_end &&
-        m_row_window < EVO_PROVIDER_ROW_WINDOW_MAX &&
-        m_row_offset + m_row_window < m_all_rows.size()) {
-        m_row_window += EVO_PROVIDER_ROW_WINDOW_STEP;
+    if (m_all_rows.empty()) {
+        m_row_offset = 0;
         PublishRowWindow();
-        PushArtRequests();
-        PROV_LOG("row window -> %zu of %zu (focus row %d)",
-                 m_row_window, m_all_rows.size(), idx);
         return;
     }
-
-    /* At the cap. Slide to keep a margin of runway on the side focus is
-     * heading for, and stop at either end of the level. */
-    if (near_end && m_row_offset + m_row_window < m_all_rows.size()) {
-        size_t room = m_all_rows.size() - (m_row_offset + m_row_window);
-        size_t step = room < EVO_PROVIDER_ROW_WINDOW_STEP
-                          ? room : EVO_PROVIDER_ROW_WINDOW_STEP;
-        SlideRowWindow(m_row_offset + step, idx);
-    } else if (near_start) {
-        size_t step = m_row_offset < EVO_PROVIDER_ROW_WINDOW_STEP
-                          ? m_row_offset : EVO_PROVIDER_ROW_WINDOW_STEP;
-        SlideRowWindow(m_row_offset - step, idx);
+    if (new_offset >= m_all_rows.size()) {
+        new_offset = ((m_all_rows.size() - 1) / EVO_PROVIDER_PAGE_SIZE) * EVO_PROVIDER_PAGE_SIZE;
     }
-}
-
-void EvoRmlProviderHost::SlideRowWindow(size_t new_offset, int focused_local)
-{
-    if (new_offset == m_row_offset) return;
-
-    const bool forward = new_offset > m_row_offset;
-    const size_t distance = forward ? (new_offset - m_row_offset)
-                                    : (m_row_offset - new_offset);
     m_row_offset = new_offset;
-
     PublishRowWindow();
     PushArtRequests();
 
-    /*
-     * The element that had focus is still the same element - nothing was
-     * re-instanced - but it now renders a row `distance` further along, so
-     * focus has effectively jumped. Move it back by the same distance to leave
-     * the user on the row they were actually on.
-     */
-    const int target = forward ? focused_local - (int)distance
-                               : focused_local + (int)distance;
-    FocusPublishedRow(target);
+    if (target_slot >= 0) {
+        if (target_slot >= (int)m_model.rows.size()) {
+            target_slot = (int)m_model.rows.size() - 1;
+        }
+        FocusPublishedRow(target_slot);
+    }
+    UpdateSelectedPreview();
+}
 
-    PROV_LOG("row window slide -> [%zu,%zu) of %zu (focus %d -> %d)",
-             m_row_offset, m_row_offset + m_row_window, m_all_rows.size(),
-             focused_local, target);
+void EvoRmlProviderHost::UpdateSelectedPreview()
+{
+    const EvoProviderRow* row = GetFocusedRow();
+    if (!row && !m_model.rows.empty()) {
+        row = &m_model.rows[0];
+    }
+
+    if (row) {
+        m_model.has_selected = true;
+        m_model.selected_id = row->id;
+        m_model.selected_title = row->title;
+        m_model.selected_subtitle = row->subtitle;
+        m_model.selected_art = row->art;
+        m_model.selected_initial = row->initial;
+        m_model.selected_now = row->now;
+        m_model.selected_next = row->next;
+        m_model.selected_is_folder = row->is_folder;
+
+        int abs_idx = (int)m_row_offset + row->index;
+        char num_buf[32];
+        std::snprintf(num_buf, sizeof(num_buf), "CH %d", abs_idx + 1);
+        m_model.selected_num = Rml::String(num_buf);
+
+        if (row->is_folder) {
+            m_model.selected_tech = "CHANNEL GROUP";
+        } else if (row->is_live) {
+            m_model.selected_tech = "LIVE HLS STREAM • 1080p • 60 FPS";
+        } else {
+            m_model.selected_tech = row->duration.empty() ? "VOD STREAM" : row->duration;
+        }
+    } else {
+        m_model.has_selected = false;
+        m_model.selected_id = "";
+        m_model.selected_title = "";
+        m_model.selected_subtitle = "";
+        m_model.selected_art = "";
+        m_model.selected_initial = "";
+        m_model.selected_now = "";
+        m_model.selected_next = "";
+        m_model.selected_num = "";
+        m_model.selected_tech = "";
+        m_model.selected_is_folder = false;
+    }
+
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("has_selected");
+        m_model_handle.DirtyVariable("selected_id");
+        m_model_handle.DirtyVariable("selected_title");
+        m_model_handle.DirtyVariable("selected_subtitle");
+        m_model_handle.DirtyVariable("selected_art");
+        m_model_handle.DirtyVariable("selected_initial");
+        m_model_handle.DirtyVariable("selected_now");
+        m_model_handle.DirtyVariable("selected_next");
+        m_model_handle.DirtyVariable("selected_num");
+        m_model_handle.DirtyVariable("selected_tech");
+        m_model_handle.DirtyVariable("selected_is_folder");
+    }
 }
 
 bool EvoRmlProviderHost::FocusPublishedRow(int local_idx)
@@ -1010,6 +1073,7 @@ void EvoRmlProviderHost::PushArtRequests()
 
     if (changed && m_model_handle) {
         m_model_handle.DirtyVariable("rows");
+        UpdateSelectedPreview();
         m_dirty = true;
     }
 }
@@ -1023,20 +1087,55 @@ bool EvoRmlProviderHost::HandleKey(Key k)
     if (!IsOpen() || !m_context) return false;
 
     switch (k) {
+    case KeyPageUp: {
+        int idx = FocusedRowIndex();
+        if (m_row_offset >= EVO_PROVIDER_PAGE_SIZE) {
+            SetPageOffset(m_row_offset - EVO_PROVIDER_PAGE_SIZE, idx >= 0 ? idx : 0);
+            return true;
+        }
+        return true;
+    }
+
+    case KeyPageDown: {
+        int idx = FocusedRowIndex();
+        if (m_row_offset + EVO_PROVIDER_PAGE_SIZE < m_all_rows.size()) {
+            SetPageOffset(m_row_offset + EVO_PROVIDER_PAGE_SIZE, idx >= 0 ? idx : 0);
+            return true;
+        }
+        return true;
+    }
+
     case KeyUp:
     case KeyDown:
     case KeyLeft:
     case KeyRight: {
-        /*
-         * Straight into RmlUi. ElementDocument's default action turns
-         * KI_UP/DOWN/LEFT/RIGHT into a spatial-navigation move driven by the
-         * `nav-up`/`nav-down`/... RCSS properties, and sets :focus and
-         * :focus-visible on the result.
-         *
-         * This is the whole of scope 11: EVO does not know where the rows are,
-         * how many there are per line, or which one is selected. The provider's
-         * stylesheet decides, and the focus ring it draws is its own.
-         */
+        int idx = FocusedRowIndex();
+
+        /* Deterministic 2x4 grid paging for Up/Down */
+        if (idx >= 0 && k == KeyDown) {
+            /* If on the bottom row (slot >= 4 or slot + 4 exceeds visible cards), press Down flips page */
+            if (idx >= 4 || idx + 4 >= (int)m_model.rows.size()) {
+                if (m_row_offset + EVO_PROVIDER_PAGE_SIZE < m_all_rows.size()) {
+                    int target_col = idx % 4;
+                    SetPageOffset(m_row_offset + EVO_PROVIDER_PAGE_SIZE, target_col);
+                    return true;
+                }
+                /* Already at bottom of last page */
+                return true;
+            }
+        } else if (idx >= 0 && k == KeyUp) {
+            /* If on the top row (slot < 4), press Up flips to previous page bottom row */
+            if (idx < 4) {
+                if (m_row_offset >= EVO_PROVIDER_PAGE_SIZE) {
+                    int target_col = idx + 4;
+                    SetPageOffset(m_row_offset - EVO_PROVIDER_PAGE_SIZE, target_col);
+                    return true;
+                }
+                /* Already on page 0: stay on top row */
+                return true;
+            }
+        }
+
         Rml::Input::KeyIdentifier id =
             (k == KeyUp)    ? Rml::Input::KI_UP :
             (k == KeyDown)  ? Rml::Input::KI_DOWN :
@@ -1052,26 +1151,12 @@ bool EvoRmlProviderHost::HandleKey(Key k)
             m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
         }
 
-        /*
-         * Who ends up with focus is RmlUi's business, but whether the key was
-         * USED is EVO's, and the rail depends on the answer.
-         *
-         * ProviderHostScreen hands Left to the document first and focuses the
-         * navigation rail if the document declines it - the leftmost column is
-         * the only place that can know it is the leftmost column, and the rail
-         * is a document in EVO's MAIN context that this one cannot reach. That
-         * contract was written on the screen side but never honoured here: this
-         * returned true for every direction, so Left was always consumed and
-         * the rail was unreachable from a provider screen by d-pad at all.
-         *
-         * Focus not moving is the signal. Nothing else distinguishes "moved to
-         * the card on the left" from "there was nothing to move to".
-         */
         Rml::Element* before = m_context->GetFocusElement();
 
         m_context->ProcessKeyDown(id, 0);
         m_context->ProcessKeyUp(id, 0);
         m_dirty = true;
+        UpdateSelectedPreview();
 
         if (k == KeyLeft && m_context->GetFocusElement() == before)
             return false;   /* -> the rail takes it */
@@ -1252,10 +1337,7 @@ void EvoRmlProviderHost::Tick()
     evo_provider_art_poll();
     /* Adopt whatever finished decoding, and ask for the next batch. */
     PushArtRequests();
-    /* Grow the render window if focus has walked to the end of it. Cheap: it
-     * returns immediately unless the window is both partial and nearly used
-     * up, and it logs only on the rare frame where it actually grows. */
-    ExtendRowWindow();
+    UpdateSelectedPreview();
     ApplyPendingActivation();
 }
 

@@ -804,6 +804,14 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeyDown) != 0;
     if (pressed & PadButtons::Right)
         return evo_rmlui_provider_key(EvoRmlProviderHost::KeyRight) != 0;
+    if (pressed & PadButtons::L1) {
+        evo_feedback(EVO_FB_MOVE);
+        return evo_rmlui_provider_key(EvoRmlProviderHost::KeyPageUp) != 0;
+    }
+    if (pressed & PadButtons::R1) {
+        evo_feedback(EVO_FB_MOVE);
+        return evo_rmlui_provider_key(EvoRmlProviderHost::KeyPageDown) != 0;
+    }
 
     if (pressed & PadButtons::Left) {
         /* Let the document have it first - a grid's leftmost column is where

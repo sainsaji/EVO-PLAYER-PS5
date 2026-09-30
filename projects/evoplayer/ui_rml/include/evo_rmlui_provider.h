@@ -91,54 +91,40 @@ struct EvoProviderModel {
     bool is_folder_level = false;
     int  count = 0;
     std::vector<EvoProviderRow> rows;
+
+    /* Deterministic page-based navigation (#ProsperoTV design) */
+    Rml::String page_info;          /* "PAGE 2 OF 45" */
+    int  page_current = 1;
+    int  page_count = 1;
+    bool has_multiple_pages = false;
+
+    /* Selected / Focused item preview details (for right-hand preview panel) */
+    Rml::String selected_id;
+    Rml::String selected_title;
+    Rml::String selected_subtitle;
+    Rml::String selected_art;
+    Rml::String selected_initial;
+    Rml::String selected_now;
+    Rml::String selected_next;
+    Rml::String selected_num;       /* "CH 14" */
+    Rml::String selected_tech;      /* "LIVE HLS • 1080p • 60 FPS" */
+    bool has_selected = false;
+    bool selected_is_folder = false;
 };
 
 /* ------------------------------------------------------------------------- */
-/* The render budget                                                         */
+/* The render budget & grid layout                                           */
 /* ------------------------------------------------------------------------- */
 /*
- * How many rows EVO will materialise into a provider document at once.
- *
- * This is EVO's limit, not the provider's, and it belongs here rather than in
- * a bundle because only EVO knows what its renderer costs. Measured on
- * hardware with a 184-group IPTV playlist: every row became a card, every card
- * contributed several clipped elements, and the sceAgc backend logged ~2465
- * scissor changes a frame until the 2MB command buffer filled. Commands past
- * that point are simply not submitted, so the tail of the document - the
- * bundle's status strip, and then EVO's own navigation rail composited after
- * it - vanished, differently on each frame. It read as flashing.
- *
- * A bundle cannot defend against this: it does not know the command buffer
- * exists, and `data-for` has no limit clause. So the host hands the document a
- * window onto the catalog and grows it as focus approaches the end. RmlUi's
- * for-view only instances the elements that are NEW when an array grows
- * (DataViewFor::Update), so extending is cheap and does not disturb focus.
- *
- * `count` stays the size of the whole level, because that is what a header
- * saying "184 GROUPS" means.
+ * Fixed 2x4 grid of 8 cards per page (inspired by ProsperoTV).
+ * Deterministic paging replaces unstable infinite-scroll virtualization.
+ * Zero scroll jumping, zero DCB overflows, instant 60 FPS rendering.
  */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW = 16;
-/* Grow once focus is within this many rows of the end of the window. */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW_MARGIN = 6;
-/* Step size when expanding window. */
+constexpr size_t EVO_PROVIDER_PAGE_SIZE = 8;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW = 8;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MAX = 8;
 constexpr size_t EVO_PROVIDER_ROW_WINDOW_STEP = 8;
-/*
- * The hard cap on LIVE rows, and the reason the window slides instead of
- * growing without bound.
- *
- * Growing is cheap, as above. What is not cheap is the steady state: the
- * per-frame layout and the command buffer both scale with the number of live
- * elements, and at 19 elements per card a 184-group level reached 524288 DCB
- * dwords - exactly the slot capacity. Everything past that point was dropped
- * by a write callback that returns 0 and says nothing, which is the "flashing"
- * described above, now arriving through a different door.
- *
- * 20 (and not 32/48): on IPTV screens with cards containing badges, epg previews,
- * and backdrop blurs, 32 rows pushed DCB to 524288 with dcb_full=204774. A cap of
- * 20 rows (5 full grid rows, with only 2 rows visible at once) keeps peak DCB well
- * under the 524k slot limit with dcb_full=0.
- */
-constexpr size_t EVO_PROVIDER_ROW_WINDOW_MAX = 20;
+constexpr size_t EVO_PROVIDER_ROW_WINDOW_MARGIN = 0;
 
 /* ------------------------------------------------------------------------- */
 /* Host                                                                      */
@@ -175,7 +161,7 @@ public:
      * root of the provider's catalog Back is NOT consumed, and the rail takes
      * it. Anywhere deeper it pops a level and is consumed.
      */
-    enum Key { KeyUp, KeyDown, KeyLeft, KeyRight, KeyAccept, KeyBack, KeySearch };
+    enum Key { KeyUp, KeyDown, KeyLeft, KeyRight, KeyAccept, KeyBack, KeySearch, KeyPageUp, KeyPageDown };
     bool HandleKey(Key k);
 
     /* True when something changed and the screen needs re-rasterising. The
@@ -209,14 +195,12 @@ private:
     bool RegisterDataModel();
     void RequestPage(const char* parent_id, int page);
     void ApplyItems(const evo_provider_item_t* items, int count, int has_more);
-    /* Copy the first m_row_window rows of m_all_rows into the bound model. */
+    /* Publish the current page of 8 items into m_model.rows */
     void PublishRowWindow();
-    /* Grow the window when focus nears its end, then slide it once it is at
-     * EVO_PROVIDER_ROW_WINDOW_MAX. Called once per Tick(). */
-    void ExtendRowWindow();
-    /* Move the window to `new_offset` and put focus back on the row it was on.
-     * `focused_local` is that row's index in the OUTGOING window. */
-    void SlideRowWindow(size_t new_offset, int focused_local);
+    /* Set page offset (deterministic paging) and focus slot */
+    void SetPageOffset(size_t new_offset, int target_slot = -1);
+    /* Update the right-side detail preview panel to match current focus */
+    void UpdateSelectedPreview();
     /* Focus the published card at `local_idx`, found by position among the
      * siblings data-for produced. Position, not `rowid`: the attribute still
      * holds the pre-slide value until the next Context::Update(), while the

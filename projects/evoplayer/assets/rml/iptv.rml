@@ -16,11 +16,11 @@
     <!-- 152dp gutter for EVO's navigation rail -->
     <div id="tv-pane">
 
-        <!-- 1. Header: badge, title, breadcrumb pill, counter -->
+        <!-- 1. Header: badge, title, breadcrumb pill, counter, paging info -->
         <div id="tv-header">
             <div id="tv-header-left">
                 <div id="tv-badge">
-                    <img id="tv-badge-icon" src="/assets/icons/icon_emby.png"/>
+                    <img id="tv-badge-icon" src="/assets/icons/icon_tv.png"/>
                 </div>
                 <div id="tv-title-row">
                     <span id="tv-title">LIVE TV</span>
@@ -29,6 +29,7 @@
                 <div id="tv-path">{{ breadcrumb }}</div>
             </div>
             <div id="tv-header-right" data-if="!empty">
+                <div class="tv-page-pill" data-if="has_multiple_pages">{{ page_info }}</div>
                 <div class="tv-counter" data-if="is_folder_level">{{ count }} GROUPS</div>
                 <div class="tv-counter" data-if="!is_folder_level">{{ count }} CHANNELS</div>
             </div>
@@ -47,7 +48,7 @@
                 <div id="tv-setup" data-if="query == ''">
                     <div id="tv-setup-header">
                         <div id="tv-setup-badge">
-                            <img id="tv-setup-badge-icon" src="/assets/icons/icon_emby.png"/>
+                            <img id="tv-setup-badge-icon" src="/assets/icons/icon_tv.png"/>
                         </div>
                         <div id="tv-setup-title">SELECT PLAYLIST SOURCE</div>
                         <div id="tv-setup-desc">Choose how you would like to load your television channels</div>
@@ -94,7 +95,7 @@
                 <!-- Empty state when search query yielded no results -->
                 <div id="tv-search-empty" data-if="query != ''">
                     <div id="tv-empty-icon-box">
-                        <img id="tv-empty-icon" src="/assets/icons/icon_emby.png"/>
+                        <img id="tv-empty-icon" src="/assets/icons/icon_tv.png"/>
                     </div>
                     <div id="tv-empty-title">NO CHANNELS FOUND</div>
                     <div id="tv-empty-hint">No channels match '{{ query }}'</div>
@@ -111,45 +112,103 @@
                 </div>
             </div>
 
-            <!-- Channel grid (hidden when empty so setup screen and channel grid never overlap) -->
-            <div id="tv-grid" data-if="!empty" data-class-tv-grid-notice="status != ''">
-                <div class="tv-card" data-for="row : rows"
-                     data-attr-rowid="row.id" data-event-click="activate()"
-                     data-class-tv-card-group="row.is_folder">
+            <!-- Main browser view: 2-column layout (Grid + Detail Preview Panel) -->
+            <div id="tv-browser-view" data-if="!empty">
+                <!-- Channel grid: 2 rows x 4 columns = 8 cards, fixed, overflow: hidden -->
+                <div id="tv-grid" data-class-tv-grid-notice="status != ''">
+                    <div class="tv-card" data-for="row : rows"
+                         data-attr-rowid="row.id" data-event-click="activate()"
+                         data-class-tv-card-group="row.is_folder">
 
-                    <div class="tv-preview">
-                        <img class="tv-logo" data-if="row.art != ''"
-                             data-attr-src="row.art"/>
-                        <img class="tv-folder-icon" data-if="row.is_folder"
+                        <div class="tv-preview">
+                            <img class="tv-logo" data-if="row.art != ''"
+                                 data-attr-src="row.art"/>
+                            <img class="tv-folder-icon" data-if="row.is_folder"
+                                 src="/assets/icons/icon_folder.png"/>
+                            <div class="tv-initial"
+                                 data-if="!row.is_folder && row.art == ''">{{ row.initial }}</div>
+
+                            <div class="tv-badge-group" data-if="row.is_folder">GROUP</div>
+                            <div class="tv-badge-live"
+                                 data-if="row.is_live && !row.is_folder">LIVE</div>
+                        </div>
+
+                        <div class="tv-meta">
+                            <div class="tv-name">{{ row.title }}</div>
+                            <div class="tv-sub"
+                                 data-if="row.is_folder || row.now == ''">{{ row.subtitle }}</div>
+
+                            <div class="tv-epg" data-if="row.now != ''">
+                                <span class="tv-epg-label">NOW</span>
+                                <span class="tv-epg-title">{{ row.now }}</span>
+                            </div>
+                            <div class="tv-epg tv-epg-next" data-if="row.next != ''">
+                                <span class="tv-epg-label">NEXT</span>
+                                <span class="tv-epg-title">{{ row.next }}</span>
+                            </div>
+                        </div>
+
+                        <div class="tv-card-footer">
+                            <div class="tv-kind" data-if="row.is_folder">GROUP</div>
+                            <div class="tv-kind" data-if="!row.is_folder">CHANNEL</div>
+                            <div class="tv-tag" data-if="row.is_folder">OPEN</div>
+                            <div class="tv-tag" data-if="!row.is_folder">WATCH</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right-hand Selected Channel / Group Detail Preview Panel -->
+                <div id="tv-detail-pane" data-if="has_selected">
+                    <div class="tv-detail-kicker" data-if="!selected_is_folder">SELECTED CHANNEL</div>
+                    <div class="tv-detail-kicker" data-if="selected_is_folder">SELECTED GROUP</div>
+
+                    <!-- Large Channel Logo / Artwork plate -->
+                    <div class="tv-detail-preview">
+                        <img class="tv-detail-logo" data-if="selected_art != ''"
+                             data-attr-src="selected_art"/>
+                        <img class="tv-detail-folder-icon" data-if="selected_is_folder"
                              src="/assets/icons/icon_folder.png"/>
-                        <div class="tv-initial"
-                             data-if="!row.is_folder && row.art == ''">{{ row.initial }}</div>
+                        <div class="tv-detail-initial"
+                             data-if="!selected_is_folder && selected_art == ''">{{ selected_initial }}</div>
 
-                        <div class="tv-badge-group" data-if="row.is_folder">GROUP</div>
-                        <div class="tv-badge-live"
-                             data-if="row.is_live && !row.is_folder">LIVE</div>
+                        <div class="tv-detail-badge-group" data-if="selected_is_folder">GROUP</div>
+                        <div class="tv-detail-badge-live" data-if="!selected_is_folder">● LIVE</div>
                     </div>
 
-                    <div class="tv-meta">
-                        <div class="tv-name">{{ row.title }}</div>
-                        <div class="tv-sub"
-                             data-if="row.is_folder || row.now == ''">{{ row.subtitle }}</div>
-
-                        <div class="tv-epg" data-if="row.now != ''">
-                            <span class="tv-epg-label">NOW</span>
-                            <span class="tv-epg-title">{{ row.now }}</span>
+                    <!-- Channel metadata -->
+                    <div class="tv-detail-meta">
+                        <div class="tv-detail-tag-row">
+                            <span class="tv-detail-num" data-if="!selected_is_folder">{{ selected_num }}</span>
+                            <span class="tv-detail-tech">{{ selected_tech }}</span>
                         </div>
-                        <div class="tv-epg tv-epg-next" data-if="row.next != ''">
-                            <span class="tv-epg-label">NEXT</span>
-                            <span class="tv-epg-title">{{ row.next }}</span>
+                        <div class="tv-detail-title">{{ selected_title }}</div>
+                        <div class="tv-detail-sub" data-if="selected_subtitle != ''">{{ selected_subtitle }}</div>
+                    </div>
+
+                    <!-- Live EPG guide -->
+                    <div class="tv-detail-epg-box" data-if="!selected_is_folder && (selected_now != '' || selected_next != '')">
+                        <div class="tv-detail-epg-row" data-if="selected_now != ''">
+                            <span class="tv-detail-epg-badge">NOW</span>
+                            <span class="tv-detail-epg-text">{{ selected_now }}</span>
+                        </div>
+                        <div class="tv-detail-epg-row tv-detail-epg-next" data-if="selected_next != ''">
+                            <span class="tv-detail-epg-badge tv-detail-badge-next">NEXT</span>
+                            <span class="tv-detail-epg-text">{{ selected_next }}</span>
                         </div>
                     </div>
 
-                    <div class="tv-action-bar">
-                        <div class="tv-kind" data-if="row.is_folder">GROUP</div>
-                        <div class="tv-kind" data-if="!row.is_folder">CHANNEL</div>
-                        <div class="tv-tag" data-if="row.is_folder">OPEN</div>
-                        <div class="tv-tag" data-if="!row.is_folder">LIVE</div>
+                    <!-- Prominent Watch / Open Action Button -->
+                    <div class="tv-detail-action" data-event-click="activate_selected()">
+                        <div class="tv-detail-glyph-box">
+                            <img class="tv-detail-glyph" src="/assets/icons/btn_cross.png"/>
+                        </div>
+                        <span class="tv-detail-action-text" data-if="!selected_is_folder">WATCH CHANNEL</span>
+                        <span class="tv-detail-action-text" data-if="selected_is_folder">OPEN GROUP</span>
+                    </div>
+
+                    <!-- Paging & Quick hint in preview panel -->
+                    <div class="tv-detail-paging" data-if="has_multiple_pages">
+                        <span class="tv-detail-page-hint">Use L1 / R1 or D-Pad Up/Down to flip pages</span>
                     </div>
                 </div>
             </div>
@@ -159,8 +218,9 @@
         <div id="tv-status-strip">
             <div id="tv-status-details">
                 <span id="tv-source-name">{{ provider_name }}</span>
-                <span class="tv-spec-pill" data-if="is_folder_level">CHANNEL GUIDE</span>
-                <span class="tv-spec-pill" data-if="!is_folder_level">LIVE CHANNELS</span>
+                <span class="tv-spec-pill" data-if="is_folder_level">GROUPS</span>
+                <span class="tv-spec-pill" data-if="!is_folder_level">CHANNELS</span>
+                <span class="tv-spec-pill" data-if="has_multiple_pages">{{ page_info }}</span>
                 <div id="tv-tuning-indicator" data-if="loading || tuning">
                     <div class="tv-spinner-sm"></div>
                     <span id="tv-tuning" data-if="tuning">TUNING...</span>
@@ -172,7 +232,8 @@
                 <div class="tv-hint">
                     <div class="tv-glyph"><img src="/assets/icons/btn_cross.png" class="tv-glyph-img"/></div>
                     <span class="tv-hint-text" data-if="empty && !loading">SELECT</span>
-                    <span class="tv-hint-text" data-if="!empty || loading">WATCH</span>
+                    <span class="tv-hint-text" data-if="!empty && !is_folder_level">WATCH</span>
+                    <span class="tv-hint-text" data-if="!empty && is_folder_level">OPEN</span>
                 </div>
                 <div class="tv-hint">
                     <div class="tv-glyph"><img src="/assets/icons/btn_circle.png" class="tv-glyph-img"/></div>
@@ -185,6 +246,10 @@
                 <div class="tv-hint" data-if="!empty && !is_folder_level">
                     <div class="tv-glyph"><img src="/assets/icons/btn_triangle.png" class="tv-glyph-img"/></div>
                     <span class="tv-hint-text">FAVORITE</span>
+                </div>
+                <div class="tv-hint" data-if="has_multiple_pages">
+                    <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">L1 / R1</span></div>
+                    <span class="tv-hint-text">PAGE</span>
                 </div>
                 <div class="tv-hint">
                     <div class="tv-glyph"><img src="/assets/icons/btn_dpad.png" class="tv-glyph-img"/></div>

@@ -118,6 +118,7 @@ third_party/SharpProspero/
 # Kept on disk, never committed.
 third_party/ps5-audio-decoding-research/
 third_party/ps5-gpu-research/
+third_party/ProsperoTV/
 third_party/ps5-hardware-video-decoding-research/
 
 # third_party/ps5-opengl/ is a git SUBMODULE (#77, render overhaul GL-1..GL-6),

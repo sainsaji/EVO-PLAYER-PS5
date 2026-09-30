@@ -20,7 +20,7 @@
 
 /*
  * The canvas the stylesheets are authored against. Every length in
- * assets/rml/*.rcss is expressed in dp, and the RmlUi contexts are given a
+ * assets/rml .rcss files are expressed in dp, and the RmlUi contexts are given a
  * density-independent pixel ratio of (panel width / EVO_UI_DESIGN_W), so the
  * same source lays out natively at 1080p, 1440p or anything else 16:9 - text
  * and vector edges are rasterised at the panel's own pixel size rather than
