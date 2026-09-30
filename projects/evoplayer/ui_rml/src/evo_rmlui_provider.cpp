@@ -723,7 +723,15 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
      * to agree keeps a provider that does mix them from flipping the header. */
     m_model.is_folder_level = !m_all_rows.empty() && m_all_rows[0].is_folder;
 
-    PublishRowWindow();
+    if (m_saved_offset > 0) {
+        size_t off = m_saved_offset;
+        int slot = m_saved_slot;
+        m_saved_offset = 0;
+        m_saved_slot = -1;
+        SetPageOffset(off, slot);
+    } else {
+        PublishRowWindow();
+    }
 
     if (m_model_handle) {
         m_model_handle.DirtyVariable("count");
@@ -1493,6 +1501,8 @@ void EvoRmlProviderHost::ShowSetupScreen()
 
 void EvoRmlProviderHost::ReloadCurrentLevel()
 {
+    m_saved_offset = m_row_offset;
+    m_saved_slot = FocusedRowIndex();
     const char* cur = m_stack.empty() ? "" : m_stack.back().c_str();
     RequestPage(cur, 0);
 }

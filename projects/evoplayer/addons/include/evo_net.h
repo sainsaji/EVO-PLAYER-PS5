@@ -80,7 +80,7 @@ extern "C" {
 #define EVO_NET_MAX_PATH        2048
 #define EVO_NET_MAX_URL         2048
 #define EVO_NET_MAX_REDIRECTS   5
-#define EVO_NET_MAX_BODY        (8 * 1024 * 1024)
+#define EVO_NET_MAX_BODY        (64 * 1024 * 1024)
 
 /* evo_net_request_async return codes */
 #define EVO_NET_ASYNC_OK         0

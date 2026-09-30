@@ -259,6 +259,8 @@ private:
 
     int  m_page = 0;
     bool m_has_more = false;
+    size_t m_saved_offset = 0;
+    int    m_saved_slot = -1;
     /*
      * A page has arrived and nothing has focus yet.
      *

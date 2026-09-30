@@ -757,21 +757,140 @@ static int tag_attr(const char *el, const char *el_end, const char *attr,
     return -1;
 }
 
+static void xml_decode_entities(char *s)
+{
+    if (!s) return;
+    char *r = s, *w = s;
+    while (*r) {
+        if (*r == '&') {
+            if (strncmp(r, "&amp;", 5) == 0) {
+                *w++ = '&'; r += 5;
+            } else if (strncmp(r, "&quot;", 6) == 0) {
+                *w++ = '"'; r += 6;
+            } else if (strncmp(r, "&apos;", 6) == 0) {
+                *w++ = '\''; r += 6;
+            } else if (strncmp(r, "&#39;", 5) == 0) {
+                *w++ = '\''; r += 5;
+            } else if (strncmp(r, "&lt;", 4) == 0) {
+                *w++ = '<'; r += 4;
+            } else if (strncmp(r, "&gt;", 4) == 0) {
+                *w++ = '>'; r += 4;
+            } else {
+                *w++ = *r++;
+            }
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+}
+
+static int channel_name_match(const char *a, const char *b)
+{
+    if (!a || !b) return 0;
+    if (strcasecmp(a, b) == 0) return 1;
+    /* Compare ignoring non-alphanumeric characters and whitespace */
+    const unsigned char *pa = (const unsigned char *)a;
+    const unsigned char *pb = (const unsigned char *)b;
+    while (*pa || *pb) {
+        while (*pa && !isalnum(*pa)) pa++;
+        while (*pb && !isalnum(*pb)) pb++;
+        if (!*pa || !*pb) break;
+        if (tolower(*pa) != tolower(*pb)) return 0;
+        pa++;
+        pb++;
+    }
+    while (*pa && !isalnum(*pa)) pa++;
+    while (*pb && !isalnum(*pb)) pb++;
+    return (!*pa && !*pb);
+}
+
 static void parse_xmltv(const char *body, size_t len)
 {
     if (!G.loaded || G.ch_count == 0) return;
 
-    int64_t now = (int64_t)time(NULL);
-    const char *p = body, *end = body + len;
+    const char *end = body + len;
 
     /*
-     * One pass. For each programme, if its channel is one of ours, keep it as
-     * `now` when it straddles the current time and as `next` when it is the
-     * earliest thing starting after it. No sorting, no buffering the file.
+     * Pass 1: Parse <channel id="..."> elements.
+     * Maps the XMLTV channel id to our playlist channels by matching
+     * <display-name> (or id) to G.ch[i].name. Also fills logos if missing.
      */
+    const char *cp = body;
+    int mapped_count = 0;
+    while (cp < end) {
+        const char *oc = strstr(cp, "<channel");
+        if (!oc || oc >= end) break;
+        const char *close = strstr(oc, "</channel>");
+        const char *ce = close ? close : end;
+
+        char chan_id[96] = {0};
+        const char *hdr_end = memchr(oc, '>', (size_t)(ce - oc));
+        if (hdr_end) {
+            tag_attr(oc, hdr_end, "id", chan_id, sizeof chan_id);
+            xml_decode_entities(chan_id);
+            trim(chan_id);
+
+            char dname[128] = {0};
+            const char *db = strstr(hdr_end, "<display-name");
+            if (db && db < ce) {
+                const char *dg = memchr(db, '>', (size_t)(ce - db));
+                const char *dc = dg ? strstr(dg, "</display-name>") : NULL;
+                if (dg && dc && dc > dg + 1) {
+                    size_t n = (size_t)(dc - dg - 1);
+                    if (n >= sizeof dname) n = sizeof dname - 1;
+                    memcpy(dname, dg + 1, n);
+                    dname[n] = '\0';
+                    xml_decode_entities(dname);
+                    trim(dname);
+                }
+            }
+
+            char icon_src[256] = {0};
+            const char *ic = strstr(hdr_end, "<icon");
+            if (ic && ic < ce) {
+                const char *ic_end = memchr(ic, '>', (size_t)(ce - ic));
+                if (ic_end) {
+                    tag_attr(ic, ic_end, "src", icon_src, sizeof icon_src);
+                }
+            }
+
+            if (chan_id[0]) {
+                for (int i = 0; i < G.ch_count; ++i) {
+                    int match = 0;
+                    if (dname[0] && channel_name_match(G.ch[i].name, dname)) {
+                        match = 1;
+                    } else if (channel_name_match(G.ch[i].name, chan_id)) {
+                        match = 1;
+                    }
+                    if (match) {
+                        if (!G.ch[i].tvg_id[0]) {
+                            free(G.ch[i].tvg_id);
+                            G.ch[i].tvg_id = dup_str(chan_id);
+                            mapped_count++;
+                        }
+                        if ((!G.ch[i].logo || !G.ch[i].logo[0]) && icon_src[0]) {
+                            free(G.ch[i].logo);
+                            G.ch[i].logo = dup_str(icon_src);
+                        }
+                    }
+                }
+            }
+        }
+        cp = close ? close + 10 : (hdr_end ? hdr_end + 1 : end);
+    }
+    PROV_LOG("iptv: XMLTV pass 1 mapped %d/%d channels by display-name/id", mapped_count, G.ch_count);
+
+    /*
+     * Pass 2: Parse <programme> elements.
+     * Matches programme channel to G.ch[i].tvg_id or G.ch[i].name.
+     */
+    int64_t now = (int64_t)time(NULL);
     int64_t *next_start = (int64_t *)calloc((size_t)G.ch_count, sizeof(int64_t));
     if (!next_start) return;
 
+    const char *p = body;
+    int progs_found = 0;
     while (p < end) {
         const char *op = strstr(p, "<programme");
         if (!op || op >= end) break;
@@ -785,6 +904,8 @@ static void parse_xmltv(const char *body, size_t len)
         tag_attr(op, hdr_end, "start",   start, sizeof start);
         tag_attr(op, hdr_end, "stop",    stop,  sizeof stop);
         tag_attr(op, hdr_end, "channel", chan,  sizeof chan);
+        xml_decode_entities(chan);
+        trim(chan);
 
         if (chan[0] && start[0]) {
             int64_t ts = xmltv_time(start);
@@ -800,6 +921,7 @@ static void parse_xmltv(const char *body, size_t len)
                     if (n >= sizeof title) n = sizeof title - 1;
                     memcpy(title, tg + 1, n);
                     title[n] = '\0';
+                    xml_decode_entities(title);
                     trim(title);
                 }
             }
@@ -808,9 +930,10 @@ static void parse_xmltv(const char *body, size_t len)
                 for (int i = 0; i < G.ch_count; ++i) {
                     int match = (G.ch[i].tvg_id[0] && strcmp(G.ch[i].tvg_id, chan) == 0);
                     if (!match && G.ch[i].name[0]) {
-                        match = (strcasecmp(G.ch[i].name, chan) == 0);
+                        match = channel_name_match(G.ch[i].name, chan);
                     }
                     if (!match) continue;
+                    progs_found++;
                     if (ts <= now && now < te) {
                         free(G.ch[i].now);
                         G.ch[i].now = dup_str(title);
@@ -829,48 +952,8 @@ static void parse_xmltv(const char *body, size_t len)
     }
 
     free(next_start);
-
-    /*
-     * Scan <channel> elements in XMLTV for logos (<icon src="...">)
-     * if the channel didn't already have a logo from the playlist.
-     */
-    const char *cp = body;
-    while (cp < end) {
-        const char *oc = strstr(cp, "<channel");
-        if (!oc || oc >= end) break;
-        const char *close = strstr(oc, "</channel>");
-        const char *ce = close ? close : end;
-
-        char chan_id[96] = {0};
-        const char *hdr_end = memchr(oc, '>', (size_t)(ce - oc));
-        if (hdr_end) {
-            tag_attr(oc, hdr_end, "id", chan_id, sizeof chan_id);
-            if (chan_id[0]) {
-                const char *ic = strstr(hdr_end, "<icon");
-                if (ic && ic < ce) {
-                    const char *ic_end = memchr(ic, '>', (size_t)(ce - ic));
-                    if (ic_end) {
-                        char icon_src[256] = {0};
-                        tag_attr(ic, ic_end, "src", icon_src, sizeof icon_src);
-                        if (icon_src[0]) {
-                            for (int i = 0; i < G.ch_count; ++i) {
-                                if (G.ch[i].tvg_id[0] && strcmp(G.ch[i].tvg_id, chan_id) == 0) {
-                                    if (!G.ch[i].logo || !G.ch[i].logo[0]) {
-                                        free(G.ch[i].logo);
-                                        G.ch[i].logo = dup_str(icon_src);
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        cp = close ? close + 10 : (hdr_end ? hdr_end + 1 : end);
-    }
-
     G.epg_loaded = 1;
+    PROV_LOG("iptv: XMLTV pass 2 matched %d programmes", progs_found);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1099,13 +1182,21 @@ typedef struct pending {
 static void emit_search(const char *query, int page,
                         evo_provider_items_cb cb, void *ud);
 
+__attribute__((weak)) void evo_rmlui_provider_reload(void);
+
 static void on_epg(int success, int status, const char *body, size_t len, void *ud)
 {
     (void)ud;
-    if (success && status == 200 && body && len)
+    PROV_LOG("iptv: on_epg result success=%d status=%d len=%zu", success, status, len);
+    if (success && status == 200 && body && len) {
         parse_xmltv(body, len);
-    else
+        PROV_LOG("iptv: parse_xmltv finished, requesting UI level reload to display EPG");
+        if (evo_rmlui_provider_reload) {
+            evo_rmlui_provider_reload();
+        }
+    } else {
         G.epg_loaded = 1;   /* do not retry every page turn */
+    }
 }
 
 static void kick_epg(void)
