@@ -273,7 +273,56 @@ static void test_emby_url_and_config(void)
                 "Stream URL path malformed");
     TEST_ASSERT(strstr(stream_url, "api_key=sample_token_xyz") != NULL,
                 "Stream URL missing API authentication token");
-    
+
+    TEST_PASS();
+}
+
+/* #116: a PlaybackInfo reply with two versions -> two choices, each naming
+ * its MediaSourceId, with the details the stream picker shows. */
+static void test_emby_media_sources(void)
+{
+    TEST_START("Addons: Emby/Jellyfin MediaSources -> stream choices (#116)");
+
+    ms_client_t *c = ms_client(MS_JELLYFIN);
+    emby_config_t *cfg = ms_config(c);
+    snprintf(cfg->host, sizeof cfg->host, "jf.test");
+    cfg->port = 8096;
+    snprintf(cfg->token, sizeof cfg->token, "tok");
+
+    const char *body =
+        "{\"PlaySessionId\":\"ps1\",\"MediaSources\":["
+        "{\"Id\":\"src4k\",\"Name\":\"4K - HEVC\\nRemux\",\"Container\":\"mkv\","
+        " \"Size\":26306674688,\"Bitrate\":45000000,\"DefaultAudioStreamIndex\":2,"
+        " \"MediaStreams\":["
+        "  {\"Type\":\"Video\",\"Index\":0,\"Codec\":\"hevc\",\"Width\":3840,\"Height\":2160,"
+        "   \"VideoRange\":\"HDR\",\"VideoRangeType\":\"DOVIWithHDR10\"},"
+        "  {\"Type\":\"Audio\",\"Index\":1,\"Codec\":\"aac\",\"Channels\":2},"
+        "  {\"Type\":\"Audio\",\"Index\":2,\"Codec\":\"truehd\",\"Channels\":8}]},"
+        "{\"Id\":\"src1080\",\"Name\":\"\",\"Container\":\"mp4\","
+        " \"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Width\":1920,\"Height\":1080,"
+        "   \"VideoRange\":\"SDR\"},{\"Type\":\"Audio\",\"Codec\":\"eac3\",\"Channels\":6,\"IsDefault\":true}]},"
+        "{\"Name\":\"no id - skipped\"}]}";
+
+    evo_stream_choice_t ch[4];
+    int n = ms_parse_sources(c, "i:item1", body, ch, 4);
+    TEST_ASSERT(n == 2, "expected two versions");
+    TEST_ASSERT(strstr(ch[0].url, "/Videos/item1/stream?Static=true&MediaSourceId=src4k&PlaySessionId=ps1&api_key=tok") != NULL,
+                "4K version URL wrong");
+    TEST_ASSERT(strstr(ch[1].url, "MediaSourceId=src1080") != NULL, "1080p version URL wrong");
+    TEST_ASSERT(strcmp(ch[0].label, "4K - HEVC | Remux") == 0, "multi-line name not flattened");
+    TEST_ASSERT(strcmp(ch[1].label, "Version 2") == 0, "unnamed version label wrong");
+    TEST_ASSERT(ch[0].width == 3840 && ch[0].height == 2160, "4K size wrong");
+    TEST_ASSERT(strcmp(ch[0].video_codec, "hevc") == 0, "video codec wrong");
+    TEST_ASSERT(strcmp(ch[0].video_range, "Dolby Vision") == 0, "DV not recognised");
+    TEST_ASSERT(strcmp(ch[0].audio_codec, "truehd") == 0 && ch[0].audio_channels == 8,
+                "DefaultAudioStreamIndex not honoured");
+    TEST_ASSERT(ch[0].size_bytes == 26306674688LL && ch[0].bitrate_bps == 45000000, "size/bitrate wrong");
+    TEST_ASSERT(strcmp(ch[1].video_range, "SDR") == 0, "SDR not recognised");
+    TEST_ASSERT(strcmp(ch[1].audio_codec, "eac3") == 0 && ch[1].audio_channels == 6, "IsDefault audio wrong");
+
+    TEST_ASSERT(ms_parse_sources(c, "i:item1", "{\"MediaSources\":[]}", ch, 4) == 0, "empty list not 0");
+    TEST_ASSERT(ms_parse_sources(c, "i:item1", "not json", ch, 4) == 0, "bad JSON not 0");
+
     TEST_PASS();
 }
 
@@ -612,6 +661,7 @@ int main(void)
     test_direct_mem_lifecycle();
     test_clean_media_title_resolution();
     test_emby_url_and_config();
+    test_emby_media_sources();
     test_provider_bundle_path_safety();
     test_provider_url_escape();
     test_navigation_grid_and_focus();

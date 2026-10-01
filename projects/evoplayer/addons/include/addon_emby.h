@@ -98,6 +98,16 @@ int  ms_resolve(ms_client_t *c, const char *item_id,
 void ms_report(ms_client_t *c, const char *item_id, int64_t pos_sec,
                int64_t dur_sec, evo_provider_play_state_t state);
 
+/* The version about to play (the provider's stream_chosen): later reports
+ * carry its MediaSourceId and PlaySessionId. */
+void ms_stream_chosen(ms_client_t *c, const char *item_id, const evo_stream_choice_t *choice);
+
+/* A PlaybackInfo reply -> one choice per MediaSource, server order. Returns
+ * the count, 0 when the body lists none. Pure apart from the client's address
+ * and token, which go into the URLs; exposed for the host tests. */
+int  ms_parse_sources(ms_client_t *c, const char *item_id, const char *body,
+                      evo_stream_choice_t *out, int max);
+
 /* Direct stream URL (Static=true, the file as it is) for a raw item id. */
 int  ms_build_stream_url(ms_client_t *c, const char *item_id, char *out, size_t cap);
 

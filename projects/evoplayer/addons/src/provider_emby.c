@@ -47,6 +47,11 @@ static void emby_p_progress(const char *id, int64_t pos, int64_t dur, evo_provid
     ms_report(C, id, pos, dur, st);
 }
 
+static void emby_p_chosen(const char *id, const evo_stream_choice_t *ch)
+{
+    ms_stream_chosen(C, id, ch);
+}
+
 static int  emby_p_signed_in(void) { return ms_is_signed_in(C); }
 static void emby_p_sign_out(void)  { ms_sign_out(C); }
 static const char *emby_p_get_source(void)       { return ms_get_source(C); }
@@ -58,7 +63,8 @@ const evo_provider_t evo_provider_emby = {
     .icon            = "icon_emby.png",
     .caps            = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                        EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_PROGRESS |
-                       EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_WEBUI,
+                       EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_WEBUI |
+                       EVO_PROVIDER_CAP_PICK,
     .api_version     = EVO_PROVIDER_API_VERSION,
     .init            = emby_p_init,
     .shutdown        = emby_p_shutdown,
@@ -67,6 +73,7 @@ const evo_provider_t evo_provider_emby = {
     .search          = emby_p_search,
     .resolve         = emby_p_resolve,
     .report_progress = emby_p_progress,
+    .stream_chosen   = emby_p_chosen,
     .get_source      = emby_p_get_source,
     .set_source      = emby_p_set_source,
     .web_ui_url      = emby_p_get_source,

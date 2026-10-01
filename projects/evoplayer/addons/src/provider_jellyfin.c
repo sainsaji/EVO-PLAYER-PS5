@@ -52,6 +52,11 @@ static void jf_progress(const char *id, int64_t pos, int64_t dur, evo_provider_p
     ms_report(C, id, pos, dur, st);
 }
 
+static void jf_chosen(const char *id, const evo_stream_choice_t *ch)
+{
+    ms_stream_chosen(C, id, ch);
+}
+
 static const char *jf_get_source(void)          { return ms_get_source(C); }
 static int         jf_set_source(const char *v) { return ms_set_source(C, v); }
 
@@ -61,7 +66,8 @@ const evo_provider_t evo_provider_jellyfin = {
     .icon            = "icon_emby.png",
     .caps            = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                        EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_PROGRESS |
-                       EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_WEBUI,
+                       EVO_PROVIDER_CAP_CONFIG  | EVO_PROVIDER_CAP_WEBUI |
+                       EVO_PROVIDER_CAP_PICK,
     .api_version     = EVO_PROVIDER_API_VERSION,
     .init            = jf_init,
     .shutdown        = jf_shutdown,
@@ -70,6 +76,7 @@ const evo_provider_t evo_provider_jellyfin = {
     .search          = jf_search,
     .resolve         = jf_resolve,
     .report_progress = jf_progress,
+    .stream_chosen   = jf_chosen,
     .get_source      = jf_get_source,
     .set_source      = jf_set_source,
     .web_ui_url      = jf_get_source,

@@ -157,6 +157,8 @@ int launch_choice(int idx)
 {
     g_pending.active_choice = idx;
     const evo_stream_choice_t& c = g_pending.choices[idx];
+    if (const evo_provider_t* p = evo_provider_find(g_pending.provider))
+        if (p->stream_chosen) p->stream_chosen(g_pending.item_id, &c);
 
     PlaybackSource src;
     src.url      = c.url;
@@ -197,6 +199,55 @@ bool choice_is_hls(const evo_stream_choice_t& c)
     std::string u(c.url);
     std::transform(u.begin(), u.end(), u.begin(), [](unsigned char ch) { return std::tolower(ch); });
     return u.find(".m3u8") != std::string::npos;
+}
+
+/*
+ * What a source row says about its file, when the provider knows anything:
+ * "4K HEVC  -  Dolby Vision  -  24.5 GB  -  45.0 Mbps  -  TRUEHD 7.1" (#116).
+ * "" when it knows nothing, and the row falls back to "Source N of M".
+ */
+std::string source_detail(const evo_stream_choice_t& c)
+{
+    std::string d;
+    auto add = [&d](const std::string& s) {
+        if (s.empty()) return;
+        if (!d.empty()) d += "  -  ";
+        d += s;
+    };
+    auto upper = [](const char* s) {
+        std::string u(s);
+        std::transform(u.begin(), u.end(), u.begin(), [](unsigned char ch) { return std::toupper(ch); });
+        return u;
+    };
+    char buf[48];
+    std::string video;
+    if (c.width >= 3200 || c.height >= 1800)      video = "4K";
+    else if (c.width >= 1800 || c.height >= 1000) video = "1080p";
+    else if (c.width >= 1200 || c.height >= 700)  video = "720p";
+    else if (c.height > 0) { std::snprintf(buf, sizeof buf, "%dp", c.height); video = buf; }
+    if (c.video_codec[0]) video += (video.empty() ? "" : " ") + upper(c.video_codec);
+    add(video);
+    add(c.video_range);
+    if (c.size_bytes > 0) {
+        const double gb = (double)c.size_bytes / (1024.0 * 1024.0 * 1024.0);
+        if (gb >= 1.0) std::snprintf(buf, sizeof buf, "%.1f GB", gb);
+        else           std::snprintf(buf, sizeof buf, "%.0f MB", gb * 1024.0);
+        add(buf);
+    }
+    if (c.bitrate_bps > 0) {
+        std::snprintf(buf, sizeof buf, "%.1f Mbps", (double)c.bitrate_bps / 1e6);
+        add(buf);
+    }
+    std::string audio = upper(c.audio_codec);
+    if (c.audio_channels > 0) {
+        const int ch = c.audio_channels;
+        if (ch == 1)      std::snprintf(buf, sizeof buf, "Mono");
+        else if (ch == 2) std::snprintf(buf, sizeof buf, "Stereo");
+        else              std::snprintf(buf, sizeof buf, "%d.1", ch - 1);
+        audio += (audio.empty() ? "" : " ") + std::string(buf);
+    }
+    add(audio);
+    return d;
 }
 
 /*
@@ -714,8 +765,12 @@ void ProviderHostScreen::renderStreamPicker(uint32_t* framebuffer, int width, in
         const int kind = g_pending.kind[i];
 
         if (kind == KindSource) {
-            std::snprintf(detail[i], sizeof detail[i], "Source %d of %d%s", i + 1, total,
-                          choice_is_hls(c) ? "  -  HLS" : "");
+            const std::string d = source_detail(c);
+            if (!d.empty())
+                std::snprintf(detail[i], sizeof detail[i], "%s", d.c_str());
+            else
+                std::snprintf(detail[i], sizeof detail[i], "Source %d of %d%s", i + 1, total,
+                              choice_is_hls(c) ? "  -  HLS" : "");
         } else if (kind == KindListed) {
             std::snprintf(detail[i], sizeof detail[i], "%s",
                           choice_is_hls(c) ? "As the playlist lists it - EVO picks the quality"
@@ -1004,50 +1059,46 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
             const char* title = evo_rmlui_provider_get_focused_title();
             const char* id = evo_rmlui_provider_get_focused_id();
             if (title && title[0]) {
+                /* Heap, not stack: a resolve can answer later from
+                 * evo_net_poll() (Stremio, and Emby/Jellyfin since #116 ask
+                 * the server for its versions), long after this frame. */
                 struct FavCtx {
                     char title[128];
                     char id[128];
-                    bool handled;
-                } ctx;
-                std::memset(&ctx, 0, sizeof(ctx));
-                std::snprintf(ctx.title, sizeof(ctx.title), "%s", title);
-                std::snprintf(ctx.id, sizeof(ctx.id), "%s", id ? id : "");
+                };
+                auto* ctx = static_cast<FavCtx*>(std::calloc(1, sizeof(FavCtx)));
+                if (!ctx) return true;
+                std::snprintf(ctx->title, sizeof(ctx->title), "%s", title);
+                std::snprintf(ctx->id, sizeof(ctx->id), "%s", id ? id : "");
 
-                /* Resolve stream URL so favorite path points to direct stream */
-                evo_provider_resolve_chain(m_providerId.c_str(), id, [](int ok, const evo_stream_choice_t* choices, int count, void* ud) {
-                    auto* c = static_cast<FavCtx*>(ud);
-                    if (ok && count > 0 && choices && choices[0].url[0]) {
-                        int idx = favorites_find(choices[0].url);
-                        if (idx < 0) idx = favorites_find(c->title);
-                        if (idx >= 0) {
-                            favorites_remove(favorite_files[idx].path);
-                            favorites_save();
-                            toast("FAVORITES", "Removed from favorites");
-                            evo_feedback(EVO_FB_CANCEL);
-                        } else {
-                            favorites_add(choices[0].url, c->title, 0.0);
-                            favorites_save();
-                            toast("FAVORITES", "Added to favorites");
-                            evo_feedback(EVO_FB_CONFIRM);
-                        }
-                        c->handled = true;
-                    }
-                }, &ctx);
-
-                if (!ctx.handled) {
-                    int idx = favorites_find(title);
-                    if (idx < 0 && id && id[0]) idx = favorites_find(id);
+                /* Toggle: the resolved stream URL when there is one, so the
+                 * favourite path points at the stream; else the title. */
+                auto toggle = [](FavCtx* c, const char* url) {
+                    int idx = url ? favorites_find(url) : -1;
+                    if (idx < 0) idx = favorites_find(c->title);
+                    if (idx < 0 && !url && c->id[0]) idx = favorites_find(c->id);
                     if (idx >= 0) {
                         favorites_remove(favorite_files[idx].path);
                         favorites_save();
                         toast("FAVORITES", "Removed from favorites");
                         evo_feedback(EVO_FB_CANCEL);
                     } else {
-                        favorites_add(title, title, 0.0);
+                        favorites_add(url ? url : c->title, c->title, 0.0);
                         favorites_save();
                         toast("FAVORITES", "Added to favorites");
                         evo_feedback(EVO_FB_CONFIRM);
                     }
+                };
+                static void (*s_toggle)(FavCtx*, const char*) = toggle;
+
+                if (evo_provider_resolve_chain(m_providerId.c_str(), id, [](int ok, const evo_stream_choice_t* choices, int count, void* ud) {
+                        auto* c = static_cast<FavCtx*>(ud);
+                        const bool have = ok && count > 0 && choices && choices[0].url[0];
+                        s_toggle(c, have ? choices[0].url : nullptr);
+                        std::free(c);
+                    }, ctx) != 0) {
+                    toggle(ctx, nullptr);
+                    std::free(ctx);
                 }
                 evo_rmlui_provider_reload();
                 return true;

@@ -48,8 +48,14 @@ struct ms_client {
     emby_config_t cfg;
     /* One per playback, sent with every report. Emby 4.9 answers a
      * /Sessions/Playing without one with 400 "Value cannot be null (key)". */
-    char play_session[40];
+    char play_session[64];
     unsigned play_count;
+    /* The version about to play (#116), from stream_chosen: reports carry its
+     * MediaSourceId, and the server's PlaySessionId when PlaybackInfo gave one.
+     * Only used while chosen_item matches the reported item. */
+    char chosen_item[96];
+    char chosen_source[96];
+    char chosen_session[64];
     char qc_secret[128];           /* Quick Connect in progress */
 };
 
@@ -743,9 +749,128 @@ int ms_build_stream_url(ms_client_t *c, const char *item_id, char *out, size_t c
     return 0;
 }
 
-int ms_resolve(ms_client_t *c, const char *item_id, evo_provider_resolve_cb cb, void *ud)
+/*
+ * VERSIONS (#116)
+ *
+ * One item can have several MediaSources: a 4K and a 1080p file of the same
+ * movie, or - behind AIOStreams - a dozen releases. /Items/{id}/PlaybackInfo
+ * lists them; each becomes one choice whose stream URL names its
+ * MediaSourceId. Without that parameter the server plays the first source.
+ * Anything that goes wrong on the way falls back to the plain direct stream,
+ * which is what EVO always played.
+ */
+#define MS_MAX_SOURCES 12
+
+static void video_range(cJSON *vs, char *out, size_t cap)
 {
-    if (!item_id || strncmp(item_id, "i:", 2) || !c->cfg.is_connected) return -1;
+    const char *t   = jstr(vs, "VideoRangeType");     /* Jellyfin 10.9+   */
+    const char *ext = jstr(vs, "ExtendedVideoType");  /* Emby 4.8+        */
+    const char *r   = jstr(vs, "VideoRange");         /* both: SDR / HDR  */
+    const char *s   = "";
+    if (!strncmp(t, "DOVI", 4) || !strcmp(ext, "DolbyVision") || jstr(vs, "VideoDoViTitle")[0])
+        s = "Dolby Vision";
+    else if (!strcmp(t, "HDR10Plus") || !strcmp(ext, "Hdr10Plus")) s = "HDR10+";
+    else if (!strcmp(t, "HDR10")     || !strcmp(ext, "Hdr10"))     s = "HDR10";
+    else if (!strcmp(t, "HLG")       || !strcmp(ext, "HyperLogGamma")) s = "HLG";
+    else if (!strcmp(r, "HDR"))                                     s = "HDR";
+    else if (!strcmp(t, "SDR") || !strcmp(r, "SDR"))                s = "SDR";
+    snprintf(out, cap, "%s", s);
+}
+
+/* A source name on one line: AIOStreams writes multi-line release blurbs. */
+static void one_line(const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (; *in && o + 4 < cap; ++in) {
+        unsigned char ch = (unsigned char)*in;
+        if (ch == '\n') {
+            while (o > 0 && out[o - 1] == ' ') o--;
+            if (o > 0) { memcpy(out + o, " | ", 3); o += 3; }
+            while (in[1] == ' ' || in[1] == '\n' || in[1] == '\r') in++;
+        } else if (ch < 0x20) {
+            if (o > 0 && out[o - 1] != ' ') out[o++] = ' ';
+        } else {
+            out[o++] = (char)ch;
+        }
+    }
+    out[o] = '\0';
+}
+
+static void source_url(ms_client_t *c, const char *item, const char *source,
+                       const char *session, char *out, size_t cap)
+{
+    char base[200], src[200], ses[128];
+    ms_base(c, base, sizeof base);
+    if (evo_provider_url_escape(source, src, sizeof src) < 0) src[0] = '\0';
+    if (!session || evo_provider_url_escape(session, ses, sizeof ses) < 0) ses[0] = '\0';
+    snprintf(out, cap, "%s/Videos/%s/stream?Static=true&MediaSourceId=%s%s%s&api_key=%s",
+             base, item, src, ses[0] ? "&PlaySessionId=" : "", ses, c->cfg.token);
+}
+
+int ms_parse_sources(ms_client_t *c, const char *item_id, const char *body,
+                     evo_stream_choice_t *out, int max)
+{
+    if (!body || !out || max <= 0) return 0;
+    cJSON *root = cJSON_Parse(body);
+    cJSON *arr  = root ? cJSON_GetObjectItem(root, "MediaSources") : NULL;
+    const char *session = jstr(root, "PlaySessionId");
+    int n = 0;
+    for (int i = 0; arr && cJSON_IsArray(arr) && i < cJSON_GetArraySize(arr) && n < max; ++i) {
+        cJSON *ms = cJSON_GetArrayItem(arr, i);
+        const char *id = jstr(ms, "Id");
+        if (!id[0]) continue;
+        evo_stream_choice_t *ch = &out[n];
+        evo_provider_stream_choice_clear(ch);
+        source_url(c, raw_id(item_id), id, session, ch->url, sizeof ch->url);
+        snprintf(ch->container, sizeof ch->container, "%s", jstr(ms, "Container"));
+        ch->size_bytes  = (int64_t)jnum(ms, "Size");
+        ch->bitrate_bps = (int64_t)jnum(ms, "Bitrate");
+
+        cJSON *streams = cJSON_GetObjectItem(ms, "MediaStreams");
+        cJSON *vs = NULL, *as = NULL, *as_default = NULL, *as_first = NULL;
+        cJSON *dai = cJSON_GetObjectItem(ms, "DefaultAudioStreamIndex");
+        for (int k = 0; streams && k < cJSON_GetArraySize(streams); ++k) {
+            cJSON *s = cJSON_GetArrayItem(streams, k);
+            const char *type = jstr(s, "Type");
+            if (!strcmp(type, "Video") && !vs) vs = s;
+            else if (!strcmp(type, "Audio")) {
+                if (!as_first) as_first = s;
+                if (!as_default && jbool(s, "IsDefault")) as_default = s;
+                if (dai && cJSON_IsNumber(dai) && (int)jnum(s, "Index") == dai->valueint) as = s;
+            }
+        }
+        if (!as) as = as_default ? as_default : as_first;
+        if (vs) {
+            ch->width  = (int)jnum(vs, "Width");
+            ch->height = (int)jnum(vs, "Height");
+            snprintf(ch->video_codec, sizeof ch->video_codec, "%s", jstr(vs, "Codec"));
+            video_range(vs, ch->video_range, sizeof ch->video_range);
+        }
+        if (as) {
+            snprintf(ch->audio_codec, sizeof ch->audio_codec, "%s", jstr(as, "Codec"));
+            ch->audio_channels = (int)jnum(as, "Channels");
+        }
+
+        char name[256];
+        one_line(jstr(ms, "Name"), name, sizeof name);
+        if (name[0]) snprintf(ch->label, sizeof ch->label, "%.63s", name);
+        else         snprintf(ch->label, sizeof ch->label, "Version %d", n + 1);
+        ++n;
+    }
+    if (root) cJSON_Delete(root);
+    return n;
+}
+
+typedef struct {
+    ms_client_t *c;
+    evo_provider_resolve_cb cb;
+    void *ud;
+    char item[EVO_PROVIDER_MAX_ITEM_ID];
+} resolve_ctx_t;
+
+static void resolve_direct(ms_client_t *c, const char *item_id,
+                           evo_provider_resolve_cb cb, void *ud)
+{
     evo_stream_choice_t choice;
     evo_provider_stream_choice_clear(&choice);
     ms_build_stream_url(c, item_id, choice.url, sizeof choice.url);
@@ -753,7 +878,82 @@ int ms_resolve(ms_client_t *c, const char *item_id, evo_provider_resolve_cb cb, 
      * whatever it is on the server, and FFmpeg probes it anyway. */
     snprintf(choice.label, sizeof choice.label, "Direct");
     if (cb) cb(1, &choice, 1, ud);
+}
+
+static void on_playback_info(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    resolve_ctx_t *x = (resolve_ctx_t *)ud;
+    evo_stream_choice_t *ch = (evo_stream_choice_t *)calloc(MS_MAX_SOURCES, sizeof *ch);
+    int n = (ch && ok && status == 200) ? ms_parse_sources(x->c, x->item, body, ch, MS_MAX_SOURCES) : 0;
+    if (n <= 0) {
+        PROV_LOG("media server: PlaybackInfo for %s -> ok=%d http=%d, no sources - direct stream",
+                 x->item, ok, status);
+        resolve_direct(x->c, x->item, x->cb, x->ud);
+    } else {
+        PROV_LOG("media server: %d version(s) for %s", n, x->item);
+        for (int i = 0; i < n; ++i)
+            PROV_LOG("  [%d] %s | %dx%d %s %s | %s %dch | %lld kbps %lld MB", i, ch[i].label,
+                     ch[i].width, ch[i].height, ch[i].video_codec, ch[i].video_range,
+                     ch[i].audio_codec, ch[i].audio_channels,
+                     (long long)(ch[i].bitrate_bps / 1000), (long long)(ch[i].size_bytes >> 20));
+        if (x->cb) x->cb(1, ch, n, x->ud);
+    }
+    free(ch);
+    free(x);
+}
+
+int ms_resolve(ms_client_t *c, const char *item_id, evo_provider_resolve_cb cb, void *ud)
+{
+    if (!item_id || strncmp(item_id, "i:", 2) || !c->cfg.is_connected) return -1;
+    resolve_ctx_t *x = (resolve_ctx_t *)calloc(1, sizeof *x);
+    if (!x) return -2;
+    x->c = c; x->cb = cb; x->ud = ud;
+    snprintf(x->item, sizeof x->item, "%s", item_id);
+
+    char path[256], body[128];
+    snprintf(path, sizeof path, "/Items/%s/PlaybackInfo?UserId=%s", raw_id(item_id), c->cfg.user_id);
+    snprintf(body, sizeof body, "{\"UserId\":\"%s\"}", c->cfg.user_id);
+    if (ms_request(c, "POST", path, body, 1, on_playback_info, x) != 0) {
+        free(x);
+        resolve_direct(c, item_id, cb, ud);
+    }
     return 0;
+}
+
+/* Copy query parameter `key` out of `url`, %-decoded. "" when absent. */
+static void url_param(const char *url, const char *key, char *out, size_t cap)
+{
+    out[0] = '\0';
+    size_t kl = strlen(key);
+    const char *q = strchr(url, '?');
+    for (const char *p = q; p; p = strchr(p + 1, '&')) {
+        if (strncmp(p + 1, key, kl) || p[1 + kl] != '=') continue;
+        const char *v = p + 2 + kl;
+        size_t o = 0;
+        while (*v && *v != '&' && o + 1 < cap) {
+            if (*v == '%' && v[1] && v[2]) {
+                char hex[3] = { v[1], v[2], 0 };
+                out[o++] = (char)strtol(hex, NULL, 16);
+                v += 3;
+            } else {
+                out[o++] = *v++;
+            }
+        }
+        out[o] = '\0';
+        return;
+    }
+}
+
+void ms_stream_chosen(ms_client_t *c, const char *item_id, const evo_stream_choice_t *choice)
+{
+    c->chosen_item[0] = c->chosen_source[0] = c->chosen_session[0] = '\0';
+    if (!item_id || !choice) return;
+    url_param(choice->url, "MediaSourceId", c->chosen_source, sizeof c->chosen_source);
+    if (!c->chosen_source[0]) return;                  /* the direct fallback */
+    url_param(choice->url, "PlaySessionId", c->chosen_session, sizeof c->chosen_session);
+    snprintf(c->chosen_item, sizeof c->chosen_item, "%s", raw_id(item_id));
+    PROV_LOG("media server: playing %s source %s (%s)", c->chosen_item, c->chosen_source, choice->label);
 }
 
 /* Logged, so a server that rejects the reports shows in evo.log rather than
@@ -770,30 +970,41 @@ void ms_report(ms_client_t *c, const char *item_id, int64_t pos_sec, int64_t dur
                evo_provider_play_state_t state)
 {
     if (!c->cfg.is_connected || !item_id || strncmp(item_id, "i:", 2)) return;
-    char body[448];
+    char body[640];
     long long pos = (long long)pos_sec * 10000000LL;
     const char *path = "/Sessions/Playing";
-    if (state == EVO_PROVIDER_PLAY_START || !c->play_session[0])
-        snprintf(c->play_session, sizeof c->play_session, "evo-%s-%u-%lld",
-                 c->kind == MS_EMBY ? "e" : "j", ++c->play_count, (long long)time(NULL));
+    /* The version that plays when the user picked one (#116); otherwise the
+     * item's own id, which is what a single-source item's source is called. */
+    const char *item = raw_id(item_id);
+    const int chosen = c->chosen_source[0] && !strcmp(c->chosen_item, item);
+    const char *source = chosen ? c->chosen_source : item;
+    if (state == EVO_PROVIDER_PLAY_START || !c->play_session[0]) {
+        if (chosen && c->chosen_session[0])
+            snprintf(c->play_session, sizeof c->play_session, "%s", c->chosen_session);
+        else
+            snprintf(c->play_session, sizeof c->play_session, "evo-%s-%u-%lld",
+                     c->kind == MS_EMBY ? "e" : "j", ++c->play_count, (long long)time(NULL));
+    }
     if (state == EVO_PROVIDER_PLAY_START) {
         snprintf(body, sizeof body,
                  "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
                  "\"PositionTicks\":%lld,\"CanSeek\":true,\"PlayMethod\":\"DirectStream\"}",
-                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
+                 item, source, c->play_session, pos);
     } else if (state == EVO_PROVIDER_PLAY_UPDATE) {
         path = "/Sessions/Playing/Progress";
         snprintf(body, sizeof body,
                  "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
                  "\"PositionTicks\":%lld,\"CanSeek\":true,\"IsPaused\":false,"
                  "\"PlayMethod\":\"DirectStream\",\"EventName\":\"TimeUpdate\"}",
-                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
+                 item, source, c->play_session, pos);
     } else {
         path = "/Sessions/Playing/Stopped";
         snprintf(body, sizeof body,
                  "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
                  "\"PositionTicks\":%lld}",
-                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
+                 item, source, c->play_session, pos);
+        /* A later play of the same item from Recent goes through no picker. */
+        if (chosen) c->chosen_item[0] = c->chosen_source[0] = c->chosen_session[0] = '\0';
     }
     (void)dur_sec;
     ms_request(c, "POST", path, body, 1, on_report, (void *)(path + 10));

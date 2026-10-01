@@ -140,6 +140,8 @@ typedef struct evo_stream_choice {
     int     height;
     int64_t bitrate_bps;        /* 0 if unknown */
     int64_t size_bytes;         /* 0 if unknown or live */
+    char    video_range[16];    /* "SDR", "HDR10", "HDR10+", "HLG", "Dolby Vision"; "" unknown */
+    int     audio_channels;     /* 0 if unknown */
 
     /* No duration, not seekable. Set from EVO_PROVIDER_CAP_LIVE providers and
      * from any HLS playlist with no EXT-X-ENDLIST. */
@@ -274,6 +276,15 @@ typedef struct evo_provider {
     /* CAP_PROGRESS. Fire-and-forget; no callback, never fails visibly. */
     void (*report_progress)(const char *item_id, int64_t pos_sec,
                             int64_t dur_sec, evo_provider_play_state_t state);
+
+    /*
+     * Optional. The choice from this provider's resolve that is about to
+     * play - the user's pick, or the automatic one. A media server reports
+     * progress against the version that plays (MediaSourceId), which only the
+     * choice says; item_id stays the catalog id so resume and Recent keys do
+     * not split per version. Called on the main thread before playback opens.
+     */
+    void (*stream_chosen)(const char *item_id, const evo_stream_choice_t *choice);
 
     /*
      * CAP_UI. Where this provider's UI bundle lives, or NULL to use the
