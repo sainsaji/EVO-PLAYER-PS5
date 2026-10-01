@@ -34,6 +34,7 @@
 #include "evo_toast.h"
 #include <chrono>
 #include <atomic>
+#include <cctype>
 #include <pthread.h>
 extern "C" void evo_log_alloc_state(const char *when);  /* PlaybackController.cpp */
 
@@ -593,6 +594,94 @@ void* web_start_worker(void*) {
     return nullptr;
 }
 
+/*
+ * Watched state and resume points back to Emby / Jellyfin. The page hands
+ * over a server URL that already names the item (/Videos/<id>/...) and
+ * carries the user's api_key, so EVO can make the same three session calls
+ * the server's own player makes. The server decides "played" from the
+ * position in the Stopped report, exactly as for its own player. A URL
+ * without both (Nuvio, a plain stream) reports nothing.
+ */
+struct WebReport {
+    bool on = false;
+    std::string base;       /* scheme://host:port[/emby] */
+    std::string item;
+    std::string key;
+    std::string mediaSource;
+    std::string playSession;
+    double lastPos = 0.0;
+    int frames = 0;
+};
+WebReport g_web_rep;
+
+std::string url_lower(const std::string& s) {
+    std::string r = s;
+    for (char& c : r) c = (char)std::tolower((unsigned char)c);
+    return r;
+}
+
+/* The value of query parameter `name` (matched case-insensitively). */
+std::string url_param(const std::string& url, const char* name) {
+    const std::string low = url_lower(url);
+    const std::string want = url_lower(name) + "=";
+    size_t q = low.find('?');
+    while (q != std::string::npos) {
+        size_t at = q + 1;
+        if (low.compare(at, want.size(), want) == 0) {
+            size_t v = at + want.size();
+            size_t e = url.find_first_of("&#", v);
+            return url.substr(v, e == std::string::npos ? std::string::npos : e - v);
+        }
+        q = low.find('&', at);
+    }
+    return std::string();
+}
+
+void web_report_begin(const std::string& url) {
+    g_web_rep = WebReport();
+    const std::string low = url_lower(url);
+    size_t scheme = low.find("://");
+    if (scheme == std::string::npos) return;
+    size_t path = low.find('/', scheme + 3);
+    if (path == std::string::npos) return;
+    size_t v = low.find("/videos/", path);
+    if (v == std::string::npos) v = low.find("/audio/", path);
+    if (v == std::string::npos) return;
+    size_t idStart = low.find('/', v + 1) + 1;
+    size_t idEnd = url.find_first_of("/?#", idStart);
+    std::string key = url_param(url, "api_key");
+    if (key.empty()) key = url_param(url, "ApiKey");
+    if (idEnd == std::string::npos || idEnd == idStart || key.empty()) return;
+
+    g_web_rep.base = url.substr(0, path);
+    if (low.compare(path, 6, "/emby/") == 0) g_web_rep.base += "/emby";
+    g_web_rep.item = url.substr(idStart, idEnd - idStart);
+    g_web_rep.key = key;
+    g_web_rep.mediaSource = url_param(url, "MediaSourceId");
+    if (g_web_rep.mediaSource.empty()) g_web_rep.mediaSource = g_web_rep.item;
+    g_web_rep.playSession = url_param(url, "PlaySessionId");
+    g_web_rep.on = true;
+}
+
+void web_report_cb(int success, int status, const char*, size_t, void* what) {
+    evo_bt("web: report %s -> ok=%d http=%d", (const char*)what, success, status);
+}
+
+void web_report(const char* what, double pos) {
+    if (!g_web_rep.on) return;
+    char body[640];
+    std::snprintf(body, sizeof body,
+                  "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
+                  "\"PositionTicks\":%lld,\"CanSeek\":true,\"PlayMethod\":\"DirectStream\"}",
+                  g_web_rep.item.c_str(), g_web_rep.mediaSource.c_str(),
+                  g_web_rep.playSession.c_str(), (long long)(pos * 10000000.0));
+    std::string url = g_web_rep.base + "/Sessions/Playing" + what;
+    std::string hdr = "X-Emby-Token: " + g_web_rep.key;
+    const char* headers[1] = { hdr.c_str() };
+    evo_net_request_async("POST", url.c_str(), body, headers, 1, web_report_cb,
+                          (void*)(what[0] ? what : "/start"));
+}
+
 void webui_playback_pump() {
     static int phase = 0;           /* 0 idle, 1 starting, 2 playing */
     static int frames = 0;
@@ -637,12 +726,25 @@ void webui_playback_pump() {
         phase = 2;
         frames = 0;
         seen_active = false;
+        web_report_begin(g_web_src.url);
+        evo_bt("web: server reporting %s (item %s)", g_web_rep.on ? "on" : "off",
+               g_web_rep.on ? g_web_rep.item.c_str() : "-");
+        web_report("", 0.0);
     } else {
         IPlaybackController* pb = app.getPlaybackController();
         bool active = pb && pb->isActive();
-        if (active)
+        if (active) {
             seen_active = true;
+            /* Kept while playing: the position is gone once playback stops,
+             * and the Stopped report is what sets watched / resume. */
+            double pos = pb->getPositionSeconds();
+            if (pos > 0.0) g_web_rep.lastPos = pos;
+            if (++g_web_rep.frames % 600 == 0)          /* ~10 s */
+                web_report("/Progress", g_web_rep.lastPos);
+        }
         if ((seen_active && !active) || (!seen_active && ++frames > 600)) {
+            web_report("/Stopped", g_web_rep.lastPos);
+            g_web_rep.on = false;
             evo_webui_playback_ended(seen_active ? 1 : 0);
             phase = 0;
         }

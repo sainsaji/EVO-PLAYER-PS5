@@ -32,13 +32,25 @@
  * Settings -> Interface -> Keyboard Input still chooses, and the choice
  * persists.
  */
-static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
 static int g_native_ime_broken = 0;   /* latched after a failed native open */
+
+/* package-app.sh --virtual-keyboard (debug builds only): the dev remote can
+ * neither press nor see the system IME, so pin EVO's own keyboard. */
+#if defined(EVO_FORCE_VIRTUAL_KEYBOARD)
+static int g_kb_type = EVO_KEYBOARD_TYPE_VIRTUAL;
+
+void evo_keyboard_set_type(int type)
+{
+    (void)type;
+}
+#else
+static int g_kb_type = EVO_KEYBOARD_TYPE_NATIVE;
 
 void evo_keyboard_set_type(int type)
 {
     g_kb_type = (type == EVO_KEYBOARD_TYPE_VIRTUAL) ? EVO_KEYBOARD_TYPE_VIRTUAL : EVO_KEYBOARD_TYPE_NATIVE;
 }
+#endif
 
 int evo_keyboard_get_type(void)
 {
@@ -489,6 +501,8 @@ static void submit_text(void)
 #define EVO_PAD_RIGHT     0x0020
 #define EVO_PAD_DOWN      0x0040
 #define EVO_PAD_LEFT      0x0080
+#define EVO_PAD_L2        0x0100
+#define EVO_PAD_R2        0x0200
 #define EVO_PAD_L1        0x0400
 #define EVO_PAD_R1        0x0800
 #define EVO_PAD_TRIANGLE  0x1000
@@ -559,6 +573,18 @@ int evo_keyboard_handle_input(uint32_t pressed)
     if (pressed & EVO_PAD_CIRCLE) { /* CIRCLE — Quick Cancel */
         evo_feedback(EVO_FB_CANCEL);
         g_kb.is_open = 0;
+        return 1;
+    }
+
+    /* L2 / R2 — '.' and ':'. A server address is mostly digits, dots and
+     * one colon, and the two keys sit at the far right of rows 2 and 3:
+     * typing 192.168.0.14:8096 took 103 D-pad presses on hardware. */
+    if (pressed & EVO_PAD_L2) {
+        insert_char('.');
+        return 1;
+    }
+    if (pressed & EVO_PAD_R2) {
+        insert_char(':');
         return 1;
     }
 

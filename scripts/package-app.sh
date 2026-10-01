@@ -11,6 +11,10 @@
 #   ./scripts/package-app.sh --usb-remote     + the scriptable FTP dev remote
 #                                             (/mnt/usb0/evo_cmd + evo_status +
 #                                             verbose vdec log) — off in release
+#   ./scripts/package-app.sh --virtual-keyboard  debug only: always use
+#                                             EVO's own keyboard, never the
+#                                             PS5 IME, which the dev remote
+#                                             can neither press nor see
 #   ./scripts/package-app.sh --breadcrumbs    + boot-trace notification
 #                                             popups (#51, off by default —
 #                                             klog carries these otherwise)
@@ -39,6 +43,7 @@ REBUILD_LIBC=0
 FFPFSC=0
 USB_REMOTE=0
 BREADCRUMBS=0
+VIRTUAL_KB=0
 AGC_DEVICE=1        # bare-metal AGC is the only render path
 NATIVE_SECONDARY=0
 NATIVE_SECONDARY_4K=0
@@ -56,6 +61,7 @@ while (( $# )); do
         --ffpfsc)       FFPFSC=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
+        --virtual-keyboard) VIRTUAL_KB=1 ;;  # debug: EVO's keyboard instead of the PS5 IME
         --agc)          AGC_DEVICE=1 ;;   # accepted and redundant: AGC is the only render path
         --gl|--no-gl|--gl-smoke|--gl-hdr-probe)
             die "$1 is gone. The OpenGL device path, its ps5-opengl submodule and
@@ -67,7 +73,7 @@ while (( $# )); do
         --no-native-secondary-4k) NO_NATIVE_SECONDARY_4K=1 ;;               # #41: escape hatch — HEVC/VP9 stay on but drop to 1080p, rollback to pre-2026-09-11 4K behaviour
         --native-10bit)         NATIVE_10BIT=1; NO_NATIVE_10BIT=0 ;;        # #41 Phase D: HEVC Main10 + VP9 Profile 2 resident decoders — ON BY DEFAULT, so this flag is a no-op kept for back-compat and for scripts that state it explicitly
         --no-native-10bit)      NO_NATIVE_10BIT=1; NATIVE_10BIT=0 ;;        # #41 Phase D escape hatch — 10-bit stays on the FFmpeg CPU path. Try this first if thumbnail/poster decode fails to allocate: Phase D's two slots left ~3 MB of flex memory free AT BOOT on 2026-09-11
-        -h|--help)      sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help)      sed -n '2,38p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
     shift
@@ -82,6 +88,7 @@ if ! in_container; then
     (( FFPFSC ))       && FWD+=(--ffpfsc)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
+    (( VIRTUAL_KB ))   && FWD+=(--virtual-keyboard)
     # Forward the RESOLVED choice, never the default, so the in-container build
     # cannot disagree with the host-side one.
     (( AGC_DEVICE ))   && FWD+=(--agc)
@@ -300,6 +307,11 @@ else
     # (tools/klog.sh) carries the same lines unconditionally in the app
     # module now, so the popups are only useful watching the TV without klog.
     (( BREADCRUMBS )) && APP_DEFS+=" -DEVO_BOOT_TRACE_POPUP=1"
+    # --virtual-keyboard: debug builds only. The PS5 IME is a system dialog
+    # that evo-remote.sh can neither press nor screenshot, and while it is up
+    # EVO routes every pad press to it - one stray prompt wedges a remote
+    # session. Users keep the IME; the Settings row cannot undo this.
+    (( VIRTUAL_KB )) && APP_DEFS+=" -DEVO_FORCE_VIRTUAL_KEYBOARD=1"
     # --native-secondary (#41): HEVC + VP9 resident sceVideodec2 decoders, at
     # 4K since 2026-09-11 — both hardware-verified (evo_vdec_native.c has the
     # full evidence). --no-native-secondary / --no-native-secondary-4k are the

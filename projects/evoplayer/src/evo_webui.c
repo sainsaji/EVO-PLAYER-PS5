@@ -42,6 +42,8 @@
 #if defined(EVO_APP_MODULE)
 
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -150,6 +152,7 @@ static const probe_layout_t k_layouts[] = {
 
 enum probe_state {
     P_OFF,          /* no trigger, finished, or the base path refused */
+    P_CHECK,        /* is the server there at all? (preflight thread) */
     P_WAIT,         /* counting frames before (re)opening */
     P_RUN,          /* dialog up */
     P_CLOSING,      /* handoff received, EVO closed the dialog, waiting for it */
@@ -159,6 +162,9 @@ enum probe_state {
 #define OPEN_DELAY_FRAMES   120      /* ~2 s at 60 fps */
 #define RUN_LOG_EVERY       1800     /* heartbeat while the dialog is up */
 #define DEFAULT_PORT        8686
+#define CHECK_TIMEOUT_MS    3000     /* preflight connect */
+#define CONNECT_TIMEOUT_MS  5000     /* every proxied connect */
+#define PAGE_LOAD_FRAMES    1200     /* ~10 s (the pump runs ~120x/s): no hook by then, the page never loaded */
 
 static int  s_preload_rc = -1;       /* sysmodule load */
 static int  s_init_done  = 0;        /* sceWebBrowserDialogInitialize ok */
@@ -176,6 +182,12 @@ static char s_url[1024];
 static char s_hook_profile[16];      /* "" = media server, "nuvio" */
 static char s_open_url[2048];        /* what the dialog opens first */
 static char s_reopen_url[2048];      /* where it reopens after playback */
+
+/* Why EVO ended the session itself (server unreachable, page never loaded);
+ * the provider screen shows it once through evo_webui_take_error(). */
+static char s_error[256];
+static int  s_error_pending = 0;
+static volatile int s_check_rc = 0;  /* preflight: 0 running, 1 ok, -1 failed */
 
 /* The stream EVO's player should start, handed to Application by
  * evo_webui_take_play() once the dialog is fully closed. */
@@ -205,6 +217,8 @@ static int  s_listen_fd  = -1;
 static volatile int s_srv_stop = 0;
 static int  s_handoff_ready = 0;
 static int  s_close_req = 0;         /* the page's "Back to EVO" button */
+static int  s_hook_seen = 0;         /* the page fetched /evo/hook.js: it loaded */
+static int  s_entry_failed = 0;      /* the site's index.html could not be fetched */
 static char s_h_url[2048];
 static char s_h_title[256];
 static char s_h_return[2048];
@@ -592,6 +606,38 @@ static void u_close(uconn_t *u)
     if (u->fd >= 0) { close(u->fd); u->fd = -1; }
 }
 
+/* A connected blocking socket, or -1. Non-blocking connect + poll, as in
+ * evo_net.c: a blocking connect() to an address nobody answers sits in the
+ * kernel's SYN retries for ~75 s, with the user staring at a blank page. */
+static int connect_bounded(const struct addrinfo *rp, int timeout_ms)
+{
+    int fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+    if (fd < 0) return -1;
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    int rc = connect(fd, rp->ai_addr, rp->ai_addrlen);
+    if (rc != 0 && flags >= 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        int pr;
+        do {
+            pr = poll(&pfd, 1, timeout_ms);
+        } while (pr < 0 && errno == EINTR);
+        int err = 0;
+        socklen_t len = sizeof err;
+        rc = (pr > 0 && getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) ? 0 : -1;
+        if (pr == 0) errno = ETIMEDOUT;
+    }
+    if (rc != 0) {
+        close(fd);
+        return -1;
+    }
+    if (flags >= 0) fcntl(fd, F_SETFL, flags);
+    return fd;
+}
+
 /* 0 on success; on failure *why says which step. */
 static int u_open(uconn_t *u, const char **why)
 {
@@ -605,11 +651,11 @@ static int u_open(uconn_t *u, const char **why)
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(s_up.host, port, &hints, &res) != 0 || !res) { *why = "dns"; return -1; }
     for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
-        int fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        int fd = connect_bounded(rp, CONNECT_TIMEOUT_MS);
         if (fd < 0) continue;
         set_timeouts(fd, 30);
-        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) { u->fd = fd; break; }
-        close(fd);
+        u->fd = fd;
+        break;
     }
     freeaddrinfo(res);
     if (u->fd < 0) { *why = "connect"; return -1; }
@@ -760,6 +806,9 @@ static void to_upstream(const char *in, char *out, size_t cap)
 static void serve_evo(int fd, const char *path)
 {
     if (!strncmp(path, "/evo/hook.js", 12)) {
+        pthread_mutex_lock(&s_mx);
+        s_hook_seen = 1;
+        pthread_mutex_unlock(&s_mx);
         respond(fd, "200 OK", "application/javascript", k_hook_js, sizeof k_hook_js - 1);
     } else if (!strncmp(path, "/evo/close", 10)) {
         tlog("close requested by the page");
@@ -911,6 +960,11 @@ static void proxy_request(int cfd, char *req, size_t got, size_t hl,
     const char *why = "";
     if (u_open(&u, &why) != 0) {
         tlog("proxy: %s to %s failed errno=%d (%.100s)", why, s_up.base, errno, path);
+        if (is_html_entry(path)) {
+            pthread_mutex_lock(&s_mx);
+            s_entry_failed = 1;
+            pthread_mutex_unlock(&s_mx);
+        }
         respond(cfd, "502 Bad Gateway", "text/plain", "upstream unreachable", 20);
         return;
     }
@@ -1174,6 +1228,8 @@ static void open_dialog(const char *url)
     pthread_mutex_unlock(&s_store_mx);
     pthread_mutex_lock(&s_mx);
     s_close_req = 0;                     /* nothing stale from a previous page */
+    s_hook_seen = 0;
+    s_entry_failed = 0;
     s_handoff_ready = 0;
     pthread_mutex_unlock(&s_mx);
     memset(&s_param, 0, sizeof s_param);
@@ -1233,7 +1289,7 @@ static void read_result(void)
  * hardware, and evo_webui_shutdown() terminates it at exit anyway. */
 static void finish(void)
 {
-    LOG("session closed by the user");
+    LOG("session closed by %s", s_error_pending ? "EVO (error)" : "the user");
     server_stop();
     s_state = P_OFF;
 }
@@ -1279,6 +1335,44 @@ int evo_webui_session_active(void)
     return s_state != P_OFF;
 }
 
+/* Preflight: one bounded connect to the server before the browser opens, so
+ * a wrong address or a server that is down is an error in EVO rather than a
+ * browser page that never loads and has no way out. */
+static void *check_thread(void *arg)
+{
+    (void)arg;
+    char port[8];
+    snprintf(port, sizeof port, "%d", s_up.port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    int ok = 0;
+    if (getaddrinfo(s_up.host, port, &hints, &res) == 0 && res) {
+        for (struct addrinfo *rp = res; rp && !ok; rp = rp->ai_next) {
+            int fd = connect_bounded(rp, CHECK_TIMEOUT_MS);
+            if (fd >= 0) { close(fd); ok = 1; }
+        }
+        freeaddrinfo(res);
+    }
+    s_check_rc = ok ? 1 : -1;
+    return NULL;
+}
+
+static void set_error(const char *msg)
+{
+    snprintf(s_error, sizeof s_error, "%s", msg);
+    s_error_pending = 1;
+}
+
+int evo_webui_take_error(char *buf, size_t cap)
+{
+    if (!s_error_pending) return 0;
+    s_error_pending = 0;
+    snprintf(buf, cap, "%s", s_error);
+    return 1;
+}
+
 int evo_webui_open(const char *upstream, const char *path)
 {
     return evo_webui_open_ex(upstream, path, NULL);
@@ -1306,8 +1400,17 @@ int evo_webui_open_ex(const char *upstream, const char *path, const char *hook_p
     s_checked = 1;                       /* a provider open wins over the trigger */
     LOG("open: %s via %s hook=%s", s_open_url, s_up.base,
         s_hook_profile[0] ? s_hook_profile : "media-server");
-    s_state = P_WAIT;
-    s_frames = OPEN_DELAY_FRAMES - 6;    /* a few frames: let the screen draw first */
+    s_error_pending = 0;
+    s_check_rc = 0;
+    pthread_t t;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    int trc = pthread_create(&t, &at, check_thread, NULL);
+    pthread_attr_destroy(&at);
+    if (trc != 0) s_check_rc = 1;        /* no thread: skip the check, open anyway */
+    s_state = P_CHECK;
+    s_frames = 0;
     return 0;
 }
 
@@ -1353,6 +1456,20 @@ void evo_webui_pump(void)
     case P_OFF:
     case P_PLAYING:
         return;
+    case P_CHECK:
+        if (s_check_rc == 0) return;
+        if (s_check_rc < 0) {
+            char m[256];
+            snprintf(m, sizeof m, "Can't reach %s", s_up.base);
+            LOG("preflight: %s did not answer in %d ms - not opening", s_up.base, CHECK_TIMEOUT_MS);
+            set_error(m);
+            s_state = P_OFF;
+            return;
+        }
+        LOG("preflight: %s answered", s_up.base);
+        s_state = P_WAIT;
+        s_frames = OPEN_DELAY_FRAMES - 6;    /* a few frames: let the screen draw first */
+        return;
     case P_WAIT:
         if (++s_frames >= OPEN_DELAY_FRAMES) open_dialog(s_reopen_url);
         return;
@@ -1366,10 +1483,12 @@ void evo_webui_pump(void)
             LOG("still status %d at frame %d", st, s_frames);
         }
 
-        int handoff = 0, close_req = 0;
+        int handoff = 0, close_req = 0, hook_seen, entry_failed;
         pthread_mutex_lock(&s_mx);
         close_req = s_close_req;
         s_close_req = 0;
+        hook_seen = s_hook_seen;
+        entry_failed = s_entry_failed;
         if (s_handoff_ready) {
             handoff = 1;
             s_handoff_ready = 0;
@@ -1381,11 +1500,23 @@ void evo_webui_pump(void)
         pthread_mutex_unlock(&s_mx);
 
         int cycle_up = s_cycle && s_frames >= s_hold_frames;
+        /* A page that failed, or never loaded, has no Back to EVO button and
+         * the PS button is a panic risk - so EVO closes it and says why. */
+        int stuck = !s_cycle && !hook_seen && (entry_failed || s_frames >= PAGE_LOAD_FRAMES);
+        if (stuck && !dialog_gone(st) && !s_closed_by_evo) {
+            char m[256];
+            snprintf(m, sizeof m, entry_failed ? "Lost the connection to %s"
+                                               : "%s did not load", s_up.base);
+            LOG("page watchdog: %s", m);
+            set_error(m);
+            close_req = 1;
+        }
         if ((handoff || cycle_up || close_req) && !dialog_gone(st) && !s_closed_by_evo) {
             s_closed_by_evo = 1;
             int rc = sceWebBrowserDialogClose();
             LOG("EVO closes the dialog (%s) -> 0x%08x",
-                handoff ? "handoff" : close_req ? "Back to EVO" : "layout hold up", (unsigned)rc);
+                handoff ? "handoff" : stuck ? "page watchdog" : close_req ? "Back to EVO" : "layout hold up",
+                (unsigned)rc);
             s_state = handoff ? P_CLOSING : P_RUN;
             s_frames = 0;
             if (handoff) return;

@@ -160,6 +160,9 @@ bool EvoRmlProviderHost::RegisterDataModel()
         row.RegisterMember("is_folder", &EvoProviderRow::is_folder);
         row.RegisterMember("is_live",   &EvoProviderRow::is_live);
         row.RegisterMember("index",     &EvoProviderRow::index);
+        row.RegisterMember("progress",  &EvoProviderRow::progress);
+        row.RegisterMember("progress_w", &EvoProviderRow::progress_w);
+        row.RegisterMember("played",    &EvoProviderRow::played);
     } else {
         return false;
     }
@@ -194,6 +197,11 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("selected_tech",      &m_model.selected_tech);
     c.Bind("has_selected",       &m_model.has_selected);
     c.Bind("selected_is_folder", &m_model.selected_is_folder);
+    c.Bind("selected_overview",  &m_model.selected_overview);
+    c.Bind("selected_resume",    &m_model.selected_resume);
+    c.Bind("selected_progress",  &m_model.selected_progress);
+    c.Bind("selected_progress_w", &m_model.selected_progress_w);
+    c.Bind("selected_played",    &m_model.selected_played);
 
     /*
      * The one event a bundle raises to start something.
@@ -423,9 +431,13 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
      * (e.g. "rml/iptv.rml"). If present, it loads instantly from memory with zero
      * network or disk dependency, completely self-contained.
      */
-    std::string embedded_path = "rml/" + m_provider_id + ".rml";
+    /* A provider family that shares a document (Emby + Jellyfin: "mediaserver")
+     * names it; the data model takes the document's name, since the document
+     * declares it. */
+    const std::string doc_name = m_provider->ui_embedded ? m_provider->ui_embedded : m_provider_id;
+    std::string embedded_path = "rml/" + doc_name + ".rml";
     if (evo_rmlui_bundle_find(embedded_path)) {
-        model_name = m_provider_id;
+        model_name = doc_name;
         m_bundle_version = "embedded";
         m_model_name = model_name;
         if (RegisterDataModel()) {
@@ -709,6 +721,17 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
         r.is_folder = s.is_folder != 0;
         r.is_live   = s.is_live != 0;
         r.index     = (int)m_all_rows.size();
+        r.played    = s.played != 0;
+        r.resume_sec = s.resume_pos_sec > 0 ? (long long)s.resume_pos_sec : 0;
+        if (s.resume_pos_sec > 0 && s.duration_sec > 0) {
+            long long pct = (long long)s.resume_pos_sec * 100 / (long long)s.duration_sec;
+            r.progress = (int)(pct < 1 ? 1 : pct > 99 ? 99 : pct);
+            /* Published ready to use: an expression building "37%" from an
+             * int did not apply on hardware (the bar stayed empty). */
+            char w[8];
+            snprintf(w, sizeof w, "%d%%", r.progress);
+            r.progress_w = Rml::String(w);
+        }
         /* Art starts empty and is filled in by the art queue as posters
          * arrive. A bundle that wants something behind the gap paints a
          * background colour on the element, which is why this is "" and not a
@@ -746,10 +769,15 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
         m_model_handle.DirtyVariable("is_folder_level");
     }
 
-    if (m_all_rows.empty())
-        SetStatus("", false);
-    else
-        SetStatus("", false);
+    SetStatus("", false);
+
+    /* A Down/R1 past the last loaded page fetched this page: finish the move
+     * now that the cards exist. */
+    if (m_advance_after_load) {
+        m_advance_after_load = false;
+        if (m_row_offset + EVO_PROVIDER_PAGE_SIZE < m_all_rows.size())
+            SetPageOffset(m_row_offset + EVO_PROVIDER_PAGE_SIZE, m_advance_col);
+    }
 
     /* Deferred to Render(), which is where Context::Update() creates the
      * elements data-for is going to produce. See m_needs_initial_focus. */
@@ -935,6 +963,16 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
         m_model.selected_now = row->now;
         m_model.selected_next = row->next;
         m_model.selected_is_folder = row->is_folder;
+        m_model.selected_overview = row->overview;
+        m_model.selected_progress = row->progress;
+        m_model.selected_progress_w = row->progress_w;
+        m_model.selected_played = row->played;
+        if (row->resume_sec > 0) {
+            Rml::String t = format_duration(row->resume_sec);
+            m_model.selected_resume = Rml::String("Resume from ") + t;
+        } else {
+            m_model.selected_resume = "";
+        }
 
         int abs_idx = (int)m_row_offset + row->index;
         char num_buf[32];
@@ -960,6 +998,11 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
         m_model.selected_num = "";
         m_model.selected_tech = "";
         m_model.selected_is_folder = false;
+        m_model.selected_overview = "";
+        m_model.selected_resume = "";
+        m_model.selected_progress = 0;
+        m_model.selected_progress_w = "";
+        m_model.selected_played = false;
     }
 
     if (m_model_handle) {
@@ -974,6 +1017,11 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
         m_model_handle.DirtyVariable("selected_num");
         m_model_handle.DirtyVariable("selected_tech");
         m_model_handle.DirtyVariable("selected_is_folder");
+        m_model_handle.DirtyVariable("selected_overview");
+        m_model_handle.DirtyVariable("selected_resume");
+        m_model_handle.DirtyVariable("selected_progress");
+        m_model_handle.DirtyVariable("selected_progress_w");
+        m_model_handle.DirtyVariable("selected_played");
     }
 }
 
@@ -1129,6 +1177,7 @@ bool EvoRmlProviderHost::HandleKey(Key k)
             SetPageOffset(m_row_offset + EVO_PROVIDER_PAGE_SIZE, idx >= 0 ? idx : 0);
             return true;
         }
+        FetchMoreAndAdvance(idx >= 0 ? idx : 0);
         return true;
     }
 
@@ -1157,7 +1206,8 @@ bool EvoRmlProviderHost::HandleKey(Key k)
                     SetPageOffset(m_row_offset + EVO_PROVIDER_PAGE_SIZE, target_col);
                     return true;
                 }
-                /* Already at bottom of last page */
+                /* At the bottom of what is loaded: the provider may have more. */
+                FetchMoreAndAdvance(idx % 4);
                 return true;
             }
         } else if (idx >= 0 && k == KeyUp) {
@@ -1369,7 +1419,18 @@ void EvoRmlProviderHost::ApplyPendingActivation()
     snprintf(g_selection.title, sizeof g_selection.title,
              "%s", hit->title.c_str());
     g_selection.is_live = hit->is_live ? 1 : 0;
+    g_selection.resume_sec = hit->resume_sec;
     g_selection_pending = true;
+}
+
+/* The last loaded page is on screen and the provider said there is more:
+ * fetch the next page, and move onto it once it lands (ApplyItems). */
+void EvoRmlProviderHost::FetchMoreAndAdvance(int col)
+{
+    if (!m_has_more || m_model.loading || !m_model.query.empty()) return;
+    m_advance_after_load = true;
+    m_advance_col = col;
+    RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), ++m_page);
 }
 
 void EvoRmlProviderHost::Tick()
@@ -1511,6 +1572,9 @@ void EvoRmlProviderHost::ShowSetupScreen()
     m_model.empty = true;
     m_model.count = 0;
     m_model.is_folder_level = false;
+    /* The stack was just cleared: without this, Options pressed inside a
+     * group kept in_folder set and drew "NO CHANNELS HERE" over setup. */
+    m_model.in_folder = false;
     m_model.breadcrumb = Rml::String(m_provider ? m_provider->name : "IPTV");
     SetStatus("", false);
 
@@ -1526,6 +1590,7 @@ void EvoRmlProviderHost::ShowSetupScreen()
         m_model_handle.DirtyVariable("empty");
         m_model_handle.DirtyVariable("count");
         m_model_handle.DirtyVariable("is_folder_level");
+        m_model_handle.DirtyVariable("in_folder");
         m_model_handle.DirtyVariable("breadcrumb");
     }
 

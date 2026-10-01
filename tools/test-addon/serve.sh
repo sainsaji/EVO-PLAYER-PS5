@@ -34,13 +34,16 @@ BASE="http://${HOST_IP}:${PORT}"
 
 rm -rf "${OUT}"
 mkdir -p "${OUT}"
-python3 "${REPO_ROOT}/tools/test-addon/gen_addon.py" "$(cygpath -u "${MEDIA_DIR}" 2>/dev/null || echo "${MEDIA_DIR}")" "${OUT}" "${BASE}"
+# The TV test show the media servers use too (Show/Season NN/...SxxEyy...).
+TV_DIR="${REPO_ROOT}/emby_media/TV"
+python3 "${REPO_ROOT}/tools/test-addon/gen_addon.py" "$(cygpath -u "${MEDIA_DIR}" 2>/dev/null || echo "${MEDIA_DIR}")" "${OUT}" "${BASE}" "${TV_DIR}"
 cp "${REPO_ROOT}/projects/evoplayer/sce_sys/pic0.png" "${OUT}/poster.png"
 
 docker rm -f evo-test-addon >/dev/null 2>&1 || true
 MSYS_NO_PATHCONV=1 docker run -d --name evo-test-addon -p "${PORT}:80" \
     -v "$(cygpath -w "${OUT}" 2>/dev/null || echo "${OUT}"):/usr/share/nginx/html:ro" \
     -v "${MEDIA_DIR}:/media:ro" \
+    -v "$(cygpath -w "${TV_DIR}" 2>/dev/null || echo "${TV_DIR}"):/tv:ro" \
     -v "$(cygpath -w "${REPO_ROOT}/tools/test-addon/nginx.conf" 2>/dev/null || echo "${REPO_ROOT}/tools/test-addon/nginx.conf"):/etc/nginx/conf.d/default.conf:ro" \
     nginx:alpine >/dev/null
 

@@ -1,0 +1,174 @@
+<rml>
+<head>
+    <link type="text/rcss" href="iptv.rcss"/>
+    <link type="text/rcss" href="mediaserver.rcss"/>
+</head>
+<!--
+    Emby and Jellyfin (docs/addons/native-providers.md). One document for both:
+    the providers set ui_embedded = "mediaserver", so this binds to the model of
+    that name. A 4x2 poster grid with a detail panel, on the provider host's
+    paging (L1/R1, or Down off the bottom row).
+-->
+<body data-model="mediaserver">
+
+    <div id="tv-wallpaper"></div>
+    <div id="tv-scrim"></div>
+
+    <div id="tv-pane">
+
+        <!-- 1. Header -->
+        <div id="tv-header">
+            <div id="tv-header-left">
+                <div id="tv-badge">
+                    <img id="tv-badge-icon" src="/assets/icons/icon_emby.png"/>
+                </div>
+                <div id="tv-title-row">
+                    <span id="tv-title">{{ provider_name }}</span>
+                </div>
+                <div id="tv-path">{{ breadcrumb }}</div>
+            </div>
+            <div id="tv-header-right" data-if="!empty">
+                <div class="tv-page-pill" data-if="has_multiple_pages">{{ page_info }}</div>
+                <div class="tv-counter">{{ count }} ITEMS</div>
+            </div>
+        </div>
+
+        <!-- 2. Grid + detail -->
+        <div id="tv-grid-pane">
+
+            <div id="tv-notice" data-if="status != ''"
+                 data-class-tv-notice-bad="has_error">{{ status }}</div>
+
+            <div id="tv-empty" data-if="empty && !loading">
+                <div id="tv-search-empty" data-if="query == ''">
+                    <div id="tv-empty-icon-box">
+                        <img id="tv-empty-icon" src="/assets/icons/icon_emby.png"/>
+                    </div>
+                    <div id="tv-empty-title">NOTHING HERE YET</div>
+                    <div id="tv-empty-hint">This list is empty</div>
+                    <div id="tv-empty-subhint">Press Circle to go back</div>
+                </div>
+                <div id="tv-search-empty" data-if="query != ''">
+                    <div id="tv-empty-icon-box">
+                        <img id="tv-empty-icon" src="/assets/icons/icon_emby.png"/>
+                    </div>
+                    <div id="tv-empty-title">NO RESULTS</div>
+                    <div id="tv-empty-hint">Nothing matches '{{ query }}'</div>
+                    <div id="tv-empty-subhint">Press Square to search again, or Circle to clear</div>
+                </div>
+            </div>
+
+            <div id="tv-tuning-overlay" data-if="tuning">
+                <div id="tv-tuning-card">
+                    <div class="tv-spinner"></div>
+                    <div id="tv-tuning-title">STARTING</div>
+                    <div id="tv-tuning-subtitle">Opening the stream...</div>
+                </div>
+            </div>
+
+            <div id="tv-browser-view" data-if="!empty">
+                <div id="tv-grid" data-class-tv-grid-notice="status != ''">
+                    <div class="tv-card ms-card" data-for="row : rows"
+                         data-attr-rowid="row.id" data-event-click="activate()">
+
+                        <div class="ms-poster">
+                            <img class="ms-poster-img" data-if="row.art != ''"
+                                 data-attr-src="row.art"/>
+                            <img class="tv-folder-icon" data-if="row.art == '' && row.is_folder"
+                                 src="/assets/icons/icon_folder.png"/>
+                            <div class="tv-initial"
+                                 data-if="row.art == '' && !row.is_folder">{{ row.initial }}</div>
+                            <div class="ms-watched" data-if="row.played">WATCHED</div>
+                            <div class="ms-bar" data-if="row.progress > 0">
+                                <div class="ms-bar-fill" data-style-width="row.progress_w"></div>
+                            </div>
+                        </div>
+
+                        <div class="ms-meta">
+                            <div class="tv-name">{{ row.title }}</div>
+                            <div class="tv-sub">{{ row.subtitle }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tv-detail-pane" data-if="has_selected">
+                    <div class="tv-detail-kicker" data-if="selected_is_folder">OPEN</div>
+                    <div class="tv-detail-kicker" data-if="!selected_is_folder">PLAY</div>
+
+                    <div class="ms-detail-top">
+                        <div class="ms-detail-poster">
+                            <img class="ms-detail-img" data-if="selected_art != ''"
+                                 data-attr-src="selected_art"/>
+                            <img class="tv-detail-folder-icon"
+                                 data-if="selected_art == '' && selected_is_folder"
+                                 src="/assets/icons/icon_folder.png"/>
+                            <div class="tv-detail-initial"
+                                 data-if="selected_art == '' && !selected_is_folder">{{ selected_initial }}</div>
+                        </div>
+                        <div class="ms-detail-head">
+                            <div class="ms-detail-title">{{ selected_title }}</div>
+                            <div class="tv-detail-sub" data-if="selected_subtitle != ''">{{ selected_subtitle }}</div>
+                            <div class="ms-detail-watched" data-if="selected_played">WATCHED</div>
+                            <div class="ms-detail-resume" data-if="selected_resume != ''">
+                                <div class="ms-detail-resume-text">{{ selected_resume }}</div>
+                                <div class="ms-bar ms-bar-detail">
+                                    <div class="ms-bar-fill" data-style-width="selected_progress_w"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ms-overview" data-if="selected_overview != ''">{{ selected_overview }}</div>
+                    <div class="ms-overview-gap" data-if="selected_overview == ''"></div>
+
+                    <div class="tv-detail-action" data-event-click="activate_selected()">
+                        <div class="tv-detail-glyph-box">
+                            <img class="tv-detail-glyph" src="/assets/icons/btn_cross.png"/>
+                        </div>
+                        <span class="tv-detail-action-text" data-if="selected_is_folder">OPEN</span>
+                        <span class="tv-detail-action-text" data-if="!selected_is_folder && selected_resume != ''">RESUME</span>
+                        <span class="tv-detail-action-text" data-if="!selected_is_folder && selected_resume == ''">PLAY</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Status strip -->
+        <div id="tv-status-strip">
+            <div id="tv-status-details">
+                <span id="tv-source-name">{{ provider_name }}</span>
+                <span class="tv-spec-pill" data-if="has_multiple_pages">{{ page_info }}</span>
+                <div id="tv-tuning-indicator" data-if="loading || tuning">
+                    <div class="tv-spinner-sm"></div>
+                    <span id="tv-tuning" data-if="tuning">STARTING...</span>
+                    <span id="tv-tuning" data-if="loading && !tuning">LOADING...</span>
+                </div>
+            </div>
+
+            <div id="tv-footer">
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_cross.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text" data-if="is_folder_level">OPEN</span>
+                    <span class="tv-hint-text" data-if="!is_folder_level">PLAY</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_circle.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">BACK</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph"><img src="/assets/icons/btn_square.png" class="tv-glyph-img"/></div>
+                    <span class="tv-hint-text">SEARCH</span>
+                </div>
+                <div class="tv-hint" data-if="has_multiple_pages">
+                    <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">L1 / R1</span></div>
+                    <span class="tv-hint-text">PAGE</span>
+                </div>
+                <div class="tv-hint">
+                    <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">OPTIONS</span></div>
+                    <span class="tv-hint-text">SERVERS</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>

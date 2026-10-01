@@ -113,7 +113,10 @@ typedef enum {
     /* web_ui_url: the provider's UI is its own website, opened in the
      * system browser beside the rail (evo_webui.c, #101) instead of an RmlUi
      * bundle. The site's player is rerouted to EVO's. */
-    EVO_PROVIDER_CAP_WEBUI    = 1u << 8
+    EVO_PROVIDER_CAP_WEBUI    = 1u << 8,
+    /* resolve returns alternatives the user should choose between (an addon's
+     * list of sources), so the stream picker opens whatever the setting says. */
+    EVO_PROVIDER_CAP_PICK     = 1u << 9
 } evo_provider_caps_t;
 
 /* ------------------------------------------------------------------------- */
@@ -174,6 +177,7 @@ typedef struct evo_provider_item {
     evo_media_kind_t kind;
     int     is_folder;
     int     is_live;
+    int     played;             /* the service marks it watched */
 
     /* Now-and-next, when the provider has an EPG. Empty otherwise. A full
      * XMLTV grid is explicitly out of #90's scope; two strings are not. */
@@ -206,6 +210,11 @@ typedef void (*evo_provider_resolve_cb)(int ok,
                                         const evo_stream_choice_t *choices,
                                         int count,
                                         void *ud);
+
+/* Quick Connect (Jellyfin): the code to show, then the poll's verdict -
+ * state 1 signed in, 0 still waiting for approval, -1 failed (msg says why). */
+typedef void (*evo_provider_qc_code_cb)(int ok, const char *code, void *ud);
+typedef void (*evo_provider_qc_cb)(int state, const char *msg, void *ud);
 
 /* Playback state handed to report_progress. */
 typedef enum {
@@ -303,6 +312,35 @@ typedef struct evo_provider {
      * NULL for the media-server one (Emby/Jellyfin stream URLs), "nuvio" for
      * Nuvio's #player / #videoPlayer. */
     const char *web_ui_hook;
+
+    /*
+     * Optional, CAP_AUTH: an interactive sign-in for a provider whose session
+     * belongs to a user account (Emby, Jellyfin). The provider screen asks for
+     * a user name (pre-filled from suggest_user) and a password on EVO's own
+     * keyboard, then calls sign_in, which persists the session itself.
+     * needs_sign_in is 1 while there is no session to browse with.
+     */
+    int  (*needs_sign_in)(void);
+    int  (*suggest_user)(void (*cb)(const char *name, void *ud), void *ud);
+    int  (*sign_in)(const char *user, const char *password,
+                    evo_provider_auth_cb cb, void *ud);
+
+    /*
+     * Optional: sign in by approving a short code in another app (Jellyfin's
+     * Quick Connect) instead of typing a password with the D-pad. qc_start
+     * asks for a code; the screen shows it and calls qc_poll every few
+     * seconds until it reports 1 (signed in, session saved) or -1.
+     */
+    int  (*qc_start)(evo_provider_qc_code_cb cb, void *ud);
+    int  (*qc_poll)(evo_provider_qc_cb cb, void *ud);
+
+    /*
+     * Optional. The embedded document family this provider renders with:
+     * "mediaserver" loads rml/mediaserver.rml bound to the data model of that
+     * name, so providers that share a shape (Emby, Jellyfin) share a document.
+     * NULL looks for rml/<id>.rml, as before.
+     */
+    const char *ui_embedded;
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */

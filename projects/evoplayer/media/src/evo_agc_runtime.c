@@ -6,6 +6,7 @@
 #include "evo_hw.h"
 
 #include <emmintrin.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2378,6 +2379,72 @@ void evo_agc_runtime_set_player_mode(int is_player)
  * Single-threaded and only called for a screenshot, so the per-pixel table
  * lookup does not need the worker pool tile_copy had for per-frame present.
  */
+/*
+ * HDR10 scanout -> an SDR picture a screenshot can show.
+ *
+ * In HDR the scanout is not 0xAARRGGBB: it is R10G10B10A2 (R in bits 20-29,
+ * B in 0-9, as evo_agc_probe_rgb reads it), BT.2020 primaries, PQ-encoded.
+ * Copied as if it were 8-bit it is psychedelic noise (hardware, 2026-10-01:
+ * a 4K Dolby Vision/HDR10 film looked like a broken decode in every capture,
+ * while playback was fine). So each pixel is decoded: PQ -> nits, SDR
+ * reference white (203 nits, BT.2408) = 1.0, BT.2020 -> BT.709, an extended
+ * Reinhard roll-off for highlights, then the sRGB curve. Tables keep a 4K
+ * frame to a few hundred ms; this only runs for a screenshot.
+ */
+static float   s_pq_lin[1024];   /* 10-bit PQ code -> linear, 1.0 = 203 nits */
+static uint8_t s_srgb[4096];     /* linear [0,1] -> sRGB 8-bit */
+static int     s_hdr_luts;
+
+static void hdr_shot_luts(void)
+{
+    if (s_hdr_luts) return;
+    const float m1 = 2610.0f / 16384.0f, m2 = 2523.0f / 4096.0f * 128.0f;
+    const float c1 = 3424.0f / 4096.0f, c2 = 2413.0f / 4096.0f * 32.0f;
+    const float c3 = 2392.0f / 4096.0f * 32.0f;
+    for (int i = 0; i < 1024; ++i) {
+        float e  = powf((float)i / 1023.0f, 1.0f / m2);
+        float num = e - c1;
+        if (num < 0.0f) num = 0.0f;
+        float nits = 10000.0f * powf(num / (c2 - c3 * e), 1.0f / m1);
+        s_pq_lin[i] = nits / 203.0f;
+    }
+    for (int i = 0; i < 4096; ++i) {
+        float l = (float)i / 4095.0f;
+        float v = l <= 0.0031308f ? 12.92f * l : 1.055f * powf(l, 1.0f / 2.4f) - 0.055f;
+        int q = (int)(v * 255.0f + 0.5f);
+        s_srgb[i] = (uint8_t)(q < 0 ? 0 : q > 255 ? 255 : q);
+    }
+    s_hdr_luts = 1;
+}
+
+static inline uint8_t hdr_shot_channel(float x)
+{
+    /* Extended Reinhard, white at 4x reference: SDR-range content stays close
+     * to as-mastered, highlights roll off instead of clipping flat. */
+    if (x < 0.0f) x = 0.0f;
+    const float w2 = 16.0f;
+    x = x * (1.0f + x / w2) / (1.0f + x);
+    if (x > 1.0f) x = 1.0f;
+    return s_srgb[(int)(x * 4095.0f + 0.5f)];
+}
+
+static void hdr_shot_convert(uint32_t *px, size_t n)
+{
+    hdr_shot_luts();
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t v = px[i];
+        const float r = s_pq_lin[(v >> 20) & 0x3FF];
+        const float g = s_pq_lin[(v >> 10) & 0x3FF];
+        const float b = s_pq_lin[v & 0x3FF];
+        /* BT.2020 -> BT.709, linear light */
+        const float r7 =  1.6605f * r - 0.5876f * g - 0.0728f * b;
+        const float g7 = -0.1246f * r + 1.1329f * g - 0.0083f * b;
+        const float b7 = -0.0182f * r - 0.1006f * g + 1.1187f * b;
+        px[i] = 0xFF000000u | ((uint32_t)hdr_shot_channel(r7) << 16) |
+                ((uint32_t)hdr_shot_channel(g7) << 8) | (uint32_t)hdr_shot_channel(b7);
+    }
+}
+
 void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
 {
     if (!g_agc_dev.initialized || !bgra || width <= 0 || height <= 0)
@@ -2429,6 +2496,9 @@ void evo_agc_runtime_read_scanout(uint32_t *bgra, int width, int height)
             for (int k = 0; k < n; ++k)
                 dst[x0 + k] = tile[lut[k]];
         }
+        /* HDR10: 10-bit PQ words, not 8-bit BGRA - convert the row. */
+        if (g_agc_dev.is_hdr)
+            hdr_shot_convert(dst, (size_t)w);
     }
 }
 

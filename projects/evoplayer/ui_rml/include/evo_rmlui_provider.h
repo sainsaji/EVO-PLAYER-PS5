@@ -73,6 +73,13 @@ struct EvoProviderRow {
     bool is_folder = false;
     bool is_live = false;
     int  index = 0;         /* position in `rows`, for data-event callbacks */
+    /* Media-server rows: how far in (0-100, 0 when not started) and whether
+     * the service marks it watched. */
+    int  progress = 0;
+    Rml::String progress_w;   /* the same as a CSS width ("37%") for data-style-width */
+    bool played = false;
+    /* Not bound: where playback resumes, handed to the player on activation. */
+    long long resume_sec = 0;
 };
 
 struct EvoProviderModel {
@@ -111,6 +118,13 @@ struct EvoProviderModel {
     Rml::String selected_tech;      /* "LIVE HLS • 1080p • 60 FPS" */
     bool has_selected = false;
     bool selected_is_folder = false;
+
+    /* Provider-neutral detail fields (media servers, addons). */
+    Rml::String selected_overview;
+    Rml::String selected_resume;    /* "Resume from 23:10", "" when not started */
+    int  selected_progress = 0;     /* 0-100 */
+    Rml::String selected_progress_w;  /* "37%" */
+    bool selected_played = false;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -202,6 +216,7 @@ private:
     void SetPageOffset(size_t new_offset, int target_slot = -1);
     /* Update the right-side detail preview panel to match current focus */
     void UpdateSelectedPreview();
+    void FetchMoreAndAdvance(int col);
     /* Focus the published card at `local_idx`, found by position among the
      * siblings data-for produced. Position, not `rowid`: the attribute still
      * holds the pre-slide value until the next Context::Update(), while the
@@ -260,6 +275,9 @@ private:
 
     int  m_page = 0;
     bool m_has_more = false;
+    /* A page-down past the loaded rows is waiting on the next page. */
+    bool m_advance_after_load = false;
+    int  m_advance_col = 0;
     size_t m_saved_offset = 0;
     int    m_saved_slot = -1;
     /*
@@ -362,6 +380,7 @@ typedef struct evo_provider_selection {
     char item_id[EVO_PROVIDER_MAX_ITEM_ID];
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
+    long long resume_sec;   /* where the service says playback stopped, 0 = start */
 } evo_provider_selection_t;
 
 int  evo_rmlui_provider_take_selection(evo_provider_selection_t *out);

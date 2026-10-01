@@ -31,6 +31,7 @@ extern const evo_provider_t evo_provider_xtream;
 extern const evo_provider_t evo_provider_emby;
 extern const evo_provider_t evo_provider_jellyfin;
 extern const evo_provider_t evo_provider_nuvio;
+extern const evo_provider_t evo_provider_stremio;
 
 /*
  * Emby is in the table unconditionally, even while EVO_ENABLE_EMBY is 0.
@@ -45,7 +46,8 @@ static const evo_provider_t *const PROVIDERS[] = {
     &evo_provider_iptv,
     &evo_provider_xtream,
     &evo_provider_emby,
-    &evo_provider_jellyfin,     /* #101: web UI only */
+    &evo_provider_jellyfin,     /* native screens; the web UI as an extra */
+    &evo_provider_stremio,      /* Stremio addons, native (provider_stremio.c) */
     &evo_provider_nuvio,        /* web UI only - Stremio addons, debrid */
 };
 

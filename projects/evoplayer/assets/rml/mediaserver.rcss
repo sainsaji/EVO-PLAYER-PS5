@@ -1,0 +1,162 @@
+/* =============================================================================
+ * mediaserver.rcss - Emby / Jellyfin poster grid (docs/addons/native-providers.md)
+ *
+ * On top of iptv.rcss: the layout, the 4x2 grid, the detail pane and the
+ * status strip are shared; this file turns the channel card into a 2:3
+ * poster card and the detail pane into poster + overview.
+ * ============================================================================= */
+
+/* ---- the poster card ---------------------------------------------------- */
+
+.ms-card {
+    padding: 10dp;
+    justify-content: flex-start;
+}
+
+.ms-poster {
+    width: 254dp;
+    height: 276dp;
+    background-color: #070c16;
+    border-radius: 10dp;
+    border-width: 1dp;
+    border-color: #5a7db426;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 2:3, the shape of every poster both servers serve. */
+.ms-poster-img {
+    width: 184dp;
+    height: 276dp;
+}
+
+.ms-watched {
+    position: absolute;
+    right: 8dp;
+    top: 8dp;
+    background-color: #0f3d24e6;
+    border-width: 1dp;
+    border-color: #3ddc84;
+    border-radius: 6dp;
+    padding: 2dp 6dp;
+    font-size: 10dp;
+    font-weight: bold;
+    color: #9ff0c0;
+    letter-spacing: 1dp;
+}
+
+/* The same shape as launch.rcss's .tile-progress-track/-fill, which draws on
+ * hardware. With overflow: hidden here the fill never showed: rounded clipping
+ * needs clip masks, and the sceAgc render path has them off (clip_masks=0). */
+.ms-bar {
+    position: absolute;
+    left: 10dp;
+    right: 10dp;
+    bottom: 10dp;
+    height: 5dp;
+    z-index: 4;
+    background-color: #ffffff33;
+    border-radius: 3dp;
+}
+
+.ms-bar-fill {
+    display: block;
+    width: 0%;
+    height: 5dp;
+    border-radius: 3dp;
+    background-color: #00cdff;
+}
+
+.ms-meta {
+    display: flex;
+    flex-direction: column;
+    margin-top: 10dp;
+    gap: 4dp;
+}
+
+/* ---- the detail pane ---------------------------------------------------- */
+
+.ms-detail-top {
+    display: flex;
+    flex-direction: row;
+    gap: 18dp;
+    margin-bottom: 14dp;
+}
+
+.ms-detail-poster {
+    width: 160dp;
+    height: 240dp;
+    background-color: #070c16;
+    border-radius: 12dp;
+    border-width: 1dp;
+    border-color: #5a7db44d;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ms-detail-img {
+    width: 160dp;
+    height: 240dp;
+}
+
+.ms-detail-head {
+    width: 270dp;
+    display: flex;
+    flex-direction: column;
+    gap: 8dp;
+}
+
+.ms-detail-title {
+    font-size: 24dp;
+    font-weight: bold;
+    color: #ffffff;
+    line-height: 30dp;
+    max-height: 120dp;
+    overflow: hidden;
+}
+
+.ms-detail-watched {
+    font-size: 11dp;
+    font-weight: bold;
+    color: #9ff0c0;
+    letter-spacing: 1.2dp;
+}
+
+.ms-detail-resume {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+    margin-top: 4dp;
+}
+
+.ms-detail-resume-text {
+    font-size: 13dp;
+    color: #c2d2e8;
+}
+
+.ms-bar-detail {
+    position: relative;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+}
+
+.ms-overview {
+    font-size: 14dp;
+    line-height: 21dp;
+    color: #c2d2e8;
+    height: 300dp;
+    overflow: hidden;
+    margin-bottom: 14dp;
+}
+
+.ms-overview-gap {
+    height: 300dp;
+    margin-bottom: 14dp;
+}

@@ -47,6 +47,10 @@ int  evo_webui_open_ex(const char *upstream, const char *path, const char *hook_
 /* 1 while the system browser is up: EVO must not act on pad input. */
 int  evo_webui_active(void);
 
+/* Returns 1 once when EVO ended the session itself - the server did not
+ * answer, or the page never loaded - with the message to show. */
+int  evo_webui_take_error(char *buf, size_t cap);
+
 /* Application::shutdown(): stop the proxy and terminate the subsystem. */
 void evo_webui_shutdown(void);
 
@@ -72,6 +76,7 @@ static inline int  evo_webui_open_ex(const char *u, const char *p, const char *h
 static inline int  evo_webui_active(void) { return 0; }
 static inline void evo_webui_shutdown(void) {}
 static inline int  evo_webui_session_active(void) { return 0; }
+static inline int  evo_webui_take_error(char *b, size_t c) { (void)b; (void)c; return 0; }
 static inline int  evo_webui_take_play(char *u, size_t uc, char *t, size_t tc)
 { (void)u; (void)uc; (void)t; (void)tc; return 0; }
 static inline void evo_webui_playback_ended(int played) { (void)played; }

@@ -32,6 +32,123 @@
 #include <sys/time.h>
 
 #include "evo_net.h"
+
+/* ---- LAN discovery (Emby / Jellyfin, UDP 7359) ---- */
+
+#define DISCOVER_PORT     7359
+#define DISCOVER_WAIT_MS  1500
+
+static pthread_mutex_t s_disc_mx = PTHREAD_MUTEX_INITIALIZER;
+static int  s_disc_state = 0;            /* 0 idle/taken, 1 running, 2 found, 3 none */
+static char s_disc_product[32];
+static char s_disc_addr[128];
+
+/* The reply is JSON with an "Address" like "http://172.17.0.2:8096". The
+ * host part is what the server believes its address is - wrong behind Docker
+ * or NAT - so only the scheme and port are taken from it, and the host is
+ * where the reply actually came from. */
+static void disc_build_addr(const char *reply, const struct sockaddr_in *from)
+{
+    const char *scheme = "http";
+    int port = 8096;
+    const char *a = strstr(reply, "\"Address\"");
+    if (a) {
+        a = strchr(a + 9, '"');
+        if (a) {
+            a++;
+            if (strncmp(a, "https://", 8) == 0) scheme = "https";
+            const char *hp = strstr(a, "://");
+            hp = hp ? hp + 3 : a;
+            const char *end = strchr(hp, '"');
+            const char *colon = strchr(hp, ':');
+            if (colon && (!end || colon < end)) port = atoi(colon + 1);
+        }
+    }
+    char ip[INET_ADDRSTRLEN] = "";
+    inet_ntop(AF_INET, &from->sin_addr, ip, sizeof ip);
+    snprintf(s_disc_addr, sizeof s_disc_addr, "%s://%s:%d", scheme, ip, port);
+}
+
+static void *disc_thread(void *arg)
+{
+    (void)arg;
+    int found = 0;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd >= 0) {
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+        struct sockaddr_in to;
+        memset(&to, 0, sizeof to);
+        to.sin_family = AF_INET;
+        to.sin_port = htons(DISCOVER_PORT);
+        to.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+        char msg[64];
+        int n = snprintf(msg, sizeof msg, "who is %s?", s_disc_product);
+        if (sendto(fd, msg, (size_t)n, 0, (struct sockaddr *)&to, sizeof to) == n) {
+            struct pollfd pfd;
+            pfd.fd = fd;
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+            if (poll(&pfd, 1, DISCOVER_WAIT_MS) > 0) {
+                char buf[1024];
+                struct sockaddr_in from;
+                socklen_t fl = sizeof from;
+                ssize_t r = recvfrom(fd, buf, sizeof buf - 1, 0, (struct sockaddr *)&from, &fl);
+                if (r > 0) {
+                    buf[r] = '\0';
+                    pthread_mutex_lock(&s_disc_mx);
+                    disc_build_addr(buf, &from);
+                    pthread_mutex_unlock(&s_disc_mx);
+                    found = 1;
+                }
+            }
+        }
+        close(fd);
+    }
+    pthread_mutex_lock(&s_disc_mx);
+    s_disc_state = found ? 2 : 3;
+    pthread_mutex_unlock(&s_disc_mx);
+    return NULL;
+}
+
+void evo_net_discover_start(const char *product)
+{
+    pthread_mutex_lock(&s_disc_mx);
+    if (s_disc_state == 1) { pthread_mutex_unlock(&s_disc_mx); return; }
+    snprintf(s_disc_product, sizeof s_disc_product, "%s", product ? product : "");
+    s_disc_addr[0] = '\0';
+    s_disc_state = 1;
+    pthread_mutex_unlock(&s_disc_mx);
+
+    pthread_t t;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &at, disc_thread, NULL) != 0) {
+        pthread_mutex_lock(&s_disc_mx);
+        s_disc_state = 3;
+        pthread_mutex_unlock(&s_disc_mx);
+    }
+    pthread_attr_destroy(&at);
+}
+
+int evo_net_discover_poll(char *addr, size_t cap)
+{
+    int rc;
+    pthread_mutex_lock(&s_disc_mx);
+    if (s_disc_state == 1) {
+        rc = 0;
+    } else if (s_disc_state == 2) {
+        snprintf(addr, cap, "%s", s_disc_addr);
+        s_disc_state = 0;
+        rc = 1;
+    } else {
+        s_disc_state = 0;
+        rc = -1;
+    }
+    pthread_mutex_unlock(&s_disc_mx);
+    return rc;
+}
 #ifndef NO_OPENSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -725,8 +842,11 @@ static int execute_http(const char *method,
             return EVO_NET_ERR_SEND_HDR;
         }
 
-        /* Send payload if POST */
-        if (current_post_data) {
+        /* Send payload if POST. Not when it is empty: SSL_write of 0 bytes
+         * returns 0, which reads as a failure, so every body-less POST over
+         * https failed (Jellyfin's Quick Connect start, measured on a
+         * reverse-proxied server 2026-10-01). */
+        if (current_post_data && current_post_data[0]) {
             size_t post_len = strlen(current_post_data);
             int post_err = 0;
 #ifndef NO_OPENSSL

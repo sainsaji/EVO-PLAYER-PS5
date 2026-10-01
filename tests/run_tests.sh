@@ -50,6 +50,7 @@ SRCS=(
     "${ADDONS}/src/provider_emby.c"
     "${ADDONS}/src/provider_jellyfin.c"
     "${ADDONS}/src/provider_nuvio.c"
+    "${ADDONS}/src/provider_stremio.c"
     "${EVO}/src/evo_favorites.c"
 )
 

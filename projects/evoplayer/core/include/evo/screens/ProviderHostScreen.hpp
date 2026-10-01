@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+struct evo_provider;    /* evo_provider.h, C */
+
 namespace evo {
 
 /**
@@ -143,6 +145,39 @@ private:
      * really started, so its end can be told from "not open yet". */
     bool m_web = false;
     bool m_webSeen = false;
+
+    /* Looking for an Emby/Jellyfin server on the LAN before the address
+     * keyboard opens, so the field can be pre-filled (evo_net_discover_*). */
+    bool m_discovering = false;
+    void openSourceKeyboard(const std::string& initial);
+
+    /* Signing in to a media server (Emby, Jellyfin) on EVO's keyboard: user
+     * name, then password, then the provider's sign_in. Keyboards are opened
+     * from update(), never from a keyboard callback - the keyboard closes
+     * itself AFTER calling back, which would close the next one too. */
+    enum class SignIn { None, QcStart, QcWait, QcPolling, Suggest, OpenUser, User,
+                        OpenPass, Pass, Signing };
+    SignIn m_signIn = SignIn::None;
+    std::string m_signInUser;
+    std::string m_signInPass;
+    void beginSignIn();
+    void beginPasswordSignIn();
+    void signInStep();
+    bool signInQcInput(uint32_t pressed);
+    void renderQuickConnect(uint32_t* framebuffer, int width, int height);
+    static void OnQcCode(int ok, const char* code, void* ud);
+    static void OnQcPoll(int state, const char* msg, void* ud);
+    std::string m_qcCode;
+    long long m_qcNextPollMs = 0;
+    long long m_qcDeadlineMs = 0;
+    static void OnSignInSuggest(const char* name, void* ud);
+    static void OnSignInUser(const char* text, void* ud);
+    static void OnSignInPass(const char* text, void* ud);
+    static void OnSignInDone(int ok, const char* msg, void* ud);
+
+    /* Emby/Jellyfin: browsed natively, with the site in the browser as an
+     * extra. Nuvio: web only. */
+    static bool isNativeWeb(const ::evo_provider* p);
 };
 
 } // namespace evo

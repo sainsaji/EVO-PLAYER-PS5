@@ -17,6 +17,7 @@ extern "C" {
 #include "evo_readdir.h"
 #include "evo_favorites.h"
 #include "evo_hls_variants.h"                      /* the stream picker's quality list */
+#include "evo_net.h"                               /* evo_net_discover_* */
 #include "evo/interfaces/ISettingsService.hpp"
 }
 
@@ -78,7 +79,8 @@ constexpr int kMaxChoices = EVO_RMLUI_LIST_ROWS;
 enum ChoiceKind {
     KindListed = 0,     /* the URL the playlist gave                        */
     KindVariant,        /* a quality variant read from its HLS master       */
-    KindGuess           /* an alternative the provider derived (.ts <-> .m3u8) */
+    KindGuess,          /* an alternative the provider derived (.ts <-> .m3u8) */
+    KindSource          /* one of several real sources (a Stremio addon's list) */
 };
 
 struct PendingPlay {
@@ -86,6 +88,7 @@ struct PendingPlay {
     char item_id[EVO_PROVIDER_MAX_ITEM_ID];
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
+    long long resume_sec;   /* the service's resume point, 0 = from the start */
     evo_stream_choice_t choices[kMaxChoices];
     int  kind[kMaxChoices];
     int  choice_count;
@@ -127,6 +130,7 @@ constexpr int kVariantsGiveUpMs = 15000; /* stop saying "reading" after this */
 bool g_resolve_finished = false;
 
 static PlaybackSource g_start_src;
+static double g_start_resume = 0.0;
 static pthread_t g_start_thread;
 static std::atomic<bool> g_start_running{false};
 static std::atomic<bool> g_start_done{false};
@@ -142,7 +146,7 @@ static void* start_playback_worker(void* arg)
         return nullptr;
     }
 
-    bool ok = pb->startPlaybackSource(g_start_src, 0.0);
+    bool ok = pb->startPlaybackSource(g_start_src, g_start_resume);
     g_start_success = ok;
     g_start_done = true;
     return nullptr;
@@ -164,6 +168,7 @@ int launch_choice(int idx)
     src.is_live  = (g_pending.is_live || c.is_live) ? true : false;
 
     g_start_src = src;
+    g_start_resume = src.is_live ? 0.0 : (double)g_pending.resume_sec;
     g_start_done = false;
     g_start_success = false;
     g_start_running = true;
@@ -253,13 +258,23 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
      * if the first fails to open; with it on it is listed, and marked a guess.
      */
     pp->choice_count = std::min(count, kMaxChoices);
+    const evo_provider_t* rp = evo_provider_find(pp->provider);
+    const bool sources = rp && (rp->caps & EVO_PROVIDER_CAP_PICK);
     for (int i = 0; i < pp->choice_count; ++i) {
         pp->choices[i] = choices[i];
-        pp->kind[i] = (i == 0) ? KindListed : KindGuess;
+        pp->kind[i] = sources ? KindSource : (i == 0) ? KindListed : KindGuess;
     }
     pp->active_choice = 0;
 
-    if (pp->ask) {
+    if (pp->ask && sources) {
+        /* Every row is a real source the addon listed: no guesses, and no HLS
+         * quality read - its rows would be inserted as if after a playlist URL. */
+        g_variants = VariantsState::None;
+        if (pp->choice_count > 1) {
+            g_pick_stage = PickStage::Ready;
+            return;
+        }
+    } else if (pp->ask) {
         /* An HLS master lists the same channel at several qualities. The list
          * opens now with what is known and the qualities are added when the read
          * lands; if the read cannot even be queued the list has fewer rows. */
@@ -316,6 +331,11 @@ void ProviderHostScreen::onEnter()
             m_navigatingToPlayer = false;
             evo_bt("prov_screen: returning from playback, keeping provider '%s' open",
                    m_providerId.c_str());
+            /* A service that tracks progress has just been told where playback
+             * stopped: re-read the level so the card shows it (same cursor). */
+            const evo_provider_t* rp = evo_provider_find(m_providerId.c_str());
+            if (rp && (rp->caps & EVO_PROVIDER_CAP_PROGRESS) && !(rp->caps & EVO_PROVIDER_CAP_LIVE))
+                evo_rmlui_provider_reload();
             return;
         }
         /* One provider to offer: the rail slot means that provider, as it
@@ -334,7 +354,7 @@ void ProviderHostScreen::openProvider(const std::string& want)
 {
     m_picking = false;
     const evo_provider_t* wp = evo_provider_find(want.c_str());
-    if (wp && (wp->caps & EVO_PROVIDER_CAP_WEBUI)) {
+    if (wp && (wp->caps & EVO_PROVIDER_CAP_WEBUI) && !isNativeWeb(wp)) {
         if (m_opened) {
             evo_rmlui_provider_close();
             m_opened = false;
@@ -344,6 +364,17 @@ void ProviderHostScreen::openProvider(const std::string& want)
         return;
     }
     m_web = false;
+
+    /* A media server with no session yet: sign in first, then come back. */
+    if (wp && wp->needs_sign_in && wp->needs_sign_in()) {
+        if (m_opened) {
+            evo_rmlui_provider_close();
+            m_opened = false;
+        }
+        m_providerId = want;
+        beginSignIn();
+        return;
+    }
 
     /* Returning from Player playback into the same provider: keep it. */
     if (m_opened && m_providerId == want) {
@@ -407,7 +438,21 @@ void ProviderHostScreen::openWebProvider()
         openSourceEditor();
         return;
     }
-    int rc = evo_webui_open_ex(url, p->web_ui_path ? p->web_ui_path : "/", p->web_ui_hook);
+    /* A server behind a reverse proxy at a path ("https://host/jellyfin"):
+     * the proxy upstream is scheme://host[:port], and the page lives under
+     * the path. */
+    std::string upstream = url, page = p->web_ui_path ? p->web_ui_path : "/";
+    {
+        size_t s = upstream.find("://");
+        size_t slash = upstream.find('/', s == std::string::npos ? 0 : s + 3);
+        if (slash != std::string::npos) {
+            std::string path = upstream.substr(slash);
+            while (!path.empty() && path.back() == '/') path.pop_back();
+            upstream.resize(slash);
+            page = path + page;
+        }
+    }
+    int rc = evo_webui_open_ex(upstream.c_str(), page.c_str(), p->web_ui_hook);
     evo_bt("prov_screen: web UI '%s' -> %s rc=%d", p->id, url, rc);
     if (rc < 0) {
         toast(p->name, "Set the server as http(s)://<host>:<port>");
@@ -443,7 +488,12 @@ void ProviderHostScreen::enterPicker()
         if (!p->is_configured()) {
             detail = (p->caps & EVO_PROVIDER_CAP_WEBUI)
                    ? "Not set up - press X to enter the server address"
+                   : p->ui_embedded ? "No addons yet - press X to add one"
                    : "Not set up - press X to add a playlist";
+        } else if (isNativeWeb(p)) {
+            const char* src = p->get_source ? p->get_source() : "";
+            detail = std::string(src ? src : "") +
+                     ((p->needs_sign_in && p->needs_sign_in()) ? " - press X to sign in" : "");
         } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
             /* An address carries no secret; a playlist URL can (Xtream user and
              * password), so only the web kind shows its source. */
@@ -484,8 +534,8 @@ void ProviderHostScreen::choosePicked(bool editSource)
             return;
         }
         evo_feedback(EVO_FB_OPEN);
-        if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
-            openSourceEditor();     /* the address; opens the web UI once set */
+        if ((p->caps & EVO_PROVIDER_CAP_WEBUI) || p->ui_embedded) {
+            openSourceEditor();     /* the address; opens the provider once set */
             return;
         }
         /* A bundle provider has its own setup page (IPTV: type a URL, or pick
@@ -516,6 +566,12 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     params.section = EVO_SECTION_EMBY;
     params.rail_focused = railFocused ? 1 : 0;
 
+    if (m_signIn == SignIn::QcStart || m_signIn == SignIn::QcWait ||
+        m_signIn == SignIn::QcPolling) {
+        renderQuickConnect(framebuffer, width, height);
+        return;
+    }
+
     if (m_web) {
         /* Behind the browser, which covers everything right of the rail. */
         const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
@@ -539,11 +595,12 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     params.row_count = rows;
     for (int i = 0; i < rows; ++i) {
         const evo_provider_t* p = evo_provider_find(m_pickIds[i].c_str());
-        bool web = p && (p->caps & EVO_PROVIDER_CAP_WEBUI);
+        bool web = p && (p->caps & EVO_PROVIDER_CAP_WEBUI) && !isNativeWeb(p);
+        bool server = p && isNativeWeb(p);
         params.rows[i].title = p ? p->name : m_pickIds[i].c_str();
         params.rows[i].detail = m_pickDetail[i].c_str();
-        params.rows[i].icon_path = web ? "../icons/icon_emby.png" : "../icons/icon_folder.png";
-        params.rows[i].badge = web ? "WEB"
+        params.rows[i].icon_path = (web || server) ? "../icons/icon_emby.png" : "../icons/icon_folder.png";
+        params.rows[i].badge = web ? "WEB" : server ? "SERVER"
                              : (p && (p->caps & EVO_PROVIDER_CAP_LIVE)) ? "LIVE" : "";
         params.rows[i].progress = -1;
         params.rows[i].has_chevron = 1;
@@ -552,14 +609,19 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
 
     const evo_provider_t* fp = (m_pickIndex >= 0 && m_pickIndex < total)
                              ? evo_provider_find(m_pickIds[m_pickIndex].c_str()) : nullptr;
-    params.hint_count = 3;
-    params.hints[0].glyph_path = "../icons/btn_cross.png";
-    params.hints[0].label = "OPEN";
-    params.hints[1].glyph_path = "../icons/btn_square.png";
-    params.hints[1].label = (fp && (fp->caps & EVO_PROVIDER_CAP_WEBUI)) ? "EDIT ADDRESS"
-                                                                         : "EDIT PLAYLIST";
-    params.hints[2].glyph_path = "../icons/btn_circle.png";
-    params.hints[2].label = "BACK";
+    params.hint_count = 0;
+    params.hints[params.hint_count].glyph_path = "../icons/btn_cross.png";
+    params.hints[params.hint_count++].label = "OPEN";
+    params.hints[params.hint_count].glyph_path = "../icons/btn_square.png";
+    params.hints[params.hint_count++].label = (fp && (fp->caps & EVO_PROVIDER_CAP_WEBUI))
+                                              ? "EDIT ADDRESS"
+                                              : (fp && fp->ui_embedded) ? "ADD ADDON" : "EDIT PLAYLIST";
+    if (fp && isNativeWeb(fp) && fp->is_configured()) {
+        params.hints[params.hint_count].glyph_path = "../icons/btn_triangle.png";
+        params.hints[params.hint_count++].label = "WEB VERSION";
+    }
+    params.hints[params.hint_count].glyph_path = "../icons/btn_circle.png";
+    params.hints[params.hint_count++].label = "BACK";
 
     evo_rmlui_update_list(&params);
     evo_rmlui_render_list(framebuffer, width, height);
@@ -647,7 +709,10 @@ void ProviderHostScreen::renderStreamPicker(uint32_t* framebuffer, int width, in
         const evo_stream_choice_t& c = g_pending.choices[i];
         const int kind = g_pending.kind[i];
 
-        if (kind == KindListed) {
+        if (kind == KindSource) {
+            std::snprintf(detail[i], sizeof detail[i], "Source %d of %d%s", i + 1, total,
+                          choice_is_hls(c) ? "  -  HLS" : "");
+        } else if (kind == KindListed) {
             std::snprintf(detail[i], sizeof detail[i], "%s",
                           choice_is_hls(c) ? "As the playlist lists it - EVO picks the quality"
                                            : "As the playlist lists it");
@@ -684,7 +749,8 @@ void ProviderHostScreen::renderStreamPicker(uint32_t* framebuffer, int width, in
         params.rows[i].title = c.label[0] ? c.label : "Stream";
         params.rows[i].detail = detail[i];
         params.rows[i].icon_path = "../icons/icon_tv.png";
-        params.rows[i].badge = kind == KindListed ? "LISTED" : kind == KindGuess ? "GUESS" : "HLS";
+        params.rows[i].badge = kind == KindSource ? "SOURCE" : kind == KindListed ? "LISTED"
+                             : kind == KindGuess ? "GUESS" : "HLS";
         params.rows[i].progress = -1;
         params.rows[i].has_chevron = 1;
         params.rows[i].is_focused = (i == m_streamIndex);
@@ -733,6 +799,11 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     (void)held;
     (void)released;
 
+    /* Discovery takes ~1.5 s at most and then opens the keyboard itself; a
+     * sign-in in flight finishes or fails on its own the same way. */
+    if (m_discovering) return true;
+    if (m_signIn == SignIn::Suggest || m_signIn == SignIn::Signing) return true;
+
     if (m_streamPick) {
         const int n = g_pending.choice_count;
         if (pressed & PadButtons::Up) {
@@ -756,6 +827,8 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         }
         return true;        /* the list has the pad while it is open */
     }
+    if (signInQcInput(pressed)) return true;
+
     if (m_picking) {
         auto psm = Application::getInstance().getScreenManager();
         if (psm && psm->isRailFocused()) return false;
@@ -776,6 +849,20 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         }
         if (pressed & PadButtons::Cross)   { choosePicked(false); return true; }
         if (pressed & PadButtons::Square)  { choosePicked(true);  return true; }
+        if (pressed & PadButtons::Triangle) {
+            /* The site itself, in the system browser - for what EVO's screens
+             * do not cover (server settings, admin). */
+            const evo_provider_t* tp = (m_pickIndex >= 0 && m_pickIndex < n)
+                                     ? evo_provider_find(m_pickIds[m_pickIndex].c_str()) : nullptr;
+            if (tp && isNativeWeb(tp) && tp->is_configured()) {
+                evo_feedback(EVO_FB_OPEN);
+                m_providerId = tp->id;
+                m_picking = false;
+                openWebProvider();
+                if (!m_web) enterPicker();
+            }
+            return true;
+        }
         if (pressed & PadButtons::Circle) {
             evo_feedback(EVO_FB_CANCEL);
             if (psm) psm->navigateTo(ScreenId::MainMenu);
@@ -841,6 +928,14 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
          */
         if (evo_rmlui_provider_key(EvoRmlProviderHost::KeyBack) != 0)
             return true;
+        /* Out of a provider's root: back to the chooser when there is one to
+         * go back to, so switching provider is one Circle away rather than
+         * a trip through the main menu. */
+        if (pickable_count(nullptr) > 1) {
+            evo_feedback(EVO_FB_CANCEL);
+            enterPicker();
+            return true;
+        }
         if (sm) sm->navigateTo(ScreenId::MainMenu);
         return true;
     }
@@ -918,7 +1013,14 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
      */
     if (pressed & PadButtons::Options) {
         evo_feedback(EVO_FB_OPEN);
-        evo_rmlui_provider_show_setup();
+        const evo_provider_t* op = evo_provider_find(m_providerId.c_str());
+        if (op && (isNativeWeb(op) || op->ui_embedded)) {
+            /* No setup page: the chooser is where the address is edited and
+             * the web version opened. */
+            enterPicker();
+        } else {
+            evo_rmlui_provider_show_setup();
+        }
         return true;
     }
 
@@ -994,9 +1096,13 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     evo_provider_set_enabled(p->id, p->is_configured() ? 1 : 0);
     self->m_picking = false;
     if (web) {
-        /* #101: a web-UI provider opens straight away on its new address. */
+        /* #101: a web-UI provider opens straight away on its new address. A
+         * media server browsed natively signs in first (openProvider). */
         toast(p->name, "Server saved");
-        self->openWebProvider();
+        if (isNativeWeb(p))
+            self->openProvider(p->id);
+        else
+            self->openWebProvider();
         return;
     }
 
@@ -1005,7 +1111,10 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     }
 
     /* Reopen the host so the catalog is re-fetched from the new source. */
-    toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
+    if (p->ui_embedded)
+        toast(p->name, value.empty() ? "Addons cleared" : "Addon added");
+    else
+        toast("PROVIDERS", value.empty() ? "Playlist cleared" : "Playlist updated");
 
     std::string id = self->m_providerId;
     if (self->m_opened) {
@@ -1029,14 +1138,40 @@ void ProviderHostScreen::openSourceEditor()
     if (current && (std::strncmp(current, "http://", 7) == 0 || std::strncmp(current, "https://", 8) == 0)) {
         initial = current;
     } else if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+        /* Nothing set yet: Emby and Jellyfin answer a LAN broadcast, so look
+         * first and pre-fill what answers - typing an address with the D-pad
+         * took 103 presses on hardware. update() opens the keyboard. */
+        const char* product = m_providerId == "emby"     ? "EmbyServer"
+                            : m_providerId == "jellyfin" ? "JellyfinServer"
+                            : nullptr;
+        if (product) {
+            evo_net_discover_start(product);
+            m_discovering = true;
+            evo_feedback(EVO_FB_OPEN);
+            char msg[96];
+            std::snprintf(msg, sizeof msg, "Looking for %s on your network...", p->name);
+            toast(p->name, msg);
+            return;
+        }
         initial = "http://";
+    } else if (p->ui_embedded) {
+        initial = "https://";       /* an addon to ADD, not a source to edit */
     } else if (!m_lastTypedUrl.empty()) {
         initial = m_lastTypedUrl;
     }
+    openSourceKeyboard(initial);
+}
+
+void ProviderHostScreen::openSourceKeyboard(const std::string& initial)
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p) return;
 
     char title[96];
     if (p->caps & EVO_PROVIDER_CAP_WEBUI)
         std::snprintf(title, sizeof title, "%s server (http(s)://host:port)", p->name);
+    else if (p->ui_embedded)
+        std::snprintf(title, sizeof title, "Add a Stremio addon (its manifest URL)");
     else
         std::snprintf(title, sizeof title, "%s playlist URL (clear to reset)", p->name);
 
@@ -1191,12 +1326,15 @@ void ProviderHostScreen::startSelected()
     std::snprintf(g_pending.item_id,  sizeof g_pending.item_id,  "%s", sel.item_id);
     std::snprintf(g_pending.title,    sizeof g_pending.title,    "%s", sel.title);
     g_pending.is_live = sel.is_live;
+    g_pending.resume_sec = sel.resume_sec;
     g_resolve_finished = false;
 
     /* Read the setting now, not when the reply lands: what was on when the
      * channel was opened is what applies to it. */
     if (auto st = Application::getInstance().getSettingsService())
         g_pending.ask = st->isAskStreamEnabled() ? 1 : 0;
+    if (const evo_provider_t* pp = evo_provider_find(sel.provider_id))
+        if (pp->caps & EVO_PROVIDER_CAP_PICK) g_pending.ask = 1;
     g_pending.picked = 0;
     g_pick_stage = PickStage::Idle;
     ++g_pick_gen;
@@ -1207,8 +1345,10 @@ void ProviderHostScreen::startSelected()
     m_tuneFrames = 0;
 
     char msg[128];
-    std::snprintf(msg, sizeof(msg), "Tuning %s...", sel.title);
-    toast("LIVE TV", msg);
+    const evo_provider_t* tp = evo_provider_find(sel.provider_id);
+    const bool live = tp && (tp->caps & EVO_PROVIDER_CAP_LIVE);
+    std::snprintf(msg, sizeof(msg), live ? "Tuning %s..." : "Opening %s...", sel.title);
+    toast(live ? "LIVE TV" : (tp ? tp->name : "PROVIDER"), msg);
     evo_rmlui_provider_set_tuning(1);
     evo_rmlui_provider_set_loading(1, msg);
 }
@@ -1217,11 +1357,42 @@ void ProviderHostScreen::update(double deltaMs)
 {
     StatefulScreen::update(deltaMs);
 
+    signInStep();
+
+    if (m_discovering) {
+        char addr[128];
+        int rc = evo_net_discover_poll(addr, sizeof addr);
+        if (rc != 0) {
+            m_discovering = false;
+            const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+            if (rc > 0) {
+                evo_bt("prov_screen: discovery found %s for '%s'", addr, m_providerId.c_str());
+                toast(p ? p->name : "PROVIDER", "Found a server - press Triangle to use it");
+                openSourceKeyboard(addr);
+            } else {
+                evo_bt("prov_screen: discovery found nothing for '%s'", m_providerId.c_str());
+                toast(p ? p->name : "PROVIDER", "No server found - type its address");
+                openSourceKeyboard("http://");
+            }
+        }
+    }
+
     /* #101: the web UI's session ended when the user closed the browser (a
      * handed-over stream keeps it alive). Back to the chooser, or out when
      * this is the only provider. */
     if (m_web) {
-        if (evo_webui_session_active()) {
+        /* EVO ended it (server down, page never loaded): say why, and stay
+         * on the chooser so the address can be fixed right there. Checked
+         * first: a refused connect can end the session before this screen
+         * ever saw it running. */
+        char err[256];
+        if (!evo_webui_session_active() && evo_webui_take_error(err, sizeof err)) {
+            m_web = false;
+            m_webSeen = false;
+            const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+            toast(p ? p->name : "PROVIDER", err);
+            enterPicker();
+        } else if (evo_webui_session_active()) {
             m_webSeen = true;
         } else if (m_webSeen) {
             m_web = false;
@@ -1235,6 +1406,20 @@ void ProviderHostScreen::update(double deltaMs)
         return;
     }
     if (!m_opened) return;
+
+    /* The server rejected the saved session (expired, revoked, a server
+     * reset): the catalog cannot load, so go to sign-in rather than leave
+     * "Could not load the catalog" with no way forward. */
+    if (const evo_provider_t* sp = evo_provider_find(m_providerId.c_str())) {
+        if (sp->needs_sign_in && sp->sign_in && sp->needs_sign_in()) {
+            evo_bt("prov_screen: '%s' session rejected - back to sign-in", m_providerId.c_str());
+            toast(sp->name, "Please sign in again");
+            evo_rmlui_provider_close();
+            m_opened = false;
+            beginSignIn();
+            return;
+        }
+    }
 
     /* Bundle refresh, artwork decode, and any catalog reply that landed. */
     evo_rmlui_provider_tick();
@@ -1360,6 +1545,237 @@ void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
      * provider's own context - it is composited on top afterwards. */
     evo_rmlui_render_nav_overlay(framebuffer, width, height);
     evo_rmlui_provider_clear_frame();
+}
+
+/* ------------------------------------------------------------------------- */
+/* Media-server sign-in                                                      */
+/* ------------------------------------------------------------------------- */
+
+bool ProviderHostScreen::isNativeWeb(const ::evo_provider* p)
+{
+    return p && (p->caps & EVO_PROVIDER_CAP_WEBUI) &&
+           (p->caps & EVO_PROVIDER_CAP_CATALOG) && p->list_catalog;
+}
+
+void ProviderHostScreen::beginSignIn()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p || !p->sign_in) return;
+    std::string id = m_providerId;
+    enterPicker();                  /* the chooser sits behind the keyboards */
+    m_providerId = id;
+    m_signInUser.clear();
+    m_signInPass.clear();
+    m_qcCode.clear();
+    evo_bt("prov_screen: sign-in to '%s' begins", id.c_str());
+    /* Quick Connect first where the server has it: approving a six-digit code
+     * on a phone beats spelling a password with the D-pad. A server with it
+     * switched off answers the start with an error and falls through. */
+    if (p->qc_start) {
+        m_signIn = SignIn::QcStart;
+        if (p->qc_start(&ProviderHostScreen::OnQcCode, this) == 0) return;
+    }
+    beginPasswordSignIn();
+}
+
+void ProviderHostScreen::beginPasswordSignIn()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p || !p->sign_in) { m_signIn = SignIn::None; return; }
+    m_signIn = SignIn::Suggest;
+    /* The server's first public user pre-fills the name - one press, not a
+     * spelled-out user name. A server that hides its users just gives "". */
+    if (!p->suggest_user || p->suggest_user(&ProviderHostScreen::OnSignInSuggest, this) != 0)
+        m_signIn = SignIn::OpenUser;
+}
+
+static long long qc_now_ms()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void ProviderHostScreen::OnQcCode(int ok, const char* code, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self || self->m_signIn != SignIn::QcStart) return;
+    if (!ok || !code || !code[0]) {
+        evo_bt("prov_screen: quick connect unavailable for '%s' - password sign-in",
+               self->m_providerId.c_str());
+        self->beginPasswordSignIn();
+        return;
+    }
+    self->m_qcCode = code;
+    self->m_qcNextPollMs = qc_now_ms() + 3000;
+    /* Jellyfin drops a pending request after about ten minutes. */
+    self->m_qcDeadlineMs = qc_now_ms() + 9 * 60 * 1000;
+    self->m_signIn = SignIn::QcWait;
+    evo_bt("prov_screen: quick connect code %s for '%s'", code, self->m_providerId.c_str());
+}
+
+void ProviderHostScreen::OnQcPoll(int state, const char* msg, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self || self->m_signIn != SignIn::QcPolling) return;
+    const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
+    if (state == 0) {
+        self->m_qcNextPollMs = qc_now_ms() + 3000;
+        self->m_signIn = SignIn::QcWait;
+        return;
+    }
+    self->m_signIn = SignIn::None;
+    self->m_qcCode.clear();
+    evo_bt("prov_screen: quick connect for '%s' -> %s (%s)", self->m_providerId.c_str(),
+           state > 0 ? "signed in" : "failed", msg ? msg : "");
+    toast(p ? p->name : "PROVIDER", msg && msg[0] ? msg : (state > 0 ? "Signed in" : "Quick Connect failed"));
+    if (state > 0)
+        self->openProvider(self->m_providerId);
+}
+
+/* While the code is on screen: Square switches to the password, Circle gives
+ * up. Everything else is swallowed - there is nothing else to press. */
+bool ProviderHostScreen::signInQcInput(uint32_t pressed)
+{
+    if (m_signIn != SignIn::QcStart && m_signIn != SignIn::QcWait &&
+        m_signIn != SignIn::QcPolling)
+        return false;
+    if (pressed & PadButtons::Square) {
+        evo_feedback(EVO_FB_OPEN);
+        m_qcCode.clear();
+        beginPasswordSignIn();
+    } else if (pressed & PadButtons::Circle) {
+        evo_feedback(EVO_FB_CANCEL);
+        m_qcCode.clear();
+        m_signIn = SignIn::None;
+        evo_bt("prov_screen: quick connect for '%s' cancelled", m_providerId.c_str());
+    }
+    return true;
+}
+
+void ProviderHostScreen::renderQuickConnect(uint32_t* framebuffer, int width, int height)
+{
+    evo_rmlui_list_params_t params;
+    std::memset(&params, 0, sizeof(params));
+    params.section = EVO_SECTION_EMBY;
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    static char title[64], hint[160], code[16];
+    std::snprintf(title, sizeof title, "SIGN IN TO %s", p ? p->name : "THE SERVER");
+    params.title = title;
+    params.subtitle = "Quick Connect - no password needed";
+    params.is_empty = 1;
+    if (m_qcCode.size() == 6)
+        std::snprintf(code, sizeof code, "%.3s %.3s", m_qcCode.c_str(), m_qcCode.c_str() + 3);
+    else
+        std::snprintf(code, sizeof code, "%s", m_qcCode.empty() ? "..." : m_qcCode.c_str());
+    params.empty_title = code;
+    std::snprintf(hint, sizeof hint,
+                  "In %s on your phone or computer, open Settings > Quick Connect and enter this code.",
+                  p ? p->name : "the app");
+    params.empty_hint = hint;
+    params.empty_icon = "../icons/icon_emby.png";
+    params.hint_count = 2;
+    params.hints[0].glyph_path = "../icons/btn_square.png";
+    params.hints[0].label = "USE PASSWORD";
+    params.hints[1].glyph_path = "../icons/btn_circle.png";
+    params.hints[1].label = "CANCEL";
+    evo_rmlui_update_list(&params);
+    evo_rmlui_render_list(framebuffer, width, height);
+}
+
+void ProviderHostScreen::OnSignInSuggest(const char* name, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self || self->m_signIn != SignIn::Suggest) return;
+    self->m_signInUser = name ? name : "";
+    self->m_signIn = SignIn::OpenUser;
+}
+
+void ProviderHostScreen::OnSignInUser(const char* text, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self) return;
+    self->m_signInUser = text ? text : "";
+    self->m_signIn = self->m_signInUser.empty() ? SignIn::None : SignIn::OpenPass;
+}
+
+void ProviderHostScreen::OnSignInPass(const char* text, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self) return;
+    self->m_signInPass = text ? text : "";
+    const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
+    self->m_signIn = SignIn::Signing;
+    int rc = (p && p->sign_in)
+           ? p->sign_in(self->m_signInUser.c_str(), self->m_signInPass.c_str(),
+                        &ProviderHostScreen::OnSignInDone, self)
+           : -1;
+    self->m_signInPass.assign(self->m_signInPass.size(), '\0');
+    self->m_signInPass.clear();
+    if (rc != 0) {
+        self->m_signIn = SignIn::None;
+        toast(p ? p->name : "PROVIDER", "Could not reach the server");
+    }
+}
+
+void ProviderHostScreen::OnSignInDone(int ok, const char* msg, void* ud)
+{
+    auto* self = static_cast<ProviderHostScreen*>(ud);
+    if (!self || self->m_signIn != SignIn::Signing) return;
+    self->m_signIn = SignIn::None;
+    const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
+    evo_bt("prov_screen: sign-in to '%s' -> %s (%s)", self->m_providerId.c_str(),
+           ok ? "ok" : "failed", msg ? msg : "");
+    toast(p ? p->name : "PROVIDER", msg ? msg : (ok ? "Signed in" : "Sign-in failed"));
+    if (ok)
+        self->openProvider(self->m_providerId);
+}
+
+/* Called every frame from update(). Opens the next keyboard, and notices a
+ * keyboard the user cancelled (Circle closes it without a callback). */
+void ProviderHostScreen::signInStep()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    const char* name = p ? p->name : "Server";
+    char title[96];
+    switch (m_signIn) {
+    case SignIn::QcWait: {
+        const long long now = qc_now_ms();
+        if (now > m_qcDeadlineMs) {
+            m_signIn = SignIn::None;
+            m_qcCode.clear();
+            toast(name, "The code expired - press X to get a new one");
+            break;
+        }
+        if (now >= m_qcNextPollMs && p && p->qc_poll) {
+            m_signIn = SignIn::QcPolling;
+            if (p->qc_poll(&ProviderHostScreen::OnQcPoll, this) != 0) {
+                m_signIn = SignIn::QcWait;
+                m_qcNextPollMs = now + 3000;
+            }
+        }
+        break;
+    }
+    case SignIn::OpenUser:
+        std::snprintf(title, sizeof title, "%s user name", name);
+        m_signIn = SignIn::User;
+        evo_keyboard_open(title, m_signInUser.c_str(), 63,
+                          &ProviderHostScreen::OnSignInUser, this);
+        break;
+    case SignIn::OpenPass:
+        std::snprintf(title, sizeof title, "Password for %s (empty if none)", m_signInUser.c_str());
+        m_signIn = SignIn::Pass;
+        evo_keyboard_open(title, "", 63, &ProviderHostScreen::OnSignInPass, this);
+        break;
+    case SignIn::User:
+    case SignIn::Pass:
+        if (!evo_keyboard_is_open()) {
+            evo_bt("prov_screen: sign-in to '%s' cancelled", m_providerId.c_str());
+            m_signIn = SignIn::None;
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 } // namespace evo

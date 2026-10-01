@@ -1,5 +1,23 @@
 /*
- * addon_emby.c — Emby & Jellyfin media server client implementation.
+ * addon_emby.c — the Emby & Jellyfin media-server client (see addon_emby.h).
+ *
+ * Everything here runs on the main thread: requests go out through
+ * evo_net_request_async and every reply lands from evo_net_poll().
+ *
+ * CATALOG IDS
+ *
+ * The provider host treats an item id as opaque, so the catalog encodes where
+ * a row leads in the id itself:
+ *
+ *   v:resume            Continue Watching          (folder)
+ *   v:nextup            Next Up                    (folder)
+ *   lib:<type>:<id>     a library; <type> is its CollectionType
+ *   ser:<id>            a series  -> its seasons
+ *   sea:<series>:<id>   a season  -> its episodes
+ *   fol:<id>            any other folder (box set, plain folder)
+ *   i:<id>              something playable
+ *
+ * Only this file builds or reads them.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,572 +28,786 @@
 #include "evo_net.h"
 #include "cJSON.h"
 #include "evo_data_path.h"
+#include "evo_provider_log.h"
 
-#ifndef EMBY_CONF_PATH
-#define EMBY_CONF_PATH evo_data_path("emby.conf")
+#include <time.h>
+
+#ifndef EVO_PLAYER_VERSION
+#define EVO_PLAYER_VERSION "dev"
 #endif
 
-#ifndef EMBY_CONF_USB
-#define EMBY_CONF_USB  "/mnt/usb0/.evo_emby.conf"
-#endif
+#define MS_DEVICE_ID   "evo-ps5"
+#define MS_PAGE        96          /* rows per catalog request: twelve 8-card pages */
+#define MS_FIELDS      "Fields=Overview,ProductionYear,ChildCount&EnableImageTypes=Primary&ImageTypeLimit=1"
 
-/*
- * No default host, no default username.
- *
- * This used to ship with "192.168.0.11" and "bin" in it - one developer's LAN,
- * compiled into every copy. It made the provider look configured when it was
- * not, so the first thing a user saw was a six-second timeout against a
- * machine that is not theirs, with nothing to say why. is_configured() now
- * answers honestly and the setup screen is reachable instead.
- */
-static emby_config_t g_emby_config = {
-    .host = "",
-    .port = 8096,
-    .username = "",
-    .password = "",
-    .token = "",
-    .user_id = "",
-    .server_name = "Emby Server",
-    .server_version = "",
-    .use_https = false,
-    .is_connected = false
+struct ms_client {
+    ms_kind_t   kind;
+    const char *conf;              /* leaf under the data root */
+    const char *usb_conf;          /* pre-#46 fallback, Emby only */
+    const char *prefix;            /* "/emby" or "" */
+    emby_config_t cfg;
+    /* One per playback, sent with every report. Emby 4.9 answers a
+     * /Sessions/Playing without one with 400 "Value cannot be null (key)". */
+    char play_session[40];
+    unsigned play_count;
+    char qc_secret[128];           /* Quick Connect in progress */
 };
 
-/*
- * "http://host:port" or "https://host:port".
- *
- * Every request in this file used to spell out "http://%s:%d" at its own call
- * site - nine of them - which meant an HTTPS Emby server was not
- * misconfigured, it was unreachable, and adding TLS support meant finding all
- * nine. It also meant emby_build_stream_url handed FFmpeg an http:// URL for a
- * server that only speaks https.
- *
- * Returns a static buffer. Single-threaded by construction: every caller is
- * either the main thread or evo_net's worker building a request before it is
- * queued, never both at once.
- */
-static const char *emby_base(void)
+static ms_client_t g_clients[2] = {
+    { MS_EMBY,     "emby.conf",     "/mnt/usb0/.evo_emby.conf", "/emby",
+      { .port = 8096, .server_name = "Emby Server" } },
+    { MS_JELLYFIN, "jellyfin.conf", NULL,                       "",
+      { .port = 8096, .server_name = "Jellyfin" } },
+};
+
+ms_client_t *ms_client(ms_kind_t kind)
 {
-    static char base[160];
-    snprintf(base, sizeof base, "%s://%s:%d",
-             g_emby_config.use_https ? "https" : "http",
-             g_emby_config.host, g_emby_config.port);
-    return base;
+    return &g_clients[kind == MS_JELLYFIN ? 1 : 0];
 }
 
-int emby_init(void)
+emby_config_t *ms_config(ms_client_t *c) { return &c->cfg; }
+
+/* ------------------------------------------------------------------------- */
+/* Config                                                                    */
+/* ------------------------------------------------------------------------- */
+
+int ms_load(ms_client_t *c)
 {
-    FILE *f = fopen(EMBY_CONF_PATH, "r");
-    if (!f) f = fopen(EMBY_CONF_USB, "r");
+    emby_config_t *g = &c->cfg;
+    char name[sizeof g->server_name];
+    snprintf(name, sizeof name, "%s", c->kind == MS_EMBY ? "Emby Server" : "Jellyfin");
+    memset(g, 0, sizeof *g);
+    g->port = 8096;
+    snprintf(g->server_name, sizeof g->server_name, "%s", name);
 
-    if (f) {
-        char line[256];
-        int line_idx = 0;
-        while (fgets(line, sizeof(line), f)) {
-            line[strcspn(line, "\r\n")] = 0;
+    FILE *f = fopen(evo_data_path(c->conf), "r");
+    if (!f && c->usb_conf) f = fopen(c->usb_conf, "r");
+    if (!f) return 0;                    /* not set up yet - not an error */
 
-            if (strncmp(line, "host=", 5) == 0) {
-                strncpy(g_emby_config.host, line + 5, sizeof(g_emby_config.host) - 1);
-            } else if (strncmp(line, "port=", 5) == 0) {
-                g_emby_config.port = atoi(line + 5);
-                if (g_emby_config.port <= 0) g_emby_config.port = 8096;
-            } else if (strncmp(line, "username=", 9) == 0) {
-                strncpy(g_emby_config.username, line + 9, sizeof(g_emby_config.username) - 1);
-            } else if (strncmp(line, "password=", 9) == 0) {
-                strncpy(g_emby_config.password, line + 9, sizeof(g_emby_config.password) - 1);
-            } else if (strncmp(line, "token=", 6) == 0) {
-                strncpy(g_emby_config.token, line + 6, sizeof(g_emby_config.token) - 1);
-            } else if (strncmp(line, "user_id=", 8) == 0) {
-                strncpy(g_emby_config.user_id, line + 8, sizeof(g_emby_config.user_id) - 1);
-            } else if (strncmp(line, "server_name=", 12) == 0) {
-                strncpy(g_emby_config.server_name, line + 12, sizeof(g_emby_config.server_name) - 1);
-            } else if (strncmp(line, "https=", 6) == 0) {
-                g_emby_config.use_https = atoi(line + 6) ? true : false;
-            } else {
-                /* Positional fallback */
-                if (line_idx == 0 && line[0]) {
-                    strncpy(g_emby_config.host, line, sizeof(g_emby_config.host) - 1);
-                } else if (line_idx == 1 && line[0]) {
-                    g_emby_config.port = atoi(line);
-                    if (g_emby_config.port <= 0) g_emby_config.port = 8096;
-                } else if (line_idx == 2 && line[0]) {
-                    strncpy(g_emby_config.username, line, sizeof(g_emby_config.username) - 1);
-                } else if (line_idx == 3) {
-                    strncpy(g_emby_config.password, line, sizeof(g_emby_config.password) - 1);
-                } else if (line_idx == 4 && line[0]) {
-                    strncpy(g_emby_config.token, line, sizeof(g_emby_config.token) - 1);
-                } else if (line_idx == 5 && line[0]) {
-                    strncpy(g_emby_config.user_id, line, sizeof(g_emby_config.user_id) - 1);
-                } else if (line_idx == 6 && line[0]) {
-                    strncpy(g_emby_config.server_name, line, sizeof(g_emby_config.server_name) - 1);
-                }
-            }
-            line_idx++;
-        }
-
-        if (g_emby_config.token[0] && g_emby_config.user_id[0]) {
-            g_emby_config.is_connected = true;
-        }
-
-        fclose(f);
+    char line[1200];                     /* token= can be a long JWT */
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        const char *v = strchr(line, '=');
+        if (!v) continue;
+        v++;
+        if      (!strncmp(line, "host=", 5))        snprintf(g->host, sizeof g->host, "%s", v);
+        else if (!strncmp(line, "port=", 5))        { g->port = atoi(v); if (g->port <= 0 || g->port > 65535) g->port = 8096; }
+        else if (!strncmp(line, "username=", 9))    snprintf(g->username, sizeof g->username, "%s", v);
+        else if (!strncmp(line, "token=", 6))       snprintf(g->token, sizeof g->token, "%s", v);
+        else if (!strncmp(line, "user_id=", 8))     snprintf(g->user_id, sizeof g->user_id, "%s", v);
+        else if (!strncmp(line, "server_name=", 12)) snprintf(g->server_name, sizeof g->server_name, "%s", v);
+        else if (!strncmp(line, "https=", 6))       g->use_https = atoi(v) ? true : false;
+        else if (!strncmp(line, "path=", 5))        snprintf(g->path, sizeof g->path, "%s", v);
     }
-
+    fclose(f);
+    g->is_connected = g->token[0] && g->user_id[0];
     return 0;
 }
 
-int emby_save_config(void)
+int ms_save(ms_client_t *c)
 {
-    FILE *f = fopen(EMBY_CONF_PATH, "w");
-    if (!f) f = fopen(EMBY_CONF_USB, "w");
+    emby_config_t *g = &c->cfg;
+    FILE *f = fopen(evo_data_path(c->conf), "w");
+    if (!f && c->usb_conf) f = fopen(c->usb_conf, "w");
     if (!f) return -1;
-
-    fprintf(f, "host=%s\nport=%d\nusername=%s\npassword=%s\ntoken=%s\nuser_id=%s\nserver_name=%s\nhttps=%d\n",
-            g_emby_config.host,
-            g_emby_config.port,
-            g_emby_config.username,
-            g_emby_config.password,
-            g_emby_config.token,
-            g_emby_config.user_id,
-            g_emby_config.server_name,
-            g_emby_config.use_https ? 1 : 0);
-
+    /* No password: the token is the session, and a password in a plain file
+     * on the console is a password anyone with FTP can read. */
+    fprintf(f, "host=%s\nport=%d\nusername=%s\ntoken=%s\nuser_id=%s\nserver_name=%s\nhttps=%d\npath=%s\n",
+            g->host, g->port, g->username, g->token, g->user_id, g->server_name,
+            g->use_https ? 1 : 0, g->path);
     fclose(f);
     return 0;
 }
 
-emby_config_t *emby_get_config(void)
+int ms_is_configured(ms_client_t *c) { return c->cfg.host[0] ? 1 : 0; }
+
+int ms_needs_sign_in(ms_client_t *c)
 {
-    return &g_emby_config;
+    return c->cfg.host[0] && !c->cfg.is_connected;
 }
 
-void emby_set_server(const char *host, int port, const char *username, const char *password)
+static void ms_drop_session(ms_client_t *c)
 {
-    if (host) strncpy(g_emby_config.host, host, sizeof(g_emby_config.host) - 1);
-    if (port > 0) g_emby_config.port = port;
-    if (username) strncpy(g_emby_config.username, username, sizeof(g_emby_config.username) - 1);
-    if (password) strncpy(g_emby_config.password, password, sizeof(g_emby_config.password) - 1);
+    c->cfg.token[0] = '\0';
+    c->cfg.user_id[0] = '\0';
+    c->cfg.is_connected = false;
+    ms_save(c);
 }
 
-void emby_disconnect(void)
+const char *ms_get_source(ms_client_t *c)
 {
-    g_emby_config.token[0] = '\0';
-    g_emby_config.user_id[0] = '\0';
-    g_emby_config.is_connected = false;
-    emby_save_config();
+    static char src[2][176];
+    char *out = src[c->kind == MS_JELLYFIN ? 1 : 0];
+    if (!c->cfg.host[0]) return "";
+    int port = c->cfg.port > 0 ? c->cfg.port : 8096;
+    if ((c->cfg.use_https && port == 443) || (!c->cfg.use_https && port == 80))
+        snprintf(out, sizeof src[0], "%s://%s%s", c->cfg.use_https ? "https" : "http",
+                 c->cfg.host, c->cfg.path);
+    else
+        snprintf(out, sizeof src[0], "%s://%s:%d%s", c->cfg.use_https ? "https" : "http",
+                 c->cfg.host, port, c->cfg.path);
+    return out;
 }
 
-/* Authentication Context */
+int ms_set_source(ms_client_t *c, const char *value)
+{
+    char host[128];
+    int port = 8096, tls = 0;
+    if (evo_provider_parse_web_source(value, host, sizeof host, &port, &tls, 8096) != 0)
+        return -1;
+    snprintf(c->cfg.host, sizeof c->cfg.host, "%s", host);
+    c->cfg.port = port;
+    c->cfg.use_https = tls ? true : false;
+    /* The path after host[:port] - a reverse proxy's "/jellyfin" - without
+     * a query, a fragment or a trailing '/'. The parser above ignores it. */
+    c->cfg.path[0] = '\0';
+    {
+        const char *v = value;
+        while (*v == ' ') v++;
+        const char *s = strstr(v, "://");
+        s = s ? s + 3 : v;
+        const char *slash = strchr(s, '/');
+        if (slash) {
+            size_t n = strcspn(slash, "?# ");
+            while (n > 0 && slash[n - 1] == '/') n--;
+            if (n > 0 && n < sizeof c->cfg.path)
+                snprintf(c->cfg.path, sizeof c->cfg.path, "%.*s", (int)n, slash);
+        }
+    }
+    c->cfg.token[0] = '\0';
+    c->cfg.user_id[0] = '\0';
+    c->cfg.is_connected = false;
+    return ms_save(c);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Requests                                                                  */
+/* ------------------------------------------------------------------------- */
+
+static void ms_base(ms_client_t *c, char *out, size_t cap)
+{
+    /* Emby behind a proxy at /emby already is the /emby prefix. */
+    size_t pl = strlen(c->cfg.path);
+    const char *prefix = (c->prefix[0] && pl >= 5 && !strcmp(c->cfg.path + pl - 5, "/emby"))
+                       ? "" : c->prefix;
+    snprintf(out, cap, "%s://%s:%d%s%s", c->cfg.use_https ? "https" : "http",
+             c->cfg.host, c->cfg.port > 0 ? c->cfg.port : 8096, c->cfg.path, prefix);
+}
+
+static void ms_auth_header(ms_client_t *c, int with_token, char *out, size_t cap)
+{
+    if (c->kind == MS_EMBY && with_token && c->cfg.token[0]) {
+        snprintf(out, cap, "X-Emby-Token: %s", c->cfg.token);
+        return;
+    }
+    int n = snprintf(out, cap,
+                     "%s: MediaBrowser Client=\"EVO Player\", Device=\"PlayStation 5\", "
+                     "DeviceId=\"%s\", Version=\"%s\"",
+                     c->kind == MS_EMBY ? "X-Emby-Authorization" : "Authorization",
+                     MS_DEVICE_ID, EVO_PLAYER_VERSION);
+    if (with_token && c->cfg.token[0] && n > 0 && (size_t)n < cap)
+        snprintf(out + n, cap - (size_t)n, ", Token=\"%s\"", c->cfg.token);
+}
+
+static int ms_request(ms_client_t *c, const char *method, const char *path,
+                      const char *body, int with_token, evo_net_cb cb, void *ud)
+{
+    char base[200], url[EVO_PROVIDER_MAX_URL], auth[1400];   /* header + a JWT token */
+    ms_base(c, base, sizeof base);
+    if (snprintf(url, sizeof url, "%s%s", base, path) >= (int)sizeof url) return -1;
+    ms_auth_header(c, with_token, auth, sizeof auth);
+    const char *headers[1] = { auth };
+    return evo_net_request_async(method, url, body, headers, 1, cb, ud);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Sign-in                                                                   */
+/* ------------------------------------------------------------------------- */
+
 typedef struct {
-    emby_auth_cb callback;
-    void        *userdata;
-    int          retried;
-} auth_ctx_t;
+    ms_client_t *c;
+    void (*cb)(const char *name, void *ud);
+    void *ud;
+} user_ctx_t;
 
-static void on_auth_response(int success, int status_code, const char *body, size_t body_len, void *userdata);
-
-static void on_public_users_response(int success, int status_code, const char *body, size_t body_len, void *userdata)
+static void on_public_users(int ok, int status, const char *body, size_t len, void *ud)
 {
-    (void)body_len;
-    auth_ctx_t *ctx = (auth_ctx_t *)userdata;
+    (void)len;
+    user_ctx_t *x = (user_ctx_t *)ud;
+    const char *name = "";
+    cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    if (root && cJSON_IsArray(root) && cJSON_GetArraySize(root) > 0) {
+        cJSON *n = cJSON_GetObjectItem(cJSON_GetArrayItem(root, 0), "Name");
+        if (n && cJSON_IsString(n)) name = n->valuestring;
+    }
+    if (x->cb) x->cb(name, x->ud);
+    if (root) cJSON_Delete(root);
+    free(x);
+}
 
-    if (success && status_code == 200 && body) {
+int ms_suggest_user(ms_client_t *c, void (*cb)(const char *name, void *ud), void *ud)
+{
+    if (!c->cfg.host[0]) return -1;
+    user_ctx_t *x = (user_ctx_t *)calloc(1, sizeof *x);
+    if (!x) return -2;
+    x->c = c; x->cb = cb; x->ud = ud;
+    int rc = ms_request(c, "GET", "/Users/Public", NULL, 0, on_public_users, x);
+    if (rc != 0) free(x);
+    return rc;
+}
+
+typedef struct {
+    ms_client_t *c;
+    evo_provider_auth_cb cb;
+    void *ud;
+    char user[64];
+} signin_ctx_t;
+
+static void on_sign_in(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    signin_ctx_t *x = (signin_ctx_t *)ud;
+    ms_client_t *c = x->c;
+    const char *msg = "Could not reach the server";
+    int good = 0;
+
+    if (ok && (status == 401 || status == 403)) {
+        msg = "Wrong user name or password";
+    } else if (ok && status == 200 && body) {
         cJSON *root = cJSON_Parse(body);
-        if (root && cJSON_IsArray(root) && cJSON_GetArraySize(root) > 0) {
-            cJSON *first_user = cJSON_GetArrayItem(root, 0);
-            if (first_user) {
-                cJSON *name_item = cJSON_GetObjectItem(first_user, "Name");
-                if (name_item && cJSON_IsString(name_item)) {
-                    strncpy(g_emby_config.username, name_item->valuestring, sizeof(g_emby_config.username) - 1);
-                    emby_save_config();
-                    cJSON_Delete(root);
-
-                    /* Retry auth with discovered username */
-                    char url[256];
-                    snprintf(url, sizeof(url), "%s/emby/Users/AuthenticateByName",
-                             emby_base());
-
-                    cJSON *auth_req = cJSON_CreateObject();
-                    cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
-                    cJSON_AddStringToObject(auth_req, "Pw", g_emby_config.password);
-                    char *post_json = cJSON_PrintUnformatted(auth_req);
-
-                    const char *headers[2];
-                    headers[0] = "X-Emby-Authorization: MediaBrowser Client=\"EVOPlayer\", Device=\"PlayStation 5\", DeviceId=\"EVO-PS5-050\", Version=\"0.5.0\"";
-                    headers[1] = "Content-Type: application/json";
-
-                    ctx->retried = 1;
-                    evo_net_request_async("POST", url, post_json ? post_json : "{}", headers, 2, on_auth_response, ctx);
-                    if (post_json) free(post_json);
-                    cJSON_Delete(auth_req);
-                    return;
-                }
-            }
+        cJSON *tok  = root ? cJSON_GetObjectItem(root, "AccessToken") : NULL;
+        cJSON *user = root ? cJSON_GetObjectItem(root, "User") : NULL;
+        cJSON *uid  = user ? cJSON_GetObjectItem(user, "Id") : NULL;
+        if (tok && cJSON_IsString(tok) && uid && cJSON_IsString(uid)) {
+            snprintf(c->cfg.token, sizeof c->cfg.token, "%s", tok->valuestring);
+            snprintf(c->cfg.user_id, sizeof c->cfg.user_id, "%s", uid->valuestring);
+            snprintf(c->cfg.username, sizeof c->cfg.username, "%s", x->user);
+            c->cfg.is_connected = true;
+            ms_save(c);
+            good = 1;
+            msg = "Signed in";
+        } else {
+            msg = "The server sent an answer EVO does not understand";
         }
         if (root) cJSON_Delete(root);
     }
-
-    if (ctx && ctx->callback) {
-        ctx->callback(0, "Connection or authentication failed", ctx->userdata);
-    }
-    free(ctx);
+    if (x->cb) x->cb(good, msg, x->ud);
+    free(x);
 }
 
-static void on_auth_response(int success, int status_code, const char *body, size_t body_len, void *userdata)
+int ms_sign_in(ms_client_t *c, const char *user, const char *password,
+               evo_provider_auth_cb cb, void *ud)
 {
-    (void)body_len;
-    auth_ctx_t *ctx = (auth_ctx_t *)userdata;
+    if (!c->cfg.host[0] || !user || !*user) return -1;
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "Username", user);
+    cJSON_AddStringToObject(req, "Pw", password ? password : "");
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return -2;
 
-    if (!success || status_code != 200 || !body) {
-        if (ctx && !ctx->retried) {
-            /* Try auto-discovering public users on the server */
-            char url[256];
-            snprintf(url, sizeof(url), "%s/emby/Users/Public",
-                     emby_base());
-            evo_net_request_async("GET", url, NULL, NULL, 0, on_public_users_response, ctx);
-            return;
-        }
+    signin_ctx_t *x = (signin_ctx_t *)calloc(1, sizeof *x);
+    if (!x) { free(body); return -2; }
+    x->c = c; x->cb = cb; x->ud = ud;
+    snprintf(x->user, sizeof x->user, "%s", user);
 
-        if (ctx && ctx->callback) {
-            ctx->callback(0, "Connection or authentication failed", ctx->userdata);
-        }
-        free(ctx);
-        return;
-    }
-
-    cJSON *root = cJSON_Parse(body);
-    if (!root) {
-        if (ctx && ctx->callback) {
-            ctx->callback(0, "Invalid JSON from server", ctx->userdata);
-        }
-        free(ctx);
-        return;
-    }
-
-    cJSON *token_item = cJSON_GetObjectItem(root, "AccessToken");
-    cJSON *user_item  = cJSON_GetObjectItem(root, "User");
-    cJSON *uid_item   = user_item ? cJSON_GetObjectItem(user_item, "Id") : NULL;
-    cJSON *srv_item   = cJSON_GetObjectItem(root, "ServerId");
-
-    if (token_item && cJSON_IsString(token_item) && uid_item && cJSON_IsString(uid_item)) {
-        strncpy(g_emby_config.token, token_item->valuestring, sizeof(g_emby_config.token) - 1);
-        strncpy(g_emby_config.user_id, uid_item->valuestring, sizeof(g_emby_config.user_id) - 1);
-        if (srv_item && cJSON_IsString(srv_item)) {
-            snprintf(g_emby_config.server_name, sizeof(g_emby_config.server_name), "Emby (%.16s)", srv_item->valuestring);
-        }
-        g_emby_config.is_connected = true;
-        emby_save_config();
-
-        if (ctx && ctx->callback) {
-            ctx->callback(1, "Connected successfully", ctx->userdata);
-        }
-    } else {
-        if (ctx && ctx->callback) {
-            ctx->callback(0, "Missing AccessToken or UserId in response", ctx->userdata);
-        }
-    }
-
-    cJSON_Delete(root);
-    free(ctx);
+    int rc = ms_request(c, "POST", "/Users/AuthenticateByName", body, 0, on_sign_in, x);
+    free(body);
+    if (rc != 0) free(x);
+    return rc;
 }
 
-int emby_connect_async(emby_auth_cb callback, void *userdata)
-{
-    char url[256];
-    snprintf(url, sizeof(url), "%s/emby/Users/AuthenticateByName",
-             emby_base());
+/* ------------------------------------------------------------------------- */
+/* Quick Connect (Jellyfin)                                                  */
+/* ------------------------------------------------------------------------- */
 
-    cJSON *auth_req = cJSON_CreateObject();
-    cJSON_AddStringToObject(auth_req, "Username", g_emby_config.username);
-    cJSON_AddStringToObject(auth_req, "Pw", g_emby_config.password);
-    char *post_json = cJSON_PrintUnformatted(auth_req);
-
-    const char *headers[2];
-    headers[0] = "X-Emby-Authorization: MediaBrowser Client=\"EVOPlayer\", Device=\"PlayStation 5\", DeviceId=\"EVO-PS5-050\", Version=\"0.5.0\"";
-    headers[1] = "Content-Type: application/json";
-
-    auth_ctx_t *ctx = (auth_ctx_t *)malloc(sizeof(auth_ctx_t));
-    if (!ctx) {
-        if (post_json) free(post_json);
-        cJSON_Delete(auth_req);
-        return -1;
-    }
-    ctx->callback = callback;
-    ctx->userdata = userdata;
-    ctx->retried  = 0;
-
-    int ret = evo_net_request_async("POST", url, post_json ? post_json : "{}", headers, 2, on_auth_response, ctx);
-    if (post_json) free(post_json);
-    cJSON_Delete(auth_req);
-    return ret;
-}
-
-/* Items Query Context */
 typedef struct {
-    emby_items_cb callback;
-    void         *userdata;
+    ms_client_t *c;
+    evo_provider_qc_code_cb code_cb;
+    evo_provider_qc_cb poll_cb;
+    void *ud;
+} qc_ctx_t;
+
+static void on_qc_initiate(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    qc_ctx_t *x = (qc_ctx_t *)ud;
+    cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    cJSON *sec  = root ? cJSON_GetObjectItem(root, "Secret") : NULL;
+    cJSON *code = root ? cJSON_GetObjectItem(root, "Code") : NULL;
+    if (sec && cJSON_IsString(sec) && code && cJSON_IsString(code)) {
+        snprintf(x->c->qc_secret, sizeof x->c->qc_secret, "%s", sec->valuestring);
+        if (x->code_cb) x->code_cb(1, code->valuestring, x->ud);
+    } else {
+        /* 401 = Quick Connect switched off on the server: password instead. */
+        PROV_LOG("quick connect: initiate -> ok=%d http=%d", ok, status);
+        x->c->qc_secret[0] = '\0';
+        if (x->code_cb) x->code_cb(0, "", x->ud);
+    }
+    if (root) cJSON_Delete(root);
+    free(x);
+}
+
+int ms_qc_start(ms_client_t *c, evo_provider_qc_code_cb cb, void *ud)
+{
+    if (!c->cfg.host[0] || c->kind != MS_JELLYFIN) return -1;
+    qc_ctx_t *x = (qc_ctx_t *)calloc(1, sizeof *x);
+    if (!x) return -2;
+    x->c = c; x->code_cb = cb; x->ud = ud;
+    int rc = ms_request(c, "POST", "/QuickConnect/Initiate", "", 0, on_qc_initiate, x);
+    if (rc != 0) free(x);
+    return rc;
+}
+
+static void on_qc_session(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    qc_ctx_t *x = (qc_ctx_t *)ud;
+    ms_client_t *c = x->c;
+    int good = 0;
+    cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    cJSON *tok  = root ? cJSON_GetObjectItem(root, "AccessToken") : NULL;
+    cJSON *user = root ? cJSON_GetObjectItem(root, "User") : NULL;
+    cJSON *uid  = user ? cJSON_GetObjectItem(user, "Id") : NULL;
+    cJSON *name = user ? cJSON_GetObjectItem(user, "Name") : NULL;
+    if (tok && cJSON_IsString(tok) && uid && cJSON_IsString(uid)) {
+        snprintf(c->cfg.token, sizeof c->cfg.token, "%s", tok->valuestring);
+        snprintf(c->cfg.user_id, sizeof c->cfg.user_id, "%s", uid->valuestring);
+        if (name && cJSON_IsString(name))
+            snprintf(c->cfg.username, sizeof c->cfg.username, "%s", name->valuestring);
+        c->cfg.is_connected = true;
+        c->qc_secret[0] = '\0';
+        ms_save(c);
+        good = 1;
+    }
+    if (root) cJSON_Delete(root);
+    if (x->poll_cb) x->poll_cb(good ? 1 : -1, good ? "Signed in" : "The server refused the approved code", x->ud);
+    free(x);
+}
+
+static void on_qc_connect(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    qc_ctx_t *x = (qc_ctx_t *)ud;
+    ms_client_t *c = x->c;
+    if (!ok || !body) {                 /* a dropped poll: try again next time */
+        if (x->poll_cb) x->poll_cb(0, "", x->ud);
+        free(x);
+        return;
+    }
+    if (status != 200) {                /* the secret expired or was rejected */
+        c->qc_secret[0] = '\0';
+        if (x->poll_cb) x->poll_cb(-1, "The code expired", x->ud);
+        free(x);
+        return;
+    }
+    cJSON *root = cJSON_Parse(body);
+    int approved = root && cJSON_IsTrue(cJSON_GetObjectItem(root, "Authenticated"));
+    if (root) cJSON_Delete(root);
+    if (!approved) {
+        if (x->poll_cb) x->poll_cb(0, "", x->ud);
+        free(x);
+        return;
+    }
+    char req[200];
+    snprintf(req, sizeof req, "{\"Secret\":\"%s\"}", c->qc_secret);
+    if (ms_request(c, "POST", "/Users/AuthenticateWithQuickConnect", req, 0, on_qc_session, x) != 0) {
+        if (x->poll_cb) x->poll_cb(-1, "Could not reach the server", x->ud);
+        free(x);
+    }
+}
+
+int ms_qc_poll(ms_client_t *c, evo_provider_qc_cb cb, void *ud)
+{
+    if (!c->qc_secret[0]) return -1;
+    qc_ctx_t *x = (qc_ctx_t *)calloc(1, sizeof *x);
+    if (!x) return -2;
+    x->c = c; x->poll_cb = cb; x->ud = ud;
+    char path[200];
+    snprintf(path, sizeof path, "/QuickConnect/Connect?Secret=%s", c->qc_secret);
+    int rc = ms_request(c, "GET", path, NULL, 0, on_qc_connect, x);
+    if (rc != 0) free(x);
+    return rc;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Items                                                                     */
+/* ------------------------------------------------------------------------- */
+
+static const char *jstr(cJSON *o, const char *k)
+{
+    cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return (v && cJSON_IsString(v)) ? v->valuestring : "";
+}
+
+static double jnum(cJSON *o, const char *k)
+{
+    cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return (v && cJSON_IsNumber(v)) ? v->valuedouble : 0.0;
+}
+
+static int jbool(cJSON *o, const char *k)
+{
+    cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return v && cJSON_IsTrue(v);
+}
+
+static void fmt_runtime(int64_t secs, char *out, size_t cap)
+{
+    out[0] = '\0';
+    if (secs <= 0) return;
+    int h = (int)(secs / 3600), m = (int)((secs % 3600) / 60);
+    if (h > 0) snprintf(out, cap, "%dh %dm", h, m);
+    else       snprintf(out, cap, "%dm", m > 0 ? m : 1);
+}
+
+/* A poster for `id`, or "" for no art. 2:3 posters only: a library's 16:9
+ * thumb stretched into a poster card looks broken, so folders that only have
+ * one get the folder icon instead. */
+static void art_url(ms_client_t *c, const char *id, char *out, size_t cap)
+{
+    char base[200];
+    ms_base(c, base, sizeof base);
+    snprintf(out, cap, "%s/Items/%s/Images/Primary?maxHeight=480&quality=85&format=jpg",
+             base, id);
+}
+
+/* Context flags for the subtitle wording. */
+enum { CTX_LIST = 0, CTX_SEASON = 1, CTX_MIXED = 2 };
+
+static void map_item(ms_client_t *c, cJSON *o, int ctx, evo_provider_item_t *it)
+{
+    evo_provider_item_clear(it);
+    const char *id   = jstr(o, "Id");
+    const char *type = jstr(o, "Type");
+    const char *name = jstr(o, "Name");
+    int year         = (int)jnum(o, "ProductionYear");
+    int64_t runtime  = (int64_t)(jnum(o, "RunTimeTicks") / 10000000.0);
+    cJSON *ud        = cJSON_GetObjectItem(o, "UserData");
+    cJSON *tags      = cJSON_GetObjectItem(o, "ImageTags");
+    int has_primary  = tags && cJSON_GetObjectItem(tags, "Primary") != NULL;
+    char rt[24];
+    fmt_runtime(runtime, rt, sizeof rt);
+
+    snprintf(it->title, sizeof it->title, "%s", name);
+    snprintf(it->overview, sizeof it->overview, "%s", jstr(o, "Overview"));
+    it->duration_sec = runtime;
+    it->resume_pos_sec = (int64_t)(jnum(ud, "PlaybackPositionTicks") / 10000000.0);
+    it->played = jbool(ud, "Played");
+
+    if (!strcmp(type, "Series")) {
+        snprintf(it->id, sizeof it->id, "ser:%s", id);
+        it->is_folder = 1;
+        it->kind = EVO_MEDIA_FOLDER;
+        int n = (int)jnum(o, "ChildCount");
+        if (year && n > 0) snprintf(it->subtitle, sizeof it->subtitle, "%d · %d season%s", year, n, n == 1 ? "" : "s");
+        else if (year)     snprintf(it->subtitle, sizeof it->subtitle, "%d", year);
+        if (has_primary) art_url(c, id, it->art_url, sizeof it->art_url);
+    } else if (!strcmp(type, "Season")) {
+        snprintf(it->id, sizeof it->id, "sea:%s:%s", jstr(o, "SeriesId"), id);
+        it->is_folder = 1;
+        it->kind = EVO_MEDIA_FOLDER;
+        int n = (int)jnum(o, "ChildCount");
+        if (n > 0) snprintf(it->subtitle, sizeof it->subtitle, "%d episode%s", n, n == 1 ? "" : "s");
+        if (has_primary)                 art_url(c, id, it->art_url, sizeof it->art_url);
+        else if (jstr(o, "SeriesId")[0]) art_url(c, jstr(o, "SeriesId"), it->art_url, sizeof it->art_url);
+    } else if (jbool(o, "IsFolder")) {
+        snprintf(it->id, sizeof it->id, "fol:%s", id);
+        it->is_folder = 1;
+        it->kind = EVO_MEDIA_FOLDER;
+        int n = (int)jnum(o, "ChildCount");
+        if (n > 0) snprintf(it->subtitle, sizeof it->subtitle, "%d item%s", n, n == 1 ? "" : "s");
+        if (has_primary && !strcmp(type, "BoxSet")) art_url(c, id, it->art_url, sizeof it->art_url);
+    } else {
+        snprintf(it->id, sizeof it->id, "i:%s", id);
+        it->kind = EVO_MEDIA_VIDEO;
+        if (!strcmp(type, "Episode")) {
+            int s = (int)jnum(o, "ParentIndexNumber"), e = (int)jnum(o, "IndexNumber");
+            if (ctx == CTX_SEASON)
+                snprintf(it->subtitle, sizeof it->subtitle, "Episode %d%s%s", e, rt[0] ? " · " : "", rt);
+            else
+                snprintf(it->subtitle, sizeof it->subtitle, "%s · S%d E%d", jstr(o, "SeriesName"), s, e);
+            /* An episode's own Primary is a 16:9 still; the poster card wants
+             * the series poster. */
+            if (jstr(o, "SeriesId")[0]) art_url(c, jstr(o, "SeriesId"), it->art_url, sizeof it->art_url);
+        } else {
+            if (year && rt[0]) snprintf(it->subtitle, sizeof it->subtitle, "%d · %s", year, rt);
+            else if (year)     snprintf(it->subtitle, sizeof it->subtitle, "%d", year);
+            else               snprintf(it->subtitle, sizeof it->subtitle, "%s", rt);
+            if (has_primary) art_url(c, id, it->art_url, sizeof it->art_url);
+        }
+    }
+}
+
+typedef struct {
+    ms_client_t *c;
+    evo_provider_items_cb cb;
+    void *ud;
+    int  ctx;
+    int  start;                 /* StartIndex of this request */
+    int  root;                  /* a Views reply: prepend the virtual rows */
 } items_ctx_t;
 
-static void on_views_response(int success, int status_code, const char *body, size_t body_len, void *userdata)
+static void add_virtual(evo_provider_item_t *it, const char *id, const char *title,
+                        const char *sub)
 {
-    (void)body_len;
-    items_ctx_t *ctx = (items_ctx_t *)userdata;
-    evo_media_entry_t items[EMBY_MAX_ITEMS];
-    int count = 0;
+    evo_provider_item_clear(it);
+    snprintf(it->id, sizeof it->id, "%s", id);
+    snprintf(it->title, sizeof it->title, "%s", title);
+    snprintf(it->subtitle, sizeof it->subtitle, "%s", sub);
+    it->is_folder = 1;
+    it->kind = EVO_MEDIA_FOLDER;
+}
 
-    if (!success || status_code != 200 || !body) {
-        if (ctx && ctx->callback) ctx->callback(0, NULL, 0, ctx->userdata);
-        free(ctx);
+static void on_items(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    items_ctx_t *x = (items_ctx_t *)ud;
+    ms_client_t *c = x->c;
+
+    if (status == 401 || status == 403) {
+        /* The session is gone (token revoked, server reset): sign in again.
+         * Whatever evo_net calls `ok`, the status is the server's verdict. */
+        PROV_LOG("media server: session rejected (http %d) - sign-in needed", status);
+        ms_drop_session(c);
+    }
+    cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    /* Seasons and episodes come back as {"Items": [...]}, like everything
+     * else; a bare array is tolerated in case a server version differs. */
+    cJSON *arr = root ? (cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "Items")) : NULL;
+    if (!arr || !cJSON_IsArray(arr)) {
+        if (x->cb) x->cb(0, NULL, 0, 0, x->ud);
+        if (root) cJSON_Delete(root);
+        free(x);
         return;
     }
 
-    cJSON *root = cJSON_Parse(body);
-    if (!root) {
-        if (ctx && ctx->callback) ctx->callback(0, NULL, 0, ctx->userdata);
-        free(ctx);
+    int n = cJSON_GetArraySize(arr);
+    int extra = x->root ? 2 : 0;
+    if (n + extra > EVO_PROVIDER_PAGE_MAX) n = EVO_PROVIDER_PAGE_MAX - extra;
+    evo_provider_item_t *items = (evo_provider_item_t *)calloc((size_t)(n + extra) + 1, sizeof *items);
+    if (!items) {
+        if (x->cb) x->cb(0, NULL, 0, 0, x->ud);
+        cJSON_Delete(root);
+        free(x);
         return;
     }
 
-    cJSON *items_arr = cJSON_GetObjectItem(root, "Items");
-    if (items_arr && cJSON_IsArray(items_arr)) {
-        int n = cJSON_GetArraySize(items_arr);
-        if (n > EMBY_MAX_ITEMS) n = EMBY_MAX_ITEMS;
-
-        for (int i = 0; i < n; i++) {
-            cJSON *item = cJSON_GetArrayItem(items_arr, i);
-            if (!item) continue;
-
-            cJSON *id_val   = cJSON_GetObjectItem(item, "Id");
-            cJSON *name_val = cJSON_GetObjectItem(item, "Name");
-            cJSON *type_val = cJSON_GetObjectItem(item, "CollectionType");
-
-            memset(&items[count], 0, sizeof(items[count]));
-            if (id_val && cJSON_IsString(id_val))
-                strncpy(items[count].id, id_val->valuestring, sizeof(items[count].id) - 1);
-            if (name_val && cJSON_IsString(name_val))
-                strncpy(items[count].title, name_val->valuestring, sizeof(items[count].title) - 1);
-
-            const char *type_str = (type_val && cJSON_IsString(type_val)) ? type_val->valuestring : "folder";
-            snprintf(items[count].detail, sizeof(items[count].detail), "LIBRARY - %s", type_str);
-            items[count].is_folder = 1;
-            items[count].kind = EVO_MEDIA_FOLDER;
-            count++;
+    int k = 0;
+    if (x->root) {
+        add_virtual(&items[k++], "v:resume", "Continue Watching", "Pick up where you left off");
+        add_virtual(&items[k++], "v:nextup", "Next Up", "The next episode of your shows");
+    }
+    for (int i = 0; i < n; ++i) {
+        cJSON *o = cJSON_GetArrayItem(arr, i);
+        if (!o || !jstr(o, "Id")[0]) continue;
+        if (x->root) {
+            /* A view: lib:<CollectionType>:<id>. */
+            const char *ct = jstr(o, "CollectionType");
+            evo_provider_item_clear(&items[k]);
+            snprintf(items[k].id, sizeof items[k].id, "lib:%s:%s", ct[0] ? ct : "folder", jstr(o, "Id"));
+            snprintf(items[k].title, sizeof items[k].title, "%s", jstr(o, "Name"));
+            snprintf(items[k].subtitle, sizeof items[k].subtitle, "%s",
+                     !strcmp(ct, "movies")  ? "Movies" :
+                     !strcmp(ct, "tvshows") ? "TV Shows" :
+                     !strcmp(ct, "music")   ? "Music" : "Library");
+            items[k].is_folder = 1;
+            items[k].kind = EVO_MEDIA_FOLDER;
+            k++;
+        } else {
+            map_item(c, o, x->ctx, &items[k++]);
         }
     }
 
+    int total = (int)jnum(root, "TotalRecordCount");
+    int has_more = !x->root && total > 0 && x->start + n < total;
+    if (x->cb) x->cb(1, items, k, has_more, x->ud);
+    free(items);
     cJSON_Delete(root);
-
-    if (ctx && ctx->callback) {
-        ctx->callback(1, items, count, ctx->userdata);
-    }
-    free(ctx);
+    free(x);
 }
 
-int emby_fetch_libraries_async(emby_items_cb callback, void *userdata)
+static int items_request(ms_client_t *c, const char *path, int ctx, int start, int root,
+                         evo_provider_items_cb cb, void *ud)
 {
-    if (!g_emby_config.is_connected || !g_emby_config.user_id[0])
-        return -1;
-
-    char url[256];
-    snprintf(url, sizeof(url), "%s/emby/Users/%s/Views",
-             emby_base(), g_emby_config.user_id);
-
-    char auth_hdr[256];
-    snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
-
-    const char *headers[1];
-    headers[0] = auth_hdr;
-
-    items_ctx_t *ctx = (items_ctx_t *)malloc(sizeof(items_ctx_t));
-    if (!ctx) return -2;
-    ctx->callback = callback;
-    ctx->userdata = userdata;
-
-    return evo_net_request_async("GET", url, NULL, headers, 1, on_views_response, ctx);
+    items_ctx_t *x = (items_ctx_t *)calloc(1, sizeof *x);
+    if (!x) return -2;
+    x->c = c; x->cb = cb; x->ud = ud; x->ctx = ctx; x->start = start; x->root = root;
+    int rc = ms_request(c, "GET", path, NULL, 1, on_items, x);
+    if (rc != 0) free(x);
+    return rc;
 }
 
-static void on_items_response(int success, int status_code, const char *body, size_t body_len, void *userdata)
+int ms_list_catalog(ms_client_t *c, const char *parent_id, int page,
+                    evo_provider_items_cb cb, void *ud)
 {
-    (void)body_len;
-    items_ctx_t *ctx = (items_ctx_t *)userdata;
-    evo_media_entry_t items[EMBY_MAX_ITEMS];
-    int count = 0;
+    if (!c->cfg.is_connected) return -1;
+    const char *uid = c->cfg.user_id;
+    const int start = page > 0 ? page * MS_PAGE : 0;
+    char path[1024];
 
-    if (!success || status_code != 200 || !body) {
-        if (ctx && ctx->callback) ctx->callback(0, NULL, 0, ctx->userdata);
-        free(ctx);
-        return;
+    if (!parent_id || !*parent_id) {
+        if (page > 0) return -1;
+        snprintf(path, sizeof path, "/Users/%s/Views", uid);
+        return items_request(c, path, CTX_LIST, 0, 1, cb, ud);
     }
-
-    cJSON *root = cJSON_Parse(body);
-    if (!root) {
-        if (ctx && ctx->callback) ctx->callback(0, NULL, 0, ctx->userdata);
-        free(ctx);
-        return;
+    if (!strcmp(parent_id, "v:resume")) {
+        snprintf(path, sizeof path,
+                 "/Users/%s/Items/Resume?MediaTypes=Video&StartIndex=%d&Limit=%d&%s",
+                 uid, start, MS_PAGE, MS_FIELDS);
+        return items_request(c, path, CTX_MIXED, start, 0, cb, ud);
     }
-
-    cJSON *items_arr = cJSON_GetObjectItem(root, "Items");
-    if (items_arr && cJSON_IsArray(items_arr)) {
-        int n = cJSON_GetArraySize(items_arr);
-        if (n > EMBY_MAX_ITEMS) n = EMBY_MAX_ITEMS;
-
-        for (int i = 0; i < n; i++) {
-            cJSON *item = cJSON_GetArrayItem(items_arr, i);
-            if (!item) continue;
-
-            cJSON *id_val   = cJSON_GetObjectItem(item, "Id");
-            cJSON *name_val = cJSON_GetObjectItem(item, "Name");
-            cJSON *type_val = cJSON_GetObjectItem(item, "Type");
-            cJSON *desc_val = cJSON_GetObjectItem(item, "Overview");
-            cJSON *year_val = cJSON_GetObjectItem(item, "ProductionYear");
-            cJSON *dur_val  = cJSON_GetObjectItem(item, "RunTimeTicks");
-            cJSON *fold_val = cJSON_GetObjectItem(item, "IsFolder");
-
-            memset(&items[count], 0, sizeof(items[count]));
-            if (id_val && cJSON_IsString(id_val))
-                strncpy(items[count].id, id_val->valuestring, sizeof(items[count].id) - 1);
-            if (name_val && cJSON_IsString(name_val))
-                strncpy(items[count].title, name_val->valuestring, sizeof(items[count].title) - 1);
-            if (desc_val && cJSON_IsString(desc_val))
-                strncpy(items[count].overview, desc_val->valuestring, sizeof(items[count].overview) - 1);
-
-            int is_folder = (fold_val && cJSON_IsTrue(fold_val));
-            const char *type_str = (type_val && cJSON_IsString(type_val)) ? type_val->valuestring : "Media";
-
-            int year = year_val ? year_val->valueint : 0;
-            if (dur_val && cJSON_IsNumber(dur_val)) {
-                items[count].duration_sec = (int64_t)(dur_val->valuedouble / 10000000.0);
-            }
-
-            if (is_folder) {
-                snprintf(items[count].detail, sizeof(items[count].detail), "%s", type_str);
-                items[count].is_folder = 1;
-                items[count].kind = EVO_MEDIA_FOLDER;
-            } else {
-                int mins = (int)(items[count].duration_sec / 60);
-                if (year > 0 && mins > 0) {
-                    snprintf(items[count].detail, sizeof(items[count].detail), "%d  -  %d MIN  -  %s", year, mins, type_str);
-                } else if (year > 0) {
-                    snprintf(items[count].detail, sizeof(items[count].detail), "%d  -  %s", year, type_str);
-                } else {
-                    snprintf(items[count].detail, sizeof(items[count].detail), "%s", type_str);
-                }
-                items[count].is_folder = 0;
-                items[count].kind = EVO_MEDIA_VIDEO;
-                emby_build_stream_url(items[count].id, items[count].stream_url, sizeof(items[count].stream_url));
-            }
-
-            count++;
-        }
+    if (!strcmp(parent_id, "v:nextup")) {
+        snprintf(path, sizeof path, "/Shows/NextUp?UserId=%s&StartIndex=%d&Limit=%d&%s",
+                 uid, start, MS_PAGE, MS_FIELDS);
+        return items_request(c, path, CTX_MIXED, start, 0, cb, ud);
     }
-
-    cJSON_Delete(root);
-
-    if (ctx && ctx->callback) {
-        ctx->callback(1, items, count, ctx->userdata);
+    if (!strncmp(parent_id, "lib:", 4)) {
+        char type[32] = "", id[96] = "";
+        const char *colon = strchr(parent_id + 4, ':');
+        if (!colon) return -1;
+        snprintf(type, sizeof type, "%.*s", (int)(colon - (parent_id + 4)), parent_id + 4);
+        snprintf(id, sizeof id, "%s", colon + 1);
+        const char *include = !strcmp(type, "movies")  ? "&Recursive=true&IncludeItemTypes=Movie" :
+                              !strcmp(type, "tvshows") ? "&Recursive=true&IncludeItemTypes=Series" : "";
+        snprintf(path, sizeof path,
+                 "/Users/%s/Items?ParentId=%s%s&SortBy=SortName&SortOrder=Ascending"
+                 "&StartIndex=%d&Limit=%d&%s",
+                 uid, id, include, start, MS_PAGE, MS_FIELDS);
+        return items_request(c, path, CTX_LIST, start, 0, cb, ud);
     }
-    free(ctx);
+    if (!strncmp(parent_id, "ser:", 4)) {
+        snprintf(path, sizeof path, "/Shows/%s/Seasons?UserId=%s&%s",
+                 parent_id + 4, uid, MS_FIELDS);
+        return items_request(c, path, CTX_LIST, 0, 0, cb, ud);
+    }
+    if (!strncmp(parent_id, "sea:", 4)) {
+        char series[96];
+        const char *colon = strchr(parent_id + 4, ':');
+        if (!colon) return -1;
+        snprintf(series, sizeof series, "%.*s", (int)(colon - (parent_id + 4)), parent_id + 4);
+        snprintf(path, sizeof path, "/Shows/%s/Episodes?SeasonId=%s&UserId=%s&%s",
+                 series, colon + 1, uid, MS_FIELDS);
+        return items_request(c, path, CTX_SEASON, 0, 0, cb, ud);
+    }
+    if (!strncmp(parent_id, "fol:", 4)) {
+        snprintf(path, sizeof path,
+                 "/Users/%s/Items?ParentId=%s&SortBy=SortName&SortOrder=Ascending"
+                 "&StartIndex=%d&Limit=%d&%s",
+                 uid, parent_id + 4, start, MS_PAGE, MS_FIELDS);
+        return items_request(c, path, CTX_LIST, start, 0, cb, ud);
+    }
+    return -1;
 }
 
-int emby_fetch_items_async(const char *parent_id, emby_items_cb callback, void *userdata)
+int ms_search(ms_client_t *c, const char *query, int page,
+              evo_provider_items_cb cb, void *ud)
 {
-    if (!g_emby_config.is_connected || !g_emby_config.user_id[0])
-        return -1;
+    if (!c->cfg.is_connected || !query || !*query) return -1;
+    char esc[256], path[1024];
+    if (evo_provider_url_escape(query, esc, sizeof esc) < 0) return -1;
+    const int start = page > 0 ? page * MS_PAGE : 0;
+    snprintf(path, sizeof path,
+             "/Users/%s/Items?SearchTerm=%s&Recursive=true&IncludeItemTypes=Movie,Series,Episode"
+             "&StartIndex=%d&Limit=%d&%s",
+             c->cfg.user_id, esc, start, MS_PAGE, MS_FIELDS);
+    return items_request(c, path, CTX_MIXED, start, 0, cb, ud);
+}
 
-    char url[512];
-    if (parent_id && *parent_id) {
-        snprintf(url, sizeof(url),
-                 "%s/emby/Users/%s/Items?ParentId=%s&Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
-                 emby_base(), g_emby_config.user_id, parent_id);
+/* ------------------------------------------------------------------------- */
+/* Resolve + progress                                                        */
+/* ------------------------------------------------------------------------- */
+
+static const char *raw_id(const char *item_id)
+{
+    return (item_id && !strncmp(item_id, "i:", 2)) ? item_id + 2 : item_id;
+}
+
+int ms_build_stream_url(ms_client_t *c, const char *item_id, char *out, size_t cap)
+{
+    if (!item_id || !out || cap == 0) return -1;
+    char base[200];
+    ms_base(c, base, sizeof base);
+    snprintf(out, cap, "%s/Videos/%s/stream?Static=true&api_key=%s",
+             base, raw_id(item_id), c->cfg.token);
+    return 0;
+}
+
+int ms_resolve(ms_client_t *c, const char *item_id, evo_provider_resolve_cb cb, void *ud)
+{
+    if (!item_id || strncmp(item_id, "i:", 2) || !c->cfg.is_connected) return -1;
+    evo_stream_choice_t choice;
+    evo_provider_stream_choice_clear(&choice);
+    ms_build_stream_url(c, item_id, choice.url, sizeof choice.url);
+    /* Static=true is the file byte for byte, no transcode: the container is
+     * whatever it is on the server, and FFmpeg probes it anyway. */
+    snprintf(choice.label, sizeof choice.label, "Direct");
+    if (cb) cb(1, &choice, 1, ud);
+    return 0;
+}
+
+/* Logged, so a server that rejects the reports shows in evo.log rather than
+ * silently never saving a resume point. */
+static void on_report(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    if (!ok || status >= 300)
+        PROV_LOG("media server report %s -> ok=%d http=%d %.120s",
+                 (const char *)ud, ok, status, body ? body : "");
+}
+
+void ms_report(ms_client_t *c, const char *item_id, int64_t pos_sec, int64_t dur_sec,
+               evo_provider_play_state_t state)
+{
+    if (!c->cfg.is_connected || !item_id || strncmp(item_id, "i:", 2)) return;
+    char body[448];
+    long long pos = (long long)pos_sec * 10000000LL;
+    const char *path = "/Sessions/Playing";
+    if (state == EVO_PROVIDER_PLAY_START || !c->play_session[0])
+        snprintf(c->play_session, sizeof c->play_session, "evo-%s-%u-%lld",
+                 c->kind == MS_EMBY ? "e" : "j", ++c->play_count, (long long)time(NULL));
+    if (state == EVO_PROVIDER_PLAY_START) {
+        snprintf(body, sizeof body,
+                 "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
+                 "\"PositionTicks\":%lld,\"CanSeek\":true,\"PlayMethod\":\"DirectStream\"}",
+                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
+    } else if (state == EVO_PROVIDER_PLAY_UPDATE) {
+        path = "/Sessions/Playing/Progress";
+        snprintf(body, sizeof body,
+                 "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
+                 "\"PositionTicks\":%lld,\"CanSeek\":true,\"IsPaused\":false,"
+                 "\"PlayMethod\":\"DirectStream\",\"EventName\":\"TimeUpdate\"}",
+                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
     } else {
-        snprintf(url, sizeof(url),
-                 "%s/emby/Users/%s/Items?Fields=Overview,RunTimeTicks,ProductionYear,MediaSources&Limit=64",
-                 emby_base(), g_emby_config.user_id);
+        path = "/Sessions/Playing/Stopped";
+        snprintf(body, sizeof body,
+                 "{\"ItemId\":\"%s\",\"MediaSourceId\":\"%s\",\"PlaySessionId\":\"%s\","
+                 "\"PositionTicks\":%lld}",
+                 raw_id(item_id), raw_id(item_id), c->play_session, pos);
     }
+    (void)dur_sec;
+    ms_request(c, "POST", path, body, 1, on_report, (void *)(path + 10));
+}
 
-    char auth_hdr[256];
-    snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
+/* ------------------------------------------------------------------------- */
+/* The old single-instance API                                               */
+/* ------------------------------------------------------------------------- */
 
-    const char *headers[1];
-    headers[0] = auth_hdr;
+int emby_init(void)                 { return ms_load(ms_client(MS_EMBY)); }
+int emby_save_config(void)          { return ms_save(ms_client(MS_EMBY)); }
+emby_config_t *emby_get_config(void) { return &ms_client(MS_EMBY)->cfg; }
+void emby_disconnect(void)          { ms_drop_session(ms_client(MS_EMBY)); }
 
-    items_ctx_t *ctx = (items_ctx_t *)malloc(sizeof(items_ctx_t));
-    if (!ctx) return -2;
-    ctx->callback = callback;
-    ctx->userdata = userdata;
-
-    return evo_net_request_async("GET", url, NULL, headers, 1, on_items_response, ctx);
+void emby_set_server(const char *host, int port, const char *username, const char *password)
+{
+    emby_config_t *g = &ms_client(MS_EMBY)->cfg;
+    if (host) snprintf(g->host, sizeof g->host, "%s", host);
+    if (port > 0) g->port = port;
+    if (username) snprintf(g->username, sizeof g->username, "%s", username);
+    if (password) snprintf(g->password, sizeof g->password, "%s", password);
 }
 
 int emby_build_stream_url(const char *item_id, char *out_url, size_t max_len)
 {
-    if (!item_id || !out_url || max_len == 0) return -1;
-
-    snprintf(out_url, max_len,
-             "%s/emby/Videos/%s/stream?Static=true&api_key=%s",
-             emby_base(), item_id, g_emby_config.token);
-
-    return 0;
-}
-
-void emby_report_playback_start(const char *item_id)
-{
-    if (!g_emby_config.is_connected || !item_id) return;
-
-    char url[256];
-    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing",
-             emby_base());
-
-    char auth_hdr[256];
-    snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
-
-    char post_json[256];
-    snprintf(post_json, sizeof(post_json), "{\"ItemId\":\"%s\",\"CanSeek\":true}", item_id);
-
-    const char *headers[2] = { auth_hdr, "Content-Type: application/json" };
-    evo_net_request_async("POST", url, post_json, headers, 2, NULL, NULL);
-}
-
-void emby_report_playback_progress(const char *item_id, int64_t pos_sec, int64_t dur_sec)
-{
-    if (!g_emby_config.is_connected || !item_id) return;
-
-    char url[256];
-    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing/Progress",
-             emby_base());
-
-    char auth_hdr[256];
-    snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
-
-    int64_t pos_ticks = pos_sec * 10000000LL;
-    int64_t dur_ticks = dur_sec * 10000000LL;
-
-    char post_json[256];
-    snprintf(post_json, sizeof(post_json),
-             "{\"ItemId\":\"%s\",\"PositionTicks\":%lld,\"RunTimeTicks\":%lld,\"CanSeek\":true}",
-             item_id, (long long)pos_ticks, (long long)dur_ticks);
-
-    const char *headers[2] = { auth_hdr, "Content-Type: application/json" };
-    evo_net_request_async("POST", url, post_json, headers, 2, NULL, NULL);
-}
-
-void emby_report_playback_stop(const char *item_id, int64_t pos_sec)
-{
-    if (!g_emby_config.is_connected || !item_id) return;
-
-    char url[256];
-    snprintf(url, sizeof(url), "%s/emby/Sessions/Playing/Stopped",
-             emby_base());
-
-    char auth_hdr[256];
-    snprintf(auth_hdr, sizeof(auth_hdr), "X-Emby-Token: %s", g_emby_config.token);
-
-    int64_t pos_ticks = pos_sec * 10000000LL;
-
-    char post_json[256];
-    snprintf(post_json, sizeof(post_json),
-             "{\"ItemId\":\"%s\",\"PositionTicks\":%lld}",
-             item_id, (long long)pos_ticks);
-
-    const char *headers[2] = { auth_hdr, "Content-Type: application/json" };
-    evo_net_request_async("POST", url, post_json, headers, 2, NULL, NULL);
+    return ms_build_stream_url(ms_client(MS_EMBY), item_id, out_url, max_len);
 }

@@ -173,6 +173,18 @@ int  evo_net_http_post_sync(const char *url,
                             size_t *out_len,
                             int *out_status);
 
+/*
+ * LAN discovery of an Emby or Jellyfin server: the "who is <product>?" UDP
+ * broadcast on port 7359 both servers answer. Runs on its own thread for at
+ * most ~1.5 s; poll it once a frame. `product` is "EmbyServer" or
+ * "JellyfinServer".
+ */
+void evo_net_discover_start(const char *product);
+
+/* 0 = still looking, 1 = found (addr = "http://<ip>:<port>"), -1 = nothing
+ * answered. A result is returned once. */
+int  evo_net_discover_poll(char *addr, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif
