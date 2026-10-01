@@ -22,6 +22,8 @@ struct EvoPlaybackState {
     std::string decoder_badge;   // #59
     std::string upscale_badge;   // #103
     bool upscale_active = false;
+    std::string smooth_badge;    // #105
+    bool smooth_active = false;
     double position_sec = 0.0;
     double duration_sec = 0.0;
     double percentage = 0.0;
@@ -54,6 +56,7 @@ struct EvoPlaybackState {
                fps_badge == o.fps_badge && audio_badge == o.audio_badge &&
                decoder_badge == o.decoder_badge &&
                upscale_badge == o.upscale_badge && upscale_active == o.upscale_active &&
+               smooth_badge == o.smooth_badge && smooth_active == o.smooth_active &&
                position_sec == o.position_sec && duration_sec == o.duration_sec &&
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
@@ -210,6 +213,7 @@ struct EvoMediaInfoState {
     std::string output;
     std::string renderer;
     std::string upscaler;
+    std::string motion_smoothing; // #105
     std::string decoder;
 
     bool operator==(const EvoMediaInfoState& o) const {
@@ -221,7 +225,7 @@ struct EvoMediaInfoState {
                color_hdr == o.color_hdr && audio_codec == o.audio_codec &&
                channels == o.channels && sample_rate == o.sample_rate &&
                subtitles == o.subtitles && output == o.output && renderer == o.renderer && upscaler == o.upscaler &&
-               decoder == o.decoder;
+               motion_smoothing == o.motion_smoothing && decoder == o.decoder;
     }
     bool operator!=(const EvoMediaInfoState& o) const { return !(*this == o); }
 };

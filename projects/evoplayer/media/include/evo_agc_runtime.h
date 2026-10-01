@@ -49,7 +49,11 @@ enum {
     /* Dolby Vision Profile 5: the RPU-reshaped IPT-PQ-c2 picture (evo_dovi). */
     EVO_AGC_PIPE_VIDEO_DOVI = 72,     /* -> SDR */
     EVO_AGC_PIPE_VIDEO_DOVI_PQ = 73,  /* -> HDR10 */
-    EVO_AGC_PIPE_COUNT = 74,
+    /* #105 frame interpolation (motion smoothing 24 -> 60 fps) */
+    EVO_AGC_PIPE_INTERP_ME = 74,
+    EVO_AGC_PIPE_INTERP_MEDIAN = 75,
+    EVO_AGC_PIPE_INTERP_WARP = 76,
+    EVO_AGC_PIPE_COUNT = 77,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -314,6 +318,24 @@ const char *evo_agc_upscale_label(void);
  * Standard; evo_agc_upscale_label() names the new one). Reading it clears it, so the
  * caller toasts exactly once. */
 int         evo_agc_upscale_take_downgrade(void);
+
+/* #105 frame interpolation (motion smoothing 24 -> 60 fps).
+ *
+ * Settings -> Playback & Video -> MOTION SMOOTHING (Off / Low / High).
+ * High is full motion-vector warp; Low is blend-weighted version with
+ * fewer artifacts. Automatically off for sources >= 50 fps, 10-bit/HDR, or 4K. */
+enum {
+    EVO_AGC_MOTION_SMOOTH_OFF = 0,
+    EVO_AGC_MOTION_SMOOTH_LOW = 1,
+    EVO_AGC_MOTION_SMOOTH_HIGH = 2,
+};
+void        evo_agc_motion_smoothing_set_mode(int mode);
+void        evo_agc_motion_smoothing_set_phase(float phase);
+void        evo_agc_motion_smoothing_set_source_fps(double fps);
+const char *evo_agc_motion_smoothing_label(void);
+int         evo_agc_motion_smoothing_take_downgrade(void);
+int         evo_agc_motion_smoothing_is_active(void);
+void        evo_agc_motion_smoothing_reset(void);
 
 /* Draw the video quad. Returns 0 when the quad was emitted (and the current
  * backbuffer stamped with pts_us), -1 when the frame was rejected.

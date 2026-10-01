@@ -2,6 +2,9 @@
 #ifndef EVO_AGC_PIPES_H
 #define EVO_AGC_PIPES_H
 
+#include "interp_me_pipe.h"
+#include "interp_median_pipe.h"
+#include "interp_warp_pipe.h"
 #include "ui_backdrop_blur_pipe.h"
 #include "ui_screen_2d_pipe.h"
 #include "ui_screen_2d_pq_out_pipe.h"

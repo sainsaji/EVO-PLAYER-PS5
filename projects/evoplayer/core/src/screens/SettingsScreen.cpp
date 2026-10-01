@@ -36,6 +36,7 @@ enum class SettingKey : int {
     VideoDecoder,
     Upscaling,
     AiNetwork,
+    MotionSmoothing,
     RefreshRate,
     HdrOutput,
     /* AUDIO */
@@ -84,7 +85,7 @@ struct SettingDef {
 
 const SettingKey kVideoKeys[] = {
     SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
-    SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
+    SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::MotionSmoothing, SettingKey::RefreshRate,
     SettingKey::HdrOutput,
 };
 const SettingKey kAudioKeys[] = {
@@ -207,6 +208,13 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
             d.disabled = true;
             d.detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
         }
+        break;
+
+    case SettingKey::MotionSmoothing:
+        d = valueDef(key, "MOTION SMOOTHING", "24 -> 60 FPS MOTION INTERPOLATION ON THE GPU",
+                     "../icons/icon_activity.png", 3, static_cast<int>(settings->getMotionSmoothing()));
+        for (int i = 0; i < 3; ++i)
+            d.opt_label[i] = settings->getMotionSmoothingName(static_cast<MotionSmoothing>(i));
         break;
 
     case SettingKey::RefreshRate:
@@ -446,6 +454,7 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::VideoDecoder:   st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt)); break;
     case SettingKey::Upscaling:      st->setUpscaler(static_cast<Upscaler>(opt)); break;
     case SettingKey::AiNetwork:      st->setAiNetwork(static_cast<AiNetwork>(opt)); break;
+    case SettingKey::MotionSmoothing: st->setMotionSmoothing(static_cast<MotionSmoothing>(opt)); break;
     case SettingKey::HdrOutput:      st->setHdrOutputMode(static_cast<HdrOutputMode>(opt)); break;
     case SettingKey::OutputChannels: st->setAudioOutputChannels(static_cast<AudioOutputChannels>(opt)); break;
     case SettingKey::SubtitleFont:   st->setSubtitleFontFace(opt); break;

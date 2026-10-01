@@ -66,6 +66,8 @@ void pp_playback_init(pp_playback *pb)
     pb->aspect = PP_ASPECT_FIT;
     pb->out_w = 1920;
     pb->out_h = 1080;
+    pb->next_pts_us = -1;
+    pb->prev_pts_us = -1;
     pb->stats.output_w = 1920;
     pb->stats.output_h = 1080;
     pb->stats.aspect = (int)PP_ASPECT_FIT;
@@ -119,6 +121,8 @@ void pp_playback_on_file_open(pp_playback *pb)
     pb->active = 1;
     pb->seek_discarding = 0;
     pb->display_pts_us = 0;
+    pb->next_pts_us = -1;
+    pb->prev_pts_us = -1;
     /* Don't show the previous file's last frame, or hold it through its seek. */
     pb->gl_ready = 0;
     pb->hold_valid = 0;
@@ -330,6 +334,13 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pp_clock_is_paused(&pb->clock))
         return 1;
 
+    /* #105: expose incoming frame PTS for presentation clock interpolation */
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    pb->next_pts_us = src->pts_us;
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+
     if (!pb->clock.started) {
         pp_clock_start(&pb->clock, src->pts_us);
     } else if (pp_clock_wait_or_drop(&pb->clock, src->pts_us) == PP_CLOCK_DROP) {
@@ -405,6 +416,7 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     pb->gl_dh = dh;
     pb->gl_ready = 1;
     pb->hold_valid = 0;          /* live frames again */
+    pb->prev_pts_us = pb->display_pts_us;
     pb->display_pts_us = src->pts_us;
     pb->stats.frames_converted++;
     pb->stats.frames_published++;
@@ -478,6 +490,50 @@ int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f)
     return got;
 }
 
+int pp_playback_get_interp_phase(pp_playback *pb, float *phase)
+{
+    if (phase)
+        *phase = 0.0f;
+    if (!pb || !phase || !pb->active || !pb->clock.started || pp_clock_is_paused(&pb->clock) || pb->seek_discarding)
+        return 0;
+
+    int64_t pts_a, pts_b, prev_pts;
+    int ready;
+    if (pb->lock)
+        pthread_mutex_lock(mtx(pb));
+    pts_a = pb->display_pts_us;
+    pts_b = pb->next_pts_us;
+    prev_pts = pb->prev_pts_us;
+    ready = pb->gl_ready && !pb->hold_valid;
+    if (pb->lock)
+        pthread_mutex_unlock(mtx(pb));
+
+    if (!ready)
+        return 0;
+
+    int64_t dur_us = 0;
+    if (pts_b > pts_a) {
+        dur_us = pts_b - pts_a;
+    } else if (pts_a > prev_pts && prev_pts >= 0) {
+        dur_us = pts_a - prev_pts;
+    }
+
+    if (dur_us < 8000 || dur_us > 120000)
+        return 0;
+
+    int64_t now_media = pp_clock_media_us(&pb->clock);
+    int64_t elapsed = now_media - pts_a;
+    if (elapsed < 0)
+        elapsed = 0;
+
+    float t = (float)elapsed / (float)dur_us;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    *phase = t;
+    return 1;
+}
+
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
 {
     if (!pb)
@@ -495,6 +551,8 @@ void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
     pb->seek_discarding = 1;
     pb->seek_target_us = target_pts_us;
     pb->seek_begin_ms = now_ms();
+    pb->next_pts_us = -1;
+    pb->prev_pts_us = -1;
     pp_clock_pause(&pb->clock);
     if (pb->lock)
         pthread_mutex_lock(mtx(pb));

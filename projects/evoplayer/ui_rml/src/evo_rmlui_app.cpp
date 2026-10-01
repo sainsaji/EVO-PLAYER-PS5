@@ -2740,6 +2740,16 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
             el_up->SetClass("active", state.upscale_active);
         }
     }
+    // #105: motion smoothing badge - hidden when motion smoothing is Off in Settings
+    if (Rml::Element* el_sm = m_playback_doc->GetElementById("badge-smooth")) {
+        if (state.smooth_badge.empty()) {
+            el_sm->SetProperty("display", "none");
+        } else {
+            el_sm->SetProperty("display", "inline-block");
+            el_sm->SetInnerRML(state.smooth_badge);
+            el_sm->SetClass("active", state.smooth_active);
+        }
+    }
     /* #81: dev FPS pill — independent of the OSD chrome (shows with controls faded). */
     if (Rml::Element* el_fps_pill = m_playback_doc->GetElementById("fps-pill")) {
         el_fps_pill->SetProperty("display", state.debug_overlay ? "block" : "none");

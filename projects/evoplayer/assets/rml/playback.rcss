@@ -162,6 +162,27 @@ div, span, p {
     color: #ffffff;
 }
 
+/* #105: motion smoothing badge. Cyan/teal while motion smoothing is active;
+ * dimmed when on in Settings but bypassed (>= 50 fps / 10-bit / 4K / unavailable). */
+.badge-smooth {
+    display: none;
+    background-color: #141c28;
+    border-width: 1dp;
+    border-color: #2a374a;
+    color: #8b99ad;
+    font-weight: bold;
+    font-size: 13dp;
+    padding: 4dp 10dp;
+    border-radius: 9dp;
+    letter-spacing: 0.5dp;
+}
+
+.badge-smooth.active {
+    background-color: #0088cc;
+    border-color: #00aaff;
+    color: #ffffff;
+}
+
 /* On-video caption overlay (#81)
  *
  * Full-width layer, text centred; the box shrink-wraps the caption and carries a

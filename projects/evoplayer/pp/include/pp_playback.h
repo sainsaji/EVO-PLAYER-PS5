@@ -50,6 +50,8 @@ typedef struct pp_playback {
     uint32_t out_w;             /* panel size; reporting only since GL-4 */
     uint32_t out_h;
     int64_t display_pts_us;
+    int64_t next_pts_us;        /* #105 incoming frame PTS for interpolation */
+    int64_t prev_pts_us;        /* #105 previous frame PTS for interpolation */
 
     int active;
     int seek_discarding;
@@ -159,6 +161,12 @@ typedef struct pp_video_frame {
  * copy, no pixels). Returns 1 if ready, 0 otherwise.
  */
 int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f);
+
+/**
+ * #105 Presentation clock interpolation phase.
+ * Returns 1 if valid phase was computed (phase in [0.0, 1.0]), 0 otherwise (*phase = 0.0f).
+ */
+int pp_playback_get_interp_phase(pp_playback *pb, float *phase);
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us);
 void pp_playback_notify_seek_end(pp_playback *pb, int success,

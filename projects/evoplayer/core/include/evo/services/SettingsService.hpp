@@ -62,6 +62,10 @@ public:
     void setAiNetwork(AiNetwork network) override { m_aiNetwork = network; }
     const char* getAiNetworkName(AiNetwork network) const override;
 
+    MotionSmoothing getMotionSmoothing() const override { return m_motionSmoothing; }
+    void setMotionSmoothing(MotionSmoothing smoothing) override { m_motionSmoothing = smoothing; }
+    const char* getMotionSmoothingName(MotionSmoothing smoothing) const override;
+
     bool isDebugOverlayEnabled() const override { return m_debugOverlayEnabled; }
     void setDebugOverlayEnabled(bool enabled) override { m_debugOverlayEnabled = enabled; }
 
@@ -99,6 +103,7 @@ private:
     // Off until the upscaler is hardware-verified (#103), then Sharp.
     Upscaler m_upscaler = Upscaler::Off;
     AiNetwork m_aiNetwork = AiNetwork::Auto;
+    MotionSmoothing m_motionSmoothing = MotionSmoothing::Off;
     RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
     HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
     AudioOutputChannels m_audioOutputChannels = AudioOutputChannels::Auto;

@@ -72,6 +72,10 @@ public:
     virtual void setAiNetwork(AiNetwork network) = 0;
     virtual const char* getAiNetworkName(AiNetwork network) const = 0;
 
+    virtual MotionSmoothing getMotionSmoothing() const = 0;
+    virtual void setMotionSmoothing(MotionSmoothing smoothing) = 0;
+    virtual const char* getMotionSmoothingName(MotionSmoothing smoothing) const = 0;
+
     virtual bool isDebugOverlayEnabled() const = 0;
     virtual void setDebugOverlayEnabled(bool enabled) = 0;
 

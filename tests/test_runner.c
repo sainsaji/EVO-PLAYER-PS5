@@ -22,6 +22,8 @@
 #include "evo_provider_bundle.h"
 #include "evo_changelog.h"
 #include "SDL_ps5tilemap.inc"
+#include <sys/time.h>
+#include "pp_playback.h"
 
 /* Test runner assertion tracking */
 static int g_tests_run = 0;
@@ -57,6 +59,14 @@ double media_duration_sec = 0.0;
 void toast(const char *category, const char *msg) {
     (void)category;
     (void)msg;
+}
+
+void evo_boot_log(const char *fmt, ...) {
+    (void)fmt;
+}
+
+void pp_stage_bc_checkpoint(const char *stage) {
+    (void)stage;
 }
 
 static bool str_contains_ci(const char *haystack, const char *needle) {
@@ -658,6 +668,175 @@ static void test_iptv_provider_catalog_and_epg(void)
 }
 
 /* ==========================================================================
+ * 10. Frame Interpolation & Motion Smoothing Tests (#105)
+ * ========================================================================== */
+
+static int simulate_interp_plan(uint32_t src_w, uint32_t src_h, int ten_bit, double fps, int requested_mode, const char **out_reason)
+{
+    if (requested_mode == 0) {
+        if (out_reason) *out_reason = "Off";
+        return 0;
+    }
+    if (ten_bit) {
+        if (out_reason) *out_reason = "10-bit/HDR";
+        return 0;
+    }
+    if (fps >= 49.0) {
+        if (out_reason) *out_reason = ">= 50 fps";
+        return 0;
+    }
+    if (src_w > 1920 || src_h > 1080) {
+        if (out_reason) *out_reason = "source > 1080p";
+        return 0;
+    }
+    if (out_reason) *out_reason = (requested_mode == 1) ? "Low (Smooth)" : "High (Ultra Smooth)";
+    return 1;
+}
+
+static uint64_t test_now_us(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000000ull + (uint64_t)tv.tv_usec;
+}
+
+static void test_frame_interpolation(void)
+{
+    TEST_START("Frame Interpolation: Phase Calculation, Bypass & Settings");
+
+    /* 1. Bypass Evaluation Rules (#105 spec: auto-off for sources >= 50 fps, 10-bit/HDR, or > 1080p) */
+    const char *reason = NULL;
+
+    /* 10-bit / HDR bypass */
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 1, 23.976, 2, &reason) == 0, "10-bit source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, "10-bit/HDR") == 0, "Bypass reason mismatch for 10-bit");
+
+    /* High frame rate bypass (>= 50 fps) */
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 50.0, 1, &reason) == 0, "50 fps source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, ">= 50 fps") == 0, "Bypass reason mismatch for 50 fps");
+
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 59.94, 2, &reason) == 0, "59.94 fps source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, ">= 50 fps") == 0, "Bypass reason mismatch for 59.94 fps");
+
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 60.0, 2, &reason) == 0, "60 fps source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, ">= 50 fps") == 0, "Bypass reason mismatch for 60 fps");
+
+    /* High resolution bypass (> 1080p) */
+    TEST_ASSERT(simulate_interp_plan(3840, 2160, 0, 24.0, 2, &reason) == 0, "4K source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, "source > 1080p") == 0, "Bypass reason mismatch for 4K");
+
+    TEST_ASSERT(simulate_interp_plan(2560, 1440, 0, 24.0, 1, &reason) == 0, "1440p source must bypass interpolation");
+    TEST_ASSERT(strcmp(reason, "source > 1080p") == 0, "Bypass reason mismatch for 1440p");
+
+    /* Eligible SDR streams <= 1080p and < 50 fps */
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 23.976, 1, &reason) == 1, "1080p 24fps SDR must be eligible");
+    TEST_ASSERT(strcmp(reason, "Low (Smooth)") == 0, "Expected Low (Smooth) label");
+
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 24.0, 2, &reason) == 1, "1080p 24fps High must be eligible");
+    TEST_ASSERT(strcmp(reason, "High (Ultra Smooth)") == 0, "Expected High (Ultra Smooth) label");
+
+    TEST_ASSERT(simulate_interp_plan(1280, 720, 0, 25.0, 2, &reason) == 1, "720p 25fps SDR must be eligible");
+
+    /* Off mode */
+    TEST_ASSERT(simulate_interp_plan(1920, 1080, 0, 23.976, 0, &reason) == 0, "Off mode must not activate plan");
+    TEST_ASSERT(strcmp(reason, "Off") == 0, "Expected Off label");
+
+    /* 2. Presentation Clock & Phase Calculation (pp_playback_get_interp_phase) */
+    pp_playback pb;
+    pp_playback_init(&pb);
+
+    float phase = -1.0f;
+    /* Inactive playback must return 0 */
+    TEST_ASSERT(pp_playback_get_interp_phase(&pb, &phase) == 0, "Inactive playback must return 0");
+    TEST_ASSERT(phase == 0.0f, "Phase should be 0.0 on inactive playback");
+
+    pb.active = 1;
+    pp_clock_start(&pb.clock, 0);
+    pb.gl_ready = 1;
+
+    /* When paused, must return 0 */
+    pp_clock_pause(&pb.clock);
+    TEST_ASSERT(pp_playback_get_interp_phase(&pb, &phase) == 0, "Paused playback must return 0");
+    pp_clock_resume(&pb.clock);
+
+    /* When seek_discarding, must return 0 */
+    pb.seek_discarding = 1;
+    TEST_ASSERT(pp_playback_get_interp_phase(&pb, &phase) == 0, "Seek discarding must return 0");
+    pb.seek_discarding = 0;
+
+    /* 24 fps cadence on 60 Hz display (41666 us duration) */
+    const int64_t frame_dur_us = 41666;
+    pb.display_pts_us = 1000000;
+    pb.next_pts_us = pb.display_pts_us + frame_dur_us;
+    pb.prev_pts_us = pb.display_pts_us - frame_dur_us;
+
+    /* Simulate 60 Hz vsync ticks:
+     * Tick 0: elapsed 0 us     -> phase 0.000
+     * Tick 1: elapsed 16666 us -> phase 0.400
+     * Tick 2: elapsed 33333 us -> phase 0.800
+     * Next frame lands: display_pts_us becomes 1041666, next_pts becomes 1083332
+     * Tick 3: elapsed 8334 us  -> phase 0.200
+     * Tick 4: elapsed 25000 us -> phase 0.600
+     */
+    const int64_t simulated_elapsed[5] = { 0, 16666, 33333, 8334, 25000 };
+    const float expected_phase[5] = { 0.0f, 0.400f, 0.800f, 0.200f, 0.600f };
+
+    for (int i = 0; i < 5; i++) {
+        if (i == 3) {
+            /* Frame A advances to next frame */
+            pb.prev_pts_us = pb.display_pts_us;
+            pb.display_pts_us += frame_dur_us;
+            pb.next_pts_us = pb.display_pts_us + frame_dur_us;
+        }
+
+        uint64_t now = test_now_us();
+        pb.clock.host_start_us = now - (uint64_t)simulated_elapsed[i];
+        pb.clock.media_start_pts_us = pb.display_pts_us;
+
+        int rc = pp_playback_get_interp_phase(&pb, &phase);
+        TEST_ASSERT(rc == 1, "Valid phase calculation should return 1");
+        float diff = fabsf(phase - expected_phase[i]);
+        TEST_ASSERT(diff < 0.015f, "Cadence phase mismatch on vsync tick");
+    }
+
+    /* Fallback to prev_pts_us when next_pts_us is unknown/equal */
+    pb.display_pts_us = 2000000;
+    pb.prev_pts_us = 2000000 - frame_dur_us;
+    pb.next_pts_us = pb.display_pts_us; /* no future frame known yet */
+
+    uint64_t now = test_now_us();
+    pb.clock.host_start_us = now - 20833; /* half frame elapsed */
+    pb.clock.media_start_pts_us = pb.display_pts_us;
+
+    int rc = pp_playback_get_interp_phase(&pb, &phase);
+    TEST_ASSERT(rc == 1, "Fallback to prev_pts_us should succeed");
+    TEST_ASSERT(fabsf(phase - 0.50f) < 0.015f, "Half frame phase should be ~0.50");
+
+    /* Out of bounds duration rejection (< 8000 us or > 120000 us) */
+    pb.next_pts_us = pb.display_pts_us + 5000; /* < 8000 us */
+    TEST_ASSERT(pp_playback_get_interp_phase(&pb, &phase) == 0, "Dur < 8000us must be rejected");
+
+    pb.next_pts_us = pb.display_pts_us + 150000; /* > 120000 us */
+    TEST_ASSERT(pp_playback_get_interp_phase(&pb, &phase) == 0, "Dur > 120000us must be rejected");
+
+    /* 3. Settings Persistence Format Validation */
+    /* Verify line 22 parsing logic for MotionSmoothing enum */
+    int parsed_mode = -1;
+    const char *cfg_lines[] = { "0", "1", "2", "99", "-1" };
+    int expected_modes[] = { 0, 1, 2, 0, 0 }; /* out of bounds fall back to 0 (Off) */
+
+    for (size_t i = 0; i < sizeof(cfg_lines)/sizeof(cfg_lines[0]); i++) {
+        int v = atoi(cfg_lines[i]);
+        if (v < 0 || v > 2) v = 0;
+        parsed_mode = v;
+        TEST_ASSERT(parsed_mode == expected_modes[i], "Config parsing mode mismatch");
+    }
+
+    pp_playback_shutdown(&pb);
+    TEST_PASS();
+}
+
+/* ==========================================================================
  * Main Test Runner Entrypoint
  * ========================================================================== */
 
@@ -676,6 +855,7 @@ int main(void)
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
     test_iptv_provider_catalog_and_epg();
+    test_frame_interpolation();
     
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

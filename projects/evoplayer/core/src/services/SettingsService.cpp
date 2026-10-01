@@ -54,6 +54,15 @@ const char* SettingsService::getAiNetworkName(AiNetwork network) const {
     }
 }
 
+const char* SettingsService::getMotionSmoothingName(MotionSmoothing smoothing) const {
+    switch (smoothing) {
+        case MotionSmoothing::Low:  return "LOW";
+        case MotionSmoothing::High: return "HIGH";
+        case MotionSmoothing::Off:
+        default:                    return "OFF";
+    }
+}
+
 const char* SettingsService::getHdrOutputModeName(HdrOutputMode mode) const {
     switch (mode) {
         case HdrOutputMode::Off:  return "OFF (TONE-MAP TO SDR)";
@@ -134,7 +143,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -155,7 +164,8 @@ bool SettingsService::saveSettings() {
         m_secondarySubtitlePosition,         // line 18 (#110)
         m_secondarySubtitleColor,            // line 19 (#110)
         m_askStream ? 1 : 0,                 // line 20 (live TV stream picker)
-        static_cast<int>(m_audioOutputChannels) // line 21 (#117 stereo downmix)
+        static_cast<int>(m_audioOutputChannels), // line 21 (#117 stereo downmix)
+        static_cast<int>(m_motionSmoothing)  // line 22 (#105 motion smoothing)
     );
 
     std::fclose(file);
@@ -190,9 +200,10 @@ bool SettingsService::loadSettings() {
     int rawSecondaryColor = 0;
     int rawAskStream = 1;
     int rawAudioChannels = 0;
+    int rawMotionSmoothing = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -213,7 +224,8 @@ bool SettingsService::loadSettings() {
         &rawSecondaryPosition,
         &rawSecondaryColor,
         &rawAskStream,
-        &rawAudioChannels
+        &rawAudioChannels,
+        &rawMotionSmoothing
     );
 
     std::fclose(file);
@@ -275,6 +287,9 @@ bool SettingsService::loadSettings() {
     if (readCount >= 20) m_askStream = (rawAskStream != 0);
     if (readCount >= 21 && rawAudioChannels >= 0 && rawAudioChannels <= 1) {
         m_audioOutputChannels = static_cast<AudioOutputChannels>(rawAudioChannels);
+    }
+    if (readCount >= 22 && rawMotionSmoothing >= 0 && rawMotionSmoothing <= 2) {
+        m_motionSmoothing = static_cast<MotionSmoothing>(rawMotionSmoothing);
     }
 
     syncThemeToRmlUi();

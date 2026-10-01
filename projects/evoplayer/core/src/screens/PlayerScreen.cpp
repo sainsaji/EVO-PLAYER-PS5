@@ -356,8 +356,9 @@ void PlayerScreen::feedPerformanceHud() {
                       : (prospero_embedded_subtitle_stream_index >= 0 ? "EMBEDDED" : "NONE"),
                   (prospero_subtitle_enabled && prospero_secondary_subtitle_active())
                       ? "  +  2ND TRACK" : "");
-    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps  /  UPSCALER %s  /  %s",
+    std::snprintf(l_perf, sizeof(l_perf), "RENDER %d fps  /  DECODE %d fps  /  UPSCALER %s  /  SMOOTH %s  /  %s",
                   perf_render_fps, perf_decode_fps, evo_agc_upscale_label(),
+                  evo_agc_motion_smoothing_label(),
                   evo_hw_model_name());
     std::snprintf(l_queues, sizeof(l_queues), "QUEUES  video %d/96  audio %d/96  pcm %d",
                   packet_queue_count(&video_packet_queue),
@@ -611,6 +612,26 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                 if (std::strcmp(up, e.label) == 0) {
                     p.upscale_badge = e.badge;
                     p.upscale_active = e.active;
+                    break;
+                }
+            }
+
+            /* #105: what motion smoothing did to the last frame */
+            static const struct { const char* label; const char* badge; int active; } k_sm[] = {
+                { "Low",                    "SMOOTHING · LOW",      1 },
+                { "High",                   "SMOOTHING · HIGH",     1 },
+                { "Off (>= 50 fps)",        "SMOOTH OFF · HIGH FPS", 0 },
+                { "Off (10-bit/HDR)",       "SMOOTH OFF · 10-BIT",  0 },
+                { "Off (source > 1080p)",   "SMOOTH OFF · 4K",      0 },
+                { "Off (unavailable)",      "SMOOTH OFF",           0 },
+                { "Off (scratch alloc failed)", "SMOOTH OFF",       0 },
+                { "Off (GPU over budget)",  "SMOOTH OFF · CAPPED",  0 },
+            };
+            const char* sm = evo_agc_motion_smoothing_label();
+            for (const auto& e : k_sm) {
+                if (std::strcmp(sm, e.label) == 0) {
+                    p.smooth_badge = e.badge;
+                    p.smooth_active = e.active;
                     break;
                 }
             }

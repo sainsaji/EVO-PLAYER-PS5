@@ -22,6 +22,9 @@ typedef struct {
      * (upscaling switched off in Settings). upscale_active picks the style. */
     const char* upscale_badge;
     int upscale_active;
+    /* #105: motion smoothing badge */
+    const char* smooth_badge;
+    int smooth_active;
     double position_sec;
     double duration_sec;
     double percentage;
@@ -196,6 +199,7 @@ typedef struct {
     const char* renderer;
     const char* decoder;   /* #37: "Hardware (sceVideodec2)" / "Software (FFmpeg)" */
     const char* upscaler;  /* #103: "Off" / "Sharp" / "AI (shader)" (+ bypass reason) */
+    const char* motion_smoothing; /* #105: "Off" / "Low" / "High" (+ bypass reason) */
 } evo_rmlui_mediainfo_params_t;
 
 /*

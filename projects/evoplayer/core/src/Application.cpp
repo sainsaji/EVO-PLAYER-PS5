@@ -1583,7 +1583,20 @@ int Application::run() {
              */
             bool buffer_stale = have && evo_agc_runtime_video_slot_stale(current_pts);
 
-            bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding;
+            /* #105: query motion smoothing phase from presentation clock */
+            if (m_settingsService) {
+                evo_agc_motion_smoothing_set_mode(static_cast<int>(m_settingsService->getMotionSmoothing()));
+            }
+            double video_fps = evo_pb_video_fps();
+            evo_agc_motion_smoothing_set_source_fps(video_fps);
+
+            float interp_phase = 0.0f;
+            int valid_phase = pp_playback_get_interp_phase(&g_pp_pb, &interp_phase);
+            evo_agc_motion_smoothing_set_phase(valid_phase ? interp_phase : 0.0f);
+
+            bool smoothing_active = evo_agc_motion_smoothing_is_active() && !is_paused && !is_scrubbing && !g_pp_pb.seek_discarding;
+
+            bool should_render = (have && new_frame) || buffer_stale || overlay_active || is_paused || is_scrubbing || toast_visible || g_pp_pb.seek_discarding || (have && smoothing_active);
 
             /* #103 `upcompare`: capture what the previous iteration presented,
              * then move to the next mode. */
@@ -1654,6 +1667,12 @@ int Application::run() {
                                            ? "GPU over budget - using a smaller AI network"
                                            : up_capped == static_cast<int>(Upscaler::Sharp)
                                            ? "GPU over budget - using Sharp"
+                                           : "GPU over budget - turned off");
+
+                const int sm_capped = evo_agc_motion_smoothing_take_downgrade();
+                if (sm_capped >= 0)
+                    toast("SMOOTHING", sm_capped == static_cast<int>(MotionSmoothing::Low)
+                                           ? "GPU over budget - using Low smoothing"
                                            : "GPU over budget - turned off");
                 int is_direct = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE && !f.held && f.uv != nullptr) ? 1 : 0;
                 if (new_frame) g_pace.new_frame();

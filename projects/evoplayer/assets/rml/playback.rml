@@ -16,6 +16,7 @@
             <span id="badge-fps" class="badge-fps"></span>
             <span id="badge-decoder" class="badge-decoder"></span>
             <span id="badge-upscale" class="badge-upscale"></span>
+            <span id="badge-smooth" class="badge-smooth"></span>
         </div>
     </div>
 

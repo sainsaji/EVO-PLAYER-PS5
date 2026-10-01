@@ -343,6 +343,31 @@ typedef struct evo_agc_device {
         uint64_t     window_us;
         uint32_t     over_budget_windows;
     } up;
+
+    /* #105 frame interpolation (motion smoothing). See agc_motion_smoothing_* below. */
+    struct {
+        int          requested;        /* EVO_AGC_MOTION_SMOOTH_* from Settings */
+        int          cap;              /* highest mode GPU time allows (HIGH -> LOW -> OFF) */
+        int          downgrade_notice; /* -1, or the mode just capped to */
+        float        phase;            /* phase t in [0.0, 1.0] from presentation clock */
+        double       source_fps;       /* input video fps */
+        const char  *label;            /* what the last frame used */
+        int          active_plan;      /* 1 if motion smoothing is running */
+        int          resident_slot_a;  /* slot index for Frame A (default UP_SLOT_INTERP_A = 5) */
+        int          resident_slot_b;  /* slot index for Frame B (default UP_SLOT_INTERP_B = 6) */
+        int64_t      pts_a;            /* PTS of resident Frame A */
+        int64_t      pts_b;            /* PTS of resident Frame B */
+        int          have_a;
+        int          have_b;
+        int          me_done;          /* ME + median run for current pair */
+        uint32_t     mv_w;             /* width of motion vector grid */
+        uint32_t     mv_h;             /* height of motion vector grid */
+        int          last_key[6];
+        int          this_frame;       /* Frame carried interp passes */
+        uint32_t     window_frames;
+        uint64_t     window_us;
+        uint32_t     over_budget_windows;
+    } interp;
 } evo_agc_device_t;
 
 typedef struct evo_agc_gpu_regs {
@@ -361,6 +386,8 @@ static evo_agc_device_t g_agc_dev = {0};
 /* #103 upscaler, defined beside evo_agc_blit_yuv. */
 static void agc_upscale_release(void);
 static void agc_upscale_note_gpu_time(uint64_t us);
+/* #105 frame interpolation, defined beside evo_agc_blit_yuv. */
+static void agc_interp_note_gpu_time(uint64_t us);
 
 /*
  * Present path: no GPU SetFlip in the DCB; the CPU calls sceVideoOutSubmitFlip
@@ -1301,6 +1328,10 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_UP_M_ACC0 + 6, &upscale_a4k_m_acc6_metadata, "upscale_a4k_m_acc6"},
         {EVO_AGC_PIPE_UP_RGB_FINAL, &upscale_a4k_rgb_final_metadata, "upscale_a4k_rgb_final"},
 #include "upscale_wide_pipes.inc"
+        /* #105 frame interpolation (motion smoothing) */
+        {EVO_AGC_PIPE_INTERP_ME,     &interp_me_metadata,     "interp_me"},
+        {EVO_AGC_PIPE_INTERP_MEDIAN, &interp_median_metadata, "interp_median"},
+        {EVO_AGC_PIPE_INTERP_WARP,   &interp_warp_metadata,   "interp_warp"},
     };
     for (unsigned i = 0; i < sizeof(video_pipes) / sizeof(video_pipes[0]); ++i) {
         int vrc = compile_agc_pipeline(&g_agc_dev.pipelines[video_pipes[i].pipe_id],
@@ -2207,12 +2238,13 @@ void evo_agc_runtime_frame_end(void)
         {
             /* #103: submit -> retire of a frame carrying upscale passes is the
              * GPU time the budget check needs (1 ms poll granularity). */
+            const int has_timed_work = g_agc_dev.up.this_frame || g_agc_dev.interp.this_frame;
             struct timespec up_t0;
-            if (g_agc_dev.up.this_frame)
+            if (has_timed_work)
                 clock_gettime(CLOCK_MONOTONIC, &up_t0);
-            /* 100 us steps on an upscaled frame so its GPU time is measured
+            /* 100 us steps on an upscaled or interpolated frame so its GPU time is measured
              * rather than rounded up to the first 1 ms poll; same 500 ms cap. */
-            const unsigned step_us = g_agc_dev.up.this_frame ? 100u : 1000u;
+            const unsigned step_us = has_timed_work ? 100u : 1000u;
             unsigned waits = 0;
             for (; waits < 500000u / step_us; ++waits) {
                 evo_agc_runtime_cache_flush((const void *)g_agc_dev.fences[slot], 4);
@@ -2220,13 +2252,19 @@ void evo_agc_runtime_frame_end(void)
                     break;
                 sceKernelUsleep(step_us);
             }
-            if (g_agc_dev.up.this_frame) {
+            if (has_timed_work) {
                 struct timespec up_t1;
                 clock_gettime(CLOCK_MONOTONIC, &up_t1);
                 const int64_t us = (int64_t)(up_t1.tv_sec - up_t0.tv_sec) * 1000000 +
                                    (int64_t)(up_t1.tv_nsec - up_t0.tv_nsec) / 1000;
-                agc_upscale_note_gpu_time(us > 0 ? (uint64_t)us : 0u);
-                g_agc_dev.up.this_frame = 0;
+                if (g_agc_dev.up.this_frame) {
+                    agc_upscale_note_gpu_time(us > 0 ? (uint64_t)us : 0u);
+                    g_agc_dev.up.this_frame = 0;
+                }
+                if (g_agc_dev.interp.this_frame) {
+                    agc_interp_note_gpu_time(us > 0 ? (uint64_t)us : 0u);
+                    g_agc_dev.interp.this_frame = 0;
+                }
             }
             int32_t fliprc = sceVideoOutSubmitFlip(g_agc_dev.video_handle,
                                                    g_agc_dev.active_backbuffer,
@@ -2348,6 +2386,7 @@ void evo_agc_runtime_set_player_mode(int is_player)
     g_agc_dev.is_player_mode = is_player;
     /* a new file decides HDR10 by its own first frame, not the last file's */
     g_agc_dev.last_video_trc = -1;
+    evo_agc_motion_smoothing_reset();
     if (is_player) {
         /* Clear both scanout buffers once upon entering player mode so letterbox borders are dark */
         for (int b = 0; b < 2; ++b) {
@@ -3131,14 +3170,17 @@ void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
  * blur relies on between its H and V passes.
  * ========================================================================= */
 
-#define EVO_AGC_UP_SURFACES   5
+#define EVO_AGC_UP_SURFACES   7
 #define EVO_AGC_UP_EXT_SURFACES 8   /* Anime4K UL only */
 /* 36 MB: colour targets are 64KB_R_X tiled, so a 4K RGBA8 image takes
  * 30 x 17 blocks of 64 KB = 33.4 MB, not its 31.6 MB linear size. */
 #define EVO_AGC_UP_SLOT_BYTES UINT64_C(0x02400000)
 enum {
     UP_SLOT_L0 = 0, UP_SLOT_E = 1, UP_SLOT_F0 = 1, UP_SLOT_A0 = 3,
-    /* UL: two sets of 3 feature maps, two sets of 3 accumulators. Slots 5+
+    /* #105 frame interpolation: motion vector textures and resident Frame A/B */
+    UP_SLOT_INTERP_MV0 = 1, UP_SLOT_INTERP_MV1 = 2,
+    UP_SLOT_INTERP_A = 5,   UP_SLOT_INTERP_B = 6,
+    /* UL: two sets of 3 feature maps, two sets of 3 accumulators. Slots 7+
      * live in the second block. */
     UP_SLOT_UL_F = 1, UP_SLOT_UL_A = 7,
 };
@@ -3306,12 +3348,13 @@ static int agc_up_bind_target(const agc_up_surface_t *t, int x, int y, int w, in
     return 0;
 }
 
-/* One fullscreen pass of an upscale pipe: every one shares the vertex stage
- * of tools/gen_upscale_pipes.py (a vec4 source-UV rect) and reads `n`
+/* One fullscreen pass of an upscale or interpolation pipe: shares the vertex stage
+ * (vec4 source-UV rect plus optional vec4 params) and reads `n`
  * combined textures from one fragment table. */
-static int agc_up_pass(int pipe_id, const agc_up_surface_t *dst,
-                       int x, int y, int w, int h, const float uv[4],
-                       const agc_up_tex_t *tex, int n)
+static int agc_up_pass_params(int pipe_id, const agc_up_surface_t *dst,
+                              int x, int y, int w, int h, const float uv[4],
+                              const float params[4],
+                              const agc_up_tex_t *tex, int n)
 {
     SceAgcCommandBuffer *cb = &g_agc_dev.current_cb;
     evo_agc_transient_ring_t *ring = &g_agc_dev.transient_ring;
@@ -3324,15 +3367,20 @@ static int agc_up_pass(int pipe_id, const agc_up_surface_t *dst,
         ud.vs_count > 16 || ud.ps_count > 16)
         return -1;
 
+    const size_t cons_bytes = params ? 32u : 16u;
     evo_agc_transient_slice_t cons, vsh, desc;
-    if (evo_agc_transient_ring_alloc(ring, slot, 16, 16, &cons) != EVO_AGC_TRANSIENT_OK ||
+    if (evo_agc_transient_ring_alloc(ring, slot, cons_bytes, 16, &cons) != EVO_AGC_TRANSIENT_OK ||
         evo_agc_transient_ring_alloc(ring, slot, 16, 16, &vsh) != EVO_AGC_TRANSIENT_OK ||
         evo_agc_transient_ring_alloc(ring, slot, (size_t)n * 48u, 16, &desc) != EVO_AGC_TRANSIENT_OK) {
         g_agc_dev.ring_alloc_fail++;
         return -1;
     }
-    memcpy(cons.cpu, uv, 16);
-    evo_agc_build_constant_vsharp((uint32_t *)vsh.cpu, cons.gpu_addr, 16);
+    float cbuf[8] = {0};
+    memcpy(cbuf, uv, 16);
+    if (params)
+        memcpy(cbuf + 4, params, 16);
+    memcpy(cons.cpu, cbuf, cons_bytes);
+    evo_agc_build_constant_vsharp((uint32_t *)vsh.cpu, cons.gpu_addr, (uint32_t)cons_bytes);
 
     uint32_t *d = (uint32_t *)desc.cpu;
     memset(d, 0, (size_t)n * 48u);
@@ -3365,6 +3413,13 @@ static int agc_up_pass(int pipe_id, const agc_up_surface_t *dst,
     if (!dst->scanout)
         evo_agc_flush_color_target();
     return 0;
+}
+
+static int agc_up_pass(int pipe_id, const agc_up_surface_t *dst,
+                       int x, int y, int w, int h, const float uv[4],
+                       const agc_up_tex_t *tex, int n)
+{
+    return agc_up_pass_params(pipe_id, dst, x, y, w, h, uv, NULL, tex, n);
 }
 
 /* Hand the UI back a full-canvas scanout target. */
@@ -3438,6 +3493,10 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
             : evo_hw_is_ps5_pro();
         if (net > g_agc_dev.up.net_cap)
             net = g_agc_dev.up.net_cap;
+        /* #105: Anime4K UL uses slots 1..6 for feature maps, colliding with Frame A/B
+         * in slots 5/6. Step down to Large (net 1, slots 0..4) when smoothing is on. */
+        if (g_agc_dev.interp.requested != EVO_AGC_MOTION_SMOOTH_OFF && net > 1)
+            net = 1;
         if (net == 2 && !(up_pipes_valid(EVO_AGC_PIPE_UP_UL_CONV0, EVO_AGC_UP_UL_CONVS) &&
                           up_pipes_valid(EVO_AGC_PIPE_UP_UL_ACC0, EVO_AGC_UP_UL_ACCS) &&
                           up_pipes_valid(EVO_AGC_PIPE_UP_RGB_FINAL, 1) &&
@@ -3708,6 +3767,287 @@ int evo_agc_upscale_take_downgrade(void)
     return v;
 }
 
+/* =========================================================================
+ * #105 Frame Interpolation (Motion Smoothing)
+ * ========================================================================= */
+
+typedef struct {
+    int      mode;                        /* EVO_AGC_MOTION_SMOOTH_LOW or HIGH */
+    float    phase;
+    uint32_t src_w, src_h;
+    int      x0, y0, x1, y1;
+    float    uv[4];
+} agc_interp_plan_t;
+
+static void agc_interp_note_gpu_time(uint64_t us)
+{
+    g_agc_dev.interp.window_us += us;
+    if (++g_agc_dev.interp.window_frames < EVO_AGC_UP_WINDOW)
+        return;
+    const uint64_t avg = g_agc_dev.interp.window_us / g_agc_dev.interp.window_frames;
+    evo_boot_log("agc interp us=%llu n=%u mode=%s budget_us=%u",
+                 (unsigned long long)avg, g_agc_dev.interp.window_frames,
+                 g_agc_dev.interp.label, EVO_AGC_UP_BUDGET_US);
+    g_agc_dev.interp.window_us = 0;
+    g_agc_dev.interp.window_frames = 0;
+
+    if (avg <= EVO_AGC_UP_BUDGET_US) {
+        g_agc_dev.interp.over_budget_windows = 0;
+        return;
+    }
+    if (++g_agc_dev.interp.over_budget_windows < 2)
+        return;
+    g_agc_dev.interp.over_budget_windows = 0;
+
+    const int from = g_agc_dev.interp.cap;
+    const int to = (from > EVO_AGC_MOTION_SMOOTH_OFF) ? from - 1 : EVO_AGC_MOTION_SMOOTH_OFF;
+    g_agc_dev.interp.cap = to;
+    g_agc_dev.interp.downgrade_notice = to;
+    evo_boot_log("agc interp: over budget (us=%llu > %u) - %s -> %s for this session",
+                 (unsigned long long)avg, EVO_AGC_UP_BUDGET_US,
+                 (from == EVO_AGC_MOTION_SMOOTH_HIGH) ? "High" : (from == EVO_AGC_MOTION_SMOOTH_LOW) ? "Low" : "Off",
+                 (to == EVO_AGC_MOTION_SMOOTH_HIGH) ? "High" : (to == EVO_AGC_MOTION_SMOOTH_LOW) ? "Low" : "Off");
+}
+
+void evo_agc_motion_smoothing_set_mode(int mode)
+{
+    if (mode < EVO_AGC_MOTION_SMOOTH_OFF || mode > EVO_AGC_MOTION_SMOOTH_HIGH)
+        mode = EVO_AGC_MOTION_SMOOTH_OFF;
+    if (mode == g_agc_dev.interp.requested)
+        return;
+    g_agc_dev.interp.requested = mode;
+    g_agc_dev.interp.cap = EVO_AGC_MOTION_SMOOTH_HIGH;
+    g_agc_dev.interp.over_budget_windows = 0;
+    g_agc_dev.interp.window_frames = 0;
+    g_agc_dev.interp.window_us = 0;
+}
+
+void evo_agc_motion_smoothing_set_phase(float phase)
+{
+    if (phase < 0.0f) phase = 0.0f;
+    if (phase > 1.0f) phase = 1.0f;
+    g_agc_dev.interp.phase = phase;
+}
+
+void evo_agc_motion_smoothing_set_source_fps(double fps)
+{
+    g_agc_dev.interp.source_fps = fps;
+}
+
+const char *evo_agc_motion_smoothing_label(void)
+{
+    return g_agc_dev.interp.label ? g_agc_dev.interp.label : "Off";
+}
+
+int evo_agc_motion_smoothing_take_downgrade(void)
+{
+    const int v = g_agc_dev.interp.downgrade_notice;
+    g_agc_dev.interp.downgrade_notice = -1;
+    return v;
+}
+
+int evo_agc_motion_smoothing_is_active(void)
+{
+    return g_agc_dev.interp.active_plan;
+}
+
+void evo_agc_motion_smoothing_reset(void)
+{
+    g_agc_dev.interp.have_a = 0;
+    g_agc_dev.interp.have_b = 0;
+    g_agc_dev.interp.me_done = 0;
+    g_agc_dev.interp.pts_a = -1;
+    g_agc_dev.interp.pts_b = -1;
+    g_agc_dev.interp.resident_slot_a = UP_SLOT_INTERP_A;
+    g_agc_dev.interp.resident_slot_b = UP_SLOT_INTERP_B;
+    g_agc_dev.interp.active_plan = 0;
+}
+
+static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
+                                    float sx, float sy, agc_interp_plan_t *pl)
+{
+    int mode = g_agc_dev.interp.requested;
+    if (mode > g_agc_dev.interp.cap)
+        mode = g_agc_dev.interp.cap;
+    const char *reason = NULL;
+
+    const float W = (float)g_agc_dev.width, H = (float)g_agc_dev.height;
+    const float img_w = sx * W, img_h = sy * H;
+
+    /* Visible part of the image, in whole pixels, and the source UV it shows. */
+    const float fx0 = (W - img_w) * 0.5f, fy0 = (H - img_h) * 0.5f;
+    int x0 = (int)(fx0 + 0.5f), y0 = (int)(fy0 + 0.5f);
+    int x1 = (int)(fx0 + img_w + 0.5f), y1 = (int)(fy0 + img_h + 0.5f);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > g_agc_dev.width) x1 = g_agc_dev.width;
+    if (y1 > g_agc_dev.height) y1 = g_agc_dev.height;
+
+    if (mode != EVO_AGC_MOTION_SMOOTH_OFF) {
+        if (ten_bit)
+            reason = "10-bit/HDR";
+        else if (g_agc_dev.interp.source_fps >= 49.0)
+            reason = ">= 50 fps";
+        else if (src_w > 1920 || src_h > 1080)
+            reason = "source > 1080p";
+        else if (x1 <= x0 || y1 <= y0 || !up_fits(src_w, src_h, 4u))
+            reason = "size";
+        else if (!(g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_ME].valid &&
+                   g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_MEDIAN].valid &&
+                   g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_WARP].valid))
+            reason = "unavailable";
+        else if (agc_upscale_alloc(0) != 0)
+            reason = "scratch alloc failed";
+    }
+
+    if (reason || mode == EVO_AGC_MOTION_SMOOTH_OFF) {
+        g_agc_dev.interp.label = (mode == EVO_AGC_MOTION_SMOOTH_OFF) ? "Off"
+            : !strcmp(reason, ">= 50 fps") ? "Off (>= 50 fps)"
+            : !strcmp(reason, "10-bit/HDR") ? "Off (10-bit/HDR)"
+            : !strcmp(reason, "source > 1080p") ? "Off (source > 1080p)"
+            : !strcmp(reason, "scratch alloc failed") ? "Off (scratch alloc failed)"
+            : "Off (unavailable)";
+        if (g_agc_dev.interp.cap == EVO_AGC_MOTION_SMOOTH_OFF &&
+            g_agc_dev.interp.requested != EVO_AGC_MOTION_SMOOTH_OFF)
+            g_agc_dev.interp.label = "Off (GPU over budget)";
+        mode = EVO_AGC_MOTION_SMOOTH_OFF;
+    } else {
+        g_agc_dev.interp.label = (mode == EVO_AGC_MOTION_SMOOTH_HIGH) ? "High" : "Low";
+    }
+
+    const int key[6] = { g_agc_dev.interp.requested, mode, (int)src_w, (int)src_h,
+                         (int)(g_agc_dev.interp.source_fps * 100), (int)(g_agc_dev.interp.phase * 1000) };
+    if (memcmp(key, g_agc_dev.interp.last_key, sizeof(key)) != 0) {
+        memcpy(g_agc_dev.interp.last_key, key, sizeof(key));
+        if (g_agc_dev.interp.requested != EVO_AGC_MOTION_SMOOTH_OFF) {
+            if (reason)
+                evo_boot_log("agc interp: bypass requested=%d reason=%s src=%ux%u fps=%.2f",
+                             g_agc_dev.interp.requested, reason, src_w, src_h,
+                             g_agc_dev.interp.source_fps);
+            else
+                evo_boot_log("agc interp: mode=%s src=%ux%u -> rect=%d,%d %dx%d fps=%.2f phase=%.2f",
+                             g_agc_dev.interp.label, src_w, src_h, x0, y0, x1 - x0, y1 - y0,
+                             g_agc_dev.interp.source_fps, g_agc_dev.interp.phase);
+        }
+    }
+
+    g_agc_dev.interp.active_plan = (mode != EVO_AGC_MOTION_SMOOTH_OFF);
+    if (mode == EVO_AGC_MOTION_SMOOTH_OFF)
+        return 0;
+
+    pl->mode = mode;
+    pl->phase = g_agc_dev.interp.phase;
+    pl->src_w = src_w;
+    pl->src_h = src_h;
+    pl->x0 = x0; pl->y0 = y0; pl->x1 = x1; pl->y1 = y1;
+    pl->uv[0] = ((float)x0 - fx0) / img_w;
+    pl->uv[1] = ((float)y0 - fy0) / img_h;
+    pl->uv[2] = (float)(x1 - x0) / img_w;
+    pl->uv[3] = (float)(y1 - y0) / img_h;
+    return 1;
+}
+
+static int agc_interp_run_me(uint32_t src_w, uint32_t src_h)
+{
+    static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    const uint32_t mv_w = (src_w + 31u) / 32u;
+    const uint32_t mv_h = (src_h + 31u) / 32u;
+    g_agc_dev.interp.mv_w = mv_w;
+    g_agc_dev.interp.mv_h = mv_h;
+
+    agc_up_surface_t surf_a = up_surface(g_agc_dev.interp.resident_slot_a, src_w, src_h, 0);
+    agc_up_surface_t surf_b = up_surface(g_agc_dev.interp.resident_slot_b, src_w, src_h, 0);
+    agc_up_surface_t surf_mv0 = up_surface(UP_SLOT_INTERP_MV0, mv_w, mv_h, 1);
+    agc_up_surface_t surf_mv1 = up_surface(UP_SLOT_INTERP_MV1, mv_w, mv_h, 1);
+
+    const agc_up_tex_t tex_me[2] = {
+        up_tex(&surf_a, 0),
+        up_tex(&surf_b, 0)
+    };
+
+    /* Pass 1: Block matching ME (outputs raw MV + SAD in RGBA16F) */
+    int rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_ME, &surf_mv0, 0, 0,
+                                (int)mv_w, (int)mv_h, full, NULL, tex_me, 2);
+    if (rc != 0)
+        return rc;
+
+    /* Pass 2: 3x3 Median filter on motion vectors */
+    const agc_up_tex_t tex_mv0 = up_tex(&surf_mv0, 0);
+    rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_MEDIAN, &surf_mv1, 0, 0,
+                            (int)mv_w, (int)mv_h, full, NULL, &tex_mv0, 1);
+    return rc;
+}
+
+static int agc_interp_run_warp(const agc_interp_plan_t *ipl, const agc_up_plan_t *upl)
+{
+    static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    const uint32_t sw = ipl->src_w, sh = ipl->src_h;
+    const uint32_t mv_w = g_agc_dev.interp.mv_w ? g_agc_dev.interp.mv_w : (sw + 31u) / 32u;
+    const uint32_t mv_h = g_agc_dev.interp.mv_h ? g_agc_dev.interp.mv_h : (sh + 31u) / 32u;
+
+    agc_up_surface_t surf_a = up_surface(g_agc_dev.interp.resident_slot_a, sw, sh, 0);
+    agc_up_surface_t surf_b = up_surface(g_agc_dev.interp.resident_slot_b, sw, sh, 0);
+    agc_up_surface_t surf_mv = up_surface(UP_SLOT_INTERP_MV1, mv_w, mv_h, 1);
+
+    const agc_up_tex_t tex_warp[3] = {
+        up_tex(&surf_a, 1),
+        up_tex(&surf_b, 1),
+        up_tex(&surf_mv, 1)
+    };
+
+    float params[4] = { ipl->phase, (float)ipl->mode, 0.0f, 0.0f };
+    int rc = 0;
+
+    if (upl) {
+        agc_up_surface_t l0 = up_surface(UP_SLOT_L0, sw, sh, 0);
+        rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_WARP, &l0, 0, 0,
+                                (int)sw, (int)sh, full, params, tex_warp, 3);
+        if (rc == 0) {
+            evo_agc_flush_color_target();
+            rc = agc_upscale_run(upl);
+        }
+    } else {
+        agc_up_surface_t scan;
+        memset(&scan, 0, sizeof(scan));
+        scan.scanout = 1;
+        rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_WARP, &scan,
+                                ipl->x0, ipl->y0, ipl->x1 - ipl->x0, ipl->y1 - ipl->y0,
+                                ipl->uv, params, tex_warp, 3);
+        agc_up_restore_scanout();
+    }
+    return rc;
+}
+
+static int agc_interp_present_single(int slot, const agc_interp_plan_t *ipl, const agc_up_plan_t *upl)
+{
+    static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    const uint32_t sw = ipl->src_w, sh = ipl->src_h;
+    agc_up_surface_t surf = up_surface(slot, sw, sh, 0);
+    const agc_up_tex_t tex = up_tex(&surf, 1);
+    const agc_up_tex_t tex3[3] = { tex, tex, tex };
+    float params[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    int rc = 0;
+
+    if (upl) {
+        agc_up_surface_t l0 = up_surface(UP_SLOT_L0, sw, sh, 0);
+        rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_WARP, &l0, 0, 0,
+                                (int)sw, (int)sh, full, params, tex3, 3);
+        if (rc == 0) {
+            evo_agc_flush_color_target();
+            rc = agc_upscale_run(upl);
+        }
+    } else {
+        agc_up_surface_t scan;
+        memset(&scan, 0, sizeof(scan));
+        scan.scanout = 1;
+        rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_WARP, &scan,
+                                ipl->x0, ipl->y0, ipl->x1 - ipl->x0, ipl->y1 - ipl->y0,
+                                ipl->uv, params, tex3, 3);
+        agc_up_restore_scanout();
+    }
+    return rc;
+}
+
 /* The Off quad's NDC half-extents for Fit (0) / Fill (1) / Stretch (2). */
 static void agc_video_scale(int disp_w, int disp_h, int view_mode, float *sx, float *sy)
 {
@@ -3778,17 +4118,54 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     float sx, sy;
     agc_video_scale(disp_w, disp_h, view_mode, &sx, &sy);
 
-    /* #103: with an upscaler engaged this pass renders the picture at source
-     * size into scratch surface L0 instead, and agc_upscale_run() below takes
-     * it to the scanout. */
     const uint32_t src_w = (disp_w > 0 && disp_w <= coded_w) ? (uint32_t)disp_w : (uint32_t)coded_w;
     const uint32_t src_h = (disp_h > 0 && disp_h <= coded_h) ? (uint32_t)disp_h : (uint32_t)coded_h;
+
+    agc_interp_plan_t interp_plan;
+    const int interp_active = agc_motion_smoothing_plan(src_w, src_h, ten_bit || hdr_src, sx, sy, &interp_plan);
+
     agc_up_plan_t up_plan;
     /* the upscalers are SDR-only: off for any HDR source, 8-bit ones too */
     const int upscale = agc_upscale_plan(src_w, src_h, ten_bit || hdr_src, sx, sy, &up_plan);
 
+    if (interp_active && pts_us == g_agc_dev.interp.pts_b && g_agc_dev.interp.have_b) {
+        /* Resident frames Frame A and Frame B are already in GPU memory.
+         * Run warp with the new vsync phase and present. */
+        if (agc_interp_run_warp(&interp_plan, upscale ? &up_plan : NULL) == 0) {
+            g_agc_dev.interp.this_frame = 1;
+            evo_agc_runtime_note_draw();
+            evo_agc_runtime_note_video_pts(pts_us);
+            return 0;
+        }
+    }
+
+    int target_slot = -1;
+    if (interp_active) {
+        if (!g_agc_dev.interp.have_a || pts_us < g_agc_dev.interp.pts_a ||
+            (g_agc_dev.interp.pts_b >= 0 && pts_us - g_agc_dev.interp.pts_b > 200000)) {
+            target_slot = g_agc_dev.interp.resident_slot_a;
+            g_agc_dev.interp.pts_a = pts_us;
+            g_agc_dev.interp.have_a = 1;
+            g_agc_dev.interp.have_b = 0;
+            g_agc_dev.interp.me_done = 0;
+        } else {
+            if (g_agc_dev.interp.have_b) {
+                int tmp = g_agc_dev.interp.resident_slot_a;
+                g_agc_dev.interp.resident_slot_a = g_agc_dev.interp.resident_slot_b;
+                g_agc_dev.interp.resident_slot_b = tmp;
+                g_agc_dev.interp.pts_a = g_agc_dev.interp.pts_b;
+            }
+            target_slot = g_agc_dev.interp.resident_slot_b;
+            g_agc_dev.interp.pts_b = pts_us;
+            g_agc_dev.interp.have_b = 1;
+            g_agc_dev.interp.me_done = 0;
+        }
+    } else if (upscale) {
+        target_slot = UP_SLOT_L0;
+    }
+
     /* 2. Fullscreen viewport and scissor */
-    if (!upscale) {
+    if (target_slot < 0) {
         evo_agc_writer_set_viewport(&g_agc_dev.current_cb, alloc_transient_cx(12), 0.0f, 0.0f,
                                     (float)g_agc_dev.width, (float)g_agc_dev.height);
         evo_agc_writer_set_scissor(&g_agc_dev.current_cb, alloc_transient_cx(2), 0, 0,
@@ -3810,9 +4187,9 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     constants.crop[0] = cx;
     constants.crop[1] = cy;
 
-    /* Into L0 the picture fills the viewport exactly. */
-    constants.scale[0] = upscale ? 1.0f : sx;
-    constants.scale[1] = upscale ? 1.0f : sy;
+    /* Into scratch surface the picture fills the viewport exactly. */
+    constants.scale[0] = (target_slot >= 0) ? 1.0f : sx;
+    constants.scale[1] = (target_slot >= 0) ? 1.0f : sy;
 
     /* Allocate VideoConstants in transient ring (64 bytes) */
     evo_agc_transient_slice_t const_slice;
@@ -3968,11 +4345,10 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     ps_user[vud.ps_texture_table_dword] = (uint32_t)desc_slice.gpu_addr;
     evo_agc_writer_set_user_data_ps(&g_agc_dev.current_cb, ps_user, vud.ps_count);
 
-    /* #103: switch to L0 only now, after every early return above - one of
-     * those leaving MRT0 on a scratch surface would send the UI there too. */
-    if (upscale) {
-        agc_up_surface_t l0 = up_surface(UP_SLOT_L0, src_w, src_h, 0);
-        if (agc_up_bind_target(&l0, 0, 0, (int)src_w, (int)src_h) != 0) {
+    /* switch to target scratch surface only now, after every early return above */
+    if (target_slot >= 0) {
+        agc_up_surface_t dst_surf = up_surface(target_slot, src_w, src_h, 0);
+        if (agc_up_bind_target(&dst_surf, 0, 0, (int)src_w, (int)src_h) != 0) {
             agc_up_restore_scanout();
             return -1;
         }
@@ -3981,12 +4357,28 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     /* 5. Dispatch hardware quad draw call with pipeline draw modifier */
     evo_agc_writer_draw_index_modifier(&g_agc_dev.current_cb, 6, g_agc_dev.quad_indices,
                                       g_agc_dev.pipelines[pipe_id].draw_modifier);
-    /* Without this the frame carries no recorded draw and frame_end discards it
-     * instead of presenting - video would decode and never reach the panel. */
     evo_agc_runtime_note_draw();
 
-    if (upscale) {
-        evo_agc_flush_color_target();   /* the chain samples L0 */
+    if (target_slot >= 0) {
+        evo_agc_flush_color_target();
+    }
+
+    if (interp_active) {
+        if (g_agc_dev.interp.have_a && g_agc_dev.interp.have_b) {
+            if (!g_agc_dev.interp.me_done) {
+                agc_interp_run_me(src_w, src_h);
+                g_agc_dev.interp.me_done = 1;
+            }
+            if (agc_interp_run_warp(&interp_plan, upscale ? &up_plan : NULL) != 0)
+                return -1;
+            g_agc_dev.interp.this_frame = 1;
+        } else {
+            /* Only Frame A is ready */
+            if (agc_interp_present_single(g_agc_dev.interp.resident_slot_a,
+                                          &interp_plan, upscale ? &up_plan : NULL) != 0)
+                return -1;
+        }
+    } else if (upscale) {
         if (agc_upscale_run(&up_plan) != 0)
             return -1;
     }

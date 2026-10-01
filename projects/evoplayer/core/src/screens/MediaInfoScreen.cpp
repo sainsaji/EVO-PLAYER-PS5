@@ -223,6 +223,8 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     params.renderer = rendererStr;
     /* #103: what the last frame actually got, bypass reason included. */
     params.upscaler = evo_agc_upscale_label();
+    /* #105: motion smoothing */
+    params.motion_smoothing = evo_agc_motion_smoothing_label();
     params.decoder = decoderBadge;
 
     evo_rmlui_update_mediainfo(&params);

@@ -307,6 +307,8 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.decoder_badge = p->decoder_badge ? p->decoder_badge : "";
     state.upscale_badge = p->upscale_badge ? p->upscale_badge : "";
     state.upscale_active = (p->upscale_active != 0);
+    state.smooth_badge = p->smooth_badge ? p->smooth_badge : "";
+    state.smooth_active = (p->smooth_active != 0);
     state.position_sec = p->position_sec;
     state.duration_sec = p->duration_sec;
     state.percentage = p->percentage;
@@ -515,6 +517,7 @@ void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
     state.output = p->output ? p->output : "";
     state.renderer = p->renderer ? p->renderer : "";
     state.upscaler = p->upscaler ? p->upscaler : "";
+    state.motion_smoothing = p->motion_smoothing ? p->motion_smoothing : "";
     state.decoder = p->decoder ? p->decoder : "";
 
     EvoRmlApp::Instance().UpdateMediaInfoState(state);

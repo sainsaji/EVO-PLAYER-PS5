@@ -99,6 +99,14 @@ enum class AiNetwork : int {
     Maximum = 3     // Anime4K UL - sized for a PS5 Pro
 };
 
+// Frame interpolation / motion smoothing (24 -> 60 fps) (#105). Values match
+// EVO_AGC_MOTION_SMOOTH_* in evo_agc_runtime.h.
+enum class MotionSmoothing : int {
+    Off = 0,
+    Low = 1,    // blend-weighted version with fewer artifacts
+    High = 2    // full motion-vector warp
+};
+
 // Refresh rate output mode (60 Hz vs 120 Hz)
 enum class RefreshRateMode : int {
     Off = 0,
