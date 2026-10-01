@@ -89,6 +89,7 @@ struct EvoProviderModel {
      * work this out from the rows (RCSS data expressions cannot aggregate) and
      * every catalog UI wants to word itself differently for the two. */
     bool is_folder_level = false;
+    bool in_folder = false;     /* below the root: an empty level is "no channels", not setup */
     int  count = 0;
     std::vector<EvoProviderRow> rows;
 
@@ -275,6 +276,21 @@ private:
      * the data-for elements, which is why it is a flag and not a call.
      */
     bool m_needs_initial_focus = false;
+
+    /*
+     * Which card that seeded focus lands on: 0 for a level just opened, the
+     * remembered card on Back / reload / page flip. Seeding by KI_TAB alone
+     * moved focus one card PAST the one data-for had recycled - so a group
+     * opened from slot 5 started on its 7th channel, and a group with fewer
+     * channels than that started on the WATCH button or nowhere, D-pad dead.
+     */
+    int m_focus_slot = 0;
+    bool SeedFocus();
+
+    /* Offset + card of every level above this one, so Back lands where the
+     * user left, not on the first card of page 1. Parallel to m_stack. */
+    struct LevelPos { size_t offset; int slot; };
+    std::vector<LevelPos> m_pos_stack;
 
     /*
      * A row the user activated, waiting for Tick() to act on it.

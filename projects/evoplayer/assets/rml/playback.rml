@@ -118,11 +118,11 @@
                 <div class="glyph-badge"><img src="icons/btn_cross.png" class="glyph-badge-img"/></div>
                 <span id="label-playpause" class="control-label">PAUSE</span>
             </div>
-            <div class="control-item">
+            <div class="control-item" id="item-seek">
                 <div class="glyph-badge"><img src="icons/btn_dpad.png" class="glyph-badge-img"/></div>
                 <span class="control-label">SEEK 10s</span>
             </div>
-            <div class="control-item">
+            <div class="control-item" id="item-chapter">
                 <span class="btn-tag">L1 / R1</span>
                 <span class="control-label">CHAPTER</span>
             </div>
@@ -130,7 +130,7 @@
                 <span class="btn-tag">R2</span>
                 <span id="label-audio" class="control-label">AUDIO: Stereo</span>
             </div>
-            <div class="control-item">
+            <div class="control-item" id="item-subs">
                 <span class="btn-tag">UP / DN</span>
                 <span id="label-subs" class="control-label">SUBS: None</span>
             </div>

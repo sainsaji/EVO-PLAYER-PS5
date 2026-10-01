@@ -315,6 +315,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.audio_track = p->audio_track ? p->audio_track : "";
     state.sub_track = p->sub_track ? p->sub_track : "";
     state.sub_delay_ms = p->sub_delay_ms;
+    state.is_live = (p->is_live != 0);
     state.view_mode = p->view_mode;
     state.show_stats = (p->show_stats != 0);
     state.alpha = p->alpha;

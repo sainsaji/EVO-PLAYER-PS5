@@ -45,7 +45,19 @@
             <!-- Start / Empty State -->
             <div id="tv-empty" data-if="empty && !loading">
                 <!-- Two clear options from start when no query is active -->
-                <div id="tv-setup" data-if="query == ''">
+                <!-- An empty GROUP (e.g. no favourites yet): say so. The setup
+                     cards here would let X reconfigure the playlist from
+                     inside a folder. -->
+                <div id="tv-search-empty" data-if="query == '' && in_folder">
+                    <div id="tv-empty-icon-box">
+                        <img id="tv-empty-icon" src="/assets/icons/icon_tv.png"/>
+                    </div>
+                    <div id="tv-empty-title">NO CHANNELS HERE</div>
+                    <div id="tv-empty-hint">This group is empty</div>
+                    <div id="tv-empty-subhint">Press Circle to go back</div>
+                </div>
+
+                <div id="tv-setup" data-if="query == '' && !in_folder">
                     <div id="tv-setup-header">
                         <div id="tv-setup-badge">
                             <img id="tv-setup-badge-icon" src="/assets/icons/icon_tv.png"/>

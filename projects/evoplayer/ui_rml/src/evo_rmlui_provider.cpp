@@ -174,6 +174,7 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("has_error",     &m_model.has_error);
     c.Bind("empty",         &m_model.empty);
     c.Bind("is_folder_level", &m_model.is_folder_level);
+    c.Bind("in_folder",     &m_model.in_folder);
     c.Bind("count",         &m_model.count);
     c.Bind("rows",          &m_model.rows);
 
@@ -403,6 +404,7 @@ bool EvoRmlProviderHost::Open(const char* provider_id, int width, int height)
     m_provider_id = provider_id;
     m_using_fallback = false;
     m_stack.clear();
+    m_pos_stack.clear();
     m_crumbs.clear();
     m_page = 0;
     m_has_more = false;
@@ -527,6 +529,7 @@ void EvoRmlProviderHost::Close()
     m_provider = nullptr;
     m_provider_id.clear();
     m_stack.clear();
+    m_pos_stack.clear();
     m_crumbs.clear();
     m_art_urls.clear();
     m_art_keys.clear();
@@ -723,7 +726,11 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
      * to agree keeps a provider that does mix them from flipping the header. */
     m_model.is_folder_level = !m_all_rows.empty() && m_all_rows[0].is_folder;
 
-    if (m_saved_offset > 0) {
+    m_model.in_folder = !m_stack.empty();
+    if (m_model_handle) m_model_handle.DirtyVariable("in_folder");
+
+    m_focus_slot = 0;
+    if (m_saved_offset > 0 || m_saved_slot > 0) {
         size_t off = m_saved_offset;
         int slot = m_saved_slot;
         m_saved_offset = 0;
@@ -903,7 +910,10 @@ void EvoRmlProviderHost::SetPageOffset(size_t new_offset, int target_slot)
         if (target_slot >= (int)m_model.rows.size()) {
             target_slot = (int)m_model.rows.size() - 1;
         }
-        FocusPublishedRow(target_slot);
+        /* The cards for the new page do not exist until the next
+         * Context::Update(), so focusing one now would hit the old page. */
+        m_focus_slot = target_slot < 0 ? 0 : target_slot;
+        m_needs_initial_focus = true;
     }
     UpdateSelectedPreview();
 }
@@ -969,35 +979,44 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
 
 bool EvoRmlProviderHost::FocusPublishedRow(int local_idx)
 {
-    if (!m_context || local_idx < 0) return false;
+    if (!m_doc || local_idx < 0) return false;
 
-    /* The cards are the siblings data-for instanced, so walk up from whatever
-     * has focus to the card, then index its parent's children. Only those
-     * carrying `rowid` count - the parent also holds data-for's own template
-     * element and whatever else the bundle put beside the list. */
-    Rml::Element* focused = m_context->GetFocusElement();
-    Rml::Element* card = nullptr;
-    for (Rml::Element* e = focused; e; e = e->GetParentNode()) {
-        if (!e->GetAttribute<Rml::String>("rowid", Rml::String()).empty()) {
-            card = e;
-            break;
-        }
-    }
-    if (!card) return false;
-
-    Rml::Element* parent = card->GetParentNode();
-    if (!parent) return false;
-
-    int seen = 0;
-    for (int i = 0; i < parent->GetNumChildren(); ++i) {
-        Rml::Element* child = parent->GetChild(i);
-        if (child->GetAttribute<Rml::String>("rowid", Rml::String()).empty())
+    /* The cards are whatever data-for instanced with a `rowid`, in document
+     * order - found from the document, not from the focused element, which
+     * may be the WATCH button or nothing at all. data-for's template element
+     * has no bound rowid, so it never counts. */
+    std::vector<Rml::Element*> cards;
+    std::vector<Rml::Element*> todo{m_doc};
+    while (!todo.empty()) {
+        Rml::Element* e = todo.back();
+        todo.pop_back();
+        if (!e->GetAttribute<Rml::String>("rowid", Rml::String()).empty() && e->IsVisible()) {
+            cards.push_back(e);
             continue;
-        if (seen++ != local_idx) continue;
-        child->Focus();
-        m_dirty = true;
+        }
+        for (int i = e->GetNumChildren() - 1; i >= 0; --i)
+            todo.push_back(e->GetChild(i));
+    }
+    if (cards.empty()) return false;
+    if (local_idx >= (int)cards.size()) local_idx = (int)cards.size() - 1;
+    cards[local_idx]->Focus();
+    m_dirty = true;
+    return true;
+}
+
+/* Focus m_focus_slot's card; a level with no cards (setup, empty) falls back
+ * to KI_TAB so its own controls still get focus. Call after Context::Update(). */
+bool EvoRmlProviderHost::SeedFocus()
+{
+    m_needs_initial_focus = false;
+    const int slot = m_focus_slot;
+    m_focus_slot = 0;
+    if (FocusPublishedRow(slot)) {
+        UpdateSelectedPreview();
         return true;
     }
+    m_context->ProcessKeyDown(Rml::Input::KI_TAB, 0);
+    m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
     return false;
 }
 
@@ -1121,6 +1140,16 @@ bool EvoRmlProviderHost::HandleKey(Key k)
 
         /* Deterministic 2x4 grid paging for Up/Down */
         if (idx >= 0 && k == KeyDown) {
+            const int n = (int)m_model.rows.size();
+            /* Top row over a SHORT bottom row (6 cards, focus on column 3):
+             * nothing sits directly below, so take the last card rather than
+             * swallowing the press. */
+            if (idx < 4 && idx + 4 >= n && n > 4) {
+                FocusPublishedRow(n - 1);
+                m_dirty = true;
+                UpdateSelectedPreview();
+                return true;
+            }
             /* If on the bottom row (slot >= 4 or slot + 4 exceeds visible cards), press Down flips page */
             if (idx >= 4 || idx + 4 >= (int)m_model.rows.size()) {
                 if (m_row_offset + EVO_PROVIDER_PAGE_SIZE < m_all_rows.size()) {
@@ -1153,10 +1182,8 @@ bool EvoRmlProviderHost::HandleKey(Key k)
          * otherwise this direction is swallowed and the screen reads as hung
          * for one press. */
         if (m_needs_initial_focus) {
-            m_needs_initial_focus = false;
             m_context->Update();
-            m_context->ProcessKeyDown(Rml::Input::KI_TAB, 0);
-            m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
+            SeedFocus();
         }
 
         Rml::Element* before = m_context->GetFocusElement();
@@ -1204,6 +1231,11 @@ bool EvoRmlProviderHost::HandleKey(Key k)
         if (!m_stack.empty()) {
             m_stack.pop_back();
             if (!m_crumbs.empty()) m_crumbs.pop_back();
+            if (!m_pos_stack.empty()) {
+                m_saved_offset = m_pos_stack.back().offset;
+                m_saved_slot = m_pos_stack.back().slot;
+                m_pos_stack.pop_back();
+            }
             m_page = 0;
             RequestPage(m_stack.empty() ? "" : m_stack.back().c_str(), 0);
             return true;
@@ -1307,6 +1339,7 @@ void EvoRmlProviderHost::ApplyPendingActivation()
             m_provider->set_source(hit->id.c_str());
             evo_provider_set_enabled(m_provider_id.c_str(), 1);
             m_stack.clear();
+            m_pos_stack.clear();
             m_crumbs.clear();
             m_page = 0;
             RequestPage("", 0);
@@ -1319,6 +1352,7 @@ void EvoRmlProviderHost::ApplyPendingActivation()
              hit->title.c_str());
 
     if (hit->is_folder) {
+        m_pos_stack.push_back({m_row_offset, hit->index});
         m_stack.push_back(std::string(hit->id.c_str()));
         m_crumbs.push_back(std::string(hit->title.c_str()));
         m_page = 0;
@@ -1385,9 +1419,7 @@ void EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
      * rather than the next one.
      */
     if (m_needs_initial_focus) {
-        m_needs_initial_focus = false;
-        m_context->ProcessKeyDown(Rml::Input::KI_TAB, 0);
-        m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
+        SeedFocus();
         m_context->Update();
     }
 
@@ -1409,6 +1441,7 @@ void EvoRmlProviderHost::ShowUsbPlaylists(const std::vector<std::string>& paths)
     m_all_rows.clear();
     m_model.rows.clear();
     m_stack.clear();
+    m_pos_stack.clear();
     m_crumbs.clear();
     m_art_urls.clear();
     m_art_keys.clear();
@@ -1463,6 +1496,7 @@ void EvoRmlProviderHost::ShowSetupScreen()
 {
     m_saved_usb_playlists.clear();
     m_stack.clear();
+    m_pos_stack.clear();
     m_crumbs.clear();
     m_all_rows.clear();
     m_model.rows.clear();
@@ -1560,7 +1594,7 @@ void evo_rmlui_provider_clear_frame(void)
 
 int evo_rmlui_provider_key(int key)
 {
-    if (key < EvoRmlProviderHost::KeyUp || key > EvoRmlProviderHost::KeySearch)
+    if (key < EvoRmlProviderHost::KeyUp || key > EvoRmlProviderHost::KeyPageDown)
         return 0;
     return EvoRmlProviderHost::Instance().HandleKey(
                (EvoRmlProviderHost::Key)key) ? 1 : 0;

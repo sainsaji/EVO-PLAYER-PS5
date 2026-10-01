@@ -2826,6 +2826,21 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
         el_subs->SetInnerRML(s_txt);
     }
 
+    /* Live TV: there is no timeline to show or seek through, and no chapters.
+     * The meta line already reads LIVE. SUBS stays only if the stream has
+     * subtitles to turn on. */
+    {
+        const bool no_subs = state.sub_track.empty() || state.sub_track == "None";
+        const char* live_off = state.is_live ? "none" : "flex";
+        static const char* const k_vod_only[] = {
+            "item-seek", "item-chapter", "progress-container", "time-row" };
+        for (const char* id : k_vod_only)
+            if (Rml::Element* e = m_playback_doc->GetElementById(id))
+                e->SetProperty("display", live_off);
+        if (Rml::Element* e = m_playback_doc->GetElementById("item-subs"))
+            e->SetProperty("display", (state.is_live && no_subs) ? "none" : "flex");
+    }
+
     Rml::Element* el_subsync_item = m_playback_doc->GetElementById("item-subsync");
     Rml::Element* el_subsync = m_playback_doc->GetElementById("label-subsync");
     if (el_subsync_item && el_subsync) {

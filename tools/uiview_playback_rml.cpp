@@ -814,6 +814,23 @@ static void render_playback_screen(std::vector<uint32_t>& fb, int width, int hei
     evo_rmlui_render_playback_osd(fb.data(), width, height);
     save_bmp_24("output/uiview/rml_playback_paused.bmp", fb.data(), width, height);
 
+    /* Live TV: no timeline, seek, chapters, or SUBS when there are none. */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_playback_osd_params_t pl = p;
+        pl.title = "NDTV 24x7 (1080p)";
+        pl.metadata = "LIVE";
+        pl.is_live = 1;
+        pl.paused = 0;
+        pl.sub_track = "";
+        pl.subtitle_text = "";
+        pl.duration_sec = 0;
+        evo_rmlui_update_playback_params(&pl);
+        evo_rmlui_render_playback_osd(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_playback_live.bmp", fb.data(), width, height);
+        evo_rmlui_update_playback_params(&p);
+    }
+
     /* #81 / #63: diagnostic HUD with live-ish telemetry graphs. */
     std::fill(fb.begin(), fb.end(), 0xFF06090E);
     evo_playback_osd_params_t ps = p;
@@ -1789,6 +1806,68 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
     hide_nav();
 }
 
+/*
+ * EVO_UIVIEW_IPTV_SWEEP=<playlist.m3u>: open EVERY root row of a real playlist
+ * and drive the same D-pad script inside each, printing where focus lands
+ * after every press. Navigation bugs that only some groups hit (size, page
+ * count, a partial last page) show up as a line that stops moving, jumps, or
+ * loses focus - none of which a screenshot shows.
+ */
+static std::string sweep_focus() {
+    const char* id = evo_rmlui_provider_get_focused_id();
+    const char* t = evo_rmlui_provider_get_focused_title();
+    std::string s = (id && *id) ? id : "-";
+    if (t && *t) { s += "|"; s += std::string(t).substr(0, 18); }
+    return s;
+}
+
+static int sweep_iptv(std::vector<uint32_t>& fb, int width, int height, const char* playlist) {
+    const char* root = std::getenv("EVO_DATA_DIR_OVERRIDE");
+    if (!root || !*root) { std::cerr << "sweep: EVO_DATA_DIR_OVERRIDE unset\n"; return 1; }
+    char conf[768];
+    std::snprintf(conf, sizeof conf, "%s/iptv.conf", root);
+    if (FILE* f = std::fopen(conf, "w")) { std::fprintf(f, "playlist=%s\n", playlist); std::fclose(f); }
+    if (evo_provider_mgr_init() <= 0) { std::cerr << "sweep: no providers\n"; return 1; }
+    evo_provider_mgr_rebind();
+    evo_provider_set_enabled("iptv", 1);
+
+    auto key = [&](int k) { int r = evo_rmlui_provider_key(k); pump_provider(fb, width, height, 2); return r; };
+    const char* names[] = {"U", "D", "L", "R", "X", "O", "S", "L1", "R1"};
+
+    /* EVO_UIVIEW_IPTV_SWEEP_ROWS=0,3,8: only those root rows (a full sweep of
+     * a big playlist is ~1 min per group on the CPU rasteriser). */
+    std::vector<int> only;
+    if (const char* rows = std::getenv("EVO_UIVIEW_IPTV_SWEEP_ROWS"))
+        for (const char* q = rows; *q; ) { only.push_back(std::atoi(q)); while (*q && *q != ',') ++q; if (*q) ++q; }
+    for (int target = 0; target < 64; ++target) {
+        if (!only.empty() && std::find(only.begin(), only.end(), target) == only.end()) continue;
+        if (!evo_rmlui_provider_open("iptv", width, height)) { std::cerr << "sweep: open failed\n"; return 1; }
+        pump_provider(fb, width, height, 30);
+        /* Reach root row `target`: Down moves a row of 4 (and flips pages at
+         * the bottom row), Right moves a column. */
+        for (int i = 0; i < target / 4; ++i) key(1);
+        for (int i = 0; i < target % 4; ++i) key(3);
+        std::string at = sweep_focus();
+        if (at == "-" || evo_rmlui_provider_get_focused_is_folder() == 0) {
+            std::cout << "root[" << target << "] end of root (" << at << ")\n";
+            evo_rmlui_provider_close();
+            break;
+        }
+        key(4);
+        pump_provider(fb, width, height, 20);
+        std::cout << "root[" << target << "] " << at << " -> " << sweep_focus() << "\n  ";
+        static const int script[] = {3,3,3,3, 1,1,1, 2,2,2, 0,0,0, 8,8,7,7, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 0,0,0,0,0,0, 5};
+        for (int k : script) {
+            int consumed = key(k);
+            std::cout << names[k] << (consumed ? "" : "!") << ">" << sweep_focus() << " ";
+        }
+        std::cout << "\n";
+        evo_rmlui_provider_close();
+    }
+    evo_provider_mgr_shutdown();
+    return 0;
+}
+
 static void render_stress_screens(std::vector<uint32_t>& fb, int width, int height) {
     /* Player OSD: 55-char title + 76-char metadata must ellipsise, never
      * collide with the badge rack. */
@@ -2134,6 +2213,12 @@ int main(int argc, char** argv) {
     if (!evo_rmlui_init(width, height)) {
         std::cerr << "Failed to initialize RmlUi playback engine!" << std::endl;
         return 1;
+    }
+
+    if (const char* pl = std::getenv("EVO_UIVIEW_IPTV_SWEEP")) {
+        int rc = sweep_iptv(fb, width, height, pl);
+        evo_rmlui_shutdown();
+        return rc;
     }
 
     if (const char* only = std::getenv("EVO_UIVIEW_ONLY")) {

@@ -170,6 +170,11 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
                            playback->getViewMode() == ViewMode::Fill ? "FILL" : "STRETCH");
         return true;
     }
+    /* Live TV has no timeline: seek and chapter keys are swallowed, not sent
+     * to a demuxer that has nothing behind the live edge. */
+    if (playback->isLiveSource() &&
+        (pressed & (PadButtons::L1 | PadButtons::R1 | PadButtons::Left | PadButtons::Right)))
+        return true;
     if (pressed & PadButtons::L1) {
         playback->jumpChapter(-1);
         return true;
@@ -536,9 +541,10 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                     sst ? av_dict_get(sst->metadata, "language", nullptr, 0) : nullptr;
                 std::snprintf(subTrackBuf, sizeof(subTrackBuf), "%s",
                               (lang && lang->value && lang->value[0]) ? lang->value : "On");
-            } else {
-                std::snprintf(subTrackBuf, sizeof(subTrackBuf), "On");
             }
+            /* Enabled but nothing to show (no external file, no embedded
+             * track): leave it empty, so the OSD says None - and hides SUBS
+             * and SYNC on live TV - instead of claiming subtitles are On. */
         }
 
         // #110: name the secondary track next to the primary's.
@@ -577,6 +583,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.audio_track = audioTrackBuf[0] ? audioTrackBuf : "";
         p.sub_track   = subTrackBuf[0]   ? subTrackBuf   : "";
         p.sub_delay_ms = prospero_subtitle_enabled ? prospero_subtitle_delay_ms : 0;
+        p.is_live = playback->isLiveSource() ? 1 : 0;
         p.audio_badge = chLabel[0] ? chLabel : ((evo_audio_channels == 8) ? "7.1" : "STEREO");
         p.decoder_badge = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE) ? "Hardware" : "Software";
         /* #103: what the upscaler did to the last frame, so it is visible on the

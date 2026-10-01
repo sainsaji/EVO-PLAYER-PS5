@@ -31,6 +31,8 @@ typedef struct {
     const char* audio_track;
     const char* sub_track;
     int sub_delay_ms;
+    /* A live stream: no timeline, no seek, no chapters - the OSD hides them. */
+    int is_live;
     int view_mode;
     int show_stats;
     int alpha;
