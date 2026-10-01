@@ -451,10 +451,153 @@ static void test_changelog_model_integrity(void)
  * ========================================================================== */
 
 /* ==========================================================================
- * Mock Drawing Vtable for Host UI Tests
+ * 8. IPTV Provider Catalog, Stream Resolution & EPG Display Tests
  * ========================================================================== */
 
-;
+typedef struct {
+    int count;
+    evo_provider_item_t items[16];
+    char resolved_url[256];
+} test_iptv_ctx_t;
+
+static void on_test_iptv_items(int ok, const evo_provider_item_t *items, int count, int has_more, void *ud)
+{
+    (void)has_more;
+    test_iptv_ctx_t *ctx = (test_iptv_ctx_t *)ud;
+    if (ok && items && count > 0) {
+        ctx->count = count;
+        int n = count < 16 ? count : 16;
+        for (int i = 0; i < n; i++) {
+            ctx->items[i] = items[i];
+        }
+    }
+}
+
+static void on_test_iptv_resolve(int ok, const evo_stream_choice_t *choices, int count, void *ud)
+{
+    test_iptv_ctx_t *ctx = (test_iptv_ctx_t *)ud;
+    if (ok && choices && count > 0) {
+        snprintf(ctx->resolved_url, sizeof(ctx->resolved_url), "%s", choices[0].url);
+    }
+}
+
+static void test_iptv_provider_catalog_and_epg(void)
+{
+    TEST_START("IPTV Provider: Catalog, EPG Formats & Stream Resolution");
+
+    const evo_provider_t *p = evo_provider_find("iptv");
+    TEST_ASSERT(p != NULL, "IPTV provider not found in registry");
+    TEST_ASSERT(p->caps & EVO_PROVIDER_CAP_LIVE, "IPTV missing LIVE cap");
+    TEST_ASSERT(p->caps & EVO_PROVIDER_CAP_CATALOG, "IPTV missing CATALOG cap");
+    TEST_ASSERT(p->caps & EVO_PROVIDER_CAP_RESOLVE, "IPTV missing RESOLVE cap");
+
+    /* Create sample M3U file with multiple channel formats */
+    const char *test_m3u_path = "/tmp/test_iptv_sample.m3u";
+    FILE *f = fopen(test_m3u_path, "w");
+    TEST_ASSERT(f != NULL, "Failed to create test M3U file");
+    fprintf(f, "#EXTM3U\n");
+    fprintf(f, "#EXTINF:-1,20:00 | ATLETICO TORQUE X PENAROL\n");
+    fprintf(f, "http://stream.test/live/event1\n");
+    fprintf(f, "#EXTINF:-1,24H ARCHIVE 81\n");
+    fprintf(f, "http://stream.test/live/24h1\n");
+    fprintf(f, "#EXTINF:-1 tvg-id=\"br#gloob-hd\",GLOOB HD\n");
+    fprintf(f, "http://stream.test/live/gloob\n");
+    fprintf(f, "#EXTINF:-1,A&E HD\n");
+    fprintf(f, "http://stream.test/live/ae\n");
+    fclose(f);
+
+    /* Initialize provider and set local playlist */
+    TEST_ASSERT(p->init() == 0, "IPTV provider init failed");
+    TEST_ASSERT(p->set_source(test_m3u_path) == 0, "IPTV provider set_source failed");
+    TEST_ASSERT(p->is_configured() == 1, "IPTV provider reports not configured");
+
+    /* List catalog */
+    test_iptv_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    int rc = p->list_catalog(NULL, 0, on_test_iptv_items, &ctx);
+    TEST_ASSERT(rc == 0, "list_catalog returned error");
+    TEST_ASSERT(ctx.count >= 4, "Expected at least 4 channels");
+
+    /* Verify channel items and subtitles */
+    int found_event = 0, found_24h = 0, found_gloob = 0, found_ae = 0;
+    for (int i = 0; i < ctx.count; i++) {
+        if (strstr(ctx.items[i].title, "ATLETICO TORQUE")) {
+            found_event = 1;
+            TEST_ASSERT(strstr(ctx.items[i].subtitle, "Live Event • 20:00") != NULL, "Event subtitle mismatch");
+            TEST_ASSERT(strstr(ctx.items[i].now_title, "ATLETICO TORQUE") != NULL, "Event now_title mismatch");
+        } else if (strstr(ctx.items[i].title, "24H ARCHIVE 81")) {
+            found_24h = 1;
+            TEST_ASSERT(strstr(ctx.items[i].subtitle, "24/7 Series Marathon") != NULL, "24H subtitle mismatch");
+            TEST_ASSERT(strstr(ctx.items[i].now_title, "24/7 ARCHIVE 81") != NULL, "24H now_title mismatch");
+        } else if (strstr(ctx.items[i].title, "GLOOB HD")) {
+            found_gloob = 1;
+        } else if (strstr(ctx.items[i].title, "A&E HD")) {
+            found_ae = 1;
+        }
+    }
+    TEST_ASSERT(found_event, "Event channel not found in catalog");
+    TEST_ASSERT(found_24h, "24H channel not found in catalog");
+    TEST_ASSERT(found_gloob, "GLOOB channel not found in catalog");
+    TEST_ASSERT(found_ae, "A&E channel not found in catalog");
+
+    /* Resolve first playable channel to stream URL */
+    int ch_idx = -1;
+    for (int i = 0; i < ctx.count; i++) {
+        if (!ctx.items[i].is_folder) {
+            ch_idx = i;
+            break;
+        }
+    }
+    TEST_ASSERT(ch_idx >= 0, "No playable channel found in catalog");
+    p->resolve(ctx.items[ch_idx].id, on_test_iptv_resolve, &ctx);
+    TEST_ASSERT(strlen(ctx.resolved_url) > 0, "Failed to resolve channel stream URL");
+    TEST_ASSERT(strstr(ctx.resolved_url, "http://stream.test/live/") != NULL, "Resolved stream URL mismatch");
+
+    /* Feed XMLTV EPG data and verify NOW title and subtitle updates */
+    const char *sample_xmltv =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<tv>\n"
+        "  <channel id=\"br#gloob-hd\">\n"
+        "    <display-name>GLOOB HD</display-name>\n"
+        "  </channel>\n"
+        "  <channel id=\"Ae.br\">\n"
+        "    <display-name>A&amp;E HD</display-name>\n"
+        "  </channel>\n"
+        "  <programme start=\"20200101000000 +0000\" stop=\"20350101000000 +0000\" channel=\"br#gloob-hd\">\n"
+        "    <title>Miraculous - As Aventuras de Ladybug</title>\n"
+        "  </programme>\n"
+        "  <programme start=\"20200101000000 +0000\" stop=\"20350101000000 +0000\" channel=\"Ae.br\">\n"
+        "    <title>Acumuladores Compulsivos</title>\n"
+        "  </programme>\n"
+        "</tv>\n";
+
+    TEST_ASSERT(provider_iptv_feed_xmltv(sample_xmltv, strlen(sample_xmltv)) == 0, "Feed XMLTV failed");
+
+    /* Re-list catalog and verify that NOW title and EPG subtitles are set */
+    memset(&ctx, 0, sizeof(ctx));
+    rc = p->list_catalog(NULL, 0, on_test_iptv_items, &ctx);
+    TEST_ASSERT(rc == 0, "list_catalog re-list returned error");
+
+    int verified_gloob_epg = 0, verified_ae_epg = 0;
+    for (int i = 0; i < ctx.count; i++) {
+        if (strstr(ctx.items[i].title, "GLOOB HD")) {
+            TEST_ASSERT(strstr(ctx.items[i].now_title, "Miraculous") != NULL, "GLOOB now_title EPG mismatch");
+            TEST_ASSERT(strstr(ctx.items[i].subtitle, "Miraculous") != NULL, "GLOOB subtitle EPG mismatch");
+            verified_gloob_epg = 1;
+        } else if (strstr(ctx.items[i].title, "A&E HD")) {
+            TEST_ASSERT(strstr(ctx.items[i].now_title, "Acumuladores") != NULL, "A&E now_title EPG mismatch");
+            TEST_ASSERT(strstr(ctx.items[i].subtitle, "Acumuladores") != NULL, "A&E subtitle EPG mismatch");
+            verified_ae_epg = 1;
+        }
+    }
+    TEST_ASSERT(verified_gloob_epg, "GLOOB EPG not verified");
+    TEST_ASSERT(verified_ae_epg, "A&E EPG not verified");
+
+    p->shutdown();
+    remove(test_m3u_path);
+
+    TEST_PASS();
+}
 
 /* ==========================================================================
  * Main Test Runner Entrypoint
@@ -473,6 +616,7 @@ int main(void)
     test_provider_url_escape();
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
+    test_iptv_provider_catalog_and_epg();
     
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

@@ -393,6 +393,9 @@ void evo_provider_stream_choice_clear(evo_stream_choice_t *c);
  */
 int  evo_provider_url_escape(const char *in, char *out, size_t out_sz);
 
+/* Feed XMLTV EPG data directly to IPTV provider */
+int  provider_iptv_feed_xmltv(const char *body, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

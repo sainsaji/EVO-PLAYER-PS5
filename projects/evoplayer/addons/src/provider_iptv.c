@@ -805,6 +805,22 @@ static int channel_name_match(const char *a, const char *b)
     return (!*pa && !*pb);
 }
 
+#define XMLTV_HASH_SIZE 4096
+
+static uint32_t xmltv_hash_str(const char *s)
+{
+    uint32_t h = 5381;
+    while (*s) {
+        h = ((h << 5) + h) + (unsigned char)(*s++);
+    }
+    return h;
+}
+
+typedef struct ch_hash_node {
+    int ch_idx;
+    struct ch_hash_node *next;
+} ch_hash_node_t;
+
 static void parse_xmltv(const char *body, size_t len)
 {
     if (!G.loaded || G.ch_count == 0) return;
@@ -882,12 +898,35 @@ static void parse_xmltv(const char *body, size_t len)
     PROV_LOG("iptv: XMLTV pass 1 mapped %d/%d channels by display-name/id", mapped_count, G.ch_count);
 
     /*
+     * Build hash lookup table for fast programme channel matching
+     */
+    ch_hash_node_t **hash_table = (ch_hash_node_t **)calloc(XMLTV_HASH_SIZE, sizeof(ch_hash_node_t *));
+    ch_hash_node_t *node_pool = (ch_hash_node_t *)malloc((size_t)(G.ch_count * 2) * sizeof(ch_hash_node_t));
+    int pool_idx = 0;
+
+    if (hash_table && node_pool) {
+        for (int i = 0; i < G.ch_count; i++) {
+            if (G.ch[i].tvg_id && G.ch[i].tvg_id[0]) {
+                uint32_t h = xmltv_hash_str(G.ch[i].tvg_id) % XMLTV_HASH_SIZE;
+                ch_hash_node_t *node = &node_pool[pool_idx++];
+                node->ch_idx = i;
+                node->next = hash_table[h];
+                hash_table[h] = node;
+            }
+        }
+    }
+
+    /*
      * Pass 2: Parse <programme> elements.
      * Matches programme channel to G.ch[i].tvg_id or G.ch[i].name.
      */
     int64_t now = (int64_t)time(NULL);
     int64_t *next_start = (int64_t *)calloc((size_t)G.ch_count, sizeof(int64_t));
-    if (!next_start) return;
+    if (!next_start) {
+        free(hash_table);
+        free(node_pool);
+        return;
+    }
 
     const char *p = body;
     int progs_found = 0;
@@ -927,23 +966,41 @@ static void parse_xmltv(const char *body, size_t len)
             }
 
             if (title[0] && ts > 0) {
-                for (int i = 0; i < G.ch_count; ++i) {
-                    int match = (G.ch[i].tvg_id[0] && strcmp(G.ch[i].tvg_id, chan) == 0);
-                    if (!match && G.ch[i].name[0]) {
-                        match = channel_name_match(G.ch[i].name, chan);
+                int matched = 0;
+                if (hash_table) {
+                    uint32_t h = xmltv_hash_str(chan) % XMLTV_HASH_SIZE;
+                    for (ch_hash_node_t *cur = hash_table[h]; cur; cur = cur->next) {
+                        int i = cur->ch_idx;
+                        if (strcmp(G.ch[i].tvg_id, chan) == 0) {
+                            matched = 1;
+                            progs_found++;
+                            if (ts <= now && now < te) {
+                                free(G.ch[i].now);
+                                G.ch[i].now = dup_str(title);
+                            } else if (ts > now &&
+                                       (next_start[i] == 0 || ts < next_start[i])) {
+                                next_start[i] = ts;
+                                free(G.ch[i].next);
+                                G.ch[i].next = dup_str(title);
+                            }
+                        }
                     }
-                    if (!match) continue;
-                    progs_found++;
-                    if (ts <= now && now < te) {
-                        free(G.ch[i].now);
-                        G.ch[i].now = dup_str(title);
-                    } else if (ts > now &&
-                               (next_start[i] == 0 || ts < next_start[i])) {
-                        next_start[i] = ts;
-                        free(G.ch[i].next);
-                        G.ch[i].next = dup_str(title);
+                }
+                if (!matched) {
+                    for (int i = 0; i < G.ch_count; ++i) {
+                        if (G.ch[i].name[0] && channel_name_match(G.ch[i].name, chan)) {
+                            progs_found++;
+                            if (ts <= now && now < te) {
+                                free(G.ch[i].now);
+                                G.ch[i].now = dup_str(title);
+                            } else if (ts > now &&
+                                       (next_start[i] == 0 || ts < next_start[i])) {
+                                next_start[i] = ts;
+                                free(G.ch[i].next);
+                                G.ch[i].next = dup_str(title);
+                            }
+                        }
                     }
-                    break;
                 }
             }
         }
@@ -951,6 +1008,8 @@ static void parse_xmltv(const char *body, size_t len)
         p = close ? close + 12 : end;
     }
 
+    free(hash_table);
+    free(node_pool);
     free(next_start);
     G.epg_loaded = 1;
     PROV_LOG("iptv: XMLTV pass 2 matched %d programmes", progs_found);
@@ -1004,14 +1063,28 @@ static void fill_channel_item(evo_provider_item_t *it, int i, const char *parent
             snprintf(it->subtitle, sizeof it->subtitle, "%s | Next: %s", G.ch[i].now, G.ch[i].next);
         else
             snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].now);
-    } else if (G.ch[i].group && G.ch[i].group[0]) {
+    } else if (strncasecmp(G.ch[i].name, "24H ", 4) == 0) {
+        snprintf(it->now_title, sizeof it->now_title, "24/7 %s", G.ch[i].name + 4);
+        snprintf(it->subtitle, sizeof it->subtitle, "24/7 Series Marathon");
+    } else if (strstr(G.ch[i].name, " | ")) {
+        const char *bar = strstr(G.ch[i].name, " | ");
+        snprintf(it->now_title, sizeof it->now_title, "%s", bar + 3);
+        snprintf(it->subtitle, sizeof it->subtitle, "Live Event • %.*s", (int)(bar - G.ch[i].name), G.ch[i].name);
+    } else if (G.ch[i].group && G.ch[i].group[0] && strcmp(G.ch[i].group, "Ungrouped") != 0) {
         if (G.ch[i].lang && G.ch[i].lang[0])
             snprintf(it->subtitle, sizeof it->subtitle, "[%s] %s", G.ch[i].lang, G.ch[i].group);
         else
             snprintf(it->subtitle, sizeof it->subtitle, "%s", G.ch[i].group);
     } else if (G.ch[i].lang && G.ch[i].lang[0]) {
-        snprintf(it->subtitle, sizeof it->subtitle, "[%s]", G.ch[i].lang);
+        snprintf(it->subtitle, sizeof it->subtitle, "[%s] Live Broadcast", G.ch[i].lang);
+    } else {
+        snprintf(it->subtitle, sizeof it->subtitle, "Live Broadcast");
     }
+
+    xml_decode_entities(it->title);
+    xml_decode_entities(it->now_title);
+    xml_decode_entities(it->next_title);
+    xml_decode_entities(it->subtitle);
 
     it->kind = EVO_MEDIA_STREAM;
     it->is_live = 1;
@@ -1199,13 +1272,74 @@ static void on_epg(int success, int status, const char *body, size_t len, void *
     }
 }
 
+int provider_iptv_feed_xmltv(const char *body, size_t len)
+{
+    if (!body || !len) return -1;
+    parse_xmltv(body, len);
+    if (evo_rmlui_provider_reload) {
+        evo_rmlui_provider_reload();
+    }
+    return 0;
+}
+
 static void kick_epg(void)
 {
-    if (G.epg_loaded || !G.xmltv_url[0]) return;
-    /* Marked loaded up front: one attempt per playlist load. A retry loop on a
-     * 30 MB EPG that will never fit the body cap is a frame-rate bug. */
+    if (G.epg_loaded) return;
+
+    /* Auto-discover local XMLTV on USB stick if none configured */
+    if (!G.xmltv_url[0]) {
+        static const char *const kUsbEpgNames[] = {
+            "/mnt/usb0/epg.xml",
+            "/mnt/usb0/iptv.xml",
+            "/mnt/usb0/guide.xml",
+            NULL
+        };
+        for (int i = 0; kUsbEpgNames[i]; ++i) {
+            FILE *f = fopen(kUsbEpgNames[i], "rb");
+            if (f) {
+                fclose(f);
+                snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", kUsbEpgNames[i]);
+                PROV_LOG("iptv: auto-discovered local EPG on USB: %s", G.xmltv_url);
+                break;
+            }
+        }
+    }
+
+    if (!G.xmltv_url[0]) return;
+
+    /* Local file path on disk / USB */
+    if (G.xmltv_url[0] == '/') {
+        FILE *f = fopen(G.xmltv_url, "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            rewind(f);
+            if (sz > 0 && (size_t)sz <= EVO_NET_MAX_BODY) {
+                char *buf = (char *)malloc((size_t)sz + 1);
+                if (buf) {
+                    size_t got = fread(buf, 1, (size_t)sz, f);
+                    buf[got] = '\0';
+                    fclose(f);
+                    parse_xmltv(buf, got);
+                    free(buf);
+                    G.epg_loaded = 1;
+                    if (evo_rmlui_provider_reload) {
+                        evo_rmlui_provider_reload();
+                    }
+                    return;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    /* Marked loaded up front: one attempt per playlist load. */
     G.epg_loaded = 1;
-    evo_net_request_async("GET", G.xmltv_url, NULL, NULL, 0, on_epg, NULL);
+    int rc = evo_net_request_async("GET", G.xmltv_url, NULL, NULL, 0, on_epg, NULL);
+    if (rc != 0) {
+        G.epg_loaded = 0;
+        PROV_LOG("iptv: evo_net_request_async for EPG failed rc=%d", rc);
+    }
 }
 
 static void on_playlist(int success, int status, const char *body, size_t len,

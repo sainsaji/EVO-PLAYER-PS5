@@ -68,7 +68,9 @@ output/dns-host/
 output/streamopts-host/
 output/hls-host/
 output/netconnect-host/
+output/iptv-epg-host/
 output/subsync-test/
+tests/fixtures/
 
 # Records the last launch time so tools/launch.sh can refuse to stack
 # instances. Machine-local state, not project state.
