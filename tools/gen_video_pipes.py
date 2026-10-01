@@ -362,11 +362,122 @@ void main() {
 }
 """
 
-def resource_mapping(sampler_count: int) -> str:
+# ---------------------------------------------------------------------------
+# Dolby Vision Profile 5. The picture is Dolby's reshaped IPT-PQ-c2 signal, not
+# YCbCr, so it needs the frame's RPU: per-component reshaping curves on the raw
+# signal, the RPU's YCC->L'M'S' matrix, PQ EOTF, then LMS->BT.2020 RGB. This is
+# libplacebo's pl_shader_dovi_reshape + DOLBYVISION decode. evo_dovi.c turns the
+# RPU into DoviParams; keep the two layouts in step (evo_dovi_params).
+# ---------------------------------------------------------------------------
+
+DOVI_COMMON = """
+layout(set = 1, binding = 2, std140) uniform DoviParams {
+    vec4 ycc[3];
+    vec4 off;
+    vec4 lms[3];
+    vec4 lohi[3];     /* lo, hi, has curve */
+    vec4 piv[6];      /* inner pivots, 2 per component, 1e9 padded */
+    vec4 coef[24];    /* per piece: poly {c0,c1,c2,0} or MMR {const,idx,-,order} */
+    vec4 mmr[144];    /* 48 per component */
+} dv;
+
+float dv_reshape(int c, vec3 sig) {
+    vec4 lh = dv.lohi[c];
+    float s = sig[c];
+    if (lh.z == 0.0)
+        return s;
+    vec4 p0 = dv.piv[c * 2];
+    vec4 p1 = dv.piv[c * 2 + 1];
+    int i = int(s >= p0.x) + int(s >= p0.y) + int(s >= p0.z) + int(s >= p0.w)
+          + int(s >= p1.x) + int(s >= p1.y) + int(s >= p1.z);
+    vec4 co = dv.coef[c * 8 + i];
+    float r;
+    if (co.w == 0.0) {
+        r = (co.z * s + co.y) * s + co.x;
+    } else {
+        int m = c * 48 + int(co.y);
+        vec4 sx = vec4(sig.xxy * sig.yzz, sig.x * sig.y * sig.z);
+        r = co.x + dot(dv.mmr[m].xyz, sig) + dot(dv.mmr[m + 1], sx);
+        if (co.w >= 2.0) {
+            vec3 s2 = sig * sig;
+            vec4 x2 = sx * sx;
+            r += dot(dv.mmr[m + 2].xyz, s2) + dot(dv.mmr[m + 3], x2);
+            if (co.w >= 3.0)
+                r += dot(dv.mmr[m + 4].xyz, s2 * sig) + dot(dv.mmr[m + 5], x2 * sx);
+        }
+    }
+    return clamp(r, lh.x, lh.y);
+}
+
+/* PQ code value -> linear light, 1.0 = 10000 nits */
+vec3 pq_eotf3(vec3 x) {
+    x = pow(max(x, vec3(0.0)), vec3(1.0 / 78.84375));
+    x = max(x - vec3(0.8359375), vec3(0.0)) / (vec3(18.8515625) - vec3(18.6875) * x);
+    return pow(x, vec3(1.0 / 0.1593017578125));
+}
+
+/* Linear BT.2020 light in nits for this pixel. */
+vec3 dovi_nits() {
+    float y = texture(uY, vUV).r * 64.0615844;
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
+    vec3 sig = clamp(vec3(y, uv), 0.0, 1.0);
+    vec3 t = vec3(dv_reshape(0, sig), dv_reshape(1, sig), dv_reshape(2, sig)) - dv.off.xyz;
+    vec3 lmsp = vec3(dot(dv.ycc[0].xyz, t), dot(dv.ycc[1].xyz, t), dot(dv.ycc[2].xyz, t));
+    vec3 l = pq_eotf3(lmsp);
+    vec3 rgb = vec3(dot(dv.lms[0].xyz, l), dot(dv.lms[1].xyz, l), dot(dv.lms[2].xyz, l));
+    return max(rgb, vec3(0.0)) * 10000.0;
+}
+"""
+
+DOVI_HEAD = """#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D uY;
+layout(set = 1, binding = 1) uniform sampler2D uUV;
+
+layout(location = 0) in vec2 vUV;
+layout(location = 0) out vec4 out_color;
+"""
+
+
+def _between(text: str, start: str, end: str) -> str:
+    a = text.index(start)
+    return text[a:text.index(end, a)]
+
+
+# HDR -> SDR tail shared with HDR_FS: pq_oetf, pq_to_nits, eetf, hdr_nits_to_sdr.
+_SDR_TAIL = _between(HDR_FS, "const float SRC_PEAK", "void main()")
+
+DOVI_FS = DOVI_HEAD + DOVI_COMMON + "\n" + _SDR_TAIL + """
+void main() {
+    out_color = vec4(hdr_nits_to_sdr(dovi_nits()), 1.0);
+}
+"""
+
+DOVI_PQ_FS = DOVI_HEAD + DOVI_COMMON + """
+float pq_oetf(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+/* -> HDR10 output: BT.2020 PQ, the TV tone-maps. */
+void main() {
+    vec3 n = dovi_nits();
+    out_color = vec4(pq_oetf(n.r), pq_oetf(n.g), pq_oetf(n.b), 1.0);
+}
+"""
+
+DOVI_PARAMS_BYTES = (3 + 1 + 3 + 3 + 6 + 24 + 144) * 16
+
+
+def resource_mapping(sampler_count: int, dovi: bool = False) -> str:
     """Vertex uniform block at set 0, fragment samplers at set 1.
 
     visibility 2 = vertex stage, 64 = fragment stage. The vertex stage has no
     IndirectUserDataVaPtr because it takes no vertex buffer.
+
+    `dovi` adds the DoviParams buffer to the END of the fragment texture table
+    (set 1 binding 2, V# at dword sampler_count*12), so it needs no user SGPR
+    of its own and the table is still classified as the texture table.
     """
     lines = [
         "userDataNode[0].visibility = 2",
@@ -391,10 +502,19 @@ def resource_mapping(sampler_count: int) -> str:
             f"userDataNode[1].next[{i}].set = 1",
             f"userDataNode[1].next[{i}].binding = {i}",
         ]
+    if dovi:
+        i = sampler_count
+        lines += [
+            f"userDataNode[1].next[{i}].type = DescriptorConstBuffer",
+            f"userDataNode[1].next[{i}].offsetInDwords = {i * 12}",
+            f"userDataNode[1].next[{i}].sizeInDwords = 4",
+            f"userDataNode[1].next[{i}].set = 1",
+            f"userDataNode[1].next[{i}].binding = {i}",
+        ]
     return "\n".join(lines)
 
 
-def build(name: str, fs: str, samplers: int, comment: str) -> None:
+def build(name: str, fs: str, samplers: int, comment: str, dovi: bool = False) -> None:
     text = f"""; {name} - {comment}
 ; Generated by tools/gen_video_pipes.py. Edit the generator, not this file.
 ;
@@ -416,7 +536,7 @@ entryPoint = main
 entryPoint = main
 
 [ResourceMapping]
-{resource_mapping(samplers)}
+{resource_mapping(samplers, dovi)}
 
 [GraphicsPipelineState]
 topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
@@ -442,6 +562,8 @@ def main() -> int:
     build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) -> SDR: BT.2100 OOTF + BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_pq_out", PQ_OUT_FS, 2, "P010 HDR10 -> HDR10 output (PQ passthrough)")
     build("video_yuv_p010_hlg_pq_out", HLG_PQ_FS, 2, "P010 HLG -> HDR10 output (BT.2100 OOTF, PQ)")
+    build("video_yuv_p010_dovi", DOVI_FS, 2, "P010 Dolby Vision P5 -> SDR (RPU reshape + BT.2390 EETF)", dovi=True)
+    build("video_yuv_p010_dovi_pq_out", DOVI_PQ_FS, 2, "P010 Dolby Vision P5 -> HDR10 output (RPU reshape, PQ)", dovi=True)
 
     # 8-bit HDR: HEVC Main (8-bit) carrying HLG / PQ over BT.2020 exists -
     # broadcast 4K HLG channels do it. Same maths; the NV12 planes are R8/RG8

@@ -10,6 +10,7 @@
 #include "evo_toast.h"
 #include "evo_feedback.h"
 #include "evo_boot_log.h"
+#include "evo_dovi.h"
 #include "evo_agc_runtime.h"
 #include "evo_hw.h"
 #include "pp_playback.h"   /* g_pp_pb.seek_discarding - the LOADING badge */
@@ -492,7 +493,8 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                 }
                 std::snprintf(codecBuf, sizeof(codecBuf), "%s", cn);
 
-                if (cp->color_trc == AVCOL_TRC_SMPTE2084)     hdrBadge = "HDR10";
+                if (evo_dovi_stream_profile(cp) > 0)          hdrBadge = "DOLBY VISION";
+                else if (cp->color_trc == AVCOL_TRC_SMPTE2084) hdrBadge = "HDR10";
                 else if (cp->color_trc == AVCOL_TRC_ARIB_STD_B67) hdrBadge = "HLG";
             }
         }

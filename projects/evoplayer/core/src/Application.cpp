@@ -1627,7 +1627,7 @@ int Application::run() {
                                  static_cast<int>(f.coded_w), static_cast<int>(f.coded_h),
                                  static_cast<int>(f.disp_w), static_cast<int>(f.disp_h),
                                  view_mode, f.ten_bit, f.color_trc,
-                                 is_direct, current_pts);
+                                 is_direct, current_pts, f.dovi);
                 g_pace.blit(PaceTrace::ms(blit_t0, PaceTrace::clk::now()));
                 if (isPlayer && evo_sweep_active()) s_sw_p1 = evo_sweep_now_us();
                 swap = true;

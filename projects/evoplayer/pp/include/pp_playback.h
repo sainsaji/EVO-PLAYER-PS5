@@ -80,6 +80,8 @@ typedef struct pp_playback {
     int      gl_ready;
     int      gl_ten_bit;        /* GL-5 (#81): planar source is 16-bit (yuv420p10le) */
     int      gl_color_trc;
+    const void *gl_dovi;        /* pp_frame.dovi, borrowed like the planes */
+    uint32_t gl_dovi_size;
 
     /*
      * GL-4 Stage 2d: a seek's discard window is the one time the borrowed
@@ -97,6 +99,9 @@ typedef struct pp_playback {
     int      hold_planar;
     int      hold_ten_bit;
     int      hold_color_trc;
+    void    *hold_dovi;         /* own copy of gl_dovi, or NULL */
+    uint32_t hold_dovi_cap;
+    int      hold_has_dovi;
     int      hold_ypitch, hold_uvpitch, hold_upitch, hold_vpitch;
     size_t   hold_uv_off, hold_u_off, hold_v_off;
     uint32_t hold_cw, hold_ch, hold_dw, hold_dh;
@@ -146,6 +151,7 @@ typedef struct pp_video_frame {
     int      held;               /* 1 = the frozen mid-seek snapshot    */
     int      ten_bit;            /* GL-5 (#81): planar 16-bit (yuv420p10le), sample as GL_R16 */
     int      color_trc;
+    const void *dovi;            /* evo_dovi_params for Dolby Vision P5, else NULL */
 } pp_video_frame;
 
 /**

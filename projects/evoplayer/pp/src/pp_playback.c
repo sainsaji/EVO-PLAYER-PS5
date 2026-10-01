@@ -79,6 +79,9 @@ void pp_playback_shutdown(pp_playback *pb)
     free(pb->hold_buf);
     pb->hold_buf = NULL;
     pb->hold_cap = 0;
+    free(pb->hold_dovi);
+    pb->hold_dovi = NULL;
+    pb->hold_dovi_cap = 0;
     pb->gl_ready = 0;
     pb->gl_src_y = pb->gl_src_uv = pb->gl_src_u = pb->gl_src_v = NULL;
     if (pb->lock) {
@@ -143,6 +146,7 @@ void pp_playback_on_file_close(pp_playback *pb)
     pb->gl_ready = 0;
     pb->hold_valid = 0;
     pb->gl_src_y = pb->gl_src_uv = pb->gl_src_u = pb->gl_src_v = NULL;
+    pb->gl_dovi = NULL;          /* points into the decoder being closed */
     if (pb->lock)
         pthread_mutex_unlock(mtx(pb));
 }
@@ -271,6 +275,21 @@ static int hold_snapshot(pp_playback *pb)
     pb->hold_planar  = planar;
     pb->hold_ten_bit = pb->gl_ten_bit;
     pb->hold_color_trc = pb->gl_color_trc;
+    /* the decoder's RPU slot recycles during the discard run, like the planes */
+    pb->hold_has_dovi = 0;
+    if (pb->gl_dovi && pb->gl_dovi_size) {
+        if (pb->hold_dovi_cap < pb->gl_dovi_size) {
+            void *nd = realloc(pb->hold_dovi, pb->gl_dovi_size);
+            if (nd) {
+                pb->hold_dovi = nd;
+                pb->hold_dovi_cap = pb->gl_dovi_size;
+            }
+        }
+        if (pb->hold_dovi_cap >= pb->gl_dovi_size) {
+            memcpy(pb->hold_dovi, pb->gl_dovi, pb->gl_dovi_size);
+            pb->hold_has_dovi = 1;
+        }
+    }
     pb->hold_ypitch  = pb->gl_src_ypitch;
     pb->hold_uvpitch = pb->gl_src_uvpitch;
     pb->hold_upitch  = pb->gl_src_upitch;
@@ -364,6 +383,8 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
     if (pb->lock) pthread_mutex_lock(mtx(pb));
     pb->gl_ten_bit = (src->format == PP_FRAME_YUV420P10 || src->format == PP_FRAME_NV12_10);
     pb->gl_color_trc = src->color_trc;
+    pb->gl_dovi = src->dovi;
+    pb->gl_dovi_size = src->dovi ? src->dovi_size : 0;
     pb->gl_src_y  = src->planes[0];
     pb->gl_src_ypitch = syp;
     if (src->format == PP_FRAME_NV12 || src->format == PP_FRAME_NV12_10) {
@@ -429,6 +450,7 @@ int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f)
         f->disp_h   = pb->hold_dh;
         f->ten_bit  = pb->hold_ten_bit;
         f->color_trc = pb->hold_color_trc;
+        f->dovi     = pb->hold_has_dovi ? pb->hold_dovi : NULL;
         f->ready    = 1;
         f->held     = 1;
         got = 1;
@@ -447,6 +469,7 @@ int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f)
         f->disp_h   = pb->gl_dh;
         f->ten_bit  = pb->gl_ten_bit;
         f->color_trc = pb->gl_color_trc;
+        f->dovi     = pb->gl_dovi;
         f->ready    = 1;
         got = 1;
     }

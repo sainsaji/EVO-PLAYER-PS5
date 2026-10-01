@@ -13,6 +13,7 @@
  */
 #include "evo_vdec.h"
 #include "evo_vdec_native.h"   /* sceVideodec2 backend (stubs off the app module) */
+#include "evo_dovi.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,12 @@ struct evo_vdec {
     int              frame_idx;
     AVPacket        *pkt;     /* scratch for send */
     evo_vdec_native *nat;     /* sceVideodec2 sub-backend, or NULL */
+
+    /* Dolby Vision Profile 5 (evo_dovi): the decoder attaches each frame's
+     * RPU as side data; converted per ring slot so it lives as long as the
+     * borrowed planes do. */
+    int              dovi_p5;
+    evo_dovi_params  dovi[FFMPEG_FRAME_RING];
 
     /* #8 instrumentation. `pending_us` accumulates the cost of the send() calls
      * and the empty receive() polls since the last frame came out, so the cost
@@ -308,6 +315,7 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
         evo_vdec_close(v);
         return NULL;
     }
+    v->dovi_p5 = p->avctx_params && evo_dovi_stream_needs_reshape(p->avctx_params);
 
     ffmpeg_apply_tuning(v->ctx, p);
 
@@ -416,8 +424,18 @@ static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
     else if (frame->pts != AV_NOPTS_VALUE)
         pts_us = frame->pts;
 
-    if (pp_map_avframe(frame, out, pts_us) == 0)
+    if (pp_map_avframe(frame, out, pts_us) == 0) {
+        if (v->dovi_p5) {
+            const AVFrameSideData *sd =
+                av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
+            if (sd && evo_dovi_params_from_av(sd->data, &v->dovi[next_idx]) == 0) {
+                out->dovi      = &v->dovi[next_idx];
+                out->dovi_size = sizeof(evo_dovi_params);
+                out->color_trc = AVCOL_TRC_SMPTE2084;   /* the reshaped output is PQ */
+            }
+        }
         return 1;
+    }
 
     /* Decoded, but an exotic pixel format — caller runs the swscale path. */
     return 2;

@@ -58,6 +58,11 @@ typedef struct pp_frame {
      * for the HDR badge and #41's PQ/HLG tone-map tail; GL-5 does not act on it —
      * 10-bit is presented as SDR-with-more-precision. */
     int color_trc;
+    /* Dolby Vision Profile 5: this frame's RPU as GPU constants (evo_dovi_params,
+     * dovi_size bytes), owned by the decoder and valid as long as the planes.
+     * NULL for everything else. */
+    const void *dovi;
+    uint32_t dovi_size;
 } pp_frame;
 
 #ifdef __cplusplus

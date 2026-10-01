@@ -71,6 +71,7 @@
 #include <libavcodec/bsf.h>
 #include <libavutil/rational.h>
 
+#include "evo_dovi.h"
 #include "sce/sce_videodec2.h"
 
 /* FFmpeg profile-id fallbacks — the pinned build has the FF_PROFILE_* spelling
@@ -817,6 +818,14 @@ struct nat_slot {
     size_t   u_off, v_off;      /* byte offsets of U and V within data       */
 };
 
+#define DOVI_RING 32
+
+struct dovi_entry {
+    int64_t         pts;
+    int             valid;
+    evo_dovi_params p;
+};
+
 struct evo_vdec_native {
     const nat_codec_desc *desc;  /* selected codec mode                */
     struct dec_slot *slot;  /* the claimed resident slot, released on close */
@@ -883,6 +892,21 @@ struct evo_vdec_native {
 
     struct nat_slot ro[RO_SLOTS];
     int             ro_count;
+
+    /*
+     * Dolby Vision Profile 5 (evo_dovi). The RPU rides in each access unit,
+     * in decode order; the picture comes out in display order. So each AU's
+     * parsed RPU is filed under its PTS and picked back up by the frame that
+     * leaves with that PTS. The ring outlives the reorder window by far, and
+     * an entry is not rewritten until DOVI_RING AUs later - long after the
+     * frame it went with has been presented.
+     */
+    evo_dovi_parser    *dovi;
+    struct dovi_entry  *dovi_ring;
+    unsigned            dovi_head;
+    const evo_dovi_params *dovi_shown;   /* last one handed out */
+    evo_dovi_params     dovi_default;    /* until the first RPU parses */
+    unsigned            dovi_parsed, dovi_errs, dovi_misses;
 };
 
 static void pts_push(evo_vdec_native *n, int64_t pts)
@@ -914,6 +938,40 @@ static int64_t pts_take(evo_vdec_native *n)
     n->pts_pool[mi] = n->pts_pool[--n->pts_n];
     return v;
 #endif
+}
+
+/* File this AU's RPU under its PTS. */
+static void dovi_note_au(evo_vdec_native *n, const uint8_t *au, int size, int64_t pts)
+{
+    struct dovi_entry *e = &n->dovi_ring[n->dovi_head % DOVI_RING];
+    e->valid = 0;
+    int rc = evo_dovi_parse_annexb(n->dovi, au, size, &e->p);
+    if (rc <= 0) {
+        if (rc < 0 && n->dovi_errs++ < 3)
+            note("EVO vdec native: dovi RPU did not parse (AU %u)", n->dec_calls);
+        return;
+    }
+    e->pts   = pts;
+    e->valid = 1;
+    n->dovi_head++;
+    if (n->dovi_parsed++ == 0)
+        note("EVO vdec native: dovi first RPU parsed (lo/hi Y %.3f/%.3f, Y pieces %s)",
+             e->p.lohi[0][0], e->p.lohi[0][1], e->p.lohi[0][2] != 0.0f ? "yes" : "none");
+}
+
+/* The RPU for the frame leaving with `pts`; the last one shown when that AU
+ * carried none (a stream may send one only per scene). */
+static const evo_dovi_params *dovi_for_pts(evo_vdec_native *n, int64_t pts)
+{
+    for (unsigned k = 1; k <= DOVI_RING; k++) {
+        const struct dovi_entry *e = &n->dovi_ring[(n->dovi_head - k) % DOVI_RING];
+        if (e->valid && e->pts == pts) {
+            n->dovi_shown = &e->p;
+            return n->dovi_shown;
+        }
+    }
+    n->dovi_misses++;
+    return n->dovi_shown;
 }
 
 static void ro_reset(evo_vdec_native *n)
@@ -1175,8 +1233,11 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
              out.width, out.height);
     }
 
-    if (present)
+    if (present) {
+        if (n->dovi)
+            dovi_note_au(n, au, size, pts);
         pts_push(n, pts);
+    }
     if (out.valid && out.picture_count) {
         n->since_flush_out++;
         if (present) {
@@ -1389,6 +1450,27 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     n->disp_w     = par->width  > 0 ? (uint32_t)par->width  : 0;
     n->disp_h     = par->height > 0 ? (uint32_t)par->height : 0;
     n->color_trc  = (int)par->color_trc;
+    /* Dolby Vision Profile 5: no HDR10 base layer, so the picture is only
+     * right through the RPU. Its output is BT.2020 PQ, so the rest of EVO
+     * (HDR10 scanout, the SDR tone-map) treats it as PQ. A parser or ring
+     * that will not allocate just leaves the old purple/green picture. */
+    if (d->idx == NAT_HEVC10 && evo_dovi_stream_needs_reshape(par)) {
+        n->dovi      = evo_dovi_parser_open(par);
+        n->dovi_ring = (struct dovi_entry *)calloc(DOVI_RING, sizeof *n->dovi_ring);
+        if (n->dovi && n->dovi_ring) {
+            evo_dovi_params_default(&n->dovi_default);
+            n->dovi_shown = &n->dovi_default;
+            n->color_trc  = AVCOL_TRC_SMPTE2084;
+            note("EVO vdec native: Dolby Vision profile %d - RPU reshaping on",
+                 evo_dovi_stream_profile(par));
+        } else {
+            evo_dovi_parser_close(n->dovi);
+            free(n->dovi_ring);
+            n->dovi = NULL;
+            n->dovi_ring = NULL;
+            note("EVO vdec native: Dolby Vision RPU setup failed - colours will be wrong");
+        }
+    }
     /* GL video path: emit NV12 straight from the decoder - the GLSL video
      * shader samples NV12 and does the YUV->RGB + scale on-GPU, so the CPU
      * never touches the pixels. Fixed for the stream's lifetime.
@@ -1528,6 +1610,10 @@ int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *out)
     out->strides[2]   = (int)best->c_stride;
     out->pts_us       = best->pts;
     out->color_trc    = v->color_trc;
+    if (v->dovi) {
+        out->dovi      = dovi_for_pts(v, best->pts);
+        out->dovi_size = sizeof(evo_dovi_params);
+    }
 
     best->used = 0;
     v->ro_count--;
@@ -1541,6 +1627,13 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
     ro_reset(v);
     v->pts_n          = 0;
     v->au_ring        = 0;
+    if (v->dovi) {
+        /* keep dovi_shown: the held frame and the first frames after the
+         * seek look like the scene before it until a new RPU lands */
+        evo_dovi_parser_flush(v->dovi);
+        for (int i = 0; i < DOVI_RING; i++)
+            v->dovi_ring[i].valid = 0;
+    }
     v->flushing       = 0;
     v->fatal          = 0;
     v->first_err_logged = 0;
@@ -1631,6 +1724,12 @@ void evo_vdec_native_close(evo_vdec_native *v)
     for (int i = 0; i < RO_SLOTS; i++)
         if (!v->ro[i].borrowed)
             free(v->ro[i].data);
+    if (v->dovi) {
+        note("EVO vdec native: dovi RPUs parsed=%u errors=%u unmatched_frames=%u",
+             v->dovi_parsed, v->dovi_errs, v->dovi_misses);
+        evo_dovi_parser_close(v->dovi);
+    }
+    free(v->dovi_ring);
     free(v);
 }
 

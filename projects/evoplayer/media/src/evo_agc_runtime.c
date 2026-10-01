@@ -3,6 +3,7 @@
 #include "evo_agc_pipes.h"
 #include "evo_boot_log.h"
 #include "evo_direct_mem.h"
+#include "evo_dovi.h"
 #include "evo_hw.h"
 
 #include <emmintrin.h>
@@ -1265,6 +1266,9 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_NV12_HDR_PQ,  &video_yuv_nv12_pq_out_metadata,     "video_yuv_nv12_pq_out"},
         {EVO_AGC_PIPE_NV12_HLG_PQ,  &video_yuv_nv12_hlg_pq_out_metadata, "video_yuv_nv12_hlg_pq_out"},
         {EVO_AGC_PIPE_VIDEO_PLANAR, &video_yuv_planar_metadata,   "video_yuv_planar"},
+        /* Dolby Vision P5; without them a P5 stream plays purple/green */
+        {EVO_AGC_PIPE_VIDEO_DOVI,    &video_yuv_p010_dovi_metadata,        "video_yuv_p010_dovi"},
+        {EVO_AGC_PIPE_VIDEO_DOVI_PQ, &video_yuv_p010_dovi_pq_out_metadata, "video_yuv_p010_dovi_pq_out"},
         /* #103 upscaler. Each is optional: a missing one makes the upscaler
          * fall back a mode (AI -> Sharp -> Off), never fail the runtime. */
         {EVO_AGC_PIPE_UP_EASU,      &upscale_easu_metadata,       "upscale_easu"},
@@ -1800,6 +1804,7 @@ static int agc_hdr_remap(int pipeline_id)
     case EVO_AGC_PIPE_VIDEO_HLG:  to = EVO_AGC_PIPE_VIDEO_HLG_PQ; break;
     case EVO_AGC_PIPE_NV12_HDR:   to = EVO_AGC_PIPE_NV12_HDR_PQ; break;
     case EVO_AGC_PIPE_NV12_HLG:   to = EVO_AGC_PIPE_NV12_HLG_PQ; break;
+    case EVO_AGC_PIPE_VIDEO_DOVI: to = EVO_AGC_PIPE_VIDEO_DOVI_PQ; break;
     default: break;
     }
     return g_agc_dev.pipelines[to].valid ? to : pipeline_id;
@@ -3674,7 +3679,7 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       int coded_w, int coded_h,
                       int disp_w, int disp_h,
                       int view_mode, int ten_bit, int color_trc,
-                      int is_direct, int64_t pts_us)
+                      int is_direct, int64_t pts_us, const void *dovi)
 {
     if (!g_agc_dev.initialized || !y || y_pitch <= 0 || coded_w <= 0 || coded_h <= 0)
         return -1;
@@ -3692,9 +3697,16 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     const int hdr_src = (color_trc == 16 || color_trc == 18);
     g_agc_dev.last_video_trc = hdr_src ? color_trc : 1;
 
+    /* Dolby Vision P5 rides the 10-bit two-plane layout (P010, or planar
+     * interleaved to RG16) with its RPU constants after the textures. */
+    if (dovi && (!ten_bit || !g_agc_dev.pipelines[EVO_AGC_PIPE_VIDEO_DOVI].valid))
+        dovi = NULL;
+
     /* 1. Select Pipeline */
     int pipe_id;
-    if (ten_bit) {
+    if (dovi) {
+        pipe_id = EVO_AGC_PIPE_VIDEO_DOVI;
+    } else if (ten_bit) {
         if (color_trc == 16)
             pipe_id = EVO_AGC_PIPE_VIDEO_HDR;
         else if (color_trc == 18)
@@ -3838,14 +3850,28 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
         }
     } else {
         /* NV12 / P010 2-plane: 96 bytes descriptor table (2 * 48B).
-         * Used for NV12 (SDR 8-bit), NV12_10 (HDR 10-bit), and planar 10-bit (interleaved to RG16). */
-        if (evo_agc_transient_ring_alloc(ring, slot, 96, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
+         * Used for NV12 (SDR 8-bit), NV12_10 (HDR 10-bit), and planar 10-bit (interleaved to RG16).
+         * Dolby Vision appends the DoviParams V# at dword 24 (112 bytes). */
+        const size_t desc_bytes = dovi ? 112u : 96u;
+        if (evo_agc_transient_ring_alloc(ring, slot, desc_bytes, 16, &desc_slice) != EVO_AGC_TRANSIENT_OK) {
             evo_boot_log("agc_blit_yuv: 2-plane desc_slice alloc failed");
             evo_boot_log_flush();
             return -1;
         }
         uint32_t *desc = (uint32_t *)desc_slice.cpu;
-        memset(desc, 0, 96);
+        memset(desc, 0, desc_bytes);
+
+        if (dovi) {
+            evo_agc_transient_slice_t dv_slice;
+            if (evo_agc_transient_ring_alloc(ring, slot, sizeof(evo_dovi_params), 256,
+                                             &dv_slice) != EVO_AGC_TRANSIENT_OK) {
+                evo_boot_log("agc_blit_yuv: dovi params alloc failed");
+                evo_boot_log_flush();
+                return -1;
+            }
+            memcpy(dv_slice.cpu, dovi, sizeof(evo_dovi_params));
+            evo_agc_build_constant_vsharp(desc + 24, dv_slice.gpu_addr, sizeof(evo_dovi_params));
+        }
 
         uint32_t uv_pitch_gpu = 0;
         uint64_t uv_gpu = 0;

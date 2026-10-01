@@ -46,7 +46,10 @@ enum {
     EVO_AGC_PIPE_NV12_HDR_PQ = 69,    /* PQ  -> HDR10 */
     EVO_AGC_PIPE_NV12_HLG_PQ = 70,    /* HLG -> HDR10 */
     EVO_AGC_PIPE_VIDEO_P010_SDR = 71, /* 10-bit P010 SDR (BT.709) */
-    EVO_AGC_PIPE_COUNT = 72,
+    /* Dolby Vision Profile 5: the RPU-reshaped IPT-PQ-c2 picture (evo_dovi). */
+    EVO_AGC_PIPE_VIDEO_DOVI = 72,     /* -> SDR */
+    EVO_AGC_PIPE_VIDEO_DOVI_PQ = 73,  /* -> HDR10 */
+    EVO_AGC_PIPE_COUNT = 74,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -310,7 +313,9 @@ const char *evo_agc_upscale_label(void);
 int         evo_agc_upscale_take_downgrade(void);
 
 /* Draw the video quad. Returns 0 when the quad was emitted (and the current
- * backbuffer stamped with pts_us), -1 when the frame was rejected. */
+ * backbuffer stamped with pts_us), -1 when the frame was rejected.
+ * `dovi` is the frame's evo_dovi_params for a Dolby Vision Profile 5 source,
+ * else NULL. */
 int  evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       const uint8_t *uv, int uv_pitch,
                       const uint8_t *u,  int u_pitch,
@@ -318,7 +323,7 @@ int  evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
                       int coded_w, int coded_h,
                       int disp_w, int disp_h,
                       int view_mode, int ten_bit, int color_trc,
-                      int is_direct, int64_t pts_us);
+                      int is_direct, int64_t pts_us, const void *dovi);
 
 #ifdef __cplusplus
 }
