@@ -301,11 +301,20 @@ static void test_emby_media_sources(void)
         "{\"Id\":\"src1080\",\"Name\":\"\",\"Container\":\"mp4\","
         " \"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Width\":1920,\"Height\":1080,"
         "   \"VideoRange\":\"SDR\"},{\"Type\":\"Audio\",\"Codec\":\"eac3\",\"Channels\":6,\"IsDefault\":true}]},"
-        "{\"Name\":\"no id - skipped\"}]}";
+        "{\"Name\":\"no id - skipped\"},"
+        /* A real AIOStreams name (hardware, 2026-10-02): NBSP padding, zero-width
+         * joiners, symbols, angle brackets, a line of nothing but stars. */
+        "{\"Id\":\"aio\",\"Name\":\"4K\xc2\xa0\xe2\x80\x8d\xc2\xa0\xc2\xa0\xe2\x9a\xa1\xe2\x80\x8d\\n"
+        "\xc2\xa0\xc2\xa0\xe2\x8c\xa9Web\xe2\x80\x8d-\xe2\x80\x8d" "dl\xe2\x8c\xaa\xe2\x80\x8d\xc2\xa0\\n"
+        "\xc2\xa0\xc2\xa0\xe2\x98\x85\xe2\x98\x85\xe2\x98\x85\\n"
+        "\xe2\x98\x81\xef\xb8\x8e  Unabomber (2026) \\n"
+        "\xe2\x96\xa3  HEVC  \xe2\x9c\xa6 DV\"}]}";
 
     evo_stream_choice_t ch[4];
     int n = ms_parse_sources(c, "i:item1", body, ch, 4);
-    TEST_ASSERT(n == 2, "expected two versions");
+    TEST_ASSERT(n == 3, "expected three versions");
+    TEST_ASSERT(strcmp(ch[2].label, "4K | [Web-dl] | Unabomber (2026) | HEVC DV") == 0,
+                "AIOStreams name not cleaned");
     TEST_ASSERT(strstr(ch[0].url, "/Videos/item1/stream?Static=true&MediaSourceId=src4k&PlaySessionId=ps1&api_key=tok") != NULL,
                 "4K version URL wrong");
     TEST_ASSERT(strstr(ch[1].url, "MediaSourceId=src1080") != NULL, "1080p version URL wrong");

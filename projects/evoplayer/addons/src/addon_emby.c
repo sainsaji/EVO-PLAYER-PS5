@@ -777,23 +777,79 @@ static void video_range(cJSON *vs, char *out, size_t cap)
     snprintf(out, cap, "%s", s);
 }
 
-/* A source name on one line: AIOStreams writes multi-line release blurbs. */
-static void one_line(const char *in, char *out, size_t cap)
+/* One UTF-8 sequence at `s`: its code point and length; -1 for a bad byte. */
+static long utf8_next(const unsigned char *s, int *len)
 {
-    size_t o = 0;
-    for (; *in && o + 4 < cap; ++in) {
-        unsigned char ch = (unsigned char)*in;
-        if (ch == '\n') {
-            while (o > 0 && out[o - 1] == ' ') o--;
-            if (o > 0) { memcpy(out + o, " | ", 3); o += 3; }
-            while (in[1] == ' ' || in[1] == '\n' || in[1] == '\r') in++;
-        } else if (ch < 0x20) {
-            if (o > 0 && out[o - 1] != ' ') out[o++] = ' ';
-        } else {
-            out[o++] = (char)ch;
-        }
+    if (s[0] < 0x80) { *len = 1; return s[0]; }
+    int n = (s[0] & 0xE0) == 0xC0 ? 2 : (s[0] & 0xF0) == 0xE0 ? 3 : (s[0] & 0xF8) == 0xF0 ? 4 : 0;
+    if (!n) { *len = 1; return -1; }
+    long cp = s[0] & (0x7F >> n);
+    for (int i = 1; i < n; ++i) {
+        if ((s[i] & 0xC0) != 0x80) { *len = i; return -1; }
+        cp = (cp << 6) | (s[i] & 0x3F);
     }
-    out[o] = '\0';
+    *len = n;
+    return cp;
+}
+
+/*
+ * A source name as a picker label (#116). AIOStreams names are multi-line
+ * blurbs padded with zero-width joiners and emoji ("4K ‍⚡ | 〈Web-dl〉"):
+ * the font has none of those glyphs, and a byte cut could split a character.
+ * Lines become " | " segments, invisible / symbol / emoji code points go,
+ * angle brackets become [ ], spaces collapse, and only whole characters fit.
+ */
+static void label_clean(const char *in, char *out, size_t cap)
+{
+    char tmp[512];
+    size_t t = 0;
+    const unsigned char *s = (const unsigned char *)in;
+    while (*s && t + 5 < sizeof tmp) {
+        int len;
+        long cp = utf8_next(s, &len);
+        if (cp == '\n') tmp[t++] = '|';
+        else if (cp == '\r' || cp == '\t' || cp == 0xA0 || (cp >= 0x2000 && cp <= 0x200A) ||
+                 cp == 0x202F || cp == 0x205F || cp == 0x3000)
+            tmp[t++] = ' ';                 /* AIOStreams pads with NBSP */
+        else if (cp == 0x3008 || cp == 0x2329 || cp == 0x27E8) tmp[t++] = '[';
+        else if (cp == 0x3009 || cp == 0x232A || cp == 0x27E9) tmp[t++] = ']';
+        else if (cp < 0x20 || cp < 0 || (cp >= 0x2000 && cp < 0x2C00) ||
+                 (cp >= 0x0250 && cp < 0x0300) ||       /* IPA, modifier letters  */
+                 (cp >= 0x1D00 && cp < 0x1DC0) ||       /* small capitals         */
+                 (cp >= 0xFE00 && cp < 0xFE10) || cp == 0xFEFF || cp >= 0x1F000) {
+            /* control, invisible, symbol or emoji: dropped */
+        } else {
+            memcpy(tmp + t, s, (size_t)len);
+            t += (size_t)len;
+        }
+        s += len;
+    }
+    tmp[t] = '\0';
+
+    size_t o = 0;
+    out[0] = '\0';
+    for (char *seg = tmp; seg; ) {
+        char *bar = strchr(seg, '|');
+        if (bar) *bar = '\0';
+        int pending_space = 0, wrote = 0;
+        for (const unsigned char *p = (const unsigned char *)seg; *p; ) {
+            if (*p == ' ') { pending_space = wrote; ++p; continue; }
+            int len;
+            (void)utf8_next(p, &len);
+            const char *sep = (!wrote && o > 0) ? " | " : pending_space ? " " : "";
+            size_t need = strlen(sep) + (size_t)len;
+            if (o + need >= cap) { out[o] = '\0'; return; }
+            memcpy(out + o, sep, strlen(sep));
+            o += strlen(sep);
+            memcpy(out + o, p, (size_t)len);
+            o += (size_t)len;
+            p += len;
+            wrote = 1;
+            pending_space = 0;
+        }
+        out[o] = '\0';
+        seg = bar ? bar + 1 : NULL;
+    }
 }
 
 static void source_url(ms_client_t *c, const char *item, const char *source,
@@ -851,10 +907,8 @@ int ms_parse_sources(ms_client_t *c, const char *item_id, const char *body,
             ch->audio_channels = (int)jnum(as, "Channels");
         }
 
-        char name[256];
-        one_line(jstr(ms, "Name"), name, sizeof name);
-        if (name[0]) snprintf(ch->label, sizeof ch->label, "%.63s", name);
-        else         snprintf(ch->label, sizeof ch->label, "Version %d", n + 1);
+        label_clean(jstr(ms, "Name"), ch->label, sizeof ch->label);
+        if (!ch->label[0]) snprintf(ch->label, sizeof ch->label, "Version %d", n + 1);
         ++n;
     }
     if (root) cJSON_Delete(root);
@@ -893,7 +947,7 @@ static void on_playback_info(int ok, int status, const char *body, size_t len, v
     } else {
         PROV_LOG("media server: %d version(s) for %s", n, x->item);
         for (int i = 0; i < n; ++i)
-            PROV_LOG("  [%d] %s | %dx%d %s %s | %s %dch | %lld kbps %lld MB", i, ch[i].label,
+            PROV_LOG("  [%d] %s | %dx%d %s %s | %s %dch | %lld kbps %lld MB (as listed)", i, ch[i].label,
                      ch[i].width, ch[i].height, ch[i].video_codec, ch[i].video_range,
                      ch[i].audio_codec, ch[i].audio_channels,
                      (long long)(ch[i].bitrate_bps / 1000), (long long)(ch[i].size_bytes >> 20));

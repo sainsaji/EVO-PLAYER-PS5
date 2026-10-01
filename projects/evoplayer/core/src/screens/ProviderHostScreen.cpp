@@ -720,7 +720,10 @@ void ProviderHostScreen::chooseStream(int index)
 
     char msg[128];
     std::snprintf(msg, sizeof(msg), "Opening %s...", g_pending.choices[index].label);
-    toast("LIVE TV", msg);
+    /* A media server's versions are not live TV (#116): name the provider. */
+    const evo_provider_t* tp = evo_provider_find(g_pending.provider);
+    const bool live = g_pending.is_live || (tp && (tp->caps & EVO_PROVIDER_CAP_LIVE));
+    toast(live ? "LIVE TV" : (tp ? tp->name : "PROVIDER"), msg);
     evo_rmlui_provider_set_tuning(1);
     evo_rmlui_provider_set_loading(1, msg);
     evo_bt("prov_screen: stream %d chosen for %s: %s", index, g_pending.title,
