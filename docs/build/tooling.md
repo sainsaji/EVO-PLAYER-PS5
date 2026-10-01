@@ -169,7 +169,9 @@ What `cycle` does, in order. It stops at the first anomaly and never retries:
    heartbeat, the result is `no-run`.
 3. **Package.** `package-app.sh --ffpfsc --usb-remote`, then record the
    `.ffpfsc` sha256.
-4. **Deploy.** The deploy runs, then ShadowMount must log the new registration
+4. **Deploy.** The upload is read back and its sha256 compared before it is
+   renamed into place; a mismatch deletes it, and the result is
+   `transport-failure`. The deploy runs, then ShadowMount must log the new registration
    within 90 s. Without it, nothing launches.
 5. **Observe.** klog starts recording first. `launch` is sent only if
    `[GAME] started` doesn't appear within 40 s, which guards against an

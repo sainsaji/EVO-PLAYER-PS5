@@ -165,6 +165,7 @@ do_launch() {
     local slot hb base
     slot="$(lc slot)"; hb="$(lc heartbeat)"
     [[ "${hb}" == RUNNING ]] && die "EVO's heartbeat is advancing - it is running. Not stacking a launch."
+    [[ "${slot}" == UNKNOWN ]] && die "could not read ShadowMount's log - cannot prove the slot is free. Not launching."
     [[ "${slot}" == FREE ]] || die "ShadowMount says ${TITLE_ID} is ${slot} (started, not released). Not launching.
    If it is parked: evo-remote.sh close. Otherwise PS-button-close it first."
     base="$(lc smlen)" || die "could not read ShadowMount's log"

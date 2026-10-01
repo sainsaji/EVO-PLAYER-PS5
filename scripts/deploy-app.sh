@@ -13,6 +13,10 @@
 # sce_sys/param.json are uploaded LAST so a half-finished folder is never
 # mountable. After this, mount + launch from the Games row with ShadowMountPlus.
 #
+# The --ffpfsc image goes up as <TID>.ffpfsc.upload, is read back and
+# sha256-compared with the local file, and is renamed into place only on a
+# match. A mismatch deletes the upload, so ShadowMount+ never sees bad bytes.
+#
 # The --ffpfsc deploy also DELETEs /mnt/usb0/{evo.log, evo_status,
 # evo_compat_report.txt}, so each launch starts with a fresh log.
 #
@@ -211,7 +215,7 @@ if (( FFPFSC )) && [[ "${ACTION}" == "deploy" ]]; then
     fi
     begin "deploy ${TITLE_ID}.ffpfsc -> ftp://${PS5_HOST}:${FTP_PORT}/data/homebrew/"
     python3 - "${PS5_HOST}" "${FTP_PORT}" "${TITLE_ID}" "${FFPFSC_IMG}" <<'PY'
-import sys, time
+import hashlib, sys, time
 from ftplib import FTP, error_perm
 from posixpath import join
 
@@ -264,6 +268,23 @@ with FTP() as ftp:
         except error_perm: pass
     with open(img, "rb") as fh:
         ftp.storbinary(f"STOR {tmp}", fh, blocksize=256 * 1024)
+
+    # Read the upload back and hash it BEFORE promoting it: ShadowMount+ acts
+    # on the final name, so a short or corrupted transfer must never get it.
+    want = hashlib.sha256()
+    with open(img, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            want.update(chunk)
+    got = hashlib.sha256()
+    ftp.retrbinary(f"RETR {tmp}", got.update, blocksize=256 * 1024)
+    if got.hexdigest() != want.hexdigest():
+        try: ftp.sendcmd(f"DELE {tmp}")
+        except error_perm: pass
+        sys.exit(f"upload hash MISMATCH - console {got.hexdigest()[:16]}... "
+                 f"!= local {want.hexdigest()[:16]}...; deleted the upload, "
+                 f"nothing was promoted")
+    print(f"verified sha256 {got.hexdigest()}")
+
     ftp.rename(tmp, remote)
     print(f"done: ftp://{host}:{port}{remote}")
 PY

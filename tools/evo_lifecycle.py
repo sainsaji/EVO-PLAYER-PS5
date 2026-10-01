@@ -52,8 +52,19 @@ MOUNT_READY = f"[SHELLCORE] launch mount ready: {TID}"
 IMAGE_CHECKED = f"unmount complete: source=/data/homebrew/{TID}.ffpfsc"
 
 
-def fetch(path):
-    """File text, None if it does not exist. Raises on a transport failure."""
+def fetch(path, tries=3):
+    """File text, None if it does not exist. Raises once every try failed:
+    one slow FTP read must not be taken for a verdict."""
+    for i in range(tries):
+        try:
+            return _fetch_once(path)
+        except Exception:
+            if i == tries - 1:
+                raise
+            time.sleep(2)
+
+
+def _fetch_once(path):
     with FTP() as f:
         f.connect(HOST, PORT, timeout=15)
         f.login()
