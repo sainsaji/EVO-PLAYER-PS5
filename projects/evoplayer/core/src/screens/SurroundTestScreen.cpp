@@ -407,7 +407,7 @@ bool SurroundTestScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         stopSweep();
         evo_feedback(EVO_FB_CANCEL);
         if (auto sm = Application::getInstance().getScreenManager()) {
-            sm->navigateBack(ScreenId::SettingsPlayback);
+            sm->navigateBack(ScreenId::SettingsAudio);
         }
         return true;
     }

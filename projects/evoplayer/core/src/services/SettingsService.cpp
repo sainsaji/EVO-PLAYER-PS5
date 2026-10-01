@@ -62,6 +62,14 @@ const char* SettingsService::getHdrOutputModeName(HdrOutputMode mode) const {
     }
 }
 
+const char* SettingsService::getAudioOutputChannelsName(AudioOutputChannels channels) const {
+    switch (channels) {
+        case AudioOutputChannels::Stereo: return "STEREO (2.0)";
+        case AudioOutputChannels::Auto:
+        default:                          return "AUTO";
+    }
+}
+
 const char* SettingsService::getRefreshRateModeName(RefreshRateMode mode) const {
     switch (mode) {
         case RefreshRateMode::Off:          return "OFF";
@@ -126,7 +134,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -146,7 +154,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_hdrOutputMode),   // line 17 (HDR10 output)
         m_secondarySubtitlePosition,         // line 18 (#110)
         m_secondarySubtitleColor,            // line 19 (#110)
-        m_askStream ? 1 : 0                  // line 20 (live TV stream picker)
+        m_askStream ? 1 : 0,                 // line 20 (live TV stream picker)
+        static_cast<int>(m_audioOutputChannels) // line 21 (#117 stereo downmix)
     );
 
     std::fclose(file);
@@ -180,9 +189,10 @@ bool SettingsService::loadSettings() {
     int rawSecondaryPosition = 0;
     int rawSecondaryColor = 0;
     int rawAskStream = 1;
+    int rawAudioChannels = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -202,7 +212,8 @@ bool SettingsService::loadSettings() {
         &rawHdrOutputMode,
         &rawSecondaryPosition,
         &rawSecondaryColor,
-        &rawAskStream
+        &rawAskStream,
+        &rawAudioChannels
     );
 
     std::fclose(file);
@@ -262,6 +273,9 @@ bool SettingsService::loadSettings() {
     if (readCount >= 18) setSecondarySubtitlePosition(rawSecondaryPosition);
     if (readCount >= 19) setSecondarySubtitleColor(rawSecondaryColor);
     if (readCount >= 20) m_askStream = (rawAskStream != 0);
+    if (readCount >= 21 && rawAudioChannels >= 0 && rawAudioChannels <= 1) {
+        m_audioOutputChannels = static_cast<AudioOutputChannels>(rawAudioChannels);
+    }
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

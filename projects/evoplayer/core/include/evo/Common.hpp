@@ -55,7 +55,8 @@ enum class ScreenId : int {
     ThemeSelect = 29,
     ImageViewer = 30,
     AudioTrackPicker = 31,
-    SafeToClose = 32     /* the frame EVO parks on after QUIT (SafeToCloseScreen) */
+    SafeToClose = 32,    /* the frame EVO parks on after QUIT (SafeToCloseScreen) */
+    SettingsAudio = 33   /* #118 */
 };
 
 // Playback Quality Profile
@@ -110,6 +111,13 @@ enum class RefreshRateMode : int {
 enum class HdrOutputMode : int {
     Auto = 0,
     Off = 1
+};
+
+// Audio output channels (#117): Auto opens an 8-channel port for surround
+// sources; Stereo always opens 2.0 and libswresample downmixes surround to it.
+enum class AudioOutputChannels : int {
+    Auto = 0,
+    Stereo = 1
 };
 
 

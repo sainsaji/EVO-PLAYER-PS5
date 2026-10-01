@@ -215,6 +215,13 @@ typedef struct evo_agc_device {
     int                     current_refresh_rate;
     int                     is_player_mode;
 
+    /* #114: the last output-mode change (120 Hz or HDR) that has not reached
+     * the screen yet. Logged, with how long it took, at the first flip after
+     * it; NULL once that flip has retired. */
+    const char             *mode_switch_what;
+    int64_t                 mode_switch_t0_us;
+    int                     mode_switch_block_ms;
+
     /* Per-scanout-buffer: UI was composited into it, so it cannot be reused
      * without a clear even in player mode. See evo_agc_runtime_note_ui_drawn. */
     int                     ui_dirty[2];
@@ -1545,6 +1552,8 @@ cleanup_fail:
  * into a hang on exit. Past the deadline we give up and release anyway, which
  * is no worse than the behaviour this replaces.
  */
+static void agc_mode_switch_presented(void); /* #114, defined by set_hdr_output */
+
 static void agc_wait_gpu_idle(unsigned timeout_ms)
 {
     if (!g_agc_dev.initialized)
@@ -2256,6 +2265,7 @@ void evo_agc_runtime_frame_end(void)
                 g_agc_dev.flip_waits += fwaits;
                 if (fwaits >= 120u)
                     g_agc_dev.flip_timeouts++;
+                agc_mode_switch_presented();
             }
 
             /* Frame 40: late enough that RmlUi has drawn a real screen, and the
@@ -2652,6 +2662,43 @@ static void agc_scanout_set_10bit(int ten_bit)
 int32_t sceVideoOutSubmitChangeBufferAttribute2(int32_t handle, int32_t set_index,
                                                 const void *attribute, const void *option);
 
+static int64_t agc_now_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + (int64_t)ts.tv_nsec / 1000;
+}
+
+/*
+ * #114: every output-mode change blanks the TV while it re-locks, and the
+ * blocking part (ConfigureOutput) used to be invisible in evo.log. Note the
+ * switch here; agc_mode_switch_presented() logs the time to the first frame
+ * that reached the screen after it. The TV's own re-lock comes on top.
+ */
+static void agc_mode_switch_note(const char *what, int64_t t0_us)
+{
+    g_agc_dev.mode_switch_what = what;
+    g_agc_dev.mode_switch_t0_us = t0_us;
+    g_agc_dev.mode_switch_block_ms = (int)((agc_now_us() - t0_us) / 1000);
+    evo_boot_log("agc mode switch: %s blocked %d ms", what, g_agc_dev.mode_switch_block_ms);
+}
+
+static void agc_mode_switch_presented(void)
+{
+    if (!g_agc_dev.mode_switch_what)
+        return;
+    evo_boot_log("agc mode switch: %s -> first frame on screen +%d ms (blocked %d ms)",
+                 g_agc_dev.mode_switch_what,
+                 (int)((agc_now_us() - g_agc_dev.mode_switch_t0_us) / 1000),
+                 g_agc_dev.mode_switch_block_ms);
+    g_agc_dev.mode_switch_what = NULL;
+}
+
+int evo_agc_runtime_mode_switch_pending(void)
+{
+    return (g_agc_dev.initialized && g_agc_dev.mode_switch_what) ? 1 : 0;
+}
+
 int evo_agc_runtime_set_hdr_output(int enable)
 {
     enable = enable ? 1 : 0;
@@ -2673,6 +2720,7 @@ int evo_agc_runtime_set_hdr_output(int enable)
                  enable ? "HDR10 Bgr10A2Bt2100Pq" : "SDR Bgra8",
                  (unsigned long long)vfmt);
     evo_boot_log_flush();
+    const int64_t switch_t0 = agc_now_us();
 
     /* No GPU write in the old format may land after the retype. */
     agc_wait_gpu_idle(200);
@@ -2702,6 +2750,7 @@ int evo_agc_runtime_set_hdr_output(int enable)
 
     agc_scanout_set_10bit(enable);
     g_agc_dev.is_hdr = enable;
+    agc_mode_switch_note(enable ? "HDR10 on" : "HDR10 off", switch_t0);
     /* Both buffers still hold pixels in the old format: clear them on their
      * next use, and redraw the video into each. */
     g_agc_dev.ui_dirty[0] = g_agc_dev.ui_dirty[1] = 1;
@@ -2749,10 +2798,13 @@ int evo_agc_runtime_set_120hz(int enable)
     evo_boot_log("agc: switching output mode to %#llx (120hz=%d)",
                  (unsigned long long)mode, enable);
 
+    const int64_t switch_t0 = agc_now_us();
     agc_wait_gpu_idle(200);
 
     int32_t rc = sceVideoOutConfigureOutput(g_agc_dev.video_handle, mode, NULL, NULL, 0);
     evo_boot_log("agc: sceVideoOutConfigureOutput rc=%d (0x%08x)", rc, (unsigned)rc);
+    if (rc == 0)
+        agc_mode_switch_note(enable ? "120 Hz on" : "120 Hz off", switch_t0);
 
     evo_vo_resolution_status vres;
     memset(&vres, 0, sizeof(vres));

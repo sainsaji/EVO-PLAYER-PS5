@@ -77,6 +77,7 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
 #endif
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
+        case ScreenId::SettingsAudio:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
         case ScreenId::SettingsSystem:  return EVO_ENABLE_EMBY ? 3 : 2; // Settings

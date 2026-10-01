@@ -2361,317 +2361,222 @@ int main(int argc, char** argv) {
 
     set_nav(5, 0);
 
-    // 1. Settings Main Hub
+    /* Settings rows (#118): one helper so each fixture below reads like the
+     * section list in SettingsScreen.cpp's kSections/makeDef(). */
+    auto settings_row = [](evo_rmlui_settings_row_t& r, const char* title, const char* detail,
+                           const char* icon, int kind, const char* badge, int on) {
+        r.title = title;
+        r.detail = detail;
+        r.icon_path = icon;
+        r.kind = kind;
+        r.badge = badge;
+        r.toggle_on = on;
+        r.has_chevron = (kind == EVO_RMLUI_ROW_VALUE || kind == EVO_RMLUI_ROW_ACTION) ? 1 : 0;
+    };
+
+    // 1. Settings Main Hub - sidebar owns the cursor, the detail pane previews section 0
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        /* Sidebar owns the cursor, and the detail pane previews the
-         * highlighted section's real options - no row focused. Mirrors
-         * buildSectionRows(0, .., -1) in SettingsScreen.cpp. */
-        set.title = "PLAYBACK & VIDEO";
-        set.subtitle = "ASPECT RATIO, RESUME & DECODER";
-        set.counter = "4 SETTINGS";
+        set.title = "VIDEO & DISPLAY";
+        set.subtitle = "DECODER, UPSCALING, 120 HZ & HDR";
+        set.counter = "7 SETTINGS";
         set.rail_active_idx = 5;
         set.section_active = 0;
         set.sidebar_focused = 1;
         set.rail_focused = 0;
-        set.row_count = 4;
-
-        set.rows[0].title = "DEFAULT ASPECT RATIO";
-        set.rows[0].detail = "FIT, FILL OR STRETCH";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
-        set.rows[0].badge = "FIT";
-        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
-        set.rows[0].has_chevron = 1;
-
-        set.rows[1].title = "RESUME PLAYBACK";
-        set.rows[1].detail = "REMEMBER PLAYBACK POSITION";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
-        set.rows[1].toggle_on = 1;
-
-        set.rows[2].title = "SURROUND SOUND TEST";
-        set.rows[2].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[2].badge = "OPEN";
-        set.rows[2].kind = EVO_RMLUI_ROW_ACTION;
-        set.rows[2].has_chevron = 1;
-
-        set.rows[3].title = "VIDEO DECODER";
-        set.rows[3].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
-        set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        set.rows[3].badge = "Auto (FFmpeg)";
-        set.rows[3].kind = EVO_RMLUI_ROW_VALUE;
-        set.rows[3].has_chevron = 1;
+        set.row_count = 7;
+        settings_row(set.rows[0], "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN", "projects/evoplayer/assets/icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, "FIT", 0);
+        settings_row(set.rows[1], "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "projects/evoplayer/assets/icons/icon_resume.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[2], "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "projects/evoplayer/assets/icons/icon_cpu.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        settings_row(set.rows[3], "UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN", "projects/evoplayer/assets/icons/icon_sparkles.png", EVO_RMLUI_ROW_VALUE, "SHARP", 0);
+        settings_row(set.rows[4], "AI NETWORK", "ONLY USED WHEN UPSCALING IS SET TO AI", "projects/evoplayer/assets/icons/icon_brain.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        set.rows[4].is_disabled = 1;
+        settings_row(set.rows[5], "120 HZ OUTPUT", "5:5 PULLDOWN FOR 24 FPS & 120 FPS UI", "projects/evoplayer/assets/icons/icon_gauge.png", EVO_RMLUI_ROW_VALUE, "OFF", 0);
+        settings_row(set.rows[6], "HDR OUTPUT", "HDR10 TO THE TV WHILE HDR VIDEO PLAYS", "projects/evoplayer/assets/icons/icon_sun.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_settings_main.bmp", fb.data(), width, height);
     }
 
-    // 2. Playback & Video Subsection
+    // 2. Video & Display
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        set.title = "PLAYBACK & VIDEO";
-        set.subtitle = "SETTINGS  -  PROFILES, ASPECT RATIO & RESUME";
-        set.counter = "1 OF 5";
+        set.title = "VIDEO & DISPLAY";
+        set.subtitle = "DECODER, UPSCALING, 120 HZ & HDR";
+        set.counter = "7 SETTINGS";
         set.rail_active_idx = 5;
         set.section_active = 0;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
-        set.row_count = 5;
-
-        set.rows[0].title = "PLAYBACK PROFILE";
-        set.rows[0].detail = "SELECT ENGINE PROFILE";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
-        set.rows[0].badge = "Performance";
-        set.rows[0].has_chevron = 1;
-        set.rows[0].is_focused = 1;
-
-        set.rows[1].title = "DEFAULT ASPECT RATIO";
-        set.rows[1].detail = "FIT, FILL OR STRETCH";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
-        set.rows[1].badge = "FIT";
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
-
-        set.rows[2].title = "RESUME PLAYBACK";
-        set.rows[2].detail = "REMEMBER PLAYBACK POSITION";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[2].kind = EVO_RMLUI_ROW_TOGGLE;
-        set.rows[2].toggle_on = 1;
-        set.rows[2].has_chevron = 1;
-        set.rows[2].is_focused = 0;
-
-        set.rows[3].title = "SURROUND SOUND TEST";
-        set.rows[3].detail = "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION";
-        set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[3].badge = "";
-        set.rows[3].has_chevron = 1;
-        set.rows[3].is_focused = 0;
-
-        /* #37: native decode never runs on host — evo_vdec_probe() is a
-         * no-op there, so this is what a real build shows too. */
-        set.rows[4].title = "VIDEO DECODER";
-        set.rows[4].detail = "AUTO, SOFTWARE OR HARDWARE DECODE";
-        set.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        set.rows[4].badge = "Auto (FFmpeg)";
-        set.rows[4].has_chevron = 1;
-        set.rows[4].is_focused = 0;
-
-        /* #103 */
-        set.rows[5].title = "UPSCALING";
-        set.rows[5].detail = "SHARPEN VIDEO SMALLER THAN THE SCREEN";
-        set.rows[5].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
-        set.rows[5].badge = "SHARP";
-        set.rows[5].has_chevron = 1;
-
-        /* UPSCALING is SHARP above, so AI NETWORK is disabled (SettingsScreen) */
-        set.rows[6].title = "AI NETWORK";
-        set.rows[6].detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
-        set.rows[6].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        set.rows[6].badge = "LARGE (PRO)";
-        set.rows[6].has_chevron = 1;
-        set.rows[6].is_disabled = 1;
         set.row_count = 7;
+        settings_row(set.rows[0], "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN", "projects/evoplayer/assets/icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, "FIT", 0);
+        settings_row(set.rows[1], "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "projects/evoplayer/assets/icons/icon_resume.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[2], "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "projects/evoplayer/assets/icons/icon_cpu.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        settings_row(set.rows[3], "UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN", "projects/evoplayer/assets/icons/icon_sparkles.png", EVO_RMLUI_ROW_VALUE, "SHARP", 0);
+        settings_row(set.rows[4], "AI NETWORK", "ONLY USED WHEN UPSCALING IS SET TO AI", "projects/evoplayer/assets/icons/icon_brain.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        set.rows[4].is_disabled = 1;
+        settings_row(set.rows[5], "120 HZ OUTPUT", "5:5 PULLDOWN FOR 24 FPS & 120 FPS UI", "projects/evoplayer/assets/icons/icon_gauge.png", EVO_RMLUI_ROW_VALUE, "OFF", 0);
+        settings_row(set.rows[6], "HDR OUTPUT", "HDR10 TO THE TV WHILE HDR VIDEO PLAYS", "projects/evoplayer/assets/icons/icon_sun.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        set.rows[0].is_focused = 1;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_settings_playback.bmp", fb.data(), width, height);
     }
 
-    // 3. Subtitles Subsection
+    // 2b. Audio (#118)
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "AUDIO";
+        set.subtitle = "OUTPUT CHANNELS, SPEAKERS & SOUNDS";
+        set.counter = "3 SETTINGS";
+        set.rail_active_idx = 5;
+        set.section_active = 1;
+        set.sidebar_focused = 0;
+        set.rail_focused = 0;
+        set.row_count = 3;
+        settings_row(set.rows[0], "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "projects/evoplayer/assets/icons/icon_volume.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        settings_row(set.rows[1], "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "projects/evoplayer/assets/icons/icon_speaker.png", EVO_RMLUI_ROW_ACTION, "OPEN", 0);
+        settings_row(set.rows[2], "NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS", "projects/evoplayer/assets/icons/icon_listener.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        set.rows[0].is_focused = 1;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_audio.bmp", fb.data(), width, height);
+    }
+
+    // 2c. Audio with OUTPUT CHANNELS expanded
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "AUDIO";
+        set.subtitle = "OUTPUT CHANNELS, SPEAKERS & SOUNDS";
+        set.counter = "3 SETTINGS";
+        set.rail_active_idx = 5;
+        set.section_active = 1;
+        set.sidebar_focused = 0;
+        set.rail_focused = 0;
+        set.row_count = 5;
+        settings_row(set.rows[0], "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "projects/evoplayer/assets/icons/icon_volume.png", EVO_RMLUI_ROW_VALUE, "AUTO", 0);
+        settings_row(set.rows[1], "AUTO", "", "", EVO_RMLUI_ROW_OPTION, "", 1);
+        settings_row(set.rows[2], "STEREO (2.0)", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[3], "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "projects/evoplayer/assets/icons/icon_speaker.png", EVO_RMLUI_ROW_ACTION, "OPEN", 0);
+        settings_row(set.rows[4], "NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS", "projects/evoplayer/assets/icons/icon_listener.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        set.rows[0].is_focused = 1;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_audio_expanded.bmp", fb.data(), width, height);
+    }
+
+    // 3. Subtitles
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
         set.title = "SUBTITLES";
-        set.subtitle = "SETTINGS  -  AUTO-DETECT & DEFAULT SIZING";
-        set.counter = "1 OF 2";
+        set.subtitle = "PREFERENCES & APPEARANCE";
+        set.counter = "4 SETTINGS";
         set.rail_active_idx = 5;
-        set.section_active = 1;
+        set.section_active = 2;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
-        set.row_count = 2;
-
-        set.rows[0].title = "AUTO-DETECT SUBTITLES";
-        set.rows[0].detail = "LOAD EXTERNAL .SRT AND EMBEDDED STREAMS";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[0].badge = "ON";
-        set.rows[0].has_chevron = 1;
+        set.row_count = 4;
+        settings_row(set.rows[0], "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "projects/evoplayer/assets/icons/icon_subtitles.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[1], "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "projects/evoplayer/assets/icons/icon_type.png", EVO_RMLUI_ROW_VALUE, "STANDARD", 0);
+        settings_row(set.rows[2], "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES", "projects/evoplayer/assets/icons/icon_subtitles.png", EVO_RMLUI_ROW_VALUE, "STACKED ABOVE", 0);
+        settings_row(set.rows[3], "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART", "projects/evoplayer/assets/icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, "YELLOW", 0);
         set.rows[0].is_focused = 1;
-
-        set.rows[1].title = "DEFAULT SUBTITLE SIZE";
-        set.rows[1].detail = "MEDIUM (RECOMMENDED FOR 4K TVS)";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_aspect.png";
-        set.rows[1].badge = "MEDIUM";
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_settings_subtitles.bmp", fb.data(), width, height);
     }
 
-    // 4. Interface & Controls Subsection
+    // 4. Interface & Storage
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        set.title = "INTERFACE & CONTROLS";
-        set.subtitle = "SETTINGS  -  THEMES, SOUNDS, LIGHTBAR & SORTING";
-        set.counter = "1 OF 5";
+        set.title = "INTERFACE & STORAGE";
+        set.subtitle = "THEMES, CONTROLS & BROWSING";
+        set.counter = "5 SETTINGS";
         set.rail_active_idx = 5;
-        set.section_active = 2;
+        set.section_active = 3;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 5;
-
-        set.rows[0].title = "THEME";
-        set.rows[0].detail = "MIDNIGHT OBSIDIAN";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
-        set.rows[0].badge = "ACTIVE";
-        set.rows[0].has_chevron = 1;
+        settings_row(set.rows[0], "THEME", "COLOR PALETTE & ACCENTS", "projects/evoplayer/assets/icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, "MIDNIGHT OBSIDIAN", 0);
+        settings_row(set.rows[1], "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT", "projects/evoplayer/assets/icons/icon_gamepad.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[2], "FOLDERS FIRST", "USB FILE BROWSER SORTING", "projects/evoplayer/assets/icons/icon_folder.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[3], "KEYBOARD INPUT", "TEXT ENTRY METHOD", "projects/evoplayer/assets/icons/icon_keyboard.png", EVO_RMLUI_ROW_VALUE, "VIRTUAL KEYBOARD", 0);
+        settings_row(set.rows[4], "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL", "projects/evoplayer/assets/icons/icon_tv.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
         set.rows[0].is_focused = 1;
-
-        set.rows[1].title = "NAVIGATION SOUNDS";
-        set.rows[1].detail = "PLAY AUDIO CLICKS ON INPUT";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_resume.png";
-        set.rows[1].kind = EVO_RMLUI_ROW_TOGGLE;
-        set.rows[1].toggle_on = 1;
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
-
-        set.rows[2].title = "CONTROLLER LIGHTBAR";
-        set.rows[2].detail = "SYNC DUALSENSE ACCENT WITH THEME";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
-        set.rows[2].badge = "THEME";
-        set.rows[2].has_chevron = 1;
-        set.rows[2].is_focused = 0;
-
-        set.rows[3].title = "FOLDER SORTING";
-        set.rows[3].detail = "NAME ASCENDING (A-Z)";
-        set.rows[3].icon_path = "projects/evoplayer/assets/icons/icon_browse_usb.png";
-        set.rows[3].badge = "A-Z";
-        set.rows[3].has_chevron = 1;
-        set.rows[3].is_focused = 0;
-
-        set.rows[4].title = "ON-SCREEN KEYBOARD";
-        set.rows[4].detail = "SYSTEM OS KEYBOARD FOR SEARCH";
-        set.rows[4].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        set.rows[4].badge = "ENABLED";
-        set.rows[4].has_chevron = 1;
-        set.rows[4].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_settings_interface.bmp", fb.data(), width, height);
     }
 
-    // Interface with the THEME row expanded - every choice visible at once,
-    // which is the whole point of the options rework.
+    // Interface with the THEME row expanded - every choice visible at once
     {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
-        set.title = "INTERFACE & CONTROLS";
-        set.subtitle = "THEMES, SOUNDS & CONTROLS";
+        set.title = "INTERFACE & STORAGE";
+        set.subtitle = "THEMES, CONTROLS & BROWSING";
         set.counter = "5 SETTINGS";
         set.rail_active_idx = 5;
-        set.section_active = 2;
+        set.section_active = 3;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
-        set.row_count = 10;
-
-        set.rows[0].title = "THEME";
-        set.rows[0].detail = "COLOR PALETTE & ACCENTS";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
-        set.rows[0].badge = "MIDNIGHT OBSIDIAN";
-        set.rows[0].kind = EVO_RMLUI_ROW_VALUE;
-        set.rows[0].has_chevron = 1;
+        set.row_count = 12;
+        settings_row(set.rows[0], "THEME", "COLOR PALETTE & ACCENTS", "projects/evoplayer/assets/icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, "MIDNIGHT OBSIDIAN", 0);
+        settings_row(set.rows[1], "MIDNIGHT OBSIDIAN", "", "", EVO_RMLUI_ROW_OPTION, "", 1);
+        settings_row(set.rows[2], "SAPPHIRE BLUE", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[3], "AURORA", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[4], "CARBON", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[5], "EMBER", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[6], "MONO SLATE", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[7], "DEEP VIOLET", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[8], "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT", "projects/evoplayer/assets/icons/icon_gamepad.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[9], "FOLDERS FIRST", "USB FILE BROWSER SORTING", "projects/evoplayer/assets/icons/icon_folder.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
+        settings_row(set.rows[10], "KEYBOARD INPUT", "TEXT ENTRY METHOD", "projects/evoplayer/assets/icons/icon_keyboard.png", EVO_RMLUI_ROW_VALUE, "VIRTUAL KEYBOARD", 0);
+        settings_row(set.rows[11], "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL", "projects/evoplayer/assets/icons/icon_tv.png", EVO_RMLUI_ROW_TOGGLE, "", 1);
         set.rows[0].is_focused = 1;
-
-        set.rows[1].title = "MIDNIGHT OBSIDIAN";
-        set.rows[1].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[1].toggle_on = 1;
-
-        set.rows[2].title = "SAPPHIRE BLUE";
-        set.rows[2].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[2].toggle_on = 0;
-
-        set.rows[3].title = "AURORA";
-        set.rows[3].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[3].toggle_on = 0;
-
-        set.rows[4].title = "CARBON";
-        set.rows[4].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[4].toggle_on = 0;
-
-        set.rows[5].title = "EMBER";
-        set.rows[5].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[5].toggle_on = 0;
-
-        set.rows[6].title = "MONO SLATE";
-        set.rows[6].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[6].toggle_on = 0;
-
-        set.rows[7].title = "DEEP VIOLET";
-        set.rows[7].kind = EVO_RMLUI_ROW_OPTION;
-        set.rows[7].toggle_on = 0;
-
-        set.rows[8].title = "NAVIGATION SOUNDS";
-        set.rows[8].detail = "AUDIO FEEDBACK ON D-PAD & BUTTONS";
-        set.rows[8].icon_path = "projects/evoplayer/assets/icons/icon_subtitles.png";
-        set.rows[8].kind = EVO_RMLUI_ROW_TOGGLE;
-        set.rows[8].toggle_on = 1;
-
-        set.rows[9].title = "CONTROLLER LIGHTBAR";
-        set.rows[9].detail = "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT";
-        set.rows[9].icon_path = "projects/evoplayer/assets/icons/icon_palette.png";
-        set.rows[9].kind = EVO_RMLUI_ROW_TOGGLE;
-        set.rows[9].toggle_on = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
         save_bmp_24("output/uiview/rml_settings_theme_expanded.bmp", fb.data(), width, height);
     }
 
-    // 5. System & Diagnostics Subsection
+    // 5. System & Diagnostics
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);
         evo_rmlui_settings_params_t set;
         memset(&set, 0, sizeof(set));
         set.title = "SYSTEM & DIAGNOSTICS";
-        set.subtitle = "SETTINGS  -  DEVELOPER TOOLS & MEDIA TILE";
-        set.counter = "1 OF 3";
+        set.subtitle = "DIAGNOSTICS & SYSTEM MANAGEMENT";
+        set.counter = "5 SETTINGS";
         set.rail_active_idx = 5;
-        set.section_active = 3;
+        set.section_active = 4;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
-        set.row_count = 3;
-
-        set.rows[0].title = "DEVELOPER TOOLS";
-        set.rows[0].detail = "COMPATIBILITY REPORT, DEBUG HUD & HARDWARE TESTS";
-        set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
-        set.rows[0].badge = "OPEN";
-        set.rows[0].has_chevron = 1;
+        set.row_count = 5;
+        settings_row(set.rows[0], "COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0", "projects/evoplayer/assets/icons/icon_report.png", EVO_RMLUI_ROW_ACTION, "RUN", 0);
+        settings_row(set.rows[1], "DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS", "projects/evoplayer/assets/icons/icon_activity.png", EVO_RMLUI_ROW_TOGGLE, "", 0);
+        settings_row(set.rows[2], "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS", "projects/evoplayer/assets/icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, "OPEN", 0);
+        settings_row(set.rows[3], "CONSOLE", "DETECTED HARDWARE MODEL", "projects/evoplayer/assets/icons/icon_tv.png", EVO_RMLUI_ROW_ACTION, "NOT DETECTED", 0);
+        settings_row(set.rows[4], "QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER", "projects/evoplayer/assets/icons/icon_power.png", EVO_RMLUI_ROW_ACTION, "QUIT", 0);
         set.rows[0].is_focused = 1;
-
-        set.rows[1].title = "RESET APPLICATION PREFERENCES";
-        set.rows[1].detail = "RESTORE DEFAULT SETTINGS";
-        set.rows[1].icon_path = "projects/evoplayer/assets/icons/icon_settings.png";
-        set.rows[1].badge = "RESET";
-        set.rows[1].has_chevron = 1;
-        set.rows[1].is_focused = 0;
-
-        set.rows[2].title = "MEDIA HOME TILE";
-        set.rows[2].detail = "REMOVE QUICK LAUNCH TILE FROM PS5 HOME SCREEN";
-        set.rows[2].icon_path = "projects/evoplayer/assets/icons/icon_home.png";
-        set.rows[2].badge = "INSTALLED";
-        set.rows[2].has_chevron = 1;
-        set.rows[2].is_focused = 0;
 
         evo_rmlui_update_settings(&set);
         evo_rmlui_render_settings(fb.data(), width, height);
@@ -2734,7 +2639,7 @@ int main(int argc, char** argv) {
         set.subtitle = "DIAGNOSTICS & SYSTEM REPORTS";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
-        set.section_active = 3;
+        set.section_active = 4;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;
@@ -2783,7 +2688,7 @@ int main(int argc, char** argv) {
         set.subtitle = "CREDITS, ENGINE & PROJECT INFO";
         set.counter = "1 OF 6";
         set.rail_active_idx = 6;
-        set.section_active = 3;
+        set.section_active = 4;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 6;
@@ -2844,7 +2749,7 @@ int main(int argc, char** argv) {
         set.subtitle = "INTERFACE PALETTES & DUALSENSE LIGHTBAR SYNC";
         set.counter = "1 OF 4";
         set.rail_active_idx = 5;
-        set.section_active = 2;
+        set.section_active = 3;
         set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 4;

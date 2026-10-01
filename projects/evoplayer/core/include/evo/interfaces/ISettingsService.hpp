@@ -83,6 +83,10 @@ public:
     virtual void setHdrOutputMode(HdrOutputMode mode) = 0;
     virtual const char* getHdrOutputModeName(HdrOutputMode mode) const = 0;
 
+    virtual AudioOutputChannels getAudioOutputChannels() const = 0;
+    virtual void setAudioOutputChannels(AudioOutputChannels channels) = 0;
+    virtual const char* getAudioOutputChannelsName(AudioOutputChannels channels) const = 0;
+
     virtual void syncThemeToRmlUi() = 0;
 
 };

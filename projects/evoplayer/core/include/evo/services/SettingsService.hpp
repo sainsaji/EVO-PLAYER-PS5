@@ -73,6 +73,10 @@ public:
     void setHdrOutputMode(HdrOutputMode mode) override { m_hdrOutputMode = mode; }
     const char* getHdrOutputModeName(HdrOutputMode mode) const override;
 
+    AudioOutputChannels getAudioOutputChannels() const override { return m_audioOutputChannels; }
+    void setAudioOutputChannels(AudioOutputChannels channels) override { m_audioOutputChannels = channels; }
+    const char* getAudioOutputChannelsName(AudioOutputChannels channels) const override;
+
     void syncThemeToRmlUi() override;
 
 private:
@@ -97,6 +101,7 @@ private:
     AiNetwork m_aiNetwork = AiNetwork::Auto;
     RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
     HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
+    AudioOutputChannels m_audioOutputChannels = AudioOutputChannels::Auto;
     bool m_debugOverlayEnabled = false;
 };
 

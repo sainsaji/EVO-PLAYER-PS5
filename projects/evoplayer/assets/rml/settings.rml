@@ -7,7 +7,7 @@
 
     <!--
       Two-pane settings, macOS System Settings shape: a frosted sidebar listing
-      the four sections over a wallpaper, and a detail pane whose rows are
+      the five sections over a wallpaper, and a detail pane whose rows are
       grouped into one frosted card.  The wallpaper exists so the glass has
       something to refract - backdrop-filter over a flat fill is a no-op.
     -->
@@ -29,38 +29,47 @@
             <div id="sidebar-divider"></div>
             <div id="sb-0" class="sb-section">
                 <div class="sb-icon-box">
-                    <img id="sb-icon-0" src="../icons/icon_resume.png" class="sb-icon"/>
+                    <img id="sb-icon-0" src="../icons/icon_tv.png" class="sb-icon"/>
                 </div>
                 <div class="sb-text">
-                    <div id="sb-label-0" class="sb-label">PLAYBACK &amp; VIDEO</div>
-                    <div id="sb-sub-0" class="sb-sub">Aspect, resume &amp; decoder</div>
+                    <div id="sb-label-0" class="sb-label">VIDEO &amp; DISPLAY</div>
+                    <div id="sb-sub-0" class="sb-sub">Decoder, upscaling &amp; HDR</div>
                 </div>
             </div>
             <div id="sb-1" class="sb-section">
                 <div class="sb-icon-box">
-                    <img id="sb-icon-1" src="../icons/icon_subtitles.png" class="sb-icon"/>
+                    <img id="sb-icon-1" src="../icons/icon_volume.png" class="sb-icon"/>
                 </div>
                 <div class="sb-text">
-                    <div id="sb-label-1" class="sb-label">SUBTITLES</div>
-                    <div id="sb-sub-1" class="sb-sub">Auto-detect &amp; sizing</div>
+                    <div id="sb-label-1" class="sb-label">AUDIO</div>
+                    <div id="sb-sub-1" class="sb-sub">Output channels &amp; speakers</div>
                 </div>
             </div>
             <div id="sb-2" class="sb-section">
                 <div class="sb-icon-box">
-                    <img id="sb-icon-2" src="../icons/icon_palette.png" class="sb-icon"/>
+                    <img id="sb-icon-2" src="../icons/icon_subtitles.png" class="sb-icon"/>
                 </div>
                 <div class="sb-text">
-                    <div id="sb-label-2" class="sb-label">INTERFACE &amp; CONTROLS</div>
-                    <div id="sb-sub-2" class="sb-sub">Themes, sounds &amp; sorting</div>
+                    <div id="sb-label-2" class="sb-label">SUBTITLES</div>
+                    <div id="sb-sub-2" class="sb-sub">Auto-load &amp; appearance</div>
                 </div>
             </div>
             <div id="sb-3" class="sb-section">
                 <div class="sb-icon-box">
-                    <img id="sb-icon-3" src="../icons/icon_developer_tools.png" class="sb-icon"/>
+                    <img id="sb-icon-3" src="../icons/icon_palette.png" class="sb-icon"/>
                 </div>
                 <div class="sb-text">
-                    <div id="sb-label-3" class="sb-label">SYSTEM &amp; DIAGNOSTICS</div>
-                    <div id="sb-sub-3" class="sb-sub">Developer tools &amp; tile</div>
+                    <div id="sb-label-3" class="sb-label">INTERFACE &amp; STORAGE</div>
+                    <div id="sb-sub-3" class="sb-sub">Themes, controls &amp; browsing</div>
+                </div>
+            </div>
+            <div id="sb-4" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-4" src="../icons/icon_developer_tools.png" class="sb-icon"/>
+                </div>
+                <div class="sb-text">
+                    <div id="sb-label-4" class="sb-label">SYSTEM &amp; DIAGNOSTICS</div>
+                    <div id="sb-sub-4" class="sb-sub">Reports, debug &amp; quit</div>
                 </div>
             </div>
         </div>

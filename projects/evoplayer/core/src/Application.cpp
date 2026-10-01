@@ -23,6 +23,7 @@
 #include "evo_boot_log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
 #include <sys/time.h>
 #include <cstdio>
@@ -456,10 +457,11 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<BrowserScreen>());
     m_screenManager->registerScreen(std::make_unique<PlayerScreen>());
     m_screenManager->registerScreen(std::make_unique<SettingsScreen>());
-    m_screenManager->registerScreen(std::make_unique<SettingsPlaybackScreen>());
-    m_screenManager->registerScreen(std::make_unique<SettingsSubtitlesScreen>());
-    m_screenManager->registerScreen(std::make_unique<SettingsInterfaceScreen>());
-    m_screenManager->registerScreen(std::make_unique<SettingsSystemScreen>());
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsPlayback));
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsAudio));
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsSubtitles));
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsInterface));
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsSystem));
     m_screenManager->registerScreen(std::make_unique<SubtitlePickerScreen>());
     m_screenManager->registerScreen(std::make_unique<AudioTrackPickerScreen>());
     m_screenManager->registerScreen(std::make_unique<TextReaderScreen>());
@@ -1412,24 +1414,11 @@ int Application::run() {
         // 3. Determine if graphics needs to render/present
         bool isPlayer = (m_screenManager->getCurrentScreenId() == ScreenId::Player);
         bool isSurround = (m_screenManager->getCurrentScreenId() == ScreenId::SurroundTest);
-        bool isHighRefresh = isPlayer || isSurround;
 
         static bool s_was_player = false;
         if (isPlayer != s_was_player) {
             evo_agc_runtime_set_player_mode(isPlayer ? 1 : 0);
             s_was_player = isPlayer;
-        }
-
-        static bool s_was_high_refresh = false;
-        if (isHighRefresh != s_was_high_refresh) {
-            if (m_settingsService && m_settingsService->getRefreshRateMode() == RefreshRateMode::PlaybackOnly) {
-                if (evo_agc_runtime_supports_120hz()) {
-                    evo_bt("120Hz: playback-only transition isHighRefresh=%d (player=%d, surround=%d)",
-                           isHighRefresh ? 1 : 0, isPlayer ? 1 : 0, isSurround ? 1 : 0);
-                    evo_agc_runtime_set_120hz(isHighRefresh ? 1 : 0);
-                }
-            }
-            s_was_high_refresh = isHighRefresh;
         }
 
         /*
@@ -1456,6 +1445,54 @@ int Application::run() {
                     s_hdr_refused = true;
                     toast("HDR", "The display did not accept HDR10 - playing tone-mapped");
                 }
+            }
+        }
+
+        /*
+         * 120 Hz, Playback only. Each switch blanks the TV for a couple of
+         * seconds (#114), so only switch when 120 Hz buys something: video
+         * whose rate divides 119.88 (23.976, 24, 29.97, 30, 59.94, 60) and the
+         * Surround Studio. 25/50 fps judders at 120 Hz just as at 60, and
+         * music has no frames to pace. Between files the rate is not known
+         * yet (no stream), so the current mode is held rather than flipped.
+         *
+         * Runs after the HDR decision on purpose: leaving an HDR video, the
+         * SDR retype is flipped to the screen first and the 120 -> 60 switch
+         * follows on the next frame, so the TV re-locks once into SDR 60 Hz
+         * instead of re-locking for the rate and again, 2 s later, for SDR.
+         */
+        if (m_settingsService && m_settingsService->getRefreshRateMode() == RefreshRateMode::PlaybackOnly &&
+            evo_agc_runtime_supports_120hz()) {
+            static bool s_want_120 = false;
+            static int  s_wait_frames = 0;
+            bool want = s_want_120;
+            if (isSurround) {
+                want = true;
+            } else if (!isPlayer) {
+                want = false;
+            } else if (m_playbackController && m_playbackController->isActive()) {
+                if (m_playbackController->isMusicMode()) {
+                    want = false;
+                } else {
+                    const double fps = evo_pb_video_fps();
+                    if (fps > 1.0) {
+                        const double k = 119.88 / fps;
+                        const double kr = static_cast<double>(static_cast<int>(k + 0.5));
+                        want = kr >= 1.0 && std::fabs(k - kr) < 0.02 * kr;
+                    }
+                }
+            }
+            /* A pending HDR retype goes to the screen before the rate change.
+             * Bounded: if nothing flips for half a second, switch anyway. */
+            const bool hold = evo_agc_runtime_mode_switch_pending() && s_wait_frames < 30;
+            if (want != s_want_120 && hold) {
+                ++s_wait_frames;
+            } else if (want != s_want_120) {
+                evo_bt("120Hz: playback-only -> %d (player=%d surround=%d fps=%.3f)",
+                       want ? 1 : 0, isPlayer ? 1 : 0, isSurround ? 1 : 0, evo_pb_video_fps());
+                evo_agc_runtime_set_120hz(want ? 1 : 0);
+                s_want_120 = want;
+                s_wait_frames = 0;
             }
         }
 

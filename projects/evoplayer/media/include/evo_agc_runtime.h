@@ -216,6 +216,9 @@ int                       evo_agc_runtime_supports_120hz(void);
 int                       evo_agc_runtime_is_120hz(void);
 int                       evo_agc_runtime_get_refresh_rate(void);
 int                       evo_agc_runtime_set_120hz(int enable);
+/* #114: 1 while the last 120 Hz / HDR switch has not been flipped to the
+ * screen yet. */
+int                       evo_agc_runtime_mode_switch_pending(void);
 
 /*
  * Real HDR10 output. enable=1 re-registers the display buffers as

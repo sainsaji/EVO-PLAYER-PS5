@@ -8,6 +8,7 @@
 #include "evo_hw.h"
 #include "evo_agc_runtime.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -19,12 +20,46 @@ namespace evo {
 
 namespace {
 
-constexpr int kSectionCount = 4;
-constexpr int kMaxDefs      = 9;
-constexpr int kMaxOptions   = EVO_THEME_MAX;   /* themes are the longest list */
+constexpr int kMaxDefs    = 16;
+constexpr int kMaxOptions = EVO_THEME_MAX;   /* themes are the longest list */
 
-
-enum SettingAction { ACT_NONE = 0, ACT_SURROUND, ACT_COMPAT_REPORT, ACT_DEVTOOLS, ACT_QUIT };
+/*
+ * Every setting the screen can show, by name rather than by position (#118).
+ * Toggling, picking a choice and running an action all dispatch on this key,
+ * so a section's rows can be added to or reordered without touching any of
+ * that code. Sections are just lists of keys - see kSections below.
+ */
+enum class SettingKey : int {
+    /* VIDEO & DISPLAY */
+    DefaultAspect,
+    ResumePlayback,
+    VideoDecoder,
+    Upscaling,
+    AiNetwork,
+    RefreshRate,
+    HdrOutput,
+    /* AUDIO */
+    OutputChannels,
+    SurroundTest,
+    NavigationSounds,
+    /* SUBTITLES */
+    AutoSubtitles,
+    SubtitleFont,
+    SecondaryPosition,
+    SecondaryColour,
+    /* INTERFACE & STORAGE */
+    Theme,
+    Lightbar,
+    FoldersFirst,
+    KeyboardInput,
+    AskStream,
+    /* SYSTEM & DIAGNOSTICS */
+    CompatReport,
+    DebugOverlay,
+    DeveloperTools,
+    ConsoleModel,
+    QuitEvo,
+};
 
 /*
  * One description of a setting, independent of how it is drawn.
@@ -34,202 +69,297 @@ enum SettingAction { ACT_NONE = 0, ACT_SURROUND, ACT_COMPAT_REPORT, ACT_DEVTOOLS
  * theme used to mean cycling a badge blind, with no way to see the list.
  */
 struct SettingDef {
+    SettingKey  key;
     const char* title;
     const char* detail;
     const char* icon;
     int         kind;
     bool        toggle_on;
     const char* badge;
-    int         action;
     int         opt_count;
     int         opt_current;
     const char* opt_label[kMaxOptions];
     bool        disabled;   /* depends on another setting: dimmed, Cross does nothing */
 };
 
-struct SectionHeader { const char* title; const char* subtitle; };
-const SectionHeader kHeaders[kSectionCount] = {
-    {"PLAYBACK & VIDEO",     "ASPECT RATIO, RESUME & DECODER"},
-    {"SUBTITLES",            "PREFERENCES & APPEARANCE"},
-    {"INTERFACE & CONTROLS", "THEMES, SOUNDS & CONTROLS"},
-    {"SYSTEM & DIAGNOSTICS", "DIAGNOSTICS & SYSTEM MANAGEMENT"},
+const SettingKey kVideoKeys[] = {
+    SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
+    SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
+    SettingKey::HdrOutput,
+};
+const SettingKey kAudioKeys[] = {
+    SettingKey::OutputChannels, SettingKey::SurroundTest, SettingKey::NavigationSounds,
+};
+const SettingKey kSubtitleKeys[] = {
+    SettingKey::AutoSubtitles, SettingKey::SubtitleFont,
+    SettingKey::SecondaryPosition, SettingKey::SecondaryColour,
+};
+const SettingKey kInterfaceKeys[] = {
+    SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
+    SettingKey::KeyboardInput, SettingKey::AskStream,
+};
+const SettingKey kSystemKeys[] = {
+    SettingKey::CompatReport, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
+    SettingKey::ConsoleModel, SettingKey::QuitEvo,
 };
 
-int buildSectionDefs(int section, SettingDef* d) {
-    auto settings = Application::getInstance().getSettingsService();
-    if (!settings) return 0;
-    for (int i = 0; i < kMaxDefs; ++i) d[i] = SettingDef{};
+struct SectionSpec {
+    const char*       title;
+    const char*       subtitle;
+    const char*       name;     /* screen name for the lifecycle FSM */
+    ScreenId          screen;
+    const SettingKey* keys;
+    int               count;
+};
 
-    int n = 0;
-    switch (section) {
-    case 0:
-        d[0] = {"DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN",
-                "../icons/icon_aspect.png", EVO_RMLUI_ROW_VALUE, false, "", ACT_NONE, 3,
-                static_cast<int>(settings->getDefaultViewMode()), {}};
+template <std::size_t N>
+constexpr SectionSpec makeSection(const char* title, const char* subtitle, const char* name,
+                                  ScreenId screen, const SettingKey (&keys)[N]) {
+    static_assert(N <= kMaxDefs, "settings section holds more than kMaxDefs settings");
+    return {title, subtitle, name, screen, keys, static_cast<int>(N)};
+}
+
+/* Order here is the sidebar order in settings.rml (sb-0 .. sb-4). */
+const SectionSpec kSections[] = {
+    makeSection("VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR",
+                "SettingsPlaybackScreen", ScreenId::SettingsPlayback, kVideoKeys),
+    makeSection("AUDIO", "OUTPUT CHANNELS, SPEAKERS & SOUNDS",
+                "SettingsAudioScreen", ScreenId::SettingsAudio, kAudioKeys),
+    makeSection("SUBTITLES", "PREFERENCES & APPEARANCE",
+                "SettingsSubtitlesScreen", ScreenId::SettingsSubtitles, kSubtitleKeys),
+    makeSection("INTERFACE & STORAGE", "THEMES, CONTROLS & BROWSING",
+                "SettingsInterfaceScreen", ScreenId::SettingsInterface, kInterfaceKeys),
+    makeSection("SYSTEM & DIAGNOSTICS", "DIAGNOSTICS & SYSTEM MANAGEMENT",
+                "SettingsSystemScreen", ScreenId::SettingsSystem, kSystemKeys),
+};
+constexpr int kSectionCount = static_cast<int>(sizeof kSections / sizeof kSections[0]);
+
+int sectionForScreen(ScreenId id) {
+    for (int s = 0; s < kSectionCount; ++s)
+        if (kSections[s].screen == id) return s;
+    return 0;
+}
+
+SettingDef toggleDef(SettingKey key, const char* title, const char* detail,
+                     const char* icon, bool on) {
+    SettingDef d{};
+    d.key = key; d.title = title; d.detail = detail; d.icon = icon;
+    d.kind = EVO_RMLUI_ROW_TOGGLE; d.toggle_on = on; d.badge = "";
+    return d;
+}
+
+SettingDef actionDef(SettingKey key, const char* title, const char* detail,
+                     const char* icon, const char* badge) {
+    SettingDef d{};
+    d.key = key; d.title = title; d.detail = detail; d.icon = icon;
+    d.kind = EVO_RMLUI_ROW_ACTION; d.badge = badge;
+    return d;
+}
+
+/* The caller fills opt_label[0 .. count-1]. */
+SettingDef valueDef(SettingKey key, const char* title, const char* detail,
+                    const char* icon, int count, int current) {
+    SettingDef d{};
+    d.key = key; d.title = title; d.detail = detail; d.icon = icon;
+    d.kind = EVO_RMLUI_ROW_VALUE; d.badge = "";
+    d.opt_count = count; d.opt_current = current;
+    return d;
+}
+
+SettingDef makeDef(SettingKey key, ISettingsService* settings) {
+    SettingDef d{};
+    switch (key) {
+    case SettingKey::DefaultAspect:
+        d = valueDef(key, "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN",
+                     "../icons/icon_aspect.png", 3,
+                     static_cast<int>(settings->getDefaultViewMode()));
         for (int i = 0; i < 3; ++i)
-            d[0].opt_label[i] = settings->getViewModeName(static_cast<ViewMode>(i));
+            d.opt_label[i] = settings->getViewModeName(static_cast<ViewMode>(i));
+        break;
 
-        d[1] = {"RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION",
-                "../icons/icon_resume.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isResumePlaybackEnabled(), "", ACT_NONE, 0, 0, {}};
+    case SettingKey::ResumePlayback:
+        d = toggleDef(key, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION",
+                      "../icons/icon_resume.png", settings->isResumePlaybackEnabled());
+        break;
 
-        d[2] = {"SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION",
-                "../icons/icon_speaker.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
-                ACT_SURROUND, 0, 0, {}};
-
-        d[3] = {"VIDEO DECODER", "WHICH BACKEND DECODES VIDEO",
-                "../icons/icon_cpu.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 3, static_cast<int>(settings->getVideoDecoderPreference()), {}};
+    case SettingKey::VideoDecoder:
+        d = valueDef(key, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO",
+                     "../icons/icon_cpu.png", 3,
+                     static_cast<int>(settings->getVideoDecoderPreference()));
         for (int i = 0; i < 3; ++i)
-            d[3].opt_label[i] = settings->getDecoderPreferenceBadge(
-                                    static_cast<DecoderPreference>(i));
+            d.opt_label[i] = settings->getDecoderPreferenceBadge(static_cast<DecoderPreference>(i));
+        break;
 
-        d[4] = {"UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN",
-                "../icons/icon_sparkles.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 3, static_cast<int>(settings->getUpscaler()), {}};
+    case SettingKey::Upscaling:
+        d = valueDef(key, "UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN",
+                     "../icons/icon_sparkles.png", 3, static_cast<int>(settings->getUpscaler()));
         for (int i = 0; i < 3; ++i)
-            d[4].opt_label[i] = settings->getUpscalerName(static_cast<Upscaler>(i));
+            d.opt_label[i] = settings->getUpscalerName(static_cast<Upscaler>(i));
+        break;
 
-        d[5] = {"AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO",
-                "../icons/icon_brain.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 4, static_cast<int>(settings->getAiNetwork()), {}};
+    case SettingKey::AiNetwork:
+        d = valueDef(key, "AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO",
+                     "../icons/icon_brain.png", 4, static_cast<int>(settings->getAiNetwork()));
         for (int i = 0; i < 4; ++i)
-            d[5].opt_label[i] = settings->getAiNetworkName(static_cast<AiNetwork>(i));
+            d.opt_label[i] = settings->getAiNetworkName(static_cast<AiNetwork>(i));
         /* Only AI runs a network; Sharp (FSR 1) and Off have nothing to pick. */
         if (settings->getUpscaler() != Upscaler::AI) {
-            d[5].disabled = true;
-            d[5].detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
+            d.disabled = true;
+            d.detail = "ONLY USED WHEN UPSCALING IS SET TO AI";
         }
-
-        d[6] = {"120 HZ OUTPUT", "5:5 PULLDOWN FOR 24 FPS & 120 FPS UI",
-                "../icons/icon_gauge.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 3, static_cast<int>(settings->getRefreshRateMode()), {}};
-        for (int i = 0; i < 3; ++i)
-            d[6].opt_label[i] = settings->getRefreshRateModeName(static_cast<RefreshRateMode>(i));
-        if (!evo_agc_runtime_supports_120hz()) {
-            d[6].disabled = true;
-            d[6].detail = "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
-        }
-
-        d[7] = {"HDR OUTPUT", "HDR10 TO THE TV WHILE HDR VIDEO PLAYS",
-                "../icons/icon_sun.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 2, static_cast<int>(settings->getHdrOutputMode()), {}};
-        for (int i = 0; i < 2; ++i)
-            d[7].opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
-
-        d[8] = {"ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
-                "../icons/icon_tv.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isAskStreamEnabled(), "", ACT_NONE, 0, 0, {}};
-        n = 9;
         break;
 
+    case SettingKey::RefreshRate:
+        d = valueDef(key, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH",
+                     "../icons/icon_gauge.png", 3, static_cast<int>(settings->getRefreshRateMode()));
+        for (int i = 0; i < 3; ++i)
+            d.opt_label[i] = settings->getRefreshRateModeName(static_cast<RefreshRateMode>(i));
+        if (!evo_agc_runtime_supports_120hz()) {
+            d.disabled = true;
+            d.detail = "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
+        }
+        break;
 
-    case 1: {
+    case SettingKey::HdrOutput:
+        d = valueDef(key, "HDR OUTPUT", "HDR10 FOR HDR VIDEO - THE TV GOES BLACK BRIEFLY AT START & END",
+                     "../icons/icon_sun.png", 2, static_cast<int>(settings->getHdrOutputMode()));
+        for (int i = 0; i < 2; ++i)
+            d.opt_label[i] = settings->getHdrOutputModeName(static_cast<HdrOutputMode>(i));
+        break;
+
+    /* #117: read when a file opens, so it applies from the next file. */
+    case SettingKey::OutputChannels:
+        d = valueDef(key, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0",
+                     "../icons/icon_volume.png", 2,
+                     static_cast<int>(settings->getAudioOutputChannels()));
+        for (int i = 0; i < 2; ++i)
+            d.opt_label[i] = settings->getAudioOutputChannelsName(static_cast<AudioOutputChannels>(i));
+        break;
+
+    case SettingKey::SurroundTest:
+        d = actionDef(key, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION",
+                      "../icons/icon_speaker.png", "OPEN");
+        break;
+
+    case SettingKey::NavigationSounds:
+        d = toggleDef(key, "NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS",
+                      "../icons/icon_listener.png", settings->isSoundFeedbackEnabled());
+        break;
+
+    case SettingKey::AutoSubtitles:
+        d = toggleDef(key, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK",
+                      "../icons/icon_subtitles.png", settings->isAutoSubtitlesEnabled());
+        break;
+
+    case SettingKey::SubtitleFont: {
         static const char* kFaces[] = {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"};
-        d[0] = {"AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK",
-                "../icons/icon_subtitles.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isAutoSubtitlesEnabled(), "", ACT_NONE, 0, 0, {}};
-
         int face = settings->getSubtitleFontFace();
         if (face < 0 || face >= 4) face = 0;
-        d[1] = {"DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE",
-                "../icons/icon_type.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 4, face, {}};
-        for (int i = 0; i < 4; ++i) d[1].opt_label[i] = kFaces[i];
+        d = valueDef(key, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE",
+                     "../icons/icon_type.png", 4, face);
+        for (int i = 0; i < 4; ++i) d.opt_label[i] = kFaces[i];
+        break;
+    }
 
-        /* #110: the second line of dialogue, drawn with the first when a
-         * secondary track is chosen in the subtitle picker. */
+    /* #110: the second line of dialogue, drawn with the first when a
+     * secondary track is chosen in the subtitle picker. */
+    case SettingKey::SecondaryPosition: {
         static const char* kSecondaryPos[] = {"STACKED ABOVE", "TOP OF SCREEN"};
-        static const char* kSecondaryColor[] = {"YELLOW", "CYAN", "WHITE"};
         int secPos = settings->getSecondarySubtitlePosition();
         if (secPos < 0 || secPos >= 2) secPos = 0;
-        d[2] = {"SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
-                "../icons/icon_subtitles.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 2, secPos, {}};
-        for (int i = 0; i < 2; ++i) d[2].opt_label[i] = kSecondaryPos[i];
+        d = valueDef(key, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES",
+                     "../icons/icon_subtitles.png", 2, secPos);
+        for (int i = 0; i < 2; ++i) d.opt_label[i] = kSecondaryPos[i];
+        break;
+    }
 
+    case SettingKey::SecondaryColour: {
+        static const char* kSecondaryColor[] = {"YELLOW", "CYAN", "WHITE"};
         int secColor = settings->getSecondarySubtitleColor();
         if (secColor < 0 || secColor >= 3) secColor = 0;
-        d[3] = {"SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART",
-                "../icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 3, secColor, {}};
-        for (int i = 0; i < 3; ++i) d[3].opt_label[i] = kSecondaryColor[i];
-        n = 4;
+        d = valueDef(key, "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART",
+                     "../icons/icon_palette.png", 3, secColor);
+        for (int i = 0; i < 3; ++i) d.opt_label[i] = kSecondaryColor[i];
         break;
     }
 
-    case 2: {
+    case SettingKey::Theme: {
         int themes = evo_theme_count();
         if (themes > kMaxOptions) themes = kMaxOptions;
-        d[0] = {"THEME", "COLOR PALETTE & ACCENTS",
-                "../icons/icon_palette.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, themes, evo_theme_index(), {}};
+        d = valueDef(key, "THEME", "COLOR PALETTE & ACCENTS",
+                     "../icons/icon_palette.png", themes, evo_theme_index());
         for (int i = 0; i < themes; ++i) {
             const char* nm = evo_theme_name(i);
-            d[0].opt_label[i] = nm ? nm : "THEME";
+            d.opt_label[i] = nm ? nm : "THEME";
         }
-
-        d[1] = {"NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS",
-                "../icons/icon_volume.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isSoundFeedbackEnabled(), "", ACT_NONE, 0, 0, {}};
-
-        d[2] = {"CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT",
-                "../icons/icon_gamepad.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isLightbarFeedbackEnabled(), "", ACT_NONE, 0, 0, {}};
-
-        d[3] = {"FOLDERS FIRST", "USB FILE BROWSER SORTING",
-                "../icons/icon_folder.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isSortFoldersFirst(), "", ACT_NONE, 0, 0, {}};
-
-        static const char* kKeyboards[] = {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"};
-        int kb = (settings->getKeyboardType() == 1) ? 1 : 0;
-        d[4] = {"KEYBOARD INPUT", "TEXT ENTRY METHOD",
-                "../icons/icon_keyboard.png", EVO_RMLUI_ROW_VALUE, false, "",
-                ACT_NONE, 2, kb, {}};
-        for (int i = 0; i < 2; ++i) d[4].opt_label[i] = kKeyboards[i];
-        n = 5;
         break;
     }
 
-    case 3:
-        d[0] = {"COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0",
-                "../icons/icon_report.png", EVO_RMLUI_ROW_ACTION, false, "RUN",
-                ACT_COMPAT_REPORT, 0, 0, {}};
-
-        d[1] = {"DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS",
-                "../icons/icon_activity.png", EVO_RMLUI_ROW_TOGGLE,
-                settings->isDebugOverlayEnabled(), "", ACT_NONE, 0, 0, {}};
-
-        d[2] = {"DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS",
-                "../icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, false, "OPEN",
-                ACT_DEVTOOLS, 0, 0, {}};
-
-        d[3] = {"QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER",
-                "../icons/icon_power.png", EVO_RMLUI_ROW_ACTION, false, "QUIT",
-                ACT_QUIT, 0, 0, {}};
-
-        /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
-        d[4] = {"CONSOLE", "DETECTED HARDWARE MODEL",
-                "../icons/icon_tv.png", EVO_RMLUI_ROW_ACTION, false,
-                evo_hw_is_ps5_pro() ? "PS5 PRO"
-                    : evo_hw_model_known() ? "PS5" : "NOT DETECTED",
-                ACT_NONE, 0, 0, {}};
-        n = 5;
+    case SettingKey::Lightbar:
+        d = toggleDef(key, "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT",
+                      "../icons/icon_gamepad.png", settings->isLightbarFeedbackEnabled());
         break;
 
-    default:
+    case SettingKey::FoldersFirst:
+        d = toggleDef(key, "FOLDERS FIRST", "USB FILE BROWSER SORTING",
+                      "../icons/icon_folder.png", settings->isSortFoldersFirst());
+        break;
+
+    case SettingKey::KeyboardInput: {
+        static const char* kKeyboards[] = {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"};
+        d = valueDef(key, "KEYBOARD INPUT", "TEXT ENTRY METHOD",
+                     "../icons/icon_keyboard.png", 2, settings->getKeyboardType() == 1 ? 1 : 0);
+        for (int i = 0; i < 2; ++i) d.opt_label[i] = kKeyboards[i];
+        break;
+    }
+
+    case SettingKey::AskStream:
+        d = toggleDef(key, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
+                      "../icons/icon_tv.png", settings->isAskStreamEnabled());
+        break;
+
+    case SettingKey::CompatReport:
+        d = actionDef(key, "COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0",
+                      "../icons/icon_report.png", "RUN");
+        break;
+
+    case SettingKey::DebugOverlay:
+        d = toggleDef(key, "DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS",
+                      "../icons/icon_activity.png", settings->isDebugOverlayEnabled());
+        break;
+
+    case SettingKey::DeveloperTools:
+        d = actionDef(key, "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS",
+                      "../icons/icon_developer_tools.png", "OPEN");
+        break;
+
+    /* #103: read-only - the badge is what evo_hw_probe() found at boot. */
+    case SettingKey::ConsoleModel:
+        d = actionDef(key, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_tv.png",
+                      evo_hw_is_ps5_pro() ? "PS5 PRO"
+                          : evo_hw_model_known() ? "PS5" : "NOT DETECTED");
+        break;
+
+    case SettingKey::QuitEvo:
+        d = actionDef(key, "QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER",
+                      "../icons/icon_power.png", "QUIT");
         break;
     }
 
     /* A collapsed VALUE row shows its current choice as the badge. */
-    for (int i = 0; i < n; ++i) {
-        if (d[i].kind == EVO_RMLUI_ROW_VALUE) {
-            const int c = d[i].opt_current;
-            d[i].badge = (c >= 0 && c < d[i].opt_count && d[i].opt_label[c])
-                           ? d[i].opt_label[c] : "";
-        }
+    if (d.kind == EVO_RMLUI_ROW_VALUE) {
+        const int c = d.opt_current;
+        d.badge = (c >= 0 && c < d.opt_count && d.opt_label[c]) ? d.opt_label[c] : "";
     }
-    return n;
+    return d;
+}
+
+int buildSectionDefs(int section, SettingDef* d) {
+    ISettingsService* settings = Application::getInstance().getSettingsService();
+    if (!settings || section < 0 || section >= kSectionCount) return 0;
+    const SectionSpec& spec = kSections[section];
+    for (int i = 0; i < spec.count; ++i) d[i] = makeDef(spec.keys[i], settings);
+    return spec.count;
 }
 
 /* One visible line: a setting, or a choice under an expanded setting. */
@@ -248,33 +378,6 @@ int buildSlots(const SettingDef* d, int n, int expanded, DisplaySlot* out) {
     return m;
 }
 
-int sectionRowCount(int section, int expanded) {
-    SettingDef d[kMaxDefs];
-    DisplaySlot slots[EVO_RMLUI_SETTINGS_ROWS];
-    const int n = buildSectionDefs(section, d);
-    return buildSlots(d, n, expanded, slots);
-}
-
-bool slotAt(int section, int expanded, int cursor, int& defOut, int& optOut) {
-    SettingDef d[kMaxDefs];
-    DisplaySlot slots[EVO_RMLUI_SETTINGS_ROWS];
-    const int n = buildSectionDefs(section, d);
-    const int m = buildSlots(d, n, expanded, slots);
-    if (cursor < 0 || cursor >= m) return false;
-    defOut = slots[cursor].def;
-    optOut = slots[cursor].opt;
-    return true;
-}
-
-/* A disabled row reports ACTION with no action behind it, so every section's
- * Cross/Right handling leaves it alone (runAction gives the boundary buzz). */
-int settingKind(int section, int def) {
-    SettingDef d[kMaxDefs];
-    const int n = buildSectionDefs(section, d);
-    if (def < 0 || def >= n || d[def].disabled) return EVO_RMLUI_ROW_ACTION;
-    return d[def].kind;
-}
-
 /* Fills the params for one section. cursor < 0 = the sidebar owns the cursor,
  * so nothing in the detail pane is highlighted. */
 int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params_t& p) {
@@ -284,8 +387,8 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
     const int m = buildSlots(d, n, expanded, slots);
 
     if (section >= 0 && section < kSectionCount) {
-        p.title = kHeaders[section].title;
-        p.subtitle = kHeaders[section].subtitle;
+        p.title = kSections[section].title;
+        p.subtitle = kSections[section].subtitle;
     }
 
     for (int i = 0; i < m; ++i) {
@@ -319,46 +422,43 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
     return m;
 }
 
-void toggleSetting(int section, int def) {
-    auto st = Application::getInstance().getSettingsService();
+void toggleSetting(SettingKey key) {
+    ISettingsService* st = Application::getInstance().getSettingsService();
     if (!st) return;
-    if (section == 0 && def == 1) st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled());
-    else if (section == 0 && def == 8) st->setAskStreamEnabled(!st->isAskStreamEnabled());
-    else if (section == 1 && def == 0) st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled());
-    else if (section == 2 && def == 1) st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled());
-    else if (section == 2 && def == 2) st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled());
-    else if (section == 2 && def == 3) st->setSortFoldersFirst(!st->isSortFoldersFirst());
-    else if (section == 3 && def == 1) st->setDebugOverlayEnabled(!st->isDebugOverlayEnabled());
-    else return;
+    switch (key) {
+    case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
+    case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
+    case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
+    case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;
+    case SettingKey::Lightbar:         st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled()); break;
+    case SettingKey::FoldersFirst:     st->setSortFoldersFirst(!st->isSortFoldersFirst()); break;
+    case SettingKey::DebugOverlay:     st->setDebugOverlayEnabled(!st->isDebugOverlayEnabled()); break;
+    default: return;
+    }
     evo_feedback(EVO_FB_TOGGLE);
 }
 
-void applyOption(int section, int def, int opt) {
-    auto st = Application::getInstance().getSettingsService();
+void applyOption(SettingKey key, int opt) {
+    ISettingsService* st = Application::getInstance().getSettingsService();
     if (!st || opt < 0) return;
-    if (section == 0 && def == 0) st->setDefaultViewMode(static_cast<ViewMode>(opt));
-    else if (section == 0 && def == 3) st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt));
-    else if (section == 0 && def == 4) st->setUpscaler(static_cast<Upscaler>(opt));
-    else if (section == 0 && def == 5) st->setAiNetwork(static_cast<AiNetwork>(opt));
-    else if (section == 0 && def == 6) {
+    switch (key) {
+    case SettingKey::DefaultAspect:  st->setDefaultViewMode(static_cast<ViewMode>(opt)); break;
+    case SettingKey::VideoDecoder:   st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt)); break;
+    case SettingKey::Upscaling:      st->setUpscaler(static_cast<Upscaler>(opt)); break;
+    case SettingKey::AiNetwork:      st->setAiNetwork(static_cast<AiNetwork>(opt)); break;
+    case SettingKey::HdrOutput:      st->setHdrOutputMode(static_cast<HdrOutputMode>(opt)); break;
+    case SettingKey::OutputChannels: st->setAudioOutputChannels(static_cast<AudioOutputChannels>(opt)); break;
+    case SettingKey::SubtitleFont:   st->setSubtitleFontFace(opt); break;
+    case SettingKey::SecondaryPosition: st->setSecondarySubtitlePosition(opt); break;
+    case SettingKey::SecondaryColour:   st->setSecondarySubtitleColor(opt); break;
+    case SettingKey::KeyboardInput:  st->setKeyboardType(opt); break;
+    case SettingKey::RefreshRate:
         st->setRefreshRateMode(static_cast<RefreshRateMode>(opt));
-        if (opt == static_cast<int>(RefreshRateMode::Always)) {
-            if (evo_agc_runtime_supports_120hz()) {
-                evo_agc_runtime_set_120hz(1);
-            }
-        } else {
-            /* Off or PlaybackOnly (SettingsScreen is not player mode, so run 60 Hz) */
-            if (evo_agc_runtime_supports_120hz()) {
-                evo_agc_runtime_set_120hz(0);
-            }
-        }
-    }
-    else if (section == 0 && def == 7) st->setHdrOutputMode(static_cast<HdrOutputMode>(opt));
-    else if (section == 1 && def == 1) st->setSubtitleFontFace(opt);
-    else if (section == 1 && def == 2) st->setSecondarySubtitlePosition(opt);
-    else if (section == 1 && def == 3) st->setSecondarySubtitleColor(opt);
-
-    else if (section == 2 && def == 0) {
+        /* Off or PlaybackOnly run 60 Hz here: SettingsScreen is not player mode. */
+        if (evo_agc_runtime_supports_120hz())
+            evo_agc_runtime_set_120hz(opt == static_cast<int>(RefreshRateMode::Always) ? 1 : 0);
+        break;
+    case SettingKey::Theme: {
         /*
          * evo_theme_set() returns the index it applied, not a status - see the
          * contract in evo_theme.h. Testing it for 0 meant the body only ran for
@@ -373,30 +473,28 @@ void applyOption(int section, int def, int opt) {
         const int applied = evo_theme_set(opt);
         if (const char* nm = evo_theme_name(applied))
             st->setThemeName(nm);
+        break;
     }
-    else if (section == 2 && def == 4) st->setKeyboardType(opt);
-    else return;
+    default: return;
+    }
     evo_feedback(EVO_FB_TOGGLE);
 }
 
-bool runAction(int section, int def) {
-    SettingDef d[kMaxDefs];
-    const int n = buildSectionDefs(section, d);
-    if (def < 0 || def >= n) return false;
-    if (d[def].disabled) {
+bool runAction(const SettingDef& def) {
+    if (def.disabled) {
         evo_feedback(EVO_FB_BOUNDARY);
         return false;
     }
 
-    switch (d[def].action) {
-    case ACT_SURROUND:
+    switch (def.key) {
+    case SettingKey::SurroundTest:
         if (auto sm = Application::getInstance().getScreenManager()) {
             evo_feedback(EVO_FB_OPEN);
             sm->navigateTo(ScreenId::SurroundTest);
             return true;
         }
         return false;
-    case ACT_DEVTOOLS:
+    case SettingKey::DeveloperTools:
         if (auto sm = Application::getInstance().getScreenManager()) {
             evo_feedback(EVO_FB_OPEN);
             sm->navigateTo(ScreenId::DeveloperTools);
@@ -422,13 +520,13 @@ bool runAction(int section, int def) {
      * everything and parks instead, and the user closes it from the switcher.
      * See Application::requestSoftClose().
      */
-    case ACT_QUIT:
+    case SettingKey::QuitEvo:
         evo_feedback(EVO_FB_OPEN);
         evo_boot_log("settings: QUIT EVO selected - soft close");
         evo_boot_log_flush();
         Application::getInstance().requestSoftClose();
         return true;
-    case ACT_COMPAT_REPORT: {
+    case SettingKey::CompatReport: {
         FILE* fp = std::fopen("/mnt/usb0/evo_compatibility_report.txt", "w");
         if (!fp) fp = std::fopen("evo_compatibility_report.txt", "w");
         if (fp) {
@@ -451,12 +549,9 @@ bool runAction(int section, int def) {
     }
 }
 
-ScreenId sectionScreenId(int section) {
-    switch (section) {
-        case 0: return ScreenId::SettingsPlayback;
-        case 1: return ScreenId::SettingsSubtitles;
-        case 2: return ScreenId::SettingsInterface;
-        default: return ScreenId::SettingsSystem;
+void saveSettings() {
+    if (auto settings = Application::getInstance().getSettingsService()) {
+        settings->saveSettings();
     }
 }
 
@@ -478,9 +573,7 @@ void SettingsScreen::onEnter() {
 
 void SettingsScreen::onExit() {
     StatefulScreen::onExit();
-    if (auto settings = Application::getInstance().getSettingsService()) {
-        settings->saveSettings();
-    }
+    saveSettings();
 }
 
 void SettingsScreen::navigate(int delta) {
@@ -502,11 +595,7 @@ void SettingsScreen::activateSelection() {
     if (!screenMgr) return;
 
     evo_feedback(EVO_FB_CONFIRM);
-    screenMgr->navigateTo(sectionScreenId(m_selectedIndex));
-}
-
-void SettingsScreen::adjustValue(int delta) {
-    (void)delta;
+    screenMgr->navigateTo(kSections[m_selectedIndex].screen);
 }
 
 bool SettingsScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
@@ -571,28 +660,30 @@ void SettingsScreen::render(uint32_t* framebuffer, int width, int height) {
 }
 
 // =============================================================================
-// SettingsPlaybackScreen
+// SettingsSectionScreen (one per section in kSections)
 // =============================================================================
 
-SettingsPlaybackScreen::SettingsPlaybackScreen()
-    : StatefulScreen("SettingsPlaybackScreen") {
+SettingsSectionScreen::SettingsSectionScreen(ScreenId id)
+    : StatefulScreen(kSections[sectionForScreen(id)].name),
+      m_id(id),
+      m_section(sectionForScreen(id)) {
 }
 
-void SettingsPlaybackScreen::onExit() {
+void SettingsSectionScreen::onExit() {
     StatefulScreen::onExit();
-    if (auto settings = Application::getInstance().getSettingsService()) {
-        settings->saveSettings();
-    }
+    saveSettings();
 }
 
-void SettingsPlaybackScreen::onEnter() {
+void SettingsSectionScreen::onEnter() {
     StatefulScreen::onEnter();
     m_selectedIndex = 0;
     m_expandedIndex = -1;
 }
 
-void SettingsPlaybackScreen::navigate(int delta) {
-    const int total = sectionRowCount(0, m_expandedIndex);
+void SettingsSectionScreen::navigate(int delta) {
+    SettingDef d[kMaxDefs];
+    DisplaySlot slots[EVO_RMLUI_SETTINGS_ROWS];
+    const int total = buildSlots(d, buildSectionDefs(m_section, d), m_expandedIndex, slots);
     if (total <= 0) return;
     m_selectedIndex += delta;
     if (m_selectedIndex < 0) {
@@ -606,22 +697,27 @@ void SettingsPlaybackScreen::navigate(int delta) {
     }
 }
 
-void SettingsPlaybackScreen::activateSelection() {
-    int def = -1, opt = -1;
-    if (!slotAt(0, m_expandedIndex, m_selectedIndex, def, opt)) return;
+void SettingsSectionScreen::activateSelection() {
+    SettingDef d[kMaxDefs];
+    DisplaySlot slots[EVO_RMLUI_SETTINGS_ROWS];
+    const int m = buildSlots(d, buildSectionDefs(m_section, d), m_expandedIndex, slots);
+    if (m_selectedIndex < 0 || m_selectedIndex >= m) return;
+    const int def = slots[m_selectedIndex].def;
+    const int opt = slots[m_selectedIndex].opt;
 
     if (opt >= 0) {
         /* A choice under an expanded setting: apply it and collapse, leaving
          * the cursor on the setting itself. */
-        applyOption(0, def, opt);
+        applyOption(d[def].key, opt);
         m_expandedIndex = -1;
         m_selectedIndex = def;
         return;
     }
 
-    switch (settingKind(0, def)) {
+    /* A disabled row does nothing but the boundary buzz (runAction). */
+    switch (d[def].disabled ? EVO_RMLUI_ROW_ACTION : d[def].kind) {
     case EVO_RMLUI_ROW_TOGGLE:
-        toggleSetting(0, def);
+        toggleSetting(d[def].key);
         break;
     case EVO_RMLUI_ROW_VALUE:
         /* Expand in place so every choice is visible, collapse if already open. */
@@ -630,12 +726,12 @@ void SettingsPlaybackScreen::activateSelection() {
         evo_feedback(EVO_FB_CONFIRM);
         break;
     default:
-        runAction(0, def);
+        runAction(d[def]);
         break;
     }
 }
 
-bool SettingsPlaybackScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
+bool SettingsSectionScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
     (void)held;
     (void)released;
 
@@ -664,11 +760,15 @@ bool SettingsPlaybackScreen::handleInput(uint32_t pressed, uint32_t held, uint32
         return true;
     }
     if (pressed & PadButtons::Right) {
-        int def = -1, opt = -1;
-        if (slotAt(0, m_expandedIndex, m_selectedIndex, def, opt) && opt < 0 &&
-            settingKind(0, def) == EVO_RMLUI_ROW_VALUE && m_expandedIndex != def) {
-            m_expandedIndex = def;
-            evo_feedback(EVO_FB_CONFIRM);
+        SettingDef d[kMaxDefs];
+        DisplaySlot slots[EVO_RMLUI_SETTINGS_ROWS];
+        const int m = buildSlots(d, buildSectionDefs(m_section, d), m_expandedIndex, slots);
+        if (m_selectedIndex >= 0 && m_selectedIndex < m && slots[m_selectedIndex].opt < 0) {
+            const int def = slots[m_selectedIndex].def;
+            if (d[def].kind == EVO_RMLUI_ROW_VALUE && !d[def].disabled && m_expandedIndex != def) {
+                m_expandedIndex = def;
+                evo_feedback(EVO_FB_CONFIRM);
+            }
         }
         return true;
     }
@@ -692,445 +792,22 @@ bool SettingsPlaybackScreen::handleInput(uint32_t pressed, uint32_t held, uint32
     return false;
 }
 
-void SettingsPlaybackScreen::render(uint32_t* framebuffer, int width, int height) {
+void SettingsSectionScreen::render(uint32_t* framebuffer, int width, int height) {
     evo_rmlui_settings_params_t params;
     std::memset(&params, 0, sizeof(params));
 
     params.rail_active_idx = 5;
     params.rail_focused = 0;
-    params.section_active = 0;
+    params.section_active = m_section;
     params.sidebar_focused = 0;
 
-    fillSection(0, m_expandedIndex, m_selectedIndex, params);
+    fillSection(m_section, m_expandedIndex, m_selectedIndex, params);
 
     evo_rmlui_update_settings(&params);
     evo_rmlui_render_settings(framebuffer, width, height);
 }
 
-void SettingsPlaybackScreen::update(double deltaMs) {
-    (void)deltaMs;
-}
-
-// =============================================================================
-// SettingsSubtitlesScreen
-// =============================================================================
-
-SettingsSubtitlesScreen::SettingsSubtitlesScreen()
-    : StatefulScreen("SettingsSubtitlesScreen") {
-}
-
-void SettingsSubtitlesScreen::onExit() {
-    StatefulScreen::onExit();
-    if (auto settings = Application::getInstance().getSettingsService()) {
-        settings->saveSettings();
-    }
-}
-
-void SettingsSubtitlesScreen::onEnter() {
-    StatefulScreen::onEnter();
-    m_selectedIndex = 0;
-    m_expandedIndex = -1;
-}
-
-void SettingsSubtitlesScreen::navigate(int delta) {
-    const int total = sectionRowCount(1, m_expandedIndex);
-    if (total <= 0) return;
-    m_selectedIndex += delta;
-    if (m_selectedIndex < 0) {
-        m_selectedIndex = 0;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedIndex >= total) {
-        m_selectedIndex = total - 1;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else {
-        evo_feedback(EVO_FB_MOVE);
-    }
-}
-
-void SettingsSubtitlesScreen::activateSelection() {
-    int def = -1, opt = -1;
-    if (!slotAt(1, m_expandedIndex, m_selectedIndex, def, opt)) return;
-
-    if (opt >= 0) {
-        /* A choice under an expanded setting: apply it and collapse, leaving
-         * the cursor on the setting itself. */
-        applyOption(1, def, opt);
-        m_expandedIndex = -1;
-        m_selectedIndex = def;
-        return;
-    }
-
-    switch (settingKind(1, def)) {
-    case EVO_RMLUI_ROW_TOGGLE:
-        toggleSetting(1, def);
-        break;
-    case EVO_RMLUI_ROW_VALUE:
-        /* Expand in place so every choice is visible, collapse if already open. */
-        m_expandedIndex = (m_expandedIndex == def) ? -1 : def;
-        m_selectedIndex = def;
-        evo_feedback(EVO_FB_CONFIRM);
-        break;
-    default:
-        runAction(1, def);
-        break;
-    }
-}
-
-bool SettingsSubtitlesScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
-    (void)held;
-    (void)released;
-
-    /* The D-pad only ever moves the cursor. Values change on Cross alone -
-     * Left/Right used to edit the highlighted setting, which meant walking the
-     * menu silently rewrote your settings. */
-    if (pressed & PadButtons::Up) {
-        navigate(-1);
-        return true;
-    }
-    if (pressed & PadButtons::Down) {
-        navigate(1);
-        return true;
-    }
-    if (pressed & PadButtons::Left) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            evo_feedback(EVO_FB_CANCEL);
-            screenMgr->navigateTo(ScreenId::Settings);
-            return true;
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Right) {
-        int def = -1, opt = -1;
-        if (slotAt(1, m_expandedIndex, m_selectedIndex, def, opt) && opt < 0 &&
-            settingKind(1, def) == EVO_RMLUI_ROW_VALUE && m_expandedIndex != def) {
-            m_expandedIndex = def;
-            evo_feedback(EVO_FB_CONFIRM);
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Cross) {
-        activateSelection();
-        return true;
-    }
-    if (pressed & PadButtons::Circle) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        evo_feedback(EVO_FB_CANCEL);
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            screenMgr->navigateTo(ScreenId::Settings);
-        }
-        return true;
-    }
-
-    return false;
-}
-
-void SettingsSubtitlesScreen::render(uint32_t* framebuffer, int width, int height) {
-    evo_rmlui_settings_params_t params;
-    std::memset(&params, 0, sizeof(params));
-
-    params.rail_active_idx = 5;
-    params.rail_focused = 0;
-    params.section_active = 1;
-    params.sidebar_focused = 0;
-
-    fillSection(1, m_expandedIndex, m_selectedIndex, params);
-
-    evo_rmlui_update_settings(&params);
-    evo_rmlui_render_settings(framebuffer, width, height);
-}
-
-void SettingsSubtitlesScreen::update(double deltaMs) {
-    (void)deltaMs;
-}
-
-// =============================================================================
-// SettingsInterfaceScreen
-// =============================================================================
-
-SettingsInterfaceScreen::SettingsInterfaceScreen()
-    : StatefulScreen("SettingsInterfaceScreen") {
-}
-
-void SettingsInterfaceScreen::onExit() {
-    StatefulScreen::onExit();
-    if (auto settings = Application::getInstance().getSettingsService()) {
-        settings->saveSettings();
-    }
-}
-
-void SettingsInterfaceScreen::onEnter() {
-    StatefulScreen::onEnter();
-    m_selectedIndex = 0;
-    m_expandedIndex = -1;
-}
-
-void SettingsInterfaceScreen::navigate(int delta) {
-    const int total = sectionRowCount(2, m_expandedIndex);
-    if (total <= 0) return;
-    m_selectedIndex += delta;
-    if (m_selectedIndex < 0) {
-        m_selectedIndex = 0;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedIndex >= total) {
-        m_selectedIndex = total - 1;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else {
-        evo_feedback(EVO_FB_MOVE);
-    }
-}
-
-void SettingsInterfaceScreen::activateSelection() {
-    int def = -1, opt = -1;
-    if (!slotAt(2, m_expandedIndex, m_selectedIndex, def, opt)) return;
-
-    if (opt >= 0) {
-        /* A choice under an expanded setting: apply it and collapse, leaving
-         * the cursor on the setting itself. */
-        applyOption(2, def, opt);
-        m_expandedIndex = -1;
-        m_selectedIndex = def;
-        return;
-    }
-
-    switch (settingKind(2, def)) {
-    case EVO_RMLUI_ROW_TOGGLE:
-        toggleSetting(2, def);
-        break;
-    case EVO_RMLUI_ROW_VALUE:
-        /* Expand in place so every choice is visible, collapse if already open. */
-        m_expandedIndex = (m_expandedIndex == def) ? -1 : def;
-        m_selectedIndex = def;
-        evo_feedback(EVO_FB_CONFIRM);
-        break;
-    default:
-        runAction(2, def);
-        break;
-    }
-}
-
-bool SettingsInterfaceScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
-    (void)held;
-    (void)released;
-
-    /* The D-pad only ever moves the cursor. Values change on Cross alone -
-     * Left/Right used to edit the highlighted setting, which meant walking the
-     * menu silently rewrote your settings. */
-    if (pressed & PadButtons::Up) {
-        navigate(-1);
-        return true;
-    }
-    if (pressed & PadButtons::Down) {
-        navigate(1);
-        return true;
-    }
-    if (pressed & PadButtons::Left) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            evo_feedback(EVO_FB_CANCEL);
-            screenMgr->navigateTo(ScreenId::Settings);
-            return true;
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Right) {
-        int def = -1, opt = -1;
-        if (slotAt(2, m_expandedIndex, m_selectedIndex, def, opt) && opt < 0 &&
-            settingKind(2, def) == EVO_RMLUI_ROW_VALUE && m_expandedIndex != def) {
-            m_expandedIndex = def;
-            evo_feedback(EVO_FB_CONFIRM);
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Cross) {
-        activateSelection();
-        return true;
-    }
-    if (pressed & PadButtons::Circle) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        evo_feedback(EVO_FB_CANCEL);
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            screenMgr->navigateTo(ScreenId::Settings);
-        }
-        return true;
-    }
-
-    return false;
-}
-
-void SettingsInterfaceScreen::render(uint32_t* framebuffer, int width, int height) {
-    evo_rmlui_settings_params_t params;
-    std::memset(&params, 0, sizeof(params));
-
-    params.rail_active_idx = 5;
-    params.rail_focused = 0;
-    params.section_active = 2;
-    params.sidebar_focused = 0;
-
-    fillSection(2, m_expandedIndex, m_selectedIndex, params);
-
-    evo_rmlui_update_settings(&params);
-    evo_rmlui_render_settings(framebuffer, width, height);
-}
-
-void SettingsInterfaceScreen::update(double deltaMs) {
-    (void)deltaMs;
-}
-
-// =============================================================================
-// SettingsSystemScreen
-// =============================================================================
-
-SettingsSystemScreen::SettingsSystemScreen()
-    : StatefulScreen("SettingsSystemScreen") {
-}
-
-void SettingsSystemScreen::onExit() {
-    StatefulScreen::onExit();
-    if (auto settings = Application::getInstance().getSettingsService()) {
-        settings->saveSettings();
-    }
-}
-
-void SettingsSystemScreen::onEnter() {
-    StatefulScreen::onEnter();
-    m_selectedIndex = 0;
-    m_expandedIndex = -1;
-}
-
-void SettingsSystemScreen::navigate(int delta) {
-    const int total = sectionRowCount(3, m_expandedIndex);
-    if (total <= 0) return;
-    m_selectedIndex += delta;
-    if (m_selectedIndex < 0) {
-        m_selectedIndex = 0;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else if (m_selectedIndex >= total) {
-        m_selectedIndex = total - 1;
-        evo_feedback(EVO_FB_BOUNDARY);
-    } else {
-        evo_feedback(EVO_FB_MOVE);
-    }
-}
-
-void SettingsSystemScreen::activateSelection() {
-    int def = -1, opt = -1;
-    if (!slotAt(3, m_expandedIndex, m_selectedIndex, def, opt)) return;
-
-    if (opt >= 0) {
-        /* A choice under an expanded setting: apply it and collapse, leaving
-         * the cursor on the setting itself. */
-        applyOption(3, def, opt);
-        m_expandedIndex = -1;
-        m_selectedIndex = def;
-        return;
-    }
-
-    switch (settingKind(3, def)) {
-    case EVO_RMLUI_ROW_TOGGLE:
-        toggleSetting(3, def);
-        break;
-    case EVO_RMLUI_ROW_VALUE:
-        /* Expand in place so every choice is visible, collapse if already open. */
-        m_expandedIndex = (m_expandedIndex == def) ? -1 : def;
-        m_selectedIndex = def;
-        evo_feedback(EVO_FB_CONFIRM);
-        break;
-    default:
-        runAction(3, def);
-        break;
-    }
-}
-
-bool SettingsSystemScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
-    (void)held;
-    (void)released;
-
-    /* The D-pad only ever moves the cursor. Values change on Cross alone -
-     * Left/Right used to edit the highlighted setting, which meant walking the
-     * menu silently rewrote your settings. */
-    if (pressed & PadButtons::Up) {
-        navigate(-1);
-        return true;
-    }
-    if (pressed & PadButtons::Down) {
-        navigate(1);
-        return true;
-    }
-    if (pressed & PadButtons::Left) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            evo_feedback(EVO_FB_CANCEL);
-            screenMgr->navigateTo(ScreenId::Settings);
-            return true;
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Right) {
-        int def = -1, opt = -1;
-        if (slotAt(3, m_expandedIndex, m_selectedIndex, def, opt) && opt < 0 &&
-            settingKind(3, def) == EVO_RMLUI_ROW_VALUE && m_expandedIndex != def) {
-            m_expandedIndex = def;
-            evo_feedback(EVO_FB_CONFIRM);
-        }
-        return true;
-    }
-    if (pressed & PadButtons::Cross) {
-        activateSelection();
-        return true;
-    }
-    if (pressed & PadButtons::Circle) {
-        if (m_expandedIndex >= 0) {
-            m_expandedIndex = -1;
-            evo_feedback(EVO_FB_CANCEL);
-            return true;
-        }
-        evo_feedback(EVO_FB_CANCEL);
-        if (auto screenMgr = Application::getInstance().getScreenManager()) {
-            screenMgr->navigateTo(ScreenId::Settings);
-        }
-        return true;
-    }
-
-    return false;
-}
-
-void SettingsSystemScreen::render(uint32_t* framebuffer, int width, int height) {
-    evo_rmlui_settings_params_t params;
-    std::memset(&params, 0, sizeof(params));
-
-    params.rail_active_idx = 5;
-    params.rail_focused = 0;
-    params.section_active = 3;
-    params.sidebar_focused = 0;
-
-    fillSection(3, m_expandedIndex, m_selectedIndex, params);
-
-    evo_rmlui_update_settings(&params);
-    evo_rmlui_render_settings(framebuffer, width, height);
-}
-
-void SettingsSystemScreen::update(double deltaMs) {
+void SettingsSectionScreen::update(double deltaMs) {
     (void)deltaMs;
 }
 

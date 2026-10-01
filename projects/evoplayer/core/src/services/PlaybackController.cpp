@@ -1054,7 +1054,14 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     int chCount = audio_ctx->ch_layout.nb_channels;
                     int handle = -1;
 
-                    if (chCount > 2) {
+                    /* #117: Stereo (2.0) never opens the surround port. The
+                     * resampler follows evo_audio_channels, so a 5.1/7.1
+                     * source is downmixed to 2.0 by libswresample. */
+                    bool forceStereo = false;
+                    if (ISettingsService *settings = Application::getInstance().getSettingsService())
+                        forceStereo = settings->getAudioOutputChannels() == AudioOutputChannels::Stereo;
+
+                    if (chCount > 2 && !forceStereo) {
                         handle = sceAudioOutOpen(0xFF, 0, 0,
                                                  AUDIO_BLOCK_SAMPLES, 48000,
                                                  2 /* S16_8CH */);
@@ -1075,6 +1082,9 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                     }
 
                     audio_handle = handle;
+                    evo_boot_log("audio: source %dch -> port %dch (output=%s) handle=%d",
+                                 chCount, evo_audio_channels,
+                                 forceStereo ? "stereo" : "auto", handle);
 
                     if (audio_handle < 1) {
                         toast("AUDIO OUTPUT ERROR",
