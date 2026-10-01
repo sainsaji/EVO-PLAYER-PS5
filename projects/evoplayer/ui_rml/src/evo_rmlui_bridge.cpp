@@ -1,5 +1,6 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_rmlui_app.h"
+#include "evo_rmlui_devstate.h"
 
 extern "C" {
 
@@ -333,6 +334,10 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.music_codec = p->music_codec ? p->music_codec : "";
 
     EvoRmlApp::Instance().UpdatePlaybackState(state);
+#if defined(EVO_USB_REMOTE) && defined(EVO_APP_MODULE)
+    evo_rmlui_dev_note_osd(!state.chrome_hidden && state.alpha > 0,
+                           state.show_stats, state.scrub_active);   /* #115 */
+#endif
 }
 
 void evo_rmlui_update_perf_hud(const evo_perf_hud_t* p) {

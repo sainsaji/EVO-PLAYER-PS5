@@ -40,14 +40,21 @@
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   stop                                    end playback, back to the browser
-#   key <button>                            one synthetic pad press (up down left
+#   key <button>...                         synthetic pad presses (up down left
 #                                           right cross circle square triangle
 #                                           l1 r1 l2 r2 l3 r3 options touchpad
 #                                           touchpad_left touchpad_right; `l3`/
-#                                           `shot` takes a screenshot). One press
-#                                           per call: the device reads the file
-#                                           about once a second, so pause between
-#                                           calls when chaining them
+#                                           `shot` takes a screenshot), in order.
+#                                           After each it waits for the UI state
+#                                           it produced and prints one line:
+#                                           [focus] #id "text" (item i/n) on
+#                                           Screen. `key --no-wait <b>` = one
+#                                           press, no readback
+#   ui [--line]                             #115: the UI state as text - screen,
+#                                           focused element, its list, modal,
+#                                           toast, player OSD - from
+#                                           /mnt/usb0/evo_ui.json. Use this, not
+#                                           a screenshot, to navigate
 #   screen <id>                             go straight to a screen (an evo::
 #                                           ScreenId number: 2 Player, 21 Text
 #                                           Reader, 28 SurroundTest, 30 Image
@@ -138,6 +145,10 @@ PY
 
 USB_STATUS="/mnt/usb0/evo_status"
 USB_LOG="/mnt/usb0/evo.log"
+USB_UI="/mnt/usb0/evo_ui.json"
+
+evo_ui() { PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" \
+           python3 "$(dirname "${BASH_SOURCE[0]}")/evo_ui.py" "$@"; }
 
 # --- lifecycle: controllers + ShadowMount evidence ---------------------------
 TITLE_ID="PPSA99039"
@@ -348,7 +359,10 @@ cycle)  do_cycle "$@" ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
 stop)   put_cmd "stop" ;;
-key)    [[ -n "${1:-}" ]] || die "usage: evo-remote.sh key <button>  (e.g. cross, up, l1, l3)"; put_cmd "key $1" ;;
+key)    [[ -n "${1:-}" ]] || die "usage: evo-remote.sh key <button>...  (e.g. cross, up, l1, l3)"
+        if [[ "${1}" == --no-wait ]]; then shift; put_cmd "key $1"
+        else evo_ui key "$@"; fi ;;
+ui)     evo_ui show "$@" ;;
 screen) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh screen <id>  (an evo::ScreenId number)"; put_cmd "screen $1" ;;
 source) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh source <n>  (0 USB, 1 Internal, 2 Favorites, 3 Recent)"; put_cmd "source $1" ;;
 image)  [[ -n "${1:-}" ]] || die "usage: evo-remote.sh image <path>"; put_cmd "image $1" ;;
@@ -395,7 +409,7 @@ report)
     python3 "$(dirname "${BASH_SOURCE[0]}")/sweep_report.py" \
         "${1:-${LOG_OUT}/evo.log}" -o "${LOG_OUT}/sweep.md"
     ;;
-clear)  del_files "${USB_STATUS}" "${USB_LOG}" ;;
+clear)  del_files "${USB_STATUS}" "${USB_LOG}" "${USB_UI}" ;;
 status) get_file "${USB_STATUS}" || echo "(no evo_status — launched? built --usb-remote?)" ;;
 boot|log)
     mkdir -p "${LOG_OUT}"

@@ -11,7 +11,7 @@ doc before working deep in an area.
 
 **Replies:** Reply in plain, simple words: the result first, then the next step. No tables or extra detail unless I ask.
 
-**Test on the console yourself.** After any fix, run it on the PS5 yourself: `evo-remote.sh quit` → `close` → deploy → `launch`, then drive it with `screen` / `key` / `key l3` + `tools/shot.sh grab` and read the screenshots. Never ask me to test what you can test. → [tooling.md#hardware-cycle](docs/build/tooling.md#hardware-cycle)
+**Test on the console yourself.** After any fix, run it on the PS5 yourself: `evo-remote.sh quit` → `close` → deploy → `launch`, then drive it with `screen` / `key` and read where focus went from `key`'s output or `ui`. Use `key l3` + `tools/shot.sh grab` only when you need to see pixels (layout, colour, rendering). Never ask me to test what you can test. → [tooling.md#hardware-cycle](docs/build/tooling.md#hardware-cycle)
 
 **Implementing a GitHub issue?** Start at [roadmap.md](docs/planning/roadmap.md).
 Each issue body also has a "References & sequencing" block.
@@ -70,7 +70,8 @@ docker compose run --rm ps5-dev ./scripts/deploy-app.sh --ffpfsc   # sha256-veri
 
 # drive the console (PS5_HOST=192.168.0.x)
 ./tools/evo-remote.sh launch | quit | close | status | log
-./tools/evo-remote.sh screen <id> | key <button> | play <path>      # key l3 = screenshot
+./tools/evo-remote.sh screen <id> | key <button>... | play <path>   # key l3 = screenshot
+./tools/evo-remote.sh ui [--line]       # screen + focused element + modal/toast as text (#115)
 ./tools/shot.sh grab                                                 # -> output/screenshots/latest.png
 ./tools/evo-remote.sh cycle --secs 60   # whole loop, classified result in output/cycles/
 

@@ -36,6 +36,7 @@ docker compose run --rm ps5-dev ./tools/klog.sh
 # unattended: build/deploy + drive playback over FTP, pull the boot log
 docker compose run --rm ps5-dev bash -lc './tools/evo-remote.sh build --usb-remote'
 docker compose run --rm ps5-dev ./tools/evo-remote.sh status
+docker compose run --rm ps5-dev ./tools/evo-remote.sh key down cross   # prints where focus landed (#115)
 
 # a UI/layout question? render on the host, no console:
 ./tools/uiview.sh --all      # -> output/uiview/rml_*.png
@@ -410,6 +411,55 @@ make rule tracks `main.c` and the `pp/` sources but not `CFLAGS` and not
 headers, so changing a `-D` flag left the previous binary in place and reported
 "up to date" — which cost a debugging cycle when a flag change was installed,
 launched, and reasoned about against a binary that had never been rebuilt.
+
+---
+
+## Navigating by text: `evo-remote.sh ui` and `key` (#115)
+
+A `--usb-remote` build writes `/mnt/usb0/evo_ui.json` whenever the screen,
+the focused element, a modal or a toast changes. The DOM is sampled at 10 Hz
+and the file is written only when it differs, so an idle UI writes nothing.
+Release builds compile all of it out.
+
+```bash
+./tools/evo-remote.sh key down down cross     # one line per press:
+# down     [focus] #rec-tile-0 "Best of the Best Recent File" (item 1/6, launch) on MainMenu(0)  (seq 3)
+./tools/evo-remote.sh ui            # the whole JSON + that line
+./tools/evo-remote.sh ui --line     # just the line
+./tools/evo-remote.sh key --no-wait l3   # old behaviour: send, don't read back
+```
+
+`key` sends each press, waits for `seq` to move (up to `EVO_KEY_WAIT`
+seconds, default 2.5), and prints where focus came to rest. `(unchanged)`
+means the press moved nothing: the end of a list, or a key the screen ignores.
+
+What is in the JSON (`ui`):
+
+- `screen`: the `evo::ScreenId` number and name.
+- `docs`: every visible RmlUi document (`launch`, `navbar`, `dialog`, a
+  provider's own `.rml`, ...).
+- `focused`: `id`, `tag`, `class`, `text`, `doc`, `index`/`total` in its list,
+  `rect` (UI context pixels: 3840x2160 on a 4K output), and `focusable`, the
+  other items of the same list (same tag and same first class) with their
+  text. Icon-only items get their icon name as text,
+  e.g. `[icon_home]`.
+- `also_highlighted`: other highlighted elements, such as a remembered
+  selection in a pane that does not have the cursor.
+- `modal`: `{kind: keyboard|dialog, text}` or `null`. `toast`: its text or
+  `null`.
+- `native_player` (Player screen only): `osd_visible`, `paused`,
+  `active_overlay` (`scrub` / `stats` / `null`).
+
+How focus is found (`ui_rml/src/evo_rmlui_devstate.cpp`): RmlUi's own focus
+(provider screens), or an element carrying a `focused`, `*-focused` or
+`*-cursor` class (every native screen). The keyboard wins over a dialog, a
+dialog over the nav rail, the rail over the screen. **A new screen that
+highlights with inline properties only is invisible to this**: give the
+highlighted element a `*-focused` class, even with no RCSS rule (see
+`hero-focused` in `UpdateLaunchState`).
+
+Use `ui` / `key` for navigation and test automation. Keep `key l3` +
+`shot.sh grab` for visual checks: layout, colour, rendering.
 
 ---
 

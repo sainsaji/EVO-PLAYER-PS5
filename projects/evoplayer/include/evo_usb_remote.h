@@ -28,6 +28,10 @@
  * Status line: build=<id> t=<s> scr=<n> be=<0|1> pos=<s> dur=<s> fps=<n>
  *              fatal=<0|1> eof=<0|1> active=<0|1> parked=<0|1>
  * parked=1 is written once, as the soft close parks; t= is frozen after it.
+ *
+ * #115: /mnt/usb0/evo_ui.json - {"seq","t_ms","ui":{screen, focused, modal,
+ * toast, native_player, ...}}, written only when the UI state changes (see
+ * ui_rml/include/evo_rmlui_devstate.h). `seq` goes up by one per write.
  */
 #ifndef EVO_USB_REMOTE_H
 #define EVO_USB_REMOTE_H

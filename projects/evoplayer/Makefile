@@ -212,7 +212,8 @@ RMLUI_SRCS := \
     ui_rml/src/evo_rmlui_bundle.cpp \
     ui_rml/src/evo_rmlui_bundle_data.cpp \
     ui_rml/src/evo_rmlui_provider.cpp \
-    ui_rml/src/evo_rmlui_provider_art.cpp
+    ui_rml/src/evo_rmlui_provider_art.cpp \
+    ui_rml/src/evo_rmlui_devstate.cpp
 
 ifeq ($(AGC_DEVICE),1)
     RMLUI_SRCS += ui_rml/src/evo_rmlui_render_agc.cpp

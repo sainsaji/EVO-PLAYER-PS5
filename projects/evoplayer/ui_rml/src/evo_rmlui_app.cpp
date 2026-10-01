@@ -803,6 +803,9 @@ void EvoRmlApp::UpdateLaunchState(const EvoLaunchState& state) {
     Rml::Element* el_hero = m_launch_doc->GetElementById("hero");
     if (el_hero) {
         el_hero->SetProperty("background-color", surface);
+        /* No RCSS rule: the class is how the #115 dev-remote snapshot sees
+         * the highlight, which is otherwise only inline properties. */
+        el_hero->SetClass("hero-focused", state.hero_focused);
         if (state.hero_focused) {
             el_hero->SetProperty("border-color", accent);
             el_hero->SetProperty("border-width", "2px");

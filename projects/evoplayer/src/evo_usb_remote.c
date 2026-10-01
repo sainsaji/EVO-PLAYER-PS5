@@ -15,6 +15,7 @@
 #include "evo_playback.h"
 #include "evo_demux.h"
 #include "pp_stage_breadcrumb.h"
+#include "evo_rmlui_devstate.h"
 
 #ifdef EVO_HAVE_BUILD_ID
 #include "evo_build_id.h"
@@ -24,6 +25,8 @@
 
 #define CMD_PATH    "/mnt/usb0/evo_cmd"
 #define STATUS_PATH "/mnt/usb0/evo_status"
+#define UI_PATH     "/mnt/usb0/evo_ui.json"
+#define UI_TMP_PATH "/mnt/usb0/evo_ui.json.tmp"
 
 extern int    screen;   /* main.c */
 
@@ -172,6 +175,51 @@ static void write_status(long long now, int parked)
     fclose(sf);
 }
 
+/*
+ * #115: /mnt/usb0/evo_ui.json - the screen, the focused element, modal, toast
+ * and player OSD state as text, so the remote can navigate without a
+ * screenshot. The DOM is sampled at 10 Hz and the file is written only when
+ * the document differs from the last one written; an idle UI writes nothing.
+ * `seq` goes up by one per write, which is how `evo-remote.sh key` tells the
+ * state its press produced from the state before it.
+ *
+ * Written to a temp file and renamed, so an FTP RETR never reads half of it.
+ */
+static void write_ui_state(long long now)
+{
+    static long long last_sample = 0;
+    static char     *last_json;
+    static unsigned  seq;
+    const char      *json;
+    FILE            *f;
+
+    if (now - last_sample < 100)
+        return;
+    last_sample = now;
+
+    json = evo_rmlui_dev_ui_json(screen, evo_pb_is_paused());
+    if (last_json && strcmp(json, last_json) == 0)
+        return;
+    free(last_json);
+    {
+        size_t n = strlen(json) + 1;   /* no strdup: see native-libc gaps */
+        last_json = malloc(n);
+        if (last_json)
+            memcpy(last_json, json, n);
+    }
+
+    f = fopen(UI_TMP_PATH, "w");
+    if (!f)
+        return;
+    /* seq/t first and outside the compared body: they change on every write. */
+    fprintf(f, "{\"seq\":%u,\"t_ms\":%lld,\"ui\":%s}\n", ++seq, now, json);
+    fclose(f);
+    if (rename(UI_TMP_PATH, UI_PATH) != 0) {
+        remove(UI_PATH);
+        rename(UI_TMP_PATH, UI_PATH);
+    }
+}
+
 void evo_usb_remote_poll(void)
 {
     static long long last_status = 0;
@@ -203,6 +251,8 @@ void evo_usb_remote_poll(void)
             remove(CMD_PATH);
         }
     }
+
+    write_ui_state(now);
 
     /* Status once a second. */
     if (now - last_status < 1000)
