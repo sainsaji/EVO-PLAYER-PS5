@@ -11,7 +11,32 @@
 #   PS5_HOST=192.168.0.6 ./tools/evo-remote.sh <subcommand>
 #
 #   build [--breadcrumbs ...]               package --usb-remote + deploy .ffpfsc
-#   kill                                    SIGKILL the running eboot (app_ctl)
+#   launch                                  launch PPSA99039 with no controller
+#                                           (title-aware controller -> elfldr
+#                                           :9021). Refused while ShadowMount
+#                                           shows it resident or the heartbeat
+#                                           is live - never stacks a launch
+#   quit                                    soft close (= Settings -> QUIT EVO):
+#                                           stop media, drain the GPU, park.
+#                                           Waits for parked=1 in evo_status
+#   close [--force]                         free the slot: the title-aware close
+#                                           controller, then waits for
+#                                           ShadowMount's "runtime layers
+#                                           released". Only after `quit` has
+#                                           parked it; --force when there is no
+#                                           heartbeat to read (never if running)
+#   cycle [--secs n] [--play <path>]        ONE bounded hardware cycle, the
+#         [--no-build] [-- pkg-args...]     ps5-homebrew-dev-protocol runbook:
+#                                           free slot -> package -> deploy ->
+#                                           ShadowMount registered -> launched
+#                                           (auto, else `launch`) -> klog + evo.log
+#                                           for n s -> quit -> close -> classify.
+#                                           Evidence + result.json in
+#                                           output/cycles/<stamp>/, one line
+#                                           appended to output/cycles/ledger.txt.
+#                                           Stops at the first anomaly, never
+#                                           retries, never chains
+#   kill                                    = quit + close
 #   play <path>                             open <path> from the start
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   stop                                    end playback, back to the browser
@@ -45,9 +70,10 @@
 #                                           known to take the app down)
 #   report [evo.log]                        re-render that table offline
 #
-# The one thing this can't do: launch the title (sceSystemServiceLaunchApp from
-# a payload returns 0x80940005). After `build` / `kill`, launch once from the
-# Games row via ShadowMount+; everything else is hands-off.
+# launch/close send the vendored controllers in tools/ps5-controllers/ (from
+# ps5-homebrew-dev-protocol). Their evidence is ShadowMount+'s debug.log, read
+# by tools/evo_lifecycle.py; elfldr accepting the bytes proves nothing.
+# Protocol, safety rules, outcome classes: docs/build/tooling.md#hardware-cycle
 # =============================================================================
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/common.sh"
 
@@ -59,7 +85,7 @@ if ! in_container; then
     reexec_in_container "../tools/evo-remote.sh" "${SUB}" "$@"
 fi
 require_ps5_host
-need_cmd python3 curl
+need_cmd python3 curl nc timeout
 
 ftp_py() { PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" python3 - "$@"; }
 
@@ -113,6 +139,192 @@ PY
 USB_STATUS="/mnt/usb0/evo_status"
 USB_LOG="/mnt/usb0/evo.log"
 
+# --- lifecycle: controllers + ShadowMount evidence ---------------------------
+TITLE_ID="PPSA99039"
+ELF_PORT="${PS5_ELF_PORT:-9021}"
+CTRL_SRC="$(dirname "${BASH_SOURCE[0]}")/ps5-controllers"
+CTRL_OUT="${OUTPUT_DIR}/controllers"
+
+lc() { PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" TITLE_ID="${TITLE_ID}" \
+       python3 "$(dirname "${BASH_SOURCE[0]}")/evo_lifecycle.py" "$@"; }
+
+send_controller() {   # send_controller launch|close
+    local mode="$1" elf="${CTRL_OUT}/${1}-${TITLE_ID}.elf"
+    local libs=(-lSceSystemService)
+    [[ "${mode}" == launch ]] && libs+=(-lSceUserService)
+    mkdir -p "${CTRL_OUT}"
+    "${PS5_PAYLOAD_SDK}/bin/prospero-clang" -Wall -Werror \
+        -DBOOTSTRAP_TITLE_ID="\"${TITLE_ID}\"" "${libs[@]}" \
+        -o "${elf}" "${CTRL_SRC}/${mode}.c" || die "could not build the ${mode} controller"
+    timeout --signal=TERM 15s nc -q0 "${PS5_HOST}" "${ELF_PORT}" < "${elf}" \
+        || die "elfldr ${PS5_HOST}:${ELF_PORT} did not take the ${mode} controller"
+    echo "sent: ${mode} ${TITLE_ID} -> ${PS5_HOST}:${ELF_PORT}"
+}
+
+do_launch() {
+    local slot hb base
+    slot="$(lc slot)"; hb="$(lc heartbeat)"
+    [[ "${hb}" == RUNNING ]] && die "EVO's heartbeat is advancing - it is running. Not stacking a launch."
+    [[ "${slot}" == FREE ]] || die "ShadowMount says ${TITLE_ID} is ${slot} (started, not released). Not launching.
+   If it is parked: evo-remote.sh close. Otherwise PS-button-close it first."
+    base="$(lc smlen)" || die "could not read ShadowMount's log"
+    del_files "${USB_STATUS}" >/dev/null || true
+    send_controller launch
+    [[ "$(lc wait-started "${base}" 30)" == STARTED ]] \
+        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take (0x80940005 class?). Check klog."
+    ok "launched (ShadowMount: started)"
+}
+
+do_quit() {
+    local hb; hb="$(lc heartbeat)"
+    case "${hb}" in
+        PARKED)  ok "already parked"; return 0 ;;
+        RUNNING) ;;
+        *) die "no live heartbeat (${hb}) - not a running --usb-remote build, so \`quit\` cannot reach it." ;;
+    esac
+    put_cmd "quit"
+    [[ "$(lc wait-parked 30)" == PARKED ]] || die "EVO did not report parked=1 within 30 s. Do NOT close it remotely - check the TV."
+    ok "parked - GPU drained, safe to close"
+}
+
+do_close() {
+    local force=0 hb slot base
+    [[ "${1:-}" == --force ]] && force=1
+    slot="$(lc slot)"
+    if [[ "${slot}" == FREE ]]; then ok "ShadowMount: ${TITLE_ID} already released"; return 0; fi
+    hb="$(lc heartbeat)"
+    case "${hb}" in
+        PARKED) ;;
+        RUNNING) die "EVO is running (heartbeat advancing). Killing a submitting GPU panicked the console
+   on 2026-09-18. Run evo-remote.sh quit first; --force does not override this." ;;
+        *) (( force )) || die "cannot see EVO's state (heartbeat ${hb}): not a --usb-remote build, or not parked.
+   Park it first (Settings -> QUIT EVO), then: evo-remote.sh close --force"
+           warn "closing without a parked=1 receipt (--force)" ;;
+    esac
+    base="$(lc smlen)" || die "could not read ShadowMount's log"
+    send_controller close
+    [[ "$(lc wait-released "${base}" 30)" == RELEASED ]] \
+        || die "no '[LINK] runtime layers released: ${TITLE_ID}' within 30 s. STOP - check the console before anything else."
+    ok "closed (ShadowMount: runtime layers released)"
+}
+
+# One bounded cycle (ps5-homebrew-dev-protocol docs/RUNBOOK.md, section 3).
+# Every exit path writes result.json + one ledger line. Never retries.
+do_cycle() {
+    local secs=60 play="" build=1 pkg=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --secs)     secs="$2"; shift 2 ;;
+            --play)     play="$2"; shift 2 ;;
+            --no-build) build=0; shift ;;
+            --)         shift; pkg=("$@"); break ;;
+            *) die "usage: evo-remote.sh cycle [--secs n] [--play <path>] [--no-build] [-- package-app args]" ;;
+        esac
+    done
+    local stamp dir commit dirty img sha="" base stage="none" klog_pid=""
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    dir="${OUTPUT_DIR}/cycles/${stamp}"
+    mkdir -p "${dir}"
+    commit="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    dirty="$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=no 2>/dev/null | wc -l)"
+    img="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
+
+    finish() {   # finish <outcome> <next-action>
+        [[ -n "${klog_pid}" ]] && { kill "${klog_pid}" 2>/dev/null || true; }
+        local line
+        line="- $(date -u +%F) | ${commit}$( (( dirty )) && echo +dirty) | ${TITLE_ID} | $1: ${stage} | output/cycles/${stamp} | $2"
+        python3 - "${dir}/result.json" "$1" "${stage}" "${commit}" "${dirty}" "${sha}" "$2" <<'PY'
+import json, sys
+p, outcome, stage, commit, dirty, sha, nxt = sys.argv[1:]
+json.dump({"outcome": outcome, "highestStage": stage, "commit": commit,
+           "dirtyFiles": int(dirty), "ffpfscSha256": sha, "next": nxt},
+          open(p, "w"), indent=2)
+PY
+        echo "${line}" >> "${OUTPUT_DIR}/cycles/ledger.txt"
+        echo ""; echo "${line}"
+        [[ "$1" == pass ]] && return 0
+        exit 1
+    }
+
+    # 1. preflight - only the declared services
+    local port klog=1
+    for port in "${FTP_PORT}" "${ELF_PORT}"; do
+        nc -z -w 3 "${PS5_HOST}" "${port}" 2>/dev/null \
+            || { stage="preflight"; finish no-run "service :${port} down - re-run the jailbreak chain"; }
+    done
+    # klog is evidence, not a requirement: klogsrv is not in every autoload chain
+    nc -z -w 3 "${PS5_HOST}" 3232 2>/dev/null \
+        || { klog=0; warn "klog :3232 closed - no klog.log this cycle; a crash then shows only as a lost heartbeat (inconclusive)"; }
+    (( dirty )) && warn "${dirty} tracked file(s) uncommitted - the candidate is not frozen (ledger marks +dirty)"
+
+    # 2. a free slot, by evidence: quit -> parked -> close -> released
+    if [[ "$(lc slot)" != FREE ]]; then
+        local hb; hb="$(lc heartbeat)"
+        [[ "${hb}" == RUNNING ]] && { ( do_quit ) || { stage="preflight"; finish no-run "quit did not park"; }; hb=PARKED; }
+        [[ "${hb}" == PARKED ]] || { stage="preflight"; finish no-run "resident with no heartbeat (${hb}) - park/close it by hand"; }
+        ( do_close ) || { stage="preflight"; finish failed "close never released the slot - STOP, check the console"; }
+    fi
+    stage="slot-free"
+
+    # 3. build the candidate
+    if (( build )); then
+        "${SCRIPTS_DIR}/package-app.sh" --ffpfsc --usb-remote "${pkg[@]+"${pkg[@]}"}" > "${dir}/package.log" 2>&1 \
+            || finish no-run "package failed - see package.log"
+    fi
+    [[ -f "${img}" ]] || finish no-run "no ${img}"
+    sha="$(sha256sum "${img}" | cut -d' ' -f1)"
+    echo "${sha}  ${TITLE_ID}.ffpfsc" > "${dir}/sha256.txt"
+    stage="packaged"
+
+    # 4. deploy, then ShadowMount must register it before anything launches
+    base="$(lc smlen)" || { finish transport-failure "ShadowMount log unreadable"; }
+    "${SCRIPTS_DIR}/deploy-app.sh" --ffpfsc > "${dir}/deploy.log" 2>&1 \
+        || finish transport-failure "deploy failed - do NOT retry; see deploy.log"
+    stage="deployed"
+    [[ "$(lc wait-registered "${base}" 90)" == REGISTERED ]] \
+        || { lc smslice "${base}" > "${dir}/shadowmount.log" 2>/dev/null || true; finish no-run "ShadowMount never registered the new image - not launching"; }
+    stage="registered"
+
+    # 5. observe: klog from before the launch, ShadowMount auto-launches on the
+    #    image change - only send `launch` if it did not.
+    : > "${dir}/klog.log"
+    if (( klog )); then
+        timeout --signal=TERM "$((secs + 90))s" nc "${PS5_HOST}" 3232 > "${dir}/klog.log" 2>/dev/null &
+        klog_pid=$!
+    fi
+    if [[ "$(lc wait-started "${base}" 40)" != STARTED ]]; then
+        ( do_launch ) > "${dir}/launch.log" 2>&1 \
+            || { lc smslice "${base}" > "${dir}/shadowmount.log" 2>/dev/null || true; finish failed "never started - see launch.log + klog.log"; }
+    fi
+    stage="started"
+    [[ "$(lc heartbeat)" =~ RUNNING|PARKED ]] && stage="app-checkpoint"
+    [[ -n "${play}" ]] && { sleep 5; put_cmd "play ${play}" > /dev/null; }
+    sleep "${secs}"
+    get_file "${USB_STATUS}" > "${dir}/evo_status.txt" 2>/dev/null || true
+    get_file "${USB_LOG}"    > "${dir}/evo.log"        2>/dev/null || true
+
+    # 6. close: app-initiated soft close first, the kill controller only once parked
+    local hb; hb="$(lc heartbeat)"
+    if [[ "${hb}" != RUNNING && "${hb}" != PARKED ]]; then
+        lc smslice "${base}" > "${dir}/shadowmount.log" 2>/dev/null || true
+        grep -qaE 'A user thread receives a fatal signal|App Crash' "${dir}/klog.log" \
+            && finish failed "runtime crash - see klog.log"
+        finish inconclusive "started but no heartbeat (${hb}) - check the TV before the next cycle"
+    fi
+    ( do_quit ) > "${dir}/quit.log" 2>&1 || finish partial-pass "did not park - close by hand, check the TV"
+    ( do_close ) > "${dir}/close.log" 2>&1 || finish failed "parked but never released - STOP, check the console"
+    stage="teardown"
+    kill "${klog_pid}" 2>/dev/null || true; klog_pid=""
+    lc smslice "${base}" > "${dir}/shadowmount.log" 2>/dev/null || true
+
+    # 7. classify
+    grep -qaE 'A user thread receives a fatal signal|App Crash' "${dir}/klog.log" \
+        && finish failed "crash in klog.log despite a clean teardown"
+    grep -q 'fatal=1' "${dir}/evo_status.txt" 2>/dev/null \
+        && finish failed "decoder fatal=1 - see evo.log"
+    finish pass "-"
+}
+
 case "${SUB}" in
 build)
     "${SCRIPTS_DIR}/package-app.sh" --ffpfsc --usb-remote "$@"
@@ -121,13 +333,11 @@ build)
     echo ""
     echo "  >>> launch PPSA99039 from the Games row (ShadowMount+ remounted) <<<"
     ;;
-kill)
-    # The old app_ctl /hbldr helper is gone with the ELF-push scripts
-    # (2026-09-03). PS-button close on the console is the only reliable way to
-    # free the app slot; ShadowMount+ re-mounts + auto-launches on the next
-    # `evo-remote.sh build`.
-    die "no remote kill. PS-button-close EVO on the console, then re-deploy."
-    ;;
+launch) do_launch ;;
+quit)   do_quit ;;
+close)  do_close "${1:-}" ;;
+kill)   do_quit; do_close ;;
+cycle)  do_cycle "$@" ;;
 play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
 stop)   put_cmd "stop" ;;

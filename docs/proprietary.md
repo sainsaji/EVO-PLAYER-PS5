@@ -120,6 +120,7 @@ Not proprietary, but recorded here so the licences are in one place.
 | Component | Where | Licence | Notes |
 |---|---|---|---|
 | AMD FidelityFX Super Resolution 1.0 (EASU + RCAS) | ported to GLSL in `tools/gen_upscale_pipes.py` → `projects/evoplayer/shaders/agc/upscale_{easu,rcas}.pipe` | MIT, © Advanced Micro Devices | #103 Sharp upscaler. A port of `ffx_fsr1.h`'s float path, not a copy of the header |
+| ps5-homebrew-dev-protocol launch/close controllers | `tools/ps5-controllers/` (vendored unchanged, with `COPYING`) | GPL-3.0-or-later, © BlackBearReloaded; adapted from shsrv/websrv © John Törnblom | Dev tooling only: standalone ELF payloads sent to elfldr by `evo-remote.sh`. Never linked into EVO or shipped in the `.ffpfsc` |
 | Anime4K `Upscale_CNN_x2` S and M | `third_party/anime4k/` (vendored unchanged, with its `LICENSE`) → `upscale_a4k_*.pipe` | MIT, © bloc97 | #103 AI upscaler. The network weights are the literal constants in those mpv hooks |
 
 A live-action super-resolution network (FSRCNN-class) was considered for AI

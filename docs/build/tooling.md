@@ -26,7 +26,8 @@ under `projects/evoplayer/shaders/agc/`.
 docker compose run --rm ps5-dev bash -lc '
   ./scripts/package-app.sh --ffpfsc
   ./scripts/deploy-app.sh --ffpfsc'
-# ShadowMountPlus re-mounts + auto-launches PPSA99039 on the .ffpfsc change;
+# ShadowMount+ v1.7 test-mounts the new image but does NOT launch it:
+# tools/evo-remote.sh launch (or the Games row);
 # otherwise launch it from the Games row. PS-button-close a running EVO first.
 
 # watch the console log (separate terminal, keeps a record)
@@ -58,10 +59,11 @@ it hard-errors on `--run`.
 ## Launching, and why it needs care
 
 Deploy = `deploy-app.sh --ffpfsc` FTPs `PPSA99039.ffpfsc` to
-`/data/homebrew/`. The user's **ShadowMountPlus re-mounts and auto-launches**
-it on the file change — the only non-manual relaunch. Otherwise the user
-launches PPSA99039 from the **Games row**. There is **no remote launch or kill**
-for a fake-signed title.
+`/data/homebrew/`. **ShadowMount+ v1.7** test-mounts the changed image, then
+unmounts it again. It does **not** auto-launch an updated image (seen
+2026-10-01; older versions did on first registration). The user
+launches PPSA99039 from the **Games row**, or sends the launch remotely with
+`tools/evo-remote.sh launch`. See [the hardware cycle](#hardware-cycle) below.
 
 **The app slot stays resident.** Launching again does not replace the running
 instance — it adds one, and each opens videoout, an audio port, the pad and
@@ -114,6 +116,105 @@ Two habits:
 
 `curl` / `timeout` reporting a timeout (exit 28 / 124) on an `evo-remote.sh`
 call is the normal, successful outcome — the far end holds the socket.
+
+### Hardware cycle
+
+Adopted from
+[ps5-homebrew-dev-protocol](https://github.com/blackbearreloaded/ps5-homebrew-dev-protocol)
+(its `docs/RUNBOOK.md`). One case means one changed variable, one frozen
+candidate, one bounded console cycle and one classified result.
+
+```bash
+# needs elfldr :9021, ftpsrv :2121, klog :3232; the cycle builds with --usb-remote
+docker compose run --rm ps5-dev ./tools/evo-remote.sh cycle --secs 60
+docker compose run --rm ps5-dev ./tools/evo-remote.sh cycle --no-build --play /mnt/usb0/media/gta.mp4
+
+# the pieces, by hand
+./tools/evo-remote.sh quit      # soft close -> waits for parked=1 in evo_status
+./tools/evo-remote.sh close     # close controller -> waits for "runtime layers released"
+./tools/evo-remote.sh launch    # launch controller -> waits for "[GAME] started"
+```
+
+**Lifecycle evidence comes from two sources, both read by
+`tools/evo_lifecycle.py`:**
+- ShadowMount+'s `/data/shadowmount/debug.log`:
+  - `NOTIFY: installed game` / `mount.lnk created` = registered;
+  - `[GAME] started:` = launched;
+  - `[LINK] runtime layers released:` = the process is gone and the slot is
+    free.
+- EVO's `evo_status` heartbeat: `t=` advancing means running; `parked=1` is
+  written once, when the soft close parks.
+
+`deploy-app.sh` now asks ShadowMount too. "EVO ran and is not running" used to
+need `--force`, because a parked EVO and a closed one looked the same. A
+"released" after the last "started" now settles that.
+
+**The controllers** (`tools/ps5-controllers/`, vendored GPL-3.0, see the README
+there) are tiny ELF payloads sent to elfldr, with the title ID compiled in:
+- `launch.c`: `sceSystemServiceLaunchApp` for the foreground user.
+- `close.c`: kills the foreground app, only if its title is PPSA99039.
+
+**`close` kills the process, the same as a PS-button close.** The script
+refuses to send it unless `evo_status` says `parked=1` (or `--force` with no
+heartbeat to read, and never while `t=` advances). The order is always
+`quit` → parked → `close`, so a quiescent GPU is what gets killed. `launch` is
+refused while ShadowMount shows the title started-and-not-released, or while
+the heartbeat moves, so it cannot stack a launch.
+
+What `cycle` does, in order. It stops at the first anomaly and never retries:
+
+1. **Preflight.** :2121, :3232 and :9021 must answer. A dirty tree is flagged
+   `+dirty`.
+2. **Free the slot.** If it is resident: `quit`, then `close`. If there is no
+   heartbeat, the result is `no-run`.
+3. **Package.** `package-app.sh --ffpfsc --usb-remote`, then record the
+   `.ffpfsc` sha256.
+4. **Deploy.** The deploy runs, then ShadowMount must log the new registration
+   within 90 s. Without it, nothing launches.
+5. **Observe.** klog starts recording first. `launch` is sent only if
+   `[GAME] started` doesn't appear within 40 s, which guards against an
+   older ShadowMount that auto-launches. v1.7 never does, so expect the
+   wait. Then `--play`, the `--secs` window, and pulling `evo.log` and
+   `evo_status`.
+6. **Close.** `quit`, then parked, then `close`, then released.
+7. **Classify** with exactly one result:
+   - `pass`;
+   - `partial-pass`: started but did not park;
+   - `failed`: never started, crash in klog, `fatal=1`, or no release;
+   - `inconclusive`: started but the heartbeat vanished;
+   - `transport-failure`: deploy or FTP broke;
+   - `no-run`: blocked before execution.
+
+The evidence goes to `output/cycles/<stamp>/`: `result.json`, `klog.log`,
+`evo.log`, `evo_status.txt`, the ShadowMount slice, `sha256.txt` and the step
+logs. One line is appended to `output/cycles/ledger.txt`:
+
+```text
+- 2026-10-01 | 8718ffa | PPSA99039 | pass: teardown | output/cycles/20261001T034700Z | -
+```
+
+Paste a proven milestone's line into the issue or
+[status.md](../evo-pro/status.md). Don't paste raw logs.
+
+Protocol rules that apply on top of ours:
+- Run cycles one at a time.
+- After any `failed`, `inconclusive` or `transport-failure`, check the console
+  before the next run.
+- After a suspected kernel panic, analyse the evidence offline and don't rerun.
+- Never touch console Settings, and never approve an update.
+
+> **Status: hw-verified 2026-10-01** (PS5 Pro, FW 12.70, ShadowMount+
+> v1.7beta2, elfldr :9021):
+> - `launch`: `[GAME] started` in 1 s, heartbeat live. The old hbldr
+>   `0x80940005` doesn't happen through elfldr.
+> - `quit`: parked in 2.7 s, `soft close: parked - GPU idle`.
+> - `close`: `runtime layers released` 1 s after the kill, services healthy.
+> - `cycle --no-build --secs 30`: `pass: teardown`.
+>
+> The `getAppStatus: LNC_ISOK::0x80940004` line both controllers print is
+> SceLncUtil chatter echoed back by elfldr, not a failure. In ShadowMount
+> v1.7, an updated image counts as registered at
+> `unmount complete: source=/data/homebrew/PPSA99039.ffpfsc`.
 
 ---
 

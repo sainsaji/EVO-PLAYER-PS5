@@ -14,6 +14,10 @@
  *   seek -<sec>        seek back
  *   stop               end playback, back to the browser (#8: flushes the
  *                      per-file `sweep` line, which the decoder close writes)
+ *   quit               Settings -> QUIT EVO: stop media, drain the GPU, park the
+ *                      frame loop (Application::requestSoftClose). The process
+ *                      stays resident - tools/evo-remote.sh then sends the
+ *                      title-aware close controller to free the slot
  *   upcompare          #103: pause, then capture the SAME frame with the
  *                      upscaler Off / Sharp / AI Standard / Large / Maximum
  *                      and no OSD, to
@@ -22,7 +26,8 @@
  *                      Settings mode and the pause state afterwards
  *
  * Status line: build=<id> t=<s> scr=<n> be=<0|1> pos=<s> dur=<s> fps=<n>
- *              fatal=<0|1> eof=<0|1> active=<0|1>
+ *              fatal=<0|1> eof=<0|1> active=<0|1> parked=<0|1>
+ * parked=1 is written once, as the soft close parks; t= is frozen after it.
  */
 #ifndef EVO_USB_REMOTE_H
 #define EVO_USB_REMOTE_H
@@ -35,6 +40,11 @@ extern "C" {
 /* Call once per frame from main()'s loop. Cheap: a stat() on the cmd file and,
  * at most once a second, a status write. */
 void evo_usb_remote_poll(void);
+
+/* Call once, as the soft close parks the frame loop: one last status line with
+ * parked=1. The loop never polls again, so this is what tells the host the
+ * slot is quiescent and safe to close. */
+void evo_usb_remote_mark_parked(void);
 
 /*
  * One frame's worth of synthetic button presses, OR'd into the real pad mask
@@ -83,6 +93,7 @@ void evo_remote_open_image(const char *path);
 void evo_remote_open_text(const char *path);
 #else
 #define evo_usb_remote_poll() ((void)0)
+#define evo_usb_remote_mark_parked() ((void)0)
 #define evo_usb_remote_take_buttons() (0u)
 #endif
 
@@ -93,6 +104,10 @@ void evo_open_media_path(const char *path);
 /* Provided by the host (Application.cpp): start the #103 upscaler A/B/C
  * capture described above. No-op unless a video is playing. */
 void evo_remote_upscale_compare(void);
+
+/* Provided by the host (Application.cpp): the `quit` command - the same soft
+ * close as Settings -> QUIT EVO. */
+void evo_remote_soft_close(void);
 
 /* Provided by the host (main.c): end playback and return to the browser. */
 void evo_stop_media_playback(void);

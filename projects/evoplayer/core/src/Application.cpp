@@ -732,6 +732,10 @@ extern "C" void evo_remote_upscale_compare(void) {
         evo::s_upcmp.state = -1;
 }
 
+extern "C" void evo_remote_soft_close(void) {
+    evo::Application::getInstance().requestSoftClose();
+}
+
 namespace evo {
 namespace {
 
@@ -992,6 +996,7 @@ int Application::run() {
                 evo_boot_log("soft close: parked - GPU idle, display latched, "
                              "safe to close from the switcher");
                 evo_boot_log_flush();
+                evo_usb_remote_mark_parked();
                 continue;
             }
         }

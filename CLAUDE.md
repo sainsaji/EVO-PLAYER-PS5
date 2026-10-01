@@ -21,7 +21,8 @@ the dependency-ordered plan; each issue body also carries its own
   `scripts/package-app.sh` (the real build). → [docs/tooling.md](docs/build/tooling.md)
 - **One hardware path: the `.ffpfsc` app module.** `scripts/package-app.sh
   --ffpfsc` + `scripts/deploy-app.sh --ffpfsc`, launched from the Games row
-  (ShadowMountPlus auto-launches on the `.ffpfsc` change). There is no other
+  (`tools/evo-remote.sh launch`, or the Games row; ShadowMount+ v1.7 does NOT
+  auto-launch an updated image). There is no other
   deploy path; `build-evoplayer.sh` is a compile check only.
 - **Never deploy over a running EVO** (panic risk) and **never stack launches**
   — the app slot stays resident; stacking has kernel-panicked the console
@@ -31,6 +32,14 @@ the dependency-ordered plan; each issue body also carries its own
   under a possibly-still-submitting GPU — that panicked the console on
   2026-09-18. QUIT + the `agc_wait_gpu_idle()` drain are **hw-verify-pending**;
   the PS button remains the fallback. → [docs/tooling.md](docs/build/tooling.md)
+- **Remote launch/close = `tools/evo-remote.sh quit` → `close` / `launch` /
+  `cycle`**, never the controllers in `tools/ps5-controllers/` directly.
+  `close` is a kill (same as the PS button), so the script only sends it once
+  `evo_status` says `parked=1`. Lifecycle truth is ShadowMount's
+  `debug.log` (`started` / `runtime layers released`), not an exit code. One
+  cycle at a time, stop at the first anomaly, never auto-retry.
+  → [tooling.md#hardware-cycle](docs/build/tooling.md#hardware-cycle)
+  (**hw-verified 2026-10-01**: launch, quit, close, full cycle = pass)
 - **Never sweep kernel `.text`** (`kernel_copyout` over a range). Panics the
   console every time; this is why the `kdump` project no longer exists.
 - **Never call `sceVideoOutOpen` from a payload.** Returns a handle that
@@ -69,13 +78,17 @@ the dependency-ordered plan; each issue body also carries its own
 docker compose run --rm ps5-dev bash -lc '
   ./scripts/package-app.sh --ffpfsc     # + --usb-remote for the FTP dev remote
   ./scripts/deploy-app.sh --ffpfsc'     # deploy also clears the /mnt/usb0 logs
-# ShadowMountPlus re-mounts + auto-launches on the .ffpfsc change; otherwise
+# ShadowMount+ v1.7 only test-mounts an updated image - launch it with
+# tools/evo-remote.sh launch (hw-verified 2026-10-01); otherwise
 # launch PPSA99039 from the Games row. PS-button-close a running EVO first.
 # Bare-metal sceAgc is the only render path (docs/evo-pro/agc-bare-metal-ui.md).
 # `--agc` is accepted but redundant; `--gl`/`--no-gl`/`--gl-smoke`/`--gl-hdr-probe`
 # and the ps5-opengl submodule are gone and now fail with that explanation.
 # Diagnostics = /mnt/usb0/evo.log (one file) + klog live; popups with --breadcrumbs.
 # Unattended: tools/evo-remote.sh  (build/play/seek/status/boot over FTP).
+# One protocol cycle (free slot -> package -> deploy -> launch -> observe ->
+# quit -> close -> classify), evidence in output/cycles/<stamp>/:
+#   docker compose run --rm ps5-dev ./tools/evo-remote.sh cycle --secs 60
 
 # COMPILE CHECK ONLY - keeps the non-app-module path green (#31/#36/modularisation)
 docker compose run --rm ps5-dev ./scripts/build-evoplayer.sh   # never deploys

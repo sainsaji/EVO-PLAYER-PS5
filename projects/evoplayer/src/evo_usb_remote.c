@@ -128,6 +128,10 @@ static void run_command(const char *line)
         evo_stop_media_playback();
         return;
     }
+    if (strcmp(buf, "quit") == 0) {
+        evo_remote_soft_close();
+        return;
+    }
     if (strncmp(buf, "seek ", 5) == 0) {
         const char *arg = buf + 5;
         double target;
@@ -146,6 +150,26 @@ static void run_command(const char *line)
         return;
     }
     pp_stage_bc("REMOTE_CMD", "unknown");
+}
+
+/*
+ * parked=1 is written exactly once, by evo_usb_remote_mark_parked(), as the
+ * soft close stops the frame loop - after that t= never moves again. It is the
+ * one state in which tools/evo-remote.sh will send the title-aware close
+ * controller: the GPU is drained, nothing is submitting.
+ */
+static void write_status(long long now, int parked)
+{
+    FILE *sf = fopen(STATUS_PATH, "w");
+    if (!sf)
+        return;
+    fprintf(sf,
+            "build=%s t=%lld scr=%d be=%d pos=%.2f dur=%.1f fps=%.1f "
+            "fatal=%d eof=%d active=%d parked=%d\n",
+            EVO_BUILD_ID, now / 1000, screen, evo_pb_active_backend(),
+            evo_player_position_s(), evo_pb_duration_s(), evo_pb_video_fps(),
+            evo_pb_decode_fatal(), evo_pb_is_eof(), evo_pb_is_active(), parked);
+    fclose(sf);
 }
 
 void evo_usb_remote_poll(void)
@@ -184,17 +208,12 @@ void evo_usb_remote_poll(void)
     if (now - last_status < 1000)
         return;
     last_status = now;
+    write_status(now, 0);
+}
 
-    FILE *sf = fopen(STATUS_PATH, "w");
-    if (!sf)
-        return;
-    fprintf(sf,
-            "build=%s t=%lld scr=%d be=%d pos=%.2f dur=%.1f fps=%.1f "
-            "fatal=%d eof=%d active=%d\n",
-            EVO_BUILD_ID, now / 1000, screen, evo_pb_active_backend(),
-            evo_player_position_s(), evo_pb_duration_s(), evo_pb_video_fps(),
-            evo_pb_decode_fatal(), evo_pb_is_eof(), evo_pb_is_active());
-    fclose(sf);
+void evo_usb_remote_mark_parked(void)
+{
+    write_status(now_ms_local(), 1);
 }
 
 #endif /* EVO_USB_REMOTE && EVO_APP_MODULE */

@@ -94,6 +94,12 @@ FFPFSC_IMG="${OUTPUT_DIR}/app/${TITLE_ID}.ffpfsc"
 #                                 where --force still applies.
 #   evo.log absent     FREE     - nothing has run since the last deploy.
 #
+# The IDLE ambiguity is settled by ShadowMount+'s own lifecycle log
+# (tools/evo_lifecycle.py slot): "[LINK] runtime layers released: <TID>" after
+# the last "[GAME] started: <TID>" means the process is gone - closed from the
+# switcher or by `evo-remote.sh close` - and the deploy goes ahead without
+# --force. Started-and-not-released means resident (parked counts), refused.
+#
 check_evo_not_resident() {
     local out
     out="$(python3 - "${PS5_HOST}" "${FTP_PORT}" <<'PY' 2>/dev/null || echo BROKEN
@@ -153,7 +159,16 @@ PY
 
    Close it from the switcher (PS button -> close the application) first." ;;
         PRESENT)
-            if (( FORCE )); then
+            local sm
+            sm="$(PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" TITLE_ID="${TITLE_ID}" \
+                  python3 "${REPO_ROOT}/tools/evo_lifecycle.py" slot 2>/dev/null || true)"
+            if [[ "${sm}" == FREE ]]; then
+                ok "EVO ran since the last deploy, and ShadowMount confirms its runtime was released - slot is free"
+            elif [[ "${sm}" == RESIDENT ]] && (( ! FORCE )); then
+                die "ShadowMount shows ${TITLE_ID} started and NOT released - it is resident (parked by QUIT, or wedged).
+
+   Free it first: tools/evo-remote.sh close (after quit), or PS-button-close it."
+            elif (( FORCE )); then
                 warn "EVO has been launched since the last deploy - --force given, continuing"
             else
                 die "EVO has run since the last deploy, and is not running now.
