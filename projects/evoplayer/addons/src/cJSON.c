@@ -107,6 +107,65 @@ static parse_buffer *buffer_skip_whitespace(parse_buffer *buffer)
 
 static cJSON_bool parse_value(cJSON * const item, parse_buffer * const buffer);
 
+/* Four hex digits -> value; 0 when they are not four hex digits. */
+static int parse_hex4(const unsigned char *s, unsigned *out)
+{
+    unsigned v = 0;
+    for (int k = 0; k < 4; ++k) {
+        unsigned char c = s[k];
+        v <<= 4;
+        if (c >= '0' && c <= '9')      v |= (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') v |= (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v |= (unsigned)(c - 'A' + 10);
+        else return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+/*
+ * \uXXXX (and a \uD8xx\uDCxx surrogate pair) at input[i], i pointing at the
+ * 'u'. Writes UTF-8 to output[j..]; returns how many input bytes past the 'u'
+ * were consumed, 0 when it is not a valid escape. Every form fits the space the
+ * escape itself took (6 chars -> at most 3 bytes, 12 -> 4), so the caller's
+ * len + 1 buffer is always enough.
+ */
+static size_t utf16_escape_to_utf8(const unsigned char *input, size_t i, size_t len,
+                                   unsigned char *output, size_t *j)
+{
+    unsigned cp, lo;
+    if (i + 4 >= len) return 0;                             /* hex at i+1..i+4 */
+    if (!parse_hex4(input + i + 1, &cp)) return 0;
+    size_t used = 4;
+    if (cp >= 0xD800 && cp <= 0xDBFF) {                    /* high surrogate */
+        if (i + 10 < len && input[i + 5] == '\\' && input[i + 6] == 'u' &&
+            parse_hex4(input + i + 7, &lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            used = 10;
+        } else {
+            cp = 0xFFFD;
+        }
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+        cp = 0xFFFD;                                        /* stray low half */
+    }
+    if (cp < 0x80) {
+        output[(*j)++] = (unsigned char)cp;
+    } else if (cp < 0x800) {
+        output[(*j)++] = (unsigned char)(0xC0 | (cp >> 6));
+        output[(*j)++] = (unsigned char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+        output[(*j)++] = (unsigned char)(0xE0 | (cp >> 12));
+        output[(*j)++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        output[(*j)++] = (unsigned char)(0x80 | (cp & 0x3F));
+    } else {
+        output[(*j)++] = (unsigned char)(0xF0 | (cp >> 18));
+        output[(*j)++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+        output[(*j)++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        output[(*j)++] = (unsigned char)(0x80 | (cp & 0x3F));
+    }
+    return used;
+}
+
 static cJSON_bool parse_string(cJSON * const item, parse_buffer * const buffer)
 {
     const unsigned char *input = buffer->json + buffer->position;
@@ -145,6 +204,12 @@ static cJSON_bool parse_string(cJSON * const item, parse_buffer * const buffer)
                     case '\"': output[j++] = '\"'; break;
                     case '\\': output[j++] = '\\'; break;
                     case '/': output[j++] = '/'; break;
+                    case 'u': {
+                        size_t used = utf16_escape_to_utf8(input, i, len, output, &j);
+                        if (used) i += used;
+                        else output[j++] = 'u';
+                        break;
+                    }
                     default: output[j++] = input[i]; break;
                 }
             } else {

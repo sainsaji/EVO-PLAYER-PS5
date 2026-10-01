@@ -142,4 +142,8 @@ Layer boundaries: [architecture.md](docs/architecture/architecture.md).
   ... bash -c`. Each container start costs seconds.
 - **On Windows, write multi-line patch scripts to a file and run
   `python3 -X utf8 file.py`.** Heredocs with quotes or em dashes break in Git
-  Bash.
+  Bash. A PreToolUse hook (`.claude/hooks/block-heredoc-escapes.py`) blocks a
+  Bash heredoc that has backslash escapes or feeds python: use the Write tool.
+- **`evo-remote.sh launch` waits for ShadowMount to go idle** (log quiet 15 s)
+  first. Launching mid-scan after a deploy gives "Can't start game or app";
+  only an X press on the pad clears it.

@@ -1146,12 +1146,133 @@ static const char *xtream_provider_get_source(void)
     return g_source;
 }
 
+/*
+ * An M3U exported from an Xtream panel carries the account in every stream
+ * link: http://host:port/live/USER/PASS/123.ts, the short form
+ * http://host/USER/PASS/123, or a get.php?username=..&password=.. link.
+ *
+ * "Every" is the test: a public list can hold the odd Xtream-shaped link from
+ * some stray server (iptv.m3u had one in 738), and that is not the user's
+ * account. So the account has to be behind at least half of the file's links.
+ * Fills `out` with the get.php form set_source understands; -1 = a plain
+ * playlist, which belongs to the IPTV provider, not this one.
+ */
+static int xtream_link_account(const char *line, char *out, size_t out_sz)
+{
+    int https = strncmp(line, "https://", 8) == 0;
+    if (!https && strncmp(line, "http://", 7) != 0) return -1;
+
+    const char *u = strstr(line, "username=");
+    const char *pw = strstr(line, "password=");
+    if (u && pw) {
+        /* Keep only scheme://host/get.php?username=..&password=.. */
+        const char *hp = line + (https ? 8 : 7);
+        const char *sl = strchr(hp, '/');
+        size_t hl = sl ? (size_t)(sl - hp) : strlen(hp);
+        u += 9; pw += 9;
+        size_t ul = strcspn(u, "&"), pl = strcspn(pw, "&");
+        snprintf(out, out_sz, "%s://%.*s/get.php?username=%.*s&password=%.*s",
+                 https ? "https" : "http", (int)hl, hp, (int)ul, u, (int)pl, pw);
+        return 0;
+    }
+
+    const char *hp = line + (https ? 8 : 7);
+    const char *path_start = strchr(hp, '/');
+    if (!path_start) return -1;
+    size_t hl = (size_t)(path_start - hp);
+    if (hl == 0 || hl >= 160) return -1;
+
+    char segbuf[512];
+    snprintf(segbuf, sizeof segbuf, "%s", path_start + 1);
+    char *q = strchr(segbuf, '?');
+    if (q) *q = 0;
+    char *seg[6];
+    int ns = 0;
+    for (char *p = segbuf; *p && ns < 6; ) {
+        seg[ns++] = p;
+        char *sl = strchr(p, '/');
+        if (!sl) break;
+        *sl = 0;
+        p = sl + 1;
+    }
+
+    const char *user = NULL, *pass = NULL;
+    if (ns >= 4 && (strcmp(seg[0], "live") == 0 || strcmp(seg[0], "movie") == 0 ||
+                    strcmp(seg[0], "series") == 0)) {
+        user = seg[1]; pass = seg[2];
+    } else if (ns == 3 && seg[2][0] >= '0' && seg[2][0] <= '9') {
+        user = seg[0]; pass = seg[1];
+    }
+    if (!user || !pass || !*user || !*pass) return -1;
+    snprintf(out, out_sz, "%s://%.*s/get.php?username=%s&password=%s",
+             https ? "https" : "http", (int)hl, hp, user, pass);
+    return 0;
+}
+
+static int xtream_url_from_m3u(const char *path, char *out, size_t out_sz)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    enum { MAXA = 8 };
+    static char acct[MAXA][512];
+    int votes[MAXA] = {0};
+    int na = 0, links = 0, lines = 0;
+    char line[1024], cand[512];
+
+    while (lines < 20000 && fgets(line, sizeof line, f)) {
+        lines++;
+        size_t n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) line[--n] = 0;
+        if (strncmp(line, "http", 4) != 0) continue;
+        links++;
+        if (xtream_link_account(line, cand, sizeof cand) != 0) continue;
+        int i = 0;
+        while (i < na && strcmp(acct[i], cand) != 0) i++;
+        if (i == na) {
+            if (na == MAXA) continue;
+            snprintf(acct[na++], sizeof acct[0], "%s", cand);
+        }
+        votes[i]++;
+    }
+    fclose(f);
+
+    int best = -1;
+    for (int i = 0; i < na; ++i)
+        if (best < 0 || votes[i] > votes[best]) best = i;
+    if (best < 0 || votes[best] * 2 < links) {
+        PROV_LOG("xtream: playlist has %d links, best account behind %d - not an Xtream export",
+                 links, best < 0 ? 0 : votes[best]);
+        return -1;
+    }
+    snprintf(out, out_sz, "%s", acct[best]);
+    return 0;
+}
+
+static int xtream_provider_set_source(const char *value);
+
+static void xtream_provider_sign_out(void)
+{
+    xtream_provider_set_source("");      /* "" clears the account and saves */
+}
+
 static int xtream_provider_set_source(const char *value)
 {
     if (!value || !*value) {
         memset(&g_cfg, 0, sizeof g_cfg);
         xtream_save_config();
         return 0;
+    }
+
+    /* A playlist file from the USB picker: Xtream needs the account inside it. */
+    char from_file[1024];
+    if (value[0] == '/') {
+        if (xtream_url_from_m3u(value, from_file, sizeof from_file) != 0) {
+            PROV_LOG("xtream: %s has no Xtream account in its links", value);
+            return -1;
+        }
+        PROV_LOG("xtream: account read from %s", value);
+        value = from_file;
     }
 
     char host[128] = {0};
@@ -1273,4 +1394,6 @@ const evo_provider_t evo_provider_xtream = {
     .web_ui_url      = NULL,
     .web_ui_path     = NULL,
     .web_ui_hook     = NULL,
+    .is_signed_in    = xtream_provider_is_configured,
+    .sign_out        = xtream_provider_sign_out,
 };

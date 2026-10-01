@@ -21,6 +21,8 @@
 #ifndef EVO_BOOT_LOG_H
 #define EVO_BOOT_LOG_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,6 +40,10 @@ void evo_boot_log_flush(void);
 void evo_boot_log_kick(void);
 /* Crash-handler use only: write still-queued lines to `fd` (no locks). */
 void evo_boot_log_crash_drain(int fd);
+
+/* Mask credentials in a line in place (api_key=, token=, password=, ...,
+ * Xtream /live/USER/PASS/). evo_boot_log() applies it to every line. */
+void evo_log_redact(char *line, size_t cap);
 
 /* Preferred names for new code — the file carries far more than the boot. */
 #define evo_log        evo_boot_log

@@ -4,6 +4,83 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
+
+/*
+ * Credentials out of anything logged.
+ *
+ * Stream URLs are logged at every playback stage, and a provider's URL carries
+ * its login: Emby/Jellyfin "api_key=<session token>", Xtream "username=" and
+ * "password=", or the account in the path (/live/USER/PASS/123.ts). evo.log is
+ * readable by anyone with FTP and is the file users send when reporting a bug.
+ * Hardware, 2026-10-01: a Jellyfin session token in full in four lines.
+ *
+ * Masks the value of known secret query parameters, and the two path segments
+ * after /live/, /movie/, /series/ and /timeshift/. Works in place on `msg`.
+ * Applied to every line evo_boot_log() writes, so no caller can leak one.
+ */
+static int bc_param_is_secret(const char *name, size_t n)
+{
+    static const char *const keys[] = {
+        "api_key", "apikey", "token", "access_token", "auth", "password",
+        "pass", "username", "user", "X-Emby-Token", "X-Plex-Token", "key",
+        "hdnts", "sig", "signature", NULL };
+    for (int i = 0; keys[i]; ++i)
+        if (strlen(keys[i]) == n && strncasecmp(name, keys[i], n) == 0)
+            return 1;
+    return 0;
+}
+
+void evo_log_redact(char *msg, size_t cap)
+{
+    char out[640];
+    size_t o = 0;
+    const char *p = msg;
+    const int is_url = strstr(msg, "://") != NULL;   /* path masking: web links only */
+    while (*p && o + 1 < sizeof out) {
+        /* ?name=value / &name=value */
+        if ((*p == '?' || *p == '&') && p[1]) {
+            const char *name = p + 1;
+            const char *eq = name;
+            while (*eq && *eq != '=' && *eq != '&' && *eq != ' ') eq++;
+            if (*eq == '=' && bc_param_is_secret(name, (size_t)(eq - name))) {
+                size_t len = (size_t)(eq - p) + 1;              /* "?name=" */
+                if (o + len + 3 >= sizeof out) break;
+                memcpy(out + o, p, len);
+                o += len;
+                memcpy(out + o, "***", 3);
+                o += 3;
+                p = eq + 1;
+                while (*p && *p != '&' && *p != ' ') p++;       /* skip the value */
+                continue;
+            }
+        }
+        /* /live/USER/PASS/ - Xtream's account in the path */
+        static const char *const segs[] = { "/live/", "/movie/", "/series/", "/timeshift/", NULL };
+        int hit = 0;
+        for (int i = 0; is_url && segs[i] && !hit; ++i) {
+            size_t sl = strlen(segs[i]);
+            if (strncmp(p, segs[i], sl) == 0) {
+                const char *u_end = strchr(p + sl, '/');
+                const char *pw_end = u_end ? strchr(u_end + 1, '/') : NULL;
+                if (u_end && pw_end) {
+                    if (o + sl + 8 >= sizeof out) break;
+                    memcpy(out + o, segs[i], sl);
+                    o += sl;
+                    memcpy(out + o, "***/***", 7);
+                    o += 7;
+                    p = pw_end;                                /* keep the "/123.ts" */
+                    hit = 1;
+                }
+            }
+        }
+        if (hit) continue;
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+    if (o + 1 > cap) { o = cap - 1; out[o] = 0; }
+    memcpy(msg, out, o + 1);
+}
 
 #ifdef EVO_APP_MODULE
 
@@ -123,6 +200,7 @@ void evo_boot_log(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
+    evo_log_redact(line, sizeof line);
 
     printf("EVO boot: %s\n", line);
     fflush(stdout);

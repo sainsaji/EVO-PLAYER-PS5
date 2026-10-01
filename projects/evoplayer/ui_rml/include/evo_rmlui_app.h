@@ -28,6 +28,7 @@ struct EvoPlaybackState {
     bool paused = false;
     bool scrub_active = false;
     double scrub_target = 0.0;
+    bool loading = false;
     std::string audio_track;
     std::string sub_track;
     int sub_delay_ms = 0;
@@ -56,6 +57,7 @@ struct EvoPlaybackState {
                position_sec == o.position_sec && duration_sec == o.duration_sec &&
                percentage == o.percentage && paused == o.paused &&
                scrub_active == o.scrub_active && scrub_target == o.scrub_target &&
+               loading == o.loading &&
                audio_track == o.audio_track && sub_track == o.sub_track &&
                sub_delay_ms == o.sub_delay_ms && is_live == o.is_live &&
                view_mode == o.view_mode && show_stats == o.show_stats && alpha == o.alpha &&

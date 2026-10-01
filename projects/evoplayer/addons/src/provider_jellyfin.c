@@ -16,6 +16,8 @@ static int  jf_init(void)          { return ms_load(C); }
 static void jf_shutdown(void)      { }
 static int  jf_configured(void)    { return ms_is_configured(C); }
 static int  jf_needs_sign_in(void) { return ms_needs_sign_in(C); }
+static int  jf_signed_in(void)     { return ms_is_signed_in(C); }
+static void jf_sign_out(void)      { ms_sign_out(C); }
 
 static int jf_suggest_user(void (*cb)(const char *, void *), void *ud)
 {
@@ -78,4 +80,6 @@ const evo_provider_t evo_provider_jellyfin = {
     .qc_start        = jf_qc_start,
     .qc_poll         = jf_qc_poll,
     .ui_embedded     = "mediaserver",
+    .is_signed_in    = jf_signed_in,
+    .sign_out        = jf_sign_out,
 };

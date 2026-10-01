@@ -47,6 +47,8 @@ static void emby_p_progress(const char *id, int64_t pos, int64_t dur, evo_provid
     ms_report(C, id, pos, dur, st);
 }
 
+static int  emby_p_signed_in(void) { return ms_is_signed_in(C); }
+static void emby_p_sign_out(void)  { ms_sign_out(C); }
 static const char *emby_p_get_source(void)       { return ms_get_source(C); }
 static int         emby_p_set_source(const char *v) { return ms_set_source(C, v); }
 
@@ -73,4 +75,6 @@ const evo_provider_t evo_provider_emby = {
     .suggest_user    = emby_p_suggest_user,
     .sign_in         = emby_p_sign_in,
     .ui_embedded     = "mediaserver",
+    .is_signed_in    = emby_p_signed_in,
+    .sign_out        = emby_p_sign_out,
 };

@@ -28,6 +28,9 @@ typedef struct {
     int paused;
     int scrub_active;
     double scrub_target;
+    /* A seek (or the first frames) is still on its way: the centre shows a
+     * LOADING spinner instead of a picture that looks frozen. */
+    int loading;
     const char* audio_track;
     const char* sub_track;
     int sub_delay_ms;

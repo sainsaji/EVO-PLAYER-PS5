@@ -1317,7 +1317,27 @@ void PlaybackController::beginScrub() {
      * there.
      */
     m_scrubTargetSeconds = getPositionSeconds();
-    m_playbackFsm.postEvent(PlaybackEvent::StartScrub);
+
+    /*
+     * Only Playing and Paused may start a scrub. The pause and the decode hold
+     * below used to happen whether or not the FSM took the transition - and if
+     * it refused, nothing was ever going to commit (tickScrubAutoCommit checks
+     * isScrubbing()) or release them: the picture froze for good. Hardware,
+     * 2026-10-01: D-pad seeks in Emby and Jellyfin streams, which start on the
+     * provider screen's worker thread, froze exactly so - no SEEK_BEGIN ever
+     * logged. Settle the FSM to Playing (what the stream actually is) and try
+     * once more; if it still refuses, hold nothing and let the caller seek
+     * directly instead.
+     */
+    if (!m_playbackFsm.postEvent(PlaybackEvent::StartScrub)) {
+        const int was = static_cast<int>(m_playbackFsm.getCurrentState());
+        m_playbackFsm.postEvent(PlaybackEvent::Play);
+        if (!m_playbackFsm.postEvent(PlaybackEvent::StartScrub)) {
+            evo_boot_log("scrub: refused in playback state %d - seeking directly", was);
+            return;
+        }
+        evo_boot_log("scrub: playback state %d settled to Playing first", was);
+    }
     pp_playback_pause(&g_pp_pb);
     /* Park demux's two consumers for the drag. Everything decoded from here
      * until the commit would be thrown away by the clock pp_playback_pause()
@@ -1329,6 +1349,12 @@ void PlaybackController::beginScrub() {
 void PlaybackController::moveScrub(double deltaSeconds) {
     if (!isScrubbing()) {
         beginScrub();
+        if (!isScrubbing()) {
+            /* No scrub to drag (see beginScrub): a plain relative seek beats
+             * a frozen picture. */
+            seekTo(clampScrubTarget(getPositionSeconds() + deltaSeconds));
+            return;
+        }
     }
     m_scrubTargetSeconds = clampScrubTarget(m_scrubTargetSeconds + deltaSeconds);
     m_scrubAutoCommitDeadlineMs = GetCurrentTimeMs() + 600ULL; // auto-commit after 600ms idle
@@ -1422,7 +1448,13 @@ void PlaybackController::seekTo(double targetSeconds) {
     resume_base_offset_seconds = targetSeconds;
 
     int64_t targetUs = static_cast<int64_t>(targetSeconds * 1000000.0);
-    prospero_request_inplace_seek(targetSeconds, 0);
+    if (!prospero_request_inplace_seek(targetSeconds, 0)) {
+        /* Refused: nothing will run the seek, so nothing would ever restart the
+         * clock a scrub paused. Carry on playing where we are instead. */
+        evo_boot_log("seek: request to %.1fs refused - resuming", targetSeconds);
+        pp_playback_resume(&g_pp_pb);
+        return;
+    }
     pp_playback_notify_seek_begin(&g_pp_pb, targetUs);
 }
 

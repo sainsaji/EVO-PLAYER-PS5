@@ -1,7 +1,7 @@
 {
   "id": "iptv",
   "name": "IPTV",
-  "version": "20260927.122426",
+  "version": "20261001.154454",
   "api_version": 1,
   "entry": "main.rml",
   "data_model": "iptv",

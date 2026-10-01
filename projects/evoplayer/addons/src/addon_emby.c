@@ -134,6 +134,16 @@ static void ms_drop_session(ms_client_t *c)
     ms_save(c);
 }
 
+int ms_is_signed_in(ms_client_t *c)
+{
+    return c->cfg.host[0] && c->cfg.token[0];
+}
+
+void ms_sign_out(ms_client_t *c)
+{
+    ms_drop_session(c);
+}
+
 const char *ms_get_source(ms_client_t *c)
 {
     static char src[2][176];

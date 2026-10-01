@@ -219,6 +219,9 @@ div, span, img {
     border-color: #5a7db44d;
     border-radius: 12dp;
     padding: 12dp 18dp;
+    height: 46dp;          /* fixed (border-box: 20 text + 24 padding + 2 border),
+                              so the view below can sit at a known offset: 62dp */
+    line-height: 20dp;
     margin-bottom: 14dp;
     font-size: 14dp;
     font-weight: bold;
@@ -521,6 +524,24 @@ div, span, img {
 
 #tv-grid.tv-grid-notice {
     height: 690dp;
+}
+
+/* The notice strip is in flow at the top of the pane, but the browser view is
+ * absolutely positioned at top 0 - so without this the cards were drawn OVER
+ * the notice and it read as stray text behind them. With a notice up, the
+ * whole view (grid and detail panel) starts below it. */
+#tv-browser-view.tv-browser-notice {
+    top: 62dp;
+    height: 698dp;
+}
+
+.tv-browser-notice #tv-detail-pane {
+    height: 680dp;
+}
+
+/* Two rows of 360dp cards need 748dp; with the notice the grid has 690. */
+.tv-browser-notice .tv-card {
+    height: 330dp;
 }
 
 /* ---- the channel card -------------------------------------------------- */
@@ -1209,4 +1230,287 @@ div, span, img {
     font-weight: bold;
     color: #8ea4c8;
     letter-spacing: 1.2dp;
+}
+
+/* ---------------------------------------------------------------------------
+ * "Set up a guide" in the channel guide box
+ * ------------------------------------------------------------------------- */
+.tv-detail-epg-setup {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-top: 4dp;
+}
+
+.tv-detail-epg-setup-pill {
+    font-size: 10dp;
+    font-weight: bold;
+    color: #00cdff;
+    background-color: #00cdff22;
+    border-width: 1dp;
+    border-color: #00cdff66;
+    border-radius: 6dp;
+    padding: 2dp 7dp;
+    letter-spacing: 1dp;
+    margin-right: 8dp;
+}
+
+.tv-detail-epg-setup-text {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #ffcd00;
+    letter-spacing: 1dp;
+}
+
+/* ---------------------------------------------------------------------------
+ * Side panel - Live TV options / channel guide picker (Settings' rows)
+ * ------------------------------------------------------------------------- */
+#op-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1200dp;
+    height: 1080dp;
+    background-color: #000000b0;
+}
+
+#op-panel {
+    display: block;
+    position: absolute;
+    left: 1200dp;
+    top: 0;
+    width: 720dp;
+    height: 1080dp;
+    background-color: #0a1019;
+    border-left-width: 1dp;
+    border-left-color: #ffffff1f;
+    padding: 64dp 40dp 0 40dp;
+    box-sizing: border-box;
+}
+
+.op-eyebrow {
+    display: block;
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2.4dp;
+}
+
+.op-crumb {
+    color: #5e718c;
+}
+
+.op-title {
+    display: block;
+    font-size: 36dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 1dp;
+    margin-top: 10dp;
+}
+
+.op-sub {
+    display: block;
+    font-size: 15dp;
+    color: #7c8ba3;
+    margin-top: 8dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.op-rows {
+    display: block;
+    margin-top: 40dp;
+}
+
+.op-row {
+    height: 84dp;
+    padding: 0 18dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #ffffff14;
+}
+
+.op-row.op-focused {
+    background-color: #ffcd0026;
+    border-radius: 12dp;
+    border-bottom-color: transparent;
+}
+
+.op-left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-ibox {
+    width: 52dp;
+    height: 52dp;
+    background-color: #00cdff14;
+    border-width: 1dp;
+    border-color: #00cdff33;
+    border-radius: 14dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 18dp;
+}
+
+.op-focused .op-ibox {
+    background-color: #ffcd0026;
+    border-color: #ffcd0066;
+}
+
+.op-icon {
+    width: 26dp;
+    height: 26dp;
+}
+
+.op-text {
+    display: block;
+}
+
+.op-rt {
+    display: block;
+    font-size: 22dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 0.4dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 440dp;
+}
+
+.op-rd {
+    display: block;
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6dp;
+    margin-top: 5dp;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 440dp;
+}
+
+.op-focused .op-rd {
+    color: #ffcd00;
+}
+
+.op-rd.op-warn {
+    color: #ffa940;
+}
+
+.op-chev {
+    width: 20dp;
+    height: 20dp;
+}
+
+.op-badge {
+    background-color: #0a101c99;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 7dp 16dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #7c8ba3;
+    letter-spacing: 1.4dp;
+    margin-right: 14dp;
+}
+
+.op-badge.op-live {
+    color: #33d17a;
+    border-color: #33d17a55;
+}
+
+.op-radio {
+    width: 22dp;
+    height: 22dp;
+    border-width: 2dp;
+    border-color: #5e718c;
+    border-radius: 11dp;
+    margin-right: 22dp;
+    box-sizing: border-box;
+}
+
+.op-radio.op-on {
+    border-color: #ffcd00;
+}
+
+.op-dot {
+    display: block;
+    width: 10dp;
+    height: 10dp;
+    margin: 4dp;
+    border-radius: 5dp;
+    background-color: #ffcd00;
+}
+
+.op-note {
+    display: block;
+    margin-top: 34dp;
+    padding: 18dp 20dp;
+    background-color: #00cdff0f;
+    border-width: 1dp;
+    border-color: #00cdff26;
+    border-radius: 14dp;
+    font-size: 15dp;
+    color: #9fb0c8;
+    line-height: 22dp;
+}
+
+.op-note-b {
+    color: #eef4ff;
+    font-weight: bold;
+}
+
+.op-foot {
+    position: absolute;
+    left: 40dp;
+    bottom: 44dp;
+    width: 640dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.op-hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-right: 30dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #9fb0c8;
+    letter-spacing: 1.4dp;
+}
+
+.op-hint img {
+    width: 30dp;
+    height: 30dp;
+    margin-right: 10dp;
+}
+
+/* "Using up.kiwi - Circle to go back to it" under the setup title. */
+#tv-setup-account {
+    display: block;
+    margin-top: 10dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #ffcd00;
+    letter-spacing: 0.6dp;
+    text-align: center;
 }

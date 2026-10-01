@@ -64,6 +64,7 @@
                         </div>
                         <div id="tv-setup-title">SELECT PLAYLIST SOURCE</div>
                         <div id="tv-setup-desc">Choose how you would like to load your television channels</div>
+                        <div id="tv-setup-account" data-if="setup_account != ''">{{ setup_account }}</div>
                     </div>
                     <div id="tv-setup-cards">
                         <div id="tv-card-setup-url" class="tv-setup-card" data-event-click="setup_url()">
@@ -125,7 +126,7 @@
             </div>
 
             <!-- Main browser view: 2-column layout (Grid + Detail Preview Panel) -->
-            <div id="tv-browser-view" data-if="!empty">
+            <div id="tv-browser-view" data-if="!empty" data-class-tv-browser-notice="status != ''">
                 <!-- Channel grid: 2 rows x 4 columns = 8 cards, fixed, overflow: hidden -->
                 <div id="tv-grid" data-class-tv-grid-notice="status != ''">
                     <div class="tv-card" data-for="row : rows"
@@ -213,7 +214,11 @@
                         </div>
                         <div class="tv-detail-epg-standby" data-if="selected_now == '' && selected_next == ''">
                             <span class="tv-detail-epg-standby-badge">GUIDE</span>
-                            <span class="tv-detail-epg-standby-text">Live Broadcast — Electronic Guide Loading / Standby</span>
+                            <span class="tv-detail-epg-standby-text">{{ epg_status }}</span>
+                        </div>
+                        <div class="tv-detail-epg-setup" data-if="selected_now == '' && selected_next == '' && epg_setup">
+                            <span class="tv-detail-epg-setup-pill">OPTIONS</span>
+                            <span class="tv-detail-epg-setup-text">SET UP A GUIDE</span>
                         </div>
                     </div>
 
@@ -277,9 +282,46 @@
                 </div>
                 <div class="tv-hint" data-if="!empty">
                     <div class="tv-glyph-pill"><span class="tv-glyph-pill-text">OPTIONS</span></div>
-                    <span class="tv-hint-text">SOURCE</span>
+                    <span class="tv-hint-text">PLAYLIST &amp; GUIDE</span>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Side panel: Live TV options and the channel guide picker. Settings' row
+         language; the host fills panel_* and owns the keys while it is up. -->
+    <div id="op-scrim" data-if="panel_open"></div>
+    <div id="op-panel" data-if="panel_open">
+        <div class="op-eyebrow"><span class="op-crumb">{{ panel_crumb }}</span>{{ panel_eyebrow }}</div>
+        <div class="op-title">{{ panel_title }}</div>
+        <div class="op-sub">{{ panel_sub }}</div>
+
+        <div class="op-rows">
+            <div class="op-row" data-for="row : panel_rows" data-class-op-focused="row.focused">
+                <div class="op-left">
+                    <div class="op-radio" data-if="row.radio" data-class-op-on="row.on">
+                        <div class="op-dot" data-if="row.on"></div>
+                    </div>
+                    <div class="op-ibox" data-if="!row.radio"><img class="op-icon" data-attr-src="row.icon"/></div>
+                    <div class="op-text">
+                        <div class="op-rt">{{ row.title }}</div>
+                        <div class="op-rd" data-class-op-warn="row.warn">{{ row.detail }}</div>
+                    </div>
+                </div>
+                <div class="op-right">
+                    <div class="op-badge" data-if="row.badge != ''" data-class-op-live="row.badge_live">{{ row.badge }}</div>
+                    <img class="op-chev" data-if="row.chevron" src="/assets/icons/icon_chevron.png"/>
+                </div>
+            </div>
+        </div>
+
+        <div class="op-note" data-if="panel_note_b != ''">
+            <span class="op-note-b">{{ panel_note_b }}</span> {{ panel_note }}
+        </div>
+
+        <div class="op-foot">
+            <div class="op-hint"><img src="/assets/icons/btn_cross.png"/><span>{{ panel_accept }}</span></div>
+            <div class="op-hint"><img src="/assets/icons/btn_circle.png"/><span>{{ panel_back }}</span></div>
         </div>
     </div>
 </body>

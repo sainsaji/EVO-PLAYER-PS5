@@ -2801,11 +2801,18 @@ void EvoRmlApp::UpdatePlaybackState(const EvoPlaybackState& state) {
          * from the badge is not enough - set it on the span itself. */
         if (Rml::Element* el_pause_lbl = m_playback_doc->GetElementById("pause-label"))
             el_pause_lbl->SetProperty("color", ink_on(m_theme.accent));
-        if (state.paused && !state.scrub_active) {
+        /* A seek raises the engine's paused flag while it runs: LOADING says
+         * what is really going on, PAUSED would be wrong. */
+        if (state.paused && !state.scrub_active && !state.loading) {
             el_pause->SetProperty("display", "flex");
         } else {
             el_pause->SetProperty("display", "none");
         }
+    }
+
+    if (Rml::Element* el_load = m_playback_doc->GetElementById("loading-badge")) {
+        el_load->SetProperty("border-color", to_hex_rgb(m_theme.border_sel));
+        el_load->SetProperty("display", (state.loading && !state.scrub_active) ? "flex" : "none");
     }
 
     Rml::Element* el_pp_label = m_playback_doc->GetElementById("label-playpause");

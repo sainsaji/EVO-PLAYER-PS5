@@ -28,7 +28,8 @@ Subcommands (print one word / line, exit 0 unless the FTP read failed):
   wait-started     BASE S  STARTED | TIMEOUT
   wait-released    BASE S  RELEASED | TIMEOUT
   wait-parked      S       PARKED | TIMEOUT
-  smslice BASE             the debug.log lines after BASE that mention the title
+  wait-quiet  Q MAX        QUIET | TIMEOUT   (debug.log grew by nothing for Q s)
+  smslice BASE            the debug.log lines after BASE that mention the title
 
 Env: PS5_HOST, FTP_PORT (2121), TITLE_ID (PPSA99039).
 """
@@ -177,6 +178,28 @@ def main(argv):
                     print("TIMEOUT")
                     break
                 time.sleep(2)
+        elif cmd == "wait-quiet":
+            # ShadowMount is still scanning/verifying/remounting while its log
+            # grows. A launch sent then gets the PS5's "Can't start game or app"
+            # dialog, which only a pad X press clears. Length, not timestamps:
+            # the console clock and this host's clock are not the same.
+            quiet, limit = int(argv[2]), int(argv[3])
+            deadline = time.time() + limit
+            last, since = None, time.time()
+            while True:
+                try:
+                    n = len(sm_text())
+                    if n != last:
+                        last, since = n, time.time()
+                    elif time.time() - since >= quiet:
+                        print("QUIET")
+                        break
+                except Exception:
+                    pass
+                if time.time() >= deadline:
+                    print("TIMEOUT")
+                    break
+                time.sleep(3)
         elif cmd == "smslice":
             for ln in sm_delta(int(argv[2])).splitlines():
                 if TID in ln or "[rtld]" in ln or "crash" in ln.lower():

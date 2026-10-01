@@ -63,6 +63,10 @@
         <div id="pause-badge">
             <span id="pause-label">PAUSED</span>
         </div>
+        <div id="loading-badge">
+            <div id="loading-spinner"></div>
+            <span id="loading-label">LOADING</span>
+        </div>
     </div>
 
     <!-- Dev FPS pill (#81) -->

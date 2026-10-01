@@ -91,11 +91,12 @@ vec3 hdr_nits_to_sdr(vec3 nits2020) {
                   dot(nits2020, vec3(-0.1246,  1.1329, -0.0083)),
                   dot(nits2020, vec3(-0.0182, -0.1006,  1.1187)));
     c = max(c, vec3(0.0));
-    /* tone-map the brightest channel and scale all three by the same
-     * factor, so hues don't shift the way per-channel mapping does */
-    float m = max(max(c.r, c.g), c.b);
-    if (m > 0.0)
-        c *= eetf(m) / m;
+    /* tone-map each channel on its own. Below the knee the EETF is the
+     * identity, so mids keep their colour; above it the channels converge,
+     * so highlights roll off to white. Scaling all three by the max
+     * channel's factor kept a highlight's small tint at full strength:
+     * bright windows and skies came out pink/cyan mottled. */
+    c = vec3(eetf(c.r), eetf(c.g), eetf(c.b));
     vec3 sdr = clamp(c / SDR_PEAK, 0.0, 1.0);
     return pow(sdr, vec3(1.0 / 2.2));
 }

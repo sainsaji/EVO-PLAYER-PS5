@@ -82,6 +82,21 @@ struct EvoProviderRow {
     long long resume_sec = 0;
 };
 
+/* One row of the side panel (Live TV options): Settings' row language. */
+struct EvoPanelRow {
+    Rml::String id;
+    Rml::String title;
+    Rml::String detail;
+    Rml::String badge;      /* "" = none */
+    Rml::String icon;       /* used when !radio */
+    bool radio = false;     /* a pick-one row: radio instead of an icon */
+    bool on = false;        /* radio selected */
+    bool warn = false;      /* detail in amber */
+    bool chevron = false;   /* leads somewhere */
+    bool badge_live = false;
+    bool focused = false;
+};
+
 struct EvoProviderModel {
     Rml::String provider_name;
     Rml::String breadcrumb;     /* "IPTV / Sports" */
@@ -114,6 +129,25 @@ struct EvoProviderModel {
     Rml::String selected_initial;
     Rml::String selected_now;
     Rml::String selected_next;
+    Rml::String epg_status;   /* why the guide panel is empty (iptv) */
+    bool epg_setup = false;   /* offer "set up a guide" in that box */
+
+    /* The setup screen, opened over a provider that already has a source: it
+     * must not lose it (Back returns to it; Sign out is the explicit removal). */
+    bool setup_configured = false;
+    Rml::String setup_account;   /* "Signed in to up.kiwi" - host only, never credentials */
+
+    /* The side panel (Live TV options). */
+    bool panel_open = false;
+    Rml::String panel_crumb;        /* "OPTIONS › " - dimmed lead-in, may be "" */
+    Rml::String panel_eyebrow;      /* "LIVE TV" / "CHANNEL GUIDE" */
+    Rml::String panel_title;
+    Rml::String panel_sub;
+    Rml::String panel_note_b;       /* bold lead of the note, "" = no note */
+    Rml::String panel_note;
+    Rml::String panel_accept;       /* the X hint: "SELECT" */
+    Rml::String panel_back;         /* the O hint: "CLOSE" / "BACK" */
+    std::vector<EvoPanelRow> panel_rows;
     Rml::String selected_num;       /* "CH 14" */
     Rml::String selected_tech;      /* "LIVE HLS • 1080p • 60 FPS" */
     bool has_selected = false;
@@ -195,6 +229,14 @@ public:
     void ShowUsbPlaylists(const std::vector<std::string>& paths);
     bool IsUsbPickerActive() const { return m_is_usb_picker; }
     void ShowSetupScreen();
+
+    /* The side panel over the current level. X on a row, or Circle, is reported
+     * through TakeChoice() ("panel:back" for Circle); the caller decides what
+     * comes next - another page, or HidePanel(). */
+    void ShowPanel(const EvoProviderModel& page, int focus);
+    void HidePanel();
+    bool PanelOpen() const { return m_model.panel_open; }
+    std::string TakeChoice();
     const EvoProviderRow* GetFocusedRow() const;
     void ReloadCurrentLevel();
 
@@ -341,6 +383,11 @@ private:
 
     int  m_pending_action = 0;
     bool m_is_usb_picker = false;
+    int  m_panel_focus = 0;
+    bool m_setup_shown = false;   /* the setup cards are on screen */
+    std::string m_choice;
+    void PanelMove(int dir);
+    void PublishPanel();
     std::vector<std::string> m_saved_usb_playlists;
 };
 
@@ -358,6 +405,7 @@ enum {
     EVO_PROVIDER_ACTION_NONE = 0,
     EVO_PROVIDER_ACTION_SETUP_URL = 1,
     EVO_PROVIDER_ACTION_SETUP_USB = 2,
+    EVO_PROVIDER_ACTION_CHOICE = 3,     /* evo_rmlui_provider_take_choice() has it */
 };
 
 int  evo_rmlui_provider_open(const char *provider_id, int width, int height);
@@ -391,6 +439,23 @@ void evo_rmlui_provider_set_status(const char *status, int error);
 void evo_rmlui_provider_search(const char *query);
 const char* evo_rmlui_provider_get_query(void);
 void evo_rmlui_provider_show_setup(void);
+typedef struct evo_panel_row {
+    const char *id, *title, *detail, *badge, *icon;
+    int radio, on, warn, chevron, badge_live;
+} evo_panel_row_t;
+
+typedef struct evo_panel {
+    const char *crumb, *eyebrow, *title, *sub;
+    const char *note_b, *note;          /* note_b "" = no note */
+    const char *accept, *back;          /* hint labels */
+    const evo_panel_row_t *rows;
+    int n, focus;
+} evo_panel_t;
+
+void evo_rmlui_provider_show_panel(const evo_panel_t *p);
+void evo_rmlui_provider_hide_panel(void);
+int  evo_rmlui_provider_panel_open(void);
+int  evo_rmlui_provider_take_choice(char *out, size_t out_sz);
 const char* evo_rmlui_provider_get_focused_title(void);
 const char* evo_rmlui_provider_get_focused_id(void);
 int         evo_rmlui_provider_get_focused_is_folder(void);

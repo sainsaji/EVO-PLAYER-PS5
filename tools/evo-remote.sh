@@ -168,11 +168,17 @@ do_launch() {
     [[ "${slot}" == UNKNOWN ]] && die "could not read ShadowMount's log - cannot prove the slot is free. Not launching."
     [[ "${slot}" == FREE ]] || die "ShadowMount says ${TITLE_ID} is ${slot} (started, not released). Not launching.
    If it is parked: evo-remote.sh close. Otherwise PS-button-close it first."
+    # Launching while ShadowMount is still busy (a fresh deploy: scan, verify,
+    # remount) raises "Can't start game or app" on the PS5. Wait it out.
+    [[ "$(lc wait-quiet 15 120)" == QUIET ]] \
+        || die "ShadowMount's log is still moving after 120 s - it is not idle. Not launching."
     base="$(lc smlen)" || die "could not read ShadowMount's log"
     del_files "${USB_STATUS}" >/dev/null || true
     send_controller launch
     [[ "$(lc wait-started "${base}" 30)" == STARTED ]] \
-        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take (0x80940005 class?). Check klog."
+        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take (0x80940005 class?).
+   Look at the TV: if \"Can't start game or app\" is showing, press X on the pad to clear it
+   (nothing here can) before launching again. Never retry automatically."
     ok "launched (ShadowMount: started)"
 }
 

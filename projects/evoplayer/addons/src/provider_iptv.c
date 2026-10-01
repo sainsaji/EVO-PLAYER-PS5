@@ -48,6 +48,7 @@
 #include "evo_data_path.h"
 #include "evo_provider_log.h"
 #include "evo_favorites.h"
+#include "evo_readdir.h"
 
 #define IPTV_CONF "iptv.conf"
 
@@ -75,6 +76,7 @@ typedef struct channel {
     char  *group;      /* heap, "" when the row had no group-title */
     char  *logo;       /* heap, "" when it had no tvg-logo */
     char  *tvg_id;     /* heap, "" when it had no tvg-id; the EPG key */
+    char  *epg_id;     /* heap or NULL - the guide's own id, found by name */
     char  *now;        /* heap or NULL - filled by the XMLTV pass */
     char  *next;       /* heap or NULL */
     char  *lang;       /* heap or NULL - detected language code e.g. "EN" */
@@ -119,7 +121,21 @@ static struct {
     int   loaded;          /* a playlist has been parsed                  */
     int   loading;         /* a fetch is in flight                        */
     int   epg_loaded;
+    char  guides[4][EVO_PROVIDER_MAX_URL]; /* guide URLs the user gave us     */
+    int   guide_n;
+    char  cand[12][EVO_PROVIDER_MAX_URL];  /* guides to try for this playlist  */
+    unsigned char cand_weak[12];           /* found by scanning: must cover 10% */
+    char  in_use[EVO_PROVIDER_MAX_URL];    /* the guide now on screen, ""       */
+    char  notice[160];                     /* "auto-picked X" for a toast, once  */
+    int   cand_n, cand_i, cand_failed;
+    int   cand_pinned;     /* the user chose this playlist's guide            */
+    int   epg_gen;         /* bumped per playlist load: drops stale downloads */
+    char  m3u_tvg[EVO_PROVIDER_MAX_URL]; /* url-tvg from the playlist header  */
+    int   epg_state;       /* EPG_* below                                     */
+    int   epg_matched;     /* channels that got a now/next from the guide     */
 } G;
+
+enum { EPG_NONE = 0, EPG_LOADING, EPG_OK, EPG_NOMATCH, EPG_FAILED };
 
 /* ------------------------------------------------------------------------- */
 /* Small string helpers                                                      */
@@ -209,6 +225,10 @@ static char *extinf_attr(const char *line, const char *attr)
 /* Defined further down, next to the rest of the parse and fetch machinery. */
 static int  parse_m3u(const char *body, size_t len);
 static void kick_epg(void);
+static const char *playlist_key(void);
+static int  map_query(int mode, const char *key, const char *url, char *out, size_t osz);
+static void map_set(const char *key, const char *url, const char *st_new);
+static void epg_cache_paths(const char *url, char *body, size_t bsz, char *meta, size_t msz);
 
 /*
  * Names we accept for a playlist dropped on the USB stick, in priority order.
@@ -308,7 +328,10 @@ static void load_conf(void)
                 snprintf(G.last_url, sizeof G.last_url, "%s", v);
             }
         }
-        else if (strcmp(k, "xmltv") == 0) snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", v);
+        else if (strcmp(k, "xmltv") == 0) {
+            if (*v && G.guide_n < 4)
+                snprintf(G.guides[G.guide_n++], sizeof G.guides[0], "%s", v);
+        }
     }
     fclose(f);
 }
@@ -339,8 +362,10 @@ int provider_iptv_save_conf(void)
     if (G.last_url[0])
         fprintf(f, "last_url=%s\n", G.last_url);
 
-    if (G.xmltv_url[0])
-        fprintf(f, "xmltv=%s\n", G.xmltv_url);
+    /* Only guides the user gave us are persisted. Which one fits a playlist is
+     * worked out per playlist (and remembered), so these are plain sources. */
+    for (int i = 0; i < G.guide_n; ++i)
+        fprintf(f, "xmltv=%s\n", G.guides[i]);
     fclose(f);
     return 0;
 }
@@ -359,8 +384,151 @@ void provider_iptv_set_bundle(const char *url)
 
 void provider_iptv_set_xmltv(const char *url)
 {
-    snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", url ? url : "");
+    /* Replaces the user's guides with this one; empty clears them and goes back
+     * to automatic (playlist header, a sidecar .xml, the stick). */
+    G.guide_n = 0;
+    if (url && *url) snprintf(G.guides[G.guide_n++], sizeof G.guides[0], "%s", url);
+    remove(evo_data_path("iptv_guides.map"));   /* forget "does not cover" verdicts */
     G.epg_loaded = 0;
+    G.epg_state  = EPG_NONE;
+    provider_iptv_save_conf();
+    if (G.loaded) kick_epg();
+}
+
+const char *provider_iptv_xmltv_url(void) { return G.guide_n ? G.guides[0] : ""; }
+
+/* The guide the user picked for the playlist on screen, "" = automatic. */
+const char *provider_iptv_pinned_guide(void)
+{
+    static char pin[EVO_PROVIDER_MAX_URL];
+    pin[0] = 0;
+    const char *key = playlist_key();
+    if (key[0]) map_query(2, key, NULL, pin, sizeof pin);
+    return pin;
+}
+
+/* Choose (or, with "", clear) the guide for this playlist. Remembered across
+ * launches; every other playlist is untouched. */
+int provider_iptv_pin_guide(const char *url)
+{
+    /* "none" is a pin too: no guide for this playlist, and no guessing. */
+    const char *key = playlist_key();
+    if (!key[0]) return -1;
+    if (url && *url) map_set(key, url, "pin");
+    else             map_set(key, "", "clear");
+    for (int i = 0; i < G.ch_count; ++i) {      /* the old guide's titles go */
+        free(G.ch[i].now);  G.ch[i].now  = NULL;
+        free(G.ch[i].next); G.ch[i].next = NULL;
+    }
+    G.epg_loaded = 0;
+    G.epg_state  = EPG_NONE;
+    if (G.loaded) kick_epg();
+    return 0;
+}
+
+const char *provider_iptv_epg_status(void)
+{
+    switch (G.epg_state) {
+    case EPG_LOADING: return "Loading the guide...";
+    case EPG_OK:      return "No guide data for this channel";
+    case EPG_NOMATCH: return G.cand_pinned
+                          ? "The chosen guide does not cover these channels"
+                          : "No guide covers these channels";
+    case EPG_FAILED:  return "The guide could not be downloaded";
+    default:          return G.cand_pinned ? "Guide turned off for this playlist"
+                                           : "No guide for this playlist yet";
+    }
+}
+
+/* The guide box offers "set up a guide" whenever the playlist has none working. */
+int provider_iptv_epg_needs_setup(void)
+{
+    return G.epg_state == EPG_NONE || G.epg_state == EPG_NOMATCH ||
+           G.epg_state == EPG_FAILED;
+}
+
+int provider_iptv_channel_count(void) { return G.loaded ? G.ch_count : 0; }
+
+/* The playlist on screen, for the options panel: its file or URL. */
+const char *provider_iptv_playlist_name(void) { return playlist_key(); }
+
+/* The guide in use right now ("" when none), and how many channels it filled. */
+const char *provider_iptv_guide_in_use(void) { return G.in_use; }
+int provider_iptv_guide_matched(void) { return G.in_use[0] ? G.epg_matched : 0; }
+
+/* Channels of THIS playlist a guide covered when last tried; -1 = never tried. */
+int provider_iptv_guide_coverage(const char *url)
+{
+    const char *key = playlist_key();
+    if (!key[0] || !url || !*url) return -1;
+    if (G.in_use[0] && strcmp(url, G.in_use) == 0) return G.epg_matched;
+    char out[16];
+    return map_query(3, key, url, out, sizeof out) ? atoi(out) : -1;
+}
+
+/* Seconds since a downloaded guide was fetched; -1 when it is local or unknown. */
+long long provider_iptv_guide_age(void)
+{
+    if (!G.in_use[0] || G.in_use[0] == '/') return -1;
+    char bpath[600], mpath[600];
+    epg_cache_paths(G.in_use, bpath, sizeof bpath, mpath, sizeof mpath);
+    FILE *m = fopen(mpath, "r");
+    if (!m) return -1;
+    char line[32];
+    long long when = 0;
+    if (fgets(line, sizeof line, m)) when = strtoll(line, NULL, 10);
+    fclose(m);
+    long long age = (long long)time(NULL) - when;
+    return (when > 0 && age >= 0) ? age : -1;
+}
+
+/* Drop the cached copy and load the guide again. */
+void provider_iptv_refresh_guide(void)
+{
+    if (G.in_use[0] && G.in_use[0] != '/') {
+        char bpath[600], mpath[600];
+        epg_cache_paths(G.in_use, bpath, sizeof bpath, mpath, sizeof mpath);
+        remove(mpath);
+        remove(bpath);
+    }
+    for (int i = 0; i < G.ch_count; ++i) {
+        free(G.ch[i].now);  G.ch[i].now  = NULL;
+        free(G.ch[i].next); G.ch[i].next = NULL;
+    }
+    G.epg_loaded = 0;
+    G.epg_state  = EPG_NONE;
+    if (G.loaded) kick_epg();
+}
+
+/* A guide EVO picked by itself, once, for a toast. */
+int provider_iptv_take_guide_notice(char *out, size_t sz)
+{
+    if (!G.notice[0]) return 0;
+    snprintf(out, sz, "%s", G.notice);
+    G.notice[0] = 0;
+    return 1;
+}
+
+/* Every .xml on the stick (top level), for the guide list and auto-pick. */
+int provider_iptv_usb_guides(char out[][512], int max)
+{
+    int n = 0;
+    static const char *const roots[] = { "/mnt/usb0", "/mnt/usb1", NULL };
+    for (int r = 0; roots[r] && n < max; ++r) {
+        evo_dir_t *d = evo_opendir(roots[r]);
+        if (!d) continue;
+        struct dirent *e;
+        while ((e = evo_readdir(d)) != NULL && n < max) {
+            size_t l = strlen(e->d_name);
+            if (e->d_name[0] == '.' || l < 5) continue;
+            const char *x = e->d_name + l - 4;
+            if (x[0] == '.' && tolower((unsigned char)x[1]) == 'x' &&
+                tolower((unsigned char)x[2]) == 'm' && tolower((unsigned char)x[3]) == 'l')
+                snprintf(out[n++], 512, "%s/%s", roots[r], e->d_name);
+        }
+        evo_closedir(d);
+    }
+    return n;
 }
 
 const char *provider_iptv_playlist_url(void) { return G.playlist_url; }
@@ -373,7 +541,7 @@ static void free_channels(void)
 {
     for (int i = 0; i < G.ch_count; ++i) {
         free(G.ch[i].name); free(G.ch[i].url); free(G.ch[i].group);
-        free(G.ch[i].logo); free(G.ch[i].tvg_id);
+        free(G.ch[i].logo); free(G.ch[i].tvg_id); free(G.ch[i].epg_id);
         free(G.ch[i].now);  free(G.ch[i].next);
         free(G.ch[i].lang);
     }
@@ -382,6 +550,11 @@ static void free_channels(void)
     G.lang_count = 0;
     G.loaded = 0;
     G.epg_loaded = 0;
+    G.epg_state = EPG_NONE;
+    G.m3u_tvg[0] = 0;
+    G.in_use[0] = 0;
+    G.cand_n = G.cand_i = G.cand_failed = 0;
+    G.epg_gen++;
 }
 
 static int push_channel(channel_t c)
@@ -607,12 +780,13 @@ static int parse_m3u(const char *body, size_t len)
 
         } else if (line[0] == '#') {
             /* #EXTM3U: check if header provides XMLTV EPG URL */
-            if (strncmp(line, "#EXTM3U", 7) == 0 && !G.xmltv_url[0]) {
+            if (strncmp(line, "#EXTM3U", 7) == 0) {
                 char *tvg = extinf_attr(line, "x-tvg-url");
                 if (!tvg) tvg = extinf_attr(line, "url-tvg");
                 if (tvg) {
-                    snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", tvg);
-                    PROV_LOG("iptv: auto-discovered EPG URL from M3U: %s", G.xmltv_url);
+                    /* The playlist's own guide: one candidate among several. */
+                    snprintf(G.m3u_tvg, sizeof G.m3u_tvg, "%s", tvg);
+                    PROV_LOG("iptv: playlist names its own guide: %s", G.m3u_tvg);
                     free(tvg);
                 }
             }
@@ -785,24 +959,46 @@ static void xml_decode_entities(char *s)
     *w = '\0';
 }
 
+/*
+ * "Animax Asia India (1080p) [Geo-blocked]" and "Animax" are the same channel.
+ * Lower-case letters and digits only, anything in (...) or [...] dropped, and a
+ * trailing quality tag (HD, FHD, UHD, SD, 4K) cut, so playlists and guides that
+ * dress the name differently still meet.
+ */
+static void norm_name(const char *s, char *out, size_t osz)
+{
+    size_t n = 0;
+    int depth = 0;
+    for (; *s && n + 1 < osz; ++s) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '(' || c == '[') { depth++; continue; }
+        if (c == ')' || c == ']') { if (depth) depth--; continue; }
+        if (depth) continue;
+        if (isalnum(c)) out[n++] = (char)tolower(c);
+    }
+    out[n] = 0;
+
+    static const char *const tags[] = { "fhd", "uhd", "hd", "sd", "4k", NULL };
+    for (int again = 1; again; ) {
+        again = 0;
+        for (int t = 0; tags[t]; ++t) {
+            size_t tl = strlen(tags[t]);
+            if (n > tl + 2 && strcmp(out + n - tl, tags[t]) == 0) {
+                n -= tl;
+                out[n] = 0;
+                again = 1;
+                break;
+            }
+        }
+    }
+}
+
 static int channel_name_match(const char *a, const char *b)
 {
-    if (!a || !b) return 0;
-    if (strcasecmp(a, b) == 0) return 1;
-    /* Compare ignoring non-alphanumeric characters and whitespace */
-    const unsigned char *pa = (const unsigned char *)a;
-    const unsigned char *pb = (const unsigned char *)b;
-    while (*pa || *pb) {
-        while (*pa && !isalnum(*pa)) pa++;
-        while (*pb && !isalnum(*pb)) pb++;
-        if (!*pa || !*pb) break;
-        if (tolower(*pa) != tolower(*pb)) return 0;
-        pa++;
-        pb++;
-    }
-    while (*pa && !isalnum(*pa)) pa++;
-    while (*pb && !isalnum(*pb)) pb++;
-    return (!*pa && !*pb);
+    char na[96], nb[96];
+    norm_name(a, na, sizeof na);
+    norm_name(b, nb, sizeof nb);
+    return na[0] && strcmp(na, nb) == 0;
 }
 
 #define XMLTV_HASH_SIZE 4096
@@ -834,6 +1030,16 @@ static void parse_xmltv(const char *body, size_t len)
      */
     const char *cp = body;
     int mapped_count = 0;
+    int guide_channels = 0;
+
+    /* A previous guide's ids mean nothing to this one. */
+    for (int i = 0; i < G.ch_count; ++i) { free(G.ch[i].epg_id); G.ch[i].epg_id = NULL; }
+
+    /* The playlist's names, normalised once: guides have thousands of channels. */
+    char (*pn)[96] = (char (*)[96])malloc((size_t)G.ch_count * 96);
+    if (pn)
+        for (int i = 0; i < G.ch_count; ++i) norm_name(G.ch[i].name, pn[i], 96);
+
     while (cp < end) {
         const char *oc = strstr(cp, "<channel");
         if (!oc || oc >= end) break;
@@ -847,20 +1053,28 @@ static void parse_xmltv(const char *body, size_t len)
             xml_decode_entities(chan_id);
             trim(chan_id);
 
-            char dname[128] = {0};
-            const char *db = strstr(hdr_end, "<display-name");
-            if (db && db < ce) {
+            /* Every <display-name>: guides list a channel under several names. */
+            char dn[6][96];
+            int dn_count = 0;
+            for (const char *db = strstr(hdr_end, "<display-name");
+                 db && db < ce && dn_count < 6;
+                 db = strstr(db + 1, "<display-name")) {
                 const char *dg = memchr(db, '>', (size_t)(ce - db));
                 const char *dc = dg ? strstr(dg, "</display-name>") : NULL;
-                if (dg && dc && dc > dg + 1) {
-                    size_t n = (size_t)(dc - dg - 1);
-                    if (n >= sizeof dname) n = sizeof dname - 1;
-                    memcpy(dname, dg + 1, n);
-                    dname[n] = '\0';
-                    xml_decode_entities(dname);
-                    trim(dname);
-                }
+                if (!dg || !dc || dc <= dg + 1 || dc > ce) continue;
+                char tmp[128];
+                size_t n = (size_t)(dc - dg - 1);
+                if (n >= sizeof tmp) n = sizeof tmp - 1;
+                memcpy(tmp, dg + 1, n);
+                tmp[n] = '\0';
+                xml_decode_entities(tmp);
+                trim(tmp);
+                norm_name(tmp, dn[dn_count], sizeof dn[0]);
+                if (dn[dn_count][0]) dn_count++;
             }
+            char idn[96];
+            norm_name(chan_id, idn, sizeof idn);
+            guide_channels++;
 
             char icon_src[256] = {0};
             const char *ic = strstr(hdr_end, "<icon");
@@ -871,18 +1085,21 @@ static void parse_xmltv(const char *body, size_t len)
                 }
             }
 
-            if (chan_id[0]) {
+            if (chan_id[0] && pn) {
                 for (int i = 0; i < G.ch_count; ++i) {
-                    int match = 0;
-                    if (dname[0] && channel_name_match(G.ch[i].name, dname)) {
-                        match = 1;
-                    } else if (channel_name_match(G.ch[i].name, chan_id)) {
-                        match = 1;
-                    }
+                    if (!pn[i][0]) continue;
+                    int match = idn[0] && strcmp(pn[i], idn) == 0;
+                    for (int d = 0; !match && d < dn_count; ++d)
+                        match = strcmp(pn[i], dn[d]) == 0;
                     if (match) {
+                        /* The playlist keeps its own tvg-id; the guide's id is
+                         * remembered beside it so programmes can find the row. */
                         if (!G.ch[i].tvg_id[0]) {
                             free(G.ch[i].tvg_id);
                             G.ch[i].tvg_id = dup_str(chan_id);
+                            mapped_count++;
+                        } else if (!G.ch[i].epg_id) {
+                            G.ch[i].epg_id = dup_str(chan_id);
                             mapped_count++;
                         }
                         if ((!G.ch[i].logo || !G.ch[i].logo[0]) && icon_src[0]) {
@@ -895,7 +1112,9 @@ static void parse_xmltv(const char *body, size_t len)
         }
         cp = close ? close + 10 : (hdr_end ? hdr_end + 1 : end);
     }
-    PROV_LOG("iptv: XMLTV pass 1 mapped %d/%d channels by display-name/id", mapped_count, G.ch_count);
+    free(pn);
+    PROV_LOG("iptv: XMLTV pass 1 mapped %d/%d channels by name (%d guide channels)",
+             mapped_count, G.ch_count, guide_channels);
 
     /*
      * Build hash lookup table for fast programme channel matching
@@ -908,6 +1127,13 @@ static void parse_xmltv(const char *body, size_t len)
         for (int i = 0; i < G.ch_count; i++) {
             if (G.ch[i].tvg_id && G.ch[i].tvg_id[0]) {
                 uint32_t h = xmltv_hash_str(G.ch[i].tvg_id) % XMLTV_HASH_SIZE;
+                ch_hash_node_t *node = &node_pool[pool_idx++];
+                node->ch_idx = i;
+                node->next = hash_table[h];
+                hash_table[h] = node;
+            }
+            if (G.ch[i].epg_id) {
+                uint32_t h = xmltv_hash_str(G.ch[i].epg_id) % XMLTV_HASH_SIZE;
                 ch_hash_node_t *node = &node_pool[pool_idx++];
                 node->ch_idx = i;
                 node->next = hash_table[h];
@@ -971,7 +1197,8 @@ static void parse_xmltv(const char *body, size_t len)
                     uint32_t h = xmltv_hash_str(chan) % XMLTV_HASH_SIZE;
                     for (ch_hash_node_t *cur = hash_table[h]; cur; cur = cur->next) {
                         int i = cur->ch_idx;
-                        if (strcmp(G.ch[i].tvg_id, chan) == 0) {
+                        if (strcmp(G.ch[i].tvg_id, chan) == 0 ||
+                            (G.ch[i].epg_id && strcmp(G.ch[i].epg_id, chan) == 0)) {
                             matched = 1;
                             progs_found++;
                             if (ts <= now && now < te) {
@@ -986,7 +1213,7 @@ static void parse_xmltv(const char *body, size_t len)
                         }
                     }
                 }
-                if (!matched) {
+                if (!matched && guide_channels == 0) {
                     for (int i = 0; i < G.ch_count; ++i) {
                         if (G.ch[i].name[0] && channel_name_match(G.ch[i].name, chan)) {
                             progs_found++;
@@ -1012,7 +1239,13 @@ static void parse_xmltv(const char *body, size_t len)
     free(node_pool);
     free(next_start);
     G.epg_loaded = 1;
-    PROV_LOG("iptv: XMLTV pass 2 matched %d programmes", progs_found);
+    int with_data = 0;
+    for (int i = 0; i < G.ch_count; ++i)
+        if (G.ch[i].now || G.ch[i].next) with_data++;
+    G.epg_matched = with_data;
+    G.epg_state = with_data ? EPG_OK : EPG_NOMATCH;
+    PROV_LOG("iptv: XMLTV pass 2 matched %d programmes, %d/%d channels have now/next",
+             progs_found, with_data, G.ch_count);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1257,19 +1490,339 @@ static void emit_search(const char *query, int page,
 
 __attribute__((weak)) void evo_rmlui_provider_reload(void);
 
+/*
+ * Guides.
+ *
+ * A guide is a global source, a playlist is a file: nothing ties them together
+ * except the channels they happen to share. So each time a playlist loads, EVO
+ * lists the guides that could cover it - the one it used last time, the ones
+ * the user gave, the playlist's own url-tvg, a sidecar <playlist>.xml, and the
+ * epg.xml/iptv.xml/guide.xml on the stick - and takes the first that gives any
+ * channel a now/next. Which one won (or that one covers nothing) is remembered
+ * per playlist, so switching playlists needs no editing and no re-download.
+ *
+ * Downloads are cached per URL for EPG_CACHE_SECS.
+ */
+#define EPG_CACHE_SECS (12 * 3600)
+#define EPG_NONE_SECS  (7 * 24 * 3600)
+#define GUIDE_MAP      "iptv_guides.map"
+#define GUIDE_MAP_MAX  48
+
+static unsigned epg_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    while (*s) { h ^= (unsigned char)*s++; h *= 16777619u; }
+    return h;
+}
+
+static void epg_cache_paths(const char *url, char *body, size_t bsz,
+                            char *meta, size_t msz)
+{
+    char nb[48], nm[48];
+    snprintf(nb, sizeof nb, "iptv_epg_%08x.xml", epg_hash(url));
+    snprintf(nm, sizeof nm, "iptv_epg_%08x.meta", epg_hash(url));
+    snprintf(body, bsz, "%s", evo_data_path(nb));
+    snprintf(meta, msz, "%s", evo_data_path(nm));
+}
+
+static char *epg_read_file(const char *path, size_t *out_len)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    rewind(f);
+    if (sz <= 0 || (size_t)sz > EVO_NET_MAX_BODY) { fclose(f); return NULL; }
+    char *buf = (char *)malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[got] = '\0';
+    *out_len = got;
+    return buf;
+}
+
+static char *epg_cache_load(const char *url, size_t *out_len)
+{
+    char bpath[600], mpath[600];
+    epg_cache_paths(url, bpath, sizeof bpath, mpath, sizeof mpath);
+
+    FILE *m = fopen(mpath, "r");
+    if (!m) return NULL;
+    char line[EVO_PROVIDER_MAX_URL + 8];
+    long long when = 0;
+    int ok = 0;
+    if (fgets(line, sizeof line, m)) {
+        when = strtoll(line, NULL, 10);
+        if (fgets(line, sizeof line, m)) {
+            trim(line);
+            ok = (strcmp(line, url) == 0);
+        }
+    }
+    fclose(m);
+    long long age = (long long)time(NULL) - when;
+    if (!ok || when <= 0 || age < 0 || age > EPG_CACHE_SECS) return NULL;
+    return epg_read_file(bpath, out_len);
+}
+
+static void epg_cache_save(const char *url, const char *body, size_t len)
+{
+    char bpath[600], mpath[600];
+    epg_cache_paths(url, bpath, sizeof bpath, mpath, sizeof mpath);
+    FILE *f = fopen(bpath, "wb");
+    if (!f) return;
+    size_t w = fwrite(body, 1, len, f);
+    fclose(f);
+    if (w != len) { remove(bpath); return; }
+    FILE *m = fopen(mpath, "w");
+    if (!m) return;
+    fprintf(m, "%lld\n%s\n", (long long)time(NULL), url);
+    fclose(m);
+    PROV_LOG("iptv: guide cached (%zu bytes) for %d h", len, EPG_CACHE_SECS / 3600);
+}
+
+/* --- what each playlist learned: key <TAB> url <TAB> ok|none <TAB> time ------ */
+
+static const char *playlist_key(void)
+{
+    if (G.playlist_file[0]) return G.playlist_file;
+    return G.playlist_url[0] ? G.playlist_url : G.last_url;
+}
+
+/* key <TAB> url <TAB> status <TAB> time [<TAB> channels covered] */
+static int map_parse(char *line, char **key, char **url, char **st, long long *when)
+{
+    char *t1 = strchr(line, '\t');
+    if (!t1) return 0;
+    *t1++ = 0;
+    char *t2 = strchr(t1, '\t');
+    if (!t2) return 0;
+    *t2++ = 0;
+    char *t3 = strchr(t2, '\t');
+    if (!t3) return 0;
+    *t3++ = 0;
+    *key = line; *url = t1; *st = t2; *when = strtoll(t3, NULL, 10);
+    return 1;
+}
+
+static int map_count(const char *time_field)
+{
+    const char *t = strchr(time_field, '\t');
+    return t ? atoi(t + 1) : -1;
+}
+
+/* Next line of a buffer, NUL-terminated in place; NULL at the end. Not strtok:
+ * this runs on the UI thread and on the download callback. */
+static char *map_line(char **cur)
+{
+    char *p = *cur;
+    while (p && *p == '\n') p++;
+    if (!p || !*p) { *cur = p; return NULL; }
+    char *e = strchr(p, '\n');
+    if (e) { *e = 0; *cur = e + 1; } else { *cur = p + strlen(p); }
+    return p;
+}
+
+/* mode 0: copy the guide that last worked for key into out; 1: is url known not
+ * to cover key (recently)?; 2: copy the guide the user chose for key; 3: copy
+ * how many of key's channels url covered. Returns 1 on a hit. */
+static int map_query(int mode, const char *key, const char *url, char *out, size_t osz)
+{
+    size_t n = 0;
+    char *buf = epg_read_file(evo_data_path(GUIDE_MAP), &n);
+    if (!buf) return 0;
+    int hit = 0;
+    long long now = (long long)time(NULL);
+    char *cur = buf;
+    for (char *ln = map_line(&cur); ln; ln = map_line(&cur)) {
+        char *k, *u, *st; long long when;
+        char *after_st = NULL;
+        if (!map_parse(ln, &k, &u, &st, &when) || strcmp(k, key) != 0) continue;
+        after_st = st + strlen(st) + 1;           /* "time[\tcount]" */
+        if (mode == 3 && strcmp(st, "pin") != 0 && strcmp(u, url) == 0) {
+            int c = strcmp(st, "none") == 0 ? 0 : map_count(after_st);
+            if (c >= 0) { snprintf(out, osz, "%d", c); hit = 1; }
+        } else if (mode == 0 && strcmp(st, "ok") == 0) {
+            snprintf(out, osz, "%s", u); hit = 1;
+        } else if (mode == 2 && strcmp(st, "pin") == 0) {
+            snprintf(out, osz, "%s", u); hit = 1;
+        } else if (mode == 1 && (strcmp(st, "none") == 0 || strcmp(st, "weak") == 0) && strcmp(u, url) == 0 &&
+                   now - when >= 0 && now - when < EPG_NONE_SECS) {
+            hit = 1;
+        }
+    }
+    free(buf);
+    return hit;
+}
+
+/* st: "ok" (it worked), "none" (it covers nothing), "pin" (the user's choice for
+ * this playlist), or "clear" (drop the pin, write nothing). */
+static void map_set_n(const char *key, const char *url, const char *st_new, int count);
+
+static void map_set(const char *key, const char *url, const char *st_new)
+{
+    map_set_n(key, url, st_new, -1);
+}
+
+static void map_set_n(const char *key, const char *url, const char *st_new, int count)
+{
+    if (!key[0]) return;
+    size_t n = 0;
+    char *buf = epg_read_file(evo_data_path(GUIDE_MAP), &n);
+    char *keep[GUIDE_MAP_MAX + 2];
+    int nk = 0;
+    if (buf) {
+        char *cur = buf;
+        for (char *ln = map_line(&cur); ln; ln = map_line(&cur)) {
+            char copy[EVO_PROVIDER_MAX_URL * 2 + 96];
+            snprintf(copy, sizeof copy, "%s", ln);
+            char *k, *u, *st; long long when;
+            if (map_parse(copy, &k, &u, &st, &when) && strcmp(k, key) == 0) {
+                int is_pin  = strcmp(st, "pin") == 0;
+                int same_url = strcmp(u, url) == 0;
+                int drop;
+                if (strcmp(st_new, "pin") == 0 || strcmp(st_new, "clear") == 0)
+                    drop = is_pin;                        /* one pin per playlist */
+                else
+                    drop = !is_pin && same_url;           /* a verdict never eats a pin */
+                if (drop) continue;                       /* superseded by the new line */
+            }
+            if (nk < GUIDE_MAP_MAX) keep[nk++] = ln;
+        }
+    }
+    FILE *f = fopen(evo_data_path(GUIDE_MAP), "w");
+    if (f) {
+        for (int i = 0; i < nk; ++i) fprintf(f, "%s\n", keep[i]);
+        if (strcmp(st_new, "clear") != 0) {
+            if (count >= 0)
+                fprintf(f, "%s\t%s\t%s\t%lld\t%d\n", key, url, st_new,
+                        (long long)time(NULL), count);
+            else
+                fprintf(f, "%s\t%s\t%s\t%lld\n", key, url, st_new, (long long)time(NULL));
+        }
+        fclose(f);
+    }
+    free(buf);
+}
+
+/* --- candidates --------------------------------------------------------------- */
+
+static void cand_add_w(const char *u, int weak)
+{
+    if (!u || !*u || G.cand_n >= 12) return;
+    for (int i = 0; i < G.cand_n; ++i)
+        if (strcmp(G.cand[i], u) == 0) return;
+    G.cand_weak[G.cand_n] = (unsigned char)weak;
+    snprintf(G.cand[G.cand_n++], sizeof G.cand[0], "%s", u);
+}
+
+static void cand_add(const char *u) { cand_add_w(u, 0); }
+
+static int file_exists(const char *p)
+{
+    FILE *f = fopen(p, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static void build_candidates(void)
+{
+    G.cand_n = G.cand_i = G.cand_failed = 0;
+    G.epg_gen++;
+
+    G.cand_pinned = 0;
+    G.in_use[0] = 0;
+    const char *key = playlist_key();
+    char win[EVO_PROVIDER_MAX_URL];
+    if (key[0] && map_query(2, key, NULL, win, sizeof win)) {
+        G.cand_pinned = 1;             /* the user said which guide: no guessing */
+        if (strcmp(win, "none") != 0) cand_add(win);
+        return;
+    }
+    if (key[0] && map_query(0, key, NULL, win, sizeof win)) cand_add(win);
+
+    for (int i = 0; i < G.guide_n; ++i) cand_add(G.guides[i]);
+    cand_add(G.m3u_tvg);
+
+    if (G.playlist_file[0]) {                 /* Canais.m3u -> Canais.xml */
+        char stem[512], side[560];
+        snprintf(stem, sizeof stem, "%s", G.playlist_file);
+        char *dot = strrchr(stem, '.'), *sl = strrchr(stem, '/');
+        if (dot && (!sl || dot > sl)) *dot = 0;
+        snprintf(side, sizeof side, "%s.xml", stem);
+        if (file_exists(side)) cand_add(side);
+    }
+    static const char *const kUsb[] = {
+        "/mnt/usb0/epg.xml", "/mnt/usb0/iptv.xml", "/mnt/usb0/guide.xml", NULL };
+    for (int i = 0; kUsb[i]; ++i)
+        if (file_exists(kUsb[i])) cand_add(kUsb[i]);
+
+    /* Any other guide on the stick, last - only taken if it covers at least a
+     * tenth of the playlist, so a stray .xml never wins by one lucky name. */
+    static char found[8][512];
+    int nf = provider_iptv_usb_guides(found, 8);
+    for (int i = 0; i < nf; ++i) cand_add_w(found[i], 1);
+}
+
+/* --- trying them ---------------------------------------------------------------- */
+
+static void epg_next(void);
+
+static void epg_done(void)
+{
+    G.epg_loaded = 1;
+    if (evo_rmlui_provider_reload) evo_rmlui_provider_reload();
+}
+
+/* parse_xmltv just ran on cand[cand_i]. Returns 1 when it settled the matter. */
+static int epg_judge(void)
+{
+    if (!G.loaded) return 1;                  /* the playlist went away: drop it */
+    const char *key = playlist_key();
+    const char *url = G.cand[G.cand_i];
+    int enough = G.epg_matched > 0 &&
+                 (!G.cand_weak[G.cand_i] || G.epg_matched * 10 >= G.ch_count);
+    if (enough) {
+        PROV_LOG("iptv: guide %s covers %d channels - using it", url, G.epg_matched);
+        char prev[EVO_PROVIDER_MAX_URL] = "";
+        if (!G.cand_pinned) map_query(0, key, NULL, prev, sizeof prev);
+        snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", url);
+        snprintf(G.in_use, sizeof G.in_use, "%s", url);
+        map_set_n(key, url, "ok", G.epg_matched);
+        if (!G.cand_pinned && strcmp(prev, url) != 0) {
+            const char *b = strrchr(url, '/');
+            snprintf(G.notice, sizeof G.notice, "Guide: %s - %d channels",
+                     (b && b[1]) ? b + 1 : url, G.epg_matched);
+        }
+        epg_done();
+        return 1;
+    }
+    PROV_LOG("iptv: guide %s covers %d of these channels - not enough", url, G.epg_matched);
+    /* A weak match leaves its titles behind: clear them before the next guide. */
+    for (int i = 0; i < G.ch_count; ++i) {
+        free(G.ch[i].now);  G.ch[i].now  = NULL;
+        free(G.ch[i].next); G.ch[i].next = NULL;
+    }
+    map_set_n(key, url, G.epg_matched ? "weak" : "none", G.epg_matched);
+    return 0;
+}
+
 static void on_epg(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)ud;
     PROV_LOG("iptv: on_epg result success=%d status=%d len=%zu", success, status, len);
+    if ((int)(intptr_t)ud != G.epg_gen || G.cand_i >= G.cand_n) return;  /* stale */
+
     if (success && status == 200 && body && len) {
+        epg_cache_save(G.cand[G.cand_i], body, len);
+        G.epg_matched = 0;
         parse_xmltv(body, len);
-        PROV_LOG("iptv: parse_xmltv finished, requesting UI level reload to display EPG");
-        if (evo_rmlui_provider_reload) {
-            evo_rmlui_provider_reload();
-        }
+        if (epg_judge()) return;
     } else {
-        G.epg_loaded = 1;   /* do not retry every page turn */
+        G.cand_failed = 1;
     }
+    G.cand_i++;
+    epg_next();
 }
 
 int provider_iptv_feed_xmltv(const char *body, size_t len)
@@ -1282,64 +1835,60 @@ int provider_iptv_feed_xmltv(const char *body, size_t len)
     return 0;
 }
 
+static void epg_next(void)
+{
+    const char *key = playlist_key();
+    while (G.cand_i < G.cand_n) {
+        const char *url = G.cand[G.cand_i];
+        snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", url);
+
+        if (!G.cand_pinned && url[0] != '/' && key[0] && map_query(1, key, url, NULL, 0)) {
+            PROV_LOG("iptv: skipping guide %s - known not to cover this playlist", url);
+            G.cand_i++;
+            continue;
+        }
+        G.epg_state = EPG_LOADING;
+
+        size_t blen = 0;
+        int cached = 0;
+        char *buf = NULL;
+        if (url[0] == '/') {
+            buf = epg_read_file(url, &blen);
+        } else {
+            buf = epg_cache_load(url, &blen);
+            cached = buf != NULL;
+        }
+        if (buf) {
+            if (cached) PROV_LOG("iptv: guide from cache (%zu bytes), no download", blen);
+            G.epg_matched = 0;
+            parse_xmltv(buf, blen);
+            free(buf);
+            if (epg_judge()) return;
+            G.cand_i++;
+            continue;
+        }
+        if (url[0] == '/') { G.cand_i++; continue; }   /* unreadable local file */
+
+        int rc = evo_net_request_async("GET", url, NULL, NULL, 0, on_epg,
+                                       (void *)(intptr_t)G.epg_gen);
+        if (rc == 0) return;                           /* carries on in on_epg */
+        PROV_LOG("iptv: evo_net_request_async for EPG failed rc=%d", rc);
+        G.cand_failed = 1;
+        G.cand_i++;
+    }
+
+    G.epg_state = G.cand_n == 0 ? EPG_NONE
+                : G.cand_failed ? EPG_FAILED : EPG_NOMATCH;
+    epg_done();
+}
+
 static void kick_epg(void)
 {
     if (G.epg_loaded) return;
-
-    /* Auto-discover local XMLTV on USB stick if none configured */
-    if (!G.xmltv_url[0]) {
-        static const char *const kUsbEpgNames[] = {
-            "/mnt/usb0/epg.xml",
-            "/mnt/usb0/iptv.xml",
-            "/mnt/usb0/guide.xml",
-            NULL
-        };
-        for (int i = 0; kUsbEpgNames[i]; ++i) {
-            FILE *f = fopen(kUsbEpgNames[i], "rb");
-            if (f) {
-                fclose(f);
-                snprintf(G.xmltv_url, sizeof G.xmltv_url, "%s", kUsbEpgNames[i]);
-                PROV_LOG("iptv: auto-discovered local EPG on USB: %s", G.xmltv_url);
-                break;
-            }
-        }
-    }
-
-    if (!G.xmltv_url[0]) return;
-
-    /* Local file path on disk / USB */
-    if (G.xmltv_url[0] == '/') {
-        FILE *f = fopen(G.xmltv_url, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long sz = ftell(f);
-            rewind(f);
-            if (sz > 0 && (size_t)sz <= EVO_NET_MAX_BODY) {
-                char *buf = (char *)malloc((size_t)sz + 1);
-                if (buf) {
-                    size_t got = fread(buf, 1, (size_t)sz, f);
-                    buf[got] = '\0';
-                    fclose(f);
-                    parse_xmltv(buf, got);
-                    free(buf);
-                    G.epg_loaded = 1;
-                    if (evo_rmlui_provider_reload) {
-                        evo_rmlui_provider_reload();
-                    }
-                    return;
-                }
-            }
-            fclose(f);
-        }
-    }
-
-    /* Marked loaded up front: one attempt per playlist load. */
-    G.epg_loaded = 1;
-    int rc = evo_net_request_async("GET", G.xmltv_url, NULL, NULL, 0, on_epg, NULL);
-    if (rc != 0) {
-        G.epg_loaded = 0;
-        PROV_LOG("iptv: evo_net_request_async for EPG failed rc=%d", rc);
-    }
+    G.epg_loaded = 1;            /* one pass per playlist load */
+    G.epg_state = EPG_NONE;
+    build_candidates();
+    epg_next();
 }
 
 static void on_playlist(int success, int status, const char *body, size_t len,

@@ -1,0 +1,236 @@
+/* Shared look for the Live TV options mockups: Settings' row language
+ * (settings.rcss .setting-row / .row-*), IPTV's palette. Preview only. */
+div {
+    display: block;
+}
+
+body {
+    font-family: LatoLatin;
+    font-size: 16dp;
+    color: #ffffff;
+    width: 1920dp;
+    height: 1080dp;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    background-color: transparent;
+}
+
+#scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1200dp;
+    height: 1080dp;
+    background-color: #000000b0;
+}
+
+#panel {
+    position: absolute;
+    left: 1200dp;
+    top: 0;
+    width: 720dp;
+    height: 1080dp;
+    background-color: #0a1019;
+    border-left-width: 1dp;
+    border-left-color: #ffffff1f;
+    padding: 64dp 40dp 0 40dp;
+    box-sizing: border-box;
+}
+
+.eyebrow {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2.4dp;
+}
+
+.crumb-back {
+    color: #5e718c;
+}
+
+.title {
+    font-size: 36dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 1dp;
+    margin-top: 10dp;
+}
+
+.sub {
+    font-size: 15dp;
+    color: #7c8ba3;
+    margin-top: 8dp;
+}
+
+.rows {
+    margin-top: 40dp;
+}
+
+.row {
+    height: 84dp;
+    padding: 0 18dp;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-width: 1dp;
+    border-bottom-color: #ffffff14;
+}
+
+.row.focused {
+    background-color: #ffcd0026;
+    border-radius: 12dp;
+    border-bottom-color: transparent;
+}
+
+.left {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.right {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.ibox {
+    width: 52dp;
+    height: 52dp;
+    background-color: #00cdff14;
+    border-width: 1dp;
+    border-color: #00cdff33;
+    border-radius: 14dp;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 18dp;
+}
+
+.focused .ibox {
+    background-color: #ffcd0026;
+    border-color: #ffcd0066;
+}
+
+.ibox img {
+    width: 26dp;
+    height: 26dp;
+}
+
+.rt {
+    font-size: 22dp;
+    font-weight: bold;
+    color: #eef4ff;
+    letter-spacing: 0.4dp;
+}
+
+.rd {
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #5e718c;
+    letter-spacing: 0.6dp;
+    margin-top: 5dp;
+}
+
+.focused .rd {
+    color: #ffcd00;
+}
+
+.rd .warn {
+    color: #ffa940;
+}
+
+.rd .good {
+    color: #33d17a;
+}
+
+.chev {
+    width: 20dp;
+    height: 20dp;
+}
+
+.badge {
+    background-color: #0a101c99;
+    border-width: 1dp;
+    border-color: #5a7db433;
+    border-radius: 10dp;
+    padding: 7dp 16dp;
+    font-size: 12dp;
+    font-weight: bold;
+    color: #7c8ba3;
+    letter-spacing: 1.4dp;
+    margin-right: 14dp;
+}
+
+.badge.live {
+    color: #33d17a;
+    border-color: #33d17a55;
+}
+
+/* Radio, for "pick one" lists */
+.radio {
+    width: 22dp;
+    height: 22dp;
+    border-width: 2dp;
+    border-color: #5e718c;
+    border-radius: 11dp;
+    margin-right: 22dp;
+    box-sizing: border-box;
+}
+
+.radio.on {
+    border-color: #ffcd00;
+}
+
+.dot {
+    width: 10dp;
+    height: 10dp;
+    margin: 4dp;
+    border-radius: 5dp;
+    background-color: #ffcd00;
+}
+
+.note {
+    margin-top: 34dp;
+    padding: 18dp 20dp;
+    background-color: #00cdff0f;
+    border-width: 1dp;
+    border-color: #00cdff26;
+    border-radius: 14dp;
+    font-size: 15dp;
+    color: #9fb0c8;
+    line-height: 22dp;
+}
+
+.note b {
+    color: #eef4ff;
+}
+
+.foot {
+    position: absolute;
+    left: 40dp;
+    bottom: 44dp;
+    width: 640dp;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.hint {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    margin-right: 30dp;
+    font-size: 14dp;
+    font-weight: bold;
+    color: #9fb0c8;
+    letter-spacing: 1.4dp;
+}
+
+.hint img {
+    width: 30dp;
+    height: 30dp;
+    margin-right: 10dp;
+}

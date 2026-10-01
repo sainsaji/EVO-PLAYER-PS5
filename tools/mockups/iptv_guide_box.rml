@@ -1,0 +1,64 @@
+<rml>
+<head>
+    <title>mock_iptv_guide_box</title>
+    <link type="text/rcss" href="mock.rcss"/>
+    <style>
+        /* Sits exactly over the channel panel's CHANNEL GUIDE box. */
+        #box {
+            position: absolute;
+            left: 1384dp;
+            top: 620dp;
+            width: 448dp;
+            height: 124dp;
+            background-color: #0d1522;
+            border-width: 1dp;
+            border-color: #ffa94055;
+            border-radius: 12dp;
+            padding: 14dp 16dp;
+            box-sizing: border-box;
+        }
+        .bh {
+            font-size: 12dp;
+            font-weight: bold;
+            color: #00cdff;
+            letter-spacing: 2dp;
+        }
+        .bt {
+            font-size: 15dp;
+            color: #c8d4e6;
+            margin-top: 10dp;
+        }
+        .btn {
+            margin-top: 12dp;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+        .pill {
+            background-color: #00cdff22;
+            border-width: 1dp;
+            border-color: #00cdff66;
+            border-radius: 8dp;
+            padding: 3dp 9dp;
+            font-size: 11dp;
+            font-weight: bold;
+            color: #00cdff;
+            letter-spacing: 1dp;
+            margin-right: 10dp;
+        }
+        .bl {
+            font-size: 14dp;
+            font-weight: bold;
+            color: #ffcd00;
+            letter-spacing: 1dp;
+        }
+    </style>
+</head>
+<body>
+    <div id="box">
+        <div class="bh">CHANNEL GUIDE</div>
+        <div class="bt">No guide for this playlist yet</div>
+        <div class="btn"><span class="pill">OPTIONS</span><span class="bl">SET UP A GUIDE</span></div>
+    </div>
+</body>
+</rml>

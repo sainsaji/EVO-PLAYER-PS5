@@ -14,6 +14,7 @@
 #include "../projects/evoplayer/include/evo_changelog.h"
 /* #90: the provider host, driven for real - see render_provider_screens(). */
 #include "../projects/evoplayer/ui_rml/include/evo_rmlui_provider.h"
+#include "../projects/evoplayer/ui_rml/include/evo_rmlui_app.h"   /* mock_shot */
 extern "C" {
 #include "../projects/evoplayer/addons/include/evo_net.h"
 #include "../projects/evoplayer/media/include/prospero_thumbnail.h"
@@ -1600,6 +1601,44 @@ static void provider_shot(std::vector<uint32_t>& fb, int width, int height,
     std::cerr << "uiview: ok -> " << name << std::endl;
 }
 
+/*
+ * A design mockup (tools/mockups/*.rml) laid over the live provider frame, in
+ * its own Rml context so nothing in EVO's documents is touched. Preview only:
+ * lets a proposed layout be judged with the real fonts, icons and the real
+ * screen underneath before any of it is built.
+ */
+static void mock_shot(std::vector<uint32_t>& fb, int width, int height,
+                      const char* doc_path, const char* name) {
+    std::fill(fb.begin(), fb.end(), 0xFF000000);
+    evo_rmlui_provider_render(fb.data(), width, height);
+    evo_rmlui_render_nav_overlay(fb.data(), width, height);
+
+    Rml::Context* ctx = Rml::CreateContext(std::string("mock_") + name,
+                                           Rml::Vector2i(width, height));
+    if (!ctx) { std::cerr << "uiview: mock context failed" << std::endl; return; }
+    ctx->SetDensityIndependentPixelRatio(EvoRmlApp::Instance().DpRatio());
+    Rml::ElementDocument* doc = ctx->LoadDocument(doc_path);
+    if (!doc) {
+        std::cerr << "uiview: could not load " << doc_path << std::endl;
+        Rml::RemoveContext(ctx->GetName());
+        return;
+    }
+    doc->Show();
+    EvoRenderBridge* r = EvoRmlApp::Instance().RenderBridge();
+    r->SetFramebuffer(fb.data());
+    r->SetDimensions(width, height);
+    ctx->Update();
+    ctx->Update();
+    r->FrameBegin();
+    ctx->Render();
+    r->FrameEnd();
+    Rml::RemoveContext(ctx->GetName());
+
+    std::string out = std::string("output/uiview/") + name + ".bmp";
+    save_bmp_24(out.c_str(), fb.data(), width, height);
+    std::cerr << "uiview: ok -> " << name << std::endl;
+}
+
 static void render_provider_screens(std::vector<uint32_t>& fb, int width, int height) {
     const char* root = std::getenv("EVO_DATA_DIR_OVERRIDE");
     if (!root || !*root) {
@@ -1680,6 +1719,26 @@ static void render_provider_screens(std::vector<uint32_t>& fb, int width, int he
         evo_rmlui_provider_key(4 /* KeyAccept */);
         pump_provider(fb, width, height, 20);
         provider_shot(fb, width, height, "rml_provider_iptv_channels");
+
+        /* A notice over a populated level: it must sit ABOVE the cards, never
+         * behind them (the browser view is absolutely positioned). */
+        evo_rmlui_provider_set_status("Could not reach the server - showing the last channel list", 1);
+        pump_provider(fb, width, height, 3);
+        provider_shot(fb, width, height, "rml_provider_iptv_notice");
+        evo_rmlui_provider_set_status("", 0);
+        pump_provider(fb, width, height, 2);
+
+        /* The USB playlist list puts its hint in the same notice strip. */
+        EvoRmlProviderHost::Instance().ShowUsbPlaylists(
+            { "/mnt/usb0/Canais.m3u", "/mnt/usb0/iptv.m3u", "/mnt/usb0/news.m3u",
+              "/mnt/usb0/sports.m3u", "/mnt/usb0/music.m3u", "/mnt/usb0/movies.m3u" });
+        pump_provider(fb, width, height, 4);
+        provider_shot(fb, width, height, "rml_provider_iptv_usb_list");
+
+        /* Live TV options redesign - mockups over this channel frame. */
+        mock_shot(fb, width, height, "tools/mockups/iptv_options.rml",   "mock_iptv_options");
+        mock_shot(fb, width, height, "tools/mockups/iptv_guide.rml",     "mock_iptv_guide");
+        mock_shot(fb, width, height, "tools/mockups/iptv_guide_box.rml", "mock_iptv_guide_box");
 
         /*
          * Walk Left off the left edge. The document must CONSUME each press

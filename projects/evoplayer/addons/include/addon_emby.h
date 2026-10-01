@@ -67,6 +67,9 @@ int  ms_save(ms_client_t *c);
 int  ms_is_configured(ms_client_t *c);
 /* No session yet (or the server rejected the last one). */
 int  ms_needs_sign_in(ms_client_t *c);
+/* A session token is stored; sign_out forgets it and keeps the address. */
+int  ms_is_signed_in(ms_client_t *c);
+void ms_sign_out(ms_client_t *c);
 
 /* The address as http[s]://host:port. set_source re-points the instance and
  * drops its session: a new address needs a new sign-in. */

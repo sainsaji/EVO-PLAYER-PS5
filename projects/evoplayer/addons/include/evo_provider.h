@@ -341,6 +341,16 @@ typedef struct evo_provider {
      * NULL looks for rml/<id>.rml, as before.
      */
     const char *ui_embedded;
+
+    /*
+     * Optional, for providers with an account. is_signed_in: 1 while a login
+     * or session is stored. sign_out: forget it (a media server keeps its
+     * address, so signing in again needs only the user); persisted at once.
+     * The ONLY way a provider's login is removed - opening a setup screen or
+     * pressing Back never does.
+     */
+    int  (*is_signed_in)(void);
+    void (*sign_out)(void);
 } evo_provider_t;
 
 /* ------------------------------------------------------------------------- */
@@ -433,6 +443,28 @@ int  evo_provider_url_escape(const char *in, char *out, size_t out_sz);
 
 /* Feed XMLTV EPG data directly to IPTV provider */
 int  provider_iptv_feed_xmltv(const char *body, size_t len);
+
+/* The guide URL the user typed ("" = automatic), set it (empty = automatic,
+ * persisted, reloads now), and a one-line reason for the empty guide panel. */
+const char *provider_iptv_xmltv_url(void);
+void        provider_iptv_set_xmltv(const char *url);
+const char *provider_iptv_epg_status(void);
+
+/* Per-playlist guide choice. pin("") = automatic. Returns -1 with no playlist. */
+int         provider_iptv_pin_guide(const char *url);
+const char *provider_iptv_pinned_guide(void);
+
+/* For the Live TV options panel. */
+int         provider_iptv_epg_needs_setup(void);
+int         provider_iptv_channel_count(void);
+const char *provider_iptv_playlist_name(void);
+const char *provider_iptv_guide_in_use(void);
+int         provider_iptv_guide_matched(void);
+int         provider_iptv_guide_coverage(const char *url);   /* -1 = never tried */
+long long   provider_iptv_guide_age(void);                   /* -1 = local/unknown */
+void        provider_iptv_refresh_guide(void);
+int         provider_iptv_take_guide_notice(char *out, size_t sz);
+int         provider_iptv_usb_guides(char out[][512], int max);
 
 #ifdef __cplusplus
 }

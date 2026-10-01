@@ -502,6 +502,10 @@ void ProviderHostScreen::enterPicker()
         } else {
             detail = "Ready";
         }
+        /* The footer has four fixed slots, all taken on a media-server row, so
+         * the sign-out button is announced on the row it applies to. */
+        if (p->sign_out && p->is_signed_in && p->is_signed_in())
+            detail += "  \u00b7  Signed in - OPTIONS to sign out";
         m_pickIds.push_back(p->id);
         m_pickDetail.push_back(detail);
     }
@@ -863,6 +867,34 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
             }
             return true;
         }
+        if (pressed & PadButtons::Options) {
+            /* Sign out of the focused provider. Twice, within a few seconds:
+             * one stray press must not cost the user a login. */
+            const evo_provider_t* op = (m_pickIndex >= 0 && m_pickIndex < n)
+                                     ? evo_provider_find(m_pickIds[m_pickIndex].c_str()) : nullptr;
+            if (!op || !op->sign_out || !op->is_signed_in || !op->is_signed_in()) {
+                evo_feedback(EVO_FB_BOUNDARY);
+                return true;
+            }
+            uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (m_signOutArmed == op->id && now - m_signOutAt < 4000) {
+                op->sign_out();
+                m_signOutArmed.clear();
+                evo_feedback(EVO_FB_CONFIRM);
+                evo_bt("prov_screen: signed out of '%s'", op->id);
+                toast(op->name, "Signed out");
+                int keep = m_pickIndex;
+                enterPicker();
+                m_pickIndex = keep;
+            } else {
+                m_signOutArmed = op->id;
+                m_signOutAt = now;
+                evo_feedback(EVO_FB_OPEN);
+                toast(op->name, "Press OPTIONS again to sign out");
+            }
+            return true;
+        }
         if (pressed & PadButtons::Circle) {
             evo_feedback(EVO_FB_CANCEL);
             if (psm) psm->navigateTo(ScreenId::MainMenu);
@@ -879,6 +911,28 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
      * owns Up/Down and Left/Right in that state, exactly as on every other
      * screen. */
     if (railFocused) return false;
+
+    /* The Live TV options panel: the d-pad and X work its rows, Circle steps back,
+     * Options closes it, and nothing may act on the grid behind it. */
+    if (evo_rmlui_provider_panel_open()) {
+        if (pressed & PadButtons::Options) {
+            evo_feedback(EVO_FB_CANCEL);
+            evo_rmlui_provider_hide_panel();
+        } else if (pressed & PadButtons::Up) {
+            evo_feedback(EVO_FB_MOVE);
+            evo_rmlui_provider_key(EvoRmlProviderHost::KeyUp);
+        } else if (pressed & PadButtons::Down) {
+            evo_feedback(EVO_FB_MOVE);
+            evo_rmlui_provider_key(EvoRmlProviderHost::KeyDown);
+        } else if (pressed & PadButtons::Cross) {
+            evo_feedback(EVO_FB_CONFIRM);
+            evo_rmlui_provider_key(EvoRmlProviderHost::KeyAccept);
+        } else if (pressed & PadButtons::Circle) {
+            evo_feedback(EVO_FB_CANCEL);
+            evo_rmlui_provider_key(EvoRmlProviderHost::KeyBack);
+        }
+        return true;
+    }
 
     /*
      * Everything below goes into RmlUi. EVO does not translate a direction into
@@ -1018,6 +1072,9 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
             /* No setup page: the chooser is where the address is edited and
              * the web version opened. */
             enterPicker();
+        } else if (op && std::strcmp(op->id, "iptv") == 0 &&
+                   !evo_rmlui_provider_get_query()[0]) {
+            openProviderMenu();     /* playlist or guide, for the one on screen */
         } else {
             evo_rmlui_provider_show_setup();
         }
@@ -1123,6 +1180,221 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     }
     self->m_opened = evo_rmlui_provider_open(id.c_str(),
                                              DisplayWidth, DisplayHeight) != 0;
+}
+
+void ProviderHostScreen::OnGuideSubmitted(const char* text, void* userdata)
+{
+    (void)userdata;
+    std::string value = text ? text : "";
+    size_t b = value.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) {
+        value.clear();
+    } else {
+        size_t e = value.find_last_not_of(" \t\r\n");
+        value = value.substr(b, e - b + 1);
+    }
+    bool ok = value.empty() || value.rfind("http://", 0) == 0 ||
+              value.rfind("https://", 0) == 0 || value[0] == '/';
+    if (!ok) {
+        toast("IPTV", "Guide must start with http(s):// or /");
+        return;
+    }
+    if (provider_iptv_pin_guide(value.c_str()) != 0) {
+        toast("IPTV", "Open a playlist first");
+        return;
+    }
+    toast("LIVE TV", value.empty() ? "Guide: automatic" : "Guide saved for this playlist");
+    evo_rmlui_provider_hide_panel();
+    evo_rmlui_provider_reload();
+}
+
+static std::string baseName(const std::string& p)
+{
+    size_t s = p.find_last_of("/\\");
+    return s == std::string::npos ? p : p.substr(s + 1);
+}
+
+/* What a guide is called on screen: a file's name, a web guide's host. */
+static std::string guideLabel(const std::string& url)
+{
+    if (url.empty()) return "";
+    if (url[0] == '/') return baseName(url);
+    size_t b = url.find("://");
+    b = (b == std::string::npos) ? 0 : b + 3;
+    size_t e = url.find('/', b);
+    return url.substr(b, e == std::string::npos ? std::string::npos : e - b);
+}
+
+static std::string ageText(long long s)
+{
+    char buf[48];
+    if (s < 90)            return "just now";
+    if (s < 3600)          std::snprintf(buf, sizeof buf, "%lld min ago", s / 60);
+    else if (s < 2 * 86400) std::snprintf(buf, sizeof buf, "%lld h ago", s / 3600);
+    else                    std::snprintf(buf, sizeof buf, "%lld days ago", s / 86400);
+    return buf;
+}
+
+/* Owns the strings behind an evo_panel_t until it has been handed over. */
+struct PanelBuild {
+    struct Row { std::string id, title, detail, badge, icon; int radio = 0, on = 0, warn = 0, chevron = 0, live = 0; };
+    std::vector<Row> rows;
+    void show(const char* crumb, const char* eyebrow, const std::string& title,
+              const std::string& sub, const char* note_b, const char* note,
+              const char* accept, const char* back, int focus)
+    {
+        std::vector<evo_panel_row_t> r;
+        for (const Row& x : rows)
+            r.push_back({ x.id.c_str(), x.title.c_str(), x.detail.c_str(), x.badge.c_str(),
+                          x.icon.c_str(), x.radio, x.on, x.warn, x.chevron, x.live });
+        evo_panel_t p = { crumb, eyebrow, title.c_str(), sub.c_str(), note_b, note,
+                          accept, back, r.data(), (int)r.size(), focus };
+        evo_rmlui_provider_show_panel(&p);
+    }
+};
+
+void ProviderHostScreen::openProviderMenu(int focus)
+{
+    evo_feedback(EVO_FB_OPEN);
+    m_panelPage = "menu";
+
+    const int n = provider_iptv_channel_count();
+    const std::string pl = baseName(provider_iptv_playlist_name());
+    const std::string pin = provider_iptv_pinned_guide();
+    const std::string inUse = provider_iptv_guide_in_use();
+
+    PanelBuild pb;
+    PanelBuild::Row r;
+
+    r.id = "menu:playlist"; r.title = "Playlist"; r.icon = "/assets/icons/icon_tv.png";
+    r.detail = pl.empty() ? std::string("None yet")
+                          : pl + " · " + std::to_string(n) + " channels";
+    r.chevron = 1;
+    pb.rows.push_back(r);
+
+    r = PanelBuild::Row();
+    r.id = "menu:guide"; r.title = "Channel guide"; r.icon = "/assets/icons/icon_recent_files.png";
+    r.chevron = 1;
+    if (pin == "none") {
+        r.detail = "Turned off for this playlist";
+    } else if (!inUse.empty()) {
+        r.detail = guideLabel(inUse) + " · covers " + std::to_string(provider_iptv_guide_matched()) +
+                   " of " + std::to_string(n) + " channels";
+    } else {
+        r.detail = "None yet - choose one";
+        r.warn = 1;
+    }
+    pb.rows.push_back(r);
+
+    r = PanelBuild::Row();
+    r.id = "menu:refresh"; r.title = "Refresh guide"; r.icon = "/assets/icons/icon_activity.png";
+    long long age = provider_iptv_guide_age();
+    r.detail = inUse.empty() ? std::string("No guide loaded")
+             : inUse[0] == '/' ? std::string("Reads the USB file again")
+             : age >= 0 ? "Updated " + ageText(age) : std::string("Download it again");
+    pb.rows.push_back(r);
+
+    pb.show("", "LIVE TV", "Options", pl, "", "", "SELECT", "CLOSE", focus);
+}
+
+void ProviderHostScreen::openGuidePicker()
+{
+    evo_feedback(EVO_FB_OPEN);
+    m_panelPage = "guide";
+
+    const int n = provider_iptv_channel_count();
+    const std::string pl = baseName(provider_iptv_playlist_name());
+    const std::string pin = provider_iptv_pinned_guide();
+    const std::string inUse = provider_iptv_guide_in_use();
+
+    PanelBuild pb;
+    int focus = 0;
+
+    PanelBuild::Row a;
+    a.id = "guide:auto"; a.title = "Automatic"; a.radio = 1; a.on = pin.empty();
+    a.detail = (pin.empty() && !inUse.empty()) ? "Picked " + guideLabel(inUse)
+                                               : std::string("EVO picks a guide that fits");
+    pb.rows.push_back(a);
+
+    /* Every guide EVO knows of for this playlist: files on the stick, the one in
+     * use, the one chosen, the one in iptv.conf. */
+    std::vector<std::string> urls;
+    char found[16][512];
+    int nf = provider_iptv_usb_guides(found, 16);
+    for (int i = 0; i < nf; ++i) urls.emplace_back(found[i]);
+    for (const std::string& u : { inUse, (pin == "none" ? std::string() : pin),
+                                  std::string(provider_iptv_xmltv_url()) })
+        if (!u.empty() && std::find(urls.begin(), urls.end(), u) == urls.end())
+            urls.push_back(u);
+
+    for (const std::string& u : urls) {
+        PanelBuild::Row r;
+        r.id = "guide:" + u;
+        r.title = guideLabel(u);
+        r.radio = 1;
+        r.on = (pin == u);
+        int cov = provider_iptv_guide_coverage(u.c_str());
+        std::string where = u[0] == '/' ? "USB" : "Web";
+        if (cov < 0)       r.detail = where + " · not tried yet";
+        else if (cov == 0) { r.detail = where + " · covers none of these channels"; r.warn = 1; }
+        else               r.detail = where + " · covers " + std::to_string(cov) + " of " +
+                                      std::to_string(n) + " channels";
+        if (u == inUse) { r.badge = "IN USE"; r.live = 1; }
+        if (r.on) focus = (int)pb.rows.size();
+        pb.rows.push_back(r);
+    }
+
+    PanelBuild::Row none;
+    none.id = "guide:none"; none.title = "None"; none.radio = 1; none.on = (pin == "none");
+    none.detail = "Show no guide for this playlist";
+    if (none.on) focus = (int)pb.rows.size();
+    pb.rows.push_back(none);
+
+    PanelBuild::Row url;
+    url.id = "guide:url"; url.title = "Enter guide address…";
+    url.detail = "Web address of an XMLTV guide";
+    url.icon = "/assets/icons/icon_keyboard.png"; url.chevron = 1;
+    pb.rows.push_back(url);
+
+    pb.show("OPTIONS  ›  ", "CHANNEL GUIDE", "Channel guide", "For " + pl,
+            "Guides are not part of a playlist.",
+            "Pick one once and EVO remembers it for this playlist. Put .xml guides on your "
+            "USB stick and they show up here.",
+            "USE THIS GUIDE", "BACK", focus);
+}
+
+void ProviderHostScreen::applyChoice(const std::string& id)
+{
+    if (id == "panel:back") {
+        if (m_panelPage == "guide") openProviderMenu(1);
+        else evo_rmlui_provider_hide_panel();
+    } else if (id == "menu:playlist") {
+        evo_rmlui_provider_hide_panel();
+        evo_rmlui_provider_show_setup();
+    } else if (id == "menu:guide") {
+        openGuidePicker();
+    } else if (id == "menu:refresh") {
+        provider_iptv_refresh_guide();
+        evo_rmlui_provider_hide_panel();
+        toast("LIVE TV", "Refreshing the guide...");
+    } else if (id == "guide:url") {
+        const std::string pin = provider_iptv_pinned_guide();
+        evo_keyboard_open("Guide address (XMLTV, http(s)://...)",
+                          (!pin.empty() && pin[0] != '/' && pin != "none") ? pin.c_str() : "https://",
+                          512, &ProviderHostScreen::OnGuideSubmitted, this);
+    } else if (id.rfind("guide:", 0) == 0) {
+        std::string choice = id.substr(6);
+        std::string pinv = choice == "auto" ? std::string() : choice;
+        if (provider_iptv_pin_guide(pinv.c_str()) != 0) {
+            toast("LIVE TV", "Open a playlist first");
+            return;
+        }
+        evo_rmlui_provider_hide_panel();
+        toast("LIVE TV", choice == "auto" ? "Guide: automatic"
+                       : choice == "none" ? "Guide turned off for this playlist"
+                       : ("Guide: " + guideLabel(choice)).c_str());
+        evo_rmlui_provider_reload();
+    }
 }
 
 void ProviderHostScreen::openSourceEditor()
@@ -1429,6 +1701,16 @@ void ProviderHostScreen::update(double deltaMs)
         openSourceEditor();
     } else if (action == EVO_PROVIDER_ACTION_SETUP_USB) {
         browseUsb();
+    } else if (action == EVO_PROVIDER_ACTION_CHOICE) {
+        char choice[1100];
+        if (evo_rmlui_provider_take_choice(choice, sizeof choice))
+            applyChoice(choice);
+    }
+
+    if (m_providerId == "iptv") {
+        char note[160];
+        if (provider_iptv_take_guide_notice(note, sizeof note))
+            toast("LIVE TV", (std::string(note) + " · change in Options").c_str());
     }
 
     if (g_start_running && g_start_done) {

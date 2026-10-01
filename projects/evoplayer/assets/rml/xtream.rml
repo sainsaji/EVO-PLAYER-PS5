@@ -52,6 +52,7 @@
                         </div>
                         <div id="tv-setup-title">SETUP XTREAM CODES ACCOUNT</div>
                         <div id="tv-setup-desc">Connect to your Xtream Codes subscription for Live TV, Movies &amp; Series</div>
+                        <div id="tv-setup-account" data-if="setup_account != ''">{{ setup_account }}</div>
                     </div>
                     <div id="tv-setup-cards">
                         <div id="tv-card-setup-url" class="tv-setup-card" data-event-click="setup_url()">
@@ -80,13 +81,32 @@
                             </div>
                             <div class="tv-setup-card-meta">
                                 <div class="tv-setup-card-title">LOAD FROM USB</div>
-                                <div class="tv-setup-card-desc">Read credentials from /mnt/usb0/.evo_xtream.conf</div>
+                                <div class="tv-setup-card-desc">Open an M3U exported from your Xtream account</div>
                             </div>
                             <div class="tv-setup-card-action">
                                 <div class="tv-setup-glyph-box">
                                     <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
                                 </div>
                                 <span class="tv-setup-action-text">READ USB</span>
+                            </div>
+                        </div>
+
+                        <div id="tv-card-setup-signout" class="tv-setup-card" data-if="setup_configured"
+                             data-event-click="setup_signout()">
+                            <div class="tv-setup-card-preview">
+                                <div class="tv-setup-icon-circle">
+                                    <img class="tv-setup-icon" src="/assets/icons/icon_power.png"/>
+                                </div>
+                            </div>
+                            <div class="tv-setup-card-meta">
+                                <div class="tv-setup-card-title">SIGN OUT</div>
+                                <div class="tv-setup-card-desc">Remove this account from EVO</div>
+                            </div>
+                            <div class="tv-setup-card-action">
+                                <div class="tv-setup-glyph-box">
+                                    <img class="tv-setup-glyph" src="/assets/icons/btn_cross.png"/>
+                                </div>
+                                <span class="tv-setup-action-text">SIGN OUT</span>
                             </div>
                         </div>
                     </div>
@@ -113,7 +133,7 @@
             </div>
 
             <!-- Main browser view: 2-column layout (Grid + Detail Preview Panel) -->
-            <div id="tv-browser-view" data-if="!empty">
+            <div id="tv-browser-view" data-if="!empty" data-class-tv-browser-notice="status != ''">
                 <!-- Item/Channel grid: 2 rows x 4 columns = 8 cards, fixed, overflow: hidden -->
                 <div id="tv-grid" data-class-tv-grid-notice="status != ''">
                     <div class="tv-card" data-for="row : rows"

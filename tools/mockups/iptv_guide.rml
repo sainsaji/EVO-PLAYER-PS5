@@ -1,0 +1,71 @@
+<rml>
+<head>
+    <title>mock_iptv_guide</title>
+    <link type="text/rcss" href="mock.rcss"/>
+</head>
+<body>
+    <div id="scrim"></div>
+    <div id="panel">
+        <div class="eyebrow"><span class="crumb-back">OPTIONS  ›  </span>CHANNEL GUIDE</div>
+        <div class="title">Channel guide</div>
+        <div class="sub">For iptv.m3u</div>
+
+        <div class="rows">
+            <div class="row focused">
+                <div class="left">
+                    <div class="radio on"><div class="dot"></div></div>
+                    <div>
+                        <div class="rt">india_epg.xml</div>
+                        <div class="rd">USB · covers 238 of 738 channels</div>
+                    </div>
+                </div>
+                <div class="right"><div class="badge live">IN USE</div></div>
+            </div>
+
+            <div class="row">
+                <div class="left">
+                    <div class="radio"></div>
+                    <div>
+                        <div class="rt">up.kiwi guide</div>
+                        <div class="rd">Web · <span class="warn">covers none of these channels</span></div>
+                    </div>
+                </div>
+                <div class="right"></div>
+            </div>
+
+            <div class="row">
+                <div class="left">
+                    <div class="radio"></div>
+                    <div>
+                        <div class="rt">None</div>
+                        <div class="rd">Show no guide for this playlist</div>
+                    </div>
+                </div>
+                <div class="right"></div>
+            </div>
+
+            <div class="row">
+                <div class="left">
+                    <div class="ibox"><img src="/assets/icons/icon_keyboard.png"/></div>
+                    <div>
+                        <div class="rt">Enter guide address…</div>
+                        <div class="rd">Web address of an XMLTV guide</div>
+                    </div>
+                </div>
+                <div class="right"><img class="chev" src="/assets/icons/icon_chevron.png"/></div>
+            </div>
+        </div>
+
+        <div class="note">
+            <b>Guides are not part of a playlist.</b> Pick one once and EVO
+            remembers it for this playlist. Put .xml guides on your USB stick
+            and they show up here.
+        </div>
+
+        <div class="foot">
+            <div class="hint"><img src="/assets/icons/btn_cross.png"/><span>USE THIS GUIDE</span></div>
+            <div class="hint"><img src="/assets/icons/btn_circle.png"/><span>BACK</span></div>
+        </div>
+    </div>
+</body>
+</rml>

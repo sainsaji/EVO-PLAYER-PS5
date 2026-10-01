@@ -44,6 +44,7 @@ void pp_stage_bc(const char *stage_id, const char *detail)
     char msg[512];
     snprintf(msg, sizeof msg, "bc %s%s%s", stage_id,
              (detail && detail[0]) ? " " : "", detail ? detail : "");
+    evo_log_redact(msg, sizeof msg);   /* klog gets the same masked line */
     evo_boot_log("%s", msg);
     pp_bc_notify(msg);
 }

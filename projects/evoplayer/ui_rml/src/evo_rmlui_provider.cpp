@@ -28,6 +28,10 @@ extern "C" {
  * /mnt/usb0/evo.log), plain stderr on the host. See evo_provider_log.h for why
  * this is not fprintf(stderr, ...). */
 #include "evo_provider_log.h"
+
+__attribute__((weak)) const char *provider_iptv_epg_status(void);
+__attribute__((weak)) int provider_iptv_epg_needs_setup(void);
+__attribute__((weak)) void toast(const char *title, const char *msg);   /* ui/evo_keyboard.c */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -168,6 +172,23 @@ bool EvoRmlProviderHost::RegisterDataModel()
     }
     c.RegisterArray<std::vector<EvoProviderRow>>();
 
+    if (auto pr = c.RegisterStruct<EvoPanelRow>()) {
+        pr.RegisterMember("id",         &EvoPanelRow::id);
+        pr.RegisterMember("title",      &EvoPanelRow::title);
+        pr.RegisterMember("detail",     &EvoPanelRow::detail);
+        pr.RegisterMember("badge",      &EvoPanelRow::badge);
+        pr.RegisterMember("icon",       &EvoPanelRow::icon);
+        pr.RegisterMember("radio",      &EvoPanelRow::radio);
+        pr.RegisterMember("on",         &EvoPanelRow::on);
+        pr.RegisterMember("warn",       &EvoPanelRow::warn);
+        pr.RegisterMember("chevron",    &EvoPanelRow::chevron);
+        pr.RegisterMember("badge_live", &EvoPanelRow::badge_live);
+        pr.RegisterMember("focused",    &EvoPanelRow::focused);
+    } else {
+        return false;
+    }
+    c.RegisterArray<std::vector<EvoPanelRow>>();
+
     c.Bind("provider_name", &m_model.provider_name);
     c.Bind("breadcrumb",    &m_model.breadcrumb);
     c.Bind("status",        &m_model.status);
@@ -193,6 +214,20 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.Bind("selected_initial",   &m_model.selected_initial);
     c.Bind("selected_now",       &m_model.selected_now);
     c.Bind("selected_next",      &m_model.selected_next);
+    c.Bind("epg_status",         &m_model.epg_status);
+    c.Bind("epg_setup",          &m_model.epg_setup);
+    c.Bind("setup_configured",   &m_model.setup_configured);
+    c.Bind("setup_account",      &m_model.setup_account);
+    c.Bind("panel_open",         &m_model.panel_open);
+    c.Bind("panel_crumb",        &m_model.panel_crumb);
+    c.Bind("panel_eyebrow",      &m_model.panel_eyebrow);
+    c.Bind("panel_title",        &m_model.panel_title);
+    c.Bind("panel_sub",          &m_model.panel_sub);
+    c.Bind("panel_note_b",       &m_model.panel_note_b);
+    c.Bind("panel_note",         &m_model.panel_note);
+    c.Bind("panel_accept",       &m_model.panel_accept);
+    c.Bind("panel_back",         &m_model.panel_back);
+    c.Bind("panel_rows",         &m_model.panel_rows);
     c.Bind("selected_num",       &m_model.selected_num);
     c.Bind("selected_tech",      &m_model.selected_tech);
     c.Bind("has_selected",       &m_model.has_selected);
@@ -283,6 +318,18 @@ bool EvoRmlProviderHost::RegisterDataModel()
     c.BindEventCallback("setup_usb",
         [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
             m_pending_action = EVO_PROVIDER_ACTION_SETUP_USB;
+        });
+
+    /* The one place a configured source is removed on purpose. */
+    c.BindEventCallback("setup_signout",
+        [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
+            if (!m_provider) return;
+            if (m_provider->sign_out) m_provider->sign_out();
+            else if (m_provider->set_source) m_provider->set_source("");
+            else return;
+            PROV_LOG("'%s' signed out by the user", m_provider_id.c_str());
+            if (toast) toast(m_provider->name, "Signed out");
+            ShowSetupScreen();
         });
 
     m_model_handle = c.GetModelHandle();
@@ -601,6 +648,7 @@ struct ItemsCtx {
 
 void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
 {
+    m_setup_shown = false;
     if (!m_provider || !(m_provider->caps & EVO_PROVIDER_CAP_CATALOG)) {
         SetStatus(std::string(m_provider ? m_provider->name : "Provider") +
                   " has no catalog", false);
@@ -695,6 +743,53 @@ void EvoRmlProviderHost::ItemsCallback(int ok, const evo_provider_item_t* items,
              self->m_model.count);
 }
 
+/*
+ * Provider text as the UI font can draw it.
+ *
+ * Catalogs decorate names with emoji ("⚽ BRASILEIRAO", "CANAL ✨ REALITY").
+ * LatoLatin has none of them, so each one rendered as a box or a stray mark in
+ * front of the real name. Dropped here: pictographs (U+1F000+), the symbol and
+ * dingbat blocks (U+2190-U+2BFF), variation selectors and the zero-width
+ * joiner that glue emoji together, and private-use glyphs. Letters in any
+ * script, digits and ordinary punctuation are kept. Runs of spaces left behind
+ * collapse to one and the ends are trimmed.
+ */
+static Rml::String display_text(const char* in)
+{
+    std::string out;
+    const unsigned char* p = (const unsigned char*)(in ? in : "");
+    while (*p) {
+        unsigned cp = *p;
+        int n = 1;
+        if (cp >= 0xF0 && p[1] && p[2] && p[3]) {
+            cp = ((cp & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+            n = 4;
+        } else if (cp >= 0xE0 && p[1] && p[2]) {
+            cp = ((cp & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+            n = 3;
+        } else if (cp >= 0xC0 && p[1]) {
+            n = 2;
+        }
+        bool drop = cp >= 0x1F000 ||
+                    (cp >= 0x2190 && cp <= 0x2BFF) ||
+                    (cp >= 0xFE00 && cp <= 0xFE0F) ||
+                    cp == 0x200D || cp == 0x20E3 ||
+                    (cp >= 0xE000 && cp <= 0xF8FF);
+        if (drop) {
+            if (!out.empty() && out.back() != ' ') out.push_back(' ');
+        } else if (*p == ' ') {
+            if (!out.empty() && out.back() != ' ') out.push_back(' ');
+        } else {
+            out.append((const char*)p, (size_t)n);
+        }
+        p += n;
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    /* A name that was nothing but symbols keeps them: boxes beat a blank card. */
+    if (out.empty()) return Rml::String(in ? in : "");
+    return Rml::String(out.c_str());
+}
+
 void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
                                     int has_more)
 {
@@ -704,17 +799,18 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
         const evo_provider_item_t& s = items[i];
         EvoProviderRow r;
         r.id        = Rml::String(s.id);
-        r.title     = Rml::String(s.title);
-        r.subtitle  = Rml::String(s.subtitle);
-        r.overview  = Rml::String(s.overview);
-        r.now       = Rml::String(s.now_title);
-        r.next      = Rml::String(s.next_title);
+        r.title     = display_text(s.title);
+        r.subtitle  = display_text(s.subtitle);
+        r.overview  = display_text(s.overview);
+        r.now       = display_text(s.now_title);
+        r.next      = display_text(s.next_title);
         r.duration  = s.is_live ? Rml::String() : format_duration(s.duration_sec);
         /* ASCII-only on purpose: taking the first BYTE of a UTF-8 title would
          * emit half a codepoint, so a non-ASCII title gets no initial rather
          * than a broken glyph. */
-        if (s.title[0] >= 0x20 && (unsigned char)s.title[0] < 0x80) {
-            char ini[2] = { s.title[0], 0 };
+        const char* t0 = r.title.c_str();
+        if (t0[0] >= 0x20 && (unsigned char)t0[0] < 0x80) {
+            char ini[2] = { t0[0], 0 };
             if (ini[0] >= 'a' && ini[0] <= 'z') ini[0] = (char)(ini[0] - 'a' + 'A');
             r.initial = Rml::String(ini);
         }
@@ -962,6 +1058,10 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
         m_model.selected_initial = row->initial;
         m_model.selected_now = row->now;
         m_model.selected_next = row->next;
+        m_model.epg_status = (m_provider && std::strcmp(m_provider->id, "iptv") == 0 && provider_iptv_epg_status)
+                           ? provider_iptv_epg_status() : "Live Broadcast";
+        m_model.epg_setup = m_provider && std::strcmp(m_provider->id, "iptv") == 0 &&
+                            provider_iptv_epg_needs_setup && provider_iptv_epg_needs_setup();
         m_model.selected_is_folder = row->is_folder;
         m_model.selected_overview = row->overview;
         m_model.selected_progress = row->progress;
@@ -1014,6 +1114,8 @@ void EvoRmlProviderHost::UpdateSelectedPreview()
         m_model_handle.DirtyVariable("selected_initial");
         m_model_handle.DirtyVariable("selected_now");
         m_model_handle.DirtyVariable("selected_next");
+        m_model_handle.DirtyVariable("epg_status");
+        m_model_handle.DirtyVariable("epg_setup");
         m_model_handle.DirtyVariable("selected_num");
         m_model_handle.DirtyVariable("selected_tech");
         m_model_handle.DirtyVariable("selected_is_folder");
@@ -1161,6 +1263,28 @@ bool EvoRmlProviderHost::HandleKey(Key k)
 {
     if (!IsOpen() || !m_context) return false;
 
+    /* The side panel owns every key while it is up: the grid behind it must not
+     * move, and Left must not wander off to the navigation rail. */
+    if (m_model.panel_open) {
+        switch (k) {
+        case KeyUp:   PanelMove(-1); break;
+        case KeyDown: PanelMove(+1); break;
+        case KeyAccept:
+            if (m_panel_focus >= 0 && m_panel_focus < (int)m_model.panel_rows.size()) {
+                m_choice = m_model.panel_rows[m_panel_focus].id.c_str();
+                m_pending_action = EVO_PROVIDER_ACTION_CHOICE;
+            }
+            break;
+        case KeyBack:
+            m_choice = "panel:back";
+            m_pending_action = EVO_PROVIDER_ACTION_CHOICE;
+            break;
+        default: break;
+        }
+        m_dirty = true;
+        return true;
+    }
+
     switch (k) {
     case KeyPageUp: {
         int idx = FocusedRowIndex();
@@ -1291,15 +1415,18 @@ bool EvoRmlProviderHost::HandleKey(Key k)
             return true;
         }
 
-        /* At root: if we arrived via USB playlist picker with multiple playlists, return to USB list */
-        if (!m_saved_usb_playlists.empty()) {
-            ShowUsbPlaylists(m_saved_usb_playlists);
-            return true;
-        }
+        /* At the root of a loaded source, Back leaves the provider. It used to
+         * open the setup screen (and the USB list before that), and setup no
+         * longer clears the source - so Back there returns here, and the two
+         * would trap the user. Setup is under Options. */
+        if (!m_model.empty && !m_setup_shown)
+            return false;
 
-        /* At root: if a playlist is loaded, Back returns to the Select Playlist Source screen */
-        if (!m_model.empty) {
-            ShowSetupScreen();
+        /* On the setup screen of a provider that still has its source (setup no
+         * longer clears it): Back returns to that source instead of leaving. */
+        if (m_setup_shown && m_provider->is_configured && m_provider->is_configured()) {
+            m_page = 0;
+            RequestPage("", 0);
             return true;
         }
 
@@ -1384,9 +1511,20 @@ void EvoRmlProviderHost::ApplyPendingActivation()
 
     /* If USB playlist picker is active, activating a row selects that playlist */
     if (m_is_usb_picker) {
+        if (m_provider && m_provider->set_source &&
+            m_provider->set_source(hit->id.c_str()) != 0) {
+            /* Refused (Xtream wants an account, and a plain M3U has none). Stay
+             * on the list and say why, rather than reloading a provider that is
+             * still unconfigured - that bounced the user back to setup. */
+            PROV_LOG("'%s' refused USB playlist '%s'", m_provider_id.c_str(), hit->id.c_str());
+            if (toast)
+                toast(m_provider->name, std::strcmp(m_provider->id, "xtream") == 0
+                      ? "Not an Xtream playlist - open it under IPTV"
+                      : "That playlist could not be opened");
+            return;
+        }
         m_is_usb_picker = false;
         if (m_provider && m_provider->set_source) {
-            m_provider->set_source(hit->id.c_str());
             evo_provider_set_enabled(m_provider_id.c_str(), 1);
             m_stack.clear();
             m_pos_stack.clear();
@@ -1553,6 +1691,67 @@ void EvoRmlProviderHost::ShowUsbPlaylists(const std::vector<std::string>& paths)
     m_dirty = true;
 }
 
+void EvoRmlProviderHost::ShowPanel(const EvoProviderModel& page, int focus)
+{
+    m_model.panel_crumb   = page.panel_crumb;
+    m_model.panel_eyebrow = page.panel_eyebrow;
+    m_model.panel_title   = page.panel_title;
+    m_model.panel_sub     = page.panel_sub;
+    m_model.panel_note_b  = page.panel_note_b;
+    m_model.panel_note    = page.panel_note;
+    m_model.panel_accept  = page.panel_accept;
+    m_model.panel_back    = page.panel_back;
+    m_model.panel_rows    = page.panel_rows;
+    m_model.panel_open    = true;
+    m_choice.clear();
+    m_panel_focus = (focus >= 0 && focus < (int)m_model.panel_rows.size()) ? focus : 0;
+    PublishPanel();
+}
+
+void EvoRmlProviderHost::HidePanel()
+{
+    if (!m_model.panel_open) return;
+    m_model.panel_open = false;
+    m_model.panel_rows.clear();
+    PublishPanel();
+}
+
+void EvoRmlProviderHost::PanelMove(int dir)
+{
+    int n = (int)m_model.panel_rows.size();
+    if (n == 0) return;
+    int f = m_panel_focus + dir;
+    if (f < 0 || f >= n) return;                  /* no wrap, like Settings */
+    m_panel_focus = f;
+    PublishPanel();
+}
+
+void EvoRmlProviderHost::PublishPanel()
+{
+    for (int i = 0; i < (int)m_model.panel_rows.size(); ++i)
+        m_model.panel_rows[i].focused = (i == m_panel_focus);
+    if (m_model_handle) {
+        m_model_handle.DirtyVariable("panel_open");
+        m_model_handle.DirtyVariable("panel_crumb");
+        m_model_handle.DirtyVariable("panel_eyebrow");
+        m_model_handle.DirtyVariable("panel_title");
+        m_model_handle.DirtyVariable("panel_sub");
+        m_model_handle.DirtyVariable("panel_note_b");
+        m_model_handle.DirtyVariable("panel_note");
+        m_model_handle.DirtyVariable("panel_accept");
+        m_model_handle.DirtyVariable("panel_back");
+        m_model_handle.DirtyVariable("panel_rows");
+    }
+    m_dirty = true;
+}
+
+std::string EvoRmlProviderHost::TakeChoice()
+{
+    std::string c = m_choice;
+    m_choice.clear();
+    return c;
+}
+
 void EvoRmlProviderHost::ShowSetupScreen()
 {
     m_saved_usb_playlists.clear();
@@ -1566,6 +1765,7 @@ void EvoRmlProviderHost::ShowSetupScreen()
     m_row_window = 0;
     m_row_offset = 0;
     m_is_usb_picker = false;
+    HidePanel();
     m_model.query = "";
     m_model.loading = false;
     m_model.tuning = false;
@@ -1578,11 +1778,38 @@ void EvoRmlProviderHost::ShowSetupScreen()
     m_model.breadcrumb = Rml::String(m_provider ? m_provider->name : "IPTV");
     SetStatus("", false);
 
-    if (m_provider && m_provider->set_source) {
-        m_provider->set_source("");
+    /*
+     * Showing the choices must not remove anything. This used to call
+     * set_source("") here, which for Xtream deletes the account: pressing Back at
+     * the top level, or Options, signed the user out before they had chosen
+     * anything. The source now changes only when a new one is entered or picked,
+     * or on an explicit Sign out.
+     */
+    m_setup_shown = true;
+    m_model.setup_configured = m_provider && m_provider->is_signed_in &&
+                               m_provider->is_signed_in();
+    m_model.setup_account = "";
+    if (m_provider && m_provider->is_configured && m_provider->is_configured() &&
+        m_provider->get_source) {
+        /* Host only: get_source() carries the username and password. */
+        std::string src = m_provider->get_source();
+        size_t b = src.find("://");
+        b = (b == std::string::npos) ? 0 : b + 3;
+        size_t at = src.find('@', b), sl = src.find('/', b);
+        if (at != std::string::npos && (sl == std::string::npos || at < sl)) b = at + 1;
+        size_t e = src.find_first_of("/?", b);
+        std::string host = src.substr(b, e == std::string::npos ? std::string::npos : e - b);
+        if (src[0] == '/') {
+            size_t s2 = src.find_last_of('/');
+            host = src.substr(s2 + 1);
+        }
+        if (!host.empty())
+            m_model.setup_account = Rml::String(("Using " + host + " - Circle to go back to it").c_str());
     }
 
     if (m_model_handle) {
+        m_model_handle.DirtyVariable("setup_configured");
+        m_model_handle.DirtyVariable("setup_account");
         m_model_handle.DirtyVariable("rows");
         m_model_handle.DirtyVariable("query");
         m_model_handle.DirtyVariable("loading");
@@ -1615,6 +1842,49 @@ extern "C" {
 void evo_rmlui_provider_show_setup(void)
 {
     EvoRmlProviderHost::Instance().ShowSetupScreen();
+}
+
+void evo_rmlui_provider_show_panel(const evo_panel_t *p)
+{
+    if (!p) return;
+    auto S = [](const char* s) { return Rml::String(s ? s : ""); };
+    EvoProviderModel page;
+    page.panel_crumb   = S(p->crumb);
+    page.panel_eyebrow = S(p->eyebrow);
+    page.panel_title   = S(p->title);
+    page.panel_sub     = S(p->sub);
+    page.panel_note_b  = S(p->note_b);
+    page.panel_note    = S(p->note);
+    page.panel_accept  = S(p->accept);
+    page.panel_back    = S(p->back);
+    for (int i = 0; i < p->n; ++i) {
+        const evo_panel_row_t& r = p->rows[i];
+        EvoPanelRow row;
+        row.id = S(r.id); row.title = S(r.title); row.detail = S(r.detail);
+        row.badge = S(r.badge); row.icon = S(r.icon);
+        row.radio = r.radio != 0; row.on = r.on != 0; row.warn = r.warn != 0;
+        row.chevron = r.chevron != 0; row.badge_live = r.badge_live != 0;
+        page.panel_rows.push_back(row);
+    }
+    EvoRmlProviderHost::Instance().ShowPanel(page, p->focus);
+}
+
+void evo_rmlui_provider_hide_panel(void)
+{
+    EvoRmlProviderHost::Instance().HidePanel();
+}
+
+int evo_rmlui_provider_panel_open(void)
+{
+    return EvoRmlProviderHost::Instance().PanelOpen() ? 1 : 0;
+}
+
+int evo_rmlui_provider_take_choice(char *out, size_t out_sz)
+{
+    std::string c = EvoRmlProviderHost::Instance().TakeChoice();
+    if (c.empty() || !out || !out_sz) return 0;
+    snprintf(out, out_sz, "%s", c.c_str());
+    return 1;
 }
 
 int evo_rmlui_provider_take_action(void)

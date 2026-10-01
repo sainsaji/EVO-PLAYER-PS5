@@ -1,0 +1,54 @@
+<rml>
+<head>
+    <title>mock_iptv_options</title>
+    <link type="text/rcss" href="mock.rcss"/>
+</head>
+<body>
+    <div id="scrim"></div>
+    <div id="panel">
+        <div class="eyebrow">LIVE TV</div>
+        <div class="title">Options</div>
+        <div class="sub">iptv.m3u</div>
+
+        <div class="rows">
+            <div class="row">
+                <div class="left">
+                    <div class="ibox"><img src="/assets/icons/icon_tv.png"/></div>
+                    <div>
+                        <div class="rt">Playlist</div>
+                        <div class="rd">iptv.m3u · 738 channels · USB</div>
+                    </div>
+                </div>
+                <div class="right"><img class="chev" src="/assets/icons/icon_chevron.png"/></div>
+            </div>
+
+            <div class="row focused">
+                <div class="left">
+                    <div class="ibox"><img src="/assets/icons/icon_recent_files.png"/></div>
+                    <div>
+                        <div class="rt">Channel guide</div>
+                        <div class="rd">india_epg.xml · covers 238 of 738 channels</div>
+                    </div>
+                </div>
+                <div class="right"><img class="chev" src="/assets/icons/icon_chevron.png"/></div>
+            </div>
+
+            <div class="row">
+                <div class="left">
+                    <div class="ibox"><img src="/assets/icons/icon_activity.png"/></div>
+                    <div>
+                        <div class="rt">Refresh guide</div>
+                        <div class="rd">Updated 2 h ago</div>
+                    </div>
+                </div>
+                <div class="right"></div>
+            </div>
+        </div>
+
+        <div class="foot">
+            <div class="hint"><img src="/assets/icons/btn_cross.png"/><span>SELECT</span></div>
+            <div class="hint"><img src="/assets/icons/btn_circle.png"/><span>CLOSE</span></div>
+        </div>
+    </div>
+</body>
+</rml>

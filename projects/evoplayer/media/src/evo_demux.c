@@ -100,10 +100,17 @@ int prospero_request_inplace_seek(
     double target_seconds,
     int restore_paused
 ) {
+    /*
+     * An open stream is all a seek needs. This also required current_media_path,
+     * which PlaybackController deliberately leaves EMPTY for a provider source
+     * (a URL with a session token must not reach the sidecar scan or the
+     * favourites store) - so every seek in an Emby, Jellyfin, Xtream or IPTV
+     * VOD stream was dropped here without a word, after the scrub had already
+     * paused the clock: the picture froze. Hardware, 2026-10-01.
+     */
     if (
         !play_fmt ||
-        (video_stream_index < 0 && audio_stream_index < 0) ||
-        !current_media_path[0]
+        (video_stream_index < 0 && audio_stream_index < 0)
     ) {
         return 0;
     }
@@ -543,8 +550,19 @@ static void demux_wait_for_room(PacketQueue *q, int cap,
     if (other_cap > 0 && starve_low > other_cap / 2)
         starve_low = other_cap / 2;
 
+    /*
+     * ...and never past a seek. A scrub stops the video consuming packets
+     * without setting player_paused, so with both queues at their caps this
+     * loop waited forever - and the seek request, which is only picked up at
+     * the top of the demux loop, was never reached. Hardware, 2026-10-01: a
+     * D-pad seek in a Jellyfin stream froze the picture for good, evo.log
+     * showing DEMUX_OVERSHOOT and then no SEEK_BEGIN at all ("seek_req=3 ok=0
+     * fail=0"). Network streams hit it far more readily than local files: they
+     * read ahead in bursts and fill the queues to the cap.
+     */
     while (demux_thread_running &&
            !player_paused &&
+           !prospero_seek_pending &&
            packet_queue_count(q) >= cap) {
         /* Still re-check the pre-buffer here: this loop does not return to the
          * top of the demux loop, so it is the only place the deadline can fire
@@ -641,9 +659,12 @@ void *demux_thread_func(void *arg) {
                                 prebuffer_deadline_ms,
                                 playback_profile >= 3 ? 300 : 500);
 
+            /* A seek arrived while waiting: this packet is from before it, and
+             * the seek clears the queues anyway. Drop it; the loop top seeks. */
             if (
                 demux_thread_running &&
-                !player_paused
+                !player_paused &&
+                !prospero_seek_pending
             ) {
                 packet_queue_push(
                     &video_packet_queue,
@@ -662,7 +683,8 @@ void *demux_thread_func(void *arg) {
 
             if (
                 demux_thread_running &&
-                !player_paused
+                !player_paused &&
+                !prospero_seek_pending
             ) {
                 packet_queue_push(
                     &audio_packet_queue,

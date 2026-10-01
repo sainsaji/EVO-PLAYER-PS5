@@ -311,6 +311,7 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     state.percentage = p->percentage;
     state.paused = (p->paused != 0);
     state.scrub_active = (p->scrub_active != 0);
+    state.loading = (p->loading != 0);
     state.scrub_target = p->scrub_target;
     state.audio_track = p->audio_track ? p->audio_track : "";
     state.sub_track = p->sub_track ? p->sub_track : "";

@@ -659,3 +659,44 @@ div, span, p {
     font-weight: bold;
     letter-spacing: 0.5dp;
 }
+
+/* LOADING: a seek, or the first frames, on the way (network streams can take
+ * seconds). Same place and shape as the PAUSED badge, with a spinner. */
+#loading-badge {
+    display: none;
+    background-color: #0b1220e6;
+    border-width: 1dp;
+    border-color: #38bdf8;
+    border-radius: 12dp;
+    padding: 12dp 26dp;
+    flex-direction: row;
+    align-items: center;
+    gap: 14dp;
+}
+
+#loading-spinner {
+    display: inline-block;
+    width: 26dp;
+    height: 26dp;
+    border-radius: 13dp;
+    border-width: 3dp;
+    border-color: #00cdff33;
+    border-top-color: #00cdff;
+    animation: 0.8s linear infinite pb-spin;
+}
+
+#loading-label {
+    font-size: 20dp;
+    font-weight: bold;
+    color: #ffffff;
+    letter-spacing: 2dp;
+}
+
+@keyframes pb-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}

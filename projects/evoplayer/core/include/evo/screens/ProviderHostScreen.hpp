@@ -110,6 +110,7 @@ private:
      */
     void openSourceEditor();
     static void OnSourceSubmitted(const char* text, void* userdata);
+    static void OnGuideSubmitted(const char* text, void* userdata);
 
     void browseUsb();
     static std::vector<std::string> scanUsbPlaylists();
@@ -150,6 +151,12 @@ private:
      * keyboard opens, so the field can be pre-filled (evo_net_discover_*). */
     bool m_discovering = false;
     void openSourceKeyboard(const std::string& initial);
+    void openProviderMenu(int focus = 0); /* IPTV: Options -> side panel        */
+    void openGuidePicker();
+    void applyChoice(const std::string& id);
+    std::string m_panelPage;              /* "menu" / "guide" while the panel is up */
+    std::string m_signOutArmed;           /* provider whose sign-out awaits a 2nd press */
+    uint64_t    m_signOutAt = 0;
 
     /* Signing in to a media server (Emby, Jellyfin) on EVO's keyboard: user
      * name, then password, then the provider's sign_in. Keyboards are opened

@@ -12,6 +12,7 @@
 #include "evo_boot_log.h"
 #include "evo_agc_runtime.h"
 #include "evo_hw.h"
+#include "pp_playback.h"   /* g_pp_pb.seek_discarding - the LOADING badge */
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -30,6 +31,7 @@ extern int evo_audio_channels;
 extern char current_media_path[768];
 extern double resume_base_offset_seconds;
 void draw_video_frame_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
+extern pp_playback g_pp_pb;
 }
 
 #include <cstdio>
@@ -279,8 +281,11 @@ void PlayerScreen::update(double deltaMs) {
      */
     const bool reallyPaused = (evo_pb_is_paused() != 0) || playback->isPaused();
 
-    /* Hold the OSD active while video frames are still buffering into the decoder. */
-    const bool isBuffering = !playback->isMusicMode() && !video_frame_loaded;
+    /* Hold the OSD active while video frames are still buffering into the
+     * decoder - and while a seek is: on a network stream that is seconds of a
+     * still picture that would otherwise read as frozen. */
+    const bool isBuffering = !playback->isMusicMode() &&
+                             (!video_frame_loaded || g_pp_pb.seek_discarding);
     if (isBuffering) {
         m_controlsLastUsedMs = now;
     }
@@ -613,6 +618,8 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.percentage = playback->getPercentage();
         p.paused = playback->isPaused() ? 1 : 0;
         p.scrub_active = playback->isScrubbing() ? 1 : 0;
+        p.loading = (!playback->isMusicMode() &&
+                     (!video_frame_loaded || g_pp_pb.seek_discarding)) ? 1 : 0;
         p.scrub_target = playback->getScrubTargetSeconds();
         p.view_mode = static_cast<int>(playback->getViewMode());
         p.show_stats = m_showStatsForNerds ? 1 : 0;
