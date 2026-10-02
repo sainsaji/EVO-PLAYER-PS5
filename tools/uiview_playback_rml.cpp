@@ -2583,6 +2583,34 @@ int main(int argc, char** argv) {
         save_bmp_24("output/uiview/rml_settings_system.bmp", fb.data(), width, height);
     }
 
+    // 5b. Experimental (#105) - MOTION SMOOTHING expanded, which is the whole
+    // point of the section: three choices visible with the warning above them.
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF06090E);
+        evo_rmlui_settings_params_t set;
+        memset(&set, 0, sizeof(set));
+        set.title = "EXPERIMENTAL";
+        set.subtitle = "UNFINISHED WORK - EXPECT ARTEFACTS";
+        set.counter = "1 SETTING";
+        set.rail_active_idx = 5;
+        set.section_active = 5;
+        set.sidebar_focused = 0;
+        set.rail_focused = 0;
+        set.row_count = 4;
+        settings_row(set.rows[0], "MOTION SMOOTHING",
+                     "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION",
+                     "projects/evoplayer/assets/icons/icon_activity.png",
+                     EVO_RMLUI_ROW_VALUE, "OFF", 0);
+        settings_row(set.rows[1], "OFF", "", "", EVO_RMLUI_ROW_OPTION, "", 1);
+        settings_row(set.rows[2], "LOW", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        settings_row(set.rows[3], "HIGH", "", "", EVO_RMLUI_ROW_OPTION, "", 0);
+        set.rows[0].is_focused = 1;
+
+        evo_rmlui_update_settings(&set);
+        evo_rmlui_render_settings(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_settings_experimental.bmp", fb.data(), width, height);
+    }
+
     // 6. Playback Profile Picker
     {
         std::fill(fb.begin(), fb.end(), 0xFF06090E);

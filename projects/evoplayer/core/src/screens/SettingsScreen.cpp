@@ -36,7 +36,6 @@ enum class SettingKey : int {
     VideoDecoder,
     Upscaling,
     AiNetwork,
-    MotionSmoothing,
     RefreshRate,
     HdrOutput,
     /* AUDIO */
@@ -60,6 +59,8 @@ enum class SettingKey : int {
     DeveloperTools,
     ConsoleModel,
     QuitEvo,
+    /* EXPERIMENTAL */
+    MotionSmoothing,
 };
 
 /*
@@ -85,7 +86,7 @@ struct SettingDef {
 
 const SettingKey kVideoKeys[] = {
     SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
-    SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::MotionSmoothing, SettingKey::RefreshRate,
+    SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
     SettingKey::HdrOutput,
 };
 const SettingKey kAudioKeys[] = {
@@ -102,6 +103,13 @@ const SettingKey kInterfaceKeys[] = {
 const SettingKey kSystemKeys[] = {
     SettingKey::CompatReport, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
     SettingKey::ConsoleModel, SettingKey::QuitEvo,
+};
+/*
+ * Things that work but are not finished. They stay out of the other sections so
+ * nobody turns one on expecting a shipped feature, and they default to off.
+ */
+const SettingKey kExperimentalKeys[] = {
+    SettingKey::MotionSmoothing,
 };
 
 struct SectionSpec {
@@ -132,6 +140,9 @@ const SectionSpec kSections[] = {
                 "SettingsInterfaceScreen", ScreenId::SettingsInterface, kInterfaceKeys),
     makeSection("SYSTEM & DIAGNOSTICS", "DIAGNOSTICS & SYSTEM MANAGEMENT",
                 "SettingsSystemScreen", ScreenId::SettingsSystem, kSystemKeys),
+    makeSection("EXPERIMENTAL", "UNFINISHED WORK - EXPECT ARTEFACTS",
+                "SettingsExperimentalScreen", ScreenId::SettingsExperimental,
+                kExperimentalKeys),
 };
 constexpr int kSectionCount = static_cast<int>(sizeof kSections / sizeof kSections[0]);
 
@@ -211,7 +222,8 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
 
     case SettingKey::MotionSmoothing:
-        d = valueDef(key, "MOTION SMOOTHING", "24 -> 60 FPS MOTION INTERPOLATION ON THE GPU",
+        d = valueDef(key, "MOTION SMOOTHING",
+                     "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION",
                      "../icons/icon_activity.png", 3, static_cast<int>(settings->getMotionSmoothing()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getMotionSmoothingName(static_cast<MotionSmoothing>(i));

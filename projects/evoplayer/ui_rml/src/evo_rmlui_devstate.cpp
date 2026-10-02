@@ -53,6 +53,7 @@ const char* screen_name(int id)
     case 25: return "SettingsSubtitles";
     case 26: return "SettingsInterface";
     case 27: return "SettingsSystem";
+    case 34: return "SettingsExperimental";
     case 28: return "SurroundTest";
     case 29: return "ThemeSelect";
     case 30: return "ImageViewer";

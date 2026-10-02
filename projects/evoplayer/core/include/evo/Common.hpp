@@ -56,7 +56,8 @@ enum class ScreenId : int {
     ImageViewer = 30,
     AudioTrackPicker = 31,
     SafeToClose = 32,    /* the frame EVO parks on after QUIT (SafeToCloseScreen) */
-    SettingsAudio = 33   /* #118 */
+    SettingsAudio = 33,  /* #118 */
+    SettingsExperimental = 34  /* #105 */
 };
 
 // Playback Quality Profile
@@ -103,8 +104,8 @@ enum class AiNetwork : int {
 // EVO_AGC_MOTION_SMOOTH_* in evo_agc_runtime.h.
 enum class MotionSmoothing : int {
     Off = 0,
-    Low = 1,    // blend-weighted version with fewer artifacts
-    High = 2    // full motion-vector warp
+    Low = 1,    // whole-pixel search, short half-strength warp
+    High = 2    // quarter-pel search, full-strength warp
 };
 
 // Refresh rate output mode (60 Hz vs 120 Hz)

@@ -96,6 +96,20 @@ def decode_pal_metadata(notes: str) -> dict:
 
     def stage(key: str) -> dict:
         value = stages[key]
+        # EVO's AGC runtime never programs a scratch (temp) ring, so a shader
+        # that spills to private memory writes to an unmapped address. The
+        # console kills the process with GPU_FAULT_PAGE_FAULT_ASYNC, EVO gets
+        # no log line of its own, and the only clue is ShadowMount's debug.log.
+        # Refuse the shader here instead - see #105's interp_median, where a
+        # `vec4 v[9]` indexed by a loop counter cost a console session.
+        if value.get(".scratch_en") or value.get(".scratch_memory_size"):
+            raise SystemExit(
+                "%s stage %s needs %s bytes of SCRATCH. The AGC runtime has no "
+                "scratch ring, so this would GPU page-fault on hardware. "
+                "Remove the dynamically indexed local array (name the elements, "
+                "or keep every index a compile-time constant)."
+                % (pipeline.get(".api_shader_hash", "pipeline"), key,
+                   value.get(".scratch_memory_size", "?")))
         return {
             "sgpr_count": value[".sgpr_count"],
             "user_sgprs": value[".user_sgprs"],

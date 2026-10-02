@@ -362,7 +362,7 @@ typedef struct evo_agc_device {
         int          me_done;          /* ME + median run for current pair */
         uint32_t     mv_w;             /* width of motion vector grid */
         uint32_t     mv_h;             /* height of motion vector grid */
-        int          last_key[6];
+        int          last_key[5];
         int          this_frame;       /* Frame carried interp passes */
         uint32_t     window_frames;
         uint64_t     window_us;
@@ -1329,6 +1329,7 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         {EVO_AGC_PIPE_UP_RGB_FINAL, &upscale_a4k_rgb_final_metadata, "upscale_a4k_rgb_final"},
 #include "upscale_wide_pipes.inc"
         /* #105 frame interpolation (motion smoothing) */
+        {EVO_AGC_PIPE_INTERP_PYR,    &interp_pyr_metadata,    "interp_pyr"},
         {EVO_AGC_PIPE_INTERP_ME,     &interp_me_metadata,     "interp_me"},
         {EVO_AGC_PIPE_INTERP_MEDIAN, &interp_median_metadata, "interp_median"},
         {EVO_AGC_PIPE_INTERP_WARP,   &interp_warp_metadata,   "interp_warp"},
@@ -1547,6 +1548,12 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     g_agc_dev.frame_counter = 0;
     g_agc_dev.flip_arg = 1;
     g_agc_dev.bound_pipeline = -1;
+    /* #105: the resident Frame A/B slot numbers only ever came from
+     * evo_agc_motion_smoothing_reset(), which nothing called - so they stayed
+     * at the zeroed struct's 0, i.e. both frames aliased scratch slot 0, which
+     * is also the upscaler's input. Set them here, where every other default
+     * is set. */
+    evo_agc_motion_smoothing_reset();
     g_agc_dev.initialized = 1;
 
     printf(EVO_AGC_LOG_PREFIX "AGC runtime successfully initialized! 100%% GPU ready.\n");
@@ -3177,13 +3184,24 @@ void evo_agc_composite_bgra(const uint32_t *fb, int w, int h, int upload)
 #define EVO_AGC_UP_SLOT_BYTES UINT64_C(0x02400000)
 enum {
     UP_SLOT_L0 = 0, UP_SLOT_E = 1, UP_SLOT_F0 = 1, UP_SLOT_A0 = 3,
-    /* #105 frame interpolation: motion vector textures and resident Frame A/B */
-    UP_SLOT_INTERP_MV0 = 1, UP_SLOT_INTERP_MV1 = 2,
-    UP_SLOT_INTERP_A = 5,   UP_SLOT_INTERP_B = 6,
     /* UL: two sets of 3 feature maps, two sets of 3 accumulators. Slots 7+
      * live in the second block. */
     UP_SLOT_UL_F = 1, UP_SLOT_UL_A = 7,
+    /* #105 frame interpolation. All of it lives in the EXTENDED block: the
+     * motion vectors have to survive from the frame that computes them until
+     * the last vsync that presents the pair, and Anime4K Standard/Large use
+     * block 0 slots 1..4 as feature maps - which is where the vectors used to
+     * sit, so with an AI upscaler on the field was overwritten between
+     * presents. Anime4K UL is the one mode that reaches into block 1, and it
+     * steps down to Large while smoothing is on (see agc_upscale_plan). */
+    UP_SLOT_INTERP_A = 7,   UP_SLOT_INTERP_B = 8,
+    UP_SLOT_INTERP_MV0 = 9, UP_SLOT_INTERP_MV1 = 10,
+    UP_SLOT_INTERP_PYR = 11,
 };
+_Static_assert(UP_SLOT_INTERP_A >= EVO_AGC_UP_SURFACES,
+               "#105 interpolation surfaces must sit past block 0, which the upscalers use");
+_Static_assert(UP_SLOT_INTERP_PYR < EVO_AGC_UP_SURFACES + EVO_AGC_UP_EXT_SURFACES,
+               "#105 interpolation surfaces run off the end of the extended block");
 
 /* Whole-frame GPU time (submit -> retire) of an upscaled frame. A 60 fps
  * frame has 16.7 ms; leave room for the UI, the flip and poll granularity. */
@@ -3493,8 +3511,9 @@ static int agc_upscale_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
             : evo_hw_is_ps5_pro();
         if (net > g_agc_dev.up.net_cap)
             net = g_agc_dev.up.net_cap;
-        /* #105: Anime4K UL uses slots 1..6 for feature maps, colliding with Frame A/B
-         * in slots 5/6. Step down to Large (net 1, slots 0..4) when smoothing is on. */
+        /* #105: Anime4K UL's accumulators are slots 7..12, i.e. the extended
+         * block, which is where interpolation keeps Frame A/B, the vectors and
+         * the pyramid. Step down to Large (block 0 only) while smoothing is on. */
         if (g_agc_dev.interp.requested != EVO_AGC_MOTION_SMOOTH_OFF && net > 1)
             net = 1;
         if (net == 2 && !(up_pipes_valid(EVO_AGC_PIPE_UP_UL_CONV0, EVO_AGC_UP_UL_CONVS) &&
@@ -3815,6 +3834,10 @@ void evo_agc_motion_smoothing_set_mode(int mode)
         mode = EVO_AGC_MOTION_SMOOTH_OFF;
     if (mode == g_agc_dev.interp.requested)
         return;
+    /* The resident pair and its vector field belong to the old mode (Low and
+     * High search to different precision), so drop them rather than warp one
+     * more frame with vectors nobody asked for. */
+    evo_agc_motion_smoothing_reset();
     g_agc_dev.interp.requested = mode;
     g_agc_dev.interp.cap = EVO_AGC_MOTION_SMOOTH_HIGH;
     g_agc_dev.interp.over_budget_windows = 0;
@@ -3861,6 +3884,11 @@ void evo_agc_motion_smoothing_reset(void)
     g_agc_dev.interp.resident_slot_a = UP_SLOT_INTERP_A;
     g_agc_dev.interp.resident_slot_b = UP_SLOT_INTERP_B;
     g_agc_dev.interp.active_plan = 0;
+    /* -1 is "nothing to report". The zeroed struct left it at 0, which is
+     * EVO_AGC_MOTION_SMOOTH_OFF, so the first take_downgrade() of a session
+     * toasted "GPU over budget - turned off" before a single frame had been
+     * measured. */
+    g_agc_dev.interp.downgrade_notice = -1;
 }
 
 static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit,
@@ -3892,11 +3920,12 @@ static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit
             reason = "source > 1080p";
         else if (x1 <= x0 || y1 <= y0 || !up_fits(src_w, src_h, 4u))
             reason = "size";
-        else if (!(g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_ME].valid &&
+        else if (!(g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_PYR].valid &&
+                   g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_ME].valid &&
                    g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_MEDIAN].valid &&
                    g_agc_dev.pipelines[EVO_AGC_PIPE_INTERP_WARP].valid))
             reason = "unavailable";
-        else if (agc_upscale_alloc(0) != 0)
+        else if (agc_upscale_alloc(1) != 0)
             reason = "scratch alloc failed";
     }
 
@@ -3915,8 +3944,10 @@ static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit
         g_agc_dev.interp.label = (mode == EVO_AGC_MOTION_SMOOTH_HIGH) ? "High" : "Low";
     }
 
-    const int key[6] = { g_agc_dev.interp.requested, mode, (int)src_w, (int)src_h,
-                         (int)(g_agc_dev.interp.source_fps * 100), (int)(g_agc_dev.interp.phase * 1000) };
+    /* The phase is deliberately NOT in the key: it changes every vsync, so
+     * keying on it logged a line per presented frame. */
+    const int key[5] = { g_agc_dev.interp.requested, mode, (int)src_w, (int)src_h,
+                         (int)(g_agc_dev.interp.source_fps * 100) };
     if (memcmp(key, g_agc_dev.interp.last_key, sizeof(key)) != 0) {
         memcpy(g_agc_dev.interp.last_key, key, sizeof(key));
         if (g_agc_dev.interp.requested != EVO_AGC_MOTION_SMOOTH_OFF) {
@@ -3931,9 +3962,35 @@ static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit
         }
     }
 
-    g_agc_dev.interp.active_plan = (mode != EVO_AGC_MOTION_SMOOTH_OFF);
+    /* Every time it turns itself on or off, with everything that decides it.
+     * The keyed log above cannot report a bypass while `requested` is Off, and
+     * says nothing at all when the plan simply stops being reached - which is
+     * exactly the state worth knowing about. */
+    const int now_active = (mode != EVO_AGC_MOTION_SMOOTH_OFF);
+    if (now_active != g_agc_dev.interp.active_plan)
+        evo_boot_log("agc interp: %s requested=%d cap=%d mode=%d reason=%s "
+                     "src=%ux%u ten=%d fps=%.2f rect=%d,%d %dx%d",
+                     now_active ? "ON" : "OFF", g_agc_dev.interp.requested,
+                     g_agc_dev.interp.cap, mode, reason ? reason : "-",
+                     src_w, src_h, ten_bit, g_agc_dev.interp.source_fps,
+                     x0, y0, x1 - x0, y1 - y0);
+    g_agc_dev.interp.active_plan = now_active;
     if (mode == EVO_AGC_MOTION_SMOOTH_OFF)
         return 0;
+
+    /* Self-heal rather than hand the GPU an address built from a slot number
+     * nobody set: every one of these surfaces is a render target, so a wrong
+     * base is a GPU page fault, not a wrong picture. */
+    if ((g_agc_dev.interp.resident_slot_a != UP_SLOT_INTERP_A &&
+         g_agc_dev.interp.resident_slot_a != UP_SLOT_INTERP_B) ||
+        (g_agc_dev.interp.resident_slot_b != UP_SLOT_INTERP_A &&
+         g_agc_dev.interp.resident_slot_b != UP_SLOT_INTERP_B) ||
+        g_agc_dev.interp.resident_slot_a == g_agc_dev.interp.resident_slot_b) {
+        evo_boot_log("agc interp: resident slots were %d/%d - resetting",
+                     g_agc_dev.interp.resident_slot_a, g_agc_dev.interp.resident_slot_b);
+        evo_agc_motion_smoothing_reset();
+        g_agc_dev.interp.active_plan = 1;
+    }
 
     pl->mode = mode;
     pl->phase = g_agc_dev.interp.phase;
@@ -3947,55 +4004,144 @@ static int agc_motion_smoothing_plan(uint32_t src_w, uint32_t src_h, int ten_bit
     return 1;
 }
 
-static int agc_interp_run_me(uint32_t src_w, uint32_t src_h)
+/* Write a digit to /mnt/usb0/evo_interp_stage to stop the chain early:
+ *   1 = pyramid only   2 = + motion estimation   3 = + median
+ * Anything below 4 also forces the warp to pass frame A straight through, so
+ * the stage under test is the last thing the GPU is asked to do. A GPU page
+ * fault kills the process with no log of its own, so bisecting it needs to be
+ * possible without a rebuild. 0 or absent = the whole chain. */
+static int agc_interp_stage(void)
 {
+    static int s_stage = -1;
+    if (s_stage < 0) {
+        s_stage = 4;
+        FILE *f = fopen("/mnt/usb0/evo_interp_stage", "r");
+        if (f) {
+            int v = 0;
+            if (fscanf(f, "%d", &v) == 1 && v > 0 && v < 4)
+                s_stage = v;
+            fclose(f);
+        }
+        if (s_stage != 4)
+            evo_boot_log("agc interp: stage limit %d", s_stage);
+    }
+    return s_stage;
+}
+
+/* Motion estimation for the pair now resident, once per source frame: the
+ * 24 presented vsyncs a second each re-run only the warp. That is why this
+ * can afford a real search. */
+static int agc_interp_run_me(uint32_t src_w, uint32_t src_h, int mode)
+{
+    const int stage = agc_interp_stage();
     static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
-    const uint32_t mv_w = (src_w + 31u) / 32u;
-    const uint32_t mv_h = (src_h + 31u) / 32u;
+    const uint32_t mv_w = (src_w + 15u) / 16u;
+    const uint32_t mv_h = (src_h + 15u) / 16u;
+    const uint32_t pyr_w = (src_w + 3u) / 4u;
+    const uint32_t pyr_h = (src_h + 3u) / 4u;
     g_agc_dev.interp.mv_w = mv_w;
     g_agc_dev.interp.mv_h = mv_h;
 
     agc_up_surface_t surf_a = up_surface(g_agc_dev.interp.resident_slot_a, src_w, src_h, 0);
     agc_up_surface_t surf_b = up_surface(g_agc_dev.interp.resident_slot_b, src_w, src_h, 0);
+    agc_up_surface_t surf_pyr = up_surface(UP_SLOT_INTERP_PYR, pyr_w, pyr_h, 1);
     agc_up_surface_t surf_mv0 = up_surface(UP_SLOT_INTERP_MV0, mv_w, mv_h, 1);
     agc_up_surface_t surf_mv1 = up_surface(UP_SLOT_INTERP_MV1, mv_w, mv_h, 1);
 
-    const agc_up_tex_t tex_me[2] = {
-        up_tex(&surf_a, 0),
-        up_tex(&surf_b, 0)
-    };
+    /* Bilinear, not point: the search samples between pixels, and every tap is
+     * a 2x2 box average only because the sampler filters it. */
+    const agc_up_tex_t tex_frames[2] = { up_tex(&surf_a, 1), up_tex(&surf_b, 1) };
 
-    /* Pass 1: Block matching ME (outputs raw MV + SAD in RGBA16F) */
-    int rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_ME, &surf_mv0, 0, 0,
-                                (int)mv_w, (int)mv_h, full, NULL, tex_me, 2);
-    if (rc != 0)
+    /* Every address the GPU is about to touch, once per session. A wrong one
+     * here is a page fault, which the console reports as a crash with no EVO
+     * log line at all - so print them before the first submit, not after. */
+    static int s_logged_surfaces;
+    if (!s_logged_surfaces) {
+        s_logged_surfaces = 1;
+        evo_boot_log("agc interp surfaces: blk1=%p A=s%d@%llx B=s%d@%llx "
+                     "pyr=%ux%u@%llx mv=%ux%u @%llx/%llx fits(pyr=%d mv=%d frame=%d)",
+                     (void *)g_agc_dev.up.mem_base[1],
+                     g_agc_dev.interp.resident_slot_a, (unsigned long long)surf_a.addr,
+                     g_agc_dev.interp.resident_slot_b, (unsigned long long)surf_b.addr,
+                     pyr_w, pyr_h, (unsigned long long)surf_pyr.addr,
+                     mv_w, mv_h, (unsigned long long)surf_mv0.addr,
+                     (unsigned long long)surf_mv1.addr,
+                     up_fits(pyr_w, pyr_h, 8u), up_fits(mv_w, mv_h, 8u),
+                     up_fits(src_w, src_h, 4u));
+        /* On the stick before the submit: a GPU page fault kills the process
+         * outright and the queued tail never reaches the file. */
+        evo_boot_log_flush();
+    }
+
+    /* Pass 1: quarter-res prefiltered luma for both frames in one target. */
+    int rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_PYR, &surf_pyr, 0, 0,
+                                (int)pyr_w, (int)pyr_h, full, NULL, tex_frames, 2);
+    if (rc != 0 || stage < 2)
         return rc;
 
-    /* Pass 2: 3x3 Median filter on motion vectors */
+    /* Pass 2: coarse-to-fine block matching -> (mv.xy, residual, confidence). */
+    const float params[4] = { 0.0f, (float)mode, 0.0f, 0.0f };
+    const agc_up_tex_t tex_me[3] = {
+        up_tex(&surf_a, 1), up_tex(&surf_b, 1), up_tex(&surf_pyr, 1)
+    };
+    rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_ME, &surf_mv0, 0, 0,
+                            (int)mv_w, (int)mv_h, full, params, tex_me, 3);
+    if (rc != 0 || stage < 3)
+        return rc;
+
+    /* Pass 3: vector median + 5x5 mean residual. */
     const agc_up_tex_t tex_mv0 = up_tex(&surf_mv0, 0);
     rc = agc_up_pass_params(EVO_AGC_PIPE_INTERP_MEDIAN, &surf_mv1, 0, 0,
                             (int)mv_w, (int)mv_h, full, NULL, &tex_mv0, 1);
     return rc;
 }
 
+/* Write a digit to /mnt/usb0/evo_interp_debug to replace the interpolated
+ * picture with what the vector field holds: 1 = vectors (R/G) and area
+ * residual (B), 2 = confidence, 3 = the final warp weight. Read once. */
+static float agc_interp_debug_mode(void)
+{
+    static int s_mode = -1;
+    if (s_mode < 0) {
+        s_mode = 0;
+        FILE *f = fopen("/mnt/usb0/evo_interp_debug", "r");
+        if (f) {
+            int v = 0;
+            if (fscanf(f, "%d", &v) == 1 && v > 0 && v <= 3)
+                s_mode = v;
+            fclose(f);
+        }
+        if (s_mode)
+            evo_boot_log("agc interp: debug view %d", s_mode);
+    }
+    return (float)s_mode;
+}
+
 static int agc_interp_run_warp(const agc_interp_plan_t *ipl, const agc_up_plan_t *upl)
 {
     static const float full[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
     const uint32_t sw = ipl->src_w, sh = ipl->src_h;
-    const uint32_t mv_w = g_agc_dev.interp.mv_w ? g_agc_dev.interp.mv_w : (sw + 31u) / 32u;
-    const uint32_t mv_h = g_agc_dev.interp.mv_h ? g_agc_dev.interp.mv_h : (sh + 31u) / 32u;
+    const uint32_t mv_w = g_agc_dev.interp.mv_w ? g_agc_dev.interp.mv_w : (sw + 15u) / 16u;
+    const uint32_t mv_h = g_agc_dev.interp.mv_h ? g_agc_dev.interp.mv_h : (sh + 15u) / 16u;
 
     agc_up_surface_t surf_a = up_surface(g_agc_dev.interp.resident_slot_a, sw, sh, 0);
     agc_up_surface_t surf_b = up_surface(g_agc_dev.interp.resident_slot_b, sw, sh, 0);
     agc_up_surface_t surf_mv = up_surface(UP_SLOT_INTERP_MV1, mv_w, mv_h, 1);
 
+    /* The vector field is read with texelFetch and upsampled in the shader, so
+     * it is bound unfiltered - bilinear across a motion boundary is a halo. */
     const agc_up_tex_t tex_warp[3] = {
         up_tex(&surf_a, 1),
         up_tex(&surf_b, 1),
-        up_tex(&surf_mv, 1)
+        up_tex(&surf_mv, 0)
     };
 
-    float params[4] = { ipl->phase, (float)ipl->mode, 0.0f, 0.0f };
+    const int stage = agc_interp_stage();
+    /* mode + 10 * debug view, in one channel - see the warp shader. */
+    float params[4] = { ipl->phase,
+                        (stage >= 4 ? (float)ipl->mode : 0.0f)
+                            + 10.0f * agc_interp_debug_mode(),
+                        0.0f, 0.0f };
     int rc = 0;
 
     if (upl) {
@@ -4148,6 +4294,13 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
             g_agc_dev.interp.have_a = 1;
             g_agc_dev.interp.have_b = 0;
             g_agc_dev.interp.me_done = 0;
+            /* And forget the old B timestamp. Leaving it behind deadlocks the
+             * pair: this branch is the one that fires on a discontinuity, its
+             * own test is `pts - pts_b > 200 ms`, and pts_b is only ever
+             * written in the other branch - so after one seek every later
+             * frame took this branch again, B was never refilled, and
+             * smoothing quietly stopped for the rest of the session. */
+            g_agc_dev.interp.pts_b = -1;
         } else {
             if (g_agc_dev.interp.have_b) {
                 int tmp = g_agc_dev.interp.resident_slot_a;
@@ -4366,7 +4519,7 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     if (interp_active) {
         if (g_agc_dev.interp.have_a && g_agc_dev.interp.have_b) {
             if (!g_agc_dev.interp.me_done) {
-                agc_interp_run_me(src_w, src_h);
+                agc_interp_run_me(src_w, src_h, interp_plan.mode);
                 g_agc_dev.interp.me_done = 1;
             }
             if (agc_interp_run_warp(&interp_plan, upscale ? &up_plan : NULL) != 0)

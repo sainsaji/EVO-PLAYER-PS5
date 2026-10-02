@@ -72,6 +72,15 @@
                     <div id="sb-sub-4" class="sb-sub">Reports, debug &amp; quit</div>
                 </div>
             </div>
+            <div id="sb-5" class="sb-section">
+                <div class="sb-icon-box">
+                    <img id="sb-icon-5" src="../icons/icon_sparkles.png" class="sb-icon"/>
+                </div>
+                <div class="sb-text">
+                    <div id="sb-label-5" class="sb-label">EXPERIMENTAL</div>
+                    <div id="sb-sub-5" class="sb-sub">Unfinished work</div>
+                </div>
+            </div>
         </div>
 
         <!-- ================= Detail pane ================= -->

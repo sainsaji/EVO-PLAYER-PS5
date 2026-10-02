@@ -53,7 +53,8 @@ enum {
     EVO_AGC_PIPE_INTERP_ME = 74,
     EVO_AGC_PIPE_INTERP_MEDIAN = 75,
     EVO_AGC_PIPE_INTERP_WARP = 76,
-    EVO_AGC_PIPE_COUNT = 77,
+    EVO_AGC_PIPE_INTERP_PYR = 77,     /* quarter-res prefiltered luma, both frames */
+    EVO_AGC_PIPE_COUNT = 78,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,
@@ -321,9 +322,10 @@ int         evo_agc_upscale_take_downgrade(void);
 
 /* #105 frame interpolation (motion smoothing 24 -> 60 fps).
  *
- * Settings -> Playback & Video -> MOTION SMOOTHING (Off / Low / High).
- * High is full motion-vector warp; Low is blend-weighted version with
- * fewer artifacts. Automatically off for sources >= 50 fps, 10-bit/HDR, or 4K. */
+ * Settings -> Experimental -> MOTION SMOOTHING (Off / Low / High).
+ * High searches to quarter-pel and warps at full strength; Low stops the
+ * search at whole pixels and keeps the warp short and half-strength.
+ * Automatically off for sources >= 50 fps, 10-bit/HDR, or 4K. */
 enum {
     EVO_AGC_MOTION_SMOOTH_OFF = 0,
     EVO_AGC_MOTION_SMOOTH_LOW = 1,

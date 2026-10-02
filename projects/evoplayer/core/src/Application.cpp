@@ -462,6 +462,7 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsSubtitles));
     m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsInterface));
     m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsSystem));
+    m_screenManager->registerScreen(std::make_unique<SettingsSectionScreen>(ScreenId::SettingsExperimental));
     m_screenManager->registerScreen(std::make_unique<SubtitlePickerScreen>());
     m_screenManager->registerScreen(std::make_unique<AudioTrackPickerScreen>());
     m_screenManager->registerScreen(std::make_unique<TextReaderScreen>());
@@ -1590,9 +1591,14 @@ int Application::run() {
             double video_fps = evo_pb_video_fps();
             evo_agc_motion_smoothing_set_source_fps(video_fps);
 
-            float interp_phase = 0.0f;
+            /* Phase 1.0 is "show frame B exactly" - B is the newest decoded
+             * frame, so that is the right answer whenever there is no phase to
+             * interpolate at: paused, scrubbing, between files. Phase 0.0 would
+             * hand back frame A and the picture would jump back one frame on
+             * every pause. */
+            float interp_phase = 1.0f;
             int valid_phase = pp_playback_get_interp_phase(&g_pp_pb, &interp_phase);
-            evo_agc_motion_smoothing_set_phase(valid_phase ? interp_phase : 0.0f);
+            evo_agc_motion_smoothing_set_phase(valid_phase ? interp_phase : 1.0f);
 
             bool smoothing_active = evo_agc_motion_smoothing_is_active() && !is_paused && !is_scrubbing && !g_pp_pb.seek_discarding;
 

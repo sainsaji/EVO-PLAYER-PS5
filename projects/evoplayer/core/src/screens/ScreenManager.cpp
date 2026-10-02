@@ -80,7 +80,8 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
         case ScreenId::SettingsAudio:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
-        case ScreenId::SettingsSystem:  return EVO_ENABLE_EMBY ? 3 : 2; // Settings
+        case ScreenId::SettingsSystem:
+        case ScreenId::SettingsExperimental: return EVO_ENABLE_EMBY ? 3 : 2; // Settings
         case ScreenId::AboutSupport:
         case ScreenId::Changelog:       return EVO_ENABLE_EMBY ? 4 : 3; // About & Support
         default:                        return -1; // Non-rail screens

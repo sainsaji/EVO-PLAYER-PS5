@@ -3086,11 +3086,11 @@ void EvoRmlApp::UpdateSettingsState(const EvoSettingsState& state) {
         SetImageColor(el_sicon, to_hex_rgb(m_theme.accent_alt));
     }
 
-    /* Two-pane sidebar. The section labels are static markup (sb-0 .. sb-4,
+    /* Two-pane sidebar. The section labels are static markup (sb-0 .. sb-5,
      * same order as kSections in SettingsScreen.cpp); only the highlight
      * moves. `sidebar_focused` is set by the index page, where the sidebar IS
      * the page; the section pages light the current row instead. */
-    for (int sct = 0; sct < 5; sct++) {
+    for (int sct = 0; sct < 6; sct++) {
         Rml::Element* el_s = m_settings_doc->GetElementById("sb-" + std::to_string(sct));
         if (!el_s) continue;
         const bool s_active = (sct == state.section_active);

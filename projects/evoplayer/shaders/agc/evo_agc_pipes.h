@@ -4,6 +4,7 @@
 
 #include "interp_me_pipe.h"
 #include "interp_median_pipe.h"
+#include "interp_pyr_pipe.h"
 #include "interp_warp_pipe.h"
 #include "ui_backdrop_blur_pipe.h"
 #include "ui_screen_2d_pipe.h"
