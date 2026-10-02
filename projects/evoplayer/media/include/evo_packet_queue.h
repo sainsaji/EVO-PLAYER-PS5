@@ -17,13 +17,27 @@ extern "C" {
 
 #include <libavcodec/packet.h>
 
-#define PACKET_QUEUE_SIZE 512
+/*
+ * Ring slots. A hard ceiling on the read-ahead, not a budget: a push into a
+ * full ring is dropped, so the caps in Bridge.cpp must always bind first. 512
+ * slots was 4 s of 24 fps video and under a second of TrueHD, too tight once
+ * the read-ahead is sized in seconds. The array is pointers, so 2048 slots
+ * cost 16 KB per queue.
+ */
+#define PACKET_QUEUE_SIZE 2048
 
 typedef struct {
     AVPacket *packets[PACKET_QUEUE_SIZE];
     int read;
     int write;
     int count;
+    /*
+     * Queued payload. A packet count says nothing about memory when one source
+     * is a 2 Mbit/s IPTV channel and the next a 54 Mbit/s UHD remux, and the
+     * flexible pool is the scarce one on this platform - so the demux caps
+     * bound bytes as well as packets, and this is what they read.
+     */
+    long long bytes;
     pthread_mutex_t mutex;
 } PacketQueue;
 
@@ -38,6 +52,9 @@ AVPacket *packet_queue_pop(PacketQueue *q);
 
 /* Current number of queued packets. */
 int packet_queue_count(PacketQueue *q);
+
+/* Total payload bytes currently queued. */
+long long packet_queue_bytes(PacketQueue *q);
 
 #ifdef __cplusplus
 }

@@ -111,6 +111,11 @@ extern int evo_audio_channels;
 /* Start-of-stream pre-buffer hold - see the note in Bridge.cpp. */
 extern volatile int pb_prebuffer_hold;
 extern volatile int pb_scrub_hold;
+extern int pb_rebuffer_enabled;
+extern int video_packet_cap;
+extern int audio_packet_cap;
+extern long long video_queue_byte_cap;
+extern long long audio_queue_byte_cap;
 
 namespace evo {
 
@@ -122,6 +127,100 @@ namespace evo {
  * Cluster it will not find gives up before the user does.
  */
 static constexpr double kProbeDeadlineSeconds = 12.0;
+
+/*
+ * How far ahead of the decoder the demuxer reads on a network source.
+ *
+ * In seconds, because that is the only unit in which "enough cushion" means
+ * the same thing for a 2 Mbit/s IPTV channel and a 54 Mbit/s UHD remux. The
+ * byte ceilings are the memory guard: the flexible pool is the scarce one here
+ * (~144 MB free during 4K playback, with map_fail already nonzero), so a
+ * high-bitrate source gets fewer seconds rather than more megabytes.
+ *
+ * 10 s against the 4 s a flat 96-packet cap gave. This does not make a link
+ * that cannot sustain the bitrate work - nothing can - but it rides out the
+ * dips, and what it cannot ride out now ends in a clean rebuffer instead of
+ * indefinite slow motion.
+ */
+static constexpr double    kReadAheadSeconds        = 10.0;
+static constexpr long long kVideoReadAheadMaxBytes  = 48ll * 1024 * 1024;
+static constexpr long long kVideoReadAheadMinBytes  =  8ll * 1024 * 1024;
+static constexpr long long kAudioReadAheadMaxBytes  = 12ll * 1024 * 1024;
+
+/* Leave headroom under PACKET_QUEUE_SIZE (2048) for demux_wait_for_room()'s
+ * bounded overshoot, which doubles the cap when the other stream is starving. */
+static constexpr int kVideoPacketCapMax = 384;
+static constexpr int kAudioPacketCapMax = 512;
+
+/*
+ * Bits per second carried by the video stream, best effort.
+ *
+ * Matroska routinely reports neither a stream nor a container bitrate, and this
+ * only sizes a buffer, so an unknown value falls back to the ceiling rather
+ * than to a guess that could be an order of magnitude low.
+ */
+static long long videoBitsPerSecond(const AVFormatContext* fmt, int streamIndex)
+{
+    if (!fmt || streamIndex < 0 || streamIndex >= static_cast<int>(fmt->nb_streams))
+        return 0;
+    const AVStream* st = fmt->streams[streamIndex];
+    if (st && st->codecpar && st->codecpar->bit_rate > 0)
+        return static_cast<long long>(st->codecpar->bit_rate);
+    /* Container total. It includes audio and subtitles, so it over-states the
+     * video stream - which is the safe direction for a ceiling. */
+    if (fmt->bit_rate > 0)
+        return static_cast<long long>(fmt->bit_rate);
+    return 0;
+}
+
+/*
+ * Size the four demux ceilings for this source, and say so in evo.log: when a
+ * stream stutters, the first question is whether the cushion was ever there.
+ */
+static void sizeReadAhead(bool networkSource, const AVFormatContext* fmt,
+                          int videoIndex, double fps)
+{
+    if (!networkSource) {
+        video_packet_cap      = 96;
+        audio_packet_cap      = 96;
+        video_queue_byte_cap  = 0;
+        audio_queue_byte_cap  = 0;
+        return;
+    }
+
+    const double safeFps = (fps > 1.0 && fps < 1000.0) ? fps : 30.0;
+
+    int vcap = static_cast<int>(kReadAheadSeconds * safeFps);
+    if (vcap < 96)                  vcap = 96;
+    if (vcap > kVideoPacketCapMax)  vcap = kVideoPacketCapMax;
+    video_packet_cap = vcap;
+
+    const long long vbps = videoBitsPerSecond(fmt, videoIndex);
+    long long vbytes = vbps > 0
+        ? static_cast<long long>(kReadAheadSeconds * static_cast<double>(vbps) / 8.0)
+        : kVideoReadAheadMaxBytes;
+    if (vbytes > kVideoReadAheadMaxBytes) vbytes = kVideoReadAheadMaxBytes;
+    if (vbytes < kVideoReadAheadMinBytes) vbytes = kVideoReadAheadMinBytes;
+    video_queue_byte_cap = vbytes;
+
+    /*
+     * Audio has to read ahead as far as video does. av_read_frame() hands both
+     * streams back in interleave order, so parking on a full audio queue stops
+     * video filling too - a 96-packet audio cap put a hard 3 s ceiling on the
+     * video read-ahead however deep video's own cap was. Packets per second
+     * vary enormously by codec (31/s for 32 ms E-AC-3 frames against TrueHD's
+     * far shorter ones), so give audio generous slots and let bytes bind.
+     */
+    audio_packet_cap     = kAudioPacketCapMax;
+    audio_queue_byte_cap = kAudioReadAheadMaxBytes;
+
+    evo_boot_log("  pb: read-ahead %.0fs -> video %d pkt / %lld MB, "
+                 "audio %d pkt / %lld MB (video %lld kbit/s @ %.2f fps)",
+                 kReadAheadSeconds, video_packet_cap,
+                 video_queue_byte_cap / (1024 * 1024),
+                 audio_packet_cap, audio_queue_byte_cap / (1024 * 1024),
+                 vbps / 1000, safeFps);
+}
 
 #ifdef EVO_APP_MODULE
 #  define SIO_STAGE(id, d) pp_stage_bc((id), (d))
@@ -1274,7 +1373,9 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     {
         const bool network_source =
             filePath.rfind("http://", 0) == 0 || filePath.rfind("https://", 0) == 0;
-        pb_prebuffer_hold = network_source ? 1 : 0;
+        sizeReadAhead(network_source, play_fmt, video_stream_index, video_fps);
+        pb_prebuffer_hold   = network_source ? 1 : 0;
+        pb_rebuffer_enabled = network_source ? 1 : 0;
         if (network_source)
             SIO_STAGE("P8_03_PREBUFFER_ARM", filePath.c_str());
     }

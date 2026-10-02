@@ -61,12 +61,22 @@ extern volatile int video_decode_hold;
 extern int      playback_profile;
 extern int      video_packet_cap;
 extern int      audio_packet_cap;
+extern long long video_queue_byte_cap;
+extern long long audio_queue_byte_cap;
 
 /* Start-of-stream pre-buffer. Armed by PlaybackController for a network
  * source, cleared here - see the note in Bridge.cpp. */
 extern volatile int pb_prebuffer_hold;
 extern int          pb_prebuffer_packets;
 extern int          pb_prebuffer_max_ms;
+extern int          pb_rebuffer_enabled;
+extern int          pb_rebuffer_low_packets;
+extern int          pb_rebuffer_packets;
+extern int          pb_rebuffer_max_ms;
+
+/* Scrub hold (Bridge.cpp). Read here so a rebuffer cannot arm while the seek
+ * bar is being dragged - the picture is already parked. */
+extern volatile int pb_scrub_hold;
 
 extern pp_playback g_pp_pb;
 
@@ -443,6 +453,36 @@ packet_queue_clear(
 
 
 /*
+ * The one queue the pre-buffer hold waits on. An audio-only stream never fills
+ * the video queue, so it gates on whichever queue this source actually feeds.
+ */
+static PacketQueue *prebuffer_gated_queue(void)
+{
+    return (video_stream_index >= 0) ? &video_packet_queue : &audio_packet_queue;
+}
+
+/*
+ * Which kind of hold is up. Set by rebuffer_check(), cleared by
+ * prebuffer_check() when it releases, and read only to pick the fill target -
+ * a rebuffer wants a deeper one than an open. See the note in Bridge.cpp.
+ */
+static int pb_hold_is_rebuffer = 0;
+
+/*
+ * Has `q` reached its read-ahead ceiling? Packets or bytes, whichever binds
+ * first - see the note on the caps in Bridge.cpp. A byte cap of 0 means the
+ * packet count is the only limit, which is how local files still behave.
+ */
+static int queue_at_cap(PacketQueue *q, int cap, long long byte_cap)
+{
+    if (packet_queue_count(q) >= cap)
+        return 1;
+    if (byte_cap > 0 && packet_queue_bytes(q) >= byte_cap)
+        return 1;
+    return 0;
+}
+
+/*
  * Release the pre-buffer hold once the queue has a cushion, the deadline has
  * passed, or the stream ended. Called from the demux loop after each packet.
  * `ended` is set on a read failure, where waiting for depth that will never
@@ -465,35 +505,48 @@ static void prebuffer_check(long long deadline_ms, int ended)
      * here to clear the hold - the decode threads would stay parked forever.
      */
     const int cap    = have_video ? video_packet_cap : audio_packet_cap;
-    int       target = pb_prebuffer_packets;
+    int       target = pb_hold_is_rebuffer ? pb_rebuffer_packets
+                                           : pb_prebuffer_packets;
     if (target > cap - 1) target = cap - 1;
     if (target < 1)       target = 1;
 
     /*
      * A queue at its cap is as much cushion as this stream will ever get, so
-     * release on that too rather than sitting out the deadline. Without it, a
-     * stream whose audio caps out before video reaches its target would buffer
-     * for the full deadline every time it is opened.
+     * release on that too rather than sitting out the deadline.
+     *
+     * Only the gated queue counts. This used to test BOTH, to stop a stream
+     * whose audio capped out before video reached its target from buffering
+     * for the full deadline - but it meant any source with a fat audio track
+     * started with no video cushion at all. Hardware, 2026-10-02 (Avatar UHD
+     * remux, TrueHD 8ch): "PREBUFFER_DONE queue-full packets=1 target=48" -
+     * audio filled its 96-packet queue in 0.13 s and released the hold with a
+     * single video packet queued, so playback began 4 s of cushion short.
+     * demux_wait_for_room() now keeps reading past a full ungated queue while
+     * the hold is up, which is what that escape was really guarding against.
      */
-    const int any_full =
-        packet_queue_count(&video_packet_queue) >= video_packet_cap ||
-        packet_queue_count(&audio_packet_queue) >= audio_packet_cap;
+    const int gated_full = queue_at_cap(prebuffer_gated_queue(),
+                                        have_video ? video_packet_cap
+                                                   : audio_packet_cap,
+                                        have_video ? video_queue_byte_cap
+                                                   : audio_queue_byte_cap);
 
     const int timed_out = (now_ms() >= deadline_ms);
-    if (!ended && !timed_out && !any_full && depth < target)
+    if (!ended && !timed_out && !gated_full && depth < target)
         return;
 
     pb_prebuffer_hold = 0;
     {
         char d[64];
         snprintf(d, sizeof d, "%s packets=%d target=%d",
-                 ended     ? "ended"
-                 : timed_out ? "deadline"
-                 : any_full  ? "queue-full"
-                             : "filled",
+                 ended      ? "ended"
+                 : timed_out  ? "deadline"
+                 : gated_full ? "queue-full"
+                              : "filled",
                  depth, target);
-        pp_stage_bc("P8_03_PREBUFFER_DONE", d);
+        pp_stage_bc(pb_hold_is_rebuffer ? "P8_04_REBUFFER_DONE"
+                                        : "P8_03_PREBUFFER_DONE", d);
     }
+    pb_hold_is_rebuffer = 0;
 }
 
 /*
@@ -536,13 +589,18 @@ static void prebuffer_check(long long deadline_ms, int ended)
  * hand overshoots its cap by a bounded amount instead, which costs a few MB
  * and keeps both decoders fed.
  */
-static void demux_wait_for_room(PacketQueue *q, int cap,
+static void demux_wait_for_room(PacketQueue *q, int cap, long long byte_cap,
                                 PacketQueue *other, int other_cap,
                                 long long prebuffer_deadline_ms, int sleep_us)
 {
     int limit = cap * DEMUX_OVERSHOOT_FACTOR;
     if (limit > PACKET_QUEUE_SIZE - 1)
         limit = PACKET_QUEUE_SIZE - 1;
+
+    /* The overshoot is a few MB of slack, not a second budget: bound it in
+     * bytes too, or a high-bitrate source doubles its queue in megabytes as
+     * well as packets just because the other stream went quiet. */
+    long long byte_limit = byte_cap > 0 ? byte_cap + byte_cap / 4 : 0;
 
     /* An other-stream low-water above its own cap would release immediately
      * and turn the cap off altogether; keep it strictly below. */
@@ -563,7 +621,7 @@ static void demux_wait_for_room(PacketQueue *q, int cap,
     while (demux_thread_running &&
            !player_paused &&
            !prospero_seek_pending &&
-           packet_queue_count(q) >= cap) {
+           queue_at_cap(q, cap, byte_cap)) {
         /* Still re-check the pre-buffer here: this loop does not return to the
          * top of the demux loop, so it is the only place the deadline can fire
          * once a queue is full. It is also what keeps the pre-buffer itself
@@ -571,10 +629,24 @@ static void demux_wait_for_room(PacketQueue *q, int cap,
          * target (audio is ~43 pkt/s against 30 fps). */
         prebuffer_check(prebuffer_deadline_ms, 0);
 
+        /*
+         * Still pre-buffering, and this is not the queue being waited on.
+         *
+         * The hold parks this stream's consumer, so its queue cannot drain
+         * until the hold clears - and the hold only clears once the OTHER
+         * queue reaches its target, which only this thread can fill. Parking
+         * here would deadlock both until the deadline fired. Overshoot
+         * instead; it is bounded, and it ends the moment the hold releases.
+         */
+        if (pb_prebuffer_hold && q != prebuffer_gated_queue() &&
+            !queue_at_cap(q, limit, byte_limit)) {
+            return;
+        }
+
         /* The other decoder is about to run dry and only this thread can feed
          * it. Overshoot rather than deadlock. */
         if (other && packet_queue_count(other) < starve_low &&
-            packet_queue_count(q) < limit) {
+            !queue_at_cap(q, limit, byte_limit)) {
             /* Rate-limited: this fires per packet once it starts, and one
              * line per 2 s is enough to tell a starved interleave apart from
              * a healthy one in evo.log without flooding it. */
@@ -595,8 +667,61 @@ static void demux_wait_for_room(PacketQueue *q, int cap,
     }
 }
 
+/*
+ * Re-arm the pre-buffer hold when the queue runs dry mid-playback.
+ *
+ * See the note on pb_rebuffer_enabled in Bridge.cpp for why: without this a
+ * link that cannot sustain the bitrate produced indefinite slow motion rather
+ * than a buffering pause. prebuffer_check() releases the hold again on the
+ * normal target, so the deadline has to be refreshed here - it is measured
+ * from when the hold was armed, and the one taken at thread start is long
+ * past by now.
+ *
+ * Deliberately NOT armed across a seek. The seek-discard window needs the
+ * video decode thread running to reach the target, and parking it here would
+ * stall the discard until the deadline fired - a 4 s freeze on every seek.
+ */
+static void rebuffer_check(long long *deadline_ms)
+{
+    if (!pb_rebuffer_enabled || pb_prebuffer_hold)
+        return;
+    if (player_paused || prospero_seek_pending || pb_scrub_hold)
+        return;
+    if (g_pp_pb.active && g_pp_pb.seek_discarding)
+        return;
+    /* At EOF the queue is empty because there is nothing left to read, not
+     * because the link is short; holding would never release. */
+    if (video_decode_done)
+        return;
+
+    PacketQueue *q = prebuffer_gated_queue();
+    if (packet_queue_count(q) > pb_rebuffer_low_packets)
+        return;
+
+    pb_hold_is_rebuffer = 1;
+    pb_prebuffer_hold   = 1;
+    *deadline_ms = now_ms() + (long long)pb_rebuffer_max_ms;
+
+    {
+        char d[64];
+        snprintf(d, sizeof d, "q=%d low=%d target=%d",
+                 packet_queue_count(q), pb_rebuffer_low_packets,
+                 pb_rebuffer_packets);
+        pp_stage_bc("P8_04_REBUFFER_ARM", d);
+    }
+}
+
 void *demux_thread_func(void *arg) {
     (void)arg;
+
+    /*
+     * This thread is created fresh per file, and the hold PlaybackController
+     * just armed is an open pre-buffer. Backing out of playback while a
+     * rebuffer was up leaves the flag set - prebuffer_check() only clears it
+     * on release - and the next file would then open against the rebuffer's
+     * deeper target and longer deadline, i.e. a slower start for no reason.
+     */
+    pb_hold_is_rebuffer = 0;
 
     AVPacket *pkt =
         av_packet_alloc();
@@ -609,8 +734,9 @@ void *demux_thread_func(void *arg) {
     }
 
     /* Deadline for the pre-buffer, measured from when this thread actually
-     * starts reading rather than from when it was created. */
-    const long long prebuffer_deadline_ms = now_ms() + (long long)pb_prebuffer_max_ms;
+     * starts reading rather than from when it was created. Not const: a
+     * mid-playback rebuffer re-arms the hold and needs a fresh one. */
+    long long prebuffer_deadline_ms = now_ms() + (long long)pb_prebuffer_max_ms;
 
     while (demux_thread_running) {
         /*
@@ -645,6 +771,7 @@ void *demux_thread_func(void *arg) {
 
         video_decode_done = 0;
         prebuffer_check(prebuffer_deadline_ms, 0);
+        rebuffer_check(&prebuffer_deadline_ms);
 
         if (
             pkt->stream_index ==
@@ -655,6 +782,7 @@ void *demux_thread_func(void *arg) {
              * (often every 1–2s). Cap queue by waiting only.
              */
             demux_wait_for_room(&video_packet_queue, video_packet_cap,
+                                video_queue_byte_cap,
                                 &audio_packet_queue, audio_packet_cap,
                                 prebuffer_deadline_ms,
                                 playback_profile >= 3 ? 300 : 500);
@@ -678,6 +806,7 @@ void *demux_thread_func(void *arg) {
             audio_stream_index
         ) {
             demux_wait_for_room(&audio_packet_queue, audio_packet_cap,
+                                audio_queue_byte_cap,
                                 &video_packet_queue, video_packet_cap,
                                 prebuffer_deadline_ms, 1000);
 

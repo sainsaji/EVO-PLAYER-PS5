@@ -21,6 +21,7 @@ void packet_queue_clear(PacketQueue *q) {
     q->read = 0;
     q->write = 0;
     q->count = 0;
+    q->bytes = 0;
 
     pthread_mutex_unlock(&q->mutex);
 }
@@ -33,9 +34,22 @@ int packet_queue_push(PacketQueue *q, AVPacket *pkt) {
         return 0;
     }
 
-    q->packets[q->write] = av_packet_clone(pkt);
+    /*
+     * A failed clone used to be stored anyway, so count claimed a packet that
+     * pop handed back as NULL - indistinguishable from empty to every caller.
+     * Report it as full instead: the demux thread then waits and retries
+     * rather than punching a hole in the stream.
+     */
+    AVPacket *clone = av_packet_clone(pkt);
+    if (!clone) {
+        pthread_mutex_unlock(&q->mutex);
+        return 0;
+    }
+
+    q->packets[q->write] = clone;
     q->write = (q->write + 1) % PACKET_QUEUE_SIZE;
     q->count++;
+    q->bytes += (long long)clone->size;
 
     pthread_mutex_unlock(&q->mutex);
     return 1;
@@ -53,6 +67,10 @@ AVPacket *packet_queue_pop(PacketQueue *q) {
     q->packets[q->read] = NULL;
     q->read = (q->read + 1) % PACKET_QUEUE_SIZE;
     q->count--;
+    if (pkt) {
+        q->bytes -= (long long)pkt->size;
+        if (q->bytes < 0) q->bytes = 0;
+    }
 
     pthread_mutex_unlock(&q->mutex);
     return pkt;
@@ -63,4 +81,11 @@ int packet_queue_count(PacketQueue *q) {
     int c = q->count;
     pthread_mutex_unlock(&q->mutex);
     return c;
+}
+
+long long packet_queue_bytes(PacketQueue *q) {
+    pthread_mutex_lock(&q->mutex);
+    long long b = q->bytes;
+    pthread_mutex_unlock(&q->mutex);
+    return b;
 }

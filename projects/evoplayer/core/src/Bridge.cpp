@@ -59,8 +59,32 @@ int show_debug_overlay = 0;
 
 int current_profile = 0;
 int playback_profile = 1;
+/*
+ * Demux read-ahead ceilings.
+ *
+ * These are the defaults for a local file, where the disk reads far faster
+ * than real time and 96 packets is already more cushion than anything needs.
+ * PlaybackController re-sizes all four for a network source, where the
+ * read-ahead has to be expressed in seconds instead.
+ *
+ * A flat packet count was the whole problem: 96 packets is 4 s at 24 fps for a
+ * 2 Mbit/s IPTV channel and 4 s for a 54 Mbit/s UHD remux, so the cushion in
+ * seconds was identical while the consequence of losing it was not. Hardware,
+ * 2026-10-02 (Avatar: Fire and Ash, 4K HEVC DV remux, 54 Mbit/s, over a debrid
+ * proxy): the queue sat at its overshoot limit for the first 40 s, then the
+ * link fell to roughly 12 Mbit/s and those 4 s were gone - 25 s at
+ * video_frames=0, then 11 fps against a 24 fps stream, while decode and the
+ * render loop both logged zero slow iterations. Nothing was slow.
+ *
+ * The byte caps keep a deeper read-ahead honest: 10 s of 54 Mbit/s is 67 MB
+ * and the flexible pool had ~144 MB free with map_fail already nonzero, so a
+ * high-bitrate source gets fewer seconds rather than more megabytes. 0 means
+ * "bound by packets only".
+ */
 int video_packet_cap = 96;
 int audio_packet_cap = 96;
+long long video_queue_byte_cap = 0;
+long long audio_queue_byte_cap = 0;
 
 /*
  * Start-of-stream pre-buffer (live/network sources only).
@@ -86,6 +110,46 @@ int audio_packet_cap = 96;
 volatile int pb_prebuffer_hold = 0;
 int pb_prebuffer_packets = 48;
 int pb_prebuffer_max_ms = 4000;
+
+/*
+ * Mid-playback rebuffer.
+ *
+ * The hold above was armed once, at open, and there was no path back to it:
+ * when the queue later ran dry the decode threads simply took frames at
+ * whatever rate the network managed and the renderer held each one for two or
+ * three refreshes. A slow link therefore showed up as permanent slow motion
+ * with nothing on screen to say why - "held 2:61" in the pace line, every
+ * frame shown twice, for as long as the link stayed short.
+ *
+ * Re-arming the hold parks both decode threads; audio output then falls into
+ * its soft-underrun branch, which emits silence WITHOUT advancing the media
+ * clock, so the picture freezes on its last frame and both restart together
+ * once there is a cushion again. That reads as a slow connection, which is
+ * what it is. Slow motion reads as a broken player.
+ *
+ * Armed for network sources only: a local file that runs dry has a real
+ * problem, and pausing would hide it. The low-water mark is deliberately close
+ * to empty - this is the last resort before the decoder starves, not a target.
+ */
+int pb_rebuffer_enabled = 0;
+int pb_rebuffer_low_packets = 3;
+
+/*
+ * A rebuffer fills deeper, and waits longer, than the pre-buffer at open.
+ *
+ * The open deadline is short because somebody is waiting to find out whether
+ * the file plays at all, and starting with a thin cushion beats not starting.
+ * Mid-playback that trade is reversed: the viewer is already watching, the
+ * picture has stopped either way, and releasing early only means running dry
+ * again a second later. Reusing 48 packets / 4 s gave a visible stutter cycle
+ * on a short link - hold 4 s, play under a second, repeat.
+ *
+ * 96 packets is ~4 s at 24 fps, clamped to the queue cap by prebuffer_check().
+ * The 8 s deadline is the backstop for a link that will never reach it: play
+ * what arrived rather than freeze for good.
+ */
+int pb_rebuffer_packets = 96;
+int pb_rebuffer_max_ms = 8000;
 
 /*
  * Scrub hold: the media pipeline is parked for as long as the seek bar is

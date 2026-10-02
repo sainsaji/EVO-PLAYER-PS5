@@ -33,6 +33,9 @@ extern char current_media_path[768];
 extern double resume_base_offset_seconds;
 void draw_video_frame_to_fb(uint32_t *fb, int x, int y, int max_w, int max_h);
 extern pp_playback g_pp_pb;
+/* Bridge.cpp - raised at open and again whenever the demux queue runs dry on a
+ * network source. Both decode threads are parked for as long as it is set. */
+extern volatile int pb_prebuffer_hold;
 }
 
 #include <cstdio>
@@ -286,7 +289,8 @@ void PlayerScreen::update(double deltaMs) {
      * decoder - and while a seek is: on a network stream that is seconds of a
      * still picture that would otherwise read as frozen. */
     const bool isBuffering = !playback->isMusicMode() &&
-                             (!video_frame_loaded || g_pp_pb.seek_discarding);
+                             (!video_frame_loaded || g_pp_pb.seek_discarding ||
+                              pb_prebuffer_hold);
     if (isBuffering) {
         m_controlsLastUsedMs = now;
     }
@@ -459,6 +463,16 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         } else if (playback->isLiveSource()) {
             metaStr = (!video_frame_loaded) ? "BUFFERING..." : "LIVE";
         }
+
+        /*
+         * A rebuffer parks both decode threads mid-playback, so the picture
+         * freezes on its last frame with the title still on the OSD - which
+         * reads as a hung player rather than a short link. Say which it is.
+         * This overrides whatever the branches above chose: while the hold is
+         * up, nothing else about the stream is the useful thing to show.
+         */
+        if (pb_prebuffer_hold)
+            metaStr = "BUFFERING...";
 
         evo_playback_osd_params_t p;
         std::memset(&p, 0, sizeof(p));
