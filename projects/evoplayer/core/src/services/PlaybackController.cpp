@@ -383,6 +383,7 @@ void PlaybackController::stopPlayback() {
         sws_freeContext(play_sws);
         play_sws = nullptr;
     }
+    evo_playback_release_sw_scaler();
 
     if (audio_handle >= 1) {
         sceAudioOutClose(audio_handle);
