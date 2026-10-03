@@ -294,6 +294,34 @@ typedef struct {
 
 static evo_keyboard_state_t g_kb;
 
+/*
+ * Remote text entry. The dev remote polls /mnt/usb0/evo_cmd on its own thread,
+ * so it parks the request here and evo_keyboard_update() (frame loop) applies
+ * it, the same way evo_usb_remote parks injected buttons.
+ */
+static volatile int g_pending_text;
+static volatile int g_pending_submit;
+static char         g_pending_buf[KB_MAX_BUF];
+
+static void submit_text(void);
+
+int evo_keyboard_queue_text(const char *text)
+{
+    if (!g_kb.is_open || g_kb.is_native_active)
+        return 0;
+    snprintf(g_pending_buf, sizeof g_pending_buf, "%s", text ? text : "");
+    g_pending_text = 1;
+    return 1;
+}
+
+int evo_keyboard_queue_submit(void)
+{
+    if (!g_kb.is_open || g_kb.is_native_active)
+        return 0;
+    g_pending_submit = 1;
+    return 1;
+}
+
 void evo_keyboard_open(const char *title,
                        const char *initial_value,
                        int max_len,
@@ -436,6 +464,21 @@ const char *evo_keyboard_get_text(void)
 
 void evo_keyboard_update(void)
 {
+    /* Apply anything the dev remote parked, on the frame loop's thread. */
+    if (g_pending_text) {
+        g_pending_text = 0;
+        if (g_kb.is_open && !g_kb.is_native_active) {
+            snprintf(g_kb.buffer, sizeof g_kb.buffer, "%s", g_pending_buf);
+            if ((int)strlen(g_kb.buffer) > g_kb.max_len)
+                g_kb.buffer[g_kb.max_len] = '\0';
+        }
+    }
+    if (g_pending_submit) {
+        g_pending_submit = 0;
+        if (g_kb.is_open && !g_kb.is_native_active)
+            submit_text();     /* fires the callback and closes the modal */
+    }
+
 #if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
     if (g_kb.is_open && g_kb.is_native_active) {
         int status = sceImeDialogGetStatus();

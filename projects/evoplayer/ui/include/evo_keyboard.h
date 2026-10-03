@@ -70,6 +70,20 @@ int  evo_keyboard_is_native_active(void);
 /* Retrieve current text in the keyboard buffer. */
 const char *evo_keyboard_get_text(void);
 
+/*
+ * Remote text entry (the --usb-remote dev remote: `evo-remote.sh type`).
+ *
+ * Both queue the request and return 1 if the virtual keyboard was open to
+ * take it; evo_keyboard_update() applies it on the next frame, so the dev
+ * remote's polling thread never touches g_kb directly.
+ *
+ * The NATIVE PS5 IME cannot be driven this way and these return 0 for it: it
+ * is a system dialog that reads real HID, which nothing in EVO can reach.
+ * Set KEYBOARD INPUT = VIRTUAL KEYBOARD before an unattended text test.
+ */
+int evo_keyboard_queue_text(const char *text);
+int evo_keyboard_queue_submit(void);
+
 /* Update keyboard lifecycle every frame (polls Native IME status if active) */
 void evo_keyboard_update(void);
 

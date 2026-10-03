@@ -50,6 +50,15 @@
 #                                           [focus] #id "text" (item i/n) on
 #                                           Screen. `key --no-wait <b>` = one
 #                                           press, no readback
+#   type [--submit] <text>                  fill the virtual keyboard in one
+#                                           shot (--submit also presses DONE),
+#                                           instead of ~5 D-pad presses per
+#                                           character. Requires Settings ->
+#                                           Interface & Storage -> KEYBOARD
+#                                           INPUT = VIRTUAL KEYBOARD: the
+#                                           native PS5 IME is a system dialog
+#                                           and nothing EVO injects reaches it
+#   kbdone                                  press DONE on the virtual keyboard
 #   ui [--line]                             #115: the UI state as text - screen,
 #                                           focused element, its list, modal,
 #                                           toast, player OSD - from
@@ -386,6 +395,18 @@ source) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh source <n>  (0 U
 iobench) put_cmd "iobench ${1:-}" ;;
 image)  [[ -n "${1:-}" ]] || die "usage: evo-remote.sh image <path>"; put_cmd "image $1" ;;
 text)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh text <path>"; put_cmd "text $1" ;;
+# Fill EVO's virtual keyboard in one shot, rather than ~5 D-pad presses per
+# character. --submit also presses DONE. Needs Settings -> Interface & Storage
+# -> KEYBOARD INPUT = VIRTUAL KEYBOARD: the native PS5 IME is a system dialog
+# and nothing EVO can inject will ever reach it.
+type)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh type [--submit] <text>"
+        _submit=0
+        if [[ "${1}" == --submit ]]; then _submit=1; shift; fi
+        [[ -n "${1:-}" ]] || die "usage: evo-remote.sh type [--submit] <text>"
+        put_cmd "type $*"
+        (( _submit )) && { sleep 1; put_cmd "kbdone"; }
+        true ;;
+kbdone) put_cmd "kbdone" ;;
 upcompare)
     # #103: same paused frame with the upscaler Off / Sharp / AI, no OSD ->
     # output/upcompare/{off,sharp,ai}.bmp (+ compare.png where Pillow exists).

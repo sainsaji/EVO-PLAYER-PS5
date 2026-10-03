@@ -16,6 +16,7 @@
 #include "evo_demux.h"
 #include "pp_stage_breadcrumb.h"
 #include "evo_rmlui_devstate.h"
+#include "evo_keyboard.h"
 
 #ifdef EVO_HAVE_BUILD_ID
 #include "evo_build_id.h"
@@ -118,6 +119,22 @@ static void run_command(const char *line)
     if (strncmp(buf, "key ", 4) == 0) {
         if (!inject_key(buf + 4))
             pp_stage_bc("REMOTE_KEY?", buf + 4);
+        return;
+    }
+    /*
+     * `type <text>` fills the virtual keyboard in one shot, instead of walking
+     * its grid with ~5 D-pad presses per character. `kbdone` is its DONE key.
+     * Both no-op on the native PS5 IME, which is a system dialog EVO cannot
+     * reach - switch KEYBOARD INPUT to VIRTUAL KEYBOARD for unattended tests.
+     */
+    if (strncmp(buf, "type ", 5) == 0) {
+        if (!evo_keyboard_queue_text(buf + 5))
+            pp_stage_bc("REMOTE_TYPE?", "no virtual keyboard open");
+        return;
+    }
+    if (strcmp(buf, "kbdone") == 0) {
+        if (!evo_keyboard_queue_submit())
+            pp_stage_bc("REMOTE_TYPE?", "no virtual keyboard open");
         return;
     }
     if (strncmp(buf, "play ", 5) == 0) {
