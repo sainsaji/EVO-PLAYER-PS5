@@ -176,9 +176,27 @@ do_launch() {
     local slot hb base
     slot="$(lc slot)"; hb="$(lc heartbeat)"
     [[ "${hb}" == RUNNING ]] && die "EVO's heartbeat is advancing - it is running. Not stacking a launch."
-    [[ "${slot}" == UNKNOWN ]] && die "could not read ShadowMount's log - cannot prove the slot is free. Not launching."
-    [[ "${slot}" == FREE ]] || die "ShadowMount says ${TITLE_ID} is ${slot} (started, not released). Not launching.
+    if [[ "${slot}" == UNKNOWN ]]; then
+        # ShadowMount has no verdict, so the heartbeat is all there is, and a
+        # parked EVO still holds the slot. (With a slot verdict this check is
+        # wrong: `close` leaves /mnt/usb0/evo_status behind with parked=1, so a
+        # freed slot still reads PARKED until the next launch deletes it.)
+        [[ "${hb}" == PARKED ]] && die "EVO is parked (soft-closed) - the slot is still held. Not launching.
+   Free it first: evo-remote.sh close."
+        # A fresh boot: the slot stays UNKNOWN until something launches, and
+        # nothing may launch while it is UNKNOWN. coldboot() breaks that by
+        # proving the slot is free instead of assuming it - ShadowMount's log
+        # reaches back to its own startup banner and records no launch of this
+        # title since. The heartbeat has to agree: RUNNING and PARKED are
+        # already out above, so only ABSENT (no evo_status at all, which is
+        # what a deploy leaves) and STILL (a stale file) can get here.
+        [[ "$(lc coldboot)" == COLDBOOT ]] \
+            || die "could not read ShadowMount's log - cannot prove the slot is free. Not launching."
+        warn "cold boot: ShadowMount has logged no launch of ${TITLE_ID} since it started, heartbeat ${hb} - slot is free"
+    else
+        [[ "${slot}" == FREE ]] || die "ShadowMount says ${TITLE_ID} is ${slot} (started, not released). Not launching.
    If it is parked: evo-remote.sh close. Otherwise PS-button-close it first."
+    fi
     # Launching while ShadowMount is still busy (a fresh deploy: scan, verify,
     # remount) raises "Can't start game or app" on the PS5. Wait it out.
     [[ "$(lc wait-quiet 15 120)" == QUIET ]] \

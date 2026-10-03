@@ -49,6 +49,16 @@ Each issue body also has a "References & sequencing" block.
   and panics once a compute queue is allocated.
   → [hardware-decode.md](docs/hardware/hardware-decode.md)
 - **Do not kill `kstuff`.** It destabilises the console into a panic.
+- **Remote Play is permanently impossible — a jailbroken PS5 cannot pair.**
+  chiaki-ng, pyremoteplay, virtual gamepads: all dead ends, forever. Never
+  propose, install or probe them. The console *does* answer Remote Play
+  discovery and TCP 9295 *is* open — **that proves nothing.** Consequence:
+  `evo-remote.sh key` cannot reach a system dialog (the native IME, the web
+  browser), because it injects into EVO's own pad state. To test anything that
+  types text, set Settings → Interface & Storage → `KEYBOARD INPUT` =
+  `VIRTUAL KEYBOARD`, which EVO draws itself and the remote can drive. If an
+  IME is already up and wedging input, `evo-remote.sh quit` → `close` still
+  works through it.
 - **The console's `/fs` web route is read-only.** Delete over FTP
   (`tools/shot.sh clean`).
 - **Diagnostics: one file, `/mnt/usb0/evo.log`.** It holds the boot trace,

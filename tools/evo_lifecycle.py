@@ -22,6 +22,8 @@ Two sources, both read over FTP:
 Subcommands (print one word / line, exit 0 unless the FTP read failed):
 
   slot                     FREE | RESIDENT | UNKNOWN    (ShadowMount only)
+  coldboot                 COLDBOOT | NO   (booted, and the title never ran
+                           since - the only sound reading of an UNKNOWN slot)
   heartbeat                RUNNING | PARKED | STILL | ABSENT
   smlen                    current debug.log length, a baseline for wait-*
   wait-registered  BASE S  REGISTERED | TIMEOUT   (new install/mount.lnk after BASE)
@@ -51,6 +53,12 @@ INSTALLED = f"NOTIFY: installed game {TID}"
 MOUNTED = f"[LINK] mount.lnk created: /user/app/{TID}/mount.lnk"
 MOUNT_READY = f"[SHELLCORE] launch mount ready: {TID}"
 IMAGE_CHECKED = f"unmount complete: source=/data/homebrew/{TID}.ffpfsc"
+
+# ShadowMount writes these once, as it comes up. Finding one means the log
+# still holds the whole of this boot, so "no [GAME] started since" is evidence
+# and not just an absence - see coldboot().
+BOOT_BANNERS = ("[GAME] lifecycle watcher started",
+                "[STARTUP] scanner startup sync begin")
 
 
 def fetch(path, tries=3):
@@ -111,6 +119,27 @@ def slot(text):
     return "FREE" if r > s else "RESIDENT"
 
 
+def coldboot(text):
+    """COLDBOOT when the console has booted and never launched the title.
+
+    slot() cannot tell "nothing has run" from "the log does not go back far
+    enough", so it says UNKNOWN for both and the callers refuse - which on a
+    cold boot deadlocks: the slot stays UNKNOWN until a launch, and nothing
+    will launch while it is UNKNOWN.
+
+    This settles it from evidence rather than from an absence. ShadowMount
+    writes a startup banner as it comes up; everything after the LAST banner is
+    this boot. If the title has neither started nor been released in that
+    stretch, it has not run since the console came up, so the app slot is free.
+    No banner means the log has rotated past the boot and nothing is proven.
+    """
+    at = max(text.rfind(b) for b in BOOT_BANNERS)
+    if at < 0:
+        return "NO"
+    boot = text[at:]
+    return "NO" if (STARTED in boot or RELEASED in boot) else "COLDBOOT"
+
+
 def status_fields():
     t = fetch(STATUS)
     if not t:
@@ -154,6 +183,8 @@ def main(argv):
     try:
         if cmd == "slot":
             print(slot(sm_both()))
+        elif cmd == "coldboot":
+            print(coldboot(sm_both()))
         elif cmd == "heartbeat":
             print(heartbeat())
         elif cmd == "smlen":
