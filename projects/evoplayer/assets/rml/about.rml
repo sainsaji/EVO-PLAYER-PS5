@@ -16,7 +16,7 @@
                 <div id="header-titles">
                     <div id="header-title-row">
                         <span id="about-title">EVO PLAYER PRO</span>
-                        <span id="about-version-pill" class="badge-pill">v0.9.0</span>
+                        <span id="about-version-pill" class="badge-pill">v0.11.0-final</span>
                         <span id="about-build-tag" class="badge-tag">PS5 HOMEBREW</span>
                     </div>
                     <div id="about-tagline">CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW</div>

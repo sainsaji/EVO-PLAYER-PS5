@@ -278,7 +278,7 @@
                     <div class="glyph-badge-pill"><span class="glyph-pill-text">OPTIONS</span></div>
                     <span class="footer-text">OPERATIONS</span>
                 </div>
-                <div id="browser-footer-version">v0.10.0</div>
+                <div id="browser-footer-version">v0.11.0-final</div>
             </div>
         </div>
     </div>

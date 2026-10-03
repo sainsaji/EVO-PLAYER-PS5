@@ -3339,7 +3339,13 @@ void EvoRmlApp::UpdateAboutState(const EvoAboutState& state) {
         el->SetInnerRML(state.app_name);
 
     if (Rml::Element* el = m_about_doc->GetElementById("about-version-pill")) {
-        std::string v = state.version.empty() ? ("v" + m_version) : state.version;
+        std::string v = state.version;
+        if (v.empty()) {
+            if (!m_version.empty() && (m_version[0] == 'v' || m_version[0] == 'V'))
+                v = m_version;
+            else
+                v = "v" + m_version;
+        }
         el->SetInnerRML(v);
         el->SetProperty("background-color", to_hex_rgb(m_theme.accent));
         el->SetProperty("border-color", to_hex_rgb(m_theme.accent));
@@ -3421,8 +3427,16 @@ void EvoRmlApp::RenderClosed(uint32_t* framebuffer, int width, int height) {
     set("closed-footer", "color", to_hex_rgb(m_theme.text_muted));
     if (Rml::Element* el = d->GetElementById("closed-power"))
         SetImageColor(el, ink_on(m_theme.accent));
-    if (Rml::Element* el = d->GetElementById("closed-footer"))
-        el->SetInnerRML("EVO PLAYER" + (m_version.empty() ? std::string() : "  v" + m_version));
+    if (Rml::Element* el = d->GetElementById("closed-footer")) {
+        std::string v_suffix;
+        if (!m_version.empty()) {
+            if (m_version[0] == 'v' || m_version[0] == 'V')
+                v_suffix = "  " + m_version;
+            else
+                v_suffix = "  v" + m_version;
+        }
+        el->SetInnerRML("EVO PLAYER" + v_suffix);
+    }
 
     Rml::ElementList steps, nums, keys, strongs;
     d->GetElementsByClassName(steps, "closed-step");
@@ -3611,6 +3625,13 @@ void EvoRmlApp::UpdateMediaInfoState(const EvoMediaInfoState& state) {
 
     Rml::Element* el_pa = m_mediainfo_doc->GetElementById("mediainfo-path");
     if (el_pa) el_pa->SetInnerRML(state.path);
+
+    if (!m_version.empty()) {
+        if (Rml::Element* el_ver = m_mediainfo_doc->GetElementById("footer-engine-ver")) {
+            std::string v = (m_version[0] == 'v' || m_version[0] == 'V') ? m_version : ("v" + m_version);
+            el_ver->SetInnerRML("EVO PRO DECODER " + v);
+        }
+    }
 
     // Badges
     Rml::Element* el_res = m_mediainfo_doc->GetElementById("info-badge-res");

@@ -13,7 +13,7 @@
 #include <cstring>
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "0.10.0"
+#define EVO_PLAYER_VERSION "v0.11.0-final"
 #endif
 
 namespace evo {

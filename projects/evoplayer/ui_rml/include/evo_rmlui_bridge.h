@@ -663,7 +663,7 @@ void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height);
 /* About & Support Screen API */
 typedef struct {
     const char* app_name;        /* "EVO PLAYER PRO" */
-    const char* version;         /* "v0.9.0" */
+    const char* version;         /* "v0.11.0-final" */
     const char* build_tag;       /* "PS5 HOMEBREW" */
     const char* tagline;         /* "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW" */
     const char* themes_info;     /* "X AVAILABLE - DROP .THEME FILES ON USB0" */

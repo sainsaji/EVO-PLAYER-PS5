@@ -85,7 +85,7 @@ static void build_launch(evo_rmlui_launch_params_t& p,
                          int focus_tile) {
     memset(&p, 0, sizeof(p));
     p.app_name = "EVO PLAYER";
-    p.version = "VERSION 0.7.0";
+    p.version = "v0.11.0-final";
     p.clock = "21:48";
     p.theme_name = "MIDNIGHT";
     p.hero_eyebrow = "CONTINUE WATCHING";
@@ -364,7 +364,7 @@ int main() {
     std::vector<uint32_t> fb((size_t)W * H, 0xFF0E0906);
 
     if (!evo_rmlui_init(W, H)) { printf("init failed\n"); return 1; }
-    evo_rmlui_set_version("0.7.0");
+    evo_rmlui_set_version("v0.11.0-final");
 
     evo_rmlui_theme_t th; memset(&th, 0, sizeof(th));
     th.name = "MIDNIGHT";

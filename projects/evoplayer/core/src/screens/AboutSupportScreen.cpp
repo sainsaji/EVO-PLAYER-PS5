@@ -72,7 +72,9 @@ void AboutSupportScreen::render(uint32_t* framebuffer, int width, int height) {
     }
 
     params.app_name = "EVO PLAYER PRO";
-    params.version = "v" EVO_PLAYER_VERSION;
+    params.version = (EVO_PLAYER_VERSION[0] == 'v' || EVO_PLAYER_VERSION[0] == 'V')
+                     ? EVO_PLAYER_VERSION
+                     : ("v" EVO_PLAYER_VERSION);
     params.build_tag = "PS5 HOMEBREW (AGC GPU)";
     params.tagline = "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
     params.themes_info = "PRESS CROSS FOR CHANGELOG, SQUARE FOR DEV TOOLS";

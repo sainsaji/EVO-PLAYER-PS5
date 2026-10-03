@@ -66,7 +66,7 @@ jobs:
         run: |
           FILE_VER="$(tr -d '[:space:]' < projects/evoplayer/VERSION)"
           WANT="${{ steps.ver.outputs.version }}"
-          if [ "$FILE_VER" != "$WANT" ]; then
+          if [ "${FILE_VER#v}" != "$WANT" ]; then
             echo "::error::projects/evoplayer/VERSION is '$FILE_VER' but the tag says '$WANT'"
             exit 1
           fi

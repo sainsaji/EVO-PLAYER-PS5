@@ -131,7 +131,7 @@ long long now_ms(void);
 }
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "0.10.0"
+#define EVO_PLAYER_VERSION "v0.11.0-final"
 #endif
 
 #ifndef EVO_DIRECT_MEM_POOL_BYTES
@@ -399,7 +399,10 @@ bool Application::initHardware() {
      * that string was last hand-edited. Only the host tools set it, which is
      * why uiview looked right while the console did not.
      */
-    evo_rmlui_set_version("v" EVO_PLAYER_VERSION);
+    const char* app_ver = (EVO_PLAYER_VERSION[0] == 'v' || EVO_PLAYER_VERSION[0] == 'V')
+                          ? EVO_PLAYER_VERSION
+                          : ("v" EVO_PLAYER_VERSION);
+    evo_rmlui_set_version(app_ver);
 
     evo_input_reset(&evo_pad_state);
     evo_feedback_init(m_padHandle, SoundEffectCallback);
@@ -449,7 +452,9 @@ bool Application::initServices() {
     favorites_load();
     m_fileSystemBrowser->loadLastFolder();
 
-    toast("EVO Player", "Version " EVO_PLAYER_VERSION);
+    toast("EVO Player", (EVO_PLAYER_VERSION[0] == 'v' || EVO_PLAYER_VERSION[0] == 'V')
+                         ? EVO_PLAYER_VERSION
+                         : ("v" EVO_PLAYER_VERSION));
     return true;
 }
 

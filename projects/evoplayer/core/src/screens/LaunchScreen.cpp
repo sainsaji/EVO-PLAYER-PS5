@@ -273,7 +273,9 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     std::memset(&params, 0, sizeof(params));
 
     params.app_name = "EVO PLAYER";
-    params.version = "VERSION " EVO_PLAYER_VERSION;
+    params.version = (EVO_PLAYER_VERSION[0] == 'v' || EVO_PLAYER_VERSION[0] == 'V')
+                     ? EVO_PLAYER_VERSION
+                     : ("v" EVO_PLAYER_VERSION);
 
     // Clock
     char clockBuf[16] = {0};
