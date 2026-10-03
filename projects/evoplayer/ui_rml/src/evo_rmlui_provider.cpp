@@ -1155,7 +1155,7 @@ bool EvoRmlProviderHost::FocusPublishedRow(int local_idx)
 }
 
 /* Focus m_focus_slot's card; a level with no cards (setup, empty) falls back
- * to KI_TAB so its own controls still get focus. Call after Context::Update(). */
+ * to setup cards or KI_TAB so its own controls still get focus. Call after Context::Update(). */
 bool EvoRmlProviderHost::SeedFocus()
 {
     m_needs_initial_focus = false;
@@ -1165,9 +1165,40 @@ bool EvoRmlProviderHost::SeedFocus()
         UpdateSelectedPreview();
         return true;
     }
+
+    /* Setup cards (IPTV / Xtream setup screen) */
+    if (m_doc) {
+        if (auto* card = m_doc->GetElementById("tv-card-setup-url")) {
+            if (card->IsVisible(true)) {
+                card->Focus();
+                m_dirty = true;
+                return true;
+            }
+        }
+        if (auto* card = m_doc->GetElementById("tv-card-setup-usb")) {
+            if (card->IsVisible(true)) {
+                card->Focus();
+                m_dirty = true;
+                return true;
+            }
+        }
+        Rml::ElementList setup_cards;
+        m_doc->GetElementsByClassName(setup_cards, "tv-setup-card");
+        for (auto* sc : setup_cards) {
+            if (sc && sc->IsVisible(true)) {
+                sc->Focus();
+                m_dirty = true;
+                return true;
+            }
+        }
+        if (!m_context->GetFocusElement()) {
+            m_doc->Focus();
+        }
+    }
+
     m_context->ProcessKeyDown(Rml::Input::KI_TAB, 0);
     m_context->ProcessKeyUp(Rml::Input::KI_TAB, 0);
-    return false;
+    return m_context->GetFocusElement() != nullptr;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1355,12 +1386,17 @@ bool EvoRmlProviderHost::HandleKey(Key k)
         /* A press that beats the first render: seed focus onto a row first,
          * otherwise this direction is swallowed and the screen reads as hung
          * for one press. */
-        if (m_needs_initial_focus) {
+        if (m_needs_initial_focus || !m_context->GetFocusElement()) {
             m_context->Update();
             SeedFocus();
+            m_context->Update();
         }
 
         Rml::Element* before = m_context->GetFocusElement();
+        if (!before) {
+            SeedFocus();
+            before = m_context->GetFocusElement();
+        }
 
         m_context->ProcessKeyDown(id, 0);
         m_context->ProcessKeyUp(id, 0);
@@ -1373,6 +1409,12 @@ bool EvoRmlProviderHost::HandleKey(Key k)
     }
 
     case KeyAccept: {
+        if (m_needs_initial_focus || !m_context->GetFocusElement()) {
+            m_context->Update();
+            SeedFocus();
+            m_context->Update();
+        }
+
         /*
          * Click the focused element. RmlUi synthesises a click from Return for
          * form controls only, and a provider's rows are divs - so the click is
@@ -1645,6 +1687,7 @@ void EvoRmlProviderHost::ShowUsbPlaylists(const std::vector<std::string>& paths)
     m_art_urls.clear();
     m_art_keys.clear();
     m_is_usb_picker = true;
+    m_setup_shown = false;
 
     for (const auto& path : paths) {
         size_t last_slash = path.find_last_of("/\\");
@@ -1823,6 +1866,14 @@ void EvoRmlProviderHost::ShowSetupScreen()
 
     m_needs_initial_focus = true;
     m_dirty = true;
+
+    /* Update immediately so the DOM reflects query == '' && !in_folder
+     * and displays #tv-setup right away, then seed focus onto the first card. */
+    if (m_context) {
+        m_context->Update();
+        SeedFocus();
+        m_context->Update();
+    }
 }
 
 void EvoRmlProviderHost::ReloadCurrentLevel()
