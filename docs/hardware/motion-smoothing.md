@@ -174,3 +174,9 @@ docker compose -f docker-compose.yml -f docker-compose.amdllpc.yml run --rm ps5-
 - The GPU budget (12 ms window) steps High → Low → Off for the session and
   toasts once. Low really is cheaper — it skips the two finest search steps.
 - Memory: the extended scratch block is 288 MB, allocated on first use.
+- **Stacking it on AI upscaling makes both worse.** The search runs on the
+  picture it is handed, so it estimates motion from — and then interpolates —
+  whatever Anime4K invented, and the two sets of artefacts compound around
+  fast motion. Both are allowed on together; the `MOTION SMOOTHING` row says
+  so when `UPSCALING` is `AI` (`SettingsScreen.cpp`, the `MotionSmoothing`
+  case). Sharp (FSR 1) does not have the same problem.

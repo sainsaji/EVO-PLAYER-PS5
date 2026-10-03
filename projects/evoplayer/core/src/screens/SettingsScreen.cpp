@@ -227,6 +227,14 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                      "../icons/icon_activity.png", 3, static_cast<int>(settings->getMotionSmoothing()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getMotionSmoothingName(static_cast<MotionSmoothing>(i));
+        /*
+         * Interpolation invents frames from the picture it is handed, so it
+         * also interpolates whatever the AI upscaler invented - the two stack
+         * and the haloes get much worse. Say so on the row rather than leaving
+         * it to be discovered.
+         */
+        if (settings->getUpscaler() == Upscaler::AI)
+            d.detail = "AI UPSCALING IS ON - THE TWO STACK, EXPECT HEAVY ARTEFACTS";
         break;
 
     case SettingKey::RefreshRate:
