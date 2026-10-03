@@ -5,6 +5,97 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.11.0
+
+![](https://img.shields.io/badge/Release-v0.11.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
+
+**EVO plays what you have, from wherever it is.** 0.10.0 made EVO a real PS5 app; 0.11.0 fills it in. Live TV from an M3U playlist, your Emby or Jellyfin library in EVO's own screens, real-time AI upscaling for anything below 4K, Dolby Vision, a surround test room you can fly a sound around, and file management with FTP so a PC is no longer in the loop. 96 commits since 0.10.0.
+
+Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO from the Games row.
+
+### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Live TV & Media Servers
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Providers**, reached from the nav rail or the home screen, replacing the Emby entry that was switched off in 0.10.0. **Cross** opens one, **Square** sets its address, **Triangle** opens the web version in the PS5's own browser, and OPTIONS twice signs out.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Live TV from an M3U playlist.** Put `iptv.m3u` on a USB stick and EVO finds it with no typing, or enter a URL. Channels browse as a 2×4 grid of logos with L1/R1 paging, a detail pane, favourites and search.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A channel guide.** XMLTV with NOW and NEXT on the channel, discovered automatically from USB or the web — each candidate is scored by how many of your channels it actually covers — or pointed at a feed of your own. Xtream accounts use their own EPG.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Xtream Codes accounts.** Set one up by hand, or load an M3U exported from the account and EVO reads the credentials out of it. Live, VOD and Series categories, with a sign-out that removes the account.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Emby, Jellyfin and Stremio addons as native EVO screens** — poster grids, Continue Watching, libraries, series, seasons and episodes, with resume and watched state written back to the server. Jellyfin Quick Connect is tried before asking for a password, and the server address is pre-filled from LAN discovery.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Pick which version plays.** A title with several versions lists them with resolution, codec, HDR or Dolby Vision, size, bitrate and audio format.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Web versions of Emby, Jellyfin and Nuvio** run in the console's browser beside the nav rail, hand the stream to EVO's player when you press Play, and keep their sign-ins between sessions.
+
+### ![](https://img.shields.io/badge/PICTURE-ff8c00?style=flat-square) The Picture
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Real-time upscaling for anything below 4K.** Settings → Video & Display → `UPSCALING`: **Sharp** is FSR 1 sharpening, **AI** runs Anime4K. `AI NETWORK` picks Standard, Large or Maximum — Maximum is for a PS5 Pro. The player's OSD names what ran, and says why when it bypassed.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Dolby Vision Profile 5** reshapes on the GPU from the RPU, so skin is no longer purple and backgrounds no longer green.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **AV1**, including raw `.obu` files and 4K 10-bit, through libdav1d.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **4K HEVC Main10 HDR on the console's hardware decoder**, with decoder slots that grow on demand.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **120 Hz output** — Off, Auto, or Playback Only — for smoother 24 fps. The row dims itself when the display or HDMI sink cannot do it.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **`HDR OUTPUT` is yours to set**, Auto or Off, rather than always following the file.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **HDR to SDR tone mapping is BT.2390**, not Reinhard, with a correct BT.2020 → BT.709 conversion. 8-bit NV12 HDR and HLG streams get their own pipelines, and HLG highlights are no longer pink or cyan.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **The `VIDEO DECODER` setting is honoured** — it was silently resolving to Auto whatever you chose — and 4K software decode is on by default.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Exotic pixel formats display** instead of decoding into a dead buffer: 4:2:2, 4:4:4, 10-bit 4:4:4 and GBRP showed a black screen.
+
+### ![](https://img.shields.io/badge/AUDIO-9c27b0?style=flat-square) Sound
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Surround Sound Studio.** Settings → Audio → `SURROUND SOUND TEST` opens a 2.5D room: a perspective floor with distance rings, per-speaker VU meters, and eight tests — 3D sound field, spatial orb free-roam, a 360° sweep, auto tests for 5.1 and 7.1, and the speaker layout. The orb flies on the stick, the touchpad or the D-pad, with L1/R1 for height.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Room calibration with the DualSense microphone.** It measures each speaker's level and delay, applies the trims to playback and saves them.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Stereo downmix.** Settings → Audio → `OUTPUT CHANNELS` folds 5.1 and 7.1 to 2.0 for headphones or a stereo TV.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Every audio codec FFmpeg supports**, Dolby TrueHD included, plus WMV, FLV and ASF containers.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Opus files no longer crash playback.**
+
+### ![](https://img.shields.io/badge/SUBTITLES-00bcd4?style=flat-square) Subtitles
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Auto-sync.** The picker's `AUTO-SYNC` row aligns the subtitles to the audio, shows its progress, and says so plainly when the file is not confident enough to align.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Two tracks at once** — Cross sets the primary, Square the secondary — with the secondary's position (stacked or top of screen) and colour under Settings → Subtitles.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Nudge the delay while you watch**, by swiping the DualSense trackpad or with L2, without opening a menu. L1/R1 move the secondary.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **WebVTT** decodes.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Subtitle size really cycles.** LARGE was unreachable and two of the three stops rendered identically.
+
+### ![](https://img.shields.io/badge/FILES-795548?style=flat-square) Your Files
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **File operations in the browser.** OPTIONS on anything opens copy, cut, paste, rename, delete and new folder. Transfers run off the UI thread with the current item, bytes, speed and time remaining, cancel at a chunk boundary, and resolve a name collision as overwrite, skip or auto-rename.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **FTP network storage.** Add a server from the browser's sidebar and browse, play and copy to and from it like any other source.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Folder filter chips.** Press Up from the top row to filter the folder you are actually looking at, instantly, with a chip only for the categories that have files there. They used to search the whole drive, not filter, not clear, and freeze the UI.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **The All Videos, Music and Photos views** recurse from the source root and list files rather than folders.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **No more `[Unknown] [Unknown]` codec pills** on text and log files.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The browser no longer hangs** when the jailbreak daemon is not running.
+
+### ![](https://img.shields.io/badge/PLAYBACK-0070d1?style=flat-square) Playback
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A preview frame on the seek bar.** The pipeline parks while you scrub, and the preview keeps up with a moving bar instead of trailing it.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Network streams pre-buffer** before the decoders start, and **rebuffer** when the read-ahead runs dry instead of stuttering silently. The read-ahead is sized in seconds of video, not bytes.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A `BUFFERING...` indicator** for any source, until the first frame lands and again mid-file if the stream runs out.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Quality and audio picker on R2.** On a live stream it lists the renditions read from the HLS master as well as the audio tracks, and your choice sticks across reopens. `ASK WHICH LIVE STREAM` under Settings → Interface & Storage controls whether it asks when a channel opens.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Live TV's OSD knows it is live** — no seek bar, timer or chapter keys on a stream with nothing behind the live edge.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Live channels play their best rendition.** Stream selection took the first video stream, which by convention is the lowest bitrate.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Big MKVs open instead of hanging.** An 85-stream UHD remux never reached playback, because the demuxer probe was unbounded.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Resuming no longer runs subtitles two to three seconds early.**
+
+### ![](https://img.shields.io/badge/INTERFACE-007acc?style=flat-square) Interface
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Settings is six pages**, not four: Video & Display, **Audio**, Subtitles, Interface & Storage, System & Diagnostics and **Experimental** — each row with its own icon.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A Safe to close screen.** QUIT EVO, from the nav rail or Settings, releases playback, the decoders and the GPU and then tells you it is done, with the three steps to close it from the switcher.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **An `UPSCALER` row in Media Info** (Square during playback), and the console model under System & Diagnostics.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Toasts are visible at 4K.** Every overlay — toasts, the keyboard, the debug overlay — was projected at twice its size and landed off-screen, so on a 4K panel no toast was ever seen.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The virtual keyboard draws.** It opened and took input while never being rendered.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The letterbox bars are black** instead of keeping the last menu frame in the corner for the length of a film.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Readable text**: the version pill and the `PAUSED` badge were white on near-white in Carbon, and the OSD no longer vanishes while paused.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The native PS5 keyboard is the default again**, and HDR10 screenshots are no longer rainbow noise.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The splash screen dismisses** on the first presented frame.
+
+### ![](https://img.shields.io/badge/EXPERIMENTAL-6e7681?style=flat-square) Experimental
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Motion smoothing** — 24 → 60 fps synthesised on the GPU, Off, Low or High, under Settings → Experimental. It costs about 0.55 ms of GPU time, and it bypasses itself for 50 fps or faster sources, 10-bit and HDR, and anything above 1080p. It is unfinished: expect soft edges and haloes around fast motion, and worse if AI upscaling is on at the same time — the row says so when it is.
+
+### ![](https://img.shields.io/badge/INTERNAL-6e7681?style=flat-square) Under the Hood
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **The console's own DNS resolver**, replacing a hand-rolled UDP client with a hardcoded server list.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Logs redact API keys, tokens and provider credentials.**
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Deploys are verified by sha256** before the new image is promoted, and the dev remote can launch, quit and close EVO without touching a controller.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Large allocations come from direct memory first**, and the GPU's transient ring doubled to 128 MB.
+
+---
+
 ## 0.10.0
 
 ![](https://img.shields.io/badge/Release-v0.10.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
