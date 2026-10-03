@@ -99,7 +99,7 @@ jobs:
       - name: Build and PFS-pack the app module
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release bash -lc './scripts/package-app.sh --ffpfsc'
+            evo-player/ps5-dev:release bash -lc './scripts/package-app.sh --ffpfsc --zip'
 
       # Independent checks on top of what package-app.sh already asserts
       # while building (titleId/version format, MkPFS "Errors: 0") - a
@@ -166,6 +166,7 @@ jobs:
           mkdir -p dist
           T="${{ steps.ver.outputs.tag }}"
           cp "output/app/${TITLE_ID}.ffpfsc" "dist/EVOPlayer-${T}-${TITLE_ID}.ffpfsc"
+          cp "output/app/${TITLE_ID}.zip" "dist/EVOPlayer-${T}-${TITLE_ID}.zip"
           ( cd dist && sha256sum * > SHA256SUMS.txt )
           ls -la dist
 
@@ -198,6 +199,10 @@ jobs:
           cat >> dist/NOTES.md <<'EOF'
           ## Install — start here
 
+          Choose either the **`.ffpfsc`** image or the **`.zip`** archive:
+
+          ### Option A: PFS Image (`.ffpfsc`)
+
           **Download `EVOPlayer-*-PPSA99039.ffpfsc`.** That is the whole app
           module, PFS-packed and ready to mount — no loose files, no second
           download.
@@ -212,6 +217,16 @@ jobs:
              change and can auto-launch it; otherwise mount it and launch
              **EVO Player from the Games row**.
 
+          ### Option B: Folder Title Archive (`.zip`)
+
+          **Download `EVOPlayer-*-PPSA99039.zip`.** Standard homebrew folder title
+          layout (identical layout to Kodi PS5).
+
+          1. Extract the zip into `/data/homebrew/` on the console over FTP
+             (creates `/data/homebrew/PPSA99039/`).
+          2. Register the title with **ShadowMountPlus** (or your preferred
+             homebrew launcher) and launch **EVO Player from the Games row**.
+
           Never stack launches — PS button to close a running EVO before
           relaunching (deploying/launching over a live instance risks a
           console kernel panic).
@@ -219,8 +234,7 @@ jobs:
           ## Requirements
 
           * PS5 on firmware **12.70**, jailbroken (re-run after every reboot)
-          * ShadowMountPlus (or another PFS-mount tool that understands
-            `.ffpfsc`)
+          * ShadowMountPlus (or another tool that understands `.ffpfsc` / folder titles)
           * A USB stick for media
 
           ## Verification
@@ -228,7 +242,7 @@ jobs:
           Built reproducibly in CI from the pinned toolchain (clang 18,
           PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so this
           image is not hardware-tested** — it is exactly what
-          `scripts/package-app.sh --ffpfsc` produces locally. Checksum in
+          `scripts/package-app.sh` produces locally. Checksum in
           `SHA256SUMS.txt`.
 
           Licensed GPL-3.0-or-later. Derived from ProsperoPlayer; see NOTICE.
@@ -259,4 +273,5 @@ jobs:
           make_latest: true
           files: |
             dist/EVOPlayer-*.ffpfsc
+            dist/EVOPlayer-*.zip
             dist/SHA256SUMS.txt

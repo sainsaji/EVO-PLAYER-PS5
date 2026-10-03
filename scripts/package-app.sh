@@ -8,6 +8,8 @@
 #   ./scripts/package-app.sh --rebuild-libc   force-regenerate the runtime shim
 #   ./scripts/package-app.sh --ffpfsc         also emit a PFS image, like
 #                                             ProsperoLight (needs MkPFS)
+#   ./scripts/package-app.sh --zip            emit a folder-title ZIP archive,
+#                                             matching Kodi PS5's packaging
 #   ./scripts/package-app.sh --usb-remote     + the scriptable FTP dev remote
 #                                             (/mnt/usb0/evo_cmd + evo_status +
 #                                             verbose vdec log) — off in release
@@ -41,6 +43,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 MODE="player"
 REBUILD_LIBC=0
 FFPFSC=0
+ZIP=0
 USB_REMOTE=0
 BREADCRUMBS=0
 VIRTUAL_KB=0
@@ -59,6 +62,7 @@ while (( $# )); do
         --player)       MODE="player" ;;
         --rebuild-libc) REBUILD_LIBC=1 ;;
         --ffpfsc)       FFPFSC=1 ;;
+        --zip)          ZIP=1 ;;
         --usb-remote)   USB_REMOTE=1 ;;   # dev: /mnt/usb0/evo_cmd + evo_status + verbose vdec log
         --breadcrumbs)  BREADCRUMBS=1 ;;  # #51: bring back the on-screen boot-trace popups
         --virtual-keyboard) VIRTUAL_KB=1 ;;  # debug: EVO's keyboard instead of the PS5 IME
@@ -86,6 +90,7 @@ if ! in_container; then
     FWD=(--"${MODE}")
     (( REBUILD_LIBC )) && FWD+=(--rebuild-libc)
     (( FFPFSC ))       && FWD+=(--ffpfsc)
+    (( ZIP ))          && FWD+=(--zip)
     (( USB_REMOTE ))   && FWD+=(--usb-remote)
     (( BREADCRUMBS ))  && FWD+=(--breadcrumbs)
     (( VIRTUAL_KB ))   && FWD+=(--virtual-keyboard)
@@ -671,6 +676,15 @@ if (( FFPFSC )); then
         warn "MkPFS unavailable (needs git + python3-venv + network on first run).
        Skipping .ffpfsc; deploy the folder with scripts/deploy-app.sh."
     fi
+fi
+
+if (( ZIP )); then
+    begin "packaging ${TITLE_ID}.zip (folder title archive)"
+    ZIP_IMG="${APP_OUT}/${TITLE_ID}.zip"
+    rm -f -- "${ZIP_IMG}"
+    python3 "${REPO_ROOT}/tools/package_zip.py" "${APPDIR}" "${ZIP_IMG}" "${TITLE_ID}" \
+        && ok "zip: ${ZIP_IMG#"${REPO_ROOT}/"}  ($(stat -c %s "${ZIP_IMG}") bytes)" \
+        || warn "ZIP packaging failed"
 fi
 
 echo ""
