@@ -70,6 +70,8 @@ public:
     void setSource(int sourceIndex);
     void setSearchQuery(const std::string& query);
     void handleAddFtpHost(const std::string& hostStr);
+    void handleActionRename(const std::string& newName);
+    void handleActionNewFolder(const std::string& folderName);
 
 private:
     void initBrowserStateMachine();
@@ -83,6 +85,8 @@ private:
     void applyFilterChange();
     std::string filterScopeKey() const;
     void openSearch();
+    void openActionMenu();
+    void performAction(int actionIndex);
 
     StateMachine<BrowserScreenState, BrowserScreenEvent> m_browserFsm;
 
@@ -124,6 +128,26 @@ private:
     std::string m_networkRemotePath = "/";
     std::string m_networkEmptyTitle;
     std::string m_networkEmptyHint;
+
+    // File operations & Action menu
+    bool m_actionMenuOpen = false;
+    int m_actionMenuFocused = 0;
+    bool m_showDeleteConfirm = false;
+    int m_deleteConfirmButton = 0;
+    bool m_showTransferDialog = false;
+    std::string m_actionTargetName;
+    std::string m_actionTargetPath;
+    bool m_actionTargetIsDir = false;
+    char m_transferTitleBuf[64];
+    char m_transferDetailBuf[256];
+    char m_actionTargetSubBuf[64];
+    char m_actionClipboardBuf[128];
+    char m_transferSpeedBuf[32];
+    char m_transferBytesBuf[64];
+    char m_transferEtaBuf[64];
+    char m_transferPercentBuf[16];
+    char m_transferSrcBuf[256];
+    char m_transferDstBuf[256];
 };
 
 } // namespace evo

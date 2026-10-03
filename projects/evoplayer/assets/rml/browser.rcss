@@ -702,3 +702,446 @@ div, span, p {
     color: #6b7d96;
     margin-left: 8dp;
 }
+
+/* ================== File Operations Action Menu Modal ================== */
+
+#browser-action-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090ee8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.action-scrim-hidden {
+    display: none !important;
+}
+
+#browser-action-card {
+    width: 580dp;
+    border-radius: 20dp;
+    background-color: #0c1424fc;
+    border-width: 1.5dp;
+    border-color: #1e304d;
+    padding: 26dp 28dp;
+    display: flex;
+    flex-direction: column;
+    gap: 12dp;
+}
+
+#browser-action-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #1e304d;
+    padding-bottom: 14dp;
+}
+
+.action-header-badge {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.action-indicator {
+    width: 4dp;
+    height: 14dp;
+    background-color: #00cdff;
+    border-radius: 2dp;
+}
+
+#browser-action-eyebrow {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2dp;
+}
+
+#action-target-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #1f3554;
+    border-radius: 12dp;
+    padding: 10dp 14dp;
+}
+
+.action-target-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+.action-target-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+    overflow: hidden;
+}
+
+.action-target-title {
+    font-size: 16dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.action-target-sub {
+    font-size: 12dp;
+    color: #7e97b8;
+}
+
+.action-clip-badge {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #0d2847;
+    border-width: 1dp;
+    border-color: #00cdff66;
+    border-radius: 8dp;
+    padding: 6dp 12dp;
+}
+
+.action-clip-icon {
+    width: 16dp;
+    height: 16dp;
+}
+
+.action-clip-text {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#browser-action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+}
+
+.action-row {
+    height: 48dp;
+    border-radius: 12dp;
+    background-color: #101a2b;
+    border-width: 1.5dp;
+    border-color: #1a2a42;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 14dp;
+    gap: 12dp;
+}
+
+.action-row-focused {
+    background-color: #0d2545;
+    border-color: #00cdff;
+    border-width: 2dp;
+}
+
+.action-row-focused.action-row-danger-slot {
+    background-color: #381216;
+    border-color: #ff5a4f;
+    border-width: 2dp;
+}
+
+.action-row-disabled {
+    opacity: 0.35;
+}
+
+.act-icon-box {
+    width: 32dp;
+    height: 32dp;
+    border-radius: 8dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-row-focused .act-icon-box {
+    background-color: #00cdff33;
+}
+
+.action-row-focused.action-row-danger-slot .act-icon-box {
+    background-color: #ff5a4f33;
+}
+
+.act-icon-img {
+    width: 18dp;
+    height: 18dp;
+}
+
+.act-text-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+}
+
+.act-label {
+    font-size: 14.5dp;
+    font-weight: bold;
+    color: #e2e8f0;
+}
+
+.action-row-focused .act-label {
+    color: #ffffff;
+}
+
+.action-row-focused.action-row-danger-slot .act-label {
+    color: #ff8882;
+}
+
+.act-desc {
+    font-size: 11dp;
+    color: #6b82a6;
+}
+
+.action-row-focused .act-desc {
+    color: #b0c9ec;
+}
+
+.action-row-focused.action-row-danger-slot .act-desc {
+    color: #fca5a5;
+}
+
+.act-glyph-badge {
+    width: 24dp;
+    height: 24dp;
+    border-radius: 12dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.act-glyph-img {
+    width: 16dp;
+    height: 16dp;
+}
+
+#browser-action-footer {
+    display: flex;
+    flex-direction: row;
+    gap: 20dp;
+    margin-top: 6dp;
+    justify-content: flex-end;
+}
+
+/* ================== Dedicated File Transfer Progress Modal ================== */
+
+#browser-transfer-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090ee8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 150;
+}
+
+.transfer-scrim-hidden {
+    display: none !important;
+}
+
+#browser-transfer-card {
+    width: 760dp;
+    border-radius: 20dp;
+    background-color: #0c1424fc;
+    border-width: 1.5dp;
+    border-color: #1f3554;
+    padding: 34dp 38dp;
+    display: flex;
+    flex-direction: column;
+    gap: 20dp;
+}
+
+#transfer-header {
+    display: flex;
+    flex-direction: column;
+}
+
+#transfer-top-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+#transfer-op-pill {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #00cdff1f;
+    border-width: 1dp;
+    border-color: #00cdff4d;
+    border-radius: 14dp;
+    padding: 5dp 14dp;
+}
+
+.transfer-pulse-dot {
+    width: 8dp;
+    height: 8dp;
+    border-radius: 4dp;
+    background-color: #00cdff;
+}
+
+#transfer-op-title {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 1.5dp;
+}
+
+#transfer-speed-box {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6dp;
+    background-color: #08291f;
+    border-width: 1dp;
+    border-color: #10b98166;
+    border-radius: 12dp;
+    padding: 4dp 14dp;
+}
+
+.transfer-speed-icon {
+    font-size: 12dp;
+    color: #34d399;
+}
+
+#transfer-speed-pill {
+    font-size: 14dp;
+    font-weight: bold;
+    color: #34d399;
+    letter-spacing: 0.5dp;
+}
+
+#transfer-item-title {
+    font-size: 24dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    margin-top: 14dp;
+}
+
+#transfer-paths-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+    margin-top: 12dp;
+    background-color: #101a2b;
+    border-width: 1dp;
+    border-color: #1a2a42;
+    border-radius: 10dp;
+    padding: 10dp 14dp;
+}
+
+.transfer-path-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10dp;
+}
+
+.transfer-path-tag {
+    font-size: 10.5dp;
+    font-weight: bold;
+    color: #5a7396;
+    letter-spacing: 1.2dp;
+    width: 38dp;
+}
+
+.transfer-path-val {
+    font-size: 13dp;
+    color: #c2d2e8;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    flex: 1;
+}
+
+#transfer-body {
+    display: flex;
+    flex-direction: column;
+    margin-top: 4dp;
+}
+
+#transfer-hero-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 12dp;
+}
+
+.transfer-hero-pct {
+    font-size: 46dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 0.5dp;
+    line-height: 46dp;
+}
+
+#transfer-meta-stats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4dp;
+}
+
+.transfer-meta-pill {
+    font-size: 13.5dp;
+    font-weight: bold;
+    color: #c2d2e8;
+}
+
+#transfer-track {
+    width: 684dp;
+    height: 14dp;
+    background-color: #131f33;
+    border-width: 1dp;
+    border-color: #223756;
+    border-radius: 7dp;
+    overflow: hidden;
+    position: relative;
+}
+
+#transfer-fill {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: #00cdff;
+    border-radius: 6dp;
+}
+
+#transfer-footer {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    margin-top: 12dp;
+}

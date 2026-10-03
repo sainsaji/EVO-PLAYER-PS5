@@ -29,6 +29,7 @@
 #define UI_TMP_PATH "/mnt/usb0/evo_ui.json.tmp"
 
 extern int    screen;   /* main.c */
+extern void   evo_iobench_run(const char *spec);   /* evo_iobench.c */
 
 static long long now_ms_local(void)
 {
@@ -121,6 +122,13 @@ static void run_command(const char *line)
     }
     if (strncmp(buf, "play ", 5) == 0) {
         evo_open_media_path(buf + 5);
+        return;
+    }
+    if (strncmp(buf, "iobench", 7) == 0) {
+        const char *arg = buf + 7;
+        while (*arg == ' ')
+            ++arg;
+        evo_iobench_run(arg);
         return;
     }
     if (strcmp(buf, "upcompare") == 0) {

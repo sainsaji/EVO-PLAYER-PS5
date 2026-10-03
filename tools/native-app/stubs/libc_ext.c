@@ -87,3 +87,19 @@ int sendmmsg(int s, void *msgvec, unsigned int vlen, int flags)
     errno = ENOSYS;
     return -1;
 }
+
+/* ------------------------------------------------ posix_fadvise / fallocate -- */
+/* The PS5 kernel does not wire posix_fadvise or posix_fallocate syscalls for
+ * app-modules; calling them faults (SIGSYS / 0xa002030a SYSTEM_ILLEGAL_FUNCTION_CALL).
+ * Stubbing them here prevents libc.a's raw-syscall implementations from being linked. */
+int posix_fadvise(int fd, off_t offset, off_t len, int advice)
+{
+    (void)fd; (void)offset; (void)len; (void)advice;
+    return 0;
+}
+
+int posix_fallocate(int fd, off_t offset, off_t len)
+{
+    (void)fd; (void)offset; (void)len;
+    return 0;
+}

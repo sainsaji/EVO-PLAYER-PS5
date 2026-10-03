@@ -439,6 +439,7 @@ bool Application::initServices() {
     m_surroundTestService = std::make_unique<SurroundTestService>();
     m_fileSystemBrowser = std::make_unique<FileSystemBrowser>();
     m_playbackController = std::make_unique<PlaybackController>();
+    m_fileTransferService = std::make_unique<FileTransferService>();
     m_screenManager = std::make_unique<ScreenManager>();
 
     m_soundEffectEngine->initialize();
@@ -1079,9 +1080,10 @@ int Application::run() {
         }
         if (m_softClose) {
             if (m_softCloseFrames == 0) {
-                if (m_playbackController) m_playbackController->stopPlayback();
+                if (m_playbackController)  m_playbackController->stopPlayback();
                 if (m_surroundTestService) m_surroundTestService->stop();
                 if (m_soundEffectEngine)   m_soundEffectEngine->shutdown();
+                if (m_fileTransferService) m_fileTransferService->cancelTransfer();
                 pp_playback_shutdown(&g_pp_pb);
                 if (evo_agc_runtime_is_120hz()) {
                     evo_agc_runtime_set_120hz(0);

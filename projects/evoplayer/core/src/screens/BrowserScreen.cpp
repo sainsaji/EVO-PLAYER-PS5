@@ -99,6 +99,213 @@ void BrowserScreen::handleAddFtpHost(const std::string& hostStr) {
     toast("FTP ADDED", share.name.c_str());
 }
 
+static void OnRenameSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleActionRename(text);
+}
+
+static void OnNewFolderSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleActionNewFolder(text);
+}
+
+void BrowserScreen::handleActionRename(const std::string& newName) {
+    std::string trimmed = newName;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty() || trimmed == m_actionTargetName) return;
+
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (transferService && !m_actionTargetPath.empty()) {
+        bool ok = transferService->renameItem(m_actionTargetPath, trimmed);
+        if (ok) {
+            toast("RENAMED", trimmed.c_str());
+            evo_feedback(EVO_FB_CONFIRM);
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser) {
+                browser->refresh();
+                resetSelection();
+            }
+        } else {
+            toast("ERROR", "Rename failed");
+            evo_feedback(EVO_FB_ERROR);
+        }
+    }
+}
+
+void BrowserScreen::handleActionNewFolder(const std::string& folderName) {
+    std::string trimmed = folderName;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty()) return;
+
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    std::string currentPath = browser ? browser->getCurrentPath() : "";
+    if (currentPath.empty()) {
+        toast("ERROR", "Invalid path");
+        return;
+    }
+
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (transferService) {
+        bool ok = transferService->createDirectory(currentPath, trimmed);
+        if (ok) {
+            toast("FOLDER CREATED", trimmed.c_str());
+            evo_feedback(EVO_FB_CONFIRM);
+            if (browser) {
+                browser->refresh();
+                resetSelection();
+            }
+        } else {
+            toast("ERROR", "Could not create folder");
+            evo_feedback(EVO_FB_ERROR);
+        }
+    }
+}
+
+void BrowserScreen::openActionMenu() {
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    std::string currentPath = browser ? browser->getCurrentPath() : "";
+
+    if (m_focusPane == BrowserFocusPane::Grid && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
+        const auto& item = m_items[m_selectedIndex];
+        m_actionTargetName = item.name;
+        m_actionTargetPath = item.fullPath;
+        m_actionTargetIsDir = (item.category == FileCategory::Folder);
+    } else {
+        if (!currentPath.empty()) {
+            size_t slash = currentPath.find_last_of('/');
+            if (slash != std::string::npos && slash + 1 < currentPath.size()) {
+                m_actionTargetName = currentPath.substr(slash + 1);
+            } else {
+                m_actionTargetName = currentPath;
+            }
+            m_actionTargetPath = currentPath;
+            m_actionTargetIsDir = true;
+        } else {
+            m_actionTargetName = "None";
+            m_actionTargetPath.clear();
+            m_actionTargetIsDir = false;
+        }
+    }
+
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (transferService && transferService->hasClipboardItem() && (m_actionTargetIsDir || m_actionTargetPath.empty())) {
+        m_actionMenuFocused = 2; // Default to Paste if clipboard has content
+    } else {
+        m_actionMenuFocused = 0; // Default to Copy
+    }
+
+    m_actionMenuOpen = true;
+    evo_feedback(EVO_FB_CONFIRM);
+}
+
+void BrowserScreen::performAction(int actionIndex) {
+    auto transferService = Application::getInstance().getFileTransferService();
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    std::string currentPath = browser ? browser->getCurrentPath() : "";
+
+    switch (actionIndex) {
+        case 0: { // Copy
+            if (!transferService || m_actionTargetPath.empty()) {
+                toast("ERROR", "No file selected");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            transferService->copyToClipboard(m_actionTargetPath, m_actionTargetName, m_actionTargetIsDir);
+            m_actionMenuOpen = false;
+            toast("CLIPBOARD", ("Copied: " + m_actionTargetName).c_str());
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 1: { // Cut (Move)
+            if (!transferService || m_actionTargetPath.empty()) {
+                toast("ERROR", "No file selected");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            transferService->cutToClipboard(m_actionTargetPath, m_actionTargetName, m_actionTargetIsDir);
+            m_actionMenuOpen = false;
+            toast("CLIPBOARD", ("Cut: " + m_actionTargetName).c_str());
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 2: { // Paste
+            if (!transferService || !transferService->hasClipboardItem()) {
+                toast("PASTE", "Clipboard is empty");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            std::string destDir = currentPath;
+            if (destDir.empty()) {
+                toast("ERROR", "Cannot paste at root");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            m_actionMenuOpen = false;
+            bool ok = transferService->startPaste(destDir);
+            if (ok) {
+                m_showTransferDialog = true;
+                evo_feedback(EVO_FB_CONFIRM);
+            } else {
+                toast("ERROR", "Could not start paste");
+                evo_feedback(EVO_FB_ERROR);
+            }
+            break;
+        }
+        case 3: { // Rename
+            if (!transferService || m_actionTargetPath.empty()) {
+                toast("ERROR", "No item to rename");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            m_actionMenuOpen = false;
+            evo_keyboard_open("Rename item...", m_actionTargetName.c_str(), 128, OnRenameSubmitted, this);
+            break;
+        }
+        case 4: { // Delete
+            if (!transferService || m_actionTargetPath.empty()) {
+                toast("ERROR", "No item to delete");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            m_actionMenuOpen = false;
+            m_showDeleteConfirm = true;
+            m_deleteConfirmButton = 0; // Default to Cancel for safety
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 5: { // New Folder
+            if (currentPath.empty()) {
+                toast("ERROR", "Cannot create folder here");
+                evo_feedback(EVO_FB_BOUNDARY);
+                return;
+            }
+            m_actionMenuOpen = false;
+            evo_keyboard_open("New folder name...", "New Folder", 64, OnNewFolderSubmitted, this);
+            break;
+        }
+        case 6: // Cancel
+        default: {
+            m_actionMenuOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            break;
+        }
+    }
+}
+
 BrowserScreen::BrowserScreen()
     : StatefulScreen("BrowserScreen")
     , m_browserFsm(BrowserScreenState::Browsing, "BrowserFSM")
@@ -530,10 +737,22 @@ void BrowserScreen::onEnter() {
     if (!evo_jailbreak_is_open() && (m_activeSource == 0 || m_activeSource == 1)) {
         m_focusPane = BrowserFocusPane::Sidebar;
     }
+
+    m_actionMenuOpen = false;
+    m_showDeleteConfirm = false;
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (transferService && transferService->isBusy()) {
+        m_showTransferDialog = true;
+    } else {
+        m_showTransferDialog = false;
+    }
 }
 
 void BrowserScreen::onExit() {
     StatefulScreen::onExit();
+    m_actionMenuOpen = false;
+    m_showDeleteConfirm = false;
+    m_showTransferDialog = false;
     auto browser = Application::getInstance().getFileSystemBrowser();
     if (browser) {
         browser->saveLastFolder();
@@ -770,6 +989,85 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     (void)held;
     (void)released;
 
+    // 0. Active Transfer Dialog - intercept all input
+    if (m_showTransferDialog) {
+        if (pressed & (PadButtons::Circle | PadButtons::Cross)) {
+            auto ts = Application::getInstance().getFileTransferService();
+            if (ts) {
+                ts->cancelTransfer();
+                toast("TRANSFER", "Cancelling...");
+            }
+        }
+        return true;
+    }
+
+    // 0b. Delete Confirmation Modal
+    if (m_showDeleteConfirm) {
+        if (pressed & (PadButtons::Left | PadButtons::Right)) {
+            m_deleteConfirmButton = (m_deleteConfirmButton == 0) ? 1 : 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            m_showDeleteConfirm = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            if (m_deleteConfirmButton == 0) { // Cancel
+                m_showDeleteConfirm = false;
+                evo_feedback(EVO_FB_CANCEL);
+            } else { // Confirm Delete
+                m_showDeleteConfirm = false;
+                auto ts = Application::getInstance().getFileTransferService();
+                if (ts && !m_actionTargetPath.empty()) {
+                    bool ok = ts->startDelete(m_actionTargetPath, m_actionTargetIsDir);
+                    if (ok) {
+                        m_showTransferDialog = true;
+                        evo_feedback(EVO_FB_CONFIRM);
+                    } else {
+                        toast("ERROR", "Could not start delete");
+                        evo_feedback(EVO_FB_ERROR);
+                    }
+                }
+            }
+            return true;
+        }
+        return true;
+    }
+
+    // 0c. File Operations Action Menu Modal
+    if (m_actionMenuOpen) {
+        if (pressed & PadButtons::Up) {
+            if (m_actionMenuFocused > 0) m_actionMenuFocused--;
+            else m_actionMenuFocused = 6;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            if (m_actionMenuFocused < 6) m_actionMenuFocused++;
+            else m_actionMenuFocused = 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            m_actionMenuOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            performAction(m_actionMenuFocused);
+            return true;
+        }
+        return true;
+    }
+
+    // Options button toggles action menu
+    if (pressed & PadButtons::Options) {
+        openActionMenu();
+        return true;
+    }
+
     // Sidebar navigation pane
     if (m_focusPane == BrowserFocusPane::Sidebar) {
         if (pressed & PadButtons::Up) {
@@ -989,10 +1287,47 @@ void BrowserScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
     m_browserFsm.update(deltaMs);
 
+    // Poll active file transfer operations
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (transferService && m_showTransferDialog) {
+        TransferProgress prog = transferService->getProgress();
+        if (prog.status == TransferStatus::Completed) {
+            m_showTransferDialog = false;
+            toast("COMPLETED", "File operation completed!");
+            evo_feedback(EVO_FB_CONFIRM);
+            transferService->resetStatus();
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser) {
+                browser->refresh();
+                resetSelection();
+            }
+        } else if (prog.status == TransferStatus::Failed) {
+            m_showTransferDialog = false;
+            toast("TRANSFER FAILED", prog.errorMessage.empty() ? "Operation failed" : prog.errorMessage.c_str());
+            evo_feedback(EVO_FB_ERROR);
+            transferService->resetStatus();
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser) {
+                browser->refresh();
+                resetSelection();
+            }
+        } else if (prog.status == TransferStatus::Cancelled) {
+            m_showTransferDialog = false;
+            toast("CANCELLED", "Operation was cancelled");
+            evo_feedback(EVO_FB_CANCEL);
+            transferService->resetStatus();
+            auto browser = Application::getInstance().getFileSystemBrowser();
+            if (browser) {
+                browser->refresh();
+                resetSelection();
+            }
+        }
+    }
+
     m_settleMs += deltaMs;
     auto coverService = Application::getInstance().getCoverArtService();
 
-    if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
+    if (!m_showTransferDialog && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
         const auto& item = m_items[m_selectedIndex];
         bool isDir = (item.category == FileCategory::Folder);
         if (m_settleMs >= 200.0) {
@@ -1233,7 +1568,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.rows[i].detail = item.detail.c_str();
 
         const uint32_t* art = nullptr;
-        if (coverService && item.fullPath.find("://") == std::string::npos) {
+        if (!m_showTransferDialog && coverService && item.fullPath.find("://") == std::string::npos) {
             art = coverService->peekCoverArt(item.fullPath);
             bool tried = coverService->hasTriedCoverArt(item.fullPath);
             if (!art && !tried && coverBudget > 0) {
@@ -1349,8 +1684,134 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.ins_probing = (m_settleMs >= 200.0 && curItem.fullPath.find("://") == std::string::npos && m_cachedMetadata.filePath != curItem.fullPath && curItem.category != FileCategory::Folder) ? 1 : 0;
     }
 
+    auto transferService = Application::getInstance().getFileTransferService();
+    params.action_menu_open = m_actionMenuOpen ? 1 : 0;
+    params.action_menu_focused = m_actionMenuFocused;
+    params.action_menu_target = m_actionTargetName.c_str();
+    params.action_paste_enabled = (transferService && transferService->hasClipboardItem()) ? 1 : 0;
+
+    if (m_actionTargetIsDir) {
+        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Directory");
+    } else if (m_selectedIndex >= 0 && m_selectedIndex < totalCount) {
+        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "%s • %s", m_insExt, m_statusSize[0] ? m_statusSize : "File");
+    } else {
+        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Current Directory");
+    }
+    params.action_target_sub = m_actionTargetSubBuf;
+
+    if (transferService && transferService->hasClipboardItem()) {
+        const auto& clip = transferService->getClipboard();
+        std::snprintf(m_actionClipboardBuf, sizeof(m_actionClipboardBuf), "CLIPBOARD: %s (%s)",
+                      clip.name.c_str(), clip.action == ClipboardAction::Cut ? "Move" : "Copy");
+        params.action_clipboard_info = m_actionClipboardBuf;
+    } else {
+        params.action_clipboard_info = nullptr;
+    }
+
+    // Populate Transfer Progress Modal parameters
+    if (m_showTransferDialog && transferService) {
+        TransferProgress prog = transferService->getProgress();
+        params.transfer_modal_open = 1;
+
+        if (prog.opType == FileOpType::Copy) {
+            std::snprintf(m_transferTitleBuf, sizeof(m_transferTitleBuf), "COPYING TO STORAGE");
+        } else if (prog.opType == FileOpType::Move) {
+            std::snprintf(m_transferTitleBuf, sizeof(m_transferTitleBuf), "MOVING FILE");
+        } else if (prog.opType == FileOpType::Delete) {
+            std::snprintf(m_transferTitleBuf, sizeof(m_transferTitleBuf), "DELETING FROM STORAGE");
+        } else {
+            std::snprintf(m_transferTitleBuf, sizeof(m_transferTitleBuf), "FILE OPERATION");
+        }
+        params.transfer_op_title = m_transferTitleBuf;
+        params.transfer_item_name = prog.currentItemName.empty() ? "Processing..." : prog.currentItemName.c_str();
+
+        // Speed format
+        double speedMB = prog.currentSpeedBps / (1024.0 * 1024.0);
+        if (speedMB >= 100.0) {
+            std::snprintf(m_transferSpeedBuf, sizeof(m_transferSpeedBuf), "%.0f MB/s", speedMB);
+        } else if (speedMB >= 0.1) {
+            std::snprintf(m_transferSpeedBuf, sizeof(m_transferSpeedBuf), "%.1f MB/s", speedMB);
+        } else if (prog.currentSpeedBps > 0.0) {
+            std::snprintf(m_transferSpeedBuf, sizeof(m_transferSpeedBuf), "%.0f KB/s", prog.currentSpeedBps / 1024.0);
+        } else {
+            std::snprintf(m_transferSpeedBuf, sizeof(m_transferSpeedBuf), "0.0 MB/s");
+        }
+        params.transfer_speed_str = m_transferSpeedBuf;
+
+        // Size format (Transferred / Total)
+        double transferredMB = static_cast<double>(prog.bytesTransferred) / (1024.0 * 1024.0);
+        double totalMB = static_cast<double>(prog.totalBytes) / (1024.0 * 1024.0);
+        if (totalMB >= 1024.0) {
+            std::snprintf(m_transferBytesBuf, sizeof(m_transferBytesBuf), "%.2f GB / %.2f GB",
+                          transferredMB / 1024.0, totalMB / 1024.0);
+        } else if (totalMB > 0.0) {
+            std::snprintf(m_transferBytesBuf, sizeof(m_transferBytesBuf), "%.1f MB / %.1f MB",
+                          transferredMB, totalMB);
+        } else if (prog.totalFiles > 0) {
+            std::snprintf(m_transferBytesBuf, sizeof(m_transferBytesBuf), "%u of %u items",
+                          prog.filesTransferred, prog.totalFiles);
+        } else {
+            std::snprintf(m_transferBytesBuf, sizeof(m_transferBytesBuf), "Scanning filesystem...");
+        }
+        params.transfer_bytes_str = m_transferBytesBuf;
+
+        // ETA format
+        if (prog.estimatedSecondsRemaining > 0) {
+            int etaSec = prog.estimatedSecondsRemaining;
+            if (etaSec >= 60) {
+                std::snprintf(m_transferEtaBuf, sizeof(m_transferEtaBuf), "ETA %dm %02ds", etaSec / 60, etaSec % 60);
+            } else {
+                std::snprintf(m_transferEtaBuf, sizeof(m_transferEtaBuf), "ETA %ds", etaSec);
+            }
+        } else if (prog.totalFiles > 1) {
+            std::snprintf(m_transferEtaBuf, sizeof(m_transferEtaBuf), "Item %u of %u", prog.filesTransferred + 1, prog.totalFiles);
+        } else {
+            std::snprintf(m_transferEtaBuf, sizeof(m_transferEtaBuf), "In progress...");
+        }
+        params.transfer_eta_str = m_transferEtaBuf;
+
+        // Percentage
+        std::snprintf(m_transferPercentBuf, sizeof(m_transferPercentBuf), "%.0f%%", prog.progressPercent);
+        params.transfer_percent_str = m_transferPercentBuf;
+        params.transfer_progress_pct = prog.progressPercent;
+
+        // Paths
+        std::snprintf(m_transferSrcBuf, sizeof(m_transferSrcBuf), "%s", prog.currentSourcePath.empty() ? "-" : prog.currentSourcePath.c_str());
+        std::snprintf(m_transferDstBuf, sizeof(m_transferDstBuf), "%s", prog.currentDestPath.empty() ? "-" : prog.currentDestPath.c_str());
+        params.transfer_src_path = m_transferSrcBuf;
+        params.transfer_dst_path = m_transferDstBuf;
+    } else {
+        params.transfer_modal_open = 0;
+    }
+
     evo_rmlui_update_browser(&params);
     evo_rmlui_render_browser(framebuffer, width, height);
+
+    // Render Delete Confirmation Dialog if open
+    if (m_showDeleteConfirm) {
+        evo_rmlui_dialog_params_t dlg;
+        std::memset(&dlg, 0, sizeof(dlg));
+        dlg.eyebrow = "DELETE PERMANENTLY";
+        dlg.title = m_actionTargetName.c_str();
+        std::snprintf(m_transferDetailBuf, sizeof(m_transferDetailBuf),
+                      "Are you sure you want to permanently delete this %s?",
+                      m_actionTargetIsDir ? "folder and all its contents" : "file");
+        dlg.detail = m_transferDetailBuf;
+        dlg.progress_pct = -1.0;
+        dlg.action_count = 2;
+        dlg.focused_action = m_deleteConfirmButton;
+
+        dlg.actions[0].label = "CANCEL";
+        dlg.actions[0].icon_path = "../icons/btn_circle.png";
+        dlg.actions[0].is_primary = (m_deleteConfirmButton == 0) ? 1 : 0;
+
+        dlg.actions[1].label = "DELETE";
+        dlg.actions[1].icon_path = "../icons/btn_cross.png";
+        dlg.actions[1].is_primary = (m_deleteConfirmButton == 1) ? 1 : 0;
+
+        evo_rmlui_update_dialog(&dlg);
+        evo_rmlui_render_dialog(framebuffer, width, height);
+    }
 }
 
 } // namespace evo

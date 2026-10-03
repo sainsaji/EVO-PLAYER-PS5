@@ -1500,6 +1500,65 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (Rml::Element* e = el("bhint-back")) {
         e->SetProperty("display", (state.at_root && state.sidebar_focused) ? "none" : "flex");
     }
+
+    /* 5. File Operations Action Menu Modal */
+    if (Rml::Element* scrim = el("browser-action-scrim")) {
+        scrim->SetClass("action-scrim-hidden", !state.action_menu_open);
+        scrim->SetProperty("display", state.action_menu_open ? "flex" : "none");
+    }
+    if (state.action_menu_open) {
+        if (Rml::Element* target = el("browser-action-target")) {
+            target->SetInnerRML(state.action_menu_target.empty() ? "Current Directory" : state.action_menu_target);
+        }
+        if (Rml::Element* sub = el("browser-action-target-sub")) {
+            sub->SetInnerRML(state.action_target_sub.empty() ? "Directory" : state.action_target_sub);
+        }
+        if (Rml::Element* clip = el("browser-action-clip-badge")) {
+            if (!state.action_clipboard_info.empty()) {
+                clip->SetProperty("display", "flex");
+                if (Rml::Element* clipTxt = el("browser-action-clip-text")) {
+                    clipTxt->SetInnerRML(state.action_clipboard_info);
+                }
+            } else {
+                clip->SetProperty("display", "none");
+            }
+        }
+        for (int i = 0; i < 7; i++) {
+            if (Rml::Element* row = el("act-row-" + std::to_string(i))) {
+                bool focused = (state.action_menu_focused == i);
+                row->SetClass("action-row-focused", focused);
+                if (i == 4) { // Delete row
+                    row->SetClass("action-row-danger-slot", true);
+                }
+                if (i == 2) { // Paste row
+                    row->SetClass("action-row-disabled", !state.action_paste_enabled);
+                }
+            }
+        }
+    }
+
+    /* 6. File Operations Transfer Progress Modal */
+    if (Rml::Element* tscrim = el("browser-transfer-scrim")) {
+        tscrim->SetClass("transfer-scrim-hidden", !state.transfer_modal_open);
+        tscrim->SetProperty("display", state.transfer_modal_open ? "flex" : "none");
+    }
+    if (state.transfer_modal_open) {
+        if (Rml::Element* e = el("transfer-op-title")) e->SetInnerRML(state.transfer_op_title);
+        if (Rml::Element* e = el("transfer-speed-pill")) e->SetInnerRML(state.transfer_speed_str);
+        if (Rml::Element* e = el("transfer-item-title")) e->SetInnerRML(state.transfer_item_name);
+        if (Rml::Element* e = el("transfer-src-path")) e->SetInnerRML(state.transfer_src_path);
+        if (Rml::Element* e = el("transfer-dst-path")) e->SetInnerRML(state.transfer_dst_path);
+        if (Rml::Element* e = el("transfer-percent-num")) e->SetInnerRML(state.transfer_percent_str);
+        if (Rml::Element* e = el("transfer-bytes-pill")) e->SetInnerRML(state.transfer_bytes_str);
+        if (Rml::Element* e = el("transfer-eta-pill")) e->SetInnerRML(state.transfer_eta_str);
+        if (Rml::Element* fill = el("transfer-fill")) {
+            double pct = state.transfer_progress_pct;
+            if (pct < 0.0) pct = 0.0;
+            if (pct > 100.0) pct = 100.0;
+            fill->SetProperty("width", evo_fmt("%.1f%%", pct));
+            fill->SetProperty("background-color", accent);
+        }
+    }
 }
 
 void EvoRmlApp::RenderBrowser(uint32_t* framebuffer, int width, int height) {
@@ -2988,7 +3047,7 @@ void EvoRmlApp::UpdateDialogState(const EvoDialogState& state) {
     if (el_track && el_fill) {
         if (state.progress_pct >= 0.0) {
             el_track->SetProperty("display", "block");
-            double pct = state.progress_pct * 100.0;
+            double pct = (state.progress_pct <= 1.0) ? (state.progress_pct * 100.0) : state.progress_pct;
             if (pct < 0.0) pct = 0.0;
             if (pct > 100.0) pct = 100.0;
             el_fill->SetProperty("width", evo_fmt("%.1f%%", pct));

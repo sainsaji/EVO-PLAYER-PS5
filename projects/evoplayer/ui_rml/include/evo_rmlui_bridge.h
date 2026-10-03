@@ -370,6 +370,26 @@ typedef struct {
     const char* status_acodec;
     const char* status_duration;
     const char* status_size;
+
+    /* File Operations Action Menu */
+    int         action_menu_open;
+    int         action_menu_focused;
+    const char* action_menu_target;
+    int         action_paste_enabled;
+    const char* action_target_sub;
+    const char* action_clipboard_info;
+
+    /* File Operations Transfer Progress Modal */
+    int         transfer_modal_open;
+    const char* transfer_op_title;
+    const char* transfer_item_name;
+    const char* transfer_speed_str;
+    const char* transfer_bytes_str;
+    const char* transfer_eta_str;
+    const char* transfer_percent_str;
+    double      transfer_progress_pct;
+    const char* transfer_src_path;
+    const char* transfer_dst_path;
 } evo_rmlui_browser_params_t;
 
 /*

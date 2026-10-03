@@ -399,6 +399,24 @@ struct EvoBrowserState {
     std::string status_duration;
     std::string status_size;
 
+    bool action_menu_open = false;
+    int action_menu_focused = 0;
+    std::string action_menu_target;
+    bool action_paste_enabled = false;
+    std::string action_target_sub;
+    std::string action_clipboard_info;
+
+    bool transfer_modal_open = false;
+    std::string transfer_op_title;
+    std::string transfer_item_name;
+    std::string transfer_speed_str;
+    std::string transfer_bytes_str;
+    std::string transfer_eta_str;
+    std::string transfer_percent_str;
+    double transfer_progress_pct = 0.0;
+    std::string transfer_src_path;
+    std::string transfer_dst_path;
+
     bool operator==(const EvoBrowserState& o) const {
         return path == o.path && title == o.title && at_root == o.at_root && rail_focused == o.rail_focused &&
                sidebar_focused == o.sidebar_focused && sidebar_index == o.sidebar_index && active_source == o.active_source &&
@@ -413,7 +431,15 @@ struct EvoBrowserState {
                ins_preview_h == o.ins_preview_h && ins_props == o.ins_props &&
                status_res == o.status_res && status_vcodec == o.status_vcodec &&
                status_acodec == o.status_acodec && status_duration == o.status_duration &&
-               status_size == o.status_size;
+               status_size == o.status_size &&
+               action_menu_open == o.action_menu_open && action_menu_focused == o.action_menu_focused &&
+               action_menu_target == o.action_menu_target && action_paste_enabled == o.action_paste_enabled &&
+               action_target_sub == o.action_target_sub && action_clipboard_info == o.action_clipboard_info &&
+               transfer_modal_open == o.transfer_modal_open && transfer_op_title == o.transfer_op_title &&
+               transfer_item_name == o.transfer_item_name && transfer_speed_str == o.transfer_speed_str &&
+               transfer_bytes_str == o.transfer_bytes_str && transfer_eta_str == o.transfer_eta_str &&
+               transfer_percent_str == o.transfer_percent_str && transfer_progress_pct == o.transfer_progress_pct &&
+               transfer_src_path == o.transfer_src_path && transfer_dst_path == o.transfer_dst_path;
     }
     bool operator!=(const EvoBrowserState& o) const { return !(*this == o); }
 };

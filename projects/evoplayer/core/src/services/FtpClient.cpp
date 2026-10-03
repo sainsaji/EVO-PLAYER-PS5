@@ -206,7 +206,7 @@ bool FtpClient::connectServer(const std::string& host, int port,
     return true;
 }
 
-int FtpClient::openDataConnection() {
+int FtpClient::openDataConnection(int timeoutSecOverride) {
     if (sendCommand("PASV") != 0) {
         m_lastError = "Failed to send PASV";
         return -1;
@@ -248,8 +248,147 @@ int FtpClient::openDataConnection() {
     int dataSock = createConnectedSocket(targetHost, dataPort, m_timeoutSec);
     if (dataSock < 0) {
         m_lastError = "Failed to open data socket to " + targetHost + ":" + std::to_string(dataPort);
+        return dataSock;
+    }
+
+    if (timeoutSecOverride > 0) {
+        struct timeval tv;
+        tv.tv_sec = timeoutSecOverride;
+        tv.tv_usec = 0;
+        setsockopt(dataSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(dataSock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     }
     return dataSock;
+}
+
+bool FtpClient::removeFile(const std::string& remotePath) {
+    if (m_controlSock < 0) {
+        m_lastError = "Not connected";
+        return false;
+    }
+    if (sendCommand("DELE " + remotePath) != 0) {
+        m_lastError = "Failed to send DELE";
+        return false;
+    }
+    int code = readResponse();
+    if (code < 200 || code >= 300) {
+        m_lastError = "DELE failed (code " + std::to_string(code) + ")";
+        return false;
+    }
+    return true;
+}
+
+bool FtpClient::storeFile(const std::string& remotePath, const std::string& localPath,
+                          StoreProgressFn onProgress, void* user, int dataTimeoutSec) {
+    if (m_controlSock < 0) {
+        m_lastError = "Not connected";
+        return false;
+    }
+
+    int srcFd = open(localPath.c_str(), O_RDONLY);
+    if (srcFd < 0) {
+        m_lastError = "Cannot open source " + localPath + " (errno " + std::to_string(errno) + ")";
+        return false;
+    }
+
+    const size_t kChunk = 1024 * 1024;
+    char* buf = static_cast<char*>(std::malloc(kChunk));
+    if (!buf) {
+        m_lastError = "Out of memory for the transfer buffer";
+        close(srcFd);
+        return false;
+    }
+
+    int dataSock = openDataConnection(dataTimeoutSec);
+    if (dataSock < 0) {
+        std::free(buf);
+        close(srcFd);
+        return false;
+    }
+
+    if (sendCommand("STOR " + remotePath) != 0) {
+        m_lastError = "Failed to send STOR";
+        close(dataSock);
+        std::free(buf);
+        close(srcFd);
+        return false;
+    }
+
+    int code = readResponse();
+    if (code != 150 && code != 125) {
+        m_lastError = "STOR rejected (code " + std::to_string(code) + ")";
+        close(dataSock);
+        std::free(buf);
+        close(srcFd);
+        return false;
+    }
+
+    uint64_t totalSent = 0;
+    bool     ok = true;
+    bool     cancelled = false;
+
+    while (true) {
+        ssize_t got = read(srcFd, buf, kChunk);
+        if (got == 0) break;                      /* end of file */
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            m_lastError = "Source read failed (errno " + std::to_string(errno) + ")";
+            ok = false;
+            break;
+        }
+
+        ssize_t off = 0;
+        while (off < got) {
+            ssize_t sent = send(dataSock, buf + off, static_cast<size_t>(got - off), 0);
+            if (sent > 0) {
+                off += sent;
+                continue;
+            }
+            /* SO_SNDTIMEO expiry looks like EAGAIN: the server is just busy
+             * writing, so keep waiting rather than failing the transfer. */
+            if (sent < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (onProgress && !onProgress(user, totalSent, 0)) {
+                    cancelled = true;
+                    break;
+                }
+                continue;
+            }
+            m_lastError = "Data send failed (errno " + std::to_string(errno) + ")";
+            ok = false;
+            break;
+        }
+        if (!ok || cancelled) break;
+
+        totalSent += static_cast<uint64_t>(got);
+        if (onProgress && !onProgress(user, totalSent, static_cast<uint32_t>(got))) {
+            cancelled = true;
+            break;
+        }
+    }
+
+    /* Closing the data socket is what tells the server the body is complete, so
+     * on cancel we close it early and then clear the aborted reply. */
+    close(dataSock);
+    std::free(buf);
+    close(srcFd);
+
+    code = readResponse();
+    if (cancelled) {
+        m_lastError = "Cancelled";
+        removeFile(remotePath);
+        return false;
+    }
+    if (!ok) {
+        removeFile(remotePath);
+        return false;
+    }
+    if (code < 200 || code >= 300) {
+        m_lastError = "Transfer not accepted (code " + std::to_string(code) + ")";
+        removeFile(remotePath);
+        return false;
+    }
+
+    return true;
 }
 
 bool FtpClient::parseUnixLine(const std::string& line, FtpFileEntry& entry) {

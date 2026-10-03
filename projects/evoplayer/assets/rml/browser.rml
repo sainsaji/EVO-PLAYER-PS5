@@ -274,7 +274,162 @@
                     <div class="glyph-badge-pill"><span class="glyph-pill-text">L2 / R2</span></div>
                     <span class="footer-text">A-Z</span>
                 </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge-pill"><span class="glyph-pill-text">OPTIONS</span></div>
+                    <span class="footer-text">OPERATIONS</span>
+                </div>
                 <div id="browser-footer-version">v0.10.0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Operations Action Menu Scrim & Modal -->
+    <div id="browser-action-scrim" class="action-scrim-hidden">
+        <div id="browser-action-card">
+            <div id="browser-action-header">
+                <div class="action-header-badge">
+                    <div class="action-indicator"></div>
+                    <span id="browser-action-eyebrow">OPTIONS  •  FILE OPERATIONS</span>
+                </div>
+                <div id="action-target-card">
+                    <img id="action-target-icon" src="../icons/icon_folder.png" class="action-target-icon"/>
+                    <div class="action-target-col">
+                        <span id="browser-action-target" class="action-target-title">Current Directory</span>
+                        <span id="browser-action-target-sub" class="action-target-sub">Directory</span>
+                    </div>
+                </div>
+                <div id="browser-action-clip-badge" class="action-clip-badge">
+                    <img src="../icons/icon_recent_files.png" class="action-clip-icon"/>
+                    <span id="browser-action-clip-text" class="action-clip-text">CLIPBOARD</span>
+                </div>
+            </div>
+            <div id="browser-action-list">
+                <!-- 0: Copy -->
+                <div id="act-row-0" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_browse_usb.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Copy</span>
+                        <span class="act-desc">Copy item to clipboard</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 1: Cut (Move) -->
+                <div id="act-row-1" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_recent_files.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Cut (Move)</span>
+                        <span class="act-desc">Move item to clipboard for relocation</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 2: Paste -->
+                <div id="act-row-2" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Paste</span>
+                        <span class="act-desc">Paste clipboard item into this folder</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 3: Rename -->
+                <div id="act-row-3" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_type.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Rename</span>
+                        <span class="act-desc">Change file or folder name</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 4: Delete -->
+                <div id="act-row-4" class="action-row action-row-danger-slot">
+                    <div class="act-icon-box act-icon-danger"><img src="../icons/icon_trash.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label act-label-danger">Delete</span>
+                        <span class="act-desc">Permanently remove this item</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 5: New Folder -->
+                <div id="act-row-5" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">New Folder</span>
+                        <span class="act-desc">Create directory in current location</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <!-- 6: Close -->
+                <div id="act-row-6" class="action-row">
+                    <div class="act-icon-box"><img src="../icons/btn_circle.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span class="act-label">Close</span>
+                        <span class="act-desc">Dismiss menu and return to browser</span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_circle.png" class="act-glyph-img"/></div>
+                </div>
+            </div>
+            <div id="browser-action-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SELECT</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">CLOSE</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated File Transfer Modal Scrim -->
+    <div id="browser-transfer-scrim" class="transfer-scrim-hidden">
+        <div id="browser-transfer-card">
+            <!-- Header with Operation Pill & Speed Badge -->
+            <div id="transfer-header">
+                <div id="transfer-top-bar">
+                    <div id="transfer-op-pill">
+                        <div class="transfer-pulse-dot"></div>
+                        <span id="transfer-op-title">COPYING TO STORAGE</span>
+                    </div>
+                    <div id="transfer-speed-box">
+                        <span class="transfer-speed-icon">⚡</span>
+                        <span id="transfer-speed-pill">0.0 MB/s</span>
+                    </div>
+                </div>
+                <div id="transfer-item-title">Processing...</div>
+                <div id="transfer-paths-box">
+                    <div class="transfer-path-row">
+                        <span class="transfer-path-tag">FROM</span>
+                        <span id="transfer-src-path" class="transfer-path-val">/mnt/usb0/...</span>
+                    </div>
+                    <div class="transfer-path-row">
+                        <span class="transfer-path-tag">TO</span>
+                        <span id="transfer-dst-path" class="transfer-path-val">/data/...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hero Progress Section -->
+            <div id="transfer-body">
+                <div id="transfer-hero-row">
+                    <span id="transfer-percent-num" class="transfer-hero-pct">0%</span>
+                    <div id="transfer-meta-stats">
+                        <span id="transfer-bytes-pill" class="transfer-meta-pill">0.0 MB / 0.0 MB</span>
+                        <span id="transfer-eta-pill" class="transfer-meta-pill">Calculating ETA...</span>
+                    </div>
+                </div>
+
+                <div id="transfer-track">
+                    <div id="transfer-fill"></div>
+                </div>
+            </div>
+
+            <!-- Footer with Cancel button -->
+            <div id="transfer-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">CANCEL OPERATION</span>
+                </div>
             </div>
         </div>
     </div>

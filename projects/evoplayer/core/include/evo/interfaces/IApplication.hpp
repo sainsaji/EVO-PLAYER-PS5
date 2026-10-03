@@ -13,6 +13,7 @@ class ISoundEffectEngine;
 class ISurroundTestService;
 class IFileSystemBrowser;
 class IPlaybackController;
+class IFileTransferService;
 class ScreenManager;
 
 /**
@@ -64,6 +65,7 @@ public:
     virtual ISurroundTestService* getSurroundTestService() const = 0;
     virtual IFileSystemBrowser* getFileSystemBrowser() const = 0;
     virtual IPlaybackController* getPlaybackController() const = 0;
+    virtual IFileTransferService* getFileTransferService() const = 0;
     virtual ScreenManager* getScreenManager() const = 0;
 };
 

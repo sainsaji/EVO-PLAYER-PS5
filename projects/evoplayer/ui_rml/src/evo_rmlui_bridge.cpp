@@ -196,6 +196,24 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     state.status_duration = p->status_duration ? p->status_duration : "";
     state.status_size = p->status_size ? p->status_size : "";
 
+    state.action_menu_open = (p->action_menu_open != 0);
+    state.action_menu_focused = p->action_menu_focused;
+    state.action_menu_target = p->action_menu_target ? p->action_menu_target : "";
+    state.action_paste_enabled = (p->action_paste_enabled != 0);
+    state.action_target_sub = p->action_target_sub ? p->action_target_sub : "";
+    state.action_clipboard_info = p->action_clipboard_info ? p->action_clipboard_info : "";
+
+    state.transfer_modal_open = (p->transfer_modal_open != 0);
+    state.transfer_op_title = p->transfer_op_title ? p->transfer_op_title : "";
+    state.transfer_item_name = p->transfer_item_name ? p->transfer_item_name : "";
+    state.transfer_speed_str = p->transfer_speed_str ? p->transfer_speed_str : "";
+    state.transfer_bytes_str = p->transfer_bytes_str ? p->transfer_bytes_str : "";
+    state.transfer_eta_str = p->transfer_eta_str ? p->transfer_eta_str : "";
+    state.transfer_percent_str = p->transfer_percent_str ? p->transfer_percent_str : "";
+    state.transfer_progress_pct = p->transfer_progress_pct;
+    state.transfer_src_path = p->transfer_src_path ? p->transfer_src_path : "";
+    state.transfer_dst_path = p->transfer_dst_path ? p->transfer_dst_path : "";
+
     EvoRmlApp::Instance().UpdateBrowserState(state);
 }
 

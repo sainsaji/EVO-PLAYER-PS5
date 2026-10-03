@@ -11,6 +11,7 @@
 #include "evo/services/SurroundTestService.hpp"
 #include "evo/services/FileSystemBrowser.hpp"
 #include "evo/services/PlaybackController.hpp"
+#include "evo/services/FileTransferService.hpp"
 #include "evo/screens/ScreenManager.hpp"
 #include "evo/fsm/StateMachine.hpp"
 
@@ -62,6 +63,7 @@ public:
     ISurroundTestService* getSurroundTestService() const override { return m_surroundTestService.get(); }
     IFileSystemBrowser* getFileSystemBrowser() const override { return m_fileSystemBrowser.get(); }
     IPlaybackController* getPlaybackController() const override { return m_playbackController.get(); }
+    IFileTransferService* getFileTransferService() const override { return m_fileTransferService.get(); }
     ScreenManager* getScreenManager() const override { return m_screenManager.get(); }
 
     void getLeftStick(float* x, float* y) const {
@@ -100,6 +102,7 @@ private:
     std::unique_ptr<SurroundTestService> m_surroundTestService;
     std::unique_ptr<FileSystemBrowser> m_fileSystemBrowser;
     std::unique_ptr<PlaybackController> m_playbackController;
+    std::unique_ptr<FileTransferService> m_fileTransferService;
     std::unique_ptr<ScreenManager> m_screenManager;
 
     int m_padHandle = -1;
