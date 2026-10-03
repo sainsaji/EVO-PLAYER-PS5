@@ -1782,6 +1782,19 @@ int Application::run() {
          */
         if (uiActive && evo_keyboard_is_open() && !evo_keyboard_is_native_active()) {
             evo_screen_keyboard(m_uiScratch);
+            m_keyboardDrawn = true;
+            swap = true;
+        } else if (uiActive && m_keyboardDrawn) {
+            /*
+             * One last call on the frame after it closes. evo_screen_keyboard()
+             * hides its RmlUi document when the keyboard is shut, but this gate
+             * meant that branch could never run: the document stayed visible,
+             * so #115's `ui` readback went on reporting a keyboard modal over
+             * every screen that followed - the dev remote's view of the UI was
+             * wrong from the first text entry onwards.
+             */
+            evo_screen_keyboard(m_uiScratch);
+            m_keyboardDrawn = false;
             swap = true;
         }
 

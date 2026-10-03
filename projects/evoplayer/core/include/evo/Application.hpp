@@ -113,6 +113,9 @@ private:
     float m_touchX = 0.0f;
     float m_touchY = 0.0f;
     uint32_t* m_uiScratch = nullptr;
+    /* Drew the virtual keyboard last frame, so its document still needs
+     * hiding once it closes. See the render loop's keyboard block. */
+    bool      m_keyboardDrawn = false;
     bool m_running = false;
     /* shutdown() is reached from both run() and ~Application(); see the note
      * on its definition. Nothing in it is written to survive a second pass. */
