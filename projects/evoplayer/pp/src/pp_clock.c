@@ -19,7 +19,17 @@ void pp_clock_init(pp_clock *c, int64_t max_late_us, int64_t max_early_us)
     memset(c, 0, sizeof(*c));
     c->max_late_us = max_late_us > 0 ? max_late_us : 80000;
     c->max_early_us = max_early_us > 0 ? max_early_us : 250000;
+    c->clock_source = NULL;
+    c->clock_source_user = NULL;
     c->stats.min_lag_us = INT64_MAX;
+}
+
+void pp_clock_set_clock_source(pp_clock *c, pp_clock_source_fn fn, void *user)
+{
+    if (!c)
+        return;
+    c->clock_source = fn;
+    c->clock_source_user = user;
 }
 
 void pp_clock_start(pp_clock *c, int64_t first_pts_us)
@@ -41,6 +51,11 @@ int64_t pp_clock_media_us(const pp_clock *c)
         return 0;
     if (c->paused)
         return c->media_at_pause_us;
+    if (c->clock_source) {
+        int64_t master_us = c->clock_source(c->clock_source_user);
+        if (master_us >= 0)
+            return master_us;
+    }
     elapsed = now_us() - c->host_start_us;
     return c->media_start_pts_us + (int64_t)elapsed;
 }
@@ -76,6 +91,7 @@ void pp_clock_resume(pp_clock *c)
     c->host_start_us += paused_dur;
     c->paused = 0;
     c->pause_host_us = 0;
+    c->media_at_pause_us = 0;
     c->stats.resume_count++;
 }
 
@@ -96,14 +112,20 @@ void pp_clock_reset(pp_clock *c)
 {
     int64_t max_late, max_early;
     pp_clock_stats kept;
+    pp_clock_source_fn cs;
+    void *csu;
     if (!c)
         return;
     max_late = c->max_late_us;
     max_early = c->max_early_us;
     kept = c->stats;
+    cs = c->clock_source;
+    csu = c->clock_source_user;
     memset(c, 0, sizeof(*c));
     c->max_late_us = max_late;
     c->max_early_us = max_early;
+    c->clock_source = cs;
+    c->clock_source_user = csu;
     c->stats = kept;
     c->stats.reset_count++;
     c->stats.min_lag_us = INT64_MAX;

@@ -206,6 +206,17 @@ double prospero_media_clock_seconds(void)
     return video_rel;
 }
 
+int64_t evo_audio_master_media_us(void *user)
+{
+    (void)user;
+    if (audio_stream_index < 0 || audio_handle < 1 || audio_clock_seconds < 0.05)
+        return -1;
+    if (first_video_pts_seconds < 0.0)
+        return -1;
+    return (int64_t)(first_video_pts_seconds * 1000000.0) +
+           (int64_t)(audio_clock_seconds * 1000000.0);
+}
+
 
 /*
  * present_pp_frame — job 4 of the old decode_next_video_frame (§5): hand a
@@ -216,6 +227,7 @@ double prospero_media_clock_seconds(void)
 static int present_pp_frame(const pp_frame *pf)
 {
     if (!g_first_frame_bc_done) {
+        pp_playback_set_clock_source(&g_pp_pb, evo_audio_master_media_us, NULL);
         char d[80];
         snprintf(d, sizeof(d), "fmt=%d %ux%u", (int)pf->format, pf->width, pf->height);
         pp_stage_bc_checkpoint("009_FIRST_FRAME_ENTER", d);

@@ -49,6 +49,7 @@ int    evo_pb_active_backend(void);   /* evo_vdec_backend of the live decoder */
 /* The audio-preferred media clock (kept under its historical name — many call
  * sites). evo_pb_position_s() is the façade alias. */
 double prospero_media_clock_seconds(void);
+int64_t evo_audio_master_media_us(void *user);
 
 /* ---- the video thread (spawned / joined by start/stop_video_playback,
  *      mirroring how main.c drives evo_demux's thread) ---- */

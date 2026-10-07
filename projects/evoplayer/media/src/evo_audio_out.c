@@ -192,7 +192,9 @@ void *audio_output_thread(void *arg) {
              * comparing the audio clock with a stale absolute PTS.
              */
             double video_rel = 0.0;
-            if (first_video_pts_seconds >= 0.0)
+            if (g_pp_pb.active && g_pp_pb.display_pts_us > 0 && first_video_pts_seconds >= 0.0)
+                video_rel = ((double)g_pp_pb.display_pts_us / 1000000.0) - first_video_pts_seconds;
+            else if (first_video_pts_seconds >= 0.0)
                 video_rel = video_clock_seconds - first_video_pts_seconds;
             if (video_rel < 0.0)
                 video_rel = 0.0;
@@ -232,7 +234,7 @@ void *audio_output_thread(void *arg) {
                 video_stuck_iters = 0;
             }
             if (video_rel >= EVO_AV_SYNC_SETTLE_SEC &&
-                audio_clock_seconds > video_rel + 0.50 &&
+                audio_clock_seconds > video_rel + EVO_AV_AUDIO_LEAD_MAX_SEC &&
                 video_stuck_iters < 125) {
                 video_stuck_iters++;
                 usleep(2000);
@@ -252,6 +254,9 @@ void *audio_output_thread(void *arg) {
                 sceAudioOutOutput(audio_handle, silence);
             }
         } else {
+            /* Reset throttle tracker while paused or inactive so resume starts clean */
+            video_rel_at_wait = -1.0;
+            video_stuck_iters = 0;
             usleep(200);
         }
     }

@@ -1355,6 +1355,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     video_decode_done = 0;
     evo_pb_reset_decode_fatal();
     pp_playback_on_file_open(&g_pp_pb);
+    pp_playback_set_clock_source(&g_pp_pb, evo_audio_master_media_us, nullptr);
 
     applyViewMode();
 

@@ -168,6 +168,8 @@ int pp_playback_get_video_frame(pp_playback *pb, pp_video_frame *f);
  */
 int pp_playback_get_interp_phase(pp_playback *pb, float *phase);
 
+void pp_playback_set_clock_source(pp_playback *pb, pp_clock_source_fn fn, void *user);
+
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us);
 void pp_playback_notify_seek_end(pp_playback *pb, int success,
                                  uint64_t discarded, uint64_t elapsed_ms);

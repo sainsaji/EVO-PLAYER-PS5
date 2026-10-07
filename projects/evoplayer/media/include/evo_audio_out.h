@@ -52,6 +52,18 @@ extern "C" {
  */
 #define EVO_AV_SYNC_SETTLE_SEC 0.75
 
+/*
+ * Maximum audio lead over video presentation position, in seconds.
+ *
+ * One audio block is 2048 samples @ 48 kHz (~42.67 ms). 45 ms allows the
+ * audio driver to maintain double-buffered hardware output (~85 ms) while
+ * preventing audio from running ahead of video by more than ~1 video frame.
+ * In particular, rapid play/pause toggles drain hardware audio buffers;
+ * throttling audio lead to 45 ms ensures unpause waits for video presentation
+ * and prevents cumulative A/V desync.
+ */
+#define EVO_AV_AUDIO_LEAD_MAX_SEC 0.045
+
 /* ---------------------------------------------------------------------------
  * Audio-out session state. Owned by evo_audio_out.c; still written directly by
  * main.c's start_video_playback / stop_video_playback / seek path until A8.

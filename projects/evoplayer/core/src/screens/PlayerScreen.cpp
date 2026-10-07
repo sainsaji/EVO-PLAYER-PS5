@@ -146,9 +146,13 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
     playback->updateScrubHold(held);
 
     if (pressed & PadButtons::Cross) {
-        // Toggle play / pause
-        playback->togglePause();
-        toast("PLAYBACK", playback->isPaused() ? "PAUSED" : "RESUMED");
+        uint64_t now = NowMs();
+        if (now - m_lastPlayPauseToggleMs >= 150) {
+            m_lastPlayPauseToggleMs = now;
+            // Toggle play / pause
+            playback->togglePause();
+            toast("PLAYBACK", playback->isPaused() ? "PAUSED" : "RESUMED");
+        }
         return true;
     }
     if (pressed & PadButtons::Circle) {

@@ -47,6 +47,33 @@ static size_t availableFlexBytes() {
 static size_t availableFlexBytes() { return 0; }
 #endif
 
+extern "C" void evo_log_alloc_state(const char *when);
+
+static bool isSw4kAllowed() {
+    static int allowed = -1;
+    if (allowed < 0) {
+        allowed = (access("/mnt/usb0/evo_no_sw_4k", F_OK) == 0) ? 0 : 1;
+    }
+    return allowed != 0;
+}
+
+struct ThumbTimeout {
+    double deadlineSec;
+};
+
+static double thumbNowSec() {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
+}
+
+static int thumbInterruptCb(void* opaque) {
+    if (!opaque) return 0;
+    auto* t = static_cast<ThumbTimeout*>(opaque);
+    if (t->deadlineSec <= 0.0) return 0;
+    return thumbNowSec() >= t->deadlineSec ? 1 : 0;
+}
+
 /*
  * The decoders fault rather than fail when a picture buffer cannot be
  * allocated - libavcodec logs "get_buffer() failed" and the HEVC decoder then
@@ -411,7 +438,13 @@ bool CoverArtService::isVideoFile(const std::string& path) const {
     return (ext == ".mkv"  || ext == ".mp4"  || ext == ".mov" ||
             ext == ".m4v"  || ext == ".avi"  || ext == ".webm" ||
             ext == ".ts"   || ext == ".m2ts" || ext == ".mpg" ||
-            ext == ".mpeg" || ext == ".wmv"  || ext == ".flv");
+            ext == ".mpeg" || ext == ".wmv"  || ext == ".flv" ||
+            ext == ".asf"  || ext == ".wm"   || ext == ".rm"  ||
+            ext == ".rmvb" || ext == ".ogv"  || ext == ".dv"  ||
+            ext == ".mxf"  || ext == ".mts"  || ext == ".vob" ||
+            ext == ".m2v"  || ext == ".3gp"  || ext == ".3g2" ||
+            ext == ".mp2"  || ext == ".f4v"  || ext == ".ivf" ||
+            ext == ".obu");
 }
 
 std::string CoverArtService::resolveSidecarPath(const std::string& mediaPath, bool isDirectory) {
@@ -564,6 +597,16 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     }
 
     /*
+     * #88 / #96: Record heap memory state before and after extraction.
+     */
+    evo_log_alloc_state("thumb-start");
+    struct AllocStateGuard {
+        ~AllocStateGuard() {
+            evo_log_alloc_state("thumb-end");
+        }
+    } allocGuard;
+
+    /*
      * A file that died in the container probe is refused before it is opened
      * at all.
      *
@@ -642,7 +685,13 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
      */
     CrashNoteScope probeNote(videoPath.c_str(), EVO_CRASH_STAGE_PROBE);
 
-    AVFormatContext* fmt = nullptr;
+    ThumbTimeout timeout{ thumbNowSec() + 4.0 };
+    AVFormatContext* fmt = avformat_alloc_context();
+    if (fmt) {
+        fmt->interrupt_callback.callback = thumbInterruptCb;
+        fmt->interrupt_callback.opaque   = &timeout;
+    }
+
     evo_bt("extractVideoFrame: calling avformat_open_input");
     evo_boot_log_flush();
     if (avformat_open_input(&fmt, videoPath.c_str(), nullptr, &opts) < 0) {
@@ -665,40 +714,19 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     if (vstream >= 0 && fmt->streams[vstream]->codecpar) {
         const AVCodecParameters* par = fmt->streams[vstream]->codecpar;
 
-        if (par->codec_id == AV_CODEC_ID_AV1) {
-            evo_bt("extractVideoFrame: skipping AV1 codec before find_stream_info (unsupported on PS5)");
-            evo_boot_log_flush();
-            avformat_close_input(&fmt);
-            return false;
-        }
-
         /*
-         * Above 1080p with no hardware decoder to take it, do not probe at all.
-         *
-         * find_stream_info() opens decoders of its own to fill in what the
-         * container left out, and a 4K picture buffer plus a reference queue
-         * does not fit in the flexible pool the resident decoders have already
-         * drawn from - at which point libavcodec faults instead of returning
-         * the error, taking the process with it. Those gates further down
-         * never get to run. The file could not have been played either way:
-         * "4K is hardware-only" is the documented limit, and HEVC Main 10
-         * above 1080p has no hardware path (the resident 10-bit decoder is
-         * 1920x1088), which is exactly what a 4K HDR title is.
-         *
-         * MPEG-TS usually has no geometry this early, so its 4K files fall
-         * through here and are caught by the crash note instead - one fault,
-         * then never again.
-         *
-         * Off the app module availableFlexBytes() is 0 and none of this
-         * applies: the host renderer has no such pool and posters every file.
+         * Above 1080p with no hardware decoder to take it:
+         * Since 115d9ff, blocks >= 1 MB come from direct memory first (8+ GB available),
+         * so 4K software decode is safe and enabled by default (see memory-budget.md).
+         * Only skip if the user explicitly switches it off via /mnt/usb0/evo_no_sw_4k.
          */
-        if (par->width > 1920 || par->height > 1088) {
+        if (!isSw4kAllowed() && (par->width > 1920 || par->height > 1088)) {
             const int depth = codecparBitDepth(par);
             if (availableFlexBytes() > 0 &&
                 !evo_vdec_native_can_open(par->codec_id, par->profile, depth,
                                           par->width, par->height)) {
                 evo_bt("extractVideoFrame: skipping %dx%d %d-bit codec=%d before "
-                       "find_stream_info - no hardware decoder, too large for software",
+                       "find_stream_info - /mnt/usb0/evo_no_sw_4k is set",
                        par->width, par->height, depth, (int)par->codec_id);
                 evo_boot_log_flush();
                 avformat_close_input(&fmt);
@@ -744,12 +772,6 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         return false;
     }
 
-    if (st->codecpar->codec_id == AV_CODEC_ID_AV1) {
-        evo_bt("extractVideoFrame: skipping AV1 codec (unsupported on PS5)");
-        evo_boot_log_flush();
-        avformat_close_input(&fmt);
-        return false;
-    }
 
     double duration = (fmt->duration > 0) ? (static_cast<double>(fmt->duration) / static_cast<double>(AV_TIME_BASE)) : 0.0;
     double seekSec = 0.0;
@@ -793,29 +815,12 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     }
 
     /*
-     * No software poster above 1080p - conservative, and deliberately so.
-     *
-     * Be careful with the reasoning here, because the obvious version of it is
-     * wrong. EVO_TEST_hevc8_4k.mp4 passed the working-set pre-flight below with
-     * 123 MB free and still took the process down, which looked like proof that
-     * the six-frame estimate is too small. It was not: that crash was av_log
-     * writing to a null stderr (see EvoAvLogCallback in Application.cpp), and
-     * the "Error parsing NAL unit #0." in its register dump was the message
-     * being logged, not evidence of a failed allocation. No `get_buffer2
-     * FAILED` line has ever actually appeared in a log.
-     *
-     * So this ceiling is not a measured memory limit. It is a bet that a 4K
-     * software poster is not worth any risk at all: the hardware decoder has
-     * already had its turn immediately above, it handles 4K 8-bit HEVC and AVC
-     * natively, and across the sessions examined on 2026-09-23 the software
-     * path produced a poster at 1920x1080 and at no other size. Revisit it once
-     * the stderr fix has been on hardware long enough to trust - the honest
-     * test is whether 4K software decode works when nothing is logging.
+     * Above 1080p software decode: allowed by default since 115d9ff (direct memory
+     * heap backing). Touch /mnt/usb0/evo_no_sw_4k to revert to refusing.
      */
-    if (availableFlexBytes() > 0 &&
+    if (!isSw4kAllowed() &&
         (st->codecpar->width > 1920 || st->codecpar->height > 1088)) {
-        evo_bt("extractVideoFrame: no software poster for %dx%d - above the "
-               "1080p software ceiling",
+        evo_bt("extractVideoFrame: no software poster for %dx%d - /mnt/usb0/evo_no_sw_4k is set",
                st->codecpar->width, st->codecpar->height);
         evo_boot_log_flush();
         avformat_close_input(&fmt);
@@ -841,7 +846,17 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         return false;
     }
 
-    ctx->thread_count = 1;
+    ctx->thread_count = (st->codecpar->width >= 2560 || st->codecpar->codec_id == AV_CODEC_ID_AV1) ? 4 : 2;
+    if (st->codecpar->codec_id == AV_CODEC_ID_AV1) {
+        /*
+         * In libdav1d, FF_THREAD_SLICE keeps max_frame_delay = 1 so the keyframe
+         * is decoded across the worker thread pool and returned immediately on
+         * packet receive without multi-frame buffering delay.
+         */
+        ctx->thread_type = FF_THREAD_SLICE;
+    } else {
+        ctx->thread_type = FF_THREAD_FRAME;
+    }
 #ifdef AV_CODEC_FLAG2_FAST
     ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 #endif
@@ -853,41 +868,17 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     /*
      * Working-set pre-flight.
      *
-     * A 4K decoder's picture buffers are tens of MB each and the DPB holds
-     * several. When flexible memory cannot serve them, libavcodec's
-     * get_buffer() fails mid-decode and the HEVC decoder walks into its own
-     * error path and dereferences null - a SIGSEGV with nothing to catch from
-     * here. Declining the poster costs a thumbnail; letting it through costs
-     * the process.
-     *
-     * Measured, not probed. The probe this replaced allocated four frames'
-     * worth and freed them again, and concluded there was room even as the
-     * decoder failed: a handful of large mallocs can still be served out of a
-     * pool far too tight to build a picture pool in. The headroom multiplier
-     * is deliberately generous - the pool has to hold the whole DPB plus the
-     * decoder's own tables, and this is the last gate before code that faults
-     * rather than fails.
+     * Since commit 115d9ff, blocks of 1 MB and up (including all decoded picture buffers
+     * for 1080p and 4K) are served from direct memory (>= 8 GB available).
+     * Flexible memory only serves small contexts (< 1 MB), so we only gate
+     * if flexible memory is critically low (< 32 MB).
      */
     {
-        int bytesPerSample = 1;
-        enum AVPixelFormat pxf = static_cast<enum AVPixelFormat>(st->codecpar->format);
-        const AVPixFmtDescriptor* pfd = (pxf != AV_PIX_FMT_NONE) ? av_pix_fmt_desc_get(pxf) : nullptr;
-        if (pfd) {
-            if (pfd->comp[0].depth > 8) bytesPerSample = 2;
-        } else if (st->codecpar->bits_per_raw_sample > 8) {
-            bytesPerSample = 2;
-        }
-
-        const size_t frameBytes = static_cast<size_t>(st->codecpar->width) *
-                                  static_cast<size_t>(st->codecpar->height) *
-                                  3u / 2u * static_cast<size_t>(bytesPerSample);
-        const size_t needBytes  = frameBytes * 6u;
         const size_t availBytes = availableFlexBytes();
-
-        if (frameBytes > 0 && availBytes > 0 && availBytes < needBytes) {
-            evo_bt("extractVideoFrame: skipping %dx%d - flex %zuMB free, needs ~%zuMB",
+        if (availBytes > 0 && availBytes < 32u * 1024u * 1024u) {
+            evo_bt("extractVideoFrame: skipping %dx%d - flex %zuMB critically low",
                    st->codecpar->width, st->codecpar->height,
-                   availBytes / (1024u * 1024u), needBytes / (1024u * 1024u));
+                   availBytes / (1024u * 1024u));
             evo_boot_log_flush();
             avcodec_free_context(&ctx);
             avformat_close_input(&fmt);
@@ -942,6 +933,12 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     evo_crash_note_set(videoPath.c_str(), EVO_CRASH_STAGE_DECODE);
 
     while (packetCount < 48 && av_read_frame(fmt, pkt) >= 0) {
+        if (thumbNowSec() >= timeout.deadlineSec) {
+            evo_bt("extractVideoFrame: decode timed out after %d packets", packetCount);
+            evo_boot_log_flush();
+            av_packet_unref(pkt);
+            break;
+        }
         packetCount++;
         if (pkt->stream_index == vstream) {
             if (avcodec_send_packet(ctx, pkt) == 0) {
@@ -957,7 +954,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         av_packet_unref(pkt);
     }
 
-    if (!gotFrame) {
+    if (!gotFrame && thumbNowSec() < timeout.deadlineSec) {
         evo_bt("extractVideoFrame: flushing decoder");
         evo_boot_log_flush();
         avcodec_send_packet(ctx, nullptr);

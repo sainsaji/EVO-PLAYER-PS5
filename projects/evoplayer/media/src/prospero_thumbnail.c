@@ -605,7 +605,10 @@ static int prospero_thumbnail_ensure_context(const char *path)
          */
         prospero_thumb_codec->thread_count =
             stream->codecpar->width >= 2560 ? 4 : 2;
-        prospero_thumb_codec->thread_type = FF_THREAD_FRAME;
+        prospero_thumb_codec->thread_type =
+            stream->codecpar->codec_id == AV_CODEC_ID_AV1
+                ? FF_THREAD_SLICE
+                : FF_THREAD_FRAME;
 #ifdef AV_CODEC_FLAG2_FAST
         prospero_thumb_codec->flags2 |= AV_CODEC_FLAG2_FAST;
 #endif

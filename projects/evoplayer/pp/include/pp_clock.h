@@ -28,6 +28,8 @@ typedef struct pp_clock_stats {
     uint64_t lag_samples;
 } pp_clock_stats;
 
+typedef int64_t (*pp_clock_source_fn)(void *user);
+
 typedef struct pp_clock {
     int started;
     int paused;
@@ -37,6 +39,8 @@ typedef struct pp_clock {
     int64_t media_start_pts_us;
     int64_t max_late_us;
     int64_t max_early_us;
+    pp_clock_source_fn clock_source;
+    void *clock_source_user;
     pp_clock_stats stats;
 } pp_clock;
 
@@ -44,6 +48,7 @@ typedef struct pp_clock {
 #define PP_CLOCK_DROP    1
 
 void pp_clock_init(pp_clock *c, int64_t max_late_us, int64_t max_early_us);
+void pp_clock_set_clock_source(pp_clock *c, pp_clock_source_fn fn, void *user);
 void pp_clock_start(pp_clock *c, int64_t first_pts_us);
 /** Re-sync host timeline to a media PTS (soft-decode catch-up). */
 void pp_clock_reanchor(pp_clock *c, int64_t pts_us);

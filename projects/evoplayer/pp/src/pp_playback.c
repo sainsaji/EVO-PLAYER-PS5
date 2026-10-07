@@ -62,7 +62,7 @@ void pp_playback_init(pp_playback *pb)
      * AV1 played 1.37x fast (#94, hardware 2026-09-26). Waiting out an early
      * frame costs nothing: the decoder is by definition ahead.
      */
-    pp_clock_init(&pb->clock, 800000, 100000);
+    pp_clock_init(&pb->clock, 120000, 100000);
     pb->aspect = PP_ASPECT_FIT;
     pb->out_w = 1920;
     pb->out_h = 1080;
@@ -352,7 +352,17 @@ int pp_playback_push_frame(pp_playback *pb, const pp_frame *src)
          * advanced during a period when nothing was being pushed, so every
          * frame now looks late and the picture freezes for good while audio
          * carries on. Re-base on the frame in hand and let it through.
+         *
+         * When an audio clock source is active (pb->clock.clock_source != NULL),
+         * dropping frames IS the legitimate catch-up after pause/resume. The
+         * audio clock will naturally stop reading as "late" once video catches up,
+         * so never resync the clock in that case — doing so would reset the audio
+         * anchor and stall the catch-up.
          */
+        if (pb->clock.clock_source != NULL) {
+            /* Audio-master: keep dropping until PTS >= audio clock. */
+            return 1;
+        }
         if (++pb->late_drop_streak < PP_LATE_DROP_RESYNC)
             return 1;
         pp_clock_reset(&pb->clock);
@@ -532,6 +542,12 @@ int pp_playback_get_interp_phase(pp_playback *pb, float *phase)
 
     *phase = t;
     return 1;
+}
+
+void pp_playback_set_clock_source(pp_playback *pb, pp_clock_source_fn fn, void *user)
+{
+    if (pb)
+        pp_clock_set_clock_source(&pb->clock, fn, user);
 }
 
 void pp_playback_notify_seek_begin(pp_playback *pb, int64_t target_pts_us)
