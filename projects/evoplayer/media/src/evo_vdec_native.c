@@ -1307,7 +1307,7 @@ static unsigned hevc_ps_id(int type, const uint8_t *payload, int len)
  */
 #define AU_MAX_NALS 512
 
-static int hevc_copy_base_layer(uint8_t *dst, const uint8_t *au, int size, int *stripped,
+__attribute__((noinline)) static int hevc_copy_base_layer(uint8_t *dst, const uint8_t *au, int size, int *stripped,
                                 int *dups)
 {
     int sc_at[AU_MAX_NALS], nal_at[AU_MAX_NALS], end_at[AU_MAX_NALS];

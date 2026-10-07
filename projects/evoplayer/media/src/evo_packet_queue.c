@@ -43,6 +43,7 @@ typedef struct {
 } ring_hdr_t;
 
 volatile unsigned long packet_queue_ring_fallbacks = 0;
+extern void evo_boot_log(const char *fmt, ...);
 
 static uint8_t *ring_alloc(struct PacketRing *r, size_t n)
 {
@@ -208,8 +209,16 @@ int packet_queue_push_timed(PacketQueue *q, AVPacket *pkt, int64_t dur_us) {
     AVPacket *clone = NULL;
     if (q->ring && pkt->size > 0 && pkt->data) {
         clone = ring_clone(q->ring, pkt);
-        if (!clone)
-            packet_queue_ring_fallbacks++;
+        if (!clone) {
+            const unsigned long n = ++packet_queue_ring_fallbacks;
+            if (n == 1 || n % 2000 == 0) {
+                pthread_mutex_lock(&q->ring->mu);
+                evo_boot_log("  ring fallback #%lu: pkt=%d ring=%zu used=%zu head=%zu tail=%zu queued=%d",
+                             n, pkt->size, q->ring->size, q->ring->used,
+                             q->ring->head, q->ring->tail, q->count);
+                pthread_mutex_unlock(&q->ring->mu);
+            }
+        }
     }
     if (!clone)
         clone = av_packet_clone(pkt);
