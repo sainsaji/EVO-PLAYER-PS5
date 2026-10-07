@@ -151,6 +151,32 @@ int  evo_net_request_async(const char *method,
                            void *user_data);
 
 /*
+ * Why a request failed. An evo_net_cb only receives success and the HTTP
+ * status, so a DNS failure, a refused connection, a TLS error and a reply over
+ * the size cap all arrived as the same bare "success = 0".
+ *
+ *   evo_net_callback_error(): the EVO_NET_ERR_* of the request whose callback is
+ *       running now (0 when it succeeded). Meaningful only inside the callback.
+ *   evo_net_describe_failure(): that code as a sentence for the screen, led by
+ *       the host name ("cf.example.ink: could not find the server ..."). Never
+ *       includes the path or query, which carry the login.
+ *   evo_net_last_failure(): the sentence for the most recent failed request that
+ *       was not an image, if it failed within max_age_ms; 1 if filled. For a
+ *       screen whose own callback only knows "it did not load".
+ */
+int  evo_net_callback_error(void);
+void evo_net_describe_failure(int err, int status, const char *url, char *out, size_t cap);
+int  evo_net_last_failure(char *out, size_t cap, int max_age_ms);
+
+/*
+ * The best available reason for "that did not work", for a screen to show in
+ * place of its generic text: the pending evo_error (stream open, playlist load)
+ * if there is one, else the last failed network request from the last 5 s.
+ * Returns 1 and fills out, or 0 and leaves it untouched - keep the generic text.
+ */
+int  evo_failure_reason(char *out, size_t cap);
+
+/*
  * Synchronous HTTP GET request. Blocks calling thread.
  * Caller must free(*out_body) if allocated.
  */

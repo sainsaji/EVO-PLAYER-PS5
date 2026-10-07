@@ -334,3 +334,6 @@ third_party/ps5-homebrew-dev-protocol/
 
 # local search index (tools/rag)
 output/rag/
+
+# controller dumps (tools/dualsense_dump.py) hold a serial / Bluetooth address
+output/dualsense/

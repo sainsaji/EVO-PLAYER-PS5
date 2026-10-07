@@ -20,6 +20,9 @@
 #include "addon_emby.h"
 #include "evo_provider.h"
 #include "evo_provider_bundle.h"
+#include "evo_error.h"
+#include "evo_net.h"
+#include "evo_playlist_sniff.h"
 #include "evo_changelog.h"
 #include "SDL_ps5tilemap.inc"
 #include <sys/time.h>
@@ -837,6 +840,67 @@ static void test_frame_interpolation(void)
 }
 
 /* ==========================================================================
+ * Error reporting: playlist sniffing, host extraction, failure wording
+ * ========================================================================== */
+
+static void test_error_reporting(void)
+{
+    TEST_START("Errors: playlist sniffing, host-only text, failure wording");
+
+    /* A channel list - what an Xtream get.php link returns - is a playlist. */
+    const char *iptv = "#EXTM3U\n#EXTINF:-1 tvg-id=\"a\",One\nhttp://h/live/1.ts\n";
+    TEST_ASSERT(evo_playlist_sniff_is_channel_list(iptv, strlen(iptv)), "IPTV channel list is detected");
+
+    /* ...also with a UTF-8 BOM and leading blank lines. */
+    const char *bom = "\xEF\xBB\xBF\r\n\r\n#EXTM3U\r\n#EXTINF:-1,Two\r\nhttp://h/2.ts\r\n";
+    TEST_ASSERT(evo_playlist_sniff_is_channel_list(bom, strlen(bom)), "BOM + CRLF channel list is detected");
+
+    /* HLS is also M3U but FFmpeg plays it: it must never be taken for a list. */
+    const char *hls_media = "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg0.ts\n";
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list(hls_media, strlen(hls_media)), "HLS media playlist is not a channel list");
+    const char *hls_master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nlow.m3u8\n";
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list(hls_master, strlen(hls_master)), "HLS master playlist is not a channel list");
+
+    /* Things that are not playlists at all. */
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list("<html>403 Forbidden</html>", 26), "an HTML error page is not a playlist");
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list("\x00\x00\x00\x20" "ftypisom", 12), "an MP4 header is not a playlist");
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list("#EXTM3U\n", 8), "an empty M3U has no channels to load");
+    TEST_ASSERT(!evo_playlist_sniff_is_channel_list(NULL, 0), "NULL is not a playlist");
+
+    /* Host only: never the login, path or query. */
+    char host[128];
+    evo_error_url_host("http://cf.example.ink:8080/get.php?username=u&password=p", host, sizeof host);
+    TEST_ASSERT(strcmp(host, "cf.example.ink") == 0, "host drops port, path and query");
+    evo_error_url_host("https://user:secret@srv.example.com/live/u/p/1.ts", host, sizeof host);
+    TEST_ASSERT(strcmp(host, "srv.example.com") == 0, "host drops user:pass@");
+    evo_error_url_host("/mnt/usb0/file.mkv", host, sizeof host);
+    TEST_ASSERT(host[0] == 0 || strstr(host, "secret") == NULL, "a path never yields a credential");
+
+    /* The pending reason is taken once. */
+    char msg[256];
+    evo_error_clear();
+    TEST_ASSERT(!evo_error_take(msg, sizeof msg), "nothing pending after clear");
+    evo_error_set("%s: boom %d", "host", 7);
+    TEST_ASSERT(evo_error_peek(msg, sizeof msg) && strcmp(msg, "host: boom 7") == 0, "peek returns the reason");
+    TEST_ASSERT(evo_error_take(msg, sizeof msg) && strcmp(msg, "host: boom 7") == 0, "take returns the reason");
+    TEST_ASSERT(!evo_error_take(msg, sizeof msg), "take clears it");
+
+    /* Failure wording names the host and the cause, and never the login. */
+    evo_net_describe_failure(EVO_NET_ERR_DNS, 0, "http://cf.example.ink/get.php?password=p", msg, sizeof msg);
+    TEST_ASSERT(strstr(msg, "cf.example.ink") && strstr(msg, "name lookup") && !strstr(msg, "password"),
+                "DNS failure names the host and cause, not the login");
+    evo_net_describe_failure(EVO_NET_ERR_HTTP, 403, "http://h/x", msg, sizeof msg);
+    TEST_ASSERT(strstr(msg, "403") && strstr(msg, "refused"), "HTTP 403 says refused");
+    evo_net_describe_failure(EVO_NET_ERR_HTTP, 404, "http://h/x", msg, sizeof msg);
+    TEST_ASSERT(strstr(msg, "404") && strstr(msg, "not found"), "HTTP 404 says not found");
+    evo_net_describe_failure(EVO_NET_ERR_BODY_LIMIT, 200, "http://h/x", msg, sizeof msg);
+    TEST_ASSERT(strstr(msg, "too large"), "oversize reply says so");
+    evo_net_describe_failure(-99, 0, "http://h/x", msg, sizeof msg);
+    TEST_ASSERT(strstr(msg, "-99"), "unknown code is still shown");
+    TEST_PASS();
+}
+
+/* ==========================================================================
  * Main Test Runner Entrypoint
  * ========================================================================== */
 
@@ -856,7 +920,8 @@ int main(void)
     test_changelog_model_integrity();
     test_iptv_provider_catalog_and_epg();
     test_frame_interpolation();
-    
+    test_error_reporting();
+
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",
            g_tests_passed, g_tests_run, g_tests_failed);

@@ -109,6 +109,8 @@ private:
      * prompt would be invisible while still swallowing input.
      */
     void openSourceEditor();
+    /* A channel's address turned out to be a playlist: use it as the IPTV source. */
+    bool adoptChannelPlaylist(const char* url);
     static void OnSourceSubmitted(const char* text, void* userdata);
     static void OnGuideSubmitted(const char* text, void* userdata);
 

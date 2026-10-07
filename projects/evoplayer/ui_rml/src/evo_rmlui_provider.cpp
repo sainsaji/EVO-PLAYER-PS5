@@ -28,6 +28,7 @@ extern "C" {
  * /mnt/usb0/evo.log), plain stderr on the host. See evo_provider_log.h for why
  * this is not fprintf(stderr, ...). */
 #include "evo_provider_log.h"
+#include "evo_net.h"   /* evo_failure_reason */
 
 __attribute__((weak)) const char *provider_iptv_epg_status(void);
 __attribute__((weak)) int provider_iptv_epg_needs_setup(void);
@@ -704,7 +705,9 @@ void EvoRmlProviderHost::RequestPage(const char* parent_id, int page)
         PROV_LOG("'%s' list_catalog REFUSED rc=%d configured=%d",
                  m_provider_id.c_str(), rc, m_provider->is_configured());
         if (m_provider->is_configured()) {
-            SetStatus("Could not reach the provider", true);
+            char why[256];
+            SetStatus(evo_failure_reason(why, sizeof why) ? why : "Could not reach the provider",
+                      true);
         } else {
             SetStatus("", false);
         }
@@ -729,7 +732,9 @@ void EvoRmlProviderHost::ItemsCallback(int ok, const evo_provider_item_t* items,
         self->m_model.empty = self->m_all_rows.empty();
         if (self->m_model_handle) self->m_model_handle.DirtyVariable("empty");
         if (self->m_doc) self->m_needs_initial_focus = true;
-        self->SetStatus("Could not load the catalog", true);
+        char why[256];
+        self->SetStatus(evo_failure_reason(why, sizeof why) ? why : "Could not load the catalog",
+                        true);
         return;
     }
 

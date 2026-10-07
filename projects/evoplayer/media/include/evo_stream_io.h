@@ -64,6 +64,14 @@ int evo_stream_io_url_is_playlist(const char *url);
 /* Fail every blocking I/O call on this context from now on (stop/quit). */
 void evo_stream_io_abort(evo_stream_io_ctx_t *ctx);
 
+/**
+ * After an open failed with "invalid data" over http(s): was the address really a
+ * list of channels (an IPTV playlist link given where a stream belongs)? If so,
+ * copies that address into url and returns 1, once; the screen should then load
+ * it as the playlist. 0 otherwise. Set by the last evo_stream_io_open().
+ */
+int evo_stream_io_take_channel_playlist(char *url, size_t cap);
+
 /* Request headers a provider wants sent with the stream ("Name: value\r\n"
  * each) and a User-Agent; set before evo_stream_io_open(), empty otherwise. */
 extern char evo_stream_headers[4096];

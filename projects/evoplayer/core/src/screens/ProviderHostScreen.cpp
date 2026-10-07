@@ -301,10 +301,12 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
     if (!ok || count <= 0 || !choices) {
         g_resolve_finished = true;
         evo_bt("provider: resolve failed for %s/%s", pp->provider, pp->item_id);
-        toast("STREAM", "Failed to resolve channel stream");
+        char why[256];
+        const bool have = evo_failure_reason(why, sizeof why) != 0;
+        toast("STREAM", have ? why : "Failed to resolve channel stream");
         evo_rmlui_provider_set_tuning(0);
         evo_rmlui_provider_set_loading(0, "");
-        evo_rmlui_provider_set_status("Failed to resolve stream for channel", 1);
+        evo_rmlui_provider_set_status(have ? why : "Failed to resolve stream for channel", 1);
         return;
     }
 
@@ -1639,10 +1641,12 @@ void ProviderHostScreen::startSelected()
             if (evo_provider_resolve_chain(g_pending.provider, g_pending.item_id,
                                             on_resolved, &g_pending) != 0) {
                 m_resolving = false;
-                toast("STREAM", "That item could not be played");
+                char why[256];
+                const bool have = evo_failure_reason(why, sizeof why) != 0;
+                toast("STREAM", have ? why : "That item could not be played");
                 evo_rmlui_provider_set_tuning(0);
                 evo_rmlui_provider_set_loading(0, "");
-                evo_rmlui_provider_set_status("Failed to resolve stream for channel", 1);
+                evo_rmlui_provider_set_status(have ? why : "Failed to resolve stream for channel", 1);
             }
         }
         return;
@@ -1786,12 +1790,26 @@ void ProviderHostScreen::update(double deltaMs)
                 sm->navigateTo(ScreenId::Player);
             }
         } else {
+            /* The address was a playlist, not a stream (an IPTV link given where
+             * a channel belongs): load it as the channel list it is. */
+            char plurl[2048];
+            if (std::strcmp(g_pending.provider, "iptv") == 0 &&
+                evo_stream_io_take_channel_playlist(plurl, sizeof plurl) &&
+                adoptChannelPlaylist(plurl)) {
+                return;
+            }
+            char why[256];
+            const bool have_why = evo_failure_reason(why, sizeof why) != 0;
+
             if (g_pending.picked) {
                 /* The user chose this stream. Nothing else is tried for them:
                  * say what happened and give the list back. */
                 const evo_stream_choice_t& bad = g_pending.choices[g_pending.active_choice];
-                char msg[128];
-                std::snprintf(msg, sizeof(msg), "%s did not open - pick another", bad.label);
+                char msg[256];
+                if (have_why)
+                    std::snprintf(msg, sizeof(msg), "%s did not open: %s", bad.label, why);
+                else
+                    std::snprintf(msg, sizeof(msg), "%s did not open - pick another", bad.label);
                 toast("STREAM", msg);
                 evo_bt("prov_screen: chosen stream %d failed (%s) - back to the list",
                        g_pending.active_choice, bad.url);
@@ -1818,7 +1836,8 @@ void ProviderHostScreen::update(double deltaMs)
             }
             evo_rmlui_provider_set_tuning(0);
             evo_rmlui_provider_set_loading(0, "");
-            evo_rmlui_provider_set_status("Stream unavailable or connection timed out", 1);
+            evo_rmlui_provider_set_status(have_why ? why
+                                          : "Stream unavailable or connection timed out", 1);
         }
     }
 
@@ -2054,7 +2073,9 @@ void ProviderHostScreen::OnSignInPass(const char* text, void* ud)
     self->m_signInPass.clear();
     if (rc != 0) {
         self->m_signIn = SignIn::None;
-        toast(p ? p->name : "PROVIDER", "Could not reach the server");
+        char why[256];
+        toast(p ? p->name : "PROVIDER",
+              evo_failure_reason(why, sizeof why) ? why : "Could not reach the server");
     }
 }
 
@@ -2066,9 +2087,39 @@ void ProviderHostScreen::OnSignInDone(int ok, const char* msg, void* ud)
     const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
     evo_bt("prov_screen: sign-in to '%s' -> %s (%s)", self->m_providerId.c_str(),
            ok ? "ok" : "failed", msg ? msg : "");
-    toast(p ? p->name : "PROVIDER", msg ? msg : (ok ? "Signed in" : "Sign-in failed"));
+    char why[256];
+    const char* shown = msg && msg[0] ? msg : nullptr;
+    if (!shown && !ok && evo_failure_reason(why, sizeof why)) shown = why;
+    toast(p ? p->name : "PROVIDER", shown ? shown : (ok ? "Signed in" : "Sign-in failed"));
     if (ok)
         self->openProvider(self->m_providerId);
+}
+
+/*
+ * The address behind a channel was a playlist, not a stream. Make it the IPTV
+ * source and reopen the channel list. False if the provider will not take it,
+ * in which case the caller reports the failure as usual.
+ */
+bool ProviderHostScreen::adoptChannelPlaylist(const char* url)
+{
+    const evo_provider_t* ip = evo_provider_find("iptv");
+    if (!ip || !ip->set_source || ip->set_source(url) != 0)
+        return false;
+    evo_provider_set_enabled(ip->id, ip->is_configured() ? 1 : 0);
+    evo_bt("prov_screen: the channel address is a playlist - loaded as the IPTV source");
+    toast("IPTV", "That link is a playlist - loading it as your channel list");
+
+    evo_rmlui_provider_set_tuning(0);
+    evo_rmlui_provider_set_loading(0, "");
+    m_resolving = false;
+    m_streamPick = false;
+    std::string id = m_providerId;
+    if (m_opened) {
+        evo_rmlui_provider_close();
+        m_opened = false;
+    }
+    m_opened = evo_rmlui_provider_open(id.c_str(), DisplayWidth, DisplayHeight) != 0;
+    return true;
 }
 
 /* Called every frame from update(). Opens the next keyboard, and notices a

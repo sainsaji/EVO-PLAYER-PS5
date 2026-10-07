@@ -45,6 +45,7 @@
 
 #include "evo_provider.h"
 #include "evo_net.h"
+#include "evo_error.h"
 #include "evo_data_path.h"
 #include "evo_provider_log.h"
 #include "evo_favorites.h"
@@ -1897,17 +1898,39 @@ static void on_playlist(int success, int status, const char *body, size_t len,
     pending_t *pd = (pending_t *)ud;
     G.loading = 0;
 
+    /* A playlist that never loads used to leave no trace at all: this callback
+     * said nothing on success or failure, so a report of "IPTV never worked"
+     * could not be told apart from a DNS, HTTP, size or parse problem. On a
+     * transport failure `status` carries the EVO_NET_ERR_* code. */
+    PROV_LOG("iptv: playlist reply success=%d status=%d bytes=%zu%s", success, status,
+             len, (body && len >= 7 && !strncmp(body, "#EXTM3U", 7)) ? " (#EXTM3U)" : "");
+
     if (!success || status < 200 || status >= 300 || !body || len == 0) {
+        char why[200];
+        if (!success)
+            evo_net_describe_failure(evo_net_callback_error(), status, G.playlist_url,
+                                     why, sizeof why);
+        else if (status < 200 || status >= 300)
+            snprintf(why, sizeof why, "the server answered HTTP %d", status);
+        else
+            snprintf(why, sizeof why, "the server sent an empty reply");
+        PROV_LOG("iptv: playlist NOT loaded: %s", why);
+        evo_error_set("Playlist did not load - %s", why);
         if (pd && pd->cb) pd->cb(0, NULL, 0, 0, pd->ud);
         free(pd);
         return;
     }
 
     if (parse_m3u(body, len) < 0) {
+        PROV_LOG("iptv: playlist NOT loaded: %zu bytes did not parse as M3U (first bytes: %.40s)",
+                 len, body);
+        evo_error_set("The link answered, but not with a channel list (%zu bytes, not an M3U file)",
+                      len);
         if (pd && pd->cb) pd->cb(0, NULL, 0, 0, pd->ud);
         free(pd);
         return;
     }
+    PROV_LOG("iptv: playlist loaded: %d channels", G.ch_count);
 
     kick_epg();
 

@@ -29,6 +29,8 @@ SRCS=(
     "${REPO_ROOT}/tests/test_runner.c"
     "${MEDIA}/src/evo_direct_mem.c"
     "${MEDIA}/src/evo_textreader.c"
+    "${MEDIA}/src/evo_playlist_sniff.c"
+    "${EVO}/src/evo_error.c"
     "${UI}/src/evo_nav.c"
     "${UI}/src/evo_focus.c"
     "${UI}/src/evo_layout.c"

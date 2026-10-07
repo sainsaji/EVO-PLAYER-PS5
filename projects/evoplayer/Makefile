@@ -103,6 +103,7 @@ MEDIA_SRCS := \
     media/src/evo_textreader.c \
     media/src/evo_direct_mem.c \
     media/src/evo_stream_io.c \
+    media/src/evo_playlist_sniff.c \
     media/src/evo_parallel_io.c \
     media/src/evo_packet_queue.c \
     media/src/evo_audio_resample.c \
@@ -125,6 +126,7 @@ MEDIA_SRCS := \
     src/evo_data_path.c \
     src/evo_readdir.c \
     src/evo_boot_log.c \
+    src/evo_error.c \
     src/evo_log_server.c \
     src/evo_crash_note.c \
     src/evo_usb_remote.c \

@@ -7,6 +7,8 @@
 #include "evo_stream_io.h"
 #include "evo_direct_mem.h"
 #include "evo_parallel_io.h"
+#include "evo_error.h"
+#include "evo_playlist_sniff.h"
 
 #ifdef EVO_APP_MODULE
 extern void pp_stage_bc(const char *stage_id, const char *detail);
@@ -300,6 +302,87 @@ void evo_stream_io_apply_network_options(AVDictionary **opts, const char *url)
     av_dict_set(opts, "extension_picky", "0", 0);
 }
 
+/*
+ * Why an open failed, for the screen and for the log.
+ *
+ * "Could not open the stream" hid everything: a wrong link, a refused login, a
+ * dead server and a playlist pasted where a channel belongs all read the same.
+ * avformat_open_input already knows which, so say it, led by the host (never
+ * the path or query - they carry the login).
+ *
+ * When the open failed with "invalid data" over http, the server did answer. If
+ * what it sent is a list of channels (the user gave a playlist link where a
+ * stream belongs - hardware, 2026-10, an Xtream get.php link saved as the only
+ * entry of IPTV.M3U), remember the address so the screen can load it as the
+ * playlist it is. The probe reads 4 KB, only after a failure, so a good stream
+ * pays nothing for it.
+ */
+static char          s_chan_playlist_url[2048];
+static volatile int  s_chan_playlist_set;
+
+int evo_stream_io_take_channel_playlist(char *url, size_t cap)
+{
+    if (!s_chan_playlist_set) return 0;
+    s_chan_playlist_set = 0;
+    if (url && cap) snprintf(url, cap, "%s", s_chan_playlist_url);
+    return 1;
+}
+
+static int sio_probe_channel_list(const char *path)
+{
+    AVDictionary *o = NULL;
+    av_dict_set(&o, "timeout", "5000000", 0);
+    av_dict_set(&o, "rw_timeout", "5000000", 0);
+    if (evo_stream_headers[0]) av_dict_set(&o, "headers", evo_stream_headers, 0);
+    if (evo_stream_user_agent[0]) av_dict_set(&o, "user_agent", evo_stream_user_agent, 0);
+
+    AVIOContext *pb = NULL;
+    int rc = avio_open2(&pb, path, AVIO_FLAG_READ, NULL, &o);
+    av_dict_free(&o);
+    if (rc < 0 || !pb) return 0;
+
+    unsigned char buf[4096];
+    int n = avio_read(pb, buf, (int)sizeof buf);
+    avio_closep(&pb);
+    return n > 0 && evo_playlist_sniff_is_channel_list((const char *)buf, (size_t)n);
+}
+
+static void sio_report_open_failure(int rc, const char *path, int is_network)
+{
+    char host[128];
+    host[0] = 0;
+    if (is_network) evo_error_url_host(path, host, sizeof host);
+
+    s_chan_playlist_set = 0;
+    if (is_network && rc == AVERROR_INVALIDDATA && strncmp(path, "http", 4) == 0 &&
+        !evo_stream_io_url_is_playlist(path) && sio_probe_channel_list(path)) {
+        snprintf(s_chan_playlist_url, sizeof s_chan_playlist_url, "%s", path);
+        s_chan_playlist_set = 1;
+        evo_error_set("%s%sThat link is a playlist of channels, not a video",
+                      host, host[0] ? ": " : "");
+        return;
+    }
+
+    char av[128];
+    if (av_strerror(rc, av, sizeof av) < 0) snprintf(av, sizeof av, "error %d", rc);
+
+    const char *hint = "";
+    if (rc == AVERROR_INVALIDDATA)
+        hint = is_network ? " - the server answered, but not with a video (a web page, an error message or a wrong link)"
+                          : " - the file is damaged or is not a video";
+    else if (rc == AVERROR(ETIMEDOUT))     hint = " - the server did not answer in time";
+    else if (rc == AVERROR(ECONNREFUSED))  hint = " - the server refused the connection";
+    else if (rc == AVERROR(ENOENT))        hint = " - not found";
+    else if (rc == AVERROR_EXIT)           hint = " - cancelled or timed out";
+
+    if (is_network) {
+        evo_error_set("%s%s%s%s", host, host[0] ? ": " : "", av, hint);
+    } else {
+        const char *base = strrchr(path, '/');
+        evo_error_set("%s: %s%s", base ? base + 1 : path, av, hint);
+    }
+}
+
 int evo_stream_io_open(const char *path,
                        AVFormatContext **out_fmt_ctx,
                        const evo_stream_io_config_t *cfg,
@@ -414,7 +497,9 @@ int evo_stream_io_open(const char *path,
     if (rc < 0) {
         evo_pio_close(ctx->pio);
         ctx->pio = NULL;
+        const int was_network = ctx->is_network;
         evo_direct_mem_free(ctx);
+        sio_report_open_failure(rc, path, was_network);
         return rc;
     }
 

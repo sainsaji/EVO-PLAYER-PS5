@@ -4,6 +4,8 @@
 
 #include "pp_playback.h"
 #include "evo_playback.h"
+#include "evo_error.h"
+#include "evo_thread.h"
 #include "evo_demux.h"
 #include "evo_audio_out.h"
 #include "evo_audio_resample.h"
@@ -694,8 +696,13 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     int open_rc = evo_stream_io_open(filePath.c_str(), &play_fmt, &io_cfg, &m_streamIo);
     if (open_rc < 0) {
         m_playbackFsm.postEvent(PlaybackEvent::Fail);
-        toast("OPEN FAIL", source.isProvider() ? "Could not open the stream"
-                                              : "Could not open media");
+        /* evo_stream_io_open recorded why (wrong link, refused login, dead
+         * server, damaged file, a playlist where a stream belongs). */
+        char why[256];
+        toast("OPEN FAIL", evo_error_take(why, sizeof why)
+                               ? why
+                               : (source.isProvider() ? "Could not open the stream"
+                                                      : "Could not open media"));
         return false;
     }
 
@@ -1447,16 +1454,16 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     evo_boot_log("  pb: threads demux=1 video=%d adec=%d aout=%d",
                  video_thread_running, audio_decode_thread_running,
                  audio_thread_running);
-    pthread_create(&demux_thread, nullptr, demux_thread_func, nullptr);
+    evo_thread_create(&demux_thread, demux_thread_func, nullptr);
 
     if (video_thread_running) {
-        pthread_create(&video_thread, nullptr, video_decode_thread_func, nullptr);
+        evo_thread_create(&video_thread, video_decode_thread_func, nullptr);
     }
     if (audio_decode_thread_running) {
-        pthread_create(&audio_decode_thread, nullptr, audio_decode_thread_func, nullptr);
+        evo_thread_create(&audio_decode_thread, audio_decode_thread_func, nullptr);
     }
     if (audio_thread_running) {
-        pthread_create(&audio_thread, nullptr, audio_output_thread, nullptr);
+        evo_thread_create(&audio_thread, audio_output_thread, nullptr);
     }
 
     m_playbackFsm.postEvent(PlaybackEvent::Play);

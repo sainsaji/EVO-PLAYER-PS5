@@ -32,6 +32,7 @@
 #include <sys/time.h>
 
 #include "evo_net.h"
+#include "evo_error.h"
 
 /* ---- LAN discovery (Emby / Jellyfin, UDP 7359) ---- */
 
@@ -303,6 +304,7 @@ typedef struct evo_net_req {
     /* Result */
     int         completed;
     int         success;
+    int         error;          /* EVO_NET_ERR_*; the reason when !success */
     int         status_code;
     char       *response_body;
     size_t      response_len;
@@ -1267,6 +1269,7 @@ static void *evo_net_worker(void *arg)
                                    &req->status_code);
 
             req->success   = (res == 0);
+            req->error     = res;       /* kept: the callback only gets success/status */
             req->completed = 1;
 
             /* Push to completed queue */
@@ -1397,6 +1400,95 @@ int evo_net_request_async(const char *method,
     return EVO_NET_ASYNC_OK;
 }
 
+/* ---- Why a request failed, in words (the callback only gets success/status) ---- */
+
+static int          g_cb_error;            /* EVO_NET_ERR_* of the callback running now */
+static pthread_mutex_t g_fail_mx = PTHREAD_MUTEX_INITIALIZER;
+static char         g_last_fail_msg[200];
+static long long    g_last_fail_at;
+
+static long long mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000L;
+}
+
+/* Posters and icons fail all the time while browsing; they are never "the
+ * reason" something else did not load. */
+static int url_is_image(const char *url)
+{
+    const char *end = url + strcspn(url, "?#");
+    static const char *const ext[] = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".ico", NULL };
+    for (int i = 0; ext[i]; ++i) {
+        size_t l = strlen(ext[i]);
+        if ((size_t)(end - url) >= l && strncasecmp(end - l, ext[i], l) == 0) return 1;
+    }
+    return 0;
+}
+
+int evo_net_callback_error(void) { return g_cb_error; }
+
+void evo_net_describe_failure(int err, int status, const char *url, char *out, size_t cap)
+{
+    if (!out || !cap) return;
+    char host[EVO_NET_MAX_HOST];
+    evo_error_url_host(url ? url : "", host, sizeof host);
+
+    char tmp[128];
+    const char *what;
+    switch (err) {
+    case EVO_NET_ERR_INVALID_URL: what = "that is not a valid http(s) address"; break;
+    case EVO_NET_ERR_DNS:         what = "could not find the server (name lookup failed)"; break;
+    case EVO_NET_ERR_CONNECT:     what = "could not connect to the server"; break;
+    case EVO_NET_ERR_SEND_HDR:
+    case EVO_NET_ERR_SEND_BODY:   what = "the connection dropped while sending the request"; break;
+    case EVO_NET_ERR_MEM:
+    case EVO_NET_ERR_REALLOC:     what = "ran out of memory downloading the reply"; break;
+    case EVO_NET_ERR_HTTP: {
+        const char *why = (status == 401 || status == 403) ? "refused - check the username, password or link"
+                        : status == 404                    ? "not found - check the address"
+                        : status == 429                    ? "too many requests - try again shortly"
+                        : status >= 500                    ? "the server has a problem"
+                                                           : "error";
+        snprintf(tmp, sizeof tmp, "the server answered HTTP %d (%s)", status, why);
+        what = tmp;
+        break;
+    }
+    case EVO_NET_ERR_SSL_CTX:
+    case EVO_NET_ERR_SSL_NEW:
+    case EVO_NET_ERR_SSL_CONN:    what = "the secure (https) connection failed"; break;
+    case EVO_NET_ERR_TOO_LONG:    what = "the address is too long"; break;
+    case EVO_NET_ERR_REDIRECTS:   what = "too many redirects"; break;
+    case EVO_NET_ERR_DOWNGRADE:   what = "redirect from https to http refused"; break;
+    case EVO_NET_ERR_CHUNKED:     what = "the server's reply was malformed"; break;
+    case EVO_NET_ERR_BODY_LIMIT:  what = "the reply is too large (over 64 MB)"; break;
+    default:
+        snprintf(tmp, sizeof tmp, "network error %d", err);
+        what = tmp;
+        break;
+    }
+    snprintf(out, cap, "%s%s%s", host, host[0] ? ": " : "", what);
+}
+
+int evo_net_last_failure(char *out, size_t cap, int max_age_ms)
+{
+    int have = 0;
+    pthread_mutex_lock(&g_fail_mx);
+    if (g_last_fail_msg[0] && mono_ms() - g_last_fail_at <= max_age_ms) {
+        if (out && cap) snprintf(out, cap, "%s", g_last_fail_msg);
+        have = 1;
+    }
+    pthread_mutex_unlock(&g_fail_mx);
+    return have;
+}
+
+int evo_failure_reason(char *out, size_t cap)
+{
+    if (evo_error_take(out, cap)) return 1;
+    return evo_net_last_failure(out, cap, 5000);
+}
+
 void evo_net_poll(void)
 {
     evo_net_req_t *ready[EVO_NET_MAX_QUEUE];
@@ -1412,6 +1504,15 @@ void evo_net_poll(void)
 
     for (int i = 0; i < count; i++) {
         evo_net_req_t *req = ready[i];
+        g_cb_error = req->success ? 0 : req->error;
+        if (!req->success && !url_is_image(req->url)) {
+            char why[sizeof g_last_fail_msg];
+            evo_net_describe_failure(req->error, req->status_code, req->url, why, sizeof why);
+            pthread_mutex_lock(&g_fail_mx);
+            memcpy(g_last_fail_msg, why, sizeof g_last_fail_msg);
+            g_last_fail_at = mono_ms();
+            pthread_mutex_unlock(&g_fail_mx);
+        }
         if (req->callback) {
             req->callback(req->success, req->status_code,
                           req->response_body, req->response_len,

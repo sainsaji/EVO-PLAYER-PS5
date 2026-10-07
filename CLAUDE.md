@@ -49,16 +49,20 @@ Each issue body also has a "References & sequencing" block.
   and panics once a compute queue is allocated.
   → [hardware-decode.md](docs/hardware/hardware-decode.md)
 - **Do not kill `kstuff`.** It destabilises the console into a panic.
-- **Remote Play is permanently impossible — a jailbroken PS5 cannot pair.**
-  chiaki-ng, pyremoteplay, virtual gamepads: all dead ends, forever. Never
-  propose, install or probe them. The console *does* answer Remote Play
-  discovery and TCP 9295 *is* open — **that proves nothing.** Consequence:
-  `evo-remote.sh key` cannot reach a system dialog (the native IME, the web
-  browser), because it injects into EVO's own pad state. To test anything that
-  types text, set Settings → Interface & Storage → `KEYBOARD INPUT` =
-  `VIRTUAL KEYBOARD`, which EVO draws itself and the remote can drive. If an
-  IME is already up and wedging input, `evo-remote.sh quit` → `close` still
-  works through it.
+- **Remote Play (chiaki-ng) works on this console** (paired and streamed
+  2026-10-07; an earlier note said a jailbroken PS5 cannot pair, which was
+  wrong). It needs no PSN: the account was offline-activated with `offact` and
+  paired with **LinkDev** (a websrv app) and chiaki-ng v1.10.0 on the PC
+  (`tools/chiaki.ps1`). The steps, the result and the pitfalls are in
+  [remote-play.md](docs/build/remote-play.md). It gives the real screen and real
+  pad input, so it reaches the system dialogs that `evo-remote.sh key` cannot
+  (the native IME, the web browser). Still: don't start a stream or any console
+  action the owner has not asked for, and close EVO (`quit`, then `close`)
+  before sending payloads. The pairing survives power cuts only if the account
+  stays activated; the console's address changes (`ps5-remoteplay status`).
+  `evo-remote.sh key` itself still only injects into EVO's own pad state; for
+  tests that type text without Remote Play, set Settings → Interface & Storage
+  → `KEYBOARD INPUT` = `VIRTUAL KEYBOARD`.
 - **The console's `/fs` web route is read-only.** Delete over FTP
   (`tools/shot.sh clean`).
 - **Diagnostics: one file, `/mnt/usb0/evo.log`.** It holds the boot trace,
