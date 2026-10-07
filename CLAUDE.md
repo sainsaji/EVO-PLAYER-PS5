@@ -146,6 +146,11 @@ Layer boundaries: [architecture.md](docs/architecture/architecture.md).
 
 ## Working efficiently
 
+- **Search before you grep.** The `evo_search` tool (MCP server `evo-rag`,
+  [tools/rag/](tools/rag/README.md)) searches the code, docs, every GitHub issue
+  and the memory notes by meaning or by name. Ask it first ("why can't we call
+  sceVideoOutOpen", "where is seek handled") and then Read the `path:lines` it
+  returns. Fall back to Grep for an exact string you already know.
 - **Read narrow.** `evo_rmlui_app.cpp` (4k lines), `uiview_playback_rml.cpp`
   and `core/Application.cpp` are large. Grep first, then read only that range.
 - **Don't re-read a file right after editing it.**

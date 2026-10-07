@@ -331,3 +331,6 @@ output/iptv-repro/
 
 # Cloned reference, GPL-3.0, kept on disk and never committed.
 third_party/ps5-homebrew-dev-protocol/
+
+# local search index (tools/rag)
+output/rag/

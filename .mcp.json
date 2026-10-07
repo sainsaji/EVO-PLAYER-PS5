@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "evo-rag": {
+      "command": "python",
+      "args": ["tools/rag/evo_rag_mcp.py"]
+    }
+  }
+}
