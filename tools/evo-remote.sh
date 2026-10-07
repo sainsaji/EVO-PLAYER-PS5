@@ -456,6 +456,36 @@ boot|log)
     get_file "${USB_LOG}" 2>/dev/null | tee "${LOG_OUT}/evo.log" \
         || echo "(no evo.log — launched? sandbox open?)"
     ;;
+logs|tail)
+    # Live log from EVO's own server (port 9780), no FTP. Ctrl-C to stop.
+    #   evo-remote.sh logs              whole ring, then live
+    #   evo-remote.sh logs now          live only
+    #   evo-remote.sh logs <text>       only lines containing <text>
+    #   evo-remote.sh logs now <text>
+    #   evo-remote.sh logs problems     only WARN / ERROR lines (also: now problems)
+    Q=""
+    if [[ "${1:-}" == "now" ]]; then Q="tail=0"; shift; fi
+    if [[ "${1:-}" == "problems" ]]; then Q="${Q:+${Q}&}level=warn"; shift; fi
+    if [[ -n "${1:-}" ]]; then Q="${Q:+${Q}&}grep=$(printf '%s' "$1" | sed 's/ /+/g')"; fi
+    # Lines read "[seconds] LEVEL text". Shown as "mm:ss.mmm LEVEL text", WARN and
+    # ERROR coloured when stdout is a terminal. LOGS_RAW=1 keeps the raw lines.
+    if [[ "${LOGS_RAW:-}" == "1" ]]; then
+        FMT=(cat)
+    else
+        FMT=(awk -v color="$([[ -t 1 ]] && echo 1 || echo 0)" '
+            match($0, /^\[[0-9]+(\.[0-9]+)?\] (INFO |WARN |ERROR)/) {
+                s = $1; gsub(/[\[\]]/, "", s); lv = $2
+                m = int(s / 60); sec = s - m * 60
+                rest = substr($0, index($0, lv) + length(lv) + 1); sub(/^ +/, "", rest)
+                line = sprintf("%02d:%06.3f %-5s %s", m, sec, lv, rest)
+                if (color && lv == "ERROR") line = "\033[31m" line "\033[0m"
+                else if (color && lv == "WARN") line = "\033[33m" line "\033[0m"
+                print line; fflush(); next }
+            { print; fflush() }')
+    fi
+    curl -sN --connect-timeout 5 "http://${PS5_HOST}:9780/raw${Q:+?${Q}}" | "${FMT[@]}" \
+        || echo "(no log server on ${PS5_HOST}:9780 - EVO running?)"
+    ;;
 watch)
     SECS="${1:-180}"
     ftp_py "${SECS}" <<'PY'

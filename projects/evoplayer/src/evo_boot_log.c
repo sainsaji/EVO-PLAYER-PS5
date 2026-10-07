@@ -121,6 +121,95 @@ static char   g_boot[BL_BOOT_CAP];
 static size_t g_boot_len;
 static int    g_dropped;
 static FILE  *g_fp;
+static long   g_written;   /* bytes in evo.log since open/rotation, incl. what was there */
+
+#define BL_ROTATE_BYTES (16L * 1024 * 1024)
+static FILE *bl_rotate(FILE *fp);
+static void  bl_session_header(FILE *fp, const char *why);
+static void  bl_wall_iso(char *out, size_t cap);
+
+/*
+ * Live-tail ring (evo_log_server.c). Every line lands here from the first
+ * call, even before /mnt/usb0 opens, so a client that connects late still sees
+ * the boot. `g_ring_total` counts every byte ever logged; a reader keeps its
+ * own absolute position, so a slow client loses old lines instead of stalling
+ * the logger (evo_boot_log is only ever a memcpy under g_ring_lock).
+ */
+#define BL_RING_CAP (128 * 1024)
+static char            g_ring[BL_RING_CAP];
+static unsigned long long g_ring_total;
+static pthread_mutex_t g_ring_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_ring_cond = PTHREAD_COND_INITIALIZER;
+
+static void bl_ring_put(const char *s, size_t n)
+{
+    pthread_mutex_lock(&g_ring_lock);
+    for (size_t i = 0; i < n;) {
+        size_t at = (size_t)(g_ring_total % BL_RING_CAP);
+        size_t c = BL_RING_CAP - at;
+        if (c > n - i) c = n - i;
+        memcpy(g_ring + at, s + i, c);
+        g_ring_total += c;
+        i += c;
+    }
+    pthread_cond_broadcast(&g_ring_cond);
+    pthread_mutex_unlock(&g_ring_lock);
+}
+
+unsigned long long evo_log_ring_total(void)
+{
+    pthread_mutex_lock(&g_ring_lock);
+    unsigned long long t = g_ring_total;
+    pthread_mutex_unlock(&g_ring_lock);
+    return t;
+}
+
+size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
+                         int wait_ms, unsigned long long *missed)
+{
+    size_t n = 0;
+    pthread_mutex_lock(&g_ring_lock);
+    if (*pos > g_ring_total)
+        *pos = g_ring_total;
+    if (*pos == g_ring_total && wait_ms > 0) {
+        struct timespec until;
+        clock_gettime(CLOCK_REALTIME, &until);
+        until.tv_sec += wait_ms / 1000;
+        until.tv_nsec += (long)(wait_ms % 1000) * 1000000L;
+        if (until.tv_nsec >= 1000000000L) {
+            until.tv_sec++;
+            until.tv_nsec -= 1000000000L;
+        }
+        pthread_cond_timedwait(&g_ring_cond, &g_ring_lock, &until);
+    }
+    if (g_ring_total - *pos > BL_RING_CAP) {
+        /* Overwritten while the reader was away: jump to the oldest byte still
+         * held, then on to the next line start. */
+        unsigned long long from = g_ring_total - BL_RING_CAP;
+        while (from < g_ring_total && g_ring[from % BL_RING_CAP] != '\n')
+            from++;
+        if (from < g_ring_total)
+            from++;
+        if (missed)
+            *missed += from - *pos;
+        *pos = from;
+    }
+    unsigned long long avail = g_ring_total - *pos;
+    n = avail < cap ? (size_t)avail : cap;
+    for (size_t i = 0; i < n; ++i)
+        buf[i] = g_ring[(*pos + i) % BL_RING_CAP];
+    if (n == cap && n > 0) {
+        /* Hand out whole lines only; the tail is picked up on the next call. */
+        size_t k = n;
+        while (k > 0 && buf[k - 1] != '\n')
+            k--;
+        if (k > 0)
+            n = k;
+    }
+    *pos += n;
+    pthread_mutex_unlock(&g_ring_lock);
+    return n;
+}
 
 static pthread_mutex_t g_q_lock  = PTHREAD_MUTEX_INITIALIZER;  /* the queue */
 static pthread_mutex_t g_io_lock = PTHREAD_MUTEX_INITIALIZER;  /* g_fp writes */
@@ -153,6 +242,16 @@ static size_t bl_drain(int do_sync)
         if (n)
             fwrite(out, 1, n, g_fp);
         fflush(g_fp);
+        g_written += (long)n;
+        if (g_written > BL_ROTATE_BYTES) {
+            FILE *fresh = bl_rotate(g_fp);
+            if (fresh) {
+                g_fp = fresh;
+                g_written = 0;
+                bl_session_header(g_fp, "rotated (previous file is evo.log.1)");
+                fflush(g_fp);
+            }
+        }
         if (do_sync)
             fsync(fileno(g_fp));
     }
@@ -165,6 +264,7 @@ static void *bl_writer(void *arg)
     (void)arg;
     struct timespec last_sync;
     clock_gettime(CLOCK_MONOTONIC, &last_sync);
+    struct timespec last_clock = last_sync;
     for (;;) {
         pthread_mutex_lock(&g_q_lock);
         if (g_q_len == 0 && !g_want_sync) {
@@ -186,6 +286,14 @@ static void *bl_writer(void *arg)
         const long since_ms = (long)(now.tv_sec - last_sync.tv_sec) * 1000L +
                               (now.tv_nsec - last_sync.tv_nsec) / 1000000L;
         const int do_sync = want_sync || since_ms >= BL_SYNC_MS;
+        /* Re-state the wall clock every 10 minutes so any stretch of the log
+         * can be dated, and a rotated file carries its own anchor. */
+        if ((now.tv_sec - last_clock.tv_sec) >= 600) {
+            char iso[32];
+            bl_wall_iso(iso, sizeof iso);
+            evo_boot_log("log clock: wall clock %s at this line", iso);
+            last_clock = now;
+        }
         bl_drain(do_sync);
         if (do_sync)
             last_sync = now;
@@ -193,13 +301,12 @@ static void *bl_writer(void *arg)
     return NULL;
 }
 
-void evo_boot_log(const char *fmt, ...)
+static void bl_vlog(const char *level, const char *fmt, va_list ap)
 {
     char line[600];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(line, sizeof line, fmt, ap);
-    va_end(ap);
+    /* Fixed-width level column, so lines align: "INFO  ", "WARN  ", "ERROR ". */
+    int ln = snprintf(line, sizeof line, "%-5s ", level ? level : "INFO");
+    vsnprintf(line + ln, sizeof line - (size_t)ln, fmt, ap);
     evo_log_redact(line, sizeof line);
 
     printf("EVO boot: %s\n", line);
@@ -224,6 +331,8 @@ void evo_boot_log(const char *fmt, ...)
     if ((size_t)m >= sizeof stamped)
         m = (int)sizeof stamped - 1;
 
+    bl_ring_put(stamped, (size_t)m);
+
     pthread_mutex_lock(&g_q_lock);
     if (g_fp) {
         if (g_q_len + (size_t)m <= BL_QUEUE_CAP) {
@@ -242,6 +351,79 @@ void evo_boot_log(const char *fmt, ...)
     pthread_mutex_unlock(&g_q_lock);
 }
 
+void evo_boot_log(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    bl_vlog(NULL, fmt, ap);
+    va_end(ap);
+}
+
+/* level: 1 = WARN, 2 = ERROR; anything else is INFO. Every line is
+ * "[seconds] LEVEL text" with LEVEL padded to 5 characters. */
+void evo_log_level(int level, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    bl_vlog(level == 2 ? "ERROR" : level == 1 ? "WARN" : NULL, fmt, ap);
+    va_end(ap);
+}
+
+/* Wall-clock time as "2026-10-07T12:34:56Z" without libc time helpers (the
+ * native-app libc is missing some). */
+static void bl_wall_iso(char *out, size_t cap)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long long s = (long long)ts.tv_sec;
+    long long days = s / 86400, rem = s % 86400;
+    if (rem < 0) { rem += 86400; days--; }
+    long long z = days + 719468;                       /* civil-from-days */
+    long long era = (z >= 0 ? z : z - 146096) / 146097;
+    long long doe = z - era * 146097;
+    long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long y = yoe + era * 400;
+    long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long long mp = (5 * doy + 2) / 153;
+    long long d = doy - (153 * mp + 2) / 5 + 1;
+    long long m = mp < 10 ? mp + 3 : mp - 9;
+    if (m <= 2) y++;
+    snprintf(out, cap, "%04lld-%02lld-%02lldT%02lld:%02lld:%02lldZ", y, m, d,
+             rem / 3600, (rem % 3600) / 60, rem % 60);
+}
+
+/* Keep evo.log from growing without bound on the stick: past BL_ROTATE_BYTES
+ * the file is copied to evo.log.1 (one generation kept) and started afresh.
+ * A copy, not rename(): the app module has no rename() guarantee. Caller holds
+ * g_io_lock. */
+static FILE *bl_rotate(FILE *fp)
+{
+    static char buf[64 * 1024];
+    fflush(fp);
+    fclose(fp);
+    FILE *in = fopen(EVO_LOG_PATH, "r");
+    FILE *out = in ? fopen(EVO_LOG_PATH ".1", "w") : NULL;
+    if (in && out) {
+        size_t n;
+        while ((n = fread(buf, 1, sizeof buf, in)) > 0)
+            fwrite(buf, 1, n, out);
+    }
+    if (in) fclose(in);
+    if (out) { fflush(out); fsync(fileno(out)); fclose(out); }
+    FILE *fresh = fopen(EVO_LOG_PATH, (in && out) ? "w" : "a");   /* keep it if the copy failed */
+    return fresh;
+}
+
+static void bl_session_header(FILE *fp, const char *why)
+{
+    char iso[32];
+    struct timespec ts;
+    bl_wall_iso(iso, sizeof iso);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    fprintf(fp, "[%lld.%03ld] INFO  log %s: wall clock %s at this line\n",
+            (long long)ts.tv_sec, ts.tv_nsec / 1000000L, why, iso);
+}
+
 void evo_boot_log_flush(void)
 {
     if (!g_fp) {
@@ -249,6 +431,13 @@ void evo_boot_log_flush(void)
         if (!fp)
             return;   /* /mnt/usb0 not reachable yet — try again next call */
         pthread_mutex_lock(&g_io_lock);
+        fseek(fp, 0, SEEK_END);
+        g_written = ftell(fp);
+        if (g_written > BL_ROTATE_BYTES) {   /* a previous run left it big */
+            FILE *fresh = bl_rotate(fp);
+            if (fresh) { fp = fresh; g_written = 0; }
+        }
+        bl_session_header(fp, "session start");
         pthread_mutex_lock(&g_q_lock);
         if (g_dropped) {
             fprintf(fp, "[log] %d pre-mount line(s) dropped\n", g_dropped);
@@ -269,6 +458,7 @@ void evo_boot_log_flush(void)
                 g_writer_up = 1;
             }
         }
+        evo_log_server_start();   /* once; the sandbox (and network) is open now */
     }
     /* An explicit flush is a breadcrumb: it waits until the line is on the
      * stick. */
@@ -306,8 +496,14 @@ void evo_boot_log_crash_drain(int fd)
 #else  /* host / payload */
 
 void evo_boot_log(const char *fmt, ...) { (void)fmt; }
+void evo_log_level(int level, const char *fmt, ...) { (void)level; (void)fmt; }
 void evo_boot_log_flush(void) {}
 void evo_boot_log_kick(void) {}
 void evo_boot_log_crash_drain(int fd) { (void)fd; }
+unsigned long long evo_log_ring_total(void) { return 0; }
+size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
+                         int wait_ms, unsigned long long *missed)
+{ (void)pos; (void)buf; (void)cap; (void)wait_ms; (void)missed; return 0; }
+void evo_log_server_start(void) {}
 
 #endif

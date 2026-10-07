@@ -27,12 +27,12 @@ import re
 import sys
 
 BEGIN_RE = re.compile(
-    r"\[(?P<t>\d+\.\d+)\]\s+seekstutter SEEK_BEGIN target_pts=(?P<target>-?\d+)")
+    r"\[(?P<t>\d+\.\d+)\]\s+(?:(?:INFO|WARN|ERROR)\s+)?seekstutter SEEK_BEGIN target_pts=(?P<target>-?\d+)")
 COMMIT_RE = re.compile(
-    r"\[(?P<t>\d+\.\d+)\]\s+seekstutter SEEK_COMMIT pts=(?P<pts>-?\d+) "
+    r"\[(?P<t>\d+\.\d+)\]\s+(?:(?:INFO|WARN|ERROR)\s+)?seekstutter SEEK_COMMIT pts=(?P<pts>-?\d+) "
     r"to_first_frame_us=(?P<t2f>\d+)")
 TICK_RE = re.compile(
-    r"\[(?P<t>\d+\.\d+)\]\s+seekstutter tick swap=(?P<swap>\d) "
+    r"\[(?P<t>\d+\.\d+)\]\s+(?:(?:INFO|WARN|ERROR)\s+)?seekstutter tick swap=(?P<swap>\d) "
     r"newvid=(?P<newvid>\d) have=(?P<have>\d) held=(?P<held>\d) "
     r"disc=(?P<disc>\d) pts=(?P<pts>-?\d+) "
     r"osd_act=(?P<osd_act>\d) osd_chg=(?P<osd_chg>\d) "

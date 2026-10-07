@@ -29,7 +29,7 @@ STEP = 2.0            # cue every STEP seconds
 
 STAMP_RE = re.compile(r"^\[(\d+(?:\.\d+)?)\]")
 SUB_RE = re.compile(
-    r"\[(?P<t>\d+\.\d+)\]\s+subsync "
+    r"\[(?P<t>\d+\.\d+)\]\s+(?:(?:INFO|WARN|ERROR)\s+)?subsync "
     r"pos=(?P<pos>-?\d+\.\d+) base=(?P<base>-?\d+\.\d+) clk=(?P<clk>-?\d+\.\d+) "
     r"src=(?P<src>\w+) delay=(?P<delay>-?\d+) mode=(?P<mode>\w+) "
     r"mclk=(?P<mclk>-?\d+\.\d+) cue=\"(?P<cue>.*)\"\s*$")
