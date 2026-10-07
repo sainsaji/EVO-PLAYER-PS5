@@ -354,7 +354,14 @@ else
     begin "bundling RmlUi assets into evo_rmlui_bundle_data.cpp"
     python3 "${REPO_ROOT}/tools/bundle_rml_assets.py"
 
+    # ccache (volume /ccache): a flag change or a payload compile check no longer
+    # means recompiling every unchanged file. EVO_NO_CCACHE=1 turns it off.
+    CCACHE_BIN=""
+    if [[ "${EVO_NO_CCACHE:-}" != "1" ]] && command -v ccache >/dev/null 2>&1; then
+        CCACHE_BIN="ccache"
+    fi
     make -C "${EVO}" objects -j"$(nproc)" \
+        CCACHE="${CCACHE_BIN}" \
         CC="${TCC}" CXX="${TCXX}" \
         AGC_DEVICE="${AGC_DEVICE}" \
         EXTRA_CFLAGS="${WANT}" \

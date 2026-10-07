@@ -232,11 +232,17 @@ RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 DEPFLAGS := -MMD -MP
 ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d)
 
+# CCACHE=ccache (set by scripts/package-app.sh and build-evoplayer.sh) caches each
+# object by its preprocessed source + flags, so switching between the payload
+# compile check and the app-module build, or between --usb-remote and release,
+# does not recompile unchanged files. Empty = compile directly.
+CCACHE ?=
+
 %.o: %.c
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(CCACHE) $(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(CCACHE) $(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 all: $(ELF)
 

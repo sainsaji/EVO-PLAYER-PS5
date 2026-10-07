@@ -84,6 +84,11 @@ SCE_LIBS=(
 MAKE_ARGS=("ELF=${ELF_NAME}"
            "LIBS=${UPSTREAM_LIBS[*]} ${TRANSITIVE_LIBS[*]} ${SCE_LIBS[*]}")
 [[ -n "${STAGE}" ]] && MAKE_ARGS+=("STAGE=${STAGE}")
+# ccache: shares compiled objects with package-app.sh (same /ccache volume), so a
+# compile check followed by a package build does not compile everything twice.
+if [[ "${EVO_NO_CCACHE:-}" != "1" ]] && command -v ccache >/dev/null 2>&1; then
+    MAKE_ARGS+=("CCACHE=ccache")
+fi
 
 # Development switches, e.g. EXTRA_CFLAGS="-DEVO_AUTOSHOT=4 -DEVO_START_SCREEN=10".
 # Going through the script rather than calling make directly matters: the LIBS
