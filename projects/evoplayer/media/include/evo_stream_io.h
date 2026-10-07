@@ -61,6 +61,14 @@ int evo_stream_io_deadline_expired(const evo_stream_io_ctx_t *io_ctx);
  */
 int evo_stream_io_url_is_playlist(const char *url);
 
+/* Fail every blocking I/O call on this context from now on (stop/quit). */
+void evo_stream_io_abort(evo_stream_io_ctx_t *ctx);
+
+/* Request headers a provider wants sent with the stream ("Name: value\r\n"
+ * each) and a User-Agent; set before evo_stream_io_open(), empty otherwise. */
+extern char evo_stream_headers[4096];
+extern char evo_stream_user_agent[512];
+
 /**
  * The FFmpeg options a network open gets: bounded reconnects, 5 s timeouts, the
  * HLS segment allowlist widened - and reconnect_at_eof for a raw stream but NOT

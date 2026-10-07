@@ -619,7 +619,6 @@ static void demux_wait_for_room(PacketQueue *q, int cap, long long byte_cap,
      * read ahead in bursts and fill the queues to the cap.
      */
     while (demux_thread_running &&
-           !player_paused &&
            !prospero_seek_pending &&
            queue_at_cap(q, cap, byte_cap)) {
         /* Still re-check the pre-buffer here: this loop does not return to the
@@ -747,11 +746,11 @@ void *demux_thread_func(void *arg) {
             continue;
         }
 
-        if (player_paused) {
-            usleep(1000);
-            continue;
-        }
-
+        /* Paused or not, keep reading up to the queue caps: a pause is the
+         * cheapest time to build cushion on a network stream. The wait in
+         * demux_wait_for_room() bounds it, and it no longer exits on a pause -
+         * that dropped the packet in hand, and a lost reference frame smears
+         * the picture until the next keyframe. */
         int read_result =
             av_read_frame(
                 play_fmt,
@@ -791,7 +790,6 @@ void *demux_thread_func(void *arg) {
              * the seek clears the queues anyway. Drop it; the loop top seeks. */
             if (
                 demux_thread_running &&
-                !player_paused &&
                 !prospero_seek_pending
             ) {
                 packet_queue_push(
@@ -812,7 +810,6 @@ void *demux_thread_func(void *arg) {
 
             if (
                 demux_thread_running &&
-                !player_paused &&
                 !prospero_seek_pending
             ) {
                 packet_queue_push(

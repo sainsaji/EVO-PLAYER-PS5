@@ -785,6 +785,17 @@ static void on_streams(int ok, int status, const char *body, size_t len, void *u
         if (title[0]) snprintf(c->label, sizeof c->label, "%s - %s", name, title);
         else          snprintf(c->label, sizeof c->label, "%s", name);
         if (strstr(url, ".m3u8")) snprintf(c->container, sizeof c->container, "hls");
+        /* behaviorHints.proxyHeaders.request: headers the host wants on the stream. */
+        cJSON *hdr = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "behaviorHints"),
+                                                             "proxyHeaders"), "request");
+        size_t hl = 0;
+        for (cJSON *h = hdr ? hdr->child : NULL; h; h = h->next) {
+            if (!cJSON_IsString(h) || !h->string || !h->valuestring) continue;
+            if (strpbrk(h->string, "\r\n:") || strpbrk(h->valuestring, "\r\n")) continue;
+            int w = snprintf(c->headers + hl, sizeof c->headers - hl, "%s: %s\r\n", h->string, h->valuestring);
+            if (w < 0 || (size_t)w >= sizeof c->headers - hl) { c->headers[hl] = 0; break; }
+            hl += (size_t)w;
+        }
     }
     if (!ok || status != 200)
         PROV_LOG("addons: streams from %s failed ok=%d http=%d", g_ad[r->addon].name, ok, status);

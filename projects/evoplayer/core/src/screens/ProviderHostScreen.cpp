@@ -16,7 +16,8 @@ extern "C" {
 #include "evo_boot_trace.h"
 #include "evo_readdir.h"
 #include "evo_favorites.h"
-#include "evo_hls_variants.h"                      /* the stream picker's quality list */
+#include "evo_stream_io.h"                          /* evo_stream_headers */
+#include "evo_hls_variants.h"                    /* the stream picker's quality list */
 #include "evo_net.h"                               /* evo_net_discover_* */
 #include "evo/interfaces/ISettingsService.hpp"
 }
@@ -168,6 +169,10 @@ int launch_choice(int idx)
     /* Either side may know it is live: the provider's catalog said so, or the
      * resolved choice did (an HLS playlist with no EXT-X-ENDLIST). */
     src.is_live  = (g_pending.is_live || c.is_live) ? true : false;
+
+    /* Read by evo_stream_io_open() on the worker started below. */
+    snprintf(evo_stream_headers, sizeof evo_stream_headers, "%s", c.headers);
+    evo_stream_user_agent[0] = '\0';
 
     g_start_src = src;
     g_start_resume = src.is_live ? 0.0 : (double)g_pending.resume_sec;

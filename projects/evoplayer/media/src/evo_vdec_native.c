@@ -440,6 +440,11 @@ struct dec_slot {
     size_t   frame_size;
     uint32_t max_w, max_h;
     uint32_t boot_w, boot_h;
+    /* What the decoder was created with, so a seek can build it afresh on
+     * the same memory (slot_renew_decoder). */
+    SceVideodec2DecoderConfigInfo cfg;
+    SceVideodec2DecoderMemoryInfo mem;
+    int      have_cfg;
 };
 
 static int             g_boot_tried;
@@ -464,6 +469,35 @@ static void slot_teardown(struct dec_slot *s)
     memset(s, 0, sizeof *s);
     s->boot_w = boot_w;
     s->boot_h = boot_h;
+}
+
+/*
+ * A new decoder object on the slot's existing memory - what a seek needs.
+ *
+ * sceVideodec2Reset() on a decoder mid-stream leaves some 4K streams unable
+ * to start again: the first IRAP after it fails (0x811d0303) and nothing
+ * comes out afterwards, IRAP after IRAP (hardware 2026-10-01, a UHD Blu-ray
+ * remux, DV 8.1 / HDR10, resumed at 25 min: 0 frames in two minutes, audio
+ * waiting on the first picture). EVO met the same thing as #57 and fell back
+ * to software decoding. A decoder created afresh decodes that IRAP like the
+ * first one of the file. Creation is ~15 ms against a seek's network round
+ * trip. Returns 0 on success; on failure the slot is left without a decoder.
+ */
+static int slot_renew_decoder(struct dec_slot *s)
+{
+    if (!s->have_cfg)
+        return -1;
+    if (s->decoder) {
+        sceVideodec2DeleteDecoder(s->decoder);
+        s->decoder = NULL;
+    }
+    SceVideodec2DecoderMemoryInfo mem = s->mem;
+    int rc = sceVideodec2CreateDecoder(&s->cfg, &mem, &s->decoder);
+    if (rc != 0 || !s->decoder) {
+        s->decoder = NULL;
+        return rc ? rc : -1;
+    }
+    return sceVideodec2Reset(s->decoder);
 }
 
 /*
@@ -524,6 +558,10 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     config.codec_type           = d->codec_type;
     config.profile              = d->profile_cfg;
     config.max_level            = (w > 1920 || h > 1088) ? d->level_4k : d->level_1080;
+    /* Level 5.1 caps a picture at 8,912,896 luma samples: a 3840x3840 stereo
+     * 360 or an 8K frame needs HEVC level 6.1 (183 on the x30 scale). */
+    if (d->codec_type == SCE_VIDEODEC2_CODEC_HEVC && (int64_t)w * h > 8912896)
+        config.max_level = 183;
     config.max_width            = w;
     config.max_height           = h;
     config.max_dpb_frames       = SCE_VIDEODEC2_AUTO_FRAMES;   /* decoder self-sizes */
@@ -581,6 +619,9 @@ static int slot_bringup(struct dec_slot *s, const nat_codec_desc *d,
     STAGE("CreateDecoder");
     if ((rc = sceVideodec2CreateDecoder(&config, &mem, &s->decoder)) != 0) return rc;
     if (!s->decoder) return -1;
+    s->cfg = config;
+    s->mem = mem;
+    s->have_cfg = 1;
     STAGE("Reset");
     if ((rc = sceVideodec2Reset(s->decoder)) != 0) return rc;
 
@@ -877,6 +918,9 @@ struct evo_vdec_native {
      * so a genuinely undecodable stream still fails instead of spinning.
      */
     int      post_flush_errs;
+    unsigned dec_fails;
+    int      dv_strip_logged;
+    int      need_irap;         /* a keyframe was refused: hold pictures until the next */
     int      since_flush_out;   /* pictures produced since the last flush */
 
     AVBSFContext        *bsf;
@@ -981,6 +1025,27 @@ static void ro_reset(evo_vdec_native *n)
     n->ro_count = 0;
 }
 
+/* An interlaced H.264 picture (broadcast 1080i) comes out as its two fields
+ * woven into one frame (picture_count == 2): two moments on alternate lines,
+ * which shows as a comb on motion. Each line becomes the mean of itself and the
+ * one under it. In place, on the decoder's own copy; 8-bit NV12 only. */
+static void blend_rows(uint8_t *plane, uint32_t pitch, uint32_t rows, uint32_t bytes)
+{
+    for (uint32_t y = 0; y + 1u < rows; y++) {
+        uint8_t *row = plane + (size_t)y * pitch;
+        const uint8_t *below = row + pitch;
+        for (uint32_t x = 0; x < bytes; x++)
+            row[x] = (uint8_t)((row[x] + below[x] + 1u) >> 1);
+    }
+}
+
+static void blend_fields(const SceVideodec2OutputInfo *out, uint32_t pitch)
+{
+    uint8_t *luma = (uint8_t *)out->buffer;
+    blend_rows(luma, pitch, out->height, out->width);
+    blend_rows(luma + (size_t)pitch * out->height, pitch, (out->height + 1u) / 2u, out->width);
+}
+
 static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
 {
     struct nat_slot *s = NULL;
@@ -998,6 +1063,9 @@ static void ro_harvest(evo_vdec_native *n, const SceVideodec2OutputInfo *out)
     else
         is_10bit = (n->desc->idx == NAT_HEVC10 || n->desc->idx == NAT_VP92);
     s->is_10bit = is_10bit;
+
+    if (out->picture_count == 2 && !is_10bit)
+        blend_fields(out, out->pitch_bytes ? out->pitch_bytes : out->pitch);
 
     uint32_t cw = out->pitch_bytes ? out->pitch_bytes : out->pitch;
     if (is_10bit && cw < out->pitch * 2u)
@@ -1146,6 +1214,173 @@ static int drop_undecodable_leading(evo_vdec_native *n, const uint8_t *au, int s
     return 0;
 }
 
+/* Minimal RBSP bit reader for parameter-set IDs: skips emulation prevention
+ * bytes (00 00 03), reads past the end as zeros. */
+typedef struct { const uint8_t *p; int n, byte, bit, zeros; } ps_bits;
+
+static int ps_bit(ps_bits *b)
+{
+    if (b->byte >= b->n)
+        return 0;
+    if (b->bit == 0 && b->zeros >= 2 && b->p[b->byte] == 3) {   /* emulation prevention */
+        b->byte++;
+        b->zeros = 0;
+        if (b->byte >= b->n)
+            return 0;
+    }
+    const int v = (b->p[b->byte] >> (7 - b->bit)) & 1;
+    if (++b->bit == 8) {
+        b->zeros = b->p[b->byte] == 0 ? b->zeros + 1 : 0;
+        b->bit = 0;
+        b->byte++;
+    }
+    return v;
+}
+
+static unsigned ps_u(ps_bits *b, int n)
+{
+    unsigned v = 0;
+    while (n-- > 0)
+        v = (v << 1) | (unsigned)ps_bit(b);
+    return v;
+}
+
+static unsigned ps_ue(ps_bits *b)
+{
+    int lz = 0;
+    while (lz < 31 && !ps_bit(b))
+        lz++;
+    return ((1u << lz) - 1) + ps_u(b, lz);
+}
+
+/* The ID a VPS (32), SPS (33) or PPS (34) defines; payload = after the NAL
+ * header. */
+static unsigned hevc_ps_id(int type, const uint8_t *payload, int len)
+{
+    ps_bits b = { payload, len, 0, 0, 0 };
+    if (type == 32)
+        return ps_u(&b, 4);
+    if (type == 34)
+        return ps_ue(&b);
+    /* SPS: vps id, max_sub_layers_minus1, temporal_id_nesting, then
+     * profile_tier_level(1, max_sub_layers_minus1), then the SPS id. */
+    ps_u(&b, 4);
+    const unsigned subs = ps_u(&b, 3);
+    ps_u(&b, 1);
+    ps_u(&b, 32); ps_u(&b, 32); ps_u(&b, 32);       /* general PTL, 96 bits */
+    unsigned prof[8] = {0}, lvl[8] = {0};
+    for (unsigned i = 0; i < subs; i++) {
+        prof[i] = ps_u(&b, 1);
+        lvl[i]  = ps_u(&b, 1);
+    }
+    if (subs > 0)
+        for (unsigned i = subs; i < 8; i++)
+            ps_u(&b, 2);
+    for (unsigned i = 0; i < subs; i++) {
+        if (prof[i]) { ps_u(&b, 32); ps_u(&b, 32); ps_u(&b, 24); }   /* 88 bits */
+        if (lvl[i])  ps_u(&b, 8);
+    }
+    return ps_ue(&b);
+}
+
+/*
+ * Copy an HEVC access unit into the decoder's input slot, cleaned of two
+ * things sceVideodec2 does not cope with:
+ *
+ * - NAL units of types 48-63. "Unspecified" in the standard, which a
+ *   conforming decoder must ignore - and Dolby Vision lives there: the RPU in
+ *   62 and, in profile 7 (UHD Blu-ray remuxes), the whole enhancement layer
+ *   in 63. The PS5 decodes the base layer only.
+ *
+ * - A parameter set that a later one in the same AU replaces (same type,
+ *   layer and ID). hevc_mp4toannexb puts the hvcC copy in front of every
+ *   IRAP; a stream that carries its own in-band - every UHD Blu-ray remux -
+ *   then holds each set twice, and where the encoder changed a PPS since the
+ *   header was written, two different PPS 0 in one AU. The decoder refuses
+ *   that IRAP (0x811d0301) and every picture up to the next one is lost:
+ *   hardware 2026-10-01, Avengers: Endgame UHD remux, 126 of 300 frames
+ *   gone and green/black blocks after a seek. Keeping the last of each is
+ *   exactly what the stream means - the in-band set, nearest the slice.
+ *
+ * Start codes are kept as found, so the output is never longer than the
+ * input. Returns the bytes written.
+ */
+#define AU_MAX_NALS 512
+
+static int hevc_copy_base_layer(uint8_t *dst, const uint8_t *au, int size, int *stripped,
+                                int *dups)
+{
+    int sc_at[AU_MAX_NALS], nal_at[AU_MAX_NALS], end_at[AU_MAX_NALS];
+    uint32_t key[AU_MAX_NALS];
+    int count = 0;
+    *stripped = 0;
+    *dups = 0;
+
+    int sc = -1, nal = -1;
+    for (int i = 0; i + 3 <= size; i++) {
+        if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1) {
+            sc = (i > 0 && au[i - 1] == 0) ? i - 1 : i;
+            nal = i + 3;
+            break;
+        }
+    }
+    if (nal < 0) {                          /* not Annex B: pass through */
+        memcpy(dst, au, (size_t)size);
+        return size;
+    }
+    /* Pass 1: where each NAL unit is, and a key for each parameter set. */
+    while (nal < size && count < AU_MAX_NALS) {
+        int next_sc = size, next_nal = -1;
+        for (int j = nal; j + 3 <= size; j++) {
+            if (au[j] == 0 && au[j + 1] == 0 && au[j + 2] == 1) {
+                next_sc  = (j > nal && au[j - 1] == 0) ? j - 1 : j;
+                next_nal = j + 3;
+                break;
+            }
+        }
+        const int type = (au[nal] >> 1) & 0x3f;
+        sc_at[count]  = sc;
+        nal_at[count] = nal;
+        end_at[count] = next_sc;
+        key[count]    = 0;
+        if (type >= 32 && type <= 34 && nal + 2 < next_sc) {
+            const unsigned layer = ((au[nal] & 1u) << 5) | (au[nal + 1] >> 3);
+            const unsigned id = hevc_ps_id(type, au + nal + 2, next_sc - nal - 2);
+            key[count] = 0x80000000u | ((uint32_t)type << 24) | (layer << 16) | (id & 0xffffu);
+        }
+        count++;
+        if (next_nal < 0)
+            break;
+        sc  = next_sc;
+        nal = next_nal;
+    }
+    if (count == AU_MAX_NALS && nal < size) {   /* pathological: copy untouched */
+        memcpy(dst, au, (size_t)size);
+        return size;
+    }
+    /* Pass 2: copy what the decoder should see. */
+    int o = 0;
+    for (int k = 0; k < count; k++) {
+        const int type = (au[nal_at[k]] >> 1) & 0x3f;
+        if (type >= 48) {
+            (*stripped)++;
+            continue;
+        }
+        if (key[k]) {
+            int replaced = 0;
+            for (int m = k + 1; m < count && !replaced; m++)
+                replaced = key[m] == key[k];
+            if (replaced) {
+                (*dups)++;
+                continue;
+            }
+        }
+        memcpy(dst + o, au + sc_at[k], (size_t)(end_at[k] - sc_at[k]));
+        o += end_at[k] - sc_at[k];
+    }
+    return o;
+}
+
 /* `present` == 0 for a VP9 hidden (alt-ref / show_frame=0) coded frame: the
  * decoder still needs it for reference, but its output must not be paired to a
  * PTS or handed to the presenter (research repo, packetization.cpp). Always 1
@@ -1165,7 +1400,31 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
     unsigned fslot = n->au_ring % FRAME_POOL_SLOTS;
     n->au_ring++;
 
-    memcpy(n->input_mem + (size_t)islot * INPUT_SLOT_BYTES, au, (size_t)size);
+    uint8_t *slot_mem = n->input_mem + (size_t)islot * INPUT_SLOT_BYTES;
+    if (n->desc->codec_type == SCE_VIDEODEC2_CODEC_HEVC) {
+        int stripped = 0, dups = 0;
+        size = hevc_copy_base_layer(slot_mem, au, size, &stripped, &dups);
+        if ((stripped || dups) && !n->dv_strip_logged) {
+            n->dv_strip_logged = 1;
+            note("EVO vdec native: HEVC AU cleaned - %d NAL unit(s) of type 48-63 "
+                 "(Dolby Vision RPU / enhancement layer) and %d repeated parameter "
+                 "set(s) left out", stripped, dups);
+        }
+        if (size <= 0)
+            return 0;
+    } else {
+        memcpy(slot_mem, au, (size_t)size);
+    }
+
+    /* After a refused keyframe, every picture up to the next one references
+     * what was never decoded: green and scrambled blocks if submitted. */
+    int irap = 0;
+    if (n->desc->codec_type == SCE_VIDEODEC2_CODEC_HEVC) {
+        const int vcl = hevc_au_nal_type(slot_mem, size);
+        irap = vcl >= 16 && vcl <= HEVC_NAL_IRAP_HI;
+        if (n->need_irap && vcl >= 0 && !irap)
+            return 0;
+    }
 
     SceVideodec2InputData  in;
     SceVideodec2FrameBuffer fb;
@@ -1186,6 +1445,10 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
 
     int rc = sceVideodec2Decode(n->dec, &in, &fb, &out);
     n->dec_calls++;
+    if (irap)
+        n->need_irap = rc != 0;   /* refused: hold its dependents (see above) */
+    if (rc != 0)
+        n->dec_fails++;
     if (n->dec_calls <= 3 || (out.valid && !n->first_valid_logged)) {
         if (out.valid) {
             n->first_valid_logged = 1;
@@ -1342,6 +1605,80 @@ static int pkt_present(const evo_vdec_native *n, const AVPacket *pkt)
     return 1;
 }
 
+/* Set when the last open was declined for tiles (see hevc_extradata_tiles);
+ * the player reads it to tell the viewer rather than play in slow motion. */
+int evo_vdec_tiled_declined = 0;
+
+/* tiles_enabled_flag of an HEVC PPS (payload = after the NAL header), with
+ * the tile grid when set. */
+static int hevc_pps_tiles(const uint8_t *payload, int len, unsigned *cols, unsigned *rows)
+{
+    ps_bits b = { payload, len, 0, 0, 0 };
+    ps_ue(&b); ps_ue(&b);                 /* pps id, sps id */
+    ps_u(&b, 1); ps_u(&b, 1);             /* dependent slices, output flag */
+    ps_u(&b, 3);                          /* num_extra_slice_header_bits */
+    ps_u(&b, 1); ps_u(&b, 1);             /* sign data hiding, cabac init */
+    ps_ue(&b); ps_ue(&b);                 /* num_ref_idx l0/l1 default */
+    ps_ue(&b);                            /* init_qp_minus26 (se) */
+    ps_u(&b, 1); ps_u(&b, 1);             /* constrained intra, transform skip */
+    if (ps_u(&b, 1))                      /* cu_qp_delta_enabled */
+        ps_ue(&b);
+    ps_ue(&b); ps_ue(&b);                 /* cb / cr qp offset (se) */
+    ps_u(&b, 1); ps_u(&b, 1); ps_u(&b, 1); /* slice chroma qp, weighted pred / bipred */
+    ps_u(&b, 1);                          /* transquant bypass */
+    if (!ps_u(&b, 1))
+        return 0;
+    ps_u(&b, 1);                          /* entropy_coding_sync */
+    *cols = ps_ue(&b) + 1;
+    *rows = ps_ue(&b) + 1;
+    return 1;
+}
+
+/*
+ * Whether an HEVC stream codes its pictures in tiles, from the PPS in its
+ * extradata (hvcC, or Annex B).
+ *
+ * sceVideodec2 as configured here does not decode tiled pictures: a UHD
+ * Blu-ray remux in 4x3 tiles (hardware 2026-10-01) came out as twelve boxes
+ * of scrambled colour, or not at all - every AU refused with 0x811d0303 from
+ * the first full-size picture on. Such a stream goes to the software decoder
+ * from the start rather than failing part-way in.
+ */
+static int hevc_extradata_tiles(const uint8_t *x, int n, unsigned *cols, unsigned *rows)
+{
+    if (!x || n < 4)
+        return 0;
+    if (x[0] == 0 && x[1] == 0 && (x[2] == 1 || (x[2] == 0 && x[3] == 1))) {
+        for (int i = 0; i + 4 < n; i++) {
+            if (x[i] || x[i + 1] || x[i + 2] != 1)
+                continue;
+            const int nal = i + 3;
+            if (((x[nal] >> 1) & 0x3f) == 34 && hevc_pps_tiles(x + nal + 2, n - nal - 2, cols, rows))
+                return 1;
+        }
+        return 0;
+    }
+    if (n < 23)
+        return 0;
+    int pos = 23;
+    const int arrays = x[22];
+    for (int a = 0; a < arrays && pos + 3 <= n; a++) {
+        const int type = x[pos] & 0x3f;
+        const int count = (x[pos + 1] << 8) | x[pos + 2];
+        pos += 3;
+        for (int k = 0; k < count && pos + 2 <= n; k++) {
+            const int len = (x[pos] << 8) | x[pos + 1];
+            pos += 2;
+            if (pos + len > n)
+                return 0;
+            if (type == 34 && len > 2 && hevc_pps_tiles(x + pos + 2, len - 2, cols, rows))
+                return 1;
+            pos += len;
+        }
+    }
+    return 0;
+}
+
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 {
     if (!evo_vdec_native_probe())
@@ -1350,6 +1687,15 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         return NULL;
 
     const AVCodecParameters *par = (const AVCodecParameters *)p->avctx_params;
+    evo_vdec_tiled_declined = 0;
+    if (par->codec_id == AV_CODEC_ID_HEVC) {
+        unsigned cols = 0, rows = 0;
+        if (hevc_extradata_tiles(par->extradata, par->extradata_size, &cols, &rows)) {
+            note("EVO vdec native: HEVC in %ux%u tiles -> software decoder", cols, rows);
+            evo_vdec_tiled_declined = 1;
+            return NULL;
+        }
+    }
     int bit_depth = par->bits_per_raw_sample > 8 ? par->bits_per_raw_sample : 8;
     if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE ||
         par->profile == FF_PROFILE_HEVC_MAIN_10 || par->profile == FF_PROFILE_VP9_2)
@@ -1664,7 +2010,19 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
         av_bsf_flush(v->bsf);
     }
     if (v->dec) {
-        sceVideodec2Reset(v->dec);
+        int renewed = v->slot ? slot_renew_decoder(v->slot) : -1;
+        if (v->slot && renewed != 0) {
+            note("EVO vdec native: FLUSH (seek) decoder renew FAILED rc=0x%08x -> fatal",
+                 (unsigned)renewed);
+            v->fatal = 1;
+            v->dec = NULL;
+            return;
+        }
+        if (v->slot)
+            v->dec = v->slot->decoder;
+        else
+            sceVideodec2Reset(v->dec);
+        v->need_irap = 0;
         if (!v->bsf && v->annexb_extradata && v->annexb_extradata_size > 0)
             decode_one(v, v->annexb_extradata, v->annexb_extradata_size, INT64_MIN, 0);
     }

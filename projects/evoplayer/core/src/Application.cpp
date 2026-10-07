@@ -21,6 +21,7 @@
 #include "evo/animation/AnimationManager.hpp"
 
 #include "evo_boot_log.h"
+#include "evo_stream_io.h"
 
 #include <algorithm>
 #include <cmath>
@@ -598,6 +599,8 @@ std::atomic<bool> g_web_ok{false};
 
 void* web_start_worker(void*) {
     IPlaybackController* pb = Application::getInstance().getPlaybackController();
+    evo_stream_headers[0] = '\0';       /* a provider's headers must not follow us here */
+    evo_stream_user_agent[0] = '\0';
     g_web_ok = pb && pb->startPlaybackSource(g_web_src, 0.0);
     g_web_done = true;
     return nullptr;

@@ -154,6 +154,10 @@ typedef struct evo_stream_choice {
      * hand a choice with this set to the player.
      */
     int     needs_resolver;
+
+    /* Request headers the stream needs ("Name: value\r\n" each; Stremio's
+     * behaviorHints.proxyHeaders.request). Empty for a plain link. */
+    char    headers[1024];
 } evo_stream_choice_t;
 
 /*
