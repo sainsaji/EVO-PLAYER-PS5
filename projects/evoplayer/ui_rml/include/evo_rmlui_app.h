@@ -309,6 +309,19 @@ struct EvoListHint {
     bool operator!=(const EvoListHint& o) const { return !(*this == o); }
 };
 
+struct EvoListMenuRow {
+    std::string label;
+    std::string desc;
+    std::string icon_path;
+    bool danger = false;
+
+    bool operator==(const EvoListMenuRow& o) const {
+        return label == o.label && desc == o.desc && icon_path == o.icon_path &&
+               danger == o.danger;
+    }
+    bool operator!=(const EvoListMenuRow& o) const { return !(*this == o); }
+};
+
 struct EvoListState {
     std::string title;
     std::string subtitle;
@@ -326,12 +339,23 @@ struct EvoListState {
 
     std::vector<EvoListHint> hints;
 
+    /* OPTIONS menu; empty = closed. */
+    std::vector<EvoListMenuRow> menu;
+    int menu_focus = 0;
+    std::string menu_eyebrow;
+    std::string menu_title;
+    std::string menu_sub;
+    std::string menu_icon;
+
     bool operator==(const EvoListState& o) const {
         return title == o.title && subtitle == o.subtitle && section == o.section &&
                rail_focused == o.rail_focused && total_count == o.total_count &&
                cursor_index == o.cursor_index && rows == o.rows &&
                is_empty == o.is_empty && empty_title == o.empty_title &&
-               empty_hint == o.empty_hint && empty_icon == o.empty_icon && hints == o.hints;
+               empty_hint == o.empty_hint && empty_icon == o.empty_icon && hints == o.hints &&
+               menu == o.menu && menu_focus == o.menu_focus &&
+               menu_eyebrow == o.menu_eyebrow && menu_title == o.menu_title &&
+               menu_sub == o.menu_sub && menu_icon == o.menu_icon;
     }
     bool operator!=(const EvoListState& o) const { return !(*this == o); }
 };
@@ -825,6 +849,7 @@ private:
     /* Rows the list document actually contains. Must stay in step with
      * EVO_RMLUI_LIST_ROWS in evo_rmlui_bridge.h and with list.rml. */
     static const int kListRows = 9;
+    static const int kListMenuRows = 7;   /* EVO_RMLUI_LIST_MENU_ROWS */
 
     /* Must stay in step with EVO_RMLUI_BROWSER_ROWS / _PROPS and browser.rml. */
     static const int kBrowserRows = 12;

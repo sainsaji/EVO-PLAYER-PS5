@@ -157,8 +157,16 @@ private:
     void openGuidePicker();
     void applyChoice(const std::string& id);
     std::string m_panelPage;              /* "menu" / "guide" while the panel is up */
-    std::string m_signOutArmed;           /* provider whose sign-out awaits a 2nd press */
-    uint64_t    m_signOutAt = 0;
+
+    /* The chooser's OPTIONS menu: everything that can be done to the focused
+     * provider (open, change server, sign in again, sign out, web version). */
+    struct MenuItem { std::string id, label, desc, icon; bool danger = false; };
+    std::vector<MenuItem> m_menu;         /* empty = closed */
+    int m_menuIndex = 0;
+    void openPickerMenu();
+    void runPickerMenu(const std::string& id);
+    bool pickerMenuInput(uint32_t pressed);
+    void discoverServer();                /* LAN search, then the address keyboard */
 
     /* Signing in to a media server (Emby, Jellyfin) on EVO's keyboard: user
      * name, then password, then the provider's sign_in. Keyboards are opened

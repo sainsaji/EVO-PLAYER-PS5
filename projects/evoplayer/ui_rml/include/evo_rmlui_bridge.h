@@ -260,6 +260,7 @@ typedef struct {
  * so a library of five thousand files costs the same as one of five.
  */
 #define EVO_RMLUI_LIST_ROWS 9
+#define EVO_RMLUI_LIST_MENU_ROWS 7
 
 typedef struct {
     const char* title;
@@ -295,6 +296,21 @@ typedef struct {
         const char* glyph_path;
         const char* label;
     } hints[4];
+
+    /* OPTIONS menu over the list, the same card as the file browser's
+     * operations menu. menu_count 0 = closed. */
+    int         menu_count;
+    int         menu_focus;
+    const char* menu_eyebrow;
+    const char* menu_title;
+    const char* menu_sub;
+    const char* menu_icon;
+    struct {
+        const char* label;
+        const char* desc;
+        const char* icon_path;
+        int         danger;
+    } menu[EVO_RMLUI_LIST_MENU_ROWS];
 } evo_rmlui_list_params_t;
 
 /*

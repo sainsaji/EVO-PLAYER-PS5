@@ -55,9 +55,10 @@ for c in projects/evoplayer/addons/src/cJSON.c \
          projects/evoplayer/addons/src/provider_nuvio.c \
          projects/evoplayer/addons/src/provider_stremio.c \
          projects/evoplayer/src/evo_data_path.c \
+         projects/evoplayer/src/evo_error.c \
          projects/evoplayer/src/evo_readdir.c; do
     o="output/uiview/obj/$(basename "${c%.c}").o"
-    gcc -O2 -std=c11 -Wall -DNO_OPENSSL=1 \
+    gcc -O2 -std=c11 -Wall -D_DEFAULT_SOURCE -DNO_OPENSSL=1 \
         -Iprojects/evoplayer/include \
         -Iprojects/evoplayer/addons/include \
         -c "$c" -o "$o"

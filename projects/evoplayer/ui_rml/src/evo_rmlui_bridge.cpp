@@ -259,6 +259,20 @@ void evo_rmlui_update_list(const evo_rmlui_list_params_t* p) {
         state.hints.push_back(h);
     }
 
+    for (int i = 0; i < p->menu_count && i < EVO_RMLUI_LIST_MENU_ROWS; i++) {
+        EvoListMenuRow m;
+        m.label = p->menu[i].label ? p->menu[i].label : "";
+        m.desc = p->menu[i].desc ? p->menu[i].desc : "";
+        m.icon_path = p->menu[i].icon_path ? p->menu[i].icon_path : "";
+        m.danger = (p->menu[i].danger != 0);
+        state.menu.push_back(m);
+    }
+    state.menu_focus = p->menu_focus;
+    state.menu_eyebrow = p->menu_eyebrow ? p->menu_eyebrow : "";
+    state.menu_title = p->menu_title ? p->menu_title : "";
+    state.menu_sub = p->menu_sub ? p->menu_sub : "";
+    state.menu_icon = p->menu_icon ? p->menu_icon : "";
+
     EvoRmlApp::Instance().UpdateListState(state);
 }
 

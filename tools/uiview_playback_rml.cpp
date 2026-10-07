@@ -531,6 +531,63 @@ static void render_list_screens(std::vector<uint32_t>& fb, int width, int height
         save_bmp_24("output/uiview/rml_stream_picker.bmp", fb.data(), width, height);
     }
 
+    /* --- PROVIDER CHOOSER + OPTIONS menu: ProviderHostScreen::renderPicker
+     *     with openPickerMenu() up on a signed-in Jellyfin. --- */
+    {
+        std::fill(fb.begin(), fb.end(), 0xFF0E0906);
+        set_nav(2, 0);
+        evo_rmlui_list_params_t p;
+        memset(&p, 0, sizeof(p));
+        p.title = "PROVIDERS";
+        p.subtitle = "Choose where to watch from";
+        p.section = 2;
+        p.total_count = 3;
+        p.cursor_index = 1;
+        static const struct { const char* t; const char* d; const char* b; } r[3] = {
+            { "Emby", "http://192.168.0.20:8096", "SERVER" },
+            { "Jellyfin", "http://192.168.0.20:8097  ·  Signed in", "SERVER" },
+            { "IPTV", "Ready", "LIVE" },
+        };
+        for (int i = 0; i < 3; i++) {
+            p.rows[i].title = r[i].t;
+            p.rows[i].detail = r[i].d;
+            p.rows[i].icon_path = "../icons/icon_emby.png";
+            p.rows[i].badge = r[i].b;
+            p.rows[i].progress = -1;
+            p.rows[i].has_chevron = 1;
+            p.rows[i].is_focused = (i == 1);
+            p.row_count++;
+        }
+        p.hint_count = 2;
+        p.hints[0].glyph_path = "../icons/btn_cross.png";
+        p.hints[0].label = "OPEN";
+        p.hints[1].glyph_path = "../icons/icon_settings.png";
+        p.hints[1].label = "OPTIONS";
+        static const struct { const char* l; const char* d; const char* i; int x; } m[6] = {
+            { "Open", "Browse this server's libraries", "../icons/icon_resume.png", 0 },
+            { "Change server", "Address and port - now http://192.168.0.20:8097", "../icons/icon_keyboard.png", 0 },
+            { "Find server on network", "Look for Jellyfin on your home network", "../icons/icon_activity.png", 0 },
+            { "Sign in as another user", "Switch account on this server", "../icons/icon_type.png", 0 },
+            { "Web version", "Open the server's own site in the browser", "../icons/icon_emby.png", 0 },
+            { "Sign out", "Forget the saved session on this console", "../icons/icon_power.png", 1 },
+        };
+        p.menu_count = 6;
+        p.menu_focus = 1;
+        p.menu_eyebrow = "OPTIONS";
+        p.menu_title = "Jellyfin";
+        p.menu_sub = r[1].d;
+        p.menu_icon = "../icons/icon_emby.png";
+        for (int i = 0; i < 6; i++) {
+            p.menu[i].label = m[i].l;
+            p.menu[i].desc = m[i].d;
+            p.menu[i].icon_path = m[i].i;
+            p.menu[i].danger = m[i].x;
+        }
+        evo_rmlui_update_list(&p);
+        evo_rmlui_render_list(fb.data(), width, height);
+        save_bmp_24("output/uiview/rml_provider_menu.bmp", fb.data(), width, height);
+    }
+
     /* --- EMBY SETUP --- */
     {
         std::fill(fb.begin(), fb.end(), 0xFF0E0906);

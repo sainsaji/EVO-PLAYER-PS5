@@ -1233,6 +1233,46 @@ void EvoRmlApp::UpdateListState(const EvoListState& state) {
             label->SetProperty("color", text_2);
         }
     }
+
+    /* OPTIONS menu: the file browser's operations card, rows filled by the
+     * caller. */
+    const bool menuOpen = !state.menu.empty();
+    if (Rml::Element* e = el("list-menu-scrim"))
+        e->SetProperty("display", menuOpen ? "flex" : "none");
+    if (menuOpen) {
+        if (Rml::Element* e = el("list-menu-eyebrow")) e->SetInnerRML(state.menu_eyebrow);
+        if (Rml::Element* e = el("list-menu-title"))   e->SetInnerRML(state.menu_title);
+        if (Rml::Element* e = el("list-menu-sub")) {
+            e->SetInnerRML(state.menu_sub);
+            e->SetProperty("display", state.menu_sub.empty() ? "none" : "block");
+        }
+        if (Rml::Element* e = el("list-menu-icon")) {
+            if (!state.menu_icon.empty()) e->SetAttribute("src", state.menu_icon);
+        }
+        for (int i = 0; i < kListMenuRows; i++) {
+            const std::string n = std::to_string(i);
+            Rml::Element* row = el("lmenu-" + n);
+            if (!row) continue;
+            if (i >= (int)state.menu.size()) {
+                row->SetProperty("display", "none");
+                continue;
+            }
+            const EvoListMenuRow& m = state.menu[i];
+            row->SetProperty("display", "flex");
+            row->SetClass("action-row-focused", i == state.menu_focus);
+            row->SetClass("action-row-danger-slot", m.danger);
+            if (Rml::Element* e = el("lmenu-label-" + n)) {
+                e->SetInnerRML(m.label);
+                e->SetClass("act-label-danger", m.danger);
+            }
+            if (Rml::Element* e = el("lmenu-desc-" + n)) e->SetInnerRML(m.desc);
+            if (Rml::Element* e = el("lmenu-icon-" + n)) {
+                if (!m.icon_path.empty()) e->SetAttribute("src", m.icon_path);
+            }
+            if (Rml::Element* e = el("lmenu-iconbox-" + n))
+                e->SetClass("act-icon-danger", m.danger);
+        }
+    }
 }
 
 void EvoRmlApp::RenderList(uint32_t* framebuffer, int width, int height) {

@@ -178,5 +178,92 @@
             <div id="list-footer-version">v0.11.0-final</div>
         </div>
     </div>
+
+    <!-- OPTIONS menu (provider chooser): the file browser's operations card -->
+    <div id="list-menu-scrim" style="display: none;">
+        <div id="list-menu-card">
+            <div id="list-menu-header">
+                <div class="action-header-badge">
+                    <div class="action-indicator"></div>
+                    <span id="list-menu-eyebrow">OPTIONS</span>
+                </div>
+                <div id="list-menu-target">
+                    <img id="list-menu-icon" src="../icons/icon_emby.png" class="action-target-icon"/>
+                    <div class="action-target-col">
+                        <span id="list-menu-title" class="action-target-title"></span>
+                        <span id="list-menu-sub" class="action-target-sub"></span>
+                    </div>
+                </div>
+            </div>
+            <div id="list-menu-list">
+                <div id="lmenu-0" class="action-row">
+                    <div id="lmenu-iconbox-0" class="act-icon-box"><img id="lmenu-icon-0" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-0" class="act-label"></span>
+                        <span id="lmenu-desc-0" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-1" class="action-row">
+                    <div id="lmenu-iconbox-1" class="act-icon-box"><img id="lmenu-icon-1" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-1" class="act-label"></span>
+                        <span id="lmenu-desc-1" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-2" class="action-row">
+                    <div id="lmenu-iconbox-2" class="act-icon-box"><img id="lmenu-icon-2" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-2" class="act-label"></span>
+                        <span id="lmenu-desc-2" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-3" class="action-row">
+                    <div id="lmenu-iconbox-3" class="act-icon-box"><img id="lmenu-icon-3" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-3" class="act-label"></span>
+                        <span id="lmenu-desc-3" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-4" class="action-row">
+                    <div id="lmenu-iconbox-4" class="act-icon-box"><img id="lmenu-icon-4" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-4" class="act-label"></span>
+                        <span id="lmenu-desc-4" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-5" class="action-row">
+                    <div id="lmenu-iconbox-5" class="act-icon-box"><img id="lmenu-icon-5" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-5" class="act-label"></span>
+                        <span id="lmenu-desc-5" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+                <div id="lmenu-6" class="action-row">
+                    <div id="lmenu-iconbox-6" class="act-icon-box"><img id="lmenu-icon-6" src="../icons/icon_settings.png" class="act-icon-img"/></div>
+                    <div class="act-text-col">
+                        <span id="lmenu-label-6" class="act-label"></span>
+                        <span id="lmenu-desc-6" class="act-desc"></span>
+                    </div>
+                    <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
+                </div>
+            </div>
+            <div id="list-menu-footer">
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_cross.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">SELECT</span>
+                </div>
+                <div class="footer-hint">
+                    <div class="glyph-badge"><img src="../icons/btn_circle.png" class="glyph-badge-img"/></div>
+                    <span class="footer-text">CLOSE</span>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </rml>

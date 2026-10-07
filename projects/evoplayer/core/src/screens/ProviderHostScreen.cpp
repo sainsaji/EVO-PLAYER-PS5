@@ -533,6 +533,7 @@ void ProviderHostScreen::enterPicker()
     }
     m_web = false;
     m_webSeen = false;
+    m_menu.clear();
     m_pickIds.clear();
     m_pickDetail.clear();
 
@@ -560,10 +561,8 @@ void ProviderHostScreen::enterPicker()
         } else {
             detail = "Ready";
         }
-        /* The footer has four fixed slots, all taken on a media-server row, so
-         * the sign-out button is announced on the row it applies to. */
         if (p->sign_out && p->is_signed_in && p->is_signed_in())
-            detail += "  \u00b7  Signed in - OPTIONS to sign out";
+            detail += "  \u00b7  Signed in";
         m_pickIds.push_back(p->id);
         m_pickDetail.push_back(detail);
     }
@@ -674,10 +673,10 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     params.hint_count = 0;
     params.hints[params.hint_count].glyph_path = "../icons/btn_cross.png";
     params.hints[params.hint_count++].label = "OPEN";
-    params.hints[params.hint_count].glyph_path = "../icons/btn_square.png";
-    params.hints[params.hint_count++].label = (fp && (fp->caps & EVO_PROVIDER_CAP_WEBUI))
-                                              ? "EDIT ADDRESS"
-                                              : (fp && fp->ui_embedded) ? "ADD ADDON" : "EDIT PLAYLIST";
+    /* Square still edits the address / playlist directly; the OPTIONS menu
+     * lists that and everything else, so it is the one announced. */
+    params.hints[params.hint_count].glyph_path = "../icons/icon_settings.png";
+    params.hints[params.hint_count++].label = "OPTIONS";
     if (fp && isNativeWeb(fp) && fp->is_configured()) {
         params.hints[params.hint_count].glyph_path = "../icons/btn_triangle.png";
         params.hints[params.hint_count++].label = "WEB VERSION";
@@ -685,8 +684,177 @@ void ProviderHostScreen::renderPicker(uint32_t* framebuffer, int width, int heig
     params.hints[params.hint_count].glyph_path = "../icons/btn_circle.png";
     params.hints[params.hint_count++].label = "BACK";
 
+    if (!m_menu.empty() && fp) {
+        params.menu_count = std::min((int)m_menu.size(), EVO_RMLUI_LIST_MENU_ROWS);
+        params.menu_focus = m_menuIndex;
+        params.menu_eyebrow = "OPTIONS";
+        params.menu_title = fp->name;
+        params.menu_sub = m_pickDetail[m_pickIndex].c_str();
+        params.menu_icon = (fp->caps & EVO_PROVIDER_CAP_WEBUI) ? "../icons/icon_emby.png"
+                                                               : "../icons/icon_folder.png";
+        for (int i = 0; i < params.menu_count; ++i) {
+            params.menu[i].label = m_menu[i].label.c_str();
+            params.menu[i].desc = m_menu[i].desc.c_str();
+            params.menu[i].icon_path = m_menu[i].icon.c_str();
+            params.menu[i].danger = m_menu[i].danger ? 1 : 0;
+        }
+    }
+
     evo_rmlui_update_list(&params);
     evo_rmlui_render_list(framebuffer, width, height);
+}
+
+/* ------------------------------------------------------------------------- */
+/* The chooser's OPTIONS menu                                                */
+/* ------------------------------------------------------------------------- */
+
+void ProviderHostScreen::openPickerMenu()
+{
+    if (m_pickIndex < 0 || m_pickIndex >= (int)m_pickIds.size()) return;
+    const std::string id = m_pickIds[m_pickIndex];
+    const evo_provider_t* p = evo_provider_find(id.c_str());
+    if (!p) return;
+
+    const bool web = (p->caps & EVO_PROVIDER_CAP_WEBUI) != 0;
+    const bool server = isNativeWeb(p);
+    const bool configured = p->is_configured() != 0;
+    const bool signedIn = p->is_signed_in && p->is_signed_in();
+    const char* src = p->get_source ? p->get_source() : "";
+
+    m_menu.clear();
+    auto add = [this](const char* mid, const std::string& label, const std::string& desc,
+                      const char* icon, bool danger) {
+        MenuItem m;
+        m.id = mid; m.label = label; m.desc = desc; m.icon = icon; m.danger = danger;
+        m_menu.push_back(m);
+    };
+
+    if (configured)
+        add("open", "Open", server ? "Browse this server's libraries" : "Open this provider",
+            "../icons/icon_resume.png", false);
+    if (p->caps & EVO_PROVIDER_CAP_CONFIG) {
+        if (web) {
+            add("address", configured ? "Change server" : "Set server address",
+                (src && src[0]) ? std::string("Address and port - now ") + src
+                                : std::string("Type http(s)://host:port"),
+                "../icons/icon_keyboard.png", false);
+            if (id == "emby" || id == "jellyfin")
+                add("discover", "Find server on network",
+                    std::string("Look for ") + p->name + " on your home network",
+                    "../icons/icon_activity.png", false);
+        } else if (p->ui_embedded) {
+            add("address", "Add addon", "Paste a Stremio addon's manifest URL",
+                "../icons/icon_keyboard.png", false);
+        } else {
+            add("address", configured ? "Change playlist" : "Add playlist",
+                "Type a URL or pick an .m3u from USB", "../icons/icon_tv.png", false);
+        }
+    }
+    if (configured && p->sign_in)
+        add("signin", signedIn ? "Sign in as another user" : "Sign in",
+            signedIn ? "Switch account on this server" : "User name and password, or Quick Connect",
+            "../icons/icon_type.png", false);
+    if (configured && server)
+        add("webui", "Web version", "Open the server's own site in the browser",
+            "../icons/icon_emby.png", false);
+    if (signedIn && p->sign_out)
+        add("signout", "Sign out", "Forget the saved session on this console",
+            "../icons/icon_power.png", true);
+
+    if (m_menu.empty()) {
+        evo_feedback(EVO_FB_BOUNDARY);
+        return;
+    }
+    if ((int)m_menu.size() > EVO_RMLUI_LIST_MENU_ROWS)
+        m_menu.resize(EVO_RMLUI_LIST_MENU_ROWS);
+    m_menuIndex = 0;
+    evo_feedback(EVO_FB_OPEN);
+    evo_bt("prov_screen: options menu for '%s' (%d rows)", p->id, (int)m_menu.size());
+}
+
+bool ProviderHostScreen::pickerMenuInput(uint32_t pressed)
+{
+    const int n = (int)m_menu.size();
+    if (pressed & PadButtons::Up) {
+        if (m_menuIndex > 0) { --m_menuIndex; evo_feedback(EVO_FB_MOVE); }
+        else evo_feedback(EVO_FB_BOUNDARY);
+    } else if (pressed & PadButtons::Down) {
+        if (m_menuIndex + 1 < n) { ++m_menuIndex; evo_feedback(EVO_FB_MOVE); }
+        else evo_feedback(EVO_FB_BOUNDARY);
+    } else if (pressed & PadButtons::Cross) {
+        std::string id = (m_menuIndex >= 0 && m_menuIndex < n) ? m_menu[m_menuIndex].id : "";
+        m_menu.clear();
+        runPickerMenu(id);
+    } else if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+        evo_feedback(EVO_FB_CANCEL);
+        m_menu.clear();
+    }
+    return true;        /* the menu has the pad while it is open */
+}
+
+void ProviderHostScreen::runPickerMenu(const std::string& action)
+{
+    if (m_pickIndex < 0 || m_pickIndex >= (int)m_pickIds.size()) return;
+    const std::string id = m_pickIds[m_pickIndex];
+    const evo_provider_t* p = evo_provider_find(id.c_str());
+    if (!p) return;
+    evo_bt("prov_screen: options '%s' on '%s'", action.c_str(), id.c_str());
+
+    if (action == "open") {
+        choosePicked(false);
+    } else if (action == "address") {
+        if (p->caps & EVO_PROVIDER_CAP_WEBUI) {
+            /* Straight to the keyboard with the saved address, so a new host
+             * or port is a few presses - no LAN search in the way. */
+            m_providerId = id;
+            const char* cur = p->get_source ? p->get_source() : "";
+            openSourceKeyboard((cur && cur[0]) ? cur : "http://");
+        } else {
+            choosePicked(true);
+        }
+    } else if (action == "discover") {
+        m_providerId = id;
+        discoverServer();
+    } else if (action == "signin") {
+        /* The saved session stays until the new sign-in succeeds, so backing
+         * out of the keyboard costs nothing. */
+        evo_feedback(EVO_FB_OPEN);
+        m_providerId = id;
+        beginSignIn();
+    } else if (action == "webui") {
+        evo_feedback(EVO_FB_OPEN);
+        m_providerId = id;
+        m_picking = false;
+        openWebProvider();
+        if (!m_web) enterPicker();
+    } else if (action == "signout") {
+        p->sign_out();
+        evo_feedback(EVO_FB_CONFIRM);
+        evo_bt("prov_screen: signed out of '%s'", p->id);
+        toast(p->name, "Signed out");
+        int keep = m_pickIndex;
+        enterPicker();
+        m_pickIndex = keep;
+    }
+}
+
+void ProviderHostScreen::discoverServer()
+{
+    const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
+    if (!p) return;
+    const char* product = m_providerId == "emby"     ? "EmbyServer"
+                        : m_providerId == "jellyfin" ? "JellyfinServer"
+                        : nullptr;
+    if (!product) {
+        openSourceKeyboard("http://");
+        return;
+    }
+    evo_net_discover_start(product);
+    m_discovering = true;
+    evo_feedback(EVO_FB_OPEN);
+    char msg[96];
+    std::snprintf(msg, sizeof msg, "Looking for %s on your network...", p->name);
+    toast(p->name, msg);
 }
 
 void ProviderHostScreen::enterStreamPicker()
@@ -899,6 +1067,7 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
     if (signInQcInput(pressed)) return true;
 
     if (m_picking) {
+        if (!m_menu.empty()) return pickerMenuInput(pressed);
         auto psm = Application::getInstance().getScreenManager();
         if (psm && psm->isRailFocused()) return false;
         int n = (int)m_pickIds.size();
@@ -933,31 +1102,7 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
             return true;
         }
         if (pressed & PadButtons::Options) {
-            /* Sign out of the focused provider. Twice, within a few seconds:
-             * one stray press must not cost the user a login. */
-            const evo_provider_t* op = (m_pickIndex >= 0 && m_pickIndex < n)
-                                     ? evo_provider_find(m_pickIds[m_pickIndex].c_str()) : nullptr;
-            if (!op || !op->sign_out || !op->is_signed_in || !op->is_signed_in()) {
-                evo_feedback(EVO_FB_BOUNDARY);
-                return true;
-            }
-            uint64_t now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            if (m_signOutArmed == op->id && now - m_signOutAt < 4000) {
-                op->sign_out();
-                m_signOutArmed.clear();
-                evo_feedback(EVO_FB_CONFIRM);
-                evo_bt("prov_screen: signed out of '%s'", op->id);
-                toast(op->name, "Signed out");
-                int keep = m_pickIndex;
-                enterPicker();
-                m_pickIndex = keep;
-            } else {
-                m_signOutArmed = op->id;
-                m_signOutAt = now;
-                evo_feedback(EVO_FB_OPEN);
-                toast(op->name, "Press OPTIONS again to sign out");
-            }
+            openPickerMenu();
             return true;
         }
         if (pressed & PadButtons::Circle) {
@@ -1130,9 +1275,14 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
         evo_feedback(EVO_FB_OPEN);
         const evo_provider_t* op = evo_provider_find(m_providerId.c_str());
         if (op && (isNativeWeb(op) || op->ui_embedded)) {
-            /* No setup page: the chooser is where the address is edited and
-             * the web version opened. */
+            /* No setup page: the chooser's menu for this provider is where
+             * the address is edited, the user switched and the web version
+             * opened. */
+            std::string id = op->id;
             enterPicker();
+            for (int i = 0; i < (int)m_pickIds.size(); ++i)
+                if (m_pickIds[i] == id) m_pickIndex = i;
+            if (m_picking) openPickerMenu();
         } else if (op && std::strcmp(op->id, "iptv") == 0 &&
                    !evo_rmlui_provider_get_query()[0]) {
             openProviderMenu();     /* playlist or guide, for the one on screen */
@@ -1204,6 +1354,11 @@ void ProviderHostScreen::OnSourceSubmitted(const char* text, void* userdata)
     }
 
     bool web = (p->caps & EVO_PROVIDER_CAP_WEBUI) != 0;
+    if (web && p->get_source && p->is_configured() && value == p->get_source()) {
+        /* The same address again: setting it would drop the session. */
+        toast(p->name, "Server unchanged");
+        return;
+    }
     if (p->set_source(value.c_str()) != 0) {
         toast(p->name, web ? "Use http(s)://<host>:<port>"
                            : "That does not look like an M3U URL");
@@ -1474,16 +1629,8 @@ void ProviderHostScreen::openSourceEditor()
         /* Nothing set yet: Emby and Jellyfin answer a LAN broadcast, so look
          * first and pre-fill what answers - typing an address with the D-pad
          * took 103 presses on hardware. update() opens the keyboard. */
-        const char* product = m_providerId == "emby"     ? "EmbyServer"
-                            : m_providerId == "jellyfin" ? "JellyfinServer"
-                            : nullptr;
-        if (product) {
-            evo_net_discover_start(product);
-            m_discovering = true;
-            evo_feedback(EVO_FB_OPEN);
-            char msg[96];
-            std::snprintf(msg, sizeof msg, "Looking for %s on your network...", p->name);
-            toast(p->name, msg);
+        if (m_providerId == "emby" || m_providerId == "jellyfin") {
+            discoverServer();
             return;
         }
         initial = "http://";

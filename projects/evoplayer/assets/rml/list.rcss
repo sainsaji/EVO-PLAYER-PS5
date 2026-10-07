@@ -344,3 +344,249 @@ div, span, p {
     color: #8b99ad;
     letter-spacing: 1dp;
 }
+
+/* ================== OPTIONS menu (copied from browser.rcss) ================== */
+
+#list-menu-scrim {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920dp;
+    height: 1080dp;
+    background-color: #06090ee8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+#list-menu-card {
+    width: 580dp;
+    border-radius: 20dp;
+    background-color: #0c1424fc;
+    border-width: 1.5dp;
+    border-color: #1e304d;
+    padding: 26dp 28dp;
+    display: flex;
+    flex-direction: column;
+    gap: 12dp;
+}
+
+#list-menu-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10dp;
+    border-bottom-width: 1dp;
+    border-bottom-color: #1e304d;
+    padding-bottom: 14dp;
+}
+
+.action-header-badge {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+}
+
+.action-indicator {
+    width: 4dp;
+    height: 14dp;
+    background-color: #00cdff;
+    border-radius: 2dp;
+}
+
+#list-menu-eyebrow {
+    font-size: 13dp;
+    font-weight: bold;
+    color: #00cdff;
+    letter-spacing: 2dp;
+}
+
+#list-menu-target {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12dp;
+    background-color: #101c30;
+    border-width: 1dp;
+    border-color: #1f3554;
+    border-radius: 12dp;
+    padding: 10dp 14dp;
+}
+
+.action-target-icon {
+    width: 24dp;
+    height: 24dp;
+}
+
+.action-target-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+    overflow: hidden;
+}
+
+.action-target-title {
+    font-size: 16dp;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.action-target-sub {
+    font-size: 12dp;
+    color: #7e97b8;
+}
+
+.action-clip-badge {
+    display: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 8dp;
+    background-color: #0d2847;
+    border-width: 1dp;
+    border-color: #00cdff66;
+    border-radius: 8dp;
+    padding: 6dp 12dp;
+}
+
+.action-clip-icon {
+    width: 16dp;
+    height: 16dp;
+}
+
+.action-clip-text {
+    font-size: 12dp;
+    font-weight: bold;
+    color: #00cdff;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#list-menu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6dp;
+}
+
+.action-row {
+    height: 48dp;
+    border-radius: 12dp;
+    background-color: #101a2b;
+    border-width: 1.5dp;
+    border-color: #1a2a42;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0 14dp;
+    gap: 12dp;
+}
+
+.action-row-focused {
+    background-color: #0d2545;
+    border-color: #00cdff;
+    border-width: 2dp;
+}
+
+.action-row-focused.action-row-danger-slot {
+    background-color: #381216;
+    border-color: #ff5a4f;
+    border-width: 2dp;
+}
+
+.action-row-disabled {
+    opacity: 0.35;
+}
+
+.act-icon-box {
+    width: 32dp;
+    height: 32dp;
+    border-radius: 8dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-row-focused .act-icon-box {
+    background-color: #00cdff33;
+}
+
+.action-row-focused.action-row-danger-slot .act-icon-box {
+    background-color: #ff5a4f33;
+}
+
+.act-icon-img {
+    width: 18dp;
+    height: 18dp;
+}
+
+.act-text-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2dp;
+    flex: 1;
+}
+
+.act-label {
+    font-size: 14.5dp;
+    font-weight: bold;
+    color: #e2e8f0;
+}
+
+.action-row-focused .act-label {
+    color: #ffffff;
+}
+
+.action-row-focused.action-row-danger-slot .act-label {
+    color: #ff8882;
+}
+
+.act-desc {
+    font-size: 11dp;
+    color: #6b82a6;
+}
+
+.action-row-focused .act-desc {
+    color: #b0c9ec;
+}
+
+.action-row-focused.action-row-danger-slot .act-desc {
+    color: #fca5a5;
+}
+
+.act-glyph-badge {
+    width: 24dp;
+    height: 24dp;
+    border-radius: 12dp;
+    background-color: #16243a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.act-glyph-img {
+    width: 16dp;
+    height: 16dp;
+}
+
+#list-menu-footer {
+    display: flex;
+    flex-direction: row;
+    gap: 20dp;
+    margin-top: 6dp;
+    justify-content: flex-end;
+}
+
+.act-label-danger {
+    color: #ff8882;
+}
+
+.act-icon-danger {
+    background-color: #ff5a4f22;
+}
+
