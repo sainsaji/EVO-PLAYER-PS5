@@ -80,7 +80,7 @@ docker run --rm hello-world
 ## 3. Repository setup
 
 ```powershell
-git clone <your-fork-url> "EVO Player"
+git clone --recursive <your-fork-url> "EVO Player"
 cd "EVO Player"
 ```
 

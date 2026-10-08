@@ -210,7 +210,7 @@ The entire user interface is rendered on the GPU through bare-metal `sceAgc` at 
 Builds inside a pinned Docker toolchain:
 
 ```bash
-git clone https://github.com/sainsaji/EVO-PLAYER-PS5
+git clone --recursive https://github.com/sainsaji/EVO-PLAYER-PS5
 cd EVO-PLAYER-PS5
 echo "PS5_HOST=192.168.0.10" > .env      # your console's IP
 
