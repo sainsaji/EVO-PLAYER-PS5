@@ -23,6 +23,18 @@ The root `LICENSE` was therefore replaced with GPL-3.0 to match.
 * Modifications must be marked as such.
 * You cannot add restrictions beyond the GPL.
 
+## Credit is appreciated
+
+If EVO Player helps your project (you fork it, borrow code, or build on its
+research), a mention such as *"Based on EVO Player by sainsaji —
+github.com/sainsaji/EVO-PLAYER-PS5"* in your README or credits would be
+great, and so would crediting the people EVO itself builds on (see the
+README's Credits).
+
+This is a friendly request, not an extra licence term: the GPL is the only
+condition. Keeping the existing copyright notices is already required by
+the GPL itself.
+
 ## Components
 
 | Part | Origin | Licence |

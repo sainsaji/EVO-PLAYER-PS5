@@ -263,6 +263,8 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 
 Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by KINGDKAK and licensed under **GPL-3.0-or-later** (see [COPYRIGHT.md](COPYRIGHT.md)).
 
+If EVO helps your project, a credit mention would be great: a request, not a licence condition ([details](COPYRIGHT.md#credit-is-appreciated)).
+
 - [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) — SDK and toolchain
 - [KINGDKAK](https://github.com/KINGDKAK) — ProsperoPlayer
 - [zecoxao/sce_symbols](https://github.com/zecoxao/sce_symbols) — NID symbol database
