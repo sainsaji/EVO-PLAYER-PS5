@@ -30,7 +30,7 @@ def main():
     ]
     
     ver_file = os.path.join(repo_root, "projects/evoplayer/VERSION")
-    evo_version = "v0.11.0-final"
+    evo_version = "v0.11.0"
     if os.path.isfile(ver_file):
         with open(ver_file) as vf:
             evo_version = vf.read().strip()

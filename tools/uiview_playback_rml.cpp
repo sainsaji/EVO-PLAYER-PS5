@@ -271,7 +271,7 @@ static void launch_build(evo_rmlui_launch_params_t& p, int row, int col, bool wi
     {
         memset(&p, 0, sizeof(p));
         p.app_name = "EVO PLAYER";
-        p.version = "v0.11.0-final";
+        p.version = "v0.11.0";
         p.clock = "21:48";
         p.theme_name = "MIDNIGHT";
 
@@ -1390,7 +1390,7 @@ static void render_toast_screens(std::vector<uint32_t>& fb, int width, int heigh
         evo_rmlui_launch_params_t lp;
         memset(&lp, 0, sizeof(lp));
         lp.app_name = "EVO PLAYER";
-        lp.version = "v0.11.0-final";
+        lp.version = "v0.11.0";
         lp.clock = "21:48";
         lp.theme_name = "MIDNIGHT";
         lp.hero_eyebrow = "WELCOME";
@@ -1424,7 +1424,7 @@ static void render_debug_overlay_screen(std::vector<uint32_t>& fb, int width, in
     evo_rmlui_launch_params_t lp;
     memset(&lp, 0, sizeof(lp));
     lp.app_name = "EVO PLAYER";
-    lp.version = "v0.11.0-final";
+    lp.version = "v0.11.0";
     lp.clock = "21:48";
     lp.theme_name = "MIDNIGHT";
     lp.hero_eyebrow = "WELCOME";
@@ -2175,7 +2175,7 @@ static void render_stress_screens(std::vector<uint32_t>& fb, int width, int heig
         evo_rmlui_launch_params_t p;
         memset(&p, 0, sizeof(p));
         p.app_name = "EVO PLAYER";
-        p.version = "v0.11.0-final";
+        p.version = "v0.11.0";
         p.clock = "21:48";
         p.theme_name = "MIDNIGHT";
         p.hero_eyebrow = "CONTINUE WATCHING";
@@ -2980,7 +2980,7 @@ int main(int argc, char** argv) {
         evo_rmlui_about_params_t ab;
         memset(&ab, 0, sizeof(ab));
         ab.app_name = "EVO PLAYER PRO";
-        ab.version = "v0.11.0-final";
+        ab.version = "v0.11.0";
         ab.build_tag = "PS5 HOMEBREW";
         ab.tagline = "CINEMATIC MEDIA PLAYER FOR PLAYSTATION 5 HOMEBREW";
         ab.themes_info = "4 AVAILABLE - DROP .THEME FILES ON USB0";

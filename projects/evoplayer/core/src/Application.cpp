@@ -132,7 +132,7 @@ long long now_ms(void);
 }
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "v0.11.0-final"
+#define EVO_PLAYER_VERSION "v0.11.0"
 #endif
 
 #ifndef EVO_DIRECT_MEM_POOL_BYTES
