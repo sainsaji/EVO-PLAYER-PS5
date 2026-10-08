@@ -225,6 +225,27 @@ int                       evo_agc_runtime_supports_120hz(void);
 int                       evo_agc_runtime_is_120hz(void);
 int                       evo_agc_runtime_get_refresh_rate(void);
 int                       evo_agc_runtime_set_120hz(int enable);
+
+/*
+ * Frame rate matching: drive the panel at the video's own rate, the way the
+ * PS5's Blu-ray player does for 24p. The values are the small
+ * sceVideoOutConfigureOutput modes, read out of libSceVideoOut's mode parser
+ * (FW 12.70) and the Blu-ray player core's own mode tables
+ * (docs/hardware/refresh-rate-modes.md).
+ */
+typedef enum evo_vo_rate {
+    EVO_VO_RATE_DEFAULT = 0,   /* mode 0x1 - the system's own (normally 59.94) */
+    EVO_VO_RATE_23_976,        /* mode 0x2 */
+    EVO_VO_RATE_24,            /* mode 0x3 */
+    EVO_VO_RATE_50,            /* mode 0x9 */
+    EVO_VO_RATE_119_88,        /* mode 0xF */
+    EVO_VO_RATE_COUNT
+} evo_vo_rate;
+int                       evo_agc_runtime_set_output_rate(evo_vo_rate rate);
+evo_vo_rate               evo_agc_runtime_get_output_rate(void);
+/* 1 if IsOutputSupported accepted the rate's mode at init. */
+int                       evo_agc_runtime_supports_output_rate(evo_vo_rate rate);
+const char               *evo_agc_runtime_output_rate_name(evo_vo_rate rate);
 /* #114: 1 while the last 120 Hz / HDR switch has not been flipped to the
  * screen yet. */
 int                       evo_agc_runtime_mode_switch_pending(void);

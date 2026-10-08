@@ -93,7 +93,8 @@ const char* SettingsService::getRefreshRateModeName(RefreshRateMode mode) const 
         case RefreshRateMode::Off:          return "OFF";
         case RefreshRateMode::Always:       return "AUTO (ALWAYS 120 HZ)";
         case RefreshRateMode::PlaybackOnly: return "PLAYBACK ONLY";
-        default:                            return "OFF";
+        case RefreshRateMode::MatchVideo:   return "MATCH VIDEO (24P / 50 HZ)";
+        default:                           return "OFF";
     }
 }
 
@@ -291,7 +292,7 @@ bool SettingsService::loadSettings() {
     if (readCount >= 15 && rawAiNetwork >= 0 && rawAiNetwork <= 3) {
         m_aiNetwork = static_cast<AiNetwork>(rawAiNetwork);
     }
-    if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 2) {
+    if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 3) {
         m_refreshRateMode = static_cast<RefreshRateMode>(rawRefreshRateMode);
     }
     if (readCount >= 17 && rawHdrOutputMode >= 0 && rawHdrOutputMode <= 1) {

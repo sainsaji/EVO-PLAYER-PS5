@@ -33,6 +33,8 @@ int coding_for(Codec codec)
         return 6;  // AAC
     case Codec::eac3:
         return 10; // E-AC-3
+    case Codec::truehd:
+        return 12; // Dolby TrueHD (MAT)
     case Codec::unknown:
         break;
     }

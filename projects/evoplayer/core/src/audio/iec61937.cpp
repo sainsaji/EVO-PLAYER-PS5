@@ -20,6 +20,24 @@ constexpr std::uint16_t kTypeDts2 = 0x0C; // 1024
 constexpr std::uint16_t kTypeDts3 = 0x0D; // 2048
 constexpr std::uint16_t kTypeEac3 = 0x15;
 constexpr std::uint16_t kTypeAac  = 0x07; // MPEG-2/4 AAC, 1024 samples per frame
+constexpr std::uint16_t kTypeTruehd = 0x16; // Dolby TrueHD, as MAT
+
+// One MAT frame holds up to 24 TrueHD access units (40 samples each, so 20 ms)
+// and goes out in a 61440-byte burst on the 768 kHz port.
+constexpr std::size_t kMatFrameSize = 61424;
+constexpr std::size_t kMatBurstBytes = 61440;
+constexpr int kMatAccessUnits = 24;
+constexpr std::uint8_t kMatStartCode[20] = {
+    0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00,
+    0x56, 0xA5, 0x3B, 0xF4, 0x81, 0x83, 0x49, 0x80, 0x77, 0xE0,
+};
+constexpr std::uint8_t kMatMiddleCode[12] = {
+    0xC3, 0xC1, 0x42, 0x49, 0x3B, 0xFA, 0x82, 0x83, 0x49, 0x80, 0x77, 0xE0,
+};
+constexpr std::uint8_t kMatEndCode[16] = {
+    0xC3, 0xC2, 0xC0, 0xC4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x97, 0x11,
+};
 
 // AC-3 frame size in 16-bit words, by frmsizecod (0..37) and fscod (48, 44.1, 32 kHz).
 constexpr std::uint16_t kAc3Words[38][3] = {
@@ -64,6 +82,8 @@ bool is_sync_any(Codec codec, Span<std::uint8_t> d, std::size_t at)
         return is_dts_sync(d, at);
     case Codec::aac:
         return is_adts_sync(d, at);
+    case Codec::truehd:
+        return true; // access units are packet-aligned: there is no sync word to find
     default:
         return false;
     }
@@ -83,6 +103,8 @@ const char *codec_name(Codec codec)
         return "DTS";
     case Codec::aac:
         return "AAC (ADTS)";
+    case Codec::truehd:
+        return "Dolby TrueHD";
     case Codec::unknown:
         break;
     }
@@ -113,6 +135,10 @@ Carrier carrier_for(Codec codec)
         return {3, 1024, 192000};
     case Codec::aac:
         return {1, 256, 48000};
+    case Codec::truehd:
+        // sceAudioOutSysOpen mode 5: a 768 kHz port of 1024 S16 8-channel
+        // frames; SysConfigureOutput mode 5 is MAT (the Blu-ray player's route).
+        return {5, 1024, 768000, true, 16};
     case Codec::unknown:
         break;
     }
@@ -167,6 +193,15 @@ Frame parse_frame(Codec codec, Span<std::uint8_t> d, std::size_t at)
         const int length = ((d[at + 3] & 3) << 11) | (d[at + 4] << 3) | (d[at + 5] >> 5);
         f.size = static_cast<std::size_t>(length);
         f.samples = ((d[at + 6] & 3) + 1) * 1024; // raw data blocks in the frame
+    }
+    else if (codec == Codec::truehd)
+    {
+        // An access unit starts with a 16-bit word: 4 check bits, then its
+        // length in 16-bit words.
+        if (at + 2 > d.size())
+            return f;
+        f.size = ((static_cast<std::size_t>(d[at] & 0x0F) << 8) | d[at + 1]) * 2;
+        f.samples = 40;
     }
     if (at + f.size > d.size())
         f.size = 0;
@@ -296,6 +331,68 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
         write_burst(kTypeAac, static_cast<std::uint16_t>(((first.size + 1) & ~std::size_t{1}) * 8), // Pd: bits, padded to a whole 16-bit word
                     d.subspan(first.offset, first.size), kBurst, out);
         *cursor += first.size;
+        return true;
+    }
+
+    if (codec_ == Codec::truehd)
+    {
+        // Pack 24 access units into one MAT frame. A short frame would last
+        // as long as a full one and run the audio fast, so wait for all 24
+        // unless the stream is ending.
+        std::size_t cur = *cursor;
+        int available = 0;
+        while (available < kMatAccessUnits)
+        {
+            const Frame f = parse_frame(codec_, d, cur);
+            if (f.size == 0)
+                break;
+            cur += f.size;
+            ++available;
+        }
+        if (available == 0 || (available < kMatAccessUnits && !flush))
+            return false;
+
+        std::vector<std::uint8_t> mat(kMatFrameSize, 0);
+        std::memcpy(mat.data(), kMatStartCode, sizeof(kMatStartCode));
+        std::memcpy(mat.data() + 30708, kMatMiddleCode, sizeof(kMatMiddleCode));
+        std::memcpy(mat.data() + (kMatFrameSize - sizeof(kMatEndCode)), kMatEndCode,
+                    sizeof(kMatEndCode));
+
+        cur = *cursor;
+        std::size_t pos = sizeof(kMatStartCode);
+        int packed = 0;
+        while (packed < available)
+        {
+            const Frame f = parse_frame(codec_, d, cur);
+            if (f.size == 0)
+                break;
+            if (packed >= 12 && pos < 30720)
+                pos = 30720; // the second half of the frame starts after the middle code
+            std::size_t limit = (pos < 30708) ? 30708 : (kMatFrameSize - sizeof(kMatEndCode));
+            if (pos + f.size > limit)
+            {
+                if (pos < 30708)
+                {
+                    pos = 30720;
+                    limit = kMatFrameSize - sizeof(kMatEndCode);
+                }
+                if (pos + f.size > limit)
+                    break;
+            }
+            std::memcpy(mat.data() + pos, d.data() + cur, f.size);
+            pos += f.size;
+            cur += f.size;
+            ++packed;
+        }
+        if (packed == 0)
+        {
+            *error = "TrueHD access unit does not fit a MAT frame";
+            return false;
+        }
+
+        write_burst(kTypeTruehd, static_cast<std::uint16_t>(kMatFrameSize),
+                    Span<std::uint8_t>(mat), kMatBurstBytes, out);
+        *cursor = cur;
         return true;
     }
 

@@ -23,6 +23,10 @@ extern "C"
     int sceAudioOutExClose(int handle);                                               // 0TfjSulCV2A
     int sceAudioOutExConfigureOutput(int zero, unsigned flags, int mode, int target,
                                      std::uint64_t opt);                              // VcE+gXSwFXI
+    int sceAudioOutSysOpen(int user, int mode);                                       // MGkAS4ncQ90
+    int sceAudioOutSysClose(int handle);                                              // pKY2S4K-6Mg
+    int sceAudioOutSysConfigureOutput(int type, unsigned flags, int mode, int target,
+                                      std::uint64_t opt);                             // ktdp5iauPQc
 }
 
 namespace
@@ -61,12 +65,12 @@ void send_null_bursts(int handle, const pt::Carrier &carrier, int ms)
 {
     if (handle < 1 || carrier.grain_frames <= 0 || carrier.sample_rate <= 0)
         return;
-    std::vector<uint8_t> grain(static_cast<size_t>(carrier.grain_frames) * 4, 0);
+    std::vector<uint8_t> grain(static_cast<size_t>(carrier.grain_frames) * static_cast<size_t>(carrier.frame_bytes), 0);
     grain[0] = 0x72; // Pa 0xF872, little-endian
     grain[1] = 0xF8;
     grain[2] = 0x1F; // Pb 0x4E1F
     grain[3] = 0x4E;
-    const int grains = ms * carrier.sample_rate / 1000 / carrier.grain_frames;
+    const int grains = ms * carrier.frame_rate() / 1000 / carrier.grain_frames;
     for (int i = 0; i < grains; ++i)
         sceAudioOutOutput(handle, grain.data());
 }
@@ -77,6 +81,7 @@ pt::Codec               g_pt_codec = pt::Codec::unknown;
 pt::Carrier             g_pt_carrier{};
 pt::Packer              g_pt_packer(pt::Codec::unknown);
 std::vector<uint8_t>    g_pt_stream_buf;
+std::vector<uint8_t>    g_pt_pending;   // burst bytes not yet a whole port grain
 std::deque<std::vector<uint8_t>> g_pt_grain_queue;
 pthread_mutex_t         g_pt_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -84,6 +89,8 @@ pt::Codec codec_from_av(int av_codec_id)
 {
     switch (av_codec_id)
     {
+    case AV_CODEC_ID_TRUEHD:
+        return pt::Codec::truehd;
     case AV_CODEC_ID_AC3:
         return pt::Codec::ac3;
     case AV_CODEC_ID_EAC3:
@@ -180,7 +187,8 @@ int evo_pt_open(int av_codec_id)
         sleep_ms(static_cast<int>(kBeforeOpenMs - since_reset));
 
     // 1. Open the bitstream port first (citroncore sequence)
-    const int handle = sceAudioOutExOpen(kSystemUser, carrier.mode);
+    const int handle = carrier.sys ? sceAudioOutSysOpen(kSystemUser, carrier.mode)
+                                    : sceAudioOutExOpen(kSystemUser, carrier.mode);
     evo_boot_log("[PT] sceAudioOutExOpen(0xFF, %d) -> %d (0x%08x)",
                  carrier.mode, handle, static_cast<unsigned>(handle));
     if (handle < 1)
@@ -190,13 +198,14 @@ int evo_pt_open(int av_codec_id)
     }
 
     // 2. Switch HDMI audio to bitstream mode for this format
-    const int cfg_rc = sceAudioOutExConfigureOutput(0, 0, carrier.mode, kTargetHdmi, 0);
+    const int cfg_rc = carrier.sys ? sceAudioOutSysConfigureOutput(1 /* HDMI */, 0, carrier.mode, kTargetHdmi, 0)
+                                     : sceAudioOutExConfigureOutput(0, 0, carrier.mode, kTargetHdmi, 0);
     evo_boot_log("[PT] sceAudioOutExConfigureOutput(mode=%d, target=%d) -> 0x%08x",
                  carrier.mode, kTargetHdmi, static_cast<unsigned>(cfg_rc));
     if (cfg_rc < 0)
     {
         evo_boot_log("[PT] sceAudioOutExConfigureOutput failed (%d), closing port and reverting", cfg_rc);
-        sceAudioOutExClose(handle);
+        carrier.sys ? sceAudioOutSysClose(handle) : sceAudioOutExClose(handle);
         sceAudioOutExConfigureOutput(0, 0, kModeDefault, kModeDefault, 0);
         return cfg_rc;
     }
@@ -210,6 +219,7 @@ int evo_pt_open(int av_codec_id)
     g_pt_packer.set_codec(codec);
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
+    g_pt_pending.clear();
     g_pt_active = 1;
     pthread_mutex_unlock(&g_pt_mutex);
 
@@ -227,7 +237,7 @@ void evo_pt_close(int handle)
         send_null_bursts(handle, g_pt_carrier, kLeadOutMs);
         sceAudioOutOutput(handle, nullptr);
         // 4. Close bitstream port
-        const int close_rc = sceAudioOutExClose(handle);
+        const int close_rc = g_pt_carrier.sys ? sceAudioOutSysClose(handle) : sceAudioOutExClose(handle);
         evo_boot_log("[PT] sceAudioOutExClose(%d) -> 0x%08x", handle, static_cast<unsigned>(close_rc));
         sleep_ms(kAfterCloseMs);
     }
@@ -245,6 +255,7 @@ void evo_pt_close(int handle)
     g_pt_carrier = pt::Carrier{};
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
+    g_pt_pending.clear();
     pthread_mutex_unlock(&g_pt_mutex);
 }
 
@@ -253,6 +264,7 @@ void evo_pt_reset(void)
     pthread_mutex_lock(&g_pt_mutex);
     g_pt_stream_buf.clear();
     g_pt_grain_queue.clear();
+    g_pt_pending.clear();
     pthread_mutex_unlock(&g_pt_mutex);
     evo_boot_log("[PT] Queues flushed (seek)");
 }
@@ -278,7 +290,7 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
 
     g_pt_stream_buf.insert(g_pt_stream_buf.end(), data, data + size);
 
-    const size_t grain_bytes = static_cast<size_t>(g_pt_carrier.grain_frames) * 4;
+    const size_t grain_bytes = static_cast<size_t>(g_pt_carrier.grain_frames) * static_cast<size_t>(g_pt_carrier.frame_bytes);
     size_t cursor = 0;
     const char *error = nullptr;
     std::vector<uint8_t> burst;
@@ -296,15 +308,20 @@ int evo_pt_push_packet(const uint8_t *data, size_t size, int sample_rate, int ch
 
         cursor += consumed;
 
-        // Split the generated IEC 61937 burst into port grains
-        for (size_t off = 0; off < burst.size(); off += grain_bytes)
+        // Split the generated IEC 61937 burst into port grains. A burst that
+        // is not a whole number of grains (a 61440-byte MAT burst is 3.75
+        // grains of the 768 kHz port) carries its tail into the next one:
+        // padding it would stretch every burst and break the stream.
+        g_pt_pending.insert(g_pt_pending.end(), burst.begin(), burst.end());
+        size_t used = 0;
+        while (g_pt_pending.size() - used >= grain_bytes)
         {
-            const size_t take = std::min(grain_bytes, burst.size() - off);
-            std::vector<uint8_t> grain(burst.begin() + off, burst.begin() + off + take);
-            if (grain.size() < grain_bytes)
-                grain.resize(grain_bytes, 0);
-            g_pt_grain_queue.push_back(std::move(grain));
+            g_pt_grain_queue.emplace_back(g_pt_pending.begin() + used,
+                                          g_pt_pending.begin() + used + grain_bytes);
+            used += grain_bytes;
         }
+        if (used > 0)
+            g_pt_pending.erase(g_pt_pending.begin(), g_pt_pending.begin() + used);
     }
 
     if (cursor > 0)
@@ -354,7 +371,7 @@ int evo_pt_is_active(void)
 
 size_t evo_pt_grain_bytes(void)
 {
-    return static_cast<size_t>(g_pt_carrier.grain_frames) * 4;
+    return static_cast<size_t>(g_pt_carrier.grain_frames) * static_cast<size_t>(g_pt_carrier.frame_bytes);
 }
 
 int evo_pt_grain_frames(void)
@@ -364,7 +381,7 @@ int evo_pt_grain_frames(void)
 
 int evo_pt_sample_rate(void)
 {
-    return g_pt_carrier.sample_rate > 0 ? g_pt_carrier.sample_rate : 48000;
+    return g_pt_carrier.sample_rate > 0 ? g_pt_carrier.frame_rate() : 48000;
 }
 
 const char *evo_pt_active_codec_name(void)
@@ -380,7 +397,7 @@ void evo_pt_cleanup(void)
         if (g_pt_handle >= 1)
         {
             sceAudioOutOutput(g_pt_handle, nullptr);
-            sceAudioOutExClose(g_pt_handle);
+            g_pt_carrier.sys ? sceAudioOutSysClose(g_pt_handle) : sceAudioOutExClose(g_pt_handle);
             g_pt_handle = -1;
         }
         sceAudioOutExConfigureOutput(0, 0, kModeDefault, kModeDefault, 0);

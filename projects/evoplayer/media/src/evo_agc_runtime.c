@@ -156,6 +156,26 @@ int32_t sceVideoOutConfigureOutput(int32_t handle, uint64_t mode,
                                    const void *options, const void *reserved0, uint64_t reserved1);
 int32_t sceVideoOutIsOutputSupported(int32_t handle, uint64_t mode,
                                      const void *options, const void *reserved0, uint64_t reserved1);
+int32_t sceVideoOutConfigureOutputEx(int32_t handle, uint64_t mode,
+                                     const void *options, const void *reserved0, uint64_t reserved1);
+
+/*
+ * sceVideoOutConfigureOutput modes per evo_vo_rate. libSceVideoOut's parser
+ * (0x188e0 in the 12.70 sprx) maps each to a refresh token: 2 -> 1 (23.976),
+ * 3 -> 4 (24), 9 -> 2 (50), 0xF -> 13 (119.88). The Blu-ray player core uses
+ * the same low bytes in its full 0xb/0xc0000040x modes and falls back
+ * 24 -> 23.976 and 25 -> 50 when only the small modes are allowed.
+ */
+static const struct {
+    uint64_t    mode;
+    const char *name;
+} k_vo_rates[EVO_VO_RATE_COUNT] = {
+    [EVO_VO_RATE_DEFAULT] = { UINT64_C(0x1), "default" },
+    [EVO_VO_RATE_23_976]  = { UINT64_C(0x2), "23.976 Hz" },
+    [EVO_VO_RATE_24]      = { UINT64_C(0x3), "24 Hz" },
+    [EVO_VO_RATE_50]      = { UINT64_C(0x9), "50 Hz" },
+    [EVO_VO_RATE_119_88]  = { UINT64_C(0xF), "119.88 Hz" },
+};
 
 /* Output-mode readback. ABI verified in third_party/ps5-opengl
  * (ps5_agc_native_runtime.c: runtime_resolution_status_t). */
@@ -213,6 +233,8 @@ typedef struct evo_agc_device {
     int                     supports_120hz;
     int                     is_120hz;
     int                     current_refresh_rate;
+    evo_vo_rate             output_rate;       /* the mode EVO last configured */
+    unsigned                rate_supported;    /* bit per evo_vo_rate, from IsOutputSupported */
     int                     is_player_mode;
 
     /* #114: the last output-mode change (120 Hz or HDR) that has not reached
@@ -1428,6 +1450,19 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     evo_boot_log("agc display 120hz support probe rc=%d (%s)",
                  sup120, g_agc_dev.supports_120hz ? "YES" : "NO");
 
+    g_agc_dev.output_rate = EVO_VO_RATE_DEFAULT;
+    g_agc_dev.rate_supported = 1u << EVO_VO_RATE_DEFAULT;
+    if (g_agc_dev.supports_120hz)
+        g_agc_dev.rate_supported |= 1u << EVO_VO_RATE_119_88;
+    for (int r = EVO_VO_RATE_23_976; r <= EVO_VO_RATE_50; ++r) {
+        /* Logged only: on a 4K HDR output this refuses the small modes while
+         * the full one may still work, so set_output_rate tries for real. */
+        int32_t src = sceVideoOutIsOutputSupported(g_agc_dev.video_handle, k_vo_rates[r].mode, NULL, NULL, 0);
+        g_agc_dev.rate_supported |= 1u << r;
+        evo_boot_log("agc display %s (mode %#llx) support probe rc=%d (0x%08x)",
+                     k_vo_rates[r].name, (unsigned long long)k_vo_rates[r].mode, src, (unsigned)src);
+    }
+
     /*
      * What the panel is actually running at. The render size below is still
      * whatever evo_agc_runtime_init() was handed - the UI is authored at a
@@ -1443,6 +1478,8 @@ int evo_agc_runtime_init(int width, int height, int hdr)
         if (vres.refresh_rate == 13) {
             g_agc_dev.is_120hz = 1;
             g_agc_dev.supports_120hz = 1;
+            g_agc_dev.output_rate = EVO_VO_RATE_119_88;
+            g_agc_dev.rate_supported |= 1u << EVO_VO_RATE_119_88;
         }
         evo_boot_log("agc display probe rc=%d full=%ux%u pane=%ux%u refresh_id=%llu (120hz=%d) "
                      "inches=%d render=%dx%d",
@@ -1658,10 +1695,12 @@ void evo_agc_runtime_shutdown(void)
     agc_upscale_release();
 
     if (g_agc_dev.video_handle >= 0) {
-        if (g_agc_dev.is_120hz) {
-            evo_boot_log("agc shutdown: restoring default 60hz output mode");
-            sceVideoOutConfigureOutput(g_agc_dev.video_handle, 0x0000000000000001UL, NULL, NULL, 0);
+        if (g_agc_dev.output_rate != EVO_VO_RATE_DEFAULT || g_agc_dev.is_120hz) {
+            evo_boot_log("agc shutdown: restoring default output mode (was %s)",
+                         k_vo_rates[g_agc_dev.output_rate].name);
+            sceVideoOutConfigureOutput(g_agc_dev.video_handle, k_vo_rates[EVO_VO_RATE_DEFAULT].mode, NULL, NULL, 0);
             g_agc_dev.is_120hz = 0;
+            g_agc_dev.output_rate = EVO_VO_RATE_DEFAULT;
         }
         sceVideoOutUnregisterBuffers(g_agc_dev.video_handle, 0);
         sceVideoOutClose(g_agc_dev.video_handle);
@@ -2845,31 +2884,89 @@ int evo_agc_runtime_last_video_trc(void)
 
 int evo_agc_runtime_set_120hz(int enable)
 {
-    if (!g_agc_dev.initialized || g_agc_dev.video_handle < 0)
-        return -1;
-
     if (enable && !g_agc_dev.supports_120hz) {
         evo_boot_log("agc: 120hz requested but not supported by display");
         return -1;
     }
+    return evo_agc_runtime_set_output_rate(enable ? EVO_VO_RATE_119_88 : EVO_VO_RATE_DEFAULT);
+}
 
-    if ((enable && g_agc_dev.is_120hz) || (!enable && !g_agc_dev.is_120hz)) {
+evo_vo_rate evo_agc_runtime_get_output_rate(void)
+{
+    return g_agc_dev.initialized ? g_agc_dev.output_rate : EVO_VO_RATE_DEFAULT;
+}
+
+int evo_agc_runtime_supports_output_rate(evo_vo_rate rate)
+{
+    if (!g_agc_dev.initialized || (unsigned)rate >= EVO_VO_RATE_COUNT)
         return 0;
+    return (g_agc_dev.rate_supported >> rate) & 1u;
+}
+
+const char *evo_agc_runtime_output_rate_name(evo_vo_rate rate)
+{
+    return (unsigned)rate < EVO_VO_RATE_COUNT ? k_vo_rates[rate].name : "?";
+}
+
+int evo_agc_runtime_set_output_rate(evo_vo_rate rate)
+{
+    if (!g_agc_dev.initialized || g_agc_dev.video_handle < 0 || (unsigned)rate >= EVO_VO_RATE_COUNT)
+        return -1;
+
+    if (rate == g_agc_dev.output_rate)
+        return 0;
+
+    if (!evo_agc_runtime_supports_output_rate(rate)) {
+        evo_boot_log("agc: output %s refused earlier - not retried", k_vo_rates[rate].name);
+        return -1;
     }
 
-    uint64_t mode = enable ? UINT64_C(0x000000000000000F) /* Mode119_88Hz */
-                           : UINT64_C(0x0000000000000001); /* Default */;
+    /*
+     * Candidates: the small mode, then for the film / PAL rates the full mode
+     * the Blu-ray player uses - 0xb SDR / 0xc HDR, 0x400 2K / 0x800 4K, low
+     * byte the small mode's rate. On a 4K HDR output the small 23.976 / 24 /
+     * 50 modes were refused at init (hardware 2026-10-09), so the full mode
+     * matching what the TV runs now is the one to try.
+     */
+    uint64_t cand[2];
+    int ncand = 0;
+    cand[ncand++] = k_vo_rates[rate].mode;
+    if (rate == EVO_VO_RATE_23_976 || rate == EVO_VO_RATE_24 || rate == EVO_VO_RATE_50) {
+        evo_vo_output_status cur;
+        memset(&cur, 0, sizeof(cur));
+        const int hdr = (sceVideoOutGetOutputStatus(g_agc_dev.video_handle, &cur) == 0)
+                            ? (cur.dynamic_range == 2 || (cur.flags & 1))
+                            : g_agc_dev.is_hdr;
+        const uint64_t res = (g_agc_dev.width >= 3840) ? 0x800u : 0x400u;
+        cand[ncand++] = (hdr ? UINT64_C(0xc00000000) : UINT64_C(0xb00000000)) | res | k_vo_rates[rate].mode;
+    }
 
-    evo_boot_log("agc: switching output mode to %#llx (120hz=%d)",
-                 (unsigned long long)mode, enable);
+    evo_boot_log("agc: switching output mode %s -> %s",
+                 k_vo_rates[g_agc_dev.output_rate].name, k_vo_rates[rate].name);
 
     const int64_t switch_t0 = agc_now_us();
     agc_wait_gpu_idle(200);
 
-    int32_t rc = sceVideoOutConfigureOutput(g_agc_dev.video_handle, mode, NULL, NULL, 0);
-    evo_boot_log("agc: sceVideoOutConfigureOutput rc=%d (0x%08x)", rc, (unsigned)rc);
-    if (rc == 0)
-        agc_mode_switch_note(enable ? "120 Hz on" : "120 Hz off", switch_t0);
+    /*
+     * libSceVideoOut's gate (0x18200) refuses modes 2 / 3 / 9 / 10 with
+     * 0x8029001e unless the call is the Ex one (hardware 2026-10-09) - the
+     * plain call only reaches the default and 119.88 Hz modes.
+     */
+    const int use_ex = (ncand > 1);
+    int32_t rc = -1;
+    for (int i = 0; i < ncand && rc != 0; ++i) {
+        const int32_t sup = sceVideoOutIsOutputSupported(g_agc_dev.video_handle, cand[i], NULL, NULL, 0);
+        rc = use_ex ? sceVideoOutConfigureOutputEx(g_agc_dev.video_handle, cand[i], NULL, NULL, 0)
+                    : sceVideoOutConfigureOutput(g_agc_dev.video_handle, cand[i], NULL, NULL, 0);
+        evo_boot_log("agc: mode %#llx: IsOutputSupported rc=0x%08x, ConfigureOutput%s rc=%d (0x%08x)",
+                     (unsigned long long)cand[i], (unsigned)sup, use_ex ? "Ex" : "", rc, (unsigned)rc);
+    }
+    if (rc == 0) {
+        agc_mode_switch_note(k_vo_rates[rate].name, switch_t0);
+    } else {
+        g_agc_dev.rate_supported &= ~(1u << rate);
+        evo_boot_log("agc: %s refused in every form - not retried this session", k_vo_rates[rate].name);
+    }
 
     evo_vo_resolution_status vres;
     memset(&vres, 0, sizeof(vres));
@@ -2885,7 +2982,8 @@ int evo_agc_runtime_set_120hz(int enable)
                  vorc, vout.dynamic_range, (unsigned long long)vout.refresh_rate);
 
     if (rc == 0) {
-        g_agc_dev.is_120hz = enable ? 1 : 0;
+        g_agc_dev.output_rate = rate;
+        g_agc_dev.is_120hz = (rate == EVO_VO_RATE_119_88) ? 1 : 0;
         g_agc_dev.current_refresh_rate = (int)(vres.refresh_rate != 0 ? vres.refresh_rate : vout.refresh_rate);
     }
 

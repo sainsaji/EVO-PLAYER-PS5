@@ -116,11 +116,12 @@ enum class DeepBlacks : int {
     High = 2    // stronger, for washed-out masters
 };
 
-// Refresh rate output mode (60 Hz vs 120 Hz)
+// Refresh rate output mode: 60 Hz, 120 Hz, or the video's own rate
 enum class RefreshRateMode : int {
     Off = 0,
     Always = 1,
-    PlaybackOnly = 2
+    PlaybackOnly = 2,
+    MatchVideo = 3     // 23.976 / 24 / 50 Hz during playback, like the Blu-ray player's 24p output
 };
 
 // HDR10 output: Auto switches the TV into HDR10 while an HDR10 / HLG video is

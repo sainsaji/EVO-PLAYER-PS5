@@ -242,8 +242,8 @@ void *audio_output_thread(void *arg) {
                 continue;
             }
             if (evo_pt_is_active()) {
-                static uint8_t pt_grain_buf[4096];
-                static uint8_t pt_silence_buf[4096];
+                static uint8_t pt_grain_buf[16384];
+                static uint8_t pt_silence_buf[16384];
                 int grain_bytes = (int)evo_pt_grain_bytes();
                 if (grain_bytes > (int)sizeof(pt_grain_buf))
                     grain_bytes = sizeof(pt_grain_buf);

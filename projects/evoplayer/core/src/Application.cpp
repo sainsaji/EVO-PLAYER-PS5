@@ -959,6 +959,36 @@ static bool write_scanout_bmp(FILE* fp) {
     return true;
 }
 
+/* True when `hz` shows every frame of `fps` video for the same number of
+ * refreshes (59.94 fps on 119.88 Hz: 2 each). */
+static bool fits_rate(double fps, double hz)
+{
+    const double k = hz / fps;
+    const double kr = static_cast<double>(static_cast<int>(k + 0.5));
+    return kr >= 1.0 && std::fabs(k - kr) < 0.02 * kr;
+}
+
+/*
+ * RefreshRateMode::MatchVideo: the output rate for `fps` video. 23.976 and 24
+ * are told apart (0.024 fps apart; streams report them to well under 0.005),
+ * since 24 fps on 23.976 Hz still drops a frame every 42 s. Film the display
+ * cannot take natively goes to 119.88 Hz when it has it. Everything else
+ * (29.97, 30, 59.94, 60) stays on the default rate.
+ */
+static evo_vo_rate match_video_rate(double fps, bool can120)
+{
+    evo_vo_rate want = EVO_VO_RATE_DEFAULT;
+    if (std::fabs(fps - 24000.0 / 1001.0) < 0.008)
+        want = EVO_VO_RATE_23_976;
+    else if (std::fabs(fps - 24.0) < 0.008)
+        want = EVO_VO_RATE_24;
+    else if (fits_rate(fps, 50.0))
+        want = EVO_VO_RATE_50;
+    if (want != EVO_VO_RATE_DEFAULT && !evo_agc_runtime_supports_output_rate(want))
+        want = (want != EVO_VO_RATE_50 && can120) ? EVO_VO_RATE_119_88 : EVO_VO_RATE_DEFAULT;
+    return want;
+}
+
 /*
  * Playback frame-pacing trace - diagnostics only, no effect on playback.
  *
@@ -1484,38 +1514,54 @@ int Application::run() {
          * SDR retype is flipped to the screen first and the 120 -> 60 switch
          * follows on the next frame, so the TV re-locks once into SDR 60 Hz
          * instead of re-locking for the rate and again, 2 s later, for SDR.
+         *
+         * Match video does the same, but with the video's own rate (what the
+         * Blu-ray player calls 24p output): 23.976 / 24 Hz for film, 50 Hz for
+         * 25 / 50 fps. Each repeats every frame for the same time, so pans stop
+         * juddering. 29.97 / 59.94 already fit the default 59.94 Hz. Film
+         * falls back to 119.88 Hz if the display refuses its exact rate.
          */
-        if (m_settingsService && m_settingsService->getRefreshRateMode() == RefreshRateMode::PlaybackOnly &&
-            evo_agc_runtime_supports_120hz()) {
-            static bool s_want_120 = false;
-            static int  s_wait_frames = 0;
-            bool want = s_want_120;
+        const RefreshRateMode rrMode = m_settingsService ? m_settingsService->getRefreshRateMode()
+                                                         : RefreshRateMode::Off;
+        const bool rrPlayback = rrMode == RefreshRateMode::PlaybackOnly && evo_agc_runtime_supports_120hz();
+        if (rrPlayback || rrMode == RefreshRateMode::MatchVideo) {
+            static int s_wait_frames = 0;
+            /* The last rate asked for, so a refused mode is not retried every frame. */
+            static evo_vo_rate s_asked = evo_agc_runtime_get_output_rate();
+            evo_vo_rate want = s_asked;
+            const bool can120 = evo_agc_runtime_supports_120hz() != 0;
             if (isSurround) {
-                want = true;
+                want = (rrPlayback && can120) ? EVO_VO_RATE_119_88 : EVO_VO_RATE_DEFAULT;
             } else if (!isPlayer) {
-                want = false;
+                want = EVO_VO_RATE_DEFAULT;
             } else if (m_playbackController && m_playbackController->isActive()) {
                 if (m_playbackController->isMusicMode()) {
-                    want = false;
+                    want = EVO_VO_RATE_DEFAULT;
                 } else {
                     const double fps = evo_pb_video_fps();
-                    if (fps > 1.0) {
-                        const double k = 119.88 / fps;
-                        const double kr = static_cast<double>(static_cast<int>(k + 0.5));
-                        want = kr >= 1.0 && std::fabs(k - kr) < 0.02 * kr;
-                    }
+                    if (fps > 1.0)
+                        want = rrPlayback ? (fits_rate(fps, 119.88) ? EVO_VO_RATE_119_88 : EVO_VO_RATE_DEFAULT)
+                                          : match_video_rate(fps, can120);
                 }
             }
             /* A pending HDR retype goes to the screen before the rate change.
              * Bounded: if nothing flips for half a second, switch anyway. */
+            const evo_vo_rate have = evo_agc_runtime_get_output_rate();
             const bool hold = evo_agc_runtime_mode_switch_pending() && s_wait_frames < 30;
-            if (want != s_want_120 && hold) {
+            if (want != s_asked && hold) {
                 ++s_wait_frames;
-            } else if (want != s_want_120) {
-                evo_bt("120Hz: playback-only -> %d (player=%d surround=%d fps=%.3f)",
-                       want ? 1 : 0, isPlayer ? 1 : 0, isSurround ? 1 : 0, evo_pb_video_fps());
-                evo_agc_runtime_set_120hz(want ? 1 : 0);
-                s_want_120 = want;
+            } else if (want != s_asked) {
+                evo_bt("refresh: %s -> %s (%s player=%d surround=%d fps=%.3f)",
+                       evo_agc_runtime_output_rate_name(have), evo_agc_runtime_output_rate_name(want),
+                       rrPlayback ? "playback-only" : "match-video",
+                       isPlayer ? 1 : 0, isSurround ? 1 : 0, evo_pb_video_fps());
+                if (evo_agc_runtime_set_output_rate(want) != 0 &&
+                    (want == EVO_VO_RATE_23_976 || want == EVO_VO_RATE_24) && can120) {
+                    /* Refused: 120 Hz still repeats film evenly (5:5). 50 Hz
+                     * content gains nothing from it, so it stays default. */
+                    evo_agc_runtime_set_output_rate(EVO_VO_RATE_119_88);
+                }
+                s_asked = want;
                 s_wait_frames = 0;
             }
         }
