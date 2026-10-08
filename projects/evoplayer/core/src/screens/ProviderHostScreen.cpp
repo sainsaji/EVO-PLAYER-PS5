@@ -2047,10 +2047,12 @@ void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
         return;
     }
     if (!m_opened) return;
-    evo_rmlui_provider_render(framebuffer, width, height);
+    const bool kit_drew = evo_rmlui_provider_render(framebuffer, width, height) != 0;
     /* The rail is a document in the MAIN context, so it does not come with the
-     * provider's own context - it is composited on top afterwards. */
-    evo_rmlui_render_nav_overlay(framebuffer, width, height);
+     * provider's own context - it is composited on top afterwards. The kit draws
+     * its own rail with the screen. */
+    if (!kit_drew)
+        evo_rmlui_render_nav_overlay(framebuffer, width, height);
     evo_rmlui_provider_clear_frame();
 }
 

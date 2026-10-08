@@ -566,6 +566,109 @@ typedef struct {
     float       cal_delay_ms[EVO_RMLUI_SURROUND_SPEAKERS];
 } evo_rmlui_surround_params_t;
 
+/*
+ * The media-server screen (Emby / Jellyfin / Stremio addons, "mediaserver"): a
+ * 4x2 poster page plus a detail pane. Filled by EvoRmlProviderHost from its
+ * data model and drawn by the kit. Focus stays with the host (RmlUi's own
+ * navigation); `focus` is the local row it reports, -1 for none.
+ */
+#define EVO_HUI_PROVIDER_ROWS 8
+typedef struct {
+    const char*     title;
+    const char*     subtitle;
+    const char*     initial;
+    const char*     art_key;     /* stable per poster, for the texture cache */
+    const uint32_t* art;         /* 0xAABBGGRR, NULL until the poster arrives */
+    int             art_w;
+    int             art_h;
+    int             is_folder;
+    int             played;
+    int             progress;    /* 0-100 */
+    int             is_live;
+    const char*     now;         /* EPG, "" when none */
+    const char*     next;
+} evo_hui_provider_row_t;
+
+/* One row of the options side panel (Live TV options, guide picker). */
+#define EVO_HUI_PROVIDER_PANEL_ROWS 16
+typedef struct {
+    const char* title;
+    const char* detail;
+    const char* badge;
+    const char* icon;
+    int         radio;
+    int         on;
+    int         warn;
+    int         chevron;
+    int         badge_live;
+    int         focused;
+} evo_hui_panel_row_t;
+
+/* variant */
+#define EVO_HUI_PROVIDER_MEDIASERVER 0   /* poster wall: Emby, Jellyfin, addons */
+#define EVO_HUI_PROVIDER_LIVETV      1   /* channel cards + guide: IPTV */
+#define EVO_HUI_PROVIDER_XTREAM      2   /* the same, worded for Xtream Codes */
+#define EVO_HUI_PROVIDER_GENERIC     3   /* the fallback skin: any other provider */
+
+typedef struct {
+    const char* provider_name;
+    const char* breadcrumb;
+    const char* status;
+    const char* query;
+    const char* page_info;
+    int         loading;
+    int         tuning;
+    int         has_error;
+    int         empty;
+    int         has_multiple_pages;
+    int         is_folder_level;
+    int         count;
+    evo_hui_provider_row_t rows[EVO_HUI_PROVIDER_ROWS];
+    int         row_count;
+    int         focus;
+    /* the detail pane */
+    int         has_selected;
+    int         selected_is_folder;
+    int         selected_played;
+    int         selected_progress;
+    const char* selected_title;
+    const char* selected_subtitle;
+    const char* selected_initial;
+    const char* selected_overview;
+    const char* selected_resume;
+    const char* selected_art_key;
+    const uint32_t* selected_art;
+    int         selected_art_w;
+    int         selected_art_h;
+
+    int         variant;                 /* EVO_HUI_PROVIDER_* */
+    int         in_folder;
+    const char* selected_num;            /* "CH 14" */
+    const char* selected_tech;
+    const char* selected_now;
+    const char* selected_next;
+    const char* epg_status;
+    int         epg_setup;
+
+    /* The setup screen (empty, no search): up to three cards. */
+    int         setup_configured;        /* a source exists: adds SIGN OUT */
+    const char* setup_account;
+    int         setup_focus;             /* 0 url, 1 usb, 2 sign out, -1 none */
+
+    /* The options side panel. */
+    int         panel_open;
+    const char* panel_crumb;
+    const char* panel_eyebrow;
+    const char* panel_title;
+    const char* panel_sub;
+    const char* panel_note_b;
+    const char* panel_note;
+    const char* panel_accept;
+    const char* panel_back;
+    evo_hui_panel_row_t panel_rows[EVO_HUI_PROVIDER_PANEL_ROWS];
+    int         panel_row_count;
+} evo_hui_provider_params_t;
+
 
 /* Initialize RmlUi Retained Engine */
 bool evo_rmlui_init(int screen_width, int screen_height);

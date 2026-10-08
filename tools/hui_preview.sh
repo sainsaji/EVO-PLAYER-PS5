@@ -36,6 +36,8 @@ SOURCES=("${ROOT}/tools/hui_preview/hui_preview.cpp"
          "${EVO}/ui_kit/src/evo_hui_modals.cpp"
          "${EVO}/ui_kit/src/evo_hui_misc.cpp"
          "${EVO}/ui_kit/src/evo_hui_extra.cpp"
+         "${EVO}/ui_kit/src/evo_hui_surround.cpp"
+         "${EVO}/ui_kit/src/evo_hui_provider.cpp"
          "${KIT}/host/platform_host.cpp")
 while IFS= read -r -d '' f; do SOURCES+=("$f"); done < <(
     find "${KIT}/src/gfx" "${KIT}/src/ui" "${KIT}/src/core" -name '*.cpp' -print0 | sort -z)

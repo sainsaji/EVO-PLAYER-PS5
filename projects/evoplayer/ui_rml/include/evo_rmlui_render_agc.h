@@ -55,6 +55,7 @@ public:
     void SetDimensions(int w, int h) override;
 
     void SetMemoryTexture(const std::string& key, const uint32_t* bgra, int w, int h) override;
+    const uint32_t* MemoryTexturePixels(const std::string& key, int* w, int* h) const override;
     void DropMemoryTexture(const std::string& key) override;
 
     void FrameBegin() override;

@@ -653,6 +653,16 @@ void EvoRenderInterfaceAGC::SetMemoryTexture(const std::string &key,
     entry.handle = CreateTextureInternal(entry.pixels.data(), w, h);
 }
 
+const uint32_t *EvoRenderInterfaceAGC::MemoryTexturePixels(const std::string &key, int *w, int *h) const
+{
+    auto it = m_mem_textures.find(key);
+    if (it == m_mem_textures.end() || it->second.pixels.empty())
+        return nullptr;
+    if (w) *w = it->second.width;
+    if (h) *h = it->second.height;
+    return it->second.pixels.data();
+}
+
 void EvoRenderInterfaceAGC::DropMemoryTexture(const std::string &key)
 {
     auto it = m_mem_textures.find(key);

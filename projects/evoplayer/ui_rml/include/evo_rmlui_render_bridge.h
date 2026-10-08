@@ -42,6 +42,11 @@ public:
                                   int w, int h) = 0;
     virtual void DropMemoryTexture(const std::string& key) = 0;
 
+    /* The pixels (0xAABBGGRR, premultiplied) behind an evo:mem key, for a
+     * renderer that draws them itself. NULL when the interface keeps none. */
+    virtual const uint32_t* MemoryTexturePixels(const std::string& key, int* w, int* h) const
+    { (void)key; (void)w; (void)h; return nullptr; }
+
     virtual void FrameBegin() {}
     virtual void FrameEnd() {}
 

@@ -74,6 +74,10 @@ void evo_hui_update_reader(const evo_rmlui_reader_params_t* params);
 int  evo_hui_render_reader(int width, int height);
 void evo_hui_update_image(const evo_rmlui_image_params_t* params);
 int  evo_hui_render_image(int width, int height);
+void evo_hui_update_surround(const evo_rmlui_surround_params_t* params);
+int  evo_hui_render_surround(int width, int height);
+void evo_hui_update_provider(const evo_hui_provider_params_t* params);
+int  evo_hui_render_provider(int width, int height);
 /* The virtual keyboard: an overlay that draws only while it is visible. */
 void evo_hui_update_keyboard(const evo_keyboard_params_t* params);
 int  evo_hui_render_keyboard(int width, int height);

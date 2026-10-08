@@ -15,6 +15,8 @@
 #include "evo_hui_osd.hpp"
 #include "evo_hui_screens.hpp"
 #include "evo_hui_settings.hpp"
+#include "evo_hui_surround.hpp"
+#include "evo_hui_provider.hpp"
 #include "hui_agc_batch.hpp"
 
 #include "evo_agc_runtime.h"
@@ -88,6 +90,8 @@ enum class Screen
     closed,
     reader,
     image,
+    surround,
+    provider,
     dialog, /* overlays from here on */
     toast,
     keyboard,
@@ -122,6 +126,10 @@ const char *doc_name(Screen s)
         return "hui_reader";
     case Screen::image:
         return "hui_image";
+    case Screen::surround:
+        return "hui_surround";
+    case Screen::provider:
+        return "hui_provider";
     default:
         return "hui";
     }
@@ -158,6 +166,8 @@ struct Kit
     evo::kit::ToastOverlay toast;
     evo::kit::ReaderScreen reader;
     evo::kit::ImageViewer image;
+    evo::kit::SurroundScreen surround;
+    evo::kit::ProviderGridScreen provider;
     evo::kit::KeyboardOverlay keyboard;
     bool keyboard_visible = false;
     /* Frame bookkeeping: one dt per presented frame, however many kit draws
@@ -276,6 +286,10 @@ struct Kit
                 reader.enter();
             else if (screen == Screen::image)
                 image.enter();
+            else if (screen == Screen::surround)
+                surround.enter();
+            else if (screen == Screen::provider)
+                provider.enter();
         }
         const float dt = step();
         rail.update(dt);
@@ -429,6 +443,10 @@ const char *evo_hui_dev_focus_json(const char **screen_doc)
         has = k.reader.focus(&f);
     else if (!has && k.drawn_last_frame == Screen::image)
         has = k.image.focus(&f);
+    else if (!has && k.drawn_last_frame == Screen::surround)
+        has = k.surround.focus(&f);
+    else if (!has && k.drawn_last_frame == Screen::provider)
+        has = k.provider.focus(&f);
     static std::string o;
     o.clear();
     if (!has)
@@ -720,6 +738,41 @@ int evo_hui_render_image(int width, int height)
             k.image.draw(list, ctx);
         },
         false);
+}
+
+void evo_hui_update_surround(const evo_rmlui_surround_params_t *params)
+{
+    if (!params)
+        return;
+    Kit &k = kit();
+    k.surround.set(*params);
+    k.surround.set_display_120(evo_agc_runtime_is_120hz() != 0);
+}
+
+int evo_hui_render_surround(int width, int height)
+{
+    Kit &k = kit();
+    return k.render(Screen::surround, width, height,
+                    [&](float dt, hui::gfx::DrawList &list, const Context &ctx) {
+                        k.surround.update(dt);
+                        k.surround.draw(list, ctx);
+                    });
+}
+
+void evo_hui_update_provider(const evo_hui_provider_params_t *params)
+{
+    if (params)
+        kit().provider.set(*params);
+}
+
+int evo_hui_render_provider(int width, int height)
+{
+    Kit &k = kit();
+    return k.render(Screen::provider, width, height,
+                    [&](float dt, hui::gfx::DrawList &list, const Context &ctx) {
+                        k.provider.update(dt);
+                        k.provider.draw(list, ctx);
+                    });
 }
 
 void evo_hui_update_keyboard(const evo_keyboard_params_t *params)

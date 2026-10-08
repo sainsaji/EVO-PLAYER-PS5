@@ -10,6 +10,10 @@
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_render_bridge.h"
 #include "evo_rmlui_bundle.h"
+#if defined(EVO_AGC_DEVICE)
+#include "evo_hui.h"
+#endif
+#include <algorithm>
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/DataModelHandle.h>
@@ -1641,12 +1645,12 @@ void EvoRmlProviderHost::Tick()
  * Trace the once-per-open events (Open, RequestPage, the bundle refresh)
  * instead; those tell the same story and cost nothing.
  */
-void EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
+bool EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
 {
-    if (!IsOpen() || !m_context) return;
+    if (!IsOpen() || !m_context) return false;
 
     EvoRenderBridge* r = EvoRmlApp::Instance().RenderBridge();
-    if (!r) return;
+    if (!r) return false;
 
     /*
      * Own context, so nothing here touches EvoRmlApp's cached menu surface or
@@ -1669,10 +1673,132 @@ void EvoRmlProviderHost::Render(uint32_t* framebuffer, int width, int height)
         m_context->Update();
     }
 
+#if defined(EVO_AGC_DEVICE)
+    /* EVO's own provider screens (the embedded documents and the fallback skin) are drawn by the kit. RmlUi stays the
+     * logic here (data model, focus, events) and still lays the document out;
+     * it just does not rasterise it. */
+    if ((m_bundle_version == "embedded" || m_using_fallback) && RenderKit(width, height))
+        return true;
+#endif
+
     r->FrameBegin();
     m_context->Render();
     r->FrameEnd();
+    return false;
 }
+
+#if defined(EVO_AGC_DEVICE)
+bool EvoRmlProviderHost::RenderKit(int width, int height)
+{
+    EvoRenderBridge* r = EvoRmlApp::Instance().RenderBridge();
+    if (!r || !EvoRmlApp::Instance().GlActive()) return false;
+
+    static evo_hui_provider_params_t p;
+    std::memset(&p, 0, sizeof(p));
+
+    if (m_using_fallback)                    p.variant = EVO_HUI_PROVIDER_GENERIC;
+    else if (m_model_name == "iptv")         p.variant = EVO_HUI_PROVIDER_LIVETV;
+    else if (m_model_name == "xtream")       p.variant = EVO_HUI_PROVIDER_XTREAM;
+    else if (m_model_name == "mediaserver")  p.variant = EVO_HUI_PROVIDER_MEDIASERVER;
+    else                                     p.variant = EVO_HUI_PROVIDER_GENERIC;
+
+    p.provider_name = m_model.provider_name.c_str();
+    p.breadcrumb = m_model.breadcrumb.c_str();
+    p.status = m_model.status.c_str();
+    p.query = m_model.query.c_str();
+    p.page_info = m_model.page_info.c_str();
+    p.loading = m_model.loading;
+    p.tuning = m_model.tuning;
+    p.has_error = m_model.has_error;
+    p.empty = m_model.empty;
+    p.has_multiple_pages = m_model.has_multiple_pages;
+    p.is_folder_level = m_model.is_folder_level;
+    p.in_folder = m_model.in_folder;
+    p.count = m_model.count;
+    p.row_count = (int)std::min<size_t>(m_model.rows.size(), EVO_HUI_PROVIDER_ROWS);
+    for (int i = 0; i < p.row_count; ++i) {
+        const EvoProviderRow& row = m_model.rows[i];
+        evo_hui_provider_row_t& o = p.rows[i];
+        o.title = row.title.c_str();
+        o.subtitle = row.subtitle.c_str();
+        o.initial = row.initial.c_str();
+        o.art_key = row.art.c_str();
+        if (!row.art.empty()) o.art = r->MemoryTexturePixels(row.art, &o.art_w, &o.art_h);
+        o.is_folder = row.is_folder;
+        o.played = row.played;
+        o.progress = row.progress;
+        o.is_live = row.is_live;
+        o.now = row.now.c_str();
+        o.next = row.next.c_str();
+    }
+    p.focus = FocusedRowIndex();
+    p.has_selected = m_model.has_selected;
+    p.selected_is_folder = m_model.selected_is_folder;
+    p.selected_played = m_model.selected_played;
+    p.selected_progress = m_model.selected_progress;
+    p.selected_title = m_model.selected_title.c_str();
+    p.selected_subtitle = m_model.selected_subtitle.c_str();
+    p.selected_initial = m_model.selected_initial.c_str();
+    p.selected_overview = m_model.selected_overview.c_str();
+    p.selected_resume = m_model.selected_resume.c_str();
+    p.selected_art_key = m_model.selected_art.c_str();
+    if (!m_model.selected_art.empty())
+        p.selected_art = r->MemoryTexturePixels(m_model.selected_art, &p.selected_art_w, &p.selected_art_h);
+    p.selected_num = m_model.selected_num.c_str();
+    p.selected_tech = m_model.selected_tech.c_str();
+    p.selected_now = m_model.selected_now.c_str();
+    p.selected_next = m_model.selected_next.c_str();
+    p.epg_status = m_model.epg_status.c_str();
+    p.epg_setup = m_model.epg_setup;
+
+    /* The setup cards are plain focusable elements: read which has the cursor. */
+    p.setup_configured = m_model.setup_configured;
+    p.setup_account = m_model.setup_account.c_str();
+    p.setup_focus = -1;
+    if (m_context) {
+        if (Rml::Element* f = m_context->GetFocusElement()) {
+            const Rml::String id = f->GetId();
+            if (id == "tv-card-setup-url")          p.setup_focus = 0;
+            else if (id == "tv-card-setup-usb")     p.setup_focus = 1;
+            else if (id == "tv-card-setup-signout") p.setup_focus = 2;
+        }
+    }
+
+    p.panel_open = m_model.panel_open;
+    if (m_model.panel_open) {
+        p.panel_crumb = m_model.panel_crumb.c_str();
+        p.panel_eyebrow = m_model.panel_eyebrow.c_str();
+        p.panel_title = m_model.panel_title.c_str();
+        p.panel_sub = m_model.panel_sub.c_str();
+        p.panel_note_b = m_model.panel_note_b.c_str();
+        p.panel_note = m_model.panel_note.c_str();
+        p.panel_accept = m_model.panel_accept.c_str();
+        p.panel_back = m_model.panel_back.c_str();
+        p.panel_row_count = (int)std::min<size_t>(m_model.panel_rows.size(), EVO_HUI_PROVIDER_PANEL_ROWS);
+        for (int i = 0; i < p.panel_row_count; ++i) {
+            const EvoPanelRow& pr = m_model.panel_rows[i];
+            evo_hui_panel_row_t& o = p.panel_rows[i];
+            o.title = pr.title.c_str();
+            o.detail = pr.detail.c_str();
+            o.badge = pr.badge.c_str();
+            o.icon = pr.icon.c_str();
+            o.radio = pr.radio;
+            o.on = pr.on;
+            o.warn = pr.warn;
+            o.chevron = pr.chevron;
+            o.badge_live = pr.badge_live;
+            o.focused = pr.focused;
+        }
+    }
+
+    evo_hui_update_provider(&p);
+    if (!evo_hui_render_provider(width, height)) return false;
+    EvoRmlApp::Instance().NoteExternalDraw();
+    return true;
+}
+#else
+bool EvoRmlProviderHost::RenderKit(int, int) { return false; }
+#endif
 
 int EvoRmlProviderHost::TakeAction()
 {
@@ -1968,9 +2094,9 @@ void evo_rmlui_provider_tick(void)
     EvoRmlProviderHost::Instance().Tick();
 }
 
-void evo_rmlui_provider_render(uint32_t *framebuffer, int width, int height)
+int evo_rmlui_provider_render(uint32_t *framebuffer, int width, int height)
 {
-    EvoRmlProviderHost::Instance().Render(framebuffer, width, height);
+    return EvoRmlProviderHost::Instance().Render(framebuffer, width, height) ? 1 : 0;
 }
 
 int evo_rmlui_provider_needs_frame(void)

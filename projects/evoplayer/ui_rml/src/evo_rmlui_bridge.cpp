@@ -154,6 +154,9 @@ void evo_rmlui_render_image(uint32_t* framebuffer, int width, int height) {
 }
 
 void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
+#if defined(EVO_AGC_DEVICE)
+    if (p) evo_hui_update_surround(p);
+#endif
     if (!p) return;
     EvoSurroundState state;
     std::memcpy(&state.p, p, sizeof(state.p));
@@ -170,6 +173,12 @@ void evo_rmlui_update_surround(const evo_rmlui_surround_params_t* p) {
 }
 
 void evo_rmlui_render_surround(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_surround(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderSurround(framebuffer, width, height);
 }
 

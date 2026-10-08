@@ -202,7 +202,9 @@ public:
      * queue, and any catalog request that has completed. */
     void Tick();
 
-    void Render(uint32_t* framebuffer, int width, int height);
+    /* True when the kit drew the screen, rail included. */
+    bool Render(uint32_t* framebuffer, int width, int height);
+    bool RenderKit(int width, int height);
 
     /*
      * D-pad and buttons. Returns true when the host consumed the key, false
@@ -412,7 +414,8 @@ int  evo_rmlui_provider_open(const char *provider_id, int width, int height);
 void evo_rmlui_provider_close(void);
 int  evo_rmlui_provider_is_open(void);
 void evo_rmlui_provider_tick(void);
-void evo_rmlui_provider_render(uint32_t *framebuffer, int width, int height);
+/* 1 when the kit drew the screen and the rail with it (no nav overlay needed). */
+int evo_rmlui_provider_render(uint32_t *framebuffer, int width, int height);
 int  evo_rmlui_provider_needs_frame(void);
 void evo_rmlui_provider_clear_frame(void);
 

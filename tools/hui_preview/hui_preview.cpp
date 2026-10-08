@@ -21,6 +21,8 @@
 #include "settings_fixtures.inc"
 #include "misc_fixtures.inc"
 #include "evo_hui_extra.hpp"
+#include "evo_hui_surround.hpp"
+#include "evo_hui_provider.hpp"
 #include "extra_fixtures.inc"
 
 #include "core/save_file.hpp"
@@ -350,6 +352,9 @@ int main(int argc, char **argv)
     evo_rmlui_image_params_t imagep{};
     std::vector<uint32_t> image_px;
     evo_keyboard_params_t kbp{};
+    evo_rmlui_surround_params_t srp{};
+    evo_hui_provider_params_t prp{};
+    std::vector<uint32_t> provider_art;
     evo_rmlui_about_params_t aboutp{};
     evo_rmlui_changelog_params_t changelogp{};
 
@@ -494,6 +499,16 @@ int main(int argc, char **argv)
         {"dialog", 11, [&] { clear_focus(); fill_dialog_fixture(dialogp); }},
         {"reader", 13, [&] { clear_focus(); fill_reader_fixture(readerp); }},
         {"image", 14, [&] { clear_focus(); fill_image_fixture(imagep, image_px); }},
+        {"surround", 16, [&] { clear_focus(); fill_surround_fixture(srp, 0); }},
+        {"surround_orb", 16, [&] { clear_focus(); fill_surround_fixture(srp, 1); }},
+        {"surround_cal", 16, [&] { clear_focus(); fill_surround_fixture(srp, 2); }},
+        {"provider", 17, [&] { clear_focus(); fill_provider_fixture(prp, provider_art, 2); }},
+        {"livetv", 17, [&] { clear_focus(); fill_channels_fixture(prp, provider_art, 1, 0); }},
+        {"livetv_setup", 17, [&] { clear_focus(); fill_channels_fixture(prp, provider_art, 1, 1); }},
+        {"livetv_panel", 17, [&] { clear_focus(); fill_channels_fixture(prp, provider_art, 1, 2); }},
+        {"xtream", 17, [&] { clear_focus(); fill_channels_fixture(prp, provider_art, 2, 0); }},
+        {"xtream_setup", 17, [&] { clear_focus(); fill_channels_fixture(prp, provider_art, 2, 1); }},
+        {"provider_folder", 17, [&] { clear_focus(); fill_provider_fixture(prp, provider_art, 4); }},
         {"keyboard", 15, [&] { clear_focus(); fill_keyboard_fixture(kbp); }},
         {"toast", 12, [&] { clear_focus(); fill_toast_fixture(toastp); toastp.visible = 1; toastp.alpha = 255; toastp.slide = 0; }},
     };
@@ -518,6 +533,8 @@ int main(int argc, char **argv)
         evo::kit::ReaderScreen reader;
         evo::kit::ImageViewer image;
         evo::kit::KeyboardOverlay keyboard;
+        evo::kit::SurroundScreen surround;
+        evo::kit::ProviderGridScreen provider;
         f.setup();
         osd.set(op);
         osd.set_hud(hud);
@@ -543,6 +560,9 @@ int main(int argc, char **argv)
         image.enter();
         keyboard.set(kbp);
         keyboard.enter();
+        surround.set(srp);
+        provider.set(prp);
+        provider.enter();
         home.set(launch);
         lst.set(lp);
         brw.set(bp);
@@ -585,6 +605,10 @@ int main(int argc, char **argv)
                 image.update(kDt);
             else if (f.kind == 15)
                 keyboard.update(kDt);
+            else if (f.kind == 16)
+                surround.update(kDt);
+            else if (f.kind == 17)
+                provider.update(kDt);
             rail.update(kDt);
             textures.tick();
             time += kDt;
@@ -609,6 +633,10 @@ int main(int argc, char **argv)
             reader.draw(list, ctx);
         else if (f.kind == 14)
             image.draw(list, ctx);
+        else if (f.kind == 16)
+            surround.draw(list, ctx);
+        else if (f.kind == 17)
+            provider.draw(list, ctx);
         const bool over_video = (f.kind >= 4 && f.kind <= 6) || f.kind == 11 || f.kind == 12 || f.kind == 15;
         if (over_video)
         {
