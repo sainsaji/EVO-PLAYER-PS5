@@ -76,6 +76,10 @@ public:
     virtual void setMotionSmoothing(MotionSmoothing smoothing) = 0;
     virtual const char* getMotionSmoothingName(MotionSmoothing smoothing) const = 0;
 
+    virtual DeepBlacks getDeepBlacks() const = 0;
+    virtual void setDeepBlacks(DeepBlacks mode) = 0;
+    virtual const char* getDeepBlacksName(DeepBlacks mode) const = 0;
+
     virtual bool isDebugOverlayEnabled() const = 0;
     virtual void setDebugOverlayEnabled(bool enabled) = 0;
 

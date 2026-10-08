@@ -1767,7 +1767,9 @@ void evo_agc_runtime_frame_begin(void)
              * HDR scanout those bits would light one channel near full, so
              * HDR clears to black with opaque alpha. */
             evo_agc_runtime_stream_fill(backbuffer,
-                                        g_agc_dev.is_hdr ? 0xc0000000u : 0xff100d0du,
+                                        g_agc_dev.is_hdr ? 0xc0000000u
+                                        : g_agc_dev.is_player_mode ? 0xff000000u /* true-black letterbox */
+                                                                   : 0xff100d0du,
                                         scanout_tiled_bytes());
         }
     }
@@ -3763,6 +3765,33 @@ static void agc_upscale_note_gpu_time(uint64_t us)
                  k_up_mode_name[from], k_up_mode_name[to]);
 }
 
+/* #119 Deep Blacks. A plain store read by the next video draw - no reload, no
+ * extra pass: the three numbers ride in the VideoConstants slice the quad
+ * already allocates. {floor, knee, toe slope}; see DEEP_BLACK in
+ * tools/gen_video_pipes.py for the curve. */
+static int g_deep_black_mode = EVO_AGC_DEEP_BLACK_OFF;
+static const float k_deep_black[3][3] = {
+    { 0.000f, 0.000f, 0.00f },   /* off: knee 0 = shader bypass */
+    { 0.012f, 0.060f, 0.55f },   /* low */
+    { 0.025f, 0.120f, 0.30f },   /* high */
+};
+
+void evo_agc_deepblack_set_mode(int mode)
+{
+    if (mode < EVO_AGC_DEEP_BLACK_OFF || mode > EVO_AGC_DEEP_BLACK_HIGH)
+        mode = EVO_AGC_DEEP_BLACK_OFF;
+    g_deep_black_mode = mode;
+}
+
+const char *evo_agc_deepblack_badge(void)
+{
+    switch (g_deep_black_mode) {
+    case EVO_AGC_DEEP_BLACK_LOW:  return "DEEP BLACKS · LOW";
+    case EVO_AGC_DEEP_BLACK_HIGH: return "DEEP BLACKS · HIGH";
+    default:                      return "";
+    }
+}
+
 void evo_agc_upscale_set_mode(int mode)
 {
     if (mode < EVO_AGC_UPSCALE_OFF || mode > EVO_AGC_UPSCALE_AI)
@@ -4350,7 +4379,15 @@ int evo_agc_blit_yuv(const uint8_t *y,  int y_pitch,
     struct {
         float crop[2];
         float scale[2];
+        float black;    /* #119 Deep Blacks: floor, toe knee, toe slope */
+        float knee;
+        float slope;
+        float pad;
     } constants;
+    constants.black = k_deep_black[g_deep_black_mode][0];
+    constants.knee  = k_deep_black[g_deep_black_mode][1];
+    constants.slope = k_deep_black[g_deep_black_mode][2];
+    constants.pad   = 0.0f;
 
     float cx = (disp_w > 0 && disp_w <= coded_w) ? (float)disp_w / (float)coded_w : 1.0f;
     float cy = (disp_h > 0 && disp_h <= coded_h) ? (float)disp_h / (float)coded_h : 1.0f;

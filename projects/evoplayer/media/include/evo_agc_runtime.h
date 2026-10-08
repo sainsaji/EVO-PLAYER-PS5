@@ -335,6 +335,16 @@ enum {
     EVO_AGC_MOTION_SMOOTH_LOW = 1,
     EVO_AGC_MOTION_SMOOTH_HIGH = 2,
 };
+/* #119 Deep Blacks: pulls elevated shadows down to true black in the video
+ * fragment shader. Takes effect on the next drawn frame. */
+enum {
+    EVO_AGC_DEEP_BLACK_OFF = 0,
+    EVO_AGC_DEEP_BLACK_LOW = 1,
+    EVO_AGC_DEEP_BLACK_HIGH = 2,
+};
+void        evo_agc_deepblack_set_mode(int mode);
+const char *evo_agc_deepblack_badge(void);   /* "" when off - OSD badge text */
+
 void        evo_agc_motion_smoothing_set_mode(int mode);
 void        evo_agc_motion_smoothing_set_phase(float phase);
 void        evo_agc_motion_smoothing_set_source_fps(double fps);

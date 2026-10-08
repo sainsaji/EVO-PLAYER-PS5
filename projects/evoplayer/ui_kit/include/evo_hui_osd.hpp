@@ -40,7 +40,7 @@ class OsdScreen
 
     evo_playback_osd_params_t raw_{}; /* numbers only: its strings dangle */
     std::string title_, meta_;
-    std::string badges_[8]; /* res hdr codec fps audio decoder upscale smooth */
+    std::string badges_[9]; /* res hdr codec fps audio decoder upscale smooth deepblack */
     std::string audio_track_, sub_track_, music_codec_;
     std::vector<std::string> sub_lines_, sub2_lines_;
 

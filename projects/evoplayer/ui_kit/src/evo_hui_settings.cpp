@@ -141,8 +141,15 @@ void SettingsScreen::update(float dt)
         float want = scroll_.target;
         if (top - want < kRowsTop)
             want = top - kRowsTop;
-        if (top + h - want > kRowsBottom)
-            want = top + h - kRowsBottom;
+        /* An expanded value row lists its options right below it; bring the
+         * whole list into view, but never scroll the focused row itself out
+         * of the top of the card. */
+        float bottom = top + h;
+        for (size_t j = static_cast<size_t>(focus_idx) + 1;
+             j < rows_.size() && rows_[j].kind == EVO_RMLUI_ROW_OPTION; ++j)
+            bottom = row_top(static_cast<int>(j)) + 56.0f;
+        if (bottom - want > kRowsBottom)
+            want = std::min(bottom - kRowsBottom, top - kRowsTop);
         scroll_.target = std::max(0.0f, want);
         if (!row_cursor_snapped_)
             scroll_.snap(scroll_.target);

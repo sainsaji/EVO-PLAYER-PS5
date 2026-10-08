@@ -695,6 +695,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                 }
             }
         }
+        p.deepblack_badge = evo_agc_deepblack_badge();   /* #119 */
         p.position_sec = playback->getPositionSeconds();
         p.duration_sec = playback->getDurationSeconds();
         p.percentage = playback->getPercentage();

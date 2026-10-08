@@ -148,6 +148,7 @@ void OsdScreen::set(const evo_playback_osd_params_t &p)
     badges_[5] = str(p.decoder_badge);
     badges_[6] = str(p.upscale_badge);
     badges_[7] = str(p.smooth_badge);
+    badges_[8] = str(p.deepblack_badge);
     audio_track_ = str(p.audio_track);
     sub_track_ = str(p.sub_track);
     music_codec_ = str(p.music_codec);
@@ -236,12 +237,12 @@ void OsdScreen::draw_top(DrawList &list, const Context &ctx) const
     /* Badges, right-aligned on the title line, as many as clear the title. */
     const float limit = kMargin + std::min(1300.0f, fonts.display.measure(title_, 44)) + 48.0f;
     float x = 1920.0f - kMargin;
-    for (int i = 7; i >= 0; --i)
+    for (int i = 8; i >= 0; --i)
     {
         const std::string &b = badges_[i];
         if (b.empty())
             continue;
-        const bool accent = (i == 6 && raw_.upscale_active) || (i == 7 && raw_.smooth_active) || i == 1;
+        const bool accent = (i == 6 && raw_.upscale_active) || (i == 7 && raw_.smooth_active) || i == 8 || i == 1;
         const float w = fonts.semibold.measure(b, 16, 1.5f) + 24.0f;
         if (x - w < limit)
             break;

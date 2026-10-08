@@ -73,7 +73,9 @@
 #                                           1 Internal, 2 Favorites, 3 Recent
 #   image <path>                            open <path> in the image viewer
 #   text <path>                             open <path> in the text reader
-#   upcompare [--crop x,y,w,h]              #103: pause, capture the same frame
+#   dbcompare                               #119: pause, capture the same frame with
+#                                           Deep Blacks Off/Low/High -> output/dbcompare/
+#   upcompare [--crop x,y,w,h]            #103: pause, capture the same frame
 #                                           with the upscaler Off/Sharp/AI (no
 #                                           OSD) -> output/upcompare/
 #   status                                  print /mnt/usb0/evo_status once
@@ -413,6 +415,11 @@ upcompare)
     # #103: same paused frame with the upscaler Off / Sharp / AI, no OSD ->
     # output/upcompare/{off,sharp,ai}.bmp (+ compare.png where Pillow exists).
     PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}"     python3 "$(dirname "${BASH_SOURCE[0]}")/upcompare_run.py" "$@" || die "upcompare failed"
+    ;;
+dbcompare)
+    # #119: same paused frame with Deep Blacks Off / Low / High, no OSD ->
+    # output/dbcompare/{off,low,high}.bmp + compare.png / shadows.png + stats.
+    PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" python3 "$(dirname "${BASH_SOURCE[0]}")/dbcompare_run.py" "$@" || die "dbcompare failed"
     ;;
 sweep)
     # #8 — the codec sweep. Plays every clip in a directory for a fixed window,

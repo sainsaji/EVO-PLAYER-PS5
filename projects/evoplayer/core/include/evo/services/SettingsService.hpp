@@ -66,6 +66,10 @@ public:
     void setMotionSmoothing(MotionSmoothing smoothing) override { m_motionSmoothing = smoothing; }
     const char* getMotionSmoothingName(MotionSmoothing smoothing) const override;
 
+    DeepBlacks getDeepBlacks() const override { return m_deepBlacks; }
+    void setDeepBlacks(DeepBlacks mode) override { m_deepBlacks = mode; }
+    const char* getDeepBlacksName(DeepBlacks mode) const override;
+
     bool isDebugOverlayEnabled() const override { return m_debugOverlayEnabled; }
     void setDebugOverlayEnabled(bool enabled) override { m_debugOverlayEnabled = enabled; }
 
@@ -104,6 +108,7 @@ private:
     Upscaler m_upscaler = Upscaler::Off;
     AiNetwork m_aiNetwork = AiNetwork::Auto;
     MotionSmoothing m_motionSmoothing = MotionSmoothing::Off;
+    DeepBlacks m_deepBlacks = DeepBlacks::Off;
     RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
     HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
     AudioOutputChannels m_audioOutputChannels = AudioOutputChannels::Auto;

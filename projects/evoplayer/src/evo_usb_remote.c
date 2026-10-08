@@ -163,6 +163,10 @@ static void run_command(const char *line)
         evo_remote_upscale_compare();
         return;
     }
+    if (strcmp(buf, "dbcompare") == 0) {
+        evo_remote_deepblack_compare();
+        return;
+    }
     if (strcmp(buf, "stop") == 0) {
         evo_stop_media_playback();
         return;

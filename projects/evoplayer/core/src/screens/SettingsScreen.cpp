@@ -59,6 +59,7 @@ enum class SettingKey : int {
     DeveloperTools,
     ConsoleModel,
     QuitEvo,
+    DeepBlacks,
     /* EXPERIMENTAL */
     MotionSmoothing,
 };
@@ -87,7 +88,7 @@ struct SettingDef {
 const SettingKey kVideoKeys[] = {
     SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
     SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
-    SettingKey::HdrOutput,
+    SettingKey::HdrOutput, SettingKey::DeepBlacks,
 };
 const SettingKey kAudioKeys[] = {
     SettingKey::OutputChannels, SettingKey::SurroundTest, SettingKey::NavigationSounds,
@@ -207,6 +208,13 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                      "../icons/icon_sparkles.png", 3, static_cast<int>(settings->getUpscaler()));
         for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getUpscalerName(static_cast<Upscaler>(i));
+        break;
+
+    case SettingKey::DeepBlacks:
+        d = valueDef(key, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK",
+                     "../icons/icon_sparkles.png", 3, static_cast<int>(settings->getDeepBlacks()));
+        for (int i = 0; i < 3; ++i)
+            d.opt_label[i] = settings->getDeepBlacksName(static_cast<DeepBlacks>(i));
         break;
 
     case SettingKey::AiNetwork:
@@ -474,6 +482,7 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::VideoDecoder:   st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt)); break;
     case SettingKey::Upscaling:      st->setUpscaler(static_cast<Upscaler>(opt)); break;
     case SettingKey::AiNetwork:      st->setAiNetwork(static_cast<AiNetwork>(opt)); break;
+    case SettingKey::DeepBlacks:     st->setDeepBlacks(static_cast<DeepBlacks>(opt)); break;
     case SettingKey::MotionSmoothing: st->setMotionSmoothing(static_cast<MotionSmoothing>(opt)); break;
     case SettingKey::HdrOutput:      st->setHdrOutputMode(static_cast<HdrOutputMode>(opt)); break;
     case SettingKey::OutputChannels: st->setAudioOutputChannels(static_cast<AudioOutputChannels>(opt)); break;

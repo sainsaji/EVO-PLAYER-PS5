@@ -819,6 +819,7 @@ struct UpscaleCompare {
     int  step = 0;         /* index into kModes */
     int  frames = 0;       /* presents since this step's mode was set */
     bool wasPaused = false;
+    int  kind = 0;         /* 0 upscaler (#103), 1 Deep Blacks (#119) */
 };
 UpscaleCompare s_upcmp;
 struct UpcmpMode { int mode; int net; };
@@ -830,6 +831,9 @@ constexpr UpcmpMode kUpcmpModes[] = {
     { EVO_AGC_UPSCALE_AI,    EVO_AGC_UPNET_MAXIMUM },
 };
 constexpr const char* kUpcmpNames[] = { "off", "sharp", "ai", "ai_large", "ai_max" };
+/* #119 `dbcompare`: the same held frame with Deep Blacks Off / Low / High. */
+constexpr const char* kDbcmpNames[] = { "off", "low", "high" };
+inline int upcmpSteps() { return s_upcmp.kind ? 3 : static_cast<int>(sizeof kUpcmpModes / sizeof kUpcmpModes[0]); }
 /* The first step also waits out the pause settling; later ones only need both
  * scanout buffers redrawn in the new mode and flipped. */
 constexpr int kUpcmpSettleFirst = 30;
@@ -842,8 +846,17 @@ constexpr int kUpcmpSettle = 8;
 } // namespace evo
 
 extern "C" void evo_remote_upscale_compare(void) {
-    if (evo::s_upcmp.state == 0)
+    if (evo::s_upcmp.state == 0) {
+        evo::s_upcmp.kind = 0;
         evo::s_upcmp.state = -1;
+    }
+}
+
+extern "C" void evo_remote_deepblack_compare(void) {
+    if (evo::s_upcmp.state == 0) {
+        evo::s_upcmp.kind = 1;
+        evo::s_upcmp.state = -1;
+    }
 }
 
 extern "C" void evo_remote_soft_close(void) {
@@ -1625,25 +1638,30 @@ int Application::run() {
                     s_upcmp.wasPaused = is_paused;
                     if (!is_paused && m_playbackController)
                         m_playbackController->setPaused(true);
-                    evo_boot_log("upcompare: start pos=%.2f was_paused=%d",
-                           evo_player_position_s(), (int)s_upcmp.wasPaused);
+                    evo_boot_log("%s: start pos=%.2f was_paused=%d",
+                           s_upcmp.kind ? "dbcompare" : "upcompare", evo_player_position_s(), (int)s_upcmp.wasPaused);
                 } else if (s_upcmp.frames >= (s_upcmp.step == 0 ? kUpcmpSettleFirst
                                                                 : kUpcmpSettle)) {
                     char path[96];
-                    std::snprintf(path, sizeof path, "/mnt/usb0/evo_up_%s.bmp",
-                                  kUpcmpNames[s_upcmp.step]);
+                    const char* stepName = s_upcmp.kind ? kDbcmpNames[s_upcmp.step]
+                                                        : kUpcmpNames[s_upcmp.step];
+                    std::snprintf(path, sizeof path, "/mnt/usb0/evo_%s_%s.bmp",
+                                  s_upcmp.kind ? "db" : "up", stepName);
                     FILE* fp = std::fopen(path, "wb");
                     const bool ok = fp != nullptr && write_scanout_bmp(fp);
-                    evo_boot_log("upcompare: %s -> %s (active=\"%s\" pts=%lld)",
-                           kUpcmpNames[s_upcmp.step], ok ? path : "WRITE FAILED",
-                           evo_agc_upscale_label(), (long long)current_pts);
+                    evo_boot_log("%s: %s -> %s (active=\"%s\" pts=%lld)",
+                           s_upcmp.kind ? "dbcompare" : "upcompare",
+                           stepName, ok ? path : "WRITE FAILED",
+                           s_upcmp.kind ? kDbcmpNames[s_upcmp.step] : evo_agc_upscale_label(),
+                           (long long)current_pts);
                     evo_boot_log_flush();
                     s_upcmp.frames = 0;
-                    if (++s_upcmp.step >= static_cast<int>(sizeof kUpcmpModes / sizeof kUpcmpModes[0])) {
+                    if (++s_upcmp.step >= upcmpSteps()) {
                         s_upcmp.state = 0;
                         if (!s_upcmp.wasPaused && m_playbackController)
                             m_playbackController->setPaused(false);
-                        notifyOnScreen("EVO: upscaler comparison saved to USB");
+                        notifyOnScreen(s_upcmp.kind ? "EVO: deep blacks comparison saved to USB"
+                                                 : "EVO: upscaler comparison saved to USB");
                     }
                 }
                 if (s_upcmp.state != 0) {
@@ -1670,7 +1688,13 @@ int Application::run() {
                 }
                 /* #103: a plain store; the runtime decides per frame whether
                  * the source actually gets upscaled. */
-                if (upcmp_frame) {
+                /* #119: a plain store too, so the toggle works mid-playback. */
+                if (upcmp_frame && s_upcmp.kind) {
+                    evo_agc_deepblack_set_mode(s_upcmp.step);
+                } else if (m_settingsService) {
+                    evo_agc_deepblack_set_mode(static_cast<int>(m_settingsService->getDeepBlacks()));
+                }
+                if (upcmp_frame && !s_upcmp.kind) {
                     evo_agc_upscale_set_mode(kUpcmpModes[s_upcmp.step].mode);
                     evo_agc_upscale_set_network(kUpcmpModes[s_upcmp.step].net);
                 } else if (m_settingsService) {

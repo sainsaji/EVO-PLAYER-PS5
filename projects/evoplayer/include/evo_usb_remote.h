@@ -18,6 +18,8 @@
  *                      frame loop (Application::requestSoftClose). The process
  *                      stays resident - tools/evo-remote.sh then sends the
  *                      title-aware close controller to free the slot
+ *   dbcompare          #119: pause, capture the SAME frame with Deep Blacks
+ *                      Off / Low / High (no OSD) to /mnt/usb0/evo_db_*.bmp
  *   upcompare          #103: pause, then capture the SAME frame with the
  *                      upscaler Off / Sharp / AI Standard / Large / Maximum
  *                      and no OSD, to
@@ -108,6 +110,10 @@ void evo_open_media_path(const char *path);
 /* Provided by the host (Application.cpp): start the #103 upscaler A/B/C
  * capture described above. No-op unless a video is playing. */
 void evo_remote_upscale_compare(void);
+
+/* Provided by the host (Application.cpp): `dbcompare` (#119) - the same held
+ * frame with Deep Blacks Off / Low / High, to /mnt/usb0/evo_db_{off,low,high}.bmp. */
+void evo_remote_deepblack_compare(void);
 
 /* Provided by the host (Application.cpp): the `quit` command - the same soft
  * close as Settings -> QUIT EVO. */

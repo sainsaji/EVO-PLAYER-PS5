@@ -108,6 +108,14 @@ enum class MotionSmoothing : int {
     High = 2    // quarter-pel search, full-strength warp
 };
 
+// Deep Blacks (#119): pulls elevated shadows down to true OLED black in the
+// video shader. Values match EVO_AGC_DEEP_BLACK_*.
+enum class DeepBlacks : int {
+    Off = 0,
+    Low = 1,    // subtle toe, ~1-2 % near-black pull-down
+    High = 2    // stronger, for washed-out masters
+};
+
 // Refresh rate output mode (60 Hz vs 120 Hz)
 enum class RefreshRateMode : int {
     Off = 0,

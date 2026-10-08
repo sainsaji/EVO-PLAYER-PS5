@@ -14,13 +14,18 @@ version = 65
 layout(set = 0, binding = 0, std140) uniform VideoConstants {
     vec2 uCrop;
     vec2 uScale;
+    float uBlack;   /* Deep Blacks (#119): floor, toe knee, toe slope. All 0 = off. */
+    float uKnee;
+    float uSlope;
 } video;
 
 layout(location = 0) out vec2 vUV;
+layout(location = 1) flat out vec3 vDeep;
 
 void main() {
     vec2 p = vec2(float(gl_VertexIndex & 1), float((gl_VertexIndex >> 1) & 1));
     vUV = vec2(p.x, 1.0 - p.y) * video.uCrop;
+    vDeep = vec3(video.uBlack, video.uKnee, video.uSlope);
     gl_Position = vec4((p * 2.0 - 1.0) * video.uScale, 0.0, 1.0);
 }
 

@@ -25,6 +25,8 @@ typedef struct {
     /* #105: motion smoothing badge */
     const char* smooth_badge;
     int smooth_active;
+    /* #119: Deep Blacks badge; NULL/"" hides it (setting Off). */
+    const char* deepblack_badge;
     double position_sec;
     double duration_sec;
     double percentage;
