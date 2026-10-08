@@ -1359,6 +1359,22 @@ int evo_agc_runtime_init(int width, int height, int hdr)
                          "backdrop-filter is off", brc);
     }
 
+    /* The ps5-homebrew-ui draw-list pipe. Optional too: without it the kit
+     * screens report themselves unavailable and the RmlUi screens stay. */
+    {
+        int src = compile_agc_pipeline(&g_agc_dev.pipelines[EVO_AGC_PIPE_UI_SDF],
+                                       shader_storage, &shader_storage_used,
+                                       &ui_sdf_metadata, "ui_sdf");
+        if (src != 0)
+            evo_boot_log("agc pipe ui_sdf unavailable (rc=%d); kit UI is off", src);
+        int prc = compile_agc_pipeline(&g_agc_dev.pipelines[EVO_AGC_PIPE_UI_SDF_PQ],
+                                       shader_storage, &shader_storage_used,
+                                       &ui_sdf_pq_out_metadata, "ui_sdf_pq_out");
+        if (prc != 0)
+            evo_boot_log("agc pipe ui_sdf_pq_out unavailable (rc=%d); kit UI over HDR10 "
+                         "keeps SDR colours", prc);
+    }
+
     /* Quad index buffer for fullscreen video drawing */
     size_t qat = (shader_storage_used + 255u) & ~255u;
     g_agc_dev.quad_indices = (uint16_t *)(shader_storage + qat);
@@ -1847,6 +1863,7 @@ static int agc_hdr_remap(int pipeline_id)
     int to = pipeline_id;
     switch (pipeline_id) {
     case EVO_AGC_PIPE_UI:         to = EVO_AGC_PIPE_UI_PQ; break;
+    case EVO_AGC_PIPE_UI_SDF:     to = EVO_AGC_PIPE_UI_SDF_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HDR:  to = EVO_AGC_PIPE_VIDEO_HDR_PQ; break;
     case EVO_AGC_PIPE_VIDEO_HLG:  to = EVO_AGC_PIPE_VIDEO_HLG_PQ; break;
     case EVO_AGC_PIPE_NV12_HDR:   to = EVO_AGC_PIPE_NV12_HDR_PQ; break;

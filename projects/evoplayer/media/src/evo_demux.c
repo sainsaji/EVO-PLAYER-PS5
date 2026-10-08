@@ -28,6 +28,8 @@
 #include "evo_vdec.h"
 #include "evo_adec.h"
 #include "pp_stage_breadcrumb.h"
+#include "evo_boot_log.h"
+#include "evo_parallel_io.h"
 
 /* ---------------------------------------------------------------------------
  * TRANSITIONAL: playback-core decode context + flags + the app playback
@@ -710,8 +712,129 @@ static void rebuffer_check(long long *deadline_ms)
     }
 }
 
+/* ---------------------------------------------------------------------------
+ * Network read recovery.
+ *
+ * A failed read used to be the end of the file: the AVIOContext latches its
+ * error, every later av_read_frame() fails, and video stops while the audio
+ * read-ahead plays on for another thirty seconds. On hardware 2026-10-07 a
+ * Jellyfin stream lost one chunk to an allocation failure and never showed
+ * another frame, although the network and the memory were both back seconds
+ * later. So on a network source, a read error short of the real end clears
+ * the latch, seeks back to the last packet demuxed and drops what it has
+ * already queued until it is past that point again.
+ * ------------------------------------------------------------------------ */
+#define DEMUX_RECOVER_TRIES 10
+
+static int64_t demux_last_vdts = AV_NOPTS_VALUE;
+static int64_t demux_last_adts = AV_NOPTS_VALUE;
+static int     demux_catching_up;
+static int     demux_recover_tries;
+static int     demux_gave_up_told;
+
+/* For the /stats dashboard. */
+volatile int demux_recoveries_total;
+volatile int demux_recovering;
+
+static void demux_recover_reset(void)
+{
+    demux_last_vdts = AV_NOPTS_VALUE;
+    demux_last_adts = AV_NOPTS_VALUE;
+    demux_catching_up = 0;
+    demux_recover_tries = 0;
+    demux_gave_up_told = 0;
+    demux_recovering = 0;
+}
+
+static int pio_open(void)
+{
+    evo_pio_stats_t st;
+    evo_pio_get_stats(&st);
+    return st.active;
+}
+
+static int64_t pkt_ts(const AVPacket *pkt)
+{
+    return pkt->dts != AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
+}
+
+/* 1 when the stream really ended (or recovery is not ours to try). */
+static int demux_read_is_final(int read_result)
+{
+    if (!pb_rebuffer_enabled || !play_fmt || !play_fmt->pb ||
+        video_stream_index < 0 || demux_last_vdts == AV_NOPTS_VALUE)
+        return 1;
+    if (read_result == AVERROR_EOF && media_duration_sec > 0.0) {
+        const AVStream *st = play_fmt->streams[video_stream_index];
+        const double at = demux_last_vdts * av_q2d(st->time_base) -
+                          (st->start_time != AV_NOPTS_VALUE ? st->start_time * av_q2d(st->time_base) : 0.0);
+        if (at >= media_duration_sec - 3.0)
+            return 1;
+    }
+    return demux_recover_tries >= DEMUX_RECOVER_TRIES;
+}
+
+static void demux_recover(int read_result)
+{
+    demux_recover_tries++;
+    demux_recoveries_total++;
+    demux_recovering = 1;
+    /* Through the parallel reader the player has already said so
+     * (PlayerScreen watches the reader); one toast per outage, not two. */
+    if (demux_recover_tries == 1 && !pio_open())
+        toast("CONNECTION LOST", "The stream dropped - reconnecting...");
+    const AVStream *st = play_fmt->streams[video_stream_index];
+    char err[64];
+    av_strerror(read_result, err, sizeof err);
+    evo_boot_log("demux: read failed (%s) at %.2fs - recovering, try %d/%d", err,
+                 demux_last_vdts * av_q2d(st->time_base), demux_recover_tries,
+                 DEMUX_RECOVER_TRIES);
+    /* back off: give the network (and the heap) a moment */
+    usleep(demux_recover_tries == 1 ? 200000 : 1000000);
+    play_fmt->pb->error = 0;
+    play_fmt->pb->eof_reached = 0;
+    int rc = av_seek_frame(play_fmt, video_stream_index, demux_last_vdts, AVSEEK_FLAG_BACKWARD);
+    if (rc < 0) {
+        av_strerror(rc, err, sizeof err);
+        evo_boot_log("demux: recovery seek failed (%s)", err);
+        play_fmt->pb->error = 0;
+        play_fmt->pb->eof_reached = 0;
+    }
+    demux_catching_up = 1 | (demux_last_adts != AV_NOPTS_VALUE ? 2 : 0);
+}
+
+/* While catching up after a recovery seek: 1 = already queued, drop it. */
+static int demux_already_have(const AVPacket *pkt)
+{
+    if (!demux_catching_up)
+        return 0;
+    const int64_t ts = pkt_ts(pkt);
+    if (pkt->stream_index == video_stream_index && (demux_catching_up & 1)) {
+        if (ts == AV_NOPTS_VALUE || ts <= demux_last_vdts)
+            return 1;
+        evo_boot_log("demux: recovered - picking up after %.2fs",
+                     demux_last_vdts * av_q2d(play_fmt->streams[video_stream_index]->time_base));
+        demux_catching_up &= ~1;
+        demux_recovering = 0;
+        if (!pio_open())
+            toast("CONNECTION", "Reconnected - the stream is back");
+        return 0;
+    }
+    if (pkt->stream_index == audio_stream_index && (demux_catching_up & 2)) {
+        if (ts == AV_NOPTS_VALUE || ts <= demux_last_adts)
+            return 1;
+        demux_catching_up &= ~2;
+        return 0;
+    }
+    if (pkt->stream_index == video_stream_index || pkt->stream_index == audio_stream_index)
+        return 0;
+    return 1;    /* subtitles and the rest: already handed on */
+}
+
 void *demux_thread_func(void *arg) {
     (void)arg;
+
+    demux_recover_reset();
 
     /*
      * This thread is created fresh per file, and the hold PlaybackController
@@ -743,6 +866,7 @@ void *demux_thread_func(void *arg) {
          */
         if (prospero_process_seek_request()) {
             av_packet_unref(pkt);
+            demux_recover_reset();
             continue;
         }
 
@@ -758,6 +882,16 @@ void *demux_thread_func(void *arg) {
             );
 
         if (read_result < 0) {
+            if (!demux_read_is_final(read_result)) {
+                demux_recover(read_result);
+                continue;
+            }
+            if (demux_recover_tries >= DEMUX_RECOVER_TRIES && !demux_gave_up_told) {
+                demux_gave_up_told = 1;
+                demux_recovering = 0;
+                evo_boot_log("demux: gave up after %d tries - stream stopped", demux_recover_tries);
+                toast("PLAYBACK ERROR", "The connection did not come back - stream stopped");
+            }
             /*
              * Keep the demux thread alive so seeking backward from EOF
              * does not require reopening the file.
@@ -766,6 +900,18 @@ void *demux_thread_func(void *arg) {
             prebuffer_check(prebuffer_deadline_ms, 1);
             usleep(5000);
             continue;
+        }
+
+        if (demux_already_have(pkt)) {
+            av_packet_unref(pkt);
+            continue;
+        }
+        if (pkt->stream_index == video_stream_index) {
+            if (pkt_ts(pkt) != AV_NOPTS_VALUE)
+                demux_last_vdts = pkt_ts(pkt);
+            demux_recover_tries = 0;
+        } else if (pkt->stream_index == audio_stream_index && pkt_ts(pkt) != AV_NOPTS_VALUE) {
+            demux_last_adts = pkt_ts(pkt);
         }
 
         video_decode_done = 0;

@@ -982,6 +982,26 @@ public:
     void GlSetActive(bool a) { m_gl_active = a; }
     bool GlActive() const { return m_gl_active; }
     bool GlConsumeDrew() { bool d = m_drew; m_drew = false; return d; }
+    /* A ps5-homebrew-ui screen (ui_kit/) drew into this frame instead. */
+    void NoteExternalDraw() {
+        m_drew = true;
+        /* The kit screen replaces whatever RmlUi screen was up - including a
+         * dialog left visible by the screen we came from. A modal rendered
+         * after it this frame shows its own document again. */
+        ShowOnlyScreen(nullptr);
+        if (m_nav_doc) m_nav_doc->Hide();
+    }
+    /* A kit overlay drew over this frame's screen: only RmlUi's own copy of
+     * that overlay goes away; the screen under it is left as it is. */
+    void NoteExternalDialog() {
+        m_drew = true;
+        if (m_dialog_doc) m_dialog_doc->Hide();
+    }
+    void NoteExternalKeyboard() { m_drew = true; }
+    void NoteExternalToast() {
+        m_drew = true;
+        if (m_toast_doc) m_toast_doc->Hide();
+    }
     void GlEndFrame() { m_frame_dirty = false; }
     /* true  = CPU coverage rasteriser + one GL blit (default; ps5-opengl's fast
      *         path). false = RmlUi renders itself through RenderInterface_GL3

@@ -77,6 +77,7 @@ the reasoning survives, not to be acted on.
 | | |
 |---|---|
 | [provider-architecture.md](addons/provider-architecture.md) | **The provider seam (#90).** The `evo_provider_t` vtable, the runtime-fetched UI bundle format, the binding and RCSS rules a bundle must follow, and how a provider item reaches the player. Replaces the payload-era `addons-emby-nuvio.md` |
+| [ui/hui-kit.md](ui/hui-kit.md) | **EVO's UI on ps5-homebrew-ui.** How the kit's draw lists reach sceAgc (`ui_sdf.pipe`), which screens run on it, the RmlUi fallback, `tools/hui_preview.sh`, and how to add a screen |
 
 ## Top level
 

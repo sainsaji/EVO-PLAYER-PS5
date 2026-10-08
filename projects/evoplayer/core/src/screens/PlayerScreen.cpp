@@ -14,6 +14,7 @@
 #include "evo_agc_runtime.h"
 #include "evo_hw.h"
 #include "pp_playback.h"   /* g_pp_pb.seek_discarding - the LOADING badge */
+#include "evo_parallel_io.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -48,6 +49,18 @@ static uint64_t NowMs() {
     struct timeval tv;
     gettimeofday(&tv, nullptr);
     return static_cast<uint64_t>(tv.tv_sec) * 1000ULL + static_cast<uint64_t>(tv.tv_usec / 1000ULL);
+}
+
+/*
+ * The network reader is stuck waiting on the server and the video queue has
+ * run dry. The demuxer is blocked inside that read, so the rebuffer hold never
+ * arms and nothing else would say why the picture stopped: on hardware
+ * 2026-10-07 a server outage showed a frozen frame, silently, for a minute.
+ */
+static bool readerStalled() {
+    evo_pio_stats_t st;
+    evo_pio_get_stats(&st);
+    return st.active && st.stall_ms > 1500 && packet_queue_count(&video_packet_queue) < 3;
 }
 
 PlayerScreen::PlayerScreen()
@@ -292,9 +305,21 @@ void PlayerScreen::update(double deltaMs) {
     /* Hold the OSD active while video frames are still buffering into the
      * decoder - and while a seek is: on a network stream that is seconds of a
      * still picture that would otherwise read as frozen. */
+    /* Say so once when the server stops the picture, and once when it is back.
+     * Raised here rather than in the reader, which stalls long before anyone
+     * can see it: the read-ahead keeps playing for half a minute. */
+    const bool stalled = readerStalled();
+    if (stalled && !m_stallToastShown) {
+        m_stallToastShown = true;
+        toast("CONNECTION LOST", "Can't get data from the server - retrying...");
+    } else if (!stalled && m_stallToastShown && !pb_prebuffer_hold) {
+        m_stallToastShown = false;
+        toast("CONNECTION", "Reconnected - the stream is back");
+    }
+
     const bool isBuffering = !playback->isMusicMode() &&
                              (!video_frame_loaded || g_pp_pb.seek_discarding ||
-                              pb_prebuffer_hold);
+                              pb_prebuffer_hold || stalled);
     if (isBuffering) {
         m_controlsLastUsedMs = now;
     }
@@ -475,7 +500,9 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
          * This overrides whatever the branches above chose: while the hold is
          * up, nothing else about the stream is the useful thing to show.
          */
-        if (pb_prebuffer_hold)
+        if (readerStalled())
+            metaStr = "WAITING FOR THE SERVER...";
+        else if (pb_prebuffer_hold)
             metaStr = "BUFFERING...";
 
         evo_playback_osd_params_t p;

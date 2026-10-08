@@ -756,6 +756,24 @@ hardware screenshot had happened to capture.
 
 ---
 
+## `tools/evo-dash.py` — live health dashboard on the PC
+
+```bash
+python tools/evo-dash.py            # then open http://localhost:8790
+```
+
+Runs on the HOST (plain Python 3, no Docker). It polls EVO's `GET /stats`
+(port 9780, `src/evo_stats.c`) once a second and tails `/raw`, then shows in
+plain words whether playback is OK: memory (the 448 MB flexible pool, the one
+that runs out), seconds of video loaded ahead, download speed against what the
+video needs, and a "What happened" list (buffering, connection lost / back,
+out-of-memory). The raw log is behind a toggle. Every sample is also written to
+`output/dash/<date>.jsonl`. Console address: `--host`, else `PS5_HOST`.
+
+`curl http://<ps5>:9780/stats` gives the same snapshot as JSON.
+
+---
+
 ## `tools/provider-server.sh` — serving a provider UI bundle (#90)
 
 A provider brings its own UI: `.rml`/`.rcss`/fonts/images fetched over HTTP at

@@ -1605,80 +1605,6 @@ static int pkt_present(const evo_vdec_native *n, const AVPacket *pkt)
     return 1;
 }
 
-/* Set when the last open was declined for tiles (see hevc_extradata_tiles);
- * the player reads it to tell the viewer rather than play in slow motion. */
-int evo_vdec_tiled_declined = 0;
-
-/* tiles_enabled_flag of an HEVC PPS (payload = after the NAL header), with
- * the tile grid when set. */
-static int hevc_pps_tiles(const uint8_t *payload, int len, unsigned *cols, unsigned *rows)
-{
-    ps_bits b = { payload, len, 0, 0, 0 };
-    ps_ue(&b); ps_ue(&b);                 /* pps id, sps id */
-    ps_u(&b, 1); ps_u(&b, 1);             /* dependent slices, output flag */
-    ps_u(&b, 3);                          /* num_extra_slice_header_bits */
-    ps_u(&b, 1); ps_u(&b, 1);             /* sign data hiding, cabac init */
-    ps_ue(&b); ps_ue(&b);                 /* num_ref_idx l0/l1 default */
-    ps_ue(&b);                            /* init_qp_minus26 (se) */
-    ps_u(&b, 1); ps_u(&b, 1);             /* constrained intra, transform skip */
-    if (ps_u(&b, 1))                      /* cu_qp_delta_enabled */
-        ps_ue(&b);
-    ps_ue(&b); ps_ue(&b);                 /* cb / cr qp offset (se) */
-    ps_u(&b, 1); ps_u(&b, 1); ps_u(&b, 1); /* slice chroma qp, weighted pred / bipred */
-    ps_u(&b, 1);                          /* transquant bypass */
-    if (!ps_u(&b, 1))
-        return 0;
-    ps_u(&b, 1);                          /* entropy_coding_sync */
-    *cols = ps_ue(&b) + 1;
-    *rows = ps_ue(&b) + 1;
-    return 1;
-}
-
-/*
- * Whether an HEVC stream codes its pictures in tiles, from the PPS in its
- * extradata (hvcC, or Annex B).
- *
- * sceVideodec2 as configured here does not decode tiled pictures: a UHD
- * Blu-ray remux in 4x3 tiles (hardware 2026-10-01) came out as twelve boxes
- * of scrambled colour, or not at all - every AU refused with 0x811d0303 from
- * the first full-size picture on. Such a stream goes to the software decoder
- * from the start rather than failing part-way in.
- */
-static int hevc_extradata_tiles(const uint8_t *x, int n, unsigned *cols, unsigned *rows)
-{
-    if (!x || n < 4)
-        return 0;
-    if (x[0] == 0 && x[1] == 0 && (x[2] == 1 || (x[2] == 0 && x[3] == 1))) {
-        for (int i = 0; i + 4 < n; i++) {
-            if (x[i] || x[i + 1] || x[i + 2] != 1)
-                continue;
-            const int nal = i + 3;
-            if (((x[nal] >> 1) & 0x3f) == 34 && hevc_pps_tiles(x + nal + 2, n - nal - 2, cols, rows))
-                return 1;
-        }
-        return 0;
-    }
-    if (n < 23)
-        return 0;
-    int pos = 23;
-    const int arrays = x[22];
-    for (int a = 0; a < arrays && pos + 3 <= n; a++) {
-        const int type = x[pos] & 0x3f;
-        const int count = (x[pos + 1] << 8) | x[pos + 2];
-        pos += 3;
-        for (int k = 0; k < count && pos + 2 <= n; k++) {
-            const int len = (x[pos] << 8) | x[pos + 1];
-            pos += 2;
-            if (pos + len > n)
-                return 0;
-            if (type == 34 && len > 2 && hevc_pps_tiles(x + pos + 2, len - 2, cols, rows))
-                return 1;
-            pos += len;
-        }
-    }
-    return 0;
-}
-
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 {
     if (!evo_vdec_native_probe())
@@ -1687,15 +1613,6 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
         return NULL;
 
     const AVCodecParameters *par = (const AVCodecParameters *)p->avctx_params;
-    evo_vdec_tiled_declined = 0;
-    if (par->codec_id == AV_CODEC_ID_HEVC) {
-        unsigned cols = 0, rows = 0;
-        if (hevc_extradata_tiles(par->extradata, par->extradata_size, &cols, &rows)) {
-            note("EVO vdec native: HEVC in %ux%u tiles -> software decoder", cols, rows);
-            evo_vdec_tiled_declined = 1;
-            return NULL;
-        }
-    }
     int bit_depth = par->bits_per_raw_sample > 8 ? par->bits_per_raw_sample : 8;
     if (par->format == AV_PIX_FMT_YUV420P10LE || par->format == AV_PIX_FMT_YUV420P10BE ||
         par->profile == FF_PROFILE_HEVC_MAIN_10 || par->profile == FF_PROFILE_VP9_2)

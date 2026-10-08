@@ -44,7 +44,7 @@ import os
 import re
 import sys
 
-ASSET_SUBDIRS = ("rml", "fonts", "icons", "wallpaper")
+ASSET_SUBDIRS = ("rml", "fonts", "icons", "wallpaper", "hui")
 BYTES_PER_LINE = 20
 
 

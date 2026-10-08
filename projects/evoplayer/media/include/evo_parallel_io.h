@@ -21,6 +21,19 @@ void evo_pio_abort(evo_pio *p);
 /* After avformat_close_input(). */
 void evo_pio_close(evo_pio *p);
 
+/* For the /stats dashboard. Counters run for the life of the open reader. */
+typedef struct {
+    int       active;          /* a parallel reader is open */
+    int       connections;
+    int       ready_chunks;    /* fetched and waiting for the reader */
+    int       window_chunks;
+    int       chunk_mb;
+    long long bytes;           /* fetched since open */
+    long long chunk_failures;  /* a worker gave up on a chunk (it is retried) */
+    long long stall_ms;        /* how long the reader has been waiting now, 0 if not */
+} evo_pio_stats_t;
+void evo_pio_get_stats(evo_pio_stats_t *out);
+
 #ifdef __cplusplus
 }
 #endif

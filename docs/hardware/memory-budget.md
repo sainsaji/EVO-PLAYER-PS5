@@ -5,6 +5,15 @@
 kernel query, not from an inference. If you are about to say "EVO is
 memory-limited", say which pool, and check it against this page first.
 
+> **Update 2026-10-07: flexible memory is now 1 GiB.** `sce_sys/param.json`
+> carries `"kernel": {"flexibleMemorySize": 1073741824}`, the most the
+> console accepts (2 MiB to 1 GiB; idea from PS5_VulkanTemplate `04aa411`).
+> The extra 576 MiB comes out of direct memory. Measured on the Pro, FW 12.70:
+> `flex_total=1024MB flex_free=841MB direct_total=11712MB` at boot, and
+> `flex_avail` ~809 MB idle, against 268 MB before. Remove the key to go back
+> to 448 MB. `package-app.sh` rejects a value outside that range. The tables
+> below are the original 448 MB measurements.
+
 ---
 
 ## The numbers

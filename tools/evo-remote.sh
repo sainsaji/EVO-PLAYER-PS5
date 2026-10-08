@@ -59,6 +59,7 @@
 #                                           native PS5 IME is a system dialog
 #                                           and nothing EVO injects reaches it
 #   kbdone                                  press DONE on the virtual keyboard
+#   kbclose                                 cancel any open keyboard, the native IME too
 #   ui [--line]                             #115: the UI state as text - screen,
 #                                           focused element, its list, modal,
 #                                           toast, player OSD - from
@@ -407,6 +408,7 @@ type)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh type [--submit] <text>"
         (( _submit )) && { sleep 1; put_cmd "kbdone"; }
         true ;;
 kbdone) put_cmd "kbdone" ;;
+kbclose) put_cmd "kbclose" ;;
 upcompare)
     # #103: same paused frame with the upscaler Off / Sharp / AI, no OSD ->
     # output/upcompare/{off,sharp,ai}.bmp (+ compare.png where Pillow exists).

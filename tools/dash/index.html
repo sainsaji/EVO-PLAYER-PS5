@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVO Health</title>
+<style>
+:root{
+  --bg:#f5f6f8;--panel:#fff;--fg:#1b2130;--dim:#646d80;--line:#e2e5eb;--grid:#eef0f4;
+  --c1:#2f6fde;--c2:#e0820b;--c4:#14967f;
+  --ok:#1f9d55;--warn:#b97a00;--bad:#d1343f;
+  --okbg:#e8f6ee;--warnbg:#fdf3dd;--badbg:#fde8ea;--infobg:#eef1f6;
+  --band:rgba(209,52,63,.10);--band2:rgba(199,132,0,.13);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1218;--panel:#171b23;--fg:#e6e9f0;--dim:#8f98aa;--line:#272d39;--grid:#1f2430;
+  --c1:#5b93f5;--c2:#f0a03c;--c4:#3cc2a6;
+  --ok:#43c27f;--warn:#e9ad35;--bad:#f2646e;
+  --okbg:#14271e;--warnbg:#2b2312;--badbg:#2e1719;--infobg:#1e2430;
+  --band:rgba(242,100,110,.14);--band2:rgba(233,173,53,.15);
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1218;--panel:#171b23;--fg:#e6e9f0;--dim:#8f98aa;--line:#272d39;--grid:#1f2430;
+  --c1:#5b93f5;--c2:#f0a03c;--c4:#3cc2a6;
+  --ok:#43c27f;--warn:#e9ad35;--bad:#f2646e;
+  --okbg:#14271e;--warnbg:#2b2312;--badbg:#2e1719;--infobg:#1e2430;
+  --band:rgba(242,100,110,.14);--band2:rgba(233,173,53,.15);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:18px 16px 40px;display:grid;gap:16px}
+.top{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:13px;color:var(--dim)}
+.top b{color:var(--fg);font-size:15px}
+.grow{flex:1}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:6px}
+.dot.on{background:var(--ok)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:transparent;color:var(--fg);padding:5px 11px;font:inherit;font-size:13px;cursor:pointer}
+.seg button.on{background:var(--infobg);font-weight:650}
+
+.hero{border-radius:14px;padding:20px 22px;background:var(--infobg);border:1px solid var(--line)}
+.hero.ok{background:var(--okbg)}.hero.warn{background:var(--warnbg)}.hero.bad{background:var(--badbg)}
+.hero .h{font-size:26px;font-weight:700;display:flex;align-items:center;gap:12px}
+.hero .h::before{content:"";width:14px;height:14px;border-radius:50%;background:var(--dim);flex:none}
+.hero.ok .h::before{background:var(--ok)}.hero.warn .h::before{background:var(--warn)}.hero.bad .h::before{background:var(--bad)}
+.hero .d{margin-top:4px;font-size:16px}
+.hero .p{margin-top:12px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.track{flex:1;height:6px;border-radius:3px;background:rgba(127,127,127,.2);overflow:hidden}
+.track>i{display:block;height:100%;background:var(--fg);opacity:.55}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+.card .k{font-size:13px;color:var(--dim)}
+.card .v{font-size:22px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.card .w{font-size:13px;font-weight:650;margin-top:2px}
+.card .s{font-size:13px;color:var(--dim);margin-top:2px}
+.card.ok .w{color:var(--ok)}.card.warn .w{color:var(--warn)}.card.bad .w{color:var(--bad)}
+.meter{height:8px;border-radius:4px;background:var(--grid);margin-top:10px;overflow:hidden}
+.meter>i{display:block;height:100%;border-radius:4px;background:var(--ok)}
+.card.warn .meter>i{background:var(--warn)}.card.bad .meter>i{background:var(--bad)}
+
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px}
+.chart h2{font-size:15px;margin:0}
+.chart .sub{font-size:13px;color:var(--dim);margin:2px 0 8px}
+.key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--dim);margin-bottom:4px}
+.key i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:3px}
+canvas{display:block;width:100%;height:170px}
+
+.events h2,.raw summary{font-size:15px;font-weight:650;margin:0}
+.ev{display:grid;grid-template-columns:62px 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--grid);align-items:baseline}
+.ev:first-of-type{border-top:0}
+.ev .t{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
+.ev .m{display:flex;gap:8px;align-items:baseline}
+.ev .m::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none;transform:translateY(-1px)}
+.ev.good .m::before{background:var(--ok)}.ev.warn .m::before{background:var(--warn)}.ev.bad .m::before{background:var(--bad)}
+.ev.bad .m{color:var(--bad)}
+.ev .n{font-size:12px;color:var(--dim)}
+.evlist{max-height:380px;overflow:auto;margin-top:6px}
+.empty{color:var(--dim);font-size:14px;padding:8px 0}
+.raw summary{cursor:pointer;color:var(--dim)}
+.raw .bar{display:flex;gap:8px;margin:10px 0 6px}
+.raw input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:5px 9px;font:inherit;font-size:13px}
+.log{max-height:360px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.log .WARN{color:var(--warn)}.log .ERROR{color:var(--bad)}
+#tip{position:fixed;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:6px 10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.18);display:none;z-index:5;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <b>EVO health</b>
+    <span><span class="dot" id="dot"></span><span id="conn">connecting...</span></span>
+    <span class="grow"></span>
+    <span>Show the last</span>
+    <span class="seg" id="win"><button data-s="120">2 min</button><button data-s="600" class="on">10 min</button><button data-s="1800">30 min</button><button data-s="0">all</button></span>
+  </div>
+
+  <section class="hero" id="hero">
+    <div class="h" id="headline">Connecting to the console...</div>
+    <div class="d" id="detail">This page reads EVO's status once a second.</div>
+    <div class="p" id="progress" hidden><span id="pos"></span><span class="track"><i id="posbar"></i></span><span id="dur"></span></div>
+  </section>
+
+  <section class="cards">
+    <div class="card" id="c-mem"><div class="k">Memory</div><div class="w">-</div><div class="s">-</div><div class="meter"><i></i></div></div>
+    <div class="card" id="c-buf"><div class="k">Video loaded ahead</div><div class="w">-</div><div class="s">-</div><div class="meter"><i></i></div></div>
+    <div class="card" id="c-net"><div class="k">Internet speed</div><div class="w">-</div><div class="s">-</div><div class="meter"><i></i></div></div>
+    <div class="card" id="c-err"><div class="k">Problems so far</div><div class="w">-</div><div class="s">-</div></div>
+  </section>
+
+  <section class="charts">
+    <div class="card chart"><h2>Memory used</h2><div class="sub">Video stops if this reaches the red line.</div>
+      <div class="key" id="k-mem"></div><canvas id="g-mem"></canvas></div>
+    <div class="card chart"><h2>Video loaded ahead</h2><div class="sub">Seconds ready to play. At zero the picture stops.</div>
+      <div class="key" id="k-buf"></div><canvas id="g-buf"></canvas></div>
+    <div class="card chart"><h2>Internet speed</h2><div class="sub">Should stay above the dashed line (what the video needs).</div>
+      <div class="key" id="k-net"></div><canvas id="g-net"></canvas></div>
+  </section>
+
+  <section class="card events">
+    <h2>What happened</h2>
+    <div class="evlist" id="events"><div class="empty">Nothing yet. Events appear here as they happen.</div></div>
+  </section>
+
+  <details class="card raw" id="raw">
+    <summary>Technical log (for debugging)</summary>
+    <div class="bar"><input id="filter" placeholder="Filter"></div>
+    <div class="log" id="log"></div>
+  </details>
+</main>
+<div id="tip"></div>
+<script>
+"use strict";
+const S = [], EV = new Map();
+let seq = 0, winSec = 600, lines = [], online = false;
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const clock = w => new Date(w * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+function hms(s) { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
+const r0 = v => Math.round(v);
+
+// ---- derived values -------------------------------------------------------
+function derive(s) {
+  const p = S[S.length - 1];
+  s.mbps = null; s.memFail = 0;
+  if (p && s.net.pio && p.net.pio) {
+    const dt = s.wall - p.wall, db = s.net.bytes - p.net.bytes;
+    s.rate = dt > 0 && db >= 0 ? db * 8 / 1e6 / dt : 0;
+  } else s.rate = s.net.pio ? 0 : null;
+  if (p && s.mem.map_fail > p.mem.map_fail) s.memFail = s.mem.map_fail - p.mem.map_fail;
+  // speed: 5 s average, so the chart reads as a level, not a comb
+  const w = [s];
+  for (let i = S.length - 1; i >= 0 && w.length < 5 && s.wall - S[i].wall < 6; i--) w.push(S[i]);
+  const rs = w.map(x => x.rate).filter(x => x != null);
+  s.mbps = rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null;
+  // what the video needs: its bitrate, from the read-ahead queue
+  s.need = s.queue.video_s > 1 ? s.queue.video_mb * 8 * 1.048576 / s.queue.video_s : (p ? p.need : null);
+  s.used = s.mem.flex_total_mb - s.mem.flex_free_mb;
+  return s;
+}
+
+// ---- headline: one sentence for "is it OK?" -------------------------------
+function verdict(s) {
+  if (!online) return ["bad", "Can't reach EVO", "Is EVO open on the console? This page keeps trying."];
+  const recentMemFail = S.slice(-10).some(x => x.memFail);
+  const p = s.play, n = s.net;
+  if (!p.active) {
+    if (recentMemFail) return ["bad", "EVO ran out of memory", "Something failed to load just now."];
+    return ["", "Nothing playing", "EVO is open. Start a video and its health shows here."];
+  }
+  if (p.fatal) return ["bad", "The video decoder failed", "This file can't be decoded. Try another version of it."];
+  if (recentMemFail || s.mem.flex_free_mb < 16) return ["bad", "Out of memory", "EVO has run out of memory. The picture may freeze while sound carries on."];
+  if (n.recovering) return ["bad", "Connection lost, reconnecting", "The stream dropped. EVO is reconnecting and will carry on from the same spot."];
+  if (n.stall_ms > 2000) return ["bad", "Waiting for the server", `No data for ${r0(n.stall_ms / 1000)} seconds. EVO keeps retrying.`];
+  if (p.eof) return ["", "Finished", "The video reached its end."];
+  if (p.buffering) return ["warn", "Buffering", s.mbps != null && s.need && s.mbps < s.need
+      ? `Loading more video. Your connection (${r0(s.mbps)} Mbit/s) is slower than this video needs (${r0(s.need)} Mbit/s).`
+      : "Loading more video before carrying on."];
+  if (p.paused) return ["", "Paused", `${r0(s.queue.video_s)} seconds of video are loaded and ready.`];
+  if (s.queue.video_s < 5) return ["warn", "Playing, but running low", s.need && s.mbps != null && s.mbps < s.need
+      ? `Only ${s.queue.video_s.toFixed(1)} s loaded ahead. The connection is slower than the video needs.`
+      : `Only ${s.queue.video_s.toFixed(1)} s loaded ahead. It may pause to buffer.`];
+  if (s.mem.flex_free_mb < 64) return ["warn", "Playing, memory is getting full", `${r0(s.mem.flex_free_mb)} MB left. If it runs out, the picture can freeze.`];
+  return ["ok", "Playing smoothly", `${r0(s.queue.video_s)} seconds of video loaded ahead, memory is fine.`];
+}
+
+function card(id, cls, word, sub, pct) {
+  const c = $(id);
+  c.className = "card" + (cls ? " " + cls : "");
+  c.querySelector(".w").textContent = word;
+  c.querySelector(".s").textContent = sub;
+  const m = c.querySelector(".meter>i");
+  if (m) m.style.width = (pct == null ? 0 : Math.max(2, Math.min(100, pct))) + "%";
+}
+
+function render() {
+  const s = S[S.length - 1];
+  $("dot").className = "dot" + (online ? " on" : "");
+  if (!s) return;
+  const [cls, head, det] = verdict(s);
+  $("hero").className = "hero " + cls;
+  $("headline").textContent = head;
+  $("detail").textContent = det;
+  const p = s.play;
+  $("progress").hidden = !(online && p.active && p.dur > 0);
+  if (p.active && p.dur > 0) {
+    $("pos").textContent = hms(p.pos); $("dur").textContent = hms(p.dur);
+    $("posbar").style.width = Math.min(100, p.pos / p.dur * 100) + "%";
+  }
+  // memory
+  const free = s.mem.flex_free_mb;
+  card("c-mem", free < 16 ? "bad" : free < 64 ? "warn" : "ok",
+       free < 16 ? "Full" : free < 64 ? "Getting full" : "Healthy",
+       `${r0(s.used)} of ${s.mem.flex_total_mb} MB used`, s.used / s.mem.flex_total_mb * 100);
+  // buffer
+  if (p.active) {
+    const v = s.queue.video_s;
+    card("c-buf", p.eof ? "" : v < 2 ? "bad" : v < 6 ? "warn" : "ok",
+         p.eof ? "End of video" : v.toFixed(v < 10 ? 1 : 0) + " seconds",
+         p.eof ? "nothing left to load" : v < 2 ? "about to stop" : v < 6 ? "low" : "plenty", v / 30 * 100);
+  } else card("c-buf", "", "-", "nothing playing", 0);
+  // network
+  if (p.active && s.net.pio && s.mbps != null) {
+    const enough = !s.need || s.mbps >= s.need * 1.1 || s.queue.video_s > 20;
+    card("c-net", s.net.stall_ms > 2000 ? "bad" : enough ? "ok" : "warn",
+         r0(s.mbps) + " Mbit/s",
+         s.need ? `video needs about ${r0(s.need)} Mbit/s` + (s.queue.video_s > 20 && s.mbps < s.need ? " (resting: buffer is full)" : "") : "",
+         s.need ? s.mbps / (s.need * 2) * 100 : 50);
+  } else card("c-net", "", p.active ? "Single connection" : "-", p.active ? "speed not measured for this source" : "nothing playing", 0);
+  // problems
+  const parts = [];
+  if (s.mem.map_fail) parts.push(`${s.mem.map_fail} out-of-memory errors`);
+  if (s.net.recoveries) parts.push(`${s.net.recoveries} reconnects`);
+  if (s.net.chunk_failures) parts.push(`${s.net.chunk_failures} download retries`);
+  card("c-err", s.mem.map_fail ? "bad" : parts.length ? "warn" : "ok", parts.length ? (s.mem.map_fail ? "Memory errors" : "Some") : "None",
+       parts.length ? parts.join(", ") : "no errors since EVO started");
+  for (const k of Object.keys(G)) draw(k);
+}
+
+// ---- charts ---------------------------------------------------------------
+const G = {
+  mem: { lines: [["Memory used (MB)", "--c1", s => s.used]], limit: s => s.mem.flex_total_mb, limitName: v => `Limit (${r0(v)} MB)`,
+         ticks: s => s.memFail, tickName: "Out-of-memory error" },
+  buf: { lines: [["Seconds loaded", "--c1", s => s.play.active ? s.queue.video_s : null]], min: 35 },
+  net: { lines: [["Download speed (Mbit/s)", "--c4", s => s.mbps],
+                 ["Video needs", "--c2", s => s.play.active ? s.need : null, true]],
+         band: s => s.net.stall_ms > 1500 || s.net.recovering, bandName: "Waiting for the server" },
+};
+function keys(k) {
+  const g = G[k], el = $("k-" + k);
+  if (el.dataset.done) return; el.dataset.done = 1;
+  const add = (col, name, style) => { const sp = document.createElement("span"); sp.innerHTML = `<i style="background:${col};${style || ""}"></i>`; sp.append(name); el.append(sp); };
+  for (const [n, c, , d] of g.lines) add(css(c), n, d ? "opacity:.7" : "");
+  if (g.limit) { add(css("--bad"), ""); g.limitEl = el.lastChild; }
+  if (g.band) add(css("--band"), g.bandName, "height:9px");
+  add(css("--band2"), "Buffering", "height:9px");
+}
+function visible() {
+  if (!S.length || !winSec) return S;
+  const t0 = S[S.length - 1].wall - winSec; let i = S.length - 1;
+  while (i > 0 && S[i - 1].wall >= t0) i--; return S.slice(i);
+}
+function nice(v) { const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; }
+function draw(k) {
+  const g = G[k], cv = $("g-" + k), dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, W, H); keys(k);
+  const d = visible(), L = 36, R = 6, T = 6, B = 18, pw = W - L - R, ph = H - T - B;
+  x.font = "11px system-ui,sans-serif"; x.fillStyle = css("--dim");
+  if (d.length < 2) { x.fillText("Waiting for data...", L, T + ph / 2); g.geo = null; return; }
+  const t0 = d[0].wall, span = Math.max(1, d[d.length - 1].wall - t0);
+  const lim = g.limit ? g.limit(d[d.length - 1]) : 0;
+  if (g.limitEl) g.limitEl.lastChild.textContent = g.limitName(lim);
+  let top = g.max || 0;
+  if (!g.max) { for (const s of d) for (const [, , f] of g.lines) top = Math.max(top, f(s) || 0); top = nice(Math.max(top * 1.1, lim * 1.07, g.min || 1)); }
+  const X = w => L + (w - t0) / span * pw, Y = v => T + ph - Math.min(1, Math.max(0, v / top)) * ph;
+  x.strokeStyle = css("--grid"); x.lineWidth = 1;
+  for (let i = 0; i <= 3; i++) { const v = top * i / 3, y = Math.round(Y(v)) + .5; x.beginPath(); x.moveTo(L, y); x.lineTo(W - R, y); x.stroke(); x.fillText(String(r0(v)), 2, y + 4); }
+  x.textAlign = "left"; x.fillText(clock(t0), L, H - 4); x.textAlign = "right"; x.fillText(clock(t0 + span), W - R, H - 4); x.textAlign = "left";
+  const band = (test, col) => { x.fillStyle = col; for (let i = 0; i < d.length; i++) { if (!test(d[i])) continue; let j = i; while (j + 1 < d.length && test(d[j + 1])) j++;
+      const a = X(d[i].wall) - 2, b = X(d[Math.min(j + 1, d.length - 1)].wall); x.fillRect(a, T, Math.max(4, b - a), ph); i = j; } };
+  band(s => s.play.active && s.play.buffering, css("--band2"));
+  if (g.band) band(g.band, css("--band"));
+  if (lim) { x.strokeStyle = css("--bad"); x.lineWidth = 1.5; x.setLineDash([6, 4]); const y = Math.round(Y(lim)) + .5; x.beginPath(); x.moveTo(L, y); x.lineTo(W - R, y); x.stroke(); x.setLineDash([]); }
+  for (const [, col, f, dash] of g.lines) {
+    x.strokeStyle = css(col); x.lineWidth = 2.2; x.globalAlpha = dash ? .8 : 1; if (dash) x.setLineDash([5, 4]);
+    x.beginPath(); let pen = false, prev = null;
+    for (const s of d) { if (prev && s.wall - prev.wall > 5) pen = false; const v = f(s); prev = s;
+      if (v == null || isNaN(v)) { pen = false; continue; } const px = X(s.wall), py = Y(v); pen ? x.lineTo(px, py) : x.moveTo(px, py); pen = true; }
+    x.stroke(); x.setLineDash([]); x.globalAlpha = 1;
+  }
+  if (g.ticks) { x.fillStyle = css("--bad"); for (const s of d) if (g.ticks(s)) { const px = X(s.wall); x.fillRect(px - 1, T, 2.5, ph); } }
+  g.geo = { d, L, pw, t0, span };
+}
+for (const k of Object.keys(G)) {
+  const cv = $("g-" + k), tip = $("tip");
+  cv.addEventListener("mousemove", e => {
+    const g = G[k], o = g.geo; if (!o) return;
+    const r = cv.getBoundingClientRect(), w = o.t0 + (e.clientX - r.left - o.L) / o.pw * o.span;
+    let b = o.d[0]; for (const s of o.d) if (Math.abs(s.wall - w) < Math.abs(b.wall - w)) b = s;
+    const rows = g.lines.map(([n, c, f]) => { const v = f(b); return `<div><span style="color:${css(c)}">&#9632;</span> ${n}: <b>${v == null ? "-" : v.toFixed(v < 10 ? 1 : 0)}</b></div>`; });
+    if (b.play.buffering) rows.push(`<div style="color:${css("--warn")}">Buffering</div>`);
+    if (b.net.stall_ms > 1500) rows.push(`<div style="color:${css("--bad")}">Waiting for the server (${r0(b.net.stall_ms / 1000)} s)</div>`);
+    if (b.memFail) rows.push(`<div style="color:${css("--bad")}">Out-of-memory error</div>`);
+    tip.innerHTML = `<div style="color:${css("--dim")}">${clock(b.wall)}</div>` + rows.join("");
+    tip.style.display = "block";
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY + 14) + "px";
+  });
+  cv.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+}
+
+// ---- events + raw log -----------------------------------------------------
+function renderEvents() {
+  const el = $("events"), list = [...EV.values()].sort((a, b) => b.wall_last - a.wall_last).slice(0, 200);
+  if (!list.length) return;
+  el.textContent = "";
+  for (const e of list) {
+    const d = document.createElement("div"); d.className = "ev " + e.kind; d.title = e.raw;
+    const t = document.createElement("span"); t.className = "t"; t.textContent = clock(e.wall);
+    const m = document.createElement("span"); m.className = "m"; m.textContent = e.msg;
+    if (e.count > 1) { const n = document.createElement("span"); n.className = "n"; n.textContent = `${e.count} times, until ${clock(e.wall_last)}`; m.append(n); }
+    d.append(t, m); el.append(d);
+  }
+}
+function renderLog() {
+  if (!$("raw").open) return;
+  const q = $("filter").value.toLowerCase(), el = $("log");
+  const show = (q ? lines.filter(l => l.text.toLowerCase().includes(q)) : lines).slice(-500);
+  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.textContent = "";
+  for (const l of show) { const d = document.createElement("div"); d.className = l.level; d.textContent = clock(l.wall) + "  " + l.text; el.append(d); }
+  if (atEnd) el.scrollTop = el.scrollHeight;
+}
+
+async function tick() {
+  try {
+    const j = await (await fetch("/api/state?since=" + seq, { cache: "no-store" })).json();
+    seq = j.seq; online = j.online;
+    $("conn").textContent = j.online ? `console ${j.host}` : `console ${j.host} not answering`;
+    for (const s of j.samples) S.push(derive(s));
+    if (S.length > 14400) S.splice(0, S.length - 14400);
+    for (const e of j.events) EV.set(e.id, e);
+    if (j.lines.length) { lines.push(...j.lines); lines = lines.slice(-3000); }
+    render();
+    if (j.events.length) renderEvents();
+    if (j.lines.length) renderLog();
+  } catch (_) {
+    online = false; $("conn").textContent = "the dashboard program (evo-dash.py) has stopped";
+    $("hero").className = "hero bad"; $("headline").textContent = "Dashboard stopped"; $("detail").textContent = "Run python tools/evo-dash.py again.";
+  }
+  setTimeout(tick, 1000);
+}
+$("win").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+  for (const x of $("win").children) x.classList.toggle("on", x === b); winSec = +b.dataset.s;
+  try { localStorage.setItem("evo-dash-win", winSec); } catch (_) {} render(); });
+try { const w = localStorage.getItem("evo-dash-win"); if (w != null) { winSec = +w; for (const x of $("win").children) x.classList.toggle("on", +x.dataset.s === winSec); } } catch (_) {}
+$("filter").oninput = renderLog; $("raw").addEventListener("toggle", renderLog);
+addEventListener("resize", render);
+tick();
+</script>
+</body>
+</html>

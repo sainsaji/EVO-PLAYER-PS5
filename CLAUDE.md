@@ -93,6 +93,9 @@ docker compose run --rm ps5-dev ./scripts/deploy-app.sh --ffpfsc   # sha256-veri
 ./tools/uiview.sh --all                 # every RmlUi screen -> output/uiview/rml_*.png
 EVO_UIVIEW_IPTV_SWEEP=<m3u> ...         # walk every IPTV group with the D-pad (see the .cpp)
 
+# live health dashboard (memory, buffer, network) - on the HOST -> http://localhost:8790
+python tools/evo-dash.py
+
 # serve provider bundles / a playlist TO the console - on the HOST, not the container
 ./tools/provider-server.sh
 
@@ -141,6 +144,8 @@ Layer boundaries: [architecture.md](docs/architecture/architecture.md).
   `evo.log` before blaming a codec.
 - [agc-bare-metal-ui.md](docs/evo-pro/agc-bare-metal-ui.md) +
   [shader-compilation.md](docs/hardware/shader-compilation.md): the sceAgc UI and the shader toolchain
+- [ui/hui-kit.md](docs/ui/hui-kit.md): EVO's own screens on ps5-homebrew-ui (draw lists → sceAgc),
+  the RmlUi fallback, and `tools/hui_preview.sh` (host render of every screen)
 - [provider-architecture.md](docs/addons/provider-architecture.md): the provider seam (#90)
 - [upscaler.md](docs/hardware/upscaler.md): FSR1 / Anime4K (#103)
 - [proprietary.md](docs/proprietary.md): licences, including the vendored GPL controllers

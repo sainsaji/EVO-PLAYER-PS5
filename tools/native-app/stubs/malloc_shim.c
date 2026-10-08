@@ -67,6 +67,7 @@ extern int sceKernelReleaseDirectMemory(long phys, size_t len);
 #define MAGIC_LARGE    UINT64_C(0x4F56454752414C45)   /* large block */
 #define MAGIC_SLAB     UINT64_C(0x4F56534C41425F5F)   /* slab block  */
 #define MAGIC_DIRECT   UINT64_C(0x4F56444952454354)   /* large block's pad[0]: backed by direct memory */
+#define MAGIC_ALIGNED  UINT64_C(0x4F56414C49474E44)   /* over-aligned slab block: info = the real block */
 
 typedef struct {
     uint64_t magic;
@@ -371,7 +372,10 @@ void free(void *p)
     if (!p)
         return;
     hdr_t *h = (hdr_t *)((uint8_t *)p - HDR);
-    if (h->magic == MAGIC_LARGE) {
+    if (h->magic == MAGIC_ALIGNED) {
+        h->magic = 0;
+        free((void *)(uintptr_t)h->info);
+    } else if (h->magic == MAGIC_LARGE) {
         atomic_fetch_sub_explicit(&g_mmap_live, (uint64_t)h->info,
                                   memory_order_relaxed);
         sh_unmap((uint8_t *)p - PAGE, (size_t)h->info, h->pad[0] == MAGIC_DIRECT);
@@ -389,6 +393,10 @@ void free(void *p)
 static size_t usable(void *p)
 {
     hdr_t *h = (hdr_t *)((uint8_t *)p - HDR);
+    if (h->magic == MAGIC_ALIGNED) {
+        uint8_t *real = (uint8_t *)(uintptr_t)h->info;
+        return usable(real) - (size_t)((uint8_t *)p - real);
+    }
     if (h->magic == MAGIC_LARGE)
         return (size_t)h->info - PAGE;
     if (h->magic == MAGIC_SLAB)
@@ -452,6 +460,28 @@ int posix_memalign(void **out, size_t align, size_t size)
     if (align > PAGE || (align & (align - 1))) {
         *out = 0;
         return 22;                     /* EINVAL */
+    }
+    /*
+     * Small and over-aligned: a slab block with room to slide up to the
+     * boundary. FFmpeg is built with AVX-512, so EVERY av_malloc asks for 64;
+     * on the large path below each one - an AVPacket, an AVBufferRef - took
+     * its own 32 KiB flexible mapping. A DTS:X stream's 30 s audio read-ahead
+     * (~3000 packets, three av_mallocs each) drained the whole 448 MB pool on
+     * hardware 2026-10-07. Slab pointers are 32-aligned, so the slide is a
+     * multiple of 32 and a redirect header fits in front of the result.
+     */
+    if (size + align - HDR <= SLAB_MAX) {
+        uint8_t *real = (uint8_t *)small_alloc(size + align - HDR);
+        if (!real)
+            return 12;
+        uint8_t *p = (uint8_t *)(((uintptr_t)real + align - 1) & ~(uintptr_t)(align - 1));
+        if (p != real) {
+            hdr_t *h = (hdr_t *)(p - HDR);
+            h->magic = MAGIC_ALIGNED;
+            h->info  = (uint64_t)(uintptr_t)real;
+        }
+        *out = p;
+        return 0;
     }
     /* Force the large path: its user pointer sits one PAGE-rounded header in,
      * i.e. PAGE-aligned, which covers every align in (HDR, PAGE]. */

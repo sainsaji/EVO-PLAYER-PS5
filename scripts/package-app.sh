@@ -164,6 +164,12 @@ if (v.get("applicationCategoryType"), v.get("contentBadgeType")) != (0, 1):
 intents = v.get("gameIntent", {}).get("permittedIntents", [])
 if not any(i.get("intentType") == "launchActivity" for i in intents):
     raise SystemExit("game param.json must permit the launchActivity intent")
+# Flexible pool: the kernel default is 448 MiB; the console accepts 2 MiB..1 GiB
+# here, and the extra comes out of direct memory (docs/hardware/memory-budget.md).
+fm = v.get("kernel", {}).get("flexibleMemorySize")
+if fm is not None and (isinstance(fm, bool) or not isinstance(fm, int)
+                       or not 2097152 <= fm <= 1073741824 or fm % 2097152):
+    raise SystemExit("kernel.flexibleMemorySize must be a 2 MiB multiple in 2097152..1073741824")
 lp = v.get("localizedParameters", {})
 if not lp.get(lp.get("defaultLanguage",""), {}).get("titleName","").strip():
     raise SystemExit("default-language titleName is empty")

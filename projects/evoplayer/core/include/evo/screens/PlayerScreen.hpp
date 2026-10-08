@@ -59,6 +59,7 @@ private:
     StateMachine<PlayerScreenState, PlayerScreenEvent> m_playerFsm;
     int m_osdVisibilityAlpha = 255;
     uint64_t m_controlsLastUsedMs = 0;
+    bool m_stallToastShown = false;   /* "connection lost" is up; say when it is back */
     uint64_t m_lastPlayPauseToggleMs = 0;
     bool m_showStatsForNerds = false;
 };

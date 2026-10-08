@@ -8,6 +8,9 @@
 
 #include <RmlUi/Core.h>
 #include <RmlUi/Core/ElementText.h>
+#if defined(EVO_AGC_DEVICE)
+#include "evo_hui.h"
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -357,13 +360,35 @@ extern "C" const char* evo_rmlui_dev_ui_json(int screen_id, int paused)
     std::snprintf(b, sizeof b, "{\"screen\":{\"id\":%d,\"name\":", screen_id);
     o += b;
     json_str(o, screen_name(screen_id));
+    /* A ps5-homebrew-ui screen (ui_kit/) drew last frame: it is the screen,
+     * and owns the cursor unless an RmlUi modal (keyboard, dialog) is up. */
+    const char* kit_doc = nullptr;
+    const char* kit_focus = nullptr;
+#if defined(EVO_AGC_DEVICE)
+    kit_focus = evo_hui_dev_focus_json(&kit_doc);
+#endif
+    bool rml_modal = false;
+    for (const VisDoc& v : docs)
+        if (v.ctx->GetName() == "keyboard_context" || v.name == "dialog") rml_modal = true;
+
     o += "},\"docs\":[";
+    bool first_doc = true;
+    if (kit_doc) { json_str(o, kit_doc); first_doc = false; }
     for (size_t i = 0; i < docs.size(); ++i) {
-        if (i) o += ',';
+        /* The RmlUi screen documents a kit screen replaced stay "visible"
+         * in RmlUi's eyes; only overlays are worth listing beside it. */
+        if (kit_doc && docs[i].ctx->GetName() == "main_context" && docs[i].name != "dialog") continue;
+        if (!first_doc) o += ',';
+        first_doc = false;
         json_str(o, docs[i].name);
     }
     o += "],\"focused\":";
-    if (best) element_json(o, *best);
+    if (kit_focus && !rml_modal) {
+        o += kit_focus;
+        hits.clear();   /* the RmlUi highlights belong to a hidden screen */
+        best = nullptr;
+    }
+    else if (best) element_json(o, *best);
     else      o += "null";
 
     /* Anything else that is highlighted - a remembered selection in a pane

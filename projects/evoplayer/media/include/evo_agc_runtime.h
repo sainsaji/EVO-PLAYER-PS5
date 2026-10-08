@@ -54,7 +54,11 @@ enum {
     EVO_AGC_PIPE_INTERP_MEDIAN = 75,
     EVO_AGC_PIPE_INTERP_WARP = 76,
     EVO_AGC_PIPE_INTERP_PYR = 77,     /* quarter-res prefiltered luma, both frames */
-    EVO_AGC_PIPE_COUNT = 78,
+    /* ps5-homebrew-ui draw lists: the kit's SDF shader (ui_sdf.pipe), drawn
+     * by ui_kit/src/hui_agc_batch.cpp. */
+    EVO_AGC_PIPE_UI_SDF = 78,
+    EVO_AGC_PIPE_UI_SDF_PQ = 79,      /* the same on a HDR10 scanout */
+    EVO_AGC_PIPE_COUNT = 80,
 
     EVO_AGC_UP_S_CONVS = 4,
     EVO_AGC_UP_M_CONVS = 7,

@@ -63,7 +63,13 @@ struct evo_pio {
     uint8_t *mem;                 /* the PIO_WINDOW chunks */
     int64_t  mem_off;
     int     logged;
+    int     logged_wait;          /* this outage is in evo.log; log its end too */
 };
+
+/* Dashboard counters (evo_pio_get_stats). Plain globals rather than a pointer
+ * into the reader, so a stats request can never touch a closed one. */
+static volatile int       g_st_active, g_st_conns, g_st_ready;
+static volatile long long g_st_bytes, g_st_fail, g_st_stall_start_us;
 
 static uint64_t now_us(void)
 {
@@ -72,8 +78,18 @@ static uint64_t now_us(void)
     return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
 }
 
+/* FFmpeg's network calls poll this every ~100 ms. Without it a worker stuck
+ * connecting to an unreachable server held evo_pio_close() - and so the stop,
+ * and the whole UI - for 24 s on hardware 2026-10-07. */
+static int pio_interrupted(void *opaque)
+{
+    const evo_pio *p = opaque;
+    return p->stop || p->aborted;
+}
+
 static int open_http(evo_pio *p, AVIOContext **pb, int64_t offset)
 {
+    const AVIOInterruptCB cb = { pio_interrupted, p };
     AVDictionary *o = NULL;
     if (p->headers[0])
         av_dict_set(&o, "headers", p->headers, 0);
@@ -88,7 +104,7 @@ static int open_http(evo_pio *p, AVIOContext **pb, int64_t offset)
         snprintf(off, sizeof off, "%lld", (long long)offset);
         av_dict_set(&o, "offset", off, 0);
     }
-    int r = avio_open2(pb, p->url, AVIO_FLAG_READ, NULL, &o);
+    int r = avio_open2(pb, p->url, AVIO_FLAG_READ, &cb, &o);
     av_dict_free(&o);
     return r;
 }
@@ -151,6 +167,8 @@ static void *worker(void *arg)
             if (got < want) {
                 avio_closep(&pb);
                 at = -1;
+                if (!p->stop)
+                    usleep(200000);           /* don't hammer a host that just dropped us */
             }
         }
         pthread_mutex_lock(&p->mu);
@@ -159,8 +177,10 @@ static void *worker(void *arg)
                 s->len = got;
                 s->state = 2;
                 p->bytes += (uint64_t)got;
+                g_st_bytes = (long long)p->bytes;
             } else {
                 s->state = 3;
+                g_st_fail++;
             }
         }
         pthread_cond_broadcast(&p->cv);
@@ -183,8 +203,27 @@ static int pio_read(void *opaque, uint8_t *dst, int len)
         pthread_cond_broadcast(&p->cv);
     }
     pio_slot *s = &p->slot[idx % PIO_WINDOW];
-    const uint64_t give_up = now_us() + 30000000u;   /* 30 s without the bytes: an error */
-    while (!p->stop && !p->aborted && !(s->index == idx && (s->state == 2 || s->state == 3))) {
+    const uint64_t t_wait = now_us();
+    const uint64_t give_up = t_wait + 30000000u;   /* 30 s without the bytes: an error */
+    int saw_fail = 0;
+    if (!(s->index == idx && s->state == 2) && !g_st_stall_start_us)
+        g_st_stall_start_us = (long long)t_wait;
+    while (!p->stop && !p->aborted && !(s->index == idx && s->state == 2)) {
+        /* A worker gave up on it: hand it back and keep waiting. One bad
+         * connection is not the end of the file; only the deadline is. */
+        if (s->index == idx && s->state == 3) {
+            s->state = 0;
+            saw_fail = 1;
+            pthread_cond_broadcast(&p->cv);
+        }
+        /* Logged once per outage. The player tells the viewer (PlayerScreen,
+         * from evo_pio_get_stats) once the read-ahead has actually run out. */
+        const uint64_t waited = now_us() - t_wait;
+        if (!p->logged_wait && ((saw_fail && waited > 2000000u) || waited > 8000000u)) {
+            p->logged_wait = 1;
+            evo_boot_log("pio: reader waiting %.1f s on chunk %lld (%s)", waited / 1e6,
+                         (long long)idx, saw_fail ? "connection failed" : "slow");
+        }
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_nsec += 100000000;
@@ -194,16 +233,20 @@ static int pio_read(void *opaque, uint8_t *dst, int len)
             break;
     }
     if (p->aborted || p->stop) {
+        g_st_stall_start_us = 0;
         pthread_mutex_unlock(&p->mu);
         return AVERROR_EXIT;
     }
     if (!(s->index == idx && s->state == 2)) {
-        if (s->index == idx && s->state == 3) {
-            s->state = 0;                     /* failed: a worker fetches it again */
-            pthread_cond_broadcast(&p->cv);
-        }
+        /* the stall clock keeps running: the outage is not over */
         pthread_mutex_unlock(&p->mu);
+        evo_boot_log("pio: chunk %lld not fetched in 30 s - read error", (long long)idx);
         return AVERROR(EIO);
+    }
+    g_st_stall_start_us = 0;
+    if (p->logged_wait) {
+        p->logged_wait = 0;
+        evo_boot_log("pio: reader has data again - outage over");
     }
     const int in = (int)(p->pos - idx * PIO_CHUNK);
     int n = s->len - in;
@@ -217,6 +260,10 @@ static int pio_read(void *opaque, uint8_t *dst, int len)
         s->index = -1;
         p->base = p->pos / PIO_CHUNK;
         pthread_cond_broadcast(&p->cv);
+        int ready = 0;
+        for (int i = 0; i < PIO_WINDOW; i++)
+            ready += p->slot[i].state == 2;
+        g_st_ready = ready;
     }
     pthread_mutex_unlock(&p->mu);
     if (!p->logged && p->bytes > 128u * 1024 * 1024) {
@@ -299,6 +346,12 @@ evo_pio *evo_pio_open(const char *url, const char *headers, const char *user_age
         return NULL;
     }
     p->avio->seekable = AVIO_SEEKABLE_NORMAL;
+    g_st_bytes = 0;
+    g_st_fail = 0;
+    g_st_ready = 0;
+    g_st_stall_start_us = 0;
+    g_st_conns = p->nworkers;
+    g_st_active = 1;
     evo_boot_log("pio: %lld MB file, %d connections, %d MB read-ahead", (long long)(p->size >> 20),
                  p->nworkers, PIO_WINDOW * PIO_CHUNK >> 20);
     return p;
@@ -325,6 +378,8 @@ void evo_pio_close(evo_pio *p)
 {
     if (!p)
         return;
+    if (p->avio)
+        g_st_active = 0;   /* only an open reader (one that got this far) set it */
     if (p->nworkers) {
         pthread_mutex_lock(&p->mu);
         p->stop = 1;
@@ -344,4 +399,20 @@ void evo_pio_close(evo_pio *p)
     if (p->mem_off >= 0 && p->mem)
         sceKernelReleaseDirectMemory(p->mem_off, (size_t)PIO_WINDOW * PIO_CHUNK);
     free(p);
+}
+
+void evo_pio_get_stats(evo_pio_stats_t *o)
+{
+    memset(o, 0, sizeof *o);
+    o->active = g_st_active;
+    if (!o->active)
+        return;
+    o->connections    = g_st_conns;
+    o->ready_chunks   = g_st_ready;
+    o->window_chunks  = PIO_WINDOW;
+    o->chunk_mb       = PIO_CHUNK >> 20;
+    o->bytes          = g_st_bytes;
+    o->chunk_failures = g_st_fail;
+    const long long t = g_st_stall_start_us;
+    o->stall_ms = t ? (long long)(now_us() - (uint64_t)t) / 1000 : 0;
 }

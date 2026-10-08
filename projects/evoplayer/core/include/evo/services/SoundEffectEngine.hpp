@@ -4,6 +4,8 @@
 #include "evo/interfaces/ISoundEffectEngine.hpp"
 #include <pthread.h>
 #include <atomic>
+#include <cstdint>
+#include <vector>
 
 namespace evo {
 
@@ -22,6 +24,16 @@ private:
     static void* WorkerThreadEntry(void* arg);
     void WorkerLoop();
     void renderTone(int handle, double startFreq, double endFreq, int durationMs, double gain);
+    /* ps5-homebrew-ui's "glass" set (assets/hui/sfx), mono S16 48 kHz.
+     * Empty when the bundle lacks one: that effect falls back to its tone. */
+    bool loadSample(const char* key, std::vector<int16_t>* out);
+    void renderSample(int handle, const std::vector<int16_t>& samples, double gain);
+
+    std::vector<int16_t> m_move[2];
+    std::vector<int16_t> m_confirm;
+    std::vector<int16_t> m_back;
+    std::vector<int16_t> m_toggle;
+    int m_moveAlternate = 0;
 
     static constexpr int AudioGrain = 256;
     static constexpr int SampleRate = 48000;

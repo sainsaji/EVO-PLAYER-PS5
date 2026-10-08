@@ -1,6 +1,9 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_devstate.h"
+#if defined(EVO_AGC_DEVICE)
+#include "evo_hui.h"
+#endif
 
 extern "C" {
 
@@ -9,6 +12,9 @@ bool evo_rmlui_init(int screen_width, int screen_height) {
 }
 
 void evo_rmlui_shutdown(void) {
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_shutdown();
+#endif
     EvoRmlApp::Instance().Shutdown();
 }
 
@@ -29,6 +35,9 @@ void evo_rmlui_set_active(int active) {
 }
 
 void evo_rmlui_end_frame(void) {
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_end_frame();
+#endif
     EvoRmlApp::Instance().GlEndFrame();
 }
 
@@ -38,6 +47,9 @@ int evo_rmlui_blit_mode(void) {
 
 void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_changelog(p);
+#endif
     EvoChangelogState state;
     state.title = p->title ? p->title : "CHANGELOG";
     state.subtitle = p->subtitle ? p->subtitle : "";
@@ -68,11 +80,20 @@ void evo_rmlui_update_changelog(const evo_rmlui_changelog_params_t* p) {
 }
 
 void evo_rmlui_render_changelog(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_changelog(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderChangelog(framebuffer, width, height);
 }
 
 void evo_rmlui_update_reader(const evo_rmlui_reader_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_reader(p);
+#endif
     EvoReaderState state;
     state.title = p->title ? p->title : "";
     state.subtitle = p->subtitle ? p->subtitle : "";
@@ -92,11 +113,20 @@ void evo_rmlui_update_reader(const evo_rmlui_reader_params_t* p) {
 }
 
 void evo_rmlui_render_reader(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_reader(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderReader(framebuffer, width, height);
 }
 
 void evo_rmlui_update_image(const evo_rmlui_image_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_image(p);
+#endif
     EvoImageState s;
     s.title  = p->title ? p->title : "";
     s.loaded = (p->loaded != 0 && p->pixels && p->w > 0 && p->h > 0);
@@ -114,6 +144,12 @@ void evo_rmlui_update_image(const evo_rmlui_image_params_t* p) {
 }
 
 void evo_rmlui_render_image(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_image(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderImage(framebuffer, width, height);
 }
 
@@ -139,6 +175,9 @@ void evo_rmlui_render_surround(uint32_t* framebuffer, int width, int height) {
 
 void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_browser(p);
+#endif
     EvoBrowserState state;
     state.path = p->path ? p->path : "";
     state.title = p->title ? p->title : "";
@@ -218,6 +257,12 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
 }
 
 void evo_rmlui_render_browser(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_browser(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderBrowser(framebuffer, width, height);
 }
 
@@ -227,6 +272,9 @@ void evo_rmlui_set_version(const char* version) {
 
 void evo_rmlui_update_list(const evo_rmlui_list_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_list(p);
+#endif
     EvoListState state;
     state.title = p->title ? p->title : "";
     state.subtitle = p->subtitle ? p->subtitle : "";
@@ -277,6 +325,12 @@ void evo_rmlui_update_list(const evo_rmlui_list_params_t* p) {
 }
 
 void evo_rmlui_render_list(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_list(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderList(framebuffer, width, height);
 }
 
@@ -295,6 +349,9 @@ static EvoLaunchTile evo_rmlui_tile_from(const evo_rmlui_launch_tile_t& in) {
 
 void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_launch(p);
+#endif
     EvoLaunchState state;
     state.app_name = p->app_name ? p->app_name : "EVO PLAYER";
     state.version = p->version ? p->version : "";
@@ -323,11 +380,21 @@ void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* p) {
 }
 
 void evo_rmlui_render_launch(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    /* ps5-homebrew-ui home screen first; RmlUi's launch.rml if the kit is off. */
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_launch(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderLaunch(framebuffer, width, height);
 }
 
 void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_playback(p);
+#endif
     EvoPlaybackState state;
     state.title = p->title ? p->title : "";
     state.meta = p->metadata ? p->metadata : "";
@@ -375,23 +442,44 @@ void evo_rmlui_update_playback_params(const evo_playback_osd_params_t* p) {
 }
 
 void evo_rmlui_update_perf_hud(const evo_perf_hud_t* p) {
+#if defined(EVO_AGC_DEVICE)
+    if (p) evo_hui_update_perf_hud(p);
+#endif
     if (p) EvoRmlApp::Instance().UpdatePerfHud(p);
 }
 
 void evo_rmlui_update_keyboard(const evo_keyboard_params_t* p) {
+#if defined(EVO_AGC_DEVICE)
+    if (p) evo_hui_update_keyboard(p);
+#endif
     if (p) EvoRmlApp::Instance().UpdateKeyboard(p);
 }
 
 void evo_rmlui_render_keyboard(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_keyboard(width, height)) {
+        EvoRmlApp::Instance().NoteExternalKeyboard();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderKeyboard(framebuffer, width, height);
 }
 
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_playback_osd(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderPlaybackOSD(framebuffer, width, height);
 }
 
 void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_dialog(p);
+#endif
     EvoDialogState state;
     state.eyebrow = p->eyebrow ? p->eyebrow : "";
     state.title = p->title ? p->title : "";
@@ -411,11 +499,20 @@ void evo_rmlui_update_dialog(const evo_rmlui_dialog_params_t* p) {
 }
 
 void evo_rmlui_render_dialog(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_dialog(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDialog();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderDialog(framebuffer, width, height);
 }
 
 void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_toast(p);
+#endif
     EvoToastState state;
     state.title = p->title ? p->title : "";
     state.message = p->message ? p->message : "";
@@ -428,6 +525,12 @@ void evo_rmlui_update_toast(const evo_rmlui_toast_params_t* p) {
 }
 
 void evo_rmlui_render_toast(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_toast(width, height)) {
+        EvoRmlApp::Instance().NoteExternalToast();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderToast(framebuffer, width, height);
 }
 
@@ -446,6 +549,9 @@ void evo_rmlui_render_debug_overlay(uint32_t* framebuffer, int width, int height
 
 void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_settings(p);
+#endif
     EvoSettingsState state;
     state.title = p->title ? p->title : "SETTINGS";
     state.subtitle = p->subtitle ? p->subtitle : "";
@@ -473,11 +579,20 @@ void evo_rmlui_update_settings(const evo_rmlui_settings_params_t* p) {
 }
 
 void evo_rmlui_render_settings(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_settings(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderSettings(framebuffer, width, height);
 }
 
 void evo_rmlui_update_about(const evo_rmlui_about_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_about(p);
+#endif
     EvoAboutState state;
     state.app_name = p->app_name ? p->app_name : "EVO PLAYER PRO";
     state.version = p->version ? p->version : "";
@@ -490,15 +605,30 @@ void evo_rmlui_update_about(const evo_rmlui_about_params_t* p) {
 }
 
 void evo_rmlui_render_about(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_about(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderAbout(framebuffer, width, height);
 }
 
 void evo_rmlui_render_closed(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_closed(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderClosed(framebuffer, width, height);
 }
 
 void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_subtitles(p);
+#endif
     EvoSubtitlesState state;
     state.eyebrow = p->eyebrow ? p->eyebrow : "SUBTITLES & CLOSED CAPTIONS";
     state.title = p->title ? p->title : "SELECT SUBTITLE TRACK";
@@ -524,11 +654,20 @@ void evo_rmlui_update_subtitles(const evo_rmlui_subtitles_params_t* p) {
 }
 
 void evo_rmlui_render_subtitles(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_subtitles(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderSubtitles(framebuffer, width, height);
 }
 
 void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_mediainfo(p);
+#endif
     EvoMediaInfoState state;
     state.title = p->title ? p->title : "";
     state.path = p->path ? p->path : "";
@@ -556,11 +695,20 @@ void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
 }
 
 void evo_rmlui_render_mediainfo(uint32_t* framebuffer, int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_mediainfo(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
     EvoRmlApp::Instance().RenderMediaInfo(framebuffer, width, height);
 }
 
 void evo_rmlui_set_theme(const evo_rmlui_theme_t* t) {
     if (!t) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_set_theme(t);
+#endif
     EvoThemeColors colors;
     colors.name = t->name ? t->name : "MIDNIGHT";
     colors.bg_top = t->bg_top;
@@ -580,6 +728,9 @@ void evo_rmlui_set_theme(const evo_rmlui_theme_t* t) {
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* p) {
     if (!p) return;
+#if defined(EVO_AGC_DEVICE)
+    evo_hui_update_nav(p);
+#endif
     EvoNavState state;
     state.active_section = p->active_section;
     state.rail_focused   = (p->rail_focused != 0);

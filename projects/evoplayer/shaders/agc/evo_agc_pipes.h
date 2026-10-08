@@ -9,6 +9,8 @@
 #include "ui_backdrop_blur_pipe.h"
 #include "ui_screen_2d_pipe.h"
 #include "ui_screen_2d_pq_out_pipe.h"
+#include "ui_sdf_pipe.h"
+#include "ui_sdf_pq_out_pipe.h"
 #include "upscale_a4k_final_pipe.h"
 #include "upscale_a4k_m_acc0_pipe.h"
 #include "upscale_a4k_m_acc1_pipe.h"

@@ -137,6 +137,17 @@ static void run_command(const char *line)
             pp_stage_bc("REMOTE_TYPE?", "no virtual keyboard open");
         return;
     }
+    /* `kbclose` cancels whichever keyboard is open, the native IME included:
+     * once the system dialog is up it takes every pad press, so `key` can no
+     * longer reach EVO and a scripted run is stranded until someone presses
+     * Circle on a real controller. */
+    if (strcmp(buf, "kbclose") == 0) {
+        if (evo_keyboard_is_open())
+            evo_keyboard_close();
+        else
+            pp_stage_bc("REMOTE_KBCLOSE?", "no keyboard open");
+        return;
+    }
     if (strncmp(buf, "play ", 5) == 0) {
         evo_open_media_path(buf + 5);
         return;

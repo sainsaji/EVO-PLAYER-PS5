@@ -1,5 +1,8 @@
 #include "evo_features.h"
 #include "evo_rmlui_app.h"
+#if defined(EVO_AGC_DEVICE)
+#include "evo_hui.h"
+#endif
 #include "evo_rmlui_prof.h"
 #include "evo_metrics.h"   /* EVO_UI_DESIGN_W/H - the dp authoring canvas */
 #include "prospero_thumbnail.h"   /* #32 scrub preview: request/serial/snapshot */
@@ -243,6 +246,10 @@ bool EvoRmlApp::GlNeedsFrame()
      * caught by the IsVisible checks. Called exactly once per frame by main.c. */
     if (m_gl_warmup > 0) { m_gl_warmup--; return true; }
     if (m_frame_dirty) return true;
+#if defined(EVO_AGC_DEVICE)
+    /* ps5-homebrew-ui screens animate continuously (springs, entrances). */
+    if (evo_hui_wants_frame()) return true;
+#endif
     if (m_toast_doc && m_toast_doc->IsVisible()) return true;
     if (m_dialog_doc && m_dialog_doc->IsVisible()) return true;
     if (m_launch_doc && m_launch_doc->IsVisible()) return true;

@@ -25,6 +25,7 @@ CXXFLAGS := -Wall -g -O2 -std=c++17 $(EXTRA_CFLAGS) \
     -Ipp/include \
     -Iui/include \
     -Iui_rml/include \
+    -Iui_kit/include \
     -Imedia/include \
     -Iaddons/include \
     -I$(PS5_PAYLOAD_SDK)/target/user/homebrew/include/SDL2 \
@@ -128,6 +129,7 @@ MEDIA_SRCS := \
     src/evo_boot_log.c \
     src/evo_error.c \
     src/evo_log_server.c \
+    src/evo_stats.c \
     src/evo_crash_note.c \
     src/evo_usb_remote.c \
     src/evo_iobench.c \
@@ -227,13 +229,50 @@ endif
 
 RMLUI_OBJS := $(RMLUI_SRCS:.cpp=.o)
 
+# ps5-homebrew-ui (third_party/ps5-homebrew-ui): the UI kit EVO's own screens
+# are moving to. Only the parts that build a DrawList are compiled - the kit's
+# OpenGL backend (gfx/gl_*, renderer, canvas, backdrop), its platform layer and
+# the music player (needs stb_vorbis) are not; ui_kit/src/hui_agc_batch.cpp
+# draws the lists through sceAgc instead. The kit is C++20; its objects land
+# under ui_kit/obj so the vendored tree stays untouched.
+HUI_ROOT := ../../third_party/ps5-homebrew-ui
+HUI_SRCS := \
+    gfx/draw_list.cpp gfx/font.cpp gfx/triangulate.cpp \
+    $(patsubst $(HUI_ROOT)/src/%,%,$(wildcard $(HUI_ROOT)/src/ui/*.cpp)) \
+    $(patsubst $(HUI_ROOT)/src/%,%,$(wildcard $(HUI_ROOT)/src/ui/components/*.cpp)) \
+    $(patsubst $(HUI_ROOT)/src/%,%,$(wildcard $(HUI_ROOT)/src/core/*.cpp)) \
+    audio/cues.cpp audio/mixer.cpp audio/wav.cpp
+HUI_OBJS := $(addprefix ui_kit/obj/hui/,$(HUI_SRCS:.cpp=.o))
+
+UI_KIT_SRCS :=
+ifeq ($(AGC_DEVICE),1)
+    UI_KIT_SRCS += ui_kit/src/hui_agc_batch.cpp ui_kit/src/evo_hui_app.cpp \
+                   ui_kit/src/evo_hui_screens.cpp ui_kit/src/evo_hui_browser.cpp \
+                   ui_kit/src/evo_hui_settings.cpp \
+                   ui_kit/src/evo_hui_osd.cpp \
+                   ui_kit/src/evo_hui_modals.cpp \
+                   ui_kit/src/evo_hui_misc.cpp \
+                   ui_kit/src/evo_hui_extra.cpp
+endif
+UI_KIT_OBJS := $(UI_KIT_SRCS:.cpp=.o)
+
+HUI_CXXFLAGS := $(filter-out -std=c++17,$(CXXFLAGS)) -std=c++20 \
+    -I$(HUI_ROOT)/src -I$(HUI_ROOT) -Iui_kit/include
+
+ui_kit/obj/hui/%.o: $(HUI_ROOT)/src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CCACHE) $(CXX) $(HUI_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+ui_kit/src/%.o: ui_kit/src/%.cpp
+	$(CCACHE) $(CXX) $(HUI_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
 # -MMD -MP: emit a .d next to each .o listing its header prerequisites, so an
 # object rebuilds when a header it includes changes. Without this, editing e.g.
 # a shared ABI header left stale .o files linked against the old ABI (#28, cost
 # real hardware cycles). package-app.sh's app-cflags.stamp only force-cleans on
 # a *flag* change, not a header edit.
 DEPFLAGS := -MMD -MP
-ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d)
+ALL_DEPS := $(C_OBJS:.o=.d) $(RMLUI_OBJS:.o=.d) $(CORE_OBJS:.o=.d) $(HUI_OBJS:.o=.d) $(UI_KIT_OBJS:.o=.d)
 
 # CCACHE=ccache (set by scripts/package-app.sh and build-evoplayer.sh) caches each
 # object by its preprocessed source + flags, so switching between the payload
@@ -260,17 +299,17 @@ all: $(ELF)
 #   print-objects  emit the object paths (relative to this dir), space-separated
 # -----------------------------------------------------------------------------
 .PHONY: objects print-objects
-objects: $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
+objects: $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 
 print-objects:
-	@echo $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
+	@echo $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 
-$(ELF): $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS)
+$(ELF): $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS)
 	$(CXX) $(CFLAGS) -o $@ $^ $(LIBS)
 	@echo "STAGE=$(STAGE)"
 	@sha256sum $@
 	@ls -la $@
 
 clean:
-	rm -f $(ELF) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(ALL_DEPS)
-	rm -rf artifacts/4k_stages
+	rm -f $(ELF) $(C_OBJS) $(RMLUI_OBJS) $(CORE_OBJS) $(HUI_OBJS) $(UI_KIT_OBJS) $(ALL_DEPS)
+	rm -rf artifacts/4k_stages ui_kit/obj

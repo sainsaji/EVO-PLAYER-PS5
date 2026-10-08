@@ -9,6 +9,8 @@
  *   GET /stream        Server-Sent Events, one event per line
  *   GET /raw           plain text, kept open (curl -N http://<ps5>:9780/raw)
  *   GET /log           snapshot of the ring (the last ~128 KiB), then closes
+ *   GET /stats         one JSON snapshot of memory, read-ahead, network and
+ *                      playback (evo_stats.c) - tools/evo-dash.py graphs it
  *
  * Query options (stream, raw, log):
  *   tail=0        only lines logged from now on (default: the whole ring first)
@@ -39,6 +41,8 @@
 
 #define LS_MAX_CLIENTS 4
 #define LS_CHUNK       8192
+
+size_t evo_stats_json(char *out, size_t cap);
 
 static int s_started;
 static pthread_mutex_t s_mx = PTHREAD_MUTEX_INITIALIZER;
@@ -274,6 +278,15 @@ static void *conn_thread(void *arg)
                          "Content-Length: %zu\r\nConnection: close\r\n\r\n", sizeof k_page - 1);
                 send_str(fd, head);
                 send_all(fd, k_page, sizeof k_page - 1);
+            } else if (!strcmp(target, "/stats")) {
+                char body[2048], head[192];
+                size_t n = evo_stats_json(body, sizeof body);
+                snprintf(head, sizeof head,
+                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                         "Cache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n"
+                         "Content-Length: %zu\r\nConnection: close\r\n\r\n", n);
+                send_str(fd, head);
+                send_all(fd, body, n);
             } else if (!strcmp(target, "/stream"))
                 serve_stream(fd, 's', &o);
             else if (!strcmp(target, "/raw"))

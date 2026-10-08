@@ -1,0 +1,390 @@
+; EVO Player - ps5-homebrew-ui draw list pipeline, AMD LLPC .pipe form.
+;
+; The kit's one SDF shader (third_party/ps5-homebrew-ui/src/gfx/gl_batch.cpp,
+; kVertex/kFragment) ported to the AGC chain. Every shape, glyph and image of
+; the kit UI is drawn through it. Keep the shape numbers in step with
+; hui::gfx::Shape (draw_list.hpp) and ui_kit/src/hui_agc_batch.cpp.
+;
+; Differences from the GL original, all forced by the AGC path:
+;   * No instancing. hui_agc_batch.cpp writes each hui::gfx::Instance six
+;     times (96-byte vertices) and draws identity indices; the corner of the
+;     quad is gl_VertexIndex % 6. Every run's V# starts at the run, so the
+;     index restarts at 0 for each draw.
+;   * Mesh vertices (polygon fills) go through the same pipeline as shape 9:
+;     rect.xy is the position and color_top the colour.
+;   * The font array is seven separate bindings: binding 0 is the run's own
+;     texture, bindings 1..6 the font atlases.
+;   * The fragment stage has no constant buffer: output pixels per virtual
+;     unit come down as a flat varying.
+;   * The output is premultiplied (EVO_AGC_BLEND_PREMULTIPLIED), the same
+;     result as GL's SRC_ALPHA / ONE_MINUS_SRC_ALPHA on colour and alpha.
+
+[Version]
+version = 65
+
+[VsGlsl]
+#version 450
+
+layout(location = 0) in vec4 a_rect;
+layout(location = 1) in vec4 a_top;
+layout(location = 2) in vec4 a_bottom;
+layout(location = 3) in vec4 a_border;
+layout(location = 4) in vec4 a_params;
+layout(location = 5) in vec4 a_extra;
+
+layout(set = 0, binding = 0, std140) uniform BatchConstants {
+    vec4 viewport; /* scale, offset x, offset y, unused */
+    vec4 surface;  /* width, height, unused, unused */
+} batch;
+
+layout(location = 0) out vec2 v_local;
+layout(location = 1) out vec2 v_virtual;
+layout(location = 2) out vec2 v_uv;
+layout(location = 3) out float v_t;
+layout(location = 4) flat out vec2 v_half;
+layout(location = 5) flat out vec4 v_top;
+layout(location = 6) flat out vec4 v_bottom;
+layout(location = 7) flat out vec4 v_border;
+layout(location = 8) flat out vec4 v_params;
+layout(location = 9) flat out vec4 v_extra;
+layout(location = 10) flat out float v_px;
+
+/* Corners of the two triangles (0,0)(1,0)(0,1) (1,0)(1,1)(0,1). Worked out
+ * rather than read from a constant array: LLPC puts an indexed const array in
+ * a data section, and the runtime only loads relocation-free code. */
+vec2 quad_corner(int i)
+{
+    return vec2((i == 1 || i == 3 || i == 4) ? 1.0 : 0.0,
+                (i == 2 || i == 4 || i == 5) ? 1.0 : 0.0);
+}
+
+void main()
+{
+    int shape = int(a_params.w + 0.5);
+    vec2 virt;
+    if (shape == 9)
+    {
+        virt = a_rect.xy;
+        v_local = vec2(0.0);
+        v_half = vec2(0.0);
+        v_t = 0.0;
+        v_uv = vec2(0.0);
+    }
+    else
+    {
+        vec2 corner = quad_corner(gl_VertexIndex % 6);
+        vec2 size = a_rect.zw;
+        float pad = (shape == 1 || shape == 3) ? 0.0 : a_params.z + 1.0 / batch.viewport.x;
+        vec2 local = mix(vec2(-pad), size + vec2(pad), corner);
+        vec2 centred = local - 0.5 * size;
+        virt = a_rect.xy + local;
+        bool box = shape == 0 || shape == 2 || shape == 5;
+        if (box && a_extra.x != 0.0)
+        {
+            float c = cos(a_extra.x);
+            float s = sin(a_extra.x);
+            virt = a_rect.xy + 0.5 * size + vec2(c * centred.x - s * centred.y,
+                                                 s * centred.x + c * centred.y);
+        }
+        v_local = centred;
+        v_half = 0.5 * size;
+        v_t = (shape == 0 && a_extra.y > 0.5) ? clamp(local.x / max(size.x, 1e-3), 0.0, 1.0)
+                                              : clamp(local.y / max(size.y, 1e-3), 0.0, 1.0);
+        v_uv = mix(a_extra.xy, a_extra.zw, corner);
+    }
+    v_virtual = virt;
+    v_top = a_top;
+    v_bottom = a_bottom;
+    v_border = a_border;
+    v_params = a_params;
+    v_extra = a_extra;
+    v_px = 1.0 / batch.viewport.x;
+    vec2 surface = virt * batch.viewport.x + batch.viewport.yz;
+    vec2 ndc = surface / batch.surface.xy * 2.0 - 1.0;
+    gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
+}
+
+[VsInfo]
+entryPoint = main
+
+[FsGlsl]
+#version 450
+
+layout(set = 1, binding = 0) uniform sampler2D u_texture;
+layout(set = 1, binding = 1) uniform sampler2D u_font1;
+layout(set = 1, binding = 2) uniform sampler2D u_font2;
+layout(set = 1, binding = 3) uniform sampler2D u_font3;
+layout(set = 1, binding = 4) uniform sampler2D u_font4;
+layout(set = 1, binding = 5) uniform sampler2D u_font5;
+layout(set = 1, binding = 6) uniform sampler2D u_font6;
+
+layout(location = 0) in vec2 v_local;
+layout(location = 1) in vec2 v_virtual;
+layout(location = 2) in vec2 v_uv;
+layout(location = 3) in float v_t;
+layout(location = 4) flat in vec2 v_half;
+layout(location = 5) flat in vec4 v_top;
+layout(location = 6) flat in vec4 v_bottom;
+layout(location = 7) flat in vec4 v_border;
+layout(location = 8) flat in vec4 v_params;
+layout(location = 9) flat in vec4 v_extra;
+layout(location = 10) flat in float v_px;
+
+layout(location = 0) out vec4 frag_color;
+
+float round_box(vec2 p, vec2 b, float r)
+{
+    vec2 q = abs(p) - b + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+float triangle(vec2 p, vec2 p0, vec2 p1, vec2 p2)
+{
+    vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+    vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+    vec2 q0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+    vec2 q1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+    vec2 q2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+    float s = sign(e0.x * e2.y - e0.y * e2.x);
+    vec2 d = min(min(vec2(dot(q0, q0), s * (v0.x * e0.y - v0.y * e0.x)),
+                     vec2(dot(q1, q1), s * (v1.x * e1.y - v1.y * e1.x))),
+                 vec2(dot(q2, q2), s * (v2.x * e2.y - v2.y * e2.x)));
+    return -sqrt(d.x) * sign(d.y);
+}
+
+float star5(vec2 p, float r, float rf)
+{
+    const vec2 k1 = vec2(0.809016994375, -0.587785252292);
+    const vec2 k2 = vec2(-k1.x, k1.y);
+    p.x = abs(p.x);
+    p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+    p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+    p.x = abs(p.x);
+    p.y -= r;
+    vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
+    float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+    return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
+
+void main()
+{
+    float px = v_px;
+    int shape = int(v_params.w + 0.5);
+    vec4 fill = mix(v_top, v_bottom, v_t);
+    vec4 color;
+    if (shape == 9)
+    {
+        color = v_top;
+    }
+    else if (shape == 0)
+    {
+        float radius = min(v_params.x, min(v_half.x, v_half.y));
+        float d = round_box(v_local, v_half, radius);
+        color = fill;
+        if (v_params.y > 0.0)
+        {
+            float inner = clamp(0.5 - (d + v_params.y) / px, 0.0, 1.0);
+            color = mix(v_border, fill, inner);
+        }
+        color.a *= clamp(0.5 - d / px, 0.0, 1.0);
+    }
+    else if (shape == 1)
+    {
+        int slot = int(v_params.z + 0.5);
+        float sdf;
+        if (slot == 1)
+            sdf = texture(u_font1, v_uv).r;
+        else if (slot == 2)
+            sdf = texture(u_font2, v_uv).r;
+        else if (slot == 3)
+            sdf = texture(u_font3, v_uv).r;
+        else if (slot == 4)
+            sdf = texture(u_font4, v_uv).r;
+        else if (slot == 5)
+            sdf = texture(u_font5, v_uv).r;
+        else if (slot == 6)
+            sdf = texture(u_font6, v_uv).r;
+        else
+            sdf = texture(u_texture, v_uv).r;
+        float distance = (sdf - 0.5) * 2.0 * v_params.x;
+        color = vec4(fill.rgb, fill.a * clamp(distance / px + 0.5, 0.0, 1.0));
+    }
+    else if (shape == 2)
+    {
+        float radius = min(v_params.x, min(v_half.x, v_half.y));
+        float d = round_box(v_local, v_half, radius);
+        color = vec4(fill.rgb, fill.a * (1.0 - smoothstep(-v_params.z, v_params.z, d)));
+    }
+    else if (shape == 3)
+    {
+        color = texture(u_texture, v_uv) * fill;
+        if (v_params.x > 0.0)
+        {
+            float radius = min(v_params.x, min(v_half.x, v_half.y));
+            color.a *= clamp(0.5 - round_box(v_local, v_half, radius) / px, 0.0, 1.0);
+        }
+    }
+    else if (shape == 4)
+    {
+        vec2 pa = v_virtual - v_extra.xy;
+        vec2 ba = v_extra.zw - v_extra.xy;
+        float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+        float d = length(pa - ba * h) - 0.5 * v_params.y;
+        color = vec4(fill.rgb, fill.a * clamp(0.5 - d / px, 0.0, 1.0));
+    }
+    else if (shape == 8)
+    {
+        float cut = min(v_params.x, min(v_half.x, v_half.y));
+        vec2 q = abs(v_local) - v_half;
+        float box = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+        float d = max(box, (q.x + q.y + cut) * 0.70710678);
+        color = fill;
+        if (v_params.y > 0.0)
+        {
+            float inner = clamp(0.5 - (d + v_params.y) / px, 0.0, 1.0);
+            color = mix(v_border, fill, inner);
+        }
+        color.a *= clamp(0.5 - d / px, 0.0, 1.0);
+    }
+    else if (shape == 7)
+    {
+        float rb = 0.5 * v_params.y;
+        float ra = min(v_half.x, v_half.y) - rb;
+        float half_sweep = 0.5 * v_extra.x;
+        float mid = v_params.x + half_sweep;
+        float cm = cos(mid);
+        float sm = sin(mid);
+        vec2 p = vec2(v_local.x, -v_local.y);
+        p = vec2(abs(p.x * cm - p.y * sm), p.x * sm + p.y * cm);
+        vec2 sc = vec2(sin(half_sweep), cos(half_sweep));
+        float ring = abs(length(p) - ra);
+        float d;
+        if (v_extra.y > 0.5)
+            d = max(ring - rb, p.x * sc.y - p.y * sc.x);
+        else
+            d = ((sc.y * p.x > sc.x * p.y) ? length(p - sc * ra) : ring) - rb;
+        color = vec4(fill.rgb, fill.a * clamp(0.5 - d / px, 0.0, 1.0));
+    }
+    else if (shape == 6)
+    {
+        vec2 p = vec2(v_local.x, -v_local.y);
+        float d = star5(p, min(v_half.x, v_half.y), 0.45);
+        if (v_params.y > 0.0)
+            d = abs(d + 0.5 * v_params.y) - 0.5 * v_params.y;
+        color = vec4(fill.rgb, fill.a * clamp(0.5 - d / px, 0.0, 1.0));
+    }
+    else
+    {
+        float d = triangle(v_local, vec2(0.0, -v_half.y), vec2(-v_half.x, v_half.y),
+                           vec2(v_half.x, v_half.y));
+        if (v_params.y > 0.0)
+            d = abs(d + 0.5 * v_params.y) - 0.5 * v_params.y;
+        color = vec4(fill.rgb, fill.a * clamp(0.5 - d / px, 0.0, 1.0));
+    }
+    if (color.a <= 0.0)
+        discard;
+    frag_color = vec4(color.rgb * color.a, color.a);
+}
+
+[FsInfo]
+entryPoint = main
+
+[ResourceMapping]
+; visibility 2 = vertex stage, 64 = fragment stage.
+; node[0]: VS -> table holding the BatchConstants buffer (V#, 4 dwords)
+; node[1]: VS -> the vertex buffer table (IndirectUserDataVaPtr)
+; node[2]: FS -> table of seven combined image+samplers, 12 dwords each:
+;          the run's texture, then the six font atlases.
+userDataNode[0].visibility = 2
+userDataNode[0].type = DescriptorTableVaPtr
+userDataNode[0].offsetInDwords = 0
+userDataNode[0].sizeInDwords = 1
+userDataNode[0].next[0].type = DescriptorConstBuffer
+userDataNode[0].next[0].offsetInDwords = 0
+userDataNode[0].next[0].sizeInDwords = 4
+userDataNode[0].next[0].set = 0
+userDataNode[0].next[0].binding = 0
+userDataNode[1].visibility = 2
+userDataNode[1].type = IndirectUserDataVaPtr
+userDataNode[1].offsetInDwords = 1
+userDataNode[1].sizeInDwords = 1
+userDataNode[1].indirectUserDataCount = 1
+userDataNode[2].visibility = 64
+userDataNode[2].type = DescriptorTableVaPtr
+userDataNode[2].offsetInDwords = 0
+userDataNode[2].sizeInDwords = 1
+userDataNode[2].next[0].type = DescriptorCombinedTexture
+userDataNode[2].next[0].offsetInDwords = 0
+userDataNode[2].next[0].sizeInDwords = 12
+userDataNode[2].next[0].set = 1
+userDataNode[2].next[0].binding = 0
+userDataNode[2].next[1].type = DescriptorCombinedTexture
+userDataNode[2].next[1].offsetInDwords = 12
+userDataNode[2].next[1].sizeInDwords = 12
+userDataNode[2].next[1].set = 1
+userDataNode[2].next[1].binding = 1
+userDataNode[2].next[2].type = DescriptorCombinedTexture
+userDataNode[2].next[2].offsetInDwords = 24
+userDataNode[2].next[2].sizeInDwords = 12
+userDataNode[2].next[2].set = 1
+userDataNode[2].next[2].binding = 2
+userDataNode[2].next[3].type = DescriptorCombinedTexture
+userDataNode[2].next[3].offsetInDwords = 36
+userDataNode[2].next[3].sizeInDwords = 12
+userDataNode[2].next[3].set = 1
+userDataNode[2].next[3].binding = 3
+userDataNode[2].next[4].type = DescriptorCombinedTexture
+userDataNode[2].next[4].offsetInDwords = 48
+userDataNode[2].next[4].sizeInDwords = 12
+userDataNode[2].next[4].set = 1
+userDataNode[2].next[4].binding = 4
+userDataNode[2].next[5].type = DescriptorCombinedTexture
+userDataNode[2].next[5].offsetInDwords = 60
+userDataNode[2].next[5].sizeInDwords = 12
+userDataNode[2].next[5].set = 1
+userDataNode[2].next[5].binding = 5
+userDataNode[2].next[6].type = DescriptorCombinedTexture
+userDataNode[2].next[6].offsetInDwords = 72
+userDataNode[2].next[6].sizeInDwords = 12
+userDataNode[2].next[6].set = 1
+userDataNode[2].next[6].binding = 6
+
+[GraphicsPipelineState]
+topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+nggState.enableNgg = 1
+nggState.enableGsUse = 0
+; R8G8B8A8, as ui_screen_2d.pipe explains: the scanout word 0xAABBGGRR is
+; the byte sequence R,G,B,A.
+colorBuffer[0].format = VK_FORMAT_R8G8B8A8_UNORM
+colorBuffer[0].channelWriteMask = 15
+colorBuffer[0].blendEnable = 0
+
+[VertexInputState]
+; One hui::gfx::Instance per vertex: six vec4, stride 96.
+binding[0].binding = 0
+binding[0].stride = 96
+binding[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+attribute[0].location = 0
+attribute[0].binding = 0
+attribute[0].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[0].offset = 0
+attribute[1].location = 1
+attribute[1].binding = 0
+attribute[1].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[1].offset = 16
+attribute[2].location = 2
+attribute[2].binding = 0
+attribute[2].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[2].offset = 32
+attribute[3].location = 3
+attribute[3].binding = 0
+attribute[3].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[3].offset = 48
+attribute[4].location = 4
+attribute[4].binding = 0
+attribute[4].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[4].offset = 64
+attribute[5].location = 5
+attribute[5].binding = 0
+attribute[5].format = VK_FORMAT_R32G32B32A32_SFLOAT
+attribute[5].offset = 80
