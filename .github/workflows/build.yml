@@ -42,15 +42,15 @@ jobs:
     name: Build dev image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build image with layer cache
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -66,7 +66,7 @@ jobs:
       - name: Fast export image
         run: docker save evo-player/ps5-dev:ci | gzip -1 > /tmp/evo-image.tar.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: docker-image
           path: /tmp/evo-image.tar.gz
@@ -78,10 +78,10 @@ jobs:
     needs: build-image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -98,10 +98,10 @@ jobs:
     needs: build-image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -140,7 +140,7 @@ jobs:
             '
 
       - name: Archive ELF artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ps5-elf-payloads
           path: |
@@ -151,7 +151,7 @@ jobs:
 
       - name: Archive build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-logs
           path: output/logs/
@@ -168,15 +168,15 @@ jobs:
     needs: build-image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
       - name: Cache MkPFS toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .deps/MkPFS
           key: mkpfs-${{ hashFiles('scripts/setup-pfs-tool.sh') }}
@@ -222,7 +222,7 @@ jobs:
             '
 
       - name: Archive app module
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: evoplayer-app-module
           path: |
@@ -241,10 +241,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -256,7 +256,7 @@ jobs:
             evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-ffmpeg.sh --profile minimal'
 
       - name: Archive codec inventory
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ffmpeg-codec-inventory
           path: output/logs/ffmpeg-*-codecs.txt
@@ -272,10 +272,10 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -284,7 +284,7 @@ jobs:
           docker run --rm -v "$PWD:/workspace" -w /workspace \
             evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-prosperoplayer.sh'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: prosperoplayer-baseline
@@ -303,12 +303,12 @@ jobs:
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
@@ -318,7 +318,7 @@ jobs:
             evo-player/ps5-dev:ci bash -lc 'bash ./tests/run_tests.sh'
 
       - name: Archive Test Coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-coverage-report
@@ -328,14 +328,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Cache SonarCloud packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v3
+        uses: SonarSource/sonarcloud-github-action@v5
         if: env.SONAR_TOKEN != ''
         continue-on-error: true
         env:
@@ -347,7 +347,7 @@ jobs:
     name: Shell lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: shellcheck
