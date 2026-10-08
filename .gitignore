@@ -337,3 +337,12 @@ output/rag/
 
 # controller dumps (tools/dualsense_dump.py) hold a serial / Bluetooth address
 output/dualsense/
+
+# Generated output and nested repos
+output/dash/
+output/hui-snap/
+output/kp/
+output/netclips/
+output/test/
+third_party/ProsperoStore/
+third_party/ps5-homebrew-ui/
