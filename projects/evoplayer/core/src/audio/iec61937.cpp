@@ -293,7 +293,7 @@ bool Packer::next_burst(Span<std::uint8_t> d, std::size_t *cursor,
             *error = "AAC frame too large for one burst";
             return false;
         }
-        write_burst(kTypeAac, static_cast<std::uint16_t>(first.size * 8),
+        write_burst(kTypeAac, static_cast<std::uint16_t>(((first.size + 1) & ~std::size_t{1}) * 8), // Pd: bits, padded to a whole 16-bit word
                     d.subspan(first.offset, first.size), kBurst, out);
         *cursor += first.size;
         return true;
