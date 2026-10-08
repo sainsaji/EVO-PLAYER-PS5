@@ -9,9 +9,11 @@
 #include <libavcodec/codec_id.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <deque>
 #include <pthread.h>
+#include <thread>
 #include <vector>
 
 extern "C"
@@ -29,6 +31,45 @@ namespace
 constexpr int kSystemUser = 0xFF;
 constexpr int kTargetHdmi = 1;     // citroncore target: 1 (HDMI)
 constexpr int kModeDefault = 0xFF; // normal PCM output restore code
+
+// A receiver follows HDMI format changes slowly. Switching formats back to
+// back left it stuck on the previous one (a PCM stream labelled AAC, and AAC
+// silent until the receiver was restarted). So a new switch waits out a settle
+// time after the last reset, the stream is bracketed by IEC 61937 null bursts,
+// and the reset is spaced from the port close.
+constexpr int kLeadInMs = 400;      // null bursts after the switch, before the first frame
+constexpr int kLeadOutMs = 500;     // null bursts after the last frame, before the port closes
+constexpr int kAfterCloseMs = 250;  // between closing the port and resetting HDMI
+constexpr int kAfterResetMs = 400;  // after the reset, before returning
+constexpr int kBeforeOpenMs = 1000; // minimum gap since the last reset before a new switch
+std::int64_t g_last_reset_ms = -100000;
+
+std::int64_t now_ms()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+void sleep_ms(int ms)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+// IEC 61937 null data (data type 0), one port grain per call, for `ms` of audio.
+void send_null_bursts(int handle, const pt::Carrier &carrier, int ms)
+{
+    if (handle < 1 || carrier.grain_frames <= 0 || carrier.sample_rate <= 0)
+        return;
+    std::vector<uint8_t> grain(static_cast<size_t>(carrier.grain_frames) * 4, 0);
+    grain[0] = 0x72; // Pa 0xF872, little-endian
+    grain[1] = 0xF8;
+    grain[2] = 0x1F; // Pb 0x4E1F
+    grain[3] = 0x4E;
+    const int grains = ms * carrier.sample_rate / 1000 / carrier.grain_frames;
+    for (int i = 0; i < grains; ++i)
+        sceAudioOutOutput(handle, grain.data());
+}
 
 int                     g_pt_handle = -1;
 volatile int            g_pt_active = 0;
@@ -134,6 +175,10 @@ int evo_pt_open(int av_codec_id)
     evo_boot_log("[PT] Opening bitstream port: mode=%d grain=%d rate=%d (%s)",
                  carrier.mode, carrier.grain_frames, carrier.sample_rate, pt::codec_name(codec));
 
+    const std::int64_t since_reset = now_ms() - g_last_reset_ms;
+    if (since_reset < kBeforeOpenMs)
+        sleep_ms(static_cast<int>(kBeforeOpenMs - since_reset));
+
     // 1. Open the bitstream port first (citroncore sequence)
     const int handle = sceAudioOutExOpen(kSystemUser, carrier.mode);
     evo_boot_log("[PT] sceAudioOutExOpen(0xFF, %d) -> %d (0x%08x)",
@@ -156,6 +201,8 @@ int evo_pt_open(int av_codec_id)
         return cfg_rc;
     }
 
+    send_null_bursts(handle, carrier, kLeadInMs);
+
     pthread_mutex_lock(&g_pt_mutex);
     g_pt_handle = handle;
     g_pt_codec = codec;
@@ -176,16 +223,20 @@ void evo_pt_close(int handle)
 
     if (handle >= 1)
     {
-        // 3. Drain pending bursts
+        // 3. Tell the receiver the stream is ending, then drain pending bursts
+        send_null_bursts(handle, g_pt_carrier, kLeadOutMs);
         sceAudioOutOutput(handle, nullptr);
         // 4. Close bitstream port
         const int close_rc = sceAudioOutExClose(handle);
         evo_boot_log("[PT] sceAudioOutExClose(%d) -> 0x%08x", handle, static_cast<unsigned>(close_rc));
+        sleep_ms(kAfterCloseMs);
     }
 
     // 5. Restore HDMI to normal PCM output
     const int rst_rc = sceAudioOutExConfigureOutput(0, 0, kModeDefault, kModeDefault, 0);
     evo_boot_log("[PT] sceAudioOutExConfigureOutput(0xFF, 0xFF) -> 0x%08x", static_cast<unsigned>(rst_rc));
+    g_last_reset_ms = now_ms();
+    sleep_ms(kAfterResetMs);
 
     pthread_mutex_lock(&g_pt_mutex);
     g_pt_handle = -1;
@@ -333,6 +384,7 @@ void evo_pt_cleanup(void)
             g_pt_handle = -1;
         }
         sceAudioOutExConfigureOutput(0, 0, kModeDefault, kModeDefault, 0);
+        g_last_reset_ms = now_ms();
         g_pt_active = 0;
     }
 }
