@@ -6,6 +6,8 @@ Plays video from USB drives, internal storage, network shares (FTP), Live TV (IP
 
 ![EVO Player launch screen](docs/images/launch.png)
 
+**[Download the latest release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)** · **[Install from ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)** · **[Join the Discord](https://discord.gg/MyNnCWNU5)**
+
 ---
 
 ## What's New in v0.11.0
@@ -32,7 +34,11 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 - An FTP server on the console (the usual jailbreak payloads provide one on port `2121`).
 - *(For USB playback)* a USB drive formatted **exFAT** or **FAT32**, plugged into `/mnt/usb0`.
 
-### Install Steps
+### Easiest: install from ProsperoStore
+
+**[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for the [homebrew.page](https://homebrew.page) catalog, installs and updates EVO Player from the console itself, with no PC and no FTP. Find EVO Player in the store, install it, and launch it from the **Games** row.
+
+### Install Steps (manual)
 
 1. Download **`PPSA99039.ffpfsc`** from the latest **[GitHub Release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)**.
 2. Copy it to `/data/homebrew/` on the console over FTP.
@@ -256,6 +262,12 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 | [docs/addons/provider-architecture.md](docs/addons/provider-architecture.md) | Network providers and runtime UI bundles |
 | [docs/theming.md](docs/ui/theming.md) | Theme tokens and styling specifications |
 | [CHANGELOG.md](CHANGELOG.md) | Complete version history |
+
+---
+
+## Community
+
+Questions, bug reports, feature requests and early test builds: join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**. Many of 0.11.0's features started as requests there.
 
 ---
 

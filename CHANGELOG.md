@@ -11,7 +11,9 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 **EVO plays what you have, from wherever it is.** 0.10.0 made EVO a real PS5 app; 0.11.0 fills it in, in a brand-new interface. Live TV from an M3U playlist, your Emby or Jellyfin library in EVO's own screens, real-time AI upscaling for anything below 4K, Deep Blacks, Dolby Vision, a surround test room you can fly a sound around, and file management with FTP so a PC is no longer in the loop. 127 commits since 0.10.0.
 
-Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Runs on any jailbroken PS5 below firmware 13.60.
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60.
+
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
 
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Live TV & Media Servers
 
