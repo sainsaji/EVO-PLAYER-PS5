@@ -266,5 +266,8 @@ Forked from [ProsperoPlayer](https://github.com/KINGDKAK/ProsperoPlayer) by KING
 - [ps5-payload-dev](https://github.com/ps5-payload-dev) (John Törnblom) — SDK and toolchain
 - [KINGDKAK](https://github.com/KINGDKAK) — ProsperoPlayer
 - [zecoxao/sce_symbols](https://github.com/zecoxao/sce_symbols) — NID symbol database
+- [BlackBearReloaded](https://github.com/blackbearreloaded) — [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), the UI kit EVO's interface is built on
+- [mihawk-99](https://github.com/mihawk-99) — [PS5_VulkanTemplate](https://github.com/mihawk-99/PS5_VulkanTemplate), whose [1 GiB flexible-memory change](https://github.com/mihawk-99/PS5_VulkanTemplate/commit/04aa411deb9d9d12b40cc2afb479a328394da4ca) EVO's app module uses
+- PS5 developers **Philow**, **sword** and **0xManuel** — for their help and research
 
 *EVO Player is independent homebrew software and is not affiliated with, endorsed by, or associated with Sony Interactive Entertainment. All PlayStation trademarks belong to their respective owners.*
