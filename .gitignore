@@ -48,6 +48,13 @@ output/screenshots/
 output/uicheck/
 output/blur-check/
 
+# Release-video project (Remotion + node_modules, captures, renders) and
+# loose scratch logs / test files dropped straight into output/.
+output/evolve/
+output/testfiles/
+output/*.log
+output/c123.md
+
 # Host benchmark binary (tools/bench.sh)
 output/bench/
 output/tests/
