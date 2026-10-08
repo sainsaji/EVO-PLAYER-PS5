@@ -7,15 +7,15 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ## 0.11.0
 
-![](https://img.shields.io/badge/Release-v0.11.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-12.70-blue?style=flat-square)
+![](https://img.shields.io/badge/Release-v0.11.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
 
-**EVO plays what you have, from wherever it is.** 0.10.0 made EVO a real PS5 app; 0.11.0 fills it in. Live TV from an M3U playlist, your Emby or Jellyfin library in EVO's own screens, real-time AI upscaling for anything below 4K, Dolby Vision, a surround test room you can fly a sound around, and file management with FTP so a PC is no longer in the loop. 96 commits since 0.10.0.
+**EVO plays what you have, from wherever it is.** 0.10.0 made EVO a real PS5 app; 0.11.0 fills it in, in a brand-new interface. Live TV from an M3U playlist, your Emby or Jellyfin library in EVO's own screens, real-time AI upscaling for anything below 4K, Deep Blacks, Dolby Vision, a surround test room you can fly a sound around, and file management with FTP so a PC is no longer in the loop. 127 commits since 0.10.0.
 
-Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO from the Games row.
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Runs on any jailbroken PS5 below firmware 13.60.
 
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Live TV & Media Servers
 
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Providers**, reached from the nav rail or the home screen, replacing the Emby entry that was switched off in 0.10.0. **Cross** opens one, **Square** sets its address, **Triangle** opens the web version in the PS5's own browser, and OPTIONS twice signs out.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Providers**, reached from the nav rail or the home screen, replacing the Emby entry that was switched off in 0.10.0. **Cross** opens one, **Square** sets its address, **Triangle** opens the web version in the PS5's own browser, and **OPTIONS** opens a menu: open, change the server, find it on the network, sign in (or as another user), the web version, or sign out. IPTV adds Change playlist, Stremio Add addon.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Live TV from an M3U playlist.** Put `iptv.m3u` on a USB stick and EVO finds it with no typing, or enter a URL. Channels browse as a 2×4 grid of logos with L1/R1 paging, a detail pane, favourites and search.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A channel guide.** XMLTV with NOW and NEXT on the channel, discovered automatically from USB or the web — each candidate is scored by how many of your channels it actually covers — or pointed at a feed of your own. Xtream accounts use their own EPG.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Xtream Codes accounts.** Set one up by hand, or load an M3U exported from the account and EVO reads the credentials out of it. Live, VOD and Series categories, with a sign-out that removes the account.
@@ -26,7 +26,8 @@ Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO
 ### ![](https://img.shields.io/badge/PICTURE-ff8c00?style=flat-square) The Picture
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Real-time upscaling for anything below 4K.** Settings → Video & Display → `UPSCALING`: **Sharp** is FSR 1 sharpening, **AI** runs Anime4K. `AI NETWORK` picks Standard, Large or Maximum — Maximum is for a PS5 Pro. The player's OSD names what ran, and says why when it bypassed.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Dolby Vision Profile 5** reshapes on the GPU from the RPU, so skin is no longer purple and backgrounds no longer green.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Deep Blacks.** Settings → Video & Display → `DEEP BLACKS`, Off, Low or High, pulls grey, lifted shadows down to true black. It applies live, and the OSD shows a badge while it is on.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Dolby Vision Profile 5** reshapes on the GPU from the RPU, so skin is no longer purple and backgrounds no longer green. On the hardware decoder the RPU used to arrive cut short; it now gets the whole access unit.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **AV1**, including raw `.obu` files and 4K 10-bit, through libdav1d.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **4K HEVC Main10 HDR on the console's hardware decoder**, with decoder slots that grow on demand.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **120 Hz output** — Off, Auto, or Playback Only — for smoother 24 fps. The row dims itself when the display or HDMI sink cannot do it.
@@ -57,6 +58,7 @@ Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **FTP network storage.** Add a server from the browser's sidebar and browse, play and copy to and from it like any other source.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Folder filter chips.** Press Up from the top row to filter the folder you are actually looking at, instantly, with a chip only for the categories that have files there. They used to search the whole drive, not filter, not clear, and freeze the UI.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **The All Videos, Music and Photos views** recurse from the source root and list files rather than folders.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Thumbnails decode on a worker thread**, so scrolling never waits for a poster, and a poster whose first frame is black is taken from later in the file.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **No more `[Unknown] [Unknown]` codec pills** on text and log files.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **The browser no longer hangs** when the jailbreak daemon is not running.
 
@@ -66,13 +68,18 @@ Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Network streams pre-buffer** before the decoders start, and **rebuffer** when the read-ahead runs dry instead of stuttering silently. The read-ahead is sized in seconds of video, not bytes.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A `BUFFERING...` indicator** for any source, until the first frame lands and again mid-file if the stream runs out.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Quality and audio picker on R2.** On a live stream it lists the renditions read from the HLS master as well as the audio tracks, and your choice sticks across reopens. `ASK WHICH LIVE STREAM` under Settings → Interface & Storage controls whether it asks when a channel opens.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A hung hardware decoder no longer freezes EVO.** Every decoder call is timed; one that never returns ends playback with an error and EVO switches to software decode for the rest of the session.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **EVO says why a file or stream did not open**, and recognises a channel playlist given where a single stream belongs.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Live TV's OSD knows it is live** — no seek bar, timer or chapter keys on a stream with nothing behind the live edge.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Live channels play their best rendition.** Stream selection took the first video stream, which by convention is the lowest bitrate.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Big MKVs open instead of hanging.** An 85-stream UHD remux never reached playback, because the demuxer probe was unbounded.
 - ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Resuming no longer runs subtitles two to three seconds early.**
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Playback threads get 1 MB stacks.** The default stack could overflow while decoding.
 
 ### ![](https://img.shields.io/badge/INTERFACE-007acc?style=flat-square) Interface
 
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A brand-new interface.** Every EVO screen (home, browser, settings, player OSD, Media Info, subtitle picker, dialogs, Surround Studio and the provider screens) is redrawn on [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui) by BlackBearReloaded, rendered by EVO on bare-metal `sceAgc`, with springy motion and four themes: Midnight, Carbon, Ember and Aurora.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **What's new in each release** under About → View Changelog, now including 0.11.0, with rows that fit their card.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Settings is six pages**, not four: Video & Display, **Audio**, Subtitles, Interface & Storage, System & Diagnostics and **Experimental** — each row with its own icon.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A Safe to close screen.** QUIT EVO, from the nav rail or Settings, releases playback, the decoders and the GPU and then tells you it is done, with the three steps to close it from the switcher.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **An `UPSCALER` row in Media Info** (Square during playback), and the console model under System & Diagnostics.
@@ -89,6 +96,8 @@ Download **`PPSA99039.ffpfsc`**, deploy it with ShadowMountPlus, then launch EVO
 
 ### ![](https://img.shields.io/badge/INTERNAL-6e7681?style=flat-square) Under the Hood
 
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **A folder-title `.zip`** is released next to the `.ffpfsc`, for launchers that install from a folder.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Releases build FFmpeg 7.1.1** and the ps5-homebrew-ui kit in CI, exactly as local builds do.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **The console's own DNS resolver**, replacing a hand-rolled UDP client with a hardcoded server list.
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Logs redact API keys, tokens and provider credentials.**
 - ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Deploys are verified by sha256** before the new image is promoted, and the dev remote can launch, quit and close EVO without touching a controller.
