@@ -207,7 +207,7 @@ jobs:
           module, PFS-packed and ready to mount — no loose files, no second
           download.
 
-          1. Jailbreak the console (firmware 12.70) and run a jailbreak
+          1. Jailbreak the console (any firmware below 13.60) and run a jailbreak
              daemon (PS5-Lapy-JB-Daemon or etaHEN) — re-run it after every
              reboot.
           2. Copy the `.ffpfsc` to `/data/homebrew/PPSA99039.ffpfsc` on the
@@ -233,7 +233,7 @@ jobs:
 
           ## Requirements
 
-          * PS5 on firmware **12.70**, jailbroken (re-run after every reboot)
+          * PS5 on any firmware **below 13.60**, jailbroken (re-run after every reboot)
           * ShadowMountPlus (or another tool that understands `.ffpfsc` / folder titles)
           * A USB stick for media
 
@@ -262,6 +262,18 @@ jobs:
       #
       # The .ffpfsc is still uploaded as a run artifact either way, so a dry
       # run is inspectable.
+      - name: Upload the release files as a run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EVOPlayer-${{ steps.ver.outputs.tag }}
+          path: |
+            dist/EVOPlayer-*.ffpfsc
+            dist/EVOPlayer-*.zip
+            dist/SHA256SUMS.txt
+            dist/NOTES.md
+          if-no-files-found: error
+          retention-days: 14
+
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
