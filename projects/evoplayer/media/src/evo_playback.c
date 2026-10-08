@@ -130,6 +130,10 @@ pthread_t    video_thread;
  * path in GL-4.
  */
 volatile int video_decode_parked = 1;
+/* 1 once video_decode_thread_func has returned. stopPlayback() joins that thread
+ * on the UI thread, so it waits on this (with a limit) instead of blocking in
+ * pthread_join if a native decoder call never returns (#39). */
+volatile int video_thread_exited = 1;
 /* Set by a seek (evo_demux.c) for as long as it needs the decoder to itself:
  * the decode thread parks and stays out of evo_vdec_* until it clears. */
 volatile int video_decode_hold = 0;
@@ -751,6 +755,7 @@ void *video_decode_thread_func(void *arg) {
         usleep(playback_profile >= 2 ? 100 : 200);
     }
 
+    video_thread_exited = 1;
     return NULL;
 }
 

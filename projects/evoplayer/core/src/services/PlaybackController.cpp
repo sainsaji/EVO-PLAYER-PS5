@@ -500,7 +500,21 @@ void PlaybackController::stopPlayback() {
 
     if (video_thread_running) {
         video_thread_running = 0;
-        pthread_join(video_thread, nullptr);
+        /*
+         * Not a bare pthread_join: if the hardware decoder stops answering, the
+         * decode thread never returns and a join here froze the whole app (#39).
+         * The decoder watchdog flags that after its own limit; wait a little
+         * longer than the longest call it tolerates, then abandon the thread.
+         */
+        for (int waitedMs = 0; !video_thread_exited && !evo_vdec_native_hung() && waitedMs < 25000;
+             waitedMs += 10)
+            usleep(10 * 1000);
+        if (video_thread_exited) {
+            pthread_join(video_thread, nullptr);
+        } else {
+            pthread_detach(video_thread);
+            evo_bt("stopPlayback: video decode thread did not exit (decoder hung) - abandoned");
+        }
     }
 
     if (audio_decode_thread_running) {
@@ -1461,6 +1475,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     evo_thread_create(&demux_thread, demux_thread_func, nullptr);
 
     if (video_thread_running) {
+        video_thread_exited = 0;
         evo_thread_create(&video_thread, video_decode_thread_func, nullptr);
     }
     if (audio_decode_thread_running) {

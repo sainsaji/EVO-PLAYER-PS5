@@ -274,6 +274,20 @@ void PlayerScreen::update(double deltaMs) {
 
     playback->tickScrubAutoCommit();
 
+    /*
+     * The decoder gave up (repeated failures, or a hardware call that stopped
+     * returning - #39). The engine has already raised its error toast; without
+     * this the player sat on a frozen picture with the controls up and nothing
+     * to say why. Leave through the same path as STOP so the toast lands on the
+     * screen the user returns to.
+     */
+    if (evo_pb_decode_fatal()) {
+        playback->stopPlayback();
+        if (auto sm = Application::getInstance().getScreenManager())
+            sm->returnFromPlayback();
+        return;
+    }
+
     uint64_t now = NowMs();
     /*
      * Hold the OSD up once the clip has finished.

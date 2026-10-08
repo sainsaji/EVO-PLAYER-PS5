@@ -64,6 +64,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -395,6 +396,104 @@ static void note(const char *fmt, ...)
     sceKernelDebugOutText(0, line);
 }
 
+/*
+ * Hang watchdog (#39).
+ *
+ * A sceVideodec2 call that RETURNS an error already ends playback cleanly. One
+ * that never returns wedges the decode thread, and stopPlayback() joins that
+ * thread on the UI thread, so the whole app froze and only the PS button could
+ * free the slot. A blocked syscall cannot be cancelled, so the watchdog does
+ * the next best thing: it notices, ends the session through the same fatal path
+ * a failing decode uses, and marks native decode unusable for the rest of the
+ * process so the UI thread can abandon the stuck thread (evo_vdec_native_hung()
+ * is what PlaybackController checks before it joins).
+ *
+ * Limits are generous on purpose: the slowest healthy call seen on hardware is
+ * a 4K Decode at ~45 ms, a Reset or renew at ~50 ms.
+ */
+#define NWD_DECODE_MS   10000
+#define NWD_RESET_MS    20000
+
+extern int g_pb_decode_fatal;
+extern int video_decode_done;
+extern void toast(const char *title, const char *msg);
+
+static volatile int64_t nwd_start_ms;    /* 0 = no native call in flight */
+static volatile int     nwd_limit_ms;
+static volatile const char *nwd_what;
+static volatile int     nwd_hung;
+static volatile int     nwd_started;
+
+static int64_t nwd_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000 + 1;   /* never 0 */
+}
+
+static void *nwd_thread_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        usleep(250 * 1000);
+        int64_t t0 = nwd_start_ms;
+        if (!t0 || nwd_hung)
+            continue;
+        int64_t waited = nwd_now_ms() - t0;
+        if (waited < nwd_limit_ms || nwd_start_ms != t0)
+            continue;
+        nwd_hung = 1;
+        note("EVO vdec native: WATCHDOG - %s has not returned for %lld ms; "
+             "native decode disabled, ending playback",
+             nwd_what ? (const char *)nwd_what : "call", (long long)waited);
+        g_pb_decode_fatal = 1;
+        video_decode_done = 1;
+        /* "ERROR" in the text is what makes the toast render as an error. */
+        toast("PLAYBACK", "Video error - the hardware decoder stopped responding");
+    }
+    return NULL;
+}
+
+static void nwd_start_once(void)
+{
+    if (nwd_started)
+        return;
+    nwd_started = 1;
+    pthread_t t;
+    pthread_attr_t at;
+    pthread_attr_init(&at);
+    pthread_attr_setstacksize(&at, 256 * 1024);
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&t, &at, nwd_thread_main, NULL) != 0)
+        note("EVO vdec native: watchdog thread failed to start");
+    pthread_attr_destroy(&at);
+}
+
+static inline void nwd_enter(const char *what, int limit_ms)
+{
+    nwd_what = what;
+    nwd_limit_ms = limit_ms;
+    nwd_start_ms = nwd_now_ms();
+}
+static inline void nwd_leave(void) { nwd_start_ms = 0; }
+
+/* Test hook: /mnt/usb0/evo_vdec_hang makes the 100th Decode block forever, to
+ * prove on hardware that a hang ends the session instead of freezing the app. */
+static void nwd_test_hang(unsigned dec_calls)
+{
+    static int armed = -1;
+    if (armed < 0)
+        armed = (access("/mnt/usb0/evo_vdec_hang", F_OK) == 0);
+    if (armed && dec_calls == 100) {
+        armed = 0;
+        note("EVO vdec native: TEST HOOK - blocking in Decode (evo_vdec_hang)");
+        for (;;)
+            sleep(1);
+    }
+}
+
+int evo_vdec_native_hung(void) { return nwd_hung; }
+
 static size_t align16k(size_t v) { return (v + 0x3fffu) & ~(size_t)0x3fffu; }
 static int    roundup16(int v)   { return (v + 15) & ~15; }
 
@@ -492,12 +591,18 @@ static int slot_renew_decoder(struct dec_slot *s)
         s->decoder = NULL;
     }
     SceVideodec2DecoderMemoryInfo mem = s->mem;
+    nwd_start_once();
+    nwd_enter("CreateDecoder (renew)", NWD_RESET_MS);
     int rc = sceVideodec2CreateDecoder(&s->cfg, &mem, &s->decoder);
+    nwd_leave();
     if (rc != 0 || !s->decoder) {
         s->decoder = NULL;
         return rc ? rc : -1;
     }
-    return sceVideodec2Reset(s->decoder);
+    nwd_enter("Reset (renew)", NWD_RESET_MS);
+    rc = sceVideodec2Reset(s->decoder);
+    nwd_leave();
+    return rc;
 }
 
 /*
@@ -772,7 +877,7 @@ static void slot_ceiling(const nat_codec_desc *d, uint32_t *mw, uint32_t *mh)
 int evo_vdec_native_supports(int codec_id, int profile, int bit_depth,
                              int w, int h)
 {
-    if (!evo_vdec_native_probe())
+    if (nwd_hung || !evo_vdec_native_probe())
         return 0;
     const nat_codec_desc *d = codec_desc_for(codec_id, profile, bit_depth);
     if (!d)
@@ -1446,7 +1551,11 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
     fb.buffer_size = n->frame_size;
     out.size       = sizeof out;
 
+    nwd_start_once();
+    nwd_enter("Decode", NWD_DECODE_MS);
+    nwd_test_hang(n->dec_calls + 1);
     int rc = sceVideodec2Decode(n->dec, &in, &fb, &out);
+    nwd_leave();
     n->dec_calls++;
     if (irap)
         n->need_irap = rc != 0;   /* refused: hold its dependents (see above) */
@@ -1533,7 +1642,10 @@ static void drain_decoder(evo_vdec_native *n)
         fb.buffer_size = n->frame_size;
         out.size       = sizeof out;
 
-        if (sceVideodec2Flush(n->dec, &fb, &out) != 0)
+        nwd_enter("Flush", NWD_DECODE_MS);
+        int frc = sceVideodec2Flush(n->dec, &fb, &out);
+        nwd_leave();
+        if (frc != 0)
             break;
         if (!(out.valid && out.picture_count))
             break;
@@ -1610,7 +1722,7 @@ static int pkt_present(const evo_vdec_native *n, const AVPacket *pkt)
 
 evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
 {
-    if (!evo_vdec_native_probe())
+    if (nwd_hung || !evo_vdec_native_probe())
         return NULL;
     if (!p || p->backend != EVO_VDEC_BACKEND_NATIVE || !p->avctx_params)
         return NULL;
@@ -1774,7 +1886,9 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
     }
 
     slot->owned = 1;             /* released by evo_vdec_native_close() */
+    nwd_enter("Reset", NWD_RESET_MS);
     sceVideodec2Reset(n->dec);   /* fresh state for this stream */
+    nwd_leave();
     if (!n->bsf && n->annexb_extradata && n->annexb_extradata_size > 0)
         decode_one(n, n->annexb_extradata, n->annexb_extradata_size, INT64_MIN, 0);
     /* The first picture of a stream is a random-access point too: its leading
@@ -1941,7 +2055,7 @@ void evo_vdec_native_flush(evo_vdec_native *v)   /* seek */
         if (v->slot)
             v->dec = v->slot->decoder;
         else
-            sceVideodec2Reset(v->dec);
+            { nwd_enter("Reset (seek)", NWD_RESET_MS); sceVideodec2Reset(v->dec); nwd_leave(); }
         v->need_irap = 0;
         if (!v->bsf && v->annexb_extradata && v->annexb_extradata_size > 0)
             decode_one(v, v->annexb_extradata, v->annexb_extradata_size, INT64_MIN, 0);
@@ -1956,6 +2070,14 @@ void evo_vdec_native_close(evo_vdec_native *v)
         return;
     note("EVO vdec native: CLOSE  decodes=%u framesout=%u fatal=%d",
          v->dec_calls, v->frames_out, v->fatal);
+
+    if (nwd_hung) {
+        /* The decode thread is stuck inside the decoder with this object.
+         * Tearing the slot down would block the caller the same way, and
+         * freeing it would pull it out from under that thread. Leak it. */
+        note("EVO vdec native: CLOSE skipped - decoder is hung, leaving the slot as it is");
+        return;
+    }
 
     if (v->annexb_extradata) {
         free(v->annexb_extradata);
@@ -1986,7 +2108,7 @@ void evo_vdec_native_close(evo_vdec_native *v)
                  v->desc->tag, flex_after >> 20);
         } else {
             if (v->dec)
-                sceVideodec2Reset(v->dec);   /* leave the resident decoder alive */
+                { nwd_enter("Reset (close)", NWD_RESET_MS); sceVideodec2Reset(v->dec); nwd_leave(); }   /* leave the resident decoder alive */
         }
         slot->owned = 0;          /* the next opener may have it */
     }
@@ -2023,5 +2145,6 @@ int evo_vdec_native_send(evo_vdec_native *v, const uint8_t *d, int s, int64_t p)
 int evo_vdec_native_receive(evo_vdec_native *v, pp_frame *o) { (void)v; (void)o; return -1; }
 void evo_vdec_native_flush(evo_vdec_native *v) { (void)v; }
 void evo_vdec_native_close(evo_vdec_native *v) { (void)v; }
+int evo_vdec_native_hung(void) { return 0; }
 
 #endif /* EVO_APP_MODULE */

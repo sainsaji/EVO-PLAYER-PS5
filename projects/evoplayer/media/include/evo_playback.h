@@ -62,6 +62,7 @@ extern pthread_t    video_thread;
 /* 1 while the decode thread is idle (not inside push_frame's unlocked convert).
  * main.c waits on this before a #32 scrub-overlay VO reconfigure. */
 extern volatile int video_decode_parked;
+extern volatile int video_thread_exited;
 
 /* ---- TRANSITIONAL raw state.
  * A8 migrated main.c's OSD / debug / completion *reads* to evo_pb_*(); what

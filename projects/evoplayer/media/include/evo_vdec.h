@@ -100,6 +100,11 @@ typedef enum {
  * the cached evo_vdec_probe() result. */
 evo_vdec_backend evo_vdec_pref_resolve(evo_vdec_pref pref, int codec_id);
 
+/* 1 once a sceVideodec2 call stopped returning (#39). Native decode is then off
+ * for the rest of the process and the stuck decode thread must be abandoned,
+ * not joined. Always 0 on host / payload builds. */
+int evo_vdec_native_hung(void);
+
 /* Would evo_vdec_open() honour a NATIVE request for this stream? Answers the
  * same profile / bit-depth / dimension gate evo_vdec_open() applies, without
  * opening anything, so a caller that only wants the hardware path can decide
