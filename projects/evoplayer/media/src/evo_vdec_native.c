@@ -1401,6 +1401,9 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
     n->au_ring++;
 
     uint8_t *slot_mem = n->input_mem + (size_t)islot * INPUT_SLOT_BYTES;
+    /* `size` shrinks when the HEVC cleaner drops the RPU NALs below, but the
+     * Dolby Vision parser reads the ORIGINAL access unit: it needs this length. */
+    const int au_size_orig = size;
     if (n->desc->codec_type == SCE_VIDEODEC2_CODEC_HEVC) {
         int stripped = 0, dups = 0;
         size = hevc_copy_base_layer(slot_mem, au, size, &stripped, &dups);
@@ -1498,7 +1501,7 @@ static int decode_one(evo_vdec_native *n, const uint8_t *au, int size,
 
     if (present) {
         if (n->dovi)
-            dovi_note_au(n, au, size, pts);
+            dovi_note_au(n, au, au_size_orig, pts);
         pts_push(n, pts);
     }
     if (out.valid && out.picture_count) {

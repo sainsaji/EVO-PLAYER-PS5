@@ -652,6 +652,10 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
 
     stopPlayback();
 
+    /* A poster decode in flight may hold the resident decoder slot. */
+    if (auto* cover = Application::getInstance().getCoverArtService())
+        cover->quiesce();
+
     /* A pinned quality belongs to the source it was pinned on. */
     if (m_pinnedVideoFor != filePath) {
         m_pinnedVideoStream = -1;

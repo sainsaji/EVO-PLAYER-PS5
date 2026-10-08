@@ -43,6 +43,20 @@ public:
                                     uint32_t* destBgra, int destWidth, int destHeight) = 0;
 
     virtual void clearCache() = 0;
+
+    /*
+     * Off-thread variants for screens that must keep drawing while a poster
+     * decodes (the storage browser). request*() returns at once and the pixels
+     * show up through the usual peek/get accessors after a later pumpAsync();
+     * pumpAsync() runs on the UI thread and is the only place results land.
+     */
+    virtual void requestCoverArt(const std::string& mediaPath, bool isDirectory) = 0;
+    virtual void requestBrowserPreview(const std::string& mediaPath, bool isDirectory) = 0;
+    virtual void pumpAsync() = 0;
+
+    /* Drop queued work and wait for the one job in flight. Called before
+     * playback opens a decoder, so a poster never holds the resident slot. */
+    virtual void quiesce() = 0;
 };
 
 } // namespace evo

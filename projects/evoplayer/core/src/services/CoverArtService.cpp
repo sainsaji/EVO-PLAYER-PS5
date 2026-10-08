@@ -247,8 +247,45 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
     evo_bt("extractVideoFrame: hardware decoder for the poster");
     evo_boot_log_flush();
 
-    if (seekSec > 0.0 && st->time_base.den > 0) {
-        int64_t seekTs = static_cast<int64_t>(seekSec / av_q2d(st->time_base));
+    AVPacket* pkt = av_packet_alloc();
+    if (!pkt) {
+        evo_vdec_close(dec);
+        return false;
+    }
+    pp_frame pf;
+    bool success = false;
+    bool dark = false;
+
+    /*
+     * Demo reels (the LG 4K HDR set) open on black and fade in, so the frame at
+     * the first spot tried can be pure black. A dark poster is kept as the
+     * fallback, but two later positions are tried before settling for it.
+     */
+    const double dur = (fmt->duration > 0)
+                     ? static_cast<double>(fmt->duration) / static_cast<double>(AV_TIME_BASE) : 0.0;
+    const double seekTries[3] = { seekSec, dur * 0.35, dur * 0.6 };
+    for (int pass = 0; pass < 3; ++pass) {
+    /* No duration (an MKV remuxed from TS, raw streams): jump by file position
+     * instead, which needs no timestamps. */
+    const int64_t fileBytes = fmt->pb ? avio_size(fmt->pb) : 0;
+    const bool byBytes = dur < 3.0 && fileBytes > (1 << 20);
+    if (pass > 0 && (!dark || (dur < 3.0 && !byBytes))) {
+        evo_bt("extractVideoFrame: poster pass %d stops: dark=%d dur=%.1f", pass, (int)dark, dur);
+        break;
+    }
+    const double trySec = seekTries[pass];
+    evo_bt("extractVideoFrame: poster pass %d at %s (dur %.1fs)", pass,
+           byBytes ? (pass == 0 ? "start" : "file position") : "time", dur);
+    int maxPackets = 48;
+    if (byBytes && pass > 0) {
+        const int64_t pos = (int64_t)((double)fileBytes * (pass == 1 ? 0.25 : 0.55));
+        /* Lands mid-GOP: the decoder drops pictures until the next IRAP, so
+         * give it room to find one. */
+        maxPackets = 600;
+        if (avformat_seek_file(fmt, -1, INT64_MIN, pos, INT64_MAX, AVSEEK_FLAG_BYTE) < 0)
+            av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
+    } else if (trySec > 0.0 && st->time_base.den > 0) {
+        int64_t seekTs = static_cast<int64_t>(trySec / av_q2d(st->time_base));
         if (seekTs < 0) seekTs = 0;
         if (av_seek_frame(fmt, vstream, seekTs, AVSEEK_FLAG_BACKWARD) < 0)
             av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
@@ -265,18 +302,11 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
      */
     evo_vdec_flush(dec);
 
-    AVPacket* pkt = av_packet_alloc();
-    if (!pkt) {
-        evo_vdec_close(dec);
-        return false;
-    }
-
-    pp_frame pf;
     std::memset(&pf, 0, sizeof(pf));
     bool gotFrame = false;
     int packetCount = 0;
 
-    while (!gotFrame && packetCount < 48 && av_read_frame(fmt, pkt) >= 0) {
+    while (!gotFrame && packetCount < maxPackets && av_read_frame(fmt, pkt) >= 0) {
         packetCount++;
         if (pkt->stream_index == vstream) {
             int64_t pts = (pkt->pts != AV_NOPTS_VALUE)
@@ -286,7 +316,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
              * same unit, exactly as the play loop does. */
             for (int attempt = 0; attempt < 8; ++attempt) {
                 int sent = evo_vdec_send(dec, pkt->data, pkt->size, pts);
-                if (sent < 0) { packetCount = 48; break; }
+                if (sent < 0) { packetCount = maxPackets; break; }
                 if (evo_vdec_receive(dec, &pf) == 1) gotFrame = true;
                 if (sent == 0) break;
                 if (gotFrame) break;
@@ -300,7 +330,6 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
         gotFrame = (evo_vdec_receive(dec, &pf) == 1);
     }
 
-    bool success = false;
     if (gotFrame && pf.planes[0] && pf.width > 0 && pf.height > 0) {
         /*
          * 10-bit two-plane needs shifting before swscale can read it.
@@ -377,14 +406,29 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
             sws_scale(sws, srcData, srcLines, 0, static_cast<int>(pf.height), dst, dstLines);
             sws_freeContext(sws);
             success = true;
-            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d%s",
+            /* Brightness of what was produced: tells a black poster (decoder
+             * or conversion) from a dark one (PQ shown as SDR, fade-in frame). */
+            unsigned long long sumY = 0;
+            unsigned maxC = 0;
+            const uint8_t* px = reinterpret_cast<const uint8_t*>(outPixels);
+            const size_t npx = (size_t)targetWidth * targetHeight;
+            for (size_t i = 0; i < npx; ++i, px += 4) {
+                sumY += (px[0] + px[1] + px[2]) / 3;
+                if (px[0] > maxC) maxC = px[0];
+                if (px[1] > maxC) maxC = px[1];
+                if (px[2] > maxC) maxC = px[2];
+            }
+            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d%s mean=%llu max=%u",
                    pf.width, pf.height, (int)pf.format,
-                   shiftBuf ? " (10-bit shifted)" : "");
+                   shiftBuf ? " (10-bit shifted)" : "",
+                   npx ? sumY / npx : 0ULL, maxC);
             evo_boot_log_flush();
+            dark = (npx == 0) || (sumY / npx) < 10;
         }
         if (shiftBuf)
             av_freep(&shiftBuf);
     }
+    }   /* for pass */
 
     av_packet_free(&pkt);
     evo_vdec_close(dec);     /* releases the resident slot */
@@ -411,6 +455,13 @@ CoverArtService::CoverArtService() {
 }
 
 void CoverArtService::clearCache() {
+    pthread_mutex_lock(&m_jobMutex);
+    m_generation++;                 /* results already in flight are discarded */
+    m_posterJobs.clear();
+    m_hasPreviewJob = false;
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.clear();
+    m_previewPending = false;
     for (auto& entry : m_cache) {
         entry.pathKey.clear();
         entry.valid = false;
@@ -583,7 +634,22 @@ void CoverArtService::boxFilterScaleRgba(const uint8_t* sourceRgba, int srcWidth
     }
 }
 
+/*
+ * One extraction at a time. The worker thread and the synchronous callers
+ * (launch shelf, hero art) share the crash note, the resident hardware slot and
+ * the heap pre-flight, none of which tolerate two extractions overlapping.
+ */
+struct ExtractLock {
+    static pthread_mutex_t& mutex() {
+        static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+        return m;
+    }
+    ExtractLock()  { pthread_mutex_lock(&mutex()); }
+    ~ExtractLock() { pthread_mutex_unlock(&mutex()); }
+};
+
 bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* outPixels, int targetWidth, int targetHeight) {
+    ExtractLock extractLock;
     evo_bt("extractVideoFrame: %s (%dx%d)", videoPath.c_str(), targetWidth, targetHeight);
     evo_boot_log_flush();
 
@@ -1220,6 +1286,230 @@ void CoverArtService::ensureBrowserPreview(const std::string& mediaPath, bool is
 
 const uint32_t* CoverArtService::getBrowserPreviewPixels() const {
     return m_browserPreviewValid ? m_browserPreviewPixels.data() : nullptr;
+}
+
+/* ---- Off-thread loading ------------------------------------------------ */
+
+/* Same order as getCoverArt: sidecar image, then a video frame, then the file
+ * itself if it is an image. Touches no member state, so the worker can run it. */
+bool CoverArtService::loadArtInto(const std::string& mediaPath, bool isDirectory,
+                                  uint32_t* out, int w, int h) {
+    if (access(mediaPath.c_str(), R_OK) != 0)
+        return false;
+
+    std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
+    if (!sidecar.empty()) {
+        int sw = 0, sh = 0, ch = 0;
+        unsigned char* data = stbi_load(sidecar.c_str(), &sw, &sh, &ch, 4);
+        if (data && sw >= 2 && sh >= 2) {
+            boxFilterScaleRgba(data, sw, sh, out, w, h);
+            stbi_image_free(data);
+            return true;
+        }
+        if (data) stbi_image_free(data);
+    }
+
+    if (!isDirectory && isVideoFile(mediaPath)) {
+        if (extractVideoFrame(mediaPath, out, w, h))
+            return true;
+    }
+
+    if (!isDirectory) {
+        size_t dot = mediaPath.find_last_of('.');
+        if (dot != std::string::npos) {
+            std::string ext = mediaPath.substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".webp") {
+                int sw = 0, sh = 0, ch = 0;
+                unsigned char* data = stbi_load(mediaPath.c_str(), &sw, &sh, &ch, 4);
+                if (data && sw >= 2 && sh >= 2) {
+                    boxFilterScaleRgba(data, sw, sh, out, w, h);
+                    stbi_image_free(data);
+                    return true;
+                }
+                if (data) stbi_image_free(data);
+            }
+        }
+    }
+    return false;
+}
+
+CoverArtService::~CoverArtService() {
+    if (m_workerStarted) {
+        pthread_mutex_lock(&m_jobMutex);
+        m_stop = true;
+        pthread_cond_signal(&m_jobCond);
+        pthread_mutex_unlock(&m_jobMutex);
+        pthread_join(m_worker, nullptr);
+    }
+}
+
+void* CoverArtService::workerEntry(void* self) {
+    static_cast<CoverArtService*>(self)->workerMain();
+    return nullptr;
+}
+
+void CoverArtService::startWorker() {
+    if (m_workerStarted) return;
+    /* FFmpeg and the decoder libraries overflow the default stack. */
+    pthread_attr_t attr;
+    int rc;
+    if (pthread_attr_init(&attr) == 0) {
+        pthread_attr_setstacksize(&attr, 1u << 20);
+        rc = pthread_create(&m_worker, &attr, workerEntry, this);
+        pthread_attr_destroy(&attr);
+    } else {
+        rc = pthread_create(&m_worker, nullptr, workerEntry, this);
+    }
+    m_workerStarted = (rc == 0);
+    if (!m_workerStarted)
+        evo_bt("CoverArtService: worker pthread_create rc=%d", rc);
+}
+
+void CoverArtService::workerMain() {
+    for (;;) {
+        Job job;
+        pthread_mutex_lock(&m_jobMutex);
+        for (;;) {
+            if (m_stop) { pthread_mutex_unlock(&m_jobMutex); return; }
+            /* The focused file's preview beats any poster. */
+            if (m_hasPreviewJob) {
+                job = m_previewJob;
+                m_hasPreviewJob = false;
+                break;
+            }
+            if (!m_posterJobs.empty()) {
+                job = m_posterJobs.front();
+                m_posterJobs.pop_front();
+                break;
+            }
+            pthread_cond_wait(&m_jobCond, &m_jobMutex);
+        }
+        m_busy = true;
+        pthread_mutex_unlock(&m_jobMutex);
+
+        Result res;
+        res.job = job;
+        const int w = job.preview ? PreviewWidth : PosterWidth;
+        const int h = job.preview ? PreviewHeight : PosterHeight;
+        res.pixels.assign(static_cast<size_t>(w) * h, 0);
+        res.ok = loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
+
+        pthread_mutex_lock(&m_jobMutex);
+        m_results.push_back(std::move(res));
+        m_busy = false;
+        pthread_cond_broadcast(&m_idleCond);
+        pthread_mutex_unlock(&m_jobMutex);
+
+        /* Back-to-back 4K decodes exhausted the heap before this was paced
+         * (see the pre-flight in extractVideoFrame); leave the allocator a gap. */
+        if (!job.preview)
+            usleep(150 * 1000);
+    }
+}
+
+void CoverArtService::requestCoverArt(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) return;
+    if (findSlot(mediaPath)) return;                 /* tried already */
+    if (m_pendingPosters.count(mediaPath)) return;
+    startWorker();
+    if (!m_workerStarted) return;
+
+    constexpr size_t MaxQueued = 16;
+    pthread_mutex_lock(&m_jobMutex);
+    /* Fast scrolling leaves tiles behind that nobody is looking at; the oldest
+     * request is the likeliest to be one of them. */
+    while (m_posterJobs.size() >= MaxQueued) {
+        m_pendingPosters.erase(m_posterJobs.front().path);
+        m_posterJobs.pop_front();
+    }
+    Job j;
+    j.path = mediaPath;
+    j.isDir = isDirectory;
+    j.generation = m_generation;
+    m_posterJobs.push_back(std::move(j));
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.insert(mediaPath);
+}
+
+void CoverArtService::requestBrowserPreview(const std::string& mediaPath, bool isDirectory) {
+    if (mediaPath.empty()) {
+        m_browserPreviewValid = false;
+        m_browserPreviewPath.clear();
+        m_previewPending = false;
+        return;
+    }
+    if (m_browserPreviewPath == mediaPath) return;   /* pending, valid or failed */
+
+    startWorker();
+    if (!m_workerStarted) return;
+
+    m_browserPreviewPath = mediaPath;
+    m_browserPreviewValid = false;
+    m_browserPreviewFailed = false;
+    m_previewPending = true;
+
+    pthread_mutex_lock(&m_jobMutex);
+    m_previewJob = Job();
+    m_previewJob.preview = true;
+    m_previewJob.path = mediaPath;
+    m_previewJob.isDir = isDirectory;
+    m_previewJob.generation = m_generation;
+    m_hasPreviewJob = true;                          /* replaces any older one */
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+}
+
+void CoverArtService::pumpAsync() {
+    if (!m_workerStarted) return;
+    for (;;) {
+        Result res;
+        pthread_mutex_lock(&m_jobMutex);
+        if (m_results.empty()) { pthread_mutex_unlock(&m_jobMutex); return; }
+        res = std::move(m_results.front());
+        m_results.pop_front();
+        const unsigned gen = m_generation;
+        pthread_mutex_unlock(&m_jobMutex);
+
+        if (res.job.generation != gen) continue;     /* cache was cleared */
+
+        if (res.job.preview) {
+            if (res.job.path != m_browserPreviewPath) continue;   /* cursor moved on */
+            m_previewPending = false;
+            if (res.ok) {
+                std::copy(res.pixels.begin(), res.pixels.end(), m_browserPreviewPixels.begin());
+                m_browserPreviewValid = true;
+            } else {
+                m_browserPreviewFailed = true;
+            }
+        } else {
+            m_pendingPosters.erase(res.job.path);
+            CacheEntry* slot = findOrAllocateSlot(res.job.path);
+            if (!slot) continue;
+            slot->pathKey = res.job.path;
+            slot->tried = true;
+            slot->valid = res.ok;
+            if (res.ok)
+                std::copy(res.pixels.begin(), res.pixels.end(), slot->pixels.begin());
+        }
+    }
+}
+
+void CoverArtService::quiesce() {
+    if (!m_workerStarted) return;
+    pthread_mutex_lock(&m_jobMutex);
+    m_posterJobs.clear();
+    m_hasPreviewJob = false;
+    while (m_busy)
+        pthread_cond_wait(&m_idleCond, &m_jobMutex);
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.clear();
+    m_previewPending = false;
+    pumpAsync();
+    /* A preview that was queued and dropped must be re-requestable. */
+    if (!m_browserPreviewValid && !m_browserPreviewFailed)
+        m_browserPreviewPath.clear();
 }
 
 } // namespace evo

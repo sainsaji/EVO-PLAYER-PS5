@@ -1326,13 +1326,14 @@ void BrowserScreen::update(double deltaMs) {
 
     m_settleMs += deltaMs;
     auto coverService = Application::getInstance().getCoverArtService();
+    if (coverService) coverService->pumpAsync();
 
     if (!m_showTransferDialog && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
         const auto& item = m_items[m_selectedIndex];
         bool isDir = (item.category == FileCategory::Folder);
         if (m_settleMs >= 200.0) {
             if (coverService) {
-                coverService->ensureBrowserPreview(item.fullPath, isDir);
+                coverService->requestBrowserPreview(item.fullPath, isDir);
             }
             if (m_browserFsm.getCurrentState() == BrowserScreenState::Browsing) {
                 m_browserFsm.postEvent(BrowserScreenEvent::SettleTriggered);
@@ -1533,29 +1534,8 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
 
     params.row_count = std::min(visibleCards, std::max(0, totalCount - m_scrollOffset));
 
-    /*
-     * One poster extraction per CoverIntervalMs of wall clock.
-     *
-     * This used to be one per render() call, which sounds like a throttle and
-     * is not: render() runs on every pass of the main loop, hundreds of times
-     * a second in a menu, so extractions ran back to back with only the decode
-     * itself between them. A page of 4K HEVC files then allocated and freed
-     * tens of MB per decode with no gap, and after a few dozen the heap could
-     * no longer serve one - see the pre-flight in
-     * CoverArtService::extractVideoFrame. Pacing on the clock gives the
-     * allocator room to settle and keeps paging responsive.
-     */
-    constexpr uint64_t CoverIntervalMs = 150;
-    static uint64_t s_lastCoverMs = 0;
-    uint64_t nowCoverMs = 0;
-    {
-        struct timeval tv;
-        gettimeofday(&tv, nullptr);
-        nowCoverMs = static_cast<uint64_t>(tv.tv_sec) * 1000ULL +
-                     static_cast<uint64_t>(tv.tv_usec / 1000ULL);
-    }
-    int coverBudget = (nowCoverMs - s_lastCoverMs >= CoverIntervalMs) ? 1 : 0;
-
+    /* Poster extraction runs on the CoverArtService worker, which paces itself;
+     * render() only asks. */
     for (int i = 0; i < params.row_count; ++i) {
         int idx = m_scrollOffset + i;
         const auto& item = m_items[idx];
@@ -1571,16 +1551,9 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         if (!m_showTransferDialog && coverService && item.fullPath.find("://") == std::string::npos) {
             art = coverService->peekCoverArt(item.fullPath);
             bool tried = coverService->hasTriedCoverArt(item.fullPath);
-            if (!art && !tried && coverBudget > 0) {
-                art = coverService->getCoverArt(item.fullPath, item.category == FileCategory::Folder);
-                coverBudget--;
-                /* Stamped after, not before: the interval is a gap between
-                 * extractions, so a slow 4K decode does not immediately earn
-                 * the next one. */
-                struct timeval tvDone;
-                gettimeofday(&tvDone, nullptr);
-                s_lastCoverMs = static_cast<uint64_t>(tvDone.tv_sec) * 1000ULL +
-                                static_cast<uint64_t>(tvDone.tv_usec / 1000ULL);
+            if (!art && !tried) {
+                /* Decoded on the worker; the tile fills in after pumpAsync(). */
+                coverService->requestCoverArt(item.fullPath, item.category == FileCategory::Folder);
             }
         }
         params.rows[i].art = art;
