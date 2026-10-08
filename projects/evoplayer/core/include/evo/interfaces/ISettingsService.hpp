@@ -95,6 +95,9 @@ public:
     virtual void setAudioOutputChannels(AudioOutputChannels channels) = 0;
     virtual const char* getAudioOutputChannelsName(AudioOutputChannels channels) const = 0;
 
+    virtual bool isAudioPassthroughEnabled() const = 0;
+    virtual void setAudioPassthroughEnabled(bool enabled) = 0;
+
     virtual void syncThemeToRmlUi() = 0;
 
 };

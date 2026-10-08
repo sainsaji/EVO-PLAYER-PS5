@@ -31,6 +31,7 @@
 
 extern int    screen;   /* main.c */
 extern void   evo_iobench_run(const char *spec);   /* evo_iobench.c */
+extern void   evo_pt_probe_run(const char *spec);  /* evo_pt_probe.c */
 
 static long long now_ms_local(void)
 {
@@ -157,6 +158,10 @@ static void run_command(const char *line)
         while (*arg == ' ')
             ++arg;
         evo_iobench_run(arg);
+        return;
+    }
+    if (strncmp(buf, "ptprobe ", 8) == 0) {
+        evo_pt_probe_run(buf + 8);
         return;
     }
     if (strcmp(buf, "upcompare") == 0) {

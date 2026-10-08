@@ -25,6 +25,7 @@
 #include "evo_packet_queue.h"
 #include "evo_audio_resample.h"
 #include "evo_adec.h"
+#include "evo_pt.h"
 #include "pp_playback.h"
 #include "evo_boot_log.h"
 #include "evo_speaker_cal.h"
@@ -240,7 +241,25 @@ void *audio_output_thread(void *arg) {
                 usleep(2000);
                 continue;
             }
-            if (audio_queue_count > 0) {
+            if (evo_pt_is_active()) {
+                static uint8_t pt_grain_buf[4096];
+                static uint8_t pt_silence_buf[4096];
+                int grain_bytes = (int)evo_pt_grain_bytes();
+                if (grain_bytes > (int)sizeof(pt_grain_buf))
+                    grain_bytes = sizeof(pt_grain_buf);
+
+                if (evo_pt_pop_grain(pt_grain_buf, (size_t)grain_bytes) > 0) {
+                    sceAudioOutOutput(audio_handle, pt_grain_buf);
+                    audio_samples_played += evo_pt_grain_frames();
+                    int sr = evo_pt_sample_rate();
+                    if (sr <= 0) sr = 48000;
+                    audio_clock_seconds = (double)audio_samples_played / (double)sr;
+                } else {
+                    /* Soft underrun: silence burst */
+                    memset(pt_silence_buf, 0, (size_t)grain_bytes);
+                    sceAudioOutOutput(audio_handle, pt_silence_buf);
+                }
+            } else if (audio_queue_count > 0) {
                 sceAudioOutOutput(audio_handle, audio_queue[audio_queue_read]);
                 audio_samples_played += AUDIO_BLOCK_SAMPLES;
                 audio_clock_seconds = (double)audio_samples_played / 48000.0;
@@ -522,6 +541,26 @@ void *audio_decode_thread_func(void *arg) {
             continue;
         }
 
+        if (evo_pt_is_active()) {
+            /* Throttle if the passthrough queue has accumulated enough grains (e.g. 64 grains ~ 340ms) */
+            while (audio_decode_thread_running && evo_pt_queued_grains() > 64) {
+                usleep(2000);
+            }
+            if (pkt->pts != AV_NOPTS_VALUE && play_fmt && audio_stream_index >= 0) {
+                audio_pts_seconds = (double)pkt->pts *
+                    av_q2d(play_fmt->streams[audio_stream_index]->time_base);
+                if (first_audio_pts_seconds < 0.0) {
+                    first_audio_pts_seconds = audio_pts_seconds;
+                    anchor_resume_base();
+                }
+            }
+            int sr = (audio_ctx && audio_ctx->sample_rate > 0) ? audio_ctx->sample_rate : 48000;
+            int ch = (audio_ctx && audio_ctx->ch_layout.nb_channels > 0) ? audio_ctx->ch_layout.nb_channels : 2;
+            evo_pt_push_packet(pkt->data, (size_t)pkt->size, sr, ch);
+            av_packet_free(&pkt);
+            continue;
+        }
+
         /*
          * Native decode (libSceAudiodec, AAC/MP3) produces interleaved S16 at
          * the stream rate. Wrap it in an AVFrame and hand it to the same
@@ -721,14 +760,15 @@ void prospero_audio_build_label(
     snprintf(
         output,
         output_size,
-        "%d/%d  %s  %s  %dCH",
+        "%d/%d  %s  %s  %dCH%s",
         ordinal,
         count,
         language_text,
         codec_name
             ? codec_name
             : "unknown",
-        channels
+        channels,
+        (evo_pt_is_active() && selected_stream == audio_stream_index) ? " [PASSTHROUGH]" : ""
     );
 }
 

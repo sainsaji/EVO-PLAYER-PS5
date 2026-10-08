@@ -396,6 +396,7 @@ ui)     evo_ui show "$@" ;;
 screen) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh screen <id>  (an evo::ScreenId number)"; put_cmd "screen $1" ;;
 source) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh source <n>  (0 USB, 1 Internal, 2 Favorites, 3 Recent)"; put_cmd "source $1" ;;
 iobench) put_cmd "iobench ${1:-}" ;;
+ptprobe) [[ -n "${1:-}" ]] || die "usage: evo-remote.sh ptprobe info | mode <n> [target] | reset | stream <pt|main> <secs> <path> | sweep <path> | sony <path>"; put_cmd "ptprobe $*" ;;
 image)  [[ -n "${1:-}" ]] || die "usage: evo-remote.sh image <path>"; put_cmd "image $1" ;;
 text)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh text <path>"; put_cmd "text $1" ;;
 # Fill EVO's virtual keyboard in one shot, rather than ~5 D-pad presses per

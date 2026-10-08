@@ -8,6 +8,7 @@
 #include "evo_thread.h"
 #include "evo_demux.h"
 #include "evo_audio_out.h"
+#include "evo_pt.h"
 #include "evo_audio_resample.h"
 #include "evo_packet_queue.h"
 #include "evo_vdec.h"
@@ -350,6 +351,7 @@ PlaybackController::PlaybackController()
 
 PlaybackController::~PlaybackController() {
     stopPlayback();
+    evo_pt_cleanup();
 }
 
 void PlaybackController::initStateMachine() {
@@ -558,7 +560,11 @@ void PlaybackController::stopPlayback() {
     evo_playback_release_sw_scaler();
 
     if (audio_handle >= 1) {
-        sceAudioOutClose(audio_handle);
+        if (evo_pt_is_active()) {
+            evo_pt_close(audio_handle);
+        } else {
+            sceAudioOutClose(audio_handle);
+        }
         audio_handle = -1;
     }
 
@@ -1240,42 +1246,60 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                      * resampler follows evo_audio_channels, so a 5.1/7.1
                      * source is downmixed to 2.0 by libswresample. */
                     bool forceStereo = false;
-                    if (ISettingsService *settings = Application::getInstance().getSettingsService())
+                    bool passthroughEnabled = false;
+                    if (ISettingsService *settings = Application::getInstance().getSettingsService()) {
                         forceStereo = settings->getAudioOutputChannels() == AudioOutputChannels::Stereo;
+                        passthroughEnabled = settings->isAudioPassthroughEnabled();
+                    }
 
-                    if (chCount > 2 && !forceStereo) {
-                        handle = sceAudioOutOpen(0xFF, 0, 0,
-                                                 AUDIO_BLOCK_SAMPLES, 48000,
-                                                 2 /* S16_8CH */);
+                    if (passthroughEnabled && !forceStereo && evo_pt_probe_sink_support(aStream->codecpar->codec_id)) {
+                        handle = evo_pt_open(aStream->codecpar->codec_id);
                         if (handle >= 1) {
-                            evo_audio_channels = 8;
+                            evo_audio_channels = chCount;
+                            evo_boot_log("audio: bitstream passthrough active (%s, %dch, handle=%d)",
+                                         evo_pt_active_codec_name(), chCount, handle);
                         } else {
-                            toast("AUDIO",
-                                  "surround port refused, falling back to stereo");
+                            toast("PASSTHROUGH", "bitstream port refused, falling back to PCM");
                         }
                     }
 
-                    /* Surround refused (or a genuinely stereo source): stereo. */
                     if (handle < 1) {
-                        evo_audio_channels = 2;
-                        handle = sceAudioOutOpen(0xFF, 0, 0,
-                                                 AUDIO_BLOCK_SAMPLES, 48000,
-                                                 1 /* S16_STEREO */);
+                        if (chCount > 2 && !forceStereo) {
+                            handle = sceAudioOutOpen(0xFF, 0, 0,
+                                                     AUDIO_BLOCK_SAMPLES, 48000,
+                                                     2 /* S16_8CH */);
+                            if (handle >= 1) {
+                                evo_audio_channels = 8;
+                            } else {
+                                toast("AUDIO",
+                                      "surround port refused, falling back to stereo");
+                            }
+                        }
+
+                        /* Surround refused (or a genuinely stereo source): stereo. */
+                        if (handle < 1) {
+                            evo_audio_channels = 2;
+                            handle = sceAudioOutOpen(0xFF, 0, 0,
+                                                     AUDIO_BLOCK_SAMPLES, 48000,
+                                                     1 /* S16_STEREO */);
+                        }
                     }
 
                     audio_handle = handle;
-                    evo_boot_log("audio: source %dch -> port %dch (output=%s) handle=%d",
+                    evo_boot_log("audio: source %dch -> port %dch (output=%s, pt=%d) handle=%d",
                                  chCount, evo_audio_channels,
-                                 forceStereo ? "stereo" : "auto", handle);
+                                 forceStereo ? "stereo" : "auto", evo_pt_is_active(), handle);
 
                     if (audio_handle < 1) {
                         toast("AUDIO OUTPUT ERROR",
                               "PS5 audio output could not start");
                     }
 
-                    detected_audio_rate = (audio_ctx->sample_rate > 0)
-                                              ? audio_ctx->sample_rate
-                                              : 48000;
+                    detected_audio_rate = evo_pt_is_active()
+                                              ? evo_pt_sample_rate()
+                                              : ((audio_ctx->sample_rate > 0)
+                                                     ? audio_ctx->sample_rate
+                                                     : 48000);
 
                     audio_queue_read = 0;
                     audio_queue_write = 0;
@@ -1290,20 +1314,22 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                      * OSD reads for codec metadata, and it is the fallback the
                      * decode thread drops to if a native AU ever fails.
                      */
-                    evo_adec_open_params ap;
-                    std::memset(&ap, 0, sizeof(ap));
-                    ap.codec_id = aStream->codecpar->codec_id;
-                    ap.sample_rate = aStream->codecpar->sample_rate;
-                    ap.channels = chCount;
-                    ap.extradata = aStream->codecpar->extradata;
-                    ap.extradata_size = aStream->codecpar->extradata_size;
+                    if (!evo_pt_is_active()) {
+                        evo_adec_open_params ap;
+                        std::memset(&ap, 0, sizeof(ap));
+                        ap.codec_id = aStream->codecpar->codec_id;
+                        ap.sample_rate = aStream->codecpar->sample_rate;
+                        ap.channels = chCount;
+                        ap.extradata = aStream->codecpar->extradata;
+                        ap.extradata_size = aStream->codecpar->extradata_size;
 
-                    evo_adec_backend achosen = EVO_ADEC_BACKEND_FFMPEG;
-                    g_adec = evo_adec_open(&ap, &achosen);
-                    evo_boot_log("PlaybackController: audio %s (codec=%d, %dch, %d Hz)",
-                                 (achosen == EVO_ADEC_BACKEND_NATIVE)
-                                     ? "NATIVE (sceAudiodec)" : "FFmpeg",
-                                 (int)ap.codec_id, ap.channels, ap.sample_rate);
+                        evo_adec_backend achosen = EVO_ADEC_BACKEND_FFMPEG;
+                        g_adec = evo_adec_open(&ap, &achosen);
+                        evo_boot_log("PlaybackController: audio %s (codec=%d, %dch, %d Hz)",
+                                     (achosen == EVO_ADEC_BACKEND_NATIVE)
+                                         ? "NATIVE (sceAudiodec)" : "FFmpeg",
+                                     (int)ap.codec_id, ap.channels, ap.sample_rate);
+                    }
                 }
             }
         }

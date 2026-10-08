@@ -40,6 +40,7 @@ enum class SettingKey : int {
     HdrOutput,
     /* AUDIO */
     OutputChannels,
+    AudioPassthrough,
     SurroundTest,
     NavigationSounds,
     /* SUBTITLES */
@@ -91,7 +92,7 @@ const SettingKey kVideoKeys[] = {
     SettingKey::HdrOutput, SettingKey::DeepBlacks,
 };
 const SettingKey kAudioKeys[] = {
-    SettingKey::OutputChannels, SettingKey::SurroundTest, SettingKey::NavigationSounds,
+    SettingKey::OutputChannels, SettingKey::AudioPassthrough, SettingKey::SurroundTest, SettingKey::NavigationSounds,
 };
 const SettingKey kSubtitleKeys[] = {
     SettingKey::AutoSubtitles, SettingKey::SubtitleFont,
@@ -270,6 +271,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                      static_cast<int>(settings->getAudioOutputChannels()));
         for (int i = 0; i < 2; ++i)
             d.opt_label[i] = settings->getAudioOutputChannelsName(static_cast<AudioOutputChannels>(i));
+        break;
+
+    case SettingKey::AudioPassthrough:
+        d = toggleDef(key, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI",
+                      "../icons/icon_volume.png", settings->isAudioPassthroughEnabled());
         break;
 
     case SettingKey::SurroundTest:
@@ -463,6 +469,7 @@ void toggleSetting(SettingKey key) {
     if (!st) return;
     switch (key) {
     case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
+    case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
     case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;

@@ -133,6 +133,7 @@ MEDIA_SRCS := \
     src/evo_crash_note.c \
     src/evo_usb_remote.c \
     src/evo_iobench.c \
+    src/evo_pt_probe.c \
     src/evo_webui.c \
     src/evo_jailbreak.c
 
@@ -187,6 +188,9 @@ CORE_SRCS := \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/FileTransferService.cpp \
     core/src/services/PlaybackController.cpp \
+    core/src/audio/iec61937.cpp \
+    core/src/audio/bitstream.cpp \
+    core/src/audio/evo_pt.cpp \
     core/src/screens/ScreenManager.cpp \
     core/src/screens/LaunchScreen.cpp \
     core/src/screens/BrowserScreen.cpp \

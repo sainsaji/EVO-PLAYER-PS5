@@ -152,7 +152,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -175,7 +175,8 @@ bool SettingsService::saveSettings() {
         m_askStream ? 1 : 0,                 // line 20 (live TV stream picker)
         static_cast<int>(m_audioOutputChannels), // line 21 (#117 stereo downmix)
         static_cast<int>(m_motionSmoothing), // line 22 (#105 motion smoothing)
-        static_cast<int>(m_deepBlacks)       // line 23 (#119 deep blacks)
+        static_cast<int>(m_deepBlacks),      // line 23 (#119 deep blacks)
+        m_audioPassthroughEnabled ? 1 : 0    // line 24 (HDMI bitstream passthrough)
     );
 
     std::fclose(file);
@@ -212,9 +213,10 @@ bool SettingsService::loadSettings() {
     int rawAudioChannels = 0;
     int rawMotionSmoothing = 0;
     int rawDeepBlacks = 0;
+    int rawAudioPassthrough = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -237,7 +239,8 @@ bool SettingsService::loadSettings() {
         &rawAskStream,
         &rawAudioChannels,
         &rawMotionSmoothing,
-        &rawDeepBlacks
+        &rawDeepBlacks,
+        &rawAudioPassthrough
     );
 
     std::fclose(file);
@@ -305,6 +308,9 @@ bool SettingsService::loadSettings() {
     }
     if (readCount >= 23 && rawDeepBlacks >= 0 && rawDeepBlacks <= 2) {
         m_deepBlacks = static_cast<DeepBlacks>(rawDeepBlacks);
+    }
+    if (readCount >= 24) {
+        m_audioPassthroughEnabled = (rawAudioPassthrough != 0);
     }
 
     syncThemeToRmlUi();

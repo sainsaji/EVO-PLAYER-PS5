@@ -85,6 +85,9 @@ public:
     void setAudioOutputChannels(AudioOutputChannels channels) override { m_audioOutputChannels = channels; }
     const char* getAudioOutputChannelsName(AudioOutputChannels channels) const override;
 
+    bool isAudioPassthroughEnabled() const override { return m_audioPassthroughEnabled; }
+    void setAudioPassthroughEnabled(bool enabled) override { m_audioPassthroughEnabled = enabled; }
+
     void syncThemeToRmlUi() override;
 
 private:
@@ -112,6 +115,7 @@ private:
     RefreshRateMode m_refreshRateMode = RefreshRateMode::Off;
     HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
     AudioOutputChannels m_audioOutputChannels = AudioOutputChannels::Auto;
+    bool m_audioPassthroughEnabled = false;
     bool m_debugOverlayEnabled = false;
 };
 
