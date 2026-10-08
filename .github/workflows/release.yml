@@ -98,8 +98,13 @@ jobs:
       # defaults docs/tooling.md documents as the normal deploy.
       - name: Build and PFS-pack the app module
         run: |
+          # The image's SDK ships FFmpeg 7.0.1; EVO needs 7.1.1 (AV1 fixes, and
+          # evo_dovi.c refuses to build against anything else). Local builds get
+          # it from build-ffmpeg.sh --install in a persistent volume, so CI has
+          # to build and install it into this container before packaging.
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:release bash -lc './scripts/package-app.sh --ffpfsc --zip'
+            evo-player/ps5-dev:release bash -lc \
+            './scripts/build-ffmpeg.sh --profile minimal --install && ./scripts/package-app.sh --ffpfsc --zip'
 
       # Independent checks on top of what package-app.sh already asserts
       # while building (titleId/version format, MkPFS "Errors: 0") - a
@@ -240,7 +245,7 @@ jobs:
           ## Verification
 
           Built reproducibly in CI from the pinned toolchain (clang 18,
-          PS5 Payload SDK v0.42, FFmpeg 7.0.1). **CI has no console, so this
+          PS5 Payload SDK v0.42, FFmpeg 7.1.1). **CI has no console, so this
           image is not hardware-tested** — it is exactly what
           `scripts/package-app.sh` produces locally. Checksum in
           `SHA256SUMS.txt`.
