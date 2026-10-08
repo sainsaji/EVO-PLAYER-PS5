@@ -27,7 +27,7 @@ EVO Player is a **game-category app module** (`PPSA99039`). It installs as a sin
 
 ### Prerequisites
 
-- A jailbroken PS5. Developed and verified on firmware **12.70** — other firmwares are not known to fail; treat anything else as unverified rather than unsupported.
+- A jailbroken PS5 on any firmware **below 13.60**. Developed and tested on 12.70.
 - **ShadowMountPlus** on the console to mount and manage the app image.
 - An FTP server on the console (the usual jailbreak payloads provide one on port `2121`).
 - *(For USB playback)* a USB drive formatted **exFAT** or **FAT32**, plugged into `/mnt/usb0`.
