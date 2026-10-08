@@ -1,3 +1,4 @@
+#include "../../projects/evoplayer/include/evo_changelog.h"
 #include "evo_rmlui_bridge.h"
 
 static void fill_dialog_fixture(evo_rmlui_dialog_params_t& p)
@@ -38,61 +39,33 @@ static void fill_about_fixture(evo_rmlui_about_params_t& p)
     p.action_focused = 1;
 }
 
+// Built from the real in-app changelog (the same fill as ChangelogScreen.cpp),
+// so the preview shows exactly what the console draws, overflow included.
 static void fill_changelog_fixture(evo_rmlui_changelog_params_t& p)
 {
-    p.title = "What's New";
-    p.subtitle = "Recent updates to EVO Player";
-    
-    p.release_count = 4;
-    p.release_total = 4;
-    
-    p.releases[0].version = "1.2.0";
-    p.releases[0].tagline = "The Surround Update";
-    p.releases[0].date = "Oct 8, 2026";
-    p.releases[0].is_focused = 1;
-    
-    p.releases[1].version = "1.1.5";
-    p.releases[1].tagline = "Fixes and stability";
-    p.releases[1].date = "Sep 15, 2026";
-    p.releases[1].is_focused = 0;
-
-    p.releases[2].version = "1.1.0";
-    p.releases[2].tagline = "Network shares";
-    p.releases[2].date = "Aug 20, 2026";
-    p.releases[2].is_focused = 0;
-
-    p.releases[3].version = "1.0.0";
-    p.releases[3].tagline = "Initial Release";
-    p.releases[3].date = "Jul 1, 2026";
-    p.releases[3].is_focused = 0;
-
-    p.detail_version = "Version 1.2.0";
-    p.detail_tagline = "The Surround Update";
-    
-    p.item_count = 8;
-    p.item_total = 8;
-    
-    p.items[0].kind = "NEW";
-    p.items[0].text = "Added support for 5.1 and 7.1 surround sound audio tracks.";
-    
-    p.items[1].kind = "NEW";
-    p.items[1].text = "Added an interactive surround sound calibration tool.";
-    
-    p.items[2].kind = "IMPROVED";
-    p.items[2].text = "Subtitle rendering performance is up to 30% faster.";
-    
-    p.items[3].kind = "FIXED";
-    p.items[3].text = "Resolved an issue where some MKV files would not show chapters.";
-    
-    p.items[4].kind = "FIXED";
-    p.items[4].text = "Fixed audio sync drift when pausing for long periods.";
-    
-    p.items[5].kind = "IMPROVED";
-    p.items[5].text = "Better error handling for unsupported HDR formats.";
-    
-    p.items[6].kind = "REMOVED";
-    p.items[6].text = "Removed the old ASCII-based subtitle renderer.";
-    
-    p.items[7].kind = "FIXED";
-    p.items[7].text = "Fixed a memory leak when browsing very large directories.";
+    static const char* kindLabel[] = {"NEW", "FIXED", "IMPROVED", "REMOVED", "VERSION"};
+    p.title = "CHANGELOG";
+    p.subtitle = "WHAT CHANGED IN EACH RELEASE";
+    p.release_total = EVO_CHANGELOG_RELEASE_COUNT;
+    p.release_count = 0;
+    for (int i = 0; i < EVO_RMLUI_CL_RELEASES && i < EVO_CHANGELOG_RELEASE_COUNT; ++i)
+    {
+        p.releases[i].version = EVO_CHANGELOG_RELEASES[i].version;
+        p.releases[i].tagline = EVO_CHANGELOG_RELEASES[i].tagline;
+        p.releases[i].date = EVO_CHANGELOG_RELEASES[i].date;
+        p.releases[i].is_focused = i == 0;
+        p.release_count++;
+    }
+    const auto& r = EVO_CHANGELOG_RELEASES[0];
+    p.detail_version = r.version;
+    p.detail_tagline = r.tagline;
+    p.item_total = r.item_count;
+    p.item_count = 0;
+    for (int i = 0; i < r.item_count && i < EVO_RMLUI_CL_ITEMS; ++i)
+    {
+        int kind = static_cast<int>(r.items[i].kind);
+        p.items[i].kind = kindLabel[(kind < 0 || kind > 4) ? 0 : kind];
+        p.items[i].text = r.items[i].text;
+        p.item_count++;
+    }
 }

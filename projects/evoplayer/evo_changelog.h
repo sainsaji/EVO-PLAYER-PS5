@@ -26,6 +26,26 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
+ * Release 0.11.0
+ *
+ * The full notes are in CHANGELOG.md; this is the 12 that fit the detail card.
+ */
+static const evo_changelog_item EVO_CL_0110[] = {
+    { EVO_CL_NEW,      "A BRAND-NEW INTERFACE DRAWN ON THE GPU - FOUR THEMES" },
+    { EVO_CL_NEW,      "LIVE TV - M3U PLAYLISTS, XTREAM CODES AND A TV GUIDE" },
+    { EVO_CL_NEW,      "EMBY, JELLYFIN AND STREMIO ADDONS IN EVO'S OWN SCREENS" },
+    { EVO_CL_NEW,      "AI UPSCALING - FSR 1 SHARP OR ANIME4K" },
+    { EVO_CL_NEW,      "DEEP BLACKS - LIFTED SHADOWS PULLED DOWN TO BLACK" },
+    { EVO_CL_NEW,      "DOLBY VISION PROFILE 5, 4K HEVC HDR AND AV1" },
+    { EVO_CL_NEW,      "SUBTITLE AUTO-SYNC AND TWO SUBTITLE TRACKS AT ONCE" },
+    { EVO_CL_NEW,      "ROOM CALIBRATION WITH THE DUALSENSE MICROPHONE" },
+    { EVO_CL_NEW,      "FILE OPERATIONS AND FTP NETWORK STORAGE" },
+    { EVO_CL_NEW,      "120 HZ OUTPUT AND EXPERIMENTAL MOTION SMOOTHING" },
+    { EVO_CL_IMPROVED, "STREAMS PRE-BUFFER AND SHOW WHEN THEY ARE BUFFERING" },
+    { EVO_CL_FIXED,    "A HUNG VIDEO DECODER NO LONGER FREEZES EVO" }
+};
+
+/*
  * Release 0.10.0
  *
  * Five weeks and 315 commits: the payload became a real app, the picture moved
@@ -141,6 +161,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
+    { "0.11.0", "A NEW LOOK, PROVIDERS & AI UPSCALING", "OCTOBER 2026", EVO_CL_0110, sizeof(EVO_CL_0110)/sizeof(EVO_CL_0110[0]) },
     { "0.10.0", "THE PS5 APP, GPU & HARDWARE DECODE", "SEPTEMBER 2026", EVO_CL_0100, sizeof(EVO_CL_0100)/sizeof(EVO_CL_0100[0]) },
     { "0.7.0", "EMBY AUTH & SYSTEM ENHANCEMENTS", "AUGUST 2026", EVO_CL_070, sizeof(EVO_CL_070)/sizeof(EVO_CL_070[0]) },
     { "0.6.0", "EMBY ADDON & SURROUND SOUND STUDIO", "AUGUST 2026", EVO_CL_060, sizeof(EVO_CL_060)/sizeof(EVO_CL_060[0]) },

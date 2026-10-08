@@ -268,7 +268,7 @@ void AboutScreen::draw(DrawList &list, const Context &ctx) const
         {"DECODE", "Hardware"},
         {"RENDER", "ps5-homebrew-ui on sceAgc"},
         {"MEDIA CORE", "FFmpeg"},
-        {"TARGET", "Firmware 12.70"},
+        {"TARGET", "Firmware below 13.60"},
         {"PROJECT", "github.com/sainsaji/EVO-PLAYER-PS5"},
         {"THEMES", themes_info_}
     };
@@ -405,9 +405,22 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
     ui::text(list, fonts.display, detail_version_, rx + 40, 330, 40, kWhite);
     ui::text(list, fonts.regular, detail_tagline_, rx + 40, 360, 20, p.text_muted);
 
+    // Rows are sized by how many lines their text wraps to, and the list stops
+    // at the card's bottom edge (leaving room for "+N more") instead of
+    // running past it.
+    const float text_w = card.w - 200.0f;
+    const float bottom = card.y + card.h - 28.0f;
+    const float more_h = 34.0f;
     float cy = 400.0f;
+    int shown = 0;
     for (const Item &item : items_)
     {
+        const int lines = std::min<int>(2, std::max<std::size_t>(1, fonts.regular.font->wrap(item.text, 18, text_w).size()));
+        const float row_h = 30.0f + 26.0f * (lines - 1) + 14.0f;
+        const bool last = shown + 1 == (int)items_.size() && item_total_ <= (int)items_.size();
+        if (cy + row_h > bottom - (last ? 0.0f : more_h))
+            break;
+
         Color kind_color;
         if (item.kind == "FIXED") kind_color = Color::rgb(0x30d158);
         else if (item.kind == "IMPROVED") kind_color = Color::rgb(0x8a8fff);
@@ -417,14 +430,15 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
         list.rounded_rect({rx + 40, cy, 100, 30}, 15, kind_color.with_alpha(0.15f));
         ui::text(list, fonts.semibold, item.kind, rx + 90, cy + 21, 13, kind_color, Align::center, 1.0f);
 
-        ui::paragraph(list, fonts.regular, item.text, rx + 160, cy + 22, 18, card.w - 200, 26.0f, kWhite, 2);
-        cy += 60.0f;
+        ui::paragraph(list, fonts.regular, item.text, rx + 160, cy + 22, 18, text_w, 26.0f, kWhite, 2);
+        cy += row_h;
+        ++shown;
     }
 
-    if (item_total_ > (int)items_.size())
+    if (item_total_ > shown)
     {
         char buf[32];
-        std::snprintf(buf, sizeof(buf), "+%d more", item_total_ - (int)items_.size());
+        std::snprintf(buf, sizeof(buf), "+%d more", item_total_ - shown);
         ui::text(list, fonts.regular, buf, rx + 160, cy + 22, 18, p.text_faint);
     }
 }
