@@ -124,9 +124,15 @@ Not proprietary, but recorded here so the licences are in one place.
 | Anime4K `Upscale_CNN_x2` S and M | `third_party/anime4k/` (vendored unchanged, with its `LICENSE`) → `upscale_a4k_*.pipe` | MIT, © bloc97 | #103 AI upscaler. The network weights are the literal constants in those mpv hooks |
 | ps5-homebrew-ui | `third_party/ps5-homebrew-ui/` (cloned unchanged, own `LICENSE`); compiled into the app via `ui_kit/`; shader ported to `ui_sdf.pipe` | GPL-3.0-or-later, © BlackBearReloaded | EVO's own screens ([ui/hui-kit.md](ui/hui-kit.md)). Bundled from it: the Inter, Montserrat and DejaVu Sans Mono baked fonts (`assets/hui/fonts`, each with its licence file) and the "glass" sound effects (`assets/hui/sfx`, the author's own, project licence). Third-party notices: `third_party/ps5-homebrew-ui/THIRD_PARTY_NOTICES.md` |
 
-A live-action super-resolution network (FSRCNN-class) was considered for AI
-mode. None is shipped: add one here only once its **weights'** licence is
-checked, which is separate from the licence of the code that trained them.
+Live-action network (#123), tried 2026-10-08 and not shipped. FSRCNNX x2 8-0-4-1
+(igv/FSRCNN-TensorFlow 1.1) has LGPL-3.0-or-later weights, which fit EVO's
+GPL-3.0; the training data is undocumented. It translated to 13 conv passes and
+ran on the PS5 Pro at about 3.2 ms per 1080p to 4K frame, but rendered
+tile-sized black holes. Suspected cause: EVO's between-pass barrier
+(RELEASE_MEM, no wait) lets the next pass read before the last one finishes. A
+fix needs a new GPU sync call (AcquireMem), which is a panic risk. Also
+checked: ArtCNN (MIT, anime-aimed), CuNNy (LGPL-3.0, visual novels), RAVU
+(LGPL-3.0 at repo level, per-file headers unchecked).
 
 ## If you commit something by accident
 
