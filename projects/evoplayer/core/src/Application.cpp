@@ -969,7 +969,7 @@ static bool fits_rate(double fps, double hz)
 }
 
 /*
- * RefreshRateMode::MatchVideo: the output rate for `fps` video. 23.976 and 24
+ * Experimental MATCH VIDEO FRAME RATE: the output rate for `fps` video. 23.976 and 24
  * are told apart (0.024 fps apart; streams report them to well under 0.005),
  * since 24 fps on 23.976 Hz still drops a frame every 42 s. Film the display
  * cannot take natively goes to 119.88 Hz when it has it. Everything else
@@ -1519,12 +1519,18 @@ int Application::run() {
          * Blu-ray player calls 24p output): 23.976 / 24 Hz for film, 50 Hz for
          * 25 / 50 fps. Each repeats every frame for the same time, so pans stop
          * juddering. 29.97 / 59.94 already fit the default 59.94 Hz. Film
-         * falls back to 119.88 Hz if the display refuses its exact rate.
+         * falls back to 119.88 Hz if the display refuses its exact rate -
+         * which, on 12.70, it always does for a game-slot app
+         * (docs/hardware/refresh-rate-modes.md). Hence Experimental.
          */
         const RefreshRateMode rrMode = m_settingsService ? m_settingsService->getRefreshRateMode()
                                                          : RefreshRateMode::Off;
-        const bool rrPlayback = rrMode == RefreshRateMode::PlaybackOnly && evo_agc_runtime_supports_120hz();
-        if (rrPlayback || rrMode == RefreshRateMode::MatchVideo) {
+        /* Experimental match video wins over PlaybackOnly; Always keeps 120 Hz. */
+        const bool rrMatch = rrMode != RefreshRateMode::Always && m_settingsService &&
+                             m_settingsService->isMatchVideoRateEnabled();
+        const bool rrPlayback = !rrMatch && rrMode == RefreshRateMode::PlaybackOnly &&
+                                evo_agc_runtime_supports_120hz();
+        if (rrPlayback || rrMatch) {
             static int s_wait_frames = 0;
             /* The last rate asked for, so a refused mode is not retried every frame. */
             static evo_vo_rate s_asked = evo_agc_runtime_get_output_rate();

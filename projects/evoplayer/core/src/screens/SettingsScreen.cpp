@@ -63,6 +63,7 @@ enum class SettingKey : int {
     DeepBlacks,
     /* EXPERIMENTAL */
     MotionSmoothing,
+    MatchVideoRate,
 };
 
 /*
@@ -111,7 +112,7 @@ const SettingKey kSystemKeys[] = {
  * nobody turns one on expecting a shipped feature, and they default to off.
  */
 const SettingKey kExperimentalKeys[] = {
-    SettingKey::MotionSmoothing,
+    SettingKey::MotionSmoothing, SettingKey::MatchVideoRate,
 };
 
 struct SectionSpec {
@@ -247,19 +248,20 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
 
     case SettingKey::RefreshRate:
-        d = valueDef(key, "REFRESH RATE", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH",
-                     "../icons/icon_gauge.png", 4, static_cast<int>(settings->getRefreshRateMode()));
-        for (int i = 0; i < 4; ++i)
+        d = valueDef(key, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH",
+                     "../icons/icon_gauge.png", 3, static_cast<int>(settings->getRefreshRateMode()));
+        for (int i = 0; i < 3; ++i)
             d.opt_label[i] = settings->getRefreshRateModeName(static_cast<RefreshRateMode>(i));
         if (!evo_agc_runtime_supports_120hz()) {
-            /* MATCH VIDEO only needs the film / PAL modes, not HDMI 2.1. */
-            const bool film = evo_agc_runtime_supports_output_rate(EVO_VO_RATE_23_976) ||
-                              evo_agc_runtime_supports_output_rate(EVO_VO_RATE_24) ||
-                              evo_agc_runtime_supports_output_rate(EVO_VO_RATE_50);
-            d.disabled = !film;
-            d.detail = film ? "NO 120 HZ ON THIS DISPLAY - USE MATCH VIDEO"
-                            : "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
+            d.disabled = true;
+            d.detail = "DISPLAY OR HDMI SINK DOES NOT SUPPORT 120 HZ";
         }
+        break;
+
+    case SettingKey::MatchVideoRate:
+        d = toggleDef(key, "MATCH VIDEO FRAME RATE",
+                      "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ",
+                      "../icons/icon_gauge.png", settings->isMatchVideoRateEnabled());
         break;
 
     case SettingKey::HdrOutput:
@@ -475,6 +477,7 @@ void toggleSetting(SettingKey key) {
     switch (key) {
     case SettingKey::ResumePlayback:   st->setResumePlaybackEnabled(!st->isResumePlaybackEnabled()); break;
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
+    case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
     case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;
@@ -504,8 +507,8 @@ void applyOption(SettingKey key, int opt) {
     case SettingKey::KeyboardInput:  st->setKeyboardType(opt); break;
     case SettingKey::RefreshRate:
         st->setRefreshRateMode(static_cast<RefreshRateMode>(opt));
-        /* Off, PlaybackOnly and MatchVideo run the default rate here:
-         * SettingsScreen is not player mode. */
+        /* Off or PlaybackOnly run the default rate here: SettingsScreen is
+         * not player mode. */
         if (opt == static_cast<int>(RefreshRateMode::Always))
             evo_agc_runtime_set_120hz(1);
         else

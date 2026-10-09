@@ -156,8 +156,6 @@ int32_t sceVideoOutConfigureOutput(int32_t handle, uint64_t mode,
                                    const void *options, const void *reserved0, uint64_t reserved1);
 int32_t sceVideoOutIsOutputSupported(int32_t handle, uint64_t mode,
                                      const void *options, const void *reserved0, uint64_t reserved1);
-int32_t sceVideoOutConfigureOutputEx(int32_t handle, uint64_t mode,
-                                     const void *options, const void *reserved0, uint64_t reserved1);
 
 /*
  * sceVideoOutConfigureOutput modes per evo_vo_rate. libSceVideoOut's parser
@@ -1455,8 +1453,8 @@ int evo_agc_runtime_init(int width, int height, int hdr)
     if (g_agc_dev.supports_120hz)
         g_agc_dev.rate_supported |= 1u << EVO_VO_RATE_119_88;
     for (int r = EVO_VO_RATE_23_976; r <= EVO_VO_RATE_50; ++r) {
-        /* Logged only: on a 4K HDR output this refuses the small modes while
-         * the full one may still work, so set_output_rate tries for real. */
+        /* Logged only: set_output_rate makes one real attempt and drops the
+         * rate if that is refused too. */
         int32_t src = sceVideoOutIsOutputSupported(g_agc_dev.video_handle, k_vo_rates[r].mode, NULL, NULL, 0);
         g_agc_dev.rate_supported |= 1u << r;
         evo_boot_log("agc display %s (mode %#llx) support probe rc=%d (0x%08x)",
@@ -2921,51 +2919,26 @@ int evo_agc_runtime_set_output_rate(evo_vo_rate rate)
         return -1;
     }
 
-    /*
-     * Candidates: the small mode, then for the film / PAL rates the full mode
-     * the Blu-ray player uses - 0xb SDR / 0xc HDR, 0x400 2K / 0x800 4K, low
-     * byte the small mode's rate. On a 4K HDR output the small 23.976 / 24 /
-     * 50 modes were refused at init (hardware 2026-10-09), so the full mode
-     * matching what the TV runs now is the one to try.
-     */
-    uint64_t cand[2];
-    int ncand = 0;
-    cand[ncand++] = k_vo_rates[rate].mode;
-    if (rate == EVO_VO_RATE_23_976 || rate == EVO_VO_RATE_24 || rate == EVO_VO_RATE_50) {
-        evo_vo_output_status cur;
-        memset(&cur, 0, sizeof(cur));
-        const int hdr = (sceVideoOutGetOutputStatus(g_agc_dev.video_handle, &cur) == 0)
-                            ? (cur.dynamic_range == 2 || (cur.flags & 1))
-                            : g_agc_dev.is_hdr;
-        const uint64_t res = (g_agc_dev.width >= 3840) ? 0x800u : 0x400u;
-        cand[ncand++] = (hdr ? UINT64_C(0xc00000000) : UINT64_C(0xb00000000)) | res | k_vo_rates[rate].mode;
-    }
-
-    evo_boot_log("agc: switching output mode %s -> %s",
-                 k_vo_rates[g_agc_dev.output_rate].name, k_vo_rates[rate].name);
+    evo_boot_log("agc: switching output mode %s -> %s (mode %#llx)",
+                 k_vo_rates[g_agc_dev.output_rate].name, k_vo_rates[rate].name,
+                 (unsigned long long)k_vo_rates[rate].mode);
 
     const int64_t switch_t0 = agc_now_us();
     agc_wait_gpu_idle(200);
 
     /*
-     * libSceVideoOut's gate (0x18200) refuses modes 2 / 3 / 9 / 10 with
-     * 0x8029001e unless the call is the Ex one (hardware 2026-10-09) - the
-     * plain call only reaches the default and 119.88 Hz modes.
+     * The plain call reaches only the default and 119.88 Hz modes from a
+     * game-slot app: 23.976 / 24 / 50 Hz come back 0x8029001e on 12.70, and
+     * the Blu-ray player's ConfigureOutputEx route needs system-app rights
+     * (docs/hardware/refresh-rate-modes.md). Tried once, then not again.
      */
-    const int use_ex = (ncand > 1);
-    int32_t rc = -1;
-    for (int i = 0; i < ncand && rc != 0; ++i) {
-        const int32_t sup = sceVideoOutIsOutputSupported(g_agc_dev.video_handle, cand[i], NULL, NULL, 0);
-        rc = use_ex ? sceVideoOutConfigureOutputEx(g_agc_dev.video_handle, cand[i], NULL, NULL, 0)
-                    : sceVideoOutConfigureOutput(g_agc_dev.video_handle, cand[i], NULL, NULL, 0);
-        evo_boot_log("agc: mode %#llx: IsOutputSupported rc=0x%08x, ConfigureOutput%s rc=%d (0x%08x)",
-                     (unsigned long long)cand[i], (unsigned)sup, use_ex ? "Ex" : "", rc, (unsigned)rc);
-    }
+    int32_t rc = sceVideoOutConfigureOutput(g_agc_dev.video_handle, k_vo_rates[rate].mode, NULL, NULL, 0);
+    evo_boot_log("agc: sceVideoOutConfigureOutput rc=%d (0x%08x)", rc, (unsigned)rc);
     if (rc == 0) {
         agc_mode_switch_note(k_vo_rates[rate].name, switch_t0);
-    } else {
+    } else if (rate != EVO_VO_RATE_DEFAULT) {
         g_agc_dev.rate_supported &= ~(1u << rate);
-        evo_boot_log("agc: %s refused in every form - not retried this session", k_vo_rates[rate].name);
+        evo_boot_log("agc: %s refused - not retried this session", k_vo_rates[rate].name);
     }
 
     evo_vo_resolution_status vres;

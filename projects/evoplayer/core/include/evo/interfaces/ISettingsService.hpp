@@ -97,6 +97,9 @@ public:
 
     virtual bool isAudioPassthroughEnabled() const = 0;
     virtual void setAudioPassthroughEnabled(bool enabled) = 0;
+    // Experimental: drive the panel at the video's own rate during playback
+    virtual bool isMatchVideoRateEnabled() const = 0;
+    virtual void setMatchVideoRateEnabled(bool enabled) = 0;
 
     virtual void syncThemeToRmlUi() = 0;
 

@@ -87,6 +87,8 @@ public:
 
     bool isAudioPassthroughEnabled() const override { return m_audioPassthroughEnabled; }
     void setAudioPassthroughEnabled(bool enabled) override { m_audioPassthroughEnabled = enabled; }
+    bool isMatchVideoRateEnabled() const override { return m_matchVideoRate; }
+    void setMatchVideoRateEnabled(bool enabled) override { m_matchVideoRate = enabled; }
 
     void syncThemeToRmlUi() override;
 
@@ -116,6 +118,7 @@ private:
     HdrOutputMode m_hdrOutputMode = HdrOutputMode::Auto;
     AudioOutputChannels m_audioOutputChannels = AudioOutputChannels::Auto;
     bool m_audioPassthroughEnabled = false;
+    bool m_matchVideoRate = false;
     bool m_debugOverlayEnabled = false;
 };
 

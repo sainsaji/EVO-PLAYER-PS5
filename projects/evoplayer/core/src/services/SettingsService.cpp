@@ -93,7 +93,6 @@ const char* SettingsService::getRefreshRateModeName(RefreshRateMode mode) const 
         case RefreshRateMode::Off:          return "OFF";
         case RefreshRateMode::Always:       return "AUTO (ALWAYS 120 HZ)";
         case RefreshRateMode::PlaybackOnly: return "PLAYBACK ONLY";
-        case RefreshRateMode::MatchVideo:   return "MATCH VIDEO (24P / 50 HZ)";
         default:                           return "OFF";
     }
 }
@@ -153,7 +152,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -177,7 +176,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_audioOutputChannels), // line 21 (#117 stereo downmix)
         static_cast<int>(m_motionSmoothing), // line 22 (#105 motion smoothing)
         static_cast<int>(m_deepBlacks),      // line 23 (#119 deep blacks)
-        m_audioPassthroughEnabled ? 1 : 0    // line 24 (HDMI bitstream passthrough)
+        m_audioPassthroughEnabled ? 1 : 0,   // line 24 (HDMI bitstream passthrough)
+        m_matchVideoRate ? 1 : 0             // line 25 (experimental: match video frame rate)
     );
 
     std::fclose(file);
@@ -215,9 +215,10 @@ bool SettingsService::loadSettings() {
     int rawMotionSmoothing = 0;
     int rawDeepBlacks = 0;
     int rawAudioPassthrough = 0;
+    int rawMatchVideoRate = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -241,7 +242,8 @@ bool SettingsService::loadSettings() {
         &rawAudioChannels,
         &rawMotionSmoothing,
         &rawDeepBlacks,
-        &rawAudioPassthrough
+        &rawAudioPassthrough,
+        &rawMatchVideoRate
     );
 
     std::fclose(file);
@@ -292,7 +294,7 @@ bool SettingsService::loadSettings() {
     if (readCount >= 15 && rawAiNetwork >= 0 && rawAiNetwork <= 3) {
         m_aiNetwork = static_cast<AiNetwork>(rawAiNetwork);
     }
-    if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 3) {
+    if (readCount >= 16 && rawRefreshRateMode >= 0 && rawRefreshRateMode <= 2) {
         m_refreshRateMode = static_cast<RefreshRateMode>(rawRefreshRateMode);
     }
     if (readCount >= 17 && rawHdrOutputMode >= 0 && rawHdrOutputMode <= 1) {
@@ -313,6 +315,7 @@ bool SettingsService::loadSettings() {
     if (readCount >= 24) {
         m_audioPassthroughEnabled = (rawAudioPassthrough != 0);
     }
+    if (readCount >= 25) m_matchVideoRate = (rawMatchVideoRate != 0);
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

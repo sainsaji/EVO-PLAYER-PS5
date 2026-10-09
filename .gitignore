@@ -352,3 +352,8 @@ output/kp/
 output/netclips/
 output/test/
 third_party/ProsperoStore/
+
+# Decrypted console system binaries (ftpsrv SELF mode) - Sony proprietary, never committed
+output/re/
+# Local reference clones (e.g. AnyPS5) - kept on disk, never committed
+thirdparty/

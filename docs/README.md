@@ -39,6 +39,7 @@ Grouped by what you are trying to do. Start at
 | [hardware-decode-review.md](hardware/hardware-decode-review.md) | Review of the above |
 | [gpu-notes.md](hardware/gpu-notes.md) | GPU reverse-engineering history |
 | [shader-compilation.md](hardware/shader-compilation.md) | `.pipe` → amdllpc → PAL metadata, for gfx1013 |
+| [refresh-rate-modes.md](hardware/refresh-rate-modes.md) | VideoOut mode values (23.976/24/50/119.88 Hz), the experimental MATCH VIDEO FRAME RATE, and why 24p output is refused to a game-slot app on 12.70 |
 | [upscaler.md](hardware/upscaler.md) | #103 video upscaler: Sharp (FSR1) / AI (Anime4K S/M/UL), PS5 Pro detection, `upcompare` |
 | [motion-smoothing.md](hardware/motion-smoothing.md) | #105 frame interpolation (experimental): the four passes, the artefacts it had, the debug views |
 | [psml-research.md](hardware/psml-research.md) | Sony's PSML / PSSR on the PS5 Pro: modules, Trinity mode, what EVO can and cannot reach |
