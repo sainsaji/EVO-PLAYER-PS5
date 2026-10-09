@@ -10,7 +10,16 @@ Plays video from USB drives, internal storage, network shares (FTP), Live TV (IP
 
 ---
 
-## What's New in v0.11.0
+## What's New in v0.12.0
+
+- **Audio Passthrough:** Settings → Audio → `AUDIO PASSTHROUGH` sends Dolby Digital, Dolby Digital Plus (including Atmos), DTS and AAC over HDMI untouched, so your soundbar or receiver does the decoding. Dolby TrueHD is included as an experimental option.
+- **Type from your phone:** server addresses, playlist URLs and addon links can be sent from a phone browser on the same network. The keyboard shows the link to open; nothing to install.
+- **Stremio Addons:** renamed from "Addons", with a `Remove` row for every saved addon, and addresses may be typed without `http://`.
+- **Match video frame rate (experimental):** asks the display for the video's own rate, with a fall-back to 119.88 Hz for film on firmware 12.70.
+
+Full notes: [CHANGELOG.md](CHANGELOG.md). What follows is what 0.11.0 added.
+
+### Highlights from v0.11.0
 
 - **Live TV & IPTV:** Plug in a USB stick with an M3U playlist or enter a URL. Full channel guide with XMLTV EPG (NOW / NEXT), 2×4 channel logo grid, L1/R1 fast paging, and Xtream Codes accounts.
 - **Media Servers (Emby, Jellyfin, Stremio):** Native EVO screens for libraries, poster grids, seasons, episodes, and Continue Watching. Supports Jellyfin Quick Connect and multi-version stream selection.

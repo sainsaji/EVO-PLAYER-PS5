@@ -26,6 +26,20 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
+ * Release 0.12.0
+ *
+ * The full notes are in CHANGELOG.md.
+ */
+static const evo_changelog_item EVO_CL_0120[] = {
+    { EVO_CL_NEW,      "AUDIO PASSTHROUGH - DOLBY, DTS AND AAC SENT UNTOUCHED TO YOUR RECEIVER" },
+    { EVO_CL_NEW,      "DOLBY TRUEHD PASSTHROUGH - EXPERIMENTAL" },
+    { EVO_CL_NEW,      "MATCH VIDEO FRAME RATE - 24 AND 50 HZ OUTPUT - EXPERIMENTAL" },
+    { EVO_CL_NEW,      "TYPE FROM YOUR PHONE - ADDRESSES AND LINKS WITHOUT THE PAD" },
+    { EVO_CL_NEW,      "REMOVE A STREMIO ADDON FROM ITS OPTIONS MENU" },
+    { EVO_CL_IMPROVED, "STREMIO ADDONS - NEW NAME, AND AN ADDRESS WITHOUT HTTP:// IS FINE" }
+};
+
+/*
  * Release 0.11.0
  *
  * The full notes are in CHANGELOG.md; this is the 12 that fit the detail card.
@@ -161,6 +175,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
+    { "0.12.0", "PASSTHROUGH AUDIO & PHONE INPUT", "OCTOBER 2026", EVO_CL_0120, sizeof(EVO_CL_0120)/sizeof(EVO_CL_0120[0]) },
     { "0.11.0", "A NEW LOOK, PROVIDERS & AI UPSCALING", "OCTOBER 2026", EVO_CL_0110, sizeof(EVO_CL_0110)/sizeof(EVO_CL_0110[0]) },
     { "0.10.0", "THE PS5 APP, GPU & HARDWARE DECODE", "SEPTEMBER 2026", EVO_CL_0100, sizeof(EVO_CL_0100)/sizeof(EVO_CL_0100[0]) },
     { "0.7.0", "EMBY AUTH & SYSTEM ENHANCEMENTS", "AUGUST 2026", EVO_CL_070, sizeof(EVO_CL_070)/sizeof(EVO_CL_070[0]) },

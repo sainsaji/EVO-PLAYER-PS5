@@ -5,6 +5,34 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.12.0
+
+![](https://img.shields.io/badge/Release-v0.12.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
+
+**Your receiver decodes it, and your phone does the typing.** 0.12.0 sends Dolby and DTS audio to a soundbar or AV receiver untouched, lets you type server addresses and addon links from a phone browser instead of the pad, and adds removal to the Stremio addons screen.
+
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60.
+
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
+
+### ![](https://img.shields.io/badge/AUDIO-9c27b0?style=flat-square) Sound
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Audio passthrough.** Settings → Audio → `AUDIO PASSTHROUGH` sends **Dolby Digital, Dolby Digital Plus (including Atmos), DTS and AAC** over HDMI as the original bitstream, so your soundbar or receiver does the decoding instead of EVO. It is the same output mode the PS5's own media apps use. Confirmed on a PS5 Pro on firmware 12.70 with a soundbar: the receiver showed the format and played it. The receiver's Atmos indicator was not checked.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Dolby TrueHD passthrough (experimental).** Sent as MAT over the console's 768 kHz system audio port, the route Sony's Blu-ray player uses. It plays in the standalone [research app](https://github.com/sainsaji/PS5-Audio-Passthrough-Research) and the receiver shows "Dolby Audio", not yet "Dolby TrueHD". It has not been run inside EVO on a console yet.
+- ![](https://img.shields.io/badge/FIXED-2ea44f?style=flat-square) **Switching between formats** no longer leaves the receiver stuck on the previous one: each stream is wrapped in short silent bursts and the close, reset and next open are spaced out. AAC passthrough also pads its frames to a whole 16-bit word, which receivers require.
+
+### ![](https://img.shields.io/badge/PICTURE-ff8c00?style=flat-square) The Picture
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Match video frame rate (experimental).** Settings → Experimental → `MATCH VIDEO FRAME RATE` asks for the video's own output rate during playback: 23.976 or 24 Hz for film and 50 Hz for PAL, like the Blu-ray player. On firmware 12.70 the console refuses those exact modes to an app, so each is tried once: film falls back to 119.88 Hz (5:5, judder-free) and 25 or 50 fps to the default rate. The refusals are recorded in `docs/hardware/refresh-rate-modes.md`.
+
+### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Media Servers & Addons
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Type from your phone.** When EVO asks for a server address, a playlist URL or an addon link, the keyboard title shows `phone: <console address>:9780/input`. Open that on a phone on the same network, paste the text and tap Send. Nothing to install and no account. EVO uses its own keyboard for these prompts, never the system one. Only a prompt that is already open accepts text, and the text is not written to the log. Sign-in screens are left out, so passwords are still typed on the console.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Remove a Stremio addon.** The options menu of **Stremio Addons** has a `Remove <name>` row for each saved addon.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **The Addons provider is now called Stremio Addons**, and an addon address may be typed without `http://` or `https://`: a home-network address gets `http`, anything else `https`.
+
+---
+
 ## 0.11.0
 
 ![](https://img.shields.io/badge/Release-v0.11.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
