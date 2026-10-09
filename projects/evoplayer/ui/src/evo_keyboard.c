@@ -12,6 +12,11 @@
 #include "evo_boot_log.h"       /* #34: every native-IME step lands in evo.log */
 #include "evo_boot_trace.h"     /* evo_bt: the pre-unjail probe also goes to klog */
 #include "evo_rmlui_bridge.h"   /* #81: the modal is an RmlUi document now */
+#if defined(EVO_APP_MODULE) && (defined(EVO_TARGET_PS5) || defined(__FreeBSD__))
+#include <unistd.h>             /* the phone link: this console's own address */
+#include <sys/socket.h>
+#include <netinet/in.h>
+#endif
 
 #define KB_MAX_BUF 256
 
@@ -281,6 +286,8 @@ static const char *const ACTION_LABELS[KB_ACT_COUNT] = {
 typedef struct {
     int             is_open;
     int             is_native_active;
+    int             phone;       /* the phone page can answer this prompt */
+    char            prompt[128]; /* the title without the phone-link hint */
     char            title[128];
     char            buffer[KB_MAX_BUF];
     int             max_len;
@@ -322,16 +329,83 @@ int evo_keyboard_queue_submit(void)
     return 1;
 }
 
+/*
+ * This console's address on the network, for the phone link: a UDP socket
+ * "connected" to a public address sends nothing, but makes the kernel pick the
+ * outgoing interface, and getsockname() then names it. Empty when offline.
+ */
+static void phone_local_ip(char *out, size_t cap)
+{
+    out[0] = '\0';
+#if defined(EVO_APP_MODULE) && (defined(EVO_TARGET_PS5) || defined(__FreeBSD__))
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return;
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof to);
+    to.sin_family = AF_INET;
+    to.sin_port = htons(80);
+    to.sin_addr.s_addr = htonl(0x08080808u);     /* 8.8.8.8 */
+    struct sockaddr_in me;
+    socklen_t ml = sizeof me;
+    if (connect(s, (struct sockaddr *)&to, sizeof to) == 0 &&
+        getsockname(s, (struct sockaddr *)&me, &ml) == 0 && me.sin_addr.s_addr != 0) {
+        uint32_t a = ntohl(me.sin_addr.s_addr);
+        snprintf(out, cap, "%u.%u.%u.%u", (a >> 24) & 255, (a >> 16) & 255, (a >> 8) & 255, a & 255);
+    }
+    close(s);
+#else
+    (void)cap;
+#endif
+}
+
+static void kb_open(const char *title, const char *initial_value, int max_len,
+                    evo_keyboard_cb on_submit, void *userdata, int phone);
+
 void evo_keyboard_open(const char *title,
                        const char *initial_value,
                        int max_len,
                        evo_keyboard_cb on_submit,
                        void *userdata)
 {
+    kb_open(title, initial_value, max_len, on_submit, userdata, 0);
+}
+
+void evo_keyboard_open_phone(const char *title,
+                             const char *initial_value,
+                             int max_len,
+                             evo_keyboard_cb on_submit,
+                             void *userdata)
+{
+    kb_open(title, initial_value, max_len, on_submit, userdata, 1);
+}
+
+int evo_keyboard_phone_info(char *title, size_t tcap)
+{
+    if (!g_kb.is_open || !g_kb.phone || g_kb.is_native_active) return 0;
+    if (title && tcap) snprintf(title, tcap, "%s", g_kb.prompt);
+    return 1;
+}
+
+static void kb_open(const char *title, const char *initial_value, int max_len,
+                    evo_keyboard_cb on_submit, void *userdata, int phone)
+{
     memset(&g_kb, 0, sizeof(g_kb));
     g_kb.is_open = 1;
     if (title) strncpy(g_kb.title, title, sizeof(g_kb.title) - 1);
     else strncpy(g_kb.title, "ENTER TEXT", sizeof(g_kb.title) - 1);
+    strncpy(g_kb.prompt, g_kb.title, sizeof(g_kb.prompt) - 1);
+
+    /* The system IME is a separate dialog: it can neither show the phone link
+     * nor take text from the phone, so a phone prompt always uses EVO's own. */
+    if (phone) {
+        char ip[32];
+        phone_local_ip(ip, sizeof ip);
+        if (ip[0]) {
+            g_kb.phone = 1;
+            snprintf(g_kb.title, sizeof g_kb.title, "%.48s - phone: %s:%d/input",
+                     g_kb.prompt, ip, EVO_LOG_SERVER_PORT);
+        }
+    }
 
     if (initial_value) {
         strncpy(g_kb.buffer, initial_value, sizeof(g_kb.buffer) - 1);
@@ -346,7 +420,7 @@ void evo_keyboard_open(const char *title,
     g_kb.userdata = userdata;
 
 #if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
-    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken) {
+    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken && !phone) {
         int cd_rc = init_native_ime_subsystem();
         if (cd_rc != 0) {
             /* No CommonDialog, no IME. Don't try again this session. */

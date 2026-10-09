@@ -13,6 +13,7 @@
 
 extern "C" {
 #include "evo_provider.h"
+#include "provider_stremio.h"                       /* the Remove-addon rows */
 #include "evo_boot_trace.h"
 #include "evo_readdir.h"
 #include "evo_favorites.h"
@@ -743,8 +744,13 @@ void ProviderHostScreen::openPickerMenu()
                     std::string("Look for ") + p->name + " on your home network",
                     "../icons/icon_activity.png", false);
         } else if (p->ui_embedded) {
-            add("address", "Add addon", "Paste a Stremio addon's manifest URL",
+            add("address", "Add Stremio addon", "Paste an addon's manifest URL (https://.../manifest.json)",
                 "../icons/icon_keyboard.png", false);
+            if (id == "addons")
+                for (int i = 0; i < evo_stremio_addon_count(); ++i)
+                    add(("rmaddon:" + std::to_string(i)).c_str(),
+                        std::string("Remove ") + evo_stremio_addon_name(i),
+                        evo_stremio_addon_url(i), "../icons/icon_power.png", true);
         } else {
             add("address", configured ? "Change playlist" : "Add playlist",
                 "Type a URL or pick an .m3u from USB", "../icons/icon_tv.png", false);
@@ -827,6 +833,13 @@ void ProviderHostScreen::runPickerMenu(const std::string& action)
         m_picking = false;
         openWebProvider();
         if (!m_web) enterPicker();
+    } else if (action.compare(0, 8, "rmaddon:") == 0) {
+        evo_stremio_addon_remove(std::atoi(action.c_str() + 8));
+        evo_feedback(EVO_FB_CONFIRM);
+        toast(p->name, "Addon removed");
+        int keep = m_pickIndex;
+        enterPicker();
+        m_pickIndex = keep;
     } else if (action == "signout") {
         p->sign_out();
         evo_feedback(EVO_FB_CONFIRM);
@@ -1635,7 +1648,7 @@ void ProviderHostScreen::openSourceEditor()
         }
         initial = "http://";
     } else if (p->ui_embedded) {
-        initial = "https://";       /* an addon to ADD, not a source to edit */
+        initial = "";               /* an addon to ADD, not a source to edit; the scheme is optional */
     } else if (!m_lastTypedUrl.empty()) {
         initial = m_lastTypedUrl;
     }
@@ -1651,7 +1664,7 @@ void ProviderHostScreen::openSourceKeyboard(const std::string& initial)
     if (p->caps & EVO_PROVIDER_CAP_WEBUI)
         std::snprintf(title, sizeof title, "%s server (http(s)://host:port)", p->name);
     else if (p->ui_embedded)
-        std::snprintf(title, sizeof title, "Add a Stremio addon (its manifest URL)");
+        std::snprintf(title, sizeof title, "Add a Stremio addon");
     else
         std::snprintf(title, sizeof title, "%s playlist URL (clear to reset)", p->name);
 
@@ -1659,8 +1672,8 @@ void ProviderHostScreen::openSourceKeyboard(const std::string& initial)
     /* EVO_PROVIDER_MAX_URL is 2048, but a keyboard field that long is not
      * usable and no real M3U link needs it; 512 covers an Xtream get.php URL
      * with credentials and leaves the field navigable. */
-    evo_keyboard_open(title, initial.c_str(), 512,
-                      &ProviderHostScreen::OnSourceSubmitted, this);
+    evo_keyboard_open_phone(title, initial.c_str(), 512,
+                            &ProviderHostScreen::OnSourceSubmitted, this);
 }
 
 std::vector<std::string> ProviderHostScreen::scanUsbPlaylists()

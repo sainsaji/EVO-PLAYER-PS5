@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "evo_provider.h"
+#include "provider_stremio.h"
 #include "evo_net.h"
 #include "cJSON.h"
 #include "evo_data_path.h"
@@ -149,6 +150,15 @@ static int ad_set_source(const char *value)
     char url[AD_URL];
     if (!strncmp(s, "stremio://", 10))      snprintf(url, sizeof url, "https://%s", s + 10);
     else if (!strncmp(s, "http://", 7) || !strncmp(s, "https://", 8)) snprintf(url, sizeof url, "%s", s);
+    else if (strchr(s, '.') && !strchr(s, ' ')) {
+        /* Typed without a scheme: a home-network address is plain http (a
+         * server on the LAN has no certificate), anything else is https. */
+        int a = 0, b = 0;
+        int lan = !strncmp(s, "10.", 3) || !strncmp(s, "127.", 4) ||
+                  !strncmp(s, "192.168.", 8) ||
+                  (sscanf(s, "172.%d.%d", &a, &b) == 2 && a >= 16 && a <= 31);
+        snprintf(url, sizeof url, "%s://%s", lan ? "http" : "https", s);
+    }
     else return -1;
     n = strlen(url);
     if (n < 14 || strcmp(url + n - 14, "/manifest.json")) {
@@ -165,8 +175,36 @@ static int ad_set_source(const char *value)
     return ad_save();
 }
 
+int evo_stremio_addon_count(void) { return g_nad; }
+
+const char *evo_stremio_addon_url(int i)
+{
+    return (i >= 0 && i < g_nad) ? g_ad[i].url : "";
+}
+
+const char *evo_stremio_addon_name(int i)
+{
+    if (i < 0 || i >= g_nad) return "";
+    if (g_ad[i].name[0]) return g_ad[i].name;
+    static char label[AD_URL];
+    const char *u = g_ad[i].url;
+    const char *scheme = strstr(u, "://");
+    snprintf(label, sizeof label, "%s", scheme ? scheme + 3 : u);
+    size_t n = strlen(label), t = strlen("/manifest.json");
+    if (n >= t && !strcmp(label + n - t, "/manifest.json")) label[n - t] = '\0';
+    return label;
+}
+
+int evo_stremio_addon_remove(int i)
+{
+    if (i < 0 || i >= g_nad) return -1;
+    for (int k = i; k + 1 < g_nad; ++k) g_ad[k] = g_ad[k + 1];
+    memset(&g_ad[--g_nad], 0, sizeof g_ad[0]);
+    return ad_save();
+}
+
 /* ------------------------------------------------------------------------- */
-/* Manifests                                                                 */
+/* Manifests                                                              */
 /* ------------------------------------------------------------------------- */
 
 static void list_append(char *list, size_t cap, cJSON *arr)
@@ -833,7 +871,7 @@ static int ad_resolve(const char *item_id, evo_provider_resolve_cb cb, void *ud)
 
 const evo_provider_t evo_provider_stremio = {
     .id            = "addons",
-    .name          = "Addons",
+    .name          = "Stremio Addons",
     .icon          = "icon_emby.png",
     .caps          = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                      EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_CONFIG |

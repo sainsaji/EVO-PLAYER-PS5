@@ -9,6 +9,7 @@
 #ifndef EVO_KEYBOARD_H
 #define EVO_KEYBOARD_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "evo_draw.h"
@@ -57,6 +58,22 @@ void evo_keyboard_open(const char *title,
                        int max_len,
                        evo_keyboard_cb on_submit,
                        void *userdata);
+
+/*
+ * Like evo_keyboard_open, for a long input (an address, a link) that is slow to
+ * type with a pad. Always EVO's own keyboard, never the system IME, and the
+ * title gains "phone: <ip>:9780/input". A phone browser on the same
+ * network opens that page and sends the text, which is submitted as if typed.
+ * Served by evo_log_server.c; without a network address it is a plain open.
+ */
+void evo_keyboard_open_phone(const char *title,
+                             const char *initial_value,
+                             int max_len,
+                             evo_keyboard_cb on_submit,
+                             void *userdata);
+
+/* 1 and the prompt text while a phone-enabled keyboard is open, else 0. */
+int  evo_keyboard_phone_info(char *title, size_t tcap);
 
 /* Close the keyboard without submitting. */
 void evo_keyboard_close(void);

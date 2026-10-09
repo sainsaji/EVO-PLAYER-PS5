@@ -48,8 +48,19 @@ Learned on the way:
   `evo_agc_runtime_read_scanout`: PQ -> nits, BT.2020 -> BT.709, highlight
   roll-off, sRGB; verified on the same 4K HDR10 film (picture and OSD).
 
-Open: removing an addon from EVO (only "clear all" today), a phone page for
-pasting addon URLs, password masking on EVO's keyboard.
+Done: removing one addon (a "Remove <name>" row per saved addon in the
+provider's options menu), and a phone page for long text. Open: password
+masking on EVO's keyboard.
+
+**Phone input.** Server addresses, playlist URLs and addon links open EVO's own
+keyboard through `evo_keyboard_open_phone` (never the system IME, which cannot
+show a link or take remote text). Its title reads `... - PHONE: <ip>:9780/input`.
+A phone browser on the same network opens that page (served by
+`evo_log_server.c`, nothing to install), types or pastes, and Send submits the
+text as if typed. `POST /input` needs the `X-EVO-Input` header (so another
+website cannot post to it) and is refused unless a phone keyboard is open.
+Sign-in screens are not phone-enabled. A typed addon address may omit the
+scheme: a home-network address is `http`, anything else `https`.
 
 ## Why
 

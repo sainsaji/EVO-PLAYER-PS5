@@ -11,6 +11,10 @@
  *   GET /log           snapshot of the ring (the last ~128 KiB), then closes
  *   GET /stats         one JSON snapshot of memory, read-ahead, network and
  *                      playback (evo_stats.c) - tools/evo-dash.py graphs it
+ *   GET /input         the phone page: type or paste text for the console's
+ *                      open keyboard (evo_keyboard_open_phone) and send it
+ *   GET /input/state   {"open":0|1,"title":"..."} for that page
+ *   POST /input        the text as the body; needs the X-EVO-Input header
  *
  * Query options (stream, raw, log):
  *   tail=0        only lines logged from now on (default: the whole ring first)
@@ -38,6 +42,7 @@
 #include <netinet/in.h>
 
 #include "evo_boot_log.h"
+#include "evo_keyboard.h"
 
 #define LS_MAX_CLIENTS 4
 #define LS_CHUNK       8192
@@ -96,6 +101,33 @@ static const char k_page[] =
 "document.getElementById('p').onclick=function(){paused=!paused;this.textContent=paused?'Resume':'Pause'};"
 "document.getElementById('c').onclick=function(){L.textContent=''};"
 "open();</script>";
+
+/* The phone page for long text entry (evo_keyboard_open_phone). No external
+ * files, no libraries: it has to load on any phone browser on the LAN. */
+static const char k_input_page[] =
+"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<title>EVO input</title><style>"
+":root{color-scheme:dark light;--bg:#111;--fg:#eee;--dim:#999;--card:#1c1c1c;--line:#333;--ac:#4da3ff}"
+"@media(prefers-color-scheme:light){:root{--bg:#f5f5f5;--fg:#222;--dim:#666;--card:#fff;--line:#ddd;--ac:#0a66d6}}"
+"body{margin:0;font:17px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}"
+"main{max-width:560px;margin:0 auto;padding:20px 16px}h1{font-size:20px;margin:0 0 4px}"
+"#sub{color:var(--dim);margin:0 0 16px}"
+"textarea{width:100%;box-sizing:border-box;min-height:140px;font:16px/1.4 ui-monospace,monospace;padding:10px;"
+"border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)}"
+"button{width:100%;margin-top:12px;padding:14px;font:inherit;font-weight:600;border:0;border-radius:8px;background:var(--ac);color:#fff}"
+"button:disabled{opacity:.4}#msg{margin-top:12px;min-height:1.4em}"
+"</style><main><h1>EVO Player</h1><p id=sub>Checking...</p>"
+"<textarea id=t autocapitalize=off autocorrect=off spellcheck=false placeholder='Type or paste here'></textarea>"
+"<button id=b disabled>Send to PS5</button><p id=msg></p></main><script>"
+"var T=document.getElementById('t'),B=document.getElementById('b'),S=document.getElementById('sub'),M=document.getElementById('msg'),on=false;"
+"function poll(){fetch('/input/state').then(function(r){return r.json()}).then(function(s){"
+"on=!!s.open;B.disabled=!on;S.textContent=on?s.title:'Nothing is asking for text right now. Open a text box on the PS5 first.'"
+"}).catch(function(){on=false;B.disabled=true;S.textContent='Cannot reach the PS5'})}"
+"B.onclick=function(){B.disabled=true;M.textContent='Sending...';"
+"fetch('/input',{method:'POST',headers:{'X-EVO-Input':'1','Content-Type':'text/plain;charset=utf-8'},body:T.value.trim()})"
+".then(function(r){M.textContent=r.ok?'Sent. Check your PS5.':'The PS5 is not asking for text any more.';if(r.ok)T.value='';poll()})"
+".catch(function(){M.textContent='Could not reach the PS5.';B.disabled=false})};"
+"poll();setInterval(poll,2000);</script>";
 
 typedef struct {
     int tail_now;
@@ -238,6 +270,85 @@ static void serve_snapshot(int fd, const ls_opts_t *o)
     }
 }
 
+/* Case-insensitive prefix test; the native libc is not trusted with strcasecmp. */
+static int ci_prefix(const char *s, const char *p)
+{
+    for (; *p; ++s, ++p) {
+        char a = *s;
+        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        if (a != *p) return 0;
+    }
+    return 1;
+}
+
+/* The value of header `name` (lower case, with the colon) in a request head, or NULL. */
+static const char *header_value(const char *req, const char *name)
+{
+    const char *l = strstr(req, "\r\n");
+    while (l && l[2] != '\r') {
+        l += 2;
+        if (ci_prefix(l, name)) {
+            l += strlen(name);
+            while (*l == ' ') l++;
+            return l;
+        }
+        l = strstr(l, "\r\n");
+    }
+    return NULL;
+}
+
+/* GET /input/state - is a phone-enabled keyboard waiting, and what it asks for. */
+static void serve_input_state(int fd)
+{
+    char title[128], esc[320], body[400], head[200];
+    const int open = evo_keyboard_phone_info(title, sizeof title);
+    size_t k = 0;
+    for (const char *p = open ? title : ""; *p && k < sizeof esc - 4; ++p) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') { esc[k++] = '\\'; esc[k++] = (char)c; }
+        else if (c < 0x20)         esc[k++] = ' ';
+        else                       esc[k++] = (char)c;
+    }
+    esc[k] = '\0';
+    int n = snprintf(body, sizeof body, "{\"open\":%d,\"title\":\"%s\"}", open, esc);
+    snprintf(head, sizeof head,
+             "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+             "Cache-Control: no-store\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", n);
+    send_str(fd, head);
+    send_all(fd, body, (size_t)n);
+}
+
+/*
+ * POST /input - the text goes to the open keyboard and is submitted, as if it
+ * had been typed there. The custom header makes it a request a web page on
+ * another site cannot send without a preflight this server never answers, so
+ * only the page above (or curl -H 'X-EVO-Input: 1') can type into the console.
+ * The text itself is never logged.
+ */
+static void serve_input_post(int fd, const char *head, const char *body, size_t blen, int too_big)
+{
+    if (!header_value(head, "x-evo-input:")) {
+        send_str(fd, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    if (too_big || blen == 0 || blen >= 512) {      /* 512 is the keyboard's own limit */
+        send_str(fd, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    if (!evo_keyboard_phone_info(NULL, 0)) {
+        send_str(fd, "HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\nno text prompt is open\n");
+        return;
+    }
+    char text[512];
+    size_t n = blen < sizeof text - 1 ? blen : sizeof text - 1;
+    memcpy(text, body, n);
+    text[n] = '\0';
+    evo_keyboard_queue_text(text);
+    evo_keyboard_queue_submit();
+    evo_log("logsrv: phone input accepted (%zu chars)", n);
+    send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
+}
+
 static void *conn_thread(void *arg)
 {
     int fd = (int)(intptr_t)arg;
@@ -250,10 +361,35 @@ static void *conn_thread(void *arg)
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
 #endif
 
-    char req[1024];
-    ssize_t got = recv(fd, req, sizeof req - 1, 0);
+    /* A GET is one segment; a POST /input may arrive as head then body, so read
+     * until the head is complete and Content-Length bytes of body are in. */
+    char req[4096];
+    size_t got = 0;
+    const char *body = NULL;
+    size_t blen = 0, want = 0;
+    int too_big = 0;
+    for (;;) {
+        ssize_t g = recv(fd, req + got, sizeof req - 1 - got, 0);
+        if (g <= 0) break;
+        got += (size_t)g;
+        req[got] = '\0';
+        char *he = strstr(req, "\r\n\r\n");
+        if (!he) {
+            if (got >= sizeof req - 1) break;
+            continue;
+        }
+        if (strncmp(req, "POST ", 5) != 0) break;
+        const char *cv = header_value(req, "content-length:");
+        long clen = cv ? atol(cv) : 0;
+        size_t head = (size_t)(he + 4 - req);
+        if (clen < 0 || head + (size_t)clen > sizeof req - 1) { too_big = 1; break; }
+        body = he + 4;
+        want = (size_t)clen;
+        blen = got - head < want ? got - head : want;
+        if (got >= head + want) break;
+    }
+    if (body && blen < want) too_big = 1;       /* the client stalled mid-body: never submit half a URL */
     if (got > 0) {
-        req[got] = 0;
         char method[8] = "", target[512] = "";
         sscanf(req, "%7s %511s", method, target);
         char *q = strchr(target, '?');
@@ -266,12 +402,25 @@ static void *conn_thread(void *arg)
         if (!busy) s_clients++;
         pthread_mutex_unlock(&s_mx);
 
-        if (strcmp(method, "GET") != 0)
+        const int post_input = !strcmp(method, "POST") && !strcmp(target, "/input");
+        if (strcmp(method, "GET") != 0 && !post_input)
             send_str(fd, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
         else if (busy)
             send_str(fd, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\ntoo many log clients\n");
         else {
-            if (!strcmp(target, "/")) {
+            if (post_input) {
+                serve_input_post(fd, req, body, blen, too_big);
+            } else if (!strcmp(target, "/input")) {
+                char head[160];
+                snprintf(head, sizeof head,
+                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                         "Cache-Control: no-store\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                         sizeof k_input_page - 1);
+                send_str(fd, head);
+                send_all(fd, k_input_page, sizeof k_input_page - 1);
+            } else if (!strcmp(target, "/input/state")) {
+                serve_input_state(fd);
+            } else if (!strcmp(target, "/")) {
                 char head[160];
                 snprintf(head, sizeof head,
                          "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
