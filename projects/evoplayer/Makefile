@@ -63,6 +63,7 @@ LIBS := \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libavutil.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libswscale.a \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libdav1d.a \
+    $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libsmb2.a \
     -lssl \
     -lcrypto \
     $(PS5_PAYLOAD_SDK)/target/user/homebrew/lib/libxml2.a \
@@ -105,6 +106,7 @@ MEDIA_SRCS := \
     media/src/evo_textreader.c \
     media/src/evo_direct_mem.c \
     media/src/evo_stream_io.c \
+    media/src/evo_smb_io.c \
     media/src/evo_playlist_sniff.c \
     media/src/evo_parallel_io.c \
     media/src/evo_packet_queue.c \
@@ -192,6 +194,7 @@ CORE_SRCS := \
     core/src/services/SurroundTestService.cpp \
     core/src/services/SpeakerCalibrationService.cpp \
     core/src/services/FtpClient.cpp \
+    core/src/services/SmbClient.cpp \
     core/src/services/NetworkStorageService.cpp \
     core/src/services/FileSystemBrowser.cpp \
     core/src/services/FileTransferService.cpp \

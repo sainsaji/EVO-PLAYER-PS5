@@ -3,6 +3,7 @@
 
 #include "evo/interfaces/IFileSystemBrowser.hpp"
 #include "evo/services/FtpClient.hpp"
+#include "evo/services/SmbClient.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -51,6 +52,7 @@ public:
 private:
     std::vector<NetworkShare> m_shares;
     std::unique_ptr<FtpClient> m_ftpClient;
+    std::unique_ptr<SmbClient> m_smbClient;
     std::string m_lastConnectedShareId;
 };
 

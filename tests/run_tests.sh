@@ -72,6 +72,10 @@ SRCS=(
     "${ADDONS}/src/provider_nuvio.c"
     "${ADDONS}/src/provider_stremio.c"
     "${EVO}/src/evo_favorites.c"
+    "${REPO_ROOT}/tests/test_smb.cpp"
+    "${CORE}/src/services/SmbClient.cpp"
+    "${CORE}/src/services/FtpClient.cpp"
+    "${CORE}/src/services/NetworkStorageService.cpp"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

@@ -7,6 +7,7 @@
 #include "evo_stream_io.h"
 #include "evo_direct_mem.h"
 #include "evo_parallel_io.h"
+#include "evo_smb_io.h"
 #include "evo_error.h"
 #include "evo_playlist_sniff.h"
 
@@ -58,6 +59,7 @@ struct evo_stream_io_ctx {
     int     deadline_hit;
     volatile int aborted;      /* evo_stream_io_abort: fail every blocking call */
     evo_pio *pio;              /* parallel read-ahead, NULL when not used */
+    evo_smb_io_t *smb;          /* SMB 2/3 stream I/O, NULL when not used */
 };
 
 static double sio_now_seconds(void)
@@ -484,6 +486,20 @@ int evo_stream_io_open(const char *path,
         }
     }
 
+    if (ctx->is_network && strncmp(path, "smb://", 6) == 0) {
+        ctx->smb = evo_smb_open(path);
+        if (ctx->smb) {
+            fmt->pb = evo_smb_avio(ctx->smb);
+            fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        } else {
+            avformat_free_context(fmt);
+            av_dict_free(&opts);
+            evo_direct_mem_free(ctx);
+            sio_report_open_failure(AVERROR(EIO), path, 1);
+            return AVERROR(EIO);
+        }
+    }
+
     int rc = avformat_open_input(&fmt, path, NULL, &opts);
     /* avformat_open_input frees and NULLs *fmt on failure, including on an
      * interrupted open, so there is nothing left to clean up here. */
@@ -497,6 +513,10 @@ int evo_stream_io_open(const char *path,
     if (rc < 0) {
         evo_pio_close(ctx->pio);
         ctx->pio = NULL;
+        if (ctx->smb) {
+            evo_smb_close(ctx->smb);
+            ctx->smb = NULL;
+        }
         const int was_network = ctx->is_network;
         evo_direct_mem_free(ctx);
         sio_report_open_failure(rc, path, was_network);
@@ -514,5 +534,9 @@ void evo_stream_io_close(evo_stream_io_ctx_t *ctx)
     /* After avformat_close_input: it does not free a custom pb. */
     evo_pio_close(ctx->pio);
     ctx->pio = NULL;
+    if (ctx->smb) {
+        evo_smb_close(ctx->smb);
+        ctx->smb = NULL;
+    }
     evo_direct_mem_free(ctx);
 }

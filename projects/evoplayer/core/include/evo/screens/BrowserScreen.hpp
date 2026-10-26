@@ -70,6 +70,7 @@ public:
     void setSource(int sourceIndex);
     void setSearchQuery(const std::string& query);
     void handleAddFtpHost(const std::string& hostStr);
+    void handleAddSmbHost(const std::string& hostStr);
     void handleActionRename(const std::string& newName);
     void handleActionNewFolder(const std::string& folderName);
 

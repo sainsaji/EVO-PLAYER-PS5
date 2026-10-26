@@ -11,6 +11,7 @@ extern "C" {
 #include <libavutil/mem.h>
 #include <libavutil/pixdesc.h>
 #include <unistd.h>
+#include "evo_smb_io.h"
 }
 
 #include "evo_boot_trace.h"
@@ -769,6 +770,16 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     if (fmt) {
         fmt->interrupt_callback.callback = thumbInterruptCb;
         fmt->interrupt_callback.opaque   = &timeout;
+    }
+
+    std::unique_ptr<evo_smb_io_t, void(*)(evo_smb_io_t*)> smbGuard(nullptr, evo_smb_close);
+    if (videoPath.compare(0, 6, "smb://") == 0) {
+        evo_smb_io_t* smb = evo_smb_open(videoPath.c_str());
+        if (smb && fmt) {
+            fmt->pb = evo_smb_avio(smb);
+            fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+            smbGuard.reset(smb);
+        }
     }
 
     evo_bt("extractVideoFrame: calling avformat_open_input");

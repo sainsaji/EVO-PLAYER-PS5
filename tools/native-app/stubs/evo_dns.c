@@ -631,3 +631,16 @@ const char *gai_strerror(int errcode)
         default:           return "Unknown error";
     }
 }
+
+struct protoent *getprotobyname(const char *name)
+{
+    static char *tcp_aliases[] = { (char *)"TCP", NULL };
+    static char *udp_aliases[] = { (char *)"UDP", NULL };
+    static struct protoent pe_tcp = { (char *)"tcp", tcp_aliases, IPPROTO_TCP };
+    static struct protoent pe_udp = { (char *)"udp", udp_aliases, IPPROTO_UDP };
+
+    if (!name) return NULL;
+    if (strcasecmp(name, "tcp") == 0) return &pe_tcp;
+    if (strcasecmp(name, "udp") == 0) return &pe_udp;
+    return NULL;
+}

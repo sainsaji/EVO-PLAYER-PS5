@@ -63,6 +63,77 @@ static void OnAddFtpSubmitted(const char* text, void* userdata) {
     self->handleAddFtpHost(text);
 }
 
+static void OnAddSmbSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleAddSmbHost(text);
+}
+
+void BrowserScreen::handleAddSmbHost(const std::string& hostStr) {
+    std::string trimmed = hostStr;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty()) return;
+
+    if (trimmed.rfind("smb://", 0) == 0) {
+        trimmed = trimmed.substr(6);
+    }
+
+    std::string user = "guest";
+    std::string pass;
+    size_t at = trimmed.find('@');
+    if (at != std::string::npos) {
+        std::string auth = trimmed.substr(0, at);
+        trimmed = trimmed.substr(at + 1);
+        size_t colon = auth.find(':');
+        if (colon != std::string::npos) {
+            user = auth.substr(0, colon);
+            pass = auth.substr(colon + 1);
+        } else {
+            user = auth;
+        }
+    }
+
+    std::string host = trimmed;
+    std::string startPath = "/";
+    size_t slash = trimmed.find('/');
+    if (slash != std::string::npos) {
+        host = trimmed.substr(0, slash);
+        startPath = trimmed.substr(slash);
+    }
+
+    int port = 445;
+    size_t colon = host.find(':');
+    if (colon != std::string::npos) {
+        port = std::atoi(host.substr(colon + 1).c_str());
+        host = host.substr(0, colon);
+        if (port <= 0 || port > 65535) port = 445;
+    }
+
+    if (host.empty()) return;
+
+    NetworkShare share;
+    share.id = "smb_" + std::to_string(time(nullptr));
+    share.name = host + (startPath != "/" ? startPath : "");
+    share.protocol = NetworkProtocol::SMB;
+    share.host = host;
+    share.port = port;
+    share.user = user;
+    share.password = pass;
+    share.startPath = startPath;
+
+    NetworkStorageService::getInstance().addShare(share);
+    m_networkShareId = share.id;
+    m_networkRemotePath = startPath;
+    resetSelection();
+    toast("SMB ADDED", share.name.c_str());
+}
+
 void BrowserScreen::handleAddFtpHost(const std::string& hostStr) {
     std::string trimmed = hostStr;
     size_t start = trimmed.find_first_not_of(" \t\r\n");
@@ -411,6 +482,15 @@ void BrowserScreen::rebuildItems() {
             }
 
             if (!m_isSearching) {
+                BrowserItem addSmbItem;
+                addSmbItem.name = "+ Add SMB Share";
+                addSmbItem.fullPath = "netshare://add_smb";
+                addSmbItem.category = FileCategory::Folder;
+                addSmbItem.badge = "SETUP";
+                addSmbItem.iconPath = "../icons/icon_settings.png";
+                addSmbItem.detail = "Windows Share / Samba (SMB2/3)";
+                m_items.push_back(std::move(addSmbItem));
+
                 BrowserItem addItem;
                 addItem.name = "+ Add FTP Server";
                 addItem.fullPath = "netshare://add";
@@ -426,8 +506,10 @@ void BrowserScreen::rebuildItems() {
             std::string error;
             bool ok = NetworkStorageService::getInstance().listEntries(m_networkShareId, m_networkRemotePath, entries, error);
             if (!ok) {
+                const auto* share = NetworkStorageService::getInstance().getShare(m_networkShareId);
+                const char* protoName = (share && share->protocol == NetworkProtocol::SMB) ? "SMB" : "FTP";
                 m_networkEmptyTitle = "COULD NOT CONNECT";
-                m_networkEmptyHint = error.empty() ? "FTP server not responding" : error;
+                m_networkEmptyHint = error.empty() ? (std::string(protoName) + " server not responding") : error;
             } else {
                 for (const auto& entry : entries) {
                     if (m_isSearching && !matchesQuery(entry.name, m_searchQuery)) {
@@ -943,6 +1025,11 @@ void BrowserScreen::activateSelection() {
                     evo_keyboard_open("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 64, OnAddFtpSubmitted, this);
                     return;
                 }
+                if (item.fullPath == "netshare://add_smb") {
+                    evo_feedback(EVO_FB_OPEN);
+                    evo_keyboard_open("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 128, OnAddSmbSubmitted, this);
+                    return;
+                }
                 if (item.fullPath.rfind("netshare://", 0) == 0) {
                     evo_feedback(EVO_FB_OPEN);
                     m_networkShareId = item.fullPath.substr(11);
@@ -1274,6 +1361,21 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     if (pressed & PadButtons::Triangle) {
         if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
             auto& item = m_items[m_selectedIndex];
+            if (m_activeSource == 2 && m_networkShareId.empty()) {
+                if (item.fullPath.rfind("netshare://", 0) == 0 &&
+                    item.fullPath != "netshare://add" &&
+                    item.fullPath != "netshare://add_smb") {
+                    std::string shareId = item.fullPath.substr(11);
+                    NetworkStorageService::getInstance().removeShare(shareId);
+                    toast("SHARE REMOVED", item.name.c_str());
+                    evo_feedback(EVO_FB_CONFIRM);
+                    rebuildItems();
+                    if (m_selectedIndex >= static_cast<int>(m_items.size()) && m_selectedIndex > 0) {
+                        m_selectedIndex = static_cast<int>(m_items.size()) - 1;
+                    }
+                    return true;
+                }
+            }
             if (item.category != FileCategory::Folder) {
                 if (favorites_is_favorite(item.fullPath.c_str())) {
                     favorites_remove(item.fullPath.c_str());

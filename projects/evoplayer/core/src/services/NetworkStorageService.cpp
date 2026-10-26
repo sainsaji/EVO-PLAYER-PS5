@@ -14,7 +14,8 @@ NetworkStorageService& NetworkStorageService::getInstance() {
 }
 
 NetworkStorageService::NetworkStorageService()
-    : m_ftpClient(std::make_unique<FtpClient>())
+    : m_ftpClient(std::make_unique<FtpClient>()),
+      m_smbClient(std::make_unique<SmbClient>())
 {
     loadConfig();
 }
@@ -22,6 +23,9 @@ NetworkStorageService::NetworkStorageService()
 NetworkStorageService::~NetworkStorageService() {
     if (m_ftpClient) {
         m_ftpClient->disconnect();
+    }
+    if (m_smbClient) {
+        m_smbClient->disconnect();
     }
 }
 
@@ -154,7 +158,7 @@ void NetworkStorageService::saveConfig() {
 std::string NetworkStorageService::buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const {
     std::string proto = (share.protocol == NetworkProtocol::SMB) ? "smb://" : "ftp://";
     std::string creds;
-    if (!share.user.empty() && share.user != "anonymous") {
+    if (!share.user.empty() && share.user != "anonymous" && share.user != "guest") {
         creds = share.user;
         if (!share.password.empty()) {
             creds += ":" + share.password;
@@ -167,7 +171,18 @@ std::string NetworkStorageService::buildMediaUrl(const NetworkShare& share, cons
         cleanPath = "/" + cleanPath;
     }
 
-    return proto + creds + share.host + ":" + std::to_string(share.port) + cleanPath;
+    std::string portStr;
+    if (share.protocol == NetworkProtocol::SMB) {
+        if (share.port > 0 && share.port != 445) {
+            portStr = ":" + std::to_string(share.port);
+        }
+    } else {
+        if (share.port > 0) {
+            portStr = ":" + std::to_string(share.port);
+        }
+    }
+
+    return proto + creds + share.host + portStr + cleanPath;
 }
 
 std::string NetworkStorageService::buildMediaUrl(const std::string& shareId, const std::string& remotePath) const {
@@ -288,8 +303,72 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             outEntries.push_back(std::move(be));
         }
         return true;
+    } else if (share->protocol == NetworkProtocol::SMB) {
+        std::string targetPath = remotePath.empty() ? share->startPath : remotePath;
+        if (targetPath.empty()) targetPath = "/";
+
+        std::string smbShare;
+        std::string subPath;
+        bool hasShare = SmbClient::splitShareAndPath(targetPath, smbShare, subPath);
+
+        if (!hasShare) {
+            // Root of SMB server: enumerate available disk shares
+            std::vector<std::string> diskShares;
+            if (m_smbClient->listShares(share->host, share->port, share->user, share->password, "", diskShares, 6)) {
+                for (const auto& ds : diskShares) {
+                    BrowserEntry be;
+                    be.name = ds;
+                    be.relativePath = ds;
+                    be.fullPath = buildMediaUrl(*share, "/" + ds);
+                    be.category = FileCategory::Folder;
+                    be.directoryType = 4; // DT_DIR
+                    outEntries.push_back(std::move(be));
+                }
+                return true;
+            } else {
+                outError = m_smbClient->getLastError();
+                return false;
+            }
+        } else {
+            // Inside a share: connect to share and list subpath
+            if (!m_smbClient->connectShare(share->host, share->port, share->user, share->password, "", smbShare, 6)) {
+                outError = m_smbClient->getLastError();
+                return false;
+            }
+
+            std::vector<SmbFileEntry> smbEntries;
+            if (!m_smbClient->list(subPath, smbEntries)) {
+                outError = m_smbClient->getLastError();
+                return false;
+            }
+
+            for (const auto& se : smbEntries) {
+                BrowserEntry be;
+                be.name = se.name;
+                be.relativePath = se.name;
+
+                std::string fullItemPath = "/" + smbShare;
+                if (!subPath.empty()) {
+                    if (subPath.front() != '/') fullItemPath += "/";
+                    fullItemPath += subPath;
+                }
+                if (fullItemPath.back() != '/') fullItemPath += "/";
+                fullItemPath += se.name;
+
+                be.fullPath = buildMediaUrl(*share, fullItemPath);
+                if (se.isDirectory) {
+                    be.category = FileCategory::Folder;
+                    be.directoryType = 4; // DT_DIR
+                } else {
+                    be.category = classifyFileName(se.name);
+                    be.directoryType = 8; // DT_REG
+                }
+                outEntries.push_back(std::move(be));
+            }
+            return true;
+        }
     } else {
-        outError = "SMB support coming soon";
+        outError = "Unknown protocol";
         return false;
     }
 }

@@ -60,6 +60,7 @@ UPSTREAM_LIBS=(
     # carry it; this list overrides the Makefile's, and lacking it turned the
     # compile check into a link failure that had nothing to do with the code.
     "${HB}/lib/libdav1d.a"
+    "${HB}/lib/libsmb2.a"
 )
 TRANSITIVE_LIBS=(
     -lass -lharfbuzz -lharfbuzz-subset -lfreetype -lfribidi -lpng16

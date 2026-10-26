@@ -24,6 +24,7 @@
 #include "evo_blend.h"
 #include "evo_metrics.h"
 #include "evo_stream_io.h"
+#include "evo_smb_io.h"
 #include "evo_boot_log.h"
 
 #include <libavcodec/avcodec.h>
@@ -472,6 +473,7 @@ static struct SwsContext *prospero_thumb_sws = NULL;
 static int prospero_thumb_sws_w   = 0;
 static int prospero_thumb_sws_h   = 0;
 static int prospero_thumb_sws_fmt = -1;
+static evo_smb_io_t *prospero_thumb_smb = NULL;
 
 void prospero_thumbnail_close_context(void)
 {
@@ -490,6 +492,10 @@ void prospero_thumbnail_close_context(void)
     if (prospero_thumb_fmt) {
         avformat_close_input(&prospero_thumb_fmt);
         prospero_thumb_fmt = NULL;
+    }
+    if (prospero_thumb_smb) {
+        evo_smb_close(prospero_thumb_smb);
+        prospero_thumb_smb = NULL;
     }
     if (prospero_thumb_sws) {
         sws_freeContext(prospero_thumb_sws);
@@ -557,6 +563,15 @@ static int prospero_thumbnail_ensure_context(const char *path)
         return 0;
     prospero_thumb_fmt->interrupt_callback.callback = prospero_thumb_interrupt;
     prospero_thumb_fmt->interrupt_callback.opaque   = NULL;
+
+    if (strncmp(path, "smb://", 6) == 0) {
+        prospero_thumb_smb = evo_smb_open(path);
+        if (prospero_thumb_smb) {
+            prospero_thumb_fmt->pb = evo_smb_avio(prospero_thumb_smb);
+            prospero_thumb_fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        }
+    }
+
     /* A provider stream needs the same headers / User-Agent as the playing one
      * (a plain open is refused or crawls), and a cold connection to a debrid
      * host plus the container index of a huge file takes longer than a disk. */
@@ -571,6 +586,10 @@ static int prospero_thumbnail_ensure_context(const char *path)
     av_dict_free(&opts);
     if (open_rc < 0) {
         /* Freed and NULLed by avformat_open_input on failure. */
+        if (prospero_thumb_smb) {
+            evo_smb_close(prospero_thumb_smb);
+            prospero_thumb_smb = NULL;
+        }
         char err[64];
         av_strerror(open_rc, err, sizeof err);
         evo_boot_log("thumb: open failed (%s) net=%d", err, is_net);

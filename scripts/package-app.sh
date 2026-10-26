@@ -420,6 +420,7 @@ else
     # set). Order-independent inside the group.
     for a in libSDL2 \
              libavformat libavcodec libswresample libavutil libswscale libdav1d \
+             libsmb2 \
              libass libfreetype libharfbuzz libharfbuzz-subset libfribidi \
              libpng16 libsamplerate libssl libcrypto libiconv libxml2 \
              libz libbz2 liblzma libzstd libm; do

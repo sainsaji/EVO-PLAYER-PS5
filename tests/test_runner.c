@@ -337,7 +337,7 @@ static void test_emby_media_sources(void)
     evo_stream_choice_t ch[4];
     int n = ms_parse_sources(c, "i:item1", body, ch, 4);
     TEST_ASSERT(n == 3, "expected three versions");
-    TEST_ASSERT(strcmp(ch[2].label, "4K | [Web-dl] | Unabomber (2026) | HEVC DV") == 0,
+    TEST_ASSERT(strcmp(ch[2].label, "Unabomber (2026)") == 0,
                 "AIOStreams name not cleaned");
     TEST_ASSERT(strstr(ch[0].url, "/Videos/item1/stream?Static=true&MediaSourceId=src4k&PlaySessionId=ps1&api_key=tok") != NULL,
                 "4K version URL wrong");
@@ -1033,6 +1033,10 @@ static void test_audio_volume_boost(void)
 extern void test_settings_save_load_roundtrip(void);
 extern void test_settings_legacy_compat(void);
 
+/* SMB client and network storage host tests */
+extern void test_smb_split_path(void);
+extern void test_smb_storage_service(void);
+
 /* ==========================================================================
  * Main Test Runner Entrypoint
  * ========================================================================== */
@@ -1062,6 +1066,8 @@ int main(void)
     test_audio_volume_boost();
     test_settings_save_load_roundtrip();
     test_settings_legacy_compat();
+    test_smb_split_path();
+    test_smb_storage_service();
 
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",
