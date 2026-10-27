@@ -250,6 +250,19 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     state.action_paste_enabled = (p->action_paste_enabled != 0);
     state.action_target_sub = p->action_target_sub ? p->action_target_sub : "";
     state.action_clipboard_info = p->action_clipboard_info ? p->action_clipboard_info : "";
+    state.action_menu_count = p->action_menu_count;
+    state.action_menu_eyebrow = p->action_menu_eyebrow ? p->action_menu_eyebrow : "";
+    state.action_menu_items.clear();
+    for (int i = 0; i < p->action_menu_count && i < 7; ++i) {
+        EvoBrowserState::ActionMenuItem it;
+        it.label = p->action_menu_items[i].label ? p->action_menu_items[i].label : "";
+        it.desc = p->action_menu_items[i].desc ? p->action_menu_items[i].desc : "";
+        it.icon_path = p->action_menu_items[i].icon_path ? p->action_menu_items[i].icon_path : "";
+        it.danger = (p->action_menu_items[i].danger != 0);
+        state.action_menu_items.push_back(it);
+    }
+    state.footer_triangle_label = p->footer_triangle_label ? p->footer_triangle_label : "";
+    state.footer_options_label = p->footer_options_label ? p->footer_options_label : "";
 
     state.transfer_modal_open = (p->transfer_modal_open != 0);
     state.transfer_op_title = p->transfer_op_title ? p->transfer_op_title : "";

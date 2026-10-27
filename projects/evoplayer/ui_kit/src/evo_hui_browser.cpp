@@ -52,7 +52,7 @@ struct Source
 const Source kSources[5] = {
     {"USB Drive", "../icons/icon_browse_usb.png"},
     {"Internal Storage", "../icons/icon_folder.png"},
-    {"Network (FTP)", "../icons/icon_browse_usb.png"},
+    {"Network Storage", "../icons/icon_browse_usb.png"},
     {"Favorites", "../icons/icon_favorites.png"},
     {"Recent Media", "../icons/icon_recent_files.png"},
 };
@@ -479,13 +479,14 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         list.rounded_rect({0, 0, 1920, 1080}, 0, Color::rgb(0x000000, 0.45f * m));
         list.push_transform(0.96f + 0.04f * m, 960, 540, 0, 0);
         list.push_opacity(m);
+        const int nActions = (raw_.action_menu_count > 0) ? raw_.action_menu_count : 7;
         const Rect first = action_rect(0);
-        const float h = 170.0f + 7.0f * (kActionH + 4.0f) + 24.0f;
+        const float h = 170.0f + nActions * (kActionH + 4.0f) + 24.0f;
         const Rect card{960.0f - kMenuW * 0.5f, first.y - 170.0f, kMenuW, h};
         list.shadow({card.x, card.y + 24, card.w, card.h}, 32, 48, Color::rgb(0x000000, 0.6f));
         list.rounded_rect(card, 32, p.bg_top.with_alpha(0.97f));
         list.bordered_rect(card, 32, kClear, 1.5f, kWhite.with_alpha(0.14f));
-        ui::text(list, fonts.semibold, "FILE OPERATIONS", card.x + 32, card.y + 54, 15, p.accent, Align::left, 3.0f);
+        ui::text(list, fonts.semibold, (raw_.action_menu_count > 0 && raw_.action_menu_eyebrow) ? raw_.action_menu_eyebrow : "FILE OPERATIONS", card.x + 32, card.y + 54, 15, p.accent, Align::left, 3.0f);
         ui::text(list, fonts.display, fit(fonts.display, act_target_, 30, card.w - 64), card.x + 32, card.y + 94,
                  30, kWhite);
         ui::text(list, fonts.regular, fit(fonts.regular, act_sub_, 18, card.w - 64), card.x + 32, card.y + 124,
@@ -494,18 +495,22 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             ui::text(list, fonts.regular, fit(fonts.regular, act_clip_, 16, card.w - 64), card.x + 32,
                      card.y + 150, 16, p.text_faint);
         list.rounded_rect(action_ring_.value(), 18, kWhite);
-        for (int i = 0; i < 7; ++i)
+        for (int i = 0; i < nActions; ++i)
         {
             const Rect r = action_rect(i);
             const bool focused = i == raw_.action_menu_focused;
-            const bool disabled = i == 2 && !raw_.action_paste_enabled;
-            const Color ink = focused ? kInk : (i == 4 ? kDanger : kWhite);
+            const bool disabled = (raw_.action_menu_count == 0 && i == 2 && !raw_.action_paste_enabled);
+            const bool danger = (raw_.action_menu_count > 0) ? (raw_.action_menu_items[i].danger != 0) : (i == 4);
+            const Color ink = focused ? kInk : (danger ? kDanger : kWhite);
             list.push_opacity(disabled ? 0.35f : 1.0f);
-            const std::uint32_t icon = ctx.textures.icon(kActions[i].icon);
+            const char* iconName = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].icon_path : kActions[i].icon;
+            const char* labelText = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].label : kActions[i].label;
+            const char* descText = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].desc : kActions[i].desc;
+            const std::uint32_t icon = ctx.textures.icon(iconName ? iconName : "");
             if (icon)
                 list.image(icon, {r.x + 18, r.cy() - 13, 26, 26}, ::hui::gfx::kFullUv, ink);
-            ui::text(list, fonts.semibold, kActions[i].label, r.x + 60, r.y + 27, 20, ink);
-            ui::text(list, fonts.regular, kActions[i].desc, r.x + 60, r.y + 48, 15,
+            ui::text(list, fonts.semibold, labelText ? labelText : "", r.x + 60, r.y + 27, 20, ink);
+            ui::text(list, fonts.regular, descText ? descText : "", r.x + 60, r.y + 48, 15,
                      focused ? kInk.with_alpha(0.65f) : p.text_faint);
             list.pop_opacity();
         }
@@ -543,13 +548,17 @@ bool BrowserScreen::focus(FocusInfo *out) const
     out->focusable.clear();
     if (raw_.action_menu_open)
     {
-        for (int i = 0; i < 7; ++i)
-            out->focusable.emplace_back("action-" + std::to_string(i), kActions[i].label);
-        const int at = std::clamp(raw_.action_menu_focused, 0, 6);
+        const int nActions = (raw_.action_menu_count > 0) ? raw_.action_menu_count : 7;
+        for (int i = 0; i < nActions; ++i) {
+            const char* lbl = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].label : kActions[i].label;
+            out->focusable.emplace_back("action-" + std::to_string(i), lbl ? lbl : "");
+        }
+        const int at = std::clamp(raw_.action_menu_focused, 0, nActions - 1);
+        const char* atLbl = (raw_.action_menu_count > 0) ? raw_.action_menu_items[at].label : kActions[at].label;
         out->id = "action-" + std::to_string(at);
-        out->text = kActions[at].label;
+        out->text = atLbl ? atLbl : "";
         out->index = at + 1;
-        out->total = 7;
+        out->total = nActions;
         out->rect = action_rect(at);
         return true;
     }

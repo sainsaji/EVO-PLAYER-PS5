@@ -1564,6 +1564,12 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     if (Rml::Element* e = el("bhint-back")) {
         e->SetProperty("display", (state.at_root && state.sidebar_focused) ? "none" : "flex");
     }
+    if (Rml::Element* e = el("footer-triangle-label")) {
+        e->SetInnerRML(state.footer_triangle_label.empty() ? "FAVORITE" : state.footer_triangle_label);
+    }
+    if (Rml::Element* e = el("footer-options-label")) {
+        e->SetInnerRML(state.footer_options_label.empty() ? "OPERATIONS" : state.footer_options_label);
+    }
 
     /* 5. File Operations Action Menu Modal */
     if (Rml::Element* scrim = el("browser-action-scrim")) {
@@ -1571,6 +1577,9 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
         scrim->SetProperty("display", state.action_menu_open ? "flex" : "none");
     }
     if (state.action_menu_open) {
+        if (Rml::Element* eyebrow = el("browser-action-eyebrow")) {
+            eyebrow->SetInnerRML(state.action_menu_eyebrow.empty() ? "OPTIONS  •  FILE OPERATIONS" : state.action_menu_eyebrow);
+        }
         if (Rml::Element* target = el("browser-action-target")) {
             target->SetInnerRML(state.action_menu_target.empty() ? "Current Directory" : state.action_menu_target);
         }
@@ -1587,15 +1596,51 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
                 clip->SetProperty("display", "none");
             }
         }
-        for (int i = 0; i < 7; i++) {
-            if (Rml::Element* row = el("act-row-" + std::to_string(i))) {
-                bool focused = (state.action_menu_focused == i);
-                row->SetClass("action-row-focused", focused);
-                if (i == 4) { // Delete row
-                    row->SetClass("action-row-danger-slot", true);
+        if (state.action_menu_count > 0) {
+            for (int i = 0; i < 7; i++) {
+                std::string n = std::to_string(i);
+                Rml::Element* row = el("act-row-" + n);
+                if (!row) continue;
+                if (i >= state.action_menu_count || i >= (int)state.action_menu_items.size()) {
+                    row->SetProperty("display", "none");
+                    continue;
                 }
-                if (i == 2) { // Paste row
-                    row->SetClass("action-row-disabled", !state.action_paste_enabled);
+                const auto& item = state.action_menu_items[i];
+                row->SetProperty("display", "flex");
+                row->SetClass("action-row-focused", state.action_menu_focused == i);
+                row->SetClass("action-row-danger-slot", item.danger);
+                row->SetClass("action-row-disabled", false);
+                if (Rml::Element* e = el("act-label-" + n)) {
+                    e->SetInnerRML(item.label);
+                    e->SetClass("act-label-danger", item.danger);
+                }
+                if (Rml::Element* e = el("act-desc-" + n)) {
+                    e->SetInnerRML(item.desc);
+                }
+                if (Rml::Element* e = el("act-icon-" + n)) {
+                    if (!item.icon_path.empty()) e->SetAttribute("src", item.icon_path);
+                }
+                if (Rml::Element* e = el("act-iconbox-" + n)) {
+                    e->SetClass("act-icon-danger", item.danger);
+                }
+            }
+        } else {
+            for (int i = 0; i < 7; i++) {
+                std::string n = std::to_string(i);
+                if (Rml::Element* row = el("act-row-" + n)) {
+                    row->SetProperty("display", "flex");
+                    bool focused = (state.action_menu_focused == i);
+                    row->SetClass("action-row-focused", focused);
+                    if (i == 4) { // Delete row
+                        row->SetClass("action-row-danger-slot", true);
+                    } else {
+                        row->SetClass("action-row-danger-slot", false);
+                    }
+                    if (i == 2) { // Paste row
+                        row->SetClass("action-row-disabled", !state.action_paste_enabled);
+                    } else {
+                        row->SetClass("action-row-disabled", false);
+                    }
                 }
             }
         }

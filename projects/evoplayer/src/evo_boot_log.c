@@ -121,6 +121,7 @@ static char   g_boot[BL_BOOT_CAP];
 static size_t g_boot_len;
 static int    g_dropped;
 static FILE  *g_fp;
+static const char *g_log_path = EVO_LOG_PATH;
 static long   g_written;   /* bytes in evo.log since open/rotation, incl. what was there */
 
 #define BL_ROTATE_BYTES (16L * 1024 * 1024)
@@ -401,8 +402,10 @@ static FILE *bl_rotate(FILE *fp)
     static char buf[64 * 1024];
     fflush(fp);
     fclose(fp);
-    FILE *in = fopen(EVO_LOG_PATH, "r");
-    FILE *out = in ? fopen(EVO_LOG_PATH ".1", "w") : NULL;
+    char old_path[128];
+    snprintf(old_path, sizeof(old_path), "%s.1", g_log_path);
+    FILE *in = fopen(g_log_path, "r");
+    FILE *out = in ? fopen(old_path, "w") : NULL;
     if (in && out) {
         size_t n;
         while ((n = fread(buf, 1, sizeof buf, in)) > 0)
@@ -410,7 +413,7 @@ static FILE *bl_rotate(FILE *fp)
     }
     if (in) fclose(in);
     if (out) { fflush(out); fsync(fileno(out)); fclose(out); }
-    FILE *fresh = fopen(EVO_LOG_PATH, (in && out) ? "w" : "a");   /* keep it if the copy failed */
+    FILE *fresh = fopen(g_log_path, (in && out) ? "w" : "a");   /* keep it if the copy failed */
     return fresh;
 }
 
@@ -428,8 +431,15 @@ void evo_boot_log_flush(void)
 {
     if (!g_fp) {
         FILE *fp = fopen(EVO_LOG_PATH, "a");
+        if (fp) {
+            g_log_path = EVO_LOG_PATH;
+        } else {
+            fp = fopen("/data/evoplayer/evo.log", "a");
+            if (fp)
+                g_log_path = "/data/evoplayer/evo.log";
+        }
         if (!fp)
-            return;   /* /mnt/usb0 not reachable yet — try again next call */
+            return;   /* /mnt/usb0 and /data/evoplayer not reachable yet — try again next call */
         pthread_mutex_lock(&g_io_lock);
         fseek(fp, 0, SEEK_END);
         g_written = ftell(fp);

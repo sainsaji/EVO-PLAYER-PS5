@@ -143,7 +143,17 @@ with FTP() as f:
     f.login()
     try: f.set_pasv(True)
     except Exception: pass
-    f.storbinary("STOR /mnt/usb0/evo_cmd", io.BytesIO((sys.argv[1] + "\n").encode()))
+    cmd_bytes = (sys.argv[1] + "\n").encode()
+    sent = False
+    for p in ["/mnt/usb0/evo_cmd", "/data/evoplayer/evo_cmd"]:
+        try:
+            f.storbinary("STOR " + p, io.BytesIO(cmd_bytes))
+            sent = True
+            break
+        except Exception:
+            pass
+    if not sent:
+        sys.exit(1)
 print("sent:", sys.argv[1])
 PY
 }
@@ -152,16 +162,24 @@ get_file() {  # get_file <remote> -> stdout
     ftp_py "$1" <<'PY'
 import os, sys
 from ftplib import FTP, error_perm
+paths = [sys.argv[1]]
+if sys.argv[1].startswith("/mnt/usb0/"):
+    paths.append(sys.argv[1].replace("/mnt/usb0/", "/data/evoplayer/"))
 try:
     with FTP() as f:
         f.connect(os.environ["PS5_HOST"], int(os.environ["FTP_PORT"]), timeout=15)
         f.login()
         try: f.set_pasv(True)
         except Exception: pass
-        buf = []
-        try: f.retrbinary("RETR " + sys.argv[1], buf.append)
-        except error_perm: sys.exit(3)
-        sys.stdout.write(b"".join(buf).decode("utf-8", "replace"))
+        for p in paths:
+            buf = []
+            try:
+                f.retrbinary("RETR " + p, buf.append)
+                sys.stdout.write(b"".join(buf).decode("utf-8", "replace"))
+                sys.exit(0)
+            except error_perm:
+                continue
+        sys.exit(3)
 except Exception as e:
     sys.stderr.write(str(e) + "\n"); sys.exit(1)
 PY
@@ -176,8 +194,12 @@ with FTP() as f:
     try: f.set_pasv(True)
     except Exception: pass
     for p in sys.argv[1:]:
-        try: f.sendcmd("DELE " + p); print("del", p)
-        except error_perm: print("--", p)
+        targets = [p]
+        if p.startswith("/mnt/usb0/"):
+            targets.append(p.replace("/mnt/usb0/", "/data/evoplayer/"))
+        for t in targets:
+            try: f.sendcmd("DELE " + t); print("del", t)
+            except error_perm: print("--", t)
 PY
 }
 
@@ -612,14 +634,21 @@ from ftplib import FTP, error_perm
 H, P = os.environ["PS5_HOST"], int(os.environ["FTP_PORT"])
 def get(p):
     try:
+        paths = [p]
+        if p.startswith("/mnt/usb0/"):
+            paths.append(p.replace("/mnt/usb0/", "/data/evoplayer/"))
         with FTP() as f:
             f.connect(H, P, timeout=10); f.login()
             try: f.set_pasv(True)
             except Exception: pass
-            b = []
-            try: f.retrbinary("RETR " + p, b.append)
-            except error_perm: return None
-            return b"".join(b).decode("utf-8", "replace")
+            for tgt in paths:
+                b = []
+                try:
+                    f.retrbinary("RETR " + tgt, b.append)
+                    return b"".join(b).decode("utf-8", "replace")
+                except error_perm:
+                    pass
+            return None
     except Exception:
         return None
 dl = time.time() + int(sys.argv[1]); vlen = 0; last = ""

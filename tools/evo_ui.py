@@ -21,8 +21,8 @@ from ftplib import FTP, error_perm
 
 HOST = os.environ["PS5_HOST"]
 PORT = int(os.environ.get("FTP_PORT", "2121"))
-UI_PATH = "/mnt/usb0/evo_ui.json"
-CMD_PATH = "/mnt/usb0/evo_cmd"
+UI_PATHS = ["/mnt/usb0/evo_ui.json", "/data/evoplayer/evo_ui.json"]
+CMD_PATHS = ["/mnt/usb0/evo_cmd", "/data/evoplayer/evo_cmd"]
 
 
 def connect():
@@ -37,15 +37,17 @@ def connect():
 
 
 def read_state(f):
-    buf = []
-    try:
-        f.retrbinary("RETR " + UI_PATH, buf.append)
-    except error_perm:
-        return None
-    try:
-        return json.loads(b"".join(buf).decode("utf-8", "replace"))
-    except ValueError:
-        return None   # caught between write and rename - next read is whole
+    for p in UI_PATHS:
+        buf = []
+        try:
+            f.retrbinary("RETR " + p, buf.append)
+        except error_perm:
+            continue
+        try:
+            return json.loads(b"".join(buf).decode("utf-8", "replace"))
+        except ValueError:
+            return None   # caught between write and rename - next read is whole
+    return None
 
 
 def summary(st):
@@ -90,7 +92,16 @@ def cmd_key(buttons):
         st = read_state(f)
         for b in buttons:
             seq = st.get("seq") if st else None
-            f.storbinary("STOR " + CMD_PATH, io.BytesIO(("key %s\n" % b).encode()))
+            sent = False
+            for p in CMD_PATHS:
+                try:
+                    f.storbinary("STOR " + p, io.BytesIO(("key %s\n" % b).encode()))
+                    sent = True
+                    break
+                except Exception:
+                    continue
+            if not sent:
+                sys.stderr.write("Failed to send key to any cmd path\n")
             deadline = time.time() + wait
             changed = False
             while time.time() < deadline:

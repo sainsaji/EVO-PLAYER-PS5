@@ -1215,6 +1215,10 @@ void writeSetResult(const char* text) {
         std::fputs(text, fp);
         std::fputc('\n', fp);
         std::fclose(fp);
+    } else if (FILE* fp2 = std::fopen("/data/evoplayer/evo_set.txt", "w")) {
+        std::fputs(text, fp2);
+        std::fputc('\n', fp2);
+        std::fclose(fp2);
     }
     evo_boot_log("remote set: %s", text);
 }

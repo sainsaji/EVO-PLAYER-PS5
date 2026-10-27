@@ -71,6 +71,8 @@ public:
     void setSearchQuery(const std::string& query);
     void handleAddFtpHost(const std::string& hostStr);
     void handleAddSmbHost(const std::string& hostStr);
+    void handleEditSmbHost(const std::string& hostStr);
+    void handleEditFtpHost(const std::string& hostStr);
     void handleActionRename(const std::string& newName);
     void handleActionNewFolder(const std::string& folderName);
 
@@ -88,6 +90,9 @@ private:
     void openSearch();
     void openActionMenu();
     void performAction(int actionIndex);
+    void openEditShareKeyboard(const std::string& shareId);
+    void openServerMenu(const std::string& shareId, const std::string& shareName);
+    void performServerAction(int actionIndex);
 
     StateMachine<BrowserScreenState, BrowserScreenEvent> m_browserFsm;
 
@@ -138,6 +143,17 @@ private:
     bool m_showDeleteConfirm = false;
     int m_deleteConfirmButton = 0;
     bool m_showTransferDialog = false;
+
+    // Network share management & server options menu
+    bool m_serverMenuOpen = false;
+    int m_serverMenuFocused = 0;
+    std::string m_serverMenuShareId;
+    std::string m_serverMenuShareName;
+    bool m_removeShareConfirmOpen = false;
+    int m_removeShareConfirmButton = 0;
+    std::string m_removeShareId;
+    std::string m_removeShareName;
+    std::string m_editingShareId;
     std::string m_actionTargetName;
     std::string m_actionTargetPath;
     bool m_actionTargetIsDir = false;

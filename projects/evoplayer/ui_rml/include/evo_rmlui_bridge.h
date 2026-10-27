@@ -485,6 +485,16 @@ typedef struct {
     int         action_paste_enabled;
     const char* action_target_sub;
     const char* action_clipboard_info;
+    int         action_menu_count; /* 0 = default 7 file ops, > 0 = custom menu */
+    const char* action_menu_eyebrow;
+    struct {
+        const char* label;
+        const char* desc;
+        const char* icon_path;
+        int danger;
+    } action_menu_items[7];
+    const char* footer_triangle_label;
+    const char* footer_options_label;
 
     /* File Operations Transfer Progress Modal */
     int         transfer_modal_open;

@@ -56,7 +56,7 @@
             </div>
             <div id="sb-item-2" class="sb-item">
                 <img id="sb-icon-2" class="sb-icon" src="../icons/icon_browse_usb.png"/>
-                <span id="sb-label-2" class="sb-label">Network (FTP)</span>
+                <span id="sb-label-2" class="sb-label">Network Storage</span>
             </div>
             <div id="sb-item-3" class="sb-item">
                 <img id="sb-icon-3" class="sb-icon" src="../icons/icon_favorites.png"/>
@@ -264,7 +264,7 @@
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge"><img src="../icons/btn_triangle.png" class="glyph-badge-img"/></div>
-                    <span class="footer-text">FAVORITE</span>
+                    <span id="footer-triangle-label" class="footer-text">FAVORITE</span>
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge-pill"><span class="glyph-pill-text">L1 / R1</span></div>
@@ -276,7 +276,7 @@
                 </div>
                 <div class="footer-hint">
                     <div class="glyph-badge-pill"><span class="glyph-pill-text">OPTIONS</span></div>
-                    <span class="footer-text">OPERATIONS</span>
+                    <span id="footer-options-label" class="footer-text">OPERATIONS</span>
                 </div>
                 <div id="browser-footer-version">v0.11.0</div>
             </div>
@@ -306,64 +306,64 @@
             <div id="browser-action-list">
                 <!-- 0: Copy -->
                 <div id="act-row-0" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/icon_browse_usb.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-0" class="act-icon-box"><img id="act-icon-0" src="../icons/icon_browse_usb.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">Copy</span>
-                        <span class="act-desc">Copy item to clipboard</span>
+                        <span id="act-label-0" class="act-label">Copy</span>
+                        <span id="act-desc-0" class="act-desc">Copy item to clipboard</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 1: Cut (Move) -->
                 <div id="act-row-1" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/icon_recent_files.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-1" class="act-icon-box"><img id="act-icon-1" src="../icons/icon_recent_files.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">Cut (Move)</span>
-                        <span class="act-desc">Move item to clipboard for relocation</span>
+                        <span id="act-label-1" class="act-label">Cut (Move)</span>
+                        <span id="act-desc-1" class="act-desc">Move item to clipboard for relocation</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 2: Paste -->
                 <div id="act-row-2" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-2" class="act-icon-box"><img id="act-icon-2" src="../icons/icon_folder.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">Paste</span>
-                        <span class="act-desc">Paste clipboard item into this folder</span>
+                        <span id="act-label-2" class="act-label">Paste</span>
+                        <span id="act-desc-2" class="act-desc">Paste clipboard item into this folder</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 3: Rename -->
                 <div id="act-row-3" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/icon_type.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-3" class="act-icon-box"><img id="act-icon-3" src="../icons/icon_type.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">Rename</span>
-                        <span class="act-desc">Change file or folder name</span>
+                        <span id="act-label-3" class="act-label">Rename</span>
+                        <span id="act-desc-3" class="act-desc">Change file or folder name</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 4: Delete -->
                 <div id="act-row-4" class="action-row action-row-danger-slot">
-                    <div class="act-icon-box act-icon-danger"><img src="../icons/icon_trash.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-4" class="act-icon-box act-icon-danger"><img id="act-icon-4" src="../icons/icon_trash.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label act-label-danger">Delete</span>
-                        <span class="act-desc">Permanently remove this item</span>
+                        <span id="act-label-4" class="act-label act-label-danger">Delete</span>
+                        <span id="act-desc-4" class="act-desc">Permanently remove this item</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 5: New Folder -->
                 <div id="act-row-5" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/icon_folder.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-5" class="act-icon-box"><img id="act-icon-5" src="../icons/icon_folder.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">New Folder</span>
-                        <span class="act-desc">Create directory in current location</span>
+                        <span id="act-label-5" class="act-label">New Folder</span>
+                        <span id="act-desc-5" class="act-desc">Create directory in current location</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_cross.png" class="act-glyph-img"/></div>
                 </div>
                 <!-- 6: Close -->
                 <div id="act-row-6" class="action-row">
-                    <div class="act-icon-box"><img src="../icons/btn_circle.png" class="act-icon-img"/></div>
+                    <div id="act-iconbox-6" class="act-icon-box"><img id="act-icon-6" src="../icons/btn_circle.png" class="act-icon-img"/></div>
                     <div class="act-text-col">
-                        <span class="act-label">Close</span>
-                        <span class="act-desc">Dismiss menu and return to browser</span>
+                        <span id="act-label-6" class="act-label">Close</span>
+                        <span id="act-desc-6" class="act-desc">Dismiss menu and return to browser</span>
                     </div>
                     <div class="act-glyph-badge"><img src="../icons/btn_circle.png" class="act-glyph-img"/></div>
                 </div>

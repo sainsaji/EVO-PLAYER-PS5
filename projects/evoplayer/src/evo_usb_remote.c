@@ -24,10 +24,14 @@
 #define EVO_BUILD_ID "unknown"
 #endif
 
-#define CMD_PATH    "/mnt/usb0/evo_cmd"
-#define STATUS_PATH "/mnt/usb0/evo_status"
-#define UI_PATH     "/mnt/usb0/evo_ui.json"
-#define UI_TMP_PATH "/mnt/usb0/evo_ui.json.tmp"
+#define CMD_PATH        "/mnt/usb0/evo_cmd"
+#define CMD_FALLBACK    "/data/evoplayer/evo_cmd"
+#define STATUS_PATH     "/mnt/usb0/evo_status"
+#define STATUS_FALLBACK "/data/evoplayer/evo_status"
+#define UI_PATH         "/mnt/usb0/evo_ui.json"
+#define UI_TMP_PATH     "/mnt/usb0/evo_ui.json.tmp"
+#define UI_FALLBACK     "/data/evoplayer/evo_ui.json"
+#define UI_TMP_FALLBACK "/data/evoplayer/evo_ui.json.tmp"
 
 extern int    screen;   /* main.c */
 extern void   evo_iobench_run(const char *spec);   /* evo_iobench.c */
@@ -218,9 +222,9 @@ static void run_command(const char *line)
  * one state in which tools/evo-remote.sh will send the title-aware close
  * controller: the GPU is drained, nothing is submitting.
  */
-static void write_status(long long now, int parked)
+static void write_status_to(const char *path, long long now, int parked)
 {
-    FILE *sf = fopen(STATUS_PATH, "w");
+    FILE *sf = fopen(path, "w");
     if (!sf)
         return;
     fprintf(sf,
@@ -230,6 +234,26 @@ static void write_status(long long now, int parked)
             evo_player_position_s(), evo_pb_duration_s(), evo_pb_video_fps(),
             evo_pb_decode_fatal(), evo_pb_is_eof(), evo_pb_is_active(), parked);
     fclose(sf);
+}
+
+static void write_status(long long now, int parked)
+{
+    write_status_to(STATUS_PATH, now, parked);
+    write_status_to(STATUS_FALLBACK, now, parked);
+}
+
+static void write_ui_file(const char *tmp_path, const char *path, unsigned seq, long long now, const char *json)
+{
+    FILE *f = fopen(tmp_path, "w");
+    if (!f)
+        return;
+    /* seq/t first and outside the compared body: they change on every write. */
+    fprintf(f, "{\"seq\":%u,\"t_ms\":%lld,\"ui\":%s}\n", seq, now, json);
+    fclose(f);
+    if (rename(tmp_path, path) != 0) {
+        remove(path);
+        rename(tmp_path, path);
+    }
 }
 
 /*
@@ -248,7 +272,6 @@ static void write_ui_state(long long now)
     static char     *last_json;
     static unsigned  seq;
     const char      *json;
-    FILE            *f;
 
     if (now - last_sample < 100)
         return;
@@ -265,15 +288,29 @@ static void write_ui_state(long long now)
             memcpy(last_json, json, n);
     }
 
-    f = fopen(UI_TMP_PATH, "w");
-    if (!f)
+    ++seq;
+    write_ui_file(UI_TMP_PATH, UI_PATH, seq, now, json);
+    write_ui_file(UI_TMP_FALLBACK, UI_FALLBACK, seq, now, json);
+}
+
+static void poll_cmd_file(const char *path)
+{
+    FILE *cf = fopen(path, "r");
+    if (!cf)
         return;
-    /* seq/t first and outside the compared body: they change on every write. */
-    fprintf(f, "{\"seq\":%u,\"t_ms\":%lld,\"ui\":%s}\n", ++seq, now, json);
-    fclose(f);
-    if (rename(UI_TMP_PATH, UI_PATH) != 0) {
-        remove(UI_PATH);
-        rename(UI_TMP_PATH, UI_PATH);
+
+    char line[600];
+    int  got = (fgets(line, sizeof line, cf) != NULL);
+    int  complete = got && strchr(line, '\n') != NULL;
+    /* A full buffer with no newline is not a partial write, it is junk —
+     * drop it rather than wedging the remote on it forever. */
+    int  junk = got && !complete && strlen(line) >= sizeof line - 1;
+    fclose(cf);
+    if (complete) {
+        remove(path);
+        run_command(line);
+    } else if (junk) {
+        remove(path);
     }
 }
 
@@ -284,30 +321,10 @@ void evo_usb_remote_poll(void)
 
     /*
      * Command file — consume then delete so each command runs once.
-     *
-     * The frame loop polls ~300 times a second and the writer is an FTP STOR,
-     * so the file is routinely opened while it is still being written: the
-     * read then yields nothing (or half a path), the command is lost, and the
-     * remove() hides the evidence. Only consume a COMPLETE line — one that
-     * arrived with its terminating newline. Anything else is a write still in
-     * flight, and is left alone for the next poll.
+     * Check both USB stick and fallback internal data directory.
      */
-    FILE *cf = fopen(CMD_PATH, "r");
-    if (cf) {
-        char line[600];
-        int  got = (fgets(line, sizeof line, cf) != NULL);
-        int  complete = got && strchr(line, '\n') != NULL;
-        /* A full buffer with no newline is not a partial write, it is junk —
-         * drop it rather than wedging the remote on it forever. */
-        int  junk = got && !complete && strlen(line) >= sizeof line - 1;
-        fclose(cf);
-        if (complete) {
-            remove(CMD_PATH);
-            run_command(line);
-        } else if (junk) {
-            remove(CMD_PATH);
-        }
-    }
+    poll_cmd_file(CMD_PATH);
+    poll_cmd_file(CMD_FALLBACK);
 
     write_ui_state(now);
 

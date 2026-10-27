@@ -430,6 +430,20 @@ struct EvoBrowserState {
     bool action_paste_enabled = false;
     std::string action_target_sub;
     std::string action_clipboard_info;
+    struct ActionMenuItem {
+        std::string label;
+        std::string desc;
+        std::string icon_path;
+        bool danger = false;
+        bool operator==(const ActionMenuItem& o) const {
+            return label == o.label && desc == o.desc && icon_path == o.icon_path && danger == o.danger;
+        }
+    };
+    int action_menu_count = 0;
+    std::string action_menu_eyebrow;
+    std::vector<ActionMenuItem> action_menu_items;
+    std::string footer_triangle_label;
+    std::string footer_options_label;
 
     bool transfer_modal_open = false;
     std::string transfer_op_title;
@@ -460,6 +474,9 @@ struct EvoBrowserState {
                action_menu_open == o.action_menu_open && action_menu_focused == o.action_menu_focused &&
                action_menu_target == o.action_menu_target && action_paste_enabled == o.action_paste_enabled &&
                action_target_sub == o.action_target_sub && action_clipboard_info == o.action_clipboard_info &&
+               action_menu_count == o.action_menu_count && action_menu_eyebrow == o.action_menu_eyebrow &&
+               action_menu_items == o.action_menu_items &&
+               footer_triangle_label == o.footer_triangle_label && footer_options_label == o.footer_options_label &&
                transfer_modal_open == o.transfer_modal_open && transfer_op_title == o.transfer_op_title &&
                transfer_item_name == o.transfer_item_name && transfer_speed_str == o.transfer_speed_str &&
                transfer_bytes_str == o.transfer_bytes_str && transfer_eta_str == o.transfer_eta_str &&

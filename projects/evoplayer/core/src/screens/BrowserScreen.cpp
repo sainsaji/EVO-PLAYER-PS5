@@ -128,8 +128,8 @@ void BrowserScreen::handleAddSmbHost(const std::string& hostStr) {
     share.startPath = startPath;
 
     NetworkStorageService::getInstance().addShare(share);
-    m_networkShareId = share.id;
-    m_networkRemotePath = startPath;
+    m_networkShareId.clear();
+    m_networkRemotePath = "/";
     resetSelection();
     toast("SMB ADDED", share.name.c_str());
 }
@@ -165,10 +165,227 @@ void BrowserScreen::handleAddFtpHost(const std::string& hostStr) {
     share.startPath = "/";
 
     NetworkStorageService::getInstance().addShare(share);
-    m_networkShareId = share.id;
+    m_networkShareId.clear();
     m_networkRemotePath = "/";
     resetSelection();
     toast("FTP ADDED", share.name.c_str());
+}
+
+static void OnEditSmbSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleEditSmbHost(text);
+}
+
+static void OnEditFtpSubmitted(const char* text, void* userdata) {
+    auto* self = static_cast<BrowserScreen*>(userdata);
+    if (!self || !text) return;
+    self->handleEditFtpHost(text);
+}
+
+void BrowserScreen::openEditShareKeyboard(const std::string& shareId) {
+    const auto* share = NetworkStorageService::getInstance().getShare(shareId);
+    if (!share) return;
+
+    m_editingShareId = shareId;
+    std::string initial;
+    if (share->protocol == NetworkProtocol::SMB) {
+        if (!share->user.empty() && share->user != "guest") {
+            initial = share->user;
+            if (!share->password.empty()) {
+                initial += ":" + share->password;
+            }
+            initial += "@";
+        }
+        initial += share->host;
+        if (share->port != 445) {
+            initial += ":" + std::to_string(share->port);
+        }
+        if (!share->startPath.empty() && share->startPath != "/") {
+            if (share->startPath[0] != '/') initial += "/";
+            initial += share->startPath;
+        }
+        evo_keyboard_open_phone("Edit SMB Share (user:pass@host/Share)...", initial.c_str(), 512, OnEditSmbSubmitted, this);
+    } else {
+        if (!share->user.empty() && share->user != "anonymous") {
+            initial = share->user;
+            if (!share->password.empty() && share->password != "anonymous") {
+                initial += ":" + share->password;
+            }
+            initial += "@";
+        }
+        initial += share->host;
+        if (share->port != 21) {
+            initial += ":" + std::to_string(share->port);
+        }
+        if (!share->startPath.empty() && share->startPath != "/") {
+            if (share->startPath[0] != '/') initial += "/";
+            initial += share->startPath;
+        }
+        evo_keyboard_open_phone("Edit FTP Server (user:pass@host:port)...", initial.c_str(), 512, OnEditFtpSubmitted, this);
+    }
+}
+
+void BrowserScreen::handleEditSmbHost(const std::string& hostStr) {
+    const auto* orig = NetworkStorageService::getInstance().getShare(m_editingShareId);
+    if (!orig) return;
+
+    std::string trimmed = hostStr;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty()) return;
+
+    if (trimmed.rfind("smb://", 0) == 0) {
+        trimmed = trimmed.substr(6);
+    }
+
+    std::string user = "guest";
+    std::string pass;
+    size_t at = trimmed.find('@');
+    if (at != std::string::npos) {
+        std::string auth = trimmed.substr(0, at);
+        trimmed = trimmed.substr(at + 1);
+        size_t colon = auth.find(':');
+        if (colon != std::string::npos) {
+            user = auth.substr(0, colon);
+            pass = auth.substr(colon + 1);
+        } else {
+            user = auth;
+        }
+    }
+
+    std::string host = trimmed;
+    std::string startPath = "/";
+    size_t slash = trimmed.find('/');
+    if (slash != std::string::npos) {
+        host = trimmed.substr(0, slash);
+        startPath = trimmed.substr(slash);
+    }
+
+    int port = 445;
+    size_t colon = host.find(':');
+    if (colon != std::string::npos) {
+        port = std::atoi(host.substr(colon + 1).c_str());
+        host = host.substr(0, colon);
+        if (port <= 0 || port > 65535) port = 445;
+    }
+
+    if (host.empty()) return;
+
+    NetworkShare share = *orig;
+    share.name = host + (startPath != "/" ? startPath : "");
+    share.protocol = NetworkProtocol::SMB;
+    share.host = host;
+    share.port = port;
+    share.user = user;
+    share.password = pass;
+    share.startPath = startPath;
+
+    NetworkStorageService::getInstance().addShare(share);
+    resetSelection();
+    toast("SMB UPDATED", share.name.c_str());
+    evo_feedback(EVO_FB_CONFIRM);
+}
+
+void BrowserScreen::handleEditFtpHost(const std::string& hostStr) {
+    const auto* orig = NetworkStorageService::getInstance().getShare(m_editingShareId);
+    if (!orig) return;
+
+    std::string trimmed = hostStr;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return;
+    }
+    if (trimmed.empty()) return;
+
+    if (trimmed.rfind("ftp://", 0) == 0) {
+        trimmed = trimmed.substr(6);
+    }
+
+    std::string user = "anonymous";
+    std::string pass = "anonymous";
+    size_t at = trimmed.find('@');
+    if (at != std::string::npos) {
+        std::string auth = trimmed.substr(0, at);
+        trimmed = trimmed.substr(at + 1);
+        size_t colon = auth.find(':');
+        if (colon != std::string::npos) {
+            user = auth.substr(0, colon);
+            pass = auth.substr(colon + 1);
+        } else {
+            user = auth;
+        }
+    }
+
+    std::string host = trimmed;
+    int port = 21;
+    size_t colon = trimmed.find(':');
+    if (colon != std::string::npos) {
+        host = trimmed.substr(0, colon);
+        port = std::atoi(trimmed.substr(colon + 1).c_str());
+        if (port <= 0 || port > 65535) port = 21;
+    }
+
+    if (host.empty()) return;
+
+    NetworkShare share = *orig;
+    share.name = host + (port != 21 ? (":" + std::to_string(port)) : "");
+    share.protocol = NetworkProtocol::FTP;
+    share.host = host;
+    share.port = port;
+    share.user = user;
+    share.password = pass;
+
+    NetworkStorageService::getInstance().addShare(share);
+    resetSelection();
+    toast("FTP UPDATED", share.name.c_str());
+    evo_feedback(EVO_FB_CONFIRM);
+}
+
+void BrowserScreen::openServerMenu(const std::string& shareId, const std::string& shareName) {
+    m_serverMenuOpen = true;
+    m_serverMenuFocused = 0;
+    m_serverMenuShareId = shareId;
+    m_serverMenuShareName = shareName;
+    evo_feedback(EVO_FB_CONFIRM);
+}
+
+void BrowserScreen::performServerAction(int actionIndex) {
+    m_serverMenuOpen = false;
+    switch (actionIndex) {
+        case 0: { // Open
+            m_networkShareId = m_serverMenuShareId;
+            m_networkRemotePath = "/";
+            resetSelection();
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 1: { // Edit Server
+            evo_feedback(EVO_FB_OPEN);
+            openEditShareKeyboard(m_serverMenuShareId);
+            break;
+        }
+        case 2: { // Remove Server
+            m_removeShareConfirmOpen = true;
+            m_removeShareConfirmButton = 0; // Default to Cancel
+            m_removeShareId = m_serverMenuShareId;
+            m_removeShareName = m_serverMenuShareName;
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 3: // Close
+        default:
+            evo_feedback(EVO_FB_CANCEL);
+            break;
+    }
 }
 
 static void OnRenameSubmitted(const char* text, void* userdata) {
@@ -248,6 +465,19 @@ void BrowserScreen::handleActionNewFolder(const std::string& folderName) {
 }
 
 void BrowserScreen::openActionMenu() {
+    if (m_activeSource == 2 && m_networkShareId.empty()) {
+        if (m_focusPane == BrowserFocusPane::Grid && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
+            const auto& item = m_items[m_selectedIndex];
+            if (item.fullPath.rfind("netshare://", 0) == 0 &&
+                item.fullPath != "netshare://add" &&
+                item.fullPath != "netshare://add_smb") {
+                openServerMenu(item.fullPath.substr(11), item.name);
+                return;
+            }
+        }
+        return;
+    }
+
     auto browser = Application::getInstance().getFileSystemBrowser();
     std::string currentPath = browser ? browser->getCurrentPath() : "";
 
@@ -855,6 +1085,8 @@ void BrowserScreen::onEnter() {
 
     m_actionMenuOpen = false;
     m_showDeleteConfirm = false;
+    m_serverMenuOpen = false;
+    m_removeShareConfirmOpen = false;
     auto transferService = Application::getInstance().getFileTransferService();
     if (transferService && transferService->isBusy()) {
         m_showTransferDialog = true;
@@ -867,6 +1099,8 @@ void BrowserScreen::onExit() {
     StatefulScreen::onExit();
     m_actionMenuOpen = false;
     m_showDeleteConfirm = false;
+    m_serverMenuOpen = false;
+    m_removeShareConfirmOpen = false;
     m_showTransferDialog = false;
     auto browser = Application::getInstance().getFileSystemBrowser();
     if (browser) {
@@ -987,7 +1221,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             }
             break;
         case 2: // Network Storage (FTP / SMB)
-            if (m_activeSource != 2) {
+            if (m_activeSource != 2 || !m_networkShareId.empty() || m_items.empty()) {
                 m_activeSource = 2;
                 m_networkShareId.clear();
                 m_networkRemotePath = "/";
@@ -1125,6 +1359,62 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
                 ts->cancelTransfer();
                 toast("TRANSFER", "Cancelling...");
             }
+        }
+        return true;
+    }
+
+    // 0a1. Remove Server Confirmation Modal
+    if (m_removeShareConfirmOpen) {
+        if (pressed & (PadButtons::Left | PadButtons::Right)) {
+            m_removeShareConfirmButton = (m_removeShareConfirmButton == 0) ? 1 : 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            m_removeShareConfirmOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            m_removeShareConfirmOpen = false;
+            if (m_removeShareConfirmButton == 1) { // Confirm Remove
+                NetworkStorageService::getInstance().removeShare(m_removeShareId);
+                toast("SERVER REMOVED", m_removeShareName.c_str());
+                evo_feedback(EVO_FB_CONFIRM);
+                rebuildItems();
+                if (m_selectedIndex >= static_cast<int>(m_items.size()) && m_selectedIndex > 0) {
+                    m_selectedIndex = static_cast<int>(m_items.size()) - 1;
+                }
+            } else {
+                evo_feedback(EVO_FB_CANCEL);
+            }
+            return true;
+        }
+        return true;
+    }
+
+    // 0a2. Server Options Menu Modal
+    if (m_serverMenuOpen) {
+        if (pressed & PadButtons::Up) {
+            if (m_serverMenuFocused > 0) m_serverMenuFocused--;
+            else m_serverMenuFocused = 3;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            if (m_serverMenuFocused < 3) m_serverMenuFocused++;
+            else m_serverMenuFocused = 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            m_serverMenuOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            performServerAction(m_serverMenuFocused);
+            return true;
         }
         return true;
     }
@@ -1389,14 +1679,11 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
                 if (item.fullPath.rfind("netshare://", 0) == 0 &&
                     item.fullPath != "netshare://add" &&
                     item.fullPath != "netshare://add_smb") {
-                    std::string shareId = item.fullPath.substr(11);
-                    NetworkStorageService::getInstance().removeShare(shareId);
-                    toast("SHARE REMOVED", item.name.c_str());
+                    m_removeShareConfirmOpen = true;
+                    m_removeShareConfirmButton = 0; // Default to Cancel for safety
+                    m_removeShareId = item.fullPath.substr(11);
+                    m_removeShareName = item.name;
                     evo_feedback(EVO_FB_CONFIRM);
-                    rebuildItems();
-                    if (m_selectedIndex >= static_cast<int>(m_items.size()) && m_selectedIndex > 0) {
-                        m_selectedIndex = static_cast<int>(m_items.size()) - 1;
-                    }
                     return true;
                 }
             }
@@ -1804,28 +2091,76 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.ins_probing = (m_settleMs >= 200.0 && curItem.fullPath.find("://") == std::string::npos && m_cachedMetadata.filePath != curItem.fullPath && curItem.category != FileCategory::Folder) ? 1 : 0;
     }
 
-    auto transferService = Application::getInstance().getFileTransferService();
-    params.action_menu_open = m_actionMenuOpen ? 1 : 0;
-    params.action_menu_focused = m_actionMenuFocused;
-    params.action_menu_target = m_actionTargetName.c_str();
-    params.action_paste_enabled = (transferService && transferService->hasClipboardItem()) ? 1 : 0;
-
-    if (m_actionTargetIsDir) {
-        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Directory");
-    } else if (m_selectedIndex >= 0 && m_selectedIndex < totalCount) {
-        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "%s • %s", m_insExt, m_statusSize[0] ? m_statusSize : "File");
-    } else {
-        std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Current Directory");
+    if (m_activeSource == 2 && m_networkShareId.empty()) {
+        if (m_selectedIndex >= 0 && m_selectedIndex < totalCount) {
+            const auto& curItem = m_items[m_selectedIndex];
+            if (curItem.fullPath.rfind("netshare://", 0) == 0 &&
+                curItem.fullPath != "netshare://add" &&
+                curItem.fullPath != "netshare://add_smb") {
+                params.footer_triangle_label = "REMOVE";
+                params.footer_options_label = "OPTIONS";
+            }
+        }
     }
-    params.action_target_sub = m_actionTargetSubBuf;
 
-    if (transferService && transferService->hasClipboardItem()) {
-        const auto& clip = transferService->getClipboard();
-        std::snprintf(m_actionClipboardBuf, sizeof(m_actionClipboardBuf), "CLIPBOARD: %s (%s)",
-                      clip.name.c_str(), clip.action == ClipboardAction::Cut ? "Move" : "Copy");
-        params.action_clipboard_info = m_actionClipboardBuf;
-    } else {
+    auto transferService = Application::getInstance().getFileTransferService();
+    if (m_serverMenuOpen) {
+        params.action_menu_open = 1;
+        params.action_menu_focused = m_serverMenuFocused;
+        params.action_menu_target = m_serverMenuShareName.c_str();
+        const auto* share = NetworkStorageService::getInstance().getShare(m_serverMenuShareId);
+        const bool isSmb = (share && share->protocol == NetworkProtocol::SMB);
+        params.action_target_sub = isSmb ? "Windows Share (SMB)" : "FTP Server";
+        params.action_menu_eyebrow = isSmb ? "OPTIONS  •  SMB SHARE" : "OPTIONS  •  FTP SERVER";
+        params.action_menu_count = 4;
+
+        params.action_menu_items[0].label = "Open";
+        params.action_menu_items[0].desc = isSmb ? "Browse this Windows share" : "Browse this FTP server";
+        params.action_menu_items[0].icon_path = "../icons/icon_resume.png";
+        params.action_menu_items[0].danger = 0;
+
+        params.action_menu_items[1].label = "Edit Server";
+        params.action_menu_items[1].desc = "Address, host, share or credentials";
+        params.action_menu_items[1].icon_path = "../icons/icon_keyboard.png";
+        params.action_menu_items[1].danger = 0;
+
+        params.action_menu_items[2].label = "Remove Server";
+        params.action_menu_items[2].desc = "Forget this server on this console";
+        params.action_menu_items[2].icon_path = "../icons/icon_trash.png";
+        params.action_menu_items[2].danger = 1;
+
+        params.action_menu_items[3].label = "Close";
+        params.action_menu_items[3].desc = "Dismiss menu";
+        params.action_menu_items[3].icon_path = "../icons/btn_circle.png";
+        params.action_menu_items[3].danger = 0;
+
+        params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
+    } else {
+        params.action_menu_count = 0;
+        params.action_menu_eyebrow = nullptr;
+        params.action_menu_open = m_actionMenuOpen ? 1 : 0;
+        params.action_menu_focused = m_actionMenuFocused;
+        params.action_menu_target = m_actionTargetName.c_str();
+        params.action_paste_enabled = (transferService && transferService->hasClipboardItem()) ? 1 : 0;
+
+        if (m_actionTargetIsDir) {
+            std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Directory");
+        } else if (m_selectedIndex >= 0 && m_selectedIndex < totalCount) {
+            std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "%s • %s", m_insExt, m_statusSize[0] ? m_statusSize : "File");
+        } else {
+            std::snprintf(m_actionTargetSubBuf, sizeof(m_actionTargetSubBuf), "Current Directory");
+        }
+        params.action_target_sub = m_actionTargetSubBuf;
+
+        if (transferService && transferService->hasClipboardItem()) {
+            const auto& clip = transferService->getClipboard();
+            std::snprintf(m_actionClipboardBuf, sizeof(m_actionClipboardBuf), "CLIPBOARD: %s (%s)",
+                          clip.name.c_str(), clip.action == ClipboardAction::Cut ? "Move" : "Copy");
+            params.action_clipboard_info = m_actionClipboardBuf;
+        } else {
+            params.action_clipboard_info = nullptr;
+        }
     }
 
     // Populate Transfer Progress Modal parameters
@@ -1928,6 +2263,29 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         dlg.actions[1].label = "DELETE";
         dlg.actions[1].icon_path = "../icons/btn_cross.png";
         dlg.actions[1].is_primary = (m_deleteConfirmButton == 1) ? 1 : 0;
+
+        evo_rmlui_update_dialog(&dlg);
+        evo_rmlui_render_dialog(framebuffer, width, height);
+    }
+
+    // Render Remove Server Confirmation Dialog if open
+    if (m_removeShareConfirmOpen) {
+        evo_rmlui_dialog_params_t dlg;
+        std::memset(&dlg, 0, sizeof(dlg));
+        dlg.eyebrow = "REMOVE SERVER";
+        dlg.title = m_removeShareName.c_str();
+        dlg.detail = "Are you sure you want to remove this network server from this console?";
+        dlg.progress_pct = -1.0;
+        dlg.action_count = 2;
+        dlg.focused_action = m_removeShareConfirmButton;
+
+        dlg.actions[0].label = "CANCEL";
+        dlg.actions[0].icon_path = "../icons/btn_circle.png";
+        dlg.actions[0].is_primary = (m_removeShareConfirmButton == 0) ? 1 : 0;
+
+        dlg.actions[1].label = "REMOVE";
+        dlg.actions[1].icon_path = "../icons/btn_cross.png";
+        dlg.actions[1].is_primary = (m_removeShareConfirmButton == 1) ? 1 : 0;
 
         evo_rmlui_update_dialog(&dlg);
         evo_rmlui_render_dialog(framebuffer, width, height);
