@@ -21,8 +21,8 @@ In-app updater (#120), volume boost (#166), audio delay (#170), the playback dia
 panel (#167), the network buffer setting (#199), a preview card for every setting (#158),
 stream and audio pickers with pills and a details card and a busy card during a switch,
 Pro memory mode (#143), faster console testing (`set`, `focus`, `verify`, per-feature
-checks, #201), a pad scrub that always commits, and backing out of playback keeping the
-selection on the played item (#214). See [../../CHANGELOG.md](../../CHANGELOG.md).
+checks, #201), a pad scrub that always commits, backing out of playback keeping the
+selection on the played item (#214), and SMB/Samba Windows share streaming and server options (#213). See [../../CHANGELOG.md](../../CHANGELOG.md).
 
 ## Verification and diagnostics
 
@@ -83,7 +83,7 @@ selection on the played item (#214). See [../../CHANGELOG.md](../../CHANGELOG.md
 | #180 | A malformed playlist entry must not fail the whole playlist (bug, `medium`) |
 | #179 | Live TV search and recordings |
 | #176 | Trakt sync for Nuvio and Stremio (watched state and progress) |
-| #213 | More network sources: SMB and DLNA/UPnP |
+| #213 | More network sources: SMB (landed in v0.13.0) and DLNA/UPnP |
 
 ## Interface and console
 

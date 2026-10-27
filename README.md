@@ -2,7 +2,7 @@
 
 **A native media player for jailbroken PlayStation 5.**
 
-Plays video from USB drives, internal storage, network shares (FTP), Live TV (IPTV / M3U), and media servers (Emby, Jellyfin, Stremio). Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR and Dolby Vision, the interface renders directly on the GPU via bare-metal `sceAgc`, and everything is built from the ground up for the DualSense controller and the big screen.
+Plays video from USB drives, internal storage, network shares (SMB and FTP), Live TV (IPTV / M3U), and media servers (Emby, Jellyfin, Stremio). Video decodes on the console's own hardware decoder at up to 4K with 10-bit HDR and Dolby Vision, the interface renders directly on the GPU via bare-metal `sceAgc`, and everything is built from the ground up for the DualSense controller and the big screen.
 
 ![EVO Player launch screen](docs/images/launch.png)
 
@@ -177,10 +177,13 @@ A 2.5D visual soundstage (**Settings → Audio → Surround Sound Test**) to con
 
 ---
 
-### File Operations & FTP Network Storage
+### File Operations & Network Storage (SMB / FTP)
 
-Manage your storage directly on the PS5 with native file operations and integrated FTP:
+Manage your storage directly on the PS5 with native file operations, integrated Samba/Windows sharing, and FTP:
 
+- **Samba / Windows Shares (SMB):** Connect directly to Windows shared folders, Samba servers, and NAS appliances (`smb://host/Share` or `user:pass@host/Share`) via **+ Add SMB Share**.
+- **Direct Network Streaming:** Media streams directly over SMB via `libsmb2` and custom AVIO pipelines (`evo_smb_io`) with zero local caching or download delay.
+- **Server Options & Management:** Press **OPTIONS** on any configured network share to Open, **Edit Server** (pre-fills connection details on the on-screen keyboard), or **Remove Server** (with confirmation dialog). Shortcut **TRIANGLE** opens the remove confirmation directly.
 - **File Manager:** Press **OPTIONS** on any file or folder to Copy, Cut, Paste, Rename (using the on-screen virtual keyboard), Delete, or create folders.
 - **Asynchronous Transfers:** File operations run on a dedicated background thread with real-time transfer speed (MB/s), bytes copied, and remaining ETA.
 - **Instant Filter Chips:** Press **Up** from the top row to filter the current folder by video, audio, or images without rescanning the drive.
@@ -227,9 +230,9 @@ The entire user interface is rendered on the GPU through bare-metal `sceAgc` at 
 |---|---|---|---|
 | **CROSS ✕** | Select / Open | Play / Pause | Type character |
 | **CIRCLE ○** | Back | Stop playback (with prompt) | Cancel |
-| **TRIANGLE △** | Toggle favourite / Web view | Cycle Aspect Ratio (Fit / Fill / Stretch) | Space |
+| **TRIANGLE △** | Toggle favourite / Web view / Remove network server | Cycle Aspect Ratio (Fit / Fill / Stretch) | Space |
 | **SQUARE □** | File details / Provider settings | Media Info (Codec, Resolution, Decoder) | Backspace |
-| **OPTIONS** | File operations (Copy, Move, Rename, Delete) | Playback settings menu | Done |
+| **OPTIONS** | File operations (Copy, Move, Rename, Delete) / Server options (Edit, Remove) | Playback settings menu | Done |
 | **D-Pad / Left Stick** | Move focus, hold to scroll | Scrub seek bar (hold for high-speed) | Move between keys (up from the top row: the clear X) |
 | **LEFT** | Open navigation rail | — | — |
 | **UP** | Instant folder filter chips | Toggle OSD overlay | — |

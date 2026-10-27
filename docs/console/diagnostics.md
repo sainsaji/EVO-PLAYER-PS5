@@ -136,7 +136,7 @@ which does not survive a relaunch):
 |---|---|
 | `evo_player_settings.cfg` | every setting ([../ui/settings.md](../ui/settings.md)) |
 | `evo_recent.txt`, `evo_favorites.txt`, `ps5_media_resume.txt`, `evo_last_folder.cfg` | history |
-| `evo_network_shares.json` | saved FTP and NAS shares |
+| `evo_network_shares.json` | saved SMB (Samba/Windows) and FTP network shares |
 | `<provider>.conf` (`emby`, `jellyfin`, `plex`, `iptv`, `xtream`, ...), `addons.json` | provider setup and sessions. Tokens are stored in plain text |
 | `webui/<host>_<port>.json` | a web UI's saved page storage (Nuvio's addon list) |
 | `providers/<id>/` | cached provider UI bundles |

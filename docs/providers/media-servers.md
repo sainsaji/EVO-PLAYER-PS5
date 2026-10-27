@@ -123,5 +123,5 @@ The host preview has fixtures for each home: `shelves` (Jellyfin), `shelves_stre
 ## Not built
 
 TorBox and Real-Debrid as direct resolvers (`CAP_RESOLVE` providers with no catalog; the
-resolver chain exists for them), a full XMLTV grid, Trakt sync (#176), SMB and DLNA/UPnP
+resolver chain exists for them), a full XMLTV grid, Trakt sync (#176), DLNA/UPnP (SMB landed in v0.13.0)
 sources (#213), per-stream HTTP headers for IPTV (#92). See [../planning/roadmap.md](../planning/roadmap.md).

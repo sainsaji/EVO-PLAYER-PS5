@@ -53,8 +53,8 @@ Services own state that outlives a screen. Each has an interface in
 | `SettingsService` | every user setting and `evo_player_settings.cfg` ([ui/settings.md](../ui/settings.md)) |
 | `PlaybackController` | opening a source, the decoder choice, resume, seek/scrub, audio and quality switching, progress reports to providers |
 | `FileSystemBrowser` | directory listing, categories, sorting, drive discovery (`/mnt/usb0`..`usb7`, `/mnt/ext0`/`ext1`, `/data`) |
-| `FileTransferService`, `FtpClient` | copy/move/rename/delete, FTP shares and the console's own FTP server |
-| `NetworkStorageService` | saved network shares (`evo_network_shares.json`) |
+| `FileTransferService`, `FtpClient`, `SmbClient` | copy/move/rename/delete, SMB (Samba/Windows) and FTP shares, and the console's own FTP server |
+| `NetworkStorageService` | saved network shares (SMB and FTP via `evo_network_shares.json`) |
 | `MediaMetadataService` | cheap `stat()` metadata for lists and container probing for media files |
 | `CoverArtService` | posters, hero art and thumbnails, with a memory budget |
 | `SoundEffectEngine` | the kit's navigation sounds |
@@ -125,6 +125,15 @@ services, screens, running, exiting), `PlaybackController` (`PlaybackState`:
 stopped, opening, playing, paused, scrubbing, seeking, finished, error),
 `ScreenManager` (`NavigationState`), `BrowserScreen`, `PlayerScreen`,
 `LaunchScreen` and `ModalDialogScreen`.
+
+## Network Storage & SMB Streaming
+
+EVO supports browsing and streaming from remote network storage, including Windows / Samba shares (SMB) and FTP servers:
+
+- **`NetworkStorageService`**: Persists configured shares in `/data/evoplayer/evo_network_shares.json`. Configured shares appear in `BrowserScreen` under **Network Storage**.
+- **`SmbClient` (`libsmb2`)**: Connects to Windows and Samba shares (`smb://host/Share` or `user:pass@host/Share`) for directory enumeration and file metadata.
+- **Direct AVIO Streaming (`evo_smb_io`)**: Playback streams directly over SMB via custom FFmpeg `AVIOContext` callbacks (`evo_smb_io_open`, `evo_smb_io_read`, `evo_smb_io_seek`, `evo_smb_io_close`). No local disk copy or download is required; seeking is handled over the SMB connection, scaling with the user's configured network buffer.
+- **Server Management**: Pressing **OPTIONS** on a network share opens the Server Options menu (**Open**, **Edit Server**, **Remove Server**). Selecting **Edit Server** re-opens the on-screen keyboard with existing details pre-filled. Shortcut **TRIANGLE** opens the remove confirmation dialog directly.
 
 ## Rules for code in the core
 

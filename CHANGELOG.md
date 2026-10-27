@@ -34,6 +34,13 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyN
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **A pad scrub always commits.** The wait for the preview frame is capped at 3 seconds, so a hung preview can no longer leave playback paused.
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Backing out of playback** keeps the selection on the item you played.
 
+### ![](https://img.shields.io/badge/STORAGE-4caf50?style=flat-square) Storage & Network
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Samba / Windows Share (SMB) support.** Connect directly to Windows shared folders, Samba servers, and NAS devices (`smb://host/Share` or `user:pass@host/Share`) with direct streaming via `libsmb2` and custom AVIO pipelines (`evo_smb_io`).
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Server options menu.** Press **OPTIONS** on any configured network share (SMB or FTP) to Open, **Edit Server** (pre-fills the address into the on-screen keyboard for easy modification), or **Remove Server** with a confirmation dialog. Shortcut **TRIANGLE** opens the remove dialog directly.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Virtual keyboard long input.** Keyboard input text box now scrolls horizontally when typing or pasting long URLs, paths, or passwords without truncation or overflowing the dialog bounds.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Empty USB drive selection.** If no USB drive is connected, entering the USB view cleanly avoids trapping focus or auto-selecting non-existent drives, allowing smooth navigation back to the sidebar.
+
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Media Servers & Addons
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **One shelves home for every provider**, with a scroll hint. Jellyfin and Emby also get an item menu, a transcode fallback and skip intro.
