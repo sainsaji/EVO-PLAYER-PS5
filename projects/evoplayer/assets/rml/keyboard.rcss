@@ -70,19 +70,37 @@ body {
     display: flex;
     flex-direction: row;
     align-items: center;
+    overflow: hidden;
+}
+
+#kb-text-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    overflow: hidden;
+    height: 100%;
 }
 
 #kb-text {
-    font-size: 26dp;
+    font-size: 24dp;
+    font-weight: bold;
+    color: #f4f7fb;
+    white-space: nowrap;
+}
+
+#kb-text-after {
+    font-size: 24dp;
     font-weight: bold;
     color: #f4f7fb;
     white-space: nowrap;
 }
 
 #kb-caret {
-    font-size: 26dp;
+    font-size: 24dp;
     font-weight: bold;
     color: #00d2ff;
+    flex-shrink: 0;
 }
 
 #kb-caret.hidden { color: #00d2ff00; }
@@ -91,7 +109,8 @@ body {
     font-size: 15dp;
     font-weight: bold;
     color: #6b7c93;
-    margin-left: auto;
+    margin-left: 16dp;
+    flex-shrink: 0;
 }
 
 #kb-grid {

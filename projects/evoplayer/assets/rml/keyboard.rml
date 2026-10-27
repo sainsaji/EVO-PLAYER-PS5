@@ -10,7 +10,9 @@
             <span id="kb-mode">LOWERCASE</span>
         </div>
         <div id="kb-field">
-            <span id="kb-text"></span><span id="kb-caret">|</span>
+            <div id="kb-text-wrap">
+                <span id="kb-text"></span><span id="kb-caret">|</span><span id="kb-text-after"></span>
+            </div>
             <span id="kb-count">0 / 0</span>
         </div>
         <div id="kb-grid">

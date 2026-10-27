@@ -1022,12 +1022,12 @@ void BrowserScreen::activateSelection() {
             if (m_networkShareId.empty()) {
                 if (item.fullPath == "netshare://add") {
                     evo_feedback(EVO_FB_OPEN);
-                    evo_keyboard_open("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 64, OnAddFtpSubmitted, this);
+                    evo_keyboard_open_phone("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 512, OnAddFtpSubmitted, this);
                     return;
                 }
                 if (item.fullPath == "netshare://add_smb") {
                     evo_feedback(EVO_FB_OPEN);
-                    evo_keyboard_open("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 128, OnAddSmbSubmitted, this);
+                    evo_keyboard_open_phone("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 512, OnAddSmbSubmitted, this);
                     return;
                 }
                 if (item.fullPath.rfind("netshare://", 0) == 0) {

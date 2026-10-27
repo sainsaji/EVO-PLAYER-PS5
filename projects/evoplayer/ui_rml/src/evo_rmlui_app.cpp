@@ -4168,7 +4168,7 @@ void EvoRmlApp::UpdateKeyboard(const evo_keyboard_params_t* p) {
     sig += char('0' + (p->focus_row & 7));
     sig += char('0' + (p->focus_col & 15));
     sig += p->show_caret ? '1' : '0';
-    { char b[24]; std::snprintf(b, sizeof b, "|%d/%d", p->len, p->max_len); sig += b; }
+    { char b[32]; std::snprintf(b, sizeof b, "|%d/%d@%d", p->len, p->max_len, p->cursor); sig += b; }
 
     if (!m_keyboard_doc->IsVisible()) m_keyboard_doc->Show();
     if (sig == m_kb_sig) return;
@@ -4179,17 +4179,35 @@ void EvoRmlApp::UpdateKeyboard(const evo_keyboard_params_t* p) {
     if (panel) panel->SetProperty("display", p->native_only ? "none" : "flex");
     if (p->native_only) return;
 
+    std::string text_before = p->text ? p->text : "";
+    std::string text_after = "";
+    if (p->cursor >= 0 && p->cursor < (int)text_before.size()) {
+        text_after = text_before.substr(p->cursor);
+        text_before = text_before.substr(0, p->cursor);
+    }
+
     if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-title"))
         e->SetInnerRML(kb_esc(p->title && p->title[0] ? p->title : "ENTER TEXT"));
     if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-mode"))
         e->SetInnerRML(p->mode_label ? p->mode_label : "");
     if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-text"))
-        e->SetInnerRML(kb_esc(p->text));
+        e->SetInnerRML(kb_esc(text_before.c_str()));
+    if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-text-after"))
+        e->SetInnerRML(kb_esc(text_after.c_str()));
     if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-caret"))
         e->SetClass("hidden", !p->show_caret);
     if (Rml::Element* e = m_keyboard_doc->GetElementById("kb-count")) {
         char b[24]; std::snprintf(b, sizeof b, "%d / %d", p->len, p->max_len);
         e->SetInnerRML(b);
+    }
+    if (Rml::Element* wrap = m_keyboard_doc->GetElementById("kb-text-wrap")) {
+        float sw = wrap->GetScrollWidth();
+        float cw = wrap->GetClientWidth();
+        if (sw > cw) {
+            wrap->SetScrollLeft(sw - cw);
+        } else {
+            wrap->SetScrollLeft(0.0f);
+        }
     }
 
     for (int r = 0; r < 4; r++) {
