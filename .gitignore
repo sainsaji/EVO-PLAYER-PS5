@@ -347,6 +347,10 @@ output/hui-snap/
 output/kp/
 output/netclips/
 output/test/
+output/big/
+output/pro/
+output/rel013/
+output/v013/
 third_party/ProsperoStore/
 
 # Decrypted console system binaries (ftpsrv SELF mode) - Sony proprietary, never committed
@@ -370,6 +374,7 @@ third_party/VLC/
 third_party/afterglow/
 third_party/mortalfin/
 third_party/nuvio-ps5-homebrew/
+third_party/playden-ps5/
 third_party/regie5/
 third_party/spot5/
 third_party/twispero/
@@ -394,3 +399,4 @@ output/confbak/
 
 # Local-only tool, not part of EVO.
 tools/mydebrid/
+tools/gen_big_m3u.py
