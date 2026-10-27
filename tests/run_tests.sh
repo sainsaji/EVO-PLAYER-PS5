@@ -72,6 +72,8 @@ SRCS=(
     "${ADDONS}/src/provider_nuvio.c"
     "${ADDONS}/src/provider_stremio.c"
     "${EVO}/src/evo_favorites.c"
+    "${EVO}/src/evo_recent.c"
+    "${MEDIA}/src/evo_smb_io.c"
     "${REPO_ROOT}/tests/test_smb.cpp"
     "${CORE}/src/services/SmbClient.cpp"
     "${CORE}/src/services/FtpClient.cpp"

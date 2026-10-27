@@ -17,6 +17,7 @@
 #include "pp_stage_breadcrumb.h"
 #include "evo_rmlui_devstate.h"
 #include "evo_keyboard.h"
+#include "evo_error.h"
 
 #ifdef EVO_HAVE_BUILD_ID
 #include "evo_build_id.h"
@@ -103,7 +104,9 @@ static void run_command(const char *line)
     if (!buf[0])
         return;
 
-    pp_stage_bc("REMOTE_CMD", buf);
+    char safe_buf[600];
+    evo_url_sanitize(buf, safe_buf, sizeof(safe_buf));
+    pp_stage_bc("REMOTE_CMD", safe_buf);
 
     if (strncmp(buf, "image ", 6) == 0) {
         evo_remote_open_image(buf + 6);

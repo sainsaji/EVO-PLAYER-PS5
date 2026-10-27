@@ -63,6 +63,9 @@ int g_tests_failed = 0;
 char g_current_media_title[256] = {0};
 char current_media_path[768] = {0};
 double media_duration_sec = 0.0;
+double resume_base_offset_seconds = 0.0;
+long long now_ms(void) { return 0; }
+double prospero_media_clock_seconds(void) { return 0.0; }
 void toast(const char *category, const char *msg) {
     (void)category;
     (void)msg;
@@ -1036,6 +1039,11 @@ extern void test_settings_legacy_compat(void);
 /* SMB client and network storage host tests */
 extern void test_smb_split_path(void);
 extern void test_smb_storage_service(void);
+extern void test_smb_url_sanitizer(void);
+extern void test_smb_url_decoder(void);
+extern void test_smb_url_parsing(void);
+extern void test_smb_recent_and_favorites(void);
+extern void test_smb_attach_credentials(void);
 
 /* ==========================================================================
  * Main Test Runner Entrypoint
@@ -1068,6 +1076,11 @@ int main(void)
     test_settings_legacy_compat();
     test_smb_split_path();
     test_smb_storage_service();
+    test_smb_url_sanitizer();
+    test_smb_url_decoder();
+    test_smb_url_parsing();
+    test_smb_recent_and_favorites();
+    test_smb_attach_credentials();
 
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

@@ -1,4 +1,5 @@
 #include "evo/services/CoverArtService.hpp"
+#include "evo/services/NetworkStorageService.hpp"
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include "../../../stb_image.h"
@@ -12,6 +13,7 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 #include <unistd.h>
 #include "evo_smb_io.h"
+#include "evo_error.h"
 }
 
 #include "evo_boot_trace.h"
@@ -37,6 +39,21 @@ static bool pathReadable(const char* path) {
     if (!f) return false;
     std::fclose(f);
     return true;
+}
+
+static bool isNetworkPath(const std::string& path) {
+    return path.rfind("smb://", 0) == 0 || path.rfind("ftp://", 0) == 0;
+}
+
+/*
+ * Strips credentials from a URL so passwords are never written to breadcrumb traces.
+ */
+static std::string sanitizeUrl(const std::string& url) {
+    if (url.empty()) return url;
+    std::string safe(url.size() + 1, '\0');
+    evo_url_sanitize(url.c_str(), &safe[0], safe.size());
+    safe.resize(std::strlen(safe.c_str()));
+    return safe;
 }
 #ifdef EVO_APP_MODULE
 /*
@@ -538,6 +555,9 @@ std::string CoverArtService::resolveSidecarPath(const std::string& mediaPath, bo
 
     std::string dir = mediaPath.substr(0, lastSlash);
     std::string base = mediaPath.substr(lastSlash + 1);
+    if (mediaPath.rfind("smb://", 0) == 0) {
+        base = evo_url_decode_string(base);
+    }
     size_t lastDot = base.find_last_of('.');
     if (lastDot != std::string::npos && lastDot > 0) {
         base = base.substr(0, lastDot);
@@ -664,14 +684,19 @@ struct ExtractLock {
 
 bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* outPixels, int targetWidth, int targetHeight) {
     ExtractLock extractLock;
-    evo_bt("extractVideoFrame: %s (%dx%d)", videoPath.c_str(), targetWidth, targetHeight);
+    evo_bt("extractVideoFrame: %s (%dx%d)", sanitizeUrl(videoPath).c_str(), targetWidth, targetHeight);
     evo_boot_log_flush();
 
     if (videoPath.empty() || !outPixels || targetWidth < 2 || targetHeight < 2) {
         return false;
     }
+    if (isNetworkPath(videoPath)) {
+        evo_bt("extractVideoFrame: skipping network path: %s", sanitizeUrl(videoPath).c_str());
+        evo_boot_log_flush();
+        return false;
+    }
     if (!pathReadable(videoPath.c_str())) {
-        evo_bt("extractVideoFrame: access failed: %s", videoPath.c_str());
+        evo_bt("extractVideoFrame: access failed: %s", sanitizeUrl(videoPath).c_str());
         evo_boot_log_flush();
         return false;
     }
@@ -772,20 +797,21 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         fmt->interrupt_callback.opaque   = &timeout;
     }
 
+    std::string openPath = NetworkStorageService::attachCredentials(videoPath);
     std::unique_ptr<evo_smb_io_t, void(*)(evo_smb_io_t*)> smbGuard(nullptr, evo_smb_close);
-    if (videoPath.compare(0, 6, "smb://") == 0) {
-        evo_smb_io_t* smb = evo_smb_open(videoPath.c_str());
+    if (openPath.compare(0, 6, "smb://") == 0) {
+        evo_smb_io_t* smb = evo_smb_open(openPath.c_str());
+        smbGuard.reset(smb);
         if (smb && fmt) {
             fmt->pb = evo_smb_avio(smb);
             fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
-            smbGuard.reset(smb);
         }
     }
 
     evo_bt("extractVideoFrame: calling avformat_open_input");
     evo_boot_log_flush();
-    if (avformat_open_input(&fmt, videoPath.c_str(), nullptr, &opts) < 0) {
-        evo_bt("extractVideoFrame: open_input failed: %s", videoPath.c_str());
+    if (avformat_open_input(&fmt, openPath.c_str(), nullptr, &opts) < 0) {
+        evo_bt("extractVideoFrame: open_input failed: %s", sanitizeUrl(openPath).c_str());
         evo_boot_log_flush();
         av_dict_free(&opts);
         return false;
@@ -1151,21 +1177,21 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
 
     /* First attempt for this path: from here down the tracing is once per path,
      * not once per frame. */
-    evo_bt("getCoverArt: %s (isDir=%d)", mediaPath.c_str(), isDirectory ? 1 : 0);
+    evo_bt("getCoverArt: %s (isDir=%d)", sanitizeUrl(mediaPath).c_str(), isDirectory ? 1 : 0);
     evo_boot_log_flush();
 
     slot->pathKey = mediaPath;
     slot->tried = true;
     slot->valid = false;
 
-    if (!pathReadable(mediaPath.c_str())) {
+    if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str())) {
         evo_bt("getCoverArt: access fail len=%zu -> cached as missing", mediaPath.length());
         evo_boot_log_flush();
         return nullptr;
     }
 
     std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
-    evo_bt("getCoverArt: sidecar='%s'", sidecar.c_str());
+    evo_bt("getCoverArt: sidecar='%s'", sanitizeUrl(sidecar).c_str());
     evo_boot_log_flush();
     if (!sidecar.empty() && pathReadable(sidecar.c_str())) {
         int w = 0, h = 0, ch = 0;
@@ -1179,7 +1205,7 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
         if (data) stbi_image_free(data);
     }
 
-    if (!isDirectory && isVideoFile(mediaPath)) {
+    if (!isDirectory && !isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
         evo_bt("getCoverArt: isVideo, calling extractVideoFrame");
         evo_boot_log_flush();
         if (extractVideoFrame(mediaPath, slot->pixels.data(), PosterWidth, PosterHeight)) {
@@ -1224,11 +1250,11 @@ void CoverArtService::ensureHeroArt(const std::string& mediaPath) {
     m_heroArtPath = mediaPath;
     m_heroArtValid = false;
 
-    if (!pathReadable(mediaPath.c_str())) {
+    if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str())) {
         return;
     }
 
-    if (isVideoFile(mediaPath)) {
+    if (!isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
         if (extractVideoFrame(mediaPath, m_heroArtPixels.data(), HeroWidth, HeroHeight)) {
             m_heroArtValid = true;
             return;
@@ -1279,7 +1305,7 @@ void CoverArtService::ensureBrowserPreview(const std::string& mediaPath, bool is
         if (data) stbi_image_free(data);
     }
 
-    if (!isDirectory && isVideoFile(mediaPath)) {
+    if (!isDirectory && !isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
         if (extractVideoFrame(mediaPath, m_browserPreviewPixels.data(), PreviewWidth, PreviewHeight)) {
             m_browserPreviewValid = true;
             return;
@@ -1318,7 +1344,7 @@ const uint32_t* CoverArtService::getBrowserPreviewPixels() const {
  * itself if it is an image. Touches no member state, so the worker can run it. */
 bool CoverArtService::loadArtInto(const std::string& mediaPath, bool isDirectory,
                                   uint32_t* out, int w, int h) {
-    if (!pathReadable(mediaPath.c_str()))
+    if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str()))
         return false;
 
     std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
@@ -1333,7 +1359,7 @@ bool CoverArtService::loadArtInto(const std::string& mediaPath, bool isDirectory
         if (data) stbi_image_free(data);
     }
 
-    if (!isDirectory && isVideoFile(mediaPath)) {
+    if (!isDirectory && !isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
         if (extractVideoFrame(mediaPath, out, w, h))
             return true;
     }

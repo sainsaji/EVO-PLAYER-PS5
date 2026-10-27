@@ -208,6 +208,15 @@ static int sio_contains_ci(const char *hay, const char *needle)
     return 0;
 }
 
+/*
+ * Strips user:pass@ credentials from a URL for safe logging/breadcrumbs.
+ * Copies the sanitized string into dst (up to dst_len) and returns dst.
+ */
+static const char *sio_sanitize_url(const char *url, char *dst, size_t dst_len)
+{
+    return evo_url_sanitize(url, dst, dst_len);
+}
+
 int evo_stream_io_url_is_playlist(const char *url)
 {
     if (!url) return 0;
@@ -380,8 +389,10 @@ static void sio_report_open_failure(int rc, const char *path, int is_network)
     if (is_network) {
         evo_error_set("%s%s%s%s", host, host[0] ? ": " : "", av, hint);
     } else {
-        const char *base = strrchr(path, '/');
-        evo_error_set("%s: %s%s", base ? base + 1 : path, av, hint);
+        char safe_path[512];
+        const char *safe = evo_url_sanitize(path, safe_path, sizeof safe_path);
+        const char *base = strrchr(safe, '/');
+        evo_error_set("%s: %s%s", base ? base + 1 : safe, av, hint);
     }
 }
 
@@ -392,7 +403,8 @@ int evo_stream_io_open(const char *path,
 {
     if (!path || !out_fmt_ctx) return -1;
 
-    SIO_BC("P8_01a_SIO_ENTER", path);
+    char safe_url[512];
+    SIO_BC("P8_01a_SIO_ENTER", sio_sanitize_url(path, safe_url, sizeof safe_url));
     evo_stream_io_ctx_t *ctx = (evo_stream_io_ctx_t *)evo_direct_mem_calloc(1, sizeof(evo_stream_io_ctx_t));
     if (!ctx) ctx = (evo_stream_io_ctx_t *)calloc(1, sizeof(evo_stream_io_ctx_t));
     if (!ctx) return -1;

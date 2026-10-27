@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "evo_recent.h"
+#include "evo_error.h"
+#include "evo_error.h"
 
 /* Shared player globals. */
 extern char   current_media_path[768];
@@ -46,9 +48,12 @@ void recent_add_or_update(const char *path, const char *title,
 {
     if (!path || !path[0]) return;
 
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
+
     int existing = -1;
     for (int i = 0; i < recent_file_count; i++) {
-        if (strcmp(recent_files[i].path, path) == 0) {
+        if (strcmp(recent_files[i].path, clean_path) == 0) {
             existing = i;
             break;
         }
@@ -56,9 +61,11 @@ void recent_add_or_update(const char *path, const char *title,
 
     RecentFileEntry entry;
     memset(&entry, 0, sizeof(entry));
-    snprintf(entry.path,  sizeof(entry.path),  "%s", path);
-    snprintf(entry.title, sizeof(entry.title), "%s",
-             title && title[0] ? title : path);
+    snprintf(entry.path, sizeof(entry.path), "%s", clean_path);
+
+    char clean_title[128];
+    evo_url_sanitize(title && title[0] ? title : clean_path, clean_title, sizeof(clean_title));
+    snprintf(entry.title, sizeof(entry.title), "%s", clean_title);
     entry.last_pos    = last_pos;
     entry.duration    = duration;
     entry.last_played = now_ms();
@@ -131,8 +138,8 @@ void recent_load(void)
 
         if (!path || !title) continue;
 
-        snprintf(e->path,  sizeof(e->path),  "%s", path);
-        snprintf(e->title, sizeof(e->title), "%s", title);
+        evo_url_sanitize(path, e->path, sizeof(e->path));
+        evo_url_sanitize(title, e->title, sizeof(e->title));
         e->last_pos    = last_pos    ? atof(last_pos)    : 0.0;
         e->duration    = duration    ? atof(duration)    : 0.0;
         e->last_played = last_played ? atoll(last_played) : 0;
@@ -146,8 +153,10 @@ void recent_load(void)
 double recent_lookup(const char *path)
 {
     if (!path || !path[0]) return 0.0;
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
     for (int i = 0; i < recent_file_count; i++) {
-        if (strcmp(recent_files[i].path, path) == 0)
+        if (strcmp(recent_files[i].path, clean_path) == 0)
             return recent_files[i].last_pos;
     }
     return 0.0;

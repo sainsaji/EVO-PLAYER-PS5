@@ -11,6 +11,7 @@
 
 #include "evo_favorites.h"
 #include "evo_toast.h"
+#include "evo_error.h"
 
 /* Shared player globals. */
 extern char   current_media_path[768];
@@ -40,8 +41,10 @@ void favorites_clear(void)
 int favorites_find(const char *path)
 {
     if (!path || !path[0]) return -1;
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
     for (int i = 0; i < favorite_count; i++) {
-        if (strcmp(favorite_files[i].path, path) == 0) return i;
+        if (strcmp(favorite_files[i].path, clean_path) == 0) return i;
     }
     return -1;
 }
@@ -54,14 +57,18 @@ int favorites_is_favorite(const char *path)
 void favorites_add(const char *path, const char *title, double duration)
 {
     if (!path || !path[0]) return;
-    if (favorites_find(path) >= 0) return;
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
+    if (favorites_find(clean_path) >= 0) return;
     if (favorite_count >= MAX_FAVORITES) return;
 
     FavoriteEntry *e = &favorite_files[favorite_count];
     memset(e, 0, sizeof(*e));
-    snprintf(e->path,  sizeof(e->path),  "%s", path);
-    snprintf(e->title, sizeof(e->title), "%s",
-             title && title[0] ? title : path);
+    snprintf(e->path, sizeof(e->path), "%s", clean_path);
+
+    char clean_title[128];
+    evo_url_sanitize(title && title[0] ? title : clean_path, clean_title, sizeof(clean_title));
+    snprintf(e->title, sizeof(e->title), "%s", clean_title);
     e->duration = duration;
 
     favorite_count++;
@@ -114,8 +121,8 @@ void favorites_load(void)
 
         if (!path || !title) continue;
 
-        snprintf(e->path,  sizeof(e->path),  "%s", path);
-        snprintf(e->title, sizeof(e->title), "%s", title);
+        evo_url_sanitize(path, e->path, sizeof(e->path));
+        evo_url_sanitize(title, e->title, sizeof(e->title));
         e->duration = duration ? atof(duration) : 0.0;
 
         favorite_count++;

@@ -43,6 +43,7 @@
 #include <libswresample/swresample.h>
 
 #include "evo_boot_log.h"
+#include "evo_error.h"
 
 #define SS_RATE         8000
 #define SS_FRAME_SMP    80                  /* 10 ms at 8 kHz              */
@@ -568,7 +569,8 @@ int evo_subsync_analyse(const char *media_path, int audio_stream,
     c.fmt->interrupt_callback.callback = ss_interrupt;
     c.fmt->interrupt_callback.opaque = (void *)cancel;
     if (avformat_open_input(&c.fmt, media_path, NULL, NULL) < 0) {
-        evo_log("subsync: open failed: %s", media_path);
+        char safe_url[512];
+        evo_log("subsync: open failed: %s", evo_url_sanitize(media_path, safe_url, sizeof safe_url));
         c.fmt = NULL;       /* freed by avformat_open_input on failure */
         goto done;
     }

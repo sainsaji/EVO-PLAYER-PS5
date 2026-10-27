@@ -23,6 +23,7 @@ struct NetworkShare {
     int port = 2121;
     std::string user = "anonymous";
     std::string password = "anonymous";
+    std::string domain;
     std::string startPath = "/";
 };
 
@@ -46,6 +47,17 @@ public:
 
     std::string buildMediaUrl(const std::string& shareId, const std::string& remotePath) const;
     std::string buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const;
+
+    static std::string percentEncode(const std::string& str);
+    static std::string attachCredentials(const std::string& url);
+    static std::string attachCredentials(const std::string& url, const std::vector<NetworkShare>& shares);
+    static bool parseSmbUrl(const std::string& url, NetworkShare& outShare);
+    static bool parseSmbUrl(const std::string& url,
+                            std::string& outHost, int& outPort,
+                            std::string& outUser, std::string& outPassword,
+                            std::string& outStartPath,
+                            std::string* outDomain = nullptr);
+    static std::string buildEditUrl(const NetworkShare& share);
 
     FileCategory classifyFileName(const std::string& fileName) const;
 

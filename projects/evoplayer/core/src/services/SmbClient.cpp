@@ -1,5 +1,7 @@
 #include "evo/services/SmbClient.hpp"
+#include "evo_smb_io.h"
 
+#include <cerrno>
 #include <cstring>
 #include <algorithm>
 #include <fcntl.h>
@@ -92,13 +94,20 @@ bool SmbClient::connectShare(const std::string& host, int port,
                              const std::string& shareName,
                              int timeoutSec) {
 #if defined(HAVE_LIBSMB2)
-    // Reuse existing connection if same host and share
-    if (m_ctx && m_currentHost == host && m_currentShare == shareName) {
+    // Reuse existing connection only if host, port, user, password, domain and share ALL match
+    if (m_ctx && m_currentHost == host && m_currentPort == port &&
+        m_currentUser == user && m_currentPassword == password &&
+        m_currentDomain == domain && m_currentShare == shareName) {
         return true;
     }
 
     disconnect();
     m_lastError.clear();
+
+    if (evo_smb_tcp_precheck(host.c_str(), port, 4) != 0) {
+        m_lastError = "Server not reachable";
+        return false;
+    }
 
     struct smb2_context* ctx = smb2_init_context();
     if (!ctx) {
@@ -136,6 +145,10 @@ bool SmbClient::connectShare(const std::string& host, int port,
 
     m_ctx = ctx;
     m_currentHost = host;
+    m_currentPort = port;
+    m_currentUser = user;
+    m_currentPassword = password;
+    m_currentDomain = domain;
     m_currentShare = shareName;
     return true;
 #else
@@ -154,6 +167,10 @@ void SmbClient::disconnect() {
     }
 #endif
     m_currentHost.clear();
+    m_currentPort = 0;
+    m_currentUser.clear();
+    m_currentPassword.clear();
+    m_currentDomain.clear();
     m_currentShare.clear();
 }
 
@@ -205,6 +222,13 @@ bool SmbClient::listShares(const std::string& host, int port,
                            int timeoutSec) {
     outShares.clear();
 #if defined(HAVE_LIBSMB2)
+    m_lastError.clear();
+
+    if (evo_smb_tcp_precheck(host.c_str(), port, 4) != 0) {
+        m_lastError = "Server not reachable";
+        return false;
+    }
+
     struct smb2_context* ctx = smb2_init_context();
     if (!ctx) {
         m_lastError = "Out of memory initializing SMB context";

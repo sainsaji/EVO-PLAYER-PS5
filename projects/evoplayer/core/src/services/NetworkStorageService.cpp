@@ -1,5 +1,6 @@
 #include "evo/services/NetworkStorageService.hpp"
 #include "evo_data_path.h"
+#include "evo_smb_io.h"
 #include "cJSON.h"
 
 #include <cstdio>
@@ -82,6 +83,7 @@ void NetworkStorageService::loadConfig() {
                     cJSON* jPort = cJSON_GetObjectItem(item, "port");
                     cJSON* jUser = cJSON_GetObjectItem(item, "user");
                     cJSON* jPass = cJSON_GetObjectItem(item, "password");
+                    cJSON* jDomain = cJSON_GetObjectItem(item, "domain");
                     cJSON* jPath = cJSON_GetObjectItem(item, "startPath");
 
                     if (jId && jId->valuestring) share.id = jId->valuestring;
@@ -94,6 +96,7 @@ void NetworkStorageService::loadConfig() {
                     if (jPort && cJSON_IsNumber(jPort)) share.port = jPort->valueint;
                     if (jUser && jUser->valuestring) share.user = jUser->valuestring;
                     if (jPass && jPass->valuestring) share.password = jPass->valuestring;
+                    if (jDomain && jDomain->valuestring) share.domain = jDomain->valuestring;
                     if (jPath && jPath->valuestring) share.startPath = jPath->valuestring;
 
                     if (!share.id.empty() && !share.host.empty()) {
@@ -137,6 +140,9 @@ void NetworkStorageService::saveConfig() {
         cJSON_AddNumberToObject(item, "port", s.port);
         cJSON_AddStringToObject(item, "user", s.user.c_str());
         cJSON_AddStringToObject(item, "password", s.password.c_str());
+        if (!s.domain.empty()) {
+            cJSON_AddStringToObject(item, "domain", s.domain.c_str());
+        }
         cJSON_AddStringToObject(item, "startPath", s.startPath.c_str());
 
         cJSON_AddItemToArray(root, item);
@@ -155,34 +161,361 @@ void NetworkStorageService::saveConfig() {
     cJSON_Delete(root);
 }
 
-std::string NetworkStorageService::buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const {
-    std::string proto = (share.protocol == NetworkProtocol::SMB) ? "smb://" : "ftp://";
-    std::string creds;
-    if (!share.user.empty() && share.user != "anonymous" && share.user != "guest") {
-        creds = share.user;
-        if (!share.password.empty()) {
-            creds += ":" + share.password;
-        }
-        creds += "@";
-    }
+static bool isUnreservedChar(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') ||
+           c == '-' || c == '.' || c == '_' || c == '~';
+}
 
+std::string NetworkStorageService::percentEncode(const std::string& str) {
+    static const char hexChars[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(str.size() * 3);
+    for (unsigned char c : str) {
+        if (isUnreservedChar(c)) {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(hexChars[(c >> 4) & 0x0F]);
+            out.push_back(hexChars[c & 0x0F]);
+        }
+    }
+    return out;
+}
+
+static std::string percentEncodePath(const std::string& path) {
+    std::string out;
+    out.reserve(path.size() * 3);
+    size_t i = 0;
+    while (i < path.size()) {
+        if (path[i] == '/') {
+            out.push_back('/');
+            i++;
+        } else {
+            size_t nextSlash = path.find('/', i);
+            if (nextSlash == std::string::npos) {
+                nextSlash = path.size();
+            }
+            std::string segment = path.substr(i, nextSlash - i);
+            out += NetworkStorageService::percentEncode(segment);
+            i = nextSlash;
+        }
+    }
+    return out;
+}
+
+std::string NetworkStorageService::buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const {
     std::string cleanPath = remotePath;
     if (cleanPath.empty() || cleanPath.front() != '/') {
         cleanPath = "/" + cleanPath;
     }
 
-    std::string portStr;
     if (share.protocol == NetworkProtocol::SMB) {
+        std::string creds;
+        if (!share.user.empty() && share.user != "anonymous" && share.user != "guest") {
+            if (!share.domain.empty()) {
+                creds = percentEncode(share.domain) + ";" + percentEncode(share.user);
+            } else {
+                creds = percentEncode(share.user);
+            }
+            if (!share.password.empty()) {
+                creds += ":" + percentEncode(share.password);
+            }
+            creds += "@";
+        }
+
+        std::string portStr;
         if (share.port > 0 && share.port != 445) {
             portStr = ":" + std::to_string(share.port);
         }
+
+        return "smb://" + creds + share.host + portStr + percentEncodePath(cleanPath);
     } else {
+        // FTP: keep raw format as FTP consumers do not decode percent encoding
+        std::string creds;
+        if (!share.user.empty() && share.user != "anonymous" && share.user != "guest") {
+            creds = share.user;
+            if (!share.password.empty()) {
+                creds += ":" + share.password;
+            }
+            creds += "@";
+        }
+
+        std::string portStr;
         if (share.port > 0) {
             portStr = ":" + std::to_string(share.port);
         }
+
+        return "ftp://" + creds + share.host + portStr + cleanPath;
+    }
+}
+
+static bool hostEquals(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i]))
+            return false;
+    }
+    return true;
+}
+
+std::string NetworkStorageService::attachCredentials(const std::string& url, const std::vector<NetworkShare>& shares) {
+    if (url.empty()) return url;
+
+    NetworkProtocol proto;
+    int defaultPort = 0;
+    size_t prefixLen = 0;
+
+    if (url.rfind("smb://", 0) == 0) {
+        proto = NetworkProtocol::SMB;
+        defaultPort = 445;
+        prefixLen = 6;
+    } else if (url.rfind("ftp://", 0) == 0) {
+        proto = NetworkProtocol::FTP;
+        defaultPort = 21;
+        prefixLen = 6;
+    } else {
+        return url;
     }
 
-    return proto + creds + share.host + portStr + cleanPath;
+    size_t authEnd = url.find_first_of("/?#", prefixLen);
+    std::string auth = (authEnd != std::string::npos)
+                     ? url.substr(prefixLen, authEnd - prefixLen)
+                     : url.substr(prefixLen);
+    std::string pathPart = (authEnd != std::string::npos) ? url.substr(authEnd) : "";
+
+    // If user info already present, return unchanged
+    if (auth.find('@') != std::string::npos) {
+        return url;
+    }
+
+    std::string host = auth;
+    int port = defaultPort;
+    size_t colon = auth.find(':');
+    if (colon != std::string::npos) {
+        host = auth.substr(0, colon);
+        int parsedPort = std::atoi(auth.substr(colon + 1).c_str());
+        if (parsedPort > 0 && parsedPort <= 65535) {
+            port = parsedPort;
+        }
+    }
+
+    if (host.empty()) {
+        return url;
+    }
+
+    const NetworkShare* match = nullptr;
+    for (auto it = shares.rbegin(); it != shares.rend(); ++it) {
+        const auto& s = *it;
+        if (s.protocol != proto) continue;
+        int sPort = (s.port > 0) ? s.port : defaultPort;
+        if (sPort != port) continue;
+        if (!hostEquals(s.host, host)) continue;
+
+        if (!s.startPath.empty() && s.startPath != "/") {
+            std::string sharePrefix = s.startPath;
+            if (sharePrefix.back() == '/') sharePrefix.pop_back();
+            if (pathPart.rfind(sharePrefix, 0) == 0 &&
+                (pathPart.size() == sharePrefix.size() || pathPart[sharePrefix.size()] == '/')) {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    if (!match) {
+        for (auto it = shares.rbegin(); it != shares.rend(); ++it) {
+            const auto& s = *it;
+            if (s.protocol != proto) continue;
+            int sPort = (s.port > 0) ? s.port : defaultPort;
+            if (sPort != port) continue;
+            if (hostEquals(s.host, host)) {
+                match = &s;
+                break;
+            }
+        }
+    }
+
+    if (!match) {
+        return url;
+    }
+
+    std::string creds;
+    if (!match->user.empty() && match->user != "anonymous" && match->user != "guest") {
+        if (!match->domain.empty()) {
+            creds = percentEncode(match->domain) + ";" + percentEncode(match->user);
+        } else {
+            creds = percentEncode(match->user);
+        }
+        if (!match->password.empty()) {
+            creds += ":" + percentEncode(match->password);
+        }
+        creds += "@";
+    }
+
+    std::string portStr;
+    if (match->port > 0 && match->port != defaultPort) {
+        portStr = ":" + std::to_string(match->port);
+    }
+
+    std::string scheme = (proto == NetworkProtocol::SMB) ? "smb://" : "ftp://";
+    return scheme + creds + match->host + portStr + pathPart;
+}
+
+std::string NetworkStorageService::attachCredentials(const std::string& url) {
+    return attachCredentials(url, getInstance().getShares());
+}
+
+bool NetworkStorageService::parseSmbUrl(const std::string& url,
+                                        std::string& outHost, int& outPort,
+                                        std::string& outUser, std::string& outPassword,
+                                        std::string& outStartPath,
+                                        std::string* outDomain) {
+    std::string trimmed = url;
+    size_t start = trimmed.find_first_not_of(" \t\r\n");
+    if (start != std::string::npos) {
+        size_t end = trimmed.find_last_not_of(" \t\r\n");
+        trimmed = trimmed.substr(start, end - start + 1);
+    } else {
+        return false;
+    }
+    if (trimmed.empty()) return false;
+
+    if (trimmed.rfind("smb://", 0) == 0) {
+        trimmed = trimmed.substr(6);
+    }
+
+    std::string domain;
+    std::string user = "guest";
+    std::string pass;
+
+    size_t at = trimmed.find('@');
+    if (at != std::string::npos) {
+        std::string auth = trimmed.substr(0, at);
+        trimmed = trimmed.substr(at + 1);
+
+        size_t semi = auth.find(';');
+        if (semi != std::string::npos) {
+            domain = auth.substr(0, semi);
+            auth = auth.substr(semi + 1);
+        } else {
+            size_t backslash = auth.find('\\');
+            if (backslash != std::string::npos) {
+                domain = auth.substr(0, backslash);
+                auth = auth.substr(backslash + 1);
+            }
+        }
+
+        size_t colon = auth.find(':');
+        if (colon != std::string::npos) {
+            user = auth.substr(0, colon);
+            pass = auth.substr(colon + 1);
+        } else {
+            user = auth;
+        }
+
+        domain = evo_url_decode_string(domain);
+        user = evo_url_decode_string(user);
+        pass = evo_url_decode_string(pass);
+    }
+
+    std::string host = trimmed;
+    std::string startPath = "/";
+    size_t slash = trimmed.find('/');
+    if (slash != std::string::npos) {
+        host = trimmed.substr(0, slash);
+        startPath = trimmed.substr(slash);
+    }
+
+    int port = 445;
+    size_t colon = host.find(':');
+    if (colon != std::string::npos) {
+        port = std::atoi(host.substr(colon + 1).c_str());
+        host = host.substr(0, colon);
+        if (port <= 0 || port > 65535) port = 445;
+    }
+
+    if (host.empty()) return false;
+
+    outHost = host;
+    outPort = port;
+    outUser = user;
+    outPassword = pass;
+    outStartPath = startPath;
+    if (outDomain) {
+        *outDomain = domain;
+    }
+    return true;
+}
+
+bool NetworkStorageService::parseSmbUrl(const std::string& url, NetworkShare& outShare) {
+    std::string host, user, pass, startPath, domain;
+    int port = 445;
+    if (!parseSmbUrl(url, host, port, user, pass, startPath, &domain)) {
+        return false;
+    }
+    outShare.protocol = NetworkProtocol::SMB;
+    outShare.name = host + (startPath != "/" ? startPath : "");
+    outShare.host = host;
+    outShare.port = port;
+    outShare.user = user;
+    outShare.password = pass;
+    outShare.domain = domain;
+    outShare.startPath = startPath;
+    return true;
+}
+
+std::string NetworkStorageService::buildEditUrl(const NetworkShare& share) {
+    if (share.protocol == NetworkProtocol::SMB) {
+        std::string creds;
+        if (!share.user.empty() && share.user != "guest") {
+            if (!share.domain.empty()) {
+                creds = percentEncode(share.domain) + ";" + percentEncode(share.user);
+            } else {
+                creds = percentEncode(share.user);
+            }
+            if (!share.password.empty()) {
+                creds += ":" + percentEncode(share.password);
+            }
+            creds += "@";
+        }
+
+        std::string portStr;
+        if (share.port > 0 && share.port != 445) {
+            portStr = ":" + std::to_string(share.port);
+        }
+
+        std::string pathStr;
+        if (!share.startPath.empty() && share.startPath != "/") {
+            if (share.startPath.front() != '/') pathStr = "/";
+            pathStr += share.startPath;
+        }
+
+        return "smb://" + creds + share.host + portStr + pathStr;
+    } else {
+        std::string creds;
+        if (!share.user.empty() && share.user != "anonymous") {
+            creds = share.user;
+            if (!share.password.empty() && share.password != "anonymous") {
+                creds += ":" + share.password;
+            }
+            creds += "@";
+        }
+
+        std::string portStr;
+        if (share.port > 0 && share.port != 21) {
+            portStr = ":" + std::to_string(share.port);
+        }
+
+        std::string pathStr;
+        if (!share.startPath.empty() && share.startPath != "/") {
+            if (share.startPath.front() != '/') pathStr = "/";
+            pathStr += share.startPath;
+        }
+
+        return creds + share.host + portStr + pathStr;
+    }
 }
 
 std::string NetworkStorageService::buildMediaUrl(const std::string& shareId, const std::string& remotePath) const {
@@ -314,7 +647,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
         if (!hasShare) {
             // Root of SMB server: enumerate available disk shares
             std::vector<std::string> diskShares;
-            if (m_smbClient->listShares(share->host, share->port, share->user, share->password, "", diskShares, 6)) {
+            if (m_smbClient->listShares(share->host, share->port, share->user, share->password, share->domain, diskShares, 6)) {
                 for (const auto& ds : diskShares) {
                     BrowserEntry be;
                     be.name = ds;
@@ -331,7 +664,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             }
         } else {
             // Inside a share: connect to share and list subpath
-            if (!m_smbClient->connectShare(share->host, share->port, share->user, share->password, "", smbShare, 6)) {
+            if (!m_smbClient->connectShare(share->host, share->port, share->user, share->password, share->domain, smbShare, 6)) {
                 outError = m_smbClient->getLastError();
                 return false;
             }
@@ -339,7 +672,14 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             std::vector<SmbFileEntry> smbEntries;
             if (!m_smbClient->list(subPath, smbEntries)) {
                 outError = m_smbClient->getLastError();
-                return false;
+                // Retry once with reconnect in case connection timed out
+                m_smbClient->disconnect();
+                if (m_smbClient->connectShare(share->host, share->port, share->user, share->password, share->domain, smbShare, 6) &&
+                    m_smbClient->list(subPath, smbEntries)) {
+                    outError.clear();
+                } else {
+                    return false;
+                }
             }
 
             for (const auto& se : smbEntries) {

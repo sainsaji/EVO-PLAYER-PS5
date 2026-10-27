@@ -1,5 +1,7 @@
 #include "evo/services/MediaMetadataService.hpp"
 #include "evo_toast.h"
+#include "evo_smb_io.h"
+#include "evo_error.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -25,7 +27,9 @@ static const char* ResolveCodecName(enum AVCodecID id) {
 
 MediaMetadataInfo MediaMetadataService::extractBasicMetadata(const std::string& filePath) {
     MediaMetadataInfo info;
-    info.filePath = filePath;
+    char cleanPath[512];
+    evo_url_sanitize(filePath.c_str(), cleanPath, sizeof(cleanPath));
+    info.filePath = cleanPath;
     /*
      * Empty, not "Unknown".
      *
@@ -150,6 +154,9 @@ void MediaMetadataService::cleanMediaTitle(const std::string& filePath, std::str
 
     size_t lastSlash = filePath.find_last_of("/\\");
     std::string filename = (lastSlash != std::string::npos) ? filePath.substr(lastSlash + 1) : filePath;
+    if (filePath.rfind("smb://", 0) == 0) {
+        filename = evo_url_decode_string(filename);
+    }
 
     size_t lastDot = filename.find_last_of('.');
     std::string extension;

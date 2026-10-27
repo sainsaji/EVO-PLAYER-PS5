@@ -1,6 +1,7 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_rmlui_app.h"
 #include "evo_rmlui_devstate.h"
+#include "evo_error.h"
 #if defined(EVO_AGC_DEVICE)
 #include "evo_hui.h"
 #endif
@@ -222,6 +223,9 @@ void evo_rmlui_update_browser(const evo_rmlui_browser_params_t* p) {
     state.is_empty = (p->is_empty != 0);
     state.empty_title = p->empty_title ? p->empty_title : "";
     state.empty_hint = p->empty_hint ? p->empty_hint : "";
+    state.loading = (p->loading != 0);
+    state.loading_text = p->loading_text ? p->loading_text : "";
+    state.failed = (p->failed != 0);
 
     state.ins_name = p->ins_name ? p->ins_name : "";
     state.ins_kind = p->ins_kind ? p->ins_kind : "";
@@ -307,8 +311,10 @@ void evo_rmlui_update_list(const evo_rmlui_list_params_t* p) {
 
     for (int i = 0; i < p->row_count && i < EVO_RMLUI_LIST_ROWS; i++) {
         EvoListRow r;
-        r.title = p->rows[i].title ? p->rows[i].title : "";
-        r.detail = p->rows[i].detail ? p->rows[i].detail : "";
+        char cleanTitle[256];
+        char cleanDetail[512];
+        r.title = p->rows[i].title ? evo_url_sanitize(p->rows[i].title, cleanTitle, sizeof(cleanTitle)) : "";
+        r.detail = p->rows[i].detail ? evo_url_sanitize(p->rows[i].detail, cleanDetail, sizeof(cleanDetail)) : "";
         r.icon_path = p->rows[i].icon_path ? p->rows[i].icon_path : "";
         r.badge = p->rows[i].badge ? p->rows[i].badge : "";
         r.progress = p->rows[i].progress;
@@ -358,8 +364,10 @@ void evo_rmlui_render_list(uint32_t* framebuffer, int width, int height) {
 
 static EvoLaunchTile evo_rmlui_tile_from(const evo_rmlui_launch_tile_t& in) {
     EvoLaunchTile t;
-    t.title = in.title ? in.title : "";
-    t.detail = in.detail ? in.detail : "";
+    char cleanTitle[256];
+    char cleanDetail[512];
+    t.title = in.title ? evo_url_sanitize(in.title, cleanTitle, sizeof(cleanTitle)) : "";
+    t.detail = in.detail ? evo_url_sanitize(in.detail, cleanDetail, sizeof(cleanDetail)) : "";
     t.icon_path = in.icon_path ? in.icon_path : "";
     t.progress = in.progress;
     t.art = in.art;
@@ -380,9 +388,11 @@ void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* p) {
     state.clock = p->clock ? p->clock : "";
     state.theme_name = p->theme_name ? p->theme_name : "";
 
+    char cleanHeroTitle[256];
+    char cleanHeroDetail[512];
     state.hero_eyebrow = p->hero_eyebrow ? p->hero_eyebrow : "";
-    state.hero_title = p->hero_title ? p->hero_title : "";
-    state.hero_detail = p->hero_detail ? p->hero_detail : "";
+    state.hero_title = p->hero_title ? evo_url_sanitize(p->hero_title, cleanHeroTitle, sizeof(cleanHeroTitle)) : "";
+    state.hero_detail = p->hero_detail ? evo_url_sanitize(p->hero_detail, cleanHeroDetail, sizeof(cleanHeroDetail)) : "";
     state.hero_action = p->hero_action ? p->hero_action : "";
     state.hero_progress = p->hero_progress;
     state.hero_art = p->hero_art;
@@ -692,8 +702,9 @@ void evo_rmlui_update_mediainfo(const evo_rmlui_mediainfo_params_t* p) {
     evo_hui_update_mediainfo(p);
 #endif
     EvoMediaInfoState state;
+    char cleanPath[512];
     state.title = p->title ? p->title : "";
-    state.path = p->path ? p->path : "";
+    state.path = p->path ? evo_url_sanitize(p->path, cleanPath, sizeof(cleanPath)) : "";
     state.res_badge = p->res_badge ? p->res_badge : "";
     state.hdr_badge = p->hdr_badge ? p->hdr_badge : "";
     state.codec_badge = p->codec_badge ? p->codec_badge : "";

@@ -4,6 +4,7 @@
 #include "evo_feedback.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
+#include "evo_error.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -68,8 +69,10 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     evo_rmlui_mediainfo_params_t params;
     std::memset(&params, 0, sizeof(params));
 
+    char cleanPath[512];
+    evo_url_sanitize(meta.filePath.c_str(), cleanPath, sizeof(cleanPath));
     params.title = meta.title.c_str();
-    params.path = meta.filePath.c_str();
+    params.path = cleanPath;
     /* These land in labelled spec rows, so an absent value needs a visible
      * placeholder - a blank after "VIDEO CODEC" reads as a broken screen,
      * where the browser's status strip simply hides the pill instead. */

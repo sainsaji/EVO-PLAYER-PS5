@@ -12,6 +12,7 @@
 #include <strings.h>
 
 #include "evo_toast.h"
+#include "evo_error.h"
 
 /* Shared player globals this module needs read access to. */
 extern int show_debug_overlay;
@@ -124,8 +125,13 @@ void toast(const char *title, const char *msg)
     if (technical && !error && !debug_enabled)
         return;
 
-    snprintf(prospero_toast_title,   sizeof(prospero_toast_title),   "%s", title);
-    snprintf(prospero_toast_message, sizeof(prospero_toast_message), "%s", msg);
+    char safe_title[128];
+    char safe_msg[256];
+    evo_url_sanitize(title, safe_title, sizeof(safe_title));
+    evo_url_sanitize(msg, safe_msg, sizeof(safe_msg));
+
+    snprintf(prospero_toast_title,   sizeof(prospero_toast_title),   "%s", safe_title);
+    snprintf(prospero_toast_message, sizeof(prospero_toast_message), "%s", safe_msg);
 
     prospero_toast_started_ms = now_ms();
     prospero_toast_active     = 1;

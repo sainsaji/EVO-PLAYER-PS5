@@ -44,6 +44,7 @@ class BrowserScreen
     std::vector<std::string> chips_;
     std::vector<Card> cards_;
     std::string empty_title_, empty_hint_;
+    std::string loading_text_;
     std::string ins_name_, ins_kind_;
     std::vector<std::pair<std::string, std::string>> props_;
     std::string status_[5];

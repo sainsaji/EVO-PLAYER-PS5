@@ -2,6 +2,7 @@
 #include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_favorites.h"
+#include "evo_error.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
@@ -130,11 +131,16 @@ void FavoritesScreen::render(uint32_t* framebuffer, int width, int height) {
     int rowsToDisplay = std::min(EVO_RMLUI_LIST_ROWS, std::max(0, favorite_count - m_scrollOffset));
     params.row_count = rowsToDisplay;
 
+    char safeTitles[EVO_RMLUI_LIST_ROWS][128];
+    char safeDetails[EVO_RMLUI_LIST_ROWS][512];
+
     for (int i = 0; i < rowsToDisplay; ++i) {
         int idx = m_scrollOffset + i;
         const auto& f = favorite_files[idx];
-        params.rows[i].title = f.title[0] ? f.title : f.path;
-        params.rows[i].detail = f.path;
+        evo_url_sanitize(f.path, safeDetails[i], sizeof(safeDetails[i]));
+        evo_url_sanitize(f.title[0] ? f.title : safeDetails[i], safeTitles[i], sizeof(safeTitles[i]));
+        params.rows[i].title = safeTitles[i];
+        params.rows[i].detail = safeDetails[i];
         params.rows[i].icon_path = "../icons/icon_favorites.png";
         params.rows[i].badge = "FAVORITE";
         params.rows[i].progress = -1;

@@ -6,6 +6,7 @@
 #include "evo_rmlui_bridge.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
+#include "evo_error.h"
 #include "evo_feedback.h"
 #include "evo_nav.h"
 
@@ -304,12 +305,18 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     }
     params.hero_focused = (!railFocused && m_selectedRow == 0);
 
+    char safeHeroTitle[128];
+    char safeHeroDetail[512];
+    char safeRecentTitles[EVO_RMLUI_TILES][128];
+
     // Hero - always the most recent file; it does not track the cursor.
     if (recent_file_count > 0) {
         const auto& r = recent_files[0];
+        evo_url_sanitize(r.path, safeHeroDetail, sizeof(safeHeroDetail));
+        evo_url_sanitize(r.title[0] ? r.title : safeHeroDetail, safeHeroTitle, sizeof(safeHeroTitle));
         params.hero_eyebrow = (r.last_pos > 1.0) ? "CONTINUE WATCHING" : "START WATCHING";
-        params.hero_title = r.title[0] ? r.title : r.path;
-        params.hero_detail = (std::strncmp(r.path, "evo://", 6) == 0) ? "Provider media" : r.path;
+        params.hero_title = safeHeroTitle;
+        params.hero_detail = (std::strncmp(safeHeroDetail, "evo://", 6) == 0) ? "Provider media" : safeHeroDetail;
         params.hero_action = (r.last_pos > 1.0) ? "RESUME" : "PLAY";
         if (r.duration > 1.0) {
             params.hero_progress = static_cast<int>((r.last_pos / r.duration) * 1000.0);
@@ -357,8 +364,11 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     int coverBudget = 1;
     for (int i = 0; i < params.recent_visible; ++i) {
         const auto& r = recent_files[i];
-        params.recent[i].title = r.title[0] ? r.title : r.path;
-        params.recent[i].detail = (std::strncmp(r.path, "evo://", 6) == 0) ? "Provider media" : "Recent File";
+        char safeRecentPath[512];
+        evo_url_sanitize(r.path, safeRecentPath, sizeof(safeRecentPath));
+        evo_url_sanitize(r.title[0] ? r.title : safeRecentPath, safeRecentTitles[i], sizeof(safeRecentTitles[i]));
+        params.recent[i].title = safeRecentTitles[i];
+        params.recent[i].detail = (std::strncmp(safeRecentPath, "evo://", 6) == 0) ? "Provider media" : "Recent File";
         params.recent[i].icon_path = "../icons/icon_recent_files.png";
         if (std::strncmp(r.path, "evo://", 6) == 0) {      /* no poster: the service's own mark, not a clock */
             static const struct { const char* prefix; const char* icon; } kBrands[] = {

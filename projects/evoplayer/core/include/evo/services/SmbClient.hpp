@@ -57,6 +57,10 @@ private:
     struct smb2_context* m_ctx = nullptr;
     std::string m_lastError;
     std::string m_currentHost;
+    int m_currentPort = 0;
+    std::string m_currentUser;
+    std::string m_currentPassword;
+    std::string m_currentDomain;
     std::string m_currentShare;
 };
 

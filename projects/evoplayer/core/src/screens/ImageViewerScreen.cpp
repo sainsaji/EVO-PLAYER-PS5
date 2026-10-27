@@ -4,6 +4,7 @@
 #include "evo_feedback.h"
 #include "evo_toast.h"
 #include "evo_boot_log.h"
+#include "evo_smb_io.h"
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -40,6 +41,9 @@ void ImageViewerScreen::openImage(const std::string& path) {
 
     size_t slash = path.find_last_of('/');
     m_imageTitle = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+    if (path.rfind("smb://", 0) == 0) {
+        m_imageTitle = evo_url_decode_string(m_imageTitle);
+    }
 
     /*
      * Load at the file's own channel count, and thin large images down while

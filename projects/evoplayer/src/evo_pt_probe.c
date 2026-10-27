@@ -44,6 +44,7 @@
 #include <libavformat/avformat.h>
 
 #include "evo_boot_trace.h"
+#include "evo_error.h"
 
 int sceKernelDlsym(int moduleHandle, const char *symbol, void **addrOut);
 int sceKernelLoadStartModule(const char *name, size_t argc, const void *argv,
@@ -181,7 +182,8 @@ static void do_stream(const struct pt_variant *v, int secs, const char *path)
     AVFormatContext *fmt = NULL;
     int rc = avformat_open_input(&fmt, path, NULL, NULL);
     if (rc < 0) {
-        evo_bt("ptprobe: open '%s' rc=%d", path, rc);
+        char safe_path[512];
+        evo_bt("ptprobe: open '%s' rc=%d", evo_url_sanitize(path, safe_path, sizeof safe_path), rc);
         return;
     }
     avformat_find_stream_info(fmt, NULL);
@@ -192,7 +194,8 @@ static void do_stream(const struct pt_variant *v, int secs, const char *path)
             break;
         }
     if (si < 0) {
-        evo_bt("ptprobe: no AC-3 track in '%s'", path);
+        char safe_path[512];
+        evo_bt("ptprobe: no AC-3 track in '%s'", evo_url_sanitize(path, safe_path, sizeof safe_path));
         avformat_close_input(&fmt);
         return;
     }

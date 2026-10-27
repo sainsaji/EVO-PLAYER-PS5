@@ -19,6 +19,7 @@ extern "C" {
 #include "evo_readdir.h"
 #include "evo_favorites.h"
 #include "evo_stream_io.h"                          /* evo_stream_headers */
+#include "evo_smb_io.h"
 #include "evo_hls_variants.h"                    /* the stream picker's quality list */
 #include "evo_net.h"                               /* evo_net_discover_* */
 #include "evo/interfaces/ISettingsService.hpp"
@@ -1784,7 +1785,11 @@ void ProviderHostScreen::OnGuideSubmitted(const char* text, void* userdata)
 static std::string baseName(const std::string& p)
 {
     size_t s = p.find_last_of("/\\");
-    return s == std::string::npos ? p : p.substr(s + 1);
+    std::string base = (s == std::string::npos) ? p : p.substr(s + 1);
+    if (p.rfind("smb://", 0) == 0) {
+        base = evo_url_decode_string(base);
+    }
+    return base;
 }
 
 /* What a guide is called on screen: a file's name, a web guide's host. */

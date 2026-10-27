@@ -455,6 +455,9 @@ typedef struct {
     int         is_empty;
     const char* empty_title;
     const char* empty_hint;
+    int         loading;
+    const char* loading_text;
+    int         failed;
 
     /* Inspector & Bottom Status Strip */
     const char* ins_name;

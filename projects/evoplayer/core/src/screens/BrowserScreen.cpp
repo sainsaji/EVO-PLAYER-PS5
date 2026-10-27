@@ -12,6 +12,7 @@
 #include "evo_recent.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
+#include "evo_smb_io.h"
 
 #include <cstdio>
 #include <cstring>
@@ -27,6 +28,9 @@ extern "C" {
 }
 
 namespace evo {
+
+static bool s_addServerChooserOpen = false;
+static int s_addServerChooserFocused = 0;
 
 static bool matchesQuery(const std::string& str, const std::string& q) {
     if (q.empty()) return true;
@@ -70,63 +74,11 @@ static void OnAddSmbSubmitted(const char* text, void* userdata) {
 }
 
 void BrowserScreen::handleAddSmbHost(const std::string& hostStr) {
-    std::string trimmed = hostStr;
-    size_t start = trimmed.find_first_not_of(" \t\r\n");
-    if (start != std::string::npos) {
-        size_t end = trimmed.find_last_not_of(" \t\r\n");
-        trimmed = trimmed.substr(start, end - start + 1);
-    } else {
+    NetworkShare share;
+    if (!NetworkStorageService::parseSmbUrl(hostStr, share)) {
         return;
     }
-    if (trimmed.empty()) return;
-
-    if (trimmed.rfind("smb://", 0) == 0) {
-        trimmed = trimmed.substr(6);
-    }
-
-    std::string user = "guest";
-    std::string pass;
-    size_t at = trimmed.find('@');
-    if (at != std::string::npos) {
-        std::string auth = trimmed.substr(0, at);
-        trimmed = trimmed.substr(at + 1);
-        size_t colon = auth.find(':');
-        if (colon != std::string::npos) {
-            user = auth.substr(0, colon);
-            pass = auth.substr(colon + 1);
-        } else {
-            user = auth;
-        }
-    }
-
-    std::string host = trimmed;
-    std::string startPath = "/";
-    size_t slash = trimmed.find('/');
-    if (slash != std::string::npos) {
-        host = trimmed.substr(0, slash);
-        startPath = trimmed.substr(slash);
-    }
-
-    int port = 445;
-    size_t colon = host.find(':');
-    if (colon != std::string::npos) {
-        port = std::atoi(host.substr(colon + 1).c_str());
-        host = host.substr(0, colon);
-        if (port <= 0 || port > 65535) port = 445;
-    }
-
-    if (host.empty()) return;
-
-    NetworkShare share;
     share.id = "smb_" + std::to_string(time(nullptr));
-    share.name = host + (startPath != "/" ? startPath : "");
-    share.protocol = NetworkProtocol::SMB;
-    share.host = host;
-    share.port = port;
-    share.user = user;
-    share.password = pass;
-    share.startPath = startPath;
-
     NetworkStorageService::getInstance().addShare(share);
     m_networkShareId.clear();
     m_networkRemotePath = "/";
@@ -188,40 +140,10 @@ void BrowserScreen::openEditShareKeyboard(const std::string& shareId) {
     if (!share) return;
 
     m_editingShareId = shareId;
-    std::string initial;
+    std::string initial = NetworkStorageService::buildEditUrl(*share);
     if (share->protocol == NetworkProtocol::SMB) {
-        if (!share->user.empty() && share->user != "guest") {
-            initial = share->user;
-            if (!share->password.empty()) {
-                initial += ":" + share->password;
-            }
-            initial += "@";
-        }
-        initial += share->host;
-        if (share->port != 445) {
-            initial += ":" + std::to_string(share->port);
-        }
-        if (!share->startPath.empty() && share->startPath != "/") {
-            if (share->startPath[0] != '/') initial += "/";
-            initial += share->startPath;
-        }
         evo_keyboard_open_phone("Edit SMB Share (user:pass@host/Share)...", initial.c_str(), 512, OnEditSmbSubmitted, this);
     } else {
-        if (!share->user.empty() && share->user != "anonymous") {
-            initial = share->user;
-            if (!share->password.empty() && share->password != "anonymous") {
-                initial += ":" + share->password;
-            }
-            initial += "@";
-        }
-        initial += share->host;
-        if (share->port != 21) {
-            initial += ":" + std::to_string(share->port);
-        }
-        if (!share->startPath.empty() && share->startPath != "/") {
-            if (share->startPath[0] != '/') initial += "/";
-            initial += share->startPath;
-        }
         evo_keyboard_open_phone("Edit FTP Server (user:pass@host:port)...", initial.c_str(), 512, OnEditFtpSubmitted, this);
     }
 }
@@ -230,62 +152,11 @@ void BrowserScreen::handleEditSmbHost(const std::string& hostStr) {
     const auto* orig = NetworkStorageService::getInstance().getShare(m_editingShareId);
     if (!orig) return;
 
-    std::string trimmed = hostStr;
-    size_t start = trimmed.find_first_not_of(" \t\r\n");
-    if (start != std::string::npos) {
-        size_t end = trimmed.find_last_not_of(" \t\r\n");
-        trimmed = trimmed.substr(start, end - start + 1);
-    } else {
+    NetworkShare share = *orig;
+    if (!NetworkStorageService::parseSmbUrl(hostStr, share)) {
         return;
     }
-    if (trimmed.empty()) return;
-
-    if (trimmed.rfind("smb://", 0) == 0) {
-        trimmed = trimmed.substr(6);
-    }
-
-    std::string user = "guest";
-    std::string pass;
-    size_t at = trimmed.find('@');
-    if (at != std::string::npos) {
-        std::string auth = trimmed.substr(0, at);
-        trimmed = trimmed.substr(at + 1);
-        size_t colon = auth.find(':');
-        if (colon != std::string::npos) {
-            user = auth.substr(0, colon);
-            pass = auth.substr(colon + 1);
-        } else {
-            user = auth;
-        }
-    }
-
-    std::string host = trimmed;
-    std::string startPath = "/";
-    size_t slash = trimmed.find('/');
-    if (slash != std::string::npos) {
-        host = trimmed.substr(0, slash);
-        startPath = trimmed.substr(slash);
-    }
-
-    int port = 445;
-    size_t colon = host.find(':');
-    if (colon != std::string::npos) {
-        port = std::atoi(host.substr(colon + 1).c_str());
-        host = host.substr(0, colon);
-        if (port <= 0 || port > 65535) port = 445;
-    }
-
-    if (host.empty()) return;
-
-    NetworkShare share = *orig;
-    share.name = host + (startPath != "/" ? startPath : "");
-    share.protocol = NetworkProtocol::SMB;
-    share.host = host;
-    share.port = port;
-    share.user = user;
-    share.password = pass;
-    share.startPath = startPath;
-
+    share.id = orig->id;
     NetworkStorageService::getInstance().addShare(share);
     resetSelection();
     toast("SMB UPDATED", share.name.c_str());
@@ -470,7 +341,8 @@ void BrowserScreen::openActionMenu() {
             const auto& item = m_items[m_selectedIndex];
             if (item.fullPath.rfind("netshare://", 0) == 0 &&
                 item.fullPath != "netshare://add" &&
-                item.fullPath != "netshare://add_smb") {
+                item.fullPath != "netshare://add_smb" &&
+                item.fullPath != "netshare://add_server") {
                 openServerMenu(item.fullPath.substr(11), item.name);
                 return;
             }
@@ -493,6 +365,9 @@ void BrowserScreen::openActionMenu() {
                 m_actionTargetName = currentPath.substr(slash + 1);
             } else {
                 m_actionTargetName = currentPath;
+            }
+            if (currentPath.rfind("smb://", 0) == 0) {
+                m_actionTargetName = evo_url_decode_string(m_actionTargetName);
             }
             m_actionTargetPath = currentPath;
             m_actionTargetIsDir = true;
@@ -694,7 +569,19 @@ void BrowserScreen::rebuildItems() {
         m_networkEmptyHint.clear();
 
         if (m_networkShareId.empty()) {
-            // Show list of configured Network Shares + "+ Add FTP Server"
+            // Put "+ Add Server" at the top of the network root list
+            if (!m_isSearching) {
+                BrowserItem addServerItem;
+                addServerItem.name = "+ Add Server";
+                addServerItem.fullPath = "netshare://add_server";
+                addServerItem.category = FileCategory::Folder;
+                addServerItem.badge = "SETUP";
+                addServerItem.iconPath = "../icons/icon_settings.png";
+                addServerItem.detail = "SMB or FTP";
+                m_items.push_back(std::move(addServerItem));
+            }
+
+            // Show list of configured Network Shares
             const auto& shares = NetworkStorageService::getInstance().getShares();
             for (const auto& share : shares) {
                 if (m_isSearching && !matchesQuery(share.name, m_searchQuery) && !matchesQuery(share.host, m_searchQuery)) {
@@ -709,26 +596,6 @@ void BrowserScreen::rebuildItems() {
                 item.iconPath = "../icons/icon_folder.png";
                 item.detail = share.host + ":" + std::to_string(share.port);
                 m_items.push_back(std::move(item));
-            }
-
-            if (!m_isSearching) {
-                BrowserItem addSmbItem;
-                addSmbItem.name = "+ Add SMB Share";
-                addSmbItem.fullPath = "netshare://add_smb";
-                addSmbItem.category = FileCategory::Folder;
-                addSmbItem.badge = "SETUP";
-                addSmbItem.iconPath = "../icons/icon_settings.png";
-                addSmbItem.detail = "Windows Share / Samba (SMB2/3)";
-                m_items.push_back(std::move(addSmbItem));
-
-                BrowserItem addItem;
-                addItem.name = "+ Add FTP Server";
-                addItem.fullPath = "netshare://add";
-                addItem.category = FileCategory::Folder;
-                addItem.badge = "SETUP";
-                addItem.iconPath = "../icons/icon_settings.png";
-                addItem.detail = "Connect to Network FTP";
-                m_items.push_back(std::move(addItem));
             }
         } else {
             // Browse within the selected share
@@ -790,6 +657,9 @@ void BrowserScreen::rebuildItems() {
                 std::string p(fav.path);
                 size_t slash = p.find_last_of('/');
                 displayName = (slash != std::string::npos) ? p.substr(slash + 1) : p;
+                if (p.rfind("smb://", 0) == 0) {
+                    displayName = evo_url_decode_string(displayName);
+                }
             }
 
             if (m_isSearching && !matchesQuery(displayName, m_searchQuery) && !matchesQuery(fav.path, m_searchQuery)) {
@@ -845,6 +715,9 @@ void BrowserScreen::rebuildItems() {
                 std::string p(rec.path);
                 size_t slash = p.find_last_of('/');
                 displayName = (slash != std::string::npos) ? p.substr(slash + 1) : p;
+                if (p.rfind("smb://", 0) == 0) {
+                    displayName = evo_url_decode_string(displayName);
+                }
             }
 
             if (m_isSearching && !matchesQuery(displayName, m_searchQuery) && !matchesQuery(rec.path, m_searchQuery)) {
@@ -1086,6 +959,7 @@ void BrowserScreen::onEnter() {
     m_actionMenuOpen = false;
     m_showDeleteConfirm = false;
     m_serverMenuOpen = false;
+    s_addServerChooserOpen = false;
     m_removeShareConfirmOpen = false;
     auto transferService = Application::getInstance().getFileTransferService();
     if (transferService && transferService->isBusy()) {
@@ -1100,6 +974,7 @@ void BrowserScreen::onExit() {
     m_actionMenuOpen = false;
     m_showDeleteConfirm = false;
     m_serverMenuOpen = false;
+    s_addServerChooserOpen = false;
     m_removeShareConfirmOpen = false;
     m_showTransferDialog = false;
     auto browser = Application::getInstance().getFileSystemBrowser();
@@ -1278,14 +1153,12 @@ void BrowserScreen::activateSelection() {
     if (item.category == FileCategory::Folder) {
         if (m_activeSource == 2) {
             if (m_networkShareId.empty()) {
-                if (item.fullPath == "netshare://add") {
-                    evo_feedback(EVO_FB_OPEN);
-                    evo_keyboard_open_phone("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 512, OnAddFtpSubmitted, this);
-                    return;
-                }
-                if (item.fullPath == "netshare://add_smb") {
-                    evo_feedback(EVO_FB_OPEN);
-                    evo_keyboard_open_phone("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 512, OnAddSmbSubmitted, this);
+                if (item.fullPath == "netshare://add_server" ||
+                    item.fullPath == "netshare://add" ||
+                    item.fullPath == "netshare://add_smb") {
+                    s_addServerChooserOpen = true;
+                    s_addServerChooserFocused = 0;
+                    evo_feedback(EVO_FB_CONFIRM);
                     return;
                 }
                 if (item.fullPath.rfind("netshare://", 0) == 0) {
@@ -1359,6 +1232,41 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
                 ts->cancelTransfer();
                 toast("TRANSFER", "Cancelling...");
             }
+        }
+        return true;
+    }
+
+    // 0a0. Add Server Chooser Modal
+    if (s_addServerChooserOpen) {
+        if (pressed & PadButtons::Up) {
+            if (s_addServerChooserFocused > 0) s_addServerChooserFocused--;
+            else s_addServerChooserFocused = 1;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            if (s_addServerChooserFocused < 1) s_addServerChooserFocused++;
+            else s_addServerChooserFocused = 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Triangle | PadButtons::Options)) {
+            s_addServerChooserOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            s_addServerChooserOpen = false;
+            if (s_addServerChooserFocused == 0) {
+                // Samba / Windows share (SMB)
+                evo_feedback(EVO_FB_OPEN);
+                evo_keyboard_open_phone("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 512, OnAddSmbSubmitted, this);
+            } else {
+                // FTP server
+                evo_feedback(EVO_FB_OPEN);
+                evo_keyboard_open_phone("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 512, OnAddFtpSubmitted, this);
+            }
+            return true;
         }
         return true;
     }
@@ -1576,17 +1484,44 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return true;
     }
     if (pressed & PadButtons::Up) {
-        /* From the top row, Up reaches the folder's filter chips. Everywhere
-         * else it is an ordinary row move. */
-        if (m_selectedIndex < 4 && !m_folderCats.empty()) {
-            m_focusPane = BrowserFocusPane::Filter;
-            evo_feedback(EVO_FB_MOVE);
-            return true;
+        if (m_activeSource == 2 && m_networkShareId.empty()) {
+            if (m_selectedIndex == 0) {
+                evo_feedback(EVO_FB_BOUNDARY);
+                return true;
+            }
+            if (m_selectedIndex < 4) {
+                m_selectedIndex = 0;
+                m_settleMs = 0.0;
+                m_cachedMetadata = MediaMetadataInfo();
+                m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
+                evo_feedback(EVO_FB_MOVE);
+                return true;
+            }
+        } else {
+            /* From the top row, Up reaches the folder's filter chips. Everywhere
+             * else it is an ordinary row move. */
+            if (m_selectedIndex < 4 && !m_folderCats.empty()) {
+                m_focusPane = BrowserFocusPane::Filter;
+                evo_feedback(EVO_FB_MOVE);
+                return true;
+            }
         }
         navigate(-4);
         return true;
     }
     if (pressed & PadButtons::Down) {
+        if (m_activeSource == 2 && m_networkShareId.empty() && m_selectedIndex == 0) {
+            if (m_items.size() > 1) {
+                m_selectedIndex = 1;
+                m_settleMs = 0.0;
+                m_cachedMetadata = MediaMetadataInfo();
+                m_browserFsm.postEvent(BrowserScreenEvent::CursorMoved);
+                evo_feedback(EVO_FB_MOVE);
+            } else {
+                evo_feedback(EVO_FB_BOUNDARY);
+            }
+            return true;
+        }
         navigate(4);
         return true;
     }
@@ -1638,9 +1573,19 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
                     evo_feedback(EVO_FB_CANCEL);
                     return true;
                 } else {
+                    std::string exitedShareId = m_networkShareId;
                     m_networkShareId.clear();
                     m_networkRemotePath = "/";
                     resetSelection();
+                    if (!exitedShareId.empty()) {
+                        std::string targetPath = "netshare://" + exitedShareId;
+                        for (size_t i = 0; i < m_items.size(); ++i) {
+                            if (m_items[i].fullPath == targetPath) {
+                                m_selectedIndex = static_cast<int>(i);
+                                break;
+                            }
+                        }
+                    }
                     evo_feedback(EVO_FB_CANCEL);
                     return true;
                 }
@@ -1678,7 +1623,8 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             if (m_activeSource == 2 && m_networkShareId.empty()) {
                 if (item.fullPath.rfind("netshare://", 0) == 0 &&
                     item.fullPath != "netshare://add" &&
-                    item.fullPath != "netshare://add_smb") {
+                    item.fullPath != "netshare://add_smb" &&
+                    item.fullPath != "netshare://add_server") {
                     m_removeShareConfirmOpen = true;
                     m_removeShareConfirmButton = 0; // Default to Cancel for safety
                     m_removeShareId = item.fullPath.substr(11);
@@ -1892,7 +1838,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
                             "then relaunch EVO";
     } else if (m_activeSource == 2) {
         params.empty_title = m_networkEmptyTitle.empty() ? "NO SHARES CONFIGURED" : m_networkEmptyTitle.c_str();
-        params.empty_hint = m_networkEmptyHint.empty() ? "Press Cross on [+ Add FTP Server] to configure" : m_networkEmptyHint.c_str();
+        params.empty_hint = m_networkEmptyHint.empty() ? "Press Cross on [+ Add Server] to configure" : m_networkEmptyHint.c_str();
     } else if (m_activeSource == 3) {
         params.empty_title = "NO FAVORITES YET";
         params.empty_hint = "Press [Triangle] on any file to add to Favorites";
@@ -2096,7 +2042,8 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
             const auto& curItem = m_items[m_selectedIndex];
             if (curItem.fullPath.rfind("netshare://", 0) == 0 &&
                 curItem.fullPath != "netshare://add" &&
-                curItem.fullPath != "netshare://add_smb") {
+                curItem.fullPath != "netshare://add_smb" &&
+                curItem.fullPath != "netshare://add_server") {
                 params.footer_triangle_label = "REMOVE";
                 params.footer_options_label = "OPTIONS";
             }
@@ -2104,7 +2051,27 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     }
 
     auto transferService = Application::getInstance().getFileTransferService();
-    if (m_serverMenuOpen) {
+    if (s_addServerChooserOpen) {
+        params.action_menu_open = 1;
+        params.action_menu_focused = s_addServerChooserFocused;
+        params.action_menu_target = "+ Add Server";
+        params.action_target_sub = "SMB or FTP";
+        params.action_menu_eyebrow = "ADD SERVER";
+        params.action_menu_count = 2;
+
+        params.action_menu_items[0].label = "Samba / Windows share (SMB)";
+        params.action_menu_items[0].desc = "Connect via Samba / Windows share (SMB2/3)";
+        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].danger = 0;
+
+        params.action_menu_items[1].label = "FTP server";
+        params.action_menu_items[1].desc = "Connect via Network FTP";
+        params.action_menu_items[1].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[1].danger = 0;
+
+        params.action_paste_enabled = 0;
+        params.action_clipboard_info = nullptr;
+    } else if (m_serverMenuOpen) {
         params.action_menu_open = 1;
         params.action_menu_focused = m_serverMenuFocused;
         params.action_menu_target = m_serverMenuShareName.c_str();

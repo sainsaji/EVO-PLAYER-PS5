@@ -5,6 +5,10 @@
 #include "evo/services/SmbClient.hpp"
 #include "evo/services/NetworkStorageService.hpp"
 #include "evo_data_path.h"
+#include "evo_error.h"
+#include "evo_smb_io.h"
+#include "evo_recent.h"
+#include "evo_favorites.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -103,7 +107,7 @@ extern "C" void test_smb_storage_service(void) {
     std::string url1 = service.buildMediaUrl(*found, "/Public/Videos/test.mkv");
     TEST_ASSERT(url1 == "smb://192.168.1.50/Public/Videos/test.mkv", "guest URL format mismatch");
 
-    // 3. Authenticated SMB with custom port
+    // 3. Authenticated SMB with custom port and percent-encoding
     evo::NetworkShare share2;
     share2.id = "smb_auth";
     share2.name = "Secure SMB";
@@ -116,18 +120,378 @@ extern "C" void test_smb_storage_service(void) {
     service.addShare(share2);
 
     std::string url2 = service.buildMediaUrl(share2, "/SecretShare/doc.pdf");
-    TEST_ASSERT(url2 == "smb://admin:P@ss123@10.0.0.5:4450/SecretShare/doc.pdf", "auth URL format mismatch");
+    TEST_ASSERT(url2 == "smb://admin:P%40ss123@10.0.0.5:4450/SecretShare/doc.pdf", "auth URL format mismatch");
 
-    // 4. File classification
+    std::string urlPercent = service.buildMediaUrl(share2, "/SecretShare/100%25.mkv");
+    TEST_ASSERT(urlPercent == "smb://admin:P%40ss123@10.0.0.5:4450/SecretShare/100%2525.mkv", "path percent-escape mismatch");
+
+    std::string urlSpace = service.buildMediaUrl(share2, "/SecretShare/My Movie.mkv");
+    TEST_ASSERT(urlSpace == "smb://admin:P%40ss123@10.0.0.5:4450/SecretShare/My%20Movie.mkv", "path space-escape mismatch");
+
+    // 4. FTP URLs remain unencoded
+    evo::NetworkShare ftpShare;
+    ftpShare.id = "ftp_test";
+    ftpShare.name = "FTP Test";
+    ftpShare.protocol = evo::NetworkProtocol::FTP;
+    ftpShare.host = "10.0.0.5";
+    ftpShare.port = 2121;
+    ftpShare.user = "admin";
+    ftpShare.password = "P@ss123";
+    ftpShare.startPath = "/";
+    std::string ftpUrl = service.buildMediaUrl(ftpShare, "/SecretShare/100%25.mkv");
+    TEST_ASSERT(ftpUrl == "ftp://admin:P@ss123@10.0.0.5:2121/SecretShare/100%25.mkv", "FTP URL must remain unencoded");
+
+    // 5. File classification
     TEST_ASSERT(service.classifyFileName("movie.mkv") == evo::FileCategory::Video, "mkv is video");
     TEST_ASSERT(service.classifyFileName("track.flac") == evo::FileCategory::Audio, "flac is audio");
     TEST_ASSERT(service.classifyFileName("subs.srt") == evo::FileCategory::Document, "srt is document");
     TEST_ASSERT(service.classifyFileName("poster.jpg") == evo::FileCategory::Image, "jpg is image");
 
-    // 5. Cleanup
+    // 6. Cleanup
     service.removeShare("smb_test_nas");
     service.removeShare("smb_auth");
     TEST_ASSERT(service.getShare("smb_test_nas") == nullptr, "share should be removed");
+
+    TEST_PASS();
+}
+
+extern "C" void test_smb_url_sanitizer(void) {
+    TEST_START("SMB: URL Credential Sanitizer");
+
+    char buf[512];
+
+    // SMB URLs
+    TEST_ASSERT(std::string(evo_url_sanitize("smb://admin:secret@192.168.1.50/Share/movie.mkv", buf, sizeof(buf)))
+                == "smb://192.168.1.50/Share/movie.mkv", "SMB credentials must be stripped");
+
+    TEST_ASSERT(std::string(evo_url_sanitize("smb://192.168.1.50/Share/movie.mkv", buf, sizeof(buf)))
+                == "smb://192.168.1.50/Share/movie.mkv", "SMB without credentials must remain intact");
+
+    TEST_ASSERT(std::string(evo_url_sanitize("smb://admin:P%40ss123@10.0.0.5:4450/SecretShare/doc.pdf", buf, sizeof(buf)))
+                == "smb://10.0.0.5:4450/SecretShare/doc.pdf", "SMB with %40 in password must strip credentials correctly");
+
+    // FTP URLs
+    TEST_ASSERT(std::string(evo_url_sanitize("ftp://admin:P@ss123@10.0.0.5:2121/SecretShare/file.mkv", buf, sizeof(buf)))
+                == "ftp://10.0.0.5:2121/SecretShare/file.mkv", "FTP with @ in password must strip credentials correctly");
+
+    TEST_ASSERT(std::string(evo_url_sanitize("ftp://10.0.0.5:2121/Public/file.mkv", buf, sizeof(buf)))
+                == "ftp://10.0.0.5:2121/Public/file.mkv", "FTP without credentials must remain intact");
+
+    // HTTP / HTTPS URLs
+    TEST_ASSERT(std::string(evo_url_sanitize("http://user:secret@srv.example.com:8080/live/1.ts", buf, sizeof(buf)))
+                == "http://srv.example.com:8080/live/1.ts", "HTTP credentials must be stripped");
+
+    TEST_ASSERT(std::string(evo_url_sanitize("http://srv.example.com:8080/live/1.ts", buf, sizeof(buf)))
+                == "http://srv.example.com:8080/live/1.ts", "HTTP without credentials must remain intact");
+
+    TEST_ASSERT(std::string(evo_url_sanitize("https://user:secret@srv.example.com/stream.m3u8", buf, sizeof(buf)))
+                == "https://srv.example.com/stream.m3u8", "HTTPS credentials must be stripped");
+
+    // Local path / non-network
+    TEST_ASSERT(std::string(evo_url_sanitize("/mnt/usb0/video.mkv", buf, sizeof(buf)))
+                == "/mnt/usb0/video.mkv", "Local filesystem path must remain intact");
+
+    // Embedded in log message
+    TEST_ASSERT(std::string(evo_url_sanitize("Opening 'smb://user:pass@192.168.1.50/share/file.mkv' failed", buf, sizeof(buf)))
+                == "Opening 'smb://192.168.1.50/share/file.mkv' failed", "Embedded URL credentials must be stripped");
+
+    // Edge cases
+    TEST_ASSERT(std::string(evo_url_sanitize(nullptr, buf, sizeof(buf))).empty(), "Null URL returns empty string");
+    TEST_ASSERT(std::string(evo_url_sanitize("", buf, sizeof(buf))).empty(), "Empty URL returns empty string");
+
+    TEST_PASS();
+}
+
+extern "C" void test_smb_url_decoder(void) {
+    TEST_START("SMB: URL Percent-Decoder");
+
+    char out[256];
+
+    // Standard percent-encoded spaces
+    TEST_ASSERT(evo_url_decode("My%20Movie.mkv", out, sizeof(out)) == 0, "decode space should succeed");
+    TEST_ASSERT(std::string(out) == "My Movie.mkv", "decoded space mismatch");
+
+    // Percent-encoded '%' character (%25)
+    TEST_ASSERT(evo_url_decode("100%2525.mkv", out, sizeof(out)) == 0, "decode %2525 should succeed");
+    TEST_ASSERT(std::string(out) == "100%25.mkv", "decoded %2525 mismatch");
+
+    TEST_ASSERT(evo_url_decode("100%25.mkv", out, sizeof(out)) == 0, "decode %25 should succeed");
+    TEST_ASSERT(std::string(out) == "100%.mkv", "decoded %25 mismatch");
+
+    // Hex digits case insensitivity
+    TEST_ASSERT(evo_url_decode("%2f%2F", out, sizeof(out)) == 0, "decode %2f%2F should succeed");
+    TEST_ASSERT(std::string(out) == "//", "decoded hex mismatch");
+
+    // Punctuation and brackets
+    TEST_ASSERT(evo_url_decode("Show%20S01E01%20%282026%29%20%5B1080p%5D.mkv", out, sizeof(out)) == 0, "decode brackets should succeed");
+    TEST_ASSERT(std::string(out) == "Show S01E01 (2026) [1080p].mkv", "decoded brackets mismatch");
+
+    // Unencoded strings
+    TEST_ASSERT(evo_url_decode("plain_filename.mkv", out, sizeof(out)) == 0, "plain filename should succeed");
+    TEST_ASSERT(std::string(out) == "plain_filename.mkv", "plain filename mismatch");
+
+    // Empty and null
+    TEST_ASSERT(evo_url_decode("", out, sizeof(out)) == 0, "empty string should succeed");
+    TEST_ASSERT(std::string(out).empty(), "empty string should produce empty output");
+
+    TEST_ASSERT(evo_url_decode(nullptr, out, sizeof(out)) == 0, "null input should succeed");
+    TEST_ASSERT(std::string(out).empty(), "null input should produce empty output");
+
+    // In-place decoding
+    char inout[64] = "In%20Place%20Decode.mp4";
+    TEST_ASSERT(evo_url_decode(inout, inout, sizeof(inout)) == 0, "in-place decode should succeed");
+    TEST_ASSERT(std::string(inout) == "In Place Decode.mp4", "in-place decode mismatch");
+
+    // Truncation detection
+    char small[5];
+    TEST_ASSERT(evo_url_decode("LongString", small, sizeof(small)) < 0, "overflow must return -1");
+
+    // C++ std::string helper
+    TEST_ASSERT(evo_url_decode_string("Another%20Movie%20%26%20Show.mkv") == "Another Movie & Show.mkv",
+                "evo_url_decode_string mismatch");
+
+    TEST_PASS();
+}
+
+extern "C" void test_smb_url_parsing(void) {
+    TEST_START("SMB: URL Parsing & Edit Round-Trip");
+
+    auto& service = evo::NetworkStorageService::getInstance();
+
+    // 1. Parse complex SMB URL with percent-encoded awkward password
+    const std::string url = "smb://evotest:p%40ss%3Aw0rd%2F1@host:4450/Media";
+    evo::NetworkShare share;
+    TEST_ASSERT(evo::NetworkStorageService::parseSmbUrl(url, share), "parseSmbUrl should succeed");
+    TEST_ASSERT(share.user == "evotest", "parsed user should be evotest");
+    TEST_ASSERT(share.password == "p@ss:w0rd/1", "parsed password should be decoded raw 'p@ss:w0rd/1'");
+    TEST_ASSERT(share.host == "host", "parsed host should be host");
+    TEST_ASSERT(share.port == 4450, "parsed port should be 4450");
+    TEST_ASSERT(share.startPath == "/Media", "parsed startPath should be /Media");
+
+    // 2. buildMediaUrl round-trips back to the same encoded string
+    std::string mediaUrl = service.buildMediaUrl(share, "/Media");
+    TEST_ASSERT(mediaUrl == "smb://evotest:p%40ss%3Aw0rd%2F1@host:4450/Media",
+                "buildMediaUrl round-trips back to the same encoded string");
+
+    // 3. Edit prefill round-trip: Add -> Edit -> Save
+    std::string prefill = evo::NetworkStorageService::buildEditUrl(share);
+    TEST_ASSERT(prefill == "smb://evotest:p%40ss%3Aw0rd%2F1@host:4450/Media",
+                "edit prefill URL should match encoded URL format");
+
+    evo::NetworkShare reloaded;
+    TEST_ASSERT(evo::NetworkStorageService::parseSmbUrl(prefill, reloaded),
+                "re-parsing edit prefill should succeed");
+    TEST_ASSERT(reloaded.password == "p@ss:w0rd/1",
+                "reloaded password must remain raw 'p@ss:w0rd/1' (no double encoding)");
+    TEST_ASSERT(reloaded.user == "evotest", "reloaded user should match");
+    TEST_ASSERT(reloaded.host == "host", "reloaded host should match");
+    TEST_ASSERT(reloaded.port == 4450, "reloaded port should match");
+    TEST_ASSERT(reloaded.startPath == "/Media", "reloaded startPath should match");
+    TEST_ASSERT(evo::NetworkStorageService::buildEditUrl(reloaded) == prefill,
+                "re-encoded prefill must match original prefill");
+
+    // 4. URL parsing without smb:// prefix
+    evo::NetworkShare noSchemeShare;
+    TEST_ASSERT(evo::NetworkStorageService::parseSmbUrl("evotest:p%40ss%3Aw0rd%2F1@192.168.0.8:4450/Media", noSchemeShare),
+                "parsing URL without smb:// should succeed");
+    TEST_ASSERT(noSchemeShare.password == "p@ss:w0rd/1", "no-scheme password should be decoded");
+    TEST_ASSERT(noSchemeShare.host == "192.168.0.8", "no-scheme host should match");
+    TEST_ASSERT(noSchemeShare.port == 4450, "no-scheme port should match");
+
+    // 5. URL parsing with domain
+    evo::NetworkShare domainShare;
+    TEST_ASSERT(evo::NetworkStorageService::parseSmbUrl("smb://CORP%3A1;user%40dom:secret@nas/Share", domainShare),
+                "parsing URL with domain should succeed");
+    TEST_ASSERT(domainShare.domain == "CORP:1", "domain should be decoded");
+    TEST_ASSERT(domainShare.user == "user@dom", "user with @ should be decoded");
+    TEST_ASSERT(domainShare.password == "secret", "password should match");
+
+    // 6. TCP precheck failure cases
+    TEST_ASSERT(evo_smb_tcp_precheck(nullptr, 445, 1) < 0, "null host precheck should return -1");
+    TEST_ASSERT(evo_smb_tcp_precheck("", 445, 1) < 0, "empty host precheck should return -1");
+    TEST_ASSERT(evo_smb_tcp_precheck("127.0.0.1", 1, 1) < 0, "closed port precheck should fail fast");
+
+    TEST_PASS();
+}
+
+extern "C" void test_smb_recent_and_favorites(void) {
+    TEST_START("SMB: Recent & Favorites Credential Sanitization");
+
+    // 1. Store with credentials in Recent -> file on disk has none
+    recent_clear();
+    const char *credUrl = "smb://evotest:p%40ss%3Aw0rd%2F1@192.168.0.8:4450/Media/Movie%20Name.mp4";
+    recent_add_or_update(credUrl, "Movie Name", 12.5, 120.0);
+    recent_save();
+
+    FILE *rfp = fopen(RECENT_FILE_DB, "r");
+    TEST_ASSERT(rfp != nullptr, "recent DB must be created");
+    char rbuf[1024] = {0};
+    size_t rread = fread(rbuf, 1, sizeof(rbuf) - 1, rfp);
+    fclose(rfp);
+    rbuf[rread] = '\0';
+
+    TEST_ASSERT(strstr(rbuf, "192.168.0.8:4450/Media/Movie%20Name.mp4") != nullptr, "sanitized path must be on disk");
+    TEST_ASSERT(strstr(rbuf, "evotest") == nullptr, "disk file must not contain username");
+    TEST_ASSERT(strstr(rbuf, "p@ss") == nullptr && strstr(rbuf, "p%40ss") == nullptr, "disk file must not contain password");
+    TEST_ASSERT(strstr(rbuf, "w0rd") == nullptr, "disk file must not contain password remainder");
+
+    // Lookup with credentialed and clean path
+    TEST_ASSERT(recent_lookup(credUrl) == 12.5, "recent_lookup with credentialed URL must succeed");
+    TEST_ASSERT(recent_lookup("smb://192.168.0.8:4450/Media/Movie%20Name.mp4") == 12.5, "recent_lookup with clean URL must succeed");
+
+    // 2. Load of an old file containing user:pass@ -> migrated
+    rfp = fopen(RECENT_FILE_DB, "w");
+    TEST_ASSERT(rfp != nullptr, "open recent DB for writing");
+    fprintf(rfp, "smb://legacyuser:legacypass@10.0.0.5:445/Media/OldMovie.mp4\tOld Movie\t50.000\t200.000\t1700000000\n");
+    fclose(rfp);
+
+    recent_load();
+    TEST_ASSERT(recent_file_count == 1, "recent_load must load migrated entry");
+    TEST_ASSERT(std::string(recent_files[0].path) == "smb://10.0.0.5:445/Media/OldMovie.mp4",
+                "loaded entry must be sanitized on load");
+    recent_save();
+
+    rfp = fopen(RECENT_FILE_DB, "r");
+    memset(rbuf, 0, sizeof(rbuf));
+    rread = fread(rbuf, 1, sizeof(rbuf) - 1, rfp);
+    fclose(rfp);
+    rbuf[rread] = '\0';
+    TEST_ASSERT(strstr(rbuf, "legacyuser") == nullptr && strstr(rbuf, "legacypass") == nullptr,
+                "re-saved recent file must not contain legacy credentials");
+
+    // 3. Favorites: store with credentials -> file on disk has none
+    favorites_clear();
+    favorites_add(credUrl, "Movie Name", 120.0);
+    favorites_save();
+
+    FILE *ffp = fopen(FAVORITES_FILE_DB, "r");
+    TEST_ASSERT(ffp != nullptr, "favorites DB must be created");
+    char fbuf[1024] = {0};
+    size_t fread_bytes = fread(fbuf, 1, sizeof(fbuf) - 1, ffp);
+    fclose(ffp);
+    fbuf[fread_bytes] = '\0';
+
+    TEST_ASSERT(strstr(fbuf, "192.168.0.8:4450/Media/Movie%20Name.mp4") != nullptr, "favorites disk path must be sanitized");
+    TEST_ASSERT(strstr(fbuf, "evotest") == nullptr, "favorites file must not contain username");
+    TEST_ASSERT(strstr(fbuf, "p@ss") == nullptr && strstr(fbuf, "w0rd") == nullptr, "favorites file must not contain password");
+
+    TEST_ASSERT(favorites_is_favorite(credUrl) == 1, "favorites_is_favorite with credentialed URL must match");
+    TEST_ASSERT(favorites_is_favorite("smb://192.168.0.8:4450/Media/Movie%20Name.mp4") == 1, "favorites_is_favorite with clean URL must match");
+
+    favorites_remove(credUrl);
+    TEST_ASSERT(favorite_count == 0, "favorites_remove with credentialed URL must remove clean entry");
+
+    // 4. Load of an old file containing user:pass@ in Favorites -> migrated
+    ffp = fopen(FAVORITES_FILE_DB, "w");
+    TEST_ASSERT(ffp != nullptr, "open favorites DB for writing");
+    fprintf(ffp, "smb://legacyuser:legacypass@10.0.0.5/Media/OldFav.mp4\tOld Fav\t150.000\n");
+    fclose(ffp);
+
+    favorites_load();
+    TEST_ASSERT(favorite_count == 1, "favorites_load must load migrated entry");
+    TEST_ASSERT(std::string(favorite_files[0].path) == "smb://10.0.0.5/Media/OldFav.mp4",
+                "loaded favorite must be sanitized on load");
+    favorites_save();
+
+    ffp = fopen(FAVORITES_FILE_DB, "r");
+    memset(fbuf, 0, sizeof(fbuf));
+    fread_bytes = fread(fbuf, 1, sizeof(fbuf) - 1, ffp);
+    fclose(ffp);
+    fbuf[fread_bytes] = '\0';
+    TEST_ASSERT(strstr(fbuf, "legacyuser") == nullptr && strstr(fbuf, "legacypass") == nullptr,
+                "re-saved favorites file must not contain legacy credentials");
+
+    TEST_PASS();
+}
+
+extern "C" void test_smb_attach_credentials(void) {
+    TEST_START("SMB: attachCredentials Resolution & Edge Cases");
+
+    std::vector<evo::NetworkShare> testShares;
+
+    evo::NetworkShare s1;
+    s1.id = "s1";
+    s1.name = "MediaShare";
+    s1.protocol = evo::NetworkProtocol::SMB;
+    s1.host = "192.168.0.8";
+    s1.port = 4450;
+    s1.user = "evotest";
+    s1.password = "p@ss:w0rd/1";
+    testShares.push_back(s1);
+
+    evo::NetworkShare s2;
+    s2.id = "s2";
+    s2.name = "DefaultNas";
+    s2.protocol = evo::NetworkProtocol::SMB;
+    s2.host = "nas.lan";
+    s2.port = 0; // Default 445
+    s2.user = "admin";
+    s2.password = "secret";
+    testShares.push_back(s2);
+
+    evo::NetworkShare s3;
+    s3.id = "s3";
+    s3.name = "FtpCustom";
+    s3.protocol = evo::NetworkProtocol::FTP;
+    s3.host = "ftp.example.com";
+    s3.port = 2121;
+    s3.user = "ftpuser";
+    s3.password = "ftppass";
+    testShares.push_back(s3);
+
+    evo::NetworkShare s4;
+    s4.id = "s4";
+    s4.name = "FtpDefault";
+    s4.protocol = evo::NetworkProtocol::FTP;
+    s4.host = "ftp.default.com";
+    s4.port = 21;
+    s4.user = "user";
+    s4.password = "pass";
+    testShares.push_back(s4);
+
+    // 1. Matching SMB with custom port and awkward password
+    std::string in1 = "smb://192.168.0.8:4450/Media/Movie%20Name.mp4";
+    std::string out1 = evo::NetworkStorageService::attachCredentials(in1, testShares);
+    TEST_ASSERT(out1 == "smb://evotest:p%40ss%3Aw0rd%2F1@192.168.0.8:4450/Media/Movie%20Name.mp4",
+                "attachCredentials must attach percent-encoded credentials and retain encoded path");
+
+    // 2. Matching SMB with default port (treated as 445)
+    std::string in2 = "smb://nas.lan/Media/Movie.mp4";
+    std::string out2 = evo::NetworkStorageService::attachCredentials(in2, testShares);
+    TEST_ASSERT(out2 == "smb://admin:secret@nas.lan/Media/Movie.mp4",
+                "attachCredentials must match share with default port 445");
+
+    std::string in2_explicit = "smb://nas.lan:445/Media/Movie.mp4";
+    std::string out2_explicit = evo::NetworkStorageService::attachCredentials(in2_explicit, testShares);
+    TEST_ASSERT(out2_explicit == "smb://admin:secret@nas.lan/Media/Movie.mp4",
+                "explicit :445 must match default port and omit default port in output");
+
+    // 3. Non-matching share -> return unchanged
+    std::string in3 = "smb://unknown.server:4450/Share/File.mp4";
+    std::string out3 = evo::NetworkStorageService::attachCredentials(in3, testShares);
+    TEST_ASSERT(out3 == in3, "non-matching share must return URL unchanged");
+
+    // 4. URL that already has credentials -> return unchanged
+    std::string in4 = "smb://custom:pass@192.168.0.8:4450/Media/Movie.mp4";
+    std::string out4 = evo::NetworkStorageService::attachCredentials(in4, testShares);
+    TEST_ASSERT(out4 == in4, "URL with credentials must return unchanged");
+
+    // 5. FTP with custom port
+    std::string in5 = "ftp://ftp.example.com:2121/pub/file.txt";
+    std::string out5 = evo::NetworkStorageService::attachCredentials(in5, testShares);
+    TEST_ASSERT(out5 == "ftp://ftpuser:ftppass@ftp.example.com:2121/pub/file.txt",
+                "FTP with custom port must attach credentials");
+
+    // 6. FTP with default port
+    std::string in6 = "ftp://ftp.default.com/pub/file.txt";
+    std::string out6 = evo::NetworkStorageService::attachCredentials(in6, testShares);
+    TEST_ASSERT(out6 == "ftp://user:pass@ftp.default.com/pub/file.txt",
+                "FTP with default port must attach credentials");
+
+    // 7. Non-network paths -> return unchanged
+    std::string in7 = "/mnt/usb0/video.mp4";
+    std::string out7 = evo::NetworkStorageService::attachCredentials(in7, testShares);
+    TEST_ASSERT(out7 == in7, "local path must return unchanged");
 
     TEST_PASS();
 }

@@ -1,5 +1,6 @@
 #include "evo/screens/PlayerScreen.hpp"
 #include "evo/Application.hpp"
+#include "evo/services/NetworkStorageService.hpp"
 #include "evo/screens/ProviderHostScreen.hpp"
 #include "evo_provider.h"
 #include "evo_rmlui_bridge.h"
@@ -888,7 +889,8 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
                     thumbBaseline = prospero_thumbnail_serial();
                     thumbSerial = 0;
                 }
-                prospero_thumbnail_request(thumbPath, p.scrub_target, 1);
+                std::string credThumb = NetworkStorageService::attachCredentials(thumbPath ? thumbPath : "");
+                prospero_thumbnail_request(credThumb.c_str(), p.scrub_target, 1);
                 const int words = PROSPERO_THUMB_W * PROSPERO_THUMB_H;
                 if (static_cast<int>(thumbPixels.size()) < words)
                     thumbPixels.resize(static_cast<size_t>(words));

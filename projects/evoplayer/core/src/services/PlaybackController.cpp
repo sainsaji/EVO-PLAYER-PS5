@@ -1,10 +1,12 @@
 #include "evo/services/PlaybackController.hpp"
 #include "evo/interfaces/IMediaMetadataService.hpp"
+#include "evo/services/NetworkStorageService.hpp"
 #include "evo/Application.hpp"
 
 #include "pp_playback.h"
 #include "evo_playback.h"
 #include "evo_error.h"
+#include "evo_smb_io.h"
 #include "evo_thread.h"
 #include "evo_demux.h"
 #include "evo_audio_out.h"
@@ -672,14 +674,14 @@ void PlaybackController::stopPlayback() {
  */
 bool PlaybackController::startPlayback(const std::string& filePath, double resumeOffset) {
     PlaybackSource src;
-    src.url = filePath;
+    src.url = NetworkStorageService::attachCredentials(filePath);
     return startPlaybackSource(src, resumeOffset);
 }
 
 bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                                              double resumeOffset) {
-    const std::string& filePath = source.url;
-    if (filePath.empty()) {
+    const std::string rawUrl = source.url;
+    if (rawUrl.empty()) {
         return false;
     }
 
@@ -689,6 +691,10 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     if (auto* cover = Application::getInstance().getCoverArtService())
         cover->quiesce();
 
+    char safeBuf[512];
+    evo_url_sanitize(rawUrl.c_str(), safeBuf, sizeof(safeBuf));
+    const std::string filePath = safeBuf;
+
     /* A pinned quality belongs to the source it was pinned on. */
     if (m_pinnedVideoFor != filePath) {
         m_pinnedVideoStream = -1;
@@ -697,6 +703,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
 
     m_playbackFsm.postEvent(PlaybackEvent::Open);
     m_source = source;
+    m_source.url = filePath;
     m_currentFilePath = filePath;
     m_lastProgressReport = 0.0;
 
@@ -712,6 +719,8 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         current_media_path[0] = 0;
     else
         std::snprintf(current_media_path, sizeof(current_media_path), "%s", filePath.c_str());
+
+    std::string openUrl = NetworkStorageService::attachCredentials(rawUrl);
 
     /*
      * #90 scope 15: evo_stream_io_open() is the single open path for local and
@@ -730,7 +739,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     std::memset(&io_cfg, 0, sizeof io_cfg);
     io_cfg.ring_buffer_size = 8u * 1024u * 1024u;
 
-    int open_rc = evo_stream_io_open(filePath.c_str(), &play_fmt, &io_cfg, &m_streamIo);
+    int open_rc = evo_stream_io_open(openUrl.c_str(), &play_fmt, &io_cfg, &m_streamIo);
     if (open_rc < 0) {
         m_playbackFsm.postEvent(PlaybackEvent::Fail);
         /* evo_stream_io_open recorded why (wrong link, refused login, dead
@@ -761,7 +770,8 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
      * than the return code. A probe that timed out having already identified a
      * decodable video stream costs a frame-rate estimate, not the file.
      */
-    SIO_STAGE("P8_02a_PRE_FIND_INFO", filePath.c_str());
+    char safePath[512];
+    SIO_STAGE("P8_02a_PRE_FIND_INFO", evo_url_sanitize(filePath.c_str(), safePath, sizeof safePath));
     evo_stream_io_set_deadline(m_streamIo, kProbeDeadlineSeconds);
     const int find_rc = avformat_find_stream_info(play_fmt, nullptr);
     evo_stream_io_set_deadline(m_streamIo, 0.0);
@@ -1526,8 +1536,10 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         sizeReadAhead(network_source, play_fmt, video_stream_index, video_fps, ringSeconds);
         pb_prebuffer_hold   = network_source ? 1 : 0;
         pb_rebuffer_enabled = network_source ? 1 : 0;
-        if (network_source)
-            SIO_STAGE("P8_03_PREBUFFER_ARM", filePath.c_str());
+        if (network_source) {
+            char safePath[512];
+            SIO_STAGE("P8_03_PREBUFFER_ARM", evo_url_sanitize(filePath.c_str(), safePath, sizeof safePath));
+        }
     }
 
     // Start background worker threads
@@ -1861,8 +1873,13 @@ void PlaybackController::saveResumePosition() {
      * "resume from Recent" has everything it needs and nothing it should not.
      */
     std::string persistKey = m_currentFilePath;
-    if (m_source.isProvider())
+    if (m_source.isProvider()) {
         persistKey = "evo://" + m_source.provider + "/" + m_source.item_id;
+    } else {
+        char cleanPersist[512];
+        evo_url_sanitize(persistKey.c_str(), cleanPersist, sizeof(cleanPersist));
+        persistKey = cleanPersist;
+    }
 
     const char* resumeFile = evo_data_path("ps5_media_resume.txt");
     FILE* fp = std::fopen(resumeFile, "w");
@@ -1896,6 +1913,9 @@ void PlaybackController::saveResumePosition() {
 double PlaybackController::loadResumePosition(const std::string& filePath) const {
     if (filePath.empty()) return 0.0;
 
+    char cleanFile[512];
+    evo_url_sanitize(filePath.c_str(), cleanFile, sizeof(cleanFile));
+
     const char* resumeFile = evo_data_path("ps5_media_resume.txt");
     FILE* fp = std::fopen(resumeFile, "r");
     if (!fp) return 0.0;
@@ -1908,7 +1928,9 @@ double PlaybackController::loadResumePosition(const std::string& filePath) const
             pathBuf[len - 1] = '\0';
             len--;
         }
-        if (std::fscanf(fp, "%lf", &pos) == 1 && std::strcmp(pathBuf, filePath.c_str()) == 0) {
+        char cleanBuf[512];
+        evo_url_sanitize(pathBuf, cleanBuf, sizeof(cleanBuf));
+        if (std::fscanf(fp, "%lf", &pos) == 1 && std::strcmp(cleanBuf, cleanFile) == 0) {
             std::fclose(fp);
             return pos;
         }
@@ -1926,6 +1948,9 @@ bool PlaybackController::playNextVideo() {
     std::string currentFile = m_currentFilePath;
     size_t lastSlash = currentFile.find_last_of('/');
     std::string filename = (lastSlash != std::string::npos) ? currentFile.substr(lastSlash + 1) : currentFile;
+    if (currentFile.rfind("smb://", 0) == 0) {
+        filename = evo_url_decode_string(filename);
+    }
 
     const auto& entries = browser->getEntries();
     int currentIndex = -1;

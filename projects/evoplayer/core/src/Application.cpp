@@ -22,6 +22,7 @@
 #include "evo/animation/AnimationManager.hpp"
 
 #include "evo_boot_log.h"
+#include "evo_error.h"
 #include "evo_stream_io.h"
 
 #include <algorithm>
@@ -201,7 +202,9 @@ static void EvoAvLogCallback(void* avcl, int level, const char* fmt, va_list vl)
         line[--n] = '\0';
     if (n == 0)
         return;
-    evo_bt("ffmpeg[%d]: %s", level, line);
+    char safe_line[512];
+    evo_url_sanitize(line, safe_line, sizeof safe_line);
+    evo_bt("ffmpeg[%d]: %s", level, safe_line);
 }
 
 static void evo_av_log_init() {

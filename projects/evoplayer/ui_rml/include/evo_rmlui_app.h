@@ -407,6 +407,9 @@ struct EvoBrowserState {
     bool is_empty = false;
     std::string empty_title;
     std::string empty_hint;
+    bool loading = false;
+    std::string loading_text;
+    bool failed = false;
 
     std::string ins_name;
     std::string ins_kind;
@@ -463,7 +466,8 @@ struct EvoBrowserState {
                filter_focused == o.filter_focused &&
                total_count == o.total_count && cursor_index == o.cursor_index &&
                rows == o.rows && is_empty == o.is_empty && empty_title == o.empty_title &&
-               empty_hint == o.empty_hint && ins_name == o.ins_name &&
+               empty_hint == o.empty_hint && loading == o.loading && loading_text == o.loading_text && failed == o.failed &&
+               ins_name == o.ins_name &&
                ins_kind == o.ins_kind && ins_ext == o.ins_ext &&
                ins_probing == o.ins_probing && ins_preview_badge == o.ins_preview_badge &&
                ins_preview == o.ins_preview && ins_preview_w == o.ins_preview_w &&

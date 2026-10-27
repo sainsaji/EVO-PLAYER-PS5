@@ -3,6 +3,7 @@
 #include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
 #include "evo_recent.h"
+#include "evo_error.h"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
@@ -118,11 +119,16 @@ void RecentFilesScreen::render(uint32_t* framebuffer, int width, int height) {
     int rowsToDisplay = std::min(EVO_RMLUI_LIST_ROWS, std::max(0, recent_file_count - m_scrollOffset));
     params.row_count = rowsToDisplay;
 
+    char safeTitles[EVO_RMLUI_LIST_ROWS][128];
+    char safeDetails[EVO_RMLUI_LIST_ROWS][512];
+
     for (int i = 0; i < rowsToDisplay; ++i) {
         int idx = m_scrollOffset + i;
         const auto& r = recent_files[idx];
-        params.rows[i].title = r.title[0] ? r.title : r.path;
-        params.rows[i].detail = r.path;
+        evo_url_sanitize(r.path, safeDetails[i], sizeof(safeDetails[i]));
+        evo_url_sanitize(r.title[0] ? r.title : safeDetails[i], safeTitles[i], sizeof(safeTitles[i]));
+        params.rows[i].title = safeTitles[i];
+        params.rows[i].detail = safeDetails[i];
         params.rows[i].icon_path = "../icons/icon_recent_files.png";
         params.rows[i].badge = "RECENT";
         if (r.duration > 1.0) {

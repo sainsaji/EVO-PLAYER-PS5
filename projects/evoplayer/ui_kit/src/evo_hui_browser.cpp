@@ -117,6 +117,7 @@ void BrowserScreen::set(const evo_rmlui_browser_params_t &p)
     }
     empty_title_ = str(p.empty_title);
     empty_hint_ = str(p.empty_hint);
+    loading_text_ = str(p.loading_text);
     ins_name_ = str(p.ins_name);
     ins_kind_ = str(p.ins_kind);
     props_.clear();
@@ -339,16 +340,46 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
     }
 
     /* ---- grid ---- */
-    if (raw_.is_empty)
+    if (raw_.loading)
+    {
+        const float cx = kGridX + (kRight - kGridX) * 0.5f;
+        const float cy = 460.0f;
+        list.push_opacity(tween::stagger(age_, 1, 0.05f, 0.35f));
+        for (int i = 0; i < 3; ++i)
+        {
+            const float pulse = std::max(0.0f, std::sin(age_ * 6.0f - static_cast<float>(i) * 0.9f));
+            const float x = cx + (static_cast<float>(i) - 1.0f) * 40.0f;
+            list.rounded_rect({x - 9.0f, cy - 30.0f, 18.0f, 18.0f}, 9,
+                              p.accent.with_alpha(0.25f + 0.75f * pulse));
+        }
+        ui::text(list, fonts.display, loading_text_.empty() ? "Connecting..." : loading_text_,
+                 cx, cy + 40.0f, 32, kWhite, Align::center);
+        ui::text(list, fonts.regular, "Press Circle to cancel",
+                 cx, cy + 80.0f, 20, p.text_muted, Align::center);
+        list.pop_opacity();
+    }
+    else if (raw_.is_empty)
     {
         const float cx = kGridX + (kRight - kGridX) * 0.5f;
         list.push_opacity(tween::stagger(age_, 2, 0.08f, 0.5f));
-        const std::uint32_t icon = ctx.textures.icon("../icons/icon_browse_usb.png");
+        const std::uint32_t icon = ctx.textures.icon(raw_.failed ? "../icons/icon_about_support.png" : "../icons/icon_browse_usb.png");
         if (icon)
-            list.image(icon, {cx - 44, 360, 88, 88}, ::hui::gfx::kFullUv, kWhite.with_alpha(0.35f));
-        ui::text(list, fonts.display, empty_title_.empty() ? "Folder is empty" : empty_title_, cx, 530, 36,
+            list.image(icon, {cx - 44, 360, 88, 88}, ::hui::gfx::kFullUv, raw_.failed ? kDanger : kWhite.with_alpha(0.35f));
+        ui::text(list, fonts.display, empty_title_.empty() ? "Folder is empty" : empty_title_, cx, 510, 36,
                  kWhite, Align::center);
-        ui::text(list, fonts.regular, empty_hint_, cx, 574, 22, p.text_muted, Align::center);
+        ui::text(list, fonts.regular, empty_hint_, cx, 554, 22, p.text_muted, Align::center);
+
+        if (raw_.failed)
+        {
+            ui::Hint actionHints[2];
+            actionHints[0] = {ui::Button::cross, "Retry"};
+            actionHints[1] = {ui::Button::circle, "Back"};
+            ui::HintLayout actionLayout;
+            actionLayout.size = 28;
+            actionLayout.text_size = 20;
+            actionLayout.cy = 610.0f;
+            ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), actionHints, 2, cx + 110.0f, true, actionLayout);
+        }
         list.pop_opacity();
     }
     else
@@ -459,10 +490,22 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
     {
         ui::Hint hints[4];
         int n = 0;
-        hints[n++] = {ui::Button::cross, "Open"};
-        hints[n++] = {ui::Button::square, "Options"};
-        if (!raw_.at_root)
+        if (raw_.loading)
+        {
+            hints[n++] = {ui::Button::circle, "Cancel"};
+        }
+        else if (raw_.failed)
+        {
+            hints[n++] = {ui::Button::cross, "Retry"};
             hints[n++] = {ui::Button::circle, "Back"};
+        }
+        else
+        {
+            hints[n++] = {ui::Button::cross, "Open"};
+            hints[n++] = {ui::Button::square, "Options"};
+            if (!raw_.at_root)
+                hints[n++] = {ui::Button::circle, "Back"};
+        }
         ui::HintLayout layout;
         layout.size = 30;
         layout.text_size = 20;
@@ -584,6 +627,26 @@ bool BrowserScreen::focus(FocusInfo *out) const
         out->index = at + 1;
         out->total = static_cast<int>(chips_.size());
         out->rect = chip_rect(at, nullptr);
+        return true;
+    }
+    if (raw_.loading)
+    {
+        out->id = "browser-busy";
+        out->text = loading_text_.empty() ? "Connecting..." : loading_text_;
+        out->focusable.emplace_back("browser-busy", out->text);
+        out->index = 1;
+        out->total = 1;
+        out->rect = {kGridX, kGridY, kRight - kGridX, 400.0f};
+        return true;
+    }
+    if (raw_.failed)
+    {
+        out->id = "browser-error";
+        out->text = empty_title_.empty() ? "COULD NOT CONNECT" : empty_title_;
+        out->focusable.emplace_back("browser-retry", "Retry");
+        out->index = 1;
+        out->total = 1;
+        out->rect = {kGridX, kGridY, kRight - kGridX, 400.0f};
         return true;
     }
     for (std::size_t i = 0; i < cards_.size(); ++i)

@@ -45,6 +45,11 @@ void evo_error_clear(void);
  * credentials, path or query. Empty string when there is no host. */
 void evo_error_url_host(const char *url, char *out, size_t cap);
 
+/* Strips credentials (user:pass@) from smb://, ftp://, http://, https:// URLs for safe logging.
+ * Non-matching schemes, local paths, or URLs without credentials are copied as-is into dst.
+ * Returns dst. Safe to call inline in logging / breadcrumb calls. */
+const char *evo_url_sanitize(const char *url, char *dst, size_t dst_len);
+
 #ifdef __cplusplus
 }
 #endif

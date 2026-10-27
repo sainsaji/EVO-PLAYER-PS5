@@ -1,6 +1,7 @@
 /* evo_error.c - see evo_error.h. */
 #include "evo_error.h"
 
+#include <ctype.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -84,4 +85,63 @@ void evo_error_url_host(const char *url, char *out, size_t cap)
     if (n >= cap) n = cap - 1;
     memcpy(out, p, n);
     out[n] = 0;
+}
+
+const char *evo_url_sanitize(const char *url, char *dst, size_t dst_len)
+{
+    if (!dst || dst_len == 0) return "";
+    dst[0] = '\0';
+    if (!url) return dst;
+
+    const char *scheme_sep = strstr(url, "://");
+    if (!scheme_sep) {
+        snprintf(dst, dst_len, "%s", url);
+        return dst;
+    }
+
+    const char *scheme_start = scheme_sep;
+    while (scheme_start > url && (isalnum((unsigned char)scheme_start[-1]) ||
+                                  scheme_start[-1] == '+' ||
+                                  scheme_start[-1] == '-' ||
+                                  scheme_start[-1] == '.')) {
+        scheme_start--;
+    }
+
+    size_t scheme_len = (size_t)(scheme_sep - scheme_start);
+    int is_target_scheme = 0;
+    if ((scheme_len == 3 && strncasecmp(scheme_start, "smb", 3) == 0) ||
+        (scheme_len == 3 && strncasecmp(scheme_start, "ftp", 3) == 0) ||
+        (scheme_len == 4 && strncasecmp(scheme_start, "http", 4) == 0) ||
+        (scheme_len == 5 && strncasecmp(scheme_start, "https", 5) == 0)) {
+        is_target_scheme = 1;
+    }
+
+    if (!is_target_scheme) {
+        snprintf(dst, dst_len, "%s", url);
+        return dst;
+    }
+
+    const char *auth_start = scheme_sep + 3;
+    size_t auth_len = strcspn(auth_start, "/?# \t\r\n'\"");
+
+    const char *at = NULL;
+    for (size_t i = 0; i < auth_len; ++i) {
+        if (auth_start[i] == '@') {
+            at = auth_start + i;
+        }
+    }
+
+    if (!at) {
+        snprintf(dst, dst_len, "%s", url);
+        return dst;
+    }
+
+    size_t prefix_len = (size_t)(auth_start - url);
+    if (prefix_len >= dst_len) prefix_len = dst_len - 1;
+    memcpy(dst, url, prefix_len);
+    dst[prefix_len] = '\0';
+
+    const char *remainder = at + 1;
+    strncat(dst, remainder, dst_len - prefix_len - 1);
+    return dst;
 }

@@ -1414,13 +1414,23 @@ void EvoRmlApp::UpdateBrowserState(const EvoBrowserState& state) {
     }
 
     /* 3. Empty State & Media Grid Cards */
+    const bool show_empty = state.is_empty || state.loading;
     if (Rml::Element* e = el("browser-grid"))
-        e->SetProperty("display", state.is_empty ? "none" : "flex");
+        e->SetProperty("display", show_empty ? "none" : "flex");
     if (Rml::Element* e = el("browser-empty"))
-        e->SetProperty("display", state.is_empty ? "flex" : "none");
-    if (state.is_empty) {
+        e->SetProperty("display", show_empty ? "flex" : "none");
+    if (state.loading) {
+        if (Rml::Element* e = el("browser-empty-title")) e->SetInnerRML(state.loading_text.empty() ? "Connecting..." : state.loading_text);
+        if (Rml::Element* e = el("browser-empty-hint"))  e->SetInnerRML("Press Circle to cancel");
+        if (Rml::Element* e = el("browser-empty-icon"))  SetImageColor(e, text_3);
+    } else if (state.is_empty) {
         if (Rml::Element* e = el("browser-empty-title")) e->SetInnerRML(state.empty_title);
-        if (Rml::Element* e = el("browser-empty-hint"))  e->SetInnerRML(state.empty_hint);
+        if (state.failed) {
+            std::string hint = state.empty_hint + "  •  Cross: Retry  •  Circle: Back";
+            if (Rml::Element* e = el("browser-empty-hint"))  e->SetInnerRML(hint);
+        } else {
+            if (Rml::Element* e = el("browser-empty-hint"))  e->SetInnerRML(state.empty_hint);
+        }
         if (Rml::Element* e = el("browser-empty-icon"))  SetImageColor(e, text_3);
     }
 
