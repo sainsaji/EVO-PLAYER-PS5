@@ -304,8 +304,18 @@ void ScreenManager::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             stepRail(1);
             return;
         }
-        if (pressed & (PadButtons::Right | PadButtons::Circle)) {
+        if (pressed & PadButtons::Right) {
             setRailFocused(false);
+            return;
+        }
+        if (pressed & (PadButtons::Left | PadButtons::Circle)) {
+            setRailFocused(false);
+            if (m_currentScreenId != ScreenId::MainMenu) {
+                evo_feedback(EVO_FB_CANCEL);
+                navigateTo(ScreenId::MainMenu);
+            } else if (pressed & PadButtons::Left) {
+                evo_feedback(EVO_FB_BOUNDARY);
+            }
             return;
         }
         if (pressed & PadButtons::Cross) {

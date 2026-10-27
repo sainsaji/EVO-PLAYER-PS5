@@ -47,7 +47,7 @@ public:
 
     /* The mounts that have files, in order. Cached for a few seconds, so the
      * main loop can poll it for plug / unplug toasts. */
-    std::vector<std::string> usbMounts() const;
+    std::vector<std::string> usbMounts() const override;
 
     /*
      * Library view: collect every file of one category under the current

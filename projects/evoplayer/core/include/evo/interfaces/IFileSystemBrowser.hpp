@@ -53,6 +53,7 @@ public:
      * ext1) that has something on it. usbHome() is where the USB source opens:
      * the one drive's own root, or kUsbRoot - a list of the drives - when
      * there are several. */
+    virtual std::vector<std::string> usbMounts() const = 0;
     virtual std::string usbHome() const = 0;
     virtual bool isUsbPath(const std::string& path) const = 0;
     /* "/mnt/usb1/Movies" -> "/mnt/usb1"; "" when path is on no drive. */

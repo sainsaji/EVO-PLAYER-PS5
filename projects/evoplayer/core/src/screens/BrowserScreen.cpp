@@ -750,6 +750,14 @@ void BrowserScreen::setSource(int sourceIndex) {
     /* Sources only now - the category filters moved out of this panel and
      * into the folder header, where they are chosen per folder. */
     if (sourceIndex < 0 || sourceIndex > 4) sourceIndex = 0;
+    auto browser = Application::getInstance().getFileSystemBrowser();
+    if (sourceIndex == 0 && browser && browser->usbMounts().empty()) {
+        if (!NetworkStorageService::getInstance().getShares().empty()) {
+            sourceIndex = 2;
+        } else {
+            sourceIndex = 1;
+        }
+    }
     m_sidebarIndex = sourceIndex;
     const bool focusGrid = evo_jailbreak_is_open() || (sourceIndex == 2 || sourceIndex == 3 || sourceIndex == 4);
     activateSidebar(focusGrid);
@@ -791,26 +799,39 @@ void BrowserScreen::onEnter() {
 
     auto browser = Application::getInstance().getFileSystemBrowser();
     if (browser) {
-        if (browser->getCurrentPath().empty()) {
-            browser->loadLastFolder();
-            if (browser->getCurrentPath().empty()) {
-                browser->setCurrentPath(browser->usbHome());
-            }
-        }
-        /* Never open on an empty pane: a restored folder that has since been
-         * deleted or emptied still resolves, so fall back to the USB root
-         * rather than showing nothing. */
-        if (evo_jailbreak_is_open() && browser->getEntryCount() == 0 && !m_isSearching) {
-            browser->navigateToSource(0);
-        }
-        if (m_activeSource != 2 && m_activeSource != 3 && m_activeSource != 4) {
-            const std::string& path = browser->getCurrentPath();
-            if (path.rfind("/data", 0) == 0) {
-                m_activeSource = 1;
-                m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 1;
+        const std::vector<std::string> mounts = browser->usbMounts();
+        if (m_activeSource <= 1) {
+            if (mounts.empty()) {
+                // No USB drive plugged in: fallback to Network Storage if shares exist, else Internal Storage
+                if (!NetworkStorageService::getInstance().getShares().empty()) {
+                    m_activeSource = 2;
+                    m_sidebarIndex = 2;
+                } else {
+                    m_activeSource = 1;
+                    m_sidebarIndex = 1;
+                    browser->navigateToSource(1);
+                }
             } else {
-                m_activeSource = 0;
-                m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 0;
+                if (browser->getCurrentPath().empty()) {
+                    browser->loadLastFolder();
+                    if (browser->getCurrentPath().empty()) {
+                        browser->setCurrentPath(browser->usbHome());
+                    }
+                }
+                /* Never open on an empty pane: a restored folder that has since been
+                 * deleted or emptied still resolves, so fall back to the USB root
+                 * rather than showing nothing. */
+                if (evo_jailbreak_is_open() && browser->getEntryCount() == 0 && !m_isSearching) {
+                    browser->navigateToSource(0);
+                }
+                const std::string& path = browser->getCurrentPath();
+                if (path.rfind("/data", 0) == 0) {
+                    m_activeSource = 1;
+                    m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 1;
+                } else {
+                    m_activeSource = 0;
+                    m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : 0;
+                }
             }
         } else {
             m_sidebarIndex = (m_categoryFilter != -1) ? (m_categoryFilter + 3) : m_activeSource;
@@ -826,7 +847,9 @@ void BrowserScreen::onEnter() {
         }
         m_returnFocusPath.clear();
     }
-    if (!evo_jailbreak_is_open() && (m_activeSource == 0 || m_activeSource == 1)) {
+    if (m_items.empty()) {
+        m_focusPane = BrowserFocusPane::Sidebar;
+    } else if (!evo_jailbreak_is_open() && (m_activeSource == 0 || m_activeSource == 1)) {
         m_focusPane = BrowserFocusPane::Sidebar;
     }
 
@@ -936,13 +959,6 @@ void BrowserScreen::jumpLetter(int direction) {
 void BrowserScreen::activateSidebar(bool focusGrid) {
     auto browser = Application::getInstance().getFileSystemBrowser();
 
-    if (focusGrid) {
-        evo_feedback(EVO_FB_CONFIRM);
-        m_focusPane = BrowserFocusPane::Grid;
-    } else {
-        evo_feedback(EVO_FB_MOVE);
-    }
-
     switch (m_sidebarIndex) {
         case 0: // USB Drive
             if (m_activeSource != 0 || (browser && !browser->isUsbPath(browser->getCurrentPath()))) {
@@ -970,7 +986,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
                 if (focusGrid) toast("STORAGE", "Internal Storage");
             }
             break;
-        case 2: // Network Storage (FTP)
+        case 2: // Network Storage (FTP / SMB)
             if (m_activeSource != 2) {
                 m_activeSource = 2;
                 m_networkShareId.clear();
@@ -978,7 +994,7 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
                 m_isSearching = false;
                 m_searchQuery.clear();
                 resetSelection();
-                if (focusGrid) toast("STORAGE", "Network (FTP)");
+                if (focusGrid) toast("STORAGE", "Network Storage");
             }
             break;
         case 3: // Favorites
@@ -1001,6 +1017,14 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
             break;
         default:
             break;
+    }
+
+    if (focusGrid && !m_items.empty()) {
+        evo_feedback(EVO_FB_CONFIRM);
+        m_focusPane = BrowserFocusPane::Grid;
+    } else {
+        evo_feedback(EVO_FB_MOVE);
+        m_focusPane = BrowserFocusPane::Sidebar;
     }
 }
 
@@ -1248,7 +1272,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
 
     // Media Grid navigation (4 columns)
     if (pressed & PadButtons::Left) {
-        if (m_selectedIndex % 4 == 0) {
+        if (m_items.empty() || m_selectedIndex % 4 == 0) {
             m_focusPane = BrowserFocusPane::Sidebar;
             m_sidebarIndex = m_activeSource;
             evo_feedback(EVO_FB_MOVE);
@@ -1610,7 +1634,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         railFocused = sm->isRailFocused();
     }
     params.rail_focused = railFocused ? 1 : 0;
-    params.sidebar_focused = (m_focusPane == BrowserFocusPane::Sidebar) ? 1 : 0;
+    params.sidebar_focused = (m_focusPane == BrowserFocusPane::Sidebar && !railFocused) ? 1 : 0;
     params.sidebar_index = m_sidebarIndex;
     params.active_source = m_activeSource;
 
