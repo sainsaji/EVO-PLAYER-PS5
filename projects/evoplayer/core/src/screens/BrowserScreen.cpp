@@ -18,6 +18,8 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+#include <atomic>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 
@@ -506,6 +508,83 @@ void BrowserScreen::initBrowserStateMachine() {
         .addTransition(BrowserScreenState::Searching, BrowserScreenEvent::CursorMoved, BrowserScreenState::Browsing);
 }
 
+/* Hard overall deadline for one folder listing (connect, retry, list). */
+static constexpr double kNetListDeadlineMs = 12000.0;
+
+struct NetListJob {
+    std::string shareId;
+    std::string path;
+    std::vector<BrowserEntry> entries;
+    std::string error;
+    bool ok = false;
+    bool launched = false;           // UI thread only
+    std::atomic<bool> done{false};
+};
+
+/* The service owns one FTP and one SMB client, so only one listing may run.
+ * A request abandoned by timeout keeps running to its own bound; the next
+ * one waits for it. */
+static std::atomic<bool> s_netInFlight{false};
+
+static void* netListEntry(void* arg) {
+    auto* sp = static_cast<std::shared_ptr<NetListJob>*>(arg);
+    std::shared_ptr<NetListJob> job = *sp;
+    delete sp;
+    job->ok = NetworkStorageService::getInstance().listEntries(job->shareId, job->path, job->entries, job->error);
+    job->done.store(true);
+    s_netInFlight.store(false);
+    return nullptr;
+}
+
+void BrowserScreen::startNetJob() {
+    m_netJob = std::make_shared<NetListJob>();
+    m_netJob->shareId = m_networkShareId;
+    m_netJob->path = m_networkRemotePath;
+    pollNetList(0.0);   // launches now when the worker is free
+}
+
+void BrowserScreen::pollNetList(double deltaMs) {
+    if (m_netState != NetListState::Loading || !m_netJob) return;
+    m_netElapsedMs += deltaMs;
+
+    if (!m_netJob->launched && !s_netInFlight.load()) {
+        m_netJob->launched = true;
+        s_netInFlight.store(true);
+        auto* arg = new std::shared_ptr<NetListJob>(m_netJob);
+        pthread_attr_t attr;
+        pthread_t th;
+        int rc;
+        if (pthread_attr_init(&attr) == 0) {
+            pthread_attr_setstacksize(&attr, 1u << 20);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+            rc = pthread_create(&th, &attr, netListEntry, arg);
+            pthread_attr_destroy(&attr);
+        } else {
+            rc = pthread_create(&th, nullptr, netListEntry, arg);
+            if (rc == 0) pthread_detach(th);
+        }
+        if (rc != 0) {
+            delete arg;
+            s_netInFlight.store(false);
+            m_netJob->error = "Could not start the request";
+            m_netJob->done.store(true);
+        }
+    }
+
+    if (m_netJob->done.load()) {
+        m_netEntries = std::move(m_netJob->entries);
+        m_netError = m_netJob->error;
+        m_netState = m_netJob->ok ? NetListState::Ready : NetListState::Failed;
+        m_netJob.reset();
+        rebuildItems();
+    } else if (m_netElapsedMs > kNetListDeadlineMs) {
+        m_netError = "Timed out waiting for the server";
+        m_netState = NetListState::Failed;
+        m_netJob.reset();   // the worker finishes on its own; its result is dropped
+        rebuildItems();
+    }
+}
+
 void BrowserScreen::rebuildItems() {
     m_items.clear();
     auto browser = Application::getInstance().getFileSystemBrowser();
@@ -598,17 +677,28 @@ void BrowserScreen::rebuildItems() {
                 m_items.push_back(std::move(item));
             }
         } else {
-            // Browse within the selected share
-            std::vector<BrowserEntry> entries;
-            std::string error;
-            bool ok = NetworkStorageService::getInstance().listEntries(m_networkShareId, m_networkRemotePath, entries, error);
-            if (!ok) {
+            // Browse within the selected share. The listing comes from the
+            // worker; this only reads what it has delivered for this folder.
+            const std::string key = m_networkShareId + "\n" + m_networkRemotePath;
+            if (m_netState == NetListState::Idle || m_netKey != key) {
+                m_netKey = key;
+                m_netState = NetListState::Loading;
+                m_netElapsedMs = 0.0;
+                m_netEntries.clear();
+                m_netError.clear();
+                startNetJob();
+            }
+            if (m_netState == NetListState::Failed) {
                 const auto* share = NetworkStorageService::getInstance().getShare(m_networkShareId);
                 const char* protoName = (share && share->protocol == NetworkProtocol::SMB) ? "SMB" : "FTP";
                 m_networkEmptyTitle = "COULD NOT CONNECT";
-                m_networkEmptyHint = error.empty() ? (std::string(protoName) + " server not responding") : error;
-            } else {
-                for (const auto& entry : entries) {
+                m_networkEmptyHint = m_netError.empty() ? (std::string(protoName) + " server not responding") : m_netError;
+            } else if (m_netState == NetListState::Ready) {
+                if (m_netEntries.empty()) {
+                    m_networkEmptyTitle = "FOLDER IS EMPTY";
+                    m_networkEmptyHint = "Nothing here";
+                }
+                for (const auto& entry : m_netEntries) {
                     if (m_isSearching && !matchesQuery(entry.name, m_searchQuery)) {
                         continue;
                     }
@@ -840,6 +930,7 @@ void BrowserScreen::applyFilterChange() {
 }
 
 void BrowserScreen::resetSelection() {
+    m_netState = NetListState::Idle;   // moving or retrying: list the folder again
     m_selectedIndex = 0;
     m_scrollOffset = 0;
     m_settleMs = 0.0;
@@ -1138,6 +1229,11 @@ void BrowserScreen::activateSidebar(bool focusGrid) {
 }
 
 void BrowserScreen::activateSelection() {
+    if (m_activeSource == 2 && !m_networkShareId.empty() && m_netState == NetListState::Failed) {
+        evo_feedback(EVO_FB_CONFIRM);   // one retry per press, never automatic
+        resetSelection();
+        return;
+    }
     if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_items.size())) {
         return;
     }
@@ -1202,7 +1298,7 @@ void BrowserScreen::activateSelection() {
             screenMgr->navigateTo(ScreenId::ResumePrompt);
         } else {
             evo_feedback(EVO_FB_CONFIRM);
-            playback->startPlayback(item.fullPath, 0.0);
+            if (!playback->startPlayback(item.fullPath, 0.0)) return;   // toast already shown
             screenMgr->navigateTo(ScreenId::Player);
         }
     } else if (item.category == FileCategory::Document) {
@@ -1663,6 +1759,8 @@ void BrowserScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
     m_browserFsm.update(deltaMs);
 
+    if (m_activeSource == 2) pollNetList(deltaMs);
+
     // Poll active file transfer operations
     auto transferService = Application::getInstance().getFileTransferService();
     if (transferService && m_showTransferDialog) {
@@ -1891,6 +1989,20 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     int totalCount = static_cast<int>(m_items.size());
     params.total_count = totalCount;
     params.is_empty = (totalCount == 0);
+
+    char loadingText[160];
+    if (m_activeSource == 2 && !m_networkShareId.empty()) {
+        params.loading = (m_netState == NetListState::Loading) ? 1 : 0;
+        params.failed = (m_netState == NetListState::Failed) ? 1 : 0;
+        if (params.loading) {
+            const auto* share = NetworkStorageService::getInstance().getShare(m_networkShareId);
+            if (m_networkRemotePath == "/" || m_networkRemotePath.empty())
+                std::snprintf(loadingText, sizeof(loadingText), "Connecting to %s...", share ? share->name.c_str() : "server");
+            else
+                std::snprintf(loadingText, sizeof(loadingText), "Loading folder...");
+            params.loading_text = loadingText;
+        }
+    }
 
     if (totalCount == 0) {
         m_selectedIndex = 0;

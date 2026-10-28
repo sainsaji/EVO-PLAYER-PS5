@@ -74,8 +74,9 @@ bool RecentFilesScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
             const auto& r = recent_files[m_selectedIndex];
             evo_feedback(EVO_FB_CONFIRM);
             if (!ProviderHostScreen::launchRecent(r.path, r.title, r.last_pos)) {
-                if (auto pb = Application::getInstance().getPlaybackController())
-                    pb->startPlayback(r.path, r.last_pos);
+                if (auto pb = Application::getInstance().getPlaybackController()) {
+                    if (!pb->startPlayback(r.path, r.last_pos)) return true;   // toast already shown
+                }
                 if (auto sm = Application::getInstance().getScreenManager())
                     sm->navigateTo(ScreenId::Player);
             }

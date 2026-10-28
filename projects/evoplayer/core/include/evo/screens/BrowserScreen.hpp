@@ -4,10 +4,14 @@
 #include "evo/screens/StatefulScreen.hpp"
 #include "evo/fsm/StateMachine.hpp"
 #include "evo/interfaces/IMediaMetadataService.hpp"
+#include "evo/interfaces/IFileSystemBrowser.hpp"
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace evo {
+
+struct NetListJob;
 
 /**
  * @brief Discrete functional states for storage browsing and media inspection.
@@ -136,6 +140,21 @@ private:
     std::string m_networkRemotePath = "/";
     std::string m_networkEmptyTitle;
     std::string m_networkEmptyHint;
+
+    /*
+     * Network listings run on a worker (#224): the UI thread never waits on a
+     * server. One request is in flight at a time; m_netKey names the folder it
+     * is for, so a result that arrives after the user has moved on is dropped.
+     */
+    enum class NetListState { Idle, Loading, Ready, Failed };
+    NetListState m_netState = NetListState::Idle;
+    std::string m_netKey;
+    std::shared_ptr<NetListJob> m_netJob;
+    std::vector<BrowserEntry> m_netEntries;
+    std::string m_netError;
+    double m_netElapsedMs = 0.0;
+    void pollNetList(double deltaMs);
+    void startNetJob();
 
     // File operations & Action menu
     bool m_actionMenuOpen = false;

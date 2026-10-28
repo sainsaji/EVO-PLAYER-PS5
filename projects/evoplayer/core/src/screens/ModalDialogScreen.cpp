@@ -70,15 +70,19 @@ void ModalDialogScreen::executeAction(int actionIndex) {
         if (actionIndex == 0) {
             // "RESUME"
             evo_feedback(EVO_FB_CONFIRM);
-            if (playback && !m_resumePath.empty()) {
-                playback->startPlayback(m_resumePath, m_resumeTimestamp);
+            if (playback && !m_resumePath.empty() &&
+                !playback->startPlayback(m_resumePath, m_resumeTimestamp)) {
+                screenMgr->returnFromPlayback();   // open failed: back to the list, toast already shown
+                return;
             }
             screenMgr->navigateTo(ScreenId::Player);
         } else {
             // "START OVER"
             evo_feedback(EVO_FB_CONFIRM);
-            if (playback && !m_resumePath.empty()) {
-                playback->startPlayback(m_resumePath, 0.0);
+            if (playback && !m_resumePath.empty() &&
+                !playback->startPlayback(m_resumePath, 0.0)) {
+                screenMgr->returnFromPlayback();
+                return;
             }
             screenMgr->navigateTo(ScreenId::Player);
         }

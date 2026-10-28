@@ -188,8 +188,8 @@ void LaunchScreen::activateSelection() {
         // Hero row
         if (recent_file_count > 0) {
             if (!ProviderHostScreen::launchRecent(recent_files[0].path, recent_files[0].title, recent_files[0].last_pos)) {
-                playback->startPlayback(recent_files[0].path, recent_files[0].last_pos);
-                screenMgr->navigateTo(ScreenId::Player);
+                if (playback->startPlayback(recent_files[0].path, recent_files[0].last_pos))
+                    screenMgr->navigateTo(ScreenId::Player);   // on failure the toast is up and we stay
             }
         } else {
             screenMgr->navigateTo(ScreenId::UsbBrowser);
@@ -198,8 +198,8 @@ void LaunchScreen::activateSelection() {
         // Recent shelf
         if (m_selectedCol >= 0 && m_selectedCol < recent_file_count) {
             if (!ProviderHostScreen::launchRecent(recent_files[m_selectedCol].path, recent_files[m_selectedCol].title, recent_files[m_selectedCol].last_pos)) {
-                playback->startPlayback(recent_files[m_selectedCol].path, recent_files[m_selectedCol].last_pos);
-                screenMgr->navigateTo(ScreenId::Player);
+                if (playback->startPlayback(recent_files[m_selectedCol].path, recent_files[m_selectedCol].last_pos))
+                    screenMgr->navigateTo(ScreenId::Player);
             }
         }
     } else if (m_selectedRow == 2) {

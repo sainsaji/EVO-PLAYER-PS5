@@ -73,7 +73,7 @@ bool FavoritesScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t rele
             const auto& f = favorite_files[m_selectedIndex];
             evo_feedback(EVO_FB_CONFIRM);
             if (auto pb = Application::getInstance().getPlaybackController()) {
-                pb->startPlayback(f.path, 0.0);
+                if (!pb->startPlayback(f.path, 0.0)) return true;   // toast already shown
             }
             if (auto sm = Application::getInstance().getScreenManager()) {
                 sm->navigateTo(ScreenId::Player);
