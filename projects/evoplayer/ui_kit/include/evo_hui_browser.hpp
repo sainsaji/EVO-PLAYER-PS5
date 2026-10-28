@@ -25,7 +25,8 @@ class BrowserScreen
   private:
     struct Card
     {
-        std::string name, detail, icon, badge, duration;
+        std::string name, detail, icon, badge, duration, status;
+        int status_kind = 0;
         int progress = -1;
         bool favorite = false;
         bool focused = false;

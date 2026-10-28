@@ -49,6 +49,8 @@ struct BrowserItem {
     std::string detail;
     std::string badge;
     std::string iconPath;
+    int statusKind = 0;          // 0 none, 1 checking, 2 online, 3 offline (#226)
+    std::string statusText;
 };
 
 class BrowserScreen : public StatefulScreen {
@@ -155,6 +157,9 @@ private:
     double m_netElapsedMs = 0.0;
     void pollNetList(double deltaMs);
     void startNetJob();
+
+    /* Server status chips (#226): one probe at a time on the same worker rule. */
+    void pollServerStatus(double deltaMs);
 
     // File operations & Action menu
     bool m_actionMenuOpen = false;

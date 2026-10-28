@@ -48,6 +48,10 @@ public:
     std::string buildMediaUrl(const std::string& shareId, const std::string& remotePath) const;
     std::string buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const;
 
+    /* Opens and closes a TCP connection to host:port. Touches no client state,
+     * so it is safe off the UI thread. Returns the connect time in ms, or -1. */
+    static int probeReachable(const std::string& host, int port, int timeoutMs);
+
     static std::string percentEncode(const std::string& str);
     static std::string attachCredentials(const std::string& url);
     static std::string attachCredentials(const std::string& url, const std::vector<NetworkShare>& shares);

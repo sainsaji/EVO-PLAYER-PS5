@@ -765,6 +765,32 @@ int main(int argc, char **argv)
                                    bp.action_menu_open = 1; bp.action_menu_focused = 3; }},
         {"browser_transfer", 2, [&] { clear_focus(); bp.rows[3].is_focused = 1; bp.cursor_index = 3;
                                        bp.transfer_modal_open = 1; }},
+        {"browser_network", 2, [&] {
+             /* #226: server cards with Online / Checking / Offline chips */
+             clear_focus();
+             static const char *net[4][4] = {
+                 {"+ Add Server", "SMB or FTP", "SETUP", ""},
+                 {"NAS", "192.168.0.20:445", "SMB", "Online  12 ms"},
+                 {"Old PC", "192.168.0.8:4450", "SMB", "Offline"},
+                 {"PS5 Local FTP", "127.0.0.1:2121", "FTP", "Checking"},
+             };
+             bp.row_count = 4;
+             for (int i = 0; i < 4; ++i)
+             {
+                 bp.rows[i].name = net[i][0];
+                 bp.rows[i].detail = net[i][1];
+                 bp.rows[i].badge = net[i][2];
+                 bp.rows[i].duration = "";
+                 bp.rows[i].art = nullptr;
+                 bp.rows[i].progress = -1;
+                 bp.rows[i].is_favorite = 0;
+                 bp.rows[i].icon_path = "../icons/icon_folder.png";
+                 bp.rows[i].status_text = net[i][3];
+                 bp.rows[i].status_kind = i == 0 ? 0 : (i == 1 ? 2 : (i == 2 ? 3 : 1));
+             }
+             bp.rows[1].is_focused = 1;
+             bp.cursor_index = 1;
+         }},
         {"about", 7, [&] { clear_focus(); fill_about_fixture(aboutp); aboutp.action_focused = 0; }},
         {"about_focused", 8, [&] { clear_focus(); fill_about_fixture(aboutp); aboutp.action_focused = 1; }},
         {"changelog", 9, [&] { clear_focus(); fill_changelog_fixture(changelogp); changelogp.releases[0].is_focused = 1; }},

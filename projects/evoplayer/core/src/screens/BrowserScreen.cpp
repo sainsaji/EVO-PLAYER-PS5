@@ -19,6 +19,7 @@
 #include <cctype>
 #include <algorithm>
 #include <atomic>
+#include <map>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -585,6 +586,98 @@ void BrowserScreen::pollNetList(double deltaMs) {
     }
 }
 
+/* Server status chips (#226). The probe is a short TCP connect on a worker,
+ * one at a time. It does not take s_netInFlight: it touches no SMB/FTP client,
+ * and a connect that hangs must not hold up a folder listing. Results are
+ * cached for the session; an Offline server is looked at again after
+ * kOfflineRecheckMs. */
+static constexpr int kProbeConnectMs = 2500;
+static constexpr double kProbeDeadlineMs = 5000.0;
+static constexpr double kOfflineRecheckMs = 30000.0;
+
+struct ProbeJob {
+    std::string key;
+    std::string host;
+    int port = 0;
+    int ms = -1;
+    std::atomic<bool> done{false};
+};
+
+struct ServerStatus {
+    int ms = -1;          // -1 = offline
+    double at = 0.0;
+};
+
+static std::map<std::string, ServerStatus> s_serverStatus;
+static std::shared_ptr<ProbeJob> s_probeJob;    // UI thread only
+static double s_probeElapsedMs = 0.0;
+static double s_statusClockMs = 0.0;
+
+static std::string serverStatusKey(const NetworkShare& s) {
+    return s.id + "|" + s.host + ":" + std::to_string(s.port);
+}
+
+static void* probeEntry(void* arg) {
+    auto* sp = static_cast<std::shared_ptr<ProbeJob>*>(arg);
+    std::shared_ptr<ProbeJob> job = *sp;
+    delete sp;
+    job->ms = NetworkStorageService::probeReachable(job->host, job->port, kProbeConnectMs);
+    job->done.store(true);
+    return nullptr;
+}
+
+void BrowserScreen::pollServerStatus(double deltaMs) {
+    s_statusClockMs += deltaMs;
+
+    if (s_probeJob) {
+        s_probeElapsedMs += deltaMs;
+        if (s_probeJob->done.load()) {
+            s_serverStatus[s_probeJob->key] = {s_probeJob->ms, s_statusClockMs};
+            s_probeJob.reset();
+            rebuildItems();
+        } else if (s_probeElapsedMs > kProbeDeadlineMs) {
+            s_serverStatus[s_probeJob->key] = {-1, s_statusClockMs};
+            s_probeJob.reset();   // the worker finishes on its own; its result is dropped
+            rebuildItems();
+        }
+        return;
+    }
+
+    for (const auto& share : NetworkStorageService::getInstance().getShares()) {
+        const std::string key = serverStatusKey(share);
+        auto it = s_serverStatus.find(key);
+        if (it != s_serverStatus.end() &&
+            (it->second.ms >= 0 || s_statusClockMs - it->second.at < kOfflineRecheckMs)) {
+            continue;
+        }
+        auto job = std::make_shared<ProbeJob>();
+        job->key = key;
+        job->host = share.host;
+        job->port = share.port;
+        auto* arg = new std::shared_ptr<ProbeJob>(job);
+        pthread_attr_t attr;
+        pthread_t th;
+        int rc;
+        if (pthread_attr_init(&attr) == 0) {
+            pthread_attr_setstacksize(&attr, 1u << 18);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+            rc = pthread_create(&th, &attr, probeEntry, arg);
+            pthread_attr_destroy(&attr);
+        } else {
+            rc = pthread_create(&th, nullptr, probeEntry, arg);
+            if (rc == 0) pthread_detach(th);
+        }
+        if (rc != 0) {
+            delete arg;
+            s_serverStatus[key] = {-1, s_statusClockMs};
+        } else {
+            s_probeJob = job;
+            s_probeElapsedMs = 0.0;
+        }
+        return;
+    }
+}
+
 void BrowserScreen::rebuildItems() {
     m_items.clear();
     auto browser = Application::getInstance().getFileSystemBrowser();
@@ -674,6 +767,17 @@ void BrowserScreen::rebuildItems() {
                 item.badge = (share.protocol == NetworkProtocol::SMB) ? "SMB" : "FTP";
                 item.iconPath = "../icons/icon_folder.png";
                 item.detail = share.host + ":" + std::to_string(share.port);
+                auto st = s_serverStatus.find(serverStatusKey(share));
+                if (st == s_serverStatus.end()) {
+                    item.statusKind = 1;
+                    item.statusText = "Checking";
+                } else if (st->second.ms >= 0) {
+                    item.statusKind = 2;
+                    item.statusText = "Online  " + std::to_string(st->second.ms) + " ms";
+                } else {
+                    item.statusKind = 3;
+                    item.statusText = "Offline";
+                }
                 m_items.push_back(std::move(item));
             }
         } else {
@@ -1759,7 +1863,10 @@ void BrowserScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
     m_browserFsm.update(deltaMs);
 
-    if (m_activeSource == 2) pollNetList(deltaMs);
+    if (m_activeSource == 2) {
+        pollNetList(deltaMs);
+        if (m_networkShareId.empty()) pollServerStatus(deltaMs);
+    }
 
     // Poll active file transfer operations
     auto transferService = Application::getInstance().getFileTransferService();
@@ -2038,6 +2145,8 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.rows[i].is_favorite = item.isFavorite;
         params.rows[i].icon_path = item.iconPath.c_str();
         params.rows[i].detail = item.detail.c_str();
+        params.rows[i].status_kind = item.statusKind;
+        params.rows[i].status_text = item.statusText.c_str();
 
         const uint32_t* art = nullptr;
         if (!m_showTransferDialog && coverService && item.fullPath.find("://") == std::string::npos) {

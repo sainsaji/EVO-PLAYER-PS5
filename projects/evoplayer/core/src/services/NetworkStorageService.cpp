@@ -6,8 +6,63 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <time.h>
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <netdb.h>
 
 namespace evo {
+
+static long long monotonicMs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<long long>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+int NetworkStorageService::probeReachable(const std::string& host, int port, int timeoutMs) {
+    struct addrinfo hints, *res = nullptr;
+    char portStr[16];
+    std::snprintf(portStr, sizeof(portStr), "%d", port);
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host.c_str(), portStr, &hints, &res) != 0 || !res) return -1;
+
+    const long long t0 = monotonicMs();
+    int result = -1;
+    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sock >= 0) {
+        /* O_NONBLOCK does not stop connect() blocking ~75 s on this console
+         * (measured on a dead LAN host), so the bound is the send timeout. */
+        struct timeval tv;
+        tv.tv_sec = timeoutMs / 1000;
+        tv.tv_usec = (timeoutMs % 1000) * 1000;
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        int rc = connect(sock, res->ai_addr, res->ai_addrlen);
+        bool up = (rc == 0);
+        if (!up && errno == EINPROGRESS) {
+            struct pollfd pfd;
+            pfd.fd = sock;
+            pfd.events = POLLOUT;
+            pfd.revents = 0;
+            if (poll(&pfd, 1, timeoutMs) > 0 && (pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
+                int err = 0;
+                socklen_t len = sizeof(err);
+                up = (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0);
+            }
+        }
+        if (up) result = static_cast<int>(std::max<long long>(1, monotonicMs() - t0));
+        close(sock);
+    }
+    freeaddrinfo(res);
+    return result;
+}
 
 NetworkStorageService& NetworkStorageService::getInstance() {
     static NetworkStorageService s_instance;

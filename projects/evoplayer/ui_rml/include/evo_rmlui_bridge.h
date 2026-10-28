@@ -426,6 +426,8 @@ typedef struct {
     const uint32_t* art;     /* Thumbnail pixels BGRA or NULL */
     int         art_w;
     int         art_h;
+    const char* status_text; /* #226 server chip, e.g. "Online  12 ms"; NULL = none */
+    int         status_kind; /* 0 none, 1 checking, 2 online, 3 offline */
 } evo_rmlui_browser_row_t;
 
 typedef struct {

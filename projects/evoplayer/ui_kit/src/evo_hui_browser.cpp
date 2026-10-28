@@ -107,6 +107,8 @@ void BrowserScreen::set(const evo_rmlui_browser_params_t &p)
         c.icon = str(r.icon_path);
         c.badge = str(r.badge);
         c.duration = str(r.duration);
+        c.status = str(r.status_text);
+        c.status_kind = r.status_kind;
         c.progress = r.progress;
         c.favorite = r.is_favorite != 0;
         c.focused = r.is_focused != 0;
@@ -420,6 +422,19 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
                 list.rounded_rect(pill, 13, Color::rgb(0x000000, 0.6f));
                 ui::text(list, fonts.semibold, c.badge, pill.cx(), pill.y + 18, 14, kWhite, Align::center, 1.5f);
             }
+            if (c.status_kind > 0 && !c.status.empty())
+            {
+                /* Server status chip (#226): dot + text, bottom-left of the card. */
+                const Color dot = c.status_kind == 2   ? Color::rgb(0x3ddc84)
+                                  : c.status_kind == 3 ? kDanger
+                                                       : Color::rgb(0xf2b84b);
+                const float w = fonts.semibold.measure(c.status, 15, 0.5f) + 44;
+                const Rect chip{r.x + 10, r.y + r.h - 38, w, 28};
+                list.rounded_rect(chip, 14, Color::rgb(0x000000, 0.7f));
+                list.rounded_rect({chip.x + 11, chip.y + 10, 8, 8}, 4,
+                                  dot.with_alpha(c.status_kind == 1 ? 0.45f + 0.4f * ui::breathe(ctx.time) : 1.0f));
+                ui::text(list, fonts.semibold, c.status, chip.x + 28, chip.y + 19, 15, kWhite, Align::left, 0.5f);
+            }
             if (c.favorite)
                 list.star(r.x + r.w - 22, r.y + 22, 11, kStar);
             if (!c.duration.empty())
@@ -650,13 +665,13 @@ bool BrowserScreen::focus(FocusInfo *out) const
         return true;
     }
     for (std::size_t i = 0; i < cards_.size(); ++i)
-        out->focusable.emplace_back("card-" + std::to_string(i), cards_[i].name);
+        out->focusable.emplace_back("card-" + std::to_string(i), cards_[i].name + (cards_[i].status.empty() ? "" : "  [" + cards_[i].status + "]"));
     for (std::size_t i = 0; i < cards_.size(); ++i)
     {
         if (!cards_[i].focused)
             continue;
         out->id = "card-" + std::to_string(i);
-        out->text = cards_[i].name;
+        out->text = cards_[i].name + (cards_[i].status.empty() ? "" : "  [" + cards_[i].status + "]");
         out->index = raw_.cursor_index >= 0 ? raw_.cursor_index + 1 : static_cast<int>(i) + 1;
         out->total = raw_.total_count;
         out->rect = card_rect(static_cast<int>(i));
