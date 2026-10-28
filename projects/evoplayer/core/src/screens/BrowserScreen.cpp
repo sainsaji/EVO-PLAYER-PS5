@@ -55,7 +55,8 @@ static std::vector<std::string> s_pickNames;
 static std::vector<char> s_pickTicked;
 static int s_pickFocus = 0;                 // 0..n-1 a share, n = Done
 static constexpr int kPickWindow = 6;
-static bool s_addSavePending = false;       // draft is ready to be stored (UI thread only)
+static std::string s_addEditId;             // set while an existing server is being re-picked
+static bool s_addSavePending = false;      // draft is ready to be stored (UI thread only)
 
 static int pickTop() {
     const int n = (int)s_pickNames.size();
@@ -301,6 +302,15 @@ void BrowserScreen::handleEditSmbHost(const std::string& hostStr) {
         return;
     }
     share.id = orig->id;
+    std::string smbShare, subPath;
+    if (!SmbClient::splitShareAndPath(share.startPath, smbShare, subPath)) {
+        // Server root: test the login again and let the person re-tick the shares
+        s_addDraft = share;
+        s_addEditId = share.id;
+        startAddTest();
+        return;
+    }
+    share.chosenShares.clear();   // a named share has nothing to pick
     NetworkStorageService::getInstance().addShare(share);
     resetSelection();
     toast("SMB UPDATED", share.name.c_str());
@@ -1314,6 +1324,7 @@ void BrowserScreen::onExit() {
     s_addSignInOpen = false;
     s_pickOpen = false;
     s_addSavePending = false;
+    s_addEditId.clear();
     s_addTesting = false;
     s_testJob.reset();
     s_addPendingKb = ADDKB_NONE;
@@ -1605,6 +1616,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         if (pressed & PadButtons::Cross) {
             s_addServerChooserOpen = false;
             s_addDraft = NetworkShare();
+            s_addEditId.clear();
             s_addDraft.host.clear();
             s_addDraft.port = 0;
             s_addError.clear();
@@ -2132,6 +2144,11 @@ void BrowserScreen::update(double deltaMs) {
                 // SMB server address with no share: let the person pick which to show
                 s_pickNames = res.shares;
                 s_pickTicked.assign(s_pickNames.size(), 1);
+                if (!s_addDraft.chosenShares.empty()) {
+                    const auto kept = NetworkStorageService::filterChosenShares(s_pickNames, s_addDraft.chosenShares);
+                    for (size_t i = 0; i < s_pickNames.size(); ++i)
+                        s_pickTicked[i] = std::find(kept.begin(), kept.end(), s_pickNames[i]) != kept.end();
+                }
                 s_pickFocus = 0;
                 s_pickOpen = true;
             } else if (res.stage == NetworkTestStage::Ok) {
@@ -2156,13 +2173,16 @@ void BrowserScreen::update(double deltaMs) {
     if (s_addSavePending) {
         s_addSavePending = false;
         NetworkShare share = s_addDraft;
-        share.id = (share.protocol == NetworkProtocol::SMB ? "smb_" : "ftp_") + std::to_string(time(nullptr));
+        const bool editing = !s_addEditId.empty();
+        share.id = editing ? s_addEditId
+                           : (share.protocol == NetworkProtocol::SMB ? "smb_" : "ftp_") + std::to_string(time(nullptr));
+        s_addEditId.clear();
         if (share.name.empty()) share.name = share.host;
         NetworkStorageService::getInstance().addShare(share);
         m_networkShareId.clear();
         m_networkRemotePath = "/";
         resetSelection();
-        toast("ADDED", share.name.c_str());
+        toast(editing ? "UPDATED" : "ADDED", share.name.c_str());
         evo_feedback(EVO_FB_CONFIRM);
     }
 
