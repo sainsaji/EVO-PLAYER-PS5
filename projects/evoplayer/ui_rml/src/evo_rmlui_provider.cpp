@@ -25,6 +25,7 @@
 #include <RmlUi/Core/Input.h>
 #include <RmlUi/Core/Types.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -53,6 +54,7 @@ __attribute__((weak)) void toast(const char *title, const char *msg);   /* ui/ev
  */
 static evo_provider_selection_t g_selection;
 static bool g_selection_pending = false;
+static bool g_resume_enabled = true;      /* the Resume playback setting, for the detail page's Restart button */
 
 /*
  * The data model name the embedded fallback skin binds to.
@@ -609,6 +611,9 @@ void EvoRmlProviderHost::Close()
     m_row_offset = 0;
     m_needs_initial_focus = false;
     m_pending_activation.clear();
+    m_detail = DetailState();
+    ++m_detail_gen;
+    m_detail_bypass = false;
     m_pending_action = 0;
     m_is_usb_picker = false;
     m_saved_usb_playlists.clear();
@@ -903,6 +908,12 @@ void EvoRmlProviderHost::ApplyItems(const evo_provider_item_t* items, int count,
         r.played    = s.played != 0;
         r.favorite  = s.favorite != 0;
         r.resume_sec = s.resume_pos_sec > 0 ? (long long)s.resume_pos_sec : 0;
+        r.rating = s.rating;
+        r.cert = s.cert;
+        r.facts = s.facts;
+        r.art_url = s.art_url;
+        r.duration_sec = s.duration_sec;
+        r.detail = s.detail;
         if (s.resume_pos_sec > 0 && s.duration_sec > 0) {
             long long pct = (long long)s.resume_pos_sec * 100 / (long long)s.duration_sec;
             r.progress = (int)(pct < 1 ? 1 : pct > 99 ? 99 : pct);
@@ -1388,6 +1399,9 @@ bool EvoRmlProviderHost::HandleKey(Key k)
 {
     if (!IsOpen() || !m_context) return false;
 
+    /* The detail page owns every key while it is up (#221). */
+    if (m_detail.open) return DetailKey(k);
+
     /* The side panel owns every key while it is up: the grid behind it must not
      * move, and Left must not wander off to the navigation rail. */
     if (m_model.panel_open) {
@@ -1678,6 +1692,14 @@ void EvoRmlProviderHost::ApplyPendingActivation()
         return;
     }
 
+    /* A movie or a show opens its detail page; Play and Restart there come back as the selection below. */
+    const bool bypass = m_detail_bypass;
+    m_detail_bypass = false;
+    if (!bypass && WantsDetail(*hit)) {
+        OpenDetail(*hit);
+        return;
+    }
+
     PROV_LOG("'%s' activate '%s' (%s) title='%s'", m_provider_id.c_str(),
              hit->id.c_str(), hit->is_folder ? "folder" : "playable",
              hit->title.c_str());
@@ -1705,6 +1727,12 @@ void EvoRmlProviderHost::ApplyPendingActivation()
             if (a < m_art_urls.size())
                 evo_home_art_capture(m_provider_id.c_str(), hit->id.c_str(), m_art_urls[a].c_str(), "");
         }
+    }
+    {
+        std::string art = hit->art_url;
+        const size_t a = m_row_offset + hit->index;
+        if (art.empty() && a < m_art_urls.size()) art = m_art_urls[a];
+        RememberPickContext(hit->title.c_str(), !hit->facts.empty() ? hit->facts : std::string(hit->subtitle.c_str()), art);
     }
     memset(&g_selection, 0, sizeof g_selection);
     snprintf(g_selection.provider_id, sizeof g_selection.provider_id,
@@ -1734,6 +1762,7 @@ void EvoRmlProviderHost::Tick()
     evo_bundle_poll();
     evo_provider_art_poll();
     /* Adopt whatever finished decoding, and ask for the next batch. */
+    if (m_detail.open) PushDetailArt();
     if (ShelvesActive()) {
         PushShelfArt();
         PushShelfBackdrop();
@@ -1925,6 +1954,8 @@ bool EvoRmlProviderHost::RenderKit(int width, int height)
     }
 
     if (ShelvesActive()) FillShelfParams(p, r);
+    if (m_detail.open) FillDetailParams(p.detail, r);
+    else if (m_pick_fresh) FillPickParams(p.detail, r);
 
     evo_hui_update_provider(&p);
     if (!evo_hui_render_provider(width, height)) return false;
@@ -2642,6 +2673,7 @@ void EvoRmlProviderHost::AddShelfCards(EvoShelf& s, const evo_provider_item_t* i
         c.logo_url = it.logo_url;
         c.is_folder = it.is_folder != 0;
         c.is_live = it.is_live != 0;
+        c.detail = it.detail;
         c.now = display_text(it.now_title);
         c.next = display_text(it.next_title);
         c.played = it.played != 0;
@@ -2696,6 +2728,12 @@ const EvoProviderRow* EvoRmlProviderHost::ShelfFocusedRow() const
     r.favorite = c.favorite;
     r.progress = c.progress;
     r.resume_sec = c.resume_sec;
+    r.rating = c.rating;
+    r.cert = c.cert;
+    r.facts = c.facts;
+    r.art_url = c.art_url;
+    r.duration_sec = c.duration_sec;
+    r.detail = c.detail;
     return &r;
 }
 
@@ -2967,4 +3005,281 @@ void EvoRmlProviderHost::FillShelfParams(evo_hui_provider_params_t& p, EvoRender
         p.selected_played = f->played;
         p.selected_progress = f->progress;
     }
+}
+
+/* ------------------------------------------------------------------------- */
+/* The movie / show detail page (#221)                                       */
+/* ------------------------------------------------------------------------- */
+/*
+ * Cross on a movie or a show opens this instead of playing. The page is built
+ * from the card that was focused (overview, rating, facts, poster); the cast
+ * comes from the provider's "details" panel and the versions from the same
+ * resolve the stream picker uses, each asked for once. Play and Restart go out
+ * as the selection a card press would make, so the player starts through
+ * ProviderHostScreen::startSelected like any other item.
+ */
+
+bool EvoRmlProviderHost::WantsDetail(const EvoProviderRow& r) const
+{
+    /* A provider with no facts to show (IPTV) keeps opening straight into playback. */
+    if (!m_provider || !m_provider->panel || r.is_live) return false;
+    return r.detail == 1 || r.detail == 2;
+}
+
+void EvoRmlProviderHost::OpenDetail(const EvoProviderRow& r)
+{
+    m_detail = DetailState();
+    DetailState& d = m_detail;
+    d.open = true;
+    d.gen = ++m_detail_gen;
+    d.item_id = r.id.c_str();
+    d.title = r.title.c_str();
+    d.meta = !r.facts.empty() ? r.facts : std::string(r.subtitle.c_str());
+    d.rating = r.rating;
+    d.cert = r.cert;
+    d.overview = r.overview.c_str();
+    d.art_url = r.art_url;
+    d.is_show = r.detail == 2;
+    d.resume_sec = r.resume_sec;
+    if (d.art_url.empty() && !m_art_urls.empty()) {
+        const size_t a = m_row_offset + (size_t)r.index;
+        if (a < m_art_urls.size()) d.art_url = m_art_urls[a];
+    }
+    if (ShelvesActive() && m_shelf_row >= 0 && m_shelf_row < (int)m_shelves.size()) {
+        const EvoShelf& sh = m_shelves[m_shelf_row];
+        if (sh.col >= 0 && sh.col < (int)sh.cards.size() && sh.cards[sh.col].id == r.id)
+            d.backdrop_url = sh.cards[sh.col].backdrop_url;
+    }
+
+    /* A show has nothing to resume or restart from here: its one button opens the episodes. */
+    if (d.is_show || !g_resume_enabled || d.resume_sec <= 5) d.resume_sec = 0;
+    if (d.resume_sec > 0) d.resume = std::string("Resume from ") + format_duration(d.resume_sec).c_str();
+
+    PROV_LOG("'%s' detail page '%s' (%s)", m_provider_id.c_str(), d.item_id.c_str(), d.is_show ? "show" : "movie");
+
+    if (m_provider && m_provider->panel) {
+        struct Ctx { EvoRmlProviderHost* host; unsigned gen; };
+        d.cast_state = EVO_HUI_LOAD_BUSY;
+        Ctx* x = new Ctx{this, d.gen};
+        if (m_provider->panel(d.item_id.c_str(), "details", &EvoRmlProviderHost::DetailCastCallback, x) != 0) {
+            d.cast_state = EVO_HUI_LOAD_FAILED;
+            delete x;
+        }
+    }
+    m_dirty = true;
+}
+
+void EvoRmlProviderHost::CloseDetail()
+{
+    m_detail = DetailState();
+    ++m_detail_gen;               /* a reply still in flight is dropped */
+    m_dirty = true;
+}
+
+void EvoRmlProviderHost::DetailCastCallback(int ok, const evo_provider_row_t* rows, int count, void* ud)
+{
+    struct Ctx { EvoRmlProviderHost* host; unsigned gen; };
+    Ctx* x = static_cast<Ctx*>(ud);
+    EvoRmlProviderHost* self = x->host;
+    const unsigned gen = x->gen;
+    delete x;
+    if (!self->IsOpen() || !self->m_detail.open || self->m_detail.gen != gen) return;
+    DetailState& d = self->m_detail;
+    d.cast.clear();
+    d.versions.clear();
+    for (int i = 0; ok && i < count; ++i) {
+        /* the Details tab: every fact row the provider sent (rating, genres, director, studio, tagline) */
+        if (std::strcmp(rows[i].group, "cast") != 0) {
+            if (rows[i].title[0] && rows[i].detail[0] && (int)d.versions.size() < EVO_HUI_DETAIL_VERSIONS)
+                d.versions.push_back({display_text(rows[i].title).c_str(), display_text(rows[i].detail).c_str()});
+            continue;
+        }
+        if (!rows[i].title[0] || (int)d.cast.size() >= EVO_HUI_DETAIL_CAST) continue;
+        DetailPerson p;
+        p.name = display_text(rows[i].title).c_str();
+        p.role = std::strcmp(rows[i].detail, "Cast") ? display_text(rows[i].detail).c_str() : "";
+        p.art_url = rows[i].art_url;
+        d.cast.push_back(std::move(p));
+    }
+    d.cast_state = ok ? EVO_HUI_LOAD_DONE : EVO_HUI_LOAD_FAILED;
+    d.versions_state = d.cast_state;
+    self->m_dirty = true;
+}
+
+/* The poster and the headshots: asked for once, shown when they land. */
+void EvoRmlProviderHost::PushDetailArt()
+{
+    DetailState& d = m_detail;
+    bool waiting = false;
+    auto step = [&](const std::string& url, std::string& key) {
+        if (url.empty()) return;
+        if (key.empty()) {
+            char k[128];
+            const int rc = evo_provider_art_request(m_provider_id.c_str(), url.c_str(), k, sizeof k);
+            if (rc < 0) return;                 /* full or refused: the circle stays a letter */
+            key = k;
+        }
+        if (!evo_provider_art_ready(key.c_str())) waiting = true;
+    };
+    step(d.art_url, d.poster_key);
+    for (DetailPerson& p : d.cast) step(p.art_url, p.art_key);
+    /* Keep frames coming until the pictures land, but give up on one that never does. */
+    if (waiting && d.art_wait < 900) { ++d.art_wait; m_dirty = true; }
+}
+
+bool EvoRmlProviderHost::DetailKey(Key k)
+{
+    DetailState& d = m_detail;
+    const int tabs = d.is_show ? 4 : 3;
+    const int buttons = d.is_show ? 1 : (d.resume_sec > 0 ? 3 : 2);   /* PLAY, RESTART when a position is saved, CHOOSE STREAM */
+    m_dirty = true;
+
+    if (k == KeyBack) {
+        CloseDetail();
+        return true;
+    }
+    if (d.zone == EVO_HUI_DETAIL_ZONE_BUTTONS) {
+        switch (k) {
+        case KeyUp:    if (d.button > 0) --d.button; break;
+        case KeyDown:  if (d.button < buttons - 1) ++d.button; break;
+        case KeyRight: d.zone = EVO_HUI_DETAIL_ZONE_TABS; break;
+        case KeyAccept: DetailPlay(d.is_show || d.button == 0 ? 0 : (d.resume_sec > 0 && d.button == 1 ? 1 : 2)); break;
+        default: break;
+        }
+        return true;
+    }
+    if (d.zone == EVO_HUI_DETAIL_ZONE_TABS) {
+        switch (k) {
+        case KeyLeft:
+            if (d.tab > 0) --d.tab;
+            else d.zone = EVO_HUI_DETAIL_ZONE_BUTTONS;
+            break;
+        case KeyRight: if (d.tab < tabs - 1) ++d.tab; break;
+        case KeyDown:  if (d.tab == EVO_HUI_DETAIL_TAB_EPISODES) d.zone = EVO_HUI_DETAIL_ZONE_CONTENT; break;
+        default: break;
+        }
+        return true;
+    }
+    /* the Episodes tab's open row */
+    if (k == KeyUp) d.zone = EVO_HUI_DETAIL_ZONE_TABS;
+    else if (k == KeyAccept) DetailPlay(0);
+    return true;
+}
+
+/* A show's button opens its episodes (the level the card press would have opened);
+ * a movie's Play and Restart queue the selection the player starts from. */
+void EvoRmlProviderHost::DetailPlay(int mode)
+{
+    const DetailState d = m_detail;
+    if (d.is_show) {
+        m_detail_bypass = true;
+        m_pending_activation = d.item_id;
+        CloseDetail();
+        return;
+    }
+    evo_home_art_capture(m_provider_id.c_str(), d.item_id.c_str(), d.art_url.c_str(), d.backdrop_url.c_str());
+    RememberPickContext(d.title, d.meta, d.art_url);
+    memset(&g_selection, 0, sizeof g_selection);
+    snprintf(g_selection.provider_id, sizeof g_selection.provider_id, "%s", m_provider_id.c_str());
+    snprintf(g_selection.item_id, sizeof g_selection.item_id, "%s", d.item_id.c_str());
+    snprintf(g_selection.title, sizeof g_selection.title, "%s", d.title.c_str());
+    g_selection.resume_sec = mode == 1 ? 0 : d.resume_sec;
+    g_selection.force_pick = mode == 2;
+    g_selection.skip_prompt = 1;
+    g_selection_pending = true;
+    CloseDetail();
+}
+
+void EvoRmlProviderHost::FillDetailParams(evo_hui_detail_t& o, EvoRenderBridge* r)
+{
+    const DetailState& d = m_detail;
+    o.open = 1;
+    o.title = d.title.c_str();
+    o.meta = d.meta.c_str();
+    o.rating = d.rating.c_str();
+    o.cert = d.cert.c_str();
+    o.overview = d.overview.c_str();
+    o.resume = d.resume.c_str();
+    o.is_show = d.is_show;
+    o.has_restart = d.resume_sec > 0;
+    o.zone = d.zone;
+    o.button = d.button;
+    o.tab = d.tab;
+    o.poster_key = d.poster_key.c_str();
+    if (!d.poster_key.empty() && evo_provider_art_ready(d.poster_key.c_str()))
+        o.poster = r->MemoryTexturePixels(Rml::String(d.poster_key.c_str()), &o.poster_w, &o.poster_h);
+    o.cast_count = (int)std::min<size_t>(d.cast.size(), EVO_HUI_DETAIL_CAST);
+    for (int i = 0; i < o.cast_count; ++i) {
+        const DetailPerson& p = d.cast[i];
+        evo_hui_cast_t& c = o.cast[i];
+        static char initials[EVO_HUI_DETAIL_CAST][2];
+        initials[i][0] = (p.name[0] >= 0x20 && (unsigned char)p.name[0] < 0x80)
+                             ? (char)std::toupper((unsigned char)p.name[0]) : '\0';
+        initials[i][1] = '\0';
+        c.name = p.name.c_str();
+        c.role = p.role.c_str();
+        c.initial = initials[i];
+        c.art_key = p.art_key.c_str();
+        if (!p.art_key.empty() && evo_provider_art_ready(p.art_key.c_str()))
+            c.art = r->MemoryTexturePixels(Rml::String(p.art_key.c_str()), &c.art_w, &c.art_h);
+    }
+    o.cast_state = d.cast_state;
+    o.version_count = (int)std::min<size_t>(d.versions.size(), EVO_HUI_DETAIL_VERSIONS);
+    for (int i = 0; i < o.version_count; ++i) {
+        o.versions[i].label = d.versions[i].label.c_str();
+        o.versions[i].facts = d.versions[i].facts.c_str();
+    }
+    o.versions_state = d.versions_state;
+}
+
+/* The "Resume playback" setting, told to us by ProviderHostScreen (this layer has no settings access). */
+extern "C" void evo_rmlui_provider_set_resume_enabled(int on)
+{
+    g_resume_enabled = on != 0;
+}
+
+extern "C" int evo_rmlui_provider_detail_open(void)
+{
+    return EvoRmlProviderHost::Instance().DetailOpen() ? 1 : 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* The stream picker in the detail page's look                               */
+/* ------------------------------------------------------------------------- */
+
+void EvoRmlProviderHost::RememberPickContext(const std::string& title, const std::string& meta, const std::string& art_url)
+{
+    m_pick_title = title;
+    m_pick_meta = meta;
+    if (art_url != m_pick_art_url) m_pick_poster_key.clear();
+    m_pick_art_url = art_url;
+}
+
+void EvoRmlProviderHost::SetPick(const evo_hui_detail_t* d)
+{
+    if (!d) { m_pick_fresh = false; return; }
+    m_pick = *d;
+    m_pick_fresh = true;
+}
+
+void EvoRmlProviderHost::FillPickParams(evo_hui_detail_t& d, EvoRenderBridge* r)
+{
+    d = m_pick;
+    d.open = 1;
+    d.pick = 1;
+    d.title = m_pick_title.c_str();
+    d.meta = m_pick_meta.c_str();
+    if (m_pick_poster_key.empty() && !m_pick_art_url.empty()) {
+        char k[128];
+        if (evo_provider_art_request(m_provider_id.c_str(), m_pick_art_url.c_str(), k, sizeof k) >= 0) m_pick_poster_key = k;
+    }
+    d.poster_key = m_pick_poster_key.c_str();
+    if (!m_pick_poster_key.empty() && evo_provider_art_ready(m_pick_poster_key.c_str()))
+        d.poster = r->MemoryTexturePixels(Rml::String(m_pick_poster_key.c_str()), &d.poster_w, &d.poster_h);
+    m_pick_fresh = false;
+}
+
+extern "C" void evo_rmlui_provider_pick_set(const evo_hui_detail_t* d)
+{
+    EvoRmlProviderHost::Instance().SetPick(d);
 }

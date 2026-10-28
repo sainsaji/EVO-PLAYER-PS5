@@ -111,6 +111,43 @@ class ProviderGridScreen
     float scroll_x_[32] = {};               /* per shelf, in cards */
     bool scroll_snapped_ = false;
 
+    /* The movie / show detail page (#221): poster, PLAY / RESTART, and the tabs. */
+    struct DetailPerson
+    {
+        std::string name, role, initial, art_key;
+        const std::uint32_t *art = nullptr;
+        int art_w = 0, art_h = 0;
+    };
+    struct DetailVersion
+    {
+        std::string label, facts;
+    };
+    struct Detail
+    {
+        bool open = false, is_show = false, has_restart = false;
+        std::string title, meta, rating, cert, overview, resume, poster_key;
+        int zone = 0, button = 0, tab = 0;
+        const std::uint32_t *poster = nullptr;
+        int poster_w = 0, poster_h = 0;
+        std::vector<DetailPerson> cast;
+        std::vector<DetailVersion> versions;
+        int cast_state = 0, versions_state = 0;
+        /* the stream picker (pick = true) */
+        bool pick = false;
+        std::string pick_note, fact_title;
+        struct StreamRow
+        {
+            std::string label, chips, badge;
+        };
+        std::vector<StreamRow> streams;
+        int stream_total = 0, stream_first = 0, stream_cursor = -1;
+        std::vector<DetailVersion> facts;     /* label, value */
+    } detail_;
+    float detail_age_ = 0.0f;
+    hui::gfx::Rect detail_focus_rect() const;
+    void draw_detail_page(hui::gfx::DrawList &list, const Context &ctx) const;
+    void draw_stream_picker(hui::gfx::DrawList &list, const Context &ctx) const;
+
     float age_ = 0.0f;
     float panel_age_ = 0.0f;
     hui::ui::SpringRect ring_;

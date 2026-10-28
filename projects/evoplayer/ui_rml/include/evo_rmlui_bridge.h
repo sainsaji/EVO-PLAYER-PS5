@@ -741,6 +741,86 @@ typedef struct {
     const char*     initial;   /* drawn in a circle when there is no picture */
 } evo_hui_panel_row_t;
 
+/*
+ * The movie / show detail page (#221): poster, PLAY and RESTART on the left;
+ * Overview, Cast, Versions (and Episodes for a show) as tabs on the right. The
+ * host keeps the focus; the kit only draws `zone`, `button` and `tab`.
+ */
+#define EVO_HUI_DETAIL_CAST      12
+#define EVO_HUI_DETAIL_VERSIONS  8
+#define EVO_HUI_DETAIL_ZONE_BUTTONS 0   /* PLAY / RESTART */
+#define EVO_HUI_DETAIL_ZONE_TABS    1
+#define EVO_HUI_DETAIL_ZONE_CONTENT 2   /* the Episodes tab's open row */
+#define EVO_HUI_DETAIL_TAB_OVERVIEW 0
+#define EVO_HUI_DETAIL_TAB_CAST     1
+#define EVO_HUI_DETAIL_TAB_VERSIONS 2
+#define EVO_HUI_DETAIL_TAB_EPISODES 3
+typedef struct {
+    const char*     name;
+    const char*     role;        /* "" when the service gives none */
+    const char*     initial;     /* drawn in a circle until the headshot arrives */
+    const char*     art_key;
+    const uint32_t* art;
+    int             art_w, art_h;
+} evo_hui_cast_t;
+typedef struct {
+    const char* label;
+    const char* facts;           /* "HEVC · HDR10 · DD+ 5.1 · 6.3 GB" */
+} evo_hui_version_t;
+/* The stream picker in the detail page's look: poster and title on the left, the streams as rows with
+ * chips, and a facts card for the focused one. The title, facts line and poster come from the host. */
+#define EVO_HUI_STREAM_ROWS 6
+#define EVO_HUI_STREAM_FACTS 10
+typedef struct {
+    const char* label;
+    const char* chips;           /* tab-separated: "HEVC\t+HDR10\tDD+ 5.1\t6.3 GB", "" = none */
+    const char* badge;           /* "1080P", "" = none */
+} evo_hui_stream_row_t;
+typedef struct {
+    const char* label;
+    const char* value;
+} evo_hui_fact_t;
+/* load states of the lazy lists */
+#define EVO_HUI_LOAD_IDLE    0
+#define EVO_HUI_LOAD_BUSY    1
+#define EVO_HUI_LOAD_DONE    2
+#define EVO_HUI_LOAD_FAILED  3
+typedef struct {
+    int         open;
+    const char* title;
+    const char* meta;            /* "2024 · 2h 46m · Sci-Fi, Adventure" */
+    const char* rating;          /* "8.5", "" = no pill */
+    const char* cert;            /* "PG-13" */
+    const char* overview;
+    const char* resume;          /* "Resume from 0:41:10", "" = none */
+    int         is_show;
+    int         has_restart;     /* a saved position exists */
+    int         zone;            /* EVO_HUI_DETAIL_ZONE_* */
+    int         button;          /* 0 PLAY, 1 RESTART */
+    int         tab;             /* EVO_HUI_DETAIL_TAB_* */
+    const char* poster_key;
+    const uint32_t* poster;
+    int         poster_w, poster_h;
+    evo_hui_cast_t cast[EVO_HUI_DETAIL_CAST];
+    int         cast_count;
+    int         cast_state;      /* EVO_HUI_LOAD_* */
+    evo_hui_version_t versions[EVO_HUI_DETAIL_VERSIONS];
+    int         version_count;
+    int         versions_state;
+
+    /* pick = 1: draw the stream picker instead of the tabs. */
+    int         pick;
+    const char* pick_note;       /* "reading the available qualities...", "" = none */
+    evo_hui_stream_row_t streams[EVO_HUI_STREAM_ROWS];   /* the visible window */
+    int         stream_count;    /* in `streams` */
+    int         stream_total;    /* all of them */
+    int         stream_first;    /* index of streams[0] among them */
+    int         stream_cursor;   /* index among them, -1 = none */
+    const char* fact_title;
+    evo_hui_fact_t facts[EVO_HUI_STREAM_FACTS];
+    int         fact_count;
+} evo_hui_detail_t;
+
 /* variant */
 #define EVO_HUI_PROVIDER_MEDIASERVER 0   /* poster wall: Emby, Jellyfin, addons */
 #define EVO_HUI_PROVIDER_LIVETV      1   /* channel cards + guide: IPTV */
@@ -824,6 +904,8 @@ typedef struct {
     int             logo_w, logo_h;
     const char*     logo_key;
     evo_hui_shelf_t shelves[EVO_HUI_SHELVES];
+
+    evo_hui_detail_t detail;       /* detail.open = the movie / show page replaces the screen */
 } evo_hui_provider_params_t;
 
 

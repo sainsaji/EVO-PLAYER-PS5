@@ -529,6 +529,27 @@ shelves. Triangle opens the item menu when the provider has `item_action` or
 `panel`; Stremio and Nuvio offer Details & cast built from the title's meta
 reply (`panel` hook, kind "details").
 
+### Movie and show detail page (#221)
+
+Cross on an item the provider marks `evo_provider_item_t::detail` (1 a movie, 2 a TV
+show) opens a page instead of playing: poster, PLAY and RESTART on the left, then
+Overview / Cast / Details tabs (Episodes for a show). Only providers with a `panel`
+hook use it, so IPTV still plays straight away. What the page reads:
+
+- **Item fields** (already in the list reply): `overview`, `rating`, `cert`, `facts`
+  (year, runtime, genres), `art_url`, `resume_pos_sec`.
+- **Cast:** the `panel` hook, kind "details". Person rows carry `group = "cast"`, `title` =
+  name, `detail` = role (empty when unknown), `art_url` = headshot (empty on Xtream and
+  on addons that send names only; the page draws a letter in a circle).
+- **Details tab** (replaced a Versions tab that re-ran the stream lookup and came back
+  empty when no stream addon answered): the non-cast rows of the same "details" reply
+  (Rating, Genres, Director, Studio, Tagline), shown as label / value. No extra request.
+- **Play / Restart:** the selection a card press queues, with `skip_prompt` set, so
+  ProviderHostScreen does not ask Continue / Restart / Cancel again. Restart is only
+  offered when the Resume playback setting is on and a position is saved.
+- **Show:** one EPISODES button (and the Episodes tab's row) opens the show's folder
+  exactly as the card press did.
+
 ---
 
 ## 10. Known gaps

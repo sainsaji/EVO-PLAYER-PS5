@@ -159,6 +159,7 @@ bool g_resolve_finished = false;
 
 static PlaybackSource g_start_src;
 static double g_start_resume = 0.0;
+static bool g_force_pick = false;      /* the detail page's CHOOSE STREAM: open the picker whatever the setting says */
 static pthread_t g_start_thread;
 static std::atomic<bool> g_start_running{false};
 static std::atomic<bool> g_start_done{false};
@@ -460,6 +461,10 @@ void ProviderHostScreen::onEnter()
     m_resumePromptButton = 0;
     evo_rmlui_provider_set_tuning(0);
     evo_rmlui_provider_set_loading(0, "");
+    {
+        auto st = Application::getInstance().getSettingsService();
+        evo_rmlui_provider_set_resume_enabled(st ? st->isResumePlaybackEnabled() : true);
+    }
 
     /* #101: back from a stream a web page handed over. The page reopens by
      * itself (evo_webui.c); this screen just keeps hosting it. */
@@ -1326,6 +1331,39 @@ void ProviderHostScreen::renderStreamPicker(uint32_t* framebuffer, int width, in
     params.hints[1].glyph_path = "../icons/btn_circle.png";
     params.hints[1].label = "BACK";
 
+    /* The detail page's look: the rows built above, a window of them, and the facts card. */
+    {
+        static evo_hui_detail_t pk;
+        std::memset(&pk, 0, sizeof pk);
+        pk.pick = 1;
+        pk.pick_note = note ? note : "";
+        pk.stream_total = total;
+        pk.stream_cursor = params.cursor_index;
+        const int cur = std::max(0, params.cursor_index);
+        int first = std::min(std::max(0, cur - 2), std::max(0, rows - EVO_HUI_STREAM_ROWS));
+        pk.stream_first = first;
+        pk.stream_count = std::min(EVO_HUI_STREAM_ROWS, rows - first);
+        for (int k = 0; k < pk.stream_count; ++k) {
+            const auto& r = params.rows[first + k];
+            pk.streams[k].label = r.title ? r.title : "";
+            pk.streams[k].chips = r.pills ? r.pills : "";
+            /* only a quality is worth a badge; the kind word (SOURCE, LISTED...) is noise here */
+            const bool kind_word = r.badge && (!std::strcmp(r.badge, "SOURCE") || !std::strcmp(r.badge, "LISTED") || !std::strcmp(r.badge, "GUESS") || !std::strcmp(r.badge, "HLS"));
+            pk.streams[k].badge = (r.badge && !kind_word) ? r.badge : "";
+        }
+        pk.fact_title = params.panel_title ? params.panel_title : "";
+        pk.fact_count = std::min(EVO_HUI_STREAM_FACTS, params.panel_count);
+        for (int k = 0; k < pk.fact_count; ++k) {
+            pk.facts[k].label = params.panel[k].label;
+            pk.facts[k].value = params.panel[k].value;
+        }
+        evo_rmlui_provider_pick_set(&pk);
+        if (evo_rmlui_provider_render(framebuffer, width, height)) {
+            evo_rmlui_provider_clear_frame();
+            return;
+        }
+    }
+
     evo_rmlui_update_list(&params);
     evo_rmlui_render_list(framebuffer, width, height);
 }
@@ -1528,6 +1566,24 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
      * owns Up/Down and Left/Right in that state, exactly as on every other
      * screen. */
     if (railFocused) return false;
+
+    /* The movie / show detail page (#221): d-pad moves, Cross presses, Circle closes it.
+     * Square, Triangle and Options do nothing here; the screen behind it stays put. */
+    if (evo_rmlui_provider_detail_open()) {
+        if (m_resolving || m_tunePending || g_start_running) return true;      /* one activation at a time */
+        int key = -1;
+        if (pressed & PadButtons::Up)          key = EvoRmlProviderHost::KeyUp;
+        else if (pressed & PadButtons::Down)   key = EvoRmlProviderHost::KeyDown;
+        else if (pressed & PadButtons::Left)   key = EvoRmlProviderHost::KeyLeft;
+        else if (pressed & PadButtons::Right)  key = EvoRmlProviderHost::KeyRight;
+        else if (pressed & PadButtons::Cross)  key = EvoRmlProviderHost::KeyAccept;
+        else if (pressed & PadButtons::Circle) key = EvoRmlProviderHost::KeyBack;
+        if (key < 0) return true;
+        evo_feedback(key == EvoRmlProviderHost::KeyAccept ? EVO_FB_OPEN
+                   : key == EvoRmlProviderHost::KeyBack   ? EVO_FB_CANCEL : EVO_FB_MOVE);
+        evo_rmlui_provider_key(key);
+        return true;
+    }
 
     /* The Live TV options panel: the d-pad and X work its rows, Circle steps back,
      * Options closes it, and nothing may act on the grid behind it. */
@@ -2509,11 +2565,13 @@ void ProviderHostScreen::startSelected()
     std::snprintf(g_pending.title,    sizeof g_pending.title,    "%s", sel.title);
     g_pending.is_live = sel.is_live;
     g_pending.resume_sec = sel.resume_sec;
+    g_force_pick = sel.force_pick != 0;
     g_resolve_finished = false;
 
     auto st = Application::getInstance().getSettingsService();
     bool resumeEnabled = st ? st->isResumePlaybackEnabled() : true;
-    if (!g_pending.is_live && resumeEnabled && g_pending.resume_sec > 5) {
+    /* The detail page already asked Play or Restart, so no Continue / Restart / Cancel on top. */
+    if (!g_pending.is_live && resumeEnabled && g_pending.resume_sec > 5 && !sel.skip_prompt) {
         m_showResumePrompt = true;
         m_resumePromptButton = 0;
         return;
@@ -2530,6 +2588,7 @@ void ProviderHostScreen::proceedTunePending()
         g_pending.ask = st->isAskStreamEnabled() ? 1 : 0;
     if (const evo_provider_t* pp = evo_provider_find(g_pending.provider))
         if (pp->caps & EVO_PROVIDER_CAP_PICK) g_pending.ask = 1;
+    if (g_force_pick) g_pending.ask = 1;
     g_pending.picked = 0;
     g_pick_stage = PickStage::Idle;
     ++g_pick_gen;

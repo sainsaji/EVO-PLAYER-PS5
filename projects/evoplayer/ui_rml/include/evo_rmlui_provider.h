@@ -84,6 +84,10 @@ struct EvoProviderRow {
     bool favorite = false;
     /* Not bound: where playback resumes, handed to the player on activation. */
     long long resume_sec = 0;
+    /* Not bound: what the movie / show detail page (#221) shows. */
+    std::string rating, cert, facts, art_url;
+    long long duration_sec = 0;
+    int  detail = 0;        /* evo_provider_item_t::detail */
 };
 
 /* One row of the side panel (Live TV options): Settings' row language. */
@@ -110,6 +114,7 @@ struct EvoShelfCard {
     std::string rating, cert, facts, cast;   /* the Details block; cast comes later, from the details panel */
     int  cast_state = 0;                     /* 0 not asked, 1 asked, 2 answered */
     bool is_folder = false, is_live = false, played = false, favorite = false, see_all = false;
+    int  detail = 0;                         /* evo_provider_item_t::detail */
     int  progress = 0;
     long long resume_sec = 0;
     long long duration_sec = 0;
@@ -462,6 +467,47 @@ private:
     std::vector<evo_provider_item_t> m_expand_items;
     unsigned m_expand_gen = 0;
     mutable EvoProviderRow m_shelf_focus_row;
+
+    /* ---- the movie / show detail page (#221) ---- */
+    struct DetailPerson { std::string name, role, art_url, art_key; };
+    struct DetailVersion { std::string label, facts; };
+    struct DetailState {
+        bool open = false;
+        std::string item_id, title, meta, rating, cert, overview, art_url, poster_key, resume;
+        bool is_show = false;
+        long long resume_sec = 0;
+        int zone = 0, button = 0, tab = 0;
+        std::vector<DetailPerson> cast;
+        int cast_state = 0;                 /* EVO_HUI_LOAD_* */
+        std::vector<DetailVersion> versions;
+        int versions_state = 0;
+        unsigned gen = 0;                   /* drops a reply that lands after the page closed */
+        std::string backdrop_url;
+        int art_wait = 0;                   /* frames spent waiting for pictures; gives up on a failed one */
+    };
+    DetailState m_detail;
+    unsigned m_detail_gen = 0;
+    bool m_detail_bypass = false;           /* the next activation opens the folder, not the page */
+    bool WantsDetail(const EvoProviderRow& r) const;
+    void OpenDetail(const EvoProviderRow& r);
+    void CloseDetail();
+    bool DetailKey(Key k);
+    void DetailPlay(int mode);   /* 0 play, 1 restart, 2 choose a stream */
+    void PushDetailArt();
+    void FillDetailParams(evo_hui_detail_t& d, EvoRenderBridge* r);
+    static void DetailCastCallback(int ok, const evo_provider_row_t* rows, int count, void* ud);
+
+    /* The stream picker in the detail page's look: what the player screen fills each frame it is up,
+     * and the item it is for (remembered when the item was activated). */
+    evo_hui_detail_t m_pick;
+    bool m_pick_fresh = false;
+    std::string m_pick_title, m_pick_meta, m_pick_art_url, m_pick_poster_key;
+    void RememberPickContext(const std::string& title, const std::string& meta, const std::string& art_url);
+    void FillPickParams(evo_hui_detail_t& d, EvoRenderBridge* r);
+
+public:
+    bool DetailOpen() const { return m_detail.open; }
+    void SetPick(const evo_hui_detail_t* d);
 };
 
 /* ------------------------------------------------------------------------- */
@@ -493,6 +539,16 @@ void evo_rmlui_provider_clear_frame(void);
 /* Returns 1 when consumed. `key` is an EvoRmlProviderHost::Key value. */
 int  evo_rmlui_provider_key(int key);
 
+/* The movie / show detail page (#221) is up: it takes every key, and Square, Triangle and
+ * Options must leave the screen behind it alone. */
+int  evo_rmlui_provider_detail_open(void);
+/* The "Resume playback" setting: with it off the page has no Restart button. */
+void evo_rmlui_provider_set_resume_enabled(int on);
+/* The stream picker: call every frame it is up (strings must outlive the frame), then
+ * evo_rmlui_provider_render(). Fill pick = 1 and the streams; title, facts line and poster come from the
+ * item last activated. The kit not drawing it leaves render() returning 0. */
+void evo_rmlui_provider_pick_set(const evo_hui_detail_t* d);
+
 /*
  * The item the user just activated, for PlaybackController. Empty title means
  * nothing is pending. Cleared by evo_rmlui_provider_take_selection().
@@ -503,6 +559,8 @@ typedef struct evo_provider_selection {
     char title[EVO_PROVIDER_MAX_TITLE];
     int  is_live;
     long long resume_sec;   /* where the service says playback stopped, 0 = start */
+    int  force_pick;        /* open the stream picker whatever the Ask-stream setting says (detail page: CHOOSE STREAM) */
+    int  skip_prompt;       /* the detail page already asked Play or Restart: no Continue / Restart / Cancel */
 } evo_provider_selection_t;
 
 int  evo_rmlui_provider_take_selection(evo_provider_selection_t *out);

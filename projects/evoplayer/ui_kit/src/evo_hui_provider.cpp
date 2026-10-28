@@ -49,6 +49,24 @@ constexpr float kPosterH = 264.0f;
 constexpr float kCardStride = 198.0f;
 constexpr float kGridPitch = 332.0f;       /* a folder level's row height: card + two text lines */
 
+/* The movie / show detail page. */
+constexpr float kDetPosterY = 130.0f;
+constexpr Rect kDetPoster{kGridX, kDetPosterY, 300.0f, 450.0f};
+constexpr float kDetBtnY = 612.0f;
+constexpr float kDetBtnH = 64.0f;
+constexpr float kDetBtnGap = 16.0f;
+constexpr float kDetRightX = kGridX + 356.0f;
+constexpr float kDetRightW = 1824.0f - (kGridX + 356.0f);
+constexpr float kDetTabY = 290.0f;
+constexpr float kDetTabW = 190.0f;
+constexpr float kDetTabH = 52.0f;
+constexpr float kDetTabGap = 12.0f;
+constexpr float kDetBodyY = 392.0f;
+constexpr float kPickRowH = 92.0f;         /* the stream picker's rows */
+constexpr float kPickRowPitch = 102.0f;
+constexpr float kPickRowW = 800.0f;
+constexpr int kDetVersionRows = 6;        /* the Versions tab shows this many; the rest scroll out of reach */
+
 std::string str(const char *s) { return std::string(s ? s : ""); }
 
 std::uint64_t hash_of(const std::string &s)
@@ -245,6 +263,65 @@ void ProviderGridScreen::set(const evo_hui_provider_params_t &p)
         row.focused = r.focused != 0;
         panel_rows_.push_back(std::move(row));
     }
+
+    const bool was_detail = detail_.open;
+    const evo_hui_detail_t &dp = p.detail;
+    detail_.open = dp.open != 0;
+    detail_.cast.clear();
+    detail_.versions.clear();
+    detail_.streams.clear();
+    detail_.facts.clear();
+    detail_.pick = false;
+    if (detail_.open)
+    {
+        if (!was_detail)
+        {
+            detail_age_ = 0.0f;
+            ring_snapped_ = false;
+        }
+        detail_.is_show = dp.is_show != 0;
+        detail_.has_restart = dp.has_restart != 0;
+        detail_.title = str(dp.title);
+        detail_.meta = str(dp.meta);
+        detail_.rating = str(dp.rating);
+        detail_.cert = str(dp.cert);
+        detail_.overview = str(dp.overview);
+        detail_.resume = str(dp.resume);
+        detail_.poster_key = str(dp.poster_key);
+        detail_.poster = dp.poster;
+        detail_.poster_w = dp.poster_w;
+        detail_.poster_h = dp.poster_h;
+        detail_.zone = dp.zone;
+        detail_.button = dp.button;
+        detail_.tab = dp.tab;
+        detail_.cast_state = dp.cast_state;
+        detail_.versions_state = dp.versions_state;
+        detail_.pick = dp.pick != 0;
+        detail_.pick_note = str(dp.pick_note);
+        detail_.fact_title = str(dp.fact_title);
+        detail_.stream_total = dp.stream_total;
+        detail_.stream_first = dp.stream_first;
+        detail_.stream_cursor = dp.stream_cursor;
+        for (int i = 0; i < dp.stream_count && i < EVO_HUI_STREAM_ROWS; ++i)
+            detail_.streams.push_back({str(dp.streams[i].label), str(dp.streams[i].chips), str(dp.streams[i].badge)});
+        for (int i = 0; i < dp.fact_count && i < EVO_HUI_STREAM_FACTS; ++i)
+            detail_.facts.push_back({str(dp.facts[i].label), str(dp.facts[i].value)});
+        for (int i = 0; i < dp.cast_count && i < EVO_HUI_DETAIL_CAST; ++i)
+        {
+            const evo_hui_cast_t &c = dp.cast[i];
+            DetailPerson person;
+            person.name = str(c.name);
+            person.role = str(c.role);
+            person.initial = str(c.initial);
+            person.art_key = str(c.art_key);
+            person.art = c.art;
+            person.art_w = c.art_w;
+            person.art_h = c.art_h;
+            detail_.cast.push_back(std::move(person));
+        }
+        for (int i = 0; i < dp.version_count && i < EVO_HUI_DETAIL_VERSIONS; ++i)
+            detail_.versions.push_back({str(dp.versions[i].label), str(dp.versions[i].facts)});
+    }
 }
 
 void ProviderGridScreen::enter()
@@ -276,8 +353,14 @@ void ProviderGridScreen::update(float dt)
     bd_alpha_ = std::min(1.0f, bd_alpha_ + dt * 2.2f);
     if (panel_open_)
         panel_age_ += dt;
+    if (detail_.open)
+        detail_age_ += dt;
     Rect target{};
-    if (shelves_active_)
+    if (detail_.open)
+    {
+        target = detail_focus_rect();
+    }
+    else if (shelves_active_)
     {
         /* Ease the shelves toward the focus (vertical) and each row toward its own window (horizontal). */
         const float k = 1.0f - std::exp(-dt * 14.0f);
@@ -334,8 +417,60 @@ Rect ProviderGridScreen::shelf_card_rect(const Shelf &s, int card_index) const
     return {kGridX + (static_cast<float>(card_index) - sx) * kCardStride, y, kPosterW, kPosterH};
 }
 
+Rect ProviderGridScreen::detail_focus_rect() const
+{
+    if (detail_.pick)
+        return {kDetRightX, kDetBodyY + 8.0f + static_cast<float>(detail_.stream_cursor - detail_.stream_first) * kPickRowPitch,
+                kPickRowW, kPickRowH};
+    if (detail_.zone == EVO_HUI_DETAIL_ZONE_BUTTONS)
+        return {kGridX, kDetBtnY + detail_.button * (kDetBtnH + kDetBtnGap), kDetPoster.w, kDetBtnH};
+    if (detail_.zone == EVO_HUI_DETAIL_ZONE_TABS)
+        return {kDetRightX + detail_.tab * (kDetTabW + kDetTabGap), kDetTabY, kDetTabW, kDetTabH};
+    return {kDetRightX, kDetBodyY, kDetRightW, 96.0f};
+}
+
 bool ProviderGridScreen::focus(FocusInfo *out) const
 {
+    if (detail_.open && detail_.pick)
+    {
+        const int k = detail_.stream_cursor - detail_.stream_first;
+        if (k < 0 || k >= static_cast<int>(detail_.streams.size()))
+            return false;
+        out->id = "stream-" + std::to_string(detail_.stream_cursor);
+        out->text = detail_.streams[k].label;
+        out->index = detail_.stream_cursor + 1;
+        out->total = detail_.stream_total;
+        out->rect = detail_focus_rect();
+        return true;
+    }
+    if (detail_.open)
+    {
+        static const char *kTabs[4] = {"Overview", "Cast", "Details", "Episodes"};
+        if (detail_.zone == EVO_HUI_DETAIL_ZONE_BUTTONS)
+        {
+            const int kind = detail_.is_show ? 0 : (detail_.button == 0 ? 0 : (detail_.has_restart && detail_.button == 1 ? 1 : 2));
+            out->id = kind == 1 ? "detail-restart" : (kind == 2 ? "detail-pick" : "detail-play");
+            out->text = kind == 1 ? "Restart" : (kind == 2 ? "Choose stream" : (detail_.is_show ? "Episodes" : "Play"));
+            out->index = detail_.button + 1;
+            out->total = detail_.is_show ? 1 : (detail_.has_restart ? 3 : 2);
+        }
+        else if (detail_.zone == EVO_HUI_DETAIL_ZONE_TABS)
+        {
+            out->id = std::string("detail-tab-") + kTabs[std::min(3, detail_.tab)];
+            out->text = kTabs[std::min(3, detail_.tab)];
+            out->index = detail_.tab + 1;
+            out->total = detail_.is_show ? 4 : 3;
+        }
+        else
+        {
+            out->id = "detail-episodes";
+            out->text = "Open seasons and episodes";
+            out->index = 1;
+            out->total = 1;
+        }
+        out->rect = detail_focus_rect();
+        return true;
+    }
     if (shelves_active_ && !panel_open_)
     {
         for (const Shelf &s : shelves_)
@@ -809,10 +944,271 @@ void ProviderGridScreen::draw_shelves(DrawList &list, const Context &ctx) const
     draw_selected_line(list, ctx);
 }
 
+/* The stream picker, in the detail page's look: the same poster, title and facts line, then the streams as rows
+ * with chips, and a card of facts for the focused one. */
+void ProviderGridScreen::draw_stream_picker(DrawList &list, const Context &ctx) const
+{
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &pal = ctx.palette;
+    const Detail &d = detail_;
+    list.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0, kBlack.with_alpha(0.66f));
+
+    list.push_opacity(tween::stagger(detail_age_, 0, 0.08f, 0.5f));
+    list.shadow(kDetPoster, 14, 16, kBlack.with_alpha(0.45f));
+    draw_art(list, ctx, kDetPoster, 14, d.poster, d.poster_w, d.poster_h, d.poster_key, false,
+             d.title.empty() ? std::string() : d.title.substr(0, 1), 110.0f, false);
+    list.pop_opacity();
+
+    list.push_opacity(tween::stagger(detail_age_, 1, 0.08f, 0.5f));
+    ui::text(list, fonts.display, fonts.display.font->fit(d.title, 56, kDetRightW), kDetRightX, 186.0f, 56, kWhite);
+    if (!d.meta.empty())
+        ui::text(list, fonts.regular, fonts.regular.font->fit(d.meta, 22, kDetRightW), kDetRightX + 4.0f, 243.0f, 22,
+                 pal.text_muted);
+    const float hx = kDetRightX + ui::text(list, fonts.semibold, "CHOOSE A STREAM", kDetRightX + 2.0f, 322.0f, 18, pal.accent,
+                                           Align::left, 2.4f) + 22.0f;
+    std::string right = d.pick_note;
+    if (right.empty() && d.stream_total > 1)
+        right = std::to_string(d.stream_cursor + 1) + " / " + std::to_string(d.stream_total);
+    if (!right.empty())
+        ui::text(list, fonts.regular, right, hx + 6.0f, 322.0f, 18, pal.text_faint);
+    list.pop_opacity();
+
+    list.push_opacity(tween::stagger(detail_age_, 2, 0.08f, 0.5f));
+    if (d.streams.empty())
+        ui::text(list, fonts.regular, d.pick_note.empty() ? "No streams." : d.pick_note, kDetRightX, kDetBodyY + 36.0f, 24,
+                 pal.text_faint);
+    for (std::size_t i = 0; i < d.streams.size(); ++i)
+    {
+        const Detail::StreamRow &s = d.streams[i];
+        const Rect row{kDetRightX, kDetBodyY + 8.0f + static_cast<float>(i) * kPickRowPitch, kPickRowW, kPickRowH};
+        list.rounded_rect(row, 18, kWhite.with_alpha(0.07f));
+        float badge_w = 0.0f;
+        if (!s.badge.empty())
+            badge_w = fonts.semibold.measure(s.badge, 15, 1.2f) + 8.0f;
+        ui::text(list, fonts.semibold, fonts.semibold.font->fit(s.label, 22, row.w - 56.0f - badge_w), row.x + 28.0f, row.y + 36.0f, 22,
+                 kWhite);
+        if (!s.badge.empty())
+            ui::text(list, fonts.semibold, s.badge, row.x + row.w - 28.0f, row.y + 36.0f, 15, pal.accent, Align::right, 1.2f);
+        /* chips: codec, HDR, audio, size, bitrate */
+        float cx = row.x + 28.0f;
+        for (std::size_t from = 0; from <= s.chips.size() && !s.chips.empty();)
+        {
+            std::size_t tab = s.chips.find('\t', from);
+            if (tab == std::string::npos)
+                tab = s.chips.size();
+            const std::string chip = s.chips.substr(from, tab - from);
+            from = tab + 1;
+            if (chip.empty())
+                continue;
+            const float tw = fonts.semibold.measure(chip, 14, 0.4f);
+            if (cx + tw + 24.0f > row.x + row.w - 20.0f)
+                break;
+            const Rect c{cx, row.y + 52.0f, tw + 24.0f, 28.0f};
+            const bool hdr = chip[0] == '+';
+            list.rounded_rect(c, 14, hdr ? kAmber.with_alpha(0.9f) : kWhite.with_alpha(0.14f));
+            ui::text(list, fonts.semibold, hdr ? chip.substr(1) : chip, c.cx(), c.y + 20.0f, 14, hdr ? kBlack : kWhite, Align::center, 0.4f);
+            cx += c.w + 8.0f;
+        }
+    }
+    list.pop_opacity();
+
+    /* the focused stream, fact by fact */
+    if (!d.facts.empty())
+    {
+        list.push_opacity(tween::stagger(detail_age_, 3, 0.08f, 0.5f));
+        const float fx = kDetRightX + kPickRowW + 30.0f;
+        const Rect card{fx, kDetBodyY + 8.0f, 1824.0f - fx, 600.0f};
+        list.rounded_rect(card, 22, kWhite.with_alpha(0.07f));
+        ui::text(list, fonts.semibold, "STREAM DETAILS", card.x + 28.0f, card.y + 44.0f, 15, pal.accent, Align::left, 2.0f);
+        ui::text(list, fonts.display, fonts.display.font->fit(d.fact_title, 26, card.w - 56.0f), card.x + 28.0f, card.y + 88.0f, 26,
+                 kWhite);
+        float y = card.y + 134.0f;
+        for (const DetailVersion &f : d.facts)
+        {
+            ui::text(list, fonts.semibold, ui::upper(f.label), card.x + 28.0f, y, 14, pal.text_faint, Align::left, 1.6f);
+            const float end = ui::paragraph(list, fonts.regular, f.facts, card.x + 28.0f, y + 28.0f, 21, card.w - 56.0f, 28.0f,
+                                            kWhite, 3);
+            y = end + 20.0f;
+            if (y > card.y + card.h - 24.0f)
+                break;
+        }
+        list.pop_opacity();
+    }
+
+    const Rect ring = ring_.value();
+    list.glow(ring, 16, 20, pal.accent.with_alpha(0.32f + 0.1f * ui::breathe(ctx.time)));
+    list.bordered_rect(ring.inset(-5), 20, Color::rgb(0x000000, 0.0f), 4, kWhite);
+
+    std::vector<ui::Hint> hints;
+    hints.push_back({ui::Button::cross, "Play"});
+    hints.push_back({ui::Button::circle, "Back"});
+    hints.push_back({ui::Button::dpad, "Navigate"});
+    ui::HintLayout layout;
+    layout.size = 30;
+    layout.text_size = 20;
+    layout.cy = 1030.0f;
+    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints.data(), static_cast<int>(hints.size()), 1824.0f, true, layout);
+}
+
+/* The movie / show page: poster, PLAY and RESTART on the left; the title, one facts line and the
+ * Overview / Cast / Versions (/ Episodes) tabs on the right. A field the service did not send is not drawn. */
+void ProviderGridScreen::draw_detail_page(DrawList &list, const Context &ctx) const
+{
+    if (detail_.pick)
+    {
+        draw_stream_picker(list, ctx);
+        return;
+    }
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &pal = ctx.palette;
+    const Detail &d = detail_;
+    list.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0, kBlack.with_alpha(0.66f));   /* text stays readable over a bright backdrop */
+
+    /* poster, then the buttons under it */
+    list.push_opacity(tween::stagger(detail_age_, 0, 0.08f, 0.5f));
+    list.shadow(kDetPoster, 14, 16, kBlack.with_alpha(0.45f));
+    draw_art(list, ctx, kDetPoster, 14, d.poster, d.poster_w, d.poster_h, d.poster_key, false,
+             d.title.empty() ? std::string() : d.title.substr(0, 1), 110.0f, false);
+    const int buttons = d.is_show ? 1 : (d.has_restart ? 3 : 2);   /* PLAY, RESTART with a saved position, CHOOSE STREAM */
+    for (int i = 0; i < buttons; ++i)
+    {
+        const Rect b{kGridX, kDetBtnY + i * (kDetBtnH + kDetBtnGap), kDetPoster.w, kDetBtnH};
+        const bool primary = i == 0;
+        const bool lit = d.zone == EVO_HUI_DETAIL_ZONE_BUTTONS && d.button == i;
+        list.rounded_rect(b, kDetBtnH * 0.5f, primary ? pal.accent : kWhite.with_alpha(lit ? 0.22f : 0.12f));
+        const int kind = d.is_show ? 0 : (i == 0 ? 0 : (d.has_restart && i == 1 ? 1 : 2));
+        const char *label = kind == 1 ? "RESTART" : (kind == 2 ? "CHOOSE STREAM" : (d.is_show ? "EPISODES" : "PLAY"));
+        ui::text(list, fonts.semibold, label, b.cx(), b.y + 41.0f, 24, primary ? kBlack : kWhite, Align::center, 2.0f);
+    }
+    if (!d.resume.empty() && !d.is_show)
+        ui::text(list, fonts.regular, d.resume, kDetPoster.cx(), kDetBtnY + buttons * (kDetBtnH + kDetBtnGap) + 16.0f, 18,
+                 pal.text_muted, Align::center);
+    list.pop_opacity();
+
+    /* title, pills, facts */
+    list.push_opacity(tween::stagger(detail_age_, 1, 0.08f, 0.5f));
+    ui::text(list, fonts.display, fonts.display.font->fit(d.title, 56, kDetRightW), kDetRightX, 186.0f, 56, kWhite);
+    float px = kDetRightX;
+    const float py = 218.0f;
+    auto pill = [&](const std::string &label, Color fill, Color ink)
+    {
+        const float tw = fonts.semibold.measure(label, 17, 0.6f);
+        const Rect r{px, py, tw + 30.0f, 34.0f};
+        list.rounded_rect(r, 17, fill);
+        ui::text(list, fonts.semibold, label, r.cx(), r.y + 24.0f, 17, ink, Align::center, 0.6f);
+        px += r.w + 12.0f;
+    };
+    if (!d.rating.empty())
+        pill("IMDb " + d.rating, kAmber.with_alpha(0.95f), kBlack);
+    if (!d.cert.empty())
+        pill(d.cert, kWhite.with_alpha(0.16f), kWhite);
+    if (!d.meta.empty())
+        ui::text(list, fonts.regular, fonts.regular.font->fit(d.meta, 22, kDetRightX + kDetRightW - px), px + 4.0f, py + 25.0f,
+                 22, pal.text_muted);
+    list.pop_opacity();
+
+    /* tabs */
+    list.push_opacity(tween::stagger(detail_age_, 2, 0.08f, 0.5f));
+    static const char *kTabs[4] = {"OVERVIEW", "CAST", "DETAILS", "EPISODES"};
+    const int tabs = d.is_show ? 4 : 3;
+    for (int i = 0; i < tabs; ++i)
+    {
+        const Rect t{kDetRightX + i * (kDetTabW + kDetTabGap), kDetTabY, kDetTabW, kDetTabH};
+        const bool on = d.tab == i;
+        list.rounded_rect(t, kDetTabH * 0.5f, on ? pal.accent : kWhite.with_alpha(0.10f));
+        ui::text(list, fonts.semibold, kTabs[i], t.cx(), t.y + 34.0f, 18, on ? kBlack : pal.text_muted, Align::center, 1.6f);
+    }
+    list.pop_opacity();
+
+    /* the tab's body */
+    list.push_opacity(tween::stagger(detail_age_, 3, 0.08f, 0.5f));
+    const float bx = kDetRightX;
+    if (d.tab == EVO_HUI_DETAIL_TAB_OVERVIEW)
+    {
+        if (!d.overview.empty())
+            ui::paragraph(list, fonts.regular, d.overview, bx, kDetBodyY + 26.0f, 25, std::min(kDetRightW, 1100.0f), 40.0f,
+                          kWhite.with_alpha(0.88f), 12);
+        else
+            ui::text(list, fonts.regular, "No description.", bx, kDetBodyY + 28.0f, 24, pal.text_faint);
+    }
+    else if (d.tab == EVO_HUI_DETAIL_TAB_CAST)
+    {
+        if (d.cast.empty())
+            ui::text(list, fonts.regular,
+                     d.cast_state == EVO_HUI_LOAD_BUSY ? "Loading cast..." : "No cast listed.", bx, kDetBodyY + 28.0f, 24,
+                     pal.text_faint);
+        const float cell = 319.0f;
+        for (std::size_t i = 0; i < d.cast.size(); ++i)
+        {
+            const DetailPerson &p = d.cast[i];
+            const float cx = bx + (static_cast<float>(i % 4) + 0.5f) * cell;
+            const float cy = kDetBodyY + 10.0f + static_cast<float>(i / 4) * 212.0f;
+            const Rect av{cx - 52.0f, cy, 104.0f, 104.0f};
+            draw_art(list, ctx, av, 52, p.art, p.art_w, p.art_h, p.art_key, false, p.initial, 44.0f, false);
+            ui::text(list, fonts.semibold, fonts.semibold.font->fit(p.name, 21, cell - 24.0f), cx, cy + 142.0f, 21, kWhite,
+                     Align::center);
+            if (!p.role.empty())
+                ui::text(list, fonts.regular, fonts.regular.font->fit(p.role, 18, cell - 24.0f), cx, cy + 170.0f, 18,
+                         pal.text_muted, Align::center);
+        }
+    }
+    else if (d.tab == EVO_HUI_DETAIL_TAB_VERSIONS)
+    {
+        if (d.versions.empty())
+            ui::text(list, fonts.regular,
+                     d.versions_state == EVO_HUI_LOAD_BUSY ? "Loading details..." : "No details from this service.",
+                     bx, kDetBodyY + 28.0f, 24, pal.text_faint);
+        for (std::size_t i = 0; i < d.versions.size() && static_cast<int>(i) < kDetVersionRows; ++i)
+        {
+            const DetailVersion &v = d.versions[i];
+            const Rect row{bx, kDetBodyY + 8.0f + static_cast<float>(i) * 76.0f, kDetRightW, 64.0f};
+            list.rounded_rect(row, 16, kWhite.with_alpha(0.07f));
+            ui::text(list, fonts.semibold, ui::upper(v.label), row.x + 28.0f, row.y + 40.0f, 17, pal.text_faint, Align::left, 1.6f);
+            ui::text(list, fonts.regular, fonts.regular.font->fit(v.facts, 24, row.w - 300.0f), row.x + 260.0f, row.y + 41.0f, 24,
+                     kWhite);
+        }
+    }
+    else
+    {
+        const Rect row{bx, kDetBodyY, kDetRightW, 96.0f};
+        list.rounded_rect(row, 18, kWhite.with_alpha(d.zone == EVO_HUI_DETAIL_ZONE_CONTENT ? 0.16f : 0.08f));
+        ui::text(list, fonts.semibold, "Open seasons and episodes", row.x + 32.0f, row.y + 58.0f, 26, kWhite);
+        const std::uint32_t chev = ctx.textures.icon("../icons/icon_chevron.png");
+        if (chev)
+            list.image(chev, {row.x + row.w - 72.0f, row.cy() - 20.0f, 40, 40}, ::hui::gfx::kFullUv, kWhite.with_alpha(0.85f));
+    }
+    list.pop_opacity();
+
+    /* the focus ring: the same glow and white outline the shelves use */
+    {
+        const Rect ring = ring_.value();
+        list.glow(ring, 16, 20, pal.accent.with_alpha(0.32f + 0.1f * ui::breathe(ctx.time)));
+        list.bordered_rect(ring.inset(-5), 20, Color::rgb(0x000000, 0.0f), 4, kWhite);
+    }
+
+    /* the button bar */
+    {
+        std::vector<ui::Hint> hints;
+        hints.push_back({ui::Button::cross, d.zone == EVO_HUI_DETAIL_ZONE_BUTTONS ? (d.is_show ? "Open" : (d.button == 0 ? "Play" : (d.has_restart && d.button == 1 ? "Restart" : "Choose"))) : "Select"});
+        hints.push_back({ui::Button::circle, "Back"});
+        hints.push_back({ui::Button::dpad, "Navigate"});
+        ui::HintLayout layout;
+        layout.size = 30;
+        layout.text_size = 20;
+        layout.cy = 1030.0f;
+        ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints.data(), static_cast<int>(hints.size()), 1824.0f, true, layout);
+    }
+}
+
 void ProviderGridScreen::draw(DrawList &list, const Context &ctx) const
 {
     const std::uint32_t bd_tex = (shelves_active_ && bd_) ? ctx.textures.pixels(bd_, bd_w_, bd_h_, hash_of(bd_key_)) : 0;
     draw_backdrop(list, ctx, bd_tex, bd_alpha_);
+    if (detail_.open)
+    {
+        draw_detail_page(list, ctx);
+        return;
+    }
     if (details_mode())     /* keeps the text readable over a bright picture */
         list.gradient_rect_h({0.0f, 0.0f, 1500.0f, 1080.0f}, 0, kBlack.with_alpha(0.72f), kBlack.with_alpha(0.0f));
     const ui::Fonts &fonts = ctx.fonts;

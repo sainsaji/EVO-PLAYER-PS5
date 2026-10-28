@@ -720,3 +720,99 @@ static void fill_settings_pv_extra_fixture(evo_rmlui_settings_params_t &p, const
         });
     }
 }
+
+/* The movie / show detail page (#221). variant: 0 overview, 1 cast (with a saved position), 2 versions,
+ * 3 a show's Episodes tab, 4 cast still loading and no poster yet. */
+static void fill_detail_fixture(evo_hui_provider_params_t& p, std::vector<uint32_t>& art, int variant)
+{
+    fill_shelves_fixture(p, art, 0, 2);       /* the poster pixels, and a backdrop-free provider screen */
+    evo_hui_detail_t& d = p.detail;
+    d = evo_hui_detail_t{};
+    d.open = 1;
+    p.provider_name = "Jellyfin";
+    const bool show = variant == 3;
+    d.is_show = show;
+    d.title = show ? "Severance" : "Dune: Part Two";
+    d.meta = show ? "2022  \xC2\xB7  2 seasons  \xC2\xB7  Sci-Fi, Drama, Mystery"
+                  : "2024  \xC2\xB7  2h 46m  \xC2\xB7  Sci-Fi, Adventure, Drama";
+    d.rating = show ? "8.7" : "8.5";
+    d.cert = show ? "TV-MA" : "PG-13";
+    d.overview = "Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who "
+                 "destroyed his family. Facing a choice between the love of his life and the fate of the known "
+                 "universe, he endeavors to prevent a terrible future only he can foresee.";
+    d.has_restart = (variant == 1) ? 1 : 0;
+    d.resume = d.has_restart ? "Resume from 0:41:10" : "";
+    d.poster_key = "detail-poster";
+    if (variant != 4)
+    {
+        d.poster = art.data();
+        d.poster_w = 200;
+        d.poster_h = 300;
+    }
+    d.zone = EVO_HUI_DETAIL_ZONE_TABS;
+    d.tab = variant == 0 ? EVO_HUI_DETAIL_TAB_OVERVIEW
+          : (variant == 2 ? EVO_HUI_DETAIL_TAB_VERSIONS : (variant == 3 ? EVO_HUI_DETAIL_TAB_EPISODES : EVO_HUI_DETAIL_TAB_CAST));
+    if (variant == 3)
+        d.zone = EVO_HUI_DETAIL_ZONE_CONTENT;
+    if (variant == 1)
+        d.zone = EVO_HUI_DETAIL_ZONE_BUTTONS;
+    static const char* const kNames[8] = {"Timoth\xC3\xA9""e Chalamet", "Zendaya", "Rebecca Ferguson", "Josh Brolin",
+                                          "Austin Butler", "Florence Pugh", "Dave Bautista", "Christopher Walken"};
+    static const char* const kRoles[8] = {"Paul Atreides", "Chani", "Lady Jessica", "Gurney Halleck",
+                                          "Feyd-Rautha", "Princess Irulan", "Rabban", ""};
+    static const char* const kInit[8] = {"T", "Z", "R", "J", "A", "F", "D", "C"};
+    if (variant != 4)
+    {
+        d.cast_count = 8;
+        for (int i = 0; i < 8; ++i)
+        {
+            d.cast[i].name = kNames[i];
+            d.cast[i].role = kRoles[i];
+            d.cast[i].initial = kInit[i];
+            d.cast[i].art_key = kNames[i];
+            if (i < 2)                        /* two headshots have landed, the rest are letters */
+            {
+                d.cast[i].art = art.data();
+                d.cast[i].art_w = 200;
+                d.cast[i].art_h = 300;
+            }
+        }
+        d.cast_state = EVO_HUI_LOAD_DONE;
+    }
+    else
+    {
+        d.cast_state = EVO_HUI_LOAD_BUSY;
+    }
+    d.versions_state = EVO_HUI_LOAD_DONE;
+    d.version_count = 4;
+    d.versions[0] = {"Rating", "8.5/10 IMDb  ·  PG-13"};
+    d.versions[1] = {"Genres", "Sci-Fi, Adventure, Drama"};
+    d.versions[2] = {"Director", "Denis Villeneuve"};
+    d.versions[3] = {"Studio", "Legendary Pictures, Warner Bros."};
+    if (variant == 5)                         /* the stream picker */
+    {
+        d.pick = 1;
+        d.pick_note = "";
+        static const char* const kLabels[6] = {"Dune.Part.Two.2024.2160p.UHD.BluRay.REMUX-FraMeSToR", "Dune.Part.Two.2024.1080p.WEB-DL.DDP5.1.Atmos.H.264",
+                                                "Dune.Part.Two.2024.1080p.BluRay.x265-RARBG", "Dune.Part.Two.2024.720p.WEBRip.AAC2.0",
+                                                "Server transcode (1080p H.264)", "Dune.Part.Two.2024.480p.DVDRip"};
+        static const char* const kChips[6] = {"HEVC\t+HDR10\tTrueHD 7.1\t58.2 GB\t62.0 Mbps", "H.264\tSDR\tDD+ 5.1\t6.3 GB\t8.1 Mbps",
+                                              "HEVC\tSDR\tDD 5.1\t3.4 GB\t4.4 Mbps", "H.264\tSDR\tAAC 2.0\t2.1 GB",
+                                              "H.264\tAAC", "XVID\tMP3 2.0\t0.9 GB"};
+        static const char* const kBadges[6] = {"2160P", "1080P", "1080P", "720P", "", "480P"};
+        d.stream_total = 8;
+        d.stream_first = 0;
+        d.stream_cursor = 1;
+        d.stream_count = 6;
+        for (int i = 0; i < 6; ++i)
+            d.streams[i] = {kLabels[i], kChips[i], kBadges[i]};
+        d.fact_title = kLabels[1];
+        d.fact_count = 6;
+        d.facts[0] = {"Quality", "1080p WEB-DL"};
+        d.facts[1] = {"Video", "H.264 1920x1080 SDR"};
+        d.facts[2] = {"Audio", "Dolby Digital Plus 5.1 English"};
+        d.facts[3] = {"Size", "6.3 GB"};
+        d.facts[4] = {"Bitrate", "8.1 Mbps"};
+        d.facts[5] = {"Source", "[TB] STorz"};
+    }
+}

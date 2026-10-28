@@ -71,6 +71,10 @@ setting switches them.
 ```
 
 Add a fixture in `tools/hui_preview/hui_preview.cpp` for a new screen or state. The provider screens have fixtures for each home: `shelves` (Jellyfin), `shelves_stremio`, `shelves_plex`, `shelves_iptv`, `shelves_xtream` (poster, channel and category shelves side by side) and `livetv`/`xtream`/`provider_folder` for the See all levels; see [../providers/architecture.md](../providers/architecture.md#home-layout-shelves-for-every-provider).
+The movie / show detail page (#221) has `detail_overview`, `detail_cast`, `detail_details`, `detail_show` and `detail_loading`.
+It is a mode of `ProviderGridScreen` (`params.detail.open`), not a screen of its own: Cross on a movie or show opens it
+(`EvoRmlProviderHost::OpenDetail`, for items the provider marks `evo_provider_item_t::detail`), the host keeps the zone and tab,
+and Play / Restart queue the same selection a card press does, with `skip_prompt` so the Continue / Restart / Cancel prompt is not asked twice.
 Layout questions are answered there; only run the console for behaviour.
 Hardware loop: [../console/hardware-cycle.md](../console/hardware-cycle.md).
 
