@@ -2,6 +2,7 @@
 #include "evo/Application.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_feedback.h"
+#include "evo_playback.h"
 
 #include <cstdio>
 #include <cstring>
@@ -39,7 +40,8 @@ ScreenId ModalDialogScreen::getScreenId() const {
 void ModalDialogScreen::onEnter() {
     StatefulScreen::onEnter();
     m_modalFsm.postEvent(ModalDialogEvent::Open);
-    m_focusedButton = (m_type == ModalType::ExitConfirm) ? 1 : 0; // Default STOP (1) or RESUME (0)
+    m_focusedButton = (m_type == ModalType::ExitConfirm) ? 1 : 0; // Default STOP (1) or CONTINUE (0)
+    m_atEnd = (m_type == ModalType::ExitConfirm) && evo_pb_is_eof();
 }
 
 void ModalDialogScreen::onExit() {
@@ -53,7 +55,16 @@ void ModalDialogScreen::executeAction(int actionIndex) {
     if (!screenMgr) return;
 
     if (m_type == ModalType::ExitConfirm) {
-        if (actionIndex == 0) {
+        if (actionIndex == 0 && m_atEnd && playback) {
+            // "REPLAY": the clip is over, so start it again from the top
+            evo_feedback(EVO_FB_CONFIRM);
+            const PlaybackSource src = playback->getSource();
+            if (!playback->startPlaybackSource(src, 0.0)) {
+                screenMgr->returnFromPlayback();
+                return;
+            }
+            screenMgr->navigateTo(ScreenId::Player);
+        } else if (actionIndex == 0) {
             // "KEEP WATCHING"
             evo_feedback(EVO_FB_CANCEL);
             screenMgr->navigateBack(ScreenId::Player);
@@ -68,7 +79,7 @@ void ModalDialogScreen::executeAction(int actionIndex) {
     } else {
         // Resume prompt
         if (actionIndex == 0) {
-            // "RESUME"
+            // "CONTINUE"
             evo_feedback(EVO_FB_CONFIRM);
             if (playback && !m_resumePath.empty() &&
                 !playback->startPlayback(m_resumePath, m_resumeTimestamp)) {
@@ -76,8 +87,8 @@ void ModalDialogScreen::executeAction(int actionIndex) {
                 return;
             }
             screenMgr->navigateTo(ScreenId::Player);
-        } else {
-            // "START OVER"
+        } else if (actionIndex == 1) {
+            // "RESTART"
             evo_feedback(EVO_FB_CONFIRM);
             if (playback && !m_resumePath.empty() &&
                 !playback->startPlayback(m_resumePath, 0.0)) {
@@ -85,6 +96,10 @@ void ModalDialogScreen::executeAction(int actionIndex) {
                 return;
             }
             screenMgr->navigateTo(ScreenId::Player);
+        } else {
+            // "CANCEL"
+            evo_feedback(EVO_FB_CANCEL);
+            screenMgr->returnFromPlayback();
         }
     }
 }
@@ -93,10 +108,23 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
     (void)held;
     (void)released;
 
-    if (pressed & (PadButtons::Left | PadButtons::Right | PadButtons::Up | PadButtons::Down)) {
-        m_focusedButton = (m_focusedButton == 0) ? 1 : 0;
-        evo_feedback(EVO_FB_MOVE);
-        return true;
+    if (m_type == ModalType::ResumePrompt) {
+        if (pressed & (PadButtons::Left | PadButtons::Up)) {
+            m_focusedButton = (m_focusedButton + 2) % 3;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Right | PadButtons::Down)) {
+            m_focusedButton = (m_focusedButton + 1) % 3;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+    } else {
+        if (pressed & (PadButtons::Left | PadButtons::Right | PadButtons::Up | PadButtons::Down)) {
+            m_focusedButton = (m_focusedButton == 0) ? 1 : 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
     }
 
     if (pressed & PadButtons::Cross) {
@@ -104,10 +132,17 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
         return true;
     }
 
+    if (pressed & PadButtons::Square) {
+        if (m_type == ModalType::ResumePrompt) {
+            executeAction(1); // RESTART shortcut
+            return true;
+        }
+    }
+
     if (pressed & PadButtons::Circle) {
         if (m_type == ModalType::ResumePrompt) {
-            // Circle directly triggers "START OVER"
-            executeAction(1);
+            // Circle directly triggers "CANCEL"
+            executeAction(2);
         } else {
             evo_feedback(EVO_FB_CANCEL);
             if (auto sm = Application::getInstance().getScreenManager()) {
@@ -120,10 +155,7 @@ bool ModalDialogScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t re
     if (pressed & PadButtons::Triangle) {
         // Back out to file manager / browser if cancelled from resume prompt
         if (m_type == ModalType::ResumePrompt) {
-            evo_feedback(EVO_FB_CANCEL);
-            if (auto sm = Application::getInstance().getScreenManager()) {
-                sm->returnFromPlayback();
-            }
+            executeAction(2);
             return true;
         }
     }
@@ -144,17 +176,18 @@ void ModalDialogScreen::render(uint32_t* framebuffer, int width, int height) {
 
     if (m_type == ModalType::ExitConfirm) {
         dialog.eyebrow = "PLAYBACK";
-        dialog.title = "Stop playback?";
-        dialog.detail = "Your current position will be saved automatically.";
+        dialog.title = m_atEnd ? "Playback finished" : "Stop playback?";
+        dialog.detail = m_atEnd ? "Watch it again, or go back to the list."
+                                : "Your current position will be saved automatically.";
         dialog.progress_pct = -1.0;
         dialog.action_count = 2;
         dialog.focused_action = m_focusedButton;
 
-        dialog.actions[0].label = "KEEP WATCHING";
+        dialog.actions[0].label = m_atEnd ? "REPLAY" : "KEEP WATCHING";
         dialog.actions[0].icon_path = "/assets/icons/btn_circle.png";
         dialog.actions[0].is_primary = (m_focusedButton == 0) ? 1 : 0;
 
-        dialog.actions[1].label = "STOP";
+        dialog.actions[1].label = m_atEnd ? "CLOSE" : "STOP";
         dialog.actions[1].icon_path = "/assets/icons/btn_cross.png";
         dialog.actions[1].is_primary = (m_focusedButton == 1) ? 1 : 0;
     } else {
@@ -183,16 +216,20 @@ void ModalDialogScreen::render(uint32_t* framebuffer, int width, int height) {
             dialog.progress_pct = -1.0;
         }
 
-        dialog.action_count = 2;
+        dialog.action_count = 3;
         dialog.focused_action = m_focusedButton;
 
-        dialog.actions[0].label = "RESUME";
-        dialog.actions[0].icon_path = "/assets/icons/btn_cross.png";
+        dialog.actions[0].label = "CONTINUE";
+        dialog.actions[0].icon_path = "../icons/btn_cross.png";
         dialog.actions[0].is_primary = (m_focusedButton == 0) ? 1 : 0;
 
-        dialog.actions[1].label = "START OVER";
-        dialog.actions[1].icon_path = "/assets/icons/btn_circle.png";
+        dialog.actions[1].label = "RESTART";
+        dialog.actions[1].icon_path = "../icons/btn_square.png";
         dialog.actions[1].is_primary = (m_focusedButton == 1) ? 1 : 0;
+
+        dialog.actions[2].label = "CANCEL";
+        dialog.actions[2].icon_path = "../icons/btn_circle.png";
+        dialog.actions[2].is_primary = (m_focusedButton == 2) ? 1 : 0;
     }
 
     evo_rmlui_update_dialog(&dialog);

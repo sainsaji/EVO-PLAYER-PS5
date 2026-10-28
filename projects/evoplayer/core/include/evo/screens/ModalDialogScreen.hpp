@@ -67,6 +67,7 @@ private:
     StateMachine<ModalDialogState, ModalDialogEvent> m_modalFsm;
     int m_focusedButton = 1; // Default to primary action (STOP / RESUME)
     std::string m_resumePath;
+    bool m_atEnd = false;    // ExitConfirm opened after the clip finished: Replay / Close
     double m_resumeTimestamp = 0.0;
     double m_resumeDuration = 0.0;
 };

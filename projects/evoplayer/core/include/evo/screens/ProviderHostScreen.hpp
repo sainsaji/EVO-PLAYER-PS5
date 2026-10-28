@@ -156,6 +156,12 @@ private:
     std::string m_removeConfirmTitle;
     std::string m_removeConfirmDetail;
 
+    /* Resume prompt dialog for items with saved progress (#218) */
+    bool m_showResumePrompt = false;
+    int  m_resumePromptButton = 0;
+    void proceedTunePending();
+    void renderResumePrompt(uint32_t* framebuffer, int width, int height);
+
     /* #101: hosting a web-UI provider. The browser is a system overlay, so
      * m_opened (the RmlUi host) stays false; m_webSeen notes that the session
      * really started, so its end can be told from "not open yet". */

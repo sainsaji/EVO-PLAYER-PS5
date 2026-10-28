@@ -456,6 +456,8 @@ void ProviderHostScreen::onEnter()
     m_resolving = false;
     m_tunePending = false;
     m_tuneFrames = 0;
+    m_showResumePrompt = false;
+    m_resumePromptButton = 0;
     evo_rmlui_provider_set_tuning(0);
     evo_rmlui_provider_set_loading(0, "");
 
@@ -508,23 +510,17 @@ void ProviderHostScreen::onEnter()
 
         g_pending.resume_sec = (long long)g_recentProviderRequest.resume;
         g_pending.is_live = 0;
-        g_pending.ask = 0;
-        g_pending.picked = 0;
-
-        g_resolve_finished = false;
-        g_pick_stage = PickStage::Idle;
-        ++g_pick_gen;
-        g_variants = VariantsState::None;
-        g_variants_merged = false;
-
-        m_resolving = false;
-        m_tunePending = true;
-        m_tuneFrames = 0;
-
-        evo_rmlui_provider_set_tuning(1);
-        evo_rmlui_provider_set_loading(1, "Opening recent media...");
-
         g_recentProviderRequest.active = false;
+
+        auto st = Application::getInstance().getSettingsService();
+        bool resumeEnabled = st ? st->isResumePlaybackEnabled() : true;
+        if (resumeEnabled && g_pending.resume_sec > 5) {
+            m_showResumePrompt = true;
+            m_resumePromptButton = 0;
+            return;
+        }
+
+        proceedTunePending();
     }
 }
 
@@ -1351,6 +1347,7 @@ void ProviderHostScreen::onExit()
     m_resolving = false;
     m_picking = false;
     m_showRemoveConfirm = false;
+    m_showResumePrompt = false;
     m_streamPick = false;
     g_pick_stage = PickStage::Idle;
     ++g_pick_gen;
@@ -1372,6 +1369,51 @@ bool ProviderHostScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t r
      * sign-in in flight finishes or fails on its own the same way. */
     if (m_discovering) return true;
     if (m_signIn == SignIn::Suggest || m_signIn == SignIn::Signing) return true;
+
+    if (m_showResumePrompt) {
+        if (pressed & (PadButtons::Left | PadButtons::Up)) {
+            m_resumePromptButton = (m_resumePromptButton + 2) % 3;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Right | PadButtons::Down)) {
+            m_resumePromptButton = (m_resumePromptButton + 1) % 3;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Triangle | PadButtons::Options)) {
+            m_showResumePrompt = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Square) {
+            m_showResumePrompt = false;
+            g_pending.resume_sec = 0;
+            evo_feedback(EVO_FB_CONFIRM);
+            proceedTunePending();
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            if (m_resumePromptButton == 0) {
+                // CONTINUE
+                m_showResumePrompt = false;
+                evo_feedback(EVO_FB_CONFIRM);
+                proceedTunePending();
+            } else if (m_resumePromptButton == 1) {
+                // RESTART
+                m_showResumePrompt = false;
+                g_pending.resume_sec = 0;
+                evo_feedback(EVO_FB_CONFIRM);
+                proceedTunePending();
+            } else {
+                // CANCEL
+                m_showResumePrompt = false;
+                evo_feedback(EVO_FB_CANCEL);
+            }
+            return true;
+        }
+        return true;
+    }
 
     if (m_streamPick) {
         const int n = g_pending.choice_count;
@@ -2459,7 +2501,7 @@ void ProviderHostScreen::startSelected()
 
     evo_provider_selection_t sel;
     if (!evo_rmlui_provider_take_selection(&sel)) return;
-    if (m_resolving || g_start_running) return;
+    if (m_resolving || g_start_running || m_showResumePrompt) return;
 
     std::memset(&g_pending, 0, sizeof g_pending);
     std::snprintf(g_pending.provider, sizeof g_pending.provider, "%s", sel.provider_id);
@@ -2469,11 +2511,24 @@ void ProviderHostScreen::startSelected()
     g_pending.resume_sec = sel.resume_sec;
     g_resolve_finished = false;
 
+    auto st = Application::getInstance().getSettingsService();
+    bool resumeEnabled = st ? st->isResumePlaybackEnabled() : true;
+    if (!g_pending.is_live && resumeEnabled && g_pending.resume_sec > 5) {
+        m_showResumePrompt = true;
+        m_resumePromptButton = 0;
+        return;
+    }
+
+    proceedTunePending();
+}
+
+void ProviderHostScreen::proceedTunePending()
+{
     /* Read the setting now, not when the reply lands: what was on when the
      * channel was opened is what applies to it. */
     if (auto st = Application::getInstance().getSettingsService())
         g_pending.ask = st->isAskStreamEnabled() ? 1 : 0;
-    if (const evo_provider_t* pp = evo_provider_find(sel.provider_id))
+    if (const evo_provider_t* pp = evo_provider_find(g_pending.provider))
         if (pp->caps & EVO_PROVIDER_CAP_PICK) g_pending.ask = 1;
     g_pending.picked = 0;
     g_pick_stage = PickStage::Idle;
@@ -2485,9 +2540,9 @@ void ProviderHostScreen::startSelected()
     m_tuneFrames = 0;
 
     char msg[128];
-    const evo_provider_t* tp = evo_provider_find(sel.provider_id);
+    const evo_provider_t* tp = evo_provider_find(g_pending.provider);
     const bool live = tp && (tp->caps & EVO_PROVIDER_CAP_LIVE);
-    std::snprintf(msg, sizeof(msg), live ? "Tuning %s..." : "Opening %s...", sel.title);
+    std::snprintf(msg, sizeof(msg), live ? "Tuning %s..." : "Opening %s...", g_pending.title);
     toast(live ? "LIVE TV" : (tp ? tp->name : "PROVIDER"), msg);
     evo_rmlui_provider_set_tuning(1);
     evo_rmlui_provider_set_loading(1, msg);
@@ -2702,6 +2757,9 @@ void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
     }
     if (m_picking || m_web) {
         renderPicker(framebuffer, width, height);
+        if (m_showResumePrompt) {
+            renderResumePrompt(framebuffer, width, height);
+        }
         return;
     }
     if (!m_opened) return;
@@ -2712,6 +2770,45 @@ void ProviderHostScreen::render(uint32_t* framebuffer, int width, int height)
     if (!kit_drew)
         evo_rmlui_render_nav_overlay(framebuffer, width, height);
     evo_rmlui_provider_clear_frame();
+
+    if (m_showResumePrompt) {
+        renderResumePrompt(framebuffer, width, height);
+    }
+}
+
+void ProviderHostScreen::renderResumePrompt(uint32_t* framebuffer, int width, int height)
+{
+    evo_rmlui_dialog_params_t dlg;
+    std::memset(&dlg, 0, sizeof(dlg));
+    dlg.eyebrow = "RESUME";
+    dlg.title = "Continue from previous position?";
+    static char detailBuf[128];
+    int pos = static_cast<int>(g_pending.resume_sec);
+    int ph = pos / 3600, pm = (pos % 3600) / 60, ps = pos % 60;
+    if (ph > 0) {
+        std::snprintf(detailBuf, sizeof(detailBuf), "STOPPED AT %02d:%02d:%02d", ph, pm, ps);
+    } else {
+        std::snprintf(detailBuf, sizeof(detailBuf), "STOPPED AT %02d:%02d", pm, ps);
+    }
+    dlg.detail = detailBuf;
+    dlg.progress_pct = -1.0;
+    dlg.action_count = 3;
+    dlg.focused_action = m_resumePromptButton;
+
+    dlg.actions[0].label = "CONTINUE";
+    dlg.actions[0].icon_path = "../icons/btn_cross.png";
+    dlg.actions[0].is_primary = (m_resumePromptButton == 0) ? 1 : 0;
+
+    dlg.actions[1].label = "RESTART";
+    dlg.actions[1].icon_path = "../icons/btn_square.png";
+    dlg.actions[1].is_primary = (m_resumePromptButton == 1) ? 1 : 0;
+
+    dlg.actions[2].label = "CANCEL";
+    dlg.actions[2].icon_path = "../icons/btn_circle.png";
+    dlg.actions[2].is_primary = (m_resumePromptButton == 2) ? 1 : 0;
+
+    evo_rmlui_update_dialog(&dlg);
+    evo_rmlui_render_dialog(framebuffer, width, height);
 }
 
 /* ------------------------------------------------------------------------- */
