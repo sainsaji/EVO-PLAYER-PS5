@@ -181,7 +181,7 @@ A 2.5D visual soundstage (**Settings → Audio → Surround Sound Test**) to con
 
 Manage your storage directly on the PS5 with native file operations, integrated Samba/Windows sharing, and FTP:
 
-- **Samba / Windows Shares (SMB):** Connect directly to Windows shared folders, Samba servers, and NAS appliances (`smb://host/Share` or `user:pass@host/Share`) via **+ Add SMB Share**.
+- **Samba / Windows Shares (SMB):** Connect directly to Windows shared folders, Samba servers, and NAS appliances (`smb://host/Share` or `user:pass@host/Share`) via **+ Add Server**: type the address, pick Guest or Account, and EVO tests the login before saving. Server cards show Online (with ms), Offline or Checking.
 - **Direct Network Streaming:** Media streams directly over SMB via `libsmb2` and custom AVIO pipelines (`evo_smb_io`) with zero local caching or download delay.
 - **Server Options & Management:** Press **OPTIONS** on any configured network share to Open, **Edit Server** (pre-fills connection details on the on-screen keyboard), or **Remove Server** (with confirmation dialog). Shortcut **TRIANGLE** opens the remove confirmation directly.
 - **File Manager:** Press **OPTIONS** on any file or folder to Copy, Cut, Paste, Rename (using the on-screen virtual keyboard), Delete, or create folders.
