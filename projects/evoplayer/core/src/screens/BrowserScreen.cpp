@@ -2619,16 +2619,18 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_count = rows + 1;
         for (int i = 0; i < rows; ++i) {
             const int idx = top + i;
-            labels[i] = std::string(s_pickTicked[idx] ? "[x]  " : "[ ]  ") + s_pickNames[idx];
+            labels[i] = s_pickNames[idx];
             params.action_menu_items[i].label = labels[i].c_str();
             params.action_menu_items[i].desc = s_pickTicked[idx] ? "Shown in the browser" : "Hidden";
             params.action_menu_items[i].icon_path = "../icons/icon_folder.png";
             params.action_menu_items[i].danger = 0;
+            params.action_menu_items[i].toggle = s_pickTicked[idx] ? 2 : 1;
         }
         params.action_menu_items[rows].label = "Done";
         params.action_menu_items[rows].desc = "Save the server with the ticked shares";
         params.action_menu_items[rows].icon_path = "../icons/icon_resume.png";
         params.action_menu_items[rows].danger = 0;
+        params.action_menu_items[rows].toggle = 0;
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
     } else if (s_addSignInOpen) {

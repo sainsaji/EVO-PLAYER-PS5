@@ -500,6 +500,7 @@ typedef struct {
         const char* desc;
         const char* icon_path;
         int danger;
+        int toggle; /* 0 = no switch, 1 = switch off, 2 = switch on (kit renderer only) */
     } action_menu_items[7];
     const char* footer_triangle_label;
     const char* footer_options_label;

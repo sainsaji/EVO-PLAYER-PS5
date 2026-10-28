@@ -4,6 +4,7 @@
 #include "evo_hui_browser.hpp"
 
 #include "ui/glyphs.hpp"
+#include "ui/widgets.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -567,6 +568,13 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             const std::uint32_t icon = ctx.textures.icon(iconName ? iconName : "");
             if (icon)
                 list.image(icon, {r.x + 18, r.cy() - 13, 26, 26}, ::hui::gfx::kFullUv, ink);
+            const int sw = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].toggle : 0;
+            if (sw)
+            {
+                const ui::Theme theme = p.kit_theme();
+                ui::Painter paint(list, fonts, theme);
+                paint.toggle({r.x + r.w - 18 - 64, r.cy() - 17, 64, 34}, sw == 2 ? 1.0f : 0.0f, {});
+            }
             ui::text(list, fonts.semibold, labelText ? labelText : "", r.x + 60, r.y + 27, 20, ink);
             ui::text(list, fonts.regular, descText ? descText : "", r.x + 60, r.y + 48, 15,
                      focused ? kInk.with_alpha(0.65f) : p.text_faint);
