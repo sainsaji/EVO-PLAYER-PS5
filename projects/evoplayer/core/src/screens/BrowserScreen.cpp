@@ -47,6 +47,23 @@ static int s_addPendingKb = ADDKB_NONE;
 static std::string s_addError;      // why the last test failed, shown on the next prompt
 static bool s_addTesting = false;
 
+/* Share picker (#226 step 3): after a good SMB test, tick the shares to show.
+ * Rows are the shares plus a Done row; the menu has 7 slots, so at most 6 shares
+ * are on screen and the window follows the focus. */
+static bool s_pickOpen = false;
+static std::vector<std::string> s_pickNames;
+static std::vector<char> s_pickTicked;
+static int s_pickFocus = 0;                 // 0..n-1 a share, n = Done
+static constexpr int kPickWindow = 6;
+static bool s_addSavePending = false;       // draft is ready to be stored (UI thread only)
+
+static int pickTop() {
+    const int n = (int)s_pickNames.size();
+    if (n <= kPickWindow) return 0;
+    const int f = std::min(s_pickFocus, n - 1);
+    return std::max(0, std::min(f - 2, n - kPickWindow));
+}
+
 struct TestJob {
     NetworkShare share;
     NetworkTestResult result;
@@ -1295,6 +1312,8 @@ void BrowserScreen::onExit() {
     m_serverMenuOpen = false;
     s_addServerChooserOpen = false;
     s_addSignInOpen = false;
+    s_pickOpen = false;
+    s_addSavePending = false;
     s_addTesting = false;
     s_testJob.reset();
     s_addPendingKb = ADDKB_NONE;
@@ -1603,6 +1622,50 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
             s_addTesting = false;
             s_testJob.reset();   // the worker finishes on its own; its result is dropped
             evo_feedback(EVO_FB_CANCEL);
+        }
+        return true;
+    }
+
+    // 0a0b2. Add-server share picker: Cross ticks, Done saves, Circle goes back
+    if (s_pickOpen) {
+        const int n = (int)s_pickNames.size();
+        if (pressed & PadButtons::Up) {
+            s_pickFocus = s_pickFocus > 0 ? s_pickFocus - 1 : n;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & PadButtons::Down) {
+            s_pickFocus = s_pickFocus < n ? s_pickFocus + 1 : 0;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Triangle | PadButtons::Options)) {
+            s_pickOpen = false;
+            s_addError.clear();
+            s_addPendingKb = ADDKB_ADDRESS;   // back one step
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            if (s_pickFocus < n) {
+                s_pickTicked[s_pickFocus] = !s_pickTicked[s_pickFocus];
+                evo_feedback(EVO_FB_MOVE);
+                return true;
+            }
+            std::vector<std::string> chosen;
+            for (int i = 0; i < n; ++i)
+                if (s_pickTicked[i]) chosen.push_back(s_pickNames[i]);
+            if (chosen.empty()) {
+                toast("PICK A SHARE", "Tick at least one share to show.");
+                evo_feedback(EVO_FB_ERROR);
+                return true;
+            }
+            s_pickOpen = false;
+            // Everything ticked = no filter, so a share added on the server later still shows up.
+            if ((int)chosen.size() == n) chosen.clear();
+            s_addDraft.chosenShares = chosen;
+            s_addSavePending = true;   // update() saves it
+            return true;
         }
         return true;
     }
@@ -2065,16 +2128,14 @@ void BrowserScreen::update(double deltaMs) {
             }
             s_testJob.reset();
             s_addTesting = false;
-            if (res.stage == NetworkTestStage::Ok) {
-                NetworkShare share = s_addDraft;
-                share.id = (share.protocol == NetworkProtocol::SMB ? "smb_" : "ftp_") + std::to_string(time(nullptr));
-                if (share.name.empty()) share.name = share.host;
-                NetworkStorageService::getInstance().addShare(share);
-                m_networkShareId.clear();
-                m_networkRemotePath = "/";
-                resetSelection();
-                toast("ADDED", share.name.c_str());
-                evo_feedback(EVO_FB_CONFIRM);
+            if (res.stage == NetworkTestStage::Ok && !res.shares.empty()) {
+                // SMB server address with no share: let the person pick which to show
+                s_pickNames = res.shares;
+                s_pickTicked.assign(s_pickNames.size(), 1);
+                s_pickFocus = 0;
+                s_pickOpen = true;
+            } else if (res.stage == NetworkTestStage::Ok) {
+                s_addSavePending = true;
             } else {
                 const char* title = res.stage == NetworkTestStage::Login ? "LOGIN REFUSED"
                                   : res.stage == NetworkTestStage::Address ? "CAN'T REACH SERVER"
@@ -2090,6 +2151,19 @@ void BrowserScreen::update(double deltaMs) {
                 }
             }
         }
+    }
+
+    if (s_addSavePending) {
+        s_addSavePending = false;
+        NetworkShare share = s_addDraft;
+        share.id = (share.protocol == NetworkProtocol::SMB ? "smb_" : "ftp_") + std::to_string(time(nullptr));
+        if (share.name.empty()) share.name = share.host;
+        NetworkStorageService::getInstance().addShare(share);
+        m_networkShareId.clear();
+        m_networkRemotePath = "/";
+        resetSelection();
+        toast("ADDED", share.name.c_str());
+        evo_feedback(EVO_FB_CONFIRM);
     }
 
     // Poll active file transfer operations
@@ -2507,6 +2581,34 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_items[0].desc = "Checking the address and login...";
         params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
         params.action_menu_items[0].danger = 0;
+        params.action_paste_enabled = 0;
+        params.action_clipboard_info = nullptr;
+    } else if (s_pickOpen) {
+        const int n = (int)s_pickNames.size();
+        const int top = pickTop();
+        const int rows = std::min(n, kPickWindow);
+        int ticked = 0;
+        for (int i = 0; i < n; ++i) ticked += s_pickTicked[i] ? 1 : 0;
+        static std::string sub, labels[kPickWindow];
+        sub = std::to_string(ticked) + " of " + std::to_string(n) + " shares shown";
+        params.action_menu_open = 1;
+        params.action_menu_focused = s_pickFocus < n ? s_pickFocus - top : rows;
+        params.action_menu_target = s_addDraft.host.c_str();
+        params.action_target_sub = sub.c_str();
+        params.action_menu_eyebrow = "CHOOSE SHARES";
+        params.action_menu_count = rows + 1;
+        for (int i = 0; i < rows; ++i) {
+            const int idx = top + i;
+            labels[i] = std::string(s_pickTicked[idx] ? "[x]  " : "[ ]  ") + s_pickNames[idx];
+            params.action_menu_items[i].label = labels[i].c_str();
+            params.action_menu_items[i].desc = s_pickTicked[idx] ? "Shown in the browser" : "Hidden";
+            params.action_menu_items[i].icon_path = "../icons/icon_folder.png";
+            params.action_menu_items[i].danger = 0;
+        }
+        params.action_menu_items[rows].label = "Done";
+        params.action_menu_items[rows].desc = "Save the server with the ticked shares";
+        params.action_menu_items[rows].icon_path = "../icons/icon_resume.png";
+        params.action_menu_items[rows].danger = 0;
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
     } else if (s_addSignInOpen) {

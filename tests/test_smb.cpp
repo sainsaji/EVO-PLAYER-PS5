@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 extern "C" {
     extern int g_tests_run;
@@ -147,7 +148,161 @@ extern "C" void test_smb_storage_service(void) {
     TEST_ASSERT(service.classifyFileName("subs.srt") == evo::FileCategory::Document, "srt is document");
     TEST_ASSERT(service.classifyFileName("poster.jpg") == evo::FileCategory::Image, "jpg is image");
 
-    // 6. Cleanup
+    // 6. filterChosenShares helper tests
+    {
+        std::vector<std::string> offered = { "Videos", "Music", "Photos", "Backups" };
+
+        // Empty chosen = all (offered returned unchanged)
+        std::vector<std::string> emptyChosen;
+        auto resAll = evo::NetworkStorageService::filterChosenShares(offered, emptyChosen);
+        TEST_ASSERT(resAll == offered, "empty chosen must return offered unchanged");
+
+        // Subset keeps server order
+        std::vector<std::string> subsetChosen = { "Photos", "Videos" };
+        auto resSubset = evo::NetworkStorageService::filterChosenShares(offered, subsetChosen);
+        std::vector<std::string> expectedSubset = { "Videos", "Photos" };
+        TEST_ASSERT(resSubset == expectedSubset, "subset must retain server order");
+
+        // Case-insensitive (ASCII)
+        std::vector<std::string> caseChosen = { "videos", "PHOTOS" };
+        auto resCase = evo::NetworkStorageService::filterChosenShares(offered, caseChosen);
+        std::vector<std::string> expectedCase = { "Videos", "Photos" };
+        TEST_ASSERT(resCase == expectedCase, "case-insensitive matching must preserve offered server casing");
+
+        // Chosen name the server no longer offers is ignored
+        std::vector<std::string> staleChosen = { "Videos", "OldDeletedShare", "Backups", "NonExistent" };
+        auto resStale = evo::NetworkStorageService::filterChosenShares(offered, staleChosen);
+        std::vector<std::string> expectedStale = { "Videos", "Backups" };
+        TEST_ASSERT(resStale == expectedStale, "chosen share no longer offered must be ignored");
+
+        // Empty offered returns empty
+        std::vector<std::string> emptyOffered;
+        auto resEmptyOffered = evo::NetworkStorageService::filterChosenShares(emptyOffered, subsetChosen);
+        TEST_ASSERT(resEmptyOffered.empty(), "empty offered must return empty result");
+    }
+
+    // 7. chosenShares persistence: saveConfig / loadConfig round-trip
+    {
+        evo::NetworkShare shareChosen;
+        shareChosen.id = "smb_chosen_test";
+        shareChosen.name = "Chosen SMB";
+        shareChosen.protocol = evo::NetworkProtocol::SMB;
+        shareChosen.host = "192.168.1.100";
+        shareChosen.port = 445;
+        shareChosen.user = "user";
+        shareChosen.password = "pass";
+        shareChosen.startPath = "/";
+        shareChosen.chosenShares = { "Media", "Public", "Docs" };
+        service.addShare(shareChosen);
+
+        // Verify JSON file on disk contains "shares"
+        const char* cfgPath = evo_data_path("evo_network_shares.json");
+        FILE* fCheck = std::fopen(cfgPath, "rb");
+        TEST_ASSERT(fCheck != nullptr, "evo_network_shares.json must exist after addShare");
+        char jsonBuf[4096] = {0};
+        size_t bytesRead = std::fread(jsonBuf, 1, sizeof(jsonBuf) - 1, fCheck);
+        std::fclose(fCheck);
+        jsonBuf[bytesRead] = '\0';
+        TEST_ASSERT(std::strstr(jsonBuf, "\"shares\"") != nullptr, "JSON on disk must contain 'shares' key when chosenShares is non-empty");
+        TEST_ASSERT(std::strstr(jsonBuf, "\"Media\"") != nullptr, "JSON must contain Media");
+        TEST_ASSERT(std::strstr(jsonBuf, "\"Public\"") != nullptr, "JSON must contain Public");
+        TEST_ASSERT(std::strstr(jsonBuf, "\"Docs\"") != nullptr, "JSON must contain Docs");
+
+        // Reload config and verify chosenShares survived round-trip
+        service.loadConfig();
+        const auto* loadedShare = service.getShare("smb_chosen_test");
+        TEST_ASSERT(loadedShare != nullptr, "smb_chosen_test should be loaded");
+        std::vector<std::string> expectedChosen = { "Media", "Public", "Docs" };
+        TEST_ASSERT(loadedShare->chosenShares == expectedChosen, "chosenShares must survive saveConfig/loadConfig round trip");
+
+        // Verify share with empty chosenShares does not write "shares" key
+        evo::NetworkShare shareEmptyChosen;
+        shareEmptyChosen.id = "smb_empty_chosen";
+        shareEmptyChosen.name = "Empty Chosen SMB";
+        shareEmptyChosen.protocol = evo::NetworkProtocol::SMB;
+        shareEmptyChosen.host = "192.168.1.101";
+        shareEmptyChosen.port = 445;
+        shareEmptyChosen.user = "user";
+        shareEmptyChosen.password = "pass";
+        shareEmptyChosen.startPath = "/";
+        shareEmptyChosen.chosenShares.clear();
+        service.addShare(shareEmptyChosen);
+
+        // Remove smb_chosen_test
+        service.removeShare("smb_chosen_test");
+
+        fCheck = std::fopen(cfgPath, "rb");
+        TEST_ASSERT(fCheck != nullptr, "evo_network_shares.json must exist");
+        std::memset(jsonBuf, 0, sizeof(jsonBuf));
+        bytesRead = std::fread(jsonBuf, 1, sizeof(jsonBuf) - 1, fCheck);
+        std::fclose(fCheck);
+        jsonBuf[bytesRead] = '\0';
+        TEST_ASSERT(std::strstr(jsonBuf, "\"shares\"") == nullptr, "JSON on disk must NOT contain 'shares' key when chosenShares is empty");
+
+        service.loadConfig();
+        const auto* loadedEmpty = service.getShare("smb_empty_chosen");
+        TEST_ASSERT(loadedEmpty != nullptr, "smb_empty_chosen should be loaded");
+        TEST_ASSERT(loadedEmpty->chosenShares.empty(), "chosenShares must remain empty");
+        service.removeShare("smb_empty_chosen");
+    }
+
+    // 8. Backward compatibility: loadConfig with old-format JSON without "shares"
+    {
+        const char* cfgPath = evo_data_path("evo_network_shares.json");
+        FILE* fLegacy = std::fopen(cfgPath, "wb");
+        TEST_ASSERT(fLegacy != nullptr, "must open config path for writing legacy test");
+        const char* legacyJson = "[\n"
+            "  {\n"
+            "    \"id\": \"legacy_share\",\n"
+            "    \"name\": \"Legacy Share\",\n"
+            "    \"protocol\": \"smb\",\n"
+            "    \"host\": \"192.168.1.200\",\n"
+            "    \"port\": 445,\n"
+            "    \"user\": \"guest\",\n"
+            "    \"password\": \"\",\n"
+            "    \"startPath\": \"/\"\n"
+            "  }\n"
+            "]";
+        std::fwrite(legacyJson, 1, std::strlen(legacyJson), fLegacy);
+        std::fclose(fLegacy);
+
+        service.loadConfig();
+        const auto* legacyShare = service.getShare("legacy_share");
+        TEST_ASSERT(legacyShare != nullptr, "legacy share must load");
+        TEST_ASSERT(legacyShare->id == "legacy_share", "legacy share id mismatch");
+        TEST_ASSERT(legacyShare->host == "192.168.1.200", "legacy share host mismatch");
+        TEST_ASSERT(legacyShare->chosenShares.empty(), "legacy share without 'shares' must have empty chosenShares");
+
+        // 9. Load config with non-string entries in "shares" array (should skip non-strings)
+        FILE* fMixed = std::fopen(cfgPath, "wb");
+        TEST_ASSERT(fMixed != nullptr, "must open config path for writing mixed test");
+        const char* mixedJson = "[\n"
+            "  {\n"
+            "    \"id\": \"mixed_share\",\n"
+            "    \"name\": \"Mixed Share\",\n"
+            "    \"protocol\": \"smb\",\n"
+            "    \"host\": \"192.168.1.201\",\n"
+            "    \"port\": 445,\n"
+            "    \"user\": \"guest\",\n"
+            "    \"password\": \"\",\n"
+            "    \"startPath\": \"/\",\n"
+            "    \"shares\": [123, \"ValidShare1\", null, true, \"ValidShare2\", {}]\n"
+            "  }\n"
+            "]";
+        std::fwrite(mixedJson, 1, std::strlen(mixedJson), fMixed);
+        std::fclose(fMixed);
+
+        service.loadConfig();
+        const auto* mixedShare = service.getShare("mixed_share");
+        TEST_ASSERT(mixedShare != nullptr, "mixed share must load");
+        std::vector<std::string> expectedMixed = { "ValidShare1", "ValidShare2" };
+        TEST_ASSERT(mixedShare->chosenShares == expectedMixed, "non-string entries in 'shares' array must be skipped");
+
+        service.removeShare("legacy_share");
+        service.removeShare("mixed_share");
+    }
+
+    // 10. Cleanup
     service.removeShare("smb_test_nas");
     service.removeShare("smb_auth");
     TEST_ASSERT(service.getShare("smb_test_nas") == nullptr, "share should be removed");

@@ -140,6 +140,7 @@ void NetworkStorageService::loadConfig() {
                     cJSON* jPass = cJSON_GetObjectItem(item, "password");
                     cJSON* jDomain = cJSON_GetObjectItem(item, "domain");
                     cJSON* jPath = cJSON_GetObjectItem(item, "startPath");
+                    cJSON* jShares = cJSON_GetObjectItem(item, "shares");
 
                     if (jId && jId->valuestring) share.id = jId->valuestring;
                     if (jName && jName->valuestring) share.name = jName->valuestring;
@@ -153,6 +154,16 @@ void NetworkStorageService::loadConfig() {
                     if (jPass && jPass->valuestring) share.password = jPass->valuestring;
                     if (jDomain && jDomain->valuestring) share.domain = jDomain->valuestring;
                     if (jPath && jPath->valuestring) share.startPath = jPath->valuestring;
+
+                    if (jShares && cJSON_IsArray(jShares)) {
+                        int sharesCount = cJSON_GetArraySize(jShares);
+                        for (int sIdx = 0; sIdx < sharesCount; ++sIdx) {
+                            cJSON* sItem = cJSON_GetArrayItem(jShares, sIdx);
+                            if (sItem && cJSON_IsString(sItem) && sItem->valuestring) {
+                                share.chosenShares.push_back(sItem->valuestring);
+                            }
+                        }
+                    }
 
                     if (!share.id.empty() && !share.host.empty()) {
                         m_shares.push_back(std::move(share));
@@ -199,6 +210,16 @@ void NetworkStorageService::saveConfig() {
             cJSON_AddStringToObject(item, "domain", s.domain.c_str());
         }
         cJSON_AddStringToObject(item, "startPath", s.startPath.c_str());
+
+        if (!s.chosenShares.empty()) {
+            cJSON* sharesArr = cJSON_CreateArray();
+            if (sharesArr) {
+                for (const auto& shareName : s.chosenShares) {
+                    cJSON_AddItemToArray(sharesArr, cJSON_CreateString(shareName.c_str()));
+                }
+                cJSON_AddItemToObject(item, "shares", sharesArr);
+            }
+        }
 
         cJSON_AddItemToArray(root, item);
     }
@@ -573,6 +594,36 @@ std::string NetworkStorageService::buildEditUrl(const NetworkShare& share) {
     }
 }
 
+static bool asciiEqualsCi(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        char ca = (a[i] >= 'A' && a[i] <= 'Z') ? static_cast<char>(a[i] + ('a' - 'A')) : a[i];
+        char cb = (b[i] >= 'A' && b[i] <= 'Z') ? static_cast<char>(b[i] + ('a' - 'A')) : b[i];
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
+std::vector<std::string> NetworkStorageService::filterChosenShares(
+    const std::vector<std::string>& offered,
+    const std::vector<std::string>& chosen)
+{
+    if (chosen.empty()) {
+        return offered;
+    }
+
+    std::vector<std::string> result;
+    for (const auto& off : offered) {
+        for (const auto& ch : chosen) {
+            if (asciiEqualsCi(off, ch)) {
+                result.push_back(off);
+                break;
+            }
+        }
+    }
+    return result;
+}
+
 std::string NetworkStorageService::buildMediaUrl(const std::string& shareId, const std::string& remotePath) const {
     const NetworkShare* share = getShare(shareId);
     if (!share) return "";
@@ -703,6 +754,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             // Root of SMB server: enumerate available disk shares
             std::vector<std::string> diskShares;
             if (m_smbClient->listShares(share->host, share->port, share->user, share->password, share->domain, diskShares, 6)) {
+                diskShares = filterChosenShares(diskShares, share->chosenShares);
                 for (const auto& ds : diskShares) {
                     BrowserEntry be;
                     be.name = ds;

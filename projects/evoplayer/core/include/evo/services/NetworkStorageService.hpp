@@ -25,6 +25,8 @@ struct NetworkShare {
     std::string password = "anonymous";
     std::string domain;
     std::string startPath = "/";
+    // SMB share names ticked in the picker; empty = show every share the server offers.
+    std::vector<std::string> chosenShares;
 };
 
 enum class NetworkTestStage { Ok, Address, Login, Share, Folder };
@@ -77,6 +79,9 @@ public:
                             std::string& outStartPath,
                             std::string* outDomain = nullptr);
     static std::string buildEditUrl(const NetworkShare& share);
+
+    static std::vector<std::string> filterChosenShares(const std::vector<std::string>& offered,
+                                                       const std::vector<std::string>& chosen);
 
     FileCategory classifyFileName(const std::string& fileName) const;
 
