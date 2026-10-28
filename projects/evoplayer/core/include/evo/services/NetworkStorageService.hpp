@@ -27,8 +27,19 @@ struct NetworkShare {
     std::string startPath = "/";
 };
 
+enum class NetworkTestStage { Ok, Address, Login, Share, Folder };
+
+struct NetworkTestResult {
+    NetworkTestStage stage = NetworkTestStage::Ok;
+    std::string message;
+    std::vector<std::string> shares;
+};
+
 class NetworkStorageService {
 public:
+    using NetworkTestStage = evo::NetworkTestStage;
+    using NetworkTestResult = evo::NetworkTestResult;
+
     static NetworkStorageService& getInstance();
 
     NetworkStorageService();
@@ -51,6 +62,10 @@ public:
     /* Opens and closes a TCP connection to host:port. Touches no client state,
      * so it is safe off the UI thread. Returns the connect time in ms, or -1. */
     static int probeReachable(const std::string& host, int port, int timeoutMs);
+
+    /* Tests a share's address, credentials, and target share/folder. Touches no
+     * shared client state; safe to call on a worker thread. */
+    static NetworkTestResult testConnection(const NetworkShare& share);
 
     static std::string percentEncode(const std::string& str);
     static std::string attachCredentials(const std::string& url);

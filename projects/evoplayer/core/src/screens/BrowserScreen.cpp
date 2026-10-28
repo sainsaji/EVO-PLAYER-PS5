@@ -35,6 +35,142 @@ namespace evo {
 static bool s_addServerChooserOpen = false;
 static int s_addServerChooserFocused = 0;
 
+/* Add-server flow (#226): address -> Guest/Account -> login test -> saved.
+ * Each step is a modal or a keyboard prompt; the test runs on a worker. A prompt
+ * is never opened from inside another prompt's callback: the callback sets
+ * s_addPendingKb and update() opens it. */
+enum AddKb { ADDKB_NONE = 0, ADDKB_ADDRESS, ADDKB_USER, ADDKB_PASS };
+static NetworkShare s_addDraft;
+static bool s_addSignInOpen = false;
+static int s_addSignInFocused = 0;
+static int s_addPendingKb = ADDKB_NONE;
+static std::string s_addError;      // why the last test failed, shown on the next prompt
+static bool s_addTesting = false;
+
+struct TestJob {
+    NetworkShare share;
+    NetworkTestResult result;
+    std::atomic<bool> done{false};
+};
+static std::shared_ptr<TestJob> s_testJob;      // UI thread only
+static double s_testElapsedMs = 0.0;
+static constexpr double kTestDeadlineMs = 15000.0;
+
+static void* testEntry(void* arg) {
+    auto* sp = static_cast<std::shared_ptr<TestJob>*>(arg);
+    std::shared_ptr<TestJob> job = *sp;
+    delete sp;
+    job->result = NetworkStorageService::testConnection(job->share);
+    job->done.store(true);
+    return nullptr;
+}
+
+static std::string trimText(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    return s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1);
+}
+
+/* Fills s_addDraft from what was typed. Returns true when the text carried its
+ * own login (user:pass@host), so the Guest/Account step is skipped. */
+static bool parseAddAddress(const std::string& text) {
+    const NetworkProtocol proto = s_addDraft.protocol;
+    std::string t = trimText(text);
+    NetworkShare d;
+    d.protocol = proto;
+    bool hasLogin = false;
+    if (proto == NetworkProtocol::SMB) {
+        if (!NetworkStorageService::parseSmbUrl(t, d)) return false;
+        hasLogin = !d.user.empty() && d.user != "guest";
+    } else {
+        if (t.rfind("ftp://", 0) == 0) t = t.substr(6);
+        std::string user = "anonymous", pass = "anonymous";
+        size_t at = t.find('@');
+        if (at != std::string::npos) {
+            std::string auth = t.substr(0, at);
+            t = t.substr(at + 1);
+            size_t c = auth.find(':');
+            user = c == std::string::npos ? auth : auth.substr(0, c);
+            if (c != std::string::npos) pass = auth.substr(c + 1);
+            hasLogin = true;
+        }
+        size_t slash = t.find('/');
+        d.startPath = slash == std::string::npos ? "/" : t.substr(slash);
+        if (slash != std::string::npos) t = t.substr(0, slash);
+        d.host = t;
+        d.port = 21;
+        size_t colon = t.find(':');
+        if (colon != std::string::npos) {
+            d.host = t.substr(0, colon);
+            d.port = std::atoi(t.substr(colon + 1).c_str());
+            if (d.port <= 0 || d.port > 65535) d.port = 21;
+        }
+        if (d.host.empty()) return false;
+        d.user = user;
+        d.password = pass;
+        d.name = d.host + (d.port != 21 ? ":" + std::to_string(d.port) : "");
+    }
+    s_addDraft = d;
+    return hasLogin;
+}
+
+static void startAddTest() {
+    auto job = std::make_shared<TestJob>();
+    job->share = s_addDraft;
+    auto* arg = new std::shared_ptr<TestJob>(job);
+    pthread_attr_t attr;
+    pthread_t th;
+    int rc;
+    if (pthread_attr_init(&attr) == 0) {
+        pthread_attr_setstacksize(&attr, 1u << 18);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        rc = pthread_create(&th, &attr, testEntry, arg);
+        pthread_attr_destroy(&attr);
+    } else {
+        rc = pthread_create(&th, nullptr, testEntry, arg);
+        if (rc == 0) pthread_detach(th);
+    }
+    if (rc != 0) {
+        delete arg;
+        return;
+    }
+    s_testJob = job;
+    s_testElapsedMs = 0.0;
+    s_addTesting = true;
+}
+
+static void OnAddAddress(const char* text, void* userdata) {
+    (void)userdata;
+    if (!text || !trimText(text).size()) return;
+    if (!parseAddAddress(text)) {
+        s_addSignInOpen = true;
+        s_addSignInFocused = 0;
+    } else {
+        startAddTest();
+    }
+}
+
+static void OnAddUser(const char* text, void* userdata) {
+    (void)userdata;
+    s_addDraft.user = text ? trimText(text) : "";
+    s_addPendingKb = ADDKB_PASS;
+}
+
+static void OnAddPass(const char* text, void* userdata) {
+    (void)userdata;
+    s_addDraft.password = text ? text : "";
+    startAddTest();
+}
+
+/* "192.168.0.10:4450/Movies" - the draft as the person typed it, no login. */
+static std::string draftAddressText() {
+    std::string a = s_addDraft.host;
+    const int def = s_addDraft.protocol == NetworkProtocol::SMB ? 445 : 21;
+    if (s_addDraft.port > 0 && s_addDraft.port != def) a += ":" + std::to_string(s_addDraft.port);
+    if (s_addDraft.startPath.size() > 1) a += s_addDraft.startPath;
+    return a;
+}
+
 static bool matchesQuery(const std::string& str, const std::string& q) {
     if (q.empty()) return true;
     auto it = std::search(
@@ -62,18 +198,6 @@ static void OnSearchSubmitted(const char* text, void* userdata) {
     }
 
     self->setSearchQuery(queryStr);
-}
-
-static void OnAddFtpSubmitted(const char* text, void* userdata) {
-    auto* self = static_cast<BrowserScreen*>(userdata);
-    if (!self || !text) return;
-    self->handleAddFtpHost(text);
-}
-
-static void OnAddSmbSubmitted(const char* text, void* userdata) {
-    auto* self = static_cast<BrowserScreen*>(userdata);
-    if (!self || !text) return;
-    self->handleAddSmbHost(text);
 }
 
 void BrowserScreen::handleAddSmbHost(const std::string& hostStr) {
@@ -1170,6 +1294,10 @@ void BrowserScreen::onExit() {
     m_showDeleteConfirm = false;
     m_serverMenuOpen = false;
     s_addServerChooserOpen = false;
+    s_addSignInOpen = false;
+    s_addTesting = false;
+    s_testJob.reset();
+    s_addPendingKb = ADDKB_NONE;
     m_removeShareConfirmOpen = false;
     m_showTransferDialog = false;
     auto browser = Application::getInstance().getFileSystemBrowser();
@@ -1457,14 +1585,53 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         }
         if (pressed & PadButtons::Cross) {
             s_addServerChooserOpen = false;
-            if (s_addServerChooserFocused == 0) {
-                // Samba / Windows share (SMB)
-                evo_feedback(EVO_FB_OPEN);
-                evo_keyboard_open_phone("Enter SMB Host (e.g. 192.168.0.10 or 192.168.0.10/Share)...", "", 512, OnAddSmbSubmitted, this);
+            s_addDraft = NetworkShare();
+            s_addDraft.host.clear();
+            s_addDraft.port = 0;
+            s_addError.clear();
+            s_addDraft.protocol = s_addServerChooserFocused == 0 ? NetworkProtocol::SMB : NetworkProtocol::FTP;
+            evo_feedback(EVO_FB_OPEN);
+            s_addPendingKb = ADDKB_ADDRESS;
+            return true;
+        }
+        return true;
+    }
+
+    // 0a0b. Add-server test running: Circle cancels
+    if (s_addTesting) {
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            s_addTesting = false;
+            s_testJob.reset();   // the worker finishes on its own; its result is dropped
+            evo_feedback(EVO_FB_CANCEL);
+        }
+        return true;
+    }
+
+    // 0a0c. Add-server sign-in: Guest or Account
+    if (s_addSignInOpen) {
+        if (pressed & (PadButtons::Up | PadButtons::Down)) {
+            s_addSignInFocused = s_addSignInFocused ? 0 : 1;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Triangle | PadButtons::Options)) {
+            s_addSignInOpen = false;
+            s_addError.clear();
+            s_addPendingKb = ADDKB_ADDRESS;   // back one step
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            s_addSignInOpen = false;
+            s_addError.clear();
+            evo_feedback(EVO_FB_OPEN);
+            if (s_addSignInFocused == 0) {
+                const bool smb = s_addDraft.protocol == NetworkProtocol::SMB;
+                s_addDraft.user = smb ? "guest" : "anonymous";
+                s_addDraft.password = smb ? "" : "anonymous";
+                startAddTest();
             } else {
-                // FTP server
-                evo_feedback(EVO_FB_OPEN);
-                evo_keyboard_open_phone("Enter FTP Host (e.g. 192.168.0.10:21)...", "", 512, OnAddFtpSubmitted, this);
+                s_addPendingKb = ADDKB_USER;
             }
             return true;
         }
@@ -1866,6 +2033,63 @@ void BrowserScreen::update(double deltaMs) {
     if (m_activeSource == 2) {
         pollNetList(deltaMs);
         if (m_networkShareId.empty()) pollServerStatus(deltaMs);
+    }
+
+    // Add-server flow: open the next prompt, collect the login test
+    if (s_addPendingKb != ADDKB_NONE) {
+        const int kb = s_addPendingKb;
+        s_addPendingKb = ADDKB_NONE;
+        const bool smb = s_addDraft.protocol == NetworkProtocol::SMB;
+        if (kb == ADDKB_ADDRESS) {
+            static std::string title;
+            title = !s_addError.empty() ? s_addError
+                  : smb ? "Server address (e.g. 192.168.0.10 or smb://nas/Movies)"
+                        : "Server address (e.g. 192.168.0.10:21 or ftp://host)";
+            s_addError.clear();
+            evo_keyboard_open_phone(title.c_str(), draftAddressText().c_str(), 512, OnAddAddress, this);
+        } else if (kb == ADDKB_USER) {
+            evo_keyboard_open_phone("User name", s_addDraft.user.c_str(), 128, OnAddUser, this);
+        } else {
+            evo_keyboard_open_phone("Password", "", 128, OnAddPass, this);
+            evo_keyboard_mark_secret();
+        }
+    }
+    if (s_addTesting && s_testJob) {
+        s_testElapsedMs += deltaMs;
+        const bool timedOut = s_testElapsedMs > kTestDeadlineMs;
+        if (s_testJob->done.load() || timedOut) {
+            NetworkTestResult res = timedOut && !s_testJob->done.load() ? NetworkTestResult() : s_testJob->result;
+            if (timedOut && !s_testJob->done.load()) {
+                res.stage = NetworkTestStage::Address;
+                res.message = "No answer from " + s_addDraft.host + ". Check the address.";
+            }
+            s_testJob.reset();
+            s_addTesting = false;
+            if (res.stage == NetworkTestStage::Ok) {
+                NetworkShare share = s_addDraft;
+                share.id = (share.protocol == NetworkProtocol::SMB ? "smb_" : "ftp_") + std::to_string(time(nullptr));
+                if (share.name.empty()) share.name = share.host;
+                NetworkStorageService::getInstance().addShare(share);
+                m_networkShareId.clear();
+                m_networkRemotePath = "/";
+                resetSelection();
+                toast("ADDED", share.name.c_str());
+                evo_feedback(EVO_FB_CONFIRM);
+            } else {
+                const char* title = res.stage == NetworkTestStage::Login ? "LOGIN REFUSED"
+                                  : res.stage == NetworkTestStage::Address ? "CAN'T REACH SERVER"
+                                  : res.stage == NetworkTestStage::Share ? "SHARE NOT FOUND" : "FOLDER NOT FOUND";
+                toast(title, res.message.c_str());
+                s_addError = res.message;   // the toast hides behind the next prompt
+                evo_feedback(EVO_FB_ERROR);
+                if (res.stage == NetworkTestStage::Login) {
+                    s_addSignInOpen = true;
+                    s_addSignInFocused = 1;
+                } else {
+                    s_addPendingKb = ADDKB_ADDRESS;
+                }
+            }
+        }
     }
 
     // Poll active file transfer operations
@@ -2272,7 +2496,38 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     }
 
     auto transferService = Application::getInstance().getFileTransferService();
-    if (s_addServerChooserOpen) {
+    if (s_addTesting) {
+        params.action_menu_open = 1;
+        params.action_menu_focused = 0;
+        params.action_menu_target = s_addDraft.host.c_str();
+        params.action_target_sub = s_addDraft.protocol == NetworkProtocol::SMB ? "SMB" : "FTP";
+        params.action_menu_eyebrow = "TESTING";
+        params.action_menu_count = 1;
+        params.action_menu_items[0].label = "Cancel";
+        params.action_menu_items[0].desc = "Checking the address and login...";
+        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].danger = 0;
+        params.action_paste_enabled = 0;
+        params.action_clipboard_info = nullptr;
+    } else if (s_addSignInOpen) {
+        params.action_menu_open = 1;
+        params.action_menu_focused = s_addSignInFocused;
+        params.action_menu_target = s_addDraft.host.c_str();
+        params.action_target_sub = !s_addError.empty() ? s_addError.c_str()
+                                 : s_addDraft.protocol == NetworkProtocol::SMB ? "SMB" : "FTP";
+        params.action_menu_eyebrow = "SIGN IN";
+        params.action_menu_count = 2;
+        params.action_menu_items[0].label = "Guest";
+        params.action_menu_items[0].desc = "No user or password";
+        params.action_menu_items[0].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[0].danger = 0;
+        params.action_menu_items[1].label = "Account";
+        params.action_menu_items[1].desc = "Enter a user and password";
+        params.action_menu_items[1].icon_path = "../icons/icon_folder.png";
+        params.action_menu_items[1].danger = 0;
+        params.action_paste_enabled = 0;
+        params.action_clipboard_info = nullptr;
+    } else if (s_addServerChooserOpen) {
         params.action_menu_open = 1;
         params.action_menu_focused = s_addServerChooserFocused;
         params.action_menu_target = "+ Add Server";

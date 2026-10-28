@@ -768,4 +768,85 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
     }
 }
 
+NetworkTestResult NetworkStorageService::testConnection(const NetworkShare& share) {
+    const int effectivePort = share.port > 0 ? share.port : (share.protocol == NetworkProtocol::SMB ? 445 : 21);
+
+    if (probeReachable(share.host, effectivePort, 2500) < 0) {
+        NetworkTestResult result;
+        result.stage = NetworkTestStage::Address;
+        result.message = "Can't reach " + share.host + ". Check the address.";
+        return result;
+    }
+
+    if (share.protocol == NetworkProtocol::SMB) {
+        std::string smbShare;
+        std::string subPath;
+        const bool hasShare = SmbClient::splitShareAndPath(share.startPath, smbShare, subPath);
+
+        SmbClient smb;
+        const int timeoutSec = 3;
+
+        if (!hasShare) {
+            std::vector<std::string> shares;
+            if (!smb.listShares(share.host, effectivePort, share.user, share.password, share.domain, shares, timeoutSec)) {
+                NetworkTestResult result;
+                result.stage = NetworkTestStage::Login;
+                result.message = "Login refused. Check user and password.";
+                return result;
+            }
+            NetworkTestResult result;
+            result.stage = NetworkTestStage::Ok;
+            result.shares = std::move(shares);
+            return result;
+        } else {
+            if (!smb.connectShare(share.host, effectivePort, share.user, share.password, share.domain, smbShare, timeoutSec)) {
+                NetworkTestResult result;
+                const std::string& err = smb.getLastError();
+                if (err.find("STATUS_LOGON_FAILURE") != std::string::npos ||
+                    err.find("STATUS_ACCESS_DENIED") != std::string::npos ||
+                    err.find("LOGON") != std::string::npos ||
+                    err.find("ACCESS_DENIED") != std::string::npos) {
+                    result.stage = NetworkTestStage::Login;
+                    result.message = "Login refused. Check user and password.";
+                } else {
+                    result.stage = NetworkTestStage::Share;
+                    result.message = "Share " + smbShare + " not found on " + share.host + ".";
+                }
+                return result;
+            }
+            NetworkTestResult result;
+            result.stage = NetworkTestStage::Ok;
+            return result;
+        }
+    } else if (share.protocol == NetworkProtocol::FTP) {
+        FtpClient ftp;
+        const int timeoutSec = 3;
+
+        if (!ftp.connectServer(share.host, effectivePort, share.user, share.password, timeoutSec)) {
+            NetworkTestResult result;
+            result.stage = NetworkTestStage::Login;
+            result.message = "Login refused. Check user and password.";
+            return result;
+        }
+
+        const std::string path = share.startPath.empty() ? "/" : share.startPath;
+        std::vector<FtpFileEntry> entries;
+        if (!ftp.list(path, entries)) {
+            NetworkTestResult result;
+            result.stage = NetworkTestStage::Folder;
+            result.message = "Start folder " + path + " not found.";
+            return result;
+        }
+
+        NetworkTestResult result;
+        result.stage = NetworkTestStage::Ok;
+        return result;
+    } else {
+        NetworkTestResult result;
+        result.stage = NetworkTestStage::Address;
+        result.message = "Unknown protocol";
+        return result;
+    }
+}
+
 } // namespace evo
