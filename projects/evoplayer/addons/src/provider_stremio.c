@@ -487,6 +487,7 @@ static void map_meta(int a, cJSON *m, evo_provider_item_t *it)
         snprintf(it->logo_url, sizeof it->logo_url, "%s", jstr(m, "logo"));
     it->is_folder = series;
     it->kind = series ? EVO_MEDIA_FOLDER : EVO_MEDIA_VIDEO;
+    it->detail = series ? 2 : 1;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -888,6 +889,18 @@ static void prow(evo_provider_row_t *rows, int *n, int max, const char *title, c
     snprintf(r->detail, sizeof r->detail, "%s", detail);
 }
 
+static evo_provider_row_t *cast_row(evo_provider_row_t *rows, int *n, int max, const char *title, const char *detail)
+{
+    if (*n >= max || !title || !title[0]) return NULL;
+    evo_provider_row_t *r = &rows[(*n)++];
+    memset(r, 0, sizeof *r);
+    r->id[0] = '\0';
+    snprintf(r->title, sizeof r->title, "%s", title);
+    if (detail && detail[0]) snprintf(r->detail, sizeof r->detail, "%s", detail);
+    snprintf(r->group, sizeof r->group, "cast");
+    return r;
+}
+
 /* A field that is a string, or an array of strings: "a, b, c". */
 static void join_field(cJSON *v, char *out, size_t cap, int limit)
 {
@@ -932,32 +945,37 @@ static void build_details(cJSON *meta, evo_provider_row_t *rows, int *n, int max
      * "cast" list name people under links[] with the category "Cast". */
     int cast = 0;
     cJSON *c = cJSON_GetObjectItem(meta, "cast");
-    for (int i = 0; c && cJSON_IsArray(c) && i < cJSON_GetArraySize(c) && cast < 10; ++i) {
+    for (int i = 0; c && cJSON_IsArray(c) && i < cJSON_GetArraySize(c) && cast < 12; ++i) {
         cJSON *e = cJSON_GetArrayItem(c, i);
         const char *name = cJSON_IsString(e) ? e->valuestring : jstr(e, "name");
         if (!name[0]) continue;
-        prow(rows, n, max, name, "Cast");
-        if (cJSON_IsObject(e) && *n > 0) {          /* TMDB-style addons: a full photo URL */
-            const char *ph = jstr(e, "photo")[0] ? jstr(e, "photo") : (jstr(e, "image")[0] ? jstr(e, "image") : jstr(e, "profile"));
-            if (!strncmp(ph, "http", 4)) snprintf(rows[*n - 1].art_url, sizeof rows[*n - 1].art_url, "%s", ph);
+        const char *role = cJSON_IsObject(e) ? (jstr(e, "character")[0] ? jstr(e, "character") : jstr(e, "role")) : "";
+        evo_provider_row_t *r = cast_row(rows, n, max, name, role);
+        if (r) {
+            if (cJSON_IsObject(e)) {          /* TMDB-style addons: a full photo URL */
+                const char *ph = jstr(e, "photo")[0] ? jstr(e, "photo") : (jstr(e, "image")[0] ? jstr(e, "image") : jstr(e, "profile"));
+                if (!strncmp(ph, "http", 4)) snprintf(r->art_url, sizeof r->art_url, "%s", ph);
+            }
+            ++cast;
         }
-        ++cast;
     }
     cJSON *links = cJSON_GetObjectItem(meta, "links");
-    for (int i = 0; !cast && links && cJSON_IsArray(links) && i < cJSON_GetArraySize(links) && cast < 10; ++i) {
+    for (int i = 0; !cast && links && cJSON_IsArray(links) && i < cJSON_GetArraySize(links) && cast < 12; ++i) {
         cJSON *e = cJSON_GetArrayItem(links, i);
         if (strcmp(jstr(e, "category"), "Cast") || !jstr(e, "name")[0]) continue;
-        prow(rows, n, max, jstr(e, "name"), "Cast");
-        ++cast;
+        const char *role = cJSON_IsObject(e) ? (jstr(e, "character")[0] ? jstr(e, "character") : jstr(e, "role")) : "";
+        if (cast_row(rows, n, max, jstr(e, "name"), role)) {
+            ++cast;
+        }
     }
 }
 
 static void deliver_panel(panel_ctx_t *x)
 {
-    evo_provider_row_t rows[16];
+    evo_provider_row_t rows[20];
     int n = 0;
     cJSON *meta = S->meta ? cJSON_GetObjectItem(S->meta, "meta") : NULL;
-    build_details(meta, rows, &n, 16);
+    build_details(meta, rows, &n, 20);
     if (x->cb) x->cb(n > 0, rows, n, x->ud);
     free(x);
 }

@@ -205,6 +205,7 @@ typedef struct evo_provider_item {
     int     is_live;
     int     played;             /* the service marks it watched */
     int     favorite;           /* the service marks it a favourite */
+    int     detail;             /* Cross opens the detail page (#221): 1 a movie, 2 a TV show (a folder), 0 plain open */
 
     /* Now-and-next, when the provider has an EPG. Empty otherwise. A full
      * XMLTV grid is explicitly out of #90's scope; two strings are not. */
@@ -255,6 +256,10 @@ typedef struct evo_provider_row {
     char title[96];
     char detail[160];
     char art_url[EVO_PROVIDER_MAX_ART_URL];   /* a headshot, "" = none */
+    /* "cast" on a person of a "details" panel (title = name, detail = role,
+     * "" when the service gives none), "" on every other row. The movie
+     * detail page reads the cast grid from these. */
+    char group[8];
 } evo_provider_row_t;
 typedef void (*evo_provider_rows_cb)(int ok, const evo_provider_row_t *rows, int count, void *ud);
 

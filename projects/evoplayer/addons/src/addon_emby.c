@@ -555,6 +555,7 @@ static void map_item(ms_client_t *c, cJSON *o, int ctx, evo_provider_item_t *it)
         snprintf(it->id, sizeof it->id, "ser:%s", id);
         it->is_folder = 1;
         it->kind = EVO_MEDIA_FOLDER;
+        it->detail = 2;
         int n = (int)jnum(o, "ChildCount");
         if (year && n > 0) snprintf(it->subtitle, sizeof it->subtitle, "%d · %d season%s", year, n, n == 1 ? "" : "s");
         else if (year)     snprintf(it->subtitle, sizeof it->subtitle, "%d", year);
@@ -605,6 +606,7 @@ static void map_item(ms_client_t *c, cJSON *o, int ctx, evo_provider_item_t *it)
              * the series poster. */
             if (jstr(o, "SeriesId")[0]) art_url(c, jstr(o, "SeriesId"), it->art_url, sizeof it->art_url);
         } else {
+            it->detail = 1;
             if (year && rt[0]) snprintf(it->subtitle, sizeof it->subtitle, "%d · %s", year, rt);
             else if (year)     snprintf(it->subtitle, sizeof it->subtitle, "%d", year);
             else               snprintf(it->subtitle, sizeof it->subtitle, "%s", rt);
@@ -1032,14 +1034,14 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
     /* /Items?Ids= answers {"Items":[item]}; an older server's /Users/../Items/id the item itself. */
     cJSON *its = root ? cJSON_GetObjectItem(root, "Items") : NULL;
     cJSON *o = (its && cJSON_IsArray(its)) ? cJSON_GetArrayItem(its, 0) : root;
-    evo_provider_row_t rows[16];
+    evo_provider_row_t rows[20];
     int n = 0;
     PROV_LOG("media server details -> ok=%d http=%d len=%zu parsed=%d", ok, status, len, o != NULL);
     if (o) {
         char buf[160];
         cJSON *tl = cJSON_GetObjectItem(o, "Taglines");
         cJSON *t0 = tl ? cJSON_GetArrayItem(tl, 0) : NULL;
-        if (t0 && cJSON_IsString(t0) && t0->valuestring[0]) row_add(rows, &n, 16, "", "Tagline", t0->valuestring);
+        if (t0 && cJSON_IsString(t0) && t0->valuestring[0]) row_add(rows, &n, 20, "", "Tagline", t0->valuestring);
 
         size_t b = 0;
         buf[0] = '\0';
@@ -1048,7 +1050,7 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
         if (crit > 0) b += (size_t)snprintf(buf + b, sizeof buf - b, "%s%.0f%% critics", b ? " · " : "", crit);
         if (jstr(o, "OfficialRating")[0])
             b += (size_t)snprintf(buf + b, sizeof buf - b, "%s%s", b ? " · " : "", jstr(o, "OfficialRating"));
-        if (b) row_add(rows, &n, 16, "", "Rating", buf);
+        if (b) row_add(rows, &n, 20, "", "Rating", buf);
 
         cJSON *g = cJSON_GetObjectItem(o, "Genres");
         b = 0; buf[0] = '\0';
@@ -1056,13 +1058,13 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
             cJSON *v = cJSON_GetArrayItem(g, i);
             if (cJSON_IsString(v)) b += (size_t)snprintf(buf + b, sizeof buf - b, "%s%s", b ? ", " : "", v->valuestring);
         }
-        if (b) row_add(rows, &n, 16, "", "Genres", buf);
+        if (b) row_add(rows, &n, 20, "", "Genres", buf);
 
         cJSON *st = cJSON_GetObjectItem(o, "Studios");
         b = 0; buf[0] = '\0';
         for (int i = 0; st && i < 2 && i < cJSON_GetArraySize(st) && b + 2 < sizeof buf; ++i)
             b += (size_t)snprintf(buf + b, sizeof buf - b, "%s%s", b ? ", " : "", jstr(cJSON_GetArrayItem(st, i), "Name"));
-        if (b) row_add(rows, &n, 16, "", "Studio", buf);
+        if (b) row_add(rows, &n, 20, "", "Studio", buf);
 
         cJSON *ppl = cJSON_GetObjectItem(o, "People");
         b = 0; buf[0] = '\0';
@@ -1071,17 +1073,21 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
             if (!strcmp(jstr(p, "Type"), "Director"))
                 b += (size_t)snprintf(buf + b, sizeof buf - b, "%s%s", b ? ", " : "", jstr(p, "Name"));
         }
-        if (b) row_add(rows, &n, 16, "", "Director", buf);
+        if (b) row_add(rows, &n, 20, "", "Director", buf);
 
         int cast = 0;
-        for (int i = 0; ppl && i < cJSON_GetArraySize(ppl) && cast < 10; ++i) {
+        for (int i = 0; ppl && i < cJSON_GetArraySize(ppl) && cast < 12; ++i) {
             cJSON *p = cJSON_GetArrayItem(ppl, i);
             if (strcmp(jstr(p, "Type"), "Actor")) continue;
-            row_add(rows, &n, 16, "", jstr(p, "Name"), jstr(p, "Role")[0] ? jstr(p, "Role") : "Cast");
-            if (jstr(p, "PrimaryImageTag")[0] && jstr(p, "Id")[0] && n > 0)
-                snprintf(rows[n - 1].art_url, sizeof rows[n - 1].art_url,
-                         "%s/Items/%s/Images/Primary?maxHeight=120&quality=80&format=jpg", x->base, jstr(p, "Id"));
-            ++cast;
+            int prev = n;
+            row_add(rows, &n, 20, "", jstr(p, "Name"), jstr(p, "Role"));
+            if (n > prev) {
+                snprintf(rows[n - 1].group, sizeof rows[n - 1].group, "cast");
+                if (jstr(p, "PrimaryImageTag")[0] && jstr(p, "Id")[0])
+                    snprintf(rows[n - 1].art_url, sizeof rows[n - 1].art_url,
+                             "%s/Items/%s/Images/Primary?maxHeight=120&quality=80&format=jpg", x->base, jstr(p, "Id"));
+                ++cast;
+            }
         }
     }
     PROV_LOG("media server details: %d row(s)", n);

@@ -687,7 +687,9 @@ static int plex_parse_xml_media(const char *body, size_t len,
                      "%s:%d:%s", prefix, server_index, key);
             it->kind = EVO_MEDIA_FOLDER;
             it->is_folder = 1;
+            it->detail = !strcmp(type, "show") ? 2 : 0;
         } else {
+            it->detail = !strcmp(type, "movie") ? 1 : 0;
             snprintf(it->id, sizeof it->id,
                      "video:%d:%s", server_index, key);
             it->kind = EVO_MEDIA_VIDEO;
@@ -1537,6 +1539,339 @@ static void plex_report_progress(const char *item_id,
            rc);
 }
 
+/* ------------------------------------------------------------------------- */
+/* Details and cast (the Triangle panel)                                     */
+/* ------------------------------------------------------------------------- */
+
+typedef struct {
+    evo_provider_rows_cb cb;
+    void *ud;
+    int server_index;
+} plex_panel_ctx_t;
+
+static int plex_parse_any_media_id(const char *id, int *server_index, char *key, size_t cap)
+{
+    if (plex_parse_media_id(id, "video:", server_index, key, cap)) return 1;
+    if (plex_parse_media_id(id, "show:", server_index, key, cap)) return 1;
+    if (plex_parse_media_id(id, "season:", server_index, key, cap)) return 1;
+    if (plex_parse_media_id(id, "folder:", server_index, key, cap)) return 1;
+    if (plex_parse_media_id(id, "lib:", server_index, key, cap)) return 1;
+
+    if (!id || !server_index || !key || cap == 0) return 0;
+    const char *colon = strchr(id, ':');
+    if (colon) {
+        char *end = NULL;
+        long idx = strtol(id, &end, 10);
+        if (end == colon && idx >= 0 && idx < plex_server_count) {
+            *server_index = (int)idx;
+            snprintf(key, cap, "%s", colon + 1);
+            return 1;
+        }
+        const char *colon2 = strchr(colon + 1, ':');
+        if (colon2) {
+            long idx2 = strtol(colon + 1, &end, 10);
+            if (end == colon2 && idx2 >= 0 && idx2 < plex_server_count) {
+                *server_index = (int)idx2;
+                snprintf(key, cap, "%s", colon2 + 1);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void plex_build_thumb_url(int server_index, const char *thumb, char *out, size_t cap)
+{
+    if (!out || cap == 0) return;
+    out[0] = '\0';
+    if (!thumb || !thumb[0] || server_index < 0 || server_index >= plex_server_count)
+        return;
+
+    const plex_server_t *server = &plex_servers[server_index];
+    if (thumb[0] == '/') {
+        snprintf(out, cap, "%s%s%sX-Plex-Token=%s",
+                 server->uri, thumb, strchr(thumb, '?') ? "&" : "?", server->access_token);
+    } else if (!strncmp(thumb, "http", 4)) {
+        if (strstr(thumb, server->uri) && !strstr(thumb, "X-Plex-Token")) {
+            snprintf(out, cap, "%s%sX-Plex-Token=%s",
+                     thumb, strchr(thumb, '?') ? "&" : "?", server->access_token);
+        } else {
+            snprintf(out, cap, "%s", thumb);
+        }
+    }
+}
+
+static void plex_row_add(evo_provider_row_t *rows, int *n, int max,
+                         const char *title, const char *detail,
+                         const char *art_url, const char *group)
+{
+    if (*n >= max || !title || !title[0]) return;
+    evo_provider_row_t *r = &rows[(*n)++];
+    memset(r, 0, sizeof *r);
+    r->id[0] = '\0';
+    snprintf(r->title, sizeof r->title, "%s", title);
+    if (detail && detail[0]) snprintf(r->detail, sizeof r->detail, "%s", detail);
+    if (art_url && art_url[0]) snprintf(r->art_url, sizeof r->art_url, "%s", art_url);
+    if (group && group[0]) snprintf(r->group, sizeof r->group, "%s", group);
+}
+
+static void plex_on_panel_details(int ok, int status, const char *body, size_t len, void *ud)
+{
+    plex_panel_ctx_t *ctx = (plex_panel_ctx_t *)ud;
+    if (!ctx) return;
+
+    if (!ok || status != 200 || !body || !len) {
+        if (ctx->cb) ctx->cb(0, NULL, 0, ctx->ud);
+        free(ctx);
+        return;
+    }
+
+    evo_provider_row_t rows[20];
+    int n = 0;
+
+    cJSON *root = cJSON_ParseWithLength(body, len);
+    cJSON *mc = root ? cJSON_GetObjectItemCaseSensitive(root, "MediaContainer") : NULL;
+    cJSON *item = NULL;
+    if (mc) {
+        cJSON *arr = cJSON_GetObjectItemCaseSensitive(mc, "Metadata");
+        if (!arr) arr = cJSON_GetObjectItemCaseSensitive(mc, "Video");
+        if (!arr) arr = cJSON_GetObjectItemCaseSensitive(mc, "Directory");
+        if (arr && cJSON_IsArray(arr)) item = cJSON_GetArrayItem(arr, 0);
+        else if (arr && cJSON_IsObject(arr)) item = arr;
+    }
+
+    if (item) {
+        /* Rating: audienceRating or rating, "x.x/10", plus contentRating */
+        double ar_val = 0.0;
+        cJSON *ar = cJSON_GetObjectItemCaseSensitive(item, "audienceRating");
+        if (ar) {
+            if (cJSON_IsNumber(ar)) ar_val = ar->valuedouble;
+            else if (cJSON_IsString(ar) && ar->valuestring) ar_val = atof(ar->valuestring);
+        }
+        if (ar_val <= 0.0) {
+            cJSON *rt = cJSON_GetObjectItemCaseSensitive(item, "rating");
+            if (rt) {
+                if (cJSON_IsNumber(rt)) ar_val = rt->valuedouble;
+                else if (cJSON_IsString(rt) && rt->valuestring) ar_val = atof(rt->valuestring);
+            }
+        }
+        const char *cr = plex_json_string(item, "contentRating");
+        char rbuf[160];
+        size_t rb = 0;
+        rbuf[0] = '\0';
+        if (ar_val > 0.0) {
+            rb += (size_t)snprintf(rbuf + rb, sizeof rbuf - rb, "%.1f/10", ar_val);
+        }
+        if (cr && cr[0]) {
+            rb += (size_t)snprintf(rbuf + rb, sizeof rbuf - rb, "%s%s", rb ? " · " : "", cr);
+        }
+        if (rb > 0) {
+            plex_row_add(rows, &n, 20, "Rating", rbuf, NULL, NULL);
+        }
+
+        /* Genres: Genre[].tag */
+        cJSON *genres = cJSON_GetObjectItemCaseSensitive(item, "Genre");
+        char gbuf[160];
+        size_t gb = 0;
+        gbuf[0] = '\0';
+        for (int i = 0; genres && cJSON_IsArray(genres) && i < cJSON_GetArraySize(genres) && gb + 2 < sizeof gbuf; ++i) {
+            cJSON *g = cJSON_GetArrayItem(genres, i);
+            const char *tag = plex_json_string(g, "tag");
+            if (tag[0]) {
+                gb += (size_t)snprintf(gbuf + gb, sizeof gbuf - gb, "%s%s", gb ? ", " : "", tag);
+            }
+        }
+        if (gb > 0) {
+            plex_row_add(rows, &n, 20, "Genres", gbuf, NULL, NULL);
+        }
+
+        /* Director: Director[].tag */
+        cJSON *directors = cJSON_GetObjectItemCaseSensitive(item, "Director");
+        char dbuf[160];
+        size_t db = 0;
+        dbuf[0] = '\0';
+        for (int i = 0; directors && cJSON_IsArray(directors) && i < cJSON_GetArraySize(directors) && db + 2 < sizeof dbuf; ++i) {
+            cJSON *d = cJSON_GetArrayItem(directors, i);
+            const char *tag = plex_json_string(d, "tag");
+            if (tag[0]) {
+                db += (size_t)snprintf(dbuf + db, sizeof dbuf - db, "%s%s", db ? ", " : "", tag);
+            }
+        }
+        if (db > 0) {
+            plex_row_add(rows, &n, 20, "Director", dbuf, NULL, NULL);
+        }
+
+        /* Studio */
+        const char *studio = plex_json_string(item, "studio");
+        if (!studio[0]) studio = plex_json_string(item, "Studio");
+        if (studio[0]) {
+            plex_row_add(rows, &n, 20, "Studio", studio, NULL, NULL);
+        }
+
+        /* Cast: up to 12 from Role[] */
+        cJSON *roles = cJSON_GetObjectItemCaseSensitive(item, "Role");
+        int cast_count = 0;
+        for (int i = 0; roles && cJSON_IsArray(roles) && i < cJSON_GetArraySize(roles) && cast_count < 12; ++i) {
+            cJSON *r = cJSON_GetArrayItem(roles, i);
+            const char *name = plex_json_string(r, "tag");
+            if (!name[0]) continue;
+            const char *role = plex_json_string(r, "role");
+            const char *thumb = plex_json_string(r, "thumb");
+            char art[EVO_PROVIDER_MAX_ART_URL] = {0};
+            if (thumb[0]) {
+                plex_build_thumb_url(ctx->server_index, thumb, art, sizeof art);
+            }
+            plex_row_add(rows, &n, 20, name, role, art, "cast");
+            cast_count++;
+        }
+    } else {
+        /* Fallback: XML parser using existing plex_xml_attribute */
+        const char *tag = strstr(body, "<Video");
+        if (!tag) tag = strstr(body, "<Directory");
+        if (tag) {
+            const char *tag_end = strchr(tag, '>');
+            if (tag_end) {
+                char ar_str[32] = {0}, rt_str[32] = {0}, cr_str[64] = {0}, st_str[96] = {0};
+                plex_xml_attribute(tag, tag_end, "audienceRating", ar_str, sizeof ar_str);
+                plex_xml_attribute(tag, tag_end, "rating", rt_str, sizeof rt_str);
+                plex_xml_attribute(tag, tag_end, "contentRating", cr_str, sizeof cr_str);
+                plex_xml_attribute(tag, tag_end, "studio", st_str, sizeof st_str);
+
+                double ar_val = ar_str[0] ? atof(ar_str) : (rt_str[0] ? atof(rt_str) : 0.0);
+                char rbuf[160];
+                size_t rb = 0;
+                rbuf[0] = '\0';
+                if (ar_val > 0.0) {
+                    rb += (size_t)snprintf(rbuf + rb, sizeof rbuf - rb, "%.1f/10", ar_val);
+                }
+                if (cr_str[0]) {
+                    rb += (size_t)snprintf(rbuf + rb, sizeof rbuf - rb, "%s%s", rb ? " · " : "", cr_str);
+                }
+                if (rb > 0) {
+                    plex_row_add(rows, &n, 20, "Rating", rbuf, NULL, NULL);
+                }
+
+                /* Genres from <Genre tag="..."/> */
+                char gbuf[160];
+                size_t gb = 0;
+                gbuf[0] = '\0';
+                const char *p = tag_end;
+                while ((p = strstr(p, "<Genre")) != NULL) {
+                    const char *ge = strchr(p, '>');
+                    if (!ge) break;
+                    char val[64] = {0};
+                    if (plex_xml_attribute(p, ge, "tag", val, sizeof val) && val[0]) {
+                        if (gb + 2 < sizeof gbuf) {
+                            gb += (size_t)snprintf(gbuf + gb, sizeof gbuf - gb, "%s%s", gb ? ", " : "", val);
+                        }
+                    }
+                    p = ge + 1;
+                }
+                if (gb > 0) {
+                    plex_row_add(rows, &n, 20, "Genres", gbuf, NULL, NULL);
+                }
+
+                /* Director from <Director tag="..."/> */
+                char dbuf[160];
+                size_t db = 0;
+                dbuf[0] = '\0';
+                p = tag_end;
+                while ((p = strstr(p, "<Director")) != NULL) {
+                    const char *de = strchr(p, '>');
+                    if (!de) break;
+                    char val[64] = {0};
+                    if (plex_xml_attribute(p, de, "tag", val, sizeof val) && val[0]) {
+                        if (db + 2 < sizeof dbuf) {
+                            db += (size_t)snprintf(dbuf + db, sizeof dbuf - db, "%s%s", db ? ", " : "", val);
+                        }
+                    }
+                    p = de + 1;
+                }
+                if (db > 0) {
+                    plex_row_add(rows, &n, 20, "Director", dbuf, NULL, NULL);
+                }
+
+                if (st_str[0]) {
+                    plex_row_add(rows, &n, 20, "Studio", st_str, NULL, NULL);
+                }
+
+                /* Roles from <Role tag="..." role="..." thumb="..."/> */
+                int cast_count = 0;
+                p = tag_end;
+                while ((p = strstr(p, "<Role")) != NULL && cast_count < 12) {
+                    const char *re = strchr(p, '>');
+                    if (!re) break;
+                    char name[96] = {0}, role[96] = {0}, thumb[256] = {0};
+                    plex_xml_attribute(p, re, "tag", name, sizeof name);
+                    plex_xml_attribute(p, re, "role", role, sizeof role);
+                    plex_xml_attribute(p, re, "thumb", thumb, sizeof thumb);
+                    if (name[0]) {
+                        char art[EVO_PROVIDER_MAX_ART_URL] = {0};
+                        if (thumb[0]) {
+                            plex_build_thumb_url(ctx->server_index, thumb, art, sizeof art);
+                        }
+                        plex_row_add(rows, &n, 20, name, role, art, "cast");
+                        cast_count++;
+                    }
+                    p = re + 1;
+                }
+            }
+        }
+    }
+
+    if (root) cJSON_Delete(root);
+
+    if (ctx->cb) ctx->cb(n > 0, rows, n, ctx->ud);
+    free(ctx);
+}
+
+static int plex_panel(const char *item_id, const char *kind, evo_provider_rows_cb cb, void *ud)
+{
+    if (!item_id || !kind || strcmp(kind, "details") != 0) return -1;
+    int server_index = -1;
+    char key[64];
+    if (!plex_parse_any_media_id(item_id, &server_index, key, sizeof key))
+        return -1;
+    if (server_index < 0 || server_index >= plex_server_count)
+        return -1;
+
+    plex_server_t *server = &plex_servers[server_index];
+    if (!server->uri[0] || !server->access_token[0])
+        return -1;
+
+    plex_panel_ctx_t *ctx = (plex_panel_ctx_t *)calloc(1, sizeof *ctx);
+    if (!ctx) return -2;
+    ctx->cb = cb;
+    ctx->ud = ud;
+    ctx->server_index = server_index;
+
+    char url[1200];
+    int n = snprintf(url, sizeof url, "%s/library/metadata/%s", server->uri, key);
+    if (n < 0 || (size_t)n >= sizeof url) {
+        free(ctx);
+        return -1;
+    }
+
+    char auth_header[1200];
+    n = snprintf(auth_header, sizeof auth_header, "X-Plex-Token: %s", server->access_token);
+    if (n < 0 || (size_t)n >= sizeof auth_header) {
+        free(ctx);
+        return -1;
+    }
+
+    const char *headers[] = {
+        PLEX_HEADERS,
+        PLEX_PRODUCT,
+        PLEX_ACCEPT,
+        "X-Plex-Accept: application/json",
+        auth_header
+    };
+
+    int rc = evo_net_request_async("GET", url, NULL, headers, 5, plex_on_panel_details, ctx);
+    if (rc != 0) free(ctx);
+    return rc;
+}
+
 const evo_provider_t evo_provider_plex = {
     .id = "plex", .name = "Plex", .icon = "brand_plex.png",
     .caps = EVO_PROVIDER_CAP_AUTH | EVO_PROVIDER_CAP_CATALOG |
@@ -1551,5 +1886,6 @@ const evo_provider_t evo_provider_plex = {
     .qc_start = plex_qc_start, .qc_poll = plex_qc_poll,
     .qc_cancel = plex_qc_cancel,
     .is_signed_in = plex_signed_in, .sign_out = plex_sign_out,
-    .ui_embedded = "mediaserver"
+    .ui_embedded = "mediaserver",
+    .panel = plex_panel
 };

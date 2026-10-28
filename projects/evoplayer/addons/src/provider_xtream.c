@@ -591,6 +591,7 @@ static void on_vod_streams_resp(int success, int status, const char *body, size_
         if (icon && icon->valuestring && icon->valuestring[0]) {
             snprintf(items[i].art_url, sizeof items[i].art_url, "%s", icon->valuestring);
         }
+        items[i].detail = 1;
         items[i].kind = EVO_MEDIA_VIDEO;
         items[i].is_live = 0;
         items[i].is_folder = 0;
@@ -670,6 +671,7 @@ static void on_series_resp(int success, int status, const char *body, size_t len
         if (cover && cover->valuestring && cover->valuestring[0]) {
             snprintf(items[i].art_url, sizeof items[i].art_url, "%s", cover->valuestring);
         }
+        items[i].detail = 2;
         items[i].kind = EVO_MEDIA_FOLDER;
         items[i].is_folder = 1;
     }
@@ -1435,6 +1437,187 @@ static const char *xtream_provider_ui_bundle_url(void)
     return NULL;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Details and cast (the Triangle panel)                                     */
+/* ------------------------------------------------------------------------- */
+
+typedef struct {
+    evo_provider_rows_cb cb;
+    void *ud;
+} xtream_panel_ctx_t;
+
+static void xtream_row_add(evo_provider_row_t *rows, int *n, int max,
+                           const char *title, const char *detail,
+                           const char *art_url, const char *group)
+{
+    if (*n >= max || !title || !title[0]) return;
+    evo_provider_row_t *r = &rows[(*n)++];
+    memset(r, 0, sizeof *r);
+    r->id[0] = '\0';
+    snprintf(r->title, sizeof r->title, "%s", title);
+    if (detail && detail[0]) snprintf(r->detail, sizeof r->detail, "%s", detail);
+    if (art_url && art_url[0]) snprintf(r->art_url, sizeof r->art_url, "%s", art_url);
+    if (group && group[0]) snprintf(r->group, sizeof r->group, "%s", group);
+}
+
+static void on_xtream_details_resp(int success, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    xtream_panel_ctx_t *ctx = (xtream_panel_ctx_t *)ud;
+    if (!ctx) return;
+
+    if (!success || status < 200 || status >= 300 || !body) {
+        if (ctx->cb) ctx->cb(0, NULL, 0, ctx->ud);
+        free(ctx);
+        return;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        if (ctx->cb) ctx->cb(0, NULL, 0, ctx->ud);
+        free(ctx);
+        return;
+    }
+
+    cJSON *info = cJSON_GetObjectItem(root, "info");
+    if (!info) info = root;
+
+    evo_provider_row_t rows[20];
+    int n = 0;
+
+    /* Rating: info.rating / rating_5based as "x.x/10" when it parses */
+    cJSON *r = cJSON_GetObjectItem(info, "rating");
+    cJSON *r5 = cJSON_GetObjectItem(info, "rating_5based");
+    double rating_val = 0.0;
+    if (r) {
+        if (cJSON_IsNumber(r)) rating_val = r->valuedouble;
+        else if (cJSON_IsString(r) && r->valuestring) rating_val = atof(r->valuestring);
+    }
+    if (rating_val <= 0.0 && r5) {
+        if (cJSON_IsNumber(r5) && r5->valuedouble > 0.0) rating_val = r5->valuedouble * 2.0;
+        else if (cJSON_IsString(r5) && r5->valuestring) {
+            double v5 = atof(r5->valuestring);
+            if (v5 > 0.0) rating_val = v5 * 2.0;
+        }
+    }
+    if (rating_val > 0.0) {
+        char rbuf[32];
+        snprintf(rbuf, sizeof rbuf, "%.1f/10", rating_val);
+        xtream_row_add(rows, &n, 20, "Rating", rbuf, "", "");
+    }
+
+    /* Genres: info.genre */
+    cJSON *genre = cJSON_GetObjectItem(info, "genre");
+    if (genre && cJSON_IsString(genre) && genre->valuestring && genre->valuestring[0]) {
+        xtream_row_add(rows, &n, 20, "Genres", genre->valuestring, "", "");
+    }
+
+    /* Director: info.director */
+    cJSON *director = cJSON_GetObjectItem(info, "director");
+    if (director && cJSON_IsString(director) && director->valuestring && director->valuestring[0]) {
+        xtream_row_add(rows, &n, 20, "Director", director->valuestring, "", "");
+    }
+
+    /* Cast: info.cast / info.actors comma-separated, one row each, group "cast", detail "", art_url "", cap 12 */
+    cJSON *cast_item = cJSON_GetObjectItem(info, "cast");
+    if (!cast_item || !cJSON_IsString(cast_item) || !cast_item->valuestring || !cast_item->valuestring[0]) {
+        cast_item = cJSON_GetObjectItem(info, "actors");
+    }
+    if (cast_item && cJSON_IsString(cast_item) && cast_item->valuestring && cast_item->valuestring[0]) {
+        const char *p = cast_item->valuestring;
+        int cast_count = 0;
+        while (*p && cast_count < 12 && n < 20) {
+            while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ',') p++;
+            if (!*p) break;
+            const char *start = p;
+            while (*p && *p != ',') p++;
+            const char *end = p;
+            while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) end--;
+            if (end > start) {
+                char name[96];
+                size_t nlen = (size_t)(end - start);
+                if (nlen >= sizeof name) nlen = sizeof name - 1;
+                memcpy(name, start, nlen);
+                name[nlen] = '\0';
+                xtream_row_add(rows, &n, 20, name, "", "", "cast");
+                cast_count++;
+            }
+        }
+    }
+
+    if (ctx->cb) ctx->cb(n > 0, rows, n, ctx->ud);
+    cJSON_Delete(root);
+    free(ctx);
+}
+
+static int xtream_panel(const char *item_id, const char *kind, evo_provider_rows_cb cb, void *ud)
+{
+    if (!item_id || !kind || strcmp(kind, "details") != 0) return -1;
+    if (!g_cfg.host[0] || !g_cfg.username[0] || !g_cfg.password[0]) return -1;
+
+    int is_vod = 0;
+    int is_series = 0;
+    char target_id[64] = {0};
+
+    if (strncmp(item_id, "vod_stream:", 11) == 0) {
+        is_vod = 1;
+        const char *p = item_id + 11;
+        const char *colon = strchr(p, ':');
+        size_t len = colon ? (size_t)(colon - p) : strlen(p);
+        if (len >= sizeof target_id) len = sizeof target_id - 1;
+        memcpy(target_id, p, len);
+        target_id[len] = '\0';
+    } else if (strncmp(item_id, "vod:", 4) == 0) {
+        is_vod = 1;
+        const char *p = item_id + 4;
+        const char *colon = strchr(p, ':');
+        size_t len = colon ? (size_t)(colon - p) : strlen(p);
+        if (len >= sizeof target_id) len = sizeof target_id - 1;
+        memcpy(target_id, p, len);
+        target_id[len] = '\0';
+    } else if (strncmp(item_id, "series_show:", 12) == 0) {
+        is_series = 1;
+        snprintf(target_id, sizeof target_id, "%s", item_id + 12);
+    } else if (strncmp(item_id, "series_season:", 14) == 0) {
+        is_series = 1;
+        const char *p = item_id + 14;
+        const char *colon = strchr(p, ':');
+        size_t len = colon ? (size_t)(colon - p) : strlen(p);
+        if (len >= sizeof target_id) len = sizeof target_id - 1;
+        memcpy(target_id, p, len);
+        target_id[len] = '\0';
+    } else if (strncmp(item_id, "series:", 7) == 0) {
+        is_series = 1;
+        const char *p = item_id + 7;
+        const char *colon = strchr(p, ':');
+        size_t len = colon ? (size_t)(colon - p) : strlen(p);
+        if (len >= sizeof target_id) len = sizeof target_id - 1;
+        memcpy(target_id, p, len);
+        target_id[len] = '\0';
+    }
+
+    if (!target_id[0] || (!is_vod && !is_series)) return -1;
+
+    xtream_panel_ctx_t *ctx = (xtream_panel_ctx_t *)calloc(1, sizeof *ctx);
+    if (!ctx) return -2;
+    ctx->cb = cb;
+    ctx->ud = ud;
+
+    char q[128];
+    if (is_vod) {
+        snprintf(q, sizeof q, "action=get_vod_info&vod_id=%s", target_id);
+    } else {
+        snprintf(q, sizeof q, "action=get_series_info&series_id=%s", target_id);
+    }
+
+    char url[1024];
+    build_api_url(url, sizeof url, q);
+
+    int rc = evo_net_request_async("GET", url, NULL, NULL, 0, on_xtream_details_resp, ctx);
+    if (rc != 0) free(ctx);
+    return rc;
+}
+
 const evo_provider_t evo_provider_xtream = {
     .id              = "xtream",
     .name            = "Xtream Codes",
@@ -1460,4 +1643,5 @@ const evo_provider_t evo_provider_xtream = {
     .web_ui_hook     = NULL,
     .is_signed_in    = xtream_provider_is_configured,
     .sign_out        = xtream_provider_sign_out,
+    .panel           = xtream_panel,
 };
