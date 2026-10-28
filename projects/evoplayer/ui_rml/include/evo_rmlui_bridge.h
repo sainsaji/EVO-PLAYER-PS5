@@ -185,7 +185,8 @@ enum {
     EVO_RMLUI_PREVIEW_FOLDERS_FIRST,/* file list: folders grouped above files */
     EVO_RMLUI_PREVIEW_KEYBOARD,     /* EVO virtual keyboard vs native PS5 IME */
     EVO_RMLUI_PREVIEW_ASK_STREAM,   /* live channel tile to quality dialog */
-    EVO_RMLUI_PREVIEW_DEBUG_OVERLAY /* live stats box over video frame */
+    EVO_RMLUI_PREVIEW_DEBUG_OVERLAY,/* live stats box over video frame */
+    EVO_RMLUI_PREVIEW_PORT          /* phone link QR + URL + port status */
 };
 
 #define EVO_RMLUI_PREVIEW_CHOICES 12  /* EVO_THEME_MAX, the longest list */
@@ -210,6 +211,8 @@ typedef struct {
     /* THEME only: each choice's page background and accent, 0xRRGGBB. */
     unsigned int choice_bg[EVO_RMLUI_PREVIEW_CHOICES];
     unsigned int choice_accent[EVO_RMLUI_PREVIEW_CHOICES];
+    int qr_size;                      /* PORT card: the phone-link QR, modules per side, 0 = none */
+    const unsigned char* qr_modules;  /* qr_size * qr_size, row-major, 1 = dark */
 } evo_rmlui_settings_row_t;
 
 typedef struct {
@@ -909,6 +912,11 @@ typedef struct {
     int cursor;               /* caret as a byte offset into text */
     int qr_size;              /* phone-link QR: modules per side, 0 = none */
     const unsigned char* qr_modules;   /* qr_size * qr_size, row-major, 1 = dark */
+    /* No QR: a card in its place. phone_notice NULL / "" = say nothing. */
+    const char* phone_title;           /* "PHONE LINK OFF" */
+    const char* phone_notice;          /* body: why, or the result of the port check */
+    int phone_kind;                    /* 0 off (red), 1 ok (green), 2 checking (amber) */
+    const char* phone_action;          /* R3 button label ("Set port"), NULL / "" = none */
     /* Native-style layout (the kit draws it). rows / action_labels above are
      * the old 4-row grid and stay empty; the RmlUi fallback document still
      * reads them. focus_row 0..4 = key rows, EVO_KB_CLEAR_ROW = clear button. */

@@ -70,7 +70,24 @@ size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
 /* Start the live log server (once; later calls do nothing). Port
  * EVO_LOG_SERVER_PORT, read-only, every line already redacted. */
 void evo_log_server_start(void);
-#define EVO_LOG_SERVER_PORT 9780
+#define EVO_LOG_SERVER_PORT 9780   /* default; the user can change it (#227) */
+
+/* The port is user-settable. The server binds the saved port, falls back to the
+ * next nine when it is busy, and keeps retrying the saved one in the background.
+ *   evo_log_server_port:       the port really listening, 0 = none (QR off)
+ *   evo_log_server_saved_port: the port the user chose
+ *   evo_log_server_state:      EVO_LOGSRV_*
+ *   evo_log_server_set_port:   store without testing (settings load, reset)
+ *   evo_log_server_try_port:   test-bind first; 0 = accepted and stored, else the
+ *                              errno (EADDRINUSE = busy, EINVAL = out of range)
+ *                              and the old port is kept. */
+enum { EVO_LOGSRV_STARTING = 0, EVO_LOGSRV_SAVED = 1, EVO_LOGSRV_FALLBACK = 2, EVO_LOGSRV_NONE = 3 };
+int  evo_log_server_port(void);
+int  evo_log_server_saved_port(void);
+int  evo_log_server_state(void);
+void evo_log_server_set_port(int port);
+int  evo_log_server_probe_port(int port);   /* the test-bind alone: stores nothing */
+int  evo_log_server_try_port(int port);
 
 /* Preferred names for new code — the file carries far more than the boot. */
 #define evo_log        evo_boot_log

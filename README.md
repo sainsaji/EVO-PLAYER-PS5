@@ -36,7 +36,7 @@ Full notes: [CHANGELOG.md](CHANGELOG.md).
 ### Highlights from v0.12.0
 
 - **Audio Passthrough:** Settings → Audio → `AUDIO PASSTHROUGH` sends Dolby Digital, Dolby Digital Plus (including Atmos), DTS and AAC over HDMI untouched, so your soundbar or receiver does the decoding. Dolby TrueHD is included as an experimental option.
-- **Type from your phone:** server addresses, playlist URLs and addon links can be sent from a phone browser on the same network. The keyboard shows the link to open; nothing to install.
+- **Type from your phone:** server addresses, playlist URLs and addon links can be sent from a phone browser on the same network. The keyboard shows the link (user-settable port, default 9780) and QR code to open; nothing to install.
 - **Stremio Addons:** renamed from "Addons", with a `Remove` row for every saved addon, and addresses may be typed without `http://`.
 - **Match video frame rate (experimental):** asks the display for the video's own rate, with a fall-back to 119.88 Hz for film on firmware 12.70.
 

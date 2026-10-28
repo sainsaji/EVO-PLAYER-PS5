@@ -743,6 +743,10 @@ int main(int argc, char **argv)
         {"settings_pv_nav_sounds_off", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "nav_sounds_off"); }},
         {"settings_pv_folders_first", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "folders_first"); }},
         {"settings_pv_folders_first_off", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "folders_first_off"); }},
+        {"settings_pv_port_free", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_free"); }},
+        {"settings_pv_port_busy", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_busy"); }},
+        {"settings_pv_port_fallback", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_fallback"); }},
+        {"settings_pv_port_none", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_none"); }},
         {"settings_pv_keyboard", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "keyboard"); }},
         {"settings_pv_keyboard_ps5", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "keyboard_ps5"); }},
         {"settings_pv_ask_stream", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "ask_stream"); }},
@@ -826,6 +830,10 @@ int main(int argc, char **argv)
         {"shelves_xtream", 17, [&] { clear_focus(); fill_provider_shelves_fixture(prp, provider_art, 3, 0, 1); }},
         {"provider_folder", 17, [&] { clear_focus(); fill_provider_fixture(prp, provider_art, 4); }},
         {"keyboard", 15, [&] { clear_focus(); fill_keyboard_fixture(kbp); }},
+        {"keyboard_phone", 15, [&] { clear_focus(); fill_keyboard_phone_fixture(kbp); }},
+        {"keyboard_noport", 15, [&] { clear_focus(); fill_keyboard_noport_fixture(kbp); }},
+        {"keyboard_port_free", 15, [&] { clear_focus(); fill_keyboard_port_fixture(kbp, 1); }},
+        {"keyboard_port_taken", 15, [&] { clear_focus(); fill_keyboard_port_fixture(kbp, 0); }},
         {"toast", 12, [&] { clear_focus(); fill_toast_fixture(toastp); toastp.visible = 1; toastp.alpha = 255; toastp.slide = 0; }},
     };
 

@@ -86,6 +86,11 @@ void SettingsScreen::set(const evo_rmlui_settings_params_t &p)
             r.choice_bg.push_back(p.rows[i].choice_bg[c]);
             r.choice_accent.push_back(p.rows[i].choice_accent[c]);
         }
+        if (p.rows[i].qr_modules && p.rows[i].qr_size > 0)
+        {
+            r.qr_size = p.rows[i].qr_size;
+            r.qr.assign(p.rows[i].qr_modules, p.rows[i].qr_modules + static_cast<size_t>(r.qr_size) * r.qr_size);
+        }
         rows_.push_back(r);
     }
     detect_preview();
@@ -115,6 +120,8 @@ void SettingsScreen::detect_preview()
     preview_.choices = f.choices;
     preview_.choice_bg = f.choice_bg;
     preview_.choice_accent = f.choice_accent;
+    preview_.qr_size = f.qr_size;
+    preview_.qr = f.qr;
 }
 
 void SettingsScreen::enter()

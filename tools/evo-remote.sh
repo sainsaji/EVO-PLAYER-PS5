@@ -597,7 +597,7 @@ boot|log)
         || echo "(no evo.log — launched? sandbox open?)"
     ;;
 logs|tail)
-    # Live log from EVO's own server (port 9780), no FTP. Ctrl-C to stop.
+    # Live log from EVO's own server (port 9780, or PS5_LOG_PORT), no FTP. Ctrl-C to stop.
     #   evo-remote.sh logs              whole ring, then live
     #   evo-remote.sh logs now          live only
     #   evo-remote.sh logs <text>       only lines containing <text>
@@ -623,8 +623,8 @@ logs|tail)
                 print line; fflush(); next }
             { print; fflush() }')
     fi
-    curl -sN --connect-timeout 5 "http://${PS5_HOST}:9780/raw${Q:+?${Q}}" | "${FMT[@]}" \
-        || echo "(no log server on ${PS5_HOST}:9780 - EVO running?)"
+    curl -sN --connect-timeout 5 "http://${PS5_HOST}:${PS5_LOG_PORT:-9780}/raw${Q:+?${Q}}" | "${FMT[@]}" \
+        || echo "(no log server on ${PS5_HOST}:${PS5_LOG_PORT:-9780} - EVO running?)"
     ;;
 watch)
     SECS="${1:-180}"

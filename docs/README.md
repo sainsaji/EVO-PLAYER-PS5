@@ -34,7 +34,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 |---|---|
 | [hardware-cycle.md](console/hardware-cycle.md) | Quit, close, deploy, launch without panicking it; `cycle`; the services it needs |
 | [remote-control.md](console/remote-control.md) | `evo-remote.sh`: keys, `ui`, `go`, `set`, the status line |
-| [diagnostics.md](console/diagnostics.md) | `evo.log`, klog, the `:9780` endpoints, screenshots, debug switches, the files EVO keeps |
+| [diagnostics.md](console/diagnostics.md) | `evo.log`, klog, the live endpoints (default `:9780`), screenshots, debug switches, the files EVO keeps |
 | [networking.md](console/networking.md) | Container to console, ports, running servers on the host |
 | [remote-play.md](console/remote-play.md) | PS Remote Play from the PC for system dialogs |
 | [console-wake.md](console/console-wake.md) | A plan (not started) to wake the console after a power cut |

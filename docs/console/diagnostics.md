@@ -16,7 +16,7 @@ line enters the log.
 ```bash
 ./tools/evo-remote.sh log                 # pull it to output/logs/evo.log
 ./tools/evo-remote.sh watch 60            # stream status + new lines
-curl -N http://<ps5>:9780/raw             # live, no FTP
+curl -N http://<ps5>:9780/raw             # live, no FTP (default port 9780)
 curl "http://<ps5>:9780/raw?grep=hui&level=warn"
 ```
 
@@ -48,10 +48,19 @@ curl "http://<ps5>:9780/raw?grep=hui&level=warn"
 | `hui:` | the kit screens starting, or switched off |
 | `CRASH signal=... addr=...` | written by the crash handler with raw I/O (async-signal-safe) |
 
-## Live endpoints on `:9780`
+## Live endpoints (default `:9780`)
 
 `src/evo_log_server.c`, app module only, at most a few clients at once; a slow
 client never holds up the logger.
+
+The port defaults to 9780 and is user-settable in Settings → Interface & Storage →
+`PHONE & LOG PORT` (digits 1024–65535, Triangle resets to 9780). EVO test-binds the
+chosen port; if busy at startup, it falls back to the next nine ports (n+1..n+9) and
+keeps retrying the saved port in the background. The real bound port feeds the live
+log server, the phone keyboard URL and the QR code. If all 10 ports are busy, the
+server is disabled and the keyboard shows `PHONE LINK OFF` with a "Set port" button
+(R3). Dev tools (`tools/evo-remote.sh logs`, `tools/evo-dash.py`) default to 9780
+and honour `PS5_LOG_PORT` from the environment.
 
 | Path | Returns |
 |---|---|
@@ -72,7 +81,8 @@ Query options on `/raw`, `/stream`, `/log`: `tail=0` (only new lines), `grep=<te
 (the one that runs out), seconds of video loaded ahead, download speed against what
 the video needs, and a "what happened" list (buffering, connection lost or back,
 out-of-memory). Open `http://localhost:8790`; every sample is also written to
-`output/dash/<date>.jsonl`. `--host` or `PS5_HOST` picks the console.
+`output/dash/<date>.jsonl`. `--host` or `PS5_HOST` picks the console, and `PS5_LOG_PORT`
+overrides the log port (default 9780).
 
 ## Screenshots
 

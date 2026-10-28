@@ -1,4 +1,5 @@
 #include "evo/services/SettingsService.hpp"
+#include "evo_boot_log.h"
 #include "evo_data_path.h"
 #include "evo_theme.h"
 #include "evo_toast.h"
@@ -179,7 +180,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -207,7 +208,8 @@ bool SettingsService::saveSettings() {
         m_matchVideoRate ? 1 : 0,            // line 25 (experimental: match video frame rate)
         static_cast<int>(m_volumeBoost),     // line 26 (#166 volume boost)
         static_cast<int>(m_networkBuffer),   // line 27 (#199 network buffer)
-        m_audioDelayMs                       // line 28 (#170 audio delay ms)
+        m_audioDelayMs,                      // line 28 (#170 audio delay ms)
+        evo_log_server_saved_port()          // line 29 (#227 phone & log port)
     );
 
     std::fclose(file);
@@ -218,6 +220,7 @@ bool SettingsService::loadSettings() {
     const char* filePath = evo_data_path("evo_player_settings.cfg");
     FILE* file = std::fopen(filePath, "r");
     if (!file) {
+        evo_log_server_set_port(evo_log_server_saved_port());   /* nothing saved: the default stands */
         return false;
     }
 
@@ -249,9 +252,10 @@ bool SettingsService::loadSettings() {
     int rawVolumeBoost = 0;
     int rawNetworkBuffer = 0;
     int rawAudioDelay = 0;
+    int rawLogPort = EVO_LOG_SERVER_PORT;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -279,7 +283,8 @@ bool SettingsService::loadSettings() {
         &rawMatchVideoRate,
         &rawVolumeBoost,
         &rawNetworkBuffer,
-        &rawAudioDelay
+        &rawAudioDelay,
+        &rawLogPort
     );
 
     std::fclose(file);
@@ -361,6 +366,8 @@ bool SettingsService::loadSettings() {
     if (readCount >= 28 && rawAudioDelay >= -500 && rawAudioDelay <= 500) {
         m_audioDelayMs = (rawAudioDelay / 50) * 50;
     }
+    /* An older file has no port line: the default stands, and the server may bind it. */
+    evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

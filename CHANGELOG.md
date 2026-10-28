@@ -53,6 +53,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyN
 ### ![](https://img.shields.io/badge/INTERFACE-2196f3?style=flat-square) Interface & Settings
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Preview card for every setting** that shows the real effect, and Back out of an open row keeps the cursor.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **User-settable phone & log port.** Settings → Interface & Storage → PHONE & LOG PORT lets you pick any port (1024–65535, default 9780, Triangle resets). EVO test-binds it, falls back to the next nine (n+1..n+9) if busy, and keeps retrying in the background; dev tools honour `PS5_LOG_PORT`.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native-style virtual keyboard** with Shift, Caps Lock, a clear button and button icons on the keys. The phone keyboard mirrors the field for every prompt.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Fonts for every script** on the kit screens, and more subtitle encodings.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Pro memory mode.** A separate `-pro` package for the PS5 Pro, with a Memory row in Settings.

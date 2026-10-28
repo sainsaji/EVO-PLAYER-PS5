@@ -265,6 +265,11 @@ void KeyboardOverlay::set(const evo_keyboard_params_t &p)
         }
     qr_size_ = (p.qr_modules && p.qr_size > 0) ? p.qr_size : 0;
     qr_.assign(p.qr_modules, p.qr_modules + (size_t)qr_size_ * qr_size_);
+    phone_title_ = p.phone_title ? p.phone_title : "";
+    phone_notice_ = p.phone_notice ? p.phone_notice : "";
+    phone_action_ = p.phone_action ? p.phone_action : "";
+    phone_kind_ = p.phone_kind;
+    key_columns_ = p.key_columns > 0 ? p.key_columns : 11;
     sync_keys(p);
 }
 
@@ -273,6 +278,7 @@ void KeyboardOverlay::set(const evo_keyboard_params_t &p)
  * component, which draws the keys, the key icons and the shift / caps lock look. */
 void KeyboardOverlay::sync_keys(const evo_keyboard_params_t &p)
 {
+    if (layouts_built_ && built_columns_ != p.key_columns) layouts_built_ = false;   /* pad <-> full board */
     if (!layouts_built_ && p.key_row_len[0][0] > 0) {
         std::vector<ui::KeyboardLayout> layouts;
         for (int l = 0; l < EVO_KB_LAYERS; ++l) {
@@ -281,6 +287,7 @@ void KeyboardOverlay::sync_keys(const evo_keyboard_params_t &p)
             layout.columns = std::max(p.key_columns, 1);
             for (int r = 0; r < EVO_KB_ROWS; ++r) {
                 std::vector<ui::KeyboardKey> row;
+                if (p.key_row_len[l][r] <= 0) continue;
                 for (int c = 0; c < p.key_row_len[l][r]; ++c) {
                     const evo_kb_key_t &k = p.key_rows[l][r][c];
                     ui::KeyboardKey key;
@@ -302,6 +309,7 @@ void KeyboardOverlay::sync_keys(const evo_keyboard_params_t &p)
         keys_.style.bindings.shift = ::hui::Action::jump_prev;   /* L2 */
         keys_.style.bindings.done = ::hui::Action::jump_next;    /* R2 */
         layouts_built_ = true;
+        built_columns_ = p.key_columns;
     }
     if (!layouts_built_) return;
 
@@ -344,6 +352,7 @@ void KeyboardOverlay::draw(DrawList &list, const Context &ctx) const
     list.rounded_rect({0, 0, 1920, 1080}, 0, kBlack.with_alpha(0.55f * alpha));
 
     if (native_only_) return;
+    if (key_columns_ < 11) { draw_pad(list, ctx); return; }
 
     list.push_transform(enter_scale_.value, 960, 1080, 0, 0); // scale from bottom
     list.push_opacity(alpha);
@@ -405,9 +414,19 @@ void KeyboardOverlay::draw(DrawList &list, const Context &ctx) const
     {
         ui::Keyboard &keys = const_cast<ui::Keyboard &>(keys_);
         keys.style.theme = p.kit_theme();
+        /* Done is the one key that confirms: green, so the white focus plate never matches it. */
+        keys.style.theme.primary = Color::rgb(0x3ddc84);
+        keys.style.theme.on_primary = Color::rgb(0x10131a);
+        keys.style.highlight.color = p.accent;   /* the focus plate has its own colour */
         keys.style.panel = false;
         keys.style.surfaces = true;
-        keys.set_bounds(kBoard);
+        /* A pad keeps the key size of the full board, so it is as narrow as its columns, centred. */
+        Rect board = kBoard;
+        if (key_columns_ < 11) {
+            board.w = kBoard.w * static_cast<float>(key_columns_) / 11.0f;
+            board.x = kBoard.x + (kBoard.w - board.w) * 0.5f;
+        }
+        keys.set_bounds(board);
         ui::Canvas canvas{list, fonts, 0, ctx.time};
         keys_.draw(canvas);
     }
@@ -428,7 +447,107 @@ void KeyboardOverlay::draw(DrawList &list, const Context &ctx) const
             }
         }
         ui::text(list, fonts.semibold, "SCAN TO TYPE", qcard.cx(), qcard.y + side + 30.0f, 14, p.text_muted, Align::center, 2.0f);
+        if (!phone_title_.empty())
+            ui::text(list, fonts.semibold, phone_title_, qcard.cx(), qcard.y + side + 58.0f, 17, kWhite, Align::center);
+    } else if (!phone_notice_.empty()) {
+        // no QR (no port is free, or the port is being set): say so, where the QR would have been
+        const Color tone = phone_kind_ == 1 ? Color::rgb(0x3ddc84)
+                         : phone_kind_ == 2 ? Color::rgb(0xffb02e) : Color::rgb(0xff5a5f);
+        const Rect nc{card.x + card.w + 30.0f, card.y, 250.0f, 300.0f};
+        list.rounded_rect(nc, 16, kWhite.with_alpha(0.06f));
+        list.bordered_rect(nc, 16, kClear, 1.0f, tone.with_alpha(0.55f));
+        list.rounded_rect({nc.x + 20.0f, nc.y + 28.0f, 12.0f, 12.0f}, 6, tone);
+        ui::text(list, fonts.semibold, phone_title_, nc.x + 42.0f, nc.y + 40.0f, 14, tone, Align::left, 2.0f);
+        ui::paragraph(list, fonts.regular, phone_notice_, nc.x + 20.0f, nc.y + 82.0f, 18, nc.w - 40.0f, 25,
+                      kWhite.with_alpha(0.85f), 6);
+        if (!phone_action_.empty()) {
+            // the pad button that jumps to the port setting
+            const ui::Hint hint[] = {{ui::Button::right_stick, phone_action_.c_str()}};
+            ui::HintLayout layout;
+            layout.size = 30;
+            layout.text_size = 20;
+            layout.cy = nc.y + nc.h - 36.0f;
+            ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hint, 1, nc.x + 20.0f, false, layout);
+        }
     }
+
+    list.pop_opacity();
+    list.pop_transform();
+}
+
+/* A digits-only entry (the port): one compact dialog. A big readout on top, the pad on
+ * the left, and on the right the result of checking the number, all inside one card. */
+void KeyboardOverlay::draw_pad(DrawList &list, const Context &ctx) const
+{
+    const ui::Fonts &fonts = ctx.fonts;
+    const Palette &p = ctx.palette;
+    list.push_transform(enter_scale_.value, 960, 1080, 0, 0);
+    list.push_opacity(enter_fade_.value);
+
+    const Rect card{460.0f, 230.0f, 1000.0f, 620.0f};
+    list.shadow({card.x, card.y + 20, card.w, card.h}, 36, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(card, 36, p.bg_top.with_alpha(0.97f));
+    list.bordered_rect(card, 36, kClear, 1.0f, kWhite.with_alpha(0.12f));
+    ui::text(list, fonts.semibold, ui::upper(title_), card.cx(), card.y + 54.0f, 16, p.text_muted, Align::center, 3.0f);
+
+    // the number, large
+    const Rect well{card.x + 60.0f, card.y + 84.0f, card.w - 120.0f, 100.0f};
+    list.rounded_rect(well, 16, kBlack.with_alpha(0.3f));
+    list.bordered_rect(well, 16, kClear, 1.0f, kWhite.with_alpha(0.06f));
+    ui::text(list, fonts.semibold, text_, well.x + 32.0f, well.cy() + 18.0f, 52, kWhite);
+    if (show_caret_ && fmod(ctx.time, 1.0f) < 0.5f) {
+        const float tw = fonts.semibold.measure(text_, 52);
+        list.rounded_rect({well.x + 32.0f + tw + 4.0f, well.cy() - 28.0f, 3, 56}, 1, p.accent);
+    }
+    char counter[32];
+    std::snprintf(counter, sizeof(counter), "%d / %d", len_, max_len_);
+    ui::text(list, fonts.regular, counter, well.x + well.w - 28.0f, well.cy() + 8.0f, 18, p.text_faint, Align::right);
+
+    // the pad, key size as on the full keyboard
+    const Rect board{card.x + 60.0f, card.y + 214.0f, kBoard.w * static_cast<float>(key_columns_) / 11.0f, 340.0f};
+    {
+        ui::Keyboard &keys = const_cast<ui::Keyboard &>(keys_);
+        keys.style.theme = p.kit_theme();
+        /* Done is the one key that confirms: green, so the white focus plate never matches it. */
+        keys.style.theme.primary = Color::rgb(0x3ddc84);
+        keys.style.theme.on_primary = Color::rgb(0x10131a);
+        keys.style.highlight.color = p.accent;   /* the focus plate has its own colour */
+        keys.style.panel = false;
+        keys.style.surfaces = true;
+        keys.set_bounds(board);
+        ui::Canvas canvas{list, fonts, 0, ctx.time};
+        keys_.draw(canvas);
+    }
+
+    // the check result, beside the pad
+    const Color tone = phone_kind_ == 1 ? Color::rgb(0x3ddc84)
+                     : phone_kind_ == 2 ? Color::rgb(0xffb02e) : Color::rgb(0xff5a5f);
+    const float sx = board.x + board.w + 48.0f;
+    const Rect sp{sx, board.y, card.x + card.w - 60.0f - sx, board.h};
+    list.rounded_rect(sp, 20, tone.with_alpha(0.08f));
+    list.bordered_rect(sp, 20, kClear, 1.0f, tone.with_alpha(0.45f));
+    const float ix = sp.x + 56.0f, iy = sp.y + 66.0f, r = 30.0f, a = 11.0f;
+    list.circle(ix, iy, r, tone);
+    if (phone_kind_ == 1) {
+        list.line(ix - a, iy + 1.0f, ix - 3.0f, iy + 9.0f, 4.0f, kInk);
+        list.line(ix - 3.0f, iy + 9.0f, ix + a + 2.0f, iy - 8.0f, 4.0f, kInk);
+    } else {
+        list.line(ix - a + 2.0f, iy - a + 2.0f, ix + a - 2.0f, iy + a - 2.0f, 4.0f, kInk);
+        list.line(ix - a + 2.0f, iy + a - 2.0f, ix + a - 2.0f, iy - a + 2.0f, 4.0f, kInk);
+    }
+    ui::text(list, fonts.semibold, phone_title_, sp.x + 108.0f, iy + 7.0f, 20, tone, Align::left, 2.0f);
+    ui::paragraph(list, fonts.regular, phone_notice_, sp.x + 36.0f, sp.y + 140.0f, 21, sp.w - 72.0f, 30,
+                  kWhite.with_alpha(0.85f), 4);
+
+    // what the buttons do
+    const ui::Hint save[] = {{ui::Button::options, "Save"}, {ui::Button::circle, "Cancel"}};
+    const ui::Hint cancel[] = {{ui::Button::circle, "Cancel"}};
+    ui::HintLayout layout;
+    layout.size = 30;
+    layout.text_size = 20;
+    layout.cy = sp.y + sp.h - 38.0f;
+    if (phone_kind_ == 1) ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), save, 2, sp.x + 36.0f, false, layout);
+    else ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), cancel, 1, sp.x + 36.0f, false, layout);
 
     list.pop_opacity();
     list.pop_transform();

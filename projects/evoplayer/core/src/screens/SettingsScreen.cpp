@@ -5,11 +5,14 @@
 #include "evo_toast.h"
 #include "evo_theme.h"
 #include "evo_boot_log.h"
+#include "evo_keyboard.h"
+#include "qrcodegen.h"
 #include "evo_hw.h"
 #include "evo_agc_runtime.h"
 #include "evo_direct_mem.h"
 #include "evo_updater.h"
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -60,6 +63,7 @@ enum class SettingKey : int {
     Lightbar,
     FoldersFirst,
     KeyboardInput,
+    PhonePort,
     AskStream,
     /* SYSTEM & DIAGNOSTICS */
     CompatReport,
@@ -142,6 +146,8 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::FoldersFirst, EVO_RMLUI_PREVIEW_FOLDERS_FIRST, "Lists folders above files in the USB browser."},
     {SettingKey::KeyboardInput, EVO_RMLUI_PREVIEW_KEYBOARD,
      "The virtual keyboard is drawn by EVO. The native one is the PS5 system keyboard."},
+    {SettingKey::PhonePort, EVO_RMLUI_PREVIEW_PORT,
+     "EVO checks the port is free before it saves it. If it is busy at start-up, EVO tries the next nine and shows the one it got."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
     {SettingKey::CompatReport, EVO_RMLUI_PREVIEW_INFO,
@@ -172,7 +178,7 @@ const SettingKey kSubtitleKeys[] = {
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
-    SettingKey::KeyboardInput, SettingKey::AskStream,
+    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream,
 };
 const SettingKey kSystemKeys[] = {
     SettingKey::CompatReport, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
@@ -251,6 +257,8 @@ SettingDef valueDef(SettingKey key, const char* title, const char* detail,
     d.opt_count = count; d.opt_current = current;
     return d;
 }
+
+void fillPortPreview(evo_rmlui_settings_row_t& row);
 
 SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     SettingDef d{};
@@ -469,6 +477,18 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
     }
 
+    case SettingKey::PhonePort: {
+        static char s_port_badge[16];
+        const int actual = evo_log_server_port();
+        if (actual > 0) std::snprintf(s_port_badge, sizeof s_port_badge, "%d", actual);
+        else std::snprintf(s_port_badge, sizeof s_port_badge, "NONE");
+        d = actionDef(key, "PHONE & LOG PORT",
+                      actual > 0 ? "PHONE KEYBOARD LINK AND LIVE LOG - CROSS TO CHANGE"
+                                 : "NO FREE PORT - CROSS TO SET A NEW ONE",
+                      "../icons/icon_keyboard.png", s_port_badge);
+        break;
+    }
+
     case SettingKey::AskStream:
         d = toggleDef(key, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL",
                       "../icons/icon_tv.png", settings->isAskStreamEnabled());
@@ -683,6 +703,7 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
         }
         row.preview_index = (def.kind == EVO_RMLUI_ROW_TOGGLE) ? (def.toggle_on ? 1 : 0)
                           : (opt >= 0) ? opt : def.opt_current;
+        if (def.key == SettingKey::PhonePort) fillPortPreview(row);
         if (opt < 0) {
             p.rows[i].title = def.title;
             p.rows[i].detail = def.detail;
@@ -779,6 +800,85 @@ void applyOption(SettingKey key, int opt) {
     evo_feedback(EVO_FB_TOGGLE);
 }
 
+void saveSettings();
+/* The port a typed number was refused for (it was busy); 0 = nothing refused. */
+int s_portRefused = 0;
+
+/* The preview card of PHONE & LOG PORT: the link, and one line on how the port went. */
+void fillPortPreview(evo_rmlui_settings_row_t& row) {
+    static char s_link[96], s_status[200];
+    const int state = evo_log_server_state();
+    const int actual = evo_log_server_port();
+    const int saved = evo_log_server_saved_port();
+    char ip[32];
+    evo_keyboard_local_ip(ip, sizeof ip);
+    if (actual > 0 && ip[0]) std::snprintf(s_link, sizeof s_link, "http://%s:%d/input", ip, actual);
+    else s_link[0] = '\0';
+
+    row.preview_index = 0;
+    if (state == EVO_LOGSRV_NONE) {
+        row.preview_index = 3;
+        std::snprintf(s_status, sizeof s_status,
+                      "Ports %d to %d are all taken, so the phone keyboard and live log are off. Please set a new port.",
+                      saved, saved + 9);
+    } else if (s_portRefused > 0) {
+        row.preview_index = 1;
+        std::snprintf(s_status, sizeof s_status, "%d is in use, kept %d", s_portRefused, saved);
+    } else if (state == EVO_LOGSRV_FALLBACK) {
+        row.preview_index = 2;
+        std::snprintf(s_status, sizeof s_status, "%d is busy, using %d", saved, actual);
+    } else if (state == EVO_LOGSRV_SAVED) {
+        std::snprintf(s_status, sizeof s_status, "Listening on %d", actual);
+    } else {
+        std::snprintf(s_status, sizeof s_status, "Starting...");
+    }
+    /* The real QR of the link the card shows, rebuilt only when the link changes. */
+    static char s_qr_for[96];
+    static unsigned char s_qr_mod[(4 * 5 + 17) * (4 * 5 + 17)];
+    static int s_qr_n;
+    if (std::strcmp(s_qr_for, s_link) != 0) {
+        std::snprintf(s_qr_for, sizeof s_qr_for, "%s", s_link);
+        s_qr_n = 0;
+        if (s_link[0]) {
+            static uint8_t s_qr[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+            uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+            if (qrcodegen_encodeText(s_link, tmp, s_qr, qrcodegen_Ecc_LOW, qrcodegen_VERSION_MIN, 5,
+                                     qrcodegen_Mask_AUTO, true)) {
+                s_qr_n = qrcodegen_getSize(s_qr);
+                for (int y = 0; y < s_qr_n; y++)
+                    for (int x = 0; x < s_qr_n; x++)
+                        s_qr_mod[y * s_qr_n + x] = qrcodegen_getModule(s_qr, x, y) ? 1 : 0;
+            }
+        }
+    }
+    row.qr_size = s_qr_n;
+    row.qr_modules = s_qr_n ? s_qr_mod : nullptr;
+    row.choice_count = 2;
+    row.choice[0] = s_link;
+    row.choice[1] = s_status;
+}
+
+void onPortEntered(const char* text, void*) {
+    const int port = std::atoi(text);
+    const int rc = evo_log_server_try_port(port);
+    if (rc == 0) {
+        s_portRefused = 0;
+        saveSettings();
+        toast("PHONE & LOG PORT", "Saved");
+    } else {
+        s_portRefused = port;
+        toast("PHONE & LOG PORT", rc == EADDRINUSE ? "That port is in use" : "Not a valid port");
+    }
+}
+
+void resetPort() {
+    s_portRefused = 0;
+    evo_log_server_set_port(EVO_LOG_SERVER_PORT);
+    saveSettings();
+    evo_feedback(EVO_FB_CONFIRM);
+    toast("PHONE & LOG PORT", "Reset to 9780");
+}
+
 bool runAction(const SettingDef& def) {
     if (def.disabled) {
         evo_feedback(EVO_FB_BOUNDARY);
@@ -800,6 +900,13 @@ bool runAction(const SettingDef& def) {
             return true;
         }
         return false;
+    case SettingKey::PhonePort: {
+        char init[8];
+        std::snprintf(init, sizeof init, "%d", evo_log_server_saved_port());
+        evo_feedback(EVO_FB_OPEN);
+        evo_keyboard_open_number("PHONE & LOG PORT (1024-65535)", init, 5, onPortEntered, nullptr);
+        return true;
+    }
     case SettingKey::SoftwareUpdate: {
         evo_updater_status_t us;
         evo_updater_get(&us);
@@ -1116,6 +1223,16 @@ bool SettingsSectionScreen::handleInput(uint32_t pressed, uint32_t held, uint32_
     if (pressed & PadButtons::Cross) {
         activateSelection();
         return true;
+    }
+    if (pressed & PadButtons::Triangle) {
+        SettingDef d[kMaxDefs];
+        DisplaySlot slots[kMaxSlots];
+        const int m = buildSlots(d, buildSectionDefs(m_section, d), m_expandedIndex, slots);
+        if (m_selectedIndex >= 0 && m_selectedIndex < m && slots[m_selectedIndex].opt < 0 &&
+            d[slots[m_selectedIndex].def].key == SettingKey::PhonePort) {
+            resetPort();
+            return true;
+        }
     }
     if (pressed & PadButtons::Circle) {
         if (m_expandedIndex >= 0) {

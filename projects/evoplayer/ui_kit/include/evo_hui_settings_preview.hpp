@@ -25,6 +25,8 @@ struct SettingsPreview
     std::string icon;                  /* the setting's icon path */
     std::vector<std::string> choices;  /* empty for a toggle: OFF / ON */
     std::vector<unsigned int> choice_bg;      /* THEME: page background per choice, 0xRRGGBB */
+    int qr_size = 0;                          /* PORT: the real phone-link QR, 0 = none */
+    std::vector<unsigned char> qr;
     std::vector<unsigned int> choice_accent;  /* THEME: accent per choice, 0xRRGGBB */
 };
 

@@ -39,6 +39,7 @@ commands (`launch`, `quit`, `close`, `cycle`, `verify`, `kill`) are described in
 | `sweep [--dir p] [--secs n] [--max n] [--skip s]...`, `report` | the codec sweep ([../build/validation.md](../build/validation.md#the-codec-sweep)) |
 | `status` | print `evo_status` once |
 | `log` | pull `/mnt/usb0/evo.log` to `output/logs/` |
+| `logs [now] [problems|<text>]` | stream live logs from EVO's HTTP log server (honours `PS5_LOG_PORT`, default 9780) |
 | `watch [s]` | stream `evo_status` and new `evo.log` lines |
 | `clear` | delete `evo.log` and `evo_status` |
 

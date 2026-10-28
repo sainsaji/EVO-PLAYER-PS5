@@ -73,6 +73,22 @@ void evo_keyboard_open_phone(const char *title,
                              evo_keyboard_cb on_submit,
                              void *userdata);
 
+/*
+ * Digits-only entry (#227): 0-9, max_len (up to 5), narrow 3-column layout.
+ * Shows live port check result beside the pad. Never uses the system IME.
+ */
+void evo_keyboard_open_number(const char *title,
+                              const char *initial_value,
+                              int max_len,
+                              evo_keyboard_cb on_submit,
+                              void *userdata);
+
+/* 1 while the open prompt shows PHONE LINK OFF: R3 then means Set port. */
+int  evo_keyboard_wants_r3(void);
+
+/* Network address for building the phone-link URL */
+void evo_keyboard_local_ip(char *out, size_t cap);
+
 /* 1 and the prompt text while a phone-enabled keyboard is open, else 0. */
 int  evo_keyboard_phone_info(char *title, size_t tcap);
 

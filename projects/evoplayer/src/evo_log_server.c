@@ -34,6 +34,7 @@
 #if defined(EVO_APP_MODULE)
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -527,16 +528,128 @@ static void *conn_thread(void *arg)
     return NULL;
 }
 
-static void *accept_thread(void *arg)
+/*
+ * The listener is owned by one manager thread (#227). It binds the saved port,
+ * falls back to the next nine when that is busy, keeps retrying the saved port
+ * and swaps back as soon as it is free. s_actual is the one port everything else
+ * (phone link, QR, settings card) reads. One log line per outcome, not per try.
+ */
+#define LS_FALLBACKS     9
+#define LS_RETRY_SECS    3
+#define LS_PORT_MIN      1024
+#define LS_PORT_MAX      65535
+
+static pthread_mutex_t s_pm = PTHREAD_MUTEX_INITIALIZER;
+static int s_saved = EVO_LOG_SERVER_PORT;
+static int s_actual;                 /* 0 = not listening */
+static int s_state = EVO_LOGSRV_STARTING;
+static volatile int s_wake;          /* the saved port changed: retry now */
+static int s_cfg;                    /* the saved port is known (settings were read) */
+#define LS_CFG_WAIT_SECS 4          /* no settings file: bind the default after this */
+
+static int bind_port(int port, int *err)
 {
-    int lfd = (int)(intptr_t)arg;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { *err = errno; return -1; }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons((unsigned short)port);
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0 || listen(fd, 4) != 0) {
+        *err = errno;
+        close(fd);
+        return -1;
+    }
+    struct timeval tv = { 1, 0 };    /* accept wakes each second to reconcile */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    return fd;
+}
+
+static long now_secs(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long)tv.tv_sec;
+}
+
+static void *server_thread(void *arg)
+{
+    (void)arg;
+    int lfd = -1;
+    long next_try = 0;
+    const long t0 = now_secs();
+    int logged = -1;                 /* state*100000+port of the last log line */
     for (;;) {
-        int c = accept(lfd, NULL, NULL);
-        if (c < 0) {
-            if (errno == EINTR) continue;
-            evo_log("logsrv: accept errno=%d - stopped", errno);
-            break;
+        pthread_mutex_lock(&s_pm);
+        int want = s_saved;
+        int have = s_actual;
+        int wake = s_wake;
+        s_wake = 0;
+        pthread_mutex_unlock(&s_pm);
+
+        long now = now_secs();
+        pthread_mutex_lock(&s_pm);
+        const int cfg = s_cfg;
+        pthread_mutex_unlock(&s_pm);
+        if (!cfg && now < t0 + LS_CFG_WAIT_SECS) {   /* do not bind the default port just to move */
+            usleep(100 * 1000);
+            continue;
         }
+        if ((lfd < 0 || have != want) && (wake || now >= next_try)) {
+            next_try = now + LS_RETRY_SECS;
+            int err = 0, busy = 0, nfd = bind_port(want, &err);
+            int port = want, state = EVO_LOGSRV_SAVED;
+            if (nfd < 0 && err == EADDRINUSE) busy = 1;
+            if (nfd < 0 && lfd < 0) {
+                for (int k = 1; k <= LS_FALLBACKS && nfd < 0; k++) {
+                    if (want + k > LS_PORT_MAX) break;
+                    int e2 = 0;
+                    nfd = bind_port(want + k, &e2);
+                    if (nfd >= 0) { port = want + k; state = EVO_LOGSRV_FALLBACK; }
+                    else if (e2 == EADDRINUSE) busy = 1;
+                }
+            }
+            if (nfd >= 0) {
+                if (lfd >= 0) close(lfd);
+                lfd = nfd;
+                pthread_mutex_lock(&s_pm);
+                s_actual = port;
+                s_state = state;
+                pthread_mutex_unlock(&s_pm);
+                if (logged != state * 100000 + port) {
+                    logged = state * 100000 + port;
+                    if (state == EVO_LOGSRV_SAVED)
+                        evo_log("logsrv: listening on :%d", port);
+                    else
+                        evo_log("logsrv: :%d is busy (errno=%d), using :%d", want, err, port);
+                }
+            } else if (lfd < 0) {
+                int st = busy ? EVO_LOGSRV_NONE : EVO_LOGSRV_STARTING;
+                pthread_mutex_lock(&s_pm);
+                s_actual = 0;
+                s_state = st;
+                pthread_mutex_unlock(&s_pm);
+                if (logged != st * 100000) {
+                    logged = st * 100000;
+                    if (busy)
+                        evo_log("logsrv: no free port in :%d-:%d, retrying", want, want + LS_FALLBACKS);
+                    else
+                        evo_log("logsrv: cannot listen yet (errno=%d), retrying", err);
+                }
+            }
+            /* else: the saved port is still busy and the fallback keeps serving */
+        }
+        if (lfd < 0) { usleep(250 * 1000); continue; }
+
+        /* accept() on the console does not honour SO_RCVTIMEO, so a port change would
+         * wait for the next connection; poll() wakes the loop to reconcile instead. */
+        struct pollfd pfd = { lfd, POLLIN, 0 };
+        if (poll(&pfd, 1, 250) <= 0) continue;
+        int c = accept(lfd, NULL, NULL);
+        if (c < 0) continue;
         pthread_t t;
         pthread_attr_t a;
         pthread_attr_init(&a);
@@ -546,7 +659,6 @@ static void *accept_thread(void *arg)
             close(c);
         pthread_attr_destroy(&a);
     }
-    close(lfd);
     return NULL;
 }
 
@@ -554,31 +666,48 @@ void evo_log_server_start(void)
 {
     if (s_started) return;
     s_started = 1;
-
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { evo_log("logsrv: socket errno=%d", errno); return; }
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    struct sockaddr_in a;
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_port = htons(EVO_LOG_SERVER_PORT);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (bind(fd, (struct sockaddr *)&a, sizeof a) != 0 || listen(fd, 4) != 0) {
-        evo_log("logsrv: bind/listen :%d failed errno=%d", EVO_LOG_SERVER_PORT, errno);
-        close(fd);
-        return;
-    }
     pthread_t t;
     pthread_attr_t at;
     pthread_attr_init(&at);
     pthread_attr_setstacksize(&at, 128 * 1024);
     pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    int rc = pthread_create(&t, &at, accept_thread, (void *)(intptr_t)fd);
+    if (pthread_create(&t, &at, server_thread, NULL) != 0) {
+        s_started = 0;
+        evo_log("logsrv: thread create failed");
+    }
     pthread_attr_destroy(&at);
-    if (rc != 0)
-        close(fd);
-    evo_log("logsrv: listening on :%d (thread rc=%d)", EVO_LOG_SERVER_PORT, rc);
+}
+
+int evo_log_server_port(void)       { pthread_mutex_lock(&s_pm); int v = s_actual; pthread_mutex_unlock(&s_pm); return v; }
+int evo_log_server_saved_port(void) { pthread_mutex_lock(&s_pm); int v = s_saved;  pthread_mutex_unlock(&s_pm); return v; }
+int evo_log_server_state(void)      { pthread_mutex_lock(&s_pm); int v = s_state;  pthread_mutex_unlock(&s_pm); return v; }
+
+void evo_log_server_set_port(int port)
+{
+    if (port < LS_PORT_MIN || port > LS_PORT_MAX) return;
+    pthread_mutex_lock(&s_pm);
+    s_saved = port;
+    s_cfg = 1;
+    s_wake = 1;
+    pthread_mutex_unlock(&s_pm);
+}
+
+int evo_log_server_probe_port(int port)
+{
+    if (port < LS_PORT_MIN || port > LS_PORT_MAX) return EINVAL;
+    if (port == evo_log_server_port()) return 0;
+    int err = 0;
+    int fd = bind_port(port, &err);
+    if (fd < 0) return err ? err : EADDRINUSE;
+    close(fd);
+    return 0;
+}
+
+int evo_log_server_try_port(int port)
+{
+    int rc = evo_log_server_probe_port(port);
+    if (rc == 0) evo_log_server_set_port(port);
+    return rc;
 }
 
 #endif /* EVO_APP_MODULE */

@@ -42,6 +42,8 @@ class SettingsScreen
         std::string benefit;
         std::vector<std::string> choices;
         std::vector<unsigned int> choice_bg, choice_accent;
+        int qr_size = 0;
+        std::vector<unsigned char> qr;
     };
 
     /* Top of a row inside the card, before scrolling. */

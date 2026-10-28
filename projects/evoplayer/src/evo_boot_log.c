@@ -429,6 +429,9 @@ static void bl_session_header(FILE *fp, const char *why)
 
 void evo_boot_log_flush(void)
 {
+    /* The phone keyboard and live log need the server even with no log file
+     * (no USB stick); it retries on each call until bind succeeds. */
+    evo_log_server_start();
     if (!g_fp) {
         FILE *fp = fopen(EVO_LOG_PATH, "a");
         if (fp) {
@@ -468,7 +471,6 @@ void evo_boot_log_flush(void)
                 g_writer_up = 1;
             }
         }
-        evo_log_server_start();   /* once; the sandbox (and network) is open now */
     }
     /* An explicit flush is a breadcrumb: it waits until the line is on the
      * stick. */
@@ -515,5 +517,12 @@ size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
                          int wait_ms, unsigned long long *missed)
 { (void)pos; (void)buf; (void)cap; (void)wait_ms; (void)missed; return 0; }
 void evo_log_server_start(void) {}
+static int s_host_port = EVO_LOG_SERVER_PORT;
+int evo_log_server_port(void) { return s_host_port; }
+int evo_log_server_saved_port(void) { return s_host_port; }
+int evo_log_server_state(void) { return EVO_LOGSRV_SAVED; }
+void evo_log_server_set_port(int port) { if (port >= 1024 && port <= 65535) s_host_port = port; }
+int evo_log_server_probe_port(int port) { return (port < 1024 || port > 65535) ? 22 : 0; }
+int evo_log_server_try_port(int port) { if (port < 1024 || port > 65535) return 22; s_host_port = port; return 0; }
 
 #endif

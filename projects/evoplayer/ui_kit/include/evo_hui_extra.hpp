@@ -70,6 +70,7 @@ class KeyboardOverlay
 
   private:
     void sync_keys(const evo_keyboard_params_t &p);
+    void draw_pad(hui::gfx::DrawList &list, const Context &ctx) const;
     hui::ui::Keyboard keys_;
     bool layouts_built_ = false;
     bool keys_ready_ = false;
@@ -90,6 +91,12 @@ class KeyboardOverlay
     int cursor_ = 0;
     int qr_size_ = 0;
     std::vector<unsigned char> qr_;
+    int built_columns_ = 0;   /* the columns the key layouts were built for */
+    int key_columns_ = 11;   /* fewer than 11 = a pad (digits only): a narrower board */
+    std::string phone_title_;
+    std::string phone_notice_;
+    std::string phone_action_;
+    int phone_kind_ = 0;
 
     hui::tween::Spring enter_scale_;
     hui::tween::Spring enter_fade_;

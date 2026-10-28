@@ -35,6 +35,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Controller lightbar | on, off (DualSense light follows the accent) |
 | | Folders first | on, off |
 | | Keyboard input | Native PS5 IME, Virtual keyboard |
+| | Phone & log port | digits 1024–65535 (default 9780; Triangle resets). EVO test-binds it, falls back to n+1..n+9 if busy, retries saved in background. Real port feeds log server and phone keyboard. |
 | | Ask which live stream | on, off ([../providers/architecture.md](../providers/architecture.md#the-stream-picker)) |
 | **System & Diagnostics** | Compatibility report | action: writes `evo_compat_report.txt` to USB0 |
 | | Debug overlay | on, off (live performance numbers) |
@@ -47,7 +48,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Match video frame rate | off, on ([../hardware/refresh-rate-modes.md](../hardware/refresh-rate-modes.md)) |
 | | Deep blacks | Off, Low, High (pulls raised shadows to true black on OLED) |
 
-Defaults: the first listed choice, except Default font style (Rounded, the second); toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
+Defaults: the first listed choice, except Default font style (Rounded, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
 
 The row titles above are what the dev remote addresses: `evo-remote.sh set audio-delay
 +100` uses the title lower-cased with dashes, `set --list` prints every name with its valid
@@ -66,6 +67,7 @@ and read with a single `fscanf`:
  5 debug overlay            12 video decoder           19 secondary colour     26 volume boost
  6 folders first            13 keyboard marker (2)     20 ask stream           27 network buffer
  7 theme (by name)          14 upscaling               21 output channels      28 audio delay (ms)
+                                                                               29 phone & log port
 ```
 
 A line is applied only if the file has that many (`readCount >= N`), so an older file

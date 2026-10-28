@@ -102,6 +102,62 @@ static void fill_keyboard_fixture(evo_keyboard_params_t& p)
     p.max_len = 64;
 }
 
+/* The keyboard with the phone link up: a QR (a fixed pattern here) and phone: ip:port under it. */
+static void fill_keyboard_phone_fixture(evo_keyboard_params_t& p)
+{
+    static unsigned char qr[29 * 29];
+    for (int y = 0; y < 29; ++y)
+        for (int x = 0; x < 29; ++x)
+            qr[y * 29 + x] = (unsigned char)(((x * 7 + y * 13 + x * y) % 5) < 2);
+    fill_keyboard_fixture(p);
+    p.qr_size = 29;
+    p.qr_modules = qr;
+    p.phone_title = "phone: 192.168.0.12:9780";
+}
+
+/* The keyboard opened while every phone-link port is taken: no QR, a notice instead. */
+static void fill_keyboard_noport_fixture(evo_keyboard_params_t& p)
+{
+    fill_keyboard_fixture(p);
+    p.phone_title = "PHONE LINK OFF";
+    p.phone_notice = "Ports 9780 to 9789 are all taken, so typing from a phone is off. Set a new port to turn it back on.";
+    p.phone_kind = 0;
+    p.phone_action = "Set port";
+}
+
+/* The digits-only pad for a port: three columns, backspace and Done beside the 0. */
+static const evo_kb_key_t kPadR0[] = {{EVO_KB_KEY_CHAR, 1, "1", ""}, {EVO_KB_KEY_CHAR, 1, "2", ""}, {EVO_KB_KEY_CHAR, 1, "3", ""}};
+static const evo_kb_key_t kPadR1[] = {{EVO_KB_KEY_CHAR, 1, "4", ""}, {EVO_KB_KEY_CHAR, 1, "5", ""}, {EVO_KB_KEY_CHAR, 1, "6", ""}};
+static const evo_kb_key_t kPadR2[] = {{EVO_KB_KEY_CHAR, 1, "7", ""}, {EVO_KB_KEY_CHAR, 1, "8", ""}, {EVO_KB_KEY_CHAR, 1, "9", ""}};
+static const evo_kb_key_t kPadR3[] = {{EVO_KB_KEY_BACKSPACE, 1, "", ""}, {EVO_KB_KEY_CHAR, 1, "0", ""}, {EVO_KB_KEY_DONE, 1, "", ""}};
+
+/* The same keyboard after the button: typing a port, with the check result beside it. */
+static void fill_keyboard_port_fixture(evo_keyboard_params_t& p, int free_port)
+{
+    fill_keyboard_fixture(p);
+    for (int l = 0; l < EVO_KB_LAYERS; ++l)
+    {
+        p.key_rows[l][0] = kPadR0; p.key_row_len[l][0] = 3;
+        p.key_rows[l][1] = kPadR1; p.key_row_len[l][1] = 3;
+        p.key_rows[l][2] = kPadR2; p.key_row_len[l][2] = 3;
+        p.key_rows[l][3] = kPadR3; p.key_row_len[l][3] = 3;
+    }
+    p.key_columns = 3;
+    p.focus_row = 1;
+    p.focus_col = 1;
+    p.title = "PHONE & LOG PORT (1024-65535)";
+    p.text = free_port ? "9800" : "9781";
+    p.mode_label = "NUMBERS";
+    p.len = 4;
+    p.max_len = 5;
+    p.clear_visible = 0;
+    p.phone_title = free_port ? "PORT 9800 IS FREE" : "PORT 9781 IS TAKEN";
+    p.phone_notice = free_port ? "Save it and the phone link and QR code come back at once."
+                               : "Something else is using it. Type another port.";
+    p.phone_kind = free_port ? 1 : 0;
+    p.phone_action = nullptr;
+}
+
 /* Surround Sound Studio: mode 0 stage, 1 spatial orb, 2 calibration. */
 static void fill_surround_fixture(evo_rmlui_surround_params_t& p, int mode)
 {
@@ -563,6 +619,24 @@ static void fill_settings_pv_extra_fixture(evo_rmlui_settings_params_t &p, const
             {EVO_RMLUI_ROW_VALUE, "KEYBOARD INPUT", "TEXT ENTRY METHOD", "../icons/icon_keyboard.png", "VIRTUAL KEYBOARD", 0, 0, "", {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL", "../icons/icon_tv.png", "", 0, EVO_RMLUI_PREVIEW_ASK_STREAM, "Lets you choose the format and quality each time you open a live channel.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_ACTION, "COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0", "../icons/icon_report.png", "RUN", 0, 0, "", {}, 0, -1, false}
+        });
+    }
+    else if (kind == "port_free" || kind == "port_busy" || kind == "port_fallback" || kind == "port_none")
+    {
+        const int state = (kind == "port_free") ? 0 : (kind == "port_busy") ? 1 : (kind == "port_fallback") ? 2 : 3;
+        const char *badge = (state == 3) ? "NONE" : (state == 0) ? "9800" : "9780";
+        const char *link = (state == 0) ? "http://192.168.0.12:9800/input"
+                         : (state == 1) ? "http://192.168.0.12:9780/input"
+                         : (state == 2) ? "http://192.168.0.12:9783/input"
+                                        : "";
+        const char *status = (state == 0) ? "Listening on 9800"
+                           : (state == 1) ? "9800 is in use, kept 9780"
+                           : (state == 2) ? "9780 is busy, using 9783"
+                                          : "Ports 9780 to 9789 are all taken, so the phone keyboard and live log are off. Please set a new port.";
+        build_preview_section(p, 3, "INTERFACE", "THEMES, CONTROLLER & SORTING", {
+            {EVO_RMLUI_ROW_VALUE, "KEYBOARD INPUT", "TEXT ENTRY METHOD", "../icons/icon_keyboard.png", "VIRTUAL KEYBOARD", 0, 0, "", {"VIRTUAL KEYBOARD", "NATIVE PS5 IME"}, 0, -1, false},
+            {EVO_RMLUI_ROW_VALUE, "PHONE & LOG PORT", "PHONE LINK & LIVE LOG", "../icons/icon_keyboard.png", badge, 0, EVO_RMLUI_PREVIEW_PORT, "EVO checks the port is free before it saves it. If it is busy at start-up, EVO tries the next nine and shows the one it got.", {link, status}, state, -1, false},
+            {EVO_RMLUI_ROW_TOGGLE, "ASK WHICH LIVE STREAM", "PICK THE FORMAT AND QUALITY WHEN YOU OPEN A CHANNEL", "../icons/icon_tv.png", "", 1, 0, "", {}, 0, -1, false}
         });
     }
     else if (kind == "debug_overlay")

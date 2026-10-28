@@ -6,14 +6,15 @@ evo-dash.py - live health dashboard for EVO on the console, served on the PC.
     python tools/evo-dash.py --host 192.168.0.12 --port 8790 --no-open
 
 Runs on the HOST (plain Python 3, no packages, no Docker). It polls EVO's
-GET /stats (port 9780, evo_stats.c) once a second and tails GET /raw for the
+GET /stats (port 9780 or PS5_LOG_PORT, evo_stats.c) once a second and tails GET /raw for the
 lines worth seeing - warnings, errors, and the read-ahead / network / memory
 events. Both are kept here, not in the browser, so a reload or a second tab
 sees the whole session. Every sample is also appended to
 output/dash/<date>.jsonl for looking at later.
 
 The console's address comes from --host, else PS5_HOST in the environment,
-.env.local or .env (the same files the other tools read).
+.env.local or .env (the same files the other tools read). Port defaults to
+9780, or PS5_LOG_PORT in the environment.
 """
 import argparse
 import collections
@@ -30,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGE = os.path.join(ROOT, "tools", "dash", "index.html")
-LOG_PORT = 9780
+LOG_PORT = int(os.environ.get("PS5_LOG_PORT", "9780"))
 
 LINE = re.compile(r"^\[(\d+(?:\.\d+)?)\] (INFO|WARN|ERROR)\s*(.*)$")
 

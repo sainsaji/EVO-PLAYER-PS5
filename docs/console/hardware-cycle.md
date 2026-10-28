@@ -131,7 +131,7 @@ wrong ([networking.md](networking.md)).
 | `launch`, `close` | `ps5-payload-elfldr` on 9021 |
 | `klog.sh` | `ps5-payload-klogsrv` on 3232 |
 | `shot.sh` | `ps5-payload-websrv` on 8080 (the `/fs` route is read-only: delete over FTP) |
-| the dashboard, log stream, phone input | EVO itself, port 9780 ([diagnostics.md](diagnostics.md)) |
+| the dashboard, log stream, phone input | EVO itself, port 9780 by default (user-settable, dev tools accept `PS5_LOG_PORT`; [diagnostics.md](diagnostics.md)) |
 
 Do not kill `kstuff`, do not sweep kernel `.text`, and never call `sceVideoOutOpen`
 from a payload; each has panicked the console. Remote Play is an owner-initiated

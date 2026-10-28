@@ -12,6 +12,7 @@
 #include "evo/services/SettingsService.hpp"
 #include "evo/interfaces/ISettingsService.hpp"
 #include "evo/Common.hpp"
+#include "evo_boot_log.h"
 #include "evo_data_path.h"
 #include "evo_theme.h"
 
@@ -62,6 +63,14 @@ extern "C" {
     void evo_feedback_refresh_lightbar(void) {}
     void evo_keyboard_set_type(int type) { (void)type; }
     void evo_rmlui_set_theme(const void *theme) { (void)theme; }
+
+    static int s_host_port = EVO_LOG_SERVER_PORT;
+    int evo_log_server_port(void) { return s_host_port; }
+    int evo_log_server_saved_port(void) { return s_host_port; }
+    int evo_log_server_state(void) { return EVO_LOGSRV_SAVED; }
+    void evo_log_server_set_port(int port) { if (port >= 1024 && port <= 65535) s_host_port = port; }
+    int evo_log_server_probe_port(int port) { return (port < 1024 || port > 65535) ? 22 : 0; }
+    int evo_log_server_try_port(int port) { if (port < 1024 || port > 65535) return 22; s_host_port = port; return 0; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -103,6 +112,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getNetworkBuffer() == evo::NetworkBuffer::Sec30, "Initial NetworkBuffer default mismatch");
     TEST_ASSERT(svc1.getAudioDelayMs() == 0, "Initial AudioDelayMs default mismatch");
     TEST_ASSERT(svc1.getThemeName() == "EVO Dark", "Initial ThemeName default mismatch");
+    TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Initial LogServerPort default mismatch");
 
     /* 2. Mutate every enum/int/bool setting and theme to a non-default value */
     svc1.setResumePlaybackEnabled(false);
@@ -131,10 +141,14 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setNetworkBuffer(evo::NetworkBuffer::Min1);
     svc1.setAudioDelayMs(150);
     svc1.setThemeName("CARBON");
+    evo_log_server_set_port(9812);
 
     /* 3. Persist to disk */
     bool save_ok = svc1.saveSettings();
     TEST_ASSERT(save_ok, "saveSettings failed");
+
+    /* Reset port to default before loading into fresh instance */
+    evo_log_server_set_port(EVO_LOG_SERVER_PORT);
 
     /* 4. Load into a completely fresh instance */
     evo::SettingsService svc2;
@@ -168,12 +182,13 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getNetworkBuffer() == evo::NetworkBuffer::Min1, "NetworkBuffer round-trip mismatch");
     TEST_ASSERT(svc2.getAudioDelayMs() == 150, "AudioDelayMs round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
+    TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
     TEST_PASS();
 }
 
 /* ---------------------------------------------------------------------------
- * Test 2: Backward Compatibility with Older Settings File Lacking Line 28
+ * Test 2: Backward Compatibility with Older Settings File Lacking Line 29
  * ------------------------------------------------------------------------ */
 extern "C" void test_settings_legacy_compat(void)
 {
@@ -184,8 +199,8 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(f != nullptr, "Failed to create legacy cfg file");
 
     /*
-     * Write exactly 27 lines (pre-#170 format), deliberately omitting
-     * line 28 (audioDelayMs). All values are non-default.
+     * Write exactly 28 lines (pre-#227 format), deliberately omitting
+     * line 29 (phone & log port). All values are non-default.
      */
     std::fprintf(f,
         "0\n"       /* 1: legacy dummy profile */
@@ -215,9 +230,13 @@ extern "C" void test_settings_legacy_compat(void)
         "1\n"       /* 25: matchVideoRate = true */
         "2\n"       /* 26: volumeBoost = Plus100 (2) */
         "1\n"       /* 27: networkBuffer = Min1 (1) */
-        /* Line 28 (audioDelayMs) intentionally omitted */
+        "150\n"     /* 28: audioDelayMs = 150 (#170) */
+        /* Line 29 (phone & log port, #227) intentionally omitted */
     );
     std::fclose(f);
+
+    evo_log_server_set_port(EVO_LOG_SERVER_PORT);
+    TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Default LogServerPort must be 9780");
 
     evo::SettingsService svc;
 
@@ -226,10 +245,11 @@ extern "C" void test_settings_legacy_compat(void)
 
     /* Loading truncated file must succeed */
     bool load_ok = svc.loadSettings();
-    TEST_ASSERT(load_ok, "loadSettings failed on 27-line legacy configuration");
+    TEST_ASSERT(load_ok, "loadSettings failed on 28-line legacy configuration");
 
-    /* Missing line 28 setting must retain its default value */
-    TEST_ASSERT(svc.getAudioDelayMs() == 0, "Missing AudioDelayMs must retain default (0 ms)");
+    /* Missing line 29 setting must retain its default value */
+    TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Missing log port must retain default (9780)");
+    TEST_ASSERT(svc.getAudioDelayMs() == 150, "Legacy audioDelayMs mismatch");
 
     /* All 26 preceding settings must be restored correctly */
     TEST_ASSERT(svc.isResumePlaybackEnabled() == false, "Legacy resumePlaybackEnabled mismatch");

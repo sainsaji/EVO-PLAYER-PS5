@@ -21,8 +21,10 @@ or OPTIONS in the provider chooser).
 
 Server addresses come from LAN discovery where the protocol allows, otherwise they are
 typed on EVO's keyboard. Every prompt that asks for an address, playlist URL or addon link
-also accepts text from a phone: the keyboard title shows `phone: <console ip>:9780/input`
-(open it on a phone on the same network, paste, Send). It needs the `X-EVO-Input` header,
+also accepts text from a phone: the keyboard title shows `phone: <console ip>:<port>/input`
+(default port 9780, user-settable in Settings; open it on a phone on the same
+network, paste, Send). With no free port, it shows `PHONE LINK OFF` and a Set port
+button (R3). It needs the `X-EVO-Input` header,
 works only while a prompt is open, never writes the text to the log, and is not offered on
 sign-in screens, so passwords are still typed on the console. An address may omit the
 scheme (a home-network address is `http`, anything else `https`).

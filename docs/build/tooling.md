@@ -38,11 +38,11 @@ Logs, screenshots, the dashboard and the debug switches:
 
 | Tool | What it does |
 |---|---|
-| `evo-remote.sh` | The dev remote: lifecycle, keys, `ui`, `go`, `set`, sweeps, comparisons ([remote-control.md](../console/remote-control.md)) |
+| `evo-remote.sh` | The dev remote: lifecycle, keys, `ui`, `go`, `set`, sweeps, comparisons ([remote-control.md](../console/remote-control.md)); `logs` honours `PS5_LOG_PORT` (default 9780) |
 | `evo_ui.py`, `evo_lifecycle.py` | Its helpers: the UI state reader and ShadowMount lifecycle evidence |
 | `ps5-controllers/` | The title-aware launch and close payloads. Never send them by hand |
 | `klog.sh`, `shot.sh`, `grab_shot.sh`, `shot.py`, `fetch_shot.sh` | Kernel log capture, screenshots and pixel measurement ([diagnostics.md](../console/diagnostics.md)) |
-| `evo-dash.py`, `evo-panel.py`, `dash/` | The health dashboard and the Tkinter control panel |
+| `evo-dash.py`, `evo-panel.py`, `dash/` | The health dashboard (`evo-dash` honours `PS5_LOG_PORT`, default 9780) and the Tkinter control panel |
 | `wipe-evo.py` | The EVO-only console wipe behind `deploy-app.sh --fresh` |
 | `chiaki.ps1` | Launcher for the PC Remote Play client ([../console/remote-play.md](../console/remote-play.md)) |
 | `provider-server.sh`, `gen_provider_manifest.py` | Serve and regenerate provider UI bundles ([../providers/architecture.md](../providers/architecture.md)) |

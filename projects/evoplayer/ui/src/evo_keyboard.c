@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "evo_keyboard.h"
 #include "evo_ime_dialog.h"
@@ -295,7 +296,16 @@ static const evo_kb_key_t KB_S3[] = {
 };
 static const evo_kb_key_t KB_S4[] = { KB_BOTTOM_ROW };
 
+/* The digits-only pad (#227): three columns, backspace and Done beside the 0. */
+static const evo_kb_key_t KB_P0[] = { KB_CH("1", ""), KB_CH("2", ""), KB_CH("3", "") };
+static const evo_kb_key_t KB_P1[] = { KB_CH("4", ""), KB_CH("5", ""), KB_CH("6", "") };
+static const evo_kb_key_t KB_P2[] = { KB_CH("7", ""), KB_CH("8", ""), KB_CH("9", "") };
+static const evo_kb_key_t KB_P3[] = { KB_KIND(EVO_KB_KEY_BACKSPACE, 1), KB_CH("0", ""), KB_KIND(EVO_KB_KEY_DONE, 1) };
+#define KB_PAD_COLS 3
+
 #define KB_N(a) ((int)(sizeof(a) / sizeof((a)[0])))
+static const evo_kb_key_t *const KB_PAD_ROWS[EVO_KB_ROWS] = { KB_P0, KB_P1, KB_P2, KB_P3, NULL };
+static const int KB_PAD_LEN[EVO_KB_ROWS] = { KB_N(KB_P0), KB_N(KB_P1), KB_N(KB_P2), KB_N(KB_P3), 0 };
 static const evo_kb_key_t *const KB_ROWS[EVO_KB_LAYERS][EVO_KB_ROWS] = {
     { KB_L0, KB_L1, KB_L2, KB_L3, KB_L4 },
     { KB_S0, KB_S1, KB_S2, KB_S3, KB_S4 },
@@ -310,7 +320,10 @@ typedef struct {
     int             is_native_active;
     int             phone;       /* the phone page can answer this prompt */
     int             secret;      /* a password: never echoed to the phone page */
+    int             number;      /* digits-only port entry (#227) */
+    int             noport;      /* online, but no port is free: no QR, "Set port" on R3 */
     char            prompt[128]; /* the title without the phone-link hint */
+    char            phone_label[48]; /* "phone: ip:port", drawn under the QR */
     char            title[128];
     char            buffer[KB_MAX_BUF];
     int             max_len;
@@ -326,6 +339,16 @@ typedef struct {
 } evo_keyboard_state_t;
 
 static evo_keyboard_state_t g_kb;
+/* The text prompt that was open when R3 started a port entry on top of it. */
+static evo_keyboard_state_t g_kb_saved;
+static int                  g_kb_has_saved;
+static int                  g_open_number;   /* kb_open: make this one the digits pad */
+
+/* Live check of the number being typed: recomputed only when the text changes. */
+static char g_chk_for[16];
+static int  g_chk_kind;
+static char g_chk_title[48];
+static char g_chk_notice[96];
 
 /* The phone link as a QR code: encoded once when a phone prompt opens, drawn
  * over the framebuffer by evo_screen_keyboard(). Version 5 at most (a plain
@@ -451,41 +474,77 @@ int evo_keyboard_phone_info(char *title, size_t tcap)
     return 1;
 }
 
+/* The phone link of the open prompt: the QR and the "phone: ip:port" title, from the
+ * port the log server really got. Online but no port: noport, and a notice instead. */
+static void kb_setup_phone(void)
+{
+    char ip[32];
+    g_qr_ok = 0;
+    g_kb.phone = 0;
+    g_kb.noport = 0;
+    g_kb.phone_label[0] = '\0';
+    strncpy(g_kb.title, g_kb.prompt, sizeof(g_kb.title) - 1);
+    phone_local_ip(ip, sizeof ip);
+    if (!ip[0]) return;
+    const int port = evo_log_server_port();
+    if (port <= 0) { g_kb.noport = 1; return; }
+    g_kb.phone = 1;
+    snprintf(g_kb.phone_label, sizeof g_kb.phone_label, "phone: %s:%d", ip, port);
+    char url[64];
+    uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(KB_QR_MAX_VER)];
+    snprintf(url, sizeof url, "http://%s:%d/input", ip, port);
+    g_qr_ok = qrcodegen_encodeText(url, tmp, g_qr, qrcodegen_Ecc_LOW,
+                                   qrcodegen_VERSION_MIN, KB_QR_MAX_VER,
+                                   qrcodegen_Mask_AUTO, true);
+    if (g_qr_ok) {
+        g_qr_n = qrcodegen_getSize(g_qr);
+        for (int y = 0; y < g_qr_n; y++)
+            for (int x = 0; x < g_qr_n; x++)
+                g_qr_mod[y * g_qr_n + x] = qrcodegen_getModule(g_qr, x, y) ? 1 : 0;
+    }
+}
+
+static void kb_phone_info_refresh(void)
+{
+    kb_setup_phone();
+}
+
+int evo_keyboard_wants_r3(void)
+{
+    return g_kb.is_open && g_kb.noport && !g_kb.number && !g_kb.is_native_active;
+}
+
+void evo_keyboard_local_ip(char *out, size_t cap)
+{
+    phone_local_ip(out, cap);
+}
+
+void evo_keyboard_open_number(const char *title, const char *initial_value, int max_len,
+                              evo_keyboard_cb on_submit, void *userdata)
+{
+    g_open_number = 1;
+    kb_open(title, initial_value, max_len, on_submit, userdata, 0);
+}
+
 static void kb_open(const char *title, const char *initial_value, int max_len,
                     evo_keyboard_cb on_submit, void *userdata, int phone)
 {
     memset(&g_kb, 0, sizeof(g_kb));
     g_kb_seq++;
     g_qr_ok = 0;
+    g_chk_for[0] = '\x01';   /* force the first check */
     g_kb.is_open = 1;
     if (title) strncpy(g_kb.title, title, sizeof(g_kb.title) - 1);
     else strncpy(g_kb.title, "ENTER TEXT", sizeof(g_kb.title) - 1);
     strncpy(g_kb.prompt, g_kb.title, sizeof(g_kb.prompt) - 1);
 
     /* The system IME is a separate dialog: it can neither show the phone link
-     * nor take text from the phone, so a phone prompt always uses EVO's own. */
+     * nor take text from the phone, so a phone prompt always uses EVO's own.
+     * The port entry is digits only: no phone link, no IME. */
     (void)phone;   /* every prompt gets the phone link when the console has an address */
-    {
-        char ip[32];
-        phone_local_ip(ip, sizeof ip);
-        if (ip[0]) {
-            g_kb.phone = 1;
-            snprintf(g_kb.title, sizeof g_kb.title, "%.48s - phone: %s:%d",
-                     g_kb.prompt, ip, EVO_LOG_SERVER_PORT);
-            char url[64];
-            uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(KB_QR_MAX_VER)];
-            snprintf(url, sizeof url, "http://%s:%d/input", ip, EVO_LOG_SERVER_PORT);
-            g_qr_ok = qrcodegen_encodeText(url, tmp, g_qr, qrcodegen_Ecc_LOW,
-                                           qrcodegen_VERSION_MIN, KB_QR_MAX_VER,
-                                           qrcodegen_Mask_AUTO, true);
-            if (g_qr_ok) {
-                g_qr_n = qrcodegen_getSize(g_qr);
-                for (int y = 0; y < g_qr_n; y++)
-                    for (int x = 0; x < g_qr_n; x++)
-                        g_qr_mod[y * g_qr_n + x] = qrcodegen_getModule(g_qr, x, y) ? 1 : 0;
-            }
-        }
-    }
+    g_kb.number = g_open_number;
+    g_open_number = 0;
+    if (!g_kb.number) kb_setup_phone();
 
     if (initial_value) {
         g_kb.cursor = -1;
@@ -498,12 +557,14 @@ static void kb_open(const char *title, const char *initial_value, int max_len,
     g_kb.row = 1;    /* Start on 'q' / first letter row */
     g_kb.col = 0;
     g_kb.xcol = 0.5f;
+    if (g_kb.number) { g_kb.col = 1; g_kb.xcol = 1.5f; }   /* the 5 */
     g_kb.blink_timer = 0;
     g_kb.callback = on_submit;
     g_kb.userdata = userdata;
 
 #if defined(EVO_TARGET_PS5) || defined(__FreeBSD__)
-    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken && !g_kb.phone) {
+    if (g_kb_type == EVO_KEYBOARD_TYPE_NATIVE && !g_native_ime_broken && !g_kb.phone &&
+        !g_kb.number && !g_kb.noport) {
         int cd_rc = init_native_ime_subsystem();
         if (cd_rc != 0) {
             /* No CommonDialog, no IME. Don't try again this session. */
@@ -702,6 +763,9 @@ static void submit_text(void);
 static void insert_str(const char *str)
 {
     size_t n = strlen(str);
+    if (g_kb.number)   /* the port pad takes digits and nothing else */
+        for (size_t i = 0; i < n; i++)
+            if (str[i] < '0' || str[i] > '9') { evo_feedback(EVO_FB_BOUNDARY); return; }
     size_t len = strlen(g_kb.buffer);
     if (n > 0 && (int)(len + n) <= g_kb.max_len && len + n < sizeof(g_kb.buffer)) {
         size_t cur = kb_cursor();
@@ -724,20 +788,24 @@ static void insert_char(char c)
 
 static int kb_row_len(int row)
 {
-    return (row >= 0 && row < EVO_KB_ROWS) ? KB_ROW_LEN[g_kb.layer][row] : 0;
+    if (row < 0 || row >= EVO_KB_ROWS) return 0;
+    return g_kb.number ? KB_PAD_LEN[row] : KB_ROW_LEN[g_kb.layer][row];
 }
+
+static int kb_cols(void)     { return g_kb.number ? KB_PAD_COLS : KB_COLS; }
+static int kb_last_row(void) { return g_kb.number ? 3 : EVO_KB_ROWS - 1; }
 
 static const evo_kb_key_t *kb_key(int row, int col)
 {
     if (row < 0 || row >= EVO_KB_ROWS || col < 0 || col >= kb_row_len(row)) return NULL;
-    return &KB_ROWS[g_kb.layer][row][col];
+    return g_kb.number ? &KB_PAD_ROWS[row][col] : &KB_ROWS[g_kb.layer][row][col];
 }
 
 static float kb_row_start(int row)
 {
     int cols = 0;
     for (int c = 0; c < kb_row_len(row); c++) cols += kb_key(row, c)->span;
-    return (KB_COLS - cols) * 0.5f;
+    return (kb_cols() - cols) * 0.5f;
 }
 
 static float kb_key_start(int row, int col)
@@ -773,6 +841,7 @@ static void kb_move_to_row(int row)
 
 static void kb_shift_cycle(void)
 {
+    if (g_kb.number) return;
     if (g_kb.layer != 0) { evo_feedback(EVO_FB_BOUNDARY); return; }
     g_kb.shift = (g_kb.shift + 1) % 3;   /* off -> next letter -> caps lock -> off */
     evo_feedback(EVO_FB_TOGGLE);
@@ -823,15 +892,59 @@ static void backspace_char(void)
     }
 }
 
+static void kb_phone_info_refresh(void);
+
+/* Leave the open prompt. A port entry that R3 started on top of a text prompt
+ * hands that prompt back, with the phone link worked out again from the new port. */
+static void kb_leave(void)
+{
+    const int was_number = g_kb.number;
+    g_kb.is_open = 0;
+    if (was_number && g_kb_has_saved) {
+        g_kb = g_kb_saved;
+        g_kb_has_saved = 0;
+        g_kb_seq++;
+        kb_phone_info_refresh();
+    }
+}
+
 static void submit_text(void)
 {
+    if (g_kb.number && g_chk_kind != 1) {   /* only a port that tested free is saved */
+        evo_feedback(EVO_FB_BOUNDARY);
+        return;
+    }
     if (g_kb.callback) {
         g_kb.callback(g_kb.buffer, g_kb.userdata);
     }
     evo_feedback(EVO_FB_CONFIRM);
-    g_kb.is_open = 0;
+    kb_leave();
 }
 
+extern void prospero_settings_save(void);
+void toast(const char *title, const char *msg);
+
+/* R3 on "PHONE LINK OFF": set the port without leaving the prompt. */
+static void port_entry_done(const char *text, void *ud)
+{
+    (void)ud;
+    int port = atoi(text);
+    if (evo_log_server_try_port(port) == 0) {
+        prospero_settings_save();
+        toast("PHONE & LOG PORT", "Saved");
+    }
+}
+
+static void kb_open_port_entry(void)
+{
+    char init[8];
+    snprintf(init, sizeof init, "%d", evo_log_server_saved_port());
+    g_kb_saved = g_kb;
+    g_kb_has_saved = 1;
+    evo_keyboard_open_number("PHONE & LOG PORT (1024-65535)", init, 5, port_entry_done, NULL);
+}
+
+#define EVO_PAD_R3        0x0004
 #define EVO_PAD_OPTIONS   0x0008
 #define EVO_PAD_UP        0x0010
 #define EVO_PAD_RIGHT     0x0020
@@ -858,9 +971,9 @@ int evo_keyboard_handle_input(uint32_t pressed)
     /* D-PAD Navigation. Up from the top row goes to the field's clear button (when
      * there is text to clear), then wraps to the bottom row. */
     if (pressed & EVO_PAD_UP) {
-        if (g_kb.row == EVO_KB_CLEAR_ROW)  kb_move_to_row(EVO_KB_ROWS - 1);
+        if (g_kb.row == EVO_KB_CLEAR_ROW)  kb_move_to_row(kb_last_row());
         else if (g_kb.row == 0 && g_kb.buffer[0]) { g_kb.row = EVO_KB_CLEAR_ROW; g_kb.col = 0; }
-        else if (g_kb.row == 0)            kb_move_to_row(EVO_KB_ROWS - 1);
+        else if (g_kb.row == 0)            kb_move_to_row(kb_last_row());
         else                               kb_move_to_row(g_kb.row - 1);
         evo_feedback(EVO_FB_MOVE);
         return 1;
@@ -868,7 +981,7 @@ int evo_keyboard_handle_input(uint32_t pressed)
 
     if (pressed & EVO_PAD_DOWN) {
         if (g_kb.row == EVO_KB_CLEAR_ROW)       kb_move_to_row(0);
-        else if (g_kb.row == EVO_KB_ROWS - 1)   kb_move_to_row(0);
+        else if (g_kb.row == kb_last_row())     kb_move_to_row(0);
         else                                    kb_move_to_row(g_kb.row + 1);
         evo_feedback(EVO_FB_MOVE);
         return 1;
@@ -891,7 +1004,12 @@ int evo_keyboard_handle_input(uint32_t pressed)
 
     if (pressed & EVO_PAD_CIRCLE) { /* CIRCLE: Cancel */
         evo_feedback(EVO_FB_CANCEL);
-        g_kb.is_open = 0;
+        kb_leave();
+        return 1;
+    }
+
+    if ((pressed & EVO_PAD_R3) && g_kb.noport && !g_kb.number) {
+        kb_open_port_entry();
         return 1;
     }
 
@@ -927,6 +1045,31 @@ int evo_keyboard_handle_input(uint32_t pressed)
  */
 /* White card with a 4-module quiet zone, in the right margin beside the panel
  * (the panel spans x 260..1660). 0xAABBGGRR: opaque white / opaque black. */
+/* What the pad tells the player about the number so far (green / red / amber). */
+static void kb_port_check(void)
+{
+    if (strcmp(g_chk_for, g_kb.buffer) == 0) return;
+    snprintf(g_chk_for, sizeof g_chk_for, "%s", g_kb.buffer);
+    const int port = g_kb.buffer[0] ? atoi(g_kb.buffer) : 0;
+    if (!g_kb.buffer[0]) {
+        g_chk_kind = 2;
+        snprintf(g_chk_title, sizeof g_chk_title, "TYPE A PORT");
+        snprintf(g_chk_notice, sizeof g_chk_notice, "Use a number from 1024 to 65535.");
+    } else if (port < 1024 || port > 65535) {
+        g_chk_kind = 0;
+        snprintf(g_chk_title, sizeof g_chk_title, "NOT A VALID PORT");
+        snprintf(g_chk_notice, sizeof g_chk_notice, "Use a number from 1024 to 65535.");
+    } else if (evo_log_server_probe_port(port) != 0) {
+        g_chk_kind = 0;
+        snprintf(g_chk_title, sizeof g_chk_title, "PORT %d IS TAKEN", port);
+        snprintf(g_chk_notice, sizeof g_chk_notice, "Something else is using it. Type another port.");
+    } else {
+        g_chk_kind = 1;
+        snprintf(g_chk_title, sizeof g_chk_title, "PORT %d IS FREE", port);
+        snprintf(g_chk_notice, sizeof g_chk_notice, "Save it and the phone link and QR code come back at once.");
+    }
+}
+
 static void draw_phone_qr(uint32_t *fb)
 {
     const int n = qrcodegen_getSize(g_qr);
@@ -952,19 +1095,24 @@ void evo_screen_keyboard(uint32_t *fb)
         return;
     }
 
+    /* A port that comes up while the card is showing (just set, or one that freed
+     * up in the background) brings the QR back without reopening the prompt. */
+    if (g_kb.noport && !g_kb.number && evo_log_server_port() > 0) kb_setup_phone();
+
     p.visible     = 1;
     p.native_only = g_kb.is_native_active;
     p.title       = g_kb.title;
     p.text        = g_kb.buffer;
-    p.mode_label  = g_kb.layer ? "SYMBOLS"
+    p.mode_label  = g_kb.number ? "NUMBERS"
+                  : g_kb.layer ? "SYMBOLS"
                   : g_kb.shift == 1 ? "SHIFT"
                   : g_kb.shift == 2 ? "CAPS LOCK" : "LOWERCASE";
     for (int l = 0; l < EVO_KB_LAYERS; l++)
         for (int r = 0; r < EVO_KB_ROWS; r++) {
-            p.key_rows[l][r]    = KB_ROWS[l][r];
-            p.key_row_len[l][r] = KB_ROW_LEN[l][r];
+            p.key_rows[l][r]    = g_kb.number ? KB_PAD_ROWS[r] : KB_ROWS[l][r];
+            p.key_row_len[l][r] = g_kb.number ? KB_PAD_LEN[r] : KB_ROW_LEN[l][r];
         }
-    p.key_columns   = KB_COLS;
+    p.key_columns   = kb_cols();
     p.layer         = g_kb.layer;
     p.shift_state   = g_kb.shift;
     p.clear_visible = g_kb.buffer[0] != '\0';
@@ -976,6 +1124,22 @@ void evo_screen_keyboard(uint32_t *fb)
     if (g_kb.phone && g_qr_ok) {
         p.qr_size    = g_qr_n;
         p.qr_modules = g_qr_mod;
+        p.phone_title = g_kb.phone_label;
+    }
+    if (g_kb.number) {
+        kb_port_check();
+        p.phone_title  = g_chk_title;
+        p.phone_notice = g_chk_notice;
+        p.phone_kind   = g_chk_kind;
+    } else if (g_kb.noport) {
+        static char notice[128];
+        snprintf(notice, sizeof notice,
+                 "Ports %d to %d are all taken, so typing from a phone is off. Set a new port to turn it back on.",
+                 evo_log_server_saved_port(), evo_log_server_saved_port() + 9);
+        p.phone_title  = "PHONE LINK OFF";
+        p.phone_notice = notice;
+        p.phone_kind   = 0;
+        p.phone_action = "Set port";
     }
 
     g_kb.blink_timer = (g_kb.blink_timer + 1) % 60;

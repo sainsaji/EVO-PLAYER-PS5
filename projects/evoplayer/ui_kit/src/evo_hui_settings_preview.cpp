@@ -6,6 +6,7 @@
  * drawing yet falls back to the INFO card.
  */
 #include "evo_hui_settings_preview.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/widgets.hpp"
 
 #include "evo_rmlui_bridge.h"
@@ -1701,6 +1702,98 @@ void draw_keyboard(DrawList &list, const Context &ctx, const Rect &box, const Se
     benefit(list, ctx, a, y + 24.0f, pv.benefit);
 }
 
+/* ---- PHONE & LOG PORT: the phone link as it will read, and whether the port took ----
+ * pv.index = 0 free, 1 busy (old port kept), 2 fallback in use.
+ * pv.choices[0] = the link, pv.choices[1] = the status line. */
+void draw_port(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const Palette &p = ctx.palette;
+    const std::string link = pv.choices.size() > 0 ? pv.choices[0] : "";
+    const std::string status = pv.choices.size() > 1 ? pv.choices[1] : "";
+    const Color ok = Color::rgb(0x3ddc84);
+    const Color warn = Color::rgb(0xffb02e);
+    const Color bad = Color::rgb(0xff5a5f);
+    const Color tone = (pv.index == 0) ? ok : (pv.index == 3) ? bad : warn;
+
+    // The same button glyphs the footer uses, not words.
+    auto hint_row = [&](float cy) {
+        const ui::Hint hints[] = {{ui::Button::cross, "Change"}, {ui::Button::triangle, "Reset to 9780"}};
+        ui::HintLayout layout;
+        layout.size = 30;
+        layout.text_size = 20;
+        layout.cy = cy;
+        ui::draw_hints(list, ctx.fonts, ui::GlyphStyle::dark(), hints, 2, a.x, false, layout);
+    };
+
+    if (pv.index == 3)
+    {
+        // Every port in the range is taken: no QR, and a guided way out.
+        list.rounded_rect({a.x, a.top, 12.0f, 12.0f}, 6.0f, bad);
+        ui::text(list, ctx.fonts.semibold, "NO FREE PORT", a.x + 24.0f, a.top + 13.0f, 20, bad, Align::left, 2.0f);
+        ui::paragraph(list, ctx.fonts.regular, status, a.x, a.top + 52.0f, 20, a.w, 28, kWhite, 3);
+        static const char *const kSteps[] = {"Select this row", "Type a port from 1024 to 65535",
+                                             "EVO checks it, then the phone link is back"};
+        float sy = a.top + 150.0f;
+        for (int i = 0; i < 3; ++i)
+        {
+            list.rounded_rect({a.x, sy - 20.0f, 30.0f, 30.0f}, 15.0f, p.accent);
+            ui::text(list, ctx.fonts.semibold, std::to_string(i + 1), a.x + 15.0f, sy + 1.0f, 18, Color::rgb(0x10131a), Align::center);
+            ui::text(list, ctx.fonts.regular, kSteps[i], a.x + 46.0f, sy + 1.0f, 20, kWhite);
+            sy += 46.0f;
+        }
+        hint_row(sy + 40.0f);
+        return;
+    }
+
+    // A QR-shaped tile: three finder squares and a fixed scatter of modules.
+    const float qs = 176.0f;
+    const Rect qr{a.x, a.top, qs, qs};
+    list.rounded_rect(qr, 12.0f, Color::rgb(0xffffff));
+    const bool real = pv.qr_size > 0;
+    const int n = real ? pv.qr_size : 25;
+    const float m = (qs - 24.0f) / static_cast<float>(n);
+    std::uint32_t seed = 9780u;
+    for (int y = 0; y < n; ++y)
+    {
+        for (int x = 0; x < n; ++x)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const bool left = x < 7, right = x >= n - 7, top = y < 7, bottom = y >= n - 7;
+            bool on = ((seed >> 16) & 3u) != 0u ? ((seed >> 20) & 1u) != 0u : false;
+            if (real)
+                on = pv.qr[static_cast<size_t>(y) * n + x] != 0;
+            else if ((left && top) || (right && top) || (left && bottom))
+            {
+                const int fx = left ? x : x - (n - 7);
+                const int fy = top ? y : y - (n - 7);
+                const bool ring = fx == 0 || fx == 6 || fy == 0 || fy == 6;
+                const bool core = fx >= 2 && fx <= 4 && fy >= 2 && fy <= 4;
+                on = ring || core;
+            }
+            else if ((left && y == 7) || (top && x == 7) || (right && y == 7) || (bottom && x == 7)
+                     || (x == n - 8 && top) || (y == n - 8 && left))
+            {
+                on = false;
+            }
+            if (on)
+                list.rounded_rect({qr.x + 12.0f + static_cast<float>(x) * m, qr.y + 12.0f + static_cast<float>(y) * m, m, m},
+                                  0.0f, Color::rgb(0x10131a));
+        }
+    }
+
+    // To the right: what to do, the link, then the status of the port.
+    const float tx = a.x + qs + 24.0f;
+    const float tw = a.w - qs - 24.0f;
+    ui::text(list, ctx.fonts.semibold, "SCAN WITH YOUR PHONE", tx, a.top + 22.0f, 14, p.text_faint, Align::left, 2.0f);
+    ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(link, 18, tw), tx, a.top + 62.0f, 18, kWhite);
+    list.rounded_rect({tx, a.top + 108.0f, 12.0f, 12.0f}, 6.0f, tone);
+    ui::paragraph(list, ctx.fonts.regular, status, tx + 22.0f, a.top + 120.0f, 18, tw - 22.0f, 24, tone, 2);
+
+    hint_row(a.top + qs + 36.0f);
+    benefit(list, ctx, a, a.top + qs + 96.0f, pv.benefit);
+}
+
 /* ---- 21. ASK WHICH LIVE STREAM: channel tile to quality dialog vs direct play ---- */
 void draw_ask_stream(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
 {
@@ -1893,6 +1986,9 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     case EVO_RMLUI_PREVIEW_DEBUG_OVERLAY:
         draw_debug_overlay(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_PORT:
+        draw_port(list, ctx, box, pv);
         break;
     default: /* INFO and every kind that has no drawing yet */
         draw_info(list, ctx, box, pv);
