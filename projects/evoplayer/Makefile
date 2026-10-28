@@ -194,6 +194,9 @@ CORE_SRCS := \
     core/src/services/SurroundTestService.cpp \
     core/src/services/SpeakerCalibrationService.cpp \
     core/src/services/FtpClient.cpp \
+    core/src/services/NetArtSidecar.cpp \
+    core/src/services/NetArtCache.cpp \
+    core/src/services/NetArtFetcher.cpp \
     core/src/services/SmbClient.cpp \
     core/src/services/NetworkStorageService.cpp \
     core/src/services/FileSystemBrowser.cpp \

@@ -398,7 +398,19 @@ void BrowserScreen::performServerAction(int actionIndex) {
             openEditShareKeyboard(m_serverMenuShareId);
             break;
         }
-        case 2: { // Remove Server
+        case 2: { // Cover Art on/off: flips in place, the menu stays open
+            const auto* cur = NetworkStorageService::getInstance().getShare(m_serverMenuShareId);
+            if (cur) {
+                NetworkShare share = *cur;
+                share.art = !share.art;
+                NetworkStorageService::getInstance().addShare(share);
+                if (auto cover = Application::getInstance().getCoverArtService()) cover->clearCache();
+            }
+            m_serverMenuOpen = true;
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 3: { // Remove Server
             m_removeShareConfirmOpen = true;
             m_removeShareConfirmButton = 0; // Default to Cancel
             m_removeShareId = m_serverMenuShareId;
@@ -406,7 +418,7 @@ void BrowserScreen::performServerAction(int actionIndex) {
             evo_feedback(EVO_FB_CONFIRM);
             break;
         }
-        case 3: // Close
+        case 4: // Close
         default:
             evo_feedback(EVO_FB_CANCEL);
             break;
@@ -962,6 +974,8 @@ void BrowserScreen::rebuildItems() {
                     item.name = entry.name;
                     item.fullPath = entry.fullPath;
                     item.category = entry.category;
+                    item.artPath = entry.artPath;
+                    item.artKey = entry.artKey;
                     item.badge = (browser && entry.category != FileCategory::Folder)
                         ? browser->getFileCategoryLabel(entry.category) : "DIR";
                     item.isFavorite = favorites_is_favorite(item.fullPath.c_str());
@@ -1747,12 +1761,12 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
     if (m_serverMenuOpen) {
         if (pressed & PadButtons::Up) {
             if (m_serverMenuFocused > 0) m_serverMenuFocused--;
-            else m_serverMenuFocused = 3;
+            else m_serverMenuFocused = 4;
             evo_feedback(EVO_FB_MOVE);
             return true;
         }
         if (pressed & PadButtons::Down) {
-            if (m_serverMenuFocused < 3) m_serverMenuFocused++;
+            if (m_serverMenuFocused < 4) m_serverMenuFocused++;
             else m_serverMenuFocused = 0;
             evo_feedback(EVO_FB_MOVE);
             return true;
@@ -2467,7 +2481,21 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.rows[i].status_text = item.statusText.c_str();
 
         const uint32_t* art = nullptr;
-        if (!m_showTransferDialog && coverService && item.fullPath.find("://") == std::string::npos) {
+        if (!m_showTransferDialog && coverService && !item.artKey.empty()) {
+            /* Network file with a cover image in its folder listing (#230): the
+             * worker downloads it, so the row shows the icon until it lands. */
+            art = coverService->peekCoverArt(item.fullPath);
+            if (!art && !coverService->hasTriedCoverArt(item.fullPath)) {
+                const auto* share = NetworkStorageService::getInstance().getShare(m_networkShareId);
+                if (share && share->art) {
+                    NetArtRequest req;
+                    req.share = *share;
+                    req.path = item.artPath;
+                    req.key = item.artKey;
+                    coverService->requestNetworkArt(item.fullPath, req);
+                }
+            }
+        } else if (!m_showTransferDialog && coverService && item.fullPath.find("://") == std::string::npos) {
             art = coverService->peekCoverArt(item.fullPath);
             bool tried = coverService->hasTriedCoverArt(item.fullPath);
             if (!art && !tried) {
@@ -2679,7 +2707,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         const bool isSmb = (share && share->protocol == NetworkProtocol::SMB);
         params.action_target_sub = isSmb ? "Windows Share (SMB)" : "FTP Server";
         params.action_menu_eyebrow = isSmb ? "OPTIONS  •  SMB SHARE" : "OPTIONS  •  FTP SERVER";
-        params.action_menu_count = 4;
+        params.action_menu_count = 5;
 
         params.action_menu_items[0].label = "Open";
         params.action_menu_items[0].desc = isSmb ? "Browse this Windows share" : "Browse this FTP server";
@@ -2691,15 +2719,22 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
         params.action_menu_items[1].icon_path = "../icons/icon_keyboard.png";
         params.action_menu_items[1].danger = 0;
 
-        params.action_menu_items[2].label = "Remove Server";
-        params.action_menu_items[2].desc = "Forget this server on this console";
-        params.action_menu_items[2].icon_path = "../icons/icon_trash.png";
-        params.action_menu_items[2].danger = 1;
+        params.action_menu_items[2].label = "Cover Art";
+        params.action_menu_items[2].desc = (share && !share->art) ? "Off: plain icons, nothing downloaded"
+                                                                 : "Posters from poster.jpg and similar files";
+        params.action_menu_items[2].icon_path = "../icons/icon_palette.png";
+        params.action_menu_items[2].danger = 0;
+        params.action_menu_items[2].toggle = (share && !share->art) ? 1 : 2;
 
-        params.action_menu_items[3].label = "Close";
-        params.action_menu_items[3].desc = "Dismiss menu";
-        params.action_menu_items[3].icon_path = "../icons/btn_circle.png";
-        params.action_menu_items[3].danger = 0;
+        params.action_menu_items[3].label = "Remove Server";
+        params.action_menu_items[3].desc = "Forget this server on this console";
+        params.action_menu_items[3].icon_path = "../icons/icon_trash.png";
+        params.action_menu_items[3].danger = 1;
+
+        params.action_menu_items[4].label = "Close";
+        params.action_menu_items[4].desc = "Dismiss menu";
+        params.action_menu_items[4].icon_path = "../icons/btn_circle.png";
+        params.action_menu_items[4].danger = 0;
 
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;

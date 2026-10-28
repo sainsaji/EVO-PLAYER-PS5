@@ -16,6 +16,7 @@ extern "C" {
 #include "evo_error.h"
 }
 
+#include "evo_data_path.h"
 #include "evo_boot_trace.h"
 #include "evo_boot_log.h"
 #include "evo_crash_note.h"
@@ -1384,6 +1385,39 @@ bool CoverArtService::loadArtInto(const std::string& mediaPath, bool isDirectory
     return false;
 }
 
+/* A network poster (#230): disk cache first, then one download of the sidecar
+ * image over the fetcher's own connection, then the same scale-to-poster step as
+ * every other source. Worker thread only. A miss is remembered by the caller as
+ * "tried", so a folder with no readable image costs one attempt per file. */
+bool CoverArtService::loadNetArtInto(const NetArtRequest& req, uint32_t* out, int w, int h) {
+    if (!m_netCache) {
+        m_netCache.reset(new NetArtCache(std::string(evo_data_path("netart")), 24u * 1024u * 1024u));
+    }
+    if (m_netCache->get(req.key, out, w, h))
+        return true;
+
+    std::vector<uint8_t> bytes;
+    if (!m_netFetcher.fetch(req, bytes) || bytes.empty()) {
+        evo_bt("netart: fetch failed %s", sanitizeUrl(req.path).c_str());
+        return false;
+    }
+
+    /* Refuse a huge image before decoding it: 8192x8192 RGBA would not fit. */
+    int iw = 0, ih = 0, ich = 0;
+    if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &ich) ||
+        iw < 2 || ih < 2 || iw > 4096 || ih > 4096) {
+        evo_bt("netart: unusable image %dx%d %s", iw, ih, sanitizeUrl(req.path).c_str());
+        return false;
+    }
+    unsigned char* data = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                                &iw, &ih, &ich, 4);
+    if (!data) return false;
+    boxFilterScaleRgba(data, iw, ih, out, w, h);
+    stbi_image_free(data);
+    m_netCache->put(req.key, out, w, h);
+    return true;
+}
+
 CoverArtService::~CoverArtService() {
     if (m_workerStarted) {
         pthread_mutex_lock(&m_jobMutex);
@@ -1443,7 +1477,8 @@ void CoverArtService::workerMain() {
         const int w = job.preview ? PreviewWidth : PosterWidth;
         const int h = job.preview ? PreviewHeight : PosterHeight;
         res.pixels.assign(static_cast<size_t>(w) * h, 0);
-        res.ok = loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
+        res.ok = job.net ? loadNetArtInto(job.netReq, res.pixels.data(), w, h)
+                         : loadArtInto(job.path, job.isDir, res.pixels.data(), w, h);
 
         pthread_mutex_lock(&m_jobMutex);
         m_results.push_back(std::move(res));
@@ -1453,7 +1488,7 @@ void CoverArtService::workerMain() {
 
         /* Back-to-back 4K decodes exhausted the heap before this was paced
          * (see the pre-flight in extractVideoFrame); leave the allocator a gap. */
-        if (!job.preview)
+        if (!job.preview && !job.net)
             usleep(150 * 1000);
     }
 }
@@ -1477,6 +1512,33 @@ void CoverArtService::requestCoverArt(const std::string& mediaPath, bool isDirec
     j.path = mediaPath;
     j.isDir = isDirectory;
     j.generation = m_generation;
+    m_posterJobs.push_back(std::move(j));
+    pthread_cond_signal(&m_jobCond);
+    pthread_mutex_unlock(&m_jobMutex);
+    m_pendingPosters.insert(mediaPath);
+}
+
+void CoverArtService::requestNetworkArt(const std::string& mediaPath, const NetArtRequest& req) {
+    if (mediaPath.empty() || req.key.empty()) return;
+    if (findSlot(mediaPath)) return;                 /* tried already */
+    if (m_pendingPosters.count(mediaPath)) return;
+    startWorker();
+    if (!m_workerStarted) return;
+
+    constexpr size_t MaxQueued = 16;
+    pthread_mutex_lock(&m_jobMutex);
+    /* Same rule as requestCoverArt: the oldest request is the likeliest to be a
+     * tile that scrolled away, so it is the one dropped. It is asked for again
+     * if it comes back on screen. */
+    while (m_posterJobs.size() >= MaxQueued) {
+        m_pendingPosters.erase(m_posterJobs.front().path);
+        m_posterJobs.pop_front();
+    }
+    Job j;
+    j.path = mediaPath;
+    j.generation = m_generation;
+    j.net = true;
+    j.netReq = req;
     m_posterJobs.push_back(std::move(j));
     pthread_cond_signal(&m_jobCond);
     pthread_mutex_unlock(&m_jobMutex);

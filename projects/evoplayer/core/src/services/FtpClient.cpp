@@ -391,6 +391,88 @@ bool FtpClient::storeFile(const std::string& remotePath, const std::string& loca
     return true;
 }
 
+bool FtpClient::retrieveFile(const std::string& remotePath, size_t maxBytes,
+                             std::vector<uint8_t>& out, int dataTimeoutSec) {
+    out.clear();
+    m_lastError.clear();
+
+    if (m_controlSock < 0) {
+        m_lastError = "Not connected";
+        return false;
+    }
+
+    if (sendCommand("TYPE I") != 0) {
+        m_lastError = "Failed to send TYPE I";
+        return false;
+    }
+    int code = readResponse();
+    if (code < 200 || code >= 300) {
+        m_lastError = "TYPE I failed (code " + std::to_string(code) + ")";
+        return false;
+    }
+
+    int dataSock = openDataConnection(dataTimeoutSec);
+    if (dataSock < 0) {
+        return false;
+    }
+
+    if (sendCommand("RETR " + remotePath) != 0) {
+        m_lastError = "Failed to send RETR";
+        close(dataSock);
+        return false;
+    }
+
+    code = readResponse();
+    if (code != 150 && code != 125) {
+        m_lastError = "RETR failed (code " + std::to_string(code) + ")";
+        close(dataSock);
+        return false;
+    }
+
+    bool exceeded = false;
+    bool readError = false;
+    char chunk[4096];
+
+    while (true) {
+        ssize_t n = recv(dataSock, chunk, sizeof(chunk), 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            m_lastError = "Data receive failed (errno " + std::to_string(errno) + ")";
+            readError = true;
+            break;
+        }
+        if (n == 0) {
+            break;
+        }
+
+        if (out.size() + static_cast<size_t>(n) > maxBytes) {
+            exceeded = true;
+            m_lastError = "File exceeds maximum size";
+            break;
+        }
+
+        out.insert(out.end(), reinterpret_cast<const uint8_t*>(chunk),
+                   reinterpret_cast<const uint8_t*>(chunk) + n);
+    }
+
+    close(dataSock);
+
+    if (exceeded || readError) {
+        readResponse();
+        out.clear();
+        return false;
+    }
+
+    code = readResponse();
+    if (code < 200 || code >= 300) {
+        m_lastError = "Transfer failed (code " + std::to_string(code) + ")";
+        out.clear();
+        return false;
+    }
+
+    return true;
+}
+
 bool FtpClient::parseUnixLine(const std::string& line, FtpFileEntry& entry) {
     if (line.size() < 10) return false;
     char typeChar = line[0];

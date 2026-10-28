@@ -42,6 +42,9 @@ public:
                    StoreProgressFn onProgress = nullptr, void* user = nullptr,
                    int dataTimeoutSec = 30);
 
+    bool retrieveFile(const std::string& remotePath, size_t maxBytes, std::vector<uint8_t>& out,
+                      int dataTimeoutSec = 8);
+
     bool removeFile(const std::string& remotePath);
 
     const std::string& getLastError() const { return m_lastError; }

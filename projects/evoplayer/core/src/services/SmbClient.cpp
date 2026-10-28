@@ -214,6 +214,77 @@ bool SmbClient::list(const std::string& subPath, std::vector<SmbFileEntry>& entr
 #endif
 }
 
+bool SmbClient::readFile(const std::string& subPath, size_t maxBytes, std::vector<uint8_t>& out) {
+    out.clear();
+    m_lastError.clear();
+#if defined(HAVE_LIBSMB2)
+    if (!m_ctx) {
+        m_lastError = "Not connected to SMB share";
+        return false;
+    }
+
+    const char* pathStr = subPath.c_str();
+    while (*pathStr == '/') pathStr++; // strip leading slashes
+
+    struct smb2fh* fh = smb2_open(m_ctx, pathStr, O_RDONLY);
+    if (!fh) {
+        const char* err = smb2_get_error(m_ctx);
+        m_lastError = (err && err[0]) ? err : "Can't open SMB file";
+        return false;
+    }
+
+    struct smb2_stat_64 st;
+    if (smb2_fstat(m_ctx, fh, &st) < 0) {
+        const char* err = smb2_get_error(m_ctx);
+        m_lastError = (err && err[0]) ? err : "Can't stat SMB file";
+        smb2_close(m_ctx, fh);
+        return false;
+    }
+
+    if (st.smb2_size > maxBytes) {
+        m_lastError = "File exceeds maximum size";
+        smb2_close(m_ctx, fh);
+        return false;
+    }
+
+    size_t fileSize = static_cast<size_t>(st.smb2_size);
+    if (fileSize == 0) {
+        smb2_close(m_ctx, fh);
+        return true;
+    }
+
+    out.resize(fileSize);
+    size_t totalRead = 0;
+    while (totalRead < fileSize) {
+        uint32_t toRead = static_cast<uint32_t>(std::min<size_t>(fileSize - totalRead, 64 * 1024));
+        int rc = smb2_pread(m_ctx, fh, out.data() + totalRead, toRead, totalRead);
+        if (rc < 0) {
+            const char* err = smb2_get_error(m_ctx);
+            m_lastError = (err && err[0]) ? err : "Read error from SMB file";
+            smb2_close(m_ctx, fh);
+            out.clear();
+            return false;
+        }
+        if (rc == 0) {
+            break;
+        }
+        totalRead += static_cast<size_t>(rc);
+    }
+
+    smb2_close(m_ctx, fh);
+    if (totalRead < fileSize) {
+        out.resize(totalRead);
+    }
+    return true;
+#else
+    (void)subPath;
+    (void)maxBytes;
+    (void)out;
+    m_lastError = "SMB2 not supported";
+    return false;
+#endif
+}
+
 bool SmbClient::listShares(const std::string& host, int port,
                            const std::string& user,
                            const std::string& password,

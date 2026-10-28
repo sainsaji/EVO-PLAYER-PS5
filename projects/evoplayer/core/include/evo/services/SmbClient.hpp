@@ -36,6 +36,9 @@ public:
     // List folder contents within the currently connected share
     bool list(const std::string& subPath, std::vector<SmbFileEntry>& entries);
 
+    // Read an entire small file into memory from the currently connected share
+    bool readFile(const std::string& subPath, size_t maxBytes, std::vector<uint8_t>& out);
+
     // Enumerate disk shares available on the host (e.g. via IPC$)
     bool listShares(const std::string& host, int port,
                     const std::string& user,

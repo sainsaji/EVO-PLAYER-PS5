@@ -51,6 +51,8 @@ struct BrowserItem {
     std::string iconPath;
     int statusKind = 0;          // 0 none, 1 checking, 2 online, 3 offline (#226)
     std::string statusText;
+    std::string artPath;         // network sidecar image on the server, empty = none (#230)
+    std::string artKey;
 };
 
 class BrowserScreen : public StatefulScreen {

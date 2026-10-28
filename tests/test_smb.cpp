@@ -204,6 +204,7 @@ extern "C" void test_smb_storage_service(void) {
         std::fclose(fCheck);
         jsonBuf[bytesRead] = '\0';
         TEST_ASSERT(std::strstr(jsonBuf, "\"shares\"") != nullptr, "JSON on disk must contain 'shares' key when chosenShares is non-empty");
+        TEST_ASSERT(std::strstr(jsonBuf, "\"art\"") == nullptr, "JSON on disk must NOT contain 'art' key when art is true (default)");
         TEST_ASSERT(std::strstr(jsonBuf, "\"Media\"") != nullptr, "JSON must contain Media");
         TEST_ASSERT(std::strstr(jsonBuf, "\"Public\"") != nullptr, "JSON must contain Public");
         TEST_ASSERT(std::strstr(jsonBuf, "\"Docs\"") != nullptr, "JSON must contain Docs");
@@ -214,6 +215,7 @@ extern "C" void test_smb_storage_service(void) {
         TEST_ASSERT(loadedShare != nullptr, "smb_chosen_test should be loaded");
         std::vector<std::string> expectedChosen = { "Media", "Public", "Docs" };
         TEST_ASSERT(loadedShare->chosenShares == expectedChosen, "chosenShares must survive saveConfig/loadConfig round trip");
+        TEST_ASSERT(loadedShare->art == true, "default art must remain true after round-trip");
 
         // Verify share with empty chosenShares does not write "shares" key
         evo::NetworkShare shareEmptyChosen;
@@ -244,6 +246,33 @@ extern "C" void test_smb_storage_service(void) {
         TEST_ASSERT(loadedEmpty != nullptr, "smb_empty_chosen should be loaded");
         TEST_ASSERT(loadedEmpty->chosenShares.empty(), "chosenShares must remain empty");
         service.removeShare("smb_empty_chosen");
+
+        // art=false survives round-trip and writes "art": false to JSON
+        evo::NetworkShare shareNoArt;
+        shareNoArt.id = "smb_no_art";
+        shareNoArt.name = "No Art SMB";
+        shareNoArt.protocol = evo::NetworkProtocol::SMB;
+        shareNoArt.host = "192.168.1.102";
+        shareNoArt.port = 445;
+        shareNoArt.user = "user";
+        shareNoArt.password = "pass";
+        shareNoArt.startPath = "/";
+        shareNoArt.art = false;
+        service.addShare(shareNoArt);
+
+        fCheck = std::fopen(cfgPath, "rb");
+        TEST_ASSERT(fCheck != nullptr, "evo_network_shares.json must exist");
+        std::memset(jsonBuf, 0, sizeof(jsonBuf));
+        bytesRead = std::fread(jsonBuf, 1, sizeof(jsonBuf) - 1, fCheck);
+        std::fclose(fCheck);
+        jsonBuf[bytesRead] = '\0';
+        TEST_ASSERT(std::strstr(jsonBuf, "\"art\"") != nullptr, "JSON on disk must contain 'art' key when art is false");
+
+        service.loadConfig();
+        const auto* loadedNoArt = service.getShare("smb_no_art");
+        TEST_ASSERT(loadedNoArt != nullptr, "smb_no_art should be loaded");
+        TEST_ASSERT(loadedNoArt->art == false, "art=false must survive saveConfig/loadConfig round trip");
+        service.removeShare("smb_no_art");
     }
 
     // 8. Backward compatibility: loadConfig with old-format JSON without "shares"
@@ -272,6 +301,7 @@ extern "C" void test_smb_storage_service(void) {
         TEST_ASSERT(legacyShare->id == "legacy_share", "legacy share id mismatch");
         TEST_ASSERT(legacyShare->host == "192.168.1.200", "legacy share host mismatch");
         TEST_ASSERT(legacyShare->chosenShares.empty(), "legacy share without 'shares' must have empty chosenShares");
+        TEST_ASSERT(legacyShare->art == true, "legacy share without 'art' must default art to true");
 
         // 9. Load config with non-string entries in "shares" array (should skip non-strings)
         FILE* fMixed = std::fopen(cfgPath, "wb");

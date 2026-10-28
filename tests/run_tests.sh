@@ -78,6 +78,9 @@ SRCS=(
     "${CORE}/src/services/SmbClient.cpp"
     "${CORE}/src/services/FtpClient.cpp"
     "${CORE}/src/services/NetworkStorageService.cpp"
+    "${REPO_ROOT}/tests/test_netart.cpp"
+    "${CORE}/src/services/NetArtSidecar.cpp"
+    "${CORE}/src/services/NetArtCache.cpp"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

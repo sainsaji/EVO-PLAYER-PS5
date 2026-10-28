@@ -19,6 +19,12 @@ struct BrowserEntry {
     std::string fullPath;
     FileCategory category = FileCategory::Unknown;
     uint8_t directoryType = 0;
+    /* Network listings only: the cover image picked from the same listing (#230).
+     * artPath is the sidecar's path on the server; artKey is server + path + size +
+     * mtime of that sidecar, so the disk cache refetches only when it changes. Both
+     * are empty when there is no match or the source has cover art switched off. */
+    std::string artPath;
+    std::string artKey;
 };
 
 /**

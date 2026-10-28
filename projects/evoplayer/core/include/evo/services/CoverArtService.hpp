@@ -2,8 +2,11 @@
 #define EVO_COVER_ART_SERVICE_HPP
 
 #include "evo/interfaces/ICoverArtService.hpp"
+#include "evo/services/NetArtCache.hpp"
+#include "evo/services/NetArtFetcher.hpp"
 #include <pthread.h>
 #include <deque>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -36,6 +39,7 @@ public:
 
     void requestCoverArt(const std::string& mediaPath, bool isDirectory) override;
     void requestBrowserPreview(const std::string& mediaPath, bool isDirectory) override;
+    void requestNetworkArt(const std::string& mediaPath, const NetArtRequest& req) override;
     void pumpAsync() override;
     void quiesce() override;
 
@@ -47,6 +51,8 @@ private:
         std::string path;
         bool isDir = false;
         unsigned generation = 0;
+        bool net = false;           /* poster is a downloaded sidecar (#230) */
+        NetArtRequest netReq;
     };
     struct Result {
         Job job;
@@ -56,9 +62,13 @@ private:
 
     bool loadArtInto(const std::string& mediaPath, bool isDirectory,
                      uint32_t* out, int w, int h);
+    bool loadNetArtInto(const NetArtRequest& req, uint32_t* out, int w, int h);   /* worker only */
     void startWorker();
     void workerMain();
     static void* workerEntry(void* self);
+
+    NetArtFetcher m_netFetcher;             /* worker thread only */
+    std::unique_ptr<NetArtCache> m_netCache; /* worker thread only, made on first use */
 
     pthread_t m_worker;
     bool m_workerStarted = false;

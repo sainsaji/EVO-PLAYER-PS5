@@ -1,4 +1,5 @@
 #include "evo/services/NetworkStorageService.hpp"
+#include "evo/services/NetArtSidecar.hpp"
 #include "evo_data_path.h"
 #include "evo_smb_io.h"
 #include "cJSON.h"
@@ -141,6 +142,7 @@ void NetworkStorageService::loadConfig() {
                     cJSON* jDomain = cJSON_GetObjectItem(item, "domain");
                     cJSON* jPath = cJSON_GetObjectItem(item, "startPath");
                     cJSON* jShares = cJSON_GetObjectItem(item, "shares");
+                    cJSON* jArt = cJSON_GetObjectItem(item, "art");
 
                     if (jId && jId->valuestring) share.id = jId->valuestring;
                     if (jName && jName->valuestring) share.name = jName->valuestring;
@@ -163,6 +165,10 @@ void NetworkStorageService::loadConfig() {
                                 share.chosenShares.push_back(sItem->valuestring);
                             }
                         }
+                    }
+
+                    if (jArt && cJSON_IsBool(jArt)) {
+                        share.art = cJSON_IsTrue(jArt);
                     }
 
                     if (!share.id.empty() && !share.host.empty()) {
@@ -219,6 +225,10 @@ void NetworkStorageService::saveConfig() {
                 }
                 cJSON_AddItemToObject(item, "shares", sharesArr);
             }
+        }
+
+        if (!s.art) {
+            cJSON_AddItemToObject(item, "art", cJSON_CreateFalse());
         }
 
         cJSON_AddItemToArray(root, item);
@@ -685,6 +695,48 @@ FileCategory NetworkStorageService::classifyFileName(const std::string& fileName
     return FileCategory::Unknown;
 }
 
+/*
+ * Cover art from the listing already in hand (#230): for each file, pick the best
+ * sidecar image among the same folder's entries and remember where it lives. No
+ * network call happens here; the image is fetched later on the art worker.
+ * Only image names are matched, so a folder of 5000 videos stays cheap.
+ */
+static bool isSidecarImageName(const std::string& name) {
+    size_t dot = name.find_last_of('.');
+    if (dot == std::string::npos) return false;
+    std::string ext;
+    for (size_t i = dot + 1; i < name.size(); ++i)
+        ext.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(name[i]))));
+    return ext == "jpg" || ext == "jpeg" || ext == "png";
+}
+
+static void attachSidecars(const NetworkShare& share, std::vector<BrowserEntry>& entries,
+                           const std::vector<std::string>& remote,
+                           const std::vector<int64_t>& sizes, const std::vector<int64_t>& mtimes) {
+    if (!share.art || entries.size() != remote.size()) return;
+
+    std::vector<SidecarEntry> images;
+    std::vector<size_t> imageAt;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].category == FileCategory::Folder || !isSidecarImageName(entries[i].name)) continue;
+        images.push_back({entries[i].name, remote[i], false});
+        imageAt.push_back(i);
+    }
+    if (images.empty()) return;
+
+    const std::string server = std::string(share.protocol == NetworkProtocol::SMB ? "smb://" : "ftp://") +
+                               share.host + ":" + std::to_string(share.port);
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const FileCategory cat = entries[i].category;
+        if (cat == FileCategory::Folder || cat == FileCategory::Image) continue;
+        const int hit = pickSidecar(entries[i].name, images);
+        if (hit < 0) continue;
+        const size_t at = imageAt[static_cast<size_t>(hit)];
+        entries[i].artPath = remote[at];
+        entries[i].artKey = server + remote[at] + "|" + std::to_string(sizes[at]) + "|" + std::to_string(mtimes[at]);
+    }
+}
+
 bool NetworkStorageService::listEntries(const std::string& shareId, const std::string& remotePath,
                                        std::vector<BrowserEntry>& outEntries, std::string& outError) {
     outEntries.clear();
@@ -720,6 +772,8 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             }
         }
 
+        std::vector<std::string> remote;
+        std::vector<int64_t> sizes, mtimes;
         for (const auto& fe : ftpEntries) {
             BrowserEntry be;
             be.name = fe.name;
@@ -732,6 +786,9 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             fullItemPath += fe.name;
 
             be.fullPath = buildMediaUrl(*share, fullItemPath);
+            remote.push_back(fullItemPath);
+            sizes.push_back(fe.size);
+            mtimes.push_back(static_cast<int64_t>(fe.modifyTime));
             if (fe.isDirectory) {
                 be.category = FileCategory::Folder;
                 be.directoryType = 4; // DT_DIR
@@ -741,6 +798,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
             }
             outEntries.push_back(std::move(be));
         }
+        attachSidecars(*share, outEntries, remote, sizes, mtimes);
         return true;
     } else if (share->protocol == NetworkProtocol::SMB) {
         std::string targetPath = remotePath.empty() ? share->startPath : remotePath;
@@ -789,6 +847,8 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
                 }
             }
 
+            std::vector<std::string> remote;
+            std::vector<int64_t> sizes, mtimes;
             for (const auto& se : smbEntries) {
                 BrowserEntry be;
                 be.name = se.name;
@@ -803,6 +863,9 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
                 fullItemPath += se.name;
 
                 be.fullPath = buildMediaUrl(*share, fullItemPath);
+                remote.push_back(fullItemPath);
+                sizes.push_back(static_cast<int64_t>(se.size));
+                mtimes.push_back(static_cast<int64_t>(se.modifyTime));
                 if (se.isDirectory) {
                     be.category = FileCategory::Folder;
                     be.directoryType = 4; // DT_DIR
@@ -812,6 +875,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
                 }
                 outEntries.push_back(std::move(be));
             }
+            attachSidecars(*share, outEntries, remote, sizes, mtimes);
             return true;
         }
     } else {

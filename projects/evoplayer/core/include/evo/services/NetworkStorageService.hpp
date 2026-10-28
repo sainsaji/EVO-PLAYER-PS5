@@ -27,6 +27,8 @@ struct NetworkShare {
     std::string startPath = "/";
     // SMB share names ticked in the picker; empty = show every share the server offers.
     std::vector<std::string> chosenShares;
+    // fetch cover art from this source (turn off for slow links)
+    bool art = true;
 };
 
 enum class NetworkTestStage { Ok, Address, Login, Share, Folder };

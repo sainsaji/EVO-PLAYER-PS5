@@ -7,6 +7,8 @@
 
 namespace evo {
 
+struct NetArtRequest;
+
 /**
  * @brief Interface for artwork discovery, thumbnail frame decoding, and cache management.
  */
@@ -52,6 +54,9 @@ public:
      */
     virtual void requestCoverArt(const std::string& mediaPath, bool isDirectory) = 0;
     virtual void requestBrowserPreview(const std::string& mediaPath, bool isDirectory) = 0;
+    /* A network file's poster is a sidecar image downloaded by the worker (#230).
+     * Same queue, same cap and same pumpAsync() delivery as requestCoverArt. */
+    virtual void requestNetworkArt(const std::string& mediaPath, const NetArtRequest& req) = 0;
     virtual void pumpAsync() = 0;
 
     /* Drop queued work and wait for the one job in flight. Called before
