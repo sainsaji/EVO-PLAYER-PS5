@@ -9,6 +9,8 @@
  */
 #include "evo_ntfs.h"
 #include "evo_subtitle.h"
+#include "evo_langpref.h"
+#include <ctype.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -360,6 +362,91 @@ int prospero_subtitle_declared_cues(
 
 
 
+/*
+ * What a subtitle track is worth before its codec is considered: its language
+ * against SUBTITLE LANGUAGE (evo_langpref), and what kind of track it is.
+ *
+ * A forced track carries only the signs and foreign-language lines. It is the
+ * right pick when the audio is already in the language you read - and the
+ * wrong one otherwise: it used to get a bonus here, so an "English (Forced)"
+ * flagged default beat the full English track and the screen stayed empty for
+ * most of the film while the toast said "English".
+ */
+static int prospero_subtitle_audio_in(const char *a3)
+{
+    if (!a3 || !a3[0] || !play_fmt || audio_stream_index < 0 ||
+        audio_stream_index >= (int)play_fmt->nb_streams)
+        return 0;
+    AVStream *a = play_fmt->streams[audio_stream_index];
+    if (!a)
+        return 0;
+    AVDictionaryEntry *l = av_dict_get(a->metadata, "language", NULL, 0);
+    return l && l->value && evo_lang_is(l->value, a3);
+}
+
+static int prospero_subtitle_title_has(AVStream *stream, const char *word)
+{
+    AVDictionaryEntry *t = av_dict_get(stream->metadata, "title", NULL, 0);
+    if (!t || !t->value || !word || !word[0])
+        return 0;
+    /* case-insensitive substring, ASCII (strcasestr is not imported) */
+    const size_t wn = strlen(word);
+    for (const char *p = t->value; *p; ++p) {
+        size_t k = 0;
+        while (k < wn && p[k] &&
+               tolower((unsigned char)p[k]) == tolower((unsigned char)word[k]))
+            ++k;
+        if (k == wn)
+            return 1;
+    }
+    return 0;
+}
+
+static int prospero_subtitle_meta_score(AVStream *stream)
+{
+    int score = 0;
+    AVDictionaryEntry *language =
+        av_dict_get(stream->metadata, "language", NULL, 0);
+    const int rank = evo_langpref_rank(language ? language->value : NULL, 's');
+    if (rank == 2)
+        score += 100;
+    else if (rank == 1)
+        score += 40;
+
+    if (stream->disposition & AV_DISPOSITION_DEFAULT)
+        score += 40;
+
+    if (stream->disposition & AV_DISPOSITION_FORCED ||
+        prospero_subtitle_title_has(stream, "forced")) {
+        const char *want = evo_langpref_subtitle()[0] ? evo_langpref_subtitle() : "eng";
+        if (prospero_subtitle_audio_in(want) && rank == 2)
+            score += 150;    /* audio already in your language: just the signs */
+        else
+            score -= 150;    /* never instead of the dialogue */
+    }
+
+    if (prospero_subtitle_title_has(stream, "commentary"))
+        score -= 200;
+    if (prospero_subtitle_title_has(stream, "sdh") ||
+        (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED))
+        score -= 5;          /* same dialogue plus [door creaks]: a tie-break */
+    return score;
+}
+
+int prospero_subtitle_stream_rank(AVStream *stream)
+{
+    if (!stream)
+        return 0;
+    AVDictionaryEntry *l = av_dict_get(stream->metadata, "language", NULL, 0);
+    return evo_langpref_rank(l ? l->value : NULL, 's');
+}
+
+int prospero_subtitle_stream_is_forced(AVStream *stream)
+{
+    return stream && ((stream->disposition & AV_DISPOSITION_FORCED) ||
+                      prospero_subtitle_title_has(stream, "forced"));
+}
+
 static int prospero_embedded_subtitle_score_stream(
     AVStream *stream
 ) {
@@ -373,41 +460,7 @@ static int prospero_embedded_subtitle_score_stream(
         return -100000;
     }
 
-    int score = 10;
-
-    AVDictionaryEntry *language =
-        av_dict_get(
-            stream->metadata,
-            "language",
-            NULL,
-            0
-        );
-
-    if (language && language->value) {
-        if (
-            strcasecmp(
-                language->value,
-                "eng"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "en"
-            ) == 0 ||
-            strcasecmp(
-                language->value,
-                "english"
-            ) == 0
-        ) {
-            score += 100;
-        }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_DEFAULT
-    ) {
-        score += 40;
-    }
+    int score = 10 + prospero_subtitle_meta_score(stream);
 
     /*
      * Cue count outranks every metadata signal, because it is the only one
@@ -429,13 +482,6 @@ static int prospero_embedded_subtitle_score_stream(
         } else if (cues > 0) {
             score += cues > 50 ? 20 : 5;
         }
-    }
-
-    if (
-        stream->disposition &
-        AV_DISPOSITION_FORCED
-    ) {
-        score += 25;
     }
 
     return score;
@@ -629,25 +675,7 @@ int prospero_embedded_subtitle_open(
             AV_CODEC_ID_HDMV_PGS_SUBTITLE
         ) {
             /* Picture tracks only win when there is no text track at all. */
-            int pgs_score = 0;
-            AVDictionaryEntry *pgs_lang =
-                av_dict_get(stream->metadata, "language", NULL, 0);
-
-            if (
-                pgs_lang && pgs_lang->value &&
-                (strcasecmp(pgs_lang->value, "eng") == 0 ||
-                 strcasecmp(pgs_lang->value, "en") == 0)
-            ) {
-                pgs_score += 100;
-            }
-
-            if (stream->disposition & AV_DISPOSITION_DEFAULT) {
-                pgs_score += 40;
-            }
-
-            if (stream->disposition & AV_DISPOSITION_FORCED) {
-                pgs_score -= 60;     /* signs only, not the dialogue */
-            }
+            int pgs_score = prospero_subtitle_meta_score(stream);
 
             if (!found_pgs || pgs_score > best_pgs_score) {
                 best_pgs_score = pgs_score;
@@ -704,6 +732,16 @@ int prospero_embedded_subtitle_open(
     }
 
     if (best_stream < 0 && found_pgs) {
+        best_stream = best_pgs;
+    } else if (
+        found_pgs && best_stream >= 0 &&
+        prospero_subtitle_requested_stream < 0 &&
+        prospero_subtitle_stream_rank(format->streams[best_pgs]) == 2 &&
+        !prospero_subtitle_stream_is_forced(format->streams[best_pgs]) &&
+        prospero_subtitle_stream_rank(format->streams[best_stream]) < 2
+    ) {
+        /* The text track won only on being text; the picture one is in the
+         * language you asked for and the text one is not. */
         best_stream = best_pgs;
     }
 
@@ -1508,12 +1546,17 @@ int prospero_subtitle_face = 2;  /* 1 SUB (SMALL), 2 MENU (MEDIUM/DEFAULT), 3 TI
 static char prospero_subtitle_path[512] = {0};
 
 
+/* What the external track is, for the picker ("Italiano · ONLINE"); "" = a
+ * plain sidecar SRT. */
+char prospero_subtitle_external_label[96] = {0};
+
 void prospero_subtitle_clear(void) {
     /* Media change or stop: an analysis of the old file must not land on the
      * new one, and its offset/ratio belong to the old SRT too. */
     evo_subsync_cancel();
     prospero_subtitle_count = 0;
     prospero_subtitle_path[0] = 0;
+    prospero_subtitle_external_label[0] = 0;
     prospero_subtitle_delay_ms = 0;
     prospero_subtitle_time_scale = 1.0;
     prospero_secondary_delay_ms = 0;
@@ -2163,6 +2206,11 @@ static int prospero_subtitle_load_file(
     );
 
     return prospero_subtitle_count;
+}
+
+
+int prospero_subtitle_load_file_quiet(const char *path) {
+    return prospero_subtitle_load_file(path);
 }
 
 

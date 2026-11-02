@@ -79,6 +79,7 @@ public:
     bool switchVideoVariant(int streamIndex) override;
 
 private:
+    void applyOnlineSubtitles();
     void initStateMachine();
     void applyViewMode();
     double clampScrubTarget(double target) const;

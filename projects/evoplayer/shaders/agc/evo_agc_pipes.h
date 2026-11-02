@@ -70,6 +70,7 @@
 #include "upscale_easu_pipe.h"
 #include "upscale_rcas_pipe.h"
 #include "video_yuv_nv12_pipe.h"
+#include "video_yuv_nv12_709_pipe.h"
 #include "video_yuv_nv12_hdr_pipe.h"
 #include "video_yuv_nv12_hlg_pipe.h"
 #include "video_yuv_nv12_hlg_pq_out_pipe.h"
@@ -79,8 +80,10 @@
 #include "video_yuv_p010_hdr_pipe.h"
 #include "video_yuv_p010_hlg_pipe.h"
 #include "video_yuv_p010_hlg_pq_out_pipe.h"
+#include "video_yuv_p010_pq_dyn_pipe.h"
 #include "video_yuv_p010_pq_out_pipe.h"
 #include "video_yuv_p010_sdr_pipe.h"
 #include "video_yuv_planar_pipe.h"
+#include "video_yuv_planar_709_pipe.h"
 
 #endif /* EVO_AGC_PIPES_H */

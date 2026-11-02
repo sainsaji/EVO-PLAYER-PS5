@@ -77,19 +77,12 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
+@YUV601_8@
+
 void main() {
     float y = texture(uY, vUV).r;
     vec2 uv = texture(uUV, vUV).rg;
-    float U = uv.x - 0.5;
-    float V = uv.y - 0.5;
-
-    float Y = (y - 0.0627451) * 1.1640625;
-    vec3 rgb = vec3(
-        Y + 1.59765625 * V,
-        Y - 0.390625 * U - 0.8125 * V,
-        Y + 2.015625 * U
-    );
-    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+    out_color = vec4(clamp(yuv601(y, uv.x, uv.y), 0.0, 1.0), 1.0);
 }
 """
 
@@ -102,18 +95,11 @@ layout(set = 1, binding = 2) uniform sampler2D uV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
+@YUV601_8@
+
 void main() {
     float y = texture(uY, vUV).r;
-    float U = texture(uU, vUV).r - 0.5;
-    float V = texture(uV, vUV).r - 0.5;
-
-    float Y = (y - 0.0627451) * 1.1640625;
-    vec3 rgb = vec3(
-        Y + 1.59765625 * V,
-        Y - 0.390625 * U - 0.8125 * V,
-        Y + 2.015625 * U
-    );
-    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+    out_color = vec4(clamp(yuv601(y, texture(uU, vUV).r, texture(uV, vUV).r), 0.0, 1.0), 1.0);
 }
 """
 
@@ -126,19 +112,12 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
+@YUV709_10@
+
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
     vec2 uv = texture(uUV, vUV).rg * 64.0615844;
-    float U = uv.x - 0.5;
-    float V = uv.y - 0.5;
-
-    float Y = (y - 0.0627451) * 1.1640625;
-    vec3 rgb = vec3(
-        Y + 1.79274107 * V,
-        Y - 0.21324861 * U - 0.53290933 * V,
-        Y + 2.11240179 * U
-    );
-    out_color = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+    out_color = vec4(clamp(yuv709(y, uv.x, uv.y), 0.0, 1.0), 1.0);
 }
 """
 
@@ -152,12 +131,7 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
-vec3 yuv2020(float y, float U, float V) {
-    float Yp = (y - 0.0627451) * 1.1640625;
-    return vec3(Yp + 1.4746 * V,
-                Yp - 0.16455 * U - 0.57135 * V,
-                Yp + 1.8814 * U);
-}
+@YUV2020_10@
 
 
 /*
@@ -219,7 +193,7 @@ vec3 hdr_nits_to_sdr(vec3 nits2020) {
 
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
-    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
 
     vec3 pq_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
     vec3 nits = vec3(pq_to_nits(pq_rgb.r), pq_to_nits(pq_rgb.g), pq_to_nits(pq_rgb.b));
@@ -235,12 +209,7 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
-vec3 yuv2020(float y, float U, float V) {
-    float Yp = (y - 0.0627451) * 1.1640625;
-    return vec3(Yp + 1.4746 * V,
-                Yp - 0.16455 * U - 0.57135 * V,
-                Yp + 1.8814 * U);
-}
+@YUV2020_10@
 
 /* ARIB STD-B67 (HLG) electro-optical transfer function. */
 float hlg_eotf(float e) {
@@ -309,7 +278,7 @@ vec3 hdr_nits_to_sdr(vec3 nits2020) {
 
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
-    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
 
     vec3 hlg_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
     vec3 scene = vec3(hlg_eotf(hlg_rgb.r), hlg_eotf(hlg_rgb.g), hlg_eotf(hlg_rgb.b));
@@ -335,18 +304,13 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
-vec3 yuv2020(float y, float U, float V) {
-    float Yp = (y - 0.0627451) * 1.1640625;
-    return vec3(Yp + 1.4746 * V,
-                Yp - 0.16455 * U - 0.57135 * V,
-                Yp + 1.8814 * U);
-}
+@YUV2020_10@
 
 /* HDR10 source -> HDR10 output: the decoded R'G'B' already IS BT.2020 PQ, so
  * the only work is YCbCr -> RGB. */
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
-    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
     out_color = vec4(clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0), 1.0);
 }
 """
@@ -359,12 +323,7 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
-vec3 yuv2020(float y, float U, float V) {
-    float Yp = (y - 0.0627451) * 1.1640625;
-    return vec3(Yp + 1.4746 * V,
-                Yp - 0.16455 * U - 0.57135 * V,
-                Yp + 1.8814 * U);
-}
+@YUV2020_10@
 
 float hlg_eotf(float e) {
     if (e <= 0.5)
@@ -382,7 +341,7 @@ float pq_oetf(float nits) {
  * sides, so no primaries conversion. */
 void main() {
     float y = texture(uY, vUV).r * 64.0615844;
-    vec2 uv = texture(uUV, vUV).rg * 64.0615844 - vec2(0.5);
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
     vec3 hlg_rgb = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
     vec3 scene = vec3(hlg_eotf(hlg_rgb.r), hlg_eotf(hlg_rgb.g), hlg_eotf(hlg_rgb.b));
     float ys = max(dot(scene, vec3(0.2627, 0.6780, 0.0593)), 1e-6);
@@ -488,14 +447,158 @@ float pq_oetf(float nits) {
     return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
 }
 
-/* -> HDR10 output: BT.2020 PQ, the TV tone-maps. */
+
+/*
+ * HDR peak mapping (EVO "HDR peak" setting). BT.2390 EETF in the PQ domain on
+ * max(R,G,B), applied as one gain to all three channels so hue and saturation
+ * survive. `src` is the brightest the picture gets (Dolby Vision L1 max per
+ * shot, else the HDR10 MaxCLL / mastering peak), `dst` the panel peak. Below
+ * the knee and whenever src <= dst it is the identity.
+ */
+float hm_pq(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+float hm_nits(float N) {
+    float Np = pow(max(N, 0.0), 1.0 / 78.84375);
+    return 10000.0 * pow(max(Np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * Np),
+                         1.0 / 0.1593017578125);
+}
+
+vec3 hdr_peak_map(vec3 nits, float src, float dst) {
+    if (dst <= 0.0 || src <= dst)
+        return nits;
+    float m = max(max(nits.r, nits.g), nits.b);
+    if (m <= 0.0)
+        return nits;
+    float maxLum = hm_pq(src);
+    float e1 = min(hm_pq(m) / maxLum, 1.0);
+    float maxT = hm_pq(dst) / maxLum;
+    float ks = 1.5 * maxT - 0.5;
+    float e2 = e1;
+    if (e1 > ks) {
+        float t = (e1 - ks) / (1.0 - ks);
+        float t2 = t * t, t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks
+           + (t3 - 2.0 * t2 + t) * (1.0 - ks)
+           + (-2.0 * t3 + 3.0 * t2) * maxT;
+    }
+    return nits * (hm_nits(e2 * maxLum) / m);
+}
+
+/* -> HDR10 output: BT.2020 PQ. With the HDR peak setting on, the shot is fitted
+ * to the panel from its own L1 metadata (lohi[0].w source, lohi[1].w target);
+ * otherwise the TV tone-maps. */
 void main() {
-    vec3 n = dovi_nits();
+    vec3 n = hdr_peak_map(dovi_nits(), dv.lohi[0].w, dv.lohi[1].w);
     out_color = vec4(pq_oetf(n.r), pq_oetf(n.g), pq_oetf(n.b), 1.0);
 }
 """
 
+
+# HDR10 / Dolby Vision profile 7-8 base layer -> HDR10 output, fitted to the
+# panel peak (the HDR peak setting). Same DoviParams buffer as the P5 pipes so
+# the runtime binds it the same way; only lohi[0].w (source peak) and lohi[1].w
+# (target peak) are read.
+PQ_DYN_FS = DOVI_HEAD + """
+layout(set = 1, binding = 2, std140) uniform DoviParams {
+    vec4 ycc[3];
+    vec4 off;
+    vec4 lms[3];
+    vec4 lohi[3];
+} dv;
+
+@YUV2020_10@
+""" + """
+/*
+ * HDR peak mapping (EVO "HDR peak" setting). BT.2390 EETF in the PQ domain on
+ * max(R,G,B), applied as one gain to all three channels so hue and saturation
+ * survive. `src` is the brightest the picture gets (Dolby Vision L1 max per
+ * shot, else the HDR10 MaxCLL / mastering peak), `dst` the panel peak. Below
+ * the knee and whenever src <= dst it is the identity.
+ */
+float hm_pq(float nits) {
+    float Y = pow(clamp(nits / 10000.0, 0.0, 1.0), 0.1593017578125);
+    return pow((0.8359375 + 18.8515625 * Y) / (1.0 + 18.6875 * Y), 78.84375);
+}
+
+float hm_nits(float N) {
+    float Np = pow(max(N, 0.0), 1.0 / 78.84375);
+    return 10000.0 * pow(max(Np - 0.8359375, 0.0) / (18.8515625 - 18.6875 * Np),
+                         1.0 / 0.1593017578125);
+}
+
+vec3 hdr_peak_map(vec3 nits, float src, float dst) {
+    if (dst <= 0.0 || src <= dst)
+        return nits;
+    float m = max(max(nits.r, nits.g), nits.b);
+    if (m <= 0.0)
+        return nits;
+    float maxLum = hm_pq(src);
+    float e1 = min(hm_pq(m) / maxLum, 1.0);
+    float maxT = hm_pq(dst) / maxLum;
+    float ks = 1.5 * maxT - 0.5;
+    float e2 = e1;
+    if (e1 > ks) {
+        float t = (e1 - ks) / (1.0 - ks);
+        float t2 = t * t, t3 = t2 * t;
+        e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks
+           + (t3 - 2.0 * t2 + t) * (1.0 - ks)
+           + (-2.0 * t3 + 3.0 * t2) * maxT;
+    }
+    return nits * (hm_nits(e2 * maxLum) / m);
+}
+""" + """
+void main() {
+    float y = texture(uY, vUV).r * 64.0615844;
+    vec2 uv = texture(uUV, vUV).rg * 64.0615844;
+    vec3 pq = clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0);
+    vec3 n = vec3(hm_nits(pq.r), hm_nits(pq.g), hm_nits(pq.b));
+    n = hdr_peak_map(n, dv.lohi[0].w, dv.lohi[1].w);
+    out_color = vec4(hm_pq(n.r), hm_pq(n.g), hm_pq(n.b), 1.0);
+}
+"""
+
 DOVI_PARAMS_BYTES = (3 + 1 + 3 + 3 + 6 + 24 + 144) * 16
+
+
+
+# Limited-range Y'CbCr -> R'G'B', exact for the bit depth. Each function takes
+# the raw normalised samples (code / (2^bits - 1)) and removes the offsets
+# itself: luma 16..235 (8-bit) or 64..940 (10-bit), chroma 16..240 or 64..960
+# around 128 / 512. The chroma gain (255/224, 1023/896) matters: leaving it out
+# - as the BT.2020 paths once did - desaturates every colour by about 12 %.
+_MATRICES = {
+    # Kr/Kb-derived coefficients for full-range chroma: (R<-V, G<-U, G<-V, B<-U)
+    "601":  (1.402,  -0.344136, -0.714136, 1.772),
+    "709":  (1.5748, -0.187324, -0.468124, 1.8556),
+    "2020": (1.4746, -0.164553, -0.571353, 1.8814),
+}
+
+
+def yuv_fn(matrix: str, bits: int) -> str:
+    if bits == 10:
+        yoff, ys, coff, cs = 64.0 / 1023.0, 1023.0 / 876.0, 512.0 / 1023.0, 1023.0 / 896.0
+    else:
+        yoff, ys, coff, cs = 16.0 / 255.0, 255.0 / 219.0, 128.0 / 255.0, 255.0 / 224.0
+    rv, gu, gv, bu = _MATRICES[matrix]
+    return f"""vec3 yuv{matrix}(float y, float u, float v) {{
+    float Yp = (y - {yoff:.9f}) * {ys:.9f};
+    float U = (u - {coff:.9f}) * {cs:.9f};
+    float V = (v - {coff:.9f}) * {cs:.9f};
+    return vec3(Yp + {rv:.6f} * V,
+                Yp + ({gu:.6f}) * U + ({gv:.6f}) * V,
+                Yp + {bu:.6f} * U);
+}}"""
+
+
+def resolve_yuv(fs: str) -> str:
+    for m in _MATRICES:
+        for b in (8, 10):
+            fs = fs.replace(f"@YUV{m}_{b}@", yuv_fn(m, b))
+    assert "@YUV" not in fs, "unresolved yuv placeholder"
+    return fs
 
 
 def resource_mapping(sampler_count: int, dovi: bool = False) -> str:
@@ -558,7 +661,8 @@ void main() {
 
 
 def build(name: str, fs: str, samplers: int, comment: str, dovi: bool = False) -> None:
-    if "pq_out" not in name:
+    fs = resolve_yuv(fs)
+    if "pq_out" not in name and "pq_dyn" not in name:
         fs = with_deep_black(fs)
     text = f"""; {name} - {comment}
 ; Generated by tools/gen_video_pipes.py. Edit the generator, not this file.
@@ -602,19 +706,26 @@ def main() -> int:
     print("Generating video .pipe files...")
     build("video_yuv_nv12", NV12_FS, 2, "NV12 8-bit SDR, BT.601 limited range")
     build("video_yuv_planar", PLANAR_FS, 3, "planar I420 8-bit SDR, BT.601 limited")
+    # HD and UHD SDR is BT.709; BT.601 is only right for SD. The runtime picks
+    # by picture height (the usual rule when a stream is untagged).
+    build("video_yuv_nv12_709", NV12_FS.replace("@YUV601_8@", "@YUV709_8@").replace("yuv601(", "yuv709("),
+          2, "NV12 8-bit SDR, BT.709 limited range")
+    build("video_yuv_planar_709", PLANAR_FS.replace("@YUV601_8@", "@YUV709_8@").replace("yuv601(", "yuv709("),
+          3, "planar I420 8-bit SDR, BT.709 limited")
     build("video_yuv_p010_sdr", P010_SDR_FS, 2, "P010 10-bit SDR, BT.709 limited range")
     build("video_yuv_p010_hdr", HDR_FS, 2, "P010 10-bit PQ (ST.2084) -> SDR: BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_hlg", HLG_FS, 2, "P010 10-bit HLG (ARIB STD-B67) -> SDR: BT.2100 OOTF + BT.2390 EETF + BT.2020->709")
     build("video_yuv_p010_pq_out", PQ_OUT_FS, 2, "P010 HDR10 -> HDR10 output (PQ passthrough)")
     build("video_yuv_p010_hlg_pq_out", HLG_PQ_FS, 2, "P010 HLG -> HDR10 output (BT.2100 OOTF, PQ)")
     build("video_yuv_p010_dovi", DOVI_FS, 2, "P010 Dolby Vision P5 -> SDR (RPU reshape + BT.2390 EETF)", dovi=True)
-    build("video_yuv_p010_dovi_pq_out", DOVI_PQ_FS, 2, "P010 Dolby Vision P5 -> HDR10 output (RPU reshape, PQ)", dovi=True)
+    build("video_yuv_p010_dovi_pq_out", DOVI_PQ_FS, 2, "P010 Dolby Vision P5 -> HDR10 output (RPU reshape, PQ, optional peak mapping)", dovi=True)
+    build("video_yuv_p010_pq_dyn", PQ_DYN_FS, 2, "P010 HDR10 / DV base layer -> HDR10 output, fitted to the panel peak", dovi=True)
 
     # 8-bit HDR: HEVC Main (8-bit) carrying HLG / PQ over BT.2020 exists -
     # broadcast 4K HLG channels do it. Same maths; the NV12 planes are R8/RG8
     # and already sample as 0..1, so drop the 10-bit-in-16 rescale.
     def eight_bit(fs):
-        out = fs.replace(" * 64.0615844", "")
+        out = fs.replace(" * 64.0615844", "").replace("@YUV2020_10@", "@YUV2020_8@")
         assert "64.0615844" not in out
         return out
 

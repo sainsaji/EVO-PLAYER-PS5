@@ -8,6 +8,7 @@
 #include "evo_demux.h"
 #include "evo_audio_out.h"
 #include "evo_subtitle.h"
+#include "evo_online_subs.h"
 #include "evo_vdec.h"
 #include "evo_perf_monitor.h"
 #include "evo_toast.h"
@@ -371,9 +372,47 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
     return false;
 }
 
+/* An online subtitle picked in the subtitle picker has finished downloading:
+ * load it here, on the thread that draws subtitles. */
+static void pumpOnlineSubtitles()
+{
+    int idx = -1, failed = 0;
+    const char* path = evo_osubs_take_ready(&idx, &failed);
+    if (failed) {
+        toast("SUBTITLES", "DOWNLOAD FAILED");
+        return;
+    }
+    if (!path)
+        return;
+    if (prospero_secondary_use_external)
+        prospero_secondary_subtitle_select(PROSPERO_SECONDARY_NONE);
+    if (prospero_subtitle_load_file_quiet(path) <= 0) {
+        toast("SUBTITLES", "THAT FILE HAS NO SUBTITLES");
+        return;
+    }
+    char lang[64];
+    evo_osubs_label(idx, lang, sizeof lang);
+    std::string label = lang;
+    evo_osub_t meta;
+    if (evo_osubs_get(idx, &meta)) {
+        label += " - ";
+        label += meta.source;
+    }
+    std::snprintf(prospero_subtitle_external_label, sizeof prospero_subtitle_external_label,
+                  "%s", label.c_str());
+    prospero_subtitle_use_external = 1;
+    prospero_subtitle_enabled = 1;
+    evo_osubs_set_active(idx);
+    evo_osubs_remember(path, label.c_str());
+    char msg[96];
+    std::snprintf(msg, sizeof msg, "%s (ONLINE)", lang);
+    toast("SUBTITLES", msg);
+}
+
 void PlayerScreen::update(double deltaMs) {
     StatefulScreen::update(deltaMs);
     m_playerFsm.update(deltaMs);
+    pumpOnlineSubtitles();
 
     auto playback = Application::getInstance().getPlaybackController();
     if (!playback) return;
@@ -529,8 +568,20 @@ void PlayerScreen::feedPerformanceHud() {
     const char *backend = (evo_pb_active_backend() == EVO_VDEC_BACKEND_NATIVE)
                               ? "HARDWARE" : "SOFTWARE";
 
+    /* HDR peak mapping in effect on the last frame (Settings -> HDR PEAK) */
+    char hdrBuf[64];
+    {
+        const int mode = evo_agc_runtime_hdr_map_mode();
+        const int peak = evo_agc_runtime_get_hdr_peak();
+        if (mode == 2)
+            std::snprintf(hdrBuf, sizeof hdrBuf, "%s > %d NITS PER SHOT", hdrName, peak);
+        else if (mode == 1)
+            std::snprintf(hdrBuf, sizeof hdrBuf, "%s > %d NITS", hdrName, peak);
+        else
+            std::snprintf(hdrBuf, sizeof hdrBuf, "%s", hdrName);
+    }
     std::snprintf(l_video, sizeof(l_video), "VIDEO  %s  %dx%d  %.3f fps  %s  %s",
-                  vcodec, vw, vh, evo_pb_video_fps(), hdrName, backend);
+                  vcodec, vw, vh, evo_pb_video_fps(), hdrBuf, backend);
     std::snprintf(l_audio, sizeof(l_audio), "AUDIO  %s  %s  %dch  %d Hz  %s",
                   acodec, alang, ach, arate, evo_pt_is_active() ? "BITSTREAM" : "PCM");
 

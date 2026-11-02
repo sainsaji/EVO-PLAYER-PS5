@@ -32,6 +32,8 @@
 #include "evo_data_path.h"
 #include "pp_playback.h"
 #include "evo_audio_gain.h"
+#include "evo_langpref.h"
+#include "evo_online_subs.h"
 
 /* Test runner assertion tracking */
 int g_tests_run = 0;
@@ -1268,6 +1270,81 @@ static void test_audio_volume_boost(void)
     TEST_PASS();
 }
 
+
+/* ==========================================================================
+ * Preferred language: tag normalisation and track ranking
+ * ========================================================================== */
+static void test_language_preference(void)
+{
+    TEST_START("Language preference: normalise + rank");
+    char c[4];
+    TEST_ASSERT(evo_lang_normalize("it", c) && !strcmp(c, "ita"), "it -> ita");
+    TEST_ASSERT(evo_lang_normalize("ITA", c) && !strcmp(c, "ita"), "ITA -> ita");
+    TEST_ASSERT(evo_lang_normalize("Italian", c) && !strcmp(c, "ita"), "Italian -> ita");
+    TEST_ASSERT(evo_lang_normalize("italiano", c) && !strcmp(c, "ita"), "italiano -> ita");
+    TEST_ASSERT(evo_lang_normalize("it-IT", c) && !strcmp(c, "ita"), "it-IT -> ita");
+    TEST_ASSERT(evo_lang_normalize("fre", c) && !strcmp(c, "fra"), "fre -> fra");
+    TEST_ASSERT(evo_lang_normalize("pob", c) && !strcmp(c, "por"), "pob -> por");
+    TEST_ASSERT(evo_lang_normalize("pt-BR", c) && !strcmp(c, "por"), "pt-BR -> por");
+    TEST_ASSERT(evo_lang_normalize("English", c) && !strcmp(c, "eng"), "English -> eng");
+    TEST_ASSERT(!evo_lang_normalize("und", c) && c[0] == 0, "und is no language");
+    TEST_ASSERT(!evo_lang_normalize(NULL, c), "NULL is no language");
+
+    /* Auto: subtitles prefer English, audio has no preference */
+    evo_langpref_set_subtitle("");
+    evo_langpref_set_audio("");
+    TEST_ASSERT(evo_langpref_rank("eng", 's') == 2, "auto subs: eng preferred");
+    TEST_ASSERT(evo_langpref_rank("ita", 's') == 0, "auto subs: ita not");
+    TEST_ASSERT(evo_langpref_rank("eng", 'a') == 0, "auto audio: no preference");
+
+    /* Italian preferred, English the fallback */
+    evo_langpref_set_subtitle("ita");
+    evo_langpref_set_audio("Italiano");
+    TEST_ASSERT(!strcmp(evo_langpref_subtitle(), "ita"), "stored as 639-2/T");
+    TEST_ASSERT(!strcmp(evo_langpref_audio(), "ita"), "audio stored normalised");
+    TEST_ASSERT(evo_langpref_rank("it", 's') == 2, "it preferred");
+    TEST_ASSERT(evo_langpref_rank("en", 's') == 1, "en fallback");
+    TEST_ASSERT(evo_langpref_rank("jpn", 's') == 0, "jpn other");
+    TEST_ASSERT(evo_langpref_rank("ita", 'a') == 2, "audio ita preferred");
+    evo_langpref_set_subtitle("");
+    evo_langpref_set_audio("");
+    TEST_PASS();
+}
+
+/* ==========================================================================
+ * Online subtitles registry (Stremio addons)
+ * ========================================================================== */
+static void test_online_subtitles_registry(void)
+{
+    TEST_START("Online subtitles: registry, keying, best pick");
+    evo_osubs_begin("e:0:series:tt0903747:1:2");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/1.srt", "eng", "OpenSubtitles");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/2.srt", "ita", "OpenSubtitles");
+    evo_osubs_add("e:0:series:tt0903747:1:2", "https://subs.example/2.srt", "ita", "dup");      /* dropped */
+    evo_osubs_add("e:0:series:tt0903747:1:2", "magnet:?xt=urn", "ita", "bad scheme");            /* dropped */
+    evo_osubs_add("another-title", "https://subs.example/3.srt", "ita", "stale");                 /* wrong key */
+    TEST_ASSERT(evo_osubs_count() == 2, "two distinct http(s) entries for this title");
+
+    int rank = 0;
+    evo_langpref_set_subtitle("ita");
+    TEST_ASSERT(evo_osubs_best(0, &rank) == 1 && rank == 2, "Italian picked when preferred");
+    evo_langpref_set_subtitle("spa");
+    TEST_ASSERT(evo_osubs_best(0, &rank) == -1, "no Spanish, no fallback allowed");
+    TEST_ASSERT(evo_osubs_best(1, &rank) == 0 && rank == 1, "English as the fallback");
+    evo_langpref_set_subtitle("");
+
+    evo_osubs_pending("e:0:series:tt0903747:1:2", +1);
+    evo_osubs_pending("e:0:series:tt0903747:1:2", -1);
+    TEST_ASSERT(evo_osubs_wait("e:0:series:tt0903747:1:2", 10) == 2, "wait returns at once when idle");
+
+    char key[128];
+    evo_osubs_key(key, sizeof key);
+    TEST_ASSERT(!strcmp(key, "e:0:series:tt0903747:1:2"), "key kept");
+    evo_osubs_begin("m:0:movie:tt0111161");
+    TEST_ASSERT(evo_osubs_count() == 0 && evo_osubs_active() == -1, "a new title starts empty");
+    TEST_PASS();
+}
+
 /* Settings service save/load and backward compatibility host tests */
 extern void test_settings_save_load_roundtrip(void);
 extern void test_settings_legacy_compat(void);
@@ -1321,6 +1398,8 @@ int main(void)
     test_smb_url_parsing();
     test_smb_recent_and_favorites();
     test_smb_attach_credentials();
+    test_language_preference();
+    test_online_subtitles_registry();
 
     printf("\n----------------------------------------------------------------------\n");
     printf("  Results: %d/%d passed (%d failed)\n",

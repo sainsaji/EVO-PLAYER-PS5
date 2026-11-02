@@ -119,6 +119,37 @@ threads, frame threading for HEVC and slice threading for H.264.
   libavcodec** (`LIBAVCODEC_VERSION` 61.19).
 - The curve is chosen from the stream's `color_trc`, not the decoder profile: an HLG
   file once looked right until it was checked against a PQ one with the same pattern.
+- **Y'CbCr to R'G'B' is exact for range and bit depth** (`yuv_fn` in
+  `tools/gen_video_pipes.py`): luma 16-235 / 64-940 and chroma 16-240 / 64-960
+  around 128 / 512, with the chroma gain 255/224 or 1023/896. The BT.2020 paths
+  (HDR10, HLG, both scanouts) used to skip the chroma gain, which left every HDR
+  picture about 12 % less saturated than it was mastered.
+- **8-bit SDR above 576 lines uses BT.709** (`video_yuv_nv12_709`,
+  `video_yuv_planar_709`); BT.601 is kept for SD. An untagged HD stream is read as
+  BT.709, the rule every player follows.
+
+### HDR peak mapping
+
+Settings → Video & Display → `HDR PEAK` (default Off). With a value set and a
+HDR10 scanout, a picture brighter than that peak is fitted to it with a BT.2390
+roll-off on max(R,G,B), one gain for all three channels so hue survives:
+
+- **Dolby Vision, per shot.** Profiles 7 and 8 play their HDR10 base layer as
+  before, but the RPU is now parsed too (map-only, `evo_dovi_parser_set_map_only`)
+  for its L1 max; Profile 5 carries the same L1 peak in its reshape constants.
+  The peak rides in fields the reshape maths does not use (`lohi[0..2][3]` of
+  `evo_dovi_params`, see `evo_dovi.h`). Profile 7/8 draws through
+  `video_yuv_p010_pq_dyn`, Profile 5 through `video_yuv_p010_dovi_pq_out`.
+- **HDR10, static.** No RPU: the film's MaxCLL, else its mastering peak (the
+  smaller when both are there), read at open
+  (`evo_agc_runtime_set_hdr_static_peak`).
+- A shot at or below the panel peak is passed through untouched, so the setting
+  only ever changes highlights the TV would have had to compress itself.
+
+The point is the same as a Dolby Vision display: the panel gets a picture it can
+show, decided per shot, rather than one static guess for the whole film. Use it
+with the TV's own dynamic tone mapping off (HGIG on LG). The playback panel shows
+`DOLBY VISION > 1500 NITS PER SHOT` when it is mapping.
 
 ## Where it is measured
 

@@ -41,18 +41,20 @@ layout(set = 1, binding = 1) uniform sampler2D uUV;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 out_color;
 
-vec3 yuv2020(float y, float U, float V) {
-    float Yp = (y - 0.0627451) * 1.1640625;
-    return vec3(Yp + 1.4746 * V,
-                Yp - 0.16455 * U - 0.57135 * V,
-                Yp + 1.8814 * U);
+vec3 yuv2020(float y, float u, float v) {
+    float Yp = (y - 0.062745098) * 1.164383562;
+    float U = (u - 0.501960784) * 1.138392857;
+    float V = (v - 0.501960784) * 1.138392857;
+    return vec3(Yp + 1.474600 * V,
+                Yp + (-0.164553) * U + (-0.571353) * V,
+                Yp + 1.881400 * U);
 }
 
 /* HDR10 source -> HDR10 output: the decoded R'G'B' already IS BT.2020 PQ, so
  * the only work is YCbCr -> RGB. */
 void main() {
     float y = texture(uY, vUV).r;
-    vec2 uv = texture(uUV, vUV).rg - vec2(0.5);
+    vec2 uv = texture(uUV, vUV).rg;
     out_color = vec4(clamp(yuv2020(y, uv.x, uv.y), 0.0, 1.0), 1.0);
 }
 

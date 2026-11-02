@@ -1901,6 +1901,9 @@ int Application::run() {
                 } else if (m_settingsService) {
                     evo_agc_deepblack_set_mode(static_cast<int>(m_settingsService->getDeepBlacks()));
                 }
+                /* HDR peak mapping: a plain store too, read by the next blit */
+                if (m_settingsService)
+                    evo_agc_runtime_set_hdr_peak(getHdrPeakNits(m_settingsService->getHdrPeak()));
                 if (upcmp_frame && !s_upcmp.kind) {
                     evo_agc_upscale_set_mode(kUpcmpModes[s_upcmp.step].mode);
                     evo_agc_upscale_set_network(kUpcmpModes[s_upcmp.step].net);

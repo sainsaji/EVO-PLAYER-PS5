@@ -5,6 +5,26 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.13.1
+
+**HDR the way it was mastered, Dolby Vision fitted shot by shot, and subtitles from your Stremio addons.** A fork build for an LG G5 OLED, an LG S60TR soundbar on eARC and a PS5 Pro on 13.60.
+
+### The Picture
+
+- **Fixed: HDR10, HLG and Dolby Vision base layers were about 12 % desaturated.** The BT.2020 limited-range conversion skipped the chroma gain (1023/896), so every HDR colour came out paler than mastered on both the HDR10 and the tone-mapped SDR output. Every Y'CbCr conversion is now generated with exact range and bit-depth constants.
+- **Fixed: 8-bit HD and 4K SDR used the BT.601 matrix.** Above 576 lines EVO now uses BT.709, so reds and greens in H.264/HEVC SDR are where they should be.
+- **New: HDR PEAK** (Settings → Video & Display, default Off). Set your TV's peak and EVO fits each Dolby Vision shot to it from the RPU's L1 metadata (profiles 5, 7 and 8), and HDR10 films from MaxCLL. Shots under the peak are untouched. The playback panel shows when it is mapping. Pair it with the TV's dynamic tone mapping off (HGIG).
+
+### Subtitles & Languages
+
+- **New: online subtitles from Stremio addons.** EVO asks every addon with a subtitles resource, or OpenSubtitles v3 like the Stremio app does, while it resolves a title. When the file has no track in your language, the best online one loads by itself; the rest are listed as ONLINE rows in the subtitle picker.
+- **New: SUBTITLE LANGUAGE and AUDIO LANGUAGE settings.** Pick Italiano (or another language) and files open with that audio track and those subtitles; English is the fallback for subtitles.
+- **Fixed: a forced (signs only) track won over the full dialogue track** when it was flagged default, so the toast said "English" and the screen stayed empty. Forced tracks are now chosen only when the audio is already in your language.
+- **Improved: the subtitle picker** shows each track's format (SRT, ASS, PGS picture), FORCED and its cue count.
+- **Fixed: AUTO SUBTITLES** is applied when a file opens; it was saved and never read.
+
+---
+
 ## 0.13.0
 
 ![](https://img.shields.io/badge/Release-v0.13.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)

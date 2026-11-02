@@ -1105,8 +1105,9 @@ static void dovi_note_au(evo_vdec_native *n, const uint8_t *au, int size, int64_
     e->valid = 1;
     n->dovi_head++;
     if (n->dovi_parsed++ == 0)
-        note("EVO vdec native: dovi first RPU parsed (lo/hi Y %.3f/%.3f, Y pieces %s)",
-             e->p.lohi[0][0], e->p.lohi[0][1], e->p.lohi[0][2] != 0.0f ? "yes" : "none");
+        note("EVO vdec native: dovi first RPU parsed (lo/hi Y %.3f/%.3f, Y pieces %s, L1 max %.0f nits%s)",
+             e->p.lohi[0][0], e->p.lohi[0][1], e->p.lohi[0][2] != 0.0f ? "yes" : "none",
+             e->p.lohi[0][3], e->p.lohi[2][3] == EVO_DOVI_KIND_MAP_ONLY ? ", map-only" : "");
 }
 
 /* The RPU for the frame leaving with `pts`; the last one shown when that AU
@@ -1848,6 +1849,26 @@ evo_vdec_native *evo_vdec_native_open(const evo_vdec_open_params *p)
             n->dovi = NULL;
             n->dovi_ring = NULL;
             note("EVO vdec native: Dolby Vision RPU setup failed - colours will be wrong");
+        }
+    } else if (d->idx == NAT_HEVC10 && evo_dovi_stream_has_rpu(par)) {
+        /* Profile 7/8: the base layer is ordinary HDR10 and plays as such. The
+         * RPU is still read, for its per-shot L1 peak: with the HDR peak
+         * setting on, each shot is fitted to the panel the way a Dolby Vision
+         * display would (map-only params; the runtime passes them through
+         * untouched when the setting is off). */
+        n->dovi      = evo_dovi_parser_open(par);
+        n->dovi_ring = (struct dovi_entry *)calloc(DOVI_RING, sizeof *n->dovi_ring);
+        if (n->dovi && n->dovi_ring) {
+            evo_dovi_parser_set_map_only(n->dovi, 1);
+            evo_dovi_params_map_only(&n->dovi_default, 0.0f);
+            n->dovi_shown = &n->dovi_default;
+            note("EVO vdec native: Dolby Vision profile %d - HDR10 base layer, RPU read for per-shot peak",
+                 evo_dovi_stream_profile(par));
+        } else {
+            evo_dovi_parser_close(n->dovi);
+            free(n->dovi_ring);
+            n->dovi = NULL;
+            n->dovi_ring = NULL;
         }
     }
     /* GL video path: emit NV12 straight from the decoder - the GLSL video

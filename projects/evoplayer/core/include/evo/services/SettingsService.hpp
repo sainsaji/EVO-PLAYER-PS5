@@ -101,6 +101,16 @@ public:
     bool isMatchVideoRateEnabled() const override { return m_matchVideoRate; }
     void setMatchVideoRateEnabled(bool enabled) override { m_matchVideoRate = enabled; }
 
+    HdrPeak getHdrPeak() const override { return m_hdrPeak; }
+    void setHdrPeak(HdrPeak peak) override { m_hdrPeak = peak; }
+    const char* getHdrPeakName(HdrPeak peak) const override;
+
+    PreferredLanguage getAudioLanguage() const override { return m_audioLanguage; }
+    void setAudioLanguage(PreferredLanguage lang) override;
+    PreferredLanguage getSubtitleLanguage() const override { return m_subtitleLanguage; }
+    void setSubtitleLanguage(PreferredLanguage lang) override;
+    const char* getPreferredLanguageName(PreferredLanguage lang) const override;
+
     void syncThemeToRmlUi() override;
 
 private:
@@ -134,6 +144,9 @@ private:
     bool m_audioPassthroughEnabled = false;
     bool m_matchVideoRate = false;
     bool m_debugOverlayEnabled = false;
+    HdrPeak m_hdrPeak = HdrPeak::Off;
+    PreferredLanguage m_audioLanguage = PreferredLanguage::Auto;
+    PreferredLanguage m_subtitleLanguage = PreferredLanguage::Auto;
 };
 
 

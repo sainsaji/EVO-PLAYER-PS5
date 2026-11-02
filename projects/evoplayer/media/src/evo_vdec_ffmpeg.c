@@ -48,6 +48,7 @@ struct evo_vdec {
      * RPU as side data; converted per ring slot so it lives as long as the
      * borrowed planes do. */
     int              dovi_p5;
+    int              dovi_map;        /* profile 7/8: per-shot peak only */
     evo_dovi_params  dovi[FFMPEG_FRAME_RING];
 
     /* #8 instrumentation. `pending_us` accumulates the cost of the send() calls
@@ -316,6 +317,7 @@ evo_vdec *evo_vdec_open(const evo_vdec_open_params *p, evo_vdec_backend *chosen)
         return NULL;
     }
     v->dovi_p5 = p->avctx_params && evo_dovi_stream_needs_reshape(p->avctx_params);
+    v->dovi_map = !v->dovi_p5 && p->avctx_params && evo_dovi_stream_has_rpu(p->avctx_params);
 
     ffmpeg_apply_tuning(v->ctx, p);
 
@@ -432,6 +434,16 @@ static int vdec_receive_inner(evo_vdec *v, pp_frame *out)
                 out->dovi      = &v->dovi[next_idx];
                 out->dovi_size = sizeof(evo_dovi_params);
                 out->color_trc = AVCOL_TRC_SMPTE2084;   /* the reshaped output is PQ */
+            }
+        } else if (v->dovi_map) {
+            /* Profile 7/8: HDR10 base layer; the RPU only lends its per-shot
+             * peak to the HDR peak mapping. */
+            const AVFrameSideData *sd =
+                av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
+            if (sd) {
+                evo_dovi_params_map_only(&v->dovi[next_idx], evo_dovi_l1_max_nits(sd->data));
+                out->dovi      = &v->dovi[next_idx];
+                out->dovi_size = sizeof(evo_dovi_params);
             }
         }
         return 1;

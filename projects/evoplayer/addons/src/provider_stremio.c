@@ -37,6 +37,7 @@
 #include "evo_data_path.h"
 #include "evo_provider_log.h"
 #include "evo_error.h"
+#include "evo_online_subs.h"
 
 #define AD_CONF      "addons.json"
 #define AD_MAX       12
@@ -59,8 +60,9 @@ typedef struct {
     int  loaded;                 /* 0 not fetched, 1 ok, -1 failed */
     ad_cat_t cats[AD_MAX_CATS];
     int  ncats;
-    int  has_meta, has_stream;
+    int  has_meta, has_stream, has_subs;
     char meta_types[160], stream_types[160];   /* ",movie,series," - "" = any */
+    char subs_types[160];
     char prefixes[384];                          /* ",tt,kitsu:," - "" = any */
     int  builtin;                /* EVO's own Cinemeta, see builtin_sync() */
 } addon_t;
@@ -355,6 +357,9 @@ static void parse_manifest(addon_t *a, cJSON *m)
         } else if (!strcmp(rn, "stream")) {
             a->has_stream = 1;
             list_append(a->stream_types, sizeof a->stream_types, rtypes);
+        } else if (!strcmp(rn, "subtitles")) {
+            a->has_subs = 1;
+            list_append(a->subs_types, sizeof a->subs_types, rtypes);
         }
     }
 
@@ -508,6 +513,7 @@ typedef struct {
     int  nchoices;
     int  asked;                  /* stream requests sent */
     int  torrents;               /* infoHash-only streams skipped */
+    char item_key[EVO_PROVIDER_MAX_ITEM_ID];   /* resolve: the title's id */
 } fan_t;
 
 typedef struct { fan_t *fan; int addon; } fan_req_t;
@@ -1150,6 +1156,13 @@ static void on_streams(int ok, int status, const char *body, size_t len, void *u
         if (title[0]) snprintf(c->label, sizeof c->label, "%s - %s", name, title);
         else          snprintf(c->label, sizeof c->label, "%s", name);
         if (strstr(url, ".m3u8")) snprintf(c->container, sizeof c->container, "hls");
+        /* A stream may carry its own subtitles: [{url, lang}] (AIOStreams and
+         * debrid addons do). They join the title's online list. */
+        cJSON *subs = cJSON_GetObjectItem(s, "subtitles");
+        for (int k = 0; subs && k < cJSON_GetArraySize(subs); ++k) {
+            cJSON *e = cJSON_GetArrayItem(subs, k);
+            evo_osubs_add(r->fan->item_key, jstr(e, "url"), jstr(e, "lang"), S->ad[r->addon].name);
+        }
         /* behaviorHints.proxyHeaders.request: headers the host wants on the stream. */
         cJSON *hdr = cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "behaviorHints"),
                                                              "proxyHeaders"), "request");
@@ -1170,6 +1183,74 @@ static void on_streams(int ok, int status, const char *body, size_t len, void *u
 }
 
 static int st_resolve_now(const char *item_id, evo_provider_resolve_cb cb, void *ud);
+
+/* ------------------------------------------------------------------------- */
+/* Subtitles: every addon with a "subtitles" resource, and OpenSubtitles v3  */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Stremio itself ships OpenSubtitles v3 and asks it for every title, which is
+ * why a series with no subtitles in its file still has them in the Stremio app.
+ * EVO asks it too, unless the user has added a subtitles addon of their own.
+ * It serves IMDb ids only.
+ */
+#define OPENSUBS_BASE "https://opensubtitles-v3.strem.io"
+
+typedef struct {
+    char key[EVO_PROVIDER_MAX_ITEM_ID];
+    char source[96];
+} sub_req_t;
+
+static void on_subtitles(int ok, int status, const char *body, size_t len, void *ud)
+{
+    (void)len;
+    sub_req_t *r = (sub_req_t *)ud;
+    cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    cJSON *arr = root ? cJSON_GetObjectItem(root, "subtitles") : NULL;
+    int n = 0;
+    for (int i = 0; arr && i < cJSON_GetArraySize(arr); ++i) {
+        cJSON *e = cJSON_GetArrayItem(arr, i);
+        evo_osubs_add(r->key, jstr(e, "url"), jstr(e, "lang"), r->source);
+        ++n;
+    }
+    PROV_LOG("subtitles: %s gave %d for %s (ok=%d http=%d)", r->source, n, r->key, ok, status);
+    if (root) cJSON_Delete(root);
+    evo_osubs_pending(r->key, -1);
+    free(r);
+}
+
+static void request_subtitles(const char *key, const char *base, const char *source,
+                              const char *type, const char *id)
+{
+    char url[EVO_PROVIDER_MAX_URL];
+    snprintf(url, sizeof url, "%s/subtitles/%s/%s.json", base, type, id);
+    sub_req_t *r = (sub_req_t *)calloc(1, sizeof *r);
+    if (!r) return;
+    snprintf(r->key, sizeof r->key, "%s", key);
+    snprintf(r->source, sizeof r->source, "%s", source);
+    evo_osubs_pending(key, +1);
+    if (ad_get(url, on_subtitles, r) != 0) {
+        evo_osubs_pending(key, -1);
+        free(r);
+    }
+}
+
+static void resolve_subtitles(const char *item_id, const char *type, const char *id)
+{
+    evo_osubs_begin(item_id);
+    int asked = 0;
+    for (int i = 0; i < S->nad; ++i) {
+        addon_t *ad = &S->ad[i];
+        if (ad->loaded != 1 || !ad->has_subs || !list_has(ad->subs_types, type) || !prefix_ok(ad, id))
+            continue;
+        request_subtitles(item_id, ad->base, ad->name, type, id);
+        asked++;
+    }
+    /* No subtitles addon of the user's own: do what the Stremio app does. */
+    if (asked == 0 && !strncmp(id, "tt", 2) &&
+        (!strcmp(type, "movie") || !strcmp(type, "series")))
+        request_subtitles(item_id, OPENSUBS_BASE, "OpenSubtitles", type, id);
+}
 
 /* Resume from the home screen right after a start: the addons' manifests have
  * not been fetched yet (only the catalog screen does that), so every addon
@@ -1220,6 +1301,8 @@ static int st_resolve_now(const char *item_id, evo_provider_resolve_cb cb, void 
     f->set = S;
     f->rcb = cb; f->ud = ud;
     f->remaining = 1;
+    snprintf(f->item_key, sizeof f->item_key, "%s", item_id);
+    resolve_subtitles(item_id, type, id);
     for (int i = 0; i < S->nad; ++i) {
         addon_t *ad = &S->ad[i];
         if (ad->loaded != 1 || !ad->has_stream || !list_has(ad->stream_types, type) || !prefix_ok(ad, id))

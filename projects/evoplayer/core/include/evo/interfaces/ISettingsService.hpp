@@ -112,6 +112,18 @@ public:
     virtual bool isMatchVideoRateEnabled() const = 0;
     virtual void setMatchVideoRateEnabled(bool enabled) = 0;
 
+    // HDR peak mapping (panel peak, Off = the TV tone-maps)
+    virtual HdrPeak getHdrPeak() const = 0;
+    virtual void setHdrPeak(HdrPeak peak) = 0;
+    virtual const char* getHdrPeakName(HdrPeak peak) const = 0;
+
+    // Preferred audio / subtitle language (track choice when a file opens)
+    virtual PreferredLanguage getAudioLanguage() const = 0;
+    virtual void setAudioLanguage(PreferredLanguage lang) = 0;
+    virtual PreferredLanguage getSubtitleLanguage() const = 0;
+    virtual void setSubtitleLanguage(PreferredLanguage lang) = 0;
+    virtual const char* getPreferredLanguageName(PreferredLanguage lang) const = 0;
+
     virtual void syncThemeToRmlUi() = 0;
 
 };

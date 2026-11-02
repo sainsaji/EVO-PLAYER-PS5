@@ -96,6 +96,27 @@ over the addons saved in a Nuvio web app.
   so every added addon vanished at the next start (fixed 2026-10-21, with a round-trip
   test).
 
+### Online subtitles
+
+Stremio shows subtitles that are not in the video file: addons with a
+`subtitles` resource answer `<base>/subtitles/<type>/<id>.json`
+(`{subtitles: [{url, lang}]}`), and a stream may carry its own `subtitles` array.
+EVO asks for them while it resolves a title (`resolve_subtitles` in
+`provider_stremio.c`), beside the stream requests and never holding them up:
+every added addon that declares the resource, or, when none does, OpenSubtitles
+v3 (`https://opensubtitles-v3.strem.io`, IMDb ids), the addon the Stremio app
+ships with. The list lives in `addons/src/evo_online_subs.c`, keyed by the item
+id so a late answer for another title is dropped.
+
+When the file opens, an embedded track in SUBTITLE LANGUAGE wins. Otherwise the
+playback worker waits up to 4 s for the requests, fetches the best online one
+(the preferred language; English only when the file has no usable track at all)
+and loads it as the external track. The subtitle picker lists the rest as
+`ONLINE` rows, downloaded off the UI thread when picked and loaded by the player
+(`pumpOnlineSubtitles`). An audio switch reopens the file and clears the
+external track, so the active one is copied aside (`online_sub_active.srt`) and
+reloaded.
+
 ## IPTV and Xtream
 
 - **IPTV.** `#EXTINF` carries `tvg-id`, `tvg-logo` and `group-title` as unordered quoted

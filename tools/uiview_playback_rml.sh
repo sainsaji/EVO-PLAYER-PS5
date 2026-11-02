@@ -54,6 +54,9 @@ for c in projects/evoplayer/addons/src/cJSON.c \
          projects/evoplayer/addons/src/provider_jellyfin.c \
          projects/evoplayer/addons/src/provider_nuvio.c \
          projects/evoplayer/addons/src/provider_stremio.c \
+         projects/evoplayer/addons/src/evo_online_subs.c \
+         projects/evoplayer/media/src/evo_langpref.c \
+         projects/evoplayer/media/src/evo_langname.c \
          projects/evoplayer/src/evo_data_path.c \
          projects/evoplayer/src/evo_error.c \
          projects/evoplayer/src/evo_readdir.c; do
@@ -61,6 +64,7 @@ for c in projects/evoplayer/addons/src/cJSON.c \
     gcc -O2 -std=c11 -Wall -D_DEFAULT_SOURCE -DNO_OPENSSL=1 \
         -Iprojects/evoplayer/include \
         -Iprojects/evoplayer/addons/include \
+        -Iprojects/evoplayer/media/include \
         -c "$c" -o "$o"
     PROVIDER_OBJS+=("$o")
 done
