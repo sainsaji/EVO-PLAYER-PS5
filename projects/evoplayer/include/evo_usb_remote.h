@@ -116,6 +116,10 @@ void evo_remote_open_text(const char *path);
  * browse->select path (nav push, return screen, start_video_playback). */
 void evo_open_media_path(const char *path);
 
+/* Provided by the host (Bridge.cpp): "<share id> <path>" - play a file on a
+ * saved SMB/FTP server through the URL Browse would build for it. */
+void evo_open_share_path(const char *arg);
+
 /* Provided by the host (Application.cpp): start the #103 upscaler A/B/C
  * capture described above. No-op unless a video is playing. */
 void evo_remote_upscale_compare(void);

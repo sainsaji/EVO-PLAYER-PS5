@@ -69,6 +69,9 @@ docker compose run --rm ps5-dev bash -c 'for k in down down right cross; do ./to
 - FTP is `ftp://192.168.0.12:2121` (PS5_HOST in `.env`). Config files: `/data/evoplayer/*.conf`. Fonts: `/data/evoplayer/fonts/` (CJK Noto OTFs are there). Read-only web `/fs`; delete over FTP.
 - IPTV test playlist: serve any `.m3u` from the HOST (not the container) with `python -m http.server <port> --bind <host LAN ip>`; write `playlist=http://<ip>:<port>/x.m3u` to `/data/evoplayer/iptv.conf` by `curl -T`. **Port 8099 is ignored by the provider on purpose**; use another. Restart EVO (quit/close/launch) to reload the conf. Back up the original conf first (`curl ftp://.../iptv.conf`) and restore it when done.
 - Provider setup is in `/data/evoplayer/*.conf`; Xtream/Jellyfin/Nuvio are already configured on the dev console.
+- **A video that always plays:** `evo-remote.sh play --sample` (20 s 1080p H.264 + AAC + subtitle in `/data/evoplayer/test/`; if missing: `tools/make_sample.sh` on the host, then `evo-remote.sh sample-install`). EVO cannot read `/data/Media` (sandbox). A file on a saved server: `evo-remote.sh play --share ps5_local /data/Media/<file>` (the Browse URL; a hand-made `ftp://` URL is not the same).
+- **Error-path setup (dead IPTV + dead FTP):** with EVO closed, `python3 tools/testenv.py up`, launch, test, quit/close, `python3 tools/testenv.py down`. Never hand-copy the confs: `down` restores the real ones byte for byte.
+- **Reading the log:** `evo-remote.sh logq <text> [n]` (log server, instant) instead of pulling the 3 MB `evo.log` over FTP.
 
 ## 5. Rules that bite (details in CLAUDE.md)
 

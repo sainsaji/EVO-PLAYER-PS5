@@ -39,7 +39,11 @@ Logs, screenshots, the dashboard and the debug switches:
 | Tool | What it does |
 |---|---|
 | `evo-remote.sh` | The dev remote: lifecycle, keys, `ui`, `go`, `set`, sweeps, comparisons ([remote-control.md](../console/remote-control.md)); `logs` honours `PS5_LOG_PORT` (default 9780) |
-| `evo_ui.py`, `evo_lifecycle.py` | Its helpers: the UI state reader and ShadowMount lifecycle evidence |
+| `evo_ui.py`, `evo_lifecycle.py` | Its helpers: the UI state reader and ShadowMount lifecycle evidence (`foreign`: another game still running, checked before every `launch`) |
+| `make_sample.sh` (host, ffmpeg) + `evo-remote.sh sample-install` / `play --sample` | A 20 s 1080p H.264 + AAC + subtitle test clip in `/data/evoplayer/test/`, which EVO can always read: a playback check with no USB stick or SMB server |
+| `evo-remote.sh play --share <id> <path>` | Play a file on a saved SMB/FTP server through the URL Browse builds (`play --share ps5_local /data/Media/x.mkv`) |
+| `evo-remote.sh logq <text> [n]` | `evo.log` lines containing `<text>` from the log server (`:9780/snapshot`), FTP only when EVO is not answering |
+| `testenv.py up` / `down` / `status` | Swap in the test configs (a dead IPTV playlist, a dead FTP server) and always put the real ones back; backups in git-ignored `output/testenv/` |
 | `ps5-controllers/` | The title-aware launch and close payloads. Never send them by hand |
 | `klog.sh`, `shot.sh`, `grab_shot.sh`, `shot.py`, `fetch_shot.sh` | Kernel log capture, screenshots and pixel measurement ([diagnostics.md](../console/diagnostics.md)) |
 | `evo-dash.py`, `evo-panel.py`, `dash/` | The health dashboard (`evo-dash` honours `PS5_LOG_PORT`, default 9780) and the Tkinter control panel |
@@ -63,6 +67,9 @@ Logs, screenshots, the dashboard and the debug switches:
 | `host-ffmpeg-probe.sh` | Probe a media file with a host build of the same FFmpeg and flags, **before** spending a console cycle on a file that crashes the app. Needs `MSYS_NO_PATHCONV=1` |
 | `rag/` | `evo_search`: search code, docs, issues, memory notes and the `third_party/` repos and their commit messages. Reindex after changing docs (`python tools/rag/evo_rag.py index`) |
 | `agy-run.sh`, `oc-run.sh`, `agy-prune.sh`, `agy-task.md` | Delegating mechanical work to a worker agent ([agy.md](agy.md)) |
+| `check_raw_connect.sh` | Run by `build-evoplayer.sh` and `package-app.sh`: fails on a raw `connect()` in EVO's code (it blocks ~75 s on a dead host on the PS5; use `evo_net_connect_addr`). A connect that cannot hang carries `connect-ok: <why>` |
+| `stage_hunks.py` | Stage only the hunks of a file that match a regex, to split one file between two commits |
+| `ui_consistency.py` | Drift report across kit screens from `hui_preview`'s `hui_metrics.tsv` |
 
 ## `tools/`: assets and generators
 

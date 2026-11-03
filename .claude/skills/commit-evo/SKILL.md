@@ -29,6 +29,11 @@ git diff --stat
 One commit per user-visible topic, for example a bug fix and a UI feature separately. Add paths
 by name (`git add path1 path2`), never `git add -A` or `.`.
 
+A file with hunks for two topics (or the user's own earlier hunks): stage only the matching
+hunks with `python3 tools/stage_hunks.py <file> '<regex>' [--invert]` (no interactive
+`git add -p` here), then check `git diff --cached <file>`. Each commit should still build: keep a
+helper and its first caller in the same commit, or the helper first.
+
 ## 3. Message
 
 Follow `git log --oneline -8`: `type(scope): what changed, in plain words`, e.g.

@@ -17,6 +17,10 @@
 #include "evo_theme.h"
 #include "evo_subtitle.h"
 #include "evo_rmlui_bridge.h"
+#include "evo_boot_log.h"
+#include "evo/services/NetworkStorageService.hpp"
+
+#include <cstring>
 
 namespace evo {
 /* Startup default; evo::Application::initialize() replaces these with what
@@ -367,6 +371,25 @@ void evo_open_media_path(const char *path) {
         return;
     if (auto sm = evo::Application::getInstance().getScreenManager())
         sm->navigateTo(evo::ScreenId::Player);
+}
+
+/* "<share id> <path on that server>": the URL Browse would build for it (its
+ * encoding and saved login), so a remote test plays exactly what a user's
+ * pick in Browse plays. */
+void evo_open_share_path(const char *arg) {
+    if (!arg) return;
+    const char *sp = std::strchr(arg, ' ');
+    if (!sp || sp == arg || !sp[1]) {
+        EVO_LOGE("remote", "playshare wants '<share id> <path>', got '%s'", arg);
+        return;
+    }
+    const std::string id(arg, static_cast<size_t>(sp - arg));
+    const std::string url = evo::NetworkStorageService::getInstance().buildMediaUrl(id, sp + 1);
+    if (url.empty()) {
+        EVO_LOGE("remote", "playshare: no saved server with id '%s'", id.c_str());
+        return;
+    }
+    evo_open_media_path(url.c_str());
 }
 
 void save_resume_position(void) {

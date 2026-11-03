@@ -37,6 +37,9 @@ output/pkg/*
 output/logs/*
 output/coredumps*/
 output/ampr_backup/
+# tools/testenv.py backups hold the console's saved server logins
+output/testenv/
+output/sample/
 !output/elf/.gitkeep
 !output/pkg/.gitkeep
 !output/logs/.gitkeep

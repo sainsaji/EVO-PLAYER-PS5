@@ -25,6 +25,7 @@ Subcommands (print one word / line, exit 0 unless the FTP read failed):
   coldboot                 COLDBOOT | NO   (booted, and the title never ran
                            since - the only sound reading of an UNKNOWN slot)
   heartbeat                RUNNING | PARKED | STILL | ABSENT
+  foreign                  other titles started and not released (or NONE)
   smlen                    current debug.log length, a baseline for wait-*
   wait-registered  BASE S  REGISTERED | TIMEOUT   (new install/mount.lnk after BASE)
   wait-started     BASE S  STARTED | TIMEOUT
@@ -141,6 +142,20 @@ def coldboot(text):
     return "NO" if (STARTED in boot or RELEASED in boot) else "COLDBOOT"
 
 
+def foreign(text):
+    """Other ShadowMount titles started and not released since: a launch now
+    meets the PS5's "close the other app?" dialog (or "Can't start"), which no
+    script can answer. Only titles ShadowMount mounted are seen."""
+    running = []
+    for m in re.finditer(r"\[GAME\] started: (\S+)|runtime layers released: (\S+)", text):
+        started, released = m.group(1), m.group(2)
+        if started and started != TID and started not in running:
+            running.append(started)
+        elif released in running:
+            running.remove(released)
+    return " ".join(running) if running else "NONE"
+
+
 def status_fields():
     t = fetch(STATUS)
     if not t:
@@ -188,6 +203,8 @@ def main(argv):
             print(slot(sm_both()))
         elif cmd == "coldboot":
             print(coldboot(sm_both()))
+        elif cmd == "foreign":
+            print(foreign(sm_both()))
         elif cmd == "heartbeat":
             print(heartbeat())
         elif cmd == "smlen":

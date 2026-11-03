@@ -47,6 +47,15 @@
 #                                           it, never retries
 #   kill                                    = quit + close
 #   play <path>                             open <path> from the start
+#   play --sample                           the 20 s test clip in /data/evoplayer/test
+#                                           (sample-install puts it there)
+#   play --share <share id> <path>          a file on a saved SMB/FTP server, through
+#                                           the URL Browse builds (play --share
+#                                           ps5_local /data/Media/x.mkv)
+#   sample-install [file]                   upload output/sample/evo_sample.mkv (made
+#                                           on the host by tools/make_sample.sh)
+#   logq <text> [lines]                     evo.log lines with <text>, from the log
+#                                           server (:9780), FTP only as a fallback
 #   seek <sec> | seek +<sec> | seek -<sec>  seek
 #   stop                                    end playback, back to the browser
 #   go <name>                               jump to any screen by name: home browse
@@ -278,6 +287,14 @@ do_launch() {
     [[ "$(lc wait-quiet 15 120)" == QUIET ]] \
         || die "ShadowMount's log is still moving after 120 s - it is not idle. Not launching."
     base="$(lc smlen)" || die "could not read ShadowMount's log"
+    # Another ShadowMount game still running means the PS5 answers the launch
+    # with a dialog no script can clear. Said up front, not after 30 s.
+    local other
+    other="$(lc foreign 2>/dev/null || echo NONE)"
+    if [[ "${other}" != NONE ]]; then
+        die "another app is running (${other}: started, not released in ShadowMount's log).
+   Close it on the PS5 first - a launch now gets a dialog nothing here can answer."
+    fi
     del_files "${USB_STATUS}" >/dev/null || true
     local sent code
     sent="$(send_controller launch 2>&1)" || { printf '%s\n' "${sent}"; exit 1; }
@@ -480,6 +497,44 @@ do_verify() {
     do_cycle "${args[@]}"
 }
 
+# --- test media + log queries -------------------------------------------------
+SAMPLE_REMOTE="/data/evoplayer/test/evo_sample.mkv"   # EVO's own data dir: always readable
+SAMPLE_LOCAL="${OUTPUT_DIR}/sample/evo_sample.mkv"    # tools/make_sample.sh (host, ffmpeg)
+
+do_play() {
+    case "${1:-}" in
+        --sample) put_cmd "play ${SAMPLE_REMOTE}" ;;
+        --share)
+            [[ -n "${2:-}" && -n "${3:-}" ]] || die "usage: evo-remote.sh play --share <share id> <path>"
+            put_cmd "playshare $2 $3" ;;
+        "") die "usage: evo-remote.sh play <path> | --sample | --share <share id> <path>" ;;
+        *) put_cmd "play $1" ;;
+    esac
+}
+
+do_sample_install() {
+    local src="${1:-${SAMPLE_LOCAL}}"
+    [[ -f "${src}" ]] || die "no ${src#"${REPO_ROOT}/"} - make it on the host first: tools/make_sample.sh"
+    timeout 120 curl -sS --ftp-create-dirs -T "${src}" \
+        "ftp://${PS5_HOST}:${FTP_PORT}${SAMPLE_REMOTE}" || die "upload to ${SAMPLE_REMOTE} failed"
+    ok "installed ${SAMPLE_REMOTE} - play it with: evo-remote.sh play --sample"
+}
+
+# logq <text> [lines]: evo.log lines containing <text>, newest last. Asks EVO's
+# log server (:9780/snapshot - the in-memory ring, and it closes; /raw stays
+# open by design) and falls back to fetching the whole evo.log over FTP only
+# when EVO is not answering.
+do_logq() {
+    local q="${1:?usage: evo-remote.sh logq <text> [lines]}" n="${2:-40}" out enc
+    enc="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "${q}")"
+    if out="$(timeout 8 curl -sf --max-time 6 "http://${PS5_HOST}:${PS5_LOG_PORT:-9780}/snapshot?grep=${enc}")"; then
+        printf '%s\n' "${out}" | tail -n "${n}"
+    else
+        warn "log server not answering - reading evo.log over FTP"
+        get_file "${USB_LOG}" | grep -F -- "${q}" | tail -n "${n}" || true
+    fi
+}
+
 case "${SUB}" in
 build)
     "${SCRIPTS_DIR}/package-app.sh" --ffpfsc --usb-remote "$@"
@@ -494,7 +549,9 @@ close)  do_close "${1:-}" ;;
 kill)   do_quit; do_close ;;
 cycle)  do_cycle "$@" ;;
 verify) do_verify "$@" ;;
-play)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh play <path>"; put_cmd "play $1" ;;
+play)   do_play "$@" ;;
+sample-install) do_sample_install "$@" ;;
+logq)   do_logq "$@" ;;
 seek)   [[ -n "${1:-}" ]] || die "usage: evo-remote.sh seek <sec|+sec|-sec>"; put_cmd "seek $1" ;;
 stop)   put_cmd "stop" ;;
 key)    [[ -n "${1:-}" ]] || die "usage: evo-remote.sh key <button>...  (e.g. cross, up, l1, l3)"

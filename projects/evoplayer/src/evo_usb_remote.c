@@ -172,6 +172,10 @@ static void run_command(const char *line)
         evo_open_media_path(buf + 5);
         return;
     }
+    if (strncmp(buf, "playshare ", 10) == 0) {
+        evo_open_share_path(buf + 10);
+        return;
+    }
     if (strncmp(buf, "iobench", 7) == 0) {
         const char *arg = buf + 7;
         while (*arg == ' ')

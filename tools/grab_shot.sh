@@ -29,7 +29,7 @@ list_shots() {
 # EVO's own "screenshot: wrote <path>" line (log server, seconds resolution) is
 # the best evidence; the listing diff covers a build without the log server.
 last_wrote() {
-    curl -s --max-time 5 "http://${HOST}:${PS5_LOG_PORT:-9780}/raw?grep=screenshot:%20wrote" |
+    curl -s --max-time 5 "http://${HOST}:${PS5_LOG_PORT:-9780}/snapshot?grep=screenshot:%20wrote" |
         tr -d '\r' | grep 'screenshot: wrote' | tail -1
 }
 
@@ -38,7 +38,9 @@ before=$(list_shots)
 if [ -f /.dockerenv ]; then
     timeout 20 ./tools/evo-remote.sh key l3 >/dev/null 2>&1
 else
-    timeout 60 docker compose run --rm ps5-dev ./tools/evo-remote.sh key l3 >/dev/null 2>&1
+    # The long-lived dev container (tools/dx.sh) answers in ~0.2 s instead of
+    # several seconds for a fresh `docker compose run`; it is started if needed.
+    timeout 60 ./tools/dx.sh ./tools/evo-remote.sh key l3 >/dev/null 2>&1
 fi
 
 path=""
