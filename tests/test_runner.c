@@ -1406,6 +1406,27 @@ static void test_stremio_stream_ranking(void)
     TEST_ASSERT(a.size_bytes > (int64_t)58 * 1024 * 1024 * 1024, "remux size read");
     TEST_ASSERT(!strcmp(b.video_range, "HDR10") && !strcmp(b.video_codec, "hevc"), "web: HDR10 HEVC");
     TEST_ASSERT(d.height == 1080 && !strcmp(d.video_codec, "h264"), "1080p x264");
+
+    /* sainsaji's review of #235: an SDR "HDRip" is not HDR, and a ".ts" file
+     * extension is not the telesync tag. */
+    evo_stream_choice_t f, g, h;
+    const int hdrip = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n720p\",\"title\":\"Movie.720p.HDRip.x264\",\"url\":\"https://x/6\"}", &f);
+    const int bluray = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"Movie.1080p.BluRay.x264\",\"url\":\"https://x/7\"}", &g);
+    TEST_ASSERT(f.video_range[0] == 0, "HDRip gets no HDR pill");
+    TEST_ASSERT(bluray > hdrip, "1080p BluRay above a 720p HDRip");
+    const int tsfile = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"BluRay x265 DTS\",\"url\":\"https://x/8\","
+        "\"behaviorHints\":{\"filename\":\"Movie.1080p.BluRay.x265.DTS.ts\"}}", &h);
+    TEST_ASSERT(tsfile > uncached, "an MPEG-TS file is not a telesync");
+    evo_stream_choice_t i;
+    const int telesync = evo_stremio_rank_json(
+        "{\"name\":\"[TB+] Torrentio\\n1080p\",\"title\":\"Movie.2023.TS.XviD\",\"url\":\"https://x/9\"}", &i);
+    TEST_ASSERT(telesync < uncached, "a real TS tag still goes last");
+    evo_stream_choice_t j;
+    evo_stremio_rank_json("{\"name\":\"x\",\"title\":\"Movie.2160p.WEB-DL.HDR10.HEVC\",\"url\":\"https://x/10\"}", &j);
+    TEST_ASSERT(!strcmp(j.video_range, "HDR10"), "HDR10 still detected");
     TEST_PASS();
 }
 

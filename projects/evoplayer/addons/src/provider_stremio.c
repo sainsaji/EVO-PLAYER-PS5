@@ -1669,6 +1669,38 @@ static int has_word(const char *hay, const char *w)
     return 0;
 }
 
+/* has_word(), but not as a file extension: "ts" the telesync tag in
+ * "Movie.2023.TS.XviD", not the MPEG-TS container in "...DTS.ts" at the end
+ * of behaviorHints.filename (sainsaji's review of #235). */
+static int has_word_not_ext(const char *hay, const char *w)
+{
+    const size_t n = strlen(w);
+    for (const char *p = strstr(hay, w); p; p = strstr(p + 1, w)) {
+        const char b = p == hay ? ' ' : p[-1], a = p[n];
+        const int lb = (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9');
+        const int la = (a >= 'a' && a <= 'z') || (a >= '0' && a <= '9');
+        if (lb || la) continue;
+        const int ext = b == '.' && (a == '\0' || a == '\n' || a == ' ' || a == '\t');
+        if (!ext) return 1;
+    }
+    return 0;
+}
+
+/* An HDR tag ("hdr", "hdr10", "hdr10+", "[HDR]"), not "HDRip" / "HDRRip" -
+ * an SDR web rip whose name only starts with the same letters. */
+static int has_hdr(const char *hay)
+{
+    for (const char *p = strstr(hay, "hdr"); p; p = strstr(p + 1, "hdr")) {
+        const char b = p == hay ? ' ' : p[-1];
+        if ((b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')) continue;
+        const char *q = p + 3;
+        if (!strncmp(q, "ip", 2) || !strncmp(q, "rip", 3)) continue;
+        if (*q >= 'a' && *q <= 'z') continue;        /* "hdrx..." is some other word */
+        return 1;
+    }
+    return 0;
+}
+
 /* "12.4 GB" / "850 MB" anywhere in the text -> bytes (the largest one: some
  * addons print the season pack beside the episode). */
 static int64_t size_in(const char *t)
@@ -1724,7 +1756,7 @@ static int rank_stream(cJSON *s, evo_stream_choice_t *c)
     if (has_word(t, "remux") || strstr(t, "remux"))                    sc += 160;
     else if (strstr(t, "bluray") || strstr(t, "blu-ray") || has_word(t, "bdrip")) sc += 50;
     else if (strstr(t, "web-dl") || strstr(t, "webdl"))                 sc += 25;
-    if (has_word(t, "cam") || strstr(t, "hdcam") || has_word(t, "ts") || strstr(t, "telesync") ||
+    if (has_word(t, "cam") || strstr(t, "hdcam") || has_word_not_ext(t, "ts") || strstr(t, "telesync") ||
         has_word(t, "tc") || strstr(t, "screener"))
         sc -= 1000;
     if (has_word(t, "3d") || has_word(t, "sbs") || has_word(t, "hsbs")) sc -= 300;
@@ -1734,7 +1766,7 @@ static int rank_stream(cJSON *s, evo_stream_choice_t *c)
      * which has no HDR10 to fall back on, so it ranks under plain HDR. */
     const int dv = has_word(t, "dv") || strstr(t, "dolby vision") || strstr(t, "dovi") || strstr(t, "dolbyvision");
     const int hdr10p = strstr(t, "hdr10+") || strstr(t, "hdr10plus");
-    const int hdr = hdr10p || strstr(t, "hdr");
+    const int hdr = hdr10p || has_hdr(t);
     if (dv && (hdr || has_word(t, "remux")))   { sc += 130; snprintf(c->video_range, sizeof c->video_range, "Dolby Vision"); }
     else if (hdr10p)                            { sc += 100; snprintf(c->video_range, sizeof c->video_range, "HDR10+"); }
     else if (hdr)                               { sc += 90;  snprintf(c->video_range, sizeof c->video_range, "HDR10"); }
