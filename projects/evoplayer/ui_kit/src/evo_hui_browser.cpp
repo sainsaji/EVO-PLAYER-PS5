@@ -40,7 +40,7 @@ constexpr float kCardW = 300.0f;
 constexpr float kCardH = 169.0f;
 constexpr float kGapX = 28.0f;
 constexpr float kRowPitch = kCardH + 76.0f; /* card + its caption */
-constexpr float kChipsY = 196.0f;
+constexpr float kChipsY = 162.0f; /* on the path line, right-aligned under the count */
 constexpr float kStripY = 760.0f;
 constexpr float kMenuW = 660.0f;
 constexpr float kActionH = 58.0f;
@@ -177,7 +177,10 @@ Rect BrowserScreen::source_rect(int i) const
 
 float BrowserScreen::chips_x(int i) const
 {
-    float x = kGridX;
+    float total = 0.0f;
+    for (std::size_t k = 0; k < chip_w_.size(); ++k)
+        total += chip_w_[k] + (k ? 10.0f : 0.0f);
+    float x = kRight - total;
     for (int k = 0; k < i && k < static_cast<int>(chip_w_.size()); ++k)
         x += chip_w_[static_cast<std::size_t>(k)] + 10.0f;
     return x;
@@ -281,22 +284,20 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
     {
         const float in = tween::stagger(age_, 0, 0.05f, 0.45f);
         list.push_opacity(in);
-        ui::text(list, fonts.display, fit(fonts.display, title_.empty() ? "Files" : title_, 48, 900), kLeft - 2,
-                 126, 48, kWhite);
-        ui::text(list, fonts.regular, fit(fonts.regular, path_, 20, 1100), kLeft, 164, 20, p.text_muted);
+        draw_page_title(list, ctx, title_.empty() ? "Files" : title_, path_, kLeft, 0.0f, 900.0f);
         char counter[48];
         if (raw_.total_count > 0 && raw_.cursor_index >= 0)
             std::snprintf(counter, sizeof(counter), "%d OF %d", raw_.cursor_index + 1, raw_.total_count);
         else
             std::snprintf(counter, sizeof(counter), "%d %s", raw_.total_count,
                           raw_.total_count == 1 ? "ITEM" : "ITEMS");
-        ui::text(list, fonts.regular, counter, kRight, 126, 20, p.text_faint, Align::right, 2.0f);
+        draw_page_counter(list, ctx, counter);
         list.pop_opacity();
     }
 
     /* ---- sources ---- */
     {
-        list.rounded_rect(source_ring_.value(), 18, kWhite.with_alpha(raw_.sidebar_focused ? 0.0f : 0.10f));
+        list.rounded_rect(source_ring_.value(), page::kRadiusTile, kWhite.with_alpha(raw_.sidebar_focused ? 0.0f : 0.10f));
         for (int i = 0; i < 5; ++i)
         {
             const float in = tween::stagger(age_, i + 1, 0.04f, 0.4f);
@@ -306,8 +307,8 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             const bool active = i == raw_.active_source;
             if (focused)
             {
-                list.glow(r, 18, 16, p.accent.with_alpha(0.4f));
-                list.rounded_rect(r, 18, kWhite);
+                list.glow(r, page::kRadiusTile, 16, p.accent.with_alpha(0.4f));
+                list.rounded_rect(r, page::kRadiusTile, kWhite);
             }
             if (active && !focused)
                 list.rounded_rect({r.x + 4, r.y + 16, 4, r.h - 32}, 2, p.accent);
@@ -331,11 +332,11 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             const bool selected = static_cast<int>(i) == raw_.filter_selected;
             const bool focused = selected && raw_.filter_focused;
             if (focused)
-                list.rounded_rect(r, 20, kWhite);
+                list.rounded_rect(r, r.h * 0.5f, kWhite);
             else if (selected)
-                list.rounded_rect(r, 20, p.accent.with_alpha(0.9f));
+                list.rounded_rect(r, r.h * 0.5f, p.accent.with_alpha(0.9f));
             else
-                list.bordered_rect(r, 20, kWhite.with_alpha(0.06f), 1.0f, kWhite.with_alpha(0.16f));
+                list.bordered_rect(r, r.h * 0.5f, kWhite.with_alpha(0.06f), 1.0f, kWhite.with_alpha(0.16f));
             ui::text(list, fonts.semibold, chips_[i], r.cx(), r.y + 27, 18,
                      focused ? kInk : (selected ? kInk : kWhite.with_alpha(0.85f)), Align::center);
         }
@@ -390,7 +391,7 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         if (ring_alpha_.value > 0.01f && !raw_.sidebar_focused && !raw_.filter_focused)
         {
             list.push_opacity(ring_alpha_.value);
-            list.glow(ring_.value(), 22, 22, p.accent.with_alpha(0.35f + 0.1f * ui::breathe(ctx.time)));
+            list.glow(ring_.value(), page::kRadiusTile + 2, 22, p.accent.with_alpha(0.35f + 0.1f * ui::breathe(ctx.time)));
             list.pop_opacity();
         }
         for (std::size_t i = 0; i < cards_.size(); ++i)
@@ -402,15 +403,15 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             r.y += 20.0f * (1.0f - tween::cubic_out(in));
             if (c.focused)
                 r = {r.x - 8, r.y - 8, r.w + 16, r.h + 16};
-            list.shadow({r.x, r.y + 12, r.w, r.h}, 18, 22, Color::rgb(0x000000, 0.45f));
+            list.shadow({r.x, r.y + 12, r.w, r.h}, page::kRadiusTile, 22, Color::rgb(0x000000, 0.45f));
             const std::uint32_t tex = ctx.textures.pixels(c.art, c.art_w, c.art_h);
             if (tex)
             {
-                list.image(tex, r, ::hui::gfx::kFullUv, kWhite.with_alpha(c.focused ? 1.0f : 0.85f), 16);
+                list.image(tex, r, ::hui::gfx::kFullUv, kWhite.with_alpha(c.focused ? 1.0f : 0.85f), page::kRadiusTile);
             }
             else
             {
-                list.gradient_rect(r, 16, p.surface_sel, p.surface);
+                list.gradient_rect(r, page::kRadiusTile, p.surface_sel, p.surface);
                 const std::uint32_t icon = ctx.textures.icon(c.icon);
                 if (icon)
                     list.image(icon, {r.cx() - 30, r.cy() - 30, 60, 60}, ::hui::gfx::kFullUv,
@@ -462,7 +463,7 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
     if (ring_alpha_.value > 0.01f && !raw_.action_menu_open)
     {
         list.push_opacity(ring_alpha_.value);
-        const float radius = raw_.sidebar_focused ? 20.0f : (raw_.filter_focused ? 22.0f : 22.0f);
+        const float radius = page::kRadiusTile + 5.0f;
         if (!raw_.sidebar_focused && !raw_.filter_focused)
             list.bordered_rect(ring_.value().inset(-5), radius, kClear, 3.5f, kWhite);
         list.pop_opacity();
@@ -473,8 +474,8 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
     {
         list.push_opacity(tween::stagger(age_, 5, 0.06f, 0.45f));
         const Rect strip{kGridX, kStripY, kRight - kGridX, 150};
-        list.rounded_rect(strip, 26, kWhite.with_alpha(0.05f));
-        list.bordered_rect(strip, 26, kClear, 1.0f, kWhite.with_alpha(0.08f));
+        list.rounded_rect(strip, page::kRadiusCard, kWhite.with_alpha(0.05f));
+        list.bordered_rect(strip, page::kRadiusCard, kClear, 1.0f, kWhite.with_alpha(0.08f));
         ui::text(list, fonts.semibold, ui::upper(ins_kind_.empty() ? "File" : ins_kind_), strip.x + 28,
                  strip.y + 40, 15, p.accent, Align::left, 3.0f);
         ui::text(list, fonts.display, fit(fonts.display, ins_name_, 30, strip.w - 56), strip.x + 28,
@@ -522,12 +523,8 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             if (!raw_.at_root)
                 hints[n++] = {ui::Button::circle, "Back"};
         }
-        ui::HintLayout layout;
-        layout.size = 30;
-        layout.text_size = 20;
-        layout.cy = 1046;
         list.push_opacity(tween::stagger(age_, 7, 0.05f, 0.4f));
-        ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, n, kRight, true, layout);
+        draw_page_hints(list, fonts, hints, n);
         list.pop_opacity();
     }
 
@@ -542,9 +539,9 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         const Rect first = action_rect(0);
         const float h = 170.0f + nActions * (kActionH + 4.0f) + 24.0f;
         const Rect card{960.0f - kMenuW * 0.5f, first.y - 170.0f, kMenuW, h};
-        list.shadow({card.x, card.y + 24, card.w, card.h}, 32, 48, Color::rgb(0x000000, 0.6f));
-        list.rounded_rect(card, 32, p.bg_top.with_alpha(0.97f));
-        list.bordered_rect(card, 32, kClear, 1.5f, kWhite.with_alpha(0.14f));
+        list.shadow({card.x, card.y + 24, card.w, card.h}, page::kRadiusCard, 48, Color::rgb(0x000000, 0.6f));
+        list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.97f));
+        list.bordered_rect(card, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.14f));
         ui::text(list, fonts.semibold, (raw_.action_menu_count > 0 && raw_.action_menu_eyebrow) ? raw_.action_menu_eyebrow : "FILE OPERATIONS", card.x + 32, card.y + 54, 15, p.accent, Align::left, 3.0f);
         ui::text(list, fonts.display, fit(fonts.display, act_target_, 30, card.w - 64), card.x + 32, card.y + 94,
                  30, kWhite);
@@ -553,7 +550,7 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         if (!act_clip_.empty())
             ui::text(list, fonts.regular, fit(fonts.regular, act_clip_, 16, card.w - 64), card.x + 32,
                      card.y + 150, 16, p.text_faint);
-        list.rounded_rect(action_ring_.value(), 18, kWhite);
+        list.rounded_rect(action_ring_.value(), page::kRadiusTile, kWhite);
         for (int i = 0; i < nActions; ++i)
         {
             const Rect r = action_rect(i);
@@ -571,12 +568,19 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
             const int sw = (raw_.action_menu_count > 0) ? raw_.action_menu_items[i].toggle : 0;
             if (sw)
             {
-                const ui::Theme theme = p.kit_theme();
-                ui::Painter paint(list, fonts, theme);
-                paint.toggle({r.x + r.w - 18 - 64, r.cy() - 17, 64, 34}, sw == 2 ? 1.0f : 0.0f, {});
+                /* Drawn here, not with the kit toggle: its accent track vanishes on the white focused row. */
+                const bool on = sw == 2;
+                const Rect tr{r.x + r.w - 18 - 64, r.cy() - 17, 64, 34};
+                const Color track = focused ? (on ? kInk : kInk.with_alpha(0.22f))
+                                            : (on ? p.accent : kWhite.with_alpha(0.18f));
+                const Color knob = focused ? (on ? kWhite : kInk.with_alpha(0.55f)) : kWhite;
+                list.rounded_rect(tr, 17, track);
+                list.rounded_rect({on ? tr.x + tr.w - 30.0f : tr.x + 4.0f, tr.y + 4.0f, 26, 26}, 13, knob);
             }
-            ui::text(list, fonts.semibold, labelText ? labelText : "", r.x + 60, r.y + 27, 20, ink);
-            ui::text(list, fonts.regular, descText ? descText : "", r.x + 60, r.y + 48, 15,
+            const float textW = r.w - 60.0f - (sw ? 64.0f + 18.0f + 16.0f : 18.0f);
+            ui::text(list, fonts.semibold, fit(fonts.semibold, labelText ? labelText : "", 20, textW), r.x + 60,
+                     r.y + 27, 20, ink);
+            ui::text(list, fonts.regular, fit(fonts.regular, descText ? descText : "", 15, textW), r.x + 60, r.y + 48, 15,
                      focused ? kInk.with_alpha(0.65f) : p.text_faint);
             list.pop_opacity();
         }
@@ -591,9 +595,9 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         list.rounded_rect({0, 0, 1920, 1080}, 0, Color::rgb(0x000000, 0.55f * t));
         list.push_opacity(t);
         const Rect card{960 - 400, 540 - 170, 800, 340};
-        list.shadow({card.x, card.y + 24, card.w, card.h}, 32, 48, Color::rgb(0x000000, 0.6f));
-        list.rounded_rect(card, 32, p.bg_top.with_alpha(0.97f));
-        list.bordered_rect(card, 32, kClear, 1.5f, kWhite.with_alpha(0.14f));
+        list.shadow({card.x, card.y + 24, card.w, card.h}, page::kRadiusCard, 48, Color::rgb(0x000000, 0.6f));
+        list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.97f));
+        list.bordered_rect(card, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.14f));
         ui::text(list, fonts.semibold, ui::upper(tr_title_), card.x + 40, card.y + 62, 16, p.accent, Align::left, 3.0f);
         ui::text(list, fonts.display, fit(fonts.display, tr_item_, 30, card.w - 80), card.x + 40, card.y + 108, 30,
                  kWhite);

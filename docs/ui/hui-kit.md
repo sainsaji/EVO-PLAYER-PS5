@@ -56,6 +56,30 @@ Screens only *draw*: focus and input stay in `core/`. Each screen animates
 towards the state in its params (springs, staggered entrances) and reports its
 focused item for `evo-remote.sh ui` (`evo_hui_dev_focus_json`).
 
+### Page chrome
+
+Every full-screen page draws its header and footer with the shared helpers in
+`evo_hui_screens.hpp` (`namespace page`), so all pages read the same:
+
+- `draw_page_title`: the title, Title Case, 52 px at x = 192 (`page::kLeft`) and
+  baseline 140. The line under it is 18 px semibold, spaced capitals, muted, at
+  baseline 182. Labels go under the title, never above it.
+- `draw_page_counter`: "3 OF 23" / "23 ITEMS" at the top right. Provider pages show
+  the focused card at the top right, so they append their count to the line under
+  the title instead.
+- `draw_page_hints`: the button hints, centred on y = 1046, ending at x = 1824.
+  Cross comes first and Circle ("Back", never "Close") last, whatever order the
+  caller passes. L1/R1 paging is one hint (`{l1, "Page", r1}`).
+- Corner radii: `kRadiusChip` 16 (chips, badges), `kRadiusTile` 20 (tiles, posters,
+  rows, sidebar items), `kRadiusCard` 32 (cards, panels, sheets, dialogs). A focus
+  ring drawn 5 px outside an element uses the element's radius + 5.
+
+Deliberate exceptions: the Home hero, the detail page title beside its poster,
+Surround Studio's title aligned to its own wider pane (x = 152), and the provider
+logo badge left of the title. `python tools/ui_consistency.py` reads
+`output/uiview/hui_metrics.tsv` (written by `hui_preview.sh`) and lists any page
+that drifts from the rest.
+
 ## Sounds
 
 `SoundEffectEngine` plays the kit's recorded "glass" cues (`assets/hui/sfx`,

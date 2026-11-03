@@ -43,14 +43,14 @@ struct LibTile {
  */
 const LibTile* libraryTiles() {
     static const LibTile tiles[] = {
-        {"BROWSE",    "Videos and folders on USB storage", "../icons/icon_browse_usb.png",    LIB_BROWSE},
-        {"RECENT",    "Pick up where you left off",        "../icons/icon_recent_files.png",  LIB_RECENT},
-        {"FAVORITES", "Media you saved for later",         "../icons/icon_favorites.png",     LIB_FAVORITES},
+        {"BROWSE",    "USB drives",           "../icons/icon_browse_usb.png",    LIB_BROWSE},
+        {"RECENT",    "Resume watching",      "../icons/icon_recent_files.png",  LIB_RECENT},
+        {"FAVORITES", "Saved for later",      "../icons/icon_favorites.png",     LIB_FAVORITES},
 #if EVO_ENABLE_EMBY
-        {"PROVIDERS", "Network sources: IPTV, Emby, Jellyfin", "../icons/icon_emby.png",       LIB_EMBY},
+        {"PROVIDERS", "Online sources",       "../icons/icon_emby.png",       LIB_EMBY},
 #endif
-        {"SETTINGS",  "Playback and display preferences",  "../icons/icon_settings.png",      LIB_SETTINGS},
-        {"ABOUT",     "Credits and project info",          "../icons/icon_about_support.png", LIB_ABOUT},
+        {"SETTINGS",  "Video & audio",        "../icons/icon_settings.png",      LIB_SETTINGS},
+        {"ABOUT",     "Credits & info",       "../icons/icon_about_support.png", LIB_ABOUT},
     };
     return tiles;
 }

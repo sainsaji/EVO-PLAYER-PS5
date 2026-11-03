@@ -32,7 +32,7 @@ const Color kPanel = Color::rgb(0x0b1322);
 const Color kEdge = Color::rgb(0x1f3150);
 
 constexpr float kOx = 152.0f;                 /* pane origin */
-constexpr float kTop = 146.0f;
+constexpr float kTop = 218.0f;               /* under the page title */
 constexpr Rect kStage{kOx + 440.0f, kTop, 836.0f, 694.0f};
 constexpr float kCx = kStage.x + 418.0f;      /* the sweet spot */
 constexpr float kCy = kStage.y + 360.0f;
@@ -127,12 +127,10 @@ void SurroundScreen::draw(DrawList &list, const Context &ctx) const
     const bool is51 = p_.is_51_layout != 0;
 
     /* header */
-    list.rounded_rect({kOx, 46, 5, 62}, 2, is_120hz_ ? kCyan : ctx.palette.accent);
-    label(list, fonts.display, "SURROUND SOUND STUDIO", kOx + 24, 86, 34, kWhite, Align::left, 0.5f);
-    label(list, fonts.semibold,
-          fmt("%s \xC2\xB7 %s \xC2\xB7 48 kHz \xC2\xB7 %s", is51 ? "5.1 SYSTEM" : "7.1 SYSTEM",
-              is51 ? "6 CHANNELS" : "8 CHANNELS", is_120hz_ ? "120 HZ OUTPUT" : "60 HZ OUTPUT"),
-          kOx + 24, 110, 15, is_120hz_ ? kCyan : ctx.palette.text_muted, Align::left, 1.2f);
+    draw_page_title(list, ctx, "Surround Sound Studio",
+                    fmt("%s \xC2\xB7 %s \xC2\xB7 48 KHZ \xC2\xB7 %s", is51 ? "5.1 SYSTEM" : "7.1 SYSTEM",
+                        is51 ? "6 CHANNELS" : "8 CHANNELS", is_120hz_ ? "120 HZ OUTPUT" : "60 HZ OUTPUT"),
+                    kOx + 2);
 
     draw_left(list, ctx);
     draw_stage(list, ctx);
@@ -170,11 +168,7 @@ void SurroundScreen::draw(DrawList &list, const Context &ctx) const
         add(ui::Button::triangle, "Silence");
         add(ui::Button::circle, "Back");
     }
-    ui::HintLayout layout;
-    layout.size = 30;
-    layout.text_size = 20;
-    layout.cy = 1030.0f;
-    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, n, 1824.0f, true, layout);
+    draw_page_hints(list, fonts, hints, n);
 }
 
 /* ------------------------------------------------------------------ left */
@@ -190,18 +184,18 @@ void SurroundScreen::draw_left(DrawList &list, const Context &ctx) const
     const int n_spk = std::min(p_.speaker_count, (int)EVO_RMLUI_SURROUND_SPEAKERS);
     const int running = v_cal ? 1 : (v_orb ? (p_.tone_follow ? 0 : 2) : -1);
 
-    label(list, fonts.semibold, "TESTS", kOx, kTop - 8, 13, pal.text_faint, Align::left, 1.6f);
+    label(list, fonts.semibold, "TESTS", kOx, kTop - 8, 16, pal.text_muted, Align::left, 1.6f);
     for (int i = 0; i < EVO_RMLUI_SURROUND_ACTIONS; ++i)
     {
         Rect r{kOx, kTop + i * 58.0f, 420, 52};
         const bool focused = v_stage && !p_.rail_focused && p_.selected_item == i;
         const bool live = i == running;
-        list.bordered_rect(r, 12, focused ? Color::rgb(0xffcd00, 0.10f) : kPanel, focused ? 2.0f : 1.0f,
+        list.bordered_rect(r, page::kRadiusChip, focused ? Color::rgb(0xffcd00, 0.10f) : kPanel, focused ? 2.0f : 1.0f,
                            focused ? kYellow : (live ? kCyan : kEdge));
         label(list, fonts.semibold, kActionLabel[i], r.x + 18, r.y + 22, 17, focused || live ? kWhite : pal.text_muted);
         std::string sub = (i == 6) ? std::string(is51 ? "CURRENT: 5.1 SURROUND" : "CURRENT: 7.1 SURROUND")
                                    : std::string(kActionSub[i]);
-        label(list, fonts.regular, sub, r.x + 18, r.y + 42, 12, focused ? kYellow : (live ? kCyan : pal.text_faint),
+        label(list, fonts.regular, sub, r.x + 18, r.y + 43, 14, focused ? kYellow : (live ? kCyan : pal.text_faint),
               Align::left, 0.8f);
     }
 
@@ -262,11 +256,13 @@ void SurroundScreen::draw_left(DrawList &list, const Context &ctx) const
                       : "STATUS: [ IDLE ]";
     }
     Rect m{kOx, kTop + 8 * 58.0f + 14, 420, 694 - 8 * 58.0f - 14};
-    list.bordered_rect(m, 14, kPanel, 1.0f, live ? kCyan : kEdge);
+    list.bordered_rect(m, page::kRadiusTile, kPanel, 1.0f, live ? kCyan : kEdge);
     label(list, fonts.semibold, title, m.x + 18, m.y + 34, 18, kWhite);
-    label(list, fonts.regular, l1, m.x + 18, m.y + 62, 13, pal.text_muted, Align::left, 0.6f);
-    label(list, fonts.regular, l2, m.x + 18, m.y + 84, 13, pal.text_muted, Align::left, 0.6f);
-    label(list, fonts.semibold, status, m.x + 18, m.y + 112, 13, live ? kCyan : pal.text_faint, Align::left, 0.8f);
+    label(list, fonts.regular, l1, m.x + 18, m.y + 66, 15, pal.text_muted, Align::left, 0.6f);
+    const int l2_lines = static_cast<int>(std::min<std::size_t>(2, fonts.regular.font->wrap(l2, 15, m.w - 36).size()));
+    ui::paragraph(list, fonts.regular, l2, m.x + 18, m.y + 92, 15, m.w - 36, 22, pal.text_muted, 2);
+    ui::paragraph(list, fonts.semibold, status, m.x + 18, m.y + 126 + 22.0f * (std::max(1, l2_lines) - 1), 16, m.w - 36, 22,
+                  live ? kCyan : pal.text_faint, 2);
 }
 
 /* ----------------------------------------------------------------- stage */
@@ -283,7 +279,7 @@ void SurroundScreen::draw_stage(DrawList &list, const Context &ctx) const
     const int emitting = v_cal ? (measuring ? p_.cal_channel : -1) : p_.active_channel;
     const double ppm = p_.px_per_m > 1.0f ? p_.px_per_m : 100.0f;
 
-    list.bordered_rect(kStage, 22, Color::rgb(0x070d18), 1.0f, Color::rgb(0x1e3352));
+    list.bordered_rect(kStage, page::kRadiusCard, Color::rgb(0x070d18), 1.0f, Color::rgb(0x1e3352));
     list.push_clip(kStage);
 
     /* perspective floor */
@@ -306,17 +302,17 @@ void SurroundScreen::draw_stage(DrawList &list, const Context &ctx) const
     {
         const float rad = (float)(r * ppm);
         list.ring(kCx, kCy, rad, 1.0f, Color::rgb(0x2a4a70, 0.6f));
-        label(list, fonts.regular, fmt("%d.0 m", r), kCx + 6, kCy - rad + 16, 11, pal.text_faint);
+        label(list, fonts.regular, fmt("%d.0 m", r), kCx + 6, kCy - rad + 16, 13, pal.text_faint);
     }
 
     /* display bar + listener */
     list.rounded_rect({kStage.x + 238, kStage.y + 14, 360, 10}, 5, kCyan);
-    label(list, fonts.semibold, "FRONT DISPLAY", kStage.x + 418, kStage.y + 46, 11, Color::rgb(0x54708f),
+    label(list, fonts.semibold, "FRONT DISPLAY", kStage.x + 418, kStage.y + 46, 13, Color::rgb(0x54708f),
           Align::center, 1.4f);
     list.circle(kCx, kCy - 4.0f, 26.0f, Color::rgb(0x3d5a85, 0.35f));
     list.circle(kCx, kCy - 4.0f, 11.0f, v_cal ? kCyan : Color::rgb(0xe6f1ff));
     list.rounded_rect({kCx - 18, kCy + 8, 36, 20}, 8, v_cal ? kCyan : Color::rgb(0xe6f1ff));
-    label(list, fonts.regular, "0-DEG REFERENCE", kCx, kCy + 66, 11, pal.text_faint, Align::center, 1.0f);
+    label(list, fonts.regular, "0-DEG REFERENCE", kCx, kCy + 66, 13, pal.text_faint, Align::center, 1.0f);
 
     /* speakers */
     for (int i = 0; i < n_spk; ++i)
@@ -359,7 +355,7 @@ void SurroundScreen::draw_stage(DrawList &list, const Context &ctx) const
                                                                   : fmt("%+.1f dB", p_.cal_trim_db[i]);
         else if (v_orb)
             sub = fmt("%d%%", (int)(gain * 100.0f + 0.5f));
-        label(list, fonts.regular, sub, cab.x + 48, cab.y + 46, 12, tone ? kCyan : pal.text_faint);
+        label(list, fonts.regular, sub, cab.x + 48, cab.y + 47, 14, tone ? kCyan : pal.text_faint);
         /* VU */
         const int lit = level <= 0.02f ? 0 : level < 0.25f ? 1 : level < 0.55f ? 2 : level < 0.8f ? 3 : 4;
         static const Color kVu[5] = {Color::rgb(0x18263a), Color::rgb(0x3ddc97), Color::rgb(0x00cdff),
@@ -422,7 +418,7 @@ void SurroundScreen::draw_stage(DrawList &list, const Context &ctx) const
     else if (v_orb && std::fabs(z) >= 0.005f)
         tag = fmt("Z %+.2f m", z);
     if (!tag.empty())
-        label(list, fonts.semibold, tag, gx, v_cal ? vy - od * 0.5f - 10 : vy + od * 0.5f + 20, 12, kCyan, Align::center, 1.0f);
+        label(list, fonts.semibold, tag, gx, v_cal ? vy - od * 0.5f - 10 : vy + od * 0.5f + 20, 14, kCyan, Align::center, 1.0f);
 
     list.pop_clip();
 }
@@ -438,51 +434,48 @@ void SurroundScreen::draw_right(DrawList &list, const Context &ctx) const
     const int emitting = p_.active_channel;
     const bool is51 = p_.is_51_layout != 0;
 
+    /* The controls are in the hint row at the foot of the page, so this column
+     * keeps to what the hints cannot say: levels, flight mode, output. */
     auto panel = [&](float top, float h, const char *title) {
-        list.bordered_rect({x, kTop + top, w, h}, 14, kPanel, 1.0f, kEdge);
-        label(list, fonts.semibold, title, x + 18, kTop + top + 26, 12, pal.text_faint, Align::left, 1.6f);
+        list.bordered_rect({x, kTop + top, w, h}, page::kRadiusTile, kPanel, 1.0f, kEdge);
+        label(list, fonts.semibold, title, x + 20, kTop + top + 32, 16, pal.text_muted, Align::left, 2.0f);
     };
 
-    panel(0, 300, "CHANNEL LEVELS");
+    panel(0, 392, "CHANNEL LEVELS");
     for (int i = 0; i < p_.order_count && i < EVO_RMLUI_SURROUND_SPEAKERS; ++i)
     {
         const int ch = p_.order[i];
         const bool tone = emitting == ch;
         const float level = tone ? 1.0f : ((ch >= 0 && ch < EVO_RMLUI_SURROUND_SPEAKERS) ? p_.proximity[ch] : 0.0f);
-        const float y = kTop + 40.0f + i * 31.0f;
-        label(list, fonts.semibold, label_of(ch), x + 18, y + 16, 13, tone ? kCyan : kWhite);
-        list.rounded_rect({x + 70, y + 6, 250, 10}, 5, Color::rgb(0x18263a));
+        const float y = kTop + 52.0f + i * 40.0f;
+        label(list, fonts.semibold, label_of(ch), x + 20, y + 22, 18, tone ? kCyan : kWhite);
+        list.rounded_rect({x + 80, y + 10, 220, 12}, 6, Color::rgb(0x18263a));
         if (level > 0.01f)
-            list.rounded_rect({x + 70, y + 6, 250 * clamp01(level), 10}, 5, tone ? kYellow : kCyan);
-        label(list, fonts.regular, fmt("%d%%", (int)(level * 100.0f + 0.5f)), x + w - 18, y + 16, 13,
+            list.rounded_rect({x + 80, y + 10, 220 * clamp01(level), 12}, 6, tone ? kYellow : kCyan);
+        label(list, fonts.regular, fmt("%d%%", (int)(level * 100.0f + 0.5f)), x + w - 20, y + 22, 18,
               tone ? kYellow : pal.text_muted, Align::right);
     }
 
-    panel(312, 150, "CONTROLS");
-    label(list, fonts.regular, v_orb ? "LEFT STICK  MOVE SOURCE" : "D-PAD  NAVIGATE STAGE", x + 18, kTop + 312 + 56, 14, pal.text_muted);
-    label(list, fonts.regular, v_orb ? "L1 / R1  HEIGHT" : "CROSS  SELECT / TEST", x + 18, kTop + 312 + 84, 14, pal.text_muted);
-    label(list, fonts.regular, v_orb ? "TRIANGLE  FLIGHT MODE" : "SQUARE  5.1 / 7.1", x + 18, kTop + 312 + 112, 14, pal.text_muted);
-
-    panel(474, 150, "QUICK MODES");
+    panel(404, 160, "QUICK MODES");
     static const char *kModes[3] = {"MANUAL", "ORBIT", "FLYBY"};
     for (int i = 0; i < 3; ++i)
     {
-        Rect r{x + 18 + i * 128.0f, kTop + 474 + 40, 116, 90};
+        Rect r{x + 20 + i * 126.0f, kTop + 404 + 52, 116, 88};
         const bool sel = i == p_.flight_mode;
         const float a = v_orb ? 1.0f : 0.55f;
-        list.bordered_rect(r, 12, kPanel, sel ? 2.0f : 1.0f, (sel ? kCyan : Color::rgb(0x223751)).with_alpha(a));
-        label(list, fonts.semibold, kModes[i], r.cx(), r.cy() + 5, 14, (sel ? kWhite : pal.text_muted).with_alpha(a),
+        list.bordered_rect(r, page::kRadiusChip, kPanel, sel ? 2.0f : 1.0f, (sel ? kCyan : Color::rgb(0x223751)).with_alpha(a));
+        label(list, fonts.semibold, kModes[i], r.cx(), r.cy() + 6, 17, (sel ? kWhite : pal.text_muted).with_alpha(a),
               Align::center, 1.0f);
     }
 
-    panel(636, 148, "OUTPUT");
+    panel(576, 208, "OUTPUT");
     label(list, fonts.regular,
-          fmt("LAYOUT  %s \xC2\xB7 S16 \xC2\xB7 48 kHz", is51 ? "5.1 \xC2\xB7 6 CH" : "7.1 \xC2\xB7 8 CH"), x + 18,
-          kTop + 636 + 56, 14, pal.text_muted);
-    label(list, fonts.regular, is_120hz_ ? "DISPLAY  120 HZ \xC2\xB7 8.33 ms FRAMES" : "DISPLAY  60 HZ \xC2\xB7 16.67 ms FRAMES",
-          x + 18, kTop + 636 + 84, 14, pal.text_muted);
-    label(list, fonts.regular, p_.cal_profile_active ? "CALIBRATION  ACTIVE ON PLAYBACK" : "CALIBRATION  NOT SET",
-          x + 18, kTop + 636 + 112, 14, p_.cal_profile_active ? kCyan : pal.text_faint);
+          fmt("LAYOUT  %s \xC2\xB7 S16 \xC2\xB7 48 KHZ", is51 ? "5.1 \xC2\xB7 6 CH" : "7.1 \xC2\xB7 8 CH"), x + 20,
+          kTop + 576 + 74, 18, pal.text_muted);
+    label(list, fonts.regular, is_120hz_ ? "DISPLAY  120 HZ \xC2\xB7 8.33 MS" : "DISPLAY  60 HZ \xC2\xB7 16.67 MS",
+          x + 20, kTop + 576 + 114, 18, is_120hz_ ? kCyan : pal.text_muted);
+    label(list, fonts.regular, p_.cal_profile_active ? "CALIBRATION  ACTIVE" : "CALIBRATION  NOT SET",
+          x + 20, kTop + 576 + 154, 18, p_.cal_profile_active ? kCyan : pal.text_muted);
 }
 
 void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
@@ -490,8 +483,8 @@ void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
     const ui::Fonts &fonts = ctx.fonts;
     const Palette &pal = ctx.palette;
     const float x = kOx + 1296.0f, w = 408.0f;
-    list.bordered_rect({x, kTop, w, 784}, 14, kPanel, 1.0f, kEdge);
-    label(list, fonts.semibold, "AUTO CALIBRATION", x + 18, kTop + 26, 12, pal.text_faint, Align::left, 1.6f);
+    list.bordered_rect({x, kTop, w, 784}, page::kRadiusTile, kPanel, 1.0f, kEdge);
+    label(list, fonts.semibold, "AUTO CALIBRATION", x + 18, kTop + 32, 16, pal.text_muted, Align::left, 1.6f);
 
     int cur = 0;
     switch (p_.cal_phase)
@@ -509,7 +502,7 @@ void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
         const bool done = s < cur, now = s == cur && !failed;
         const float y = kTop + 52.0f + s * 28.0f;
         list.circle(x + 26, y + 8, 6, done ? kCyan : (now ? kYellow : Color::rgb(0x2a4c5c)));
-        label(list, fonts.semibold, kStep[s], x + 44, y + 13, 13, now ? kYellow : (done ? kWhite : pal.text_faint),
+        label(list, fonts.semibold, kStep[s], x + 44, y + 13, 15, now ? kYellow : (done ? kWhite : pal.text_faint),
               Align::left, 1.0f);
     }
 
@@ -526,14 +519,14 @@ void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
         if (failed)
             bc = kRed;
     }
-    ui::paragraph(list, fonts.regular, body, x + 18, kTop + 212, 15, w - 36, 22, bc, 3);
+    ui::paragraph(list, fonts.regular, body, x + 18, kTop + 212, 17, w - 36, 24, bc, 3);
 
     /* mic level */
-    label(list, fonts.semibold, "MIC", x + 18, kTop + 296, 12, pal.text_faint, Align::left, 1.4f);
+    label(list, fonts.semibold, "MIC", x + 18, kTop + 296, 14, pal.text_muted, Align::left, 1.4f);
     list.rounded_rect({x + 60, kTop + 286, 220, 10}, 5, Color::rgb(0x18263a));
     list.rounded_rect({x + 60, kTop + 286, 220 * clamp01(p_.cal_mic_level), 10}, 5, kCyan);
     if (p_.cal_noise_db > -119.0f)
-        label(list, fonts.regular, fmt("NOISE %.0f dBFS", p_.cal_noise_db), x + w - 18, kTop + 296, 12, pal.text_muted,
+        label(list, fonts.regular, fmt("NOISE %.0f dBFS", p_.cal_noise_db), x + w - 18, kTop + 296, 14, pal.text_muted,
               Align::right);
 
     /* results table */
@@ -541,7 +534,7 @@ void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
     const float cols[4] = {18, 84, 196, 306};
     static const char *kHead[4] = {"CH", "LEVEL", "PATH", "DELAY"};
     for (int c = 0; c < 4; ++c)
-        label(list, fonts.semibold, kHead[c], x + cols[c], kTop + 332, 11, pal.text_faint, Align::left, 1.2f);
+        label(list, fonts.semibold, kHead[c], x + cols[c], kTop + 332, 13, pal.text_muted, Align::left, 1.2f);
     for (int i = 0; i < p_.order_count && i < EVO_RMLUI_SURROUND_SPEAKERS; ++i)
     {
         const int ch = p_.order[i];
@@ -565,10 +558,10 @@ void SurroundScreen::draw_calibration(DrawList &list, const Context &ctx) const
         else if (now)
             c1 = "MEASURING";
         const float y = kTop + 356.0f + i * 28.0f;
-        label(list, fonts.semibold, label_of(ch), x + cols[0], y + 14, 13, now ? kYellow : kWhite);
-        label(list, fonts.regular, c1, x + cols[1], y + 14, 13, now ? kYellow : (missed ? kRed : pal.text_muted));
-        label(list, fonts.regular, c2, x + cols[2], y + 14, 13, pal.text_muted);
-        label(list, fonts.regular, c3, x + cols[3], y + 14, 13, pal.text_muted);
+        label(list, fonts.semibold, label_of(ch), x + cols[0], y + 14, 15, now ? kYellow : kWhite);
+        label(list, fonts.regular, c1, x + cols[1], y + 14, 15, now ? kYellow : (missed ? kRed : pal.text_muted));
+        label(list, fonts.regular, c2, x + cols[2], y + 14, 15, pal.text_muted);
+        label(list, fonts.regular, c3, x + cols[3], y + 14, 15, pal.text_muted);
     }
     ui::paragraph(list, fonts.regular,
                   "LEVEL = trim that balances each speaker at the seat. PATH = extra distance to the nearest "
@@ -584,7 +577,7 @@ void SurroundScreen::draw_telemetry(DrawList &list, const Context &ctx) const
     const ui::Fonts &fonts = ctx.fonts;
     const Palette &pal = ctx.palette;
     const Rect strip{kStage.x, kStage.y + kStage.h + 14, kStage.w, 70};
-    list.bordered_rect(strip, 14, kPanel, 1.0f, kEdge);
+    list.bordered_rect(strip, page::kRadiusTile, kPanel, 1.0f, kEdge);
 
     if (p_.view_mode != EVO_SURROUND_VIEW_CALIBRATION)
     {
@@ -598,8 +591,8 @@ void SurroundScreen::draw_telemetry(DrawList &list, const Context &ctx) const
         for (int i = 0; i < 8; ++i)
         {
             const float cx = strip.x + cw * (i + 0.5f);
-            label(list, fonts.semibold, cells[i][0], cx, strip.y + 26, 10, pal.text_faint, Align::center, 1.2f);
-            label(list, fonts.semibold, cells[i][1], cx, strip.y + 52, 15,
+            label(list, fonts.semibold, cells[i][0], cx, strip.y + 26, 13, pal.text_muted, Align::center, 1.2f);
+            label(list, fonts.semibold, cells[i][1], cx, strip.y + 54, 18,
                   (i == 7 && p_.nearest_channel >= 0) ? kCyan : kWhite, Align::center);
         }
         return;

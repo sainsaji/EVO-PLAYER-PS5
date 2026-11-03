@@ -257,6 +257,49 @@ void draw_backdrop(DrawList &list, const Context &ctx, std::uint32_t picture, fl
     }
 }
 
+/* ------------------------------------------------------------ page chrome */
+
+float draw_page_title(DrawList &list, const Context &ctx, const std::string &title, const std::string &subtitle,
+                      float x, float dy, float max_w)
+{
+    const ui::Fonts &fonts = ctx.fonts;
+    const float w = ui::text(list, fonts.display, fit(fonts.display, title, page::kTitleSize, max_w), x - 2,
+                             page::kTitleY + dy, page::kTitleSize, kWhite);
+    if (!subtitle.empty())
+        ui::text(list, fonts.semibold, fit(fonts.semibold, ui::upper(subtitle), 18, max_w), x,
+                 page::kSubtitleY + dy, 18, ctx.palette.text_muted, Align::left, 3.0f);
+    return w;
+}
+
+void draw_page_counter(DrawList &list, const Context &ctx, const std::string &text, float dy)
+{
+    ui::text(list, ctx.fonts.regular, text, page::kRight, page::kTitleY + dy, 20, ctx.palette.text_faint,
+             Align::right, 2.0f);
+}
+
+void draw_page_hints(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, int n, float right)
+{
+    ui::Hint sorted[12];
+    int m = 0;
+    const auto take = [&](bool want_cross, bool want_circle) {
+        for (int i = 0; i < n && m < 12; ++i)
+        {
+            const bool cross = hints[i].button == ui::Button::cross;
+            const bool circle = hints[i].button == ui::Button::circle;
+            if (cross == want_cross && circle == want_circle)
+                sorted[m++] = hints[i];
+        }
+    };
+    take(true, false);
+    take(false, false);
+    take(false, true);
+    ui::HintLayout layout;
+    layout.size = 30;
+    layout.text_size = 20;
+    layout.cy = page::kHintsY;
+    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), sorted, m, right, true, layout);
+}
+
 /* ----------------------------------------------------------------- the rail */
 
 namespace
@@ -545,17 +588,17 @@ void HomeScreen::draw_hero(DrawList &list, const Context &ctx, const Hero &hero,
     const std::uint32_t tex = art_texture(ctx, hero.art, hero.art_w, hero.art_h, hero.title);
     if (tex)
     {
-        draw_art_fit(list, tex, hero.art_w, hero.art_h, art, 28, kWhite, p.surface_sel, p.surface);
+        draw_art_fit(list, tex, hero.art_w, hero.art_h, art, page::kRadiusCard, kWhite, p.surface_sel, p.surface);
     }
     else
     {
-        list.gradient_rect(art, 28, p.accent_soft, p.bg_bottom);
+        list.gradient_rect(art, page::kRadiusCard, p.accent_soft, p.bg_bottom);
         const std::uint32_t logo = ctx.textures.icon("../icons/icon_logo.png");
         if (logo)
             list.image(logo, {art.cx() - 56, art.cy() - 56, 112, 112}, ::hui::gfx::kFullUv,
                        kWhite.with_alpha(0.85f));
     }
-    list.bordered_rect(art, 28, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.16f));
+    list.bordered_rect(art, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.16f));
 
     const float x = kLeft + slide;
     ui::text(list, fonts.semibold, ui::upper(hero.eyebrow), x, 196, 20, p.accent, Align::left, 4.0f);
@@ -669,19 +712,19 @@ void HomeScreen::draw(DrawList &list, const Context &ctx) const
             const std::uint32_t tex = art_texture(ctx, t.art, t.art_w, t.art_h, std::string());
             if (tex)
             {
-                draw_art_fit(list, tex, t.art_w, t.art_h, r, 18, kWhite.with_alpha(t.focused ? 1.0f : 0.82f), p.surface_sel,
+                draw_art_fit(list, tex, t.art_w, t.art_h, r, page::kRadiusTile, kWhite.with_alpha(t.focused ? 1.0f : 0.82f), p.surface_sel,
                              p.surface);
             }
             else
             {
-                list.gradient_rect(r, 18, p.surface_sel, p.surface);
+                list.gradient_rect(r, page::kRadiusTile, p.surface_sel, p.surface);
                 const std::uint32_t icon = ctx.textures.icon(t.icon_path);
                 if (icon)
                     list.image(icon, {r.cx() - 28, r.cy() - 40, 56, 56}, ::hui::gfx::kFullUv,
                                kWhite.with_alpha(0.5f));
             }
             /* Title on a scrim at the foot of the card. */
-            list.gradient_rect({r.x, r.y + r.h * 0.45f, r.w, r.h * 0.55f}, 18,
+            list.gradient_rect({r.x, r.y + r.h * 0.45f, r.w, r.h * 0.55f}, page::kRadiusTile,
                                Color::rgb(0x000000, 0.0f), Color::rgb(0x000000, 0.78f));
             ui::text(list, t.focused ? fonts.semibold : fonts.regular,
                      fit(fonts.regular, t.title, 22, r.w - 36), r.x + 18, r.y + r.h - 24, 22, kWhite);
@@ -712,17 +755,17 @@ void HomeScreen::draw(DrawList &list, const Context &ctx) const
             const Tile &t = library_[i];
             Rect r = library_rect(static_cast<int>(i));
             r.y += dy;
-            list.rounded_rect(r, 22, t.focused ? kWhite.with_alpha(0.16f) : p.surface);
-            list.bordered_rect(r, 22, Color::rgb(0x000000, 0.0f), 1.0f, kWhite.with_alpha(0.08f));
-            const Rect well{r.x + 16, r.y + 16, 64, 64};
-            list.rounded_rect(well, 18, t.focused ? p.accent : kWhite.with_alpha(0.08f));
+            list.rounded_rect(r, page::kRadiusTile, t.focused ? kWhite.with_alpha(0.16f) : p.surface);
+            list.bordered_rect(r, page::kRadiusTile, Color::rgb(0x000000, 0.0f), 1.0f, kWhite.with_alpha(0.08f));
+            const Rect well{r.x + 16, r.y + 22, 52, 52};
+            list.rounded_rect(well, page::kRadiusChip, t.focused ? p.accent : kWhite.with_alpha(0.08f));
             const std::uint32_t icon = ctx.textures.icon(t.icon_path);
             if (icon)
-                list.image(icon, well.inset(16), ::hui::gfx::kFullUv, t.focused ? kInk : kWhite);
-            ui::text(list, fonts.semibold, fit(fonts.semibold, t.title, 22, r.w - 112), r.x + 96,
+                list.image(icon, well.inset(13), ::hui::gfx::kFullUv, t.focused ? kInk : kWhite);
+            ui::text(list, fonts.semibold, fit(fonts.semibold, t.title, 22, r.w - 98), r.x + 82,
                      r.y + 44, 22, kWhite);
-            ui::text(list, fonts.regular, fit(fonts.regular, t.detail, 17, r.w - 112), r.x + 96,
-                     r.y + 72, 17, p.text_faint);
+            ui::text(list, fonts.regular, fit(fonts.regular, t.detail, 18, r.w - 98), r.x + 82,
+                     r.y + 72, 18, p.text_muted);
         }
         list.pop_opacity();
     }
@@ -732,7 +775,7 @@ void HomeScreen::draw(DrawList &list, const Context &ctx) const
     {
         const Rect ring = ring_.value();
         list.push_opacity(row_glow_.value);
-        list.bordered_rect(ring.inset(-5), 26, Color::rgb(0x000000, 0.0f), 4, kWhite);
+        list.bordered_rect(ring.inset(-5), page::kRadiusTile + 5, Color::rgb(0x000000, 0.0f), 4, kWhite);
         list.pop_opacity();
     }
 
@@ -740,11 +783,7 @@ void HomeScreen::draw(DrawList &list, const Context &ctx) const
     {
         list.push_opacity(tween::stagger(age_, 6, 0.08f, 0.5f));
         const ui::Hint hints[] = {{ui::Button::cross, "Select"}, {ui::Button::circle, "Back"}};
-        ui::HintLayout layout;
-        layout.size = 30;
-        layout.text_size = 20;
-        layout.cy = 1046;
-        ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, 2, 1824, true, layout);
+        draw_page_hints(list, fonts, hints, 2);
         list.pop_opacity();
     }
 }
@@ -945,11 +984,7 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
         const float in = tween::stagger(age_, 0, 0.05f, 0.45f);
         list.push_opacity(in);
         const float dy = 16.0f * (1.0f - in);
-        ui::text(list, fonts.display, fit(fonts.display, title_, 52, 1100), kLeft - 2, 140 + dy, 52,
-                 kWhite);
-        if (!subtitle_.empty())
-            ui::text(list, fonts.semibold, ui::upper(subtitle_), kLeft, 182 + dy, 18, p.text_muted,
-                     Align::left, 3.0f);
+        draw_page_title(list, ctx, title_, subtitle_, kLeft, dy);
         if (total_ > 0)
         {
             char counter[32];
@@ -957,8 +992,7 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
                 std::snprintf(counter, sizeof(counter), "%d OF %d", cursor_ + 1, total_);
             else
                 std::snprintf(counter, sizeof(counter), "%d %s", total_, total_ == 1 ? "ITEM" : "ITEMS");
-            ui::text(list, fonts.regular, counter, kListRight, 140 + dy, 20, p.text_faint, Align::right,
-                     2.0f);
+            draw_page_counter(list, ctx, counter, dy);
         }
         list.pop_opacity();
     }
@@ -992,10 +1026,10 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
             list.push_opacity(in);
             Rect r = row_rect(static_cast<int>(i));
             r.y += 24.0f * (1.0f - tween::cubic_out(in));
-            list.rounded_rect(r, 20, row.focused ? kWhite.with_alpha(0.14f) : p.surface);
+            list.rounded_rect(r, page::kRadiusTile, row.focused ? kWhite.with_alpha(0.14f) : p.surface);
             const Rect well{r.x + 12, r.y + 10, 56, 56};
             const bool brand = is_brand_icon(row.icon);
-            list.rounded_rect(well, 16, row.focused ? (brand ? kWhite.with_alpha(0.92f) : p.accent)
+            list.rounded_rect(well, page::kRadiusChip, row.focused ? (brand ? kWhite.with_alpha(0.92f) : p.accent)
                                                     : kWhite.with_alpha(0.08f));
             const std::uint32_t icon = ctx.textures.icon(row.icon);
             if (icon)
@@ -1065,7 +1099,7 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
         if (has_focus_.value > 0.01f && menu_open_.value < 0.99f)
         {
             list.push_opacity(has_focus_.value * (1.0f - menu_open_.value));
-            list.bordered_rect(ring_.value().inset(-3), 23, Color::rgb(0x000000, 0.0f), 3, kWhite);
+            list.bordered_rect(ring_.value().inset(-3), page::kRadiusTile + 3, Color::rgb(0x000000, 0.0f), 3, kWhite);
             list.pop_opacity();
         }
 
@@ -1078,8 +1112,8 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
             const float x = kListRight - kPanelW;
             const float h = 9.0f * (kListRowH + kListGap) - kListGap;
             const Rect card{x, kListTop, kPanelW, h};
-            list.rounded_rect(card, 24, p.surface);
-            list.bordered_rect(card, 24, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.10f));
+            list.rounded_rect(card, page::kRadiusCard, p.surface);
+            list.bordered_rect(card, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.10f));
             const float tx = x + 32.0f;
             const float tw = kPanelW - 64.0f;
             if (!panel_eyebrow_.empty())
@@ -1109,12 +1143,8 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
         int n = 0;
         for (const auto &h : hints_)
             hints[n++] = {static_cast<ui::Button>(h.first), h.second.c_str()};
-        ui::HintLayout layout;
-        layout.size = 30;
-        layout.text_size = 20;
-        layout.cy = 1046;
         list.push_opacity(tween::stagger(age_, 6, 0.06f, 0.4f));
-        ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, n, kListRight, true, layout);
+        draw_page_hints(list, fonts, hints, n);
         list.pop_opacity();
     }
 
@@ -1124,9 +1154,9 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
     {
         list.rounded_rect({0, 0, 1920, 1080}, 0, Color::rgb(0x000000, 0.55f));
         const Rect card{960.0f - 280.0f, 540.0f - 100.0f, 560.0f, 200.0f};
-        list.shadow({card.x, card.y + 20, card.w, card.h}, 28, 40, Color::rgb(0x000000, 0.55f));
-        list.rounded_rect(card, 28, p.bg_top.with_alpha(0.97f));
-        list.bordered_rect(card, 28, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.14f));
+        list.shadow({card.x, card.y + 20, card.w, card.h}, page::kRadiusCard, 40, Color::rgb(0x000000, 0.55f));
+        list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.97f));
+        list.bordered_rect(card, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.14f));
         for (int i = 0; i < 3; ++i)
         {
             const float pulse = std::max(0.0f, std::sin(loading_age_ * 6.0f - static_cast<float>(i) * 0.9f));
@@ -1150,11 +1180,11 @@ void ListScreen::draw(DrawList &list, const Context &ctx) const
         const float h = 180.0f + static_cast<float>(menu_.size()) * (kMenuItemH + 6.0f) + 24.0f;
         const Rect card{960.0f - kMenuW * 0.5f, top, kMenuW, h};
         list.shadow({card.x, card.y + 24, card.w, card.h}, 32, 48, Color::rgb(0x000000, 0.6f));
-        list.rounded_rect(card, 32, p.bg_top.with_alpha(0.96f));
-        list.bordered_rect(card, 32, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.14f));
+        list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.96f));
+        list.bordered_rect(card, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.5f, kWhite.with_alpha(0.14f));
         const Rect well{card.x + 32, card.y + 36, 64, 64};
         const bool brand = is_brand_icon(menu_icon_);
-        list.rounded_rect(well, 18, brand ? kWhite.with_alpha(0.92f) : p.accent);
+        list.rounded_rect(well, page::kRadiusChip, brand ? kWhite.with_alpha(0.92f) : p.accent);
         const std::uint32_t icon = ctx.textures.icon(menu_icon_);
         if (icon)
             list.image(icon, well.inset(brand ? 12 : 16), ::hui::gfx::kFullUv, brand ? kWhite : kInk);

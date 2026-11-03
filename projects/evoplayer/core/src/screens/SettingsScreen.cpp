@@ -210,17 +210,17 @@ constexpr SectionSpec makeSection(const char* title, const char* subtitle, const
 
 /* Order here is the sidebar order in settings.rml (sb-0 .. sb-4). */
 const SectionSpec kSections[] = {
-    makeSection("VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR",
+    makeSection("Video & Display", "DECODER, UPSCALING, 120 HZ & HDR",
                 "SettingsPlaybackScreen", ScreenId::SettingsPlayback, kVideoKeys),
-    makeSection("AUDIO", "OUTPUT CHANNELS, SPEAKERS & SOUNDS",
+    makeSection("Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS",
                 "SettingsAudioScreen", ScreenId::SettingsAudio, kAudioKeys),
-    makeSection("SUBTITLES", "PREFERENCES & APPEARANCE",
+    makeSection("Subtitles", "PREFERENCES & APPEARANCE",
                 "SettingsSubtitlesScreen", ScreenId::SettingsSubtitles, kSubtitleKeys),
-    makeSection("INTERFACE & STORAGE", "THEMES, CONTROLS & BROWSING",
+    makeSection("Interface & Storage", "THEMES, CONTROLS & BROWSING",
                 "SettingsInterfaceScreen", ScreenId::SettingsInterface, kInterfaceKeys),
-    makeSection("SYSTEM & DIAGNOSTICS", "DIAGNOSTICS & SYSTEM MANAGEMENT",
+    makeSection("System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT",
                 "SettingsSystemScreen", ScreenId::SettingsSystem, kSystemKeys),
-    makeSection("EXPERIMENTAL", "UNFINISHED WORK - EXPECT ARTEFACTS",
+    makeSection("Experimental", "UNFINISHED WORK - EXPECT ARTEFACTS",
                 "SettingsExperimentalScreen", ScreenId::SettingsExperimental,
                 kExperimentalKeys),
 };

@@ -310,15 +310,14 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
     draw_backdrop(list, ctx, 0, 0.0f);
 
     list.push_opacity(tween::stagger(age_, 0, 0.05f, 0.5f));
-    ui::text(list, fonts.semibold, "PREFERENCES", kLeft, 84, 18, p.accent, Align::left, 3.0f);
-    ui::text(list, fonts.display, "Settings", kLeft - 3, 150, 52, kWhite);
+    draw_page_title(list, ctx, "Settings", "Preferences", kLeft, 0.0f, 440.0f);
     list.pop_opacity();
 
     Rect sc = sidebar_cursor_.value();
     if (params_.sidebar_focused)
     {
-        list.glow(sc, 32, 18, p.accent.with_alpha(0.45f));
-        list.rounded_rect(sc, 32, kWhite);
+        list.glow(sc, page::kRadiusTile, 18, p.accent.with_alpha(0.45f));
+        list.rounded_rect(sc, page::kRadiusTile, kWhite);
     }
 
     for (int i = 0; i < 6; ++i)
@@ -331,7 +330,7 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
 
         if (!params_.sidebar_focused && active)
         {
-            list.rounded_rect(sc, 32, kWhite.with_alpha(0.10f));
+            list.rounded_rect(sc, page::kRadiusTile, kWhite.with_alpha(0.10f));
             list.rounded_rect({sc.x + 8, sc.y + 16, 4, 32}, 2, p.accent);
         }
 
@@ -347,28 +346,30 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
     }
 
     Rect pane{kLeft + 480.0f, 130.0f, 1824.0f - (kLeft + 480.0f), 820.0f};
-    list.shadow(pane, 32, 40, Color::rgb(0x000000, 0.4f));
-    list.rounded_rect(pane, 32, p.surface);
-    list.bordered_rect(pane, 32, Color::rgb(0x000000, 0.0f), 1.0f, p.border);
+    list.shadow(pane, page::kRadiusCard, 40, Color::rgb(0x000000, 0.4f));
+    list.rounded_rect(pane, page::kRadiusCard, p.surface);
+    list.bordered_rect(pane, page::kRadiusCard, Color::rgb(0x000000, 0.0f), 1.0f, p.border);
 
     list.push_clip(pane);
 
     float px = pane.x + 48.0f;
     float py = pane.y + 56.0f;
 
-    ui::text(list, fonts.semibold, fit(fonts.semibold, ui::upper(subtitle_), 18, pane.w - 96.0f, 2.0f), px, py, 18, p.text_muted, Align::left, 2.0f);
+    /* The section's own heading: title, then the line under it, as on every page. */
     const float counter_w = counter_.empty() ? 0.0f : (fonts.regular.measure(counter_, 22) + 24.0f);
     const float title_w = std::max(0.0f, pane.w - 96.0f - counter_w);
-    ui::text(list, fonts.display, fit(fonts.display, title_, 40, title_w), px - 2, py + 48, 40, kWhite);
+    ui::text(list, fonts.display, fit(fonts.display, title_, 40, title_w), px - 2, py + 36, 40, kWhite);
     if (!counter_.empty())
     {
-        ui::text(list, fonts.regular, counter_, pane.x + pane.w - 48.0f, py + 48, 22, p.text_faint, Align::right);
+        ui::text(list, fonts.regular, counter_, pane.x + pane.w - 48.0f, py + 36, 22, p.text_faint, Align::right);
     }
+    ui::text(list, fonts.semibold, fit(fonts.semibold, ui::upper(subtitle_), 18, pane.w - 96.0f, 3.0f), px, py + 70, 18,
+             p.text_muted, Align::left, 3.0f);
 
     if (!params_.sidebar_focused && row_cursor_snapped_)
     {
         Rect rc = row_cursor_.value();
-        list.glow(rc, 16, 20, p.accent.with_alpha(0.4f));
+        list.glow(rc, page::kRadiusTile, 20, p.accent.with_alpha(0.4f));
     }
 
     list.push_clip({pane.x, kRowsTop - 12.0f, pane.w, kRowsBottom - kRowsTop + 24.0f});
@@ -382,7 +383,7 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
 
         if (rows_[i].is_focused && !params_.sidebar_focused)
         {
-            list.rounded_rect(r, 16, kWhite.with_alpha(0.14f));
+            list.rounded_rect(r, page::kRadiusTile, kWhite.with_alpha(0.14f));
         }
 
         draw_row(list, ctx, rows_[i], r, static_cast<int>(i));
@@ -392,7 +393,7 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
     if (!params_.sidebar_focused && row_cursor_snapped_)
     {
         Rect rc = row_cursor_.value();
-        list.bordered_rect(rc, 16, Color::rgb(0x000000, 0.0f), 3.0f, kWhite);
+        list.bordered_rect(rc, page::kRadiusTile, Color::rgb(0x000000, 0.0f), 3.0f, kWhite);
     }
 
     list.pop_clip();
@@ -402,13 +403,9 @@ void SettingsScreen::draw(DrawList &list, const Context &ctx) const
 
     const ui::Hint hints[] = {
         {ui::Button::cross, "Select"},
-        {ui::Button::circle, "Back"},
-        {ui::Button::dpad, "Navigate"}};
-    ui::HintLayout layout;
-    layout.size = 30;
-    layout.text_size = 20;
-    layout.cy = 1046;
-    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, 3, 1824, true, layout);
+        {ui::Button::dpad, "Navigate"},
+        {ui::Button::circle, "Back"}};
+    draw_page_hints(list, fonts, hints, 3);
 }
 
 bool SettingsScreen::focus(FocusInfo *out) const

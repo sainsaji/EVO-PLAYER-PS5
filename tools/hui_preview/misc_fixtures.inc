@@ -44,7 +44,7 @@ static void fill_about_fixture(evo_rmlui_about_params_t& p)
 static void fill_changelog_fixture(evo_rmlui_changelog_params_t& p)
 {
     static const char* kindLabel[] = {"NEW", "FIXED", "IMPROVED", "REMOVED", "VERSION"};
-    p.title = "CHANGELOG";
+    p.title = "Changelog";
     p.subtitle = "WHAT CHANGED IN EACH RELEASE";
     p.release_total = EVO_CHANGELOG_RELEASE_COUNT;
     p.release_count = 0;

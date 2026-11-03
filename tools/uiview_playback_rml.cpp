@@ -130,8 +130,72 @@ void prospero_thumbnail_blit(uint32_t*, int, int, int, int, int) {}
 } /* extern "C" */
 #include <cstdio>
 #include <cstdlib>
+#include <RmlUi/Core.h>
+#include <RmlUi/Core/ElementText.h>
+
+/*
+ * Text that does not fit, in every RmlUi document on screen when a shot is
+ * saved. An element that holds text directly and whose content is wider (or
+ * taller) than its box is listed in output/uiview/rml_overflow.txt:
+ *   CLIP   overflow hidden - the text is cut off
+ *   SPILL  overflow visible - the text runs out of its box
+ * Scroll containers (overflow auto/scroll) are meant to overflow and are skipped.
+ */
+static FILE* s_rml_overflow;
+
+static void scan_overflow(const char* shot, Rml::Element* el) {
+    if (!el || !el->IsVisible(true)) return;
+    std::string text;
+    for (int i = 0; i < el->GetNumChildren(); ++i) {
+        if (auto* t = dynamic_cast<Rml::ElementText*>(el->GetChild(i))) {
+            for (char c : t->GetText())
+                if (c != ' ' && c != '\n' && c != '\t') { text += t->GetText(); break; }
+        }
+    }
+    if (!text.empty()) {
+        const float cw = el->GetClientWidth(), sw = el->GetScrollWidth();
+        const float ch = el->GetClientHeight(), sh = el->GetScrollHeight();
+        const auto& cv = el->GetComputedValues();
+        const bool scroll_x = cv.overflow_x() == Rml::Style::Overflow::Auto || cv.overflow_x() == Rml::Style::Overflow::Scroll;
+        const bool scroll_y = cv.overflow_y() == Rml::Style::Overflow::Auto || cv.overflow_y() == Rml::Style::Overflow::Scroll;
+        const float over_x = (!scroll_x && cw > 0.0f) ? sw - cw : 0.0f;
+        const float over_y = (!scroll_y && ch > 0.0f) ? sh - ch : 0.0f;
+        if (over_x > 1.5f || over_y > 1.5f) {
+            const bool hidden = over_x > 1.5f ? cv.overflow_x() == Rml::Style::Overflow::Hidden
+                                              : cv.overflow_y() == Rml::Style::Overflow::Hidden;
+            const Rml::Vector2f o = el->GetAbsoluteOffset(Rml::BoxArea::Border);
+            if (text.size() > 60) text = text.substr(0, 57) + "...";
+            for (char& c : text) if (c == '\n' || c == '\t') c = ' ';
+            std::fprintf(s_rml_overflow, "%-34s %-5s %4.0f,%4.0f %4.0fx%-3.0f by %3.0fx%-3.0f <%s id=%s class=%s> \"%s\"\n",
+                         shot, hidden ? "CLIP" : "SPILL", o.x, o.y, el->GetBox().GetSize(Rml::BoxArea::Border).x,
+                         el->GetBox().GetSize(Rml::BoxArea::Border).y, std::max(0.0f, over_x), std::max(0.0f, over_y),
+                         el->GetTagName().c_str(), el->GetId().c_str(), el->GetClassNames().c_str(), text.c_str());
+        }
+    }
+    for (int i = 0; i < el->GetNumChildren(); ++i)
+        scan_overflow(shot, el->GetChild(i));
+}
+
+static void scan_overflow_all(const char* filename) {
+    if (!s_rml_overflow) {
+        s_rml_overflow = std::fopen("output/uiview/rml_overflow.txt", "w");
+        if (!s_rml_overflow) return;
+    }
+    std::string shot = filename;
+    const size_t slash = shot.find_last_of('/');
+    if (slash != std::string::npos) shot = shot.substr(slash + 1);
+    for (int c = 0; c < Rml::GetNumContexts(); ++c) {
+        Rml::Context* ctx = Rml::GetContext(c);
+        for (int d = 0; ctx && d < ctx->GetNumDocuments(); ++d) {
+            Rml::ElementDocument* doc = ctx->GetDocument(d);
+            if (doc && doc->IsVisible()) scan_overflow(shot.c_str(), doc);
+        }
+    }
+    std::fflush(s_rml_overflow);
+}
 
 static void save_bmp_24(const char* filename, const uint32_t* fb, int width, int height) {
+    scan_overflow_all(filename);
     std::ofstream file(filename, std::ios::binary);
     if (!file) return;
 
@@ -2679,7 +2743,7 @@ int main(int argc, char** argv) {
         set.sidebar_focused = 0;
         set.rail_focused = 0;
         set.row_count = 5;
-        settings_row(set.rows[0], "COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0", "projects/evoplayer/assets/icons/icon_report.png", EVO_RMLUI_ROW_ACTION, "RUN", 0);
+        settings_row(set.rows[0], "REPORT A PROBLEM", "SEND EVO'S LOG FROM YOUR PHONE, OR SAVE IT TO USB", "projects/evoplayer/assets/icons/icon_report.png", EVO_RMLUI_ROW_ACTION, "SAVE", 0);
         settings_row(set.rows[1], "DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS", "projects/evoplayer/assets/icons/icon_activity.png", EVO_RMLUI_ROW_TOGGLE, "", 0);
         settings_row(set.rows[2], "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS", "projects/evoplayer/assets/icons/icon_developer_tools.png", EVO_RMLUI_ROW_ACTION, "OPEN", 0);
         settings_row(set.rows[3], "CONSOLE", "DETECTED HARDWARE MODEL", "projects/evoplayer/assets/icons/icon_tv.png", EVO_RMLUI_ROW_ACTION, "NOT DETECTED", 0);
@@ -2780,7 +2844,7 @@ int main(int argc, char** argv) {
         set.rail_focused = 0;
         set.row_count = 4;
 
-        set.rows[0].title = "COMPATIBILITY REPORT";
+        set.rows[0].title = "REPORT A PROBLEM";
         set.rows[0].detail = "WRITES A CODEC REPORT TO USB0";
         set.rows[0].icon_path = "projects/evoplayer/assets/icons/icon_developer_tools.png";
         set.rows[0].badge = "RUN";

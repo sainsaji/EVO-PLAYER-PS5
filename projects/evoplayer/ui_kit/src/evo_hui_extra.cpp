@@ -31,13 +31,14 @@ std::string fit(const ui::FontRef &font, const std::string &text, float size, fl
     return font.font->fit(text, size, width);
 }
 
-void hint_row(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, int n, float right, float cy = 1030.0f)
+/* A dark plate behind a page hint row, for rows drawn over a picture. */
+void hint_plate(DrawList &list, const ui::Fonts &fonts, const ui::Hint *hints, int n, float right)
 {
     ui::HintLayout layout;
     layout.size = 30;
     layout.text_size = 20;
-    layout.cy = cy;
-    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), hints, n, right, true, layout);
+    const float w = ui::measure_hints(fonts, hints, n, layout) + 32.0f;
+    list.rounded_rect({right - w + 16.0f, page::kHintsY - 18.0f, w, 36.0f}, 18, kBlack.with_alpha(0.6f));
 }
 
 std::vector<std::string> split_utf8(const std::string& str) {
@@ -83,9 +84,8 @@ void ReaderScreen::draw(DrawList &list, const Context &ctx) const
     const ui::Fonts &fonts = ctx.fonts;
     const Palette &p = ctx.palette;
 
-    float lx = NavRail::kWidth + 64.0f;
-    ui::text(list, fonts.display, title_, lx, 140, 44, kWhite);
-    ui::text(list, fonts.regular, subtitle_, lx, 180, 20, p.text_muted);
+    float lx = page::kLeft;
+    draw_page_title(list, ctx, title_, subtitle_, lx);
     if (!badge_.empty()) {
         float w = fonts.semibold.measure(badge_, 16, 1.5f) + 20;
         Rect pill{1824.0f - w, 110, w, 32};
@@ -94,7 +94,7 @@ void ReaderScreen::draw(DrawList &list, const Context &ctx) const
     }
 
     Rect card{lx, 220, 1824.0f - lx, 760};
-    list.rounded_rect(card, 28, p.surface);
+    list.rounded_rect(card, page::kRadiusCard, p.surface);
     
     /* The footnote has its own strip at the foot of the card. */
     list.push_clip({card.x, card.y, card.w, card.h - (footnote_.empty() ? 0.0f : 44.0f)});
@@ -123,12 +123,11 @@ void ReaderScreen::draw(DrawList &list, const Context &ctx) const
     }
 
     const ui::Hint hints[] = {
-        {ui::Button::circle, "Back"},
         {ui::Button::dpad, "Scroll"},
-        {ui::Button::l1, "Page"},
-        {ui::Button::r1, "Page"}
+        {ui::Button::l1, "Page", ui::Button::r1},
+        {ui::Button::circle, "Back"}
     };
-    hint_row(list, fonts, hints, 4, 1824.0f);
+    draw_page_hints(list, fonts, hints, 3);
 }
 
 bool ReaderScreen::focus(FocusInfo *out) const
@@ -191,24 +190,25 @@ void ImageViewer::draw(DrawList &list, const Context &ctx) const
             std::snprintf(dim, sizeof(dim), "%d x %d", w_, h_);
             std::string t = title_ + "   " + dim;
             float w = fonts.semibold.measure(t, 16, 1.0f) + 32;
-            Rect pill{40.0f, 1080.0f - 40.0f - 36.0f, w, 36};
+            Rect pill{1920.0f - page::kRight, page::kHintsY - 18.0f, w, 36};
             list.rounded_rect(pill, 18, kBlack.with_alpha(0.6f));
             ui::text(list, fonts.semibold, t, pill.cx(), pill.y + 24, 16, kWhite, Align::center);
 
             const ui::Hint hints[] = {{ui::Button::circle, "Back"}};
-            hint_row(list, fonts, hints, 1, 1880.0f, 1080.0f - 40.0f);
+            hint_plate(list, fonts, hints, 1, page::kRight);
+            draw_page_hints(list, fonts, hints, 1);
             list.pop_opacity();
         }
     }
     else
     {
         Rect card{960.0f - 300, 540.0f - 100, 600, 200};
-        list.rounded_rect(card, 24, p.surface);
+        list.rounded_rect(card, page::kRadiusCard, p.surface);
         ui::text(list, fonts.display, "Could not open this image", card.cx(), card.y + 80, 40, kWhite, Align::center);
         ui::text(list, fonts.regular, title_, card.cx(), card.y + 130, 20, p.text_muted, Align::center);
 
         const ui::Hint hints[] = {{ui::Button::circle, "Back"}};
-        hint_row(list, fonts, hints, 1, 1880.0f, 1040.0f);
+        draw_page_hints(list, fonts, hints, 1);
     }
 }
 
@@ -358,9 +358,9 @@ void KeyboardOverlay::draw(DrawList &list, const Context &ctx) const
     list.push_opacity(alpha);
 
     const Rect card = kCard;
-    list.shadow({card.x, card.y + 20, card.w, card.h}, 36, 60, kBlack.with_alpha(0.6f));
-    list.rounded_rect(card, 36, p.bg_top.with_alpha(0.97f));
-    list.bordered_rect(card, 36, kClear, 1.0f, kWhite.with_alpha(0.12f));
+    list.shadow({card.x, card.y + 20, card.w, card.h}, page::kRadiusCard, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.97f));
+    list.bordered_rect(card, page::kRadiusCard, kClear, 1.0f, kWhite.with_alpha(0.12f));
 
     // title
     ui::text(list, fonts.semibold, ui::upper(title_), card.cx(), card.y + 50, 16, p.text_muted, Align::center, 3.0f);
@@ -485,9 +485,9 @@ void KeyboardOverlay::draw_pad(DrawList &list, const Context &ctx) const
     list.push_opacity(enter_fade_.value);
 
     const Rect card{460.0f, 230.0f, 1000.0f, 620.0f};
-    list.shadow({card.x, card.y + 20, card.w, card.h}, 36, 60, kBlack.with_alpha(0.6f));
-    list.rounded_rect(card, 36, p.bg_top.with_alpha(0.97f));
-    list.bordered_rect(card, 36, kClear, 1.0f, kWhite.with_alpha(0.12f));
+    list.shadow({card.x, card.y + 20, card.w, card.h}, page::kRadiusCard, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.97f));
+    list.bordered_rect(card, page::kRadiusCard, kClear, 1.0f, kWhite.with_alpha(0.12f));
     ui::text(list, fonts.semibold, ui::upper(title_), card.cx(), card.y + 54.0f, 16, p.text_muted, Align::center, 3.0f);
 
     // the number, large

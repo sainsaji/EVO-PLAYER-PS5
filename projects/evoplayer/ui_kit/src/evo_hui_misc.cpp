@@ -311,64 +311,86 @@ void AboutScreen::update(float dt)
 {
 }
 
+namespace
+{
+/* About's layout: the identity card on the left, the facts on the right. */
+constexpr Rect kAboutCard{page::kLeft, 236.0f, 560.0f, 724.0f};
+constexpr float kAboutTilesX = kAboutCard.x + kAboutCard.w + 32.0f;
+constexpr float kAboutTileW = (page::kRight - kAboutTilesX - 32.0f) * 0.5f;
+constexpr float kAboutTileH = 220.0f;
+constexpr Rect kAboutButton{kAboutCard.x + 80.0f, kAboutCard.y + kAboutCard.h - 120.0f, kAboutCard.w - 160.0f, 64.0f};
+} // namespace
+
 void AboutScreen::draw(DrawList &list, const Context &ctx) const
 {
     draw_backdrop(list, ctx);
     const ui::Fonts &fonts = ctx.fonts;
     const Palette &p = ctx.palette;
 
-    float cx = (NavRail::kWidth + 1920.0f) * 0.5f;
+    draw_page_title(list, ctx, "About", tagline_);
 
+    /* identity card: logo, name, version and build, the changelog button */
+    const Rect card = kAboutCard;
+    list.rounded_rect(card, page::kRadiusCard, p.surface);
+    list.bordered_rect(card, page::kRadiusCard, Color::rgb(0, 0), 1.0f, kWhite.with_alpha(0.06f));
+    const float cx = card.cx();
     std::uint32_t logo = ctx.textures.icon("../icons/icon_logo.png");
     if (logo)
-        list.image(logo, {cx - 60, 140, 120, 120}, ::hui::gfx::kFullUv, kWhite);
+        list.image(logo, {cx - 72, card.y + 96, 144, 144}, ::hui::gfx::kFullUv, kWhite);
+    ui::text(list, fonts.display, fit(fonts.display, app_name_, 44, card.w - 64), cx, card.y + 320, 44, kWhite,
+             Align::center);
 
-    ui::text(list, fonts.display, app_name_, cx, 320, 64, kWhite, Align::center);
+    const float w1 = fonts.semibold.measure(version_, 18, 1.0f) + 36;
+    const float w2 = fonts.semibold.measure(build_tag_, 18, 1.0f) + 36;
+    const float chips_w = std::min(card.w - 48.0f, w1 + w2 + 12);
+    float px = cx - chips_w * 0.5f;
+    list.rounded_rect({px, card.y + 360, w1, 40}, page::kRadiusChip, kWhite.with_alpha(0.1f));
+    ui::text(list, fonts.semibold, version_, px + w1 * 0.5f, card.y + 387, 18, kWhite, Align::center, 1.0f);
+    px += w1 + 12;
+    const float w2_fit = std::min(w2, card.x + card.w - 24.0f - px);
+    list.rounded_rect({px, card.y + 360, w2_fit, 40}, page::kRadiusChip, kWhite.with_alpha(0.1f));
+    ui::text(list, fonts.semibold, fit(fonts.semibold, build_tag_, 18, w2_fit - 36), px + w2_fit * 0.5f, card.y + 387, 18,
+             kWhite, Align::center, 1.0f);
 
-    float w1 = fonts.semibold.measure(version_, 16) + 30;
-    float w2 = fonts.semibold.measure(build_tag_, 16) + 30;
-    float px = cx - (w1 + w2 + 10) * 0.5f;
-    list.rounded_rect({px, 350, w1, 32}, 16, kWhite.with_alpha(0.1f));
-    ui::text(list, fonts.semibold, version_, px + w1 * 0.5f, 372, 16, kWhite, Align::center);
-    px += w1 + 10;
-    list.rounded_rect({px, 350, w2, 32}, 16, kWhite.with_alpha(0.1f));
-    ui::text(list, fonts.semibold, build_tag_, px + w2 * 0.5f, 372, 16, kWhite, Align::center);
-
-    ui::text(list, fonts.semibold, ui::upper(tagline_), cx, 420, 16, p.text_muted, Align::center, 3.0f);
-
-    struct Tile { std::string title, desc; };
-    Tile tiles[6] = {
-        {"DECODE", "Hardware"},
-        {"RENDER", "ps5-homebrew-ui on sceAgc"},
-        {"MEDIA CORE", "FFmpeg"},
-        {"TARGET", "Firmware below 13.60"},
-        {"PROJECT", "github.com/sainsaji/EVO-PLAYER-PS5"},
-        {"THEMES", themes_info_}
-    };
-
-    float start_x = cx - 440;
-    float start_y = 520;
-    for (int i = 0; i < 6; ++i)
-    {
-        float tx = start_x + (i % 3) * 300;
-        float ty = start_y + (i / 3) * 120;
-        list.rounded_rect({tx, ty, 280, 100}, 16, p.surface);
-        list.bordered_rect({tx, ty, 280, 100}, 16, Color::rgb(0,0), 1.0f, kWhite.with_alpha(0.05f));
-        ui::text(list, fonts.semibold, tiles[i].title, tx + 20, ty + 40, 14, p.accent, Align::left, 2.0f);
-        ui::text(list, fonts.regular, fit(fonts.regular, tiles[i].desc, 16, 240), tx + 20, ty + 70, 16, kWhite);
-    }
-
-    Rect btn{cx - 150, 840, 300, 56};
+    const Rect btn = kAboutButton;
     if (action_focused_)
     {
-        list.glow(btn, 28, 20, p.accent.with_alpha(0.5f));
-        list.rounded_rect(btn, 28, kWhite);
+        list.glow(btn, btn.h * 0.5f, 20, p.accent.with_alpha(0.5f));
+        list.rounded_rect(btn, btn.h * 0.5f, kWhite);
     }
     else
     {
-        list.rounded_rect(btn, 28, kWhite.with_alpha(0.1f));
+        list.rounded_rect(btn, btn.h * 0.5f, kWhite.with_alpha(0.1f));
     }
-    ui::text(list, fonts.semibold, "View Changelog", btn.cx(), btn.cy() + 8, 20, action_focused_ ? kInk : kWhite, Align::center);
+    ui::text(list, fonts.semibold, "View Changelog", btn.cx(), btn.cy() + 8, 22, action_focused_ ? kInk : kWhite,
+             Align::center);
+
+    /* the facts */
+    struct Tile
+    {
+        const char *title, *desc;
+    };
+    const Tile tiles[6] = {
+        {"DECODE", "Hardware (sceVideodec2), FFmpeg when the hardware cannot"},
+        {"RENDER", "ps5-homebrew-ui on sceAgc"},
+        {"MEDIA CORE", "FFmpeg"},
+        {"TARGET", "PS5 firmware 13.60 and below"},
+        {"PROJECT", "github.com/sainsaji/EVO-PLAYER-PS5"},
+        {"HELP", "Settings \xE2\x80\xBA System & Diagnostics \xE2\x80\xBA Report a problem"},
+    };
+    for (int i = 0; i < 6; ++i)
+    {
+        const Rect t{kAboutTilesX + static_cast<float>(i % 2) * (kAboutTileW + 32.0f),
+                     card.y + static_cast<float>(i / 2) * (kAboutTileH + 32.0f), kAboutTileW, kAboutTileH};
+        list.rounded_rect(t, page::kRadiusTile, p.surface);
+        list.bordered_rect(t, page::kRadiusTile, Color::rgb(0, 0), 1.0f, kWhite.with_alpha(0.05f));
+        ui::text(list, fonts.semibold, tiles[i].title, t.x + 32, t.y + 56, 16, p.accent, Align::left, 2.0f);
+        ui::paragraph(list, fonts.regular, tiles[i].desc, t.x + 32, t.y + 104, 24, t.w - 64, 34, kWhite, 3);
+    }
+
+    const ui::Hint hints[] = {
+        {ui::Button::cross, "Changelog"}, {ui::Button::square, "Dev tools"}, {ui::Button::circle, "Back"}};
+    draw_page_hints(list, fonts, hints, 3);
 }
 
 bool AboutScreen::focus(FocusInfo *out) const
@@ -379,7 +401,7 @@ bool AboutScreen::focus(FocusInfo *out) const
         out->id = "about-changelog";
         out->text = "View Changelog";
         out->index = out->total = 1;
-        out->rect = {810, 840, 300, 56};
+        out->rect = kAboutButton;
         return true;
     }
     return false;
@@ -455,13 +477,12 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
     const ui::Fonts &fonts = ctx.fonts;
     const Palette &p = ctx.palette;
 
-    float lx = NavRail::kWidth + 64.0f;
-    ui::text(list, fonts.display, title_, lx, 140, 48, kWhite);
-    ui::text(list, fonts.regular, subtitle_, lx, 180, 20, p.text_muted);
+    float lx = page::kLeft;
+    draw_page_title(list, ctx, title_, subtitle_, lx);
 
     if (ring_snapped_)
     {
-        list.rounded_rect(ring_.value(), 35, kWhite);
+        list.rounded_rect(ring_.value(), page::kRadiusTile, kWhite);
     }
 
     for (size_t i = 0; i < releases_.size(); ++i)
@@ -478,8 +499,8 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
 
     float rx = lx + 440.0f;
     Rect card{rx, 260, 1824 - rx, 740};
-    list.rounded_rect(card, 24, p.surface);
-    list.bordered_rect(card, 24, Color::rgb(0,0), 1.0f, kWhite.with_alpha(0.05f));
+    list.rounded_rect(card, page::kRadiusCard, p.surface);
+    list.bordered_rect(card, page::kRadiusCard, Color::rgb(0,0), 1.0f, kWhite.with_alpha(0.05f));
 
     ui::text(list, fonts.display, detail_version_, rx + 40, 330, 40, kWhite);
     ui::text(list, fonts.regular, detail_tagline_, rx + 40, 360, 20, p.text_muted);
@@ -488,7 +509,7 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
     // edges fade and a thumb shows the position. A row is as tall as its text
     // wraps (one or two lines).
     const float text_w = card.w - 200.0f;
-    const Rect view{rx + 40, 392.0f, card.w - 80.0f, card.y + card.h - 392.0f - 20.0f};
+    const float view_room = card.y + card.h - 392.0f - 20.0f;
     float content_h = 0.0f;
     std::vector<float> heights;
     heights.reserve(items_.size());
@@ -498,6 +519,20 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
         heights.push_back(30.0f + 26.0f * (lines - 1) + 14.0f);
         content_h += heights.back();
     }
+    /* The view ends on a row boundary, so the list at rest never shows a row sliced through. */
+    float view_h = view_room;
+    if (content_h + 8.0f > view_room)
+    {
+        float edge = 8.0f;
+        for (float h : heights)
+        {
+            if (edge + h > view_room)
+                break;
+            edge += h;
+        }
+        view_h = edge;
+    }
+    const Rect view{rx + 40, 392.0f, card.w - 80.0f, view_h};
     scroll_.set_bounds(view);
     scroll_.set_content_size(view.w, content_h);
 
@@ -527,6 +562,9 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
     }
     scroll_.end(canvas);
     scroll_.draw(canvas);
+
+    const ui::Hint hints[] = {{ui::Button::dpad, "Navigate"}, {ui::Button::circle, "Back"}};
+    draw_page_hints(list, fonts, hints, 2);
 }
 
 bool ChangelogScreen::focus(FocusInfo *out) const

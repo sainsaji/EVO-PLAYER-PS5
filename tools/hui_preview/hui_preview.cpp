@@ -25,6 +25,7 @@
 #include "evo_hui_surround.hpp"
 #include "evo_hui_provider.hpp"
 #include "extra_fixtures.inc"
+#include "overflow_check.inc"
 
 #include "core/save_file.hpp"
 #include "gfx/gl_program.hpp"
@@ -153,6 +154,12 @@ int main(int argc, char **argv)
     const int width = argc > 4 ? std::atoi(argv[3]) : 1920;
     const int height = argc > 4 ? std::atoi(argv[4]) : 1080;
     const std::string assets = root + "/projects/evoplayer/assets";
+    FILE *overflow_report = std::fopen((output + "/hui_overflow.txt").c_str(), "w");
+    if (!overflow_report)
+        overflow_report = stderr;
+    FILE *metrics = std::fopen((output + "/hui_metrics.tsv").c_str(), "w");
+    if (!metrics)
+        metrics = stderr;
 
     if (!open_context())
     {
@@ -255,12 +262,12 @@ int main(int argc, char **argv)
         launch.recent[i].art_w = 320;
         launch.recent[i].art_h = 180;
     }
-    const char *lib[][3] = {{"BROWSE", "Videos and folders on USB storage", "../icons/icon_browse_usb.png"},
-                            {"RECENT", "Pick up where you left off", "../icons/icon_recent_files.png"},
-                            {"FAVORITES", "Media you saved for later", "../icons/icon_favorites.png"},
-                            {"PROVIDERS", "Network sources: IPTV, Emby, Jellyfin", "../icons/icon_emby.png"},
-                            {"SETTINGS", "Playback and display preferences", "../icons/icon_settings.png"},
-                            {"ABOUT", "Credits and project info", "../icons/icon_about_support.png"}};
+    const char *lib[][3] = {{"BROWSE", "USB drives", "../icons/icon_browse_usb.png"},
+                            {"RECENT", "Resume watching", "../icons/icon_recent_files.png"},
+                            {"FAVORITES", "Saved for later", "../icons/icon_favorites.png"},
+                            {"PROVIDERS", "Online sources", "../icons/icon_emby.png"},
+                            {"SETTINGS", "Video & audio", "../icons/icon_settings.png"},
+                            {"ABOUT", "Credits & info", "../icons/icon_about_support.png"}};
     launch.library_visible = 6;
     for (int i = 0; i < 6; ++i)
     {
@@ -747,6 +754,8 @@ int main(int argc, char **argv)
         {"settings_pv_port_busy", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_busy"); }},
         {"settings_pv_port_fallback", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_fallback"); }},
         {"settings_pv_port_none", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "port_none"); }},
+        {"settings_pv_report", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "report"); }},
+        {"settings_pv_report_nolink", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "report_nolink"); }},
         {"settings_pv_keyboard", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "keyboard"); }},
         {"settings_pv_keyboard_ps5", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "keyboard_ps5"); }},
         {"settings_pv_ask_stream", 3, [&] { clear_focus(); fill_settings_pv_extra_fixture(sp, "ask_stream"); }},
@@ -1004,6 +1013,39 @@ int main(int argc, char **argv)
         stbi_write_png(path.c_str(), width, height, 4, pixels.data(), width * 4);
         std::fprintf(stderr, "wrote %s: %zu shapes, %zu draw calls, GL error 0x%x\n", path.c_str(),
                      renderer.last_instances(), renderer.last_draw_calls(), glGetError());
+
+        /* Text that does not fit (overflow_check.inc): one line per finding in
+         * hui_overflow.txt, and a copy of the frame with the boxes in red. */
+        /* Every text run and box of the frame, for the cross-screen
+         * consistency report (tools/ui_consistency.py). */
+        for (const auto &t : overflow::group_text(list))
+            std::fprintf(metrics, "%s\ttext\t%.0f\t%.0f\t%.0f\t%.0f\t%.2f\t%d\t%02x%02x%02x\t%.2f\n", f.name, t.ink.x0,
+                         t.ink.y0, t.ink.w(), t.ink.h(), t.range, t.slot, (int)(t.rgba[0] * 255), (int)(t.rgba[1] * 255),
+                         (int)(t.rgba[2] * 255), t.rgba[3]);
+        for (const auto &c : list.instances())
+        {
+            const int shape = static_cast<int>(c.params[3]);
+            if ((shape == 0 || shape == 8) && c.rect[2] >= 16 && c.rect[3] >= 12 && std::max(c.color_top[3], c.border_color[3]) > 0.04f)
+                std::fprintf(metrics, "%s\tbox\t%.0f\t%.0f\t%.0f\t%.0f\t%.1f\t%.1f\t%02x%02x%02x\t%.2f\n", f.name, c.rect[0],
+                             c.rect[1], c.rect[2], c.rect[3], c.params[0], c.params[1], (int)(c.color_top[0] * 255),
+                             (int)(c.color_top[1] * 255), (int)(c.color_top[2] * 255), c.color_top[3]);
+        }
+        const auto found = overflow::check(list, 1920.0f, 1080.0f);
+        if (!found.empty() && width == 1920 && height == 1080)
+        {
+            std::vector<unsigned char> marked = pixels;
+            for (const auto &o : found)
+            {
+                std::fprintf(overflow_report, "%-36s %-9s text %4.0f,%4.0f %4.0fx%-3.0f  vs %4.0f,%4.0f %4.0fx%-3.0f  by %.0f px\n",
+                             f.name, o.kind, o.box.x0, o.box.y0, o.box.w(), o.box.h(), o.other.x0, o.other.y0,
+                             o.other.w(), o.other.h(), o.by);
+                overflow::outline(marked, width, height, o.box, 255, 40, 40);
+                if (o.other.w() > 0)
+                    overflow::outline(marked, width, height, o.other, 255, 200, 0);
+            }
+            const std::string mpath = output + "/hui_" + f.name + ".overflow.png";
+            stbi_write_png(mpath.c_str(), width, height, 4, marked.data(), width * 4);
+        }
     }
     return 0;
 }

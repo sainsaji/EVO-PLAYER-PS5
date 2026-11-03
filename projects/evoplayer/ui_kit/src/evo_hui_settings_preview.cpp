@@ -289,7 +289,14 @@ void draw_upscaling(DrawList &list, const Context &ctx, const Rect &box, const S
                  sel_thumb ? ctx.palette.accent : ctx.palette.text_muted, Align::center);
     }
 
-    credit_line(list, ctx, box, a);
+    /* The photo credit sits on the picture: under the labels there is no room. */
+    {
+        const char *credit = "Photos: NASA (public domain)";
+        const float cw = ctx.fonts.regular.measure(credit, 12) + 16.0f;
+        const Rect cr{img_rect.x + img_rect.w - cw - 8.0f, img_rect.y + img_rect.h - 30.0f, cw, 22.0f};
+        list.rounded_rect(cr, 11.0f, Color::rgb(0x000000, 0.55f));
+        ui::text(list, ctx.fonts.regular, credit, cr.cx(), cr.y + 16.0f, 12, kWhite.with_alpha(0.8f), Align::center);
+    }
 }
 
 /* ---- 1. AI NETWORK: four rising bars for DETAIL and thinner GPU COST. ---- */

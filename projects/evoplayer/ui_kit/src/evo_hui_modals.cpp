@@ -124,9 +124,9 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
     list.push_transform(1.0f, 0, 0, dx, 0);
     list.push_opacity(o);
     const Rect sheet{kSheetX, 48, kSheetW, 1080 - 96};
-    list.shadow({sheet.x - 10, sheet.y + 20, sheet.w, sheet.h}, 36, 60, kBlack.with_alpha(0.6f));
-    list.rounded_rect(sheet, 36, p.bg_top.with_alpha(0.96f));
-    list.bordered_rect(sheet, 36, kClear, 1.5f, kWhite.with_alpha(0.12f));
+    list.shadow({sheet.x - 10, sheet.y + 20, sheet.w, sheet.h}, page::kRadiusCard, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(sheet, page::kRadiusCard, p.bg_top.with_alpha(0.96f));
+    list.bordered_rect(sheet, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.12f));
 
     ui::text(list, fonts.semibold, ui::upper(eyebrow_.empty() ? "Subtitles" : eyebrow_), sheet.x + 36,
              sheet.y + 70, 16, p.accent, Align::left, 3.0f);
@@ -147,7 +147,7 @@ void SubtitlePicker::draw(DrawList &list, const Context &ctx) const
     pill("SYNC", sync_);
     pill("SYNC 2", sync2_);
 
-    list.rounded_rect(ring_.value(), 20, kWhite);
+    list.rounded_rect(ring_.value(), page::kRadiusTile, kWhite);
     for (std::size_t i = 0; i < tracks_.size(); ++i)
     {
         const Track &t = tracks_[i];
@@ -288,21 +288,31 @@ void MediaInfoCard::draw(DrawList &list, const Context &ctx) const
     list.rounded_rect({0, 0, 1920, 1080}, 0, kBlack.with_alpha(0.62f * o));
     list.push_transform(0.96f + 0.04f * o, 960, 540, 0, 0);
     list.push_opacity(o);
-    const Rect card{160, 110, 1600, 820};
-    list.shadow({card.x, card.y + 30, card.w, card.h}, 40, 60, kBlack.with_alpha(0.6f));
-    list.rounded_rect(card, 40, p.bg_top.with_alpha(0.96f));
-    list.bordered_rect(card, 40, kClear, 1.5f, kWhite.with_alpha(0.12f));
+    /* The card is as tall as its longest column, so no column sits half empty. */
+    std::size_t rows = 1;
+    for (const auto &s : sections_)
+        rows = std::max(rows, s.second.size());
+    float pitch = 72.0f;
+    const float max_h = 900.0f;
+    if (280.0f + 92.0f + static_cast<float>(rows) * pitch + 48.0f > max_h)
+        pitch = std::max(56.0f, (max_h - 280.0f - 92.0f - 48.0f) / static_cast<float>(rows));
+    const float col_h = 92.0f + static_cast<float>(rows) * pitch;
+    const float card_h = 280.0f + col_h + 48.0f;
+    const Rect card{160, std::max(60.0f, (1080.0f - card_h) * 0.5f - 20.0f), 1600, card_h};
+    list.shadow({card.x, card.y + 30, card.w, card.h}, page::kRadiusCard, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(card, page::kRadiusCard, p.bg_top.with_alpha(0.96f));
+    list.bordered_rect(card, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.12f));
 
-    ui::text(list, fonts.semibold, "MEDIA INFO", card.x + 56, card.y + 76, 16, p.accent, Align::left, 3.0f);
-    ui::text(list, fonts.display, fit(fonts.display, title_, 44, card.w - 112), card.x + 54, card.y + 132, 44, kWhite);
-    ui::text(list, fonts.regular, fit(fonts.regular, path_, 20, card.w - 112), card.x + 56, card.y + 170, 20,
-             p.text_faint);
+    ui::text(list, fonts.display, fit(fonts.display, title_, 44, card.w - 112), card.x + 54, card.y + 96, 44, kWhite);
+    ui::text(list, fonts.semibold, "MEDIA INFO", card.x + 56, card.y + 134, 18, p.text_muted, Align::left, 3.0f);
+    ui::text(list, fonts.regular, fit(fonts.regular, path_, 20, card.w - 112), card.x + 56, card.y + 172, 20,
+             p.text_muted);
     float bx = card.x + 56;
     for (const std::string &b : badges_)
     {
-        const float w = fonts.semibold.measure(b, 16, 1.5f) + 26;
-        list.bordered_rect({bx, card.y + 196, w, 34}, 9, kClear, 1.5f, kWhite.with_alpha(0.45f));
-        ui::text(list, fonts.semibold, b, bx + w * 0.5f, card.y + 219, 16, kWhite, Align::center, 1.5f);
+        const float w = fonts.semibold.measure(b, 18, 1.5f) + 28;
+        list.bordered_rect({bx, card.y + 196, w, 38}, 10, kClear, 1.5f, kWhite.with_alpha(0.45f));
+        ui::text(list, fonts.semibold, b, bx + w * 0.5f, card.y + 222, 18, kWhite, Align::center, 1.5f);
         bx += w + 10;
     }
 
@@ -312,19 +322,19 @@ void MediaInfoCard::draw(DrawList &list, const Context &ctx) const
     {
         const float x = card.x + 56 + static_cast<float>(c) * (colw + 32);
         const float top = card.y + 280;
-        list.rounded_rect({x, top, colw, card.h - 320}, 24, kWhite.with_alpha(0.04f));
-        ui::text(list, fonts.semibold, sections_[c].first, x + 24, top + 44, 15, p.accent, Align::left, 3.0f);
-        float y = top + 88;
+        list.rounded_rect({x, top, colw, col_h}, page::kRadiusTile, kWhite.with_alpha(0.04f));
+        ui::text(list, fonts.semibold, sections_[c].first, x + 24, top + 46, 16, p.accent, Align::left, 3.0f);
+        float y = top + 92;
         for (const auto &row : sections_[c].second)
         {
-            ui::text(list, fonts.regular, row.first, x + 24, y, 16, p.text_faint);
-            ui::text(list, fonts.semibold, fit(fonts.semibold, row.second.empty() ? "-" : row.second, 21, colw - 48),
-                     x + 24, y + 27, 21, kWhite);
-            y += 66;
+            ui::text(list, fonts.regular, row.first, x + 24, y, 18, p.text_muted);
+            ui::text(list, fonts.semibold, fit(fonts.semibold, row.second.empty() ? "-" : row.second, 22, colw - 48),
+                     x + 24, y + 30, 22, kWhite);
+            y += pitch;
         }
     }
-    const ui::Hint hints[] = {{ui::Button::circle, "Close"}};
-    hint_row(list, fonts, hints, 1, card.x + card.w - 56);
+    const ui::Hint hints[] = {{ui::Button::circle, "Back"}};
+    draw_page_hints(list, fonts, hints, 1);
     list.pop_opacity();
     list.pop_transform();
 }

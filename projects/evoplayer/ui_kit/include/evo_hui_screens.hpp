@@ -18,6 +18,7 @@
 #include "core/tween.hpp"
 #include "gfx/draw_list.hpp"
 #include "ui/fonts.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/motion.hpp"
 #include "ui/theme.hpp"
 
@@ -139,6 +140,35 @@ class NavRail
  * picture washed in behind them. */
 void draw_backdrop(hui::gfx::DrawList &list, const Context &ctx, std::uint32_t picture = 0,
                    float picture_alpha = 0.0f);
+
+/* What every full-screen page shares, so they all read the same: the title,
+ * the line under it, the count at the top right, the hint row and the corner
+ * radii. tools/ui_consistency.py checks the rendered screens against these. */
+namespace page
+{
+constexpr float kLeft = NavRail::kWidth + 64.0f; /* content's left edge */
+constexpr float kRight = 1824.0f;                /* content's right edge */
+constexpr float kTitleY = 140.0f;                /* title baseline */
+constexpr float kTitleSize = 52.0f;
+constexpr float kSubtitleY = 182.0f; /* the line under the title */
+constexpr float kHintsY = 1046.0f;   /* centre line of the hint row */
+/* Corner radii: chips and badges, tiles / posters / rows, cards / panels / sheets. */
+constexpr float kRadiusChip = 16.0f;
+constexpr float kRadiusTile = 20.0f;
+constexpr float kRadiusCard = 32.0f;
+} // namespace page
+
+/* The page title (as given: Title Case) and the line under it (drawn in spaced
+ * capitals). Returns the title's width. */
+float draw_page_title(hui::gfx::DrawList &list, const Context &ctx, const std::string &title,
+                      const std::string &subtitle, float x = page::kLeft, float dy = 0.0f,
+                      float max_w = 1100.0f);
+/* "3 OF 23" / "23 ITEMS" at the top right. */
+void draw_page_counter(hui::gfx::DrawList &list, const Context &ctx, const std::string &text, float dy = 0.0f);
+/* The hint row at the foot of a page or full-screen overlay. Cross comes
+ * first and Circle (Back) last, whatever order the caller lists them in. */
+void draw_page_hints(hui::gfx::DrawList &list, const hui::ui::Fonts &fonts, const hui::ui::Hint *hints, int n,
+                     float right = page::kRight);
 
 /* Home (launch.rml). */
 class HomeScreen

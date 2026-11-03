@@ -7,7 +7,7 @@ static void fill_settings_fixture(evo_rmlui_settings_params_t &p, int which)
         p.sidebar_focused = 1;
         p.section_active = 0;
         p.title = "Video & Display";
-        p.subtitle = "PREFERENCES";
+        p.subtitle = "DECODER, UPSCALING, 120 HZ & HDR";
         p.counter = "6 ITEMS";
         p.row_count = 6;
         
@@ -47,7 +47,7 @@ static void fill_settings_fixture(evo_rmlui_settings_params_t &p, int which)
     } else if (which >= 2) {
         /* #158 preview mock: which 2 = Deep Blacks, 3 = Upscaling */
         p.sidebar_focused = 0; p.section_active = 0;
-        p.title = "Video & Display"; p.subtitle = "PREFERENCES"; p.counter = "8 ITEMS"; p.row_count = 8;
+        p.title = "Video & Display"; p.subtitle = "DECODER, UPSCALING, 120 HZ & HDR"; p.counter = "8 ITEMS"; p.row_count = 8;
         p.rows[0].kind = EVO_RMLUI_ROW_TOGGLE; p.rows[0].title = "HDR Output"; p.rows[0].detail = "High dynamic range colors"; p.rows[0].toggle_on = 1;
         p.rows[1].kind = EVO_RMLUI_ROW_VALUE; p.rows[1].has_chevron = 1;
         if (which == 2) {
@@ -78,7 +78,7 @@ static void fill_settings_fixture(evo_rmlui_settings_params_t &p, int which)
         p.sidebar_focused = 0;
         p.section_active = 0;
         p.title = "Video & Display";
-        p.subtitle = "PREFERENCES";
+        p.subtitle = "DECODER, UPSCALING, 120 HZ & HDR";
         p.counter = "8 ITEMS";
         p.row_count = 8;
         

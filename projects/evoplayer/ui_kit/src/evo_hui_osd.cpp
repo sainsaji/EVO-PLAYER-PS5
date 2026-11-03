@@ -421,7 +421,7 @@ void OsdScreen::draw_centre(DrawList &list, const Context &ctx) const
                 list.image(tex, frame, ::hui::gfx::kFullUv, kWhite);
             }
         }
-        list.rounded_rect(cap, 28, kBlack.with_alpha(0.6f));
+        list.rounded_rect(cap, page::kRadiusCard, kBlack.with_alpha(0.6f));
         ui::text(list, fonts.semibold, "SEEK TO", 960, cap.y + 38, 16, p.accent, Align::center, 3.0f);
         ui::text(list, fonts.mono, clock_text(raw_.scrub_target), 960, cap.y + 86, 40, kWhite, Align::center);
         if (!scrub_chapter_title_.empty())
@@ -490,11 +490,11 @@ void OsdScreen::draw_music(DrawList &list, const Context &ctx) const
     const Palette &p = ctx.palette;
     draw_backdrop(list, ctx);
     const Rect card{960 - 520, 300, 1040, 380};
-    list.shadow({card.x, card.y + 30, card.w, card.h}, 40, 60, kBlack.with_alpha(0.6f));
-    list.rounded_rect(card, 40, kWhite.with_alpha(0.06f));
-    list.bordered_rect(card, 40, kClear, 1.5f, kWhite.with_alpha(0.12f));
+    list.shadow({card.x, card.y + 30, card.w, card.h}, page::kRadiusCard, 60, kBlack.with_alpha(0.6f));
+    list.rounded_rect(card, page::kRadiusCard, kWhite.with_alpha(0.06f));
+    list.bordered_rect(card, page::kRadiusCard, kClear, 1.5f, kWhite.with_alpha(0.12f));
     const Rect art{card.x + 50, card.y + 50, 280, 280};
-    list.gradient_rect(art, 28, p.accent, p.accent_alt);
+    list.gradient_rect(art, page::kRadiusTile, p.accent, p.accent_alt);
     const std::uint32_t icon = ctx.textures.icon("../icons/icon_volume.png");
     if (icon)
         list.image(icon, art.inset(90), ::hui::gfx::kFullUv, kWhite);
@@ -519,8 +519,8 @@ void OsdScreen::draw_stats(DrawList &list, const Context &ctx) const
 {
     const ui::Fonts &fonts = ctx.fonts;
     const Rect panel{kMargin, 200, 760, 560};
-    list.rounded_rect(panel, 24, kBlack.with_alpha(0.72f));
-    list.bordered_rect(panel, 24, kClear, 1.0f, kWhite.with_alpha(0.12f));
+    list.rounded_rect(panel, page::kRadiusCard, kBlack.with_alpha(0.72f));
+    list.bordered_rect(panel, page::kRadiusCard, kClear, 1.0f, kWhite.with_alpha(0.12f));
     ui::text(list, fonts.semibold, "PLAYBACK DIAGNOSTICS", panel.x + 28, panel.y + 44, 16, ctx.palette.accent,
              Align::left, 3.0f);
     float y = panel.y + 84;

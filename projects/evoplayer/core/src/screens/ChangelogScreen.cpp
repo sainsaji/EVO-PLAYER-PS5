@@ -84,7 +84,7 @@ void ChangelogScreen::render(uint32_t* framebuffer, int width, int height) {
     evo_rmlui_changelog_params_t p;
     std::memset(&p, 0, sizeof(p));
 
-    p.title = "CHANGELOG";
+    p.title = "Changelog";
     p.subtitle = "WHAT CHANGED IN EACH RELEASE";
     p.rail_focused = 0;
     p.release_total = EVO_CHANGELOG_RELEASE_COUNT;

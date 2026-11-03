@@ -135,7 +135,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
 {
     if (kind == "ai_network")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN", "../icons/icon_sparkles.png", "AI", 0, 0, "", {"OFF", "SHARP", "AI"}, 2, -1, false},
             {EVO_RMLUI_ROW_VALUE, "AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO", "../icons/icon_brain.png", "", 0, EVO_RMLUI_PREVIEW_AI_NETWORK, "A bigger network gives a sharper picture but is heavier. Maximum is for PS5 Pro.", {"AUTO", "STANDARD", "LARGE", "MAXIMUM (PRO)"}, 2, 2, false},
             {EVO_RMLUI_ROW_VALUE, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH", "../icons/icon_gauge.png", "OFF", 0, 0, "", {"OFF", "AUTO (ALWAYS 120 HZ)", "PLAYBACK ONLY"}, 0, -1, false}
@@ -143,7 +143,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "hdr")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH", "../icons/icon_gauge.png", "OFF", 0, 0, "", {"OFF", "AUTO (ALWAYS 120 HZ)", "PLAYBACK ONLY"}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "HDR OUTPUT", "HDR10 FOR HDR VIDEO - THE TV GOES BLACK BRIEFLY AT START & END", "../icons/icon_sun.png", "", 0, EVO_RMLUI_PREVIEW_HDR, "Highlights like the sun and lamps get brighter without clipping. Needs an HDR10 TV.", {"OFF (TONE-MAP TO SDR)", "AUTO (MATCH CONTENT)"}, 1, 1, false},
             {EVO_RMLUI_ROW_TOGGLE, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "../icons/icon_resume.png", "", 1, 0, "", {}, 0, -1, false}
@@ -151,7 +151,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "motion")
     {
-        build_preview_section(p, 5, "EXPERIMENTAL", "UNFINISHED WORK - EXPECT ARTEFACTS", {
+        build_preview_section(p, 5, "Experimental", "UNFINISHED WORK - EXPECT ARTEFACTS", {
             {EVO_RMLUI_ROW_TOGGLE, "MATCH VIDEO FRAME RATE", "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ", "../icons/icon_gauge.png", "", 0, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "MOTION SMOOTHING", "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION", "../icons/icon_activity.png", "", 0, EVO_RMLUI_PREVIEW_MOTION, "Pans and sports look fluid. Films can look too smooth, and fast motion can show haloes.", {"OFF", "LOW", "HIGH"}, 2, 2, false},
             {EVO_RMLUI_ROW_VALUE, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK", "../icons/icon_sparkles.png", "OFF", 0, 0, "", {"OFF", "LOW", "HIGH"}, 0, -1, false}
@@ -159,7 +159,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "refresh")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO", "../icons/icon_brain.png", "LARGE", 0, 0, "", {"AUTO", "STANDARD", "LARGE", "MAXIMUM (PRO)"}, 2, -1, false},
             {EVO_RMLUI_ROW_VALUE, "120 HZ OUTPUT", "SMOOTHER 24 FPS - THE TV GOES BLACK BRIEFLY ON EACH SWITCH", "../icons/icon_gauge.png", "", 0, EVO_RMLUI_PREVIEW_REFRESH, "24 fps film plays more evenly on a 120 Hz output. The TV goes black briefly on each switch.", {"OFF", "AUTO (ALWAYS 120 HZ)", "PLAYBACK ONLY"}, 1, 1, false},
             {EVO_RMLUI_ROW_VALUE, "HDR OUTPUT", "HDR10 FOR HDR VIDEO - THE TV GOES BLACK BRIEFLY AT START & END", "../icons/icon_sun.png", "AUTO", 0, 0, "", {"OFF (TONE-MAP TO SDR)", "AUTO (MATCH CONTENT)"}, 1, -1, false}
@@ -167,7 +167,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "match_rate")
     {
-        build_preview_section(p, 5, "EXPERIMENTAL", "UNFINISHED WORK - EXPECT ARTEFACTS", {
+        build_preview_section(p, 5, "Experimental", "UNFINISHED WORK - EXPECT ARTEFACTS", {
             {EVO_RMLUI_ROW_VALUE, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK", "../icons/icon_sparkles.png", "OFF", 0, 0, "", {"OFF", "LOW", "HIGH"}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "MATCH VIDEO FRAME RATE", "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ", "../icons/icon_gauge.png", "", 1, EVO_RMLUI_PREVIEW_MATCH_RATE, "Outputs the video's own rate (24p or 50 Hz) so motion has no judder.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "MOTION SMOOTHING", "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION", "../icons/icon_activity.png", "OFF", 0, 0, "", {"OFF", "LOW", "HIGH"}, 0, -1, false}
@@ -175,7 +175,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "aspect")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "../icons/icon_cpu.png", "AUTO", 0, 0, "", {"AUTO", "HARDWARE", "SOFTWARE"}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN", "../icons/icon_aspect.png", "", 0, EVO_RMLUI_PREVIEW_ASPECT, "Sets how video fills the screen: fit keeps its shape, fill crops the edges, stretch fills the screen and distorts.", {"FIT", "FILL", "STRETCH"}, 0, 0, false},
             {EVO_RMLUI_ROW_TOGGLE, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "../icons/icon_resume.png", "", 1, 0, "", {}, 0, -1, false}
@@ -183,7 +183,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "sub_auto")
     {
-        build_preview_section(p, 2, "SUBTITLES", "PREFERENCES & APPEARANCE", {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
             {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, EVO_RMLUI_PREVIEW_SUB_AUTO, "Loads subtitles on its own when a file has them.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "ROUNDED", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 1, -1, false},
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES", "../icons/icon_subtitles.png", "STACKED ABOVE", 0, 0, "", {"STACKED ABOVE", "TOP OF SCREEN"}, 0, -1, false}
@@ -191,7 +191,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "sub_font")
     {
-        build_preview_section(p, 2, "SUBTITLES", "PREFERENCES & APPEARANCE", {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
             {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "", 0, EVO_RMLUI_PREVIEW_SUB_FONT, "Picks the typeface for on-screen subtitles.", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 1, 1, false},
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES", "../icons/icon_subtitles.png", "STACKED ABOVE", 0, 0, "", {"STACKED ABOVE", "TOP OF SCREEN"}, 0, -1, false}
@@ -199,7 +199,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "sub_pos")
     {
-        build_preview_section(p, 2, "SUBTITLES", "PREFERENCES & APPEARANCE", {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
             {EVO_RMLUI_ROW_VALUE, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE", "../icons/icon_type.png", "ROUNDED", 0, 0, "", {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"}, 1, -1, false},
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES", "../icons/icon_subtitles.png", "", 0, EVO_RMLUI_PREVIEW_SUB_POS, "Where the second line of dialogue goes when two tracks are shown.", {"STACKED ABOVE", "TOP OF SCREEN"}, 1, 1, false},
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART", "../icons/icon_palette.png", "CYAN", 0, 0, "", {"YELLOW", "CYAN", "WHITE"}, 1, -1, false}
@@ -207,7 +207,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "sub_colour")
     {
-        build_preview_section(p, 2, "SUBTITLES", "PREFERENCES & APPEARANCE", {
+        build_preview_section(p, 2, "Subtitles", "PREFERENCES & APPEARANCE", {
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE POSITION", "WHERE THE SECOND LINE OF DIALOGUE GOES", "../icons/icon_subtitles.png", "STACKED ABOVE", 0, 0, "", {"STACKED ABOVE", "TOP OF SCREEN"}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "SECONDARY SUBTITLE COLOUR", "KEEPS THE TWO LINES APART", "../icons/icon_palette.png", "", 0, EVO_RMLUI_PREVIEW_SUB_COLOUR, "A different colour keeps the two lines apart.", {"YELLOW", "CYAN", "WHITE"}, 1, 1, false},
             {EVO_RMLUI_ROW_TOGGLE, "AUTO SUBTITLES", "AUTOMATICALLY LOAD SUBTITLES ON PLAYBACK", "../icons/icon_subtitles.png", "", 1, 0, "", {}, 0, -1, false}
@@ -215,7 +215,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "theme")
     {
-        build_preview_section(p, 3, "INTERFACE & STORAGE", "THEMES, CONTROLS & BROWSING", {
+        build_preview_section(p, 3, "Interface & Storage", "THEMES, CONTROLS & BROWSING", {
             {EVO_RMLUI_ROW_TOGGLE, "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT", "../icons/icon_gamepad.png", "", 1, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "THEME", "COLOR PALETTE & ACCENTS", "../icons/icon_palette.png", "", 0, EVO_RMLUI_PREVIEW_THEME, "Changes the colours of the whole app.", {"MIDNIGHT", "CARBON", "EMBER", "AURORA"}, 0, 0, true},
             {EVO_RMLUI_ROW_TOGGLE, "FOLDERS FIRST", "USB FILE BROWSER SORTING", "../icons/icon_folder.png", "", 1, 0, "", {}, 0, -1, false}
@@ -223,7 +223,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "lightbar")
     {
-        build_preview_section(p, 3, "INTERFACE & STORAGE", "THEMES, CONTROLS & BROWSING", {
+        build_preview_section(p, 3, "Interface & Storage", "THEMES, CONTROLS & BROWSING", {
             {EVO_RMLUI_ROW_VALUE, "THEME", "COLOR PALETTE & ACCENTS", "../icons/icon_palette.png", "MIDNIGHT", 0, 0, "", {"MIDNIGHT", "CARBON", "EMBER", "AURORA"}, 0, -1, true},
             {EVO_RMLUI_ROW_TOGGLE, "CONTROLLER LIGHTBAR", "DUALSENSE LIGHT FOLLOWS THE THEME ACCENT", "../icons/icon_gamepad.png", "", 1, EVO_RMLUI_PREVIEW_LIGHTBAR, "The DualSense light follows the theme accent.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "FOLDERS FIRST", "USB FILE BROWSER SORTING", "../icons/icon_folder.png", "", 1, 0, "", {}, 0, -1, false}
@@ -231,7 +231,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "channels")
     {
-        build_preview_section(p, 1, "AUDIO", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
             {EVO_RMLUI_ROW_TOGGLE, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI", "../icons/icon_volume.png", "", 0, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_volume.png", "", 0, EVO_RMLUI_PREVIEW_CHANNELS, "Stereo mixes 5.1 and 7.1 down to two speakers or headphones.", {"AUTO", "STEREO (2.0)"}, 0, 0, false},
             {EVO_RMLUI_ROW_ACTION, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "../icons/icon_speaker.png", "OPEN", 0, 0, "", {}, 0, -1, false}
@@ -239,7 +239,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "passthrough")
     {
-        build_preview_section(p, 1, "AUDIO", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
             {EVO_RMLUI_ROW_VALUE, "OUTPUT CHANNELS", "STEREO DOWNMIXES 5.1 & 7.1 TO 2.0", "../icons/icon_volume.png", "AUTO", 0, 0, "", {"AUTO", "STEREO (2.0)"}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI", "../icons/icon_volume.png", "", 1, EVO_RMLUI_PREVIEW_PASSTHROUGH, "Sends Dolby and DTS untouched to your receiver over HDMI.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_ACTION, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "../icons/icon_speaker.png", "OPEN", 0, 0, "", {}, 0, -1, false}
@@ -247,7 +247,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "surround")
     {
-        build_preview_section(p, 1, "AUDIO", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
+        build_preview_section(p, 1, "Audio", "OUTPUT CHANNELS, SPEAKERS & SOUNDS", {
             {EVO_RMLUI_ROW_TOGGLE, "AUDIO PASSTHROUGH", "BITSTREAM DOLBY & DTS TO RECEIVER OVER HDMI", "../icons/icon_volume.png", "", 1, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_ACTION, "SURROUND SOUND TEST", "5.1 & 7.1 SPEAKER CHANNEL VERIFICATION", "../icons/icon_speaker.png", "OPEN", 0, EVO_RMLUI_PREVIEW_SURROUND, "Plays a tone through each speaker so you can check your layout.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "NAVIGATION SOUNDS", "AUDIO FEEDBACK ON D-PAD & BUTTONS", "../icons/icon_listener.png", "", 1, 0, "", {}, 0, -1, false}
@@ -255,7 +255,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "deep_blacks")
     {
-        build_preview_section(p, 5, "EXPERIMENTAL", "UNFINISHED WORK - EXPECT ARTEFACTS", {
+        build_preview_section(p, 5, "Experimental", "UNFINISHED WORK - EXPECT ARTEFACTS", {
             {EVO_RMLUI_ROW_VALUE, "MOTION SMOOTHING", "24 -> 60 FPS ON THE GPU - SOFT EDGES AND HALOES AROUND FAST MOTION", "../icons/icon_activity.png", "OFF", 0, 0, "", {"OFF", "LOW", "HIGH"}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "DEEP BLACKS", "PULLS ELEVATED SHADOWS TO TRUE OLED BLACK", "../icons/icon_sparkles.png", "", 0, EVO_RMLUI_PREVIEW_DEEP_BLACKS, "Dark scenes look deeper instead of washed out. Best on OLED and HDR screens.", {"OFF", "LOW", "HIGH"}, 2, 2, false},
             {EVO_RMLUI_ROW_TOGGLE, "MATCH VIDEO FRAME RATE", "24P / 50 HZ OUTPUT DURING PLAYBACK - FALLS BACK TO 120 HZ OR 60 HZ", "../icons/icon_gauge.png", "", 0, 0, "", {}, 0, -1, false}
@@ -263,7 +263,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "upscaling")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "../icons/icon_cpu.png", "AUTO", 0, 0, "", {"AUTO", "HARDWARE", "SOFTWARE"}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "UPSCALING", "SHARPEN VIDEO SMALLER THAN THE SCREEN", "../icons/icon_sparkles.png", "", 0, EVO_RMLUI_PREVIEW_UPSCALING, "Soft video below your screen's resolution looks crisper. Higher modes cost more GPU.", {"OFF", "SHARP", "AI"}, 2, 2, false},
             {EVO_RMLUI_ROW_VALUE, "AI NETWORK", "BIGGER IS SHARPER BUT HEAVIER - MAXIMUM IS FOR PS5 PRO", "../icons/icon_brain.png", "LARGE", 0, 0, "", {"AUTO", "STANDARD", "LARGE", "MAXIMUM (PRO)"}, 2, -1, false}
@@ -271,7 +271,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "info_resume")
     {
-        build_preview_section(p, 0, "VIDEO & DISPLAY", "DECODER, UPSCALING, 120 HZ & HDR", {
+        build_preview_section(p, 0, "Video & Display", "DECODER, UPSCALING, 120 HZ & HDR", {
             {EVO_RMLUI_ROW_VALUE, "VIDEO DECODER", "WHICH BACKEND DECODES VIDEO", "../icons/icon_cpu.png", "AUTO", 0, 0, "", {"AUTO", "HARDWARE", "SOFTWARE"}, 0, -1, false},
             {EVO_RMLUI_ROW_TOGGLE, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION", "../icons/icon_resume.png", "", 1, EVO_RMLUI_PREVIEW_INFO, "Picks a film up where you stopped instead of from the start.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_VALUE, "DEFAULT ASPECT RATIO", "HOW VIDEO FILLS THE SCREEN", "../icons/icon_aspect.png", "FIT", 0, 0, "", {"FIT", "FILL", "STRETCH"}, 0, -1, false}
@@ -279,7 +279,7 @@ static void fill_settings_pv_fixture(evo_rmlui_settings_params_t &p, const std::
     }
     else if (kind == "info_quit")
     {
-        build_preview_section(p, 4, "SYSTEM & DIAGNOSTICS", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
+        build_preview_section(p, 4, "System & Diagnostics", "DIAGNOSTICS & SYSTEM MANAGEMENT", {
             {EVO_RMLUI_ROW_ACTION, "DEVELOPER TOOLS", "SYSTEM DIAGNOSTICS & PERFORMANCE STATS", "../icons/icon_developer_tools.png", "OPEN", 0, 0, "", {}, 0, -1, false},
             {EVO_RMLUI_ROW_ACTION, "QUIT EVO", "RELEASE EVERYTHING, THEN CLOSE FROM THE SWITCHER", "../icons/icon_power.png", "QUIT", 0, EVO_RMLUI_PREVIEW_INFO, "Releases everything, then close EVO from the switcher.", {}, 0, -1, false},
             {EVO_RMLUI_ROW_ACTION, "CONSOLE", "DETECTED HARDWARE MODEL", "../icons/icon_tv.png", "PS5", 0, 0, "", {}, 0, -1, false}
