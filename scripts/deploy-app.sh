@@ -116,16 +116,30 @@ def verdict(host, port):
     f.connect(host, port, timeout=10)
     f.login()
     try:
-        lines = []
-        f.cwd("/mnt/usb0")
-        f.retrlines("LIST", lines.append)
-        if not any(" evo.log" in l or l.endswith("evo.log") for l in lines):
+        # EVO writes its log and heartbeat to the USB stick, or to
+        # /data/evoplayer when there is none. Looking only at /mnt/usb0 read
+        # "never ran" on a console without a stick and let a deploy go over a
+        # running EVO (2026-11-03).
+        root = None
+        for d in ("/mnt/usb0", "/data/evoplayer"):
+            lines = []
+            try:
+                f.cwd(d)
+                f.retrlines("LIST", lines.append)
+            except Exception:
+                continue
+            if any(" evo_status" in l or l.endswith("evo_status") for l in lines):
+                root = d
+                break
+            if root is None and any(" evo.log" in l or l.endswith("evo.log") for l in lines):
+                root = d
+        if root is None:
             return "ABSENT"
 
         def stamp():
             buf = []
             try:
-                f.retrbinary("RETR /mnt/usb0/evo_status", buf.append)
+                f.retrbinary("RETR " + root + "/evo_status", buf.append)
             except Exception:
                 return None
             for tok in b"".join(buf).decode("utf-8", "replace").split():
@@ -154,7 +168,17 @@ except Exception:
 PY
 )"
     case "${out}" in
-        ABSENT)  ok "EVO has not run since the last deploy - slot is free" ;;
+        ABSENT)
+            # No log anywhere is not proof by itself: ShadowMount has the last word.
+            local sm0
+            sm0="$(PS5_HOST="${PS5_HOST}" FTP_PORT="${FTP_PORT}" TITLE_ID="${TITLE_ID}" \
+                   python3 "${REPO_ROOT}/tools/evo_lifecycle.py" slot 2>/dev/null || true)"
+            if [[ "${sm0}" == RESIDENT ]] && (( ! FORCE )); then
+                die "ShadowMount shows ${TITLE_ID} started and NOT released - it is resident.
+
+   Free it first: tools/evo-remote.sh quit, then close."
+            fi
+            ok "EVO has not run since the last deploy - slot is free" ;;
         RUNNING)
             die "EVO is RUNNING on ${PS5_HOST} right now - its status heartbeat is advancing.
 
