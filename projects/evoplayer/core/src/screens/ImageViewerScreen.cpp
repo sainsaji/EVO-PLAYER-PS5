@@ -5,6 +5,7 @@
 #include "evo_toast.h"
 #include "evo_boot_log.h"
 #include "evo_smb_io.h"
+#include "evo_ntfs.h"
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -63,7 +64,17 @@ void ImageViewerScreen::openImage(const std::string& path) {
      * rather than held at full size.
      */
     int w = 0, h = 0, ch = 0;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, 0);
+    unsigned char* data = nullptr;
+    if (evo_ntfs_is_url(path.c_str())) {
+        /* #217: an image on an NTFS drive - no fopen(); read it through evo_ntfs. */
+        unsigned char* file = nullptr;
+        size_t flen = 0;
+        if (evo_ntfs_read_file(path.c_str(), &file, &flen, 64u * 1024u * 1024u) == 0 && flen <= 0x7FFFFFFF)
+            data = stbi_load_from_memory(file, static_cast<int>(flen), &w, &h, &ch, 0);
+        std::free(file);
+    } else {
+        data = stbi_load(path.c_str(), &w, &h, &ch, 0);
+    }
     if (!data || w <= 0 || h <= 0 || ch < 3) {
         const char* why = stbi_failure_reason();
         evo_boot_log("ImageViewer: %s failed (%dx%d ch=%d): %s",

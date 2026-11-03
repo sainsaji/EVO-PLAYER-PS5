@@ -10,6 +10,7 @@
 #include "evo_keyboard.h"
 #include "evo_favorites.h"
 #include "evo_recent.h"
+#include "evo_ntfs.h"
 #include "evo_feedback.h"
 #include "evo_toast.h"
 #include "evo_smb_io.h"
@@ -583,6 +584,13 @@ void BrowserScreen::openActionMenu() {
 
     auto browser = Application::getInstance().getFileSystemBrowser();
     std::string currentPath = browser ? browser->getCurrentPath() : "";
+
+    /* #217: EVO reads NTFS drives, it never writes them. */
+    if (evo_ntfs_is_url(currentPath.c_str())) {
+        toast("NTFS DRIVE", "Read-only: play and browse only");
+        evo_feedback(EVO_FB_BOUNDARY);
+        return;
+    }
 
     if (m_focusPane == BrowserFocusPane::Grid && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size())) {
         const auto& item = m_items[m_selectedIndex];
@@ -2729,6 +2737,26 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
             if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
             std::snprintf(m_statusSize, sizeof(m_statusSize), "%.2f %s", sz, unit);
             params.status_size = m_statusSize;
+        } else if (evo_ntfs_is_url(curItem.fullPath.c_str()) && curItem.category != FileCategory::Folder) {
+            /* #217: an NTFS drive has no stat(); its size comes from the file's
+             * record, looked up once per selection, not once per frame. */
+            static std::string s_sizePath;
+            static uint64_t s_size = 0;
+            static bool s_sizeOk = false;
+            if (s_sizePath != curItem.fullPath) {
+                s_sizePath = curItem.fullPath;
+                int isDir = 0;
+                s_sizeOk = evo_ntfs_stat(curItem.fullPath.c_str(), &isDir, &s_size) == 0 && !isDir;
+            }
+            if (s_sizeOk) {
+                double sz = static_cast<double>(s_size);
+                const char* unit = "B";
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "KB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "MB"; }
+                if (sz >= 1024.0) { sz /= 1024.0; unit = "GB"; }
+                std::snprintf(m_statusSize, sizeof(m_statusSize), "%.2f %s", sz, unit);
+                params.status_size = m_statusSize;
+            }
         }
 
         if (coverService && curItem.fullPath.find("://") == std::string::npos) {

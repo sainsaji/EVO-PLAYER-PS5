@@ -47,6 +47,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | [videodec2-abi.md](hardware/videodec2-abi.md) | The verified ABI and call sequence |
 | [codec-support.md](hardware/codec-support.md) | What plays, on which decoder, and what was verified |
 | [audio.md](hardware/audio.md) | The audio path, gain and delay, and bitstream passthrough |
+| [ntfs.md](hardware/ntfs.md) | NTFS USB drives: EVO's own read-only reader on `/dev/daN`, `ntfs://` paths, test images |
 | [agc-runtime.md](hardware/agc-runtime.md) | The `sceAgc` runtime: what runs on the GPU, bugs fixed, how to verify a build |
 | [shader-compilation.md](hardware/shader-compilation.md) | `.pipe` to amdllpc to AGC registers, the `gfx1013` patch |
 | [agc-reference.md](hardware/agc-reference.md) | Where the `libSceAgc` ABI and frame loop came from |

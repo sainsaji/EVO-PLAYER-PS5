@@ -7,6 +7,7 @@
  * linkage on the handful of symbols main.c still touches (see evo_subtitle.h)
  * and the transitional extern block below.
  */
+#include "evo_ntfs.h"
 #include "evo_subtitle.h"
 
 #include <ctype.h>
@@ -1937,15 +1938,25 @@ static int subtitle_text_open(SubtitleText *t, const char *path) {
     t->text = NULL;
     t->pos = 0;
 
+    size_t cap = 64 * 1024;
+    size_t len = 0;
+    unsigned char *raw = NULL;
+
+    /* #217: a subtitle next to a video on an NTFS drive (ntfs:// path). */
+    if (evo_ntfs_is_url(path)) {
+        if (evo_ntfs_read_file(path, &raw, &len, 8u * 1024u * 1024u) != 0) {
+            return 0;
+        }
+        goto have_raw;
+    }
+
     FILE *file = fopen(path, "rb");
 
     if (!file) {
         return 0;
     }
 
-    size_t cap = 64 * 1024;
-    size_t len = 0;
-    unsigned char *raw = (unsigned char *)malloc(cap);
+    raw = (unsigned char *)malloc(cap);
 
     while (raw) {
         size_t got = fread(raw + len, 1, cap - len, file);
@@ -1974,6 +1985,7 @@ static int subtitle_text_open(SubtitleText *t, const char *path) {
 
     fclose(file);
 
+have_raw:
     if (!raw) {
         return 0;
     }

@@ -40,6 +40,7 @@ Logs, screenshots, the dashboard and the debug switches:
 |---|---|
 | `evo-remote.sh` | The dev remote: lifecycle, keys, `ui`, `go`, `set`, sweeps, comparisons ([remote-control.md](../console/remote-control.md)); `logs` honours `PS5_LOG_PORT` (default 9780) |
 | `evo_ui.py`, `evo_lifecycle.py` | Its helpers: the UI state reader and ShadowMount lifecycle evidence (`foreign`: another game still running, checked before every `launch`) |
+| `make_ntfs_image.sh` (host, Docker) | NTFS test images (whole disk, MBR, GPT; a file in ~2300 pieces) for `tests/test_ntfs.cpp` and the console's `/data/evoplayer/test/ntfs.img` ([../hardware/ntfs.md](../hardware/ntfs.md)) |
 | `make_sample.sh` (host, ffmpeg) + `evo-remote.sh sample-install` / `play --sample` | A 20 s 1080p H.264 + AAC + subtitle test clip in `/data/evoplayer/test/`, which EVO can always read: a playback check with no USB stick or SMB server |
 | `evo-remote.sh play --share <id> <path>` | Play a file on a saved SMB/FTP server through the URL Browse builds (`play --share ps5_local /data/Media/x.mkv`) |
 | `evo-remote.sh logq <text> [n]` | `evo.log` lines containing `<text>` from the log server (`:9780/snapshot`), FTP only when EVO is not answering |

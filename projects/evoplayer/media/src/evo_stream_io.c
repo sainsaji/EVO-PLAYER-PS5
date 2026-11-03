@@ -4,6 +4,7 @@
  * Implements high-throughput 8MB–16MB streaming buffers with sequential disk
  * prefetching (posix_fadvise) and optimized dictionary options for 100+ Mbps 4K media.
  */
+#include "evo_ntfs.h"
 #include "evo_stream_io.h"
 #include "evo_direct_mem.h"
 #include "evo_parallel_io.h"
@@ -60,6 +61,7 @@ struct evo_stream_io_ctx {
     volatile int aborted;      /* evo_stream_io_abort: fail every blocking call */
     evo_pio *pio;              /* parallel read-ahead, NULL when not used */
     evo_smb_io_t *smb;          /* SMB 2/3 stream I/O, NULL when not used */
+    struct sio_ntfs *ntfs;      /* #217: a file on an NTFS drive, NULL when not used */
 };
 
 static double sio_now_seconds(void)
@@ -396,6 +398,70 @@ static void sio_report_open_failure(int rc, const char *path, int is_network)
     }
 }
 
+/* ---- #217: files on NTFS drives (evo_ntfs) as an FFmpeg byte stream ---- */
+#define SIO_NTFS_AVIO_BUFFER (1024 * 1024)   /* big reads: each is one device pass */
+
+struct sio_ntfs {
+    evo_ntfs_file_t *f;
+    uint64_t pos;
+    AVIOContext *avio;
+};
+
+static int sio_ntfs_read(void *opaque, uint8_t *buf, int n)
+{
+    struct sio_ntfs *s = (struct sio_ntfs *)opaque;
+    const long r = evo_ntfs_read(s->f, buf, (size_t)n, s->pos);
+    if (r < 0) return AVERROR(EIO);
+    if (r == 0) return AVERROR_EOF;
+    s->pos += (uint64_t)r;
+    return (int)r;
+}
+
+static int64_t sio_ntfs_seek(void *opaque, int64_t off, int whence)
+{
+    struct sio_ntfs *s = (struct sio_ntfs *)opaque;
+    const int64_t size = (int64_t)evo_ntfs_size(s->f);
+    if (whence == AVSEEK_SIZE) return size;
+    whence &= ~AVSEEK_FORCE;
+    int64_t to = whence == SEEK_SET ? off : whence == SEEK_CUR ? (int64_t)s->pos + off
+               : whence == SEEK_END ? size + off : -1;
+    if (to < 0) return AVERROR(EINVAL);
+    s->pos = (uint64_t)to;
+    return to;
+}
+
+static void sio_ntfs_close(struct sio_ntfs *s)
+{
+    if (!s) return;
+    if (s->avio) {
+        av_freep(&s->avio->buffer);
+        avio_context_free(&s->avio);
+    }
+    evo_ntfs_close(s->f);
+    free(s);
+}
+
+static struct sio_ntfs *sio_ntfs_open(const char *url)
+{
+    evo_ntfs_file_t *f = evo_ntfs_open(url);
+    if (!f) {
+        evo_ntfs_refresh();   /* opened from Recent before the browser ever scanned */
+        f = evo_ntfs_open(url);
+    }
+    if (!f) return NULL;
+    struct sio_ntfs *s = (struct sio_ntfs *)calloc(1, sizeof *s);
+    uint8_t *iobuf = s ? (uint8_t *)av_malloc(SIO_NTFS_AVIO_BUFFER) : NULL;
+    if (s) s->f = f;
+    if (iobuf) s->avio = avio_alloc_context(iobuf, SIO_NTFS_AVIO_BUFFER, 0, s, sio_ntfs_read, NULL, sio_ntfs_seek);
+    if (!s || !s->avio) {
+        if (!s || !s->avio) av_free(iobuf);
+        if (s) sio_ntfs_close(s); else evo_ntfs_close(f);
+        return NULL;
+    }
+    s->avio->seekable = AVIO_SEEKABLE_NORMAL;
+    return s;
+}
+
 int evo_stream_io_open(const char *path,
                        AVFormatContext **out_fmt_ctx,
                        const evo_stream_io_config_t *cfg,
@@ -438,7 +504,7 @@ int evo_stream_io_open(const char *path,
 
     if (ctx->is_network) {
         evo_stream_io_apply_network_options(&opts, path);
-    } else {
+    } else if (!evo_ntfs_is_url(path)) {
         /* Prime the kernel storage controller for sequential read-ahead */
         SIO_BC("P8_01c_PREFETCH", "open+fadvise");
         prefetch_file_sequential(path);
@@ -498,6 +564,20 @@ int evo_stream_io_open(const char *path,
         }
     }
 
+    if (evo_ntfs_is_url(path)) {
+        ctx->ntfs = sio_ntfs_open(path);
+        if (ctx->ntfs) {
+            fmt->pb = ctx->ntfs->avio;
+            fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+        } else {
+            avformat_free_context(fmt);
+            av_dict_free(&opts);
+            evo_direct_mem_free(ctx);
+            sio_report_open_failure(AVERROR(ENOENT), path, 0);
+            return AVERROR(ENOENT);
+        }
+    }
+
     if (ctx->is_network && strncmp(path, "smb://", 6) == 0) {
         ctx->smb = evo_smb_open(path);
         if (ctx->smb) {
@@ -529,6 +609,8 @@ int evo_stream_io_open(const char *path,
             evo_smb_close(ctx->smb);
             ctx->smb = NULL;
         }
+        sio_ntfs_close(ctx->ntfs);
+        ctx->ntfs = NULL;
         const int was_network = ctx->is_network;
         evo_direct_mem_free(ctx);
         sio_report_open_failure(rc, path, was_network);
@@ -550,5 +632,7 @@ void evo_stream_io_close(evo_stream_io_ctx_t *ctx)
         evo_smb_close(ctx->smb);
         ctx->smb = NULL;
     }
+    sio_ntfs_close(ctx->ntfs);
+    ctx->ntfs = NULL;
     evo_direct_mem_free(ctx);
 }

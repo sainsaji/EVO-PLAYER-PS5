@@ -40,6 +40,7 @@ output/ampr_backup/
 # tools/testenv.py backups hold the console's saved server logins
 output/testenv/
 output/sample/
+output/ntfs/
 !output/elf/.gitkeep
 !output/pkg/.gitkeep
 !output/logs/.gitkeep
@@ -405,3 +406,4 @@ output/confbak/
 # Local-only tool, not part of EVO.
 tools/mydebrid/
 tools/gen_big_m3u.py
+projects/evoplayer/src/generated/

@@ -13,6 +13,10 @@
 #include <sys/stat.h>
 #include "evo_boot_trace.h"
 #include "evo_boot_log.h"
+#include "evo_ntfs.h"
+
+#include <stdint.h>
+#include <stdio.h>
 
 #ifdef EVO_APP_MODULE
 
@@ -38,10 +42,57 @@ struct evo_dir {
     int     len;   /* valid bytes in buf */
     int     pos;   /* cursor into buf    */
     long    base;
+    evo_ntfs_dir_t *ntfs;   /* ntfs:// (#217): entries come from evo_ntfs */
+    struct dirent   ntfs_de;
 };
+
+/* ntfs:// (#217): a drive the console does not mount, read by evo_ntfs.
+ * Same handle and dirent as a real folder, so every caller lists it unchanged.
+ * d_type is set (DT_DIR / DT_REG): callers never stat() these paths. */
+static struct evo_dir *ntfs_opendir(const char *path)
+{
+    evo_ntfs_dir_t *nd = evo_ntfs_opendir(path);
+    if (!nd) {
+        evo_ntfs_refresh();            /* a drive plugged in since the last scan */
+        nd = evo_ntfs_opendir(path);
+    }
+    if (!nd) {
+        errno = ENOENT;
+        return NULL;
+    }
+    struct evo_dir *d = calloc(1, sizeof *d);
+    if (!d) {
+        evo_ntfs_closedir(nd);
+        errno = ENOMEM;
+        return NULL;
+    }
+    d->ntfs = nd;
+    return d;
+}
+
+static struct dirent *ntfs_readdir(struct evo_dir *d)
+{
+    const char *name;
+    int is_dir;
+    uint64_t size;
+    if (!evo_ntfs_readdir(d->ntfs, &name, &is_dir, &size))
+        return NULL;
+    struct dirent *de = &d->ntfs_de;
+    memset(de, 0, sizeof *de);
+    snprintf(de->d_name, sizeof de->d_name, "%s", name);
+    de->d_type = is_dir ? DT_DIR : DT_REG;
+    de->d_reclen = (unsigned short)sizeof *de;
+#if defined(EVO_APP_MODULE)
+    de->d_namlen = (unsigned char)strlen(de->d_name);
+#endif
+    return de;
+}
+
 
 evo_dir_t *evo_opendir(const char *path)
 {
+    if (evo_ntfs_is_url(path))
+        return ntfs_opendir(path);
     int fd = open(path, O_RDONLY | O_DIRECTORY);
     if (fd < 0) {
         /* Some filesystems or symlinks fail with O_DIRECTORY, retry plain O_RDONLY */
@@ -98,6 +149,8 @@ evo_dir_t *evo_opendir(const char *path)
 
 struct dirent *evo_readdir(evo_dir_t *d)
 {
+    if (d && d->ntfs)
+        return ntfs_readdir(d);
     if (!d)
         return NULL;
 
@@ -139,6 +192,11 @@ void evo_closedir(evo_dir_t *d)
 {
     if (!d)
         return;
+    if (d->ntfs) {
+        evo_ntfs_closedir(d->ntfs);
+        free(d);
+        return;
+    }
     if (d->fd >= 0)
         close(d->fd);
     if (d->buf)
@@ -150,10 +208,57 @@ void evo_closedir(evo_dir_t *d)
 
 struct evo_dir {
     DIR *dir;
+    evo_ntfs_dir_t *ntfs;   /* ntfs:// (#217) */
+    struct dirent   ntfs_de;
 };
+
+/* ntfs:// (#217): a drive the console does not mount, read by evo_ntfs.
+ * Same handle and dirent as a real folder, so every caller lists it unchanged.
+ * d_type is set (DT_DIR / DT_REG): callers never stat() these paths. */
+static struct evo_dir *ntfs_opendir(const char *path)
+{
+    evo_ntfs_dir_t *nd = evo_ntfs_opendir(path);
+    if (!nd) {
+        evo_ntfs_refresh();            /* a drive plugged in since the last scan */
+        nd = evo_ntfs_opendir(path);
+    }
+    if (!nd) {
+        errno = ENOENT;
+        return NULL;
+    }
+    struct evo_dir *d = calloc(1, sizeof *d);
+    if (!d) {
+        evo_ntfs_closedir(nd);
+        errno = ENOMEM;
+        return NULL;
+    }
+    d->ntfs = nd;
+    return d;
+}
+
+static struct dirent *ntfs_readdir(struct evo_dir *d)
+{
+    const char *name;
+    int is_dir;
+    uint64_t size;
+    if (!evo_ntfs_readdir(d->ntfs, &name, &is_dir, &size))
+        return NULL;
+    struct dirent *de = &d->ntfs_de;
+    memset(de, 0, sizeof *de);
+    snprintf(de->d_name, sizeof de->d_name, "%s", name);
+    de->d_type = is_dir ? DT_DIR : DT_REG;
+    de->d_reclen = (unsigned short)sizeof *de;
+#if defined(EVO_APP_MODULE)
+    de->d_namlen = (unsigned char)strlen(de->d_name);
+#endif
+    return de;
+}
+
 
 evo_dir_t *evo_opendir(const char *path)
 {
+    if (evo_ntfs_is_url(path))
+        return ntfs_opendir(path);
     DIR *dir = opendir(path);
     if (!dir)
         return NULL;
@@ -171,6 +276,8 @@ evo_dir_t *evo_opendir(const char *path)
 
 struct dirent *evo_readdir(evo_dir_t *d)
 {
+    if (d && d->ntfs)
+        return ntfs_readdir(d);
     return d ? readdir(d->dir) : NULL;
 }
 
@@ -178,6 +285,11 @@ void evo_closedir(evo_dir_t *d)
 {
     if (!d)
         return;
+    if (d->ntfs) {
+        evo_ntfs_closedir(d->ntfs);
+        free(d);
+        return;
+    }
     if (d->dir)
         closedir(d->dir);
     free(d);

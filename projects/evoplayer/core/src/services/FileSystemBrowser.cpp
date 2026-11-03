@@ -4,6 +4,7 @@
 #include "evo_data_path.h"
 #include "evo_boot_trace.h"
 #include "evo_boot_log.h"
+#include "evo_ntfs.h"
 
 #include <cstdio>
 #include <cstring>
@@ -84,6 +85,12 @@ std::vector<std::string> FileSystemBrowser::usbMounts() const {
     for (const char* m : kUsbMounts) {
         if (hasEntries(m)) out.push_back(m);
     }
+    /* #217: NTFS drives the console leaves unmounted, read by evo_ntfs.
+     * Listed even when empty: a volume that mounted is a drive. */
+    evo_ntfs_refresh();
+    for (int i = 0; i < evo_ntfs_volume_count(); ++i) {
+        if (const char* url = evo_ntfs_volume_url(i)) out.push_back(url);
+    }
     m_usbMounts = out;
     m_usbMountsAtMs = now;
     return out;
@@ -101,6 +108,10 @@ std::string FileSystemBrowser::usbMountOf(const std::string& path) const {
         const size_t n = std::strlen(m);
         if (path.rfind(m, 0) == 0 && (path.size() == n || path[n] == '/')) return m;
     }
+    if (evo_ntfs_is_url(path.c_str())) {   /* ntfs://<volume>[/...] -> ntfs://<volume> */
+        const size_t slash = path.find('/', sizeof(EVO_NTFS_SCHEME) - 1);
+        return slash == std::string::npos ? path : path.substr(0, slash);
+    }
     return "";
 }
 
@@ -109,6 +120,16 @@ bool FileSystemBrowser::isUsbPath(const std::string& path) const {
 }
 
 std::string FileSystemBrowser::usbMountLabel(const std::string& mount) const {
+    if (evo_ntfs_is_url(mount.c_str())) {   /* #217: "NTFS DRIVE (Movies)" from the volume label */
+        for (int i = 0; i < evo_ntfs_volume_count(); ++i) {
+            const char* url = evo_ntfs_volume_url(i);
+            if (url && mount == url) {
+                const char* label = evo_ntfs_volume_label(i);
+                return std::string("NTFS DRIVE (") + (label ? label : mount.c_str() + 7) + ")";
+            }
+        }
+        return "NTFS DRIVE (" + mount.substr(sizeof(EVO_NTFS_SCHEME) - 1) + ")";
+    }
     const std::string name = mount.substr(mount.find_last_of('/') + 1);   /* usb1, ext0 */
     return (name.rfind("ext", 0) == 0 ? "M.2 STORAGE (" : "USB DRIVE (") + name + ")";
 }
