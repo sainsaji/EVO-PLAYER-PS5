@@ -55,6 +55,7 @@
 #include "evo_data_path.h"
 #include "evo_hw.h"
 #include "evo_keyboard.h"
+#include "evo_prev_run.h"
 
 #ifndef EVO_PLAYER_VERSION
 #define EVO_PLAYER_VERSION "dev"
@@ -178,6 +179,8 @@ static const char k_report_page[] =
 "<p>This page gets EVO's log from your PS5, so you can send it with your bug report. No USB stick needed.</p>"
 "<ol><li>Tap <b>Download report</b> (or Share / Copy).</li>"
 "<li>Attach the file to your report on GitHub or Discord, and say what you did just before the problem.</li></ol>"
+"<p id=runs>Report: <a href='/report'>this run</a> &middot; <a href='/report?run=last'>the last run</a> "
+"<span class=dim>(pick the last run if EVO crashed or froze before you reopened it)</span></p>"
 "<div id=sum>Loading the report from the PS5...</div>"
 "<a class=b id=dl href='/report.txt' download>Download report</a>"
 "<button class='b alt' id=sh hidden>Share</button><button class='b alt' id=cp>Copy text</button><p id=msg class=dim></p>"
@@ -185,12 +188,14 @@ static const char k_report_page[] =
 "<p class=dim>Passwords, tokens and keys are removed from the report. Server addresses, folder and file names stay in, "
 "because they help find the problem. <a href='/log'>Live log</a></p></main><textarea id=ta></textarea><script>"
 "var S=document.getElementById('sum'),M=document.getElementById('msg'),LA=document.getElementById('last'),"
-"SH=document.getElementById('sh'),TA=document.getElementById('ta'),txt='',name='evo-report.txt';"
-"fetch('/report.txt',{cache:'no-store'}).then(function(r){var d=r.headers.get('Content-Disposition')||'',m=/filename=\"([^\"]+)\"/.exec(d);"
+"SH=document.getElementById('sh'),TA=document.getElementById('ta'),txt='',name='evo-report.txt',"
+"LR=location.search.indexOf('run=last')>=0,U='/report.txt'+(LR?'?run=last':'');"
+"document.getElementById('dl').href=U;document.getElementById('runs').children[LR?1:0].style.fontWeight='700';"
+"fetch(U,{cache:'no-store'}).then(function(r){var d=r.headers.get('Content-Disposition')||'',m=/filename=\"([^\"]+)\"/.exec(d);"
 "if(m)name=m[1];document.getElementById('dl').setAttribute('download',name);return r.text()}).then(function(t){txt=t;"
 "var ls=t.split('\\n'),e=0,w=0,bad=[];for(var i=0;i<ls.length;i++){var l=ls[i];"
 "if(/^\\[[0-9.]+\\] ERROR /.test(l)){e++;bad.push(['E',l])}else if(/^\\[[0-9.]+\\] WARN /.test(l)){w++;bad.push(['W',l])}}"
-"var b=ls[1]||'';S.textContent='Ready: '+Math.round(t.length/1024)+' KB, '+e+' error'+(e==1?'':'s')+', '+w+' warning'+(w==1?'':'s')+'. '+b;"
+"var b=(ls[1]||'')+'. '+(ls[2]||'');S.textContent=(LR?'Last run report: ':'Ready: ')+Math.round(t.length/1024)+' KB, '+e+' error'+(e==1?'':'s')+', '+w+' warning'+(w==1?'':'s')+'. '+b;"
 "LA.textContent='';LA.className='';bad=bad.slice(-30);if(!bad.length)LA.textContent='None.';"
 "for(var j=0;j<bad.length;j++){var s=document.createElement('div');s.className=bad[j][0];s.textContent=bad[j][1];LA.appendChild(s)}"
 "try{var f=new File([t],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){SH.hidden=false;"
@@ -205,6 +210,7 @@ static const char k_report_page[] =
 typedef struct {
     int tail_now;
     int min_level;      /* 0 all, 1 WARN and ERROR, 2 ERROR only */
+    int last_run;       /* /report.txt?run=last: the previous run's report */
     char grep[96];
 } ls_opts_t;
 
@@ -229,6 +235,8 @@ static void parse_query(const char *q, ls_opts_t *o)
             o->min_level = 1;
         else if (!strncmp(q, "level=error", 11))
             o->min_level = 2;
+        else if (!strncmp(q, "run=last", 8))
+            o->last_run = 1;
         else if (!strncmp(q, "grep=", 5)) {
             const char *v = q + 5;
             size_t n = 0;
@@ -529,31 +537,42 @@ static void rp_file_tail(rp_t *r, const char *title, const char *path, long max)
     fclose(f);
 }
 
-long evo_report_write(evo_report_sink_fn sink, void *ud)
+long evo_report_write_run(evo_report_sink_fn sink, void *ud, int last_run)
 {
     rp_t r = { sink, ud, 0, 0 };
     evo_boot_log_flush();          /* everything logged so far is on disk */
 
     char path[160];
     const int have_file = evo_log_file_path(path, sizeof path);
+    const evo_prev_run_t prev = evo_prev_run_state();
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    rp_printf(&r, "EVO Player problem report\n");
+    rp_printf(&r, "EVO Player problem report - %s\n", last_run ? "LAST run" : "this run");
     rp_printf(&r, "version %s, build %s, %s, up %lld s\n", EVO_PLAYER_VERSION, EVO_BUILD_ID,
               evo_hw_model_name(), (long long)ts.tv_sec);
+    rp_printf(&r, "last run: %s\n", evo_prev_run_text(prev));
     rp_printf(&r, "log file: %s\n", have_file ? path : "none (no USB stick and /data not writable)");
 
-    char stats[2048];
-    size_t sn = evo_stats_json(stats, sizeof stats);
-    rp_printf(&r, "\n=== stats ===\n");
-    rp_put(&r, stats, sn);
-    rp_put(&r, "\n", 1);
+    if (!last_run) {
+        char stats[2048];
+        size_t sn = evo_stats_json(stats, sizeof stats);
+        rp_printf(&r, "\n=== stats ===\n");
+        rp_put(&r, stats, sn);
+        rp_put(&r, "\n", 1);
+    }
 
     /* Settings are numbers and the log port: no names, addresses or passwords.
      * The network shares file has passwords and is never included. */
     rp_file_tail(&r, "settings", evo_data_path("evo_player_settings.cfg"), 8192);
 
-    if (have_file) {
+    if (last_run) {
+        /* The run before this one, saved at start (evo_prev_run.c): a crash
+         * stays reportable however long the new session has been running. */
+        if (prev == EVO_PREV_RUN_NONE)
+            rp_printf(&r, "\n=== no earlier run is saved (the log was empty, cleared or missing) ===\n");
+        else
+            rp_file_tail(&r, "last run log", evo_prev_run_path(), EVO_REPORT_LOG_BYTES);
+    } else if (have_file) {
         long budget = EVO_REPORT_LOG_BYTES;
         long cur = rp_file_size(path);
         if (cur >= 0 && cur < budget) {
@@ -579,18 +598,29 @@ long evo_report_write(evo_report_sink_fn sink, void *ud)
     return r.stop ? -1 : r.total;
 }
 
+long evo_report_write(evo_report_sink_fn sink, void *ud)
+{
+    return evo_report_write_run(sink, ud, 0);
+}
+
 static int rp_file_sink(void *ud, const char *data, size_t n)
 {
     return fwrite(data, 1, n, (FILE *)ud) == n ? 0 : -1;
 }
 
-int evo_report_save(char *out, size_t cap)
+int evo_report_save_run(char *out, size_t cap, int last_run)
 {
-    const char *paths[2] = { "/mnt/usb0/evo_report.txt", evo_data_path("evo_report.txt") };
+    const char *name = last_run ? "evo_report_last_run.txt" : "evo_report.txt";
+    char usb[64], data[192];
+    snprintf(usb, sizeof usb, "/mnt/usb0/%s", name);
+    /* A copy: evo_data_path() hands back one shared buffer, and writing the
+     * report calls it again (the settings file) - the toast then named that. */
+    snprintf(data, sizeof data, "%s", evo_data_path(name));
+    const char *paths[2] = { usb, data };
     for (int i = 0; i < 2; ++i) {
         FILE *f = fopen(paths[i], "w");
         if (!f) continue;
-        const long n = evo_report_write(rp_file_sink, f);
+        const long n = evo_report_write_run(rp_file_sink, f, last_run);
         const int closed = fclose(f) == 0;
         if (n > 0 && closed) {
             if (out && cap) snprintf(out, cap, "%s", paths[i]);
@@ -603,22 +633,27 @@ int evo_report_save(char *out, size_t cap)
     return 0;
 }
 
+int evo_report_save(char *out, size_t cap)
+{
+    return evo_report_save_run(out, cap, 0);
+}
+
 static int rp_sock_sink(void *ud, const char *data, size_t n)
 {
     return send_all((int)(intptr_t)ud, data, n);
 }
 
-/* GET /report.txt - the report as a file the phone saves. */
-static void serve_report_txt(int fd)
+/* GET /report.txt[?run=last] - the report as a file the phone saves. */
+static void serve_report_txt(int fd, int last_run)
 {
     char head[320];
     snprintf(head, sizeof head,
              "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
-             "Content-Disposition: attachment; filename=\"evo-report-%s.txt\"\r\n"
-             "Cache-Control: no-store\r\nConnection: close\r\n\r\n", EVO_BUILD_ID);
+             "Content-Disposition: attachment; filename=\"evo-report-%s%s.txt\"\r\n"
+             "Cache-Control: no-store\r\nConnection: close\r\n\r\n", last_run ? "last-run-" : "", EVO_BUILD_ID);
     if (send_str(fd, head) != 0) return;
-    const long n = evo_report_write(rp_sock_sink, (void *)(intptr_t)fd);
-    EVO_LOGI("report", "sent to a phone (%ld bytes)", n);
+    const long n = evo_report_write_run(rp_sock_sink, (void *)(intptr_t)fd, last_run);
+    EVO_LOGI("report", "%s sent to a phone (%ld bytes)", last_run ? "last-run report" : "report", n);
 }
 
 static void *conn_thread(void *arg)
@@ -730,7 +765,7 @@ static void *conn_thread(void *arg)
                 send_str(fd, head);
                 send_all(fd, k_report_page, sizeof k_report_page - 1);
             } else if (!strcmp(norm, "/report.txt")) {
-                serve_report_txt(fd);
+                serve_report_txt(fd, o.last_run);
             } else if (!strcmp(norm, "/stats")) {
                 char body[2048], head[192];
                 size_t n = evo_stats_json(body, sizeof body);

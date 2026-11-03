@@ -97,6 +97,7 @@ and honour `PS5_LOG_PORT` from the environment.
 | `/snapshot` | the last ~128 KiB, then closes |
 | `/report` | the phone page for a bug report (#229): Download / Share / Copy, and the last warnings and errors. Settings → System & Diagnostics → Report a Problem shows its QR |
 | `/report.txt` | that report as a download: version, build, model, `/stats`, the settings file and the last 1.5 MB of `evo.log` from disk (with `evo.log.1` if there is room), every line redacted again. The network-shares file (it has passwords) is never in it |
+| `/report.txt?run=last` | the report of the run before this one, from `evo.prev.log` (`/report?run=last` is its page). At start, before the new session header, EVO copies the last session of `evo.log` (up to 1.5 MB) to `evo.prev.log` next to it and reads how it ended: `CRASH signal=` = crashed, `soft close: parked` = closed from EVO, neither = ended without closing (PS button, kill). `src/evo_prev_run.c` |
 | `/stats` | one JSON snapshot of memory pools, read-ahead, network reader and playback (`src/evo_stats.c`) |
 | `/input`, `/input/state`, `POST /input` | the phone page for typing into an open EVO keyboard (needs the `X-EVO-Input` header; refused unless a phone keyboard is open) |
 

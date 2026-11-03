@@ -1,5 +1,6 @@
 /* evo_boot_log.c — see evo_boot_log.h. The one diagnostic log. */
 #include "evo_boot_log.h"
+#include "evo_prev_run.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -503,6 +504,16 @@ void evo_boot_log_flush(void)
         pthread_mutex_lock(&g_io_lock);
         fseek(fp, 0, SEEK_END);
         g_written = ftell(fp);
+        {
+            /* #229: the last run on its own, before this one is appended and
+             * before a rotation: a report of a crash must still find it. */
+            char prev[192];
+            const char *slash = strrchr(g_log_path, '/');
+            snprintf(prev, sizeof prev, "%.*s/evo.prev.log",
+                     slash ? (int)(slash - g_log_path) : 0, g_log_path);
+            fflush(fp);
+            evo_prev_run_save(g_log_path, prev, EVO_REPORT_LOG_BYTES);
+        }
         if (g_written > BL_ROTATE_BYTES) {   /* a previous run left it big */
             FILE *fresh = bl_rotate(fp);
             if (fresh) { fp = fresh; g_written = 0; }
@@ -592,6 +603,10 @@ void evo_boot_log_crash_drain(int fd) { (void)fd; }
 int evo_log_file_path(char *out, size_t cap) { (void)out; (void)cap; return 0; }
 long evo_report_write(evo_report_sink_fn sink, void *ud) { (void)sink; (void)ud; return 0; }
 int evo_report_save(char *out, size_t cap) { if (out && cap) out[0] = '\0'; return 0; }
+long evo_report_write_run(evo_report_sink_fn sink, void *ud, int last_run)
+{ (void)sink; (void)ud; (void)last_run; return 0; }
+int evo_report_save_run(char *out, size_t cap, int last_run)
+{ (void)last_run; if (out && cap) out[0] = '\0'; return 0; }
 unsigned long long evo_log_ring_total(void) { return 0; }
 size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
                          int wait_ms, unsigned long long *missed)

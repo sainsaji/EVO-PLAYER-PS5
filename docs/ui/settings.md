@@ -38,6 +38,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Phone & log port | digits 1024–65535 (default 9780; Triangle resets). EVO test-binds it, falls back to n+1..n+9 if busy, retries saved in background. Real port feeds log server and phone keyboard. |
 | | Ask which live stream | on, off ([../providers/architecture.md](../providers/architecture.md#the-stream-picker)) |
 | **System & Diagnostics** | Report a problem | card: QR to the phone report page (`/report`); Cross saves `evo_report.txt` to USB0, or `/data/evoplayer` with no stick |
+| | Report the last run | the run before this one (`evo.prev.log`): its detail says whether it crashed, closed, or ended without closing. QR to `/report?run=last`; Cross saves `evo_report_last_run.txt`. Home shows a toast once after a crash |
 | | Debug overlay | on, off (live performance numbers) |
 | | Developer tools | action: diagnostics and performance screen |
 | | Console | shows the detected model (PS5 Pro, PS5, or not detected) |

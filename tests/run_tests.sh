@@ -82,6 +82,8 @@ SRCS=(
     "${CORE}/src/services/NetArtSidecar.cpp"
     "${CORE}/src/services/NetArtCache.cpp"
     "${REPO_ROOT}/tests/test_titles.cpp"
+    "${REPO_ROOT}/tests/test_prev_run.cpp"
+    "${EVO}/src/evo_prev_run.c"
     "${CORE}/src/services/ReleaseName.cpp"
 )
 

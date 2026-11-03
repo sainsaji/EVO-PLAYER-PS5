@@ -5,6 +5,7 @@
 #include "evo_toast.h"
 #include "evo_theme.h"
 #include "evo_boot_log.h"
+#include "evo_prev_run.h"
 #include "evo_keyboard.h"
 #include "qrcodegen.h"
 #include "evo_hw.h"
@@ -67,6 +68,7 @@ enum class SettingKey : int {
     AskStream,
     /* SYSTEM & DIAGNOSTICS */
     ReportProblem,
+    ReportLastRun,
     DebugOverlay,
     DeveloperTools,
     ConsoleModel,
@@ -152,6 +154,8 @@ const PreviewSpec kPreviews[] = {
      "Lets you choose the format and quality each time you open a live channel."},
     {SettingKey::ReportProblem, EVO_RMLUI_PREVIEW_REPORT,
      "The report has EVO's log, version and settings. Passwords and tokens are taken out."},
+    {SettingKey::ReportLastRun, EVO_RMLUI_PREVIEW_REPORT,
+     "The log of the run before this one. Use it when EVO crashed or froze and you reopened it."},
     {SettingKey::DebugOverlay, EVO_RMLUI_PREVIEW_DEBUG_OVERLAY, "Shows live performance numbers on screen."},
     {SettingKey::DeveloperTools, EVO_RMLUI_PREVIEW_INFO, "System diagnostics and performance stats."},
     {SettingKey::ConsoleModel, EVO_RMLUI_PREVIEW_INFO,
@@ -181,7 +185,7 @@ const SettingKey kInterfaceKeys[] = {
     SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream,
 };
 const SettingKey kSystemKeys[] = {
-    SettingKey::ReportProblem, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
+    SettingKey::ReportProblem, SettingKey::ReportLastRun, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
     SettingKey::ConsoleModel, SettingKey::MemoryMode, SettingKey::SoftwareUpdate, SettingKey::QuitEvo,
 };
 /*
@@ -259,7 +263,7 @@ SettingDef valueDef(SettingKey key, const char* title, const char* detail,
 }
 
 void fillPortPreview(evo_rmlui_settings_row_t& row);
-void fillReportPreview(evo_rmlui_settings_row_t& row);
+void fillReportPreview(evo_rmlui_settings_row_t& row, bool lastRun);
 
 SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     SettingDef d{};
@@ -500,6 +504,18 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                       "../icons/icon_report.png", "SAVE");
         break;
 
+    case SettingKey::ReportLastRun: {
+        /* #229: after a crash the report to send is the previous run's. */
+        const evo_prev_run_t prev = evo_prev_run_state();
+        d = actionDef(key, "REPORT THE LAST RUN",
+                      prev == EVO_PREV_RUN_CRASHED ? "THE LAST RUN CRASHED - SEND ITS LOG"
+                      : prev == EVO_PREV_RUN_ENDED ? "THE LAST RUN ENDED WITHOUT CLOSING"
+                      : prev == EVO_PREV_RUN_CLOSED ? "THE LAST RUN CLOSED NORMALLY"
+                                                     : "NO EARLIER RUN SAVED",
+                      "../icons/icon_report.png", prev == EVO_PREV_RUN_NONE ? "NONE" : "SAVE");
+        break;
+    }
+
     case SettingKey::DebugOverlay:
         d = toggleDef(key, "DEBUG OVERLAY", "ON-SCREEN HARDWARE PERFORMANCE METRICS",
                       "../icons/icon_activity.png", settings->isDebugOverlayEnabled());
@@ -705,7 +721,8 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
         row.preview_index = (def.kind == EVO_RMLUI_ROW_TOGGLE) ? (def.toggle_on ? 1 : 0)
                           : (opt >= 0) ? opt : def.opt_current;
         if (def.key == SettingKey::PhonePort) fillPortPreview(row);
-        if (def.key == SettingKey::ReportProblem) fillReportPreview(row);
+        if (def.key == SettingKey::ReportProblem) fillReportPreview(row, false);
+        if (def.key == SettingKey::ReportLastRun) fillReportPreview(row, true);
         if (opt < 0) {
             p.rows[i].title = def.title;
             p.rows[i].detail = def.detail;
@@ -862,13 +879,13 @@ void fillPortPreview(evo_rmlui_settings_row_t& row) {
 
 /* The preview card of REPORT A PROBLEM (#229): the phone link to /report and
  * where Cross saves the file. */
-void fillReportPreview(evo_rmlui_settings_row_t& row) {
+void fillReportPreview(evo_rmlui_settings_row_t& row, bool lastRun) {
     static char s_link[96], s_status[160];
     const int actual = evo_log_server_port();
     char ip[32];
     evo_keyboard_local_ip(ip, sizeof ip);
     if (actual > 0 && ip[0]) {
-        std::snprintf(s_link, sizeof s_link, "http://%s:%d/report", ip, actual);
+        std::snprintf(s_link, sizeof s_link, "http://%s:%d/report%s", ip, actual, lastRun ? "?run=last" : "");
         std::snprintf(s_status, sizeof s_status,
                       "The phone must be on the same network as the PS5. EVO has to stay open.");
         row.preview_index = 0;
@@ -1013,6 +1030,23 @@ bool runAction(const SettingDef& def) {
         if (evo_report_save(path, sizeof path)) {
             toast("REPORT SAVED", std::strncmp(path, "/mnt/usb0/", 10) == 0
                                       ? "evo_report.txt on the USB stick" : path);
+            evo_feedback(EVO_FB_CONFIRM);
+        } else {
+            toast("REPORT", "Could not save. Use the phone link instead");
+            evo_feedback(EVO_FB_BOUNDARY);
+        }
+        return true;
+    }
+    case SettingKey::ReportLastRun: {
+        if (evo_prev_run_state() == EVO_PREV_RUN_NONE) {
+            toast("REPORT", "No earlier run is saved");
+            evo_feedback(EVO_FB_BOUNDARY);
+            return true;
+        }
+        char path[160];
+        if (evo_report_save_run(path, sizeof path, 1)) {
+            toast("LAST RUN SAVED", std::strncmp(path, "/mnt/usb0/", 10) == 0
+                                        ? "evo_report_last_run.txt on the USB stick" : path);
             evo_feedback(EVO_FB_CONFIRM);
         } else {
             toast("REPORT", "Could not save. Use the phone link instead");

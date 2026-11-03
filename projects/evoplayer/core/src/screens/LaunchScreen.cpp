@@ -13,6 +13,8 @@
 
 #include "evo_boot_trace.h"
 #include "evo_boot_log.h"
+#include "evo_prev_run.h"
+#include "evo_toast.h"
 #include "evo/animation/AnimationManager.hpp"
 
 #include <cstdio>
@@ -89,6 +91,13 @@ void LaunchScreen::onEnter() {
     StatefulScreen::onEnter();
     evo::animation::AnimationManager::getInstance().setContinuousAnimation(true);
     recent_prune_missing();   // #233: a file deleted outside EVO leaves Jump back in
+    /* #229: once per launch, after a crash: where the report of that run is. */
+    static bool s_crashNoticeShown = false;
+    if (!s_crashNoticeShown && evo_prev_run_state() == EVO_PREV_RUN_CRASHED) {
+        s_crashNoticeShown = true;
+        EVO_LOGW("app", "the last run crashed; its log is in %s", evo_prev_run_path());
+        toast("EVO CLOSED UNEXPECTEDLY", "Settings > System > Report the last run");
+    }
     m_selectedRow = (recent_file_count > 0) ? 0 : 2;
     m_selectedCol = 0;
     m_heroSettlePath.clear();

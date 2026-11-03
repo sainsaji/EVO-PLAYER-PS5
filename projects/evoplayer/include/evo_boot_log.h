@@ -84,6 +84,11 @@ size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
 typedef int (*evo_report_sink_fn)(void *ud, const char *data, size_t n);
 long evo_report_write(evo_report_sink_fn sink, void *ud);
 int  evo_report_save(char *out, size_t cap);
+/* last_run=1: the report of the PREVIOUS run (evo.prev.log, see
+ * evo_prev_run.h) - the one to send after a crash. Saved as
+ * evo_report_last_run.txt; on the phone page as /report.txt?run=last. */
+long evo_report_write_run(evo_report_sink_fn sink, void *ud, int last_run);
+int  evo_report_save_run(char *out, size_t cap, int last_run);
 #define EVO_REPORT_LOG_BYTES (1536 * 1024)   /* the most of evo.log a report carries */
 
 /* Start the live log server (once; later calls do nothing). Port
