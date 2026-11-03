@@ -287,9 +287,9 @@ void BrowserScreen::openEditShareKeyboard(const std::string& shareId) {
     m_editingShareId = shareId;
     std::string initial = NetworkStorageService::buildEditUrl(*share);
     if (share->protocol == NetworkProtocol::SMB) {
-        evo_keyboard_open_phone("Edit SMB Share (user:pass@host/Share)...", initial.c_str(), 512, OnEditSmbSubmitted, this);
+        evo_keyboard_open_phone("Edit SMB Share (password kept; user:newpass@host to change)...", initial.c_str(), 512, OnEditSmbSubmitted, this);
     } else {
-        evo_keyboard_open_phone("Edit FTP Server (user:pass@host:port)...", initial.c_str(), 512, OnEditFtpSubmitted, this);
+        evo_keyboard_open_phone("Edit FTP Server (password kept; user:newpass@host to change)...", initial.c_str(), 512, OnEditFtpSubmitted, this);
     }
 }
 
@@ -302,6 +302,9 @@ void BrowserScreen::handleEditSmbHost(const std::string& hostStr) {
         return;
     }
     share.id = orig->id;
+    // The edit text hides the password: same user with none typed keeps the saved one.
+    if (share.password.empty() && share.user == orig->user && share.domain == orig->domain)
+        share.password = orig->password;
     std::string smbShare, subPath;
     if (!SmbClient::splitShareAndPath(share.startPath, smbShare, subPath)) {
         // Server root: test the login again and let the person re-tick the shares
@@ -347,6 +350,7 @@ void BrowserScreen::handleEditFtpHost(const std::string& hostStr) {
             pass = auth.substr(colon + 1);
         } else {
             user = auth;
+            if (user == orig->user) pass = orig->password;   // password is hidden in the edit text
         }
     }
 

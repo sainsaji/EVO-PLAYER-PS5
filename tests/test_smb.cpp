@@ -458,16 +458,16 @@ extern "C" void test_smb_url_parsing(void) {
     TEST_ASSERT(mediaUrl == "smb://evotest:p%40ss%3Aw0rd%2F1@host:4450/Media",
                 "buildMediaUrl round-trips back to the same encoded string");
 
-    // 3. Edit prefill round-trip: Add -> Edit -> Save
+    // 3. Edit prefill round-trip: Add -> Edit -> Save. The prefill never shows the saved
+    //    password; the edit handler keeps it when the user is unchanged.
     std::string prefill = evo::NetworkStorageService::buildEditUrl(share);
-    TEST_ASSERT(prefill == "smb://evotest:p%40ss%3Aw0rd%2F1@host:4450/Media",
-                "edit prefill URL should match encoded URL format");
+    TEST_ASSERT(prefill == "smb://evotest@host:4450/Media",
+                "edit prefill URL should hide the password");
 
     evo::NetworkShare reloaded;
     TEST_ASSERT(evo::NetworkStorageService::parseSmbUrl(prefill, reloaded),
                 "re-parsing edit prefill should succeed");
-    TEST_ASSERT(reloaded.password == "p@ss:w0rd/1",
-                "reloaded password must remain raw 'p@ss:w0rd/1' (no double encoding)");
+    TEST_ASSERT(reloaded.password.empty(), "reloaded prefill carries no password");
     TEST_ASSERT(reloaded.user == "evotest", "reloaded user should match");
     TEST_ASSERT(reloaded.host == "host", "reloaded host should match");
     TEST_ASSERT(reloaded.port == 4450, "reloaded port should match");

@@ -561,10 +561,7 @@ std::string NetworkStorageService::buildEditUrl(const NetworkShare& share) {
             } else {
                 creds = percentEncode(share.user);
             }
-            if (!share.password.empty()) {
-                creds += ":" + percentEncode(share.password);
-            }
-            creds += "@";
+            creds += "@";   // the saved password is never shown; the edit handler keeps it
         }
 
         std::string portStr;
@@ -582,11 +579,7 @@ std::string NetworkStorageService::buildEditUrl(const NetworkShare& share) {
     } else {
         std::string creds;
         if (!share.user.empty() && share.user != "anonymous") {
-            creds = share.user;
-            if (!share.password.empty() && share.password != "anonymous") {
-                creds += ":" + share.password;
-            }
-            creds += "@";
+            creds = share.user + "@";   // the saved password is never shown; the edit handler keeps it
         }
 
         std::string portStr;
