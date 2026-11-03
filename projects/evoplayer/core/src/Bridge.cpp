@@ -361,8 +361,10 @@ void evo_remote_open_text(const char *path) {
 void evo_open_media_path(const char *path) {
     if (!path || !path[0])
         return;
-    /* Same order as BrowserScreen::activate() - start, then show. */
-    start_video_playback(path);
+    /* Same order as BrowserScreen::activate() - start, then show. On a failed
+     * open the toast is up and we stay where we are, not on a dead player. */
+    if (!start_video_playback(path))
+        return;
     if (auto sm = evo::Application::getInstance().getScreenManager())
         sm->navigateTo(evo::ScreenId::Player);
 }
