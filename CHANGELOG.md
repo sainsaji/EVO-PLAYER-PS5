@@ -41,8 +41,8 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ### Streams
 
-- **New: PLAY BEST ADDON STREAM** (Settings → Interface & Storage, on by default). EVO ranks every source from every addon - already cached on your debrid service first (Torrentio `[TB+]`, AIOStreams ⚡), then 4K, Remux and size, then Dolby Vision with an HDR10 base, HDR10+, HDR10 - and plays the best at once. If it does not open, the next one is tried by itself. Cam rips, 3D and uncached links go last.
-- **New: Choose stream** in a title's OPTIONS (Triangle): the full ranked list, with resolution, range, codec and size for each.
+- **New: PLAY BEST ADDON STREAM** (Settings → Interface & Storage, on by default, settings line 33). EVO ranks every source from every addon - already cached on your debrid service first (Torrentio `[TB+]`, AIOStreams ⚡), then 4K, Remux and size, then Dolby Vision with an HDR10 base, HDR10+, HDR10 - and plays the best at once. If it does not open, the next one is tried by itself. Cam rips, 3D and uncached links go last.
+- **New: ranked CHOOSE STREAM.** The detail page's CHOOSE STREAM lists the same ranking, with resolution, range, codec and size for each addon source.
 - **Fixed: stream and subtitle lookups were cut off after 6 seconds.** AIOStreams and debrid cache checks often think longer before answering; they now get 25 s.
 - **Improved: up to 128 queued and 8 parallel requests** (were 32 and 4). With a dozen addons, requests past 32 failed at once and read as "this addon gives nothing".
 

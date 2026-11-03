@@ -117,7 +117,7 @@ id (`tt123:1:2` → `tt123`) and adds unseen titles as `temp` items, as Stremio 
 an HDR10 base > HDR10+ > HDR10 > DV-only (profile 5), size as the bitrate proxy; cam, 3D and
 uncached last. Up to 48 sources are kept (the worst is replaced when full) and sorted. With
 PLAY BEST ADDON STREAM on, choice 0 plays and the next ones are the automatic fallback;
-**Choose stream** in the Triangle menu opens the list once.
+the detail page's CHOOSE STREAM (`sel.force_pick`) opens the ranked list.
 
 **Disk cache**: `<data>/addon_cache/<fnv1a64>.json` with an `EVOCACHE <unix>` first line, for
 manifests (24 h), catalog page 0 (6 h) and meta (24 h); a failed request falls back to any
