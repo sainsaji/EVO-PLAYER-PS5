@@ -136,7 +136,7 @@ static void *worker(void *arg)
     while (!p->stop) {
         pthread_mutex_lock(&p->mu);
         int64_t idx = -1;
-        pio_slot *s;
+        pio_slot *s = NULL;
         while (!p->stop && !(s = claim(p, &idx)))
             pthread_cond_wait(&p->cv, &p->mu);
         pthread_mutex_unlock(&p->mu);

@@ -36,8 +36,6 @@ const Color kAmber = Color::rgb(0xffb020);
 constexpr int kCols = 8;                  /* a folder level: the shelf card, wrapped into 8 columns */
 constexpr float kGridX = NavRail::kWidth + 64.0f;
 constexpr float kGridTop = 214.0f;
-constexpr float kCardW = 232.0f;
-constexpr float kGap = 24.0f;
 constexpr Rect kDetail{1288.0f, 214.0f, 536.0f, 700.0f};
 
 /* Shelves: rows of posters. */
@@ -102,7 +100,6 @@ Rect contain_rect(int w, int h, const Rect &box)
     return {box.x + (box.w - ww) * 0.5f, box.y, ww, box.h};
 }
 
-const char *kind_word(int variant) { return variant == EVO_HUI_PROVIDER_XTREAM ? "CATEGORY" : "GROUP"; }
 
 struct SetupCard
 {

@@ -153,6 +153,8 @@ int evo_net_discover_poll(char *addr, size_t cap)
     return rc;
 }
 #ifndef NO_OPENSSL
+#include <openssl/pem.h>
+#include <openssl/x509_vfy.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #endif
@@ -446,6 +448,88 @@ static int             g_completed_count = 0;
 static SSL_CTX        *g_ssl_ctx = NULL;
 static pthread_mutex_t g_ssl_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/*
+ * Certificate verification.
+ *
+ * Until 0.14 every HTTPS request accepted any certificate, so anyone on the
+ * path (a hostile Wi-Fi, a poisoned DNS answer) could read what EVO sends:
+ * the Stremio authKey, and the debrid keys that addon URLs carry. Requests to
+ * public hosts are now verified against the Mozilla root set shipped in the
+ * app (assets/certs/cacert.pem), hostname included.
+ *
+ * Two deliberate exceptions:
+ *  - the validity dates are not checked: a jailbroken console that never
+ *    syncs its clock would otherwise fail every handshake. Chain and name are
+ *    what stop an impostor; an expired-but-genuine certificate is not one.
+ *  - a host on the home network (a private or loopback IPv4 literal, a name
+ *    without a dot, *.local / *.lan / *.home.arpa) is not verified: a NAS or
+ *    media server there commonly has a self-signed certificate.
+ * If the bundle cannot be read at all, EVO logs it and connects as before
+ * rather than failing every request - g_tls_verify stays 0.
+ */
+#ifndef EVO_NET_CA_BUNDLE
+#define EVO_NET_CA_BUNDLE "/app0/assets/certs/cacert.pem"
+#endif
+#ifndef EVO_NET_CA_MAX_BYTES
+#define EVO_NET_CA_MAX_BYTES ((size_t)1 << 20)
+#endif
+static int g_tls_verify = 0;     /* 1 once the roots are loaded */
+static int g_tls_roots = 0;
+
+/* Roots from the bundle into the context's store, read with the app's own
+ * stdio (not OpenSSL's file loader). Returns how many were added. */
+static int tls_load_roots(SSL_CTX *ctx, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t cap = (size_t)256 << 10, n = 0;
+    char *buf = (char *)malloc(cap);
+    while (buf) {
+        n += fread(buf + n, 1, cap - n, f);
+        if (n < cap) break;
+        if (cap >= EVO_NET_CA_MAX_BYTES) { free(buf); buf = NULL; break; }
+        char *g = (char *)realloc(buf, cap * 2);
+        if (!g) { free(buf); buf = NULL; break; }
+        buf = g;
+        cap *= 2;
+    }
+    fclose(f);
+    if (!buf) return 0;
+    int added = 0;
+    BIO *bio = BIO_new_mem_buf(buf, (int)n);
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    for (X509 *x; bio && store && (x = PEM_read_bio_X509(bio, NULL, NULL, NULL)) != NULL;) {
+        if (X509_STORE_add_cert(store, x) == 1) added++;
+        X509_free(x);
+    }
+    ERR_clear_error();           /* the read loop ends on a "no start line" */
+    if (bio) BIO_free(bio);
+    free(buf);
+    return added;
+}
+
+/* A host on the home network: its certificate is not checked (see above). */
+static int tls_host_is_local(const char *host)
+{
+    if (!host || !host[0]) return 1;
+    unsigned a, b, c, d;
+    char tail;
+    if (sscanf(host, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) == 4 && a < 256 && b < 256) {
+        return a == 10 || a == 127 || (a == 192 && b == 168) ||
+               (a == 172 && b >= 16 && b <= 31) || (a == 169 && b == 254) ||
+               (a == 100 && b >= 64 && b <= 127);      /* CGNAT / Tailscale */
+    }
+    if (strchr(host, ':')) return 0;                    /* IPv6 literal: verify */
+    if (!strchr(host, '.')) return 1;                   /* "nas", "localhost" */
+    const size_t n = strlen(host);
+    static const char *const suffix[] = { ".local", ".lan", ".home.arpa", ".internal", NULL };
+    for (int i = 0; suffix[i]; ++i) {
+        const size_t k = strlen(suffix[i]);
+        if (n > k && !strcasecmp(host + n - k, suffix[i])) return 1;
+    }
+    return 0;
+}
+
 static SSL_CTX *evo_net_get_ssl_ctx(void)
 {
     pthread_mutex_lock(&g_ssl_init_mutex);
@@ -457,6 +541,14 @@ static SSL_CTX *evo_net_get_ssl_ctx(void)
         g_ssl_ctx = SSL_CTX_new(method);
         if (g_ssl_ctx) {
             SSL_CTX_set_mode(g_ssl_ctx, SSL_MODE_AUTO_RETRY);
+            SSL_CTX_set_min_proto_version(g_ssl_ctx, TLS1_2_VERSION);
+            g_tls_roots = tls_load_roots(g_ssl_ctx, EVO_NET_CA_BUNDLE);
+            g_tls_verify = g_tls_roots > 0;
+            X509_VERIFY_PARAM_set_flags(SSL_CTX_get0_param(g_ssl_ctx), X509_V_FLAG_NO_CHECK_TIME);
+            if (g_tls_verify)
+                PROV_LOG("net: TLS verification on (%d root certificates)", g_tls_roots);
+            else
+                PROV_LOG("net: %s not readable - TLS certificates NOT verified", EVO_NET_CA_BUNDLE);
         }
     }
     pthread_mutex_unlock(&g_ssl_init_mutex);
@@ -915,12 +1007,24 @@ static int execute_http(const char *method,
                 return EVO_NET_ERR_SSL_NEW;
             }
             SSL_set_tlsext_host_name(ssl, host);
+            const int verify = g_tls_verify && !tls_host_is_local(host);
+            if (verify) {
+                SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+                SSL_set1_host(ssl, host);
+            }
             tls_session_resume(ssl, host, port);
             SSL_set_fd(ssl, sock);
             const int sc = SSL_connect(ssl);
             if (sc <= 0) {
-                PROV_WARN("net: TLS handshake with %s:%d failed (SSL error %d)",
-                          host, port, SSL_get_error(ssl, sc));
+                const long vr = verify ? SSL_get_verify_result(ssl) : X509_V_OK;
+                if (vr != X509_V_OK) {
+                    PROV_WARN("net: certificate of %s refused: %s", host, X509_verify_cert_error_string(vr));
+                    evo_error_set("%s: the server's certificate is not valid (%s)", host,
+                                  X509_verify_cert_error_string(vr));
+                } else {
+                    PROV_WARN("net: TLS handshake with %s:%d failed (SSL error %d)",
+                              host, port, SSL_get_error(ssl, sc));
+                }
                 SSL_free(ssl);
                 close(sock);
                 return EVO_NET_ERR_SSL_CONN;

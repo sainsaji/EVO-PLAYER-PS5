@@ -535,9 +535,9 @@ bool FileTransferService::copyViaLoopbackFtp(const std::string& src, const std::
     uint64_t dt = GetCurrentTimeMs() - t0;
     if (!ok) {
         EVO_LOGE("transfer", "copyViaLoopbackFtp: STOR '%s' failed after %llu ms (%s)",
-               finalDst.c_str(), dt, ftp.getLastError().c_str());
+               finalDst.c_str(), (unsigned long long)dt, ftp.getLastError().c_str());
     } else {
-        EVO_LOGI("transfer", "copyViaLoopbackFtp: '%s' stored in %llu ms", finalDst.c_str(), dt);
+        EVO_LOGI("transfer", "copyViaLoopbackFtp: '%s' stored in %llu ms", finalDst.c_str(), (unsigned long long)dt);
     }
     ftp.disconnect();
     return ok;

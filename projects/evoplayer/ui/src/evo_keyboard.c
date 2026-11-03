@@ -990,6 +990,7 @@ int evo_keyboard_handle_input(uint32_t pressed)
     if (pressed & (EVO_PAD_LEFT | EVO_PAD_RIGHT)) {
         if (g_kb.row == EVO_KB_CLEAR_ROW) { evo_feedback(EVO_FB_BOUNDARY); return 1; }
         int n = kb_row_len(g_kb.row);
+        if (n <= 0) { evo_feedback(EVO_FB_BOUNDARY); return 1; }   /* no keys: no modulo by zero */
         g_kb.col = (g_kb.col + ((pressed & EVO_PAD_RIGHT) ? 1 : n - 1)) % n;
         g_kb.xcol = kb_key_centre(g_kb.row, g_kb.col);
         evo_feedback(EVO_FB_MOVE);

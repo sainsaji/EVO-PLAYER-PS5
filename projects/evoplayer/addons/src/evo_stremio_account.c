@@ -36,6 +36,8 @@ static void  *g_poll_ud;
 /* Files                                                                     */
 /* ------------------------------------------------------------------------- */
 
+static int key_is_safe(const char *k);
+
 static cJSON *read_json(const char *leaf)
 {
     FILE *f = fopen(evo_data_path(leaf), "rb");
@@ -106,7 +108,8 @@ void evo_sa_init(void)
     cJSON *a = read_json(SA_FILE_ACCOUNT);
     const char *k = a ? cJSON_GetStringValue(cJSON_GetObjectItem(a, "authKey")) : NULL;
     const char *e = a ? cJSON_GetStringValue(cJSON_GetObjectItem(a, "email")) : NULL;
-    if (k && k[0]) {
+    /* The key goes into JSON bodies as is: a damaged file must not inject. */
+    if (k && key_is_safe(k)) {
         snprintf(g_key, sizeof g_key, "%s", k);
         snprintf(g_email, sizeof g_email, "%s", e ? e : "");
     }

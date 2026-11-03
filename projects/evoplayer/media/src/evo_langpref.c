@@ -60,7 +60,7 @@ int evo_lang_normalize(const char *tag, char out[4])
      * byte for byte, already lower case where the script has case */
     char low[48];
     size_t n = 0;
-    while (tag[n] && n < sizeof low - 1) {
+    while (n < sizeof low - 1 && tag[n]) {
         low[n] = (char)tolower((unsigned char)tag[n]);
         ++n;
     }

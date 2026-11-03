@@ -743,8 +743,6 @@ int decode_next_video_frame(void)
 
 
 void *video_decode_thread_func(void *arg) {
-    long long next_ms = 0;
-    double frame_ms = 33.333;
 
     while (video_thread_running) {
         if (
@@ -760,7 +758,6 @@ void *video_decode_thread_func(void *arg) {
              * 1000 pointless wakeups a second; 5 ms is still well inside a
              * frame, so nothing notices on resume. */
             usleep(5000);
-            next_ms = 0;
             continue;
         }
 

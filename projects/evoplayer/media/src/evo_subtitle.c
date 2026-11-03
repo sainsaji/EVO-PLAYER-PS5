@@ -110,7 +110,6 @@ prospero_embedded_subtitle_stream_index = -1;
 /* PROSPERO_DIRECT_SUBRIP_END */
 
 
-
 /* PROSPERO_SUBTITLE_SELECTION_STATE_START */
 
 /*
@@ -127,8 +126,6 @@ int prospero_subtitle_requested_stream = -2;
 int prospero_subtitle_use_external = 0;
 
 /* PROSPERO_SUBTITLE_SELECTION_STATE_END */
-
-
 
 
 /*
@@ -380,8 +377,6 @@ int prospero_subtitle_declared_cues(
 
     return (int)parsed;
 }
-
-
 
 
 /*
@@ -2422,60 +2417,6 @@ void prospero_subtitle_toggle(void) {
 }
 
 
-static int prospero_subtitle_collect_tracks(
-    int *tracks,
-    int capacity
-) {
-    if (
-        !tracks ||
-        capacity <= 0 ||
-        !play_fmt
-    ) {
-        return 0;
-    }
-
-    int count = 0;
-
-    /*
-     * -1 represents the matching external SRT.
-     */
-    if (
-        prospero_subtitle_count > 0 &&
-        count < capacity
-    ) {
-        tracks[count++] = -1;
-    }
-
-    for (
-        unsigned int index = 0;
-        index < play_fmt->nb_streams &&
-        count < capacity;
-        index++
-    ) {
-        AVStream *stream =
-            play_fmt->streams[index];
-
-        if (
-            !stream ||
-            !stream->codecpar ||
-            stream->codecpar->codec_type !=
-                AVMEDIA_TYPE_SUBTITLE
-        ) {
-            continue;
-        }
-
-        if (
-            prospero_embedded_subtitle_supported(
-                stream->codecpar->codec_id
-            )
-        ) {
-            tracks[count++] = (int)index;
-        }
-    }
-
-    return count;
-}
-
 
 static void prospero_subtitle_track_label(
     int track,
@@ -2648,82 +2589,6 @@ void prospero_subtitle_apply_track(int track)
     controls_last_used_ms = now_ms();
 }
 
-
-static void prospero_subtitle_cycle_track(void) {
-    if (
-        screen != SCREEN_PLAYER ||
-        !play_fmt ||
-        !current_media_path[0]
-    ) {
-        return;
-    }
-
-    int tracks[64];
-
-    int track_count =
-        prospero_subtitle_collect_tracks(
-            tracks,
-            64
-        );
-
-    if (track_count <= 0) {
-        prospero_subtitle_enabled = 0;
-
-        toast(
-            "SUBTITLES",
-            "NO SUPPORTED TEXT TRACK"
-        );
-
-        return;
-    }
-
-    int current_track =
-        prospero_subtitle_use_external
-            ? -1
-            : prospero_embedded_subtitle_stream_index;
-
-    int current_slot = -1;
-
-    for (
-        int index = 0;
-        index < track_count;
-        index++
-    ) {
-        if (tracks[index] == current_track) {
-            current_slot = index;
-            break;
-        }
-    }
-
-    int next_slot =
-        current_slot < 0
-            ? 0
-            : (current_slot + 1) % track_count;
-
-    int next_track =
-        tracks[next_slot];
-
-    char label[128];
-
-    prospero_subtitle_track_label(
-        next_track,
-        label,
-        sizeof(label)
-    );
-
-    if (
-        track_count == 1 &&
-        current_slot == 0
-    ) {
-        prospero_subtitle_enabled = 1;
-        toast("SUBTITLES", label);
-        return;
-    }
-
-    prospero_subtitle_apply_track(
-        next_track
-    );
-}
 
 /* PROSPERO_SUBTITLE_CONTROLS_END */
 void prospero_subtitle_nudge_delay(int delta_ms)

@@ -324,41 +324,6 @@ void *audio_output_thread(void *arg) {
     return NULL;
 }
 
-static float audio_get_sample(AVFrame *af, int ch, int i) {
-    int channels = af->ch_layout.nb_channels;
-    if (channels <= 0) channels = 2;
-
-    if (ch >= channels) ch = channels - 1;
-    if (ch < 0) ch = 0;
-
-    if (af->format == AV_SAMPLE_FMT_FLTP) {
-        float *d = (float*)af->data[ch];
-        return d ? d[i] : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_FLT) {
-        float *d = (float*)af->data[0];
-        return d ? d[i * channels + ch] : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_S16P) {
-        int16_t *d = (int16_t*)af->data[ch];
-        return d ? ((float)d[i] / 32768.0f) : 0.0f;
-    }
-
-    if (af->format == AV_SAMPLE_FMT_S16) {
-        int16_t *d = (int16_t*)af->data[0];
-        return d ? ((float)d[i * channels + ch] / 32768.0f) : 0.0f;
-    }
-
-    return 0.0f;
-}
-
-static int16_t audio_float_to_s16(float v) {
-    if (v > 1.0f) v = 1.0f;
-    if (v < -1.0f) v = -1.0f;
-    return (int16_t)(v * 30000.0f);
-}
 
 static void mix_audio_frame_to_queue(
     AVFrame *frame

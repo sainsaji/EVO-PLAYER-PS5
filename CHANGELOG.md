@@ -5,6 +5,29 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.14.1
+
+**Hardening and clean-up.** No new features: safer network, fewer ways to crash, less code.
+
+### Security
+
+- **Fixed: HTTPS certificates were never verified.** Any certificate was accepted, so anyone on the network path could read what EVO sends - the Stremio authKey, and the debrid keys inside addon URLs. Requests to public hosts are now checked against the Mozilla root certificates shipped in the app (`assets/certs/cacert.pem`), hostname included, TLS 1.2 or newer. Hosts on the home network (private and Tailscale addresses, `*.local`, `*.lan`, names without a dot) are not checked, since a NAS often has a self-signed certificate. Validity dates are not checked either, because a console that never syncs its clock would fail every handshake. If the certificate file cannot be read, EVO logs it and connects as before. Tested against a TLS-intercepting gateway: refused with the Mozilla roots, accepted with the gateway's own CA.
+- The saved Stremio key is validated when it is loaded, not only at sign-in, before it goes into a request body.
+
+### Stability
+
+- **Fixed: a modulo by zero in the virtual keyboard** on a row with no keys (a crash on Left/Right).
+- **Fixed: the IPTV guide parser read uninitialised channel ids** when a tag had no `id` or `src`.
+- Two traces printed 64-bit values with the wrong format.
+
+### Clean-up
+
+- Every `evo_bt` trace is now format-checked in all builds (it compiled to nothing outside the app module, hiding format errors and making trace-only variables look unused).
+- Removed dead code found by `clang -Wextra`, the Clang Static Analyzer and cppcheck: unused functions in IPTV, audio output, subtitles and the kit screens, unused variables, and the never-included duplicate `projects/evoplayer/evo_changelog.h`.
+- The PS5 build is warning-free with `-Wextra`.
+
+---
+
 ## 0.14.0
 
 **Stremio, natively: your account, your addons, your Continue Watching - and the best stream playing at once.** A fork build for an LG G5 OLED and a PS5 Pro, on top of 0.13.1.

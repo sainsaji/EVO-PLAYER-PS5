@@ -26,6 +26,16 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
+ * Release 0.14.1 (fork: hardening and clean-up)
+ */
+static const evo_changelog_item EVO_CL_0141[] = {
+    { EVO_CL_FIXED,    "HTTPS CERTIFICATES ARE VERIFIED - STREMIO KEY AND DEBRID LINKS SAFE ON THE NETWORK" },
+    { EVO_CL_FIXED,    "VIRTUAL KEYBOARD CANNOT CRASH ON AN EMPTY KEY ROW" },
+    { EVO_CL_FIXED,    "IPTV GUIDE NO LONGER READS UNSET CHANNEL IDS" },
+    { EVO_CL_IMPROVED, "CODE CLEAN-UP - DEAD CODE REMOVED, EVERY LOG LINE TYPE-CHECKED" },
+};
+
+/*
  * Release 0.14.0 (fork: native Stremio account)
  */
 static const evo_changelog_item EVO_CL_0140[] = {
@@ -258,6 +268,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
+    { "0.14.1", "HTTPS VERIFICATION & CLEAN-UP", "NOVEMBER 2026", EVO_CL_0141, sizeof(EVO_CL_0141)/sizeof(EVO_CL_0141[0]) },
     { "0.14.0", "NATIVE STREMIO: ACCOUNT, CONTINUE WATCHING & AUTO STREAM", "NOVEMBER 2026", EVO_CL_0140, sizeof(EVO_CL_0140)/sizeof(EVO_CL_0140[0]) },
     { "0.13.1", "TRUE HDR COLOUR, DV PEAK MAPPING & ONLINE SUBTITLES", "NOVEMBER 2026", EVO_CL_0131, sizeof(EVO_CL_0131)/sizeof(EVO_CL_0131[0]) },
     { "0.13.0", "UPDATER, CHAPTERS & PROVIDER SHELVES", "OCTOBER 2026", EVO_CL_0130, sizeof(EVO_CL_0130)/sizeof(EVO_CL_0130[0]) },
