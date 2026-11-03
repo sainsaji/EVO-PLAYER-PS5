@@ -100,6 +100,7 @@ private:
     double m_resumeBaseOffset = 0.0;
     bool m_musicMode = false;
     ViewMode m_viewMode = ViewMode::Fit;
+    std::string m_viewModeFor;   /* the source m_viewMode was last defaulted for */
 
     // Scrub state
     double m_scrubTargetSeconds = 0.0;

@@ -132,6 +132,22 @@ float caption_size(int face)
     }
 }
 
+/* Settings -> DEFAULT FONT STYLE: 0 standard (Inter SemiBold), 1 light (Inter
+ * Regular), 2 rounded (Montserrat), 3 bold (SemiBold drawn heavier, see
+ * draw_captions - the kit bakes no bold face). */
+const ui::FontRef &caption_font(const ui::Fonts &fonts, int style)
+{
+    switch (style)
+    {
+    case 1:
+        return fonts.regular;
+    case 2:
+        return fonts.display;
+    default:
+        return fonts.semibold;
+    }
+}
+
 } // namespace
 
 void OsdScreen::set(const evo_playback_osd_params_t &p)
@@ -235,11 +251,12 @@ void OsdScreen::update(float dt)
 
 bool OsdScreen::can_draw(const ui::Fonts &fonts) const
 {
+    const ui::FontRef &font = caption_font(fonts, raw_.subtitle_style);
     for (const std::string &l : sub_lines_)
-        if (!font_covers(*fonts.semibold.font, l))
+        if (!font_covers(*font.font, l))
             return false;
     for (const std::string &l : sub2_lines_)
-        if (!font_covers(*fonts.semibold.font, l))
+        if (!font_covers(*font.font, l))
             return false;
     /* The title is not checked: a missing glyph there costs one blank, and
      * dropping the whole kit OSD for it would cost far more. */
@@ -439,14 +456,21 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
     /* Lifted above the timeline while the chrome is up. */
     const float bottom = 1000.0f - (raw_.subtitle_raised ? 150.0f * chrome : 0.0f);
 
+    const ui::FontRef &font = caption_font(fonts, raw_.subtitle_style);
+    const bool heavy = raw_.subtitle_style == 3;
     auto block = [&](const std::vector<std::string> &lines, float last_baseline, float sz, Color ink) {
         float y = last_baseline - static_cast<float>(lines.size() - 1) * (sz * 1.25f);
         for (const std::string &l : lines)
         {
-            const float w = fonts.semibold.measure(l, sz);
+            const float w = font.measure(l, sz);
             list.rounded_rect({960 - w * 0.5f - 18, y - sz * 0.95f, w + 36, sz * 1.25f}, 10,
                               kBlack.with_alpha(0.55f));
-            ui::text(list, fonts.semibold, l, 960, y, sz, ink, Align::center);
+            if (heavy) /* thicken the strokes: the same line 1 px either side */
+            {
+                ui::text(list, font, l, 959, y, sz, ink, Align::center);
+                ui::text(list, font, l, 961, y, sz, ink, Align::center);
+            }
+            ui::text(list, font, l, 960, y, sz, ink, Align::center);
             y += sz * 1.25f;
         }
         return last_baseline - static_cast<float>(lines.size()) * (sz * 1.25f);

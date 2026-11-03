@@ -70,6 +70,9 @@ typedef struct {
     const char* subtitle_text2;
     int subtitle2_position;
     int subtitle2_color;
+    /* Settings -> DEFAULT FONT STYLE for both captions:
+     * 0 standard, 1 light, 2 rounded, 3 bold (prospero_subtitle_style). */
+    int subtitle_style;
     int chrome_hidden;
     /* GL-5 (#81): dev FPS pill (#fps-pill), independent of the OSD chrome. */
     int fps;

@@ -57,6 +57,7 @@ extern "C" {
 extern "C" {
     int prospero_secondary_position = 0;
     int prospero_secondary_color = 0;
+    int prospero_subtitle_style = 0;
 
     void evo_feedback_set_sound(int enabled) { (void)enabled; }
     void evo_feedback_set_lightbar(int enabled) { (void)enabled; }
@@ -93,7 +94,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.isSortFoldersFirst() == true, "Initial SortFoldersFirst default mismatch");
     TEST_ASSERT(svc1.isSoundFeedbackEnabled() == true, "Initial SoundFeedbackEnabled default mismatch");
     TEST_ASSERT(svc1.isLightbarFeedbackEnabled() == true, "Initial LightbarFeedbackEnabled default mismatch");
-    TEST_ASSERT(svc1.getSubtitleFontFace() == 1, "Initial SubtitleFontFace default mismatch");
+    TEST_ASSERT(svc1.getSubtitleFontFace() == 0, "Initial SubtitleFontFace default mismatch");
     TEST_ASSERT(svc1.getKeyboardType() == 1, "Initial KeyboardType default mismatch");
     TEST_ASSERT(svc1.getVideoDecoderPreference() == evo::DecoderPreference::Auto, "Initial VideoDecoderPreference default mismatch");
     TEST_ASSERT(svc1.getUpscaler() == evo::Upscaler::Off, "Initial Upscaler default mismatch");
@@ -259,7 +260,8 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.isSortFoldersFirst() == false, "Legacy sortFoldersFirst mismatch");
     TEST_ASSERT(svc.isSoundFeedbackEnabled() == false, "Legacy soundFeedbackEnabled mismatch");
     TEST_ASSERT(svc.isLightbarFeedbackEnabled() == false, "Legacy lightbarFeedbackEnabled mismatch");
-    TEST_ASSERT(svc.getSubtitleFontFace() == 2, "Legacy subtitleFontFace mismatch");
+    /* Saved but never drawn before schema 2: an old file starts on STANDARD. */
+    TEST_ASSERT(svc.getSubtitleFontFace() == 0, "Legacy subtitleFontFace not reset");
     TEST_ASSERT(svc.getKeyboardType() == 0, "Legacy keyboardType mismatch");
     TEST_ASSERT(svc.getVideoDecoderPreference() == evo::DecoderPreference::NativeHardware, "Legacy decoderPreference mismatch");
     TEST_ASSERT(svc.getUpscaler() == evo::Upscaler::Sharp, "Legacy upscaler mismatch");

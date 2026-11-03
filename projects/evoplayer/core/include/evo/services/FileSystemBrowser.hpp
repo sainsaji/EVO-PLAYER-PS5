@@ -43,7 +43,7 @@ public:
     FileCategory classifyFile(const std::string& fileName, int entryType) const override;
     const char* getFileCategoryLabel(FileCategory category) const override;
 
-    void setSortFoldersFirst(bool enabled) { m_sortFoldersFirst = enabled; }
+    void setSortFoldersFirst(bool enabled) override { m_sortFoldersFirst = enabled; }
 
     /* The mounts that have files, in order. Cached for a few seconds, so the
      * main loop can poll it for plug / unplug toasts. */

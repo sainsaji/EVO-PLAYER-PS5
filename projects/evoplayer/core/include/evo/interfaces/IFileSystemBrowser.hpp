@@ -52,6 +52,9 @@ public:
     virtual bool isSearching() const = 0;
     virtual const std::string& getSearchQuery() const = 0;
 
+    /* Settings -> FOLDERS FIRST; takes effect on the next listing. */
+    virtual void setSortFoldersFirst(bool enabled) = 0;
+
     virtual void saveLastFolder() = 0;
     virtual void loadLastFolder() = 0;
 

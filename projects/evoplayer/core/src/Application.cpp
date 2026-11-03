@@ -472,6 +472,7 @@ bool Application::initServices() {
     evo_speaker_cal_load();
     recent_load();
     favorites_load();
+    m_fileSystemBrowser->setSortFoldersFirst(m_settingsService->isSortFoldersFirst());
     m_fileSystemBrowser->loadLastFolder();
 
     toast("EVO Player", (EVO_PLAYER_VERSION[0] == 'v' || EVO_PLAYER_VERSION[0] == 'V')

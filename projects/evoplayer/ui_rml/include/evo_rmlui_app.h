@@ -45,6 +45,7 @@ struct EvoPlaybackState {
     std::string subtitle2_text;  // #110: secondary caption, same shape as subtitle_text
     int subtitle2_position = 0;  // 0 stacked above the primary, 1 top of screen
     int subtitle2_color = 0;     // 0 yellow, 1 cyan, 2 white
+    int subtitle_style = 0;      // 0 standard, 1 light, 2 rounded, 3 bold
     bool chrome_hidden = false;  // render only the caption, hide the OSD chrome
     int fps = 0;                 // #81: dev FPS pill
     bool debug_overlay = false;
@@ -70,6 +71,7 @@ struct EvoPlaybackState {
                subtitle2_text == o.subtitle2_text &&
                subtitle2_position == o.subtitle2_position &&
                subtitle2_color == o.subtitle2_color &&
+               subtitle_style == o.subtitle_style &&
                fps == o.fps && debug_overlay == o.debug_overlay &&
                music_mode == o.music_mode && music_codec == o.music_codec;
     }

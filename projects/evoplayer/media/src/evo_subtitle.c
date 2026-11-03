@@ -2672,6 +2672,7 @@ int prospero_secondary_use_external = 0;
 int prospero_secondary_delay_ms = 0;
 int prospero_secondary_position = PROSPERO_SECONDARY_POS_STACKED;
 int prospero_secondary_color = 0;
+int prospero_subtitle_style = 0;
 
 static char prospero_secondary_media[768] = {0};
 

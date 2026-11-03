@@ -421,10 +421,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
         break;
 
     case SettingKey::SubtitleFont: {
-        static const char* kFaces[] = {"STANDARD", "ROUNDED", "BOLD", "CONDENSED"};
+        /* Order is prospero_subtitle_style; evo_hui_osd.cpp caption_font draws them. */
+        static const char* kFaces[] = {"STANDARD", "LIGHT", "ROUNDED", "BOLD"};
         int face = settings->getSubtitleFontFace();
         if (face < 0 || face >= 4) face = 0;
-        d = valueDef(key, "DEFAULT FONT STYLE", "ON-SCREEN TEXT TYPEFACE",
+        d = valueDef(key, "DEFAULT FONT STYLE", "SUBTITLE TYPEFACE",
                      "../icons/icon_type.png", 4, face);
         for (int i = 0; i < 4; ++i) d.opt_label[i] = kFaces[i];
         break;
@@ -762,7 +763,11 @@ void toggleSetting(SettingKey key) {
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
     case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;
     case SettingKey::Lightbar:         st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled()); break;
-    case SettingKey::FoldersFirst:     st->setSortFoldersFirst(!st->isSortFoldersFirst()); break;
+    case SettingKey::FoldersFirst:
+        st->setSortFoldersFirst(!st->isSortFoldersFirst());
+        if (auto fs = Application::getInstance().getFileSystemBrowser())
+            fs->setSortFoldersFirst(st->isSortFoldersFirst());
+        break;
     case SettingKey::DebugOverlay:     st->setDebugOverlayEnabled(!st->isDebugOverlayEnabled()); break;
     default: return;
     }

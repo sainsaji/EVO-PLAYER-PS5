@@ -72,6 +72,9 @@ extern int prospero_secondary_use_external;       /* the secondary is the SRT   
 extern int prospero_secondary_delay_ms;           /* its own sync, like the primary's */
 extern int prospero_secondary_position;           /* PROSPERO_SECONDARY_POS_*   */
 extern int prospero_secondary_color;              /* 0 yellow, 1 cyan, 2 white  */
+/* Settings -> DEFAULT FONT STYLE, for both captions. */
+#define PROSPERO_SUBTITLE_STYLES 4                 /* 0 standard, 1 light, 2 rounded, 3 bold */
+extern int prospero_subtitle_style;
 
 /* Written by main.c's seek / start_video_playback flush path (A5 cleans up). */
 extern AVCodecContext *prospero_embedded_subtitle_ctx;

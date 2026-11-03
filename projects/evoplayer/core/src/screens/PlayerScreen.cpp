@@ -931,6 +931,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
+        p.subtitle_style = prospero_subtitle_style;
         p.chrome_hidden = 0;
         p.fps = perf_render_fps;
         p.debug_overlay = evo_fps_counter_enabled();
@@ -1005,6 +1006,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle_text2 = secondarySubText[0] ? secondarySubText : nullptr;
         p.subtitle2_position = prospero_secondary_position;
         p.subtitle2_color = prospero_secondary_color;
+        p.subtitle_style = prospero_subtitle_style;
         p.chrome_hidden = 1;
         p.alpha = 255;
         p.fps = perf_render_fps;

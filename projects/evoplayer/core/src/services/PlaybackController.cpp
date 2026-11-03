@@ -695,6 +695,15 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     evo_url_sanitize(rawUrl.c_str(), safeBuf, sizeof(safeBuf));
     const std::string filePath = safeBuf;
 
+    /* Settings -> DEFAULT ASPECT RATIO: every new video starts in it. A reopen
+     * of the same one (audio switch, quality change, replay) keeps the mode
+     * the user toggled to. */
+    if (m_viewModeFor != filePath) {
+        m_viewModeFor = filePath;
+        if (ISettingsService* settings = Application::getInstance().getSettingsService())
+            m_viewMode = settings->getDefaultViewMode();
+    }
+
     /* A pinned quality belongs to the source it was pinned on. */
     if (m_pinnedVideoFor != filePath) {
         m_pinnedVideoStream = -1;
@@ -1379,6 +1388,17 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
     // Subtitle setup
     prospero_subtitle_clear();
     prospero_subtitle_load_for_media(filePath.c_str());
+    /* A matching .srt next to the file is the track to show, when the user
+     * asked for subtitles on their own (Settings > Auto Subtitles) and did not
+     * just pick an embedded track. The setting was saved but never applied, so
+     * a sidecar loaded and stayed off. */
+    if (prospero_subtitle_count > 0 && prospero_subtitle_requested_stream < 0) {
+        auto settings = Application::getInstance().getSettingsService();
+        if (!settings || settings->isAutoSubtitlesEnabled()) {
+            prospero_subtitle_select_primary(-1);
+            EVO_LOGI("subtitles", "sidecar on: %d cues", prospero_subtitle_count);
+        }
+    }
     if (!m_source.subtitleUrl.empty()) {
         /* A media server's sidecar subtitle: fetch it, then it loads like a local .srt. */
         char* body = nullptr;

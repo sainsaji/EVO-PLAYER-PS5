@@ -37,7 +37,7 @@ public:
     void setLightbarFeedbackEnabled(bool enabled) override;
 
     int getSubtitleFontFace() const override { return m_subtitleFontFace; }
-    void setSubtitleFontFace(int face) override { m_subtitleFontFace = face; }
+    void setSubtitleFontFace(int face) override;
 
     bool isAskStreamEnabled() const override { return m_askStream; }
     void setAskStreamEnabled(bool enabled) override { m_askStream = enabled; }
@@ -111,7 +111,7 @@ private:
     std::string m_themeName = "EVO Dark";
     bool m_soundFeedbackEnabled = true;
     bool m_lightbarFeedbackEnabled = true;
-    int m_subtitleFontFace = 1; // Medium
+    int m_subtitleFontFace = 0; // STANDARD (prospero_subtitle_style)
     bool m_askStream = true;    // Live TV: pick the stream yourself
     int m_secondarySubtitlePosition = 0; // #110: stacked above the primary
     int m_secondarySubtitleColor = 0;    // #110: yellow

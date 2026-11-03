@@ -167,8 +167,14 @@ void SettingsService::setSecondarySubtitleColor(int color) {
     prospero_secondary_color = color;
 }
 
+void SettingsService::setSubtitleFontFace(int face) {
+    if (face < 0 || face >= PROSPERO_SUBTITLE_STYLES) return;
+    m_subtitleFontFace = face;
+    prospero_subtitle_style = face;
+}
+
 /* Bumped when a release must reset saved values once on upgrade (see loadSettings). */
-static const int kSettingsSchema = 1;
+static const int kSettingsSchema = 2;
 
 bool SettingsService::saveSettings() {
     const char* filePath = evo_data_path("evo_player_settings.cfg");
@@ -321,7 +327,7 @@ bool SettingsService::loadSettings() {
         evo_feedback_set_lightbar(rawLightbarFeedback);
     }
     if (readCount >= 10) {
-        m_subtitleFontFace = rawSubtitleFace;
+        setSubtitleFontFace(rawSubtitleFace);
     }
     if (readCount >= 11) {
         /* Marker 2 = saved with the corrected default. Files carrying
@@ -383,15 +389,19 @@ bool SettingsService::loadSettings() {
      * Experimental, where everything starts off. A file from before that
      * still carried "Deep Blacks HIGH", so it stayed on where nobody looked
      * for it. Reset them once and save; the user's later choice sticks. */
-    if (readCount < 30 || rawSchema < kSettingsSchema) {
+    const int schema = readCount >= 30 ? rawSchema : 0;
+    if (schema < 1) {
         if (m_deepBlacks != DeepBlacks::Off || m_motionSmoothing != MotionSmoothing::Off || m_matchVideoRate)
             EVO_LOGW("settings", "experimental settings reset to off (deep blacks %d, motion %d, match rate %d)",
                      static_cast<int>(m_deepBlacks), static_cast<int>(m_motionSmoothing), m_matchVideoRate ? 1 : 0);
         m_deepBlacks = DeepBlacks::Off;
         m_motionSmoothing = MotionSmoothing::Off;
         m_matchVideoRate = false;
-        saveSettings();
     }
+    /* DEFAULT FONT STYLE was saved but never drawn before schema 2, and its
+     * old default (1) now means LIGHT: start everyone on STANDARD once. */
+    if (schema < 2) setSubtitleFontFace(0);
+    if (schema < kSettingsSchema) saveSettings();
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

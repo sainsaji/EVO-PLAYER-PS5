@@ -219,6 +219,9 @@ div, span, p {
 #subtitle-box.sub-small  { font-size: 31dp; }
 #subtitle-box.sub-medium { font-size: 40dp; }
 #subtitle-box.sub-large  { font-size: 52dp; }
+/* DEFAULT FONT STYLE = LIGHT. The kit OSD draws the other styles; this
+ * fallback (scripts the kit cannot draw) only tells light from bold. */
+#subtitle-box.sub-light  { font-weight: normal; }
 
 /* Secondary caption (#110). Same plate as the primary, one size step smaller
  * and in its own colour so the two lines of dialogue never read as one. Each
