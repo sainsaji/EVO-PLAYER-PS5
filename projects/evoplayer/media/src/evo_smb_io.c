@@ -102,7 +102,7 @@ static void *smb_probe_thread(void *arg) {
     if (getaddrinfo(p->host, port_str, &hints, &res) == 0 && res) {
         int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
         if (fd >= 0) {
-            ok = (connect(fd, res->ai_addr, res->ai_addrlen) == 0);
+            ok = (connect(fd, res->ai_addr, res->ai_addrlen) == 0);   /* connect-ok: on the precheck's own worker */
             close(fd);
         }
         freeaddrinfo(res);

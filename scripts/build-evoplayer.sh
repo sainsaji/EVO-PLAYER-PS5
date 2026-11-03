@@ -97,6 +97,9 @@ fi
 # list, so a bare `make` fails to link.
 [[ -n "${EXTRA_CFLAGS:-}" ]] && MAKE_ARGS+=("EXTRA_CFLAGS=${EXTRA_CFLAGS}")
 
+# A raw connect() is a 75 s freeze on a dead host on the PS5 (see the script).
+"${REPO_ROOT}/tools/check_raw_connect.sh" || die "raw connect() found - see above"
+
 begin "building EVO Player${STAGE:+ (stage ${STAGE})}"
 BUILD_LOG="${LOG_OUT}/evoplayer-$(date -u +%Y%m%dT%H%M%SZ).log"
 

@@ -306,6 +306,8 @@ else
     # fallbacks.
     EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
     [[ -n "${EVO_VER}" ]] || die "projects/evoplayer/VERSION is empty"
+    # A raw connect() is a 75 s freeze on a dead host on the PS5 (see the script).
+    "${REPO_ROOT}/tools/check_raw_connect.sh" || die "raw connect() found - see above"
     # The quotes must survive two hops - this shell, then the make recipe's
     # shell. Written as \\" the backslash escaped the space that followed and
     # glued the NEXT -D flag into this one's value, so --usb-remote silently

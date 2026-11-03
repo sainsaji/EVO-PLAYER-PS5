@@ -251,7 +251,7 @@ static void *conn_job_run(void *arg)
     int fd = socket(j->family, j->socktype, j->protocol);
     if (fd < 0) {
         err = errno;
-    } else if (connect(fd, (const struct sockaddr *)&j->addr, j->addrlen) != 0) {
+    } else if (connect(fd, (const struct sockaddr *)&j->addr, j->addrlen) != 0) {   /* connect-ok: the bounded worker itself */
         err = errno;
         close(fd);
         fd = -1;

@@ -435,7 +435,7 @@ static void phone_local_ip(char *out, size_t cap)
     to.sin_addr.s_addr = htonl(0x08080808u);     /* 8.8.8.8 */
     struct sockaddr_in me;
     socklen_t ml = sizeof me;
-    if (connect(s, (struct sockaddr *)&to, sizeof to) == 0 &&
+    if (connect(s, (struct sockaddr *)&to, sizeof to) == 0 &&   /* connect-ok: UDP, sends nothing */
         getsockname(s, (struct sockaddr *)&me, &ml) == 0 && me.sin_addr.s_addr != 0) {
         uint32_t a = ntohl(me.sin_addr.s_addr);
         snprintf(out, cap, "%u.%u.%u.%u", (a >> 24) & 255, (a >> 16) & 255, (a >> 8) & 255, a & 255);

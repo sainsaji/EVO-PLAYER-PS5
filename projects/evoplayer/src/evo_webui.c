@@ -64,6 +64,7 @@
 #include "evo_webui.h"
 #include "evo_boot_trace.h"
 #include "evo_provider.h"     /* evo_provider_parse_web_source */
+#include "evo_net.h"          /* evo_net_connect_addr - a connect that gives up in time */
 #include "evo_data_path.h"    /* evo_data_path, evo_mkdir - the saved page storage */
 
 /* ---- libSceWebBrowserDialog, laid out after SharpProspero
@@ -610,36 +611,13 @@ static void u_close(uconn_t *u)
     if (u->fd >= 0) { close(u->fd); u->fd = -1; }
 }
 
-/* A connected blocking socket, or -1. Non-blocking connect + poll, as in
- * evo_net.c: a blocking connect() to an address nobody answers sits in the
- * kernel's SYN retries for ~75 s, with the user staring at a blank page. */
+/* A connected blocking socket, or -1. connect() on this console ignores
+ * O_NONBLOCK and SO_SNDTIMEO and sits ~75 s in the SYN retries on an address
+ * nobody answers, with the user staring at a blank page; evo_net_connect_addr()
+ * runs it on a worker and stops waiting at the deadline. */
 static int connect_bounded(const struct addrinfo *rp, int timeout_ms)
 {
-    int fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (fd < 0) return -1;
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    int rc = connect(fd, rp->ai_addr, rp->ai_addrlen);
-    if (rc != 0 && flags >= 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
-        struct pollfd pfd;
-        pfd.fd = fd;
-        pfd.events = POLLOUT;
-        pfd.revents = 0;
-        int pr;
-        do {
-            pr = poll(&pfd, 1, timeout_ms);
-        } while (pr < 0 && errno == EINTR);
-        int err = 0;
-        socklen_t len = sizeof err;
-        rc = (pr > 0 && getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) ? 0 : -1;
-        if (pr == 0) errno = ETIMEDOUT;
-    }
-    if (rc != 0) {
-        close(fd);
-        return -1;
-    }
-    if (flags >= 0) fcntl(fd, F_SETFL, flags);
-    return fd;
+    return evo_net_connect_addr(rp, timeout_ms, NULL);
 }
 
 /* 0 on success; on failure *why says which step. */
@@ -1311,7 +1289,7 @@ static void server_stop(void)
         a.sin_family = AF_INET;
         a.sin_port = htons((uint16_t)s_port);
         a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        connect(w, (struct sockaddr *)&a, sizeof a);
+        connect(w, (struct sockaddr *)&a, sizeof a);   /* connect-ok: loopback wake, answers at once */
         close(w);
     }
     close(s_listen_fd);
