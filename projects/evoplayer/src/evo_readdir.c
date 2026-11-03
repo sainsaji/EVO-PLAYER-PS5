@@ -12,6 +12,7 @@
 
 #include <sys/stat.h>
 #include "evo_boot_trace.h"
+#include "evo_boot_log.h"
 
 #ifdef EVO_APP_MODULE
 
@@ -59,7 +60,7 @@ evo_dir_t *evo_opendir(const char *path)
                 strncpy(seen[seen_n], path, sizeof seen[0] - 1);
                 seen[seen_n++][sizeof seen[0] - 1] = 0;
             }
-            evo_bt("evo_opendir: open('%s') failed (errno=%d)", path, e);
+            EVO_LOGE("readdir", "evo_opendir: open('%s') failed (errno=%d)", path, e);
         }
         errno = e;
         return NULL;
@@ -91,7 +92,7 @@ evo_dir_t *evo_opendir(const char *path)
     d->buf_size = bsize;
     d->fd = fd;
     d->base = 0;
-    evo_bt("evo_opendir('%s') -> fd=%d bsize=%zu", path, fd, bsize);
+    EVO_LOGI("readdir", "evo_opendir('%s') -> fd=%d bsize=%zu", path, fd, bsize);
     return d;
 }
 
@@ -110,7 +111,7 @@ struct dirent *evo_readdir(evo_dir_t *d)
                 n = getdirentries(d->fd, d->buf, (int)d->buf_size, &d->base);
             }
             if (n <= 0) {
-                evo_bt("evo_readdir: fd=%d read returned %d (errno=%d)",
+                EVO_LOGI("readdir", "evo_readdir: fd=%d read returned %d (errno=%d)",
                        d->fd, n, errno);
                 return NULL;   /* end of directory, or error */
             }
@@ -120,7 +121,7 @@ struct dirent *evo_readdir(evo_dir_t *d)
 
         struct dirent *de = (struct dirent *)(d->buf + d->pos);
         if (de->d_reclen == 0) {
-            evo_bt("evo_readdir: fd=%d malformed entry d_reclen=0", d->fd);
+            EVO_LOGE("readdir", "evo_readdir: fd=%d malformed entry d_reclen=0", d->fd);
             return NULL;       /* malformed block - stop rather than spin */
         }
         d->pos += de->d_reclen;

@@ -16,6 +16,7 @@ extern "C" {
 #include "addon_xtream.h"                           /* the XMLTV guide row (#149) */
 #include "provider_stremio.h"                     /* the Remove-addon rows */
 #include "evo_boot_trace.h"
+#include "evo_boot_log.h"
 #include "evo_readdir.h"
 #include "evo_favorites.h"
 #include "evo_stream_io.h"                          /* evo_stream_headers */
@@ -219,7 +220,7 @@ int launch_choice(int idx)
     if (rc != 0) {
         g_start_running = false;
         g_resolve_finished = true;
-        evo_bt("provider: pthread_create failed for playback worker rc=%d", rc);
+        EVO_LOGE("provider", "pthread_create failed for playback worker rc=%d", rc);
         evo_rmlui_provider_set_tuning(0);
         evo_rmlui_provider_set_loading(0, "");
         evo_rmlui_provider_set_status("Failed to start playback worker thread", 1);
@@ -313,7 +314,7 @@ void on_variants(int count, const evo_stream_choice_t* variants, void* ud)
         pp.kind[n++] = KindGuess;
     }
     pp.choice_count = n;
-    evo_bt("provider: stream picker: %d variant(s) read for %s, %d choice(s) in all",
+    EVO_LOGI("provider", "stream picker: %d variant(s) read for %s, %d choice(s) in all",
            count, pp.title, n);
 
     /* update() reflects it on screen: the picker is already open, and the rows
@@ -329,7 +330,7 @@ void on_resolved(int ok, const evo_stream_choice_t* choices, int count, void* ud
 
     if (!ok || count <= 0 || !choices) {
         g_resolve_finished = true;
-        evo_bt("provider: resolve failed for %s/%s", pp->provider, pp->item_id);
+        EVO_LOGE("provider", "resolve failed for %s/%s", pp->provider, pp->item_id);
         char why[256];
         const bool have = evo_failure_reason(why, sizeof why) != 0;
         toast("STREAM", have ? why : "Failed to resolve channel stream");
@@ -480,7 +481,7 @@ void ProviderHostScreen::onEnter()
          * card they left. */
         if (m_opened && m_navigatingToPlayer) {
             m_navigatingToPlayer = false;
-            evo_bt("prov_screen: returning from playback, keeping provider '%s' open",
+            EVO_LOGI("provider", "returning from playback, keeping provider '%s' open",
                    m_providerId.c_str());
             /* A service that tracks progress has just been told where playback
              * stopped: re-read the level so the card shows it (same cursor). */
@@ -558,7 +559,7 @@ void ProviderHostScreen::openProvider(const std::string& want)
     /* Returning from Player playback into the same provider: keep it. */
     if (m_opened && m_providerId == want) {
         m_navigatingToPlayer = false;
-        evo_bt("prov_screen: returning from playback, keeping provider '%s' open", m_providerId.c_str());
+        EVO_LOGI("provider", "returning from playback, keeping provider '%s' open", m_providerId.c_str());
         return;
     }
 
@@ -579,10 +580,10 @@ void ProviderHostScreen::openProvider(const std::string& want)
             }
         }
     }
-    evo_bt("prov_screen: onEnter calling evo_rmlui_provider_open('%s')", m_providerId.c_str());
+    EVO_LOGI("provider", "onEnter calling evo_rmlui_provider_open('%s')", m_providerId.c_str());
     m_opened = evo_rmlui_provider_open(m_providerId.c_str(),
                                         DisplayWidth, DisplayHeight) != 0;
-    evo_bt("prov_screen: onEnter evo_rmlui_provider_open returned opened=%d", m_opened ? 1 : 0);
+    EVO_LOGI("provider", "onEnter evo_rmlui_provider_open returned opened=%d", m_opened ? 1 : 0);
     if (m_opened) {
         /* First run: nothing to browse yet, so land on the provider's setup
          * page (IPTV: type an M3U URL or pick one from USB). */
@@ -591,7 +592,7 @@ void ProviderHostScreen::openProvider(const std::string& want)
             evo_rmlui_provider_show_setup();
     }
     if (!m_opened) {
-        evo_bt("provider: could not open host for '%s'", m_providerId.c_str());
+        EVO_LOGE("provider", "could not open host for '%s'", m_providerId.c_str());
         toast("PROVIDERS", "That provider is not available");
         if (auto sm = Application::getInstance().getScreenManager())
             sm->navigateTo(ScreenId::MainMenu);
@@ -632,7 +633,7 @@ void ProviderHostScreen::openWebProvider()
         }
     }
     int rc = evo_webui_open_ex(upstream.c_str(), page.c_str(), p->web_ui_hook);
-    evo_bt("prov_screen: web UI '%s' -> %s rc=%d", p->id, url, rc);
+    EVO_LOGI("provider", "web UI '%s' -> %s rc=%d", p->id, url, rc);
     if (rc < 0) {
         toast(p->name, "Set the server as http(s)://<host>:<port>");
         enterPicker();
@@ -960,7 +961,7 @@ void ProviderHostScreen::openPickerMenu()
         m_menu.resize(EVO_RMLUI_LIST_MENU_ROWS);
     m_menuIndex = 0;
     evo_feedback(EVO_FB_OPEN);
-    evo_bt("prov_screen: options menu for '%s' (%d rows)", p->id, (int)m_menu.size());
+    EVO_LOGI("provider", "options menu for '%s' (%d rows)", p->id, (int)m_menu.size());
 }
 
 bool ProviderHostScreen::pickerMenuInput(uint32_t pressed)
@@ -989,7 +990,7 @@ void ProviderHostScreen::runPickerMenu(const std::string& action)
     const std::string id = m_pickIds[m_pickIndex];
     const evo_provider_t* p = evo_provider_find(id.c_str());
     if (!p) return;
-    evo_bt("prov_screen: options '%s' on '%s'", action.c_str(), id.c_str());
+    EVO_LOGI("provider", "options '%s' on '%s'", action.c_str(), id.c_str());
 
     if (action == "open") {
         choosePicked(false);
@@ -1054,7 +1055,7 @@ void ProviderHostScreen::runPickerMenu(const std::string& action)
     } else if (action == "signout") {
         p->sign_out();
         evo_feedback(EVO_FB_CONFIRM);
-        evo_bt("prov_screen: signed out of '%s'", p->id);
+        EVO_LOGI("provider", "signed out of '%s'", p->id);
         toast(p->name, "Signed out");
         int keep = m_pickIndex;
         enterPicker();
@@ -1146,7 +1147,7 @@ void ProviderHostScreen::chooseStream(int index)
     toast(live ? "LIVE TV" : (tp ? tp->name : "PROVIDER"), msg);
     evo_rmlui_provider_set_tuning(1);
     evo_rmlui_provider_set_loading(1, msg);
-    evo_bt("prov_screen: stream %d chosen for %s: %s", index, g_pending.title,
+    EVO_LOGI("provider", "stream %d chosen for %s: %s", index, g_pending.title,
            g_pending.choices[index].url);
 
     if (launch_choice(index) != 0) {
@@ -2620,11 +2621,11 @@ void ProviderHostScreen::update(double deltaMs)
             m_discovering = false;
             const evo_provider_t* p = evo_provider_find(m_providerId.c_str());
             if (rc > 0) {
-                evo_bt("prov_screen: discovery found %s for '%s'", addr, m_providerId.c_str());
+                EVO_LOGI("provider", "discovery found %s for '%s'", addr, m_providerId.c_str());
                 toast(p ? p->name : "PROVIDER", "Found a server - press Triangle to use it");
                 openSourceKeyboard(addr);
             } else {
-                evo_bt("prov_screen: discovery found nothing for '%s'", m_providerId.c_str());
+                EVO_LOGW("provider", "discovery found nothing for '%s'", m_providerId.c_str());
                 toast(p ? p->name : "PROVIDER", "No server found - type its address");
                 openSourceKeyboard("http://");
             }
@@ -2666,7 +2667,7 @@ void ProviderHostScreen::update(double deltaMs)
      * "Could not load the catalog" with no way forward. */
     if (const evo_provider_t* sp = evo_provider_find(m_providerId.c_str())) {
         if (sp->needs_sign_in && sp->sign_in && sp->needs_sign_in()) {
-            evo_bt("prov_screen: '%s' session rejected - back to sign-in", m_providerId.c_str());
+            EVO_LOGW("provider", "'%s' session rejected - back to sign-in", m_providerId.c_str());
             toast(sp->name, "Please sign in again");
             evo_rmlui_provider_close();
             m_opened = false;
@@ -2730,7 +2731,7 @@ void ProviderHostScreen::update(double deltaMs)
                 else
                     std::snprintf(msg, sizeof(msg), "%s did not open - pick another", bad.label);
                 toast("STREAM", msg);
-                evo_bt("prov_screen: chosen stream %d failed (%s) - back to the list",
+                EVO_LOGW("provider", "chosen stream %d failed (%s) - back to the list",
                        g_pending.active_choice, bad.url);
                 evo_rmlui_provider_set_tuning(0);
                 evo_rmlui_provider_set_loading(0, "");
@@ -2741,7 +2742,7 @@ void ProviderHostScreen::update(double deltaMs)
             }
             if (g_pending.active_choice + 1 < g_pending.choice_count) {
                 g_pending.active_choice++;
-                evo_bt("prov_screen: stream choice %d failed, falling back to choice %d: %s",
+                EVO_LOGW("provider", "stream choice %d failed, falling back to choice %d: %s",
                        g_pending.active_choice - 1, g_pending.active_choice,
                        g_pending.choices[g_pending.active_choice].url);
                 char retry_msg[128];
@@ -2777,7 +2778,7 @@ void ProviderHostScreen::update(double deltaMs)
         if (waited > kVariantsGiveUpMs) {
             ++g_pick_gen;
             g_variants = VariantsState::Failed;
-            evo_bt("provider: stream picker: the master did not answer in %d ms", kVariantsGiveUpMs);
+            EVO_LOGW("provider", "stream picker: the master did not answer in %d ms", kVariantsGiveUpMs);
         }
     }
 
@@ -2890,7 +2891,7 @@ void ProviderHostScreen::beginSignIn()
     m_signInUser.clear();
     m_signInPass.clear();
     m_qcCode.clear();
-    evo_bt("prov_screen: sign-in to '%s' begins", id.c_str());
+    EVO_LOGI("provider", "sign-in to '%s' begins", id.c_str());
     /* Quick Connect first where the server has it: approving a six-digit code
      * on a phone beats spelling a password with the D-pad. A server with it
      * switched off answers the start with an error and falls through. */
@@ -2928,7 +2929,7 @@ void ProviderHostScreen::OnQcCode(int ok, const char* code, void* ud)
     auto* self = static_cast<ProviderHostScreen*>(ud);
     if (!self || self->m_signIn != SignIn::QcStart) return;
     if (!ok || !code || !code[0]) {
-        evo_bt("prov_screen: quick connect unavailable for '%s' - password sign-in",
+        EVO_LOGW("provider", "quick connect unavailable for '%s' - password sign-in",
                self->m_providerId.c_str());
         const evo_provider_t* provider =
             evo_provider_find(self->m_providerId.c_str());
@@ -2950,7 +2951,7 @@ void ProviderHostScreen::OnQcCode(int ok, const char* code, void* ud)
     /* Jellyfin drops a pending request after about ten minutes. */
     self->m_qcDeadlineMs = qc_now_ms() + 9 * 60 * 1000;
     self->m_signIn = SignIn::QcWait;
-    evo_bt("prov_screen: quick connect code %s for '%s'", code, self->m_providerId.c_str());
+    EVO_LOGI("provider", "quick connect code %s for '%s'", code, self->m_providerId.c_str());
 }
 
 void ProviderHostScreen::OnQcPoll(int state, const char* msg, void* ud)
@@ -2965,7 +2966,7 @@ void ProviderHostScreen::OnQcPoll(int state, const char* msg, void* ud)
     }
     self->m_signIn = SignIn::None;
     self->m_qcCode.clear();
-    evo_bt("prov_screen: quick connect for '%s' -> %s (%s)", self->m_providerId.c_str(),
+    EVO_LOGI("provider", "quick connect for '%s' -> %s (%s)", self->m_providerId.c_str(),
            state > 0 ? "signed in" : "failed", msg ? msg : "");
     toast(p ? p->name : "PROVIDER", msg && msg[0] ? msg : (state > 0 ? "Signed in" : "Quick Connect failed"));
     if (state > 0) {
@@ -2990,7 +2991,7 @@ bool ProviderHostScreen::signInQcInput(uint32_t pressed)
         m_signIn = SignIn::None;
         const evo_provider_t* cp = evo_provider_find(m_providerId.c_str());
         if (cp && cp->qc_cancel) cp->qc_cancel();
-        evo_bt("prov_screen: quick connect for '%s' cancelled", m_providerId.c_str());
+        EVO_LOGI("provider", "quick connect for '%s' cancelled", m_providerId.c_str());
     }
     return true;
 }
@@ -3079,7 +3080,7 @@ void ProviderHostScreen::OnSignInDone(int ok, const char* msg, void* ud)
     if (!self || self->m_signIn != SignIn::Signing) return;
     self->m_signIn = SignIn::None;
     const evo_provider_t* p = evo_provider_find(self->m_providerId.c_str());
-    evo_bt("prov_screen: sign-in to '%s' -> %s (%s)", self->m_providerId.c_str(),
+    EVO_LOGI("provider", "sign-in to '%s' -> %s (%s)", self->m_providerId.c_str(),
            ok ? "ok" : "failed", msg ? msg : "");
     char why[256];
     const char* shown = msg && msg[0] ? msg : nullptr;
@@ -3100,7 +3101,7 @@ bool ProviderHostScreen::adoptChannelPlaylist(const char* url)
     if (!ip || !ip->set_source || ip->set_source(url) != 0)
         return false;
     evo_provider_set_enabled(ip->id, ip->is_configured() ? 1 : 0);
-    evo_bt("prov_screen: the channel address is a playlist - loaded as the IPTV source");
+    EVO_LOGI("provider", "the channel address is a playlist - loaded as the IPTV source");
     toast("IPTV", "That link is a playlist - loading it as your channel list");
 
     evo_rmlui_provider_set_tuning(0);
@@ -3156,7 +3157,7 @@ void ProviderHostScreen::signInStep()
     case SignIn::User:
     case SignIn::Pass:
         if (!evo_keyboard_is_open()) {
-            evo_bt("prov_screen: sign-in to '%s' cancelled", m_providerId.c_str());
+            EVO_LOGI("provider", "sign-in to '%s' cancelled", m_providerId.c_str());
             m_signIn = SignIn::None;
         }
         break;

@@ -21,12 +21,13 @@ curl "http://<ps5>:9780/raw?grep=hui&level=warn"
 ```
 
 - Every `deploy-app.sh --ffpfsc` deletes `evo.log`, `evo_status` and
-  `evo_compat_report.txt`, so each launch starts clean.
+  `evo_report.txt`, so each launch starts clean.
 - **A static log proves nothing about whether EVO exited.** The idle heartbeat is
   about six minutes apart.
 - Check the build id on the first lines against the build you meant to test.
-- **klog** carries the same lines live through `sceKernelDebugOutText`, and is the
-  only channel that shows a launch dying before the sandbox opens.
+- **klog** carries the boot lines (`evo_bt`) live through `sceKernelDebugOutText`,
+  and is the only channel that shows a launch dying before the sandbox opens.
+  Runtime lines are in `evo.log` and on `:9780` only.
   `./tools/klog.sh` follows and records (`--quiet`, `--grep evo`, `--once`,
   `--tail 200`, `--sessions`) to `output/logs/klog/klog-<UTC>.log` and an
   append-only `klog-all.log`; it reconnects when the payload restarts and logs the
@@ -34,6 +35,28 @@ curl "http://<ps5>:9780/raw?grep=hui&level=warn"
   klog and the app module has none at all.
 - On-screen notification popups of each line are off since #51; `package-app.sh
   --breadcrumbs` brings them back.
+- Identical lines in a row are written once, then
+  `log: last line repeated N more times over M ms` when a different line comes or
+  the repeats stop for 2 s (at most a minute later).
+
+### Writing a log line
+
+Every line is `[seconds] LEVEL tag: text`. The live viewer colours and filters on
+the level and treats the first `word:` as the tag (`tag:net` in its filter box).
+
+| Use | For |
+|---|---|
+| `EVO_LOGI/W/E("tag", fmt, ...)` (`evo_boot_log.h`) | anything at runtime. `E` = a failure the user sees (server unreachable, login refused, file unreadable), `W` = one EVO works around (fallback, skip, retry), `I` = the rest. No klog write, no `EVO boot:` prefix |
+| `EVO_LOGW_EVERY(ms, "tag", fmt, ...)` (also `I`/`E`) | a failure that can repeat fast (reconnect loop, per-packet error): at most one line per `ms` from that call site, with the count it dropped |
+| `PROV_LOG/WARN/ERR(fmt, ...)` (`evo_provider_log.h`) | provider and network C code; start the text with its own tag (`"iptv: ..."`, `"net: ..."`). Prints to stderr on the host |
+| `evo_bt(...)` (`evo_boot_trace.h`) | boot only (before the frame loop, the jailbreak, probes): it also writes klog |
+
+Say what failed and why: the operation, the host or path, and the HTTP status,
+FTP reply, `errno` or SSL error. Never put a password, token or query string in
+the text; `evo_log_redact` masks `key=value` secrets, not a key inside a URL path.
+Nothing per frame. `evo_log_mono_ms()` gives the time for a "took N ms" line. The
+`EVO_LOG*` macros compile to nothing in host builds (tests, uiview), but the
+format is still checked.
 
 ### Lines worth knowing
 
@@ -45,6 +68,10 @@ curl "http://<ps5>:9780/raw?grep=hui&level=warn"
 | `dns:` | one line per real lookup: the host, the addresses, the console-DNS timing |
 | `sweep v=1 ...` | one line per played file, when its decoder closes |
 | `updater:` | the in-app updater |
+| `net:` | every failed HTTP request (method, path, the reason in the words the user sees, time taken), plus DNS, connect and TLS failures with their cause. Successful page requests are INFO |
+| `ftp:` / `netstore:` / `browser:` | FTP commands that failed (with the reply), SMB errors, share config load/save, and each folder listing or connection test with its time |
+| `jellyfin:` `emby:` `xtream:` `iptv:` `stremio:` `nuvio:` `plex:` `bundle:` | provider sign-in, catalog and stream failures |
+| `ffmpeg:` | FFmpeg's own warnings and errors, at its own level |
 | `hui:` | the kit screens starting, or switched off |
 | `CRASH signal=... addr=...` | written by the crash handler with raw I/O (async-signal-safe) |
 
@@ -68,6 +95,8 @@ and honour `PS5_LOG_PORT` from the environment.
 | `/stream` | Server-Sent Events, one per line |
 | `/log` | the log in a browser |
 | `/snapshot` | the last ~128 KiB, then closes |
+| `/report` | the phone page for a bug report (#229): Download / Share / Copy, and the last warnings and errors. Settings → System & Diagnostics → Report a Problem shows its QR |
+| `/report.txt` | that report as a download: version, build, model, `/stats`, the settings file and the last 1.5 MB of `evo.log` from disk (with `evo.log.1` if there is room), every line redacted again. The network-shares file (it has passwords) is never in it |
 | `/stats` | one JSON snapshot of memory pools, read-ahead, network reader and playback (`src/evo_stats.c`) |
 | `/input`, `/input/state`, `POST /input` | the phone page for typing into an open EVO keyboard (needs the `X-EVO-Input` header; refused unless a phone keyboard is open) |
 
@@ -128,8 +157,8 @@ per use, where noted) and need no rebuild.
 | `/mnt/usb0/evo_interp_stage`, `evo_interp_debug` | a digit stops the motion-smoothing chain early, or replaces its output with a debug view ([../hardware/motion-smoothing.md](../hardware/motion-smoothing.md)) |
 | `/mnt/usb0/evo_vdec_hang` | test hook: the 100th decode blocks forever, to exercise the watchdog |
 
-Written by EVO: `evo_compat_report.txt` (Settings → System & Diagnostics →
-Compatibility Report), and the `evo_status` / `evo_ui.json` / `evo_set.txt` of the
+Written by EVO: `evo_report.txt` (Settings → System & Diagnostics → Report a
+Problem; on `/data/evoplayer` with no stick), and the `evo_status` / `evo_ui.json` / `evo_set.txt` of the
 dev remote.
 
 On the data root (`/data/evoplayer`), not the USB stick: `thumb_quarantine` lists

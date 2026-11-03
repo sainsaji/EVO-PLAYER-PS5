@@ -38,6 +38,7 @@
  * timeout against somebody else's router.
  */
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -275,12 +276,15 @@ static const char *find_usb_playlist(void)
 static int load_playlist_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
-    if (!f) return -1;
+    if (!f) {
+        PROV_ERR("iptv: cannot open playlist '%s' (errno %d)", path, errno);
+        return -1;
+    }
 
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
     long n = ftell(f);
     if (n <= 0 || (unsigned long)n > IPTV_MAX_LOCAL_PLAYLIST) {
-        PROV_LOG("iptv: '%s' is %ld bytes - refused", path, n);
+        PROV_ERR("iptv: '%s' is %ld bytes - refused", path, n);
         fclose(f);
         return -1;
     }
@@ -353,7 +357,10 @@ static void resolve_playlist_source(void)
 int provider_iptv_save_conf(void)
 {
     FILE *f = fopen(evo_data_path(IPTV_CONF), "w");
-    if (!f) return -1;
+    if (!f) {
+        PROV_ERR("iptv: cannot save %s (errno %d)", evo_data_path(IPTV_CONF), errno);
+        return -1;
+    }
     if (G.playlist_url[0])
         fprintf(f, "playlist=%s\n", G.playlist_url);
     else if (G.playlist_file[0])
@@ -1572,10 +1579,17 @@ static void epg_cache_save(const char *url, const char *body, size_t len)
     char bpath[600], mpath[600];
     epg_cache_paths(url, bpath, sizeof bpath, mpath, sizeof mpath);
     FILE *f = fopen(bpath, "wb");
-    if (!f) return;
+    if (!f) {
+        PROV_WARN("iptv: cannot write guide cache %s (errno %d)", bpath, errno);
+        return;
+    }
     size_t w = fwrite(body, 1, len, f);
     fclose(f);
-    if (w != len) { remove(bpath); return; }
+    if (w != len) {
+        PROV_WARN("iptv: guide cache short write %zu of %zu bytes - dropped", w, len);
+        remove(bpath);
+        return;
+    }
     FILE *m = fopen(mpath, "w");
     if (!m) return;
     fprintf(m, "%lld\n%s\n", (long long)time(NULL), url);
@@ -1800,7 +1814,7 @@ static int epg_judge(void)
         epg_done();
         return 1;
     }
-    PROV_LOG("iptv: guide %s covers %d of these channels - not enough", url, G.epg_matched);
+    PROV_WARN("iptv: guide %s covers %d of these channels - not enough", url, G.epg_matched);
     /* A weak match leaves its titles behind: clear them before the next guide. */
     for (int i = 0; i < G.ch_count; ++i) {
         free(G.ch[i].now);  G.ch[i].now  = NULL;
@@ -1874,7 +1888,7 @@ static void epg_next(void)
         int rc = evo_net_request_async("GET", url, NULL, NULL, 0, on_epg,
                                        (void *)(intptr_t)G.epg_gen);
         if (rc == 0) return;                           /* carries on in on_epg */
-        PROV_LOG("iptv: evo_net_request_async for EPG failed rc=%d", rc);
+        PROV_WARN("iptv: evo_net_request_async for EPG failed rc=%d", rc);
         G.cand_failed = 1;
         G.cand_i++;
     }
@@ -1915,7 +1929,7 @@ static void on_playlist(int success, int status, const char *body, size_t len,
             snprintf(why, sizeof why, "the server answered HTTP %d", status);
         else
             snprintf(why, sizeof why, "the server sent an empty reply");
-        PROV_LOG("iptv: playlist NOT loaded: %s", why);
+        PROV_ERR("iptv: playlist NOT loaded: %s", why);
         evo_error_set("Playlist did not load - %s", why);
         if (pd && pd->cb) pd->cb(0, NULL, 0, 0, pd->ud);
         free(pd);
@@ -1923,7 +1937,7 @@ static void on_playlist(int success, int status, const char *body, size_t len,
     }
 
     if (parse_m3u(body, len) < 0) {
-        PROV_LOG("iptv: playlist NOT loaded: %zu bytes did not parse as M3U (first bytes: %.40s)",
+        PROV_ERR("iptv: playlist NOT loaded: %zu bytes did not parse as M3U (first bytes: %.40s)",
                  len, body);
         evo_error_set("The link answered, but not with a channel list (%zu bytes, not an M3U file)",
                       len);
@@ -1948,11 +1962,12 @@ static int fetch_playlist(pending_t *pd)
     if (!G.playlist_url[0]) { free(pd); return -1; }
     if (G.loading)          { free(pd); return -2; }
     G.loading = 1;
-    PROV_LOG("iptv: calling evo_net_request_async for playlist");
     int rc = evo_net_request_async("GET", G.playlist_url, NULL, NULL, 0,
                                    on_playlist, pd);
-    PROV_LOG("iptv: evo_net_request_async returned %d", rc);
-    if (rc != 0) { G.loading = 0; free(pd); return -3; }
+    if (rc != 0) {
+        PROV_ERR("iptv: playlist request not queued (rc %d)", rc);
+        G.loading = 0; free(pd); return -3;
+    }
     return 0;
 }
 
@@ -2183,12 +2198,12 @@ static int iptv_set_source(const char *value)
                    strncmp(value, "https://", 8) == 0);
     int is_path = (value[0] == '/');
     if (!is_url && !is_path) {
-        PROV_LOG("iptv: refused source '%s' (not http(s):// or an absolute path)",
+        PROV_WARN("iptv: refused source '%s' (not http(s):// or an absolute path)",
                  value);
         return -1;
     }
     if (strlen(value) >= sizeof G.playlist_url) {
-        PROV_LOG("iptv: refused source - %zu chars, max %zu",
+        PROV_WARN("iptv: refused source - %zu chars, max %zu",
                  strlen(value), sizeof G.playlist_url - 1);
         return -1;
     }

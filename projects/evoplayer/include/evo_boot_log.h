@@ -16,12 +16,13 @@
  * No-op on host / payload builds.
  *
  * NOT funnelled here: evo_status (a live one-line state snapshot the dev
- * remote polls) and evo_compat_report.txt (a user-triggered report).
+ * remote polls). The problem report (evo_report_write) is built from it.
  */
 #ifndef EVO_BOOT_LOG_H
 #define EVO_BOOT_LOG_H
 
 #include <stddef.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,9 @@ void evo_boot_log_flush(void);
 void evo_boot_log_kick(void);
 /* Crash-handler use only: write still-queued lines to `fd` (no locks). */
 void evo_boot_log_crash_drain(int fd);
+/* #229: the file the log is going to (/mnt/usb0/evo.log, or
+ * /data/evoplayer/evo.log with no USB stick). 0 = no file open yet. */
+int evo_log_file_path(char *out, size_t cap);
 
 /* Mask credentials in a line in place (api_key=, token=, password=, ...,
  * Xtream /live/USER/PASS/). evo_boot_log() applies it to every line. */
@@ -67,6 +71,21 @@ void evo_log_redact(char *line, size_t cap);
 unsigned long long evo_log_ring_total(void);
 size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
                          int wait_ms, unsigned long long *missed);
+/* #229: the problem report a user can send without a USB stick - version,
+ * build, model, the /stats snapshot, the settings file, and the end of evo.log
+ * read from disk (earlier sessions too, so a crash before a relaunch is in it),
+ * every line redacted again. The phone gets it from GET /report.txt; Settings >
+ * REPORT A PROBLEM saves it with evo_report_save.
+ *   evo_report_write: feeds the report to `sink` (0 = keep going) in pieces;
+ *     returns the bytes written, -1 if the sink stopped it.
+ *   evo_report_save:  writes /mnt/usb0/evo_report.txt, or
+ *     /data/evoplayer/evo_report.txt with no stick; the path goes to `out`.
+ *     1 = saved. */
+typedef int (*evo_report_sink_fn)(void *ud, const char *data, size_t n);
+long evo_report_write(evo_report_sink_fn sink, void *ud);
+int  evo_report_save(char *out, size_t cap);
+#define EVO_REPORT_LOG_BYTES (1536 * 1024)   /* the most of evo.log a report carries */
+
 /* Start the live log server (once; later calls do nothing). Port
  * EVO_LOG_SERVER_PORT, read-only, every line already redacted. */
 void evo_log_server_start(void);
@@ -92,6 +111,55 @@ int  evo_log_server_try_port(int port);
 /* Preferred names for new code — the file carries far more than the boot. */
 #define evo_log        evo_boot_log
 #define evo_log_flush  evo_boot_log_flush
+
+/* #216: tagged runtime lines - "net: ...", "ftp: ...", "emby: ...". No
+ * "EVO boot:" prefix and no kernel-log write, so cheaper than evo_bt; still
+ * not for per-frame code. Host builds (tests, uiview) do not link the log, so
+ * there they are a no-op that still type-checks the format. Every line passes
+ * evo_log_redact, but never put a password or token in the format anyway. */
+static inline void evo_log_nop_(const char *fmt, ...)
+#ifdef __GNUC__
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
+static inline void evo_log_nop_(const char *fmt, ...) { (void)fmt; }
+#ifdef EVO_APP_MODULE
+#define EVO_LOGI(tag, ...) evo_log_level(0, tag ": " __VA_ARGS__)
+#define EVO_LOGW(tag, ...) evo_log_level(1, tag ": " __VA_ARGS__)
+#define EVO_LOGE(tag, ...) evo_log_level(2, tag ": " __VA_ARGS__)
+#else
+#define EVO_LOGI(tag, ...) evo_log_nop_(tag ": " __VA_ARGS__)
+#define EVO_LOGW(tag, ...) evo_log_nop_(tag ": " __VA_ARGS__)
+#define EVO_LOGE(tag, ...) evo_log_nop_(tag ": " __VA_ARGS__)
+#endif
+
+/* Monotonic milliseconds, for "took N ms" in a log line:
+ *   const long long t0 = evo_log_mono_ms(); ...; evo_log_mono_ms() - t0 */
+static inline long long evo_log_mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000L;
+}
+
+/* At most one line per `ms` from this call site, for code that can fail over
+ * and over (a reconnect loop, a per-packet error). The lines in between are
+ * dropped, not queued; the next one that gets through says how many. */
+#define EVO_LOG_EVERY_(ms, LOGM, tag, fmt, ...) do {                              \
+        static long long evo_last_;                                               \
+        static int evo_skipped_;                                                  \
+        const long long evo_now_ = evo_log_mono_ms();                            \
+        if (evo_last_ == 0 || evo_now_ - evo_last_ >= (ms)) {                     \
+            evo_last_ = evo_now_;                                                 \
+            LOGM(tag, fmt " (+%d similar)", ##__VA_ARGS__, evo_skipped_);         \
+            evo_skipped_ = 0;                                                     \
+        } else {                                                                  \
+            evo_skipped_++;                                                       \
+        }                                                                         \
+    } while (0)
+#define EVO_LOGI_EVERY(ms, tag, fmt, ...) EVO_LOG_EVERY_(ms, EVO_LOGI, tag, fmt, ##__VA_ARGS__)
+#define EVO_LOGW_EVERY(ms, tag, fmt, ...) EVO_LOG_EVERY_(ms, EVO_LOGW, tag, fmt, ##__VA_ARGS__)
+#define EVO_LOGE_EVERY(ms, tag, fmt, ...) EVO_LOG_EVERY_(ms, EVO_LOGE, tag, fmt, ##__VA_ARGS__)
 
 #ifdef __cplusplus
 }

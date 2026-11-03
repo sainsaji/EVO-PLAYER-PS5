@@ -17,6 +17,8 @@
 #include <netdb.h>
 #include <sys/time.h>
 
+#include "evo_boot_log.h"
+
 namespace evo {
 
 FtpClient::FtpClient() {
@@ -154,9 +156,9 @@ int FtpClient::readResponse(std::string* outText) {
     return replyCode;
 }
 
-bool FtpClient::connectServer(const std::string& host, int port,
-                             const std::string& user, const std::string& pass,
-                             int timeoutSec) {
+bool FtpClient::connectImpl(const std::string& host, int port,
+                            const std::string& user, const std::string& pass,
+                            int timeoutSec) {
     disconnect();
     m_host = host;
     m_port = port > 0 ? port : 21;
@@ -261,7 +263,7 @@ int FtpClient::openDataConnection(int timeoutSecOverride) {
     return dataSock;
 }
 
-bool FtpClient::removeFile(const std::string& remotePath) {
+bool FtpClient::removeImpl(const std::string& remotePath) {
     if (m_controlSock < 0) {
         m_lastError = "Not connected";
         return false;
@@ -278,7 +280,7 @@ bool FtpClient::removeFile(const std::string& remotePath) {
     return true;
 }
 
-bool FtpClient::storeFile(const std::string& remotePath, const std::string& localPath,
+bool FtpClient::storeImpl(const std::string& remotePath, const std::string& localPath,
                           StoreProgressFn onProgress, void* user, int dataTimeoutSec) {
     if (m_controlSock < 0) {
         m_lastError = "Not connected";
@@ -391,7 +393,7 @@ bool FtpClient::storeFile(const std::string& remotePath, const std::string& loca
     return true;
 }
 
-bool FtpClient::retrieveFile(const std::string& remotePath, size_t maxBytes,
+bool FtpClient::retrieveImpl(const std::string& remotePath, size_t maxBytes,
                              std::vector<uint8_t>& out, int dataTimeoutSec) {
     out.clear();
     m_lastError.clear();
@@ -615,7 +617,7 @@ bool FtpClient::parseMlsdLine(const std::string& line, FtpFileEntry& entry) {
     return true;
 }
 
-bool FtpClient::list(const std::string& path, std::vector<FtpFileEntry>& entries) {
+bool FtpClient::listImpl(const std::string& path, std::vector<FtpFileEntry>& entries) {
     entries.clear();
     if (m_controlSock < 0) {
         m_lastError = "Not connected";
@@ -683,6 +685,55 @@ bool FtpClient::list(const std::string& path, std::vector<FtpFileEntry>& entries
     }
 
     return true;
+}
+
+/* ---- Public calls: the Impl, plus one evo.log line when it fails (#216) ---- */
+
+/* Host, port and path only: the user name and password are never logged. */
+void FtpClient::logFailure(const char* op, const std::string& path, long long ms) const {
+    EVO_LOGE("ftp", "%s%s%s on %s:%d failed after %lld ms: %s", op, path.empty() ? "" : " ",
+             path.c_str(), m_host.c_str(), m_port, ms, m_lastError.c_str());
+}
+
+bool FtpClient::connectServer(const std::string& host, int port, const std::string& user,
+                              const std::string& pass, int timeoutSec) {
+    const long long t0 = evo_log_mono_ms();
+    const bool ok = connectImpl(host, port, user, pass, timeoutSec);
+    if (!ok) logFailure("connect", "", evo_log_mono_ms() - t0);
+    return ok;
+}
+
+bool FtpClient::list(const std::string& path, std::vector<FtpFileEntry>& entries) {
+    const long long t0 = evo_log_mono_ms();
+    const bool ok = listImpl(path, entries);
+    if (!ok) logFailure("LIST", path, evo_log_mono_ms() - t0);
+    return ok;
+}
+
+bool FtpClient::storeFile(const std::string& remotePath, const std::string& localPath,
+                          StoreProgressFn onProgress, void* user, int dataTimeoutSec) {
+    const long long t0 = evo_log_mono_ms();
+    const bool ok = storeImpl(remotePath, localPath, onProgress, user, dataTimeoutSec);
+    if (!ok && m_lastError != "Cancelled") logFailure("STOR", remotePath, evo_log_mono_ms() - t0);
+    return ok;
+}
+
+bool FtpClient::retrieveFile(const std::string& remotePath, size_t maxBytes,
+                             std::vector<uint8_t>& out, int dataTimeoutSec) {
+    const long long t0 = evo_log_mono_ms();
+    const bool ok = retrieveImpl(remotePath, maxBytes, out, dataTimeoutSec);
+    /* 550 = no such file: cover art probes poster.jpg, folder.jpg, ... and most
+     * of them are not there. That is not a failure worth a line. */
+    if (!ok && m_lastError.find("(code 550)") == std::string::npos)
+        logFailure("RETR", remotePath, evo_log_mono_ms() - t0);
+    return ok;
+}
+
+bool FtpClient::removeFile(const std::string& remotePath) {
+    const long long t0 = evo_log_mono_ms();
+    const bool ok = removeImpl(remotePath);
+    if (!ok) logFailure("DELE", remotePath, evo_log_mono_ms() - t0);
+    return ok;
 }
 
 } // namespace evo

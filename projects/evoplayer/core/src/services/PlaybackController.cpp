@@ -530,7 +530,7 @@ void PlaybackController::stopPlayback() {
             pthread_join(video_thread, nullptr);
         } else {
             pthread_detach(video_thread);
-            evo_bt("stopPlayback: video decode thread did not exit (decoder hung) - abandoned");
+            EVO_LOGE("playback", "stopPlayback: video decode thread did not exit (decoder hung) - abandoned");
         }
     }
 
@@ -827,7 +827,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
         }
 
         if (!have_video && !have_audio) {
-            evo_bt("PlaybackController: find_stream_info failed (rc=%d, timeout=%d) "
+            EVO_LOGE("playback", "find_stream_info failed (rc=%d, timeout=%d) "
                    "and the header named no usable stream - giving up",
                    find_rc, probe_timed_out ? 1 : 0);
             avformat_close_input(&play_fmt);
@@ -841,7 +841,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
             return false;
         }
 
-        evo_bt("PlaybackController: find_stream_info incomplete (rc=%d, timeout=%d) - "
+        EVO_LOGW("playback", "find_stream_info incomplete (rc=%d, timeout=%d) - "
                "continuing on the container header (video=%d audio=%d)",
                find_rc, probe_timed_out ? 1 : 0, (int)have_video, (int)have_audio);
 
@@ -857,7 +857,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                                       ? play_fmt->start_time : 0;
         const int seek_rc = av_seek_frame(play_fmt, -1, rewind_to, AVSEEK_FLAG_BACKWARD);
         if (seek_rc < 0) {
-            evo_bt("PlaybackController: rewind after an incomplete probe failed (rc=%d)",
+            EVO_LOGE("playback", "rewind after an incomplete probe failed (rc=%d)",
                    seek_rc);
         }
 
@@ -913,9 +913,9 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 videoStreamPixels(ps) > 0) {
                 video_stream_index = m_pinnedVideoStream;
                 pinned = true;
-                evo_bt("PlaybackController: quality pinned to video stream %d", video_stream_index);
+                EVO_LOGI("playback", "quality pinned to video stream %d", video_stream_index);
             } else {
-                evo_bt("PlaybackController: pinned video stream %d is not usable here - "
+                EVO_LOGW("playback", "pinned video stream %d is not usable here - "
                        "choosing the best", m_pinnedVideoStream);
             }
         }
@@ -945,7 +945,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 if (st && st->codecpar &&
                     st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
                     video_stream_index = static_cast<int>(i);
-                    evo_bt("PlaybackController: no video stream resolved its size - "
+                    EVO_LOGW("playback", "no video stream resolved its size - "
                            "falling back to stream %d", video_stream_index);
                     break;
                 }
@@ -1008,7 +1008,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
             if (st && st->codecpar &&
                 st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
                 audio_stream_index = static_cast<int>(i);
-                evo_bt("PlaybackController: no decodable audio stream (codec=%d) - "
+                EVO_LOGW("playback", "no decodable audio stream (codec=%d) - "
                        "playing without sound",
                        (int)st->codecpar->codec_id);
                 break;
@@ -1059,14 +1059,14 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 ++dropped;
             }
         }
-        evo_bt("PlaybackController: %u programs, using #%d - discarded %u streams "
+        EVO_LOGI("playback", "%u programs, using #%d - discarded %u streams "
                "from the other variants",
                play_fmt->nb_programs, chosen_program, dropped);
     }
 
     if (video_stream_index >= 0) {
         const AVCodecParameters* vcp = play_fmt->streams[video_stream_index]->codecpar;
-        evo_bt("PlaybackController: video stream %d of %u (%dx%d, program %d)",
+        EVO_LOGI("playback", "video stream %d of %u (%dx%d, program %d)",
                video_stream_index, play_fmt->nb_streams,
                vcp ? vcp->width : 0, vcp ? vcp->height : 0, chosen_program);
     }
@@ -1393,7 +1393,7 @@ bool PlaybackController::startPlaybackSource(const PlaybackSource& source,
                 prospero_subtitle_load_external(tmp);
             }
         } else {
-            evo_bt("PlaybackController: sidecar subtitle fetch failed (http %d)", st);
+            EVO_LOGE("playback", "sidecar subtitle fetch failed (http %d)", st);
         }
         std::free(body);
     }
@@ -2143,7 +2143,7 @@ bool PlaybackController::switchVideoVariant(int streamIndex) {
     m_pinnedVideoStream = streamIndex;
     m_pinnedVideoFor = streamIndex >= 0 ? src.url : std::string();
 
-    evo_bt("PlaybackController: switching video quality -> %s%d (at %.1f s)",
+    EVO_LOGI("playback", "switching video quality -> %s%d (at %.1f s)",
            streamIndex >= 0 ? "stream " : "auto ", streamIndex, resumeAt);
 
     if (!startPlaybackSource(src, resumeAt)) {

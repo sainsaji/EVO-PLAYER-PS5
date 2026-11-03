@@ -51,7 +51,7 @@ KNOWN_LOGS = [
     ("/mnt/usb0/evo.log", "evo.log  —  the one diagnostic log "
                           "(boot + breadcrumbs + decode + stats)", True),
     ("/mnt/usb0/evo_status", "evo_status  —  live state snapshot (--usb-remote)", False),
-    ("/mnt/usb0/evo_compat_report.txt", "evo_compat_report.txt  —  saved report", False),
+    ("/mnt/usb0/evo_report.txt", "evo_report.txt  —  saved problem report", False),
 ]
 
 # ---- package-app.sh flags (case block in the script) ----------------------

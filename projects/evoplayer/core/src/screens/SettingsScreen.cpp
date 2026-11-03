@@ -66,7 +66,7 @@ enum class SettingKey : int {
     PhonePort,
     AskStream,
     /* SYSTEM & DIAGNOSTICS */
-    CompatReport,
+    ReportProblem,
     DebugOverlay,
     DeveloperTools,
     ConsoleModel,
@@ -150,8 +150,8 @@ const PreviewSpec kPreviews[] = {
      "EVO checks the port is free before it saves it. If it is busy at start-up, EVO tries the next nine and shows the one it got."},
     {SettingKey::AskStream, EVO_RMLUI_PREVIEW_ASK_STREAM,
      "Lets you choose the format and quality each time you open a live channel."},
-    {SettingKey::CompatReport, EVO_RMLUI_PREVIEW_INFO,
-     "Writes a codec report to USB0 that you can attach to a bug report."},
+    {SettingKey::ReportProblem, EVO_RMLUI_PREVIEW_REPORT,
+     "The report has EVO's log, version and settings. Passwords and tokens are taken out."},
     {SettingKey::DebugOverlay, EVO_RMLUI_PREVIEW_DEBUG_OVERLAY, "Shows live performance numbers on screen."},
     {SettingKey::DeveloperTools, EVO_RMLUI_PREVIEW_INFO, "System diagnostics and performance stats."},
     {SettingKey::ConsoleModel, EVO_RMLUI_PREVIEW_INFO,
@@ -181,7 +181,7 @@ const SettingKey kInterfaceKeys[] = {
     SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream,
 };
 const SettingKey kSystemKeys[] = {
-    SettingKey::CompatReport, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
+    SettingKey::ReportProblem, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
     SettingKey::ConsoleModel, SettingKey::MemoryMode, SettingKey::SoftwareUpdate, SettingKey::QuitEvo,
 };
 /*
@@ -259,6 +259,7 @@ SettingDef valueDef(SettingKey key, const char* title, const char* detail,
 }
 
 void fillPortPreview(evo_rmlui_settings_row_t& row);
+void fillReportPreview(evo_rmlui_settings_row_t& row);
 
 SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     SettingDef d{};
@@ -494,9 +495,9 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                       "../icons/icon_tv.png", settings->isAskStreamEnabled());
         break;
 
-    case SettingKey::CompatReport:
-        d = actionDef(key, "COMPATIBILITY REPORT", "WRITES A CODEC REPORT TO USB0",
-                      "../icons/icon_report.png", "RUN");
+    case SettingKey::ReportProblem:
+        d = actionDef(key, "REPORT A PROBLEM", "SEND EVO'S LOG FROM YOUR PHONE, OR SAVE IT TO USB",
+                      "../icons/icon_report.png", "SAVE");
         break;
 
     case SettingKey::DebugOverlay:
@@ -704,6 +705,7 @@ int fillSection(int section, int expanded, int cursor, evo_rmlui_settings_params
         row.preview_index = (def.kind == EVO_RMLUI_ROW_TOGGLE) ? (def.toggle_on ? 1 : 0)
                           : (opt >= 0) ? opt : def.opt_current;
         if (def.key == SettingKey::PhonePort) fillPortPreview(row);
+        if (def.key == SettingKey::ReportProblem) fillReportPreview(row);
         if (opt < 0) {
             p.rows[i].title = def.title;
             p.rows[i].detail = def.detail;
@@ -858,6 +860,50 @@ void fillPortPreview(evo_rmlui_settings_row_t& row) {
     row.choice[1] = s_status;
 }
 
+/* The preview card of REPORT A PROBLEM (#229): the phone link to /report and
+ * where Cross saves the file. */
+void fillReportPreview(evo_rmlui_settings_row_t& row) {
+    static char s_link[96], s_status[160];
+    const int actual = evo_log_server_port();
+    char ip[32];
+    evo_keyboard_local_ip(ip, sizeof ip);
+    if (actual > 0 && ip[0]) {
+        std::snprintf(s_link, sizeof s_link, "http://%s:%d/report", ip, actual);
+        std::snprintf(s_status, sizeof s_status,
+                      "The phone must be on the same network as the PS5. EVO has to stay open.");
+        row.preview_index = 0;
+    } else {
+        s_link[0] = '\0';
+        std::snprintf(s_status, sizeof s_status, "%s",
+                      actual > 0 ? "No network: the phone link is off. Save the report to USB instead."
+                                 : "The phone link is off (no free port, see PHONE & LOG PORT). Save the report to USB instead.");
+        row.preview_index = 1;
+    }
+    static char s_qr_for[96];
+    static unsigned char s_qr_mod[(4 * 5 + 17) * (4 * 5 + 17)];
+    static int s_qr_n;
+    if (std::strcmp(s_qr_for, s_link) != 0) {
+        std::snprintf(s_qr_for, sizeof s_qr_for, "%s", s_link);
+        s_qr_n = 0;
+        if (s_link[0]) {
+            static uint8_t s_qr[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+            uint8_t tmp[qrcodegen_BUFFER_LEN_FOR_VERSION(5)];
+            if (qrcodegen_encodeText(s_link, tmp, s_qr, qrcodegen_Ecc_LOW, qrcodegen_VERSION_MIN, 5,
+                                     qrcodegen_Mask_AUTO, true)) {
+                s_qr_n = qrcodegen_getSize(s_qr);
+                for (int y = 0; y < s_qr_n; y++)
+                    for (int x = 0; x < s_qr_n; x++)
+                        s_qr_mod[y * s_qr_n + x] = qrcodegen_getModule(s_qr, x, y) ? 1 : 0;
+            }
+        }
+    }
+    row.qr_size = s_qr_n;
+    row.qr_modules = s_qr_n ? s_qr_mod : nullptr;
+    row.choice_count = 2;
+    row.choice[0] = s_link;
+    row.choice[1] = s_status;
+}
+
 void onPortEntered(const char* text, void*) {
     const int port = std::atoi(text);
     const int rc = evo_log_server_try_port(port);
@@ -960,20 +1006,16 @@ bool runAction(const SettingDef& def) {
         evo_boot_log_flush();
         Application::getInstance().requestCloseAndExit();
         return true;
-    case SettingKey::CompatReport: {
-        FILE* fp = std::fopen("/mnt/usb0/evo_compatibility_report.txt", "w");
-        if (!fp) fp = std::fopen("evo_compatibility_report.txt", "w");
-        if (fp) {
-            std::fprintf(fp, "=== EVO Player Compatibility Report ===\n");
-            std::fprintf(fp, "Version: %s\n", EVO_PLAYER_VERSION);
-            std::fprintf(fp, "Hardware: %s\n", evo_hw_model_name());
-            std::fprintf(fp, "Hardware Acceleration: sceAgc Bare-Metal Driver\n");
-            std::fprintf(fp, "Report generated successfully.\n");
-            std::fclose(fp);
-            toast("REPORT", "Report saved to USB0");
+    case SettingKey::ReportProblem: {
+        /* #229: the same report the phone page gives, as a file. A stick if
+         * there is one; otherwise EVO's data folder, readable over FTP. */
+        char path[160];
+        if (evo_report_save(path, sizeof path)) {
+            toast("REPORT SAVED", std::strncmp(path, "/mnt/usb0/", 10) == 0
+                                      ? "evo_report.txt on the USB stick" : path);
             evo_feedback(EVO_FB_CONFIRM);
         } else {
-            toast("REPORT", "Save failed");
+            toast("REPORT", "Could not save. Use the phone link instead");
             evo_feedback(EVO_FB_BOUNDARY);
         }
         return true;

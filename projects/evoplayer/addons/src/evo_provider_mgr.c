@@ -190,7 +190,7 @@ int evo_provider_mgr_init(void)
     for (int i = 0; i < PROVIDER_COUNT; ++i) {
         const char *why = "";
         if (!vtable_ok(PROVIDERS[i], &why)) {
-            PROV_LOG("[%d] REFUSED (%s)", i, why);
+            PROV_ERR("registry: [%d] REFUSED (%s)", i, why);
             g_enabled[i] = 0;
             continue;
         }
@@ -199,12 +199,12 @@ int evo_provider_mgr_init(void)
         for (int j = 0; j < i; ++j)
             if (strcmp(PROVIDERS[i]->id, PROVIDERS[j]->id) == 0) dup = 1;
         if (dup) {
-            PROV_LOG("'%s' REFUSED (duplicate id)", PROVIDERS[i]->id);
+            PROV_ERR("registry: '%s' REFUSED (duplicate id)", PROVIDERS[i]->id);
             g_enabled[i] = 0;
             continue;
         }
         if (PROVIDERS[i]->init() != 0) {
-            PROV_LOG("'%s' init FAILED", PROVIDERS[i]->id);
+            PROV_ERR("registry: '%s' init FAILED", PROVIDERS[i]->id);
             g_enabled[i] = 0;
             continue;
         }
@@ -219,10 +219,10 @@ int evo_provider_mgr_init(void)
      * everything worked is indistinguishable from one where the table was
      * empty, and #90's hardware checklist asks for exactly these lines.
      */
-    PROV_LOG("registry up: %d/%d registered", g_registered, PROVIDER_COUNT);
+    PROV_LOG("registry: registry up: %d/%d registered", g_registered, PROVIDER_COUNT);
     for (int i = 0; i < PROVIDER_COUNT; ++i) {
         const evo_provider_t *p = PROVIDERS[i];
-        PROV_LOG("  %-6s caps=0x%02x configured=%d enabled=%d",
+        PROV_LOG("registry:   %-6s caps=0x%02x configured=%d enabled=%d",
                  p->id, (unsigned)p->caps,
                  p->is_configured ? p->is_configured() : 0, g_enabled[i]);
     }
@@ -243,9 +243,9 @@ void evo_provider_mgr_rebind(void)
 
     load_state();
 
-    PROV_LOG("rebind after data-root change:");
+    PROV_LOG("registry: rebind after data-root change:");
     for (int i = 0; i < PROVIDER_COUNT; ++i)
-        PROV_LOG("  %-6s configured=%d enabled=%d", PROVIDERS[i]->id,
+        PROV_LOG("registry:   %-6s configured=%d enabled=%d", PROVIDERS[i]->id,
                  PROVIDERS[i]->is_configured ? PROVIDERS[i]->is_configured() : 0,
                  g_enabled[i]);
 }

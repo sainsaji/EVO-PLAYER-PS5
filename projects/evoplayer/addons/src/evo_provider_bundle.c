@@ -40,6 +40,7 @@
 #include "evo_net.h"
 #include "cJSON.h"
 #include "evo_data_path.h"
+#include "evo_provider_log.h"
 
 /* ------------------------------------------------------------------------- */
 /* SHA-256 (FIPS 180-4)                                                      */
@@ -521,9 +522,9 @@ static evo_bundle_status_t write_entry(const char *provider_id,
     return EVO_BUNDLE_OK;
 }
 
-evo_bundle_status_t evo_bundle_fetch_sync(const char *provider_id,
-                                           const char *base_url,
-                                           evo_bundle_manifest_t *out)
+static evo_bundle_status_t fetch_sync(const char *provider_id,
+                                      const char *base_url,
+                                      evo_bundle_manifest_t *out)
 {
     if (!provider_id || !evo_provider_id_valid(provider_id))
         return EVO_BUNDLE_ERR_PATH;
@@ -600,6 +601,17 @@ evo_bundle_status_t evo_bundle_fetch_sync(const char *provider_id,
     return EVO_BUNDLE_OK;
 }
 
+evo_bundle_status_t evo_bundle_fetch_sync(const char *provider_id,
+                                           const char *base_url,
+                                           evo_bundle_manifest_t *out)
+{
+    evo_bundle_status_t st = fetch_sync(provider_id, base_url, out);
+    if (st != EVO_BUNDLE_OK)
+        PROV_ERR("bundle: %s fetch failed: %s", provider_id ? provider_id : "?",
+                 evo_bundle_status_str(st));
+    return st;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Async refresh                                                             */
 /* ------------------------------------------------------------------------- */
@@ -644,6 +656,9 @@ static struct {
 static void refresh_release(refresh_t *r, evo_bundle_status_t st)
 {
     int slot = (int)(r - g_refresh);
+    if (st != EVO_BUNDLE_OK)
+        PROV_ERR("bundle: %s refresh failed at file %d of %d: %s", r->provider_id,
+                 r->next, r->m.entry_count, evo_bundle_status_str(st));
     free(r->manifest_json);
     r->manifest_json = NULL;
 
@@ -665,6 +680,8 @@ static void on_asset(int success, int status, const char *body, size_t len,
     if (!r->in_use) return;
 
     if (!success || status != 200 || !body) {
+        PROV_ERR("bundle: %s asset %s -> ok=%d http=%d", r->provider_id,
+                 r->m.entries[r->next].path, success, status);
         refresh_release(r, EVO_BUNDLE_ERR_FETCH);
         return;
     }
@@ -713,6 +730,7 @@ static void on_manifest(int success, int status, const char *body, size_t len,
     if (!r->in_use) return;
 
     if (!success || status != 200 || !body) {
+        PROV_ERR("bundle: %s manifest -> ok=%d http=%d", r->provider_id, success, status);
         refresh_release(r, EVO_BUNDLE_ERR_FETCH);
         return;
     }

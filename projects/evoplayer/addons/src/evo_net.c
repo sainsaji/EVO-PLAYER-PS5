@@ -34,6 +34,7 @@
 #include "evo_net.h"
 #include "evo_error.h"
 #include "evo_provider_log.h"
+#include "evo_boot_log.h"     /* EVO_LOGW_EVERY */
 
 /* ---- LAN discovery (Emby / Jellyfin, UDP 7359) ---- */
 
@@ -235,6 +236,7 @@ static int connect_bounded(const struct addrinfo *rp, int timeout_ms, int *timed
     if (flags >= 0) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
     int rc = connect(sock, rp->ai_addr, rp->ai_addrlen);
+    int cerr = rc != 0 ? errno : 0;
     if (rc != 0 && flags >= 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
         struct pollfd pfd;
         pfd.fd = sock;
@@ -249,12 +251,22 @@ static int connect_bounded(const struct addrinfo *rp, int timeout_ms, int *timed
             int err = 0;
             socklen_t len = sizeof(err);
             rc = (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) ? 0 : -1;
+            cerr = err;
         } else {
             rc = -1;
+            cerr = errno;
             if (pr == 0) *timed_out = 1;
         }
     }
     if (rc != 0) {
+        const int e = cerr;
+        char ip[INET_ADDRSTRLEN] = "?";
+        if (rp->ai_family == AF_INET)
+            inet_ntop(AF_INET, &((const struct sockaddr_in *)rp->ai_addr)->sin_addr, ip, sizeof ip);
+        if (*timed_out)
+            EVO_LOGW_EVERY(5000, "net", "connect %s timed out after %d ms", ip, timeout_ms);
+        else
+            EVO_LOGW_EVERY(5000, "net", "connect %s refused or unreachable (errno %d)", ip, e);
         close(sock);
         return -1;
     }
@@ -773,7 +785,9 @@ static int execute_http(const char *method,
         hints.ai_family   = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
 
-        if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res) {
+        const int gai = getaddrinfo(host, port_str, &hints, &res);
+        if (gai != 0 || !res) {
+            PROV_WARN("net: name lookup for %s failed (getaddrinfo %d)", host, gai);
             return EVO_NET_ERR_DNS;
         }
 
@@ -783,6 +797,7 @@ static int execute_http(const char *method,
         freeaddrinfo(res);
 
         if (sock < 0) {
+            PROV_WARN("net: connect %s:%d failed on every address", host, port);
             return EVO_NET_ERR_CONNECT;
         }
 
@@ -803,7 +818,10 @@ static int execute_http(const char *method,
             SSL_set_tlsext_host_name(ssl, host);
             tls_session_resume(ssl, host, port);
             SSL_set_fd(ssl, sock);
-            if (SSL_connect(ssl) <= 0) {
+            const int sc = SSL_connect(ssl);
+            if (sc <= 0) {
+                PROV_WARN("net: TLS handshake with %s:%d failed (SSL error %d)",
+                          host, port, SSL_get_error(ssl, sc));
                 SSL_free(ssl);
                 close(sock);
                 return EVO_NET_ERR_SSL_CONN;
@@ -1270,6 +1288,24 @@ static int execute_http(const char *method,
     }
 }
 
+/* #216: one ERROR line per failed request, in the same words the user is shown,
+ * plus the path (no query: it can hold a token). Posters and icons are left
+ * out; they fail all the time while browsing and are never the real problem. */
+static int url_is_image(const char *url);
+static long long mono_ms(void);
+static void net_log_failure(const char *method, const char *url, int res, int status, long long ms)
+{
+    if (res == EVO_NET_OK || !url || url_is_image(url)) return;
+    char why[200];
+    evo_net_describe_failure(res, status, url, why, sizeof why);
+    const char *u = strstr(url, "://");
+    u = u ? u + 3 : url;
+    const char *p = u + strcspn(u, "/?");
+    const int plen = (int)strcspn(p, "?");
+    PROV_ERR("net: %s %.*s failed after %lld ms: %s", method,
+             plen > 100 ? 100 : plen, p, ms, why);
+}
+
 int evo_net_http_get_sync(const char *url,
                           const char **headers,
                           int header_count,
@@ -1277,8 +1313,11 @@ int evo_net_http_get_sync(const char *url,
                           size_t *out_len,
                           int *out_status)
 {
-    return execute_http("GET", url, NULL, headers, header_count,
-                        out_body, out_len, out_status);
+    const long long t0 = mono_ms();
+    const int res = execute_http("GET", url, NULL, headers, header_count,
+                                 out_body, out_len, out_status);
+    net_log_failure("GET", url, res, out_status ? *out_status : 0, mono_ms() - t0);
+    return res;
 }
 
 int evo_net_http_post_sync(const char *url,
@@ -1289,8 +1328,11 @@ int evo_net_http_post_sync(const char *url,
                            size_t *out_len,
                            int *out_status)
 {
-    return execute_http("POST", url, post_data, headers, header_count,
-                        out_body, out_len, out_status);
+    const long long t0 = mono_ms();
+    const int res = execute_http("POST", url, post_data, headers, header_count,
+                                 out_body, out_len, out_status);
+    net_log_failure("POST", url, res, out_status ? *out_status : 0, mono_ms() - t0);
+    return res;
 }
 
 /* FFmpeg's HTTP client, in evo_http_avio.c. Weak: the host test builds have no
@@ -1348,13 +1390,15 @@ static void *evo_net_worker(void *arg)
                                &req->status_code);
 
             clock_gettime(CLOCK_MONOTONIC, &t1);
-            if (!image_worker) {
+            const long ms = (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000);
+            if (!image_worker)
+                net_log_failure(req->method, req->url, res, req->status_code, ms);
+            if (!image_worker && res == EVO_NET_OK) {
                 /* Host and path only: a query string can hold a token. */
-                const long ms = (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000);
                 const char *u = strstr(req->url, "://");
                 u = u ? u + 3 : req->url;
                 const int ulen = (int)strcspn(u, "?");
-                PROV_LOG("net %s %.*s -> %d http=%d %zu B in %ld ms%s", req->method,
+                PROV_LOG("net: %s %.*s -> %d http=%d %zu B in %ld ms%s", req->method,
                          ulen > 120 ? 120 : ulen, u, res, req->status_code, req->response_len, ms,
                          req->via_avio ? " (ffmpeg)" : "");
             }

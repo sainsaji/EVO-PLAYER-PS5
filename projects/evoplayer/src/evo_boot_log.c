@@ -302,6 +302,39 @@ static void *bl_writer(void *arg)
     return NULL;
 }
 
+static void bl_emit(const char *line);
+
+/* #216: identical consecutive lines are counted, not written. A fault that
+ * repeats every frame used to push the whole boot trace out of the 128 KiB
+ * ring and fill the queue; now it costs one line plus one summary. The
+ * summary goes out when a different line arrives, or from the render loop's
+ * kick once the repeats stop (BL_REP_QUIET_MS) or have gone on too long. */
+#define BL_REP_QUIET_MS 2000
+#define BL_REP_MAX_MS   60000
+static pthread_mutex_t g_rep_lock = PTHREAD_MUTEX_INITIALIZER;
+static char      g_rep_last[600];
+static int       g_rep_count;      /* repeats of g_rep_last not yet reported */
+static long long g_rep_first_ms;   /* when the first unreported repeat came */
+static long long g_rep_last_ms;
+
+static long long bl_mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000L;
+}
+
+/* Takes the unreported repeat count (0 if none). Caller holds g_rep_lock. */
+static int bl_rep_take(char *summary, size_t cap)
+{
+    const int n = g_rep_count;
+    if (n > 0)
+        snprintf(summary, cap, "INFO  log: last line repeated %d more time%s over %lld ms",
+                 n, n == 1 ? "" : "s", g_rep_last_ms - g_rep_first_ms);
+    g_rep_count = 0;
+    return n;
+}
+
 static void bl_vlog(const char *level, const char *fmt, va_list ap)
 {
     char line[600];
@@ -310,8 +343,29 @@ static void bl_vlog(const char *level, const char *fmt, va_list ap)
     vsnprintf(line + ln, sizeof line - (size_t)ln, fmt, ap);
     evo_log_redact(line, sizeof line);
 
-    printf("EVO boot: %s\n", line);
-    fflush(stdout);
+    char summary[120];
+    int pending;
+    pthread_mutex_lock(&g_rep_lock);
+    if (strcmp(line, g_rep_last) == 0) {
+        const long long now = bl_mono_ms();
+        if (g_rep_count++ == 0) g_rep_first_ms = now;
+        g_rep_last_ms = now;
+        pthread_mutex_unlock(&g_rep_lock);
+        return;
+    }
+    pending = bl_rep_take(summary, sizeof summary);
+    memcpy(g_rep_last, line, sizeof line);
+    pthread_mutex_unlock(&g_rep_lock);
+
+    if (pending) bl_emit(summary);
+    bl_emit(line);
+}
+
+/* Write one finished line (level + text, already redacted) everywhere. */
+static void bl_emit(const char *line)
+{
+    /* No printf to stdout: the app module has no stdout reader, and a
+     * printf + fflush per line was pure cost on every logging thread (#216). */
 
 #ifdef EVO_BOOT_TRACE_POPUP
     /* #51: on-screen popup — opt-in (--breadcrumbs). Off by default; the
@@ -479,6 +533,18 @@ void evo_boot_log_flush(void)
 
 void evo_boot_log_kick(void)
 {
+    /* Report repeats that have gone quiet (or gone on for a minute). */
+    char summary[120];
+    int pending = 0;
+    pthread_mutex_lock(&g_rep_lock);
+    if (g_rep_count > 0) {
+        const long long now = bl_mono_ms();
+        if (now - g_rep_last_ms >= BL_REP_QUIET_MS || now - g_rep_first_ms >= BL_REP_MAX_MS)
+            pending = bl_rep_take(summary, sizeof summary);
+    }
+    pthread_mutex_unlock(&g_rep_lock);
+    if (pending) bl_emit(summary);
+
     if (!g_fp) {
         evo_boot_log_flush();   /* still in phase 1: try to open the file */
         return;
@@ -505,6 +571,14 @@ void evo_boot_log_crash_drain(int fd)
         (void)write(fd, g_boot, g_boot_len);
 }
 
+int evo_log_file_path(char *out, size_t cap)
+{
+    /* g_log_path is set once, before g_fp, and never changes after. */
+    if (!g_fp) return 0;
+    if (out && cap) snprintf(out, cap, "%s", g_log_path);
+    return 1;
+}
+
 #else  /* host / payload */
 
 void evo_boot_log(const char *fmt, ...) { (void)fmt; }
@@ -512,6 +586,9 @@ void evo_log_level(int level, const char *fmt, ...) { (void)level; (void)fmt; }
 void evo_boot_log_flush(void) {}
 void evo_boot_log_kick(void) {}
 void evo_boot_log_crash_drain(int fd) { (void)fd; }
+int evo_log_file_path(char *out, size_t cap) { (void)out; (void)cap; return 0; }
+long evo_report_write(evo_report_sink_fn sink, void *ud) { (void)sink; (void)ud; return 0; }
+int evo_report_save(char *out, size_t cap) { if (out && cap) out[0] = '\0'; return 0; }
 unsigned long long evo_log_ring_total(void) { return 0; }
 size_t evo_log_ring_read(unsigned long long *pos, char *buf, size_t cap,
                          int wait_ms, unsigned long long *missed)

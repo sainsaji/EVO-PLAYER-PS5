@@ -117,7 +117,7 @@ What follows from it:
 | `#include <iostream>` | its priority-100 static initialiser builds the global locale and dereferences null in the CRT's `_init`; SIGSEGV at load, no log, and layout-sensitive so it can survive for weeks | never include it; use `<cstdio>` |
 | a libc function the shim lacks (`strcasestr`, `opendir`, ...) | the import binds to NULL; SIGSEGV at address 0 when first called | only call functions EVO already uses, or add a shim |
 | `posix_fadvise` | SIGSYS-class fault from the app sandbox | already guarded by `#ifndef EVO_APP_MODULE` in `evo_stream_io.c`; keep it |
-| `stderr` / `printf` | there is no stdout; `fprintf(stderr, ...)` in FFmpeg's `av_log` crashed every file that made it log | log through `evo_boot_log()` / `evo_bt()`; FFmpeg's log callback is redirected |
+| `stderr` / `printf` | there is no stdout; `fprintf(stderr, ...)` in FFmpeg's `av_log` crashed every file that made it log | log through `EVO_LOGI/W/E` (or `evo_bt()` at boot); FFmpeg's log callback is redirected |
 | `sceVideoOutOpen` | returns a bogus handle; panics the console once a compute queue exists | never call it. `evo_agc_runtime.c` owns VideoOut |
 | a mid-stream credential swap | libSceAudiodec dies | probe the audio decoders before `evo_jailbreak_self()` |
 | `getenv()` | always NULL | pass constants directly |

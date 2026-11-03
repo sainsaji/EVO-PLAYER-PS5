@@ -129,11 +129,11 @@ static int thumbGetBuffer(AVCodecContext* avctx, AVFrame* frame, int flags) {
          * looking for a format problem that did not exist. The context's
          * fields survive and are what the allocation was sized from.
          */
-        evo_bt("extractVideoFrame: get_buffer2 FAILED ctx=%dx%d coded=%dx%d pix=%d rc=%d",
+        EVO_LOGE("cover", "extractVideoFrame: get_buffer2 FAILED ctx=%dx%d coded=%dx%d pix=%d rc=%d",
                avctx->width, avctx->height,
                avctx->coded_width, avctx->coded_height,
                avctx->pix_fmt, ret);
-        evo_bt("extractVideoFrame: flex %zuMB free at failure",
+        EVO_LOGE("cover", "extractVideoFrame: flex %zuMB free at failure",
                availableFlexBytes() / (1024u * 1024u));
         evo_boot_log_flush();
     }
@@ -276,7 +276,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
         return false;
     }
 
-    evo_bt("extractVideoFrame: hardware decoder for the poster");
+    EVO_LOGI("cover", "extractVideoFrame: hardware decoder for the poster");
     evo_boot_log_flush();
 
     AVPacket* pkt = av_packet_alloc();
@@ -302,11 +302,11 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
     const int64_t fileBytes = fmt->pb ? avio_size(fmt->pb) : 0;
     const bool byBytes = dur < 3.0 && fileBytes > (1 << 20);
     if (pass > 0 && (!dark || (dur < 3.0 && !byBytes))) {
-        evo_bt("extractVideoFrame: poster pass %d stops: dark=%d dur=%.1f", pass, (int)dark, dur);
+        EVO_LOGI("cover", "extractVideoFrame: poster pass %d stops: dark=%d dur=%.1f", pass, (int)dark, dur);
         break;
     }
     const double trySec = seekTries[pass];
-    evo_bt("extractVideoFrame: poster pass %d at %s (dur %.1fs)", pass,
+    EVO_LOGI("cover", "extractVideoFrame: poster pass %d at %s (dur %.1fs)", pass,
            byBytes ? (pass == 0 ? "start" : "file position") : "time", dur);
     int maxPackets = 48;
     if (byBytes && pass > 0) {
@@ -403,7 +403,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
                 shifted.planes[0] = (uint8_t*)dstY;
                 shifted.planes[1] = (uint8_t*)dstUV;
             } else {
-                evo_bt("extractVideoFrame: 10-bit shift buffer alloc failed "
+                EVO_LOGE("cover", "extractVideoFrame: 10-bit shift buffer alloc failed "
                        "(%zu words) - skipping the hardware poster",
                        yWords + uvWords);
                 evo_boot_log_flush();
@@ -450,7 +450,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
                 if (px[1] > maxC) maxC = px[1];
                 if (px[2] > maxC) maxC = px[2];
             }
-            evo_bt("extractVideoFrame: hardware poster ok %ux%u fmt=%d%s mean=%llu max=%u",
+            EVO_LOGI("cover", "extractVideoFrame: hardware poster ok %ux%u fmt=%d%s mean=%llu max=%u",
                    pf.width, pf.height, (int)pf.format,
                    shiftBuf ? " (10-bit shifted)" : "",
                    npx ? sumY / npx : 0ULL, maxC);
@@ -468,7 +468,7 @@ static bool decodePosterOnHardware(AVFormatContext* fmt, AVStream* st, int vstre
     if (!success) {
         /* Put the demuxer back where the caller's own path expects it. */
         av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
-        evo_bt("extractVideoFrame: hardware poster produced nothing -> FFmpeg");
+        EVO_LOGW("cover", "extractVideoFrame: hardware poster produced nothing -> FFmpeg");
         evo_boot_log_flush();
     }
     return success;
@@ -685,19 +685,19 @@ struct ExtractLock {
 
 bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* outPixels, int targetWidth, int targetHeight) {
     ExtractLock extractLock;
-    evo_bt("extractVideoFrame: %s (%dx%d)", sanitizeUrl(videoPath).c_str(), targetWidth, targetHeight);
+    EVO_LOGI("cover", "extractVideoFrame: %s (%dx%d)", sanitizeUrl(videoPath).c_str(), targetWidth, targetHeight);
     evo_boot_log_flush();
 
     if (videoPath.empty() || !outPixels || targetWidth < 2 || targetHeight < 2) {
         return false;
     }
     if (isNetworkPath(videoPath)) {
-        evo_bt("extractVideoFrame: skipping network path: %s", sanitizeUrl(videoPath).c_str());
+        EVO_LOGW("cover", "extractVideoFrame: skipping network path: %s", sanitizeUrl(videoPath).c_str());
         evo_boot_log_flush();
         return false;
     }
     if (!pathReadable(videoPath.c_str())) {
-        evo_bt("extractVideoFrame: access failed: %s", sanitizeUrl(videoPath).c_str());
+        EVO_LOGE("cover", "extractVideoFrame: access failed: %s", sanitizeUrl(videoPath).c_str());
         evo_boot_log_flush();
         return false;
     }
@@ -723,7 +723,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
      * choose, so there is no second path to offer it.
      */
     if (evo_crash_note_stage(videoPath.c_str()) == EVO_CRASH_STAGE_PROBE) {
-        evo_bt("extractVideoFrame: quarantined - crashed in the container probe, skipping");
+        EVO_LOGW("cover", "extractVideoFrame: quarantined - crashed in the container probe, skipping");
         evo_boot_log_flush();
         return false;
     }
@@ -746,7 +746,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         constexpr size_t ProbeFloorBytes = 64u * 1024u * 1024u;
         const size_t availBytes = availableFlexBytes();
         if (availBytes > 0 && availBytes < ProbeFloorBytes) {
-            evo_bt("extractVideoFrame: skipping - only %zuMB flex free, need %zuMB to probe",
+            EVO_LOGW("cover", "extractVideoFrame: skipping - only %zuMB flex free, need %zuMB to probe",
                    availBytes / (1024u * 1024u), ProbeFloorBytes / (1024u * 1024u));
             evo_boot_log_flush();
             return false;
@@ -809,16 +809,16 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         }
     }
 
-    evo_bt("extractVideoFrame: calling avformat_open_input");
+    EVO_LOGI("cover", "extractVideoFrame: calling avformat_open_input");
     evo_boot_log_flush();
     if (avformat_open_input(&fmt, openPath.c_str(), nullptr, &opts) < 0) {
-        evo_bt("extractVideoFrame: open_input failed: %s", sanitizeUrl(openPath).c_str());
+        EVO_LOGE("cover", "extractVideoFrame: open_input failed: %s", sanitizeUrl(openPath).c_str());
         evo_boot_log_flush();
         av_dict_free(&opts);
         return false;
     }
     av_dict_free(&opts);
-    evo_bt("extractVideoFrame: avformat_open_input ok");
+    EVO_LOGI("cover", "extractVideoFrame: avformat_open_input ok");
     evo_boot_log_flush();
 
     int vstream = -1;
@@ -842,7 +842,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
             if (availableFlexBytes() > 0 &&
                 !evo_vdec_native_can_open(par->codec_id, par->profile, depth,
                                           par->width, par->height)) {
-                evo_bt("extractVideoFrame: skipping %dx%d %d-bit codec=%d before "
+                EVO_LOGW("cover", "extractVideoFrame: skipping %dx%d %d-bit codec=%d before "
                        "find_stream_info - /mnt/usb0/evo_no_sw_4k is set",
                        par->width, par->height, depth, (int)par->codec_id);
                 evo_boot_log_flush();
@@ -852,15 +852,15 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         }
     }
 
-    evo_bt("extractVideoFrame: calling avformat_find_stream_info");
+    EVO_LOGI("cover", "extractVideoFrame: calling avformat_find_stream_info");
     evo_boot_log_flush();
     if (avformat_find_stream_info(fmt, nullptr) < 0) {
-        evo_bt("extractVideoFrame: find_stream_info failed");
+        EVO_LOGE("cover", "extractVideoFrame: find_stream_info failed");
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
     }
-    evo_bt("extractVideoFrame: avformat_find_stream_info ok, nb_streams=%u", fmt->nb_streams);
+    EVO_LOGI("cover", "extractVideoFrame: avformat_find_stream_info ok, nb_streams=%u", fmt->nb_streams);
     evo_boot_log_flush();
 
     /* Survived. Out of libavformat's own decoders now - what follows is a
@@ -875,7 +875,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         }
     }
     if (vstream < 0) {
-        evo_bt("extractVideoFrame: no video stream");
+        EVO_LOGE("cover", "extractVideoFrame: no video stream");
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
@@ -883,7 +883,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
 
     AVStream* st = fmt->streams[vstream];
     if (!st || !st->codecpar) {
-        evo_bt("extractVideoFrame: invalid stream or codecpar");
+        EVO_LOGE("cover", "extractVideoFrame: invalid stream or codecpar");
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
@@ -912,7 +912,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     if (decodePosterOnHardware(fmt, st, vstream, seekSec, outPixels,
                                targetWidth, targetHeight)) {
         avformat_close_input(&fmt);
-        evo_bt("extractVideoFrame: cleanup complete, success=1 (hardware)");
+        EVO_LOGI("cover", "extractVideoFrame: cleanup complete, success=1 (hardware)");
         evo_boot_log_flush();
         return true;
     }
@@ -925,7 +925,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
      * retry.
      */
     if (evo_crash_note_stage(videoPath.c_str()) >= 0) {
-        evo_bt("extractVideoFrame: quarantined after an earlier crash, skipping");
+        EVO_LOGW("cover", "extractVideoFrame: quarantined after an earlier crash, skipping");
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
@@ -937,7 +937,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
      */
     if (!isSw4kAllowed() &&
         (st->codecpar->width > 1920 || st->codecpar->height > 1088)) {
-        evo_bt("extractVideoFrame: no software poster for %dx%d - /mnt/usb0/evo_no_sw_4k is set",
+        EVO_LOGW("cover", "extractVideoFrame: no software poster for %dx%d - /mnt/usb0/evo_no_sw_4k is set",
                st->codecpar->width, st->codecpar->height);
         evo_boot_log_flush();
         avformat_close_input(&fmt);
@@ -946,17 +946,17 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
 
     const AVCodec* dec = avcodec_find_decoder(st->codecpar->codec_id);
     if (!dec) {
-        evo_bt("extractVideoFrame: decoder not found for id=%d", st->codecpar->codec_id);
+        EVO_LOGE("cover", "extractVideoFrame: decoder not found for id=%d", st->codecpar->codec_id);
         evo_boot_log_flush();
         avformat_close_input(&fmt);
         return false;
     }
-    evo_bt("extractVideoFrame: found decoder %s (id=%d)", dec->name ? dec->name : "?", st->codecpar->codec_id);
+    EVO_LOGI("cover", "extractVideoFrame: found decoder %s (id=%d)", dec->name ? dec->name : "?", st->codecpar->codec_id);
     evo_boot_log_flush();
 
     AVCodecContext* ctx = avcodec_alloc_context3(dec);
     if (!ctx || avcodec_parameters_to_context(ctx, st->codecpar) < 0) {
-        evo_bt("extractVideoFrame: alloc_context/parameters failed");
+        EVO_LOGE("cover", "extractVideoFrame: alloc_context/parameters failed");
         evo_boot_log_flush();
         if (ctx) avcodec_free_context(&ctx);
         avformat_close_input(&fmt);
@@ -993,7 +993,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     {
         const size_t availBytes = availableFlexBytes();
         if (availBytes > 0 && availBytes < 32u * 1024u * 1024u) {
-            evo_bt("extractVideoFrame: skipping %dx%d - flex %zuMB critically low",
+            EVO_LOGW("cover", "extractVideoFrame: skipping %dx%d - flex %zuMB critically low",
                    st->codecpar->width, st->codecpar->height,
                    availBytes / (1024u * 1024u));
             evo_boot_log_flush();
@@ -1003,35 +1003,35 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
         }
     }
 
-    evo_bt("extractVideoFrame: calling avcodec_open2");
+    EVO_LOGI("cover", "extractVideoFrame: calling avcodec_open2");
     evo_boot_log_flush();
     if (avcodec_open2(ctx, dec, nullptr) < 0) {
-        evo_bt("extractVideoFrame: avcodec_open2 failed");
+        EVO_LOGE("cover", "extractVideoFrame: avcodec_open2 failed");
         evo_boot_log_flush();
         avcodec_free_context(&ctx);
         avformat_close_input(&fmt);
         return false;
     }
-    evo_bt("extractVideoFrame: avcodec_open2 ok");
+    EVO_LOGI("cover", "extractVideoFrame: avcodec_open2 ok");
     evo_boot_log_flush();
 
     if (seekSec > 0.0 && st->time_base.den > 0) {
         int64_t seekTs = static_cast<int64_t>(seekSec / av_q2d(st->time_base));
         if (seekTs < 0) seekTs = 0;
-        evo_bt("extractVideoFrame: seeking to ts=%lld", static_cast<long long>(seekTs));
+        EVO_LOGI("cover", "extractVideoFrame: seeking to ts=%lld", static_cast<long long>(seekTs));
         evo_boot_log_flush();
         if (av_seek_frame(fmt, vstream, seekTs, AVSEEK_FLAG_BACKWARD) < 0) {
             av_seek_frame(fmt, vstream, 0, AVSEEK_FLAG_BACKWARD);
         }
         avcodec_flush_buffers(ctx);
-        evo_bt("extractVideoFrame: seek done");
+        EVO_LOGI("cover", "extractVideoFrame: seek done");
         evo_boot_log_flush();
     }
 
     AVFrame* frame = av_frame_alloc();
     AVPacket* pkt = av_packet_alloc();
     if (!frame || !pkt) {
-        evo_bt("extractVideoFrame: frame/pkt alloc failed");
+        EVO_LOGE("cover", "extractVideoFrame: frame/pkt alloc failed");
         evo_boot_log_flush();
         if (frame) av_frame_free(&frame);
         if (pkt) av_packet_free(&pkt);
@@ -1042,7 +1042,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     bool gotFrame = false;
     int packetCount = 0;
 
-    evo_bt("extractVideoFrame: starting read loop");
+    EVO_LOGI("cover", "extractVideoFrame: starting read loop");
     evo_boot_log_flush();
 
     /* From here until the decoder is released we are inside code that can
@@ -1051,7 +1051,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
 
     while (packetCount < 48 && av_read_frame(fmt, pkt) >= 0) {
         if (thumbNowSec() >= timeout.deadlineSec) {
-            evo_bt("extractVideoFrame: decode timed out after %d packets", packetCount);
+            EVO_LOGW("cover", "extractVideoFrame: decode timed out after %d packets", packetCount);
             evo_boot_log_flush();
             av_packet_unref(pkt);
             break;
@@ -1061,7 +1061,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
             if (avcodec_send_packet(ctx, pkt) == 0) {
                 if (avcodec_receive_frame(ctx, frame) == 0) {
                     gotFrame = true;
-                    evo_bt("extractVideoFrame: got frame on packet %d (%dx%d fmt=%d)", packetCount, frame->width, frame->height, frame->format);
+                    EVO_LOGI("cover", "extractVideoFrame: got frame on packet %d (%dx%d fmt=%d)", packetCount, frame->width, frame->height, frame->format);
                     evo_boot_log_flush();
                     av_packet_unref(pkt);
                     break;
@@ -1072,12 +1072,12 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
     }
 
     if (!gotFrame && thumbNowSec() < timeout.deadlineSec) {
-        evo_bt("extractVideoFrame: flushing decoder");
+        EVO_LOGI("cover", "extractVideoFrame: flushing decoder");
         evo_boot_log_flush();
         avcodec_send_packet(ctx, nullptr);
         if (avcodec_receive_frame(ctx, frame) == 0) {
             gotFrame = true;
-            evo_bt("extractVideoFrame: got frame after flush (%dx%d fmt=%d)", frame->width, frame->height, frame->format);
+            EVO_LOGI("cover", "extractVideoFrame: got frame after flush (%dx%d fmt=%d)", frame->width, frame->height, frame->format);
             evo_boot_log_flush();
         }
     }
@@ -1101,7 +1101,7 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
 
     bool success = false;
     if (gotFrame && frame->width > 0 && frame->height > 0 && frame->format >= 0 && frame->data[0]) {
-        evo_bt("extractVideoFrame: scaling via sws_getContext (%dx%d -> %dx%d fmt=%d)",
+        EVO_LOGI("cover", "extractVideoFrame: scaling via sws_getContext (%dx%d -> %dx%d fmt=%d)",
                frame->width, frame->height, targetWidth, targetHeight, frame->format);
         evo_boot_log_flush();
 
@@ -1122,19 +1122,19 @@ bool CoverArtService::extractVideoFrame(const std::string& videoPath, uint32_t* 
             sws_scale(sws, (const uint8_t* const*)frame->data, frame->linesize, 0, frame->height, dst, dstLinesize);
             sws_freeContext(sws);
             success = true;
-            evo_bt("extractVideoFrame: sws_scale done");
+            EVO_LOGI("cover", "extractVideoFrame: sws_scale done");
             evo_boot_log_flush();
         } else {
-            evo_bt("extractVideoFrame: sws_getContext failed");
+            EVO_LOGE("cover", "extractVideoFrame: sws_getContext failed");
             evo_boot_log_flush();
         }
     } else {
-        evo_bt("extractVideoFrame: no valid frame decoded");
+        EVO_LOGI("cover", "extractVideoFrame: no valid frame decoded");
         evo_boot_log_flush();
     }
 
     av_frame_free(&frame);
-    evo_bt("extractVideoFrame: cleanup complete, success=%d", success ? 1 : 0);
+    EVO_LOGI("cover", "extractVideoFrame: cleanup complete, success=%d", success ? 1 : 0);
     evo_boot_log_flush();
     return success;
 }
@@ -1178,7 +1178,7 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
 
     /* First attempt for this path: from here down the tracing is once per path,
      * not once per frame. */
-    evo_bt("getCoverArt: %s (isDir=%d)", sanitizeUrl(mediaPath).c_str(), isDirectory ? 1 : 0);
+    EVO_LOGI("cover", "getCoverArt: %s (isDir=%d)", sanitizeUrl(mediaPath).c_str(), isDirectory ? 1 : 0);
     evo_boot_log_flush();
 
     slot->pathKey = mediaPath;
@@ -1186,13 +1186,13 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
     slot->valid = false;
 
     if (!isNetworkPath(mediaPath) && !pathReadable(mediaPath.c_str())) {
-        evo_bt("getCoverArt: access fail len=%zu -> cached as missing", mediaPath.length());
+        EVO_LOGW("cover", "getCoverArt: access fail len=%zu -> cached as missing", mediaPath.length());
         evo_boot_log_flush();
         return nullptr;
     }
 
     std::string sidecar = resolveSidecarPath(mediaPath, isDirectory);
-    evo_bt("getCoverArt: sidecar='%s'", sanitizeUrl(sidecar).c_str());
+    EVO_LOGI("cover", "getCoverArt: sidecar='%s'", sanitizeUrl(sidecar).c_str());
     evo_boot_log_flush();
     if (!sidecar.empty() && pathReadable(sidecar.c_str())) {
         int w = 0, h = 0, ch = 0;
@@ -1207,7 +1207,7 @@ const uint32_t* CoverArtService::getCoverArt(const std::string& mediaPath, bool 
     }
 
     if (!isDirectory && !isNetworkPath(mediaPath) && isVideoFile(mediaPath)) {
-        evo_bt("getCoverArt: isVideo, calling extractVideoFrame");
+        EVO_LOGI("cover", "getCoverArt: isVideo, calling extractVideoFrame");
         evo_boot_log_flush();
         if (extractVideoFrame(mediaPath, slot->pixels.data(), PosterWidth, PosterHeight)) {
             slot->valid = true;
@@ -1398,7 +1398,7 @@ bool CoverArtService::loadNetArtInto(const NetArtRequest& req, uint32_t* out, in
 
     std::vector<uint8_t> bytes;
     if (!m_netFetcher.fetch(req, bytes) || bytes.empty()) {
-        evo_bt("netart: fetch failed %s", sanitizeUrl(req.path).c_str());
+        EVO_LOGW("cover", "netart: fetch failed %s", sanitizeUrl(req.path).c_str());
         return false;
     }
 
@@ -1406,7 +1406,7 @@ bool CoverArtService::loadNetArtInto(const NetArtRequest& req, uint32_t* out, in
     int iw = 0, ih = 0, ich = 0;
     if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &iw, &ih, &ich) ||
         iw < 2 || ih < 2 || iw > 4096 || ih > 4096) {
-        evo_bt("netart: unusable image %dx%d %s", iw, ih, sanitizeUrl(req.path).c_str());
+        EVO_LOGI("cover", "netart: unusable image %dx%d %s", iw, ih, sanitizeUrl(req.path).c_str());
         return false;
     }
     unsigned char* data = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
@@ -1447,7 +1447,7 @@ void CoverArtService::startWorker() {
     }
     m_workerStarted = (rc == 0);
     if (!m_workerStarted)
-        evo_bt("CoverArtService: worker pthread_create rc=%d", rc);
+        EVO_LOGE("cover", "worker pthread_create rc=%d", rc);
 }
 
 void CoverArtService::workerMain() {

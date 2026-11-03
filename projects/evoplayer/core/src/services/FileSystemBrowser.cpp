@@ -3,6 +3,7 @@
 #include "evo_jailbreak.h"
 #include "evo_data_path.h"
 #include "evo_boot_trace.h"
+#include "evo_boot_log.h"
 
 #include <cstdio>
 #include <cstring>
@@ -294,10 +295,10 @@ bool FileSystemBrowser::refresh() {
 }
 
 void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
-    evo_bt("FS: scanDirectory '%s'", dirPath.c_str());
+    EVO_LOGI("files", "scanDirectory '%s'", dirPath.c_str());
     evo_dir_t* dir = evo_opendir(dirPath.c_str());
     if (!dir && dirPath.rfind("/data", 0) == 0) {
-        evo_bt("FS: evo_opendir('%s') null, ensuring unjail retry", dirPath.c_str());
+        EVO_LOGW("files", "evo_opendir('%s') null, ensuring unjail retry", dirPath.c_str());
         evo_jailbreak_ensure();
         dir = evo_opendir(dirPath.c_str());
     }
@@ -313,7 +314,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
     }
 
     if (!dir) {
-        evo_bt("FS: scanDirectory '%s' failed (errno=%d)", dirPath.c_str(), errno);
+        EVO_LOGE("files", "scanDirectory '%s' failed (errno=%d)", dirPath.c_str(), errno);
         return;
     }
 
@@ -351,7 +352,7 @@ void FileSystemBrowser::scanDirectory(const std::string& dirPath) {
         m_entries.push_back(std::move(bEntry));
     }
 
-    evo_bt("FS: scanDirectory '%s' complete, found %zu entries", dirPath.c_str(), m_entries.size());
+    EVO_LOGI("files", "scanDirectory '%s' complete, found %zu entries", dirPath.c_str(), m_entries.size());
     evo_closedir(dir);
 }
 

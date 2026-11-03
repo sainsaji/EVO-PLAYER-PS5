@@ -361,7 +361,7 @@ bool EvoRmlApp::Initialize(int width, int height) {
                                      "NotoSansKR-Regular.otf" }) {
                 const std::string path = std::string(evo_data_path("fonts/")) + cjk;
                 if (access(path.c_str(), R_OK) == 0 && Rml::LoadFontFace(path, true))
-                    evo_bt("RmlUi: loaded CJK face %s", path.c_str());
+                    EVO_LOGI("rmlui", "loaded CJK face %s", path.c_str());
             }
 #endif
             fprintf(stderr, "[EVO RmlUi] Loaded font face from %s\n", p.c_str());

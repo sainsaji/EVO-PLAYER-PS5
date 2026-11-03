@@ -186,7 +186,8 @@ enum {
     EVO_RMLUI_PREVIEW_KEYBOARD,     /* EVO virtual keyboard vs native PS5 IME */
     EVO_RMLUI_PREVIEW_ASK_STREAM,   /* live channel tile to quality dialog */
     EVO_RMLUI_PREVIEW_DEBUG_OVERLAY,/* live stats box over video frame */
-    EVO_RMLUI_PREVIEW_PORT          /* phone link QR + URL + port status */
+    EVO_RMLUI_PREVIEW_PORT,         /* phone link QR + URL + port status */
+    EVO_RMLUI_PREVIEW_REPORT        /* #229: report page QR + what to do + save to USB */
 };
 
 #define EVO_RMLUI_PREVIEW_CHOICES 12  /* EVO_THEME_MAX, the longest list */

@@ -260,11 +260,11 @@ typedef struct {
 
 static void on_auth_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     auth_ctx_t *ctx = (auth_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: sign-in failed ok=%d http=%d", success, status);
         g_cfg.is_connected = false;
         if (ctx->cb) ctx->cb(0, "Connection to Xtream server failed", ctx->ud);
         free(ctx);
@@ -273,6 +273,7 @@ static void on_auth_resp(int success, int status, const char *body, size_t len, 
 
     cJSON *root = cJSON_Parse(body);
     if (!root) {
+        PROV_ERR("xtream: sign-in reply unreadable (%zu bytes)", len);
         g_cfg.is_connected = false;
         if (ctx->cb) ctx->cb(0, "Invalid JSON from Xtream server", ctx->ud);
         free(ctx);
@@ -304,12 +305,14 @@ static void on_auth_resp(int success, int status, const char *body, size_t len, 
         kick_guide();
         if (ctx->cb) ctx->cb(1, "Account active", ctx->ud);
     } else if (auth == 0) {
+        PROV_ERR("xtream: sign-in refused (user_info.auth=0%s)", uinfo ? "" : ", no user_info");
         g_cfg.is_connected = false;
         if (ctx->cb) ctx->cb(0, "Invalid username or password", ctx->ud);
     } else {
         g_cfg.is_connected = false;
         char msg[96];
         snprintf(msg, sizeof msg, "Account status: %s", stat[0] ? stat : "Inactive");
+        PROV_ERR("xtream: account not active (status '%.32s')", stat);
         if (ctx->cb) ctx->cb(0, msg, ctx->ud);
     }
 
@@ -351,11 +354,11 @@ typedef struct {
 
 static void on_categories_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     catalog_ctx_t *ctx = (catalog_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: categories failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -363,6 +366,7 @@ static void on_categories_resp(int success, int status, const char *body, size_t
 
     cJSON *arr = cJSON_Parse(body);
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("xtream: categories reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         if (arr) cJSON_Delete(arr);
         free(ctx);
@@ -420,11 +424,11 @@ static void on_categories_resp(int success, int status, const char *body, size_t
 
 static void on_live_streams_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     catalog_ctx_t *ctx = (catalog_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: live channels failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -432,6 +436,7 @@ static void on_live_streams_resp(int success, int status, const char *body, size
 
     cJSON *arr = cJSON_Parse(body);
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("xtream: live channels reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         if (arr) cJSON_Delete(arr);
         free(ctx);
@@ -526,11 +531,11 @@ static void on_live_streams_resp(int success, int status, const char *body, size
 
 static void on_vod_streams_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     catalog_ctx_t *ctx = (catalog_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: movies failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -538,6 +543,7 @@ static void on_vod_streams_resp(int success, int status, const char *body, size_
 
     cJSON *arr = cJSON_Parse(body);
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("xtream: movies reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         if (arr) cJSON_Delete(arr);
         free(ctx);
@@ -605,11 +611,11 @@ static void on_vod_streams_resp(int success, int status, const char *body, size_
 
 static void on_series_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     catalog_ctx_t *ctx = (catalog_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: series failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -617,6 +623,7 @@ static void on_series_resp(int success, int status, const char *body, size_t len
 
     cJSON *arr = cJSON_Parse(body);
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("xtream: series reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         if (arr) cJSON_Delete(arr);
         free(ctx);
@@ -684,11 +691,11 @@ static void on_series_resp(int success, int status, const char *body, size_t len
 
 static void on_series_info_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     catalog_ctx_t *ctx = (catalog_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: series info failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -696,6 +703,7 @@ static void on_series_info_resp(int success, int status, const char *body, size_
 
     cJSON *root = cJSON_Parse(body);
     if (!root) {
+        PROV_ERR("xtream: series info reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -1090,11 +1098,11 @@ static const char *xt_strcasestr(const char *h, const char *n)
 
 static void on_search_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     search_ctx_t *ctx = (search_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: search failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         free(ctx);
         return;
@@ -1102,6 +1110,7 @@ static void on_search_resp(int success, int status, const char *body, size_t len
 
     cJSON *arr = cJSON_Parse(body);
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("xtream: search reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
         if (arr) cJSON_Delete(arr);
         free(ctx);
@@ -1462,11 +1471,11 @@ static void xtream_row_add(evo_provider_row_t *rows, int *n, int max,
 
 static void on_xtream_details_resp(int success, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     xtream_panel_ctx_t *ctx = (xtream_panel_ctx_t *)ud;
     if (!ctx) return;
 
     if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: details failed ok=%d http=%d", success, status);
         if (ctx->cb) ctx->cb(0, NULL, 0, ctx->ud);
         free(ctx);
         return;
@@ -1474,6 +1483,7 @@ static void on_xtream_details_resp(int success, int status, const char *body, si
 
     cJSON *root = cJSON_Parse(body);
     if (!root) {
+        PROV_ERR("xtream: details reply unreadable (%zu bytes)", len);
         if (ctx->cb) ctx->cb(0, NULL, 0, ctx->ud);
         free(ctx);
         return;

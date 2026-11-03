@@ -1702,6 +1702,8 @@ void draw_keyboard(DrawList &list, const Context &ctx, const Rect &box, const Se
     benefit(list, ctx, a, y + 24.0f, pv.benefit);
 }
 
+void draw_qr_tile(DrawList &list, float x0, float y0, float qs, const SettingsPreview &pv);
+
 /* ---- PHONE & LOG PORT: the phone link as it will read, and whether the port took ----
  * pv.index = 0 free, 1 busy (old port kept), 2 fallback in use.
  * pv.choices[0] = the link, pv.choices[1] = the status line. */
@@ -1746,9 +1748,62 @@ void draw_port(DrawList &list, const Context &ctx, const Rect &box, const Settin
         return;
     }
 
-    // A QR-shaped tile: three finder squares and a fixed scatter of modules.
     const float qs = 176.0f;
-    const Rect qr{a.x, a.top, qs, qs};
+    draw_qr_tile(list, a.x, a.top, qs, pv);
+
+    // To the right: what to do, the link, then the status of the port.
+    const float tx = a.x + qs + 24.0f;
+    const float tw = a.w - qs - 24.0f;
+    ui::text(list, ctx.fonts.semibold, "SCAN WITH YOUR PHONE", tx, a.top + 22.0f, 14, p.text_faint, Align::left, 2.0f);
+    ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(link, 18, tw), tx, a.top + 62.0f, 18, kWhite);
+    list.rounded_rect({tx, a.top + 108.0f, 12.0f, 12.0f}, 6.0f, tone);
+    ui::paragraph(list, ctx.fonts.regular, status, tx + 22.0f, a.top + 120.0f, 18, tw - 22.0f, 24, tone, 2);
+
+    hint_row(a.top + qs + 36.0f);
+    benefit(list, ctx, a, a.top + qs + 96.0f, pv.benefit);
+}
+
+/* ---- REPORT A PROBLEM (#229): the report page's QR, what to do, and Cross to save ----
+ * pv.index = 0 the phone page is up, 1 no link (no port or no network).
+ * pv.choices[0] = the link, pv.choices[1] = the status line. */
+void draw_report(DrawList &list, const Context &ctx, const Rect &box, const SettingsPreview &pv)
+{
+    Area a = begin_card(list, ctx, box, pv);
+    const Palette &p = ctx.palette;
+    const std::string link = pv.choices.size() > 0 ? pv.choices[0] : "";
+    const std::string status = pv.choices.size() > 1 ? pv.choices[1] : "";
+    const Color tone = pv.index == 0 ? Color::rgb(0x3ddc84) : Color::rgb(0xffb02e);
+
+    const float qs = 176.0f;
+    float ty = a.top;
+    if (pv.index == 0)
+    {
+        draw_qr_tile(list, a.x, a.top, qs, pv);
+        const float tx = a.x + qs + 24.0f;
+        const float tw = a.w - qs - 24.0f;
+        ui::text(list, ctx.fonts.semibold, "SCAN WITH YOUR PHONE", tx, a.top + 22.0f, 14, p.text_faint, Align::left, 2.0f);
+        ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(link, 18, tw), tx, a.top + 62.0f, 18, kWhite);
+        ui::paragraph(list, ctx.fonts.regular, "Opens a page to download or share EVO's log. No USB stick needed.",
+                      tx, a.top + 104.0f, 18, tw, 24, p.text_faint, 3);
+        ty = a.top + qs + 20.0f;
+    }
+    list.rounded_rect({a.x, ty + 4.0f, 12.0f, 12.0f}, 6.0f, tone);
+    ui::paragraph(list, ctx.fonts.regular, status, a.x + 22.0f, ty + 16.0f, 18, a.w - 22.0f, 24, tone, 2);
+
+    const ui::Hint hints[] = {{ui::Button::cross, "Save report to USB"}};
+    ui::HintLayout layout;
+    layout.size = 30;
+    layout.text_size = 20;
+    layout.cy = ty + 76.0f;
+    ui::draw_hints(list, ctx.fonts, ui::GlyphStyle::dark(), hints, 1, a.x, false, layout);
+    benefit(list, ctx, a, ty + 136.0f, pv.benefit);
+}
+
+/* A QR tile: the real code when pv carries one, otherwise a QR-shaped stand-in
+ * (three finder squares and a fixed scatter) for the host preview. */
+void draw_qr_tile(DrawList &list, float x0, float y0, float qs, const SettingsPreview &pv)
+{
+    const Rect qr{x0, y0, qs, qs};
     list.rounded_rect(qr, 12.0f, Color::rgb(0xffffff));
     const bool real = pv.qr_size > 0;
     const int n = real ? pv.qr_size : 25;
@@ -1781,17 +1836,6 @@ void draw_port(DrawList &list, const Context &ctx, const Rect &box, const Settin
                                   0.0f, Color::rgb(0x10131a));
         }
     }
-
-    // To the right: what to do, the link, then the status of the port.
-    const float tx = a.x + qs + 24.0f;
-    const float tw = a.w - qs - 24.0f;
-    ui::text(list, ctx.fonts.semibold, "SCAN WITH YOUR PHONE", tx, a.top + 22.0f, 14, p.text_faint, Align::left, 2.0f);
-    ui::text(list, ctx.fonts.semibold, ctx.fonts.semibold.font->fit(link, 18, tw), tx, a.top + 62.0f, 18, kWhite);
-    list.rounded_rect({tx, a.top + 108.0f, 12.0f, 12.0f}, 6.0f, tone);
-    ui::paragraph(list, ctx.fonts.regular, status, tx + 22.0f, a.top + 120.0f, 18, tw - 22.0f, 24, tone, 2);
-
-    hint_row(a.top + qs + 36.0f);
-    benefit(list, ctx, a, a.top + qs + 96.0f, pv.benefit);
 }
 
 /* ---- 21. ASK WHICH LIVE STREAM: channel tile to quality dialog vs direct play ---- */
@@ -1989,6 +2033,9 @@ void draw_settings_preview(DrawList &list, const Context &ctx, const Rect &box, 
         break;
     case EVO_RMLUI_PREVIEW_PORT:
         draw_port(list, ctx, box, pv);
+        break;
+    case EVO_RMLUI_PREVIEW_REPORT:
+        draw_report(list, ctx, box, pv);
         break;
     default: /* INFO and every kind that has no drawing yet */
         draw_info(list, ctx, box, pv);

@@ -10,6 +10,9 @@
  *   GET /stream        Server-Sent Events, one event per line
  *   GET /raw           plain text, kept open (curl -N http://<ps5>:9780/raw)
  *   GET /snapshot      snapshot of the ring (the last ~128 KiB), then closes
+ *   GET /report        the phone page for sending a problem report (#229)
+ *   GET /report.txt    that report as a download: version, model, stats, settings
+ *                      and the end of evo.log from disk (evo_report_write)
  *   GET /stats         one JSON snapshot of memory, read-ahead, network and
  *                      playback (evo_stats.c) - tools/evo-dash.py graphs it
  *   GET /input         the phone page: type or paste text for the console's
@@ -36,6 +39,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +51,14 @@
 #include <netinet/in.h>
 
 #include "evo_boot_log.h"
+#include "evo_build_id.h"
+#include "evo_data_path.h"
+#include "evo_hw.h"
 #include "evo_keyboard.h"
+
+#ifndef EVO_PLAYER_VERSION
+#define EVO_PLAYER_VERSION "dev"
+#endif
 
 #define LS_MAX_CLIENTS 4
 #define LS_CHUNK       8192
@@ -144,6 +155,52 @@ static const char k_input_page[] =
 "poll()})"
 ".catch(function(){busy=false;M.textContent='Could not reach the PS5.';B.disabled=false})};"
 "poll();setInterval(poll,1000);</script>";
+
+/* #229: the phone page for sending a problem report. It loads /report.txt once,
+ * shows how big it is and its last warnings and errors, and offers Download,
+ * Share (only where the browser allows it on plain http) and Copy. No external
+ * files: it has to load on any phone browser on the LAN. */
+static const char k_report_page[] =
+"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<title>EVO problem report</title><style>"
+":root{color-scheme:dark light;--bg:#111;--fg:#eee;--dim:#999;--card:#1c1c1c;--line:#333;--ac:#4da3ff;--e:#ff6b6b;--w:#ffc857}"
+"@media(prefers-color-scheme:light){:root{--bg:#f5f5f5;--fg:#222;--dim:#666;--card:#fff;--line:#ddd;--ac:#0a66d6;--e:#c62828;--w:#a66a00}}"
+"body{margin:0;font:17px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}"
+"main{max-width:640px;margin:0 auto;padding:20px 16px}h1{font-size:21px;margin:0 0 6px}h2{font-size:16px;margin:22px 0 6px}"
+"p{margin:6px 0}.dim{color:var(--dim)}ol{padding-left:22px;margin:6px 0}"
+".b{display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:14px;font:inherit;font-weight:600;border:0;"
+"border-radius:8px;background:var(--ac);color:#fff;text-align:center;text-decoration:none}.b.alt{background:var(--card);color:var(--fg);border:1px solid var(--line)}"
+"#sum{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:12px}"
+"pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px/1.4 ui-monospace,monospace;"
+"white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}.E{color:var(--e)}.W{color:var(--w)}"
+"textarea{position:absolute;left:-9999px}"
+"</style><main><h1>EVO Player: report a problem</h1>"
+"<p>This page gets EVO's log from your PS5, so you can send it with your bug report. No USB stick needed.</p>"
+"<ol><li>Tap <b>Download report</b> (or Share / Copy).</li>"
+"<li>Attach the file to your report on GitHub or Discord, and say what you did just before the problem.</li></ol>"
+"<div id=sum>Loading the report from the PS5...</div>"
+"<a class=b id=dl href='/report.txt' download>Download report</a>"
+"<button class='b alt' id=sh hidden>Share</button><button class='b alt' id=cp>Copy text</button><p id=msg class=dim></p>"
+"<h2>Last warnings and errors</h2><pre id=last class=dim>-</pre>"
+"<p class=dim>Passwords, tokens and keys are removed from the report. Server addresses, folder and file names stay in, "
+"because they help find the problem. <a href='/log'>Live log</a></p></main><textarea id=ta></textarea><script>"
+"var S=document.getElementById('sum'),M=document.getElementById('msg'),LA=document.getElementById('last'),"
+"SH=document.getElementById('sh'),TA=document.getElementById('ta'),txt='',name='evo-report.txt';"
+"fetch('/report.txt',{cache:'no-store'}).then(function(r){var d=r.headers.get('Content-Disposition')||'',m=/filename=\"([^\"]+)\"/.exec(d);"
+"if(m)name=m[1];document.getElementById('dl').setAttribute('download',name);return r.text()}).then(function(t){txt=t;"
+"var ls=t.split('\\n'),e=0,w=0,bad=[];for(var i=0;i<ls.length;i++){var l=ls[i];"
+"if(/^\\[[0-9.]+\\] ERROR /.test(l)){e++;bad.push(['E',l])}else if(/^\\[[0-9.]+\\] WARN /.test(l)){w++;bad.push(['W',l])}}"
+"var b=ls[1]||'';S.textContent='Ready: '+Math.round(t.length/1024)+' KB, '+e+' error'+(e==1?'':'s')+', '+w+' warning'+(w==1?'':'s')+'. '+b;"
+"LA.textContent='';LA.className='';bad=bad.slice(-30);if(!bad.length)LA.textContent='None.';"
+"for(var j=0;j<bad.length;j++){var s=document.createElement('div');s.className=bad[j][0];s.textContent=bad[j][1];LA.appendChild(s)}"
+"try{var f=new File([t],name,{type:'text/plain'});if(navigator.canShare&&navigator.canShare({files:[f]})){SH.hidden=false;"
+"SH.onclick=function(){navigator.share({files:[f],title:'EVO Player report'}).catch(function(){})}}}catch(x){}"
+"}).catch(function(){S.textContent='Could not reach the PS5. Is EVO still open, and is this phone on the same network?'});"
+"document.getElementById('cp').onclick=function(){if(!txt){M.textContent='The report has not loaded yet.';return}"
+"function done(){M.textContent='Copied. Paste it into your report.'}"
+"if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(done,function(){M.textContent='Copy failed - use Download.'});return}"
+"TA.value=txt;TA.select();try{document.execCommand('copy');done()}catch(x){M.textContent='Copy failed - use Download.'}};"
+"</script>";
 
 typedef struct {
     int tail_now;
@@ -402,6 +459,151 @@ static void serve_input_post(int fd, const char *head, const char *body, size_t 
     send_str(fd, "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n");
 }
 
+/* ---- #229: the problem report ------------------------------------------ */
+
+typedef struct { evo_report_sink_fn sink; void *ud; long total; int stop; } rp_t;
+
+static void rp_put(rp_t *r, const char *s, size_t n)
+{
+    if (r->stop || !n) return;
+    if (r->sink(r->ud, s, n) != 0) { r->stop = 1; return; }
+    r->total += (long)n;
+}
+
+static void rp_printf(rp_t *r, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void rp_printf(rp_t *r, const char *fmt, ...)
+{
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    rp_put(r, buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);
+}
+
+static long rp_file_size(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    long n = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+    fclose(f);
+    return n;
+}
+
+/* The last `max` bytes of a text file, from a line start, each line redacted
+ * again: a log written by an older build may predate a redaction rule. */
+static void rp_file_tail(rp_t *r, const char *title, const char *path, long max)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : 0;
+    long start = size > max ? size - max : 0;
+    fseek(f, start, SEEK_SET);
+    rp_printf(r, "\n=== %s: %s (%s%ld of %ld bytes) ===\n", title, path,
+              start ? "last " : "", size - start, size);
+    char line[1024];
+    int skip = start > 0;          /* the first line is cut in half: drop it */
+    while (!r->stop && fgets(line, sizeof line, f)) {
+        if (skip) { skip = line[strlen(line) - 1] != '\n'; continue; }
+        evo_log_redact(line, sizeof line);
+        rp_put(r, line, strlen(line));
+    }
+    fclose(f);
+}
+
+long evo_report_write(evo_report_sink_fn sink, void *ud)
+{
+    rp_t r = { sink, ud, 0, 0 };
+    evo_boot_log_flush();          /* everything logged so far is on disk */
+
+    char path[160];
+    const int have_file = evo_log_file_path(path, sizeof path);
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    rp_printf(&r, "EVO Player problem report\n");
+    rp_printf(&r, "version %s, build %s, %s, up %lld s\n", EVO_PLAYER_VERSION, EVO_BUILD_ID,
+              evo_hw_model_name(), (long long)ts.tv_sec);
+    rp_printf(&r, "log file: %s\n", have_file ? path : "none (no USB stick and /data not writable)");
+
+    char stats[2048];
+    size_t sn = evo_stats_json(stats, sizeof stats);
+    rp_printf(&r, "\n=== stats ===\n");
+    rp_put(&r, stats, sn);
+    rp_put(&r, "\n", 1);
+
+    /* Settings are numbers and the log port: no names, addresses or passwords.
+     * The network shares file has passwords and is never included. */
+    rp_file_tail(&r, "settings", evo_data_path("evo_player_settings.cfg"), 8192);
+
+    if (have_file) {
+        long budget = EVO_REPORT_LOG_BYTES;
+        long cur = rp_file_size(path);
+        if (cur >= 0 && cur < budget) {
+            /* Room left: the end of the rotated file too, so a crash just
+             * before a rotation is still in the report. */
+            char old[176];
+            snprintf(old, sizeof old, "%s.1", path);
+            rp_file_tail(&r, "older log", old, budget - cur);
+        }
+        rp_file_tail(&r, "log", path, budget);
+    } else {
+        /* No file: what is still in memory, this session only. */
+        rp_printf(&r, "\n=== log (memory, this session only) ===\n");
+        unsigned long long pos = 0, end = evo_log_ring_total(), missed = 0;
+        char buf[LS_CHUNK];
+        while (!r.stop && pos < end) {
+            size_t n = evo_log_ring_read(&pos, buf, sizeof buf, 0, &missed);
+            if (!n) break;
+            rp_put(&r, buf, n);
+        }
+    }
+    rp_printf(&r, "\n=== end of report ===\n");
+    return r.stop ? -1 : r.total;
+}
+
+static int rp_file_sink(void *ud, const char *data, size_t n)
+{
+    return fwrite(data, 1, n, (FILE *)ud) == n ? 0 : -1;
+}
+
+int evo_report_save(char *out, size_t cap)
+{
+    const char *paths[2] = { "/mnt/usb0/evo_report.txt", evo_data_path("evo_report.txt") };
+    for (int i = 0; i < 2; ++i) {
+        FILE *f = fopen(paths[i], "w");
+        if (!f) continue;
+        const long n = evo_report_write(rp_file_sink, f);
+        const int closed = fclose(f) == 0;
+        if (n > 0 && closed) {
+            if (out && cap) snprintf(out, cap, "%s", paths[i]);
+            EVO_LOGI("report", "saved %ld bytes to %s", n, paths[i]);
+            return 1;
+        }
+        EVO_LOGE("report", "writing %s failed", paths[i]);
+    }
+    if (out && cap) out[0] = '\0';
+    return 0;
+}
+
+static int rp_sock_sink(void *ud, const char *data, size_t n)
+{
+    return send_all((int)(intptr_t)ud, data, n);
+}
+
+/* GET /report.txt - the report as a file the phone saves. */
+static void serve_report_txt(int fd)
+{
+    char head[320];
+    snprintf(head, sizeof head,
+             "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+             "Content-Disposition: attachment; filename=\"evo-report-%s.txt\"\r\n"
+             "Cache-Control: no-store\r\nConnection: close\r\n\r\n", EVO_BUILD_ID);
+    if (send_str(fd, head) != 0) return;
+    const long n = evo_report_write(rp_sock_sink, (void *)(intptr_t)fd);
+    EVO_LOGI("report", "sent to a phone (%ld bytes)", n);
+}
+
 static void *conn_thread(void *arg)
 {
     int fd = (int)(intptr_t)arg;
@@ -502,6 +704,16 @@ static void *conn_thread(void *arg)
                          sizeof k_page - 1);
                 send_str(fd, head);
                 send_all(fd, k_page, sizeof k_page - 1);
+            } else if (!strcmp(norm, "/report")) {
+                char head[160];
+                snprintf(head, sizeof head,
+                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                         "Cache-Control: no-store\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                         sizeof k_report_page - 1);
+                send_str(fd, head);
+                send_all(fd, k_report_page, sizeof k_report_page - 1);
+            } else if (!strcmp(norm, "/report.txt")) {
+                serve_report_txt(fd);
             } else if (!strcmp(norm, "/stats")) {
                 char body[2048], head[192];
                 size_t n = evo_stats_json(body, sizeof body);

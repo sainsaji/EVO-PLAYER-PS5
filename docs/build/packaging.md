@@ -74,7 +74,7 @@ same folder before suspecting code.
   the local file, and is renamed into place only on a match. A mismatch deletes the
   upload, so ShadowMount+ never sees bad bytes. For a folder deploy, `eboot.bin` and
   `param.json` go up last, so a half-finished folder is never mountable.
-- It deletes `/mnt/usb0/{evo.log, evo_status, evo_compat_report.txt}` so each
+- It deletes `/mnt/usb0/{evo.log, evo_status, evo_report.txt}` so each
   launch starts with a fresh log.
 - **It refuses to run while EVO is resident.** It asks ShadowMount's
   `/data/shadowmount/debug.log` (via `tools/evo_lifecycle.py`): started and not

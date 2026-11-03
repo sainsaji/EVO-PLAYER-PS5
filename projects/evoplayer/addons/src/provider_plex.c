@@ -1,4 +1,5 @@
 #include "evo_boot_trace.h"
+#include "evo_boot_log.h"
 /*
  * Plex PIN pairing — initial native provider integration.
  * This phase implements asynchronous account linking; catalog and playback
@@ -50,7 +51,7 @@ static void plex_sign_out(void) { token[0] = 0; save_token(); pending = 0; }
 static void on_pin(int ok, int status, const char *body, size_t len, void *ud) {
     (void)ud;
 
-    evo_bt("PLEX PIN: ok=%d status=%d len=%zu", ok, status, len);
+    EVO_LOGI("plex", "PIN: ok=%d status=%d len=%zu", ok, status, len);
     cJSON *r = NULL;
 
     if (ok && status >= 200 && status < 300 && body && len > 0) {
@@ -67,7 +68,7 @@ static void on_pin(int ok, int status, const char *body, size_t len, void *ud) {
                 code->valuestring &&
                 code->valuestring[0];
 
-    evo_bt("PLEX PIN parse: json=%d id=%d code=%d valid=%d",
+    EVO_LOGI("plex", "PIN parse: json=%d id=%d code=%d valid=%d",
            r != NULL,
            cJSON_IsNumber(id),
            cJSON_IsString(code),
@@ -398,7 +399,7 @@ static void plex_on_libraries(int ok, int status,
                 xml_items, EVO_PROVIDER_PAGE_MAX);
 
             if (xml_count >= 0) {
-                evo_bt("PLEX libraries: XML parsed %d libraries",
+                EVO_LOGI("plex", "libraries: XML parsed %d libraries",
                        xml_count);
                 ctx->cb(1, xml_items, xml_count, 0, ctx->ud);
                 free(xml_items);
@@ -414,10 +415,10 @@ static void plex_on_libraries(int ok, int status,
     if (!cJSON_IsArray(arr)) {
         unsigned char first = (body && len) ? (unsigned char)body[0] : 0;
 
-        evo_bt("PLEX libraries: HTTP=%d ok=%d bytes=%zu JSON=%d first_byte=0x%02X",
+        EVO_LOGI("plex", "libraries: HTTP=%d ok=%d bytes=%zu JSON=%d first_byte=0x%02X",
                status, ok, len, root != NULL, first);
 
-        evo_bt("PLEX libraries: request failed HTTP=%d JSON=%d",
+        EVO_LOGE("plex", "libraries: request failed HTTP=%d JSON=%d",
                status, root != NULL);
         ctx->cb(0, NULL, 0, 0, ctx->ud);
         cJSON_Delete(root);
@@ -470,7 +471,7 @@ static void plex_on_libraries(int ok, int status,
         ++count;
     }
 
-    evo_bt("PLEX libraries: found %d libraries", count);
+    EVO_LOGI("plex", "libraries: found %d libraries", count);
 
     ctx->cb(1, items, count, 0, ctx->ud);
 
@@ -663,15 +664,15 @@ static int plex_parse_xml_media(const char *body, size_t len,
         plex_set_media_artwork(it, server_index, thumb, art);
 
         if (count < 5) {
-            evo_bt("PLEX ART DEBUG: item=%d title='%s'",
+            EVO_LOGI("plex", "ART DEBUG: item=%d title='%s'",
                    count, it->title);
-            evo_bt("PLEX ART DEBUG: thumb='%s' art='%s'",
+            EVO_LOGI("plex", "ART DEBUG: thumb='%s' art='%s'",
                    thumb, art);
-            evo_bt("PLEX ART DEBUG: poster_url='%s'",
+            EVO_LOGI("plex", "ART DEBUG: poster_url='%s'",
                    it->art_url);
-            evo_bt("PLEX ART DEBUG: backdrop_url='%s'",
+            EVO_LOGI("plex", "ART DEBUG: backdrop_url='%s'",
                    it->backdrop_url);
-            evo_bt("PLEX ART DEBUG: poster_len=%zu backdrop_len=%zu",
+            EVO_LOGI("plex", "ART DEBUG: poster_len=%zu backdrop_len=%zu",
                    strlen(it->art_url),
                    strlen(it->backdrop_url));
         }
@@ -766,7 +767,7 @@ static void plex_on_media_items(int ok, int status,
         }
     }
 
-    evo_bt("PLEX media: page=%d HTTP=%d ok=%d bytes=%zu items=%d total=%lld has_more=%d",
+    EVO_LOGI("plex", "media: page=%d HTTP=%d ok=%d bytes=%zu items=%d total=%lld has_more=%d",
            ctx->page, status, ok, len, count, total, has_more);
 
     if (count >= 0)
@@ -832,7 +833,7 @@ static int plex_request_media(int server_index, const char *path,
         "GET", url, NULL, req_headers, 6,
         plex_on_media_items, ctx);
 
-    evo_bt("PLEX media: request queued rc=%d", rc);
+    EVO_LOGI("plex", "media: request queued rc=%d", rc);
 
     if (rc != 0)
         free(ctx);
@@ -877,7 +878,7 @@ static int plex_request_libraries(int server_index,
         auth_header
     };
 
-    evo_bt("PLEX libraries: requesting server=%d HTTPS=%d",
+    EVO_LOGI("plex", "libraries: requesting server=%d HTTPS=%d",
            server_index,
            strncmp(server->uri, "https://", 8) == 0);
 
@@ -886,7 +887,7 @@ static int plex_request_libraries(int server_index,
         req_headers, 5,
         plex_on_libraries, ctx);
 
-    evo_bt("PLEX libraries: request queued rc=%d", rc);
+    EVO_LOGI("plex", "libraries: request queued rc=%d", rc);
 
     if (rc != 0)
         free(ctx);
@@ -929,14 +930,14 @@ static void plex_on_resources(int ok, int status,
     if (ok && status == 200 && body && len)
         root = cJSON_ParseWithLength(body, len);
 
-    evo_bt("PLEX resources: HTTP=%d ok=%d bytes=%zu JSON=%d array=%d object=%d",
+    EVO_LOGI("plex", "resources: HTTP=%d ok=%d bytes=%zu JSON=%d array=%d object=%d",
            status, ok, len,
            root != NULL,
            root && cJSON_IsArray(root),
            root && cJSON_IsObject(root));
 
     if (!root || !cJSON_IsArray(root)) {
-        evo_bt("PLEX catalog: resource discovery failed, HTTP %d", status);
+        EVO_LOGE("plex", "catalog: resource discovery failed, HTTP %d", status);
         ctx->cb(0, NULL, 0, 0, ctx->ud);
         cJSON_Delete(root);
         free(ctx);
@@ -980,7 +981,7 @@ static void plex_on_resources(int ok, int status,
 
         if (cJSON_IsArray(connections)) {
             int n = cJSON_GetArraySize(connections);
-            evo_bt("PLEX discovery: advertised connections=%d", n);
+            EVO_LOGI("plex", "discovery: advertised connections=%d", n);
 
             for (int j = 0; j < n; ++j) {
                 cJSON *conn = cJSON_GetArrayItem(connections, j);
@@ -994,7 +995,7 @@ static void plex_on_resources(int ok, int status,
                 int is_docker = strstr(uri, "172-17-") != NULL ||
                                 strstr(uri, "172-22-") != NULL;
 
-                evo_bt("PLEX connection[%d]: https=%d local=%d relay=%d docker=%d",
+                EVO_LOGI("plex", "connection[%d]: https=%d local=%d relay=%d docker=%d",
                        j, is_https, is_local, is_relay, is_docker);
             }
         }
@@ -1024,11 +1025,11 @@ static void plex_on_resources(int ok, int status,
             }
         }
 
-        evo_bt("PLEX discovery: selected HTTPS connection score=%d",
+        EVO_LOGI("plex", "discovery: selected HTTPS connection score=%d",
                best_score);
 
         if (!chosen_uri) {
-            evo_bt("PLEX discovery: server has no HTTPS connection");
+            EVO_LOGW("plex", "discovery: server has no HTTPS connection");
             continue;
         }
 
@@ -1060,7 +1061,7 @@ static void plex_on_resources(int ok, int status,
         ++count;
     }
 
-    evo_bt("PLEX catalog: discovered %d media server(s)", count);
+    EVO_LOGI("plex", "catalog: discovered %d media server(s)", count);
 
     ctx->cb(1, items, count, 0, ctx->ud);
 
@@ -1330,7 +1331,7 @@ static int plex_resolve_xml(const char *body, size_t len,
     choice->bitrate_bps = (int64_t)atoll(bitrate) * 1000;
     choice->size_bytes = (int64_t)atoll(size);
 
-    evo_bt("PLEX playback: Direct Play %s %dx%d video=%s audio=%s bitrate=%lld kbps",
+    EVO_LOGI("plex", "playback: Direct Play %s %dx%d video=%s audio=%s bitrate=%lld kbps",
            choice->container,
            choice->width,
            choice->height,
@@ -1346,7 +1347,7 @@ static void plex_on_resolve(int ok, int status,
 {
     plex_resolve_ctx_t *ctx = (plex_resolve_ctx_t *)ud;
 
-    evo_bt("PLEX playback: metadata HTTP=%d ok=%d bytes=%zu",
+    EVO_LOGI("plex", "playback: metadata HTTP=%d ok=%d bytes=%zu",
            status, ok, len);
 
     evo_stream_choice_t *choice =
@@ -1363,7 +1364,7 @@ static void plex_on_resolve(int ok, int status,
                 resolved ? 1 : 0, ctx->ud);
 
     if (!resolved)
-        evo_bt("PLEX playback: no usable Direct Play source");
+        EVO_LOGE("plex", "playback: no usable Direct Play source");
 
     free(choice);
     free(ctx);
@@ -1426,14 +1427,14 @@ static int plex_resolve(const char *item_id,
         auth_header
     };
 
-    evo_bt("PLEX playback: resolving server=%d ratingKey=%s",
+    EVO_LOGI("plex", "playback: resolving server=%d ratingKey=%s",
            server_index, key);
 
     int rc = evo_net_request_async(
         "GET", url, NULL, headers, 4,
         plex_on_resolve, ctx);
 
-    evo_bt("PLEX playback: metadata request queued rc=%d", rc);
+    EVO_LOGI("plex", "playback: metadata request queued rc=%d", rc);
 
     if (rc != 0)
         free(ctx);
@@ -1454,7 +1455,7 @@ static void plex_on_timeline(int ok, int status,
     (void)ud;
 
     if (!ok || status < 200 || status >= 300)
-        evo_bt("PLEX timeline: HTTP=%d ok=%d", status, ok);
+        EVO_LOGI("plex", "timeline: HTTP=%d ok=%d", status, ok);
 }
 
 static void plex_report_progress(const char *item_id,
@@ -1532,7 +1533,7 @@ static void plex_report_progress(const char *item_id,
         plex_on_timeline, NULL
     );
 
-    evo_bt("PLEX timeline: state=%s ratingKey=%s pos=%lld duration=%lld rc=%d",
+    EVO_LOGI("plex", "timeline: state=%s ratingKey=%s pos=%lld duration=%lld rc=%d",
            plex_state, key,
            (long long)pos_sec,
            (long long)dur_sec,

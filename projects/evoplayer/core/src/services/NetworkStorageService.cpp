@@ -2,6 +2,7 @@
 #include "evo/services/NetArtSidecar.hpp"
 #include "evo_data_path.h"
 #include "evo_smb_io.h"
+#include "evo_boot_log.h"
 #include "cJSON.h"
 
 #include <cstdio>
@@ -175,8 +176,13 @@ void NetworkStorageService::loadConfig() {
                         m_shares.push_back(std::move(share));
                     }
                 }
+            } else {
+                /* The defaults below then replace the saved shares. */
+                EVO_LOGW("netstore", "%s is not a JSON array (%ld bytes) - shares reset", path, len);
             }
             if (root) cJSON_Delete(root);
+        } else {
+            EVO_LOGW("netstore", "%s is %ld bytes - ignored", path, len);
         }
         std::fclose(f);
     }
@@ -239,8 +245,12 @@ void NetworkStorageService::saveConfig() {
         const char* path = evo_data_path("evo_network_shares.json");
         FILE* f = std::fopen(path, "wb");
         if (f) {
-            std::fwrite(rendered, 1, std::strlen(rendered), f);
-            std::fclose(f);
+            const size_t n = std::strlen(rendered);
+            const size_t put = std::fwrite(rendered, 1, n, f);
+            if (std::fclose(f) != 0 || put != n)
+                EVO_LOGE("netstore", "short write saving %s (%zu of %zu bytes)", path, put, n);
+        } else {
+            EVO_LOGE("netstore", "cannot save %s (errno %d)", path, errno);
         }
         std::free(rendered);
     }
@@ -738,6 +748,7 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
     const NetworkShare* share = getShare(shareId);
     if (!share) {
         outError = "Network share not found";
+        EVO_LOGE("netstore", "list: no share with id '%s'", shareId.c_str());
         return false;
     }
 
@@ -818,12 +829,16 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
                 return true;
             } else {
                 outError = m_smbClient->getLastError();
+                EVO_LOGE("netstore", "SMB share list on %s:%d failed: %s", share->host.c_str(),
+                         share->port, outError.c_str());
                 return false;
             }
         } else {
             // Inside a share: connect to share and list subpath
             if (!m_smbClient->connectShare(share->host, share->port, share->user, share->password, share->domain, smbShare, 6)) {
                 outError = m_smbClient->getLastError();
+                EVO_LOGE("netstore", "SMB connect %s:%d share '%s' failed: %s", share->host.c_str(),
+                         share->port, smbShare.c_str(), outError.c_str());
                 return false;
             }
 
@@ -836,6 +851,8 @@ bool NetworkStorageService::listEntries(const std::string& shareId, const std::s
                     m_smbClient->list(subPath, smbEntries)) {
                     outError.clear();
                 } else {
+                    EVO_LOGE("netstore", "SMB list '%s' in '%s' on %s failed (after a reconnect): %s",
+                             subPath.c_str(), smbShare.c_str(), share->host.c_str(), outError.c_str());
                     return false;
                 }
             }
@@ -881,6 +898,7 @@ NetworkTestResult NetworkStorageService::testConnection(const NetworkShare& shar
     const int effectivePort = share.port > 0 ? share.port : (share.protocol == NetworkProtocol::SMB ? 445 : 21);
 
     if (probeReachable(share.host, effectivePort, 2500) < 0) {
+        EVO_LOGE("netstore", "test: %s:%d unreachable within 2.5 s", share.host.c_str(), effectivePort);
         NetworkTestResult result;
         result.stage = NetworkTestStage::Address;
         result.message = "Can't reach " + share.host + ". Check the address.";
@@ -898,6 +916,8 @@ NetworkTestResult NetworkStorageService::testConnection(const NetworkShare& shar
         if (!hasShare) {
             std::vector<std::string> shares;
             if (!smb.listShares(share.host, effectivePort, share.user, share.password, share.domain, shares, timeoutSec)) {
+                EVO_LOGE("netstore", "test: SMB share list on %s:%d failed: %s", share.host.c_str(),
+                         effectivePort, smb.getLastError().c_str());
                 NetworkTestResult result;
                 result.stage = NetworkTestStage::Login;
                 result.message = "Login refused. Check user and password.";
@@ -911,6 +931,8 @@ NetworkTestResult NetworkStorageService::testConnection(const NetworkShare& shar
             if (!smb.connectShare(share.host, effectivePort, share.user, share.password, share.domain, smbShare, timeoutSec)) {
                 NetworkTestResult result;
                 const std::string& err = smb.getLastError();
+                EVO_LOGE("netstore", "test: SMB connect %s:%d share '%s' failed: %s", share.host.c_str(),
+                         effectivePort, smbShare.c_str(), err.c_str());
                 if (err.find("STATUS_LOGON_FAILURE") != std::string::npos ||
                     err.find("STATUS_ACCESS_DENIED") != std::string::npos ||
                     err.find("LOGON") != std::string::npos ||

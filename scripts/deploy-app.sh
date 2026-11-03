@@ -18,7 +18,7 @@
 # match. A mismatch deletes the upload, so ShadowMount+ never sees bad bytes.
 #
 # The --ffpfsc deploy also DELETEs /mnt/usb0/{evo.log, evo_status,
-# evo_compat_report.txt}, so each launch starts with a fresh log.
+# evo_report.txt}, so each launch starts with a fresh log.
 #
 # This does NOT launch anything - launch safety (never stack launches) is on
 # you and ShadowMountPlus. See docs/architecture/app-module.md.
@@ -249,7 +249,7 @@ def rmtree(ftp, path):
 
 # The runtime files the app module writes - cleared on each deploy so a launch
 # always starts fresh (evo-remote.sh / evo-panel read these back).
-USB_LOGS = ["evo.log", "evo_status", "evo_compat_report.txt"]
+USB_LOGS = ["evo.log", "evo_status", "evo_report.txt"]
 
 with FTP() as ftp:
     ftp.connect(host, int(port), timeout=60)

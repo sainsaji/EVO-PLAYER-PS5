@@ -9,6 +9,7 @@
 #include "evo_subtitle.h"
 #include "evo_vdec.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 
@@ -170,6 +171,7 @@ bool SettingsService::saveSettings() {
     const char* filePath = evo_data_path("evo_player_settings.cfg");
     FILE* file = std::fopen(filePath, "w");
     if (!file) {
+        EVO_LOGE("settings", "cannot save %s (errno %d)", filePath, errno);
         toast("SETTINGS", "SAVE FAILED");
         return false;
     }
@@ -212,7 +214,8 @@ bool SettingsService::saveSettings() {
         evo_log_server_saved_port()          // line 29 (#227 phone & log port)
     );
 
-    std::fclose(file);
+    if (std::fclose(file) != 0)
+        EVO_LOGE("settings", "writing %s failed (errno %d)", filePath, errno);
     return true;
 }
 
@@ -368,6 +371,7 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
+    EVO_LOGI("settings", "loaded %d of 29 fields from %s", readCount, filePath);
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

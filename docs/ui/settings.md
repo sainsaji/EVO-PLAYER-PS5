@@ -37,7 +37,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Keyboard input | Native PS5 IME, Virtual keyboard |
 | | Phone & log port | digits 1024–65535 (default 9780; Triangle resets). EVO test-binds it, falls back to n+1..n+9 if busy, retries saved in background. Real port feeds log server and phone keyboard. |
 | | Ask which live stream | on, off ([../providers/architecture.md](../providers/architecture.md#the-stream-picker)) |
-| **System & Diagnostics** | Compatibility report | action: writes `evo_compat_report.txt` to USB0 |
+| **System & Diagnostics** | Report a problem | card: QR to the phone report page (`/report`); Cross saves `evo_report.txt` to USB0, or `/data/evoplayer` with no stick |
 | | Debug overlay | on, off (live performance numbers) |
 | | Developer tools | action: diagnostics and performance screen |
 | | Console | shows the detected model (PS5 Pro, PS5, or not detected) |

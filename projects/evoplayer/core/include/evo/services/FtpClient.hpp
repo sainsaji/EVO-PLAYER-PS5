@@ -50,6 +50,18 @@ public:
     const std::string& getLastError() const { return m_lastError; }
 
 private:
+    /* The public calls above are thin wrappers (#216): each runs its Impl and,
+     * on failure, writes m_lastError to evo.log with the host and the time. */
+    bool connectImpl(const std::string& host, int port, const std::string& user,
+                     const std::string& pass, int timeoutSec);
+    bool listImpl(const std::string& path, std::vector<FtpFileEntry>& entries);
+    bool storeImpl(const std::string& remotePath, const std::string& localPath,
+                   StoreProgressFn onProgress, void* user, int dataTimeoutSec);
+    bool retrieveImpl(const std::string& remotePath, size_t maxBytes, std::vector<uint8_t>& out,
+                      int dataTimeoutSec);
+    bool removeImpl(const std::string& remotePath);
+    void logFailure(const char* op, const std::string& path, long long ms) const;
+
     int sendCommand(const std::string& cmd);
     int readResponse(std::string* outText = nullptr);
     int openDataConnection(int timeoutSecOverride = 0);

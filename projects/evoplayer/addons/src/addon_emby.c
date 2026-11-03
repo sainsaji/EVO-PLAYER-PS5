@@ -37,6 +37,7 @@
 #endif
 
 #define MS_DEVICE_ID   "evo-ps5"      /* only until a device_id is made */
+#define MS_TAG(c)      ((c)->kind == MS_JELLYFIN ? "jellyfin" : "emby")   /* log lines */
 #define MS_PAGE        96          /* rows per catalog request: twelve 8-card pages */
 #define MS_FIELDS      "Fields=Overview,ProductionYear,ChildCount,Genres,CommunityRating,OfficialRating,Taglines,ParentBackdropImageTags,ParentBackdropItemId&EnableImageTypes=Primary,Backdrop,Thumb&ImageTypeLimit=1"
 
@@ -318,7 +319,6 @@ typedef struct {
 
 static void on_sign_in(int ok, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     signin_ctx_t *x = (signin_ctx_t *)ud;
     ms_client_t *c = x->c;
     const char *msg = "Could not reach the server";
@@ -326,6 +326,7 @@ static void on_sign_in(int ok, int status, const char *body, size_t len, void *u
 
     if (ok && (status == 401 || status == 403)) {
         msg = "Wrong user name or password";
+        PROV_ERR("%s: sign-in refused (http %d)", MS_TAG(c), status);
     } else if (ok && status == 200 && body) {
         cJSON *root = cJSON_Parse(body);
         cJSON *tok  = root ? cJSON_GetObjectItem(root, "AccessToken") : NULL;
@@ -341,9 +342,14 @@ static void on_sign_in(int ok, int status, const char *body, size_t len, void *u
             msg = "Signed in";
         } else {
             msg = "The server sent an answer EVO does not understand";
+            PROV_ERR("%s: sign-in reply has no AccessToken/User.Id (%zu bytes, json=%d)",
+                     MS_TAG(c), len, root != NULL);
         }
         if (root) cJSON_Delete(root);
+    } else {
+        PROV_ERR("%s: sign-in failed ok=%d http=%d", MS_TAG(c), ok, status);
     }
+    if (good) PROV_LOG("%s: signed in", MS_TAG(c));
     if (x->cb) x->cb(good, msg, x->ud);
     free(x);
 }
@@ -393,7 +399,7 @@ static void on_qc_initiate(int ok, int status, const char *body, size_t len, voi
         if (x->code_cb) x->code_cb(1, code->valuestring, x->ud);
     } else {
         /* 401 = Quick Connect switched off on the server: password instead. */
-        PROV_LOG("quick connect: initiate -> ok=%d http=%d err=%d", ok, status, evo_net_callback_error());
+        PROV_LOG("mediasrv: quick connect: initiate -> ok=%d http=%d err=%d", ok, status, evo_net_callback_error());
         x->c->qc_secret[0] = '\0';
         if (x->code_cb) x->code_cb(0, "", x->ud);
     }
@@ -432,6 +438,8 @@ static void on_qc_session(int ok, int status, const char *body, size_t len, void
         c->qc_secret[0] = '\0';
         ms_save(c);
         good = 1;
+    } else {
+        PROV_ERR("%s: quick connect sign-in refused ok=%d http=%d", MS_TAG(c), ok, status);
     }
     if (root) cJSON_Delete(root);
     if (x->poll_cb) x->poll_cb(good ? 1 : -1, good ? "Signed in" : "The server refused the approved code", x->ud);
@@ -449,6 +457,7 @@ static void on_qc_connect(int ok, int status, const char *body, size_t len, void
         return;
     }
     if (status != 200) {                /* the secret expired or was rejected */
+        PROV_WARN("%s: quick connect code expired or rejected (http %d)", MS_TAG(c), status);
         c->qc_secret[0] = '\0';
         if (x->poll_cb) x->poll_cb(-1, "The code expired", x->ud);
         free(x);
@@ -643,7 +652,7 @@ static void map_item(ms_client_t *c, cJSON *o, int ctx, evo_provider_item_t *it)
                      "%s/Items/%s/Images/Thumb?maxWidth=640&quality=70&format=jpg", base, id);
         if (is_episode && ctx == CTX_SEASON) {
             char *tj = tags ? cJSON_PrintUnformatted(tags) : NULL;
-            PROV_LOG("episode art: '%s' ImageTags=%s SeriesPrimary=%s SeasonId=%s parentBackdrop=%d art=%s alt=%s",
+            PROV_LOG("mediasrv: episode art: '%s' ImageTags=%s SeriesPrimary=%s SeasonId=%s parentBackdrop=%d art=%s alt=%s",
                      name, tj ? tj : "none", jstr(o, "SeriesPrimaryImageTag")[0] ? "yes" : "no",
                      jstr(o, "SeasonId")[0] ? "yes" : "no", pbd ? cJSON_GetArraySize(pbd) : -1,
                      it->art_url[0] ? "set" : "none", it->art_alt_url[0] ? "set" : "none");
@@ -735,7 +744,7 @@ static void on_items(int ok, int status, const char *body, size_t len, void *ud)
     if (status == 401 || status == 403) {
         /* The session is gone (token revoked, server reset): sign in again.
          * Whatever evo_net calls `ok`, the status is the server's verdict. */
-        PROV_LOG("media server: session rejected (http %d) - sign-in needed", status);
+        PROV_WARN("mediasrv: session rejected (http %d) - sign-in needed", status);
         ms_drop_session(c);
     }
     cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
@@ -743,6 +752,7 @@ static void on_items(int ok, int status, const char *body, size_t len, void *ud)
      * else; a bare array is tolerated in case a server version differs. */
     cJSON *arr = root ? (cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "Items")) : NULL;
     if (!arr || !cJSON_IsArray(arr)) {
+        PROV_ERR("%s: item list failed ok=%d http=%d json=%d", MS_TAG(c), ok, status, root != NULL);
         if (x->cb) x->cb(0, NULL, 0, 0, x->ud);
         if (root) cJSON_Delete(root);
         free(x);
@@ -940,7 +950,7 @@ static void on_action(int ok, int status, const char *body, size_t len, void *ud
     (void)len;
     act_ctx_t *x = (act_ctx_t *)ud;
     const int good = ok && status >= 200 && status < 300;
-    if (!good) PROV_LOG("media server action -> ok=%d http=%d %.120s", ok, status, body ? body : "");
+    if (!good) PROV_ERR("mediasrv: action -> ok=%d http=%d %.120s", ok, status, body ? body : "");
     if (x->cb) x->cb(good, NULL, x->ud);
     free(x);
 }
@@ -1036,7 +1046,7 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
     cJSON *o = (its && cJSON_IsArray(its)) ? cJSON_GetArrayItem(its, 0) : root;
     evo_provider_row_t rows[20];
     int n = 0;
-    PROV_LOG("media server details -> ok=%d http=%d len=%zu parsed=%d", ok, status, len, o != NULL);
+    PROV_LOG("mediasrv: details -> ok=%d http=%d len=%zu parsed=%d", ok, status, len, o != NULL);
     if (o) {
         char buf[160];
         cJSON *tl = cJSON_GetObjectItem(o, "Taglines");
@@ -1090,7 +1100,7 @@ static void on_details(int ok, int status, const char *body, size_t len, void *u
             }
         }
     }
-    PROV_LOG("media server details: %d row(s)", n);
+    PROV_LOG("mediasrv: details: %d row(s)", n);
     if (x->cb) x->cb(o != NULL, rows, n, x->ud);
     if (root) cJSON_Delete(root);
     free(x);
@@ -1604,7 +1614,7 @@ int ms_parse_sources(ms_client_t *c, const char *item_id, const char *body,
             ch->audio_channels = (int)jnum(as, "Channels");
         }
 
-        PROV_LOG("  source %d name (raw): %s", n + 1, jstr(ms, "Name"));
+        PROV_LOG("mediasrv:   source %d name (raw): %s", n + 1, jstr(ms, "Name"));
         label_clean(jstr(ms, "Name"), ch->label, sizeof ch->label);
         label_facts(ch);
         if (!ch->label[0]) snprintf(ch->label, sizeof ch->label, "Version %d", n + 1);
@@ -1680,13 +1690,13 @@ static void on_playback_info(int ok, int status, const char *body, size_t len, v
         ++n;
     }
     if (n <= 0) {
-        PROV_LOG("media server: PlaybackInfo for %s -> ok=%d http=%d, no sources - direct stream",
+        PROV_WARN("mediasrv: PlaybackInfo for %s -> ok=%d http=%d, no sources - direct stream",
                  x->item, ok, status);
         resolve_direct(x->c, x->item, x->cb, x->ud);
     } else {
-        PROV_LOG("media server: %d version(s) for %s", n, x->item);
+        PROV_LOG("mediasrv: %d version(s) for %s", n, x->item);
         for (int i = 0; i < n; ++i)
-            PROV_LOG("  [%d] %s | %dx%d %s %s | %s %dch | %lld kbps %lld MB (as listed)", i, ch[i].label,
+            PROV_LOG("mediasrv:   [%d] %s | %dx%d %s %s | %s %dch | %lld kbps %lld MB (as listed)", i, ch[i].label,
                      ch[i].width, ch[i].height, ch[i].video_codec, ch[i].video_range,
                      ch[i].audio_codec, ch[i].audio_channels,
                      (long long)(ch[i].bitrate_bps / 1000), (long long)(ch[i].size_bytes >> 20));
@@ -1719,7 +1729,7 @@ static void on_live_info(int ok, int status, const char *body, size_t len, void 
         ch.is_live = 1;
         if (x->cb) x->cb(1, &ch, 1, x->ud);
     } else {
-        PROV_LOG("media server: live channel %s -> ok=%d http=%d, no stream", x->item, ok, status);
+        PROV_ERR("mediasrv: live channel %s -> ok=%d http=%d, no stream", x->item, ok, status);
         if (x->cb) x->cb(0, NULL, 0, x->ud);
     }
     if (root) cJSON_Delete(root);
@@ -1800,7 +1810,7 @@ void ms_stream_chosen(ms_client_t *c, const char *item_id, const evo_stream_choi
     if (!c->chosen_source[0]) return;                  /* the direct fallback */
     url_param(choice->url, "PlaySessionId", c->chosen_session, sizeof c->chosen_session);
     snprintf(c->chosen_item, sizeof c->chosen_item, "%s", raw_id(item_id));
-    PROV_LOG("media server: playing %s source %s (%s)", c->chosen_item, c->chosen_source, choice->label);
+    PROV_LOG("mediasrv: playing %s source %s (%s)", c->chosen_item, c->chosen_source, choice->label);
 }
 
 /* Logged, so a server that rejects the reports shows in evo.log rather than
@@ -1809,7 +1819,7 @@ static void on_report(int ok, int status, const char *body, size_t len, void *ud
 {
     (void)len;
     if (!ok || status >= 300)
-        PROV_LOG("media server report %s -> ok=%d http=%d %.120s",
+        PROV_LOG("mediasrv: report %s -> ok=%d http=%d %.120s",
                  (const char *)ud, ok, status, body ? body : "");
 }
 

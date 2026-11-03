@@ -13,6 +13,7 @@
 #include "evo_feedback.h"
 #include "evo_toast.h"
 #include "evo_smb_io.h"
+#include "evo_boot_log.h"
 
 #include <cstdio>
 #include <cstring>
@@ -78,7 +79,14 @@ static void* testEntry(void* arg) {
     auto* sp = static_cast<std::shared_ptr<TestJob>*>(arg);
     std::shared_ptr<TestJob> job = *sp;
     delete sp;
+    const long long t0 = evo_log_mono_ms();
     job->result = NetworkStorageService::testConnection(job->share);
+    const long long ms = evo_log_mono_ms() - t0;
+    if (job->result.stage == NetworkTestStage::Ok)
+        EVO_LOGI("browser", "connection test %s:%d ok in %lld ms", job->share.host.c_str(), job->share.port, ms);
+    else
+        EVO_LOGW("browser", "connection test %s:%d failed in %lld ms: %s", job->share.host.c_str(),
+                 job->share.port, ms, job->result.message.c_str());
     job->done.store(true);
     return nullptr;
 }
@@ -149,6 +157,7 @@ static void startAddTest() {
         if (rc == 0) pthread_detach(th);
     }
     if (rc != 0) {
+        EVO_LOGE("browser", "connection test thread not started (pthread_create %d)", rc);
         delete arg;
         return;
     }
@@ -698,7 +707,15 @@ static void* netListEntry(void* arg) {
     auto* sp = static_cast<std::shared_ptr<NetListJob>*>(arg);
     std::shared_ptr<NetListJob> job = *sp;
     delete sp;
+    const long long t0 = evo_log_mono_ms();
     job->ok = NetworkStorageService::getInstance().listEntries(job->shareId, job->path, job->entries, job->error);
+    const long long ms = evo_log_mono_ms() - t0;
+    if (job->ok)
+        EVO_LOGI("browser", "list %s '%s': %zu entries in %lld ms", job->shareId.c_str(), job->path.c_str(),
+                 job->entries.size(), ms);
+    else
+        EVO_LOGW("browser", "list %s '%s' failed in %lld ms: %s", job->shareId.c_str(), job->path.c_str(),
+                 ms, job->error.c_str());
     job->done.store(true);
     s_netInFlight.store(false);
     return nullptr;
@@ -732,6 +749,7 @@ void BrowserScreen::pollNetList(double deltaMs) {
             if (rc == 0) pthread_detach(th);
         }
         if (rc != 0) {
+            EVO_LOGE("browser", "list thread not started (pthread_create %d)", rc);
             delete arg;
             s_netInFlight.store(false);
             m_netJob->error = "Could not start the request";
@@ -746,6 +764,8 @@ void BrowserScreen::pollNetList(double deltaMs) {
         m_netJob.reset();
         rebuildItems();
     } else if (m_netElapsedMs > kNetListDeadlineMs) {
+        EVO_LOGW("browser", "list %s '%s' gave up after %.0f ms (worker still running)",
+                 m_networkShareId.c_str(), m_networkRemotePath.c_str(), m_netElapsedMs);
         m_netError = "Timed out waiting for the server";
         m_netState = NetListState::Failed;
         m_netJob.reset();   // the worker finishes on its own; its result is dropped
@@ -799,6 +819,11 @@ void BrowserScreen::pollServerStatus(double deltaMs) {
     if (s_probeJob) {
         s_probeElapsedMs += deltaMs;
         if (s_probeJob->done.load()) {
+            /* One line when a server goes offline, not one per 30 s recheck. */
+            auto prev = s_serverStatus.find(s_probeJob->key);
+            if (s_probeJob->ms < 0 && (prev == s_serverStatus.end() || prev->second.ms >= 0))
+                EVO_LOGW("browser", "server %s:%d offline (no TCP connect in %d ms)",
+                         s_probeJob->host.c_str(), s_probeJob->port, kProbeConnectMs);
             s_serverStatus[s_probeJob->key] = {s_probeJob->ms, s_statusClockMs};
             s_probeJob.reset();
             rebuildItems();
@@ -835,6 +860,7 @@ void BrowserScreen::pollServerStatus(double deltaMs) {
             if (rc == 0) pthread_detach(th);
         }
         if (rc != 0) {
+            EVO_LOGE("browser", "status probe thread not started (pthread_create %d)", rc);
             delete arg;
             s_serverStatus[key] = {-1, s_statusClockMs};
         } else {
@@ -2153,6 +2179,7 @@ void BrowserScreen::update(double deltaMs) {
         if (s_testJob->done.load() || timedOut) {
             NetworkTestResult res = timedOut && !s_testJob->done.load() ? NetworkTestResult() : s_testJob->result;
             if (timedOut && !s_testJob->done.load()) {
+                EVO_LOGW("browser", "connection test %s gave up after %.0f ms", s_addDraft.host.c_str(), s_testElapsedMs);
                 res.stage = NetworkTestStage::Address;
                 res.message = "No answer from " + s_addDraft.host + ". Check the address.";
             }

@@ -141,8 +141,9 @@ EVO supports browsing and streaming from remote network storage, including Windo
 
 - **No `#include <iostream>`** anywhere. Its static initialiser dereferences null
   at load in the app-module CRT, with no log line. Use `<cstdio>`.
-- **`stderr` is not usable.** Log with `evo_boot_log()` / `evo_bt()`, which land in
-  `/mnt/usb0/evo.log` and klog ([console/diagnostics.md](../console/diagnostics.md)).
+- **`stderr` is not usable.** Log with `EVO_LOGI/W/E("tag", ...)`, which land in
+  `/mnt/usb0/evo.log`; `evo_bt()` is for boot lines that also need klog
+  ([console/diagnostics.md](../console/diagnostics.md#writing-a-log-line)).
 - **Only call libc functions EVO already uses.** The clean-room `libc.prx` has no
   `strcasestr`, `opendir` and so on; a missing import is null and crashes at
   address 0 ([app-module.md](app-module.md#traps)). Use `evo_readdir`, `evo_mkdir`

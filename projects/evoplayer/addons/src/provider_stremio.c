@@ -531,7 +531,11 @@ static void on_manifest(int ok, int status, const char *body, size_t len, void *
         a->loaded = 1;
     } else {
         a->loaded = -1;
-        PROV_LOG("%s: manifest %s failed ok=%d http=%d", S->tag, a->url, ok, status);
+        /* Host only: an addon path often carries its debrid key or config. */
+        char host[128];
+        evo_error_url_host(a->url, host, sizeof host);
+        PROV_WARN("%s: manifest from %s failed ok=%d http=%d%s", S->tag, host, ok, status,
+                  (ok && status == 200) ? " (not a JSON object)" : "");
     }
     if (m) cJSON_Delete(m);
     fan_done_root(r->fan);
@@ -771,7 +775,7 @@ static void on_meta(int ok, int status, const char *body, size_t len, void *ud)
     S = x->set;
     cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
     if (!root || !cJSON_GetObjectItem(root, "meta")) {
-        PROV_LOG("%s: meta %s/%s failed ok=%d http=%d", S->tag, x->type, x->id, ok, status);
+        PROV_ERR("%s: meta %s/%s failed ok=%d http=%d", S->tag, x->type, x->id, ok, status);
         if (x->cb) x->cb(0, NULL, 0, 0, x->ud);
         if (root) cJSON_Delete(root);
         free(x);
@@ -797,7 +801,7 @@ static int list_series(int a, const char *type, const char *id, int season,
     }
     int m = find_meta_addon(a, type, id);
     if (m < 0) {
-        PROV_LOG("%s: no addon gives details for %s/%s", S->tag, type, id);
+        PROV_WARN("%s: no addon gives details for %s/%s", S->tag, type, id);
         evo_error_set("No addon gives the episode list for this title. Add one that "
                       "serves details for it, or use a catalog with IMDb ids");
         return -1;
@@ -1159,7 +1163,7 @@ static void on_streams(int ok, int status, const char *body, size_t len, void *u
         }
     }
     if (!ok || status != 200)
-        PROV_LOG("%s: streams from %s failed ok=%d http=%d", S->tag, S->ad[r->addon].name, ok, status);
+        PROV_WARN("%s: streams from %s failed ok=%d http=%d", S->tag, S->ad[r->addon].name, ok, status);
     if (root) cJSON_Delete(root);
     fan_done_streams(f);
     free(r);
@@ -1529,15 +1533,17 @@ int evo_nuvio_addon_add(const char *value)
     snprintf(v, sizeof v, "%s", value ? value : "");
     char *s = ad_trim(v);
     if (!*s || ad_parse_address(s, url, sizeof url) != 0) {
-        PROV_LOG("nuvio: add addon: not an address (%d chars)", (int)strlen(s));
+        PROV_WARN("nuvio: add addon: not an address (%d chars)", (int)strlen(s));
         return -1;
     }
     nv_base_of(url, base, sizeof base);
     if (nv_edit(base, 1) != 0) {
-        PROV_LOG("nuvio: add addon: could not save %s", evo_nuvio_store_file());
+        PROV_ERR("nuvio: add addon: could not save %s", evo_nuvio_store_file());
         return -2;
     }
-    PROV_LOG("nuvio: added addon %.120s", base);
+    char host[128];
+    evo_error_url_host(base, host, sizeof host);   /* the path can hold a key */
+    PROV_LOG("nuvio: added addon from %s", host);
     S = &g_nuvio;
     nv_load_addons();
     return 0;

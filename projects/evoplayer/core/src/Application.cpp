@@ -204,7 +204,11 @@ static void EvoAvLogCallback(void* avcl, int level, const char* fmt, va_list vl)
         return;
     char safe_line[512];
     evo_url_sanitize(line, safe_line, sizeof safe_line);
-    evo_bt("ffmpeg[%d]: %s", level, safe_line);
+    /* FFmpeg's own severity carries over (only WARNING and worse get here). */
+    if (level <= AV_LOG_ERROR)
+        EVO_LOGE("ffmpeg", "[%d] %s", level, safe_line);
+    else
+        EVO_LOGW("ffmpeg", "[%d] %s", level, safe_line);
 }
 
 static void evo_av_log_init() {
@@ -693,7 +697,7 @@ void web_report_begin(const std::string& url) {
 }
 
 void web_report_cb(int success, int status, const char*, size_t, void* what) {
-    evo_bt("web: report %s -> ok=%d http=%d", (const char*)what, success, status);
+    EVO_LOGI("web", "report %s -> ok=%d http=%d", (const char*)what, success, status);
 }
 
 void web_report(const char* what, double pos) {
@@ -738,7 +742,7 @@ void webui_playback_pump() {
         int rc = pthread_create(&g_web_thread, &attr, web_start_worker, nullptr);
         pthread_attr_destroy(&attr);
         if (rc != 0) {
-            evo_bt("web: playback worker pthread_create rc=%d", rc);
+            EVO_LOGE("web", "playback worker pthread_create rc=%d", rc);
             evo_webui_playback_ended(0);
             return;
         }
@@ -747,7 +751,7 @@ void webui_playback_pump() {
         if (!g_web_done)
             return;
         pthread_join(g_web_thread, nullptr);
-        evo_bt("web: startPlaybackSource -> %s", g_web_ok ? "ok" : "failed");
+        EVO_LOGI("web", "startPlaybackSource -> %s", g_web_ok ? "ok" : "failed");
         evo_boot_log_flush();
         if (!g_web_ok) {
             toast("STREAM", "The web page's stream would not open");
@@ -761,7 +765,7 @@ void webui_playback_pump() {
         frames = 0;
         seen_active = false;
         web_report_begin(g_web_src.url);
-        evo_bt("web: server reporting %s (item %s)", g_web_rep.on ? "on" : "off",
+        EVO_LOGI("web", "server reporting %s (item %s)", g_web_rep.on ? "on" : "off",
                g_web_rep.on ? g_web_rep.item.c_str() : "-");
         web_report("", 0.0);
     } else {
@@ -909,7 +913,7 @@ bool evo_capture_screenshot(std::string& outPath) {
         fp = std::fopen(path, "wb");
     }
     if (!fp) {
-        evo_bt("screenshot: cannot open %s for writing", path);
+        EVO_LOGE("screenshot", "cannot open %s for writing", path);
         evo_boot_log_flush();
         return false;
     }
@@ -924,7 +928,7 @@ static bool write_scanout_bmp(FILE* fp) {
     int w = 0, h = 0;
     evo_agc_runtime_get_size(&w, &h);
     if (w <= 0 || h <= 0) {
-        evo_bt("screenshot: no render size (%dx%d)", w, h);
+        EVO_LOGW("screenshot", "no render size (%dx%d)", w, h);
         evo_boot_log_flush();
         std::fclose(fp);
         return false;
@@ -1312,7 +1316,7 @@ int Application::run() {
              * root - same reason recent_load() and the settings service are
              * re-run here. */
             evo_provider_mgr_rebind();
-            evo_bt("persistence: rebound to %s after late unjail", evo_data_dir());
+            EVO_LOGI("persistence", "rebound to %s after late unjail", evo_data_dir());
             evo_boot_log_flush();
 #endif
             toast("STORAGE", "READY");
@@ -1355,13 +1359,13 @@ int Application::run() {
                 for (const auto& m : now) {
                     if (std::find(s_usb_mounts.begin(), s_usb_mounts.end(), m) == s_usb_mounts.end()) {
                         toast("USB CONNECTED", m_fileSystemBrowser->usbMountLabel(m).c_str());
-                        evo_bt("usb: %s connected", m.c_str());
+                        EVO_LOGI("usb", "%s connected", m.c_str());
                     }
                 }
                 for (const auto& m : s_usb_mounts) {
                     if (std::find(now.begin(), now.end(), m) == now.end()) {
                         toast("USB REMOVED", m_fileSystemBrowser->usbMountLabel(m).c_str());
-                        evo_bt("usb: %s removed", m.c_str());
+                        EVO_LOGI("usb", "%s removed", m.c_str());
                     }
                 }
             }
@@ -1472,10 +1476,10 @@ int Application::run() {
                     if (dt <= 500 && std::abs(dx) >= 250 && std::abs(dx) > (std::abs(dy) * 3 / 2)) {
                         if (dx < 0) {
                             pressed |= PadButtons::TouchPadLeft;
-                            evo_bt("touchpad: swipe left (dx=%d)", dx);
+                            EVO_LOGI("touchpad", "swipe left (dx=%d)", dx);
                         } else {
                             pressed |= PadButtons::TouchPadRight;
-                            evo_bt("touchpad: swipe right (dx=%d)", dx);
+                            EVO_LOGI("touchpad", "swipe right (dx=%d)", dx);
                         }
                         s_swipeTriggered = true;
                     }
@@ -1489,10 +1493,10 @@ int Application::run() {
             if (pressed & PadButtons::TouchPad) {
                 if (s_lastTouchX < 960) {
                     pressed |= PadButtons::TouchPadLeft;
-                    evo_bt("touchpad: click left (x=%u)", s_lastTouchX);
+                    EVO_LOGI("touchpad", "click left (x=%u)", s_lastTouchX);
                 } else {
                     pressed |= PadButtons::TouchPadRight;
-                    evo_bt("touchpad: click right (x=%u)", s_lastTouchX);
+                    EVO_LOGI("touchpad", "click right (x=%u)", s_lastTouchX);
                 }
             }
             if (held & PadButtons::TouchPad) {
@@ -1526,7 +1530,7 @@ int Application::run() {
             /* #227: on the keyboard's PHONE LINK OFF card, R3 is Set port. */
             const bool r3ToKeyboard = (pressed & PadButtons::R3) && evo_keyboard_wants_r3();
             if ((pressed & PadButtons::L3) || ((pressed & PadButtons::R3) && !r3IsChapters && !r3ToKeyboard)) {
-                evo_bt("screenshot: stick click pressed=%#010x", pressed);
+                EVO_LOGI("screenshot", "stick click pressed=%#010x", pressed);
                 evo_boot_log_flush();
                 std::string shotPath;
                 if (evo_capture_screenshot(shotPath)) {
@@ -1538,7 +1542,7 @@ int Application::run() {
                                       name ? name + 1 : shotPath.c_str());
                         notifyOnScreen(note);
                     }
-                    evo_bt("screenshot: wrote %s", shotPath.c_str());
+                    EVO_LOGI("screenshot", "wrote %s", shotPath.c_str());
                     evo_boot_log_flush();
                     evo_feedback(EVO_FB_CONFIRM);
                 } else {
@@ -1639,7 +1643,7 @@ int Application::run() {
             const int want = (isPlayer && setting_on && (trc == 16 || trc == 18)) ? 1 : 0;
             if (!isPlayer) s_hdr_refused = false;
             if (want != s_hdr_want && !(want && s_hdr_refused)) {
-                evo_bt("hdr10: %s (player=%d trc=%d setting=%s)",
+                EVO_LOGI("hdr10", "%s (player=%d trc=%d setting=%s)",
                        want ? "ENTER" : "LEAVE", isPlayer ? 1 : 0, trc, setting_on ? "auto" : "off");
                 if (evo_agc_runtime_set_hdr_output(want) == 0) {
                     s_hdr_want = want;
@@ -1705,7 +1709,7 @@ int Application::run() {
             if (want != s_asked && hold) {
                 ++s_wait_frames;
             } else if (want != s_asked) {
-                evo_bt("refresh: %s -> %s (%s player=%d surround=%d fps=%.3f)",
+                EVO_LOGI("refresh", "%s -> %s (%s player=%d surround=%d fps=%.3f)",
                        evo_agc_runtime_output_rate_name(have), evo_agc_runtime_output_rate_name(want),
                        rrPlayback ? "playback-only" : "match-video",
                        isPlayer ? 1 : 0, isSurround ? 1 : 0, evo_pb_video_fps());

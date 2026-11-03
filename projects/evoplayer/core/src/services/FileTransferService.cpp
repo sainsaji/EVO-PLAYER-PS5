@@ -3,6 +3,7 @@
 #include "evo_readdir.h"
 #include "evo_jailbreak.h"
 #include "evo_boot_trace.h"
+#include "evo_boot_log.h"
 
 #include <cstdio>
 #include <cstring>
@@ -50,7 +51,7 @@ static uint64_t GetCurrentTimeMs() {
 }
 
 FileTransferService::FileTransferService() {
-    evo_bt("FileTransferService initialized");
+    EVO_LOGI("transfer", "FileTransferService initialized");
 }
 
 FileTransferService::~FileTransferService() {
@@ -66,7 +67,7 @@ void FileTransferService::copyToClipboard(const std::string& path, const std::st
     m_clipboard.name = name;
     m_clipboard.isDirectory = isDir;
     m_clipboard.action = ClipboardAction::Copy;
-    evo_bt("Clipboard COPY: '%s'", path.c_str());
+    EVO_LOGI("transfer", "Clipboard COPY: '%s'", path.c_str());
 }
 
 void FileTransferService::cutToClipboard(const std::string& path, const std::string& name, bool isDir) {
@@ -74,7 +75,7 @@ void FileTransferService::cutToClipboard(const std::string& path, const std::str
     m_clipboard.name = name;
     m_clipboard.isDirectory = isDir;
     m_clipboard.action = ClipboardAction::Cut;
-    evo_bt("Clipboard CUT: '%s'", path.c_str());
+    EVO_LOGI("transfer", "Clipboard CUT: '%s'", path.c_str());
 }
 
 void FileTransferService::clearClipboard() {
@@ -95,7 +96,7 @@ TransferProgress FileTransferService::getProgress() const {
 
 void FileTransferService::cancelTransfer() {
     if (m_isBusy.load()) {
-        evo_bt("FileTransferService: Cancellation requested");
+        EVO_LOGI("transfer", "Cancellation requested");
         m_cancelRequested.store(true);
     }
 }
@@ -240,10 +241,10 @@ bool FileTransferService::renameItem(const std::string& oldPath, const std::stri
     std::string newPath = parentDir.empty() ? newName : (parentDir + "/" + newName);
 
     if (rename(oldPath.c_str(), newPath.c_str()) == 0) {
-        evo_bt("FileTransferService::renameItem '%s' -> '%s' succeeded", oldPath.c_str(), newPath.c_str());
+        EVO_LOGI("transfer", "renameItem '%s' -> '%s' succeeded", oldPath.c_str(), newPath.c_str());
         return true;
     }
-    evo_bt("FileTransferService::renameItem failed (errno=%d)", errno);
+    EVO_LOGE("transfer", "renameItem failed (errno=%d)", errno);
     return false;
 }
 
@@ -254,11 +255,11 @@ bool FileTransferService::createDirectory(const std::string& parentDir, const st
 
     std::string fullPath = parentDir + "/" + folderName;
     if (mkdir(fullPath.c_str(), 0755) == 0) {
-        evo_bt("FileTransferService::createDirectory '%s' created", fullPath.c_str());
+        EVO_LOGI("transfer", "createDirectory '%s' created", fullPath.c_str());
         return true;
     }
     if (errno == EEXIST) return true;
-    evo_bt("FileTransferService::createDirectory failed (errno=%d)", errno);
+    EVO_LOGE("transfer", "createDirectory failed (errno=%d)", errno);
     return false;
 }
 
@@ -303,7 +304,7 @@ void FileTransferService::runTransfer() {
     }
 
     m_isBusy.store(false);
-    evo_bt("FileTransferService: Operation complete (status=%d)", static_cast<int>(m_progress.status));
+    EVO_LOGI("transfer", "Operation complete (status=%d)", static_cast<int>(m_progress.status));
 }
 
 bool FileTransferService::ensureDirectory(const std::string& dirPath) {
@@ -494,11 +495,11 @@ bool FileTransferService::loopbackFtpUsable() {
     if (probe.connectServer(kLoopbackFtpHost, kLoopbackFtpPort, "anonymous", "anonymous", 3)) {
         probe.disconnect();
         m_ftpProbe = 1;
-        evo_bt("FileTransferService: loopback FTP daemon on %s:%d is up - big copies go through it",
+        EVO_LOGI("transfer", "loopback FTP daemon on %s:%d is up - big copies go through it",
                kLoopbackFtpHost, kLoopbackFtpPort);
     } else {
         m_ftpProbe = -1;
-        evo_bt("FileTransferService: no FTP daemon on %s:%d (%s) - copying in-process, "
+        EVO_LOGI("transfer", "no FTP daemon on %s:%d (%s) - copying in-process, "
                "expect throttling past ~1 GB",
                kLoopbackFtpHost, kLoopbackFtpPort, probe.getLastError().c_str());
     }
@@ -524,7 +525,7 @@ bool FileTransferService::onFtpChunk(uint32_t chunkBytes) {
 bool FileTransferService::copyViaLoopbackFtp(const std::string& src, const std::string& finalDst) {
     FtpClient ftp;
     if (!ftp.connectServer(kLoopbackFtpHost, kLoopbackFtpPort, "anonymous", "anonymous", 5)) {
-        evo_bt("copyViaLoopbackFtp: connect failed (%s)", ftp.getLastError().c_str());
+        EVO_LOGE("transfer", "copyViaLoopbackFtp: connect failed (%s)", ftp.getLastError().c_str());
         m_ftpProbe = -1;
         return false;
     }
@@ -533,10 +534,10 @@ bool FileTransferService::copyViaLoopbackFtp(const std::string& src, const std::
     bool ok = ftp.storeFile(finalDst, src, FtpStoreProgress, this);
     uint64_t dt = GetCurrentTimeMs() - t0;
     if (!ok) {
-        evo_bt("copyViaLoopbackFtp: STOR '%s' failed after %llu ms (%s)",
+        EVO_LOGE("transfer", "copyViaLoopbackFtp: STOR '%s' failed after %llu ms (%s)",
                finalDst.c_str(), dt, ftp.getLastError().c_str());
     } else {
-        evo_bt("copyViaLoopbackFtp: '%s' stored in %llu ms", finalDst.c_str(), dt);
+        EVO_LOGI("transfer", "copyViaLoopbackFtp: '%s' stored in %llu ms", finalDst.c_str(), dt);
     }
     ftp.disconnect();
     return ok;
@@ -546,13 +547,13 @@ bool FileTransferService::copyInProcess(const std::string& src, const std::strin
                                         uint64_t fileSize, uint32_t mode) {
     int srcFd = open(src.c_str(), O_RDONLY);
     if (srcFd < 0) {
-        evo_bt("copyInProcess: open src '%s' failed (errno=%d)", src.c_str(), errno);
+        EVO_LOGE("transfer", "copyInProcess: open src '%s' failed (errno=%d)", src.c_str(), errno);
         return false;
     }
 
     int dstFd = open(finalDst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode & 0777);
     if (dstFd < 0) {
-        evo_bt("copyInProcess: open dst '%s' failed (errno=%d)", finalDst.c_str(), errno);
+        EVO_LOGE("transfer", "copyInProcess: open dst '%s' failed (errno=%d)", finalDst.c_str(), errno);
         close(srcFd);
         return false;
     }
@@ -648,7 +649,7 @@ bool FileTransferService::copySingleFile(const std::string& src, const std::stri
             }
             m_lastSampleBytes = progressBefore;
             unlink(finalDst.c_str());
-            evo_bt("copySingleFile: falling back to an in-process copy of '%s'", src.c_str());
+            EVO_LOGW("transfer", "copySingleFile: falling back to an in-process copy of '%s'", src.c_str());
             viaFtp = false;
         }
     }
@@ -759,12 +760,12 @@ bool FileTransferService::executeMove(const std::string& src, const std::string&
     // the collision policy says to keep or rename.
     struct stat dstSt;
     if (stat(directDst.c_str(), &dstSt) != 0 && rename(src.c_str(), directDst.c_str()) == 0) {
-        evo_bt("executeMove: Fast atomic rename succeeded '%s' -> '%s'", src.c_str(), directDst.c_str());
+        EVO_LOGI("transfer", "executeMove: Fast atomic rename succeeded '%s' -> '%s'", src.c_str(), directDst.c_str());
         return true;
     }
 
     // Cross-device fallback: copy then recursive delete source
-    evo_bt("executeMove: rename unavailable (errno=%d), falling back to copy+delete", errno);
+    EVO_LOGW("transfer", "executeMove: rename unavailable (errno=%d), falling back to copy+delete", errno);
     if (!executeCopy(src, dst)) {
         return false;
     }

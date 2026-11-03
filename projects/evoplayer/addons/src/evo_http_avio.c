@@ -102,7 +102,7 @@ int evo_avio_execute(const char *method, const char *url, const char *post_data,
         char err[128];
         av_strerror(rc, err, sizeof err);
         const int st = status_of_error(rc);
-        PROV_LOG("avio %s failed: %s (rc=%d http=%d)", method ? method : "GET", err, rc, st);
+        PROV_WARN("avio: %s failed: %s (rc=%d http=%d)", method ? method : "GET", err, rc, st);
         if (out_status) *out_status = st;
         return st ? EVO_NET_ERR_HTTP : EVO_NET_ERR_CONNECT;
     }
@@ -160,7 +160,7 @@ int evo_avio_stream(const char *url, int (*sink)(const char *, size_t, void *),
         char err[128];
         av_strerror(rc, err, sizeof err);
         const int st = status_of_error(rc);
-        PROV_LOG("avio stream failed: %s (rc=%d http=%d)", err, rc, st);
+        PROV_ERR("avio: stream failed: %s (rc=%d http=%d)", err, rc, st);
         if (out_status) *out_status = st;
         return st ? EVO_NET_ERR_HTTP : EVO_NET_ERR_CONNECT;
     }
