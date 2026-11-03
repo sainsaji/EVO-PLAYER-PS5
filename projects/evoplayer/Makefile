@@ -217,6 +217,7 @@ CORE_SRCS := \
     core/src/screens/SubtitlePickerScreen.cpp \
     core/src/screens/AudioTrackPickerScreen.cpp \
     core/src/screens/ChapterPickerScreen.cpp \
+    core/src/screens/SubtitleFileScreen.cpp \
     core/src/screens/TextReaderScreen.cpp \
     core/src/screens/MediaInfoScreen.cpp \
     core/src/screens/SurroundTestScreen.cpp \

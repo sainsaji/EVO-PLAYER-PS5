@@ -58,7 +58,8 @@ enum class ScreenId : int {
     SafeToClose = 32,    /* the frame EVO parks on after QUIT (SafeToCloseScreen) */
     SettingsAudio = 33,  /* #118 */
     SettingsExperimental = 34, /* #105 */
-    ChapterPicker = 35         /* #150 */
+    ChapterPicker = 35,        /* #150 */
+    SubtitleFile = 36          /* pick a subtitle file anywhere on the console */
 };
 
 // Playback Quality Profile

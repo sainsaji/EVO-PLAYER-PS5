@@ -66,6 +66,7 @@ const char* screen_name(int id)
     case 32: return "SafeToClose";
     case 33: return "SettingsAudio";
     case 35: return "ChapterPicker";
+    case 36: return "SubtitleFile";
     default: return "?";
     }
 }

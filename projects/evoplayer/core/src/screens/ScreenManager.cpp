@@ -156,6 +156,7 @@ bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
         case ScreenId::SubtitlePicker:
         case ScreenId::AudioTrackPicker:
         case ScreenId::ChapterPicker:
+        case ScreenId::SubtitleFile:
         case ScreenId::PlaybackFinished:
             return true;
         default:

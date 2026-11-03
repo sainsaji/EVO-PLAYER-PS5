@@ -111,6 +111,16 @@ void SubtitlePickerScreen::refreshTracks() {
         }
     }
 
+    // LOAD FROM FILE...: an .srt from anywhere on the console. Last, so the
+    // tracks this file already has come first.
+    {
+        SubtitleTrackEntry loadRow;
+        loadRow.trackId = kLoadFileTrack;
+        loadRow.label = "LOAD FROM FILE...";
+        loadRow.detail = "Pick an .srt from a drive or folder";
+        m_tracks.push_back(std::move(loadRow));
+    }
+
     if (!prospero_subtitle_enabled) {
         m_activeTrackIndex = 0;
     }
@@ -146,6 +156,12 @@ void SubtitlePickerScreen::activateSelection() {
     }
 
     int trackId = m_tracks[m_selectedIndex].trackId;
+
+    if (trackId == kLoadFileTrack) {
+        evo_feedback(EVO_FB_OPEN);
+        if (auto sm = Application::getInstance().getScreenManager()) sm->navigateTo(ScreenId::SubtitleFile);
+        return;
+    }
 
     if (trackId == kAutoSyncTrack) {
         // Start, or cancel a run. Stay on the picker so the progress shows;
@@ -194,7 +210,7 @@ void SubtitlePickerScreen::activateSecondary() {
 
     const SubtitleTrackEntry& entry = m_tracks[m_selectedIndex];
 
-    if (entry.trackId == kAutoSyncTrack) {
+    if (entry.trackId == kAutoSyncTrack || entry.trackId == kLoadFileTrack) {
         evo_feedback(EVO_FB_ERROR);
         return;
     }
@@ -356,6 +372,11 @@ void SubtitlePickerScreen::render(uint32_t* framebuffer, int width, int height) 
         params.tracks[i].tag = m_tracks[idx].isSecondary ? "SECONDARY"
                              : (idx == m_activeTrackIndex && idx != 0 &&
                                 m_tracks[idx].trackId != kAutoSyncTrack) ? "PRIMARY" : "";
+        if (m_tracks[idx].trackId == kLoadFileTrack) {
+            params.tracks[i].is_current = 0;
+            params.tracks[i].is_action = 1;
+            params.tracks[i].tag = "";
+        }
         if (m_tracks[idx].trackId == kAutoSyncTrack) {
             params.tracks[i].detail = prospero_subtitle_autosync_detail(s_autoSyncDetail, sizeof(s_autoSyncDetail));
             params.tracks[i].is_current = 0;

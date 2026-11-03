@@ -31,6 +31,7 @@ private:
      * walk onto rows that are never drawn. */
     static constexpr int kVisibleRows = 6;
     static constexpr int kAutoSyncTrack = -3;
+    static constexpr int kLoadFileTrack = -4;   /* opens SubtitleFileScreen */
 
     void refreshTracks();
     void navigate(int delta);

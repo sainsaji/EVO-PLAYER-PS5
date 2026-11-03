@@ -6,6 +6,7 @@
 #include "evo/screens/SubtitlePickerScreen.hpp"
 #include "evo/screens/AudioTrackPickerScreen.hpp"
 #include "evo/screens/ChapterPickerScreen.hpp"
+#include "evo/screens/SubtitleFileScreen.hpp"
 #include "evo/screens/TextReaderScreen.hpp"
 #include "evo/screens/MediaInfoScreen.hpp"
 #include "evo/screens/SurroundTestScreen.hpp"
@@ -493,6 +494,7 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<SubtitlePickerScreen>());
     m_screenManager->registerScreen(std::make_unique<AudioTrackPickerScreen>());
     m_screenManager->registerScreen(std::make_unique<ChapterPickerScreen>());
+    m_screenManager->registerScreen(std::make_unique<SubtitleFileScreen>());
     m_screenManager->registerScreen(std::make_unique<TextReaderScreen>());
     m_screenManager->registerScreen(std::make_unique<MediaInfoScreen>());
     m_screenManager->registerScreen(std::make_unique<SurroundTestScreen>());
