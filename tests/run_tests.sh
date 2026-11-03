@@ -81,6 +81,8 @@ SRCS=(
     "${REPO_ROOT}/tests/test_netart.cpp"
     "${CORE}/src/services/NetArtSidecar.cpp"
     "${CORE}/src/services/NetArtCache.cpp"
+    "${REPO_ROOT}/tests/test_titles.cpp"
+    "${CORE}/src/services/ReleaseName.cpp"
 )
 
 # Version from the same file package-app.sh and release.yml use, rather than a

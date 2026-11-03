@@ -95,25 +95,30 @@ void* urlProbeEntry(void* arg) {
 }
 }  // namespace
 
-int NetworkStorageService::serverStatusForUrl(const std::string& url) {
-    bool ftp;
-    int port;
+bool NetworkStorageService::parseServerUrl(const std::string& url, std::string& host, int& port, bool& ftp) {
     if (url.compare(0, 6, "smb://") == 0) { ftp = false; port = 445; }
     else if (url.compare(0, 6, "ftp://") == 0) { ftp = true; port = 21; }
-    else return -1;
+    else return false;
 
     /* scheme://[user[:pass]@]host[:port]/... */
-    std::string auth = url.substr(6, url.find('/', 6) == std::string::npos ? std::string::npos
-                                                                            : url.find('/', 6) - 6);
+    const size_t slash = url.find('/', 6);
+    std::string auth = url.substr(6, slash == std::string::npos ? std::string::npos : slash - 6);
     const size_t at = auth.rfind('@');
     if (at != std::string::npos) auth = auth.substr(at + 1);
-    std::string host = auth;
+    host = auth;
     const size_t colon = auth.rfind(':');
     if (colon != std::string::npos) {
         host = auth.substr(0, colon);
         port = std::atoi(auth.c_str() + colon + 1);
     }
-    if (host.empty() || port <= 0) return -1;
+    return !host.empty() && port > 0;
+}
+
+int NetworkStorageService::serverStatusForUrl(const std::string& url) {
+    std::string host;
+    int port = 0;
+    bool ftp = false;
+    if (!parseServerUrl(url, host, port, ftp)) return -1;
     const std::string key = host + ":" + std::to_string(port);
 
     const long long now = monotonicMs();

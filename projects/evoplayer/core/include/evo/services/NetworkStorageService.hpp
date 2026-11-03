@@ -75,6 +75,10 @@ public:
      * whose server is down before Play is pressed. */
     static int serverStatusForUrl(const std::string& url);
 
+    /* smb:// or ftp:// -> host, port (445 / 21 by default) and which one.
+     * False for any other URL. Pure parsing, host-tested. */
+    static bool parseServerUrl(const std::string& url, std::string& host, int& port, bool& ftp);
+
     /* Tests a share's address, credentials, and target share/folder. Touches no
      * shared client state; safe to call on a worker thread. */
     static NetworkTestResult testConnection(const NetworkShare& share);

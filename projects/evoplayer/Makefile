@@ -189,6 +189,7 @@ CORE_SRCS := \
     core/src/Bridge.cpp \
     core/src/services/SettingsService.cpp \
     core/src/services/MediaMetadataService.cpp \
+    core/src/services/ReleaseName.cpp \
     core/src/services/CoverArtService.cpp \
     core/src/services/SoundEffectEngine.cpp \
     core/src/services/SurroundTestService.cpp \
