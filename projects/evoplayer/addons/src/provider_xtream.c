@@ -14,6 +14,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "addon_xtream.h"
@@ -28,6 +30,8 @@
 
 static xtream_config_t g_cfg;
 static char g_source[256];
+
+static void xs_reset(void);   /* the search index (see Search): dropped when the account changes */
 
 /* ------------------------------------------------------------------------- */
 /* Credential masking for safe logging                                       */
@@ -166,6 +170,7 @@ xtream_config_t *xtream_get_config(void)
 
 void xtream_set_server(const char *host, int port, const char *username, const char *password, bool use_https)
 {
+    xs_reset();
     if (host)     snprintf(g_cfg.host, sizeof g_cfg.host, "%s", host);
     if (port > 0) g_cfg.port = port;
     if (username) snprintf(g_cfg.username, sizeof g_cfg.username, "%s", username);
@@ -1077,12 +1082,16 @@ static int xtream_resolve(const char *item_id, evo_provider_resolve_cb cb, void 
 /* ------------------------------------------------------------------------- */
 /* Search                                                                    */
 /* ------------------------------------------------------------------------- */
-
-typedef struct {
-    evo_provider_items_cb cb;
-    void *ud;
-    char query[64];
-} search_ctx_t;
+/*
+ * Search covers live channels, movies and series. The panel has no search API,
+ * so the three full lists are fetched once and reduced to a small index (id,
+ * name, icon) that later searches walk in memory.
+ *
+ * The lists are scanned, not parsed into a cJSON tree. A large panel's VOD
+ * list is tens of megabytes; as a tree it is several times that again, on top
+ * of the body - which is how a search on a provider with a huge VOD library ran
+ * EVO out of memory. The index holds only what a result row shows.
+ */
 
 /* libc's strcasestr is a null import in the app module (SIGSEGV at addr 0). */
 static const char *xt_strcasestr(const char *h, const char *n)
@@ -1096,90 +1105,357 @@ static const char *xt_strcasestr(const char *h, const char *n)
     return NULL;
 }
 
-static void on_search_resp(int success, int status, const char *body, size_t len, void *ud)
+/* ---- the scanner ---- */
+
+static const char *js_ws(const char *p, const char *e)
 {
-    search_ctx_t *ctx = (search_ctx_t *)ud;
-    if (!ctx) return;
+    while (p < e && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+    return p;
+}
 
-    if (!success || status < 200 || status >= 300 || !body) {
-        PROV_ERR("xtream: search failed ok=%d http=%d", success, status);
-        if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
-        free(ctx);
-        return;
+static void js_put_utf8(char *out, size_t cap, size_t *n, unsigned cp)
+{
+    char b[4];
+    size_t k;
+    if (cp < 0x80)        { b[0] = (char)cp; k = 1; }
+    else if (cp < 0x800)  { b[0] = (char)(0xC0 | (cp >> 6)); b[1] = (char)(0x80 | (cp & 0x3F)); k = 2; }
+    else if (cp < 0x10000){ b[0] = (char)(0xE0 | (cp >> 12)); b[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                            b[2] = (char)(0x80 | (cp & 0x3F)); k = 3; }
+    else                  { b[0] = (char)(0xF0 | (cp >> 18)); b[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                            b[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); b[3] = (char)(0x80 | (cp & 0x3F)); k = 4; }
+    if (*n + k < cap) { memcpy(out + *n, b, k); *n += k; }
+}
+
+static int js_hex4(const char *p, const char *e, unsigned *v)
+{
+    if (e - p < 4) return 0;
+    unsigned x = 0;
+    for (int i = 0; i < 4; ++i) {
+        const char c = p[i];
+        x <<= 4;
+        if (c >= '0' && c <= '9') x |= (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') x |= (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') x |= (unsigned)(c - 'A' + 10);
+        else return 0;
     }
+    *v = x;
+    return 1;
+}
 
-    cJSON *arr = cJSON_Parse(body);
-    if (!arr || !cJSON_IsArray(arr)) {
-        PROV_ERR("xtream: search reply unreadable (%zu bytes)", len);
-        if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
-        if (arr) cJSON_Delete(arr);
-        free(ctx);
-        return;
+/* p at the opening quote. Decodes into out (truncated, NUL-terminated) when
+ * out is set; returns the char after the closing quote, or NULL. */
+static const char *js_string(const char *p, const char *e, char *out, size_t cap)
+{
+    size_t n = 0;
+    ++p;
+    while (p < e) {
+        char c = *p++;
+        if (c == '"') { if (out && cap) out[n] = 0; return p; }
+        if (c != '\\') {
+            if (out && n + 1 < cap) out[n++] = c;
+            continue;
+        }
+        if (p >= e) return NULL;
+        c = *p++;
+        if (c == 'u') {
+            unsigned cp;
+            if (!js_hex4(p, e, &cp)) return NULL;
+            p += 4;
+            if (cp >= 0xD800 && cp <= 0xDBFF && e - p >= 6 && p[0] == '\\' && p[1] == 'u') {
+                unsigned lo;
+                if (js_hex4(p + 2, e, &lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                    p += 6;
+                }
+            }
+            if (out) js_put_utf8(out, cap, &n, cp);
+            continue;
+        }
+        const char d = c == 'n' ? '\n' : c == 't' ? '\t' : c == 'r' ? '\r' : c == 'b' ? '\b' : c == 'f' ? '\f' : c;
+        if (out && n + 1 < cap) out[n++] = d;
     }
+    return NULL;
+}
 
-    int total = cJSON_GetArraySize(arr);
+/* Any value: returns the char after it, or NULL. A number/true/false/null is
+ * copied into out (it is how stream_id often arrives). */
+static const char *js_value(const char *p, const char *e, char *out, size_t cap)
+{
+    p = js_ws(p, e);
+    if (p >= e) return NULL;
+    if (*p == '"') return js_string(p, e, out, cap);
+    if (*p == '{' || *p == '[') {
+        int depth = 0;
+        while (p < e) {
+            const char c = *p;
+            if (c == '"') { p = js_string(p, e, NULL, 0); if (!p) return NULL; continue; }
+            if (c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') { if (--depth == 0) return p + 1; }
+            ++p;
+        }
+        return NULL;
+    }
+    size_t n = 0;
+    while (p < e && *p != ',' && *p != '}' && *p != ']' && *p != ' ' && *p != '\n' && *p != '\r' && *p != '\t') {
+        if (out && n + 1 < cap) out[n++] = *p;
+        ++p;
+    }
+    if (out && cap) out[n] = 0;
+    return p;
+}
+
+int xtream_scan_list(const char *body, size_t len, const char *id_key, const char *icon_key,
+                     xtream_list_fn fn, void *ud)
+{
+    if (!body) return -1;
+    const char *p = body, *e = body + len;
+    p = js_ws(p, e);
+    if (p >= e || *p != '[') return -1;
+    ++p;
+    int count = 0;
+    xtream_list_obj_t o;
+    char key[32], scratch[16];
+    for (;;) {
+        p = js_ws(p, e);
+        if (p >= e) return count;          /* truncated: keep what was read */
+        if (*p == ',') { ++p; continue; }
+        if (*p == ']') return count;
+        if (*p != '{') {                    /* a stray value in the array */
+            p = js_value(p, e, NULL, 0);
+            if (!p) return count;
+            continue;
+        }
+        ++p;
+        memset(&o, 0, sizeof o);
+        int ok = 1;
+        for (;;) {
+            p = js_ws(p, e);
+            if (p >= e) { ok = 0; break; }
+            if (*p == ',') { ++p; continue; }
+            if (*p == '}') { ++p; break; }
+            if (*p != '"') { ok = 0; break; }
+            p = js_string(p, e, key, sizeof key);
+            if (!p) { ok = 0; break; }
+            p = js_ws(p, e);
+            if (p >= e || *p != ':') { ok = 0; break; }
+            ++p;
+            char *dst = NULL;
+            size_t cap = 0;
+            if (!strcmp(key, "name"))                        { dst = o.name; cap = sizeof o.name; }
+            else if (id_key && !strcmp(key, id_key))         { dst = o.id;   cap = sizeof o.id; }
+            else if (icon_key && !strcmp(key, icon_key))     { dst = o.icon; cap = sizeof o.icon; }
+            else if (!strcmp(key, "container_extension"))    { dst = o.ext;  cap = sizeof o.ext; }
+            p = js_value(p, e, dst ? dst : scratch, dst ? cap : 0);
+            if (!p) { ok = 0; break; }
+            if (dst && !strcmp(dst, "null")) dst[0] = 0;
+        }
+        if (!ok) return count;
+        if (o.id[0] && o.name[0]) {
+            if (fn) fn(&o, ud);
+            count++;
+        }
+    }
+}
+
+/* ---- the index ---- */
+
+enum { XS_LIVE = 0, XS_VOD, XS_SERIES, XS_KINDS };
+enum { XS_EMPTY = 0, XS_LOADING, XS_READY };
+#define XS_STALE_SECS (6 * 3600)
+
+typedef struct {
+    uint32_t name, icon;    /* offsets into the arena */
+    char id[24];
+    char ext[8];
+    uint8_t kind;
+} xs_entry_t;
+
+typedef struct {
+    evo_provider_items_cb cb;
+    void *ud;
+    char query[128];
+    int page;
+} xs_pending_t;
+
+static struct {
+    xs_entry_t *ent;
+    int n, cap;
+    char *arena;
+    size_t used, acap;
+    int state;
+    int stage;              /* which list is downloading */
+    int lists_ok;
+    time_t built;
+    unsigned gen;           /* bumped by xs_reset: a reply for an old account is dropped */
+    xs_pending_t pending;
+    int has_pending;
+} XS;
+
+static void xs_reset(void)
+{
+    if (XS.has_pending && XS.pending.cb) XS.pending.cb(0, NULL, 0, 0, XS.pending.ud);
+    free(XS.ent);
+    free(XS.arena);
+    const unsigned gen = XS.gen + 1;
+    memset(&XS, 0, sizeof XS);
+    XS.gen = gen;
+}
+
+static int xs_str(const char *s, uint32_t *off)
+{
+    const size_t n = strlen(s) + 1;
+    if (XS.used + n > XS.acap) {
+        size_t nc = XS.acap ? XS.acap * 2 : (1u << 20);
+        while (nc < XS.used + n) nc *= 2;
+        char *a = (char *)realloc(XS.arena, nc);
+        if (!a) return -1;
+        XS.arena = a;
+        XS.acap = nc;
+    }
+    memcpy(XS.arena + XS.used, s, n);
+    *off = (uint32_t)XS.used;
+    XS.used += n;
+    return 0;
+}
+
+static void xs_add(const xtream_list_obj_t *o, void *ud)
+{
+    const int kind = (int)(intptr_t)ud;
+    if (XS.n == XS.cap) {
+        const int nc = XS.cap ? XS.cap * 2 : 4096;
+        xs_entry_t *ne = (xs_entry_t *)realloc(XS.ent, (size_t)nc * sizeof *ne);
+        if (!ne) return;
+        XS.ent = ne;
+        XS.cap = nc;
+    }
+    xs_entry_t *x = &XS.ent[XS.n];
+    memset(x, 0, sizeof *x);
+    if (xs_str(o->name, &x->name) != 0 || xs_str(o->icon, &x->icon) != 0) return;
+    snprintf(x->id, sizeof x->id, "%s", o->id);
+    snprintf(x->ext, sizeof x->ext, "%s", o->ext[0] ? o->ext : "mp4");
+    x->kind = (uint8_t)kind;
+    XS.n++;
+}
+
+static void xs_emit(const char *query, int page, evo_provider_items_cb cb, void *ud)
+{
+    if (page < 0) page = 0;
+    const int off = page * EVO_PROVIDER_PAGE_MAX;
     evo_provider_item_t *items = (evo_provider_item_t *)calloc((size_t)EVO_PROVIDER_PAGE_MAX, sizeof *items);
-    if (!items) {
-        if (ctx->cb) ctx->cb(0, NULL, 0, 0, ctx->ud);
-        cJSON_Delete(arr);
-        free(ctx);
+    if (!items) { if (cb) cb(0, NULL, 0, 0, ud); return; }
+
+    /* Live first, then movies, then series: the order the root page lists them. */
+    int seen = 0, k = 0, more = 0;
+    for (int kind = 0; kind < XS_KINDS && !more; ++kind) {
+        for (int i = 0; i < XS.n; ++i) {
+            const xs_entry_t *x = &XS.ent[i];
+            if (x->kind != kind || !xt_strcasestr(XS.arena + x->name, query)) continue;
+            if (seen++ < off) continue;
+            if (k == EVO_PROVIDER_PAGE_MAX) { more = 1; break; }
+            evo_provider_item_t *it = &items[k++];
+            evo_provider_item_clear(it);
+            snprintf(it->title, sizeof it->title, "%s", XS.arena + x->name);
+            if (XS.arena[x->icon]) snprintf(it->art_url, sizeof it->art_url, "%s", XS.arena + x->icon);
+            if (kind == XS_LIVE) {
+                snprintf(it->id, sizeof it->id, "live_stream:%s", x->id);
+                snprintf(it->subtitle, sizeof it->subtitle, "Live TV");
+                it->kind = EVO_MEDIA_STREAM;
+                it->is_live = 1;
+            } else if (kind == XS_VOD) {
+                snprintf(it->id, sizeof it->id, "vod_stream:%s:%s", x->id, x->ext);
+                snprintf(it->subtitle, sizeof it->subtitle, "Movie");
+                it->detail = 1;
+                it->kind = EVO_MEDIA_VIDEO;
+            } else {
+                snprintf(it->id, sizeof it->id, "series_show:%s", x->id);
+                snprintf(it->subtitle, sizeof it->subtitle, "Series");
+                it->detail = 2;
+                it->kind = EVO_MEDIA_FOLDER;
+                it->is_folder = 1;
+            }
+        }
+    }
+    if (cb) cb(1, items, k, more, ud);
+    free(items);
+}
+
+static void xs_fetch_stage(void);
+
+static void on_xs_list(int success, int status, const char *body, size_t len, void *ud)
+{
+    if ((unsigned)(uintptr_t)ud != XS.gen || XS.state != XS_LOADING) return;   /* account changed */
+    static const char *const kName[XS_KINDS] = {"live", "VOD", "series"};
+    const int stage = XS.stage;
+    if (!success || status < 200 || status >= 300 || !body) {
+        PROV_ERR("xtream: search list %s failed ok=%d http=%d - searching without it",
+                 kName[stage], success, status);
+    } else {
+        const int before = XS.n;
+        const int got = xtream_scan_list(body, len, stage == XS_SERIES ? "series_id" : "stream_id",
+                                         stage == XS_SERIES ? "cover" : "stream_icon",
+                                         xs_add, (void *)(intptr_t)stage);
+        if (got < 0)
+            PROV_ERR("xtream: search list %s unreadable (%zu bytes)", kName[stage], len);
+        else {
+            XS.lists_ok++;
+            PROV_LOG("xtream: search index %s: %d of %d entries (%zu bytes)", kName[stage],
+                     XS.n - before, got, len);
+        }
+    }
+    XS.stage++;
+    xs_fetch_stage();
+}
+
+static void xs_fetch_stage(void)
+{
+    static const char *const kAction[XS_KINDS] = {
+        "action=get_live_streams", "action=get_vod_streams", "action=get_series"};
+    if (XS.stage < XS_KINDS) {
+        char url[1024];
+        build_api_url(url, sizeof url, kAction[XS.stage]);
+        if (evo_net_request_async("GET", url, NULL, NULL, 0, on_xs_list, (void *)(uintptr_t)XS.gen) == 0)
+            return;
+        PROV_ERR("xtream: search list request not queued");
+        XS.stage++;
+        xs_fetch_stage();
         return;
     }
-
-    int match_count = 0;
-    for (int i = 0; i < total && match_count < EVO_PROVIDER_PAGE_MAX; ++i) {
-        cJSON *obj = cJSON_GetArrayItem(arr, i);
-        if (!obj) continue;
-        cJSON *name = cJSON_GetObjectItem(obj, "name");
-        if (!name || !name->valuestring) continue;
-
-        /* Case-insensitive search match */
-        if (!xt_strcasestr(name->valuestring, ctx->query)) continue;
-
-        cJSON *sid = cJSON_GetObjectItem(obj, "stream_id");
-        cJSON *icon = cJSON_GetObjectItem(obj, "stream_icon");
-
-        char id_buf[32] = {0};
-        const char *id_str = sid ? (cJSON_IsString(sid) ? sid->valuestring : "") : "";
-        if (!id_str[0] && sid && cJSON_IsNumber(sid)) {
-            snprintf(id_buf, sizeof id_buf, "%d", sid->valueint);
-            id_str = id_buf;
-        }
-
-        evo_provider_item_clear(&items[match_count]);
-        snprintf(items[match_count].id, sizeof items[match_count].id, "live_stream:%s", id_str);
-        snprintf(items[match_count].title, sizeof items[match_count].title, "%s", name->valuestring);
-        if (icon && icon->valuestring && icon->valuestring[0]) {
-            snprintf(items[match_count].art_url, sizeof items[match_count].art_url, "%s", icon->valuestring);
-        }
-        items[match_count].kind = EVO_MEDIA_STREAM;
-        items[match_count].is_live = 1;
-        match_count++;
+    XS.state = XS.lists_ok ? XS_READY : XS_EMPTY;
+    XS.built = time(NULL);
+    PROV_LOG("xtream: search index ready: %d entries, %zu bytes of text", XS.n, XS.used);
+    if (XS.has_pending) {
+        xs_pending_t p = XS.pending;
+        XS.has_pending = 0;
+        if (XS.state == XS_READY) xs_emit(p.query, p.page, p.cb, p.ud);
+        else if (p.cb) p.cb(0, NULL, 0, 0, p.ud);
     }
-
-    if (ctx->cb) ctx->cb(1, items, match_count, 0, ctx->ud);
-    free(items);
-    cJSON_Delete(arr);
-    free(ctx);
 }
 
 static int xtream_search(const char *query, int page, evo_provider_items_cb cb, void *ud)
 {
-    (void)page;
     if (!query || !*query || !g_cfg.host[0] || !g_cfg.username[0] || !g_cfg.password[0]) {
         if (cb) cb(0, NULL, 0, 0, ud);
         return -1;
     }
-
-    search_ctx_t *ctx = (search_ctx_t *)calloc(1, sizeof *ctx);
-    if (!ctx) return -2;
-    ctx->cb = cb;
-    ctx->ud = ud;
-    snprintf(ctx->query, sizeof ctx->query, "%s", query);
-
-    char url[1024];
-    build_api_url(url, sizeof url, "action=get_live_streams");
-    return evo_net_request_async("GET", url, NULL, NULL, 0, on_search_resp, ctx);
+    if (XS.state == XS_READY && time(NULL) - XS.built > XS_STALE_SECS) xs_reset();
+    if (XS.state == XS_READY) {
+        xs_emit(query, page, cb, ud);
+        return 0;
+    }
+    /* Only the newest query waits for the lists; an older one is answered empty. */
+    if (XS.has_pending && XS.pending.cb) XS.pending.cb(1, NULL, 0, 0, XS.pending.ud);
+    XS.pending.cb = cb;
+    XS.pending.ud = ud;
+    XS.pending.page = page;
+    snprintf(XS.pending.query, sizeof XS.pending.query, "%s", query);
+    XS.has_pending = 1;
+    if (XS.state != XS_LOADING) {
+        XS.state = XS_LOADING;
+        XS.stage = 0;
+        XS.lists_ok = 0;
+        xs_fetch_stage();
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1193,6 +1469,7 @@ static int xtream_provider_init(void)
 
 static void xtream_provider_shutdown(void)
 {
+    xs_reset();
 }
 
 static int xtream_provider_is_configured(void)
@@ -1332,6 +1609,7 @@ static void xtream_provider_sign_out(void)
 
 static int xtream_provider_set_source(const char *value)
 {
+    xs_reset();
     if (!value || !*value) {
         memset(&g_cfg, 0, sizeof g_cfg);
         unlink(evo_data_path(XTREAM_CONF));

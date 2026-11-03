@@ -9,6 +9,7 @@ Serves legal, public 24/7 Live HLS streams, VOD movies, and series.
 Usage:
     python tools/mock_xtream_server.py
     python tools/mock_xtream_server.py --port 8080
+    python tools/mock_xtream_server.py --port 8095 --huge 150000   # a huge VOD library
 """
 
 import http.server
@@ -34,6 +35,33 @@ STREAMS = {
     "series_401": "https://raw.githubusercontent.com/mediaelement/mediaelement-files/master/big_buck_bunny.mp4",
     "series_402": "https://filesamples.com/samples/video/mp4/sample_960x540.mp4",
 }
+
+# --huge N: also list N synthetic movies, N/10 live channels and N/20 series in
+# the all-category replies (no category_id) - the lists search downloads. For
+# reproducing "search crashes on a panel with a huge VOD library".
+HUGE = 0
+_HUGE_CACHE = {}
+
+
+def huge_list(kind):
+    if kind in _HUGE_CACHE:
+        return _HUGE_CACHE[kind]
+    if kind == "vod":
+        out = [{"num": i, "name": f"Movie Title Number {i} ({2000 + i % 25})", "stream_type": "movie",
+                "stream_id": 300000 + i, "rating": "7.1", "added": "1700000000", "category_id": "10",
+                "stream_icon": f"https://image.tmdb.example/t/p/w600_and_h900_bestv2/poster{i}.jpg",
+                "container_extension": "mp4", "direct_source": ""} for i in range(HUGE)]
+    elif kind == "live":
+        out = [{"num": i, "name": f"UK: Channel {i} HD", "stream_type": "live", "stream_id": 100000 + i,
+                "stream_icon": f"https://img.example/logos/{i}.png", "epg_channel_id": f"ch{i}.uk",
+                "category_id": "1", "tv_archive": 0} for i in range(HUGE // 10)]
+    else:
+        out = [{"num": i, "name": f"Some Series {i}", "series_id": 500000 + i,
+                "cover": f"https://image.tmdb.example/t/p/w600/series{i}.jpg",
+                "plot": "A long plot line " * 10, "genre": "Drama", "category_id": "20"} for i in range(HUGE // 20)]
+    _HUGE_CACHE[kind] = out
+    return out
+
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -194,6 +222,8 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                 ]
                 if cat_id:
                     streams = [s for s in streams if s["category_id"] == cat_id]
+                elif HUGE:
+                    streams = streams + huge_list("live")
                 self.wfile.write(json.dumps(streams).encode('utf-8'))
                 return
 
@@ -261,6 +291,8 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                 cat_id = qs.get('category_id', [None])[0]
                 if cat_id:
                     streams = [s for s in streams if s["category_id"] == cat_id]
+                elif HUGE:
+                    streams = streams + huge_list("vod")
                 self.wfile.write(json.dumps(streams).encode('utf-8'))
                 return
 
@@ -290,6 +322,8 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
                         "category_id": "20"
                     }
                 ]
+                if HUGE and not qs.get('category_id', [None])[0]:
+                    data = data + huge_list("series")
                 self.wfile.write(json.dumps(data).encode('utf-8'))
                 return
 
@@ -344,9 +378,21 @@ class XtreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
 def main():
-    global PORT
-    if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        PORT = int(sys.argv[1])
+    global PORT, HUGE
+    args = sys.argv[1:]
+    if "--huge" in args:
+        i = args.index("--huge")
+        HUGE = int(args[i + 1])
+        del args[i:i + 2]
+    if "--port" in args:
+        i = args.index("--port")
+        PORT = int(args[i + 1])
+        del args[i:i + 2]
+    if args and args[0].isdigit():
+        PORT = int(args[0])
+    if HUGE:
+        sizes = {k: len(json.dumps(huge_list(k))) // (1 << 20) for k in ("live", "vod", "series")}
+        print(f" --huge {HUGE}: all-category lists add ~{sizes} MB of JSON")
 
     local_ip = get_local_ip()
     server_address = ('0.0.0.0', PORT)

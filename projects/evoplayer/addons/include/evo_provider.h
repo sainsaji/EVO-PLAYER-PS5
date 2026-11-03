@@ -557,6 +557,8 @@ const char *provider_iptv_pinned_guide(void);
 /* For the Live TV options panel. */
 int         provider_iptv_epg_needs_setup(void);
 int         provider_iptv_channel_count(void);
+/* #180: entries the last playlist parse skipped (no address, stray text). */
+int         provider_iptv_skipped_count(void);
 const char *provider_iptv_playlist_name(void);
 const char *provider_iptv_guide_in_use(void);
 int         provider_iptv_guide_matched(void);

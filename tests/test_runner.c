@@ -23,6 +23,7 @@
 #include "evo_error.h"
 #include "evo_net.h"
 #include "cJSON.h"
+#include "addon_xtream.h"
 #include "evo_playlist_sniff.h"
 #include "evo_changelog.h"
 #include "SDL_ps5tilemap.inc"
@@ -726,6 +727,241 @@ static void test_iptv_provider_catalog_and_epg(void)
 }
 
 /* ==========================================================================
+ * Xtream: list scanner behind search (no cJSON tree for huge VOD lists)
+ * ========================================================================== */
+
+typedef struct {
+    int n;
+    xtream_list_obj_t first, last;
+} test_scan_ctx_t;
+
+static void on_test_scan(const xtream_list_obj_t *o, void *ud)
+{
+    test_scan_ctx_t *c = (test_scan_ctx_t *)ud;
+    if (c->n == 0) c->first = *o;
+    c->last = *o;
+    c->n++;
+}
+
+static void test_xtream_scan_list(void)
+{
+    TEST_START("Xtream: list scanner (escapes, numbers, nesting)");
+    test_scan_ctx_t c;
+
+    const char *live =
+        "[{\"num\":1,\"name\":\"UK: BBC One \\\"HD\\\"\",\"stream_id\":101,\"stream_icon\":\"http:\\/\\/i.example\\/1.png\","
+        "\"tv_archive\":0,\"direct_source\":\"\",\"category_ids\":[1,2],\"extra\":{\"a\":\"}\"}},"
+        " {\"name\":\"Caf\\u00e9 TV \\ud83d\\ude00\",\"stream_id\":\"102\",\"stream_icon\":null},"
+        " {\"name\":\"no id\"},"
+        " {\"stream_id\":104}]";
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(live, strlen(live), "stream_id", "stream_icon", on_test_scan, &c) == 2,
+                "two complete objects");
+    TEST_ASSERT(!strcmp(c.first.name, "UK: BBC One \"HD\""), "escaped quotes");
+    TEST_ASSERT(!strcmp(c.first.id, "101"), "numeric id");
+    TEST_ASSERT(!strcmp(c.first.icon, "http://i.example/1.png"), "escaped slashes");
+    TEST_ASSERT(!strcmp(c.last.name, "Caf\xc3\xa9 TV \xf0\x9f\x98\x80"), "unicode and surrogate pair");
+    TEST_ASSERT(!strcmp(c.last.id, "102") && c.last.icon[0] == 0, "string id, null icon");
+
+    const char *vod = "[{\"name\":\"A Movie (2019)\",\"stream_id\":5,\"container_extension\":\"mkv\",\"stream_icon\":\"\"}]";
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(vod, strlen(vod), "stream_id", "stream_icon", on_test_scan, &c) == 1, "vod");
+    TEST_ASSERT(!strcmp(c.first.ext, "mkv"), "container extension");
+
+    const char *series = "[{\"series_id\":77,\"name\":\"A Show\",\"cover\":\"http://c/x.jpg\",\"plot\":\"[{not json}]\"}]";
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(series, strlen(series), "series_id", "cover", on_test_scan, &c) == 1, "series");
+    TEST_ASSERT(!strcmp(c.first.id, "77") && !strcmp(c.first.icon, "http://c/x.jpg"), "series id and cover");
+
+    /* A body cut off mid-object keeps what came before; junk is not an array. */
+    const char *cut = "[{\"name\":\"One\",\"stream_id\":1},{\"name\":\"Tw";
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(cut, strlen(cut), "stream_id", "stream_icon", on_test_scan, &c) == 1, "truncated body");
+    TEST_ASSERT(xtream_scan_list("{\"user_info\":{}}", 16, "stream_id", NULL, NULL, NULL) == -1, "object, not array");
+    TEST_ASSERT(xtream_scan_list("", 0, "stream_id", NULL, NULL, NULL) == -1, "empty body");
+    TEST_ASSERT(xtream_scan_list("[]", 2, "stream_id", NULL, NULL, NULL) == 0, "empty array");
+
+    /* Over-long fields are cut, not overflowed. */
+    char longname[2048];
+    char body[8192];
+    memset(longname, 'x', sizeof longname - 1);
+    longname[sizeof longname - 1] = 0;
+    snprintf(body, sizeof body, "[{\"name\":\"%s\",\"stream_id\":\"%s\"}]", longname, longname);
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(body, strlen(body), "stream_id", NULL, on_test_scan, &c) == 1, "long fields");
+    TEST_ASSERT(strlen(c.first.name) == sizeof c.first.name - 1 && strlen(c.first.id) == sizeof c.first.id - 1,
+                "long fields truncated");
+    TEST_PASS();
+}
+
+static void test_xtream_scan_huge_vod(void)
+{
+    TEST_START("Xtream: scan a 150k-title VOD list");
+    const int n = 150000;
+    size_t cap = (size_t)n * 400 + 16, used = 0;
+    char *body = (char *)malloc(cap);
+    TEST_ASSERT(body != NULL, "no memory for the test body");
+    body[used++] = '[';
+    for (int i = 0; i < n; ++i)
+        used += (size_t)snprintf(body + used, cap - used,
+            "%s{\"num\":%d,\"name\":\"Movie Title Number %d (20%02d)\",\"stream_type\":\"movie\",\"stream_id\":%d,"
+            "\"stream_icon\":\"https:\\/\\/image.tmdb.example\\/t\\/p\\/w600\\/abcdef%d.jpg\",\"rating\":\"7.1\","
+            "\"added\":\"1700000000\",\"category_id\":\"12\",\"container_extension\":\"mkv\",\"direct_source\":\"\"}",
+            i ? "," : "", i, i, i % 25, 300000 + i, i);
+    body[used++] = ']';
+    test_scan_ctx_t c;
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(xtream_scan_list(body, used, "stream_id", "stream_icon", on_test_scan, &c) == n, "every title read");
+    TEST_ASSERT(!strcmp(c.last.id, "449999") && strstr(c.last.name, "149999"), "last title intact");
+    free(body);
+    TEST_PASS();
+}
+
+/* ==========================================================================
+ * IPTV: a playlist with a huge VOD section (a user's search crashed on one)
+ * ========================================================================== */
+
+typedef struct {
+    int calls, ok, count, has_more;
+    char first_title[128];
+} test_big_ctx_t;
+
+static void on_test_big_items(int ok, const evo_provider_item_t *items, int count, int has_more, void *ud)
+{
+    test_big_ctx_t *c = (test_big_ctx_t *)ud;
+    c->calls++;
+    c->ok = ok;
+    c->count = count;
+    c->has_more = has_more;
+    c->first_title[0] = 0;
+    if (ok && items && count > 0)
+        snprintf(c->first_title, sizeof c->first_title, "%s", items[0].title);
+}
+
+/* An M3U the way an Xtream panel exports one: a few thousand live channels,
+ * then every movie and every episode, with long logo URLs and names. */
+static int write_big_playlist(const char *path, int live, int movies, int episodes)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "#EXTM3U x-tvg-url=\"http://epg.example/xmltv.php\"\n");
+    for (int i = 0; i < live; ++i)
+        fprintf(f, "#EXTINF:-1 tvg-id=\"ch%d.uk\" tvg-name=\"UK: Channel %d HD\" tvg-logo=\"http://img.example/logos/%d.png\" "
+                   "group-title=\"UK | Entertainment\",UK: Channel %d HD\nhttp://panel.example:8080/user/pass/%d\n",
+                i, i, i, i, 100000 + i);
+    for (int i = 0; i < movies; ++i)
+        fprintf(f, "#EXTINF:-1 tvg-id=\"\" tvg-name=\"Movie Title Number %d (20%02d)\" "
+                   "tvg-logo=\"https://image.tmdb.example/t/p/w600_and_h900_bestv2/abcdefghijklmnop%d.jpg\" "
+                   "group-title=\"VOD | Action & Adventure\",Movie Title Number %d (20%02d)\n"
+                   "http://panel.example:8080/movie/user/pass/%d.mkv\n",
+                i, i % 25, i, i, i % 25, 200000 + i);
+    for (int i = 0; i < episodes; ++i)
+        fprintf(f, "#EXTINF:-1 tvg-name=\"Some Series %d S%02dE%02d\" tvg-logo=\"\" group-title=\"SERIES | Drama\","
+                   "Some Series %d S%02dE%02d\nhttp://panel.example:8080/series/user/pass/%d.mp4\n",
+                i / 100, (i / 10) % 10 + 1, i % 10 + 1, i / 100, (i / 10) % 10 + 1, i % 10 + 1, 500000 + i);
+    fclose(f);
+    return 0;
+}
+
+static void test_iptv_huge_vod_search(void)
+{
+    TEST_START("IPTV: search a playlist with 60k VOD entries");
+
+    const evo_provider_t *p = evo_provider_find("iptv");
+    TEST_ASSERT(p != NULL, "IPTV provider not found");
+    const char *path = "/tmp/test_iptv_huge_vod.m3u";
+    TEST_ASSERT(write_big_playlist(path, 3000, 45000, 12000) == 0, "could not write the big playlist");
+    TEST_ASSERT(p->init() == 0, "init failed");
+    TEST_ASSERT(p->set_source(path) == 0, "set_source failed");
+
+    test_big_ctx_t c;
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(p->list_catalog(NULL, 0, on_test_big_items, &c) == 0, "list_catalog failed");
+    TEST_ASSERT(c.ok && c.count > 0, "root page empty");
+
+    /* A short query matches nearly everything; a long or odd one nothing. */
+    static const char *queries[] = {
+        "a", "e", " ", "Movie", "movie title number 1", "S01E01", "UK:", "(2019)",
+        "zzzz-no-match", "\xc3\xa9", "%s%n%s", "\"quoted\"",
+        "a very long query that is longer than any channel name in the whole playlist at all, really long",
+    };
+    for (size_t q = 0; q < sizeof queries / sizeof queries[0]; ++q) {
+        for (int page = 0; page < 4; ++page) {
+            memset(&c, 0, sizeof c);
+            const int rc = p->search(queries[q], page, on_test_big_items, &c);
+            TEST_ASSERT(rc == 0, "search returned an error");
+            TEST_ASSERT(c.calls == 1, "search callback not called exactly once");
+            TEST_ASSERT(c.ok, "search reported failure");
+            TEST_ASSERT(c.count >= 0 && c.count <= EVO_PROVIDER_PAGE_MAX, "page larger than PAGE_MAX");
+        }
+    }
+
+    /* A page far past the end answers empty, not garbage. */
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(p->search("a", 100000, on_test_big_items, &c) == 0 && c.ok && c.count == 0 && !c.has_more,
+                "page past the end");
+
+    /* The matches are the right ones. */
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(p->search("Movie Title Number 44999", 0, on_test_big_items, &c) == 0 && c.count == 1,
+                "exact movie not found once");
+    TEST_ASSERT(strstr(c.first_title, "44999") != NULL, "wrong movie returned");
+
+    remove(path);
+    TEST_PASS();
+}
+
+/* ==========================================================================
+ * IPTV #180: a broken entry is skipped, the rest of the playlist loads
+ * ========================================================================== */
+
+static void test_iptv_broken_playlist(void)
+{
+    TEST_START("IPTV #180: broken entries skipped, rest loads");
+    const evo_provider_t *p = evo_provider_find("iptv");
+    TEST_ASSERT(p != NULL, "IPTV provider not found");
+
+    const char *path = "/tmp/test_iptv_broken.m3u";
+    FILE *f = fopen(path, "wb");
+    TEST_ASSERT(f != NULL, "cannot write the playlist");
+    fputs("#EXTM3U\n"
+          "#EXTINF:-1 tvg-id=\"a\" group-title=\"News\",Good One\n"
+          "http://h/1.ts\n"
+          "#EXTINF:-1 tvg-id=\"b\" group-title=\"News broken,Good Two\n"   /* unterminated quote */
+          "some stray text\n"                                               /* skipped, entry waits */
+          "http://h/2.ts\r\n"                                               /* CRLF */
+          "#EXTINF:-1,No URL\r\n"                                           /* skipped: no address */
+          "#EXTINF:-1,Good Three\n"
+          "http://h/3.ts\n"
+          "just garbage\n"                                                  /* skipped */
+          "#EXTVLCOPT:http-user-agent=x\n"
+          "#EXTINF:-1 group-title=\"X\",Good Four\n"
+          "rtmp://h/4\n"
+          "/mnt/usb0/local.ts\n"                                            /* bare path: a channel */
+          "#EXTINF:-1,Dangling at end",                                     /* skipped at EOF, no newline */
+          f);
+    fclose(f);
+
+    TEST_ASSERT(p->init() == 0, "init failed");
+    TEST_ASSERT(p->set_source(path) == 0, "set_source failed");
+    test_big_ctx_t c;
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(p->list_catalog(NULL, 0, on_test_big_items, &c) == 0 && c.ok, "playlist did not load");
+    TEST_ASSERT(provider_iptv_channel_count() == 5, "expected 5 channels");
+    TEST_ASSERT(provider_iptv_skipped_count() == 4, "expected 4 skipped entries");
+
+    const char *want[] = {"Good One", "Good Two", "Good Three", "Good Four", "local.ts"};
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; ++i) {
+        memset(&c, 0, sizeof c);
+        TEST_ASSERT(p->search(want[i], 0, on_test_big_items, &c) == 0 && c.count == 1, "channel missing");
+    }
+    memset(&c, 0, sizeof c);
+    TEST_ASSERT(p->search("garbage", 0, on_test_big_items, &c) == 0 && c.count == 0, "stray text became a channel");
+    remove(path);
+    TEST_PASS();
+}
+
+/* ==========================================================================
  * 10. Frame Interpolation & Motion Smoothing Tests (#105)
  * ========================================================================== */
 
@@ -1069,6 +1305,10 @@ int main(void)
     test_navigation_grid_and_focus();
     test_changelog_model_integrity();
     test_iptv_provider_catalog_and_epg();
+    test_iptv_huge_vod_search();
+    test_iptv_broken_playlist();
+    test_xtream_scan_list();
+    test_xtream_scan_huge_vod();
     test_frame_interpolation();
     test_error_reporting();
     test_audio_volume_boost();

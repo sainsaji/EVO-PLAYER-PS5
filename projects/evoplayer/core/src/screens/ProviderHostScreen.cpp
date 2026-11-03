@@ -1746,8 +1746,11 @@ void ProviderHostScreen::openSearch()
     }
 
     evo_feedback(EVO_FB_OPEN);
-    const bool live = m_providerId == "iptv" || m_providerId == "xtream";
-    evo_keyboard_open(live ? "Search channels..." : "Search...", m_searchQuery.c_str(), 64,
+    /* Xtream search covers channels, movies and series; an M3U playlist only has channels. */
+    const char* prompt = m_providerId == "iptv"     ? "Search channels..."
+                       : m_providerId == "xtream"   ? "Search channels, movies and series..."
+                                                    : "Search...";
+    evo_keyboard_open(prompt, m_searchQuery.c_str(), 64,
                       &ProviderHostScreen::OnSearchSubmitted, this);
 }
 
@@ -1948,6 +1951,8 @@ void ProviderHostScreen::openProviderMenu(int focus)
     r.id = "menu:playlist"; r.title = "Playlist"; r.icon = "/assets/icons/icon_tv.png";
     r.detail = pl.empty() ? std::string("None yet")
                           : pl + " · " + std::to_string(n) + " channels";
+    if (!pl.empty() && provider_iptv_skipped_count() > 0)   /* #180: broken entries are skipped, not fatal */
+        r.detail += " · " + std::to_string(provider_iptv_skipped_count()) + " skipped";
     r.chevron = 1;
     pb.rows.push_back(r);
 

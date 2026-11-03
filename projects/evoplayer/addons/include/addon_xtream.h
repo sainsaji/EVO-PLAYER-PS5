@@ -49,6 +49,23 @@ typedef void (*xtream_auth_cb)(int success, const char *msg, void *userdata);
 /* Authenticate with Xtream server asynchronously */
 int  xtream_connect_async(xtream_auth_cb callback, void *userdata);
 
+/* One object of an Xtream list reply (get_live_streams, get_vod_streams,
+ * get_series), reduced to what search needs. */
+typedef struct xtream_list_obj {
+    char id[24];        /* stream_id or series_id */
+    char name[256];
+    char icon[512];     /* stream_icon or cover */
+    char ext[12];       /* container_extension (VOD) */
+} xtream_list_obj_t;
+typedef void (*xtream_list_fn)(const xtream_list_obj_t *o, void *ud);
+
+/* Walks a JSON array of objects without building a tree: a 100k-title VOD
+ * list as a cJSON tree is several times its own size, which is what ran a
+ * search out of memory. `id_key` / `icon_key` name the fields to read.
+ * Returns the number of objects, or -1 when the body is not a JSON array. */
+int xtream_scan_list(const char *body, size_t len, const char *id_key, const char *icon_key,
+                     xtream_list_fn fn, void *ud);
+
 /* Program guide (#149). The URL passed to load carries the account password:
  * `label` (the host) is what gets logged. lookup fills now/next for an
  * epg_channel_id and returns 1 when there is anything. */

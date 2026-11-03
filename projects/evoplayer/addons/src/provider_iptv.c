@@ -121,6 +121,7 @@ static struct {
      */
     char  playlist_file[512];
 
+    int   skipped;         /* #180: entries the last parse dropped        */
     int   loaded;          /* a playlist has been parsed                  */
     int   loading;         /* a fetch is in flight                        */
     int   epg_loaded;
@@ -457,6 +458,7 @@ int provider_iptv_epg_needs_setup(void)
 }
 
 int provider_iptv_channel_count(void) { return G.loaded ? G.ch_count : 0; }
+int provider_iptv_skipped_count(void) { return G.loaded ? G.skipped : 0; }
 
 /* The playlist on screen, for the options panel: its file or URL. */
 const char *provider_iptv_playlist_name(void) { return playlist_key(); }
@@ -733,9 +735,24 @@ static int build_groups(void)
  * next line that is not a directive completes it, and anything unpaired at EOF
  * is dropped.
  */
+/* A stream address: anything with a scheme (http, https, rtmp, udp, rtp...)
+ * or a local path. A stray word, a broken attribute line, a second title -
+ * none of those is one, and taking it as a URL made a channel that can never
+ * play (#180). */
+static int looks_like_stream(const char *s)
+{
+    if (s[0] == '/') return 1;
+    const char *c = strstr(s, "://");
+    if (!c || c == s) return 0;
+    for (const char *q = s; q < c; ++q)
+        if (!isalnum((unsigned char)*q) && *q != '+' && *q != '-' && *q != '.') return 0;
+    return 1;
+}
+
 static int parse_m3u(const char *body, size_t len)
 {
     free_channels();
+    G.skipped = 0;
 
     const char *p   = body;
     const char *end = body + len;
@@ -743,12 +760,18 @@ static int parse_m3u(const char *body, size_t len)
     char *pend_name = NULL, *pend_group = NULL, *pend_logo = NULL, *pend_tvg = NULL, *pend_lang = NULL;
     char *extgrp = NULL;    /* #EXTGRP applies until the next one */
     int   armed = 0;
+    int   lineno = 0, first_bad = 0;
+    const char *first_why = "";
+
+    /* One bad entry costs that entry, never the playlist (#180). */
+#define SKIP_ENTRY(why) do { G.skipped++; if (!first_bad) { first_bad = lineno; first_why = (why); } } while (0)
 
     while (p < end) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
         const char *le = nl ? nl : end;
         size_t n = (size_t)(le - p);
         while (n && (p[n - 1] == '\r')) n--;
+        lineno++;
 
         if (n == 0) { p = nl ? nl + 1 : end; continue; }
 
@@ -760,6 +783,7 @@ static int parse_m3u(const char *body, size_t len)
         trim(line);
 
         if (strncmp(line, "#EXTINF", 7) == 0) {
+            if (armed) SKIP_ENTRY("#EXTINF with no address before the next one");
             free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg); free(pend_lang);
             pend_group = extinf_attr(line, "group-title");
             pend_logo  = extinf_attr(line, "tvg-logo");
@@ -799,6 +823,11 @@ static int parse_m3u(const char *body, size_t len)
                     free(tvg);
                 }
             }
+
+        } else if (!looks_like_stream(line)) {
+            /* Stray text. An armed #EXTINF keeps waiting: its address may
+             * still be on a later line. */
+            SKIP_ENTRY("a line that is not a stream address");
 
         } else if (armed) {
             channel_t c;
@@ -851,18 +880,25 @@ static int parse_m3u(const char *body, size_t len)
         p = nl ? nl + 1 : end;
     }
 
+    if (armed) SKIP_ENTRY("#EXTINF with no address at the end");
     free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg); free(pend_lang);
     free(extgrp);
 
     if (build_groups() != 0) { free_channels(); return -1; }
     G.loaded = 1;
+    if (G.skipped)
+        PROV_WARN("iptv: playlist: %d channels, %d entries skipped (first at line %d: %s)",
+                  G.ch_count, G.skipped, first_bad, first_why);
     return G.ch_count;
 
 oom:
-    free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg);
+    PROV_ERR("iptv: out of memory at playlist line %d (%d channels read) - playlist not loaded",
+             lineno, G.ch_count);
+    free(pend_name); free(pend_group); free(pend_logo); free(pend_tvg); free(pend_lang);
     free(extgrp);
     free_channels();
     return -1;
+#undef SKIP_ENTRY
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2012,6 +2048,7 @@ static void emit_search(const char *query, int page,
 
 static int iptv_init(void)
 {
+    free_channels();          /* a second init must not leak the last playlist */
     memset(&G, 0, sizeof G);
     load_conf();
     /* Only stats a handful of paths - no network, so it is safe during boot. */
