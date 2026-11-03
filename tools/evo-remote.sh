@@ -568,8 +568,10 @@ go)     case "${1:-}" in
           home)                put_cmd "screen 0" ;;
           browse|usb)          put_cmd "source 0" ;;
           internal)            put_cmd "source 1" ;;
-          favorites)           put_cmd "source 2" ;;
-          recent)              put_cmd "source 3" ;;
+          # BrowserScreen sources: 0 USB, 1 Internal, 2 Network, 3 Favorites, 4 Recent
+          network)             put_cmd "source 2" ;;
+          favorites)           put_cmd "source 3" ;;
+          recent)              put_cmd "source 4" ;;
           providers|chooser)   put_cmd "screen 23" ;;
           iptv|xtream|emby|jellyfin|plex|stremio|nuvio) put_cmd "provider $1" ;;
           settings)            put_cmd "screen 10" ;;
@@ -585,7 +587,7 @@ go)     case "${1:-}" in
           surround)            put_cmd "screen 28" ;;
           devtools)            put_cmd "screen 15" ;;
           [0-9]*)              put_cmd "screen $1" ;;
-          *) die "usage: evo-remote.sh go <home|browse|internal|favorites|recent|providers|iptv|xtream|emby|jellyfin|plex|stremio|nuvio|settings[-playback|-subtitles|-interface|-system|-audio|-experimental]|about|changelog|themes|surround|devtools|<ScreenId>>" ;;
+          *) die "usage: evo-remote.sh go <home|browse|internal|network|favorites|recent|providers|iptv|xtream|emby|jellyfin|plex|stremio|nuvio|settings[-playback|-subtitles|-interface|-system|-audio|-experimental]|about|changelog|themes|surround|devtools|<ScreenId>>" ;;
         esac ;;
 provider) [[ -n "${1:-}" ]] || die "usage: evo-remote.sh provider <id>  (iptv xtream emby jellyfin plex stremio nuvio)"; put_cmd "provider $1" ;;
 source) [[ "${1:-}" =~ ^[0-9]+$ ]] || die "usage: evo-remote.sh source <n>  (0 USB, 1 Internal, 2 Favorites, 3 Recent)"; put_cmd "source $1" ;;

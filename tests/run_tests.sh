@@ -89,12 +89,19 @@ SRCS=(
 # fourth hardcoded copy - this said 0.8.0-dev while the app itself said 0.7.6.
 EVO_VER="$(tr -d '[:space:]' < "${EVO}/VERSION")"
 
+# EVO_TEST_SANITIZE=1: AddressSanitizer + UBSan, for a crash that only shows on
+# big inputs (out-of-bounds, use-after-free). Slower; off by default.
+SAN_FLAGS=""
+if [[ "${EVO_TEST_SANITIZE:-}" == "1" ]]; then
+    SAN_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+fi
+
 OBJS=()
 for src in "${SRCS[@]}"; do
     fname="$(basename "${src}")"
     obj="${OUT}/${fname%.*}.o"
     if [[ "${src}" == *.cpp || "${src}" == *"test_settings.c" ]]; then
-        $CXX -O0 -g -coverage -Wall -Wextra -std=c++17 -Wno-format-truncation \
+        $CXX -O0 -g -coverage ${SAN_FLAGS} -Wall -Wextra -std=c++17 -Wno-format-truncation \
             -DNO_OPENSSL=1 \
             -DEVO_PLAYER_VERSION="\"${EVO_VER}\"" \
             -DEVO_THEME_DIR='"/tmp/evo_themes"' \
@@ -109,7 +116,7 @@ for src in "${SRCS[@]}"; do
             -I/opt/ps5-payload-sdk/target/user/homebrew/include \
             -c "${src}" -o "${obj}"
     else
-        $CC -O0 -g -coverage -Wall -Wextra -std=gnu11 -Wno-format-truncation \
+        $CC -O0 -g -coverage ${SAN_FLAGS} -Wall -Wextra -std=gnu11 -Wno-format-truncation \
             -DNO_OPENSSL=1 \
             -DEVO_PLAYER_VERSION="\"${EVO_VER}\"" \
             -DEVO_THEME_DIR='"/tmp/evo_themes"' \
@@ -124,7 +131,7 @@ for src in "${SRCS[@]}"; do
     OBJS+=("${obj}")
 done
 
-$CXX -coverage "${OBJS[@]}" -pthread -lm -o "${OUT}/test_runner"
+$CXX -coverage ${SAN_FLAGS} "${OBJS[@]}" -pthread -lm -o "${OUT}/test_runner"
 
 echo "==> Running Test Suite..."
 "${OUT}/test_runner"
