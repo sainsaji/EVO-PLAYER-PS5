@@ -279,11 +279,18 @@ do_launch() {
         || die "ShadowMount's log is still moving after 120 s - it is not idle. Not launching."
     base="$(lc smlen)" || die "could not read ShadowMount's log"
     del_files "${USB_STATUS}" >/dev/null || true
-    send_controller launch
+    local sent code
+    sent="$(send_controller launch 2>&1)" || { printf '%s\n' "${sent}"; exit 1; }
+    printf '%s\n' "${sent}"
+    # The system's own answer, echoed back by the controller (the getAppStatus
+    # 0x80940004 line before it is chatter). Quote it rather than guess.
+    # (No launchApp line on a clean launch: grep finding nothing must not end the
+    # script under set -e/pipefail.)
+    code="$(printf '%s\n' "${sent}" | grep -oE 'launchApp: LNC_ISOK::0x[0-9a-fA-F]+' | tail -1 | sed 's/.*:://' || true)"
     [[ "$(lc wait-started "${base}" 30)" == STARTED ]] \
-        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take (0x80940005 class?).
+        || die "no '[GAME] started: ${TITLE_ID}' within 30 s - launch did not take${code:+ (launchApp returned ${code})}.
    Look at the TV: if \"Can't start game or app\" is showing, press X on the pad to clear it
-   (nothing here can) before launching again. Never retry automatically."
+   (nothing here can), or start EVO from the home screen. Never retry automatically."
     ok "launched (ShadowMount: started)"
 }
 

@@ -120,7 +120,7 @@ overrides the log port (default 9780).
 on a 4K output; numbers wrap at 32). Fetch and look:
 
 ```bash
-./tools/grab_shot.sh <name>     # presses l3, waits, fetches the newest BMP over FTP -> output/screenshots/<name>.png
+./tools/grab_shot.sh <name>     # presses l3, fetches the shot it wrote (USB0 or /data/evoplayer) -> output/screenshots/<name>.png
 ./tools/shot.sh grab            # newest capture via the web server (needs websrv on 8080)
 ./tools/shot.sh list            # what is on the stick
 ```

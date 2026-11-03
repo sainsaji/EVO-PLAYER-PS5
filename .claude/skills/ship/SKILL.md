@@ -62,7 +62,7 @@ docker compose run --rm ps5-dev bash -c 'for k in down down right cross; do ./to
 - **Whole check in one command:** `evo-remote.sh verify [--check <name>]` = soft close, close, deploy, launch, run `tools/checks/<name>.sh`, quit, close, then PASS/FAIL with the evidence line. No `--check` runs every script in `tools/checks/`. Use `--no-build` to reuse the last `.ffpfsc`.
 - Home -> PROVIDERS by keys (only if you need the chooser itself): `down down right right right cross`. `r1`/`l1` flip pages.
 - **Screenshot** (`key l3` writes `/mnt/usb0/evo_shot_NNN.bmp`, 3840x2160, numbers wrap at 32). `shot.sh grab` often fails (needs the web server); use FTP:
-  `tools/grab_shot.sh <name>` (presses l3, waits, fetches the newest BMP by FTP time, writes `output/screenshots/<name>.png` at 1920x1080), then Read the PNG. Only for pixel questions; use `ui` for focus/text.
+  `tools/grab_shot.sh <name>` (presses l3, finds the shot EVO just wrote - `/mnt/usb0`, or `/data/evoplayer` with no stick - from its log line or the FTP listing, writes `output/screenshots/<name>.png` at 1920x1080; host or container), then Read the PNG. Only for pixel questions; use `ui` for focus/text.
 
 ## 4. Test data on the console
 

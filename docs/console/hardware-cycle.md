@@ -70,7 +70,11 @@ elfldr on `:9021`, with the title id compiled in (vendored GPL-3.0 from
 foreground user; `close.c` kills the foreground app only if its title is
 `PPSA99039`. **Never send them by hand.** A zero exit only means elfldr took the
 bytes. The harmless `getAppStatus: LNC_ISOK::0x80940004` line is echoed
-SceLncUtil chatter, not a failure; the old `0x80940005` came from hbldr.
+SceLncUtil chatter, not a failure; the old `0x80940005` came from hbldr. The
+`launchApp: LNC_ISOK::0x...` line is the system's real answer, and a launch that
+never reaches `[GAME] started` quotes it in the error (0x80940033 was seen on
+2026-11-03 with a system dialog or another app in the way; EVO started fine
+from the home screen afterwards).
 
 A `timeout` or `curl` timeout (exit 124 / 28) on an `evo-remote.sh` call is a
 normal, successful outcome: the far end holds the socket open. Bound every
