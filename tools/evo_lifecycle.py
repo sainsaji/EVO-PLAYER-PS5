@@ -36,6 +36,7 @@ Subcommands (print one word / line, exit 0 unless the FTP read failed):
 Env: PS5_HOST, FTP_PORT (2121), TITLE_ID (PPSA99039).
 """
 import os
+import re
 import sys
 import time
 from ftplib import FTP, error_perm
@@ -216,12 +217,15 @@ def main(argv):
             # grows. A launch sent then gets the PS5's "Can't start game or app"
             # dialog, which only a pad X press clears. Length, not timestamps:
             # the console clock and this host's clock are not the same.
+            # "[MANUAL] scanned N manual source(s)" is a heartbeat logged every
+            # scan_interval_s (15 s) even when nothing changes, so it never lets
+            # the log go quiet: leave it out of the count.
             quiet, limit = int(argv[2]), int(argv[3])
             deadline = time.time() + limit
             last, since = None, time.time()
             while True:
                 try:
-                    n = len(sm_text())
+                    n = len(re.sub(r"(?m)^.*\[MANUAL\] scanned \d+ manual source\(s\)\n?", "", sm_text()))
                     if n != last:
                         last, since = n, time.time()
                     elif time.time() - since >= quiet:
