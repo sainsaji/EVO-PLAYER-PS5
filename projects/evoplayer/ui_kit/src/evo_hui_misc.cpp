@@ -492,9 +492,10 @@ void ChangelogScreen::draw(DrawList &list, const Context &ctx) const
         Color ink = r.focused ? kInk : kWhite;
         Color ink_muted = r.focused ? kInk.with_alpha(0.6f) : p.text_muted;
 
+        /* Date up beside the version, so the release name gets the whole row. */
         ui::text(list, fonts.semibold, r.version, lx + 20, y + 30, 22, ink);
-        ui::text(list, fonts.regular, fit(fonts.regular, r.tagline, 16, 200), lx + 20, y + 54, 16, ink_muted);
-        ui::text(list, fonts.regular, r.date, lx + 380, y + 42, 16, ink_muted, Align::right);
+        ui::text(list, fonts.regular, r.date, lx + 380, y + 30, 15, ink_muted, Align::right);
+        ui::text(list, fonts.regular, fit(fonts.regular, r.tagline, 15, 360), lx + 20, y + 54, 15, ink_muted);
     }
 
     float rx = lx + 440.0f;

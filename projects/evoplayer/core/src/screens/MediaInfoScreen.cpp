@@ -88,7 +88,8 @@ void MediaInfoScreen::render(uint32_t* framebuffer, int width, int height) {
     std::string durStr = metaService->formatDuration(meta.durationSeconds);
     params.duration = durStr.c_str();
 
-    std::string sizeStr = metaService->formatFileSize(meta.fileSizeBytes);
+    /* A network stream (FTP, HTTP) often reports no size: say so, not "0.00 B". */
+    std::string sizeStr = meta.fileSizeBytes > 0 ? metaService->formatFileSize(meta.fileSizeBytes) : "Unknown";
     params.file_size = sizeStr.c_str();
 
     char resBadge[32] = "";

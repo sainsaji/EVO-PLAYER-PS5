@@ -520,8 +520,7 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         {
             hints[n++] = {ui::Button::cross, "Open"};
             hints[n++] = {ui::Button::square, "Options"};
-            if (!raw_.at_root)
-                hints[n++] = {ui::Button::circle, "Back"};
+            hints[n++] = {ui::Button::circle, "Back"};   // at the root it steps to the source list
         }
         list.push_opacity(tween::stagger(age_, 7, 0.05f, 0.4f));
         draw_page_hints(list, fonts, hints, n);

@@ -23,7 +23,7 @@ namespace
 
 constexpr float kLeft = NavRail::kWidth + 64.0f;
 constexpr float kPreviewW = 560.0f; /* preview card, right of the rows */
-constexpr float kBadgeMax = 170.0f;  /* a long value ("AUTO (MATCH CONTENT)") is cut short */
+constexpr float kBadgeMax = 260.0f;  /* fits "AUTO (MATCH CONTENT)"; the row text makes room */
 const Color kWhite = Color::rgb(0xffffff);
 const Color kInk = Color::rgb(0x0b0d16);
 

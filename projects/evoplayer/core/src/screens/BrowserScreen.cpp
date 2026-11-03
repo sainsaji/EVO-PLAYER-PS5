@@ -2309,7 +2309,7 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
     evo_rmlui_browser_params_t params;
     std::memset(&params, 0, sizeof(params));
 
-    params.title = "STORAGE";
+    params.title = "Storage";
 
     // Format top location breadcrumbs
     auto formatPathBreadcrumbs = [](const std::string& prefix, const std::string& fullPath, size_t prefixLen) -> std::string {

@@ -3,6 +3,7 @@
 #include "evo_features.h"
 #include "evo/screens/BrowserScreen.hpp"
 #include "evo/Application.hpp"
+#include "evo/services/NetworkStorageService.hpp"
 #include "evo_rmlui_bridge.h"
 #include "evo_recent.h"
 #include "evo_favorites.h"
@@ -309,12 +310,29 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
     char safeHeroDetail[512];
     char safeRecentTitles[EVO_RMLUI_TILES][128];
 
+    /* A file's name tidied again on the way out, so entries saved before the
+     * title cleaner learned release tags read well too. Provider titles are
+     * real titles already. */
+    auto metaService = Application::getInstance().getMediaMetadataService();
+    auto displayTitle = [&](const RecentFileEntry& r) -> std::string {
+        if (std::strncmp(r.path, "evo://", 6) != 0 && metaService) {
+            std::string t, cat;
+            metaService->cleanMediaTitle(r.path, t, cat);
+            if (!t.empty()) return t;
+        }
+        return r.title;
+    };
+
     // Hero - always the most recent file; it does not track the cursor.
     if (recent_file_count > 0) {
         const auto& r = recent_files[0];
+        const std::string heroName = displayTitle(r);
         evo_url_sanitize(r.path, safeHeroDetail, sizeof(safeHeroDetail));
-        evo_url_sanitize(r.title[0] ? r.title : safeHeroDetail, safeHeroTitle, sizeof(safeHeroTitle));
+        evo_url_sanitize(!heroName.empty() ? heroName.c_str() : safeHeroDetail, safeHeroTitle, sizeof(safeHeroTitle));
         params.hero_eyebrow = (r.last_pos > 1.0) ? "CONTINUE WATCHING" : "START WATCHING";
+        /* Say so before Play is pressed, not after a 3 s connect fails. */
+        if (NetworkStorageService::serverStatusForUrl(r.path) == 0)
+            params.hero_eyebrow = "SERVER OFFLINE";
         params.hero_title = safeHeroTitle;
         params.hero_detail = (std::strncmp(safeHeroDetail, "evo://", 6) == 0) ? "Provider media" : safeHeroDetail;
         params.hero_action = (r.last_pos > 1.0) ? "RESUME" : "PLAY";
@@ -366,7 +384,8 @@ void LaunchScreen::render(uint32_t* framebuffer, int width, int height) {
         const auto& r = recent_files[i];
         char safeRecentPath[512];
         evo_url_sanitize(r.path, safeRecentPath, sizeof(safeRecentPath));
-        evo_url_sanitize(r.title[0] ? r.title : safeRecentPath, safeRecentTitles[i], sizeof(safeRecentTitles[i]));
+        const std::string name = displayTitle(r);
+        evo_url_sanitize(!name.empty() ? name.c_str() : safeRecentPath, safeRecentTitles[i], sizeof(safeRecentTitles[i]));
         params.recent[i].title = safeRecentTitles[i];
         params.recent[i].detail = (std::strncmp(safeRecentPath, "evo://", 6) == 0) ? "Provider media" : "Recent File";
         params.recent[i].icon_path = "../icons/icon_recent_files.png";

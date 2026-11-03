@@ -21,6 +21,12 @@ public:
     int getChapterIndexAtPosition(double positionSeconds) const override;
 
     void cleanMediaTitle(const std::string& filePath, std::string& outTitle, std::string& outCategory) override;
+
+    /* A space-separated file name made readable: release tags after the title
+     * go ("Show S01E08 720p AMZN WEBRip x264-Group" -> "Show S01E08"), a year
+     * before them is kept as "(2019)", and a camera-style "20261028 225403 ..."
+     * becomes "28 Oct 2026, 22:54". Empty when nothing would be left. */
+    static std::string tidyReleaseName(const std::string& spaced);
     std::string formatDuration(double durationSeconds) override;
     std::string formatFileSize(int64_t bytes) override;
     std::string formatRemainingTime(double currentPosition, double duration) override;
