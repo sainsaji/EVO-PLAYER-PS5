@@ -7,7 +7,7 @@ tomorrow as today.
 
 ```
 Windows ─► Git Bash / VS Code ─► Docker container ─► clang 18 + PS5 Payload SDK v0.42
-                                                  ─► app module (PPSA99039.ffpfsc) ─► PS5 12.70
+                                                  ─► app module (PPSA99039.ffpfsc) ─► PS5 13.60
 ```
 
 Contents: [prerequisites](#prerequisites) · [first build](#first-build) ·
@@ -25,7 +25,7 @@ Contents: [prerequisites](#prerequisites) · [first build](#first-build) ·
 | Docker Desktop (WSL2 backend) | give it at least 4 CPUs and 8 GB RAM; FFmpeg builds with `-j$(nproc)` |
 | Git for Windows | its Git Bash runs the `./scripts/*.sh` and `./tools/*.sh` wrappers |
 | ~25 GB free disk | the image is about 1.3 GB, plus the SDK, FFmpeg and build trees |
-| A jailbroken PS5 on 12.70 | only to *run* the result, not to build it |
+| A jailbroken PS5 on 13.60 | only to *run* the result, not to build it |
 
 ## First build
 

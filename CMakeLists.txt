@@ -27,7 +27,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(EVOPlayer
     VERSION     0.1.0
-    DESCRIPTION "PS5 12.70 homebrew media player and development environment"
+    DESCRIPTION "PS5 13.60 homebrew media player and development environment"
     LANGUAGES   C)
 
 # -----------------------------------------------------------------------------

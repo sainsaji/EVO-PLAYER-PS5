@@ -127,7 +127,7 @@ homebrew)
 function main() {
     return {
         mainText: "${TITLE}",
-        secondaryText: "EVO Player - PS5 12.70 homebrew",
+        secondaryText: "EVO Player - PS5 13.60 homebrew",
         args: []
     };
 }

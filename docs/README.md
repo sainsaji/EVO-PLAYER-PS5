@@ -1,6 +1,6 @@
 # EVO Player documentation
 
-EVO Player is a native media player for a jailbroken PS5 (FW 12.70), built against the
+EVO Player is a native media player for a jailbroken PS5 (FW 13.60), built against the
 PS5 Payload SDK and shipped as an app module (`.ffpfsc`, title `PPSA99039`). The UI is
 the ps5-homebrew-ui kit and RmlUi on bare-metal `sceAgc`; video decodes on
 `sceVideodec2` with an FFmpeg fallback.

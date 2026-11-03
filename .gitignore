@@ -35,6 +35,8 @@ system_dump/
 output/elf/*
 output/pkg/*
 output/logs/*
+output/coredumps*/
+output/ampr_backup/
 !output/elf/.gitkeep
 !output/pkg/.gitkeep
 !output/logs/.gitkeep

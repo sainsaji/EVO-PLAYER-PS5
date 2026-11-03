@@ -12,7 +12,7 @@
   //
   // Requires the "Dev Containers" extension (ms-vscode-remote.remote-containers).
   // ==========================================================================
-  "name": "EVO Player - PS5 12.70 Dev",
+  "name": "EVO Player - PS5 13.60 Dev",
 
   // Reuse the compose service so the container is identical whether you
   // enter it from VS Code or from ./scripts/shell.sh. Volume definitions,

@@ -1,5 +1,5 @@
 # =============================================================================
-# EVO Player - PS5 12.70 homebrew development environment
+# EVO Player - PS5 13.60 homebrew development environment
 #
 #   docker compose build
 #   docker compose run --rm ps5-dev bash
