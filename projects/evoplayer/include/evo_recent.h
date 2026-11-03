@@ -47,6 +47,17 @@ void   recent_save(void);
 void   recent_load(void);
 double recent_lookup(const char *path);   /* returns last_pos or 0.0 */
 
+/* #233: drop the entry for `path`, and every entry under it when `path` is a
+ * folder that was deleted. Saves when anything went. Returns how many went. */
+int    recent_forget(const char *path);
+/* #233: remove one entry by index / empty the list; both save. */
+void   recent_remove_at(int index);
+void   recent_clear_all(void);
+/* #233: drop local entries whose file is gone (deleted outside EVO). Only when
+ * the folder is there and lists something - an unplugged USB stick keeps its
+ * entries. Saves when anything went. */
+int    recent_prune_missing(void);
+
 #ifdef __cplusplus
 }
 #endif

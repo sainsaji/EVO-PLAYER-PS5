@@ -88,6 +88,7 @@ void LaunchScreen::initLaunchStateMachine() {
 void LaunchScreen::onEnter() {
     StatefulScreen::onEnter();
     evo::animation::AnimationManager::getInstance().setContinuousAnimation(true);
+    recent_prune_missing();   // #233: a file deleted outside EVO leaves Jump back in
     m_selectedRow = (recent_file_count > 0) ? 0 : 2;
     m_selectedCol = 0;
     m_heroSettlePath.clear();

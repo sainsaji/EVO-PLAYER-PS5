@@ -270,13 +270,22 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.getSecondarySubtitleColor() == 1, "Legacy secondarySubtitleColor mismatch");
     TEST_ASSERT(svc.isAskStreamEnabled() == false, "Legacy askStream mismatch");
     TEST_ASSERT(svc.getAudioOutputChannels() == evo::AudioOutputChannels::Stereo, "Legacy audioOutputChannels mismatch");
-    TEST_ASSERT(svc.getMotionSmoothing() == evo::MotionSmoothing::Low, "Legacy motionSmoothing mismatch");
-    TEST_ASSERT(svc.getDeepBlacks() == evo::DeepBlacks::Low, "Legacy deepBlacks mismatch");
+    /* #233: a file from before the Experimental section resets those once. */
+    TEST_ASSERT(svc.getMotionSmoothing() == evo::MotionSmoothing::Off, "Legacy motionSmoothing must reset to Off");
+    TEST_ASSERT(svc.getDeepBlacks() == evo::DeepBlacks::Off, "Legacy deepBlacks must reset to Off");
     TEST_ASSERT(svc.isAudioPassthroughEnabled() == true, "Legacy audioPassthroughEnabled mismatch");
-    TEST_ASSERT(svc.isMatchVideoRateEnabled() == true, "Legacy matchVideoRate mismatch");
+    TEST_ASSERT(svc.isMatchVideoRateEnabled() == false, "Legacy matchVideoRate must reset to Off");
     TEST_ASSERT(svc.getVolumeBoost() == evo::VolumeBoost::Plus100, "Legacy volumeBoost mismatch");
     TEST_ASSERT(svc.getNetworkBuffer() == evo::NetworkBuffer::Min1, "Legacy networkBuffer mismatch");
     TEST_ASSERT(svc.getThemeName() == "CARBON", "Legacy themeName mismatch");
+
+    /* ...once: the user's choice after that sticks across a reload. */
+    svc.setDeepBlacks(evo::DeepBlacks::High);
+    TEST_ASSERT(svc.saveSettings(), "save after the reset failed");
+    evo::SettingsService again;
+    TEST_ASSERT(again.loadSettings(), "reload failed");
+    TEST_ASSERT(again.getDeepBlacks() == evo::DeepBlacks::High, "deepBlacks chosen after the reset must stick");
+    TEST_ASSERT(again.getVolumeBoost() == evo::VolumeBoost::Plus100, "other settings survive the reset");
 
     TEST_PASS();
 }

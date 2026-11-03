@@ -167,6 +167,9 @@ void SettingsService::setSecondarySubtitleColor(int color) {
     prospero_secondary_color = color;
 }
 
+/* Bumped when a release must reset saved values once on upgrade (see loadSettings). */
+static const int kSettingsSchema = 1;
+
 bool SettingsService::saveSettings() {
     const char* filePath = evo_data_path("evo_player_settings.cfg");
     FILE* file = std::fopen(filePath, "w");
@@ -182,7 +185,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -211,7 +214,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_volumeBoost),     // line 26 (#166 volume boost)
         static_cast<int>(m_networkBuffer),   // line 27 (#199 network buffer)
         m_audioDelayMs,                      // line 28 (#170 audio delay ms)
-        evo_log_server_saved_port()          // line 29 (#227 phone & log port)
+        evo_log_server_saved_port(),         // line 29 (#227 phone & log port)
+        kSettingsSchema                      // line 30 (#233: experimental defaults applied)
     );
 
     if (std::fclose(file) != 0)
@@ -256,9 +260,10 @@ bool SettingsService::loadSettings() {
     int rawNetworkBuffer = 0;
     int rawAudioDelay = 0;
     int rawLogPort = EVO_LOG_SERVER_PORT;
+    int rawSchema = 0;
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -287,7 +292,8 @@ bool SettingsService::loadSettings() {
         &rawVolumeBoost,
         &rawNetworkBuffer,
         &rawAudioDelay,
-        &rawLogPort
+        &rawLogPort,
+        &rawSchema
     );
 
     std::fclose(file);
@@ -371,7 +377,21 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
-    EVO_LOGI("settings", "loaded %d of 29 fields from %s", readCount, filePath);
+    EVO_LOGI("settings", "loaded %d of 30 fields from %s", readCount, filePath);
+
+    /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
+     * Experimental, where everything starts off. A file from before that
+     * still carried "Deep Blacks HIGH", so it stayed on where nobody looked
+     * for it. Reset them once and save; the user's later choice sticks. */
+    if (readCount < 30 || rawSchema < kSettingsSchema) {
+        if (m_deepBlacks != DeepBlacks::Off || m_motionSmoothing != MotionSmoothing::Off || m_matchVideoRate)
+            EVO_LOGW("settings", "experimental settings reset to off (deep blacks %d, motion %d, match rate %d)",
+                     static_cast<int>(m_deepBlacks), static_cast<int>(m_motionSmoothing), m_matchVideoRate ? 1 : 0);
+        m_deepBlacks = DeepBlacks::Off;
+        m_motionSmoothing = MotionSmoothing::Off;
+        m_matchVideoRate = false;
+        saveSettings();
+    }
 
     syncThemeToRmlUi();
     evo_feedback_refresh_lightbar();

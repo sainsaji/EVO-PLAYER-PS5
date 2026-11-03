@@ -518,8 +518,11 @@ void BrowserScreen::draw(DrawList &list, const Context &ctx) const
         }
         else
         {
+            /* Square is search and OPTIONS the file / server / Recent menu
+             * (BrowserScreen::handleInput); the old row showed Square as Options. */
             hints[n++] = {ui::Button::cross, "Open"};
-            hints[n++] = {ui::Button::square, "Options"};
+            hints[n++] = {ui::Button::square, "Search"};
+            hints[n++] = {ui::Button::options, "Options"};
             hints[n++] = {ui::Button::circle, "Back"};   // at the root it steps to the source list
         }
         list.push_opacity(tween::stagger(age_, 7, 0.05f, 0.4f));

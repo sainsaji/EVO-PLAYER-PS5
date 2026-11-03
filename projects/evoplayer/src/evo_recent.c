@@ -5,13 +5,15 @@
  * Extracted from main.c (lines 600–614, 1611–1723, 1428–1445).
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "evo_recent.h"
 #include "evo_error.h"
-#include "evo_error.h"
+#include "evo_readdir.h"
 
 /* Shared player globals. */
 extern char   current_media_path[768];
@@ -148,6 +150,100 @@ void recent_load(void)
     }
 
     fclose(fp);
+}
+
+void recent_remove_at(int index)
+{
+    if (index < 0 || index >= recent_file_count) return;
+    memmove(&recent_files[index], &recent_files[index + 1],
+            (size_t)(recent_file_count - index - 1) * sizeof recent_files[0]);
+    recent_file_count--;
+    memset(&recent_files[recent_file_count], 0, sizeof recent_files[0]);
+    if (recent_selected >= recent_file_count) recent_selected = recent_file_count ? recent_file_count - 1 : 0;
+    recent_save();
+}
+
+void recent_clear_all(void)
+{
+    recent_clear();
+    recent_save();
+}
+
+int recent_forget(const char *path)
+{
+    if (!path || !path[0]) return 0;
+    char clean_path[512];
+    evo_url_sanitize(path, clean_path, sizeof(clean_path));
+    size_t n = strlen(clean_path);
+    while (n > 1 && clean_path[n - 1] == '/') clean_path[--n] = '\0';
+
+    int gone = 0;
+    for (int i = 0; i < recent_file_count; ) {
+        const char *p = recent_files[i].path;
+        /* The file itself, or anything inside a deleted folder - not a
+         * sibling that merely starts with the same name ("a.mkv" vs "a.mkv2"). */
+        if (strncmp(p, clean_path, n) == 0 && (p[n] == '\0' || p[n] == '/')) {
+            memmove(&recent_files[i], &recent_files[i + 1],
+                    (size_t)(recent_file_count - i - 1) * sizeof recent_files[0]);
+            recent_file_count--;
+            memset(&recent_files[recent_file_count], 0, sizeof recent_files[0]);
+            gone++;
+        } else {
+            i++;
+        }
+    }
+    if (gone) {
+        if (recent_selected >= recent_file_count) recent_selected = recent_file_count ? recent_file_count - 1 : 0;
+        recent_save();
+    }
+    return gone;
+}
+
+/* Is `dir` there and does it list anything? An unplugged USB stick leaves an
+ * empty mount point (or no folder at all): its files are away, not gone. */
+static int dir_has_entries(const char *dir)
+{
+    evo_dir_t *d = evo_opendir(dir);
+    if (!d) return 0;
+    int any = 0;
+    struct dirent *de;
+    while (!any && (de = evo_readdir(d)) != NULL)
+        any = strcmp(de->d_name, ".") != 0 && strcmp(de->d_name, "..") != 0;
+    evo_closedir(d);
+    return any;
+}
+
+int recent_prune_missing(void)
+{
+    int gone = 0;
+    for (int i = 0; i < recent_file_count; ) {
+        const char *p = recent_files[i].path;
+        struct stat st;
+        int missing = 0;
+        if (p[0] == '/' && stat(p, &st) != 0 && errno == ENOENT) {
+            char dir[512];
+            snprintf(dir, sizeof dir, "%s", p);
+            char *slash = strrchr(dir, '/');
+            if (slash && slash != dir) {
+                *slash = '\0';
+                missing = dir_has_entries(dir);
+            }
+        }
+        if (missing) {
+            memmove(&recent_files[i], &recent_files[i + 1],
+                    (size_t)(recent_file_count - i - 1) * sizeof recent_files[0]);
+            recent_file_count--;
+            memset(&recent_files[recent_file_count], 0, sizeof recent_files[0]);
+            gone++;
+        } else {
+            i++;
+        }
+    }
+    if (gone) {
+        if (recent_selected >= recent_file_count) recent_selected = recent_file_count ? recent_file_count - 1 : 0;
+        recent_save();
+    }
+    return gone;
 }
 
 double recent_lookup(const char *path)

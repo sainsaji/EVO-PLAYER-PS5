@@ -396,6 +396,40 @@ void BrowserScreen::openServerMenu(const std::string& shareId, const std::string
     evo_feedback(EVO_FB_CONFIRM);
 }
 
+void BrowserScreen::performRecentAction(int actionIndex) {
+    switch (actionIndex) {
+        case 0: { // Remove from Recent
+            m_recentMenuOpen = false;
+            if (m_recentMenuPath.empty()) { evo_feedback(EVO_FB_BOUNDARY); return; }
+            recent_forget(m_recentMenuPath.c_str());
+            toast("RECENT", "Removed from Recent");
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        case 1: { // Clear all: the first press arms, the second clears
+            if (!m_recentClearArmed) {
+                m_recentClearArmed = true;
+                evo_feedback(EVO_FB_MOVE);
+                return;
+            }
+            m_recentMenuOpen = false;
+            m_recentClearArmed = false;
+            recent_clear_all();
+            EVO_LOGI("browser", "recent list cleared");
+            toast("RECENT", "Recent list cleared");
+            evo_feedback(EVO_FB_CONFIRM);
+            break;
+        }
+        default: // Close
+            m_recentMenuOpen = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return;
+    }
+    rebuildItems();
+    if (m_selectedIndex >= static_cast<int>(m_items.size()))
+        m_selectedIndex = m_items.empty() ? 0 : static_cast<int>(m_items.size()) - 1;
+}
+
 void BrowserScreen::performServerAction(int actionIndex) {
     m_serverMenuOpen = false;
     switch (actionIndex) {
@@ -526,6 +560,24 @@ void BrowserScreen::openActionMenu() {
                 return;
             }
         }
+        return;
+    }
+
+    /* #233: in Recent the file menu would copy/move/delete the real file. What
+     * a Recent entry needs is to leave the list. */
+    if (m_activeSource == 4) {
+        if (m_focusPane == BrowserFocusPane::Grid && m_selectedIndex >= 0 &&
+            m_selectedIndex < static_cast<int>(m_items.size())) {
+            m_recentMenuPath = m_items[m_selectedIndex].fullPath;
+            m_recentMenuName = m_items[m_selectedIndex].name;
+        } else {
+            m_recentMenuPath.clear();
+            m_recentMenuName = "Recent Media";
+        }
+        m_recentMenuOpen = true;
+        m_recentMenuFocused = m_recentMenuPath.empty() ? 1 : 0;
+        m_recentClearArmed = false;
+        evo_feedback(EVO_FB_CONFIRM);
         return;
     }
 
@@ -1104,6 +1156,7 @@ void BrowserScreen::rebuildItems() {
     } else if (m_activeSource == 4) {
         // Recent Media
         recent_load();
+        recent_prune_missing();   // #233: files deleted outside EVO leave the list too
         for (int i = 0; i < recent_file_count; ++i) {
             const auto& rec = recent_files[i];
             if (rec.path[0] == '\0') continue;
@@ -1111,6 +1164,15 @@ void BrowserScreen::rebuildItems() {
             FileCategory cat = browser ? browser->classifyFile(rec.path, 0) : FileCategory::Video;
 
             std::string displayName = rec.title[0] ? rec.title : "";
+            /* The same tidy name Home shows, also for entries saved before the
+             * title cleaner knew release tags. Provider titles are kept. */
+            if (std::strncmp(rec.path, "evo://", 6) != 0) {
+                if (auto meta = Application::getInstance().getMediaMetadataService()) {
+                    std::string t, catName;
+                    meta->cleanMediaTitle(rec.path, t, catName);
+                    if (!t.empty()) displayName = t;
+                }
+            }
             if (displayName.empty()) {
                 std::string p(rec.path);
                 size_t slash = p.find_last_of('/');
@@ -1798,6 +1860,27 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
         return true;
     }
 
+    // 0a1. Recent entry menu (#233)
+    if (m_recentMenuOpen) {
+        if (pressed & (PadButtons::Up | PadButtons::Down)) {
+            m_recentMenuFocused = (m_recentMenuFocused + ((pressed & PadButtons::Up) ? 2 : 1)) % 3;
+            m_recentClearArmed = false;
+            evo_feedback(EVO_FB_MOVE);
+            return true;
+        }
+        if (pressed & (PadButtons::Circle | PadButtons::Options)) {
+            m_recentMenuOpen = false;
+            m_recentClearArmed = false;
+            evo_feedback(EVO_FB_CANCEL);
+            return true;
+        }
+        if (pressed & PadButtons::Cross) {
+            performRecentAction(m_recentMenuFocused);
+            return true;
+        }
+        return true;
+    }
+
     // 0a2. Server Options Menu Modal
     if (m_serverMenuOpen) {
         if (pressed & PadButtons::Up) {
@@ -1846,6 +1929,7 @@ bool BrowserScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t releas
                 if (ts && !m_actionTargetPath.empty()) {
                     bool ok = ts->startDelete(m_actionTargetPath, m_actionTargetIsDir);
                     if (ok) {
+                        m_pendingForgetPath = m_actionTargetPath;
                         m_showTransferDialog = true;
                         evo_feedback(EVO_FB_CONFIRM);
                     } else {
@@ -2248,6 +2332,14 @@ void BrowserScreen::update(double deltaMs) {
         TransferProgress prog = transferService->getProgress();
         if (prog.status == TransferStatus::Completed) {
             m_showTransferDialog = false;
+            if (!m_pendingForgetPath.empty()) {
+                /* #233: a deleted file must not stay in Recent / Jump back in. */
+                const int gone = recent_forget(m_pendingForgetPath.c_str());
+                favorites_remove(m_pendingForgetPath.c_str());
+                EVO_LOGI("browser", "deleted %s - %d recent entr%s dropped", m_pendingForgetPath.c_str(), gone,
+                         gone == 1 ? "y" : "ies");
+                m_pendingForgetPath.clear();
+            }
             toast("COMPLETED", "File operation completed!");
             evo_feedback(EVO_FB_CONFIRM);
             transferService->resetStatus();
@@ -2258,6 +2350,7 @@ void BrowserScreen::update(double deltaMs) {
             }
         } else if (prog.status == TransferStatus::Failed) {
             m_showTransferDialog = false;
+            m_pendingForgetPath.clear();
             toast("TRANSFER FAILED", prog.errorMessage.empty() ? "Operation failed" : prog.errorMessage.c_str());
             evo_feedback(EVO_FB_ERROR);
             transferService->resetStatus();
@@ -2268,6 +2361,7 @@ void BrowserScreen::update(double deltaMs) {
             }
         } else if (prog.status == TransferStatus::Cancelled) {
             m_showTransferDialog = false;
+            m_pendingForgetPath.clear();
             toast("CANCELLED", "Operation was cancelled");
             evo_feedback(EVO_FB_CANCEL);
             transferService->resetStatus();
@@ -2741,6 +2835,29 @@ void BrowserScreen::render(uint32_t* framebuffer, int width, int height) {
 
         params.action_paste_enabled = 0;
         params.action_clipboard_info = nullptr;
+    } else if (m_recentMenuOpen) {
+        static char clearDesc[64];
+        std::snprintf(clearDesc, sizeof clearDesc, m_recentClearArmed ? "Press X again to clear all %d"
+                                                                      : "Empty the whole list (%d items)",
+                      recent_file_count);
+        params.action_menu_open = 1;
+        params.action_menu_focused = m_recentMenuFocused;
+        params.action_menu_target = m_recentMenuName.c_str();
+        params.action_target_sub = "Recent Media";
+        params.action_menu_eyebrow = "RECENT";
+        params.action_menu_count = 3;
+        params.action_menu_items[0].label = "Remove from Recent";
+        params.action_menu_items[0].desc = m_recentMenuPath.empty() ? "No entry selected" : "The file itself is not touched";
+        params.action_menu_items[0].icon_path = "../icons/icon_recent_files.png";
+        params.action_menu_items[0].danger = 0;
+        params.action_menu_items[1].label = m_recentClearArmed ? "Confirm: Clear All" : "Clear All Recent";
+        params.action_menu_items[1].desc = clearDesc;
+        params.action_menu_items[1].icon_path = "../icons/icon_trash.png";
+        params.action_menu_items[1].danger = 1;
+        params.action_menu_items[2].label = "Close";
+        params.action_menu_items[2].desc = "Dismiss menu";
+        params.action_menu_items[2].icon_path = "../icons/btn_circle.png";
+        params.action_menu_items[2].danger = 0;
     } else if (m_serverMenuOpen) {
         params.action_menu_open = 1;
         params.action_menu_focused = m_serverMenuFocused;

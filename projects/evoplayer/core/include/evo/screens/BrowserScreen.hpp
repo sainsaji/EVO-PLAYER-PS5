@@ -173,6 +173,13 @@ private:
     // Network share management & server options menu
     bool m_serverMenuOpen = false;
     int m_serverMenuFocused = 0;
+    // #233: Square on a Recent entry - remove it, or clear the whole list (asks twice).
+    bool m_recentMenuOpen = false;
+    int m_recentMenuFocused = 0;
+    bool m_recentClearArmed = false;
+    std::string m_recentMenuPath;
+    std::string m_recentMenuName;
+    void performRecentAction(int actionIndex);
     std::string m_serverMenuShareId;
     std::string m_serverMenuShareName;
     bool m_removeShareConfirmOpen = false;
@@ -182,6 +189,7 @@ private:
     std::string m_editingShareId;
     std::string m_actionTargetName;
     std::string m_actionTargetPath;
+    std::string m_pendingForgetPath;   // #233: a delete in flight; dropped from Recent when it completes
     bool m_actionTargetIsDir = false;
     char m_transferTitleBuf[64];
     char m_transferDetailBuf[256];
