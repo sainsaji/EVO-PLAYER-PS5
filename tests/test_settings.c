@@ -144,6 +144,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setHdrPeak(evo::HdrPeak::Nits1500);
     svc1.setAudioLanguage(evo::PreferredLanguage::Italian);
     svc1.setSubtitleLanguage(evo::PreferredLanguage::English);
+    svc1.setAddonAutoPickEnabled(false);
     svc1.setThemeName("CARBON");
     evo_log_server_set_port(9812);
 
@@ -188,6 +189,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getHdrPeak() == evo::HdrPeak::Nits1500, "HdrPeak round-trip mismatch");
     TEST_ASSERT(svc2.getAudioLanguage() == evo::PreferredLanguage::Italian, "AudioLanguage round-trip mismatch");
     TEST_ASSERT(svc2.getSubtitleLanguage() == evo::PreferredLanguage::English, "SubtitleLanguage round-trip mismatch");
+    TEST_ASSERT(svc2.isAddonAutoPickEnabled() == false, "AddonAutoPick round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
@@ -261,6 +263,7 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.getHdrPeak() == evo::HdrPeak::Off, "Missing HdrPeak must default to Off");
     TEST_ASSERT(svc.getAudioLanguage() == evo::PreferredLanguage::Auto, "Missing AudioLanguage must default to Auto");
     TEST_ASSERT(svc.getSubtitleLanguage() == evo::PreferredLanguage::Auto, "Missing SubtitleLanguage must default to Auto");
+    TEST_ASSERT(svc.isAddonAutoPickEnabled() == true, "Missing AddonAutoPick must default to on");
 
     /* All 26 preceding settings must be restored correctly */
     TEST_ASSERT(svc.isResumePlaybackEnabled() == false, "Legacy resumePlaybackEnabled mismatch");

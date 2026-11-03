@@ -937,11 +937,17 @@ void ProviderHostScreen::openPickerMenu()
         add("signin", signedIn ? "Sign in as another user" : "Sign in",
             signedIn ? "Switch account on this server" : "User name and password, or Quick Connect",
             "../icons/icon_type.png", false);
+    else if (id == "addons" && p->qc_start && !signedIn)
+        add("signin", "Sign in with Stremio",
+            "Your addons, library and Continue Watching - a code at link.stremio.com",
+            "../icons/icon_type.png", false);
     if (configured && server)
         add("webui", "Web version", "Open the server's own site in the browser",
             "../icons/icon_emby.png", false);
     if (signedIn && p->sign_out)
-        add("signout", "Sign out", "Forget the saved session on this console",
+        add("signout", "Sign out",
+            id == "addons" ? "Forget the Stremio account on this console (your addons you added here stay)"
+                           : "Forget the saved session on this console",
             "../icons/icon_power.png", true);
     if (configured && p->set_source) {
         if (web || server) {
@@ -2593,7 +2599,13 @@ void ProviderHostScreen::proceedTunePending()
     if (auto st = Application::getInstance().getSettingsService())
         g_pending.ask = st->isAskStreamEnabled() ? 1 : 0;
     if (const evo_provider_t* pp = evo_provider_find(g_pending.provider))
-        if (pp->caps & EVO_PROVIDER_CAP_PICK) g_pending.ask = 1;
+        if (pp->caps & EVO_PROVIDER_CAP_PICK) {
+            /* Addons rank their sources (provider_stremio.c): with PLAY BEST
+             * ADDON STREAM on, the best one plays at once; the detail page's
+             * CHOOSE STREAM opens the ranked list. */
+            auto ss = Application::getInstance().getSettingsService();
+            g_pending.ask = (ss && !ss->isAddonAutoPickEnabled()) ? 1 : 0;
+        }
     if (g_force_pick) g_pending.ask = 1;
     g_pending.picked = 0;
     g_pick_stage = PickStage::Idle;
@@ -2953,8 +2965,9 @@ void ProviderHostScreen::OnQcCode(int ok, const char* code, void* ud)
     }
     self->m_qcCode = code;
     self->m_qcNextPollMs = qc_now_ms() + 3000;
-    /* Jellyfin drops a pending request after about ten minutes. */
-    self->m_qcDeadlineMs = qc_now_ms() + 9 * 60 * 1000;
+    /* Jellyfin drops a pending request after about ten minutes; a Stremio link
+     * code lives about five, and is renewed just before (signInStep). */
+    self->m_qcDeadlineMs = qc_now_ms() + (self->m_providerId == "addons" ? 270 : 9 * 60) * 1000;
     self->m_signIn = SignIn::QcWait;
     EVO_LOGI("provider", "quick connect code %s for '%s'", code, self->m_providerId.c_str());
 }
@@ -2986,7 +2999,8 @@ bool ProviderHostScreen::signInQcInput(uint32_t pressed)
     if (m_signIn != SignIn::QcStart && m_signIn != SignIn::QcWait &&
         m_signIn != SignIn::QcPolling)
         return false;
-    if (pressed & PadButtons::Square) {
+    const evo_provider_t* qp = evo_provider_find(m_providerId.c_str());
+    if ((pressed & PadButtons::Square) && qp && qp->sign_in) {
         evo_feedback(EVO_FB_OPEN);
         m_qcCode.clear();
         beginPasswordSignIn();
@@ -3010,7 +3024,8 @@ void ProviderHostScreen::renderQuickConnect(uint32_t* framebuffer, int width, in
     static char title[64], hint[160], code[16];
     std::snprintf(title, sizeof title, "SIGN IN TO %s", p ? p->name : "THE SERVER");
     params.title = title;
-    params.subtitle = "Quick Connect - no password needed";
+    params.subtitle = m_providerId == "addons" ? "Link this console - no password needed"
+                                               : "Quick Connect - no password needed";
     params.is_empty = 1;
     if (m_qcCode.size() == 6)
         std::snprintf(code, sizeof code, "%.3s %.3s", m_qcCode.c_str(), m_qcCode.c_str() + 3);
@@ -3020,6 +3035,9 @@ void ProviderHostScreen::renderQuickConnect(uint32_t* framebuffer, int width, in
     if (m_providerId == "plex") {
     std::snprintf(hint, sizeof hint,
                   "On your phone or computer, visit plex.tv/link and enter this code.");
+    } else if (m_providerId == "addons") {
+    std::snprintf(hint, sizeof hint,
+                  "On a phone or computer signed in to Stremio, open link.stremio.com and enter this code.");
     } else {
     std::snprintf(hint, sizeof hint,
                   "In %s on your phone or computer, open Settings > Quick Connect and enter this code.",
@@ -3027,7 +3045,7 @@ void ProviderHostScreen::renderQuickConnect(uint32_t* framebuffer, int width, in
     }
     params.empty_hint = hint;
     params.empty_icon = provider_icon(p);
-    if (m_providerId == "plex") {
+    if (m_providerId == "plex" || m_providerId == "addons") {
     params.hint_count = 1;
     params.hints[0].glyph_path = "../icons/btn_circle.png";
     params.hints[0].label = "CANCEL";
@@ -3133,6 +3151,11 @@ void ProviderHostScreen::signInStep()
     case SignIn::QcWait: {
         const long long now = qc_now_ms();
         if (now > m_qcDeadlineMs) {
+            if (m_providerId == "addons" && p && p->qc_start) {
+                /* A new code in its place; the screen stays up. */
+                m_signIn = SignIn::QcStart;
+                if (p->qc_start(&ProviderHostScreen::OnQcCode, this) == 0) break;
+            }
             m_signIn = SignIn::None;
             m_qcCode.clear();
             toast(name, "The code expired - press X to get a new one");

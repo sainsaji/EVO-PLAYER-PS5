@@ -69,6 +69,7 @@ enum class SettingKey : int {
     KeyboardInput,
     PhonePort,
     AskStream,
+    AddonAutoPick,
     /* SYSTEM & DIAGNOSTICS */
     ReportProblem,
     ReportLastRun,
@@ -165,6 +166,8 @@ const PreviewSpec kPreviews[] = {
      "The report has EVO's log, version and settings. Passwords and tokens are taken out."},
     {SettingKey::ReportLastRun, EVO_RMLUI_PREVIEW_REPORT,
      "The log of the run before this one. Use it when EVO crashed or froze and you reopened it."},
+    {SettingKey::AddonAutoPick, EVO_RMLUI_PREVIEW_ASK_STREAM,
+     "Plays the best source at once: Remux and high bitrate, Dolby Vision or HDR, already cached on your debrid service. The full list is in OPTIONS on the title."},
     {SettingKey::DebugOverlay, EVO_RMLUI_PREVIEW_DEBUG_OVERLAY, "Shows live performance numbers on screen."},
     {SettingKey::DeveloperTools, EVO_RMLUI_PREVIEW_INFO, "System diagnostics and performance stats."},
     {SettingKey::ConsoleModel, EVO_RMLUI_PREVIEW_INFO,
@@ -192,7 +195,7 @@ const SettingKey kSubtitleKeys[] = {
 };
 const SettingKey kInterfaceKeys[] = {
     SettingKey::Theme, SettingKey::Lightbar, SettingKey::FoldersFirst,
-    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream,
+    SettingKey::KeyboardInput, SettingKey::PhonePort, SettingKey::AskStream, SettingKey::AddonAutoPick,
 };
 const SettingKey kSystemKeys[] = {
     SettingKey::ReportProblem, SettingKey::ReportLastRun, SettingKey::DebugOverlay, SettingKey::DeveloperTools,
@@ -533,6 +536,11 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
                       "../icons/icon_tv.png", settings->isAskStreamEnabled());
         break;
 
+    case SettingKey::AddonAutoPick:
+        d = toggleDef(key, "PLAY BEST ADDON STREAM", "REMUX, DOLBY VISION / HDR, CACHED FIRST - LIST IN OPTIONS",
+                      "../icons/icon_tv.png", settings->isAddonAutoPickEnabled());
+        break;
+
     case SettingKey::ReportProblem:
         d = actionDef(key, "REPORT A PROBLEM", "SEND EVO'S LOG FROM YOUR PHONE, OR SAVE IT TO USB",
                       "../icons/icon_report.png", "SAVE");
@@ -793,6 +801,7 @@ void toggleSetting(SettingKey key) {
     case SettingKey::AudioPassthrough: st->setAudioPassthroughEnabled(!st->isAudioPassthroughEnabled()); break;
     case SettingKey::MatchVideoRate:   st->setMatchVideoRateEnabled(!st->isMatchVideoRateEnabled()); break;
     case SettingKey::AskStream:        st->setAskStreamEnabled(!st->isAskStreamEnabled()); break;
+    case SettingKey::AddonAutoPick:    st->setAddonAutoPickEnabled(!st->isAddonAutoPickEnabled()); break;
     case SettingKey::AutoSubtitles:    st->setAutoSubtitlesEnabled(!st->isAutoSubtitlesEnabled()); break;
     case SettingKey::NavigationSounds: st->setSoundFeedbackEnabled(!st->isSoundFeedbackEnabled()); break;
     case SettingKey::Lightbar:         st->setLightbarFeedbackEnabled(!st->isLightbarFeedbackEnabled()); break;

@@ -49,6 +49,11 @@ public:
      * EVO choose and fall back on its own. */
     virtual bool isAskStreamEnabled() const = 0;
     virtual void setAskStreamEnabled(bool enabled) = 0;
+    /* Stremio addons: play the best-ranked source at once (Remux, Dolby
+     * Vision/HDR, cached on the debrid service), the full list one press
+     * away in the title's OPTIONS. Off: always open the list. */
+    virtual bool isAddonAutoPickEnabled() const = 0;
+    virtual void setAddonAutoPickEnabled(bool enabled) = 0;
 
     /* #110: where the second line of dialogue goes (0 stacked above the
      * primary, 1 top of the screen) and its colour (0 yellow, 1 cyan, 2 white). */

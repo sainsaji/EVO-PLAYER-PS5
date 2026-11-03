@@ -157,13 +157,27 @@ int evo_net_discover_poll(char *addr, size_t cap)
 #include <openssl/err.h>
 #endif
 
+/* A Stremio account brings a dozen addons, and opening a title asks every one
+ * of them for streams and subtitles at once, beside the shelves' catalogs and
+ * their posters: 32 filled up and the requests past it failed at once, which
+ * read as "this addon gives nothing". */
 #ifndef EVO_NET_MAX_QUEUE
-#define EVO_NET_MAX_QUEUE    32
+#define EVO_NET_MAX_QUEUE    128
 #endif
 
 #ifndef EVO_NET_TIMEOUT_SEC
 #define EVO_NET_TIMEOUT_SEC  6
 #endif
+
+/* A stream lookup on an aggregator (AIOStreams asks every scraper it has, with
+ * its own timeout of ten seconds or more) or a debrid cache check can be quiet
+ * far longer than 6 s before its first byte. Those requests get this. */
+#ifndef EVO_NET_SLOW_TIMEOUT_SEC
+#define EVO_NET_SLOW_TIMEOUT_SEC 25
+#endif
+
+/* The read timeout of the request this worker thread is running. */
+static _Thread_local int t_timeout_sec = EVO_NET_TIMEOUT_SEC;
 
 #define EVO_NET_BUFFER_SIZE  8192
 
@@ -349,7 +363,7 @@ static int connect_bounded(const struct addrinfo *rp, int timeout_ms, int *timed
     }
 
     struct timeval tv;
-    tv.tv_sec = EVO_NET_TIMEOUT_SEC;
+    tv.tv_sec = t_timeout_sec > 0 ? t_timeout_sec : EVO_NET_TIMEOUT_SEC;
     tv.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -399,6 +413,7 @@ typedef struct evo_net_req {
     void       *user_data;
     int         via_avio;       /* run on FFmpeg's HTTP client (evo_http_avio.c) */
     int         is_image;       /* a picture: runs on the image workers, never ahead of a page */
+    int         timeout_sec;    /* read timeout; 0 = EVO_NET_TIMEOUT_SEC */
 
     /* Result */
     int         completed;
@@ -411,7 +426,7 @@ typedef struct evo_net_req {
 
 /* Page requests run several at once: a provider home asks for each shelf, and
  * one slow answer no longer holds up the rest. */
-#define EVO_NET_PAGE_WORKERS  4
+#define EVO_NET_PAGE_WORKERS  8
 #define EVO_NET_IMAGE_WORKERS 4
 static pthread_t       g_page_threads[EVO_NET_PAGE_WORKERS];
 static int             g_page_threads_up = 0;
@@ -1463,6 +1478,7 @@ static void *evo_net_worker(void *arg)
             struct timespec t0, t1;
             clock_gettime(CLOCK_MONOTONIC, &t0);
             /* Execute HTTP */
+            t_timeout_sec = req->timeout_sec > 0 ? req->timeout_sec : EVO_NET_TIMEOUT_SEC;
             int res = (req->via_avio && evo_avio_execute)
                 ? evo_avio_execute(req->method, req->url, req->post_data,
                                    (const char **)req->headers, req->header_count,
@@ -1581,7 +1597,8 @@ static int request_async(const char *method,
                          evo_net_cb callback,
                          void *user_data,
                          int via_avio,
-                         int is_image)
+                         int is_image,
+                         int timeout_sec)
 {
     if (!method || !url || strlen(url) >= EVO_NET_MAX_URL || strlen(method) >= 16) {
         return EVO_NET_ASYNC_ERR_ARG;
@@ -1608,6 +1625,7 @@ static int request_async(const char *method,
     req->user_data = user_data;
     req->via_avio  = via_avio;
     req->is_image  = is_image ? 1 : 0;
+    req->timeout_sec = timeout_sec;
 
     if (header_count > 0 && headers) {
         req->headers = (char **)calloc((size_t)header_count, sizeof(char *));
@@ -1645,21 +1663,29 @@ int evo_net_request_async(const char *method, const char *url, const char *post_
                           const char **headers, int header_count,
                           evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0, 0);
+}
+
+int evo_net_request_async_slow(const char *method, const char *url, const char *post_data,
+                               const char **headers, int header_count,
+                               evo_net_cb callback, void *user_data)
+{
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 0,
+                         EVO_NET_SLOW_TIMEOUT_SEC);
 }
 
 int evo_net_request_async_avio(const char *method, const char *url, const char *post_data,
                                const char **headers, int header_count,
                                evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 1, 0);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 1, 0, 0);
 }
 
 int evo_net_request_async_image(const char *method, const char *url, const char *post_data,
                                 const char **headers, int header_count,
                                 evo_net_cb callback, void *user_data)
 {
-    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 1);
+    return request_async(method, url, post_data, headers, header_count, callback, user_data, 0, 1, 0);
 }
 
 /* ---- Why a request failed, in words (the callback only gets success/status) ---- */

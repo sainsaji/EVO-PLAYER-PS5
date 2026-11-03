@@ -893,11 +893,10 @@ void ProviderGridScreen::draw_shelves(DrawList &list, const Context &ctx) const
             continue;
         }
 
-        /* the shelf's title and how many it holds */
+        /* the shelf's title (0.14: no item count beside it - the row shows it) */
         const bool focused_shelf = s.abs_index == shelf_focus_abs_;
-        const float tw = ui::text(list, fonts.display, fonts.display.font->fit(s.title, 30, 900.0f), kGridX, y + 26, 30,
-                                  focused_shelf ? kWhite : kWhite.with_alpha(0.78f));
-        ui::text(list, fonts.regular, std::to_string(s.total), kGridX + tw + 14, y + 26, 18, pal.text_faint);
+        ui::text(list, fonts.display, fonts.display.font->fit(s.title, 30, 900.0f), kGridX, y + 26, 30,
+                 focused_shelf ? kWhite : kWhite.with_alpha(0.78f));
 
         const float sx = (s.abs_index >= 0 && s.abs_index < 32) ? scroll_x_[s.abs_index] : 0.0f;
         for (std::size_t i = 0; i < s.cards.size(); ++i)

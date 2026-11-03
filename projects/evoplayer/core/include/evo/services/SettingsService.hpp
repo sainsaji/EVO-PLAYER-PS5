@@ -41,6 +41,8 @@ public:
 
     bool isAskStreamEnabled() const override { return m_askStream; }
     void setAskStreamEnabled(bool enabled) override { m_askStream = enabled; }
+    bool isAddonAutoPickEnabled() const override { return m_addonAutoPick; }
+    void setAddonAutoPickEnabled(bool enabled) override { m_addonAutoPick = enabled; }
 
     int getSecondarySubtitlePosition() const override { return m_secondarySubtitlePosition; }
     void setSecondarySubtitlePosition(int position) override;
@@ -145,6 +147,7 @@ private:
     bool m_matchVideoRate = false;
     bool m_debugOverlayEnabled = false;
     HdrPeak m_hdrPeak = HdrPeak::Off;
+    bool m_addonAutoPick = true;   /* addons: rank the sources, play the best at once */
     PreferredLanguage m_audioLanguage = PreferredLanguage::Auto;
     PreferredLanguage m_subtitleLanguage = PreferredLanguage::Auto;
 };

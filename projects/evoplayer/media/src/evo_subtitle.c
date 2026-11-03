@@ -68,7 +68,11 @@ double prospero_subtitle_time_scale = 1.0;
 
 /* PROSPERO_EMBEDDED_SUBTITLE_MODULE_START */
 
-#define PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES 256
+/* Cues are decoded when the demuxer reads them, which on a network stream is
+ * the whole read-ahead (up to five minutes) before they are shown. 1024 holds
+ * about forty minutes of dialogue, and the heaviest fansub typesetting comfortably
+ * spans the buffer. */
+#define PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES 1024
 #define PROSPERO_EMBEDDED_SUBTITLE_TEXT_SIZE 768
 
 typedef struct {
@@ -143,9 +147,22 @@ int prospero_subtitle_use_external = 0;
  *                under a decode in flight.
  *   ring_mutex   the cue ring. The render thread only ever takes this one.
  */
-/* A picture cue (Blu-ray PGS): every rect of one display set composed into one
- * RGBA image (0xAABBGGRR words) over the bounding box, on the track's canvas. */
-#define PROSPERO_BITMAP_CUES 4
+/*
+ * A picture cue (Blu-ray PGS): every rect of one display set composed into one
+ * palette-indexed image over the bounding box, on the track's canvas, and
+ * turned into RGBA (0xAABBGGRR words) only when it is drawn.
+ *
+ * Like text, a picture is decoded when the demuxer reads it - on a network
+ * stream, the read-ahead before it is due. This ring used to hold four, so
+ * from a USB stick (a read-ahead of a few packets) PGS showed, and from a
+ * debrid or media-server stream (thirty seconds to five minutes ahead) every
+ * picture had been pushed out by four later ones before its time came: the
+ * picker said PGS, and nothing was ever drawn. It now holds what the
+ * read-ahead can carry, at one byte a pixel, within a byte budget; when it is
+ * full, pictures already shown go first.
+ */
+#define PROSPERO_BITMAP_CUES 192
+#define PROSPERO_BITMAP_BUDGET_BYTES ((size_t)96 * 1024 * 1024)
 
 typedef struct {
     double    start_seconds;
@@ -153,7 +170,8 @@ typedef struct {
     int       x, y, w, h;
     int       canvas_w, canvas_h;
     uint32_t  serial;
-    uint32_t *pixels;
+    uint8_t  *index;               /* w*h palette indices; NULL = empty slot */
+    uint32_t  palette[256];        /* already 0xAABBGGRR */
 } ProsperoBitmapCue;
 
 typedef struct {
@@ -165,6 +183,8 @@ typedef struct {
     ProsperoBitmapCue bitmaps[PROSPERO_BITMAP_CUES];
     int              bitmap_count;
     uint32_t         bitmap_serial;
+    size_t           bitmap_bytes;     /* index data held */
+    double           bitmap_shown_at;  /* last position the renderer asked for */
     ProsperoEmbeddedSubtitleCue cues[
         PROSPERO_EMBEDDED_SUBTITLE_MAX_CUES
     ];
@@ -228,11 +248,13 @@ static void prospero_sub_slot_bitmaps_clear(
     ProsperoSubSlot *slot
 ) {
     for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
-        free(slot->bitmaps[i].pixels);
-        slot->bitmaps[i].pixels = NULL;
+        free(slot->bitmaps[i].index);
+        slot->bitmaps[i].index = NULL;
     }
 
     slot->bitmap_count = 0;
+    slot->bitmap_bytes = 0;
+    slot->bitmap_shown_at = 0.0;
 }
 
 
@@ -974,17 +996,14 @@ static void prospero_sub_slot_add_bitmap(
 
     if (rects == 0) {
         /* Clear: the newest picture stops being shown here. */
-        if (slot->bitmap_count > 0) {
-            ProsperoBitmapCue *last =
-                &slot->bitmaps[
-                    (slot->bitmap_serial + PROSPERO_BITMAP_CUES - 1) %
-                    PROSPERO_BITMAP_CUES
-                ];
-
-            if (last->pixels && last->end_seconds > start_seconds) {
-                last->end_seconds = start_seconds;
-            }
+        ProsperoBitmapCue *last = NULL;
+        for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
+            ProsperoBitmapCue *c = &slot->bitmaps[i];
+            if (c->index && (!last || c->serial > last->serial))
+                last = c;
         }
+        if (last && last->end_seconds > start_seconds)
+            last->end_seconds = start_seconds;
 
         pthread_mutex_unlock(
             &slot->ring_mutex
@@ -995,10 +1014,11 @@ static void prospero_sub_slot_add_bitmap(
 
     const int w = max_x - min_x;
     const int h = max_y - min_y;
+    const size_t bytes = (size_t)w * (size_t)h;
 
     if (
         w <= 0 || h <= 0 ||
-        (size_t)w * (size_t)h > (size_t)4096 * 2160
+        bytes > (size_t)4096 * 2160
     ) {
         pthread_mutex_unlock(
             &slot->ring_mutex
@@ -1007,19 +1027,60 @@ static void prospero_sub_slot_add_bitmap(
         return;
     }
 
-    uint32_t *pixels =
-        calloc(
-            (size_t)w * (size_t)h,
-            sizeof(uint32_t)
-        );
+    /*
+     * Room: first the pictures that are over (ended before the position the
+     * player last drew), then - only if the budget still says no - the oldest.
+     * Dropping the oldest is what the four-slot ring did all the time; here it
+     * only happens with minutes of pictures queued, and those are the ones
+     * furthest behind the screen anyway.
+     */
+    for (;;) {
+        int free_slot = -1, done = -1, oldest = -1;
+        for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
+            ProsperoBitmapCue *c = &slot->bitmaps[i];
+            if (!c->index) {
+                if (free_slot < 0) free_slot = i;
+                continue;
+            }
+            if (c->end_seconds < slot->bitmap_shown_at - 1.0 &&
+                (done < 0 || c->serial < slot->bitmaps[done].serial))
+                done = i;
+            if (oldest < 0 || c->serial < slot->bitmaps[oldest].serial)
+                oldest = i;
+        }
+        const int over = slot->bitmap_bytes + bytes > PROSPERO_BITMAP_BUDGET_BYTES;
+        if (free_slot >= 0 && !over)
+            break;
+        const int victim = done >= 0 ? done : oldest;
+        if (victim < 0)
+            break;
+        ProsperoBitmapCue *v = &slot->bitmaps[victim];
+        slot->bitmap_bytes -= (size_t)v->w * (size_t)v->h;
+        free(v->index);
+        v->index = NULL;
+        slot->bitmap_count--;
+    }
 
-    if (!pixels) {
+    int at = -1;
+    for (int i = 0; i < PROSPERO_BITMAP_CUES && at < 0; i++)
+        if (!slot->bitmaps[i].index)
+            at = i;
+    uint8_t *index = at >= 0 ? (uint8_t *)calloc(bytes, 1) : NULL;
+
+    if (!index) {
         pthread_mutex_unlock(
             &slot->ring_mutex
         );
 
         return;
     }
+
+    ProsperoBitmapCue *cue = &slot->bitmaps[at];
+    /* Index 0 of the composed box is left transparent; each rect brings its own
+     * palette, so the cue keeps one merged palette: rect k's entries are
+     * re-numbered only when two rects disagree (rare - one PDS serves a set). */
+    memset(cue->palette, 0, sizeof cue->palette);
+    int palette_from = -1;
 
     for (unsigned int i = 0; i < subtitle->num_rects; i++) {
         const AVSubtitleRect *r = subtitle->rects[i];
@@ -1034,45 +1095,33 @@ static void prospero_sub_slot_add_bitmap(
 
         const uint32_t *palette =
             (const uint32_t *)r->data[1];
+        const int colors = r->nb_colors > 0 && r->nb_colors <= 256 ? r->nb_colors : 256;
 
-        for (int row = 0; row < r->h; row++) {
-            const uint8_t *src =
-                r->data[0] + (size_t)row * (size_t)r->linesize[0];
-
-            uint32_t *dst =
-                pixels +
-                (size_t)(r->y - min_y + row) * (size_t)w +
-                (size_t)(r->x - min_x);
-
-            for (int col = 0; col < r->w; col++) {
-                /* The palette is 0xAARRGGBB; the frame wants R,G,B,A bytes. */
-                uint32_t c = palette[src[col]];
-
-                dst[col] =
+        if (palette_from < 0) {
+            /* The palette is 0xAARRGGBB; the frame wants R,G,B,A bytes. */
+            for (int k = 0; k < colors; k++) {
+                const uint32_t c = palette[k];
+                cue->palette[k] =
                     (c & 0xff000000u) |
                     ((c & 0x000000ffu) << 16) |
                     (c & 0x0000ff00u) |
                     ((c >> 16) & 0xffu);
             }
+            palette_from = (int)i;
+        }
+
+        for (int row = 0; row < r->h; row++) {
+            const uint8_t *src =
+                r->data[0] + (size_t)row * (size_t)r->linesize[0];
+
+            uint8_t *dst =
+                index +
+                (size_t)(r->y - min_y + row) * (size_t)w +
+                (size_t)(r->x - min_x);
+
+            memcpy(dst, src, (size_t)r->w);
         }
     }
-
-    if (slot->bitmap_count >= PROSPERO_BITMAP_CUES) {
-        /* Oldest goes; the ring is indexed by serial. */
-        ProsperoBitmapCue *old =
-            &slot->bitmaps[
-                slot->bitmap_serial % PROSPERO_BITMAP_CUES
-            ];
-
-        free(old->pixels);
-        old->pixels = NULL;
-        slot->bitmap_count--;
-    }
-
-    ProsperoBitmapCue *cue =
-        &slot->bitmaps[
-            slot->bitmap_serial % PROSPERO_BITMAP_CUES
-        ];
 
     cue->start_seconds = start_seconds;
     cue->end_seconds = end_seconds;
@@ -1082,9 +1131,10 @@ static void prospero_sub_slot_add_bitmap(
     cue->h = h;
     cue->canvas_w = canvas_w > 0 ? canvas_w : 1920;
     cue->canvas_h = canvas_h > 0 ? canvas_h : 1080;
-    cue->pixels = pixels;
+    cue->index = index;
     cue->serial = ++slot->bitmap_serial;
     slot->bitmap_count++;
+    slot->bitmap_bytes += bytes;
 
     pthread_mutex_unlock(
         &slot->ring_mutex
@@ -1471,12 +1521,13 @@ int prospero_embedded_subtitle_image_at(
     );
 
     const ProsperoBitmapCue *selected = NULL;
+    slot->bitmap_shown_at = position;
 
     for (int i = 0; i < PROSPERO_BITMAP_CUES; i++) {
         const ProsperoBitmapCue *cue = &slot->bitmaps[i];
 
         if (
-            cue->pixels &&
+            cue->index &&
             position >= cue->start_seconds &&
             position < cue->end_seconds &&
             (!selected || cue->serial > selected->serial)
@@ -1501,7 +1552,8 @@ int prospero_embedded_subtitle_image_at(
             }
 
             if (need <= view_cap && view) {
-                memcpy(view, selected->pixels, need * sizeof(uint32_t));
+                for (size_t k = 0; k < need; k++)
+                    view[k] = selected->palette[selected->index[k]];
                 view_serial = selected->serial;
                 view_info.pixels = view;
                 view_info.x = selected->x;

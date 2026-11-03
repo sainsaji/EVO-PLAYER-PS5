@@ -76,6 +76,7 @@ and read with a single `fscanf`:
                                                                                31 HDR peak
                                                                                32 audio language
                                                                                33 subtitle language
+                                                                               34 play best addon stream
 ```
 
 A line is applied only if the file has that many (`readCount >= N`), so an older file

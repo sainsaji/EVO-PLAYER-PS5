@@ -25,7 +25,14 @@
  *   m:<a>:<type>:<id>             a playable title
  *   e:<a>:<type>:<videoId>        a playable episode
  *   x:<a>                         an addon that failed to load (empty folder)
+ *   l:cw                          the Stremio account's Continue Watching
+ *   l:lib                         the Stremio account's library
+ *
+ * With a Stremio account (evo_stremio_account.c) the addons are the account's,
+ * in its order and with the manifests it stores - nothing fetched per addon -
+ * then the ones added on this console, then the built-in Cinemeta.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,12 +45,17 @@
 #include "evo_provider_log.h"
 #include "evo_error.h"
 #include "evo_online_subs.h"
+#include "evo_stremio_account.h"
+#include <time.h>
 
 #define AD_CONF      "addons.json"
-#define AD_MAX       12
+/* A Stremio account easily has a dozen and a half addons, and an AIOStreams or
+ * debrid addon's URL carries its whole configuration (a kilobyte and more). */
+#define AD_MAX       24
 #define AD_MAX_CATS  24
-#define AD_URL       512
-#define AD_CHOICES   16
+#define AD_URL       1792
+/* Sources kept per title: the best ones by rank_stream(), from every addon. */
+#define AD_CHOICES   48
 
 typedef struct {
     char type[24];
@@ -65,6 +77,7 @@ typedef struct {
     char subs_types[160];
     char prefixes[384];                          /* ",tt,kitsu:," - "" = any */
     int  builtin;                /* EVO's own Cinemeta, see builtin_sync() */
+    int  from_account;           /* the Stremio account's: listed first, not saved here */
 } addon_t;
 
 /*
@@ -122,6 +135,14 @@ static int user_count(void)
     return (S->nad > 0 && S->ad[S->nad - 1].builtin) ? S->nad - 1 : S->nad;
 }
 
+/* The account's addons lead the list; the ones added here follow. */
+static int acc_count(void)
+{
+    int n = 0;
+    while (n < S->nad && S->ad[n].from_account) n++;
+    return n;
+}
+
 static void builtin_drop(void)
 {
     if (S->nad > 0 && S->ad[S->nad - 1].builtin) memset(&S->ad[--S->nad], 0, sizeof S->ad[0]);
@@ -147,7 +168,7 @@ static int ad_save(void)
     cJSON *root = cJSON_CreateObject();
     cJSON *arr = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "addons", arr);
-    for (int i = 0; i < user_count(); ++i) cJSON_AddItemToArray(arr, cJSON_CreateString(S->ad[i].url));
+    for (int i = acc_count(); i < user_count(); ++i) cJSON_AddItemToArray(arr, cJSON_CreateString(S->ad[i].url));
     char *txt = cJSON_Print(root);
     cJSON_Delete(root);
     if (!txt) return -1;
@@ -185,7 +206,7 @@ static int ad_init(void)
 }
 
 static void ad_shutdown(void) { }
-static int  ad_is_configured(void) { S = &g_addons; return user_count() > 0; }
+static int  ad_is_configured(void) { S = &g_addons; return user_count() > 0 || evo_sa_signed_in(); }
 
 /* The editor starts empty: the value typed is an addon to ADD, not a source
  * to replace (see ad_set_source). */
@@ -237,14 +258,19 @@ static int ad_set_source(const char *value)
 
     S = &g_addons;
     if (!*s) {
-        S->nad = 0;
-        memset(S->ad, 0, sizeof S->ad);
+        /* Clears what was added here; the account's addons stay. */
+        builtin_drop();
+        const int keep = acc_count();
+        for (int i = keep; i < S->nad; ++i) memset(&S->ad[i], 0, sizeof S->ad[i]);
+        S->nad = keep;
+        builtin_sync();
         return ad_save();
     }
     char url[AD_URL];
     if (ad_parse_address(s, url, sizeof url) != 0) return -1;
     for (int i = 0; i < user_count(); ++i)
         if (!strcmp(S->ad[i].url, url)) return 0;
+    if (strlen(url) >= AD_URL - 1) return -1;
     builtin_drop();                      /* added ones go before it */
     if (S->nad >= AD_MAX) { builtin_sync(); return -1; }
     memset(&S->ad[S->nad], 0, sizeof S->ad[S->nad]);
@@ -255,12 +281,15 @@ static int ad_set_source(const char *value)
     return ad_save();
 }
 
-int evo_stremio_addon_count(void) { S = &g_addons; return user_count(); }
+/* The list OPTIONS shows (and removes from) is the addons added on this
+ * console; the account's are managed in Stremio itself. */
+int evo_stremio_addon_count(void) { S = &g_addons; return user_count() - acc_count(); }
 
 const char *evo_stremio_addon_url(int i)
 {
     S = &g_addons;
-    return (i >= 0 && i < user_count()) ? S->ad[i].url : "";
+    i += acc_count();
+    return (i >= acc_count() && i < user_count()) ? S->ad[i].url : "";
 }
 
 static const char *addon_label(int i)
@@ -279,13 +308,15 @@ static const char *addon_label(int i)
 const char *evo_stremio_addon_name(int i)
 {
     S = &g_addons;
-    return addon_label(i);
+    return i < 0 ? "" : addon_label(i + acc_count());
 }
 
 int evo_stremio_addon_remove(int i)
 {
     S = &g_addons;
-    if (i < 0 || i >= user_count()) return -1;
+    if (i < 0) return -1;
+    i += acc_count();
+    if (i >= user_count()) return -1;
     for (int k = i; k + 1 < S->nad; ++k) S->ad[k] = S->ad[k + 1];
     memset(&S->ad[--S->nad], 0, sizeof S->ad[0]);
     builtin_sync();
@@ -411,13 +442,47 @@ static const char *jstr(cJSON *o, const char *k)
     return (v && cJSON_IsString(v)) ? v->valuestring : "";
 }
 
+static int lib_has(int cw)
+{
+    const cJSON *lib = evo_sa_library_cached();
+    for (int i = 0; lib && i < cJSON_GetArraySize(lib); ++i) {
+        const cJSON *it = cJSON_GetArrayItem(lib, i);
+        if (cw ? evo_sa_in_continue_watching(it)
+               : (!cJSON_IsTrue(cJSON_GetObjectItem(it, "removed")) &&
+                  !cJSON_IsTrue(cJSON_GetObjectItem(it, "temp"))))
+            return 1;
+    }
+    return 0;
+}
+
 static void emit_root(evo_provider_items_cb cb, void *ud)
 {
-    int max = 1;
+    int max = 3;
     for (int i = 0; i < S->nad; ++i) max += S->ad[i].ncats + 1;
     evo_provider_item_t *items = (evo_provider_item_t *)calloc((size_t)max, sizeof *items);
     if (!items) { if (cb) cb(0, NULL, 0, 0, ud); return; }
     int k = 0;
+    /* The account's own shelves come first, as on Stremio's Board. */
+    if (S == &g_addons && evo_sa_signed_in() && S->nad > 0) {
+        if (lib_has(1)) {
+            evo_provider_item_clear(&items[k]);
+            snprintf(items[k].id, sizeof items[k].id, "l:cw");
+            snprintf(items[k].title, sizeof items[k].title, "Continue Watching");
+            snprintf(items[k].subtitle, sizeof items[k].subtitle, "Stremio");
+            items[k].is_folder = 1;
+            items[k].kind = EVO_MEDIA_FOLDER;
+            k++;
+        }
+        if (lib_has(0)) {
+            evo_provider_item_clear(&items[k]);
+            snprintf(items[k].id, sizeof items[k].id, "l:lib");
+            snprintf(items[k].title, sizeof items[k].title, "Library");
+            snprintf(items[k].subtitle, sizeof items[k].subtitle, "Stremio");
+            items[k].is_folder = 1;
+            items[k].kind = EVO_MEDIA_FOLDER;
+            k++;
+        }
+    }
     /* The built-in Cinemeta lends its catalogs only when nothing added has any. */
     int others = 0;
     for (int i = 0; i < S->nad; ++i)
@@ -453,6 +518,44 @@ static void emit_root(evo_provider_items_cb cb, void *ud)
 
 /* A meta from a catalog or search answer -> a row. */
 static void join_field(cJSON *v, char *out, size_t cap, int limit);
+
+/*
+ * Titles shown recently, by meta id: what a progress report needs to add a
+ * title to the account's library the first time it is watched (Stremio shows
+ * its name and poster in Continue Watching on every device).
+ */
+#define SEEN_MAX 128
+typedef struct {
+    char id[96];
+    char type[16];
+    char name[128];
+    char poster[EVO_PROVIDER_MAX_ART_URL];
+} seen_t;
+static seen_t g_seen[SEEN_MAX];
+static int    g_seen_next;
+
+static void seen_put(const char *id, const char *type, const char *name, const char *poster)
+{
+    if (!id || !id[0] || strlen(id) >= sizeof g_seen[0].id) return;
+    seen_t *e = NULL;
+    for (int i = 0; i < SEEN_MAX && !e; ++i)
+        if (!strcmp(g_seen[i].id, id)) e = &g_seen[i];
+    if (!e) {
+        e = &g_seen[g_seen_next];
+        g_seen_next = (g_seen_next + 1) % SEEN_MAX;
+    }
+    snprintf(e->id, sizeof e->id, "%s", id);
+    snprintf(e->type, sizeof e->type, "%s", type ? type : "");
+    if (name && name[0]) snprintf(e->name, sizeof e->name, "%s", name);
+    if (poster && !strncmp(poster, "http", 4)) snprintf(e->poster, sizeof e->poster, "%s", poster);
+}
+
+static const seen_t *seen_get(const char *id)
+{
+    for (int i = 0; id && i < SEEN_MAX; ++i)
+        if (g_seen[i].id[0] && !strcmp(g_seen[i].id, id)) return &g_seen[i];
+    return NULL;
+}
 
 static void map_meta(int a, cJSON *m, evo_provider_item_t *it)
 {
@@ -493,6 +596,7 @@ static void map_meta(int a, cJSON *m, evo_provider_item_t *it)
     it->is_folder = series;
     it->kind = series ? EVO_MEDIA_FOLDER : EVO_MEDIA_VIDEO;
     it->detail = series ? 2 : 1;
+    if (S == &g_addons) seen_put(id, type, jstr(m, "name"), poster);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -510,13 +614,19 @@ typedef struct {
     /* streams */
     evo_provider_resolve_cb rcb;
     evo_stream_choice_t choices[AD_CHOICES];
+    int  score[AD_CHOICES];      /* rank_stream(); the list is sorted on it at the end */
+    int  seq[AD_CHOICES];        /* arrival order, for ties */
+    int  nseq;
     int  nchoices;
     int  asked;                  /* stream requests sent */
     int  torrents;               /* infoHash-only streams skipped */
     char item_key[EVO_PROVIDER_MAX_ITEM_ID];   /* resolve: the title's id */
 } fan_t;
 
-typedef struct { fan_t *fan; int addon; } fan_req_t;
+typedef struct { fan_t *fan; int addon; int from_cache; } fan_req_t;
+
+static char *cache_load(const char *url, int max_age, size_t *len_out);
+static void  cache_store(const char *url, const char *body, size_t len);
 
 static void fan_done_root(fan_t *f)
 {
@@ -527,11 +637,23 @@ static void fan_done_root(fan_t *f)
 
 static void on_manifest(int ok, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     fan_req_t *r = (fan_req_t *)ud;
     S = r->fan->set;
     addon_t *a = &S->ad[r->addon];
     cJSON *m = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    if (!(m && cJSON_IsObject(m))) {
+        /* Down right now: what it said last time is better than nothing. */
+        size_t sl = 0;
+        char *old = r->from_cache ? NULL : cache_load(a->url, -1, &sl);
+        if (old) {
+            if (m) cJSON_Delete(m);
+            m = cJSON_Parse(old);
+            free(old);
+            if (m) PROV_LOG("%s: manifest %s offline, using the saved one", S->tag, a->url);
+        }
+    } else if (!r->from_cache) {
+        cache_store(a->url, body, len);
+    }
     if (m && cJSON_IsObject(m)) {
         parse_manifest(a, m);
         a->loaded = 1;
@@ -556,9 +678,219 @@ static int ad_get(const char *url, evo_net_cb cb, void *ud)
     return evo_net_request_async("GET", url, NULL, h, 1, cb, ud);
 }
 
+/* Streams and subtitles: an aggregator (AIOStreams) or a debrid cache check
+ * thinks for ten seconds and more before its first byte, and the 6 s read
+ * timeout cut those off as "no streams". */
+static int ad_get_slow(const char *url, evo_net_cb cb, void *ud)
+{
+    if (S->avio) return ad_get(url, cb, ud);
+    const char *h[1] = { "Accept: application/json" };
+    return evo_net_request_async_slow("GET", url, NULL, h, 1, cb, ud);
+}
+
+/*
+ * A disk cache of addon answers that do not change by the minute: manifests,
+ * the first page of each catalog, series details. Home is one shelf per
+ * catalog, so opening it asked every addon for every catalog before the first
+ * poster could show; now a fresh answer opens at once from disk, and a stale
+ * one still opens when the network or the addon is down.
+ *
+ * <data>/addon_cache/<fnv1a64 of the URL>.json, first line "EVOCACHE <unix>".
+ */
+#define CACHE_DIR       "addon_cache"
+#define CACHE_TTL_CAT   (6 * 3600)
+#define CACHE_TTL_META  (24 * 3600)
+#define CACHE_TTL_MAN   (24 * 3600)
+#define CACHE_MAX_BYTES ((size_t)4 << 20)
+
+static void cache_path(const char *url, char *out, size_t cap)
+{
+    uint64_t h = 1469598103934665603ULL;
+    for (const unsigned char *p = (const unsigned char *)url; *p; ++p) {
+        h ^= *p;
+        h *= 1099511628211ULL;
+    }
+    char leaf[64];
+    snprintf(leaf, sizeof leaf, CACHE_DIR "/%016llx.json", (unsigned long long)h);
+    snprintf(out, cap, "%s", evo_data_path(leaf));
+}
+
+/* The cached body (malloc'd, NUL-terminated) if younger than max_age seconds
+ * (any age when max_age < 0), else NULL. */
+static char *cache_load(const char *url, int max_age, size_t *len_out)
+{
+    if (S->avio || !url) return NULL;            /* Nuvio's list changes under it */
+    char path[600];
+    cache_path(url, path, sizeof path);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    char head[48] = {0};
+    if (!fgets(head, sizeof head, f) || strncmp(head, "EVOCACHE ", 9)) { fclose(f); return NULL; }
+    const long long ts = atoll(head + 9);
+    const long long now = (long long)time(NULL);
+    if (max_age >= 0 && (ts <= 0 || now - ts > max_age || ts > now + 3600)) { fclose(f); return NULL; }
+    size_t cap = 1 << 15, n = 0;
+    char *buf = (char *)malloc(cap + 1);
+    while (buf) {
+        n += fread(buf + n, 1, cap - n, f);
+        if (n < cap) break;
+        if (cap >= CACHE_MAX_BYTES) { free(buf); buf = NULL; break; }
+        char *g = (char *)realloc(buf, cap * 2 + 1);
+        if (!g) { free(buf); buf = NULL; break; }
+        buf = g;
+        cap *= 2;
+    }
+    fclose(f);
+    if (!buf || n == 0) { free(buf); return NULL; }
+    buf[n] = 0;
+    if (len_out) *len_out = n;
+    return buf;
+}
+
+static void cache_store(const char *url, const char *body, size_t len)
+{
+    if (S->avio || !url || !body || len == 0 || len > CACHE_MAX_BYTES) return;
+    static int dir_ok;
+    if (!dir_ok) dir_ok = evo_mkdir(evo_data_path(CACHE_DIR)) == 0;
+    char path[600], tmp[620];
+    cache_path(url, path, sizeof path);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return;
+    const int ok = fprintf(f, "EVOCACHE %lld\n", (long long)time(NULL)) > 0 &&
+                   fwrite(body, 1, len, f) == len;
+    fclose(f);
+    if (!ok) { remove(tmp); return; }
+    remove(path);
+    rename(tmp, path);
+}
+
 static void nv_load_addons(void);
 
+static int local_addr(const char *u)
+{
+    const char *h = strstr(u, "://");
+    h = h ? h + 3 : u;
+    return !strncmp(h, "127.", 4) || !strncmp(h, "localhost", 9) || !strncmp(h, "0.0.0.0", 7);
+}
+
+/*
+ * The account's addons (the saved collection) -> the head of g_addons, the
+ * ones added here after them. Nothing happens when the account's list is what
+ * is already there, so the addon indices in the ids on screen stay valid; it
+ * runs only when the root is listed (Home), never under an open title.
+ */
+static void account_apply(void)
+{
+    S = &g_addons;
+    const cJSON *arr = evo_sa_signed_in() ? evo_sa_addons_cached() : NULL;
+
+    /* What the account wants, in its order. */
+    const char *want[AD_MAX];
+    const cJSON *man[AD_MAX];
+    int nw = 0;
+    for (int i = 0; arr && i < cJSON_GetArraySize(arr) && nw < AD_MAX - 1; ++i) {
+        const cJSON *e = cJSON_GetArrayItem(arr, i);
+        const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(e, "transportUrl"));
+        if (!u || (strncmp(u, "http://", 7) && strncmp(u, "https://", 8))) continue;
+        if (local_addr(u) || strlen(u) >= AD_URL - 1) continue;   /* the app's own streaming server */
+        int dup = 0;
+        for (int k = 0; k < nw && !dup; ++k) dup = !strcmp(want[k], u);
+        if (dup) continue;
+        want[nw] = u;
+        man[nw] = cJSON_GetObjectItem(e, "manifest");
+        nw++;
+    }
+    int same = acc_count() == nw;
+    for (int i = 0; same && i < nw; ++i) same = !strcmp(S->ad[i].url, want[i]);
+    if (same) return;
+
+    /* Keep the ones added here (loaded state and all). */
+    builtin_drop();
+    const int first = acc_count(), nloc = S->nad - first;
+    addon_t *loc = nloc > 0 ? (addon_t *)malloc((size_t)nloc * sizeof *loc) : NULL;
+    if (nloc > 0 && !loc) { builtin_sync(); return; }
+    if (loc) memcpy(loc, &S->ad[first], (size_t)nloc * sizeof *loc);
+
+    memset(S->ad, 0, sizeof S->ad);
+    S->nad = 0;
+    for (int i = 0; i < nw; ++i) {
+        addon_t *a = &S->ad[S->nad++];
+        snprintf(a->url, sizeof a->url, "%s", want[i]);
+        ad_set_base(a);
+        a->from_account = 1;
+        if (man[i] && cJSON_IsObject(man[i])) {
+            parse_manifest(a, (cJSON *)man[i]);
+            a->loaded = 1;
+        }
+    }
+    for (int i = 0; i < nloc && S->nad < AD_MAX - 1; ++i) {
+        int dup = 0;
+        for (int k = 0; k < nw && !dup; ++k) dup = !strcmp(S->ad[k].base, loc[i].base);
+        if (!dup) S->ad[S->nad++] = loc[i];
+    }
+    free(loc);
+    builtin_sync();
+    /* What was cached was keyed on the old indices. */
+    S->cat_key[0] = '\0';
+    S->meta_key[0] = '\0';
+    PROV_LOG("addons: %d from the Stremio account, %d added here", nw, user_count() - nw);
+}
+
+static int list_root_go(evo_provider_items_cb cb, void *ud);
+
+/* The first Home of a session waits for the account (a few hundred ms), so
+ * Continue Watching shows what was watched on the phone or the Shield a
+ * minute ago; later ones use what is saved and refresh behind it. */
+static int64_t g_acc_pulled_at;
+
+typedef struct {
+    evo_provider_items_cb cb;
+    void *ud;
+    int left;
+} acc_wait_t;
+
+static void acc_wait_done(acc_wait_t *w)
+{
+    if (--w->left > 0) return;
+    S = &g_addons;
+    account_apply();
+    list_root_go(w->cb, w->ud);
+    free(w);
+}
+
+static void on_acc_addons(int ok, int changed, void *ud) { (void)ok; (void)changed; acc_wait_done((acc_wait_t *)ud); }
+static void on_acc_library(int ok, void *ud) { (void)ok; acc_wait_done((acc_wait_t *)ud); }
+
 static int list_root(evo_provider_items_cb cb, void *ud)
+{
+    if (S == &g_addons && evo_sa_signed_in()) {
+        const int64_t now = (int64_t)time(NULL);
+        const int first = g_acc_pulled_at == 0 || !evo_sa_addons_cached();
+        if (first || now - g_acc_pulled_at > 300) {
+            g_acc_pulled_at = now;
+            if (first) {
+                acc_wait_t *w = (acc_wait_t *)calloc(1, sizeof *w);
+                if (w) {
+                    w->cb = cb; w->ud = ud; w->left = 1;
+                    w->left++;
+                    if (evo_sa_addons_pull(on_acc_addons, w) != 0) w->left--;
+                    w->left++;
+                    if (evo_sa_library_pull(on_acc_library, w) != 0) w->left--;
+                    acc_wait_done(w);            /* drops the hold */
+                    return 0;
+                }
+            } else {
+                evo_sa_addons_pull(NULL, NULL);
+                evo_sa_library_pull(NULL, NULL);
+            }
+        }
+        account_apply();
+    }
+    return list_root_go(cb, ud);
+}
+
+static int list_root_go(evo_provider_items_cb cb, void *ud)
 {
     if (S == &g_nuvio) nv_load_addons();     /* changed in the web version since? */
     fan_t *f = (fan_t *)calloc(1, sizeof *f);
@@ -572,6 +904,14 @@ static int list_root(evo_provider_items_cb cb, void *ud)
         if (!r) continue;
         r->fan = f; r->addon = i;
         f->remaining++;
+        size_t cl = 0;
+        char *cached = cache_load(S->ad[i].url, CACHE_TTL_MAN, &cl);
+        if (cached) {
+            r->from_cache = 1;
+            on_manifest(1, 200, cached, cl, r);   /* frees r; the hold keeps f */
+            free(cached);
+            continue;
+        }
         if (ad_get(S->ad[i].url, on_manifest, r) != 0) {
             S->ad[i].loaded = -1;
             f->remaining--;
@@ -592,16 +932,31 @@ typedef struct {
     int skip;
     evo_provider_items_cb cb;
     void *ud;
+    int from_cache;
+    char url[EVO_PROVIDER_MAX_URL];   /* page 0 only: the cache key */
 } cat_ctx_t;
 
 
 static void on_catalog(int ok, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     cat_ctx_t *x = (cat_ctx_t *)ud;
     S = x->set;
     cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
     cJSON *arr = root ? cJSON_GetObjectItem(root, "metas") : NULL;
+    if (x->url[0] && !x->from_cache) {
+        if (arr && cJSON_IsArray(arr) && cJSON_GetArraySize(arr) > 0) {
+            cache_store(x->url, body, len);
+        } else {
+            size_t sl = 0;
+            char *old = cache_load(x->url, -1, &sl);
+            if (old) {
+                if (root) cJSON_Delete(root);
+                root = cJSON_Parse(old);
+                free(old);
+                arr = root ? cJSON_GetObjectItem(root, "metas") : NULL;
+            }
+        }
+    }
     if (!arr || !cJSON_IsArray(arr)) {
         /* A page past the end is often a 404: that is "no more", not an error. */
         if (x->cb) x->cb(x->skip > 0 ? 1 : 0, NULL, 0, 0, x->ud);
@@ -643,6 +998,17 @@ static int list_catalog_page(int a, const char *type, const char *cat, const cha
     if (!x) return -2;
     x->set = S;
     x->a = a; x->skip = page > 0 ? S->cat_loaded : 0; x->cb = cb; x->ud = ud;
+    if (x->skip == 0) {
+        snprintf(x->url, sizeof x->url, "%s", url);
+        size_t cl = 0;
+        char *cached = cache_load(url, CACHE_TTL_CAT, &cl);
+        if (cached) {
+            x->from_cache = 1;
+            on_catalog(1, 200, cached, cl, x);   /* frees x */
+            free(cached);
+            return 0;
+        }
+    }
     int rc = ad_get(url, on_catalog, x);
     if (rc != 0) free(x);
     return rc;
@@ -772,14 +1138,28 @@ typedef struct {
     char id[160];
     evo_provider_items_cb cb;
     void *ud;
+    int from_cache;
+    char url[EVO_PROVIDER_MAX_URL];
 } meta_ctx_t;
 
 static void on_meta(int ok, int status, const char *body, size_t len, void *ud)
 {
-    (void)len;
     meta_ctx_t *x = (meta_ctx_t *)ud;
     S = x->set;
     cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
+    if (!x->from_cache && x->url[0]) {
+        if (root && cJSON_GetObjectItem(root, "meta")) {
+            cache_store(x->url, body, len);
+        } else {
+            size_t sl = 0;
+            char *old = cache_load(x->url, -1, &sl);
+            if (old) {
+                if (root) cJSON_Delete(root);
+                root = cJSON_Parse(old);
+                free(old);
+            }
+        }
+    }
     if (!root || !cJSON_GetObjectItem(root, "meta")) {
         PROV_ERR("%s: meta %s/%s failed ok=%d http=%d", S->tag, x->type, x->id, ok, status);
         if (x->cb) x->cb(0, NULL, 0, 0, x->ud);
@@ -820,9 +1200,119 @@ static int list_series(int a, const char *type, const char *id, int season,
     snprintf(x->id, sizeof x->id, "%s", id);
     char url[EVO_PROVIDER_MAX_URL];
     snprintf(url, sizeof url, "%s/meta/%s/%s.json", S->ad[m].base, type, id);
+    snprintf(x->url, sizeof x->url, "%s", url);
+    size_t cl = 0;
+    char *cached = cache_load(url, CACHE_TTL_META, &cl);
+    if (cached) {
+        x->from_cache = 1;
+        on_meta(1, 200, cached, cl, x);   /* frees x */
+        free(cached);
+        return 0;
+    }
     int rc = ad_get(url, on_meta, x);
     if (rc != 0) free(x);
     return rc;
+}
+
+/* ------------------------------------------------------------------------- */
+/* The account's library: Continue Watching and Library                      */
+/* ------------------------------------------------------------------------- */
+
+static double lib_num(const cJSON *o, const char *k)
+{
+    const cJSON *v = o ? cJSON_GetObjectItem(o, k) : NULL;
+    return (v && cJSON_IsNumber(v)) ? v->valuedouble : 0.0;
+}
+
+static const char *lib_str(const cJSON *o, const char *k)
+{
+    const char *v = o ? cJSON_GetStringValue(cJSON_GetObjectItem(o, k)) : NULL;
+    return v ? v : "";
+}
+
+/* Newest first by an ISO date ("2026-11-03T21:04:05.000Z" sorts as text). */
+static const char *lib_sort_key(const cJSON *it, int cw)
+{
+    return cw ? lib_str(cJSON_GetObjectItem(it, "state"), "lastWatched") : lib_str(it, "_mtime");
+}
+
+static void lib_map(const cJSON *li, int cw, evo_provider_item_t *it)
+{
+    evo_provider_item_clear(it);
+    const char *id = lib_str(li, "_id"), *type = lib_str(li, "type"), *name = lib_str(li, "name");
+    const char *poster = lib_str(li, "poster");
+    const cJSON *st = cJSON_GetObjectItem(li, "state");
+    const char *vid = lib_str(st, "video_id");
+    const int series = !strcmp(type, "series") || !strcmp(type, "anime");
+    int a = find_meta_addon(-1, type, id);
+    if (a < 0) a = 0;
+    snprintf(it->title, sizeof it->title, "%s", name[0] ? name : id);
+    if (!strncmp(poster, "http", 4)) snprintf(it->art_url, sizeof it->art_url, "%s", poster);
+    if (cw) {
+        it->resume_pos_sec = (int64_t)(lib_num(st, "timeOffset") / 1000.0);
+        it->duration_sec = (int64_t)(lib_num(st, "duration") / 1000.0);
+    }
+    if (cw && series && vid[0] && strcmp(vid, id)) {
+        /* The episode itself, so X resumes it. "tt123:2:5" -> S2 E5. */
+        snprintf(it->id, sizeof it->id, "e:%d:%s:%s", a, type, vid);
+        const char *e = strrchr(vid, ':');
+        int sn = 0, ep = 0;
+        if (e && e > vid) {
+            const char *b = e - 1;
+            while (b > vid && *b != ':') b--;
+            if (*b == ':') { sn = atoi(b + 1); ep = atoi(e + 1); }
+        }
+        if (sn > 0 || ep > 0) snprintf(it->subtitle, sizeof it->subtitle, "S%d E%d", sn, ep);
+        else                  snprintf(it->subtitle, sizeof it->subtitle, "%s", type_label(type));
+        it->kind = EVO_MEDIA_VIDEO;
+    } else if (series) {
+        snprintf(it->id, sizeof it->id, "s:%d:%s:%s", a, type, id);
+        snprintf(it->subtitle, sizeof it->subtitle, "%s", type_label(type));
+        it->is_folder = 1;
+        it->kind = EVO_MEDIA_FOLDER;
+    } else {
+        snprintf(it->id, sizeof it->id, "m:%d:%s:%s", a, type[0] ? type : "movie", id);
+        snprintf(it->subtitle, sizeof it->subtitle, "%s", type_label(type[0] ? type : "movie"));
+        it->kind = EVO_MEDIA_VIDEO;
+    }
+    if (it->resume_pos_sec > 0 && it->duration_sec > 0) {
+        const int left = (int)((it->duration_sec - it->resume_pos_sec) / 60);
+        if (left > 0) snprintf(it->facts, sizeof it->facts, "%s  \xC2\xB7  %d min left", it->subtitle, left);
+    }
+    seen_put(id, type, name, poster);
+}
+
+static int list_library(int cw, evo_provider_items_cb cb, void *ud)
+{
+    const cJSON *lib = evo_sa_library_cached();
+    const int n = lib ? cJSON_GetArraySize(lib) : 0;
+    const cJSON **pick = n > 0 ? (const cJSON **)calloc((size_t)n, sizeof *pick) : NULL;
+    int np = 0;
+    for (int i = 0; pick && i < n; ++i) {
+        const cJSON *it = cJSON_GetArrayItem(lib, i);
+        const char *type = lib_str(it, "type");
+        if (!lib_str(it, "_id")[0] || !type[0]) continue;
+        const int in = cw ? evo_sa_in_continue_watching(it)
+                          : (!cJSON_IsTrue(cJSON_GetObjectItem(it, "removed")) &&
+                             !cJSON_IsTrue(cJSON_GetObjectItem(it, "temp")) && strcmp(type, "other"));
+        if (!in) continue;
+        /* insertion, newest first (a library is a few hundred items at most) */
+        const char *key = lib_sort_key(it, cw);
+        int at = np;
+        while (at > 0 && strcmp(lib_sort_key(pick[at - 1], cw), key) < 0) {
+            pick[at] = pick[at - 1];
+            at--;
+        }
+        pick[at] = it;
+        np++;
+    }
+    if (np > EVO_PROVIDER_PAGE_MAX) np = EVO_PROVIDER_PAGE_MAX;
+    evo_provider_item_t *items = np > 0 ? (evo_provider_item_t *)calloc((size_t)np, sizeof *items) : NULL;
+    for (int i = 0; items && i < np; ++i) lib_map(pick[i], cw, &items[i]);
+    if (cb) cb(1, items, items ? np : 0, 0, ud);
+    free(items);
+    free(pick);
+    return 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -874,6 +1364,8 @@ static int st_list_catalog(const char *parent_id, int page,
         if (cb) cb(1, NULL, 0, 0, ud);
         return 0;
     }
+    if (!strcmp(parent_id, "l:cw") || !strcmp(parent_id, "l:lib"))
+        return list_library(parent_id[2] == 'c', cb, ud);
     return -1;
 }
 
@@ -1110,9 +1602,30 @@ static int st_search(const char *query, int page, evo_provider_items_cb cb, void
 /* Resolve: every addon that streams this type                               */
 /* ------------------------------------------------------------------------- */
 
+/* Best first: by score, then in the order the addons answered. */
+static void sort_choices(fan_t *f)
+{
+    for (int i = 1; i < f->nchoices; ++i) {
+        int j = i;
+        while (j > 0 && (f->score[j - 1] < f->score[j] ||
+                         (f->score[j - 1] == f->score[j] && f->seq[j - 1] > f->seq[j]))) {
+            evo_stream_choice_t tc = f->choices[j];
+            f->choices[j] = f->choices[j - 1];
+            f->choices[j - 1] = tc;
+            int t = f->score[j]; f->score[j] = f->score[j - 1]; f->score[j - 1] = t;
+            t = f->seq[j]; f->seq[j] = f->seq[j - 1]; f->seq[j - 1] = t;
+            --j;
+        }
+    }
+}
+
 static void fan_done_streams(fan_t *f)
 {
     if (--f->remaining > 0) return;
+    sort_choices(f);
+    if (f->nchoices > 0)
+        PROV_LOG("%s: %d source(s), best \"%s\" (score %d)", f->set->tag, f->nchoices,
+                 f->choices[0].label, f->score[0]);
     /* Nothing to play: say why, for the screen in place of its generic text.
      * Catalog addons (Cinemeta) and subtitle addons serve no streams. */
     const char *where = f->set == &g_nuvio ? "in Nuvio's web version" : "in OPTIONS";
@@ -1132,6 +1645,126 @@ static void first_line(const char *s, char *out, size_t cap)
     snprintf(out, cap, "%.*s", (int)n, s);
 }
 
+/* ASCII lower-case copy (no locale, no ctype import). */
+static void lower_into(char *out, size_t cap, const char *in)
+{
+    size_t i = 0;
+    for (; in && in[i] && i + 1 < cap; ++i) {
+        const char c = in[i];
+        out[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    if (cap) out[i] = 0;
+}
+
+/* A token on its own ("dv" in "4k dv hdr", not in "dvd" or "advent"). */
+static int has_word(const char *hay, const char *w)
+{
+    const size_t n = strlen(w);
+    for (const char *p = strstr(hay, w); p; p = strstr(p + 1, w)) {
+        const char b = p == hay ? ' ' : p[-1], a = p[n];
+        const int lb = (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9');
+        const int la = (a >= 'a' && a <= 'z') || (a >= '0' && a <= '9');
+        if (!lb && !la) return 1;
+    }
+    return 0;
+}
+
+/* "12.4 GB" / "850 MB" anywhere in the text -> bytes (the largest one: some
+ * addons print the season pack beside the episode). */
+static int64_t size_in(const char *t)
+{
+    int64_t best = 0;
+    for (const char *p = t; *p; ++p) {
+        if (!(*p >= '0' && *p <= '9') || (p > t && ((p[-1] >= '0' && p[-1] <= '9') || p[-1] == '.')))
+            continue;
+        char *e;
+        const double v = strtod(p, &e);
+        while (*e == ' ') e++;
+        int64_t b = 0;
+        if (!strncmp(e, "gb", 2) || !strncmp(e, "gib", 3)) b = (int64_t)(v * 1073741824.0);
+        else if (!strncmp(e, "mb", 2) || !strncmp(e, "mib", 3)) b = (int64_t)(v * 1048576.0);
+        else if (!strncmp(e, "tb", 2)) b = (int64_t)(v * 1099511627776.0);
+        if (b > best) best = b;
+    }
+    return best;
+}
+
+/*
+ * How good a source is for this setup, from what the addon says about it
+ * (Torrentio, AIOStreams, MediaFusion, Comet all print resolution, HDR, size
+ * and the debrid cache state in name/title), and fills the facts the picker
+ * shows. The order the user asked for: already cached on the debrid service
+ * (plays at once), then Remux / high bitrate, then Dolby Vision / HDR.
+ */
+static int rank_stream(cJSON *s, evo_stream_choice_t *c)
+{
+    char raw[1024], t[1024];
+    const cJSON *bh = cJSON_GetObjectItem(s, "behaviorHints");
+    snprintf(raw, sizeof raw, "%s\n%s\n%s\n%s", jstr(s, "name"), jstr(s, "title"),
+             jstr(s, "description"), jstr((cJSON *)bh, "filename"));
+    lower_into(t, sizeof t, raw);
+    int sc = 0;
+
+    /* Debrid cache: Torrentio "[TB+]"/"[RD+]", AIOStreams/Comet a lightning
+     * bolt; "download" or an hourglass means it would have to fetch first. */
+    const int cached = strstr(t, "+]") != NULL || strstr(t, "\xE2\x9A\xA1") != NULL ||
+                       strstr(t, "instant") != NULL || strstr(t, "[cached]") != NULL;
+    const int uncached = strstr(t, "download]") != NULL || strstr(t, "\xE2\x8F\xB3") != NULL ||
+                         strstr(t, "uncached") != NULL;
+    if (uncached)    sc -= 600;
+    else if (cached) sc += 400;
+
+    /* Resolution */
+    if (strstr(t, "2160") || has_word(t, "4k") || has_word(t, "uhd")) { sc += 300; c->width = 3840; c->height = 2160; }
+    else if (strstr(t, "1080"))                                        { sc += 200; c->width = 1920; c->height = 1080; }
+    else if (strstr(t, "720"))                                         { sc += 100; c->width = 1280; c->height = 720; }
+    else if (strstr(t, "480") || has_word(t, "sd"))                    { c->height = 480; }
+
+    /* Source */
+    if (has_word(t, "remux") || strstr(t, "remux"))                    sc += 160;
+    else if (strstr(t, "bluray") || strstr(t, "blu-ray") || has_word(t, "bdrip")) sc += 50;
+    else if (strstr(t, "web-dl") || strstr(t, "webdl"))                 sc += 25;
+    if (has_word(t, "cam") || strstr(t, "hdcam") || has_word(t, "ts") || strstr(t, "telesync") ||
+        has_word(t, "tc") || strstr(t, "screener"))
+        sc -= 1000;
+    if (has_word(t, "3d") || has_word(t, "sbs") || has_word(t, "hsbs")) sc -= 300;
+
+    /* Range. A Dolby Vision file with an HDR10 base (Blu-ray profile 7, most
+     * hybrids, "DV HDR10") is the best case; a DV-only web file is profile 5,
+     * which has no HDR10 to fall back on, so it ranks under plain HDR. */
+    const int dv = has_word(t, "dv") || strstr(t, "dolby vision") || strstr(t, "dovi") || strstr(t, "dolbyvision");
+    const int hdr10p = strstr(t, "hdr10+") || strstr(t, "hdr10plus");
+    const int hdr = hdr10p || strstr(t, "hdr");
+    if (dv && (hdr || has_word(t, "remux")))   { sc += 130; snprintf(c->video_range, sizeof c->video_range, "Dolby Vision"); }
+    else if (hdr10p)                            { sc += 100; snprintf(c->video_range, sizeof c->video_range, "HDR10+"); }
+    else if (hdr)                               { sc += 90;  snprintf(c->video_range, sizeof c->video_range, "HDR10"); }
+    else if (dv)                                { sc += 40;  snprintf(c->video_range, sizeof c->video_range, "Dolby Vision"); }
+    else if (strstr(t, "hlg"))                  { sc += 60;  snprintf(c->video_range, sizeof c->video_range, "HLG"); }
+
+    /* Codec, for the picker */
+    if (strstr(t, "hevc") || strstr(t, "x265") || strstr(t, "h265") || strstr(t, "h.265"))
+        snprintf(c->video_codec, sizeof c->video_codec, "hevc");
+    else if (has_word(t, "av1"))
+        snprintf(c->video_codec, sizeof c->video_codec, "av1");
+    else if (strstr(t, "x264") || strstr(t, "h264") || strstr(t, "h.264") || has_word(t, "avc"))
+        snprintf(c->video_codec, sizeof c->video_codec, "h264");
+
+    /* Audio */
+    if (strstr(t, "atmos"))                               sc += 15;
+    if (strstr(t, "truehd") || strstr(t, "dts-hd") || strstr(t, "dts:x")) sc += 10;
+
+    /* Size: the bitrate the addon does not give. Up to +160 at 80 GB. */
+    const cJSON *vs = cJSON_GetObjectItem(bh, "videoSize");
+    int64_t bytes = (vs && cJSON_IsNumber(vs) && vs->valuedouble > 0) ? (int64_t)vs->valuedouble : size_in(t);
+    c->size_bytes = bytes;
+    if (bytes > 0) {
+        int gb = (int)(bytes / 1073741824LL);
+        if (gb > 80) gb = 80;
+        sc += gb * 2;
+    }
+    return sc;
+}
+
 static void on_streams(int ok, int status, const char *body, size_t len, void *ud)
 {
     (void)len;
@@ -1140,15 +1773,31 @@ static void on_streams(int ok, int status, const char *body, size_t len, void *u
     fan_t *f = r->fan;
     cJSON *root = (ok && status == 200 && body) ? cJSON_Parse(body) : NULL;
     cJSON *arr = root ? cJSON_GetObjectItem(root, "streams") : NULL;
-    for (int i = 0; arr && i < cJSON_GetArraySize(arr) && f->nchoices < AD_CHOICES; ++i) {
+    static evo_stream_choice_t spare;    /* main thread only */
+    for (int i = 0; arr && i < cJSON_GetArraySize(arr); ++i) {
         cJSON *s = cJSON_GetArrayItem(arr, i);
         const char *url = jstr(s, "url");
         if (strncmp(url, "http://", 7) && strncmp(url, "https://", 8)) {
             if (jstr(s, "infoHash")[0]) f->torrents++;
             continue;
         }
-        evo_stream_choice_t *c = &f->choices[f->nchoices++];
-        evo_provider_stream_choice_clear(c);
+        if (strlen(url) >= sizeof spare.url) continue;
+        /* Rank it first: when the list is full, it takes the worst one's place. */
+        evo_provider_stream_choice_clear(&spare);
+        const int score = rank_stream(s, &spare);
+        int slot = f->nchoices;
+        if (slot >= AD_CHOICES) {
+            slot = 0;
+            for (int k = 1; k < AD_CHOICES; ++k)
+                if (f->score[k] < f->score[slot]) slot = k;
+            if (f->score[slot] >= score) continue;
+        } else {
+            f->nchoices++;
+        }
+        f->score[slot] = score;
+        f->seq[slot] = f->nseq++;
+        evo_stream_choice_t *c = &f->choices[slot];
+        *c = spare;
         snprintf(c->url, sizeof c->url, "%s", url);
         char name[48], title[64];
         first_line(jstr(s, "name")[0] ? jstr(s, "name") : S->ad[r->addon].name, name, sizeof name);
@@ -1229,7 +1878,7 @@ static void request_subtitles(const char *key, const char *base, const char *sou
     snprintf(r->key, sizeof r->key, "%s", key);
     snprintf(r->source, sizeof r->source, "%s", source);
     evo_osubs_pending(key, +1);
-    if (ad_get(url, on_subtitles, r) != 0) {
+    if (ad_get_slow(url, on_subtitles, r) != 0) {
         evo_osubs_pending(key, -1);
         free(r);
     }
@@ -1314,7 +1963,7 @@ static int st_resolve_now(const char *item_id, evo_provider_resolve_cb cb, void 
         r->fan = f; r->addon = i;
         f->remaining++;
         f->asked++;
-        if (ad_get(url, on_streams, r) != 0) { f->remaining--; free(r); }
+        if (ad_get_slow(url, on_streams, r) != 0) { f->remaining--; free(r); }
     }
     fan_done_streams(f);
     return 0;
@@ -1685,15 +2334,54 @@ static int ad_panel(const char *item_id, const char *kind, evo_provider_rows_cb 
     return st_panel(item_id, kind, cb, ud);
 }
 
+/*
+ * Progress on the account: the title's library item gets the position, so it
+ * is in Continue Watching on every Stremio device and resumes at the same
+ * second there. Pushed at most once a minute while playing, at once on stop.
+ */
+static void ad_report_progress(const char *item_id, int64_t pos_sec, int64_t dur_sec,
+                               evo_provider_play_state_t state)
+{
+    if (!item_id || !evo_sa_signed_in() || state == EVO_PROVIDER_PLAY_START) return;
+    S = &g_addons;
+    const int ep = !strncmp(item_id, "e:", 2);
+    if (!ep && strncmp(item_id, "m:", 2)) return;
+    int a;
+    char type[24];
+    const char *id;
+    if (split3(item_id + 2, &a, type, sizeof type, &id) != 0) return;
+    char lib[128];
+    if (ep) evo_sa_lib_id_of(id, lib, sizeof lib);
+    else    snprintf(lib, sizeof lib, "%s", id);
+    const seen_t *sn = seen_get(lib);
+    evo_sa_progress(lib, type, id, sn ? sn->name : NULL, sn ? sn->poster : NULL,
+                    pos_sec, dur_sec, state == EVO_PROVIDER_PLAY_STOP);
+}
+
+static void ad_sign_out(void)
+{
+    evo_sa_sign_out();
+    g_acc_pulled_at = 0;
+    account_apply();
+}
+
+static int ad_init_all(void)
+{
+    ad_init();
+    evo_sa_init();
+    account_apply();
+    return 0;
+}
+
 const evo_provider_t evo_provider_stremio = {
     .id            = "addons",
     .name          = "Stremio",
     .icon          = "brand_stremio.png",
     .caps          = EVO_PROVIDER_CAP_CATALOG | EVO_PROVIDER_CAP_SEARCH |
                      EVO_PROVIDER_CAP_RESOLVE | EVO_PROVIDER_CAP_CONFIG |
-                     EVO_PROVIDER_CAP_PICK,
+                     EVO_PROVIDER_CAP_PICK | EVO_PROVIDER_CAP_PROGRESS,
     .api_version   = EVO_PROVIDER_API_VERSION,
-    .init          = ad_init,
+    .init          = ad_init_all,
     .shutdown      = ad_shutdown,
     .is_configured = ad_is_configured,
     .list_catalog  = ad_list_catalog,
@@ -1703,4 +2391,21 @@ const evo_provider_t evo_provider_stremio = {
     .set_source    = ad_set_source,
     .ui_embedded   = "mediaserver",
     .panel         = ad_panel,
+    .report_progress = ad_report_progress,
+    .qc_start      = evo_sa_link_start,
+    .qc_poll       = evo_sa_link_poll,
+    .qc_cancel     = evo_sa_link_cancel,
+    .is_signed_in  = evo_sa_signed_in,
+    .sign_out      = ad_sign_out,
 };
+
+/* Host tests: rank one addon stream object given as JSON text. */
+int evo_stremio_rank_json(const char *json, evo_stream_choice_t *out)
+{
+    cJSON *s = json ? cJSON_Parse(json) : NULL;
+    if (!s || !out) { if (s) cJSON_Delete(s); return -100000; }
+    evo_provider_stream_choice_clear(out);
+    const int sc = rank_stream(s, out);
+    cJSON_Delete(s);
+    return sc;
+}

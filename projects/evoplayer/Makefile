@@ -164,7 +164,8 @@ ADDON_SRCS := \
     addons/src/provider_plex.c \
     addons/src/provider_nuvio.c \
     addons/src/provider_stremio.c \
-    addons/src/evo_online_subs.c
+    addons/src/evo_online_subs.c \
+    addons/src/evo_stremio_account.c
 
 # The bare-metal AGC device context and its 100% GPU RmlUi render interface
 # are the only device render path - the AGC runtime owns sceAgc and

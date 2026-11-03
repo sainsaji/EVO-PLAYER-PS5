@@ -5,6 +5,36 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.14.0
+
+**Stremio, natively: your account, your addons, your Continue Watching - and the best stream playing at once.** A fork build for an LG G5 OLED and a PS5 Pro, on top of 0.13.1.
+
+### Stremio Account
+
+- **New: Sign in with Stremio** (OPTIONS on the Stremio tile). EVO shows a code; enter it at link.stremio.com on a phone or computer that is signed in. No password on the pad. The code renews itself until you enter it.
+- **New: your account's addons, in its order**, with the manifests the account stores - nothing to add by hand and nothing fetched per addon. Addons added on this console stay and come after them; the app's local streaming-server addons are skipped.
+- **New: Continue Watching and Library shelves** at the top of Stremio's Home, from the account. An episode in Continue Watching resumes at the second you stopped, on the Shield or the phone too: EVO saves the position to the account once a minute and when you stop, and marks a title watched past 90 %.
+- **Sign out** forgets the account on this console only.
+
+### Streams
+
+- **New: PLAY BEST ADDON STREAM** (Settings → Interface & Storage, on by default). EVO ranks every source from every addon - already cached on your debrid service first (Torrentio `[TB+]`, AIOStreams ⚡), then 4K, Remux and size, then Dolby Vision with an HDR10 base, HDR10+, HDR10 - and plays the best at once. If it does not open, the next one is tried by itself. Cam rips, 3D and uncached links go last.
+- **New: Choose stream** in a title's OPTIONS (Triangle): the full ranked list, with resolution, range, codec and size for each.
+- **Fixed: stream and subtitle lookups were cut off after 6 seconds.** AIOStreams and debrid cache checks often think longer before answering; they now get 25 s.
+- **Improved: up to 128 queued and 8 parallel requests** (were 32 and 4). With a dozen addons, requests past 32 failed at once and read as "this addon gives nothing".
+
+### Subtitles
+
+- **Fixed: PGS (Blu-ray picture) subtitles never showed on debrid or media-server streams.** Pictures are decoded when the demuxer reads them, which on a stream is up to minutes ahead; EVO kept only four, so each was pushed out before its time. It now keeps what the read-ahead carries (192 pictures, palette-indexed, within 96 MB) and drops the ones already shown first.
+- Text subtitles keep 1024 cues ahead (were 256).
+
+### Speed & Interface
+
+- **Improved: Home opens from disk.** Manifests, the first page of every catalog and series details are cached (6 h for catalogs, a day for the rest) and served even when an addon is down.
+- **Improved: cleaner shelves** - no item counter beside each shelf, no provider name repeated under the header or in the footer.
+
+---
+
 ## 0.13.1
 
 **HDR the way it was mastered, Dolby Vision fitted shot by shot, and subtitles from your Stremio addons.** A fork build for an LG G5 OLED, an LG S60TR soundbar on eARC and a PS5 Pro on 13.60.

@@ -73,6 +73,7 @@ SRCS=(
     "${ADDONS}/src/provider_nuvio.c"
     "${ADDONS}/src/provider_stremio.c"
     "${ADDONS}/src/evo_online_subs.c"
+    "${ADDONS}/src/evo_stremio_account.c"
     "${MEDIA}/src/evo_langname.c"
     "${EVO}/src/evo_favorites.c"
     "${EVO}/src/evo_recent.c"

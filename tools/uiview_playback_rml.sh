@@ -55,6 +55,7 @@ for c in projects/evoplayer/addons/src/cJSON.c \
          projects/evoplayer/addons/src/provider_nuvio.c \
          projects/evoplayer/addons/src/provider_stremio.c \
          projects/evoplayer/addons/src/evo_online_subs.c \
+         projects/evoplayer/addons/src/evo_stremio_account.c \
          projects/evoplayer/media/src/evo_langpref.c \
          projects/evoplayer/media/src/evo_langname.c \
          projects/evoplayer/src/evo_data_path.c \

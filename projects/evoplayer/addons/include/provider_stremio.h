@@ -19,6 +19,8 @@ const char *evo_stremio_addon_url(int i);
 const char *evo_stremio_addon_name(int i);
 /* Drops entry i, shifts the rest down and saves. 0 ok, -1 bad index. */
 int         evo_stremio_addon_remove(int i);
+/* Host tests: the rank provider_stremio.c gives one addon stream (JSON object). */
+int         evo_stremio_rank_json(const char *json, evo_stream_choice_t *out);
 
 /*
  * Nuvio's native screens run on the same addon engine, over the addons the
