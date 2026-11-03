@@ -297,6 +297,22 @@ static int emit(int fd, char mode, const ls_opts_t *o, char *buf, size_t n)
     return used ? send_all(fd, out, used) : 0;
 }
 
+/* The client hung up (a curl --max-time, a closed tab). A filtered stream may
+ * write nothing for hours, so a failed send cannot be how this is noticed: four
+ * such leftovers held every slot and the server answered 503 (2026-11-03). */
+static int client_gone(int fd)
+{
+    struct pollfd p;
+    p.fd = fd;
+    p.events = POLLIN;
+    p.revents = 0;
+    if (poll(&p, 1, 0) <= 0) return 0;
+    if (p.revents & (POLLHUP | POLLERR | POLLNVAL)) return 1;
+    char c;
+    const ssize_t r = recv(fd, &c, 1, MSG_PEEK);   /* readable: does not block */
+    return r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR);
+}
+
 static void serve_stream(int fd, char mode, const ls_opts_t *o)
 {
     if (mode == 's')
@@ -313,6 +329,7 @@ static void serve_stream(int fd, char mode, const ls_opts_t *o)
     int idle = 0;
     for (;;) {
         size_t n = evo_log_ring_read(&pos, buf, sizeof buf, 1000, &missed);
+        if (client_gone(fd)) return;
         if (missed != reported) {
             char note[96];
             snprintf(note, sizeof note, "[log] %llu bytes missed - client too slow\n",
