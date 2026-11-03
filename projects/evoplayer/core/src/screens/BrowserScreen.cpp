@@ -702,6 +702,7 @@ struct NetListJob {
  * A request abandoned by timeout keeps running to its own bound; the next
  * one waits for it. */
 static std::atomic<bool> s_netInFlight{false};
+static void markServerOffline(const std::string& shareId);   // with the status chips below
 
 static void* netListEntry(void* arg) {
     auto* sp = static_cast<std::shared_ptr<NetListJob>*>(arg);
@@ -769,6 +770,7 @@ void BrowserScreen::pollNetList(double deltaMs) {
         m_netError = "Timed out waiting for the server";
         m_netState = NetListState::Failed;
         m_netJob.reset();   // the worker finishes on its own; its result is dropped
+        markServerOffline(m_networkShareId);   // its card must not keep saying Online
         rebuildItems();
     }
 }
@@ -786,6 +788,7 @@ struct ProbeJob {
     std::string key;
     std::string host;
     int port = 0;
+    bool ftp = false;
     int ms = -1;
     std::atomic<bool> done{false};
 };
@@ -804,11 +807,18 @@ static std::string serverStatusKey(const NetworkShare& s) {
     return s.id + "|" + s.host + ":" + std::to_string(s.port);
 }
 
+/* A listing that timed out proves more than a probe that connected: the card
+ * shows Offline until the normal recheck finds the server answering again. */
+static void markServerOffline(const std::string& shareId) {
+    if (const NetworkShare* s = NetworkStorageService::getInstance().getShare(shareId))
+        s_serverStatus[serverStatusKey(*s)] = {-1, s_statusClockMs};
+}
+
 static void* probeEntry(void* arg) {
     auto* sp = static_cast<std::shared_ptr<ProbeJob>*>(arg);
     std::shared_ptr<ProbeJob> job = *sp;
     delete sp;
-    job->ms = NetworkStorageService::probeReachable(job->host, job->port, kProbeConnectMs);
+    job->ms = NetworkStorageService::probeReachable(job->host, job->port, kProbeConnectMs, job->ftp);
     job->done.store(true);
     return nullptr;
 }
@@ -822,8 +832,8 @@ void BrowserScreen::pollServerStatus(double deltaMs) {
             /* One line when a server goes offline, not one per 30 s recheck. */
             auto prev = s_serverStatus.find(s_probeJob->key);
             if (s_probeJob->ms < 0 && (prev == s_serverStatus.end() || prev->second.ms >= 0))
-                EVO_LOGW("browser", "server %s:%d offline (no TCP connect in %d ms)",
-                         s_probeJob->host.c_str(), s_probeJob->port, kProbeConnectMs);
+                EVO_LOGW("browser", "server %s:%d offline (no %s in %d ms)", s_probeJob->host.c_str(),
+                         s_probeJob->port, s_probeJob->ftp ? "FTP greeting" : "TCP connect", kProbeConnectMs);
             s_serverStatus[s_probeJob->key] = {s_probeJob->ms, s_statusClockMs};
             s_probeJob.reset();
             rebuildItems();
@@ -846,6 +856,7 @@ void BrowserScreen::pollServerStatus(double deltaMs) {
         job->key = key;
         job->host = share.host;
         job->port = share.port;
+        job->ftp = share.protocol == NetworkProtocol::FTP;
         auto* arg = new std::shared_ptr<ProbeJob>(job);
         pthread_attr_t attr;
         pthread_t th;

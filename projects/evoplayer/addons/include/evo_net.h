@@ -114,17 +114,22 @@ typedef void (*evo_net_cb)(int success, int status_code, const char *body, size_
  * Connects to the first address in `list` that answers, and returns the socket
  * (blocking, with EVO_NET_TIMEOUT_SEC read/write timeouts) or -1.
  *
- * Each address gets at most `per_addr_timeout_ms` (a non-blocking connect
- * bounded by poll). A plain blocking connect() to an address that silently drops
- * packets does not honour SO_SNDTIMEO here: it sits in the kernel's SYN retry
- * for about 75 s. That stalled evo_net's single worker thread - and every
- * request queued behind it - whenever a host had one dead address, which
- * raw.githubusercontent.com does from some networks (hardware, 2026-09-30).
+ * Each address gets at most `per_addr_timeout_ms`. connect() to an address that
+ * silently drops packets honours neither O_NONBLOCK nor SO_SNDTIMEO on this
+ * console: it sits in the kernel's SYN retry for about 75 s (hardware,
+ * 2026-09-30 and 2026-11-03). So the connect runs on its own detached thread and
+ * the caller stops waiting at the deadline. That stall used to hold evo_net's
+ * single worker thread - and every request queued behind it.
  *
  * An address that timed out is remembered for five minutes and tried after the
  * ones that have not, so only the first request to a host pays for it.
  */
 int evo_net_connect_list(const struct addrinfo *list, int per_addr_timeout_ms);
+
+/* One address, the same bounded connect: a connected blocking socket (no
+ * timeouts set), or -1 with errno set; *timed_out (may be NULL) says the
+ * deadline ran out. For callers outside evo_net (FTP, the server probes). */
+int evo_net_connect_addr(const struct addrinfo *rp, int timeout_ms, int *timed_out);
 
 /* Initialize background network worker and request queue. */
 int  evo_net_init(void);

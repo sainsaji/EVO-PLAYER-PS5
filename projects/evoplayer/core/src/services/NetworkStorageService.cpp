@@ -3,11 +3,15 @@
 #include "evo_data_path.h"
 #include "evo_smb_io.h"
 #include "evo_boot_log.h"
+#include "evo_net.h"
 #include "cJSON.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <map>
+#include <pthread.h>
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
@@ -26,7 +30,7 @@ static long long monotonicMs() {
     return static_cast<long long>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
 }
 
-int NetworkStorageService::probeReachable(const std::string& host, int port, int timeoutMs) {
+int NetworkStorageService::probeReachable(const std::string& host, int port, int timeoutMs, bool ftpGreeting) {
     struct addrinfo hints, *res = nullptr;
     char portStr[16];
     std::snprintf(portStr, sizeof(portStr), "%d", port);
@@ -37,33 +41,110 @@ int NetworkStorageService::probeReachable(const std::string& host, int port, int
 
     const long long t0 = monotonicMs();
     int result = -1;
-    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    /* connect() ignores O_NONBLOCK and SO_SNDTIMEO on this console and waits
+     * ~75 s on a dead LAN host; evo_net_connect_addr() stops waiting in time. */
+    int sock = evo_net_connect_addr(res, timeoutMs, nullptr);
     if (sock >= 0) {
-        /* O_NONBLOCK does not stop connect() blocking ~75 s on this console
-         * (measured on a dead LAN host), so the bound is the send timeout. */
-        struct timeval tv;
-        tv.tv_sec = timeoutMs / 1000;
-        tv.tv_usec = (timeoutMs % 1000) * 1000;
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        int rc = connect(sock, res->ai_addr, res->ai_addrlen);
-        bool up = (rc == 0);
-        if (!up && errno == EINPROGRESS) {
-            struct pollfd pfd;
-            pfd.fd = sock;
-            pfd.events = POLLOUT;
-            pfd.revents = 0;
-            if (poll(&pfd, 1, timeoutMs) > 0 && (pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
-                int err = 0;
-                socklen_t len = sizeof(err);
-                up = (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0);
+        bool up = true;
+        if (ftpGreeting) {
+            /* SO_RCVTIMEO bounds each recv (it does work for reads); the
+             * greeting is one short line. */
+            struct timeval tv;
+            tv.tv_sec = timeoutMs / 1000;
+            tv.tv_usec = (timeoutMs % 1000) * 1000;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            char buf[128];
+            size_t got = 0;
+            while (got < 3) {
+                ssize_t n = recv(sock, buf + got, sizeof(buf) - got, 0);
+                if (n <= 0) break;
+                got += static_cast<size_t>(n);
             }
+            up = got >= 3 && std::strncmp(buf, "220", 3) == 0;
         }
         if (up) result = static_cast<int>(std::max<long long>(1, monotonicMs() - t0));
         close(sock);
     }
     freeaddrinfo(res);
     return result;
+}
+
+namespace {
+struct UrlStatus {
+    int state = -1;            // 1 online, 0 offline, -1 not known yet
+    long long at = 0;          // monotonicMs() of the answer
+    bool probing = false;
+};
+pthread_mutex_t g_urlStatusLock = PTHREAD_MUTEX_INITIALIZER;
+std::map<std::string, UrlStatus> g_urlStatus;   // key "host:port"
+
+struct UrlProbe {
+    std::string key, host;
+    int port = 0;
+    bool ftp = false;
+};
+
+void* urlProbeEntry(void* arg) {
+    UrlProbe* p = static_cast<UrlProbe*>(arg);
+    const int ms = NetworkStorageService::probeReachable(p->host, p->port, 2500, p->ftp);
+    pthread_mutex_lock(&g_urlStatusLock);
+    g_urlStatus[p->key] = {ms >= 0 ? 1 : 0, monotonicMs(), false};
+    pthread_mutex_unlock(&g_urlStatusLock);
+    delete p;
+    return nullptr;
+}
+}  // namespace
+
+int NetworkStorageService::serverStatusForUrl(const std::string& url) {
+    bool ftp;
+    int port;
+    if (url.compare(0, 6, "smb://") == 0) { ftp = false; port = 445; }
+    else if (url.compare(0, 6, "ftp://") == 0) { ftp = true; port = 21; }
+    else return -1;
+
+    /* scheme://[user[:pass]@]host[:port]/... */
+    std::string auth = url.substr(6, url.find('/', 6) == std::string::npos ? std::string::npos
+                                                                            : url.find('/', 6) - 6);
+    const size_t at = auth.rfind('@');
+    if (at != std::string::npos) auth = auth.substr(at + 1);
+    std::string host = auth;
+    const size_t colon = auth.rfind(':');
+    if (colon != std::string::npos) {
+        host = auth.substr(0, colon);
+        port = std::atoi(auth.c_str() + colon + 1);
+    }
+    if (host.empty() || port <= 0) return -1;
+    const std::string key = host + ":" + std::to_string(port);
+
+    const long long now = monotonicMs();
+    pthread_mutex_lock(&g_urlStatusLock);
+    UrlStatus& st = g_urlStatus[key];
+    const int previous = st.state;
+    if (st.probing || (st.state >= 0 && now - st.at < 30000)) {
+        pthread_mutex_unlock(&g_urlStatusLock);
+        return previous;
+    }
+    st.probing = true;
+    pthread_mutex_unlock(&g_urlStatusLock);
+
+    UrlProbe* p = new UrlProbe{key, host, port, ftp};
+    pthread_attr_t attr;
+    pthread_t th;
+    int rc = pthread_attr_init(&attr);
+    if (rc == 0) {
+        pthread_attr_setstacksize(&attr, 1u << 18);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        rc = pthread_create(&th, &attr, urlProbeEntry, p);
+        pthread_attr_destroy(&attr);
+    }
+    if (rc != 0) {
+        EVO_LOGE("netstore", "server probe thread not started (%d)", rc);
+        delete p;
+        pthread_mutex_lock(&g_urlStatusLock);
+        g_urlStatus[key].probing = false;
+        pthread_mutex_unlock(&g_urlStatusLock);
+    }
+    return previous;   // the last answer stands while the recheck runs
 }
 
 NetworkStorageService& NetworkStorageService::getInstance() {

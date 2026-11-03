@@ -64,8 +64,16 @@ public:
     std::string buildMediaUrl(const NetworkShare& share, const std::string& remotePath) const;
 
     /* Opens and closes a TCP connection to host:port. Touches no client state,
-     * so it is safe off the UI thread. Returns the connect time in ms, or -1. */
-    static int probeReachable(const std::string& host, int port, int timeoutMs);
+     * so it is safe off the UI thread. Returns the connect time in ms, or -1.
+     * ftpGreeting: also wait for the server's "220" line, so a port that takes
+     * the connection but never answers (seen on 127.0.0.1:2121) is not "online". */
+    static int probeReachable(const std::string& host, int port, int timeoutMs, bool ftpGreeting = false);
+
+    /* For a smb:// or ftp:// URL: 1 = its server answered, 0 = offline,
+     * -1 = not known yet (a probe is now running on a worker) or not a network
+     * URL. Never blocks; answers are kept 30 s. Home uses it to mark a hero
+     * whose server is down before Play is pressed. */
+    static int serverStatusForUrl(const std::string& url);
 
     /* Tests a share's address, credentials, and target share/folder. Touches no
      * shared client state; safe to call on a worker thread. */

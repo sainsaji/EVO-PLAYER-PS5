@@ -18,6 +18,7 @@
 #include <sys/time.h>
 
 #include "evo_boot_log.h"
+#include "evo_net.h"
 
 namespace evo {
 
@@ -56,47 +57,17 @@ static int createConnectedSocket(const std::string& host, int port, int timeoutS
     int limitSec = (timeoutSec > 0) ? timeoutSec : 3;
 
     for (rp = res; rp != nullptr; rp = rp->ai_next) {
-        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        // connect() ignores O_NONBLOCK and SO_SNDTIMEO on this console and waits
+        // ~75 s on a dead host; evo_net_connect_addr() stops waiting in time.
+        sock = evo_net_connect_addr(rp, limitSec * 1000, nullptr);
         if (sock < 0) continue;
 
-        // Set non-blocking so connect() does not hang for 75s if host drops packets
-        int flags = fcntl(sock, F_GETFL, 0);
-        if (flags >= 0) {
-            fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-        }
-
-        int connRes = connect(sock, rp->ai_addr, rp->ai_addrlen);
-        if (connRes == 0) {
-            // Connected immediately
-        } else if (connRes < 0 && (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EINTR)) {
-            struct pollfd pfd;
-            pfd.fd = sock;
-            pfd.events = POLLOUT;
-            int pr = poll(&pfd, 1, limitSec * 1000);
-            if (pr > 0 && (pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
-                int err = 0;
-                socklen_t len = sizeof(err);
-                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
-                    connRes = 0; // Connection succeeded
-                }
-            }
-        }
-
-        if (connRes == 0) {
-            // Restore blocking mode and apply socket timeouts
-            if (flags >= 0) {
-                fcntl(sock, F_SETFL, flags);
-            }
-            struct timeval tv;
-            tv.tv_sec = limitSec;
-            tv.tv_usec = 0;
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            break;
-        }
-
-        close(sock);
-        sock = -1;
+        struct timeval tv;
+        tv.tv_sec = limitSec;
+        tv.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        break;
     }
 
     freeaddrinfo(res);
