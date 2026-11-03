@@ -324,13 +324,16 @@ static long long bl_mono_ms(void)
     return (long long)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000L;
 }
 
-/* Takes the unreported repeat count (0 if none). Caller holds g_rep_lock. */
+/* Takes the unreported repeat count (0 if none). Caller holds g_rep_lock.
+ * One repeat is just written again: a summary line would be longer than it. */
 static int bl_rep_take(char *summary, size_t cap)
 {
     const int n = g_rep_count;
-    if (n > 0)
-        snprintf(summary, cap, "INFO  log: last line repeated %d more time%s over %lld ms",
-                 n, n == 1 ? "" : "s", g_rep_last_ms - g_rep_first_ms);
+    if (n == 1)
+        snprintf(summary, cap, "%s", g_rep_last);
+    else if (n > 1)
+        snprintf(summary, cap, "INFO  log: last line repeated %d more times over %lld ms",
+                 n, g_rep_last_ms - g_rep_first_ms);
     g_rep_count = 0;
     return n;
 }
@@ -343,7 +346,7 @@ static void bl_vlog(const char *level, const char *fmt, va_list ap)
     vsnprintf(line + ln, sizeof line - (size_t)ln, fmt, ap);
     evo_log_redact(line, sizeof line);
 
-    char summary[120];
+    char summary[sizeof g_rep_last];
     int pending;
     pthread_mutex_lock(&g_rep_lock);
     if (strcmp(line, g_rep_last) == 0) {
@@ -534,7 +537,7 @@ void evo_boot_log_flush(void)
 void evo_boot_log_kick(void)
 {
     /* Report repeats that have gone quiet (or gone on for a minute). */
-    char summary[120];
+    char summary[sizeof g_rep_last];
     int pending = 0;
     pthread_mutex_lock(&g_rep_lock);
     if (g_rep_count > 0) {
