@@ -96,7 +96,7 @@ over the addons saved in a Nuvio web app.
   so every added addon vanished at the next start (fixed 2026-10-21, with a round-trip
   test).
 
-### Stremio account (0.14)
+### Stremio account (0.13.5)
 
 `addons/src/evo_stremio_account.c` speaks the Stremio API (`api.strem.io`, the protocol of
 stremio-core): sign-in by a link code (`link.stremio.com/api/v2/create`, then `read` every
@@ -173,5 +173,5 @@ The host preview has fixtures for each home: `shelves` (Jellyfin), `shelves_stre
 ## Not built
 
 TorBox and Real-Debrid as direct resolvers (`CAP_RESOLVE` providers with no catalog; the
-resolver chain exists for them), a full XMLTV grid, Trakt sync (#176), DLNA/UPnP (SMB landed in v0.14.0)
+resolver chain exists for them), a full XMLTV grid, Trakt sync (#176), DLNA/UPnP (SMB landed in v0.13.5)
 sources (#213), per-stream HTTP headers for IPTV (#92). See [../planning/roadmap.md](../planning/roadmap.md).

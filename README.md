@@ -14,7 +14,7 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ---
 
-## What's New in v0.14.0
+## What's New in v0.13.5
 
 - **Skip intros & credits:** a **Skip intro** / **Skip credits** / **Next episode** button appears while the playhead is inside one, and **TRIANGLE** presses it. **Settings → Video & Display → Skip intros & credits** is Off, Ask (default) or Auto. It works for every file whose chapters are named Intro, Opening, OP, Recap, Credits, Ending, ED or Outro, and uses the media server's own marks on Jellyfin and Emby.
 - **NTFS USB drives:** open read-only. Browse, play, view pictures and load subtitles from them.

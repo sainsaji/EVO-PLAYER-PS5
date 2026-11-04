@@ -5,11 +5,11 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
-## 0.14.0
+## 0.13.5
 
-![](https://img.shields.io/badge/Release-v0.14.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
+![](https://img.shields.io/badge/Release-v0.13.5-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
 
-**Network shares, a detail page, a Stremio account, and a log viewer on your phone.** 0.14.0 adds SMB shares with a proper Add Server flow, read-only NTFS drives, a movie and show detail page, skip intro and credits, native Stremio sign-in with a ranked automatic stream, true HDR colour, TLS certificate checks, and a phone and PC log viewer that can file a bug report for you.
+**Network shares, a detail page, a Stremio account, and a log viewer on your phone.** 0.13.5 adds SMB shares with a proper Add Server flow, read-only NTFS drives, a movie and show detail page, skip intro and credits, native Stremio sign-in with a ranked automatic stream, true HDR colour, TLS certificate checks, and a phone and PC log viewer that can file a bug report for you.
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-What is open, grouped by area, as of **2026-10-24** (v0.14.0 prepared).
+What is open, grouped by area, as of **2026-10-24** (v0.13.5 prepared).
 GitHub is the live source: `gh issue list --state open`, or the "EVO Player Roadmap"
 project board ([project-tracking.md](project-tracking.md)). This page is the map across
 them. Each issue body ends with a "References & sequencing" block naming the docs and files
@@ -15,7 +15,7 @@ The v0.8.0 to v1.1.0 milestones are all closed. v0.11.0 still lists four issues 
 are `priority: medium` and `priority: low`; `hw-verify-pending` marks code that is in but
 not yet seen on a console.
 
-## Landed in v0.14.0
+## Landed in v0.13.5
 
 SMB shares with a step-by-step Add Server flow and Online / Offline status (#213, #226),
 read-only NTFS drives (#217), cover art on FTP and SMB (#230), a user-settable phone and
@@ -92,7 +92,7 @@ selection on the played item (#214). See [../../CHANGELOG.md](../../CHANGELOG.md
 | #180 | A malformed playlist entry must not fail the whole playlist (bug, `medium`) |
 | #179 | Live TV search and recordings |
 | #176 | Trakt sync for Nuvio and Stremio (watched state and progress) |
-| #213 | More network sources: SMB (landed in v0.14.0) and DLNA/UPnP |
+| #213 | More network sources: SMB (landed in v0.13.5) and DLNA/UPnP |
 
 ## Interface and console
 

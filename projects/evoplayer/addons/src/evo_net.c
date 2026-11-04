@@ -451,7 +451,7 @@ static pthread_mutex_t g_ssl_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 /*
  * Certificate verification.
  *
- * Until 0.14 every HTTPS request accepted any certificate, so anyone on the
+ * Until 0.13.5 every HTTPS request accepted any certificate, so anyone on the
  * path (a hostile Wi-Fi, a poisoned DNS answer) could read what EVO sends:
  * the Stremio authKey, and the debrid keys that addon URLs carry. Requests to
  * public hosts are now verified against the Mozilla root set shipped in the

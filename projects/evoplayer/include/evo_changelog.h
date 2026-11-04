@@ -26,11 +26,11 @@ typedef struct evo_changelog_release {
 } evo_changelog_release;
 
 /*
- * Release 0.14.0
+ * Release 0.13.5
  *
  * The full notes are in CHANGELOG.md. The screen scrolls this list (right stick).
  */
-static const evo_changelog_item EVO_CL_0140[] = {
+static const evo_changelog_item EVO_CL_0135[] = {
     { EVO_CL_NEW,      "SMB / WINDOWS SHARES - STREAM DIRECTLY FROM A PC, NAS OR SAMBA SERVER" },
     { EVO_CL_NEW,      "ADD SERVER IN STEPS - ADDRESS, GUEST OR ACCOUNT, LOGIN TEST, SHARE PICKER" },
     { EVO_CL_NEW,      "ONLINE / OFFLINE STATUS ON EVERY SERVER CARD, EDIT AND REMOVE FROM OPTIONS" },
@@ -261,7 +261,7 @@ static const evo_changelog_item EVO_CL_001[] = {
 };
 
 static const evo_changelog_release EVO_CHANGELOG_RELEASES[] = {
-    { "0.14.0", "NETWORK SHARES, DETAIL PAGE & STREMIO ACCOUNT", "NOVEMBER 2026", EVO_CL_0140, sizeof(EVO_CL_0140)/sizeof(EVO_CL_0140[0]) },
+    { "0.13.5", "NETWORK SHARES, DETAIL PAGE & STREMIO ACCOUNT", "NOVEMBER 2026", EVO_CL_0135, sizeof(EVO_CL_0135)/sizeof(EVO_CL_0135[0]) },
     { "0.13.0", "UPDATER, CHAPTERS & PROVIDER SHELVES", "OCTOBER 2026", EVO_CL_0130, sizeof(EVO_CL_0130)/sizeof(EVO_CL_0130[0]) },
     { "0.12.5", "PLEX INTEGRATION & MULTI-USB", "OCTOBER 2026", EVO_CL_0125, sizeof(EVO_CL_0125)/sizeof(EVO_CL_0125[0]) },
     { "0.12.0", "PASSTHROUGH AUDIO & PHONE INPUT", "OCTOBER 2026", EVO_CL_0120, sizeof(EVO_CL_0120)/sizeof(EVO_CL_0120[0]) },
