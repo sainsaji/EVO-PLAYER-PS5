@@ -16,6 +16,7 @@
 #include "evo_hui_modals.hpp"
 #include "evo_hui_osd.hpp"
 #include "evo_hui_screens.hpp"
+#include "../../browser/evo_browser_hooks.hpp"
 #include "evo_hui_settings.hpp"
 #include "evo_hui_surround.hpp"
 #include "evo_hui_provider.hpp"
@@ -299,7 +300,6 @@ struct Kit
     evo::kit::ImageViewer image;
     evo::kit::SurroundScreen surround;
     evo::kit::ProviderGridScreen provider;
-    evo::kit::WebPage webpage;
     evo::kit::KeyboardOverlay keyboard;
     bool keyboard_visible = false;
     /* Frame bookkeeping: one dt per presented frame, however many kit draws
@@ -451,8 +451,6 @@ struct Kit
                 surround.enter();
             else if (screen == Screen::provider)
                 provider.enter();
-            else if (screen == Screen::webpage)
-                webpage.enter();
         }
         const float dt = step();
         rail.update(dt);
@@ -611,7 +609,7 @@ const char *evo_hui_dev_focus_json(const char **screen_doc)
     else if (!has && k.drawn_last_frame == Screen::provider)
         has = k.provider.focus(&f);
     else if (!has && k.drawn_last_frame == Screen::webpage)
-        has = k.webpage.focus(&f);
+        has = evo::kit::web_browser_focus(&f);
     static std::string o;
     o.clear();
     if (!has)
@@ -940,26 +938,27 @@ int evo_hui_render_provider(int width, int height)
                     });
 }
 
-void evo_hui_update_webpage(const evo_hui_webpage_params_t *params)
-{
-    if (params)
-        kit().webpage.set(*params);
-}
-
 int evo_hui_render_webpage(int width, int height)
 {
     Kit &k = kit();
     return k.render(
         Screen::webpage, width, height,
         [&](float dt, hui::gfx::DrawList &list, const Context &ctx) {
-            k.web.update(k.batch);
-            const std::uint32_t t = k.web.tex[k.web.cur];
-            const float u1 = k.web.tex_w ? static_cast<float>(k.web.page_w) / static_cast<float>(k.web.tex_w) : 1.0f;
-            const float v1 = k.web.tex_h ? static_cast<float>(k.web.page_h) / static_cast<float>(k.web.tex_h) : 1.0f;
-            k.webpage.set_page(t, u1, v1);
-            k.webpage.update(dt);
-            k.webpage.draw(list, ctx);
-        }); /* with EVO's rail: the page sits right of it */
+            k.web.update(k.batch);   /* the engine's newest frame into the page texture */
+            evo::kit::web_browser_draw(list, ctx, dt);
+        }); /* with EVO's rail: the browser sits right of it */
+}
+
+/* The engine page for the copied browser UI (browser/evo_browser_hooks.hpp). */
+int evo_browser_page_texture(std::uint32_t *tex, float *u1, float *v1)
+{
+    const WebFrame &w = kit().web;
+    if (!w.tex[w.cur])
+        return 0;
+    *tex = w.tex[w.cur];
+    *u1 = w.tex_w ? static_cast<float>(w.page_w) / static_cast<float>(w.tex_w) : 1.0f;
+    *v1 = w.tex_h ? static_cast<float>(w.page_h) / static_cast<float>(w.tex_h) : 1.0f;
+    return 1;
 }
 
 int evo_hui_render_webframe(int width, int height)

@@ -85,34 +85,29 @@ int  evo_hui_render_keyboard(int width, int height);
  * no engine host is sending frames. */
 int  evo_hui_render_webframe(int width, int height);
 
-/* #237 Phase 2: the Browser section's page view. EVO's rail stays on the
- * left (EVO_HUI_WEBPAGE_X wide); right of it an address bar across the top
- * (EVO_HUI_WEBPAGE_BAR_H tall), the page under it at 1:1 pixels, EVO's own
- * pointer over the page, and the button hints over the page's foot.
- * The page is the browser engine's newest frame (evo_browser_frame_*). */
+/* #237: the Web section. Prospero Browser's app and kit UI (browser/, see
+ * ui_kit/src/evo_hui_web.cpp), right of EVO's rail (EVO_HUI_WEBPAGE_X wide);
+ * the page in it is the browser engine's newest frame. */
 #define EVO_HUI_WEBPAGE_X     128   /* NavRail::kWidth */
-#define EVO_HUI_WEBPAGE_BAR_H 96
-#define EVO_HUI_WEBPAGE_W     (1920 - EVO_HUI_WEBPAGE_X)
-#define EVO_HUI_WEBPAGE_H     (1080 - EVO_HUI_WEBPAGE_BAR_H)
 
-typedef struct evo_hui_webpage_params_s {
-    const char* url;          /* address bar text */
-    const char* title;        /* page title; may be NULL or empty */
-    int         loading;      /* 1 while a page loads: a thin bar moves under the address */
-    int         can_back;     /* back / forward state, for the hints */
-    int         can_forward;
-    int         state;        /* evo_browser_state_t (evo_browser_engine.h) */
-    const char* message;      /* over the page area while state != READY:
-                                 "Starting the browser..." or why it failed */
-    int         pointer_visible;
-    int         pointer_x;    /* screen pixels, 1920x1080 space */
-    int         pointer_y;
-    int         pointer_hand; /* 1 over a link: a hand instead of an arrow */
-    int         hints_visible;
-} evo_hui_webpage_params_t;
-
-void evo_hui_update_webpage(const evo_hui_webpage_params_t* params);
 int  evo_hui_render_webpage(int width, int height);
+
+/* Pad input for it, from the core screen. evo_hui_web_input() returns 0 when
+ * the press leaves the browser (D-pad Left on its leftmost header button:
+ * EVO's rail), else 1. */
+enum {
+    EVO_HUI_WEB_UP = 1, EVO_HUI_WEB_DOWN, EVO_HUI_WEB_LEFT, EVO_HUI_WEB_RIGHT,
+    EVO_HUI_WEB_CROSS_DOWN, EVO_HUI_WEB_CROSS_UP, EVO_HUI_WEB_CIRCLE, EVO_HUI_WEB_TRIANGLE,
+    EVO_HUI_WEB_SQUARE, EVO_HUI_WEB_OPTIONS, EVO_HUI_WEB_L1, EVO_HUI_WEB_R1, EVO_HUI_WEB_TOUCHPAD,
+};
+int  evo_hui_web_input(int what);
+/* Sticks -1..1 (y down), triggers 0..1, every frame the screen is active. */
+void evo_hui_web_sticks(float lx, float ly, float rx, float ry, float l2, float r2, float dt);
+/* 1 once after the page focused a text field (EVO opens its keyboard). */
+int  evo_hui_web_take_text_focus(void);
+void evo_hui_web_insert_text(const char* utf8);
+/* 0 while EVO shows another screen: the engine stops painting. */
+void evo_hui_web_set_visible(int visible);
 
 #ifdef __cplusplus
 }

@@ -387,25 +387,6 @@ int main(int argc, char **argv)
     evo_rmlui_reader_params_t readerp{};
     evo_rmlui_image_params_t imagep{};
     std::vector<uint32_t> image_px;
-    /* #237: the Web page view, with a made-up page standing in for the engine's frame */
-    evo_hui_webpage_params_t webp{};
-    constexpr int kWebW = EVO_HUI_WEBPAGE_W;
-    constexpr int kWebH = EVO_HUI_WEBPAGE_H;
-    std::vector<uint32_t> web_px(static_cast<std::size_t>(kWebW) * kWebH, 0xFFFFFFFFu);
-    {
-        auto bar = [&](int x, int y, int w, int h, uint32_t c) {
-            for (int yy = y; yy < y + h && yy < kWebH; ++yy)
-                for (int xx = x; xx < x + w && xx < kWebW; ++xx)
-                    web_px[static_cast<std::size_t>(yy) * kWebW + xx] = c;
-        };
-        bar(0, 0, 1920, 110, 0xFFF4F1EEu);            /* site header */
-        bar(160, 36, 420, 40, 0xFF555555u);
-        bar(160, 170, 900, 54, 0xFF222222u);          /* headline */
-        for (int i = 0; i < 9; ++i)                    /* text lines */
-            bar(160, 270 + i * 46, i % 3 == 2 ? 1100 : 1500, 20, 0xFFBBBBBBu);
-        bar(160, 700, 380, 22, 0xFFD05F1Au);          /* a link */
-        bar(1240, 170, 520, 380, 0xFFE0D6CCu);        /* a picture */
-    }
     evo_keyboard_params_t kbp{};
     evo_rmlui_surround_params_t srp{};
     evo_hui_provider_params_t prp{};
@@ -834,45 +815,14 @@ int main(int argc, char **argv)
         {"dialog", 11, [&] { clear_focus(); fill_dialog_fixture(dialogp); }},
         {"reader", 13, [&] { clear_focus(); fill_reader_fixture(readerp); }},
         {"image", 14, [&] { clear_focus(); fill_image_fixture(imagep, image_px); }},
-        {"webpage", 18, [&] {
+        /* #237: the Web section, Prospero Browser's UI (one browser for all
+         * three: each fixture's presses carry on from the one before). */
+        {"web", 18, [&] { clear_focus(); }},
+        {"web_menu", 18, [&] { clear_focus(); evo_hui_web_input(EVO_HUI_WEB_OPTIONS); }},
+        {"web_address", 18, [&] {
              clear_focus();
-             webp = {};
-             webp.url = "https://en.wikipedia.org/wiki/PlayStation_5";
-             webp.title = "PlayStation 5 - Wikipedia";
-             webp.loading = 1;
-             webp.can_back = 1;
-             webp.state = 2;
-             webp.pointer_visible = 1;
-             webp.pointer_x = 900;
-             webp.pointer_y = 520;
-             webp.pointer_hand = 1;
-             webp.hints_visible = 1;
-         }},
-        {"webpage_arrow", 18, [&] {
-             clear_focus();
-             webp = {};
-             webp.url = "https://duckduckgo.com/";
-             webp.state = 2;
-             webp.pointer_visible = 1;
-             webp.pointer_x = 700;
-             webp.pointer_y = 400;
-             webp.hints_visible = 1;
-         }},
-        {"webpage_starting", 18, [&] {
-             clear_focus();
-             webp = {};
-             webp.url = "https://duckduckgo.com/";
-             webp.state = 1;
-             webp.message = "Starting the browser...";
-             webp.hints_visible = 1;
-         }},
-        {"webpage_failed", 18, [&] {
-             clear_focus();
-             webp = {};
-             webp.url = "https://duckduckgo.com/";
-             webp.state = 3;
-             webp.message = "The browser needs an ELF loader (elfldr on port 9021)";
-             webp.hints_visible = 1;
+             evo_hui_web_input(EVO_HUI_WEB_CIRCLE);
+             evo_hui_web_input(EVO_HUI_WEB_TRIANGLE);
          }},
         {"surround", 16, [&] { clear_focus(); fill_surround_fixture(srp, 0); }},
         {"surround_orb", 16, [&] { clear_focus(); fill_surround_fixture(srp, 1); }},
@@ -934,7 +884,6 @@ int main(int argc, char **argv)
         evo::kit::ToastOverlay toast;
         evo::kit::ReaderScreen reader;
         evo::kit::ImageViewer image;
-        evo::kit::WebPage webpage;
         evo::kit::KeyboardOverlay keyboard;
         evo::kit::SurroundScreen surround;
         evo::kit::ProviderGridScreen provider;
@@ -961,8 +910,6 @@ int main(int argc, char **argv)
         reader.enter();
         image.set(imagep);
         image.enter();
-        webpage.set(webp);
-        webpage.enter();
         keyboard.set(kbp);
         keyboard.enter();
         surround.set(srp);
@@ -1014,8 +961,6 @@ int main(int argc, char **argv)
                 surround.update(kDt);
             else if (f.kind == 17)
                 provider.update(kDt);
-            else if (f.kind == 18)
-                webpage.update(kDt);
             rail.update(kDt);
             textures.tick();
             time += kDt;
@@ -1046,8 +991,12 @@ int main(int argc, char **argv)
             provider.draw(list, ctx);
         else if (f.kind == 18)
         {
-            webpage.set_page(webp.state == 2 ? textures.pixels(web_px.data(), kWebW, kWebH) : 0u, 1.0f, 1.0f);
-            webpage.draw(list, ctx);
+            /* the browser animates as it updates: run it a second, draw the last frame */
+            for (int i = 0; i < 60; ++i)
+            {
+                list.clear();
+                evo::kit::web_browser_draw(list, ctx, kDt);
+            }
         }
         const bool over_video = (f.kind >= 4 && f.kind <= 6) || f.kind == 11 || f.kind == 12 || f.kind == 15;
         if (over_video)

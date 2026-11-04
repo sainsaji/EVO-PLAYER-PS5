@@ -190,47 +190,52 @@ The rail has a **Web** entry (globe icon) after Providers. Its section order
 lives in `ScreenManager.cpp` (`kSecWeb`, `kSecSettings`, `kSecAbout`) and in
 the kit's `rail_items`; keep the two in step.
 
-- **Web home** (`ScreenId::WebHome`, `core/src/screens/WebScreens.cpp`): the
-  generic list screen. Row one opens the address keyboard (EVO's own keyboard
-  with the phone page, since addresses are long); then bookmarks, then
-  history. Opening the section starts the engine in the background, and the
-  subtitle says when it is starting or why it cannot.
-- **Page view** (`ScreenId::WebPage`, kit screen `evo_hui_render_webpage`):
-  EVO's rail stays on the left (128 px, the Web entry lit); right of it the
-  address bar on top (96 px) and the page under it at 1:1 (the engine is
-  resized to 1792x984), EVO's pointer over it. D-pad Left opens the rail.
-- **Bookmarks and history:** `web_bookmarks.txt` and `web_history.txt` in
-  EVO's data folder, one `url<TAB>title` per line, history capped at 50. A
-  fresh install gets three default bookmarks.
-- **Typed text** goes through `evo_web_url.c` (host tests in
-  `tests/test_web_url.cpp`): a host gets `https://`, an IPv4 address or
-  `localhost` gets `http://` (LAN servers), anything else is a DuckDuckGo
-  search.
+The section is **Prospero Browser's own UI**, copied into EVO, not a screen
+EVO draws itself: speed dial, address bar and keyboard, tab strip, Options
+menu, bookmarks, history and settings. It sits right of EVO's rail (128 px,
+Web lit), laid out for 1792x1080.
+
+- **The copy** (`projects/evoplayer/browser/`, from `D:\Projects\Prospero
+  Browser\src`): `browser/` (BrowserApp, tabs, page view, bookmarks, history,
+  settings, cursor), `web/` (PageEngine interface, the built-in renderer for
+  `about:` pages), `ui/browser_ui.cpp` (the kit drawing). Every line EVO
+  changed is marked `EVO:`: the hard-coded 1920 widths now use the app's
+  width, the header's right-hand buttons moved inside 1792 px, the page
+  viewport draws EVO's page texture, storage is `/data/evoplayer/browser/`,
+  tabs are capped at 1. Bring Prospero fixes over by diffing against it.
+- **EVO stand-ins**, so the copies compile unchanged: `net/download_manager.hpp`
+  (no downloads yet: a notice says so), `net/http_client.hpp` (fails at once:
+  every web page goes to the engine), `browser/page_texture.hpp` (no GL
+  texture), `platform/ps5/webkit_dialog.hpp` (no system browser), and
+  `evo_shims.cpp` (the kit's `hui::sys::log` into `evo.log`).
+- **`evo_page_engine.cpp`**: Prospero's `web::PageEngine` on this seam. The
+  host has one web view, so the newest page owns it and an older one goes
+  quiet (Prospero restores a session by opening the saved tab, then closing
+  its start tab). Frames do not pass through it: the kit copies the host's
+  buffers into its textures (`WebFrame`) and `evo_browser_page_texture()`
+  hands that texture to the page viewport.
+- **Kit glue** (`ui_kit/src/evo_hui_web.cpp`): creates the app, draws it
+  shifted right of the rail, takes pad input (`evo_hui_web_input`,
+  `evo_hui_web_sticks`). **Core screen** (`WebScreen`, `ScreenId::WebHome`):
+  passes the pad in, and opens EVO's keyboard when a page field the user just
+  clicked (within 1.5 s) takes focus; the text goes in with `TEXT`.
+- **D-pad Left opens EVO's rail** from the leftmost header button, from the
+  speed dial's first column, and always on a web page (Prospero would send
+  the page an arrow key, and the D-pad would never leave it).
+- **Host preview:** `hui_preview.sh` renders `hui_web`, `hui_web_menu` and
+  `hui_web_address` with engine stubs (`tools/hui_preview/web_stubs.cpp`).
 - **Engine files:** `prosperoweb-broker.elf` and `prosperoweb.elf` are looked
   for in `/mnt/usb0`, then `/data/evoplayer/browser` (until they are bundled
   in the `.ffpfsc`).
 
-| Page view | does |
-|---|---|
-| Left stick | moves the pointer (squared response, 1500 px/s at full tilt) |
-| Right stick | scrolls, both ways |
-| D-pad Up / Down / Right | scrolls 160 px a press |
-| D-pad Left | opens EVO's rail |
-| Cross | clicks (press and release are sent apart, so drags work) |
-| Square | edits the address |
-| L1 / R1 | back / forward |
-| Triangle | reload, or stop while loading |
-| Options | bookmarks the page, or removes the bookmark |
-| Circle | back in the page's history, else to the Web home |
+Prospero's own controls apply (pointer on the left stick, page scroll on the
+right stick and triggers, D-pad to the page as arrow keys, Triangle for the
+address, Options for the menu, L1/R1 tabs, Circle back). Leaving the section
+sends `VISIBLE 0`, so the engine stops painting while EVO shows anything else.
 
-A text field the user has just clicked (within 1.5 s) opens EVO's keyboard,
-and the text is inserted into it. A field that a page focuses on its own does
-not. `window.open()` loads in the same page. Leaving the page view sends
-`VISIBLE 0`, so the engine stops painting while EVO shows anything else.
-
-**Not yet:** playback from pages (Phase 3), a restart after the engine dies
-(the section shows why and stays failed until EVO restarts), the RmlUi
-fallback rail (it has no Web entry).
+**Not yet:** playback from pages (Phase 3), downloads, more than one tab,
+emoji icons on the speed dial (the kit fonts show `?`), a restart after the
+engine dies, the RmlUi fallback rail (it has no Web entry).
 
 **Spike trigger.** With `/mnt/usb0/prosperoweb.elf` present, the spike spawns
 the engine host instead of the frame test. Line 2 of

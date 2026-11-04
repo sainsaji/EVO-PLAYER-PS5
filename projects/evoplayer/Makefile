@@ -288,7 +288,15 @@ ifeq ($(AGC_DEVICE),1)
                    ui_kit/src/evo_hui_surround.cpp \
                    ui_kit/src/evo_hui_provider.cpp \
                    ui_kit/src/evo_hui_complex.cpp \
-                   ui_kit/src/evo_hui_webpage.cpp
+                   ui_kit/src/evo_hui_web.cpp
+    # #237: Prospero Browser's app and kit UI, copied (browser/), on EVO's engine.
+    UI_KIT_SRCS += browser/browser/browser_app.cpp browser/browser/tab_manager.cpp \
+                   browser/browser/page_view.cpp browser/browser/bookmarks.cpp \
+                   browser/browser/history.cpp browser/browser/browser_settings.cpp \
+                   browser/browser/navigation.cpp browser/browser/virtual_cursor.cpp \
+                   browser/web/html_document.cpp browser/web/css_engine.cpp \
+                   browser/ui/browser_ui.cpp \
+                   browser/evo_page_engine.cpp browser/evo_shims.cpp
 endif
 UI_KIT_OBJS := $(UI_KIT_SRCS:.cpp=.o)
 
@@ -301,6 +309,11 @@ ui_kit/obj/hui/%.o: $(HUI_ROOT)/src/%.cpp
 
 ui_kit/src/%.o: ui_kit/src/%.cpp
 	$(CCACHE) $(CXX) $(HUI_CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+# -Ibrowser: the copies include "platform/ps5/webkit_dialog.hpp" (EVO's
+# stand-in there) next to the kit's own platform/ps5/system.hpp.
+browser/%.o: browser/%.cpp
+	$(CCACHE) $(CXX) $(HUI_CXXFLAGS) -Ibrowser $(DEPFLAGS) -c -o $@ $<
 
 # -MMD -MP: emit a .d next to each .o listing its header prerequisites, so an
 # object rebuilds when a header it includes changes. Without this, editing e.g.

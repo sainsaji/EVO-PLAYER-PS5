@@ -34,7 +34,9 @@ SOURCES=("${ROOT}/tools/hui_preview/hui_preview.cpp"
          "${EVO}/ui_kit/src/evo_hui_settings.cpp"
          "${EVO}/ui_kit/src/evo_hui_settings_preview.cpp"
          "${EVO}/ui_kit/src/evo_hui_osd.cpp"
-         "${EVO}/ui_kit/src/evo_hui_webpage.cpp"
+         "${EVO}/ui_kit/src/evo_hui_web.cpp"
+         "${ROOT}/tools/hui_preview/web_stubs.cpp"
+         "${EVO}/browser/evo_page_engine.cpp"
          "${EVO}/ui_kit/src/evo_hui_modals.cpp"
          "${EVO}/ui_kit/src/evo_hui_misc.cpp"
          "${EVO}/ui_kit/src/evo_hui_extra.cpp"
@@ -44,6 +46,10 @@ SOURCES=("${ROOT}/tools/hui_preview/hui_preview.cpp"
 while IFS= read -r -d '' f; do SOURCES+=("$f"); done < <(
     find "${KIT}/src/gfx" "${KIT}/src/ui" "${KIT}/src/core" -name '*.cpp' -print0 | sort -z)
 SOURCES+=("${KIT}/src/audio/cues.cpp" "${KIT}/src/audio/mixer.cpp" "${KIT}/src/audio/wav.cpp")
+# #237: Prospero Browser's app and UI, copied into EVO (browser/).
+while IFS= read -r -d '' f; do SOURCES+=("$f"); done < <(
+    find "${EVO}/browser/browser" "${EVO}/browser/web" "${EVO}/browser/ui" -name '*.cpp' -print0 | sort -z)
+FLAGS+=(-I"${EVO}/browser")
 
 # Compile what changed, in parallel; headers are not tracked, so touch a
 # source (or delete build/hui_preview) after changing one.

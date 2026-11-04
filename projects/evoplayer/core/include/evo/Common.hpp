@@ -60,8 +60,8 @@ enum class ScreenId : int {
     SettingsExperimental = 34, /* #105 */
     ChapterPicker = 35,        /* #150 */
     SubtitleFile = 36,         /* pick a subtitle file anywhere on the console */
-    WebHome = 37,              /* #237: the Web section's home (address, bookmarks, history) */
-    WebPage = 38               /* #237: a web page, full screen, from the browser engine */
+    WebHome = 37,              /* #237: the Web section (Prospero Browser's UI, browser/) */
+    WebPage = 38               /* #237: no longer used (was the page view); kept so the ids stay */
 };
 
 // Playback Quality Profile
