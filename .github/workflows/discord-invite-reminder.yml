@@ -54,7 +54,7 @@ jobs:
           $when
 
           1. In Discord, make a new invite that never expires (Server Settings, Invites, set Expire after to Never).
-          2. Replace the old link \`https://discord.gg/MyNnCWNU5\` with the new one in:
+          2. Replace the old link \`https://discord.gg/47Nc8WtXh\` with the new one in:
              - README.md (the links at the top and in Community)
              - CHANGELOG.md (every release section has one; the release workflow copies the newest into the release notes)
              - .github/ISSUE_TEMPLATE/config.yml and .github/ISSUE_TEMPLATE/bug-report.yml

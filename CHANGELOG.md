@@ -13,7 +13,7 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60. PS5 Pro owners can use the `-pro` package for the larger memory mode.
 
-Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
 
 ### ![](https://img.shields.io/badge/UPDATES-9c27b0?style=flat-square) Updater
 
@@ -70,7 +70,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyN
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60.
 
-Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
 
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Media Servers & Addons
 
@@ -99,7 +99,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyN
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60.
 
-Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
 
 ### ![](https://img.shields.io/badge/AUDIO-9c27b0?style=flat-square) Sound
 
@@ -127,7 +127,7 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyN
 
 Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**, the native PS5 app store for [homebrew.page](https://homebrew.page). Runs on any jailbroken PS5 below firmware 13.60.
 
-Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**.
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
 
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Live TV & Media Servers
 

@@ -10,7 +10,7 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ![EVO Player home screen: Continue Watching, Jump back in and the library](docs/images/launch.png)
 
-**[Download the latest release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)** · **[Install from ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)** · **[Join the Discord](https://discord.gg/MyNnCWNU5)**
+**[Download the latest release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)** · **[Install from ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)** · **[Join the Discord](https://discord.gg/47Nc8WtXh)**
 
 ---
 
@@ -359,7 +359,7 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 
 ## Community
 
-Questions, bug reports, feature requests and early test builds: join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**. Many of 0.11.0's features started as requests there.
+Questions, bug reports, feature requests and early test builds: join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**. Many of 0.11.0's features started as requests there.
 
 To report a bug or send a pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md)** first.
 
