@@ -17,7 +17,7 @@ extern "C" {
 #include <algorithm>
 
 #ifndef EVO_PLAYER_VERSION
-#define EVO_PLAYER_VERSION "v0.13.0"
+#define EVO_PLAYER_VERSION "v0.13.5"
 #endif
 
 namespace evo {

@@ -26,7 +26,7 @@ build.
 | `attribute3` | `524352` (`0x80040`) | standard memory. `--pro-memory` sets bit 22 in the *packaged* copy only |
 | `kernel.flexibleMemorySize` | `1073741824` | 1 GiB, the most the console accepts. Default is 448 MB ([hardware/memory-budget.md](../hardware/memory-budget.md)) |
 | `downloadDataSize` | `256` | must be above 0 or `/download0` is not writable |
-| `contentVersion` | `NN.NNN.NNN` | **raise it every release** (0.13.5 is `01.013.005`), or ProsperoStore never offers the update; the release workflow fails if it did not go up |
+| `contentVersion` | `NN.NNN.NNN` | **raise it every release** (0.13.5 is `01.013.050`), or ProsperoStore never offers the update; the release workflow fails if it did not go up |
 
 Loader constants stay on the cross-firmware profile: module SDK `0x02000009`,
 companion `0x08050001`, FSELF magic `0x1D3D154F`. Use one stable title id.
