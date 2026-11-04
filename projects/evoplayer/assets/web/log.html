@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EVO Player - what is happening</title>
+<!--
+  EVO's log viewer, served by evo_log_server.c at /log (and / when no phone
+  keyboard is open). Three views over the same lines:
+    Now    live cards from /stats + plain-words alerts (and diag: findings)
+    Story  the session told as events: each video a card with a timeline
+    Log    every line, searchable, with routine lines hidden by default
+  Data: /info (version, model, last run, theme), /session.txt[?run=last]
+  (this session from disk), /stream (live lines), /stats (1 s poll).
+  No external files: fonts come from /web/, colours from the active EVO theme.
+-->
+<style>
+@font-face{font-family:Inter;font-weight:400;src:url(/web/inter.woff2) format("woff2");font-display:swap}
+@font-face{font-family:Inter;font-weight:600;src:url(/web/inter-semibold.woff2) format("woff2");font-display:swap}
+@font-face{font-family:Montserrat;font-weight:500;src:url(/web/montserrat-medium.woff2) format("woff2");font-display:swap}
+@font-face{font-family:EvoMono;font-weight:400;src:url(/web/dejavu-sans-mono.woff2) format("woff2");font-display:swap}
+:root{
+  /* MIDNIGHT, replaced by the console's current theme from /info */
+  --bg-top:#080D16;--bg-bottom:#03050A;--surface:#101A2Cf0;--surface-alt:#0C1422f0;--surface-sel:#16223Afa;
+  --border:#5A7DB433;--border-sel:#FFCD00;--accent:#FFCD00;--accent-soft:#FFCD0032;--accent-alt:#00CDFF;
+  --danger:#FF5C5C;--warn:#FFA94D;--good:#4CD38A;--text:#EEF4FF;--text2:#A3B6D0;--muted:#5E718C;--radius:16px;
+  --pill:#ffffff14;--mono:EvoMono,ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--bg-bottom)}
+body{margin:0;min-height:100vh;background:linear-gradient(var(--bg-top),var(--bg-bottom)) fixed;color:var(--text);
+  font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit}
+a{color:var(--accent-alt)}
+.wrap{max-width:1200px;margin:0 auto;padding:0 20px}
+/* header */
+header{position:sticky;top:0;z-index:5;background:var(--bg-top);padding-top:14px}
+.hrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-family:Montserrat,Inter,sans-serif;font-weight:500;font-size:22px;letter-spacing:.02em;white-space:nowrap}
+.brand b{color:var(--accent);font-weight:500}
+.meta{color:var(--text2);font-size:13px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.live{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;padding:3px 10px;border-radius:999px;background:var(--pill)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.live.on i{background:var(--good);box-shadow:0 0 0 3px #4cd38a33}
+.live.off i{background:var(--danger)}
+.sp{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);font-weight:600;font-size:13px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:var(--text2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#0b0f17}
+.btn[disabled]{opacity:.4;cursor:default}
+.tabs{display:flex;gap:4px;margin:14px 0 0;border-bottom:1px solid var(--border)}
+.tab{padding:10px 16px;border:0;background:none;color:var(--text2);font-weight:600;cursor:pointer;border-bottom:3px solid transparent;
+  display:inline-flex;gap:8px;align-items:center}
+.tab.on{color:var(--text);border-bottom-color:var(--accent)}
+.badge{font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px}
+.badge.e{background:#ff5c5c26;color:var(--danger)}.badge.w{background:#ffa94d24;color:var(--warn)}
+.runsel{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.runsel button{border:0;background:none;padding:6px 12px;font-size:13px;font-weight:600;color:var(--text2);cursor:pointer}
+.runsel button.on{background:var(--surface-sel);color:var(--text)}
+main{padding:18px 0 60px}
+.view{display:none}.view.on{display:block}
+.label{font-family:Montserrat,Inter,sans-serif;font-weight:500;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:22px 0 10px}
+.label:first-child{margin-top:4px}
+.card{background:linear-gradient(var(--surface),var(--surface-alt));border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;min-width:0}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--pill);color:var(--text);margin:0 4px 4px 0;white-space:nowrap}
+.pill.e{background:#ff5c5c26;color:var(--danger)}.pill.w{background:#ffa94d24;color:var(--warn)}.pill.g{background:#4cd38a22;color:var(--good)}
+.pill.a{background:var(--accent-soft);color:var(--accent)}
+.dim{color:var(--text2)}.muted{color:var(--muted)}
+.empty{padding:26px;text-align:center;color:var(--text2)}
+/* NOW */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.cards .card h4{margin:0 0 6px;font:500 11px Montserrat,Inter,sans-serif;letter-spacing:.14em;color:var(--text2);text-transform:uppercase}
+.big{font-size:24px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font-size:13px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card.warn{border-color:#ffa94d66}.card.warn .big{color:var(--warn)}
+.card.bad{border-color:#ff5c5c80}.card.bad .big{color:var(--danger)}
+.card.idle .big{color:var(--text2)}
+svg.spark{display:block;width:100%;height:38px;margin-top:8px}
+.prog{height:6px;border-radius:3px;background:var(--pill);margin-top:10px;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--accent);width:0}
+.alert{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;margin-bottom:10px;border-radius:var(--radius);border:1px solid #ffa94d66;background:#ffa94d14}
+.alert.bad{border-color:#ff5c5c80;background:#ff5c5c14}
+.alert.diag{border-color:var(--accent);background:var(--accent-soft)}
+.alert .ic{font-size:18px;line-height:1.3}
+.alert b{display:block}
+.alert .why{color:var(--text2);font-size:14px}
+.memrow{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--text2)}
+.memrow b{color:var(--text);font-weight:600}
+.memrow span{white-space:nowrap}
+.plist .pi>div,.ev.minor .body>span:last-child{min-width:0;overflow-wrap:anywhere}
+.memrow{overflow-wrap:anywhere}
+.plist .pi{display:flex;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border);cursor:pointer}
+.plist .pi:last-child{border-bottom:0}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 9px;background:var(--muted)}
+.dot.w{background:var(--warn)}.dot.e{background:var(--danger)}.dot.g{background:var(--good)}.dot.a{background:var(--accent)}
+.when{font:12px var(--mono);color:var(--muted)}
+/* STORY */
+.ev{display:grid;grid-template-columns:62px minmax(0,1fr);gap:14px;margin-bottom:12px}
+.ev>.when{padding-top:15px;text-align:right}
+.ev.minor>.when{padding-top:3px}
+.ev.minor .body{padding:2px 0;color:var(--text2);display:flex;gap:10px}
+.ev .card h3{margin:0;font-size:17px;font-weight:600;overflow-wrap:anywhere}
+.ev .card .src{color:var(--text2);font-size:13px;margin:2px 0 8px;overflow-wrap:anywhere}
+.ev .card.now{border-color:var(--border-sel)}
+.ev.bad .card{border-color:#ff5c5c80}
+.tl{position:relative;height:14px;border-radius:7px;background:var(--pill);margin:14px 0 26px}
+.tl .fill{position:absolute;left:0;top:0;bottom:0;border-radius:7px;background:var(--accent-soft);border-right:2px solid var(--accent)}
+.tl .seg{position:absolute;top:0;bottom:0;background:#ffa94d55}
+.tl .mk{position:absolute;top:-4px;width:4px;height:22px;border-radius:2px;margin-left:-2px}
+.tl .mk.w{background:var(--warn)}.tl .mk.e{background:var(--danger)}.tl .mk.g{background:var(--good)}
+.tl .ax{position:absolute;top:20px;font:11px var(--mono);color:var(--muted)}
+.tl .ax.r{right:0}
+.sum{margin:6px 0 0;padding-left:20px}
+.sum li{margin:3px 0}
+.more{margin-top:10px;font-size:13px;font-weight:600;color:var(--accent-alt);cursor:pointer;background:none;border:0;padding:0}
+.lines{display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:8px;max-height:360px;overflow:auto}
+.lines.on{display:block}
+/* LOG */
+.lbar{position:sticky;top:var(--hdr,112px);z-index:3;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;margin:0 -10px;
+  background:linear-gradient(var(--bg-top),var(--bg-top))}
+.search{flex:1 1 220px;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface)}
+.search input{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--text);font:inherit;font-size:14px}
+.search:focus-within{border-color:var(--accent)}
+.seg2{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--surface)}
+.seg2 button{border:0;background:none;padding:7px 12px;font-size:13px;font-weight:600;color:var(--text2);cursor:pointer}
+.seg2 button.on{background:var(--surface-sel);color:var(--text)}
+.chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--text2);cursor:pointer;white-space:nowrap}
+.chk input{accent-color:var(--accent)}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}
+.tag{font:12px var(--mono);padding:3px 10px;border-radius:999px;background:var(--pill);color:var(--text2);border:1px solid transparent;cursor:pointer}
+.tag.on{border-color:var(--accent);color:var(--text)}
+.tag span{color:var(--muted);margin-left:4px}
+.log{font:12.5px/1.55 var(--mono);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:#00000033}
+.r{display:grid;grid-template-columns:100px 52px minmax(0,1fr);gap:0 10px;padding:3px 12px;border-bottom:1px solid #ffffff08}
+.r:last-child{border-bottom:0}
+.r .t{color:var(--muted)}.r .l{font-size:11px;font-weight:700;color:var(--muted)}
+.r .m{white-space:pre-wrap;overflow-wrap:anywhere}
+.r .g{color:var(--accent-alt)}
+.r.W{background:#ffa94d0d}.r.W .l,.r.W .m{color:var(--warn)}
+.r.E{background:#ff5c5c12}.r.E .l,.r.E .m{color:var(--danger)}
+.r.D .m{color:var(--accent)}
+.r.x .m{color:var(--muted)}
+.r.sel{box-shadow:inset 3px 0 0 var(--accent);background:var(--accent-soft)}
+mark{background:var(--accent-soft);color:var(--text);border-radius:3px;outline:1px solid var(--accent)}
+.note{padding:6px 12px;color:var(--muted);font:12px var(--mono);text-align:center;border-bottom:1px solid #ffffff08}
+.fab{position:fixed;right:18px;bottom:18px;z-index:6;box-shadow:0 6px 18px #0008}
+/* report sheet */
+.scrim{position:fixed;inset:0;z-index:10;background:#000000b4;display:flex;align-items:center;justify-content:center;padding:16px}
+.sheet{width:100%;max-width:560px;max-height:100%;overflow:auto;padding:20px 22px;box-shadow:0 12px 40px #000c;
+  background:linear-gradient(var(--surface),var(--surface-alt)),var(--bg-top)}   /* theme cards are slightly see-through */
+.sheet .label{margin-top:0}
+.steps{margin:0;padding-left:22px}
+.steps li{margin:0 0 16px}
+.steps li>div{margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.steps textarea{display:block;width:100%;margin-top:8px;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:var(--surface-alt);
+  color:var(--text);font:inherit;font-size:14px;resize:vertical}
+.steps textarea:focus{outline:0;border-color:var(--accent)}
+#sh-about{display:block;font-size:13px}
+.shrow{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+@media(max-width:880px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:0 12px}}
+@media(max-width:600px){
+  /* three rows of header would hold a third of a phone screen: it scrolls away,
+     and only the Log toolbar stays at the top */
+  header{position:static}
+  .brand{font-size:19px}.meta .opt{display:none}
+  .big{font-size:20px}.cards{gap:8px}.cards .card{padding:12px}
+  .ev{grid-template-columns:minmax(0,1fr);gap:4px}.ev>.when{text-align:left;padding:0}
+  .r{grid-template-columns:62px minmax(0,1fr);padding:4px 10px}.r .l{display:none}
+  .r .t{font-size:11px}.tab{padding:10px 10px}
+  .lbar .chk.opt{display:none}
+}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="hrow">
+    <span class="brand"><b>EVO</b> Player</span>
+    <span class="meta"><span id="ver">...</span><span class="opt" id="model"></span></span>
+    <span class="live" id="live"><i></i><span>connecting</span></span>
+    <span class="sp"></span>
+    <span class="runsel" id="runsel"><button class="on" data-run="now">This run</button><button data-run="last">Last run</button></span>
+    <button class="btn pri" id="report">Report a problem</button>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab on" data-v="now">Now</button>
+    <button class="tab" data-v="story">What happened <span class="badge e" id="b-story" hidden></span></button>
+    <button class="tab" data-v="log">Log <span class="badge e" id="b-err" hidden></span><span class="badge w" id="b-warn" hidden></span></button>
+  </nav>
+</div></header>
+
+<main class="wrap">
+  <section class="view on" id="v-now">
+    <div id="alerts"></div>
+    <div class="cards">
+      <div class="card idle" id="c-play"><h4>Playing</h4><div class="big">Nothing</div><div class="sub">&nbsp;</div><div class="sub">&nbsp;</div><div class="prog"><i></i></div></div>
+      <div class="card idle" id="c-pic"><h4>Picture</h4><div class="big">-</div><div class="sub">&nbsp;</div><div class="sub">&nbsp;</div><svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none"></svg></div>
+      <div class="card idle" id="c-buf"><h4>Loaded ahead</h4><div class="big">-</div><div class="sub">&nbsp;</div><div class="sub">&nbsp;</div><svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none"></svg></div>
+      <div class="card idle" id="c-net"><h4>Network</h4><div class="big">-</div><div class="sub">&nbsp;</div><div class="sub">&nbsp;</div><svg class="spark" viewBox="0 0 120 30" preserveAspectRatio="none"></svg></div>
+    </div>
+    <div class="memrow" id="mem"></div>
+    <div class="label">Latest problems</div>
+    <div class="card plist" id="problems"><div class="empty">No warnings or errors yet.</div></div>
+  </section>
+
+  <section class="view" id="v-story"><div id="story"><div class="empty">Loading what happened...</div></div></section>
+
+  <section class="view" id="v-log">
+    <div class="lbar" id="lbar">
+      <label class="search">&#x2315;<input id="q" placeholder="Search the log" autocomplete="off" spellcheck="false"></label>
+      <span class="seg2" id="lvl"><button class="on" data-v="0">All</button><button data-v="1">Warnings</button><button data-v="2">Errors</button></span>
+      <button class="btn" id="prev" title="Previous problem">&#8249; Prev</button><button class="btn" id="next" title="Next problem">Next &#8250;</button>
+      <label class="chk" title="Memory, frame-pacing, drive-polling and other lines that repeat every second"><input type="checkbox" id="quiet" checked> Hide routine lines</label>
+    </div>
+    <div class="tags" id="tags"></div>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+<button class="btn pri fab" id="follow" hidden>&#8595; Newest</button>
+
+<!-- Report a problem: EVO cannot post to GitHub for the user (that needs their
+     login), so it opens GitHub's issue form already filled in, and the user
+     attaches the report file it just downloaded. -->
+<div class="scrim" id="sheet" hidden>
+  <div class="sheet card" role="dialog" aria-labelledby="sh-t">
+    <div class="label" id="sh-t">Report a problem</div>
+    <ol class="steps">
+      <li><b>Download the report.</b> It holds what EVO logged, with passwords and keys masked.
+        <div><a class="btn" id="sh-dl" href="/report.txt" download>&#8681; Download the report</a> <a class="dim" id="sh-page" href="/report">or open the report page</a></div></li>
+      <li><b>What went wrong?</b>
+        <div class="seg2" id="sh-kind"><button data-k="play" class="on">Playing a video</button><button data-k="bug">Something else</button></div>
+        <div class="dim" id="sh-about"></div></li>
+      <li><b>Say what you did and what you saw</b> <span class="dim">(you can also write it on GitHub)</span>
+        <textarea id="sh-text" rows="4" placeholder="I opened a 4K film from Jellyfin and it kept pausing after about 10 minutes."></textarea></li>
+      <li><b>Open GitHub</b>, sign in, drag the downloaded report into <i>Report file</i>, add your firmware and press <i>Submit</i>.</li>
+    </ol>
+    <div class="shrow"><button class="btn" id="sh-close">Cancel</button><a class="btn pri" id="sh-go" target="_blank" rel="noopener">Open GitHub &#8599;</a></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ------------------------------------------------------------------ lines */
+const RX = /^\[(\d+(?:\.\d+)?)\] (INFO|WARN|ERROR)\s*(.*)$/;
+const NOSCROLL = /noscroll/.test(location.search);   // headless screenshots (tools/logview_preview.py)
+const TAG = /^\s*(?:EVO boot: )?([A-Za-z][\w.-]{1,24}):\s/;
+// Lines that repeat every second or frame: hidden in the Log view unless asked for.
+const ROUTINE = /^\s*(alloc \[|pace:|readdir:|agc health|app present|app video blit|PlayerScreen::render|stats |mem budget|bc REMOTE_CMD (ui|status)|EVO vdec native: \S+ \d+x\d+ \[)/;
+
+let L = [];            // every line of the current view: {i,t,lv,tag,msg,raw,routine}
+let wallBase = null;   // ms since epoch at t=0, from "wall clock" lines
+let sessionStart = 0;  // index in L where the session being shown starts
+
+function parseLine(raw) {
+  const m = RX.exec(raw);
+  if (!m) return { t: null, lv: 0, tag: "", msg: raw, raw, routine: /^===|^\[log\]/.test(raw) };
+  const msg = m[3];
+  const tg = TAG.exec(msg);
+  const lv = m[2] === "ERROR" ? 2 : m[2] === "WARN" ? 1 : 0;
+  const o = { t: parseFloat(m[1]), lv, tag: tg ? tg[1] : "", msg, raw, routine: lv === 0 && ROUTINE.test(msg) };
+  if (/^\s*diag:/.test(msg)) o.diag = msg.replace(/^\s*diag:\s*/, "");
+  const w = /wall clock (\S+Z)/.exec(msg);
+  if (w && /^log /.test(msg)) { const a = Date.parse(w[1]); if (!isNaN(a)) wallBase = a - o.t * 1000; }
+  return o;
+}
+const p2 = (n) => (n < 10 ? "0" : "") + n;
+function clock(t, secs) {
+  if (t == null) return "";
+  if (wallBase != null) { const d = new Date(wallBase + t * 1000);
+    return p2(d.getHours()) + ":" + p2(d.getMinutes()) + (secs ? ":" + p2(d.getSeconds()) : ""); }
+  const m = Math.floor(t / 60); return m + "m" + (secs ? p2(Math.floor(t % 60)) + "s" : "");
+}
+function dur(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 60) return s + " s";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? h + " h " + m + " min" : m + " min" + (r ? " " + r + " s" : "");
+}
+function hms(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return (h ? h + ":" + p2(m) : m) + ":" + p2(r);
+}
+
+/* ------------------------------------------------- plain words (from evo-dash) */
+const PLAIN = [
+  [/P8_04_REBUFFER_ARM/, "w", "Ran out of video ahead - paused to load more"],
+  [/P8_04_REBUFFER_DONE ended/, "e", "Stopped loading - the stream ended or failed"],
+  [/P8_04_REBUFFER_DONE/, "g", "Loaded enough - playing again"],
+  [/pio: reader waiting/, "e", "Can't get data from the server - retrying"],
+  [/pio: reader has data again/, "g", "Connection is back"],
+  [/pio: chunk \d+ not fetched/, "e", "The server didn't answer for 30 seconds"],
+  [/demux: read failed/, "e", "The stream dropped - reconnecting"],
+  [/demux: recovered/, "g", "Reconnected - picking up where it stopped"],
+  [/demux: gave up/, "e", "Gave up reconnecting - the stream stopped"],
+  [/map_fail=[1-9]|malloc failure|get_buffer\(\) failed|ring fallback/, "e", "Out of memory - video may stop"],
+  [/OPEN FAIL|open failed/, "e", "Couldn't open the file"],
+  [/decode fatal|dec_fatal=[1-9]/, "e", "The video decoder failed"],
+  [/CRASH signal=(\d+)/, "e", "EVO crashed"],
+  [/hdr10: ENTER/, "g", "Switched the TV to HDR"],
+];
+function plain(o) {
+  if (o.diag) return ["a", o.diag];
+  for (const [rx, k, say] of PLAIN) if (rx.test(o.msg)) return [k, say];
+  if (o.lv === 2) return ["e", o.msg.trim()];
+  if (o.lv === 1) return ["w", o.msg.trim()];
+  return null;
+}
+
+/* ------------------------------------------------------------------ story */
+// One pass over the lines builds the events. Live lines extend it.
+let ST;
+function storyReset() {
+  ST = { events: [], cur: null, pendingTitle: null, pendingT: 0, lastMap: 0, otherW: 0, otherE: 0, closed: null };
+}
+function srcOf(url) {
+  if (/^smb:/i.test(url)) return "Network share (SMB)";
+  if (/^ftp:/i.test(url)) return "Network share (FTP)";
+  if (/^ntfs:/i.test(url)) return "NTFS drive";
+  if (/^\/mnt\/usb/i.test(url)) return "USB drive";
+  if (/^\/(data|user|mnt)\//i.test(url)) return "Internal storage";
+  if (/^https?:/i.test(url)) return "Network stream";
+  return "File";
+}
+function nameOf(url) {
+  let b = url.split("?")[0].replace(/\/+$/, "");
+  b = b.slice(b.lastIndexOf("/") + 1);
+  try { b = decodeURIComponent(b); } catch (_) {}
+  return b || url;
+}
+function storyLine(o, idx) {
+  if (o.t == null) return;
+  const S = ST, m = o.msg;
+  let x;
+  if (/^log session start/.test(m)) { S.events.push({ k: "start", t: o.t, i: idx }); return; }
+  if ((x = /EVO boot: BUILD (\S+)/.exec(m))) { const s = S.events[S.events.length - 1]; if (s && s.k === "start") s.build = x[1]; return; }
+  if ((x = /provider: stream \d+ chosen for (.+?): \S+$/.exec(m))) { S.pendingTitle = x[1]; S.pendingT = o.t; return; }
+  if ((x = /P8_01a_SIO_ENTER (\S+)/.exec(m))) {
+    if (S.cur && !S.cur.end) S.cur.end = o.t;
+    const url = x[1];
+    const p = { k: "play", t: o.t, i: idx, url, src: srcOf(url), title: (S.pendingTitle && o.t - S.pendingT < 15) ? S.pendingTitle : nameOf(url),
+      marks: [], lines: [idx], rebuf: 0, rebufS: 0, warn: 0, err: 0 };
+    S.pendingTitle = null; S.cur = p; S.events.push(p); return;
+  }
+  const p = S.cur && !S.cur.end ? S.cur : null;
+  if (p) {
+    if (!o.routine) p.lines.push(idx);
+    if ((x = /video stream \d+ of \d+ \((\d+)x(\d+)/.exec(m))) { p.w = +x[1]; p.h = +x[2]; }
+    if ((x = /video decoder opened \(backend=(NATIVE|FFmpeg|SOFTWARE)[^,]*, codec=\d+, (\d+)x(\d+) @ ([\d.]+) fps/.exec(m))) { p.hw = x[1] === "NATIVE"; p.w = +x[2]; p.h = +x[3]; p.fps = +x[4]; }
+    if ((x = /audio: source (\d+)ch -> port \d+ch \(output=\S+, pt=(\d)/.exec(m))) { p.ch = +x[1]; p.pt = x[2] === "1"; }
+    if ((x = /\(video (\d+) kbit\/s/.exec(m))) p.kbps = +x[1];
+    if (/P8_03_PREBUFFER_DONE/.test(m) && !p.started) p.started = o.t;
+    if (/hdr10: ENTER/.test(m)) p.hdr = true;
+    if ((x = /P8_01e_OPEN_RC rc=(-\d+)/.exec(m))) { p.failed = "EVO could not open it (error " + x[1] + ")"; p.marks.push({ t: o.t, k: "e", s: "could not open" }); }
+    if (/P8_04_REBUFFER_ARM/.test(m)) { p.rebuf++; p._rb = o.t; p.marks.push({ t: o.t, k: "w", s: "paused to load" }); }
+    if (/P8_04_REBUFFER_DONE/.test(m) && p._rb != null) { p.rebufS += o.t - p._rb; (p.segs = p.segs || []).push([p._rb, o.t]); p._rb = null; }
+    if ((x = /map_fail=(\d+)/.exec(m)) && +x[1] > S.lastMap) { S.lastMap = +x[1]; p.mem = true; p.marks.push({ t: o.t, k: "e", s: "out of memory" }); }
+    if ((x = /sweep v=1 codec=(\S+) res=(\d+)x(\d+) fps=([\d.]+) dur=([\d.]+) be=(\S+) open=(\S+) play_s=([\d.]+).*?dec_fatal=(\d+).*?drop_late=(\d+).*?verdict=(\S+)/.exec(m))) {
+      Object.assign(p, { codec: x[1], w: +x[2], h: +x[3], fps: +x[4], dur: +x[5], hw: x[6] === "native", played: +x[8], fatal: +x[9], late: +x[10], verdict: x[11] });
+      p.end = o.t; return;
+    }
+    if (/soft close: media released|alloc \[stop\]/.test(m) && p.started) { p.end = o.t; return; }
+    if (o.lv || o.diag) {
+      const pl = plain(o);
+      if (o.lv === 2) p.err++; else if (o.lv === 1) p.warn++;
+      const last = p.marks[p.marks.length - 1];
+      if (pl && !(last && last.s === pl[1] && o.t - last.t < 20) && !/REBUFFER|map_fail/.test(m)) p.marks.push({ t: o.t, k: pl[0] === "a" ? "w" : pl[0], s: pl[1], i: idx });
+    }
+    return;
+  }
+  if ((x = /CRASH signal=(\d+)/.exec(m))) { S.events.push({ k: "crash", t: o.t, i: idx, sig: x[1] }); return; }
+  if (/soft close: parked/.test(m)) { S.events.push({ k: "closed", t: o.t, i: idx }); return; }
+  if (o.diag) { S.events.push({ k: "diag", t: o.t, i: idx, s: o.diag }); return; }
+  if (o.lv) {
+    const last = S.events[S.events.length - 1];
+    const known = PLAIN.find(([rx]) => rx.test(m));
+    if (known) {                                   // a problem the page can name
+      if (last && last.k === "prob" && last.s === known[2]) { last.n++; last.tl = o.t; return; }
+      S.events.push({ k: "prob", t: o.t, tl: o.t, i: idx, s: known[2], c: known[1], n: 1 });
+      return;
+    }
+    // Anything else (a folder that does not exist, an FFmpeg note) is one quiet
+    // row per run of them, so the story is not a wall of warnings.
+    if (last && last.k === "misc") { last.tl = o.t; o.lv === 2 ? last.e++ : last.w++; if (o.tag) last.tags.add(o.tag); return; }
+    S.events.push({ k: "misc", t: o.t, tl: o.t, i: idx, e: o.lv === 2 ? 1 : 0, w: o.lv === 1 ? 1 : 0, tags: new Set(o.tag ? [o.tag] : []) });
+  }
+}
+const VERDICT = {
+  realtime: ["g", "The decoder kept up the whole time."],
+  slow_decode: ["w", "The decoder was too slow for this video, so the picture stuttered."],
+  slow_pipeline: ["w", "Drawing the picture was too slow (smoothing, upscaling or HDR work), so it stuttered."],
+  decode_error: ["e", "The video had errors the decoder could not read."],
+  no_frames: ["e", "No picture came out of the decoder."],
+  no_decoder: ["e", "EVO has no decoder for this video."],
+};
+function fmtLine(p) {
+  const a = [];
+  // By width: a 1920x800 film is 1080p, not 800p
+  if (p.w) a.push((p.w >= 3200 ? "4K" : p.w >= 1800 ? "1080p" : p.w >= 1200 ? "720p" : p.h + "p") + (p.hdr ? " HDR" : ""));
+  if (p.codec) a.push(p.codec.toUpperCase());
+  if (p.fps) a.push(+p.fps.toFixed(3) + " fps");
+  if (p.hw != null) a.push(p.hw ? "hardware decode" : "software decode");
+  if (p.ch) a.push(p.ch === 2 ? "stereo" : p.ch === 6 ? "5.1" : p.ch === 8 ? "7.1" : p.ch + " channels");
+  if (p.pt) a.push("passthrough");
+  if (p.kbps) a.push((p.kbps / 1000).toFixed(1) + " Mbit/s");
+  return a;
+}
+// The plain-words sentences for one video: on its story card and in a GitHub report.
+function playSummary(p) {
+  const sum = [];
+  if (p.failed) sum.push(p.failed + ".");
+  if (p.rebuf) sum.push("It ran out of video ahead " + (p.rebuf === 1 ? "once" : p.rebuf + " times") + " and paused for " + dur(p.rebufS) + " in total" +
+    (p.kbps ? ". This video needs about " + (p.kbps / 1000).toFixed(1) + " Mbit/s: a slower connection than that keeps pausing it." : "."));
+  if (p.mem) sum.push("EVO ran out of memory while playing it.");
+  if (p.verdict && VERDICT[p.verdict] && (p.verdict !== "realtime" || p.end)) sum.push(VERDICT[p.verdict][1]);
+  if (p.late > 50) sum.push(p.late + " frames arrived too late and were skipped.");
+  p.marks.filter((k) => k.k === "e" && !/out of memory|could not open/.test(k.s)).slice(0, 3).forEach((k) => sum.push(clock(k.t, 1) + ": " + k.s));
+  return sum;
+}
+function playCard(p, live) {
+  const t1 = p.end || (live && L.length ? L[L.length - 1].t : p.t);
+  const span = Math.max(1, t1 - p.t);
+  const pos = (t) => Math.min(100, Math.max(0, ((t - p.t) / span) * 100)).toFixed(2) + "%";
+  let tl = '<div class="tl"><div class="fill" style="width:100%"></div>';
+  (p.segs || []).forEach(([a, b]) => { tl += '<div class="seg" style="left:' + pos(a) + ";width:calc(" + pos(b) + " - " + pos(a) + ')"></div>'; });
+  p.marks.forEach((k) => { tl += '<div class="mk ' + k.k + '" style="left:' + pos(k.t) + '" title="' + esc(clock(k.t, 1) + "  " + k.s) + '"></div>'; });
+  tl += '<span class="ax">' + clock(p.t, 1) + '</span><span class="ax r">' + (p.end ? clock(p.end, 1) : "now") + "</span></div>";
+  const chips = [], sum = playSummary(p);
+  const nowPlaying = !p.end && live;
+  if (p.failed) chips.push('<span class="pill e">did not open</span>');
+  else if (nowPlaying) chips.push('<span class="pill a">playing now</span>');
+  // play_s counts the time held on the last frame too: never more than the video
+  else if (p.played != null) chips.push('<span class="pill">watched ' + dur(p.dur ? Math.min(p.played, p.dur) : p.played) + (p.dur ? " of " + dur(p.dur) : "") + "</span>");
+  if (p.rebuf) chips.push('<span class="pill w">paused to load ' + p.rebuf + "&times;</span>");
+  if (p.err) chips.push('<span class="pill e">' + p.err + " error" + (p.err > 1 ? "s" : "") + "</span>");
+  if (p.warn) chips.push('<span class="pill w">' + p.warn + " warning" + (p.warn > 1 ? "s" : "") + "</span>");
+  if (!p.rebuf && !p.err && !p.warn && !p.mem && !p.failed && (p.end || p.started)) chips.push('<span class="pill g">no problems</span>');
+  const raw = p.lines.slice(0, 400).map((i) => rowHTML(L[i], i, "")).join("");
+  return '<div class="ev' + (p.failed || p.err ? " bad" : "") + '"><div class="when">' + clock(p.t) + '</div><div class="card' + (nowPlaying ? " now" : "") + '">' +
+    "<h3>" + esc(p.title) + '</h3><div class="src">' + esc(p.src) + (fmtLine(p).length ? " &middot; " + esc(fmtLine(p).join(" · ")) : "") + "</div>" +
+    (p.failed ? "" : tl) + "<div>" + chips.join("") + "</div>" + (sum.length ? '<ul class="sum">' + sum.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul>" : "") +
+    '<button class="more" data-more>Show its ' + p.lines.length + " log lines &#9662;</button>" + '<div class="lines log">' + raw + "</div></div></div>";
+}
+function minor(t, dot, html) {
+  return '<div class="ev minor"><div class="when">' + clock(t) + '</div><div class="body"><span class="dot ' + dot + '"></span><span>' + html + "</span></div></div>";
+}
+let INFO = {};
+function renderStory() {
+  const live = RUN === "now";
+  const out = [];
+  let problems = 0;
+  if (ST.cutStart) out.push(minor(L[0] && L[0].t, "", "The start of this run is older than the part EVO keeps for this page."));
+  ST.events.forEach((e) => {
+    if (e.k === "start") {
+      let s = "Started EVO" + (e.build ? " (build " + esc(e.build) + ")" : "") + (INFO.model ? " on a " + esc(INFO.model) : "") + ".";
+      if (live && INFO.last_run === "crashed") s += ' <b style="color:var(--danger)">The run before this one crashed</b> - <a href="#last" data-last>see what happened</a>.';
+      else if (live && INFO.last_run === "ended") s += " The run before this one ended without closing (PS button or a freeze).";
+      out.push(minor(e.t, "a", s));
+    } else if (e.k === "play") { out.push(playCard(e, live)); if (e.err || e.failed) problems++; }
+    else if (e.k === "crash") { problems++; out.push('<div class="ev bad"><div class="when">' + clock(e.t) + '</div><div class="card"><h3>EVO crashed</h3><div class="src">signal ' + esc(e.sig) + '</div>Send the report for this run so it can be fixed: <a href="/report' + (RUN === "last" ? "?run=last" : "") + '">report page</a>.</div></div>'); }
+    else if (e.k === "closed") out.push(minor(e.t, "g", "EVO was closed normally."));
+    else if (e.k === "diag") out.push('<div class="ev"><div class="when">' + clock(e.t) + '</div><div class="card" style="border-color:var(--accent)"><h3>' + esc(e.s) + "</h3></div></div>");
+    else if (e.k === "prob") { if (e.c === "e") problems++; out.push(minor(e.t, e.c, esc(e.s) + (e.n > 1 ? ' <span class="muted">(' + e.n + " times, until " + clock(e.tl, 1) + ")</span>" : "") + ' <a href="#log" data-goto="' + e.i + '">log</a>')); }
+    else if (e.k === "misc") {
+      const parts = [];
+      if (e.e) parts.push(e.e + " error" + (e.e > 1 ? "s" : ""));
+      if (e.w) parts.push(e.w + " warning" + (e.w > 1 ? "s" : ""));
+      out.push(minor(e.t, "", '<span class="muted">' + parts.join(" and ") + (e.tags.size ? " from " + esc([...e.tags].slice(0, 4).join(", ")) : "") +
+        '</span> <a href="#log" data-goto="' + e.i + '">show</a>'));
+    }
+  });
+  if (!live && out.length && !ST.events.some((e) => e.k === "closed" || e.k === "crash")) {
+    const t = L.length ? L[L.length - 1].t : null;
+    out.push(INFO.last_run === "crashed" ? minor(t, "e", '<b style="color:var(--danger)">EVO crashed here.</b> Send the report for this run: <a href="/report?run=last">report page</a>.')
+                                         : minor(t, "w", "The run ended here without closing EVO (the PS button, or it froze)."));
+  }
+  $("story").innerHTML = out.length ? out.join("") : '<div class="empty">Nothing has happened yet in this run.</div>';
+  const b = $("b-story"); b.hidden = !problems; b.textContent = problems;
+}
+
+/* -------------------------------------------------------------------- log */
+const LOG = { q: "", lv: 0, tag: "", quiet: true, sel: -1, follow: true, shown: 1500 };
+function rowHTML(o, i, q) {
+  if (!o) return "";
+  const cls = o.lv === 2 ? "E" : o.lv === 1 ? "W" : o.diag ? "D" : o.t == null ? "x" : "";
+  let m = esc(o.msg);
+  if (q) { const k = m.toLowerCase().indexOf(esc(q).toLowerCase()); if (k >= 0) m = m.slice(0, k) + "<mark>" + m.slice(k, k + esc(q).length) + "</mark>" + m.slice(k + esc(q).length); }
+  return '<div class="r ' + cls + (i === LOG.sel ? " sel" : "") + '" data-i="' + i + '"><span class="t">' + clock(o.t, 1) + '</span><span class="l">' +
+    (o.lv === 2 ? "ERROR" : o.lv === 1 ? "WARN" : o.t == null ? "" : "INFO") + '</span><span class="m">' + m + "</span></div>";
+}
+function vis(o) {
+  if (o.lv < LOG.lv) return false;
+  if (LOG.quiet && o.routine && !LOG.q) return false;
+  if (LOG.tag && o.tag !== LOG.tag) return false;
+  if (LOG.q && o.raw.toLowerCase().indexOf(LOG.q.toLowerCase()) < 0) return false;
+  return true;
+}
+function renderLog() {
+  const idx = [];
+  for (let i = sessionStart; i < L.length; i++) if (vis(L[i])) idx.push(i);
+  let from = Math.max(0, idx.length - LOG.shown);
+  if (LOG.sel >= 0) { const k = idx.indexOf(LOG.sel); if (k >= 0 && k < from) from = Math.max(0, k - 50); }
+  const h = [];
+  if (from) h.push('<div class="note"><button class="more" id="earlier">Show ' + Math.min(from, 1500) + " earlier lines (" + from + " hidden)</button></div>");
+  for (let k = from; k < idx.length; k++) h.push(rowHTML(L[idx[k]], idx[k], LOG.q));
+  if (!idx.length) h.push('<div class="empty">No line matches.</div>');
+  $("log").innerHTML = h.join("");
+  const e = $("earlier"); if (e) e.onclick = () => { LOG.shown += 1500; renderLog(); };
+  if (LOG.sel >= 0) { const s = $("log").querySelector(".sel"); if (s) s.scrollIntoView({ block: "center" }); }
+  else if (LOG.follow && VIEW === "log" && !NOSCROLL) window.scrollTo(0, document.body.scrollHeight);
+}
+function renderTags() {
+  const c = {};
+  for (let i = sessionStart; i < L.length; i++) { const o = L[i]; if (o.tag && !o.routine) c[o.tag] = (c[o.tag] || 0) + 1; }
+  const top = Object.keys(c).sort((a, b) => c[b] - c[a]).slice(0, 14);
+  if (LOG.tag && top.indexOf(LOG.tag) < 0) top.push(LOG.tag);
+  $("tags").innerHTML = top.map((t) => '<span class="tag' + (t === LOG.tag ? " on" : "") + '" data-t="' + esc(t) + '">' + esc(t) + "<span>" + (c[t] || 0) + "</span></span>").join("");
+}
+function counts() {
+  let w = 0, e = 0;
+  for (let i = sessionStart; i < L.length; i++) { if (L[i].lv === 2) e++; else if (L[i].lv === 1) w++; }
+  const be = $("b-err"), bw = $("b-warn");
+  be.hidden = !e; be.textContent = e; bw.hidden = !w; bw.textContent = w;
+}
+function jump(dir) {
+  const n = L.length; if (!n) return;
+  let i = LOG.sel < 0 ? (dir > 0 ? sessionStart - 1 : n) : LOG.sel;
+  for (let k = 0; k < n; k++) { i += dir; if (i < sessionStart || i >= n) break; if (L[i].lv >= Math.max(1, LOG.lv) && vis(L[i])) { LOG.sel = i; LOG.follow = false; renderLog(); return; } }
+}
+
+/* -------------------------------------------------------------------- now */
+const H = { fps: [], buf: [], net: [] };
+let lastStats = null, lastBytes = null, lastBytesT = 0, mapFail0 = null, slowSince = 0, netAvg = [];
+function spark(svg, arr, max, cls, line) {
+  if (!arr.length) { svg.innerHTML = ""; return; }
+  const n = 60, mx = Math.max(max || 0, ...arr, 1);
+  const pts = arr.slice(-n).map((v, i, a) => ((i / Math.max(1, n - 1)) * 120).toFixed(1) + "," + (28 - (v / mx) * 26).toFixed(1)).join(" ");
+  const col = cls === "bad" ? "var(--danger)" : cls === "warn" ? "var(--warn)" : "var(--accent-alt)";
+  svg.innerHTML = (line != null ? '<line x1="0" x2="120" y1="' + (28 - (line / mx) * 26).toFixed(1) + '" y2="' + (28 - (line / mx) * 26).toFixed(1) + '" stroke="var(--muted)" stroke-dasharray="3 3"/>' : "") +
+    '<polyline fill="none" stroke="' + col + '" stroke-width="2" vector-effect="non-scaling-stroke" points="' + pts + '"/>';
+}
+function setCard(id, cls, big, sub1, sub2) {
+  const c = $(id); c.className = "card " + (cls || "");
+  c.querySelector(".big").textContent = big;
+  const s = c.querySelectorAll(".sub"); if (s[0]) s[0].textContent = sub1 || " "; if (s[1]) s[1].textContent = sub2 || " ";
+}
+function current() { for (let i = ST.events.length - 1; i >= 0; i--) if (ST.events[i].k === "play") return ST.events[i]; return null; }
+function renderNow(s) {
+  const p = s.play || {}, q = s.queue || {}, n = s.net || {}, mem = s.mem || {};
+  const cur = current(), playing = p.active && cur && !cur.end;
+  const alerts = [];
+  // Playing
+  if (p.active) {
+    setCard("c-play", "", hms(p.pos) + (p.dur ? " / " + hms(p.dur) : ""), cur ? cur.title : "", cur ? [cur.src].concat(fmtLine(cur).slice(0, 2)).join(" · ") : "");
+    $("c-play").querySelector(".prog i").style.width = p.dur ? Math.min(100, (p.pos / p.dur) * 100) + "%" : "0";
+  } else {
+    setCard("c-play", "idle", "Nothing", cur ? "Last: " + cur.title : "No video opened yet", "");
+    $("c-play").querySelector(".prog i").style.width = "0";
+  }
+  // Picture
+  const fps = p.fps || 0, dfps = p.decode_fps || 0;
+  if (p.active) {
+    H.fps.push(dfps); H.fps = H.fps.slice(-60);
+    const slow = fps > 1 && dfps > 0 && dfps < fps * 0.9 && !p.buffering && !p.paused;
+    slowSince = slow ? slowSince || Date.now() : 0;
+    const cls = p.fatal ? "bad" : slowSince && Date.now() - slowSince > 5000 ? "warn" : "";
+    // the hardware decoder does not count frames (decode_fps stays 0): show the video's rate
+    setCard("c-pic", cls, (dfps || +fps.toFixed(2)) + " fps", (cur && cur.hw != null ? (cur.hw ? "hardware decode" : "software decode") : "decoding") + " · video " + (+fps.toFixed(3)) + " fps",
+      "screen " + (p.render_fps || 0) + " fps");
+    spark($("c-pic").querySelector("svg"), H.fps, fps * 1.1, cls, fps);
+    if (p.fatal) alerts.push(["bad", "The video decoder failed", "The picture stopped. Try the other decoder in the player menu, or send a report."]);
+    else if (cls === "warn") alerts.push(["", "The picture is stuttering", "EVO decodes " + dfps + " frames a second but this video has " + (+fps.toFixed(2)) + ". Turn off motion smoothing or upscaling, or try the other decoder."]);
+  } else { setCard("c-pic", "idle", "-", "Nothing is playing"); spark($("c-pic").querySelector("svg"), []); }
+  // Loaded ahead
+  if (p.active) {
+    const v = q.video_s || 0; H.buf.push(v); H.buf = H.buf.slice(-60);
+    const cls = p.buffering ? "bad" : v < 3 && n.pio ? "warn" : "";
+    setCard("c-buf", cls, p.buffering ? "Loading..." : v.toFixed(1) + " s", (cur && cur.rebuf ? "paused to load " + cur.rebuf + "×" : "no pauses") + " · " + (q.video_mb || 0).toFixed(0) + " of " + (q.video_cap_mb || 0).toFixed(0) + " MB");
+    spark($("c-buf").querySelector("svg"), H.buf, 0, cls);
+    if (p.buffering) alerts.push(["bad", "Paused to load more video", "EVO ran out of video ahead and is waiting for the network."]);
+  } else { setCard("c-buf", "idle", "-", ""); spark($("c-buf").querySelector("svg"), []); }
+  // Network
+  let mbit = null;
+  const now = Date.now();
+  if (n.bytes != null && lastBytes != null && n.bytes >= lastBytes && now > lastBytesT) mbit = ((n.bytes - lastBytes) * 8) / ((now - lastBytesT) / 1000) / 1e6;
+  lastBytes = n.bytes; lastBytesT = now;
+  if (p.active && n.pio) {
+    if (mbit != null) { netAvg.push(mbit); netAvg = netAvg.slice(-10); H.net.push(mbit); H.net = H.net.slice(-60); }
+    const avg = netAvg.length ? netAvg.reduce((a, b) => a + b, 0) / netAvg.length : 0;
+    const need = cur && cur.kbps ? cur.kbps / 1000 : 0;
+    const cls = n.recovering ? "bad" : need && netAvg.length >= 5 && avg < need ? "warn" : "";
+    setCard("c-net", cls, avg.toFixed(1) + " Mbit/s", need ? "this video needs " + need.toFixed(1) + " Mbit/s" : n.connections + " connection" + (n.connections === 1 ? "" : "s"),
+      n.stall_ms > 1500 ? "server slow for " + (n.stall_ms / 1000).toFixed(1) + " s" : "");
+    spark($("c-net").querySelector("svg"), H.net, need * 1.2, cls, need || null);
+    if (n.recovering) alerts.push(["bad", "The connection dropped", "EVO is reconnecting and will pick up where it stopped."]);
+    else if (cls === "warn") alerts.push(["", "Download is slower than this video needs", avg.toFixed(1) + " of " + need.toFixed(1) + " Mbit/s, so it will keep pausing to load. A wired connection or a lower quality fixes it; a bigger buffer will not."]);
+  } else if (p.active) { setCard("c-net", "idle", "Local file", "no network needed"); spark($("c-net").querySelector("svg"), []); }
+  else { setCard("c-net", "idle", "-", ""); spark($("c-net").querySelector("svg"), []); }
+  // Memory
+  if (mapFail0 == null) mapFail0 = mem.map_fail || 0;
+  if ((mem.map_fail || 0) > mapFail0) alerts.push(["bad", "EVO ran out of memory", "Video may stop. Lower the network buffer, or turn off motion smoothing and upscaling."]);
+  // one span per fact, so a narrow screen wraps between them, never inside one
+  $("mem").innerHTML = "<span>Video memory free <b>" + Math.round(mem.flex_free_mb || 0) + " of " + Math.round(mem.flex_total_mb || 0) + " MB</b></span><span>GPU pool <b>" +
+    Math.round(mem.gpu_pool_mb || 0) + " of " + Math.round(mem.gpu_pool_total_mb || 0) + " MB</b></span>" + (mem.map_fail ? "<span><b style='color:var(--danger)'>" + mem.map_fail + " failed allocations</b></span>" : "");
+  // diag: findings from the diagnostic engine come first
+  const d = []; for (let i = L.length - 1; i >= sessionStart && d.length < 3; i--) if (L[i].diag && now - (wallBase + L[i].t * 1000) < 600000) d.push(L[i]);
+  $("alerts").innerHTML = d.map((o) => '<div class="alert diag"><span class="ic">&#9733;</span><div><b>' + esc(o.diag) + "</b></div></div>").join("") +
+    alerts.map(([c, t, w]) => '<div class="alert ' + c + '"><span class="ic">' + (c === "bad" ? "&#9888;" : "&#9888;") + "</span><div><b>" + esc(t) + '</b><span class="why">' + esc(w) + "</span></div></div>").join("");
+}
+function renderProblems() {
+  const out = [];
+  for (let i = L.length - 1; i >= sessionStart && out.length < 6; i--) {
+    const o = L[i]; if (!o.lv && !o.diag) continue;
+    const pl = plain(o); if (!pl) continue;
+    out.push('<div class="pi" data-goto="' + i + '"><span class="dot ' + pl[0] + '"></span><div><span class="when">' + clock(o.t, 1) + "</span><div>" + esc(pl[1]) + "</div></div></div>");
+  }
+  $("problems").innerHTML = out.length ? out.join("") : '<div class="empty">No warnings or errors in this run.</div>';
+}
+
+/* ---------------------------------------------------- report on GitHub */
+// GitHub's issue forms take their text fields from the URL (?<field id>=...),
+// see .github/ISSUE_TEMPLATE/*.yml. Dropdowns and the attachment stay with the
+// user, and the whole link is kept well under the ~8 KB GitHub accepts.
+const ISSUES = "https://github.com/sainsaji/EVO-PLAYER-PS5/issues/new";
+let REPORT_KIND = "play";
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+function reportVideo() {
+  // the video worth reporting: the latest one with a problem, else the latest one
+  const plays = ST.events.filter((e) => e.k === "play");
+  for (let i = plays.length - 1; i >= 0; i--) if (plays[i].failed || plays[i].err || plays[i].rebuf || plays[i].mem) return plays[i];
+  return plays[plays.length - 1] || null;
+}
+function reportFacts() {
+  const out = [];
+  if (RUN === "last" || INFO.last_run === "crashed") {
+    if (INFO.last_run === "crashed") out.push("EVO crashed in the run before this one" + (RUN === "last" ? " (this report is that run)" : "") + ".");
+    else if (INFO.last_run === "ended" && RUN === "last") out.push("That run ended without closing EVO (PS button, or it froze).");
+  }
+  if (ST.events.some((e) => e.k === "crash")) out.push("EVO crashed during this run.");
+  for (const e of ST.events) if (e.k === "diag") out.push("EVO's diagnosis: " + e.s);
+  // problems the page can name, outside the video already described (raw notes
+  // such as a folder that does not exist would only be noise in an issue)
+  const p = REPORT_KIND === "play" ? reportVideo() : null, seen = new Set();
+  for (let i = L.length - 1; i >= sessionStart && seen.size < 5; i--) {
+    const o = L[i]; if (!o.lv || (p && o.t >= p.t && o.t <= (p.end || Infinity))) continue;
+    const k = PLAIN.find(([rx]) => rx.test(o.msg)); if (!k || k[1] === "g" || seen.has(k[2])) continue;
+    seen.add(k[2]); out.push(clock(o.t, 1) + " " + k[2]);
+  }
+  return out;
+}
+function headline(p) {
+  if (p.failed) return "won't open";
+  if (p.mem) return "runs out of memory";
+  if (p.rebuf) return "keeps pausing to load";
+  if (p.verdict && p.verdict !== "realtime") return "stutters";
+  if (p.err) return "errors while playing";
+  return "playback problem";
+}
+function reportURL() {
+  const user = $("sh-text").value.trim();
+  const p = reportVideo();
+  const facts = reportFacts();
+  const q = new URLSearchParams();
+  const ver = String(INFO.version || "").replace(/^v/, "");
+  let saw = [];
+  if (REPORT_KIND === "play" && p) {
+    q.set("template", "playback-problem.yml");
+    q.set("title", "[Playback]: " + clip(p.title, 70) + " " + headline(p));
+    q.set("media", clip([fmtLine(p).join(", "), p.codec ? "" : "(codec: see the report)"].filter(Boolean).join(" "), 300));
+    saw = [p.title + " (" + p.src + ")"].concat(playSummary(p));
+  } else {
+    q.set("template", REPORT_KIND === "play" ? "playback-problem.yml" : "bug-report.yml");
+    q.set("title", REPORT_KIND === "play" ? "[Playback]: " : "[Bug]: ");
+  }
+  saw = saw.concat(facts);
+  q.set("what-happened", clip((user || "<!-- What did you do, and what did you see? -->") +
+    (saw.length ? "\n\nWhat EVO's log viewer found:\n" + saw.map((s) => "- " + s).join("\n") : ""), 2500));
+  if (ver) q.set("version", ver);
+  // Never claims a file is attached: the box stays honest if the user skips it.
+  q.set("report", "Drag " + (RUN === "last" ? "evo-report-last-run" : "evo-report") + "-" + (INFO.build || "") +
+    ".txt (downloaded from EVO) into this box.\n");
+  return ISSUES + "?" + q.toString();
+}
+function openSheet() {
+  const p = reportVideo();
+  REPORT_KIND = p && (p.failed || p.err || p.rebuf || p.mem || !p.end) ? "play" : REPORT_KIND;
+  syncSheet();
+  $("sheet").hidden = false;
+}
+function syncSheet() {
+  document.querySelectorAll("#sh-kind button").forEach((b) => b.classList.toggle("on", b.dataset.k === REPORT_KIND));
+  const p = reportVideo();
+  $("sh-about").textContent = REPORT_KIND === "play"
+    ? (p ? "About: " + p.title + (playSummary(p)[0] ? " - " + playSummary(p)[0] : "") : "No video was opened in this run.")
+    : "Screens, settings, providers, drives, start-up or closing EVO.";
+  $("sh-go").href = reportURL();
+}
+$("report").onclick = openSheet;
+$("sh-close").onclick = () => { $("sheet").hidden = true; };
+$("sheet").onclick = (e) => { if (e.target === $("sheet")) $("sheet").hidden = true; };
+$("sh-kind").onclick = (e) => { const b = e.target.closest("button"); if (b) { REPORT_KIND = b.dataset.k; syncSheet(); } };
+$("sh-text").oninput = () => { $("sh-go").href = reportURL(); };
+$("sh-go").onclick = () => { $("sh-go").href = reportURL(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("sheet").hidden = true; });
+
+/* ----------------------------------------------------------- data + wiring */
+let VIEW = "now", RUN = "now", es = null, statsTimer = null, dirty = false, lastT = -1, tailSet = new Set();
+function addLines(text, fromStream) {
+  const parts = text.split("\n");
+  for (const raw of parts) {
+    if (!raw.trim()) continue;
+    const o = parseLine(raw.replace(/\r$/, ""));
+    if (fromStream && o.t != null) {               // the stream starts with lines the file already had
+      if (o.t < lastT || (o.t === lastT && tailSet.has(raw))) continue;
+    }
+    if (o.t != null) { if (o.t > lastT) { lastT = o.t; tailSet.clear(); } tailSet.add(raw); }
+    if (/^log session start/.test(o.msg)) { sessionStart = L.length; storyReset(); }
+    L.push(o);
+    storyLine(o, L.length - 1);
+  }
+  dirty = true;
+}
+function setLive(state, txt) { const e = $("live"); e.className = "live " + state; e.lastChild.textContent = txt; }
+function redraw() {
+  if (!dirty) return; dirty = false;
+  counts();
+  if (VIEW === "story") renderStory();
+  if (VIEW === "log") { renderTags(); renderLog(); }
+  if (VIEW === "now") renderProblems();
+}
+function applyTheme(th) {
+  if (!th) return;
+  const r = document.documentElement.style, map = { bg_top: "bg-top", bg_bottom: "bg-bottom", surface: "surface", surface_alt: "surface-alt", surface_sel: "surface-sel",
+    border: "border", border_sel: "border-sel", accent: "accent", accent_soft: "accent-soft", accent_alt: "accent-alt", danger: "danger", text_primary: "text", text_secondary: "text2", text_muted: "muted" };
+  for (const k in map) if (th[k]) r.setProperty("--" + map[k], th[k]);
+  if (th.radius) r.setProperty("--radius", th.radius + "px");
+}
+async function load(run) {
+  RUN = run;
+  if (es) { es.close(); es = null; }
+  clearInterval(statsTimer);
+  L = []; sessionStart = 0; lastT = -1; tailSet.clear(); storyReset(); LOG.sel = -1; LOG.shown = 1500;
+  $("story").innerHTML = '<div class="empty">Loading what happened...</div>';
+  $("sh-dl").href = run === "last" ? "/report.txt?run=last" : "/report.txt";
+  $("sh-page").href = run === "last" ? "/report?run=last" : "/report";
+  document.querySelectorAll("#runsel button").forEach((b) => b.classList.toggle("on", b.dataset.run === run));
+  $("tabs").querySelector('[data-v="now"]').hidden = run === "last";
+  if (run === "last" && VIEW === "now") show("story");
+  try {
+    const r = await fetch("/session.txt" + (run === "last" ? "?run=last" : ""), { cache: "no-store" });
+    const txt = await r.text();
+    addLines(txt, false);
+    if (txt.indexOf("log session start") < 0 && L.length) ST.cutStart = true;
+  } catch (_) { setLive("off", "can't reach the PS5"); }
+  if (run === "now") {
+    openStream();
+    pollStats(); statsTimer = setInterval(pollStats, 1000);
+  } else setLive("", "last run");
+  dirty = true; redraw(); if (VIEW === "story") renderStory();
+}
+function openStream() {
+  es = new EventSource("/stream");
+  es.onopen = () => setLive("on", "live");
+  es.onerror = () => setLive("off", "reconnecting");
+  es.onmessage = (e) => addLines(e.data, true);
+}
+async function pollStats() {
+  if (document.hidden) return;
+  try {
+    const r = await fetch("/stats", { cache: "no-store" });
+    lastStats = await r.json();
+    if (VIEW === "now") renderNow(lastStats);
+  } catch (_) {}
+}
+function show(v) {
+  VIEW = v; location.hash = v === "now" ? "" : v;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.v === v));
+  document.querySelectorAll(".view").forEach((s) => s.classList.toggle("on", s.id === "v-" + v));
+  $("follow").hidden = v !== "log";
+  dirty = true; redraw();
+  if (v === "story") renderStory();
+  if (v === "now" && lastStats) renderNow(lastStats);
+}
+function gotoLine(i) { LOG.sel = +i; LOG.q = ""; $("q").value = ""; LOG.tag = ""; LOG.lv = 0; LOG.quiet = false; $("quiet").checked = false;
+  document.querySelectorAll("#lvl button").forEach((b) => b.classList.toggle("on", b.dataset.v === "0")); LOG.follow = false; show("log"); }
+
+$("tabs").onclick = (e) => { const b = e.target.closest(".tab"); if (b) show(b.dataset.v); };
+$("runsel").onclick = (e) => { const b = e.target.closest("button"); if (b && b.dataset.run !== RUN) load(b.dataset.run); };
+document.addEventListener("click", (e) => {
+  const m = e.target.closest("[data-more]");
+  if (m) { const l = m.nextElementSibling, open = l.classList.toggle("on");
+    if (!m.dataset.label) m.dataset.label = m.innerHTML;
+    m.innerHTML = open ? "Hide the log lines &#9652;" : m.dataset.label; return; }
+  const g = e.target.closest("[data-goto]"); if (g) { e.preventDefault(); gotoLine(g.dataset.goto); return; }
+  const ls = e.target.closest("[data-last]"); if (ls) { e.preventDefault(); load("last"); show("story"); return; }
+  const r = e.target.closest("#log .r"); if (r) { LOG.sel = LOG.sel === +r.dataset.i ? -1 : +r.dataset.i; LOG.follow = false; renderLog(); }
+});
+$("q").oninput = () => { LOG.q = $("q").value; LOG.sel = -1; renderLog(); };
+$("lvl").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; LOG.lv = +b.dataset.v; document.querySelectorAll("#lvl button").forEach((x) => x.classList.toggle("on", x === b)); renderLog(); };
+$("quiet").onchange = () => { LOG.quiet = $("quiet").checked; renderLog(); };
+$("tags").onclick = (e) => { const t = e.target.closest(".tag"); if (!t) return; LOG.tag = LOG.tag === t.dataset.t ? "" : t.dataset.t; renderTags(); renderLog(); };
+$("prev").onclick = () => jump(-1);
+$("next").onclick = () => jump(1);
+$("follow").onclick = () => { LOG.follow = true; LOG.sel = -1; renderLog(); window.scrollTo(0, document.body.scrollHeight); };
+window.addEventListener("scroll", () => { if (VIEW !== "log") return; const atEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 40; if (!atEnd && LOG.follow) LOG.follow = false; if (atEnd && LOG.sel < 0) LOG.follow = true; $("follow").textContent = LOG.follow ? "✓ Following" : "↓ Newest"; }, { passive: true });
+setInterval(redraw, 700);
+const sizeHdr = () => {
+  const h = document.querySelector("header");
+  document.documentElement.style.setProperty("--hdr", (getComputedStyle(h).position === "sticky" ? h.offsetHeight : 0) + "px");
+};
+window.addEventListener("resize", sizeHdr); sizeHdr();
+
+(async () => {
+  try {
+    INFO = await (await fetch("/info", { cache: "no-store" })).json();
+    // EVO_PLAYER_VERSION already reads "v0.13.0"; a model EVO could not detect is left out
+    if (/unknown/i.test(INFO.model || "")) INFO.model = "";
+    $("ver").textContent = "v" + String(INFO.version || "").replace(/^v/, "");
+    $("model").textContent = (INFO.model ? "· " + INFO.model + " " : "") + "· build " + INFO.build;
+    applyTheme(INFO.theme);
+    if (INFO.last_run === "crashed") $("runsel").querySelector('[data-run="last"]').innerHTML = 'Last run <span class="badge e">crashed</span>';
+  } catch (_) {}
+  storyReset();
+  const h = location.hash.replace("#", "");
+  if (h === "last") { show("story"); load("last"); }
+  else if (h === "report" || h === "report-last") {               // from the /report page
+    show("story"); await load(h === "report" ? "now" : "last"); openSheet(); }
+  else { show(h === "story" || h === "log" ? h : "now"); load("now"); }
+  sizeHdr();
+})();
+</script>
+</body>
+</html>

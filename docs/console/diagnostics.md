@@ -93,7 +93,10 @@ and honour `PS5_LOG_PORT` from the environment.
 |---|---|
 | `/raw` | plain text, kept open |
 | `/stream` | Server-Sent Events, one per line |
-| `/log` | the log in a browser |
+| `/log` (and `/` when no phone keyboard is open) | the log viewer for a phone or PC, in the active theme's colours and the kit's fonts. **Now**: live cards from `/stats` (playing, picture, loaded ahead, network against the video's bitrate, memory) and plain-words alerts. **What happened**: the session as a story, one card per video with a timeline of pauses and errors, quiet rows for everything else, and the run before this one (**Last run**). **Log**: every line, search, levels, tags, routine lines hidden. `diag:` lines (the diagnostic engine, #234) show as findings in both. Page: `assets/web/log.html`, embedded with the bundle; preview it on a PC with `tools/logview_preview.py --log <evo.log> --demo` |
+| `/info` | `{"version","build","model","up_s","last_run","theme"}` for the viewer; `last_run` is `crashed`, `closed`, `ended` or `none`, `theme` the active colours as `#RRGGBBAA` |
+| `/session.txt` | the end of `evo.log` from disk (as much as a report carries, redacted again), or with `?run=last` the saved run before this one. The viewer builds its story from it and then follows `/stream` |
+| `/web/<file>` | the viewer's files: `log.html` and the kit's fonts as Latin-only WOFF2 |
 | `/snapshot` | the last ~128 KiB, then closes |
 | `/report` | the phone page for a bug report (#229): Download / Share / Copy, and the last warnings and errors. Settings → System & Diagnostics → Report a Problem shows its QR |
 | `/report.txt` | that report as a download: version, build, model, `/stats`, the settings file and the last 1.5 MB of `evo.log` from disk (with `evo.log.1` if there is room), every line redacted again. The network-shares file (it has passwords) is never in it |

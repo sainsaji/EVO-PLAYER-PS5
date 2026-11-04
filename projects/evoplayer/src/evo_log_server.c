@@ -5,8 +5,15 @@
  * USB stick pull or FTP. Every line is already credential-redacted before it
  * reaches the ring, so nothing here needs to filter.
  *
- *   GET /              the input page if a keyboard is open, else tails the log
- *   GET /log           tails the log in the browser
+ *   GET /              the input page if a keyboard is open, else the log viewer
+ *   GET /log           the log viewer: Now (live cards), What happened (the
+ *                      session as a story), Log (every line). The page and its
+ *                      fonts are assets/web/, embedded with the RmlUi bundle
+ *   GET /web/<file>    those files (log.html, the kit's fonts as woff2)
+ *   GET /info          {"version","build","model","up_s","last_run","theme"}:
+ *                      the page takes its colours from the active EVO theme
+ *   GET /session.txt   the log from disk, as much as a report carries
+ *                      (?run=last: the run before this one, evo.prev.log)
  *   GET /stream        Server-Sent Events, one event per line
  *   GET /raw           plain text, kept open (curl -N http://<ps5>:9780/raw)
  *   GET /snapshot      snapshot of the ring (the last ~128 KiB), then closes
@@ -40,6 +47,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,12 +64,15 @@
 #include "evo_hw.h"
 #include "evo_keyboard.h"
 #include "evo_prev_run.h"
+#include "evo_theme.h"
 
 #ifndef EVO_PLAYER_VERSION
 #define EVO_PLAYER_VERSION "dev"
 #endif
 
-#define LS_MAX_CLIENTS 4
+/* The viewer alone opens the live stream, /stats once a second and its fonts
+ * at load; a phone and a PC at once must both fit. */
+#define LS_MAX_CLIENTS 8
 #define LS_CHUNK       8192
 
 size_t evo_stats_json(char *out, size_t cap);
@@ -70,54 +81,9 @@ static int s_started;
 static pthread_mutex_t s_mx = PTHREAD_MUTEX_INITIALIZER;
 static int s_clients;
 
-static const char k_page[] =
-"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>EVO log</title><style>"
-":root{color-scheme:dark light;--bg:#111;--fg:#ddd;--dim:#888;--bar:#1c1c1c;--line:#2a2a2a;--e:#ff6b6b;--w:#ffc857;--chip:#2c3a4d}"
-"@media(prefers-color-scheme:light){:root{--bg:#fff;--fg:#222;--dim:#777;--bar:#f1f1f1;--line:#e4e4e4;--e:#c62828;--w:#a66a00;--chip:#dbe6f3}}"
-"body{margin:0;font:13px/1.4 ui-monospace,Consolas,monospace;background:var(--bg);color:var(--fg)}"
-"#bar{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 8px;background:var(--bar);border-bottom:1px solid var(--line)}"
-"#bar input[type=text]{flex:1;min-width:120px;background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:4px 6px;font:inherit}"
-"#bar button,#bar select{font:inherit;padding:4px 10px}#st{color:var(--dim)}"
-".r{display:grid;grid-template-columns:96px 52px minmax(0,auto) 1fr;gap:0 8px;padding:1px 8px;border-bottom:1px solid var(--line);align-items:baseline}"
-".r>*{min-width:0}.t{color:var(--dim)}.m{white-space:pre-wrap;word-break:break-word}"
-".l{font-weight:700;font-size:11px}.INFO .l{color:var(--dim);font-weight:400}.WARN .l,.WARN .m{color:var(--w)}.ERROR .l,.ERROR .m{color:var(--e)}"
-".g{background:var(--chip);border-radius:3px;padding:0 5px;font-size:11px;white-space:nowrap}.g:empty{display:none}.g{cursor:pointer}"
-".x{grid-column:1/-1;color:var(--dim);white-space:pre-wrap}"
-"@media(max-width:640px){.r{grid-template-columns:72px 44px 1fr}.m{grid-column:1/-1}}"
-"</style>"
-"<div id=bar><input type=text id=f placeholder='filter: text, or tag:pio'>"
-"<select id=v><option value=0>all levels<option value=1>warn + error<option value=2>error only</select>"
-"<label><input type=checkbox id=u checked> wall time</label>"
-"<button id=p>Pause</button><button id=c>Clear</button><span id=st>connecting</span></div>"
-"<div id=log></div><script>"
-"var L=document.getElementById('log'),st=document.getElementById('st'),F=document.getElementById('f'),"
-"V=document.getElementById('v'),U=document.getElementById('u'),paused=false,es=null,MAX=4000,off=null,"
-"RX=/^\\[(\\d+(?:\\.\\d+)?)\\] (INFO|WARN|ERROR) ?(.*)$/,TG=/^([A-Za-z][\\w.-]{1,24}): ?/,WC=/wall clock (\\S+Z)/;"
-"function p2(n,w){n=String(n);while(n.length<w)n='0'+n;return n}"
-"function fmt(s){if(off!==null&&U.checked){var d=new Date(off+s*1000);return p2(d.getHours(),2)+':'+p2(d.getMinutes(),2)+':'+p2(d.getSeconds(),2)+'.'+p2(d.getMilliseconds(),3)}"
-"var m=Math.floor(s/60);return p2(m,2)+':'+p2((s-m*60).toFixed(3),6)}"
-"function vis(d){var q=F.value,lv=+V.value,dl=+d.dataset.lv;if(dl<lv)return false;if(!q)return true;"
-"if(q.indexOf('tag:')==0)return d.dataset.tag==q.slice(4);return d.textContent.indexOf(q)>=0}"
-"function add(t){var d=document.createElement('div'),m=RX.exec(t);"
-"if(!m){d.className='x';d.dataset.lv=0;d.dataset.tag='';d.textContent=t}else{"
-"var lv=m[2],msg=m[3],tg='',x=TG.exec(msg);if(x){tg=x[1];msg=msg.slice(x[0].length)}"
-"var w=WC.exec(msg);if(w&&/^log /.test(msg)){var a=Date.parse(w[1]);if(!isNaN(a))off=a-parseFloat(m[1])*1000}"
-"d.className='r '+lv;d.dataset.lv=lv=='ERROR'?2:lv=='WARN'?1:0;d.dataset.tag=tg;d.dataset.s=m[1];"
-"var c=[['t',fmt(parseFloat(m[1]))],['l',lv],['g',tg],['m',msg]];"
-"for(var i=0;i<4;i++){var e=document.createElement('span');e.className=c[i][0];e.textContent=c[i][1];"
-"if(c[i][0]=='g'&&tg)e.onclick=function(){F.value='tag:'+this.textContent;refilter()};d.appendChild(e)}}"
-"L.appendChild(d);d.hidden=!vis(d);while(L.childNodes.length>MAX)L.removeChild(L.firstChild);"
-"if(!paused&&!d.hidden)window.scrollTo(0,document.body.scrollHeight)}"
-"function refilter(){for(var i=0;i<L.childNodes.length;i++){var d=L.childNodes[i];d.hidden=!vis(d);"
-"if(d.dataset.s)d.firstChild.textContent=fmt(parseFloat(d.dataset.s))}}"
-"function open(){if(es)es.close();es=new EventSource('/stream');"
-"es.onopen=function(){st.textContent='live'};es.onerror=function(){st.textContent='reconnecting'};"
-"es.onmessage=function(e){add(e.data)}}"
-"F.oninput=refilter;V.onchange=refilter;U.onchange=refilter;"
-"document.getElementById('p').onclick=function(){paused=!paused;this.textContent=paused?'Resume':'Pause'};"
-"document.getElementById('c').onclick=function(){L.textContent=''};"
-"open();</script>";
+/* The log viewer page and its fonts: assets/web/, embedded with the RmlUi
+ * bundle (tools/bundle_rml_assets.py) and looked up in evo_rmlui_bundle.cpp. */
+const unsigned char *evo_web_asset(const char *name, unsigned *size);
 
 /* The phone page for long text entry (evo_keyboard_open_phone). No external
  * files, no libraries: it has to load on any phone browser on the LAN. */
@@ -184,13 +150,14 @@ static const char k_report_page[] =
 "<div id=sum>Loading the report from the PS5...</div>"
 "<a class=b id=dl href='/report.txt' download>Download report</a>"
 "<button class='b alt' id=sh hidden>Share</button><button class='b alt' id=cp>Copy text</button><p id=msg class=dim></p>"
+"<a class='b alt' id=gh href='/log#report'>Report it on GitHub, filled in for you</a>"
 "<h2>Last warnings and errors</h2><pre id=last class=dim>-</pre>"
 "<p class=dim>Passwords, tokens and keys are removed from the report. Server addresses, folder and file names stay in, "
 "because they help find the problem. <a href='/log'>Live log</a></p></main><textarea id=ta></textarea><script>"
 "var S=document.getElementById('sum'),M=document.getElementById('msg'),LA=document.getElementById('last'),"
 "SH=document.getElementById('sh'),TA=document.getElementById('ta'),txt='',name='evo-report.txt',"
 "LR=location.search.indexOf('run=last')>=0,U='/report.txt'+(LR?'?run=last':'');"
-"document.getElementById('dl').href=U;document.getElementById('runs').children[LR?1:0].style.fontWeight='700';"
+"document.getElementById('dl').href=U;document.getElementById('gh').href='/log#report'+(LR?'-last':'');document.getElementById('runs').children[LR?1:0].style.fontWeight='700';"
 "fetch(U,{cache:'no-store'}).then(function(r){var d=r.headers.get('Content-Disposition')||'',m=/filename=\"([^\"]+)\"/.exec(d);"
 "if(m)name=m[1];document.getElementById('dl').setAttribute('download',name);return r.text()}).then(function(t){txt=t;"
 "var ls=t.split('\\n'),e=0,w=0,bad=[];for(var i=0;i<ls.length;i++){var l=ls[i];"
@@ -537,6 +504,19 @@ static void rp_file_tail(rp_t *r, const char *title, const char *path, long max)
     fclose(f);
 }
 
+/* No log file: what is still in memory, this session only. */
+static void rp_ring(rp_t *r)
+{
+    rp_printf(r, "\n=== log (memory, this session only) ===\n");
+    unsigned long long pos = 0, end = evo_log_ring_total(), missed = 0;
+    char buf[LS_CHUNK];
+    while (!r->stop && pos < end) {
+        size_t n = evo_log_ring_read(&pos, buf, sizeof buf, 0, &missed);
+        if (!n) break;
+        rp_put(r, buf, n);
+    }
+}
+
 long evo_report_write_run(evo_report_sink_fn sink, void *ud, int last_run)
 {
     rp_t r = { sink, ud, 0, 0 };
@@ -584,15 +564,7 @@ long evo_report_write_run(evo_report_sink_fn sink, void *ud, int last_run)
         }
         rp_file_tail(&r, "log", path, budget);
     } else {
-        /* No file: what is still in memory, this session only. */
-        rp_printf(&r, "\n=== log (memory, this session only) ===\n");
-        unsigned long long pos = 0, end = evo_log_ring_total(), missed = 0;
-        char buf[LS_CHUNK];
-        while (!r.stop && pos < end) {
-            size_t n = evo_log_ring_read(&pos, buf, sizeof buf, 0, &missed);
-            if (!n) break;
-            rp_put(&r, buf, n);
-        }
+        rp_ring(&r);
     }
     rp_printf(&r, "\n=== end of report ===\n");
     return r.stop ? -1 : r.total;
@@ -654,6 +626,115 @@ static void serve_report_txt(int fd, int last_run)
     if (send_str(fd, head) != 0) return;
     const long n = evo_report_write_run(rp_sock_sink, (void *)(intptr_t)fd, last_run);
     EVO_LOGI("report", "%s sent to a phone (%ld bytes)", last_run ? "last-run report" : "report", n);
+}
+
+/* ---- the log viewer (assets/web/log.html) ------------------------------- */
+
+/* GET /log, /web/<file>: a file from assets/web. A name with a slash or ".."
+ * is never looked up; the bundle only holds what was embedded anyway. */
+static void serve_asset(int fd, const char *name)
+{
+    unsigned size = 0;
+    const unsigned char *data = (strchr(name, '/') || strstr(name, "..")) ? NULL : evo_web_asset(name, &size);
+    if (!data) {
+        send_str(fd, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    const char *dot = strrchr(name, '.');
+    const int page = dot && !strcmp(dot, ".html");
+    const char *type = page                            ? "text/html; charset=utf-8"
+                     : dot && !strcmp(dot, ".woff2")   ? "font/woff2"
+                     : dot && !strcmp(dot, ".css")     ? "text/css; charset=utf-8"
+                     : dot && !strcmp(dot, ".js")      ? "text/javascript; charset=utf-8"
+                                                       : "application/octet-stream";
+    char head[256];
+    snprintf(head, sizeof head,
+             "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nCache-Control: %s\r\n"
+             "Content-Length: %u\r\nConnection: close\r\n\r\n",
+             type, page ? "no-cache" : "max-age=86400", size);
+    if (send_str(fd, head) == 0)
+        send_all(fd, (const char *)data, size);
+}
+
+/* EVO_RGBA packs r in the low byte: out "#RRGGBBAA". */
+static void css_rgba(char out[10], uint32_t c)
+{
+    snprintf(out, 10, "#%02X%02X%02X%02X", (unsigned)(c & 0xFF), (unsigned)((c >> 8) & 0xFF),
+             (unsigned)((c >> 16) & 0xFF), (unsigned)(c >> 24));
+}
+
+/* GET /info - who is answering, and the active theme's colours so the page
+ * looks like the console (a .theme file can rename or recolour any of them). */
+static void serve_info(int fd)
+{
+    const evo_theme *th = evo_theme_current();
+    char name[EVO_THEME_NAME_MAX] = "";
+    size_t k = 0;
+    for (const char *s = th ? th->name : ""; *s && k + 1 < sizeof name; ++s)
+        if ((*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z') || (*s >= '0' && *s <= '9') || *s == ' ' || *s == '_' || *s == '-')
+            name[k++] = *s;
+    name[k] = '\0';
+
+    static const struct { const char *key; size_t off; } cols[] = {
+        { "bg_top", offsetof(evo_theme, bg_top) },           { "bg_bottom", offsetof(evo_theme, bg_bottom) },
+        { "surface", offsetof(evo_theme, surface) },         { "surface_alt", offsetof(evo_theme, surface_alt) },
+        { "surface_sel", offsetof(evo_theme, surface_sel) }, { "border", offsetof(evo_theme, border) },
+        { "border_sel", offsetof(evo_theme, border_sel) },   { "accent", offsetof(evo_theme, accent) },
+        { "accent_soft", offsetof(evo_theme, accent_soft) }, { "accent_alt", offsetof(evo_theme, accent_alt) },
+        { "danger", offsetof(evo_theme, danger) },           { "text_primary", offsetof(evo_theme, text_primary) },
+        { "text_secondary", offsetof(evo_theme, text_secondary) }, { "text_muted", offsetof(evo_theme, text_muted) },
+    };
+    char theme[1024];
+    int tn = snprintf(theme, sizeof theme, "{\"name\":\"%s\"", name);
+    for (size_t i = 0; th && i < sizeof cols / sizeof cols[0] && tn > 0 && (size_t)tn < sizeof theme; ++i) {
+        char hex[10];
+        css_rgba(hex, *(const uint32_t *)((const char *)th + cols[i].off));
+        tn += snprintf(theme + tn, sizeof theme - (size_t)tn, ",\"%s\":\"%s\"", cols[i].key, hex);
+    }
+    if (tn > 0 && (size_t)tn < sizeof theme)
+        snprintf(theme + tn, sizeof theme - (size_t)tn, ",\"radius\":%d}", th ? (int)th->radius : 16);
+
+    const evo_prev_run_t prev = evo_prev_run_state();
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    char body[1536], head[192];
+    const int n = snprintf(body, sizeof body,
+        "{\"version\":\"%s\",\"build\":\"%s\",\"model\":\"%s\",\"up_s\":%lld,\"last_run\":\"%s\",\"theme\":%s}",
+        EVO_PLAYER_VERSION, EVO_BUILD_ID, evo_hw_model_name(), (long long)ts.tv_sec,
+        prev == EVO_PREV_RUN_CRASHED ? "crashed" : prev == EVO_PREV_RUN_CLOSED ? "closed"
+            : prev == EVO_PREV_RUN_ENDED ? "ended" : "none",
+        theme);
+    if (n <= 0 || (size_t)n >= sizeof body) {
+        send_str(fd, "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    snprintf(head, sizeof head,
+             "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+             "Cache-Control: no-store\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", n);
+    if (send_str(fd, head) == 0)
+        send_all(fd, body, (size_t)n);
+}
+
+/* GET /session.txt[?run=last] - the log the page builds its story from: the
+ * end of evo.log (as much as a report carries, redacted again), or the saved
+ * run before this one. The live lines after it come from /stream. */
+static void serve_session(int fd, int last_run)
+{
+    if (send_str(fd, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                     "Cache-Control: no-store\r\nConnection: close\r\n\r\n") != 0)
+        return;
+    rp_t r = { rp_sock_sink, (void *)(intptr_t)fd, 0, 0 };
+    if (last_run) {
+        if (evo_prev_run_state() != EVO_PREV_RUN_NONE)
+            rp_file_tail(&r, "last run log", evo_prev_run_path(), EVO_REPORT_LOG_BYTES);
+        return;
+    }
+    evo_boot_log_flush();
+    char path[160];
+    if (evo_log_file_path(path, sizeof path))
+        rp_file_tail(&r, "log", path, EVO_REPORT_LOG_BYTES);
+    else
+        rp_ring(&r);
 }
 
 static void *conn_thread(void *arg)
@@ -740,22 +821,16 @@ static void *conn_thread(void *arg)
                     send_str(fd, head);
                     send_all(fd, k_input_page, sizeof k_input_page - 1);
                 } else {
-                    char head[160];
-                    snprintf(head, sizeof head,
-                             "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                             "Cache-Control: no-cache\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-                             sizeof k_page - 1);
-                    send_str(fd, head);
-                    send_all(fd, k_page, sizeof k_page - 1);
+                    serve_asset(fd, "log.html");
                 }
             } else if (!strcmp(norm, "/log")) {
-                char head[160];
-                snprintf(head, sizeof head,
-                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                         "Cache-Control: no-cache\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-                         sizeof k_page - 1);
-                send_str(fd, head);
-                send_all(fd, k_page, sizeof k_page - 1);
+                serve_asset(fd, "log.html");
+            } else if (!strncmp(norm, "/web/", 5)) {
+                serve_asset(fd, norm + 5);
+            } else if (!strcmp(norm, "/info")) {
+                serve_info(fd);
+            } else if (!strcmp(norm, "/session.txt")) {
+                serve_session(fd, o.last_run);
             } else if (!strcmp(norm, "/report")) {
                 char head[160];
                 snprintf(head, sizeof head,

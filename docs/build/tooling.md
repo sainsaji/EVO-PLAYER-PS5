@@ -63,6 +63,7 @@ Logs, screenshots, the dashboard and the debug switches:
 | Tool | What it does |
 |---|---|
 | `hui_preview.sh` (+ `hui_preview/`) | Render every kit screen to PNG ([../ui/hui-kit.md](../ui/hui-kit.md)) |
+| `logview_preview.py` | Serve the phone/PC log viewer (`assets/web/log.html`) on the host from a real `evo.log`, with fake `/stats` and `/stream`; `--demo` adds a buffering 4K film, `--shots` lets headless Edge screenshot it (add `?noscroll` to the URL) ([../console/diagnostics.md](../console/diagnostics.md)) |
 | `uiview.sh`, `uiview_playback_rml.sh/.cpp`, `uiplay.sh`, `prof_rmlui.sh/.cpp` | The RmlUi preview, its contact sheet and its profiler |
 | `*_host.sh` / `*_host.c` (`subsync`, `dualsub`, `dns`, `streamopts`, `hls`, `netconnect`, `iptv_epg`) | Host harnesses for single source files ([validation.md](validation.md#host-harnesses)) |
 | `host-ffmpeg-probe.sh` | Probe a media file with a host build of the same FFmpeg and flags, **before** spending a console cycle on a file that crashes the app. Needs `MSYS_NO_PATHCONV=1` |

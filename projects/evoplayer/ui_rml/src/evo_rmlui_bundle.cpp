@@ -46,3 +46,11 @@ const EvoRmlBundleFile* evo_rmlui_bundle_find(const std::string& raw_path) {
     }
     return nullptr;
 }
+
+/* assets/web/<name> for the log server (C): the viewer page and its fonts. */
+extern "C" const unsigned char* evo_web_asset(const char* name, unsigned* size) {
+    const EvoRmlBundleFile* f = evo_rmlui_bundle_find(std::string("web/") + name);
+    if (!f) return nullptr;
+    if (size) *size = f->size;
+    return f->data;
+}
