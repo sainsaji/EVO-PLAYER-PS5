@@ -11,14 +11,19 @@ Status: Phase 0 spikes S1 (engine lifetime), S2a (transport) and S2b (frames
 drawn as a texture) passed on a PS5 Pro on FW 13.60 with the stock
 ProsperoWeb v0.2.1 broker. S2b measured about 58 drawn frames a second at
 1080p, 0.22 ms and about 0.9 MB per dirty-rect copy, EVO at 60 fps, and
-`map_fail=0`.
+`map_fail=0`. Phase 1 (the `--evo-host` engine host) is written and
+host-tested; it is not yet built in the fork's CI or run on the console.
 
 ## The seam
 
-`include/evo_browser_engine.h` is engine-neutral. Today it has the lifetime
-calls only: `start`, `running`, `stop`, `wait_stopped`. `load`, `input`,
-`poll_events` and `acquire_frame`/`release_frame` come with S2 and Phase 1.
-The ProsperoWeb backend is `src/evo_browser_prosperoweb.c`.
+`include/evo_browser_engine.h` is engine-neutral: the lifetime calls
+(`start`, `running`, `stop`, `wait_stopped`), the frames
+(`frame_acquire`/`frame_release`), and what the Web section uses: `open`,
+`state`, `load`, `nav`, `pointer`, `scroll`, `key`, `text`, `resize`,
+`set_visible` and `poll_event`. All of them run on the main thread and never
+block: commands go out with `MSG_DONTWAIT` and are dropped (and logged) when
+the engine is not reading. The ProsperoWeb backend is
+`src/evo_browser_prosperoweb.c`.
 
 ## Lifetime (S1)
 
@@ -92,7 +97,22 @@ little-endian.
 | `RELEASE` | EVO to host | buffer index: EVO has copied it and the host may paint into it again |
 | `BYE` | either | orderly shutdown |
 
-Later types (Phase 1) carry `load`, `input`, `resize` and the page events.
+Phase 1 adds the control and event types below. Strings are raw UTF-8 at the
+end of the payload, no NUL. A packet is at most 8 KB (`EVOB_MAX_PACKET`, the
+kernel's default SEQPACKET limit); the sender cuts a longer string and logs it.
+
+| type | direction | payload |
+|---|---|---|
+| `LOAD` | EVO to host | the URL |
+| `NAV` | EVO to host | back, forward, reload or stop |
+| `POINTER` | EVO to host | x, y, move/down/up, button (page pixels) |
+| `SCROLL` | EVO to host | x, y, dx, dy (a wheel step; positive dy scrolls down) |
+| `KEY` | EVO to host | DOM key code, modifiers, pressed, then the text it types |
+| `TEXT` | EVO to host | text for the focused field (EVO's keyboard and IME) |
+| `RESIZE` | EVO to host | width, height; the host answers with a `HELLO` with `nbuf` 0 (same buffers, new size, never larger than the buffers) |
+| `VISIBLE` | EVO to host | 0 pauses painting (playback), 1 resumes with a full repaint |
+| `JS` | EVO to host | a script for the main frame |
+| `EVENT` | host to EVO | kind, arg, text: url, title, load started/finished/failed, back/forward state, text focus, script message (JSON), window.open URL, cursor, fullscreen, engine error |
 
 - **Buffers:** two SHM_ANON objects of `stride * height` (1920x1080x4, about
   8.3 MB each), made by the host. The host paints only into a buffer EVO has
@@ -125,3 +145,94 @@ Later types (Phase 1) carry `load`, `input`, `resize` and the page events.
 
 S2 passes when the test pattern moves smoothly inside EVO, the frame time
 stays steady, `quit` still ends with `broker gone`, and `map_fail` stays 0.
+
+## Engine host (Phase 1, our ProsperoWeb fork)
+
+`prosperoweb.elf --evo-host` (branch `feat/evo-host` of
+[sainsaji/ProsperoWeb](https://github.com/sainsaji/ProsperoWeb)) is the real
+engine host. It runs in place of the frame test, with EVO's socket end at
+fd 3, and has no SDL window, no `chrome.html` and no shell controller.
+
+- `src/frontend/ps5/evo_host.{h,cpp}`: one web view from ProsperoWeb's own
+  engine factory. Its `WKPagePaint` output goes into a private ARGB32 cache,
+  dirty rects only; the changed rects are copied into whichever shared
+  buffer EVO has released, with R and B swapped (`kRGBA_8888`, premultiplied).
+  The page events go to EVO as `EVENT`s.
+- `src/ps5/evohost/`: the wire header (an identical copy of EVO's
+  `include/evo_browser_wire.h`; keep the two in step), message packing and the
+  two-buffer bookkeeping. Each buffer tracks what it missed while EVO held
+  it, so after a publish it equals the cache. Host tests:
+  `tests/ps5/test_evo_host.cpp` (`ps5.evo_host` in the fork's CI).
+- `main.cpp` picks the role from `--evo-host` (or `--role=evo-host`). argv[0]
+  must be the ELF's absolute path: the host re-runs that ELF as its
+  WebProcess and NetworkProcess.
+
+**Lifetime.** The broker serves one client and a new connection replaces the
+old one. The host's WebKit connects to 17771 to spawn its WebProcess and
+NetworkProcess, so it takes over the connection EVO opened. From then on fd 3
+keeps everything alive: EVO's soft close sends `BYE` and shuts its end down,
+a kill or crash closes it, and either way the host leaves within 200 ms
+without WebKit's teardown. Its broker connection closes with it, and the
+broker kills the children and exits. EVO's park-time wait for 17771 to refuse
+is unchanged. The broker needs no change.
+
+**Profile and assets.** The host uses ProsperoWeb's own `/data/prosperoweb`
+(log, profile, fonts, certificates). A normal ProsperoWeb install puts the
+assets there, which is one more reason to run it standalone first.
+
+**Not in Phase 1:** the audio server and video overlay (a page's own video
+does not play yet; EVO plays video from Phase 3), the ad-block add-ons, and
+`SCRIPT` messages longer than one packet.
+
+## Web section (Phase 2)
+
+The rail has a **Web** entry (globe icon) after Providers. Its section order
+lives in `ScreenManager.cpp` (`kSecWeb`, `kSecSettings`, `kSecAbout`) and in
+the kit's `rail_items`; keep the two in step.
+
+- **Web home** (`ScreenId::WebHome`, `core/src/screens/WebScreens.cpp`): the
+  generic list screen. Row one opens the address keyboard (EVO's own keyboard
+  with the phone page, since addresses are long); then bookmarks, then
+  history. Opening the section starts the engine in the background, and the
+  subtitle says when it is starting or why it cannot.
+- **Page view** (`ScreenId::WebPage`, kit screen `evo_hui_render_webpage`):
+  the address bar on top (96 px), the page under it at 1:1 (the engine is
+  resized to 1920x984), EVO's pointer over it. No rail.
+- **Bookmarks and history:** `web_bookmarks.txt` and `web_history.txt` in
+  EVO's data folder, one `url<TAB>title` per line, history capped at 50. A
+  fresh install gets three default bookmarks.
+- **Typed text** goes through `evo_web_url.c` (host tests in
+  `tests/test_web_url.cpp`): a host gets `https://`, an IPv4 address or
+  `localhost` gets `http://` (LAN servers), anything else is a DuckDuckGo
+  search.
+- **Engine files:** `prosperoweb-broker.elf` and `prosperoweb.elf` are looked
+  for in `/mnt/usb0`, then `/data/evoplayer/browser` (until they are bundled
+  in the `.ffpfsc`).
+
+| Page view | does |
+|---|---|
+| Left stick | moves the pointer (squared response, 1500 px/s at full tilt) |
+| Right stick, D-pad | scrolls (D-pad: 160 px a press) |
+| Cross | clicks (press and release are sent apart, so drags work) |
+| Square | edits the address |
+| L1 / R1 | back / forward |
+| Triangle | reload, or stop while loading |
+| Options | bookmarks the page, or removes the bookmark |
+| Circle | back in the page's history, else to the Web home |
+
+A text field the user has just clicked (within 1.5 s) opens EVO's keyboard,
+and the text is inserted into it. A field that a page focuses on its own does
+not. `window.open()` loads in the same page. Leaving the page view sends
+`VISIBLE 0`, so the engine stops painting while EVO shows anything else.
+
+**Not yet:** playback from pages (Phase 3), a restart after the engine dies
+(the section shows why and stays failed until EVO restarts), the RmlUi
+fallback rail (it has no Web entry).
+
+**Spike trigger.** With `/mnt/usb0/prosperoweb.elf` present, the spike spawns
+the engine host instead of the frame test. Line 2 of
+`/mnt/usb0/evo_browser_spike` is the page to load (default
+`https://example.com/`). EVO logs every `EVENT` and sends one `SCROLL` when
+the first load finishes. Phase 1 passes when `evo.log` shows the URL, title
+and load-finished events, the page appears and moves after the scroll,
+`quit` ends with `broker gone`, `close` is clean, and `map_fail` stays 0.

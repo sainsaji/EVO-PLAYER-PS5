@@ -6,6 +6,7 @@
  * the runtime and ui_sdf.pipe are known to be up. If anything fails the kit
  * stays off for the session and every screen keeps its RmlUi version.
  */
+#include "evo_rmlui_bridge.h"
 #include "evo_hui.h"
 
 #include "evo_hui_browser.hpp"
@@ -94,6 +95,7 @@ enum class Screen
     image,
     surround,
     provider,
+    webpage,
     dialog, /* overlays from here on */
     toast,
     keyboard,
@@ -119,6 +121,8 @@ struct WebFrame
     std::uint32_t tex[2] = {0, 0};
     int cur = 0;
     int prev[4] = {0, 0, 0, 0}; /* bounding box of the previous frame's rects */
+    int tex_w = 0, tex_h = 0;   /* what the textures were made for */
+    int page_w = 0, page_h = 0; /* the page inside them (the last frame's size) */
 
     static void grow(int box[4], const int r[4])
     {
@@ -151,10 +155,20 @@ struct WebFrame
         {
             /* create_texture wants tight rows; the hosts send exactly that */
         }
-        else if (!tex[0])
+        else if (!tex[0] || f.width > tex_w || f.height > tex_h)
         {
+            /* First frame, or a page grown past the textures (a RESIZE):
+             * make both again from this whole frame. */
+            for (std::uint32_t &t : tex)
+            {
+                if (t)
+                    batch.release_texture(t);
+                t = 0;
+            }
             tex[0] = batch.create_texture(f.width, f.height, f.pixels);
             tex[1] = batch.create_texture(f.width, f.height, f.pixels);
+            tex_w = f.width;
+            tex_h = f.height;
             cur = 0;
             bytes = 2LL * f.stride * f.height;
             prev[2] = prev[3] = 0;
@@ -176,6 +190,8 @@ struct WebFrame
             for (int i = 0; i < 4; ++i)
                 prev[i] = box[i];
         }
+        page_w = f.width;
+        page_h = f.height;
         evo_browser_frame_release(f.buf);
         evo_browser_frame_note_copy(mono_us() - t0, bytes);
     }
@@ -213,6 +229,8 @@ const char *doc_name(Screen s)
         return "hui_surround";
     case Screen::provider:
         return "hui_provider";
+    case Screen::webpage:
+        return "hui_webpage";
     default:
         return "hui";
     }
@@ -258,6 +276,7 @@ struct Kit
     evo::kit::ImageViewer image;
     evo::kit::SurroundScreen surround;
     evo::kit::ProviderGridScreen provider;
+    evo::kit::WebPage webpage;
     evo::kit::KeyboardOverlay keyboard;
     bool keyboard_visible = false;
     /* Frame bookkeeping: one dt per presented frame, however many kit draws
@@ -409,6 +428,8 @@ struct Kit
                 surround.enter();
             else if (screen == Screen::provider)
                 provider.enter();
+            else if (screen == Screen::webpage)
+                webpage.enter();
         }
         const float dt = step();
         rail.update(dt);
@@ -566,6 +587,8 @@ const char *evo_hui_dev_focus_json(const char **screen_doc)
         has = k.surround.focus(&f);
     else if (!has && k.drawn_last_frame == Screen::provider)
         has = k.provider.focus(&f);
+    else if (!has && k.drawn_last_frame == Screen::webpage)
+        has = k.webpage.focus(&f);
     static std::string o;
     o.clear();
     if (!has)
@@ -894,9 +917,34 @@ int evo_hui_render_provider(int width, int height)
                     });
 }
 
+void evo_hui_update_webpage(const evo_hui_webpage_params_t *params)
+{
+    if (params)
+        kit().webpage.set(*params);
+}
+
+int evo_hui_render_webpage(int width, int height)
+{
+    Kit &k = kit();
+    return k.render(
+        Screen::webpage, width, height,
+        [&](float dt, hui::gfx::DrawList &list, const Context &ctx) {
+            k.web.update(k.batch);
+            const std::uint32_t t = k.web.tex[k.web.cur];
+            const float u1 = k.web.tex_w ? static_cast<float>(k.web.page_w) / static_cast<float>(k.web.tex_w) : 1.0f;
+            const float v1 = k.web.tex_h ? static_cast<float>(k.web.page_h) / static_cast<float>(k.web.tex_h) : 1.0f;
+            k.webpage.set_page(t, u1, v1);
+            k.webpage.update(dt);
+            k.webpage.draw(list, ctx);
+        },
+        false);
+}
+
 int evo_hui_render_webframe(int width, int height)
 {
-    if (!evo_browser_frame_shown())
+    /* Only the spike draws the page over everything; the Browser section's
+     * page screen draws it in its own frame (evo_hui_render_webpage). */
+    if (!evo_browser_frame_shown() || !evo_browser_spike_overlay())
         return 0;
     Kit &k = kit();
     return k.render_overlay(Screen::webframe, width, height,

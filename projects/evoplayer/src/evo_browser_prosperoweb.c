@@ -27,6 +27,7 @@
 
 #define SPIKE_TRIGGER     "/mnt/usb0/evo_browser_spike"
 #define SPIKE_DEFAULT_ELF "/mnt/usb0/prosperoweb-broker.elf"
+#define SPIKE_DEFAULT_URL "https://example.com/"
 #define BROKER_MAX_ELF    (64u << 20)
 #define ELFLDR_SEND_MS    10000     /* the loader reads the whole ELF first */
 #define BROKER_UP_MS      10000     /* broker binds 17771 after it starts */
@@ -40,6 +41,23 @@ static int g_busy;                  /* the start worker is still running */
 static int g_stop;                  /* soft close asked for the stop */
 static int g_running;               /* ping answered, connection held */
 static char g_path[256];
+static int g_spike;                 /* started by the trigger file, not the UI */
+static char g_engine_elf[256];      /* prosperoweb.elf, empty: none found */
+static char g_url[512];             /* a page to load once the engine is ready */
+static int g_url_pending;
+static char g_fail[160];            /* why the engine is not available */
+
+/* Page events for the main thread (evo_browser_poll_event). */
+#define EVENT_RING 32
+static evo_browser_event_t g_events[EVENT_RING];
+static int g_ev_head, g_ev_count;
+
+static void set_fail(const char *why)
+{
+    pthread_mutex_lock(&g_mu);
+    if (!g_fail[0]) snprintf(g_fail, sizeof g_fail, "%s", why);
+    pthread_mutex_unlock(&g_mu);
+}
 
 static int stop_requested(void)
 {
@@ -249,8 +267,17 @@ out:
  * end of a new socketpair at fd 3 (src_pid + src_fds, the same rdup route as
  * S2a and as the real engine host later). A thread here receives HELLO and
  * FRAME; the UI takes frames on the main thread (evo_browser_frame_*) and
- * draws them as a texture (ui_kit evo_hui_render_webframe). */
+ * draws them as a texture (ui_kit evo_hui_render_webframe).
+ *
+ * Phase 1 spike: when /mnt/usb0/prosperoweb.elf exists, the broker spawns
+ * that instead, as `prosperoweb.elf --evo-host` (our ProsperoWeb fork). Its
+ * WebKit then takes over the broker connection to spawn WebProcess and
+ * NetworkProcess, so from then on fd 3 is what keeps the engine alive: EVO
+ * closing its end ends the host, and the broker follows. After HELLO, EVO
+ * sends LOAD with the trigger file's second line (default example.com),
+ * logs the page events, and scrolls once when the first load finishes. */
 #define FRAME_TEST_ELF  "/mnt/usb0/evo_frame_test.elf"
+#define ENGINE_HOST_ELF "/mnt/usb0/prosperoweb.elf"
 #define FRAME_RECV_MS   250        /* the receive thread checks the stop this often */
 
 static int g_fsock = -1;
@@ -258,18 +285,73 @@ static unsigned char *g_fbuf[EVOB_MAX_BUFS];
 static size_t g_fbuf_len;
 static int g_fw, g_fh, g_fstride;
 static int g_hello, g_fclosed, g_frame_busy;
+static int g_engine_host;           /* the channel is the real engine, not the test */
 static evo_browser_frame_t g_pending;
 static int g_has_pending;
 static long long g_frames_in, g_frames_drawn, g_copy_us, g_copy_bytes;
 
+/* One packet: a fixed struct, then text (cut to fit EVOB_MAX_PACKET). */
+static int frame_send_text(int s, int type, const void *body, uint32_t len,
+                           const char *text, size_t text_len)
+{
+    unsigned char pkt[EVOB_MAX_PACKET];
+    if (sizeof(struct evob_hdr) + len > sizeof pkt) return -1;
+    const size_t room = sizeof pkt - sizeof(struct evob_hdr) - len;
+    if (text_len > room) text_len = room;
+    const struct evob_hdr h = {EVOB_MAGIC, EVOB_VERSION, (uint16_t)type, (uint32_t)(len + text_len)};
+    memcpy(pkt, &h, sizeof h);
+    if (len) memcpy(pkt + sizeof h, body, len);
+    if (text_len) memcpy(pkt + sizeof h + len, text, text_len);
+    const size_t n = sizeof h + len + text_len;
+    /* Never waits: the main thread sends most of these, and the host reads
+     * all the time. A full socket drops the packet. */
+    const ssize_t r = send(s, pkt, n, MSG_DONTWAIT);
+    if (r == (ssize_t)n) return 0;
+    if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        EVO_LOGW("browser", "engine not reading: packet type %d dropped", type);
+    return -1;
+}
+
 static int frame_send(int s, int type, const void *body, uint32_t len)
 {
-    unsigned char pkt[sizeof(struct evob_hdr) + 16];
-    const struct evob_hdr h = {EVOB_MAGIC, EVOB_VERSION, (uint16_t)type, len};
-    if (len > 16) return -1;
-    memcpy(pkt, &h, sizeof h);
-    memcpy(pkt + sizeof h, body, len);
-    return send(s, pkt, sizeof h + len, 0) == (ssize_t)(sizeof h + len) ? 0 : -1;
+    return frame_send_text(s, type, body, len, NULL, 0);
+}
+
+static void handle_event(const unsigned char *body, size_t len)
+{
+    struct evob_event ev;
+    if (len < sizeof ev) return;
+    memcpy(&ev, body, sizeof ev);
+    const char *text = (const char *)body + sizeof ev;
+    int text_len = (int)(len - sizeof ev);
+    if (text_len > 300) text_len = 300;   /* the log line, not the event */
+    EVO_LOGI("browser", "engine event %u arg %u: %.*s", ev.kind, ev.arg, text_len, text);
+
+    pthread_mutex_lock(&g_mu);
+    evo_browser_event_t *e;
+    if (g_ev_count == EVENT_RING) {   /* full: the oldest goes */
+        g_ev_head = (g_ev_head + 1) % EVENT_RING;
+        g_ev_count--;
+    }
+    e = &g_events[(g_ev_head + g_ev_count) % EVENT_RING];
+    g_ev_count++;
+    e->kind = (int)ev.kind;
+    e->arg = ev.arg;
+    size_t n = len - sizeof ev;
+    if (n >= sizeof e->text) n = sizeof e->text - 1;
+    memcpy(e->text, text, n);
+    e->text[n] = 0;
+    pthread_mutex_unlock(&g_mu);
+
+    if (g_spike && ev.kind == EVOB_EV_LOAD_FINISHED) {
+        static int scrolled;
+        if (!scrolled) {   /* the input path, once: a wheel step down mid-page */
+            scrolled = 1;
+            const struct evob_scroll sc = {960, 540, 0, 400};
+            EVO_LOGI("browser", "Phase 1: page loaded, scrolling once (%s)",
+                     frame_send(g_fsock, EVOB_SCROLL, &sc, sizeof sc) == 0 ? "sent" : "send failed");
+        }
+    }
 }
 
 static void frame_log_stats(const char *when)
@@ -284,11 +366,24 @@ static void frame_log_stats(const char *when)
 static void handle_hello(const unsigned char *body, size_t len, const int *fds, int nfds)
 {
     struct evob_hello h;
+    if (len >= sizeof h) memcpy(&h, body, sizeof h);
+    if (len >= sizeof h && h.nbuf == 0 && nfds == 0) {
+        /* the answer to RESIZE: same buffers, a new page size */
+        pthread_mutex_lock(&g_mu);
+        const int ok = g_hello && (size_t)h.stride == (size_t)g_fstride &&
+                       (size_t)h.stride * h.height <= g_fbuf_len && h.width * 4 <= h.stride;
+        if (ok) {
+            g_fw = (int)h.width;
+            g_fh = (int)h.height;
+        }
+        pthread_mutex_unlock(&g_mu);
+        EVO_LOGI("browser", "host page size %ux%u%s", h.width, h.height, ok ? "" : " refused");
+        return;
+    }
     if (len < sizeof h || nfds != EVOB_MAX_BUFS) {
         EVO_LOGW("browser", "S2b: bad HELLO (%zu bytes, %d fds)", len, nfds);
         return;
     }
-    memcpy(&h, body, sizeof h);
     if (h.width == 0 || h.width > 3840 || h.height == 0 || h.height > 2160 ||
         h.stride < h.width * 4 || h.format != EVOB_RGBA8_PREMUL || h.nbuf != EVOB_MAX_BUFS) {
         EVO_LOGW("browser", "S2b: HELLO refused: %ux%u stride %u format %u nbuf %u",
@@ -314,6 +409,18 @@ static void handle_hello(const unsigned char *body, size_t len, const int *fds, 
     pthread_mutex_unlock(&g_mu);
     EVO_LOGI("browser", "S2b: host HELLO %ux%u stride %u, %d buffers mapped (%zu KB each)",
              h.width, h.height, h.stride, EVOB_MAX_BUFS, bytes / 1024);
+    if (g_engine_host) {
+        char url[sizeof g_url];
+        pthread_mutex_lock(&g_mu);
+        const int pending = g_url_pending;
+        g_url_pending = 0;
+        snprintf(url, sizeof url, "%s", g_url);
+        pthread_mutex_unlock(&g_mu);
+        if (pending) {
+            const int r = frame_send_text(g_fsock, EVOB_LOAD, NULL, 0, url, strlen(url));
+            EVO_LOGI("browser", "LOAD %s %s", url, r == 0 ? "sent" : "send failed");
+        }
+    }
 }
 
 static void handle_frame(const unsigned char *body, size_t len)
@@ -361,7 +468,7 @@ static void *frame_worker(void *arg)
     long long last_log = evo_log_mono_ms();
     const char *why = "stopped";
     while (!stop_requested()) {
-        unsigned char pkt[sizeof(struct evob_hdr) + sizeof(struct evob_frame) + 16];
+        unsigned char pkt[EVOB_MAX_PACKET];
         struct iovec iov = {pkt, sizeof pkt};
         union { struct cmsghdr h; char buf[CMSG_SPACE(sizeof(int) * EVOB_MAX_BUFS)]; } ctl;
         memset(&ctl, 0, sizeof ctl);
@@ -398,6 +505,8 @@ static void *frame_worker(void *arg)
                 handle_hello(pkt + sizeof h, h.len, fds, nfds);
             } else if (h.type == EVOB_FRAME) {
                 handle_frame(pkt + sizeof h, h.len);
+            } else if (h.type == EVOB_EVENT) {
+                handle_event(pkt + sizeof h, h.len);
             } else if (h.type == EVOB_BYE) {
                 why = "host said BYE";
                 for (int i = 0; i < nfds; ++i) close(fds[i]);
@@ -433,11 +542,22 @@ static void *frame_worker(void *arg)
     return NULL;
 }
 
+static int file_exists(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
 static void frame_test_start(int broker)
 {
-    FILE *f = fopen(FRAME_TEST_ELF, "rb");
-    if (!f) return;
-    fclose(f);
+    g_engine_host = g_engine_elf[0] != 0;
+    if (!g_engine_host && !(g_spike && file_exists(FRAME_TEST_ELF))) {
+        set_fail("The browser engine (prosperoweb.elf) is not installed");
+        return;
+    }
+    const char *what = g_engine_host ? "engine host" : "frame test";
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0) {
         EVO_LOGW("browser", "S2b: socketpair failed (errno %d)", errno);
@@ -447,21 +567,32 @@ static void frame_test_start(int broker)
     setsockopt(sv[0], SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof rtv);
     setsockopt(sv[0], SOL_SOCKET, SO_SNDTIMEO, &stv, sizeof stv);
 
-    char req[256], reply[512];
-    snprintf(req, sizeof req,
-             "{\"op\":\"spawn\",\"elf\":\"" FRAME_TEST_ELF "\",\"argv\":[\"evo-frame-test\"],"
-             "\"env\":[],\"nfds\":0,\"src_pid\":%d,\"src_fds\":[%d]}",
-             (int)getpid(), sv[1]);
+    char req[384], reply[512];
+    if (g_engine_host) {
+        /* argv[0] is the ELF's absolute path: the host re-runs the same ELF
+         * as its WebProcess and NetworkProcess (ProsperoWeb main.cpp,
+         * export_self_path). */
+        snprintf(req, sizeof req,
+                 "{\"op\":\"spawn\",\"elf\":\"%s\",\"argv\":[\"%s\",\"--evo-host\"],"
+                 "\"env\":[],\"nfds\":0,\"src_pid\":%d,\"src_fds\":[%d]}",
+                 g_engine_elf, g_engine_elf, (int)getpid(), sv[1]);
+    } else {
+        snprintf(req, sizeof req,
+                 "{\"op\":\"spawn\",\"elf\":\"" FRAME_TEST_ELF "\",\"argv\":[\"evo-frame-test\"],"
+                 "\"env\":[],\"nfds\":0,\"src_pid\":%d,\"src_fds\":[%d]}",
+                 (int)getpid(), sv[1]);
+    }
     const long long t0 = evo_log_mono_ms();
     const int ok = broker_send(broker, req) == 0 && broker_recv(broker, reply, sizeof reply) == 0;
     close(sv[1]);   /* the child has its own copy (rdup) once the broker answered */
     if (!ok || !strstr(reply, "\"ok\":true")) {
-        EVO_LOGW("browser", "S2b: spawn of the frame test failed: %s", ok ? reply : "no answer");
+        EVO_LOGW("browser", "S2b: spawn of the %s failed: %s", what, ok ? reply : "no answer");
+        set_fail("The browser engine could not be started");
         close(sv[0]);
         return;
     }
     const char *p = strstr(reply, "\"pid\":");
-    EVO_LOGI("browser", "S2b: frame test spawned, pid %d, in %lld ms",
+    EVO_LOGI("browser", "S2b: %s spawned, pid %d, in %lld ms", what,
              p ? atoi(p + 6) : 0, evo_log_mono_ms() - t0);
 
     g_fsock = sv[0];
@@ -533,10 +664,12 @@ static void *start_worker(void *arg)
 
     if (!elf) {
         EVO_LOGW("browser", "broker ELF %s missing, too big or not an ELF", g_path);
+        set_fail("The browser engine (prosperoweb-broker.elf) is not installed");
         goto done;
     }
     if (evo_elfldr_send(elf, len, ELFLDR_SEND_MS) != 0) {
         EVO_LOGW("browser", "no ELF loader on 127.0.0.1:%d - the browser needs one", EVO_ELFLDR_PORT);
+        set_fail("The browser needs an ELF loader (elfldr on port 9021)");
         goto done;
     }
     pthread_mutex_lock(&g_mu);
@@ -554,18 +687,20 @@ static void *start_worker(void *arg)
         if (!stop_requested())
             EVO_LOGW("browser", "broker did not answer on 127.0.0.1:%d within %d ms",
                      EVO_BROWSER_BROKER_PORT, BROKER_UP_MS);
+        set_fail("The browser engine did not start");
         goto done;
     }
     int pid = 0;
     if (broker_ping(s, &pid) != 0) {
         EVO_LOGW("browser", "broker on 127.0.0.1:%d did not answer the ping", EVO_BROWSER_BROKER_PORT);
+        set_fail("The browser engine did not answer");
         close(s);   /* a closed client connection makes the broker exit */
         s = -1;
         goto done;
     }
     EVO_LOGI("browser", "broker pid %d answers on 127.0.0.1:%d, %lld ms after the start",
              pid, EVO_BROWSER_BROKER_PORT, evo_log_mono_ms() - t0);
-    if (!stop_requested())
+    if (g_spike && !stop_requested())
         ipc_selftest(s);
     if (!stop_requested())
         frame_test_start(s);
@@ -602,6 +737,7 @@ int evo_browser_engine_start(const char *broker_elf_path)
     if (evo_loopback_port_open(EVO_BROWSER_BROKER_PORT)) {
         EVO_LOGW("browser", "something already answers on 127.0.0.1:%d - not starting a broker",
                  EVO_BROWSER_BROKER_PORT);
+        set_fail("Another browser is running (close ProsperoWeb first)");
         pthread_mutex_lock(&g_mu);
         g_busy = 0;
         pthread_mutex_unlock(&g_mu);
@@ -631,11 +767,168 @@ void evo_browser_engine_boot(void)
     if (!f) return;
     char path[256] = {0};
     if (!fgets(path, sizeof path, f)) path[0] = 0;
+    /* line 2 (Phase 1): the page the engine host loads */
+    if (!fgets(g_url, sizeof g_url, f)) g_url[0] = 0;
     fclose(f);
     path[strcspn(path, "\r\n")] = 0;
+    g_url[strcspn(g_url, "\r\n")] = 0;
     if (!path[0]) snprintf(path, sizeof path, "%s", SPIKE_DEFAULT_ELF);
+    if (!g_url[0]) snprintf(g_url, sizeof g_url, "%s", SPIKE_DEFAULT_URL);
+    g_url_pending = 1;
+    g_spike = 1;
+    if (file_exists(ENGINE_HOST_ELF))
+        snprintf(g_engine_elf, sizeof g_engine_elf, "%s", ENGINE_HOST_ELF);
     EVO_LOGI("browser", "spike S1: starting the broker from %s", path);
     evo_browser_engine_start(path);
+}
+
+int evo_browser_spike_overlay(void)
+{
+    return g_spike;
+}
+
+/* ---- Phase 2: the Browser section's calls ---- */
+
+/* dir/name if it exists, else empty. */
+static int find_elf(const char *name, char *out, size_t cap)
+{
+    static const char *const dirs[] = EVO_BROWSER_ELF_DIRS;
+    for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; ++i) {
+        snprintf(out, cap, "%s/%s", dirs[i], name);
+        if (file_exists(out)) return 1;
+    }
+    out[0] = 0;
+    return 0;
+}
+
+void evo_browser_open(void)
+{
+    pthread_mutex_lock(&g_mu);
+    const int active = g_busy || g_fd >= 0 || g_stop || (g_hello && !g_fclosed);
+    pthread_mutex_unlock(&g_mu);
+    if (active) return;
+
+    char broker[256];
+    pthread_mutex_lock(&g_mu);
+    g_fail[0] = 0;
+    pthread_mutex_unlock(&g_mu);
+    if (!find_elf("prosperoweb-broker.elf", broker, sizeof broker)) {
+        set_fail("The browser engine (prosperoweb-broker.elf) is not installed");
+        return;
+    }
+    if (!find_elf("prosperoweb.elf", g_engine_elf, sizeof g_engine_elf)) {
+        set_fail("The browser engine (prosperoweb.elf) is not installed");
+        return;
+    }
+    EVO_LOGI("browser", "opening: broker %s, engine %s", broker, g_engine_elf);
+    evo_browser_engine_start(broker);
+}
+
+evo_browser_state_t evo_browser_state(char *why, int why_cap)
+{
+    pthread_mutex_lock(&g_mu);
+    evo_browser_state_t st;
+    if (g_fail[0])
+        st = EVO_BROWSER_FAILED;
+    else if (g_hello && !g_fclosed)
+        st = EVO_BROWSER_READY;
+    else if (g_fclosed)
+        st = EVO_BROWSER_FAILED;
+    else if (g_busy || g_fd >= 0)
+        st = EVO_BROWSER_STARTING;
+    else
+        st = EVO_BROWSER_OFF;
+    if (why && why_cap > 0) {
+        snprintf(why, (size_t)why_cap, "%s",
+                 g_fail[0] ? g_fail : (st == EVO_BROWSER_FAILED ? "The browser engine stopped" : ""));
+    }
+    pthread_mutex_unlock(&g_mu);
+    return st;
+}
+
+/* The channel, if commands can go now. */
+static int channel(void)
+{
+    pthread_mutex_lock(&g_mu);
+    const int s = (g_hello && !g_fclosed && !g_stop && g_engine_host) ? g_fsock : -1;
+    pthread_mutex_unlock(&g_mu);
+    return s;
+}
+
+void evo_browser_load(const char *url)
+{
+    if (!url || !url[0]) return;
+    const int s = channel();
+    if (s >= 0) {
+        frame_send_text(s, EVOB_LOAD, NULL, 0, url, strlen(url));
+        EVO_LOGI("browser", "LOAD %s", url);
+        return;
+    }
+    pthread_mutex_lock(&g_mu);
+    snprintf(g_url, sizeof g_url, "%s", url);
+    g_url_pending = 1;
+    pthread_mutex_unlock(&g_mu);
+}
+
+void evo_browser_nav(int op)
+{
+    const int s = channel();
+    const struct evob_nav n = {(uint32_t)op};
+    if (s >= 0) frame_send(s, EVOB_NAV, &n, sizeof n);
+}
+
+void evo_browser_pointer(int x, int y, int action, int button)
+{
+    const int s = channel();
+    const struct evob_pointer p = {x, y, (uint32_t)action, (uint32_t)button};
+    if (s >= 0) frame_send(s, EVOB_POINTER, &p, sizeof p);
+}
+
+void evo_browser_scroll(int x, int y, int dx, int dy)
+{
+    const int s = channel();
+    const struct evob_scroll sc = {x, y, dx, dy};
+    if (s >= 0) frame_send(s, EVOB_SCROLL, &sc, sizeof sc);
+}
+
+void evo_browser_key(unsigned key_code, unsigned modifiers, int pressed, const char *text)
+{
+    const int s = channel();
+    const struct evob_key k = {key_code, modifiers, pressed ? 1u : 0u};
+    if (s >= 0) frame_send_text(s, EVOB_KEY, &k, sizeof k, text, text ? strlen(text) : 0);
+}
+
+void evo_browser_text(const char *utf8)
+{
+    const int s = channel();
+    if (s >= 0 && utf8 && utf8[0]) frame_send_text(s, EVOB_TEXT, NULL, 0, utf8, strlen(utf8));
+}
+
+void evo_browser_resize(int width, int height)
+{
+    const int s = channel();
+    const struct evob_size sz = {(uint32_t)width, (uint32_t)height};
+    if (s >= 0) frame_send(s, EVOB_RESIZE, &sz, sizeof sz);
+}
+
+void evo_browser_set_visible(int visible)
+{
+    const int s = channel();
+    const struct evob_flag f = {visible ? 1u : 0u};
+    if (s >= 0) frame_send(s, EVOB_VISIBLE, &f, sizeof f);
+}
+
+int evo_browser_poll_event(evo_browser_event_t *ev)
+{
+    pthread_mutex_lock(&g_mu);
+    const int r = g_ev_count > 0;
+    if (r) {
+        *ev = g_events[g_ev_head];
+        g_ev_head = (g_ev_head + 1) % EVENT_RING;
+        g_ev_count--;
+    }
+    pthread_mutex_unlock(&g_mu);
+    return r;
 }
 
 int evo_browser_engine_running(void)
@@ -654,7 +947,14 @@ void evo_browser_engine_stop(void)
     g_fd = -1;
     g_running = 0;
     const int started = g_started || g_busy;
+    const int fsock = g_fclosed ? -1 : g_fsock;
     pthread_mutex_unlock(&g_mu);
+    if (fsock >= 0) {
+        /* The engine host owns the broker connection by now: ending fd 3 ends
+         * it, and the broker follows. The frame thread closes the socket. */
+        frame_send(fsock, EVOB_BYE, NULL, 0);
+        shutdown(fsock, SHUT_RDWR);
+    }
     if (fd >= 0) close(fd);   /* the broker terminates its children and exits */
     if (started)
         EVO_LOGI("browser", "stop: broker connection %s", fd >= 0 ? "closed" : "was not held");

@@ -511,6 +511,28 @@ int evo_rmlui_render_webframe(int width, int height) {
     return 0;
 }
 
+void evo_rmlui_update_webpage(const evo_hui_webpage_params_t* params) {
+#if defined(EVO_AGC_DEVICE)
+    if (params) {
+        evo_hui_update_webpage(params);
+    }
+#else
+    (void)params;
+#endif
+}
+
+void evo_rmlui_render_webpage(uint32_t* fb, int w, int h) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_webpage(w, h)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return;
+    }
+#endif
+    (void)fb;
+    (void)w;
+    (void)h;
+}
+
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height) {
 #if defined(EVO_AGC_DEVICE)
     if (EvoRmlApp::Instance().GlActive() && evo_hui_render_playback_osd(width, height)) {

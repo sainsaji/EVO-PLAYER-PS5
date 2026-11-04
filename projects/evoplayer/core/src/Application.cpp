@@ -19,6 +19,7 @@
 #include "evo/screens/AboutSupportScreen.hpp"
 #include "evo/screens/SafeToCloseScreen.hpp"
 #include "evo/screens/ImageViewerScreen.hpp"
+#include "evo/screens/WebScreens.hpp"
 #include "evo/screens/ChangelogScreen.hpp"
 #include "evo/animation/AnimationManager.hpp"
 
@@ -513,6 +514,8 @@ bool Application::initScreens() {
     m_screenManager->registerScreen(std::make_unique<SafeToCloseScreen>());
     m_screenManager->registerScreen(std::make_unique<ChangelogScreen>());
     m_screenManager->registerScreen(std::make_unique<ImageViewerScreen>());
+    m_screenManager->registerScreen(std::make_unique<WebHomeScreen>());   /* #237 */
+    m_screenManager->registerScreen(std::make_unique<WebPageScreen>());
     m_screenManager->registerScreen(std::make_unique<ModalDialogScreen>(ModalType::ExitConfirm));
     m_screenManager->registerScreen(std::make_unique<ModalDialogScreen>(ModalType::ResumePrompt));
     m_screenManager->navigateTo(ScreenId::MainMenu);

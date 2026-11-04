@@ -59,7 +59,9 @@ enum class ScreenId : int {
     SettingsAudio = 33,  /* #118 */
     SettingsExperimental = 34, /* #105 */
     ChapterPicker = 35,        /* #150 */
-    SubtitleFile = 36          /* pick a subtitle file anywhere on the console */
+    SubtitleFile = 36,         /* pick a subtitle file anywhere on the console */
+    WebHome = 37,              /* #237: the Web section's home (address, bookmarks, history) */
+    WebPage = 38               /* #237: a web page, full screen, from the browser engine */
 };
 
 // Playback Quality Profile

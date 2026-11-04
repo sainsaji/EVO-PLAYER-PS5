@@ -65,6 +65,16 @@ IScreen* ScreenManager::getScreen(ScreenId screenId) const {
     return nullptr;
 }
 
+/* Rail order: Home, Browse, Providers (when built), Web, Settings, About,
+ * then QUIT EVO. P shifts everything after the Providers slot. The kit draws
+ * the same list (rail_items in ui_kit/src/evo_hui_screens.cpp). */
+namespace {
+constexpr int P = EVO_ENABLE_EMBY ? 1 : 0;
+constexpr int kSecWeb = 2 + P;
+constexpr int kSecSettings = 3 + P;
+constexpr int kSecAbout = 4 + P;
+}
+
 int ScreenManager::getSectionForScreen(ScreenId screenId) const {
     switch (screenId) {
         case ScreenId::MainMenu:        return 0; // Home
@@ -75,15 +85,16 @@ int ScreenManager::getSectionForScreen(ScreenId screenId) const {
         case ScreenId::EmbySetup:
         case ScreenId::EmbyBrowse:      return 2; // Emby
 #endif
+        case ScreenId::WebHome:         return kSecWeb; // the page view itself has no rail
         case ScreenId::Settings:
         case ScreenId::SettingsPlayback:
         case ScreenId::SettingsAudio:
         case ScreenId::SettingsSubtitles:
         case ScreenId::SettingsInterface:
         case ScreenId::SettingsSystem:
-        case ScreenId::SettingsExperimental: return EVO_ENABLE_EMBY ? 3 : 2; // Settings
+        case ScreenId::SettingsExperimental: return kSecSettings; // Settings
         case ScreenId::AboutSupport:
-        case ScreenId::Changelog:       return EVO_ENABLE_EMBY ? 4 : 3; // About & Support
+        case ScreenId::Changelog:       return kSecAbout; // About & Support
         default:                        return -1; // Non-rail screens
     }
 }
@@ -123,28 +134,19 @@ void ScreenManager::stepRail(int delta) {
 ScreenId ScreenManager::getRootScreenForSection(int section) const {
     /* Must stay the inverse of getSectionForScreen() above, including the
      * shift when Emby is compiled out. */
+    if (section == 0) return ScreenId::MainMenu;
+    if (section == 1) return ScreenId::UsbBrowser;
 #if EVO_ENABLE_EMBY
-    switch (section) {
-        case 0: return ScreenId::MainMenu;
-        case 1: return ScreenId::UsbBrowser;
-        /* #90: the one shared provider slot lands on the generic provider host
-         * (ProviderHostScreen), not on the Emby setup stub. The host picks the
-         * first enabled provider and sends the user to Settings if none is
-         * configured, so the slot is useful before anything is set up. */
-        case 2: return ScreenId::EmbyBrowse;
-        case 3: return ScreenId::Settings;
-        case 4: return ScreenId::AboutSupport;
-        default: return ScreenId::MainMenu;
-    }
-#else
-    switch (section) {
-        case 0: return ScreenId::MainMenu;
-        case 1: return ScreenId::UsbBrowser;
-        case 2: return ScreenId::Settings;
-        case 3: return ScreenId::AboutSupport;
-        default: return ScreenId::MainMenu;
-    }
+    /* #90: the one shared provider slot lands on the generic provider host
+     * (ProviderHostScreen), not on the Emby setup stub. The host picks the
+     * first enabled provider and sends the user to Settings if none is
+     * configured, so the slot is useful before anything is set up. */
+    if (section == 2) return ScreenId::EmbyBrowse;
 #endif
+    if (section == kSecWeb) return ScreenId::WebHome;
+    if (section == kSecSettings) return ScreenId::Settings;
+    if (section == kSecAbout) return ScreenId::AboutSupport;
+    return ScreenId::MainMenu;
 }
 
 bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
@@ -165,7 +167,7 @@ bool ScreenManager::isPlaybackScreen(ScreenId screenId) const {
 }
 
 int ScreenManager::railSectionCount() const {
-    return EVO_ENABLE_EMBY ? 5 : 4;
+    return kSecAbout + 1;
 }
 
 void ScreenManager::activateRail() {

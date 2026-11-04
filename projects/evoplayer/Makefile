@@ -139,6 +139,7 @@ MEDIA_SRCS := \
     src/generated/evo_ntfs_helper_elf.c \
     src/evo_elfldr.c \
     src/evo_browser_prosperoweb.c \
+    src/evo_web_url.c \
     src/evo_error.c \
     src/evo_log_server.c \
     src/evo_stats.c \
@@ -235,6 +236,7 @@ CORE_SRCS := \
     core/src/screens/SafeToCloseScreen.cpp \
     core/src/screens/ChangelogScreen.cpp \
     core/src/screens/ImageViewerScreen.cpp \
+    core/src/screens/WebScreens.cpp \
     core/src/screens/ModalDialogScreen.cpp \
     core/src/screens/StatefulScreen.cpp
 
@@ -285,7 +287,8 @@ ifeq ($(AGC_DEVICE),1)
                    ui_kit/src/evo_hui_extra.cpp \
                    ui_kit/src/evo_hui_surround.cpp \
                    ui_kit/src/evo_hui_provider.cpp \
-                   ui_kit/src/evo_hui_complex.cpp
+                   ui_kit/src/evo_hui_complex.cpp \
+                   ui_kit/src/evo_hui_webpage.cpp
 endif
 UI_KIT_OBJS := $(UI_KIT_SRCS:.cpp=.o)
 

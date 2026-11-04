@@ -14,6 +14,7 @@
 #define EVO_HUI_SCREENS_HPP
 
 #include "evo_rmlui_bridge.h"
+#include "evo_hui.h" /* evo_hui_webpage_params_t */
 
 #include "core/tween.hpp"
 #include "gfx/draw_list.hpp"
@@ -281,6 +282,38 @@ class ListScreen
     hui::tween::Spring menu_open_;
     hui::ui::SpringRect menu_ring_;
     bool menu_ring_snapped_ = false;
+};
+
+/* The browser section's page view (#237 Phase 2). */
+class WebPage
+{
+  public:
+    void set(const evo_hui_webpage_params_t &params);
+    void enter();
+    void update(float dt);
+    void draw(hui::gfx::DrawList &list, const Context &ctx) const;
+    bool focus(FocusInfo *out) const;
+    void set_page(std::uint32_t tex, float u1, float v1);
+
+  private:
+    std::string url_;
+    std::string title_;
+    std::string message_;
+    int loading_ = 0;
+    int can_back_ = 0;
+    int can_forward_ = 0;
+    int state_ = 0;
+    int pointer_visible_ = 0;
+    int pointer_x_ = 0;
+    int pointer_y_ = 0;
+    int pointer_hand_ = 0;
+    int hints_visible_ = 0;
+
+    std::uint32_t tex_ = 0;
+    float u1_ = 1.0f;
+    float v1_ = 1.0f;
+    float age_ = 0.0f;
+    float loading_age_ = 0.0f;
 };
 
 } // namespace evo::kit

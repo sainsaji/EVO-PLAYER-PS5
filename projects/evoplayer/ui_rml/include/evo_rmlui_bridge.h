@@ -1125,6 +1125,12 @@ typedef struct {
 
 void evo_rmlui_update_nav(const evo_rmlui_nav_params_t* params);
 
+/* #237 Phase 2: the Web section's page view. Kit only: nothing draws when
+ * the kit cannot. The params are evo_hui_webpage_params_t (evo_hui.h). */
+struct evo_hui_webpage_params_s;
+void evo_rmlui_update_webpage(const struct evo_hui_webpage_params_s* params);
+void evo_rmlui_render_webpage(uint32_t* fb, int w, int h);
+
 #ifdef __cplusplus
 }
 #endif

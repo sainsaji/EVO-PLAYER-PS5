@@ -20,6 +20,9 @@ extern "C" {
 #endif
 
 #define EVO_BROWSER_BROKER_PORT 17771
+/* Where the engine's two ELFs are looked for, in order (until they are
+ * bundled in the .ffpfsc). */
+#define EVO_BROWSER_ELF_DIRS { "/mnt/usb0", "/data/evoplayer/browser" }
 
 /* At boot: starts the engine in the background when the spike trigger file
  * exists. Never blocks. */
@@ -62,6 +65,48 @@ int evo_browser_frame_acquire(evo_browser_frame_t *out);
 void evo_browser_frame_release(int buf);
 /* Called by the drawer once per copied frame, for the log's statistics. */
 void evo_browser_frame_note_copy(long long copy_us, long long bytes);
+/* 1 only in the spike (trigger file): frames then draw full screen over
+ * everything; otherwise the Browser page screen draws them. */
+int evo_browser_spike_overlay(void);
+
+/* ---- Phase 2: what the Browser section uses ----
+ * Main thread. None of these block: commands are sent with MSG_DONTWAIT and
+ * dropped (and logged) if the engine is not reading. */
+
+typedef enum {
+    EVO_BROWSER_OFF = 0,       /* never opened */
+    EVO_BROWSER_STARTING = 1,  /* broker and engine host on their way */
+    EVO_BROWSER_READY = 2,     /* frames and commands flow */
+    EVO_BROWSER_FAILED = 3,    /* could not start, or the engine went away */
+} evo_browser_state_t;
+
+/* Starts the engine in the background unless it runs or is starting.
+ * Needs prosperoweb-broker.elf and prosperoweb.elf (EVO_BROWSER_ELF_DIRS)
+ * and an ELF loader on 127.0.0.1:9021. */
+void evo_browser_open(void);
+/* The state; for FAILED, a short reason for the user in why. */
+evo_browser_state_t evo_browser_state(char *why, int why_cap);
+
+/* Load a URL now, or as soon as the engine is ready. */
+void evo_browser_load(const char *url);
+void evo_browser_nav(int op);   /* EVOB_NAV_BACK / _FORWARD / _RELOAD / _STOP */
+/* Page pixels; action EVOB_PTR_MOVE / _DOWN / _UP, button 1 left. */
+void evo_browser_pointer(int x, int y, int action, int button);
+void evo_browser_scroll(int x, int y, int dx, int dy);
+void evo_browser_key(unsigned key_code, unsigned modifiers, int pressed, const char *text);
+void evo_browser_text(const char *utf8);
+/* The page size; at most the size of the engine's buffers (1920x1080). */
+void evo_browser_resize(int width, int height);
+/* 0 while EVO plays a video or leaves the page: the engine stops painting. */
+void evo_browser_set_visible(int visible);
+
+/* Page events, oldest first. kind is an EVOB_EV_* value. */
+typedef struct {
+    int kind;
+    unsigned arg;
+    char text[1024];   /* cut to fit */
+} evo_browser_event_t;
+int evo_browser_poll_event(evo_browser_event_t *ev);
 
 #ifdef __cplusplus
 }

@@ -85,6 +85,33 @@ int  evo_hui_render_keyboard(int width, int height);
  * no engine host is sending frames. */
 int  evo_hui_render_webframe(int width, int height);
 
+/* #237 Phase 2: the Browser section's page view. An address bar across the
+ * top (EVO_HUI_WEBPAGE_BAR_H tall), the page under it at 1:1 pixels, EVO's
+ * own pointer over the page, and the button hints over the page's foot.
+ * The page is the browser engine's newest frame (evo_browser_frame_*). */
+#define EVO_HUI_WEBPAGE_BAR_H 96
+#define EVO_HUI_WEBPAGE_W     1920
+#define EVO_HUI_WEBPAGE_H     (1080 - EVO_HUI_WEBPAGE_BAR_H)
+
+typedef struct evo_hui_webpage_params_s {
+    const char* url;          /* address bar text */
+    const char* title;        /* page title; may be NULL or empty */
+    int         loading;      /* 1 while a page loads: a thin bar moves under the address */
+    int         can_back;     /* back / forward state, for the hints */
+    int         can_forward;
+    int         state;        /* evo_browser_state_t (evo_browser_engine.h) */
+    const char* message;      /* over the page area while state != READY:
+                                 "Starting the browser..." or why it failed */
+    int         pointer_visible;
+    int         pointer_x;    /* screen pixels, 1920x1080 space */
+    int         pointer_y;
+    int         pointer_hand; /* 1 over a link: a hand instead of an arrow */
+    int         hints_visible;
+} evo_hui_webpage_params_t;
+
+void evo_hui_update_webpage(const evo_hui_webpage_params_t* params);
+int  evo_hui_render_webpage(int width, int height);
+
 #ifdef __cplusplus
 }
 #endif
