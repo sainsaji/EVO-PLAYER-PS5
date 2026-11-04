@@ -94,6 +94,8 @@ private:
 
     std::string m_url;
     std::string m_title;
+    std::string m_titleUrl;     /* m_url when m_title arrived */
+    std::string m_visitedUrl;   /* the last page written to history (a finished load) */
     std::string m_pendingUrl;
     bool m_loading = false;
     bool m_canBack = false;

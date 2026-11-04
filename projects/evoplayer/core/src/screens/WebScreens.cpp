@@ -428,19 +428,25 @@ void WebPageScreen::pollEvents()
     evo_browser_event_t ev;
     while (evo_browser_poll_event(&ev)) {
         switch (ev.kind) {
+        /* History gets a page only once its load finishes, so the short
+         * stops of a redirect (en.m.wikipedia.org, no title) stay out. */
         case EVOB_EV_URL:
             m_url = ev.text;
-            WebLibrary::instance().noteVisit(m_url, m_title);
             break;
         case EVOB_EV_TITLE:
             m_title = ev.text;
-            WebLibrary::instance().noteVisit(m_url, m_title);
+            m_titleUrl = m_url;
+            if (!m_visitedUrl.empty() && m_visitedUrl == m_url)
+                WebLibrary::instance().noteVisit(m_url, m_title);   /* a title after the load */
             break;
         case EVOB_EV_LOAD_STARTED:
             m_loading = true;
             break;
         case EVOB_EV_LOAD_FINISHED:
             m_loading = false;
+            m_visitedUrl = m_url;
+            /* the old page's title must not stick to a page that has none */
+            WebLibrary::instance().noteVisit(m_url, m_titleUrl == m_url ? m_title : std::string());
             break;
         case EVOB_EV_LOAD_FAILED: {
             m_loading = false;
