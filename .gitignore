@@ -405,6 +405,14 @@ output/*.patch
 output/brand-icons/
 output/confbak/
 
+# Everything else under output/ too: it is all generated or scratch, and the
+# per-folder list above never kept up. Only the three .gitkeep placeholders
+# (rules near the top) and already tracked files (vo.log) stay in git.
+output/*
+!output/elf/
+!output/pkg/
+!output/logs/
+
 # Local-only tool, not part of EVO.
 tools/mydebrid/
 tools/gen_big_m3u.py
