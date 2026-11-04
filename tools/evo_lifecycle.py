@@ -236,13 +236,17 @@ def main(argv):
             # the console clock and this host's clock are not the same.
             # "[MANUAL] scanned N manual source(s)" is a heartbeat logged every
             # scan_interval_s (15 s) even when nothing changes, so it never lets
-            # the log go quiet: leave it out of the count.
+            # the log go quiet: leave it out of the count. So is "[SKIP] game
+            # info unavailable: <dir>", which a broken tile (no param.json, e.g.
+            # /data/ps5upload/tile/PSUP00001) repeats on every one of those scans.
             quiet, limit = int(argv[2]), int(argv[3])
             deadline = time.time() + limit
             last, since = None, time.time()
+            scan_noise = re.compile(r"(?m)^.*(\[MANUAL\] scanned \d+ manual source\(s\)"
+                                    r"|\[SKIP\] game info unavailable: .*)\n?")
             while True:
                 try:
-                    n = len(re.sub(r"(?m)^.*\[MANUAL\] scanned \d+ manual source\(s\)\n?", "", sm_text()))
+                    n = len(scan_noise.sub("", sm_text()))
                     if n != last:
                         last, since = n, time.time()
                     elif time.time() - since >= quiet:
