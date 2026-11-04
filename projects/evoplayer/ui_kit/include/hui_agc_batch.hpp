@@ -56,6 +56,12 @@ class AgcBatch
      * 0xAABBGGRR pixels. 0 on failure. */
     std::uint32_t create_texture(int width, int height, const std::uint8_t *rgba);
     void release_texture(std::uint32_t handle);
+    /* Copies a rectangle of RGBA8 rows (src points at the source's top-left
+     * pixel of the whole image, src_pitch bytes per row) into an RGBA texture
+     * in place. The caller makes sure the GPU is not reading it this frame
+     * (the browser view alternates two textures). False on a bad handle. */
+    bool update_texture(std::uint32_t handle, int x, int y, int w, int h,
+                        const std::uint8_t *src, int src_pitch);
 
     /* Records the list into the current AGC frame. */
     void draw(const hui::gfx::DrawList &list, const hui::gfx::Viewport &viewport,

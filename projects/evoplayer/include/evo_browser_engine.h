@@ -42,6 +42,27 @@ void evo_browser_engine_stop(void);
  * never started), -1 when it still answers. Only acts if EVO started one. */
 int evo_browser_engine_wait_stopped(int timeout_ms);
 
+/* ---- frames (spike S2b; wire format in evo_browser_wire.h) ----
+ * Main thread only. A frame is one of the host's shared buffers, complete,
+ * plus the rectangles that changed since the host last painted it. */
+typedef struct {
+    int buf;
+    unsigned seq;
+    const unsigned char *pixels;   /* RGBA8 premultiplied, top row first */
+    int width, height, stride;
+    int nrects;
+    int rects[16][4];              /* x, y, w, h */
+} evo_browser_frame_t;
+
+/* 1 while a host has sent its buffers and its channel is open. */
+int evo_browser_frame_shown(void);
+/* The newest frame not yet taken: 1 and *out, else 0. Hand it back with
+ * evo_browser_frame_release() once copied. */
+int evo_browser_frame_acquire(evo_browser_frame_t *out);
+void evo_browser_frame_release(int buf);
+/* Called by the drawer once per copied frame, for the log's statistics. */
+void evo_browser_frame_note_copy(long long copy_us, long long bytes);
+
 #ifdef __cplusplus
 }
 #endif

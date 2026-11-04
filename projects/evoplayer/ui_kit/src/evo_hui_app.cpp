@@ -22,6 +22,7 @@
 
 #include "evo_agc_runtime.h"
 #include "evo_boot_log.h"
+#include "evo_browser_engine.h"
 #include "evo_rmlui_bundle.h"
 
 #include "gfx/font.hpp"
@@ -96,7 +97,88 @@ enum class Screen
     dialog, /* overlays from here on */
     toast,
     keyboard,
+    webframe, /* #237 spike S2b: a browser engine frame, full screen */
     count,
+};
+
+/*
+ * The browser engine's page, drawn from the host's shared buffers (#237).
+ * Two textures alternate so the CPU never writes the one the GPU drew last
+ * frame. The one about to be written was last brought up to date two frames
+ * ago, so it gets this frame's changed rectangles and the previous frame's.
+ */
+struct WebFrame
+{
+    static long long mono_us()
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<long long>(ts.tv_sec) * 1000000LL + ts.tv_nsec / 1000L;
+    }
+
+    std::uint32_t tex[2] = {0, 0};
+    int cur = 0;
+    int prev[4] = {0, 0, 0, 0}; /* bounding box of the previous frame's rects */
+
+    static void grow(int box[4], const int r[4])
+    {
+        if (r[2] <= 0 || r[3] <= 0)
+            return;
+        if (box[2] <= 0 || box[3] <= 0)
+        {
+            for (int i = 0; i < 4; ++i)
+                box[i] = r[i];
+            return;
+        }
+        const int x0 = box[0] < r[0] ? box[0] : r[0];
+        const int y0 = box[1] < r[1] ? box[1] : r[1];
+        const int x1 = (box[0] + box[2]) > (r[0] + r[2]) ? box[0] + box[2] : r[0] + r[2];
+        const int y1 = (box[1] + box[3]) > (r[1] + r[3]) ? box[1] + box[3] : r[1] + r[3];
+        box[0] = x0;
+        box[1] = y0;
+        box[2] = x1 - x0;
+        box[3] = y1 - y0;
+    }
+
+    void update(evo::hui_agc::AgcBatch &batch)
+    {
+        evo_browser_frame_t f;
+        if (!evo_browser_frame_acquire(&f))
+            return;
+        const long long t0 = mono_us();
+        long long bytes = 0;
+        if (f.stride != f.width * 4)
+        {
+            /* create_texture wants tight rows; the hosts send exactly that */
+        }
+        else if (!tex[0])
+        {
+            tex[0] = batch.create_texture(f.width, f.height, f.pixels);
+            tex[1] = batch.create_texture(f.width, f.height, f.pixels);
+            cur = 0;
+            bytes = 2LL * f.stride * f.height;
+            prev[2] = prev[3] = 0;
+        }
+        else
+        {
+            int box[4] = {0, 0, 0, 0};
+            for (int i = 0; i < f.nrects; ++i)
+                grow(box, f.rects[i]);
+            int both[4] = {box[0], box[1], box[2], box[3]};
+            grow(both, prev);
+            const int next = cur ^ 1;
+            if (both[2] > 0 && both[3] > 0 &&
+                batch.update_texture(tex[next], both[0], both[1], both[2], both[3], f.pixels, f.stride))
+            {
+                cur = next;
+                bytes = 4LL * both[2] * both[3];
+            }
+            for (int i = 0; i < 4; ++i)
+                prev[i] = box[i];
+        }
+        evo_browser_frame_release(f.buf);
+        evo_browser_frame_note_copy(mono_us() - t0, bytes);
+    }
 };
 
 const char *doc_name(Screen s)
@@ -146,6 +228,7 @@ struct Kit
     } state = untried;
 
     evo::hui_agc::AgcBatch batch;
+    WebFrame web;
     std::unique_ptr<BundleTextures> host;
     std::unique_ptr<evo::kit::TextureCache> textures;
     hui::gfx::Font font_regular, font_semibold, font_display, font_mono;
@@ -809,6 +892,21 @@ int evo_hui_render_provider(int width, int height)
                         k.provider.update(dt);
                         k.provider.draw(list, ctx);
                     });
+}
+
+int evo_hui_render_webframe(int width, int height)
+{
+    if (!evo_browser_frame_shown())
+        return 0;
+    Kit &k = kit();
+    return k.render_overlay(Screen::webframe, width, height,
+                            [&](float, hui::gfx::DrawList &list, const Context &) {
+                                k.web.update(k.batch);
+                                const std::uint32_t t = k.web.tex[k.web.cur];
+                                if (t)
+                                    list.image(t, hui::gfx::Rect{0.0f, 0.0f, 1920.0f, 1080.0f},
+                                               hui::gfx::kFullUv, hui::gfx::Color{1.0f, 1.0f, 1.0f, 1.0f});
+                            });
 }
 
 void evo_hui_update_keyboard(const evo_keyboard_params_t *params)

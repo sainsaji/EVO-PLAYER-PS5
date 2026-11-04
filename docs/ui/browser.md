@@ -7,8 +7,11 @@ down. The first engine is ProsperoWeb (kvaps, GPL-3; our fork is
 [sainsaji/ProsperoWeb](https://github.com/sainsaji/ProsperoWeb)); the WPE GPU
 engine from Prospero Browser replaces it behind the same seam later.
 
-Status: Phase 0. Spike S1 (engine lifetime) is in the code; S2 (frame
-handoff) is designed below. Nothing here is hardware-verified yet.
+Status: Phase 0 spikes S1 (engine lifetime), S2a (transport) and S2b (frames
+drawn as a texture) passed on a PS5 Pro on FW 13.60 with the stock
+ProsperoWeb v0.2.1 broker. S2b measured about 58 drawn frames a second at
+1080p, 0.22 ms and about 0.9 MB per dirty-rect copy, EVO at 60 fps, and
+`map_fail=0`.
 
 ## The seam
 
@@ -68,9 +71,14 @@ S2 runs in two steps:
    (`src_pid`, `src_fd` = `sv[1]`), receives the broker's SHM_ANON object by
    `SCM_RIGHTS`, maps it and checks the `PRWB-BROKER-SHM` pattern. This proves
    the transport inside PPSA99039 with no fork change.
-2. **S2b, frame test.** The fork adds an `evo-frame-test` role to the broker
-   ELF (no WebKit): it speaks the frame protocol below and paints a moving
-   test pattern. EVO draws it full screen behind a dev trigger.
+2. **S2b, frame test.** No fork change either: the stock broker spawns any
+   ELF by path, so `helpers/frame_test.c` (built by
+   `tools/build_frame_test.sh` into `output/evo_frame_test.elf`) is spawned
+   with EVO's socket end at fd 3, the same route the engine host will take.
+   It speaks the frame protocol below (`include/evo_browser_wire.h`) and
+   paints a moving bar plus red, green and blue squares (byte order check).
+   EVO draws it full screen (`evo_hui_render_webframe`) when
+   `/mnt/usb0/evo_frame_test.elf` exists next to the spike trigger.
 
 ### Wire protocol (SEQPACKET, one message per packet)
 

@@ -1019,6 +1019,9 @@ typedef struct {
 } evo_keyboard_params_t;
 void evo_rmlui_update_keyboard(const evo_keyboard_params_t* params);
 void evo_rmlui_render_keyboard(uint32_t* framebuffer, int width, int height);
+/* #237 spike S2b: draws the browser engine's frame over the screen. 1 when
+ * something was drawn (the frame must then be presented). */
+int evo_rmlui_render_webframe(int width, int height);
 
 /* Launch / home screen API */
 void evo_rmlui_update_launch(const evo_rmlui_launch_params_t* params);

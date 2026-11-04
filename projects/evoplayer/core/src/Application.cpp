@@ -2010,6 +2010,10 @@ int Application::run() {
          * changed, and without this it would wait for something else to
          * trigger a frame.
          */
+        /* #237 spike S2b: a browser engine host's frame, over the screen and
+         * under the toast. Only while a host sends frames. */
+        if (uiActive && evo_rmlui_render_webframe(1920, 1080))
+            swap = true;
         if (uiActive && evo_toast_visible()) {
             draw_prospero_toast(m_uiScratch);
             swap = true;

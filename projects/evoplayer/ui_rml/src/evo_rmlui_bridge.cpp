@@ -499,6 +499,18 @@ void evo_rmlui_render_keyboard(uint32_t* framebuffer, int width, int height) {
     EvoRmlApp::Instance().RenderKeyboard(framebuffer, width, height);
 }
 
+int evo_rmlui_render_webframe(int width, int height) {
+#if defined(EVO_AGC_DEVICE)
+    if (EvoRmlApp::Instance().GlActive() && evo_hui_render_webframe(width, height)) {
+        EvoRmlApp::Instance().NoteExternalDraw();
+        return 1;
+    }
+#endif
+    (void)width;
+    (void)height;
+    return 0;
+}
+
 void evo_rmlui_render_playback_osd(uint32_t* framebuffer, int width, int height) {
 #if defined(EVO_AGC_DEVICE)
     if (EvoRmlApp::Instance().GlActive() && evo_hui_render_playback_osd(width, height)) {

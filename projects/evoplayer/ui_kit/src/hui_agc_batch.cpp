@@ -230,6 +230,30 @@ std::uint32_t AgcBatch::create_texture(int width, int height, const std::uint8_t
     return static_cast<std::uint32_t>(textures_.size());
 }
 
+bool AgcBatch::update_texture(std::uint32_t handle, int x, int y, int w, int h,
+                              const std::uint8_t *src, int src_pitch)
+{
+    if (!ok_ || handle == 0 || hui::gfx::is_font_handle(handle) || handle > textures_.size() || !src)
+        return false;
+    Texture *tex = textures_[handle - 1];
+    if (!tex || tex->bytes_per_pixel != 4)
+        return false;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > tex->width) w = tex->width - x;
+    if (y + h > tex->height) h = tex->height - y;
+    if (w <= 0 || h <= 0)
+        return true;
+    auto *dst = static_cast<std::uint8_t *>(tex->pixels);
+    const std::size_t row = static_cast<std::size_t>(w) * 4u;
+    for (int r = y; r < y + h; ++r)
+        std::memcpy(dst + static_cast<std::size_t>(r) * tex->pitch + static_cast<std::size_t>(x) * 4u,
+                    src + static_cast<std::size_t>(r) * src_pitch + static_cast<std::size_t>(x) * 4u, row);
+    evo_agc_runtime_cache_flush(dst + static_cast<std::size_t>(y) * tex->pitch,
+                                static_cast<std::size_t>(h) * tex->pitch);
+    return true;
+}
+
 void AgcBatch::release_texture(std::uint32_t handle)
 {
     if (handle == 0 || hui::gfx::is_font_handle(handle) || handle > textures_.size())
