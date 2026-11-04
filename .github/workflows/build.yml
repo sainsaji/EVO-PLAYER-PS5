@@ -105,15 +105,14 @@ jobs:
         with: { name: docker-image, path: /tmp }
       - run: docker load < /tmp/evo-image.tar.gz
 
-      - name: Build EVO Player
+      # The image's SDK ships FFmpeg 7.0.1; EVO needs 7.1.1 (evo_dovi.c refuses
+      # to build against anything else), same as release.yml. --install only
+      # lasts for this container, so the CMake build runs in it too.
+      - name: Build EVO Player, then via CMake + Ninja (compile_commands.json)
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/build-evoplayer.sh'
-
-      - name: Build via CMake + Ninja and emit compile_commands.json
-        run: |
-          docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc 'bash ./scripts/gen-compile-commands.sh'
+            evo-player/ps5-dev:ci bash -lc \
+            './scripts/build-ffmpeg.sh --profile minimal --install && bash ./scripts/build-evoplayer.sh && bash ./scripts/gen-compile-commands.sh'
 
       # ELF validation: every artifact must be a PS5 payload, not a host
       # binary. build.sh already checks this, but assert it independently so a
@@ -184,7 +183,8 @@ jobs:
       - name: package-app.sh --ffpfsc
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            evo-player/ps5-dev:ci bash -lc './scripts/package-app.sh --ffpfsc'
+            evo-player/ps5-dev:ci bash -lc \
+            './scripts/build-ffmpeg.sh --profile minimal --install && ./scripts/package-app.sh --ffpfsc'
 
       # Same independent checks as release.yml's "Verify the release image" -
       # kept in sync by hand since GHA has no clean way to share a step body
