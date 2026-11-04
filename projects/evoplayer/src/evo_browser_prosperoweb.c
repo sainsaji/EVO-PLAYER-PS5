@@ -288,7 +288,7 @@ static int g_hello, g_fclosed, g_frame_busy;
 static int g_engine_host;           /* the channel is the real engine, not the test */
 static evo_browser_frame_t g_pending;
 static int g_has_pending;
-static long long g_frames_in, g_frames_drawn, g_copy_us, g_copy_bytes;
+static long long g_frames_in, g_frames_drawn, g_copy_us, g_copy_bytes, g_damage_px;
 
 /* One packet: a fixed struct, then text (cut to fit EVOB_MAX_PACKET). */
 static int frame_send_text(int s, int type, const void *body, uint32_t len,
@@ -358,9 +358,21 @@ static void frame_log_stats(const char *when)
 {
     pthread_mutex_lock(&g_mu);
     const long long in = g_frames_in, drawn = g_frames_drawn, us = g_copy_us, bytes = g_copy_bytes;
+    const long long damage = g_damage_px;
     pthread_mutex_unlock(&g_mu);
-    EVO_LOGI("browser", "S2b %s: frames received %lld, drawn %lld, copy avg %lld us / %lld KB",
-             when, in, drawn, drawn ? us / drawn : 0, drawn ? bytes / drawn / 1024 : 0);
+    /* Since the last line, not since the start: an idle page shows 0.
+     * damage: what the host said changed (its own rects, before EVO's two
+     * textures add the previous frame's); copy: what EVO copied into them. */
+    static long long l_in, l_drawn, l_us, l_bytes, l_damage;
+    const long long d_in = in - l_in, d_drawn = drawn - l_drawn;
+    EVO_LOGI("browser", "frames %s: received %lld (+%lld), drawn %lld (+%lld), damage avg %lld KB, copy avg %lld us / %lld KB",
+             when, in, d_in, drawn, d_drawn, d_in > 0 ? (damage - l_damage) * 4 / d_in / 1024 : 0,
+             d_drawn > 0 ? (us - l_us) / d_drawn : 0, d_drawn > 0 ? (bytes - l_bytes) / d_drawn / 1024 : 0);
+    l_in = in;
+    l_drawn = drawn;
+    l_us = us;
+    l_bytes = bytes;
+    l_damage = damage;
 }
 
 static void handle_hello(const unsigned char *body, size_t len, const int *fds, int nfds)
@@ -423,6 +435,39 @@ static void handle_hello(const unsigned char *body, size_t len, const int *fds, 
     }
 }
 
+/* Adds from's rects to into's; past 16 they become one bounding box. */
+static void frame_merge_rects(evo_browser_frame_t *into, const evo_browser_frame_t *from)
+{
+    for (int i = 0; i < from->nrects; ++i) {
+        if (into->nrects < 16) {
+            memcpy(into->rects[into->nrects++], from->rects[i], sizeof from->rects[i]);
+            continue;
+        }
+        int x0 = from->rects[i][0], y0 = from->rects[i][1];
+        int x1 = x0 + from->rects[i][2], y1 = y0 + from->rects[i][3];
+        for (int k = 0; k < into->nrects; ++k) {
+            const int *r = into->rects[k];
+            if (r[0] < x0) x0 = r[0];
+            if (r[1] < y0) y0 = r[1];
+            if (r[0] + r[2] > x1) x1 = r[0] + r[2];
+            if (r[1] + r[3] > y1) y1 = r[1] + r[3];
+        }
+        for (int k = i + 1; k < from->nrects; ++k) {
+            const int *r = from->rects[k];
+            if (r[0] < x0) x0 = r[0];
+            if (r[1] < y0) y0 = r[1];
+            if (r[0] + r[2] > x1) x1 = r[0] + r[2];
+            if (r[1] + r[3] > y1) y1 = r[1] + r[3];
+        }
+        into->rects[0][0] = x0;
+        into->rects[0][1] = y0;
+        into->rects[0][2] = x1 - x0;
+        into->rects[0][3] = y1 - y0;
+        into->nrects = 1;
+        return;
+    }
+}
+
 static void handle_frame(const unsigned char *body, size_t len)
 {
     struct evob_frame f;
@@ -450,7 +495,15 @@ static void handle_frame(const unsigned char *body, size_t len)
     out.width = g_fw;
     out.height = g_fh;
     out.stride = g_fstride;
-    if (g_has_pending) superseded = g_pending.buf;
+    for (int i = 0; i < out.nrects; ++i)
+        g_damage_px += (long long)out.rects[i][2] * out.rects[i][3];
+    if (g_has_pending) {
+        /* The newer buffer holds the whole page, but the rects only say what
+         * changed since the last frame: keep the dropped frame's rects too, or
+         * the drawer never copies those areas into its textures. */
+        superseded = g_pending.buf;
+        frame_merge_rects(&out, &g_pending);
+    }
     g_pending = out;
     g_has_pending = 1;
     g_frames_in++;

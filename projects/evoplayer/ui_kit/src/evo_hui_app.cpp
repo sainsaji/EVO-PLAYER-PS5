@@ -120,29 +120,10 @@ struct WebFrame
 
     std::uint32_t tex[2] = {0, 0};
     int cur = 0;
-    int prev[4] = {0, 0, 0, 0}; /* bounding box of the previous frame's rects */
+    int prev[16][4] = {};       /* the previous frame's rects */
+    int nprev = 0;
     int tex_w = 0, tex_h = 0;   /* what the textures were made for */
     int page_w = 0, page_h = 0; /* the page inside them (the last frame's size) */
-
-    static void grow(int box[4], const int r[4])
-    {
-        if (r[2] <= 0 || r[3] <= 0)
-            return;
-        if (box[2] <= 0 || box[3] <= 0)
-        {
-            for (int i = 0; i < 4; ++i)
-                box[i] = r[i];
-            return;
-        }
-        const int x0 = box[0] < r[0] ? box[0] : r[0];
-        const int y0 = box[1] < r[1] ? box[1] : r[1];
-        const int x1 = (box[0] + box[2]) > (r[0] + r[2]) ? box[0] + box[2] : r[0] + r[2];
-        const int y1 = (box[1] + box[3]) > (r[1] + r[3]) ? box[1] + box[3] : r[1] + r[3];
-        box[0] = x0;
-        box[1] = y0;
-        box[2] = x1 - x0;
-        box[3] = y1 - y0;
-    }
 
     void update(evo::hui_agc::AgcBatch &batch)
     {
@@ -176,24 +157,61 @@ struct WebFrame
             tex_h = f.height;
             cur = 0;
             bytes = 2LL * f.stride * f.height;
-            prev[2] = prev[3] = 0;
+            nprev = 0;
         }
         else
         {
-            int box[4] = {0, 0, 0, 0};
-            for (int i = 0; i < f.nrects; ++i)
-                grow(box, f.rects[i]);
-            int both[4] = {box[0], box[1], box[2], box[3]};
-            grow(both, prev);
+            /* Rect by rect, not one box around them: a caret at the top and
+             * a spinner at the bottom would otherwise copy the whole page. */
             const int next = cur ^ 1;
-            if (both[2] > 0 && both[3] > 0 &&
-                batch.update_texture(tex[next], both[0], both[1], both[2], both[3], f.pixels, f.stride))
+            bool ok = f.nrects > 0 || nprev > 0;
+            long long copied = 0;
+            auto copy = [&](const int r[4]) {
+                if (r[2] <= 0 || r[3] <= 0)
+                    return;
+                if (!batch.update_texture(tex[next], r[0], r[1], r[2], r[3], f.pixels, f.stride))
+                    ok = false;
+                copied += 4LL * r[2] * r[3];
+            };
+            /* ...but when they overlap (this frame's and the last one's are
+             * often the same area) and add up to more than their box, the
+             * box once is cheaper. */
+            int x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0;
+            long long sum = 0;
+            auto add = [&](const int r[4]) {
+                if (r[2] <= 0 || r[3] <= 0)
+                    return;
+                x0 = r[0] < x0 ? r[0] : x0;
+                y0 = r[1] < y0 ? r[1] : y0;
+                x1 = r[0] + r[2] > x1 ? r[0] + r[2] : x1;
+                y1 = r[1] + r[3] > y1 ? r[1] + r[3] : y1;
+                sum += static_cast<long long>(r[2]) * r[3];
+            };
+            for (int i = 0; i < f.nrects; ++i)
+                add(f.rects[i]);
+            for (int i = 0; i < nprev; ++i)
+                add(prev[i]);
+            if (sum > 0 && sum >= static_cast<long long>(x1 - x0) * (y1 - y0))
+            {
+                const int box[4] = {x0, y0, x1 - x0, y1 - y0};
+                copy(box);
+            }
+            else
+            {
+                for (int i = 0; i < f.nrects; ++i)
+                    copy(f.rects[i]);
+                for (int i = 0; i < nprev; ++i)
+                    copy(prev[i]);
+            }
+            if (ok)
             {
                 cur = next;
-                bytes = 4LL * both[2] * both[3];
+                bytes = copied;
             }
-            for (int i = 0; i < 4; ++i)
-                prev[i] = box[i];
+            nprev = f.nrects;
+            for (int i = 0; i < f.nrects; ++i)
+                for (int k = 0; k < 4; ++k)
+                    prev[i][k] = f.rects[i][k];
         }
         page_w = f.width;
         page_h = f.height;
