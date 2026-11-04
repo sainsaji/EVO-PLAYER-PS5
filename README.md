@@ -8,6 +8,8 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 *A real capture from the console: 4K HDR10 HEVC on the hardware decoder, chapter ticks on the seek bar, and the new **Skip intro** button.*
 
+![EVO Player home screen: Continue Watching, Jump back in and the library](docs/images/launch.png)
+
 **[Download the latest release](https://github.com/sainsaji/EVO-PLAYER-PS5/releases/latest)** · **[Install from ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)** · **[Join the Discord](https://discord.gg/MyNnCWNU5)**
 
 ---
@@ -160,6 +162,8 @@ Full-featured IPTV playback built right into EVO's native screens:
 - **Xtream Codes API:** Native account support for Live Streams, VOD, and Series categories.
 - **Live Stream Switcher:** Press **R2** during playback to swap video streams, quality renditions, or audio tracks on the fly.
 
+![Live TV channel guide and EPG](docs/images/iptv.png)
+
 ---
 
 ### Media Servers: Emby, Jellyfin, Plex, Stremio & Nuvio
@@ -172,6 +176,8 @@ Connect your media servers directly to EVO without leaving the native interface:
 - **Multi-Version Selector:** If a movie or episode has multiple releases (e.g. 4K HDR Remux, 1080p SDR, Web-DL), EVO lets you choose which version to play.
 - **Stremio and Nuvio:** addons and accounts in EVO's own screens, with a ranked pick that plays the best stream at once, or a picker if you turn that off.
 - **Skip intro and credits:** Jellyfin and Emby segment marks drive the Skip button, and "Next episode" starts the following episode.
+
+![Providers hub](docs/images/providers.png)
 
 ---
 
@@ -217,6 +223,8 @@ Manage your storage directly on the PS5 with native file operations, integrated 
 - **Remote FTP / NAS Mounting:** Add remote FTP servers from your home network in the sidebar to stream media directly or transfer files between your PC/NAS and console without leaving the sofa.
 - **NTFS USB drives:** an NTFS drive is not mounted by the PS5, so EVO reads the raw disk itself, read-only: browse, play, view pictures and load subtitles from it ([docs/hardware/ntfs.md](docs/hardware/ntfs.md)).
 - **Cover art:** FTP and SMB folders show posters from `poster.jpg`, `folder.jpg` and `<name>.jpg` files beside the video.
+
+![Browsing a folder](docs/images/browse.png)
 
 ![Network Storage: Add Server, the console's own FTP (Online, 1 ms) and an SMB server that is Offline](docs/images/network.png)
 

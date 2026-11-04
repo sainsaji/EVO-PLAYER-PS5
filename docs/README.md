@@ -87,7 +87,7 @@ ones expensive to relearn on real hardware) are in the root [CLAUDE.md](../CLAUD
 | | |
 |---|---|
 | [proprietary.md](proprietary.md) | What is never committed, and the third-party licences in the build |
-| [images/](images/) | Screenshots. The root README uses fourteen console captures taken 2026-11-04 (player, stats, mediainfo, chapters, picker, network, surround, about, changelog, and five settings pages); the rest are older captures |
+| [images/](images/) | Screenshots. The root README uses fourteen console captures taken 2026-11-04 and four older ones (home, browse, providers, iptv). The new ones: player, stats, mediainfo, chapters, picker, network, surround, about, changelog, and five settings pages); the rest are older captures |
 | [video/youtube-listing.md](video/youtube-listing.md) | Copy for the release video upload |
 | [theme-mock/ui.html](theme-mock/ui.html) | A static design mock of the home screen |
 
