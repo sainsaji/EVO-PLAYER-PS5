@@ -305,6 +305,8 @@ docker compose run --rm ps5-dev ./tests/run_tests.sh
 
 Questions, bug reports, feature requests and early test builds: join the **[EVO Player Discord](https://discord.gg/MyNnCWNU5)**. Many of 0.11.0's features started as requests there.
 
+To report a bug or send a pull request, read **[CONTRIBUTING.md](CONTRIBUTING.md)** first.
+
 ---
 
 ## Credits & License

@@ -20,6 +20,10 @@ write it yourself. Only hardware decisions, console work, and review stay with
 Claude. State "agy: yes/no, because ..." in your first reply on an issue.
 → [agy.md](docs/build/agy.md)
 
+**Contributing from a fork?** Follow [CONTRIBUTING.md](CONTRIBUTING.md): one pull
+request, one change; never touch the version, changelog, generated bundle or
+submodule pins; say how it was tested on a PS5 and which AI tool wrote it.
+
 **Implementing a GitHub issue?** Start at [roadmap.md](docs/planning/roadmap.md).
 Each issue body also has a "References & sequencing" block.
 

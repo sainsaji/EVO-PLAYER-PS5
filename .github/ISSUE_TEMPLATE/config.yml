@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help on Discord
+    url: https://discord.gg/MyNnCWNU5
+    about: Ask about setup, installing or anything that isn't a bug.
+  - name: Install EVO from ProsperoStore
+    url: https://github.com/blackbearreloaded/ProsperoStore
+    about: Install and update EVO from the console itself.
+  - name: Roadmap
+    url: https://github.com/sainsaji/EVO-PLAYER-PS5/blob/main/docs/planning/roadmap.md
+    about: See what is planned before you request a feature.

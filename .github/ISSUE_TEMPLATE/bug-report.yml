@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in EVO does not work as it should (screens, settings, controls, crashes outside playback).
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For questions and help with setup, ask on [Discord](https://discord.gg/MyNnCWNU5) instead. A problem playing a
+        file or a stream goes in a
+        [playback problem](https://github.com/sainsaji/EVO-PLAYER-PS5/issues/new?template=playback-problem.yml).
+
+        **Get EVO's report first.** Settings → System & Diagnostics → **Report a Problem**, or **Report the last run**
+        if EVO crashed or froze (start EVO again first). Scan the QR code on your phone, or press Cross to save the file
+        to your USB drive. Passwords, tokens and debrid keys in it are already masked.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Home, browser or file operations
+        - Settings
+        - Providers (Emby, Jellyfin, Plex, Stremio, IPTV, Xtream, Nuvio)
+        - Network shares (SMB, FTP)
+        - USB or NTFS drives
+        - Controls, keyboard or on-screen display
+        - Themes or interface look
+        - Start-up, updates or closing EVO
+        - Other (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, what you saw and what you expected instead. Copy any message EVO showed.
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often
+      options:
+        - Every time
+        - Sometimes
+        - Once
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: EVO version
+      description: On the About screen, or in the first lines of the report.
+      placeholder: "0.13.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console
+      options:
+        - PS5
+        - PS5 Pro
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware
+      placeholder: "13.60"
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Report file and screenshots
+      description: Drag `evo_report.txt` or `evo_report_last_run.txt` here, and a photo or screenshot of the screen if it helps.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the open issues first.
+          required: true
+        - label: I am on the latest EVO release, or I said above why not.
+          required: true

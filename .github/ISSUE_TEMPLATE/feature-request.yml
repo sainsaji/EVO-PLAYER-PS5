@@ -1,0 +1,37 @@
+name: Feature request
+description: Something EVO cannot do yet, or could do better.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/sainsaji/EVO-PLAYER-PS5/blob/main/docs/planning/roadmap.md) and the open
+        issues first: it may already be planned. One request per issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you want to do that EVO does not let you do today? Describe the situation, not the solution.
+      placeholder: "When I watch a series from Jellyfin, I have to go back to the list after every episode."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How it could work in EVO, from the viewer's side - the screen, the button, the setting.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other players or workarounds
+      description: Does another player do this well? How do you work around it today?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I can test a build of this on my PS5.
+        - label: I would like to open a pull request for it (read CONTRIBUTING.md first).

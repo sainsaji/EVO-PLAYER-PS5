@@ -1,0 +1,120 @@
+name: Playback problem
+description: A file or a stream will not play, stutters, loses sync, shows wrong colours or wrong subtitles.
+title: "[Playback]: "
+labels: ["bug", "playback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Get EVO's report first.** Settings → System & Diagnostics → **Report a Problem**, or **Report the last run**
+        if EVO crashed or froze (start EVO again first). Scan the QR code on your phone, or press Cross to save the file
+        to your USB drive. Passwords, tokens and debrid keys in it are already masked.
+
+        While the file plays, **Media Info** shows its container and codecs. A photo of that screen is enough.
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What goes wrong
+      multiple: true
+      options:
+        - Does not start, or shows an error
+        - Black screen or no picture
+        - Stutters, drops frames or buffers
+        - Audio and video out of sync
+        - No sound, or wrong sound (channels, passthrough)
+        - Colours or HDR / Dolby Vision look wrong
+        - Subtitles missing, wrong or out of time
+        - Seeking or resuming does not work
+        - EVO freezes or crashes
+        - Other (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, what you saw and what you expected instead. Say at which point in the file it starts if it is not at once.
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where the file comes from
+      options:
+        - USB drive (exFAT / FAT32)
+        - USB drive (NTFS)
+        - Internal storage
+        - Network share (SMB)
+        - Network share (FTP)
+        - Emby
+        - Jellyfin
+        - Plex
+        - Stremio addon (Torrentio, AIOStreams, ...)
+        - IPTV or Xtream
+        - Nuvio
+        - Other (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: The file
+      description: From Media Info, or the file name. Container, video codec, resolution, HDR / Dolby Vision, audio codec and channels, subtitle format.
+      placeholder: "MKV, HEVC Main10 3840x2160 HDR10, TrueHD 7.1 Atmos, PGS subtitles"
+    validations:
+      required: true
+  - type: dropdown
+    id: audio-out
+    attributes:
+      label: Sound goes to
+      options:
+        - TV speakers
+        - Soundbar or AV receiver
+        - Headphones or headset
+    validations:
+      required: true
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: Does it play elsewhere?
+      description: Does the same file play in another player (VLC, Kodi, a TV app)? Did it play in an earlier EVO version?
+  - type: input
+    id: version
+    attributes:
+      label: EVO version
+      description: On the About screen, or in the first lines of the report.
+      placeholder: "0.13.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console
+      options:
+        - PS5
+        - PS5 Pro
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware
+      placeholder: "13.60"
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Report file and screenshots
+      description: Drag `evo_report.txt` or `evo_report_last_run.txt` here, and a photo of Media Info or of the problem if it helps.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the open issues first.
+          required: true
+        - label: I am on the latest EVO release, or I said above why not.
+          required: true
