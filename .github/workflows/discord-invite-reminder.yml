@@ -1,0 +1,67 @@
+name: Discord invite reminder
+
+# The Discord invite expires. .github/discord-invite-expires holds the date (YYYY-MM-DD).
+# Every day this opens one issue, assigned to the owner, once the date is 3 days away or
+# past. After you make a new invite: replace the link everywhere the issue lists, put the
+# new expiry date in that file, and close the issue.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open a reminder issue when the invite is about to expire
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          expires="$(tr -d '[:space:]' < .github/discord-invite-expires)"
+          if ! date -d "$expires" +%s >/dev/null 2>&1; then
+            echo "::error::.github/discord-invite-expires is not a date: '$expires'"
+            exit 1
+          fi
+          days_left=$(( ( $(date -d "$expires" +%s) - $(date -u -d "$(date -u +%F)" +%s) ) / 86400 ))
+          echo "Discord invite expires $expires ($days_left days left)"
+          if [ "$days_left" -gt 3 ]; then
+            exit 0
+          fi
+
+          title="Replace the Discord invite (expires $expires)"
+          open="$(gh issue list --state open --search "in:title \"Replace the Discord invite\"" --json number --jq 'length')"
+          if [ "$open" -gt 0 ]; then
+            echo "A reminder issue is already open."
+            exit 0
+          fi
+
+          if [ "$days_left" -lt 0 ]; then
+            when="The invite expired on $expires."
+          else
+            when="The invite expires on $expires ($days_left days left)."
+          fi
+
+          gh issue create --title "$title" --assignee "${GITHUB_REPOSITORY_OWNER}" --body "$(cat <<EOF
+          $when
+
+          1. In Discord, make a new invite that never expires (Server Settings, Invites, set Expire after to Never).
+          2. Replace the old link \`https://discord.gg/MyNnCWNU5\` with the new one in:
+             - README.md (the links at the top and in Community)
+             - CHANGELOG.md (every release section has one; the release workflow copies the newest into the release notes)
+             - .github/ISSUE_TEMPLATE/config.yml and .github/ISSUE_TEMPLATE/bug-report.yml
+             - the GitHub release notes of the latest release, the repository About box, and the ProsperoStore / homebrew.page listing, if they link it
+          3. Put the new expiry date in \`.github/discord-invite-expires\`. A never-expiring invite can use a far date, for example 2099-01-01.
+          4. Close this issue.
+
+          Opened by .github/workflows/discord-invite-reminder.yml.
+          EOF
+          )"
