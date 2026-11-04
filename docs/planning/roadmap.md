@@ -1,6 +1,6 @@
 # Roadmap
 
-What is open, grouped by area, as of **2026-10-24** (v0.13.0 prepared; 36 open issues).
+What is open, grouped by area, as of **2026-10-24** (v0.14.0 prepared).
 GitHub is the live source: `gh issue list --state open`, or the "EVO Player Roadmap"
 project board ([project-tracking.md](project-tracking.md)). This page is the map across
 them. Each issue body ends with a "References & sequencing" block naming the docs and files
@@ -15,6 +15,15 @@ The v0.8.0 to v1.1.0 milestones are all closed. v0.11.0 still lists four issues 
 are `priority: medium` and `priority: low`; `hw-verify-pending` marks code that is in but
 not yet seen on a console.
 
+## Landed in v0.14.0
+
+SMB shares with a step-by-step Add Server flow and Online / Offline status (#213, #226),
+read-only NTFS drives (#217), cover art on FTP and SMB (#230), a user-settable phone and
+log port (#227), the movie and show detail page (#221), the resume prompt (#218), skip
+intro and credits, native Stremio sign-in with a ranked automatic stream, true HDR colour
+and HDR PEAK, TLS certificate checks, and the phone and PC log viewer with Report a
+problem (#216, #229). See [../../CHANGELOG.md](../../CHANGELOG.md).
+
 ## Landed in v0.13.0
 
 In-app updater (#120), volume boost (#166), audio delay (#170), the playback diagnostics
@@ -22,7 +31,7 @@ panel (#167), the network buffer setting (#199), a preview card for every settin
 stream and audio pickers with pills and a details card and a busy card during a switch,
 Pro memory mode (#143), faster console testing (`set`, `focus`, `verify`, per-feature
 checks, #201), a pad scrub that always commits, backing out of playback keeping the
-selection on the played item (#214), and SMB/Samba Windows share streaming and server options (#213). See [../../CHANGELOG.md](../../CHANGELOG.md).
+selection on the played item (#214). See [../../CHANGELOG.md](../../CHANGELOG.md).
 
 ## Verification and diagnostics
 
@@ -83,7 +92,7 @@ selection on the played item (#214), and SMB/Samba Windows share streaming and s
 | #180 | A malformed playlist entry must not fail the whole playlist (bug, `medium`) |
 | #179 | Live TV search and recordings |
 | #176 | Trakt sync for Nuvio and Stremio (watched state and progress) |
-| #213 | More network sources: SMB (landed in v0.13.0) and DLNA/UPnP |
+| #213 | More network sources: SMB (landed in v0.14.0) and DLNA/UPnP |
 
 ## Interface and console
 

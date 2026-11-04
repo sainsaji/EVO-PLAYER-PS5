@@ -14,7 +14,7 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 
 ---
 
-## Coming in the next release (already on `main`)
+## What's New in v0.14.0
 
 - **Skip intros & credits:** a **Skip intro** / **Skip credits** / **Next episode** button appears while the playhead is inside one, and **TRIANGLE** presses it. **Settings → Video & Display → Skip intros & credits** is Off, Ask (default) or Auto. It works for every file whose chapters are named Intro, Opening, OP, Recap, Credits, Ending, ED or Outro, and uses the media server's own marks on Jellyfin and Emby.
 - **NTFS USB drives:** open read-only. Browse, play, view pictures and load subtitles from them.
@@ -22,10 +22,15 @@ Plays video from USB drives (exFAT, FAT32 and read-only NTFS), internal storage,
 - **Add Server flow for SMB and FTP:** address, Guest or Account, a login test with a plain error, a share picker, and Online / Offline status on every server card.
 - **Movie and show detail page:** Overview, Cast and Details tabs, a stream picker, and a resume prompt (Continue / Restart / Cancel).
 - **Stremio account:** native sign-in, a ranked automatic stream pick, and PGS picture subtitles on streams.
+- **True HDR colour:** HDR10, HLG and Dolby Vision are no longer washed out, plus an **HDR PEAK** setting that fits Dolby Vision to your TV shot by shot.
 - **Safer network use:** TLS certificate verification, a dead server fails in 3 seconds instead of 75, and no passwords or keys in logs.
 - **Diagnostics:** a phone and PC log viewer with live playback health, a kept log of the last run, and **Report a problem**, which opens a GitHub issue already filled in.
 
-## What's New in v0.13.0
+![The new resume prompt on a Jellyfin episode: Continue, Restart or Cancel](docs/images/resume.png)
+
+Full notes: [CHANGELOG.md](CHANGELOG.md).
+
+### Highlights from v0.13.0
 
 - **In-app updater:** a side card offers the new version, downloads and verifies it, installs it with one rename, and closes EVO.
 - **Chapters:** L1 / R1 jump between chapters, the seek bar shows chapter ticks, R3 opens a chapter picker. The OSD shows when the video ends and the time remaining.

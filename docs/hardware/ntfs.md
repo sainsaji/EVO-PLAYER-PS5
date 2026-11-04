@@ -19,8 +19,11 @@ those disks itself, read-only, with its own NTFS reader (`src/evo_ntfs.c`).
 - **Playing:** `evo_stream_io_open` gives FFmpeg an `AVIOContext` over
   `evo_ntfs_read` (1 MiB reads), the same pattern as `smb://`.
 - **Read-only:** the Options menu on an NTFS drive says so; nothing is written.
+- **Small files:** `evo_ntfs_read_file` reads a whole file into memory, which is
+  how a sidecar `.srt` (`subtitle_text_open`) and a picture (`ImageViewerScreen`)
+  open from an NTFS drive.
 - **Not supported:** compressed and encrypted files (open fails with a log line),
-  external subtitle files next to the video, cover art from the drive.
+  cover art from the drive.
 
 ## Reaching the disk: the helper payload
 

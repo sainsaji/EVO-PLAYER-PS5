@@ -5,6 +5,76 @@ into the GitHub release notes, so keep the headings in the form `## 0.1.0`.
 
 ---
 
+## 0.14.0
+
+![](https://img.shields.io/badge/Release-v0.14.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
+
+**Network shares, a detail page, a Stremio account, and a log viewer on your phone.** 0.14.0 adds SMB shares with a proper Add Server flow, read-only NTFS drives, a movie and show detail page, skip intro and credits, native Stremio sign-in with a ranked automatic stream, true HDR colour, TLS certificate checks, and a phone and PC log viewer that can file a bug report for you.
+
+Download **`PPSA99039.ffpfsc`** and deploy it with ShadowMountPlus, or the folder-title **`.zip`**, then launch EVO from the Games row. Or install it straight from the console with **[ProsperoStore](https://github.com/blackbearreloaded/ProsperoStore)**. Runs on any jailbroken PS5 on firmware 13.60 and below. PS5 Pro owners can use the `-pro` package for the larger memory mode.
+
+Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47Nc8WtXh)**.
+
+### ![](https://img.shields.io/badge/STORAGE-4caf50?style=flat-square) Storage & Network
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Samba / Windows Share (SMB) support.** Connect directly to Windows shared folders, Samba servers and NAS devices (`smb://host/Share` or `user:pass@host/Share`) with direct streaming via `libsmb2`.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Add Server in steps.** Enter the address (or paste an `smb://` or `ftp://` link), pick Guest or Account, and EVO tests the login before saving. A wrong address, a wrong login and a missing share each give their own message. On a Samba server, tick which of its shares to show; the browser lists only those.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Online, Offline or Checking** on every server card, probed off the UI thread, with the round-trip time in ms.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Server options menu.** Press **OPTIONS** on a network server to Open, **Edit Server** or **Remove Server** (TRIANGLE opens Remove directly). Edit never shows the saved password; leave it empty to keep it.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **NTFS USB drives** open read-only: browse, play, view pictures and load subtitles.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Cover art on FTP and SMB.** Files show `poster.jpg`, `folder.jpg`, `<name>.jpg` and similar images from the same folder, with a disk cache and a per-source Cover Art switch.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **User-settable phone & log port.** Settings → Interface & Storage → PHONE & LOG PORT takes any port (1024–65535, default 9780, Triangle resets). EVO test-binds it, falls back to the next nine if busy, and keeps retrying in the background.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **A dead server fails in 3 seconds**, not 75. Folder listings run off the UI thread with busy, retry and cancel, and a dead file stays on the list.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Long keyboard input** scrolls sideways instead of being cut off, and **an empty USB list** no longer traps focus.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **SMB passwords** stay out of logs and Recent, special characters in URLs are escaped, and a dropped connection reconnects.
+
+### ![](https://img.shields.io/badge/PLAYBACK-e91e63?style=flat-square) Playback
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Skip intro, Skip credits and Next episode.** A button shows while the playhead is inside one, and TRIANGLE presses it. Settings → Video & Display → Skip intros & credits is Off, Ask (default) or Auto. It uses chapters named Intro, Opening, OP, Recap, Credits, Ending, ED or Outro, and the server's own marks on Jellyfin and Emby.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Resume prompt** with Continue, Restart or Cancel for files and providers, and an end-of-clip prompt with Replay or Close.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **HDR PEAK** setting. Set your TV's peak and EVO fits each Dolby Vision shot to it from the RPU metadata, and HDR10 films from MaxCLL.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **HDR10, HLG and Dolby Vision base layers were about 12 % desaturated.** The BT.2020 conversion skipped the chroma gain. HD and 4K SDR now use the BT.709 matrix.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **A play that cannot open** stays on the current screen with its error, not on an empty player.
+
+### ![](https://img.shields.io/badge/SUBTITLES-9c27b0?style=flat-square) Subtitles & Languages
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Load from file.** The subtitle picker browses this video's folder, any USB or NTFS drive, internal storage or the whole console for an `.srt`.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Online subtitles from Stremio addons**, with OpenSubtitles built in, when the file has none in your language.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **SUBTITLE LANGUAGE and AUDIO LANGUAGE** settings choose the track a file opens with.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) The picker shows each track's format (SRT, ASS, PGS picture), FORCED and cue count.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **PGS picture subtitles** now show on debrid and media-server streams.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **A forced (signs only) track** no longer wins over the full dialogue track.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Four settings were saved and never used**; they now apply: Auto Subtitles, Default Aspect Ratio, Folders First and Default Font Style.
+
+### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Media Servers & Addons
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Movie and show detail page** with Overview, Cast and Details tabs, CHOOSE STREAM, and a stream picker in the same look.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Sign in with Stremio.** EVO shows a code; enter it at link.stremio.com on a phone. Your account's addons come in its order, with Continue Watching and Library shelves, and progress is saved back to the account.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **PLAY BEST ADDON STREAM.** EVO ranks every source from every addon (debrid-cached first, then 4K, Remux and size, Dolby Vision, HDR10+, HDR10) and plays the best. CHOOSE STREAM lists the same ranking.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) Cast rows carry the role and a headshot, and Plex and Xtream get a details page.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Stremio Home opens from a disk cache** of manifests, catalogs and details, and stream lookups get 25 seconds with 128 queued and 8 parallel requests.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Readable titles** from release file names, and SERVER OFFLINE on Home's top pick.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Xtream search** no longer runs out of memory on a huge library and now finds movies and series; one broken M3U entry is skipped.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Recent**: a deleted file leaves Recent and Jump back in, and Recent's Options menu removes one entry or clears all.
+
+### ![](https://img.shields.io/badge/INTERFACE-2196f3?style=flat-square) Interface
+
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **One page chrome for every kit screen:** title, subtitle, counter, hints and radii. About, Home library tiles, Media Info, the Surround panel and the Live TV header follow it.
+- ![](https://img.shields.io/badge/IMPROVED-ff8c00?style=flat-square) **Clearer logs.** Every failure users hit leaves one clear line in `evo.log`, and repeats collapse into one.
+
+### ![](https://img.shields.io/badge/DIAGNOSTICS-ff8c00?style=flat-square) Diagnostics
+
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Phone and PC log viewer** at `http://<console>:9780`. Now shows live playback health with alerts in plain words, What happened tells the run as a story, Log keeps every line searchable, and **Report a problem** opens a GitHub issue already filled in.
+- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **The last run's log is kept.** After a crash, Settings → Report the last run, or `/report?run=last` on a phone.
+
+### ![](https://img.shields.io/badge/SECURITY-f44336?style=flat-square) Security
+
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **HTTPS certificates are verified** against the bundled Mozilla roots, hostnames are checked, and TLS 1.2 is the minimum. Before, any certificate was accepted. Home-network hosts are exempt.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **No passwords or keys in logs:** SMB passwords and debrid keys inside addon URLs are removed.
+- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **A crash on Left/Right** on an empty virtual keyboard row, and unset channel ids in the IPTV guide parser.
+
+---
+
 ## 0.13.0
 
 ![](https://img.shields.io/badge/Release-v0.13.0-blueviolet?style=flat-square) ![](https://img.shields.io/badge/PS5%20Hardware-Verified-0070d1?style=flat-square&logo=playstation&logoColor=white) ![](https://img.shields.io/badge/Firmware-below%2013.60-blue?style=flat-square)
@@ -34,13 +104,6 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **A pad scrub always commits.** The wait for the preview frame is capped at 3 seconds, so a hung preview can no longer leave playback paused.
 - ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Backing out of playback** keeps the selection on the item you played.
 
-### ![](https://img.shields.io/badge/STORAGE-4caf50?style=flat-square) Storage & Network
-
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Samba / Windows Share (SMB) support.** Connect directly to Windows shared folders, Samba servers, and NAS devices (`smb://host/Share` or `user:pass@host/Share`) with direct streaming via `libsmb2` and custom AVIO pipelines (`evo_smb_io`).
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Server options menu.** Press **OPTIONS** on any configured network share (SMB or FTP) to Open, **Edit Server** (pre-fills the address into the on-screen keyboard for easy modification), or **Remove Server** with a confirmation dialog. Shortcut **TRIANGLE** opens the remove dialog directly.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Virtual keyboard long input.** Keyboard input text box now scrolls horizontally when typing or pasting long URLs, paths, or passwords without truncation or overflowing the dialog bounds.
-- ![](https://img.shields.io/badge/FIXED-4caf50?style=flat-square) **Empty USB drive selection.** If no USB drive is connected, entering the USB view cleanly avoids trapping focus or auto-selecting non-existent drives, allowing smooth navigation back to the sidebar.
-
 ### ![](https://img.shields.io/badge/PROVIDERS-e91e63?style=flat-square) Media Servers & Addons
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **One shelves home for every provider**, with a scroll hint. Jellyfin and Emby also get an item menu, a transcode fallback and skip intro.
@@ -53,8 +116,6 @@ Questions, bugs or ideas? Join the **[EVO Player Discord](https://discord.gg/47N
 ### ![](https://img.shields.io/badge/INTERFACE-2196f3?style=flat-square) Interface & Settings
 
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Preview card for every setting** that shows the real effect, and Back out of an open row keeps the cursor.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Add Server in steps.** Enter the address (or paste an `smb://` or `ftp://` link), pick Guest or Account, and EVO tests the login before saving. A wrong address, a wrong login and a missing share each give their own message. Server cards show Online (with ms), Offline or Checking. On a Samba server, tick which of its shares to show; the browser lists only those.
-- ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **User-settable phone & log port.** Settings → Interface & Storage → PHONE & LOG PORT lets you pick any port (1024–65535, default 9780, Triangle resets). EVO test-binds it, falls back to the next nine (n+1..n+9) if busy, and keeps retrying in the background; dev tools honour `PS5_LOG_PORT`.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Native-style virtual keyboard** with Shift, Caps Lock, a clear button and button icons on the keys. The phone keyboard mirrors the field for every prompt.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Fonts for every script** on the kit screens, and more subtitle encodings.
 - ![](https://img.shields.io/badge/NEW-007acc?style=flat-square) **Pro memory mode.** A separate `-pro` package for the PS5 Pro, with a Memory row in Settings.
