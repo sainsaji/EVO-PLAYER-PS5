@@ -210,6 +210,13 @@ enum class NetworkBuffer : int {
     Min5 = 3
 };
 
+// Skip intros & credits: Off never offers a skip; Ask shows a button; Auto skips once.
+enum class SkipSegments : int {
+    Off = 0,
+    Ask = 1,
+    Auto = 2
+};
+
 inline int getNetworkBufferSeconds(NetworkBuffer buffer) {
     switch (buffer) {
         case NetworkBuffer::Min1: return 60;

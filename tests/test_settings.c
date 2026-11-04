@@ -112,6 +112,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc1.getVolumeBoost() == evo::VolumeBoost::Off, "Initial VolumeBoost default mismatch");
     TEST_ASSERT(svc1.getNetworkBuffer() == evo::NetworkBuffer::Sec30, "Initial NetworkBuffer default mismatch");
     TEST_ASSERT(svc1.getAudioDelayMs() == 0, "Initial AudioDelayMs default mismatch");
+    TEST_ASSERT(svc1.getSkipSegments() == evo::SkipSegments::Ask, "Initial SkipSegments default mismatch");
     TEST_ASSERT(svc1.getThemeName() == "EVO Dark", "Initial ThemeName default mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == EVO_LOG_SERVER_PORT, "Initial LogServerPort default mismatch");
 
@@ -145,6 +146,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     svc1.setAudioLanguage(evo::PreferredLanguage::Italian);
     svc1.setSubtitleLanguage(evo::PreferredLanguage::English);
     svc1.setAddonAutoPickEnabled(false);
+    svc1.setSkipSegments(evo::SkipSegments::Auto);
     svc1.setThemeName("CARBON");
     evo_log_server_set_port(9812);
 
@@ -190,6 +192,7 @@ extern "C" void test_settings_save_load_roundtrip(void)
     TEST_ASSERT(svc2.getAudioLanguage() == evo::PreferredLanguage::Italian, "AudioLanguage round-trip mismatch");
     TEST_ASSERT(svc2.getSubtitleLanguage() == evo::PreferredLanguage::English, "SubtitleLanguage round-trip mismatch");
     TEST_ASSERT(svc2.isAddonAutoPickEnabled() == false, "AddonAutoPick round-trip mismatch");
+    TEST_ASSERT(svc2.getSkipSegments() == evo::SkipSegments::Auto, "SkipSegments round-trip mismatch");
     TEST_ASSERT(svc2.getThemeName() == "CARBON", "ThemeName round-trip mismatch");
     TEST_ASSERT(evo_log_server_saved_port() == 9812, "Log server saved port round-trip mismatch");
 
@@ -264,6 +267,7 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(svc.getAudioLanguage() == evo::PreferredLanguage::Auto, "Missing AudioLanguage must default to Auto");
     TEST_ASSERT(svc.getSubtitleLanguage() == evo::PreferredLanguage::Auto, "Missing SubtitleLanguage must default to Auto");
     TEST_ASSERT(svc.isAddonAutoPickEnabled() == true, "Missing AddonAutoPick must default to on");
+    TEST_ASSERT(svc.getSkipSegments() == evo::SkipSegments::Ask, "Missing SkipSegments must default to Ask");
 
     /* All 26 preceding settings must be restored correctly */
     TEST_ASSERT(svc.isResumePlaybackEnabled() == false, "Legacy resumePlaybackEnabled mismatch");
@@ -301,6 +305,57 @@ extern "C" void test_settings_legacy_compat(void)
     TEST_ASSERT(again.loadSettings(), "reload failed");
     TEST_ASSERT(again.getDeepBlacks() == evo::DeepBlacks::High, "deepBlacks chosen after the reset must stick");
     TEST_ASSERT(again.getVolumeBoost() == evo::VolumeBoost::Plus100, "other settings survive the reset");
+
+    /*
+     * Test legacy 34-line file (has AddonAutoPick at line 34, but lacks line 35).
+     * Verify that line 34 is loaded and omitted line 35 retains default Ask.
+     */
+    FILE *f34 = std::fopen(cfg_path, "w");
+    TEST_ASSERT(f34 != nullptr, "Failed to create 34-line legacy cfg file");
+    std::fprintf(f34,
+        "0\n"       /* 1: legacy dummy profile */
+        "0\n"       /* 2: resumePlaybackEnabled = false */
+        "1\n"       /* 3: defaultViewMode = Fill (1) */
+        "0\n"       /* 4: autoSubtitlesEnabled = false */
+        "1\n"       /* 5: debugOverlayEnabled = true */
+        "0\n"       /* 6: sortFoldersFirst = false */
+        "CARBON\n"  /* 7: activeTheme = CARBON */
+        "0\n"       /* 8: soundFeedbackEnabled = false */
+        "0\n"       /* 9: lightbarFeedbackEnabled = false */
+        "2\n"       /* 10: subtitleFontFace = 2 */
+        "0\n"       /* 11: keyboardType = 0 */
+        "1\n"       /* 12: decoderPreference = NativeHardware (1) */
+        "2\n"       /* 13: marker = 2 */
+        "1\n"       /* 14: upscaler = Sharp (1) */
+        "1\n"       /* 15: aiNetwork = Standard (1) */
+        "1\n"       /* 16: refreshRateMode = Always (1) */
+        "1\n"       /* 17: hdrOutputMode = Off (1) */
+        "1\n"       /* 18: secondarySubtitlePosition = 1 */
+        "1\n"       /* 19: secondarySubtitleColor = 1 */
+        "0\n"       /* 20: askStream = false */
+        "1\n"       /* 21: audioOutputChannels = Stereo (1) */
+        "1\n"       /* 22: motionSmoothing = Low (1) */
+        "1\n"       /* 23: deepBlacks = Low (1) */
+        "1\n"       /* 24: audioPassthroughEnabled = true */
+        "1\n"       /* 25: matchVideoRate = true */
+        "2\n"       /* 26: volumeBoost = Plus100 (2) */
+        "1\n"       /* 27: networkBuffer = Min1 (1) */
+        "150\n"     /* 28: audioDelayMs = 150 */
+        "9780\n"    /* 29: phone & log port */
+        "2\n"       /* 30: schema = 2 */
+        "3\n"       /* 31: hdrPeak = Nits1500 (3) */
+        "1\n"       /* 32: audioLanguage = Italian (1) */
+        "2\n"       /* 33: subtitleLanguage = English (2) */
+        "0\n"       /* 34: addonAutoPick = false (0) */
+        /* Line 35 (skipSegments) intentionally omitted */
+    );
+    std::fclose(f34);
+
+    evo::SettingsService svc34;
+    TEST_ASSERT(svc34.getSkipSegments() == evo::SkipSegments::Ask, "Default SkipSegments must be Ask");
+    TEST_ASSERT(svc34.loadSettings(), "loadSettings failed on 34-line legacy configuration");
+    TEST_ASSERT(svc34.isAddonAutoPickEnabled() == false, "34-line legacy addonAutoPick mismatch");
+    TEST_ASSERT(svc34.getSkipSegments() == evo::SkipSegments::Ask, "Missing 35th line must default to Ask");
 
     TEST_PASS();
 }

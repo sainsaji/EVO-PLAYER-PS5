@@ -104,6 +104,10 @@ public:
     virtual void setNetworkBuffer(NetworkBuffer buffer) = 0;
     virtual const char* getNetworkBufferName(NetworkBuffer buffer) const = 0;
 
+    virtual SkipSegments getSkipSegments() const = 0;
+    virtual void setSkipSegments(SkipSegments mode) = 0;
+    virtual const char* getSkipSegmentsName(SkipSegments mode) const = 0;
+
     virtual VolumeBoost getVolumeBoost() const = 0;
     virtual void setVolumeBoost(VolumeBoost boost) = 0;
     virtual const char* getVolumeBoostName(VolumeBoost boost) const = 0;

@@ -719,6 +719,10 @@ int main(int argc, char **argv)
                                         op.subtitle_text2 = "Cellules interconnectees."; }},
         {"osd_stats", 4, [&] { clear_focus(); op.chrome_hidden = 0; op.alpha = 255; op.subtitle_text2 = nullptr;
                                 op.show_stats = 1; op.loading = 1; }},
+        {"osd_skip", 4, [&] { clear_focus(); op.show_stats = 0; op.loading = 0; op.subtitle_text = nullptr;
+                               op.skip_label = "Skip intro"; }},
+        {"osd_skip_next", 4, [&] { clear_focus(); op.chrome_hidden = 1; op.alpha = 0;
+                                    op.skip_label = "Next episode"; }},
         {"subtitles", 5, [&] { clear_focus(); }},
         {"mediainfo", 6, [&] { clear_focus(); }},
         {"settings_sidebar", 3, [&] { clear_focus(); fill_settings_fixture(sp, 0); }},

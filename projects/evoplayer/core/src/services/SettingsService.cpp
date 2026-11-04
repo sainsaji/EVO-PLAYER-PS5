@@ -137,6 +137,15 @@ const char* SettingsService::getNetworkBufferName(NetworkBuffer buffer) const {
     }
 }
 
+const char* SettingsService::getSkipSegmentsName(SkipSegments mode) const {
+    switch (mode) {
+        case SkipSegments::Off:  return "OFF";
+        case SkipSegments::Auto: return "AUTO";
+        case SkipSegments::Ask:
+        default:                 return "ASK";
+    }
+}
+
 const char* SettingsService::getVolumeBoostName(VolumeBoost boost) const {
     switch (boost) {
         case VolumeBoost::Plus50:  return "+50%";
@@ -228,7 +237,7 @@ bool SettingsService::saveSettings() {
     }
 
     std::fprintf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%s\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n",
         0, // legacy dummy profile
         m_resumePlaybackEnabled ? 1 : 0,
         static_cast<int>(m_defaultViewMode),
@@ -262,7 +271,8 @@ bool SettingsService::saveSettings() {
         static_cast<int>(m_hdrPeak),         // line 31 (HDR peak mapping)
         static_cast<int>(m_audioLanguage),   // line 32 (preferred audio language)
         static_cast<int>(m_subtitleLanguage), // line 33 (preferred subtitle language)
-        m_addonAutoPick ? 1 : 0              // line 34 (addons: play the best stream at once)
+        m_addonAutoPick ? 1 : 0,             // line 34 (addons: play the best stream at once)
+        static_cast<int>(m_skipSegments)     // line 35 (skip intros & credits: Off=0, Ask=1, Auto=2)
     );
 
     if (std::fclose(file) != 0)
@@ -312,9 +322,10 @@ bool SettingsService::loadSettings() {
     int rawAudioLanguage = 0;
     int rawSubtitleLanguage = 0;
     int rawAddonAutoPick = 1;
+    int rawSkipSegments = static_cast<int>(SkipSegments::Ask);
 
     int readCount = std::fscanf(file,
-        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
+        "%d\n%d\n%d\n%d\n%d\n%d\n%127[^\n]\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n%d",
         &rawProfile,
         &rawResume,
         &rawViewMode,
@@ -348,7 +359,8 @@ bool SettingsService::loadSettings() {
         &rawHdrPeak,
         &rawAudioLanguage,
         &rawSubtitleLanguage,
-        &rawAddonAutoPick
+        &rawAddonAutoPick,
+        &rawSkipSegments
     );
 
     std::fclose(file);
@@ -432,7 +444,7 @@ bool SettingsService::loadSettings() {
     }
     /* An older file has no port line: the default stands, and the server may bind it. */
     evo_log_server_set_port(readCount >= 29 ? rawLogPort : evo_log_server_saved_port());   /* ignores out-of-range */
-    EVO_LOGI("settings", "loaded %d of 34 fields from %s", readCount, filePath);
+    EVO_LOGI("settings", "loaded %d of 35 fields from %s", readCount, filePath);
     if (readCount >= 31 && rawHdrPeak >= 0 && rawHdrPeak <= 5) {
         m_hdrPeak = static_cast<HdrPeak>(rawHdrPeak);
     }
@@ -443,6 +455,9 @@ bool SettingsService::loadSettings() {
         setSubtitleLanguage(static_cast<PreferredLanguage>(rawSubtitleLanguage));
     }
     if (readCount >= 34) m_addonAutoPick = (rawAddonAutoPick != 0);
+    if (readCount >= 35 && rawSkipSegments >= 0 && rawSkipSegments <= 2) {
+        m_skipSegments = static_cast<SkipSegments>(rawSkipSegments);
+    }
 
     /* #233: Deep Blacks, Motion Smoothing and Match Video Rate moved to
      * Experimental, where everything starts off. A file from before that

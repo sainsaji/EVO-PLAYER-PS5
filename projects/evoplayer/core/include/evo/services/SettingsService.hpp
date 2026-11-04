@@ -91,6 +91,10 @@ public:
     void setNetworkBuffer(NetworkBuffer buffer) override { m_networkBuffer = buffer; }
     const char* getNetworkBufferName(NetworkBuffer buffer) const override;
 
+    SkipSegments getSkipSegments() const override { return m_skipSegments; }
+    void setSkipSegments(SkipSegments mode) override { m_skipSegments = mode; }
+    const char* getSkipSegmentsName(SkipSegments mode) const override;
+
     VolumeBoost getVolumeBoost() const override { return m_volumeBoost; }
     void setVolumeBoost(VolumeBoost boost) override { m_volumeBoost = boost; }
     const char* getVolumeBoostName(VolumeBoost boost) const override;
@@ -148,6 +152,7 @@ private:
     bool m_debugOverlayEnabled = false;
     HdrPeak m_hdrPeak = HdrPeak::Off;
     bool m_addonAutoPick = true;   /* addons: rank the sources, play the best at once */
+    SkipSegments m_skipSegments = SkipSegments::Ask;
     PreferredLanguage m_audioLanguage = PreferredLanguage::Auto;
     PreferredLanguage m_subtitleLanguage = PreferredLanguage::Auto;
 };

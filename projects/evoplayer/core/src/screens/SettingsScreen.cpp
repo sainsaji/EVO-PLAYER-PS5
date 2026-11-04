@@ -41,6 +41,7 @@ enum class SettingKey : int {
     /* VIDEO & DISPLAY */
     DefaultAspect,
     ResumePlayback,
+    SkipSegments,
     VideoDecoder,
     Upscaling,
     AiNetwork,
@@ -113,6 +114,8 @@ const PreviewSpec kPreviews[] = {
     {SettingKey::DefaultAspect, EVO_RMLUI_PREVIEW_ASPECT,
      "Sets how video fills the screen: fit keeps its shape, fill crops the edges, stretch fills the screen and distorts."},
     {SettingKey::ResumePlayback, EVO_RMLUI_PREVIEW_RESUME, "Picks a film up where you stopped instead of from the start."},
+    {SettingKey::SkipSegments, EVO_RMLUI_PREVIEW_INFO,
+     "Off never offers a skip. Ask shows a Skip button during an intro or credits and Triangle presses it. Auto skips by itself once and says so."},
     {SettingKey::VideoDecoder, EVO_RMLUI_PREVIEW_DECODER,
      "Hardware decoding is smoother and cooler. Software is for odd formats."},
     {SettingKey::Upscaling, EVO_RMLUI_PREVIEW_UPSCALING,
@@ -180,7 +183,7 @@ const PreviewSpec kPreviews[] = {
 };
 
 const SettingKey kVideoKeys[] = {
-    SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::VideoDecoder,
+    SettingKey::DefaultAspect, SettingKey::ResumePlayback, SettingKey::SkipSegments, SettingKey::VideoDecoder,
     SettingKey::Upscaling, SettingKey::AiNetwork, SettingKey::RefreshRate,
     SettingKey::HdrOutput, SettingKey::HdrPeak, SettingKey::NetworkBuffer,
 };
@@ -292,6 +295,14 @@ SettingDef makeDef(SettingKey key, ISettingsService* settings) {
     case SettingKey::ResumePlayback:
         d = toggleDef(key, "RESUME PLAYBACK", "REMEMBER PLAYBACK POSITION",
                       "../icons/icon_resume.png", settings->isResumePlaybackEnabled());
+        break;
+
+    case SettingKey::SkipSegments:
+        d = valueDef(key, "SKIP INTROS & CREDITS", "OFF NEVER OFFERS A SKIP; ASK SHOWS A BUTTON; AUTO SKIPS ONCE",
+                     "../icons/icon_resume.png", 3,
+                     static_cast<int>(settings->getSkipSegments()));
+        for (int i = 0; i < 3; ++i)
+            d.opt_label[i] = settings->getSkipSegmentsName(static_cast<SkipSegments>(i));
         break;
 
     case SettingKey::VideoDecoder:
@@ -821,6 +832,7 @@ void applyOption(SettingKey key, int opt) {
     if (!st || opt < 0) return;
     switch (key) {
     case SettingKey::DefaultAspect:  st->setDefaultViewMode(static_cast<ViewMode>(opt)); break;
+    case SettingKey::SkipSegments:   st->setSkipSegments(static_cast<SkipSegments>(opt)); break;
     case SettingKey::VideoDecoder:   st->setVideoDecoderPreference(static_cast<DecoderPreference>(opt)); break;
     case SettingKey::Upscaling:      st->setUpscaler(static_cast<Upscaler>(opt)); break;
     case SettingKey::AiNetwork:      st->setAiNetwork(static_cast<AiNetwork>(opt)); break;
@@ -1474,7 +1486,8 @@ bool findSetting(const char* name, ISettingsService* st, SettingDef& def) {
             if (d.kind != EVO_RMLUI_ROW_TOGGLE && d.kind != EVO_RMLUI_ROW_VALUE) continue;
             char slug[64];
             slugOf(d.title, slug, sizeof slug);
-            if (std::strcmp(slug, name) == 0) {
+            if (std::strcmp(slug, name) == 0 ||
+                (d.key == SettingKey::SkipSegments && std::strcmp(name, "skip-segments") == 0)) {
                 def = d;
                 return true;
             }
@@ -1502,7 +1515,11 @@ void listSettings(ISettingsService* st) {
             const SettingDef d = makeDef(kSections[s].keys[i], st);
             if (d.kind != EVO_RMLUI_ROW_TOGGLE && d.kind != EVO_RMLUI_ROW_VALUE) continue;
             char slug[64];
-            slugOf(d.title, slug, sizeof slug);
+            if (d.key == SettingKey::SkipSegments) {
+                std::snprintf(slug, sizeof slug, "skip-segments");
+            } else {
+                slugOf(d.title, slug, sizeof slug);
+            }
             put("%s: %s", slug, "");
             if (d.kind == EVO_RMLUI_ROW_TOGGLE) {
                 put("%s%s", "on|off", "");
@@ -1590,7 +1607,8 @@ extern "C" void evo_remote_focus(const char* row) {
             const SettingDef d = makeDef(kSections[s].keys[i], st);
             char slug[64];
             slugOf(d.title, slug, sizeof slug);
-            if (std::strcmp(slug, row) != 0) continue;
+            if (std::strcmp(slug, row) != 0 &&
+                !(d.key == SettingKey::SkipSegments && std::strcmp(row, "skip-segments") == 0)) continue;
             s_pendingFocus = static_cast<int>(kSections[s].keys[i]);
             if (sm->getCurrentScreenId() != kSections[s].screen)
                 sm->navigateTo(kSections[s].screen);

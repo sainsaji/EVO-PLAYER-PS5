@@ -176,6 +176,10 @@ void OsdScreen::set(const evo_playback_osd_params_t &p)
     for (int i = 0; p.chapter_starts && i < p.chapter_count && i < 128; ++i)
         chapter_starts_.push_back(p.chapter_starts[i]);
     raw_.chapter_starts = nullptr;
+    skip_on_ = p.skip_label && *p.skip_label;
+    if (skip_on_)
+        skip_label_ = p.skip_label;
+    raw_.skip_label = nullptr;
     sub_lines_ = split_lines(p.subtitle_text);
     sub2_lines_ = split_lines(p.subtitle_text2);
     raw_.title = raw_.metadata = nullptr; /* never read the copied pointers */
@@ -225,6 +229,8 @@ void OsdScreen::update(float dt)
     loading_.update(dt, 14.0f);
     scrub_.target = raw_.scrub_active ? 1.0f : 0.0f;
     scrub_.update(dt, 18.0f);
+    skip_.target = skip_on_ ? 1.0f : 0.0f;
+    skip_.update(dt, 14.0f);
     const float pct = static_cast<float>(std::clamp(raw_.percentage > 1.0 ? raw_.percentage / 100.0
                                                                            : raw_.percentage,
                                                     0.0, 1.0));
@@ -508,6 +514,33 @@ void OsdScreen::draw_captions(DrawList &list, const Context &ctx, float chrome) 
     (void)line_h;
 }
 
+/* #219: "[triangle] Skip intro", bottom right above the timeline. Drawn on its
+ * own opacity so it shows with the controls hidden too. */
+void OsdScreen::draw_skip(DrawList &list, const Context &ctx) const
+{
+    if (skip_.value <= 0.01f || skip_label_.empty())
+        return;
+    const ui::Fonts &fonts = ctx.fonts;
+    ui::Hint hint{ui::Button::triangle, skip_label_.c_str()};
+    ui::HintLayout layout;
+    layout.size = 36;
+    layout.text_size = 26;
+    layout.font = &fonts.semibold;
+    const float hw = ui::measure_hints(fonts, &hint, 1, layout);
+    const float w = hw + 56.0f, h = 64.0f;
+    const float s = 0.92f + 0.08f * skip_.value;
+    const Rect r{1920 - kMargin - w, 800, w, h};
+    layout.cy = r.cy();
+    list.push_transform(s, r.x + r.w, r.cy(), 0, 0);
+    list.push_opacity(skip_.value);
+    list.shadow({r.x, r.y + 8, r.w, r.h}, h * 0.5f, 24, kBlack.with_alpha(0.5f));
+    list.rounded_rect(r, h * 0.5f, kBlack.with_alpha(0.72f));
+    list.bordered_rect(r, h * 0.5f, kClear, 2.0f, kWhite.with_alpha(0.75f));
+    ui::draw_hints(list, fonts, ui::GlyphStyle::dark(), &hint, 1, r.x + r.w - 28.0f, true, layout);
+    list.pop_opacity();
+    list.pop_transform();
+}
+
 void OsdScreen::draw_music(DrawList &list, const Context &ctx) const
 {
     const ui::Fonts &fonts = ctx.fonts;
@@ -609,6 +642,7 @@ void OsdScreen::draw(DrawList &list, const Context &ctx) const
     {
         draw_centre(list, ctx);
         draw_captions(list, ctx, chrome);
+        draw_skip(list, ctx);
     }
     if (hud_on_)
         draw_stats(list, ctx);

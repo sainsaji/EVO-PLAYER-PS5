@@ -15,6 +15,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 |---|---|---|
 | **Video & Display** | Default aspect ratio | Fit, Fill, Stretch |
 | | Resume playback | on, off |
+| | Skip intros & credits | Off, Ask, Auto. Off never offers a skip. Ask shows a Skip button during an intro or credits and Triangle presses it. Auto skips by itself once and says so. |
 | | Video decoder | Auto, Hardware (`sceVideodec2`), Software (FFmpeg) ([../hardware/video-decode.md](../hardware/video-decode.md)) |
 | | Upscaling | Off, Sharp (FSR 1), AI (Anime4K) ([../hardware/upscaler.md](../hardware/upscaler.md)) |
 | | AI network | Auto, Standard, Large, Maximum (Pro). Only used when Upscaling is AI |
@@ -52,7 +53,7 @@ its real effect (#158). A row can be disabled by another setting, and then says 
 | | Match video frame rate | off, on ([../hardware/refresh-rate-modes.md](../hardware/refresh-rate-modes.md)) |
 | | Deep blacks | Off, Low, High (pulls raised shadows to true black on OLED) |
 
-Defaults: the first listed choice, except Default font style (Rounded, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
+Defaults: the first listed choice, except Default font style (Rounded, the second) and Skip intros & credits (Ask, the second); Phone & log port defaults to 9780; toggles that default on are Resume playback, Auto subtitles, Navigation sounds, Controller lightbar, Folders first and Ask which live stream. Everything in Experimental, Upscaling, Audio passthrough and the Debug overlay defaults off. A fresh install uses the MIDNIGHT theme.
 
 The row titles above are what the dev remote addresses: `evo-remote.sh set audio-delay
 +100` uses the title lower-cased with dashes, `set --list` prints every name with its valid
@@ -77,6 +78,7 @@ and read with a single `fscanf`:
                                                                                32 audio language
                                                                                33 subtitle language
                                                                                34 play best addon stream
+                                                                               35 skip intros & credits
 ```
 
 A line is applied only if the file has that many (`readCount >= N`), so an older file

@@ -48,6 +48,7 @@ extern volatile int pb_prebuffer_hold;
 }
 
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <cmath>
 #include <ctime>
@@ -133,8 +134,251 @@ double PlayerScreen::subtitleClockSeconds() const {
     return (pos < 0.0) ? 0.0 : pos;
 }
 
+namespace {
+
+/*
+ * What the media server knows about the item on screen: its intro and credits,
+ * and the episode after it. Filled by two requests when a new item starts;
+ * answers for an item that is no longer playing are dropped.
+ */
+struct SegState {
+    std::string item;
+    std::vector<evo_provider_segment_t> segs;
+    std::string nextId, nextTitle;
+    bool autoplayed = false;
+};
+SegState g_seg;
+
+struct SegCtx { std::string item; };
+
+void on_segments(int ok, const evo_provider_segment_t* segs, int count, void* ud)
+{
+    auto* c = static_cast<SegCtx*>(ud);
+    if (ok && c->item == g_seg.item)
+        g_seg.segs.assign(segs, segs + count);
+    delete c;
+}
+
+void on_next(int ok, const char* id, const char* title, void* ud)
+{
+    auto* c = static_cast<SegCtx*>(ud);
+    if (ok && id && c->item == g_seg.item) {
+        g_seg.nextId = id;
+        g_seg.nextTitle = title ? title : "";
+    }
+    delete c;
+}
+
+void start_next_episode(const PlaybackSource& src)
+{
+    if (g_seg.nextId.empty() || g_seg.autoplayed) return;
+    g_seg.autoplayed = true;
+    toast("UP NEXT", g_seg.nextTitle.c_str());
+    std::string path = "evo://" + src.provider + "/" + g_seg.nextId;
+    ProviderHostScreen::launchRecent(path.c_str(), g_seg.nextTitle.c_str(), 0.0);
+}
+
+/*
+ * #219: skip intros and credits. The stretches come from the media server when
+ * it has them (g_seg.segs), else from chapter titles, which every file carries
+ * whatever it plays from. State is per item and per stretch: the button is
+ * offered once and for a few seconds, an automatic skip happens once, and
+ * neither fires for a stretch the user seeked into.
+ */
+constexpr uint64_t kSkipShowMs = 8000;   /* how long the button stays up */
+constexpr uint64_t kSkipBackMs = 8000;   /* how long Triangle still undoes an automatic skip */
+
+struct SegFlags {
+    bool seen = false, noAuto = false, handled = false;
+    uint64_t shownAt = 0;
+};
+
+struct SkipState {
+    std::string key;
+    std::vector<evo_provider_segment_t> chap;   /* from chapter titles */
+    bool chapBuilt = false;
+    std::vector<SegFlags> flags;
+    size_t flagsFor = 0;                        /* size of the list the flags belong to */
+    bool havePrev = false;
+    double prevPos = 0.0;
+    int shown = -1;                             /* stretch whose button is up */
+    std::string label;
+    double backTo = 0.0;                        /* where an automatic skip came from */
+    uint64_t backUntil = 0;
+};
+SkipState g_skip;
+
+/* A chapter title as an intro (1), credits (2) or neither (0): whole words, any case. */
+int chapter_kind(const std::string& title)
+{
+    static const char* const kIntro[] = {"intro", "opening", "op", "recap"};
+    static const char* const kOutro[] = {"credits", "ending", "ed", "outro"};
+    std::string word;
+    for (size_t i = 0; i <= title.size(); ++i) {
+        const unsigned char c = i < title.size() ? static_cast<unsigned char>(title[i]) : 0;
+        if (std::isalpha(c)) {
+            word += static_cast<char>(std::tolower(c));
+            continue;
+        }
+        if (!word.empty()) {
+            for (const char* w : kIntro) if (word == w) return EVO_SEGMENT_INTRO;
+            for (const char* w : kOutro) if (word == w) return EVO_SEGMENT_OUTRO;
+            word.clear();
+        }
+    }
+    return 0;
+}
+
+void build_chapter_segments(IMediaMetadataService* meta, double duration)
+{
+    g_skip.chap.clear();
+    if (!meta || duration <= 1.0) return;
+    const size_t n = meta->getChapterCount();
+    if (n == 0) return;
+    for (size_t i = 0; i < n; ++i) {
+        const ChapterInfo* ch = meta->getChapter(i);
+        if (!ch) continue;
+        const int kind = chapter_kind(ch->title);
+        if (!kind) continue;
+        const ChapterInfo* nx = i + 1 < n ? meta->getChapter(i + 1) : nullptr;
+        const double end = nx ? nx->startTimeSeconds : duration;
+        if (end - ch->startTimeSeconds < 3.0) continue;
+        /* A chapter called "Opening" that runs for half an hour is a scene, not a title sequence. */
+        if (kind == EVO_SEGMENT_INTRO && end - ch->startTimeSeconds > 600.0) continue;
+        g_skip.chap.push_back({kind, ch->startTimeSeconds, end});
+    }
+    g_skip.chapBuilt = true;
+}
+
+/* The server's stretches win; chapter names are the fallback. */
+const std::vector<evo_provider_segment_t>& skip_segments()
+{
+    return g_seg.segs.empty() ? g_skip.chap : g_seg.segs;
+}
+
+/* The stretch the playhead is inside (-1 for none). */
+int active_segment(double pos)
+{
+    const auto& segs = skip_segments();
+    for (size_t i = 0; i < segs.size(); ++i)
+        if (pos >= segs[i].start_sec - 0.5 && pos < segs[i].end_sec - 1.0)
+            return static_cast<int>(i);
+    return -1;
+}
+
+/* What the button says for a stretch. */
+const char* skip_text(const evo_provider_segment_t& sg)
+{
+    if (sg.kind == EVO_SEGMENT_INTRO) return "Skip intro";
+    return g_seg.nextId.empty() ? "Skip credits" : "Next episode";
+}
+
+/* Move past a stretch. True when the playhead moved within this item (so it can be undone). */
+template <class P>
+bool skip_past(P& playback, const PlaybackSource& src, const evo_provider_segment_t& sg)
+{
+    if (sg.kind == EVO_SEGMENT_OUTRO && !g_seg.nextId.empty()) {
+        start_next_episode(src);
+        return false;
+    }
+    const double dur = playback->getDurationSeconds();
+    playback->seekTo(sg.end_sec < dur - 2.0 ? sg.end_sec : dur - 1.0);
+    return true;
+}
+
+/* Once per frame: note where the playhead is, raise or drop the button, run Auto. */
+template <class P>
+void skip_tick(P& playback, const PlaybackSource& src, uint64_t now)
+{
+    g_skip.shown = -1;
+    if (playback->isLiveSource() || playback->isMusicMode()) return;
+
+    const std::string key = src.isProvider() ? src.item_id : playback->getCurrentFilePath();
+    if (key != g_skip.key) {
+        g_skip = SkipState();
+        g_skip.key = key;
+    }
+    if (!g_skip.chapBuilt)
+        build_chapter_segments(Application::getInstance().getMediaMetadataService(),
+                               playback->getDurationSeconds());
+
+    const auto& segs = skip_segments();
+    if (g_skip.flagsFor != segs.size() || g_skip.flags.size() != segs.size()) {
+        g_skip.flags.assign(segs.size(), SegFlags());
+        g_skip.flagsFor = segs.size();
+    }
+
+    ISettingsService* st = Application::getInstance().getSettingsService();
+    const SkipSegments mode = st ? st->getSkipSegments() : SkipSegments::Ask;
+
+    /* A scrub in progress moves the playhead on purpose: judge it when it lands. */
+    if (playback->isScrubbing()) return;
+    const double pos = playback->getPositionSeconds();
+    const bool jumped = g_skip.havePrev && (pos < g_skip.prevPos - 0.5 || pos > g_skip.prevPos + 2.5);
+    g_skip.havePrev = true;
+    g_skip.prevPos = pos;
+
+    if (mode == SkipSegments::Off || segs.empty()) return;
+    const int i = active_segment(pos);
+    if (i < 0) return;
+    SegFlags& f = g_skip.flags[i];
+    const evo_provider_segment_t sg = segs[i];
+    if (!f.seen) {
+        f.seen = true;
+        /* Playback walked into it from before: auto is fine. Seeked or resumed into it: not. */
+        f.noAuto = jumped || pos > sg.start_sec + 3.0;
+        f.shownAt = now;
+        evo_boot_log("skip: enter %s %.1f-%.1f at %.1f via %s, mode %d, auto %s",
+                     sg.kind == EVO_SEGMENT_INTRO ? "intro" : "credits", sg.start_sec, sg.end_sec, pos,
+                     g_seg.segs.empty() ? "chapters" : "server", static_cast<int>(mode),
+                     f.noAuto ? "no (seeked in)" : "yes");
+    }
+    if (f.handled) return;
+
+    if (mode == SkipSegments::Auto) {
+        if (f.noAuto) return;
+        f.handled = true;
+        evo_boot_log("skip: auto skip past %.1f", sg.end_sec);
+        if (skip_past(playback, src, sg)) {
+            g_skip.backTo = std::max(0.0, sg.start_sec);
+            g_skip.backUntil = now + kSkipBackMs;
+            toast("PLAYBACK", sg.kind == EVO_SEGMENT_INTRO ? "Skipped intro - press Triangle to go back"
+                                                          : "Skipped credits - press Triangle to go back");
+        }
+        return;
+    }
+    /* Ask */
+    if (now - f.shownAt >= kSkipShowMs) return;
+    g_skip.shown = i;
+    g_skip.label = skip_text(sg);
+}
+
+/* Triangle: press the button, or undo an automatic skip. False = not ours. */
+template <class P>
+bool skip_press(P& playback, const PlaybackSource& src, uint64_t now)
+{
+    if (g_skip.backUntil > now) {
+        g_skip.backUntil = 0;
+        evo_boot_log("skip: Triangle undoes the auto skip, back to %.1f", g_skip.backTo);
+        playback->seekTo(g_skip.backTo);
+        toast("PLAYBACK", "Back to the start");
+        return true;
+    }
+    const auto& segs = skip_segments();
+    if (g_skip.shown < 0 || g_skip.shown >= static_cast<int>(segs.size())) return false;
+    const evo_provider_segment_t sg = segs[g_skip.shown];
+    g_skip.flags[g_skip.shown].handled = true;
+    g_skip.shown = -1;
+    evo_boot_log("skip: Triangle pressed, skipping past %.1f", sg.end_sec);
+    if (skip_past(playback, src, sg))
+        toast("PLAYBACK", sg.kind == EVO_SEGMENT_INTRO ? "Skipped intro" : "Skipped credits");
+    return true;
+}
+
+} // namespace
+
 bool PlayerScreen::hasActiveOverlay() const {
-    if (m_osdVisibilityAlpha > 0 || m_showStatsForNerds) {
+    if (m_osdVisibilityAlpha > 0 || m_showStatsForNerds || g_skip.shown >= 0) {
         return true;
     }
     if (prospero_subtitle_enabled) {
@@ -165,6 +409,7 @@ bool PlayerScreen::hasActiveOverlay() const {
 void PlayerScreen::onEnter() {
     StatefulScreen::onEnter();
     m_osdVisibilityAlpha = 255;
+    g_skip = SkipState();   /* #219: a file played twice offers its skip twice */
     m_controlsLastUsedMs = NowMs();
     m_playerFsm.postEvent(PlayerScreenEvent::ShowOsd);
 }
@@ -172,62 +417,6 @@ void PlayerScreen::onEnter() {
 void PlayerScreen::onExit() {
     StatefulScreen::onExit();
 }
-
-namespace {
-
-/*
- * What the media server knows about the item on screen: its intro and credits,
- * and the episode after it. Filled by two requests when a new item starts;
- * answers for an item that is no longer playing are dropped.
- */
-struct SegState {
-    std::string item;
-    std::vector<evo_provider_segment_t> segs;
-    std::string nextId, nextTitle;
-    bool hinted[8] = {};
-    bool autoplayed = false;
-};
-SegState g_seg;
-
-struct SegCtx { std::string item; };
-
-void on_segments(int ok, const evo_provider_segment_t* segs, int count, void* ud)
-{
-    auto* c = static_cast<SegCtx*>(ud);
-    if (ok && c->item == g_seg.item)
-        g_seg.segs.assign(segs, segs + count);
-    delete c;
-}
-
-void on_next(int ok, const char* id, const char* title, void* ud)
-{
-    auto* c = static_cast<SegCtx*>(ud);
-    if (ok && id && c->item == g_seg.item) {
-        g_seg.nextId = id;
-        g_seg.nextTitle = title ? title : "";
-    }
-    delete c;
-}
-
-/* The segment the playhead is inside (-1 for none). */
-int active_segment(double pos)
-{
-    for (size_t i = 0; i < g_seg.segs.size(); ++i)
-        if (pos >= g_seg.segs[i].start_sec - 0.5 && pos < g_seg.segs[i].end_sec - 1.0)
-            return static_cast<int>(i);
-    return -1;
-}
-
-void start_next_episode(const PlaybackSource& src)
-{
-    if (g_seg.nextId.empty() || g_seg.autoplayed) return;
-    g_seg.autoplayed = true;
-    toast("UP NEXT", g_seg.nextTitle.c_str());
-    std::string path = "evo://" + src.provider + "/" + g_seg.nextId;
-    ProviderHostScreen::launchRecent(path.c_str(), g_seg.nextTitle.c_str(), 0.0);
-}
-
-} // namespace
 
 bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t released) {
     (void)released;
@@ -271,21 +460,8 @@ bool PlayerScreen::handleInput(uint32_t pressed, uint32_t held, uint32_t release
         return true;
     }
     if (pressed & PadButtons::Triangle) {
-        /* Inside an intro or the credits, Triangle skips them. */
-        const PlaybackSource& src = playback->getSource();
-        const int seg = src.isProvider() ? active_segment(playback->getPositionSeconds()) : -1;
-        if (seg >= 0) {
-            const evo_provider_segment_t& sg = g_seg.segs[seg];
-            if (sg.kind == EVO_SEGMENT_OUTRO && !g_seg.nextId.empty()) {
-                start_next_episode(src);
-            } else if (sg.end_sec < playback->getDurationSeconds() - 2.0) {
-                playback->seekTo(sg.end_sec);
-                toast("PLAYBACK", sg.kind == EVO_SEGMENT_INTRO ? "Skipped intro" : "Skipped credits");
-            } else {
-                playback->seekTo(playback->getDurationSeconds() - 1.0);
-            }
-            return true;
-        }
+        /* While the skip button is up (or just after an automatic skip), Triangle is that button. */
+        if (skip_press(playback, playback->getSource(), NowMs())) return true;
         /* Aspect ratio, as it has always been on this screen. */
         playback->cycleViewMode();
         toast("VIEW MODE", playback->getViewMode() == ViewMode::Fit ? "FIT" :
@@ -435,7 +611,10 @@ void PlayerScreen::update(double deltaMs) {
 
     uint64_t now = NowMs();
 
-    /* Skip prompts and "up next": only for a media-server item with a timeline. */
+    /* #219: the skip button, or the automatic skip, for any file with intro / credits marks. */
+    skip_tick(playback, playback->getSource(), now);
+
+    /* "Up next": only for a media-server item with a timeline. */
     {
         const PlaybackSource& src = playback->getSource();
         if (src.isProvider() && !src.is_live && !src.item_id.empty()) {
@@ -446,13 +625,6 @@ void PlayerScreen::update(double deltaMs) {
                     if (p->segments) p->segments(src.item_id.c_str(), on_segments, new SegCtx{src.item_id});
                     if (p->next_item) p->next_item(src.item_id.c_str(), on_next, new SegCtx{src.item_id});
                 }
-            }
-            const int seg = active_segment(playback->getPositionSeconds());
-            if (seg >= 0 && seg < 8 && !g_seg.hinted[seg]) {
-                g_seg.hinted[seg] = true;
-                const bool outro = g_seg.segs[seg].kind == EVO_SEGMENT_OUTRO;
-                toast("TRIANGLE", outro ? (g_seg.nextId.empty() ? "Skip credits" : "Next episode")
-                                        : "Skip intro");
             }
             if (evo_pb_is_eof() && !g_seg.nextId.empty())
                 start_next_episode(src);
@@ -984,6 +1156,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle2_color = prospero_secondary_color;
         p.subtitle_style = prospero_subtitle_style;
         p.chrome_hidden = 0;
+        p.skip_label = g_skip.shown >= 0 ? g_skip.label.c_str() : nullptr;   /* #219 */
         p.fps = perf_render_fps;
         p.debug_overlay = evo_fps_counter_enabled();
         p.music_mode = playback->isMusicMode() ? 1 : 0;
@@ -1037,7 +1210,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
             feedPerformanceHud();
         }
         evo_rmlui_render_playback_osd(framebuffer, width, height);
-    } else if ((activeSubText[0] || secondarySubText[0] || hasSubImage) && !playback->isMusicMode() &&
+    } else if ((activeSubText[0] || secondarySubText[0] || hasSubImage || g_skip.shown >= 0) && !playback->isMusicMode() &&
                evo_rmlui_is_initialized()) {
         evo_playback_osd_params_t p;
         std::memset(&p, 0, sizeof(p));
@@ -1059,6 +1232,7 @@ void PlayerScreen::render(uint32_t* framebuffer, int width, int height) {
         p.subtitle2_color = prospero_secondary_color;
         p.subtitle_style = prospero_subtitle_style;
         p.chrome_hidden = 1;
+        p.skip_label = g_skip.shown >= 0 ? g_skip.label.c_str() : nullptr;   /* #219 */
         p.alpha = 255;
         p.fps = perf_render_fps;
         p.debug_overlay = evo_fps_counter_enabled();

@@ -92,6 +92,9 @@ typedef struct {
     /* #151: "21:40" the video ends at, and "-1:12:05" left. NULL/"" hides. */
     const char* ends_at;
     const char* remaining;
+    /* #219: the skip button ("Skip intro" / "Skip credits" / "Next episode").
+     * NULL/"" hides it. Drawn by the kit OSD even when the chrome is faded. */
+    const char* skip_label;
 } evo_playback_osd_params_t;
 
 /*

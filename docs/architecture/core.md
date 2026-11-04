@@ -126,6 +126,31 @@ stopped, opening, playing, paused, scrubbing, seeking, finished, error),
 `ScreenManager` (`NavigationState`), `BrowserScreen`, `PlayerScreen`,
 `LaunchScreen` and `ModalDialogScreen`.
 
+## Skip intros & credits (#219)
+
+`PlayerScreen` keeps one `SkipState` per item (the provider item id, else the file path).
+Stretches come from two sources, and the media server wins when it has any:
+
+- **Server segments**: Jellyfin and Emby `.segments` (`g_seg.segs`), fetched when the item starts.
+- **Chapter names**: `MediaMetadataService` loads chapters for every file (local, USB, NTFS,
+  SMB/FTP, Plex, Stremio). A chapter whose title has the whole word Intro, Opening, OP or Recap
+  is an intro; Credits, Ending, ED or Outro is credits (any case). It runs to the next chapter's
+  start, or to the end. An "intro" chapter longer than 10 minutes is ignored (a scene, not a title
+  sequence).
+
+Settings → Playback → **Skip intros & credits** (`SkipSegments`, settings line 35):
+
+- **Off**: no button, no skip. Triangle stays on aspect ratio.
+- **Ask** (default): while the playhead is inside a stretch the kit draws a button
+  (`OsdScreen::draw_skip`, "Skip intro" / "Skip credits" / "Next episode") for 8 s, once per
+  stretch. Triangle presses it. It shows with the controls hidden too.
+- **Auto**: seeks past the stretch once, with a toast "Skipped intro - press Triangle to go back".
+  Triangle puts the playhead back for 8 s. It never fires for a stretch the user seeked or
+  resumed into (any jump of the playhead, or arriving more than 3 s after the stretch started).
+
+Credits with a known next episode (media servers only) start that episode instead of seeking.
+The RmlUi fallback OSD has no button; Triangle still works there.
+
 ## Network Storage & SMB Streaming
 
 EVO supports browsing and streaming from remote network storage, including Windows / Samba shares (SMB) and FTP servers:

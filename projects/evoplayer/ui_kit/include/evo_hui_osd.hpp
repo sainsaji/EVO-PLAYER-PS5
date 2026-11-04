@@ -38,6 +38,7 @@ class OsdScreen
     void draw_captions(hui::gfx::DrawList &list, const Context &ctx, float chrome) const;
     void draw_music(hui::gfx::DrawList &list, const Context &ctx) const;
     void draw_stats(hui::gfx::DrawList &list, const Context &ctx) const;
+    void draw_skip(hui::gfx::DrawList &list, const Context &ctx) const;
 
     evo_playback_osd_params_t raw_{}; /* numbers only: its strings dangle */
     std::string title_, meta_;
@@ -58,6 +59,9 @@ class OsdScreen
     hui::tween::Spring loading_;
     hui::tween::Spring scrub_;
     hui::tween::Spring progress_;
+    hui::tween::Spring skip_;   /* #219: the skip button fading in and out */
+    std::string skip_label_;    /* kept after the button hides, so it fades with its text */
+    bool skip_on_ = false;
     mutable hui::ui::ProgressBar bar_; /* the seek track and fill (#157) */
     bool progress_snapped_ = false;
 };
